@@ -1,3 +1,4 @@
+use 'directives.jo'
 use 'source_types.dewy'
 # Demand loading for the prelude (lib/core, lib/std, lib/game). Each file is indexed by a fresh
 # scan (scan.jo): its top-level units (a declaration with its attributes, or a `when` block), their
@@ -222,10 +223,32 @@ prelude_demand_entry = (e: int):
 # this list whole)
 prelude_known = ["Map", "NDArray", "Missing", "Console", "Set", "__crash_install", "__c_threads", "__cpu_avx2", "__loop_budget", "__mt_active", "__hash_key"]
 
+settings_runtime_loaded = false
+settings_zone_loaded = false
 math_runtime_loaded = false
 math_eval_loaded = false
 
 demand_prelude_name = (name: int):
+    if dir_runtime_settings and name_of(name) in ["__settings_enter_cores", "__settings_enter_gap", "__settings_enter_fold", "__settings_enter_source", "__settings_enter_zone", "__settings_gap_read", "__settings_gap_one_read", "__settings_fold_read"]:
+        zone = name_of(name) == "__settings_enter_zone"
+        loaded = settings_runtime_loaded
+        if zone: loaded = settings_zone_loaded
+        if not loaded:
+            file = "settings.dewy"
+            if zone:
+                settings_zone_loaded = true
+                file = "setting_zone.dewy"
+            else: settings_runtime_loaded = true
+            first_module = modules.len()
+            first_import = from_imports.len()
+            register_module(load_module(lib_dir + "/prelude/" + file, true, -1))
+            mi = first_module
+            loop mi < modules.len():
+                register_module(mi)
+                mi += 1
+            bind_from_imports(first_import)
+            if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
+            late_module_imports = true
     if not math_runtime_loaded and starts_with(name_of(name), "__mi_"):
         math_runtime_loaded = true
         first_module = modules.len()

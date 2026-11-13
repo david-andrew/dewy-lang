@@ -1,75 +1,39 @@
+use 'diagnostic_exit.dewy'
 use 'ast.jo'
 use 'check.jo'
-use 'dewy_method_ops.dewy'
 use 'directives.jo'
-use 'panic_inventory.dewy'
 use 'settings.jo'
 use 'util.jo'
-use 'diagnostic_exit.dewy'
 
 dir_program_setting = (name: str) -> bool:
-    name == "time.zone" or name == "time.rules" or name == "time.zone_source" or name == "program.max_cores"
-
-# (a core count is a number, every other program-wide setting a name in quotes)
-dir_program_spelled = (s: DirScope) -> str:
-    if name_of(s.setting) == "program.max_cores": return "${name_of(s.setting)} = {name_of(s.value - 2)}"
-    "${name_of(s.setting)} = '{name_of(s.value - 2)}'"
-
-dir_program_disagree = (a: DirScope, b: DirScope):
-    fatal(a.at, "program-wide `{dir_program_spelled(a)}` at {pos_str(a.at)} conflicts with `{dir_program_spelled(b)}` at {pos_str(b.at)}: reachable main functions must agree on program-wide settings")
+    name == "time.zone" or name == "time.rules" or name == "time.zone_source" or name == "time.gap" or name == "time.fold" or name == "program.max_cores"
 
 dir_program_prepare = ():
     if not dir_program_any: return
     dir_program_values = {}
-    dir_program_mains = {}
     dir_rules_from_host = false
-    mains: {int: int} = {}
+    entry_main = 0
+    main_name = intern("main")
     loop m in modules:
+        if files[int(m.file)].path != settings_path: continue
         loop d in m.decls:
-            if nodes[d].kind != .fn_ or name_of(int(nodes[d].name)) != "main" or dewy_is_method(d) or nodes[d].b == 0: continue
-            mains[nodes[d].pos] = d
+            if nodes[d].kind == .fn_ and nodes[d].name == i32(main_name) and nodes[d].b != 0 and files[pos_file(nodes[d].pos)].path == settings_path:
+                entry_main = nodes[int(nodes[d].b)].pos
     loop i in [0..dir_scopes.len()):
         s = dir_scopes[i]
-        if not dir_program_setting(name_of(s.setting)): continue
-        entry = files[pos_file(s.start)].path == settings_path
+        name = name_of(s.setting)
+        if not dir_program_setting(name): continue
         header = s.start == dir_module_start(pos_file(s.start))
-        d = mains.get(s.start) ?? 0
-        placed = entry and header or d > 0
-        if d > 0:
-            scopes = dir_program_mains.get(d) ?? []
-            scopes.push(i)
-            dir_program_mains[d] = scopes
-        if not placed: fatal(s.at, "`${name_of(s.setting)}` is program-wide: put it at the top of the entry file or directly before any file's main: `${name_of(s.setting)} = ...` then `main = ...`")
-        if not entry: continue
-        old = dir_program_values.get(s.setting) ?? -1
-        if old >= 0 and dir_scopes[old].value != s.value: dir_program_disagree(s, dir_scopes[old])
+        legacy = s.start == entry_main and s.value >= 2
+        if (name == "program.max_cores" or name == "time.rules" or name == "time.zone_source") and not header and not legacy:
+            fatal(s.at, "scoped `${name}` is not yet supported; use a literal setting at the top of the entry file or its main body")
+        if files[pos_file(s.start)].path != settings_path: continue
+        # Keep the existing entry-main forms process-wide until scoped caps and packs land.
+        if legacy and (name == "time.rules" or name == "program.max_cores" or name == "time.zone_source"):
+            dir_program_values[s.setting] = i
+            if name == "time.zone_source": dir_rules_from_host = true
+        if not header: continue
         dir_program_values[s.setting] = i
-        if name_of(s.setting) == "time.zone_source": dir_rules_from_host = true
+        if name == "time.zone_source": dir_rules_from_host = true
 
-dir_program_finalize = ():
-    if not dir_program_any: return
-    dir_program_prepare()
-    held = dir_program_values
-    possible = false
-    loop d, scopes in dir_program_mains:
-        loop i in scopes:
-            s = dir_scopes[i]
-            old = held.get(s.setting) ?? -1
-            if old >= 0 and dir_scopes[old].value != s.value: possible = true
-            held[s.setting] = i
-    if not possible or main_fn == 0: return
-    held = dir_program_values
-    seen: {int: bool} = {}
-    pending = [main_fn]
-    loop pending.len() > 0:
-        f = pending.pop()
-        if f <= 0 or f >= fns.len() or seen.has(f): continue
-        seen[f] = true
-        d = int(fns[f].decl)
-        scopes = dir_program_mains.get(d) ?? []
-        loop i in scopes:
-            s = dir_scopes[i]
-            old = held.get(s.setting) ?? -1
-            if old >= 0 and dir_scopes[old].value != s.value: dir_program_disagree(s, dir_scopes[old])
-            held[s.setting] = i
-        loop g in panic_call_edges(f): pending.push(g)
+dir_program_finalize = (): dir_program_prepare()

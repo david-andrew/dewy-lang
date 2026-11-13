@@ -1,4 +1,6 @@
 # A function prefix covers generated parameter unpacking as well as its body.
-$runtime_checks
-add=((a b):array<int64>):>int64=>a+b
+add=((a b):array<int64>):>int64=>{
+    $runtime_checks
+    a+b
+}
 main=()=>printl(add([20 22]))

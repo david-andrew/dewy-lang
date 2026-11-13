@@ -6,21 +6,21 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 
-SITES = '''$runtime_checks
-checked=(xs:array<int64> i:int64):>int64=>{
+SITES = '''checked=(xs:array<int64> i:int64):>int64=>{
+    $runtime_checks
     return xs[i]
 }
-$runtime_checks
 guarded=(xs:array<int64> i:int64):>int64=>{
+    $runtime_checks
     if i >=? 0 and i <? xs.length return xs[i]
     return 0
 }
-$prototype
 draft=(xs:array<int64> i:int64):>int64=>{
+    $prototype
     return xs[i]
 }
-$runtime_checks
 main=()=>{
+    $runtime_checks
     let xs:array<int64>=[1 2 3]
     printl(int(checked(xs 0)) + guarded(xs 1) + draft(xs 2))
 }
@@ -75,8 +75,8 @@ def test_user_bundle(compiler, tmp_path):
     $explicit_copies
     $runtime_checks=false
 }
-$careful
 safe=(xs:array<int64> i:int64):>int64=>{
+    $careful
     if i >=? 0 and i <? xs.length return xs[i]
     return 0
 }

@@ -21,14 +21,14 @@ def compile_source(compiler, tmp_path, text, release):
 @pytest.mark.parametrize('release', [False, True])
 def test_exact_affine_index_vectors(compiler, tmp_path, release):
     binary, ir = compile_source(compiler, tmp_path, '''
-$runtime_checks
 kernel=(xs:array<int64> shift:int64):>int64<overflow='wrap'>=>{
+    $runtime_checks
     let total:int64<overflow='wrap'>=0
     loop i in [int64(0)..int64(32)) {total+=xs[i+shift]}
     return total
 }
-$runtime_checks
 main=(args:array<string>)=>{
+    $runtime_checks
 
     let xs:array<int64>=[loop i in [0..34) i]
     printl(kernel(xs int64(to_int(args[1]) ?? 0)))
@@ -49,15 +49,15 @@ main=(args:array<string>)=>{
 
 def test_affine_fallback_keeps_failure_order(compiler, tmp_path):
     binary, ir = compile_source(compiler, tmp_path, '''
-$runtime_checks
 kernel=(@xs:array<int64> offset:int64)=>{
+    $runtime_checks
     loop i in [int64(0)..int64(4)) {
         printl(i)
         xs[i]=i+offset
     }
 }
-$runtime_checks
 main=(args:array<string>)=>{
+    $runtime_checks
 
     let xs:array<int64>=[0 0 0 0]
     kernel(@xs int64(to_int(args[1]) ?? 0))
@@ -70,8 +70,8 @@ main=(args:array<string>)=>{
 
 def test_affine_intermediate_still_checks(compiler, tmp_path):
     binary, ir = compile_source(compiler, tmp_path, '''
-$runtime_checks
 kernel=(xs:array<int64> offset:int64):>int64<overflow='wrap'>=>{
+    $runtime_checks
     let total:int64<overflow='wrap'>=0
     loop i in [int64(0)..int64(4)) {
         let j:int64=i+offset
@@ -79,8 +79,8 @@ kernel=(xs:array<int64> offset:int64):>int64<overflow='wrap'>=>{
     }
     return total
 }
-$runtime_checks
 main=(args:array<string>)=>{
+    $runtime_checks
 
     let xs:array<int64>=[1 2 3 4]
     printl(kernel(xs int64(to_int(args[1]) ?? 0)))

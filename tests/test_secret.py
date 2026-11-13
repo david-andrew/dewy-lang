@@ -102,7 +102,7 @@ def test_main_error_report_redacts(compiler, tmp_path, flags, leak, hidden):  # 
 ])
 def test_runtime_check_report_hides_the_value(compiler, tmp_path, body, requirement):  # noqa: F811
     source = tmp_path / 'check.dewy'
-    source.write_text(f'Pos:type = int64<(>=? 0)>\n$runtime_checks\nf = (k:secret<int64>):>void => {{\n'
+    source.write_text(f'Pos:type = int64<(>=? 0)>\nf = (k:secret<int64>):>void => {{\n$runtime_checks\n'
                       f'    {body}\n    printl(p)\n}}\nf(secret(4242))\n')
     binary = tmp_path / 'check'
     built = run([compiler, 'build', source, '-o', binary])

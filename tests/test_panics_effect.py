@@ -14,8 +14,8 @@ REJECTED = {
     'checked_dependency': ('''$runtime_checks=false
 $assume_local_asserts=false
 
-$runtime_checks
 helper=(xs:array<int64> i:int64):>int64=>{
+    $runtime_checks
     return xs[i]
 }
 main=():>void=>printl(helper([1 2] 1))
@@ -45,19 +45,19 @@ main=():>void=>printl(strict([1]))
     'bundle': ('''$no_hidden_costs
 $assume_local_asserts=false
 
-$no_hidden_costs=false
-$runtime_checks
 pick=(x:int64):>int64=>{
+    $no_hidden_costs=false
+    $runtime_checks
     $runtime_assert(x >? 0)
     return x
 }
 twice=(x:int64):>int64 & no panics=>pick(x)*2
-$no_hidden_costs=false
-$runtime_checks
 main=()=>{
+    $no_hidden_costs=false
+    $runtime_checks
     printl(twice(3))
 }
-''', 'prefix this function with `$no_hidden_costs=false` and `$runtime_checks`'),
+''', "put at the top of this function's body `$no_hidden_costs=false` and `$runtime_checks`"),
     # Library preconditions are the caller's obligations.
     'first_unproven': ('$runtime_checks=false\n\nf=(xs:array<int64>)=>printl(xs.first)\nf([1])\n',
                        'cannot prove refinement `xs.length >? 0`'),
@@ -111,12 +111,12 @@ def test_format_literal_spec(compiler, tmp_path):
 
 def test_panics_opted_in(compiler, tmp_path):
     # The caller's own `$runtime_checks` accepts the call; the check runs.
-    source = '''$runtime_checks
-helper=(xs:array<int64> i:int64):>int64=>{
+    source = '''helper=(xs:array<int64> i:int64):>int64=>{
+    $runtime_checks
     return xs[i]
 }
-$runtime_checks
 main=():>void=>{
+    $runtime_checks
     printl(helper([1 2] 1))
     printl(helper([1 2] 5))
 }
@@ -142,13 +142,13 @@ def test_first_runtime_check(compiler, tmp_path):
 
 HOVERED = '''$runtime_checks=false
 
-$runtime_checks
 helper=(xs:array<int64> i:int64):>int64=>{
+    $runtime_checks
     return xs[i]
 }
 total=(xs:array<int64>):>int64=>xs.length
-$runtime_checks
 main=():>void=>{
+    $runtime_checks
     printl(helper([1 2] 1) + total([1]))
 }
 '''

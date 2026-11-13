@@ -303,9 +303,9 @@ run = (config:Config):>void => printl"{config.workers} requested workers; {avail
 laptop = ():>void => run(Config[2])
 server = ():>void => run(Config[8])
 
-$program.max_cores = 8
-$program.max_memory = 512MiB
 main = (argv:array<string> app:BackgroundTasks):>void => {
+    $program.max_cores = 8
+    $program.max_memory = 512MiB
     let environment = argv.get(0) ?? "laptop"
     if environment =? "laptop" laptop()
     else if environment =? "server" server()
@@ -321,9 +321,11 @@ main = (argv:array<string> app:BackgroundTasks):>void => {
 from units import MiB
 import p"09_environment_program.dewy" as program
 
-$program.max_cores = 2
-$program.max_memory = 512MiB
-main = (argv:array<string> app:BackgroundTasks) => program.run(argv app)
+main = (argv:array<string> app:BackgroundTasks) => {
+    $program.max_cores = 2
+    $program.max_memory = 512MiB
+    program.run(argv app)
+}
 ```
 
 - Here the tags are resolved before runtime and directly precede entry `main`; the imported shared program defines every application helper. For a module-wide header example, move that same contiguous tag list after imports and before **all** helper declarations; in the entry above both placements coincide.
@@ -610,9 +612,11 @@ main = (argv:array<string> app:BackgroundTasks) => {
 from units import MiB
 import p"09_environment_program.dewy" as program
 
-$program.max_cores = 2
-$program.max_memory = 512MiB
-main = (argv:array<string> app:BackgroundTasks) => program.run(argv app)
+main = (argv:array<string> app:BackgroundTasks) => {
+    $program.max_cores = 2
+    $program.max_memory = 512MiB
+    program.run(argv app)
+}
 ```
 
 ```dewy
@@ -623,9 +627,9 @@ run = (config:Config):>void => printl"{config.workers} requested workers; {avail
 laptop = ():>void => run(Config[2])
 server = ():>void => run(Config[8])
 
-$program.max_cores = 8
-$program.max_memory = 512MiB
 main = (argv:array<string> app:BackgroundTasks):>void => {
+    $program.max_cores = 8
+    $program.max_memory = 512MiB
     let environment = argv.get(0) ?? "laptop"
     if environment =? "laptop" laptop()
     else if environment =? "server" server()

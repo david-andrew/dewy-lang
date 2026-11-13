@@ -31,6 +31,7 @@ from p"effects.jo" import (effect_blocks_demanded effect_panics_demanded effect_
 from p"isolation_ops.dewy" import (isolation_children)
 from p"lazy_bodies.jo" import (dc_lazy_used)
 from p"node_store.dewy" import (NK)
+from p"setting_scopes.dewy" import dw_setting_scope
 from p"ownership_hooks.dewy" import (ownership_declare)
 from p"parser_shared.dewy" import (head_collapse)
 from p"place_methods.jo" import (place_written)
@@ -462,4 +463,8 @@ rs_g_transfer_tags_get=(a0:int64):>int64 | none=>{
 rs_g_transfer_tags_item_set=(a0:int64 a1:int64):>void=>{
     transfer_tags[a0]=a1
     return
+}
+
+rs_dw_setting_scope=(name:string value:int64 at:int64 body:int64):>void=>{
+    dw_setting_scope(name value at body)
 }

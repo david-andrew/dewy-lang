@@ -6,8 +6,8 @@ forward = (a:Mutex<int64> b:Mutex<int64>):>void => {
     let y = @(b.lock())
     x += y
 }
-$no_deadlocks
 main = () => {
+    $no_deadlocks
     let p = mutex<int64>(1)
     let q = mutex<int64>(2)
     forward(p q)

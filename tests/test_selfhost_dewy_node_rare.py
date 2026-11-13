@@ -14,7 +14,7 @@ PROGRAMS = {
     'arena.dewy': 'main=()=>{\n    let a=Arena[]\n    let n=$allocator(@a) [1 2 3].length\n    printl(n)\n}\n',
     'expect.dewy': '$test\nsums=()=>$expect 1 + 1 =? 3\n$test\nless=()=>$expect "a<?b" not=? "a<?b"\nmain=()=>printl(0)\n',
     'big.dewy': 'main=()=>{\n    let x=123456789012345678901234567890\n    printl(x * 2)\n    printl(-98765432109876543210)\n}\n',
-    'compound.dewy': '$runtime_checks\nmain=()=>{\n    let x:int64=7\n    x+=1 x-=2 x*=3 x//=2 x%=5 x<<=2 x>>=1 x&=6 x|=1 x^=3\n    let b=true\n    b and=false b or=true\n    printl("{x} {b}")\n}\n',
+    'compound.dewy': 'main=()=>{\n    $runtime_checks\n    let x:int64=7\n    x+=1 x-=2 x*=3 x//=2 x%=5 x<<=2 x>>=1 x&=6 x|=1 x^=3\n    let b=true\n    b and=false b or=true\n    printl("{x} {b}")\n}\n',
     'reserved.dewy': 'main=()=>{\n    let end=1\n    printl(end)\n}\n',
     'reserved_void.dewy': 'main=()=>{\n    let void=1\n    printl(void)\n}\n',
     'methods.dewy': 'Counter:type=[n:int64]\nmain=()=>{\n    let c=Counter[2]\n    let r=[double=(x:int64)=>x*2 name="row"]\n'

@@ -100,6 +100,17 @@ main = ():
 
 # The Jo services checker_instances calls, routed to the driver.
 INSTANCE_JO = {
+    'util.jo': {'pos_in_lib': 'pos_in_lib = (pos: int) -> bool: false'},
+    'directives.jo': {
+        'dir_code_any': 'dir_code_any = false',
+        'dir_mixed_files': 'dir_mixed_files: {int: bool} = {}',
+        'dir_code_uniform': 'dir_code_uniform = (decl: int, at: int) -> bool: false',
+        'dir_code_can_vary': 'dir_code_can_vary = (decl: int) -> bool: false',
+        'dir_code_by_inst': 'dir_code_by_inst: {int: int} = {}',
+        'dir_code_sources': 'dir_code_sources: {int: int} = {}',
+        'dir_code_request': 'dir_code_request = (decl: int, at: int) -> int: 0',
+    },
+    'frontend.jo': {'source_force_body': 'source_force_body = (decl: int): pass'},
     'poly_closure.jo': {
         'poly_inst': 'poly_inst = (decl: int, targs: int[], use_pos: int) -> int: instance_poly(decl, targs, use_pos)',
     },

@@ -26,13 +26,13 @@ let x=int64(to_int(args[1]) ?? 0)
 def test_dynamic_shift_keeps_high_words(compiler, tmp_path, release):
     source = tmp_path / 'dynamic.dewy'
     source.write_text('''
-$runtime_checks
 f=(x:int64 by:int64):>int64=>{
+    $runtime_checks
     if by >=? 64 and by <=? 127 {return (x << 64) >> by}
     return 0
 }
-$runtime_checks
 main=(args:array<string>)=>{
+    $runtime_checks
 printl(f(int64(to_int(args[1]) ?? 0) int64(to_int(args[2]) ?? 0)))}
 ''')
     binary = tmp_path / 'dynamic'

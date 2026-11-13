@@ -5,7 +5,7 @@
 $runtime_checks
 
 from p"dewy_parser.dewy" import ParserContext
-from p"dewy_reader.dewy" import rd_dc_module_header, rd_dn_statement, rd_mkpos, rd_pos_off
+from p"dewy_reader.dewy" import rd_dn_statement, rd_mkpos, rd_pos_off
 from p"node_store.dewy" import Node, node_mk
 
 ParserFileHost:type=[
@@ -30,7 +30,6 @@ df_file=(@p:ParserContext @nodes:array<Node> host:ParserFileHost saved_edits:boo
     p.reader.module_lists=[]
     let declarations:array<int64>=[]
     let header_open=true
-    let prefixes:array<Node>=[]
     let marked:int64=0
     let shadowable_pos:int64=0
     loop p.tokens[p.at].kind not=? 'eof' {
@@ -41,17 +40,8 @@ df_file=(@p:ParserContext @nodes:array<Node> host:ParserFileHost saved_edits:boo
             let id=-1 - statement
             if p.reader.module_nodes[id].kind =? 'build_' {
                 let form=p.reader.module_nodes[id].aux
-                if form =? 0 or form =? 6 {
-                    let separated=rd_dc_module_header(@p)
-                    if not header_open or not separated {
-                        if separated {
-                            p.stores.host[0].fatal(p.reader.module_nodes[id].pos "a setting prefixes the next construct; move this tag directly before it, with no blank line");
-                        }
-                        prefixes.push(p.reader.module_nodes[id])
-                        p.reader.module_nodes.clear()
-                        p.reader.module_lists.clear()
-                        continue
-                    }
+                if (form =? 0 or form =? 6) and not header_open {
+                    p.stores.host[0].fatal(p.reader.module_nodes[id].pos "a file setting belongs at the top of the file; for one function, put it at the top of that function's body")
                 }
                 let tag:int64=if form =? 5 1 else 0
                 let pos=p.reader.module_nodes[id].pos
@@ -83,30 +73,6 @@ df_file=(@p:ParserContext @nodes:array<Node> host:ParserFileHost saved_edits:boo
         }
         let made=host.declarations(statement rd_mkpos(file p.tokens[before].start))
         if made.length >? 0 and (statement <=? 0 or nodes[statement].kind not=? 'import_') {header_open=false}
-        if prefixes.length >? 0 {
-            if statement <=? 0 or nodes[statement].kind =? 'import_' or made.length =? 0 {
-                p.stores.host[0].fatal(prefixes[0].pos "a setting needs a following construct: put the tag directly before its declaration");
-            }
-            let start=nodes[made[0]].pos
-            let end_=rd_mkpos(file p.tokens[p.at - 1].stop - 1)
-            loop tag in prefixes {
-                let name=""
-                if tag.aux not=? 6 {name=p.stores.host[0].bytes_slice(p.source rd_pos_off(tag.pos) + 1 tag.ival)}
-                if tag.aux =? 6 {
-                    # The stored identifier is interned; the source retains its dotted spelling.
-                    let begin=rd_pos_off(tag.pos) + 1
-                    let at=begin
-                    loop at <? (p.source as array<uint8>).length {
-                        let b=(p.source as array<uint8>)[at]
-                        if b =? 32 or b =? 9 or b =? 61 {break}
-                        at += 1
-                    }
-                    name=p.stores.host[0].bytes_slice(p.source begin at)
-                }
-                p.stores.host[0].dw_dir_apply(name int64(tag.b) tag.pos start end_ false)
-            }
-            prefixes.clear()
-        }
         made=host.finish_statement(made shadowable_pos not=? 0)
         shadowable_pos=0
         loop declaration in made {declarations.push(declaration)}
@@ -120,7 +86,6 @@ df_file=(@p:ParserContext @nodes:array<Node> host:ParserFileHost saved_edits:boo
         if p.at =? before {p.stores.host[0].dn_error(p.tokens[p.at].start "expected a declaration");}
     }
     if p.reader.dc_callable_tag >? 0 {p.stores.host[0].fatal(rd_mkpos(file p.tokens[p.reader.dc_callable_tag - 1].start) "this tag needs a following function declaration: `$extern` then `name = (...):>Result`")}
-    if prefixes.length >? 0 {p.stores.host[0].fatal(prefixes[0].pos "a setting needs a following construct: move the tag before its declaration")}
     host.finish_checks(p.tokens[p.at].start)
     if marked not=? 0 {p.stores.host[0].fatal(nodes[marked].pos "`$test` marks a module-level function: put it on the line just before one")}
     if shadowable_pos not=? 0 {p.stores.host[0].fatal(shadowable_pos "`$shadowable` marks a module-level const: put it just before one")}

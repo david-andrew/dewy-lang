@@ -2,8 +2,8 @@ $runtime_checks
 
 # `$fast_math` permits reassociation and contraction; strict IEEE stays the
 # default elsewhere. (The backends reassociate nothing yet: results match.)
-$fast_math
 dot=(a:array<float64> b:array<float64>):>float64=>{
+    $fast_math
     let total=0.0
     loop i in [0..a.length) {
         total+=a[i]*b[i]

@@ -16,6 +16,10 @@ const NF_MUT = 16
 const T_VOID = 1
 const T_FN = 2
 const T_NUM = 3
+dir_code_any = false
+dir_code_inst = (f: int) -> int: 0
+dir_code_by_inst: {int: int} = {}
+dir_code_request = (decl: int, at: int) -> int: 0
 nodes: Node[] = [Node()]
 lists: i32[]
 ctxs: FnCtx[]
@@ -419,7 +423,7 @@ def test_poly_ops_twins(compiler, tmp_path, release):  # noqa: F811
     output = compare_narrow(compiler, tmp_path, release,
                             ('node_store', 'checker_types', 'checker_state', 'poly_ops'), DRIVER,
                             doubles={'services.jo': SERVICES, 'poly_closure.jo': "use 'checker_state.dewy'\n" + state},
-                            services=('ast', 'check', 'checker_expr', 'checker_signature', 'dewy_methods', 'dewy_method_ops', 'effect_contracts', 'expr', 'lower_storage', 'types', 'util'))
+                            services=('ast', 'check', 'checker_expr', 'checker_signature', 'dewy_methods', 'dewy_method_ops', 'effect_contracts', 'directives', 'expr', 'lower_storage', 'types', 'util'))
     assert output.endswith(b'poly ok\n')
     for text in (b'cannot infer a generic', b'recursive method', b'mk_callable_contract', b'a recursive generic closure that returns', b'more than 500', b'opt_rest_rebase'):
         assert text in output, text

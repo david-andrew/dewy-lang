@@ -1,16 +1,21 @@
-# Prefixes preserve binding scope and block values, and may be stacked.
+# Settings live in scopes; loop labels still prefix their loop.
 main=(argv:array<string>)=>{
     let xs=[20 22]
     let i=argv.length-1
-    $runtime_checks
-    let first=xs[i]
-    let second=$runtime_checks {
+    let first={
+        $runtime_checks
+        xs[i]
+    }
+    let second={
+        $runtime_checks
         xs[i+1]
     }
-    $runtime_checks
-    $outer
-    loop n in [0..2) {
-        if xs[i] =? 20 {break $outer}
+    {
+        $runtime_checks
+        $outer
+        loop n in [0..2) {
+            if xs[i] =? 20 {break $outer}
+        }
     }
     printl(first+second)
 }

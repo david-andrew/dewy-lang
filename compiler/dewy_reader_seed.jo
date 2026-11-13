@@ -1,3 +1,4 @@
+use 'setting_scopes.dewy'
 use 'checker_call_queries.dewy'
 use 'checker_tokens.dewy'
 use 'dewy_parser.dewy'
@@ -580,9 +581,8 @@ rt_dc_atom = () -> int:
         return rt_dc_flow()
     if op == .kw_loop and dc_parser.flags.report_now: return rt_dc_loop_value(pos)
     # `$unsafe expression`: the boundary holds over the expression (dw_unsafe_scope)
-    if token.kind == .metatag and (rt_dc_valued_place(dc_parser.at - 1) or (dn_directive_form(rt_dn_payload(token)) == 0 and dw_dir_name(rt_dn_payload(token)))):
-        dc_parser.at -= 1
-        return rt_dc_prefixed_body()
+    if token.kind == .metatag and rt_dn_payload(token) != "unsafe" and (rt_dc_valued_place(dc_parser.at - 1) or (dn_directive_form(rt_dn_payload(token)) == 0 and dw_dir_name(rt_dn_payload(token)))):
+        fatal(pos, "a setting belongs at the top of its scope: put it inside the function or block, or at the top of the file")
     if token.kind == .metatag:
         tagged = rt_dc_metatag_atom(token, pos)
         if tagged >= 0: return tagged
@@ -3667,7 +3667,6 @@ rt_dc_declaration = (constant: bool, bare: bool = false) -> int:
 # head, label, declaration or expression is left unread (dc_unread).
 
 rt_dc_body = () -> int:
-    if dc_parser.tokens[dc_parser.at].kind == .metatag and (rt_dc_valued_place(dc_parser.at) or (dn_directive_form(rt_dn_payload(dc_parser.tokens[dc_parser.at])) == 0 and dw_dir_name(rt_dn_payload(dc_parser.tokens[dc_parser.at])))): return rt_dc_prefixed_body()
     # (`=> $unsafe { ... }`: the boundary covers the block, which stays the body itself, dw_block)
     if dc_parser.tokens[dc_parser.at].kind == .metatag and dc_parser.tokens[dc_parser.at + 1].symbol == .lbrace and rt_dc_unsafe_at(dc_parser.at):
         opening = dc_parser.tokens[dc_parser.at]
@@ -3701,6 +3700,7 @@ rt_dc_body_read = () -> int:
     dc_parser.at += if braced: 1 else: 0
     n = mk(.block, pos)
     statements: int[]
+    settings = dc_parser.reader.dc_settings.len()
     loop true:
         if braced and rt_dn_accept(.rbrace): break
         if dc_parser.tokens[dc_parser.at].kind == .eof:
@@ -3784,6 +3784,18 @@ rt_dc_body_read = () -> int:
         statements.push(statement)
         if not braced: break
     set_list(n, statements)
+    if dc_parser.reader.dc_settings.len() > settings:
+        # (through its closing brace: its last syntax node is the last position inside, dw_dir_last)
+        end = mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at - 1].start)
+        loop i in [settings..dc_parser.reader.dc_settings.len()):
+            rt_dc_scope_undoable()
+            dw_dir_apply(dc_parser.reader.dc_settings[i], dc_parser.reader.dc_setting_values[i], dc_parser.reader.dc_setting_at[i], pos, end, false)
+        loop offset in [0..dc_parser.reader.dc_settings.len() - settings):
+            i = dc_parser.reader.dc_settings.len() - 1 - offset
+            dw_setting_scope(dc_parser.reader.dc_settings[i], dc_parser.reader.dc_setting_values[i], dc_parser.reader.dc_setting_at[i], n)
+        dc_parser.reader.dc_settings.truncate(settings)
+        dc_parser.reader.dc_setting_values.truncate(settings)
+        dc_parser.reader.dc_setting_at.truncate(settings)
     if braced: dc_parser.depth -= 1
     n
 
@@ -3797,15 +3809,34 @@ rt_dc_unclosed = (pos: int, close: str): dn_error(pos_off(pos), "expected '{clos
 rt_dc_body_metatag = (statements: mut int[]) -> int:
     tag = dc_parser.tokens[dc_parser.at]
     name = rt_dn_payload(tag)
+    if (name == "time" or name == "dewy") and not rt_dc_valued_place(dc_parser.at): return 0
     # (`$include_bytes(p"asset") as name`: a statement, dc_include_binding)
     if dn_directive_form(name) != 0 or name == "include_bytes": return 0
+    if name == "audited_wait": fatal(mkpos(dc_parser.file, tag.start), "`$audited_wait` marks one audited adapter: move it immediately before this function's declaration")
     if rt_dc_valued_place(dc_parser.at) or dw_dir_name(name):
-        body = rt_dc_prefixed_body()
-        if body == 0: return -1
-        source = files[dc_parser.file].src
-        if source[pos_off(nodes[body].pos)] == 123: statements.push(bc_stmt(body, nodes[body].pos))
+        if statements.len() > 0: fatal(mkpos(dc_parser.file, tag.start), "a setting belongs at the top of its scope: move it before the first statement, inside this function or block")
+        value = 0
+        if rt_dc_valued_place(dc_parser.at):
+            name = name + "." + rt_dn_payload(dc_parser.tokens[dc_parser.at + 2])
+            dc_parser.at += 4
+            expression = rt_dc_expr(0)
+            if expression == 0: return -1
+            value = -expression - 2
+            if nodes[expression].kind == .str_lit and name != "program.max_cores": value = int(nodes[expression].sval) + 2
+            if name == "program.max_cores" and nodes[expression].kind == .int_lit:
+                if nodes[expression].ival < 1: fatal(nodes[expression].pos, "`$program.max_cores` must be at least 1")
+                value = intern("{nodes[expression].ival}") + 2
+        else if name == "fast_math" and dc_parser.tokens[dc_parser.at + 1].symbol == .assign and dc_parser.tokens[dc_parser.at + 2].kind != .boolean:
+            dc_parser.at += 2
+            expression = rt_dc_expr(0)
+            if expression == 0: return -1
+            value = -expression - 2
         else:
-            loop statement in kids(body): statements.push(statement)
+            value = rt_dc_block_setting()
+            if value < 0: return -1
+        dc_parser.reader.dc_settings.push(name)
+        dc_parser.reader.dc_setting_values.push(value)
+        dc_parser.reader.dc_setting_at.push(mkpos(dc_parser.file, tag.start))
         return 1
     # (`$build.mode = ...`: a mistake in a body, dc_statement's dc_body_setting)
     if (name == "target" or name == "build") and dc_parser.tokens[rt_dc_setting_place_end(dc_parser.at)].symbol == .assign: return 0
@@ -7120,6 +7151,13 @@ rt_dn_statement_read = (top: bool) -> int:
     if top and dc_parser.tokens[dc_parser.at].kind == .metatag:
         tag = dc_parser.at
         id = intern(rt_dn_payload(dc_parser.tokens[tag]))
+        if id == intern("audited_wait"):
+            dc_parser.at += 1
+            read = rt_dn_statement_read(true)
+            if read <= 0 or nodes[read].kind != .fn_ or nodes[read].b == 0: fatal(mkpos(dc_parser.file, dc_parser.tokens[tag].start), "`$audited_wait` marks one audited adapter: put it immediately before its function declaration")
+            rt_dc_scope_undoable()
+            dw_dir_apply("audited_wait", 1, mkpos(dc_parser.file, dc_parser.tokens[tag].start), nodes[read].pos, mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at - 1].start), false)
+            return read
         if id == intern("extern") or id == intern("intrinsic"):
             dc_parser.at += 1
             if dc_parser.tokens[dc_parser.at].symbol == .lparen:
@@ -7893,59 +7931,6 @@ rt_dn_split_closer = ():
     dc_parser.tokens[dc_parser.at].start += 1
     tail = dc_parser.tokens[dc_parser.at]
     dc_parser.tokens[dc_parser.at].symbol = dn_token_kind(files[dc_parser.file].src[tail.start..tail.stop))
-
-# D4 Q19, provisional; the sole blank-line module-header rule.
-rt_dc_module_header = () -> bool:
-    at = dc_parser.at
-    loop true:
-        if at >= dc_parser.tokens.len(): return false
-        previous = dc_parser.tokens[at - 1]
-        next = dc_parser.tokens[at]
-        blank = false
-        newline = false
-        source = files[dc_parser.file].src
-        loop i in [previous.stop..next.start):
-            b = source[i]
-            if b == 10:
-                if newline: blank = true
-                newline = true
-            else if b != 32 and b != 9 and b != 13: newline = false
-        if blank or next.kind == .eof: return true
-        if next.kind != .metatag: return false
-        name = rt_dn_payload(next)
-        if rt_dc_valued_place(at):
-            at += 5
-            continue
-        if dn_directive_form(name) != 0 or not dw_dir_name(name): return false
-        at += 1
-        if dc_parser.tokens[at].symbol == .assign: at += 2
-    false
-
-rt_dc_prefixed_body = () -> int:
-    tag = dc_parser.tokens[dc_parser.at]
-    name = rt_dn_payload(tag)
-    value = 0
-    if rt_dc_valued_place(dc_parser.at):
-        name = name + "." + rt_dn_payload(dc_parser.tokens[dc_parser.at + 2])
-        value = rt_dc_valued_value(name)
-        dc_parser.at += 5
-    else:
-        if dn_directive_form(name) != 0 or not dw_dir_name(name): return 0
-        value = rt_dc_block_setting()
-        if value < 0: return 0
-    start = dc_parser.tokens[dc_parser.at]
-    if start.symbol == .rbrace or start.symbol == .rparen or start.symbol == .rbrack or start.kind == .eof: fatal(mkpos(dc_parser.file, tag.start), "`${name}` needs a following construct; move it before the construct: `${name}` then `\{ ... }`")
-    depth = dc_parser.depth
-    dc_parser.depth += 1
-    if dc_parser.depth + dc_parser.reader.dn_depth > 256:
-        dc_parser.depth = depth
-        return rt_dc_too_deep()
-    body = rt_dc_body()
-    dc_parser.depth = depth
-    if body == 0: return 0
-    rt_dc_scope_undoable()
-    dw_dir_apply(name, value, mkpos(dc_parser.file, tag.start), nodes[body].pos, mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at - 1].stop - 1), false)
-    body
 
 rt_dc_valued_place = (at: int) -> bool:
     token = dc_parser.tokens[at]

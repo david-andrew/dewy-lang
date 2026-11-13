@@ -3,8 +3,8 @@
 # error at the call.
 $no_deadlocks
 
-$no_deadlocks=false
 relay = (n:int64):>int64 | Unsent<int64> | Closed<int64> | Canceled => {
+    $no_deadlocks=false
     let c = channel<int64>(1)
     c.send(n) or_throw
     c.receive

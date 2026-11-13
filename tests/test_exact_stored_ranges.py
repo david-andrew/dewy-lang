@@ -8,12 +8,12 @@ from tests.support import compiler  # noqa: F401
 def test_small_stored_ranges(compiler, tmp_path, release):
     values = [-2**63, -1001, -1, 0, 999, 2**63-1]
     source = tmp_path / 'main.dewy'
-    source.write_text('''$runtime_checks=false
-remainder=(x:int64):>int64=>{
+    source.write_text('''remainder=(x:int64):>int64=>{
+    $runtime_checks=false
     return (x%1000)-500
 }
-$runtime_checks=false
 mask=(x:int64):>int64=>{
+    $runtime_checks=false
     return (x&255)-128
 }
 ''' + '\n'.join(f'printl(remainder({x}) mask({x}))' for x in values))

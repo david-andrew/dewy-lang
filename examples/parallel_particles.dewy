@@ -19,8 +19,8 @@ advance = (particles:array<Particle> dt:float64 threaded:bool):>array<Particle> 
     if threaded return parallel_map(particles (p) => step(p particles dt))
     return [loop p in particles step(p particles dt)]
 }
-$program.max_cores = 2
 main = ():>void => {
+    $program.max_cores = 2
     # (two threads including the caller: the program's cap when this file is the one run)
     let original = make(128)
     let serial = original let threaded = original

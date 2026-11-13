@@ -48,8 +48,8 @@ def test_provisional_bounds_tags_are_not_aliases(compiler, tmp_path, old):
 def test_bulletproof_disables_local_assert_assumption(compiler, tmp_path):
     result = check(compiler, tmp_path, '''$bulletproof
 
-$assume_local_asserts
 main=()=>{
+    $assume_local_asserts
 }
 ''')
     assert result.returncode != 0 and '$assume_local_asserts=false' in result.stderr, result.stderr

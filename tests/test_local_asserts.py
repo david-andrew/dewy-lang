@@ -39,7 +39,7 @@ def test_other_module(compiler, tmp_path):
 
 
 def test_other_module_opted_in(compiler, tmp_path):
-    files = {'helper.dewy': HELPER, 'main.dewy': 'from p"helper.dewy" import twice\n$runtime_checks\nmain=():>void=>{\n    printl(twice(3))\n}\n'}
+    files = {'helper.dewy': HELPER, 'main.dewy': 'from p"helper.dewy" import twice\nmain=():>void=>{\n    $runtime_checks\n    printl(twice(3))\n}\n'}
     result = run(compiler, tmp_path, files, 'run')
     assert result.returncode == 0 and result.stdout == '6\n', result.stdout + result.stderr
 

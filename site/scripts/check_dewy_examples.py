@@ -131,7 +131,7 @@ def validate(example: Example, compiler: Path, scratch: Path) -> dict:
         # (the published examples predate no traps by default: they keep runtime checks)
         text = prefix + padding + example.source + data.get('suffix', '')
         if not any(tag in text for tag in ('$runtime_checks', '$no_hidden_costs', '$prototype')):
-            # (a module header opens the file and a blank line ends it; it reuses two padding lines)
+            # Reuse two padding lines for the file setting and preserve example line numbers.
             text = '$runtime_checks\n\n' + (text[2:] if text.startswith('\n\n') else text)
         source.write_text(text)
         def call(args):

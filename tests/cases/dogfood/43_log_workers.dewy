@@ -38,8 +38,8 @@ produce = (out:Channel<string> text:string):>void | Unsent<string> => {
     out.close()
 }
 
-$runtime_checks    # atomic add may overflow: no way to prove it
 work = (jobs:Channel<string> stats:Mutex<dict<string Stats>> errors:Atomic<int64> bad:Atomic<int64>):>int64 | Canceled => {
+    $runtime_checks
     let handled:int64 = 0
     loop true {
         let line = jobs.receive
@@ -76,8 +76,9 @@ main = () => {
     let stats = mutex(dict<string Stats>[])
     let errors = atomic(0)
     let bad = atomic(0)
-    concurrent $runtime_checks    # the workers' atomic counters
-    {
+    concurrent {
+        $runtime_checks
+        
         spawn produce(jobs LOG)
         let a = spawn work(jobs stats errors bad)
         let b = spawn work(jobs stats errors bad)

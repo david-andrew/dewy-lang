@@ -43,7 +43,7 @@ def test_local_assert_optout_demand_proof_with_repair(compiler, tmp_path):
     assert strict.returncode != 0, strict.stderr
     assert 'calling `checked` may panic' in strict.stderr
     assert 'prove what it checks before the call' in strict.stderr
-    assert 'opt in by writing `$runtime_checks` immediately before the statement, block or function' in strict.stderr
+    assert 'opt in by writing `$runtime_checks` at the top inside this function or block' in strict.stderr
 
 
 def test_external_paths_optout_current_warning_and_repair(compiler, tmp_path):

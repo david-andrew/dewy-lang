@@ -32,8 +32,8 @@ verify = ():>int64 => {
     return total
 }
 
-$runtime_checks = false
 forbidden = (xs:array<int64> i:int64):>int64 => {
+    $runtime_checks = false
     # REJECT: no lower or upper bound is known for i.
     return xs[i]
 }

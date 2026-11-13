@@ -44,8 +44,8 @@ def test_key_extrema_empty_runtime_contract(compiler, tmp_path, operation):
 
 
 def test_key_extrema_panicking_callback(compiler, tmp_path):
-    result = run(compiler, tmp_path, '''$runtime_checks
-key=(x:int64):>int64=>{
+    result = run(compiler, tmp_path, '''key=(x:int64):>int64=>{
+    $runtime_checks
     return [1 2][x]
 }
 let values:array<int64>=[1 2]

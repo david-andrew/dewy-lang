@@ -25,6 +25,15 @@ syms: Sym[] = [Sym()]
 fns: FnInst[] = [FnInst(), FnInst(ret=33)]
 ct_values: CTValue[] = [CTValue()]
 next_value = 0
+dir_runtime_policies: {int: bool}
+lib_dir = "lib"
+struct PolicySource:
+    path: str
+    src: str
+files: PolicySource[] = [PolicySource()]
+pos_file = (p: int) -> int: 0
+pos_off = (p: int) -> int: p
+intern = (s: str) -> int: 1
 kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])
 nkids = (n: int) -> int: int(nodes[n].nlist)
 kids = (n: int) -> int[]: node_kids(nodes, lists, n)
@@ -171,7 +180,7 @@ def test_constant_checks_twins(compiler, tmp_path, release):  # noqa: F811
     output = compare_narrow(compiler, tmp_path, release,
                             ('source_types', 'node_store', 'checker_types', 'checker_state', 'checker_tokens', 'evaluator_state', 'constant_checks'), DRIVER,
                             doubles={'services.jo': SERVICES, 'check_constant.jo': (ROOT / 'compiler/check_constant.jo').read_text()},
-                            services=('checker_expr', 'ast', 'check', 'expr', 'types', 'util', 'errors', 'error_ops', 'comptime', 'warn_if_ops', 'constant_folds', 'unit_rare'))
+                            services=('directives', 'checker_expr', 'ast', 'check', 'expr', 'types', 'util', 'errors', 'error_ops', 'comptime', 'warn_if_ops', 'constant_folds', 'unit_rare'))
     assert output.endswith(b'constant ok\n')
     for text in (b'the validator of a constant check', b'bad pattern: inner', b'bad pattern: text fails', b'union [50, 51]', b'names a validator'):
         assert text in output, text

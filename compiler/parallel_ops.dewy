@@ -1,3 +1,4 @@
+from p"directives.jo" import dir_runtime_settings
 $runtime_checks
 
 from p"refinement_types.dewy" import (FactBound)
@@ -54,7 +55,7 @@ parallel_region=(n0:MoveWord):>ParallelRegion=>$unsafe {
         first=nodes.ptr[a].ival
         let last=nodes.ptr[b].ival
         # Bound arithmetic before subtraction: no overflow in compile-time shape.
-        if first <? -1048576 or first >? 1048576 or last <? first or last >? first + 8 {return ParallelRegion[]}
+        if first <? -888576 or first >? 888576 or last <? first or last >? first + 8 {return ParallelRegion[]}
         count=last - first + nodes.ptr[inclusive].ival
     }
     else {return ParallelRegion[]}
@@ -174,7 +175,9 @@ parallel_scalar_decl=(s:MoveWord l:MoveWord):>bool=>$unsafe {
     if not target_wasm and not parallel_serial and region.count >? 1 {
         iff(e_call(rt("__fj_split") [] VI));
         let root=e_call(rt("__fj_enter") [] VI)
-        let job=e_slot(new_slot(80 8))
+        let job_size=80
+        if dir_runtime_settings {job_size=88}
+        let job=e_slot(new_slot(job_size 8))
         let output=e_slot(new_slot(region.count * 8 8))
         e_call(rt("__fj_scalar") [job e_faddr(lf_helper(HK.parallel_job (if split {2} else {0}) f)) env e_iconst(region.first) e_iconst(region.count) e_addi(output 8) e_faddr(lf_helper(HK.parallel_job (if split {3} else {1}) f))] -1);
         let first_result=e_call((if split {lf_helper(HK.partition 0 f)} else {lf_of_inst(f)}) [env e_iconst(region.first)] result_type)

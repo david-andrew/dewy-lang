@@ -230,8 +230,8 @@ main = ():>void | Closed | Canceled => {
 - **Today's quiet fragment:** remove `$confine_external_paths` below. With that existing opt-out, this program still compiles, with a warning. `$bulletproof` inherits that warning severity, although other bundle members may independently reject this program.
 
 ```dewy
-$confine_external_paths
 main = ():>void => {
+    $confine_external_paths
     let argv = args()
     if argv.length =? 0 return
     let f = p(argv[0])
@@ -265,8 +265,8 @@ printl(f.exists)
 $no_deadlocks
 $extern
 usleep = (us:uint32):>int32
-$audited_wait
 nap = ():>int32 => {
+    $audited_wait
     $unsafe usleep(1000)
 }
 ```
@@ -275,8 +275,10 @@ nap = ():>int32 => {
 - **Programmer writes** for this delay, using the existing scheduler operation:
 
 ```dewy
-$no_deadlocks
-nap = ():>void | Canceled => sleep(1ms)
+nap = ():>void | Canceled => {
+    $no_deadlocks
+    sleep(1ms)
+}
 ```
 
 - The strict configuration must also check the scheduler primitive's wait contract; changing the call's name cannot substitute for that proof. Other FFI needs an adapter verified not to depend on program tasks/locks. A timeout does not prove this, and `& no_effects` on an extern must not become an alternative unchecked escape hatch.
@@ -287,8 +289,8 @@ nap = ():>void | Canceled => sleep(1ms)
 - **Today**, even with the existing opt-out:
 
 ```dewy
-$no_assumed_bounds
 visit = (lo:int64 hi:int64):>void => {
+    $no_assumed_bounds
     parallel i in [lo..hi] { let ignored = i }
 }
 ```
@@ -298,8 +300,8 @@ visit = (lo:int64 hi:int64):>void => {
 - **Programmer writes**, for a batch capped at one million items:
 
 ```dewy
-$no_assumed_bounds
 visit = (hi:int64):>void => {
+    $no_assumed_bounds
     if hi <? 0 or hi >? 1000000 return
     parallel i in [0..hi) { let ignored = i }
 }

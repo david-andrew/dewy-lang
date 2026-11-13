@@ -1,3 +1,4 @@
+use 'setting_scopes.dewy'
 use 'dewy_reader_services.jo'
 use 'checker_call_queries.dewy'
 use 'dewy_parser.dewy'
@@ -296,3 +297,5 @@ rs_g_transfer_tags_get = (a0: int) -> int?: transfer_tags.get(a0)
 rs_g_transfer_tags_item_set = (a0: int, a1: int):
     transfer_tags[a0] = a1
     return
+
+rs_dw_setting_scope = (name: str, value: int, at: int, body: int): dw_setting_scope(name, value, at, body)

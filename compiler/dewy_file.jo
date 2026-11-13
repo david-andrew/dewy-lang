@@ -24,7 +24,6 @@ df_file = (p: mut ParserContext, nodes: mut Node[], host: ParserFileHost, saved_
     p.reader.module_lists = []
     declarations: int[]
     header_open = true
-    prefixes: Node[]
     marked = 0
     shadowable_pos = 0
     loop p.tokens[p.at].kind != .eof:
@@ -35,14 +34,7 @@ df_file = (p: mut ParserContext, nodes: mut Node[], host: ParserFileHost, saved_
             id = -1 - statement
             if p.reader.module_nodes[id].kind == .build_:
                 form = p.reader.module_nodes[id].aux
-                if form == 0 or form == 6:
-                    separated = rd_dc_module_header(p)
-                    if not header_open or not separated:
-                        if separated: p.stores.host[0].fatal(p.reader.module_nodes[id].pos, "a setting prefixes the next construct; move this tag directly before it, with no blank line")
-                        prefixes.push(p.reader.module_nodes[id])
-                        p.reader.module_nodes.clear()
-                        p.reader.module_lists.clear()
-                        continue
+                if (form == 0 or form == 6) and not header_open: p.stores.host[0].fatal(p.reader.module_nodes[id].pos, "a file setting belongs at the top of the file; for one function, put it at the top of that function's body")
                 tag = if form == 5: 1 else: 0
                 pos = p.reader.module_nodes[id].pos
                 if form == 1:
@@ -68,23 +60,6 @@ df_file = (p: mut ParserContext, nodes: mut Node[], host: ParserFileHost, saved_
                     continue
         made = host.declarations(statement, (file << 40) | p.tokens[before].start)
         if made.len() > 0 and (statement <= 0 or nodes[statement].kind != .import_): header_open = false
-        if prefixes.len() > 0:
-            if statement <= 0 or nodes[statement].kind == .import_ or made.len() == 0: p.stores.host[0].fatal(prefixes[0].pos, "a setting needs a following construct: put the tag directly before its declaration")
-            start = nodes[made[0]].pos
-            end_ = (file << 40) | (p.tokens[p.at - 1].stop - 1)
-            loop tag in prefixes:
-                name = ""
-                if tag.aux == 6:
-                    begin = (tag.pos & 0xFFFFFFFFFF) + 1
-                    at = begin
-                    loop at < len(p.source):
-                        b = p.source[at]
-                        if b == 32 or b == 9 or b == 61: break
-                        at += 1
-                    name = p.stores.host[0].bytes_slice(p.source, begin, at)
-                else: name = p.stores.host[0].bytes_slice(p.source, (tag.pos & 0xFFFFFFFFFF) + 1, tag.ival)
-                p.stores.host[0].dw_dir_apply(name, int(tag.b), tag.pos, start, end_, false)
-            prefixes.clear()
         made = host.finish_statement(made, shadowable_pos != 0)
         shadowable_pos = 0
         loop declaration in made: declarations.push(declaration)
@@ -96,7 +71,6 @@ df_file = (p: mut ParserContext, nodes: mut Node[], host: ParserFileHost, saved_
         p.reader.module_lists.clear()
         if p.at == before: p.stores.host[0].dn_error(p.tokens[p.at].start, "expected a declaration")
     if p.reader.dc_callable_tag > 0: p.stores.host[0].fatal((file << 40) | p.tokens[p.reader.dc_callable_tag - 1].start, "this tag needs a following function declaration: `$extern` then `name = (...):>Result`")
-    if prefixes.len() > 0: p.stores.host[0].fatal(prefixes[0].pos, "a setting needs a following construct: move the tag before its declaration")
     host.finish_checks(p.tokens[p.at].start)
     if marked != 0: p.stores.host[0].fatal(nodes[marked].pos, "`$test` marks a module-level function: put it on the line just before one")
     if shadowable_pos != 0: p.stores.host[0].fatal(shadowable_pos, "`$shadowable` marks a module-level const: put it just before one")

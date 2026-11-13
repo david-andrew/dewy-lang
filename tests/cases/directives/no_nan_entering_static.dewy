@@ -3,8 +3,8 @@
 $runtime_checks=false
 
 Reading:type=[value:float64]
-$no_nan
 doubled=(r:Reading):>float64=>{
+    $no_nan
     r.value*2.0
 }
 main=()=>printl(doubled(Reading[1.0]))

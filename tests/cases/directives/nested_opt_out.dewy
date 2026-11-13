@@ -2,15 +2,15 @@
 # scope may ask for runtime checks again.
 $no_hidden_costs
 
-$no_hidden_costs=false
-$runtime_checks
 at=(xs:array<int64> i:int64):>int64=>{
+    $no_hidden_costs=false
+    $runtime_checks
     let ys=xs
     return ys[i]
 }
-$no_hidden_costs=false
-$runtime_checks
 main=()=>{
+    $no_hidden_costs=false
+    $runtime_checks
     let xs:array<int64>=[3 4]
     printl(at(xs 1))
 }

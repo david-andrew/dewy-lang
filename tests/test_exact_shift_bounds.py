@@ -28,6 +28,6 @@ printl(f(x))
 
 def test_shift_of_wide_intermediate_still_needs_check(compiler, tmp_path):
     source = tmp_path / 'wide.dewy'
-    source.write_text('$no_hidden_costs\nf=(x:int64):>int64=>{\nreturn ((x<<64)>>63)+1\n}\nmain=()=>printl(f(1))\n')
+    source.write_text('f=(x:int64):>int64=>{\n    $no_hidden_costs\nreturn ((x<<64)>>63)+1\n}\nmain=()=>printl(f(1))\n')
     built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'wide'], capture_output=True, text=True)
     assert built.returncode != 0 and 'cannot prove exact integer result fits int64' in built.stderr, built.stderr

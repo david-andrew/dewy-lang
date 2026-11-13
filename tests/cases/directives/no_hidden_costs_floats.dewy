@@ -7,7 +7,7 @@ mix = (a:float64 b:float64 k:int64):>float64 => {
     if c <? 0.0 -c else c
 }
 narrow = (a:float64):>float32 => float32(a)
-$no_hidden_costs=false
 main = ():>void & no panics => {
+    $no_hidden_costs=false
     printl"{id(1.5)} {mix(2.0 4.0 3)} {narrow(0.25)}"
 }

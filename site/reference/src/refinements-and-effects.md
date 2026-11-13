@@ -252,8 +252,10 @@ What a caller learns follows the argument: a fact about a parameter's length bec
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
-$prototype
-half = (n:int64 d:int64<(not=? 0)>):>int64 => n // d
+half = (n:int64 d:int64<(not=? 0)>):>int64 => {
+    $prototype
+    n // d
+}
 main = (argv:array<string>) => {
     printl(half(10 argv.length))    # warned at compile time; checked at runtime
     return 0

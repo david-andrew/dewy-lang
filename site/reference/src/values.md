@@ -136,8 +136,8 @@ a function that needs a mutable working array can copy it explicitly:
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
-$explicit_copies
 changed = (source:array<int64>):>array<int64> => {
+    $explicit_copies
     let working = source.copy()
     working.push(42)
     return working

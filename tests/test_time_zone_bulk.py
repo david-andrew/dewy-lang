@@ -198,9 +198,9 @@ check_day = (text:string name:string) => {
         show(moved)
     } else {printl"failed"}
 }
-$time.fold = 'later'
-$time.gap = 'next'
 check_month = (text:string name:string) => {
+    $time.fold = 'later'
+    $time.gap = 'next'
     let z = zoned(text zone=at(name))
     if z is? ZonedDateTime {
         let moved = z + 1month

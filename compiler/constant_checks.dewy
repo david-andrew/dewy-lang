@@ -1,3 +1,4 @@
+from p"directives.jo" import dir_runtime_policies
 $runtime_checks
 
 # Demand-driven: nothing is read unless a declaration has a constant check. Cost: O(1) per
@@ -7,12 +8,12 @@ from p"comptime_ops.dewy" import (checked_const_init ct_run)
 from p"check_constant.jo" import (cc_passed CheckConstant cc_any cc_decls cc_errors cc_forwards cc_verdicts)
 from p"checker_expr.dewy" import lookup
 from p"ast.jo" import (NF_CHECKED add_flag kid kids mk nkids nodes set_list)
-from p"check.jo" import (fns get_fn_inst syms)
+from p"check.jo" import (lib_dir fns get_fn_inst syms)
 from p"expr.jo" import (CV ntype)
 from p"constant_fold_ops.dewy" import (cc_closed_expr cc_fold_first cc_fold_after)
 from p"types.jo" import (T_STR is_union prune tkind union_members)
 from p"type_ops.dewy" import (dt mk_union union_index)
-from p"util.jo" import (name_of pos_in_lib)
+from p"util.jo" import (pos_off files intern pos_file name_of pos_in_lib)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"error_ops.dewy" import (exception_member)
 from p"comptime.jo" import (ct_values)
@@ -88,6 +89,17 @@ cc_call=(n:ConstantWord f:ConstantWord decl:ConstantWord):>ConstantWord=>$unsafe
     # (every argument constant and the value a plain record: the value, nothing at run time)
     let folded=cc_fold_first(n decl)
     if folded not=? 0 {return folded}
+    if dir_runtime_policies.length >? 0 and nkids(n) >? 0 and nodes[kid(n 0)].kind =? 'str_lit' and not pos_in_lib(nodes[n].pos) {
+        loop c in cc_decls[decl] {
+            if files[pos_file(nodes[c.validator].pos)].path not=? "{lib_dir}/time/zones.dewy" or name_of(ConstantWord(nodes[c.validator].name)) =? "zone_error" {continue}
+            let start=pos_off(nodes[n].pos)
+            let stop=pos_off(nodes[kid(n 0)].pos)
+            let src=files[pos_file(nodes[n].pos)].src as array<uint8>
+            let literal=stop >? start
+            loop i in [start..stop) {if src[i] =? 40 {literal=false;break}}
+            if literal {fatal(nodes[n].pos "literal validation through inherited run-time time policies is not yet supported; use a delimited zoned(text) call and handle its failures")}
+        }
+    }
     # (the first check whose arguments are all closed decides)
     loop c in cc_decls[decl] {
         if c.params.length =? 1 and c.params[0] <? nkids(n) and time_grid_proven(c.validator kid(n c.params[0])) {return cc_narrow(n "OffGrid")}

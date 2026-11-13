@@ -58,8 +58,9 @@ def test_progress_nested_scope(compiler, tmp_path):
 
 f=(step:int64):>int64=>{
     let count:int64=0
-    loop i in [0..10) $no_assumed_bounds
-    {
+    loop i in [0..10) {
+        $no_assumed_bounds
+        
         count+=step
     }
     return count
@@ -75,8 +76,8 @@ main=()=>printl(f(1))
 
 def test_progress_optout_retains_overflow_trap(compiler, tmp_path):
     source = tmp_path / 'progress.dewy'
-    source.write_text(('$runtime_checks\n\n') + ('''$no_assumed_bounds
-main=(args:array<string>)=>{
+    source.write_text(('$runtime_checks\n\n') + ('''main=(args:array<string>)=>{
+    $no_assumed_bounds
     let count=int64(to_int(args[1]) ?? 0)
     count+=1
     printl(count)

@@ -97,8 +97,9 @@ main=():>void=>{
     printl(f.exists)
     printl(p"/etc/hosts".exists)
     if root.contains(f) { printl(f.exists) }
-    let g=$confine_external_paths=false
-    {
+    let g={
+        $confine_external_paths=false
+        
         f.exists
     }
     printl(g)

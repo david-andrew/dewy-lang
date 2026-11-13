@@ -32,8 +32,8 @@ clamp = (x:int64):>int64 & no_effects => {
     if x >? 100 return 100
     return x
 }
-$no_hidden_costs = false
 main = ():>void => {
+    $no_hidden_costs = false
     let checksum:int64 = 0
     loop frame in [0..64) {
         checksum += block(frame)

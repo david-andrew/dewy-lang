@@ -1,7 +1,7 @@
 # exit: 101
 Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]
-$runtime_checks
 extend = (@g:Graph more:array<int64<(>=? 0)>>):>void => {
+    $runtime_checks
     g.next.extend(more)
 }
 main = ():>void => {

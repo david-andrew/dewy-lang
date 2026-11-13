@@ -55,7 +55,8 @@ dir_scopes: DirScope[]
 dir_rules_from_host = false
 dir_program_any = false
 dir_program_values: {int: int} = {}
-dir_program_mains: {int: int[]} = {}
+dir_runtime_settings = false
+dir_runtime_policies: {int: bool} = {}
 # dir_find's index: the scopes of each setting in each file, chained in scope order from
 # dir_index_head through dir_index_next; a file's chains (one per setting written in it, a few)
 # are listed from dir_index_file (group + 1, 0 none) through dir_index_group_next. Pushes extend
@@ -203,9 +204,3 @@ dir_value = (setting: int, p: int) -> int:
     i = dir_find(setting, p)
     if i < 0: return -1
     dir_scopes[i].value
-
-
-
-
-
-

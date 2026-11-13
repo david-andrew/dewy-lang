@@ -118,6 +118,10 @@ __task_worker = (slot: int) -> void:
         c.signal_root = TaskGroup()
     p.finished = true
     __task_unlock(&__task_frontier_lock)
+    when __setting_read("__runtime_settings"):
+        inherited = __settings_current()
+        __settings_install(null)
+        __settings_release(inherited)
     c.scope = TaskGroup()
     g = p.group.__p
     __task_lock(&g.lock)
@@ -142,6 +146,8 @@ __task_launch = (g: TaskGroup, f: () -> void) -> bool:
     j.group = g
     j.alive = 1
     j.slot = slot
+    when __setting_read("__runtime_settings"):
+        __task_states[slot * __TS_WORDS + __TS_SETTINGS] = __settings_capture() as int
     c = __task_data(__task_contexts) + slot + 1
     c.job = job
     c.address = j
@@ -160,6 +166,9 @@ __task_launch = (g: TaskGroup, f: () -> void) -> bool:
     if id < 0:
         p.pending -= 1
         __task_unlock(&__task_frontier_lock)
+        when __setting_read("__runtime_settings"):
+            __settings_release(__task_states[slot * __TS_WORDS + __TS_SETTINGS] as *__SettingsFrame)
+            __task_states[slot * __TS_WORDS + __TS_SETTINGS] = 0
         j.run = __task_noop
         j.group = TaskGroup()
         c.job = []
@@ -219,6 +228,9 @@ __task_join = (g: TaskGroup) -> (bool | exception):
     loop j in p.addresses:
         loop __atomic_add(&j.alive, 0) != 0: __task_wait(&j.alive, 1, false)
         slot = j.slot
+        when __setting_read("__runtime_settings"):
+            __settings_release(__task_states[slot * __TS_WORDS + __TS_SETTINGS] as *__SettingsFrame)
+            __task_states[slot * __TS_WORDS + __TS_SETTINGS] = 0
         j.run = __task_noop
         j.group = TaskGroup()
         (__task_data(__task_contexts) + slot + 1).job = []

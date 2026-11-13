@@ -44,8 +44,8 @@ main = () => {
 ```dewy
 Cell:type = [n:int64]
 bump = (@n:int64):>void => { n += 1 }
-$runtime_checks
 probe = (i:int64 j:int64):>void => {
+    $runtime_checks
     let rows = [Cell[0] Cell[0]]
     parallel {
         bump(@rows[i].n)

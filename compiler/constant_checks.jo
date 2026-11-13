@@ -1,3 +1,4 @@
+use 'directives.jo'
 use 'check_constant.jo'
 use 'checker_state.dewy'
 use 'checker_expr.dewy'
@@ -78,6 +79,18 @@ cc_call = (n: int, f: int, decl: int) -> int:
     # (every argument constant and the value a plain record: the value, nothing at run time)
     folded = cc_fold_first(n, decl)
     if folded != 0: return folded
+    if dir_runtime_policies.len() > 0 and nkids(n) > 0 and nodes[kid(n, 0)].kind == .str_lit and not pos_in_lib(nodes[n].pos):
+        loop c in cc_decls[decl]:
+            if files[pos_file(nodes[c.validator].pos)].path != lib_dir + "/time/zones.dewy" or name_of(int(nodes[c.validator].name)) == "zone_error": continue
+            start = pos_off(nodes[n].pos)
+            stop = pos_off(nodes[kid(n, 0)].pos)
+            src = files[pos_file(nodes[n].pos)].src
+            literal = stop > start
+            loop i in [start..stop):
+                if src[i] == 40:
+                    literal = false
+                    break
+            if literal: fatal(nodes[n].pos, "literal validation through inherited run-time time policies is not yet supported; use a delimited zoned(text) call and handle its failures")
     # (the first check whose arguments are all closed decides)
     loop c in cc_decls[decl]:
         if c.params.len() == 1 and c.params[0] < nkids(n) and time_grid_proven(c.validator, kid(n, c.params[0])): return cc_narrow(n, "OffGrid")

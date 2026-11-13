@@ -1,94 +1,49 @@
+from p"diagnostic_exit.dewy" import fatal
 $runtime_checks
 
-from p"ast.jo" import (kid nkids nodes)
-from p"check.jo" import (fns main_fn modules)
-from p"dewy_method_ops.dewy" import (dewy_is_method)
-from p"directives.jo" import (DirScope dir_module_start dir_program_any dir_program_mains dir_program_values dir_rules_from_host dir_scopes)
-from p"panic_inventory.dewy" import (panic_call_edges)
-from p"settings.jo" import (settings_path)
-from p"util.jo" import (files name_of pos_file pos_str)
-from p"diagnostic_exit.dewy" import (fatal)
-ProgramWord:type=int64<overflow='wrap'>
-# Classification, not a namespace prefix: renaming a setting changes only this list.
+from p"ast.jo" import nodes
+from p"check.jo" import modules
+from p"directives.jo" import (dir_module_start dir_program_any dir_program_values dir_rules_from_host dir_scopes)
+from p"settings.jo" import settings_path
+from p"util.jo" import (files intern name_of pos_file)
+# Entry headers supply the outermost runtime defaults. Imported headers cannot
+# pick the importer's policy; functions install their own frames at entry.
 dir_program_setting=(name:string):>bool=>{
-    name =? "time.zone" or name =? "time.rules" or name =? "time.zone_source" or name =? "program.max_cores"
+    name =? "time.zone" or name =? "time.rules" or name =? "time.zone_source" or name =? "time.gap" or name =? "time.fold" or name =? "program.max_cores"
 }
-# A core count is a number, every other program-wide setting a name in quotes.
-dir_program_spelled=(s:DirScope):>string=>{
-    if name_of(s.setting) =? "program.max_cores" {return "${name_of(s.setting)} = {name_of(s.value - 2)}"}
-    "${name_of(s.setting)} = '{name_of(s.value - 2)}'"
-}
-dir_program_disagree=(a:DirScope b:DirScope):>void=>{
-    fatal(a.at "program-wide `{dir_program_spelled(a)}` at {pos_str(a.at)} conflicts with `{dir_program_spelled(b)}` at {pos_str(b.at)}: reachable main functions must agree on program-wide settings")
-}
-# Before checking values, select only the invoked file's configuration. The same
-# validation runs after checking to include bodies parsed on demand. No work
-# without program-wide tags; O(module declarations + scopes + main statements).
+# O(module declarations + settings), with no call inventory or per-function map.
 dir_program_prepare=():>void=>$unsafe {
     if not dir_program_any {return}
     dir_program_values=dict<int64 int64>()
-    dir_program_mains=dict<int64 array<int64>>()
     dir_rules_from_host=false
-    let mains:dict<int64 int64>=dict<int64 int64>()
+    let entry_main:int64=0
+    let main_name=intern("main")
     loop m in modules {
+        if files[int64(m.file)].path not=? settings_path {continue}
         loop d in m.decls {
-            if nodes.ptr[d].kind not=? 'fn_' or name_of(ProgramWord(nodes.ptr[d].name)) not=? "main" or dewy_is_method(d) or nodes.ptr[d].b =? 0 {continue}
-            mains[nodes.ptr[d].pos]=d
+            if nodes.ptr[d].kind =? 'fn_' and nodes.ptr[d].name =? int32(main_name) and nodes.ptr[d].b not=? 0 and files[pos_file(nodes.ptr[d].pos)].path =? settings_path {
+                entry_main=nodes.ptr[int64(nodes.ptr[d].b)].pos
+            }
         }
     }
     loop i in [0..dir_scopes.length) {
         let s=dir_scopes[i]
-        if not dir_program_setting(name_of(s.setting)) {continue}
-        let entry=files[pos_file(s.start)].path =? settings_path
+        let name=name_of(s.setting)
+        if not dir_program_setting(name) {continue}
         let header=s.start =? dir_module_start(pos_file(s.start))
-        let d=mains.get(s.start) ?? 0
-        let placed=entry and header or d >? 0
-        if d >? 0 {
-            let scopes=dir_program_mains.get(d) ?? []
-            scopes.push(i)
-            dir_program_mains[d]=scopes
+        let legacy=s.start =? entry_main and s.value >=? 2
+        if (name =? "program.max_cores" or name =? "time.rules" or name =? "time.zone_source") and not header and not legacy {
+            fatal(s.at "scoped `${name}` is not yet supported; use a literal setting at the top of the entry file or its main body")
         }
-        if not placed {fatal(s.at "`${name_of(s.setting)}` is program-wide: put it at the top of the entry file or directly before any file's main: `${name_of(s.setting)} = ...` then `main = ...`")}
-        if not entry {continue}
-        let old=dir_program_values.get(s.setting) ?? -1
-        if old >=? 0 and dir_scopes[old].value not=? s.value {dir_program_disagree(s dir_scopes[old])}
+        if files[pos_file(s.start)].path not=? settings_path {continue}
+        # Keep the existing entry-main forms process-wide until scoped caps and packs land.
+        if legacy and (name =? "time.rules" or name =? "program.max_cores" or name =? "time.zone_source") {
+            dir_program_values[s.setting]=i
+            if name =? "time.zone_source" {dir_rules_from_host=true}
+        }
+        if not header {continue}
         dir_program_values[s.setting]=i
-        if name_of(s.setting) =? "time.zone_source" {dir_rules_from_host=true}
+        if name =? "time.zone_source" {dir_rules_from_host=true}
     }
 }
-# Reuse the panic inventory's complete-call mode, including callable targets.
-# Each reached body is inventoried once, with indexed function membership:
-# O(reached AST nodes + call edges + settings), O(reached functions + edges)
-# scratch. Skip the inventory entirely when no two explicit settings disagree.
-dir_program_finalize=():>void=>$unsafe {
-    if not dir_program_any {return}
-    dir_program_prepare()
-    let held=dir_program_values
-    let possible=false
-    loop [d scopes] in dir_program_mains {
-        loop i in scopes {
-            let s=dir_scopes[i]
-            let old=held.get(s.setting) ?? -1
-            if old >=? 0 and dir_scopes[old].value not=? s.value {possible=true}
-            held[s.setting]=i
-        }
-    }
-    if not possible or main_fn =? 0 {return}
-    held=dir_program_values
-    let seen:dict<int64 bool>=dict<int64 bool>()
-    let pending=[main_fn]
-    loop pending.length >? 0 {
-        let f=pending.pop()
-        if f <=? 0 or f >=? fns.length or seen.has(f) {continue}
-        seen[f]=true
-        let d=ProgramWord(fns.ptr[f].decl)
-        let scopes=dir_program_mains.get(d) ?? []
-        loop i in scopes {
-            let s=dir_scopes[i]
-            let old=held.get(s.setting) ?? -1
-            if old >=? 0 and dir_scopes[old].value not=? s.value {dir_program_disagree(s dir_scopes[old])}
-            held[s.setting]=i
-        }
-        loop g in panic_call_edges(f) {pending.push(g)}
-    }
-}
+dir_program_finalize=():>void=>dir_program_prepare()

@@ -55,8 +55,9 @@ def test_malformed_version(compiler, tmp_path):
 
 def test_version_is_a_module_setting(compiler, tmp_path):
     ran = run(compiler, tmp_path, '$dewy.version = \'0.1.0\'\nmain = () => {\n    printl"hi"\n}\n')
-    assert ran.returncode != 0
-    assert 'top of the module' in ran.stderr
+    assert ran.returncode == 0 and ran.stdout == 'hi\n', ran.stderr
+    ran = run(compiler, tmp_path, "main=()=>{\n$dewy.version='0.1.0'\nprintl(42)\n}\n")
+    assert ran.returncode != 0 and 'top of the module' in ran.stderr
     ran = run(compiler, tmp_path, "$dewy.version = '0.1.0'\n$dewy.version = '0.1.0'\n")
     assert ran.returncode != 0
     assert 'set twice' in ran.stderr
@@ -86,7 +87,7 @@ READ = """f = (zone:string|none=$time.zone) => {
 
 
 def test_default_reads_the_callers_setting(compiler, tmp_path):
-    source = READ.replace("$time.zone", "$time.gap") + '$time.gap = \'next\'\ng = () => {\n    f\n}\nf\ng\nf("mine")\n'
+    source = READ.replace("$time.zone", "$time.gap") + 'g = () => {\n    $time.gap = \'next\'\n    f\n}\nf\ng\nf("mine")\n'
     ran = run(compiler, tmp_path, source)
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout == 'no zone\nzone next\nzone mine\n'

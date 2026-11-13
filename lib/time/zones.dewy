@@ -23,8 +23,8 @@ _UnknownZonePackFreshness:type=[pinned:string host:string]
 # ---------------- reading the pack ----------------
 # `$time.zone_source = 'host'`: a zone's rules are the machine's, read when it is first reached and
 # kept past the pack's end. The pack still names the zones, and a literal cannot fold against them.
-const _SOURCE:string|none=$time.zone_source
-const _HOST:bool=_SOURCE =? 'host'
+_SOURCE=():>string|none=>$time.zone_source
+_HOST=():>bool=>_SOURCE =? 'host'
 _host_rules:array<uint8>=[]
 _host_zones:array<int64>=[]
 _host_records:array<int64>=[]

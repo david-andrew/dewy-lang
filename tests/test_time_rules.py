@@ -51,11 +51,11 @@ def test_the_pack_is_checked(compiler, tmp_path):
     assert 'cannot read' in ran.stderr
 
 
-def test_rules_are_the_main_files_to_say(compiler, tmp_path):
+def test_imported_header_does_not_select_the_programs_rules(compiler, tmp_path):
     (tmp_path / 'other.dewy').write_text("$time.rules = 'x.bin'\n\nshown = () => 1\n")
     ran = run(compiler, tmp_path, 'import p"other.dewy" as other\nprintl(other.shown)\n')
-    assert ran.returncode != 0
-    assert 'top of the entry file' in ran.stderr
+    assert ran.returncode == 0, ran.stderr
+    assert ran.stdout == '1\n'
 
 
 def test_zoned_accessors(compiler, tmp_path):

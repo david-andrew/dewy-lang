@@ -21,6 +21,19 @@ struct __fj_Job:
     next: int
     prev: int
 
+struct __fj_SettingsJob:
+    fn: int
+    env: int
+    lo: int
+    hi: int
+    out: int
+    serial: int
+    done: int
+    promoted: int
+    next: int
+    prev: int
+    settings: *__SettingsFrame
+
 when TARGET == "windows":
     @lib("kernelbase.dll")
     extern WaitOnAddress = (p: *u8, compare: *u8, size: int, ms: u32) -> i32
@@ -194,10 +207,14 @@ __fj_link = (j: *int):
 # activation cannot leave its join until every descendant has finished.
 @noinline
 __fj_execute = (j: *int):
+    when __setting_read("__runtime_settings"):
+        previous_settings = __settings_current()
+        __settings_install(j[10] as *__SettingsFrame)
     promoted = j[7] != 0
     if promoted: __fj_work(j, j[2], j[3])
     else: __call_raw(j[5] as *u8, null, j as *u8)
 
+    when __setting_read("__runtime_settings"): __settings_install(previous_settings)
     if promoted:
         # Last access to the stack job. Signal uses only pool storage: the
         # owner can return immediately after observing this release.
@@ -243,7 +260,10 @@ __fj_range_invoke = (j: *int):
 # a wide scalar join can use every worker, not just one worker for its tail.
 @noinline
 __fj_work = (parent: *int, lo: int, hi: int):
-    job = __fj_Job(parent[0], parent[1], lo, hi, parent[4], parent[5], 0, 0, 0, 0)
+    when __setting_read("__runtime_settings"):
+        job = __fj_SettingsJob(parent[0], parent[1], lo, hi, parent[4], parent[5], 0, 0, 0, 0, parent[10] as *__SettingsFrame)
+    else:
+        job = __fj_Job(parent[0], parent[1], lo, hi, parent[4], parent[5], 0, 0, 0, 0)
     j = (&job) as *int
     if hi - lo <= 1:
         __call_raw(j[0] as *u8, null, j as *u8)
@@ -256,7 +276,10 @@ __fj_work = (parent: *int, lo: int, hi: int):
 
 __fj_range = (fn: *u8, env: *u8, lo: int, hi: int):
     entry = ((&__fj_range_body) as *int)[0]
-    job = __fj_Job(entry, env as int, lo, hi, fn as int, entry, 0, 0, 0, 0)
+    when __setting_read("__runtime_settings"):
+        job = __fj_SettingsJob(entry, env as int, lo, hi, fn as int, entry, 0, 0, 0, 0, __settings_current())
+    else:
+        job = __fj_Job(entry, env as int, lo, hi, fn as int, entry, 0, 0, 0, 0)
     __fj_work((&job) as *int, lo, hi)
 
 @cabi
@@ -369,6 +392,8 @@ __fj_scalar = (j: *int, fn: *u8, env: *u8, first: int, count: int, out: *u8, ser
     j[3] = first + count
     j[4] = (out as int) - (first + 1) * 8
     j[5] = serial as int
+    when __setting_read("__runtime_settings"):
+        j[10] = __settings_current() as int
     __fj_link(j)
 
 

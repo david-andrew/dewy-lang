@@ -1,3 +1,4 @@
+use 'directives.jo'
 use 'lower_closures.dewy'
 use 'lower_storage.dewy'
 use 'lower_analysis.dewy'
@@ -54,7 +55,7 @@ parallel_region = (n0: int) -> ParallelRegion:
         first = nodes[a].ival
         last = nodes[b].ival
         # Bound arithmetic before subtraction: no overflow in compile-time shape.
-        if first < -1048576 or first > 1048576 or last < first or last > first + 8: return ParallelRegion()
+        if first < -888576 or first > 888576 or last < first or last > first + 8: return ParallelRegion()
         count = last - first + nodes[inclusive].ival
     else: return ParallelRegion()
     if count < 1 or count > 8: return ParallelRegion()
@@ -160,7 +161,9 @@ parallel_scalar_decl = (s: int, l: int) -> bool:
     if not target_wasm and not parallel_serial and region.count > 1:
         iff(e_call(rt("__fj_split"), [], VI))
         root = e_call(rt("__fj_enter"), [], VI)
-        job = e_slot(new_slot(80, 8))
+        job_size = 80
+        if dir_runtime_settings: job_size = 88
+        job = e_slot(new_slot(job_size, 8))
         output = e_slot(new_slot(region.count * 8, 8))
         e_call(rt("__fj_scalar"), [job, e_faddr(lf_helper(.parallel_job, (if split: 2 else: 0), f)), env, e_iconst(region.first), e_iconst(region.count), e_addi(output, 8), e_faddr(lf_helper(.parallel_job, (if split: 3 else: 1), f))], -1)
         first_result = e_call((if split: lf_helper(.partition, 0, f) else: lf_of_inst(f)), [env, e_iconst(region.first)], result_type)

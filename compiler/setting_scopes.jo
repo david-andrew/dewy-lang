@@ -1,0 +1,51 @@
+use 'diagnostic_exit.dewy'
+use 'ast.jo'
+use 'checks_builders.dewy'
+use 'directives.jo'
+use 'settings.jo'
+use 'util.jo'
+
+# Demand-driven desugaring: only scopes that write a runtime policy get frames.
+# A normal deferred cleanup restores the caller on return, break and or_throw.
+dw_setting_scope = (name: str, value: int, at: int, body: int):
+    kind = -1
+    if name == "program.max_cores": kind = 0
+    else if name == "time.zone": kind = 1
+    else if name == "time.gap": kind = 2
+    else if name == "time.fold": kind = 3
+    else if name == "time.zone_source": kind = 4
+    else if name == "time.rules": kind = 5
+    # Resource permits and dynamic rule packs are gated in dir_program_prepare.
+    if kind == 0 or kind == 4 or kind == 5: return
+    if kind == 1 and value < 2: fatal(at, "computed zone settings are not yet supported; choose between functions with literal `$time.zone` settings in main")
+    fast = name == "fast_math" and value < -1
+    if kind < 0 and not fast: return
+    expression = 0
+    if value < -1: expression = -value - 2
+    else if kind == 0: expression = bc_int(to_int(name_of(value - 2)) ?? 1, at)
+    else: expression = bc_str(name_of(value - 2), at)
+    before: int[]
+    if value < -1:
+        value_name = "$setting_value{at}"
+        value_at = nodes[expression].pos
+        before.push(bc_let(value_name, expression, value_at))
+        expression = bc_ident(value_name, value_at)
+    if fast: before.push(bc_stmt(bc_call("__settings_fast_math", [expression], at), at))
+    else:
+        dir_runtime_settings = true
+        if kind > 0: dir_runtime_policies[intern(name)] = true
+        frame = "$setting_frame{at}"
+        entry = files[pos_file(at)].path == settings_path
+        call = 0
+        if kind == 0: call = bc_call("__settings_enter_cores", [expression, bc_bool(entry, at)], at)
+        else if kind == 1: call = bc_call("__settings_enter_zone", [expression], at)
+        else if kind == 2: call = bc_call("__settings_enter_gap", [expression], at)
+        else if kind == 3: call = bc_call("__settings_enter_fold", [expression], at)
+        else if kind == 4: call = bc_call("__settings_enter_source", [expression], at)
+        else: call = bc_call("__settings_enter_policy", [bc_int(kind, at), expression], at)
+        before.push(bc_let(frame, call, at))
+        cleanup = mk(.defer_, at)
+        nodes[cleanup].a = i32(bc_stmt(bc_call("__settings_leave", [bc_ident(frame, at)], at), at))
+        before.push(cleanup)
+    loop s in kids(body): before.push(s)
+    set_list(body, before)

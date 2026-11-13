@@ -18,8 +18,9 @@ total=(xs:array<float64>):>float64=>{
 }
 main=()=>{
     printl"{half(3.0)} {ratio(1.0 4.0)} {root(9.0)} {total([1.0 2.5])}"
-    let loose=$finite_floats=false
-    {
+    let loose={
+        $finite_floats=false
+        
         let zero:float64=0.0
         zero/zero
     }

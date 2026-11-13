@@ -68,7 +68,7 @@ MEMBERS = {
                  '    let held = @(m.lock())\n    concurrent {\n        let a = spawn work(21)\n    }\n    held += 1\n}\n',
                  "main.dewy:7:5: error: this joins its tasks while holding 'm' (since line 6), and no certificate covers it (`$no_deadlocks`)"),
     # $assume_local_asserts=false: a `$runtime_assert` makes its own module's callers `panics`
-    'local_assert': ('$no_hidden_costs=false\nchecked = (x:int64):>int64 => {\n    $runtime_assert x >? 0\n    x\n}\nrelay = (x:int64):>(int64 | OutOfMemory) & no blocks => checked(x)\n$bulletproof=false\nmain = () => {\n    printl(relay(3) or_throw)\n}\n',
+    'local_assert': ('checked = (x:int64):>int64 => {\n    $no_hidden_costs=false\n    $runtime_assert x >? 0\n    x\n}\nrelay = (x:int64):>(int64 | OutOfMemory) & no blocks => checked(x)\nmain = () => {\n    $bulletproof=false\n    printl(relay(3) or_throw)\n}\n',
                      'main.dewy:8:57: error: calling `checked` may panic (checked -> __eaf_checked: `$runtime_assert` at main.dewy:5:5)'),
 }
 
@@ -99,27 +99,27 @@ def test_confined_paths(compiler, tmp_path):
 def test_opt_out_and_conflict(compiler, tmp_path):
     source = '''$bulletproof
 
-$bulletproof=false
-$runtime_checks
 pick = (xs:array<int64> i:int64):>int64 => {
+    $bulletproof=false
+    $runtime_checks
     xs[i]
 }
-$bulletproof=false
-$runtime_checks
 main = () => {
+    $bulletproof=false
+    $runtime_checks
     printl(pick([1 2] 1) or_throw)
 }
 '''
     result = run(compiler, tmp_path, source, 'run')
     assert result.returncode == 0 and result.stdout == '2\n', result.stdout + result.stderr
-    conflict = run(compiler, tmp_path, source.replace('$bulletproof=false\n$runtime_checks\n', '$runtime_checks\n'))
-    assert ('main.dewy:3:1: error: `$runtime_checks` is not allowed inside `$bulletproof`, which sets `$runtime_checks=false`'
+    conflict = run(compiler, tmp_path, source.replace('    $bulletproof=false\n    $runtime_checks\n', '    $runtime_checks\n'))
+    assert ('main.dewy:4:5: error: `$runtime_checks` is not allowed inside `$bulletproof`, which sets `$runtime_checks=false`'
             in conflict.stderr), conflict.stderr
 
 
 def test_module_policy_needs_a_module(compiler, tmp_path):
-    result = run(compiler, tmp_path, '$bulletproof\nmain = () => {\n    printl(1)\n}\n')
-    assert result.returncode != 0 and ('main.dewy:1:1: error: `$bulletproof` includes `$explicit_allocation_failure`, '
+    result = run(compiler, tmp_path, 'main = () => {\n    $bulletproof\n    printl(1)\n}\n')
+    assert result.returncode != 0 and ('main.dewy:2:5: error: `$bulletproof` includes `$explicit_allocation_failure`, '
                                        'a module policy: put it at the top of a module') in result.stderr, result.stderr
 
 
@@ -132,8 +132,8 @@ def test_nested_bundles_resolve_in_any_order(compiler, tmp_path):
 $inner = {
     $explicit_copies
 }
-$outer
 pick = (xs:array<int64> i:int64):>int64 => {
+    $outer
     if i >=? 0 and i <? xs.length return xs[i]
     0
 }

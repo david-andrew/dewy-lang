@@ -21,8 +21,10 @@ An index, a nonzero divisor or a narrowing that the compiler cannot prove is an 
 
 <!-- dewy-example: {"mode": "reject", "diagnostic": "cannot prove index is in bounds"} -->
 ```dewy
-$runtime_checks = false
-at = (xs:array<int64> i:int64):>int64 => xs[i]
+at = (xs:array<int64> i:int64):>int64 => {
+    $runtime_checks = false
+    xs[i]
+}
 ```
 
 The fix is more facts (a guard such as `if 0 <=? i and i <? xs.length`, or a refined parameter) or a value (`xs.get(i)`), not a hidden check.
@@ -81,8 +83,10 @@ A module, function or block can ask for the strict lane with one line. It turns 
 
 <!-- dewy-example: {"mode": "reject", "diagnostic": "cannot prove index is in bounds"} -->
 ```dewy
-$no_hidden_costs
-at = (xs:array<int64> i:int64):>int64 => xs[i]
+at = (xs:array<int64> i:int64):>int64 => {
+    $no_hidden_costs
+    xs[i]
+}
 ```
 
 Code that needs more opts out with `$no_hidden_costs = false` in its body, or declares a row of its own. Game code never has to enter this lane.

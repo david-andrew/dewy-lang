@@ -36,8 +36,8 @@ month=(d:Date):>int64<n => n >=? 1 and n <=? 12>=>fields(d)[1]
 day=(d:Date):>int64<n => n >=? 1 and n <=? 31>=>fields(d)[2]
 # 0 for Monday to 6 for Sunday (1970-01-01 was a Thursday).
 weekday=(d:Date):>int64<n => n >=? 0 and n <=? 6>=>(((int(d._days)+3)%7).to_int64() ?? 0)
-$runtime_checks=false
 month_name=(d:Date):>string=>{
+    $runtime_checks=false
     _MONTHS[month(d)-1]
 }
 weekday_name=(d:Date):>string=>_WEEKDAYS[weekday(d)]

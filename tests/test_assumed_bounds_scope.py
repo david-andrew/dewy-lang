@@ -56,7 +56,7 @@ def test_strict_importer_of_lax_module(compiler, tmp_path):
 
 def test_sibling_function(compiler, tmp_path):
     # A function-level setting leaves the module's other functions their ceiling.
-    source = GROW + '$no_assumed_bounds\nstrict = (n:int64):>void => {\n    printl(n)\n}\ngrow(3)\nstrict(1)\n'
+    source = GROW + 'strict = (n:int64):>void => {\n    $no_assumed_bounds\n    printl(n)\n}\ngrow(3)\nstrict(1)\n'
     result = run(compiler, tmp_path, {'main.dewy': source})
     assert result.returncode == 0 and result.stdout == '3\n1\n', result.stdout + result.stderr
 
@@ -70,6 +70,6 @@ def test_function_level_setting(compiler, tmp_path):
 def test_nested_block_setting(compiler, tmp_path):
     # A block inside the function holding the setting: the push in it is refused.
     source = GROW.replace('    loop _ in [0..n) { p.push(p.length) }\n',
-                          '    if n >? 0 $no_assumed_bounds {\n        loop _ in [0..n) { p.push(p.length) }\n    }\n') + 'grow(3)\n'
+                          '    if n >? 0 {\n        $no_assumed_bounds\n        \n        loop _ in [0..n) { p.push(p.length) }\n    }\n') + 'grow(3)\n'
     result = run(compiler, tmp_path, {'main.dewy': source}, 'check')
     assert result.returncode != 0 and REFUSED in result.stderr, result.stderr

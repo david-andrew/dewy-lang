@@ -7,11 +7,15 @@ You are designing one piece of the Dewy programming language. Write the design, 
 Dewy has no environment variables or command-line flags for settings: settings are metatags in source (`$program.max_cores = 8`, `$program.max_memory = 512MiB`, `$runtime_checks`, `$time.zone = '...'`, `$parallel.max_concurrent = 4`, and so on). David decided (decisions.md, batch 5) that per-environment settings are written idiomatically either as a separate entry file per environment, or as **one entry file with a function per environment that sets the tags, where `main` calls the right one**:
 
 ```dewy
-$program.max_cores = 2
-laptop = () => run(...)
+laptop = () => {
+    $program.max_cores = 2
+    run(...)
+}
 
-$program.max_cores = 8
-server = () => run(...)
+server = () => {
+    $program.max_cores = 8
+    run(...)
+}
 
 main = (argv:array<string>) => {
     if (argv.get(0) ?? "laptop") =? "laptop" laptop() else server()

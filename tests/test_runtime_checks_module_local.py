@@ -7,8 +7,8 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 
-HELPER = '''$runtime_checks
-pick=(xs:array<int64> i:int64):>int64=>{
+HELPER = '''pick=(xs:array<int64> i:int64):>int64=>{
+    $runtime_checks
     return xs[i]
 }
 twice=(xs:array<int64> i:int64):>int64=>(pick(xs i)%1000)*2
@@ -42,7 +42,7 @@ def test_other_module(compiler, tmp_path):
 
 
 def test_other_module_opted_in(compiler, tmp_path):
-    files = {'helper.dewy': HELPER, 'main.dewy': 'from p"helper.dewy" import twice\n$runtime_checks\nmain=():>void=>{\n    printl(twice([1 2 3] 1))\n}\n'}
+    files = {'helper.dewy': HELPER, 'main.dewy': 'from p"helper.dewy" import twice\nmain=():>void=>{\n    $runtime_checks\n    printl(twice([1 2 3] 1))\n}\n'}
     result = run(compiler, tmp_path, files, 'run')
     assert result.returncode == 0 and result.stdout == '4\n', result.stdout + result.stderr
 
@@ -81,19 +81,19 @@ def test_mixed_local_assumptions(compiler, tmp_path, reverse):
               'if j >=? 0 {\n$assume_local_asserts=false\nprintl(xs[j])\n}']
     if reverse:
         blocks.reverse()
-    source = '$runtime_checks\npick=(xs:array<int64> i:int64 j:int64):>void=>{\n' + '\n'.join(blocks) + '\n}\nmain=()=>pick([1] 0 0)\n'
+    source = 'pick=(xs:array<int64> i:int64 j:int64):>void=>{\n    $runtime_checks\n' + '\n'.join(blocks) + '\n}\nmain=()=>pick([1] 0 0)\n'
     result = run(compiler, tmp_path, {'main.dewy': source}, 'check')
     assert result.returncode == 1 and 'calling `pick` may panic' in result.stderr, result.stdout + result.stderr
 
 
-DEPENDENCY = '''$runtime_checks
-dependency=(xs:array<int64> i:int64):>int64=>{
+DEPENDENCY = '''dependency=(xs:array<int64> i:int64):>int64=>{
+    $runtime_checks
     return xs[i]
 }
 '''
 ACCEPTED = '''from p"dependency.dewy" import dependency
-$runtime_checks
 pick=(xs:array<int64> i:int64):>int64=>{
+    $runtime_checks
     return dependency(xs i)
 }
 relay=(xs:array<int64> i:int64):>int64=>pick(xs i)
@@ -136,8 +136,8 @@ def test_accepted_dependency_still_violates_effect_row(compiler, tmp_path):
 
 def test_recursive_local_handling(compiler, tmp_path):
     source = '''from p"dependency.dewy" import dependency
-$runtime_checks
 pick=(xs:array<int64> i:int64 again:bool):>int64=>{
+    $runtime_checks
     if again {return relay(xs i false)}
     return dependency(xs i)
 }
@@ -152,14 +152,14 @@ main=()=>printl(relay([4 7] 1 true))
 def test_recursive_mixed_local_handling(compiler, tmp_path, strict):
     # A recursive component needs distinct answers: a refuses the local
     # assumption, but b explicitly accepts a's panics at its call.
-    source = '''$runtime_checks
-$assume_local_asserts=false
-a=(xs:array<int64> i:int64 again:bool):>int64=>{
+    source = '''a=(xs:array<int64> i:int64 again:bool):>int64=>{
+    $runtime_checks
+    $assume_local_asserts=false
     if again {return b(xs i false)}
     return xs[i]
 }
-$runtime_checks
 b=(xs:array<int64> i:int64 again:bool):>int64=>{
+    $runtime_checks
     return a(xs i again)
 }
 '''

@@ -1,0 +1,43 @@
+# Compiler-generated setting scopes use ordinary checked contracts.
+__settings_enter_cores=(cores:int<(>=? 1)> entry:bool):>ptr<__SettingsFrame>=>__settings_cores_unchecked(int64(min(cores int(__settings_machine_cores()))) entry)
+_SettingGap:type='reject'|'skip'|'preserve_displacement'|'next'
+_SettingFold:type='reject'|'earlier'|'later'
+__settings_enter_gap=(value:_SettingGap):>ptr<__SettingsFrame>=>__settings_enter_policy(2 string(value))
+__settings_enter_fold=(value:_SettingFold):>ptr<__SettingsFrame>=>__settings_enter_policy(3 string(value))
+__settings_gap_read=(fallback:_SettingGap|none):>_SettingGap|none=>{
+    let text:string|none=none
+    if fallback isnt? none {text=string(fallback)}
+    let value=__settings_policy_read(2 text)
+    if value =? 'reject' {return 'reject'}
+    if value =? 'skip' {return 'skip'}
+    if value =? 'preserve_displacement' {return 'preserve_displacement'}
+    if value =? 'next' {return 'next'}
+    none
+}
+__settings_fold_read=(fallback:_SettingFold|none):>_SettingFold|none=>{
+    let text:string|none=none
+    if fallback isnt? none {text=string(fallback)}
+    let value=__settings_policy_read(3 text)
+    if value =? 'reject' {return 'reject'}
+    if value =? 'earlier' {return 'earlier'}
+    if value =? 'later' {return 'later'}
+    none
+}
+
+_SettingGapOne:type='reject'|'preserve_displacement'|'next'
+# A single-valued API keeps its Gap arm; only an explicit skip overload adds none.
+__settings_gap_one_read=(fallback:_SettingGapOne|none):>_SettingGapOne|none=>{
+    let text:string|none=none
+    if fallback isnt? none {text=string(fallback)}
+    let value=__settings_policy_read(2 text)
+    if value =? 'skip' {
+        printl("error: inherited $time.gap='skip' is not yet supported by a single-result time call; pass gap='skip' explicitly" file=stderr)
+        __exit_program(1)
+    }
+    if value =? 'reject' {return 'reject'}
+    if value =? 'preserve_displacement' {return 'preserve_displacement'}
+    if value =? 'next' {return 'next'}
+    none
+}
+
+__settings_enter_source=(value:'host'):>ptr<__SettingsFrame>=>__settings_enter_policy(4 string(value))

@@ -5,16 +5,16 @@ from tests.support import compiler  # noqa: F401
 
 
 @pytest.mark.parametrize('body,ok', [
-    ('$runtime_checks\nf=(xs:array<int64> i:int64):>int64=>{\nreturn xs[i]}\nprintl(f([1] 2))', False),
-    ('$runtime_checks\nf=():>int64=>{\nlet xs:array<int64>=[1 2]\nreturn xs[1]}\nprintl(f())', True),
-    ('$runtime_checks\nf=(x:int64):>int64=>{\nreturn 10//x}\nprintl(f(0))', False),
-    ('$runtime_checks\nf=(x:int64):>int8=>{\nreturn int8(x)}\nprintl(f(1000))', False),
-    ('$runtime_checks\nf=(x:int64):>int64=>{\nif x <? 0 or x >? 100 return 0; return x+1}\nprintl(f(4))', True),
-    ('$runtime_checks\nf=(x:int64):>int64=>{\nreturn x+1}\nprintl(f(4))', False),
-    ('$runtime_checks\nf=(x:int64):>int8=>{\nif x <? 0 or x >? 100 return 0; return int8(x)}\nprintl(f(4))', True),
-    ('$runtime_checks\nf=(x:int64 y:float64):>int64=>{\nif x <? 0 or x >? 100 return 0; let z:int64=x+1; printl(z); return int64(y)}\nprintl(f(4 1.0))', False),
-    ('$runtime_checks\nf=():>int64=>{\nlet a:array<int64>=[1]\n$assert a[0]=?1\nreturn a[0]}\nprintl(f())', True),
-    ('$runtime_checks\n\n$runtime_checks=false\nf=(xs:array<int64> i:int64):>int64=>{\nreturn xs[i]}\nprintl(f([1] 2))', False),
+    ('f=(xs:array<int64> i:int64):>int64=>{\n    $runtime_checks\nreturn xs[i]}\nprintl(f([1] 2))', False),
+    ('f=():>int64=>{\n    $runtime_checks\nlet xs:array<int64>=[1 2]\nreturn xs[1]}\nprintl(f())', True),
+    ('f=(x:int64):>int64=>{\n    $runtime_checks\nreturn 10//x}\nprintl(f(0))', False),
+    ('f=(x:int64):>int8=>{\n    $runtime_checks\nreturn int8(x)}\nprintl(f(1000))', False),
+    ('f=(x:int64):>int64=>{\n    $runtime_checks\nif x <? 0 or x >? 100 return 0; return x+1}\nprintl(f(4))', True),
+    ('f=(x:int64):>int64=>{\n    $runtime_checks\nreturn x+1}\nprintl(f(4))', False),
+    ('f=(x:int64):>int8=>{\n    $runtime_checks\nif x <? 0 or x >? 100 return 0; return int8(x)}\nprintl(f(4))', True),
+    ('f=(x:int64 y:float64):>int64=>{\n    $runtime_checks\nif x <? 0 or x >? 100 return 0; let z:int64=x+1; printl(z); return int64(y)}\nprintl(f(4 1.0))', False),
+    ('f=():>int64=>{\n    $runtime_checks\nlet a:array<int64>=[1]\n$assert a[0]=?1\nreturn a[0]}\nprintl(f())', True),
+    ('$runtime_checks\n\nf=(xs:array<int64> i:int64):>int64=>{\n    $runtime_checks=false\nreturn xs[i]}\nprintl(f([1] 2))', False),
 ])
 def test_deferred_body_demand(compiler, tmp_path, body, ok):
     source = tmp_path / 'demand.dewy'

@@ -172,6 +172,7 @@ EXTRA['check.jo']['Module'] = '''struct Module:
     names: {int: int}
     inits: int[]
 '''
+EXTRA['directives.jo'].update({'dir_code_any': 'dir_code_any = false', 'dir_find': 'dir_find = (setting: int, p: int) -> int: -1', 'dir_name_runtime': 'dir_name_runtime = 1', 'dir_name_prototype': 'dir_name_prototype = 2'})
 EXTRA['dewy_methods.jo']['dewy_methods'] = 'dewy_methods: int[]'
 EXTRA['poly_closure.jo']['poly_families'] = 'poly_families: int[]'
 EXTRA['check.jo'].update({

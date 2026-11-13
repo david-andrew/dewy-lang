@@ -13,8 +13,8 @@ distance_squared = (a:Point b:Point):>float64 =>
 reading = (station:Point beacon:Point):>Reading =>
     Reading[station distance_squared(station beacon)]
 
-$runtime_checks  # matrix shape and indexing of externally supplied readings
 fit = (samples:array<Reading>):>Estimate | Singular => {
+    $runtime_checks
     let origin = samples[0]
     let second = samples[1]
     let third = samples[2]

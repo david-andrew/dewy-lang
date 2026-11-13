@@ -67,67 +67,9 @@ const NF_VOID:int64=4194304
 const NF_WRITTEN_VOID:int64=NF_INDEX_CAPTURED
 const TUPLE_VALUES:int64=7
 
-# D4 Q19, provisional: a blank line ends the initial module tag block.
-# Look through consecutive settings only. The file driver owns header eligibility;
-# this is the sole whitespace rule distinguishing a header from a prefix.
-rd_dc_module_header=(@reader_ctx:ParserContext):>bool=>$unsafe {
-    let at=reader_ctx.at
-    loop true {
-        if at >=? reader_ctx.tokens.length {return false}
-        let previous=reader_ctx.tokens[at - 1]
-        let next=reader_ctx.tokens[at]
-        let blank=false
-        let newline=false
-        let gap=reader_ctx.stores.host[0].bytes_slice(reader_ctx.source previous.stop next.start)
-        loop b in (gap as array<uint8>) {
-            if b =? 10 {
-                if newline {blank=true}
-                newline=true
-            } else if b not=? 32 and b not=? 9 and b not=? 13 {newline=false}
-        }
-        if blank or next.kind =? 'eof' {return true}
-        if next.kind not=? 'metatag' {return false}
-        let name=rd_dn_payload(@reader_ctx next)
-        if rd_dc_valued_place(@reader_ctx at) {at += 5; continue}
-        if dn_directive_form(name) not=? 0 or not reader_ctx.stores.host[0].dw_dir_name(name) {return false}
-        at += 1
-        if reader_ctx.tokens[at].symbol =? 'assign' {at += 2}
-    }
-    false
-}
 
 # A boolean or valued setting immediately before one body/statement/block.
 # Its range begins at the construct, including a function's generated checks.
-rd_dc_prefixed_body=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe {
-    let tag=reader_ctx.tokens[reader_ctx.at]
-    let name=rd_dn_payload(@reader_ctx tag)
-    let value:int64=0
-    if rd_dc_valued_place(@reader_ctx reader_ctx.at) {
-        name="{name}.{rd_dn_payload(@reader_ctx reader_ctx.tokens[reader_ctx.at + 2])}"
-        value=rd_dc_valued_value(@reader_ctx @reader_nodes name)
-        reader_ctx.at += 5
-    } else {
-        if dn_directive_form(name) not=? 0 or not reader_ctx.stores.host[0].dw_dir_name(name) {return 0}
-        value=rd_dc_block_setting(@reader_ctx)
-        if value <? 0 {return 0}
-    }
-    let start=reader_ctx.tokens[reader_ctx.at]
-    if start.symbol =? 'rbrace' or start.symbol =? 'rparen' or start.symbol =? 'rbrack' or start.kind =? 'eof' {
-        reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file tag.start) "`${name}` needs a following construct; move it before the construct: `${name}` then `\{ ... }`");
-    }
-    let depth=reader_ctx.depth
-    reader_ctx.depth += 1
-    if reader_ctx.depth + reader_ctx.reader.dn_depth >? 256 {
-        reader_ctx.depth=depth
-        return rd_dc_too_deep(@reader_ctx)
-    }
-    let body=rd_dc_body(@reader_ctx @reader_nodes)
-    reader_ctx.depth=depth
-    if body =? 0 {return 0}
-    rd_dc_scope_undoable(@reader_ctx)
-    reader_ctx.stores.host[0].dw_dir_apply(name value rd_mkpos(reader_ctx.file tag.start) reader_nodes[body].pos rd_mkpos(reader_ctx.file reader_ctx.tokens[reader_ctx.at - 1].stop - 1) false)
-    body
-}
 
 
 rd_add_flag=(@reader_nodes:array<Node> n:int64 f:int64):>void=>$unsafe {
@@ -943,9 +885,8 @@ rd_dc_atom=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
         return rd_dc_loop_value(@reader_ctx @reader_nodes pos)
     }
     # `$unsafe expression`: the boundary holds over the expression (dw_unsafe_scope)
-    if token.kind =? 'metatag' and (rd_dc_valued_place(@reader_ctx reader_ctx.at - 1) or (dn_directive_form(rd_dn_payload(@reader_ctx token)) =? 0 and reader_ctx.stores.host[0].dw_dir_name(rd_dn_payload(@reader_ctx token)))) {
-        reader_ctx.at -= 1
-        return rd_dc_prefixed_body(@reader_ctx @reader_nodes)
+    if token.kind =? 'metatag' and rd_dn_payload(@reader_ctx token) not=? "unsafe" and (rd_dc_valued_place(@reader_ctx reader_ctx.at - 1) or (dn_directive_form(rd_dn_payload(@reader_ctx token)) =? 0 and reader_ctx.stores.host[0].dw_dir_name(rd_dn_payload(@reader_ctx token)))) {
+        reader_ctx.stores.host[0].fatal(pos "a setting belongs at the top of its scope: put it inside the function or block, or at the top of the file")
     }
     if (token.kind =? 'metatag') {
         let tagged:int64=rd_dc_metatag_atom(@reader_ctx @reader_nodes token pos)
@@ -1540,9 +1481,6 @@ rd_dc_block_tail_kind=(@reader_ctx:ParserContext @reader_nodes:array<Node> block
 # functions participate in the enclosing construction transaction: an unknown
 # head, label, declaration or expression is left unread (dc_unread).
 rd_dc_body=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe {
-    if reader_ctx.tokens[reader_ctx.at].kind =? 'metatag' and (rd_dc_valued_place(@reader_ctx reader_ctx.at) or (dn_directive_form(rd_dn_payload(@reader_ctx reader_ctx.tokens[reader_ctx.at])) =? 0 and reader_ctx.stores.host[0].dw_dir_name(rd_dn_payload(@reader_ctx reader_ctx.tokens[reader_ctx.at])))) {
-        return rd_dc_prefixed_body(@reader_ctx @reader_nodes)
-    }
     # (`=> $unsafe { ... }`: the boundary covers the block, which stays the body itself, dw_block)
     if (((reader_ctx.tokens[reader_ctx.at].kind =? 'metatag') and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'lbrace')) and rd_dc_unsafe_at(@reader_ctx reader_ctx.at)) {
         let opening:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
@@ -1566,19 +1504,49 @@ rd_dc_body=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
 rd_dc_body_metatag=(@reader_ctx:ParserContext @reader_nodes:array<Node> @statements:array<int64>):>int64=>$unsafe {
     let tag:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
     let name:string=rd_dn_payload(@reader_ctx tag)
+    if (name =? "time" or name =? "dewy") and not rd_dc_valued_place(@reader_ctx reader_ctx.at) {return 0}
     # (`$include_bytes(p"asset") as name`: a statement, dc_include_binding)
     if ((dn_directive_form(name) not=? 0) or (name =? "include_bytes")) {
         return 0
     }
-    if rd_dc_valued_place(@reader_ctx reader_ctx.at) or reader_ctx.stores.host[0].dw_dir_name(name) {
-        let body=rd_dc_prefixed_body(@reader_ctx @reader_nodes)
-        if body =? 0 {return -1}
-        let offset=rd_pos_off(reader_nodes[body].pos)
-        if (reader_ctx.source as array<uint8>)[offset] =? 123 {
-            statements.push(rd_bc_stmt(@reader_nodes body reader_nodes[body].pos))
-        } else {
-            loop statement in node_kids(@reader_nodes @reader_ctx.stores.lists[0] body) {statements.push(statement)}
+    if name =? "audited_wait" {reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file tag.start) "`$audited_wait` marks one audited adapter: move it immediately before this function's declaration")}
+    if (rd_dc_valued_place(@reader_ctx reader_ctx.at) or reader_ctx.stores.host[0].dw_dir_name(name)) and statements.length >? 0 {
+        reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file tag.start) "a setting belongs at the top of its scope: move it before the first statement, inside this function or block")
+    }
+    if rd_dc_valued_place(@reader_ctx reader_ctx.at) {
+        let member:string=rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)])
+        let full="{name}.{member}"
+        reader_ctx.at += 4
+        let expression=rd_dc_expr(@reader_ctx @reader_nodes 0)
+        if expression =? 0 {return -1}
+        let value=-expression-2
+        if reader_nodes[expression].kind =? 'str_lit' and full not=? "program.max_cores" {value=int64(reader_nodes[expression].sval)+2}
+        if full =? "program.max_cores" and reader_nodes[expression].kind =? 'int_lit' {
+            if reader_nodes[expression].ival <? 1 {reader_ctx.stores.host[0].fatal(reader_nodes[expression].pos "`$program.max_cores` must be at least 1")}
+            value=reader_ctx.stores.host[0].intern("{reader_nodes[expression].ival}")+2
         }
+        reader_ctx.reader.dc_settings.push(full)
+        reader_ctx.reader.dc_setting_values.push(value)
+        reader_ctx.reader.dc_setting_at.push(rd_mkpos(reader_ctx.file tag.start))
+        return 1
+    }
+    if name =? "fast_math" and reader_ctx.tokens[reader_ctx.at+1].symbol =? 'assign' and reader_ctx.tokens[reader_ctx.at+2].kind not=? 'boolean' {
+        reader_ctx.at += 2
+        let expression=rd_dc_expr(@reader_ctx @reader_nodes 0)
+        if expression =? 0 {return -1}
+        reader_ctx.reader.dc_settings.push(name)
+        reader_ctx.reader.dc_setting_values.push(-expression-2)
+        reader_ctx.reader.dc_setting_at.push(rd_mkpos(reader_ctx.file tag.start))
+        return 1
+    }
+    if reader_ctx.stores.host[0].dw_dir_name(name) {
+        let value:int64=rd_dc_block_setting(@reader_ctx)
+        if (value <? 0) {
+            return (-1)
+        }
+        reader_ctx.reader.dc_settings.push(name);
+        reader_ctx.reader.dc_setting_values.push(value);
+        reader_ctx.reader.dc_setting_at.push(rd_mkpos(reader_ctx.file tag.start));
         return 1
     }
     # (`$build.mode = ...`: a mistake in a body, dc_statement's dc_body_setting)
@@ -1617,6 +1585,7 @@ rd_dc_body_read=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$u
     reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + int64<overflow='wrap'>((if braced int64(1) else int64(0))))
     let n:int64=node_mk(@reader_nodes 'block' pos)
     let statements:array<int64>=[]
+    let settings:int64=reader_ctx.reader.dc_settings.length
     loop true {
         if (braced and rd_dn_accept(@reader_ctx 'rbrace')) {
             break
@@ -1740,6 +1709,21 @@ rd_dc_body_read=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$u
         }
     }
     node_set_list(@reader_nodes @reader_ctx.stores.lists[0] n statements);
+    if (reader_ctx.reader.dc_settings.length >? settings) {
+        # (through its closing brace: its last syntax node is the last position inside, dw_dir_last)
+        let end_:int64=rd_mkpos(reader_ctx.file reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 1)].start)
+        loop i in [settings..reader_ctx.reader.dc_settings.length) {
+            rd_dc_scope_undoable(@reader_ctx);
+            reader_ctx.stores.host[0].dw_dir_apply(reader_ctx.reader.dc_settings[i] reader_ctx.reader.dc_setting_values[i] reader_ctx.reader.dc_setting_at[i] pos end_ false);
+        }
+        loop offset in [0..reader_ctx.reader.dc_settings.length-settings) {
+            let i=reader_ctx.reader.dc_settings.length-1-offset
+            reader_ctx.stores.host[0].dw_setting_scope(reader_ctx.reader.dc_settings[i] reader_ctx.reader.dc_setting_values[i] reader_ctx.reader.dc_setting_at[i] n)
+        }
+        reader_ctx.reader.dc_settings.truncate(settings);
+        reader_ctx.reader.dc_setting_values.truncate(settings);
+        reader_ctx.reader.dc_setting_at.truncate(settings);
+    }
     if braced {
         reader_ctx.depth = (int64<overflow='wrap'>(reader_ctx.depth) - 1)
     }
@@ -11738,6 +11722,14 @@ rd_dn_statement_read=(@reader_ctx:ParserContext @reader_nodes:array<Node> top:bo
     if top and reader_ctx.tokens[reader_ctx.at].kind =? 'metatag' {
         let tag=reader_ctx.at
         let id=reader_ctx.stores.host[0].intern(rd_dn_payload(@reader_ctx reader_ctx.tokens[tag]))
+        if id =? reader_ctx.stores.host[0].intern("audited_wait") {
+            reader_ctx.at += 1
+            let read=rd_dn_statement_read(@reader_ctx @reader_nodes true)
+            if read <=? 0 or reader_nodes[read].kind not=? 'fn_' or reader_nodes[read].b =? 0 {reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[tag].start) "`$audited_wait` marks one audited adapter: put it immediately before its function declaration")}
+            rd_dc_scope_undoable(@reader_ctx)
+            reader_ctx.stores.host[0].dw_dir_apply("audited_wait" 1 rd_mkpos(reader_ctx.file reader_ctx.tokens[tag].start) reader_nodes[read].pos rd_mkpos(reader_ctx.file reader_ctx.tokens[reader_ctx.at-1].start) false)
+            return read
+        }
         if id =? reader_ctx.stores.host[0].intern("extern") or id =? reader_ctx.stores.host[0].intern("intrinsic") {
             reader_ctx.at += 1
             if reader_ctx.tokens[reader_ctx.at].symbol =? 'lparen' {

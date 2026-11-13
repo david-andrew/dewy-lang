@@ -9,8 +9,8 @@ from tests.support import compiler
 
 
 PROGRAM = '''
-$runtime_checks
 kernel=(xs:array<int64> ys:array<int64> rounds:int64):>int64=>{
+    $runtime_checks
     let total:int64=0
     loop r in [int64(0)..rounds) {
         loop i in [int64(0)..int64(32)) {total+=(xs[i]+ys[i]) xor r}

@@ -6,7 +6,7 @@ from p"@lib/core/str.jo" import (find is_digit split starts_with to_int)
 from p"ast.jo" import (NF_GENERIC NF_INBOUNDS add_flag has_flag nodes)
 from p"check.jo" import (FK_LAMBDA decl_info decl_infos fns lib_dir modules)
 from p"program_settings.dewy" import (dir_program_prepare dir_program_setting)
-from p"directives.jo" import (dir_program_any dir_program_values dir_program_mains dir_rules_from_host DIR_DEFAULT DIR_PROTOTYPE DIR_RUNTIME DIR_STATIC DirScope DirSite dir_assumed_bounds_any dir_bundles dir_bundles_loaded dir_copies_any dir_deadlocks_any dir_entry_functions dir_entry_positions dir_find dir_floats_any dir_forced dir_mixed_files dir_module_start dir_name_assumed_bounds dir_name_audited dir_name_cancellation dir_name_confine dir_name_copies dir_name_deadlocks dir_name_local_asserts dir_name_no_inf dir_name_no_nan dir_name_prototype dir_name_row dir_name_runtime dir_name_warnings dir_obligations dir_panic_sites dir_prior_static dir_proven dir_row_scopes dir_rows_any dir_scopes dir_scopes_gen dir_sites dir_uniform_files dir_value)
+from p"directives.jo" import (dir_runtime_policies dir_runtime_settings dir_program_any dir_program_values dir_rules_from_host DIR_DEFAULT DIR_PROTOTYPE DIR_RUNTIME DIR_STATIC DirScope DirSite dir_assumed_bounds_any dir_bundles dir_bundles_loaded dir_copies_any dir_deadlocks_any dir_entry_functions dir_entry_positions dir_find dir_floats_any dir_forced dir_mixed_files dir_module_start dir_name_assumed_bounds dir_name_audited dir_name_cancellation dir_name_confine dir_name_copies dir_name_deadlocks dir_name_local_asserts dir_name_no_inf dir_name_no_nan dir_name_prototype dir_name_row dir_name_runtime dir_name_warnings dir_obligations dir_panic_sites dir_prior_static dir_proven dir_row_scopes dir_rows_any dir_scopes dir_scopes_gen dir_sites dir_uniform_files dir_value)
 from p"directive_queries.dewy" import (dir_builtin dir_policy dir_static_body)
 from p"directive_rules.dewy" import (dir_panics_demanded)
 from p"effect_contracts.dewy" import (callable_contract effect_subst)
@@ -29,8 +29,9 @@ from p"witness.jo" import (wit_measure)
 DirWord:type=int64<overflow='wrap'>
 directives_reset=():>void=>{
     dir_program_any=false
+    dir_runtime_settings=false
+    dir_runtime_policies=dict<int64 bool>()
     dir_program_values=dict<int64 int64>()
-    dir_program_mains=dict<int64 array<int64>>()
     dir_rules_from_host=false
     dir_entry_positions=dict<int64 int64>()
     dir_entry_functions=dict<int64 bool>()
@@ -241,7 +242,7 @@ dir_conflict=(i:DirWord):>void=>{
 dir_push=(s:DirScope):>void=>{
     dir_scopes.push(s)
     dir_scopes_gen += 1
-    if s.setting =? dir_name_runtime or s.setting =? dir_name_prototype {
+    if s.setting =? dir_name_runtime or s.setting =? dir_name_prototype or s.setting =? dir_name_warnings {
         dir_uniform_files.remove(pos_file(s.start));
         if s.start not=? dir_module_start(pos_file(s.start)) {dir_mixed_files[pos_file(s.start)]=true}
     }
@@ -267,7 +268,7 @@ dir_set=(name:DirWord value:DirWord start:DirWord end_:DirWord at:DirWord):>void
     let text=name_of(name)
     if text =? "realtime" {fatal(at "`$realtime` is reserved for a future bundle stronger than `$no_hidden_costs` (no blocking, a bounded stack); use `$no_hidden_costs`")}
     if dir_valued_name(text) {
-        dir_valued_check(text name_of(value - 2) start at)
+        if value >=? 2 {dir_valued_check(text name_of(value - 2) start at)} else {dir_program_any=true}
         dir_push(DirScope(start end_ name value 0 at))
         return
     }
@@ -435,9 +436,9 @@ dir_panic_fix=(p:DirWord operation:bool=false):>string=>{
     let i=dir_find(dir_name_runtime p)
     if i >=? 0 and dir_scopes[i].bundle not=? 0 {
         let b=name_of(dir_scopes[i].bundle)
-        return "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or prefix this function with `${b}=false` and `$runtime_checks`"
+        return "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or put at the top of this function's body `${b}=false` and `$runtime_checks`"
     }
-    "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` immediately before the statement, block or function"
+    "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block"
 }
 # A `$runtime_assert` at p is its module's own handling, not `panics` for the
 # module's callers, unless the scope says `$assume_local_asserts=false`
@@ -479,5 +480,5 @@ dir_row_origin=(d:DirWord):>string=>{
     let i=dir_row_scopes.get(d) ?? -1
     if i <? 0 {return ""}
     let b=name_of(dir_scopes[i].bundle)
-    "; `${b}` gives functions without a row of their own this one (opt a function out by prefixing it with `${b}=false`)"
+    "; `${b}` gives functions without a row of their own this one (opt a function out with `${b}=false` at the top of its body)"
 }

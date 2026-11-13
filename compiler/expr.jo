@@ -4929,6 +4929,50 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
     else if id == .setting_read:
         # __setting_read("time.zone"), `$time.zone`: the setting where this is read, or at the
         # call a parameter's default is filled in for; none when no scope sets it
+        setting = int(nodes[args[0]].sval)
+        if setting == intern("__runtime_settings"):
+            nodes[n] = Node(kind = .bool_lit, pos = nodes[n].pos, ival = int(dir_runtime_settings))
+            return check_expr(n, expected)
+        # An explicit constant policy in this lexical scope wins over the caller.
+        # Keep it constant for validators and plain calendar operations.
+        if cx >= 0 and dir_runtime_policies.has(setting):
+            site = nodes[n].pos
+            if setting_site != 0: site = setting_site
+            local = dir_find(setting, site)
+            if local >= 0 and dir_scopes[local].value >= 2 and dir_scopes[local].start != dir_module_start(pos_file(site)):
+                value = dir_scopes[local].value - 2
+                if setting == intern("time.zone") and value == intern("build"):
+                    host = __system_zone_name()
+                    if len(host) == 0: fatal(dir_scopes[local].at, "`$time.zone = 'build'` needs the building machine to name its zone")
+                    value = intern(host)
+                nodes[n] = Node(kind = .str_lit, pos = nodes[n].pos, sval = i32(value))
+                return check_expr(n, expected)
+        runtime_kind = -1
+        if cx >= 0 and dir_runtime_policies.has(setting):
+            if setting == intern("time.zone"): runtime_kind = 1
+            else if setting == intern("time.gap"): runtime_kind = 2
+            else if setting == intern("time.fold"): runtime_kind = 3
+            else if setting == intern("time.zone_source"): runtime_kind = 4
+            else if setting == intern("time.rules"): runtime_kind = 5
+        if runtime_kind >= 0:
+            fallback = mk(.none_lit, nodes[n].pos)
+            held = dir_program_values.get(setting) ?? dir_find(setting, nodes[n].pos)
+            if held >= 0 and dir_scopes[held].value >= 2: fallback = bc_str(name_of(dir_scopes[held].value - 2), nodes[n].pos)
+            call = bc_call("__settings_policy_read", [bc_int(runtime_kind, nodes[n].pos), fallback], nodes[n].pos)
+            policy_type = prune(expected)
+            if expected != 0 and types[policy_type].kind == .opt: policy_type = prune(int(types[policy_type].elem))
+            text_policy = expected != 0 and policy_type == T_STR
+            if runtime_kind == 2 and not text_policy:
+                reader = "__settings_gap_read"
+                if expected != 0:
+                    gap_type = prune(expected)
+                    if types[gap_type].kind == .opt: gap_type = prune(int(types[gap_type].elem))
+                    gap_set = str_set_of(gap_type)
+                    if gap_set != 0 and not str_sets[gap_set].contains("skip"): reader = "__settings_gap_one_read"
+                call = bc_call(reader, [fallback], nodes[n].pos)
+            else if runtime_kind == 3 and not text_policy: call = bc_call("__settings_fold_read", [fallback], nodes[n].pos)
+            nodes[n] = nodes[call]
+            return check_expr(n, expected)
         pos = nodes[n].pos
         scope = dir_find(int(nodes[args[0]].sval), if setting_site != 0: setting_site else: pos)
         if dir_program_setting(name_of(int(nodes[args[0]].sval))):

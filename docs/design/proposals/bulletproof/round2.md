@@ -133,8 +133,8 @@ main = () => printl(average(1.0 2.0))
 ```
 
 ```dewy
-$no_deadlocks
 main = () => {
+    $no_deadlocks
     let c = channel<int>(4)
     concurrent {
         spawn { c.send(1); c.close }    # error: this waits to send into 'c' and no certificate covers it
@@ -144,10 +144,12 @@ main = () => {
 ```
 
 ```dewy
-$no_hidden_costs
-grow = (@xs:array<int64>):>void => xs.push(1)   # error: allocation exceeds the contract
-$no_hidden_costs = false
+grow = (@xs:array<int64>):>void => {
+    $no_hidden_costs
+    xs.push(1)
+}   # error: allocation exceeds the contract
 main = () => {
+    $no_hidden_costs = false
     let v:array<int64> = []
     grow(@v)
     printl(v)
@@ -265,8 +267,8 @@ main = () => {
 | `$time.explicit_*` (17 members), `$time.strict` (all) | A one-for-one rename of `$time.require_*`: context, calendar, bounds, profile, clock_domain, clock_accuracy, clock_trust, realization, history, future_rules, location, model, extrapolation, dependence, loss, protocol, resources | Any scope |
 
 ```dewy
-$explicit_copies
 main = () => {
+    $explicit_copies
     let a:array<int64> = [1 2 3]
     let b = a                           # error: implicit costly copy of array<int64>
     b[0] = 9
@@ -305,8 +307,10 @@ main = () => printl(pick(1 2))          # error: calling `pick` may panic
 ```
 
 ```dewy
-$time.explicit_clock_accuracy
-main = () => printl(today.year)         # new error: `today` gives Date | AmbiguousToday | UnknownToday
+main = () => {
+    $time.explicit_clock_accuracy
+    printl(today.year)
+}         # new error: `today` gives Date | AmbiguousToday | UnknownToday
 ```
 
 ### Less safe
@@ -339,8 +343,10 @@ $bulletproof = {
 ```
 
 ```dewy
-$bulletproof
-main = () => printl(1)                  # error: allocation exceeds the contract
+main = () => {
+    $bulletproof
+    printl(1)
+}                  # error: allocation exceeds the contract
 ```
 
 ### Old items with no tag

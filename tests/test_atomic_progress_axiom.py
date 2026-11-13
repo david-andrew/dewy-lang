@@ -27,7 +27,7 @@ def test_atomic_parameter_progress_and_nested_optout(compiler, tmp_path):
     assert result.returncode == 0, result.stderr
     strict = check(compiler, tmp_path, '$no_assumed_bounds\n\n' + source)
     assert strict.returncode != 0 and 'may panic' in strict.stderr, strict.stderr
-    restored = check(compiler, tmp_path, '$no_assumed_bounds\n\n$no_assumed_bounds=false\nf=(counter:Atomic<int64>)=>{\ncounter.add(1)\n}\nprintl(f(atomic(0)))')
+    restored = check(compiler, tmp_path, '$no_assumed_bounds\n\nf=(counter:Atomic<int64>)=>{\n    $no_assumed_bounds=false\ncounter.add(1)\n}\nprintl(f(atomic(0)))')
     assert restored.returncode == 0, restored.stderr
 
 

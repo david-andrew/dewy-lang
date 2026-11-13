@@ -1,4 +1,4 @@
-"""Program-wide settings belong to the entry; reachable test mains must agree."""
+"""Function policies override callers locally and restore on every return."""
 import subprocess
 
 import pytest
@@ -21,26 +21,24 @@ def files(tmp_path, app, library):
 
 @pytest.mark.parametrize('flags', [(), ('--release',), ('--eager-bodies',)])
 @pytest.mark.parametrize('indirect', [False, True])
-def test_reachable_mains_reject_conflicting_settings(compiler, tmp_path, flags, indirect):
+def test_reachable_mains_override_and_restore_settings(compiler, tmp_path, flags, indirect):
     entry, _ = files(tmp_path,
-        'import p"lib.dewy" as lib\n$time.zone = \'UTC\'\nmain=()=>{\n' +
-        ('lib.helper()' if indirect else 'lib.main()') + '\n}\n',
-        'helper=()=>main()\n$time.zone = \'Asia/Tokyo\'\nmain=()=>{\nprintl"library"\n}\n')
-    result = invoke(compiler, entry, 'check', flags)
-    assert result.returncode != 0
-    for text in ['app.dewy:2', 'lib.dewy:2', "$time.zone = 'UTC'",
-                 "$time.zone = 'Asia/Tokyo'", 'conflicts with']:
-        assert text in result.stderr, result.stderr
-    assert 'override' not in result.stderr
+        'import p"lib.dewy" as lib\nmain=()=>{\n$time.zone = \'UTC\'\n' +
+        'printl($time.zone)\n' + ('lib.helper()' if indirect else 'lib.main()') +
+        '\nprintl($time.zone)\n}\n',
+        'helper=()=>main()\nmain=()=>{\n$time.zone = \'Asia/Tokyo\'\nprintl($time.zone)\n}\n')
+    result = invoke(compiler, entry, flags=flags)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == 'UTC\nAsia/Tokyo\nUTC\n'
 
 
 @pytest.mark.parametrize('inner', ["$time.zone = 'UTC'\n", ''])
 @pytest.mark.parametrize('indirect', [False, True])
 def test_reachable_mains_accept_matching_or_absent_settings(compiler, tmp_path, inner, indirect):
     entry, _ = files(tmp_path,
-        'import p"lib.dewy" as lib\n$time.zone = \'UTC\'\nmain=()=>{\n' +
+        'import p"lib.dewy" as lib\nmain=()=>{\n    $time.zone = \'UTC\'\n' +
         ('lib.helper()' if indirect else 'lib.main()') + '\n}\n',
-        'helper=()=>main()\n' + inner + 'main=()=>{\nprintl($time.zone)\n}\n')
+        'helper=()=>main()\nmain=()=>{\n' + inner + 'printl($time.zone)\n}\n')
     result = invoke(compiler, entry)
     assert result.returncode == 0, result.stderr
     assert result.stdout == 'UTC\n'
@@ -51,8 +49,8 @@ def test_only_entry_configuration_is_active(compiler, tmp_path, header):
     tag = "$time.zone = 'UTC'\n"
     entry, library = files(tmp_path,
         (tag + '\n' if header else '') + 'import p"lib.dewy" as lib\n' +
-        ('' if header else tag) + 'main=()=>{\nprintl(lib.shown)\n}\n',
-        "shown=()=> $time.zone\n$time.zone = 'Asia/Tokyo'\nmain=()=>{\nprintl(shown)\n}\n")
+        'main=()=>{\n' + ('' if header else tag) + 'printl(lib.shown)\n}\n',
+        "shown=()=> $time.zone\nmain=()=>{\n    $time.zone = 'Asia/Tokyo'\nprintl(shown)\n}\n")
     for path, expected in [(entry, 'UTC\n'), (library, 'Asia/Tokyo\n')]:
         result = invoke(compiler, path)
         assert result.returncode == 0, result.stderr
@@ -73,37 +71,32 @@ def test_foreign_main_never_supplies_the_program_setting(compiler, tmp_path, nam
 @pytest.mark.parametrize('name,value', [('time.zone', 'UTC'), ('time.rules', 'missing.bin'),
                                        ('time.zone_source', 'host')])
 @pytest.mark.parametrize('body', [
-    'TAG\nf=()=>{\nprintl(1)\n}\nmain=()=>f()\n',
-    'main=()=>{\nif true TAG\n{\nprintl(1)\n}\n}\n',
+    'f=()=>printl(1)\nTAG\nmain=()=>f()\n',
+    'main=()=>{\nif true TAG\n{printl(1)}\n}\n',
     'main=()=>{\nprintl(1)\nTAG\n}\n',
 ])
-def test_program_settings_reject_other_scopes(compiler, tmp_path, name, value, body):
+def test_program_settings_reject_misplacement(compiler, tmp_path, name, value, body):
     entry = tmp_path / 'app.dewy'
     entry.write_text(body.replace('TAG', f"${name} = '{value}'"))
     result = invoke(compiler, entry, 'check')
     assert result.returncode != 0
-    if 'printl(1)\nTAG' in body:
-        assert 'needs a following construct; move it before' in result.stderr, result.stderr
-    else:
-        assert 'top of the entry file' in result.stderr, result.stderr
-        assert "directly before any file's main" in result.stderr
+    assert 'top of' in result.stderr and ('file' in result.stderr or 'scope' in result.stderr), result.stderr
 
 
-def test_entry_header_and_main_must_agree(compiler, tmp_path):
+def test_entry_header_is_a_default_for_main(compiler, tmp_path):
     entry = tmp_path / 'app.dewy'
-    entry.write_text("$time.zone = 'UTC'\n\n$time.zone = 'Asia/Tokyo'\nmain=()=>{\n}\n")
-    result = invoke(compiler, entry, 'check')
-    assert result.returncode != 0
-    assert 'app.dewy:1' in result.stderr and 'app.dewy:3' in result.stderr
-    assert 'conflicts with' in result.stderr
+    entry.write_text("$time.zone = 'UTC'\nmain=()=>{\n$time.zone = 'Asia/Tokyo'\nprintl($time.zone)\n}\n")
+    result = invoke(compiler, entry)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == 'Asia/Tokyo\n'
 
 
 def test_main_rule_pack_is_program_wide(compiler, tmp_path):
     from tests.test_time_rules import make_pack
     make_pack(tmp_path)
     entry, _ = files(tmp_path,
-        'import p"lib.dewy" as lib\n$time.rules = \'test.bin\'\nmain=()=>{\nprintl(lib.shown)\n}\n',
-        'shown=()=>zone"Test/Zone"\n$time.rules = \'missing.bin\'\nmain=()=>{\nprintl"test"\n}\n')
+        'import p"lib.dewy" as lib\nmain=()=>{\n    $time.rules = \'test.bin\'\nprintl(lib.shown)\n}\n',
+        '$time.rules = \'missing.bin\'\nshown=()=>zone"Test/Zone"\nmain=()=>printl"test"\n')
     result = invoke(compiler, entry)
     assert result.returncode == 0, result.stderr
     assert result.stdout == 'Test/Zone\n'
@@ -111,8 +104,8 @@ def test_main_rule_pack_is_program_wide(compiler, tmp_path):
 
 def test_main_host_rules_are_program_wide(compiler, tmp_path):
     entry, library = files(tmp_path,
-        'import p"lib.dewy" as lib\n$time.zone_source = \'host\'\nmain=()=>{\nprintl(lib.shown)\n}\n',
-        "shown=()=> $time.zone_source\n$time.zone_source = 'host'\nmain=()=>{\nprintl(shown)\n}\n")
+        'import p"lib.dewy" as lib\nmain=()=>{\n    $time.zone_source = \'host\'\nprintl(lib.shown)\n}\n',
+        "$time.zone_source = 'host'\nshown=()=> $time.zone_source\nmain=()=>printl(shown)\n")
     for path in [entry, library]:
         result = invoke(compiler, path)
         assert result.returncode == 0, result.stderr
@@ -121,17 +114,17 @@ def test_main_host_rules_are_program_wide(compiler, tmp_path):
 
 def test_unreached_helper_does_not_activate_a_foreign_main(compiler, tmp_path):
     entry, _ = files(tmp_path,
-        'import p"lib.dewy" as lib\nunused=()=>lib.main()\n$time.zone = \'UTC\'\nmain=()=>{\nprintl"app"\n}\n',
-        '$time.zone = \'Asia/Tokyo\'\nmain=()=>{\nprintl"library"\n}\n')
+        'import p"lib.dewy" as lib\nunused=()=>lib.main()\nmain=()=>{\n    $time.zone = \'UTC\'\nprintl"app"\n}\n',
+        'main=()=>{\n    $time.zone = \'Asia/Tokyo\'\nprintl"library"\n}\n')
     result = invoke(compiler, entry)
     assert result.returncode == 0, result.stderr
     assert result.stdout == 'app\n'
 
 
-def test_recursive_call_summary_reaches_a_conflicting_main(compiler, tmp_path):
+def test_recursive_call_restores_inner_main_policy(compiler, tmp_path):
     entry, _ = files(tmp_path,
-        'import p"lib.dewy" as lib\nbridge=(n:int64):>void=>{\nif n >? 0 {bridge(n-1)} else {lib.main()}\n}\n$time.zone = \'UTC\'\nmain=()=>{\nbridge(1)\n}\n',
-        '$time.zone = \'Asia/Tokyo\'\nmain=()=>{\nprintl"library"\n}\n')
-    result = invoke(compiler, entry, 'check')
-    assert result.returncode != 0
-    assert 'conflicts with' in result.stderr, result.stderr
+        'import p"lib.dewy" as lib\nbridge=(n:int64):>void=>{\nif n >? 0 {bridge(n-1)} else {lib.main()}\n}\nmain=()=>{\n$time.zone = \'UTC\'\nbridge(1)\nprintl($time.zone)\n}\n',
+        'main=()=>{\n$time.zone = \'Asia/Tokyo\'\nprintl($time.zone)\n}\n')
+    result = invoke(compiler, entry)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == 'Asia/Tokyo\nUTC\n'

@@ -170,9 +170,9 @@ def test_literal_errors_name_the_policy(compiler, tmp_path):
 def test_scope_settings(compiler, tmp_path):
     source = """$time.zone = 'America/New_York'
 
-$time.gap = 'next'
-$time.fold = 'later'
 f = () => {
+    $time.gap = 'next'
+    $time.fold = 'later'
     # lexical gap and fold policies
     printl(zoned"2026-07-01T12:00")
     printl(zoned"2026-03-08T02:30")
@@ -207,24 +207,25 @@ def test_main_file_zone_reaches_every_module(compiler, tmp_path):
     assert ran.stdout == '2026-07-01T12:00:00+09:00[Asia/Tokyo]\n'
 
 
-def test_main_file_zone_cannot_be_overridden(compiler, tmp_path):
-    # An inner scope that is reached, and one that is not.
-    for body in ("$time.zone = 'America/New_York'\nf = () => {\n    printl(today)\n}\nf\n",
-                 "$time.zone = 'America/New_York'\nf = () => {\n    printl(today)\n}\nprintl(1)\n"):
-        ran = run(compiler, tmp_path, PIN + body)
-        assert ran.returncode != 0, body
-        assert "`$time.zone` is program-wide" in ran.stderr
-        assert 'main.dewy:3' in ran.stderr
-        assert "directly before any file's main" in ran.stderr
-    (tmp_path / 'other.dewy').write_text("$time.zone = 'system'\n\nshown = () => 1\n")
+def test_function_zone_overrides_and_restores_file_default(compiler, tmp_path):
+    ran = run(compiler, tmp_path, PIN + """shown=()=>printl($time.zone)
+f=()=>{
+ $time.zone='America/New_York'
+ shown()
+}
+main=()=>{shown(); f(); shown()}
+""")
+    assert ran.returncode == 0, ran.stderr
+    assert ran.stdout == 'Asia/Tokyo\nAmerica/New_York\nAsia/Tokyo\n'
+    (tmp_path / 'other.dewy').write_text("$time.zone = 'system'\nshown=()=>1\n")
     ran = run(compiler, tmp_path, PIN + 'import p"other.dewy" as other\nprintl(other.shown)\n')
-    assert ran.returncode != 0
-    assert "`$time.zone` is program-wide" in ran.stderr
+    assert ran.returncode == 0, ran.stderr
+    assert ran.stdout == '1\n'
 
 
 def test_the_same_zone_elsewhere_is_fine(compiler, tmp_path):
-    (tmp_path / 'other.dewy').write_text("shown = () => 1\n$time.zone = 'Asia/Tokyo'\nmain=()=>{\nprintl(shown)\n}\n")
-    source = PIN + 'import p"other.dewy" as other\n$time.zone = \'Asia/Tokyo\'\nmain = () => {\n    printl(other.shown)\n}\n'
+    (tmp_path / 'other.dewy').write_text("shown = () => 1\nmain=()=>{\n    $time.zone = 'Asia/Tokyo'\nprintl(shown)\n}\n")
+    source = PIN + 'import p"other.dewy" as other\nmain = () => {\n    $time.zone = \'Asia/Tokyo\'\n    printl(other.shown)\n}\n'
     ran = run(compiler, tmp_path, source)
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout == '1\n'

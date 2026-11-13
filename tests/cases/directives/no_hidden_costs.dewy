@@ -8,7 +8,7 @@ clamp=(x:int64):>int64=>{
     return x
 }
 mix=(a:int64<overflow='wrap'> b:int64<overflow='wrap'> gain:int64<overflow='wrap'>):>int64=>clamp((a+b)*gain)
-$no_hidden_costs=false
 main=()=>{
+    $no_hidden_costs=false
     printl("{mix(30 40 2)} {mix(-7 3 1)}")
 }

@@ -61,8 +61,8 @@ main = () => {
     show_ingredients(shopping(recipe orders))
     let batches = pack(orders 5)
     printl"batches: {batches}"
-    $runtime_checks  # imported selector can panic; index comes from a batch plan
     {
+        $runtime_checks
         printl"second batch doubled: {double_portion(batches 1)}"
     }
     printl"packed total: {sum(batches)}"

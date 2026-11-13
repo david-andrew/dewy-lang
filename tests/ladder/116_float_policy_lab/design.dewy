@@ -8,9 +8,9 @@ Score:type = [usable:int64 rejected:int64 positive:int64 total:float64]
 
 new_score = ():>Score => Score[0 0 0 0.0]
 
-$finite_floats
-$no_nan
 safe_ratio = (signal:float64 baseline:float64):>float64 => {
+    $finite_floats
+    $no_nan
     if signal not=? signal return 0.0
     if baseline not=? baseline return 0.0
     if baseline <? 0.1 or baseline >? 100.0 return 0.0

@@ -3,11 +3,15 @@
 Turn this on and the entry file you already wanted compiles. Each setting belongs to the next construct, the same way `$parallel.off` does. `laptop()` runs the program at 2 cores, `server()` runs it at 8, and a later call does not keep the earlier cap. No new syntax.
 
 ```dewy
-$program.max_cores = 2
-laptop = () => run()
+laptop = () => {
+    $program.max_cores = 2
+    run()
+}
 
-$program.max_cores = 8
-server = () => run()
+server = () => {
+    $program.max_cores = 8
+    run()
+}
 
 main = (argv:array<string>) => {
     if (argv.get(0) ?? "laptop") =? "laptop" laptop() else server()
@@ -17,8 +21,8 @@ main = (argv:array<string>) => {
 `run` sees the cap of whichever function was called. After that call returns, the cap is gone. A task started inside the call keeps the cap it was started with. A setting whose value is not a literal is the same mechanism, written where the value exists:
 
 ```dewy
-$program.max_cores = cores
 play = (cores:int) => {
+    $program.max_cores = cores
     run()
 }
 ```

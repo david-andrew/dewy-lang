@@ -3,8 +3,8 @@
 # wait on a choice among alternatives.
 $no_deadlocks
 
-$no_deadlocks = false
 make = ():>Merged<int64> => {
+    $no_deadlocks = false
     let a = mpmc<int64>(1)
     merged(@a.receive)
 }

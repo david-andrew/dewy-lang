@@ -1846,12 +1846,11 @@ otherwise it returns the resolved value or an unresolved fold. The same policies
 When both are passed, the result is an array or `none`. These explicit policies do not
 alter the ordinary single-result call's type.
 
-`$time.zone = 'America/New_York'` pins the program to one zone in every module.
-Like `$time.rules` and `$time.zone_source`, it is program-wide: write it at the top
-of the entry file or directly before any file's `main` declaration. A non-entry file's
-settings apply only when that file is run as the entry. Other locations are compile
-errors. If the running `main` reaches another `main`, directly or transitively,
-conflicting settings are a compile error naming both files and values. `'system'` reads the
+`$time.zone = 'America/New_York'` at the top of the entry file supplies the default
+zone. At the top inside a function or block, it sets the zone for that scope's
+calls and tasks and restores the caller's policy on return. A non-entry file's
+header applies only when that file runs as the entry; its functions can still
+set their own policies. `'system'` reads the
 name of the machine's zone when the program runs, and `'build'` pins the zone of the machine building it.
 `today` is the date there, and `zoned(s)` reads text that names no zone there; with no zone set each warns, naming what it assumes. `strict_today` is the careful `today`: `Date | AmbiguousToday | UnknownToday`, where `.dates` holds the dates the clock's error bound spans near midnight, and `.message` says why there is no date (a clock reading before 2017; a system that gives no error bound, which for now is any but Linux). A machine with no zone to read reads as UTC, and the program says so once on standard error. A literal cannot assume a zone. Zone rules are not the machine's: each
 Dewy version ships its own (IANA data in `lib/time/rules`), so a program means the same thing
@@ -1944,8 +1943,8 @@ The inherited `big` module is a separate approximate-number library for idle gam
 
 ```dewy
 kelvin = (celsius:rational):>rational => celsius+273.15
-$runtime_checks          # a negative power checks its base is nonzero
 main = ():>void => {
+    $runtime_checks
     let half = 1/2
 
     printl"{half+1/3}"  # 5/6
@@ -3091,8 +3090,8 @@ obligation `>=? 0`, proven where the arguments show it (`zeros(2 3)`), and a
 shape with more elements than an `int64` counts runs out of memory:
 
 ```dewy
-$runtime_checks                  # the linear algebra calls below may panic
 main = () => {
+    $runtime_checks
     let values:array<float64> = [3.0 1.0 1.0 2.0]
     let matrix = reshape(values 2 2)
     let saved = matrix
@@ -3508,14 +3507,12 @@ call, from a record field, a table or a local copy, is an error. In a task the
 callback may wait; a function's callback parameter a task calls is checked at each
 call of that function.
 
-Native programs use a persistent worker pool. `$program.max_cores = 2`, written
-at the top of the entry file, limits it to two threads including the caller;
-`$program.max_cores = 1` runs on the caller. There is no environment variable for
-this: to run one program at several core counts, give each count its own entry
-file that sets the tag and then imports and calls the program, or one entry point
-with a function per count. *Provisional: where this tag is written is being
-redesigned with the other parallel tags.* Nested
-operations share the same pool, and a caller waiting at a join helps run ready
+Native programs use a persistent worker pool. `$program.max_cores = 2` at the
+top of the entry file supplies a default allowance of two cores, including the
+caller. The existing literal setting at the top of the entry `main` body also
+sets the whole program's pool. Scoped or run-time-selected core caps are not
+yet supported and give an error; shared permits are required before enabling
+them. `$program.max_cores = 1` runs work on the caller. Nested operations share the same pool, and a caller waiting at a join helps run ready
 work. Forks stay local until a heartbeat exposes work to another worker; small
 scoped joins use direct calls on the sequential path. Web builds run serially with
 the same result order and copy semantics. Parallel work may always execute
@@ -4128,7 +4125,7 @@ certificate is one of:
 - a structured join: the end of `concurrent`, whose tasks' waits are certified, with
   no lock held across it.
 - an audited adapter, for a foreign function that may block: a function whose
-  body says `$audited_wait` (provisional spelling), where a person has checked
+  declaration is prefixed by `$audited_wait` (provisional spelling), where a person has checked
   that the call waits only on the outside world. A foreign function declared with
   a row excluding `blocks` (`& no_effects`) is trusted not to wait.
 
@@ -4285,13 +4282,12 @@ does not bring it in, so a library can carry a local test `main` without
 colliding with the program's. An explicitly imported `main` is an ordinary
 callable function.
 
-Program-wide settings (currently `$time.zone`, `$time.rules`,
-`$time.zone_source` and `$program.max_cores`) go at the top of the entry file or as
-a prefix directly before any file's `main` declaration. A file's `main` settings configure the program
-only when that file is the entry; a library can carry its own test configuration.
-Elsewhere these settings are a compile error naming the allowed locations. Calling another file's
-`main` directly or transitively requires their explicit program-wide settings to
-agree; a conflict names both files and both values.
+Settings go at the top of a file or inside the top of a function or block;
+blank lines do not change their meaning. Time policy frames (`$time.zone`, `$time.gap` and `$time.fold`) govern calls and tasks and
+restore the caller's policy on return. Core limits and rule packs currently
+keep their existing program-wide literal entry-file or entry-`main` forms.
+Scoped core caps, rule-source changes and run-time rule-pack selection give a "not yet supported"
+error rather than an incomplete dynamic policy.
 
 `main` returns `void` or the errors that reach it, an ordinary `void | E` type,
 declared or inferred. It gives no exit code: success exits 0, and a script that
@@ -5613,32 +5609,57 @@ none. (Both spellings are provisional.)
 ## Directives
 
 A setting is a metatag on a line of its own: `$name` or `$name = true` turns it
-on and `$name = false` turns it off. A tag or label goes immediately before the
-construct it applies to: a declaration, statement, loop or block. A declaration's
-setting covers its whole body and generated entry checks, including parameter
-unpacking and shape validation. Refined arguments remain obligations at their
-calls. Prefix a block to cover several statements; a setting inside a block
-covers the following construct. An inner prefix may change it again. Each
-construct sets a setting at most once, with a literal `true` or `false`.
+on and `$name = false` turns it off. Put a function's settings at the top of
+its body. A setting at the top of a file, before declarations (and optionally
+after the initial imports), applies to the whole file. A block's settings go
+inside it, before its statements. Blank lines do not change a setting's scope.
+A scope sets each setting at most once.
 
-A module header goes at file start or after the initial imports, with a blank
-line after its tag block. With no blank line before a declaration, the tags are
-that declaration's prefixes. This blank-line rule is provisional (D4 Q19).
+Tags that mark one construct still go immediately before it: `$extern` and
+`$intrinsic` prefix their declaration, `$test` prefixes its function, and a
+loop label prefixes its loop. `$unsafe expression` remains an explicit unsafe
+boundary. These construct tags are distinct from scope-wide settings.
 
 ```dewy
 $runtime_checks
-
-$no_nan
-half = (x:float64):>float64 => x*0.5
+half = (x:float64):>float64 => {
+    $no_nan
+    x*0.5
+}
 main = () => {
-    $runtime_checks=false
-    { printl(half(2.0)) }
+    $runtime_checks = false
+    printl(half(2.0))
 }
 ```
 
-Settings are fixed at compile time and live in source: the command line sets
-only the build mode and target (under "Modules and games"). Whether settings
-may depend on run-time values remains open (D4 Q7).
+Runtime settings govern the scope's calls, everything those calls reach, and
+the tasks they start. Leaving the scope restores the caller's settings; a task
+keeps the settings it inherited even if its parent scope has returned. This
+allows `main` to choose an environment at run time:
+
+```dewy
+local = ():>void => {
+    $time.zone = 'America/New_York'
+    run()
+}
+universal = ():>void => {
+    $time.zone = 'UTC'
+    run()
+}
+main = (argv:array<string>):>void => {
+    if (argv.get(1) ?? 'local') =? 'utc' {universal()} else {local()}
+}
+```
+
+Policy settings, such as a time zone, use the innermost value. Scoped core caps, rule-source changes
+and dynamic rule-pack selection are not yet supported; their literal
+entry-file and entry-`main` forms keep their existing program-wide behavior.
+Computed zone values and literal validation through inherited runtime policies are not yet supported; choose literal zone profiles or use fallible delimited time calls. Code policies keep their existing lexical behavior until complete inheritance
+lands: a caller's `$runtime_checks`, `$prototype`, or other code policy does
+not retarget a callee. `$runtime_checks` takes a literal Boolean, never a
+runtime flag. `$fast_math = flag` permits runtime selection; identical bodies
+are merged. The command line sets only the build mode and target (under
+"Modules and games").
 
 An obligation is a fact an operation needs: an index or slice in bounds (a
 string's counted in graphemes, as `text.length` counts), a nonzero divisor, a value that fits a narrower integer, an argument meeting a refined
@@ -5673,7 +5694,7 @@ development toolchain does neither.
 A metatag read in a parameter's default is read where the function is called, so
 a library can take the caller's setting: `f = (zone:string|none=$time.zone) => ...`
 gives the program's zone, or `none`. Valued settings hold a name in quotes.
-Lexical ones, such as `$time.gap` and `$time.fold`, cover the construct they prefix.
+A scope setting, such as `$time.gap` or `$time.fold`, is written inside that scope and is inherited by its calls.
 
 ### Making code prove
 
@@ -5785,7 +5806,7 @@ $careful = {
 }
 ```
 
-Prefixing a construct with `$careful` holds every setting in the bundle throughout that construct.
+Writing `$careful` at the top of a scope holds every setting in the bundle throughout that scope.
 Inside it, a setting that contradicts the bundle is an error; `$careful = false`
 opts a nested scope out of the whole bundle first. `$default_row = <effect row>`
 in a bundle gives each function declared in its scope without an effect row
@@ -5803,7 +5824,7 @@ The library defines `$no_hidden_costs`, the strict lane (lib/directives.dewy):
 (a detach allocates), no implicit costly copy, no runtime check and no call of
 code that may panic (the `panics` effect, "Functions and values"), and it
 cannot use `$runtime_checks` or `$prototype`. A function that needs more opts out with
-`$no_hidden_costs = false` before its declaration, or declares a row of its own. The effect
+`$no_hidden_costs = false` at the top of its body, or declares a row of its own. The effect
 inventory is still partial (see "Functions and values"): an operation it does
 not classify is rejected there. `$realtime` is reserved for a stronger future bundle.
 
