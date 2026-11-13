@@ -2,11 +2,12 @@ $runtime_checks
 
 from p"callback_specialize.jo" import (callback_calls)
 from p"check.jo" import (target_wasm)
-from p"inline.jo" import (FAST_CALLBACK_MAX INLINE_LOOPY_CALLER_MAX INLINE_LOOP_MAX INLINE_MAX INLINE_SPECIALIZE_CALLER_MAX INLINE_SPECIALIZE_GROWTH INLINE_SPECIALIZE_MAX INLINE_WRAPPER_MAX defines_value fast_by_index fast_callback_sites fast_fns fast_inline_into fast_inline_loop_only fast_loop_only fast_moves inl_calls inl_const_growth inl_const_target inline_body_cache inline_branch_body inline_branch_cache inline_live_cache inline_nv_cache rel_by_index rel_fns)
-from p"ir.jo" import (VI VK dbg_on ir kc_fn)
-from p"ir_builders.dewy" import (is_kv)
-from p"ir_types.dewy" import (Ins IrFn)
+from p"inline.jo" import (FAST_CALLBACK_MAX INLINE_LOOPY_CALLER_MAX INLINE_LOOP_MAX INLINE_MAX INLINE_SPECIALIZE_CALLER_MAX INLINE_SPECIALIZE_GROWTH INLINE_SPECIALIZE_MAX INLINE_WRAPPER_MAX fast_by_index fast_callback_depth fast_callback_sites fast_fns fast_inline_loop_only fast_loop_only fast_moves inl_calls inl_const_growth inl_const_target inline_body_cache inline_branch_body inline_branch_cache inline_live_cache inline_nv_cache rel_by_index rel_fns)
+from p"ir.jo" import (M_INDEX VI VK dbg_on ir kc_fn)
+from p"ir_builders.dewy" import (is_kv k_vreg new_slot vreg vtype)
+from p"ir_types.dewy" import (Ins IrFn Op)
 from p"opt.jo" import (kills_memory o_simplify_kind)
+from p"opt_copy_forward.dewy" import (o_copy_forward)
 from p"partition.jo" import (partition_active)
 from p"partition_ops.dewy" import (partition_inline_body)
 
@@ -272,4 +273,242 @@ inline_callee=(ins:Ins self_pos:InlineWord snap:array<IrFn>):>InlineWord=>{
     let j=rel_by_index[int64(ins.imm)]
     if j <? 0 or j =? self_pos or int64(ins.b) not=? snap[j].nparams {return -1}
     j
+}
+
+fast_inline_target=(ins:Ins in_loop:bool):>InlineWord=>$unsafe {
+    if ins.op not=? 'call' or ins.c not=? 0 or ins.imm >=? fast_by_index.length {return -1}
+    let j=fast_by_index[int64(ins.imm)]
+    if j <? 0 or fast_fns.ptr[j].fn_index =? ir.fn_index or int64(ins.b) not=? fast_fns.ptr[j].nparams {return -1}
+    if fast_loop_only.ptr[j] and not in_loop and not fast_inline_loop_only {return -1}
+    j
+}
+
+fast_keeps_call=(j:InlineWord):>bool=>$unsafe {
+    fast_moves.ptr[j] and fast_fns.ptr[j].code.length >? 64 and ir.code.length >? INLINE_LOOPY_CALLER_MAX
+}
+
+fast_inline_into=():>void=>$unsafe {
+    if fast_fns.length =? 0 {return}
+    let found=false
+    loop ins in ir.code {
+        let j=fast_inline_target(ins true)
+        if j >=? 0 and not fast_keeps_call(j) {found=true break}
+    }
+    if not found {return}
+    let out:array<Ins>=[]
+    out.reserve(ir.code.length * 2)
+    let old=ir.code
+    let depth:InlineWord=0
+    let loop_depth:InlineWord=0
+    let moved=false
+    loop ins in old {
+        if ins.op =? 'block' or ins.op =? 'loop' or ins.op =? 'if_' {depth+=1}
+        if ins.op =? 'loop' and loop_depth =? 0 {loop_depth=depth}
+        if ins.op =? 'end' {
+            if depth =? loop_depth {loop_depth=0}
+            depth-=1
+        }
+        let j=fast_inline_target(ins loop_depth >? 0)
+        if j >=? 0 and not fast_keeps_call(j) {
+            inline_call(ins fast_fns.ptr[j] @out)
+            if fast_moves.ptr[j] {moved=true}
+        } else {out.push(ins)}
+    }
+    ir.code=out
+    if moved and fast_callback_depth <? 4 {
+        fast_callback_depth+=1
+        fast_inline_into()
+        fast_callback_depth-=1
+        return
+    }
+    o_copy_forward()
+}
+
+defines_value=(op:Op):>bool=>match op {
+    <'nop'|'block'|'loop'|'end'|'else_'|'br'|'brif'|'brtable'|'if_'|'ret'|'trap'|'store'|'copy'|'zero'|'memcpy'|'memset'|'zeroslots'|'assume'|'vop'> => false
+    _ => true
+}
+
+# The low operand bits of the optimizer's opcode decode. Dewy Op members are
+# text unions, so use the same constant classes without an ordinal cast.
+inline_rewrite_mask=(op:Op):>InlineWord=>match op {
+    <'nop'|'block'|'loop'|'end'|'else_'|'br'|'trap'|'zeroslots'|'iconst'|'fconst'|'slot'|'gaddr'|'daddr'|'faddr'|'vzu'> => 0
+    <'intr'|'call'|'syscall'> => 16
+    <'calli'|'callc'> => 20
+    <'if_'|'brif'|'zero'|'brtable'|'assume'> => 1
+    <'ret'> => 32
+    <'memcpy'|'memset'|'select'|'vop'|'memeq'|'findbyte'|'scanbytes'|'findb'> => 7
+    <'load'> => 65
+    <'store'> => 131
+    <'vst'> => 11
+    <'mov'|'neg'|'not_'|'fneg'|'fsqrt'|'fabs'|'ffloor'|'fceil'|'ftrunc'|'sext8'|'sext16'|'sext32'|'zext8'|'zext16'|'zext32'|'i2f'|'u2f'|'f2i'|'f2f'|'bits2f'|'f2bits'|'vsplat'> => 1
+    _ => 3
+}
+
+remap=(c0:Ins @callee:IrFn vm:ptr<int64> sm:ptr<int64>):>Ins=>$unsafe {
+    let c=c0
+    let op=c.op
+    let a=InlineWord(c.a)
+    let bb=InlineWord(c.b)
+    let args=callee.args.ptr
+    if op =? 'slot' {c.a=int32<overflow='wrap'>(sm[a])}
+    else if op =? 'zeroslots' {
+        let s=ir.args.length
+        loop k in [0..bb) {
+            let item=InlineWord(args[a+k])
+            if item & 1 =? 1 {ir.args.push(int32<overflow='wrap'>((vm[item >> 1] << 1) | 1))}
+            else {ir.args.push(int32<overflow='wrap'>(sm[item >> 1] << 1))}
+        }
+        c.a=int32<overflow='wrap'>(s)
+    } else {
+        let mask=inline_rewrite_mask(op)
+        if mask & 16 not=? 0 {
+            let s=ir.args.length
+            loop k in [0..bb) {ir.args.push(int32<overflow='wrap'>(vm[InlineWord(args[a+k])]))}
+            c.a=int32<overflow='wrap'>(s)
+        } else {
+            if mask & 1 not=? 0 or (mask & 32 not=? 0 and a >=? 0) {c.a=int32<overflow='wrap'>(vm[a])}
+            if mask & 2 not=? 0 or (mask & 64 not=? 0 and InlineWord(c.c) & M_INDEX not=? 0) {c.b=int32<overflow='wrap'>(vm[bb])}
+            if mask & 8 not=? 0 or (mask & 128 not=? 0 and InlineWord(c.c) & M_INDEX not=? 0) {c.dst=int32<overflow='wrap'>(vm[InlineWord(c.dst)])}
+        }
+        if mask & 4 not=? 0 {c.c=int32<overflow='wrap'>(vm[InlineWord(c.c)])}
+        if op =? 'brtable' {
+            let s=ir.args.length
+            loop k in [0..bb) {ir.args.push(args[InlineWord(c.c)+k])}
+            c.c=int32<overflow='wrap'>(s)
+        }
+    }
+    if defines_value(op) and c.dst >=? 0 and op not=? 'store' {c.dst=int32<overflow='wrap'>(vm[InlineWord(c.dst)])}
+    c
+}
+
+inline_span=(@out:array<Ins> source:ptr<Ins> start:InlineWord count:InlineWord):>void=>$unsafe {
+    if count =? 0 {return}
+    let n=out.length
+    out.resize(n+count)
+    mem_copy(out.ptr+n source+start count*size_of<Ins>)
+}
+
+inline_live_regs=(callee:IrFn):>array<int64>=>$unsafe {
+    let index=callee.fn_index
+    loop inline_live_cache.length <=? index {
+        inline_live_cache.push([])
+        inline_body_cache.push([])
+        inline_nv_cache.push(-1)
+    }
+    if inline_body_cache.ptr[index].ptr =? callee.code.ptr and inline_nv_cache.ptr[index] =? callee.vtypes.length {return inline_live_cache.ptr[index]}
+    let flags:array<int64>=fill(InlineWord(0) callee.vtypes.length)
+    let used=flags.ptr
+    loop p in [0..callee.nparams) {used[p]=1}
+    loop ins in callee.code {
+        let op=ins.op
+        if defines_value(op) and ins.dst >=? 0 and op not=? 'store' {used[InlineWord(ins.dst)]=1}
+        let mask=inline_rewrite_mask(op)
+        if op =? 'zeroslots' {
+            loop k in [InlineWord(ins.a)..InlineWord(ins.a)+InlineWord(ins.b)) {
+                let item=InlineWord(callee.args.ptr[k])
+                if item & 1 =? 1 {used[item >> 1]=1}
+            }
+        } else if mask & 16 not=? 0 {
+            loop k in [InlineWord(ins.a)..InlineWord(ins.a)+InlineWord(ins.b)) {used[InlineWord(callee.args.ptr[k])]=1}
+        } else {
+            if mask & 1 not=? 0 or (mask & 32 not=? 0 and ins.a >=? 0) {used[InlineWord(ins.a)]=1}
+            if mask & 2 not=? 0 or (mask & 64 not=? 0 and InlineWord(ins.c) & M_INDEX not=? 0) {used[InlineWord(ins.b)]=1}
+            if mask & 8 not=? 0 or (mask & 128 not=? 0 and InlineWord(ins.c) & M_INDEX not=? 0) {used[InlineWord(ins.dst)]=1}
+        }
+        if mask & 4 not=? 0 {used[InlineWord(ins.c)]=1}
+    }
+    let live:array<int64>=[]
+    loop v in [0..callee.vtypes.length) {
+        if used[v] not=? 0 {live.push(v)}
+    }
+    inline_live_cache[index]=live
+    inline_body_cache[index]=callee.code
+    inline_nv_cache[index]=callee.vtypes.length
+    live
+}
+
+inline_call=(call:Ins callee:IrFn @out:array<Ins>):>void=>$unsafe {
+    let vm:array<int64>=fill(InlineWord(0) callee.vtypes.length)
+    let mapped=vm.ptr
+    loop v in inline_live_regs(callee) {
+        if InlineWord(callee.vtypes.ptr[v]) =? VK {mapped[v]=k_vreg(callee.kval.ptr[v])}
+        else {mapped[v]=vreg(InlineWord(callee.vtypes.ptr[v]))}
+    }
+    let sm:array<int64>=fill(InlineWord(0) callee.slot_size.length)
+    let slots=sm.ptr
+    loop s in [0..callee.slot_size.length) {slots[s]=new_slot(InlineWord(callee.slot_size.ptr[s]) InlineWord(callee.slot_align.ptr[s]))}
+    loop k in [0..InlineWord(call.b)) {
+        let p=mapped[k]
+        out.push(Ins['mov' int32<overflow='wrap'>(vtype(p)) int32<overflow='wrap'>(p) ir.args.ptr[InlineWord(call.a)+k] 0 0 0 0])
+    }
+    if callee.raw_mem {ir.raw_mem=true}
+    out.push(Ins['block' 0 0 0 0 0 0 0])
+    let depth:InlineWord=0
+    loop ci in callee.code {
+        let op=ci.op
+        if op =? 'ret' {
+            if ci.a >=? 0 and call.dst >=? 0 {
+                out.push(Ins['mov' int32<overflow='wrap'>(vtype(InlineWord(call.dst))) call.dst int32<overflow='wrap'>(mapped[InlineWord(ci.a)]) 0 0 0 0])
+            }
+            out.push(Ins['br' 0 0 0 0 0 depth 0])
+            continue
+        }
+        let ni=remap(ci @callee mapped slots)
+        if call.c =? 2 and op =? 'call' and ni.c =? 0 {ni.c=2}
+        ni.pos=call.pos
+        out.push(ni)
+        if op =? 'block' or op =? 'loop' or op =? 'if_' {depth+=1}
+        else if op =? 'end' {depth-=1}
+    }
+    out.push(Ins['end' 0 0 0 0 0 0 0])
+}
+
+inline_into=(self_pos:int64 snap:array<IrFn> can:array<int64>):>bool=>$unsafe {
+    inl_const_growth=0
+    inl_calls=0
+    let old=ir.code
+    let instructions=old.ptr
+    loop pos in [0..old.length) {
+        let ins=instructions+pos
+        if ins[0].op =? 'calli' or ins[0].op =? 'callc' {inl_calls+=1}
+        else if ins[0].op =? 'call' and ins[0].c =? 0 {
+            let j=inline_callee(ins[0] self_pos snap)
+            if j <? 0 or can.ptr[j] not=? 1 {inl_calls+=1}
+        }
+    }
+    let depth:InlineWord=0
+    let kinds:array<Op>=[]
+    let positions:array<int64>=[]
+    let targets:array<int64>=[]
+    loop pos in [0..old.length) {
+        let ins=instructions+pos
+        if ins[0].op =? 'call' {
+            let j=inline_target(ins[0] depth self_pos snap can)
+            if j >=? 0 {
+                positions.push(pos)
+                targets.push(j)
+                if inl_const_target {inl_const_growth+=snap.ptr[j].code.length}
+            }
+        } else if ins[0].op =? 'block' or ins[0].op =? 'loop' or ins[0].op =? 'if_' {
+            kinds.push(ins[0].op)
+            if ins[0].op =? 'loop' {depth+=1}
+        } else if ins[0].op =? 'end' {
+            if kinds.pop() =? 'loop' {depth-=1}
+        }
+    }
+    if positions.length =? 0 {return false}
+    let out:array<Ins>=[]
+    out.reserve(old.length*2)
+    let start:InlineWord=0
+    loop k in [0..positions.length) {
+        let pos=positions.ptr[k]
+        inline_span(@out instructions start pos-start)
+        inline_call(instructions[pos] snap.ptr[targets.ptr[k]] @out)
+        start=pos+1
+    }
+    inline_span(@out instructions start old.length-start)
+    ir.code=out
+    o_copy_forward()
+    true
 }
