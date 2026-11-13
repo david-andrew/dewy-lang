@@ -690,3 +690,20 @@ section linked. ROADMAP.md lists them in one line each.
     or_throw )`, then `config` and `sounds`), and `parallel { … }` keeps its names inside. This
     replaces D4's exception where top-level `let`s escaped a `parallel { … }` block. With D40 Q2,
     an owner bound in `parallel ( … )` belongs to the enclosing block.
+  - **A cleanup failure is the function's result** (D40 Q1): yes. If a file's final flush or
+    close fails, that failure is what the function returns. Condition from David: no hard-to-
+    follow nonlocal behavior; the language, highlighting and hover show what extra work runs at
+    cleanup and which failures it can add. Still open: timing (Q2), combining failures (Q3), and
+    a visible exit for a cleanup failure on `break`, `continue` or an inner block's end.
+    [proposals/cleanup/](proposals/cleanup/)
+  - **`$__abandon__`** (D40 Q4): yes, for a value whose cleanup throws its work away (a
+    transaction rolls back, a child process is stopped); the work takes effect only through an
+    explicit `commit`, `wait` or `stop()`. **Dunder metatags are functions you assign**, like
+    Python's dunder methods, not tags placed before another method:
+    `Transaction:type = [handle:DbHandle  $__abandon__ = ():>void | DbError => db_rollback(handle)]`.
+    The same form applies to `$__drop__ = ():>void => …`, replacing the tag-before-method form.
+  - **Databases** (direction): David dislikes SQL and wants a Dewy-native database interface
+    built from plain functions, methods and Dewy types, without SQL or relational cruft, that
+    covers the major uses of databases and plugs into Dewy's safety and typing. It may start
+    backed by SQLite; the long-term goal is a pure Dewy database. Examples should not lean on SQL
+    strings. A design round is queued.

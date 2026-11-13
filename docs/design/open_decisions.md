@@ -21,9 +21,7 @@
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
-  - D40 Q1–Q3: cleanup failures as results, when cleanup runs, failure pairs.
 - **(b) New syntax or surface:**
-  - D40 Q4: `$__abandon__` for owners whose drop throws work away;
   - D41 Q1–Q3: `check_cancel()`, `protect_from_cancel(limit @work)`, `task.tasks(@body)` as ordinary calls;
   - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
   - D11 Q2: `check=` or `valid_if=`;
@@ -52,136 +50,24 @@
 
 ### D40. Cleanup: values clean themselves up; `defer` only for one-off actions
 
-Resources clean up on every way out of a function, with no second line to remember: a file flushes and closes, a socket closes, a lock unlocks, a transaction rolls back unless it was committed. No new syntax; `return`, `break` and `or_throw` act on your function as usual. If you accept, D4's three `defer`s go away. `defer` stays (your answer to Q5, provisional) for one-off actions; its strongest cases are at the end of this item.
+Resources clean up on every way out of a function, with no second line to remember: a file flushes and closes, a socket closes, a lock unlocks, a transaction rolls back unless it was committed. Decided so far (batch 9): a cleanup failure is the function's result, shown by hover and highlighting (Q1); `$__abandon__` (Q4); `defer` kept provisionally (Q5).
 
-#### Q1 (a). A cleanup failure is the function's result
-
-```dewy
-save = (data:array<uint8>) => {
-    let out = open(p"/mnt/usb/data.bin" 'w') or_throw
-    out.write_bytes(data) or_throw;     # buffered: nothing is on the disk yet
-}                                        # out flushes and closes here
-main = () => {
-    save(readings) ?? { printl"save failed"; return }
-    printl"saved"
-}
-```
-
-If the USB stick is full, the failure only shows up at the final flush. Today a cleanup hook can't fail, so that error is lost and this program prints "saved". With this change the flush failure becomes `save`'s result, and `main` prints "save failed". Let cleanup hooks fail, with the failure becoming the function's result? (The alternative is requiring `out.close() or_throw` before every exit, which is the second step you want to avoid.)
-
-**Rec:** yes; reversible.
-
-#### Q2 (a). When cleanup runs: the end of the block, or the last use
-
-```dewy
-log_reply = (host:string) => {
-    let s = net.tcp_connect(host 80) or_throw
-    let reply = s.request("GET /") or_throw     # last use of s
-    process(reply)                               # 10 seconds of work
-}
-```
-
-- (a) **At the end of the block, for every value with cleanup.** `s` closes after `process`. A lock is held to the end of its block too, so everything written inside it is protected. Use braces to release earlier. This is how Python's `with`, Rust and Swift behave.
-- (b) **At the end of the block only for locks and cleanup that can fail (files, transactions); at the last use for the rest.** `s` closes right after `request`, before `process`. Generic code then behaves differently by type: in `(x:T) => { x.use(); sleep(10s) }`, a socket passed as `x` closes before the sleep, a file after it.
-
-Today a lock is released at its last use, so in this loop the journal write runs unlocked under the current rule; both (a) and (b) fix that:
-
-```dewy
-loop amount in amounts {
-    let book = @(ledger.lock())
-    if book.balance + amount <? 0 break        # unlocks, then leaves the loop
-    book.balance += amount                     # last use of book
-    append_file(journal "{amount}\n") or_throw;   # (a) and (b): still locked
-}
-```
-
-Which should it be? Plain memory is freed at its last use either way; no program can tell.
-
-**Rec:** (a); reversible. (b) was dogfooded; (a) was not tested as its own round, but it removes the type-dependent timing the regrade scored 2.
-
-#### Q3 (a). Two failures at once
-
-```dewy
-let saved = save(readings) ?? false
-```
-
-Your D4 Q1 rule already applies: if Ctrl-C cancels `save`, `??` doesn't turn that into `false`; the cancellation leaves the function. A disk-full failure is defaulted as usual. The new case is two failures together: Ctrl-C cancels `save`, then the final flush fails too.
-
-```dewy
-match save(readings) {
-    both:CleanupError => printl"{both.primary}, then {both.cleanup}"   # Canceled, then the flush error
-    problem:error => printl"{problem}"
-    _ => printl"saved"
-}
-```
-
-Return both as `CleanupError` with `.primary` (what failed first) and `.cleanup` (the cleanup that failed after it)? If either one is `Canceled`, the pair counts as cancellation under your D4 Q1 rule, so `save(readings) ?? false` still lets it leave.
-
-**Rec:** yes; reversible. Names read cold correctly.
-
-#### Q4 (b). Values whose cleanup throws the work away
-
-```dewy
-transfer = (from:int64 to:int64 amount:int64) => {
-    let tx = db.begin(p"bank.sqlite") or_throw
-    tx.execute("UPDATE accounts SET balance = balance - {amount} WHERE id = {from}") or_throw;
-    if not tx.exists(to) return MissingAccount          # rolls back: the debit is undone
-    tx.execute("UPDATE accounts SET balance = balance + {amount} WHERE id = {to}") or_throw;
-    tx.commit() or_throw                                # the only way anything is saved
-}
-```
-
-A file's cleanup finishes its work (flush, then close). A transaction's cleanup must do the opposite: every exit that doesn't reach `tx.commit()` (the early `return`, a failed `execute`, Ctrl-C) rolls back. Forgetting `commit` is safe (nothing is saved), and the compiler warns when no path commits. The library marks the hook differently so the compiler knows which kind it is:
-
-```dewy
-Transaction:type = [handle:DbHandle
-    $__abandon__                                       # a file's hook is $__drop__
-    rollback = ():>void | DbError => db_rollback(handle)
-]
-```
-
-Use `$__abandon__` for this marker? Child processes use it too: one the program never waits for is stopped when its owner ends.
-
-**Rec:** yes; reversible. Read cold correctly; `$__discard__` read the same and is the alternative.
-
-#### Where `defer` still earns its keep
-
-Each of these is a one-off action that belongs to this function, not to a value, so there is no type to give a cleanup hook:
-
-```dewy
-render = (node:Node) => {
-    indent += 1
-    defer indent -= 1                     # restored on every way out, including errors
-    loop child in node.children render(child) or_throw
-}
-
-handle = (request:Request) => {
-    let started = now
-    defer printl"{request.path} took {now - started}"   # timed even when it fails
-    route(request) or_throw
-}
-```
-
-Without `defer`, each needs the line repeated before every `return` and `or_throw`, or a single-use type with a cleanup hook. Resources never need it.
-
-#### Other details
-
-- **Shared channels keep `close()`.** A single-producer queue closes when its sender is gone; a shared channel has many senders, so the last one still closes it:
+**Being reworked after your 2026-11-12 answers** (coming back with new examples):
+- Q2: which timing (end of block or last use) gives programmers the fewest surprises.
+- Q3: a general way to combine several errors into one value and split them back out, replacing the two-field `CleanupError`.
+- A cleanup failure on `break`, `continue` or an inner block's end must show a visible exit; today's draft leaves the function with nothing written there:
   ```dewy
-  produce = (out:SpscSender<int64>) => loop n in [0..10) out.send(n) or_throw   # out is dropped here: the queue closes
-  let [tx rx] = spsc<int64 16>.split
-  parallel { produce(tx) or_throw; loop n in rx printl(n) }
-  ```
-- **A failed close on `break` leaves the function.** If the file below fails to flush when the loop breaks, the code after the loop doesn't run; the failure is the function's result:
-  ```dewy
-  loop name in names {
-      let out = open(p"{name}.txt" 'w') or_throw
-      out.write_text(name) or_throw;
-      if name =? "last" break             # out closes here; a flush failure returns from the function
+  write_all = (names:array<string>) => {
+      loop name in names {
+          let out = open(p"{name}.txt" 'w') or_throw
+          out.write_text(name) or_throw;
+          if name =? "last" break             # out closes here; a flush failure leaves write_all
+      }
+      printl"all written"                     # skipped then, with nothing above saying so
   }
-  printl"all written"
   ```
-- **Dogfooded:** 24 programs over five rounds, a review and two independent regrades, no open must-fix. A safe wrapper around a C library still needs a separate decision about hiding its fields. Full rules: `proposals/cleanup/summary.md` and `amendments.md`.
+- `defer`'s strongest cases, rewritten without it, to show whether it earns its place.
+- Shared `channel` and `mpmc` keep `close()` (agreed).
 
 ### D41. Cancellation helpers as ordinary calls: `check_cancel`, `protect_from_cancel`, `task.tasks`
 
