@@ -43,6 +43,7 @@ LEAF_HOMES = {
     'exact_chain_walks': 'exact.jo',
     'exact_words': 'exact.jo',
     'exact_raw_plans': 'exact.jo',
+    'exact_count_bounds': 'exact.jo',
     'exact_reset_walks': 'exact_reset_loop.jo',
     'error_display': 'util.jo',
     'refine_rare': 'refine.jo',

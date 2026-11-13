@@ -14,6 +14,7 @@ use 'exact_loop.jo'
 use 'exact_chain_walks.dewy'
 use 'exact_words.dewy'
 use 'exact_raw_plans.dewy'
+use 'exact_count_bounds.dewy'
 use 'pcheck.jo'
 use 'pcheck_drive.dewy'
 use 'math_lower.jo'
@@ -896,122 +897,6 @@ exact_prepare = ():
 exact_count_nodes: (int, int)[]
 exact_count_index: int[]
 exact_count_bounds: FactBound[]
-
-exact_count_refined = (t0: int) -> FactBound:
-    t = prune(t0)
-    out = FactBound(wide = true)
-    if types[t].kind != .refined: return out
-    loop atom in ref_predicates[int(types[t].st)]:
-        if atom.a.path.len() != 0 or atom.b.path.len() != 0 or atom.a.offset != 0 or atom.b.offset != 0 or atom.a.unsigned or atom.b.unsigned: continue
-        if atom.a.kind == 0 and atom.b.kind == 1:
-            if atom.op == .lt and atom.b.value > FACT_MIN: out.hi = min(out.hi, atom.b.value - 1)
-            else if atom.op == .le or atom.op == .eq: out.hi = min(out.hi, atom.b.value)
-            if atom.op == .eq: out.lo = max(out.lo, atom.b.value)
-        else if atom.a.kind == 1 and atom.b.kind == 0:
-            if atom.op == .lt and atom.a.value < FACT_MAX: out.lo = max(out.lo, atom.a.value + 1)
-            else if atom.op == .le or atom.op == .eq: out.lo = max(out.lo, atom.a.value)
-            if atom.op == .eq: out.hi = min(out.hi, atom.a.value)
-    out.wide = out.lo == FACT_MIN or out.hi == FACT_MAX
-    out
-
-exact_count_bound = (n: int) -> FactBound:
-    if n == 0: return FactBound(wide = true)
-    if n < exact_count_index.len() and exact_count_index[n] != 0: return exact_count_bounds[exact_count_index[n] - 1]
-    out = FactBound(wide = true)
-    if n >= exact_count_index.len(): exact_count_index.resize(nodes.len())
-    slot = exact_count_bounds.len()
-    exact_count_bounds.push(out)
-    exact_count_index[n] = slot + 1
-    k = nodes[n].kind
-    t = exact_representation(ntype(n))
-    if k == .int_lit and not (has_flag(n, NF_U64) and nodes[n].ival < 0): out = FactBound(nodes[n].ival, nodes[n].ival)
-    else if k == .ident and nodes[n].aux == i32(int(SK.global)):
-        g = int(nodes[n].sym)
-        if readonly_global(g) and not globals[g].exposed:
-            initial = int(nodes[int(globals[g].decl)].b)
-            width = exact_type_width(initial, true)
-            index = exact_type_widths[initial]
-            if index < -1 and width / 2 <= 64:
-                value = int(exact_type_values[initial])
-                if index & 1 == 0: value = -value
-                out = FactBound(min(0, value), max(0, value))
-    else if k == .ident and nodes[n].aux == i32(int(SK.local)):
-        l = int(nodes[n].sym)
-        flags = int(locals[l].flags)
-        loop flags & LF_CAPTURE != 0 and flags & LF_VALUECAP != 0 and flags & (LF_ASSIGNED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_EXPOSED) == 0:
-            l = int(locals[l].outer)
-            flags = int(locals[l].flags)
-        if flags & (LF_ASSIGNED | LF_MUTPARAM | LF_CAPTURE | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED) == 0:
-            if flags & LF_PARAM != 0:
-                f = int(locals[l].owner)
-                loop i in [0..fns[f].params.len()):
-                    if fns[f].params[i] == l: out = exact_count_refined(fns[f].ptypes[i])
-            else if l < exact_initializers.len(): out = exact_count_bound(exact_initializers[l])
-    else if k == .conv and nodes[n].aux == i32(int(CV.refinement)):
-        out = exact_count_refined(int(nodes[n].aux2))
-    else if k == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.fixed_store)) or nodes[n].aux == i32(int(CV.wrap_int))):
-        source = exact_count_bound(int(nodes[n].a))
-        if not source.wide and (t == T_MATH_INT or is_int(t) and (if types[t].sign: sa_fits(source.lo, t) and sa_fits(source.hi, t) else: source.lo >= 0 and (types[t].bits == 64 or source.hi < 1 << int(types[t].bits)))): out = source
-    else if k == .unary and nodes[n].op == i32(int(Tok.tilde)):
-        source = exact_count_bound(int(nodes[n].a))
-        if not source.wide: out = FactBound(-1 - source.hi, -1 - source.lo)
-    else if k == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1 and tkind(ntype(kid(n, 0))) == .array and not dir_assumed_bounds_file(nodes[n].pos >> 40):
-        bytes = tsize(telem(ntype(kid(n, 0))))
-        out = FactBound(0, (if bytes > 0: (1 << 56) / bytes else: FACT_MAX))
-    else:
-        modulus = positive_modulus(n)
-        if modulus > 0: out = FactBound(0, modulus - 1)
-        else if k == .binary and nodes[n].aux == 0:
-            op = nodes[n].op as Tok
-            if op == .plus or op == .minus:
-                a = exact_count_bound(int(nodes[n].a)); b = exact_count_bound(int(nodes[n].b))
-                if not a.wide and not b.wide and (op != .minus or b.lo != FACT_MIN):
-                    if op == .minus:
-                        low = -b.hi; b.hi = -b.lo; b.lo = low
-                    if fact_add_fits(a.lo, b.lo) and fact_add_fits(a.hi, b.hi): out = FactBound(a.lo + b.lo, a.hi + b.hi)
-            else if op == .star:
-                a = exact_count_bound(int(nodes[n].a)); b = exact_count_bound(int(nodes[n].b))
-                if not a.wide and not b.wide and not math_word_overflow(2, a.lo, b.lo) and not math_word_overflow(2, a.lo, b.hi) and not math_word_overflow(2, a.hi, b.lo) and not math_word_overflow(2, a.hi, b.hi):
-                    out = FactBound(min(min(a.lo * b.lo, a.lo * b.hi), min(a.hi * b.lo, a.hi * b.hi)), max(max(a.lo * b.lo, a.lo * b.hi), max(a.hi * b.lo, a.hi * b.hi)))
-            else if op == .slash:
-                a = exact_count_bound(int(nodes[n].a)); b = exact_count_bound(int(nodes[n].b))
-                # Division by zero has its own obligation. For every nonzero
-                # integer divisor, floor division is bounded by |a| + 1.
-                if not a.wide and a.lo > FACT_MIN and a.hi < FACT_MAX:
-                    magnitude = max(abs(a.lo), abs(a.hi))
-                    if magnitude < FACT_MAX: out = FactBound(-magnitude - 1, magnitude + 1)
-                    if not b.wide and b.lo > 0 and a.lo >= 0: out = FactBound(0, a.hi)
-            else if op == .shr:
-                a = exact_count_bound(int(nodes[n].a))
-                known, count = integer_constant(int(nodes[n].b))
-                if not a.wide and known and count >= 0:
-                    count = min(count, 63)
-                    out = FactBound(a.lo >> count, a.hi >> count)
-            else if op == .amp:
-                a = exact_count_bound(int(nodes[n].a)); b = exact_count_bound(int(nodes[n].b))
-                if not a.wide and a.lo >= 0: out = FactBound(0, a.hi)
-                if not b.wide and b.lo >= 0: out = FactBound(0, (if out.wide: b.hi else: min(out.hi, b.hi)))
-    if out.wide and is_int(t) and t != T_MATH_INT and not exact_has_node(n) and (types[t].sign or types[t].bits < 64): out = fact_domain(t)
-    if not out.wide and is_int(t) and t != T_MATH_INT and not exact_has_node(n):
-        fits = if types[t].sign: sa_fits(out.lo, t) and sa_fits(out.hi, t) else: out.lo >= 0 and (types[t].bits == 64 or out.hi < 1 << int(types[t].bits))
-        if not fits: out = FactBound(wide = true)
-    exact_count_bounds[slot] = out
-    out
-
-# The cost scan can discharge a tagged-int allocation only after exact
-# preparation has marked its unrounded source. The same cached signed bounds
-# drive word lowering. A magnitude strictly below 2^62 fits the tagged payload.
-exact_small_math = (n: int) -> int:
-    if not exact_has_node(n) and prune(ntype(n)) != T_MATH_INT and exact_operation(n): return -1
-    bound = exact_count_bound(n)
-    if bound.wide or bound.lo <= -(1 << 62) or bound.hi >= 1 << 62: return -1
-    max(abs(bound.lo), abs(bound.hi))
-
-# A checked count refinement can retain the finite exact lowering path. The
-# ordinary obligation pass still proves its width after all writes are known.
-exact_bounded_count = (n: int) -> bool:
-    bound = exact_count_bound(n)
-    not bound.wide and bound.lo >= 0 and bound.hi < 1048576
 
 exact_shift_fact = (n: int, value: int, s: FactState):
     if fact_speculating > 0 or not exact_has_node(n) or (nodes[n].op != i32(int(Tok.shl)) and nodes[n].op != i32(int(Tok.starstar))): return
