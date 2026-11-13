@@ -1,0 +1,74 @@
+$runtime_checks
+
+from p"ir.jo" import (ir ir_use_count)
+from p"ir_builders.dewy" import (ir_operands ir_use)
+from p"opt.jo" import (o_defines kills_memory)
+
+CopyWord:type=int64<overflow='wrap'>
+
+# A final register copy before leaving one arm does not execute on its sibling
+# path. Restore that register's version there, then invalidate it at the real
+# join. The bounded recognizer handles the common cursor/counter update without
+# snapshotting optimizer state or adding a control-flow pass.
+o_copy_forward=():>void=>$unsafe {
+    if ir.raw_mem or ir.slot_size.length =? 0 {return}
+    let code=ir.code
+    let previous:CopyWord=-1
+    let found=false
+    loop i in [0..code.length) {
+        let ins=code[i]
+        if ins.op =? 'copy' {
+            if previous >=? 0 and ins.b =? code[previous].a and ins.imm =? code[previous].imm {
+                found=true
+                break
+            }
+            previous=i
+        } else if not o_defines(ins.op) or kills_memory(ins.op) {previous=-1}
+    }
+    if not found {return}
+    let nv=ir.vtypes.length
+    let ns=ir.slot_size.length
+    let ndef:array<CopyWord>=fill(CopyWord(0) nv)
+    let nuse:array<CopyWord>=fill(CopyWord(0) nv)
+    let slot:array<CopyWord>=fill(CopyWord(-1) nv)
+    let addresses:array<CopyWord>=fill(CopyWord(0) ns)
+    loop ins in code {
+        let d=ir_operands(ins)
+        if d >=? 0 {ndef[d]+=1}
+        loop k in [0..ir_use_count) {nuse[ir_use(k)]+=1}
+        if ins.op =? 'slot' {
+            slot[int64(ins.dst)]=int64(ins.a)
+            addresses[int64(ins.a)]+=1
+        } else if ins.op =? 'zeroslots' {
+            loop k in [0..int64(ins.b)) {
+                let item=int64(ir.args[int64(ins.a) + k])
+                if item & 1 =? 1 {ndef[item >> 1]+=1}
+            }
+        }
+    }
+    previous=-1
+    loop i in [0..code.length) {
+        let ins=code[i]
+        if ins.op not=? 'copy' {
+            if not o_defines(ins.op) or kills_memory(ins.op) {previous=-1}
+            continue
+        }
+        let first_pos=previous
+        previous=i
+        if first_pos <? 0 {continue}
+        let first=code[first_pos]
+        let tmp=int64(ins.b)
+        let src=int64(first.b)
+        let dst=int64(ins.a)
+        if tmp not=? int64(first.a) or ins.imm not=? first.imm or tmp <? 0 or src <? 0 or dst <? 0 {continue}
+        let t=slot[tmp]
+        let s=slot[src]
+        let d=slot[dst]
+        if t <? 0 or s <? 0 or d <? 0 or t =? s or t =? d or s =? d {continue}
+        if ndef[tmp] not=? 1 or ndef[src] not=? 1 or ndef[dst] not=? 1 or nuse[tmp] not=? 2 or addresses[t] not=? 1 {continue}
+        if ins.imm not=? int64(ir.slot_size[t]) or ins.imm not=? int64(ir.slot_size[s]) or ins.imm not=? int64(ir.slot_size[d]) {continue}
+        code[first_pos].op='nop'
+        code[i].b=first.b
+    }
+    ir.code=code
+}
