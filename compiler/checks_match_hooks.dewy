@@ -10,7 +10,7 @@ from p"checker_match.dewy" import (xh_match)
 from p"checker_sinks.dewy" import (sink_arm)
 from p"checker_state.dewy" import (SK)
 from p"dewy_reader.dewy" import (AUX2_PLACE)
-from p"expr.jo" import (CV coerce_hint copy_path mk_ident_local narrow_expr narrow_local path_name refined_patterns str_set_patterns wrap_conv)
+from p"expr.jo" import (CV bare_generic_set coerce_hint copy_path mk_ident_local narrow_expr narrow_local path_name refined_patterns str_set_patterns wrap_conv)
 from p"narrowing_checks.dewy" import (opt_wild_narrow opt_wild_narrow_path)
 from p"select_checks.dewy" import (select_progress source_match)
 from p"checks_thin_expr.dewy" import (int_intervals_wide opt_rest_expr)
@@ -110,7 +110,10 @@ match_refined=(arm:int64 domain:array<int64> st:int64 high:array<int64>):>void=>
     return
 }
 match_string_patterns=(arm:int64 st:int64 covered:array<string> lits:array<string>):>void=>{
+    # This prepass reads type patterns, including bare generic outcome families.
+    let was=bare_generic_set(true)
     str_set_patterns(arm st covered lits)
+    bare_generic_set(was);
     return
 }
 match_wrap_union=(n:int64 t:int64):>void=>{

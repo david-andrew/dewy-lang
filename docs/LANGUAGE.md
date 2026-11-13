@@ -3803,7 +3803,7 @@ main = () => {
 
 `ctrl_c` gives `CtrlC`. `sigterm`, `sighup`, `sigwinch`, `sigusr1`, `sigusr2`,
 `ctrl_break` and `console_close` give `signals.Signal` with the corresponding
-`.name`. The POSIX sources receive their native signals; Windows provides Ctrl-C,
+`.name`, typed as `'sigterm'|'sighup'|'sigwinch'|'sigusr1'|'sigusr2'|'ctrl_break'|'console_close'`. The POSIX sources receive their native signals; Windows provides Ctrl-C,
 Ctrl-Break and console close. A source unavailable on a platform never fires:
 there is no `SignalUnavailable` and iteration needs no `or_throw`. A timed wait
 on such a source gives `Timeout`; normal group closure can still close it.

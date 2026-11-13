@@ -1,0 +1,13 @@
+# modes: native native-release
+Signal:type=[name:'ctrl_c'|'sigterm']
+main=()=>{
+    let c=channel<Signal>(2)
+    c.send(Signal['sigterm']) or_throw
+    c.close()
+    loop item in merged(@c.receive) or_throw {
+        match item.name {
+            <'ctrl_c'> => printl"ctrl"
+            <'sigterm'> => printl"term"
+        }
+    }
+}

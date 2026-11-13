@@ -1,0 +1,5 @@
+Signal:type=[name:'ctrl_c'|'sigterm']
+main=()=>{
+    let c=channel<Signal>(1)
+    c.send(Signal['unknown']) or_throw
+}

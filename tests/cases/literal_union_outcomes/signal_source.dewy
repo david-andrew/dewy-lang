@@ -1,0 +1,24 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+name = (s:signals.Signal):>string => match s.name {
+    <'sigterm'> => "term"
+    <'sighup'> => "hup"
+    <'sigwinch'> => "winch"
+    <'sigusr1'> => "usr1"
+    <'sigusr2'> => "usr2"
+    <'ctrl_break'> => "break"
+    <'console_close'> => "close"
+}
+main=()=>{
+    printl(name(signals.Signal['sigterm']))
+    concurrent {
+        loop true {
+            match signals.sigterm.next {
+                s:signals.Signal => printl(name(s))
+                <Closed> => break
+                <Canceled> => break
+            }
+        }
+    }
+    printl"closed"
+}

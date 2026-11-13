@@ -186,7 +186,10 @@ match_refined = (arm: int, domain: int[], st: int, high: int[]):
     refined_patterns(arm, domain, st, high)
     return
 match_string_patterns = (arm: int, st: int, covered: str[], lits: str[]):
+    # Type patterns admit bare generic outcome families in this prepass too.
+    was = bare_generic_set(true)
     str_set_patterns(arm, st, covered, lits)
+    bare_generic_set(was)
     return
 match_wrap_union = (n: int, t: int):
     wrap_conv(n, .union_, t)

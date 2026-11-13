@@ -1,0 +1,15 @@
+# modes: native native-release
+# quick
+Signal:type=[name:'ctrl_c'|'sigterm']
+main=()=>{
+ let c=channel<Signal>(2)
+ c.send(Signal['ctrl_c']) or_throw
+ c.close()
+ loop true {
+  match c.receive {
+   s:Signal => {match s.name {<'ctrl_c'> => printl"ctrl" <'sigterm'> => printl"term"}}
+   <Closed> => break
+   <Canceled> => break
+  }
+ }
+}
