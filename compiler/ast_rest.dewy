@@ -1,0 +1,39 @@
+$runtime_checks
+
+# Call arguments and captures share the AST arenas owned by ast.jo. Returned
+# lists keep the original snapshots; no node pointer survives a growing call.
+from p"ast.jo" import (NF_GENERIC has_flag kids kids2 nodes rest_bundles)
+
+AstRestWord:type=int64<overflow='wrap'>
+# Generic lambdas keep explicit captures in the child block stored in d.
+lambda_captures=(n:AstRestWord):>array<int64>=>{
+    if has_flag(n NF_GENERIC) {return kids(AstRestWord(nodes[n].d))}
+    kids2(n)
+}
+# A call's written arguments expand the arrays gathered by rest parameters.
+written_args=(n:AstRestWord):>array<int64>=>{
+    let out:array<int64>=[]
+    loop a in kids(n) {
+        let b=rest_bundle_of(a)
+        if b not=? 0 {
+            loop x in kids(b) {out.push(x)}
+        }
+        else {out.push(a)}
+    }
+    out
+}
+# Follow conversions to the marked rest-parameter array, or return zero.
+rest_bundle_of=(a:AstRestWord):>int64=>{
+    let b:AstRestWord=a
+    loop nodes[b].kind =? 'conv' {b=AstRestWord(nodes[b].a)}
+    if rest_bundles.has(b) {return b}
+    0
+}
+# A negative bundle length means an array was spread into its rest parameter.
+spreads_rest=(n:AstRestWord):>bool=>{
+    loop a in kids(n) {
+        let b=rest_bundle_of(a)
+        if b not=? 0 and rest_bundles[b] <? 0 {return true}
+    }
+    false
+}

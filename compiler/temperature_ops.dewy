@@ -12,8 +12,9 @@ from p"temperature_kinds.jo" import (TKC_DIFF TKC_LIT TKC_NAMED TKC_OTHER TKC_PO
 from p"types.jo" import (prune tkind type_eq types)
 from p"units.jo" import (is_quantity quantity_base quantity_tags)
 from p"unit_ops.dewy" import (base_dimension intern_quantity_tag mk_quantity quantity_delta_reading quantity_dimension quantity_is_delta quantity_point quantity_retag quantity_tag)
-from p"util.jo" import (line_col name_of pos_in_lib warn)
-
+from p"util.jo" import (name_of pos_in_lib)
+from p"source_warnings.dewy" import (warn)
+from p"source_queries.dewy" import (line_col)
 TempWord:type=int64<overflow='wrap'>
 # (the unit name of a temperature literal as written, before checking: 20°C, -5°F; else 0)
 tk_literal_unit=(e:TempWord):>TempWord=>$unsafe {

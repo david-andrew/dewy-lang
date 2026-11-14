@@ -1,3 +1,4 @@
+from tests.selfhost_expr_double import print_warnings
 """Checker metadata spelling, fixed-size names and browser warnings agree with the frozen Jo leaf."""
 import re
 import subprocess
@@ -47,10 +48,7 @@ def test_check_metadata_matches_twin(compiler, tmp_path, monkeypatch):
 
     def modules_for(*args, **kwargs):
         modules = dict(original(*args, **kwargs))
-        modules['util.jo'], count = re.subn(
-            r'(?m)^warn = \([^\n]*\):\n(?:[ \t].*\n|\n)*',
-            'warn = (p: int, msg: str): print(msg)\n\n', modules['util.jo'], count=1)
-        assert count == 1
+        print_warnings(modules)
         return modules
 
     monkeypatch.setattr(selfhost_lsp_double, 'modules_for', modules_for)

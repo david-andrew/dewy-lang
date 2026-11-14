@@ -105,3 +105,9 @@ def isolate_hooks(modules):
         'decl_quantity_literal': ('s:int64 t:int64', 's t', 'int64'),
         'decl_after': ('s:int64 l:int64 t:int64 code:int64', 's l t code', 'void'),
     })
+
+
+def print_warnings(modules):
+    """Replace the moved warning entry in either language for diagnostic drivers."""
+    modules['source_warnings.dewy'] = '$runtime_checks\nwarn=(p:int64 msg:string):>void=>{printl(msg)}\n'
+    modules['source_warnings.jo'] = 'warn = (p: int, msg: str): print(msg)\n'

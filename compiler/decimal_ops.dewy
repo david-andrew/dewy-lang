@@ -23,8 +23,9 @@ from p"refinement_types.dewy" import (FactRequest)
 from p"types.jo" import (T_FLOAT prune tkind)
 from p"units.jo" import (bundled_rational_type is_quantity quantity_base)
 from p"unit_ops.dewy" import (base_dimension mk_quantity quantity_constant_scale quantity_dimension)
-from p"util.jo" import (files line_col name_of pos_file warn)
-
+from p"util.jo" import (files name_of pos_file)
+from p"source_warnings.dewy" import (warn)
+from p"source_queries.dewy" import (line_col)
 DecimalWord:type=int64<overflow='wrap'>
 decimal_quantity_at:DecimalWord=0 # (the last binding decimal_quantity_start found: only those may start over)
 decimal_let=(n:DecimalWord):>void=>$unsafe {

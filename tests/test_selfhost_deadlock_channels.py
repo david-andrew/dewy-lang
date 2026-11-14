@@ -1,3 +1,4 @@
+from tests.selfhost_expr_double import print_warnings
 """Channel identity, capacity and cancellation queries match frozen Jo."""
 import re
 
@@ -38,12 +39,7 @@ main = ():
         modules.arguments = ('check', str(source))
         modules.runtime_driver = lambda text: text
         diagnostic_status(modules)
-        for name, body in [('warn', 'print(msg)')]:
-            modules['util.jo'], count = re.subn(
-                rf'(?m)^{name} = \([^\n]*\):\n(?:[ \t].*\n|\n)*',
-                f'{name} = (p: int, msg: str): {body}\n\n',
-                modules['util.jo'], count=1)
-            assert count == 1
+        print_warnings(modules)
         result = compare_leaf(compiler, tmp_path, False, driver, status=status,
                               extra_stems=(leaf,), jo_doubles=modules)
         assert expected in result, (source, result)

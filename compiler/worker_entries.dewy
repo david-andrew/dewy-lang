@@ -1,0 +1,28 @@
+$runtime_checks
+from p"par.jo" import ParIn
+from p"@lib/core/os.jo" import (env)
+
+WorkerEntryWord:type=int64<overflow='wrap'>
+# (DEWY_EMIT_WORKERS=n: how many; 1: none. DEWY_EMIT_FORCE=1: workers even for a small
+# program, for tests. DEWY_PAR_TIME=1: how long each part took)
+emit_workers=():>int64=>{
+    let n:WorkerEntryWord=1
+    n=min(cpu_count() 16)
+    let w=env("DEWY_EMIT_WORKERS")
+    if w not=? none {n=to_int(w) ?? n}
+    n
+}
+# everything a pipe gives until it is closed
+par_read=(fd:int64):>array<uint8>=>$unsafe {
+    let out:array<uint8>=[]
+    loop true {
+        let n:WorkerEntryWord=WorkerEntryWord(out.length)
+        out.resize(n + 262144)
+        let r:WorkerEntryWord=syscall(0 fd data(out) + n 262144)
+        if r <=? 0 {
+            out.resize(n)
+            return out
+        }
+        out.resize(n + r)
+    }
+}

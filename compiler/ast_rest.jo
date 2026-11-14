@@ -1,0 +1,25 @@
+use 'ast.jo'
+lambda_captures = (n: int) -> int[]:
+    if has_flag(n, NF_GENERIC): return kids(int(nodes[n].d))
+    kids2(n)
+
+written_args = (n: int) -> int[]:
+    out: int[]
+    loop a in kids(n):
+        b = rest_bundle_of(a)
+        if b != 0:
+            loop x in kids(b): out.push(x)
+        else: out.push(a)
+    out
+
+rest_bundle_of = (a: int) -> int:
+    b = a
+    loop nodes[b].kind == .conv: b = int(nodes[b].a)
+    if rest_bundles.has(b): return b
+    0
+
+spreads_rest = (n: int) -> bool:
+    loop a in kids(n):
+        b = rest_bundle_of(a)
+        if b != 0 and rest_bundles[b] < 0: return true
+    false

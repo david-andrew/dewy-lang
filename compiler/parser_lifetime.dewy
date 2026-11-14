@@ -1,0 +1,25 @@
+$runtime_checks
+
+# The owner is the parse-unit array, not a copied view. Replacing/clearing the
+# stream always refreshes its pointer and length, including interpolation.
+from p"parse.jo" import (toks p_toks p_ntoks)
+from p"lex.jo" import (lex Token)
+
+let parser_tokens:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+parser_lifetime_bind=(tokens:ptr<int64>):>int64=>{
+    parser_tokens=tokens
+    0
+}
+p_lex_unit=(file:int64 src:string begin:int64=0 stop:int64=-1):>void=>$unsafe {
+    toks=lex(file src begin stop)
+    # lex always returns an EOF-terminated, nonnull array. Read the owner's
+    # runtime header [references, length, capacity], without a sentinel view.
+    let header=(parser_tokens as ptr<ptr<uint8>>)[0]
+    p_toks=(header + 24) as ptr<Token>
+    p_ntoks=toks.length
+}
+p_clear_unit=():>void=>$unsafe {
+    toks=[]
+    p_toks=uint64(0) as ptr<Token>
+    p_ntoks=0
+}

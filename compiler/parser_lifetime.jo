@@ -1,0 +1,13 @@
+use 'parse.jo'
+use 'lex.jo'
+p_lex_unit = (file: int, src: str, from: int = 0, to: int = -1):
+    toks = lex(file, src, from, to)
+    p_toks = data(toks)
+    p_ntoks = toks.len()
+
+p_clear_unit = ():
+    toks = []
+    p_toks = data(toks)
+    p_ntoks = toks.len()
+
+parser_lifetime_bind = (tokens: *int) -> int: 0

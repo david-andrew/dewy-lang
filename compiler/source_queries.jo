@@ -1,0 +1,38 @@
+use 'line_table.dewy'
+use 'util.jo'
+line_col = (p: int) -> (int, int):
+    f = pos_file(p)
+    if f < 0 or f >= files.len(): return (0, 0)
+    line_col_in(src_lines, f, pos_off(p), files[f].src)
+
+pos_str = (p: int) -> str:
+    f = pos_file(p)
+    if f < 0 or f >= files.len(): return "<unknown>"
+    l, c = line_col(p)
+    "{files[f].path}:{l}:{c}"
+
+code_lines = (src: str, a: int, b: int) -> int:
+    count = 0
+    depth = 0
+    seen_code = false
+    i = a
+    loop i < b:
+        c = src[i]
+        if c == 10:
+            if seen_code: count += 1
+            seen_code = false
+            i += 1
+        else if c == 35 and i + 1 < b and src[i + 1] == 123:
+            depth += 1
+            i += 2
+        else if depth > 0 and c == 125 and i + 1 < b and src[i + 1] == 35:
+            depth -= 1
+            i += 2
+        else if depth > 0: i += 1
+        else if c == 35:
+            loop i < b and src[i] != 10: i += 1
+        else:
+            if c != 32 and c != 9 and c != 13: seen_code = true
+            i += 1
+    if seen_code: count += 1
+    count

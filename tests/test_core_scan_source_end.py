@@ -20,6 +20,7 @@ use '{root}/compiler/lex.jo'
 use '{root}/compiler/scan.jo'
 use '{root}/compiler/scan_index.dewy'
 use '{root}/compiler/dewy_fast.jo'
+use '{root}/compiler/dewy_frontend.dewy'
 use '{root}/compiler/dewy_fast_lex.dewy'
 
 page = 4096
@@ -63,6 +64,7 @@ jb = __alloc(192)
 files.push(SrcFile("t.jo", ".", "", false))
 files.push(SrcFile("t.dewy", ".", "", true))
 nil: str
+frontend_bind(&names as *int, &name_hash as *int, &name_tab as *int, &dn_lex_host as *int)
 loop m in [0..4): scans(m, nil)
 texts = split(read_file(args()[1])!, "\\x01")
 ran = 0

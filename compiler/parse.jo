@@ -1,3 +1,4 @@
+use 'parser_lifetime.dewy'
 use 'checker_tokens.dewy'
 # Parser: tokens -> AST (nodes in ast.jo).
 
@@ -44,16 +45,6 @@ p_lazy = false           # (parsing a library file, outside the editor)
 p_top_decl = false       # (the function being parsed is a top-level one)
 
 # Lex a parse unit into the token stream owned here and borrow it (or, cleared, leave none).
-p_lex_unit = (file: int, src: str, from: int = 0, to: int = -1):
-    toks = lex(file, src, from, to)
-    p_toks = data(toks)
-    p_ntoks = toks.len()
-
-p_clear_unit = ():
-    toks = []
-    p_toks = data(toks)
-    p_ntoks = toks.len()
-
 # ---------------- expressions ----------------
 p_header = false      # parsing an if/loop/match header: `(x): ...` is not a function there
 # (inside a call's parentheses `(x): ...` is a function again, in an if or loop header too:
@@ -89,3 +80,5 @@ lx_bcount = 0
 struct_body = ""                # (the struct whose fields are being parsed)
 # profiling aid: DEWY_STOP=lex or DEWY_STOP=parse makes `dewy check` stop after that phase
 stop_after = ""
+
+parser_lifetime_binding = parser_lifetime_bind(&toks as *int)

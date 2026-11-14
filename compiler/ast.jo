@@ -5,12 +5,6 @@
 use 'util.jo'
 use 'node_store.dewy'
 
-# Generic lambdas retain type parameters in kids2, as module functions do.
-# Their explicit captures use a child block so cloning preserves both lists.
-lambda_captures = (n: int) -> int[]:
-    if has_flag(n, NF_GENERIC): return kids(int(nodes[n].d))
-    kids2(n)
-
 # node flags
 const NF_MUT = 1
 const NF_INCLUSIVE = 2
@@ -132,26 +126,4 @@ rest_bundles: {int: int} = {}
 # instance: the rest argument's length is the call's.)
 decl_has_rest = (d: int) -> bool: (dewy_param_kinds.get(d) ?? []).contains(3)
 
-# A call's arguments as written: a rest parameter's array gives those it gathered, in place.
-written_args = (n: int) -> int[]:
-    out: int[]
-    loop a in kids(n):
-        b = rest_bundle_of(a)
-        if b != 0:
-            loop x in kids(b): out.push(x)
-        else: out.push(a)
-    out
-
-# The rest parameter's array literal an argument is (through conversions), else 0.
-rest_bundle_of = (a: int) -> int:
-    b = a
-    loop nodes[b].kind == .conv: b = int(nodes[b].a)
-    if rest_bundles.has(b): return b
-    0
-
-# Does a call spread an array into its rest parameter? (Its waits are then not written.)
-spreads_rest = (n: int) -> bool:
-    loop a in kids(n):
-        b = rest_bundle_of(a)
-        if b != 0 and rest_bundles[b] < 0: return true
-    false
+# ast_rest.dewy owns capture lists and written/rest argument queries.

@@ -1,3 +1,4 @@
+use 'dewy_frontend.dewy'
 use 'dewy_lexer.dewy'
 use 'dewy_fast_lex.dewy'
 use 'dewy_fast_file.dewy'
@@ -99,36 +100,6 @@ const DN_EOF_SPARE = 8
 
 dn_lex_host = DewyLexHost(dn_lex_canonical, dn_lex_newline, dn_lex_slice, intern_new, dn_lex_problem, dn_error)
 
-dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLexeme[]:
-    if intern_names and dn_word_tokens.len() == 0: dn_init_words()
-    source = files[file].src
-    # Hold the immutable string while scanning its bounded byte span. The
-    # guards below are against stop, including interpolation subexpressions.
-    assert(begin >= 0 and begin <= stop and stop <= len(source))
-    if lx_cls == null: lx_init_classes()
-    if dn_symbols.len() == 0: dn_init_symbols()
-    classes = data(dn_classes)
-    symbols = data(dn_symbols)
-    out: DewyLexeme[]
-    capacity = (stop - begin) / 2 + 2 + DN_EOF_SPARE
-    out.resize(capacity)
-    dn_block_comments = []
-    state = DewyLexState(dn_skip_bodies, false, dn_metatags, false, false, dc_parser.reader.dn_true_id, dc_parser.reader.dn_false_id, dc_parser.reader.dn_is_id, dc_parser.reader.dn_isnt_id, dc_parser.reader.dn_in_id, dn_word_tokens.len(), &names, &name_hash, &name_tab)
-    count = dx_lex(state, &dn_lex_host, dn_lexer, dn_block_comments, source, begin, stop, intern_names, classes, symbols, data(dn_word_tokens), out, capacity)
-    dn_metatags = state.metatags
-    if state.lazy: dc_parser.reader.dn_lazy_left = true
-    spaced = state.space
-    newline = state.newline
-    capacity = out.len()
-    slots = data(out)
-    if count + 1 + DN_EOF_SPARE > capacity:
-        capacity = count + 1 + DN_EOF_SPARE
-        out.resize(capacity)
-        slots = data(out)
-    loop k in [count..count + DN_EOF_SPARE]: slots[k] = DewyLexeme(.eof, 0, stop, stop, spaced, newline)
-    out.truncate(count + 1 + DN_EOF_SPARE)
-    out
-
 const DN_EDIT_BIGINT = -1099511627776
 const DN_EDIT_LIVE = -1125899906842624
 # (below DN_EDIT_METHODS, DN_EDIT_METHODS - k: the method groups from k on, dc_literal_methods)
@@ -136,22 +107,6 @@ const DN_EDIT_METHODS = -36028797018963968
 # (`kept`: the direct nodes stay, compare mode's: their place and live-source marks stay too)
 
 
-dewy_fast_file = (file: int) -> int[]:
-    dw_bigint_import = 0
-    # (a reading may split generic closers: a retry restores them, dn_edits_undo)
-    saved_edits_on = dc_parser.reader.dn_edits_on
-    dc_parser.reader.dn_edits_on = true
-    dc_parser.file = file
-    dc_parser.source = files[file].src
-    dn_lexer.suspect_brace = -1
-    dc_parser.reader.dn_in_interpolation = 0
-    dn_metatags = 0
-    lib_lazy = dc_lib_lazy_allowed(file) and not dc_lazy_allowed(file)
-    dc_parser.reader.dn_lazy_left = false
-    dn_skip_bodies = lib_lazy
-    dc_parser.tokens = dn_lex(file, 0, len(files[file].src))
-    dn_skip_bodies = false
-    dw_dir_lexed(file)
-    df_file(dc_parser, nodes, dc_file_host, saved_edits_on, lib_lazy, dc_lazy_allowed(file))
-
 dc_file_host = ParserFileHost(df_note_lazy, dw_top_declarations, df_finish_statement, dw_test_attach, df_finish_checks, dw_finish_declarations)
+
+frontend_binding = frontend_bind(&names as *int, &name_hash as *int, &name_tab as *int, &dn_lex_host as *int)

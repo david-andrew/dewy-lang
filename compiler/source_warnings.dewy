@@ -1,0 +1,44 @@
+$runtime_checks
+from p"util.jo" import (err_held errors_only shown_warnings warned)
+from p"@lib/core/os.jo" import (eprint)
+from p"fused.jo" import (fused_on)
+from p"fused_ops.dewy" import (fz_note_text)
+from p"ide.jo" import (ide_on)
+from p"ide_ops.dewy" import (ide_warn)
+from p"lazy_bodies.jo" import (dc_lazy_used dc_warning_pos dc_warning_text)
+from p"lazy_force.dewy" import (dc_replay)
+from p"pcheck.jo" import (pc_collect pc_prechecking pc_reordered pc_warn_pos pc_warn_text)
+from p"source_queries.dewy" import (pos_str)
+
+WarningWord:type=int64<overflow='wrap'>
+warn=(p:int64 msg:string):>void=>{
+    # (after an error is held, as the compile would have stopped at it)
+    if err_held.length >? 0 {return}
+    # A prechecked library warning belongs after the pending roots. Replay there.
+    if pc_prechecking {dc_replay()}
+    if pc_collect {
+        pc_warn_pos.push(p)
+        pc_warn_text.push(msg)
+        return
+    }
+    if dc_lazy_used or pc_reordered {
+        dc_warning_pos.push(p)
+        dc_warning_text.push(msg)
+        return
+    }
+    if fused_on {
+        fz_note_text(5 p msg)
+        return
+    }
+    if ide_on {
+        ide_warn(p msg)
+        return
+    }
+    let key="{p} {msg}"
+    if warned.has(key) {return}
+    warned[key]=true
+    let wk="w{p}.{(msg as array<uint8>).length}"
+    if errors_only and shown_warnings.contains(wk) {return}
+    shown_warnings.push(wk)
+    eprint("{pos_str(p)}: warning: {msg}")
+}

@@ -27,30 +27,13 @@ use 'types.jo'
 use 'ast.jo'
 use 'fused.jo'
 use 'par_ops.dewy'
+use 'worker_entries.dewy'
 
 
 
 
 
-# (DEWY_EMIT_WORKERS=n: how many; 1: none. DEWY_EMIT_FORCE=1: workers even for a small
-# program, for tests. DEWY_PAR_TIME=1: how long each part took)
-emit_workers = () -> int:
-    n = 1
-    when not BOOTSTRAP: n = min(cpu_count(), 16)          # (the C bootstrap's compiler: one)
-    if let w = env("DEWY_EMIT_WORKERS"): n = to_int(w) ?? n
-    n
 
-# everything a pipe gives until it is closed
-par_read = (fd: int) -> u8[]:
-    out: u8[]
-    loop true:
-        n = out.len()
-        out.resize(n + 262144)
-        r = syscall(0, fd, data(out) + n, 262144)
-        if r <= 0:
-            out.resize(n)
-            return out
-        out.resize(n + r)
 
 # ---- joining a worker's run onto what is here ----
 struct ParIn:

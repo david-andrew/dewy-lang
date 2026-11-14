@@ -1,0 +1,52 @@
+$runtime_checks
+
+# Source/line storage stays in util.jo. The requested byte span is borrowed for
+# the duration of code_lines; position queries keep the shared lazy line cache.
+from p"util.jo" import (files pos_file pos_off src_lines)
+from p"line_table.dewy" import line_col_in
+
+SourceQueryWord:type=int64<overflow='wrap'>
+line_col=(p:int64):>[int64 int64]=>{
+    let f=pos_file(p)
+    if f <? 0 or f >=? files.length {return [0 0]}
+    line_col_in(@src_lines f pos_off(p) files[f].src)
+}
+pos_str=(p:int64):>string=>{
+    let f=pos_file(p)
+    if f <? 0 or f >=? files.length {return "<unknown>"}
+    let [l c]=line_col(p)
+    "{files[f].path}:{l}:{c}"
+}
+code_lines=(src:string a:SourceQueryWord b:SourceQueryWord):>int64=>$unsafe {
+    let bytes=(src as array<uint8>).ptr
+    let count:SourceQueryWord=0
+    let depth:SourceQueryWord=0
+    let seen_code=false
+    let i:SourceQueryWord=a
+    loop i <? b {
+        let c=bytes[i]
+        if c =? 10 {
+            if seen_code {count += 1}
+            seen_code=false
+            i += 1
+        }
+        else if c =? 35 and i + 1 <? b and bytes[i + 1] =? 123 {
+            depth += 1
+            i += 2
+        }
+        else if depth >? 0 and c =? 125 and i + 1 <? b and bytes[i + 1] =? 35 {
+            depth -= 1
+            i += 2
+        }
+        else if depth >? 0 {i += 1}
+        else if c =? 35 {
+            loop i <? b and bytes[i] not=? 10 {i += 1}
+        }
+        else {
+            if c not=? 32 and c not=? 9 and c not=? 13 {seen_code=true}
+            i += 1
+        }
+    }
+    if seen_code {count += 1}
+    count
+}

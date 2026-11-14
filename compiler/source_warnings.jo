@@ -1,0 +1,35 @@
+use 'util.jo'
+use 'pcheck.jo'
+use 'lazy_bodies.jo'
+use 'lazy_force.dewy'
+use 'fused.jo'
+use 'fused_ops.dewy'
+use 'ide.jo'
+use 'ide_ops.dewy'
+use 'source_queries.dewy'
+warn = (p: int, msg: str):
+    # (after an error is held, as the compile would have stopped at it)
+    if err_held.len() > 0: return
+    # A prechecked library warning belongs after the pending roots. Replay there.
+    if pc_prechecking: dc_replay()
+    if pc_collect:
+        pc_warn_pos.push(p)
+        pc_warn_text.push(msg)
+        return
+    if dc_lazy_used or pc_reordered:
+        dc_warning_pos.push(p)
+        dc_warning_text.push(msg)
+        return
+    if fused_on:
+        fz_note_text(5, p, msg)
+        return
+    if ide_on:
+        ide_warn(p, msg)
+        return
+    key = "{p} {msg}"
+    if warned.has(key): return
+    warned[key] = true
+    wk = "w{p}.{len(msg)}"
+    if errors_only and shown_warnings.contains(wk): return
+    shown_warnings.push(wk)
+    eprint("{pos_str(p)}: warning: {msg}")

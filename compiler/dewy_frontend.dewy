@@ -1,0 +1,77 @@
+$runtime_checks
+
+# Lex/file entry ownership. The Jo owner binds stable array-header and service
+# addresses once; no per-unit array copy or translated parser context is made.
+# dx_lex may grow the output, and every resize refreshes its slot pointer.
+from p"dewy_fast.jo" import (DN_EOF_SPARE dn_word_tokens dn_init_symbols dn_symbols dn_classes dn_block_comments dn_metatags dn_skip_bodies dn_lexer dc_file_host)
+from p"dewy_fast_lex.dewy" import dn_init_words
+from p"dewy_lexer.dewy" import (DewyLexHost DewyLexState dx_lex)
+from p"dewy_tokens.dewy" import (DewyLexeme DewyToken)
+from p"dewy_file.dewy" import (ParserFileHost df_file)
+from p"dewy_context.jo" import dc_parser
+from p"dewy_direct_ops.dewy" import (dc_lib_lazy_allowed dc_lazy_allowed)
+from p"dewy_directive_ops.dewy" import dw_dir_lexed
+from p"dewy_nodes.jo" import dw_bigint_import
+from p"ast.jo" import nodes
+from p"lex.jo" import lx_cls
+from p"lexer_helpers.dewy" import lx_init_classes
+from p"util.jo" import files
+
+FrontendWord:type=int64<overflow='wrap'>
+let frontend_texts:ptr<array<string>>=$unsafe (uint64(0) as ptr<array<string>>)
+let frontend_hashes:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let frontend_names:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let frontend_host:ptr<DewyLexHost>=$unsafe (uint64(0) as ptr<DewyLexHost>)
+frontend_bind=(texts:ptr<int64> hashes:ptr<int64> names_:ptr<int64> host:ptr<int64>):>int64=>$unsafe {
+    frontend_texts=texts as ptr<array<string>>
+    frontend_hashes=hashes as ptr<array<int64>>
+    frontend_names=names_ as ptr<array<int32>>
+    frontend_host=host as ptr<DewyLexHost>
+    0
+}
+dn_lex=(file:int64 begin:int64 stop:int64 intern_names:bool=true):>array<DewyLexeme>=>$unsafe {
+    if intern_names and dn_word_tokens.length =? 0 {dn_init_words()}
+    let source=files[file].src
+    $runtime_assert begin >=? 0 and begin <=? stop and stop <=? (source as array<uint8>).length
+    if lx_cls =? (uint64(0) as ptr<uint8>) {lx_init_classes()}
+    if dn_symbols.length =? 0 {dn_init_symbols()}
+    let classes=dn_classes.ptr
+    let symbols=dn_symbols.ptr
+    let out:array<DewyLexeme>=[]
+    let capacity:FrontendWord=((FrontendWord(stop) - FrontendWord(begin)) >> 1) + 2 + DN_EOF_SPARE
+    out.resize(capacity)
+    dn_block_comments=[]
+    let state=DewyLexState[dn_skip_bodies false dn_metatags false false dc_parser.reader.dn_true_id dc_parser.reader.dn_false_id dc_parser.reader.dn_is_id dc_parser.reader.dn_isnt_id dc_parser.reader.dn_in_id dn_word_tokens.length frontend_texts frontend_hashes frontend_names]
+    let count:FrontendWord=dx_lex(@state frontend_host @dn_lexer @dn_block_comments source begin stop intern_names classes symbols dn_word_tokens.ptr @out capacity)
+    dn_metatags=state.metatags
+    if state.lazy {dc_parser.reader.dn_lazy_left=true}
+    let spaced=state.space
+    let newline=state.newline
+    capacity=FrontendWord(out.length)
+    let slots=out.ptr
+    if count + 1 + DN_EOF_SPARE >? capacity {
+        capacity=count + 1 + DN_EOF_SPARE
+        out.resize(capacity)
+        slots=out.ptr
+    }
+    loop k in [count..count + DN_EOF_SPARE] {slots[k]=DewyLexeme['eof' 0 stop stop spaced newline]}
+    out.truncate(count + 1 + DN_EOF_SPARE)
+    out
+}
+dewy_fast_file=(file:int64):>array<int64>=>$unsafe {
+    dw_bigint_import=0
+    let saved_edits_on=dc_parser.reader.dn_edits_on
+    dc_parser.reader.dn_edits_on=true
+    dc_parser.file=file
+    dc_parser.source=files[file].src
+    dn_lexer.suspect_brace=-1
+    dc_parser.reader.dn_in_interpolation=0
+    dn_metatags=0
+    let lib_lazy=dc_lib_lazy_allowed(file) and not dc_lazy_allowed(file)
+    dc_parser.reader.dn_lazy_left=false
+    dn_skip_bodies=lib_lazy
+    dc_parser.tokens=dn_lex(file 0 (files[file].src as array<uint8>).length)
+    dn_skip_bodies=false
+    dw_dir_lexed(file)
+    df_file(@dc_parser @nodes dc_file_host saved_edits_on lib_lazy dc_lazy_allowed(file))
+}
