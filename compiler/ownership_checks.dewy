@@ -198,7 +198,7 @@ ownership_validate_node=(n:CWord f:CWord):>void=>$unsafe {
     }
     if k =? 'vardecl' and CWord(oc_nodes[0].ptr[n].flags) & NF_GLOBAL =? 0 and oc_nkids(n) =? 0 and oc_nodes[0].ptr[n].sym >? 0 {
         let lt=CWord(oc_locals[0].ptr[CWord(oc_nodes[0].ptr[n].sym)].type)
-        if ownership_type(lt) and oc_nodes[0].ptr[n].b =? 0 and ow_kind(lt) not=? 'array' and ow_kind(lt) not=? 'opt' and not ow_is_map(lt) {
+        if ownership_type(lt) and oc_nodes[0].ptr[n].b =? 0 and oc_nodes[0].ptr[n].aux2 not=? 1791 and ow_kind(lt) not=? 'array' and ow_kind(lt) not=? 'opt' and not ow_is_map(lt) {
             oc_fail(n "an owner requires completed construction before registration")
         }
     }

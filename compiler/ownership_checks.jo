@@ -142,7 +142,7 @@ ownership_validate_node = (n: int, f: int):
             if ownership_type(ft) and ow_kind(ft) != .opt and (i >= oc_nkids(n) or oc_kid(n, i) == 0): oc_fail(n, "an owning field requires completed construction")
     if k == .vardecl and int(oc_nodes[0][n].flags) & NF_GLOBAL == 0 and oc_nkids(n) == 0 and oc_nodes[0][n].sym > 0:
         lt = int(oc_locals[0][int(oc_nodes[0][n].sym)].type)
-        if ownership_type(lt) and oc_nodes[0][n].b == 0 and ow_kind(lt) != .array and ow_kind(lt) != .opt and not ow_is_map(lt):
+        if ownership_type(lt) and oc_nodes[0][n].b == 0 and oc_nodes[0][n].aux2 != 1791 and ow_kind(lt) != .array and ow_kind(lt) != .opt and not ow_is_map(lt):
             oc_fail(n, "an owner requires completed construction before registration")
     if k == .assign and ownership_type(oc_ntype(int(oc_nodes[0][n].a))):
         target = int(oc_nodes[0][n].a)

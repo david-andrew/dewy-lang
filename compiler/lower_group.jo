@@ -3612,6 +3612,15 @@ gen_assign = (s: int):
     write_place(pl, t, r)
 
 gen_vardecl = (s: int):
+    if nodes[s].aux2 == 1791:
+        local = int(nodes[s].sym)
+        type_id = store_type(local)
+        if is_shared(local): new_cell(local)
+        place = local_place(local, true)
+        if place.mem: e_zero(place.v, tsize(type_id))
+        else: e_mov(place.v, zero_val(type_id))
+        if is_managed(type_id): scope_locals[scope_locals.len() - 1].push(local)
+        return
     if exact_lower_active: exm_fresh_array(s)
     if nodes[s].nlist > 0:
         tt = prune(ntype(int(nodes[s].b)))

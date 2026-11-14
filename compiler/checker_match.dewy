@@ -1,5 +1,7 @@
 $runtime_checks
 
+from p"scope_joins.dewy" import (scope_join_begin scope_join_end)
+
 from p"node_store.dewy" import (Node node_mk node_set_list)
 from p"checker_types.dewy" import (TypeInfo StructInfo Field Variant TK)
 from p"source_types.dewy" import SrcFile
@@ -431,7 +433,7 @@ xh_wild_members=(@arm_state:ArmState st:XHWord seen_before:array<bool> finite_be
     }
     false
 }
-xh_match=(m:XHWord expected:XHWord):>XHWord=>$unsafe {
+xh_match_body=(m:XHWord expected:XHWord):>XHWord=>$unsafe {
     let is_stmt=XHWord(xh_nodes[0].ptr[m].flags) & 16 not=? 0
     let sc=XHWord(xh_nodes[0].ptr[m].a)
     xh_host[0].check(sc 0);
@@ -610,5 +612,12 @@ xh_match=(m:XHWord expected:XHWord):>XHWord=>$unsafe {
     }
     xh_host[0].member_arms(ms.member_arms result)
     xh_nodes[0][m].type=int32<overflow='wrap'>(result)
+    result
+}
+
+xh_match=(m:XHWord expected:XHWord):>XHWord=>{
+    let state=scope_join_begin(m)
+    let result=xh_match_body(m expected)
+    scope_join_end(m state result)
     result
 }

@@ -14,6 +14,7 @@ use 'isolation_ops.dewy'
 
 struct DaState:
     unset: int[]          # locals declared without a value and not yet given one
+    missing: {int: int} = {} # lifted local -> first missing path, node*4 + then/else/arm
     done: bool = false    # this path has ended (return, break, continue, never)
 
 da_decls: int[]           # vardecl nodes (checked: sym is the local)

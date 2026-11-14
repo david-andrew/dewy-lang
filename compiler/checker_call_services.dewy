@@ -477,6 +477,16 @@ call_name_sym=(n:CDWord name:CDWord mod_scope:CDWord s:CDWord args:array<int64> 
     -1
 }
 call_name_collect=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expected:CDWord ufcs:bool @decls:array<int64>):>CDWord=>$unsafe {
+    let callee=CDWord(nodes.ptr[n].a)
+    if nodes.ptr[callee].kind =? 'ident' and nodes.ptr[callee].aux2 =? 1797 {
+        let symbol=lookup(CDWord(nodes.ptr[callee].name))
+        loop symbol not=? 0 {
+            let declaration=CDWord(syms.ptr[symbol].decl)
+            if declaration not=? 0 {decls.push(declaration)}
+            symbol=CDWord(syms.ptr[symbol].next)
+        }
+        return -1
+    }
     surface_hidden.clear()
     if ufcs {
         if mod_scope >=? 0 {call_collect_module(mod_scope name @decls)}

@@ -1,3 +1,4 @@
+use 'scope_joins.dewy'
 # Frozen checker hooks and pending-body execution from check.jo.
 use 'check.jo'
 use 'checks_thin.dewy'
@@ -64,6 +65,8 @@ decl_after = (s: int, l: int, t: int, code: int):
     else if code == 8: const_view_declare(l, int(nodes[s].b))
     else if code == 9: da_record(s)
     else if code == 10: ide_hint_local(s, l)
+    else if code == 11: scope_join_decl(s, l, t)
+    else if code == 12: scope_join_pattern(s)
 
 run_pending_functions = (start: int) -> int:
     k = start

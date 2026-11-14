@@ -1,3 +1,4 @@
+use 'scope_joins.dewy'
 # Frozen `match` checker extracted from expr.jo.
 use 'node_store.dewy'
 use 'checker_types.dewy'
@@ -369,7 +370,7 @@ xh_wild_members = (arm_state: mut ArmState, st: int, seen_before: bool[], finite
     loop vi in [0..all.len()):
         if not seen_before[vi]: arm_state.members.push(all[vi])
     false
-xh_match = (m: int, expected: int) -> int:
+xh_match_body = (m: int, expected: int) -> int:
     is_stmt = int(xh_nodes[0][m].flags) & 16 != 0
     sc = int(xh_nodes[0][m].a)
     xh_host[0].check(sc, 0)
@@ -515,4 +516,10 @@ xh_match = (m: int, expected: int) -> int:
                 xh_host[0].coerce(int(xh_nodes[0][xh_kid(b, xh_count(b) - 1)].a), result)
     xh_host[0].member_arms(ms.member_arms, result)
     xh_nodes[0][m].type = i32(result)
+    result
+
+xh_match = (m: int, expected: int) -> int:
+    state = scope_join_begin(m)
+    result = xh_match_body(m, expected)
+    scope_join_end(m, state, result)
     result

@@ -1,3 +1,4 @@
+use 'scope_joins.dewy'
 # Frozen `if` / `if let` checker extracted from expr.jo.
 use 'node_store.dewy'
 use 'checker_types.dewy'
@@ -147,7 +148,7 @@ xf_statement = (cond: int, b: int, c: int) -> int:
     else if c != 0 and ends_c and not ends_b: cond_promote(before_b, after_b)
     if filled: xf_narrow(cond, false)
     xf_void_type[0]
-xf_if = (n: int, ex: int) -> int:
+xf_if_body = (n: int, ex: int) -> int:
     is_stmt = int(xf_nodes[0][n].flags) & 16 != 0
     chain = xf_chain_end(int(xf_nodes[0][n].a))
     check_to(int(xf_nodes[0][n].a), xf_bool_type[0])
@@ -245,3 +246,9 @@ xf_iflet = (n: int, ex: int) -> int:
     va = xf_value(b)
     vb = xf_value(c)
     cond_join(va, vb, ex, xf_nodes[0][n].pos)
+
+xf_if = (n: int, ex: int) -> int:
+    state = scope_join_begin(n)
+    result = xf_if_body(n, ex)
+    scope_join_end(n, state, result)
+    result

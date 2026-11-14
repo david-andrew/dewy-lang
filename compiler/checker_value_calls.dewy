@@ -1,5 +1,7 @@
 $runtime_checks
 
+from p"scope_joins.dewy" import (scope_call_alias scope_call_owns scope_call_prepare)
+
 from p"checker_sinks.dewy" import (sink_values_use)
 from p"ast.jo" import (NF_CHECKED NF_INBOUNDS NF_SPREAD TUPLE_VALUES add_flag clear_flag dewy_param_kinds has_flag kid kids mk nkids nkids2 nodes set_kid set_list)
 from p"types.jo" import (T_STR fields has_var prune structs targ telem tkind type_eq types)
@@ -28,12 +30,45 @@ VCWord:type=int64<overflow='wrap'>
 values_expand=(items0:array<int64> @pre:array<int64> call:int64):>array<int64>=>$unsafe {
     let items=values_flatten(items0)
     let n=items.length
+    # Zero-contribution items still follow contextual arguments in source order.
+    # Settle those arguments with the same parameter hints before pack probing.
+    let zero_sequence=false
+    loop i in [0..n) {
+        if nodes.ptr[items[i]].kind not=? 'block' or nodes.ptr[items[i]].aux2 not=? 1796 {continue}
+        zero_sequence=true
+        let contextual=nodes.length
+        nodes.push(nodes.ptr[call]);
+        set_list(contextual items[0..i));
+        let hints=values_argument_hints(contextual 0)
+        loop j in [0..i) {
+            let earlier=unnamed(items.ptr[j])
+            if not has_flag(earlier NF_CHECKED) {
+                check_expr(earlier if j <? hints.length {hints[j]} else {0});
+                let value=last_checked
+                finalize_literal(value);
+                add_flag(value NF_CHECKED)
+                if nodes.ptr[items.ptr[j]].kind =? 'namedarg' {nodes.ptr[items.ptr[j]].a=int32(value)} else {items.ptr[j]=value}
+            }
+        }
+        break
+    }
     let info:array<ValuesItem>=[]
     let any=false
     loop i in [0..n) {
         let c=items.ptr[i]
         info.push(ValuesItem[count = 1])
         if nodes.ptr[c].kind =? 'namedarg' {continue}
+        if nodes.ptr[c].kind =? 'block' and nodes.ptr[c].aux2 =? 1796 {
+            # A trailing declaration sequence contributes no positional value.
+            # Bind prior arguments first, before these declarations may shadow names.
+            check_expr(c 0);
+            items.ptr[i]=last_checked
+            add_flag(items.ptr[i] NF_CHECKED)
+            info.ptr[i].count=0
+            info.ptr[i].hidden=true
+            any=true
+            continue
+        }
         if has_flag(c NF_SPREAD) {
             clear_flag(c NF_SPREAD)
             let saved=sink_pack_site
@@ -124,12 +159,14 @@ values_expand=(items0:array<int64> @pre:array<int64> call:int64):>array<int64>=>
     values_hint_mark=values_hint_pos.length
     loop i in [0..n) {
         let c=items.ptr[i]
+        if info.ptr[i].count =? 0 and nodes.ptr[c].aux2 =? 1796 {pre.push(bc_stmt(c nodes.ptr[c].pos));continue}
         if nodes.ptr[c].kind =? 'namedarg' {
+            if zero_sequence and i <? last and not has_flag(unnamed(c) 1) {nodes.ptr[c].a=int32(capture_value(unnamed(c) ntype(unnamed(c)) @pre))}
             out.push(c)
             continue
         }
         if info.ptr[i].count =? 1 and not info.ptr[i].spread {
-            if i <? last and not values_simple(c) and not has_flag(c NF_SPREAD) {
+            if i <? last and (not values_simple(c) or zero_sequence and not has_flag(c 1)) and not has_flag(c NF_SPREAD) {
                 if not has_flag(c NF_CHECKED) {
                     check_expr(c 0);
                     c=last_checked
@@ -271,7 +308,15 @@ values_argument_hints=(n:int64 expected:int64):>array<int64>=>$unsafe {
     let ft:VCWord=0
     if nodes.ptr[callee].kind =? 'ident' {
         let s=lookup(VCWord(nodes.ptr[callee].name))
-        if s not=? 0 and syms.ptr[s].kind =? 'fns' {call_collect_named(VCWord(nodes.ptr[callee].name) -1 @decls)}
+        if s not=? 0 and syms.ptr[s].kind =? 'fns' {
+            if nodes.ptr[callee].aux2 =? 1797 {
+                let symbol=s
+                loop symbol not=? 0 {
+                    if syms.ptr[symbol].decl not=? 0 {decls.push(VCWord(syms.ptr[symbol].decl))}
+                    symbol=VCWord(syms.ptr[symbol].next)
+                }
+            } else {call_collect_named(VCWord(nodes.ptr[callee].name) -1 @decls)}
+        } else if nodes.ptr[callee].type not=? 0 {ft=callable_base(ntype(callee))}
     }
     else if nodes.ptr[callee].kind =? 'field' and nodes.ptr[callee].b =? 0 {
         let recv:VCWord=VCWord(nodes.ptr[callee].a)
@@ -354,9 +399,58 @@ values_argument_hints=(n:int64 expected:int64):>array<int64>=>$unsafe {
     if receiver not=? 0 and hints.length >? 0 {return hints[1..]}
     hints
 }
+# Called only for a trailing zero-value declaration item. Callee evaluation is
+# before argument evaluation; a local owning handle is lent, never copied.
+values_sequence_callee=(n:VCWord @pre:array<int64>):>void=>$unsafe {
+    let callee=VCWord(nodes.ptr[n].a)
+    let kind=nodes.ptr[callee].kind
+    let binding:VCWord=0
+    let name=VCWord(nodes.ptr[callee].name)
+    if kind =? 'ident' {
+        binding=lookup(name)
+        if binding =? 0 {return}
+        let sk=syms.ptr[binding].kind
+        if sk =? 'fns' or sk =? 'struct_' or sk =? 'enum_' or sk =? 'alias_' or sk =? 'type_' {
+            let held=mk('ident' nodes.ptr[callee].pos)
+            nodes.ptr[held].name=int32(scope_call_alias(n name binding 0))
+            if sk =? 'fns' {nodes.ptr[held].aux2=1797} # preserved named family
+            nodes.ptr[n].a=int32(held)
+            return
+        }
+        if sk not=? 'local' and sk not=? 'global' {return}
+    } else if kind =? 'field' {
+        let receiver=VCWord(nodes.ptr[callee].a)
+        check_expr(receiver 0);
+        let value=last_checked
+        add_flag(value NF_CHECKED)
+        if nodes.ptr[value].kind =? 'call' or nodes.ptr[value].kind =? 'block' {
+            value=capture_value(value ntype(value) @pre)
+        }
+        nodes.ptr[callee].a=int32(value)
+        return
+    }
+    let value=scope_call_prepare(callee)
+    let type_id=ntype(value)
+    let k=tkind(callable_base(type_id))
+    if k not=? 'fn_' and k not=? 'cfn' and k not=? 'polyfn' {return}
+    add_flag(value NF_CHECKED)
+    if binding not=? 0 and scope_call_owns(type_id) {
+        nodes.ptr[value].name=int32(scope_call_alias(n name binding 0))
+        nodes.ptr[n].a=int32(value)
+        return
+    }
+    let held=capture_value(value type_id @pre)
+    nodes.ptr[held].name=int32(scope_call_alias(n name 0 VCWord(nodes.ptr[held].sym)))
+    nodes.ptr[n].a=int32(held)
+}
 values_call=(n:int64 expected:int64):>int64=>$unsafe {
     let callee:VCWord=VCWord(nodes.ptr[n].a)
     if values_internal_callee(callee) {return -1}
+    let callee_pre:array<int64>=[]
+    if nkids(n) >? 0 {
+        let last=kid(n nkids(n)-1)
+        if nodes.ptr[last].kind =? 'block' and nodes.ptr[last].aux2 =? 1796 {values_sequence_callee(n @callee_pre);callee=VCWord(nodes.ptr[n].a)}
+    }
     let some=false
     let record=values_record(callee)
     let positional=true
@@ -374,6 +468,7 @@ values_call=(n:int64 expected:int64):>int64=>$unsafe {
         if nodes.ptr[a].kind =? 'call' and members_named(a) {members_argument(a)}
         let k=nodes.ptr[a].kind
         if named {record=0}
+        if k =? 'block' and nodes.ptr[a].aux2 =? 1796 {some=true;break}
         if not named and (k =? 'tuple' and nodes.ptr[a].aux =? int32(TUPLE_VALUES) or has_flag(a NF_SPREAD) or node_marked(values_hits a)) {
             some=true
             break
@@ -424,7 +519,7 @@ values_call=(n:int64 expected:int64):>int64=>$unsafe {
         }
     }
     if not some {return -1}
-    let pre:array<int64>=[]
+    let pre=callee_pre
     values_hint_mark=values_hint_pos.length
     let args=values_expand(kids(n) @pre n)
     let hints=values_hint_mark
@@ -452,6 +547,7 @@ values_call=(n:int64 expected:int64):>int64=>$unsafe {
     pre.push(bc_stmt(v pos))
     add_flag(pre.ptr[pre.length - 1] NF_CHECKED)
     let b=bc_block(pre pos)
+    loop argument in kids(n) {let a=unnamed(argument);if nodes.ptr[a].aux2 =? 1795 or nodes.ptr[a].aux2 =? 1796 {add_flag(b 4);break}}
     nodes.ptr[b].type = int32(t)
     if tkind(t) not=? 'void_' {nodes.ptr[b].aux = 1}
     add_flag(b NF_CHECKED)

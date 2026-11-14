@@ -408,6 +408,14 @@ call_name_sym = (n: int, name: int, mod_scope: int, s: int, args: int[], expecte
     -1
 
 call_name_collect = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool, decls: mut int[]) -> int:
+    callee = int(nodes[n].a)
+    if nodes[callee].kind == .ident and nodes[callee].aux2 == 1797:
+        symbol = lookup(int(nodes[callee].name))
+        loop symbol != 0:
+            declaration = int(syms[symbol].decl)
+            if declaration != 0: decls.push(declaration)
+            symbol = int(syms[symbol].next)
+        return -1
     surface_hidden.clear()
     if ufcs:
         if mod_scope >= 0: call_collect_module(mod_scope, name, decls)

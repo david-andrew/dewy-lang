@@ -179,6 +179,7 @@ vd_pattern=(s:VWord):>bool=>$unsafe {
         i=i + 1
     }
     vd_nodes[0][s].type=int32<overflow='wrap'>(t)
+    loop j in [0..VWord(vd_nodes[0].ptr[s].nlist)) {let id=vd_kid(s j);if vd_nodes[0].ptr[id].aux2 =? 1798 {decl_after(s 0 t 12);break}}
     true
 }
 # The forms another service declares (NF_SOA 131072, NF_ALIASDECL 8388608, NF_MUT 1,
@@ -292,4 +293,5 @@ vd_decl=(s:VWord):>void=>$unsafe {
     vd_nodes[0][s].sym=int32<overflow='wrap'>(l)
     if unset {decl_after(s l t 9)}
     if vd_ide[0] and not typed {decl_after(s l t 10)}
+    if vd_nodes[0].ptr[s].aux2 =? 1792 {decl_after(s l t 11)}
 }

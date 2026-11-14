@@ -1,5 +1,6 @@
 $runtime_checks
 
+from p"scope_joins.dewy" import (scope_join_begin scope_join_end)
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo TK)
 from p"checker_state.dewy" import (FnCtx CheckerScope)
@@ -92,7 +93,7 @@ xb_none_test=(c:XBWord):>bool=>$unsafe {
     xb_nodes[0].ptr[c].kind =? 'binary' and (op =? 69 or op =? 70) and xb_nodes[0].ptr[XBWord(xb_nodes[0].ptr[c].b)].kind =? 'none_lit'
 }
 # `loop cond` and `loop let x = v` (aux 1).
-xb_while=(s:XBWord):>void=>$unsafe {
+xb_while_body=(s:XBWord):>void=>$unsafe {
     let mark=xb_scopes[0].names.length
     xb_serial_next[0]=xb_serial_next[0] + 1
     xb_serials[0].push(xb_serial_next[0])
@@ -138,4 +139,12 @@ xb_jump=(s:XBWord):>void=>$unsafe {
         xb_nodes[0][s].ival=xb_depth() - target
     }
     xb_jumps[0].push(NarrowJump[context=int32<overflow='wrap'>(c) depth=int32<overflow='wrap'>(xb_depth() - xb_nodes[0].ptr[s].ival)])
+}
+
+# Only the existing DA walk decides which breaks initialize the exported names.
+xb_while=(s:XBWord):>void=>$unsafe {
+    let condition=XBWord(xb_nodes[0].ptr[s].a)
+    let state=if xb_nodes[0].ptr[s].aux not=? 1 and xb_nodes[0].ptr[condition].kind =? 'bool_lit' and xb_nodes[0].ptr[condition].ival not=? 0 {scope_join_begin(s)} else {0}
+    xb_while_body(s)
+    scope_join_end(s state 0)
 }

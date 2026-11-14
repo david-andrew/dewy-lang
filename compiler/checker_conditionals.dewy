@@ -1,5 +1,7 @@
 $runtime_checks
 
+from p"scope_joins.dewy" import (scope_join_begin scope_join_end)
+
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
@@ -186,7 +188,7 @@ xf_statement=(cond:XFWord b:XFWord c:XFWord):>XFWord=>$unsafe {
     if filled {xf_narrow(cond false)}
     xf_void_type[0]
 }
-xf_if=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
+xf_if_body=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
     let is_stmt=XFWord(xf_nodes[0].ptr[n].flags) & 16 not=? 0
     # Checking may rewrite the test (`x is? error` over a library union): ask
     # whether it ends a chain as written.
@@ -303,4 +305,11 @@ xf_iflet=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
     let va=xf_value(b)
     let vb=xf_value(c)
     cond_join(va vb ex xf_nodes[0].ptr[n].pos)
+}
+
+xf_if=(n:XFWord ex:XFWord):>XFWord=>{
+    let state=scope_join_begin(n)
+    let result=xf_if_body(n ex)
+    scope_join_end(n state result)
+    result
 }

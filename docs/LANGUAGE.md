@@ -302,6 +302,20 @@ let total = (let base:int = 10
 
 A parenthesized group of values without declarations, `(a b)`, stays several values. A
 call may be written with braces, `add{1 2}` for `add(1 2)`; that is unidiomatic.
+An argument list can declare names between its values: `add(let width = 3; width 4)`
+passes `3` and `4`, and `width` remains visible after the call. Declarations and
+arguments run in their written order. `add{let width = 3; width 4}` keeps `width`
+inside the call instead.
+
+Declarations in unscoped `if` branches or `match` arms are also visible after the
+construct. A read requires compatible types and a value on every continuing path;
+a path that returns does not reach that read. For example, `if c (let q = 3) else
+(let q = 4)` makes `q` available afterward. If a path supplies no value, the error
+names it and suggests a scoped `{ ... }` body or declaring the binding before the
+construct and assigning it on each path. Loop-body bindings keep their loop scope
+when the loop may execute zero times. In an unscoped `loop true` body, a binding
+can be used afterward when the existing definite-assignment analysis proves
+that every exit initializes it, for example `loop true (let q = 3; break)`.
 
 Several values work wherever the same values written out would (substitution
 invariance). `(1 2)` is two values, not a container; `[1 2]` is an array, one

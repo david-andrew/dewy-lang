@@ -1,3 +1,4 @@
+use 'scope_joins.dewy'
 use 'checker_sinks.dewy'
 use 'checker_state.dewy'
 # Frozen value-call machinery from check.jo.
@@ -29,12 +30,38 @@ use 'effect_contracts.dewy'
 values_expand = (items0: int[], pre: mut int[], call: int) -> int[]:
     items = values_flatten(items0)
     n = items.len()
+    zero_sequence = false
+    loop i in [0..n):
+        if nodes[items[i]].kind != .block or nodes[items[i]].aux2 != 1796: continue
+        zero_sequence = true
+        contextual = nodes.len()
+        nodes.push(nodes[call])
+        set_list(contextual, items[0..i))
+        hints = values_argument_hints(contextual, 0)
+        loop j in [0..i):
+            earlier = unnamed(items[j])
+            if not has_flag(earlier, NF_CHECKED):
+                check_expr(earlier, if j < hints.len(): hints[j] else: 0)
+                value = last_checked
+                finalize_literal(value)
+                add_flag(value, NF_CHECKED)
+                if nodes[items[j]].kind == .namedarg: nodes[items[j]].a = i32(value)
+                else: items[j] = value
+        break
     info: ValuesItem[]
     any = false
     loop i in [0..n):
         c = items[i]
         info.push(ValuesItem(count = 1))
         if nodes[c].kind == .namedarg: continue
+        if nodes[c].kind == .block and nodes[c].aux2 == 1796:
+            check_expr(c, 0)
+            items[i] = last_checked
+            add_flag(items[i], NF_CHECKED)
+            info[i].count = 0
+            info[i].hidden = true
+            any = true
+            continue
         if has_flag(c, NF_SPREAD):
             clear_flag(c, NF_SPREAD)
             saved = sink_pack_site
@@ -115,11 +142,15 @@ values_expand = (items0: int[], pre: mut int[], call: int) -> int[]:
     values_hint_mark = values_hint_pos.len()
     loop i in [0..n):
         c = items[i]
+        if info[i].count == 0 and nodes[c].aux2 == 1796:
+            pre.push(bc_stmt(c, nodes[c].pos))
+            continue
         if nodes[c].kind == .namedarg:
+            if zero_sequence and i < last and not has_flag(unnamed(c), NF_MUT): nodes[c].a = i32(capture_value(unnamed(c), ntype(unnamed(c)), pre))
             out.push(c)
             continue
         if info[i].count == 1 and not info[i].spread:
-            if i < last and not values_simple(c) and not has_flag(c, NF_SPREAD):
+            if i < last and (not values_simple(c) or zero_sequence and not has_flag(c, NF_MUT)) and not has_flag(c, NF_SPREAD):
                 if not has_flag(c, NF_CHECKED):
                     check_expr(c, 0)
                     c = last_checked
@@ -238,7 +269,14 @@ values_argument_hints = (n: int, expected: int) -> int[]:
     ft = 0
     if nodes[callee].kind == .ident:
         s = lookup(int(nodes[callee].name))
-        if s != 0 and syms[s].kind == .fns: call_collect_named(int(nodes[callee].name), -1, decls)
+        if s != 0 and syms[s].kind == .fns:
+            if nodes[callee].aux2 == 1797:
+                symbol = s
+                loop symbol != 0:
+                    if syms[symbol].decl != 0: decls.push(int(syms[symbol].decl))
+                    symbol = int(syms[symbol].next)
+            else: call_collect_named(int(nodes[callee].name), -1, decls)
+        else if nodes[callee].type != 0: ft = callable_base(ntype(callee))
     else if nodes[callee].kind == .field and nodes[callee].b == 0:
         recv = int(nodes[callee].a)
         name = int(nodes[callee].name)
@@ -309,11 +347,54 @@ values_argument_hints = (n: int, expected: int) -> int[]:
     if receiver != 0 and hints.len() > 0: return hints[1..]
     hints
 
+values_sequence_callee = (n: int, pre: mut int[]):
+    callee = int(nodes[n].a)
+    kind = nodes[callee].kind
+    binding = 0
+    name = int(nodes[callee].name)
+    if kind == .ident:
+        binding = lookup(name)
+        if binding == 0: return
+        sk = syms[binding].kind
+        if sk == .fns or sk == .struct_ or sk == .enum_ or sk == .alias_ or sk == .type_:
+            held = mk(.ident, nodes[callee].pos)
+            nodes[held].name = i32(scope_call_alias(n, name, binding, 0))
+            if sk == .fns: nodes[held].aux2 = 1797
+            nodes[n].a = i32(held)
+            return
+        if sk != .local and sk != .global: return
+    else if kind == .field:
+        receiver = int(nodes[callee].a)
+        check_expr(receiver, 0)
+        value = last_checked
+        add_flag(value, NF_CHECKED)
+        if nodes[value].kind == .call or nodes[value].kind == .block: value = capture_value(value, ntype(value), pre)
+        nodes[callee].a = i32(value)
+        return
+    value = scope_call_prepare(callee)
+    type_id = ntype(value)
+    k = tkind(callable_base(type_id))
+    if k != .fn_ and k != .cfn and k != .polyfn: return
+    add_flag(value, NF_CHECKED)
+    if binding != 0 and scope_call_owns(type_id):
+        nodes[value].name = i32(scope_call_alias(n, name, binding, 0))
+        nodes[n].a = i32(value)
+        return
+    held = capture_value(value, type_id, pre)
+    nodes[held].name = i32(scope_call_alias(n, name, 0, int(nodes[held].sym)))
+    nodes[n].a = i32(held)
+
 values_call = (n: int, expected: int) -> int:
     callee = int(nodes[n].a)
     if values_internal_callee(callee): return -1
     # (the common case, nothing to expand, decided without allocating: a call argument is
     # checked here as an untyped argument would be anyway, its own pack noted)
+    callee_pre: int[]
+    if nkids(n) > 0:
+        last = kid(n, nkids(n) - 1)
+        if nodes[last].kind == .block and nodes[last].aux2 == 1796:
+            values_sequence_callee(n, callee_pre)
+            callee = int(nodes[n].a)
     some = false
     record = values_record(callee)
     positional = true
@@ -330,6 +411,7 @@ values_call = (n: int, expected: int) -> int:
         if nodes[a].kind == .call and members_named(a): members_argument(a)
         k = nodes[a].kind
         if named: record = 0
+        if k == .block and nodes[a].aux2 == 1796: some = true; break
         if not named and (k == .tuple and nodes[a].aux == i32(TUPLE_VALUES) or has_flag(a, NF_SPREAD) or node_marked(values_hits, a)):
             some = true
             break
@@ -373,7 +455,7 @@ values_call = (n: int, expected: int) -> int:
                 some = true
                 break
     if not some: return -1
-    pre: int[]
+    pre = callee_pre
     values_hint_mark = values_hint_pos.len()
     args = values_expand(kids(n), pre, n)
     hints = values_hint_mark
@@ -398,6 +480,9 @@ values_call = (n: int, expected: int) -> int:
     pre.push(bc_stmt(v, pos))
     add_flag(pre[pre.len() - 1], NF_CHECKED)
     b = bc_block(pre, pos)
+    loop argument in kids(n):
+        a = unnamed(argument)
+        if nodes[a].aux2 == 1795 or nodes[a].aux2 == 1796: add_flag(b, 4); break # NF_UNSCOPED
     nodes[b].type = i32(t)
     if tkind(t) != .void_: nodes[b].aux = 1
     add_flag(b, NF_CHECKED)

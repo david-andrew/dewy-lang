@@ -250,6 +250,7 @@ values_settled=(n:XEWord):>bool=>$unsafe {
         if named {a=XEWord(xe_nodes[0].ptr[original].a)}
         let k=xe_nodes[0].ptr[a].kind
         let flags=XEWord(xe_nodes[0].ptr[a].flags)
+        if k =? 'block' and xe_nodes[0].ptr[a].aux2 =? 1796 {return false}
         if k =? 'call' {
             let m=xe_members_name[0]
             if m =? 0 or XEWord(xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[a].a)].name) =? m {return false}

@@ -85,6 +85,23 @@ def _graphs(stems, extra_stems, doubles, jo_doubles, driver, sources):
                 for stem in extra_stems:
                     text = text.replace(f'p"{stem}.dewy"', f'p"{stem}.jo"')
             modules[name] = rewrite(text)
+        # Control-storage joins are host context in isolated checker drivers;
+        # full compiler differentials cover their lexical and DA integration.
+        if 'scope_joins' not in stems:
+            modules['scope_joins.dewy'] = ('scope_join_begin=(n:int64):>int64=>0\n'
+                                           'scope_join_end=(n:int64 state:int64 t:int64):>void=>{}\n'
+                                           'scope_join_decl=(s:int64 l:int64 t:int64):>void=>{}\n'
+                                           'scope_join_pattern=(s:int64):>void=>{}\n'
+                                           'scope_call_alias=(n:int64 name:int64 symbol:int64 local:int64):>int64=>name\n'
+                                           'scope_call_owns=(t:int64):>bool=>false\n'
+                                           'scope_call_prepare=(n:int64):>int64=>n\n')
+            modules['scope_joins.jo'] = ('scope_join_begin = (n: int) -> int: 0\n'
+                                         'scope_join_end = (n: int, state: int, t: int): pass\n'
+                                         'scope_join_decl = (s: int, l: int, t: int): pass\n'
+                                         'scope_join_pattern = (s: int): pass\n'
+                                         'scope_call_alias = (n: int, name: int, symbol: int, local: int) -> int: name\n'
+                                         'scope_call_owns = (t: int) -> bool: false\n'
+                                         'scope_call_prepare = (n: int) -> int: n\n')
         modules['driver.jo'] = ''.join(f"use '{s}.{extension}'\n" for s in stems) + driver
         graphs.append(modules)
     return tuple(graphs)

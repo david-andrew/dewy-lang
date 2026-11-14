@@ -19,11 +19,22 @@ da_join = (x: DaState, y: DaState) -> DaState:
     u = x.unset
     loop l in y.unset:
         if not u.contains(l): u.push(l)
-    DaState(unset = u)
+    paths = x.missing
+    loop l in u:
+        if not paths.has(l) and y.missing.has(l): paths[l] = y.missing[l]
+    DaState(unset = u, missing = paths)
+
+da_path = (st0: DaState, path: int) -> DaState:
+    st = st0
+    loop l in st.unset:
+        d = da_names.get(l) ?? 0
+        if d != 0 and nodes[d].aux2 == 1791 and not st.missing.has(l): st.missing[l] = path
+    st
 
 da_remove = (st: mut DaState, l: int):
     i = st.unset.index_of(l)
     if i >= 0: st.unset.remove(i)
+    st.missing.remove(l)
 
 da_check_fn = (body: int, mark: int):
     if da_decls.len() <= mark: return
@@ -47,6 +58,14 @@ da_read = (n: int, st: DaState):
     if not st.unset.contains(l): return
     nm = name_of(int(locals[l].name))
     d = da_names.get(l) ?? 0
+    if d != 0 and nodes[d].aux2 == 1791:
+        nm = name_of(int(nodes[d].sval))
+        path = st.missing.get(l) ?? 0
+        where_ = path / 4
+        which = path % 4
+        label = if which == 1: "the then path of this if" else if which == 2: "the else path of this if" else if which == 3: "this match arm" else: "a path through this control body"
+        if where_ > 0: err_notes.push((nodes[where_].pos, "note: {label} does not initialize '{nm}'"))
+        fatal(nodes[n].pos, "'{nm}' is not definitely assigned: {label} does not declare it with a value; use a scoped body `\{ ... }` or declare '{nm}' before the construct and assign it on every path")
     ty = if d != 0 and nodes[d].a != 0: dt(int(locals[l].type)) else: "T"
     err_notes.push((locals[l].pos, "note: '{nm}' is declared here without a value"))
     fatal(nodes[n].pos, "'{nm}' is read before it is given a value on every path: give it one where it is declared (`let {nm}:{ty} = ...`), or assign it on each path before this read")
@@ -111,7 +130,7 @@ da_walk = (n: int, st0: DaState) -> DaState:
         st = da_walk(int(nodes[n].a), st)
         t = da_walk(int(nodes[n].b), st)
         e = if nodes[n].c != 0: da_walk(int(nodes[n].c), st) else: st
-        return da_join(t, e)
+        return da_join(da_path(t, n * 4 + 1), da_path(e, n * 4 + 2))
     if k == .and_ or k == .or_ or k == .coalesce:
         st = da_walk(int(nodes[n].a), st)
         da_walk(int(nodes[n].b), st)
@@ -138,7 +157,7 @@ da_walk = (n: int, st0: DaState) -> DaState:
         arms = kids(n)
         if arms.len() == 0: return st
         out = DaState(done = true)
-        loop arm in arms: out = da_join(out, da_walk(arm, st))
+        loop arm in arms: out = da_join(out, da_path(da_walk(arm, st), arm * 4 + 3))
         return out
     if k == .return_ or k == .continue_:
         st = da_walk(int(nodes[n].a), st)

@@ -1,4 +1,5 @@
 # Frozen loop statement checker extracted from check.jo.
+use 'scope_joins.dewy'
 use 'node_store.dewy'
 use 'checker_types.dewy'
 use 'checker_state.dewy'
@@ -76,7 +77,7 @@ xb_leave = (s: int):
 xb_none_test = (c: int) -> bool:
     op = xb_nodes[0][c].op
     xb_nodes[0][c].kind == .binary and (op == 69 or op == 70) and xb_nodes[0][int(xb_nodes[0][c].b)].kind == .none_lit
-xb_while = (s: int):
+xb_while_body = (s: int):
     mark = xb_scopes[0].names.len()
     xb_serial_next[0] = xb_serial_next[0] + 1
     xb_serials[0].push(xb_serial_next[0])
@@ -114,3 +115,9 @@ xb_jump = (s: int):
         if target < 0: xb_host[0].error(s, 0, 4)
         xb_nodes[0][s].ival = xb_depth() - target
     xb_jumps[0].push(NarrowJump(i32(c), i32(xb_depth() - xb_nodes[0][s].ival)))
+
+xb_while = (s: int):
+    condition = int(xb_nodes[0][s].a)
+    state = if xb_nodes[0][s].aux != 1 and xb_nodes[0][condition].kind == .bool_lit and xb_nodes[0][condition].ival != 0: scope_join_begin(s) else: 0
+    xb_while_body(s)
+    scope_join_end(s, state, 0)

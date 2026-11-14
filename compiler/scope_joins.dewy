@@ -1,0 +1,267 @@
+$runtime_checks
+
+from p"ast.jo" import (NF_CHECKED NF_UNSCOPED add_flag has_flag kids mk nodes set_list)
+from p"check.jo" import (LF_DECL binding_leaves locals new_local new_sym push_scope_sym)
+from p"checker_state.dewy" import SK
+from p"type_ops.dewy" import (dt mk_var unify)
+from p"types.jo" import (T_VOID T_NEVER prune types)
+from p"checks_builders.dewy" import (bc_block bc_stmt)
+from p"checks_thin.dewy" import check_stmt
+from p"checks_stmt_hooks.dewy" import stmt_terminates
+from p"checker_expr.dewy" import check_expr
+from p"expr.jo" import (bc_assign callee_at can_coerce last_checked mk_ident_local)
+from p"definite_walk.dewy" import da_record
+from p"isolation_ops.dewy" import isolation_children
+from p"ownership_types.dewy" import ownership_fact_type
+from p"util.jo" import (intern name_of)
+from p"diagnostic_exit.dewy" import fatal
+
+# Lexical binding groups, not a second initialization analysis. The existing DA
+# walk proves the resulting stores. Union/find indexes declaration groups; a
+# later declaration shadows an earlier group, while control arms join groups.
+# Demand: explicit unscoped bodies. O((N + B)*D*alpha(B)) for N syntax nodes,
+# B bindings and lexical nesting D; no scan of unrelated locals or functions.
+SJWord:type=int64<overflow='wrap'>
+ScopeJoin:type=[loop_body:bool=false cells:array<int64>=[] owned:array<int64>=[] declarations:array<int64>=[] parents:dict<int64 int64>=dict<int64 int64>()]
+let scope_joins:array<ScopeJoin>=[]
+# 1791: shared uninitialized storage; 1792: a declaration initializing it.
+scope_join_root=(n:SJWord @join:ScopeJoin):>SJWord=>{
+    let root=n
+    loop join.parents[root] not=? root {root=join.parents[root]}
+    let at=n
+    loop at not=? root {
+        let next=join.parents[at]
+        join.parents[at]=root
+        at=next
+    }
+    root
+}
+scope_join_merge=(@bindings:dict<int64 int64> incoming:dict<int64 int64> arms:bool @join:ScopeJoin):>void=>{
+    loop [name declaration] in incoming {
+        let previous=bindings.get(name) ?? 0
+        if arms and previous not=? 0 {
+            let root=scope_join_root(previous @join)
+            join.parents[scope_join_root(declaration @join)]=root
+        } else {bindings[name]=declaration}
+    }
+}
+scope_join_scan=(n:SJWord @join:ScopeJoin):>dict<int64 int64>=>$unsafe {
+    let bindings=dict<int64 int64>()
+    if n =? 0 {return bindings}
+    let k=nodes.ptr[n].kind
+    if k =? 'block' {
+        if has_flag(n NF_UNSCOPED) {
+            loop child in kids(n) {
+                scope_join_merge(@bindings scope_join_scan(child @join) false @join)
+                if not join.loop_body and stmt_terminates(child) {return dict<int64 int64>()}
+            }
+        }
+        return bindings
+    }
+    if k =? 'while_' and nodes.ptr[n].aux not=? 1 {
+        let condition=SJWord(nodes.ptr[n].a)
+        if nodes.ptr[condition].kind =? 'bool_lit' and nodes.ptr[condition].ival not=? 0 and has_flag(SJWord(nodes.ptr[n].b) NF_UNSCOPED) {
+            let saved=join.loop_body
+            join.loop_body=true
+            let result=scope_join_scan(SJWord(nodes.ptr[n].b) @join)
+            join.loop_body=saved
+            return result
+        }
+    }
+    if k =? 'while_' or k =? 'for_' or k =? 'lambda' or k =? 'fn_' or k =? 'defer_' {return bindings}
+    if k =? 'if_' or k =? 'iflet' {
+        bindings=scope_join_scan(SJWord(nodes.ptr[n].a) @join)
+        let branches=scope_join_scan(SJWord(nodes.ptr[n].b) @join)
+        scope_join_merge(@branches scope_join_scan(SJWord(nodes.ptr[n].c) @join) true @join)
+        scope_join_merge(@bindings branches false @join)
+        return bindings
+    }
+    if k =? 'match_' {
+        bindings=scope_join_scan(SJWord(nodes.ptr[n].a) @join)
+        let branches=dict<int64 int64>()
+        loop arm in kids(n) {scope_join_merge(@branches scope_join_scan(SJWord(nodes.ptr[arm].b) @join) true @join)}
+        scope_join_merge(@bindings branches false @join)
+        return bindings
+    }
+    let fields_=isolation_children(k)
+    if fields_ >=? 0 {
+        if fields_ & 1 not=? 0 {scope_join_merge(@bindings scope_join_scan(SJWord(nodes.ptr[n].a) @join) false @join)}
+        if fields_ & 2 not=? 0 {scope_join_merge(@bindings scope_join_scan(SJWord(nodes.ptr[n].b) @join) false @join)}
+        if fields_ & 4 not=? 0 {scope_join_merge(@bindings scope_join_scan(SJWord(nodes.ptr[n].c) @join) false @join)}
+        if fields_ & 16 not=? 0 {loop child in kids(n) {scope_join_merge(@bindings scope_join_scan(child @join) false @join)}}
+    }
+    if (k =? 'vardecl' or k =? 'const_') and nodes.ptr[n].nlist >? 0 {
+        loop leaf in binding_leaves(kids(n)) {
+            if nodes.ptr[leaf].kind =? 'hole' {continue}
+            let declaration=if nodes.ptr[leaf].aux2 =? 1798 {SJWord(nodes.ptr[leaf].c)} else {mk('vardecl' nodes.ptr[leaf].pos)}
+            nodes.ptr[declaration].name=nodes.ptr[leaf].name
+            nodes.ptr[declaration].flags=nodes.ptr[n].flags
+            nodes.ptr[leaf].aux2=1798
+            nodes.ptr[leaf].c=int32(declaration)
+            scope_join_merge(@bindings scope_join_scan(declaration @join) false @join)
+        }
+    }
+    if (k =? 'vardecl' or k =? 'const_') and nodes.ptr[n].name >? 0 and nodes.ptr[n].nlist =? 0 {
+        let name=SJWord(nodes.ptr[n].name)
+        let text=name_of(name)
+        if text not=? "_" and (text as array<uint8>)[0] not=? 36 {
+            join.parents[n]=n
+            join.declarations.push(n)
+            bindings[name]=n
+        }
+    }
+    bindings
+}
+# Common scoped bodies need no plan or binding maps. An implicit else-if wrapper
+# only demands a plan when one of its actual arms has an unscoped body.
+scope_join_needed=(body:SJWord):>bool=>$unsafe {
+    if body =? 0 or not has_flag(body NF_UNSCOPED) {return false}
+    if nodes.ptr[body].aux2 not=? 1794 {return true}
+    loop child in kids(body) {
+        let control=if nodes.ptr[child].kind =? 'exprstmt' {SJWord(nodes.ptr[child].a)} else {child}
+        if nodes.ptr[control].kind =? 'match_' {
+            loop arm in kids(control) {if scope_join_needed(SJWord(nodes.ptr[arm].b)) {return true}}
+        } else if scope_join_needed(SJWord(nodes.ptr[control].b)) or scope_join_needed(SJWord(nodes.ptr[control].c)) {return true}
+    }
+    false
+}
+scope_join_begin=(n:SJWord):>SJWord=>$unsafe {
+    let needed=false
+    if nodes.ptr[n].kind =? 'match_' {
+        loop arm in kids(n) {if scope_join_needed(SJWord(nodes.ptr[arm].b)) {needed=true;break}}
+    } else {needed=scope_join_needed(SJWord(nodes.ptr[n].b)) or scope_join_needed(SJWord(nodes.ptr[n].c))}
+    if not needed {return 0}
+    let join=ScopeJoin[loop_body=nodes.ptr[n].kind =? 'while_']
+    let bindings=dict<int64 int64>()
+    if nodes.ptr[n].kind =? 'match_' {
+        loop arm in kids(n) {scope_join_merge(@bindings scope_join_scan(SJWord(nodes.ptr[arm].b) @join) true @join)}
+    } else {
+        bindings=scope_join_scan(SJWord(nodes.ptr[n].b) @join)
+        scope_join_merge(@bindings scope_join_scan(SJWord(nodes.ptr[n].c) @join) true @join)
+    }
+    if join.declarations.length =? 0 {return 0}
+    let cells=dict<int64 int64>()
+    loop declaration in join.declarations {
+        let root=scope_join_root(declaration @join)
+        let cell=cells.get(root) ?? 0
+        if cell =? 0 {
+            if nodes.ptr[declaration].aux2 =? 1792 {cell=SJWord(nodes.ptr[declaration].c)}
+            else {
+                let pos=nodes.ptr[declaration].pos
+                cell=mk('vardecl' pos)
+                let hidden=intern("$branch{n}_{root}")
+                let t=mk_var()
+                let l=new_local(hidden t pos)
+                locals.ptr[l].name=nodes.ptr[declaration].name
+                locals.ptr[l].flags=int32(LF_DECL)
+                nodes.ptr[cell].name=int32(hidden)
+                nodes.ptr[cell].sval=nodes.ptr[declaration].name
+                nodes.ptr[cell].sym=int32(l)
+                nodes.ptr[cell].type=int32(t)
+                nodes.ptr[cell].aux2=1791
+                add_flag(cell NF_CHECKED)
+                da_record(cell)
+                join.owned.push(cell)
+            }
+            cells[root]=cell
+        }
+        if nodes.ptr[declaration].kind =? 'const_' or has_flag(declaration 262144) {add_flag(cell 262144)}
+        if nodes.ptr[declaration].aux2 not=? 1792 {nodes.ptr[declaration].d=if nodes.ptr[declaration].b =? 0 {1} else {0}}
+        if nodes.ptr[declaration].kind =? 'const_' {
+            nodes.ptr[declaration].kind='vardecl'
+            add_flag(declaration 262144) # NF_RDONLY
+        }
+        nodes.ptr[declaration].aux2=1792
+        nodes.ptr[declaration].c=int32(cell)
+    }
+    loop [name declaration] in bindings {join.cells.push(cells[scope_join_root(declaration @join)])}
+    scope_joins.push(join)
+    scope_joins.length
+}
+scope_join_decl=(s:SJWord l:SJWord t:SJWord):>void=>$unsafe {
+    let cell=SJWord(nodes.ptr[s].c)
+    let target=SJWord(nodes.ptr[cell].sym)
+    let shared=SJWord(locals.ptr[target].type)
+    if types.ptr[prune(shared)].kind =? 'var' {unify(shared t);}
+    let name=SJWord(nodes.ptr[s].name)
+    if nodes.ptr[s].b not=? 0 and not can_coerce(SJWord(nodes.ptr[s].b) t shared) {fatal(nodes.ptr[s].pos "unscoped binding '{name_of(name)}' has incompatible types across paths: {dt(shared)} and {dt(t)}; use a scoped body `\{ ... }` or declare its type before the construct")}
+    let flags=SJWord(locals.ptr[target].flags)
+    locals.ptr[target].flags=int32(flags & ~131072) # initialization may write a const
+    if nodes.ptr[s].d =? 0 {
+        let assign=bc_assign(mk_ident_local(target nodes.ptr[s].pos) SJWord(nodes.ptr[s].b) nodes.ptr[s].pos)
+        check_stmt(assign)
+        let readonly=SJWord(nodes.ptr[s].flags) & 262144 not=? 0
+        nodes.ptr[s]=nodes.ptr[assign]
+        if readonly {locals.ptr[target].flags=locals.ptr[target].flags | 131072}
+    } else {
+        nodes.ptr[s].kind='block'
+        nodes.ptr[s].nlist=0
+    }
+    locals.ptr[l].flags=locals.ptr[l].flags | 65536 # unused checker-only inference local
+    push_scope_sym(name new_sym(name 'local' target 0))
+}
+
+scope_join_end=(n:SJWord state:SJWord t0:SJWord):>void=>$unsafe {
+    if state =? 0 {return}
+    let t=if t0 =? 0 {T_VOID} else {t0}
+    let join=scope_joins.pop()
+    loop cell in join.cells {
+        let name=SJWord(nodes.ptr[cell].sval)
+        if has_flag(cell 262144) {let local=SJWord(nodes.ptr[cell].sym);locals.ptr[local].flags=locals.ptr[local].flags | 131072}
+        push_scope_sym(name new_sym(name 'local' SJWord(nodes.ptr[cell].sym) 0))
+    }
+    if join.owned.length =? 0 {return}
+    let control=nodes.length
+    nodes.push(nodes.ptr[n])
+    nodes.ptr[control].type=int32(t)
+    add_flag(control NF_CHECKED)
+    let statements=join.owned
+    statements.push(if nodes.ptr[control].kind =? 'while_' {control} else {bc_stmt(control nodes.ptr[n].pos)})
+    let block=bc_block(statements nodes.ptr[n].pos)
+    nodes.ptr[block].type=int32(t)
+    if t not=? T_VOID and t not=? T_NEVER {nodes.ptr[block].aux=1}
+    add_flag(block NF_CHECKED)
+    add_flag(block NF_UNSCOPED)
+    nodes.ptr[n]=nodes.ptr[block]
+}
+
+# A declaration-only argument item must not change the call head's binding.
+# Named families keep overload resolution; values keep their evaluated handle.
+scope_call_alias=(call:SJWord name:SJWord symbol:SJWord local:SJWord):>SJWord=>{
+    let hidden=intern("$argument_callee{call}")
+    let binding=if local not=? 0 {new_sym(hidden 'local' local 0)} else {symbol}
+    push_scope_sym(hidden binding)
+    hidden
+}
+scope_call_owns=(type_id:SJWord):>bool=>ownership_fact_type(type_id)
+
+scope_call_prepare=(callee:SJWord):>SJWord=>{
+    let saved=callee_at
+    callee_at=callee
+    check_expr(callee 0);
+    let value=last_checked
+    callee_at=saved
+    value
+}
+
+# Keep the existing unpacker and its shape/length proofs. Its leaf locals are
+# initialized once, then moved to the same shared storage as simple declarations.
+scope_join_pattern=(s:SJWord):>void=>$unsafe {
+    let original=nodes.length
+    nodes.push(nodes.ptr[s]);
+    add_flag(original NF_CHECKED)
+    let statements=[original]
+    loop leaf in kids(s) {
+        if nodes.ptr[leaf].aux2 not=? 1798 {continue}
+        let declaration=SJWord(nodes.ptr[leaf].c)
+        let local=SJWord(nodes.ptr[leaf].sym)
+        nodes.ptr[declaration].b=int32(mk_ident_local(local nodes.ptr[leaf].pos))
+        nodes.ptr[declaration].d=0
+        scope_join_decl(declaration local SJWord(locals.ptr[local].type))
+        statements.push(declaration)
+    }
+    let block=bc_block(statements nodes.ptr[s].pos)
+    add_flag(block NF_UNSCOPED)
+    add_flag(block NF_CHECKED)
+    nodes.ptr[s]=nodes.ptr[block]
+}

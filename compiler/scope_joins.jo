@@ -1,0 +1,229 @@
+use 'checker_expr.dewy'
+use 'ownership_types.dewy'
+# Lexical storage joins; definite_walk proves initialization on every path.
+use 'ast.jo'
+use 'check.jo'
+use 'checker_state.dewy'
+use 'type_ops.dewy'
+use 'types.jo'
+use 'checks_builders.dewy'
+use 'checks_thin.dewy'
+use 'checks_stmt_hooks.dewy'
+use 'expr.jo'
+use 'definite_walk.dewy'
+use 'isolation_ops.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+struct ScopeJoin:
+    loop_body: bool = false
+    cells: int[]
+    owned: int[]
+    declarations: int[]
+    parents: {int: int} = {}
+scope_joins: ScopeJoin[]
+scope_join_root = (n: int, join: mut ScopeJoin) -> int:
+    root = n
+    loop join.parents[root] != root: root = join.parents[root]
+    at = n
+    loop at != root:
+        next = join.parents[at]
+        join.parents[at] = root
+        at = next
+    root
+scope_join_merge = (bindings: mut {int: int}, incoming: {int: int}, arms: bool, join: mut ScopeJoin):
+    loop name, declaration in incoming:
+        previous = bindings.get(name) ?? 0
+        if arms and previous != 0:
+            root = scope_join_root(previous, join)
+            join.parents[scope_join_root(declaration, join)] = root
+        else: bindings[name] = declaration
+scope_join_scan = (n: int, join: mut ScopeJoin) -> {int: int}:
+    bindings: {int: int} = {}
+    if n == 0: return bindings
+    k = nodes[n].kind
+    if k == .block:
+        if has_flag(n, NF_UNSCOPED):
+            loop child in kids(n):
+                scope_join_merge(bindings, scope_join_scan(child, join), false, join)
+                if not join.loop_body and stmt_terminates(child): return {}
+        return bindings
+    if k == .while_ and nodes[n].aux != 1:
+        condition = int(nodes[n].a)
+        if nodes[condition].kind == .bool_lit and nodes[condition].ival != 0 and has_flag(int(nodes[n].b), NF_UNSCOPED):
+            saved = join.loop_body
+            join.loop_body = true
+            result = scope_join_scan(int(nodes[n].b), join)
+            join.loop_body = saved
+            return result
+    if k == .while_ or k == .for_ or k == .lambda or k == .fn_ or k == .defer_: return bindings
+    if k == .if_ or k == .iflet:
+        bindings = scope_join_scan(int(nodes[n].a), join)
+        branches = scope_join_scan(int(nodes[n].b), join)
+        scope_join_merge(branches, scope_join_scan(int(nodes[n].c), join), true, join)
+        scope_join_merge(bindings, branches, false, join)
+        return bindings
+    if k == .match_:
+        bindings = scope_join_scan(int(nodes[n].a), join)
+        branches: {int: int} = {}
+        loop arm in kids(n): scope_join_merge(branches, scope_join_scan(int(nodes[arm].b), join), true, join)
+        scope_join_merge(bindings, branches, false, join)
+        return bindings
+    fields_ = isolation_children(k)
+    if fields_ >= 0:
+        if fields_ & 1 != 0: scope_join_merge(bindings, scope_join_scan(int(nodes[n].a), join), false, join)
+        if fields_ & 2 != 0: scope_join_merge(bindings, scope_join_scan(int(nodes[n].b), join), false, join)
+        if fields_ & 4 != 0: scope_join_merge(bindings, scope_join_scan(int(nodes[n].c), join), false, join)
+        if fields_ & 16 != 0:
+            loop child in kids(n): scope_join_merge(bindings, scope_join_scan(child, join), false, join)
+    if (k == .vardecl or k == .const_) and nodes[n].nlist > 0:
+        loop leaf in binding_leaves(kids(n)):
+            if nodes[leaf].kind == .hole: continue
+            declaration = if nodes[leaf].aux2 == 1798: int(nodes[leaf].c) else: mk(.vardecl, nodes[leaf].pos)
+            nodes[declaration].name = nodes[leaf].name
+            nodes[declaration].flags = nodes[n].flags
+            nodes[leaf].aux2 = 1798
+            nodes[leaf].c = i32(declaration)
+            scope_join_merge(bindings, scope_join_scan(declaration, join), false, join)
+    if (k == .vardecl or k == .const_) and nodes[n].name > 0 and nodes[n].nlist == 0:
+        name = int(nodes[n].name)
+        text = name_of(name)
+        if text != "_" and text[0] != u8(36):
+            join.parents[n] = n
+            join.declarations.push(n)
+            bindings[name] = n
+    bindings
+scope_join_needed = (body: int) -> bool:
+    if body == 0 or not has_flag(body, NF_UNSCOPED): return false
+    if nodes[body].aux2 != 1794: return true
+    loop child in kids(body):
+        control = if nodes[child].kind == .exprstmt: int(nodes[child].a) else: child
+        if nodes[control].kind == .match_:
+            loop arm in kids(control):
+                if scope_join_needed(int(nodes[arm].b)): return true
+        else if scope_join_needed(int(nodes[control].b)) or scope_join_needed(int(nodes[control].c)): return true
+    false
+scope_join_begin = (n: int) -> int:
+    needed = false
+    if nodes[n].kind == .match_:
+        loop arm in kids(n):
+            if scope_join_needed(int(nodes[arm].b)): needed = true; break
+    else: needed = scope_join_needed(int(nodes[n].b)) or scope_join_needed(int(nodes[n].c))
+    if not needed: return 0
+    join = ScopeJoin(loop_body = nodes[n].kind == .while_)
+    bindings: {int: int} = {}
+    if nodes[n].kind == .match_:
+        loop arm in kids(n): scope_join_merge(bindings, scope_join_scan(int(nodes[arm].b), join), true, join)
+    else:
+        bindings = scope_join_scan(int(nodes[n].b), join)
+        scope_join_merge(bindings, scope_join_scan(int(nodes[n].c), join), true, join)
+    if join.declarations.len() == 0: return 0
+    cells: {int: int} = {}
+    loop declaration in join.declarations:
+        root = scope_join_root(declaration, join)
+        cell = cells.get(root) ?? 0
+        if cell == 0:
+            if nodes[declaration].aux2 == 1792: cell = int(nodes[declaration].c)
+            else:
+                pos = nodes[declaration].pos
+                cell = mk(.vardecl, pos)
+                hidden = intern("$branch{n}_{root}")
+                t = mk_var()
+                l = new_local(hidden, t, pos)
+                locals[l].name = nodes[declaration].name
+                locals[l].flags = i32(LF_DECL)
+                nodes[cell].name = i32(hidden)
+                nodes[cell].sval = nodes[declaration].name
+                nodes[cell].sym = i32(l)
+                nodes[cell].type = i32(t)
+                nodes[cell].aux2 = 1791
+                add_flag(cell, NF_CHECKED)
+                da_record(cell)
+                join.owned.push(cell)
+            cells[root] = cell
+        if nodes[declaration].kind == .const_ or has_flag(declaration, 262144): add_flag(cell, 262144)
+        if nodes[declaration].aux2 != 1792: nodes[declaration].d = if nodes[declaration].b == 0: 1 else: 0
+        if nodes[declaration].kind == .const_:
+            nodes[declaration].kind = .vardecl
+            add_flag(declaration, NF_RDONLY)
+        nodes[declaration].aux2 = 1792
+        nodes[declaration].c = i32(cell)
+    loop name, declaration in bindings: join.cells.push(cells[scope_join_root(declaration, join)])
+    scope_joins.push(join)
+    scope_joins.len()
+scope_join_decl = (s: int, l: int, t: int):
+    cell = int(nodes[s].c)
+    target = int(nodes[cell].sym)
+    shared = int(locals[target].type)
+    if types[prune(shared)].kind == .var: unify(shared, t)
+    name = int(nodes[s].name)
+    if nodes[s].b != 0 and not can_coerce(int(nodes[s].b), t, shared): fatal(nodes[s].pos, "unscoped binding '{name_of(name)}' has incompatible types across paths: {dt(shared)} and {dt(t)}; use a scoped body `\{ ... }` or declare its type before the construct")
+    flags = int(locals[target].flags)
+    locals[target].flags = i32(flags & ~LF_CONST)
+    if nodes[s].d == 0:
+        assign = bc_assign(mk_ident_local(target, nodes[s].pos), int(nodes[s].b), nodes[s].pos)
+        check_stmt(assign)
+        readonly = has_flag(s, NF_RDONLY)
+        nodes[s] = nodes[assign]
+        if readonly: locals[target].flags = i32(int(locals[target].flags) | LF_CONST)
+    else:
+        nodes[s].kind = .block
+        nodes[s].nlist = 0
+    locals[l].flags = i32(int(locals[l].flags) | LF_QUIET)
+    push_scope_sym(name, new_sym(name, .local, target, 0))
+
+scope_join_end = (n: int, state: int, t0: int):
+    if state == 0: return
+    t = if t0 == 0: T_VOID else: t0
+    join = scope_joins.pop()
+    loop cell in join.cells:
+        name = int(nodes[cell].sval)
+        if has_flag(cell, 262144):
+            local = int(nodes[cell].sym)
+            locals[local].flags |= 131072
+        push_scope_sym(name, new_sym(name, .local, int(nodes[cell].sym), 0))
+    if join.owned.len() == 0: return
+    control = nodes.len()
+    nodes.push(nodes[n])
+    nodes[control].type = i32(t)
+    add_flag(control, NF_CHECKED)
+    statements = join.owned
+    statements.push(if nodes[control].kind == .while_: control else: bc_stmt(control, nodes[n].pos))
+    block = bc_block(statements, nodes[n].pos)
+    nodes[block].type = i32(t)
+    if t != T_VOID and t != T_NEVER: nodes[block].aux = 1
+    add_flag(block, NF_CHECKED)
+    add_flag(block, NF_UNSCOPED)
+    nodes[n] = nodes[block]
+
+scope_call_alias = (call: int, name: int, symbol: int, local: int) -> int:
+    hidden = intern("$argument_callee{call}")
+    binding = if local != 0: new_sym(hidden, .local, local, 0) else: symbol
+    push_scope_sym(hidden, binding)
+    hidden
+scope_call_owns = (type_id: int) -> bool: ownership_fact_type(type_id)
+
+scope_call_prepare = (callee: int) -> int:
+    saved = callee_at
+    callee_at = callee
+    check_expr(callee, 0)
+    value = last_checked
+    callee_at = saved
+    value
+
+scope_join_pattern = (s: int):
+    original = nodes.len()
+    nodes.push(nodes[s])
+    add_flag(original, NF_CHECKED)
+    statements = [original]
+    loop leaf in kids(s):
+        if nodes[leaf].aux2 != 1798: continue
+        declaration = int(nodes[leaf].c)
+        local = int(nodes[leaf].sym)
+        nodes[declaration].b = i32(mk_ident_local(local, nodes[leaf].pos))
+        nodes[declaration].d = 0
+        scope_join_decl(declaration, local, int(locals[local].type))
+        statements.push(declaration)
+    block = bc_block(statements, nodes[s].pos)
+    add_flag(block, NF_UNSCOPED)
+    add_flag(block, NF_CHECKED)
+    nodes[s] = nodes[block]

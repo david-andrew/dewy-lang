@@ -147,6 +147,9 @@ vd_pattern = (s: int) -> bool:
             vd_nodes[0][id].sym = i32(l)
         i = i + 1
     vd_nodes[0][s].type = i32(t)
+    loop j in [0..int(vd_nodes[0][s].nlist)):
+        id = vd_kid(s, j)
+        if vd_nodes[0][id].aux2 == 1798: decl_after(s, 0, t, 12); break
     true
 vd_forms = (s: int) -> bool:
     b = int(vd_nodes[0][s].b)
@@ -233,3 +236,4 @@ vd_decl = (s: int):
     vd_nodes[0][s].sym = i32(l)
     if unset: decl_after(s, l, t, 9)
     if vd_ide[0] and not typed: decl_after(s, l, t, 10)
+    if vd_nodes[0][s].aux2 == 1792: decl_after(s, l, t, 11)

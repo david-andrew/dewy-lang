@@ -209,6 +209,7 @@ values_settled = (n: int) -> bool:
         if named: a = int(xe_nodes[0][original].a)
         k = xe_nodes[0][a].kind
         flags = int(xe_nodes[0][a].flags)
+        if k == .block and xe_nodes[0][a].aux2 == 1796: return false
         if k == .call:
             m = xe_members_name[0]
             if m == 0 or int(xe_nodes[0][int(xe_nodes[0][a].a)].name) == m: return false

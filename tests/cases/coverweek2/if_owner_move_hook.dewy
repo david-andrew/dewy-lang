@@ -1,0 +1,6 @@
+Ticket=type of [id:int64
+ $__drop__=():>void=>printl"released"
+ $__move__=():>Ticket=>{printl"moved";Ticket[id]}
+]
+pick=(yes:bool)=>{if yes (let ticket=Ticket[1]) else (let ticket=Ticket[2]);printl(ticket.id)}
+main=()=>{pick(true);pick(false)}

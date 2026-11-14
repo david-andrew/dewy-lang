@@ -2528,6 +2528,8 @@ rt_dc_field_entry = () -> int:
 
 rt_dc_arguments = (n: int, close: DewyToken, first: int = 0) -> bool:
     args: int[]
+    declarations: int[]
+    scoped = false
     if first != 0: args.push(first)
     # (`f(xs...)`: a call's spread argument, dw_spread_item)
     saved_spread = dc_parser.reader.dc_spread_depth
@@ -2539,6 +2541,12 @@ rt_dc_arguments = (n: int, close: DewyToken, first: int = 0) -> bool:
             # (`f(1` and nothing after: dn_bracketed_from's mistake, should nothing else read it)
             rt_dc_hint(mkpos(dc_parser.file, dc_parser.tokens[opener].start), "expected '{dn_token_text(close)}' before end of file")
             return false
+        if close != .rbrack and (token.symbol == .kw_let or token.symbol == .kw_const):
+            declaration = rt_dc_statement()
+            if declaration == 0: return false
+            declarations.push(declaration)
+            scoped = true
+            continue
         if rt_dc_named_next():
             dc_parser.at += 2
             dc_parser.reader.dc_spread_depth = saved_spread
@@ -2546,7 +2554,8 @@ rt_dc_arguments = (n: int, close: DewyToken, first: int = 0) -> bool:
             if value == 0: return false
             named = mk(.namedarg, mkpos(dc_parser.file, token.start))
             nodes[named].name = token.name
-            nodes[named].a = i32(value)
+            nodes[named].a = i32(rt_dc_argument_body(declarations, value))
+            declarations = []
             args.push(named)
             continue
         dc_parser.reader.dc_spread_depth = dc_parser.depth + 1
@@ -2557,10 +2566,34 @@ rt_dc_arguments = (n: int, close: DewyToken, first: int = 0) -> bool:
             if not dc_parser.flags.report_now or not rt_dc_comma_arguments(start, close, args): return false
             set_list(n, args)
             return true
-        args.push(arg)
+        args.push(rt_dc_argument_body(declarations, arg))
+        declarations = []
     dc_parser.reader.dc_spread_depth = saved_spread
+    if declarations.len() > 0: args.push(rt_dc_argument_body(declarations, 0))
     set_list(n, args)
+    if scoped and close == .rbrace:
+        call = nodes.len()
+        nodes.push(nodes[n])
+        statement = mk(.exprstmt, nodes[n].pos)
+        nodes[statement].a = i32(call)
+        nodes[n] = Node(kind = .block, pos = nodes[n].pos)
+        set_list(n, [statement])
     true
+
+# Declarations run before the following contextual argument, in the caller's scope.
+rt_dc_argument_body = (declarations: int[], value: int) -> int:
+    if declarations.len() == 0: return value
+    statements = declarations
+    if value != 0:
+        expression = mk(.exprstmt, nodes[value].pos)
+        nodes[expression].a = i32(value)
+        statements.push(expression)
+    body = mk(.block, nodes[declarations[0]].pos)
+    nodes[body].aux = 5
+    nodes[body].aux2 = if value == 0: 1796 else: 1795
+    add_flag(body, NF_UNSCOPED)
+    set_list(body, statements)
+    body
 
 rt_dc_comma_mistake = (pos: int): rt_dc_report(pos, rt_dc_comma_text())
 
@@ -3763,7 +3796,31 @@ rt_dc_accept_semi = (statement: bool) -> bool:
 
 # (dc_statement's left side when no assignment follows it, read from dc_value_start)
 
-rt_dc_body_read = () -> int: rt_dc_body_within(.lbrace, .rbrace)
+rt_dc_body_parens = () -> bool:
+    if rt_dn_peek() != .lparen or rt_dc_lambda_next(): return false
+    close = rt_dc_closing(dc_parser.at)
+    if close < 0 or dc_parser.tokens[close].symbol != .rparen: return false
+    after = dc_parser.tokens[close + 1]
+    if dn_power(after.symbol) > 0 or after.symbol == .dot or after.symbol == .question or after.symbol == .ellipsis: return false
+    if not after.space and (after.symbol == .lparen or after.symbol == .lbrack or after.symbol == .lbrace or after.kind == .quoted or after.kind == .rawquoted): return false
+    depth = 0
+    at = dc_parser.at + 1
+    loop at < close:
+        symbol = dc_parser.tokens[at].symbol
+        if symbol == .kw_let or symbol == .kw_const or depth == 0 and (symbol == .kw_if or symbol == .kw_match or symbol == .kw_loop or symbol == .kw_return or symbol == .kw_break or symbol == .kw_continue or symbol == .semi or symbol == .assign or dn_token_assignment(symbol)): return true
+        if symbol == .lparen or symbol == .lbrack or symbol == .lbrace: depth += 1
+        else if symbol == .rparen or symbol == .rbrack or symbol == .rbrace: depth -= 1
+        at += 1
+    false
+
+rt_dc_body_read = () -> int:
+    if rt_dc_body_parens(): return rt_dc_paren_block()
+    implicit = rt_dn_peek() == .kw_if or rt_dn_peek() == .kw_match
+    body = rt_dc_body_within(.lbrace, .rbrace)
+    if body != 0 and implicit:
+        add_flag(body, NF_UNSCOPED)
+        nodes[body].aux2 = 1794
+    body
 
 # A body between open and close: `{ ... }` scoped, or `( ... )`, a block whose names are
 # visible after it (decisions.md, batch 9); without open, the statement alone.
@@ -4630,6 +4687,8 @@ rt_dc_flow = () -> int:
             if nodes[rest].kind == .block: alternative = rest
             else:
                 alternative = mk(.block, pos)
+                add_flag(alternative, NF_UNSCOPED)
+                nodes[alternative].aux2 = 1794
                 set_list(alternative, [rt_dc_flow_stmt(rest)])
         else:
             if fold >= 0 and rt_dc_unsafe_at(dc_parser.at): return 0
@@ -5316,6 +5375,7 @@ rt_dc_typed_pattern = (first: DewyLexeme) -> str:
 rt_dc_operand_body = () -> int:
     first = dc_parser.at
     opening = dc_parser.tokens[dc_parser.at]
+    if rt_dc_body_parens(): return rt_dc_paren_block()
     if opening.symbol == .lbrace or opening.kind == .metatag and dc_parser.tokens[dc_parser.at + 1].symbol == .lbrace: return rt_dc_body()
     statement = 0
     if opening.symbol == .kw_concurrent:
@@ -6777,6 +6837,8 @@ rt_dc_statement = () -> int:
             discard = mk(.block, pos)
             set_list(discard, [n])
             add_flag(discard, NF_DISCARD)
+            # Discarding a control statement's value introduces no scope around exit facts.
+            nodes[discard].aux = 5
             return discard
         return n
     if op == .kw_match:
