@@ -264,12 +264,15 @@ node/type reads use checked arena IDs and retain no pointer across a growing
 call. The frozen twin keeps the same API, including the plain-word `fact_domain`
 parameters required by the type-refinement host record.
 
-`facts_slice_prep.dewy` owns syntax-child enumeration for slice preparation.
-The allocating query and append-to-worklist writer preserve mask order and
-repeated children in O(children) time. Only the writer takes a mutable array.
-Node arena reads use checked IDs and retain no view across calls or appends.
-Jo retains edge construction, stamped marks and storage, snapshots, target and
-contract preparation, plan caches and the demanded walk.
+`facts_slice_prep.dewy` owns syntax-child enumeration, writer-edge construction,
+finished-slice queries, and target/contract preparation. Jo retains parent edges,
+stamped marks and storage, snapshots, plan caches and the demanded walk. Child,
+writer and contract-actual order and duplicates are preserved, as is the 64-step
+root cap. Only array/edge writers take mutable arguments; queries read the
+existing state. Node/type arena reads use checked IDs and retain no view across
+calls that can grow them. Construction costs O(children + emitted writer edges
++ traversed root paths + predicate atoms); indexed flag lookup preserves its
+existing dense-array or open-addressed representation.
 
 ## Route beyond the checker
 

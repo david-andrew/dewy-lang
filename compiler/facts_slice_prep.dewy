@@ -4,6 +4,18 @@ from p"ast.jo" import (kid nkids nodes)
 
 from p"isolation_ops.dewy" import (isolation_children)
 
+from p"check.jo" import (LF_ALIAS locals)
+from p"checker_state.dewy" import (SK)
+from p"effect_types.dewy" import (PlaceIdentity)
+from p"facts.jo" import (FactSliceEdges fact_slice fact_place fact_root_key)
+from p"facts_index_writes.dewy" import (fact_index_put)
+from p"facts_joins.dewy" import (fact_payload_node)
+from p"facts_value_queries.dewy" import (fact_index_get)
+from p"places.jo" import (place_locked)
+from p"refine.jo" import (ref_predicates)
+from p"lower_analysis.dewy" import (checked_call_mutmask)
+from p"types.jo" import (prune types)
+
 SlicePrepWord:type=int64<overflow='wrap'>
 
 # Preserve the syntax mask's child order. Arena IDs are checked syntax IDs;
@@ -28,5 +40,67 @@ fact_slice_push_children=(@out:array<int64> n:SlicePrepWord):>void=>$unsafe {
     if mask & 4 not=? 0 {out.push(int64(nodes.ptr[n].c))}
     if mask & 16 not=? 0 {
         loop i in [0..nkids(n)) {out.push(kid(n i))}
+    }
+}
+
+fact_slice_flags=(n:SlicePrepWord):>int64=>{
+    if fact_slice.base <? 0 {return max(0 fact_index_get(fact_slice.flags n))}
+    let i:SlicePrepWord=n - SlicePrepWord(fact_slice.base)
+    if i <? 0 or i >=? fact_slice.flags.length {return 0}
+    fact_slice.flags[i]
+}
+fact_slice_edge=(@edges:FactSliceEdges key:SlicePrepWord node:SlicePrepWord):>void=>{
+    edges.next.push(fact_index_get(edges.heads key))
+    fact_index_put(@edges.heads key edges.nodes.length)
+    edges.nodes.push(node)
+}
+fact_slice_writer=(@writers:FactSliceEdges p:PlaceIdentity n:SlicePrepWord):>void=>{
+    if p.declaration =? 0 {return}
+    let key=fact_root_key(p)
+    fact_slice_edge(@writers key n)
+}
+fact_slice_target=(@writers:FactSliceEdges n:SlicePrepWord at:SlicePrepWord):>void=>$unsafe {
+    if nodes.ptr[n].kind =? 'tuple' {
+        loop i in [0..nkids(n)) {fact_slice_target(@writers kid(n i) at)}
+        return
+    }
+    fact_slice_writer(@writers fact_slice_root(n) at)
+}
+# A call's mutable (`@`) arguments, each written by it.
+fact_slice_place_arguments=(@writers:FactSliceEdges n:SlicePrepWord):>void=>{
+    let mask:SlicePrepWord=checked_call_mutmask(n)
+    loop i in [0..nkids(n)) {
+        if mask & (SlicePrepWord(1) << SlicePrepWord(i)) not=? 0 {fact_slice_target(@writers kid(n i) n)}
+    }
+}
+# The variable a write target changes: through fields, elements, local
+# places (`let q = @r.xs`, `loop @x in xs`) and narrowed names (`if r is? T`),
+# which write the variable they name, or none. O(route depth).
+fact_slice_root=(n:SlicePrepWord):>PlaceIdentity=>$unsafe {
+    let root:SlicePrepWord=n
+    let depth:SlicePrepWord=0
+    loop root not=? 0 and depth <? 64 {
+        depth+=1
+        let k=nodes.ptr[root].kind
+        if k =? 'field' or k =? 'index' or k =? 'addr' or fact_payload_node(root) {root=SlicePrepWord(nodes.ptr[root].a)}
+        # SK.local has the frozen node-ABI ordinal 1.
+        else if k =? 'ident' and nodes.ptr[root].aux =? int32(1) and SlicePrepWord(locals.ptr[SlicePrepWord(nodes.ptr[root].sym)].flags) & LF_ALIAS not=? 0 and locals.ptr[SlicePrepWord(nodes.ptr[root].sym)].alias not=? 0 and not place_locked.has(SlicePrepWord(nodes.ptr[root].sym)) {root=SlicePrepWord(locals.ptr[SlicePrepWord(nodes.ptr[root].sym)].alias)}
+        else {break}
+    }
+    fact_place(root)
+}
+# A contract reads its value and referenced actuals; proving it does not
+# demand the callee's return summary. Called only for written argument
+# contracts, O(predicate atoms), with node-indexed slice deduplication.
+fact_slice_contract_actuals=(call:SlicePrepWord arg:SlicePrepWord @values:array<int64>):>void=>$unsafe {
+    values.push(arg)
+    let rt=prune(SlicePrepWord(nodes.ptr[arg].aux2))
+    if types.ptr[rt].kind not=? 'refined' {
+        values.push(call)
+        return
+    }
+    loop atom in ref_predicates[SlicePrepWord(types.ptr[rt].st)] {
+        if (atom.a.kind =? 2 or atom.a.kind =? 5) and atom.a.value >=? 0 and atom.a.value <? nkids(call) {values.push(kid(call atom.a.value))}
+        if (atom.b.kind =? 2 or atom.b.kind =? 5) and atom.b.value >=? 0 and atom.b.value <? nkids(call) {values.push(kid(call atom.b.value))}
     }
 }

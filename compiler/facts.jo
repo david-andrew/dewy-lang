@@ -200,12 +200,6 @@ struct FactSlice:
     loop_indexes: int[]
     float_context: bool = false
 
-fact_slice_flags = (n: int) -> int:
-    if fact_slice.base < 0: return max(0, fact_index_get(fact_slice.flags, n))
-    i = n - fact_slice.base
-    if i < 0 or i >= fact_slice.flags.len(): return 0
-    fact_slice.flags[i]
-
 fact_slice = FactSlice()
 fact_slice_cache: {int: FactSlice} = {}
 fact_plan_serial = 0
@@ -1151,11 +1145,6 @@ fact_slice_member = (parents: mut FactSliceEdges, work: mut int[], c: int, n: in
     fact_slice_parent(parents, c, n)
     work.push(c)
 
-fact_slice_edge = (edges: mut FactSliceEdges, key: int, node: int):
-    edges.next.push(fact_index_get(edges.heads, key))
-    fact_index_put(edges.heads, key, edges.nodes.len())
-    edges.nodes.push(node)
-
 # Node-indexed scratch for building one slice: flags and the head of each
 # node's parent-edge chain, valid where the stamp is the current generation.
 # Membership costs O(1) without hashing; only the finished slice is indexed.
@@ -1198,50 +1187,6 @@ fact_slice_parent = (parents: mut FactSliceEdges, child: int, node: int):
     parents.next.push(fact_mark_head[child])
     fact_mark_head[child] = parents.nodes.len()
     parents.nodes.push(node)
-
-fact_slice_writer = (writers: mut FactSliceEdges, p: PlaceIdentity, n: int):
-    if p.declaration == 0: return
-    key = fact_root_key(p)
-    fact_slice_edge(writers, key, n)
-
-fact_slice_target = (writers: mut FactSliceEdges, n: int, at: int):
-    if nodes[n].kind == .tuple:
-        loop i in [0..nkids(n)): fact_slice_target(writers, kid(n, i), at)
-        return
-    fact_slice_writer(writers, fact_slice_root(n), at)
-
-# The variable a write target changes: through fields, elements, local
-# places (`let q = @r.xs`, `loop @x in xs`) and narrowed names (`if r is? T`),
-# which write the variable they name, or none. O(route depth).
-# A call's mutable (`@`) arguments, each written by it.
-fact_slice_place_arguments = (writers: mut FactSliceEdges, n: int):
-    mask = checked_call_mutmask(n)
-    loop i in [0..nkids(n)):
-        if mask & (1 << i) != 0: fact_slice_target(writers, kid(n, i), n)
-
-fact_slice_root = (n: int) -> PlaceIdentity:
-    root = n
-    depth = 0
-    loop root != 0 and depth < 64:
-        depth += 1
-        k = nodes[root].kind
-        if k == .field or k == .index or k == .addr or fact_payload_node(root): root = int(nodes[root].a)
-        else if k == .ident and nodes[root].aux == i32(int(SK.local)) and int(locals[int(nodes[root].sym)].flags) & LF_ALIAS != 0 and locals[int(nodes[root].sym)].alias != 0 and not place_locked.has(int(nodes[root].sym)): root = int(locals[int(nodes[root].sym)].alias)
-        else: break
-    fact_place(root)
-
-# A contract reads its value and referenced actuals; proving it does not
-# demand the callee's return summary. Called only for written argument
-# contracts, O(predicate atoms), with node-indexed slice deduplication.
-fact_slice_contract_actuals = (call: int, arg: int, values: mut int[]):
-    values.push(arg)
-    rt = prune(int(nodes[arg].aux2))
-    if types[rt].kind != .refined:
-        values.push(call)
-        return
-    loop atom in ref_predicates[int(types[rt].st)]:
-        if (atom.a.kind == 2 or atom.a.kind == 5) and atom.a.value >= 0 and atom.a.value < nkids(call): values.push(kid(call, atom.a.value))
-        if (atom.b.kind == 2 or atom.b.kind == 5) and atom.b.value >= 0 and atom.b.value < nkids(call): values.push(kid(call, atom.b.value))
 
 fact_slice_prepare = (f: int, summary: bool = false):
     key = (f << 4) | int(summary) | (int(fact_probe_on) << 1) | (int(fact_policy == .RequireStatic) << 2) | (int(result_active or proof_active) << 3)
