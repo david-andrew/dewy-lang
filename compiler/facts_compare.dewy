@@ -1,0 +1,764 @@
+$runtime_checks
+
+from p"ast.jo" import (kid nodes)
+from p"check.jo" import (fns)
+from p"checker_tokens.dewy" import (Tok)
+from p"facts.jo" import (FactAffine FactDifference FactState fact_add_fits fact_comparison fact_domain fact_equal_arrays fact_name_starts_with fact_project fact_terms fact_type)
+from p"facts_arith.dewy" import (fact_u64_literal)
+from p"facts_changes.dewy" import (fact_length_comparison)
+from p"facts_collect.dewy" import (fact_guarded_word fact_remainder_decided)
+from p"facts_index_writes.dewy" import (fact_constant fact_new fact_set_bound)
+from p"facts_lengths.dewy" import (fact_difference)
+from p"facts_ranges.dewy" import (fact_host_endpoint fact_host_value)
+from p"facts_row_queries.dewy" import (fact_difference_head fact_difference_next fact_row_find)
+from p"facts_text.dewy" import (fact_affix_call fact_affix_floor)
+from p"facts_value_queries.dewy" import (fact_bound fact_signed_bound fact_truth)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
+from p"types.jo" import (T_BOOL T_INT T_U64)
+from p"word_overflow.dewy" import (math_word_overflow)
+
+CompareWord:type=int64<overflow='wrap'>
+
+# Jo owns term identities and memo tables. Queries borrow the existing state;
+# only assumptions and offset narrowing write it. The searches retain the
+# 32-term/256-visit caps and the affine walk's shared 32-node budget.
+# Word workspaces and guarded endpoint arithmetic preserve Jo's representation.
+
+# Bounded single-source relaxation, never an all-pairs closure. Exhaustion
+# simply declines additional inference; every discovered path is still valid.
+fact_distance=(s:FactState a:CompareWord b:CompareWord limit:CompareWord):>bool=>{
+    if a =? 0 or b =? 0 {return false}
+    if a =? b {return limit >=? 0}
+    let direct:CompareWord=fact_row_find(s a b)
+    if direct >=? 0 and s.differences[direct].limit <=? limit {return true}
+    # (no row leaves b: the relaxation below would find nothing)
+    if fact_difference_head(s b 0) <? 0 {return false}
+    let terms:array<CompareWord>=[b]
+    let distances:array<CompareWord>=[0]
+    let pending:array<CompareWord>=[0]
+    let cursor:CompareWord=0
+    let visits:CompareWord=0
+    loop cursor <? pending.length and visits <? 256 {
+        let index:CompareWord=pending[cursor]
+        cursor += 1
+        let source:CompareWord=terms[index]
+        let distance:CompareWord=distances[index]
+        # A path can end at an interval, not only the same value identity.
+        # Guards narrow bounds after equality rows were recorded (for example,
+        # a shape binder becoming nonempty). Query only these visited values;
+        # no eager propagation or new rows. Open/wide endpoints prove nothing.
+        let x=fact_bound(s a)
+        let y=fact_bound(s source)
+        if not x.wide and not y.wide and CompareWord(x.hi) not=? FACT_MAX and CompareWord(y.lo) not=? FACT_MIN and fact_add_fits(CompareWord(x.hi) (-CompareWord(y.lo))) {
+            let gap:CompareWord=CompareWord(x.hi) - CompareWord(y.lo)
+            if fact_add_fits(gap distance) and gap + distance <=? limit {return true}
+        }
+        let ri:CompareWord=fact_difference_head(s source 0)
+        loop ri >=? 0 {
+            let row=s.differences[ri]
+            visits += 1
+            ri=fact_difference_next(s ri 0)
+            if visits >? 256 {return false}
+            if not fact_add_fits(distance row.limit) {continue}
+            let value:CompareWord=distance + CompareWord(row.limit)
+            if row.a =? a and value <=? limit {return true}
+            # (at most 32 terms: a scan beats hashing)
+            let slot:CompareWord=-1
+            loop t in 0.. and term in terms {
+                if term =? row.a {slot=t; break}
+            }
+            if slot <? 0 {
+                if terms.length >=? 32 {continue}
+                slot=terms.length
+                terms.push(row.a)
+                distances.push(value)
+                pending.push(slot)
+            }
+            else if value <? distances[slot] {
+                distances[slot]=value
+                pending.push(slot)
+            }
+        }
+    }
+    false
+}
+# The smallest d found with a - b <= d (FACT_MAX: none), by fact_distance's
+# bounded relaxation.
+fact_shortest=(s:FactState a:CompareWord b:CompareWord):>int64=>{
+    if a =? 0 or b =? 0 {return FACT_MAX}
+    if a =? b {return 0}
+    let best:CompareWord=FACT_MAX
+    let direct:CompareWord=fact_row_find(s a b)
+    if direct >=? 0 {best=s.differences[direct].limit}
+    if fact_difference_head(s b 0) <? 0 {return best}
+    let terms:array<CompareWord>=[b]
+    let distances:array<CompareWord>=[0]
+    let pending:array<CompareWord>=[0]
+    let cursor:CompareWord=0
+    let visits:CompareWord=0
+    loop cursor <? pending.length and visits <? 256 {
+        let index:CompareWord=pending[cursor]
+        cursor += 1
+        let source:CompareWord=terms[index]
+        let distance:CompareWord=distances[index]
+        let ri:CompareWord=fact_difference_head(s source 0)
+        loop ri >=? 0 {
+            let row=s.differences[ri]
+            visits += 1
+            ri=fact_difference_next(s ri 0)
+            if visits >? 256 {return best}
+            if not fact_add_fits(distance row.limit) {continue}
+            let value:CompareWord=distance + CompareWord(row.limit)
+            if row.a =? a {
+                best=min(best value)
+                continue
+            }
+            let slot:CompareWord=-1
+            loop t in 0.. and term in terms {
+                if term =? row.a {slot=t; break}
+            }
+            if slot <? 0 {
+                if terms.length >=? 32 {continue}
+                slot=terms.length
+                terms.push(row.a)
+                distances.push(value)
+                pending.push(slot)
+            }
+            else if value <? distances[slot] {
+                distances[slot]=value
+                pending.push(slot)
+            }
+        }
+    }
+    best
+}
+# Rows for a sum of two symbolic operands, v = a + b, through terms already
+# evaluated (a guard's `first+n <=? xs.length`, a range's `n-col`): with
+# w = a + c, b - c <= d gives v - w <= d; with t = c - a, b - t <= d gives
+# v - c <= d (each mirrored). Found before v exists, so a bounded sum is no
+# possible wrap. O(terms) candidates, two bounded relaxations each.
+fact_sum_rows=(s:FactState a:CompareWord b:CompareWord):>array<FactDifference>=>{
+    let rows:array<FactDifference>=[]
+    loop i in 0.. and t in s.ids {
+        let term=fact_terms[t]
+        if term.a =? 0 or term.b =? 0 {continue}
+        loop side in [0..2) {
+            let mine:CompareWord=if side =? 0 {a} else {b}
+            let other:CompareWord=if side =? 0 {b} else {a}
+            if term.op =? 'plus' and (term.a =? mine or term.b =? mine) {
+                let c:CompareWord=if term.a =? mine {term.b} else {term.a}
+                let up:CompareWord=fact_shortest(s other c)
+                if up not=? FACT_MAX {rows.push(FactDifference(0 t up))}
+                let down:CompareWord=fact_shortest(s c other)
+                if down not=? FACT_MAX {rows.push(FactDifference(t 0 down))}
+            }
+            else if term.op =? 'minus' and term.b =? mine {
+                let up:CompareWord=fact_shortest(s other t)
+                if up not=? FACT_MAX {rows.push(FactDifference(0 term.a up))}
+                let down:CompareWord=fact_shortest(s t other)
+                if down not=? FACT_MAX {rows.push(FactDifference(term.a 0 down))}
+            }
+            if rows.length >=? 8 {return rows}
+        }
+    }
+    rows
+}
+# Compose two independently bounded operands only when a comparison needs
+# them. No speculative rows consume the ordinary graph's incident budgets.
+# O(active terms), with bounded indexed distance queries, no state changes.
+fact_sum_compare=(s:FactState a:CompareWord b:CompareWord limit:CompareWord):>bool=>{
+    if a =? 0 or b =? 0 {return false}
+    let sum=fact_terms[a]
+    if sum.op not=? 'plus' or sum.a =? 0 or sum.b =? 0 {return false}
+    loop side in [0..2) {
+        let mine:CompareWord=if side =? 0 {sum.a} else {sum.b}
+        let other:CompareWord=if side =? 0 {sum.b} else {sum.a}
+        let difference=fact_terms[mine]
+        if difference.op =? 'minus' and difference.a not=? 0 and difference.b not=? 0 {
+            let up:CompareWord=fact_shortest(s other difference.b)
+            let tail:CompareWord=if up =? FACT_MAX {FACT_MAX} else {fact_shortest(s difference.a b)}
+            if up not=? FACT_MAX and tail not=? FACT_MAX and fact_add_fits(up tail) and up + tail <=? limit {return true}
+        }
+    }
+    loop t in s.ids {
+        let term=fact_terms[t]
+        if t =? a or term.op not=? 'plus' or term.a =? 0 or term.b =? 0 {continue}
+        let tail:CompareWord=fact_shortest(s t b)
+        if tail =? FACT_MAX {continue}
+        loop side in [0..2) {
+            let x:CompareWord=if side =? 0 {term.a} else {term.b}
+            let y:CompareWord=if side =? 0 {term.b} else {term.a}
+            let up:CompareWord=fact_shortest(s sum.a x)
+            if up =? FACT_MAX {continue}
+            let down:CompareWord=fact_shortest(s sum.b y)
+            if down =? FACT_MAX or not fact_add_fits(up down) {continue}
+            let total:CompareWord=up + down
+            if fact_add_fits(total tail) and total + tail <=? limit {return true}
+        }
+    }
+    false
+}
+# y - h <= d: the shortest row path, else the operands' intervals. FACT_MAX: none.
+fact_gap=(s:FactState y:CompareWord h:CompareWord):>int64=>{
+    if y =? h {return 0}
+    let best:CompareWord=fact_shortest(s y h)
+    let p=fact_signed_bound(s y)
+    let q=fact_signed_bound(s h)
+    if not p.wide and not q.wide and CompareWord(p.hi) not=? FACT_MAX and CompareWord(q.lo) not=? FACT_MIN and fact_add_fits(CompareWord(p.hi) (-CompareWord(q.lo))) {best=min(best CompareWord(p.hi) - CompareWord(q.lo))}
+    best
+}
+# v - b <= d: a bounded row path, else v's interval or one row from v to an
+# interval, against b's lower end (`h*w <=? INT64_MAX` through
+# `xs.length =? h*w`). O(fact_distance + 16 incident rows).
+fact_below=(s:FactState v:CompareWord b:CompareWord d:CompareWord):>bool=>{
+    if fact_distance(s v b d) {return true}
+    let low=fact_signed_bound(s b)
+    let top=fact_signed_bound(s v)
+    if low.wide or top.wide or low.lo =? FACT_MIN {return false}
+    let best:CompareWord=top.hi
+    let ri:CompareWord=fact_difference_head(s v 1)
+    let seen:CompareWord=0
+    loop ri >=? 0 and seen <? 16 {
+        let row=s.differences[ri]
+        ri=fact_difference_next(s ri 1)
+        seen += 1
+        let o=fact_signed_bound(s row.b)
+        if not o.wide and CompareWord(o.hi) not=? FACT_MAX and fact_add_fits(CompareWord(o.hi) CompareWord(row.limit)) {best=min(best CompareWord(o.hi) + CompareWord(row.limit))}
+    }
+    best not=? FACT_MAX and fact_add_fits(best (-CompareWord(low.lo))) and best - CompareWord(low.lo) <=? d
+}
+# A product with a shared factor, on demand: a = y*w (+ x) against a
+# retained t = h*w, then t - b. With w >= wl >= 0 and y - h <= dy <= 0,
+# a - t = (y-h)*w + x <= dy*wl + x, and with dy <= -1 and x - w <= dx,
+# also <= (dy+1)*wl + dx: `r*w + c <? xs.length` from `xs.length =? h*w`,
+# `0 <=? c <? w` and `r <? h`. Retained arithmetic terms are exact (a product
+# that may wrap is never kept), so the algebra is the mathematical one.
+# Only a compare whose left side is a product, or a sum with one (nested
+# once, `(k*n + col) + j`), gets here.
+# O(active terms) per factor order, plus two bounded relaxations and 16
+# incident rows per retained product sharing w.
+fact_product_compare=(s:FactState a:CompareWord b:CompareWord limit:CompareWord):>bool=>{
+    if a =? 0 or b =? 0 {return false}
+    let t=fact_terms[a]
+    if t.a =? 0 or t.b =? 0 {return false}
+    if t.op not=? 'star' and t.op not=? 'plus' {return false}
+    if fact_bound(s a).wide {return false}
+    # (the product and up to two addends: `p`, `p + x`, `(p + x) + x2`)
+    loop pick in [0..6) {
+        let p=a
+        let x:CompareWord=0
+        let x2:CompareWord=0
+        if t.op =? 'star' {
+            if pick >? 0 {break}
+        }
+        else if pick <? 2 {
+            p=if pick =? 0 {t.a} else {t.b}
+            x=if pick =? 0 {t.b} else {t.a}
+        }
+        else {
+            let u=if pick <? 4 {t.a} else {t.b}
+            x2=if pick <? 4 {t.b} else {t.a}
+            let ut=fact_terms[u]
+            if ut.op not=? 'plus' or ut.a =? 0 or ut.b =? 0 {continue}
+            p=if pick & 1 =? 0 {ut.a} else {ut.b}
+            x=if pick & 1 =? 0 {ut.b} else {ut.a}
+        }
+        let pt=fact_terms[p]
+        if pt.op not=? 'star' or pt.a =? 0 or pt.b =? 0 {continue}
+        if fact_bound(s p).wide {continue}
+        let xb=if x =? 0 {FactBound(0 0)} else {fact_signed_bound(s x)}
+        if x2 not=? 0 {
+            let extra=fact_signed_bound(s x2)
+            xb.wide=xb.wide or extra.wide
+            xb.lo=if CompareWord(xb.lo) not=? FACT_MIN and CompareWord(extra.lo) not=? FACT_MIN and fact_add_fits(CompareWord(xb.lo) CompareWord(extra.lo)) {CompareWord(xb.lo) + CompareWord(extra.lo)} else {FACT_MIN}
+            xb.hi=if CompareWord(xb.hi) not=? FACT_MAX and CompareWord(extra.hi) not=? FACT_MAX and fact_add_fits(CompareWord(xb.hi) CompareWord(extra.hi)) {CompareWord(xb.hi) + CompareWord(extra.hi)} else {FACT_MAX}
+        }
+        if xb.wide {continue}
+        loop side in [0..2) {
+            let y:CompareWord=if side =? 0 {pt.a} else {pt.b}
+            let w:CompareWord=if side =? 0 {pt.b} else {pt.a}
+            if side =? 1 and y =? w {break}
+            let wb=fact_signed_bound(s w)
+            if wb.wide {continue}
+            let wl:CompareWord=wb.lo
+            let dx:CompareWord=if x =? 0 {FACT_MAX} else if x2 =? 0 {fact_gap(s x w)} else {fact_pair_gap(s x x2 w)}
+            # (x <= w + dx with x >= x.lo: w >= x.lo - dx)
+            if wl <? 0 and dx not=? FACT_MAX and dx not=? FACT_MIN and CompareWord(xb.lo) not=? FACT_MIN and fact_add_fits(CompareWord(xb.lo) (-dx)) {wl=max(wl CompareWord(xb.lo) - dx)}
+            if wl <? 0 {continue}
+            loop v in s.ids {
+                let tt=fact_terms[v]
+                if tt.op not=? 'star' or tt.a not=? w and tt.b not=? w {continue}
+                let h:CompareWord=if tt.a =? w {tt.b} else {tt.a}
+                if h =? 0 or fact_bound(s v).wide {continue}
+                let dy:CompareWord=fact_gap(s y h)
+                if dy =? FACT_MAX or dy >? 0 or math_word_overflow(2 dy wl) {continue}
+                let up:CompareWord=FACT_MAX
+                if x =? 0 {up=dy * wl}
+                else {
+                    if CompareWord(xb.hi) not=? FACT_MAX and fact_add_fits(dy * wl CompareWord(xb.hi)) {up=dy * wl + CompareWord(xb.hi)}
+                    if dy <=? -1 and dx not=? FACT_MAX and not math_word_overflow(2 dy + 1 wl) and fact_add_fits((dy + 1) * wl dx) {up=min(up (dy + 1) * wl + dx)}
+                }
+                if up =? FACT_MAX or up =? FACT_MIN or not fact_add_fits(limit (-up)) {continue}
+                if fact_below(s v b limit - up) {return true}
+            }
+        }
+    }
+    false
+}
+# x + x2 - w <= d with no term for x + x2: through a retained w - x
+# (`j <? n - col` bounds `col + j` below n), else the intervals.
+# O(active terms) plus one bounded relaxation per such difference.
+fact_pair_gap=(s:FactState x:CompareWord x2:CompareWord w:CompareWord):>int64=>{
+    let best:CompareWord=FACT_MAX
+    let p=fact_signed_bound(s x)
+    let q=fact_signed_bound(s x2)
+    let r=fact_signed_bound(s w)
+    if not p.wide and not q.wide and not r.wide and CompareWord(p.hi) not=? FACT_MAX and CompareWord(q.hi) not=? FACT_MAX and CompareWord(r.lo) not=? FACT_MIN and fact_add_fits(CompareWord(p.hi) CompareWord(q.hi)) and fact_add_fits(CompareWord(p.hi) + CompareWord(q.hi) (-CompareWord(r.lo))) {best=CompareWord(p.hi) + CompareWord(q.hi) - CompareWord(r.lo)}
+    loop v in s.ids {
+        let m=fact_terms[v]
+        if m.op not=? 'minus' or m.a not=? w or m.b not=? x and m.b not=? x2 {continue}
+        let d:CompareWord=fact_gap(s (if m.b =? x {x2} else {x}) v)
+        if d <? best {best=d}
+    }
+    best
+}
+# A sum p + q against b through a retained difference m = x - p: q - m <= u and
+# x - b <= t give p + q - b = (q - m) + (x - b) <= u + t, so `start+size <? len`
+# from the guard `size <? len-start`. Retained arithmetic terms are exact, so the
+# algebra is the mathematical one; a uint64's biased terms are never composed.
+# Only a compare whose left side is a sum gets here. O(active terms) with two
+# bounded distance queries per difference of an operand.
+fact_guard_compare=(s:FactState a:CompareWord b:CompareWord limit:CompareWord):>bool=>{
+    if a =? 0 or b =? 0 {return false}
+    let sum=fact_terms[a]
+    if sum.op not=? 'plus' or sum.a =? 0 or sum.b =? 0 or fact_type(sum.type) =? T_U64 or fact_type(fact_terms[b].type) =? T_U64 {return false}
+    loop m in s.ids {
+        let term=fact_terms[m]
+        if term.op not=? 'minus' or term.a =? 0 or term.b =? 0 or term.b not=? sum.a and term.b not=? sum.b {continue}
+        if fact_type(term.type) =? T_U64 or fact_type(fact_terms[term.a].type) =? T_U64 {continue}
+        let other:CompareWord=if term.b =? sum.a {sum.b} else {sum.a}
+        if fact_type(fact_terms[other].type) =? T_U64 {continue}
+        let up:CompareWord=fact_shortest(s other m)
+        if up =? FACT_MAX {continue}
+        let tail:CompareWord=fact_shortest(s term.a b)
+        if tail not=? FACT_MAX and fact_add_fits(up tail) and up + tail <=? limit {return true}
+    }
+    false
+}
+fact_affine=(s:FactState v:CompareWord @budget:CompareWord):>FactAffine=>{
+    budget -= 1
+    if v =? 0 or budget <? 0 {return FactAffine(valid=false)}
+    let bound=fact_bound(s v)
+    # (a wide singleton is an `int` beyond int64, not that constant)
+    if bound.lo =? bound.hi and not bound.wide {return FactAffine(offset=bound.lo)}
+    let t=fact_terms[v]
+    if t.op not=? 'plus' and t.op not=? 'minus' and t.op not=? 'star' {return FactAffine(v 1)}
+    let a=fact_affine(s t.a @budget)
+    let b=fact_affine(s t.b @budget)
+    if not a.valid or not b.valid {return FactAffine(valid=false)}
+    if t.op =? 'star' {
+        if a.root =? 0 {
+            let swap=a
+            a=b
+            b=swap
+        }
+        if b.root not=? 0 or math_word_overflow(2 a.scale b.offset) or math_word_overflow(2 a.offset b.offset) {return FactAffine(valid=false)}
+        return FactAffine(a.root CompareWord(a.scale) * CompareWord(b.offset) CompareWord(a.offset) * CompareWord(b.offset))
+    }
+    if a.root not=? 0 and b.root not=? 0 and a.root not=? b.root {return FactAffine(valid=false)}
+    if t.op =? 'minus' {
+        if b.scale =? FACT_MIN or b.offset =? FACT_MIN {return FactAffine(valid=false)}
+        b.scale=-CompareWord(b.scale)
+        b.offset=-CompareWord(b.offset)
+    }
+    if not fact_add_fits(a.scale b.scale) or not fact_add_fits(a.offset b.offset) {return FactAffine(valid=false)}
+    FactAffine((if a.root not=? 0 {a.root} else {b.root}) CompareWord(a.scale) + CompareWord(b.scale) CompareWord(a.offset) + CompareWord(b.offset))
+}
+fact_affine_compare=(s:FactState op:Tok av:CompareWord bv:CompareWord):>int64=>{
+    # A sum relative to one of its captured operands needs only the other
+    # operand's sign, even if that operand has no difference rows. Query
+    # existing indexed terms only: O(1), no new rows or body walk. Retained
+    # non-wide arithmetic terms denote exact values, never a possible wrap.
+    loop side in [0..2) {
+        let sum=fact_terms[if side =? 0 {av} else {bv}]
+        let base=if side =? 0 {bv} else {av}
+        if base =? 0 or sum.op not=? 'plus' or sum.a not=? base and sum.b not=? base {continue}
+        let other:CompareWord=if sum.a =? base {sum.b} else {sum.a}
+        if other =? 0 {continue}
+        let bound=fact_bound(s other)
+        if bound.wide {continue}
+        if op =? 'eq' {
+            if bound.lo =? 0 and bound.hi =? 0 {return 1}
+            if bound.nz or bound.lo >? 0 or bound.hi <? 0 {return 0}
+        }
+        else if op =? 'lt' {
+            if side =? 0 {
+                if bound.hi <? 0 {return 1}
+                if bound.lo >=? 0 {return 0}
+            }
+            else {
+                if bound.lo >? 0 {return 1}
+                if bound.hi <=? 0 {return 0}
+            }
+        }
+        else if op =? 'le' {
+            if side =? 0 {
+                if bound.hi <=? 0 {return 1}
+                if bound.lo >? 0 {return 0}
+            }
+            else {
+                if bound.lo >=? 0 {return 1}
+                if bound.hi <? 0 {return 0}
+            }
+        }
+    }
+    let budget:CompareWord=32
+    let a=fact_affine(s av @budget)
+    let b=fact_affine(s bv @budget)
+    if not a.valid or not b.valid or a.root not=? b.root {return -1}
+    if b.scale =? FACT_MIN or b.offset =? FACT_MIN {return -1}
+    if not fact_add_fits(CompareWord(a.scale) (-CompareWord(b.scale))) or not fact_add_fits(CompareWord(a.offset) (-CompareWord(b.offset))) {return -1}
+    let scale:CompareWord=CompareWord(a.scale) - CompareWord(b.scale)
+    let offset:CompareWord=CompareWord(a.offset) - CompareWord(b.offset)
+    let domain=if a.root =? 0 {FactBound(0 0)} else {fact_bound(s a.root)}
+    if domain.wide and scale not=? 0 {return -1}
+    # (an open `int` end of the root is infinite: that side of the difference is unbounded)
+    let lo_open=scale not=? 0 and domain.lo =? FACT_MIN and fact_open_endpoint(s a.root false)
+    let hi_open=scale not=? 0 and domain.hi =? FACT_MAX and fact_open_endpoint(s a.root true)
+    if lo_open {domain.lo=if hi_open {0} else {domain.hi}}
+    if hi_open {domain.hi=domain.lo}
+    if math_word_overflow(2 domain.lo scale) or math_word_overflow(2 domain.hi scale) {return -1}
+    let low:CompareWord=min(CompareWord(domain.lo) * scale CompareWord(domain.hi) * scale)
+    let high:CompareWord=max(CompareWord(domain.lo) * scale CompareWord(domain.hi) * scale)
+    if not fact_add_fits(low offset) or not fact_add_fits(high offset) {return -1}
+    low += offset
+    high += offset
+    if lo_open and scale >? 0 or hi_open and scale <? 0 {low=FACT_MIN}
+    if hi_open and scale >? 0 or lo_open and scale <? 0 {high=FACT_MAX}
+    if op =? 'lt' {
+        if high <? 0 {return 1}
+        if low >=? 0 {return 0}
+    }
+    if op =? 'le' {
+        if high <=? 0 {return 1}
+        if low >? 0 {return 0}
+    }
+    if op =? 'eq' {
+        if low =? 0 and high =? 0 {return 1}
+        if high <? 0 or low >? 0 {return 0}
+    }
+    -1
+}
+fact_compare=(s:FactState op:Tok a:CompareWord b:CompareWord):>int64=>{
+    let x=fact_bound(s a)
+    let y=fact_bound(s b)
+    if x.wide or y.wide {
+        if (op =? 'lt' or op =? 'le') and fact_guard_compare(s a b (if op =? 'lt' {-1} else {0})) {return 1}
+        # (a wide value marked nonzero still differs from a zero)
+        if (op =? 'eq' or op =? 'ne') and (x.nz and not y.wide and y.lo =? 0 and y.hi =? 0 or y.nz and not x.wide and x.lo =? 0 and x.hi =? 0) {return int64(op =? 'ne')}
+        return -1
+    }
+    # Intervals already decide separated or singleton ranges. Do not search
+    # predicates and relation rows for an answer the endpoints give directly.
+    if op =? 'eq' or op =? 'ne' {
+        if x.hi <? y.lo or y.hi <? x.lo or x.nz and y.lo =? 0 and y.hi =? 0 or y.nz and x.lo =? 0 and x.hi =? 0 {return int64(op =? 'ne')}
+        if x.lo =? x.hi and y.lo =? y.hi {return int64((x.lo =? y.lo) =? (op =? 'eq'))}
+    }
+    else if op =? 'lt' {
+        if x.hi <? y.lo {return 1}
+        if x.lo >=? y.hi and (x.lo not=? FACT_MIN or fact_host_endpoint(s a false)) and (y.hi not=? FACT_MAX or fact_host_endpoint(s b true)) {return 0}
+    }
+    else if op =? 'le' {
+        if x.hi <=? y.lo and (x.hi not=? FACT_MAX or fact_host_endpoint(s a true)) and (y.lo not=? FACT_MIN or fact_host_endpoint(s b false)) {return 1}
+        if x.lo >? y.hi {return 0}
+    }
+    else if op =? 'gt' {
+        if x.lo >? y.hi {return 1}
+        if x.hi <=? y.lo and (x.hi not=? FACT_MAX or fact_host_endpoint(s a true)) and (y.lo not=? FACT_MIN or fact_host_endpoint(s b false)) {return 0}
+    }
+    else if op =? 'ge' {
+        if x.lo >=? y.hi and (x.lo not=? FACT_MIN or fact_host_endpoint(s a false)) and (y.hi not=? FACT_MAX or fact_host_endpoint(s b true)) {return 1}
+        if x.hi <? y.lo {return 0}
+    }
+    if a not=? 0 and b not=? 0 {
+        loop i in 0.. and id in s.ids {
+            let term=fact_terms[id]
+            if term.a =? a and term.b =? b and term.op =? op and s.bounds[i].lo =? s.bounds[i].hi {return int64(s.bounds[i].lo not=? 0)}
+        }
+    }
+    if op =? 'gt' {return fact_compare(s 'lt' b a)}
+    if op =? 'ge' {return fact_compare(s 'le' b a)}
+    if op =? 'ne' {
+        let r:CompareWord=fact_compare(s 'eq' a b)
+        return if r <? 0 {-1} else {1 - r}
+    }
+    if a not=? 0 and a =? b {return if op =? 'lt' {0} else {1}}
+    if op =? 'lt' and fact_distance(s a b (-1)) {return 1}
+    if op =? 'lt' and fact_distance(s b a 0) {return 0}
+    if op =? 'le' and fact_distance(s a b 0) {return 1}
+    if op =? 'le' and fact_distance(s b a (-1)) {return 0}
+    if op =? 'eq' {
+        if fact_distance(s a b 0) and fact_distance(s b a 0) {return 1}
+        if fact_distance(s a b (-1)) or fact_distance(s b a (-1)) {return 0}
+        if x.hi <? y.lo or y.hi <? x.lo {return 0}
+        if x.nz and y.lo =? 0 and y.hi =? 0 or y.nz and x.lo =? 0 and x.hi =? 0 {return 0}
+        if x.lo =? x.hi and y.lo =? y.hi {return int64(x.lo =? y.lo)}
+    }
+    if op =? 'lt' {
+        if x.hi <? y.lo {return 1}
+        if x.lo >=? y.hi and (x.lo not=? FACT_MIN or fact_host_endpoint(s a false)) and (y.hi not=? FACT_MAX or fact_host_endpoint(s b true)) {return 0}
+    }
+    if op =? 'le' {
+        if x.hi <=? y.lo and (x.hi not=? FACT_MAX or fact_host_endpoint(s a true)) and (y.lo not=? FACT_MIN or fact_host_endpoint(s b false)) {return 1}
+        if x.lo >? y.hi {return 0}
+    }
+    if (op =? 'lt' or op =? 'le') and fact_sum_compare(s a b (if op =? 'lt' {-1} else {0})) {return 1}
+    if (op =? 'lt' or op =? 'le') and fact_product_compare(s a b (if op =? 'lt' {-1} else {0})) {return 1}
+    if (op =? 'lt' or op =? 'le') and fact_guard_compare(s a b (if op =? 'lt' {-1} else {0})) {return 1}
+    fact_affine_compare(s op a b)
+}
+fact_inverse=(op:Tok):>Tok=>{
+    if op =? 'eq' {return 'ne'}
+    if op =? 'ne' {return 'eq'}
+    if op =? 'lt' {return 'ge'}
+    if op =? 'le' {return 'gt'}
+    if op =? 'gt' {return 'le'}
+    'lt'
+}
+# A MIN/MAX endpoint of an `int` (or an untyped value) is open: it may stand
+# for values beyond int64, unless a singleton, a captured fixed value or a
+# current guard makes it real. uint64's biased endpoints are real (0, 2^64-1).
+# O(1) plus at most 16 incident rows.
+fact_open_endpoint=(s:FactState v:CompareWord upper:bool):>bool=>{
+    v not=? 0 and fact_type(fact_terms[v].type) not=? T_U64 and not fact_host_endpoint(s v upper)
+}
+# Neither of v's MIN/MAX ends is open. O(fact_open_endpoint).
+fact_real_ends=(s:FactState v:CompareWord b:FactBound):>bool=>{
+    (b.lo not=? FACT_MIN or not fact_open_endpoint(s v false)) and (b.hi not=? FACT_MAX or not fact_open_endpoint(s v true))
+}
+fact_assume=(@s:FactState v:CompareWord truth:bool):>void=>$unsafe {
+    if v =? 0 {return}
+    let known:CompareWord=fact_truth(s v)
+    if known >=? 0 and (known =? 1) not=? truth {s.live=false}
+    let t=fact_terms[v]
+    fact_set_bound(@s v FactBound(int64(truth) int64(truth) truth))
+    if t.op =? 'kw_and' and truth or t.op =? 'kw_or' and not truth {
+        fact_assume(@s t.a truth)
+        fact_assume(@s t.b truth)
+        return
+    }
+    if t.op =? 'kw_not' {
+        fact_assume(@s t.a not truth)
+        return
+    }
+    if not fact_comparison(t.op) {
+        # This Boolean remembers the evaluated operands' lengths, not their
+        # mutable source places. Reassigning either operand cannot reuse it.
+        if t.origin not=? 0 and fact_length_comparison(t.origin) {
+            let equal=truth =? (nodes.ptr[t.origin].op =? int32(69))
+            if equal {
+                fact_assume(@s fact_new(@s fact_domain(T_BOOL) FactTerm('eq' t.a t.b)) true)
+                # (equal int arrays of a small known length have equal elements: `m.length =? [33 33]`)
+                # (by node: its latest evaluation, the one this value names; term numbers are reused)
+                let pair=fact_equal_arrays.get(t.origin) ?? [0 0 0]
+                if pair[0] =? v {
+                    let x=fact_bound(s t.a)
+                    let y=fact_bound(s t.b)
+                    let count:CompareWord=if x.lo =? x.hi {x.lo} else if y.lo =? y.hi {y.lo} else {-1}
+                    if count >=? 0 and count <=? 4 {
+                        loop axis in [0..count) {
+                            let index:CompareWord=fact_constant(@s axis)
+                            let left=fact_project(@s pair[1] index true T_INT)
+                            let right=fact_project(@s pair[2] index true T_INT)
+                            fact_assume(@s fact_new(@s fact_domain(T_BOOL) FactTerm('eq' left right)) true)
+                        }
+                    }
+                }
+            }
+            else {
+                let x=fact_bound(s t.a)
+                let y=fact_bound(s t.b)
+                if x.lo =? 0 and x.hi =? 0 or y.lo =? 0 and y.hi =? 0 {
+                    fact_assume(@s fact_new(@s fact_domain(T_BOOL) FactTerm('ne' t.a t.b)) true)
+                }
+            }
+            return
+        }
+        # Byte-prefix/suffix success on a nonempty pattern implies at least
+        # one grapheme, even when combining marks merge at the boundary.
+        if truth and t.origin not=? 0 and fact_affix_call(t.origin) and fact_bound(s t.b).lo >? 0 {
+            fact_assume(@s fact_new(@s fact_domain(T_BOOL) FactTerm('ge' t.a fact_constant(@s fact_affix_floor(kid(t.origin 1))))) true)
+        }
+        # A byte prefix has no more graphemes than its text: a boundary is
+        # decided by the scalars before it and the one after, so the prefix's
+        # inner boundaries are the text's, and its end is at most the text's.
+        # (Not a suffix: `ZWJ emoji` alone splits where `emoji ZWJ emoji` joins.)
+        if truth and t.origin not=? 0 and fact_affix_call(t.origin) and nodes.ptr[CompareWord(fns.ptr[CompareWord(nodes.ptr[t.origin].sym)].decl)].name =? int32(fact_name_starts_with) {
+            fact_assume(@s fact_new(@s fact_domain(T_BOOL) FactTerm('le' t.b t.a)) true)
+        }
+        return
+    }
+    let op=if truth {t.op} else {fact_inverse(t.op)}
+    let a=t.a
+    let b=t.b
+    if op =? 'gt' or op =? 'ge' {
+        a=t.b
+        b=t.a
+        op=if op =? 'gt' {'lt'} else {'le'}
+    }
+    let x=fact_bound(s a)
+    let y=fact_bound(s b)
+    # A true comparison can bring an exact offset back into the host domain.
+    # Require its opposite endpoint to be strictly inside that domain: an
+    # endpoint at MIN/MAX may stand for an unbounded side of a wide value.
+    # The other side's MIN/MAX end must be real too: an open `int` end would
+    # hand a wide int64 sum a real-looking word bound (`a+b <? m`).
+    if op =? 'eq' {
+        if x.wide and not y.wide and fact_real_ends(s b y) {x=y; fact_set_bound(@s a x y.lo =? y.hi)}
+        else if y.wide and not x.wide and fact_real_ends(s a x) {y=x; fact_set_bound(@s b y x.lo =? x.hi)}
+    }
+    else if op =? 'lt' or op =? 'le' {
+        # (each bounded on its far end, `top <=? bottom` after `top = max(1 ..)` and
+        # `bottom = min(n-2 ..)`: the pair lies between those ends, so neither is wide)
+        if x.wide and y.wide and (x.lo not=? FACT_MIN or not fact_open_endpoint(s a false)) and (y.hi not=? FACT_MAX or not fact_open_endpoint(s b true)) {
+            x.hi=min(x.hi y.hi)
+            x.wide=false
+            fact_set_bound(@s a x not fact_open_endpoint(s b true))
+            y.lo=max(y.lo x.lo)
+            y.wide=false
+            fact_set_bound(@s b y not fact_open_endpoint(s a false))
+            x=fact_bound(s a)
+            y=fact_bound(s b)
+        }
+        if x.wide and not y.wide and x.lo >? FACT_MIN and (y.hi not=? FACT_MAX or not fact_open_endpoint(s b true)) {
+            x.hi=y.hi
+            x.wide=false
+            # (below a real MAX, at least MAX is exactly MAX)
+            fact_set_bound(@s a x not fact_open_endpoint(s b true))
+            x=fact_bound(s a)
+        }
+        if y.wide and not x.wide and y.hi <? FACT_MAX and (x.lo not=? FACT_MIN or not fact_open_endpoint(s a false)) {
+            y.lo=x.lo
+            y.wide=false
+            fact_set_bound(@s b y not fact_open_endpoint(s a false))
+            y=fact_bound(s b)
+        }
+        # A first guard may bound only one end of a wide result. Keep its
+        # captured relation so a later guard can establish the other end.
+        if x.wide or y.wide {
+            if not y.wide and (y.hi not=? FACT_MAX or fact_host_value(s b)) or not x.wide and (x.lo not=? FACT_MIN or fact_host_value(s a)) {
+                fact_difference(@s a b (if op =? 'lt' {-1} else {0}) t.origin)
+            }
+            if x.wide {fact_guarded_word(@s a); x=fact_bound(s a)}
+            if y.wide {fact_guarded_word(@s b); y=fact_bound(s b)}
+        }
+        # (below an `int` literal in [2^63, 2^64): a row, the only place
+        # that ceiling fits, for a conversion to uint64)
+        if y.wide and not x.wide and fact_u64_literal(b) <? 0 {fact_difference(@s a b (if op =? 'lt' {-1} else {0}) t.origin)}
+    }
+    # Excluding zero does not require a host-word interval. Keep this fact
+    # for a 65-bit difference or an arbitrarily wide mathematical integer.
+    if op =? 'ne' and (x.wide or y.wide) {
+        if not y.wide and y.lo =? 0 and y.hi =? 0 {
+            x.nz=true
+            fact_set_bound(@s a x)
+        }
+        if not x.wide and x.lo =? 0 and x.hi =? 0 {
+            y.nz=true
+            fact_set_bound(@s b y)
+        }
+    }
+    if x.wide or y.wide {return}
+    let exact=false
+    if op =? 'eq' {
+        fact_difference(@s a b 0 t.origin)
+        fact_difference(@s b a 0 t.origin)
+        let lo:CompareWord=max(x.lo y.lo)
+        let hi:CompareWord=min(x.hi y.hi)
+        x.lo=lo
+        y.lo=lo
+        x.hi=hi
+        y.hi=hi
+        x.nz=x.nz or y.nz
+        y.nz=x.nz
+        # (equal to a real MIN/MAX endpoint is exactly that value)
+        if lo =? hi and (hi =? FACT_MAX or lo =? FACT_MIN) {
+            let upper=hi =? FACT_MAX
+            exact=not fact_open_endpoint(s a upper) or not fact_open_endpoint(s b upper)
+        }
+    }
+    else if op =? 'ne' {
+        # A disequality tightens an already ordered symbolic pair too.
+        # The existing bounded indexed path query supplies the ordering.
+        if x.lo not=? x.hi and y.lo not=? y.hi {
+            if fact_distance(s a b 0) {fact_difference(@s a b (-1) t.origin)}
+            else if fact_distance(s b a 0) {fact_difference(@s b a (-1) t.origin)}
+        }
+        if y.lo =? 0 and y.hi =? 0 {x.nz=true}
+        if x.lo =? 0 and x.hi =? 0 {y.nz=true}
+        # (a constant at an interval's end moves that end inward: `x not=? MAX`
+        # leaves room for x+1, `r not=? -1` with r >=? -1 makes r >=? 0)
+        # An open `int` endpoint at MIN/MAX does not move: n not=? MAX may be above it.
+        if y.lo =? y.hi and x.lo <? x.hi {
+            if CompareWord(x.lo) =? CompareWord(y.lo) and (CompareWord(x.lo) not=? FACT_MIN or not fact_open_endpoint(s a false)) {x.lo=CompareWord(x.lo) + 1}
+            else if CompareWord(x.hi) =? CompareWord(y.lo) and (CompareWord(x.hi) not=? FACT_MAX or not fact_open_endpoint(s a true)) {x.hi=CompareWord(x.hi) - 1}
+        }
+        else if x.lo =? x.hi and y.lo <? y.hi {
+            if CompareWord(y.lo) =? CompareWord(x.lo) and (CompareWord(y.lo) not=? FACT_MIN or not fact_open_endpoint(s b false)) {y.lo=CompareWord(y.lo) + 1}
+            else if CompareWord(y.hi) =? CompareWord(x.lo) and (CompareWord(y.hi) not=? FACT_MAX or not fact_open_endpoint(s b true)) {y.hi=CompareWord(y.hi) - 1}
+        }
+    }
+    else if op =? 'lt' or op =? 'le' {
+        let d:CompareWord=if op =? 'lt' {1} else {0}
+        # An open `int` endpoint at MIN/MAX bounds nothing and refutes nothing:
+        # `MAX <? n` holds for n above int64. Past a real one the edge is dead.
+        let x_open=x.lo =? FACT_MIN and fact_open_endpoint(s a false)
+        let y_open=y.hi =? FACT_MAX and fact_open_endpoint(s b true)
+        # (a guard's own relation, written by the program: the wider cap)
+        fact_difference(@s a b (-d) t.origin 16)
+        if d =? 1 and (y.hi =? FACT_MIN and not x_open or x.lo =? FACT_MAX and not y_open) {s.live=false}
+        else {
+            let below:CompareWord=if CompareWord(y.hi) =? FACT_MIN {FACT_MIN} else {CompareWord(y.hi) - d}
+            let above:CompareWord=if CompareWord(x.lo) =? FACT_MAX {FACT_MAX} else {CompareWord(x.lo) + d}
+            if not y_open {x.hi=min(x.hi below)}
+            if not x_open {y.lo=max(y.lo above)}
+        }
+    }
+    fact_set_bound(@s a x exact)
+    fact_set_bound(@s b y exact)
+    if op =? 'lt' or op =? 'le' {
+        fact_offset_narrow(@s a x)
+        fact_offset_narrow(@s b y)
+    }
+    else {
+        fact_remainder_decided(@s a)
+        fact_remainder_decided(@s b)
+    }
+}
+# A compared offset `i+c` (or `i-c`) narrows i too: `i+1 <? stop` bounds i
+# below stop-1, so a counter guarded at an offset stays below a length. O(1).
+fact_offset_narrow=(@s:FactState v:CompareWord b:FactBound):>void=>{
+    let t=fact_terms[v]
+    if t.op not=? 'plus' and t.op not=? 'minus' or t.a =? 0 or t.b =? 0 {return}
+    let c=fact_bound(s t.b)
+    let operand:CompareWord=t.a
+    # (`k + x`, the constant first, is the same offset of x)
+    if (c.lo not=? c.hi or c.lo =? FACT_MIN or c.lo =? FACT_MAX) and t.op =? 'plus' {
+        c=fact_bound(s t.a)
+        operand=t.b
+    }
+    if c.lo not=? c.hi or c.lo =? FACT_MIN or c.lo =? FACT_MAX {return}
+    let k:CompareWord=if t.op =? 'plus' {c.lo} else {-CompareWord(c.lo)}
+    let x=fact_bound(s operand)
+    if x.reason =? 'budget' and x.lo =? FACT_MIN and x.hi =? FACT_MAX {return}
+    if CompareWord(b.hi) not=? FACT_MAX and fact_add_fits(CompareWord(b.hi) (-k)) {x.hi=min(CompareWord(x.hi) CompareWord(b.hi) - k)}
+    if CompareWord(b.lo) not=? FACT_MIN and fact_add_fits(CompareWord(b.lo) (-k)) {x.lo=max(CompareWord(x.lo) CompareWord(b.lo) - k)}
+    fact_set_bound(@s operand x)
+    # Once a guard brought the exact offset into range, retain its identity
+    # as well as its interval. The next evaluation of i+k then finds the
+    # guarded value through fact_offset_value. O(1), indexed rows.
+    if not b.wide {
+        fact_difference(@s v operand k 0 16)
+        fact_difference(@s operand v (-k) 0 16)
+    }
+}

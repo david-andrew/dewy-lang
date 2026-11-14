@@ -9,6 +9,7 @@ LEAF_HOMES = {
     'facts_projection_queries': 'facts.jo',
     'facts_value_queries': 'facts.jo',
     'facts_index_writes': 'facts.jo',
+    'facts_compare': 'facts.jo',
     'facts_lengths': 'facts.jo',
     'facts_collect': 'facts.jo',
     'nd_contract_ops': 'nd_contracts.jo',
