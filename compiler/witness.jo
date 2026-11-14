@@ -11,6 +11,7 @@ use 'refinement_types.dewy'
 use 'ast.jo'
 use 'lex.jo'
 use 'types.jo'
+use 'type_ops.dewy'
 use 'util.jo'
 use 'diagnostic_exit.dewy'
 use 'expr.jo'
@@ -100,7 +101,9 @@ wit_text = (e0: int, depth: int = 0) -> str:
                 if nodes[source].kind == .unwrap: source = int(nodes[source].a)
                 return wit_text(source, depth + 1)
         return if wit_hidden_name(name): "" else: name
-    if k == .int_lit and not has_flag(e, NF_U64): return "{nodes[e].ival}"
+    # A compact policy literal still carries a typed conversion. Printing it
+    # as an untyped number can suggest a guard with different coercions.
+    if k == .int_lit and not has_flag(e, NF_U64) and int_policy(ntype(e)) == 0: return "{nodes[e].ival}"
     if k == .str_lit: return wit_quoted(e)
     if k == .field and nodes[e].aux >= 0:
         # (inside a method a member is written bare: `accounts`, not its object's field)

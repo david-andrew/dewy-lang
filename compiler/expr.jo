@@ -128,6 +128,7 @@ use 'ide.jo'
 use 'ide_text.dewy'
 use 'ide_index.dewy'
 use 'ide_ops.dewy'
+use 'ir.jo'
 use 'dewy_methods.jo'
 use 'dewy_method_ops.dewy'
 use 'ffi.jo'
@@ -413,6 +414,21 @@ exact_decimal = (n: int) -> int:
 
 # replace node n by a conversion of its old content
 wrap_conv = (n: int, cv: CV, to: int):
+    # An unchanged word value needs only its result type. Operators keep their
+    # own checked/policy type: retagging arithmetic would change its evaluation.
+    # Debug variable names contain arena IDs. Keep that allocation history in
+    # -g builds; ordinary builds need neither copies nor a second ID mapping.
+    if (cv == .wrap_int or cv == .saturate_int) and not dbg_on:
+        k = nodes[n].kind
+        if k == .int_lit and lit_fits(n, to):
+            nodes[n].type = i32(to)
+            clear_flag(n, NF_LITERAL)
+            return
+        if k == .ident or k == .field or k == .index:
+            from = prune(ntype(n))
+            if from != T_MATH_INT and types[from].bits == types[to].bits and types[from].sign == types[to].sign:
+                nodes[n].type = i32(to)
+                return
     if cv == .int2float and exact_potential(n): runtime_demand(if to == T_F32: "__exact_i128_f32" else: "__exact_i128_f64")
     inner = nodes.len()
     nodes.push(nodes[n])
@@ -763,7 +779,8 @@ coerce = (n: int, target: int) -> int:
     if nodes[n].kind == .int_lit and is_lit(n):
         to = prune(target)
         from = prune(ntype(n))
-        if from != 0 and from != T_MATH_INT and to != T_MATH_INT and types[from].kind == .int_ and types[to].kind == .int_: return coerce_int_literal(n, to)
+        if from != 0 and to != T_MATH_INT and types[from].kind == .int_ and types[to].kind == .int_:
+            if from != T_MATH_INT or not dbg_on and lit_fits(n, to): return coerce_int_literal(n, to)
     if refine_active and types[prune(target)].kind == .refined: return refine_coerce(n, target)
     if nodes[n].kind == .float_lit and nodes[n].sval != 0 and is_lit(n) and tkind(target) == .struct_:
         exact_decimal(n)
@@ -2812,6 +2829,11 @@ conversion = (n: int, to0: int, args: int[]) -> int:
     a = args[0]
     check_expr(a, if tk == .float_ and nodes[a].kind == .float_lit: to else: 0)
     ft = prune(ntype(a))
+    if nodes[a].kind == .int_lit and int_policy(to) != 0 and not dbg_on and lit_fits(a, to):
+        nodes[n] = nodes[a]
+        nodes[n].type = i32(to)
+        clear_flag(n, NF_LITERAL)
+        return to
     if ft == T_MATH_INT and to != T_MATH_INT and (is_int(to) or is_float(to)):
         if not is_lit(a) and is_int(to) and int_policy(to) == 0: check_integer_boundary(a, ft, to)
         a = exact_math_operand(a)
