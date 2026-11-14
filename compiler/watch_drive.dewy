@@ -171,6 +171,15 @@ watch_wait=(ino:DriveWord):>int64=>{
         if ino <? 0 {wait=250}
         let r=ps_poll(@pf n wait)
         if r <? 0 {continue}
+        # Readiness wins when both pipes and source edits are pending: the
+        # first frame can trigger an edit before this loop reads the handshake.
+        if n =? 3 and (pf[2] >> 48) & 0xFFFF not=? 0 {
+            # the program: gone, or saying (once its game loop starts) whether it takes patches
+            let b=fill(uint8(0) 8)
+            let got=ps_read(w_from @b 0 8)
+            if got <=? 0 {return 2}
+            w_ready=w_i64(b 0) =? 0
+        }
         if ino <? 0 and w32_files_changed() {return 1}
         if ino >=? 0 and (pf[0] >> 48) & 0xFFFF not=? 0 {
             if watch_drain(ino) {return 1}
@@ -185,13 +194,6 @@ watch_wait=(ino:DriveWord):>int64=>{
                 if line =? "q" {return 4}
                 if (line as array<uint8>).length >? 0 {eprint("dewy-core watch: r + enter restarts the program, q + enter quits");}
             }
-        }
-        if n =? 3 and (pf[2] >> 48) & 0xFFFF not=? 0 {
-            # the program: gone, or saying (once its game loop starts) whether it takes patches
-            let b=fill(uint8(0) 8)
-            let got=ps_read(w_from @b 0 8)
-            if got <=? 0 {return 2}
-            w_ready=w_i64(b 0) =? 0
         }
     }
     0
