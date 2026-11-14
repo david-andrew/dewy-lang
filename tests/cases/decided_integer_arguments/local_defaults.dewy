@@ -1,0 +1,9 @@
+Box:type=<N>[value:int64 capacity=():>int64=>N]
+const DEFAULT=4
+DefaultBox:type=<N=DEFAULT>(Box<N>)
+main=()=>{
+    const LOCAL=3
+    let local=Box<LOCAL>[5]
+    let fallback:DefaultBox=[7]
+    printl"{local.capacity} {fallback.capacity}"
+}

@@ -2366,7 +2366,12 @@ let r = Ring<string 64>["a"]
 printl(r.capacity)   # 64
 ```
 
-Only integer literals can be such arguments so far (not named constants).
+Integer literals and compile-time integer constants can be such arguments:
+`const CAP=64`, then `Ring<string CAP>`. A constant computed by ordinary pure
+code works too, as does an imported constant such as `sizes.CAP`. Equal integer
+values select the same specialization, regardless of the constant's integer
+storage type. Integer arguments currently fit `int64`; a larger constant is an
+error, and a run-time binding cannot be a type argument.
 
 A type parameter can name a default for a use that leaves it out: with
 `Box:type = <T=int64>[v:T]`, a bare `Box` is `Box<int64>`. A library type can offer a choice by

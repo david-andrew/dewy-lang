@@ -4,6 +4,7 @@ use 'secret_checks.dewy'
 use 'checks_assign_hooks.dewy'
 use 'checks_stmt_hooks.dewy'
 use 'checks_type_hooks.dewy'
+use 'type_value_arguments.dewy'
 use 'checks_loop_copies.dewy'
 use 'checks_static.dewy'
 use 'checks_program.dewy'
@@ -901,6 +902,9 @@ resolve_type_name = (tn: int) -> CheckerTypeName:
             family = generic_family_type(d)
             if family != 0: return CheckerTypeName(0, family)
         return CheckerTypeName(2, d)
+    if dewy_at(nodes[tn].pos):
+        integer = named_integer_type(tn, s)
+        if integer != 0: return CheckerTypeName(0, integer)
     h = habit_name(name_of(nm))
     if len(h) > 0: fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type (use {h})")
     fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type")

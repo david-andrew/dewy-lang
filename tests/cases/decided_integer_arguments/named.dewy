@@ -1,0 +1,10 @@
+# quick
+Ring:type=<T N>[value:T capacity=():>int64=>N]
+scale=<N>(value:int):>int=>N * value
+const CAP=2 * 3
+const NEG=-2
+main=()=>{
+    let ring=Ring<string CAP>["ok"]
+    printl"{ring.value} {ring.capacity}"
+    printl"{scale<CAP>(7)} {scale<NEG>(7)}"
+}

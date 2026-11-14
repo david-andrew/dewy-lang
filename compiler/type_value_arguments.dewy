@@ -1,0 +1,42 @@
+$runtime_checks
+
+from p"ast.jo" import (mk nodes)
+from p"check.jo" import (binding_const_init syms)
+from p"checker_expr.dewy" import check_expr
+from p"comptime.jo" import ct_values
+from p"comptime_ops.dewy" import ct_run
+from p"expr.jo" import (last_checked ntype)
+from p"refine.jo" import (mk_refined ref_intern representation_type)
+from p"refinement_types.dewy" import (RefAtom RefTerm)
+from p"types.jo" import (T_INT T_MATH_INT is_int tkind types)
+from p"diagnostic_exit.dewy" import fatal
+
+ValueArgWord:type=int64<overflow='wrap'>
+# Demand-only: a non-type name in type syntax may name an integer constant.
+# One binding lookup and one ordinary checked constant evaluation per use; no
+# scan of other declarations. Arena entries are reread after semantic calls.
+named_integer_type=(tn:ValueArgWord s:ValueArgWord):>int64=>$unsafe {
+    if nodes.ptr[tn].nlist not=? 0 {return 0}
+    if binding_const_init(syms.ptr[s].kind ValueArgWord(syms.ptr[s].ref) nodes.ptr[tn].pos) =? 0 {return 0}
+    let value=mk('ident' nodes.ptr[tn].pos)
+    nodes.ptr[value].name=nodes.ptr[tn].name
+    if nodes.ptr[tn].sval not=? 0 {
+        let base=mk('ident' nodes.ptr[tn].pos)
+        nodes.ptr[base].name=nodes.ptr[tn].sval
+        nodes.ptr[value].kind='field'
+        nodes.ptr[value].a=int32(base)
+    }
+    check_expr(value 0);
+    let checked=last_checked
+    let t=representation_type(ntype(checked))
+    if not is_int(t) {return 0}
+    let result=ct_run(checked)
+    let v=ct_values[result]
+    if (t =? T_MATH_INT and v.items.length >? 0) or (not types.ptr[t].sign and v.i <? 0) {
+        fatal(nodes.ptr[tn].pos "an integer type argument must fit int64")
+    }
+    mk_refined(T_INT ref_intern([
+        RefAtom('le' RefTerm(1 v.i) RefTerm())
+        RefAtom('le' RefTerm() RefTerm(1 v.i))
+    ]))
+}
