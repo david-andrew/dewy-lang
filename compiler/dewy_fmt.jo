@@ -12,6 +12,7 @@ use 'dewy_nodes.jo'
 use 'dewy_tokens.dewy'
 use 'dewy_syntax.dewy'
 use 'dewy_layout.dewy'
+use 'formatter_frontend.dewy'
 
 df_lexemes: DewyLexeme[]
 df_blocks: int[]            # block comments of the lexed text: [start, end) pairs
@@ -20,25 +21,4 @@ df_file = (file: int):
     dc_parser.file = file
     dc_parser.source = files[dc_parser.file].src
 
-df_tokens = (file: int, src: str) -> str[]:
-    saved = dc_parser.file
-    dc_parser.file = file
-    dc_parser.source = files[dc_parser.file].src
-    df_lexemes = dn_lex(file, 0, len(src), false)
-    df_blocks = dn_block_comments
-    dc_parser.file = saved
-    dc_parser.source = files[dc_parser.file].src
-    out: str[]
-    loop i in 0.. and t in df_lexemes:
-        if t.kind == .eof: break
-        sig = "{dw_kind_name(t.kind)}:{src[t.start..t.stop)}"
-        if i > 0:
-            sig += " n{t.newline}"
-            if not dl_free_gap(df_lexemes[i - 1].symbol, t.symbol): sig += " s{t.space}"
-        out.push(sig)
-    out
-
 # the lexed text laid out (dewy_layout.dewy), or none when its delimiters do not match
-df_text = (src: str) -> str?:
-    if let laid = dewy_layout(src, df_lexemes, df_blocks): return str_from_bytes(laid)
-    none

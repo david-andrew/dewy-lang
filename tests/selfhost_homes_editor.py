@@ -3,6 +3,9 @@
 # (a leaf moved out of a Jo module without state of its own: an isolated build that has that module but
 # not the leaf reads the leaf's functions from the module, a double or the real one)
 LEAF_HOMES = {
+    'formatter_cli': 'fmt.jo',
+    'formatter_frontend': 'dewy_fmt.jo',
+    'ide_output': 'ide.jo',
     'ide_ops': 'ide.jo',
     'lsp_handlers': 'lsp.jo',
     'ide_index': 'ide.jo',

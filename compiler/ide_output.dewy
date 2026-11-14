@@ -1,0 +1,43 @@
+$runtime_checks
+
+from p"@lib/core/str.jo" import join
+from p"@lib/core/os.jo" import (args exec exe_path)
+from p"@lib/core/rt.jo" import __write_fd
+from p"ide.jo" import (ide_lines ide_fd ide_out)
+from p"ide_decls.dewy" import ide_skippable
+from p"util.jo" import (err_skips err_more_note err_prior shown_warnings pos_file pos_off)
+
+IdeOutputWord:type=int64<overflow='wrap'>
+ide_flush=():>void=>$unsafe {
+    let s=join(ide_lines "\n")
+    ide_lines=[]
+    if (s as array<uint8>).length =? 0 {return}
+    if ide_fd <? 0 {
+        ide_out="{ide_out}{s}\n"
+        return
+    }
+    __write_fd(ide_fd (s as array<uint8>).ptr (s as array<uint8>).length);
+    __write_fd(ide_fd ("\n" as array<uint8>).ptr 1);
+}
+next_error_run=(p:int64=-1 block:string=""):>void=>{
+    if $target.arch =? 'wasm32' {return}
+    else {
+        let sp=ide_skippable()
+        if sp <? 0 {return}
+        if err_skips.length >=? 4 {
+            err_more_note=true
+            return
+        }
+        let skips=err_skips
+        skips.push("{pos_file(sp)}:{pos_off(sp)}")
+        let held:array<string>=[]
+        loop [place text] in err_prior {held.push("{place}\u{1f}{text}")}
+        if (block as array<uint8>).length >? 0 {held.push("{p}\u{1f}{block}")}
+        let a=args()
+        let argv=[a[0] "--skip-fns" join([skips... shown_warnings...] ",") join(held "\u{1e}")]
+        let k:IdeOutputWord=1
+        if a.length >? 3 and a[1] =? "--skip-fns" {k=4}
+        loop i in [k..a.length) {argv.push(a[i])}
+        exec(exe_path() argv);
+    }
+}

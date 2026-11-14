@@ -1,0 +1,32 @@
+$runtime_checks
+
+from p"util.jo" import (files)
+from p"ast.jo" import nodes
+from p"dewy_frontend.dewy" import dewy_fast_file
+from p"parser_loops.dewy" import desugar_loopx
+from p"directive_rules.dewy" import dir_apply_rows
+from p"parser_text.dewy" import parse_file
+from p"dewy_lex.dewy" import dn_quote_end
+from p"dewy_fast.jo" import (dn_lexer)
+
+SourceFrontendWord:type=int64<overflow='wrap'>
+source_declarations=(file:int64):>array<int64>=>$unsafe {
+    if files[file].is_dewy {
+        let first:SourceFrontendWord=nodes.length
+        let decls=dewy_fast_file(file)
+        let i:SourceFrontendWord=SourceFrontendWord(nodes.length) - 1
+        loop i >=? first {
+            if nodes.ptr[i].kind =? 'loopx' {
+                let lowered=desugar_loopx(i)
+                nodes[i]=nodes[lowered]
+            }
+            i -= 1
+        }
+        dir_apply_rows(first)
+        return decls
+    }
+    parse_file(file)
+}
+source_quote_end=(text:string start:int64 raw:bool):>int64=>{
+    dn_quote_end(@dn_lexer text start (text as array<uint8>).length 0 raw true)
+}

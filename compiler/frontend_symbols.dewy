@@ -1,0 +1,54 @@
+$runtime_checks
+
+from p"dewy_tokens.dewy" import (DewyToken dn_token_text)
+from p"dewy_fast_lex.dewy" import dn_ident_start
+from p"lex.jo" import lx_cls
+from p"@lib/core/str.jo" import (is_alpha is_digit)
+
+# The Jo owner binds its two array headers once. No table view survives a
+# resize; the 128-by-128 punctuation table is fixed throughout both passes.
+SymbolWord:type=int64<overflow='wrap'>
+let symbol_classes:ptr<array<uint8>>=$unsafe (uint64(0) as ptr<array<uint8>>)
+let symbol_tokens:ptr<array<DewyToken>>=$unsafe (uint64(0) as ptr<array<DewyToken>>)
+frontend_symbols_bind=(classes:ptr<int64> symbols:ptr<int64>):>int64=>{
+    symbol_classes=classes as ptr<array<uint8>>
+    symbol_tokens=symbols as ptr<array<DewyToken>>
+    0
+}
+dn_init_symbols=():>void=>$unsafe {
+    symbol_classes[0]=fill(uint8(0) 256)
+    let classes=symbol_classes[0].ptr
+    loop c in [SymbolWord(0)..256) {
+        let bits:SymbolWord=SymbolWord(lx_cls[c])
+        if is_digit(uint8(c)) or c =? 95 {bits |= 4}
+        if is_digit(uint8(c)) or is_alpha(uint8(c)) or c =? 95 {bits |= 8}
+        if c =? 32 or c =? 9 or c =? 13 or c =? 10 {bits |= 16}
+        if bits & 2 not=? 0 and c >=? 128 {bits=(bits & (2 xor -1)) | 32}
+        classes[c]=uint8(bits)
+    }
+    symbol_tokens[0]=fill('none' 128 * 128)
+    let symbols=symbol_tokens[0].ptr
+    let longer=fill(false 128 * 128)
+    # Frozen Jo visits enum ordinals 1 through kw_or_throw, inclusive. Keep
+    # that exact order, including the dotted tokens sharing first-two bytes.
+    let tokens:array<DewyToken>=['lparen' 'rparen' 'lbrack' 'rbrack' 'lbrace' 'rbrace' 'langle' 'rangle' 'colon' 'dot' 'comma' 'semi' 'assign' 'plus' 'minus' 'star' 'slash' 'percent' 'at' 'amp' 'pipe' 'caret' 'question' 'bang' 'tilde' 'not_ge' 'not_le' 'not_eq' 'not_gt' 'not_lt' 'ge' 'le' 'floor_assign' 'shl_assign' 'shr_assign' 'ellipsis' 'function' 'returns' 'arrow' 'eq' 'gt' 'lt' 'plus_assign' 'minus_assign' 'star_assign' 'slash_assign' 'power_assign' 'percent_assign' 'coalesce' 'floor' 'shl' 'shr' 'range' 'pipe_right' 'pipe_left' 'angle_assign' 'is_type' 'isnt_type' 'contains' 'not_contains' 'kw_let' 'kw_const' 'kw_return' 'kw_break' 'kw_continue' 'kw_import' 'kw_from' 'kw_else' 'kw_if' 'kw_loop' 'kw_match' 'kw_test' 'kw_not' 'kw_as' 'kw_transmute' 'kw_or' 'kw_xor' 'kw_and' 'kw_in' 'dot_not_ge' 'dot_not_le' 'dot_not_eq' 'dot_not_gt' 'dot_not_lt' 'dot_ge' 'dot_le' 'dot_floor_assign' 'dot_plus_assign' 'dot_minus_assign' 'dot_star_assign' 'dot_slash_assign' 'dot_percent_assign' 'dot_power_assign' 'dot_floor' 'dot_eq' 'dot_gt' 'dot_lt' 'dot_plus' 'dot_minus' 'dot_star' 'dot_slash' 'dot_percent' 'dot_caret' 'multiply_apply' 'call' 'broadcast_call' 'index' 'type_apply' 'range_apply' 'statement_end' 'amp_assign' 'pipe_assign' 'and_assign' 'or_assign' 'xor_assign' 'kw_of' 'kw_or_throw']
+    loop token in tokens {
+        let text=dn_token_text(token) as array<uint8>
+        let width=text.length
+        if width =? 0 or dn_ident_start(text[0]) {continue}
+        let first:SymbolWord=SymbolWord(text[0]) << 7
+        if width =? 1 {
+            loop next in [SymbolWord(0)..128) {symbols[first + next]=token}
+        }
+    }
+    loop token in tokens {
+        let text=dn_token_text(token) as array<uint8>
+        if text.length <? 2 or dn_ident_start(text[0]) {continue}
+        let slot:SymbolWord=(SymbolWord(text[0]) << 7) + SymbolWord(text[1])
+        if text.length >? 2 {
+            longer[slot]=true
+            symbols[slot]='none'
+        }
+        else if not longer[slot] {symbols[slot]=token}
+    }
+}

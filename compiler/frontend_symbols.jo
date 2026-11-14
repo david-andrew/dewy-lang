@@ -1,0 +1,35 @@
+use 'dewy_fast.jo'
+use 'lex.jo'
+use 'dewy_fast_lex.dewy'
+use 'dewy_tokens.dewy'
+dn_init_symbols = ():
+    dn_classes = fill(u8(0), 256)
+    loop c in [0..256):
+        bits = int(lx_cls[c])
+        if is_digit(u8(c)) or c == 95: bits |= 4
+        if is_digit(u8(c)) or is_alpha(u8(c)) or c == 95: bits |= 8
+        if c == 32 or c == 9 or c == 13 or c == 10: bits |= 16
+        # (an identifier byte whose name needs no second look: see dn_identifier_canonical)
+        # (a non-ASCII name byte ends the ordinary scan: the name has another spelling to settle)
+        if bits & 2 != 0 and c >= 0x80: bits = (bits & ~2) | 32
+        dn_classes[c] = u8(bits)
+    dn_symbols = fill(DewyToken.none, 128 * 128)
+    longer = fill(false, 128 * 128)
+    loop i in [1..int(DewyToken.kw_or_throw) + 1):
+        text = dn_token_text(DewyToken(i))
+        width = len(text)
+        if width == 0 or dn_ident_start(text[0]): continue
+        first = int(text[0]) * 128
+        if width == 1:
+            token = DewyToken(i)
+            loop next in [0..128): dn_symbols[first + next] = token
+    loop i in [1..int(DewyToken.kw_or_throw) + 1):
+        text = dn_token_text(DewyToken(i))
+        if len(text) < 2 or dn_ident_start(text[0]): continue
+        slot = int(text[0]) * 128 + int(text[1])
+        if len(text) > 2:
+            longer[slot] = true
+            dn_symbols[slot] = .none
+        else if not longer[slot]: dn_symbols[slot] = DewyToken(i)
+
+frontend_symbols_bind = (classes: *int, symbols: *int) -> int: 0

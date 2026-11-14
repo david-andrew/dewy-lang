@@ -169,7 +169,7 @@ def build_into(output: Path, *, seed: Path | None, bootstrap: bool, fixed_point:
     if bootstrap:
         # Build the implementation-language frontend first. This permits the
         # main compiler to use features outside the intentionally small C seed.
-        bootstrap_modules = ('frontend.jo', 'dewy_fmt.jo', 'dewy_context.jo')
+        bootstrap_modules = ('frontend.jo', 'source_frontend.jo', 'dewy_fmt.jo', 'formatter_frontend.jo', 'dewy_context.jo')
         for name in bootstrap_modules:
             shutil.copy2(ROOT / 'bootstrap' / name, output / 'compiler' / name)
         stage0 = output / 'stage0/sloppy0'

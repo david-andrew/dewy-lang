@@ -33,6 +33,7 @@ use 'ide_ops.dewy'
 use 'ide_index.dewy'
 use 'ide_text.dewy'
 use 'ide_decls.dewy'
+use 'ide_output.dewy'
 
 const IK_LOCAL = 1
 const IK_PARAM = 2
@@ -72,16 +73,6 @@ ide_lines: str[]
 
 ide_out = ""                    # (ide_fd < 0: what is flushed goes here)
 
-ide_flush = ():
-    s = join(ide_lines, "\n")
-    ide_lines = []
-    if len(s) == 0: return
-    if ide_fd < 0:
-        ide_out += s + "\n"
-        return
-    __write_fd(ide_fd, data(s), len(s))
-    __write_fd(ide_fd, data("\n"), 1)
-
 # from m import x as y: y -> x
 ide_alias_of: {int: int} = {}
 
@@ -97,26 +88,5 @@ ide_alias_at: {str: int} = {}
 # (dewy build/run/check/test, after an error in a function's body: the same command again, as
 # a check without that body, which reports the next error; at most 5 in all. The errors found
 # so far go along (p, block: this one's, if any) and the last run shows them all in source order)
-next_error_run = (p: int = -1, block: str = ""):
-    when TARGET == "wasm":
-        return
-    else:
-        sp = ide_skippable()
-        if sp < 0: return
-        if err_skips.len() >= 4:
-            err_more_note = true
-            return
-        skips = err_skips
-        skips.push("{pos_file(sp)}:{pos_off(sp)}")
-        held: str[]
-        loop e in err_prior: held.push("{e.0}\x1f{e.1}")
-        if len(block) > 0: held.push("{p}\x1f{block}")
-        a = args()
-        argv = [a[0], "--skip-fns", join(skips + shown_warnings, ","), join(held, "\x1e")]
-        k = 1
-        if a.len() > 3 and a[1] == "--skip-fns": k = 4
-        loop i in [k..a.len()): argv.push(a[i])
-        exec(exe_path(), argv)
-
 # ---- completion ----
 

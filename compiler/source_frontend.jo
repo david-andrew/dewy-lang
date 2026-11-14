@@ -1,0 +1,25 @@
+use 'frontend.jo'
+use 'util.jo'
+use 'ast.jo'
+use 'dewy_fast.jo'
+use 'dewy_frontend.dewy'
+use 'parser_loops.dewy'
+use 'directive_rules.dewy'
+use 'parser_text.dewy'
+use 'dewy_lex.dewy'
+source_declarations = (file: int) -> int[]:
+    if files[file].is_dewy:
+        first = nodes.len()
+        decls = dewy_fast_file(file)
+        i = nodes.len() - 1
+        loop i >= first:
+            if nodes[i].kind == .loopx:
+                lowered = desugar_loopx(i)
+                nodes[i] = nodes[lowered]
+            i -= 1
+        dir_apply_rows(first)
+        return decls
+    parse_file(file)
+
+source_quote_end = (text: str, start: int, raw: bool) -> int:
+    dn_quote_end(dn_lexer, text, start, len(text), 0, raw, true)

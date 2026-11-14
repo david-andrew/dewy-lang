@@ -12,6 +12,7 @@ use 'dewy_lexer.dewy'
 use 'dewy_file.dewy'
 use 'lexer_helpers.dewy'
 use 'lazy_force.dewy'
+use 'frontend_symbols.dewy'
 dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLexeme[]:
     if intern_names and dn_word_tokens.len() == 0: dn_init_words()
     source = files[file].src

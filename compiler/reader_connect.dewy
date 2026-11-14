@@ -1,0 +1,12 @@
+$runtime_checks
+
+from p"dewy_parser.dewy" import ParserContext
+from p"dewy_reader_host.dewy" import (ParserReaderStores ParserReaderHost)
+from p"dewy_builders.dewy" import ParserBuilderHost
+
+# Jo supplies the stable addresses once. Only the stores field is replaced;
+# the parser itself and the owning array headers are never copied.
+dc_reader_connect=(parser:ptr<ParserContext> stores:ParserReaderStores):>bool=>$unsafe {
+    parser[0].stores=stores
+    true
+}

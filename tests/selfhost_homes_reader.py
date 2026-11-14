@@ -3,6 +3,9 @@
 # (a leaf moved out of a Jo module without state of its own: an isolated build that has that module but
 # not the leaf reads the leaf's functions from the module, a double or the real one)
 LEAF_HOMES = {
+    'frontend_symbols': 'dewy_fast.jo',
+    'source_frontend': 'frontend.jo',
+    'reader_connect': 'dewy_reader_services.jo',
     'reader_initialize': 'dewy_context.jo',
 
     'parser_lifetime': 'parse.jo',

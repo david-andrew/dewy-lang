@@ -1,0 +1,58 @@
+$runtime_checks
+
+from p"@lib/core/rt.jo" import __read_fd
+from p"@lib/core/os.jo" import (eprint exit file_exists is_dir read_file write write_file)
+from p"fmt.jo" import fmt_failed
+from p"fmt_ops.dewy" import (fmt_checked fmt_walk)
+
+FormatterCliWord:type=int64<overflow='wrap'>
+fmt_main=(a:array<string>):>void=>$unsafe {
+    let check=false
+    let paths:array<string>=[]
+    loop i in [FormatterCliWord(2)..a.length) {
+        let x=a[i]
+        if x =? "--check" {check=true}
+        else {paths.push(x)}
+    }
+    if paths.length =? 0 {
+        eprint("usage: dewy-core fmt [--check] file.dewy or directory...   (fmt -: Dewy on standard input/output)")
+        exit(2)
+    }
+    if paths.length =? 1 and paths[0] =? "-" {
+        let buf:array<uint8>=[]
+        loop true {
+            let n:FormatterCliWord=buf.length
+            buf.resize(n + 65536)
+            # resize owns this writable span until the read returns.
+            let r=__read_fd(0 buf.ptr + n 65536)
+            if r <=? 0 {buf.resize(n); break}
+            buf.resize(n + FormatterCliWord(r))
+        }
+        write(fmt_checked("<stdin>.dewy" __str_from_bytes(buf)))
+        if fmt_failed {exit(1)}
+        return
+    }
+    let todo:array<string>=[]
+    loop p in paths {
+        if is_dir(p) {fmt_walk(p @todo)}
+        else {todo.push(p)}
+    }
+    let changed:FormatterCliWord=0
+    loop p in todo {
+        let src=read_file(p) ?? ""
+        if (src as array<uint8>).length =? 0 and not file_exists(p) {
+            eprint("dewy-core fmt: cannot read {p}")
+            exit(1)
+        }
+        let out=fmt_checked(p src)
+        if out =? src {continue}
+        changed += 1
+        if check {printl(p)}
+        else if not write_file(p out) {
+            eprint("dewy-core fmt: cannot write {p}")
+            exit(1)
+        }
+    }
+    if (check and changed >? 0) or fmt_failed {exit(1)}
+}
+from p"@lib/core/rt.jo" import __str_from_bytes

@@ -3,7 +3,8 @@ $runtime_checks
 # Lex/file entry ownership. The Jo owner binds stable array-header and service
 # addresses once; no per-unit array copy or translated parser context is made.
 # dx_lex may grow the output, and every resize refreshes its slot pointer.
-from p"dewy_fast.jo" import (DN_EOF_SPARE dn_word_tokens dn_init_symbols dn_symbols dn_classes dn_block_comments dn_metatags dn_skip_bodies dn_lexer dc_file_host)
+from p"dewy_fast.jo" import (DN_EOF_SPARE dn_word_tokens dn_symbols dn_classes dn_block_comments dn_metatags dn_skip_bodies dn_lexer dc_file_host)
+from p"frontend_symbols.dewy" import (dn_init_symbols)
 from p"dewy_fast_lex.dewy" import dn_init_words
 from p"dewy_lexer.dewy" import (DewyLexHost DewyLexState dx_lex)
 from p"dewy_tokens.dewy" import (DewyLexeme DewyToken)
@@ -15,7 +16,7 @@ from p"dewy_nodes.jo" import dw_bigint_import
 from p"ast.jo" import nodes
 from p"lex.jo" import lx_cls
 from p"lexer_helpers.dewy" import lx_init_classes
-from p"util.jo" import files
+from p"util.jo" import (files)
 
 FrontendWord:type=int64<overflow='wrap'>
 let frontend_texts:ptr<array<string>>=$unsafe (uint64(0) as ptr<array<string>>)

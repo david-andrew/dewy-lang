@@ -612,24 +612,6 @@ uniq_globals: bool[]
 # reload (watch, the prompt) or make no code.
 once_slots: {int: int} = {}
 
-once_prepare = (enabled: bool):
-    once_slots = {}
-    if not enabled or cc_passed.len() == 0: return
-    name = intern("regex")
-    path = lib_dir + "/std/regex.jo"
-    loop n, _ in cc_passed:
-        if nodes[n].kind != .narrow: continue
-        a = int(nodes[n].a)
-        if a <= 0 or nodes[a].kind != .call or nodes[a].aux != 0 or nodes[a].sym <= 0 or nkids(a) != 1: continue
-        d = int(fns[int(nodes[a].sym)].decl)
-        if d == 0 or int(nodes[d].name) != name or files[pos_file(nodes[d].pos)].path != path: continue
-        if cc_constant(kid(a, 0)) < 0: continue
-        g = globals.len()
-        m = int(nodes[d].mod)
-        globals.push(Global(name = i32(name), type = i32(prune(ntype(a))), mod = i32(m), sym = "g_regex_once_{g}", state = 2))
-        globals.push(Global(name = i32(name), type = i32(T_INT), mod = i32(m), sym = "g_regex_built_{g}", state = 2))
-        once_slots[n] = g
-
 # a loop condition that is cheap to test twice and computes nothing the body could reuse:
 # comparisons of variables and literals (i < j, k != 0, done), and/or/not of those
 use 'scanloops.dewy'
@@ -639,6 +621,7 @@ use 'lower_functions.dewy'
 use 'lower_primitives.dewy'
 use 'lower_intrinsics.dewy'
 use 'lower_races.dewy'
+use 'lower_entries.dewy'
 
 # ---------------- functions ----------------
 find_ids: int[]

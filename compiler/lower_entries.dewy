@@ -1,0 +1,35 @@
+$runtime_checks
+
+from p"@lib/core/rt.jo" import __str_concat
+from p"lower.jo" import once_slots
+from p"check_constant.jo" import cc_passed
+from p"constant_checks.dewy" import cc_constant
+from p"ast.jo" import (nodes kid nkids)
+from p"expr.jo" import ntype
+from p"check.jo" import (lib_dir fns globals)
+from p"checker_state.dewy" import Global
+from p"types.jo" import (prune T_INT)
+from p"util.jo" import (intern files pos_file)
+
+OnceWord:type=int64<overflow='wrap'>
+# O(demanded constant calls), before lowering/fused workers. Constant checking
+# can grow arenas: keep IDs and reacquire every view after it returns.
+once_prepare=(enabled:bool):>void=>$unsafe {
+    once_slots=[]
+    if not enabled or cc_passed.length =? 0 {return}
+    let name=intern("regex")
+    let path=__str_concat(lib_dir "/std/regex.jo")
+    loop [n _] in cc_passed {
+        if nodes.ptr[n].kind not=? 'narrow' {continue}
+        let a:OnceWord=OnceWord(nodes.ptr[n].a)
+        if a <=? 0 or nodes.ptr[a].kind not=? 'call' or nodes.ptr[a].aux not=? 0 or nodes.ptr[a].sym <=? 0 or nkids(a) not=? 1 {continue}
+        let d:OnceWord=OnceWord(fns[OnceWord(nodes.ptr[a].sym)].decl)
+        if d =? 0 or nodes.ptr[d].name not=? int32(name) or files[pos_file(nodes.ptr[d].pos)].path not=? path {continue}
+        if cc_constant(kid(a 0)) <? 0 {continue}
+        let g:OnceWord=globals.length
+        let m=nodes.ptr[d].mod
+        globals.push(Global[name=int32(name) type=int32(prune(ntype(a))) mod=m sym="g_regex_once_{g}" state=2])
+        globals.push(Global[name=int32(name) type=int32(T_INT) mod=m sym="g_regex_built_{g}" state=2])
+        once_slots[n]=g
+    }
+}

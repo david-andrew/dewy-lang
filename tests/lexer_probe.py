@@ -36,6 +36,8 @@ def lexer_span_helpers(compiler, out):
     helpers = (directory / 'lexer_helpers.jo').read_text()
     twin = (directory / 'dewy_fast_lex.jo').read_text()
     state_end = fast.index('const DN_EDIT_BIGINT')
+    symbols = (directory / 'frontend_symbols.jo').read_text()
+    symbols = symbols[symbols.index('dn_init_symbols ='):symbols.index('frontend_symbols_bind =')]
     entry = directory / 'dewy_frontend.jo'
     # The standalone probe still uses the frozen entry and the live scanner.
     # The shared owner's state no longer contains the lexing entry itself.
@@ -53,5 +55,5 @@ def lexer_span_helpers(compiler, out):
         'fatal = (pos: int, message: str): panic(message)\n'
         'err_notes: (int, str)[]',
         'dc_parser: ParserContext',
-        fast[fast.index('dn_word_tokens:'):state_end] + lexical_entry + twin[twin.index('dn_init_words ='):],
+        fast[fast.index('dn_word_tokens:'):state_end] + symbols + lexical_entry + twin[twin.index('dn_init_words ='):],
     ])

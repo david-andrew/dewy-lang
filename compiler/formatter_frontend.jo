@@ -1,0 +1,28 @@
+use 'dewy_fmt.jo'
+use 'dewy_context.jo'
+use 'dewy_frontend.dewy'
+use 'dewy_fast.jo'
+use 'dewy_syntax.dewy'
+use 'dewy_layout.dewy'
+use 'util.jo'
+df_tokens = (file: int, src: str) -> str[]:
+    saved = dc_parser.file
+    dc_parser.file = file
+    dc_parser.source = files[dc_parser.file].src
+    df_lexemes = dn_lex(file, 0, len(src), false)
+    df_blocks = dn_block_comments
+    dc_parser.file = saved
+    dc_parser.source = files[dc_parser.file].src
+    out: str[]
+    loop i in 0.. and t in df_lexemes:
+        if t.kind == .eof: break
+        sig = "{dw_kind_name(t.kind)}:{src[t.start..t.stop)}"
+        if i > 0:
+            sig += " n{t.newline}"
+            if not dl_free_gap(df_lexemes[i - 1].symbol, t.symbol): sig += " s{t.space}"
+        out.push(sig)
+    out
+
+df_text = (src: str) -> str?:
+    if let laid = dewy_layout(src, df_lexemes, df_blocks): return str_from_bytes(laid)
+    none

@@ -35,6 +35,7 @@ use 'dewy_ffi.jo'
 use 'literals.dewy'
 use 'dewy_lex.dewy'
 use 'oom_ops.dewy'
+use 'frontend_symbols.dewy'
 
 
 # Like the implementation-language lexer, classify interned words by ID. Names
@@ -65,36 +66,6 @@ dn_classes: u8[]
 dn_symbols: DewyToken[]
 
 # A `none` symbol delegates longer spellings to the complete scanner.
-dn_init_symbols = ():
-    dn_classes = fill(u8(0), 256)
-    loop c in [0..256):
-        bits = int(lx_cls[c])
-        if is_digit(u8(c)) or c == '_': bits |= 4
-        if is_digit(u8(c)) or is_alpha(u8(c)) or c == '_': bits |= 8
-        if c == ' ' or c == '\t' or c == '\r' or c == '\n': bits |= 16
-        # (an identifier byte whose name needs no second look: see dn_identifier_canonical)
-        # (a non-ASCII name byte ends the ordinary scan: the name has another spelling to settle)
-        if bits & 2 != 0 and c >= 0x80: bits = (bits & ~2) | 32
-        dn_classes[c] = u8(bits)
-    dn_symbols = fill(DewyToken.none, 128 * 128)
-    longer = fill(false, 128 * 128)
-    loop i in [1..int(DewyToken.kw_or_throw) + 1):
-        text = dn_token_text(DewyToken(i))
-        width = len(text)
-        if width == 0 or dn_ident_start(text[0]): continue
-        first = int(text[0]) * 128
-        if width == 1:
-            token = DewyToken(i)
-            loop next in [0..128): dn_symbols[first + next] = token
-    loop i in [1..int(DewyToken.kw_or_throw) + 1):
-        text = dn_token_text(DewyToken(i))
-        if len(text) < 2 or dn_ident_start(text[0]): continue
-        slot = int(text[0]) * 128 + int(text[1])
-        if len(text) > 2:
-            longer[slot] = true
-            dn_symbols[slot] = .none
-        else if not longer[slot]: dn_symbols[slot] = DewyToken(i)
-
 # Readers look up to six tokens past EOF; reserve eight spare EOFs.
 const DN_EOF_SPARE = 8
 
@@ -110,3 +81,5 @@ const DN_EDIT_METHODS = -36028797018963968
 dc_file_host = ParserFileHost(df_note_lazy, dw_top_declarations, df_finish_statement, dw_test_attach, df_finish_checks, dw_finish_declarations)
 
 frontend_binding = frontend_bind(&names as *int, &name_hash as *int, &name_tab as *int, &dn_lex_host as *int)
+
+symbol_binding = frontend_symbols_bind(&dn_classes as *int, &dn_symbols as *int)

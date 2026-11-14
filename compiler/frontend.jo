@@ -15,23 +15,9 @@ use 'dewy_fast_lex.dewy'
 use 'directives.jo'
 use 'directive_rules.dewy'
 use 'dewy_directives.jo'
-
-source_declarations = (file: int) -> int[]:
-    if files[file].is_dewy:
-        first = nodes.len()
-        decls = dewy_fast_file(file)
-        i = nodes.len() - 1
-        loop i >= first:
-            if nodes[i].kind == .loopx:
-                lowered = desugar_loopx(i)
-                nodes[i] = nodes[lowered]
-            i -= 1
-        dir_apply_rows(first)
-        return decls
-    parse_file(file)
+use 'source_frontend.dewy'
 
 # The prompt uses the same quote scanner, accepting an unfinished input.
-source_quote_end = (text: str, start: int, raw: bool) -> int:
-    dn_quote_end(dn_lexer, text, start, len(text), 0, raw, true)
 
+# Keep this hot forwarding entry in Jo, where its callers inline it.
 source_force_body = (decl: int): dc_force_body(decl)
