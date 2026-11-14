@@ -1,0 +1,8 @@
+Config:type=[name:string count:int64]
+main=()=>{
+ loop text in [r'{"name":"Ada"}' r'{"name":"Ada","name":"Bea","count":1}' r'{"name":'] {
+  let result=from_json<Config>(text)
+  if result is? TextError {printl(result.line >? 0 and result.column >? 0) printl(not result.message.is_empty)}
+  else {printl("unexpected success")}
+ }
+}

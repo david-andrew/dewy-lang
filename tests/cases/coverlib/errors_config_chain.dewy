@@ -1,0 +1,13 @@
+BadConfig:type=type of error & [message:string]
+parse_limit=(text:string):>int|BadConfig=>{
+ let value=to_int(text)
+ if value is? error return BadConfig["expected whole number"]
+ if value <? 0 return BadConfig["expected nonnegative number"]
+ return value
+}
+load=(text:string)=>{let n=parse_limit(text) or_throw; return n*2}
+main=()=>{
+ loop text in ["21" "-1" "bad"] {
+  match load(text) {n:int=>printl(n) e:BadConfig=>printl(e.message)}
+ }
+}

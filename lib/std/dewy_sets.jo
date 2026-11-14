@@ -58,19 +58,24 @@ pop[T] = (s: mut Set[T], value: T, default: T?) -> T?:
     if s.remove(value): return value
     default
 
-pop[T] = (s: mut Set[T]) -> T:
-    if s.is_empty(): panic("cannot pop an empty set")
+# The caller has established that one live entry remains. Internal slot
+# bounds and membership follow the set's representation, not a user check.
+__dewy_set_take_last[T] = (s: mut Set[T]) -> T:
     i = s._tail - 1
     ng = s._entries.gone.len()
     loop i < ng and s._entries.gone[i]: i -= 1
     value = s._entries.__keys[i]
-    s.pop(value)
+    s.remove(value)
     s._tail = min(i, s._entries.__keys.len())
     value
 
+pop[T] = (s: mut Set[T]) -> T:
+    if s.is_empty(): panic("cannot pop an empty set")
+    __dewy_set_take_last(s)
+
 pop[T] = (s: mut Set[T], default: T?) -> T?:
     if s.is_empty(): return default
-    s.pop()
+    __dewy_set_take_last(s)
 
 (==)[T] = (a: Set[T], b: Set[T]) -> bool: a._entries == b._entries
 

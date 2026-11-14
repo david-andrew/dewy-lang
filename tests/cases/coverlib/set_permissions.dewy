@@ -1,0 +1,8 @@
+main=()=>{
+ let requested=set["read" "write" "read"]
+ let allowed=set["read" "list"]
+ printl((requested & allowed).sorted)
+ printl((requested-allowed).values)
+ printl((requested|allowed).values)
+ printl((requested xor allowed).values)
+}

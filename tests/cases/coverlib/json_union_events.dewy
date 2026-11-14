@@ -1,0 +1,7 @@
+Event:type=[value:int64|string|none]
+main=()=>{
+ loop text in [r'{"value":42}' r'{"value":"start"}' r'{"value":null}'] {
+  let event=from_json<Event>(text) or_throw
+  printl(match event.value {n:int64=>"number {n}" s:string=>"text {s}" <none>=>"empty"})
+ }
+}

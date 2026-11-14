@@ -1,0 +1,17 @@
+Unknown:type=type of error & [message:string]
+eval=(line:string):>int|Unknown=>{
+ let parts=line.split
+ if parts.length not=? 3 return Unknown["expected OP A B"]
+ let a=to_int(parts[1]) ?? return Unknown["bad operand"]
+ let b=to_int(parts[2]) ?? return Unknown["bad operand"]
+ match parts[0] {
+  <"add">=>return a+b
+  <"mul">=>return a*b
+  _=>return Unknown["unknown operation"]
+ }
+}
+main=()=>{
+ loop line in ["add 12 30" "mul 6 7" "sub 8 2" "add x 2"] {
+  printl(eval(line) ?? -1)
+ }
+}

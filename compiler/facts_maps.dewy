@@ -51,7 +51,10 @@ fact_map_call=(n:MapWord):>MapWord=>$unsafe {
     if k =? 0 or k not=? 5 and nkids(n) not=? 2 or not pos_in_lib(nodes.ptr[d].pos) {return 0}
     # (a set's membership is its entries' keys: `v in? s` and `s.pop(v)`)
     let t=representation_type(ntype(kid(n 0)))
-    if is_dewy_set_type(t) {return if k =? 1 or k =? 4 {k} else {0}}
+    if is_dewy_set_type(t) {
+        if k =? 4 and locals.ptr[fns.ptr[MapWord(nodes.ptr[n].sym)].params[1]].name =? int32(intern("default")) {return 0}
+        return if k =? 1 or k =? 4 {k} else {0}
+    }
     if not is_map_type(t) {return 0}
     k
 }
@@ -253,6 +256,10 @@ fact_map_store=(n:MapWord @s:FactState values:array<int64> before:MapWord):>MapW
     }
     loop key in keys {fact_assume(@s fact_project(@s after key true T_BOOL) true)}
     fact_assume(@s fact_map_member(@s n after values[1]) true)
+    let length=fact_project(@s after (-1) false T_INT)
+    let bound=fact_bound(s length)
+    bound.lo=max(1 bound.lo)
+    fact_set_bound(@s length bound)
     fact_new(@s fact_domain(ntype(n) 'missing' n) FactTerm(type=ntype(n)))
 }
 # A literal dictionary with literal scalar keys has a dense entry inventory.

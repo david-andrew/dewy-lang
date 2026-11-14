@@ -1,0 +1,14 @@
+main=()=>{
+ let total=0
+ loop line in "Ada,12
+Bea,30
+".lines {
+  let fields=line.split(",")
+  if fields.length =? 2 {
+   let score=to_int(fields[1]) ?? continue
+   total+=score
+   printl"{fields[0].pad_end(5)}{fmt'04d'(score)}"
+  }
+ }
+ printl"total={total}"
+}

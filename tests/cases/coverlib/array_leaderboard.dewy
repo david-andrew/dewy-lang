@@ -1,0 +1,8 @@
+Player:type=[name:string score:int64]
+main=()=>{
+ let players=[Player["Ada" 20] Player["Bea" 42] Player["Cal" 42]]
+ let board=players.sorted(key=(p:Player)=>p.score reverse=true)
+ board[0].name="winner"
+ printl(board.map((p:Player)=>p.name))
+ printl(players.map((p:Player)=>p.name))
+}

@@ -443,7 +443,8 @@ fact_change_children=(n:ChangeWord):>ChangeWord=>$unsafe {
     if k =? 'pshape' or k =? 'pseq' {return 16}
     isolation_children(k)
 }
-# `xs.push(xs.pop())` and `xs.insert(xs.pop() i)` of a local array: an element
+# `xs.push(xs.pop())`, `xs.push(xs.pop(i))` and `xs.insert(xs.pop() i)`:
+# a side-effect-free pop index and an element of a local array. An element
 # taken from xs goes back into it, so on completion xs has its old length
 # (each failure, an empty xs or a position out of bounds, is its own
 # obligation in the transfer). The receiver, or 0. O(1).
@@ -453,7 +454,13 @@ fact_balanced_resize=(n:ChangeWord):>ChangeWord=>$unsafe {
     if k =? 'call' and (nodes.ptr[n].aux not=? 0 or nkids(n) not=? 3) {return 0}
     let taken=kid(n 1)
     loop nodes.ptr[taken].kind =? 'conv' {taken=ChangeWord(nodes.ptr[taken].a)}
-    if nodes.ptr[taken].kind not=? 'intrinsic' or nodes.ptr[taken].aux not=? int32(int64(IN.pop)) or nkids(taken) not=? 1 {return 0}
+    if nodes.ptr[taken].kind not=? 'intrinsic' {return 0}
+    if nodes.ptr[taken].aux =? int32(int64(IN.pop)) {
+        if nkids(taken) not=? 1 {return 0}
+    } else if nodes.ptr[taken].aux =? int32(int64(IN.remove)) and nkids(taken) =? 2 {
+        let index=nodes.ptr[kid(taken 1)].kind
+        if index not=? 'int_lit' and index not=? 'ident' {return 0}
+    } else {return 0}
     if k =? 'call' and fact_array_call(n) not=? 5 {return 0}
     let target=fact_balanced_root(kid(n 0))
     if target =? 0 {return 0}

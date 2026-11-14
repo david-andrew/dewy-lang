@@ -88,7 +88,9 @@ fact_map_call = (n: int) -> int:
     if k == 0 or k != 5 and nkids(n) != 2 or not pos_in_lib(nodes[d].pos): return 0
     # (a set's membership is its entries' keys: `v in? s` and `s.pop(v)`)
     t = representation_type(ntype(kid(n, 0)))
-    if is_dewy_set_type(t): return if k == 1 or k == 4: k else: 0
+    if is_dewy_set_type(t):
+        if k == 4 and locals[fns[int(nodes[n].sym)].params[1]].name == i32(intern("default")): return 0
+        return if k == 1 or k == 4: k else: 0
     if not is_map_type(t): return 0
     k
 # The key's value; a plain string literal is one value however often written,
@@ -264,6 +266,10 @@ fact_map_store = (n: int, s: mut FactState, values: int[], before: int) -> int:
         if q.element and fact_truth(s, q.value) == 1: keys.push(q.selector)
     loop key in keys: fact_assume(s, fact_project(s, after, key, true, T_BOOL), true)
     fact_assume(s, fact_map_member(s, n, after, values[1]), true)
+    length = fact_project(s, after, -1, false, T_INT)
+    bound = fact_bound(s, length)
+    bound.lo = max(1, bound.lo)
+    fact_set_bound(s, length, bound)
     fact_new(s, fact_domain(ntype(n), .missing, n), FactTerm(type = ntype(n)))
 # A literal dictionary with literal scalar keys has a dense entry inventory.
 # Duplicate keys overwrite their first position, matching core/map.jo. Unknown

@@ -1,0 +1,9 @@
+main=()=>{
+ let calls=0
+ let fallback=($capture @calls):>int=>{ calls+=1; return 99}
+ printl(to_int("42") ?? fallback())
+ printl(to_int("bad") ?? fallback())
+ printl(calls)
+ let options:dict<string string>=["name"->""]
+ printl"|{options.get("name") ?? "guest"}|"
+}

@@ -1,0 +1,9 @@
+page=(rows:array<string> start:int64 count:int64):>array<string>=>rows[$clamp start..start+count)
+main=()=>{
+ let rows=["a" "b" "c" "d" "e"]
+ printl(page(rows 3 10))
+ printl(page(rows 8 3))
+ printl(rows.first(2))
+ printl(rows.last(2))
+ printl(rows.get(99) ?? "end")
+}

@@ -1,0 +1,10 @@
+main=()=>{
+ let ages=["Ada"->25 "Bea"->17 "Cal"->30]
+ loop [name age] in ages {
+  if age <? 18 {ages.remove(name);}
+  printl"{name}:{age}"
+ }
+ printl([ages.keys...])
+ ages["Bea"]=18
+ printl([ages.keys...])
+}

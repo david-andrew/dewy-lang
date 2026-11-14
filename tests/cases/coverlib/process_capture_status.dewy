@@ -1,0 +1,7 @@
+# modes: native native-release
+main=()=>{
+ let result=capture("/bin/sh" ["-c" "printf report; printf problem >&2; exit 7"]) or_throw
+ printl(result.status)
+ printl(result.stdout_text ?? "bad stdout")
+ printl(result.stderr_text ?? "bad stderr")
+}

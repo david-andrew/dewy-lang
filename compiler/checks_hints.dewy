@@ -3,7 +3,7 @@ $runtime_checks
 from p"checks_text.dewy" import (byte_find)
 from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (kid nkids nodes)
-from p"check.jo" import (LF_DECL check_scopes ctxs cur_mod cx demand_name fns locals method_decl_for method_modules modules prelude syms universe)
+from p"check.jo" import (LF_DECL decl_info decl_infos check_scopes ctxs cur_mod cx demand_name fns locals method_decl_for method_modules modules prelude syms universe)
 from p"check_metadata.dewy" import (dewy_type_word)
 from p"expr.jo" import (dewy_prelude_method_module dewy_surface_table)
 from p"expr_node_queries.dewy" import (receiver_fits)
@@ -193,7 +193,7 @@ method_names=(recv:HintWord):>array<int64>=>$unsafe {
             let s=s0
             loop s not=? 0 {
                 if syms.ptr[s].kind =? 'fns' and syms.ptr[s].decl not=? 0 and nkids(HintWord(syms.ptr[s].decl)) >? 0 {
-                    if method_decl_for(HintWord(syms.ptr[s].decl) rt) {
+                    if method_receiver_for(HintWord(syms.ptr[s].decl) rt) {
                         out.push(k)
                         break
                     }
@@ -221,10 +221,23 @@ method_name_for=(recv:HintWord name:HintWord):>bool=>$unsafe {
         let s=tbl.get(name) ?? 0
         loop s not=? 0 {
             if syms.ptr[s].kind =? 'fns' and syms.ptr[s].decl not=? 0 and nkids(HintWord(syms.ptr[s].decl)) >? 0 {
-                if method_decl_for(HintWord(syms.ptr[s].decl) rt) {return true}
+                if method_receiver_for(HintWord(syms.ptr[s].decl) rt) {return true}
             }
             s=HintWord(syms.ptr[s].next)
         }
     }
     false
+}
+
+# Optional first parameters also accept a present receiver. Candidate lookup
+# must admit the same call as `f(x)`; overload resolution still checks its
+# complete type. Read the signature already demanded by method_decl_for, O(1).
+method_receiver_for=(decl:HintWord rt:HintWord):>bool=>$unsafe {
+    if method_decl_for(decl rt) {return true}
+    let di=decl_info(decl)
+    if decl_infos.ptr[di].sig.params.length =? 0 {return false}
+    let p=prune(decl_infos.ptr[di].sig.params[0])
+    if types.ptr[p].kind not=? 'opt' {return false}
+    let inner=prune(HintWord(types.ptr[p].elem))
+    types.ptr[inner].kind not=? 'var' and types.ptr[inner].kind =? types.ptr[rt].kind
 }

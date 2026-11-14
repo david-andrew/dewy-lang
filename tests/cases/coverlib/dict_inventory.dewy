@@ -1,0 +1,10 @@
+main=()=>{
+ let stock:dict<string int>=["tea"->4 "coffee"->2]
+ stock.insert_if_absent("tea" 99);
+ stock["tea"]-=1
+ stock.insert_if_absent("milk" 0);
+ stock["milk"]+=3
+ printl(stock)
+ printl(stock.pop("coffee"))
+ printl(stock.pop("missing" default=0))
+}

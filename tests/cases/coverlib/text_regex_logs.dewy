@@ -1,0 +1,11 @@
+main=()=>{
+ let pattern=regex(r"(INFO|WARN) (\d+)")
+ let counts:dict<string int>=[]
+ loop line in "INFO 12\nWARN 3\nnoise\nINFO 30".lines {
+  let found=line.find(pattern)
+  if found is? Missing continue
+  let level=found.groups[0]
+  counts[level]=(counts.get(level) ?? 0)+(to_int(found.groups[1]) ?? 0)
+ }
+ printl(counts)
+}

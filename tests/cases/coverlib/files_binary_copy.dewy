@@ -1,0 +1,10 @@
+main=()=>{
+ let source=p"coverlib-packet.bin"
+ let target=p"coverlib-copy.bin"
+ printl(source.write_bytes(0x"00017fff") or_throw)
+ printl(source.copy_to(target) or_throw)
+ let content=target.read_bytes or_throw
+ printl(content)
+ source.unlink or_throw;
+ target.unlink or_throw;
+}

@@ -1,0 +1,8 @@
+head=(text:string):>string=>{
+ let b=text as array<uint8>
+ loop i in [0..b.length) {
+  if b[i] =? b':' {return text.byte_slice(0 i).lower}
+ }
+ return text.lower
+}
+main=()=>{printl(head("Content-Type: café")) printl(head("Accept"))}

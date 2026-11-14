@@ -838,9 +838,9 @@ values and negative floor rounding.
 A sorted copy has its input value's length and retains bounds shared by all
 known input elements, including record fields, or by every element (a
 comprehension's, `[loop i in [0..n) i].sorted(key=f)` holds numbers in `0..n-1`'s
-interval, each below `n`). A key callback written in the call
-(`sorted`, `sort`, `min_by`, `max_by`, `group_by`) is given only the receiver's
-elements, so `[loop i in [0..n) i].sorted(key=(i) => -rank[i])` needs no guard
+interval, each below `n`). An element callback written in the call
+(`map`, `filter`, `sorted`, `sort`, `min_by`, `max_by`, `group_by`) is given only
+the receiver's elements, so `[loop i in [0..n) i].sorted(key=(i) => -rank[i])` needs no guard
 when `rank.length` is `n`; the element `min_by` or `max_by` returns is one of the
 receiver's, so what holds of every element holds of it. Sorting or reversing in place
 retains those bounds for builtin values, and the array's length, an `@` parameter's
@@ -848,8 +848,9 @@ too when the `key=` or comparison function writes nothing. Finite element invent
 scalar relations established for every entry, such as an index being below
 another array's length. A write to a known position in a short `fill` retains
 facts about its untouched entries. Element writes, unknown mutations and copy
-hooks discard evidence they can change. `xs.push(xs.pop())` and `xs.insert(xs.pop() i)` keep
-`xs.length`, in loops too. A loop that resizes an array keeps each bound its
+hooks discard evidence they can change. `xs.push(xs.pop())`,
+`xs.push(xs.pop(i))` with a literal or named index, and `xs.insert(xs.pop() i)`
+keep `xs.length`, in loops too. A loop that resizes an array keeps each bound its
 length had on entry that the body respects: after `if xs.is_empty return`,
 `loop xs.length >? 1 { xs.pop(); }` leaves `xs[0]`, and a loop that only pushes,
 however often (`if keep(v) xs.push(v)`), keeps a nonempty array nonempty. Rows pushed in a loop into an array that was
@@ -5525,7 +5526,8 @@ to even. Text widths count grapheme clusters; text is never truncated (slice it
 to truncate). Format other values with `string(value)` first.
 `s.pad_start(n)`, `s.pad_end(n)` and `s.pad_center(n)` pad text with a computed
 width, around it for `pad_center` (any odd space after: `"hi".pad_center(5)` is
-` hi  `), each with an optional fill: `"hi".pad_center(6 "*")`.
+` hi  `), each with an optional fill: `"hi".pad_center(6 "*")`. Padding widths
+and fill cycles count grapheme clusters.
 
 `bytes.read<uint64>(i)` loads the eight bytes at offset `i` of an `array<uint8>` as one
 little-endian `uint64`, at any alignment and without `$unsafe`; `read<uint32>` and

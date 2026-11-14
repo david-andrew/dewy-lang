@@ -1,0 +1,9 @@
+main=()=>{
+ let value=parse_json(r'{"name":"Ada","scores":[12,30]}') or_throw
+ let name=value.get("name").as_str ?? "unknown"
+ let scores=(value.get("scores").as_list ?? [])
+ let total:int64=0
+ loop score in scores {total+=score.as_int ?? 0}
+ printl"{name}:{total}"
+ printl(value.get("missing").as_bool ?? false)
+}

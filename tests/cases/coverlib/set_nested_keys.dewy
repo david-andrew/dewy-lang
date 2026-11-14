@@ -1,0 +1,10 @@
+main=()=>{
+ let a=set["red" "blue"]
+ let b=set["blue" "red"]
+ let cache:dict<set<string> string>=[]
+ cache[a]="cached"
+ printl(cache.get(b) ?? "miss")
+ a.push("green")
+ printl(cache.get(a) ?? "miss")
+ printl(cache.get(b) ?? "miss")
+}

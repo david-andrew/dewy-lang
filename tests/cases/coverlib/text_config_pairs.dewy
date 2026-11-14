@@ -1,0 +1,15 @@
+main=()=>{
+ let config:dict<string string>=[]
+ loop line in "# comment
+name = Dewy
+port=47200
+blank
+".lines {
+  let clean=line.trim
+  if clean.startswith("#") continue
+  let at=clean.find("=")
+  if at is? Missing continue
+  if at <? clean.length {config[clean[..at).trim]=clean[at+1..].trim}
+ }
+ printl"{config.get("name") ?? "guest"}:{config.get("port") ?? "80"}"
+}

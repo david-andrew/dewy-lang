@@ -1,0 +1,9 @@
+main=()=>{
+ let start=instant"2026-11-14T10:00:00Z"
+ let stop=start+90minute
+ let elapsed=stop-start
+ printl(stop)
+ printl(elapsed/1s)
+ let [seconds remainder]=elapsed.ticks(1minute)
+ printl"{seconds} {remainder}"
+}

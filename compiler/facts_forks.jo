@@ -147,7 +147,7 @@ fact_key_callback = (n: int) -> int:
     if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 2: return 0
     d = int(fns[int(nodes[n].sym)].decl)
     if d == 0 or not pos_in_lib(nodes[d].pos): return 0
-    if fact_key_names.len() == 0: fact_key_names = [intern("sorted"), intern("sorted_by"), intern("sort"), intern("sort_by"), intern("min_by"), intern("max_by"), intern("group_by")]
+    if fact_key_names.len() == 0: fact_key_names = [intern("sorted"), intern("sorted_by"), intern("sort"), intern("sort_by"), intern("min_by"), intern("max_by"), intern("group_by"), intern("map"), intern("filter")]
     if int(nodes[d].name) not in fact_key_names: return 0
     callback = kid(n, 1)
     if nodes[callback].kind != .lambda or has_flag(callback, NF_GENERIC) or nodes[callback].sym <= 0: return 0

@@ -1,0 +1,8 @@
+main=()=>{
+ let names=["slow" "fast" "medium"]
+ let costs=[30 10 20]
+ let positions=[loop i in [0..names.length) i]
+ let ranked=positions.sorted(key=(i)=>costs[i])
+ printl(ranked.map((i)=>names[i]))
+ printl(ranked.filter((i)=>names[i] not=? "slow"))
+}

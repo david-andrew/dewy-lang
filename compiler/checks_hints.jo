@@ -264,7 +264,7 @@ method_names = (recv: int) -> int[]:
             s = s0
             loop s != 0:
                 if syms[s].kind == .fns and syms[s].decl != 0 and nkids(int(syms[s].decl)) > 0:
-                    if method_decl_for(int(syms[s].decl), rt):
+                    if method_receiver_for(int(syms[s].decl), rt):
                         out.push(k)
                         break
                 s = int(syms[s].next)
@@ -285,6 +285,18 @@ method_name_for = (recv: int, name: int) -> bool:
         s = tbl.get(name) ?? 0
         loop s != 0:
             if syms[s].kind == .fns and syms[s].decl != 0 and nkids(int(syms[s].decl)) > 0:
-                if method_decl_for(int(syms[s].decl), rt): return true
+                if method_receiver_for(int(syms[s].decl), rt): return true
             s = int(syms[s].next)
     false
+
+# Optional first parameters also accept a present receiver. Candidate lookup
+# must admit the same call as `f(x)`; overload resolution still checks its
+# complete type. Read the signature already demanded by method_decl_for, O(1).
+method_receiver_for = (decl: int, rt: int) -> bool:
+    if method_decl_for(decl, rt): return true
+    di = decl_info(decl)
+    if decl_infos[di].sig.params.len() == 0: return false
+    p = prune(decl_infos[di].sig.params[0])
+    if types[p].kind != .opt: return false
+    inner = prune(int(types[p].elem))
+    types[inner].kind != .var and types[inner].kind == types[rt].kind

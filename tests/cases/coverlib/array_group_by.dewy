@@ -1,0 +1,6 @@
+Task:type=[owner:string title:string]
+main=()=>{
+ let tasks=[Task["Ada" "build"] Task["Bea" "test"] Task["Ada" "ship"]]
+ let groups=tasks.group_by((t:Task)=>t.owner)
+ loop [owner items] in groups {printl"{owner}: {items.map((t:Task)=>t.title).join(", ")}"}
+}

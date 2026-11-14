@@ -1,0 +1,10 @@
+main=()=>{
+ let pending=set["build" "test" "ship"]
+ let snapshot=pending
+ loop task in snapshot {
+  pending.remove(task);
+  printl(task)
+ }
+ printl(pending.is_empty)
+ printl(pending.pop(default=none) ?? "done")
+}

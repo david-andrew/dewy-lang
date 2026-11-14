@@ -1,0 +1,11 @@
+main=()=>{
+ let queue:array<int>=[1]
+ let seen:set<int>=set[]
+ loop n in @queue {
+  if n in? seen continue
+  seen.push(n)
+  if n <? 4 {queue.push(n+1)}
+ }
+ printl(queue)
+ printl(seen.values)
+}

@@ -1,0 +1,8 @@
+main=()=>{
+ loop text in ["29/2/2024" "29/2/2023" "1/3/2024"] {
+  match date(text "d/M/y") {
+   d:Date=>printl(d.format("y-MM-dd"))
+   _=>printl("invalid date")
+  }
+ }
+}

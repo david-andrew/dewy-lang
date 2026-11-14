@@ -1,0 +1,7 @@
+Todo:type=[title:string done:bool=false]
+main=()=>{
+ let rows=from_json<array<Todo>>(r'[{"title":"write"},{"title":"test","done":true}]') or_throw
+ let pending=rows.filter((t:Todo)=>not t.done)
+ printl(to_json(pending))
+ printl(pending.map((t:Todo)=>t.title).join(", "))
+}

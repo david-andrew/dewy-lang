@@ -1,0 +1,7 @@
+main=()=>{
+ loop text in ["3/4" "1/0" "-7/3" "1.25e2" "x"] {
+  let value=rational(text)
+  if value is? none {printl("invalid")}
+  else {printl"{value} floor={value.floor} ceil={value.ceil}"}
+ }
+}

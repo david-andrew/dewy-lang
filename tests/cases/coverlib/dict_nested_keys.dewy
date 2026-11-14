@@ -1,0 +1,9 @@
+main=()=>{
+ let first=["x"->1 "y"->2]
+ let other=["y"->2 "x"->1]
+ let seen=set[first other]
+ printl(seen.length)
+ let cache:dict<dict<string int> string>=[]
+ cache[first]="point"
+ printl(cache.get(other) ?? "miss")
+}

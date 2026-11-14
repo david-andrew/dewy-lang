@@ -1,0 +1,9 @@
+main=()=>{
+ let payload=bytes("café🙂")
+ printl(payload.length)
+ printl(payload as string ?? "invalid")
+ let broken:array<uint8>=[0xff 0xc0]
+ printl(broken as string ?? "invalid")
+ let header=0x"341278563412"
+ printl"{header.read<uint16>(0)} {fmt'x'(header.read<uint32>(2))}"
+}

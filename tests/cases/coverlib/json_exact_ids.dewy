@@ -1,0 +1,8 @@
+Row:type=[id:uint64 text:string]
+main=()=>{
+ let original=Row[18446744073709551615 "café\n🙂"]
+ let text=to_json(original)
+ let decoded=from_json<Row>(text) or_throw
+ printl(decoded =? original)
+ printl(text)
+}

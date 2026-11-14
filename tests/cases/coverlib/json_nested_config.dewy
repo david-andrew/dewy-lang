@@ -1,0 +1,7 @@
+Server:type=[host:string port:int64=80]
+Config:type=[servers:array<Server> token:string?]
+main=()=>{
+ let cfg=from_json<Config>(r'{"extra":{"ignore":[1,2]},"servers":[{"host":"local"}]}') or_throw
+ printl(to_json(cfg))
+ printl(cfg.token ?? "anonymous")
+}

@@ -1,0 +1,10 @@
+main=()=>{
+ let counter:uint8<overflow='wrap'>=250
+ counter+=10
+ let volume:uint8<overflow='saturate'>=250
+ volume+=10
+ printl"{counter} {volume}"
+ let wide:int=uint64.max+1
+ printl(wide)
+ printl(uint8<overflow='wrap'>(wide+42))
+}

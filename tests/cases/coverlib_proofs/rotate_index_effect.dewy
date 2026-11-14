@@ -1,0 +1,6 @@
+main=()=>{
+ let values=[1 2 3]
+ let index=($capture @values):>int64=>{values.clear(); return 0}
+ loop i in [0..2) {values.push(values.pop(index()))}
+ printl(values)
+}

@@ -1,0 +1,7 @@
+main=()=>{
+ match p"coverlib-never-created.txt".read_text {
+  text:string=>printl(text)
+  <FileNotFound>=>printl("using defaults")
+  _=>printl("unexpected failure")
+ }
+}

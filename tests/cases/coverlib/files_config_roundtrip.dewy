@@ -1,0 +1,10 @@
+Settings:type=[name:string limit:int64=10]
+main=()=>{
+ let path=p"coverlib-config.json"
+ path.write_text(to_json(Settings["Ada" 42])) or_throw;
+ let text=path.read_text or_throw
+ let config=from_json<Settings>(text) or_throw
+ printl"{config.name}:{config.limit}"
+ printl(path.size or_throw)
+ path.unlink or_throw;
+}

@@ -250,17 +250,17 @@ count = (s: str, sub: str) -> int:
 # s made `width` characters long with `fill` before it (pad_start("7", 3, "0") is "007"), or after it;
 # a longer s stays as it is ("{s:>10}" and "{s:<10}" in a string do the same with spaces)
 pad_start = (s: str, width: int, fill: str = " ") -> str:
-    n = char_count(s)
+    n = __dewy_string_length(s)
     if n >= width or len(fill) == 0: return s
     __pad_fill(fill, width - n) + s
 pad_end = (s: str, width: int, fill: str = " ") -> str:
-    n = char_count(s)
+    n = __dewy_string_length(s)
     if n >= width or len(fill) == 0: return s
     s + __pad_fill(fill, width - n)
 
 # ... or around it, any odd one after: pad_center("hi", 6) is "  hi  "
 pad_center = (s: str, width: int, fill: str = " ") -> str:
-    n = char_count(s)
+    n = __dewy_string_length(s)
     if n >= width or len(fill) == 0: return s
     before = (width - n) / 2
     __pad_fill(fill, before) + s + __pad_fill(fill, width - n - before)
@@ -268,9 +268,9 @@ pad_center = (s: str, width: int, fill: str = " ") -> str:
 # (count characters of fill, round and round)
 __pad_fill = (fill: str, count: int) -> str:
     if len(fill) == 1: return repeat(fill, count)
-    fc = chars(fill)
+    fc = graphemes(fill)
     out = ""
-    loop i in [0..count): out += chr(fc[i % fc.len()])
+    loop i in [0..count): out += fc[i % fc.len()]
     out
 
 # the first letter in upper case ("hello world" -> "Hello world")

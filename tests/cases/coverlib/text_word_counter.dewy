@@ -1,0 +1,7 @@
+main=()=>{
+ let counts:dict<string int>=[]
+ loop word in "Red blue red café CAFÉ".lower.split {
+  counts[word]=(counts.get(word) ?? 0)+1
+ }
+ loop [word count] in counts {printl"{word}: {count}"}
+}

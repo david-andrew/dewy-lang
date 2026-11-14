@@ -1,0 +1,12 @@
+sum=(text:string):>int=>{
+ let total=0
+ loop line in text.lines {
+  let value=to_int(line) ?? continue
+  total+=value
+ }
+ return total
+}
+main=()=>{printl(sum("12
+wrong
+30
+"))}

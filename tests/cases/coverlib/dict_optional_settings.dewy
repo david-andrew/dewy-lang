@@ -1,0 +1,11 @@
+main=()=>{
+ let settings:dict<string int64?>=["limit"->none "timeout"->30]
+ loop key in ["limit" "timeout" "absent"] {
+  let found=settings.get(key)
+  if found is? none {printl"{key}:missing"}
+  else {
+   let value=found
+   printl"{key}:{value ?? -1}"
+  }
+ }
+}

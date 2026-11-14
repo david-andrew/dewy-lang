@@ -108,7 +108,7 @@ fact_key_callback=(n:ForkWord):>ForkWord=>$unsafe {
     if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) <? 2 {return 0}
     let d=ForkWord(fns.ptr[ForkWord(nodes.ptr[n].sym)].decl)
     if d =? 0 or not pos_in_lib(nodes.ptr[d].pos) {return 0}
-    if fact_key_names.length =? 0 {fact_key_names=[intern("sorted") intern("sorted_by") intern("sort") intern("sort_by") intern("min_by") intern("max_by") intern("group_by")]}
+    if fact_key_names.length =? 0 {fact_key_names=[intern("sorted") intern("sorted_by") intern("sort") intern("sort_by") intern("min_by") intern("max_by") intern("group_by") intern("map") intern("filter")]}
     if ForkWord(nodes.ptr[d].name) not in? fact_key_names {return 0}
     let callback=kid(n 1)
     if nodes.ptr[callback].kind not=? 'lambda' or has_flag(callback NF_GENERIC) or nodes.ptr[callback].sym <=? 0 {return 0}

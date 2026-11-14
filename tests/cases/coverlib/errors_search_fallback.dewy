@@ -1,0 +1,7 @@
+lookup=(names:array<string> name:string)=>names.index_of(name) or_throw
+main=()=>{
+ let names=["Ada" "Bea"]
+ loop name in ["Bea" "Cal"] {
+  match lookup(names name) {n:int64=>printl"{name}:{n}" <Missing>=>printl"{name}:absent"}
+ }
+}
