@@ -19,6 +19,7 @@ use 'types.jo'
 use 'check.jo'
 use 'ast.jo'
 use 'x64.jo'
+use 'x64_ops.dewy'
 use 'fused.jo'
 
 # ---------------- stubs ----------------
@@ -47,3 +48,59 @@ arm64_entry_mac = (inits: int[], main_lf: int) -> int:
 arm64_resolve = (text_addr: int, ro_addr: int, data_addr: int):
     missing = arm64_patch_module(text_addr, ro_addr, data_addr, fn_addr, stub_addr)
     if missing >= 0: ice("unresolved function {lfuncs[missing].name}")
+
+# (the twin reads the global itself)
+arm64_function_bind = (input: *IrFn) -> int: 0
+arm64_function = ():
+    loop fn_addr.len() <= ir.fn_index: fn_addr.push(-1)
+    loop fn_len.len() <= ir.fn_index: fn_len.push(0)
+    # (at a multiple of 8, as its float constants are: their padding, so its bytes, then do not
+    # depend on where it lands, which dewy watch's comparison of builds counts on)
+    if code.len() % 8 != 0: w32(0)
+    fn_addr[ir.fn_index] = code.len()
+    fn_start = code.len()
+    if dbg_on: backend_debug_bindings()
+    marks = a_fix_marks()
+    a_far_begin(false)
+    body_start = arm64_emit(&ir, ir_operand_layout, ir_positions, fz_layout, dbg_on, target_macos, ra_stat, mt_active_off, lfuncs[ir.fn_index].name)
+    if a_emit_error == "" and a_far_missed():
+        # (over 1 MB: again, every conditional branch able to reach 128 MB)
+        code.truncate(fn_start)
+        a_fix_rollback(marks)
+        a_far_begin(true)
+        body_start = arm64_emit(&ir, ir_operand_layout, ir_positions, fz_layout, dbg_on, target_macos, ra_stat, mt_active_off, lfuncs[ir.fn_index].name)
+        a_far_begin(false)
+    if a_emit_error != "": ice(a_emit_error)
+    loop row in a_emit_lines: line_rows.push(row)
+    loop site in a_emit_sites: call_sites.push(site)
+    row_pos = a_row_pos
+    row_line = -1
+    if dbg_on:
+        vspill = a_spill
+        slot_off = a_slots
+        frame_size = a_frame_size
+        dbg_pos = a_positions
+        dbg_epis = a_epis
+        a_dbg(fn_start, body_start)
+    a_put_lits()
+    elf_syms.push((sym_name(ir.name), fn_start, code.len() - fn_start))
+    fn_len[ir.fn_index] = code.len() - fn_start
+
+# (dewy build -g) where the variables are (registers by DWARF's numbers: x0-x30 as they are,
+# v0-v31 from 64; frame offsets from sp), and how the frame is made (.debug_frame)
+A64_DWREG = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+
+a_dbg = (fn_start: int, body: int):
+    dbg_pos[ir.code.len()] = code.len()
+    dbg_function(fn_start, body, A64_DWREG, A_V, 64, 31)
+    dbg_cfi.push(fn_start)
+    dbg_cfi.push(code.len() - fn_start)
+    dbg_cfi.push(body - fn_start)
+    dbg_cfi.push(a_saved.len())
+    loop i in 0.. and r in a_saved:
+        if r >= A_V: dbg_cfi.push(64 + r - A_V)
+        else: dbg_cfi.push(r)
+        # (at sp + a_save_off + 8 i, sp being x29 - frame_size, the CFA x29 + 16)
+        dbg_cfi.push(a_save_off + 8 * i - frame_size - 16)
+    dbg_cfi.push(dbg_epis.len())
+    loop e in dbg_epis: dbg_cfi.push(e - fn_start)

@@ -56,3 +56,96 @@ x64_resolve = (text_addr: int, ro_addr: int, data_addr: int):
     if error == 1: ice("stubs not emitted")
     if error == 2: ice("no adapter for {lfuncs[lf].name}")
     if error == 3: ice("unresolved function {lfuncs[lf].name}")
+
+# (the twin reads the globals themselves)
+x64_function_bind = (input: *IrFn, cabi: *(bool[]), positions: *(int[])) -> int: 0
+# Where a function starts. On a default build a loop head takes a whole cache line, with its
+# function: arena's time moved 617-728 ms with where its function fell, 618-625 with this (redfox).
+# Code moved by whole multiples of this is the same bytes wherever it is made.
+x64_code_align = () -> int:
+    if not opt_release and not dbg_on and not watch_build and not repl_image: return 64
+    16
+
+x64_function = ():
+    x_int_fail.clear()
+    pad_moves = false
+    loop fn_addr.len() <= ir.fn_index: fn_addr.push(-1)
+    loop fn_len.len() <= ir.fn_index: fn_len.push(0)
+    align = x64_code_align()
+    x_loop_line = if align == 64: 64 else: 32
+    loop code.len() % align != 0: b(0xCC)
+    fn_addr[ir.fn_index] = code.len()
+    fn_start = code.len()
+    x_padding_floor = fn_start
+    x_padding_cmov = -1
+    if ra_stat:
+        ra_loop_visits = 0
+        ra_expire_visits = 0
+        ra_spill_visits = 0
+        ra_peak_gpr = 0
+        ra_peak_xmm = 0
+    priority = opt_release and ra_prio and not dbg_on and (len(ra_only) == 0 or ir.name == ra_only)
+    if dbg_on: backend_debug_bindings()
+    backend_analyze(ir, ir_operand_layout, dbg_on, target_wasm, ra_stat, ra_on or priority)
+    x64_allocate(&ir, priority, dbg_on, ra_stat)
+    # Large loop frames keep compact negative displacements and their established
+    # branch layout. RSP's SIB/disp32 expansion otherwise adds hot-loop padding.
+    # Relocatable watch/repl images and foreign C boundaries retain their chain.
+    rsp_frame = not dbg_on and not target_windows and not watch_build and not repl_image and not ir.cabi and not x_has_foreign_call and not (frame_size >= 64 and loop_s.len() > 0)
+    # Function IDs and C ABI declarations are monotonic during a compilation;
+    # extend the indexed policy only for Windows and only for new functions.
+    if target_windows:
+        loop x_cabi_flags.len() < lfuncs.len():
+            x_cabi_flags.push(lf_is_cabi(x_cabi_flags.len()))
+    row_line = -1
+    body_start = x64_emit(&ir, fn_start, dbg_on, target_windows, fz_layout, mt_active_off, pe_iat_off(0), &x_cabi_flags, &ir_positions)
+    if xe_emit_error != "": ice(xe_emit_error)
+    if dbg_on:
+        dbg_pos[ir.code.len()] = code.len()
+        dbg_function(fn_start, body_start, X64_DWREG, XMM, 17, 6)
+        dbg_cfi.push(fn_start)
+        dbg_cfi.push(code.len() - fn_start)
+        dbg_cfi.push(body_start - fn_start)
+        n = 0
+        loop r in [0..16):
+            if callee_off[r] != 0: n += 1
+        dbg_cfi.push(n)
+        loop r in [0..16):
+            if callee_off[r] != 0:
+                dbg_cfi.push(X64_DWREG[r])
+                dbg_cfi.push(callee_off[r] - 16)
+        dbg_cfi.push(dbg_epis.len())
+        loop e in dbg_epis: dbg_cfi.push(e - fn_start)
+    if rsp_frame: rsp_row(-1)
+    rsp_frame = false
+    elf_syms.push((sym_name(ir.name), fn_start, code.len() - fn_start))
+    fn_len[ir.fn_index] = code.len() - fn_start
+    if target_windows:
+        if uw_fo > 0: unwind_fns.push((fn_start, code.len(), UW_SAVES, uw_at))
+        else: unwind_fns.push((fn_start, code.len(), UW_FRAME, frame_size))
+        if ir.cabi:
+            pts: int[]
+            loop p in [0..ir.nparams): pts.push(vtype(p))
+            a = x64_cabi_adapter(ir.fn_index, pts)
+            unwind_fns.push((a, code.len(), UW_ADAPTER, 160))
+    if ra_stat:
+        if ra_verbose:
+            sp = 0
+            loop v in [0..ir.vtypes.len()):
+                if vloc[v] == LOC_SPILL: sp += v_live[v].weight
+            eprint("  {ir.name}: spill {sp}, save {ra_save_cost + ra_save_x - ra_fn_base}; pressure {ra_peak_gpr} gpr {ra_peak_xmm} xmm, loop visits {ra_loop_visits}, expire visits {ra_expire_visits}, spill visits {ra_spill_visits}\n")
+            ra_fn_base = ra_save_cost + ra_save_x
+        loop v in [0..ir.vtypes.len()):
+            if vloc[v] == LOC_SPILL: ra_spill_cost += v_live[v].weight
+            if vloc[v] == LOC_SPILL or vloc[v] >= 0: ra_total += v_live[v].weight
+
+# x86-64 registers by encoding, as DWARF numbers them
+X64_DWREG = [0, 2, 1, 3, 7, 6, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15]
+
+# the variables of the function just emitted (from start; its body from body): where each is,
+# from the registers the allocator gave and the frame (dwreg: DWARF numbers of the general
+# registers; vector registers from fp_base on are DWARF's fp_dw on; frame: the frame register)
+dbg_aggregate = (t: int) -> bool: vc(t) == VC_AGG
+
+dbg_function = (start: int, body: int, dwreg: int[], fp_base: int, fp_dw: int, frame: int):
+    native_debug_function(&ir, code.len(), start, body, dwreg, fp_base, fp_dw, frame, dbg_aggregate)

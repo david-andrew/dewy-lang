@@ -1,13 +1,22 @@
 $runtime_checks
 
+from p"arm64_allocate.dewy" import (A_V a_save_off a_saved)
+from p"arm64_emit.dewy" import (a_emit_error a_emit_lines a_emit_sites a_epis a_fix_marks a_fix_rollback a_frame_size a_positions a_row_pos a_slots a_spill arm64_emit)
+from p"arm64_encode.dewy" import (a_far_begin a_far_missed a_put_lits w32)
 from p"arm64_module.dewy" import (arm64_emit_entry arm64_emit_entry_mac arm64_emit_stubs arm64_patch_module)
-from p"check.jo" import (watch_build)
+from p"check.jo" import (target_macos watch_build)
+from p"fused.jo" import (fz_layout)
+from p"ir_types.dewy" import (IrFn)
+from p"native_debug.dewy" import (dbg_cfi sym_name)
+from p"x64_allocate.dewy" import (slot_off vspill)
+from p"x64_encode.dewy" import (frame_size)
+from p"x64_ops.dewy" import (backend_debug_bindings dbg_function)
 from p"elf_format.dewy" import (elf_syms)
-from p"ir.jo" import (main_code)
-from p"lower.jo" import (lfuncs)
+from p"ir.jo" import (dbg_on ir ir_operand_layout ir_positions main_code)
+from p"lower.jo" import (lfuncs mt_active_off)
 from p"diagnostic_exit.dewy" import (ice)
-from p"x64.jo" import (WATCH_CODE_AT WATCH_CODE_SIZE code entry_end_lf fn_addr row_line)
-from p"x64_emit.dewy" import (line_rows row_pos)
+from p"x64.jo" import (WATCH_CODE_AT WATCH_CODE_SIZE code entry_end_lf fn_addr fn_len row_line)
+from p"x64_emit.dewy" import (call_sites dbg_epis dbg_pos line_rows ra_stat row_pos)
 from p"x64_module.dewy" import (stub_addr)
 
 Arm64OpsWord:type=int64<overflow='wrap'>
@@ -41,3 +50,66 @@ arm64_resolve=(text_addr:Arm64OpsWord ro_addr:Arm64OpsWord data_addr:Arm64OpsWor
     let missing=arm64_patch_module(text_addr ro_addr data_addr @fn_addr @stub_addr)
     if missing >=? 0 {ice("unresolved function {lfuncs.ptr[missing].name}")}
 }
+# arm64.jo's function, bound once: the emitter takes its address
+let af_ir:ptr<IrFn>=$unsafe (uint64(0) as ptr<IrFn>)
+arm64_function_bind=(input:ptr<IrFn>):>Arm64OpsWord=>{
+    af_ir=input
+    0
+}
+arm64_function=():>void=>$unsafe {
+    loop fn_addr.length <=? ir.fn_index {fn_addr.push(-1)}
+    loop fn_len.length <=? ir.fn_index {fn_len.push(0)}
+    # (at a multiple of 8, as its float constants are: their padding, so its bytes, then do not
+    # depend on where it lands, which dewy watch's comparison of builds counts on)
+    if Arm64OpsWord(code.length) & 7 not=? 0 {w32(0)}
+    fn_addr[ir.fn_index]=code.length
+    let fn_start=Arm64OpsWord(code.length)
+    if dbg_on {backend_debug_bindings()}
+    let marks=a_fix_marks()
+    a_far_begin(false)
+    let body_start=Arm64OpsWord(arm64_emit(af_ir @ir_operand_layout @ir_positions fz_layout dbg_on target_macos ra_stat mt_active_off lfuncs[ir.fn_index].name))
+    if a_emit_error =? "" and a_far_missed() {
+        # (over 1 MB: again, every conditional branch able to reach 128 MB)
+        code.truncate(fn_start)
+        a_fix_rollback(marks)
+        a_far_begin(true)
+        body_start=Arm64OpsWord(arm64_emit(af_ir @ir_operand_layout @ir_positions fz_layout dbg_on target_macos ra_stat mt_active_off lfuncs[ir.fn_index].name))
+        a_far_begin(false)
+    }
+    if a_emit_error not=? "" {ice(a_emit_error)}
+    loop row in a_emit_lines {line_rows.push(row)}
+    loop site in a_emit_sites {call_sites.push(site)}
+    row_pos=a_row_pos
+    row_line=-1
+    if dbg_on {
+        vspill=a_spill
+        slot_off=a_slots
+        frame_size=a_frame_size
+        dbg_pos=a_positions
+        dbg_epis=a_epis
+        a_dbg(fn_start body_start)
+    }
+    a_put_lits()
+    elf_syms.push([sym_name(ir.name) fn_start Arm64OpsWord(code.length) - fn_start])
+    fn_len[ir.fn_index]=Arm64OpsWord(code.length) - fn_start
+}
+# (dewy build -g) where the variables are (registers by DWARF's numbers: x0-x30 as they are,
+# v0-v31 from 64; frame offsets from sp), and how the frame is made (.debug_frame)
+A64_DWREG:array<int64>=[0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30]
+a_dbg=(fn_start:Arm64OpsWord body:Arm64OpsWord):>void=>{
+    dbg_pos[ir.code.length]=code.length
+    dbg_function(fn_start body A64_DWREG A_V 64 31)
+    dbg_cfi.push(fn_start)
+    dbg_cfi.push(Arm64OpsWord(code.length) - fn_start)
+    dbg_cfi.push(body - fn_start)
+    dbg_cfi.push(a_saved.length)
+    loop i in [Arm64OpsWord(0)..Arm64OpsWord(a_saved.length)) {
+        let r=Arm64OpsWord(a_saved[i])
+        if r >=? A_V {dbg_cfi.push(64 + r - A_V)} else {dbg_cfi.push(r)}
+        # (at sp + a_save_off + 8 i, sp being x29 - frame_size, the CFA x29 + 16)
+        dbg_cfi.push(Arm64OpsWord(a_save_off) + 8 * i - frame_size - 16)
+    }
+    dbg_cfi.push(dbg_epis.length)
+    loop e in dbg_epis {dbg_cfi.push(Arm64OpsWord(e) - fn_start)}
+}
+
