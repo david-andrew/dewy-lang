@@ -23,7 +23,6 @@ quantize=(t:Instant rounding:_Rounding tick:rational*Time):>[Instant Duration]|O
 # A time as a stored value, when it is exactly one: `convert<Duration>(q)`.
 convert=<T>(q:int*Time):>T|OffGrid|OutOfRange=>core.duration_from(q)
 convert=<T>(q:rational*Time):>T|OffGrid|OutOfRange=>core.duration_from(q)
-convert=<T>(x:float64*Time):>T|OffGrid|OutOfRange=>core.duration_from(x)
 
 $check_constant compact_instant_error(t) "does not fit"
 convert=<T>(t:Instant):>T|OutOfRange=>core.compact_instant(t)

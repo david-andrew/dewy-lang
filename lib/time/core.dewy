@@ -366,14 +366,6 @@ duration_from=(q:rational*Time):>Duration|OffGrid|OutOfRange=>{
     if not _fits(count.numerator) {return OutOfRange}
     _duration(count.numerator)
 }
-duration_from=(x:float64*Time):>Duration|OffGrid|OutOfRange=>{
-    let value=x transmute float64
-    if not is_finite(value) {return OutOfRange}
-    let count=_float_exact(value)*rational(1000000000)
-    if count.denominator not=? 1 {return OffGrid}
-    if not _fits(count.numerator) {return OutOfRange}
-    _duration(count.numerator)
-}
 
 # ---------------- the compact form, `Instant<width=64>`: September 1684 to April 2269 ----------------
 # For huge columns: one word each. Leaving that range is reachable, so it is a value.

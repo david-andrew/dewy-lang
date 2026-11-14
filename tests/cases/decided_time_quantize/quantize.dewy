@@ -1,0 +1,21 @@
+# quick
+main=()=>{
+    let half:float64*Time=0.5s
+    let nan:float64*Time=(0.0/0.0)*s
+    let infinity:float64*Time=(1.0/0.0)*s
+    let negative:float64*Time=-0.5s
+    let r=quantize(half rounding='nearest_even')
+    if r isnt? OffGrid and r isnt? OutOfRange {
+        let [value loss]=r
+        printl"{value} {loss}"
+    }
+    let n=quantize(negative rounding='floor' tick=1s)
+    if n isnt? OffGrid and n isnt? OutOfRange {
+        let [value loss]=n
+        printl"{value} {loss}"
+    }
+    printl(quantize(nan rounding='floor') is? OutOfRange)
+    printl(quantize(infinity rounding='floor') is? OutOfRange)
+    printl(convert<Duration>(1ns/3) is? OffGrid)
+    printl(convert<Duration>(500ms))
+}

@@ -1801,8 +1801,10 @@ tick above a second counts on the UTC clock, so `tick=1minute` lands on `:00` (a
 the start of the next minute), and before 1972, when UTC's offset was not a whole number of seconds, it
 counts from the axis's origin. A
 float time is `quantize`d to enter, with `OutOfRange` for NaN and the infinities. `convert<Duration>(q)`
-takes a time that is exactly on the grid, giving `Duration | OffGrid | OutOfRange` instead of
-rounding. `t.ticks(1s)` counts down to a grid: `[count remainder]`, with the remainder at
+takes an integer or rational time that is exactly on the grid, giving
+`Duration | OffGrid | OutOfRange` instead of rounding. A floating time cannot use
+`convert<Duration>`, even when it lands exactly on a nanosecond: use `quantize`
+with an explicit rounding mode and take the reported loss. `t.ticks(1s)` counts down to a grid: `[count remainder]`, with the remainder at
 least zero and below the tick, so `-0.25s` is `-1` and `750ms`.
 Arithmetic that leaves the 128-bit range (±5.39×10²¹ years) ends the program with a report.
 
