@@ -7,8 +7,12 @@ from tools import cases
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['native', 'native-release'])
-def test_reserve_batch_with_signal_imports(compiler, tmp_path, mode):
-    names = ['reserve/or_throw', 'reserve/permits', 'reserve/select', 'signals_closing/helper']
+@pytest.mark.parametrize('names', [
+    ['reserve/or_throw', 'reserve/permits', 'reserve/select', 'signals_closing/helper'],
+    ['queue_refined_slots/mpmc_refined_receive_ok', 'reserve/channel_select', 'reserve/or_throw',
+     'reserve/permits', 'reserve/select', 'signals_unavailable/poll'],
+], ids=['reserve-signals', 'coverage-queue-select'])
+def test_reserve_batch_with_signal_imports(compiler, tmp_path, mode, names):
     chosen = [cases.parse(cases.CASES / f'{name}.dewy') for name in names]
     runner = cases.Runner(compiler, tmp_path, cases.clean_environment())
     source = tmp_path / 'batch.dewy'

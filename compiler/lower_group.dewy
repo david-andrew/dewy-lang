@@ -2281,7 +2281,11 @@ gen_intrinsic_syscall=(e:LGWord arg_start:LGWord arg_count:LGWord):>Val=>$unsafe
         return V(e_call(rt("__mac_syscall") vs VI) false)
     }
     let interruptible=false
-    if concurrency_runtime_needed and nodes.ptr[arg0].kind =? 'int_lit' and files.ptr[pos_file(nodes.ptr[e].pos)].path not=? "{lib_dir}/std/tasks.jo" and files.ptr[pos_file(nodes.ptr[e].pos)].path not=? "{lib_dir}/std/fork_join.jo" {
+    # Output and diagnostics are not cancellation points, including when a
+    # different module makes the program use the task runtime.
+    let source_file=files.ptr[pos_file(nodes.ptr[e].pos)].path
+    let runtime_output=source_file =? "{lib_dir}/core/rt.jo" and name_of(LGWord(nodes.ptr[LGWord(fns.ptr[cur_fn].decl)].name)) =? "__write_fd"
+    if concurrency_runtime_needed and not runtime_output and nodes.ptr[arg0].kind =? 'int_lit' and files.ptr[pos_file(nodes.ptr[e].pos)].path not=? "{lib_dir}/std/tasks.jo" and files.ptr[pos_file(nodes.ptr[e].pos)].path not=? "{lib_dir}/std/fork_join.jo" {
         let number=nodes.ptr[arg0].ival
         interruptible=number in? [0 1 2 7 16 17 19 20 35 42 43 44 45 46 47 61 74 75 202 288]
     }

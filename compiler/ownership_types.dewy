@@ -62,7 +62,7 @@ ow_st=(t:OWord):>OWord=>$unsafe {OWord(ow_types[0].ptr[t].st)}
 # A refined type stands for its base.
 ow_representation=(t0:OWord):>OWord=>$unsafe {
     let t=ow_prune(t0)
-    if ow_types[0].ptr[t].kind =? 'refined' {return ow_prune(OWord(ow_types[0].ptr[t].elem))}
+    loop ow_types[0].ptr[t].kind =? 'refined' {t=ow_prune(OWord(ow_types[0].ptr[t].elem))}
     t
 }
 ow_is_map=(t0:OWord):>bool=>$unsafe {
@@ -105,7 +105,7 @@ ow_scalar=(t0:OWord):>bool=>$unsafe {
 # Callable capability: 0 ordinary, 1 owning/copyable, 2 owning/move-only.
 # Adding 2 marks a nonescaping borrowed owner capture.
 ownership_callable_cap=(t0:OWord):>OWord=>$unsafe {
-    let t=ow_prune(t0)
+    let t=ow_representation(t0)
     if ow_types[0].ptr[t].kind =? 'callable' {return OWord(ow_types[0].ptr[t].bits)}
     0
 }
@@ -114,12 +114,12 @@ ownership_declared=(decl:OWord):>bool=>$unsafe {
 }
 ownership_nominal=(t0:OWord):>bool=>$unsafe {
     if ow_decls[0].length =? 0 {return false}
-    let t=ow_prune(t0)
+    let t=ow_representation(t0)
     ow_types[0].ptr[t].kind =? 'struct_' and (ow_structs[0].ptr[ow_st(t)].drop_fn not=? 0 or ow_copies[0].has(t) or ow_moves[0].has(t))
 }
 ownership_type=(t0:OWord):>bool=>$unsafe {
     if ow_decls[0].length =? 0 {return false}
-    let t=ow_prune(t0)
+    let t=ow_representation(t0)
     if ownership_callable_cap(t) not=? 0 {return true}
     let k=ow_types[0].ptr[t].kind
     (k =? 'struct_' or k =? 'tuple' or k =? 'fixed' or k =? 'array' or k =? 'opt' or k =? 'box' or k =? 'enum_') and ownership_contains(t)
@@ -129,7 +129,7 @@ ownership_type=(t0:OWord):>bool=>$unsafe {
 # answer below the current visit leaned on a guard or an unbound type variable.
 let OW_UNSETTLED:OWord=-4611686018427387904
 ownership_contains=(t0:OWord):>bool=>$unsafe {
-    let t=ow_prune(t0)
+    let t=ow_representation(t0)
     if ownership_callable_cap(t) not=? 0 {return true}
     if ownership_nominal(t) {return true}
     let cached=ow_contained[0].get(t)
@@ -178,7 +178,7 @@ ownership_contains=(t0:OWord):>bool=>$unsafe {
     found
 }
 ownership_copyable=(t0:OWord seen:array<int64>=[]):>bool=>$unsafe {
-    let t=ow_prune(t0)
+    let t=ow_representation(t0)
     let cap=ownership_callable_cap(t)
     if cap not=? 0 {return cap =? 1 or cap =? 3}
     if seen.contains(int64(t)) {return true}
@@ -209,7 +209,7 @@ ownership_copyable=(t0:OWord seen:array<int64>=[]):>bool=>$unsafe {
     true
 }
 ownership_inline=(t0:OWord depth:OWord=0):>bool=>$unsafe {
-    let t=ow_prune(t0)
+    let t=ow_representation(t0)
     if ownership_callable_cap(t) not=? 0 {return true}
     if ow_scalar(t) or ow_kind(t) =? 'float_' {return true}
     if depth >? 32 {return false}
@@ -265,7 +265,7 @@ ownership_fact_type=(t0:OWord depth:OWord=0):>bool=>$unsafe {
 # Containers remain finite layouts, but copying them can allocate. Keep this
 # separate from the no-allocation inline predicate used by effect summaries.
 ownership_layout=(t0:OWord depth:OWord=0 seen:array<int64>=[]):>bool=>$unsafe {
-    let t=ow_prune(t0)
+    let t=ow_representation(t0)
     if seen.contains(int64(t)) {return true}
     if depth >? 32 {return false}
     let visited=seen
@@ -281,7 +281,7 @@ ownership_layout=(t0:OWord depth:OWord=0 seen:array<int64>=[]):>bool=>$unsafe {
     # Layout support includes managed scalar handles: tagged integers retain
     # and release their payload through ordinary field/array cleanup. This is
     # separate from ownership_inline, which must stay allocation-free.
-    # Normalize refinements only for scalar leaves, not aggregate ownership.
+    # Refinement wrappers preserve both scalar and aggregate ownership.
     # (a raw pointer is a plain word: a handle's view of storage it shares, owning nothing)
     let scalar=ow_kind(ow_representation(t))
     if k =? 'str_' or scalar =? 'int_' or scalar =? 'bool_' or k =? 'float_' or k =? 'ptr' {return true}
@@ -300,7 +300,7 @@ ownership_layout=(t0:OWord depth:OWord=0 seen:array<int64>=[]):>bool=>$unsafe {
     true
 }
 ownership_decl_copyable=(t0:OWord seen:array<int64>=[]):>bool=>$unsafe {
-    let t=ow_prune(t0)
+    let t=ow_representation(t0)
     let cap=ownership_callable_cap(t)
     if cap not=? 0 {return cap =? 1 or cap =? 3}
     if seen.contains(int64(t)) {return true}

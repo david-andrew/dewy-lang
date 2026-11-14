@@ -1,0 +1,11 @@
+# modes: native native-release
+# quick
+# Printing is not a cancellation point, whether or not another group spawns.
+main=()=>{
+    concurrent g {
+        cancel(g)
+        printl"inside canceled group"
+    }
+    concurrent {spawn {printl"child"}}
+    printl"done"
+}

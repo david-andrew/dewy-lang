@@ -428,13 +428,15 @@ def returns_void(source: str) -> bool:
 
 
 # A case whose result is an exit code runs as `main=()=>exit(run())`; batches
-# call the function itself and keep its result.
-ENTRY = re.compile(r'^main\s*=\s*\(\s*\)\s*=>\s*exit\((\w+)\(\)\)\s*$', re.MULTILINE)
+# call the function itself and keep its result. A pure block wrapper is the
+# same entry: running its exit would invoke process-wide finalizers mid-batch.
+ENTRY = re.compile(r'^main\s*=\s*\(\s*\)\s*=>\s*(?P<brace>\{)?\s*'
+                   r'exit\((?P<entry>\w+)\(\)\)(?(brace)\s*\})\s*$', re.MULTILINE)
 
 
 def entry_name(source: str) -> str:
     match = ENTRY.search(source)
-    return match[1] if match else 'main'
+    return match['entry'] if match else 'main'
 
 
 def batch_source(cases: list[Case], forms: list[str], select: bool) -> tuple[str, dict[int, int]]:
@@ -497,10 +499,10 @@ def parse_batch(stdout: str) -> tuple[dict[int, tuple[str, str]], int | None, bo
         stray = stray or opened.start() > position
         index = int(opened[1])
         started = index
-        closed = re.compile('^' + re.escape(MARK) + rf'E{index}:(-?\d+)\n', re.MULTILINE).search(stdout, opened.end())
+        closed = re.compile('^' + re.escape(MARK) + rf'E{index}:(-?\d+|void)\n', re.MULTILINE).search(stdout, opened.end())
         if closed is None:
             return finished, started, stray
-        finished[index] = stdout[opened.end():closed.start()], closed[1]
+        finished[index] = stdout[opened.end():closed.start()], ('0' if closed[1] == 'void' else closed[1])
         position = closed.end()
     return finished, started, stray or position < len(stdout)
 

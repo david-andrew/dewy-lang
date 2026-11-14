@@ -1,0 +1,16 @@
+# modes: native native-release
+# quick
+# Returning from a refined owner's scope must unlink its stack cleanup record.
+let drops:int64=0
+Owner:type=[value:int64 $__drop__=():>void=>{drops+=1}]
+work=()=>{
+    let values:array<Owner length <? 4>=[]
+    values.push(Owner[1])
+    values.push(Owner[2])
+    printl(values.pop().value)
+}
+main=()=>{
+    work()
+    printl(drops)
+    exit(0)
+}

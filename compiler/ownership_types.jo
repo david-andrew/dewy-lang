@@ -51,7 +51,7 @@ ow_elem = (t: int) -> int: int(ow_types[0][ow_prune(t)].elem)
 ow_st = (t: int) -> int: int(ow_types[0][t].st)
 ow_representation = (t0: int) -> int:
     t = ow_prune(t0)
-    if ow_types[0][t].kind == .refined: return ow_prune(int(ow_types[0][t].elem))
+    loop ow_types[0][t].kind == .refined: t = ow_prune(int(ow_types[0][t].elem))
     t
 ow_is_map = (t0: int) -> bool:
     t = ow_prune(t0)
@@ -81,18 +81,18 @@ ow_scalar = (t0: int) -> bool:
     t = ow_representation(t0)
     ow_types[0][t].kind == .bool_ or ow_types[0][t].kind == .int_ and t != ow_math_int[0]
 ownership_callable_cap = (t0: int) -> int:
-    t = ow_prune(t0)
+    t = ow_representation(t0)
     if ow_types[0][t].kind == .callable: return int(ow_types[0][t].bits)
     0
 ownership_declared = (decl: int) -> bool:
     ow_decls[0].has(decl * 4 + 1) or ow_decls[0].has(decl * 4 + 2) or ow_decls[0].has(decl * 4 + 3)
 ownership_nominal = (t0: int) -> bool:
     if ow_decls[0].len() == 0: return false
-    t = ow_prune(t0)
+    t = ow_representation(t0)
     ow_types[0][t].kind == .struct_ and (ow_structs[0][ow_st(t)].drop_fn != 0 or ow_copies[0].has(t) or ow_moves[0].has(t))
 ownership_type = (t0: int) -> bool:
     if ow_decls[0].len() == 0: return false
-    t = ow_prune(t0)
+    t = ow_representation(t0)
     if ownership_callable_cap(t) != 0: return true
     k = ow_types[0][t].kind
     (k == .struct_ or k == .tuple or k == .fixed or k == .array or k == .opt or k == .box or k == .enum_) and ownership_contains(t)
@@ -101,7 +101,7 @@ ownership_type = (t0: int) -> bool:
 # answer below the current visit leaned on a guard or an unbound type variable.
 const OW_UNSETTLED = -4611686018427387904
 ownership_contains = (t0: int) -> bool:
-    t = ow_prune(t0)
+    t = ow_representation(t0)
     if ownership_callable_cap(t) != 0: return true
     if ownership_nominal(t): return true
     if let cached = ow_contained[0].get(t): return cached
@@ -139,7 +139,7 @@ ownership_contains = (t0: int) -> bool:
     if outer: ow_contained[0][OW_UNSETTLED] = true
     found
 ownership_copyable = (t0: int, seen: int[] = []) -> bool:
-    t = ow_prune(t0)
+    t = ow_representation(t0)
     cap = ownership_callable_cap(t)
     if cap != 0: return cap == 1 or cap == 3
     if seen.contains(t): return true
@@ -164,7 +164,7 @@ ownership_copyable = (t0: int, seen: int[] = []) -> bool:
         if ownership_type(fs[i]) and not ownership_copyable(fs[i], visited): return false
     true
 ownership_inline = (t0: int, depth: int = 0) -> bool:
-    t = ow_prune(t0)
+    t = ow_representation(t0)
     if ownership_callable_cap(t) != 0: return true
     if ow_scalar(t) or ow_kind(t) == .float_: return true
     if depth > 32: return false
@@ -207,7 +207,7 @@ ownership_fact_type = (t0: int, depth: int = 0) -> bool:
         if ownership_fact_type(int(ow_fields[0][int(ow_structs[0][si].fields) + i].type), depth + 1): return true
     false
 ownership_layout = (t0: int, depth: int = 0, seen: int[] = []) -> bool:
-    t = ow_prune(t0)
+    t = ow_representation(t0)
     if seen.contains(t): return true
     if depth > 32: return false
     visited = seen
@@ -222,7 +222,7 @@ ownership_layout = (t0: int, depth: int = 0, seen: int[] = []) -> bool:
     # Layout support includes managed scalar handles: tagged integers retain
     # and release their payload through ordinary field/array cleanup. This is
     # separate from ownership_inline, which must stay allocation-free.
-    # Normalize refinements only for scalar leaves, not aggregate ownership.
+    # Refinement wrappers preserve both scalar and aggregate ownership.
     # (a raw pointer is a plain word: a handle's view of storage it shares, owning nothing)
     scalar = ow_kind(ow_representation(t))
     if k == .str_ or scalar == .int_ or scalar == .bool_ or k == .float_ or k == .ptr: return true
@@ -237,7 +237,7 @@ ownership_layout = (t0: int, depth: int = 0, seen: int[] = []) -> bool:
         if not ownership_layout(ft, depth + 1, visited): return false
     true
 ownership_decl_copyable = (t0: int, seen: int[] = []) -> bool:
-    t = ow_prune(t0)
+    t = ow_representation(t0)
     cap = ownership_callable_cap(t)
     if cap != 0: return cap == 1 or cap == 3
     if seen.contains(t): return true
