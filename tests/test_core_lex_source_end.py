@@ -12,7 +12,7 @@ from tests.support import ROOT, compiler
 @pytest.mark.skipif(sys.platform != 'linux' or platform.machine() != 'x86_64', reason='x86-64 Linux mmap')
 def test_lex_stops_at_source_end(compiler, tmp_path):
     source = tmp_path / 'edge.jo'
-    source.write_text(f"use '{ROOT / 'compiler/lex.jo'}'\nuse '{ROOT / 'compiler/check.jo'}'\n" + '''
+    source.write_text(f"use '{ROOT / 'compiler/lex.jo'}'\nuse '{ROOT / 'compiler/lexer_scan.dewy'}'\nuse '{ROOT / 'compiler/check.jo'}'\n" + '''
 lex_at_page_end = (text: str) -> int:
     page = 4096
     base = syscall(9, 0, 2 * page, 3, 0x22, -1, 0)

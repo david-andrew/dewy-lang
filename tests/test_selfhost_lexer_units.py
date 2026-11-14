@@ -8,6 +8,7 @@ from tests.support import ROOT, compiler  # noqa: F401
 DRIVER = r'''use 'main.jo'
 use 'lexer_units.dewy'
 use 'lex.jo'
+use 'lexer_scan.dewy'
 use 'source_types.dewy'
 use 'checker_tokens.dewy'
 use 'util.jo'

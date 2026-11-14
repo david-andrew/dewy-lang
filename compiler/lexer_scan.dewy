@@ -1,0 +1,502 @@
+$runtime_checks
+
+from p"checker_tokens.dewy" import Tok
+from p"lex.jo" import (Token STRF_RAW STRF_TRIPLE STRF_SINGLE LX_SPARE lx_file lx_src lx_p lx_n lx_i lx_toks lx_indents lx_tab_indent lx_space_indent lx_ctx lx_line_indent lx_lazy lx_line_tok0 lx_decl_lines lx_base lx_slots lx_count lx_cap kw_tok lx_cls)
+from p"util.jo" import (intern_sub mkpos)
+from p"lexer_errors.dewy" import lx_err
+from p"lexer_units.dewy" import lx_unit
+from p"lexer_line_closes.dewy" import lx_line_closes
+from p"lexer_line_context.dewy" import (lx_emit lx_next lx_grow lx_last_kind lx_emit_newline lx_top_block lx_decl_line lx_decl_context lx_close_block_ctx)
+from p"lexer_helpers.dewy" import (is_ident_char init_keywords lx_init_classes lx_line_start lx_body_end lx_float)
+from p"@lib/core/str.jo" import (is_alpha byte_str)
+
+# Shared Jo state remains the owner. Byte views never own or copy arrays;
+# token pointers are reacquired after growth, and offsets wrap as Jo words do.
+LexScanWord:type=int64<overflow='wrap'>
+LexScanUWord:type=uint64<overflow='wrap'>
+
+lx_number=():>void=>$unsafe {
+    let p=lx_p
+    let s:LexScanWord=lx_i
+    let i:LexScanWord=s
+    let v:LexScanUWord=0
+    let big=false
+    if p[i] =? 48 and (p[i + 1] =? 120 or p[i + 1] =? 88 or p[i + 1] =? 98 or p[i + 1] =? 66 or p[i + 1] =? 111 or p[i + 1] =? 79) {
+        let b=p[i + 1]
+        let base:LexScanUWord=8
+        if b =? 120 or b =? 88 {base=16}
+        if b =? 98 or b =? 66 {base=2}
+        i += 2
+        loop true {
+            let c=p[i]
+            let d:LexScanUWord=99
+            if c =? 95 {
+                i += 1
+                continue
+            }
+            if c >=? 48 and c <=? 57 {d=LexScanUWord(c - 48)}
+            else if c >=? 97 and c <=? 102 {d=LexScanUWord(c - 97) + 10}
+            else if c >=? 65 and c <=? 70 {d=LexScanUWord(c - 65) + 10}
+            if d >=? base {break}
+            if v >? (0xFFFFFFFFFFFFFFFF - d) // base {lx_err(s "integer literal too large (more than 64 bits)")}
+            v=v * base + d
+            i += 1
+        }
+        lx_i=i
+    }
+    else {
+        # integers are accumulated directly; floats are re-read by to_float
+        loop true {
+            let c=p[i]
+            if c >=? 48 and c <=? 57 {
+                if v >=? 1844674407370955161 and (v >? 1844674407370955161 or c >? 53) {big=true}
+                v=v * 10 + LexScanUWord(c - 48)
+                i += 1
+            }
+            else if c =? 95 {i += 1}
+            else {break}
+        }
+        let is_float=false
+        if p[i] =? 46 and p[i + 1] >=? 48 and p[i + 1] <=? 57 {
+            is_float=true
+            i += 1
+            loop (p[i] >=? 48 and p[i] <=? 57) or p[i] =? 95 {i += 1}
+        }
+        if (p[i] =? 101 or p[i] =? 69) and ((p[i + 1] >=? 48 and p[i + 1] <=? 57) or ((p[i + 1] =? 45 or p[i + 1] =? 43) and p[i + 2] >=? 48 and p[i + 2] <=? 57)) {
+            is_float=true
+            i += 1
+            if p[i] =? 45 or p[i] =? 43 {i += 1}
+            loop p[i] >=? 48 and p[i] <=? 57 {i += 1}
+        }
+        lx_i=i
+        if is_float {
+            if lx_cls[p[i]] & 1 not=? 0 {
+                lx_unit(s lx_float(s i))
+                return
+            }
+            let fv=lx_float(s i)
+            if fv - fv not=? 0.0 {lx_err(s "number too large: the largest a float holds is about 1.8e308 (INF is infinity; for bigger numbers, `use big`: `big(1, 400)`)")}
+            lx_emit('float_lit' s i - s)
+            lx_slots[LexScanWord(lx_count) - 1].fval = fv
+            return
+        }
+    }
+    if lx_cls[p[lx_i]] & 1 not=? 0 {
+        lx_unit(s float64(v))
+        return
+    }
+    if is_ident_char(p[lx_i]) {lx_err(lx_i "invalid character in number literal")}
+    if big {lx_err(s "integer literal too large (more than 64 bits)")}
+    lx_emit('int_lit' s LexScanWord(lx_i) - s)
+    lx_slots[LexScanWord(lx_count) - 1].ival = LexScanWord(v)
+
+}
+lx_string=(raw:bool):>void=>$unsafe {
+    let p=lx_p
+    let s:LexScanWord=lx_i
+    let q=p[s]
+    let triple=q =? 34 and p[s + 1] =? 34 and p[s + 2] =? 34
+    let i:LexScanWord=s + 1
+    if triple {i=s + 3}
+    let start:LexScanWord=i
+    let depth:LexScanWord=0
+    loop true {
+        if i >=? lx_n {
+            if depth >? 0 {lx_err(s "unterminated string: a `\{` in it starts an interpolation that does not end (for a brace in the text, write \{\{ or \}\})")}
+            lx_err(s "this text has no closing quote: it starts here, and a `\"` ends it")
+        }
+        let c=p[i]
+        if depth =? 0 {
+            if c =? 92 and not raw {
+                i += 2
+                continue
+            }
+            if triple {
+                if c =? 34 and p[i + 1] =? 34 and p[i + 2] =? 34 {break}
+            }
+            else if c =? q {break}
+            if not raw and c =? 123 {
+                if p[i + 1] =? 123 {
+                    i += 2
+                    continue
+                }
+                # ('{', a brace alone: there is nothing for it to interpolate; "{"a" if c...}" is
+                # text inside an interpolation)
+                # (p[i + 2] read once p[i + 1] is the quote, so not the 0 after the source)
+                if not triple and p[i + 1] =? q and i =? start and not is_ident_char(p[i + 2]) and p[i + 2] not=? 34 and p[i + 2] not=? 39 {
+                    i += 1
+                    continue
+                }
+                depth=1
+                i += 1
+                continue
+            }
+            i += 1
+        }
+        else {
+            if c =? 123 {depth += 1}
+            else if c =? 125 {depth -= 1}
+            else if c =? 34 or c =? 39 {
+                i += 1
+                loop i <? lx_n and p[i] not=? c {
+                    if p[i] =? 92 {i += 1}
+                    i += 1
+                }
+            }
+            i += 1
+        }
+    }
+    # (print("hello) then a line on with print("round {i}"): the text runs over lines and ends
+    # at the second print's quote, a letter right after it: the first line's quote is missing)
+    if not triple and i + 1 <? lx_n {
+        let nc=p[i + 1]
+        if (nc >=? 97 and nc <=? 122) or (nc >=? 65 and nc <=? 90) or nc =? 95 {
+            let k:LexScanWord=start
+            loop k <? i and p[k] not=? 10 {k += 1}
+            if k <? i {lx_err(s "this text has no closing quote on its line: a `\"` ends it there (text that goes on over lines is written in triple quotes, \"\"\"...\"\"\")")}
+        }
+    }
+    let f:LexScanWord=0
+    if raw {f |= STRF_RAW}
+    if triple {f |= STRF_TRIPLE}
+    if q =? 39 {f |= STRF_SINGLE}
+    let k:LexScanWord=lx_next()
+    let t=lx_slots
+    t[k].kind = 'str_lit'
+    t[k].flags = int32<overflow='wrap'>(f)
+    t[k].pos = mkpos(lx_file lx_base + s)
+    t[k].start = int32<overflow='wrap'>(start)
+    t[k].len = int32<overflow='wrap'>(i - start)
+    if triple {lx_i=i + 3}
+    else {lx_i=i + 1}
+
+}
+# A requested byte span retains its original source positions (lazy bodies).
+lex=(file:LexScanWord src:string begin:LexScanWord=0 stop:LexScanWord=-1):>array<Token>=>$unsafe {
+    lx_file=file
+    lx_src=src
+    lx_p=(src as array<uint8>).ptr
+    # (a nil string, the zero value, has no bytes and no 0 after them: the empty text's do)
+    if lx_p =? (uint64(0) as ptr<uint8>) {lx_p=("" as array<uint8>).ptr}
+    lx_n=(src as array<uint8>).length
+    if stop >=? 0 {lx_n=stop}
+    lx_i=begin
+    # (about a token per five bytes of source; in a library file the bodies are mostly skipped)
+    let cap:LexScanWord=(LexScanWord(lx_n) - LexScanWord(lx_i)) // 5 + 16
+    if lx_lazy and cap >? 512 {cap=512}
+    lx_toks=[]
+    lx_toks.resize(cap)
+    lx_slots=lx_toks.ptr
+    lx_count=0
+    lx_cap=cap
+    lx_indents=[0]
+    lx_decl_lines=[]
+    lx_line_tok0=0
+    lx_tab_indent=false
+    lx_space_indent=false
+    lx_ctx=[(1 << 1) | 1]
+    if kw_tok.length =? 0 {init_keywords()}
+    if lx_cls =? (uint64(0) as ptr<uint8>) {lx_init_classes()}
+    lx_line_start()
+    let p=lx_p
+    let cls=lx_cls
+    let kws=kw_tok.ptr
+    let nkw:LexScanWord=kw_tok.length
+    let at:LexScanWord=(lx_file << 40) | lx_base
+    # (the scan position is local here; the helpers read and move lx_i)
+    let i:LexScanWord=lx_i
+    loop i <? lx_n {
+        let c=p[i]
+        if c =? 32 or c =? 9 or c =? 13 {
+            i += 1
+            loop i <? lx_n and p[i] =? 32 {i += 1}
+            continue
+        }
+        if cls[c] & 1 not=? 0 {
+            if c =? 114 and (p[i + 1] =? 34 or p[i + 1] =? 39) {
+                lx_i=i + 1
+                lx_string(true)
+                i=lx_i
+                continue
+            }
+            let s:LexScanWord=i
+            i += 1
+            loop cls[p[i]] & 2 not=? 0 {i += 1}
+            let id:LexScanWord=intern_sub(src s i - s)
+            let kind:Tok='ident'
+            if id <? nkw {kind=kws[id]}
+            if lx_count =? lx_cap {lx_grow()}
+            let t=lx_slots
+            let k:LexScanWord=lx_count
+            lx_count=k + 1
+            t[k].kind = kind
+            t[k].pos = at + s
+            t[k].start = int32<overflow='wrap'>(s)
+            t[k].len = int32<overflow='wrap'>(i - s)
+            t[k].ival = id
+            continue
+        }
+        if c =? 92 and p[i + 1] =? 10 {
+            i += 2
+            continue
+        }
+        if c =? 35 {
+            # (#xs, Lua's length: right after an opening bracket, a comma or an operator)
+            if i + 1 <? lx_n and is_alpha(p[i + 1]) {
+                let lk=lx_last_kind()
+                if lk =? 'lparen' or lk =? 'lbrack' or lk =? 'comma' or lk =? 'assign' or lk =? 'plus' or lk =? 'minus' or lk =? 'star' or lk =? 'lt' or lk =? 'gt' or lk =? 'eq' {
+                    lx_err(i "`#` starts a comment; a length is `xs.len()` (or `len(s)`)")
+                }
+            }
+            i=__find_newline(p i lx_n)
+            continue
+        }
+        lx_i=i
+        if c =? 10 {
+            if lx_lazy and lx_ctx.length =? 1 and lx_decl_context() and lx_last_kind() =? 'colon' and lx_decl_line() {
+                let end_:LexScanWord=lx_body_end(LexScanWord(lx_i) + 1 lx_line_indent)
+                if end_ >? 0 {
+                    lx_emit_newline()
+                    lx_emit('lazy' LexScanWord(lx_i) + 1 end_ - (LexScanWord(lx_i) + 1))
+                    lx_i=end_
+                    lx_line_start()
+                    i=lx_i
+                    continue
+                }
+            }
+            lx_i=LexScanWord(lx_i) + 1
+            if lx_top_block() {lx_emit_newline()}
+            lx_line_start()
+            i=lx_i
+            continue
+        }
+        if c >=? 48 and c <=? 57 {
+            lx_number()
+            i=lx_i
+            continue
+        }
+        if c =? 34 or c =? 39 {
+            lx_string(false)
+            i=lx_i
+            continue
+        }
+        # (src's bytes end with a 0, at len(src): the byte after next, p[i + 2], is read only once
+        # c1 is one of an operator's, so not that 0)
+        let c1=p[i + 1]
+        let k:Tok='eof'
+        let n:LexScanWord=1
+        match c {
+            <40> => {k='lparen'}
+            <41> => {k='rparen'}
+            <91> => {k='lbrack'}
+            <93> => {k='rbrack'}
+            <123> => {k='lbrace'}
+            <125> => {k='rbrace'}
+            <44> => {k='comma'}
+            <59> => {k='semi'}
+            <126> => {k='tilde'}
+            <64> => {k='at'}
+            <58> => {k='colon'}
+            <46> => {
+                k='dot'
+                if c1 =? 46 {
+                    k='dotdot'
+                    n=2
+                    if p[i + 2] =? 46 {
+                        k='ellipsis'
+                        n=3
+                    }
+                }
+                else if c1 =? 43 or c1 =? 45 or c1 =? 42 or c1 =? 47 or c1 =? 37 or c1 =? 94 or c1 =? 60 or c1 =? 62 or (c1 =? 61 and p[i + 2] =? 61) or (c1 =? 33 and p[i + 2] =? 61) {
+                    # dotted (broadcasting) operator: .+ .* .== .<= ...
+                    k='dotop'
+                    n=2
+                    if p[i + 2] =? 61 and c1 not=? 43 and c1 not=? 45 and c1 not=? 42 and c1 not=? 47 and c1 not=? 37 and c1 not=? 94 {n=3}
+                }
+            }
+            <45> => {
+                k='minus'
+                if c1 =? 62 {
+                    k='arrow'
+                    n=2
+                }
+                else if c1 =? 61 {
+                    k='minuseq'
+                    n=2
+                }
+            }
+            <43> => {
+                k='plus'
+                if c1 =? 61 {
+                    k='pluseq'
+                    n=2
+                }
+            }
+            <42> => {
+                k='star'
+                if c1 =? 61 {
+                    k='stareq'
+                    n=2
+                }
+                else if c1 =? 42 {
+                    k='starstar'
+                    n=2
+                }
+            }
+            <47> => {
+                k='slash'
+                if c1 =? 61 {
+                    k='slasheq'
+                    n=2
+                }
+            }
+            <37> => {
+                k='percent'
+                if c1 =? 61 {
+                    k='percenteq'
+                    n=2
+                }
+            }
+            <38> => {
+                k='amp'
+                if c1 =? 61 {
+                    k='ampeq'
+                    n=2
+                }
+            }
+            <124> => {
+                k='pipe'
+                if c1 =? 61 {
+                    k='pipeeq'
+                    n=2
+                }
+            }
+            <94> => {
+                k='caret'
+                if c1 =? 61 {
+                    k='careteq'
+                    n=2
+                }
+            }
+            <61> => {
+                k='assign'
+                if c1 =? 61 {
+                    k='eq'
+                    n=2
+                }
+            }
+            <33> => {
+                k='bang'
+                if c1 =? 61 {
+                    k='ne'
+                    n=2
+                }
+            }
+            <63> => {
+                k='question'
+                if c1 =? 63 {
+                    k='qq'
+                    n=2
+                }
+            }
+            <60> => {
+                k='lt'
+                if c1 =? 60 {
+                    k='shl'
+                    n=2
+                    if p[i + 2] =? 61 {
+                        k='shleq'
+                        n=3
+                    }
+                }
+                else if c1 =? 61 {
+                    k='le'
+                    n=2
+                }
+            }
+            <62> => {
+                k='gt'
+                if c1 =? 62 {
+                    k='shr'
+                    n=2
+                    if p[i + 2] =? 61 {
+                        k='shreq'
+                        n=3
+                    }
+                }
+                else if c1 =? 61 {
+                    k='ge'
+                    n=2
+                }
+            }
+            _ => {
+                if c =? 96 {lx_err(lx_i "strings are in double quotes and put values in by themselves: \"score \{n\}\" (no backticks)")}
+                if c =? 0 {lx_err(lx_i "this is not a source file: it holds binary data (a program built from one?)")}
+                # ($"Score: {s}": C#'s interpolated text)
+                if c =? 36 and LexScanWord(lx_i) + 1 <? (lx_src as array<uint8>).length and lx_p[LexScanWord(lx_i) + 1] =? 34 {lx_err(lx_i "every string can hold values: drop the `$` (`\"Score: \{s}\"`)")}
+                lx_err(lx_i "unexpected character '{byte_str(int64(c))}'")
+            }
+        }
+        # (a lambda's indented body inside brackets ends at a comma whose line goes on to close the
+        # bracket: f(():\n    a(), 5) gives f a lambda and 5; a, b = b, a alone on a line is a tuple)
+        if k =? 'comma' {
+            if lx_ctx.length >? 1 and lx_top_block() and lx_line_closes(LexScanWord(lx_i) + 1) {lx_close_block_ctx(lx_i)}
+        }
+        else if k =? 'rparen' or k =? 'rbrack' or k =? 'rbrace' {
+            lx_close_block_ctx(lx_i)
+            if lx_ctx.length <=? 1 {lx_err(lx_i "unmatched '{byte_str(int64(c))}'")}
+            let opening:LexScanWord=(lx_ctx[LexScanWord(lx_ctx.length) - 1] >> 1) & 0x7FFFFF
+            if opening >? 0 {lx_slots[opening - 1].ival = lx_count}
+            lx_ctx.pop();
+        }
+        if lx_count =? lx_cap {lx_grow()}
+        let t=lx_slots
+        let tk:LexScanWord=lx_count
+        lx_count=tk + 1
+        t[tk].kind = k
+        t[tk].pos = at + i
+        t[tk].start = int32<overflow='wrap'>(i)
+        t[tk].len = int32<overflow='wrap'>(n)
+        if k =? 'dotop' {t[tk].ival = LexScanWord(c1)}
+        lx_i=i + n
+        if k =? 'lparen' or k =? 'lbrack' or k =? 'lbrace' {
+            let opening:LexScanWord=0
+            if tk <? 0x7FFFFE {opening=tk + 1}
+            lx_ctx.push((i << 24) | (opening << 1))
+        }
+        else if k =? 'colon' and not lx_top_block() {
+            let q:LexScanWord=lx_i
+            loop p[q] =? 32 or p[q] =? 9 or p[q] =? 13 {q += 1}
+            if p[q] =? 35 {
+                loop q <? lx_n and p[q] not=? 10 {q += 1}
+            }
+            if p[q] =? 10 {
+                lx_indents.push(lx_line_indent)
+                lx_ctx.push((lx_i << 24) | (LexScanWord(lx_indents.length) << 1) | 1)
+            }
+        }
+        i=lx_i
+    }
+    lx_i=i
+    lx_close_block_ctx(lx_i)
+    if lx_ctx.length >? 1 {
+        lx_err(lx_ctx[LexScanWord(lx_ctx.length) - 1] >> 24 "this bracket is never closed")
+    }
+    lx_emit_newline()
+    loop lx_indents.length >? 1 {
+        lx_indents.pop();
+        lx_emit('dedent' lx_i 0)
+    }
+    lx_emit('eof' lx_i 0)
+    # (the parser looks up to LX_SPARE tokens ahead without bounds checks: zeroed slots after
+    # the eof read as more eofs, also when the tokens fill the array exactly)
+    if LexScanWord(lx_cap) - LexScanWord(lx_count) <? LX_SPARE {
+        lx_cap=LexScanWord(lx_count) + LX_SPARE
+        lx_toks.resize(lx_cap)
+    }
+    lx_toks.truncate(lx_count)
+    lx_slots=uint64(0) as ptr<Token>
+    let out=lx_toks
+    lx_toks=[]
+    out
+}
