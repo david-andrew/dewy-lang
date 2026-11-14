@@ -255,7 +255,7 @@ gen_place = (e: int, write: bool) -> Place:
                     e_call_nr3(rt("__panic_bounds"), idx, fp.len, e_daddr(loc_data(nodes[e].pos)), -1)
                     endc()
                 sz = owner_stride(int(types[bt].elem))
-                return Place(true, e_bin(.add, VI, e_addi(fp.arr, 24), e_bin(.mul, VI, idx, e_iconst(sz))))
+                return Place(true, e_bin(.add, VI, fp.data, e_bin(.mul, VI, idx, e_iconst(sz))))
             arr = 0
             idx = 0
             if write:
@@ -4137,7 +4137,7 @@ fp_begin = (s: int, l: int, bound: int, place: int) -> int:
         if desc >= 0:
             data = e_load(VI, desc, 0, 8)
             length = e_load(VI, desc, 8, 8)
-            fixed_paths.push(FixedPath(key, e_addi(data, -24), length, (if key == bound_key and stable_loop_index(l): l else: -1)))
+            fixed_paths.push(FixedPath(key, data, length, (if key == bound_key and stable_loop_index(l): l else: -1)))
             added += 1
             continue
         if written and not is_uniq_array(base): arr_unique(gen_place(base, true), at)
@@ -4146,7 +4146,10 @@ fp_begin = (s: int, l: int, bound: int, place: int) -> int:
         n = arr_len(arr)
         lv = -1
         if key == bound_key and stable_loop_index(l): lv = l
-        fixed_paths.push(FixedPath(key, arr, n, lv))
+        # The existing storage proof fixes this base too. Cache it once rather
+        # than rebuilding the header bias at each access (or undoing and redoing
+        # it for a partition). O(1) per already-demanded path; checks stay intact.
+        fixed_paths.push(FixedPath(key, e_addi(arr, 24), n, lv))
         added += 1
     added
 

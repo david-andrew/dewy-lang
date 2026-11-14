@@ -566,7 +566,7 @@ comprehension_push_index: {int: int} = {}
 # it (or of what holds it) is made in the loop.
 struct FixedPath:
     key: int
-    arr: int            # vreg: the array
+    data: int           # vreg: the stable element base (header bias applied once)
     len: int            # vreg: its length
     loopvar: int        # local: indexes by this loop variable are in bounds (-1: none)
 fixed_paths: FixedPath[]

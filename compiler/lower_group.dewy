@@ -282,7 +282,7 @@ gen_place=(e:LGWord write:bool):>Place=>$unsafe {
                     endc();
                 }
                 let sz=owner_stride(LGWord(types.ptr[bt].elem))
-                return Place[true e_bin('add' VI e_addi(fp.arr 24) e_bin('mul' VI idx e_iconst(sz)))]
+                return Place[true e_bin('add' VI fp.data e_bin('mul' VI idx e_iconst(sz)))]
             }
             let arr:LGWord=0
             let idx:LGWord=0
@@ -4635,7 +4635,7 @@ fp_begin=(s:LGWord l:LGWord bound:LGWord place:LGWord):>LGWord=>$unsafe {
         if desc >=? 0 {
             let data=e_load(VI desc 0 8)
             let length=e_load(VI desc 8 8)
-            fixed_paths.push(FixedPath[key e_addi(data -24) length (if key =? bound_key and stable_loop_index(l) {l} else {-1})]);
+            fixed_paths.push(FixedPath[key data length (if key =? bound_key and stable_loop_index(l) {l} else {-1})]);
             added += 1;
             continue
         }
@@ -4645,7 +4645,10 @@ fp_begin=(s:LGWord l:LGWord bound:LGWord place:LGWord):>LGWord=>$unsafe {
         let n=arr_len(arr)
         let lv:LGWord=-1
         if key =? bound_key and stable_loop_index(l) {lv=l}
-        fixed_paths.push(FixedPath[key arr n lv]);
+        # The existing storage proof fixes this base too. Cache it once rather
+        # than rebuilding the header bias at each access (or undoing and redoing
+        # it for a partition). O(1) per already-demanded path; checks stay intact.
+        fixed_paths.push(FixedPath[key e_addi(arr 24) n lv]);
         added += 1;
     }
     return added
