@@ -519,7 +519,19 @@ call_args=(args:array<int64> ptypes:array<int64> mutmask:LGWord @out:array<int64
         if stack {reg_temp_slot(val.slot pt LGWord(nodes.ptr[value_node].sym));}
         else {
             let held=tl_values.length
-            borrow(val pt);
+            # A spawn's callable parameter hides its capture ownership. Keep
+            # the actual temporary's cleanup authority through the call: normal
+            # statement cleanup unlinks it, and panic cleanup can still find it.
+            let cleanup_type=pt
+            let source=value_node
+            if val.owned and ownership_decls.length not=? 0 and ownership_callable_cap(pt) =? 0 {
+                loop nodes.ptr[source].kind =? 'conv' and nodes.ptr[source].aux =? LGI32(0) {
+                    source=LGWord(nodes.ptr[source].a)
+                    let actual=ntype(source)
+                    if ownership_callable_cap(actual) not=? 0 {cleanup_type=actual; break}
+                }
+            }
+            borrow(val cleanup_type);
             if snapshot and not ownership_type(pt) and tl_items.length >? 0 and tl_values.length =? held + 1 {
                 arg_snapshots.push(tl_values.ptr[held]);
             }

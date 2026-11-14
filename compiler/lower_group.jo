@@ -460,7 +460,19 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
         if stack: reg_temp_slot(val.slot, pt, int(nodes[value_node].sym))
         else:
             held = tl_values.len()
-            borrow(val, pt)
+            # A spawn's callable parameter hides its capture ownership. Keep
+            # the actual temporary's cleanup authority through the call: normal
+            # statement cleanup unlinks it, and panic cleanup can still find it.
+            cleanup_type = pt
+            source = value_node
+            if val.owned and ownership_decls.len() != 0 and ownership_callable_cap(pt) == 0:
+                loop nodes[source].kind == .conv and nodes[source].aux == i32(0):
+                    source = int(nodes[source].a)
+                    actual = ntype(source)
+                    if ownership_callable_cap(actual) != 0:
+                        cleanup_type = actual
+                        break
+            borrow(val, cleanup_type)
             if snapshot and not ownership_type(pt) and tl_items.len() > 0 and tl_values.len() == held + 1:
                 arg_snapshots.push(tl_values[held])
         out.push(val.v)

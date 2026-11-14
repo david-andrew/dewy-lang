@@ -1,0 +1,19 @@
+# modes: native native-release
+let drops:int64=0
+Ticket:type=[id:int64 $__drop__=():>void=>{drops+=id}]
+launch=()=>{
+    let ticket=Ticket[7]
+    concurrent { spawn { printl(ticket.id) } }
+}
+reuse_stack=()=>{
+    let tickets:array<Ticket length <? 4>=[]
+    tickets.push(Ticket[1])
+    tickets.push(Ticket[2])
+    printl(tickets.pop().id)
+}
+main=()=>{
+    launch()
+    reuse_stack()
+    printl(drops)
+    exit(0)
+}

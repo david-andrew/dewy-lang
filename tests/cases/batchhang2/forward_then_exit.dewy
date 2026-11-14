@@ -1,0 +1,19 @@
+# modes: native native-release
+produce=(tx:SpscSender<int64> value:int64):>void=>{tx.send(value);}
+exchange=(branch:bool)=>{
+    let [tx rx]=spsc<int64 2>().split
+    concurrent {
+        spawn { if branch produce(tx 10) else {tx.send(20);} }
+        let value=rx.receive
+        if value is? int64 printl(value)
+    }
+}
+answer=()=>{
+    let values:array<int64 length=16>=[]
+    return values[0]
+}
+main=()=>{
+    exchange(true)
+    exchange(false)
+    exit(answer() & 255)
+}
