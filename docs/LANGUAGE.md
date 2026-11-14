@@ -1537,11 +1537,12 @@ member or index right after the product's parentheses (`a(x).abs()`, `a(x)[i]`)
 is rejected: write `abs(a(x))`, or parenthesize the product. For a function `a`
 these are ordinary call chains.
 
-A semicolon attached to an
-expression (no space before it), `f();`, evaluates it and discards everything it
-would express; attached to a loop or `if`, `loop c xs.pop();`, it discards what
-that statement expresses. An unattached `;` (after a space or on its own line)
-separates rows of an array literal, `[1 2 ; 3 4]`, and is an error elsewhere.
+A semicolon evaluates the expression before it and discards what it expresses,
+independent of spacing: `f();` and `f() ;` mean the same thing. Directly inside
+an array literal it separates dimensions instead: `[1 2; 3 4]` is a 2×2 grid.
+To discard inside an array, use a group, `[(f();) 7]`, which runs `f` and keeps
+only `7`. Record and dictionary literals use the ordinary discard rule: a
+field or entry followed by `;` is evaluated but omitted.
 
 A `\` at the end of a line cancels that line break, everywhere: in code
 (`total = 1 + \` then `2` on the next line), in array literals (`[2 3 5 \` then
@@ -1595,7 +1596,7 @@ Operators bind from tightest to loosest:
 | `<\|` | right |
 | `->` | |
 | `=` and compound assignment | |
-| attached `;` | postfix |
+| `;` (discard outside array element lists) | postfix |
 
 Broadcast operators (`.+`, `.*`, `.<?`, ...) bind like their scalar forms. So
 `~x^2` is `(~x)^2`, `-x^2` is `-(x^2)`, `not x =? y` is `not (x =? y)`,
@@ -3148,13 +3149,31 @@ main = () => {
 `or_throw` returns a failure from its enclosing function, so this example uses
 `main` to report a failed solve and exit with its error code.
 
-Write a matrix literal with a standalone `;` (a space before it) between rows and
-`;;` between 2-D blocks: `[1 2 ; 3 4]` has shape `[2 2]`,
-`[1 2 ; 3 4 ;; 5 6 ; 7 8]` shape `[2 2 2]` and `[1 2 3 ;]` shape `[1 3]`.
-Rows must have the same length. `[xs ; ys]` stacks two arrays as rows. An
-attached `;` discards the value before it instead, so `[f(); 7]` is `[7]` and
-`[1 2; 3 4]` is `[1 3 4]`, with a warning (and an editor fix-it) suggesting the
-standalone ` ;` it probably meant.
+Array dimensions come from the gaps between elements. A space is level 0; one
+line break or `;` is level 1; a blank line or `;;` is level 2. A gap takes the
+highest of its line-break and semicolon counts. The lowest level present is
+dimension 0, and each higher level adds a dimension. Thus `[1 2; 3 4]` is 2×2,
+`[1; 2; 3]` and a one-per-line list are 1-D, and
+`[1 2; 3 4;; 5 6; 7 8]` is 2×2×2. Levels cannot be skipped: `[1 2;; 3 4]`
+is an error. Each row and block must have the same size; shape order is
+outermost first.
+
+The breaks after `[` and before `]` do not count. Comment-only lines are
+ignored, as are breaks inside a comment, nested brackets or an expression
+continued by a binary operator. Use `\` at each line end to wrap a 1-D list
+with several elements per line. The formatter preserves blank lines in arrays.
+A trailing `;` has no following element and makes no gap, so `[1 2 3;]`
+and `[1; 2; 3;]` both stay 1-D.
+
+A group or block that discards all its values contributes no element:
+`[1 (2;) 3 4]` is `[1 3 4]`, and `[1 2 (f();) ; 3 4]` calls `f` and makes a
+2×2 grid. Empty groups merge their neighboring gaps by the higher level.
+Discarded record and dictionary entries still evaluate their field values, keys
+and values in source order. Their operands are evaluated before constructing
+the retained record or dictionary. Retained values keep the receiving field or
+element type, including context-typed function parameters and floating literals.
+Nesting and comprehension dimensions are still being designed; the existing
+explicit `[xs ; ys]` row stack and comprehension behavior remain available.
 
 The shape belongs in the type: `array<float64 length=[m n]>` is a 2-D array,
 `array<float64 length=[n]>` a 1-D one. In a parameter, a dimension named by a

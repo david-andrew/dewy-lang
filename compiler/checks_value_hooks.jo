@@ -305,10 +305,11 @@ expr_other = (n: int, expected: int) -> int:
     if k == .lambda: t = check_lambda(n, expected)
     else if k == .match_: t = check_match(n, expected)
     else if k == .block:
-        if has_flag(n, NF_COMPREHENSION) and ex != 0 and types[ex].kind == .array:
+        snapshots = nodes[n].aux2 == -17 or nodes[n].aux2 == -20 or nodes[n].aux2 == -21
+        if not snapshots and has_flag(n, NF_COMPREHENSION) and ex != 0 and types[ex].kind == .array:
             nodes[kid(n, 0)].a = i32(type_node_of(ex, nodes[n].pos))
         # (into a fixed-size array: its elements have the fixed array's element type)
-        else if has_flag(n, NF_COMPREHENSION) and ex != 0 and types[ex].kind == .fixed and nodes[kid(n, 0)].kind == .vardecl and nodes[kid(n, 0)].a == 0:
+        else if not snapshots and has_flag(n, NF_COMPREHENSION) and ex != 0 and types[ex].kind == .fixed and nodes[kid(n, 0)].kind == .vardecl and nodes[kid(n, 0)].a == 0:
             nodes[kid(n, 0)].a = i32(type_node_of(mk_array(int(types[representation_type(ex)].elem)), nodes[n].pos))
         t = check_block(n, expected, true)
     else: fatal(nodes[n].pos, "invalid expression")

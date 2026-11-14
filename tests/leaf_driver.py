@@ -52,6 +52,17 @@ def build_pair(compiler, release, driver, extra_stems=(), doubles=None, jo_doubl
              'refinement_types', 'refine_predicates', 'refine_queries', 'type_queries',
              'type_intern', 'type_inference', 'type_constructors', 'type_labels',
              'type_unions', 'checker_alias', 'checker_resolve', 'checker_coerce') + tuple(doubles) + extra_stems
+    # Snapshot behavior is exercised by the full compiler differential. Other
+    # leaf drivers have no marked literal blocks and need only its interface.
+    if 'literal_snapshots' not in stems and 'main.jo' not in jo_doubles:
+        jo_doubles.setdefault('literal_snapshots.dewy',
+            'literal_snapshot_context=(_block:int64 _expected:int64):>void=>{return}\n'
+            'literal_snapshot_argument=(_block:int64):>int64=>0\n'
+            'literal_sequence_context=(_block:int64 _expected:int64):>void=>{return}\n')
+        jo_doubles.setdefault('literal_snapshots.jo',
+            'literal_snapshot_context = (block: int, expected: int): return\n'
+            'literal_snapshot_argument = (block: int) -> int: 0\n'
+            'literal_sequence_context = (block: int, expected: int): return\n')
     sources = tuple((f'{stem}.{extension}', module_text(ROOT / f'compiler/{stem}.{extension}'))
                     for stem in stems if stem not in doubles for extension in ('dewy', 'jo'))
     variants = tuple((stem, (texts['dewy'], texts['jo'])) for stem, texts in doubles.items())

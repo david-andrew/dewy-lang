@@ -1,0 +1,25 @@
+FloatRecord:type=[value:float64]
+Pass:type=<(x:int64):>int64>
+Budget:type=[limit:int64<(>=? 0)> values:array<int64 length=[limit]>]
+take=(b:Budget)=>b.values.length
+invoke=(functions:dict<string Pass>):>int64=>{
+    let f=functions.get("keep")
+    if f isnt? none {return f(2)}
+    0
+}
+which=(r:[value:int64]):>string=>"{r.value}: number"
+which=(r:[value:string]):>string=>"{r.value}: text"
+main=()=>{
+    let plain:FloatRecord=[value=0.1+0.2]
+    let record:FloatRecord=[gone=0; value=0.1+0.2]
+    let map:dict<string float64>=["gone"->0; "keep"->0.1+0.2]
+    printl(plain.value =? record.value)
+    printl(plain.value =? map["keep"])
+    let functions:dict<string Pass>=["gone"->1; "keep"->(x)=>x]
+    printl(functions["keep"](2))
+    printl(invoke(["gone"->1; "keep"->(x)=>x]))
+    printl(which([gone=0; value=3]))
+    printl(take([gone=99; limit=2 values=[3 4]]))
+    let maybe:FloatRecord?=[gone=0; value=0.1+0.2]
+    if maybe isnt? none {printl(plain.value =? maybe.value)}
+}

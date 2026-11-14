@@ -1,0 +1,96 @@
+$runtime_checks
+
+# Receiving types for the operand snapshots made by record/dictionary discard.
+# Only -17-marked value blocks demand this work. Indexed maps keep preparation
+# O(statements + fields + entries), O(statements + fields) storage, plus existing
+# expected-union selection and the ordinary checking of each initializer.
+from p"ast.jo" import (clone kid kids nkids nodes)
+from p"check.jo" import (check_struct_fields)
+from p"checks_thin_expr.dewy" import (is_map_type)
+from p"expr.jo" import (literal_union_member type_node_of)
+from p"refine.jo" import (representation_type)
+from p"types.jo" import (fields prune struct_targ structs tkind types)
+
+SnapshotWord:type=int64<overflow='wrap'>
+snapshot_value_context=(value:SnapshotWord expected:SnapshotWord bindings:dict<int64 int64>):>void=>$unsafe {
+    if expected =? 0 or nodes.ptr[value].kind not=? 'ident' {return}
+    let decl=bindings.get(SnapshotWord(nodes.ptr[value].name)) ?? 0
+    if decl =? 0 {return}
+    # The enclosing literal checks its field/shape predicates after all fields exist.
+    # A snapshot needs the representation context, not an early sibling obligation.
+    let context=representation_type(expected)
+    if tkind(context) =? 'param' or tkind(context) =? 'var' {return}
+    let annotation=type_node_of(context nodes.ptr[decl].pos)
+    nodes.ptr[decl].a=int32<overflow='wrap'>(annotation)
+}
+literal_snapshot_context=(block:SnapshotWord expected:SnapshotWord):>void=>$unsafe {
+    if expected =? 0 or nkids(block) =? 0 {return}
+    let last=kid(block nkids(block) - 1)
+    if nodes.ptr[last].kind not=? 'exprstmt' {return}
+    let literal=SnapshotWord(nodes.ptr[last].a)
+    let target=representation_type(prune(expected))
+    if tkind(target) =? 'opt' {target=representation_type(SnapshotWord(types.ptr[target].elem))}
+    let member=literal_union_member(literal target)
+    if member not=? 0 {target=representation_type(member)}
+    let bindings:dict<int64 int64>=[]
+    loop statement in kids(block) {
+        if nodes.ptr[statement].kind =? 'vardecl' {bindings[SnapshotWord(nodes.ptr[statement].name)]=statement}
+    }
+    if tkind(target) not=? 'struct_' {return}
+    let si=SnapshotWord(types.ptr[target].st)
+    check_struct_fields(si)
+    let map=is_map_type(target)
+    let field_types:dict<int64 int64>=[]
+    if not map {
+        loop i in [0..SnapshotWord(structs.ptr[si].nfields)) {
+            let f=SnapshotWord(structs.ptr[si].fields) + i
+            field_types[SnapshotWord(fields.ptr[f].name)]=SnapshotWord(fields.ptr[f].type)
+        }
+    }
+    loop entry in kids(literal) {
+        if map and nodes.ptr[entry].kind =? 'pair' {
+            snapshot_value_context(SnapshotWord(nodes.ptr[entry].a) struct_targ(si 0) bindings)
+            snapshot_value_context(SnapshotWord(nodes.ptr[entry].b) struct_targ(si 1) bindings)
+        } else if not map and nodes.ptr[entry].kind =? 'namedarg' {
+            let field_type=field_types.get(SnapshotWord(nodes.ptr[entry].name)) ?? 0
+            snapshot_value_context(SnapshotWord(nodes.ptr[entry].a) field_type bindings)
+        }
+    }
+}
+
+# An overload probe sees the retained literal with its original initializers, not
+# unbound names of the future snapshots. No initializer is executed here.
+# O(statements + cloned syntax); bindings are indexed by their interned names.
+literal_snapshot_argument=(block:SnapshotWord):>int64=>$unsafe {
+    let initializers:dict<int64 int64>=[]
+    loop statement in kids(block) {
+        if nodes.ptr[statement].kind =? 'vardecl' {initializers[SnapshotWord(nodes.ptr[statement].name)]=SnapshotWord(nodes.ptr[statement].b)}
+    }
+    let last=kid(block nkids(block) - 1)
+    let view=clone(SnapshotWord(nodes.ptr[last].a))
+    loop entry in kids(view) {
+        let operands:array<int64>=[]
+        if nodes.ptr[entry].kind =? 'pair' {operands=[SnapshotWord(nodes.ptr[entry].a) SnapshotWord(nodes.ptr[entry].b)]}
+        else if nodes.ptr[entry].kind =? 'namedarg' {operands=[SnapshotWord(nodes.ptr[entry].a)]}
+        loop i in 0.. and operand in operands {
+            if nodes.ptr[operand].kind not=? 'ident' {continue}
+            let initial=initializers.get(SnapshotWord(nodes.ptr[operand].name)) ?? 0
+            if initial =? 0 {continue}
+            let replacement=clone(initial)
+            if i =? 0 {nodes.ptr[entry].a=int32<overflow='wrap'>(replacement)}
+            else {nodes.ptr[entry].b=int32<overflow='wrap'>(replacement)}
+        }
+    }
+    view
+}
+
+# A trailing discard must save its preceding value before running effects.
+# Only the one saved value needs the cell's receiving context. O(1).
+literal_sequence_context=(block:SnapshotWord expected:SnapshotWord):>void=>$unsafe {
+    if expected =? 0 {return}
+    let context=representation_type(expected)
+    if tkind(context) =? 'param' or tkind(context) =? 'var' {return}
+    let decl=kid(block 0)
+    let annotation=type_node_of(context nodes.ptr[decl].pos)
+    nodes.ptr[decl].a=int32<overflow='wrap'>(annotation)
+}

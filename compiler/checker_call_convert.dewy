@@ -5,6 +5,7 @@ from p"types.jo" import (T_FLOAT T_INT T_MATH_INT T_U64 fields has_var is_float 
 from p"type_ops.dewy" import (mk_array)
 from p"ast.jo" import (NF_CHECKED NF_U64 NF_COMPREHENSION NF_GENERIC NF_SPREAD add_flag clone has_flag kid kids nkids nodes)
 from p"checker_call_cost.dewy" import (arg_cost)
+from p"literal_snapshots.dewy" import (literal_snapshot_argument)
 from p"expr.jo" import (literal_union_member branch_numeric bundled_bigint_type call_refined_literal_cost call_string_cost can_coerce charlike decimal_literal_tree dewy_bigint_literal_target dewy_record_target find_variant is_dewy_set_type is_lit is_nd lit_default lit_fits match_type ntype union_target variant_enum word_rational_source function_member lambda_member)
 from p"callable_checks.dewy" import (fn_value_adapts)
 from p"expr_rare.dewy" import (dewy_positional_fits dewy_record_spread_entries)
@@ -62,6 +63,7 @@ branch_arg_cost=(a:CVWord pat:CVWord @binds:array<int64> hidden:array<int64>=[])
         }
         return cost
     }
+    if k =? 'lambda' {return arg_cost(a pat @binds)}
     if k =? 'int_lit' or k =? 'float_lit' or k =? 'str_lit' or k =? 'bool_lit' or k =? 'none_lit' {
         let probe=clone(a)
         check_expr(probe 0);
@@ -94,7 +96,62 @@ branch_arg_cost=(a:CVWord pat:CVWord @binds:array<int64> hidden:array<int64>=[])
     if types.ptr[prune(pat)].kind =? 'param' {return 3}
     0
 }
+# Score retained fields with branch-safe probes: discarded groups may introduce
+# names only when the complete helper is checked. Field lookup is indexed, O(F+E)
+# plus existing operand probes; this path is demanded only by marked helpers.
+snapshot_arg_cost=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
+    let view=literal_snapshot_argument(a)
+    if nodes.ptr[view].kind =? 'array' and nkids(view) =? 0 {return arg_cost(view pat @binds)}
+    let target=representation_type(subst_partial(pat @binds))
+    if tkind(target) =? 'opt' {target=representation_type(CVWord(types.ptr[target].elem))}
+    if tkind(target) =? 'param' or tkind(target) =? 'var' {return 3}
+    let penalty:CVWord=0
+    if is_union(target) {
+        penalty=2
+        target=literal_union_member(view target)
+        if target =? 0 {return -1}
+    }
+    if tkind(target) not=? 'struct_' {return -1}
+    let si=CVWord(types.ptr[target].st)
+    check_struct_fields(si)
+    let map=is_map_type(target)
+    if nodes.ptr[view].kind =? 'array' and nkids(view) =? 0 and map {return 1 + penalty}
+    if (nodes.ptr[view].kind =? 'map_lit') not=? map {return -1}
+    let field_types:dict<int64 int64>=[]
+    if not map {
+        loop i in [0..CVWord(structs.ptr[si].nfields)) {
+            let f=CVWord(structs.ptr[si].fields) + i
+            field_types[CVWord(fields.ptr[f].name)]=CVWord(fields.ptr[f].type)
+        }
+    }
+    let cost:CVWord=0
+    loop i in 0.. and entry in kids(view) {
+        if map {
+            let key=branch_arg_cost(CVWord(nodes.ptr[entry].a) struct_targ(si 0) @binds)
+            let value=branch_arg_cost(CVWord(nodes.ptr[entry].b) struct_targ(si 1) @binds)
+            if key <? 0 or value <? 0 {return -1}
+            cost=max(cost key + value)
+        } else if nodes.ptr[view].kind =? 'array' {
+            if i >=? CVWord(structs.ptr[si].nfields) {return -1}
+            let value=branch_arg_cost(entry CVWord(fields.ptr[CVWord(structs.ptr[si].fields) + i].type) @binds)
+            if value <? 0 {return -1}
+            cost+=value
+        } else if nodes.ptr[entry].kind =? 'namedarg' {
+            let expected=field_types.get(CVWord(nodes.ptr[entry].name)) ?? 0
+            if expected =? 0 {return -1}
+            let value=branch_arg_cost(CVWord(nodes.ptr[entry].a) expected @binds)
+            if value <? 0 {return -1}
+            cost+=value
+        }
+    }
+    cost + penalty
+}
 arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
+    if nodes.ptr[a].kind =? 'block' {
+        if nodes.ptr[a].aux2 =? -17 {return snapshot_arg_cost(a pat @binds)}
+        if nodes.ptr[a].aux2 =? -20 {return branch_arg_cost(a pat @binds)}
+        if nodes.ptr[a].aux2 =? -21 {return branch_arg_cost(CVWord(nodes.ptr[kid(a 0)].b) pat @binds)}
+    }
     if effects_active and nodes.ptr[a].type not=? 0 and callable_contract(pat) not=? 0 {
         let inferred=effect_infer_callable(a pat)
         nodes.ptr[a].type=int32(inferred)

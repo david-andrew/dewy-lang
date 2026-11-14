@@ -19,7 +19,7 @@ Symbol:type =
 
 # Words that are symbols when written as names. (`is?` and friends take
 # their `?` in the lexer; `and=` and friends their `=`.)
-const WORDS = ["let" "const" "return" "break" "continue" "import" "from" "else" "if" "loop"
+const WORDS = ["let" "const" "return" "break" "continue" "import" "from" "else" "if" "loop" \
     "match" "test" "not" "as" "transmute" "or" "xor" "and" "in" "of" "or_throw" "nand" "nor" "xnor"]
 
 make_spellings = ():>dict<string Symbol> => {
@@ -66,11 +66,11 @@ invert = (symbol:Symbol):>Symbol? => match symbol {
     _ => none
 }
 
-assignment = (symbol:Symbol):>bool => symbol in? ['+=' '-=' '*=' '/=' '//=' '%=' '^=' '<<=' '>>='
+assignment = (symbol:Symbol):>bool => symbol in? ['+=' '-=' '*=' '/=' '//=' '%=' '^=' '<<=' '>>=' \
     '.+=' '.-=' '.*=' './=' './/=' '.%=' '.^=' '&=' '|=' 'and=' 'or=' 'xor=']
 
-comparison = (symbol:Symbol):>bool => symbol in? ['=?' 'not=?' '<?' 'not<?' '>?' 'not>?' '<=?' 'not<=?'
-    '>=?' 'not>=?' 'is?' 'isnt?' 'in?' 'not in?' '.=?' '.not=?' '.<?' '.not<?' '.>?' '.not>?'
+comparison = (symbol:Symbol):>bool => symbol in? ['=?' 'not=?' '<?' 'not<?' '>?' 'not>?' '<=?' 'not<=?' \
+    '>=?' 'not>=?' 'is?' 'isnt?' 'in?' 'not in?' '.=?' '.not=?' '.<?' '.not<?' '.>?' '.not>?' \
     '.<=?' '.not<=?' '.>=?' '.not>=?']
 
 # Binding powers of the infix operators (dn_power in compiler/dewy_fast.jo);

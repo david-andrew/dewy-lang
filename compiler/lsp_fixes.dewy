@@ -315,15 +315,6 @@ on_code_action=(id:LspFixWord params:LspFixWord):>int64=>{
             si += 3
         }
         if starts_with(msg "use `not`") and starts_with(__str_slice(text p (text as array<uint8>).length) "!") {out.push(qf_json(d "Change '!' to 'not'" dg p p + 1 "not "))}
-        # (`[1 2; 3 4]`: the attached `;` after the value at p meant as a row break)
-        if starts_with(msg "this `;` is attached to the value before it") {
-            let semi=byte_find(text ";" p)
-            let le=byte_find(text "\n" p)
-            if semi >? 0 and (le <? 0 or semi <? le) and (text as array<uint8>)[semi - 1] not=? b' ' {
-                out.push(qf_json(d "Make it a row break: ` ;`" dg semi semi " "))
-                continue
-            }
-        }
         # the spelling a message gives: `@f` for a function itself, `xs.pop(i)` for a member
         let fx=dewy_fixit(d p msg)
         if fx.length >? 0 {

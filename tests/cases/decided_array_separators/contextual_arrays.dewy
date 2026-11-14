@@ -1,0 +1,21 @@
+let drops:uint64<overflow='wrap'>=0
+Res:type=[n:int64 $__drop__=():>void=>{drops+=1}]
+Pass:type=<(x:int64):>int64>
+run=(fs:array<Pass>)=>{loop f in fs {printl(f(2));}}
+main=()=>{
+    let plain:array<float64>=[0.1+0.2]
+    let values:array<float64>=[0.1+0.2 (0;)]
+    printl(plain =? values)
+    let fs:array<Pass>=[(0;) (x)=>x]
+    run([fs... (0;) (x)=>x])
+    let a=[(let outside=7; outside) (0;)]
+    printl(a)
+    printl(outside)
+    let r=[gone=(let kept=8; 0); value=kept]
+    printl(r.value)
+    printl(kept)
+    let owned=[(let owner=Res[9]; owner.n) (0;)]
+    printl(owned)
+    printl(owner.n)
+    printl(drops)
+}

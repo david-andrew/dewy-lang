@@ -62,7 +62,9 @@ def block(dewy):
     for name, table in (('UTF8_ZERO', zero), ('UTF8_WIDE', wide)):
         if dewy:
             out.append(f'let {name}:array<int64>=[')
-            out += ['    ' + line for line in rows(table, '  ')]
+            wrapped = rows(table, '  ')
+            out += ['    ' + line + (' \\' if i + 1 < len(wrapped) else '')
+                    for i, line in enumerate(wrapped)]
             out.append(']')
         else:
             out.append(f'{name} = [')

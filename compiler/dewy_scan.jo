@@ -61,3 +61,46 @@ dc_scan_cut = (tokens: mut DewyLexeme[], at: int) -> int:
         last = symbol
         k += 1
     -1
+
+# Separator level of a token-bounded array gap. Linear, constant storage, and called
+# only when there is a newline or semicolon; expression contents are never scanned.
+dc_scan_gap = (source: str, begin: int, end_: int, include_lines: bool = true) -> int:
+    bytes = source.data()
+    at = begin
+    lines = 0
+    semis = 0
+    content = true
+    comment = false
+    loop at < end_:
+        c = bytes[at]
+        if c == 92:
+            next = at + 1
+            loop next < end_ and (bytes[next] == 32 or bytes[next] == 9 or bytes[next] == 13): next += 1
+            if next < end_ and bytes[next] == 10:
+                at = next + 1
+                continue
+        if c == 35:
+            comment = true
+            if at + 1 < end_ and bytes[at + 1] == 123:
+                depth = 1
+                at += 2
+                loop at < end_ and depth > 0:
+                    if at + 1 < end_ and bytes[at] == 35 and bytes[at + 1] == 123:
+                        depth += 1
+                        at += 2
+                    else if at + 1 < end_ and bytes[at] == 125 and bytes[at + 1] == 35:
+                        depth -= 1
+                        at += 2
+                    else: at += 1
+            else:
+                loop at < end_ and bytes[at] != 10: at += 1
+            continue
+        if c == 10:
+            if content or not comment: lines += 1
+            content = false
+            comment = false
+        else if c == 59:
+            semis += 1
+            content = true
+        at += 1
+    if include_lines: max(lines, semis) else: semis

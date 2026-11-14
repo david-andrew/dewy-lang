@@ -733,11 +733,16 @@ rt_dc_group = (pos: int) -> int:
         dc_parser.at -= 1
         return rt_dc_paren_block()
     # (`(a b)`: several values, dw_values; each may be spread, `(xs... 1)`)
+    opening = dc_parser.at - 1
     saved_spread = dc_parser.reader.dc_spread_depth
     dc_parser.reader.dc_spread_depth = dc_parser.depth + 1
     n = rt_dc_expr(0)
     items: int[]
     loop n != 0 and not rt_dn_accept(.rparen):
+        if rt_dn_peek() == .semi:
+            dc_parser.reader.dc_spread_depth = saved_spread
+            dc_parser.at = opening
+            return rt_dc_paren_block()
         if items.len() == 0: items.push(n)
         if not dn_can_start(dc_parser.tokens, dc_parser.at) or dc_parser.tokens[dc_parser.at].symbol == .rparen:
             n = 0
@@ -858,27 +863,38 @@ rt_dc_array_literal = (pos: int) -> int:
     positional = false  # (an element neither spread nor named)
     breaks: int[]       # (`[1 2 ; 3 4]`: the row breaks after each element, dw_rows_literal)
     rows = false
-    discards: int[]     # (`[f(); 7]`: the elements an attached `;` discards)
-    pure_at: int[]      # (where those of them whose discarding does nothing are written, dw_pure)
     starts: int[]       # (where each element is written)
     grouped: int[]      # (the elements written as one parenthesized group: each one value, dw_collect)
     flows = false
     targets = dc_parser.reader.dc_targets_made
-    loop not rt_dn_accept(.rbrack):
+    previous = -1
+    separator = false
+    discarded: int[]
+    minimum = 9223372036854775807
+    maximum = -1
+    empty = false
+    semis = false
+    loop true:
         if dc_parser.tokens[dc_parser.at].kind == .eof:
             if dc_parser.flags.report_now: rt_dc_unclosed(pos, "]")
             return 0
         if rt_dn_peek() == .semi:
-            if breaks.len() == 0:
-                # (`[; 1 2]`: dw_rows_literal's mistake, noted)
-                if not dc_parser.flags.report_now: return 0
-                rt_dc_report(mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at].start), "an array literal cannot start with `;`: a `;` ends a row, as in `[1 2 ; 3 4]`")
-                dc_parser.at += 1
-                continue
-            breaks[breaks.len() - 1] += 1
-            rows = true
+            if items.len() == 0: return rt_dc_hint(pos, "an array literal cannot start with `;`")
+            if not separator: discarded.push(items.len() - 1)
+            separator = true
+            semis = true
             dc_parser.at += 1
             continue
+        closing = rt_dn_peek() == .rbrack
+        if previous >= 0 and not closing and not named and nodes[n].kind == .array:
+            level = 0
+            if separator or dc_parser.tokens[dc_parser.at].newline:
+                level = dc_scan_gap(files[dc_parser.file].src, previous, dc_parser.tokens[dc_parser.at].start, not closing)
+            breaks[breaks.len() - 1] = level
+            minimum = min(minimum, level)
+            maximum = max(maximum, level)
+        if rt_dn_accept(.rbrack): break
+        separator = false
         # (`[x=1 y=2]`: a named field; methods are left unread (dc_unread))
         if rt_dc_named_next():
             field = dc_parser.tokens[dc_parser.at]
@@ -934,33 +950,34 @@ rt_dc_array_literal = (pos: int) -> int:
             extra = files[dc_parser.file].src[item_start..dc_parser.tokens[dc_parser.at - 1].stop)
             return rt_dc_hint(mkpos(dc_parser.file, item_start), "each dictionary item needs one `key -> value` pair; remove the extra `{extra}` or give it a key")
         if not has_flag(item, NF_SPREAD): positional = true
-        # (an attached `;` discards the element: a collector, dw_collects; a pure value's is
-        # warned of)
-        if rt_dn_peek() == .semi and not dc_parser.tokens[dc_parser.at].space and not dc_parser.tokens[dc_parser.at].newline:
-            if not rt_dc_discardable(item):
-                if not rt_dc_pure(item): return 0
-                pure_at.push(mkpos(dc_parser.file, item_start))
-            dc_parser.at += 1
-            discards.push(items.len())
         items.push(item)
         starts.push(mkpos(dc_parser.file, item_start))
-        breaks.push(0)
+        breaks.push(-1)
+        if nodes[item].kind == .block and rt_dc_empty_block(item): empty = true
+        previous = dc_parser.tokens[dc_parser.at - 1].stop
     dc_parser.flags.comma_stop = saved
-    collects = discards.len() > 0
-    if pure_at.len() > 0 and not rt_dc_pure_discards(pure_at, rows): return 0
+    if not named and nodes[n].kind == .array and empty and not flows: return rt_dc_array_without_empty(n, items, breaks, pos)
+    collects = empty and flows
+    rows = not named and nodes[n].kind == .array and maximum > minimum
     if flows:
         loop i in 0.. and item in items:
             if not has_flag(item, NF_SPREAD) and not grouped.contains(i) and rt_dc_multi(item): collects = true
     if collects:
         if named and positional and not rows: return rt_dc_hint(rt_dc_mixed_at(items, starts), rt_dc_mixed_text(items))
         if named or rows or nodes[n].kind == .map_lit or flows and dc_parser.reader.dc_targets_made != targets: return 0
-        return rt_dc_collector(items, starts, discards, grouped, pos)
+        return rt_dc_collector(items, starts, [], grouped, pos)
     # (a record's rows are named fields and spreads, dw_record_entry)
     if named:
         if positional and not rows and dc_parser.flags.report_now: rt_dc_mixed_record(items, starts)
         else if positional or rows: return 0
         nodes[n].kind = .record_lit
         if not rt_dc_literal_methods(items): return 0
+    # Array-valued explicit row stacks keep their current behavior pending D39.
+    if not rows and not named and nodes[n].kind == .array and semis and items.len() > 0:
+        nodes[n].kind = .matrix
+        nodes[n].ival = 1
+        nodes[n].aux = 1
+    if discarded.len() > 0 and (named or nodes[n].kind == .map_lit): return rt_dc_discarded_entries(n, items, discarded, pos)
     if rows: return rt_dc_rows(n, items, breaks, pos)
     set_list(n, items)
     return n
@@ -1012,34 +1029,6 @@ rt_dc_multi = (n: int) -> bool:
             if rt_dc_multi(int(nodes[arm].b)): return true
     false
 
-# A value an attached `;` may discard without a warning (dw_pure): a call.
-
-rt_dc_discardable = (n: int) -> bool:
-    if nodes[n].kind != .call or has_flag(n, NF_SPREAD): return false
-    callee = int(nodes[n].a)
-    nodes[callee].kind != .ident or (nodes[callee].name != i32(rt_dc_builtin(0)) and nodes[callee].name != i32(rt_dc_builtin(1)))
-
-# Pure values an attached `;` discards, where each is written: dw_discard_check's warning, or its
-# mistake among rows (false).
-
-rt_dc_pure_discards = (pure_at: int[], rows: bool) -> bool:
-    if rows:
-        rt_dc_fail_now(pure_at[0], "this `;` is attached to the value before it, which discards that value and does nothing here: {DW_ROW_HINT}")
-        return false
-    loop at in pure_at: warn(at, "this `;` is attached to the value before it, which discards that value, so `[1 2; 3 4]` is `[1 3 4]`: {DW_ROW_HINT}; to drop the value, leave it out")
-    true
-
-# A value whose discarding does nothing (dw_pure): a literal, a name, or arithmetic of them.
-
-rt_dc_pure = (n: int) -> bool:
-    k = nodes[n].kind
-    if k == .ident or k == .int_lit or k == .float_lit or k == .bool_lit: return true
-    if k == .str_lit: return nkids(n) == 0
-    if k == .unary: return not has_flag(n, NF_BROADCAST) and rt_dc_pure(int(nodes[n].a))
-    if k != .binary or has_flag(n, NF_BROADCAST): return false
-    op = nodes[n].op
-    (op == i32(int(Tok.plus)) or op == i32(int(Tok.minus)) or op == i32(int(Tok.star)) or op == i32(int(Tok.slash)) or op == i32(int(Tok.caret))) and rt_dc_pure(int(nodes[n].a)) and rt_dc_pure(int(nodes[n].b))
-
 # `[0 {1 2} if c 3]`: a literal collecting every value its elements express, in order
 # (dw_collector); starts, where each element is written; discards, those an attached `;` discards.
 
@@ -1075,7 +1064,7 @@ rt_dc_collector = (items: int[], starts: int[], discards: int[], grouped: int[],
             continue
         k = nodes[item].kind
         # (`[(match x {...}) {2 3}]`: a parenthesized element is one value, pushed)
-        if grouped.contains(i) and k != .call:
+        if grouped.contains(i) and k != .call and not rt_dc_empty_block(item):
             statement = mk(.exprstmt, at)
             nodes[statement].a = i32(rt_dc_push(accumulator, item, at))
             statements.push(statement)
@@ -1278,14 +1267,24 @@ rt_dc_range_inside = (at: int) -> bool:
 rt_dc_rows = (n: int, elements: int[], breaks: int[], pos: int) -> int:
     loop item in elements:
         if nodes[n].kind != .array or has_flag(item, NF_SPREAD): return 0
-    rank = 1
-    loop b in breaks: rank = max(rank, b + 1)
+    minimum = 9223372036854775807
+    maximum = -1
+    loop gap in breaks:
+        if gap >= 0:
+            minimum = min(minimum, gap)
+            maximum = max(maximum, gap)
+    rank = maximum - minimum + 1
+    seen = fill(false, rank)
+    loop gap in breaks:
+        if gap >= 0: seen[gap - minimum] = true
+    loop level in [0..rank):
+        if not seen[level]: return rt_dc_hint(pos, "skipped separator level in this array literal")
     dims = fill(-1, rank)
     counts = fill(0, rank)
     loop i in 0.. and b in breaks:
         counts[0] += 1
         close = rank - 1
-        if i + 1 < breaks.len(): close = b
+        if i + 1 < breaks.len(): close = b - minimum
         loop level in [1..close]:
             size = counts[level - 1]
             if dims[level - 1] < 0: dims[level - 1] = size
@@ -1772,7 +1771,7 @@ rt_dc_expr = (minimum: int) -> int:
             dc_parser.depth -= 1
             return left
         after = dc_parser.tokens[dc_parser.at + 1]
-        if not (after.space or after.newline or after.symbol == .rbrack or after.symbol == .rparen) or dn_power(after.symbol) > 0 or after.symbol == .dot or after.symbol == .question or after.symbol == .ellipsis: return 0
+        if not (after.space or after.newline or after.symbol == .rbrack or after.symbol == .rparen or after.symbol == .semi) or dn_power(after.symbol) > 0 or after.symbol == .dot or after.symbol == .question or after.symbol == .ellipsis: return 0
         dc_parser.at += 1
         add_flag(left, NF_SPREAD)
     dc_parser.depth -= 1
@@ -8166,9 +8165,6 @@ rt_dn_accept = (symbol: DewyToken) -> bool:
 
 rt_dn_accept_semi = () -> bool:
     if rt_dn_peek() != .semi: return false
-    token = dc_parser.tokens[dc_parser.at]
-    if dc_parser.reader.dn_rows and (token.space or token.newline): return false
-    if token.space or token.newline: dn_error(token.start, "an unattached `;` is reserved for array-dimension selection: attach it to the statement it ends, `f();`, or leave it out")
     dc_parser.at += 1
     true
 
@@ -8352,3 +8348,127 @@ rt_dc_valued_setting = () -> int:
     if after.kind != .eof and not after.newline: fatal(mkpos(dc_parser.file, after.start), "`${text} = ...` goes on a line of its own")
     dc_parser.at = at + 5
     rt_module_tag(token, 6, intern(text), value)
+
+# Syntactically empty contributions; effects still run in written order.
+rt_dc_empty_block = (item: int) -> bool:
+    if nodes[item].kind != .block or has_flag(item, NF_COMPREHENSION): return false
+    loop statement in kids(item):
+        kind = nodes[statement].kind
+        if kind == .assign or kind == .vardecl: continue
+        if kind == .exprstmt and rt_dc_empty_block(int(nodes[statement].a)): continue
+        return false
+    true
+
+rt_dc_sequenced_cell = (value: int, effects: int[], after: bool) -> int:
+    pos = nodes[value].pos
+    spread = has_flag(value, NF_SPREAD)
+    if spread: clear_flag(value, NF_SPREAD)
+    statements: int[]
+    result = value
+    if after:
+        name = intern("$dewy_tail_{nodes.len()}")
+        decl = mk(.vardecl, pos)
+        nodes[decl].name = i32(name)
+        nodes[decl].b = i32(value)
+        statements.push(decl)
+        result = mk(.ident, pos)
+        nodes[result].name = i32(name)
+    loop effect in effects: statements.push(effect)
+    last = mk(.exprstmt, pos)
+    nodes[last].a = i32(result)
+    statements.push(last)
+    block = bc_block(statements, pos)
+    nodes[block].aux2 = if after: -21 else: -20
+    add_flag(block, NF_COMPREHENSION)
+    if spread: add_flag(block, NF_SPREAD)
+    block
+rt_dc_array_without_empty = (n: int, items: int[], breaks: int[], pos: int) -> int:
+    effects: int[]
+    cells: int[]
+    gaps: int[]
+    loop i in 0.. and item in items:
+        if rt_dc_empty_block(item):
+            effects.push(item)
+            if gaps.len() > 0: gaps[gaps.len() - 1] = max(gaps[gaps.len() - 1], breaks[i])
+        else:
+            cell = item
+            if effects.len() > 0:
+                cell = rt_dc_sequenced_cell(item, effects, false)
+                effects = []
+            cells.push(cell)
+            gaps.push(breaks[i])
+    if effects.len() > 0 and cells.len() > 0:
+        cells[cells.len() - 1] = rt_dc_sequenced_cell(cells[cells.len() - 1], effects, true)
+        gaps[gaps.len() - 1] = -1
+        effects = []
+    result = n
+    minimum = 9223372036854775807
+    maximum = -1
+    loop gap in gaps:
+        if gap >= 0:
+            minimum = min(minimum, gap)
+            maximum = max(maximum, gap)
+    if maximum > minimum: result = rt_dc_rows(n, cells, gaps, pos)
+    else: set_list(n, cells)
+    if result == 0 or effects.len() == 0: return result
+    last = mk(.exprstmt, pos)
+    nodes[last].a = i32(result)
+    effects.push(last)
+    block = bc_block(effects, pos)
+    nodes[block].aux2 = -17
+    add_flag(block, NF_COMPREHENSION)
+    block
+
+# Non-array literal semicolons discard entries; evaluate all operands in source order.
+rt_dc_discarded_entries = (n: int, items: int[], discarded: int[], pos: int) -> int:
+    statements: int[]
+    entries: int[]
+    loop i in 0.. and item in items:
+        key = int(nodes[item].a)
+        spread = has_flag(item, NF_SPREAD)
+        value = if spread: item else: key
+        if spread: clear_flag(item, NF_SPREAD)
+        pair = nodes[item].kind == .pair
+        if pair: value = int(nodes[item].b)
+        drop = discarded.contains(i)
+        if nodes[value].kind == .lambda and not pair:
+            if not drop: entries.push(item)
+            continue
+        operands: int[]
+        if pair: operands.push(key)
+        operands.push(value)
+        reads: int[]
+        loop operand in operands:
+            # Pure literal keys stay visible to key facts; interpolation is snapshotted below.
+            kind = nodes[operand].kind
+            if not drop and pair and operand == key and (dw_const_number(operand) or (kind == .str_lit and nkids(operand) == 0)):
+                reads.push(operand)
+                continue
+            statement = mk((if drop: NK.assign else: NK.vardecl), nodes[operand].pos)
+            if drop:
+                nodes[statement].op = i32(int(Tok.assign))
+                nodes[statement].a = i32(mk(.hole, nodes[operand].pos))
+            else:
+                name = intern("$dewy_entry_{nodes.len()}")
+                nodes[statement].name = i32(name)
+                read = mk(.ident, nodes[operand].pos)
+                nodes[read].name = i32(name)
+                reads.push(read)
+            nodes[statement].b = i32(operand)
+            statements.push(statement)
+        if not drop:
+            if spread:
+                add_flag(reads[0], NF_SPREAD)
+                entries.push(reads[0])
+            else:
+                nodes[item].a = i32(reads[0])
+                if pair: nodes[item].b = i32(reads[1])
+                entries.push(item)
+    set_list(n, entries)
+    last = mk(.exprstmt, pos)
+    nodes[last].a = i32(n)
+    statements.push(last)
+    block = bc_block(statements, pos)
+    nodes[block].aux2 = -17
+    add_flag(block, NF_COMPREHENSION)
+    block

@@ -1,0 +1,12 @@
+Record:type=[items:array<int64> small:uint8]
+main=()=>{
+    let r:Record=[gone=1; items=[] small=2]
+    let arrays:dict<string array<int64>>=["gone"->[1]; "keep"->[]]
+    let numbers:dict<string uint8>=["gone"->1000; "keep"->2]
+    let optional:[value:int64?]=[gone=1; value=none]
+    printl(r.items.length)
+    printl(r.small)
+    printl(arrays["keep"].length)
+    printl(numbers["keep"])
+    printl(optional.value is? none)
+}

@@ -389,6 +389,9 @@ check_matrix = (n: int, expected: int) -> int:
         if types[t0].kind == .array: fname = "__array2_rows"
         else if is_nd(t0): fname = "__array_stack"
     set_list(arr, els)
+    if nodes[n].aux == 1 and fname == "__array2":
+        nodes[n] = nodes[arr]
+        return check_expr(n, expected)
     args.push(arr)
     if fname == "__array2":
         # with a known element type, literals take it (m: f32[,] = [1 2; 3 4])

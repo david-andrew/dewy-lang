@@ -17,6 +17,7 @@ from p"checker_returns.dewy" import xt_return
 from p"checker_conditionals.dewy" import xf_if
 from p"checker_literals.dewy" import xl_finish
 from p"checker_expr.dewy" import check_expr
+from p"literal_snapshots.dewy" import (literal_snapshot_context literal_sequence_context)
 from p"check.jo" import (block_open scope_reset stmt_assign)
 from p"checks_assign_hooks.dewy" import (block_expand block_direct block_final)
 from p"checks_stmt_hooks.dewy" import (stmt_special stmt_error stmt_terminates)
@@ -208,6 +209,13 @@ bk_finish=(b:BWord result0:BWord mode:BWord n:BWord want_value:bool):>BWord=>$un
 bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
     # (a lowered combined loop is a statement wherever it stands: its body's values go where
     # the loop's own would, to the enclosing collector or body, as a single-header loop's do)
+    # Mark synthetic sequencing unscoped only after parsing: parser-level lifting
+    # would detach the receiving context. Ownership/lowering still see the scope.
+    if bk_nodes[0].ptr[b].aux2 =? -17 or bk_nodes[0].ptr[b].aux2 =? -20 or bk_nodes[0].ptr[b].aux2 =? -21 {
+        bk_nodes[0][b].flags=int32<overflow='wrap'>(BWord(bk_nodes[0].ptr[b].flags) | 4)
+    }
+    if want_value and bk_nodes[0].ptr[b].aux2 =? -17 {literal_snapshot_context(b expected)}
+    if want_value and bk_nodes[0].ptr[b].aux2 =? -21 {literal_sequence_context(b expected)}
     let pos=BWord(bk_nodes[0].ptr[b].pos)
     if want_value and bk_flag(b 131072) and bk_files[0][pos >> 40].is_dewy {
         bk_block(b 0 false);

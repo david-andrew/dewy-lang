@@ -20,21 +20,21 @@ const IR_OVERFLOW = 2048
 # list aligned with Op; exhaustive twin/walker tests check every table slot.
 ir_operand_layouts=():>array<int64>=>{
     let modes:array<int64>=[]
-    loop op in [
-        Op.nop Op.iconst Op.fconst Op.mov Op.add Op.sub Op.mul Op.divs
-        Op.divu Op.rems Op.remu Op.and_ Op.or_ Op.xor Op.shl Op.shrs
-        Op.shru Op.neg Op.not_ Op.eq Op.ne Op.lts Op.les Op.gts
-        Op.ges Op.ltu Op.leu Op.gtu Op.geu Op.fadd Op.fsub Op.fmul
-        Op.fdiv Op.fneg Op.fsqrt Op.fmin Op.fmax Op.ffloor Op.fceil Op.fabs
-        Op.ftrunc Op.feq Op.fne Op.flt Op.fle Op.fgt Op.fge Op.sext8
-        Op.sext16 Op.sext32 Op.zext8 Op.zext16 Op.zext32 Op.i2f Op.u2f Op.f2i
-        Op.f2f Op.bits2f Op.f2bits Op.load Op.store Op.slot Op.gaddr Op.daddr
-        Op.faddr Op.copy Op.zero Op.memcpy Op.memset Op.zeroslots Op.vop Op.call
-        Op.calli Op.callc Op.syscall Op.intr Op.block Op.loop Op.if_ Op.else_
-        Op.end Op.br Op.brif Op.ret Op.trap Op.select Op.assume Op.brtable
-        Op.vld Op.vst Op.vbin Op.vsplat Op.vzu Op.mulhs Op.mulhu Op.memeq
-        Op.checked_add Op.checked_sub Op.checked_mul Op.overflow_add Op.overflow_sub Op.overflow_mul Op.rot32 Op.streq
-        Op.findbyte Op.scanbytes Op.findb
+    loop op in [ \
+        Op.nop Op.iconst Op.fconst Op.mov Op.add Op.sub Op.mul Op.divs \
+        Op.divu Op.rems Op.remu Op.and_ Op.or_ Op.xor Op.shl Op.shrs \
+        Op.shru Op.neg Op.not_ Op.eq Op.ne Op.lts Op.les Op.gts \
+        Op.ges Op.ltu Op.leu Op.gtu Op.geu Op.fadd Op.fsub Op.fmul \
+        Op.fdiv Op.fneg Op.fsqrt Op.fmin Op.fmax Op.ffloor Op.fceil Op.fabs \
+        Op.ftrunc Op.feq Op.fne Op.flt Op.fle Op.fgt Op.fge Op.sext8 \
+        Op.sext16 Op.sext32 Op.zext8 Op.zext16 Op.zext32 Op.i2f Op.u2f Op.f2i \
+        Op.f2f Op.bits2f Op.f2bits Op.load Op.store Op.slot Op.gaddr Op.daddr \
+        Op.faddr Op.copy Op.zero Op.memcpy Op.memset Op.zeroslots Op.vop Op.call \
+        Op.calli Op.callc Op.syscall Op.intr Op.block Op.loop Op.if_ Op.else_ \
+        Op.end Op.br Op.brif Op.ret Op.trap Op.select Op.assume Op.brtable \
+        Op.vld Op.vst Op.vbin Op.vsplat Op.vzu Op.mulhs Op.mulhu Op.memeq \
+        Op.checked_add Op.checked_sub Op.checked_mul Op.overflow_add Op.overflow_sub Op.overflow_mul Op.rot32 Op.streq \
+        Op.findbyte Op.scanbytes Op.findb \
     ] {
         let mode:int64=IR_DEF or 2
         match op {

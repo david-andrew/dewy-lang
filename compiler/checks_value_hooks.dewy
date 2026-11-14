@@ -256,11 +256,12 @@ expr_other=(n:int64 expected:int64):>int64=>$unsafe {
     let ex=ce_expected(expected)
     let t:ValueHookWord=0
     if k =? 'lambda' {t=check_lambda(n lambda_member(n expected))} else if k =? 'match_' {t=check_match(n expected)} else if k =? 'block' {
-        if has_flag(n NF_COMPREHENSION) and ex not=? 0 and types.ptr[ex].kind =? 'array' {
+        let snapshots=nodes.ptr[n].aux2 =? -17 or nodes.ptr[n].aux2 =? -20 or nodes.ptr[n].aux2 =? -21
+        if not snapshots and has_flag(n NF_COMPREHENSION) and ex not=? 0 and types.ptr[ex].kind =? 'array' {
             nodes.ptr[kid(n 0)].a=int32(type_node_of(ex nodes.ptr[n].pos))
         }
         # (into a fixed-size array: its elements have the fixed array's element type)
-        else if has_flag(n NF_COMPREHENSION) and ex not=? 0 and types.ptr[ex].kind =? 'fixed' and nodes.ptr[kid(n 0)].kind =? 'vardecl' and nodes.ptr[kid(n 0)].a =? 0 {
+        else if not snapshots and has_flag(n NF_COMPREHENSION) and ex not=? 0 and types.ptr[ex].kind =? 'fixed' and nodes.ptr[kid(n 0)].kind =? 'vardecl' and nodes.ptr[kid(n 0)].a =? 0 {
             nodes.ptr[kid(n 0)].a=int32(type_node_of(mk_array(ValueHookWord(types.ptr[representation_type(ex)].elem)) nodes.ptr[n].pos))
         }
         t=check_block(n expected true)

@@ -1,0 +1,15 @@
+let seen:string=""
+mark=(s:string):>int=>{seen="{seen}{s}"; 1}
+main=()=>{
+    let grid=[mark("a") mark("b") (mark("x");) ; mark("c") mark("d")]
+    printl(grid.length)
+    printl(seen)
+    seen=""
+    let record=[a=mark("a") b=mark("b"); c=mark("c")]
+    printl(record)
+    printl(seen)
+    seen=""
+    let dict=[mark("a")->mark("b"); mark("c")->mark("d")]
+    printl(dict)
+    printl(seen)
+}

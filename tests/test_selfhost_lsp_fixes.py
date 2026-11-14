@@ -64,7 +64,6 @@ def test_lsp_fixes_session(compiler, tmp_path, monkeypatch):
         diag(FIXES, 'True', "unknown name 'True' (use `true`)"),
         diag(FIXES, '&&', 'use `and` for logical and'),
         diag(FIXES, '!', 'use `not` instead of `!`'),
-        diag(FIXES, '2;', 'this `;` is attached to the value before it'),
         diag(FIXES, 's.startswith', "no member 'startswith' on string: write `s.starts_with(...)`"),
         diag(FIXES, 'xs.lenght', "no member 'lenght': `xs.length()` counts the elements"),
         diag(FIXES, 'step\n', 'write `@step` for the function itself'),
@@ -108,6 +107,6 @@ def test_lsp_fixes_session(compiler, tmp_path, monkeypatch):
     assert session(dewy, root, steps) == expected
     missing = [title for title in ("Change 'totl' to 'total'", "Change '&&' to 'and'", 'Make it `loop mut`',
                   "Mark 'a' `mut`", 'Write it as 2', 'Validate it', 'Annotate it', 'Update stored elements',
-                  'Convert it', '@step', "Change 'startswith'", "Change 'lenght'", 'row break', "Change '!'",
+                  'Convert it', '@step', "Change 'startswith'", "Change 'lenght'", "Change '!'",
                   "Change 'True'") if title not in expected]
     assert not missing, (missing, expected)

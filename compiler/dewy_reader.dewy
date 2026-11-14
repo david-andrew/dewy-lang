@@ -10,7 +10,7 @@ from p"dewy_parser.dewy" import ParserContext, dc_parser_hint, dc_parser_report,
 from p"dewy_reach.dewy" import dm_bound, dm_hide, dm_reach, dm_reach_all, dm_reach_flow, dm_reach_fn, dm_reach_head, dm_reach_in, dm_reach_match, dm_reach_statement, dm_reach_statements, dm_reach_type
 from p"dewy_reader_host.dewy" import ParserReaderHost
 from p"dewy_reader_types.dewy" import DirBundle, EffectKind, EffectSyntax, ResultClause
-from p"dewy_scan.dewy" import dc_scan_arm_end, dc_scan_closing, dc_scan_cut
+from p"dewy_scan.dewy" import dc_scan_arm_end, dc_scan_closing, dc_scan_cut, dc_scan_gap
 from p"dewy_tokens.dewy" import DewyKind, DewyLexeme, DewyToken, dn_token_assignment, dn_token_invert, dn_token_kind, dn_token_text, dn_token_undot, dn_token_uninvert
 from p"dewy_walk.dewy" import dr_arms_kind, dr_block_tail_kind, dr_collect, dr_collect_block, dr_copy_last, dr_copy_value, dr_flow_arms, dr_kind_of, dr_last_kind, dr_push, dr_tail_kind
 from p"literals.dewy" import LiteralProblem, literal_limbs, literal_packed, literal_string_text, literal_unsigned
@@ -535,38 +535,46 @@ rd_dc_array_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int
     # (`[1 2 ; 3 4]`: the row breaks after each element, dw_rows_literal)
     let breaks:array<int64>=[]
     let rows:bool=false
-    # (`[f(); 7]`: the elements an attached `;` discards)
-    let discards:array<int64>=[]
-    # (where those of them whose discarding does nothing are written, dw_pure)
-    let pure_at:array<int64>=[]
     # (where each element is written)
     let starts:array<int64>=[]
     # (the elements written as one parenthesized group: each one value, dw_collect)
     let grouped:array<int64>=[]
     let flows:bool=false
     let targets:int64=reader_ctx.reader.dc_targets_made
-    loop (not rd_dn_accept(@reader_ctx 'rbrack')) {
+    let previous:int64=-1
+    let separator=false
+    let discarded:array<int64>=[]
+    let minimum:int64=9223372036854775807
+    let maximum:int64=-1
+    let empty=false
+    let semis=false
+    loop true {
         if (reader_ctx.tokens[reader_ctx.at].kind =? 'eof') {
             if reader_ctx.flags.report_now {
                 rd_dc_unclosed(@reader_ctx pos "]");
             }
             return 0
         }
-        if (rd_dn_peek(@reader_ctx) =? 'semi') {
-            if (breaks.length =? 0) {
-                # (`[; 1 2]`: dw_rows_literal's mistake, noted)
-                if (not reader_ctx.flags.report_now) {
-                    return 0
-                }
-                rd_dc_report(@reader_ctx rd_mkpos(reader_ctx.file reader_ctx.tokens[reader_ctx.at].start) "an array literal cannot start with `;`: a `;` ends a row, as in `[1 2 ; 3 4]`");
-                reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
-                continue
-            }
-            breaks[(int64<overflow='wrap'>(breaks.length) - 1)] = (int64<overflow='wrap'>(breaks[(int64<overflow='wrap'>(breaks.length) - 1)]) + 1)
-            rows = true
-            reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+        if rd_dn_peek(@reader_ctx) =? 'semi' {
+            if items.length =? 0 {return rd_dc_hint(@reader_ctx pos "an array literal cannot start with `;`")}
+            if not separator {discarded.push(items.length - 1)}
+            separator=true
+            semis=true
+            reader_ctx.at+=1
             continue
         }
+        let closing=rd_dn_peek(@reader_ctx) =? 'rbrack'
+        if previous >=? 0 and not closing and not named and reader_nodes[n].kind =? 'array' {
+            let level:int64=0
+            if separator or reader_ctx.tokens[reader_ctx.at].newline {
+                level=dc_scan_gap(reader_ctx.source previous reader_ctx.tokens[reader_ctx.at].start not closing)
+            }
+            breaks[breaks.length - 1]=level
+            minimum=min(minimum level)
+            maximum=max(maximum level)
+        }
+        if rd_dn_accept(@reader_ctx 'rbrack') {break}
+        separator=false
         # (`[x=1 y=2]`: a named field; methods are left unread (dc_unread))
         if rd_dc_named_next(@reader_ctx) {
             let field:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
@@ -650,27 +658,18 @@ rd_dc_array_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int
         if (not rd_has_flag(@reader_nodes item NF_SPREAD)) {
             positional = true
         }
-        # (an attached `;` discards the element: a collector, dw_collects; a pure value's is
-        # warned of)
-        if (((rd_dn_peek(@reader_ctx) =? 'semi') and (not reader_ctx.tokens[reader_ctx.at].space)) and (not reader_ctx.tokens[reader_ctx.at].newline)) {
-            if (not rd_dc_discardable(@reader_ctx @reader_nodes item)) {
-                if (not rd_dc_pure(@reader_nodes item)) {
-                    return 0
-                }
-                pure_at.push(rd_mkpos(reader_ctx.file item_start));
-            }
-            reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
-            discards.push(items.length);
-        }
         items.push(item);
         starts.push(rd_mkpos(reader_ctx.file item_start));
-        breaks.push(0)
+        breaks.push(-1)
+        if reader_nodes[item].kind =? 'block' and rd_dc_empty_block(@reader_ctx @reader_nodes item) {empty=true}
+        previous=reader_ctx.tokens[reader_ctx.at - 1].stop
     }
     reader_ctx.flags.comma_stop = saved
-    let collects:bool=(discards.length >? 0)
-    if ((pure_at.length >? 0) and (not rd_dc_pure_discards(@reader_ctx pure_at rows))) {
-        return 0
+    if not named and reader_nodes[n].kind =? 'array' and empty and not flows {
+        return rd_dc_array_without_empty(@reader_ctx @reader_nodes n items breaks pos)
     }
+    let collects=empty and flows
+    rows=not named and reader_nodes[n].kind =? 'array' and maximum >? minimum
     if flows {
         loop i in 0.. and item in items {
             if (((not rd_has_flag(@reader_nodes item NF_SPREAD)) and (not (i in? grouped))) and rd_dc_multi(@reader_ctx @reader_nodes item)) {
@@ -685,7 +684,7 @@ rd_dc_array_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int
         if (((named or rows) or (reader_nodes[n].kind =? 'map_lit')) or (flows and (reader_ctx.reader.dc_targets_made not=? targets))) {
             return 0
         }
-        return rd_dc_collector(@reader_ctx @reader_nodes items starts discards grouped pos)
+        return rd_dc_collector(@reader_ctx @reader_nodes items starts [] grouped pos)
     }
     # (a record's rows are named fields and spreads, dw_record_entry)
     if named {
@@ -700,6 +699,14 @@ rd_dc_array_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int
             return 0
         }
     }
+    # Preserve the existing explicit row-stack behavior for array-valued cells. D39
+    # owns nesting/comprehensions; this change only decides scalar separator levels.
+    if not rows and not named and reader_nodes[n].kind =? 'array' and semis and items.length >? 0 {
+        reader_nodes[n].kind='matrix'
+        reader_nodes[n].ival=1
+        reader_nodes[n].aux=1
+    }
+    if discarded.length >? 0 and (named or reader_nodes[n].kind =? 'map_lit') {return rd_dc_discarded_entries(@reader_ctx @reader_nodes n items discarded pos)}
     if rows {
         return rd_dc_rows(@reader_ctx @reader_nodes n items breaks pos)
     }
@@ -2583,7 +2590,7 @@ rd_dc_collector=(@reader_ctx:ParserContext @reader_nodes:array<Node> items:array
         }
         let k:NK=reader_nodes[item].kind
         # (`[(match x {...}) {2 3}]`: a parenthesized element is one value, pushed)
-        if ((i in? grouped) and (k not=? 'call')) {
+        if ((i in? grouped) and (k not=? 'call')) and not rd_dc_empty_block(@reader_ctx @reader_nodes item) {
             let statement:int64=node_mk(@reader_nodes 'exprstmt' at)
             reader_nodes[statement].a = int32<overflow='wrap'>(rd_dc_push(@reader_ctx @reader_nodes accumulator item at))
             statements.push(statement);
@@ -3144,14 +3151,6 @@ rd_dc_directive_statement=(@reader_nodes:array<Node> call:int64 pos:int64 ended:
     n
 }
 
-# A value an attached `;` may discard without a warning (dw_pure): a call.
-rd_dc_discardable=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64):>bool=>$unsafe {
-    if ((reader_nodes[n].kind not=? 'call') or rd_has_flag(@reader_nodes n NF_SPREAD)) {
-        return false
-    }
-    let callee:int64=int64<overflow='wrap'>(reader_nodes[n].a)
-    ((reader_nodes[callee].kind not=? 'ident') or ((reader_nodes[callee].name not=? int32<overflow='wrap'>(rd_dc_builtin(@reader_ctx 0))) and (reader_nodes[callee].name not=? int32<overflow='wrap'>(rd_dc_builtin(@reader_ctx 1)))))
-}
 
 # After `.`: `f.(xs)`, the call broadcast over its arguments (dw_expr's broadcast call), or
 # `value.$field(name)`, a member named by a compile-time string (dw_field_name); 0 for another form.
@@ -4268,7 +4267,7 @@ rd_dc_expr=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int64):>
             return left
         }
         let after:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)]
-        if (((((not (((after.space or after.newline) or (after.symbol =? 'rbrack')) or (after.symbol =? 'rparen'))) or (dn_power(after.symbol) >? 0)) or (after.symbol =? 'dot')) or (after.symbol =? 'question')) or (after.symbol =? 'ellipsis')) {
+        if (((((not (((after.space or after.newline) or (after.symbol =? 'rbrack')) or (after.symbol =? 'rparen') or (after.symbol =? 'semi'))) or (dn_power(after.symbol) >? 0)) or (after.symbol =? 'dot')) or (after.symbol =? 'question')) or (after.symbol =? 'ellipsis')) {
             return 0
         }
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
@@ -5652,11 +5651,17 @@ rd_dc_group=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64):>int
         return rd_dc_paren_block(@reader_ctx @reader_nodes)
     }
     # (`(a b)`: several values, dw_values; each may be spread, `(xs... 1)`)
+    let opening=reader_ctx.at - 1
     let saved_spread:int64=reader_ctx.reader.dc_spread_depth
     reader_ctx.reader.dc_spread_depth = (int64<overflow='wrap'>(reader_ctx.depth) + 1)
     let n:int64=rd_dc_expr(@reader_ctx @reader_nodes 0)
     let items:array<int64>=[]
     loop (n not=? 0) and (not rd_dn_accept(@reader_ctx 'rparen')) {
+        if rd_dn_peek(@reader_ctx) =? 'semi' {
+            reader_ctx.reader.dc_spread_depth=saved_spread
+            reader_ctx.at=opening
+            return rd_dc_paren_block(@reader_ctx @reader_nodes)
+        }
         if (items.length =? 0) {
             items.push(n);
         }
@@ -8616,37 +8621,6 @@ rd_dc_policy_only=(@reader_ctx:ParserContext):>bool=>$unsafe {
     (((reader_ctx.tokens[(int64<overflow='wrap'>(at) + 1)].symbol =? 'assign') and (rd_dc_policy(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(at) + 2)]) not=? 0)) and (reader_ctx.tokens[(int64<overflow='wrap'>(at) + 3)].symbol =? 'rangle'))
 }
 
-# A value whose discarding does nothing (dw_pure): a literal, a name, or arithmetic of them.
-rd_dc_pure=(@reader_nodes:array<Node> n:int64):>bool=>$unsafe {
-    let k:NK=reader_nodes[n].kind
-    if ((((k =? 'ident') or (k =? 'int_lit')) or (k =? 'float_lit')) or (k =? 'bool_lit')) {
-        return true
-    }
-    if (k =? 'str_lit') {
-        return (rd_nkids(@reader_nodes n) =? 0)
-    }
-    if (k =? 'unary') {
-        return ((not rd_has_flag(@reader_nodes n NF_BROADCAST)) and rd_dc_pure(@reader_nodes int64<overflow='wrap'>(reader_nodes[n].a)))
-    }
-    if ((k not=? 'binary') or rd_has_flag(@reader_nodes n NF_BROADCAST)) {
-        return false
-    }
-    let op:int32=reader_nodes[n].op
-    (((((((op =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(58)))) or (op =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(59))))) or (op =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(60))))) or (op =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(61))))) or (op =? int32<overflow='wrap'>(int64<overflow='wrap'>(int64(65))))) and rd_dc_pure(@reader_nodes int64<overflow='wrap'>(reader_nodes[n].a))) and rd_dc_pure(@reader_nodes int64<overflow='wrap'>(reader_nodes[n].b)))
-}
-
-# Pure values an attached `;` discards, where each is written: dw_discard_check's warning, or its
-# mistake among rows (false).
-rd_dc_pure_discards=(@reader_ctx:ParserContext pure_at:array<int64> rows:bool):>bool=>$unsafe {
-    if rows {
-        rd_dc_fail_now(@reader_ctx pure_at[0] "this `;` is attached to the value before it, which discards that value and does nothing here: {reader_ctx.stores.host[0].g_DW_ROW_HINT()}");
-        return false
-    }
-    loop at in pure_at {
-        reader_ctx.stores.host[0].warn(at "this `;` is attached to the value before it, which discards that value, so `[1 2; 3 4]` is `[1 3 4]`: {reader_ctx.stores.host[0].g_DW_ROW_HINT()}; to drop the value, leave it out");
-    }
-    true
-}
 
 # `accumulator.push(value)`
 rd_dc_push=(@reader_ctx:ParserContext @reader_nodes:array<Node> accumulator:int64 value:int64 pos:int64):>int64=>$unsafe {
@@ -9641,9 +9615,14 @@ rd_dc_rows=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64 elements
             return 0
         }
     }
-    let rank:int64=1
-    loop b in breaks {
-        rank = max(rank (int64<overflow='wrap'>(b) + 1))
+    let minimum:int64=9223372036854775807
+    let maximum:int64=-1
+    loop gap in breaks {if gap >=? 0 {minimum=min(minimum gap); maximum=max(maximum gap)}}
+    let rank=maximum - minimum + 1
+    let seen=fill(false rank)
+    loop gap in breaks {if gap >=? 0 {seen[gap - minimum]=true}}
+    loop level in [0..rank) {
+        if not seen[level] {return rd_dc_hint(@reader_ctx pos "skipped separator level in this array literal")}
     }
     let dims=fill((-1) rank)
     let counts=fill(0 rank)
@@ -9651,7 +9630,7 @@ rd_dc_rows=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64 elements
         counts[0] = (counts[0] + 1)
         let close:int64=(int64<overflow='wrap'>(rank) - 1)
         if ((int64<overflow='wrap'>(i) + 1) <? breaks.length) {
-            close = b
+            close = b - minimum
         }
         loop level in [1..close] {
             let size=counts[(int64<overflow='wrap'>(level) - 1)]
@@ -11942,13 +11921,6 @@ rd_dn_accept_semi=(@reader_ctx:ParserContext):>bool=>$unsafe {
     if (rd_dn_peek(@reader_ctx) not=? 'semi') {
         return false
     }
-    let token:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
-    if (reader_ctx.reader.dn_rows and (token.space or token.newline)) {
-        return false
-    }
-    if (token.space or token.newline) {
-        reader_ctx.stores.host[0].dn_error(token.start "an unattached `;` is reserved for array-dimension selection: attach it to the statement it ends, `f();`, or leave it out");
-    }
     reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
     true
 }
@@ -12592,4 +12564,144 @@ rd_set_list=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64 xs:arra
 
 rd_set_list2=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64 xs:array<int64>):>void=>$unsafe {
     node_set_list2(@reader_nodes @reader_ctx.stores.lists[0] n xs);
+}
+
+# Only syntactically empty contributions: no guessed result type and no skipped effects.
+rd_dc_empty_block=(@reader_ctx:ParserContext @reader_nodes:array<Node> item:int64):>bool=>$unsafe {
+    if reader_nodes[item].kind not=? 'block' or rd_has_flag(@reader_nodes item NF_COMPREHENSION) {return false}
+    loop statement in node_kids(@reader_nodes @reader_ctx.stores.lists[0] item) {
+        let kind=reader_nodes[statement].kind
+        if kind =? 'assign' or kind =? 'vardecl' {continue}
+        if kind =? 'exprstmt' and rd_dc_empty_block(@reader_ctx @reader_nodes int64(reader_nodes[statement].a)) {continue}
+        return false
+    }
+    true
+}
+
+rd_dc_sequenced_cell=(@reader_ctx:ParserContext @reader_nodes:array<Node> value:int64 effects:array<int64> after:bool):>int64=>$unsafe {
+    let pos=reader_nodes[value].pos
+    let spread=rd_has_flag(@reader_nodes value NF_SPREAD)
+    if spread {rd_clear_flag(@reader_nodes value NF_SPREAD);}
+    let statements:array<int64>=[]
+    let result=value
+    if after {
+        let name=reader_ctx.stores.host[0].intern("$dewy_tail_{reader_nodes.length}")
+        let decl=node_mk(@reader_nodes 'vardecl' pos)
+        reader_nodes[decl].name=int32(name)
+        reader_nodes[decl].b=int32(value)
+        statements.push(decl)
+        result=node_mk(@reader_nodes 'ident' pos)
+        reader_nodes[result].name=int32(name)
+    }
+    loop effect in effects {statements.push(effect)}
+    let last=node_mk(@reader_nodes 'exprstmt' pos)
+    reader_nodes[last].a=int32(result)
+    statements.push(last)
+    let block=rd_bc_block(@reader_ctx @reader_nodes statements pos)
+    reader_nodes[block].aux2=if after {-21} else {-20}
+    rd_add_flag(@reader_nodes block NF_COMPREHENSION);
+    if spread {rd_add_flag(@reader_nodes block NF_SPREAD);}
+    block
+}
+rd_dc_array_without_empty=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64 items:array<int64> breaks:array<int64> pos:int64):>int64=>$unsafe {
+    let effects:array<int64>=[]
+    let cells:array<int64>=[]
+    let gaps:array<int64>=[]
+    loop i in 0.. and item in items {
+        if rd_dc_empty_block(@reader_ctx @reader_nodes item) {
+            effects.push(item)
+            if gaps.length >? 0 {gaps[gaps.length - 1]=max(gaps[gaps.length - 1] breaks[i])}
+        } else {
+            let cell=item
+            if effects.length >? 0 {cell=rd_dc_sequenced_cell(@reader_ctx @reader_nodes item effects false); effects=[]}
+            cells.push(cell)
+            gaps.push(breaks[i])
+        }
+    }
+    if effects.length >? 0 and cells.length >? 0 {
+        cells[cells.length - 1]=rd_dc_sequenced_cell(@reader_ctx @reader_nodes cells[cells.length - 1] effects true)
+        gaps[gaps.length - 1]=-1
+        effects=[]
+    }
+    let result=n
+    let minimum:int64=9223372036854775807
+    let maximum:int64=-1
+    loop gap in gaps {if gap >=? 0 {minimum=min(minimum gap); maximum=max(maximum gap)}}
+    if maximum >? minimum {result=rd_dc_rows(@reader_ctx @reader_nodes n cells gaps pos)}
+    else {node_set_list(@reader_nodes @reader_ctx.stores.lists[0] n cells);}
+    if result =? 0 or effects.length =? 0 {return result}
+    # All contributions were empty: run their effects, then the receiving empty literal.
+    let last=node_mk(@reader_nodes 'exprstmt' pos)
+    reader_nodes[last].a=int32(result)
+    effects.push(last)
+    let block=rd_bc_block(@reader_ctx @reader_nodes effects pos)
+    reader_nodes[block].aux2=-17
+    rd_add_flag(@reader_nodes block NF_COMPREHENSION);
+    block
+}
+
+
+# Record/dictionary semicolons discard entries, preserving evaluation order of every
+# field, key and value. Methods remain declarations on the completed record.
+rd_dc_discarded_entries=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64 items:array<int64> discarded:array<int64> pos:int64):>int64=>$unsafe {
+    let statements:array<int64>=[]
+    let entries:array<int64>=[]
+    loop i in 0.. and item in items {
+        let key:int64=int64(reader_nodes[item].a)
+        let spread=rd_has_flag(@reader_nodes item NF_SPREAD)
+        let value=if spread {item} else {key}
+        if spread {rd_clear_flag(@reader_nodes item NF_SPREAD);}
+        let pair=reader_nodes[item].kind =? 'pair'
+        if pair {value=int64(reader_nodes[item].b)}
+        let drop=i in? discarded
+        if reader_nodes[value].kind =? 'lambda' and not pair {
+            if not drop {entries.push(item)}
+            continue
+        }
+        let operands:array<int64>=[]
+        if pair {operands.push(key)}
+        operands.push(value)
+        let reads:array<int64>=[]
+        loop operand in operands {
+            # A literal key has no evaluation effects and must stay visible to key facts.
+            # Interpolated strings still take their source-order snapshot below.
+            let kind=reader_nodes[operand].kind
+            if not drop and pair and operand =? key and (rd_dw_const_number(@reader_nodes operand) or (kind =? 'str_lit' and rd_nkids(@reader_nodes operand) =? 0)) {
+                reads.push(operand)
+                continue
+            }
+            let statement=node_mk(@reader_nodes if drop {'assign'} else {'vardecl'} reader_nodes[operand].pos)
+            if drop {
+                reader_nodes[statement].op=47
+                reader_nodes[statement].a=int32(node_mk(@reader_nodes 'hole' reader_nodes[operand].pos))
+            } else {
+                let name=reader_ctx.stores.host[0].intern("$dewy_entry_{reader_nodes.length}")
+                reader_nodes[statement].name=int32(name)
+                let read=node_mk(@reader_nodes 'ident' reader_nodes[operand].pos)
+                reader_nodes[read].name=int32(name)
+                reads.push(read)
+            }
+            reader_nodes[statement].b=int32(operand)
+            statements.push(statement)
+        }
+        if not drop {
+            if spread {
+                rd_add_flag(@reader_nodes reads[0] NF_SPREAD);
+                entries.push(reads[0])
+            } else {
+                reader_nodes[item].a=int32(reads[0])
+                if pair {reader_nodes[item].b=int32(reads[1])}
+                entries.push(item)
+            }
+        }
+    }
+    node_set_list(@reader_nodes @reader_ctx.stores.lists[0] n entries);
+    let last=node_mk(@reader_nodes 'exprstmt' pos)
+    reader_nodes[last].a=int32(n)
+    statements.push(last)
+    let block=rd_bc_block(@reader_ctx @reader_nodes statements pos)
+    # literal_snapshots.dewy gives staged values their receiving field/key/value context.
+    reader_nodes[block].aux2=-17
+    rd_add_flag(@reader_nodes block NF_COMPREHENSION);
+    block
 }

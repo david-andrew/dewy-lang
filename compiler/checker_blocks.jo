@@ -16,6 +16,7 @@ use 'checker_returns.dewy'
 use 'checker_conditionals.dewy'
 use 'checker_literals.dewy'
 use 'checker_expr.dewy'
+use 'literal_snapshots.dewy'
 use 'check.jo'
 use 'checks_assign_hooks.dewy'
 use 'checks_stmt_hooks.dewy'
@@ -167,6 +168,9 @@ bk_finish = (b: int, result0: int, mode: int, n: int, want_value: bool) -> int:
     if mode >= 0: result = sink_close(b, result)
     result
 bk_block = (b: int, expected: int, want_value: bool) -> int:
+    if bk_nodes[0][b].aux2 == -17 or bk_nodes[0][b].aux2 == -20 or bk_nodes[0][b].aux2 == -21: bk_nodes[0][b].flags = i32(int(bk_nodes[0][b].flags) | 4)
+    if want_value and bk_nodes[0][b].aux2 == -17: literal_snapshot_context(b, expected)
+    if want_value and bk_nodes[0][b].aux2 == -21: literal_sequence_context(b, expected)
     pos = bk_nodes[0][b].pos
     if want_value and bk_flag(b, 131072) and bk_files[0][pos >> 40].is_dewy:
         bk_block(b, 0, false)

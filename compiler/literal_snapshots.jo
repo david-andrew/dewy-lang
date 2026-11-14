@@ -1,0 +1,70 @@
+# Frozen receiving-context preparation for staged record/dictionary operands.
+use 'ast.jo'
+use 'check.jo'
+use 'checks_thin_expr.dewy'
+use 'expr.jo'
+use 'refine.jo'
+use 'types.jo'
+snapshot_value_context = (value: int, expected: int, bindings: {int: int}):
+    if expected == 0 or nodes[value].kind != .ident: return
+    decl = bindings.get(int(nodes[value].name)) ?? 0
+    if decl == 0: return
+    context = representation_type(expected)
+    if tkind(context) == .param or tkind(context) == .var: return
+    annotation = type_node_of(context, nodes[decl].pos)
+    nodes[decl].a = i32(annotation)
+literal_snapshot_context = (block: int, expected: int):
+    if expected == 0 or nkids(block) == 0: return
+    last = kid(block, nkids(block) - 1)
+    if nodes[last].kind != .exprstmt: return
+    literal = int(nodes[last].a)
+    target = representation_type(prune(expected))
+    if tkind(target) == .opt: target = representation_type(int(types[target].elem))
+    member = literal_union_member(literal, target)
+    if member != 0: target = representation_type(member)
+    bindings: {int: int} = {}
+    loop statement in kids(block):
+        if nodes[statement].kind == .vardecl: bindings[int(nodes[statement].name)] = statement
+    if tkind(target) != .struct_: return
+    si = int(types[target].st)
+    check_struct_fields(si)
+    map = is_map_type(target)
+    field_types: {int: int} = {}
+    if not map:
+        loop i in [0..int(structs[si].nfields)):
+            f = int(structs[si].fields) + i
+            field_types[int(fields[f].name)] = int(fields[f].type)
+    loop entry in kids(literal):
+        if map and nodes[entry].kind == .pair:
+            snapshot_value_context(int(nodes[entry].a), struct_targ(si, 0), bindings)
+            snapshot_value_context(int(nodes[entry].b), struct_targ(si, 1), bindings)
+        else if not map and nodes[entry].kind == .namedarg:
+            field_type = field_types.get(int(nodes[entry].name)) ?? 0
+            snapshot_value_context(int(nodes[entry].a), field_type, bindings)
+
+literal_snapshot_argument = (block: int) -> int:
+    initializers: {int: int} = {}
+    loop statement in kids(block):
+        if nodes[statement].kind == .vardecl: initializers[int(nodes[statement].name)] = int(nodes[statement].b)
+    last = kid(block, nkids(block) - 1)
+    view = clone(int(nodes[last].a))
+    loop entry in kids(view):
+        operands: int[]
+        if nodes[entry].kind == .pair: operands = [int(nodes[entry].a), int(nodes[entry].b)]
+        else if nodes[entry].kind == .namedarg: operands = [int(nodes[entry].a)]
+        loop i in 0.. and operand in operands:
+            if nodes[operand].kind != .ident: continue
+            initial = initializers.get(int(nodes[operand].name)) ?? 0
+            if initial == 0: continue
+            replacement = clone(initial)
+            if i == 0: nodes[entry].a = i32(replacement)
+            else: nodes[entry].b = i32(replacement)
+    view
+
+literal_sequence_context = (block: int, expected: int):
+    if expected == 0: return
+    context = representation_type(expected)
+    if tkind(context) == .param or tkind(context) == .var: return
+    decl = kid(block, 0)
+    annotation = type_node_of(context, nodes[decl].pos)
+    nodes[decl].a = i32(annotation)
