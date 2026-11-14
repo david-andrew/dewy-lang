@@ -254,9 +254,15 @@ e_trap = (): emit(.trap, 0, 0, 0, 0, 0, 0)
 op_name = (op: Op) -> str: "{op}"
 
 
+ir_dump_capture = false
+ir_dump_lines: str[]
+dump_ir_line = (line: str):
+    if ir_dump_capture: ir_dump_lines.push(line)
+    else: print(line)
+
 dump_ir = ():
-    print("fn {ir.name} (params {ir.nparams}, ret {ir.ret}):")
-    loop i in 0.. and s in ir.slot_size: print("  slot{i}: size {s} align {ir.slot_align[i]}")
+    dump_ir_line("fn {ir.name} (params {ir.nparams}, ret {ir.ret}):")
+    loop i in 0.. and s in ir.slot_size: dump_ir_line("  slot{i}: size {s} align {ir.slot_align[i]}")
     ind = 1
     loop ins in ir.code:
         if ins.op == .end or ins.op == .else_: ind -= 1
@@ -268,7 +274,7 @@ dump_ir = ():
             al = ""
             loop k in [0..int(ins.b)): al += " v{ir.args[int(ins.a) + k]}"
             line += " args:{al}"
-        print(line)
+        dump_ir_line(line)
         if ins.op == .block or ins.op == .loop or ins.op == .if_ or ins.op == .else_: ind += 1
 
 

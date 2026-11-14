@@ -1,3 +1,4 @@
+use 'ir_builders.dewy'
 use 'par.jo'
 use 'native_debug.dewy'
 use 'pe_format.dewy'
@@ -94,6 +95,9 @@ emit_parallel = (q: IrFn[], fin: bool[]) -> bool:
         true
 # ---- a worker: emit q[a..b), write what came of it to fd, end ----
 par_worker = (q: IrFn[], fin: bool[], a: int, b: int, r0: int, fd: int):
+    # Workers retain dumps per function; only the accepted emission prints at join.
+    if dump: ir_dump_capture = true
+    __olen = 0
     code = []
     call_fix = []
     data_fix = []
@@ -116,7 +120,13 @@ par_worker = (q: IrFn[], fin: bool[], a: int, b: int, r0: int, fd: int):
         ir = q[k]
         # (where it starts in each table: par_join's marks)
         at: int[] = [code.len(), call_fix.len(), data_fix.len(), stub_fix.len(), cabi_fix.len(), elf_syms.len(), line_rows.len(), call_sites.len(), unwind_fns.len(), uw_data.len(), dbg_raw.len(), dbg_cfi.len(), ro_new.len(), rsp_rows.len()]
+        if dump: ir_dump_lines = []
         emit_now(fin[k])
+        if dump:
+            pw(out, ir_dump_lines.len())
+            loop line in ir_dump_lines:
+                pw(out, len(line))
+                loop c in bytes(line): out.push(c)
         pw(out, ir.fn_index)
         pw(out, fn_addr[ir.fn_index])
         pw(out, fn_len[ir.fn_index])
@@ -175,9 +185,12 @@ par_worker = (q: IrFn[], fin: bool[], a: int, b: int, r0: int, fd: int):
     pw_ints(out, news)
     pw_ints(out, rsp_rows)
     tw2 = time()
+    if env("DEWY_PAR_TIME") != none:
+        report = "  worker {a}..{b}: emit {(tw1 - tw0) * 1000.0:.1} ms, pack {(tw2 - tw1) * 1000.0:.1} ms, {out.len()} bytes"
+        pw(out, len(report))
+        loop c in bytes(report): out.push(c)
     __olen = 0                      # (the compiler's own output, not yet written, is the parent's to write)
     __write_fd(fd, data(out), out.len())
-    if env("DEWY_PAR_TIME") != none: eprint("  worker {a}..{b}: emit {(tw1 - tw0) * 1000.0:.1} ms, pack {(tw2 - tw1) * 1000.0:.1} ms, write {(time() - tw2) * 1000.0:.1} ms, {out.len()} bytes")
     exit(0)
 
 # A run's functions are moved as one where they land as far from where the worker made them as
@@ -188,6 +201,7 @@ par_join = (bytes_: u8[], r0: int, q: IrFn[], fin: bool[], a: int):
     r = ParIn(bytes_)
     align = x64_code_align()
     nf = pr(r)
+    dumps: str[][]
     fis: int[]
     ats: int[]
     lns: int[]
@@ -197,6 +211,13 @@ par_join = (bytes_: u8[], r0: int, q: IrFn[], fin: bool[], a: int):
     # unwind_fns, uw_data, dbg_raw, dbg_cfi, constants, rsp_rows)
     marks: int[]
     loop _ in [0..nf):
+        if dump:
+            lines: str[]
+            loop _ in [0..pr(r)):
+                n = pr(r)
+                lines.push(str_from_bytes(r.b[r.i..r.i + n)))
+                r.i += n
+            dumps.push(lines)
         fis.push(pr(r))
         ats.push(pr(r))
         lns.push(pr(r))
@@ -227,6 +248,10 @@ par_join = (bytes_: u8[], r0: int, q: IrFn[], fin: bool[], a: int):
     cfi = pr_ints(r)
     news = pr_ints(r)
     frames = pr_ints(r)
+    if env("DEWY_PAR_TIME") != none:
+        n = pr(r)
+        eprint(str_from_bytes(r.b[r.i..r.i + n)))
+        r.i += n
     ends: int[] = [nc, calls.len() / 2, datas.len() / 3, stubs.len() / 2, cabis.len() / 2, names.len(), rows.len(), sites.len(), uws.len() / 4, uwd.len(), raw.len(), cfi.len(), news.len() / 2, frames.len()]
     loop x in ends: marks.push(x)
     starts: int[]           # the worker's constants: where it put each, and where each is here
@@ -258,6 +283,8 @@ par_join = (bytes_: u8[], r0: int, q: IrFn[], fin: bool[], a: int):
             loop k in [cs..ce): code.push(r.b[c0 + k])
         else: code.extend(r.b[c0 + cs..c0 + ce))
         loop k in [j..e):
+            if dump:
+                loop line in dumps[k]: print(line)
             fi = fis[k]
             loop fn_addr.len() <= fi: fn_addr.push(-1)
             loop fn_len.len() <= fi: fn_len.push(0)

@@ -1,12 +1,13 @@
+from p"@lib/core/rt.jo" import (__str_from_bytes)
 $runtime_checks
 
-from p"@lib/core/rt.jo" import (__olen __write_fd)
+from p"@lib/core/rt.jo" import (__olen __write_fd __out_flush)
 from p"@lib/core/os.jo" import (__zstr env eprint exit time)
 from p"ast.jo" import (NF_EXTERN has_flag kids nkids nodes)
 from p"check.jo" import (FK_LAMBDA FK_PARTIAL fns globals modules prelude syms target_arm64 target_macos target_wasm target_windows watch_build)
 from p"driver_pipeline.dewy" import (emit_now emit_queue emit_queue_rel queue_emit)
 from p"elf_format.dewy" import (elf_syms)
-from p"fused.jo" import (FzRec fused_on fz_by_helper fz_by_inst fz_d0 fz_j fz_kdt fz_kro fz_layout fz_lf0 fz_mdt fz_mlf fz_mrc fz_mro fz_pinit fz_qrec fz_r0 fz_raws fz_rd fz_ready fz_recs fz_ro fz_texts fzw_f0 fzw_g0 fzw_have fzw_recs fzw_t0)
+from p"fused.jo" import (FzRec fz_trace_fd fused_on fz_by_helper fz_by_inst fz_d0 fz_j fz_kdt fz_kro fz_layout fz_lf0 fz_mdt fz_mlf fz_mrc fz_mro fz_pinit fz_qrec fz_r0 fz_raws fz_rd fz_ready fz_recs fz_ro fz_texts fzw_f0 fzw_g0 fzw_have fzw_recs fzw_t0)
 from p"fused_ir.dewy" import (fz_pack_ir)
 from p"fused_ops.dewy" import (fz_cand fz_canon fz_hkey fz_map_in fz_map_lf fz_parse fz_pos fz_put_str fz_small fz_validate fz_weight fzw_lower)
 from p"inline_ops.dewy" import (fast_inline_prepare)
@@ -19,7 +20,7 @@ from p"lower_primitives.dewy" import (global_addr_off lf_helper lf_of_inst str_d
 from p"lower_storage.dewy" import (box_dflt_off)
 from p"main.jo" import (host_ir lower_only repl_image)
 from p"native_debug.dewy" import (sym_name)
-from p"par.jo" import (ParIn emit_workers pr)
+from p"par.jo" import (ParIn emit_workers par_read pr)
 from p"par_ops.dewy" import (pw pw_ints)
 from p"proc_sys.dewy" import (ps_close ps_dup2 ps_fork ps_pipe ps_poll ps_read ps_wait_into)
 from p"pcheck.jo" import (pc_active pc_child pc_emit pc_fds pc_owner pc_pids pc_workers)
@@ -117,13 +118,16 @@ fused_start=(pinit_lf:FusedWord):>bool=>$unsafe {
             if pid =? 0 {
                 ps_close(rfd)
                 # (what a worker would say is said here, in order, when its functions are lowered here)
-                if env("DEWY_FUSED_TRACE") =? none {
-                    let nullfd=syscall(2 data(__zstr("/dev/null")) 1 0)
-                    if nullfd >=? 0 {
-                        ps_dup2(nullfd 1)
-                        ps_dup2(nullfd 2)
-                        ps_close(nullfd)
-                    }
+                # Speculative output is replayed by the parent; trace reports use the payload.
+                let nullfd=syscall(2 data(__zstr("/dev/null")) 1 0)
+                if env("DEWY_FUSED_TRACE") not=? none {
+                    fz_trace_fd=syscall(319 data(__zstr("dewy-trace")) 0)
+                    if fz_trace_fd >=? 0 {ps_close(nullfd) nullfd=fz_trace_fd}
+                }
+                if nullfd >=? 0 {
+                    ps_dup2(nullfd 1)
+                    ps_dup2(nullfd 2)
+                    if nullfd not=? fz_trace_fd {ps_close(nullfd)}
                 }
                 __olen=0
                 if (env("DEWY_FUSED_FAIL_WORKER") ?? "") =? "{w}" {exit(1)}
@@ -186,6 +190,12 @@ fused_start=(pinit_lf:FusedWord):>bool=>$unsafe {
             if pr(@trailer) not=? 0x46555345 {
                 lost=true
                 continue
+            }
+            if env("DEWY_FUSED_TRACE") not=? none {
+                let report_end=got[w].length - 16
+                let report_reader=ParIn(got[w] report_end)
+                let report_len=pr(@report_reader)
+                eprint(__str_from_bytes(got[w][report_end - report_len..report_end)))
             }
             fz_parse(w got[w])
         }
@@ -479,8 +489,19 @@ fz_worker=(cands:array<int64> a:FusedWord b:FusedWord fd:FusedWord):>void=>$unsa
         if elf_syms.length =? e0 {pw(@out 0)}
         else {pw(@out 1)}
     }
+    if env("DEWY_FUSED_TRACE") not=? none {
+        __out_flush()
+        let trace=""
+        if fz_trace_fd >=? 0 {
+            syscall(8 fz_trace_fd 0 0);
+            trace=__str_from_bytes(par_read(fz_trace_fd))
+        }
+        let report="{trace}  fused worker {a}..{b}: lower {(tw1 - tw0) * 1000.0} ms, others {(tw2 - tw1) * 1000.0} ms ({recs.length - nown}), pack {(tw3 - tw2) * 1000.0} ms, emit {(time() - tw3) * 1000.0} ms, {out.length} bytes"
+        let raw=report as array<uint8>
+        out.extend(raw)
+        pw(@out raw.length)
+    }
     pw(@out 0x46555345)
-    if env("DEWY_FUSED_TRACE") not=? none {eprint("  fused worker {a}..{b}: lower {(tw1 - tw0) * 1000.0} ms, others {(tw2 - tw1) * 1000.0} ms ({recs.length - nown}), pack {(tw3 - tw2) * 1000.0} ms, emit {(time() - tw3) * 1000.0} ms, {out.length} bytes")}
     __olen=0
     __write_fd(fd data(out) out.length)
     exit(0)

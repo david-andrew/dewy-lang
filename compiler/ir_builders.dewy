@@ -244,9 +244,16 @@ e_trap=():>int64=>$unsafe {
 op_name=(op:Op):>string=>$unsafe {
     return "{op}"
 }
+ir_dump_capture=false
+ir_dump_lines:array<string>=[]
+dump_ir_line=(line:string):>void=>{
+    if ir_dump_capture {ir_dump_lines.push(line)}
+    else {printl(line)}
+}
+
 dump_ir=():>void=>$unsafe {
-    printl("fn {ir.name} (params {ir.nparams}, ret {ir.ret}):");
-    loop i in [0..ir.slot_size.length) and s in ir.slot_size {printl("  slot{i}: size {s} align {ir.slot_align.ptr[i]}");}
+    dump_ir_line("fn {ir.name} (params {ir.nparams}, ret {ir.ret}):");
+    loop i in [0..ir.slot_size.length) and s in ir.slot_size {dump_ir_line("  slot{i}: size {s} align {ir.slot_align.ptr[i]}");}
     let ind:IRWord=1
     loop ins in ir.code {
         if ins.op =? 'end' or ins.op =? 'else_' {ind -= 1;}
@@ -259,7 +266,7 @@ dump_ir=():>void=>$unsafe {
             loop k in [0..IRWord(ins.b)) {al = "{al} v{ir.args.ptr[IRWord(ins.a) + IRWord(k)]}"}
             line = "{line} args:{al}"
         }
-        printl(line);
+        dump_ir_line(line);
         if ins.op =? 'block' or ins.op =? 'loop' or ins.op =? 'if_' or ins.op =? 'else_' {ind += 1;}
     }
 }

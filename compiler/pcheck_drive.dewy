@@ -15,6 +15,7 @@ from p"expr.jo" import (CV IN embedded_files fn_used)
 from p"facts.jo" import (fact_decided fact_policy fact_policy_default fact_requests fact_slice_cache fact_summaries)
 from p"facts_lifecycle.dewy" import (facts_finalize)
 from p"frontend.jo" import (source_force_body)
+from p"fused.jo" import (fz_trace_fd)
 from p"fused_drive.dewy" import (fz_read_all)
 from p"fused_ops.dewy" import (fz_get_str fz_put_str fz_small fz_weight)
 from p"ide.jo" import (ide_on)
@@ -178,13 +179,16 @@ pc_try=(start:PcWord):>void=>$unsafe {
                 ps_close(output & 0xFFFFFFFF)
                 pc_child=w
                 pc_emit=output >> 32
-                if env("DEWY_FUSED_TRACE") =? none {
-                    let nullfd=syscall(2 data(__zstr("/dev/null")) 1 0)
-                    if nullfd >=? 0 {
-                        ps_dup2(nullfd 1)
-                        ps_dup2(nullfd 2)
-                        ps_close(nullfd)
-                    }
+                # Speculative output is replayed by the parent; trace reports use the payload.
+                let nullfd=syscall(2 data(__zstr("/dev/null")) 1 0)
+                if env("DEWY_FUSED_TRACE") not=? none {
+                    fz_trace_fd=syscall(319 data(__zstr("dewy-trace")) 0)
+                    if fz_trace_fd >=? 0 {ps_close(nullfd) nullfd=fz_trace_fd}
+                }
+                if nullfd >=? 0 {
+                    ps_dup2(nullfd 1)
+                    ps_dup2(nullfd 2)
+                    if nullfd not=? fz_trace_fd {ps_close(nullfd)}
                 }
                 __olen=0
                 let parsefd=if dc_lazy_used {parsed >> 32} else {-1}

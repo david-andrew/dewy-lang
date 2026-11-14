@@ -5,10 +5,11 @@ from p"@lib/core/os.jo" import (env eprint exit time)
 
 from p"check.jo" import (target_arm64 target_wasm watch_build)
 from p"driver_pipeline.dewy" import (emit_now)
+from p"ir_builders.dewy" import (ir_dump_capture ir_dump_lines)
 from p"ir.jo" import (ir)
 from p"ir_types.dewy" import (IrFn)
 from p"lower.jo" import (rodata)
-from p"main.jo" import (repl_image)
+from p"main.jo" import (dump repl_image)
 from p"par.jo" import (ParIn emit_workers par_here par_read pr)
 from p"par_ops.dewy" import (pr_ints pr_n pw pw_ints)
 from p"elf_format.dewy" import (elf_syms)
@@ -107,6 +108,9 @@ emit_parallel=(q:array<IrFn> fin:array<bool>):>bool=>{
 }
 # ---- a worker: emit q[a..b), write what came of it to fd, end ----
 par_worker=(q:array<IrFn> fin:array<bool> a:ParWord b:ParWord r0:ParWord fd:ParWord):>void=>{
+    # Workers retain dumps per function; only the accepted emission prints at join.
+    if dump {ir_dump_capture=true}
+    __olen=0
     code=[]
     call_fix=[]
     data_fix=[]
@@ -129,7 +133,16 @@ par_worker=(q:array<IrFn> fin:array<bool> a:ParWord b:ParWord r0:ParWord fd:ParW
         ir=q[k]
         # (where it starts in each table: par_join's marks)
         let at:array<int64>=[code.length call_fix.length data_fix.length stub_fix.length cabi_fix.length elf_syms.length line_rows.length call_sites.length unwind_fns.length uw_data.length dbg_raw.length dbg_cfi.length ro_new.length rsp_rows.length]
+        if dump {ir_dump_lines=[]}
         emit_now(fin[k])
+        if dump {
+            pw(@out ir_dump_lines.length)
+            loop line in ir_dump_lines {
+                let raw=line as array<uint8>
+                pw(@out raw.length)
+                out.extend(raw)
+            }
+        }
         pw(@out ir.fn_index)
         pw(@out fn_addr[ir.fn_index])
         pw(@out fn_len[ir.fn_index])
@@ -195,10 +208,15 @@ par_worker=(q:array<IrFn> fin:array<bool> a:ParWord b:ParWord r0:ParWord fd:ParW
     pw_ints(@out news)
     pw_ints(@out rsp_rows)
     let tw2=time()
+    if env("DEWY_PAR_TIME") not=? none {
+        let report="  worker {a}..{b}: emit {(tw1 - tw0) * 1000.0} ms, pack {(tw2 - tw1) * 1000.0} ms, {out.length} bytes"
+        let raw=report as array<uint8>
+        pw(@out raw.length)
+        out.extend(raw)
+    }
     # (the compiler's own output, not yet written, is the parent's to write)
     __olen=0
     ps_write_fd(fd out out.length)
-    if env("DEWY_PAR_TIME") not=? none {eprint("  worker {a}..{b}: emit {(tw1 - tw0) * 1000.0} ms, pack {(tw2 - tw1) * 1000.0} ms, write {(time() - tw2) * 1000.0} ms, {out.length} bytes")}
     exit(0)
 }
 # A run's functions are moved as one where they land as far from where the worker made them as
@@ -209,6 +227,7 @@ par_join=(bytes_:array<uint8> r0:ParWord q:array<IrFn> fin:array<bool> a:ParWord
     let r=ParIn(bytes_)
     let align=x64_code_align()
     let nf:ParWord=pr(@r)
+    let dumps:array<array<string>>=[]
     let fis:array<ParWord>=[]
     let ats:array<ParWord>=[]
     let lns:array<ParWord>=[]
@@ -218,6 +237,15 @@ par_join=(bytes_:array<uint8> r0:ParWord q:array<IrFn> fin:array<bool> a:ParWord
     # unwind_fns, uw_data, dbg_raw, dbg_cfi, constants, rsp_rows)
     let marks:array<ParWord>=[]
     loop _ in [0..nf) {
+        if dump {
+            let lines:array<string>=[]
+            loop _ in [0..pr(@r)) {
+                let n:ParWord=pr(@r)
+                lines.push(__str_from_bytes(r.b[r.i..r.i + n)))
+                r.i += n
+            }
+            dumps.push(lines)
+        }
         fis.push(pr(@r))
         ats.push(pr(@r))
         lns.push(pr(@r))
@@ -250,6 +278,11 @@ par_join=(bytes_:array<uint8> r0:ParWord q:array<IrFn> fin:array<bool> a:ParWord
     let cfi=pr_ints(@r)
     let news=pr_ints(@r)
     let frames=pr_ints(@r)
+    if env("DEWY_PAR_TIME") not=? none {
+        let n:ParWord=pr(@r)
+        eprint(__str_from_bytes(r.b[r.i..r.i + n)))
+        r.i += n
+    }
     let ends:array<ParWord>=[nc calls.length // 2 datas.length // 3 stubs.length // 2 cabis.length // 2 names.length rows.length sites.length uws.length // 4 uwd.length raw.length cfi.length news.length // 2 frames.length]
     loop x in ends {marks.push(x)}
     let starts:array<ParWord>=[]
@@ -282,6 +315,7 @@ par_join=(bytes_:array<uint8> r0:ParWord q:array<IrFn> fin:array<bool> a:ParWord
         let ce:ParWord=marks[m1]
         code.extend(r.b[c0 + cs..c0 + ce))
         loop k in [j..e) {
+            if dump {loop line in dumps[k] {printl(line)}}
             let fi:ParWord=fis[k]
             loop fn_addr.length <=? fi {fn_addr.push(-1)}
             loop fn_len.length <=? fi {fn_len.push(0)}

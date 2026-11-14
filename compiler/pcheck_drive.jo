@@ -149,12 +149,17 @@ pc_try = (start: int):
                 syscall(3, output & 0xFFFFFFFF)
                 pc_child = w
                 pc_emit = output >> 32
-                if env("DEWY_FUSED_TRACE") == none:
-                    nullfd = syscall(2, data("/dev/null"), 1, 0)
-                    if nullfd >= 0:
-                        syscall(33, nullfd, 1)
-                        syscall(33, nullfd, 2)
-                        syscall(3, nullfd)
+                # Speculative output is replayed by the parent; trace reports use the payload.
+                nullfd = syscall(2, data("/dev/null"), 1, 0)
+                if env("DEWY_FUSED_TRACE") != none:
+                    fz_trace_fd = syscall(319, data("dewy-trace"), 0)
+                    if fz_trace_fd >= 0:
+                        if nullfd != fz_trace_fd: syscall(3, nullfd)
+                        nullfd = fz_trace_fd
+                if nullfd >= 0:
+                    syscall(33, nullfd, 1)
+                    syscall(33, nullfd, 2)
+                    if nullfd != fz_trace_fd: syscall(3, nullfd)
                 __olen = 0
                 pc_check(roots, summary >> 32, control & 0xFFFFFFFF, if dc_lazy_used: parsed >> 32 else: -1)
                 return

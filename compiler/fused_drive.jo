@@ -106,12 +106,17 @@ fused_start = (pinit_lf: int) -> bool:
             if pid == 0:
                 syscall(3, rfd)
                 # (what a worker would say is said here, in order, when its functions are lowered here)
-                if env("DEWY_FUSED_TRACE") == none:
-                    nullfd = syscall(2, data("/dev/null"), 1, 0)
-                    if nullfd >= 0:
-                        syscall(33, nullfd, 1)
-                        syscall(33, nullfd, 2)
-                        syscall(3, nullfd)
+                # Speculative output is replayed by the parent; trace reports use the payload.
+                nullfd = syscall(2, data("/dev/null"), 1, 0)
+                if env("DEWY_FUSED_TRACE") != none:
+                    fz_trace_fd = syscall(319, data("dewy-trace"), 0)
+                    if fz_trace_fd >= 0:
+                        if nullfd != fz_trace_fd: syscall(3, nullfd)
+                        nullfd = fz_trace_fd
+                if nullfd >= 0:
+                    syscall(33, nullfd, 1)
+                    syscall(33, nullfd, 2)
+                    if nullfd != fz_trace_fd: syscall(3, nullfd)
                 __olen = 0
                 if (env("DEWY_FUSED_FAIL_WORKER") ?? "") == "{w}": exit(1)
                 fz_worker(cands, cuts[w], cuts[w + 1], wfd)
@@ -165,6 +170,11 @@ fused_start = (pinit_lf: int) -> bool:
             if pr(trailer) != 0x46555345:
                 lost = true
                 continue
+            if env("DEWY_FUSED_TRACE") != none:
+                report_end = got[w].len() - 16
+                report_reader = ParIn(got[w], report_end)
+                report_len = pr(report_reader)
+                eprint(str_from_bytes(got[w][report_end - report_len..report_end)))
             fz_parse(w, got[w])
         # (a partitioned check's worker that did not finish decided none of
         # its obligations: the parent decides them, with every body checked)
@@ -404,8 +414,16 @@ fz_worker = (cands: int[], a: int, b: int, fd: int):
             k4 += 2
         if elf_syms.len() == e0: pw(out, 0)
         else: pw(out, 1)
+    if env("DEWY_FUSED_TRACE") != none:
+        __out_flush()
+        trace = ""
+        if fz_trace_fd >= 0:
+            syscall(8, fz_trace_fd, 0, 0)
+            trace = str_from_bytes(par_read(fz_trace_fd))
+        report = trace + "  fused worker {a}..{b}: lower {(tw1 - tw0) * 1000.0:.1} ms, others {(tw2 - tw1) * 1000.0:.1} ms ({recs.len() - nown}), pack {(tw3 - tw2) * 1000.0:.1} ms, emit {(time() - tw3) * 1000.0:.1} ms, {out.len()} bytes"
+        loop c in bytes(report): out.push(c)
+        pw(out, len(report))
     pw(out, 0x46555345)
-    if env("DEWY_FUSED_TRACE") != none: eprint("  fused worker {a}..{b}: lower {(tw1 - tw0) * 1000.0:.1} ms, others {(tw2 - tw1) * 1000.0:.1} ms ({recs.len() - nown}), pack {(tw3 - tw2) * 1000.0:.1} ms, emit {(time() - tw3) * 1000.0:.1} ms, {out.len()} bytes")
     __olen = 0
     __write_fd(fd, data(out), out.len())
     exit(0)
