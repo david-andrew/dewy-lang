@@ -17,6 +17,8 @@ __q_changed = (seq: *int, waiting: *int):
     __q_add(seq, 1)
     when TARGET == "linux":
         if __q_load(waiting) != 0: syscall(202, seq, 129, 0x7FFFFFFF)
+    else when TARGET == "macos" or TARGET == "windows":
+        if __q_load(waiting) != 0: __task_os_wake(seq)
 
 # Sleeps until seq moves on from s, or 1 ms passes; the first few rounds only yield.
 __q_park = (seq: *int, s: int, waiting: *int, spins: int):
@@ -25,6 +27,11 @@ __q_park = (seq: *int, s: int, waiting: *int, spins: int):
         __q_add(waiting, 1)
         timeout = (0, 1000000)
         syscall(202, seq, 128, s, &timeout)
+        __q_add(waiting, -1)
+    else when TARGET == "macos" or TARGET == "windows":
+        if spins < 16: return
+        __q_add(waiting, 1)
+        __task_os_wait(seq, s, 1000)
         __q_add(waiting, -1)
     else: __task_pause()
 

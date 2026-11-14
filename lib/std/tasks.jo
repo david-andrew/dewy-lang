@@ -13,19 +13,25 @@ const __TASK_WAKE_SIGNAL = 34
 
 __task_initialize = () -> bool:
     if __task_contexts.len() != 0: return true
-    when TARGET != "linux": return false
+    when TARGET == "wasm": return false
     else:
         # Initialization runs on the owner before its first child can start.
         __ts()
         __rng_threads()
         n = __TASK_SLOTS << __TASK_SHIFT
-        p = syscall(9, 0, n, 3, 0x22 | 0x4000, -1, 0)
-        if p < 0 and p > -4096: return false
+        # (reserved, not committed: a task's stack is committed when it starts)
+        when TARGET == "windows":
+            p = VirtualAlloc(null, n, u32(0x2000), 4) as int                   # MEM_RESERVE
+            if p == 0: return false
+        else:
+            p = syscall(9, 0, n, 3, 0x22 | 0x4000, -1, 0)
+            if p < 0 and p > -4096: return false
         __task_stacks = p as *u8
         __task_states = __os_pages(__TASK_SLOTS * __TS_WORDS * 8) as *int
         __task_slots = __os_pages(__TASK_SLOTS * 8) as *int
         if not __task_install_interrupt():
-            syscall(11, __task_stacks, n)
+            when TARGET == "windows": VirtualFree(__task_stacks, 0, u32(0x8000))
+            else: syscall(11, __task_stacks, n)
             __os_free_pages(__task_states as *u8, __TASK_SLOTS * __TS_WORDS * 8)
             __os_free_pages(__task_slots as *u8, __TASK_SLOTS * 8)
             __task_stacks = null
@@ -45,7 +51,7 @@ __task_new_group = (deadline: int = 0, signal_owner: bool = true) -> TaskGroup:
     p = __task_data(state) as *__TaskScope
     p.parent = __task_context().scope
     p.deadline = deadline
-    p.owner = syscall(186)
+    when TARGET == "linux": p.owner = syscall(186)
     p.signal_owner = p
     if not signal_owner: __task_inherit_signal_owner(TaskGroup(state, p))
     TaskGroup(state, p)
@@ -94,13 +100,19 @@ __task_claim_slot = () -> int:
 __task_worker = (slot: int) -> void:
     c = __task_data(__task_contexts) + slot + 1
     p = c.address
-    # Linux clears this word at actual thread exit, after the last use of the
-    # stack. A completion flag before returning is insufficient for reuse.
-    syscall(218, &p.alive)
-    # (its signal stack, between its slot's two guards: the crash handler reports an overflow there)
-    st = ((__task_stacks + (slot << __TASK_SHIFT) + 4096) as int, 0, 65536)
-    syscall(131, &st, 0)                                   # sigaltstack
-    __atomic_cas(&p.tid, 0, syscall(186))
+    when TARGET == "linux":
+        # Linux clears this word at actual thread exit, after the last use of the
+        # stack. A completion flag before returning is insufficient for reuse.
+        syscall(218, &p.alive)
+        # (its signal stack, between its slot's two guards: the crash handler reports an overflow there)
+        st = ((__task_stacks + (slot << __TASK_SHIFT) + 4096) as int, 0, 65536)
+        syscall(131, &st, 0)                                   # sigaltstack
+        __atomic_cas(&p.tid, 0, syscall(186))
+    else when TARGET == "macos":
+        # (as on Linux, with 16 KB pages, __task_prepare_stack; macOS's stack_t is the stack,
+        # its size, then the flags. The thread clears `alive` itself, back on its system stack)
+        st = ((__task_stacks + (slot << __TASK_SHIFT) + 16384) as int, 65536, 0)
+        __c_sigaltstack((&st) as *u8, null)
     c.scope = p.group
     c.rng = rng(__rng_seed + slot * 1000003)
     __task_states[slot * __TS_WORDS + __TS_FILE_CODE] = 0
@@ -135,7 +147,105 @@ __task_worker = (slot: int) -> void:
     __task_lock(&g.lock)
     g.pending -= 1
     __task_unlock(&g.lock)
-    syscall(202, &g.pending, 129, 0x7FFFFFFF)
+    when TARGET == "linux": syscall(202, &g.pending, 129, 0x7FFFFFFF)
+    else: __task_os_wake(&g.pending)
+
+# macOS and Windows start a task's thread on a small stack of the system's, which moves to its
+# slot's stack (where __task_slot and __ts find it) and comes back to end: only then is the
+# slot's stack unused, and `alive` cleared, as Linux's kernel clears it at the thread's exit.
+# The jump buffer is at the top of the slot's stack, the task's frames under it.
+when TARGET == "macos" or TARGET == "windows":
+    __task_resume_at = (slot: int) -> *u8: __task_stacks + ((slot + 1) << __TASK_SHIFT) - 256
+
+    # (entered by __jump, with nothing to return to: it leaves by the jump buffer)
+    @cabi
+    __task_os_entry = ():
+        slot = __task_slot()
+        __task_worker(slot)
+        __longjmp(__task_resume_at(slot), 1)
+
+    # On the system's stack: run the task on its own, then report the stack free.
+    __task_os_run = (slot: int):
+        job = (__task_data(__task_contexts) + slot + 1).address
+        alive = &job.alive
+        jb = __task_resume_at(slot)
+        if __setjmp(jb) == 0:
+            entry: cfn() = __task_os_entry
+            sp = jb - 64
+            when ARCH != "arm64":
+                # (as if called: a zero return address, the stack 16-byte aligned before it)
+                sp = sp - 8
+                (sp as *int)[0] = 0
+            __jump(entry as *u8, sp)
+        when TARGET == "macos":
+            # (a signal from here on must not run on the slot's signal stack, soon another's)
+            off = (0, 0, 4)                                    # SS_DISABLE
+            __c_sigaltstack((&off) as *u8, null)
+        __atomic_cas(alive, 1, 0)
+        __task_os_wake(alive)
+
+when TARGET == "macos":
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("pthread_join")
+    extern __mac_pthread_join = (t: *u8, result: *u8) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("madvise")
+    extern __c_madvise = (addr: *u8, len: int, advice: i32) -> i32
+
+    @cabi
+    __task_mac_start = (arg: *u8) -> *u8:
+        __task_os_run(arg as int)
+        null
+else when TARGET == "windows":
+    @cabi
+    __task_w32_start = (slot: int) -> int:
+        __task_os_run(slot)
+        0
+
+# (Linux's are in __task_launch and __task_join, by system call)
+# A thread for the task in slot: whether it started. The job keeps the thread (its pthread_t,
+# or its handle) in `tid`, for __task_join to wait for its end, as Linux's join waits for the
+# kernel to clear `alive`.
+__task_start_thread = (slot: int, j: *__TaskJob) -> bool:
+    when TARGET == "macos":
+        start: cfn(*u8) -> *u8 = __task_mac_start
+        th = [0]
+        if __mac_pthread_create(data(th) as *u8, null, start as *u8, slot as *u8) != 0: return false
+        j.tid = th[0]
+        return true
+    else when TARGET == "windows":
+        start: cfn(int) -> int = __task_w32_start
+        # (64 KB reserved for the system's stack: STACK_SIZE_PARAM_IS_A_RESERVATION)
+        h = CreateThread(null, 65536, start as *u8, slot as *u8, u32(0x10000), null)
+        if h == null: return false
+        j.tid = h as int
+        return true
+    else: return false
+
+__task_end_thread = (j: *__TaskJob):
+    when TARGET == "macos": __mac_pthread_join(j.tid as *u8, null)
+    else when TARGET == "windows":
+        WaitForSingleObject(j.tid as *u8, u32(0xFFFFFFFF))
+        CloseHandle(j.tid as *u8)
+
+# A slot's guards and stack, before its task starts. macOS commits pages on demand, as Linux
+# does, but its pages are 16 KB: the guards are a page each. Windows commits when asked, so
+# there the stack is committed whole, its upper guard a one-shot PAGE_GUARD with the signal
+# stack's room under it for the crash report, as a pool worker's (fork_join.jo).
+# __task_release_stack gives the pages back.
+__task_prepare_stack = (low: *u8) -> bool:
+    when TARGET == "windows":
+        size = 1 << __TASK_SHIFT
+        if VirtualAlloc(low + 4096, 65536, u32(0x1000), 4) == null: return false
+        if VirtualAlloc(low + 4096 + 65536, 4096, u32(0x1000), 0x104) == null: return false
+        return VirtualAlloc(low + 8192 + 65536, size - 8192 - 65536, u32(0x1000), 4) != null
+    else when TARGET == "macos":
+        return syscall(10, low, 16384, 0) == 0 and syscall(10, low + 16384 + 65536, 16384, 0) == 0
+    else: return false
+
+__task_release_stack = (low: *u8):
+    when TARGET == "windows": VirtualFree(low + 4096, (1 << __TASK_SHIFT) - 4096, u32(0x4000))       # MEM_DECOMMIT
+    else when TARGET == "macos": __c_madvise(low + 32768 + 65536, (1 << __TASK_SHIFT) - 32768 - 65536, i32(5))   # MADV_FREE
 
 __task_launch = (g: TaskGroup, f: () -> void) -> bool:
     if g.__state.len() == 0: return false
@@ -163,15 +273,17 @@ __task_launch = (g: TaskGroup, f: () -> void) -> bool:
     c.activity = 0
     c.waiting = null
     c.signal_wait = null
-    entry: cfn(int) = __task_worker
+    when TARGET == "linux": entry: cfn(int) = __task_worker
     top = __task_stacks + ((slot + 1) << __TASK_SHIFT)
     # The low page is a guard, then 64 KB of signal stack and another guard; reserved virtual
     # stacks commit on demand.
     low = top - (1 << __TASK_SHIFT)
-    guarded = syscall(10, low, 4096, 0) == 0 and syscall(10, low + 4096 + 65536, 4096, 0) == 0
+    when TARGET == "linux": guarded = syscall(10, low, 4096, 0) == 0 and syscall(10, low + 4096 + 65536, 4096, 0) == 0
+    else: guarded = __task_prepare_stack(low)
     __task_lock(&__task_frontier_lock)
     p.pending += 1
-    id = if guarded: __clone_thread(entry as *u8, slot, top) else: -1
+    when TARGET == "linux": id = if guarded: __clone_thread(entry as *u8, slot, top) else: -1
+    else: id = if guarded and __task_start_thread(slot, j): 0 else: -1
     if id < 0:
         p.pending -= 1
         __task_unlock(&__task_frontier_lock)
@@ -293,6 +405,7 @@ __task_join = (g: TaskGroup) -> (bool | exception):
     # acknowledgement before clearing closures or releasing any stack slot.
     loop j in p.addresses:
         loop __atomic_add(&j.alive, 0) != 0: __task_wait(&j.alive, 1, false)
+        when TARGET != "linux": __task_end_thread(j)
         slot = j.slot
         when __RUNTIME_SETTINGS:
             __settings_release(__task_states[slot * __TS_WORDS + __TS_SETTINGS] as *__SettingsFrame)
@@ -300,7 +413,8 @@ __task_join = (g: TaskGroup) -> (bool | exception):
         j.run = __task_noop
         j.group = TaskGroup()
         (__task_data(__task_contexts) + slot + 1).job = []
-        syscall(28, __task_stacks + (slot << __TASK_SHIFT) + 4096, (1 << __TASK_SHIFT) - 4096, 4)
+        when TARGET == "linux": syscall(28, __task_stacks + (slot << __TASK_SHIFT) + 4096, (1 << __TASK_SHIFT) - 4096, 4)
+        else: __task_release_stack(__task_stacks + (slot << __TASK_SHIFT))
         __task_lock(&__task_slot_lock)
         __task_slots[slot] = 0
         __task_unlock(&__task_slot_lock)
@@ -671,7 +785,8 @@ select[A, B, C, D, E] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D, timeout
 __task_interrupt = (signal: int) -> void: pass
 
 __task_install_interrupt = () -> bool:
-    when TARGET != "linux": return false
+    # (macOS and Windows: none; a canceled task's waits notice within a millisecond)
+    when TARGET != "linux": return true
     else:
         trampoline = syscall(9, 0, 4096, 3, 0x22, -1, 0)
         if trampoline < 0 and trampoline > -4096: return false
@@ -712,6 +827,10 @@ __task_wait = (address: *int, expected: int, private: bool):
         when __CORE_CAPS: suspended = __settings_core_suspend()
         timeout = (0, 1000000)
         syscall(202, address, (if private: 128 else: 0), expected, &timeout)
+        when __CORE_CAPS: __settings_core_resume(suspended)
+    else when TARGET == "macos" or TARGET == "windows":
+        when __CORE_CAPS: suspended = __settings_core_suspend()
+        __task_os_wait(address, expected, 1000)
         when __CORE_CAPS: __settings_core_resume(suspended)
     else: __task_pause()
 

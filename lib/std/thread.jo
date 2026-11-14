@@ -301,6 +301,8 @@ __chan_changed = (seq: *int, lock: *int, waiting: *int):
         __task_unlock(lock)
         when TARGET == "linux":
             if w != 0: syscall(202, seq, 129, 0x7FFFFFFF)
+        else:
+            if w != 0: __task_os_wake(seq)
 
 # Sleeps until seq moves on from s (the lock released first), or 1 ms passes.
 __chan_park = (seq: *int, s: int, lock: *int, waiting: *int, spins: int):
@@ -312,6 +314,14 @@ __chan_park = (seq: *int, s: int, lock: *int, waiting: *int, spins: int):
         __chan_unlock(lock)
         timeout = (0, 1000000)
         syscall(202, seq, 128, s, &timeout)
+        __atomic_add(waiting, -1)
+    else when TARGET == "macos" or TARGET == "windows":
+        if spins < 16:
+            __chan_unlock(lock)
+            return
+        __atomic_add(waiting, 1)
+        __chan_unlock(lock)
+        __task_os_wait(seq, s, 1000)
         __atomic_add(waiting, -1)
     else:
         __chan_unlock(lock)

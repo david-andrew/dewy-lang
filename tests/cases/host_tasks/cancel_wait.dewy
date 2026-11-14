@@ -1,0 +1,24 @@
+# modes: native native-release
+# quick
+# Cancellation reaches a waiting task on every native host: `within` ends a receive that
+# nothing will answer, and a failed sibling cancels a task blocked on an empty channel.
+Failed:type = type of error
+wait_forever = (c:Channel<int64>):>int64 | Closed<int64> | Canceled => {
+    let v = c.receive or_throw
+    v
+}
+quit = ():>void | Failed | Canceled => {
+    sleep(10ms) or_throw
+    return Failed
+}
+main = () => {
+    let silent = channel<int64>(1)
+    printl"timed out: {within(50ms @wait_forever(silent)) is? Timeout}"
+    concurrent {
+        let waiter = spawn wait_forever(silent)
+        spawn quit()
+    }
+    printl"canceled: {waiter is? Canceled}"
+    silent.send(5) ?? void;
+    printl"after them: {silent.receive}"
+}

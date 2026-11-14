@@ -112,6 +112,8 @@ when TARGET == "windows":
         fatal = code == 0x80000001 or code == 0xC00000FD or code == 0xC0000005 or code == 0xC0000094 or code == 0xC0000095 or code == 0xC000001D or code == 0xC0000096
         # (a fault while this thread reports, in the program's code or a library's: the report is over)
         me = __tid() + 1
+        task = __crash_task_id(__stack_ptr() as int)
+        if task != 0: me = task
         if fatal and __atomic_add(&__crash_reporter, 0) == me: __w32_crash_exit()
         rsp = ((ctx + 0x98) as *int)[0]
         rbp = ((ctx + 0xA0) as *int)[0]
@@ -170,6 +172,8 @@ else when TARGET == "macos":
         # the handler runs on a signal stack)
         me = 1
         if __tstack_base != null and rsp >= (__tstack_base as int) and rsp < (__tstack_base as int) + (__MAX_THREADS << __TSTACK_SHIFT): me = ((rsp - (__tstack_base as int)) >> __TSTACK_SHIFT) + 2
+        task = __crash_task_id(rsp)
+        if task != 0: me = task
         if __atomic_cas(&__crash_reporter, 0, me) != 0:
             if __atomic_add(&__crash_reporter, 0) == me: __exit(101)    # (the report itself crashed)
             pause = (1, 0)
@@ -240,6 +244,13 @@ else when TARGET != "wasm":
         __write_err("panic: {what}\n")
         __backtrace_from(rbp, rip, rsp)
         __exit(101)
+
+# (macOS and Windows tell the faulting thread by its stack: a task's, by its slot, is its own,
+# so two tasks overflowing at once are two threads, one reporting while the other waits)
+__crash_task_id = (sp: int) -> int:
+    base = __task_stacks as int
+    if __task_stacks == null or sp < base or sp >= base + (__TASK_SLOTS << __TASK_SHIFT): return 0
+    __MAX_THREADS + 3 + ((sp - base) >> __TASK_SHIFT)
 
 # what "{x:x}" writes, without the general formatter (spec parsing and floats): every native
 # program has a crash handler

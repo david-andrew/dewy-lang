@@ -1,0 +1,22 @@
+# modes: native native-release
+# quick
+# A `parallel ( ... )` block's items run as tasks on every native host: each item here waits
+# for the other's message, so neither could finish if they ran one after the other.
+Stopped:type = type of error
+let ping = channel<int64>(1)
+let pong = channel<int64>(1)
+left = ():>int64 | Stopped | Canceled | Closed<int64> | Unsent<int64> => {
+    ping.send(20) or_throw
+    pong.receive or_throw
+}
+right = ():>int64 | Stopped | Canceled | Closed<int64> | Unsent<int64> => {
+    pong.send(22) or_throw
+    ping.receive or_throw
+}
+main = () => {
+    parallel (
+        let a = left or_throw
+        let b = right or_throw
+    )
+    printl"{a} + {b} = {a + b}"
+}

@@ -74,7 +74,7 @@ def test_worker_stack_overflow_is_reported(compiler, tmp_path, target):
 
 
 # A task's stack overflows into its guard: its own signal stack, between two guards, lets the
-# handler report it (tasks run on Linux only).
+# handler report it (on Windows: a one-shot guard page with room under it, as a worker's).
 TASK_OVERFLOW = """$runtime_checks
 
 depth = (n:int64):>int64 => if n <=? 0 0 else 1 + depth(n - 1)
@@ -91,7 +91,7 @@ main = (argv:array<string>):>void => {
 """
 
 
-@pytest.mark.parametrize('target', ['x86_64-linux', 'aarch64-linux'])
+@pytest.mark.parametrize('target', TARGETS)
 def test_task_stack_overflow_is_reported(compiler, tmp_path, target):
     binary = build(compiler, tmp_path, TASK_OVERFLOW, target)
     assert run(target, binary, '1000')[:2] == (0, '1000 1001\n')

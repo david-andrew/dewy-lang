@@ -5,8 +5,6 @@ corruption, a hang or a bare signal death."""
 import subprocess
 import sys
 
-import pytest
-
 from tests.support import compiler  # noqa: F401 (fixture)
 from tests.test_cross_target_runs import TASK_OVERFLOW, WORKER_OVERFLOW
 
@@ -58,7 +56,6 @@ def test_worker_stack_overflow_is_reported(compiler, tmp_path):
         assert_reported(*run_native(binary, '1000000')[::2])
 
 
-@pytest.mark.skipif(sys.platform != 'linux', reason='tasks run on Linux only')
 def test_task_stack_overflow_is_reported(compiler, tmp_path):
     binary = build_native(compiler, tmp_path, TASK_OVERFLOW)
     assert run_native(binary, '1000')[:2] == (0, '1000 1001\n')

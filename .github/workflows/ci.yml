@@ -285,6 +285,10 @@ jobs:
         env:
           DEWY_CORE_COMPILER: ${{ runner.temp }}/host-check/dewy-core/bin/dewy-core${{ matrix.suffix }}
         run: python -m pytest -q -o addopts='' tests/test_host_stack_overflow.py
+      - name: Run tasks and deliver signals to their listeners on this host
+        env:
+          DEWY_CORE_COMPILER: ${{ runner.temp }}/host-check/dewy-core/bin/dewy-core${{ matrix.suffix }}
+        run: python -m pytest -q -o addopts='' tests/test_host_tasks.py tests/test_host_signals.py
       - name: Exercise the editor client and native language server
         env:
           DEWY_CORE_COMPILER: ${{ runner.temp }}/host-check/dewy-core/bin/dewy-core${{ matrix.suffix }}

@@ -142,6 +142,19 @@ __task_pause = ():
         when __CORE_CAPS: __settings_core_resume(suspended)
     else: __sleep_ns(1000000)
 
+# Where Linux waits on a futex (each use spells its own system call): wait while the word at p
+# holds v, at most us microseconds, and wake every waiter. macOS has __ulock_wait
+# (UL_COMPARE_AND_WAIT64), Windows WaitOnAddress (whole milliseconds); the externs are
+# fork_join.jo's. A wake of a word no one waits on, or one since freed, does nothing.
+when TARGET == "macos":
+    __task_os_wait = (p: *int, v: int, us: int): __mac_ulock_wait(u32(5), p as *u8, v, u32(us))
+    __task_os_wake = (p: *int): __mac_ulock_wake(u32(5 | 0x100), p as *u8, 0)
+else when TARGET == "windows":
+    __task_os_wait = (p: *int, v: int, us: int):
+        cmp = v
+        WaitOnAddress(p as *u8, (&cmp) as *u8, 8, u32((us + 999) / 1000))
+    __task_os_wake = (p: *int): WakeByAddressAll(p as *u8)
+
 # Race helpers inherit their caller's owner; their group body is still tracked.
 __task_inherit_signal_owner = (g: TaskGroup):
     p = g.__p

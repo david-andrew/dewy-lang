@@ -3645,7 +3645,8 @@ block's own task. A task item that would change what the block's own code holds 
 naming the item and the variable. The web target runs every item in order. A name from
 `parallel { ... }` used after it is an error that suggests `parallel ( ... )`.
 
-Waiting work uses a structured task group on the Linux threads backend:
+Waiting work uses a structured task group, each task on a thread of its own (Linux, macOS
+and Windows; the web target has no tasks):
 
 ```dewy
 work = (n:int) => n*2
@@ -4615,7 +4616,7 @@ main = ():>void | net.NetError | Canceled => {
 
 Cancellation reaches the group's own thread as well: a server can accept on the
 thread that opened the group while a spawned client cancels the group when it
-is done. Tasks run on Linux for now; elsewhere the calls simply block. Native
+is done. Native
 targets use the system's C library (Winsock on Windows); a web page has no TCP
 sockets. The game library's WebSocket messages (`net.listen`, `net.connect`,
 `net.receive`, `net.send`, below) come with the same import.

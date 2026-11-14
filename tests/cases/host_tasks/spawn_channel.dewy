@@ -1,0 +1,34 @@
+# modes: native native-release
+# quick
+# Tasks on every native host: producers and a consumer meet on a channel, each spawn's
+# result is read after its group, and a full channel makes its sender wait.
+$runtime_checks
+produce = (out:Channel<int64> start:int64):>int64 | Unsent<int64> | Canceled => {
+    loop k in [0..10) { out.send(start + k) or_throw }
+    10
+}
+consume = (inbox:Channel<int64>):>int64 | Canceled => {
+    let total:int64 = 0
+    loop true {
+        match inbox.receive {
+            item:int64 => {total = (total + item) % 1000000}
+            <Closed> => break
+            <Canceled> => return Canceled
+        }
+    }
+    total
+}
+main = ():>void | Unsent<int64> | Canceled | OutOfMemory => {
+    let inbox = channel<int64>(2)
+    concurrent {
+        let sum = spawn consume(inbox)
+        concurrent {
+            let a = spawn produce(inbox 0)
+            let b = spawn produce(inbox 100)
+            let c = spawn produce(inbox 200)
+        }
+        printl"sent {(a or_throw) + (b or_throw) + (c or_throw)}"
+        inbox.close()
+    }
+    printl"received {sum or_throw}"
+}
