@@ -14,7 +14,8 @@ from p"checks_thin.dewy" import (ensure_ret)
 from p"frontend.jo" import source_force_body
 from p"checks_type_hooks.dewy" import (instance_preflight instance_create instance_bad_arg instance_depth_error instance_load instance_validate instance_attributes)
 from p"ast.jo" import (clone kid)
-from p"directives.jo" import (dir_code_runtime_keys dir_code_generic_warn dir_code_generic dir_code_foreign_warn dir_code_context dir_code_contexts dir_code_origin dir_code_origins dir_code_any dir_code_mask dir_code_masks dir_mixed_files dir_code_uniform dir_code_can_vary dir_code_sources dir_code_by_inst dir_code_request)
+from p"directives.jo" import (dir_code_runtime_keys dir_code_contexts dir_code_origins dir_code_any dir_code_masks dir_mixed_files dir_code_sources dir_code_by_inst)
+from p"directive_code.dewy" import (dir_code_can_vary dir_code_context dir_code_foreign_warn dir_code_generic dir_code_generic_warn dir_code_mask dir_code_origin dir_code_request dir_code_uniform)
 # Demand-only instance resolution. Concrete lookup is indexed; unresolved lookup
 # scans this declaration's instances and type arguments. Substitution and body
 # walks retain their existing costs. Hosts may reenter and grow every arena.

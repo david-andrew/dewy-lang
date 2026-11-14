@@ -50,6 +50,7 @@ LEAF_HOMES = {
     'refine_siblings': 'refine.jo',
     'directive_rules': 'directives.jo',
     'directive_queries': 'directives.jo',
+    'directive_code': 'directives.jo',
     'constant_fold_ops': 'constant_folds.jo',
     'unit_rare': 'units.jo',
     'safe_path_walk': 'safe_paths.jo',
