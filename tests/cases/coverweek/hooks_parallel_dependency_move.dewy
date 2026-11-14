@@ -1,0 +1,14 @@
+let drops:int64=0
+Ticket=type of [id:int64 $__drop__=():>void=>{drops+=1}]
+load=():>Ticket=>Ticket[6]
+consume=(t:Ticket):>int64=>t.id
+main=()=>{
+ {
+  parallel (
+   let ticket=load()
+   let count=consume(ticket)
+  )
+  printl(count)
+ }
+ printl(drops)
+}

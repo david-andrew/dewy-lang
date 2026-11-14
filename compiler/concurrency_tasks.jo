@@ -14,6 +14,7 @@ use 'deadlock.jo'
 use 'checker_state.dewy'
 use 'concurrency_types.dewy'
 use 'errors.jo'
+use 'ownership_types.dewy'
 use 'error_ops.dewy'
 use 'util.jo'
 use 'diagnostic_exit.dewy'
@@ -181,8 +182,15 @@ concurrency_report = (n: int, args: int[]) -> int:
     add_flag(value, NF_CHECKED)
     gn = "$report_group{n}"
     vn = "$report_value{n}"
-    statements = [bc_let(gn, group, pos), bc_let(vn, value, pos)]
     members = value_members(t)
+    # Inspect a success owner through its local; a fresh binding would copy it.
+    borrowed = nodes[value].kind == .ident and nodes[value].aux == 1 and ownership_fact_type(t)
+    if borrowed:
+        loop member in members:
+            if exception_member(member) and ownership_fact_type(member): borrowed = false
+    statements = [bc_let(gn, group, pos)]
+    if borrowed: vn = name_of(int(nodes[value].name))
+    else: statements.push(bc_let(vn, value, pos))
     loop member in members:
         if not exception_member(member): continue
         # (the family holds no generic instance: `Closed<T>` reports its erased instance,

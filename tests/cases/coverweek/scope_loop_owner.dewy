@@ -1,0 +1,9 @@
+let drops:int64=0
+Ticket=type of [id:int64 $__drop__=():>void=>{drops+=1}]
+main=()=>{
+ loop i in [1..3] (
+  let t=Ticket[i]
+  printl(t.id)
+ )
+ printl(drops)
+}

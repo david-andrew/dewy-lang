@@ -1,0 +1,10 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+watch=()=>{
+ loop _ in signals.ctrl_c.observe {}
+ 42
+}
+main=()=>{
+ parallel (let status=watch())
+ printl(status)
+}

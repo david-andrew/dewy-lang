@@ -76,6 +76,8 @@ from p"member_ops.dewy" import (member_lower_block member_lower_text)
 from p"parallel_ops.dewy" import (parallel_scalar_decl parallel_scalar_length parallel_scalar_read)
 from p"effect_contracts.dewy" import (callable_base)
 from p"effect_costs.dewy" import (effect_lower_intrinsic)
+from p"directives.jo" import dir_runtime_settings
+from p"setting_scopes.dewy" import SETTING_SCOPE_CLEANUP
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LGWord:type=int64<overflow='wrap'>
 LGUWord:type=uint64<overflow='wrap'>
@@ -135,6 +137,28 @@ emit_scope_exit=(i:LGWord):>void=>$unsafe {
         k -= 1;
     }
     if i =? 0 {owner_leave_captures()}
+}
+# A parenthesized block shares its locals and ordinary defers with its enclosing
+# scope, but its written settings still end at its closing parenthesis. Visit
+# only defers added inside this block, and only when runtime settings exist.
+# Early exits already emit these same actions through emit_scope_exit.
+gen_unscoped_settings=(mark:LGWord):>void=>$unsafe {
+    if mark <? 0 {return}
+    let scope=scope_defers.length - 1
+    let pending=scope_defers.ptr[scope]
+    let i=pending.length - 1
+    loop i >=? mark {
+        let d=pending.ptr[i]
+        if nodes.ptr[d].aux2 =? int32(SETTING_SCOPE_CLEANUP) {
+            scope_defers.ptr[scope]=pending[..i)
+            if concurrency_runtime_needed {e_call0(rt("__task_shield_enter") -1);}
+            gen_stmt(d);
+            if concurrency_runtime_needed {e_call0(rt("__task_shield_leave") -1);}
+            pending.pop(i);
+        }
+        i -= 1
+    }
+    scope_defers.ptr[scope]=pending
 }
 scope_pop=():>void=>$unsafe {
     emit_scope_exit(scope_locals.length - 1);
@@ -947,6 +971,7 @@ gen_value_block=(b:LGWord rs:LGWord rt_:LGWord rv:LGWord=-1):>void=>$unsafe {
     }
     # (`( ... )`: its names belong to the enclosing scope, which drops them)
     let unscoped=has_flag(b NF_UNSCOPED)
+    let settings=if unscoped and dir_runtime_settings {scope_defers.ptr[scope_defers.length - 1].length} else {-1}
     if not unscoped {scope_push();}
     let n=nkids(b)
     loop i in [0..n) {
@@ -967,7 +992,7 @@ gen_value_block=(b:LGWord rs:LGWord rt_:LGWord rv:LGWord=-1):>void=>$unsafe {
         }
         gen_stmt(s);
     }
-    if not unscoped {scope_pop();}
+    if not unscoped {scope_pop();} else {gen_unscoped_settings(settings);}
 }
 gen_match_test=(p:LGWord st0:LGWord hidden_addr:LGWord):>LGWord=>$unsafe {
     # Compare a refined payload through its storage representation.
@@ -4817,6 +4842,7 @@ gen_stmt=(s:LGWord):>void=>$unsafe {
 }
 gen_block_stmts=(b:LGWord):>void=>$unsafe {
     if member_scopes.length >? 0 and nkids(b) >? 1 and member_lower_block(b) {return}
+    let settings=if dir_runtime_settings and (has_flag(b NF_UNSCOPED) or nodes.ptr[b].aux =? 5) {scope_defers.ptr[scope_defers.length - 1].length} else {-1}
     let guarded=lower_length_guards.length
     loop i in [0..nkids(b)) {
         cur_block=b
@@ -4825,6 +4851,7 @@ gen_block_stmts=(b:LGWord):>void=>$unsafe {
         lower_length_guard(kid(b i));
     }
     lower_length_guards.truncate(guarded);
+    gen_unscoped_settings(settings);
 }
 gen_owner_array=(e:LGWord t:LGWord):>Val=>$unsafe {
     let et=telem(t)

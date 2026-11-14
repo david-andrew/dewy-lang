@@ -1,0 +1,6 @@
+MissingConfig:type=type of error
+load=(ok:bool):>int|MissingConfig=>if ok 42 else MissingConfig[]
+main=()=>{
+ parallel (let a=load(false);let b=load(true))
+ printl"{a is? MissingConfig} {b}"
+}

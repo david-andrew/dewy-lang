@@ -1,0 +1,8 @@
+import p"@lib/time/intervals.dewy" as intervals
+main=()=>{
+ let start=zoned"2026-11-01T01:30-04:00[America/New_York]".nominal
+ let finish=zoned"2026-11-01T01:30-05:00[America/New_York]".nominal
+ let windows=intervals.union([start..finish) [finish..finish+1hour))
+ printl(windows.length)
+ if windows.length =? 1 {printl(intervals.measure(windows[0]))}
+}

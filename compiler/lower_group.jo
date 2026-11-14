@@ -5,6 +5,8 @@ use 'lower_views.dewy'
 use 'lower_storage.dewy'
 use 'lower_analysis.dewy'
 use 'lower_helpers.dewy'
+use 'directives.jo'
+use 'setting_scopes.dewy'
 # Frozen recursive lowering from lower.jo.
 use 'lower.jo'
 use 'expr.jo'
@@ -124,6 +126,24 @@ emit_scope_exit = (i: int):
             e_mov(int(locals[l].vreg), e_iconst(0))
         k -= 1
     if i == 0: owner_leave_captures()
+
+# Restore only runtime settings introduced by this unscoped block, leaving
+# ordinary defers and owners in their enclosing scope. O(new defers).
+gen_unscoped_settings = (mark: int):
+    if mark < 0: return
+    scope = scope_defers.len() - 1
+    pending = scope_defers[scope]
+    i = pending.len() - 1
+    loop i >= mark:
+        d = pending[i]
+        if nodes[d].aux2 == i32(SETTING_SCOPE_CLEANUP):
+            scope_defers[scope] = pending[..i)
+            if concurrency_runtime_needed: e_call0(rt("__task_shield_enter"), -1)
+            gen_stmt(d)
+            if concurrency_runtime_needed: e_call0(rt("__task_shield_leave"), -1)
+            pending.remove(i)
+        i -= 1
+    scope_defers[scope] = pending
 
 scope_pop = ():
     emit_scope_exit(scope_locals.len() - 1)
@@ -851,6 +871,7 @@ gen_value_block = (b: int, rs: int, rt_: int, rv: int = -1):
         return
     # (`( ... )`: its names belong to the enclosing scope, which drops them)
     unscoped = has_flag(b, NF_UNSCOPED)
+    settings = if unscoped and dir_runtime_settings: scope_defers[scope_defers.len() - 1].len() else: -1
     if not unscoped: scope_push()
     n = nkids(b)
     loop i in [0..n):
@@ -868,6 +889,7 @@ gen_value_block = (b: int, rs: int, rt_: int, rv: int = -1):
             continue
         gen_stmt(s)
     if not unscoped: scope_pop()
+    else: gen_unscoped_settings(settings)
 
 gen_match_test = (p: int, st0: int, hidden_addr: int) -> int:
     # Compare a refined payload through its storage representation.
@@ -4303,6 +4325,7 @@ gen_stmt = (s: int):
 
 gen_block_stmts = (b: int) -> void:
     if member_scopes.len() > 0 and nkids(b) > 1 and member_lower_block(b): return
+    settings = if dir_runtime_settings and (has_flag(b, NF_UNSCOPED) or nodes[b].aux == 5): scope_defers[scope_defers.len() - 1].len() else: -1
     guarded = lower_length_guards.len()
     loop i in [0..nkids(b)):
         cur_block = b
@@ -4310,6 +4333,7 @@ gen_block_stmts = (b: int) -> void:
         gen_stmt(kid(b, i))
         lower_length_guard(kid(b, i))
     lower_length_guards.truncate(guarded)
+    gen_unscoped_settings(settings)
 
 gen_owner_array = (e: int, t: int) -> Val:
     et = telem(t)

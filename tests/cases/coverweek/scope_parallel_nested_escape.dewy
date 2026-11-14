@@ -1,0 +1,8 @@
+load=(n:int):>int=>n*2
+main=()=>{
+ parallel (
+  parallel (let config=load(3))
+  let result=load(config)
+ )
+ printl"{config} {result}"
+}

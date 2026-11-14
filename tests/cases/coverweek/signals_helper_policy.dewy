@@ -1,0 +1,24 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+Ticket=type of [id:int64 $__drop__=():>void=>printl"released"]
+watch=(done:Channel<int64>)=>{
+ let guard=Ticket[1]
+ _ = signals.ctrl_c.next(timeout=0s)
+ printl"ready"
+ loop _ in signals.ctrl_c {
+  printl"received"
+  done.send(1) or_throw
+  break
+ }
+ printl($time.zone)
+}
+main=(argv:array<string>)=>{
+ $time.zone='UTC'
+ let done=channel<int64>(1)
+ concurrent {
+  spawn watch(done)
+  if argv.length >? 1 {done.receive or_throw;}
+ }
+ printl"joined"
+ printl($time.zone)
+}

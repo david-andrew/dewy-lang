@@ -1,0 +1,9 @@
+# modes: native native-release
+Ticket=type of [id:int64 $__drop__=():>void=>printl"released"]
+consume=(t:Ticket)=>{printl(t.id);printl($time.zone)}
+main=()=>{
+ $time.zone='UTC'
+ let t=Ticket[8]
+ concurrent {spawn consume(t)}
+ printl"joined"
+}

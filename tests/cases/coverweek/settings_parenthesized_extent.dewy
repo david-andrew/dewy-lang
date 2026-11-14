@@ -1,0 +1,22 @@
+# quick
+show=()=>printl($time.zone)
+Ticket=type of [id:int64 $__drop__=():>void=>printl"released"]
+main=()=>{
+ $time.zone='UTC'
+ (
+  $time.zone='Asia/Tokyo'
+  let local_hour:int=9
+  let owner=Ticket[9]
+  show()
+ )
+ show()
+ printl(local_hour)
+ let total=1+(
+  $time.zone='Europe/London'
+  let increment:int=41
+  show()
+  increment
+ )
+ show()
+ printl"{total} {increment} {owner.id}"
+}

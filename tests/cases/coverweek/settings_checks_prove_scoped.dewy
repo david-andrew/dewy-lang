@@ -1,0 +1,7 @@
+fetch=(xs:array<int64> n:int64):>int64=>if n >=? 0 and n <? xs.length xs[n] else -1
+main=()=>{
+ $runtime_checks=false
+ let xs:array<int64>=[40 41 42]
+ (let index:int64=2)
+ if index >=? 0 and index <? xs.length {printl(fetch(xs index))}
+}

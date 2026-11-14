@@ -7,6 +7,10 @@ use '@lib/core/os.jo'
 use 'module_paths.dewy'
 use 'util.jo'
 
+# Internal actions: leave at the written boundary, prefixes on the block's task.
+const SETTING_SCOPE_CLEANUP = 1787
+const SETTING_SCOPE_PREFIX = 1788
+
 # Demand-driven desugaring: only scopes that write a runtime policy get frames.
 # A normal deferred cleanup restores the caller on return, break and or_throw.
 dw_setting_scope = (name: str, value: int, at: int, body: int):
@@ -67,7 +71,10 @@ dw_setting_scope = (name: str, value: int, at: int, body: int):
         else: call = bc_call("__settings_enter_policy", [bc_int(kind, at), expression], at)
         before.push(bc_let(frame, call, at))
         cleanup = mk(.defer_, at)
-        nodes[cleanup].a = i32(bc_stmt(bc_call("__settings_leave", [bc_ident(frame, at)], at), at))
+        leave = bc_stmt(bc_call("__settings_leave", [bc_ident(frame, at)], at), at)
+        nodes[leave].aux2 = i32(SETTING_SCOPE_CLEANUP)
+        nodes[cleanup].a = i32(leave)
         before.push(cleanup)
+    loop s in before: nodes[s].aux2 = i32(SETTING_SCOPE_PREFIX)
     loop s in kids(body): before.push(s)
     set_list(body, before)

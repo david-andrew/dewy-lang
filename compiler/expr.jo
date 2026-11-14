@@ -416,6 +416,9 @@ wrap_conv = (n: int, cv: CV, to: int):
     if cv == .int2float and exact_potential(n): runtime_demand(if to == T_F32: "__exact_i128_f32" else: "__exact_i128_f64")
     inner = nodes.len()
     nodes.push(nodes[n])
+    # A callable coercion moves the exact policy-construction block to `inner`.
+    if nodes[n].kind == .block:
+        if let target = setting_value_targets.get(n): setting_value_targets[inner] = target
     move_divisor(n, inner)
     nodes[n] = Node(kind = .conv, pos = nodes[inner].pos, a = i32(inner), aux = i32(int(cv)), type = i32(to), flags = i32(NF_CHECKED))
     if (cv == .int_ and to == T_INT or (cv == .wrap_int or cv == .saturate_int) and ntype(inner) == T_MATH_INT and exact_constant_use(inner)) and representation_type(ntype(inner)) == T_MATH_INT and dewy_at(nodes[n].pos) and cx >= 0:
@@ -924,7 +927,8 @@ coerce = (n: int, target: int) -> int:
         return n
     if fk == .callable or tk == .callable:
         # (a spawn body is called once and released by its task, which so owns its captures)
-        spawned = nodes[n].kind == .lambda and nodes[n].aux2 == 17
+        source = setting_value_target(n)
+        spawned = nodes[source].kind == .lambda and nodes[source].aux2 == 17
         if ownership_callable_cap(from) > ownership_callable_cap(to) and not spawned: fatal(nodes[n].pos, "callable conversion would erase capture ownership")
         fits = if spawned: mk_callable_contract(callable_base(from), callable_contract(from)) else: from
         if not callable_fits(fits, to): fatal(nodes[n].pos, "cannot prove callable effect contract")
@@ -6013,6 +6017,8 @@ setting_value_body = (body: int, snapshot: str, pos: int) -> int:
     active = "$policy_active{body}"
     enter = bc_let(active, bc_call("__settings_policy_enter", [bc_ident(snapshot, pos)], pos), pos)
     cleanup = mk(.defer_, pos)
+    # This compiler cleanup restores policy only; it never borrows a user owner.
+    nodes[cleanup].aux2 = 1788  # SETTING_SCOPE_PREFIX, setting_scopes.dewy
     nodes[cleanup].a = i32(bc_stmt(bc_call("__settings_policy_leave", [bc_ident(active, pos)], pos), pos))
     if nodes[body].kind == .block:
         statements = [enter, cleanup]
@@ -6031,6 +6037,8 @@ setting_value_lambda = (n: int, expected: int) -> int:
     block = bc_block([bc_let(snapshot, bc_call("__settings_policy_capture", [], pos), pos), bc_stmt(lam, pos)], pos)
     nodes[n] = nodes[block]
     setting_value_wrapped[lam] = true
+    # Coercion must still recognize the one-shot spawn body through this block.
+    setting_value_targets[n] = lam
     result = check_expr(n, expected)
     setting_value_targets[n] = lam
     result

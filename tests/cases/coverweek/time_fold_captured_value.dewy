@@ -1,0 +1,12 @@
+read=()=>zoned("2026-11-01T01:30" zone=zone"America/New_York") or_throw
+make=()=>{
+ $time.fold='earlier'
+ @read
+}
+main=()=>{
+ $time.fold='later'
+ let captured=make()
+ let a=captured() or_throw
+ let b=read() or_throw
+ printl"{a.offset} {b.offset}"
+}

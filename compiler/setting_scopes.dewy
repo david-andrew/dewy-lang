@@ -9,6 +9,10 @@ from p"@lib/core/os.jo" import (read_file __system_zone_name)
 from p"module_paths.dewy" import is_abs_path
 from p"util.jo" import (files intern name_of pos_file)
 
+# Internal actions: a leave ends its written extent; prefixes stay on a parallel block's task.
+const SETTING_SCOPE_CLEANUP:int64=1787
+const SETTING_SCOPE_PREFIX:int64=1788
+
 # Demand-driven desugaring: only scopes that write a runtime policy get frames.
 # A normal deferred cleanup restores the caller on return, break and or_throw.
 dw_setting_scope=(name:string value:int64 at:int64 body:int64):>void=>$unsafe {
@@ -72,9 +76,12 @@ dw_setting_scope=(name:string value:int64 at:int64 body:int64):>void=>$unsafe {
         else {call=bc_call("__settings_enter_policy" [bc_int(kind at) expression] at)}
         before.push(bc_let(frame call at))
         let cleanup=mk('defer_' at)
-        nodes[cleanup].a=int32(bc_stmt(bc_call("__settings_leave" [bc_ident(frame at)] at) at))
+        let leave=bc_stmt(bc_call("__settings_leave" [bc_ident(frame at)] at) at)
+        nodes[leave].aux2=int32(SETTING_SCOPE_CLEANUP)
+        nodes[cleanup].a=int32(leave)
         before.push(cleanup)
     }
+    loop s in before {nodes[s].aux2=int32(SETTING_SCOPE_PREFIX)}
     loop s in kids(body) {before.push(s)}
     set_list(body before)
 }

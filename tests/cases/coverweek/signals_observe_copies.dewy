@@ -1,0 +1,11 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+main=()=>{
+ let ended=atomic(0)
+ let view=signals.ctrl_c.observe
+ concurrent {
+  spawn {loop _ in view {};ended.add(1);}
+  spawn {loop _ in signals.ctrl_c {};ended.add(1);}
+ }
+ printl(ended.load)
+}

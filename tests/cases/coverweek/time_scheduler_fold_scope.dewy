@@ -1,0 +1,12 @@
+resolve=()=>zoned("2026-11-01T01:30" zone=zone"America/New_York") or_throw
+late=()=>{
+ $time.fold='later'
+ resolve() or_throw
+}
+main=()=>{
+ $time.fold='earlier'
+ let a=resolve() or_throw
+ let b=late() or_throw
+ printl"{a.offset} {b.offset}"
+ printl(b.nominal-a.nominal)
+}

@@ -1,0 +1,12 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+Ticket=type of [id:int64 $__drop__=():>void=>printl"listener released"]
+listen=()=>{
+ let guard=Ticket[1]
+ loop _ in signals.ctrl_c {}
+ printl"listener closed"
+}
+main=()=>{
+ parallel {listen();printl"work complete"}
+ printl"joined"
+}

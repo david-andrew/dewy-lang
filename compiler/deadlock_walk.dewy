@@ -10,6 +10,7 @@ from p"check.jo" import (fns locals LF_CAPTURE)
 from p"util.jo" import (files pos_file name_of pos_in_lib)
 from p"effect_control.dewy" import effect_name
 from p"lower_helpers.dewy" import value_helper_calls
+from p"expr.jo" import setting_value_target
 from p"isolation_ops.dewy" import isolation_children
 
 # Only demanded function bodies and summaries are traversed; state remains shared.
@@ -114,6 +115,8 @@ dl_param_of=(l0:LockWalkWord):>int64=>$unsafe {
 dl_fn_arg=(a0:LockWalkWord depth:LockWalkWord=0):>int64=>$unsafe {
     let a=a0
     loop nodes.ptr[a].kind =? 'conv' or nodes.ptr[a].kind =? 'namedarg' {a=LockWalkWord(nodes.ptr[a].a)}
+    let target=setting_value_target(a)
+    if target not=? a and depth <? 8 {return dl_fn_arg(target depth + 1)}
     if (nodes.ptr[a].kind =? 'lambda' or nodes.ptr[a].kind =? 'fnref' or nodes.ptr[a].kind =? 'partial') and nodes.ptr[a].sym >? 0 {return LockWalkWord(nodes.ptr[a].sym)}
     if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1) and nodes.ptr[a].sym >? 0 and depth <? 8 {
         let l=LockWalkWord(nodes.ptr[a].sym)

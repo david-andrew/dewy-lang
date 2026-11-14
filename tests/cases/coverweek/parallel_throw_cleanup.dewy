@@ -1,0 +1,9 @@
+Ticket=type of [id:int64 $__drop__=():>void=>printl"released"]
+MissingConfig:type=type of error
+fail=():>int|MissingConfig=>MissingConfig[]
+run=():>void|MissingConfig=>{
+ let guard=Ticket[1]
+ parallel (let config=fail() or_throw)
+ printl(config)
+}
+main=()=>printl(run() is? MissingConfig)

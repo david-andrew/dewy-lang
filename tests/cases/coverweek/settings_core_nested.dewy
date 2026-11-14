@@ -1,0 +1,10 @@
+# modes: native native-release
+wide=()=>{
+ $program.max_cores=2
+ printl(available_cores)
+}
+main=()=>{
+ $program.max_cores=1
+ wide()
+ printl(available_cores)
+}

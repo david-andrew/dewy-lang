@@ -1,0 +1,10 @@
+import p"@lib/time/intervals.dewy" as intervals
+import p"@lib/time/core.dewy" as core
+let lo=core.Instant[-9223372036854775808 0]
+let hi=core.Instant[9223372036854775807 18446744073709551615]
+main=()=>{
+ printl(intervals.same_set((hi..hi] [lo..lo)))
+ printl(intervals.union([hi..hi] [hi..hi]).length)
+ printl(intervals.difference([lo..lo] [hi..hi]).length)
+ printl(intervals.union((lo..lo] [hi..hi]).length)
+}

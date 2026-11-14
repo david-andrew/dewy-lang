@@ -7959,6 +7959,8 @@ rd_dc_parallel_block=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:
     let pending_decls:array<int64>=[]
     let pending_handles:array<string>=[]
     loop item in items {
+        # Settings prefixes (setting_scopes.dewy, aux2 1788) run on the block's task.
+        if reader_nodes[item].aux2 =? 1788 {statements.push(item);continue}
         # (an item reading a task item's binding starts once that item's value is taken)
         if pending.length >? 0 {
             let used:array<int64>=[]

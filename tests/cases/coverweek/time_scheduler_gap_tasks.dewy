@@ -1,0 +1,10 @@
+resolve=()=>zoned("2027-03-14T02:30" zone=zone"America/New_York") or_throw
+next=()=>{
+ $time.gap='next'
+ resolve() or_throw
+}
+main=()=>{
+ $time.gap='preserve_displacement'
+ parallel (let a=resolve() or_throw;let b=next() or_throw)
+ printl"{a.hour}:{a.minute} {b.hour}:{b.minute}"
+}

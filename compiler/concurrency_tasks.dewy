@@ -14,6 +14,7 @@ from p"concurrency_waits.dewy" import concurrency_blocks
 from p"concurrency_parsafe.dewy" import (parsafe_demand_task_local parsafe_finalize parsafe_vouched_local)
 from p"concurrency.jo" import (concurrency_calls concurrency_ffi_start concurrency_protocol_module concurrency_runtime_needed concurrency_tasks)
 from p"concurrency_types.dewy" import (concurrency_builtin_type concurrency_transfer concurrency_why)
+from p"ownership_types.dewy" import ownership_fact_type
 from p"error_ops.dewy" import (exception_member nominal_generic_instance value_members)
 from p"util.jo" import (files name_of pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
@@ -192,8 +193,19 @@ concurrency_report=(n:TaskWord args:array<int64>):>int64=>$unsafe {
     add_flag(value NF_CHECKED);
     let gn="$report_group{n}"
     let vn="$report_value{n}"
-    let statements=[bc_let(gn group pos) bc_let(vn value pos)]
     let members=value_members(t)
+    # Reporting only inspects a success owner. Borrow its existing local instead
+    # of synthesizing a second owner before the runner stores its result. An
+    # owning error still requires the ordinary consuming/copy checks.
+    let borrowed=nodes.ptr[value].kind =? 'ident' and nodes.ptr[value].aux =? 1 and ownership_fact_type(t)
+    if borrowed {
+        loop member in members {
+            if exception_member(member) and ownership_fact_type(member) {borrowed=false}
+        }
+    }
+    let statements=[bc_let(gn group pos)]
+    if borrowed {vn=name_of(TaskWord(nodes.ptr[value].name))}
+    else {statements.push(bc_let(vn value pos))}
     loop member in members {
         if not exception_member(member) {continue}
         # (the family holds no generic instance: `Closed<T>` reports its erased instance,

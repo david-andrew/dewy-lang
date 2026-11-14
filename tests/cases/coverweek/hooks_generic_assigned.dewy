@@ -1,0 +1,13 @@
+let drops:int64=0
+Ticket:type=<T>[value:T
+ $__drop__=():>void=>{drops+=1}
+ $__copy__=():>Ticket<T>=>Ticket<T>[value]
+]
+main=()=>{
+ {
+  (let first=Ticket<int64>[42])
+  {let other=first.copy();printl(other.value)}
+  printl(first.value)
+ }
+ printl(drops)
+}

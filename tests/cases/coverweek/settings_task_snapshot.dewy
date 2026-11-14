@@ -1,0 +1,16 @@
+# modes: native native-release
+show=()=>printl($time.zone)
+launch=(g:TaskGroup)=>{
+ $time.zone='Asia/Tokyo'
+ spawn(g) show()
+}
+main=()=>{
+ $time.zone='UTC'
+ concurrent g {launch(g)}
+ show()
+ concurrent {
+  $time.zone='Europe/London'
+  spawn show()
+ }
+ show()
+}

@@ -1,0 +1,11 @@
+load=(n:int):>int=>n*2
+add=(a:int b:int):>int=>a+b
+main=()=>{
+ parallel (
+  let base=load(3)
+  let a=load(base)
+  let b=add(base 1)
+  let joined=add(a b)
+ )
+ printl"{base} {a} {b} {joined}"
+}

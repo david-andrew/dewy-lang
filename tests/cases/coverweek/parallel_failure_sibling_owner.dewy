@@ -1,0 +1,17 @@
+# modes: native native-release
+Ticket=type of [id:int64 $__drop__=():>void=>printl"released"]
+BadConfig:type=type of error
+load=(ready:Channel<int64>):>Ticket=>{
+ ready.send(1) ?? void;
+ Ticket[7]
+}
+fail=(ready:Channel<int64>):>int|BadConfig|Canceled|Closed<int64>=>{
+ ready.receive or_throw;
+ BadConfig[]
+}
+run=():>void|BadConfig|Canceled|Closed<int64>=>{
+ let ready=channel<int64>(1)
+ parallel (let owner=load(ready);let config=fail(ready) or_throw)
+ printl"never {owner.id} {config}"
+}
+main=()=>printl(run() is? BadConfig)

@@ -1,0 +1,10 @@
+let drops:int64=0
+Ticket=type of [id:int64 $__drop__=():>void=>{drops+=1}]
+load=(id:int64):>Ticket=>Ticket[id]
+main=()=>{
+ {
+  parallel (let left=load(3);let right=load(4))
+  printl"{left.id} {right.id} {drops}"
+ }
+ printl(drops)
+}

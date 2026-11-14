@@ -1,0 +1,7 @@
+let drops:int64=0
+Ticket=type of [id:int64 $__drop__=():>void=>{drops+=id}]
+make=(yes:bool):>Ticket|none=>if yes Ticket[9] else none
+main=()=>{
+ { (let some=make(true)); let absent=make(false); printl(some is? Ticket); printl(absent is? none) }
+ printl(drops)
+}

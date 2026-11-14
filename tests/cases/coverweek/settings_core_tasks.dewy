@@ -1,0 +1,8 @@
+# modes: native native-release
+main=()=>{
+ $program.max_cores=1
+ let total=atomic<int64<overflow='wrap'>>(0)
+ parallel i in [0..8) {total.add(available_cores)}
+ printl(total.load)
+ concurrent {spawn printl(available_cores)}
+}

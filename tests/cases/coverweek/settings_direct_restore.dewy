@@ -1,0 +1,12 @@
+show=()=>printl($time.zone)
+inner=()=>{
+ $time.zone='Asia/Tokyo'
+ show()
+}
+outer=()=>{
+ $time.zone='UTC'
+ show()
+ inner()
+ show()
+}
+main=()=>outer()

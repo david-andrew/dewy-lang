@@ -1,0 +1,11 @@
+read=()=>printl($time.zone)
+make=()=>{
+ $time.zone='UTC'
+ @read
+}
+invoke=(f:<():>void>)=>{
+ $time.zone='Asia/Tokyo'
+ f()
+ read()
+}
+main=()=>{let f=make();invoke(@f)}

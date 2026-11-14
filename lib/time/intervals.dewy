@@ -3,8 +3,8 @@ import p"@lib/ranges.dewy" as ranges
 import p"core.dewy" as core
 
 IntervalSet:type=array<ranges.Range<core.Instant>>
-measure=(r:ranges.Range<core.Instant>):>core.Duration=>if r.last <? r.first {core.duration_word(0)} else {r.last-r.first}
-measure=(r:ranges.Range<core.Duration>):>core.Duration=>if r.last <? r.first {core.duration_word(0)} else {r.last-r.first}
+measure=(r:ranges.Range<core.Instant>):>core.Duration=>if ranges.is_empty(r) {core.duration_word(0)} else {r.last-r.first}
+measure=(r:ranges.Range<core.Duration>):>core.Duration=>if ranges.is_empty(r) {core.duration_word(0)} else {r.last-r.first}
 
 _first_point=(r:ranges.Range<core.Instant>):>core.Instant|none=>{
     if r.includes_first {return r.first}

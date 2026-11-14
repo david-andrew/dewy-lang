@@ -1,0 +1,9 @@
+main=()=>{
+ let start=date"2027-01-30"
+ let good=start+(2day+1month)
+ let bad=start+(1month+2day)
+ printl(good)
+ printl(bad is? InvalidDate)
+ let local_start=start.at(time_of_day"09:15")
+ printl(local_start.add(1month overflow='clamp'))
+}

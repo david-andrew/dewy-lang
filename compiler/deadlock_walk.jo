@@ -5,6 +5,7 @@ use 'ast.jo'
 use 'check.jo'
 use 'util.jo'
 use 'lower_helpers.dewy'
+use 'expr.jo'
 use 'checker_state.dewy'
 use 'effect_control.dewy'
 use 'isolation_ops.dewy'
@@ -102,6 +103,8 @@ dl_param_of = (l0: int) -> int:
 dl_fn_arg = (a0: int, depth: int = 0) -> int:
     a = a0
     loop nodes[a].kind == .conv or nodes[a].kind == .namedarg: a = int(nodes[a].a)
+    target = setting_value_target(a)
+    if target != a and depth < 8: return dl_fn_arg(target, depth + 1)
     if (nodes[a].kind == .lambda or nodes[a].kind == .fnref or nodes[a].kind == .partial) and nodes[a].sym > 0: return int(nodes[a].sym)
     # (a local holding a function literal, or a copy of one)
     if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and nodes[a].sym > 0 and depth < 8:

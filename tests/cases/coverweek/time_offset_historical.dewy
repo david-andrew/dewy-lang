@@ -1,0 +1,7 @@
+main=()=>{
+ let historical=instant"1972-01-05T00:00:00Z".in_zone(zone"Africa/Monrovia")
+ let utc=historical.nominal.in_zone(zone"UTC")
+ printl"{historical.offset} {utc.offset}"
+ printl(historical.nominal =? utc.nominal)
+ printl(size_of<Offset>)
+}

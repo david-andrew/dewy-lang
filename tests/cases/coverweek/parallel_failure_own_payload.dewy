@@ -1,0 +1,14 @@
+Ticket=type of [id:int64 $__drop__=():>void=>printl"released"]
+BadConfig:type=type of error
+load=(ok:bool):>Ticket|BadConfig=>if ok Ticket[7] else BadConfig[]
+run=():>void|BadConfig=>{
+ parallel (let owner=load(true);let config=load(false) or_throw)
+ printl"never {owner is? Ticket} {config}"
+}
+main=()=>{
+ {
+  let loaded:array<Ticket|BadConfig>=[load(true) load(false)]
+  printl(loaded.length)
+ }
+ printl(run() is? BadConfig)
+}

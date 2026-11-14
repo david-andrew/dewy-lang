@@ -1472,6 +1472,10 @@ rt_dc_expr = (minimum: int) -> int:
                 juxt_head = false
                 continue
             if not rt_dc_arguments(n, .rparen): return 0
+            if nkids(n) == 0:
+                after = dc_parser.tokens[dc_parser.at]
+                joined = after.symbol == .lbrack or after.symbol == .lparen or after.kind == .quoted or after.kind == .rawquoted or after.symbol == .lbrace and not after.space
+                if not joined: nodes[n].aux2 = i32(AUX2_EMPTY_PARENS)
             left = n
             last_call = n
             juxt_head = false
@@ -4776,6 +4780,10 @@ rt_dc_parallel_block = (token: DewyLexeme) -> int:
     pending_decls: int[]
     pending_handles: str[]
     loop item in items:
+        # Settings belong to the block's task, before any child inherits its frame.
+        if nodes[item].aux2 == i32(SETTING_SCOPE_PREFIX):
+            statements.push(item)
+            continue
         # (an item reading a task item's binding starts once that item's value is taken)
         if pending.len() > 0:
             used: int[]
@@ -5666,7 +5674,7 @@ rt_dc_type_declaration = () -> int:
     # `Name:type = <T U>[fields]`: a generic record (dw_type_params)
     type_params: int[]
     # (`<T>[...]`: type parameters, plain names then a record; `<(x:T):>R>`, `<'a' | 1>`: an alias)
-    if rt_dn_peek() == .langle and dc_parser.tokens[dc_parser.at + 1].kind == .identifier and dc_parser.tokens[dc_parser.at + 1].symbol == .none and (dc_parser.tokens[dc_parser.at + 2].symbol == .rangle or dc_parser.tokens[dc_parser.at + 2].kind == .identifier or dc_parser.tokens[dc_parser.at + 2].symbol == .colon and rt_dn_payload(dc_parser.tokens[dc_parser.at + 3]) == "Effect"):
+    if rt_dn_peek() == .langle and dc_parser.tokens[dc_parser.at + 1].kind == .identifier and dc_parser.tokens[dc_parser.at + 1].symbol == .none and (dc_parser.tokens[dc_parser.at + 2].symbol == .rangle or dc_parser.tokens[dc_parser.at + 2].symbol == .assign or dc_parser.tokens[dc_parser.at + 2].kind == .identifier or dc_parser.tokens[dc_parser.at + 2].symbol == .colon and rt_dn_payload(dc_parser.tokens[dc_parser.at + 3]) == "Effect"):
         dc_parser.at += 1
         loop not rt_dn_accept(.rangle):
             binder = dc_parser.tokens[dc_parser.at]
@@ -5677,6 +5685,10 @@ rt_dc_type_declaration = () -> int:
             t = mk(.ident, mkpos(dc_parser.file, binder.start))
             nodes[t].name = binder.name
             if rt_dc_effect_param(): nodes[t].aux = 1
+            if rt_dn_accept(.assign):
+                fallback = rt_dc_annotation()
+                if fallback == 0: return 0
+                nodes[t].b = i32(fallback)
             type_params.push(t)
         if type_params.len() == 0 or dc_parser.tokens[dc_parser.at].space: return 0
         # `Pair:type = <T>(array<T length=2>)`: a generic alias of the one type in parentheses
@@ -7343,7 +7355,10 @@ rt_dc_tag_mistake = (name: str) -> bool: not dw_dir_name(name) and not dw_dir_kn
 # compact statement holding the attribute the function takes (dw_top_declarations).
 
 rt_dc_warn_if = (token: DewyLexeme) -> int:
-    if token.stop - token.start != 8 or rt_dn_payload(token) != "warn_if": return 0
+    width = token.stop - token.start
+    if width != 8 and width != 9 and width != 15: return 0
+    tag_name = rt_dn_payload(token)
+    if tag_name != "warn_if" and tag_name != "error_if" and tag_name != "check_constant": return 0
     pos = mkpos(dc_parser.file, token.start)
     dc_parser.at += 1
     if dc_parser.tokens[dc_parser.at].newline or not dn_can_start(dc_parser.tokens, dc_parser.at): fatal(pos, "`$warn_if` takes a condition and a message: `$warn_if condition \"message\"`")
@@ -7360,7 +7375,7 @@ rt_dc_warn_if = (token: DewyLexeme) -> int:
     if nodes[message].kind != .str_lit or written.kind != .quoted and written.kind != .rawquoted: fatal(mkpos(dc_parser.file, written.start), "a `$warn_if` message is a string literal: the compiler shows it")
     next = dc_parser.tokens[dc_parser.at]
     if next.kind != .eof and not next.newline: return 0
-    at = dw_ffi_attr("warn_if", condition, pos)
+    at = dw_ffi_attr(tag_name, condition, pos)
     nodes[at].b = i32(message)
     rt_module_tag(token, 4, at, 0)
 

@@ -1,0 +1,20 @@
+read=():>string=>$time.zone ?? 'unset'
+other=():>string=>{
+ $time.zone='Europe/London'
+ read()
+}
+main=()=>{
+ $time.zone='Asia/Tokyo'
+ parallel (
+  let a=read()
+  let b=other()
+ )
+ printl"{a} {b}"
+ printl(read())
+ parallel (
+  $time.zone='UTC'
+  let inner=read()
+ )
+ printl(inner)
+ printl(read())
+}

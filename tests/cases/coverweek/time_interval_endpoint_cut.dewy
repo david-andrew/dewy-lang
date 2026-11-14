@@ -1,0 +1,10 @@
+import p"@lib/time/intervals.dewy" as intervals
+let a=instant"2026-11-01T00:00:00Z"
+let b=a+1ns
+main=()=>{
+ let cut=intervals.difference([a..b] [a..a])
+ printl(cut.length)
+ if cut.length =? 1 {printl(intervals.same_set(cut[0] [b..b]))}
+ printl(intervals.union([a..a] [b..b]).length)
+ printl(intervals.difference([a..b] [b..b]).length)
+}

@@ -1,0 +1,14 @@
+import p"@lib/time/intervals.dewy" as intervals
+let start=instant"2026-11-01T00:00:00Z"
+let tick=start+1ns
+let finish=start+4ns
+main=()=>{
+ let empty=(start..tick)
+ printl(empty.is_empty)
+ let joined=intervals.union(empty [tick..finish])
+ printl(joined.length)
+ if joined.length =? 1 {printl(intervals.same_set(joined[0] [tick..finish]))}
+ let cut=intervals.difference([start..finish] empty)
+ printl(cut.length)
+ if cut.length =? 1 {printl(intervals.same_set(cut[0] [start..finish]))}
+}

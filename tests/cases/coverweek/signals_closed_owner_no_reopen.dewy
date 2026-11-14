@@ -1,0 +1,9 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+main=()=>{
+ parallel { {
+  loop _ in signals.ctrl_c.observe {}
+  printl(signals.sigterm.next(timeout=0s) is? Closed)
+ } }
+ printl"joined"
+}

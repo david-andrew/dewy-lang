@@ -1,0 +1,7 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+watch=()=>{concurrent {loop _ in signals.ctrl_c {}}}
+main=()=>{
+ parallel (let ignored=watch())
+ printl"both owners joined"
+}

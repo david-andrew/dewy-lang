@@ -1,0 +1,14 @@
+let drops:int64=0
+let copies:int64=0
+Ticket=type of [id:int64<overflow='wrap'>
+ $__drop__=():>void=>{drops+=1}
+ $__copy__=():>Ticket=>{copies+=1;Ticket[id+1]}
+]
+main=()=>{
+ {
+  (let first=Ticket[10])
+  {let second=first.copy();printl(second.id)}
+  printl"{first.id} {copies} {drops}"
+ }
+ printl(drops)
+}

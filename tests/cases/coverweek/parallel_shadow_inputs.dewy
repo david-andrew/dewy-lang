@@ -1,0 +1,9 @@
+load=(name:string):>string=>"loaded:{name}"
+main=()=>{
+ let config='old'
+ parallel (
+  let config=load(config)
+  let next=load(config)
+ )
+ printl"{config} {next}"
+}

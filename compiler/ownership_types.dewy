@@ -221,6 +221,18 @@ ownership_inline=(t0:OWord depth:OWord=0):>bool=>$unsafe {
         }
         return true
     }
+    if k =? 'enum_' {
+        tl_layout(t)
+        let si=ow_st(t)
+        loop i in [0..OWord(ow_structs[0].ptr[si].nvariants)) {
+            let v=OWord(ow_structs[0].ptr[si].variants) + i
+            loop j in [0..OWord(ow_variants[0].ptr[v].nfields)) {
+                let f=OWord(ow_variants[0].ptr[v].fields) + j
+                if ow_fields[0].ptr[f].boxed or not ownership_inline(OWord(ow_fields[0].ptr[f].type) depth + 1) {return false}
+            }
+        }
+        return true
+    }
     if k not=? 'struct_' {return false}
     tl_layout(t)
     let si=ow_st(t)

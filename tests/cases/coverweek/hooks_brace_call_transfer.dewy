@@ -1,0 +1,8 @@
+let drops:int64=0
+Ticket=type of [id:int64 $__drop__=():>void=>{drops+=1}]
+consume=(t:Ticket):>int64=>t.id
+main=()=>{
+ (let t=Ticket[5])
+ printl(consume{t})
+ printl(drops)
+}

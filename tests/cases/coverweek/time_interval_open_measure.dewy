@@ -1,0 +1,8 @@
+import p"@lib/time/intervals.dewy" as intervals
+main=()=>{
+ let start=instant"2026-11-01T00:00:00Z"
+ let tick=start+1ns
+ printl((start..tick).is_empty)
+ printl(intervals.measure((start..tick)))
+ printl(intervals.measure((start..start)))
+}

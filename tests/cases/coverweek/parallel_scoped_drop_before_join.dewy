@@ -1,0 +1,6 @@
+Ticket=type of [id:int64 $__drop__=():>void=>printl"released"]
+load=():>Ticket=>Ticket[1]
+main=()=>{
+ parallel {let ticket=load();printl(ticket.id)}
+ printl"joined"
+}

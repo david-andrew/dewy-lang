@@ -1,0 +1,13 @@
+let drops:int64=0
+Ticket=type of [id:int64<overflow='wrap'>
+ $__drop__=():>void=>{drops+=id}
+ $__move__=():>Ticket=>Ticket[id+1]
+]
+main=()=>{
+ {
+  let first=Ticket[10]
+  (let second=first)
+  printl(second.id)
+ }
+ printl(drops)
+}
