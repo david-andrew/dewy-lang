@@ -1,0 +1,19 @@
+# Many parallel blocks with `let` items, run in a loop: what each item's task allocates (its
+# value's slot, the group's lists) is freed, so the live allocations do not grow per item.
+make = (n:int):>string => "item {n}"
+round = (n:int):>int => {
+    parallel (
+        let a = make(n)
+        let b = make(n + 1)
+        let c = make(n + 2)
+    )
+    a.length + b.length + c.length
+}
+main = () => {
+    let total:int = round(0)
+    let before = alloc_count
+    loop i in [0..300) { total += round(i) }
+    let grown = alloc_count - before
+    printl"per-item growth: {grown >=? 300}"
+    printl(total >? 0)
+}

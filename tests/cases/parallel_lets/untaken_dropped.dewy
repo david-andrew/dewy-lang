@@ -1,0 +1,21 @@
+# modes: native native-release
+# A value never taken, because an item's failure left the function first, is still dropped
+# (its drop hook runs) when the block's scope ends; taken ones drop where their binding does.
+let drops:int64=0
+Res=type of [n:int64
+    $__drop__=():>void=>{drops+=1}
+]
+Missing:type = type of error
+make = (n:int64):>Res => Res[n]
+fail = ():>int64 | Missing => Missing
+attempt = ():>void | Missing => {
+    parallel (
+        let kept = make(1)
+        let failed = fail() or_throw
+    )
+    printl"never {kept.n} {failed}"
+}
+main = () => {
+    loop i in [0..50) { attempt() ?? void; }
+    printl"drops {drops}"
+}

@@ -172,6 +172,9 @@ alloc_count = () -> int:
     if __tstate == null: return 0
     n = 0
     loop t in [0..__MAX_THREADS + 1): n += __tstate[t * __TS_WORDS + 2]
+    # (and the task slots' own, where tasks allocate what their parents later free)
+    if __task_states != null:
+        loop i in [0..__TASK_SLOTS): n += __task_states[i * __TS_WORDS + 2]
     n
 
 __os_pages = (size: int) -> *u8:
@@ -474,6 +477,12 @@ __alloc_size = (p: *u8) -> int:
 
 __free_obj = (p: *u8):
     __free(p)
+
+# An empty array's storage, released and the handle cleared: no element is left to drop, so
+# its element type does not matter (arrays kept in raw task state, lib/std/tasks.jo).
+__empty_array_free = (slot: **u8):
+    __rc_dec(slot[0])
+    slot[0] = null
 
 __rc_inc = (p: *u8):
     if p == null: return

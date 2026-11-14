@@ -4801,6 +4801,12 @@ rt_dc_parallel_block = (token: DewyLexeme) -> int:
             nodes[decl].name = i32(intern(handle))
             nodes[decl].b = i32(start)
             statements.push(decl)
+            # (its scope's end drops a value never taken and frees the slot: __item_discard; aux2
+            # 17, it only waits for the item's own task)
+            release = mk(.defer_, ipos)
+            nodes[release].aux2 = 17
+            nodes[release].a = i32(bc_stmt(bc_call("__item_discard", [bc_ident(name, ipos), bc_ident(handle, ipos)], ipos), ipos))
+            statements.push(release)
             pending.push(int(nodes[item].name))
             pending_decls.push(item)
             pending_handles.push(handle)

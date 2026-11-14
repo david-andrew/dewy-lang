@@ -241,6 +241,18 @@ __item_spawn_failing[T] = (g: TaskGroup, f: () -> T) -> __Item[T]:
     if __task_scope_canceled(g) or not __task_launch(g, runner): runner()
     __Item[T](words, p)
 
+# At the end of the item's scope (the block's code defers it): a value never taken, as when
+# the function left early, is dropped as its type drops (the item's task canceled and waited
+# for first), and the slot's buffer, empty by then, is freed.
+__item_discard[T] = (g: TaskGroup, item: __Item[T]):
+    p = item.__p
+    if __atomic_add(&p.ready, 0) == 0:
+        cancel(g)
+        loop __atomic_add(&p.ready, 0) == 0: __task_pause()
+    if p.value.len() > 0:
+        left = p.value.pop()
+    __empty_array_free((&p.value) as **u8)
+
 # The item's value, moved out once its task is done; a waiting taker's cancellation reaches
 # the group.
 __item_take[T] = (g: TaskGroup, item: __Item[T]) -> T:
@@ -322,6 +334,10 @@ __task_cleanup = (g: TaskGroup, previous: TaskGroup):
     if g.__state.len() != 0 and not g.__p.closed:
         cancel(g)
         __task_join(g)
+    # (the joined scope's lists, empty now, live in its raw state: their storage freed here)
+    if g.__state.len() != 0 and g.__p.jobs.len() == 0:
+        __empty_array_free((&g.__p.jobs) as **u8)
+        __empty_array_free((&g.__p.addresses) as **u8)
     if g.__state.len() != 0:
         __task_lock(&__task_frontier_lock)
         __task_signal_release_hook(g.__p)

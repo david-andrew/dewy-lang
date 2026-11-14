@@ -7987,6 +7987,14 @@ rd_dc_parallel_block=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:
             reader_nodes[decl].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(handle))
             reader_nodes[decl].b = int32<overflow='wrap'>(start)
             statements.push(decl);
+            # (its scope's end drops a value never taken and frees the slot: __item_discard; aux2
+            # 17, it only waits for the item's own task)
+            let release:int64=node_mk(@reader_nodes 'defer_' ipos)
+            reader_nodes[release].aux2 = 17
+            let discard:int64=node_mk(@reader_nodes 'exprstmt' ipos)
+            reader_nodes[discard].a = int32<overflow='wrap'>(rd_bc_call(@reader_ctx @reader_nodes "__item_discard" [rd_bc_ident(@reader_ctx @reader_nodes name ipos) rd_bc_ident(@reader_ctx @reader_nodes handle ipos)] ipos))
+            reader_nodes[release].a = int32<overflow='wrap'>(discard)
+            statements.push(release);
             pending.push(int64(reader_nodes[item].name));
             pending_decls.push(item);
             pending_handles.push(handle);
