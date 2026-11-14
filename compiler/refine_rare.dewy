@@ -293,6 +293,9 @@ str_set_text_of=(n:RefineRareWord):>void=>$unsafe {
 }
 refine_implies=(from_:int64 to:int64):>bool=>$unsafe {
     if type_eq(from_ to) {return true}
+    # Opaque path brands are proof obligations, not empty numeric predicates.
+    # A callable cannot acquire a branded result (or lose its input obligation).
+    if types.ptr[prune(to)].kind =? 'refined' and types.ptr[prune(to)].bits =? -2 {return false}
     if not callable_shape_eq(representation_type(from_) representation_type(to)) {return false}
     if types.ptr[prune(to)].kind not=? 'refined' {return true}
     # Formal slots are alpha-normalized; distinct lexical declarations remain

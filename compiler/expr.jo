@@ -815,6 +815,11 @@ coerce = (n: int, target: int) -> int:
         return n
     # Settled identical scalar/aggregate types require no conversion node.
     if from == to and not is_lit(n): return n
+    # Branded path reads keep their type for inference; an ordinary Path
+    # consumer gets the same representation through a value-only view.
+    if refine_active and types[from].kind == .refined and types[from].bits == -2 and types[to].kind != .var and types[to].kind != .param and not (is_union(to) and union_index(to, from) >= 0) and not (types[to].kind == .opt and prune(int(types[to].elem)) == from):
+        wrap_conv(n, .none_, int(types[from].elem))
+        return coerce(n, to)
     if from == T_NEVER:
         # (what never comes back taken as a value, "a" + panic(...): marked, so code is made for
         # it as for any value of that type, never used)
@@ -1177,6 +1182,13 @@ join_types = (a: int, b: int, pos: int) -> int:
     tb = prune(ntype(b))
     if ta == T_NEVER: return finalize_literal(b)
     if tb == T_NEVER: return finalize_literal(a)
+    # A branch without a path guarantee widens a branded peer to Path; it
+    # cannot acquire the peer's storage obligation through join ordering.
+    if refine_active and ta != tb and (types[ta].kind == .refined and types[ta].bits == -2 or types[tb].kind == .refined and types[tb].bits == -2) and type_eq(representation_type(ta), representation_type(tb)):
+        t = representation_type(ta)
+        coerce(a, t)
+        coerce(b, t)
+        return t
     la = is_lit(a)
     lb = is_lit(b)
     # (two values of one number type, neither a literal: nothing to convert)
@@ -4714,6 +4726,10 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         bt = mk_array(T_U8)
         arg_type(args, 0, bt)
         t = prune(arg_type(args, 1, 0))
+        # Serialization reads the Path representation without weakening storage.
+        if types[t].kind == .refined and types[t].bits == -2:
+            t = representation_type(t)
+            coerce(args[1], t)
         arg_type(args, 2, T_INT)
         arg_type(args, 3, T_INT)
         k = types[t].kind
@@ -5506,6 +5522,12 @@ binary_rest = (n: int, expected: int, a0: int, b0: int, ta0: int, tb0: int, hint
     b = b0
     ta = ta0
     tb = tb0
+    if refine_active and types[ta].kind == .refined and types[ta].bits == -2:
+        ta = int(types[ta].elem)
+        coerce(a, ta)
+    if refine_active and types[tb].kind == .refined and types[tb].bits == -2:
+        tb = int(types[tb].elem)
+        coerce(b, tb)
     op = nodes[n].op as Tok
     is_cmp = op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
     is_shift = op == .shl or op == .shr

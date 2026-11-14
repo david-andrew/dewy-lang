@@ -1,0 +1,9 @@
+Config:type=[files:array<SafePath>]
+accept=(file:SafePath):>void=>printl(file)
+main=():>void=>{
+    let config=Config[[p"/srv/a"]]
+    config.files.push(p"/srv/b")
+    accept(config.files[1])
+    let copy=config
+    accept(copy.files[0])
+}

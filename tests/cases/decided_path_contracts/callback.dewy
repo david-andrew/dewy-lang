@@ -1,0 +1,9 @@
+accept=(file:SafePath):>void=>printl(file)
+identity=(file:SafePath):>SafePath=>file
+main=():>void=>{
+    let f:(SafePath:>SafePath)=@identity
+    accept(f(p"/srv/a"))
+    let paths:array<SafePath>=[p"/srv/b"]
+    let copied=paths.map(@identity)
+    loop file in copied {accept(file)}
+}

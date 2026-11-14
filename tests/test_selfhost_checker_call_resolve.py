@@ -182,6 +182,7 @@ ref_sib_dict_call = (d: int, xs: mut int[], ps: int[]):
     pass
 ref_array_call_finish = (n: int, prepared: RefArrayCall) -> int: T_BOOL
 representation_type = (t: int) -> int: t
+refine_read_type = (t: int) -> int: representation_type(t)
 ''',
     'dewy_methods.jo': "use 'driver.jo'\ndewy_is_method = (d: int) -> bool: nodes[d].sval == 2\n",
     'ide.jo': 'ide_on = false\n',

@@ -34,6 +34,9 @@ xi_last: *int
 xi_string_type: *int
 xi_bool_type: *int
 xi_host: *CheckerTypeTestHost
+xi_path_brands = false
+xi_note_path_brand = ():
+    xi_path_brands = true
 checker_type_tests_bind = (input: *CheckerTypeTestInput) -> int:
     xi_nodes = input[0].nodes
     xi_types = input[0].types
@@ -56,6 +59,9 @@ xi_representation = (t0: int) -> int:
     t = int(tu_prune(t0))
     if xi_types[0][t].kind == .refined: return int(tu_prune(int(xi_types[0][t].elem)))
     t
+xi_brand_covers = (wanted: int, member: int) -> bool:
+    if tu_equal(wanted, member) or tu_equal(wanted, xi_representation(member)): return true
+    xi_union(wanted) and (uu_index(wanted, member) >= 0 or uu_index(wanted, xi_representation(member)) >= 0)
 xi_check = (n: int) -> int:
     orig = xi_host[0].original(int(xi_nodes[0][n].a))
     xi_host[0].check(int(xi_nodes[0][n].a), 0)
@@ -63,6 +69,21 @@ xi_check = (n: int) -> int:
     xi_host[0].finalize(int(xi_nodes[0][n].a))
     at = int(tu_prune(int(xi_nodes[0][int(xi_nodes[0][n].a)].type)))
     tt = int(ct_resolve_family(int(xi_nodes[0][n].b)))
+    # A source-level Path test includes branded SafePath members. Generated
+    # exact-member tests use aux=-7 and keep their individual union tags.
+    if xi_path_brands and xi_nodes[0][int(xi_nodes[0][n].b)].aux != -7:
+        value = if xi_kind(at) == .opt: int(xi_types[0][at].elem) else: at
+        if xi_union(value):
+            si = int(xi_types[0][value].st)
+            loop i in [0..int(xi_structs[0][si].ntargs)):
+                member = tu_prune(tu_struct_targ(si, i))
+                if xi_kind(member) == .refined and xi_types[0][member].bits == -2 and xi_brand_covers(tt, member):
+                    return xi_host[0].members_test(n, orig, value, tt, xi_kind(at) == .opt)
+        else if xi_kind(value) == .refined and xi_types[0][value].bits == -2 and xi_brand_covers(tt, value):
+            tt = value
+            named = int(xi_nodes[0][n].b)
+            xi_nodes[0][named].aux = -7
+            xi_nodes[0][named].ival = tt
     tk = xi_kind(tt)
     if xi_nodes[0][int(xi_nodes[0][n].b)].aux != -7 and (xi_union(tt) or tk == .opt) and xi_host[0].family(tt):
         return xi_host[0].family_test(n, orig, at, tt)

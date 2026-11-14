@@ -60,9 +60,9 @@ value_call = (n: int, callee: int, args: int[], expected: int = 0) -> int:
         pts: int[]
         loop i in [0..na): pts.push(targ(ft, i))
         return finish_partial(n, pts, int(types[ft].mutmask), int(types[ft].elem))
-    result = representation_type(int(types[ft].elem))
+    result = refine_read_type(int(types[ft].elem))
     nodes[n].type = i32(result)
-    representation_type(int(types[ft].elem))
+    refine_read_type(int(types[ft].elem))
 
 # A call through a handle that keeps its function's defaults (see mk_fn):
 # arguments bind as in a direct call of that function, and each omitted
@@ -96,6 +96,6 @@ value_call_defaults = (n: int, callee: int, ft: int, f: int, args: int[]) -> int
         pts: int[]
         loop i in [0..np): pts.push(targ(ft, i))
         return finish_partial(n, pts, int(types[ft].mutmask), int(types[ft].elem))
-    result = representation_type(int(types[ft].elem))
+    result = refine_read_type(int(types[ft].elem))
     nodes[n].type = i32(result)
-    representation_type(int(types[ft].elem))
+    refine_read_type(int(types[ft].elem))

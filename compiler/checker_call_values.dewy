@@ -16,7 +16,7 @@ from p"type_ops.dewy" import (fn_label_names)
 from p"check.jo" import (fns)
 from p"ide_index.dewy" import (never_cascade)
 from p"poly_closure.jo" import (poly_families)
-from p"refine.jo" import (representation_type)
+from p"refine.jo" import (representation_type refine_read_type)
 from p"checker_call_resolve.dewy" import (resolve_fn_call)
 from p"effect_contracts.dewy" import (callable_base)
 # O(arguments), preserving call order and retaining indices across arena growth.
@@ -69,9 +69,9 @@ value_call=(n:int64 callee:int64 args:array<int64> expected:int64=0):>int64=>$un
         loop i in [0..na) {pts.push(targ(ft i))}
         return finish_partial(n pts HVWord(types.ptr[ft].mutmask) HVWord(types.ptr[ft].elem))
     }
-    let result=representation_type(HVWord(types.ptr[ft].elem))
+    let result=refine_read_type(HVWord(types.ptr[ft].elem))
     nodes.ptr[n].type = int32(result)
-    representation_type(HVWord(types.ptr[ft].elem))
+    refine_read_type(HVWord(types.ptr[ft].elem))
 }
 # A call through a handle that keeps its function's defaults (see mk_fn):
 # arguments bind as in a direct call of that function, and each omitted
@@ -109,7 +109,7 @@ value_call_defaults=(n:int64 callee:int64 ft:int64 f:int64 args:array<int64>):>i
         loop i in [0..np) {pts.push(targ(ft i))}
         return finish_partial(n pts HVWord(types.ptr[ft].mutmask) HVWord(types.ptr[ft].elem))
     }
-    let result=representation_type(HVWord(types.ptr[ft].elem))
+    let result=refine_read_type(HVWord(types.ptr[ft].elem))
     nodes.ptr[n].type = int32(result)
-    representation_type(HVWord(types.ptr[ft].elem))
+    refine_read_type(HVWord(types.ptr[ft].elem))
 }

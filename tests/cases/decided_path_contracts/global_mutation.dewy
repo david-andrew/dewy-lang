@@ -1,0 +1,4 @@
+Config:type=[file:SafePath]
+let file=p"/srv/a"
+change=(text:string):>void=>{file.path=text}
+main=():>void=>{change("/elsewhere");printl(Config[file])}

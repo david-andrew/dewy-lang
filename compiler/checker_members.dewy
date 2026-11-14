@@ -113,6 +113,7 @@ xd_member=(n:XDWord expected:XDWord spelled:XDWord is_callee:bool):>CheckerMembe
         let copied=member_copy(n bt)
         if copied >=? 0 {return [type=copied bypass=true]}
     }
+    if xd_types[0].ptr[bt].kind =? 'refined' and xd_types[0].ptr[bt].bits =? -2 {bt=xd_representation(bt)}
     if (xd_union(bt) or xd_kind(bt) =? 'opt') and xd_in_dewy(n) {return [type=member_forward(n bt expected) bypass=true]}
     if xd_sentinel[0] not=? 0 and fname =? xd_sentinel[0] {ide_complete_members(bt)}
     let bk=xd_types[0].ptr[bt].kind

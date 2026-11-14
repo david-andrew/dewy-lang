@@ -1,0 +1,3 @@
+source=(text:string):>Path=>p(text)
+Config:type=[file:SafePath $__copy__=():>Config=>Config[source("/elsewhere")]]
+main=():>void=>{let config=Config[p"/srv/a"]; let copy=config.copy; printl(copy.file)}

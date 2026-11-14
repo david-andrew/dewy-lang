@@ -1,0 +1,12 @@
+Config:type=[file:SafePath?]
+accept=(file:SafePath):>void=>printl(file)
+main=():>void=>{
+    let config=Config[]
+    config.file=p"/srv/a"
+    if config.file is? none {return}
+    accept(config.file)
+    let paths:array<SafePath?>=[none p"/srv/b"]
+    let file=paths[1]
+    if file is? none {return}
+    accept(file)
+}

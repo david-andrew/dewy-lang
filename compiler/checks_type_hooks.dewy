@@ -11,6 +11,9 @@ from p"check.jo" import (FK_INIT FK_NORMAL binding_const_init check_c_boxes chec
 from p"check_metadata.dewy" import (no_web_check)
 from p"checks_thin.dewy" import (new_inst push_type_params refine_resume written_refinement)
 from p"checker_alias.dewy" import (CheckerAliasScope)
+from p"checker_types.dewy" import TypeInfo
+from p"checker_type_tests.dewy" import xi_note_path_brand
+from p"safe_paths.jo" import (ut_safe_name ut_safe_used)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checker_fields.dewy" import (CheckerFieldScope)
 from p"checker_results.dewy" import (CheckerResultCandidate)
@@ -36,7 +39,7 @@ from p"refine.jo" import (ref_intern ref_storage_contract ref_validate_signature
 from p"refine.jo" import (ref_atoms)
 from p"refine_ops.dewy" import (str_set_type)
 from p"refinement_types.dewy" import (RefAtom)
-from p"types.jo" import (T_NEVER T_VOID fields prune soa_decl struct_targ structs tkind types)
+from p"types.jo" import (T_NEVER T_VOID mk_type fields prune soa_decl struct_targ structs tkind types)
 from p"type_ops.dewy" import (dt is_soa mk_param plain_problem soa_inst type_str union_alias_note zonk)
 from p"util.jo" import (err_notes files intern name_of pl_inst_decls pl_on pos_file pos_in_lib)
 from p"diagnostic_exit.dewy" import (fatal)
@@ -107,6 +110,13 @@ alias_leave=(scope:CheckerAliasScope):>void=>{
     cx=scope.context
 }
 alias_note=(d:int64 t:int64):>void=>$unsafe {
+    # Private -2 refinement: same Path layout, persistent semantic contract.
+    # Cache it on the alias so type arguments and value-level type uses agree.
+    if TypeHookWord(nodes.ptr[d].name) =? ut_safe_name and pos_in_lib(nodes.ptr[d].pos) {
+        refine_active=true;ut_safe_used=true
+        xi_note_path_brand()
+        nodes.ptr[d].type=int32(mk_type(TypeInfo(kind='refined' elem=int32(t) bits=(-2)) []))
+    }
     if dewy_at(nodes.ptr[d].pos) and not pos_in_lib(nodes.ptr[d].pos) {union_alias_note(t TypeHookWord(nodes.ptr[d].name))}
 }
 field_enter=(d:int64 si:int64):>CheckerFieldScope=>$unsafe {

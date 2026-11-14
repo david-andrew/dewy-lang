@@ -1,0 +1,6 @@
+accept=(file:SafePath):>void=>printl(file)
+make=(file:SafePath)=>{
+    let files:array<SafePath>=[file]
+    ():>void=>{loop chosen in files {accept(chosen)}}
+}
+main=():>void=>{let show=make(p"/srv/a");show}

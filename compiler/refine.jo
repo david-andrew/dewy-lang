@@ -1,3 +1,4 @@
+use 'safe_paths.jo'
 use 'facts_values.dewy'
 use 'checks_assign_hooks.dewy'
 use 'lower_storage.dewy'
@@ -100,6 +101,13 @@ representation_type = (t0: int) -> int:
     t = prune(t0)
     if types[t].kind == .refined: return prune(int(types[t].elem))
     t
+
+# Reads retain opaque storage brands, while numeric refinements keep their
+# existing value representation. This is metadata only, with the same layout.
+refine_read_type = (t0: int) -> int:
+    t = prune(t0)
+    if types[t].kind == .refined and types[t].bits == -2: return t
+    representation_type(t)
 
 # String literal sets (`'a'|'b'`): an enum whose variant i is member i, so a
 # value is one word at run time (the member's index); `=?`, `is?` and `match`
@@ -247,6 +255,16 @@ ref_wrapped_check = (n0: int) -> int:
 refine_coerce = (n: int, target: int) -> int:
     t = prune(target)
     if types[t].bits == -1: return total_dict_coerce(n, t)
+    # Path containment is proved by the demanded SafePath pass. Keep the
+    # obligation node through checking; it has no numeric predicate or runtime test.
+    if types[t].bits == -2:
+        ut_safe_used = true
+        if prune(ntype(n)) == t: return n
+        coerce(n, int(types[t].elem))
+        wrap_conv(n, .refinement, int(types[t].elem))
+        nodes[n].aux2 = i32(t)
+        nodes[n].ival = 1
+        return n
     coerce(n, int(types[t].elem))
     if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.refinement)) and nodes[n].aux2 == i32(t): return n
     owner = if cx >= 0: int(ctxs[cx].inst) else: 0
@@ -708,6 +726,7 @@ ref_place_alias = (n: int) -> int:
 ref_field_store = (statement: int, target: int) -> int:
     lhs = ref_place_alias(int(nodes[statement].a))
     if nodes[lhs].kind != .field: return 0
+    if ut_safe_used and ref_safe_path_ancestor(lhs): fatal(nodes[statement].pos, "a SafePath's representation cannot be mutated; replace the whole SafePath with a proven path")
     parent = int(nodes[lhs].a)
     t = representation_type(ntype(parent))
     if not ref_dependent_record(t) and not ref_dependent_ancestor(parent): return 0
@@ -768,7 +787,17 @@ ref_field_store = (statement: int, target: int) -> int:
 # still holds. Only these nodes, never another `@` argument. O(1))
 ref_nd_receivers: {int: bool} = {}
 
+ref_safe_path_ancestor = (n: int) -> bool:
+    value = ref_place_alias(n)
+    loop nodes[value].kind == .field or nodes[value].kind == .index or nodes[value].kind == .unwrap or nodes[value].kind == .narrow:
+        value = int(nodes[value].a)
+        t = prune(refine_storage(value, ntype(value)))
+        if types[t].kind == .refined and types[t].bits == -2: return true
+        value = ref_place_alias(value)
+    false
+
 ref_mutable_authority = (n: int):
+    if ut_safe_used and ref_safe_path_ancestor(n): fatal(nodes[n].pos, "a SafePath's representation cannot be exposed for mutation; replace the whole SafePath with a proven path")
     if ref_dependent_ancestor(n): fatal(nodes[n].pos, "mutable refinement access needs the full record invariant authority; pass the whole record with `@`")
 
 # ---------------- paired length operations (docs/LANGUAGE.md, records) ----------------
@@ -885,6 +914,7 @@ ref_record_conversion = (from: int, to: int) -> bool:
     true
 
 ref_dependent_ancestor = (n: int) -> bool:
+    if ut_safe_used and ref_safe_path_ancestor(n): return true
     value = ref_place_alias(n)
     loop nodes[value].kind == .field or nodes[value].kind == .index:
         value = int(nodes[value].a)

@@ -1,0 +1,8 @@
+Config:type=[file:SafePath]
+change=(@file:Path text:string):>void=>{file.path=text}
+make=(text:string):>Config=>{
+    let file=p"/srv/a"
+    change(@file text)
+    Config[file]
+}
+main=():>void=>printl(make("/elsewhere"))

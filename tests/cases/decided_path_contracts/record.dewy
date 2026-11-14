@@ -1,0 +1,9 @@
+# quick
+Config:type=[file:SafePath]
+accept=(file:SafePath):>void=>printl(file)
+main=():>void=>{
+    let config=Config[p"/srv/report"]
+    accept(config.file)
+    config.file=p"/srv/next"
+    accept(config.file)
+}

@@ -37,7 +37,7 @@ tm_match = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
     if pk == .param:
         id = int(tm_types[0][pat].id)
         if binds[id] == 0:
-            binds[id] = if depth > 0: whole else: a
+            binds[id] = if depth > 0 or tm_types[0][whole].kind == .refined and tm_types[0][whole].bits == -2: whole else: a
             if depth == 0: return 3
             return 0
         if tu_equal(binds[id], a): return 0

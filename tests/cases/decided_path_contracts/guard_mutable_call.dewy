@@ -1,0 +1,10 @@
+Config:type=[file:SafePath]
+change=(@file:Path text:string):>void=>{file.path=text}
+make=(input:Path text:string):>Config=>{
+    let file=input
+    let root=p"/srv"
+    if not root.contains(file) {return Config[p"/srv/fallback"]}
+    change(@file text)
+    Config[file]
+}
+main=():>void=>printl(make(p"/srv/a" "/elsewhere"))

@@ -1,0 +1,8 @@
+accept=(file:SafePath):>void=>printl(file)
+main=():>void=>{
+    let fixed:array<SafePath length=2>=[p"/srv/a" p"/srv/b"]
+    fixed[1]=p"/srv/c"
+    accept(fixed[1])
+    let pair:[int64 SafePath]=[4 fixed[0]]
+    accept(pair[1])
+}

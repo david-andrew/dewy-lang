@@ -1,0 +1,8 @@
+Config:type=[file:SafePath]
+replace=(@file:SafePath):>void=>{file=p"/srv/new"}
+accept=(file:SafePath):>void=>printl(file)
+main=():>void=>{
+    let config=Config[p"/srv/old"]
+    replace(@config.file)
+    accept(config.file)
+}

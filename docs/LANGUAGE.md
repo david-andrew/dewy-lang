@@ -4625,8 +4625,32 @@ Read-only record snapshots retain the proofs of the path values used to build
 their fields: `let config=[file=p"/srv/cache/report"]` lets `config.file` pass
 where `SafePath` is wanted. This also follows plain record copies and nested
 fields. Writes, exposed storage, captured records and opaque copy/move hooks
-require validation again. Declaring a record field or collection element
-`SafePath` does not yet establish a checked field/element contract.
+require validation again when the field is just `Path`.
+
+A record field or collection element declared `SafePath` has a checked contract:
+construction, replacement, insertion and extension take only proven paths.
+Reads retain the brand through aliases, generic records, copies, optionals and
+collection iteration. For example:
+
+```dewy
+Config:type = [file:SafePath]
+let config = Config[p"/srv/cache/report"]
+let files:array<SafePath> = [config.file]
+files.push(p"/srv/cache/next")
+```
+
+`SafePath` keeps `Path`'s runtime layout and passes where a `Path` is wanted.
+An inferred copy keeps the brand; use a `Path` annotation on a copy that must
+later hold ordinary paths.
+Collection element contracts remain part of their types: a mutable parameter
+requiring `array<Path>` cannot receive an `array<SafePath>`, since it could
+write an unproven path. Assign a new proven path to a whole `SafePath` slot to
+change it; writes or mutable aliases into its `.path` representation are
+rejected. Function-value conversions cannot add a SafePath result promise or
+remove a SafePath input requirement.
+Text/JSON decoding and unchecked collection growth cannot manufacture the brand.
+Decode external paths as `Path`, then validate them before placing them in
+checked storage. JSON writing uses the same representation as `Path`.
 
 A parameter, `let` or result declared `SafePath` takes only such a path. Passing
 another is a compile error that names the fixes: `root.confine(f) or_throw` (the

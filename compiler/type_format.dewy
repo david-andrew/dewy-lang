@@ -81,6 +81,7 @@ tf_string_in=(t0:FWord dewy:bool):>string=>$unsafe {
         <'effect'> => {"Effect"}
         <'callable'> => {"{tf_string(FWord(ti.elem)  dewy)} & <effects>"}
         <'refined'> => {
+            if ti.bits =? -2 {return "SafePath"}
             if ti.bits =? - 1 {
                 let m=tu_prune(FWord(ti.elem))
                 if dewy {return "totaldict<{tf_string(tu_struct_targ(FWord(tf_inputs[0].types[0].ptr[m].st)  0)  dewy)} {tf_string(tu_struct_targ(FWord(tf_inputs[0].types[0].ptr[m].st)  1)  dewy)}>"}

@@ -1,0 +1,13 @@
+accept=(file:SafePath):>void=>printl(file)
+pick=(ok:bool):>SafePath|Missing=>if ok p"/srv/a" else Missing
+main=():>void=>{
+    match pick(true) {
+        file:Path=>accept(file)
+        absent:Missing=>printl("missing")
+    }
+    let maybe:SafePath?=p"/srv/b"
+    match maybe {
+        file:Path=>accept(file)
+        <none>=>printl("missing")
+    }
+}

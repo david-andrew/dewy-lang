@@ -2,7 +2,7 @@ $runtime_checks
 
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
-from p"type_inference.dewy" import (tu_prune tu_equal)
+from p"type_inference.dewy" import (tu_prune tu_equal tu_struct_targ)
 from p"type_unions.dewy" import uu_index
 from p"checker_resolve.dewy" import (ct_resolve_type ct_resolve_family)
 # `x is? T` owns its test selection: family, optional-union, union-subset, string-set,
@@ -42,6 +42,8 @@ let xi_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xi_string_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xi_bool_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xi_host:ptr<CheckerTypeTestHost>=$unsafe (uint64(0) as ptr<CheckerTypeTestHost>)
+let xi_path_brands=false
+xi_note_path_brand=():>void=>{xi_path_brands=true}
 checker_type_tests_bind=(input:ptr<CheckerTypeTestInput>):>XIWord=>$unsafe {
     xi_nodes=input[0].nodes
     xi_types=input[0].types
@@ -69,6 +71,10 @@ xi_representation=(t0:XIWord):>XIWord=>$unsafe {
     if xi_types[0].ptr[t].kind =? 'refined' {return tu_prune(XIWord(xi_types[0].ptr[t].elem))}
     t
 }
+xi_brand_covers=(wanted:XIWord member:XIWord):>bool=>$unsafe {
+    if tu_equal(wanted member) or tu_equal(wanted xi_representation(member)) {return true}
+    xi_union(wanted) and (uu_index(wanted member) >=? 0 or uu_index(wanted xi_representation(member)) >=? 0)
+}
 # The test's type: bool, or a rewrite's checked type. Errors (codes 1-3) never return.
 xi_check=(n:XIWord):>XIWord=>$unsafe {
     # A variable or field path, copied before checking: rewrites test it again.
@@ -78,6 +84,26 @@ xi_check=(n:XIWord):>XIWord=>$unsafe {
     xi_host[0].finalize(XIWord(xi_nodes[0].ptr[n].a));
     let at=tu_prune(XIWord(xi_nodes[0].ptr[XIWord(xi_nodes[0].ptr[n].a)].type))
     let tt=ct_resolve_family(XIWord(xi_nodes[0].ptr[n].b))
+    # A source-level Path test includes branded SafePath members. Generated
+    # exact-member tests use aux=-7 and keep their individual union tags.
+    if xi_path_brands and xi_nodes[0].ptr[XIWord(xi_nodes[0].ptr[n].b)].aux not=? -7 {
+        let value=if xi_kind(at) =? 'opt' {XIWord(xi_types[0].ptr[at].elem)} else {at}
+        if xi_union(value) {
+            let si=XIWord(xi_types[0].ptr[value].st)
+            loop i in [0..XIWord(xi_structs[0].ptr[si].ntargs)) {
+                let member=tu_prune(tu_struct_targ(si i))
+                if xi_kind(member) =? 'refined' and xi_types[0].ptr[member].bits =? -2 and xi_brand_covers(tt member) {
+                    return xi_host[0].members_test(n orig value tt xi_kind(at) =? 'opt')
+                }
+            }
+        }
+        else if xi_kind(value) =? 'refined' and xi_types[0].ptr[value].bits =? -2 and xi_brand_covers(tt value) {
+            tt=value
+            let named=XIWord(xi_nodes[0].ptr[n].b)
+            xi_nodes[0][named].aux=-7
+            xi_nodes[0][named].ival=tt
+        }
+    }
     # Family annotations (unions or optionals only) select the tested value's members.
     let tk=xi_kind(tt)
     if xi_nodes[0].ptr[XIWord(xi_nodes[0].ptr[n].b)].aux not=? -7 and (xi_union(tt) or tk =? 'opt') and xi_host[0].family(tt) {

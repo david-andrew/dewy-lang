@@ -1,0 +1,10 @@
+accept=(file:SafePath):>void=>printl(file)
+pick=(ok:bool):>SafePath|Missing=>if ok p"/srv/a" else Missing
+main=():>void=>{
+    let one=pick(true)
+    if one is? Path {accept(one)}
+    let maybe:SafePath?=p"/srv/b"
+    if maybe is? Path {accept(maybe)}
+    let mixed:Path|SafePath|Missing=pick(true)
+    if mixed is? Path {printl(mixed)}
+}

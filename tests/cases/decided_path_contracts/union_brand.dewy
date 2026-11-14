@@ -1,0 +1,6 @@
+accept=(file:SafePath):>void=>printl(file)
+show=(file:SafePath):>void=>{
+    let mixed:Path|SafePath|Missing=file
+    if mixed is? SafePath {accept(mixed)} else {printl("lost")}
+}
+main=():>void=>show(p"/srv/a")

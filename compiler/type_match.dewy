@@ -42,7 +42,7 @@ tm_match=(pat0:MWord a0:MWord @binds:array<int64> depth:MWord):>MWord=>$unsafe {
     if pk =? 'param' {
         let id=MWord(tm_types[0].ptr[pat].id)
         if binds[id] =? 0 {
-            binds[id] = if depth >? 0 {whole} else {a}
+            binds[id] = if depth >? 0 or (tm_types[0].ptr[whole].kind =? 'refined' and tm_types[0].ptr[whole].bits =? -2) {whole} else {a}
             if depth =? 0 {return 3}
             return 0
         }

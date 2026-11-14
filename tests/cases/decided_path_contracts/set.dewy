@@ -1,0 +1,6 @@
+accept=(file:SafePath):>void=>printl(file)
+main=():>void=>{
+    let paths:set<SafePath>=set[p"/srv/a"]
+    paths.push(p"/srv/b")
+    loop file in paths {accept(file)}
+}

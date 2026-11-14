@@ -55,6 +55,7 @@ tf_string_in = (t0: int, dewy: bool) -> str:
         effect: "Effect"
         callable: "{tf_string(int(ti.elem), dewy)} & <effects>"
         refined:
+            if ti.bits == -2: return "SafePath"
             if ti.bits == -1:
                 m = tu_prune(int(ti.elem))
                 if dewy: return "totaldict<{tf_string(tu_struct_targ(int(tf_inputs[0].types[0][m].st), 0), dewy)} {tf_string(tu_struct_targ(int(tf_inputs[0].types[0][m].st), 1), dewy)}>"

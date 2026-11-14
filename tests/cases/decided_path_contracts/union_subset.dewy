@@ -1,0 +1,10 @@
+pick=(ok:bool):>SafePath|Missing=>if ok p"/srv/a" else Missing
+main=():>void=>{
+    let first=pick(true)
+    if first is? Path|Missing {printl("selected")}
+    let mixed:Path|SafePath|Missing=pick(true)
+    match mixed {
+        file:Path=>printl(file)
+        absent:Missing=>printl("missing")
+    }
+}

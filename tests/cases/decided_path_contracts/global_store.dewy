@@ -1,0 +1,4 @@
+Config:type=[file:SafePath]
+let config=Config[p"/srv/a"]
+replace=(file:Path):>void=>{config.file=file}
+main=():>void=>replace(p"/elsewhere")

@@ -1,0 +1,7 @@
+Config:type=[file:SafePath]
+accept=(file:SafePath):>void=>printl(file)
+show=(config:Config paths:array<SafePath>):>void=>{
+    accept(config.file)
+    loop file in paths {accept(file)}
+}
+main=():>void=>show(Config[p"/srv/a"] [p"/srv/b"])

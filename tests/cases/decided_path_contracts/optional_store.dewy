@@ -1,0 +1,3 @@
+Config:type=[file:SafePath?]
+replace=(@config:Config file:Path):>void=>{config.file=file}
+main=():>void=>{let config=Config[]; replace(@config p"/srv/a")}

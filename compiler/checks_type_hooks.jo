@@ -1,4 +1,6 @@
 use 'check.jo'
+use 'safe_paths.jo'
+use 'checker_type_tests.dewy'
 use 'check_metadata.dewy'
 use 'checks_thin.dewy'
 use 'proof_ops.dewy'
@@ -177,6 +179,11 @@ alias_leave = (scope: CheckerAliasScope):
     ctxs.pop()
     cx = scope.context
 alias_note = (d: int, t: int):
+    if int(nodes[d].name) == ut_safe_name and pos_in_lib(nodes[d].pos):
+        refine_active = true
+        ut_safe_used = true
+        xi_note_path_brand()
+        nodes[d].type = i32(mk_type(TypeInfo(kind = .refined, elem = i32(t), bits = -2), []))
     if dewy_at(nodes[d].pos) and not pos_in_lib(nodes[d].pos): union_alias_note(t, int(nodes[d].name))
 field_enter = (d: int, si: int) -> CheckerFieldScope:
     if refine_deferred.len() > 0 and d != 0: refine_resume(int(nodes[d].mod))

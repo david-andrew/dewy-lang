@@ -270,6 +270,7 @@ str_set_text_of = (n: int):
     nodes[n] = nodes[c]
 refine_implies = (from: int, to: int) -> bool:
     if type_eq(from, to): return true
+    if types[prune(to)].kind == .refined and types[prune(to)].bits == -2: return false
     if not callable_shape_eq(representation_type(from), representation_type(to)): return false
     if types[prune(to)].kind != .refined: return true
     # Formal slots are alpha-normalized; distinct lexical declarations remain

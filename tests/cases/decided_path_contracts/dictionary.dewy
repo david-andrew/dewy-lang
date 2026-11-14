@@ -1,0 +1,7 @@
+accept=(file:SafePath):>void=>printl(file)
+main=():>void=>{
+    let paths:dict<string SafePath>=['first' -> p"/srv/a"]
+    paths['next']=p"/srv/b"
+    let file=paths.get('next') ?? p"/srv/fallback"
+    accept(file)
+}

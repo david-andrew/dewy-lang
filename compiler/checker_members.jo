@@ -93,6 +93,7 @@ xd_member = (n: int, expected: int, spelled: int, is_callee: bool) -> CheckerMem
     if spelled & 4 != 0:
         copied = member_copy(n, bt)
         if copied >= 0: return CheckerMemberResult(copied, true)
+    if xd_types[0][bt].kind == .refined and xd_types[0][bt].bits == -2: bt = xd_representation(bt)
     if (xd_union(bt) or xd_kind(bt) == .opt) and xd_in_dewy(n): return CheckerMemberResult(member_forward(n, bt, expected), true)
     if xd_sentinel[0] != 0 and fname == xd_sentinel[0]: ide_complete_members(bt)
     bk = xd_types[0][bt].kind

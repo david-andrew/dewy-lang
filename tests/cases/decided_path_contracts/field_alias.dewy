@@ -1,0 +1,3 @@
+Config:type=[file:SafePath]
+erase=(@file:Path replacement:Path):>void=>{file=replacement}
+main=():>void=>{let config=Config[p"/srv/a"]; erase(@config.file p"/srv/b")}

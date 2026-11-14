@@ -1,5 +1,9 @@
 $runtime_checks
 
+from p"error_ops.dewy" import (nominal_family_part value_members)
+from p"safe_paths.jo" import ut_safe_used
+from p"refine.jo" import representation_type
+
 from p"checks_thin.dewy" import (jd)
 from p"expr.jo" import (CV)
 from p"ast.jo" import (NF_CHECKED add_flag kids mk nkids nodes)
@@ -116,6 +120,26 @@ match_string_patterns=(arm:int64 st:int64 covered:array<string> lits:array<strin
     str_set_patterns(arm st covered lits)
     bare_generic_set(was);
     return
+}
+# A Path pattern keeps the actual SafePath tags, including union subsets.
+# Only demanded branded programs inspect members; O(actual * wanted), like
+# the existing union-subset lookup. No body scan or runtime brand test.
+match_family_part=(t:int64 u:int64):>int64=>$unsafe {
+    let ordinary=nominal_family_part(t u)
+    if ordinary not=? 0 or not ut_safe_used {return ordinary}
+    let held:array<int64>=[]
+    let branded=false
+    loop member in value_members(u) {
+        loop wanted in value_members(t) {
+            let safe=types.ptr[member].kind =? 'refined' and types.ptr[member].bits =? -2
+            if type_eq(member wanted) or (safe and type_eq(representation_type(member) wanted)) {
+                if not held.contains(member) {held.push(member)}
+                if safe {branded=true}
+            }
+        }
+    }
+    if not branded {return 0}
+    mk_union(held)
 }
 match_wrap_union=(n:int64 t:int64):>void=>{
     wrap_conv(n CV.union_ t)

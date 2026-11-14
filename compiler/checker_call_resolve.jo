@@ -305,11 +305,11 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         nodes[n].aux2 = 0
         return finish_partial(n, fns[f].ptypes, int(cd.sig.mutmask), int(fns[f].ret))
     if not capture_defaults: save_call_order(n, args, fin)
-    nodes[n].type = i32(representation_type(int(fns[f].ret)))
+    nodes[n].type = i32(refine_read_type(int(fns[f].ret)))
     if refined_array.candidate != 0: return ref_array_call_finish(n, refined_array)
     if cc_any and nodes[decl].c != 0 and closure == 0 and not capture_defaults:
         narrowed = cc_call(n, f, decl)
         if narrowed != 0: return narrowed
     if wi_any and cc_any and closure == 0: call_warn_unsettled(n, f, decl)
     if capture_defaults: call_capture_block(n, f, statements)
-    representation_type(int(fns[f].ret))
+    refine_read_type(int(fns[f].ret))

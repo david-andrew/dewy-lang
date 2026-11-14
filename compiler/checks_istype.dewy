@@ -161,15 +161,19 @@ is_rewritten=(n:int64 orig:int64 c:int64):>int64=>$unsafe {
     check_expr(n 0)
 }
 # the members of union u that t is (t one of them, or a union of some of them); none: it is not
-sub_members=(u:int64 t:int64):>array<int64>=>{
+sub_members=(u:int64 t:int64):>array<int64>=>$unsafe {
     let out:array<int64>=[]
-    if union_index(u t) >=? 0 {
-        out.push(t)
+    if not is_union(t) {
+        loop member in union_members(u) {
+            if type_eq(member t) or (types.ptr[member].kind =? 'refined' and types.ptr[member].bits =? -2 and type_eq(representation_type(member) t)) {out.push(member)}
+        }
         return out
     }
-    if not is_union(t) {return out}
-    loop m in union_members(t) {
-        if union_index(u m) >=? 0 {out.push(m)}
+    if union_index(u t) >=? 0 {out.push(t);return out}
+    loop wanted in union_members(t) {
+        loop member in sub_members(u wanted) {
+            if not out.contains(member) {out.push(member)}
+        }
     }
     out
 }

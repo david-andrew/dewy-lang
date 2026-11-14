@@ -50,6 +50,9 @@ ca_resolve_alias=(d:CAWord targs:array<int64> use_pos:CAWord):>CAWord=>$unsafe {
     ca_host[0].leave(scope)
     ca_nodes[0][d].aux = 0
     if ntp =? 0 {ca_nodes[0][d].type = int32<overflow='wrap'>(t)}
-    if ntp =? 0 {ca_host[0].note(d t)}
+    if ntp =? 0 {
+        ca_host[0].note(d t)
+        return CAWord(ca_nodes[0].ptr[d].type)
+    }
     t
 }

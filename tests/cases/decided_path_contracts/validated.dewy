@@ -1,0 +1,11 @@
+Config:type=[file:SafePath]
+accept=(file:SafePath):>void=>printl(file)
+store=(file:Path):>void=>{
+    let root=p"/srv"
+    if not root.contains(file) {return}
+    let config=Config[file]
+    let paths:array<SafePath>=[file]
+    accept(config.file)
+    accept(paths[0])
+}
+main=():>void=>store(p"/srv/a")

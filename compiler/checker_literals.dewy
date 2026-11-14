@@ -85,7 +85,7 @@ xl_publish=(@node:Node t:XLWord):>void=>{
 }
 xl_finish=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
     let t=t0
-    if xl_refine[0] and xl_types[0].ptr[t].kind =? 'refined' {t=XLWord(xl_types[0].ptr[t].elem)}
+    if xl_refine[0] and xl_types[0].ptr[t].kind =? 'refined' and xl_types[0].ptr[t].bits not=? -2 {t=XLWord(xl_types[0].ptr[t].elem)}
     # Without an expected type the host's callable inference returns the type as published.
     if xl_effects[0] and expected not=? 0 {
         xl_nodes[0][n].type=int32<overflow='wrap'>(t)

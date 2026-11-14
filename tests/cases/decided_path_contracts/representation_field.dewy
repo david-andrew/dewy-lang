@@ -1,0 +1,3 @@
+Config:type=[file:SafePath]
+change=(@config:Config text:string):>void=>{config.file.path=text}
+main=():>void=>{let config=Config[p"/srv/a"]; change(@config "/elsewhere")}

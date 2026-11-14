@@ -45,5 +45,7 @@ ca_resolve_alias = (d: int, targs: int[], use_pos: int) -> int:
     ca_host[0].leave(scope)
     ca_nodes[0][d].aux = 0
     if ntp == 0: ca_nodes[0][d].type = i32(t)
-    if ntp == 0: ca_host[0].note(d, t)
+    if ntp == 0:
+        ca_host[0].note(d, t)
+        return int(ca_nodes[0][d].type)
     t

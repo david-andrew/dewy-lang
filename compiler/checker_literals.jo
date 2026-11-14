@@ -75,7 +75,7 @@ xl_publish = (node: mut Node, t: int):
     node.flags |= 128
 xl_finish = (n: int, t0: int, expected: int) -> int:
     t = t0
-    if xl_refine[0] and xl_types[0][t].kind == .refined: t = int(xl_types[0][t].elem)
+    if xl_refine[0] and xl_types[0][t].kind == .refined and xl_types[0][t].bits != -2: t = int(xl_types[0][t].elem)
     xl_nodes[0][n].type = i32(t)
     # (without an expected type, callable inference returns the type as published)
     if xl_effects[0] and expected != 0: t = effect_infer_callable(n, expected); xl_nodes[0][n].type = i32(t)

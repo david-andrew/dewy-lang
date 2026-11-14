@@ -1,0 +1,13 @@
+accept=(file:SafePath):>void=>printl(file)
+show=(file:SafePath?):>void=>{
+    if file is? none {printl("none");return}
+    accept(file)
+}
+main=():>void=>{
+    let chosen:SafePath?=none
+    show(chosen)
+    chosen=p"/srv/a"
+    show(chosen)
+    chosen=none
+    show(chosen)
+}

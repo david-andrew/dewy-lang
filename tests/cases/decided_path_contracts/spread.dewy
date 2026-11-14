@@ -1,0 +1,6 @@
+accept=(file:SafePath):>void=>printl(file)
+main=():>void=>{
+    let source:array<SafePath>=[p"/srv/a"]
+    let paths:array<SafePath>=[source... p"/srv/b"]
+    accept(paths[0]); accept(paths[1])
+}

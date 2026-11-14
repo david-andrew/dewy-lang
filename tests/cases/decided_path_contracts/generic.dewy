@@ -1,0 +1,12 @@
+Box:type=<T>[value:T]
+accept=(file:SafePath):>void=>printl(file)
+identity=<T>(value:T):>T=>value
+make=():>Box<SafePath>=>Box<SafePath>[p"/srv/record"]
+main=():>void=>{
+    let box=make
+    accept(identity<SafePath>(box.value))
+    let paths:array<SafePath>=[box.value]
+    accept(identity(paths)[0])
+    accept(identity(box.value))
+    accept(identity(paths[0]))
+}
