@@ -105,6 +105,7 @@ use 'facts_progress.dewy'
 use 'facts_probes.dewy'
 use 'facts_row_queries.dewy'
 use 'facts_projection_queries.dewy'
+use 'facts_value_queries.dewy'
 
 # One tombstone per invalidated route: the event that last replaced the
 # place and the value it replaced. Witnesses only; never evidence.
@@ -568,32 +569,6 @@ fact_domain = (t0: int, reason: FactReason = .missing, at: int = 0) -> FactBound
         r.hi = if types[t].sign: (1 << (bits - 1)) - 1 else: (1 << bits) - 1
     r
 
-fact_slot = (s: FactState, v: int) -> int:
-    # A value's latest insertion is a hint, never cross-branch evidence.
-    # Validate against this frame before falling back to its own index.
-    if v > 0 and v < fact_terms.len():
-        hint = fact_terms[v].slot
-        if hint >= 0 and hint < s.ids.len() and s.ids[hint] == v: return hint
-    # (a hashed index may be shared with a longer ancestor: an entry counts
-    # only when it still names v's position)
-    if s.index[0].slots.len() != 0:
-        i = fact_index_get(s.index[0].slots, v)
-        if i >= 0 and i < s.ids.len() and s.ids[i] == v: return i
-        return -1
-    if s.ids.len() == 0 or v < s.ids[0] or v > s.ids[s.ids.len() - 1]: return -1
-    lo = 0; hi = s.ids.len()
-    loop lo < hi:
-        mid = (lo + hi) / 2
-        if s.ids[mid] < v: lo = mid + 1
-        else: hi = mid
-    if lo < s.ids.len() and s.ids[lo] == v: return lo
-    -1
-
-fact_bound = (s: FactState, v: int) -> FactBound:
-    i = fact_slot(s, v)
-    if i < 0: return FactBound(reason = .budget, wide = true)
-    s.bounds[i]
-
 fact_new = (s: mut FactState, b: FactBound, term: FactTerm = FactTerm()) -> int:
     if s.ids.len() >= FACT_CAP and not s.full: fact_compact(s)
     if s.ids.len() >= FACT_CAP: return 0
@@ -602,24 +577,6 @@ fact_new = (s: mut FactState, b: FactBound, term: FactTerm = FactTerm()) -> int:
     fact_terms.push(term)
     fact_add_value(s, v, b)
     v
-
-# A compact open-address index: (key, record+1) pairs after an entry count.
-# Empty slots have record=0, so all signed keys are usable. Doubling at half
-# occupancy gives amortized O(1) insertion and expected O(1) lookup. These
-# arrays copy with the fact state; there is no mutable cross-branch cache.
-fact_index_hash = (key: int, mask: int) -> int:
-    ((key xor (key >> 32)) * 0x9e3779b1) & mask
-
-fact_index_get = (index: int[], key: int) -> int:
-    if index.len() == 0: return -1
-    mask = (index.len() - 1) / 2 - 1
-    slot = fact_index_hash(key, mask)
-    loop true:
-        i = 1 + slot * 2
-        if index[i + 1] == 0: return -1
-        if index[i] == key: return index[i + 1] - 1
-        slot = (slot + 1) & mask
-    -1
 
 # (an empty index sized to take n entries without growing)
 fact_index_sized = (n: int) -> int[]:
@@ -768,13 +725,6 @@ fact_constant = (s: mut FactState, x: int, at: int = 0) -> int:
     fact_new(s, FactBound(x, x, x != 0), FactTerm(origin = at))
 
 fact_place = (e: int) -> PlaceIdentity: place_scalar_root(e)
-
-# (a join's root index may be shared with a predecessor holding more
-# bindings: an entry counts only when it still names p's position)
-fact_binding = (s: FactState, p: PlaceIdentity) -> int:
-    i = fact_index_get(s.index[0].roots, fact_root_key(p))
-    if i >= 0 and i < s.bindings.len() and s.bindings[i].place == p: return i
-    -1
 
 fact_bind = (s: mut FactState, p: PlaceIdentity, v: int):
     if p.declaration == 0: return
@@ -1167,12 +1117,6 @@ struct FactCallWrites:
 # within the existing state cap. Map/pool internals widen to their root.
 fact_call_field_types: {(int, int): int} = {}
 
-fact_truth = (s: FactState, v: int) -> int:
-    b = fact_bound(s, v)
-    if b.lo == 0 and b.hi == 0: return 0
-    if b.nz or b.lo > 0 or b.hi < 0: return 1
-    -1
-
 # (cap: incident rows per term; a constant offset's exact rows get twice
 # the usual eight, so `b[p+1] … b[p+4]` after one guard all keep theirs)
 fact_difference = (s: mut FactState, a: int, b: int, limit: int, at: int = 0, cap: int = 8):
@@ -1338,12 +1282,6 @@ fact_sum_compare = (s: FactState, a: int, b: int, limit: int) -> bool:
             total = up + down
             if fact_add_fits(total, tail) and total + tail <= limit: return true
     false
-
-# v's interval as signed values: a uint64's biased ends count as unknown (wide).
-fact_signed_bound = (s: FactState, v: int) -> FactBound:
-    b = fact_bound(s, v)
-    if v != 0 and fact_type(fact_terms[v].type) == T_U64: b.wide = true
-    b
 
 # y - h <= d: the shortest row path, else the operands' intervals. FACT_MAX: none.
 fact_gap = (s: FactState, y: int, h: int) -> int:

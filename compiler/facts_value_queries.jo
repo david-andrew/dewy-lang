@@ -1,0 +1,155 @@
+use 'facts.jo'
+use 'lower_scalars.dewy'
+use 'lower_views.dewy'
+use 'lower_storage.dewy'
+use 'lower_analysis.dewy'
+use 'lower_helpers.dewy'
+use 'lower_group.dewy'
+use 'checker_state.dewy'
+use 'effect_lattice.dewy'
+use 'effect_types.dewy'
+use 'sequence_selectors.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'ide.jo'
+use 'exact.jo'
+use 'math_lower.jo'
+use 'ast.jo'
+use 'icount.jo'
+use 'icount_ops.dewy'
+use 'lex.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'word_overflow.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'expr.jo'
+use 'checks_thin_expr.dewy'
+use 'lower.jo'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'checks_static.dewy'
+use 'comptime.jo'
+use 'check_constant.jo'
+use 'constant_checks.dewy'
+use 'isolation.jo'
+use 'refine.jo'
+use 'refine_siblings.dewy'
+use 'refine_rare.dewy'
+use 'nd_contracts.jo'
+use 'nd_contract_ops.dewy'
+use 'proofs.jo'
+use 'proof_ops.dewy'
+use 'places.jo'
+use 'place_routes.dewy'
+use 'effects.jo'
+use 'effect_library.jo'
+use 'ownership.jo'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'directives.jo'
+use 'directive_queries.dewy'
+use 'directive_rules.dewy'
+use 'warn_if.jo'
+use 'string_domains.jo'
+use 'draw_context.jo'
+use 'predicate_facts.jo'
+use 'predicate_summaries.dewy'
+use 'floats.jo'
+use 'float_ops.dewy'
+use 'member_replay.jo'
+use 'ownership_types.dewy'
+use 'lower_primitives.dewy'
+use 'math_ops.dewy'
+use 'draw_ops.dewy'
+use 'effect_classifiers.dewy'
+use 'effect_values.dewy'
+use 'effect_control.dewy'
+use 'effect_costs.dewy'
+use 'effect_owners.dewy'
+use 'isolation_ops.dewy'
+use 'facts_collect.dewy'
+use 'facts_arith.dewy'
+use 'facts_lifecycle.dewy'
+use 'facts_forgets.dewy'
+use 'facts_plans.dewy'
+use 'facts_numeric.dewy'
+use 'fact_words.dewy'
+use 'facts_ranges.dewy'
+use 'facts_routes.dewy'
+use 'facts_forks.dewy'
+use 'facts_elements.dewy'
+use 'facts_loops.dewy'
+use 'facts_conditions.dewy'
+use 'facts_joins.dewy'
+use 'facts_changes.dewy'
+use 'facts_library.dewy'
+use 'facts_summaries.dewy'
+use 'facts_pushes.dewy'
+use 'facts_text.dewy'
+use 'facts_arrays.dewy'
+use 'facts_maps.dewy'
+use 'facts_pools.dewy'
+use 'facts_members.dewy'
+use 'facts_progress.dewy'
+use 'facts_probes.dewy'
+use 'facts_row_queries.dewy'
+use 'facts_projection_queries.dewy'
+
+fact_slot = (s: FactState, v: int) -> int:
+    # A value's latest insertion is a hint, never cross-branch evidence.
+    # Validate against this frame before falling back to its own index.
+    if v > 0 and v < fact_terms.len():
+        hint = fact_terms[v].slot
+        if hint >= 0 and hint < s.ids.len() and s.ids[hint] == v: return hint
+    # (a hashed index may be shared with a longer ancestor: an entry counts
+    # only when it still names v's position)
+    if s.index[0].slots.len() != 0:
+        i = fact_index_get(s.index[0].slots, v)
+        if i >= 0 and i < s.ids.len() and s.ids[i] == v: return i
+        return -1
+    if s.ids.len() == 0 or v < s.ids[0] or v > s.ids[s.ids.len() - 1]: return -1
+    lo = 0; hi = s.ids.len()
+    loop lo < hi:
+        mid = (lo + hi) / 2
+        if s.ids[mid] < v: lo = mid + 1
+        else: hi = mid
+    if lo < s.ids.len() and s.ids[lo] == v: return lo
+    -1
+fact_bound = (s: FactState, v: int) -> FactBound:
+    i = fact_slot(s, v)
+    if i < 0: return FactBound(reason = .budget, wide = true)
+    s.bounds[i]
+# A compact open-address index: (key, record+1) pairs after an entry count.
+# Empty slots have record=0, so all signed keys are usable. Doubling at half
+# occupancy gives amortized O(1) insertion and expected O(1) lookup. These
+# arrays copy with the fact state; there is no mutable cross-branch cache.
+fact_index_hash = (key: int, mask: int) -> int:
+    ((key xor (key >> 32)) * 0x9e3779b1) & mask
+fact_index_get = (index: int[], key: int) -> int:
+    if index.len() == 0: return -1
+    mask = (index.len() - 1) / 2 - 1
+    slot = fact_index_hash(key, mask)
+    loop true:
+        i = 1 + slot * 2
+        if index[i + 1] == 0: return -1
+        if index[i] == key: return index[i + 1] - 1
+        slot = (slot + 1) & mask
+    -1
+# (a join's root index may be shared with a predecessor holding more
+# bindings: an entry counts only when it still names p's position)
+fact_binding = (s: FactState, p: PlaceIdentity) -> int:
+    i = fact_index_get(s.index[0].roots, fact_root_key(p))
+    if i >= 0 and i < s.bindings.len() and s.bindings[i].place == p: return i
+    -1
+fact_truth = (s: FactState, v: int) -> int:
+    b = fact_bound(s, v)
+    if b.lo == 0 and b.hi == 0: return 0
+    if b.nz or b.lo > 0 or b.hi < 0: return 1
+    -1
+# v's interval as signed values: a uint64's biased ends count as unknown (wide).
+fact_signed_bound = (s: FactState, v: int) -> FactBound:
+    b = fact_bound(s, v)
+    if v != 0 and fact_type(fact_terms[v].type) == T_U64: b.wide = true
+    b

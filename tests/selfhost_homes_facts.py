@@ -7,6 +7,7 @@ LEAF_HOMES = {
     'facts_arith': 'facts.jo',
     'facts_row_queries': 'facts.jo',
     'facts_projection_queries': 'facts.jo',
+    'facts_value_queries': 'facts.jo',
     'facts_collect': 'facts.jo',
     'nd_contract_ops': 'nd_contracts.jo',
 }
