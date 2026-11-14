@@ -333,6 +333,8 @@ lsp_main=():>void=>{
         exit(0)
     }
     let shutdown=false
+    # (deterministic protocol tests turn off lowering in pauses, whose timing they cannot control)
+    let idle_lowering=env("DEWY_LSP_NO_IDLE_LOWERING") =? none
     loop true {
         # check edited documents once the editor has said everything it had to say
         if not lsp_pending() {
@@ -346,7 +348,7 @@ lsp_main=():>void=>{
         }
         # and lower them when it has been quiet for a moment
         loop i in [0..docs.length) {
-            if docs[i].open and not docs[i].dirty and not docs[i].lowered {
+            if idle_lowering and docs[i].open and not docs[i].dirty and not docs[i].lowered {
                 if lsp_queue.length >? 0 or lsp_wait_input(300) {break}
                 lsp_watch("" docs[i].uri)
                 refresh_lowered(i)

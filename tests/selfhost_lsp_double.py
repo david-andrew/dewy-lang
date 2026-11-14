@@ -1,5 +1,6 @@
 """Run one language-server session against a compiler built with a Dewy leaf and with its frozen twin."""
 import json
+import os
 
 from tests.selfhost_lower_double import cached_driver, modules_for
 from tests.test_core_editor import Client
@@ -48,8 +49,13 @@ class Recorder(Client):
 
 def session(compiler, root, steps):
     """steps: (method, params) requests, ('notify', (method, params)) notifications and ('text', (uri,
-    text, version)) edits; the server's messages in order."""
-    client = Recorder(compiler, root)
+    text, version)) edits; the server's messages in order. Lowering in the server's pauses is off: whether
+    a pause is long enough depends on the machine's load, and so would the diagnostics it publishes."""
+    os.environ['DEWY_LSP_NO_IDLE_LOWERING'] = '1'
+    try:
+        client = Recorder(compiler, root)
+    finally:
+        del os.environ['DEWY_LSP_NO_IDLE_LOWERING']
     try:
         for method, params in steps:
             if method == 'text':
