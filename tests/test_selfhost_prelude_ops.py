@@ -1,5 +1,5 @@
-"""Prelude bookkeeping (lazy setup, demanded units, declaration order, Dewy prelude modules and shown
-paths) agrees with frozen Jo."""
+"""Prelude bookkeeping (the lazy index and its demanded units, runtime files loaded by name, declaration
+order, Dewy prelude modules and their scan, shown paths and splat shadowing) agrees with frozen Jo."""
 from tests.selfhost_facts_double import compare_moved
 from tests.support import compiler  # noqa: F401
 
@@ -11,6 +11,12 @@ CASES = [
     'overload/unknown_named_argument',
     'time_clock/waits_entry',
     'time_clock/select_timeout_entry',
+    'modules/splat_shadows_prelude',
+    'settingsplace_rules/pinned',
+    'time_resolution/all_and_skip',
+    'no_deadlocks/reserve',
+    'exact_int/constant_width_checked_named',
+    'metatag_prefix/main_setting',
 ]
 
 

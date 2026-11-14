@@ -1,17 +1,31 @@
 $runtime_checks
 
+from p"@lib/core/os.jo" import (cwd list_dir)
 from p"@lib/core/rt.jo" import (__str_slice)
-from p"@lib/core/str.jo" import (ends_with starts_with)
+from p"@lib/core/str.jo" import (ends_with rfind starts_with)
 from p"ast.jo" import (nodes)
-from p"check.jo" import (ensure_bundled_import lib_dir modules watch_build)
+from p"check.jo" import (Module ensure_bundled_import from_imports init_fns late_module_imports lib_dir load_module module_added module_by_path module_ctx modules prelude refine_deferred register_decls register_module registered setup_module_contexts syms target_const watch_build)
+from p"checks_imports.dewy" import (bind_from_imports)
+from p"checks_thin.dewy" import (module_path_key)
+from p"directives.jo" import (dir_runtime_caps dir_runtime_settings)
+from p"icount.jo" import (IC_LIB IC_LOAD)
+from p"icount_ops.dewy" import (ic_restore ic_switch)
 from p"ide.jo" import (ide_on)
+from p"ide_decls.dewy" import (read_source)
+from p"intern.dewy" import (hash_bytes)
 from p"main.jo" import (repl_image)
-from p"prelude.jo" import (demand_prelude_name dp_by_name dp_load dp_names dp_paths dp_scan dp_scanned pn_entries pn_find prelude_demand_entry prelude_known prelude_lazy)
-from p"util.jo" import (intern name_of)
-from p"@lib/core/os.jo" import cwd
-from p"module_paths.dewy" import (module_key path_dir)
+from p"module_paths.dewy" import (module_key path_dir path_stem)
+from p"parser_text.dewy" import (parse_span)
+from p"prelude.jo" import (PnEntry PnPost dp_by_name dp_loaded dp_mods dp_names dp_paths dp_scanned math_eval_loaded math_runtime_loaded pm_exports pn_entries pn_pending pn_posts pn_seen pn_slots prelude_game_hint prelude_known prelude_lazy prelude_new_decls pu_done pu_mod settings_frames_loaded settings_permits_loaded settings_rule_data_loaded settings_rules_loaded settings_runtime_loaded settings_values_loaded settings_zone_loaded)
+from p"refine.jo" import (refine_active)
+from p"scan.jo" import (SU_EAGER SU_EXPORT SU_NOMINAL sc_target su_end su_flags su_name0 su_name_at su_name_len su_start)
+from p"scan_index.dewy" import (scan_source)
+from p"source_types.dewy" import (SrcFile)
+from p"util.jo" import (files intern name_of names pl_on pl_units pos_file)
 
 PreludeWord:type=int64<overflow='wrap'>
+# (the index's 32-bit fields truncate as the twin's i32 did)
+PreludeI32:type=int32<overflow='wrap'>
 # Jo entries in the Dewy prelude use the shared prelude namespace even when
 # imported explicitly first. Decide before module_added and register_module.
 prelude_jo_module=(key:string):>bool=>{
@@ -80,4 +94,339 @@ dewy_prelude_lookup=(name:PreludeWord):>int64=>{
     let m=dewy_prelude_module(name)
     if m <? 0 {return 0}
     modules[m].names.get(name) ?? 0
+}
+
+# Index the prelude file at path as a module of its own; false: load it whole (load_module)
+defer_prelude=(path:string sub:string):>bool=>$unsafe {
+    if not prelude_lazy or (sub =? "game" and prelude_game_hint) {return false}
+    let src=read_source(path)
+    if src =? none {return false}
+    let slash=rfind(path "/")
+    let d=__str_slice(path 0 slash)
+    let fi=files.length
+    files.push(SrcFile(path d src))
+    let mi=modules.length
+    modules.push(Module(name=PreludeI32(intern(path_stem(path))) file=PreludeI32(fi) dir=d is_prelude=true))
+    module_added(mi)
+    module_by_path[module_path_key(path)]=mi
+    let icb=ic_switch(IC_LOAD IC_LIB)
+    sc_target=target_const()
+    let [r0 r1]=scan_source(src)
+    sc_target=""
+    let eager:array<int64>=[]
+    # (a unit's module and parsed mark; then its names posted to the index)
+    let first=PreludeWord(pu_mod.length)
+    pu_mod.resize(first + r1 - r0)
+    pu_done.resize(first + r1 - r0)
+    let mods=pu_mod.ptr
+    loop k in [first..PreludeWord(pu_mod.length)) {mods[k]=mi}
+    let p=data(src)
+    let flags=su_flags.ptr
+    let name0=su_name0.ptr
+    let name_at=su_name_at.ptr
+    let name_len=su_name_len.ptr
+    loop u in [PreludeWord(r0)..PreludeWord(r1)) {
+        if flags[u] & (SU_EAGER | SU_NOMINAL) not=? 0 {eager.push(u)}
+        else {
+            # (exports join once their module is in use: with its first unit asked for)
+            if flags[u] & SU_EXPORT not=? 0 {
+                let xs=pm_exports.get(mi) ?? []
+                xs.push(u)
+                pm_exports[mi]=xs
+            }
+            loop x in [PreludeWord(name0[u])..PreludeWord(name0[u + 1])) {pn_post(pn_entry(p + name_at[x] name_len[x]) u)}
+        }
+    }
+    modules[mi].decls=prelude_parse_units(eager)
+    ic_restore(icb)
+    true
+}
+# The index entry of the name at p[0..n), made if it is new
+pn_entry=(p:ptr<uint8> n:PreludeWord):>int64=>$unsafe {
+    # (room for the library's names without growing)
+    if pn_slots.length =? 0 {pn_slots=fill(int32(0) 1 << 14)}
+    let h=PreludeWord(hash_bytes(p n))
+    let mask=PreludeWord(pn_slots.length) - 1
+    let i=h & mask
+    let slots=pn_slots.ptr
+    let entries=pn_entries.ptr
+    loop true {
+        let e=PreludeWord(slots[i])
+        if e =? 0 {break}
+        e -= 1
+        if entries[e].hash =? h and entries[e].len =? n and __mem_eq(entries[e].at p n) {return e}
+        i=(i + 1) & mask
+    }
+    let e=PreludeWord(pn_entries.length)
+    pn_entries.push(PnEntry(h p n -1 -1 false))
+    pn_pending += 1
+    slots[i]=PreludeI32(e + 1)
+    if PreludeWord(pn_entries.length) * 2 >? PreludeWord(pn_slots.length) {
+        # (grown: every entry placed again)
+        pn_slots=fill(int32(0) pn_slots.length * 2)
+        mask=PreludeWord(pn_slots.length) - 1
+        slots=pn_slots.ptr
+        entries=pn_entries.ptr
+        loop k in [0..PreludeWord(pn_entries.length)) {
+            let j=PreludeWord(entries[k].hash) & mask
+            loop slots[j] not=? 0 {j=(j + 1) & mask}
+            slots[j]=PreludeI32(k + 1)
+        }
+    }
+    e
+}
+# Unit u among the units declaring entry e (once, however many of its names it is)
+pn_post=(e:PreludeWord u:PreludeWord):>void=>$unsafe {
+    let entries=pn_entries.ptr
+    let last=PreludeWord(entries[e].last)
+    if last >=? 0 and PreludeWord(pn_posts[last].unit) =? u {return}
+    let k=PreludeI32(pn_posts.length)
+    pn_posts.push(PnPost(PreludeI32(u) -1))
+    if last <? 0 {entries[e].post=k} else {pn_posts[last].next=k}
+    entries[e].last=k
+}
+# The entry of an interned name, or -1 (looked for once per name)
+pn_find=(name:PreludeWord):>int64=>{
+    if pn_pending =? 0 {return -1}
+    if name <? pn_seen.length and pn_seen[name] {return -1}
+    loop PreludeWord(pn_seen.length) <=? name {pn_seen.push(false)}
+    pn_seen[name]=true
+    if pn_slots.length =? 0 {return -1}
+    let s=names[name]
+    let n=PreludeWord((s as array<uint8>).length)
+    let h=PreludeWord(hash_bytes(data(s) n))
+    let mask=PreludeWord(pn_slots.length) - 1
+    let i=h & mask
+    loop true {
+        let e=PreludeWord(pn_slots[i])
+        if e =? 0 {return -1}
+        e -= 1
+        if pn_entries[e].hash =? h and pn_entries[e].len =? n and __mem_eq(pn_entries[e].at data(s) n) {return e}
+        i=(i + 1) & mask
+    }
+    -1
+}
+# Parse units (of one module, in file order); their declarations
+prelude_parse_units=(us:array<int64>):>array<int64>=>{
+    let out:array<int64>=[]
+    loop u in us {
+        if pu_done[u] {continue}
+        pu_done[u]=true
+        let m=pu_mod[u]
+        let f=PreludeWord(modules[m].file)
+        if pl_on {
+            pl_units.push(f)
+            pl_units.push(su_start[u])
+            pl_units.push(su_end[u])
+        }
+        loop d in parse_span(f su_start[u] su_end[u]) {out.push(d)}
+    }
+    out
+}
+prelude_demand_entry=(e:PreludeWord):>void=>{
+    if pn_entries[e].done {return}
+    pn_entries[e].done=true
+    pn_pending -= 1
+    let us:array<int64>=[]
+    let k0=PreludeWord(pn_entries[e].post)
+    loop k0 >=? 0 {
+        us.push(PreludeWord(pn_posts[k0].unit))
+        k0=PreludeWord(pn_posts[k0].next)
+    }
+    let icb=ic_switch(IC_LOAD IC_LIB)
+    let k:PreludeWord=0
+    loop k <? us.length {
+        let m=pu_mod[us[k]]
+        let group:array<int64>=[]
+        loop k <? us.length and pu_mod[us[k]] =? m {
+            group.push(us[k])
+            k += 1
+        }
+        let xs=pm_exports.get(m)
+        if xs not=? none {
+            pm_exports.remove(m);
+            loop x in xs {
+                if not pu_done[x] and not group.contains(x) {group.push(x)}
+            }
+            # (in file order)
+            loop a in [PreludeWord(1)..PreludeWord(group.length)) {
+                let v=group[a]
+                let b=a
+                loop b >? 0 and group[b - 1] >? v {
+                    group[b]=group[b - 1]
+                    b -= 1
+                }
+                group[b]=v
+            }
+        }
+        let decls=prelude_parse_units(group)
+        if decls.length =? 0 {continue}
+        loop d in decls {prelude_new_decls.push(d)}
+        # (the module's declarations stay in file order)
+        loop d in decls {
+            let i=PreludeWord(modules[m].decls.length)
+            modules[m].decls.push(d)
+            loop i >? 0 and nodes[modules[m].decls[i - 1]].pos >? nodes[d].pos {
+                modules[m].decls[i]=modules[m].decls[i - 1]
+                i -= 1
+            }
+            modules[m].decls[i]=d
+        }
+        ic_restore(icb)
+        if m <? registered.length and registered[m] {register_decls(m decls)}
+        icb=ic_switch(IC_LOAD IC_LIB)
+    }
+    ic_restore(icb)
+}
+# A runtime library file loaded and registered with the modules it brings
+prelude_load_runtime=(path:string imports:bool):>void=>{
+    let first_module=PreludeWord(modules.length)
+    let first_import=PreludeWord(from_imports.length)
+    register_module(load_module(path true -1))
+    let mi=first_module
+    loop mi <? modules.length {
+        register_module(mi)
+        mi += 1
+    }
+    if imports {bind_from_imports(first_import)}
+    if module_ctx.length >? 0 {setup_module_contexts(init_fns[0])}
+    late_module_imports=true
+}
+demand_prelude_name=(name:PreludeWord):>void=>{
+    if dir_runtime_settings and not settings_frames_loaded and (name_of(name) =? "__SettingsFrame" or starts_with(name_of(name) "__settings_")) {
+        settings_frames_loaded=true
+        prelude_load_runtime("{lib_dir}/runtime/settings_frames.jo" false)
+    }
+    if dir_runtime_settings and not settings_values_loaded and name_of(name) in? ["__settings_policy_capture" "__settings_policy_enter" "__settings_policy_leave"] {
+        settings_values_loaded=true
+        prelude_load_runtime("{lib_dir}/runtime/settings_values.jo" false)
+    }
+    if dir_runtime_caps and not settings_permits_loaded and starts_with(name_of(name) "__settings_core_") {
+        settings_permits_loaded=true
+        prelude_load_runtime("{lib_dir}/runtime/settings_permits.jo" false)
+    }
+    if dir_runtime_settings and not settings_rule_data_loaded and name_of(name) in? ["__settings_rule_data_in_pack" "__settings_rule_frame" "__settings_rule_error"] {
+        settings_rule_data_loaded=true
+        prelude_load_runtime("{lib_dir}/time/rule_registry.jo" true)
+    }
+    if dir_runtime_settings and name_of(name) in? ["__settings_enter_rules_bytes" "__settings_enter_cores" "__settings_enter_gap" "__settings_enter_fold" "__settings_enter_source" "__settings_enter_zone" "__settings_enter_zone_value" "__settings_gap_read" "__settings_gap_one_read" "__settings_fold_read"] {
+        let zone=name_of(name) =? "__settings_enter_zone" or name_of(name) =? "__settings_enter_zone_value"
+        let rules=name_of(name) =? "__settings_enter_rules_bytes"
+        let loaded=settings_runtime_loaded
+        if zone {loaded=settings_zone_loaded}
+        if rules {loaded=settings_rules_loaded}
+        if not loaded {
+            if zone {
+                settings_zone_loaded=true
+                prelude_load_runtime("{lib_dir}/prelude/setting_zone.dewy" true)
+            } else if rules {
+                settings_rules_loaded=true
+                prelude_load_runtime("{lib_dir}/prelude/setting_rules.dewy" true)
+            } else {
+                settings_runtime_loaded=true
+                prelude_load_runtime("{lib_dir}/prelude/settings.dewy" true)
+            }
+        }
+    }
+    if not math_runtime_loaded and starts_with(name_of(name) "__mi_") {
+        math_runtime_loaded=true
+        prelude_load_runtime("{lib_dir}/math_runtime.jo" true)
+    }
+    if not math_eval_loaded and starts_with(name_of(name) "__mc_") {
+        math_eval_loaded=true
+        prelude_load_runtime("{lib_dir}/math_eval.jo" true)
+    }
+    # (all overload owners before one is selected; registration and later lazy body checks can
+    # demand further names, reaching a fixed point)
+    if pn_pending >? 0 {prelude_demand_units(name)}
+}
+dp_scan=():>void=>{
+    dp_scanned=true
+    let dir="{lib_dir}/prelude"
+    let names_=list_dir(dir)
+    names_.sort()
+    let icb=ic_switch(IC_LOAD IC_LIB)
+    loop n in names_ {
+        if not ends_with(n ".dewy") and not ends_with(n ".jo") {continue}
+        let path="{dir}/{n}"
+        let src=read_source(path)
+        if src =? none {continue}
+        let f=dp_paths.length
+        dp_paths.push(path)
+        dp_mods.push(-1)
+        let [r0 r1]=scan_source(src)
+        loop x in [PreludeWord(su_name0[r0])..PreludeWord(su_name0[r1])) {
+            let at=PreludeWord(su_name_at[x])
+            if su_name_len[x] =? 0 or (src as array<uint8>)[at] =? b'_' {continue}
+            let name=__str_slice(src at at + su_name_len[x])
+            if dp_names.get(name) =? none {dp_names[name]=f}
+        }
+    }
+    ic_restore(icb)
+}
+# The module of the prelude's file f, loaded on first use
+dp_load=(f:PreludeWord):>int64=>{
+    let m=dp_mods[f]
+    if m <? 0 {
+        # (`Reserved<T>`, a queue's permit, holds each kind's handle: the queue runtimes first,
+        # when a program first reaches it)
+        if ends_with(dp_paths[f] "/prelude/reserved.dewy") {
+            loop g in [PreludeWord(0)..PreludeWord(dp_paths.length)) {
+                if ends_with(dp_paths[g] "/prelude/mpmc.jo") or ends_with(dp_paths[g] "/prelude/spsc.jo") {dp_load(g);}
+            }
+        }
+        let first_module=PreludeWord(modules.length)
+        let first_import=PreludeWord(from_imports.length)
+        let active=refine_active
+        m=load_module(dp_paths[f] false 0)
+        # load_module classifies Jo entries before registration, including explicit imports.
+        dp_mods[f]=m
+        dp_loaded.push(m)
+        let mi=first_module
+        loop mi <? modules.length {
+            register_module(mi)
+            mi += 1
+        }
+        bind_from_imports(first_import)
+        if module_ctx.length >? 0 {setup_module_contexts(init_fns[0])}
+        late_module_imports=true
+        # (a refinement written in its declarations turns the program-wide machinery on once
+        # one of them is resolved: refine_resume)
+        if refine_active and not active {
+            refine_active=false
+            loop r in [first_module..PreludeWord(modules.length)) {refine_deferred[r]=true}
+        }
+    }
+    m
+}
+# The file (under lib/) declaring the prelude's name, "" when the prelude has none: its
+# indexes only, so nothing is loaded or parsed (a splat import's shadowing warning)
+prelude_source=(name:PreludeWord):>string=>{
+    if not dp_scanned {dp_scan()}
+    let f=dp_names.get(name_of(name))
+    if f not=? none {return prelude_shown_path(dp_paths[f])}
+    let s=prelude.get(name)
+    if s not=? none {
+        if syms[s].decl not=? 0 {return prelude_shown_path(files[pos_file(nodes[PreludeWord(syms[s].decl)].pos)].path)}
+    }
+    if pn_slots.length not=? 0 {
+        let nm=names[name]
+        let n=PreludeWord((nm as array<uint8>).length)
+        let h=PreludeWord(hash_bytes(data(nm) n))
+        let mask=PreludeWord(pn_slots.length) - 1
+        let i=h & mask
+        loop true {
+            let e=PreludeWord(pn_slots[i])
+            if e =? 0 {break}
+            e -= 1
+            if pn_entries[e].hash =? h and pn_entries[e].len =? n and __mem_eq(pn_entries[e].at data(nm) n) {
+                let post=PreludeWord(pn_entries[e].post)
+                if post <? 0 {break}
+                let mi=pu_mod[PreludeWord(pn_posts[post].unit)]
+                return prelude_shown_path(files[PreludeWord(modules[mi].file)].path)
+            }
+            i=(i + 1) & mask
+        }
+    }
+    ""
 }
