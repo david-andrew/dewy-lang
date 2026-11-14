@@ -1233,8 +1233,10 @@ gen_match=(m:LGWord want:bool):>Val=>$unsafe {
         stmt_begin();
         let sv=gen_owned(LGWord(nodes.ptr[m].a))
         store_val(st e_slot(LGWord(locals.ptr[hidden].offset)) 0 sv.v);
-        stmt_end();
+        # The hidden match binding takes the subject's cleanup authority.
+        if ownership_type(st) {owner_forget_slot(sv.slot);}
         scope_add_local(hidden);
+        stmt_end();
     }
     if wide_subject.length =? 0 and gen_match_switch(m st rs rtp val) {
         scope_pop();

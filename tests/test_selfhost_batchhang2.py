@@ -1,4 +1,4 @@
-"""Owned spawn temporaries keep their cleanup type across callable erasure."""
+"""Owner cleanup survives callable erasure and transfer into a match binding."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
 
