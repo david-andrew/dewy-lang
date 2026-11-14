@@ -506,18 +506,21 @@ def tail(text: str, lines: int = 25) -> str:
     return '\n'.join((['…'] if len(rows) > lines else []) + ['    ' + row for row in shown])
 
 
-# A batch imports each case's main; a case without one (top-level code only) runs
-# alone from the start instead of failing two batch builds first.
+# A batch imports each case's main; top-level-only programs run alone. Allocation
+# measurements need their own executable too: another module can enable dynamic
+# policy capture for callbacks, or leave process-wide allocation state behind.
 DEFINES_MAIN = re.compile(r'^(?:(?:let|const)\s+)?main\s*[:=]', re.MULTILINE)
+ALLOCATION_COUNTER = re.compile(r'\balloc_count\b')
 
 
-def has_main(case: Case) -> bool:
-    return DEFINES_MAIN.search(case.path.read_text()) is not None
+def needs_own_process(case: Case) -> bool:
+    source = case.path.read_text()
+    return DEFINES_MAIN.search(source) is None or ALLOCATION_COUNTER.search(source) is not None
 
 
 def plan(cases: list[Case], node: bool) -> list[tuple[str, str, list[Case]]]:
     units = []
-    alone = {c.path for c in cases if c.args or c.stdin is not None or c.kind != 'reject' and not has_main(c)}
+    alone = {c.path for c in cases if c.args or c.stdin is not None or c.kind != 'reject' and needs_own_process(c)}
     for mode in MODES:
         if mode.startswith('web') and not node:
             continue

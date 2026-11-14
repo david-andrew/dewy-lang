@@ -34,5 +34,8 @@ computed exit code returns it from its own function and ends with
 Check the recorded output before committing it. Ordinary cases of one mode
 compile together as modules of one program, so a case keeps its own module
 scope but shares the process; a case that exits or panics is rerun alone.
+Cases using `alloc_count` compile and run alone from the start, so their
+allocation measurements cannot include another program's runtime features or
+process state. Their expected counts and outputs are checked unchanged.
 Programs that need extra files, networking, timing or compiler inspection belong
 in pytest (`tests/test_core_*.py`, helpers in `tests/support.py`).
