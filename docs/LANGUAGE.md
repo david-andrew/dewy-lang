@@ -4621,6 +4621,13 @@ handle = (req:Request):>void | PathEscape | FileError => {
 }
 ```
 
+Read-only record snapshots retain the proofs of the path values used to build
+their fields: `let config=[file=p"/srv/cache/report"]` lets `config.file` pass
+where `SafePath` is wanted. This also follows plain record copies and nested
+fields. Writes, exposed storage, captured records and opaque copy/move hooks
+require validation again. Declaring a record field or collection element
+`SafePath` does not yet establish a checked field/element contract.
+
 A parameter, `let` or result declared `SafePath` takes only such a path. Passing
 another is a compile error that names the fixes: `root.confine(f) or_throw` (the
 editor applies it) or the `contains` guard. A path that joins unproven text to a

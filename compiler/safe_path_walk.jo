@@ -19,8 +19,18 @@ use 'directives.jo'
 use 'directive_ops.dewy'
 use 'warn_if.jo'
 use 'safe_path_ops.dewy'
+use 'ownership.jo'
+use 'errors.jo'
 
+ut_record_scanned: {int: bool}
+ut_record_fields: {(int, int): int}
+ut_safe_query = false
+ut_field_fuel = 0
 ut_reset = ():
+    ut_record_scanned = {}
+    ut_record_fields = {}
+    ut_safe_query = false
+    ut_field_fuel = 0
     ut_safe_used = false
     ut_paths_used = false
     ut_decl_kinds = {}
@@ -553,7 +563,65 @@ ut_strip = (n0: int) -> int:
         else if k == .block and nodes[n].aux != 0 and nkids(n) > 0 and nodes[kid(n, nkids(n) - 1)].kind == .exprstmt: n = int(nodes[kid(n, nkids(n) - 1)].a)
         else: return n
     n
+# Demand-only record field index, excluding opaque lifecycle hooks.
+ut_path_field_index = (t0: int, name: int) -> int:
+    t = prune(t0)
+    if not ut_record_scanned.has(t):
+        ut_record_scanned[t] = true
+        if types[t].kind != .struct_: return -1
+        current = t
+        settled = false
+        loop i in [0..32):
+            if types[current].kind != .struct_:
+                settled = true
+                break
+            decl = int(structs[int(types[current].st)].decl)
+            if ownership_decls.has(decl * 4 + 2) or ownership_decls.has(decl * 4 + 3): return -1
+            parent = nominal_parent.get(current) ?? 0
+            if parent == 0:
+                settled = true
+                break
+            current = parent
+        if not settled: return -1
+        si = int(types[t].st)
+        loop i in [0..int(structs[si].nfields)):
+            field = int(fields[int(structs[si].fields) + i].name)
+            ut_record_fields[(t, field)] = i
+    ut_record_fields.get((t, name)) ?? -1
+# Shared 64-carrier budget bounds alias chains and repeated nested proofs.
+ut_path_field_value = (base0: int, name: int) -> int:
+    if base0 == 0 or ut_field_fuel <= 0: return 0
+    ut_field_fuel -= 1
+    index = ut_path_field_index(int(nodes[base0].type), name)
+    if index < 0: return 0
+    base = base0
+    loop i in [0..32):
+        wrapper = nodes[base].kind
+        if wrapper == .cast: return 0
+        if wrapper != .conv and wrapper != .narrow and wrapper != .unwrap: break
+        source = int(nodes[base].a)
+        if source == 0 or prune(int(nodes[base].type)) != prune(int(nodes[source].type)): return 0
+        base = source
+    k = nodes[base].kind
+    if k == .ident and nodes[base].aux == i32(int(SK.local)) and nodes[base].sym > 0:
+        local = ut_root(int(nodes[base].sym))
+        if not ut_single(local) or ut_linit[local] == 0: return 0
+        if ut_owner(local) != ut_cur or int(locals[local].flags) & (LF_ADDR | LF_ALIAS | LF_BYREF | LF_EXPOSED) != 0: return 0
+        return ut_path_field_value(ut_linit[local], name)
+    if k == .field:
+        inner = ut_path_field_value(int(nodes[base].a), int(nodes[base].name))
+        return ut_path_field_value(inner, name)
+    if k == .call and nodes[base].sym == 0 and nodes[base].aux == 2 and nodes[base].a == 0 and index < nkids(base): return kid(base, index)
+    0
 ut_safe = (n0: int) -> bool:
+    outer = not ut_safe_query
+    if outer:
+        ut_safe_query = true
+        ut_field_fuel = 64
+    result = ut_safe_value(n0)
+    if outer: ut_safe_query = false
+    result
+ut_safe_value = (n0: int) -> bool:
     n = ut_strip(n0)
     if n == 0: return false
     k = nodes[n].kind
@@ -572,6 +640,9 @@ ut_safe = (n0: int) -> bool:
         if nodes[n].aux == i32(int(SK.global)): return ut_safe_globals.has(int(nodes[n].sym))
         return false
     if k == .if_: return nodes[n].c != 0 and ut_safe(int(nodes[n].b)) and ut_safe(int(nodes[n].c))
+    if k == .field:
+        value = ut_path_field_value(int(nodes[n].a), int(nodes[n].name))
+        return value != 0 and ut_safe(value)
     false
 # the text p(...) is given makes a SafePath: hardcoded, or an interpolation whose components
 # are each hardcoded, SafePaths with hardcoded text, or proven-safe components with hardcoded

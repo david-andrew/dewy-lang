@@ -1,0 +1,5 @@
+Files:type=[chosen:Path]
+show=(file:SafePath):>void=>printl(file)
+unknown=():>Path=>p"/elsewhere"
+change=(@files:Files):>void=>{files.chosen=unknown()}
+main=()=>{let files=Files[p"/srv/cache/a"]; change(@files); show(files.chosen)}

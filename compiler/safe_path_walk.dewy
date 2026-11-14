@@ -3,7 +3,7 @@ $runtime_checks
 from p"checks_text.dewy" import (byte_rfind)
 
 from p"ast.jo" import (kid kid2 kids nkids nkids2 nodes)
-from p"check.jo" import (FK_INIT FK_LAMBDA LF_CAPTURE dewy_at fns globals locals modules narrowed_var)
+from p"check.jo" import (FK_INIT FK_LAMBDA LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_EXPOSED dewy_at fns globals locals modules narrowed_var)
 from p"directive_ops.dewy" import (dir_confine_paths)
 from p"expr.jo" import (bundled_bigint_type)
 from p"refine.jo" import (str_set_of str_sets)
@@ -15,9 +15,19 @@ from p"util.jo" import (files name_of pos_file pos_in_lib)
 from p"source_warnings.dewy" import (warn)
 from p"source_queries.dewy" import (line_col)
 from p"warn_if.jo" import (WI_PATH wi_decls)
+from p"ownership.jo" import ownership_decls
+from p"errors.jo" import nominal_parent
 
 PathWalkWord:type=int64<overflow='wrap'>
+let ut_record_scanned:dict<int64 bool>=[]
+let ut_record_fields:dict<[int64 int64] int64>=[]
+let ut_safe_query=false
+let ut_field_fuel:PathWalkWord=0
 ut_reset=():>void=>{
+    ut_record_scanned=dict<int64 bool>()
+    ut_record_fields=dict<[int64 int64] int64>()
+    ut_safe_query=false
+    ut_field_fuel=0
     ut_safe_used=false
     ut_paths_used=false
     ut_decl_kinds=dict<int64 int64>()
@@ -667,7 +677,72 @@ ut_strip=(n0:PathWalkWord):>int64=>$unsafe {
     }
     n
 }
-ut_safe=(n0:PathWalkWord):>bool=>$unsafe {
+# Index only records whose fields a requested path proof reads. Each type costs
+# O(fields + bounded ancestry) once; field lookup is O(1). O(indexed fields) state.
+ut_path_field_index=(t0:PathWalkWord name:PathWalkWord):>int64=>$unsafe {
+    let t=prune(t0)
+    if not ut_record_scanned.has(t) {
+        ut_record_scanned[t]=true
+        if types.ptr[t].kind not=? 'struct_' {return -1}
+        let current=t
+        let settled=false
+        loop i in [0..32) {
+            if types.ptr[current].kind not=? 'struct_' {settled=true;break}
+            let decl=PathWalkWord(structs.ptr[PathWalkWord(types.ptr[current].st)].decl)
+            # Copy/move value preservation is held: never infer it for hooks.
+            if ownership_decls.has(decl * 4 + 2) or ownership_decls.has(decl * 4 + 3) {return -1}
+            let parent=nominal_parent.get(current) ?? 0
+            if parent =? 0 {settled=true;break}
+            current=parent
+        }
+        if not settled {return -1}
+        let si=PathWalkWord(types.ptr[t].st)
+        loop i in [0..PathWalkWord(structs.ptr[si].nfields)) {
+            let field=PathWalkWord(fields.ptr[PathWalkWord(structs.ptr[si].fields) + i].name)
+            ut_record_fields[[t field]]=i
+        }
+    }
+    ut_record_fields.get([t name]) ?? (-1)
+}
+# Chase only immutable local snapshots and checked record constructors. One
+# query gets 64 carrier reads, shared with nested path proofs, bounding diamonds
+# and alias chains without a new body walk. Unknown producers remain unproven.
+ut_path_field_value=(base0:PathWalkWord name:PathWalkWord):>int64=>$unsafe {
+    if base0 =? 0 or ut_field_fuel <=? 0 {return 0}
+    ut_field_fuel -= 1
+    let index=ut_path_field_index(PathWalkWord(nodes.ptr[base0].type) name)
+    if index <? 0 {return 0}
+    let base=base0
+    loop i in [0..32) {
+        let wrapper=nodes.ptr[base].kind
+        if wrapper =? 'cast' {return 0}
+        if wrapper not=? 'conv' and wrapper not=? 'narrow' and wrapper not=? 'unwrap' {break}
+        let source=PathWalkWord(nodes.ptr[base].a)
+        if source =? 0 or prune(PathWalkWord(nodes.ptr[base].type)) not=? prune(PathWalkWord(nodes.ptr[source].type)) {return 0}
+        base=source
+    }
+    let k=nodes.ptr[base].kind
+    if k =? 'ident' and nodes.ptr[base].aux =? int32(1) and nodes.ptr[base].sym >? 0 {
+        let local=ut_root(PathWalkWord(nodes.ptr[base].sym))
+        if not ut_single(local) or ut_linit[local] =? 0 {return 0}
+        if ut_owner(local) not=? ut_cur or PathWalkWord(locals.ptr[local].flags) & (LF_ADDR | LF_ALIAS | LF_BYREF | LF_EXPOSED) not=? 0 {return 0}
+        return ut_path_field_value(ut_linit[local] name)
+    }
+    if k =? 'field' {
+        let inner=ut_path_field_value(PathWalkWord(nodes.ptr[base].a) PathWalkWord(nodes.ptr[base].name))
+        return ut_path_field_value(inner name)
+    }
+    if k =? 'call' and nodes.ptr[base].sym =? 0 and nodes.ptr[base].aux =? 2 and nodes.ptr[base].a =? 0 and index <? nkids(base) {return kid(base index)}
+    0
+}
+ut_safe=(n0:PathWalkWord):>bool=>{
+    let outer=not ut_safe_query
+    if outer {ut_safe_query=true;ut_field_fuel=64}
+    let result=ut_safe_value(n0)
+    if outer {ut_safe_query=false}
+    result
+}
+ut_safe_value=(n0:PathWalkWord):>bool=>$unsafe {
     let n=ut_strip(n0)
     if n =? 0 {return false}
     let k=nodes.ptr[n].kind
@@ -689,6 +764,10 @@ ut_safe=(n0:PathWalkWord):>bool=>$unsafe {
         return false
     }
     if k =? 'if_' {return nodes.ptr[n].c not=? 0 and ut_safe(PathWalkWord(nodes.ptr[n].b)) and ut_safe(PathWalkWord(nodes.ptr[n].c))}
+    if k =? 'field' {
+        let value=ut_path_field_value(PathWalkWord(nodes.ptr[n].a) PathWalkWord(nodes.ptr[n].name))
+        return value not=? 0 and ut_safe(value)
+    }
     false
 }
 # the text p(...) is given makes a SafePath: hardcoded, or an interpolation whose components

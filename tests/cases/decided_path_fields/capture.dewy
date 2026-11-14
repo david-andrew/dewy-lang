@@ -1,0 +1,8 @@
+Files:type=[chosen:Path]
+show=(file:SafePath):>void=>printl(file)
+unknown=():>Path=>p"/elsewhere"
+main=()=>{
+    let files=Files[p"/srv/cache/a"]
+    let work=($capture files)=>{files.chosen=unknown(); show(files.chosen)}
+    work()
+}

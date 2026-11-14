@@ -1,0 +1,9 @@
+Files:type=[chosen:Path view=()=>@chosen]
+show=(file:SafePath):>void=>printl(file)
+unknown=():>Path=>p"/elsewhere"
+main=()=>{
+    let files=Files[p"/srv/cache/a"]
+    let borrowed=@(files.view())
+    borrowed=unknown()
+    show(files.chosen)
+}
