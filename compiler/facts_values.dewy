@@ -1,0 +1,67 @@
+$runtime_checks
+
+from p"ast.jo" import (NF_U64 has_flag nodes)
+from p"exact.jo" import (exact_has_node exact_representation)
+from p"expr.jo" import (ntype)
+from p"facts.jo" import (FACT_CAP FactProjection FactState fact_capture fact_query)
+from p"facts_arith.dewy" import (fact_fresh_type fact_unknown)
+from p"facts_index_writes.dewy" import (fact_add_projection fact_constant fact_new)
+from p"facts_projection_queries.dewy" import (fact_projection_find)
+from p"refine.jo" import (ref_encoded)
+from p"refinement_types.dewy" import (FACT_MAX FactBound FactReason FactTerm)
+from p"string_domains.jo" import (string_set_tests)
+from p"types.jo" import (T_MATH_INT T_U64 is_int types)
+
+ValueBuildWord:type=int64<overflow='wrap'>
+
+# Scalar domains keep the type's unsigned endpoint encoding. Arena IDs belong
+# to the checked program; these reads do not grow or retain an arena view.
+fact_scalar=(t0:ValueBuildWord):>bool=>$unsafe {
+    let t=fact_type(t0)
+    types.ptr[t].kind =? 'bool_' or types.ptr[t].kind =? 'int_'
+}
+fact_type=(t0:ValueBuildWord):>int64=>$unsafe {
+    let t=exact_representation(t0)
+    if is_int(t) and types.ptr[t].bits =? 64 and not types.ptr[t].sign {return T_U64}
+    t
+}
+fact_domain=(t0:int64 reason:FactReason='missing' at:int64=0):>FactBound=>$unsafe {
+    let t=fact_type(t0)
+    let r=FactBound(reason=reason witness=at)
+    if types.ptr[t].kind =? 'bool_' {r.lo=0; r.hi=1}
+    else if types.ptr[t].kind =? 'int_' and types.ptr[t].bits <? 64 {
+        let bits:ValueBuildWord=types.ptr[t].bits
+        r.lo=if types.ptr[t].sign {-(ValueBuildWord(1) << (bits - 1))} else {0}
+        r.hi=if types.ptr[t].sign {(ValueBuildWord(1) << (bits - 1)) - 1} else {(ValueBuildWord(1) << bits) - 1}
+    }
+    r
+}
+
+fact_literal=(@s:FactState n:ValueBuildWord):>int64=>$unsafe {
+    if not fact_scalar(ntype(n)) {return fact_new(@s FactBound(reason='unsupported' witness=n))}
+    let x=ref_encoded(nodes.ptr[n].ival ntype(n))
+    # A uint64 constant is biased; its type lets a witness decode it.
+    if fact_type(ntype(n)) =? T_U64 {return fact_new(@s FactBound(x x x not=? 0) FactTerm(origin=n type=T_U64))}
+    # An exact literal above int64 is positive, with an open upper end.
+    if has_flag(n NF_U64) and x <? 0 {return fact_new(@s FactBound(1 FACT_MAX true) FactTerm(origin=n type=T_MATH_INT))}
+    fact_constant(@s x n)
+}
+# Preserve the source membership projection across joins. Temporarily removing
+# this test lets its ordinary comparisons run, then restores the same entry.
+fact_string_set=(n:ValueBuildWord @s:FactState):>int64=>{
+    let test_info=string_set_tests[n]
+    let source=fact_capture(test_info[0] @s)
+    let selector:ValueBuildWord=-1073741824 - ValueBuildWord(test_info[1])
+    let old=fact_projection_find(s source selector false)
+    if old >=? 0 {return s.projections[old].value}
+    string_set_tests.remove(n);
+    let value=fact_capture(n @s)
+    string_set_tests[n]=test_info
+    if source not=? 0 and s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(source selector false value))}
+    value
+}
+fact_unmodeled=(@s:FactState n:ValueBuildWord reason:FactReason):>int64=>{
+    let b=if exact_has_node(n) {FactBound(reason=reason witness=n wide=true)} else {fact_domain(ntype(n) reason n)}
+    if fact_query {fact_unknown(n b)}
+    fact_new(@s b FactTerm(type=fact_fresh_type(ntype(n))))
+}
