@@ -5,6 +5,7 @@ from tests.selfhost_homes_checks import _doubled
 # not the leaf reads the leaf's functions from the module, a double or the real one)
 LEAF_HOMES = {
     'facts_arith': 'facts.jo',
+    'facts_row_queries': 'facts.jo',
     'facts_collect': 'facts.jo',
     'nd_contract_ops': 'nd_contracts.jo',
 }
