@@ -8,6 +8,7 @@ from tests.support import ROOT, compiler  # noqa: F401
 
 DRIVER = r'''use 'main.jo'
 use 'dewy_fast.jo'
+use 'dewy_frontend.dewy'
 use 'dewy_fast_lex.dewy'
 use 'dewy_context.jo'
 use 'source_types.dewy'
