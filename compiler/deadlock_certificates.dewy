@@ -336,7 +336,7 @@ nd_call=(n:CertificateWord @held:array<DlHeld>):>void=>$unsafe {
         nd_args(n held pos)
         return
     }
-    if gname =? "__task_spawn" and nkids(n) =? 2 {
+    if (gname =? "__task_spawn" or gname =? "__item_spawn" or gname =? "__item_spawn_failing") and nkids(n) =? 2 {
         let h=dl_fn_arg(kid(n 1))
         let none_held:array<DlHeld>=[]
         if h >? 0 {nd_callee(h none_held pos "the spawned task")}

@@ -1,0 +1,13 @@
+# `map` reads `config`, so it starts once `config` is made; `sounds` needs neither.
+load_config = (name:string):>string => "config:{name}"
+load_map = (config:string):>string => "map for {config}"
+load_sounds = (volume:int):>string => "sounds at {volume}"
+main = () => {
+    parallel (
+        let config = load_config("game")
+        let map = load_map(config)
+        let sounds = load_sounds(7)
+        printl"starting with {config}"
+    )
+    printl"{map} / {sounds}"
+}

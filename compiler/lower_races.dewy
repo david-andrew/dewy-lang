@@ -6,7 +6,7 @@ from p"ast.jo" import (NF_MUT has_flag kid kid2 kids nkids nkids2 nodes)
 from p"lower_analysis.dewy" import (checked_call_mutmask place_var)
 from p"util.jo" import (files name_of pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
-from p"lower.jo" import (race_done)
+from p"lower.jo" import (race_done race_item)
 from p"types.jo" import (tkind)
 from p"lower_helpers.dewy" import (value_helper_calls)
 from p"concurrency_parsafe.dewy" import (parsafe_demand_task parsafe_is_param parsafe_vouched)
@@ -102,12 +102,15 @@ race_target=(t:LRWord f:LRWord who:string captures:bool pos:LRWord):>void=>$unsa
     let n=place_var(t)
     if n =? 0 {return}
     let nm=name_of(LRWord(nodes.ptr[n].name))
+    let item=race_item[0] =? 1
     if nodes.ptr[n].aux =? int32<overflow='wrap'>(2) {
+        if item {fatal(pos "this `parallel` item runs as a task beside the block's other items, so it must not change the global '{nm}' (a data race): change '{nm}' before or after the block");}
         fatal(pos "{who} runs this function on many threads at once, so it must not change the global '{nm}' (a data race): return values instead");
     }
     if captures and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {
         let l:LRWord=LRWord(nodes.ptr[n].sym)
         if LRWord(locals.ptr[l].owner) not=? f or LRWord(locals.ptr[l].flags) & LF_CAPTURE not=? 0 {
+            if item {fatal(pos "this `parallel` item runs as a task beside the block's other items, so it must not change '{nm}', which the block's own code holds (a data race): change '{nm}' before or after the block");}
             fatal(pos "{who} runs this function on many threads at once, so it must not change '{nm}', a variable it captured (a data race): return values instead");
         }
     }

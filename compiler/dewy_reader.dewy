@@ -7954,7 +7954,44 @@ rd_dc_parallel_block=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:
         return body
     }
     let statements:array<int64>=[]
+    # (`let` items running as tasks, not yet taken: their names, declarations, handles' names)
+    let pending:array<int64>=[]
+    let pending_decls:array<int64>=[]
+    let pending_handles:array<string>=[]
     loop item in items {
+        # (an item reading a task item's binding starts once that item's value is taken)
+        if pending.length >? 0 {
+            let used:array<int64>=[]
+            rd_dc_parallel_names(@reader_ctx @reader_nodes item @used);
+            let i:int64=0
+            loop i <? pending.length {
+                if used.contains(pending[i]) {
+                    statements.push(rd_dc_parallel_take(@reader_ctx @reader_nodes name pending_decls[i] pending_handles[i]));
+                    pending.pop(i);
+                    pending_decls.pop(i);
+                    pending_handles.pop(i);
+                }
+                else {i = int64<overflow='wrap'>(i) + 1}
+            }
+        }
+        if rd_dc_parallel_binding(@reader_ctx @reader_nodes item) {
+            let ipos:int64=reader_nodes[item].pos
+            let init:int64=int64(reader_nodes[item].b)
+            let failing:bool=reader_nodes[init].kind =? 'propagate'
+            let value:int64=if failing {int64(reader_nodes[init].a)} else {init}
+            let spawned:int64=reader_ctx.stores.host[0].dw_task_spawn(rd_bc_ident(@reader_ctx @reader_nodes name ipos) value ipos)
+            let body_fn:int64=node_kids(@reader_nodes @reader_ctx.stores.lists[0] spawned)[1]
+            let handle:string="$item{item}"
+            let start:int64=rd_bc_call(@reader_ctx @reader_nodes if failing {"__item_spawn_failing"} else {"__item_spawn"} [rd_bc_ident(@reader_ctx @reader_nodes name ipos) body_fn] ipos)
+            let decl:int64=node_mk(@reader_nodes 'vardecl' ipos)
+            reader_nodes[decl].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(handle))
+            reader_nodes[decl].b = int32<overflow='wrap'>(start)
+            statements.push(decl);
+            pending.push(int64(reader_nodes[item].name));
+            pending_decls.push(item);
+            pending_handles.push(handle);
+            continue
+        }
         if rd_dc_parallel_detached(@reader_ctx @reader_nodes item) {
             let value:int64=int64(reader_nodes[item].a)
             if reader_nodes[item].kind not=? 'exprstmt' {
@@ -7971,6 +8008,18 @@ rd_dc_parallel_block=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:
     }
     node_set_list(@reader_nodes @reader_ctx.stores.lists[0] body statements);
     let group:int64=reader_ctx.stores.host[0].dw_task_group(pos name serial body true)
+    # (after the join, the rest of the values: an item forwarding a failure first, so a failure
+    # leaves before a canceled sibling would run on the taker)
+    if pending.length >? 0 {
+        let joined:array<int64>=node_kids(@reader_nodes @reader_ctx.stores.lists[0] group)
+        loop round in [0..2) {
+            loop i in [0..pending.length) {
+                let failing:bool=reader_nodes[int64(reader_nodes[pending_decls[i]].b)].kind =? 'propagate'
+                if failing =? (round =? 0) {joined.push(rd_dc_parallel_take(@reader_ctx @reader_nodes name pending_decls[i] pending_handles[i]));}
+            }
+        }
+        node_set_list(@reader_nodes @reader_ctx.stores.lists[0] group joined);
+    }
     # (the group's block takes the body's node, which its settings' scopes name)
     let at:int64=reader_nodes[body].pos
     reader_nodes[body] = reader_nodes[group]
@@ -7978,6 +8027,68 @@ rd_dc_parallel_block=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:
     reader_nodes[body].aux = if paren {int32(5)} else {int32(0)}
     if paren {rd_add_flag(@reader_nodes body NF_UNSCOPED);}
     body
+}
+
+# A `let` item that may run as a task: one plain name, no written type, and a value with a call,
+# no exit, spawn, or write to a name it does not declare, forwarding a failure only at its end
+# (`let config = load_config() or_throw`).
+rd_dc_parallel_binding=(@reader_ctx:ParserContext @reader_nodes:array<Node> item:int64):>bool=>$unsafe {
+    if reader_nodes[item].kind not=? 'vardecl' or reader_nodes[item].name =? 0 or reader_nodes[item].a not=? 0 or reader_nodes[item].nlist not=? 0 or reader_nodes[item].b =? 0 {return false}
+    let value:int64=int64(reader_nodes[item].b)
+    let failing:bool=reader_nodes[value].kind =? 'propagate'
+    if failing {
+        if reader_nodes[value].b not=? 0 {return false}
+        value = int64(reader_nodes[value].a)
+    }
+    # (`let config = load_config or_throw`: a bare name forwarding a failure is a call)
+    if reader_nodes[value].kind =? 'lambda' or not (rd_dc_parallel_calls(@reader_ctx @reader_nodes value) or failing and reader_nodes[value].kind =? 'ident') {return false}
+    if not rd_dc_parallel_exits(@reader_ctx @reader_nodes value 0) {return false}
+    let declared:array<int64>=[]
+    rd_dc_parallel_declared(@reader_ctx @reader_nodes value @declared);
+    rd_dc_parallel_writes_own(@reader_ctx @reader_nodes value @declared)
+}
+
+# Whether n calls anything (outside nested functions): a value worth a task.
+rd_dc_parallel_calls=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64):>bool=>$unsafe {
+    if n <=? 0 {return false}
+    let k:NK=reader_nodes[n].kind
+    if k =? 'lambda' or k =? 'fn_' {return false}
+    if k =? 'call' {return true}
+    if rd_dc_parallel_calls(@reader_ctx @reader_nodes int64(reader_nodes[n].a)) or rd_dc_parallel_calls(@reader_ctx @reader_nodes int64(reader_nodes[n].b)) or rd_dc_parallel_calls(@reader_ctx @reader_nodes int64(reader_nodes[n].c)) {return true}
+    loop child in node_kids(@reader_nodes @reader_ctx.stores.lists[0] n) {
+        if rd_dc_parallel_calls(@reader_ctx @reader_nodes child) {return true}
+    }
+    false
+}
+
+# The names n refers to, nested functions included (what an item reads).
+rd_dc_parallel_names=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64 @names:array<int64>):>void=>$unsafe {
+    if n <=? 0 {return}
+    if reader_nodes[n].kind =? 'ident' {names.push(int64(reader_nodes[n].name));}
+    rd_dc_parallel_names(@reader_ctx @reader_nodes int64(reader_nodes[n].a) @names);
+    rd_dc_parallel_names(@reader_ctx @reader_nodes int64(reader_nodes[n].b) @names);
+    rd_dc_parallel_names(@reader_ctx @reader_nodes int64(reader_nodes[n].c) @names);
+    rd_dc_parallel_names(@reader_ctx @reader_nodes int64(reader_nodes[n].d) @names);
+    loop child in node_kids(@reader_nodes @reader_ctx.stores.lists[0] n) {rd_dc_parallel_names(@reader_ctx @reader_nodes child @names);}
+    loop child in node_kids2(@reader_nodes @reader_ctx.stores.lists[0] n) {rd_dc_parallel_names(@reader_ctx @reader_nodes child @names);}
+}
+
+# A task item's declaration, now taking its value from the handle (forwarding the failure it
+# forwarded, `or_throw`).
+rd_dc_parallel_take=(@reader_ctx:ParserContext @reader_nodes:array<Node> group:string decl:int64 handle:string):>int64=>$unsafe {
+    let pos:int64=reader_nodes[decl].pos
+    let failing:bool=reader_nodes[int64(reader_nodes[decl].b)].kind =? 'propagate'
+    let place:int64=rd_bc_ident(@reader_ctx @reader_nodes handle pos)
+    let value:int64=rd_bc_call(@reader_ctx @reader_nodes "__item_take" [rd_bc_ident(@reader_ctx @reader_nodes group pos) place] pos)
+    if failing {
+        let forward:int64=node_mk(@reader_nodes 'propagate' int64(reader_nodes[int64(reader_nodes[decl].b)].pos))
+        reader_nodes[forward].a = int32<overflow='wrap'>(value)
+        value = forward
+    }
+    let taken:int64=node_mk(@reader_nodes 'vardecl' pos)
+    reader_nodes[taken] = reader_nodes[decl]
+    reader_nodes[taken].b = int32<overflow='wrap'>(value)
+    taken
 }
 
 # Whether a parallel block's item may run as a task (dc_parallel_block): a statement declaring

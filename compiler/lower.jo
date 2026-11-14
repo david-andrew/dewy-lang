@@ -336,6 +336,7 @@ pw_depth = 0
 # it must not change the variables it captured, or globals -- also not in the functions it calls.
 # A callback parameter given on is its function's callers' to check (concurrency.jo, parsafe).
 race_done: {int: bool} = {}     # named functions known not to change globals
+race_item: int[] = [0]          # 1 while checking a `parallel` block item's task (its messages say so)
 
 # the function value a: the compiler must see which function it is, to check it
 # a @parallel function is checked at its calls: it cannot be used as a value

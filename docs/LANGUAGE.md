@@ -3634,11 +3634,16 @@ parallel {
 ```
 
 An owner bound in `parallel ( ... )` belongs to the enclosing block. Each statement is an item.
-*Provisional:* an item that declares nothing, writes no variable from outside it, and has no
-`or_throw`, `return`, `break` or `continue` leaving it runs as a task (with a task's transfer
-checks); the other items run in source order on the block's own task, each after those before
-it have started. The web target runs every item in order. A name from `parallel { ... }` used
-after it is an error that suggests `parallel ( ... )`.
+A `let` item whose value calls something, without a written type, runs as a task; an item
+reading its binding starts once the value is made, so dependent items follow their inputs and
+the rest run beside them. A value keeps its failures (`let maybe = load(path)`); an item ending
+in `or_throw` leaves the function with its failure after the block's tasks are joined, the
+group canceling its siblings first. *Provisional:* a statement that declares nothing, writes no
+variable from outside it, and has no `or_throw`, `return`, `break` or `continue` leaving it
+runs as a task too (with a task's transfer checks); the other items run in source order on the
+block's own task. A task item that would change what the block's own code holds is an error
+naming the item and the variable. The web target runs every item in order. A name from
+`parallel { ... }` used after it is an error that suggests `parallel ( ... )`.
 
 Waiting work uses a structured task group on the Linux threads backend:
 

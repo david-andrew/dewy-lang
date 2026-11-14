@@ -277,7 +277,7 @@ dc_call=(n:ChannelWalkWord):>void=>$unsafe {
     let g=ChannelWalkWord(nodes.ptr[n].sym)
     let d=ChannelWalkWord(fns.ptr[g].decl)
     let gname=if d not=? 0 {name_of(ChannelWalkWord(nodes.ptr[d].name))} else {""}
-    if gname =? "__task_spawn" and nkids(n) =? 2 {
+    if (gname =? "__task_spawn" or gname =? "__item_spawn" or gname =? "__item_spawn_failing") and nkids(n) =? 2 {
         let h=dl_fn_arg(kid(n 1))
         if h >? 0 and fns.ptr[h].body not=? 0 {
             if dc_pending.length >=? DC_ACTORS {

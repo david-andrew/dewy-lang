@@ -207,6 +207,51 @@ __task_spawn[T] = (g: TaskGroup, f: () -> T) -> Task[T]:
         result.__ready.store(1)
     result
 
+# A `parallel` block's `let` item run as a task of the block's group (decisions.md, batch 9):
+# its value stays a value (C3), unless the item forwards a failure (`failing`), which fails
+# the group so its siblings are canceled. An item always runs, as written code would: with no
+# thread for it, or its group already canceled, it runs here, in order; canceled, its waits
+# give `Canceled` as they do anywhere.
+struct __ItemState[T]:
+    ready: int
+    value: T[]
+
+# (its state in words of its own, as a task's job is: an owning value moves through it whole)
+struct __Item[T]:
+    __words: int[]
+    __p: *__ItemState[T]
+
+__item_spawn[T] = (g: TaskGroup, f: () -> T) -> __Item[T]:
+    words = fill(0, (size_of(__ItemState[T]) + 7) / 8)
+    p = __task_data(words) as *__ItemState[T]
+    runner = () -> void:
+        p.value.push(f())
+        __atomic_add(&p.ready, 1)
+    if __task_scope_canceled(g) or not __task_launch(g, runner): runner()
+    __Item[T](words, p)
+
+__item_spawn_failing[T] = (g: TaskGroup, f: () -> T) -> __Item[T]:
+    words = fill(0, (size_of(__ItemState[T]) + 7) / 8)
+    p = __task_data(words) as *__ItemState[T]
+    runner = () -> void:
+        made = f()
+        __task_report(g, made)
+        p.value.push(made)
+        __atomic_add(&p.ready, 1)
+    if __task_scope_canceled(g) or not __task_launch(g, runner): runner()
+    __Item[T](words, p)
+
+# The item's value, moved out once its task is done; a waiting taker's cancellation reaches
+# the group.
+__item_take[T] = (g: TaskGroup, item: __Item[T]) -> T:
+    p = item.__p
+    loop __atomic_add(&p.ready, 0) == 0:
+        if __task_canceled(): cancel(g)
+        __task_pause()
+    v = p.value.pop()
+    p.value.clear()
+    v
+
 __task_join = (g: TaskGroup) -> (bool | exception):
     if g.__state.len() == 0: return OutOfMemory
     p = g.__p

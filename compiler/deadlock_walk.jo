@@ -162,7 +162,7 @@ dl_call = (n: int, held: mut DlHeld[]):
     d = int(fns[g].decl)
     gname = if d != 0: name_of(int(nodes[d].name)) else: ""
     # Task groups: spawned work runs beside the spawner, joined at the group's end.
-    if gname == "__task_spawn" and nkids(n) == 2:
+    if (gname == "__task_spawn" or gname == "__item_spawn" or gname == "__item_spawn_failing") and nkids(n) == 2:
         h = dl_fn_arg(kid(n, 1))
         grp = kid(n, 0)
         if h > 0 and nodes[grp].kind == .ident and nodes[grp].sym > 0:

@@ -1,0 +1,23 @@
+# modes: native native-release
+# The decision's example: bare zero-argument loads forwarding failures run beside each
+# other; each waits for the other's signal, so neither could finish alone.
+let config_ready = channel<int64>(1)
+let sounds_ready = channel<int64>(1)
+LoadFailed:type = type of error
+load_config = ():>string | LoadFailed | Canceled | Closed<int64> => {
+    config_ready.send(1) ?? void;
+    sounds_ready.receive or_throw;
+    "config"
+}
+load_sounds = ():>string | LoadFailed | Canceled | Closed<int64> => {
+    sounds_ready.send(1) ?? void;
+    config_ready.receive or_throw;
+    "sounds"
+}
+main = () => {
+    parallel (
+        let config = load_config or_throw
+        let sounds = load_sounds or_throw
+    )
+    printl"{config} and {sounds}"
+}

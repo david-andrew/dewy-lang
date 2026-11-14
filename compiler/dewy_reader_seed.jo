@@ -4771,7 +4771,40 @@ rt_dc_parallel_block = (token: DewyLexeme) -> int:
             add_flag(body, NF_UNSCOPED)
         return body
     statements: int[]
+    # (`let` items running as tasks, not yet taken: their names, declarations, handles' names)
+    pending: int[]
+    pending_decls: int[]
+    pending_handles: str[]
     loop item in items:
+        # (an item reading a task item's binding starts once that item's value is taken)
+        if pending.len() > 0:
+            used: int[]
+            rt_dc_parallel_names(item, used)
+            i = 0
+            loop i < pending.len():
+                if used.contains(pending[i]):
+                    statements.push(rt_dc_parallel_take(name, pending_decls[i], pending_handles[i]))
+                    pending.remove(i)
+                    pending_decls.remove(i)
+                    pending_handles.remove(i)
+                else: i += 1
+        if rt_dc_parallel_binding(item):
+            ipos = nodes[item].pos
+            init = int(nodes[item].b)
+            failing = nodes[init].kind == .propagate
+            value = if failing: int(nodes[init].a) else: init
+            spawned = dw_task_spawn(bc_ident(name, ipos), value, ipos)
+            body_fn = kids(spawned)[1]
+            handle = "$item{item}"
+            start = bc_call(if failing: "__item_spawn_failing" else: "__item_spawn", [bc_ident(name, ipos), body_fn], ipos)
+            decl = mk(.vardecl, ipos)
+            nodes[decl].name = i32(intern(handle))
+            nodes[decl].b = i32(start)
+            statements.push(decl)
+            pending.push(int(nodes[item].name))
+            pending_decls.push(item)
+            pending_handles.push(handle)
+            continue
         if rt_dc_parallel_detached(item):
             value = int(nodes[item].a)
             if nodes[item].kind != .exprstmt:
@@ -4785,6 +4818,15 @@ rt_dc_parallel_block = (token: DewyLexeme) -> int:
         else: statements.push(item)
     set_list(body, statements)
     group = dw_task_group(pos, name, serial, body, true)
+    # (after the join, the rest of the values: an item forwarding a failure first, so a failure
+    # leaves before a canceled sibling would run on the taker)
+    if pending.len() > 0:
+        joined = kids(group)
+        loop round in [0..2):
+            loop i in [0..pending.len()):
+                failing = nodes[int(nodes[pending_decls[i]].b)].kind == .propagate
+                if failing == (round == 0): joined.push(rt_dc_parallel_take(name, pending_decls[i], pending_handles[i]))
+        set_list(group, joined)
     # (the group's block takes the body's node, which its settings' scopes name)
     at = nodes[body].pos
     nodes[body] = nodes[group]
@@ -4792,6 +4834,64 @@ rt_dc_parallel_block = (token: DewyLexeme) -> int:
     nodes[body].aux = if paren: i32(5) else: i32(0)
     if paren: add_flag(body, NF_UNSCOPED)
     body
+
+# A `let` item that may run as a task: one plain name, no written type, and a value with a call,
+# no exit, spawn, or write to a name it does not declare, forwarding a failure only at its end
+# (`let config = load_config() or_throw`).
+
+rt_dc_parallel_binding = (item: int) -> bool:
+    if nodes[item].kind != .vardecl or nodes[item].name == 0 or nodes[item].a != 0 or nodes[item].nlist != 0 or nodes[item].b == 0: return false
+    value = int(nodes[item].b)
+    failing = nodes[value].kind == .propagate
+    if failing:
+        if nodes[value].b != 0: return false
+        value = int(nodes[value].a)
+    # (`let config = load_config or_throw`: a bare name forwarding a failure is a call)
+    if nodes[value].kind == .lambda or not (rt_dc_parallel_calls(value) or failing and nodes[value].kind == .ident): return false
+    if not rt_dc_parallel_exits(value, 0): return false
+    declared: int[]
+    rt_dc_parallel_declared(value, declared)
+    rt_dc_parallel_writes_own(value, declared)
+
+# Whether n calls anything (outside nested functions): a value worth a task.
+
+rt_dc_parallel_calls = (n: int) -> bool:
+    if n <= 0: return false
+    k = nodes[n].kind
+    if k == .lambda or k == .fn_: return false
+    if k == .call: return true
+    if rt_dc_parallel_calls(int(nodes[n].a)) or rt_dc_parallel_calls(int(nodes[n].b)) or rt_dc_parallel_calls(int(nodes[n].c)): return true
+    loop child in kids(n):
+        if rt_dc_parallel_calls(child): return true
+    false
+
+# The names n refers to, nested functions included (what an item reads).
+
+rt_dc_parallel_names = (n: int, names: mut int[]):
+    if n <= 0: return
+    if nodes[n].kind == .ident: names.push(int(nodes[n].name))
+    rt_dc_parallel_names(int(nodes[n].a), names)
+    rt_dc_parallel_names(int(nodes[n].b), names)
+    rt_dc_parallel_names(int(nodes[n].c), names)
+    rt_dc_parallel_names(int(nodes[n].d), names)
+    loop child in kids(n): rt_dc_parallel_names(child, names)
+    loop child in kids2(n): rt_dc_parallel_names(child, names)
+
+# A task item's declaration, now taking its value from the handle (forwarding the failure it
+# forwarded, `or_throw`).
+
+rt_dc_parallel_take = (group: str, decl: int, handle: str) -> int:
+    pos = nodes[decl].pos
+    failing = nodes[int(nodes[decl].b)].kind == .propagate
+    value = bc_call("__item_take", [bc_ident(group, pos), bc_ident(handle, pos)], pos)
+    if failing:
+        forward = mk(.propagate, nodes[int(nodes[decl].b)].pos)
+        nodes[forward].a = i32(value)
+        value = forward
+    taken = mk(.vardecl, pos)
+    nodes[taken] = nodes[decl]
+    nodes[taken].b = i32(value)
+    taken
 
 # Whether a parallel block's item may run as a task (dc_parallel_block): a statement declaring
 # nothing at its top, with no exit, `or_throw`, spawn, or write to a name it does not declare.

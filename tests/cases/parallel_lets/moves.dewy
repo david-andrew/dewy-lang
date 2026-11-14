@@ -1,0 +1,20 @@
+# Owners made by `let` items belong to the enclosing block: they live past the parallel
+# block, move like any binding, and drop once, at the enclosing block's end.
+let drops:int64=0
+Res=type of [n:int64
+    $__drop__=():>void=>{drops+=1}
+]
+make = (n:int64):>Res => Res[n]
+consume = (r:Res):>int64 => r.n
+main = () => {
+    {
+        parallel (
+            let a = make(1)
+            let b = make(2)
+        )
+        printl"after block: {a.n} {b.n}, drops {drops}"
+        let moved = a
+        printl"consumed {consume(moved)}, drops {drops}"
+    }
+    printl"after scope: drops {drops}"
+}

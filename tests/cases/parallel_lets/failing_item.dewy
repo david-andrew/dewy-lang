@@ -1,0 +1,30 @@
+# modes: native native-release
+# An item's `or_throw` leaves the function with its failure, canceling a sibling still
+# waiting; an item without `or_throw` keeps its failure as its value.
+BadFile:type = type of error & [path:string]
+load = (path:string):>string | BadFile => {
+    if path =? "missing" return BadFile[path]
+    "loaded {path}"
+}
+wait_for = (c:Channel<int64>):>int64 | Closed<int64> | Canceled => c.receive
+setup = (c:Channel<int64>):>void | BadFile => {
+    parallel (
+        let waiting = wait_for(c)
+        let a = load("one")
+        let b = load("missing") or_throw
+    )
+    printl"never {waiting} {a} {b}"
+}
+kept = ():>void => {
+    parallel (
+        let maybe = load("missing")
+        let other = load("two")
+    )
+    printl"value kept: {maybe is? BadFile} {other}"
+}
+main = () => {
+    let c = channel<int64>(1)
+    let result = setup(c)
+    printl"setup failed: {result is? BadFile}"
+    kept()
+}

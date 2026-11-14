@@ -102,11 +102,14 @@ race_target = (t: int, f: int, who: str, captures: bool, pos: int):
     n = place_var(t)
     if n == 0: return
     nm = name_of(int(nodes[n].name))
+    item = race_item[0] == 1
     if nodes[n].aux == i32(int(SK.global)):
+        if item: fatal(pos, "this `parallel` item runs as a task beside the block's other items, so it must not change the global '{nm}' (a data race): change '{nm}' before or after the block")
         fatal(pos, "{who} runs this function on many threads at once, so it must not change the global '{nm}' (a data race): return values instead")
     if captures and nodes[n].aux == i32(int(SK.local)):
         l = int(nodes[n].sym)
         if int(locals[l].owner) != f or int(locals[l].flags) & LF_CAPTURE != 0:
+            if item: fatal(pos, "this `parallel` item runs as a task beside the block's other items, so it must not change '{nm}', which the block's own code holds (a data race): change '{nm}' before or after the block")
             fatal(pos, "{who} runs this function on many threads at once, so it must not change '{nm}', a variable it captured (a data race): return values instead")
 
 

@@ -1,0 +1,23 @@
+# modes: native native-release
+# Two independent loads run at once: each sends, then waits for the other's value, which
+# only a load running beside it can send (in order, the first would wait forever).
+load_config = (mine:Channel<int64> theirs:Channel<int64>):>string | Canceled | Closed<int64> => {
+    mine.send(1) ?? void;
+    let seen = theirs.receive or_throw
+    "config saw {seen}"
+}
+load_sounds = (mine:Channel<int64> theirs:Channel<int64>):>string | Canceled | Closed<int64> => {
+    mine.send(2) ?? void;
+    let seen = theirs.receive or_throw
+    "sounds saw {seen}"
+}
+main = () => {
+    let a = channel<int64>(1)
+    let b = channel<int64>(1)
+    parallel (
+        let config = load_config(a b) or_throw
+        let sounds = load_sounds(b a) or_throw
+    )
+    printl(config)
+    printl(sounds)
+}

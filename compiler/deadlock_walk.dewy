@@ -183,7 +183,7 @@ dl_call=(n:LockWalkWord @held:array<DlHeld>):>void=>$unsafe {
     let g=LockWalkWord(nodes.ptr[n].sym)
     let d=LockWalkWord(fns.ptr[g].decl)
     let gname=if d not=? 0 {name_of(LockWalkWord(nodes.ptr[d].name))} else {""}
-    if gname =? "__task_spawn" and nkids(n) =? 2 {
+    if (gname =? "__task_spawn" or gname =? "__item_spawn" or gname =? "__item_spawn_failing") and nkids(n) =? 2 {
         let h=dl_fn_arg(kid(n 1))
         let grp=kid(n 0)
         if h >? 0 and nodes.ptr[grp].kind =? 'ident' and nodes.ptr[grp].sym >? 0 {

@@ -1,0 +1,12 @@
+# modes: native native-release
+# A `let` item's task cannot change what the block's own code holds; the message says which
+# item and which name.
+count = (xs:array<int>):>int => xs.length
+main = () => {
+    let xs:array<int> = [1 2]
+    parallel (
+        let n = count(xs) + xs.pop()
+        let m = count([3])
+    )
+    printl"{n} {m}"
+}

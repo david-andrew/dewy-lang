@@ -297,7 +297,7 @@ nd_call = (n: int, held: mut DlHeld[]):
         nd_args(n, held, pos)
         return
     # The library: its own waits are on the outside world, except these.
-    if gname == "__task_spawn" and nkids(n) == 2:
+    if (gname == "__task_spawn" or gname == "__item_spawn" or gname == "__item_spawn_failing") and nkids(n) == 2:
         h = dl_fn_arg(kid(n, 1))
         none_held: DlHeld[]
         if h > 0: nd_callee(h, none_held, pos, "the spawned task")

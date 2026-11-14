@@ -18,6 +18,7 @@ use 'error_ops.dewy'
 use 'util.jo'
 use 'diagnostic_exit.dewy'
 use 'lower_races.dewy'
+use 'lower.jo'
 use 'isolation_ops.dewy'
 use 'refine.jo'
 use 'lower_helpers.dewy'
@@ -119,7 +120,10 @@ concurrency_finalize = ():
         loop i in 0.. and callback in kids(n):
             if tkind(ntype(callback)) != .fn_ or task_arg >= -1 and i != task_arg: continue
             concurrency_callback(callback, true)
+            # (a `parallel` block's `let` item: its messages say so)
+            race_item[0] = if concurrency_item_call(n): 1 else: 0
             race_arg(callback, "spawn")
+            race_item[0] = 0
             visited: {int: bool}
             callee = setting_value_target(callback)
             loop nodes[callee].kind == .conv: callee = int(nodes[callee].a)
@@ -136,6 +140,12 @@ concurrency_finalize = ():
                 if not concurrency_transfer(ntype(a), seen): fatal(nodes[a].pos, "parallel input does not satisfy inferred Send{concurrency_why()}")
 
 
+# (a `parallel` block's `let` item's task: lib/std/tasks.jo's __item_spawn)
+concurrency_item_call = (n: int) -> bool:
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return false
+    name = name_of(int(nodes[d].name))
+    name == "__item_spawn" or name == "__item_spawn_failing"
 # The argument of a certified protocol's call that runs on a task of its own (`serve`'s handler,
 # `pipeline`'s work; the rest run on the caller's), -1 for none, -2 when n is not a protocol's
 concurrency_protocol_task_arg = (n: int) -> int:
