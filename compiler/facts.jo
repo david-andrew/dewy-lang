@@ -104,6 +104,7 @@ use 'facts_members.dewy'
 use 'facts_progress.dewy'
 use 'facts_probes.dewy'
 use 'facts_row_queries.dewy'
+use 'facts_projection_queries.dewy'
 
 # One tombstone per invalidated route: the event that last replaced the
 # place and the value it replaced. Witnesses only; never evidence.
@@ -671,38 +672,6 @@ fact_add_value = (s: mut FactState, v: int, b: FactBound):
 # O(P) queries while P < 32; expected O(1) indexed queries above that, with
 # O(P) promotion once per growing state. No new facts or budget are introduced.
 const FACT_PROJECTION_SCAN = 32
-
-fact_projections_indexed = (s: FactState) -> bool: s.index[0].projection_next.len() != 0
-
-fact_projection_find = (s: FactState, base: int, selector: int, element: bool) -> int:
-    if fact_projections_indexed(s): return fact_index_get(s.index[0].projection_index, fact_projection_key(base, selector, element))
-    loop i in [0..s.projections.len()):
-        if s.projections[i].base == base and s.projections[i].selector == selector and s.projections[i].element == element: return i
-    -1
-
-fact_projection_first = (s: FactState, base: int) -> int:
-    if fact_projections_indexed(s): return fact_index_get(s.index[0].projection_head, base)
-    loop i in [0..s.projections.len()):
-        if s.projections[i].base == base: return i
-    -1
-
-fact_projection_after = (s: FactState, i: int) -> int:
-    fact_projection_next_in(s.projections, s.index[0].projection_next, i)
-
-# A write may append projections or compact its state while traversing the
-# old projections. Keep the records and links from the same snapshot.
-fact_projection_next_in = (projections: FactProjection[], links: int[], i: int) -> int:
-    if links.len() != 0: return links[i]
-    base = projections[i].base
-    loop j in [i + 1..projections.len()):
-        if projections[j].base == base: return j
-    -1
-
-fact_projection_origin = (s: FactState, value: int) -> int:
-    if fact_projections_indexed(s): return fact_index_get(s.index[0].projection_value, value)
-    loop i in [0..s.projections.len()):
-        if not s.projections[i].element and s.projections[i].value == value: return i
-    -1
 
 fact_add_projection = (s: mut FactState, p: FactProjection):
     existing = fact_projection_find(s, p.base, p.selector, p.element)

@@ -1,0 +1,42 @@
+$runtime_checks
+
+from p"facts.jo" import (FactProjection FactState fact_index_get fact_projection_key)
+
+ProjectionWord:type=int64<overflow='wrap'>
+
+# Read-only queries over a state's projection records. Below
+# FACT_PROJECTION_SCAN records a state has no indexes and is scanned in order;
+# the indexes, once built, give the same first records.
+fact_projections_indexed=(s:FactState):>bool=>s.index[0].projection_next.length not=? 0
+fact_projection_find=(s:FactState base:ProjectionWord selector:ProjectionWord element:bool):>int64=>{
+    if fact_projections_indexed(s) {return fact_index_get(s.index[0].projection_index fact_projection_key(base selector element))}
+    loop i in [0..s.projections.length) {
+        if s.projections[i].base =? base and s.projections[i].selector =? selector and s.projections[i].element =? element {return i}
+    }
+    -1
+}
+fact_projection_first=(s:FactState base:ProjectionWord):>int64=>{
+    if fact_projections_indexed(s) {return fact_index_get(s.index[0].projection_head base)}
+    loop i in [0..s.projections.length) {
+        if s.projections[i].base =? base {return i}
+    }
+    -1
+}
+fact_projection_after=(s:FactState i:ProjectionWord):>int64=>fact_projection_next_in(s.projections s.index[0].projection_next i)
+# A write may append projections or compact its state while traversing the
+# old projections. Keep the records and links from the same snapshot.
+fact_projection_next_in=(projections:array<FactProjection> links:array<int64> i:ProjectionWord):>int64=>{
+    if links.length not=? 0 {return links[i]}
+    let base=projections[i].base
+    loop j in [i + 1..projections.length) {
+        if projections[j].base =? base {return j}
+    }
+    -1
+}
+fact_projection_origin=(s:FactState value:ProjectionWord):>int64=>{
+    if fact_projections_indexed(s) {return fact_index_get(s.index[0].projection_value value)}
+    loop i in [0..s.projections.length) {
+        if not s.projections[i].element and s.projections[i].value =? value {return i}
+    }
+    -1
+}

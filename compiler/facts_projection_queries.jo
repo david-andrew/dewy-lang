@@ -1,0 +1,124 @@
+use 'facts.jo'
+use 'lower_scalars.dewy'
+use 'lower_views.dewy'
+use 'lower_storage.dewy'
+use 'lower_analysis.dewy'
+use 'lower_helpers.dewy'
+use 'lower_group.dewy'
+use 'checker_state.dewy'
+use 'effect_lattice.dewy'
+use 'effect_types.dewy'
+use 'sequence_selectors.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'ide.jo'
+use 'exact.jo'
+use 'math_lower.jo'
+use 'ast.jo'
+use 'icount.jo'
+use 'icount_ops.dewy'
+use 'lex.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'word_overflow.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'expr.jo'
+use 'checks_thin_expr.dewy'
+use 'lower.jo'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'checks_static.dewy'
+use 'comptime.jo'
+use 'check_constant.jo'
+use 'constant_checks.dewy'
+use 'isolation.jo'
+use 'refine.jo'
+use 'refine_siblings.dewy'
+use 'refine_rare.dewy'
+use 'nd_contracts.jo'
+use 'nd_contract_ops.dewy'
+use 'proofs.jo'
+use 'proof_ops.dewy'
+use 'places.jo'
+use 'place_routes.dewy'
+use 'effects.jo'
+use 'effect_library.jo'
+use 'ownership.jo'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'directives.jo'
+use 'directive_queries.dewy'
+use 'directive_rules.dewy'
+use 'warn_if.jo'
+use 'string_domains.jo'
+use 'draw_context.jo'
+use 'predicate_facts.jo'
+use 'predicate_summaries.dewy'
+use 'floats.jo'
+use 'float_ops.dewy'
+use 'member_replay.jo'
+use 'ownership_types.dewy'
+use 'lower_primitives.dewy'
+use 'math_ops.dewy'
+use 'draw_ops.dewy'
+use 'effect_classifiers.dewy'
+use 'effect_values.dewy'
+use 'effect_control.dewy'
+use 'effect_costs.dewy'
+use 'effect_owners.dewy'
+use 'isolation_ops.dewy'
+use 'facts_collect.dewy'
+use 'facts_arith.dewy'
+use 'facts_lifecycle.dewy'
+use 'facts_forgets.dewy'
+use 'facts_plans.dewy'
+use 'facts_numeric.dewy'
+use 'fact_words.dewy'
+use 'facts_ranges.dewy'
+use 'facts_routes.dewy'
+use 'facts_forks.dewy'
+use 'facts_elements.dewy'
+use 'facts_loops.dewy'
+use 'facts_conditions.dewy'
+use 'facts_joins.dewy'
+use 'facts_changes.dewy'
+use 'facts_library.dewy'
+use 'facts_summaries.dewy'
+use 'facts_pushes.dewy'
+use 'facts_text.dewy'
+use 'facts_arrays.dewy'
+use 'facts_maps.dewy'
+use 'facts_pools.dewy'
+use 'facts_members.dewy'
+use 'facts_progress.dewy'
+use 'facts_probes.dewy'
+use 'facts_row_queries.dewy'
+
+fact_projections_indexed = (s: FactState) -> bool: s.index[0].projection_next.len() != 0
+fact_projection_find = (s: FactState, base: int, selector: int, element: bool) -> int:
+    if fact_projections_indexed(s): return fact_index_get(s.index[0].projection_index, fact_projection_key(base, selector, element))
+    loop i in [0..s.projections.len()):
+        if s.projections[i].base == base and s.projections[i].selector == selector and s.projections[i].element == element: return i
+    -1
+fact_projection_first = (s: FactState, base: int) -> int:
+    if fact_projections_indexed(s): return fact_index_get(s.index[0].projection_head, base)
+    loop i in [0..s.projections.len()):
+        if s.projections[i].base == base: return i
+    -1
+fact_projection_after = (s: FactState, i: int) -> int:
+    fact_projection_next_in(s.projections, s.index[0].projection_next, i)
+# A write may append projections or compact its state while traversing the
+# old projections. Keep the records and links from the same snapshot.
+fact_projection_next_in = (projections: FactProjection[], links: int[], i: int) -> int:
+    if links.len() != 0: return links[i]
+    base = projections[i].base
+    loop j in [i + 1..projections.len()):
+        if projections[j].base == base: return j
+    -1
+fact_projection_origin = (s: FactState, value: int) -> int:
+    if fact_projections_indexed(s): return fact_index_get(s.index[0].projection_value, value)
+    loop i in [0..s.projections.len()):
+        if not s.projections[i].element and s.projections[i].value == value: return i
+    -1
