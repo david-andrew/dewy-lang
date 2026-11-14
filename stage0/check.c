@@ -219,7 +219,7 @@ static void register_decls(Module *m, NodeList *decls, NodeList *init_stmts) {
   }
 }
 
-enum { MAX_MODULES = 512 };
+enum { MAX_MODULES = 2048 };
 static NodeList module_inits[MAX_MODULES];
 static FnCtx *module_ctx[MAX_MODULES];
 
