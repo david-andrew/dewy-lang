@@ -1,0 +1,32 @@
+$runtime_checks
+
+from p"ast.jo" import (kid nkids nodes)
+
+from p"isolation_ops.dewy" import (isolation_children)
+
+SlicePrepWord:type=int64<overflow='wrap'>
+
+# Preserve the syntax mask's child order. Arena IDs are checked syntax IDs;
+# each raw read is reacquired and no arena view survives an append or call.
+fact_slice_children=(n:SlicePrepWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    let mask:SlicePrepWord=isolation_children(nodes.ptr[n].kind)
+    if mask <? 0 {return out}
+    if mask & 1 not=? 0 {out.push(int64(nodes.ptr[n].a))}
+    if mask & 2 not=? 0 {out.push(int64(nodes.ptr[n].b))}
+    if mask & 4 not=? 0 {out.push(int64(nodes.ptr[n].c))}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {out.push(kid(n i))}
+    }
+    out
+}
+fact_slice_push_children=(@out:array<int64> n:SlicePrepWord):>void=>$unsafe {
+    let mask:SlicePrepWord=isolation_children(nodes.ptr[n].kind)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {out.push(int64(nodes.ptr[n].a))}
+    if mask & 2 not=? 0 {out.push(int64(nodes.ptr[n].b))}
+    if mask & 4 not=? 0 {out.push(int64(nodes.ptr[n].c))}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {out.push(kid(n i))}
+    }
+}

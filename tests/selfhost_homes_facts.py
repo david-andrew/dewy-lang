@@ -4,6 +4,7 @@ from tests.selfhost_homes_checks import _doubled
 # (a leaf moved out of a Jo module without state of its own: an isolated build that has that module but
 # not the leaf reads the leaf's functions from the module, a double or the real one)
 LEAF_HOMES = {
+    'facts_slice_prep': 'facts.jo',
     'facts_values': 'facts.jo',
     'facts_arith': 'facts.jo',
     'facts_row_queries': 'facts.jo',

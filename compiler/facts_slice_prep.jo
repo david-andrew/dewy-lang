@@ -1,0 +1,22 @@
+use 'ast.jo'
+use 'isolation_ops.dewy'
+
+fact_slice_children = (n: int) -> int[]:
+    out: int[]
+    mask = isolation_children(nodes[n].kind)
+    if mask < 0: return out
+    if mask & 1 != 0: out.push(int(nodes[n].a))
+    if mask & 2 != 0: out.push(int(nodes[n].b))
+    if mask & 4 != 0: out.push(int(nodes[n].c))
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)): out.push(kid(n, i))
+    out
+
+fact_slice_push_children = (out: mut int[], n: int):
+    mask = isolation_children(nodes[n].kind)
+    if mask < 0: return
+    if mask & 1 != 0: out.push(int(nodes[n].a))
+    if mask & 2 != 0: out.push(int(nodes[n].b))
+    if mask & 4 != 0: out.push(int(nodes[n].c))
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)): out.push(kid(n, i))
