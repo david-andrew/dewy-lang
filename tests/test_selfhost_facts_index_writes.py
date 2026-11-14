@@ -1,6 +1,7 @@
-"""Fact index writers (open-address insertion and growth, value slots and their promotion to a hashed
-index, projection and difference-row insertion with promotion past the scan limits) agree with
-frozen Jo: the same proofs, diagnostics and bytes over small and large states."""
+"""Fact index writers and value transitions (open-address insertion and growth, value slots and their
+hashed-index promotion, projection and row insertion past the scan limits, new values, constants,
+bindings, rebinding, bounds and reindexing) agree with frozen Jo: the same proofs, diagnostics and
+bytes over small and large states."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_facts_projection_queries import record_program

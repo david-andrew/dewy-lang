@@ -1,10 +1,12 @@
 $runtime_checks
 
-from p"facts.jo" import (FACT_PROJECTION_SCAN FACT_RECORD FACT_ROW_SCAN FactDifference FactProjection FactState fact_pair_key fact_projection_key fact_terms)
+from p"effect_types.dewy" import (PlaceIdentity)
+from p"facts.jo" import (FACT_CAP FACT_PROJECTION_SCAN FACT_RECORD FACT_ROW_SCAN FactBinding FactDifference FactProjection FactState fact_open_endpoint fact_pair_key fact_projection_key fact_root_key fact_terms)
+from p"facts_collect.dewy" import (fact_compact)
 from p"facts_projection_queries.dewy" import (fact_projection_find fact_projections_indexed)
 from p"facts_row_queries.dewy" import (fact_rows_indexed)
-from p"facts_value_queries.dewy" import (fact_index_get fact_index_hash)
-from p"refinement_types.dewy" import (FactBound)
+from p"facts_value_queries.dewy" import (fact_binding fact_index_get fact_index_hash fact_slot)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
 
 IndexWord:type=int64<overflow='wrap'>
 
@@ -127,4 +129,69 @@ fact_index_difference=(@s:FactState row:FactDifference):>void=>{
         s.index[0].difference_next.push(-1)
     }
     s.differences.push(row)
+}
+fact_new=(@s:FactState b:FactBound term:FactTerm=FactTerm[]):>int64=>{
+    if s.ids.length >=? FACT_CAP and not s.full {fact_compact(@s)}
+    if s.ids.length >=? FACT_CAP {return 0}
+    let v:IndexWord=fact_terms.length
+    if v >=? 0x80000000 {return 0}
+    fact_terms.push(term)
+    fact_add_value(@s v b)
+    v
+}
+fact_reindex=(@s:FactState):>void=>{
+    let hashed=s.index[0].slots.length not=? 0
+    s.index[0].slots=[]
+    if hashed {
+        loop i in [0..s.ids.length) {fact_index_put(@s.index[0].slots s.ids[i] i)}
+    }
+    let projections=s.projections
+    s.projections=[]
+    s.index[0].projection_index=[]
+    s.index[0].projection_head=[]
+    s.index[0].projection_tail=[]
+    s.index[0].projection_next=[]
+    s.index[0].projection_value=[]
+    loop p in projections {fact_add_projection(@s p)}
+    let differences=s.differences
+    s.differences=[]
+    s.index[0].difference_index=[]
+    s.index[0].difference_value=[]
+    s.index[0].difference_record=[]
+    s.index[0].difference_next=[]
+    loop row in differences {fact_add_difference(@s row)}
+}
+fact_constant=(@s:FactState x:IndexWord at:IndexWord=0):>int64=>fact_new(@s FactBound(x x x not=? 0) FactTerm(origin=at))
+fact_bind=(@s:FactState p:PlaceIdentity v:IndexWord):>void=>{
+    if p.declaration =? 0 {return}
+    let i:IndexWord=fact_binding(s p)
+    if i >=? 0 {s.bindings[i].value=v} else if s.bindings.length <? FACT_CAP {
+        fact_index_put(@s.index[0].roots fact_root_key(p) s.bindings.length)
+        s.bindings.push(FactBinding(p v))
+    }
+}
+# A replacement keeps the replaced value as the route's single tombstone.
+fact_rebind=(@s:FactState p:PlaceIdentity v:IndexWord at:IndexWord prior:IndexWord):>void=>{
+    fact_bind(@s p v)
+    let i:IndexWord=fact_binding(s p)
+    if i >=? 0 and at not=? 0 {
+        s.bindings[i].event=at
+        s.bindings[i].prior=prior
+    }
+}
+fact_set_bound=(@s:FactState v:IndexWord b0:FactBound exact:bool=false):>void=>{
+    let i:IndexWord=fact_slot(s v)
+    if i <? 0 {return}
+    let b=b0
+    if b.lo >? b.hi or b.nz and b.lo =? 0 and b.hi =? 0 {s.live=false}
+    # Nonzero at an interval endpoint excludes it: `n not=? 0` with `n >=? 0`
+    # is `n >=? 1` (an early-returned empty length makes `xs[0]`, `xs[end]` safe).
+    else if b.nz and b.lo =? 0 {b.lo=1} else if b.nz and b.hi =? 0 {b.hi=-1}
+    # (an `int` narrowed onto an open MIN/MAX endpoint, `n >=? MAX`, is at
+    # least MAX, not MAX itself: it stays wide unless that endpoint was real)
+    if s.live and not exact and not b.wide and b.lo =? b.hi and (b.hi =? FACT_MAX or b.lo =? FACT_MIN) and fact_open_endpoint(s v b.hi =? FACT_MAX) {
+        b.wide=true
+        b.nz=true
+    }
+    s.bounds[i]=b
 }

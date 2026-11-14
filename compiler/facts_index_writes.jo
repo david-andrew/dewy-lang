@@ -193,3 +193,53 @@ fact_index_difference = (s: mut FactState, row: FactDifference):
         s.index[0].difference_record[at + 1] = i
         s.index[0].difference_next.push(-1)
     s.differences.push(row)
+fact_new = (s: mut FactState, b: FactBound, term: FactTerm = FactTerm()) -> int:
+    if s.ids.len() >= FACT_CAP and not s.full: fact_compact(s)
+    if s.ids.len() >= FACT_CAP: return 0
+    v = fact_terms.len()
+    if v >= 0x80000000: return 0
+    fact_terms.push(term)
+    fact_add_value(s, v, b)
+    v
+fact_reindex = (s: mut FactState):
+    hashed = s.index[0].slots.len() != 0
+    s.index[0].slots = []
+    if hashed:
+        loop i in [0..s.ids.len()): fact_index_put(s.index[0].slots, s.ids[i], i)
+    projections = s.projections
+    s.projections = []; s.index[0].projection_index = []; s.index[0].projection_head = []; s.index[0].projection_tail = []; s.index[0].projection_next = []; s.index[0].projection_value = []
+    loop p in projections: fact_add_projection(s, p)
+    differences = s.differences
+    s.differences = []; s.index[0].difference_index = []; s.index[0].difference_value = []; s.index[0].difference_record = []; s.index[0].difference_next = []
+    loop row in differences: fact_add_difference(s, row)
+fact_constant = (s: mut FactState, x: int, at: int = 0) -> int:
+    fact_new(s, FactBound(x, x, x != 0), FactTerm(origin = at))
+fact_bind = (s: mut FactState, p: PlaceIdentity, v: int):
+    if p.declaration == 0: return
+    i = fact_binding(s, p)
+    if i >= 0: s.bindings[i].value = v
+    else if s.bindings.len() < FACT_CAP:
+        fact_index_put(s.index[0].roots, fact_root_key(p), s.bindings.len())
+        s.bindings.push(FactBinding(p, v))
+# A replacement keeps the replaced value as the route's single tombstone.
+fact_rebind = (s: mut FactState, p: PlaceIdentity, v: int, at: int, prior: int):
+    fact_bind(s, p, v)
+    i = fact_binding(s, p)
+    if i >= 0 and at != 0:
+        s.bindings[i].event = at
+        s.bindings[i].prior = prior
+fact_set_bound = (s: mut FactState, v: int, b0: FactBound, exact: bool = false):
+    i = fact_slot(s, v)
+    if i < 0: return
+    b = b0
+    if b.lo > b.hi or b.nz and b.lo == 0 and b.hi == 0: s.live = false
+    # Nonzero at an interval endpoint excludes it: `n not=? 0` with `n >=? 0`
+    # is `n >=? 1` (an early-returned empty length makes `xs[0]`, `xs[end]` safe).
+    else if b.nz and b.lo == 0: b.lo = 1
+    else if b.nz and b.hi == 0: b.hi = -1
+    # (an `int` narrowed onto an open MIN/MAX endpoint, `n >=? MAX`, is at
+    # least MAX, not MAX itself: it stays wide unless that endpoint was real)
+    if s.live and not exact and not b.wide and b.lo == b.hi and (b.hi == FACT_MAX or b.lo == FACT_MIN) and fact_open_endpoint(s, v, b.hi == FACT_MAX):
+        b.wide = true
+        b.nz = true
+    s.bounds[i] = b

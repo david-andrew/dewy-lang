@@ -570,15 +570,6 @@ fact_domain = (t0: int, reason: FactReason = .missing, at: int = 0) -> FactBound
         r.hi = if types[t].sign: (1 << (bits - 1)) - 1 else: (1 << bits) - 1
     r
 
-fact_new = (s: mut FactState, b: FactBound, term: FactTerm = FactTerm()) -> int:
-    if s.ids.len() >= FACT_CAP and not s.full: fact_compact(s)
-    if s.ids.len() >= FACT_CAP: return 0
-    v = fact_terms.len()
-    if v >= 0x80000000: return 0
-    fact_terms.push(term)
-    fact_add_value(s, v, b)
-    v
-
 fact_root_key = (p: PlaceIdentity) -> int: (p.declaration << 3) | int(p.root)
 fact_pair_key = (a: int, b: int) -> int: (a << 32) | b
 fact_projection_key = (base: int, selector: int, element: bool) -> int:
@@ -599,18 +590,6 @@ const FACT_RECORD = 5
 # one. A scan is O(rows), as the distance budget already charges a source.
 const FACT_ROW_SCAN = 32
 
-fact_reindex = (s: mut FactState):
-    hashed = s.index[0].slots.len() != 0
-    s.index[0].slots = []
-    if hashed:
-        loop i in [0..s.ids.len()): fact_index_put(s.index[0].slots, s.ids[i], i)
-    projections = s.projections
-    s.projections = []; s.index[0].projection_index = []; s.index[0].projection_head = []; s.index[0].projection_tail = []; s.index[0].projection_next = []; s.index[0].projection_value = []
-    loop p in projections: fact_add_projection(s, p)
-    differences = s.differences
-    s.differences = []; s.index[0].difference_index = []; s.index[0].difference_value = []; s.index[0].difference_record = []; s.index[0].difference_next = []
-    loop row in differences: fact_add_difference(s, row)
-
 # A scope's end drops the values it made that nothing live reaches: every
 # value made before the scope began stays (an enclosing expression may hold
 # it), as do the scope's result and whatever bindings, evidence and kept
@@ -619,26 +598,7 @@ fact_reindex = (s: mut FactState):
 fact_stamp: int[]
 fact_stamp_gen = 0
 
-fact_constant = (s: mut FactState, x: int, at: int = 0) -> int:
-    fact_new(s, FactBound(x, x, x != 0), FactTerm(origin = at))
-
 fact_place = (e: int) -> PlaceIdentity: place_scalar_root(e)
-
-fact_bind = (s: mut FactState, p: PlaceIdentity, v: int):
-    if p.declaration == 0: return
-    i = fact_binding(s, p)
-    if i >= 0: s.bindings[i].value = v
-    else if s.bindings.len() < FACT_CAP:
-        fact_index_put(s.index[0].roots, fact_root_key(p), s.bindings.len())
-        s.bindings.push(FactBinding(p, v))
-
-# A replacement keeps the replaced value as the route's single tombstone.
-fact_rebind = (s: mut FactState, p: PlaceIdentity, v: int, at: int, prior: int):
-    fact_bind(s, p, v)
-    i = fact_binding(s, p)
-    if i >= 0 and at != 0:
-        s.bindings[i].event = at
-        s.bindings[i].prior = prior
 
 # Aggregates have immutable evaluated identities too. A projection belongs to
 # that value, never to a source spelling; a store rebuilds the enclosing value.
@@ -1485,22 +1445,6 @@ fact_open_endpoint = (s: FactState, v: int, upper: bool) -> bool:
 # Neither of v's MIN/MAX ends is open. O(fact_open_endpoint).
 fact_real_ends = (s: FactState, v: int, b: FactBound) -> bool:
     (b.lo != FACT_MIN or not fact_open_endpoint(s, v, false)) and (b.hi != FACT_MAX or not fact_open_endpoint(s, v, true))
-
-fact_set_bound = (s: mut FactState, v: int, b0: FactBound, exact: bool = false):
-    i = fact_slot(s, v)
-    if i < 0: return
-    b = b0
-    if b.lo > b.hi or b.nz and b.lo == 0 and b.hi == 0: s.live = false
-    # Nonzero at an interval endpoint excludes it: `n not=? 0` with `n >=? 0`
-    # is `n >=? 1` (an early-returned empty length makes `xs[0]`, `xs[end]` safe).
-    else if b.nz and b.lo == 0: b.lo = 1
-    else if b.nz and b.hi == 0: b.hi = -1
-    # (an `int` narrowed onto an open MIN/MAX endpoint, `n >=? MAX`, is at
-    # least MAX, not MAX itself: it stays wide unless that endpoint was real)
-    if s.live and not exact and not b.wide and b.lo == b.hi and (b.hi == FACT_MAX or b.lo == FACT_MIN) and fact_open_endpoint(s, v, b.hi == FACT_MAX):
-        b.wide = true
-        b.nz = true
-    s.bounds[i] = b
 
 # A `let` binding's `and`/`or` value (fact_saving while it is captured):
 # a saved Boolean, assumed again where it is tested.
