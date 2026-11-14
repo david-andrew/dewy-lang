@@ -7,6 +7,7 @@ use 'lower_group.dewy'
 use 'host_binds.jo'
 use 'checker_expr.dewy'
 use 'type_refinement.dewy'
+use 'type_value_arguments.dewy'
 use 'type_substitute.dewy'
 use 'ir_types.dewy'
 use 'refine_resolve.dewy'
@@ -115,6 +116,11 @@ ref_resolve_value = (n: int) -> RefTerm:
     name = int(nodes[n].name)
     if ref_holder_name != 0 and name == ref_holder_name: return RefTerm(6)
     sym = lookup(name)
+    if sym != 0 and syms[sym].kind == .type_:
+        literal = integer_parameter_literal(n)
+        if literal != 0: return RefTerm(1, nodes[literal].ival)
+        parameter = integer_parameter_type(n)
+        if parameter != 0: return RefTerm(7, parameter)
     # (a module const, `const N = NAMES.length` too: its value while compiling)
     if sym != 0 and (syms[sym].kind == .const_ or syms[sym].kind == .global and readonly_global(int(syms[sym].ref)) and dewy_at(nodes[n].pos)):
         value = clone(n)

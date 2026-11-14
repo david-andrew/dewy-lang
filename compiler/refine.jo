@@ -156,7 +156,7 @@ ref_span_copy = (from: int, to: int):
 # Predicate tables stay with their owner; the leaf borrows the interner.
 ref_intern = (atoms: RefAtom[]) -> int: ref_atoms_intern(ref_predicates, atoms)
 
-mk_refined = (base0: int, predicate: int) -> int: tr_make(base0, predicate)
+mk_refined = (base0: int, predicate: int) -> int: tr_make(base0, predicate, ref_spans.get(predicate) ?? -1)
 
 resolve_refinement = (n: int) -> int:
     if nodes[n].b == 0: return ref_self_resolve(n)

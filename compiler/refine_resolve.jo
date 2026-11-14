@@ -73,7 +73,7 @@ ref_resolve_term = (nodes: mut Node[], types: mut TypeInfo[], names: mut str[], 
             limit = host.type_limit(n)
             if limit.found: return limit.term
         term = ref_resolve_term(nodes, types, names, bindings, host, base, binder)
-        if term.kind == 1 or term.kind == 4 or term.offset != 0: host.fatal(nodes[n].pos, "refinement projection requires a value")
+        if term.kind == 1 or term.kind == 4 or term.kind == 7 or term.offset != 0: host.fatal(nodes[n].pos, "refinement projection requires a value")
         term.path.push(if names[int(nodes[n].name)] == "length": -1 else: int(nodes[n].name))
         return term
     host.fatal(nodes[n].pos, "unsupported refinement term; expected a scalar binding or integer bound")

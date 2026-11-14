@@ -3,6 +3,7 @@ $runtime_checks
 from p"checker_types.dewy" import (TypeInfo StructInfo)
 from p"refinement_types.dewy" import (RefAtom RefTerm FactBound FactReason)
 from p"refine_predicates.dewy" import (ref_atoms_intern ref_atoms_length_only)
+from p"refine_intervals.dewy" import ref_type_intervals
 from p"type_inference.dewy" import (TypeInferenceInput tu_prune tu_has_var tu_targ)
 from p"type_constructors.dewy" import (tb_mk_array tb_mk_fixed tb_mk_opt tb_mk_tuple)
 # Demand-only construction and representation walks. Deep representation visits
@@ -53,7 +54,7 @@ tr_deep=(t0:RWord):>RWord=>$unsafe {
     }
     t
 }
-tr_make=(base0:RWord predicate0:RWord):>RWord=>$unsafe {
+tr_make=(base0:RWord predicate0:RWord position:RWord=(-1)):>RWord=>$unsafe {
     let base=tu_prune(base0)
     let declared=predicate0
     let predicate = predicate0
@@ -65,10 +66,10 @@ tr_make=(base0:RWord predicate0:RWord):>RWord=>$unsafe {
     let dependencies:array<int64>=[]
     loop original in tr_predicates[0][predicate] {
         let atom=original
-        atom.a = tr_limit(atom.a)
-        atom.b = tr_limit(atom.b)
+        atom.a = tr_limit(atom.a position)
+        atom.b = tr_limit(atom.b position)
         loop term in [atom.a  atom.b] {
-            if term.kind =? 4 {dependencies.push(term.value)}
+            if term.kind =? 4 or term.kind =? 7 or term.kind =? 8 {dependencies.push(term.value)}
         }
         # A length cannot reach 2^63; uint64.max bounds normalize to int64.max.
         if tr_types[0].ptr[base].kind =? 'array' or tr_types[0].ptr[base].kind =? 'str_' {
@@ -93,10 +94,19 @@ tr_make=(base0:RWord predicate0:RWord):>RWord=>$unsafe {
     tr_active[0] = true
     tr_inference[0].host[0].mk_type(TypeInfo[kind='refined'  elem = int32(base)  st = int32(predicate)]  dependencies)
 }
-tr_limit=(term:RefTerm):>RefTerm=>$unsafe {
-    if term.kind not=? 4 {return term}
+tr_limit=(term:RefTerm position:RWord=(-1)):>RefTerm=>$unsafe {
+    if term.kind not=? 4 and term.kind not=? 7 and term.kind not=? 8 {return term}
     let t=tu_prune(term.value)
     if tu_has_var(t) {return term}
+    if term.kind =? 7 or term.kind =? 8 {
+        if not tr_is_int(tr_representation(t)) {tr_host[0].fatal(position "a length or refinement type parameter needs one integer argument")}
+        let [known bounds]=ref_type_intervals(@tr_types[0] @tr_predicates[0] t (-1))
+        if not known or bounds.length not=? 2 or bounds[0] not=? bounds[1] {tr_host[0].fatal(position "a length or refinement type parameter needs one integer argument")}
+        let value=RWord(bounds[0]) + RWord(term.offset)
+        if (term.offset >? 0 and value <? bounds[0]) or (term.offset <? 0 and value >? bounds[0]) {tr_host[0].fatal(position "integer type parameter offset is out of range")}
+        if term.kind =? 8 and (value <? 1 or value >? (1 << 28)) {tr_host[0].fatal(position "a fixed-size array length must be between 1 and 268435456")}
+        return RefTerm(1 value)
+    }
     if not tr_is_int(t) {tr_host[0].fatal(-1  "refinement type limit requires an integer type")}
     if t =? tr_u64[0] {return RefTerm[1  (if term.unsigned {-1} else {0})  term.unsigned]}
     let domain=tr_host[0].domain(t 'missing' 0)

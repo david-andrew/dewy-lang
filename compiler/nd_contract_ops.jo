@@ -99,7 +99,7 @@ nd_signature = (decl: int, params: mut int[], result: int = 0) -> int:
                 else:
                     ordinal = refine_bindings.formals.index_of(name)
                     if ordinal >= 0: term = RefTerm(2, ordinal)
-                    else if lookup(name) != 0 and (syms[lookup(name)].kind == .local or syms[lookup(name)].kind == .global or syms[lookup(name)].kind == .const_): term = ref_resolve_value(dim)
+                    else if lookup(name) != 0 and (syms[lookup(name)].kind == .local or syms[lookup(name)].kind == .global or syms[lookup(name)].kind == .const_ or syms[lookup(name)].kind == .type_): term = ref_resolve_value(dim)
                     else:
                         bound[name] = RefTerm(2, i, path = path)
                         continue
@@ -159,7 +159,7 @@ nd_field_shape = (tn: int, t: int, siblings: int[]) -> int:
         if nodes[dim].kind == .ident:
             name = int(nodes[dim].name)
             if bound.has(name): term = bound[name]
-            else if lookup(name) != 0 and (syms[lookup(name)].kind == .global or syms[lookup(name)].kind == .const_): term = ref_resolve_value(dim)
+            else if lookup(name) != 0 and (syms[lookup(name)].kind == .global or syms[lookup(name)].kind == .const_ or syms[lookup(name)].kind == .type_): term = ref_resolve_value(dim)
             # (another word stands for an extent the record does not store: only the rank is held)
             else: continue
         else: term = nd_shape_term(dim, bound)

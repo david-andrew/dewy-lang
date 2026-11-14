@@ -1,6 +1,7 @@
 use 'checker_types.dewy'
 use 'refinement_types.dewy'
 use 'refine_predicates.dewy'
+use 'refine_intervals.dewy'
 use 'type_inference.dewy'
 use 'type_constructors.dewy'
 struct TypeRefinementHost:
@@ -50,7 +51,7 @@ tr_deep = (t0: int) -> int:
     t
 
 
-tr_make = (base0: int, predicate0: int) -> int:
+tr_make = (base0: int, predicate0: int, position: int = -1) -> int:
     base = tu_prune(base0)
     declared = predicate0
     let predicate = predicate0
@@ -61,10 +62,10 @@ tr_make = (base0: int, predicate0: int) -> int:
     dependencies: int[]
     loop original in tr_predicates[0][predicate]:
         atom = original
-        atom.a = tr_limit(atom.a)
-        atom.b = tr_limit(atom.b)
+        atom.a = tr_limit(atom.a, position)
+        atom.b = tr_limit(atom.b, position)
         loop term in [atom.a, atom.b]:
-            if term.kind == 4: dependencies.push(term.value)
+            if term.kind == 4 or term.kind == 7 or term.kind == 8: dependencies.push(term.value)
         # (a length never reaches 2^63, so against a length `uint64.max` compares as the
         # largest int64: `length <=? uint64.max` holds for every array)
         if tr_types[0][base].kind == .array or tr_types[0][base].kind == .str_:
@@ -84,10 +85,18 @@ tr_make = (base0: int, predicate0: int) -> int:
     tr_inference[0].host[0].mk_type(TypeInfo(kind = .refined, elem = i32(base), st = i32(predicate)), dependencies)
 
 
-tr_limit = (term: RefTerm) -> RefTerm:
-    if term.kind != 4: return term
+tr_limit = (term: RefTerm, position: int = -1) -> RefTerm:
+    if term.kind != 4 and term.kind != 7 and term.kind != 8: return term
     t = tu_prune(term.value)
     if tu_has_var(t): return term
+    if term.kind == 7 or term.kind == 8:
+        if not tr_is_int(tr_representation(t)): tr_host[0].fatal(position, "a length or refinement type parameter needs one integer argument")
+        known, bounds = ref_type_intervals(tr_types[0], tr_predicates[0], t, -1)
+        if not known or bounds.len() != 2 or bounds[0] != bounds[1]: tr_host[0].fatal(position, "a length or refinement type parameter needs one integer argument")
+        value = bounds[0] + term.offset
+        if term.offset > 0 and value < bounds[0] or term.offset < 0 and value > bounds[0]: tr_host[0].fatal(position, "integer type parameter offset is out of range")
+        if term.kind == 8 and (value < 1 or value > (1 << 28)): tr_host[0].fatal(position, "a fixed-size array length must be between 1 and 268435456")
+        return RefTerm(1, value)
     if not tr_is_int(t): tr_host[0].fatal(-1, "refinement type limit requires an integer type")
     if t == tr_u64[0]: return RefTerm(1, (if term.unsigned: -1 else: 0), term.unsigned)
     domain = tr_host[0].domain(t, .missing, 0)

@@ -81,8 +81,8 @@ ts_ref_subst = (predicate: int, args: int[], zonking: bool = false) -> int:
     atoms: RefAtom[]
     loop original in ts_refinements[0].predicates[0][predicate]:
         atom = original
-        if atom.a.kind == 4: atom.a.value = if zonking: tu_zonk(atom.a.value) else: ts_subst(atom.a.value, args)
-        if atom.b.kind == 4: atom.b.value = if zonking: tu_zonk(atom.b.value) else: ts_subst(atom.b.value, args)
+        if atom.a.kind == 4 or atom.a.kind == 7 or atom.a.kind == 8: atom.a.value = if zonking: tu_zonk(atom.a.value) else: ts_subst(atom.a.value, args)
+        if atom.b.kind == 4 or atom.b.kind == 7 or atom.b.kind == 8: atom.b.value = if zonking: tu_zonk(atom.b.value) else: ts_subst(atom.b.value, args)
         atoms.push(atom)
     result = ref_atoms_intern(ts_refinements[0].predicates[0], atoms)
     ts_refinements[0].copy_span(predicate, result)

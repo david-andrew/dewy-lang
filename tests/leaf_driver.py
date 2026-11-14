@@ -63,6 +63,17 @@ def build_pair(compiler, release, driver, extra_stems=(), doubles=None, jo_doubl
             'literal_snapshot_context = (block: int, expected: int): return\n'
             'literal_snapshot_argument = (block: int) -> int: 0\n'
             'literal_sequence_context = (block: int, expected: int): return\n')
+    # General value-parameter behavior is covered by whole-compiler twins.
+    # Isolated resolver drivers have no integer-bound type symbols.
+    if 'type_value_arguments' not in stems and 'main.jo' not in jo_doubles:
+        jo_doubles.setdefault('type_value_arguments.dewy',
+            'parameterized_array_type=(_node:int64 _element:int64):>int64=>0\n'
+            'integer_parameter_literal=(_node:int64):>int64=>0\n'
+            'integer_parameter_type=(_node:int64):>int64=>0\n')
+        jo_doubles.setdefault('type_value_arguments.jo',
+            'parameterized_array_type = (node: int, element: int) -> int: 0\n'
+            'integer_parameter_literal = (node: int) -> int: 0\n'
+            'integer_parameter_type = (node: int) -> int: 0\n')
     sources = tuple((f'{stem}.{extension}', module_text(ROOT / f'compiler/{stem}.{extension}'))
                     for stem in stems if stem not in doubles for extension in ('dewy', 'jo'))
     variants = tuple((stem, (texts['dewy'], texts['jo'])) for stem, texts in doubles.items())

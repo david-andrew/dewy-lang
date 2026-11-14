@@ -78,7 +78,7 @@ main = ():
 
 def compare_twins(compiler, tmp_path, release, driver, status=0):
     outputs = []
-    stems = ('checker_types', 'checker_tokens', 'refinement_types', 'refine_predicates', 'refine_queries', 'type_queries', 'type_intern', 'type_inference', 'type_constructors', 'type_refinement')
+    stems = ('checker_types', 'checker_tokens', 'refinement_types', 'refine_predicates', 'refine_queries', 'type_queries', 'type_intern', 'type_inference', 'type_constructors', 'intervals', 'refine_intervals', 'type_refinement')
     for extension in ('dewy', 'jo'):
         directory = tmp_path / extension
         directory.mkdir()

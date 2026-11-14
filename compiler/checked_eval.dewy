@@ -707,6 +707,9 @@ cx_convert=(e:CWord v:CWord):>CWord=>$unsafe {
         return cx_int(t  word)
     }
     if cv =? 'int_' {
+        # Exact intermediates already use this representation. A promotion
+        # back to mathematical int must retain its BigInt payload.
+        if t =? cx_T_MATH_INT[0] and x.type =? cx_T_MATH_INT[0] {return v}
         if t =? cx_T_MATH_INT[0] and cx_is_int(x.type) and not cx_types[0].ptr[x.type].sign and x.i <? 0 {return cx_math_unpack(cx_math_runtime("__mi_unsigned"  [v]  e))}
         if x.type =? cx_T_MATH_INT[0] and x.items.length >? 0 {
             let checked=cx_math_runtime((if cx_types[0].ptr[t].sign {"__mi_signed"} else {"__mi_to_unsigned"})  [cx_math_rep(v)]  e)

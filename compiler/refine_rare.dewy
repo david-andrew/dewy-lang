@@ -36,6 +36,7 @@ from p"string_domains.jo" import (domain_literals)
 from p"string_domains.jo" import (string_domain_conversion_stops string_domain_proofs string_domains string_set_obligations)
 from p"type_ops.dewy" import (dt mk_array)
 from p"type_refinement.dewy" import (tr_limit)
+from p"type_value_arguments.dewy" import (integer_parameter_literal integer_parameter_type)
 from p"types.jo" import (T_I16 T_I32 T_I8 T_INT T_MATH_INT T_STR T_U16 T_U32 T_U64 T_U8 T_VOID fields has_var is_int prune struct_targ structs tkind type_eq types)
 from p"util.jo" import (files name_of names pos_file pos_off)
 from p"diagnostic_exit.dewy" import (fatal)
@@ -104,6 +105,12 @@ ref_resolve_value=(n:int64):>RefTerm=>$unsafe {
     let name=RefineRareWord(nodes.ptr[n].name)
     if ref_holder_name not=? 0 and name =? ref_holder_name {return RefTerm(6)}
     let sym=lookup(name)
+    if sym not=? 0 and syms.ptr[sym].kind =? 'type_' {
+        let literal=integer_parameter_literal(n)
+        if literal not=? 0 {return RefTerm(1 nodes.ptr[literal].ival)}
+        let parameter=integer_parameter_type(n)
+        if parameter not=? 0 {return RefTerm(7 parameter)}
+    }
     # (a module const, `const N = NAMES.length` too: its value while compiling)
     if sym not=? 0 and (syms.ptr[sym].kind =? 'const_' or syms.ptr[sym].kind =? 'global' and readonly_global(RefineRareWord(syms.ptr[sym].ref)) and dewy_at(nodes.ptr[n].pos)) {
         let value=clone(n)

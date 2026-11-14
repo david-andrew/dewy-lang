@@ -20,6 +20,7 @@ from p"effect_contracts.dewy" import effect_argument
 from p"error_ops.dewy" import (nominal_family)
 from p"expr.jo" import (decimal_type word_rational_type dewy_record_schema bare_generic_set)
 from p"type_member_checks.dewy" import (type_meet)
+from p"type_value_arguments.dewy" import parameterized_array_type
 # Demand-only type syntax recursion. No arena elements survive semantic calls.
 # Work follows visited syntax and requested semantic services; record binder sorting
 # retains O(F²), with O(F) field/name storage. Scope state is restored individually.
@@ -154,7 +155,12 @@ ct_resolve_type=(tn:CTWord):>CTWord=>$unsafe {
             if ct_input[0].refine[0] and ct_input[0].binders[0].fields.length >? 0 {return ref_field_shape(tn shaped ct_input[0].binders[0].fields)}
             return shaped
         }
-        if ct_input[0].nodes[0].ptr[tn].b not=? 0 {return mk_fixed_checked(ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a))   fixed_size(CTWord(ct_input[0].nodes[0].ptr[tn].b))   ct_input[0].nodes[0].ptr[tn].pos)}
+        if ct_input[0].nodes[0].ptr[tn].b not=? 0 {
+            let element=ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a))
+            let deferred=parameterized_array_type(tn element)
+            if deferred not=? 0 {return deferred}
+            return mk_fixed_checked(element fixed_size(CTWord(ct_input[0].nodes[0].ptr[tn].b)) ct_input[0].nodes[0].ptr[tn].pos)
+        }
         if ct_input[0].nodes[0].ptr[tn].aux >=? 2 {return nd_of(ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a))   ct_input[0].nodes[0].ptr[tn].pos)}
         if ct_has_flag(tn   131072) {
             let et=ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a))

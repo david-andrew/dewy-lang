@@ -925,6 +925,7 @@ binding_const_init = (kind: SK, ref: int, pos: int) -> int:
 
 # the size of a fixed-size array type: a number or a compile-time constant
 fixed_size = (n: int) -> int:
+    if dewy_at(nodes[n].pos): return checked_array_length(n)
     v = 0
     if nodes[n].kind == .tname:
         e = mk(.ident, nodes[n].pos)
@@ -2793,7 +2794,9 @@ constant_binding = (e: int) -> int:
     if nodes[e].type != 0 and (nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global))):
         return binding_const_init(nodes[e].aux as SK, int(nodes[e].sym), nodes[e].pos)
     s = lookup(int(nodes[e].name))
-    if s != 0: return binding_const_init(syms[s].kind, int(syms[s].ref), nodes[e].pos)
+    if s != 0:
+        if syms[s].kind == .type_: return integer_parameter_literal(e)
+        return binding_const_init(syms[s].kind, int(syms[s].ref), nodes[e].pos)
     0
 
 ceval = (e: int) -> CVal: constant_eval(nodes, names, files, constant_host, e)

@@ -1,11 +1,16 @@
 use 'ast.jo'
 use 'check.jo'
 use 'checker_expr.dewy'
+use 'checks_thin_expr.dewy'
 use 'comptime.jo'
 use 'comptime_ops.dewy'
 use 'expr.jo'
 use 'refine.jo'
+use 'refine_resolve.dewy'
 use 'refinement_types.dewy'
+use 'host_binds.jo'
+use 'type_constructors.dewy'
+use 'util.jo'
 use 'types.jo'
 use 'diagnostic_exit.dewy'
 
@@ -33,3 +38,59 @@ named_integer_type = (tn: int, s: int) -> int:
         RefAtom(.le, RefTerm(), RefTerm(1, v.i))
     ]))
 
+checked_array_length = (n: int) -> int:
+    value = clone(n)
+    if nodes[value].kind == .tname:
+        nodes[value].kind = .ident
+        if nodes[value].sval != 0:
+            base = mk(.ident, nodes[value].pos)
+            nodes[base].name = nodes[value].sval
+            nodes[value].kind = .field
+            nodes[value].a = i32(base)
+    check_expr(value, T_MATH_INT)
+    checked = last_checked
+    finalize_literal(checked)
+    t = representation_type(ntype(checked))
+    if not is_int(t): fatal(nodes[n].pos, "an array length must be a compile-time integer")
+    result = ct_run(checked)
+    v = ct_values[result]
+    if t == T_MATH_INT and v.items.len() > 0 or not types[t].sign and v.i < 0 or v.i > (1 << 28):
+        fatal(nodes[n].pos, "fixed-size array too large (use array<T> for big arrays)")
+    if v.i < 1: fatal(nodes[n].pos, "the size of a fixed-size array must be at least 1 (found {v.i})")
+    v.i
+
+# Singleton integer parameters also read as constants in type annotations.
+integer_parameter_literal = (n: int) -> int:
+    if nodes[n].kind != .ident: return 0
+    s = lookup(int(nodes[n].name))
+    if s == 0 or syms[s].kind != .type_: return 0
+    t = int(syms[s].ref)
+    if tkind(t) != .refined: return 0
+    known, bounds = int_intervals(t)
+    if not known or bounds.len() != 2 or bounds[0] != bounds[1]: return 0
+    literal = mk(.int_lit, nodes[n].pos)
+    nodes[literal].ival = bounds[0]
+    literal
+
+# RefTerm 7 defers an integer value; 8 also holds the fixed-length size bound.
+integer_parameter_type = (n: int) -> int:
+    if nodes[n].kind != .ident: return 0
+    s = lookup(int(nodes[n].name))
+    if s == 0 or syms[s].kind != .type_: return 0
+    t = int(syms[s].ref)
+    if tkind(t) == .param: return t
+    0
+length_has_parameter = (n: int) -> bool:
+    if integer_parameter_type(n) != 0: return true
+    k = nodes[n].kind
+    if k == .binary: return length_has_parameter(int(nodes[n].a)) or length_has_parameter(int(nodes[n].b))
+    false
+parameterized_array_type = (tn: int, element: int) -> int:
+    length = int(nodes[tn].b)
+    if not length_has_parameter(length): return 0
+    term = ref_resolve_term(nodes, types, names, refine_bindings, ref_resolve_host, length, 0)
+    if term.kind != 7: fatal(nodes[length].pos, "an array length must name a compile-time integer or integer type parameter")
+    term.kind = 8 # integer parameter, additionally checked as a fixed-array length
+    predicate = ref_intern([RefAtom(.eq, RefTerm(path=[-1]), term)])
+    if not ref_spans.has(predicate): ref_spans[predicate] = nodes[tn].pos
+    mk_refined(tb_mk_array(element), predicate)

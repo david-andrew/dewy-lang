@@ -91,7 +91,7 @@ ref_resolve_term=(@nodes:array<Node> @types:array<TypeInfo> @names:array<string>
             if limit.found {return limit.term}
         }
         let term=ref_resolve_term(@nodes @types @names @bindings @host base binder)
-        if term.kind =? 1 or term.kind =? 4 or term.offset not=? 0 {host.fatal(nodes[n].pos "refinement projection requires a value")}
+        if term.kind =? 1 or term.kind =? 4 or term.kind =? 7 or term.offset not=? 0 {host.fatal(nodes[n].pos "refinement projection requires a value")}
         term.path.push(if names[int64(nodes[n].name)] =? "length" -1 else int64(nodes[n].name))
         return term
     }

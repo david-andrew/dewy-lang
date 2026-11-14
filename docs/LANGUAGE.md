@@ -2373,6 +2373,26 @@ values select the same specialization, regardless of the constant's integer
 storage type. Integer arguments currently fit `int64`; a larger constant is an
 error, and a run-time binding cannot be a type argument.
 
+Integer parameters also work inside array lengths and shape contracts:
+
+```dewy
+Buffer:type = <T N>[values:array<T length=N>]
+first = <N>(values:array<int64 length=N>):>int64 => values[0]
+let buffer = Buffer<int64 3>[[4 5 6]]
+printl(first<3>(buffer.values))
+```
+
+A record's fields, aliases, function parameters and results can use the bound
+integer. Lengths and bounds are checked after specialization, so a mismatched
+array is a compile error without runtime checks. An integer parameter also
+works in a scalar refinement, such as `int64<(<? N)>`, and in shaped lengths
+`length=[R C]`. A constant offset (`length=N + 1`) is supported. Fixed lengths
+keep their ordinary positive-size limits. Their arithmetic stays exact through
+intermediates outside `int64`; a noninteger length is an error. Supply the
+integer argument explicitly when only a length or refinement mentions it; a
+record argument such as
+`Buffer<int64 3>` can supply it through ordinary type inference.
+
 A type parameter can name a default for a use that leaves it out: with
 `Box:type = <T=int64>[v:T]`, a bare `Box` is `Box<int64>`. A library type can offer a choice by
 name: `Instant<width=64>` is the type its module declares as `Instant_width_64`, so

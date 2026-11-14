@@ -1,13 +1,18 @@
 $runtime_checks
 
-from p"ast.jo" import (mk nodes)
+from p"ast.jo" import (clone mk nodes)
 from p"check.jo" import (binding_const_init syms)
-from p"checker_expr.dewy" import check_expr
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checks_thin_expr.dewy" import int_intervals
 from p"comptime.jo" import ct_values
 from p"comptime_ops.dewy" import ct_run
-from p"expr.jo" import (last_checked ntype)
-from p"refine.jo" import (mk_refined ref_intern representation_type)
+from p"expr.jo" import (finalize_literal last_checked ntype)
+from p"refine.jo" import (mk_refined ref_intern ref_spans refine_bindings representation_type)
+from p"refine_resolve.dewy" import ref_resolve_term
 from p"refinement_types.dewy" import (RefAtom RefTerm)
+from p"host_binds.jo" import ref_resolve_host
+from p"type_constructors.dewy" import tb_mk_array
+from p"util.jo" import names
 from p"types.jo" import (T_INT T_MATH_INT is_int tkind types)
 from p"diagnostic_exit.dewy" import fatal
 
@@ -39,4 +44,76 @@ named_integer_type=(tn:ValueArgWord s:ValueArgWord):>int64=>$unsafe {
         RefAtom('le' RefTerm(1 v.i) RefTerm())
         RefAtom('le' RefTerm() RefTerm(1 v.i))
     ]))
+}
+# A fixed extent is an integer value, evaluated exactly just like ordinary
+# Dewy code. Check a copy: a record declaration's length syntax is reused by
+# every instance, and must not retain the first instance's bound integer.
+checked_array_length=(n:ValueArgWord):>int64=>$unsafe {
+    let value=clone(n)
+    if nodes.ptr[value].kind =? 'tname' {
+        nodes.ptr[value].kind='ident'
+        if nodes.ptr[value].sval not=? 0 {
+            let base=mk('ident' nodes.ptr[value].pos)
+            nodes.ptr[base].name=nodes.ptr[value].sval
+            nodes.ptr[value].kind='field'
+            nodes.ptr[value].a=int32(base)
+        }
+    }
+    check_expr(value T_MATH_INT);
+    let checked=last_checked
+    finalize_literal(checked);
+    let t=representation_type(ntype(checked))
+    if not is_int(t) {fatal(nodes.ptr[n].pos "an array length must be a compile-time integer")}
+    let result=ct_run(checked)
+    let v=ct_values[result]
+    if (t =? T_MATH_INT and v.items.length >? 0) or (not types.ptr[t].sign and v.i <? 0) or v.i >? (1 << 28) {
+        fatal(nodes.ptr[n].pos "fixed-size array too large (use array<T> for big arrays)")
+    }
+    if v.i <? 1 {fatal(nodes.ptr[n].pos "the size of a fixed-size array must be at least 1 (found {v.i})")}
+    v.i
+}
+# Type parameters are bound as type symbols. A singleton integer binding is
+# also a constant in requested length/refinement syntax, including field scopes
+# which have no function instance. Ordinary type bindings remain types.
+# O(1) indexed lookup plus the existing bounded interval query.
+integer_parameter_literal=(n:ValueArgWord):>int64=>$unsafe {
+    if nodes.ptr[n].kind not=? 'ident' {return 0}
+    let s=lookup(ValueArgWord(nodes.ptr[n].name))
+    if s =? 0 or syms.ptr[s].kind not=? 'type_' {return 0}
+    let t=ValueArgWord(syms.ptr[s].ref)
+    if tkind(t) not=? 'refined' {return 0}
+    let [known bounds]=int_intervals(t)
+    if not known or bounds.length not=? 2 or bounds[0] not=? bounds[1] {return 0}
+    let literal=mk('int_lit' nodes.ptr[n].pos)
+    nodes.ptr[literal].ival=bounds[0]
+    literal
+}
+# Only a requested length expression is visited, O(its syntax), stopping at
+# the first unresolved integer parameter. Specialization substitutes the
+# existing refinement's indexed type dependency; no whole-program analysis.
+# RefTerm 7 is a deferred integer value; 8 additionally holds the fixed-length
+# size obligation. Both normalize to literals before facts or lowering run.
+integer_parameter_type=(n:ValueArgWord):>int64=>$unsafe {
+    if nodes.ptr[n].kind not=? 'ident' {return 0}
+    let s=lookup(ValueArgWord(nodes.ptr[n].name))
+    if s =? 0 or syms.ptr[s].kind not=? 'type_' {return 0}
+    let t=ValueArgWord(syms.ptr[s].ref)
+    if tkind(t) =? 'param' {return t}
+    0
+}
+length_has_parameter=(n:ValueArgWord):>bool=>$unsafe {
+    if integer_parameter_type(n) not=? 0 {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'binary' {return length_has_parameter(ValueArgWord(nodes.ptr[n].a)) or length_has_parameter(ValueArgWord(nodes.ptr[n].b))}
+    false
+}
+parameterized_array_type=(tn:ValueArgWord element:ValueArgWord):>int64=>$unsafe {
+    let length=ValueArgWord(nodes.ptr[tn].b)
+    if not length_has_parameter(length) {return 0}
+    let term=ref_resolve_term(@nodes @types @names @refine_bindings @ref_resolve_host length 0)
+    if term.kind not=? 7 {fatal(nodes.ptr[length].pos "an array length must name a compile-time integer or integer type parameter")}
+    term.kind=8 # integer parameter, additionally checked as a fixed-array length
+    let predicate=ref_intern([RefAtom('eq' RefTerm(path=[-1]) term)])
+    if not ref_spans.has(predicate) {ref_spans[predicate]=nodes.ptr[tn].pos}
+    mk_refined(tb_mk_array(element) predicate)
 }

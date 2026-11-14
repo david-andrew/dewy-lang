@@ -573,6 +573,8 @@ cx_convert = (e: int, v: int) -> int:
             else if (cx_types[0][t].sign and cx_types[0][x.type].sign and word > hi) or ((not cx_types[0][t].sign or not cx_types[0][x.type].sign) and u64(word) > u64(hi)): word = hi
         return cx_int(t, word)
     if cv == .int_:
+        # Identity promotion preserves an exact intermediate's BigInt payload.
+        if t == cx_T_MATH_INT[0] and x.type == cx_T_MATH_INT[0]: return v
         if t == cx_T_MATH_INT[0] and cx_is_int(x.type) and not cx_types[0][x.type].sign and x.i < 0: return cx_math_unpack(cx_math_runtime("__mi_unsigned", [v], e))
         if x.type == cx_T_MATH_INT[0] and x.items.len() > 0:
             checked = cx_math_runtime((if cx_types[0][t].sign: "__mi_signed" else: "__mi_to_unsigned"), [cx_math_rep(v)], e)

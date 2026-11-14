@@ -21,6 +21,7 @@ use 'errors.jo'
 use 'error_ops.dewy'
 use 'expr.jo'
 use 'type_member_checks.dewy'
+use 'type_value_arguments.dewy'
 use 'effect_contracts.dewy'
 # Name result kinds: 0 resolved, 1 alias, 2 record/enum declaration,
 # 3 type with arguments, 4 secret, 5 rational. ref is a type or declaration ID.
@@ -119,9 +120,14 @@ ct_resolve_type = (tn: int) -> int:
         # (a shape, `array<T length=[m n]>`: dynamic, with dimensions checked where values enter)
         if ct_input[0].nodes[0][tn].ival == 1:
             et = ct_resolve_type(int(ct_input[0].nodes[0][tn].a))
-            if ct_input[0].nodes[0][tn].aux >= 2: return nd_of(et, ct_input[0].nodes[0][tn].pos)
-            return tb_mk_array(et)
-        if ct_input[0].nodes[0][tn].b != 0: return mk_fixed_checked(ct_resolve_type(int(ct_input[0].nodes[0][tn].a)), fixed_size(int(ct_input[0].nodes[0][tn].b)), ct_input[0].nodes[0][tn].pos)
+            shaped = if ct_input[0].nodes[0][tn].aux >= 2: nd_of(et, ct_input[0].nodes[0][tn].pos) else: tb_mk_array(et)
+            if ct_input[0].refine[0] and ct_input[0].binders[0].fields.len() > 0: return ref_field_shape(tn, shaped, ct_input[0].binders[0].fields)
+            return shaped
+        if ct_input[0].nodes[0][tn].b != 0:
+            element = ct_resolve_type(int(ct_input[0].nodes[0][tn].a))
+            deferred = parameterized_array_type(tn, element)
+            if deferred != 0: return deferred
+            return mk_fixed_checked(element, fixed_size(int(ct_input[0].nodes[0][tn].b)), ct_input[0].nodes[0][tn].pos)
         if ct_input[0].nodes[0][tn].aux >= 2: return nd_of(ct_resolve_type(int(ct_input[0].nodes[0][tn].a)), ct_input[0].nodes[0][tn].pos)
         if ct_has_flag(tn, 131072):
             et = ct_resolve_type(int(ct_input[0].nodes[0][tn].a))
