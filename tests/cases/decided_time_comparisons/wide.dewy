@@ -1,0 +1,11 @@
+above=(q:int*Time):>bool=>{let d:Duration=0s; d <? q}
+below=(q:rational*Time):>bool=>{let d:Duration=0s; q <? d}
+main=()=>{
+    let large=10^100
+    printl(above(large*s))
+    printl(below((-large)*s))
+    let d:Duration=1ns
+    printl"{d <? large*s} {large*s >? d} {d =? large*s} {large*s =? d}"
+    let q=(large+1)*1ns/3
+    printl"{d <? q} {q <? d} {d =? q}"
+}

@@ -1783,7 +1783,9 @@ If a later wall read fails, it retains the last sample and prints `? (stale)`.
 
 `Instant` counts nanoseconds on one continuous axis in 128 bits, so it reaches any
 date anyone needs, and `Duration` is the difference of two. `+` and `-` take durations
-and time quantities: `t + 90minute`, `d <? 5s`. A constant time is a `Duration` where one is wanted, so `let total:Duration = 0s`, `totals[k] = 0s` and
+and time quantities: `t + 90minute`, `d <? 5s`. Comparing a duration with an exact
+time quantity never rounds or narrows that quantity: `d <? 1ns/3` with `d:Duration = 0s`
+and comparisons beyond the stored 128-bit range remain exact. A constant time is a `Duration` where one is wanted, so `let total:Duration = 0s`, `totals[k] = 0s` and
 `f(90s)` work, and `totals.get(k) ?? 0s`; one known only at run time goes through `convert<Duration>`. `d/1s` is an exact `rational`, `d/3`
 an exact quantity, `d//7` a `Duration`; a divisor known only at run time may be zero, so
 that result also has `OutOfRange`, and a constant zero is a compile error. A constant

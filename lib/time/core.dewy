@@ -142,10 +142,10 @@ __add__=(a:Duration q:int*Time):>Duration=>a+_of_int(q)
 __add__=(q:int*Time a:Duration):>Duration=>_of_int(q)+a
 __sub__=(a:Duration q:int*Time):>Duration=>a-_of_int(q)
 __sub__=(q:int*Time a:Duration):>Duration=>_of_int(q)-a
-__lt__=(a:Duration q:int*Time):>bool=>a<?_of_int(q)
-__lt__=(q:int*Time a:Duration):>bool=>_of_int(q)<?a
-__eq__=(a:Duration q:int*Time):>bool=>a=?_of_int(q)
-__eq__=(q:int*Time a:Duration):>bool=>a=?_of_int(q)
+__lt__=(a:Duration q:int*Time):>bool=>ns_count(a) <? (q transmute int)*_NS
+__lt__=(q:int*Time a:Duration):>bool=>(q transmute int)*_NS <? ns_count(a)
+__eq__=(a:Duration q:int*Time):>bool=>ns_count(a) =? (q transmute int)*_NS
+__eq__=(q:int*Time a:Duration):>bool=>a =? q
 $check_constant _grid_error(q) "off the nanosecond grid"
 __add__=(a:Duration q:rational*Time):>Duration|OffGrid=>a+(_of_rational(q) or_throw)
 $check_constant _grid_error(q) "off the nanosecond grid"
@@ -154,21 +154,21 @@ $check_constant _grid_error(q) "off the nanosecond grid"
 __sub__=(a:Duration q:rational*Time):>Duration|OffGrid=>a-(_of_rational(q) or_throw)
 $check_constant _grid_error(q) "off the nanosecond grid"
 __sub__=(q:rational*Time a:Duration):>Duration|OffGrid=>(_of_rational(q) or_throw)-a
-# (comparing never needs the grid: both sides are exact)
-# (comparing a quantity on the grid is comparing durations; off it, exact fractions)
-_less_than_time=(a:Duration q:rational*Time):>bool=>match _of_rational(q) {
-    d:Duration=>a <? d
-    <OffGrid>=>rational(ns_count(a) 1) <? _seconds(q)*rational(1000000000)
+# Comparison never stores the quantity in a Duration. Cross multiplication is exact
+# even off the nanosecond grid or outside 128 bits; rational denominators are positive.
+_less_than_time=(a:Duration q:rational*Time):>bool=>{
+    let exact=_seconds(q)
+    ns_count(a)*exact.denominator <? exact.numerator*_NS
 }
-_time_less_than=(q:rational*Time a:Duration):>bool=>match _of_rational(q) {
-    d:Duration=>d <? a
-    <OffGrid>=>_seconds(q)*rational(1000000000) <? rational(ns_count(a) 1)
+_time_less_than=(q:rational*Time a:Duration):>bool=>{
+    let exact=_seconds(q)
+    exact.numerator*_NS <? ns_count(a)*exact.denominator
 }
 __lt__=(a:Duration q:rational*Time):>bool=>_less_than_time(a q)
 __lt__=(q:rational*Time a:Duration):>bool=>_time_less_than(q a)
-__eq__=(a:Duration q:rational*Time):>bool=>match _of_rational(q) {
-    d:Duration=>a =? d
-    <OffGrid>=>false
+__eq__=(a:Duration q:rational*Time):>bool=>{
+    let exact=_seconds(q)
+    ns_count(a)*exact.denominator =? exact.numerator*_NS
 }
 __eq__=(q:rational*Time a:Duration):>bool=>a =? q
 __mul__=(a:Duration k:int):>Duration=>_duration(ns_count(a)*k)

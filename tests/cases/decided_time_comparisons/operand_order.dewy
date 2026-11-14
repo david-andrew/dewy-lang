@@ -1,0 +1,10 @@
+let seen:string=""
+duration=():>Duration=>{seen="{seen}d"; 1s}
+quantity=():>(int*Time)=>{seen="{seen}q"; (10^100)*s}
+main=()=>{
+    printl(duration() <? quantity())
+    printl(seen)
+    seen=""
+    printl(quantity() >? duration())
+    printl(seen)
+}

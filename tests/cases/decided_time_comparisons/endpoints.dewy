@@ -1,0 +1,11 @@
+import p"@lib/time/core.dewy" as core
+main=()=>{
+    let high=(1 << 127)-1
+    let low=0-(1 << 127)
+    let hi=core.duration_of(high)
+    let lo=core.duration_of(low)
+    printl"{hi =? high*1ns} {lo =? low*1ns}"
+    printl"{hi <? (high+1)*1ns} {(low-1)*1ns <? lo}"
+    printl"{hi =? (high+1)*1ns} {lo =? (low-1)*1ns}"
+    printl"{hi <? high*1ns+1ns/3} {low*1ns-1ns/3 <? lo}"
+}
