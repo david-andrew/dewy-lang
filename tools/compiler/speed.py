@@ -547,7 +547,7 @@ def source_row(counter: Counter, candidate: Toolchain, base: Toolchain, counts: 
         notes.append('the candidate cannot build the base\'s compiler source; no source cost row')
         return
     new = staged_count(ROOT)
-    change = round(delta(old, new), 2) + 0.0
+    change = delta(old, new)
     over = change > limit
     if over:
         failures.append(('base', f'{name} (candidate compiler, base -> this source)', change))
@@ -1098,7 +1098,25 @@ def main(argv: list[str], current: Path) -> int:
     cli.add_argument('--no-pin', action='store_true', help='--wall: do not pin to one CPU per core')
     cli.add_argument('--cycles', action='store_true', help='report pinned interleaved hardware cycles and instructions')
     cli.add_argument('--cpu', type=int, help='--cycles: required allowed logical CPU; keep its SMT sibling idle')
+    cli.add_argument('--equivalent', action='store_true',
+                     help='compare current implementation leaves with their real Jo twins')
+    cli.add_argument('--equivalent-since', metavar='REV',
+                     help='compare current leaves added since REV with their current Jo twins')
+    cli.add_argument('--equivalent-leaves', action='append', default=[], metavar='STEMS',
+                     help='also compare these comma-separated compiler leaves (repeatable)')
+    cli.add_argument('--equivalent-only', action='store_true',
+                     help='run only the equivalent-source control; no historical compiler build')
     args = cli.parse_args(argv)
+    from tools.compiler import speed_equivalent
+    equivalent_leaves = ()
+    if args.equivalent or args.equivalent_only or args.equivalent_since or args.equivalent_leaves:
+        if args.cycles or args.wall or args.critical or args.corpus:
+            cli.error('equivalent-source control uses whole-build instruction counts, not cycles/wall/critical/corpus')
+        try:
+            equivalent_leaves = speed_equivalent.selected(ROOT, args.equivalent_since,
+                                                          args.equivalent_leaves, git)
+        except ValueError as error:
+            cli.error(str(error))
     if args.cycles:
         if args.cpu is None or not hasattr(os, 'sched_getaffinity') or args.cpu not in os.sched_getaffinity(0):
             cli.error('--cycles requires --cpu naming an allowed Linux CPU')
@@ -1131,6 +1149,14 @@ def main(argv: list[str], current: Path) -> int:
         lock_exclusive(lock)
         counter = Counter(args.counter)
         candidate = Toolchain('candidate', candidate_compiler(current), ROOT / 'lib')
+        equivalent = None
+        if equivalent_leaves:
+            equivalent = speed_equivalent.measure(
+                ROOT, CACHE / 'panel' / 'equivalent-source', equivalent_leaves,
+                lambda source: measure(counter, candidate, source, [], []))
+            speed_equivalent.report(equivalent)
+        if args.equivalent_only:
+            return 0 if equivalent.meets_target else 1
         references = {}
         for role, revision in (('base', args.base), ('checkpoint', args.checkpoint)):
             if revision is None:
@@ -1150,6 +1176,9 @@ def main(argv: list[str], current: Path) -> int:
               + f' -> {target}')
         notes: list[str] = []
         failures = []
+        if equivalent is not None and not equivalent.meets_target:
+            failures.append(('equivalent Jo source', 'equivalent source (target <=1.00x)',
+                             delta(equivalent.jo, equivalent.dewy)))
         counts = {}
         base_counts = {}
         fallbacks: list[Fallback] = []
@@ -1223,7 +1252,8 @@ def main(argv: list[str], current: Path) -> int:
         base_failures, throughput_failures = [], []
     remaining = base_failures + other_failures
     for role, name, change in remaining:
-        print(f'speed: {name} needs {change:+.2f}% instructions vs {role} (limit {args.limit}%)', file=sys.stderr)
+        limit = 0.0 if role == 'equivalent Jo source' else args.limit
+        print(f'speed: {name} needs {change:+.2f}% instructions vs {role} (limit {limit}%)', file=sys.stderr)
     for message in throughput_failures + hello_failures:
         print(f'speed: {message}', file=sys.stderr)
     for message in fallback_failures:
@@ -1238,7 +1268,7 @@ def main(argv: list[str], current: Path) -> int:
         print('speed: both compilers ran on this source, so the program\'s own growth is no compiler cost: add a line '
               '`speed: accept <reason naming the program>` to a commit message since then, or trim the source',
               file=sys.stderr)
-    if remaining or throughput_failures:
+    if any(role != 'equivalent Jo source' for role, _, _ in remaining) or throughput_failures:
         print('speed: add a line `speed: accept <reason>` to the commit message when the cost is intended',
               file=sys.stderr)
     return 1 if remaining or throughput_failures or hello_failures or fallback_failures or drift_failures else 0
