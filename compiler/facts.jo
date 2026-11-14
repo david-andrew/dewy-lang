@@ -107,6 +107,7 @@ use 'facts_row_queries.dewy'
 use 'facts_projection_queries.dewy'
 use 'facts_value_queries.dewy'
 use 'facts_index_writes.dewy'
+use 'facts_lengths.dewy'
 
 # One tombstone per invalidated route: the event that last replaced the
 # place and the value it replaced. Witnesses only; never evidence.
@@ -376,58 +377,8 @@ const FACT_TEXT_ID = -32
 const FACT_COMPONENT_FACTS = -64
 const FACT_ROW_ELEMENTS = 8
 
-# What held of every element of base holds of what a shrink left of them: its copy, hull and
-# bound, and a literal's inventory as a hull, positions being gone. O(inventory), only with a
-# self-length type about, whose shrink obligations are its one consumer.
-fact_shrunk_elements = (s: mut FactState, base: int, fresh: int):
-    if base == 0 or s.projections.len() + 3 >= FACT_CAP: return
-    loop selector in [FACT_ELEMENT_COPY, FACT_ELEMENT_BELOW]:
-        i = fact_projection_find(s, base, selector, false)
-        if i >= 0: fact_add_projection(s, FactProjection(fresh, selector, false, s.projections[i].value))
-    hull = fact_projection_find(s, base, FACT_ELEMENT_VALUE, false)
-    if hull >= 0:
-        fact_add_projection(s, FactProjection(fresh, FACT_ELEMENT_VALUE, false, s.projections[hull].value))
-        return
-    parts = fact_inventory(s, base)
-    if parts.len() == 0: return
-    whole = fact_bound(s, parts[0])
-    loop part in parts:
-        one = fact_bound(s, part)
-        whole = FactBound(min(whole.lo, one.lo), max(whole.hi, one.hi))
-    fact_add_projection(s, FactProjection(fresh, FACT_ELEMENT_VALUE, false, fact_new(s, whole)))
-
 fact_grown_roots: {int: bool} = {}
 fact_name_vals = 0
-
-# The array-length ceiling is the target's `addr` range (2^48 native, 2^32
-# WebAssembly: an array's positions are `addr` values), an axiom
-# `$no_assumed_bounds` turns off in its scope, decided by where the analyzed code is: a function whose body
-# is in such a scope or holds one uses only the signed storage limit; every other
-# function keeps the ceiling for its own proofs, whatever its callers or the other
-# modules set. Its summary, asked for by a strict function, is computed and cached
-# apart without the ceiling (fact_summary), so none reaches the strict scope through
-# a call; the exact domain decides by file (dir_assumed_bounds_file). Facts with no
-# owning function (retried requests without one) take the strict limit when any
-# scope sets it. O(1) per query, O(body) once per function in a file holding a
-# nested strict scope.
-fact_length_max = () -> int:
-    if dir_assumed_bounds_any and fact_length_strict(): return FACT_MAX
-    # (ref_addr_max: the same range `addr` is declared with)
-    if ptr_size == 4: return 4294967295
-    281474976710655
-
-# A heap's entry count after a push (delta 1) or a pop (-1) of the old count
-# `length`: exactly one more or one fewer, as a retained row pair and an exact
-# interval, as an array's insert keeps its length. O(1).
-fact_heap_length = (s: mut FactState, length: int, delta: int, n: int) -> int:
-    old = fact_bound(s, length)
-    size = if delta > 0: fact_new(s, FactBound(min(fact_length_max(), old.lo + 1), fact_length_max())) else: fact_new(s, FactBound(0, fact_length_max()))
-    if delta > 0 and old.hi < fact_length_max(): fact_set_bound(s, size, FactBound(old.lo + 1, old.hi + 1))
-    if delta < 0 and old.lo >= 0: fact_set_bound(s, size, FactBound(max(0, old.lo - 1), max(0, old.hi - 1)))
-    if old.lo != old.hi:
-        fact_difference(s, size, length, delta, n)
-        fact_difference(s, length, size, -delta, n)
-    size
 
 fact_length_owner = -1
 # (a callee's summary asked for by such a function: computed, and cached apart,
@@ -436,55 +387,6 @@ fact_length_forced = false
 fact_length_owner_strict = false
 fact_length_gen = -1
 fact_length_strict_fns: {int: bool} = {}
-
-fact_length_strict = () -> bool:
-    if fact_length_forced: return true
-    f = if fact_owner != 0: fact_owner else: fact_retry_owner
-    if f <= 0 or f >= fns.len(): return true
-    if fact_length_gen != dir_scopes_gen:
-        fact_length_gen = dir_scopes_gen
-        fact_length_strict_fns = {}
-        fact_length_owner = -1
-    if f == fact_length_owner: return fact_length_owner_strict
-    strict = false
-    if let known = fact_length_strict_fns.get(f): strict = known
-    else:
-        strict = fact_length_strict_body(int(fns[f].body))
-        fact_length_strict_fns[f] = strict
-    fact_length_owner = f
-    fact_length_owner_strict = strict
-    strict
-
-# (a body in a `$no_assumed_bounds` scope, or holding one: a scope of the
-# setting that starts inside the body's positions)
-fact_length_strict_body = (body: int) -> bool:
-    if body <= 0: return true
-    p = nodes[body].pos
-    if p <= 0: return true
-    if dir_value(dir_name_assumed_bounds, p) == 1: return true
-    file = p >> 40
-    later = false
-    loop s in dir_scopes:
-        if s.setting == dir_name_assumed_bounds and s.value == 1 and s.start > p and s.start >> 40 == file: later = true
-    if not later: return false
-    end = fact_max_pos(body)
-    loop s in dir_scopes:
-        if s.setting == dir_name_assumed_bounds and s.value == 1 and s.start > p and s.start <= end: return true
-    false
-
-# (the last position in n's tree; a node the walk does not know, or a lambda,
-# gives its file's end, so a nested scope is never missed)
-fact_max_pos = (n: int) -> int:
-    if n <= 0: return 0
-    out = nodes[n].pos
-    mask = isolation_children(nodes[n].kind)
-    if mask < 0 or nodes[n].kind == .lambda: return (out >> 40 << 40) | 0xFFFFFFFFFF
-    if mask & 1 != 0: out = max(out, fact_max_pos(int(nodes[n].a)))
-    if mask & 2 != 0: out = max(out, fact_max_pos(int(nodes[n].b)))
-    if mask & 4 != 0: out = max(out, fact_max_pos(int(nodes[n].c)))
-    if mask & 16 != 0:
-        loop i in [0..nkids(n)): out = max(out, fact_max_pos(kid(n, i)))
-    out
 
 # A record key type that equals itself and hashes as it did (so a key a snapshot of
 # d.keys holds is found again in d): no hash of its own, fields that are such keys
@@ -974,17 +876,6 @@ struct FactCallWrites:
 # Batched transfer is O(write-route lengths + tracked ancestor projections),
 # within the existing state cap. Map/pool internals widen to their root.
 fact_call_field_types: {(int, int): int} = {}
-
-# (cap: incident rows per term; a constant offset's exact rows get twice
-# the usual eight, so `b[p+1] … b[p+4]` after one guard all keep theirs)
-fact_difference = (s: mut FactState, a: int, b: int, limit: int, at: int = 0, cap: int = 8):
-    if a == 0 or b == 0 or a == b: return
-    i = fact_row_find(s, a, b)
-    if i >= 0:
-        if limit < s.differences[i].limit: s.differences[i] = FactDifference(a, b, limit, at)
-        return
-    if s.differences.len() < 256 and max(0, fact_incident(s, a)) < cap and max(0, fact_incident(s, b)) < cap:
-        fact_add_difference(s, FactDifference(a, b, limit, at))
 
 # Bounded single-source relaxation, never an all-pairs closure. Exhaustion
 # simply declines additional inference; every discovered path is still valid.

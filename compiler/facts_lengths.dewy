@@ -1,0 +1,136 @@
+$runtime_checks
+
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (fns)
+from p"directives.jo" import (dir_assumed_bounds_any dir_name_assumed_bounds dir_scopes dir_scopes_gen dir_value)
+from p"facts.jo" import (FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_COPY FACT_ELEMENT_VALUE FactDifference FactProjection FactState fact_length_forced fact_length_gen fact_length_owner fact_length_owner_strict fact_length_strict_fns fact_owner fact_retry_owner)
+from p"facts_elements.dewy" import (fact_inventory)
+from p"facts_index_writes.dewy" import (fact_add_difference fact_add_projection fact_new fact_set_bound)
+from p"facts_projection_queries.dewy" import (fact_projection_find)
+from p"facts_row_queries.dewy" import (fact_incident fact_row_find)
+from p"facts_value_queries.dewy" import (fact_bound)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"refinement_types.dewy" import (FACT_MAX FactBound)
+from p"types.jo" import (ptr_size)
+
+LengthWord:type=int64<overflow='wrap'>
+
+# (cap: incident rows per term; a constant offset's exact rows get twice
+# the usual eight, so `b[p+1] … b[p+4]` after one guard all keep theirs)
+fact_difference=(@s:FactState a:LengthWord b:LengthWord limit:LengthWord at:LengthWord=0 cap:LengthWord=8):>void=>{
+    if a =? 0 or b =? 0 or a =? b {return}
+    let i:LengthWord=fact_row_find(s a b)
+    if i >=? 0 {
+        if limit <? s.differences[i].limit {s.differences[i]=FactDifference(a b limit at)}
+        return
+    }
+    if s.differences.length <? 256 and max(0 fact_incident(s a)) <? cap and max(0 fact_incident(s b)) <? cap {fact_add_difference(@s FactDifference(a b limit at))}
+}
+# What held of every element of base holds of what a shrink left of them: its copy, hull and
+# bound, and a literal's inventory as a hull, positions being gone. O(inventory), only with a
+# self-length type about, whose shrink obligations are its one consumer.
+fact_shrunk_elements=(@s:FactState base:LengthWord fresh:LengthWord):>void=>{
+    if base =? 0 or s.projections.length + 3 >=? FACT_CAP {return}
+    loop selector in [FACT_ELEMENT_COPY FACT_ELEMENT_BELOW] {
+        let i:LengthWord=fact_projection_find(s base selector false)
+        if i >=? 0 {fact_add_projection(@s FactProjection(fresh selector false s.projections[i].value))}
+    }
+    let hull:LengthWord=fact_projection_find(s base FACT_ELEMENT_VALUE false)
+    if hull >=? 0 {
+        fact_add_projection(@s FactProjection(fresh FACT_ELEMENT_VALUE false s.projections[hull].value))
+        return
+    }
+    let parts=fact_inventory(s base)
+    if parts.length =? 0 {return}
+    let whole=fact_bound(s parts[0])
+    loop part in parts {
+        let one=fact_bound(s part)
+        whole=FactBound(min(whole.lo one.lo) max(whole.hi one.hi))
+    }
+    fact_add_projection(@s FactProjection(fresh FACT_ELEMENT_VALUE false fact_new(@s whole)))
+}
+# The array-length ceiling is the target's `addr` range (2^48 native, 2^32
+# WebAssembly: an array's positions are `addr` values), an axiom
+# `$no_assumed_bounds` turns off in its scope, decided by where the analyzed code is: a function whose body
+# is in such a scope or holds one uses only the signed storage limit; every other
+# function keeps the ceiling for its own proofs, whatever its callers or the other
+# modules set. Its summary, asked for by a strict function, is computed and cached
+# apart without the ceiling (fact_summary), so none reaches the strict scope through
+# a call; the exact domain decides by file (dir_assumed_bounds_file). Facts with no
+# owning function (retried requests without one) take the strict limit when any
+# scope sets it. O(1) per query, O(body) once per function in a file holding a
+# nested strict scope.
+fact_length_max=():>int64=>{
+    if dir_assumed_bounds_any and fact_length_strict() {return FACT_MAX}
+    # (ref_addr_max: the same range `addr` is declared with)
+    if ptr_size =? 4 {return 4294967295}
+    281474976710655
+}
+# A heap's entry count after a push (delta 1) or a pop (-1) of the old count
+# `length`: exactly one more or one fewer, as a retained row pair and an exact
+# interval, as an array's insert keeps its length. O(1).
+fact_heap_length=(@s:FactState length:LengthWord delta:LengthWord n:LengthWord):>int64=>{
+    let old=fact_bound(s length)
+    let size:LengthWord=if delta >? 0 {fact_new(@s FactBound(min(fact_length_max() LengthWord(old.lo) + 1) fact_length_max()))} else {fact_new(@s FactBound(0 fact_length_max()))}
+    if delta >? 0 and old.hi <? fact_length_max() {fact_set_bound(@s size FactBound(LengthWord(old.lo) + 1 LengthWord(old.hi) + 1))}
+    if delta <? 0 and old.lo >=? 0 {fact_set_bound(@s size FactBound(max(0 LengthWord(old.lo) - 1) max(0 LengthWord(old.hi) - 1)))}
+    if old.lo not=? old.hi {
+        fact_difference(@s size length delta n)
+        fact_difference(@s length size -delta n)
+    }
+    size
+}
+fact_length_strict=():>bool=>$unsafe {
+    if fact_length_forced {return true}
+    let f:LengthWord=if fact_owner not=? 0 {fact_owner} else {fact_retry_owner}
+    if f <=? 0 or f >=? fns.length {return true}
+    if fact_length_gen not=? dir_scopes_gen {
+        fact_length_gen=dir_scopes_gen
+        fact_length_strict_fns=dict<int64 bool>()
+        fact_length_owner=-1
+    }
+    if f =? fact_length_owner {return fact_length_owner_strict}
+    let strict=false
+    let known=fact_length_strict_fns.get(f)
+    if known not=? none {strict=known} else {
+        strict=fact_length_strict_body(LengthWord(fns.ptr[f].body))
+        fact_length_strict_fns[f]=strict
+    }
+    fact_length_owner=f
+    fact_length_owner_strict=strict
+    strict
+}
+# (a body in a `$no_assumed_bounds` scope, or holding one: a scope of the
+# setting that starts inside the body's positions)
+fact_length_strict_body=(body:LengthWord):>bool=>$unsafe {
+    if body <=? 0 {return true}
+    let p:LengthWord=nodes.ptr[body].pos
+    if p <=? 0 {return true}
+    if dir_value(dir_name_assumed_bounds p) =? 1 {return true}
+    let file=p >> 40
+    let later=false
+    loop scope in dir_scopes {
+        if scope.setting =? dir_name_assumed_bounds and scope.value =? 1 and scope.start >? p and scope.start >> 40 =? file {later=true}
+    }
+    if not later {return false}
+    let end_=fact_max_pos(body)
+    loop scope in dir_scopes {
+        if scope.setting =? dir_name_assumed_bounds and scope.value =? 1 and scope.start >? p and scope.start <=? end_ {return true}
+    }
+    false
+}
+# (the last position in n's tree; a node the walk does not know, or a lambda,
+# gives its file's end, so a nested scope is never missed)
+fact_max_pos=(n:LengthWord):>int64=>$unsafe {
+    if n <=? 0 {return 0}
+    let out:LengthWord=nodes.ptr[n].pos
+    let mask=isolation_children(nodes.ptr[n].kind)
+    if mask <? 0 or nodes.ptr[n].kind =? 'lambda' {return (out >> 40 << 40) | 0xFFFFFFFFFF}
+    if mask & 1 not=? 0 {out=max(out fact_max_pos(LengthWord(nodes.ptr[n].a)))}
+    if mask & 2 not=? 0 {out=max(out fact_max_pos(LengthWord(nodes.ptr[n].b)))}
+    if mask & 4 not=? 0 {out=max(out fact_max_pos(LengthWord(nodes.ptr[n].c)))}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {out=max(out fact_max_pos(kid(n i)))}
+    }
+    out
+}
