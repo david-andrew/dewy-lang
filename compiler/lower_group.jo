@@ -138,9 +138,9 @@ gen_unscoped_settings = (mark: int):
         d = pending[i]
         if nodes[d].aux2 == i32(SETTING_SCOPE_CLEANUP):
             scope_defers[scope] = pending[..i)
-            if concurrency_runtime_needed: e_call0(rt("__task_shield_enter"), -1)
+            if concurrency.concurrency_runtime_needed: e_call0(rt("__task_shield_enter"), -1)
             gen_stmt(d)
-            if concurrency_runtime_needed: e_call0(rt("__task_shield_leave"), -1)
+            if concurrency.concurrency_runtime_needed: e_call0(rt("__task_shield_leave"), -1)
             pending.remove(i)
         i -= 1
     scope_defers[scope] = pending
