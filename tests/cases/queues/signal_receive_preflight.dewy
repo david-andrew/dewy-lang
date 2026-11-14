@@ -1,0 +1,16 @@
+# modes: native native-release
+# quick
+# A missed preflight is not position 2 in either an empty or a ready queue.
+import p"@lib/std/signals.dewy" as signals
+main = () => {
+    let empty = mpmc<string>(4)
+    let ready = mpmc<string>(4)
+    ready.send("kept") or_throw
+    match select(@empty.receive @ready.receive timeout=0s) {
+        value:string => printl(value)
+        _ => printl"missed value"
+    }
+    empty.send("later") or_throw
+    printl(empty.receive(timeout=0s) or_throw)
+    printl(ready.receive(timeout=0s) is? Timeout)
+}

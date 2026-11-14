@@ -1,0 +1,15 @@
+# modes: native native-release
+# quick
+# Importing signals enables selection preflight even without a listener. A
+# preflight must not fabricate a permit for position 2 or give that slot up.
+import p"@lib/std/signals.dewy" as signals
+main = () => {
+    let queue = mpmc<int64>(1)
+    loop i in [0..6) {
+        match select(@queue.reserve timeout=0s) {
+            permit:Reserved<int64> => permit.send(i)
+            _ => {printl"missed room" return}
+        }
+        printl(queue.receive(timeout=0s) or_throw)
+    }
+}

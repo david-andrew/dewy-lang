@@ -343,6 +343,11 @@ class Runner:
         if not cases:
             return outcomes
         code, stdout, stderr = self.execute(command, timeout=RUN_TIMEOUT * 6)
+        if code == 'timeout':
+            # No golden expects a timeout. Retrying its current case alone can
+            # hide a deadlock that requires the combined program's imports.
+            return outcomes + [Outcome(case, mode, False, None,
+                               'batch timed out:\n' + tail(stdout + stderr)) for case in cases]
         finished, started, stray = parse_batch(stdout)
         if stray:
             return outcomes + self.isolate(cases, mode, self.value_batch)
