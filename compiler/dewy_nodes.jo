@@ -88,61 +88,6 @@ dw_type_members: {int: {int: {int: int}}} = {}   # file -> type name -> its memb
 # (compiler/warn_if.jo), kept as the declaration's `warn_if` attribute (condition, message).
 dw_warn_if_pending: int[]
 
-# The declarations a module statement the direct grammar read makes (dewy_direct.jo's dn_statement):
-# positive IDs are declarations; negative IDs select module-only checker nodes.
-# Keep the statement head separately: a declaration's own position may name its binding.
-dw_top_declarations = (id: int, pos: int) -> int[]:
-    if id < 0 and dc_parser.reader.module_nodes[-1 - id].kind == .build_ and dc_parser.reader.module_nodes[-1 - id].aux != 0 and dc_parser.reader.module_nodes[-1 - id].aux != 5 and dc_parser.reader.module_nodes[-1 - id].aux != 6:
-        result = dc_parser.reader.module_nodes[-1 - id]
-        text = dw_module_text(id)
-        form = int(result.aux)
-        if form == 1:
-            if text == "proof":
-                if proof_pending: fatal(pos, "duplicate $proof")
-                proof_pending = true
-                proof_active = true
-                refine_active = true
-            else if text == "export": dw_export_at(pos, "")
-            else if text == "explicit_allocation_failure": oom_module(pos_file(pos), pos)
-        else if form == 2: dw_export_at(pos, name_of(int(nodes[int(result.a)].sval)))
-        else if form == 3:
-            names: str[]
-            loop entry in kids(int(result.a)): names.push(name_of(int(nodes[entry].sval)))
-            dw_supported_names(pos, names)
-        else if form == 4: dw_warn_if_pending.push(int(result.a))
-        return []
-    exported = dw_export_pos != 0
-    pending = proof_pending
-    soft = dw_warn_if_pending
-    dw_warn_if_pending = []
-    made = dw_top_declarations_inner(id)
-    if exported: dw_export_attach(made)
-    if soft.len() > 0:
-        if made.len() != 1 or nodes[made[0]].kind != .fn_: fatal(nodes[soft[0]].pos, "`$warn_if` goes on the line before the function declaration whose callers it warns")
-        dw_ffi_attach(made[0], soft)
-    if pending:
-        if made.len() != 1 or nodes[made[0]].kind != .fn_: fatal(pos, "$proof requires a function declaration")
-        if not proof_decls.has(made[0]): proof_decls[made[0]] = 0
-        proof_pending = false
-    made
-
-dw_top_declarations_inner = (id: int) -> int[]:
-    if id > 0: return dw_with_methods(id)
-    result = dc_parser.reader.module_nodes[-1 - id]
-    if result.kind == .nil: return []
-    if result.kind == .build_:
-        file = pos_file(result.pos)
-        text = if result.aux == 5: "$test" else if result.aux == 6: name_of(int(result.a)) else: dw_module_text(id)
-        dw_dir_apply(text, int(result.b), result.pos, dir_module_start(file), dir_module_end(file), true)
-        return []
-    children = node_kids(dc_parser.reader.module_nodes, dc_parser.reader.module_lists, -1 - id)
-    if result.aux == -316: return children
-    spliced: int[]
-    starts = node_kids2(dc_parser.reader.module_nodes, dc_parser.reader.module_lists, -1 - id)
-    loop k in [0..children.len()):
-        loop made in dw_top_declarations(children[k], mkpos(pos_file(result.pos), starts[k])): spliced.push(made)
-    spliced
-
 # Spawned bindings are resolved at the joining brace. Their task storage stays
 # hidden, and ordinary bindings become visible in the enclosing statement scope.
 dw_task_groups: str[]

@@ -1,15 +1,23 @@
 $runtime_checks
 
 from p"@lib/core/rt.jo" import (__str_slice)
-from p"ast.jo" import (lists mk nodes)
+from p"ast.jo" import (kids lists mk nodes)
 from p"check.jo" import (release_build)
 from p"dewy_builders.dewy" import (db_finish_function db_range_value db_singleton_and db_singleton_int db_singleton_value db_value_name)
 from p"dewy_context.jo" import (dc_parser)
-from p"dewy_nodes.jo" import (dw_builder_host)
+from p"dewy_nodes.jo" import (dw_builder_host dw_warn_if_pending)
 from p"dewy_node_rare.dewy" import (dewy_reserved_text dw_renamed_init)
-from p"dewy_node_builds.dewy" import (dw_target_name)
+from p"dewy_node_builds.dewy" import (dw_supported_names dw_target_name dw_with_methods)
 from p"dewy_syntax.dewy" import (syntax_target_field_value)
-from p"util.jo" import (files intern names pos_file pos_off)
+from p"util.jo" import (files intern mkpos name_of names pos_file pos_off)
+from p"dewy_directive_ops.dewy" import (dw_dir_apply)
+from p"dewy_ffi.jo" import (dw_export_pos)
+from p"dewy_ffi_attrs.dewy" import (dw_export_at dw_export_attach dw_ffi_attach)
+from p"directives.jo" import (dir_module_end dir_module_start)
+from p"node_store.dewy" import (node_kids node_kids2)
+from p"oom_ops.dewy" import (oom_module)
+from p"proofs.jo" import (proof_active proof_decls proof_pending)
+from p"refine.jo" import (refine_active)
 from p"diagnostic_exit.dewy" import (fatal)
 
 NodeOpWord:type=int64<overflow='wrap'>
@@ -61,4 +69,62 @@ dewy_reserved_name=(name:string pos:NodeOpWord):>void=>{
 dw_range_value=(range:NodeOpWord):>int64=>$unsafe {
     if nodes.ptr[range].a =? 0 or nodes.ptr[range].b =? 0 {fatal(nodes.ptr[range].pos "a stored range needs both endpoints; open ranges can be used directly in loops or membership")}
     db_range_value(@nodes @lists @dw_builder_host range)
+}
+# The declarations a module statement the direct grammar read makes (dewy_direct.jo's dn_statement):
+# positive IDs are declarations; negative IDs select module-only checker nodes.
+# Keep the statement head separately: a declaration's own position may name its binding.
+dw_top_declarations=(id:int64 pos:int64):>array<int64>=>{
+    if id <? 0 and dc_parser.reader.module_nodes[-1 - id].kind =? 'build_' and dc_parser.reader.module_nodes[-1 - id].aux not=? 0 and dc_parser.reader.module_nodes[-1 - id].aux not=? 5 and dc_parser.reader.module_nodes[-1 - id].aux not=? 6 {
+        let result=dc_parser.reader.module_nodes[-1 - id]
+        let text=dw_module_text(id)
+        let form=NodeOpWord(result.aux)
+        if form =? 1 {
+            if text =? "proof" {
+                if proof_pending {fatal(pos "duplicate $proof")}
+                proof_pending=true
+                proof_active=true
+                refine_active=true
+            } else if text =? "export" {dw_export_at(pos "")} else if text =? "explicit_allocation_failure" {oom_module(pos_file(pos) pos)}
+        } else if form =? 2 {dw_export_at(pos name_of(NodeOpWord(nodes[NodeOpWord(result.a)].sval)))} else if form =? 3 {
+            let names_:array<string>=[]
+            loop entry in kids(NodeOpWord(result.a)) {names_.push(name_of(NodeOpWord(nodes[entry].sval)))}
+            dw_supported_names(pos names_)
+        } else if form =? 4 {dw_warn_if_pending.push(NodeOpWord(result.a))}
+        return []
+    }
+    let exported=dw_export_pos not=? 0
+    let pending=proof_pending
+    let soft=dw_warn_if_pending
+    dw_warn_if_pending=[]
+    let made=dw_top_declarations_inner(id)
+    if exported {dw_export_attach(made)}
+    if soft.length >? 0 {
+        if made.length not=? 1 or nodes[made[0]].kind not=? 'fn_' {fatal(nodes[soft[0]].pos "`$warn_if` goes on the line before the function declaration whose callers it warns")}
+        dw_ffi_attach(made[0] soft)
+    }
+    if pending {
+        if made.length not=? 1 or nodes[made[0]].kind not=? 'fn_' {fatal(pos "$proof requires a function declaration")}
+        if not proof_decls.has(made[0]) {proof_decls[made[0]]=0}
+        proof_pending=false
+    }
+    made
+}
+dw_top_declarations_inner=(id:NodeOpWord):>array<int64>=>{
+    if id >? 0 {return dw_with_methods(id)}
+    let result=dc_parser.reader.module_nodes[-1 - id]
+    if result.kind =? 'nil' {return []}
+    if result.kind =? 'build_' {
+        let file=pos_file(result.pos)
+        let text=if result.aux =? 5 "$test" else if result.aux =? 6 name_of(NodeOpWord(result.a)) else dw_module_text(id)
+        dw_dir_apply(text NodeOpWord(result.b) result.pos dir_module_start(file) dir_module_end(file) true)
+        return []
+    }
+    let children=node_kids(@dc_parser.reader.module_nodes @dc_parser.reader.module_lists -1 - id)
+    if result.aux =? -316 {return children}
+    let spliced:array<int64>=[]
+    let starts=node_kids2(@dc_parser.reader.module_nodes @dc_parser.reader.module_lists -1 - id)
+    loop k in [NodeOpWord(0)..NodeOpWord(children.length)) {
+        loop made in dw_top_declarations(children[k] mkpos(pos_file(result.pos) starts[k])) {spliced.push(made)}
+    }
+    spliced
 }
