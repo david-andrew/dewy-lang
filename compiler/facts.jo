@@ -106,6 +106,7 @@ use 'facts_probes.dewy'
 use 'facts_row_queries.dewy'
 use 'facts_projection_queries.dewy'
 use 'facts_value_queries.dewy'
+use 'facts_index_writes.dewy'
 
 # One tombstone per invalidated route: the event that last replaced the
 # place and the value it replaced. Witnesses only; never evidence.
@@ -578,51 +579,10 @@ fact_new = (s: mut FactState, b: FactBound, term: FactTerm = FactTerm()) -> int:
     fact_add_value(s, v, b)
     v
 
-# (an empty index sized to take n entries without growing)
-fact_index_sized = (n: int) -> int[]:
-    slots = 8
-    loop slots < n * 2 + 2: slots *= 2
-    fill(0, slots * 2 + 1)
-
-fact_index_put = (index: mut int[], key: int, value: int):
-    if index.len() == 0: index = fill(0, 17)
-    if (index[0] + 1) * 4 >= index.len():
-        old = index
-        index = fill(0, (old.len() - 1) * 2 + 1)
-        loop i in [0..(old.len() - 1) / 2):
-            if old[2 + i * 2] != 0: fact_index_put(index, old[1 + i * 2], old[2 + i * 2] - 1)
-    mask = (index.len() - 1) / 2 - 1
-    slot = fact_index_hash(key, mask)
-    loop true:
-        i = 1 + slot * 2
-        if index[i + 1] == 0:
-            index[0] += 1
-            index[i] = key
-            index[i + 1] = value + 1
-            return
-        if index[i] == key:
-            index[i + 1] = value + 1
-            return
-        slot = (slot + 1) & mask
-
 fact_root_key = (p: PlaceIdentity) -> int: (p.declaration << 3) | int(p.root)
 fact_pair_key = (a: int, b: int) -> int: (a << 32) | b
 fact_projection_key = (base: int, selector: int, element: bool) -> int:
     (base << 33) | (int(element) << 32) | (selector & 0xffffffff)
-
-# Ordered records retain deterministic witnesses and budgets; hash indexes only
-# locate records. Monotonically allocated values use their ordered ID vector
-# as a binary-search index: O(log V) lookup, amortized O(1) append. Only a
-# header mixing frames needs a hash index. Other lookups are expected O(1);
-# state occupies O(V+P+D), including the copy-on-write index box.
-fact_add_value = (s: mut FactState, v: int, b: FactBound):
-    if v > 0 and v < fact_terms.len(): fact_terms[v].slot = s.ids.len()
-    if s.index[0].slots.len() == 0 and s.ids.len() > 0 and v < s.ids[s.ids.len() - 1]:
-        s.index[0].slots = fact_index_sized(s.ids.len() * 2)
-        loop i in [0..s.ids.len()): fact_index_put(s.index[0].slots, s.ids[i], i)
-    if s.index[0].slots.len() != 0: fact_index_put(s.index[0].slots, v, s.ids.len())
-    s.ids.push(v)
-    s.bounds.push(b)
 
 # Small projection sets keep only their ordered records. Build the indexes
 # on the first insertion reaching FACT_PROJECTION_SCAN, then maintain them.
@@ -630,43 +590,7 @@ fact_add_value = (s: mut FactState, v: int, b: FactBound):
 # O(P) promotion once per growing state. No new facts or budget are introduced.
 const FACT_PROJECTION_SCAN = 32
 
-fact_add_projection = (s: mut FactState, p: FactProjection):
-    existing = fact_projection_find(s, p.base, p.selector, p.element)
-    if existing >= 0 and s.projections[existing].value == p.value: return
-    if not fact_projections_indexed(s):
-        if s.projections.len() + 1 < FACT_PROJECTION_SCAN:
-            s.projections.push(p)
-            return
-        projections = s.projections
-        s.projections = []
-        loop projection in projections: fact_index_projection(s, projection)
-    fact_index_projection(s, p)
-
-fact_index_projection = (s: mut FactState, p: FactProjection):
-    i = s.projections.len()
-    key = fact_projection_key(p.base, p.selector, p.element)
-    if fact_index_get(s.index[0].projection_index, key) < 0: fact_index_put(s.index[0].projection_index, key, i)
-    if not p.element and fact_index_get(s.index[0].projection_value, p.value) < 0: fact_index_put(s.index[0].projection_value, p.value, i)
-    tail = fact_index_get(s.index[0].projection_tail, p.base)
-    if tail >= 0: s.index[0].projection_next[tail] = i
-    else: fact_index_put(s.index[0].projection_head, p.base, i)
-    fact_index_put(s.index[0].projection_tail, p.base, i)
-    s.index[0].projection_next.push(-1)
-    s.projections.push(p)
-
 const FACT_RECORD = 5
-
-# (v's row record, made on its first row; counts the row)
-fact_difference_touch = (s: mut FactState, v: int) -> int:
-    r = fact_index_get(s.index[0].difference_value, v)
-    if r < 0:
-        r = s.index[0].difference_record.len() / FACT_RECORD
-        fact_index_put(s.index[0].difference_value, v, r)
-        # (pushed one by one: `+=` would copy the whole record list)
-        s.index[0].difference_record.push(0)
-        loop _ in [0..4): s.index[0].difference_record.push(-1)
-    s.index[0].difference_record[r * FACT_RECORD] += 1
-    r
 
 # A state's rows are indexed only once there are FACT_ROW_SCAN of them.
 # Fewer rows (nearly every state) are scanned in order instead: the same rows
@@ -674,32 +598,6 @@ fact_difference_touch = (s: mut FactState, v: int) -> int:
 # join or a loop header assembles a state, or to copy when a branch changes
 # one. A scan is O(rows), as the distance budget already charges a source.
 const FACT_ROW_SCAN = 32
-
-fact_add_difference = (s: mut FactState, row: FactDifference):
-    if not fact_rows_indexed(s):
-        if s.differences.len() + 1 < FACT_ROW_SCAN:
-            s.differences.push(row)
-            return
-        # (outgrown: index every row so far, then this one)
-        rows = s.differences
-        s.differences = []
-        loop r in rows: fact_index_difference(s, r)
-    fact_index_difference(s, row)
-
-fact_index_difference = (s: mut FactState, row: FactDifference):
-    i = s.differences.len()
-    fact_index_put(s.index[0].difference_index, fact_pair_key(row.a, row.b), i)
-    ra = fact_difference_touch(s, row.a)
-    rb = fact_difference_touch(s, row.b)
-    loop direction in [0..2):
-        r = if direction == 0: rb else: ra
-        at = r * FACT_RECORD + 1 + direction * 2
-        tail = s.index[0].difference_record[at + 1]
-        if tail >= 0: s.index[0].difference_next[tail * 2 + direction] = i
-        else: s.index[0].difference_record[at] = i
-        s.index[0].difference_record[at + 1] = i
-        s.index[0].difference_next.push(-1)
-    s.differences.push(row)
 
 fact_reindex = (s: mut FactState):
     hashed = s.index[0].slots.len() != 0

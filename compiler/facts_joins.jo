@@ -68,6 +68,7 @@ use 'facts_probes.dewy'
 use 'facts_row_queries.dewy'
 use 'facts_projection_queries.dewy'
 use 'facts_value_queries.dewy'
+use 'facts_index_writes.dewy'
 
 fact_hull = (a: FactBound, b: FactBound, at: int) -> FactBound:
     FactBound(min(a.lo, b.lo), max(a.hi, b.hi), (a.nz or a.lo > 0 or a.hi < 0) and (b.nz or b.lo > 0 or b.hi < 0), fact_hull_reason(at), at, a.wide or b.wide)
