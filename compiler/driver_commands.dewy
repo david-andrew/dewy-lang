@@ -1,0 +1,137 @@
+$runtime_checks
+
+from p"check.jo" import test_mode
+from p"diagnostic_exit.dewy" import fatal
+from p"@lib/core/os.jo" import (__test_process_group cwd env eprint exit file_exists is_dir)
+from p"@lib/core/rt.jo" import __str_slice
+from p"@lib/core/str.jo" import (ends_with find rfind starts_with)
+from p"driver_cli.dewy" import (build_and_exec cli_option_refused run_stdin stdin_is_terminal test_directory usage)
+from p"main.jo" import (build_output debug_vars dump exit_codes_only host_ir timing)
+from p"module_paths.dewy" import (is_abs_path os_path path_stem strip_ext)
+from p"settings.jo" import (cli_mode cli_target native_only)
+from p"spelling.dewy" import edit_distance
+from p"util.jo" import (error_exit errors_only)
+from p"watch_drive.dewy" import watch_main
+
+CommandWord:type=int64<overflow='wrap'>
+
+# Build and check have already returned before this command owner runs. Jo
+# retains shared compilation state; there is no per-command context or callback table.
+driver_run_command=(arguments:array<string>):>void=>{
+    let a=arguments
+    let first:CommandWord=1
+    let test_watch=false
+    let test_json=false
+    if a[1] =? "run" {first=2}
+    if a[1] =? "test" {
+        test_mode=true
+        error_exit=102
+        first=2
+    }
+    # Skip consumed option payloads while scanning each argument once.
+    loop i in 0.. and x in a {
+        let at:CommandWord=i
+        if at <? first {continue}
+        if not starts_with(x "--") {break}
+        if x =? "--web" {cli_target="wasm32"}
+        else if x =? "--release" or x =? "--debug" {cli_mode=__str_slice(x 2 (x as array<uint8>).length)}
+        else if x =? "--watch" and test_mode {test_watch=true}
+        else if x =? "--json" and test_mode {test_json=true}
+        else if x =? "--time" {timing=true}
+        else if x =? "--target" and first + 1 <? a.length {
+            cli_target=a[first + 1]
+            first += 1
+        } else {cli_option_refused(x);}
+        first += 1
+    }
+    if first <? a.length and starts_with(a[first] "$") {cli_option_refused(a[first]);}
+    if first >=? a.length and test_mode {a.push(".");}
+    if first >=? a.length and a[1] not=? "run" and not stdin_is_terminal() {
+        run_stdin();
+        return
+    }
+    if first >=? a.length {usage();}
+    if a[first] =? "watch" or test_watch {
+        if not test_watch {first += 1}
+        if a.length <=? first {usage();}
+        if cli_target =? "wasm32" and not test_mode {fatal(0 "dewy-core watch runs programs natively (for the web, use dewy-core build --target wasm32)");}
+        native_only=true
+        let wargs:array<string>=[]
+        loop i in 0.. and x in a {let at:CommandWord=i; if at >? first {wargs.push(x);}}
+        watch_main(os_path(a[first]) wargs);
+        return
+    }
+    if a[first] =? "test" {
+        if a.length <? first + 2 {usage();}
+        test_mode=true
+        error_exit=102
+        first += 1
+    }
+    if test_mode {native_only=true}
+    if $target.os =? 'windows' {if test_mode {__test_process_group();}}
+    let path=os_path(a[first])
+    if test_mode and is_dir(path) {
+        let words:array<string>=[]
+        loop i in 0.. and x in a {let at:CommandWord=i; if at >? first {words.push(x);}}
+        exit(test_directory(path words test_json));
+    }
+    if not file_exists(path) and not ends_with(path ".jo") and not ends_with(path ".dewy") and find(path "/") <? 0 {
+        let near=""
+        loop c in ["run" "build" "watch" "test" "check" "fmt" "add" "new" "lsp" "update" "help" "version"] {
+            let lim:CommandWord=2
+            if (c as array<uint8>).length <=? 3 {lim=1}
+            if edit_distance(a[first] c lim) <=? lim and (near as array<uint8>).length =? 0 {near=" (did you mean 'dewy-core {c}'?)"}
+        }
+        if (near as array<uint8>).length =? 0 {near=" (dewy-core help lists them; a program runs with dewy-core game.dewy)"}
+        eprint("dewy-core: unknown command '{a[first]}'{near}");
+        exit(1);
+    }
+    let base=path_stem(path)
+    if test_mode {base="{base}.test"}
+    let full=path
+    if (full as array<uint8>).length =? 0 or ((full as array<uint8>)[0] not=? b'/' and find(full ":") <? 0) {full="{os_path(cwd())}/{path}"}
+    let run_args=[path]
+    if test_json {run_args.push("--json");}
+    loop i in 0.. and x in a {let at:CommandWord=i; if at >? first {run_args.push(x);}}
+    build_and_exec(path base full run_args);
+}
+
+# The output name when -o was omitted: the program's build setting is relative
+# to its source directory, otherwise strip its extension without overwriting it.
+driver_build_output=(path:string):>string=>{
+    let out=""
+    if (build_output as array<uint8>).length >? 0 {
+        out=os_path(build_output)
+        let slash:CommandWord=rfind(path "/")
+        if not is_abs_path(out) and slash >=? 0 {out="{__str_slice(path 0 slash + 1)}{out}"}
+    }
+    if (out as array<uint8>).length =? 0 {
+        out=strip_ext(path)
+        if out =? path {out="{path}.bin"}
+    }
+    out
+}
+
+# Build option scanning owns only arguments and existing option globals. The
+# hot compile call remains Jo, preserving its established call boundary.
+driver_build_arguments=(a:array<string>):>[string string]=>{
+    let path=""
+    let out=""
+    let next:CommandWord=2
+    loop i in 0.. and x in a {
+        let at:CommandWord=i
+        if at <? next {continue}
+        next=at + 1
+        if x =? "-o" and at + 1 <? a.length {out=a[at + 1]; next += 1}
+        else if x =? "--target" and at + 1 <? a.length {cli_target=a[at + 1]; next += 1}
+        else if x =? "--ir" {dump=true}
+        else if x =? "--host-ir" {host_ir=true}
+        else if x =? "-g" {debug_vars=true}
+        else if x =? "--release" or x =? "--debug" {cli_mode=__str_slice(x 2 (x as array<uint8>).length)}
+        else if x =? "--time" {timing=true}
+        else if x =? "--exit-codes" {exit_codes_only=true}
+        else if starts_with(x "-") or starts_with(x "$") {cli_option_refused(x);}
+        else {path=os_path(x)}
+    }
+    [path out]
+}
