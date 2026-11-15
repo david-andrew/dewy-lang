@@ -86,3 +86,44 @@ fact_slice_contract_actuals = (call: int, arg: int, values: mut int[]):
     loop atom in ref_predicates[int(types[rt].st)]:
         if (atom.a.kind == 2 or atom.a.kind == 5) and atom.a.value >= 0 and atom.a.value < nkids(call): values.push(kid(call, atom.a.value))
         if (atom.b.kind == 2 or atom.b.kind == 5) and atom.b.value >= 0 and atom.b.value < nkids(call): values.push(kid(call, atom.b.value))
+
+slice_mark_stamp: *(int[])
+slice_mark_flags: *(int[])
+slice_mark_head: *(int[])
+slice_mark_touched: *(int[])
+facts_slice_marks_bind = (stamp: *(int[]), flags: *(int[]), head: *(int[]), touched: *(int[])) -> int:
+    slice_mark_stamp = stamp
+    slice_mark_flags = flags
+    slice_mark_head = head
+    slice_mark_touched = touched
+    0
+
+fact_slice_member = (parents: mut FactSliceEdges, work: mut int[], c: int, n: int):
+    if c == 0: return
+    fact_slice_parent(parents, c, n)
+    work.push(c)
+
+fact_mark_of = (n: int) -> int:
+    if fact_mark_stamp[n] != fact_mark_gen: return 0
+    fact_mark_flags[n]
+
+fact_mark_touch = (n: int):
+    if fact_mark_stamp[n] == fact_mark_gen: return
+    slice_mark_stamp[0][n] = fact_mark_gen
+    slice_mark_flags[0][n] = 0
+    slice_mark_head[0][n] = -1
+    slice_mark_touched[0].push(n)
+
+fact_mark_set = (n: int, flags: int):
+    fact_mark_touch(n)
+    slice_mark_flags[0][n] = flags
+
+fact_mark_parent = (n: int) -> int:
+    if fact_mark_stamp[n] != fact_mark_gen: return -1
+    fact_mark_head[n]
+
+fact_slice_parent = (parents: mut FactSliceEdges, child: int, node: int):
+    fact_mark_touch(child)
+    parents.next.push(fact_mark_head[child])
+    slice_mark_head[0][child] = parents.nodes.len()
+    parents.nodes.push(node)

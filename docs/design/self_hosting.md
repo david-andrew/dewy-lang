@@ -265,14 +265,19 @@ call. The frozen twin keeps the same API, including the plain-word `fact_domain`
 parameters required by the type-refinement host record.
 
 `facts_slice_prep.dewy` owns syntax-child enumeration, writer-edge construction,
-finished-slice queries, and target/contract preparation. Jo retains parent edges,
-stamped marks and storage, snapshots, plan caches and the demanded walk. Child,
+finished-slice queries, target/contract preparation, mark queries/writes and parent-edge construction. Jo
+retains generation resets/growth, scratch storage, snapshots, plan caches and
+the demanded walk. Child,
 writer and contract-actual order and duplicates are preserved, as is the 64-step
 root cap. Only array/edge writers take mutable arguments; queries read the
 existing state. Node/type arena reads use checked IDs and retain no view across
 calls that can grow them. Construction costs O(children + emitted writer edges
 + traversed root paths + predicate atoms); indexed flag lookup preserves its
-existing dense-array or open-addressed representation.
+existing dense-array or open-addressed representation. Mark helpers bind Jo's
+scratch places once for writes and read the same globals directly. Beginning a
+slice grows the three node-indexed arrays only when needed; IDs come from that
+checked node arena. Queries/touches are O(1), growth O(nodes), and parent-edge
+appends amortized O(1), preserving generation wrap and touched-node order.
 
 ## Route beyond the checker
 

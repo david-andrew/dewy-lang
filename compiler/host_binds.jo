@@ -331,3 +331,6 @@ effect_panic_binding = effect_panics_bind(&effect_panic_input)
 effect_loan_host = EffectLoanHost(loan_host_error, loan_host_route, loan_host_append, loan_host_demand, loan_host_events)
 effect_loan_input = EffectLoanInput(&nodes, &lists, &locals, &fns, &loan_owners, int(IN.lend), int(IN.loan_address), int(IN.loan_length), int(IN.loan_load), int(IN.loan_store), int(IN.len), int(IN.runtime_assert), int(IN.static_assert), int(IN.assert), &effect_loan_host)
 effect_loan_binding = effect_loans_bind(&effect_loan_input)
+
+use 'facts_slice_prep.dewy'
+facts_slice_marks_binding = facts_slice_marks_bind(&fact_mark_stamp, &fact_mark_flags, &fact_mark_head, &fact_mark_touched)

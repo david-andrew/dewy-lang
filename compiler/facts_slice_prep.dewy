@@ -7,7 +7,7 @@ from p"isolation_ops.dewy" import (isolation_children)
 from p"check.jo" import (LF_ALIAS locals)
 from p"checker_state.dewy" import (SK)
 from p"effect_types.dewy" import (PlaceIdentity)
-from p"facts.jo" import (FactSliceEdges fact_slice fact_place fact_root_key)
+from p"facts.jo" import (FactSliceEdges fact_slice fact_place fact_root_key fact_mark_gen fact_mark_stamp fact_mark_flags fact_mark_head fact_mark_touched)
 from p"facts_index_writes.dewy" import (fact_index_put)
 from p"facts_joins.dewy" import (fact_payload_node)
 from p"facts_value_queries.dewy" import (fact_index_get)
@@ -103,4 +103,53 @@ fact_slice_contract_actuals=(call:SlicePrepWord arg:SlicePrepWord @values:array<
         if (atom.a.kind =? 2 or atom.a.kind =? 5) and atom.a.value >=? 0 and atom.a.value <? nkids(call) {values.push(kid(call atom.a.value))}
         if (atom.b.kind =? 2 or atom.b.kind =? 5) and atom.b.value >=? 0 and atom.b.value <? nkids(call) {values.push(kid(call atom.b.value))}
     }
+}
+
+# Jo owns the generation and scratch array headers. Bind their places once;
+# queries read the same globals directly, with no callback or copied context.
+let slice_mark_stamp:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let slice_mark_flags:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let slice_mark_head:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let slice_mark_touched:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+facts_slice_marks_bind=(stamp:ptr<array<int64>> flags:ptr<array<int64>> head:ptr<array<int64>> touched:ptr<array<int64>>):>int64=>{
+    slice_mark_stamp=stamp
+    slice_mark_flags=flags
+    slice_mark_head=head
+    slice_mark_touched=touched
+    0
+}
+
+# Begin sizes all three node-indexed arrays beyond every checked node ID.
+# No view survives a call or append; writes retain the existing array COW.
+# Queries/touches are O(1); growth is O(nodes), parent appends amortized O(1).
+# Jo retains the scratch headers and the ordered touched-node publication.
+fact_mark_of=(n:SlicePrepWord):>int64=>$unsafe {
+    if fact_mark_stamp.ptr[n] not=? fact_mark_gen {return 0}
+    fact_mark_flags.ptr[n]
+}
+fact_mark_touch=(n:SlicePrepWord):>void=>$unsafe {
+    if fact_mark_stamp.ptr[n] =? fact_mark_gen {return}
+    slice_mark_stamp[0].ptr[n]=fact_mark_gen
+    slice_mark_flags[0].ptr[n]=0
+    slice_mark_head[0].ptr[n]=-1
+    slice_mark_touched[0].push(n)
+}
+fact_mark_set=(n:SlicePrepWord flags:SlicePrepWord):>void=>$unsafe {
+    fact_mark_touch(n)
+    slice_mark_flags[0].ptr[n]=flags
+}
+fact_mark_parent=(n:SlicePrepWord):>int64=>$unsafe {
+    if fact_mark_stamp.ptr[n] not=? fact_mark_gen {return -1}
+    fact_mark_head.ptr[n]
+}
+fact_slice_member=(@parents:FactSliceEdges @work:array<int64> c:SlicePrepWord n:SlicePrepWord):>void=>{
+    if c =? 0 {return}
+    fact_slice_parent(@parents c n)
+    work.push(c)
+}
+fact_slice_parent=(@parents:FactSliceEdges child:SlicePrepWord node:SlicePrepWord):>void=>$unsafe {
+    fact_mark_touch(child)
+    parents.next.push(fact_mark_head.ptr[child])
+    slice_mark_head[0].ptr[child]=parents.nodes.length
+    parents.nodes.push(node)
 }
