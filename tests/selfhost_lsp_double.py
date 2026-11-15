@@ -21,6 +21,8 @@ def leaf_compilers(compiler, tmp_path, leaves):
         # graph: its reachable modules never import a leaf's frozen .jo body.
         live = extension == 'dewy' and DRIVER == CLI_DRIVER and modules_for is _default_modules_for
         modules = dict(modules_for(tmp_path / 'unused.dewy', tmp_path / 'unused', () if live else leaves))
+        # Redirect a custom probe's explicit imports along with its services.
+        modules['driver.jo'] = DRIVER
         if extension == 'jo':
             # (every edge to a leaf, from Jo and from Dewy, leads to its twin)
             for name, text in modules.items():
@@ -29,7 +31,6 @@ def leaf_compilers(compiler, tmp_path, leaves):
                         text = (text.replace(f"'{leaf}.dewy'", f"'{leaf}.jo'")
                                 .replace(f'"{leaf}.dewy"', f'"{leaf}.jo"'))
                 modules[name] = text
-        modules['driver.jo'] = DRIVER
         built.append(cached_driver(compiler, tmp_path, False, modules))
     return built
 

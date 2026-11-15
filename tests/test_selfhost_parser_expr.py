@@ -7,6 +7,7 @@ from tests.support import ROOT, compiler  # noqa: F401
 
 
 DRIVER = r'''use 'main.jo'
+use 'parser_cursor.dewy'
 use 'parse.jo'
 use 'lex.jo'
 use 'lexer_scan.dewy'

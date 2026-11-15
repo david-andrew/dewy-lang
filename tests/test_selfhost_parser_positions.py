@@ -5,6 +5,7 @@ from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT, compiler  # noqa: F401
 
 DRIVER = r'''use 'main.jo'
+use 'checker_tokens.dewy'
 use 'parser_positions.dewy'
 use 'parse.jo'
 use 'lex.jo'

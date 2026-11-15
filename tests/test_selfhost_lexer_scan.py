@@ -15,6 +15,7 @@ from tests.support import ROOT, compiler  # noqa: F401
 DRIVER = r'''use 'main.jo'
 use 'lex.jo'
 use 'lexer_scan.dewy'
+use 'checker_tokens.dewy'
 use 'source_types.dewy'
 main = ():
     text = read_file(args()[2])!
