@@ -288,7 +288,7 @@ Runtime-only obligations still publish the deferred flag before traversal
 continues; exact-width demands remain mandatory.
 
 `facts_index_proofs.dewy` owns lexical range/index proofs, positive-bound
-queries, write collection and scope entry/exit. Jo retains the generation, local-bound maps and scope-stack headers;
+queries, write collection, loop storage inventories and scope entry/exit. Jo retains the generation, local-bound maps and scope-stack headers;
 writes use places bound once, with direct reads and no callback per value.
 Word conversion and value-equivalence walks follow only requested expressions;
 array-bound enumeration scans the existing local map and preserves duplicates.
@@ -305,6 +305,17 @@ headers. Integer bounds retain signed-word overflow guards and the `-1` unknown
 sentinel; collecting writes cannot consume local bounds as circular assumptions.
 Ordered range assumptions retain first-match behavior, and snapshots preserve
 copy-on-write semantics across cache growth and write-summary updates.
+
+Loop storage collection shares this lowering-proof leaf and its existing path
+and isolation services. Jo retains the per-function cache and the six lowering
+scratch fields, bound once for writes. A nested loop saves and restores only
+those fields; cached records and retained array snapshots keep copy-on-write
+semantics. Preserve child order, duplicate inventory entries, while conditions,
+mutable iterators, element aliases, slice retention and opaque-operation exits.
+Cache hits are O(1); a miss costs visited syntax, root-path walks and appended
+nested-summary entries. Cache space follows retained inventory entries, including
+the existing duplication across nested loops. No extra traversal or callback is
+introduced, and the lowerer retains its independent uniqueness prerequisites.
 
 ## Route beyond the checker
 
