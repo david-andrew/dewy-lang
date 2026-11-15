@@ -51,7 +51,9 @@ def test_root_files_follow_relative_imports_only(tmp_path):
 def test_corpora_membership(tmp_path):
     found = corpus.corpora(tmp_path)
     assert list(found) == ['compiler', 'ladder+examples', 'game', 'tier-4']
-    assert corpus.ROOT / 'compiler/new_project.dewy' in found['compiler']
+    # A leaf imported by a new owner remains covered through that corpus root.
+    project = corpus.ROOT / 'compiler/new_project.dewy'
+    assert any(project in corpus.root_files(entry) for entry in found['compiler'])
     assert all(path.suffix == '.dewy' for paths in found.values() for path in paths)
     mixed = found['ladder+examples']
     assert corpus.LADDER / '01_word_count/core.dewy' in mixed
