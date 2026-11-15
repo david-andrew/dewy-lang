@@ -762,3 +762,67 @@ fact_drop_reaches = (gt0: int, lt: int, depth: int) -> bool:
                 if fact_drop_reaches(ft, lt, depth + 1): return true
         return false
     not fact_type_leaf(gt)
+
+# Pointer reinterpretation, exposure and lent-storage invalidation.
+fact_pointer_cast = (n: int) -> bool:
+    if nodes[n].kind != .cast or nodes[n].a == 0: return false
+    to = tkind(representation_type(ntype(n)))
+    from = tkind(representation_type(ntype(int(nodes[n].a))))
+    to == .ptr and (from == .ptr or from == .array or from == .str_)
+
+fact_exposed = (p: PlaceIdentity) -> bool:
+    # Checked references record escape while names are resolved (O(1) per use).
+    # Only its own initializer may treat a closed script binding as a local;
+    # ordinary function summaries must never assume its initial value.
+    if p.root == .global:
+        g = p.declaration
+        # A checked const has no mutable route, including through its elements.
+        # Calls cannot replace any of its value projections. Its initializer
+        # still binds its actual value through the ordinary store transfer.
+        if g > 0 and readonly_global(g): return false
+        if g <= 0 or fact_owner <= 0: return true
+        return globals[g].fn_accessed or globals[g].fn_written or globals[g].exposed or fns[fact_owner].kind != FK_INIT or modules[int(globals[g].mod)].init_fn != i32(fact_owner)
+    if p.root != .local: return true
+    # (a Dewy dictionary's or pool's address is taken only to pass it as a
+    # mutable argument, for that call: its summary names what it writes)
+    # A lock place cannot escape its guard. Mutable actuals still invalidate
+    # it at their calls; unrelated calls cannot reach it through the mutex.
+    if place_locked.has(p.declaration): return false
+    flags = int(locals[p.declaration].flags)
+    if flags & LF_BYREF != 0 and (flags & LF_VALUEITER != 0 or map_loop_values.has(p.declaration)): flags &= ~LF_BYREF
+    if flags & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_BYREF | LF_EXPOSED) == 0 and flags & LF_ADDR != 0 and (is_map_type(int(locals[p.declaration].type)) or fact_pool_type(int(locals[p.declaration].type))) and fact_dewy_local(p.declaration): return false
+    # (and so is any Dewy local's that nothing captures, aliases or exposes:
+    # `@xs` lends it to that call alone, which fact_forget_mutable_args havocs)
+    if flags & FACT_LENT == LF_ADDR and fact_dewy_local(p.declaration): return false
+    # (also when closures capture it only by snapshot: a value capture owns its
+    # copy and reaches no storage of the local; a place capture of an owner
+    # also sets LF_ADDR, so owner types stay exposed, as check.jo capture_in)
+    if flags & FACT_LENT == LF_ADDR | LF_CAPTURED and fact_dewy_local(p.declaration) and not (ownership_decls.len() != 0 and ownership_fact_type(int(locals[p.declaration].type))): return false
+    # Only the closed, checked partition ABI supplies this guarantee. Ordinary
+    # callers and speculative summaries retain conservative alias invalidation.
+    if fact_probe_disjoint != 0 and fact_owner == fact_probe_disjoint and int(locals[p.declaration].owner) == fact_probe_disjoint and tkind(int(locals[p.declaration].type)) == .array and int(locals[p.declaration].flags) & LF_MUTPARAM != 0: return false
+    flags & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_ADDR | LF_BYREF | LF_EXPOSED) != 0
+
+fact_own_local = (p: PlaceIdentity) -> bool:
+    if p.root != .local or p.declaration <= 0: return false
+    flags = int(locals[p.declaration].flags)
+    flags & FACT_LENT == LF_ADDR and flags & LF_PARAM == 0 and tkind(fact_type(int(locals[p.declaration].type))) == .array
+
+fact_forget_mutable_maps = (n: int, s: mut FactState, lent: bool = false, at0: int = 0, reason: FactReason = .call):
+    mask = checked_call_mutmask(n)
+    if mask == 0: return
+    at = if at0 == 0: n else: at0
+    loop i in [0..min(nkids(n), 62)):
+        if mask & (1 << i) == 0: continue
+        e = kid(n, i)
+        loop nodes[e].kind == .addr or nodes[e].kind == .conv: e = int(nodes[e].a)
+        p = fact_written_root(e)
+        if p.declaration <= 0 or (p.root != .local and p.root != .global): continue
+        t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
+        if is_map_type(t) or fact_pool_type(t):
+            if lent: continue
+        else if not lent or fact_exposed(p): continue
+        if fact_routed_write(s, e, at, reason): continue
+        j = fact_binding(s, p)
+        if j < 0: continue
+        s.bindings[j] = FactBinding(p, fact_new(s, fact_domain(t, reason, at), FactTerm(type = t)), at, if s.bindings[j].event == at: s.bindings[j].prior else: s.bindings[j].value)

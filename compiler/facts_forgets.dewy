@@ -3,8 +3,8 @@ $runtime_checks
 from p"facts_summaries.dewy" import fact_record_arrays
 from p"effect_library.jo" import EffectClass
 from p"ast.jo" import (NF_ALIASDECL NF_GENERIC NF_GLOBAL has_flag kid nkids nodes)
-from p"check.jo" import (FK_INIT LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARTBORROW LF_SHARED LF_SOAELEM dewy_at fns globals lib_dir locals modules runtime_insts)
-from p"checks_thin.dewy" import (library_exit_call)
+from p"check.jo" import (LF_PARAM LF_VALUEITER map_loop_values FK_INIT LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARTBORROW LF_SHARED LF_SOAELEM dewy_at fns globals lib_dir locals modules runtime_insts)
+from p"checks_thin.dewy" import (library_exit_call readonly_global)
 from p"effect_classifiers.dewy" import (effect_library_class)
 from p"effect_control.dewy" import (effects_demand)
 from p"effect_graph.dewy" import (effect_graph_reset)
@@ -15,7 +15,7 @@ from p"effects.jo" import (effect_callbacks_full effect_footprints_only effect_i
 from p"expr.jo" import (is_nd ntype)
 from p"checks_thin_expr.dewy" import (is_map_type nd_elem)
 from p"checks_shaped.dewy" import (shape_field_type)
-from p"facts.jo" import (FACT_CAP FactBinding FactCallWrites FactProjection FactState FactSummary fact_call_field_types fact_drop_sites fact_drop_types fact_exposed fact_forget_mutable_maps fact_own_local fact_owner fact_probe_on fact_project fact_reach_cache fact_shape_summaries fact_summary_assumed fact_summary_owner fact_summary_used fact_terms fact_text_sinks)
+from p"facts.jo" import (FACT_LENT fact_probe_disjoint FACT_CAP FactBinding FactCallWrites FactProjection FactState FactSummary fact_call_field_types fact_drop_sites fact_drop_types fact_owner fact_probe_on fact_project fact_reach_cache fact_shape_summaries fact_summary_assumed fact_summary_owner fact_summary_used fact_terms fact_text_sinks)
 from p"facts_values.dewy" import (fact_domain fact_type)
 from p"facts_lengths.dewy" import (fact_difference)
 from p"facts_index_writes.dewy" import (fact_new fact_rebind fact_set_bound)
@@ -35,7 +35,7 @@ from p"refine.jo" import (ref_assume refine_active representation_type)
 from p"refinement_types.dewy" import (FactBound FactReason FactTerm)
 from p"types.jo" import (fields structs telem types T_INT T_NEVER T_STR tkind)
 from p"isolation_ops.dewy" import (isolation_children)
-from p"ownership.jo" import (owner_map_copies ownership_copies ownership_fact_cleanup ownership_moves)
+from p"ownership.jo" import (ownership_decls owner_map_copies ownership_copies ownership_fact_cleanup ownership_moves)
 from p"ownership_types.dewy" import (ow_field_types ow_parents ow_representation ow_variant_types ownership_callable_cap ownership_fact_type)
 from p"type_ops.dewy" import (mk_array)
 from p"util.jo" import (files intern name_of pos_file pos_in_lib)
@@ -888,4 +888,69 @@ fact_drop_reaches=(gt0:ForgetWord lt:ForgetWord depth:ForgetWord):>bool=>$unsafe
         return false
     }
     not fact_type_leaf(gt)
+}
+
+# Checked node/local/global IDs; reacquire arena reads after service calls.
+# Pointer reinterpretation only reads its operand; the store/call owns writes.
+fact_pointer_cast=(n:ForgetWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'cast' or nodes.ptr[n].a =? 0 {return false}
+    let to=tkind(representation_type(ntype(n)))
+    let source=tkind(representation_type(ntype(ForgetWord(nodes.ptr[n].a))))
+    to =? 'ptr' and (source =? 'ptr' or source =? 'array' or source =? 'str_')
+}
+
+# Checked escape flags are O(1) per use. Only a closed script binding's own
+# initializer may treat it as local; ordinary summaries stay conservative.
+fact_exposed=(p:PlaceIdentity):>bool=>$unsafe {
+    if p.root =? 'global' {
+        let g:ForgetWord=p.declaration
+        # A checked const has no mutable route, including through its elements.
+        if g >? 0 and readonly_global(g) {return false}
+        if g <=? 0 or fact_owner <=? 0 {return true}
+        return globals.ptr[g].fn_accessed or globals.ptr[g].fn_written or globals.ptr[g].exposed or fns.ptr[fact_owner].kind not=? FK_INIT or modules[ForgetWord(globals.ptr[g].mod)].init_fn not=? int32(fact_owner)
+    }
+    if p.root not=? 'local' {return true}
+    # Lock places cannot escape their guards; mutable actuals still invalidate.
+    if place_locked.has(p.declaration) {return false}
+    let flags:ForgetWord=ForgetWord(locals.ptr[p.declaration].flags)
+    if flags & LF_BYREF not=? 0 and (flags & LF_VALUEITER not=? 0 or map_loop_values.has(p.declaration)) {flags &= ~LF_BYREF}
+    # A Dewy map/pool's address is lent only for the named mutable call.
+    if flags & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_BYREF | LF_EXPOSED) =? 0 and flags & LF_ADDR not=? 0 and (is_map_type(ForgetWord(locals.ptr[p.declaration].type)) or fact_pool_type(ForgetWord(locals.ptr[p.declaration].type))) and fact_dewy_local(p.declaration) {return false}
+    if flags & FACT_LENT =? LF_ADDR and fact_dewy_local(p.declaration) {return false}
+    # Snapshot captures own their copy. Owner place captures remain exposed.
+    if flags & FACT_LENT =? LF_ADDR | LF_CAPTURED and fact_dewy_local(p.declaration) and not (ownership_decls.length not=? 0 and ownership_fact_type(ForgetWord(locals.ptr[p.declaration].type))) {return false}
+    # Only the closed checked partition ABI supplies disjoint mutable arrays.
+    if fact_probe_disjoint not=? 0 and fact_owner =? fact_probe_disjoint and ForgetWord(locals.ptr[p.declaration].owner) =? fact_probe_disjoint and tkind(ForgetWord(locals.ptr[p.declaration].type)) =? 'array' and ForgetWord(locals.ptr[p.declaration].flags) & LF_MUTPARAM not=? 0 {return false}
+    flags & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_ADDR | LF_BYREF | LF_EXPOSED) not=? 0
+}
+
+# A nonparameter array only lent to calls owns its COW storage. O(1).
+fact_own_local=(p:PlaceIdentity):>bool=>$unsafe {
+    if p.root not=? 'local' or p.declaration <=? 0 {return false}
+    let flags:ForgetWord=ForgetWord(locals.ptr[p.declaration].flags)
+    flags & FACT_LENT =? LF_ADDR and flags & LF_PARAM =? 0 and tkind(fact_type(ForgetWord(locals.ptr[p.declaration].type))) =? 'array'
+}
+
+# A mutable map/pool actual receives a fresh value even without a summary.
+# Preserve argument order, the 62-bit cap, routed writes and same-event prior.
+fact_forget_mutable_maps=(n:ForgetWord @s:FactState lent:bool=false at0:ForgetWord=0 reason:FactReason='call'):>void=>$unsafe {
+    let mask:ForgetWord=checked_call_mutmask(n)
+    if mask =? 0 {return}
+    let at=if at0 =? 0 {n} else {at0}
+    loop i in [0..min(nkids(n) 62)) {
+        if mask & (ForgetWord(1) << ForgetWord(i)) =? 0 {continue}
+        let e:ForgetWord=kid(n i)
+        loop nodes.ptr[e].kind =? 'addr' or nodes.ptr[e].kind =? 'conv' {e=ForgetWord(nodes.ptr[e].a)}
+        let p=fact_written_root(e)
+        if p.declaration <=? 0 or (p.root not=? 'local' and p.root not=? 'global') {continue}
+        let t:ForgetWord=if p.root =? 'local' {ForgetWord(locals.ptr[p.declaration].type)} else {ForgetWord(globals.ptr[p.declaration].type)}
+        if is_map_type(t) or fact_pool_type(t) {
+            if lent {continue}
+        }
+        else if not lent or fact_exposed(p) {continue}
+        if fact_routed_write(@s e at reason) {continue}
+        let j:ForgetWord=fact_binding(s p)
+        if j <? 0 {continue}
+        s.bindings[j]=FactBinding(p fact_new(@s fact_domain(t reason at) FactTerm(type=t)) at if s.bindings[j].event =? at {s.bindings[j].prior} else {s.bindings[j].value})
+    }
 }

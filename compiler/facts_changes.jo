@@ -462,3 +462,5 @@ fact_balanced_changes = (n: int, s: mut FactState, at: int, reason: FactReason):
             fact_difference(s, length, s.projections[held].value, 0, n)
         else if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(s.bindings[i].value, -1, false, length))
     if nkids(n) == 3: fact_changes_walk(kid(n, 2), s, at, reason)
+
+# Exposure queries share the forgetting leaf.

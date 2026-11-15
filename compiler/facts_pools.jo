@@ -243,3 +243,5 @@ fact_pool_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
         if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(after, values[1], true, fact_constant(s, 0, n)))
     fact_pool_values(n, s, before, after, values, result, kind)
     result
+
+# Exposure queries share the forgetting leaf.

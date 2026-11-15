@@ -317,6 +317,16 @@ nested-summary entries. Cache space follows retained inventory entries, includin
 the existing duplication across nested loops. No extra traversal or callback is
 introduced, and the lowerer retains its independent uniqueness prerequisites.
 
+`facts_forgets.dewy` also owns pointer-cast classification, exposure and local
+ownership queries, and mutable-map invalidation. Checked local/global flags,
+readonly declarations, initializer ownership and partition identity retain their
+existing meaning; no mutable state is introduced for queries. Only invalidation
+borrows mutable `FactState`. It retains argument order and the 62-bit mask cap,
+routed-element writes, same-event prior values and copy-on-write snapshots.
+Cost follows requested type representation/ownership queries, then at most 62
+actuals plus existing route and binding lookups. Jo keeps caches and owner state;
+no callback, copied context or extra whole-program scan is introduced.
+
 ## Route beyond the checker
 
 Planning baseline: `3449ea6a1`; physical lines including comments/blanks, excluding

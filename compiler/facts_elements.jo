@@ -1,3 +1,4 @@
+use 'facts_forgets.dewy'
 use 'facts_values.dewy'
 use 'facts.jo'
 use 'facts_compare.dewy'
@@ -506,3 +507,5 @@ fact_inventory_bound = (s: mut FactState, value: int, parts: int[], t: int, at: 
                 item = if j == 0: b else: fact_hull(item, b, at)
             item.reason = .missing; item.witness = 0
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, fact_constant(s, k), true, fact_new(s, item, FactTerm(type = et))))
+
+# Exposure queries share the forgetting leaf.
