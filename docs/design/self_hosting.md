@@ -279,6 +279,14 @@ slice grows the three node-indexed arrays only when needed; IDs come from that
 checked node arena. Queries/touches are O(1), growth O(nodes), and parent-edge
 appends amortized O(1), preserving generation wrap and touched-node order.
 
+`facts_lifecycle.dewy` owns the obligation discovery walk beside its body-work
+selection caller. The walk retains early exits, alias and callback boundaries,
+and the ordered pending-witness list. Jo keeps node classification and the
+collection/deferred flags and pending array header, bound once for writes. The
+walk costs O(visited syntax edges) and retains no arena view across calls.
+Runtime-only obligations still publish the deferred flag before traversal
+continues; exact-width demands remain mandatory.
+
 ## Route beyond the checker
 
 Planning baseline: `3449ea6a1`; physical lines including comments/blanks, excluding

@@ -20,7 +20,7 @@ from p"draw_ops.dewy" import (draw_context_finalize draw_context_reset)
 from p"effects.jo" import (effect_panic_nodes effect_panic_pending effect_panic_texts effect_unavailable loan_owners)
 from p"exact.jo" import (exact_decided exact_fact_store exact_finish exact_has_store exact_marks exact_owners exact_proof_demands exact_reset exact_shader_demand exact_shader_owners exact_stores)
 from p"expr.jo" import (CV IN ntype)
-from p"facts.jo" import (FactPlanDependency FACT_LENT FactBinding FactSlice FactState fact_add_fits fact_call_field_types fact_carried_cache fact_comprehension_sources fact_comprehensions fact_constant_globals fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_calls fact_constructor_types fact_dead_refinements fact_decided fact_deferred fact_deferred_checks fact_deferred_proving fact_divisors fact_fixed_requests fact_fork_entries fact_fork_nodes fact_grown_roots fact_has_deferred fact_internal_policy fact_key_params fact_obliged fact_owner fact_panic_collect fact_panic_pending fact_panic_sites fact_parallel_bounds fact_plan_dependencies fact_plan_forget fact_plan_serial fact_policy fact_policy_default fact_probe_on fact_probe_runs fact_pushed_rows_cache fact_query fact_regex_counts fact_requests fact_retry_owner fact_return_escapes_cache fact_returns_cache fact_root_key fact_saving fact_search_predicate fact_selector_sources fact_shape_summaries fact_shared_literals fact_slice fact_slice_cache fact_slice_prepare fact_speculating fact_sum_operand fact_summaries fact_summary_assumed fact_summary_field fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_text_sinks fact_validated fn_dewy fn_in_lib)
+from p"facts.jo" import (FactPlanDependency FACT_LENT FactBinding FactSlice FactState fact_add_fits fact_call_field_types fact_carried_cache fact_comprehension_sources fact_comprehensions fact_constant_globals fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_calls fact_constructor_types fact_dead_refinements fact_decided fact_deferred fact_deferred_checks fact_deferred_proving fact_divisors fact_fixed_requests fact_fork_entries fact_fork_nodes fact_grown_roots fact_has_deferred fact_internal_policy fact_key_params fact_owner fact_panic_collect fact_panic_pending fact_panic_sites fact_parallel_bounds fact_plan_dependencies fact_plan_forget fact_plan_serial fact_policy fact_policy_default fact_probe_on fact_probe_runs fact_pushed_rows_cache fact_query fact_regex_counts fact_requests fact_retry_owner fact_return_escapes_cache fact_returns_cache fact_root_key fact_saving fact_search_predicate fact_selector_sources fact_shape_summaries fact_shared_literals fact_slice fact_slice_cache fact_slice_prepare fact_speculating fact_sum_operand fact_summaries fact_summary_assumed fact_summary_field fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_text_sinks fact_validated fn_dewy fn_in_lib)
 from p"facts_slice_prep.dewy" import (fact_slice_push_children)
 from p"facts_values.dewy" import (fact_domain fact_type)
 from p"facts_elements.dewy" import (fact_fixed_check fact_fixed_node)
@@ -48,6 +48,12 @@ from p"error_display.dewy" import (err_flush)
 from p"warn_if.jo" import (wi_fact_finish wi_fact_requests)
 from p"witness.jo" import (wit_collect wit_collected wit_measure wit_skipped wit_tentative)
 from p"witness_ops.dewy" import (wit_fail)
+
+from p"directives.jo" import (DIR_PROTOTYPE DIR_STATIC)
+from p"facts.jo" import (fact_obligation_node)
+from p"ast.jo" import (kid2 nkids2)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"nd_contracts.jo" import (nd_mutable_handle)
 
 LifeWord:type=int64<overflow='wrap'>
 # `parallel i in [a..b)` (a range runs at most 2^63 - 1 values: lib/std/thread.jo).
@@ -454,4 +460,60 @@ fact_complete_deferred=(f:LifeWord):>void=>$unsafe {
     directives_after_facts()
     fact_deferred_proving=previous_proving
     ic_restore(icb)
+}
+
+# Discovery writes Jo-owned collection state through places bound once.
+let discovery_collect:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let discovery_deferred:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let discovery_pending:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+facts_discovery_bind=(collect:ptr<bool> deferred:ptr<bool> pending:ptr<array<int64>>):>int64=>{
+    discovery_collect=collect
+    discovery_deferred=deferred
+    discovery_pending=pending
+    0
+}
+
+fact_obliged=(n:LifeWord):>bool=>$unsafe {
+    if n <=? 0 or n >=? nodes.length {return false}
+    let k=nodes.ptr[n].kind
+    if fact_panic_collect {
+        if k =? 'parallel_region' {discovery_collect[0]=false}
+        else if k =? 'intrinsic' or k =? 'call' or k =? 'fnref' or k =? 'lambda' or k =? 'pair' or k =? 'partial' or k =? 'binary' and nodes.ptr[n].aux =? 1 {discovery_pending[0].push(n)}
+    }
+    if k =? 'lambda' {return nd_mutable_handle(n)}
+    if k =? 'ident' {
+        if nodes.ptr[n].aux =? int32(1) {
+            let l=LifeWord(nodes.ptr[n].sym)
+            if l >? 0 and LifeWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 {
+                discovery_collect[0]=false
+                return fact_obliged(LifeWord(locals.ptr[l].alias))
+            }
+        }
+        return false
+    }
+    let mask=isolation_children(k)
+    if mask =? 0 {return false}
+    # A finite lowering width is required even when runtime checks are allowed.
+    if n <? exact_marks.length and exact_marks[n] & 128 not=? 0 {return true}
+    if fact_obligation_node(n) {
+        let policy=dir_policy(nodes.ptr[n].pos)
+        if policy =? DIR_STATIC or policy =? DIR_PROTOTYPE or dir_obligations or ide_on or dir_forced {return true}
+        discovery_deferred[0]=true
+    }
+    if mask <? 0 {mask=7 | 16 | 32}
+    if mask & 1 not=? 0 and fact_obliged(LifeWord(nodes.ptr[n].a)) {return true}
+    if mask & 2 not=? 0 and fact_obliged(LifeWord(nodes.ptr[n].b)) {return true}
+    if mask & 4 not=? 0 and fact_obliged(LifeWord(nodes.ptr[n].c)) {return true}
+    if mask & 16 not=? 0 {
+        loop j in [0..nkids(n)) {
+            let child=kid(n j)
+            if fact_obliged(child) {return true}
+        }
+    }
+    if mask & 32 not=? 0 {
+        loop i in [0..nkids2(n)) {
+            if fact_obliged(kid2(n i)) {return true}
+        }
+    }
+    false
 }

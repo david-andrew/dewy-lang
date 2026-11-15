@@ -443,3 +443,46 @@ fact_complete_deferred = (f: int):
 fact_deferred_implicit = (f: int) -> bool:
     p = nodes[int(fns[f].body)].pos
     fns[f].targs.len() == 0 and pos_in_lib(p) and dir_uniform_runtime(p) and dir_policy(p) == DIR_IMPLICIT
+discovery_collect: *(bool)
+discovery_deferred: *(bool)
+discovery_pending: *(int[])
+facts_discovery_bind = (collect: *(bool), deferred: *(bool), pending: *(int[])) -> int:
+    discovery_collect = collect
+    discovery_deferred = deferred
+    discovery_pending = pending
+    0
+
+fact_obliged = (n: int) -> bool:
+    if n <= 0 or n >= nodes.len(): return false
+    k = nodes[n].kind
+    if fact_panic_collect:
+        if k == .parallel_region: discovery_collect[0] = false
+        else if k == .intrinsic or k == .call or k == .fnref or k == .lambda or k == .pair or k == .partial or k == .binary and nodes[n].aux == 1: discovery_pending[0].push(n)
+    if k == .lambda: return nd_mutable_handle(n)
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.local)):
+            l = int(nodes[n].sym)
+            if l > 0 and int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
+                discovery_collect[0] = false
+                return fact_obliged(int(locals[l].alias))
+        return false
+    mask = isolation_children(k)
+    if mask == 0: return false
+    # A finite lowering width is required even when runtime checks are allowed.
+    if n < exact_marks.len() and exact_marks[n] & 128 != 0: return true
+    if fact_obligation_node(n):
+        policy = dir_policy(nodes[n].pos)
+        if policy == DIR_STATIC or policy == DIR_PROTOTYPE or dir_obligations or ide_on or dir_forced: return true
+        discovery_deferred[0] = true
+    if mask < 0: mask = 7 | 16 | 32
+    if mask & 1 != 0 and fact_obliged(int(nodes[n].a)): return true
+    if mask & 2 != 0 and fact_obliged(int(nodes[n].b)): return true
+    if mask & 4 != 0 and fact_obliged(int(nodes[n].c)): return true
+    if mask & 16 != 0:
+        loop j in [0..nkids(n)):
+            child = kid(n, j)
+            if fact_obliged(child): return true
+    if mask & 32 != 0:
+        loop i in [0..nkids2(n)):
+            if fact_obliged(kid2(n, i)): return true
+    false
