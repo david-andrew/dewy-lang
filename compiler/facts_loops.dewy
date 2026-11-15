@@ -6,7 +6,7 @@ from p"checked_eval.dewy" import (cx_token_values)
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"expr.jo" import (IN is_nd ntype)
 from p"checks_thin_expr.dewy" import (is_map_type)
-from p"facts.jo" import (FACT_CAP FACT_PREP_CONDITION FACT_PROJECTION_SCAN FactDifference FactLoop FactPaths FactProjection FactState fact_add_fits fact_capture fact_comparison fact_grown_roots fact_loop_bound_demands fact_loop_bound_entry fact_loop_bounds fact_loop_exhausted fact_loops fact_place fact_returns_cache fact_speculating fact_summary_owner fact_terms)
+from p"facts.jo" import (FACT_CAP FACT_PREP_CONDITION FACT_PROJECTION_SCAN FactDifference FactLoop FactPaths FactProjection FactState fact_add_fits fact_capture fact_comparison fact_grown_roots fact_loop_exhausted fact_loops fact_place fact_returns_cache fact_speculating fact_summary_owner fact_terms)
 from p"facts_slice_prep.dewy" import (fact_slice_children)
 from p"facts_values.dewy" import (fact_domain fact_scalar fact_type)
 from p"facts_compare.dewy" import (fact_distance fact_shortest)
@@ -780,4 +780,171 @@ fact_while=(n:LoopWord @s:FactState):>void=>$unsafe {
     paths=fact_condition(LoopWord(nodes.ptr[n].a) header)
     edges=fact_loop_body(n @paths.yes)
     s=fact_join(paths.no edges.exits n)
+}
+
+from p"facts.jo" import (FACT_ACTIVE FACT_MEMBER FACT_PREP_INDEXED FACT_PREP_MAPPED FACT_PREP_RANGE fact_loop_steps fact_project fact_slice)
+from p"facts_pushes.dewy" import (fact_carried_assigns fact_growing_lengths fact_iteration_body)
+from p"facts_elements.dewy" import (fact_loop_index)
+from p"facts_maps.dewy" import (fact_map_loop)
+from p"refine_siblings.dewy" import (ref_sib_loop_elements)
+from p"facts_slice_prep.dewy" import (fact_slice_flags)
+from p"facts_routes.dewy" import (fact_route fact_route_values)
+from p"facts_index_writes.dewy" import (fact_constant)
+from p"facts_compare.dewy" import (fact_compare)
+from p"refine.jo" import (refine_storage)
+from p"types.jo" import (is_int)
+
+# Jo owns the speculation and shared step budget. Bind their places once;
+# nested attempts retain direct reads and restore only the original fields.
+let loop_bound_speculation:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let loop_bound_steps:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let loop_bound_exhausted:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+facts_loop_bounds_bind=(speculation:ptr<int64> steps:ptr<int64> exhausted:ptr<bool>):>int64=>{
+    loop_bound_speculation=speculation
+    loop_bound_steps=steps
+    loop_bound_exhausted=exhausted
+    0
+}
+
+# The same growing-length and iterator preparation as the loop's real body.
+fact_loop_prepare=(n:LoopWord @body:FactState prep:LoopWord base:LoopWord pushes:array<[int64 int64]>):>void=>$unsafe {
+    fact_growing_lengths(@body pushes)
+    if prep =? FACT_PREP_INDEXED {
+        fact_loop_index(n base @body)
+        ref_sib_loop_elements(n base @body)
+    }
+    else if prep =? FACT_PREP_MAPPED {fact_map_loop(n base @body)}
+    else {fact_capture(LoopWord(nodes.ptr[n].a) @body);}
+}
+
+# Checked arena IDs; paths may have conversion/field wrappers. No view escapes.
+fact_loop_index_local=(m:LoopWord):>LoopWord=>$unsafe {
+    if tkind(fact_type(ntype(LoopWord(nodes.ptr[m].a)))) not=? 'array' {return 0}
+    let a:LoopWord=LoopWord(nodes.ptr[m].a)
+    loop fact_field_node(a) {a=LoopWord(nodes.ptr[a].a)}
+    if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? 1 {return 0}
+    let x:LoopWord=LoopWord(nodes.ptr[m].b)
+    loop nodes.ptr[x].kind =? 'conv' {x=LoopWord(nodes.ptr[x].a)}
+    # SK.local is the frozen node-ABI ordinal 1.
+    if nodes.ptr[x].kind not=? 'ident' or nodes.ptr[x].aux not=? 1 {return 0}
+    LoopWord(nodes.ptr[x].sym)
+}
+
+# Preserve ordered demand selection, duplicates and the four-candidate cap.
+# Carried assignments are demanded at most once, after position filtering.
+fact_loop_bound_demands=(n:LoopWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    if fact_slice.loop_indexes.length =? 0 {return out}
+    let carried:array<int64>=[]
+    let walked=false
+    loop m in fact_slice.loop_indexes {
+        if nodes.ptr[m].pos <? nodes.ptr[n].pos {continue}
+        let x=fact_loop_index_local(m)
+        if locals.ptr[x].pos >=? nodes.ptr[n].pos {continue}
+        if not walked {
+            carried=fact_carried_assigns(n)
+            walked=true
+        }
+        loop e in carried {
+            if LoopWord(nodes.ptr[LoopWord(nodes.ptr[e].a)].sym) =? x and LoopWord(fact_slice_flags(e)) & (FACT_MEMBER | FACT_ACTIVE) not=? FACT_MEMBER {
+                out.push(m)
+                break
+            }
+        }
+        if out.length >=? 4 {break}
+    }
+    out
+}
+fact_loop_unbounded_field=(e0:LoopWord):>bool=>$unsafe {
+    let e=e0
+    loop e not=? 0 and nodes.ptr[e].kind =? 'conv' {e=LoopWord(nodes.ptr[e].a)}
+    e not=? 0 and fact_field_node(e) and is_int(ntype(e)) and refine_storage(e ntype(e)) =? ntype(e)
+}
+fact_loop_step=(e0:LoopWord x:LoopWord):>bool=>$unsafe {
+    let e=e0
+    loop e not=? 0 and nodes.ptr[e].kind =? 'conv' {e=LoopWord(nodes.ptr[e].a)}
+    # Tok.plus/minus retain node-ABI ordinals 58/59.
+    if e =? 0 or nodes.ptr[e].kind not=? 'binary' or nodes.ptr[e].op not=? 58 and nodes.ptr[e].op not=? 59 {return false}
+    loop side in [LoopWord(nodes.ptr[e].a) LoopWord(nodes.ptr[e].b)] {
+        let v:LoopWord=side
+        loop v not=? 0 and nodes.ptr[v].kind =? 'conv' {v=LoopWord(nodes.ptr[v].a)}
+        if v not=? 0 and nodes.ptr[v].kind =? 'ident' and nodes.ptr[v].aux =? 1 and LoopWord(nodes.ptr[v].sym) =? x {return true}
+    }
+    false
+}
+
+# These queries can materialize projections and constants, so they write state.
+# Ordinary indexing retains cheap read access to nested managed arrays.
+fact_loop_bound_terms=(@s:FactState m:LoopWord):>[int64 int64]=>$unsafe {
+    let l=fact_loop_index_local(m)
+    let i=fact_binding(s PlaceIdentity('local' LoopWord(locals.ptr[l].owner) l))
+    if i <? 0 {return [0 0]}
+    let held=fact_route_values(@s fact_route(LoopWord(nodes.ptr[m].a) @s))
+    if held.length =? 0 {return [0 0]}
+    [s.bindings[i].value fact_project(@s held[LoopWord(held.length) - 1] (-1) false T_INT)]
+}
+fact_loop_bound_entry=(demands:array<int64> @s:FactState):>array<int64>=>{
+    let kept:array<int64>=[]
+    if demands.length =? 0 or not s.live {return kept}
+    loop m in demands {
+        if fact_loop_bound_holds(@s m) {kept.push(m)}
+    }
+    kept
+}
+fact_loop_bound_holds=(@s:FactState m:LoopWord):>bool=>{
+    if not s.live {return true}
+    let terms=fact_loop_bound_terms(@s m)
+    if terms[0] =? 0 {return false}
+    let zero=fact_constant(@s 0)
+    fact_compare(s 'le' zero terms[0]) =? 1 and fact_compare(s 'lt' terms[0] terms[1]) =? 1
+}
+fact_loop_bound_assume=(@s:FactState m:LoopWord at:LoopWord):>void=>{
+    let terms=fact_loop_bound_terms(@s m)
+    if terms[0] =? 0 {return}
+    fact_difference(@s terms[0] terms[1] (-1) at)
+    let b=fact_bound(s terms[0])
+    let h:LoopWord=fact_bound(s terms[1]).hi
+    b.lo=max(b.lo 0)
+    if h >? 0 and h not=? FACT_MAX {b.hi=min(b.hi h - 1)}
+    fact_set_bound(@s terms[0] b)
+}
+
+# Retain initiation/preservation, candidate dropping and the five-walk cap.
+# Each attempt snapshots the current head; only verified relations publish.
+fact_loop_bounds=(n:LoopWord @s:FactState held_at_entry:array<int64> prep:LoopWord base:LoopWord lo:LoopWord hi:LoopWord pushes:array<[int64 int64]>):>bool=>$unsafe {
+    if fact_loop_exhausted or not s.live {return false}
+    if fact_summary_owner not=? 0 and not fact_may_return(LoopWord(nodes.ptr[n].b)) {return false}
+    let kept=held_at_entry
+    let outer:LoopWord=fact_speculating
+    let steps:LoopWord=fact_loop_steps
+    let verified=false
+    loop attempt in [0..5) {
+        if kept.length =? 0 or fact_loop_exhausted {break}
+        let head=s
+        loop m in kept {fact_loop_bound_assume(@head m n)}
+        loop_bound_speculation[0]=LoopWord(fact_speculating) + 1
+        let body=head
+        if prep =? FACT_PREP_CONDITION {body=fact_condition(LoopWord(nodes.ptr[n].a) head).yes}
+        else if prep =? FACT_PREP_RANGE {body=fact_iteration_body(n head true 0 lo hi pushes)}
+        else {fact_loop_prepare(n @body prep base pushes)}
+        let edges=fact_loop_body(n @body)
+        loop_bound_speculation[0]=outer
+        if fact_loop_exhausted {break}
+        let held:array<int64>=[]
+        loop m in kept {
+            if fact_loop_bound_holds(@edges.back m) {held.push(m)}
+        }
+        if held.length =? kept.length {
+            verified=true
+            break
+        }
+        kept=held
+    }
+    if outer =? 0 {
+        loop_bound_steps[0]=steps
+        loop_bound_exhausted[0]=false
+    }
+    if not verified {return false}
+    loop m in kept {fact_loop_bound_assume(@s m n)}
+    true
 }

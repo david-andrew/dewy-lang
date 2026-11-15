@@ -338,6 +338,20 @@ Work follows demanded fields/equality syntax and existing route/projection costs
 there is no new pass, cache copy or callback per field. Arena reads are reacquired
 after recursive services, and the depth-four key budget is unchanged.
 
+
+`facts_loops.dewy` also owns loop-bound demand selection, body preparation and
+inductive bound proofs. Jo retains slice caches, speculation state and the shared
+step budget; the new writers bind those places once. Preserve source order,
+duplicate demands, the four-candidate cap and at most five speculative walks.
+Failed candidates are removed and survivors rechecked from the original head;
+only verified relations publish. Top-level attempts restore the step budget,
+while nested attempts consume their enclosing budget, including exhaustion.
+Term queries may materialize projections and constants and therefore borrow
+mutable state; syntax-only queries remain read-only. Snapshots retain COW, and
+no arena view survives a growing service call. Cost remains demanded path walks
+plus at most five body walks under the existing shared step cap; no new scan,
+callback or copied context is introduced.
+
 ## Route beyond the checker
 
 Planning baseline: `3449ea6a1`; physical lines including comments/blanks, excluding

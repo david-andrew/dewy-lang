@@ -720,3 +720,133 @@ fact_while = (n: int, s: mut FactState):
     paths = fact_condition(int(nodes[n].a), header)
     edges = fact_loop_body(n, paths.yes)
     s = fact_join(paths.no, edges.exits, n)
+
+use 'facts_elements.dewy'
+use 'refine_siblings.dewy'
+loop_bound_speculation: *(int)
+loop_bound_steps: *(int)
+loop_bound_exhausted: *(bool)
+facts_loop_bounds_bind = (speculation: *(int), steps: *(int), exhausted: *(bool)) -> int:
+    loop_bound_speculation = speculation
+    loop_bound_steps = steps
+    loop_bound_exhausted = exhausted
+    0
+
+fact_loop_prepare = (n: int, body: mut FactState, prep: int, base: int, pushes: (int, int)[]):
+    fact_growing_lengths(body, pushes)
+    if prep == FACT_PREP_INDEXED:
+        fact_loop_index(n, base, body)
+        ref_sib_loop_elements(n, base, body)
+    else if prep == FACT_PREP_MAPPED: fact_map_loop(n, base, body)
+    else: fact_capture(int(nodes[n].a), body)
+
+fact_loop_index_local = (m: int) -> int:
+    if tkind(fact_type(ntype(int(nodes[m].a)))) != .array: return 0
+    a = int(nodes[m].a)
+    loop fact_field_node(a): a = int(nodes[a].a)
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return 0
+    x = int(nodes[m].b)
+    loop nodes[x].kind == .conv: x = int(nodes[x].a)
+    if nodes[x].kind != .ident or nodes[x].aux != i32(int(SK.local)): return 0
+    int(nodes[x].sym)
+
+fact_loop_bound_demands = (n: int) -> int[]:
+    out: int[]
+    if fact_slice.loop_indexes.len() == 0: return out
+    carried: int[]
+    walked = false
+    loop m in fact_slice.loop_indexes:
+        if nodes[m].pos < nodes[n].pos: continue
+        x = fact_loop_index_local(m)
+        if locals[x].pos >= nodes[n].pos: continue
+        if not walked:
+            carried = fact_carried_assigns(n)
+            walked = true
+        loop e in carried:
+            if int(nodes[int(nodes[e].a)].sym) == x and fact_slice_flags(e) & (FACT_MEMBER | FACT_ACTIVE) != FACT_MEMBER:
+                out.push(m)
+                break
+        if out.len() >= 4: break
+    out
+
+fact_loop_unbounded_field = (e0: int) -> bool:
+    e = e0
+    loop e != 0 and nodes[e].kind == .conv: e = int(nodes[e].a)
+    e != 0 and fact_field_node(e) and is_int(ntype(e)) and refine_storage(e, ntype(e)) == ntype(e)
+
+fact_loop_step = (e0: int, x: int) -> bool:
+    e = e0
+    loop e != 0 and nodes[e].kind == .conv: e = int(nodes[e].a)
+    if e == 0 or nodes[e].kind != .binary or nodes[e].op != i32(int(Tok.plus)) and nodes[e].op != i32(int(Tok.minus)): return false
+    loop side in [int(nodes[e].a), int(nodes[e].b)]:
+        v = side
+        loop v != 0 and nodes[v].kind == .conv: v = int(nodes[v].a)
+        if v != 0 and nodes[v].kind == .ident and nodes[v].aux == i32(int(SK.local)) and int(nodes[v].sym) == x: return true
+    false
+
+fact_loop_bound_terms = (s: mut FactState, m: int) -> (int, int):
+    l = fact_loop_index_local(m)
+    i = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
+    if i < 0: return (0, 0)
+    held = fact_route_values(s, fact_route(int(nodes[m].a), s))
+    if held.len() == 0: return (0, 0)
+    (s.bindings[i].value, fact_project(s, held[held.len() - 1], -1, false, T_INT))
+
+fact_loop_bound_entry = (demands: int[], s: mut FactState) -> int[]:
+    kept: int[]
+    if demands.len() == 0 or not s.live: return kept
+    loop m in demands:
+        if fact_loop_bound_holds(s, m): kept.push(m)
+    kept
+
+fact_loop_bound_holds = (s: mut FactState, m: int) -> bool:
+    if not s.live: return true
+    terms = fact_loop_bound_terms(s, m)
+    if terms.0 == 0: return false
+    zero = fact_constant(s, 0)
+    fact_compare(s, .le, zero, terms.0) == 1 and fact_compare(s, .lt, terms.0, terms.1) == 1
+
+fact_loop_bound_assume = (s: mut FactState, m: int, at: int):
+    terms = fact_loop_bound_terms(s, m)
+    if terms.0 == 0: return
+    fact_difference(s, terms.0, terms.1, -1, at)
+    b = fact_bound(s, terms.0)
+    h = fact_bound(s, terms.1).hi
+    b.lo = max(b.lo, 0)
+    if h > 0 and h != FACT_MAX: b.hi = min(b.hi, h - 1)
+    fact_set_bound(s, terms.0, b)
+
+fact_loop_bounds = (n: int, s: mut FactState, held_at_entry: int[], prep: int, base: int, lo: int, hi: int, pushes: (int, int)[]) -> bool:
+    if fact_loop_exhausted or not s.live: return false
+    if fact_summary_owner != 0 and not fact_may_return(int(nodes[n].b)): return false
+    kept = held_at_entry
+    outer = fact_speculating
+    steps = fact_loop_steps
+    verified = false
+    loop attempt in [0..5):
+        if kept.len() == 0 or fact_loop_exhausted: break
+        head = s
+        loop m in kept: fact_loop_bound_assume(head, m, n)
+        fact_speculating += 1
+        body = head
+        if prep == FACT_PREP_CONDITION: body = fact_condition(int(nodes[n].a), head).yes
+        else if prep == FACT_PREP_RANGE: body = fact_iteration_body(n, head, true, 0, lo, hi, pushes)
+        else: fact_loop_prepare(n, body, prep, base, pushes)
+        edges = fact_loop_body(n, body)
+        fact_speculating = outer
+        if fact_loop_exhausted: break
+        held: int[]
+        loop m in kept:
+            if fact_loop_bound_holds(edges.back, m): held.push(m)
+        if held.len() == kept.len():
+            verified = true
+            break
+        kept = held
+    # (outside any speculation these walks are this rule's own: the real
+    # walk and its inner loops keep the budget they had)
+    if outer == 0:
+        fact_loop_steps = steps
+        fact_loop_exhausted = false
+    if not verified: return false
+    loop m in kept: fact_loop_bound_assume(s, m, n)
+    true
