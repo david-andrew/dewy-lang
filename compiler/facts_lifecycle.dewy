@@ -50,10 +50,24 @@ from p"witness.jo" import (wit_collect wit_collected wit_measure wit_skipped wit
 from p"witness_ops.dewy" import (wit_fail)
 
 from p"directives.jo" import (DIR_PROTOTYPE DIR_STATIC)
-from p"facts.jo" import (fact_obligation_node)
 from p"ast.jo" import (kid2 nkids2)
 from p"isolation_ops.dewy" import (isolation_children)
 from p"nd_contracts.jo" import (nd_mutable_handle)
+
+from p"directives.jo" import (dir_assumed_bounds_any)
+from p"ast.jo" import (RANGE_EXHAUSTION)
+from p"facts_forks.dewy" import (fact_key_callback fact_parallel_array)
+from p"facts_library.dewy" import (fact_exact_sum_call fact_gpu_index_call fact_nonempty_call)
+from p"types.jo" import (T_MATH_INT is_int prune)
+from p"warn_if.jo" import (wi_fact_calls)
+from p"facts_arrays.dewy" import (fact_array_call)
+from p"facts_maps.dewy" import (fact_map_call)
+from p"facts_numeric.dewy" import (fact_power_call fact_rational_constructor fact_rational_divmod fact_shift_obliged)
+from p"facts_pools.dewy" import (fact_pool_call)
+from p"facts_ranges.dewy" import (fact_floor_call fact_open_range fact_range_call fact_stepped_loop)
+from p"facts_text.dewy" import (fact_string_call)
+from p"float_ops.dewy" import (ff_integer_demand)
+from p"nd_contracts.jo" import (nd_mutable_call nd_mutable_signatures)
 
 LifeWord:type=int64<overflow='wrap'>
 # `parallel i in [a..b)` (a range runs at most 2^63 - 1 values: lib/std/thread.jo).
@@ -514,6 +528,54 @@ fact_obliged=(n:LifeWord):>bool=>$unsafe {
         loop i in [0..nkids2(n)) {
             if fact_obliged(kid2(n i)) {return true}
         }
+    }
+    false
+}
+
+fact_obligation_node=(n:LifeWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if nd_mutable_signatures.length not=? 0 and nd_mutable_handle(n) {return true}
+    if k =? 'index' {return not has_flag(n NF_INBOUNDS) and fact_bounded_index(n)}
+    if k =? 'binary' {
+        if nodes.ptr[n].aux =? 0 and (nodes.ptr[n].op =? int32(61) or nodes.ptr[n].op =? int32(62)) and is_int(ntype(LifeWord(nodes.ptr[n].b))) and not fact_literal_nonzero(LifeWord(nodes.ptr[n].b)) {return true}
+        return fact_shift_obliged(n)
+    }
+    if k =? 'assign' {return fact_shift_obliged(n)}
+    if k =? 'for_' {return fact_stepped_loop(n) or fact_open_range(n)}
+    if k =? 'conv' {
+        if ff_integer_demand(n) {return true}
+        if exact_has_store(n) and not exact_decided(n) or nodes.ptr[n].aux =? int32(int64(CV.refinement)) or nodes.ptr[n].aux =? int32(int64(CV.arr2fixed)) {return true}
+        return nodes.ptr[n].aux =? int32(int64(CV.int_)) and prune(ntype(LifeWord(nodes.ptr[n].a))) =? T_MATH_INT and prune(ntype(n)) not=? T_MATH_INT
+    }
+    if k =? 'call' {
+        if wi_fact_calls.has(n) or fact_divisors.has(n) or fact_range_call(n) or nd_mutable_call(n) or fact_rational_constructor(n) and not fact_literal_nonzero(kid(n 1)) or fact_rational_divmod(n) {return true}
+        if (fact_floor_call(n) not=? 0 and not fact_literal_nonzero(kid(n 1))) or fact_string_call(n) >=? 2 or fact_array_call(n) not=? 0 or fact_power_call(n) {return true}
+        let map=fact_map_call(n)
+        if map >=? 2 and map <=? 4 or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_gpu_index_call(n) {return true}
+        let pool=fact_pool_call(n)
+        if pool >=? 2 and pool <=? 4 {return true}
+        # A fork closure's obligations start from its creator's facts.
+        if dir_assumed_bounds_any and fact_parallel_range_call(n) {return true}
+        if fact_library_call(n "parallel_range") or fact_library_call(n "parallel_map") or fact_parallel_array(n) {
+            loop i in [0..nkids(n)) {
+                let arg=kid(n i)
+                if nodes.ptr[arg].kind =? 'lambda' {
+                    discovery_collect[0]=false
+                    if fact_obliged(LifeWord(nodes.ptr[arg].b)) {return true}
+                }
+            }
+        }
+        # (and so do a key callback's: fact_key_callback)
+        let key=fact_key_callback(n)
+        if key >? 0 {
+            discovery_collect[0]=false
+            if fact_obliged(LifeWord(nodes.ptr[key].b)) {return true}
+        }
+        return false
+    }
+    if k =? 'intrinsic' {
+        let id=nodes.ptr[n].aux as IN
+        return id =? IN.static_assert or id =? IN.runtime_assert or id =? IN.assert or nodes.ptr[n].aux2 =? int32(RANGE_EXHAUSTION) or id =? IN.lend or id =? IN.loan_length or id =? IN.loan_store or id =? IN.loan_address or id =? IN.loan_load or id =? IN.pop or id =? IN.remove or id =? IN.truncate
     }
     false
 }

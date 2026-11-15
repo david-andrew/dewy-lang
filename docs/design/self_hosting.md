@@ -279,13 +279,24 @@ slice grows the three node-indexed arrays only when needed; IDs come from that
 checked node arena. Queries/touches are O(1), growth O(nodes), and parent-edge
 appends amortized O(1), preserving generation wrap and touched-node order.
 
-`facts_lifecycle.dewy` owns the obligation discovery walk beside its body-work
-selection caller. The walk retains early exits, alias and callback boundaries,
-and the ordered pending-witness list. Jo keeps node classification and the
+`facts_lifecycle.dewy` owns obligation classification and the discovery walk
+beside its body-work selection caller. The walk retains early exits, alias and callback boundaries,
+and the ordered pending-witness list. Jo keeps the
 collection/deferred flags and pending array header, bound once for writes. The
 walk costs O(visited syntax edges) and retains no arena view across calls.
 Runtime-only obligations still publish the deferred flag before traversal
 continues; exact-width demands remain mandatory.
+
+`facts_index_proofs.dewy` owns lexical range/index proofs and their scope entry
+and exit. Jo retains the generation, local-bound maps and scope-stack headers;
+writes use places bound once, with direct reads and no callback per value.
+Word conversion and value-equivalence walks follow only requested expressions;
+array-bound enumeration scans the existing local map and preserves duplicates.
+Nested index scans retain their visited bitmap and copy-on-write allowed-index
+snapshots. Guards retain the 16-entry cap, ordered first match and block lifetime.
+Entering and leaving a range invalidates the positive-bound cache at the same
+points and preserves the lowerer's frame boundary. Arena IDs are checked by the
+caller; raw reads retain no view across calls that can grow storage.
 
 ## Route beyond the checker
 

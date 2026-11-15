@@ -1,0 +1,263 @@
+$runtime_checks
+from p"ast.jo" import (NF_INCLUSIVE NF_STEP NF_U64 has_flag kid kid2 kid_c kid_d nkids nkids2 nodes)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_MUTPARAM LF_RESIZED LF_SHARED locals)
+from p"checked_eval.dewy" import (cx_token)
+from p"expr.jo" import (CV IN integer_constant ntype)
+from p"facts.jo" import (array_len_expr len_of_local lower_length_guards nonneg_limits nonneg_locals positive_bound positive_epoch safe_index)
+from p"isolation_ops.dewy" import (ambient_length_stable)
+from p"lower.jo" import (cur_fn)
+from p"lower_group.dewy" import (fp_begin)
+from p"lower_storage.dewy" import (is_shared)
+from p"lower_views.dewy" import (fp_end)
+from p"types.jo" import (T_INT T_MATH_INT prune telem tkind tsize types)
+
+IndexWord:type=int64<overflow='wrap'>
+# A loop's control counter stays in range, but its user-visible variable can
+# be reassigned, passed by reference, or changed by a closure in the body.
+stable_loop_index=(l:IndexWord):>bool=>$unsafe {
+    if l <? 0 {return false}
+    let fl=IndexWord(locals.ptr[l].flags)
+    fl & (LF_ASSIGNED | LF_ALIAS | LF_CAPTURE | LF_BYREF | LF_ADDR) =? 0 and not is_shared(l)
+}
+# e is an integer expression that is never negative
+# The step-1 int/int64 boundary changes semantic type but preserves every bit
+# and value. Existing index/length proofs can look through just that boundary.
+# This is representation-specific: step 2 must prove a word representation first.
+word_integer_value=(n0:IndexWord):>IndexWord=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.int_)) {
+        let inner=IndexWord(nodes.ptr[n].a)
+        let source=prune(ntype(inner))
+        let target=prune(ntype(n))
+        if not ((source =? T_INT and target =? T_MATH_INT) or (source =? T_MATH_INT and target =? T_INT)) {break}
+        n=inner
+    }
+    n
+}
+is_nonneg=(e0:IndexWord):>bool=>$unsafe {
+    let e=word_integer_value(e0)
+    if e =? 0 {return false}
+    let k=nodes.ptr[e].kind
+    if k =? 'int_lit' {return nodes.ptr[e].ival >=? 0}
+    if k =? 'ident' and nodes.ptr[e].aux =? int32(1) {return nonneg_locals.contains(IndexWord(nodes.ptr[e].sym))}
+    if k =? 'intrinsic' and (nodes.ptr[e].aux as IN) =? IN.len {return true}
+    # Positive operands alone do not prove a word-sized sum/product is
+    # nonnegative: it can overflow. Keep the check without a range proof.
+    false
+}
+# A, if e is A.len() / len(A) for an array local A that is never modified, else -1
+fixed_array_len=(e0:IndexWord):>IndexWord=>$unsafe {
+    let e=word_integer_value(e0)
+    if e =? 0 or nodes.ptr[e].kind not=? 'intrinsic' or (nodes.ptr[e].aux as IN) not=? IN.len or nkids(e) not=? 1 {return -1}
+    let a=kid(e 0)
+    if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? int32(1) {return -1}
+    let ak=types.ptr[prune(ntype(a))].kind
+    if ak not=? 'array' and ak not=? 'str_' {return -1}
+    let l=IndexWord(nodes.ptr[a].sym)
+    if not fixed_array_local(l) {return -1}
+    l
+}
+# the length of array local l cannot change during this function
+fixed_array_local=(l:IndexWord):>bool=>$unsafe {
+    # element writes keep the length; writing the variable itself (or a mut parameter, which
+    # could be the caller's global) may not
+    let fl=IndexWord(locals.ptr[l].flags)
+    if fl & (LF_RESIZED | LF_ALIAS | LF_BYREF) not=? 0 or is_shared(l) {return false}
+    if fl & LF_MUTPARAM not=? 0 and not ambient_length_stable(cur_fn) {return false}
+    true
+}
+# x and y always have the same value: literals, unchanging locals and + - * of those
+same_value=(x:IndexWord y:IndexWord):>bool=>$unsafe {
+    if x =? 0 or y =? 0 or nodes.ptr[x].kind not=? nodes.ptr[y].kind {return false}
+    if nodes.ptr[x].kind =? 'conv' {
+        return nodes.ptr[x].aux =? nodes.ptr[y].aux and ntype(x) =? ntype(y) and same_value(IndexWord(nodes.ptr[x].a) IndexWord(nodes.ptr[y].a))
+    }
+    let k=nodes.ptr[x].kind
+    if k =? 'int_lit' {return nodes.ptr[x].ival =? nodes.ptr[y].ival}
+    if k =? 'ident' {
+        if nodes.ptr[x].aux not=? int32(1) or nodes.ptr[y].aux not=? int32(1) or nodes.ptr[x].sym not=? nodes.ptr[y].sym {return false}
+        return IndexWord(locals.ptr[IndexWord(nodes.ptr[x].sym)].flags) & LF_ASSIGNED =? 0
+    }
+    if k =? 'binary' {
+        let op=cx_token(IndexWord(nodes.ptr[x].op))
+        if nodes.ptr[y].op not=? nodes.ptr[x].op or (op not=? 'plus' and op not=? 'minus' and op not=? 'star') {return false}
+        return same_value(IndexWord(nodes.ptr[x].a) IndexWord(nodes.ptr[y].a)) and same_value(IndexWord(nodes.ptr[x].b) IndexWord(nodes.ptr[y].b))
+    }
+    if k =? 'intrinsic' {
+        let a=fixed_array_len(x)
+        return a >=? 0 and a =? fixed_array_len(y)
+    }
+    false
+}
+# A bounded ascending range with a nonnegative start never yields a negative
+# index. For steps, require ordered literal starts; dynamic/descending steps
+# keep their ordinary checks until there is a stronger proof.
+nonnegative_range=(it:IndexWord):>bool=>$unsafe {
+    if nodes.ptr[it].b =? 0 or not is_nonneg(IndexWord(nodes.ptr[it].a)) {return false}
+    if not has_flag(it NF_STEP) {return true}
+    let a=IndexWord(nodes.ptr[it].a)
+    let b=IndexWord(nodes.ptr[it].c)
+    nodes.ptr[a].kind =? 'int_lit' and nodes.ptr[b].kind =? 'int_lit' and nodes.ptr[b].ival >? nodes.ptr[a].ival
+}
+# the array locals whose length bounds the range `it`
+range_bounds_arrays=(it:IndexWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    if not nonnegative_range(it) or has_flag(it NF_INCLUSIVE) {return out}
+    let hi=word_integer_value(IndexWord(nodes.ptr[it].b))
+    if hi =? 0 {return out}
+    let a=fixed_array_len(hi)
+    if a >=? 0 {out.push(a)}
+    if nodes.ptr[hi].kind =? 'ident' and nodes.ptr[hi].aux =? int32(1) {
+        let n=IndexWord(nodes.ptr[hi].sym)
+        if IndexWord(locals.ptr[n].flags) & LF_ASSIGNED =? 0 {
+            let b=len_of_local.get(n)
+            if b not=? none {
+                if fixed_array_local(b) {out.push(b)}
+            }
+        }
+    }
+    loop [arr e] in array_len_expr {
+        if IndexWord(locals.ptr[arr].owner) =? cur_fn and fixed_array_local(arr) and same_value(hi e) {out.push(arr)}
+    }
+    out
+}
+lower_length_guard=(n0:IndexWord):>void=>$unsafe {
+    if lower_length_guards.length >=? 16 {return}
+    let n=n0
+    if nodes.ptr[n].kind =? 'exprstmt' {n=IndexWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind not=? 'if_' or nodes.ptr[n].c not=? 0 {return}
+    let body=IndexWord(nodes.ptr[n].b)
+    if nodes.ptr[body].kind not=? 'block' or nkids(body) not=? 1 or nodes.ptr[kid(body 0)].kind not=? 'return_' {return}
+    let condition=IndexWord(nodes.ptr[n].a)
+    if nodes.ptr[condition].kind not=? 'binary' or nodes.ptr[condition].aux not=? 0 {return}
+    if nodes.ptr[condition].op not=? int32(71) {return}
+    let array=fixed_array_len(IndexWord(nodes.ptr[condition].a))
+    if array <? 0 {return}
+    let flags=IndexWord(locals.ptr[array].flags)
+    if flags & (LF_ASSIGNED | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_SHARED) not=? 0 {return}
+    let [known length]=integer_constant(IndexWord(nodes.ptr[condition].b))
+    if known and length >? 0 {index_lower_length_guards[0].push([array length])}
+}
+# 0: needs a bounds check, 1: in bounds, 2: in bounds but keep the null check (other
+# accesses to the array in the loop are checked and can build on it)
+index_safety=(arr:IndexWord idx0:IndexWord):>IndexWord=>$unsafe {
+    let idx=word_integer_value(idx0)
+    if lower_length_guards.length >? 0 and nodes.ptr[arr].kind =? 'ident' and nodes.ptr[arr].aux =? int32(1) {
+        loop guard in lower_length_guards {
+            if guard[0] =? IndexWord(nodes.ptr[arr].sym) {
+                let bound=positive_bound(idx true)
+                if bound >=? 0 and bound <? guard[1] {return 1}
+            }
+        }
+    }
+    if safe_index.length =? 0 {return 0}
+    if nodes.ptr[arr].kind not=? 'ident' or nodes.ptr[idx].kind not=? 'ident' {return 0}
+    if nodes.ptr[arr].aux not=? int32(1) or nodes.ptr[idx].aux not=? int32(1) {return 0}
+    let a=IndexWord(nodes.ptr[arr].sym)
+    let j=IndexWord(nodes.ptr[idx].sym)
+    loop p in safe_index {
+        if p[0] =? a and p[1] =? j {
+            if p[2] {return 2}
+            return 1
+        }
+    }
+    0
+}
+# does the loop body index array local a with anything but the loop variables in `ok`
+# (this loop's, and those of nested loops that are in bounds for a too)?
+other_index_of=(n:IndexWord a:IndexWord ok:array<int64> @seen:array<bool>):>bool=>$unsafe {
+    if n <=? 0 or n >=? seen.length or seen[n] {return false}
+    seen[n]=true
+    let k=nodes.ptr[n].kind
+    if k =? 'index' {
+        let b=IndexWord(nodes.ptr[n].a)
+        if nodes.ptr[b].kind =? 'ident' and nodes.ptr[b].aux =? int32(1) and IndexWord(nodes.ptr[b].sym) =? a {
+            let ix=word_integer_value(IndexWord(nodes.ptr[n].b))
+            if not (nodes.ptr[ix].kind =? 'ident' and nodes.ptr[ix].aux =? int32(1) and ok.contains(IndexWord(nodes.ptr[ix].sym))) {return true}
+        }
+    }
+    if k =? 'for_' {
+        let inner=ok
+        let it=IndexWord(nodes.ptr[n].a)
+        if IndexWord(nodes.ptr[n].aux) =? 0 and stable_loop_index(IndexWord(nodes.ptr[n].sym)) and range_bounds_arrays(it).contains(a) {inner.push(IndexWord(nodes.ptr[n].sym))}
+        return other_index_of(it a ok @seen) or other_index_of(IndexWord(nodes.ptr[n].b) a inner @seen)
+    }
+    # (a checked `for` returned above; a partial's d is a function instance)
+    loop c in [IndexWord(nodes.ptr[n].a) IndexWord(nodes.ptr[n].b) kid_c(n) kid_d(n)] {
+        if other_index_of(c a ok @seen) {return true}
+    }
+    loop i in [0..nkids(n)) {
+        if other_index_of(kid(n i) a ok @seen) {return true}
+    }
+    loop i in [0..nkids2(n)) {
+        if other_index_of(kid2(n i) a ok @seen) {return true}
+    }
+    false
+}
+# Share range facts between unit and stepped loops. Array paths can still be
+# hoisted when the counter is mutable, but only stable indices prove bounds.
+range_facts_begin=(s:IndexWord l:IndexWord):>[int64 int64 bool]=>$unsafe {
+    index_positive_epoch[0]=IndexWord(positive_epoch) + 1
+    let safe_arrs:array<int64>=[]
+    let nonneg=false
+    let bound:IndexWord=0
+    if nodes.ptr[s].aux =? 0 and stable_loop_index(l) {
+        let it=IndexWord(nodes.ptr[s].a)
+        nonneg=nonnegative_range(it)
+        if nonneg {
+            safe_arrs=range_bounds_arrays(it)
+            if not has_flag(it NF_INCLUSIVE) {
+                let hi=word_integer_value(IndexWord(nodes.ptr[it].b))
+                if nodes.ptr[hi].kind =? 'intrinsic' and (nodes.ptr[hi].aux as IN) =? IN.len and nkids(hi) =? 1 {bound=kid(hi 0)}
+            }
+        }
+    }
+    if nonneg {
+        index_nonneg_locals[0].push(l)
+        let hi=IndexWord(nodes.ptr[IndexWord(nodes.ptr[s].a)].b)
+        let limit:IndexWord=-1
+        if nodes.ptr[hi].kind =? 'int_lit' and not has_flag(hi NF_U64) and nodes.ptr[hi].ival >? 0 {
+            limit=nodes.ptr[hi].ival
+            if not has_flag(IndexWord(nodes.ptr[s].a) NF_INCLUSIVE) {limit -= 1}
+        }
+        if limit <? 0 and bound not=? 0 and tkind(ntype(bound)) =? 'array' {
+            limit=IndexWord(9223372036854775807) // max(IndexWord(1) IndexWord(tsize(telem(ntype(bound))))) - 1
+        }
+        index_nonneg_limits[0].push(limit)
+    }
+    let nfp=fp_begin(s l bound 0)
+    loop sa in safe_arrs {
+        let seen=fill(false nodes.length)
+        let ok:array<int64>=[l]
+        loop p in safe_index {
+            if p[0] =? sa {ok.push(p[1])}
+        }
+        index_safe_index[0].push([sa l other_index_of(IndexWord(nodes.ptr[s].b) sa ok @seen)])
+    }
+    [nfp safe_arrs.length nonneg]
+}
+range_facts_end=(facts:[int64 int64 bool]):>void=>$unsafe {
+    index_positive_epoch[0]=IndexWord(positive_epoch) + 1
+    loop _ in [0..facts[1]) {index_safe_index[0].pop();}
+    fp_end(facts[0])
+    if facts[2] {
+        index_nonneg_locals[0].pop();
+        index_nonneg_limits[0].pop();
+    }
+}
+
+
+# Bind Jo-owned scope stacks and generation once; reads stay direct.
+let index_positive_epoch:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let index_safe_index:ptr<array<[int64 int64 bool]>>=$unsafe (uint64(0) as ptr<array<[int64 int64 bool]>>)
+let index_nonneg_locals:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let index_nonneg_limits:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let index_lower_length_guards:ptr<array<[int64 int64]>>=$unsafe (uint64(0) as ptr<array<[int64 int64]>>)
+facts_index_proofs_bind=(positive_epoch:ptr<int64> safe_index:ptr<array<[int64 int64 bool]>> nonneg_locals:ptr<array<int64>> nonneg_limits:ptr<array<int64>> lower_length_guards:ptr<array<[int64 int64]>>):>int64=>{
+    index_positive_epoch=positive_epoch
+    index_safe_index=safe_index
+    index_nonneg_locals=nonneg_locals
+    index_nonneg_limits=nonneg_limits
+    index_lower_length_guards=lower_length_guards
+    0
+}

@@ -1,3 +1,4 @@
+use 'float_ops.dewy'
 use 'facts_slice_prep.dewy'
 use 'facts_values.dewy'
 use 'facts.jo'
@@ -485,4 +486,43 @@ fact_obliged = (n: int) -> bool:
     if mask & 32 != 0:
         loop i in [0..nkids2(n)):
             if fact_obliged(kid2(n, i)): return true
+    false
+
+fact_obligation_node = (n: int) -> bool:
+    k = nodes[n].kind
+    if nd_mutable_signatures.len() != 0 and nd_mutable_handle(n): return true
+    if k == .index: return not has_flag(n, NF_INBOUNDS) and fact_bounded_index(n)
+    if k == .binary:
+        if nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))) and is_int(ntype(int(nodes[n].b))) and not fact_literal_nonzero(int(nodes[n].b)): return true
+        return fact_shift_obliged(n)
+    if k == .assign: return fact_shift_obliged(n)
+    if k == .for_: return fact_stepped_loop(n) or fact_open_range(n)
+    if k == .conv:
+        if ff_integer_demand(n): return true
+        if exact_has_store(n) and not exact_decided(n) or nodes[n].aux == i32(int(CV.refinement)) or nodes[n].aux == i32(int(CV.arr2fixed)): return true
+        return nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT
+    if k == .call:
+        if wi_fact_calls.has(n) or fact_divisors.has(n) or fact_range_call(n) or nd_mutable_call(n) or fact_rational_constructor(n) and not fact_literal_nonzero(kid(n, 1)) or fact_rational_divmod(n): return true
+        if (fact_floor_call(n) != 0 and not fact_literal_nonzero(kid(n, 1))) or fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_power_call(n): return true
+        map = fact_map_call(n)
+        if map >= 2 and map <= 4 or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_gpu_index_call(n): return true
+        pool = fact_pool_call(n)
+        if pool >= 2 and pool <= 4: return true
+        # A fork closure's obligations start from its creator's facts.
+        if dir_assumed_bounds_any and fact_parallel_range_call(n): return true
+        if fact_library_call(n, "parallel_range") or fact_library_call(n, "parallel_map") or fact_parallel_array(n):
+            loop i in [0..nkids(n)):
+                arg = kid(n, i)
+                if nodes[arg].kind == .lambda:
+                    discovery_collect[0] = false
+                    if fact_obliged(int(nodes[arg].b)): return true
+        # (and so do a key callback's: fact_key_callback)
+        key = fact_key_callback(n)
+        if key > 0:
+            discovery_collect[0] = false
+            if fact_obliged(int(nodes[key].b)): return true
+        return false
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        return id == .static_assert or id == .runtime_assert or id == .assert or nodes[n].aux2 == i32(RANGE_EXHAUSTION) or id == .lend or id == .loan_length or id == .loan_store or id == .loan_address or id == .loan_load or id == .pop or id == .remove or id == .truncate
     false

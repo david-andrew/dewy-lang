@@ -1,0 +1,218 @@
+use 'checker_state.dewy'
+use 'checker_tokens.dewy'
+use 'ast.jo'
+use 'check.jo'
+use 'checked_eval.dewy'
+use 'expr.jo'
+use 'facts.jo'
+use 'isolation_ops.dewy'
+use 'lower.jo'
+use 'lower_group.dewy'
+use 'lower_storage.dewy'
+use 'lower_views.dewy'
+use 'types.jo'
+
+# A loop's control counter stays in range, but its user-visible variable can
+# be reassigned, passed by reference, or changed by a closure in the body.
+stable_loop_index = (l: int) -> bool:
+    if l < 0: return false
+    fl = int(locals[l].flags)
+    fl & (LF_ASSIGNED | LF_ALIAS | LF_CAPTURE | LF_BYREF | LF_ADDR) == 0 and not is_shared(l)
+# e is an integer expression that is never negative
+# The step-1 int/int64 boundary changes semantic type but preserves every bit
+# and value. Existing index/length proofs can look through just that boundary.
+# This is representation-specific: step 2 must prove a word representation first.
+word_integer_value = (n0: int) -> int:
+    n = n0
+    loop nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int_)):
+        inner = int(nodes[n].a)
+        source = prune(ntype(inner))
+        target = prune(ntype(n))
+        if not ((source == T_INT and target == T_MATH_INT) or (source == T_MATH_INT and target == T_INT)): break
+        n = inner
+    n
+is_nonneg = (e0: int) -> bool:
+    e = word_integer_value(e0)
+    if e == 0: return false
+    k = nodes[e].kind
+    if k == .int_lit: return nodes[e].ival >= 0
+    if k == .ident and nodes[e].aux == i32(int(SK.local)): return nonneg_locals.contains(int(nodes[e].sym))
+    if k == .intrinsic and (nodes[e].aux as IN) == .len: return true
+    # Positive operands alone do not prove a word-sized sum/product is
+    # nonnegative: it can overflow. Keep the check without a range proof.
+    false
+# A, if e is A.len() / len(A) for an array local A that is never modified, else -1
+fixed_array_len = (e0: int) -> int:
+    e = word_integer_value(e0)
+    if e == 0 or nodes[e].kind != .intrinsic or (nodes[e].aux as IN) != .len or nkids(e) != 1: return -1
+    a = kid(e, 0)
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return -1
+    ak = types[prune(ntype(a))].kind
+    if ak != .array and ak != .str_: return -1          # (a str's length changes only when it is assigned)
+    l = int(nodes[a].sym)
+    if not fixed_array_local(l): return -1
+    l
+# the length of array local l cannot change during this function
+fixed_array_local = (l: int) -> bool:
+    # element writes keep the length; writing the variable itself (or a mut parameter, which
+    # could be the caller's global) may not
+    fl = int(locals[l].flags)
+    if fl & (LF_RESIZED | LF_ALIAS | LF_BYREF) != 0 or is_shared(l): return false
+    if fl & LF_MUTPARAM != 0 and not ambient_length_stable(cur_fn): return false
+    true
+# x and y always have the same value: literals, unchanging locals and + - * of those
+same_value = (x: int, y: int) -> bool:
+    if x == 0 or y == 0 or nodes[x].kind != nodes[y].kind: return false
+    if nodes[x].kind == .conv:
+        return nodes[x].aux == nodes[y].aux and ntype(x) == ntype(y) and same_value(int(nodes[x].a), int(nodes[y].a))
+    k = nodes[x].kind
+    if k == .int_lit: return nodes[x].ival == nodes[y].ival
+    if k == .ident:
+        if nodes[x].aux != i32(int(SK.local)) or nodes[y].aux != i32(int(SK.local)) or nodes[x].sym != nodes[y].sym: return false
+        return int(locals[int(nodes[x].sym)].flags) & LF_ASSIGNED == 0
+    if k == .binary:
+        op = nodes[x].op as Tok
+        if nodes[y].op != nodes[x].op or (op != .plus and op != .minus and op != .star): return false
+        return same_value(int(nodes[x].a), int(nodes[y].a)) and same_value(int(nodes[x].b), int(nodes[y].b))
+    if k == .intrinsic:
+        a = fixed_array_len(x)
+        return a >= 0 and a == fixed_array_len(y)
+    false
+# A bounded ascending range with a nonnegative start never yields a negative
+# index. For steps, require ordered literal starts; dynamic/descending steps
+# keep their ordinary checks until there is a stronger proof.
+nonnegative_range = (it: int) -> bool:
+    if nodes[it].b == 0 or not is_nonneg(int(nodes[it].a)): return false
+    if not has_flag(it, NF_STEP): return true
+    a = int(nodes[it].a)
+    b = int(nodes[it].c)
+    nodes[a].kind == .int_lit and nodes[b].kind == .int_lit and nodes[b].ival > nodes[a].ival
+# the array locals whose length bounds the range `it`
+range_bounds_arrays = (it: int) -> int[]:
+    out: int[]
+    if not nonnegative_range(it) or has_flag(it, NF_INCLUSIVE): return out
+    hi = word_integer_value(int(nodes[it].b))
+    if hi == 0: return out
+    a = fixed_array_len(hi)
+    if a >= 0: out.push(a)
+    if nodes[hi].kind == .ident and nodes[hi].aux == i32(int(SK.local)):
+        n = int(nodes[hi].sym)
+        if int(locals[n].flags) & LF_ASSIGNED == 0:
+            if let b = len_of_local.get(n):
+                if fixed_array_local(b): out.push(b)
+    loop arr, e in array_len_expr:
+        if int(locals[arr].owner) == cur_fn and fixed_array_local(arr) and same_value(hi, e): out.push(arr)
+    out
+lower_length_guard = (n0: int):
+    if lower_length_guards.len() >= 16: return
+    n = n0
+    if nodes[n].kind == .exprstmt: n = int(nodes[n].a)
+    if nodes[n].kind != .if_ or nodes[n].c != 0: return
+    body = int(nodes[n].b)
+    if nodes[body].kind != .block or nkids(body) != 1 or nodes[kid(body, 0)].kind != .return_: return
+    condition = int(nodes[n].a)
+    if nodes[condition].kind != .binary or nodes[condition].aux != 0: return
+    if nodes[condition].op != i32(int(Tok.lt)): return
+    array = fixed_array_len(int(nodes[condition].a))
+    if array < 0: return
+    flags = int(locals[array].flags)
+    if flags & (LF_ASSIGNED | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_SHARED) != 0: return
+    known, length = integer_constant(int(nodes[condition].b))
+    if known and length > 0: index_lower_length_guards[0].push((array, length))
+# 0: needs a bounds check, 1: in bounds, 2: in bounds but keep the null check (other
+# accesses to the array in the loop are checked and can build on it)
+index_safety = (arr: int, idx0: int) -> int:
+    idx = word_integer_value(idx0)
+    if lower_length_guards.len() > 0 and nodes[arr].kind == .ident and nodes[arr].aux == i32(int(SK.local)):
+        loop guard in lower_length_guards:
+            if guard.0 == int(nodes[arr].sym):
+                bound = positive_bound(idx, true)
+                if bound >= 0 and bound < guard.1: return 1
+    if safe_index.len() == 0: return 0
+    if nodes[arr].kind != .ident or nodes[idx].kind != .ident: return 0
+    if nodes[arr].aux != i32(int(SK.local)) or nodes[idx].aux != i32(int(SK.local)): return 0
+    a = int(nodes[arr].sym)
+    j = int(nodes[idx].sym)
+    loop p in safe_index:
+        if p.0 == a and p.1 == j:
+            if p.2: return 2
+            return 1
+    0
+# does the loop body index array local a with anything but the loop variables in `ok`
+# (this loop's, and those of nested loops that are in bounds for a too)?
+other_index_of = (n: int, a: int, ok: int[], seen: mut bool[]) -> bool:
+    if n <= 0 or n >= seen.len() or seen[n]: return false
+    seen[n] = true
+    k = nodes[n].kind
+    if k == .index:
+        b = int(nodes[n].a)
+        if nodes[b].kind == .ident and nodes[b].aux == i32(int(SK.local)) and int(nodes[b].sym) == a:
+            ix = word_integer_value(int(nodes[n].b))
+            if not (nodes[ix].kind == .ident and nodes[ix].aux == i32(int(SK.local)) and ok.contains(int(nodes[ix].sym))): return true
+    if k == .for_:
+        inner = ok
+        it = int(nodes[n].a)
+        if int(nodes[n].aux) == 0 and stable_loop_index(int(nodes[n].sym)) and range_bounds_arrays(it).contains(a): inner.push(int(nodes[n].sym))
+        return other_index_of(it, a, ok, seen) or other_index_of(int(nodes[n].b), a, inner, seen)
+    # (a checked `for` returned above; a partial's d is a function instance)
+    loop c in [int(nodes[n].a), int(nodes[n].b), kid_c(n), kid_d(n)]:
+        if other_index_of(c, a, ok, seen): return true
+    loop i in [0..nkids(n)):
+        if other_index_of(kid(n, i), a, ok, seen): return true
+    loop i in [0..nkids2(n)):
+        if other_index_of(kid2(n, i), a, ok, seen): return true
+    false
+# Share range facts between unit and stepped loops. Array paths can still be
+# hoisted when the counter is mutable, but only stable indices prove bounds.
+range_facts_begin = (s: int, l: int) -> (int, int, bool):
+    index_positive_epoch[0] += 1
+    safe_arrs: int[]
+    nonneg = false
+    bound = 0
+    if nodes[s].aux == 0 and stable_loop_index(l):
+        it = int(nodes[s].a)
+        nonneg = nonnegative_range(it)
+        if nonneg:
+            safe_arrs = range_bounds_arrays(it)
+            if not has_flag(it, NF_INCLUSIVE):
+                hi = word_integer_value(int(nodes[it].b))
+                if nodes[hi].kind == .intrinsic and (nodes[hi].aux as IN) == .len and nkids(hi) == 1: bound = kid(hi, 0)
+    if nonneg:
+        index_nonneg_locals[0].push(l)
+        hi = int(nodes[int(nodes[s].a)].b)
+        limit = -1
+        if nodes[hi].kind == .int_lit and not has_flag(hi, NF_U64) and nodes[hi].ival > 0:
+            limit = nodes[hi].ival
+            if not has_flag(int(nodes[s].a), NF_INCLUSIVE): limit -= 1
+        if limit < 0 and bound != 0 and tkind(ntype(bound)) == .array:
+            limit = 9223372036854775807 / max(1, tsize(telem(ntype(bound)))) - 1
+        index_nonneg_limits[0].push(limit)
+    nfp = fp_begin(s, l, bound, 0)
+    loop sa in safe_arrs:
+        seen = fill(false, nodes.len())
+        ok = [l]
+        loop p in safe_index:
+            if p.0 == sa: ok.push(p.1)
+        index_safe_index[0].push((sa, l, other_index_of(int(nodes[s].b), sa, ok, seen)))
+    (nfp, safe_arrs.len(), nonneg)
+range_facts_end = (facts: (int, int, bool)):
+    index_positive_epoch[0] += 1
+    loop _ in [0..facts.1): index_safe_index[0].pop()
+    fp_end(facts.0)
+    if facts.2:
+        index_nonneg_locals[0].pop()
+        index_nonneg_limits[0].pop()
+
+
+index_positive_epoch: *(int)
+index_safe_index: *((int, int, bool)[])
+index_nonneg_locals: *(int[])
+index_nonneg_limits: *(int[])
+index_lower_length_guards: *((int, int)[])
+facts_index_proofs_bind = (positive_epoch: *(int), safe_index: *((int, int, bool)[]), nonneg_locals: *(int[]), nonneg_limits: *(int[]), lower_length_guards: *((int, int)[])) -> int:
+    index_positive_epoch = positive_epoch
+    index_safe_index = safe_index
+    index_nonneg_locals = nonneg_locals
+    index_nonneg_limits = nonneg_limits
+    index_lower_length_guards = lower_length_guards
+    0
