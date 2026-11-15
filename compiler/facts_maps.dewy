@@ -1,12 +1,12 @@
 $runtime_checks
 
 from p"ast.jo" import (NF_INDEX_CAPTURED NF_COMPREHENSION NF_GLOBAL NF_MAP_KEY NF_SPREAD has_flag kid nkids nodes)
-from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_PARAM LF_SHARED LF_SOAMUT fns globals lib_dir locals)
+from p"check.jo" import (value_hash_fns value_equal_fns LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_PARAM LF_SHARED LF_SOAMUT fns globals lib_dir locals)
 from p"checks_thin.dewy" import (readonly_global)
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"expr.jo" import (is_dewy_set_type ntype union_field_sources)
 from p"checks_thin_expr.dewy" import (is_map_type)
-from p"facts.jo" import (FACT_CAP FACT_FIELD_KEYS FACT_KEYS_POSITIONS FACT_KEYS_SOURCE FACT_KEY_SOURCE FACT_MAP_DENSE FACT_MAP_POSITIONS FactProjection FactState fact_comprehension_sources fact_comprehensions fact_ensured_keys_cache fact_grown_roots fact_key_paths fact_map_of_name fact_map_snapshot_name fact_name_contains fact_name_entry fact_name_get fact_name_has fact_name_insert_if_absent fact_name_pop fact_name_present fact_name_read fact_name_store fact_name_vals fact_place fact_policy fact_probe_on fact_project fact_query fact_selector_sources fact_speculating fact_terms)
+from p"facts.jo" import (fact_reflexive_keys fact_name_map_clear FACT_CAP FACT_FIELD_KEYS FACT_KEYS_POSITIONS FACT_KEYS_SOURCE FACT_KEY_SOURCE FACT_MAP_DENSE FACT_MAP_POSITIONS FactProjection FactState fact_comprehension_sources fact_comprehensions fact_ensured_keys_cache fact_grown_roots fact_key_paths fact_map_of_name fact_map_snapshot_name fact_name_contains fact_name_entry fact_name_get fact_name_has fact_name_insert_if_absent fact_name_pop fact_name_present fact_name_read fact_name_store fact_name_vals fact_place fact_policy fact_probe_on fact_project fact_query fact_selector_sources fact_speculating fact_terms)
 from p"facts_values.dewy" import (fact_domain fact_scalar fact_type)
 from p"facts_compare.dewy" import (fact_assume)
 from p"facts_index_writes.dewy" import (fact_bind fact_constant fact_new fact_set_bound)
@@ -25,10 +25,10 @@ from p"facts_pushes.dewy" import (fact_push_flow fact_push_only)
 from p"isolation_ops.dewy" import (isolation_children)
 from p"ownership.jo" import (ownership_decls)
 from p"ownership_types.dewy" import (ownership_fact_type)
-from p"refine.jo" import (is_total_dict refine_active refine_storage representation_type)
+from p"refine.jo" import (ref_interval is_total_dict refine_active refine_storage representation_type)
 from p"refinement_types.dewy" import (FactBound FactReason FactTerm)
 from p"string_domains.jo" import (domain_leaf)
-from p"types.jo" import (T_BOOL T_INT T_STR fields is_union prune struct_targ structs telem tkind types)
+from p"types.jo" import (is_int T_BOOL T_INT T_STR fields is_union prune struct_targ structs telem tkind types)
 from p"util.jo" import (files intern pos_file pos_in_lib)
 from p"witness_ops.dewy" import (wit_cause wit_key)
 
@@ -567,4 +567,142 @@ fact_map_check=(n:MapWord @s:FactState values:array<int64>):>void=>$unsafe {
         wit_cause(cause n)
         wit_key(n)
     }
+}
+
+from p"refine_siblings.dewy" import (ref_sib_map_read ref_sib_default_read)
+
+# Jo owns the memo and interned-name slots. Bind their places once; queries
+# retain direct reads and recursion publishes the same early negative guard.
+let map_reflexive_cache:ptr<dict<int64 bool>>=$unsafe (uint64(0) as ptr<dict<int64 bool>>)
+let map_clear_name_slot:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let map_pop_name_slot:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let map_get_name_slot:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+facts_map_queries_bind=(cache:ptr<dict<int64 bool>> clear_name:ptr<int64> pop_name:ptr<int64> get_name:ptr<int64>):>int64=>{
+    map_reflexive_cache=cache
+    map_clear_name_slot=clear_name
+    map_pop_name_slot=pop_name
+    map_get_name_slot=get_name
+    0
+}
+
+# Checked arena IDs; no element view survives recursive checking or growth.
+# Preserve depth-before-memo order and negative memo entries on every bailout.
+fact_reflexive_key=(t0:MapWord depth:MapWord=0):>bool=>$unsafe {
+    let t:MapWord=representation_type(prune(t0))
+    if is_int(t) and fact_scalar(t) or t =? T_STR or t =? T_BOOL {return true}
+    if depth >? 4 or tkind(t) not=? 'struct_' or is_map_type(t) or is_dewy_set_type(t) {return false}
+    let known=fact_reflexive_keys.get(t)
+    if known not=? none {return known}
+    map_reflexive_cache[0][t]=false
+    if not value_hash_fns.has(t) or not value_equal_fns.has(t) or value_hash_fns[t] not=? 0 {return false}
+    let si:MapWord=MapWord(types.ptr[t].st)
+    loop i in [0..MapWord(structs.ptr[si].nfields)) {
+        if not fact_reflexive_key(MapWord(fields.ptr[MapWord(structs.ptr[si].fields) + i].type) depth + 1) {return false}
+    }
+    let eq:MapWord=value_equal_fns[t]
+    if eq not=? 0 and (fns[eq].params.length not=? 2 or not fact_reflexive_eq(MapWord(fns.ptr[eq].body) fns[eq].params[0] fns[eq].params[1] depth)) {return false}
+    map_reflexive_cache[0][t]=true
+    true
+}
+
+# Ordered parameter aliases followed by fieldwise equality; no body rewrite.
+fact_reflexive_eq=(e0:MapWord a0:MapWord b0:MapWord depth:MapWord):>bool=>$unsafe {
+    let e=e0
+    let a=a0
+    let b=b0
+    if e >? 0 and nodes.ptr[e].kind =? 'block' and nkids(e) >=? 1 {
+        loop i in [0..MapWord(nkids(e)) - 1) {
+            let c:MapWord=kid(e i)
+            let init:MapWord=MapWord(nodes.ptr[c].b)
+            if nodes.ptr[c].kind not=? 'vardecl' or init <=? 0 or nodes.ptr[init].kind not=? 'ident' or MapWord(locals.ptr[MapWord(nodes.ptr[c].sym)].flags) & LF_ASSIGNED not=? 0 {return false}
+            if MapWord(nodes.ptr[init].sym) =? a {a=MapWord(nodes.ptr[c].sym)}
+            else if MapWord(nodes.ptr[init].sym) =? b {b=MapWord(nodes.ptr[c].sym)}
+            else {return false}
+        }
+        e=kid(e MapWord(nkids(e)) - 1)
+    }
+    loop e >? 0 and (nodes.ptr[e].kind =? 'return_' or nodes.ptr[e].kind =? 'exprstmt') {e=MapWord(nodes.ptr[e].a)}
+    if e <=? 0 {return false}
+    if nodes.ptr[e].kind =? 'and_' {return fact_reflexive_eq(MapWord(nodes.ptr[e].a) a b depth) and fact_reflexive_eq(MapWord(nodes.ptr[e].b) a b depth)}
+    let x:MapWord=0
+    let y:MapWord=0
+    # Tok.eq has frozen node-ABI ordinal 69.
+    if nodes.ptr[e].kind =? 'binary' and nodes.ptr[e].op =? int32(69) {
+        x=MapWord(nodes.ptr[e].a); y=MapWord(nodes.ptr[e].b)
+    }
+    else if nodes.ptr[e].kind =? 'call' and nodes.ptr[e].aux =? 0 and nkids(e) =? 2 {x=kid(e 0); y=kid(e 1)}
+    else {return false}
+    if nodes.ptr[x].kind not=? 'field' or nodes.ptr[y].kind not=? 'field' or nodes.ptr[x].name not=? nodes.ptr[y].name or nodes.ptr[x].aux <? 0 {return false}
+    let p:MapWord=MapWord(nodes.ptr[x].a)
+    let q:MapWord=MapWord(nodes.ptr[y].a)
+    if nodes.ptr[p].kind not=? 'ident' or nodes.ptr[q].kind not=? 'ident' or MapWord(nodes.ptr[p].sym) not=? a or MapWord(nodes.ptr[q].sym) not=? b {return false}
+    if not fact_reflexive_key(ntype(x) depth + 1) {return false}
+    if nodes.ptr[e].kind =? 'call' {
+        let ft=representation_type(prune(ntype(x)))
+        let f:MapWord=MapWord(nodes.ptr[e].sym)
+        if ft =? T_STR {return f >? 0 and fns.ptr[f].decl not=? 0 and pos_in_lib(nodes.ptr[MapWord(fns.ptr[f].decl)].pos)}
+        return tkind(ft) =? 'struct_' and value_equal_fns.get(ft) =? f
+    }
+    true
+}
+
+# Recognize the exact bundled dictionary operations; owners keep their hooks.
+fact_map_clear_call=(n:MapWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 1 {return false}
+    let d:MapWord=MapWord(fns.ptr[MapWord(nodes.ptr[n].sym)].decl)
+    if fact_name_map_clear =? 0 {map_clear_name_slot[0]=intern("clear")}
+    if d =? 0 or MapWord(nodes.ptr[d].name) not=? fact_name_map_clear or files[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/core/map.jo" {return false}
+    let t:MapWord=representation_type(ntype(kid(n 0)))
+    if not is_map_type(t) or ownership_decls.length not=? 0 and ownership_fact_type(ntype(kid(n 0))) {return false}
+    let kt=representation_type(struct_targ(MapWord(types.ptr[t].st) 0))
+    fact_scalar(kt) or kt =? T_STR
+}
+fact_map_bounded_call=(n:MapWord):>MapWord=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return 0}
+    let count:MapWord=nkids(n)
+    if count not=? 2 and count not=? 3 {return 0}
+    let d:MapWord=MapWord(fns.ptr[MapWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 or not pos_in_lib(nodes.ptr[d].pos) {return 0}
+    if fact_name_pop =? 0 {map_pop_name_slot[0]=intern("pop")}
+    if fact_name_get =? 0 {map_get_name_slot[0]=intern("get")}
+    let name:MapWord=MapWord(nodes.ptr[d].name)
+    let kind:MapWord=if name =? fact_name_pop {count - 1} else if name =? fact_name_get and count =? 3 {3} else {0}
+    if kind =? 0 {return 0}
+    let t:MapWord=representation_type(ntype(kid(n 0)))
+    if not is_map_type(t) or ownership_decls.length not=? 0 and ownership_fact_type(ntype(kid(n 0))) {return 0}
+    let kt=representation_type(struct_targ(MapWord(types.ptr[t].st) 0))
+    if fact_scalar(kt) or kt =? T_STR {kind} else {0}
+}
+
+# Only transfer writers borrow the state. Keep result creation before route
+# rejection, exposed-root invalidation, sibling proofs and projection order.
+fact_map_bounded=(n:MapWord @s:FactState values:array<int64> kind:MapWord):>MapWord=>$unsafe {
+    let domain=fact_domain(ntype(n) 'missing' n)
+    let held:MapWord=representation_type(ntype(kid(n 0)))
+    if is_int(fact_type(ntype(n))) {domain=ref_interval(struct_targ(MapWord(types.ptr[held].st) 1) domain)}
+    let result:MapWord=fact_new(@s domain FactTerm(type=ntype(n)))
+    if kind =? 1 or kind =? 2 {
+        let route=fact_receiver_route(n @s)
+        if route.root =? 0 {return 0}
+        let written=fact_place(route.root)
+        if written.declaration =? 0 {return 0}
+        if fact_exposed(written) {fact_forget(@s n 'call' false written true)}
+        fact_store_route(@s route fact_new(@s FactBound[] FactTerm(type=ntype(kid(n 0)))) n)
+    }
+    if kind =? 1 {ref_sib_map_read(@s values[0] result n)}
+    else {ref_sib_default_read(@s values[0] result values[2] kid(n 2) n)}
+    result
+}
+fact_map_clear=(n:MapWord @s:FactState):>bool=>$unsafe {
+    let target:MapWord=kid(n 0)
+    loop nodes.ptr[target].kind =? 'addr' or nodes.ptr[target].kind =? 'conv' {target=MapWord(nodes.ptr[target].a)}
+    let route=fact_receiver_route(n @s)
+    if route.root =? 0 {return false}
+    let written=fact_place(route.root)
+    if written.declaration =? 0 {return false}
+    if fact_exposed(written) {fact_forget(@s n 'call' false written true)}
+    let after:MapWord=fact_new(@s FactBound[] FactTerm(type=ntype(target)))
+    fact_add_projection(@s FactProjection(after (-1) false fact_constant(@s 0)))
+    fact_store_route(@s route after n)
+    true
 }

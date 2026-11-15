@@ -1,3 +1,4 @@
+use 'refine_siblings.dewy'
 use 'facts_values.dewy'
 use 'facts.jo'
 use 'facts_compare.dewy'
@@ -539,3 +540,122 @@ fact_map_check = (n: int, s: mut FactState, values: int[]):
         wit_key(n)
 
 # Exposure queries share the forgetting leaf.
+
+map_reflexive_cache: *({int: bool})
+map_clear_name_slot: *(int)
+map_pop_name_slot: *(int)
+map_get_name_slot: *(int)
+facts_map_queries_bind = (cache: *({int: bool}), clear_name: *(int), pop_name: *(int), get_name: *(int)) -> int:
+    map_reflexive_cache = cache
+    map_clear_name_slot = clear_name
+    map_pop_name_slot = pop_name
+    map_get_name_slot = get_name
+    0
+
+fact_reflexive_key = (t0: int, depth: int = 0) -> bool:
+    t = representation_type(prune(t0))
+    if is_int(t) and fact_scalar(t) or t == T_STR or t == T_BOOL: return true
+    if depth > 4 or tkind(t) != .struct_ or is_map_type(t) or is_dewy_set_type(t): return false
+    if let known = fact_reflexive_keys.get(t): return known
+    fact_reflexive_keys[t] = false
+    if not value_hash_fns.has(t) or not value_equal_fns.has(t) or value_hash_fns[t] != 0: return false
+    si = int(types[t].st)
+    loop i in [0..int(structs[si].nfields)):
+        if not fact_reflexive_key(int(fields[int(structs[si].fields) + i].type), depth + 1): return false
+    eq = value_equal_fns[t]
+    if eq != 0 and (fns[eq].params.len() != 2 or not fact_reflexive_eq(int(fns[eq].body), fns[eq].params[0], fns[eq].params[1], depth)): return false
+    fact_reflexive_keys[t] = true
+    true
+
+fact_reflexive_eq = (e0: int, a0: int, b0: int, depth: int) -> bool:
+    e = e0
+    a = a0
+    b = b0
+    # (a body block first binds its own `a` and `b` from the parameters: compare those)
+    if e > 0 and nodes[e].kind == .block and nkids(e) >= 1:
+        loop i in [0..nkids(e) - 1):
+            c = kid(e, i)
+            init = int(nodes[c].b)
+            if nodes[c].kind != .vardecl or init <= 0 or nodes[init].kind != .ident or int(locals[int(nodes[c].sym)].flags) & LF_ASSIGNED != 0: return false
+            if int(nodes[init].sym) == a: a = int(nodes[c].sym)
+            else if int(nodes[init].sym) == b: b = int(nodes[c].sym)
+            else: return false
+        e = kid(e, nkids(e) - 1)
+    loop e > 0 and (nodes[e].kind == .return_ or nodes[e].kind == .exprstmt): e = int(nodes[e].a)
+    if e <= 0: return false
+    if nodes[e].kind == .and_: return fact_reflexive_eq(int(nodes[e].a), a, b, depth) and fact_reflexive_eq(int(nodes[e].b), a, b, depth)
+    x = 0; y = 0
+    # (any representation's `=?`, text's and an exact integer's too: the fields' types decide)
+    if nodes[e].kind == .binary and nodes[e].op == i32(int(Tok.eq)):
+        x = int(nodes[e].a); y = int(nodes[e].b)
+    else if nodes[e].kind == .call and nodes[e].aux == 0 and nkids(e) == 2: x = kid(e, 0); y = kid(e, 1)
+    else: return false
+    if nodes[x].kind != .field or nodes[y].kind != .field or nodes[x].name != nodes[y].name or nodes[x].aux < 0: return false
+    p = int(nodes[x].a); q = int(nodes[y].a)
+    if nodes[p].kind != .ident or nodes[q].kind != .ident or int(nodes[p].sym) != a or int(nodes[q].sym) != b: return false
+    if not fact_reflexive_key(ntype(x), depth + 1): return false
+    # (a record field compared through its own equality, which must be that one)
+    # (text compared by the library's own text equality)
+    if nodes[e].kind == .call:
+        ft = representation_type(prune(ntype(x)))
+        f = int(nodes[e].sym)
+        if ft == T_STR: return f > 0 and fns[f].decl != 0 and pos_in_lib(nodes[int(fns[f].decl)].pos)
+        return tkind(ft) == .struct_ and value_equal_fns.get(ft) == f
+    true
+
+fact_map_clear_call = (n: int) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 1: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if fact_name_map_clear == 0: fact_name_map_clear = intern("clear")
+    if d == 0 or int(nodes[d].name) != fact_name_map_clear or files[pos_file(nodes[d].pos)].path != lib_dir + "/core/map.jo": return false
+    t = representation_type(ntype(kid(n, 0)))
+    if not is_map_type(t) or ownership_decls.len() != 0 and ownership_fact_type(ntype(kid(n, 0))): return false
+    kt = representation_type(struct_targ(int(types[t].st), 0))
+    fact_scalar(kt) or kt == T_STR
+
+fact_map_bounded_call = (n: int) -> int:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return 0
+    count = nkids(n)
+    if count != 2 and count != 3: return 0
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0 or not pos_in_lib(nodes[d].pos): return 0
+    if fact_name_pop == 0: fact_name_pop = intern("pop")
+    if fact_name_get == 0: fact_name_get = intern("get")
+    name = int(nodes[d].name)
+    kind = if name == fact_name_pop: count - 1 else if name == fact_name_get and count == 3: 3 else: 0
+    if kind == 0: return 0
+    t = representation_type(ntype(kid(n, 0)))
+    if not is_map_type(t) or ownership_decls.len() != 0 and ownership_fact_type(ntype(kid(n, 0))): return 0
+    kt = representation_type(struct_targ(int(types[t].st), 0))
+    if fact_scalar(kt) or kt == T_STR: kind else: 0
+
+fact_map_bounded = (n: int, s: mut FactState, values: int[], kind: int) -> int:
+    # (an entry's value holds the dictionary's value type: `>=? 0` unless it states its own lower bound)
+    domain = fact_domain(ntype(n), .missing, n)
+    held = representation_type(ntype(kid(n, 0)))
+    if is_int(fact_type(ntype(n))): domain = ref_interval(struct_targ(int(types[held].st), 1), domain)
+    result = fact_new(s, domain, FactTerm(type = ntype(n)))
+    if kind == 1 or kind == 2:
+        # (a removal rewrites the dictionary field alone: its siblings keep what is known of them)
+        route = fact_receiver_route(n, s)
+        if route.root == 0: return 0
+        written = fact_place(route.root)
+        if written.declaration == 0: return 0
+        if fact_exposed(written): fact_forget(s, n, .call, false, written, true)
+        fact_store_route(s, route, fact_new(s, FactBound(), FactTerm(type = ntype(kid(n, 0)))), n)
+    if kind == 1: ref_sib_map_read(s, values[0], result, n)
+    else: ref_sib_default_read(s, values[0], result, values[2], kid(n, 2), n)
+    result
+
+fact_map_clear = (n: int, s: mut FactState) -> bool:
+    target = kid(n, 0)
+    loop nodes[target].kind == .addr or nodes[target].kind == .conv: target = int(nodes[target].a)
+    route = fact_receiver_route(n, s)
+    if route.root == 0: return false
+    written = fact_place(route.root)
+    if written.declaration == 0: return false
+    if fact_exposed(written): fact_forget(s, n, .call, false, written, true)
+    after = fact_new(s, FactBound(), FactTerm(type = ntype(target)))
+    fact_add_projection(s, FactProjection(after, -1, false, fact_constant(s, 0)))
+    fact_store_route(s, route, after, n)
+    true

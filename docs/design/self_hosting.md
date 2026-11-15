@@ -327,6 +327,17 @@ Cost follows requested type representation/ownership queries, then at most 62
 actuals plus existing route and binding lookups. Jo keeps caches and owner state;
 no callback, copied context or extra whole-program scan is introduced.
 
+`facts_maps.dewy` owns reflexive-key classification and its fieldwise-equality
+walk, plus bounded dictionary reads and clear transfers. Jo retains the memo
+and interned names, with write places bound once. Preserve the depth check before
+memo lookup, early negative recursion guard, ordered parameter aliases, and exact
+bundled-operation identity. Reads remain queries; only transfer writers borrow
+mutable `FactState`. Result creation, route rejection, exposed-root invalidation
+and sibling/projection publication keep their original order and snapshots.
+Work follows demanded fields/equality syntax and existing route/projection costs;
+there is no new pass, cache copy or callback per field. Arena reads are reacquired
+after recursive services, and the depth-four key budget is unchanged.
+
 ## Route beyond the checker
 
 Planning baseline: `3449ea6a1`; physical lines including comments/blanks, excluding
