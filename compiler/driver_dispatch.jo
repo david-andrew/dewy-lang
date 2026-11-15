@@ -1,0 +1,32 @@
+use 'driver_cli.dewy'
+use 'repl_drive.dewy'
+use 'lsp_drive.dewy'
+use 'new_project.dewy'
+use 'formatter_cli.dewy'
+use 'pkg_ops.dewy'
+
+driver_cold_dispatch = (a: str[], lib_dir: str) -> bool:
+    if a.len() >= 2 and a[1] == "--print-lib":
+        if a.len() != 2: usage(2)
+        print(lib_dir)
+        return true
+    # no file: the interactive prompt at a terminal, else the program on standard input
+    if a.len() < 2:
+        if stdin_is_terminal():
+            repl_main()
+            return true
+        run_stdin()
+        return true
+    if a[1] == "lsp":
+        lsp_main()
+        return true
+    if a[1] == "new":
+        new_project(lib_dir, a)
+        return true
+    if a[1] == "fmt":
+        fmt_main(a)
+        return true
+    if a[1] == "add":
+        pkg_add_main(a)
+        return true
+    false

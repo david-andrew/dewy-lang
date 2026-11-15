@@ -515,10 +515,7 @@ main = ():
     if a.len() >= 2 and (a[1] == "build" or a[1] == "check" or a[1] == "test" or a[1] == "run" or ends_with(a[1], ".jo") or ends_with(a[1], ".dewy")): more_errors = true
     lib_dir = find_lib_dir()
     lib_root = lib_dir
-    if a.len() >= 2 and a[1] == "--print-lib":
-        if a.len() != 2: usage(2)
-        print(lib_dir)
-        return
+    if driver_cold_dispatch(a, lib_dir): return
     # (dewy watch on Windows: each build in a process of its own: watch.jo, w32_compile)
     when TARGET == "windows":
         if a.len() >= 8 and a[1] == "watch" and a[2] == "--build":
@@ -526,13 +523,6 @@ main = ():
             if a.len() > 9: cli_mode = if a[9] == "1": "release" else if a[9] == "d": "debug" else: ""
             watch_build_child(a[3], a[4], a[5], a[6] == "1", a[7])
             return
-    # no file: the interactive prompt at a terminal, else the program on standard input
-    if a.len() < 2:
-        if stdin_is_terminal():
-            repl_main()
-            return
-        run_stdin()
-        return
     if a[1] == "build":
         if a.len() < 3: usage()
         debug_info = true
@@ -580,18 +570,6 @@ main = ():
         if len(made) == 0: exit(1)
         # (where it is, said at a terminal: a script that builds gets no line it did not ask for)
         if is_terminal(): print("made {made}")
-        return
-    if a[1] == "lsp":
-        lsp_main()
-        return
-    if a[1] == "new":
-        new_project(lib_dir, a)
-        return
-    if a[1] == "fmt":
-        fmt_main(a)
-        return
-    if a[1] == "add":
-        pkg_add_main(a)
         return
     # (building and running fetch the packages a program names; the language server does not)
     pkg_fetch = true
@@ -708,3 +686,5 @@ use 'lexer_scan.dewy'
 use 'driver_timing.dewy'
 
 use 'driver_options.dewy'
+
+use 'driver_dispatch.dewy'

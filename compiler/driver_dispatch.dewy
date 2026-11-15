@@ -1,0 +1,29 @@
+$runtime_checks
+
+from p"driver_cli.dewy" import (usage stdin_is_terminal run_stdin)
+from p"repl_drive.dewy" import repl_main
+from p"lsp_drive.dewy" import lsp_main
+from p"new_project.dewy" import new_project
+from p"formatter_cli.dewy" import fmt_main
+from p"pkg_ops.dewy" import pkg_add_main
+
+# The argument and compile state stay in Jo. These commands finish without
+# entering its build/check/run/watch path.
+driver_cold_dispatch=(a:array<string> lib_dir:string):>bool=>{
+    if a.length >=? 2 and a[1] =? "--print-lib" {
+        if a.length not=? 2 {usage(2);}
+        printl(lib_dir);
+        return true
+    }
+    # No file: a terminal starts the prompt; a pipe supplies the program.
+    if a.length <? 2 {
+        if stdin_is_terminal() {repl_main(); return true}
+        run_stdin();
+        return true
+    }
+    if a[1] =? "lsp" {lsp_main(); return true}
+    if a[1] =? "new" {new_project(lib_dir a); return true}
+    if a[1] =? "fmt" {fmt_main(a); return true}
+    if a[1] =? "add" {pkg_add_main(a); return true}
+    false
+}
