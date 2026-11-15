@@ -287,8 +287,8 @@ walk costs O(visited syntax edges) and retains no arena view across calls.
 Runtime-only obligations still publish the deferred flag before traversal
 continues; exact-width demands remain mandatory.
 
-`facts_index_proofs.dewy` owns lexical range/index proofs and their scope entry
-and exit. Jo retains the generation, local-bound maps and scope-stack headers;
+`facts_index_proofs.dewy` owns lexical range/index proofs, positive-bound
+queries, write collection and scope entry/exit. Jo retains the generation, local-bound maps and scope-stack headers;
 writes use places bound once, with direct reads and no callback per value.
 Word conversion and value-equivalence walks follow only requested expressions;
 array-bound enumeration scans the existing local map and preserves duplicates.
@@ -297,6 +297,14 @@ snapshots. Guards retain the 16-entry cap, ordered first match and block lifetim
 Entering and leaving a range invalidates the positive-bound cache at the same
 points and preserves the lowerer's frame boundary. Arena IDs are checked by the
 caller; raw reads retain no view across calls that can grow storage.
+Positive-bound memo arrays and the per-function write map remain Jo-owned, with
+write places bound once. Cache hits are O(1); misses visit only demanded
+expression edges, and collection retains the existing once-per-function write
+replay. Reentrant collection can grow memo arrays, so publication reacquires their
+headers. Integer bounds retain signed-word overflow guards and the `-1` unknown
+sentinel; collecting writes cannot consume local bounds as circular assumptions.
+Ordered range assumptions retain first-match behavior, and snapshots preserve
+copy-on-write semantics across cache growth and write-summary updates.
 
 ## Route beyond the checker
 

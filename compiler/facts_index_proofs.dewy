@@ -3,13 +3,22 @@ from p"ast.jo" import (NF_INCLUSIVE NF_STEP NF_U64 has_flag kid kid2 kid_c kid_d
 from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_MUTPARAM LF_RESIZED LF_SHARED locals)
 from p"checked_eval.dewy" import (cx_token)
 from p"expr.jo" import (CV IN integer_constant ntype)
-from p"facts.jo" import (array_len_expr len_of_local lower_length_guards nonneg_limits nonneg_locals positive_bound positive_epoch safe_index)
+from p"facts.jo" import (array_len_expr len_of_local lower_length_guards nonneg_limits nonneg_locals positive_epoch safe_index)
 from p"isolation_ops.dewy" import (ambient_length_stable)
 from p"lower.jo" import (cur_fn)
 from p"lower_group.dewy" import (fp_begin)
 from p"lower_storage.dewy" import (is_shared)
 from p"lower_views.dewy" import (fp_end)
 from p"types.jo" import (T_INT T_MATH_INT prune telem tkind tsize types)
+
+from p"ast.jo" import (NF_GLOBAL)
+from p"check.jo" import (FK_LAMBDA LF_DECL LF_ELEMALIAS LF_EXPOSED LF_PARAM LF_QUIET LF_SOAELEM fns target_arm64 target_wasm)
+from p"directives.jo" import (dir_assumed_bounds_any dir_name_assumed_bounds dir_value)
+from p"exact.jo" import (exact_has_node exact_representation)
+from p"facts.jo" import (fact_parallel_bounds positive_bounds positive_bounds_fn positive_cache positive_collecting_writes positive_stamp)
+from p"lower_scalars.dewy" import (positive_modulus)
+from p"math_lower.jo" import (math_word_limits)
+from p"math_ops.dewy" import (math_prepare_writes)
 
 IndexWord:type=int64<overflow='wrap'>
 # A loop's control counter stays in range, but its user-visible variable can
@@ -260,4 +269,150 @@ facts_index_proofs_bind=(positive_epoch:ptr<int64> safe_index:ptr<array<[int64 i
     index_nonneg_limits=nonneg_limits
     index_lower_length_guards=lower_length_guards
     0
+}
+
+
+# Jo owns memo headers and function identity; bind their write places once.
+let positive_place_cache:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let positive_place_stamp:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let positive_place_bounds_fn:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let positive_place_bounds:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
+facts_positive_bind=(positive_cache:ptr<array<int64>> positive_stamp:ptr<array<int64>> positive_bounds_fn:ptr<int64> positive_bounds:ptr<dict<int64 int64>>):>int64=>{
+    positive_place_cache=positive_cache
+    positive_place_stamp=positive_stamp
+    positive_place_bounds_fn=positive_bounds_fn
+    positive_place_bounds=positive_bounds
+    0
+}
+
+# Upper bound of a nonnegative integer expression, or -1 when unknown.
+# The bound itself must fit the analysis host word; wider results are unknown.
+# During write collection, do not use local bounds (no circular assumptions).
+positive_bound=(n:IndexWord use_locals:bool):>IndexWord=>$unsafe {
+    if not use_locals {return positive_bound_value(n false)}
+    if n >=? positive_cache.length {
+        positive_place_cache[0].resize(max(n + 1 IndexWord(nodes.length)))
+        positive_place_stamp[0].resize(positive_cache.length)
+    }
+    if positive_stamp.ptr[n] =? positive_epoch {return positive_cache.ptr[n]}
+    let value=positive_bound_value(n true)
+    positive_place_cache[0].ptr[n]=value
+    positive_place_stamp[0].ptr[n]=positive_epoch
+    value
+}
+# One cache entry per expression in a lowering context. Statements and range
+# scopes advance the epoch; no facts are reused across changed loop assumptions.
+# O(demanded expression nodes/edges) per context, O(N) indexed storage.
+positive_bound_value=(n:IndexWord use_locals:bool):>IndexWord=>$unsafe {
+    if n =? 0 {return -1}
+    let t=exact_representation(ntype(n))
+    if types.ptr[t].kind not=? 'int_' {return -1}
+    # An exact conversion is an unrounded intermediate until its store. Its
+    # destination type must not hide the source range from that obligation.
+    if exact_has_node(n) and nodes.ptr[n].kind =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.int_)) or nodes.ptr[n].aux =? int32(int64(CV.none_))) {
+        return positive_bound(IndexWord(nodes.ptr[n].a) use_locals)
+    }
+    if not types.ptr[t].sign and IndexWord(types.ptr[t].bits) <? 64 and not exact_has_node(n) {return (IndexWord(1) << IndexWord(types.ptr[t].bits)) - 1}
+    if t not=? T_INT and t not=? T_MATH_INT {return -1}
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' {
+        if has_flag(n NF_U64) or nodes.ptr[n].ival <? 0 {return -1}
+        return nodes.ptr[n].ival
+    }
+    # Literal regions own their callback. Its immutable formal is bounded
+    # even while collecting the writes of the source-level parameter binding.
+    if not target_wasm and not target_arm64 and k =? 'ident' and nodes.ptr[n].aux =? int32(1) {
+        let l=IndexWord(nodes.ptr[n].sym)
+        if IndexWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_MUTPARAM | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_EXPOSED | LF_SHARED) =? 0 and cur_fn >? 0 and fns[cur_fn].kind =? FK_LAMBDA and fns[cur_fn].params.length =? 1 and fns[cur_fn].params[0] =? l {
+            let bound=fact_parallel_bounds.get(cur_fn)
+            if bound not=? none {
+                if not bound.wide and bound.lo >=? 0 {return bound.hi}
+            }
+        }
+    }
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(1) and use_locals {
+        let limit=math_word_limits.get(IndexWord(nodes.ptr[n].sym))
+        if limit not=? none {return limit}
+        loop i in 0.. and local in nonneg_locals {
+            if local =? IndexWord(nodes.ptr[n].sym) {return nonneg_limits[i]}
+        }
+        let l=IndexWord(nodes.ptr[n].sym)
+        let fl=IndexWord(locals.ptr[l].flags)
+        if fl & LF_DECL =? 0 or fl & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_SOAELEM | LF_ELEMALIAS | LF_QUIET) not=? 0 {return -1}
+        if positive_bounds_fn not=? cur_fn {
+            positive_place_bounds_fn[0]=cur_fn
+            positive_place_bounds[0].clear()
+            math_prepare_writes()
+        }
+        return positive_bounds.get(l) ?? -1
+    }
+    if k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.int_)) or nodes.ptr[n].aux =? int32(int64(CV.fixed_store))) {
+        return positive_bound(IndexWord(nodes.ptr[n].a) use_locals)
+    }
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.len)) and nkids(n) =? 1 {
+        t=prune(ntype(kid(n 0)))
+        # (no allocation outgrows the address space: 2^56 bytes on any target)
+        if types.ptr[t].kind =? 'array' {
+            if dir_value(dir_name_assumed_bounds nodes.ptr[n].pos) =? 1 {return -1}
+            # An initializer outside a nested opt-out must not seed an
+            # assumed local range later reused inside that opt-out.
+            if positive_collecting_writes and dir_assumed_bounds_any {return -1}
+            return if tsize(telem(t)) >? 0 {(IndexWord(1) << 56) // IndexWord(tsize(telem(t)))} else {9223372036854775807}
+        }
+    }
+    let modulus:IndexWord=positive_modulus(n)
+    if modulus >? 0 {return modulus - 1}
+    if k not=? 'binary' or nodes.ptr[n].aux not=? 0 {return -1}
+    let op=cx_token(IndexWord(nodes.ptr[n].op))
+    if op =? 'amp' {
+        let a=positive_bound(IndexWord(nodes.ptr[n].a) use_locals)
+        let b=positive_bound(IndexWord(nodes.ptr[n].b) use_locals)
+        if a >=? 0 and b >=? 0 {return min(a b)}
+        return max(a b)
+    }
+    if op not=? 'plus' and op not=? 'star' {return -1}
+    let a=positive_bound(IndexWord(nodes.ptr[n].a) use_locals)
+    let b=positive_bound(IndexWord(nodes.ptr[n].b) use_locals)
+    if a <? 0 or b <? 0 {return -1}
+    if op =? 'plus' {
+        if a >? IndexWord(9223372036854775807) - b {return -1}
+        return a + b
+    }
+    if b =? 0 {return 0}
+    if a >? IndexWord(9223372036854775807) // b {return -1}
+    a * b
+}
+positive_local_write=(l:IndexWord bound:IndexWord):>void=>$unsafe {
+    if l <=? 0 or IndexWord(locals.ptr[l].owner) not=? cur_fn {return}
+    let fl=IndexWord(locals.ptr[l].flags)
+    let skip=LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_SOAELEM | LF_ELEMALIAS | LF_QUIET
+    if fl & LF_DECL =? 0 or fl & skip not=? 0 or (prune(IndexWord(locals.ptr[l].type)) not=? T_INT and prune(IndexWord(locals.ptr[l].type)) not=? T_MATH_INT) {return}
+    let old=positive_bounds.get(l) ?? bound
+    if old <? 0 or bound <? 0 {positive_place_bounds[0][l]=-1}
+    else {positive_place_bounds[0][l]=max(old bound)}
+}
+positive_target_write=(n:IndexWord bound:IndexWord):>void=>$unsafe {
+    if nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].aux =? int32(1) {
+        positive_local_write(IndexWord(nodes.ptr[n].sym) bound)
+    }
+    else if nodes.ptr[n].kind =? 'tuple' {
+        loop i in [0..nkids(n)) {positive_target_write(kid(n i) (-1))}
+    }
+}
+positive_write=(n:IndexWord):>void=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'vardecl' and not has_flag(n NF_GLOBAL) {
+        if nkids(n) =? 0 {
+            let b=IndexWord(nodes.ptr[n].b)
+            positive_local_write(IndexWord(nodes.ptr[n].sym) if b =? 0 {0} else {positive_bound(b false)})
+        }
+        else {
+            loop i in [0..nkids(n)) {positive_local_write(IndexWord(nodes.ptr[kid(n i)].sym) (-1))}
+        }
+    }
+    if k =? 'assign' {
+        let bound:IndexWord=-1
+        if nodes.ptr[n].op =? int32(47) and nodes.ptr[n].aux =? 0 {bound=positive_bound(IndexWord(nodes.ptr[n].b) false)}
+        positive_target_write(IndexWord(nodes.ptr[n].a) bound)
+    }
 }
