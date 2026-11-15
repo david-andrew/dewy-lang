@@ -1,0 +1,32 @@
+$runtime_checks
+
+from p"@lib/core/os.jo" import (eprint exit)
+from p"driver_cli.dewy" import usage
+from p"main.jo" import DEWY_CORE_VERSION
+
+CliOptionWord:type=int64<overflow='wrap'>
+
+# Keep the build/run argument state in its Jo owner. Only these early commands
+# return here; a program's own --help remains one of that program's arguments.
+driver_early_options=(a:array<string>):>bool=>{
+    if a.length >=? 2 and (a[1] =? "--version" or a[1] =? "version") {
+        printl("dewy-core {DEWY_CORE_VERSION}");
+        return true
+    }
+    if a.length >=? 2 and (a[1] =? "--help" or a[1] =? "help" or a[1] =? "-h") {usage(0);}
+    if a.length >=? 3 and (a[1] =? "build" or a[1] =? "check" or a[1] =? "test" or a[1] =? "fmt" or a[1] =? "new" or a[1] =? "watch") {
+        loop i in 0.. and option in a {
+            let index:CliOptionWord=i
+            if index >=? 2 and (option =? "--help" or option =? "-h") {usage(0);}
+        }
+    }
+    if a.length >=? 2 and (a[1] =? "update" or a[1] =? "upgrade") {
+        eprint("dewy-core: update this toolchain by rebuilding from the Dewy repository; see docs/DEVELOPMENT.md");
+        exit(2);
+    }
+    if a.length >=? 2 and a[1] =? "add" {
+        eprint("dewy-core: '{a[1]}' is not yet available for Dewy; see docs/DEVELOPMENT.md");
+        exit(2);
+    }
+    false
+}

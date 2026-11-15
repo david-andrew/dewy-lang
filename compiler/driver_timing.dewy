@@ -1,0 +1,13 @@
+$runtime_checks
+
+from p"@lib/core/fmt.jo" import __format_valid
+from p"@lib/core/os.jo" import (env eprint time)
+
+# Use the formatter primitive: the seed reader cannot read fmt's forwarding prelude.
+# DriverHost receives these noncapturing callbacks once from the Jo owner.
+driver_release_timing=(rt0:float64 rt1:float64 rt2:float64):>void=>{
+    if env("DEWY_PAR_TIME") not=? none {eprint("release: optimize {__format_valid((rt1 - rt0) * 1000.0 ".1f")} ms, inline {__format_valid((rt2 - rt1) * 1000.0 ".1f")} ms, versioning and licm {__format_valid((time() - rt2) * 1000.0 ".1f")} ms")}
+}
+driver_emit_timing=(t0:float64):>void=>{
+    if env("DEWY_PAR_TIME") not=? none {eprint("emit: here, {__format_valid((time() - t0) * 1000.0 ".1f")} ms")}
+}

@@ -153,10 +153,6 @@ img_text_addr = 0
 img_ro_addr = 0
 img_data_addr = 0
 
-driver_release_timing = (rt0: f64, rt1: f64, rt2: f64):
-    if env("DEWY_PAR_TIME") != none: eprint("release: optimize {(rt1 - rt0) * 1000.0:.1} ms, inline {(rt2 - rt1) * 1000.0:.1} ms, versioning and licm {(time() - rt2) * 1000.0:.1} ms")
-driver_emit_timing = (t0: f64):
-    if env("DEWY_PAR_TIME") != none: eprint("emit: here, {(time() - t0) * 1000.0:.1} ms")
 driver_context = DriverState(&ir, &kc_fn, &rel_fns, &rel_by_index, &lower_only, &opt_release, &dbg_on, &watch_build, &repl_image, &host_ir, &dump, &target_wasm, &target_arm64, &fz_ready)
 driver_version = (): loop_versioning()
 driver_services = DriverHost(optimize, fast_inline_into, fast_vectorize, driver_version, o_licm, dump_host_ir, dump_ir, wasm_collect, arm64_function, x64_function, inlinable, inline_into, fast_inline_prepare, emit_parallel, fz_emit, ic_phase, ic_lf, ic_restore, time, driver_release_timing, driver_emit_timing)
@@ -493,23 +489,7 @@ main = ():
         dc_eager = true
         a = [a[0]] + a[2..]
     a = internal_options(a)
-    if a.len() >= 2 and (a[1] == "--version" or a[1] == "version"):
-        print("dewy-core {DEWY_CORE_VERSION}")
-        return
-    if a.len() >= 2 and (a[1] == "--help" or a[1] == "help" or a[1] == "-h"): usage(0)
-    # (dewy build --help: the commands' options, not a file named --help; a program's own
-    # arguments, as in `dewy game.jo --help`, stay its)
-    if a.len() >= 3 and (a[1] == "build" or a[1] == "check" or a[1] == "test" or a[1] == "fmt" or a[1] == "new" or a[1] == "watch"):
-        hi = 2
-        loop hi < a.len():
-            if a[hi] == "--help" or a[hi] == "-h": usage(0)
-            hi += 1
-    if a.len() >= 2 and (a[1] == "update" or a[1] == "upgrade"):
-        eprint("dewy-core: update this toolchain by rebuilding from the Dewy repository; see docs/DEVELOPMENT.md")
-        exit(2)
-    if a.len() >= 2 and a[1] == "add":
-        eprint("dewy-core: '{a[1]}' is not yet available for Dewy; see docs/DEVELOPMENT.md")
-        exit(2)
+    if driver_early_options(a): return
     # (the next errors after one in a function: next_error_run, ide.jo)
     if a.len() > 4 and a[1] == "--skip-fns":
         # (and the errors the runs before found: position, then the error as shown)
@@ -724,3 +704,7 @@ main = ():
 
 
 use 'lexer_scan.dewy'
+
+use 'driver_timing.dewy'
+
+use 'driver_options.dewy'
