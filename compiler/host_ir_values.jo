@@ -1,0 +1,7 @@
+# Versioned build-tool interchange, not a public program backend. Export after
+# the ordinary scalar optimization passes; unknown operations fail in c_host.py.
+dump_host_values = (name: str, values):
+    # Explicit widening also works in the intentionally small C bootstrap.
+    wide: int[]
+    loop x in values: wide.push(int(x))
+    print("{name} {wide}")

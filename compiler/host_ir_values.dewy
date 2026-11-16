@@ -1,0 +1,17 @@
+# Versioned build-tool interchange: explicitly widen bytes and machine words.
+$runtime_checks
+from p"@lib/core/fmt.jo" import __fmt
+from p"@lib/core/rt.jo" import (__print_str __str_from_bytes)
+HostDumpWord:type=int64<overflow='wrap'>
+
+dump_host_values=<T>(name:string values:array<T>):>void=>{
+    let wide:array<int64>=[]
+    loop x in values {wide.push(HostDumpWord(x));}
+    # This interchange uses Jo's comma-separated array format. Write directly
+    # into the interpolation buffer, retaining the original allocation shape.
+    let text:array<uint8>=[]
+    __fmt(@text name);
+    __fmt(@text " ");
+    __fmt(@text wide);
+    __print_str(__str_from_bytes(text));
+}

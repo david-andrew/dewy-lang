@@ -158,13 +158,6 @@ driver_version = (): loop_versioning()
 driver_services = DriverHost(optimize, fast_inline_into, fast_vectorize, driver_version, o_licm, dump_host_ir, dump_ir, wasm_collect, arm64_function, x64_function, inlinable, inline_into, fast_inline_prepare, emit_parallel, fz_emit, ic_phase, ic_lf, ic_restore, time, driver_release_timing, driver_emit_timing)
 driver_binding = driver_bind(&driver_context, &driver_services)
 
-# Versioned build-tool interchange, not a public program backend. Export after
-# the ordinary scalar optimization passes; unknown operations fail in c_host.py.
-dump_host_values = (name: str, values):
-    # Explicit widening also works in the intentionally small C bootstrap.
-    wide: int[]
-    loop x in values: wide.push(int(x))
-    print("{name} {wide}")
 
 
 
@@ -584,3 +577,5 @@ use 'driver_dispatch.dewy'
 use 'driver_commands.dewy'
 
 use 'driver_check.dewy'
+
+use 'host_ir_values.dewy'
