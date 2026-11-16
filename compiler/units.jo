@@ -20,6 +20,7 @@ use 'checks_builders.dewy'
 use 'node_store.dewy'
 use 'unit_ops.dewy'
 use 'unit_rare.dewy'
+use 'rational_types.dewy'
 
 quantity_dimensions: int[][] = [[0, 0, 0, 0, 0, 0, 0, 0]]
 quantity_dimension_names: str[] = ["Time", "Length", "Mass", "Current", "Temperature", "Amount", "Luminosity", "Angle"]
@@ -32,20 +33,6 @@ quantity_scales: QuantityScale[]
 
 is_quantity = (t: int) -> bool: types[prune(t)].kind == .quantity
 quantity_base = (t0: int) -> int: tp_base(t0)
-
-bundled_word_rational_type = (t0: int) -> bool:
-    t = prune(t0)
-    if types[t].kind != .struct_: return false
-    si = int(types[t].st)
-    d = int(structs[si].decl)
-    d != 0 and structs[si].name == "RationalWord" and files[pos_file(nodes[d].pos)].path == lib_dir + "/rational.dewy"
-
-bundled_rational_type = (t0: int) -> bool:
-    t = prune(t0)
-    if types[t].kind != .struct_: return false
-    si = int(types[t].st)
-    d = int(structs[si].decl)
-    d != 0 and structs[si].name == "Rational" and files[pos_file(nodes[d].pos)].path == lib_dir + "/rational.dewy"
 
 # ---------------- display units, offset scales and differences ----------------
 # A quantity type may carry a tag (in TypeInfo.bits) saying which unit it shows in and,

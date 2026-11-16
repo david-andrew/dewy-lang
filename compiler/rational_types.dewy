@@ -1,0 +1,25 @@
+$runtime_checks
+
+# Identity of the bundled implementations, not a structural/name-only test.
+from p"ast.jo" import nodes
+from p"check.jo" import lib_dir
+from p"types.jo" import (prune structs types)
+from p"util.jo" import (files pos_file)
+
+RationalTypeWord:type=int64<overflow='wrap'>
+
+bundled_word_rational_type=(t0:int64):>bool=>{
+    let t:RationalTypeWord=prune(t0)
+    if types[t].kind not=? 'struct_' {return false}
+    let si:RationalTypeWord=RationalTypeWord(types[t].st)
+    let d:RationalTypeWord=RationalTypeWord(structs[si].decl)
+    d not=? 0 and structs[si].name =? "RationalWord" and files[RationalTypeWord(pos_file(nodes[d].pos))].path =? "{lib_dir}/rational.dewy"
+}
+
+bundled_rational_type=(t0:int64):>bool=>{
+    let t:RationalTypeWord=prune(t0)
+    if types[t].kind not=? 'struct_' {return false}
+    let si:RationalTypeWord=RationalTypeWord(types[t].st)
+    let d:RationalTypeWord=RationalTypeWord(structs[si].decl)
+    d not=? 0 and structs[si].name =? "Rational" and files[RationalTypeWord(pos_file(nodes[d].pos))].path =? "{lib_dir}/rational.dewy"
+}

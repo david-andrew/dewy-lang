@@ -38,6 +38,7 @@ LEAF_HOMES = {
     'check_cold_queries': 'check.jo',
     'numeric_constants': 'expr.jo',
     'unit_ops': 'units.jo',
+    'rational_types': 'units.jo',
     'float_ops': 'floats.jo',
     'type_ops': 'types.jo',
     'word_overflow': 'types.jo',
