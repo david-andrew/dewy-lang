@@ -17,28 +17,29 @@
 
 **Questions at a glance**
 - **(a) Changes something you decided:**
+  - D44 Q1, Q2, Q5, Q6, Q8: `Canceled` inferred, never written; confined to its own work; loops end at cancellation; `race`/`first_ok` discard losers except a failed undo; the documented-behaviour changes (Ctrl-C keeps the OS default);
+  - D42 Q3: one leaf per operation, families never returned bare; `FileError` becomes the file failures' parent;
   - D40 Q2, Q5, Q6: cleanup timing, `defer`, and visible cleanup exits;
   - D38 Q1: snake_case naming style;
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
-  - D44 Q1, Q2, Q5, Q6, Q8: `Canceled` inferred, never written; confined to its own work; loops end at cancellation; `race`/`first_ok` discard losers except a failed undo; the documented-behaviour changes (Ctrl-C keeps the OS default);
-  - D42 Q3: one leaf per operation, families never returned bare; `FileError` becomes the file failures' parent.
 - **(b) New syntax or surface:**
-  - D42 Q1, Q2, Q6, Q7: no part lost silently (narrow or held); facets and `as`; a stack stays its own type; exit code of a combination;
   - D44 Q3: `$until_others_finish` for work that shouldn't keep its group alive;
-  - D43 Q1, Q2: native database v1 and a database-filter inspection pilot;
   - D41 Q1–Q3: `check_cancel()`, `protect_from_cancel(limit @work)`, `task.tasks(@body)` as ordinary calls;
-  - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
+  - D42 Q1, Q2, Q6, Q7: no part lost silently (narrow or held); facets and `as`; a stack stays its own type; exit code of a combination;
+  - D43 Q1, Q2: native database v1 and a database-filter inspection pilot;
   - D11 Q2: `check=` or `valid_if=`;
   - D11 Q3: `__read__` or `$reader`;
   - D11 Q4: the checked constructor `Roll(count=…)`;
   - D31 Q5: `Instant<width=64>`;
   - D33 Q1: a self-naming alias;
-  - D37 Q1: `iso_basic` and `""`.
+  - D37 Q1: `iso_basic` and `""`;
+  - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`).
 - **(c) Names only:**
-  - D42 Q4, Q5: `ErrorStack` or `ErrorList`; `$origin`, `$trace`, `$parts`, `$origin_at_caller`;
   - D44 Q4, Q7: `task.cancel_request` / `task.CancelRequest`; `$no_discarded_failures`;
+  - D42 Q4, Q5: `ErrorStack` or `ErrorList`; `$origin`, `$trace`, `$parts`, `$origin_at_caller`;
+  - D38 Q2: prefer familiar words;
   - D43 Q3: core database names, with `related` being renamed;
   - D10 Q4–Q8;
   - D11 Q5, Q6;
@@ -49,7 +50,6 @@
   - D35 Q1;
   - D36 Q1;
   - D37 Q2;
-  - D38 Q2: prefer familiar words;
   - D39 Q2: `stack` and `Ragged`.
 - **Unchanged:** D30 (function types without parentheses), D32 (time zone data license) and D21 (packages).
 
@@ -57,84 +57,229 @@
 
 ## P1: blocking current work
 
-### D40. Cleanup: timing, visible exits and whether `defer` stays
+In the order to answer.
 
-Resources clean themselves up: files flush and close, sockets close, locks unlock, and uncommitted transactions roll back. You decided that a cleanup failure becomes the function's result, with hover and highlighting showing the cleanup (Q1), and that `$__abandon__` discards unpublished work (Q4). `defer` is kept provisionally (Q5). Shared `channel` and `mpmc` keep explicit `close()` (agreed). Combining failures moves from the old Q3 to D42.
+### D44. Cancellation: `Canceled` only where something can cancel
 
-#### Q2 (a). Clean up at block end or after last use?
+A wait returns `Canceled` only where something can cancel the work: inside `race`, `first_ok`, `within`, `protect_from_cancel`, `parallel`, `task.tasks` and spawned tasks, and everything they call. Elsewhere, including `main`'s own waits, it never does, and Ctrl-C keeps its OS default unless a `signals.ctrl_c` item handles it. The group that cancels work consumes the `Canceled` it caused; these questions settle how that looks in source.
 
-A session must stay open while a separate service applies an update. `Batch` owns a large buffer that its cleanup hook audits; `decode` returns a small summary without borrowing that buffer.
-
-| Last use can close too early | Block end can retain too long |
-|---|---|
-| `update = () => {`<br>`    let session = service.connect or_throw`<br>`    session.send("begin") or_throw`<br>`    service.apply_side_channel_update() or_throw`<br>`} # Last use closes before the update.` | `summarize = (path:Path) => {`<br>`    let batch = Batch[path.read_bytes or_throw]`<br>`    let summary = decode(@batch.bytes) or_throw`<br>`    long_tail(summary) or_throw`<br>`    return summary`<br>`} # Block end retains the buffer through long_tail.` |
-
-A shorter scoped block repairs the second case:
+#### Q1 (a). Cancellation is inferred, never written in a result type
 
 ```dewy
-summarize = (path:Path) => {
-    let summary = {
-        let batch = Batch[path.read_bytes or_throw]
-        decode(@batch.bytes) or_throw
-    }
-    long_tail(summary) or_throw
-    return summary
+fetch_text = (url:string):>string | HttpError => http.get_text(url)
+main = () => {
+    let home = fetch_text("https://example.org")            # string | HttpError
+    parallel { printl(fetch_text("https://example.org/news") ?? "no news")   # inside: string | HttpError | Canceled
+    printl(home ?? "offline") }
 }
 ```
 
-Run observable cleanup at the owning block's end, or after the owner's last use? Moves transfer the duty and consuming operations can finish it earlier under either rule.
+Should `Canceled` appear in a result only at call sites that something can cancel, added by the compiler, like the inferred `blocks` effect, and never written in a result type?
 
-**Rec:** block end, with braces to shorten the lifetime. Its visible boundary stays stable when a later use is added, a generic function gets a different type, or a record gains a fallible field. The adversarial surprise panel slightly favors last use: raw counts **6/7/7**, severity **15/15/17**, for last-use/mixed/block-end; those judgments do not establish real-world frequencies. The recommendation rests on stability under edits and generic code. Plain storage may still be reclaimed early when unobservable. **Reversible:** before implementation; changing observable timing after release can break programs.
+- **Rec:** yes. A written type then stays the same however a function is called, and hover shows the added `| Canceled`. **Reversible** before release.
+- **You give up:** writing `| Canceled` in a result type, which becomes an error with a fix-it.
 
-#### Q6 (a, new). Show a possible function exit at local cleanup boundaries
+#### Q2 (a). `Canceled` stays inside the work it belongs to
 
 ```dewy
-write_all = (names:array<string>) => {
-    loop name in names {
-        let out = open(p"{name}.txt" 'w') or_throw
-        out.write_text(name) or_throw;
-        if name =? "last" break   # Failed close would leave write_all here.
-    }
-    printl("all written")        # Then this is skipped, without a visible exit above.
+probe = (host:string failures:Mutex<array<exception>>) => {
+    let r = net.ping(host)                      # Duration | NetError | Canceled, as a parallel item
+    printl"{host}: {r}"                         # fine: logging, locals, helpers, catch-alls
+    @(failures.lock).push(r)                    # error: failures outlives this item; handle Canceled first
+    protect_from_cancel(1s () => save(r));      # error: carries it into fresh work; pass `r is? Canceled`
+    if r is? Canceled return Failed and [cause=r]   # error: write `r and Failed`, keeping it a facet
+    if r is? Canceled return Canceled           # error: only the runtime makes one; `return r`
+    r
 }
 ```
 
-| A. Explicit consuming close | B. Mark an inner block | C. Group the loop body |
+Should a value that may hold `Canceled` work like any failure inside its own work, while these four are errors?
+
+- making a `Canceled`;
+- storing one where it outlives the work (an outer variable from a `parallel` item, a mutex, an atomic, a channel, a global);
+- putting one inside another failure's fields;
+- carrying one into protected, cleanup or background code.
+
+
+- **Rec:** yes. It is the smallest rule that keeps `Canceled` only where something can cancel: every `Canceled` stays with the work that was canceled, and that work's group consumes it. `??` and `or_throw` treat it like any failure. **Reversible** before release.
+- **You give up:** creating a `Canceled` yourself, and keeping one past the work that was canceled.
+
+#### Q3 (b). `$until_others_finish` marks work that shouldn't keep its group alive
+
+```dewy
+count_with_spinner = (path:Path) => {
+    parallel (
+        $until_others_finish spin("counting")      # canceled once count_lines is done
+        let n = count_lines(path)
+    )
+    n
+}
+```
+
+Should a `parallel` item, or a `group.spawn(…)` statement in `task.tasks`, prefixed with `$until_others_finish` be canceled once nothing but such work and signal waits remains? That is the trigger that already closes signal listeners.
+
+- **Rec:** yes. Readers got the name right cold. **Reversible:** the spelling, freely; the rule, before release.
+- **You give up:** in a marked item, binding names used outside it, and holding a lock across a wait. Its tail runs canceled, so a marked signal listener may lose a pending notification.
+
+#### Q4 (c). Handing your cancellation to another task
+
+```dewy
+thumbnail = (jobs:Channel<Job> path:Path) => {
+    let reply = channel<Reply>(1)
+    jobs.send(Job[path reply task.cancel_request]) or_throw
+    (reply.receive or_throw).result
+}
+serve_jobs = (codec:Codec jobs:Channel<Job>) => loop job in jobs or_throw {
+    let done = codec.start(job.path)
+    match select(@done.receive @job.cancel.receive) {
+        reply:Reply => job.reply.send(reply) ?? void
+        <Closed<task.CancelRequest>> => codec.abort()   # the caller was canceled, or has ended
+        <Canceled> => return                            # this worker's own group stopped it
+    }
+}
+```
+
+Should a task pass its cancellation on as `task.cancel_request`, a `task.CancelRequest` whose `receive` gives `Closed<task.CancelRequest>` once the task is canceled or ends?
+
+- **Rec:** yes. Both names read correctly cold. **Reversible.**
+- **You give up:** nothing checks that a caller passes it, and a worker can't tell "gave up" from "finished".
+
+#### Q5 (a). A loop over a source ends when its task is canceled
+
+```dewy
+total_of = (numbers:Channel<int>) => {
+    let total = 0
+    loop n in numbers { total += n }       # canceled: the loop ends here, quietly
+    printl"total {total}"                  # still runs, in the canceled task
+    total
+}
+total_or_stop = (numbers:Channel<int>) => {
+    let total = 0
+    loop n in numbers or_throw { total += n }   # canceled: leaves total_or_stop with Canceled
+    total
+}
+```
+
+Should a loop over any source (a channel, a `merged` inbox or a signal) end when its task is canceled, as signal loops already do, with `or_throw` after the source to leave the function instead?
+
+- **Rec:** yes. It replaces `merged`'s "one `Canceled` item, then end" rule with the signal rule. **Reversible** before release.
+- **You give up:** a loop ended by cancellation looks like one that ran out of input, and the code after it runs. Write `or_throw` where that code publishes a result.
+
+#### Q6 (a). `race` and `first_ok` discard their losers, but never a failed undo
+
+```dewy
+backup_to = (dir:Path data:array<uint8>) => p"{dir}/backup.bin".write_bytes(data)
+save_once = (data:array<uint8>) => first_ok(@backup_to(p"/mnt/a" data) @backup_to(p"/mnt/b" data))
+# a loser's failed close or stray temporary file goes with its result
+fastest = (args:array<string>) => race(@run_tool("rg" args) @run_tool("grep" args))
+# error: a loser's ProcessStopFailed (an UndoFailed) can't be discarded; handle it in run_tool
+```
+
+Should `race` and `first_ok` discard their losers' whole results, cleanup failures included, with one exception? The exception is a failed undo whose effects persist: an `UndoFailed`, such as `RollbackFailed` or `ProcessStopFailed` (`RollbackFailed:type = type of DbError & UndoFailed`; `ProcessStopFailed` likewise under `ProcessError`). The work must handle that itself.
+
+- **Rec:** yes. `UndoFailed` is a new error family, cold-read. It is a family: a failure type joins it by being declared `type of … & UndoFailed`, beside its own parent. Hover on the call lists what is discarded. **Reversible** before release.
+- **You give up:** a report, at run time, of a loser's failed close or stray temporary file. Hover shows it, and Q7's tag forbids it.
+
+#### Q7 (c). A strict tag against discarding losers' cleanup failures
+
+```dewy
+main = () => {
+    $no_discarded_failures
+    let data = p"state.bin".read_bytes or_throw
+    first_ok(@backup_to(p"/mnt/a" data) @backup_to(p"/mnt/b" data)) or_throw;
+}   # error: a loser's cleanup failure would be discarded; handle it inside backup_to
+```
+
+Should `$no_discarded_failures`, in `$bulletproof`, make it an error for `race` or `first_ok` to discard a loser's cleanup failure? A loser's main result stays discardable.
+
+- **Rec:** yes. Readers got the name right cold. **Reversible.**
+- **You give up:** nothing by default. Under the tag, each raced piece of work handles its own cleanup failures.
+
+#### Q8 (a). What changes in documented behaviour
+
+```dewy
+main = () => {
+    let quote = within(2s @fetch_quote("ACME"))    # rational | HttpError | Timeout: no Canceled in main
+    sleep(1s)                                      # void: nothing here can cancel
+}
+```
+
+Should these changes be accepted together?
+
+| Change | Example | Against |
 |---|---|---|
-| `write_all = (names:array<string>) => {`<br>`    loop name in names {`<br>`        let out = open(p"{name}.txt" 'w') or_throw`<br>`        out.write_text(name) or_throw;`<br>`        out.close() or_throw`<br>`        if name =? "last" break`<br>`    }`<br>`    printl("all written")`<br>`}` | `write_all = (names:array<string>) => {`<br>`    loop name in names {`<br>`        {`<br>`            let out = open(p"{name}.txt" 'w') or_throw`<br>`            out.write_text(name) or_throw;`<br>`            if name =? "last" break`<br>`        } or_throw`<br>`    }`<br>`    printl("all written")`<br>`}` | `write_all = (names:array<string>) => {`<br>`    loop name in names ({`<br>`        let out = open(p"{name}.txt" 'w') or_throw`<br>`        out.write_text(name) or_throw;`<br>`        if name =? "last" break`<br>`    } or_throw)`<br>`    printl("all written")`<br>`}` |
+| `select` gives `Canceled` only where something can cancel | `select(@a.receive)` in `main`: `int \| Closed<int>` | batch 7 |
+| A canceled send gives `Canceled`, dropping its payload; `reserve` keeps it | a canceled `out.send(conn)` closes `conn` | Channels |
+| `try_send` and `try_receive` aren't cancellation points | `q.try_receive` gives `Empty`, never `Canceled` | Channels |
+| `Task.wait()` is an ordinary wait that never reports the task's own `Canceled` | `within(2s @indexer.wait)` leaves the indexer running | task API |
+| `protect_from_cancel`'s limit starts at cancellation | `protect_from_cancel(30s @run_job(f))`: no limit until a stop | D41 Q2 |
+| After its deadline, `within` (and protection) gives `Timeout`, unless the child's value came from a branch that names `Canceled` | `<Canceled> => return best` keeps `best`; `?? none` gives `Timeout` | `within`; batch 10's uniform `??`: a plain `??` still consumes `Canceled` in the child, but `within` then gives `Timeout` |
+| Cleanup's grace starts at cancellation; its expiry gives the work's `Canceled` | a slow final flush in `main` completes | cleanup |
+| A sibling canceled by an early exit keeps what it forwarded, and its cleanup failures, beside the exit | a job cut off after SIGTERM becomes `main`'s result | C3, D40 Q1 |
+| The error stack may hold any exception except `Canceled` | `ErrorStack[Stopped[1] Stopped[2]]` | batch 10 (the stack was an error); D42 Q6 |
+| A marked item's `or_throw` of its block's `Canceled` ends only that item | `$until_others_finish { sleep(1s) or_throw }` | C3 |
+| `select`'s progress rule also covers a `??` fallback on a wait in a loop: an error where the wait is visible | `jobs.receive ?? continue` | LANGUAGE.md's `select` progress rule; replaces the open D42 Q2 |
+| The three-press forced exit goes | the REPL survives repeated Ctrl-C | signals |
+| Unhandled Ctrl-C keeps the OS default; `.observe` never cancels | Ctrl-C ends a program with no handler | signals |
 
-Reject a locally continuing exit (`break`, `continue`, or an inner block's end) while fallible cleanup remains unmarked, with a fix-it offering A or B? In B and C the block's `or_throw` acknowledges cleanup on every exit, including jumps that skip its textual end.
+- **Rec:** accept all. Each is **reversible** before release.
+- **You give up:** what the "Against" column names: in each, a documented rule changes to the one in the row.
 
-**Rec:** A for simple loops, B for complex bodies; this is also the independent review's preference. A places `or_throw` at the failing operation; successful or failed consuming close removes the duty, so cleanup never closes it twice. When conditions or work cannot move after close, B keeps one cleanup region across the existing jumps. C is coherent, but a reader must know that `loop … { … } or_throw` attaches to the whole loop and cannot mark its body. If a body failure and a cleanup failure both occur, both survive as `body & cleanup` (D42). **Reversible:** before release; the checked marker rule becomes a control-flow contract afterward.
+Dogfooded in 26 programs, with independent reviews and soundness checks; the names in Q3, Q4, Q6 and Q7 were read correctly cold: [proposal](proposals/cancellation/).
 
-#### Q5 (a). Does `defer` still earn its place?
+### D41. Cancellation helpers as ordinary calls: `check_cancel`, `protect_from_cancel`, `task.tasks`
 
-These two cases get simpler without restoration. Timing here covers every ordinary result, including errors and cancellation; `serve` owns its internal cleanup.
+A group cancels its unfinished work when it ends early: `race` or `first_ok` has its answer, a `parallel` item leaves the function, a deadline passes, or only `$until_others_finish` work is left. Ctrl-C cancels only through a `signals.ctrl_c` item; with none, it ends the process (D44). Waits (channels, `sleep`, signals) notice cancellation on their own. These three library calls cover the rest, with no new syntax.
 
-| With `defer` | Functional rewrite |
-|---|---|
-| `render = (node:Tree @indent:int64) => {`<br>`    draw(node.label indent) or_throw`<br>`    indent += 1`<br>`    defer indent -= 1`<br>`    loop child in node.children { render(child @indent) or_throw }`<br>`}` | `render = (node:Tree depth:int64=0) => {`<br>`    draw(node.label depth) or_throw`<br>`    loop child in node.children { render(child depth+1) or_throw }`<br>`}` |
-| `handle = (request:Request) => {`<br>`    let start = clock.now`<br>`    defer metrics.observe(clock.now-start)`<br>`    return serve(request) or_throw`<br>`}` | `handle = (request:Request) => {`<br>`    let start = clock.now`<br>`    let result = serve(request)`<br>`    metrics.observe(clock.now-start)`<br>`    return result`<br>`}` |
+#### Q1 (b). A cancellation checkpoint in long computations
 
-The remaining case restores a C library's global flag across all supported unwinding. Both versions require the same process-wide lock; getting and setting the flag cannot fail, allocate, block or panic.
+```dewy
+count_primes = (n:int):>int => {
+    let found = 0
+    loop i in [2..n) {
+        check_cancel() or_throw          # stops here once its group cancels it
+        if is_prime(i) found += 1
+    }
+    found
+}
+main = () => printl(within(3s @count_primes(10_000_000)) ?? "took too long")
+```
 
-| One-off `defer` | Small reusable owner |
-|---|---|
-| `render_quiet = (gate:Mutex<int> scene:Scene) => {`<br>`    let held = @(gate.lock)`<br>`    let prior = $unsafe legacy.get_diagnostics`<br>`    $unsafe legacy.set_diagnostics(false)`<br>`    defer $unsafe legacy.set_diagnostics(prior)`<br>`    return $unsafe legacy.render(scene) or_throw`<br>`}` | `SavedDiagnostics:type = type of [prior:bool`<br>`    $__drop__ = ():>void => { $unsafe legacy.set_diagnostics(prior) }`<br>`]`<br>`render_quiet = (gate:Mutex<int> scene:Scene) => {`<br>`    let held = @(gate.lock)`<br>`    let saved = SavedDiagnostics[$unsafe legacy.get_diagnostics]`<br>`    $unsafe legacy.set_diagnostics(false)`<br>`    return $unsafe legacy.render(scene) or_throw`<br>`}` |
+A loop that never waits doesn't notice cancellation until it reaches a checkpoint. Use `check_cancel()` for that? Where nothing can cancel the loop, `check_cancel()` warns.
 
-Drop `defer`, using parameters, result capture and small owners instead, or keep its checked one-line form for one-off restoration? Result capture does not cover panic unwinding; the owner does, and it restores the flag before unlocking.
+**Rec:** yes; reversible.
 
-**Rec:** drop, unless you value the one-line form for one-off restorations. Round 7 recommends dropping it; the independent review would keep it provisionally because restoring one borrowed value is shorter with `defer` (the example below). If kept, it remains non-failing and cannot `return`, `break` or `or_throw`. Removal must wait for validation that a local callback owner preserves the caller's borrow and effects and cannot escape; copying the bool is not equivalent. **Reversible:** before release; deletion later breaks source.
+#### Q2 (b). Finishing a save after cancellation
 
-#### One borrowed value, both ways
+```dewy
+match protect_from_cancel(5s @save(best)) {
+    saved:Path => printl"saved to {saved}"
+    <Timeout> => printl("save didn't finish within 5 s" file=stderr)
+    problem:error => printl("save failed: {problem}" file=stderr)
+}
+```
 
-`paint` may fail. Both versions restore the caller's `busy` value on return and supported unwinding; the callback owner must stay local.
+`protect_from_cancel(limit @work)` runs `work` on a fresh request: when the caller is canceled, `save` still runs for up to 5 s. The limit starts when the caller is canceled, or at entry if it already was; a deadline from entry is `within`. Nothing that may hold `Canceled` can be carried into `work`. Use it? A save stuck inside a C call can't be interrupted, only waited for.
 
-| One-off `defer` | Local callback owner |
-|---|---|
-| `refresh = (@busy:bool) => {`<br>`    let prior = busy`<br>`    busy = true`<br>`    defer busy = prior`<br>`    paint() or_throw`<br>`}` | `RestoreAction:type = type of [action:(():>void & no panics & no allocates & no blocks)`<br>`    $__drop__ = ():>void => action()`<br>`]`<br>`refresh = (@busy:bool) => {`<br>`    let prior = busy`<br>`    let restore = ($capture @busy):>void => { busy = prior }`<br>`    let saved = RestoreAction[@restore]`<br>`    busy = true`<br>`    paint() or_throw`<br>`}` |
+**Rec:** yes; reversible.
 
-Paper dogfood, surprise panel and independent review, with remaining implementation limits: [cleanup proposal](proposals/cleanup/) (round 7 and its review; not all-5).
+#### Q3 (b). A group of tasks started one by one
+
+```dewy
+import p"@lib/std/tasks.dewy" as task
+
+accept_all = (port:int group:Tasks) => loop true {
+    let conn = accept(port) or_throw
+    group.spawn(@handle(conn))           # one task per connection
+}
+serve = (port:int) => task.tasks(@accept_all(port))   # returns once every task has finished
+```
+
+`parallel` covers a known set of items; a server starts a task per connection. `task.tasks(@body)` runs `body` with a fresh group and returns after all of its tasks finish. The body and every spawned task are cancellable. A child failure, or the body failing, cancels the rest, keeping their forwarded and cleanup failures; a normal return joins them, then cancels `$until_others_finish` tasks. Use `task.tasks` from `@lib/std/tasks.dewy` for this?
+
+**Rec:** yes; reversible.
+
+Dogfooded in the concurrency and signals rounds; names read cold. Full rules: `proposals/concurrency/unified/proposal-v5.md`, `proposals/signals/summary.md`.
 
 ### D42. Combining failures and seeing where each came from
 
@@ -342,173 +487,123 @@ Dogfooded in 15 programs; every new name was read correctly cold.
 
 For D43: commit consumes its transaction on every outcome, rolling back on failure (`CommitFailed & RollbackFailed` if both fail).
 
-### D44. Cancellation: `Canceled` only where something can cancel
+### D40. Cleanup: timing, visible exits and whether `defer` stays
 
-A wait returns `Canceled` only where something can cancel the work: inside `race`, `first_ok`, `within`, `protect_from_cancel`, `parallel`, `task.tasks` and spawned tasks, and everything they call. Elsewhere, including `main`'s own waits, it never does, and Ctrl-C keeps its OS default unless a `signals.ctrl_c` item handles it. The group that cancels work consumes the `Canceled` it caused; these questions settle how that looks in source.
+Resources clean themselves up: files flush and close, sockets close, locks unlock, and uncommitted transactions roll back. You decided that a cleanup failure becomes the function's result, with hover and highlighting showing the cleanup (Q1), and that `$__abandon__` discards unpublished work (Q4). `defer` is kept provisionally (Q5). Shared `channel` and `mpmc` keep explicit `close()` (agreed). Combining failures moves from the old Q3 to D42.
 
-#### Q1 (a). Cancellation is inferred, never written in a result type
+#### Q2 (a). Clean up at block end or after last use?
 
-```dewy
-fetch_text = (url:string):>string | HttpError => http.get_text(url)
-main = () => {
-    let home = fetch_text("https://example.org")            # string | HttpError
-    parallel { printl(fetch_text("https://example.org/news") ?? "no news")   # inside: string | HttpError | Canceled
-    printl(home ?? "offline") }
-}
-```
+A session must stay open while a separate service applies an update. `Batch` owns a large buffer that its cleanup hook audits; `decode` returns a small summary without borrowing that buffer.
 
-Should `Canceled` appear in a result only at call sites that something can cancel, added by the compiler, like the inferred `blocks` effect, and never written in a result type?
+| Last use can close too early | Block end can retain too long |
+|---|---|
+| `update = () => {`<br>`    let session = service.connect or_throw`<br>`    session.send("begin") or_throw`<br>`    service.apply_side_channel_update() or_throw`<br>`} # Last use closes before the update.` | `summarize = (path:Path) => {`<br>`    let batch = Batch[path.read_bytes or_throw]`<br>`    let summary = decode(@batch.bytes) or_throw`<br>`    long_tail(summary) or_throw`<br>`    return summary`<br>`} # Block end retains the buffer through long_tail.` |
 
-- **Rec:** yes. A written type then stays the same however a function is called, and hover shows the added `| Canceled`. **Reversible** before release.
-- **You give up:** writing `| Canceled` in a result type, which becomes an error with a fix-it.
-
-#### Q2 (a). `Canceled` stays inside the work it belongs to
+A shorter scoped block repairs the second case:
 
 ```dewy
-probe = (host:string failures:Mutex<array<exception>>) => {
-    let r = net.ping(host)                      # Duration | NetError | Canceled, as a parallel item
-    printl"{host}: {r}"                         # fine: logging, locals, helpers, catch-alls
-    @(failures.lock).push(r)                    # error: failures outlives this item; handle Canceled first
-    protect_from_cancel(1s () => save(r));      # error: carries it into fresh work; pass `r is? Canceled`
-    if r is? Canceled return Failed and [cause=r]   # error: write `r and Failed`, keeping it a facet
-    if r is? Canceled return Canceled           # error: only the runtime makes one; `return r`
-    r
-}
-```
-
-Should a value that may hold `Canceled` work like any failure inside its own work, while these four are errors?
-
-- making a `Canceled`;
-- storing one where it outlives the work (an outer variable from a `parallel` item, a mutex, an atomic, a channel, a global);
-- putting one inside another failure's fields;
-- carrying one into protected, cleanup or background code.
-
-
-- **Rec:** yes. It is the smallest rule that keeps `Canceled` only where something can cancel: every `Canceled` stays with the work that was canceled, and that work's group consumes it. `??` and `or_throw` treat it like any failure. **Reversible** before release.
-- **You give up:** creating a `Canceled` yourself, and keeping one past the work that was canceled.
-
-#### Q3 (b). `$until_others_finish` marks work that shouldn't keep its group alive
-
-```dewy
-count_with_spinner = (path:Path) => {
-    parallel (
-        $until_others_finish spin("counting")      # canceled once count_lines is done
-        let n = count_lines(path)
-    )
-    n
-}
-```
-
-Should a `parallel` item, or a `group.spawn(…)` statement in `task.tasks`, prefixed with `$until_others_finish` be canceled once nothing but such work and signal waits remains? That is the trigger that already closes signal listeners.
-
-- **Rec:** yes. Readers got the name right cold. **Reversible:** the spelling, freely; the rule, before release.
-- **You give up:** in a marked item, binding names used outside it, and holding a lock across a wait. Its tail runs canceled, so a marked signal listener may lose a pending notification.
-
-#### Q4 (c). Handing your cancellation to another task
-
-```dewy
-thumbnail = (jobs:Channel<Job> path:Path) => {
-    let reply = channel<Reply>(1)
-    jobs.send(Job[path reply task.cancel_request]) or_throw
-    (reply.receive or_throw).result
-}
-serve_jobs = (codec:Codec jobs:Channel<Job>) => loop job in jobs or_throw {
-    let done = codec.start(job.path)
-    match select(@done.receive @job.cancel.receive) {
-        reply:Reply => job.reply.send(reply) ?? void
-        <Closed<task.CancelRequest>> => codec.abort()   # the caller was canceled, or has ended
-        <Canceled> => return                            # this worker's own group stopped it
+summarize = (path:Path) => {
+    let summary = {
+        let batch = Batch[path.read_bytes or_throw]
+        decode(@batch.bytes) or_throw
     }
+    long_tail(summary) or_throw
+    return summary
 }
 ```
 
-Should a task pass its cancellation on as `task.cancel_request`, a `task.CancelRequest` whose `receive` gives `Closed<task.CancelRequest>` once the task is canceled or ends?
+Run observable cleanup at the owning block's end, or after the owner's last use? Moves transfer the duty and consuming operations can finish it earlier under either rule.
 
-- **Rec:** yes. Both names read correctly cold. **Reversible.**
-- **You give up:** nothing checks that a caller passes it, and a worker can't tell "gave up" from "finished".
+**Rec:** block end, with braces to shorten the lifetime. Its visible boundary stays stable when a later use is added, a generic function gets a different type, or a record gains a fallible field. The adversarial surprise panel slightly favors last use: raw counts **6/7/7**, severity **15/15/17**, for last-use/mixed/block-end; those judgments do not establish real-world frequencies. The recommendation rests on stability under edits and generic code. Plain storage may still be reclaimed early when unobservable. **Reversible:** before implementation; changing observable timing after release can break programs.
 
-#### Q5 (a). A loop over a source ends when its task is canceled
+#### Q6 (a, new). Show a possible function exit at local cleanup boundaries
 
 ```dewy
-total_of = (numbers:Channel<int>) => {
-    let total = 0
-    loop n in numbers { total += n }       # canceled: the loop ends here, quietly
-    printl"total {total}"                  # still runs, in the canceled task
-    total
-}
-total_or_stop = (numbers:Channel<int>) => {
-    let total = 0
-    loop n in numbers or_throw { total += n }   # canceled: leaves total_or_stop with Canceled
-    total
+write_all = (names:array<string>) => {
+    loop name in names {
+        let out = open(p"{name}.txt" 'w') or_throw
+        out.write_text(name) or_throw;
+        if name =? "last" break   # Failed close would leave write_all here.
+    }
+    printl("all written")        # Then this is skipped, without a visible exit above.
 }
 ```
 
-Should a loop over any source (a channel, a `merged` inbox or a signal) end when its task is canceled, as signal loops already do, with `or_throw` after the source to leave the function instead?
-
-- **Rec:** yes. It replaces `merged`'s "one `Canceled` item, then end" rule with the signal rule. **Reversible** before release.
-- **You give up:** a loop ended by cancellation looks like one that ran out of input, and the code after it runs. Write `or_throw` where that code publishes a result.
-
-#### Q6 (a). `race` and `first_ok` discard their losers, but never a failed undo
-
-```dewy
-backup_to = (dir:Path data:array<uint8>) => p"{dir}/backup.bin".write_bytes(data)
-save_once = (data:array<uint8>) => first_ok(@backup_to(p"/mnt/a" data) @backup_to(p"/mnt/b" data))
-# a loser's failed close or stray temporary file goes with its result
-fastest = (args:array<string>) => race(@run_tool("rg" args) @run_tool("grep" args))
-# error: a loser's ProcessStopFailed (an UndoFailed) can't be discarded; handle it in run_tool
-```
-
-Should `race` and `first_ok` discard their losers' whole results, cleanup failures included, with one exception? The exception is a failed undo whose effects persist: an `UndoFailed`, such as `RollbackFailed` or `ProcessStopFailed` (`RollbackFailed:type = type of DbError & UndoFailed`; `ProcessStopFailed` likewise under `ProcessError`). The work must handle that itself.
-
-- **Rec:** yes. `UndoFailed` is a new error family, cold-read. It is a family: a failure type joins it by being declared `type of … & UndoFailed`, beside its own parent. Hover on the call lists what is discarded. **Reversible** before release.
-- **You give up:** a report, at run time, of a loser's failed close or stray temporary file. Hover shows it, and Q7's tag forbids it.
-
-#### Q7 (c). A strict tag against discarding losers' cleanup failures
-
-```dewy
-main = () => {
-    $no_discarded_failures
-    let data = p"state.bin".read_bytes or_throw
-    first_ok(@backup_to(p"/mnt/a" data) @backup_to(p"/mnt/b" data)) or_throw;
-}   # error: a loser's cleanup failure would be discarded; handle it inside backup_to
-```
-
-Should `$no_discarded_failures`, in `$bulletproof`, make it an error for `race` or `first_ok` to discard a loser's cleanup failure? A loser's main result stays discardable.
-
-- **Rec:** yes. Readers got the name right cold. **Reversible.**
-- **You give up:** nothing by default. Under the tag, each raced piece of work handles its own cleanup failures.
-
-#### Q8 (a). What changes in documented behaviour
-
-```dewy
-main = () => {
-    let quote = within(2s @fetch_quote("ACME"))    # rational | HttpError | Timeout: no Canceled in main
-    sleep(1s)                                      # void: nothing here can cancel
-}
-```
-
-Should these changes be accepted together?
-
-| Change | Example | Against |
+| A. Explicit consuming close | B. Mark an inner block | C. Group the loop body |
 |---|---|---|
-| `select` gives `Canceled` only where something can cancel | `select(@a.receive)` in `main`: `int \| Closed<int>` | batch 7 |
-| A canceled send gives `Canceled`, dropping its payload; `reserve` keeps it | a canceled `out.send(conn)` closes `conn` | Channels |
-| `try_send` and `try_receive` aren't cancellation points | `q.try_receive` gives `Empty`, never `Canceled` | Channels |
-| `Task.wait()` is an ordinary wait that never reports the task's own `Canceled` | `within(2s @indexer.wait)` leaves the indexer running | task API |
-| `protect_from_cancel`'s limit starts at cancellation | `protect_from_cancel(30s @run_job(f))`: no limit until a stop | D41 Q2 |
-| After its deadline, `within` (and protection) gives `Timeout`, unless the child's value came from a branch that names `Canceled` | `<Canceled> => return best` keeps `best`; `?? none` gives `Timeout` | `within`; batch 10's uniform `??`: a plain `??` still consumes `Canceled` in the child, but `within` then gives `Timeout` |
-| Cleanup's grace starts at cancellation; its expiry gives the work's `Canceled` | a slow final flush in `main` completes | cleanup |
-| A sibling canceled by an early exit keeps what it forwarded, and its cleanup failures, beside the exit | a job cut off after SIGTERM becomes `main`'s result | C3, D40 Q1 |
-| The error stack may hold any exception except `Canceled` | `ErrorStack[Stopped[1] Stopped[2]]` | batch 10 (the stack was an error); D42 Q6 |
-| A marked item's `or_throw` of its block's `Canceled` ends only that item | `$until_others_finish { sleep(1s) or_throw }` | C3 |
-| `select`'s progress rule also covers a `??` fallback on a wait in a loop: an error where the wait is visible | `jobs.receive ?? continue` | LANGUAGE.md's `select` progress rule; replaces the open D42 Q2 |
-| The three-press forced exit goes | the REPL survives repeated Ctrl-C | signals |
-| Unhandled Ctrl-C keeps the OS default; `.observe` never cancels | Ctrl-C ends a program with no handler | signals |
+| `write_all = (names:array<string>) => {`<br>`    loop name in names {`<br>`        let out = open(p"{name}.txt" 'w') or_throw`<br>`        out.write_text(name) or_throw;`<br>`        out.close() or_throw`<br>`        if name =? "last" break`<br>`    }`<br>`    printl("all written")`<br>`}` | `write_all = (names:array<string>) => {`<br>`    loop name in names {`<br>`        {`<br>`            let out = open(p"{name}.txt" 'w') or_throw`<br>`            out.write_text(name) or_throw;`<br>`            if name =? "last" break`<br>`        } or_throw`<br>`    }`<br>`    printl("all written")`<br>`}` | `write_all = (names:array<string>) => {`<br>`    loop name in names ({`<br>`        let out = open(p"{name}.txt" 'w') or_throw`<br>`        out.write_text(name) or_throw;`<br>`        if name =? "last" break`<br>`    } or_throw)`<br>`    printl("all written")`<br>`}` |
 
-- **Rec:** accept all. Each is **reversible** before release.
-- **You give up:** what the "Against" column names: in each, a documented rule changes to the one in the row.
+Reject a locally continuing exit (`break`, `continue`, or an inner block's end) while fallible cleanup remains unmarked, with a fix-it offering A or B? In B and C the block's `or_throw` acknowledges cleanup on every exit, including jumps that skip its textual end.
 
-Dogfooded in 26 programs, with independent reviews and soundness checks; the names in Q3, Q4, Q6 and Q7 were read correctly cold: [proposal](proposals/cancellation/).
+**Rec:** A for simple loops, B for complex bodies; this is also the independent review's preference. A places `or_throw` at the failing operation; successful or failed consuming close removes the duty, so cleanup never closes it twice. When conditions or work cannot move after close, B keeps one cleanup region across the existing jumps. C is coherent, but a reader must know that `loop … { … } or_throw` attaches to the whole loop and cannot mark its body. If a body failure and a cleanup failure both occur, both survive as `body & cleanup` (D42). **Reversible:** before release; the checked marker rule becomes a control-flow contract afterward.
+
+#### Q5 (a). Does `defer` still earn its place?
+
+These two cases get simpler without restoration. Timing here covers every ordinary result, including errors and cancellation; `serve` owns its internal cleanup.
+
+| With `defer` | Functional rewrite |
+|---|---|
+| `render = (node:Tree @indent:int64) => {`<br>`    draw(node.label indent) or_throw`<br>`    indent += 1`<br>`    defer indent -= 1`<br>`    loop child in node.children { render(child @indent) or_throw }`<br>`}` | `render = (node:Tree depth:int64=0) => {`<br>`    draw(node.label depth) or_throw`<br>`    loop child in node.children { render(child depth+1) or_throw }`<br>`}` |
+| `handle = (request:Request) => {`<br>`    let start = clock.now`<br>`    defer metrics.observe(clock.now-start)`<br>`    return serve(request) or_throw`<br>`}` | `handle = (request:Request) => {`<br>`    let start = clock.now`<br>`    let result = serve(request)`<br>`    metrics.observe(clock.now-start)`<br>`    return result`<br>`}` |
+
+The remaining case restores a C library's global flag across all supported unwinding. Both versions require the same process-wide lock; getting and setting the flag cannot fail, allocate, block or panic.
+
+| One-off `defer` | Small reusable owner |
+|---|---|
+| `render_quiet = (gate:Mutex<int> scene:Scene) => {`<br>`    let held = @(gate.lock)`<br>`    let prior = $unsafe legacy.get_diagnostics`<br>`    $unsafe legacy.set_diagnostics(false)`<br>`    defer $unsafe legacy.set_diagnostics(prior)`<br>`    return $unsafe legacy.render(scene) or_throw`<br>`}` | `SavedDiagnostics:type = type of [prior:bool`<br>`    $__drop__ = ():>void => { $unsafe legacy.set_diagnostics(prior) }`<br>`]`<br>`render_quiet = (gate:Mutex<int> scene:Scene) => {`<br>`    let held = @(gate.lock)`<br>`    let saved = SavedDiagnostics[$unsafe legacy.get_diagnostics]`<br>`    $unsafe legacy.set_diagnostics(false)`<br>`    return $unsafe legacy.render(scene) or_throw`<br>`}` |
+
+Drop `defer`, using parameters, result capture and small owners instead, or keep its checked one-line form for one-off restoration? Result capture does not cover panic unwinding; the owner does, and it restores the flag before unlocking.
+
+**Rec:** drop, unless you value the one-line form for one-off restorations. Round 7 recommends dropping it; the independent review would keep it provisionally because restoring one borrowed value is shorter with `defer` (the example below). If kept, it remains non-failing and cannot `return`, `break` or `or_throw`. Removal must wait for validation that a local callback owner preserves the caller's borrow and effects and cannot escape; copying the bool is not equivalent. **Reversible:** before release; deletion later breaks source.
+
+#### One borrowed value, both ways
+
+`paint` may fail. Both versions restore the caller's `busy` value on return and supported unwinding; the callback owner must stay local.
+
+| One-off `defer` | Local callback owner |
+|---|---|
+| `refresh = (@busy:bool) => {`<br>`    let prior = busy`<br>`    busy = true`<br>`    defer busy = prior`<br>`    paint() or_throw`<br>`}` | `RestoreAction:type = type of [action:(():>void & no panics & no allocates & no blocks)`<br>`    $__drop__ = ():>void => action()`<br>`]`<br>`refresh = (@busy:bool) => {`<br>`    let prior = busy`<br>`    let restore = ($capture @busy):>void => { busy = prior }`<br>`    let saved = RestoreAction[@restore]`<br>`    busy = true`<br>`    paint() or_throw`<br>`}` |
+
+Paper dogfood, surprise panel and independent review, with remaining implementation limits: [cleanup proposal](proposals/cleanup/) (round 7 and its review; not all-5).
+
+### D38. Naming style: snake_case or Julia-style joined words
+
+Moved up from P3: unlike the others it isn't blocking work, but its cost grows with every self-hosting round, since each one writes Dewy code a change of style would rename.
+
+
+A consistent separator makes multi-word names predictable. A separate rule chooses familiar words for those names.
+
+#### Q1 (a). snake_case or joined words
+
+```dewy
+"report.txt".starts_with("rep")   # snake_case
+"report.txt".startswith("rep")    # joined words
+d.nth_weekday_of_month(2 'tuesday')   # vs d.nthweekdayofmonth(2 'tuesday')
+```
+
+Use snake_case under the rule below, replacing your earlier `startswith` and `endswith` choice? This releases the renames waiting in D10; it takes about ten renames, while joined words take over 120 plus tags, keyword arguments and union members.
+
+**Rec:** yes.
+
+**Details:**
+
+- Put `_` between English words. English single words stay joined: `weekday`, `uppercase`, `filename`.
+- No abbreviations except the fixed list (`dir`, `len`, math names, `printl`). “Did you mean” ignores underscores and case, so `startswith` points to `starts_with`.
+
+#### Q2 (c). Prefer familiar words
+
+```dewy
+text.capitalize
+text.rfind("x")
+text.lines
+mapping.contains_key(key)
+```
+
+When choosing words, prefer the name programmers already know from Python, Rust, JavaScript or Go, unless it misleads in Dewy?
+
+**Rec:** yes.
+
+Names tested cold. Full study and tests: `proposals/naming-style/`.
 
 ### D43. A native database first version, and ordinary lambdas later
 
@@ -584,60 +679,6 @@ Use the core names below, while renaming the related-field selector currently sp
 Core names: `fields_of`, `collection`, `Ref`, `open(create= read_only=)`, `memory`, `get`, `require`, `insert`, `reference`, `replace`, `put`, `begin(timeout=)`, `commit`, `rollback`, `snapshot`, `close`; `index`, `unique(present_only=)`, `tuple`, `eq`, `lt`, `ge`, `contains`, `all_of`, `where`, `sorted(key= reverse=)`, `all`, `count`, `page(size= after= max_scanned= max_bytes= timeout=)`, `explain`, `include`, `update`, `delete`; result `.items`, `.next`, `.record`, `.related`. Additional release-module names and error names are not covered by this core ballot.
 
 Paper dogfood remains below all-5; the 45-line core cold read conveyed broad roles except `related` (two readers inferred a join), with low confidence for `present_only` and `reference`; inspection names have not been cold-read: [database proposal](proposals/database/), [function-inspection proposal](proposals/function-inspection/).
-
-### D41. Cancellation helpers as ordinary calls: `check_cancel`, `protect_from_cancel`, `task.tasks`
-
-A group cancels its unfinished work when it ends early: `race` or `first_ok` has its answer, a `parallel` item leaves the function, a deadline passes, or only `$until_others_finish` work is left. Ctrl-C cancels only through a `signals.ctrl_c` item; with none, it ends the process (D44). Waits (channels, `sleep`, signals) notice cancellation on their own. These three library calls cover the rest, with no new syntax.
-
-#### Q1 (b). A cancellation checkpoint in long computations
-
-```dewy
-count_primes = (n:int):>int => {
-    let found = 0
-    loop i in [2..n) {
-        check_cancel() or_throw          # stops here once its group cancels it
-        if is_prime(i) found += 1
-    }
-    found
-}
-main = () => printl(within(3s @count_primes(10_000_000)) ?? "took too long")
-```
-
-A loop that never waits doesn't notice cancellation until it reaches a checkpoint. Use `check_cancel()` for that? Where nothing can cancel the loop, `check_cancel()` warns.
-
-**Rec:** yes; reversible.
-
-#### Q2 (b). Finishing a save after cancellation
-
-```dewy
-match protect_from_cancel(5s @save(best)) {
-    saved:Path => printl"saved to {saved}"
-    <Timeout> => printl("save didn't finish within 5 s" file=stderr)
-    problem:error => printl("save failed: {problem}" file=stderr)
-}
-```
-
-`protect_from_cancel(limit @work)` runs `work` on a fresh request: when the caller is canceled, `save` still runs for up to 5 s. The limit starts when the caller is canceled, or at entry if it already was; a deadline from entry is `within`. Nothing that may hold `Canceled` can be carried into `work`. Use it? A save stuck inside a C call can't be interrupted, only waited for.
-
-**Rec:** yes; reversible.
-
-#### Q3 (b). A group of tasks started one by one
-
-```dewy
-import p"@lib/std/tasks.dewy" as task
-
-accept_all = (port:int group:Tasks) => loop true {
-    let conn = accept(port) or_throw
-    group.spawn(@handle(conn))           # one task per connection
-}
-serve = (port:int) => task.tasks(@accept_all(port))   # returns once every task has finished
-```
-
-`parallel` covers a known set of items; a server starts a task per connection. `task.tasks(@body)` runs `body` with a fresh group and returns after all of its tasks finish. The body and every spawned task are cancellable. A child failure, or the body failing, cancels the rest, keeping their forwarded and cleanup failures; a normal return joins them, then cancels `$until_others_finish` tasks. Use `task.tasks` from `@lib/std/tasks.dewy` for this?
-
-**Rec:** yes; reversible.
-
-Dogfooded in the concurrency and signals rounds; names read cold. Full rules: `proposals/concurrency/unified/proposal-v5.md`, `proposals/signals/summary.md`.
 
 ---
 
@@ -1468,42 +1509,6 @@ fmt'HH:mm'                                                        # compile erro
 ```
 
 Dogfooded; names read cold. Full rules: `proposals/time/units-and-format-round1.md` and `proposals/integration/amendments.md`.
-
-### D38. Naming style: snake_case or Julia-style joined words
-
-A consistent separator makes multi-word names predictable. A separate rule chooses familiar words for those names.
-
-#### Q1 (a). snake_case or joined words
-
-```dewy
-"report.txt".starts_with("rep")   # snake_case
-"report.txt".startswith("rep")    # joined words
-d.nth_weekday_of_month(2 'tuesday')   # vs d.nthweekdayofmonth(2 'tuesday')
-```
-
-Use snake_case under the rule below, replacing your earlier `startswith` and `endswith` choice? This releases the renames waiting in D10; it takes about ten renames, while joined words take over 120 plus tags, keyword arguments and union members.
-
-**Rec:** yes.
-
-**Details:**
-
-- Put `_` between English words. English single words stay joined: `weekday`, `uppercase`, `filename`.
-- No abbreviations except the fixed list (`dir`, `len`, math names, `printl`). “Did you mean” ignores underscores and case, so `startswith` points to `starts_with`.
-
-#### Q2 (c). Prefer familiar words
-
-```dewy
-text.capitalize
-text.rfind("x")
-text.lines
-mapping.contains_key(key)
-```
-
-When choosing words, prefer the name programmers already know from Python, Rust, JavaScript or Go, unless it misleads in Dewy?
-
-**Rec:** yes.
-
-Names tested cold. Full study and tests: `proposals/naming-style/`.
 
 ### D39. Nested array literals: brackets nest, separators make dimensions
 
