@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"facts.jo" import (FACT_RECORD FactState fact_pair_key)
+from p"facts.jo" import (FACT_RECORD FactState)
 from p"facts_value_queries.dewy" import (fact_index_get)
 
 RowWord:type=int64<overflow='wrap'>
@@ -53,3 +53,5 @@ fact_row_scan=(s:FactState v:RowWord direction:RowWord start:RowWord):>int64=>{
     }
     -1
 }
+
+from p"facts_values.dewy" import (fact_pair_key)

@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"facts.jo" import (FactProjection FactState fact_projection_key)
+from p"facts.jo" import (FactProjection FactState)
 from p"facts_value_queries.dewy" import (fact_index_get)
 
 ProjectionWord:type=int64<overflow='wrap'>
@@ -41,3 +41,5 @@ fact_projection_origin=(s:FactState value:ProjectionWord):>int64=>{
     }
     -1
 }
+
+from p"facts_values.dewy" import (fact_projection_key)

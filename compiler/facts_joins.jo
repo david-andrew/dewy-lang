@@ -592,3 +592,5 @@ fact_join_shared_rows = (s: mut FactState, a: FactState, b: FactState):
     loop i in [common..b.differences.len()):
         row = b.differences[i]
         if fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(a, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
+
+# Projection identity/construction services share the existing facts_values import.

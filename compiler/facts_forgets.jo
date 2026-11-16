@@ -826,3 +826,5 @@ fact_forget_mutable_maps = (n: int, s: mut FactState, lent: bool = false, at0: i
         j = fact_binding(s, p)
         if j < 0: continue
         s.bindings[j] = FactBinding(p, fact_new(s, fact_domain(t, reason, at), FactTerm(type = t)), at, if s.bindings[j].event == at: s.bindings[j].prior else: s.bindings[j].value)
+
+# Projection identity/construction services share the existing facts_values import.

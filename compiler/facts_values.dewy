@@ -3,14 +3,25 @@ $runtime_checks
 from p"ast.jo" import (NF_U64 has_flag nodes)
 from p"exact.jo" import (exact_has_node exact_representation)
 from p"expr.jo" import (ntype)
-from p"facts.jo" import (FACT_CAP FactProjection FactState fact_capture fact_query)
-from p"facts_arith.dewy" import (fact_fresh_type fact_unknown)
-from p"facts_index_writes.dewy" import (fact_add_projection fact_constant fact_new)
-from p"facts_projection_queries.dewy" import (fact_projection_find)
-from p"refine.jo" import (ref_encoded)
+from p"facts.jo" import (FACT_CAP FactProjection FactState fact_capture fact_query FACT_ELEMENT_COPY FACT_TEXT_ID FACT_ELEMENT_VALUE FACT_ELEMENT_BELOW FACT_ROW_SOURCE FACT_ELEMENT_SAME_LENGTH FACT_ELEMENT_LENGTH fact_terms fact_hull_owner fact_owner fact_constructor_actuals)
+from p"facts_arith.dewy" import (fact_fresh_type fact_unknown fact_fresh)
+from p"facts_index_writes.dewy" import (fact_add_projection fact_constant fact_new fact_set_bound)
+from p"facts_projection_queries.dewy" import (fact_projection_find fact_projection_first fact_projection_after)
+from p"refine.jo" import (ref_encoded refine_active ref_self_active fact_pair_transient ref_has_fields ref_assume)
 from p"refinement_types.dewy" import (FACT_MAX FactBound FactReason FactTerm)
 from p"string_domains.jo" import (string_set_tests)
-from p"types.jo" import (T_MATH_INT T_U64 is_int types)
+from p"types.jo" import (T_MATH_INT T_U64 is_int types T_INT T_STR tkind telem)
+from p"effect_types.dewy" import (PlaceIdentity)
+from p"place_routes.dewy" import (place_scalar_root)
+from p"facts_compare.dewy" import (fact_compare)
+from p"facts_lengths.dewy" import (fact_difference fact_length_max)
+from p"facts_value_queries.dewy" import (fact_bound)
+from p"facts_plans.dewy" import (fact_component_bounds fact_row_bounds)
+from p"facts_summaries.dewy" import (fact_constructor_field)
+from p"facts_elements.dewy" import (fact_inventory fact_inventory_bound)
+from p"facts_library.dewy" import (fact_field_args)
+from p"refine_rare.dewy" import (ref_self_element_row)
+from p"refine_siblings.dewy" import (ref_sib_element_row)
 
 ValueBuildWord:type=int64<overflow='wrap'>
 
@@ -64,4 +75,92 @@ fact_unmodeled=(@s:FactState n:ValueBuildWord reason:FactReason):>int64=>{
     let b=if exact_has_node(n) {FactBound(reason=reason witness=n wide=true)} else {fact_domain(ntype(n) reason n)}
     if fact_query {fact_unknown(n b)}
     fact_new(@s b FactTerm(type=fact_fresh_type(ntype(n))))
+}
+
+# Projection keys preserve wrapping word arithmetic.
+fact_pair_key=(a:ValueBuildWord b:ValueBuildWord):>ValueBuildWord=>(a << 32) | b
+fact_projection_key=(base:ValueBuildWord selector:ValueBuildWord element:bool):>ValueBuildWord=>{
+    (base << 33) | (ValueBuildWord(int64(element)) << 32) | (selector & 0xffffffff)
+}
+fact_place=(e:ValueBuildWord):>PlaceIdentity=>place_scalar_root(e)
+
+# Evaluated identities own projections. Keep first-match order, publication
+# order and caps; reacquire arena elements after recursive/growing calls.
+fact_project=(@s:FactState base:ValueBuildWord selector:ValueBuildWord element:bool t:ValueBuildWord):>int64=>$unsafe {
+    if base =? 0 {return fact_fresh(@s t)}
+    if not element {
+        let i:ValueBuildWord=fact_projection_find(s base selector false)
+        if i >=? 0 {return s.projections[i].value}
+    }
+    else {
+        let i:ValueBuildWord=fact_projection_first(s base)
+        loop i >=? 0 {
+            let p=s.projections[i]
+            i=fact_projection_after(s i)
+            if p.element and (p.selector =? selector or fact_compare(s 'eq' p.selector selector) =? 1) {return p.value}
+        }
+        i=fact_projection_find(s base FACT_ELEMENT_COPY false)
+        if i >=? 0 {return s.projections[i].value}
+    }
+    if not element and selector =? FACT_TEXT_ID {
+        let origin:ValueBuildWord=fact_terms[base].origin
+        if origin >? 0 and nodes.ptr[origin].kind =? 'str_lit' and nodes.ptr[origin].aux =? 0 and nodes.ptr[origin].sval >=? 0 {
+            return fact_constant(@s ValueBuildWord(nodes.ptr[origin].sval))
+        }
+    }
+    let v:ValueBuildWord=fact_new(@s fact_domain(t) FactTerm(type=t))
+    if not element and selector =? -1 {fact_set_bound(@s v FactBound(0 fact_length_max()))}
+    if element and fact_hull_owner =? fact_owner {
+        let hull:ValueBuildWord=fact_projection_find(s base FACT_ELEMENT_VALUE false)
+        if hull >=? 0 {
+            let b=fact_bound(s v)
+            let h=fact_bound(s s.projections[hull].value)
+            fact_set_bound(@s v FactBound(max(b.lo h.lo) min(b.hi h.hi) b.nz or h.nz))
+        }
+        let below:ValueBuildWord=fact_projection_find(s base FACT_ELEMENT_BELOW false)
+        if below >=? 0 {fact_difference(@s v s.projections[below].value (-1) 0 16)}
+        if tkind(fact_type(t)) =? 'tuple' {fact_component_bounds(@s base v fact_type(t))}
+        else if tkind(fact_type(t)) =? 'array' {fact_row_bounds(@s base v)}
+    }
+    if element and tkind(fact_type(t)) =? 'array' {
+        let source:ValueBuildWord=fact_projection_find(s base FACT_ROW_SOURCE false)
+        if source >=? 0 and ValueBuildWord(s.projections.length) + 2 <? FACT_CAP {
+            let other:ValueBuildWord=s.projections[source].value
+            let row=fact_project(@s other selector true telem(fact_type(fact_terms[other].type)))
+            let length=fact_project(@s row (-1) false T_INT)
+            fact_add_projection(@s FactProjection(v (-1) false length))
+        }
+    }
+    # Every element has one length; an element-length hull only bounds it.
+    if element and (fact_type(t) =? T_STR or tkind(fact_type(t)) =? 'array') {
+        let same:ValueBuildWord=fact_projection_find(s base FACT_ELEMENT_SAME_LENGTH false)
+        if same >=? 0 and s.projections.length <? FACT_CAP and fact_projection_find(s v (-1) false) <? 0 {fact_add_projection(@s FactProjection(v (-1) false s.projections[same].value))}
+    }
+    if element and (fact_type(t) =? T_STR or tkind(fact_type(t)) =? 'array') {
+        let hull:ValueBuildWord=fact_projection_find(s base FACT_ELEMENT_LENGTH false)
+        if hull >=? 0 and s.projections.length <? FACT_CAP and fact_projection_find(s v (-1) false) <? 0 {
+            fact_add_projection(@s FactProjection(v (-1) false fact_new(@s fact_bound(s s.projections[hull].value) FactTerm(type=T_INT))))
+        }
+    }
+    if not element and selector >=? 0 and fact_constructor_actuals.length >? 0 and (tkind(fact_type(t)) =? 'array' or tkind(fact_type(fact_terms[base].type)) =? 'tuple' and fact_scalar(t) and is_int(t)) and fact_constructor_actuals.has(base) {
+        fact_constructor_field(@s base selector v)
+    }
+    if element {
+        let parts=fact_inventory(s base)
+        if parts.length >? 0 {fact_inventory_bound(@s v parts t 0)}
+    }
+    if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(base selector element v))}
+    if refine_active {
+        if element and ref_self_active {
+            ref_self_element_row(@s base v)
+            ref_sib_element_row(@s base v)
+        }
+        let args:array<int64>=[]
+        if not element and selector >=? 0 and ref_has_fields(t) {
+            if fact_pair_transient {return v}
+            args=fact_field_args(@s base)
+        }
+        ref_assume(t v args @s)
+    }
+    v
 }

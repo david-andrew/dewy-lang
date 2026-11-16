@@ -7,7 +7,7 @@ from p"isolation_ops.dewy" import (isolation_children)
 from p"check.jo" import (LF_ALIAS locals)
 from p"checker_state.dewy" import (SK)
 from p"effect_types.dewy" import (PlaceIdentity)
-from p"facts.jo" import (FactSliceEdges fact_slice fact_place fact_root_key fact_mark_gen fact_mark_stamp fact_mark_flags fact_mark_head fact_mark_touched)
+from p"facts.jo" import (FactSliceEdges fact_slice fact_root_key fact_mark_gen fact_mark_stamp fact_mark_flags fact_mark_head fact_mark_touched)
 from p"facts_index_writes.dewy" import (fact_index_put)
 from p"facts_joins.dewy" import (fact_payload_node)
 from p"facts_value_queries.dewy" import (fact_index_get)
@@ -153,3 +153,5 @@ fact_slice_parent=(@parents:FactSliceEdges child:SlicePrepWord node:SlicePrepWor
     slice_mark_head[0].ptr[child]=parents.nodes.length
     parents.nodes.push(node)
 }
+
+from p"facts_values.dewy" import (fact_place)

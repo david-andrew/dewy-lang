@@ -398,10 +398,6 @@ fact_comparison = (op: Tok) -> bool:
     op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
 
 fact_root_key = (p: PlaceIdentity) -> int: (p.declaration << 3) | int(p.root)
-fact_pair_key = (a: int, b: int) -> int: (a << 32) | b
-fact_projection_key = (base: int, selector: int, element: bool) -> int:
-    (base << 33) | (int(element) << 32) | (selector & 0xffffffff)
-
 # Small projection sets keep only their ordered records. Build the indexes
 # on the first insertion reaching FACT_PROJECTION_SCAN, then maintain them.
 # O(P) queries while P < 32; expected O(1) indexed queries above that, with
@@ -424,77 +420,6 @@ const FACT_ROW_SCAN = 32
 # saving rebuilds the state. O(V + P + D), stamps instead of a hash set.
 fact_stamp: int[]
 fact_stamp_gen = 0
-
-fact_place = (e: int) -> PlaceIdentity: place_scalar_root(e)
-
-# Aggregates have immutable evaluated identities too. A projection belongs to
-# that value, never to a source spelling; a store rebuilds the enclosing value.
-fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: int) -> int:
-    if base == 0: return fact_fresh(s, t)
-    if not element:
-        i = fact_projection_find(s, base, selector, false)
-        if i >= 0: return s.projections[i].value
-    else:
-        i = fact_projection_first(s, base)
-        loop i >= 0:
-            p = s.projections[i]
-            i = fact_projection_after(s, i)
-            if p.element and (p.selector == selector or fact_compare(s, .eq, p.selector, selector) == 1): return p.value
-        i = fact_projection_find(s, base, FACT_ELEMENT_COPY, false)
-        if i >= 0: return s.projections[i].value
-    if not element and selector == FACT_TEXT_ID:
-        origin = fact_terms[base].origin
-        if origin > 0 and nodes[origin].kind == .str_lit and nodes[origin].aux == 0 and nodes[origin].sval >= 0:
-            return fact_constant(s, int(nodes[origin].sval))
-    v = fact_new(s, fact_domain(t), FactTerm(type = t))
-    if not element and selector == -1:
-        fact_set_bound(s, v, FactBound(0, fact_length_max()))
-    if element and fact_hull_owner == fact_owner:
-        hull = fact_projection_find(s, base, FACT_ELEMENT_VALUE, false)
-        if hull >= 0:
-            b = fact_bound(s, v); h = fact_bound(s, s.projections[hull].value)
-            fact_set_bound(s, v, FactBound(max(b.lo, h.lo), min(b.hi, h.hi), b.nz or h.nz))
-        below = fact_projection_find(s, base, FACT_ELEMENT_BELOW, false)
-        if below >= 0: fact_difference(s, v, s.projections[below].value, -1, 0, 16)
-        if tkind(fact_type(t)) == .tuple: fact_component_bounds(s, base, v, fact_type(t))
-        else if tkind(fact_type(t)) == .array: fact_row_bounds(s, base, v)
-    if element and tkind(fact_type(t)) == .array:
-        source = fact_projection_find(s, base, FACT_ROW_SOURCE, false)
-        if source >= 0 and s.projections.len() + 2 < FACT_CAP:
-            other = s.projections[source].value
-            row = fact_project(s, other, selector, true, telem(fact_type(fact_terms[other].type)))
-            length = fact_project(s, row, -1, false, T_INT)
-            fact_add_projection(s, FactProjection(v, -1, false, length))
-    # (every element has one length: fact_push_close)
-    if element and (fact_type(t) == T_STR or tkind(fact_type(t)) == .array):
-        same = fact_projection_find(s, base, FACT_ELEMENT_SAME_LENGTH, false)
-        if same >= 0 and s.projections.len() < FACT_CAP and fact_projection_find(s, v, -1, false) < 0: fact_add_projection(s, FactProjection(v, -1, false, s.projections[same].value))
-    # Element-length hulls describe each selected value separately: two
-    # arbitrary elements have the same bounds, not necessarily equal lengths.
-    if element and (fact_type(t) == T_STR or tkind(fact_type(t)) == .array):
-        hull = fact_projection_find(s, base, FACT_ELEMENT_LENGTH, false)
-        if hull >= 0 and s.projections.len() < FACT_CAP and fact_projection_find(s, v, -1, false) < 0:
-            fact_add_projection(s, FactProjection(v, -1, false, fact_new(s, fact_bound(s, s.projections[hull].value), FactTerm(type = T_INT))))
-    if not element and selector >= 0 and fact_constructor_actuals.len() > 0 and (tkind(fact_type(t)) == .array or tkind(fact_type(fact_terms[base].type)) == .tuple and fact_scalar(t) and is_int(t)) and fact_constructor_actuals.has(base):
-        fact_constructor_field(s, base, selector, v)
-    # (an element of a literal, by an index not known: what all of them share)
-    if element:
-        parts = fact_inventory(s, base)
-        if parts.len() > 0: fact_inventory_bound(s, v, parts, t, 0)
-    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(base, selector, element, v))
-    if refine_active:
-        if element and ref_self_active:
-            ref_self_element_row(s, base, v)
-            ref_sib_element_row(s, base, v)
-        # A field's contract may name its siblings: every stored record was
-        # validated whole, so the field's value relates to theirs in base.
-        args: int[]
-        if not element and selector >= 0 and ref_has_fields(t):
-            # (inside a run changing tied fields the record may not hold its contract yet)
-            if fact_pair_transient: return v
-            args = fact_field_args(s, base)
-        ref_assume(t, v, args, s)
-    v
 
 # The prelude's single-element first/last are reads of this array snapshot.
 # User overloads and slicing overloads have no such contract. O(1).

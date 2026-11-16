@@ -4,7 +4,7 @@ from p"ast.jo" import (kid nodes)
 from p"checker_tokens.dewy" import (Tok)
 from p"expr.jo" import (is_dewy_range_type ntype)
 from p"checks_builders.dewy" import (bc_int)
-from p"facts.jo" import (FACT_CAP FACT_ELEMENT_COPY FACT_ELEMENT_VALUE FactProjection FactState fact_constructor_actuals fact_project fact_terms)
+from p"facts.jo" import (FACT_CAP FACT_ELEMENT_COPY FACT_ELEMENT_VALUE FactProjection FactState fact_constructor_actuals fact_terms)
 from p"facts_compare.dewy" import (fact_compare)
 from p"facts_index_writes.dewy" import (fact_constant fact_new)
 from p"facts_index_writes.dewy" import (fact_add_projection)
@@ -328,3 +328,5 @@ fact_nd_integer_picks=(n:SliceWord @s:FactState picks:SliceWord):>void=>{
         fact_nd_need(n @s (if fact_host_endpoint(s entry true) {Tok.le} else {Tok.lt}) entry fact_constant(@s FACT_MAX) "selected index fits int64's upper bound");
     }
 }
+
+from p"facts_values.dewy" import (fact_project)

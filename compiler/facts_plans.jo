@@ -229,3 +229,5 @@ fact_queue = (n: int, cond: int, message: int):
         fatal(nodes[cond].pos, "cannot prove assertion: unsupported symbolic operand; erased operands must be pure scalar fact terms")
     owner = if cx >= 0: int(ctxs[cx].inst) else: 0
     fact_requests.push(FactRequest(n, owner))
+
+# Projection identity/construction services share the existing facts_values import.
