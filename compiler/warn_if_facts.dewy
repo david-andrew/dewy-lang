@@ -1,0 +1,46 @@
+$runtime_checks
+
+# Demand-driven integer soft-precondition visits and their final warnings.
+# Jo retains the declaration/call stores; checked calls register their callee
+# and declaration together, before either entry point visits them.
+from p"ast.jo" import nodes
+from p"check.jo" import fns
+from p"facts.jo" import (FactState fact_speculating)
+from p"facts_compare.dewy" import fact_compare
+from p"refine.jo" import ref_value
+from p"types.jo" import T_INT
+from p"source_warnings.dewy" import warn
+from p"warn_if.jo" import (WI_FACTS wi_decls wi_fact_calls wi_fact_requests wi_fact_targs)
+
+WarnFactWord:type=int64<overflow='wrap'>
+
+wi_fact_check=(n:WarnFactWord values:array<int64> @s:FactState):>void=>{
+    if fact_speculating >? 0 or not s.live {return}
+    let f:WarnFactWord=wi_fact_targs.get(n) ?? 0
+    if f =? 0 or not wi_decls.has(WarnFactWord(fns[f].decl)) {return}
+    let proven=true
+    loop w in wi_decls[WarnFactWord(fns[f].decl)] {
+        if w.kind not=? WI_FACTS {continue}
+        loop atom in w.atoms {
+            let base:WarnFactWord=T_INT
+            if atom.a.kind =? 2 and atom.a.path.length =? 0 and atom.a.value <? fns[f].ptypes.length {base=fns[f].ptypes[atom.a.value]}
+            let a:WarnFactWord=ref_value(atom.a 0 values base @s)
+            let b:WarnFactWord=ref_value(atom.b 0 values base @s)
+            if a =? 0 or b =? 0 or fact_compare(s atom.op a b) not=? 1 {proven=false}
+        }
+    }
+    if not proven {wi_fact_calls[n]=1}
+    else if wi_fact_calls[n] =? 0 {wi_fact_calls[n]=2}
+}
+
+wi_fact_finish=():>void=>{
+    loop [n state] in wi_fact_calls {
+        if state =? 2 {continue}
+        let f:WarnFactWord=wi_fact_targs[n]
+        loop w in wi_decls[WarnFactWord(fns[f].decl)] {
+            if w.kind =? WI_FACTS {warn(nodes[n].pos w.message)}
+        }
+    }
+    wi_fact_calls=dict<int64 int64>()
+    wi_fact_requests=[]
+}
