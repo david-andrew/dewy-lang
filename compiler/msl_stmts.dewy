@@ -1,4 +1,8 @@
 $runtime_checks
+from p"@lib/core/fmt.jo" import __fmt
+from p"@lib/core/math.jo" import __INF
+from p"@lib/core/str.jo" import find
+from p"@lib/core/rt.jo" import (__str_from_bytes __str_concat)
 
 from p"type_ops.dewy" import tsd
 from p"checked_eval.dewy" import (cx_token cx_token_values)
@@ -15,7 +19,7 @@ from p"glsl.jo" import (sl_exact_defs sl_turns_fns)
 from p"glsl_emit.dewy" import (gl_narrow gl_struct_fields)
 from p"glsl_ops.dewy" import (gl_store_check gl_unsigned ind sl_exact_range sl_type)
 from p"glsl_stmts.dewy" import (gl_binop gl_compound_op sl_hypot_body)
-from p"msl.jo" import (MlRef ml_decls ml_dumped ml_float ml_lref ml_math_names ml_out ml_stage ml_temps ml_utype)
+from p"msl.jo" import (MlRef ml_decls ml_dumped ml_lref ml_math_names ml_out ml_stage ml_temps ml_utype)
 from p"msl_emit.dewy" import (ml_as ml_block ml_compare ml_field_offset ml_fn ml_gbuf_elem ml_gbuf_store ml_int ml_intrinsic ml_mat_from ml_floor ml_reset ml_sdiv ml_shift_decls ml_target ml_type ml_varyings ml_zero)
 from p"msl_ops.dewy" import (ml_ctx_args ml_drain ml_err ml_first ml_is_floaty ml_is_gbuf_op ml_is_vector ml_local ml_off ml_source ml_store_decls ml_with_ctx ml_word ml_wref)
 from p"type_ops.dewy" import (dt fixed_len is_lib_texture layout)
@@ -887,4 +891,17 @@ msl_kernel=(f:MslStmtWord desc:string):>string=>$unsafe {
         ml_dumped += 1
     }
     src
+}
+
+# Preserve the shader interchange's Jo float spelling and its narrowing order.
+ml_float=(x:float64):>string=>{
+    if x not=? x {return "NAN"}
+    if x =? __INF {return "INFINITY"}
+    if x =? -__INF {return "(-INFINITY)"}
+    let text:array<uint8>=[]
+    __fmt(@text float32(x));
+    let s=__str_from_bytes(text)
+    text=[] # release the interpolation buffer before appending to s
+    if find(s ".") <? 0 and find(s "e") <? 0 {s="{s}.0"}
+    __str_concat(s "f")
 }

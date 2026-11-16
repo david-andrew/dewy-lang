@@ -267,3 +267,11 @@ gl_udesc = (t: int, prefix: str, base: int, pos: int) -> str:
             out += gl_udesc(ft, "{prefix}{f.0}_.", fo, pos)
         else: out += ";{prefix}{f.0},{uniform_kind(f.1, pos)},{fo}"
     out
+
+gl_float = (x: f64) -> str:
+    if x != x: return "uintBitsToFloat(0x7fc00000u)"
+    if x == __INF: return "uintBitsToFloat(0x7f800000u)"
+    if x == -__INF: return "uintBitsToFloat(0xff800000u)"
+    s = "{x}"
+    if find(s, ".") < 0 and find(s, "e") < 0 and find(s, "n") < 0: s += ".0"
+    s

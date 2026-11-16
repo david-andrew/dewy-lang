@@ -758,3 +758,11 @@ msl_kernel = (f: int, desc: str) -> str:
         write_file("{dir}/{ml_dumped}.kernel.metal", src)
         ml_dumped += 1
     src
+
+ml_float = (x: f64) -> str:
+    if x != x: return "NAN"
+    if x == __INF: return "INFINITY"
+    if x == -__INF: return "(-INFINITY)"
+    s = "{f32(x)}"
+    if find(s, ".") < 0 and find(s, "e") < 0: s += ".0"
+    s + "f"
