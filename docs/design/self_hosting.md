@@ -255,14 +255,19 @@ coarse cutover before extending it; a service is not permission to reintroduce
 those adapters. Every new leaf and service layout has a frozen Jo twin and
 independent differential coverage, then bootstrap and fixed-point validation.
 
-`facts_values.dewy` owns scalar/domain queries and literal, unmodeled and
-string-membership value construction. The representation wrapper `fact_capture`,
-recursive transfer `fact_capture_value` and general projection constructor
-`fact_project` remain in Jo. Direct calls share the existing `FactState`, ordered
-projection records, caps and branch snapshots; Jo retains memo storage. Raw
-node/type reads use checked arena IDs and retain no pointer across a growing
-call. The frozen twin keeps the same API, including the plain-word `fact_domain`
-parameters required by the type-refinement host record.
+`facts_values.dewy` owns scalar/domain queries, literal, unmodeled and
+string-membership value construction, projection/pair keys, place lookup and
+projection construction. The representation wrapper `fact_capture`, recursive
+transfer `fact_capture_value` and root-tag encoding `fact_root_key` remain in Jo.
+Direct calls share the existing `FactState`, ordered projection records, caps
+and branch snapshots; Jo retains memo storage. Only construction mutates the
+state. Projection lookup preserves first-match order, equivalent-index reuse,
+recursive row lengths and the distinct identities of element-length hulls.
+Work follows existing indexed queries and bounded ordered scans; there is no
+new pass, callback or copied state. Raw node/type reads use checked arena IDs
+and retain no pointer across a growing call. The frozen twin keeps the same API,
+including the plain-word `fact_domain` parameters required by the type-refinement
+host record.
 
 `facts_slice_prep.dewy` owns syntax-child enumeration, writer-edge construction,
 finished-slice queries, target/contract preparation, mark queries/writes and parent-edge construction. Jo
