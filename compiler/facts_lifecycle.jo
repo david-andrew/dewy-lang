@@ -527,3 +527,20 @@ fact_obligation_node = (n: int) -> bool:
         id = nodes[n].aux as IN
         return id == .static_assert or id == .runtime_assert or id == .assert or nodes[n].aux2 == i32(RANGE_EXHAUSTION) or id == .lend or id == .loan_length or id == .loan_store or id == .loan_address or id == .loan_load or id == .pop or id == .remove or id == .truncate
     false
+
+fn_in_lib = (f: int) -> bool:
+    m = int(fns[f].mod)
+    if m >= 0 and m < modules.len():
+        file = int(modules[m].file)
+        return len(lib_root) > 0 and file >= 0 and file < files.len() and starts_with(files[file].path, lib_root)
+    pos_in_lib(nodes[int(fns[f].body)].pos)
+
+fact_exact_demand = (n: int) -> bool:
+    (exact_has_store(n) and not exact_decided(n) and (fact_deferred_proving or dir_obligations or dir_policy(nodes[n].pos) == DIR_STATIC or exact_shader_owners.has(exact_stores.get(n) ?? 0))) or (n >= 0 and n < exact_marks.len() and exact_marks[n] & 128 != 0)
+
+fn_dewy = (f: int) -> bool:
+    m = int(fns[f].mod)
+    if m >= 0 and m < modules.len():
+        file = int(modules[m].file)
+        return file >= 0 and file < files.len() and files[file].is_dewy
+    files[pos_file(nodes[int(fns[f].body)].pos)].is_dewy

@@ -20,7 +20,7 @@ from p"draw_ops.dewy" import (draw_context_finalize draw_context_reset)
 from p"effects.jo" import (effect_panic_nodes effect_panic_pending effect_panic_texts effect_unavailable loan_owners)
 from p"exact.jo" import (exact_decided exact_fact_store exact_finish exact_has_store exact_marks exact_owners exact_proof_demands exact_reset exact_shader_demand exact_shader_owners exact_stores)
 from p"expr.jo" import (CV IN ntype)
-from p"facts.jo" import (FactPlanDependency FACT_LENT FactBinding FactSlice FactState fact_call_field_types fact_carried_cache fact_comprehension_sources fact_comprehensions fact_constant_globals fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_calls fact_constructor_types fact_dead_refinements fact_decided fact_deferred fact_deferred_checks fact_deferred_proving fact_divisors fact_fixed_requests fact_fork_entries fact_fork_nodes fact_grown_roots fact_has_deferred fact_internal_policy fact_key_params fact_owner fact_panic_collect fact_panic_pending fact_panic_sites fact_parallel_bounds fact_plan_dependencies fact_plan_forget fact_plan_serial fact_policy fact_policy_default fact_probe_on fact_probe_runs fact_pushed_rows_cache fact_query fact_regex_counts fact_requests fact_retry_owner fact_return_escapes_cache fact_returns_cache fact_root_key fact_saving fact_search_predicate fact_selector_sources fact_shape_summaries fact_shared_literals fact_slice fact_slice_cache fact_slice_prepare fact_speculating fact_sum_operand fact_summaries fact_summary_assumed fact_summary_field fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_text_sinks fact_validated fn_dewy fn_in_lib)
+from p"facts.jo" import (FactPlanDependency FACT_LENT FactBinding FactSlice FactState fact_call_field_types fact_carried_cache fact_comprehension_sources fact_comprehensions fact_constant_globals fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_calls fact_constructor_types fact_dead_refinements fact_decided fact_deferred fact_deferred_checks fact_deferred_proving fact_divisors fact_fixed_requests fact_fork_entries fact_fork_nodes fact_grown_roots fact_has_deferred fact_internal_policy fact_key_params fact_owner fact_panic_collect fact_panic_pending fact_panic_sites fact_parallel_bounds fact_plan_dependencies fact_plan_forget fact_plan_serial fact_policy fact_policy_default fact_probe_on fact_probe_runs fact_pushed_rows_cache fact_query fact_regex_counts fact_requests fact_retry_owner fact_return_escapes_cache fact_returns_cache fact_root_key fact_saving fact_search_predicate fact_selector_sources fact_shape_summaries fact_shared_literals fact_slice fact_slice_cache fact_slice_prepare fact_speculating fact_sum_operand fact_summaries fact_summary_assumed fact_summary_field fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_text_sinks fact_validated)
 from p"facts_slice_prep.dewy" import (fact_slice_push_children)
 from p"facts_values.dewy" import (fact_domain fact_type)
 from p"facts_elements.dewy" import (fact_fixed_check fact_fixed_node)
@@ -69,7 +69,35 @@ from p"facts_text.dewy" import (fact_string_call)
 from p"float_ops.dewy" import (ff_integer_demand)
 from p"nd_contracts.jo" import (nd_mutable_call nd_mutable_signatures)
 
+from p"check.jo" import (modules)
+from p"util.jo" import (files lib_root pos_file)
+from p"@lib/core/str.jo" import (starts_with)
+
 LifeWord:type=int64<overflow='wrap'>
+
+# A module's file is authoritative even when its initializer has position zero.
+# Arena IDs are checked by callers; these reads retain no views across calls.
+fn_in_lib=(f:LifeWord):>bool=>$unsafe {
+    let m:LifeWord=fns.ptr[f].mod
+    if m >=? 0 and m <? modules.length {
+        let file:LifeWord=modules[m].file
+        return (lib_root as array<uint8>).length >? 0 and file >=? 0 and file <? files.length and starts_with(files[file].path lib_root)
+    }
+    pos_in_lib(nodes.ptr[LifeWord(fns.ptr[f].body)].pos)
+}
+
+fact_exact_demand=(n:LifeWord):>bool=>$unsafe {
+    (exact_has_store(n) and not exact_decided(n) and (fact_deferred_proving or dir_obligations or dir_policy(nodes.ptr[n].pos) =? DIR_STATIC or exact_shader_owners.has(exact_stores.get(n) ?? 0))) or (n >=? 0 and n <? exact_marks.length and exact_marks[n] & 128 not=? 0)
+}
+
+fn_dewy=(f:LifeWord):>bool=>$unsafe {
+    let m:LifeWord=fns.ptr[f].mod
+    if m >=? 0 and m <? modules.length {
+        let file:LifeWord=modules[m].file
+        return file >=? 0 and file <? files.length and files[file].is_dewy
+    }
+    files[pos_file(nodes.ptr[LifeWord(fns.ptr[f].body)].pos)].is_dewy
+}
 # `parallel i in [a..b)` (a range runs at most 2^63 - 1 values: lib/std/thread.jo).
 fact_parallel_range_call=(n:LifeWord):>bool=>$unsafe {
     if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 2 {return false}

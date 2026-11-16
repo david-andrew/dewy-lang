@@ -23,7 +23,25 @@ from p"facts_library.dewy" import (fact_field_args)
 from p"refine_rare.dewy" import (ref_self_element_row)
 from p"refine_siblings.dewy" import (ref_sib_element_row)
 
+from p"ast.jo" import (kid kids)
+
 ValueBuildWord:type=int64<overflow='wrap'>
+
+# Preserve capture order and stop before any later operand after a mismatch.
+fact_bcast_common=(n:ValueBuildWord @s:FactState):>int64=>$unsafe {
+    let lengths=kid(n 0)
+    if nodes.ptr[lengths].kind not=? 'array' {return 0}
+    let one=fact_constant(@s 1)
+    let first:ValueBuildWord=0
+    loop c in kids(lengths) {
+        let v=fact_capture(c @s)
+        if fact_compare(s 'eq' v one) =? 1 {continue}
+        if first =? 0 {first=v}
+        else if fact_compare(s 'eq' v first) not=? 1 {return 0}
+    }
+    if first =? 0 {return one}
+    first
+}
 
 # Scalar domains keep the type's unsigned endpoint encoding. Arena IDs belong
 # to the checked program; these reads do not grow or retain an arena view.

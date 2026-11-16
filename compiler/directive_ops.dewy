@@ -16,7 +16,7 @@ from p"effect_panics.dewy" import (effect_panics panic_reaches)
 from p"effect_types.dewy" import (EffectAtom)
 from p"effects.jo" import (effect_contracts effect_obligations effect_panics_settled panic_edge_at panic_edge_end panic_edges panic_via panic_witness)
 from p"expr.jo" import (setting_value_targets setting_value_wrapped ntype)
-from p"facts.jo" import (fact_owner fact_retry_owner fact_policy fact_policy_default fn_in_lib)
+from p"facts.jo" import (fact_owner fact_retry_owner fact_policy fact_policy_default)
 from p"ide.jo" import (ide_on)
 from p"ide_index.dewy" import (ide_esc)
 from p"ide_ops.dewy" import (ide_emit ide_pos_str)
@@ -521,3 +521,5 @@ dir_row_origin=(d:DirWord):>string=>{
     let b=name_of(dir_scopes[i].bundle)
     "; `${b}` gives functions without a row of their own this one (opt a function out with `${b}=false` at the top of its body)"
 }
+
+from p"facts_lifecycle.dewy" import (fn_in_lib)

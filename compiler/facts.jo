@@ -2713,41 +2713,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
     fact_forget(s, n, .unsupported, true)
     return fact_new(s, FactBound(reason = .unsupported, witness = n))
 
-# A function is the library's when its module was read from the library
-# directory (its body position cannot say: the prelude's initializer starts at
-# offset 0 of file 0, which is no position at all).
-fn_in_lib = (f: int) -> bool:
-    m = int(fns[f].mod)
-    if m >= 0 and m < modules.len():
-        file = int(modules[m].file)
-        return len(lib_root) > 0 and file >= 0 and file < files.len() and starts_with(files[file].path, lib_root)
-    pos_in_lib(nodes[int(fns[f].body)].pos)
-
-# __bcast(lengths) of 1-D operands each proven equal to one length, or to 1: that length
-# (all ones: 1), as the elementwise result's. 0 when unknown. O(operands).
-fact_bcast_common = (n: int, s: mut FactState) -> int:
-    lengths = kid(n, 0)
-    if nodes[lengths].kind != .array: return 0
-    one = fact_constant(s, 1)
-    first = 0
-    loop c in kids(lengths):
-        v = fact_capture(c, s)
-        if fact_compare(s, .eq, v, one) == 1: continue
-        if first == 0: first = v
-        else if fact_compare(s, .eq, v, first) != 1: return 0
-    if first == 0: return one
-    first
-
-fact_exact_demand = (n: int) -> bool:
-    (exact_has_store(n) and not exact_decided(n) and (fact_deferred_proving or dir_obligations or dir_policy(nodes[n].pos) == DIR_STATIC or exact_shader_owners.has(exact_stores.get(n) ?? 0))) or (n >= 0 and n < exact_marks.len() and exact_marks[n] & 128 != 0)
-
-# (Jo sources, the compiler's own, keep runtime checks: none is demanded)
-fn_dewy = (f: int) -> bool:
-    m = int(fns[f].mod)
-    if m >= 0 and m < modules.len():
-        file = int(modules[m].file)
-        return file >= 0 and file < files.len() and files[file].is_dewy
-    files[pos_file(nodes[int(fns[f].body)].pos)].is_dewy
+# Function context and exact demand live in facts_lifecycle; broadcast lengths
+# are constructed with the other values in facts_values.
 
 # Admitted members(U) copies (member_replay.jo) differ only in their member
 # literal. A decide run analyses such a block once: its first copy, from the

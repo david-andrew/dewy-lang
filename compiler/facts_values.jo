@@ -143,3 +143,16 @@ fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: in
             args = fact_field_args(s, base)
         ref_assume(t, v, args, s)
     v
+
+fact_bcast_common = (n: int, s: mut FactState) -> int:
+    lengths = kid(n, 0)
+    if nodes[lengths].kind != .array: return 0
+    one = fact_constant(s, 1)
+    first = 0
+    loop c in kids(lengths):
+        v = fact_capture(c, s)
+        if fact_compare(s, .eq, v, one) == 1: continue
+        if first == 0: first = v
+        else if fact_compare(s, .eq, v, first) != 1: return 0
+    if first == 0: return one
+    first
