@@ -212,6 +212,18 @@ only for string-length dialect/runtime requests. It returns the first diagnostic
 as a seed-compatible status; Jo retains reporting. Its path remains a value
 snapshot, while all arena headers are borrowed across reentrant calls.
 
+`refine_metadata.dewy` owns the demanded representation, storage-place and
+predicate queries from `refine.jo`. It reads the existing node, type, local,
+field and predicate arenas directly; Jo retains their storage and every writer.
+Alias routes follow established places, wrapper peeling stops after eight
+steps, and predicate/field scans visit only the requested rows. The existing
+inference-chain pruning remains a direct service. Scalar arena views do not
+survive calls that can grow their owners; nested managed predicate rows use
+ordinary indexed reads. Queries introduce no callbacks, context copies or
+mutable fact-state API. IDs and offsets use wrapping machine words, with plain
+word results preserving Jo collection inference. Storage reads retain optional
+and union payload contracts, opaque brands and paired-run erasure rules.
+
 `refine_strings.dewy` owns string-set construction/publication and checked member
 constants. Its `CheckerInternHost` borrows whole-string interning; the set, type,
 structure, variant and node arenas stay with Jo, with the current field count
