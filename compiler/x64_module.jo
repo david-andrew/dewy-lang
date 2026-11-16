@@ -113,6 +113,111 @@ x64_emit_adapter = (lf: int, ptypes: int[]) -> int:
     b(0xC3)
     start
 
+# Null checks by fault (x64_emit.dewy nchk_rows): the SIGSEGV handler the runtime installs
+# (lib/std/backtrace.jo) when an index check reads the length of a null array. Machine code,
+# so no program compiles it. Its restorer (rt_sigreturn) sits 16 bytes before it. A fault below
+# address 4096 in a listed range becomes the check's call __panic_bounds(i, 0, loc), made by
+# the returning context as from the faulting code; any other fault goes on to the runtime's
+# handler (__nchk_next). The table (rodata at `table`): u32 count, u32 0, then per range u32
+# start and end (.text offsets), u32 where the index is (0 the value, 1 the register with
+# ucontext gregs index v, 2 [rbp + v], 3 [rsp + v]), u32 0, i64 v, i64 the location's rodata
+# offset. A linear scan, only when a fault happens.
+nchk_entry_at = -1
+nchk_entry_slot = -1
+
+nchk_jcc = (cc: int) -> int:
+    b16(0x0F | ((0x80 + cc) << 8))
+    b32(0)
+    x_code[0].len()
+
+nchk_patch = (at: int): patch32(at - 4, x_code[0].len() - at)
+
+nchk_short = (op: int) -> int:
+    b16(op)
+    x_code[0].len()
+
+nchk_land = (at: int): x_code[0][at - 1] = u8(x_code[0].len() - at)
+
+x64_emit_nchk = (table: int, next_slot: int, panic_lf: int) -> int:
+    loop x_code[0].len() % 16 != 0: b(0xCC)
+    if rsp_rows.len() > 0: rsp_row(0)
+    line_rows.push(x_code[0].len())
+    line_rows.push(0)
+    row_pos = 0
+    b(0xB8); b32(15); b16(0x050F)                   # restorer: rt_sigreturn
+    loop x_code[0].len() % 16 != 0: b(0xCC)
+    h = x_code[0].len()
+    b32(0x10468B48)                                 # mov rax, [rsi + 16] (the address)
+    b16(0x3D48); b32(4096)                          # cmp rax, 4096
+    far0 = nchk_jcc(3)                              # jae
+    b24(0x828B4C); b32(168)                         # mov r8, [rdx + 168] (rip)
+    b24(0x0D8D4C); b32(0 - x_code[0].len() - 4)     # lea r9, [.text]
+    b24(0xC2894D)                                   # mov r10, r8
+    b24(0xCA294D)                                   # sub r10, r9
+    rel_fixup_lea(RCX, 0, table)
+    b24(0x198B44)                                   # mov r11d, [rcx]
+    b32(0x08C18348)                                 # add rcx, 8
+    top = x_code[0].len()
+    b24(0xDB854D)                                   # test r11, r11
+    far1 = nchk_jcc(4)                              # jz
+    b16(0x018B)                                     # mov eax, [rcx]
+    b24(0xC23949)                                   # cmp r10, rax
+    below = nchk_short(0x0072)                      # jb next
+    b24(0x04418B)                                   # mov eax, [rcx + 4]
+    b24(0xC23949)                                   # cmp r10, rax
+    hit = nchk_short(0x0072)                        # jb found
+    nchk_land(below)
+    b32(0x20C18348)                                 # add rcx, 32
+    b24(0xCBFF49)                                   # dec r11
+    b(0xEB); b(top - x_code[0].len() - 1)           # jmp top
+    nchk_land(hit)
+    b24(0x08418B)                                   # mov eax, [rcx + 8] (kind)
+    b32(0x10498B4C)                                 # mov r9, [rcx + 16] (value)
+    b24(0x01F883)                                   # cmp eax, 1
+    k1 = nchk_short(0x0075)
+    b32(0xCA4C8B4E); b(0x28)                        # mov r9, [rdx + r9*8 + 40]
+    done1 = nchk_short(0x00EB)
+    nchk_land(k1)
+    b24(0x02F883)                                   # cmp eax, 2
+    k2 = nchk_short(0x0075)
+    b32(0x78428B48)                                 # mov rax, [rdx + 120] (rbp)
+    b32(0x080C8B4E)                                 # mov r9, [rax + r9]
+    done2 = nchk_short(0x00EB)
+    nchk_land(k2)
+    b24(0x03F883)                                   # cmp eax, 3
+    k3 = nchk_short(0x0075)
+    b24(0x828B48); b32(160)                         # mov rax, [rdx + 160] (rsp)
+    b32(0x080C8B4E)                                 # mov r9, [rax + r9]
+    nchk_land(k3)
+    nchk_land(done1)
+    nchk_land(done2)
+    # (the return address: just past the range's start, as the call there would have it, so
+    # the backtrace finds the check's line)
+    b24(0x198B44)                                   # mov r11d, [rcx]
+    b24(0xC3014D)                                   # add r11, r8
+    b24(0xD3294D)                                   # sub r11, r10
+    b24(0xC3FF49)                                   # inc r11
+    b32(0x18418B48)                                 # mov rax, [rcx + 24] (location)
+    rel_fixup_lea(RCX, 0, 0)
+    b24(0xC80148)                                   # add rax, rcx
+    b24(0x8A8B48); b32(160)                         # mov rcx, [rdx + 160]
+    b32(0x08E98348)                                 # sub rcx, 8
+    b24(0x19894C)                                   # mov [rcx], r11
+    b24(0x8A8948); b32(160)                         # mov [rdx + 160], rcx (rsp)
+    b32(0x684A894C)                                 # mov [rdx + 104], r9 (rdi: the index)
+    b32(0x7042C748); b32(0)                         # mov qword [rdx + 112], 0 (rsi: length 0)
+    b24(0x828948); b32(136)                         # mov [rdx + 136], rax (rdx: the location)
+    b24(0x058D48); b32(0)
+    call_fix.push((x_code[0].len() - 4, panic_lf))  # lea rax, [__panic_bounds]
+    b24(0x828948); b32(168)                         # mov [rdx + 168], rax (rip)
+    b(0xC3)
+    nchk_patch(far0)
+    nchk_patch(far1)
+    b16(0x25FF); b32(0)
+    x_data_fix[0].push((x_code[0].len() - 4, 1, next_slot))    # jmp [__nchk_next]
+    nchk_entry_at = h
+    h
+
 x64_emit_entry = (inits: int[], main_lf: int, main_code: bool, entry_end_lf: int, watch_build: bool, WATCH_CODE_AT: int, WATCH_CODE_SIZE: int) -> int:
     loop x_code[0].len() % 16 != 0: b(0xCC)
     start = x_code[0].len()
@@ -127,6 +232,10 @@ x64_emit_entry = (inits: int[], main_lf: int, main_code: bool, entry_end_lf: int
     b(0x83)
     modrr(4, RSP)
     b(0xF0)                                   # and rsp, -16
+    if nchk_entry_at >= 0 and nchk_entry_slot >= 0:
+        b24(0x058D48); b32(nchk_entry_at - x_code[0].len() - 4)    # lea rax, [the null-check handler]
+        b24(0x058948); b32(0)
+        x_data_fix[0].push((x_code[0].len() - 4, 1, nchk_entry_slot))   # mov [__nchk_entry], rax
     if watch_build:
         # (dewy watch: room for the x_code[0] of later builds, taken before anything else can be put
         # there; its first word tells lib/std/watch.jo it is there)

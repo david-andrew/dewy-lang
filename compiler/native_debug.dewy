@@ -4,7 +4,7 @@ from p"@lib/core/rt.jo" import (__str_slice)
 from p"ir_types.dewy" import (IrFn)
 from p"dwarf_format.dewy" import (DL_ADDR DL_CONST DL_FCONST DL_MEM DL_MEMAT DL_NONE DL_REG LF_MUTPARAM LF_PARAM dw_inputs dw_pos_file)
 from p"x64_allocate.dewy" import (slot_off vspill)
-from p"x64_emit.dewy" import (call_sites dbg_pos nchk_rows rsp_rows)
+from p"x64_emit.dewy" import (call_sites dbg_pos rsp_rows)
 from p"backend_analysis.dewy" import (LOC_CONST LOC_FCONST LOC_SLOT LOC_SPILL v_live vcval vloc vslot vsoff)
 from p"elf_format.dewy" import (elf_append_bytes elf_syms put32)
 
@@ -117,26 +117,6 @@ sym_name=(n:string):>string=>$unsafe {
         return __str_slice(s 0  u)
     }
     s
-}
-# the ".dewy_nullchk" section: "SNC1", u32 count, then per null check found by its fault:
-# u32 .text start and end, u32 where its index is (x64_emit.dewy nchk_rows), u32 0, i64
-# the index's value, register or frame offset, i64 its location string's address
-x64_nullchk_table=(ro_addr:NWord):>array<uint8>=>$unsafe {
-    let n=NWord(nchk_rows.length) // 5
-    let out=fill(uint8(0) 8 + 32 * n)
-    let words=out.ptr as ptr<uint32>
-    words[0]=0x31434E53 # SNC1
-    words[1]=uint32(n & 0xffffffff)
-    loop k in [0..n) {
-        let row=(out.ptr + 8 + 32 * k) as ptr<int64>
-        let w=(out.ptr + 8 + 32 * k) as ptr<uint32>
-        w[0]=uint32(nchk_rows[5 * k] & 0xffffffff)
-        w[1]=uint32(nchk_rows[5 * k + 1] & 0xffffffff)
-        w[2]=uint32(nchk_rows[5 * k + 2] & 0xffffffff)
-        row[2]=nchk_rows[5 * k + 3]
-        row[3]=ro_addr + nchk_rows[5 * k + 4]
-    }
-    out
 }
 x64_frame_table=():>array<uint8>=>$unsafe {
     let out=fill(uint8((0) & 0xff)  8 + 4 * rsp_rows.length)

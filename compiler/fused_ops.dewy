@@ -175,6 +175,9 @@ fz_parse=(w:FusedWord b:array<uint8>):>void=>{
         r.i += skip
         skip=16 * pr(@r)
         r.i += skip
+        # (null checks found by their fault)
+        skip=40 * pr(@r)
+        r.i += skip
         pr(@r);
     }
     loop k in [first..fz_recs.length) {

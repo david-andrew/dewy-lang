@@ -197,8 +197,8 @@ compile = (path: str, out0: str) -> str:
     checked_flags = not target_wasm
     # (code made after lowering everything, except where code is patched in place as it is made)
     queue_emit = not watch_build and not repl_image and not lower_only
-    # (release x86-64 Linux: null arrays found by the fault of their index checks, x64_emit.dewy)
-    nchk_wanted = opt_release and not dbg_on and not target_arm64 and not target_windows and not target_wasm and not watch_build and not repl_image and not host_ir and not lower_only
+    # (x86-64 Linux: null arrays found by the fault of their index checks, x64_emit.dewy)
+    nchk_wanted = not dbg_on and not target_arm64 and not target_windows and not target_wasm and not watch_build and not repl_image and not host_ir and not lower_only
     check_program(path)
     if exit_codes_only:
         dc_flush_warnings()
@@ -457,7 +457,6 @@ compile = (path: str, out0: str) -> str:
             # (backtraces always; debuggers and profilers get DWARF in what `dewy build` writes)
             elf_extra = [(".dewy_lines", x64_line_table())]
             if rsp_rows.len() > 0: elf_extra.push((".dewy_frames", x64_frame_table()))
-            if nchk_rows.len() > 0: elf_extra.push((".dewy_nullchk", x64_nullchk_table(img_ro_addr)))
             dw_data_addr = img_data_addr
             if debug_info: elf_extra = elf_extra + dwarf_sections(img_text_addr, code.len(), path, DEWY_CORE_VERSION)
             ok = write_elf(out, code, entry, rodata, data_size + 8 + bss_reserve)

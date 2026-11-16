@@ -31,7 +31,7 @@ from p"util.jo" import (intern)
 from p"source_warnings.dewy" import (warn)
 from p"x64.jo" import (code data_fix fn_addr fn_len)
 from p"x64_allocate.dewy" import (ra_dump)
-from p"x64_emit.dewy" import (call_fix call_sites line_rows ra_stat ro_const rsp_rows stub_fix)
+from p"x64_emit.dewy" import (call_fix call_sites line_rows nchk_rows ra_stat ro_const rsp_rows stub_fix)
 
 FusedWord:type=int64<overflow='wrap'>
 fused_start=(pinit_lf:FusedWord):>bool=>$unsafe {
@@ -444,6 +444,7 @@ fz_worker=(cands:array<int64> a:FusedWord b:FusedWord fd:FusedWord):>void=>$unsa
         let e0=elf_syms.length
         let ro0=fz_ro.length
         let u0=rsp_rows.length
+        let n0=nchk_rows.length
         emit_now(false)
         let start=fn_addr[r.lf]
         pw(@out 1)
@@ -487,6 +488,17 @@ fz_worker=(cands:array<int64> a:FusedWord b:FusedWord fd:FusedWord):>void=>$unsa
             pw(@out rsp_rows[k4] - start)
             pw(@out rsp_rows[k4 + 1])
             k4 += 2
+        }
+        # (null checks found by their fault: x64_emit.dewy nchk_rows)
+        pw(@out (nchk_rows.length - n0) // 5)
+        k4=n0
+        loop k4 <? nchk_rows.length {
+            pw(@out nchk_rows[k4] - start)
+            pw(@out nchk_rows[k4 + 1] - start)
+            pw(@out nchk_rows[k4 + 2])
+            pw(@out nchk_rows[k4 + 3])
+            pw(@out nchk_rows[k4 + 4])
+            k4 += 5
         }
         if elf_syms.length =? e0 {pw(@out 0)}
         else {pw(@out 1)}
@@ -625,6 +637,22 @@ fz_place=(x:FzRec lf:FusedWord):>void=>$unsafe {
         let p=pr(@fz_rd[w])
         rsp_rows.push(base + p)
         rsp_rows.push(pr(@fz_rd[w]))
+    }
+    loop _ in [0..pr(@fz_rd[w])) {
+        let s=pr(@fz_rd[w])
+        let e=pr(@fz_rd[w])
+        let kind=pr(@fz_rd[w])
+        let v=pr(@fz_rd[w])
+        let off=pr(@fz_rd[w])
+        # (the location's string: where it is here)
+        let m=fz_mrc[x.w].get(off)
+        if m not=? none {off=m}
+        else {off=fz_map_in(x.w 0 off fz_r0)}
+        nchk_rows.push(base + s)
+        nchk_rows.push(base + e)
+        nchk_rows.push(kind)
+        nchk_rows.push(v)
+        nchk_rows.push(off)
     }
     if pr(@fz_rd[w]) not=? 0 {elf_syms.push([sym_name(lfuncs.ptr[lf].name) base nc])}
     loop c in calls {call_fix.push([c[0] fz_map_lf(x.w c[1])])}

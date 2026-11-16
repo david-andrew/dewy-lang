@@ -208,6 +208,10 @@ bounds_check=(arr:LPWord idx:LPWord pos:LPWord):>void=>$unsafe {
     if not opt_release {
         let n:LPWord=0
         if target_wasm or target_arm64 {n=arr_len(arr)}
+        else if nchk_wanted {
+            panic_bounds_lf=rt("__panic_bounds")
+            n=e_load(VI arr 8 8 | M_HDR | M_NULLF)
+        }
         else {
             # Select a real zero-length header for nil, without a hot branch.
             # Keep the comparison next to select so native lowering reuses flags.

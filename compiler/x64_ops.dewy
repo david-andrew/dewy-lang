@@ -3,23 +3,26 @@ $runtime_checks
 from p"ir_types.dewy" import (IrFn)
 from p"@lib/core/os.jo" import (eprint)
 from p"backend_analysis.dewy" import (LOC_SPILL backend_analyze backend_debug_vregs loop_s ra_loop_visits v_live vloc x_has_foreign_call)
-from p"check.jo" import (fns locals target_wasm target_windows watch_build)
+from p"check.jo" import (fns locals prelude syms target_wasm target_windows watch_build)
+from p"checker_state.dewy" import (SK)
+from p"util.jo" import (intern)
+from p"lower_primitives.dewy" import (global_addr_off rt)
 from p"fused.jo" import (fz_layout)
 from p"ir_builders.dewy" import (vtype)
 from p"lower_storage.dewy" import (vc)
 from p"main.jo" import (repl_image)
-from p"x64_emit.dewy" import (nchk_fn dbg_epis dbg_pos pad_moves ra_save_cost ra_save_x ra_stat rsp_row uw_at uw_fo x64_emit x_int_fail x_loop_line xe_emit_error)
+from p"x64_emit.dewy" import (nchk_fn nchk_rows dbg_epis dbg_pos pad_moves ra_save_cost ra_save_x ra_stat rsp_row uw_at uw_fo x64_emit x_int_fail x_loop_line xe_emit_error)
 from p"x64_encode.dewy" import (XMM b frame_size rsp_frame x_padding_cmov x_padding_floor)
 from p"native_debug.dewy" import (dbg_cfi native_debug_function sym_name)
 from p"elf_format.dewy" import (elf_syms)
 from p"ir.jo" import (dbg_on ir ir_operand_layout main_code)
-from p"lower.jo" import (LK_INST VC_AGG lfuncs mt_active_off opt_release panic_bounds_lf)
+from p"lower.jo" import (LK_INST VC_AGG lfuncs mt_active_off opt_release panic_bounds_lf rodata)
 from p"native_debug.dewy" import (LF_ALIAS LF_CAPTURE)
 from p"pe_format.dewy" import (UW_ADAPTER UW_ENTRY UW_FRAME UW_SAVES pe_iat_off unwind_fns)
 from p"diagnostic_exit.dewy" import (fatal ice)
 from p"x64.jo" import (WATCH_CODE_AT WATCH_CODE_SIZE code entry_end_lf fn_addr fn_len ra_fn_base ra_spill_cost ra_total ra_verbose row_line)
 from p"x64_allocate.dewy" import (VI callee_off ra_expire_visits ra_on ra_only ra_peak_gpr ra_peak_xmm ra_prio ra_spill_visits x64_allocate)
-from p"x64_module.dewy" import (x64_emit_adapter x64_emit_entry x64_emit_entry_win x64_emit_stubs x64_patch_module)
+from p"x64_module.dewy" import (nchk_entry_slot x64_emit_adapter x64_emit_entry x64_emit_entry_win x64_emit_nchk x64_emit_stubs x64_patch_module)
 
 X64OpsWord:type=int64<overflow='wrap'>
 backend_debug_bindings=():>void=>$unsafe {
@@ -56,6 +59,38 @@ x64_entry=(inits:array<int64> main_lf:X64OpsWord):>int64=>{
 x64_stubs=():>void=>{
     row_line=0
     x64_emit_stubs()
+    if nchk_rows.length >? 0 and not target_windows {x64_nchk()}
+}
+# A runtime global's data offset, or -1.
+x64_runtime_slot=(name:string):>X64OpsWord=>$unsafe {
+    let s=prelude.get(intern(name)) ?? 0
+    if s =? 0 or syms.ptr[s].kind not=? SK.global {return -1}
+    global_addr_off(X64OpsWord(syms.ptr[s].ref))
+}
+# The null-check handler and its table (x64_module.dewy x64_emit_nchk).
+x64_nchk=():>void=>$unsafe {
+    let entry=x64_runtime_slot("__nchk_entry")
+    let next=x64_runtime_slot("__nchk_next")
+    # (by name: workers may have lowered every check, fused.jo)
+    let panic=rt("__panic_bounds")
+    if entry <? 0 or next <? 0 {ice("index checks find null arrays by their fault, but the runtime has no handler slots")}
+    # (x86-64 register numbers to ucontext gregs)
+    let gregs:array<int64>=[13 14 12 11 15 10 9 8 0 1 2 3 4 5 6 7]
+    loop rodata.length % 8 not=? 0 {rodata.push(0)}
+    let table=X64OpsWord(rodata.length)
+    let n=X64OpsWord(nchk_rows.length) // 5
+    rodata.resize(table + 8 + 32 * n)
+    let words=(rodata.ptr + table) as ptr<int64>
+    words[0]=n
+    loop k in [0..n) {
+        let kind=nchk_rows[5 * k + 2]
+        words[4 * k + 1]=nchk_rows[5 * k] | (nchk_rows[5 * k + 1] << 32)
+        words[4 * k + 2]=kind
+        words[4 * k + 3]=if kind =? 1 {gregs[nchk_rows[5 * k + 3]]} else {nchk_rows[5 * k + 3]}
+        words[4 * k + 4]=nchk_rows[5 * k + 4]
+    }
+    nchk_entry_slot=entry
+    x64_emit_nchk(table next panic);
 }
 lf_is_cabi=(lf:X64OpsWord):>bool=>$unsafe {
     lfuncs.ptr[lf].kind =? LK_INST and fns.ptr[lfuncs.ptr[lf].inst].cabi

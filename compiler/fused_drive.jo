@@ -376,6 +376,7 @@ fz_worker = (cands: int[], a: int, b: int, fd: int):
         e0 = elf_syms.len()
         ro0 = fz_ro.len()
         u0 = rsp_rows.len()
+        n0 = nchk_rows.len()
         emit_now(false)
         start = fn_addr[r.lf]
         pw(out, 1)
@@ -414,6 +415,16 @@ fz_worker = (cands: int[], a: int, b: int, fd: int):
             pw(out, rsp_rows[k4] - start)
             pw(out, rsp_rows[k4 + 1])
             k4 += 2
+        # (null checks found by their fault: x64_emit.dewy nchk_rows)
+        pw(out, (nchk_rows.len() - n0) / 5)
+        k4 = n0
+        loop k4 < nchk_rows.len():
+            pw(out, nchk_rows[k4] - start)
+            pw(out, nchk_rows[k4 + 1] - start)
+            pw(out, nchk_rows[k4 + 2])
+            pw(out, nchk_rows[k4 + 3])
+            pw(out, nchk_rows[k4 + 4])
+            k4 += 5
         if elf_syms.len() == e0: pw(out, 0)
         else: pw(out, 1)
     if env("DEWY_FUSED_TRACE") != none:
@@ -530,6 +541,20 @@ fz_place = (x: FzRec, lf: int):
         p = pr(fz_rd[w])
         rsp_rows.push(base + p)
         rsp_rows.push(pr(fz_rd[w]))
+    loop _ in [0..pr(fz_rd[w])):
+        s = pr(fz_rd[w])
+        e = pr(fz_rd[w])
+        kind = pr(fz_rd[w])
+        v = pr(fz_rd[w])
+        off = pr(fz_rd[w])
+        # (the location's string: where it is here)
+        if let m = fz_mrc[x.w].get(off): off = m
+        else: off = fz_map_in(x.w, 0, off, fz_r0)
+        nchk_rows.push(base + s)
+        nchk_rows.push(base + e)
+        nchk_rows.push(kind)
+        nchk_rows.push(v)
+        nchk_rows.push(off)
     if pr(fz_rd[w]) != 0: elf_syms.push((sym_name(lfuncs[lf].name), base, nc))
     loop c in calls: call_fix.push((c.0, fz_map_lf(x.w, c.1)))
     loop d in datas:

@@ -134,8 +134,8 @@ check_program=(main_path:string):>void=>$unsafe {
         let install=synth_call("__crash_install" [] 0)
         modules.ptr[mainm].inits.insert(install 0)
         # (release x86-64 Linux: index checks find null arrays by their fault, x64_emit.dewy)
-        if nchk_wanted and prelude.get(intern("__nchk_install")) not=? none {modules.ptr[mainm].inits.insert(synth_call("__nchk_install" [] 0) 1)}
-        else {nchk_wanted=false}
+        # (x86-64 Linux: index checks find null arrays by their fault, x64_module.dewy x64_emit_nchk)
+        if prelude.get(intern("__nchk_entry")) =? none {nchk_wanted=false}
     }
     let has_upd=game_fn(mainm "update") not=? none
     let has_drw=game_fn(mainm "draw") not=? none

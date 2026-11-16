@@ -89,25 +89,6 @@ sym_name = (n: str) -> str:
         return s[..u)
     s
 
-# the ".dewy_nullchk" section: "SNC1", u32 count, then per null check found by its fault:
-# u32 .text start and end, u32 where its index is (x64_emit.dewy nchk_rows), u32 0, i64
-# the index's value, register or frame offset, i64 its location string's address
-x64_nullchk_table = (ro_addr: int) -> u8[]:
-    n = nchk_rows.len() / 5
-    out = fill(u8(0), 8 + 32 * n)
-    words = data(out) as *u32
-    words[0] = 0x31434E53                 # SNC1
-    words[1] = u32(n)
-    loop k in [0..n):
-        row = (data(out) + 8 + 32 * k) as *int
-        w = (data(out) + 8 + 32 * k) as *u32
-        w[0] = u32(nchk_rows[5 * k])
-        w[1] = u32(nchk_rows[5 * k + 1])
-        w[2] = u32(nchk_rows[5 * k + 2])
-        row[2] = nchk_rows[5 * k + 3]
-        row[3] = ro_addr + nchk_rows[5 * k + 4]
-    out
-
 x64_frame_table = () -> u8[]:
     out = fill(u8(0), 8 + 4 * rsp_rows.len())
     words = data(out) as *u32

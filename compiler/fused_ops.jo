@@ -161,6 +161,8 @@ fz_parse = (w: int, b: u8[]):
         r.i += skip
         skip = 16 * pr(r)       # RSP unwind transitions
         r.i += skip
+        skip = 40 * pr(r)       # null checks found by their fault
+        r.i += skip
         pr(r)
     loop k in [first..fz_recs.len()):
         x = fz_recs[k]

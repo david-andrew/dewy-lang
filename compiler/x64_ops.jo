@@ -21,6 +21,7 @@ use 'check.jo'
 use 'ast.jo'
 use 'fused.jo'
 use 'ir_builders.dewy'
+use 'lower_primitives.dewy'
 
 backend_debug_bindings = ():
     backend_debug_vregs.clear()
@@ -50,6 +51,37 @@ x64_entry = (inits: int[], main_lf: int) -> int:
 x64_stubs = ():
     row_line = 0
     x64_emit_stubs()
+    if nchk_rows.len() > 0 and not target_windows: x64_nchk()
+
+# A runtime global's data offset, or -1.
+x64_runtime_slot = (name: str) -> int:
+    s = prelude.get(intern(name)) ?? 0
+    if s == 0 or syms[s].kind != .global: return -1
+    global_addr_off(int(syms[s].ref))
+
+# The null-check handler and its table (x64_module.dewy x64_emit_nchk).
+x64_nchk = ():
+    entry = x64_runtime_slot("__nchk_entry")
+    next = x64_runtime_slot("__nchk_next")
+    # (by name: workers may have lowered every check, fused.jo)
+    panic = rt("__panic_bounds")
+    if entry < 0 or next < 0: ice("index checks find null arrays by their fault, but the runtime has no handler slots")
+    # (x86-64 register numbers to ucontext gregs)
+    gregs = [13, 14, 12, 11, 15, 10, 9, 8, 0, 1, 2, 3, 4, 5, 6, 7]
+    loop rodata.len() % 8 != 0: rodata.push(0)
+    table = rodata.len()
+    n = nchk_rows.len() / 5
+    rodata.resize(table + 8 + 32 * n)
+    words = (data(rodata) + table) as *int
+    words[0] = n
+    loop k in [0..n):
+        kind = nchk_rows[5 * k + 2]
+        words[4 * k + 1] = nchk_rows[5 * k] | (nchk_rows[5 * k + 1] << 32)
+        words[4 * k + 2] = kind
+        words[4 * k + 3] = if kind == 1: gregs[nchk_rows[5 * k + 3]] else: nchk_rows[5 * k + 3]
+        words[4 * k + 4] = nchk_rows[5 * k + 4]
+    nchk_entry_slot = entry
+    x64_emit_nchk(table, next, panic)
 lf_is_cabi = (lf: int) -> bool: lfuncs[lf].kind == LK_INST and fns[lfuncs[lf].inst].cabi
 x64_resolve = (text_addr: int, ro_addr: int, data_addr: int):
     error, lf = x64_patch_module(text_addr, ro_addr, data_addr, fn_addr)
