@@ -1,0 +1,93 @@
+$runtime_checks
+from p"check.jo" import (locals)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (mk_ident_local)
+from p"facts.jo" import (FactState fact_terms)
+from p"facts_compare.dewy" import (fact_add_fits fact_assume)
+from p"facts_index_writes.dewy" import (fact_constant fact_new)
+from p"facts_lengths.dewy" import (fact_difference)
+from p"facts_routes.dewy" import (fact_read)
+from p"facts_value_queries.dewy" import (fact_bound)
+from p"facts_values.dewy" import (fact_domain fact_project)
+from p"nd_contract_ops.dewy" import (fact_nd_projection)
+from p"refine.jo" import (ref_fact_holder ref_predicates)
+from p"refine_metadata.dewy" import (ref_encoded representation_type)
+from p"refine_rare.dewy" import (ref_self_assume)
+from p"refine_siblings.dewy" import (ref_sib_assume)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm RefTerm)
+from p"types.jo" import (T_BOOL T_INT T_U64 fields prune structs types)
+
+RefineTransferWord:type=int64<overflow='wrap'>
+ref_project=(term:RefTerm value0:int64 @s:FactState):>int64=>$unsafe {
+    let value=value0
+    loop selector in term.path {
+        let t=if value not=? 0 {representation_type(fact_terms[value].type)} else {0}
+        let projected=T_INT
+        if selector <=? -2 {
+            value=fact_nd_projection(@s value selector)
+            continue
+        }
+        if selector not=? -1 {
+            if t =? 0 or types.ptr[t].kind not=? 'struct_' {return 0}
+            let si=RefineTransferWord(types.ptr[t].st)
+            projected=0
+            loop i in [0..RefineTransferWord(structs.ptr[si].nfields)) {
+                let field=fields.ptr[RefineTransferWord(structs.ptr[si].fields) + i]
+                if int64(field.name) =? selector {projected=int64(field.type)}
+            }
+            if projected =? 0 {return 0}
+        }
+        value=fact_project(@s value selector false projected)
+    }
+    value
+}
+ref_value=(term:RefTerm self:int64 args:array<int64> base:int64 @s:FactState):>int64=>$unsafe {
+    if term.kind =? 1 {return fact_constant(@s ref_encoded(term.value base))}
+    let value=self
+    if term.kind =? 2 or term.kind =? 5 {
+        value=if term.value <? args.length {args[term.value]} else {0}
+    }
+    else if term.kind =? 3 {
+        let e=mk_ident_local(term.value locals.ptr[term.value].pos)
+        value=fact_read(@s e)
+    }
+    else if term.kind =? 6 {value=ref_fact_holder}
+    else if term.kind not=? 0 {fatal((-1) "unresolved generic refinement bound");}
+    value=ref_project(term value @s)
+    if value not=? 0 and term.offset not=? 0 {
+        # (a mathematical sum: exact rows, and an interval only where it fits)
+        let b=fact_bound(s value)
+        let shifted=FactBound(wide=true)
+        if not b.wide and b.lo not=? FACT_MIN and b.hi not=? FACT_MAX and fact_add_fits(b.lo term.offset) and fact_add_fits(b.hi term.offset) {shifted=FactBound(RefineTransferWord(b.lo) + RefineTransferWord(term.offset) RefineTransferWord(b.hi) + RefineTransferWord(term.offset))}
+        let sum=fact_new(@s shifted FactTerm(type=T_INT))
+        fact_difference(@s sum value term.offset 0 16)
+        fact_difference(@s value sum (-RefineTransferWord(term.offset)) 0 16)
+        return sum
+    }
+    if value not=? 0 and term.path.length >? 0 and term.path[RefineTransferWord(term.path.length) - 1] =? -1 and representation_type(base) =? T_U64 {
+        # A length bounding a uint64: its interval in the biased order.
+        let b=fact_bound(s value)
+        let lo=max(b.lo 0)
+        let hi=if b.hi <? lo {lo} else {b.hi}
+        value=fact_new(@s FactBound(lo xor FACT_MIN hi xor FACT_MIN (lo xor FACT_MIN) not=? 0) FactTerm(type=T_U64))
+    }
+    value
+}
+ref_assume=(t0:int64 self:int64 args:array<int64> @s:FactState):>void=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind not=? 'refined' {return}
+    let base=RefineTransferWord(types.ptr[t].elem)
+    loop atom in ref_predicates[RefineTransferWord(types.ptr[t].st)] {
+        if atom.a.kind =? 6 {
+            if atom.b.kind =? 5 or atom.b.kind =? 6 {ref_sib_assume(@s self atom args)}
+            else {ref_self_assume(@s self atom)}
+            continue
+        }
+        # (a store's element type says nothing without the array it is stored in)
+        if atom.b.kind =? 6 and ref_fact_holder =? 0 {continue}
+        let a=ref_value(atom.a self args base @s)
+        let b=ref_value(atom.b self args base @s)
+        let v=fact_new(@s fact_domain(T_BOOL) FactTerm(atom.op a b))
+        fact_assume(@s v true)
+    }
+}

@@ -12,6 +12,7 @@ CHECKS_HOMES = {path.stem: match[1] for path in (Path(__file__).resolve().parent
 LEAF_HOMES = {
     'warn_if_facts': 'warn_if.jo',
     'refine_metadata': 'refine.jo',
+    'refine_transfers': 'refine.jo',
     'witness_nodes': 'witness.jo',
     'source_warnings': 'util.jo',
 
