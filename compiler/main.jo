@@ -547,19 +547,7 @@ main = ():
     # (building and running fetch the packages a program names; the language server does not)
     pkg_fetch = true
     if a[1] == "check":
-        # type check only
-        if a.len() > 3 and a[2] == "--obligations":
-            dir_obligations = true
-            a = [a[0], a[1]] + a[3..]
-        else if a.len() > 3 and a[3] == "--obligations":
-            dir_obligations = true
-            a = [a[0], a[1], a[2]] + a[4..]
-        if a.len() < 3: usage()
-        if let s = env("DEWY_STOP"): stop_after = s
-        path = os_path(a[2])
-        # (the test blocks are checked too, as dewy test would)
-        test_mode = true
-        check_all = true
+        path = driver_check_arguments(a)
         if len(stop_after) > 0:
             scan_build_block(path)
             setup_target()
@@ -594,3 +582,5 @@ use 'driver_options.dewy'
 use 'driver_dispatch.dewy'
 
 use 'driver_commands.dewy'
+
+use 'driver_check.dewy'

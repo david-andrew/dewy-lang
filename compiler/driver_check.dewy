@@ -1,0 +1,34 @@
+$runtime_checks
+
+from p"@lib/core/os.jo" import env
+from p"check.jo" import (check_all test_mode)
+from p"directives.jo" import dir_obligations
+from p"driver_cli.dewy" import usage
+from p"module_paths.dewy" import os_path
+from p"parse.jo" import stop_after
+
+CheckArgWord:type=int64<overflow='wrap'>
+
+# The check command prepares its path and existing mode flags here. Profiling
+# stops, compilation, error exits and obligation output remain in the Jo caller.
+driver_check_arguments=(arguments:array<string>):>string=>{
+    let a=arguments
+    if a.length >? 3 and a[2] =? "--obligations" {
+        dir_obligations=true
+        let rest=[a[0] a[1]]
+        loop i in 0.. and x in a {let at:CheckArgWord=i; if at >=? 3 {rest.push(x);}}
+        a=rest
+    } else if a.length >? 3 and a[3] =? "--obligations" {
+        dir_obligations=true
+        let rest=[a[0] a[1] a[2]]
+        loop i in 0.. and x in a {let at:CheckArgWord=i; if at >=? 4 {rest.push(x);}}
+        a=rest
+    }
+    if a.length <? 3 {usage();}
+    let requested=env("DEWY_STOP")
+    if requested not=? none {stop_after=requested}
+    let path=os_path(a[2])
+    test_mode=true
+    check_all=true
+    path
+}
