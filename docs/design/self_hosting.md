@@ -352,6 +352,14 @@ no arena view survives a growing service call. Cost remains demanded path walks
 plus at most five body walks under the existing shared step cap; no new scan,
 callback or copied context is introduced.
 
+`facts_compare.dewy` also owns saved-Boolean recognition and signed addition
+guards. Boolean recognition follows only leading negations and checks nonpositive
+sentinels before reading the arena; its cost is the negation-chain length.
+These queries do not borrow mutable `FactState` or write Jo globals. Endpoint
+arithmetic uses wrapping machine words with the original sign guards. Token
+classification and the normal-edge transfer from a successful checked access
+remain owned by Jo, preserving policy/proof guards, assumptions and snapshots.
+
 ## Route beyond the checker
 
 Planning baseline: `3449ea6a1`; physical lines including comments/blanks, excluding

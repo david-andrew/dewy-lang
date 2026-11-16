@@ -722,3 +722,13 @@ fact_offset_narrow = (s: mut FactState, v: int, b: FactBound):
     if not b.wide:
         fact_difference(s, v, operand, k, 0, 16)
         fact_difference(s, operand, v, -k, 0, 16)
+
+fact_saved_boolean = (n0: int) -> bool:
+    n = n0
+    loop n > 0 and nodes[n].kind == .not_: n = int(nodes[n].a)
+    n > 0 and (nodes[n].kind == .and_ or nodes[n].kind == .or_)
+
+fact_add_fits = (a: int, b: int) -> bool:
+    if b > 0: return a <= FACT_MAX - b
+    if b < 0: return a >= FACT_MIN - b
+    true

@@ -773,3 +773,5 @@ fact_shift_obliged = (n: int) -> bool:
     if nodes[n].aux != 0 or (k != .binary and k != .assign) or (op != .shl and op != .shr) or prune(ntype(int(nodes[n].a))) != T_MATH_INT: return false
     count = prune(ntype(int(nodes[n].b)))
     count == T_MATH_INT or is_int(count) and types[count].sign
+
+# Comparison/condition services now share the existing facts_compare import.

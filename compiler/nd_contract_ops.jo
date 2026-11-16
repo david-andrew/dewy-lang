@@ -637,3 +637,5 @@ fact_nd_valid_held = (s: FactState, value: int) -> bool:
     if j < 0: return false
     j = fact_projection_find(s, s.projections[j].value, s.projections[i].value, true)
     j >= 0 and fact_bound(s, s.projections[j].value).lo == 1
+
+# Comparison/condition services now share the existing facts_compare import.

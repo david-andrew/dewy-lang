@@ -619,6 +619,7 @@ fact_covered = 0
 # supplies its own proof. Only final walks use this transfer, not speculative
 # loop candidates or return summaries. Value identities retire naturally on
 # replacement/resizing. O(1) indexed rows/bounds under the fact-state budget.
+
 fact_index_success = (n: int, s: mut FactState, index: int, length: int):
     if fact_speculating != 0 or fact_query or dir_policy(nodes[n].pos) == DIR_STATIC: return
     if proof_active and fact_owner > 0 and proof_decls.has(int(fns[fact_owner].decl)): return
@@ -742,10 +743,6 @@ struct FactAffine:
 # A `let` binding's `and`/`or` value (fact_saving while it is captured):
 # a saved Boolean, assumed again where it is tested.
 fact_saving = false
-fact_saved_boolean = (n0: int) -> bool:
-    n = n0
-    loop n > 0 and nodes[n].kind == .not_: n = int(nodes[n].a)
-    n > 0 and (nodes[n].kind == .and_ or nodes[n].kind == .or_)
 
 # A saved Boolean's right operand runs on one path only, but the places it
 # reads, the elements it reads at a local index (`xs[i]`) and its literals
@@ -783,10 +780,6 @@ struct FactImplication:
 fact_implications: FactImplication[]
 fact_either_wanted = 0   # (an if's condition: 1 its `or` paths, 2 its `and` refutations)
 
-fact_add_fits = (a: int, b: int) -> bool:
-    if b > 0: return a <= FACT_MAX - b
-    if b < 0: return a >= FACT_MIN - b
-    true
 
 # Only a quotient/shift consumer requests a 65-bit mathematical sum term.
 # Do not retain arbitrary wide loop updates and perturb their fixed point.

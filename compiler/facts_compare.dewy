@@ -3,7 +3,7 @@ $runtime_checks
 from p"ast.jo" import (kid nodes)
 from p"check.jo" import (fns)
 from p"checker_tokens.dewy" import (Tok)
-from p"facts.jo" import (FactAffine FactDifference FactState fact_add_fits fact_comparison fact_equal_arrays fact_name_starts_with fact_project fact_terms)
+from p"facts.jo" import (fact_comparison FactAffine FactDifference FactState fact_equal_arrays fact_name_starts_with fact_project fact_terms)
 from p"facts_values.dewy" import (fact_domain fact_type)
 from p"facts_arith.dewy" import (fact_u64_literal)
 from p"facts_changes.dewy" import (fact_length_comparison)
@@ -762,4 +762,18 @@ fact_offset_narrow=(@s:FactState v:CompareWord b:FactBound):>void=>{
         fact_difference(@s v operand k 0 16)
         fact_difference(@s operand v (-k) 0 16)
     }
+}
+
+# Checked node IDs, with zero/negative sentinels rejected before any read.
+fact_saved_boolean=(n0:CompareWord):>bool=>$unsafe {
+    let n=n0
+    loop n >? 0 and nodes.ptr[n].kind =? 'not_' {n=CompareWord(nodes.ptr[n].a)}
+    n >? 0 and (nodes.ptr[n].kind =? 'and_' or nodes.ptr[n].kind =? 'or_')
+}
+# Sign guards make each endpoint subtraction fit a signed machine word,
+# including FACT_MIN/FACT_MAX. Callers retain their original overflow policy.
+fact_add_fits=(a:CompareWord b:CompareWord):>bool=>{
+    if b >? 0 {return a <=? CompareWord(FACT_MAX) - b}
+    if b <? 0 {return a >=? CompareWord(FACT_MIN) - b}
+    true
 }
