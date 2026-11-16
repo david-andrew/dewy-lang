@@ -206,6 +206,7 @@ zero_ctls: int[]
 # release builds (`opt = release`) inline the fast paths of refcounting, uniqueness and bounds
 # checks; debug builds keep them out of line so the IR (and compile time) stays small.
 opt_release = false
+panic_bounds_lf = -1          # (an index check's panic call: x64 finds its null test by the fault, x64_emit.dewy)
 
 # (where __mt_active is among the globals, for the code generator's CALL_RC_INC and CALL_RC_DEC)
 mt_active_off = -1

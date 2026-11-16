@@ -81,6 +81,7 @@ const VS=2
 const M_SIGNED=16
 const M_FLOAT=32
 const M_INDEX=128
+const M_NULLF=65536
 const VOP_SPLAT_B=256
 const VOP_SPLAT_C=512
 const CALL_IF_SHARED=3
@@ -3465,6 +3466,73 @@ save_around_call=(pos:XWord before:bool dst:XWord):>void=>$unsafe {
 }
 let cabi_fix:array<[int64 int64]>=[]
 let call_sites:array<int64>=[]
+# Null checks by fault (release, x86-64 Linux). An index check's length load
+# carries M_NULLF instead of a null test (lower_primitives.dewy bounds_check): a
+# null array faults reading address 8, and the crash handler finds the faulting
+# code here and makes the call the null test would have made, __panic_bounds(i,
+# 0, loc), with i and loc from the length check's own call (lib/std/backtrace.jo).
+# Rows: code start and end, where the index is (kind 0 a constant, 1 a register,
+# 2 [rbp + v], 3 [rsp + v]), v, and the location's rodata offset. O(1) per check.
+let nchk_fn:XWord=-1
+let nchk_rows:array<int64>=[]
+let nchk_open:XWord=-1
+let nchk_idx:XWord=-1
+let nchk_loc:XWord=0
+let nchk_call:XWord=-1
+let nchk_start:XWord=0
+# The length check after the load at pos: its call's index and location.
+nchk_begin=(pos:XWord):>void=>$unsafe {
+    let n=XWord(xe_instructions[pos].dst)
+    let q=pos + 1
+    loop q <? xe_ncode and q <=? pos + 16 {
+        let c=xe_instructions[q]
+        if c.op =? 'call' and c.imm =? nchk_fn and XWord(c.b) =? 3 and XWord(xe_arguments[XWord(c.a) + 1]) =? n {
+            let loc=XWord(xe_arguments[XWord(c.a) + 2])
+            # (its location's address: made in the check's arm, or once before by sharing)
+            let r=q - 1
+            loop r >=? 0 and not (xe_instructions[r].op =? 'daddr' and XWord(xe_instructions[r].dst) =? loc) {r -= 1}
+            let where=vloc[XWord(xe_arguments[XWord(c.a)])]
+            if r >=? 0 and (where =? LOC_CONST or where =? LOC_SPILL or(where >=? 0 and where <? XMM)) {
+                nchk_open=pos
+                nchk_idx=XWord(xe_arguments[XWord(c.a)])
+                nchk_loc=xe_instructions[r].imm
+                nchk_call=q
+                nchk_start=XWord(x_code[0].length)
+            }
+            return
+        }
+        q += 1
+    }
+}
+# After the length load (and an instruction it folded into) is emitted.
+nchk_close=():>void=>$unsafe {
+    nchk_open=-1
+    let idx=nchk_idx
+    let where=vloc[idx]
+    let kind:XWord=1
+    let value:XWord=where
+    if where =? LOC_CONST {
+        kind=0
+        value=vcval[idx]
+    }
+    else if where =? LOC_SPILL {
+        kind=if rsp_frame {3} else {2}
+        value=xe_spill[idx] + (if rsp_frame {frame_size + rsp_extra} else {0})
+    }
+    # (later padding must not move the recorded range)
+    x_padding_floor=XWord(x_code[0].length)
+    nchk_rows.push(nchk_start)
+    nchk_rows.push(XWord(x_code[0].length))
+    nchk_rows.push(kind)
+    nchk_rows.push(value)
+    nchk_rows.push(nchk_loc)
+    # (the call's line, as its return address would have it: for the backtrace)
+    let call=xe_instructions[nchk_call]
+    if call.pos not=? 0 {
+        call_sites.push(nchk_start + 1)
+        call_sites.push(XWord(call.pos))
+    }
+}
 
 # (code offset, position) where the source position changes: the line table of debuggers
 # (dwarf.jo)
@@ -3852,8 +3920,10 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
     let ncalls=XWord(call_pos.length)
     let saves=save_list.ptr as ptr<XWord>
     let nsaves=XWord(save_list.length)
+    nchk_open=-1
     loop pos in [0..xe_ncode) {
         let ins=instructions + pos
+        if ins[0].op =? 'load' and XWord(ins[0].c) & M_NULLF not=? 0 {nchk_begin(pos)}
         line_row(XWord(ins[0].pos))
         if xe_debug {dbg_pos[pos] = XWord(x_code[0].length)}
         if ci <? ncalls and calls[ci] =? pos and nsaves >? 0 {
@@ -3884,6 +3954,7 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
         }
         else {emit_ins(pos  ins)}
         if ci <? ncalls and calls[ci] =? pos {ci += 1}
+        if nchk_open >=? 0 and XWord(x_code[0].length) >? nchk_start and fold_load <? 0 and cmp_load <? 0 {nchk_close()}
     }
     if XWord(x_int_fail.length) >? 0 {
         loop fix in x_int_fail {patch32(fix  XWord(x_code[0].length) - fix - 4)}

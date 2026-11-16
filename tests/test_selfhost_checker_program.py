@@ -76,6 +76,7 @@ EXTRA = {'check.jo': {'FK_INIT': 'const FK_INIT = 4',
               'synth_call': 'synth_call = (name: str, args: int[], pos: int) -> int: '
                             'events.push("synth_call"); 0',
               'target_macos': 'target_macos = false',
+              'nchk_wanted': 'nchk_wanted = false',
               'target_wasm': 'target_wasm = false',
               'test_mode': 'test_mode = false',
               'update_fn': 'update_fn = 0',

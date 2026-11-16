@@ -191,7 +191,11 @@ else when TARGET == "macos":
         __exit(101)
 else when TARGET != "wasm":
     __crash_install = () -> bool:
-        if env("DEWY_NO_CRASH_HANDLER") != none: return false
+        # (x86-64: without the report, a null check found by its fault still panics:
+        # __crash_quiet)
+        when ARCH == "arm64":
+            if env("DEWY_NO_CRASH_HANDLER") != none: return false
+        else: __crash_quiet = env("DEWY_NO_CRASH_HANDLER") != none
         size = 1 << 16
         alt = __os_pages(size)
         st = fill(0, 3)
@@ -204,15 +208,88 @@ else when TARGET != "wasm":
         act[1] = 4 | 0x08000000 | 0x04000000                # SA_SIGINFO | SA_ONSTACK | SA_RESTORER
         act[2] = h as int                                  # (never returned to)
         loop sig in [4, 7, 8, 11]: syscall(13, sig, data(act), 0, 8)    # rt_sigaction
-        true
+        not __crash_quiet
 
     # (the thread reporting a crash: the first to fault reports, and threads faulting while it
     # does wait for its exit; the handler stays installed, so a second fault is not the default
     # action ending the program before the report)
     __crash_reporter = 0
+    __crash_quiet = false
+
+    # Null checks by fault (x86-64 release builds: compiler/x64_emit.dewy). An index check
+    # whose array is null reads address 8 in a range listed in .dewy_nullchk; that fault is the
+    # check's panic, made here as its call would have been: from the faulting code, with the
+    # same index, length 0 and location. Each row: u32 .text start and end, u32 kind of the
+    # index's place (0 the value, 1 a register, 2 [rbp + v], 3 [rsp + v]), u32 0, i64 v, i64
+    # the location string's address.
+    __nchk_idx = 0
+    __nchk_loc = 0
+    # (the compiler calls __nchk_install first in a release program; the handler is compiled
+    # only there)
+    __nchk_skip = (info: *u8, uc: *u8): return
+    __nchk_hook: (*u8, *u8) -> void = __nchk_skip
+    __nchk_install = (): __nchk_hook = __nchk_try
+
+    @cabi
+    __nchk_panic = ():
+        set = [1 << 10]
+        syscall(14, 1, data(set), 0, 8)                    # rt_sigprocmask: SIGSEGV again
+        locs = [__nchk_loc]
+        __panic_bounds(__nchk_idx, 0, (data(locs) as *str)[0])
+
+    __nchk_try = (info: *u8, uc: *u8):
+        a = ((info + 16) as *int)[0]
+        if a < 0 or a >= 4096: return
+        g = (uc + 40) as *int
+        rip = g[16]
+        if let exe = read_bytes("/proc/self/exe"):
+            if exe.len() < 64 or exe[0] != 0x7F: return
+            shoff = __u64_at(exe, 0x28)
+            shnum = __u16_at(exe, 0x3C)
+            shstr = __u16_at(exe, 0x3E)
+            if shnum == 0 or shoff + shnum * 64 > exe.len(): return
+            names_off = __u64_at(exe, shoff + shstr * 64 + 24)
+            text_addr = 0
+            table = 0
+            loop i in [0..shnum):
+                h = shoff + i * 64
+                nm = __cstr_at(exe, names_off + __u32_at(exe, h))
+                if nm == ".text": text_addr = __u64_at(exe, h + 16)
+                else if nm == ".dewy_nullchk": table = __u64_at(exe, h + 24)
+            if table == 0 or __u32_at(exe, table) != 0x31434E53: return
+            pc = rip - text_addr
+            loop k in [0..__u32_at(exe, table + 4)):
+                row = table + 8 + 32 * k
+                if pc < __u32_at(exe, row) or pc >= __u32_at(exe, row + 4): continue
+                kind = __u32_at(exe, row + 8)
+                v = __u64_at(exe, row + 16)
+                # (x86-64 register numbers to ucontext's gregs)
+                regs = [13, 14, 12, 11, 15, 10, 9, 8, 0, 1, 2, 3, 4, 5, 6, 7]
+                idx = v
+                if kind == 1: idx = g[regs[v]]
+                else if kind == 2: idx = ((g[10] + v) as *int)[0]
+                else if kind == 3: idx = ((g[15] + v) as *int)[0]
+                __nchk_idx = idx
+                __nchk_loc = __u64_at(exe, row + 24)
+                # (return address just past the faulting instruction's start: its line, its frame)
+                sp = g[15] - 8
+                (sp as *int)[0] = rip + 1
+                h: cfn() = __nchk_panic
+                jb = [g[11], g[10], g[4], g[5], g[6], g[7], sp, h as int]
+                __longjmp(data(jb) as *u8, 1)
 
     @cabi
     __crash = (sig: i32, info: *u8, uc: *u8):
+        when ARCH != "arm64":
+            if sig == 11: __nchk_hook(info, uc)
+            if __crash_quiet:
+                # (no report: the signal's own default action, as without a handler)
+                dfl = fill(0, 4)
+                syscall(13, int(sig), data(dfl), 0, 8)
+                set = [1 << (int(sig) - 1)]
+                syscall(14, 1, data(set), 0, 8)                 # rt_sigprocmask
+                syscall(234, syscall(39), syscall(186), int(sig))   # tgkill
+                __exit(128 + int(sig))
         me = syscall(186)                                  # gettid
         if __atomic_cas(&__crash_reporter, 0, me) != 0:
             if __atomic_add(&__crash_reporter, 0) == me: __exit(101)    # (the report itself crashed)

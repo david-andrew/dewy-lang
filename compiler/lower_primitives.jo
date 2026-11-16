@@ -215,10 +215,14 @@ bounds_check = (arr: int, idx: int, pos: int):
         e_call_nr3(rt("__panic_bounds"), idx, n, e_daddr(loc), -1)
         endc()
         return
-    iff(e_bin(.eq, VI, arr, e_iconst(0)))
-    e_call_nr3(rt("__panic_bounds"), idx, e_iconst(0), e_daddr(loc), -1)
-    endc()
-    n = hdr_load(arr, 8)
+    panic_bounds_lf = rt("__panic_bounds")
+    n = 0
+    if nchk_wanted: n = e_load(VI, arr, 8, 8 | M_HDR | M_NULLF)
+    else:
+        iff(e_bin(.eq, VI, arr, e_iconst(0)))
+        e_call_nr3(panic_bounds_lf, idx, e_iconst(0), e_daddr(loc), -1)
+        endc()
+        n = hdr_load(arr, 8)
     iff(e_bin(.geu, VI, idx, n))
     e_call_nr3(rt("__panic_bounds"), idx, n, e_daddr(loc), -1)
     endc()

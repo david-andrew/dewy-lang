@@ -152,7 +152,11 @@ check_program = (main_path: str):
     prepare_nominals()
     check_build_block()
     # (native programs report crashes as they do panics: lib/std/backtrace.jo)
-    if not target_wasm and prelude.get(intern("__crash_install")) != none: modules[mainm].inits.insert(0, synth_call("__crash_install", [], 0))
+    if not target_wasm and prelude.get(intern("__crash_install")) != none:
+        modules[mainm].inits.insert(0, synth_call("__crash_install", [], 0))
+        # (release x86-64 Linux: index checks find null arrays by their fault, x64_emit.dewy)
+        if nchk_wanted and prelude.get(intern("__nchk_install")) != none: modules[mainm].inits.insert(1, synth_call("__nchk_install", [], 0))
+        else: nchk_wanted = false
     # programs with update()/draw() run the game loop after main()
     has_upd = game_fn(mainm, "update") != none
     has_drw = game_fn(mainm, "draw") != none

@@ -577,7 +577,7 @@ lx_dce = (code: Ins[]) -> Ins[]:
     loop i >= 0:
         ins = code[i]
         d = int(ins.dst)
-        if o_pure(ins.op) and d >= 0 and nuse[d] == 0:
+        if o_pure(ins.op) and d >= 0 and nuse[d] == 0 and not (ins.op == .load and int(ins.c) & M_NULLF != 0):
             keep[i] = false
             ir_operands(ins)
             loop operand_index in [0..ir_use_count):

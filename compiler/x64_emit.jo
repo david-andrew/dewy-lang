@@ -44,6 +44,7 @@ const VS = 2
 const M_SIGNED = 16
 const M_FLOAT = 32
 const M_INDEX = 128
+const M_NULLF = 65536
 const VOP_SPLAT_B = 256
 const VOP_SPLAT_C = 512
 const CALL_IF_SHARED = 3
@@ -2928,6 +2929,69 @@ save_around_call = (pos: int, before: bool, dst: int):
 cabi_fix: (int, int)[]
 
 call_sites: int[]
+# Null checks by fault (release, x86-64 Linux). An index check's length load
+# carries M_NULLF instead of a null test (lower_primitives.dewy bounds_check): a
+# null array faults reading address 8, and the crash handler finds the faulting
+# code here and makes the call the null test would have made, __panic_bounds(i,
+# 0, loc), with i and loc from the length check's own call (lib/std/backtrace.jo).
+# Rows: code start and end, where the index is (kind 0 a constant, 1 a register,
+# 2 [rbp + v], 3 [rsp + v]), v, and the location's rodata offset. O(1) per check.
+nchk_fn = -1
+nchk_rows: int[]
+nchk_open = -1
+nchk_idx = -1
+nchk_loc = 0
+nchk_call = -1
+nchk_start = 0
+
+# The length check after the load at pos: its call's index and location.
+nchk_begin = (pos: int):
+    code = xe_ir[0].code
+    args = xe_ir[0].args
+    n = int(code[pos].dst)
+    q = pos + 1
+    loop q < code.len() and q <= pos + 16:
+        c = code[q]
+        if c.op == .call and c.imm == nchk_fn and int(c.b) == 3 and int(args[int(c.a) + 1]) == n:
+            loc = int(args[int(c.a) + 2])
+            # (its location's address: made in the check's arm, or once before by sharing)
+            r = q - 1
+            loop r >= 0 and not (code[r].op == .daddr and int(code[r].dst) == loc): r -= 1
+            where = vloc[int(args[int(c.a)])]
+            if r >= 0 and (where == LOC_CONST or where == LOC_SPILL or (where >= 0 and where < XMM)):
+                nchk_open = pos
+                nchk_idx = int(args[int(c.a)])
+                nchk_loc = code[r].imm
+                nchk_call = q
+                nchk_start = x_code[0].len()
+            return
+        q += 1
+
+# After the length load (and an instruction it folded into) is emitted.
+nchk_close = ():
+    nchk_open = -1
+    idx = nchk_idx
+    where = vloc[idx]
+    kind = 1
+    value = where
+    if where == LOC_CONST:
+        kind = 0
+        value = vcval[idx]
+    else if where == LOC_SPILL:
+        kind = if rsp_frame: 3 else: 2
+        value = vspill[idx] + (if rsp_frame: frame_size + rsp_extra else: 0)
+    # (later padding must not move the recorded range)
+    x_padding_floor = x_code[0].len()
+    nchk_rows.push(nchk_start)
+    nchk_rows.push(x_code[0].len())
+    nchk_rows.push(kind)
+    nchk_rows.push(value)
+    nchk_rows.push(nchk_loc)
+    # (the call's line, as its return address would have it: for the backtrace)
+    call = xe_ir[0].code[nchk_call]
+    if call.pos != 0:
+        call_sites.push(nchk_start + 1)
+        call_sites.push(int(call.pos))
 # (code offset, position) where the source position changes: the line table of debuggers
 # (dwarf.jo)
 line_rows: int[]
@@ -3213,8 +3277,10 @@ x64_emit = (input: *IrFn, start: int, debug: bool, windows: bool, fused: bool, m
     save_next = 0
     save_active.clear()
     instructions = data(xe_ir[0].code)
+    nchk_open = -1
     loop pos in [0..xe_ir[0].code.len()):
         ins = instructions + pos
+        if ins.op == .load and int(ins.c) & M_NULLF != 0: nchk_begin(pos)
         line_row(int(ins.pos))
         if xe_debug: dbg_pos[pos] = x_code[0].len()
         if ci < call_pos.len() and call_pos[ci] == pos and save_list.len() > 0:
@@ -3239,6 +3305,7 @@ x64_emit = (input: *IrFn, start: int, debug: bool, windows: bool, fused: bool, m
                     else: ra_save_cost += 2 * call_w[ci]
         else: emit_ins(pos, ins)
         if ci < call_pos.len() and call_pos[ci] == pos: ci += 1
+        if nchk_open >= 0 and x_code[0].len() > nchk_start and fold_load < 0 and cmp_load < 0: nchk_close()
     if x_int_fail.len() > 0:
         loop fix in x_int_fail: patch32(fix, x_code[0].len() - fix - 4)
         b(0xE8)

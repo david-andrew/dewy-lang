@@ -1,0 +1,8 @@
+# exit: 101
+# modes: native native-release
+$runtime_checks
+at=(s:string i:int64):>uint8=>(s as array<uint8>)[i]
+main=()=>{
+    let parts=["ab" ""]
+    loop p in parts {printl(at(p 1))}
+}

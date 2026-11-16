@@ -1,0 +1,22 @@
+# exit: 101
+# modes: native native-release
+# A null array's index check panics as before where release builds find it by its fault.
+$runtime_checks
+pick=(xs:array<int64> i:int64):>int64=>{
+    let t:int64=0
+    loop k in [0..i) {t+=k}
+    xs[i]+t
+}
+outer=(xs:array<array<int64>> j:int64):>int64=>{
+    let row=xs[j]
+    pick(row j+2)
+}
+main=()=>{
+    let rows:array<array<int64>>=[[1 2 3] [] [4]]
+    let total:int64=0
+    loop j in [0..3) {
+        printl(j)
+        total+=outer(rows j)
+    }
+    printl(total)
+}

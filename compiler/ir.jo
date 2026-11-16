@@ -22,6 +22,10 @@ const M_FLOAT = 32
 # vreg is in Ins.b for loads and Ins.dst for stores, and the scale in bits 8..9 of the mode
 const M_INDEX = 128
 const M_HDR = 64          # access to an object header word (refcount / length / capacity)
+# an index check's length load that is also its null test: a null base faults reading address
+# 8, which the crash handler turns into the check's panic (x64_emit.dewy, lib/std/backtrace.jo).
+# Never removed or moved before the code it checks; outside the optimizer's value key.
+const M_NULLF = 65536
 
 # facts for the optimizer (Op.assume)
 const A_RC1 = 1       # the array/string object a (if not null) has refcount 1

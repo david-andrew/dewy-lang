@@ -1,0 +1,9 @@
+# exit: 101
+# modes: native native-release
+$runtime_checks
+pick=(xs:array<int64> i:int64):>int64=>xs[i]
+size=():>int64=>3
+main=()=>{
+    let e:array<int64>=[]
+    printl(pick(e size()))
+}

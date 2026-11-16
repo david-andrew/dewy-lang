@@ -1866,7 +1866,8 @@ opt_rewrite=():>void=>$unsafe {
     let i=(OptWord(o_count) - OptWord(int64(1)))
     loop (i >=? 0) {
         let ins=(o_out + i)
-        if ((opt_decode[oc_tag(ins)] & 2) not=? 0) {
+        # (a length load that is a null test stays: M_NULLF)
+        if ((opt_decode[oc_tag(ins)] & 2) not=? 0) and not (ins[0].op =? 'load' and int64(ins[0].c) & 65536 not=? 0) {
             let d=int64(ins[0].dst)
             if (o_regs[d].nuse =? 0) {
                 ow_operands(ins);
