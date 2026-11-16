@@ -257,8 +257,8 @@ independent differential coverage, then bootstrap and fixed-point validation.
 
 `facts_values.dewy` owns scalar/domain queries, literal, unmodeled and
 string-membership value construction, projection/pair keys, place lookup and
-projection construction, including broadcast common-length construction. The representation wrapper `fact_capture`, recursive
-transfer `fact_capture_value` and root-tag encoding `fact_root_key` remain in Jo.
+projection construction, including broadcast common-length construction. Root-tag
+encoding `fact_root_key` remains in Jo.
 Direct calls share the existing `FactState`, ordered projection records, caps
 and branch snapshots; Jo retains memo storage. Only construction mutates the
 state. Projection lookup preserves first-match order, equivalent-index reuse,
@@ -268,6 +268,17 @@ new pass, callback or copied state. Raw node/type reads use checked arena IDs
 and retain no pointer across a growing call. The frozen twin keeps the same API,
 including the plain-word `fact_domain` parameters required by the type-refinement
 host record.
+
+`facts_capture.dewy` owns the representation wrapper, recursive value transfer
+and successful checked-index assumptions. Calls preserve evaluation order,
+ordered witnesses, caps, branch snapshots and the existing speculation budgets.
+Only writers borrow mutable `FactState`; value IDs retain their plain-word Jo
+collection ABI. Jo owns shared scalar flags, dictionaries and array headers,
+bound once for writes and read directly. No context is copied on entry and no
+callback replaces a scalar read. Work follows the demanded syntax traversal and
+its existing bounded projection/join operations. Node/type arena reads use
+checked IDs, and no raw view survives a call that may grow its owner. Text-literal
+scans count bytes, preserving the Jo ASCII and carriage-return rule.
 
 `facts_slice_prep.dewy` owns syntax-child enumeration, writer-edge construction,
 finished-slice queries, target/contract preparation, mark queries/writes and parent-edge construction. Jo
