@@ -116,7 +116,8 @@ check_doc = (path: str, completing: int, lower: bool, wide: bool) -> Result:
                     unsaved.push(e.path)
             ide_texts[e.path] = blank_out(text, it.a, it.b)
             if len(it.name) > 0: blanked.push(it.name)
-        if time() - t0 > 1.5: break
+        # (deterministic protocol tests have no wall-clock cap: how many rounds fit depends on load)
+        if time() - t0 > 1.5 and env("DEWY_LSP_NO_IDLE_LOWERING") == none: break
     loop p, t in saved:
         if unsaved.contains(p): ide_texts.remove(p)
         else: ide_texts[p] = t
