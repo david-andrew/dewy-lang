@@ -257,7 +257,7 @@ independent differential coverage, then bootstrap and fixed-point validation.
 
 `facts_values.dewy` owns scalar/domain queries, literal, unmodeled and
 string-membership value construction, projection/pair keys, place lookup and
-projection construction. The representation wrapper `fact_capture`, recursive
+projection construction, including broadcast common-length construction. The representation wrapper `fact_capture`, recursive
 transfer `fact_capture_value` and root-tag encoding `fact_root_key` remain in Jo.
 Direct calls share the existing `FactState`, ordered projection records, caps
 and branch snapshots; Jo retains memo storage. Only construction mutates the
@@ -290,7 +290,15 @@ and the ordered pending-witness list. Jo keeps the
 collection/deferred flags and pending array header, bound once for writes. The
 walk costs O(visited syntax edges) and retains no arena view across calls.
 Runtime-only obligations still publish the deferred flag before traversal
-continues; exact-width demands remain mandatory.
+continues; exact-width demands remain mandatory. Exact-demand queries preserve
+the decided-store, policy, shader-owner and mandatory-mark precedence without
+changing flags or caches. Function-context queries use the module's source file
+when available, falling back to the body's position only for an absent module;
+this preserves the prelude initializer's zero-position case. These queries read
+Jo-owned arenas directly, retain no views across calls and add no state copies.
+Broadcast construction visits operands in order, skips proven unit lengths,
+and stops at the first unproven equality. Only that construction borrows mutable
+`FactState`; its plain-word result keeps the existing Jo collection ABI.
 
 `facts_index_proofs.dewy` owns lexical range/index proofs, positive-bound
 queries, write collection, loop storage inventories and scope entry/exit. Jo retains the generation, local-bound maps and scope-stack headers;
