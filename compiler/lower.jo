@@ -190,6 +190,17 @@ struct LowerZero:
 lower_zeros: LowerZero[]
 lower_mark_serial = 0
 lower_has_nops = false
+# A managed local's entry zeroing is kept only for an exit path that could see
+# it uninitialized. Declarations that write the local at their scope's own
+# control depth before registering it make the zero dead; any other
+# registration, or none, keeps it. zero_wait: local -> its entry instructions
+# (start << 8 | count); zero_state: local -> declarations not yet matched by
+# such a registration (bit 32: one was), or -1 kept; zero_ctls: ctl at each open scope's entry.
+# Indexed by local, reset at function end. O(1) per local and registration;
+# dead zeros become nops at function end.
+zero_wait: int[]
+zero_state: int[]
+zero_ctls: int[]
 
 # ---------------- reference counting ----------------
 # release builds (`opt = release`) inline the fast paths of refcounting, uniqueness and bounds

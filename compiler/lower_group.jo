@@ -105,6 +105,7 @@ emit_scope_exit = (i: int):
             emit_scope_exit(scope_locals.len() - 1)
             scope_locals.pop()
             scope_defers.pop()
+            zero_ctls.pop()
         else: gen_stmt(d)
         if concurrency.concurrency_runtime_needed: e_call0(rt("__task_shield_leave"), -1)
         scope_defers[i] = saved
@@ -153,6 +154,7 @@ scope_pop = ():
     emit_scope_exit(scope_locals.len() - 1)
     scope_locals.pop()
     scope_defers.pop()
+    zero_ctls.pop()
 
 local_place = (l: int, write: bool) -> Place:
     f = int(locals[l].flags)
@@ -3633,11 +3635,14 @@ gen_vardecl = (s: int):
     if nodes[s].aux2 == 1791:
         local = int(nodes[s].sym)
         type_id = store_type(local)
+        zero_declare(local)
         if is_shared(local): new_cell(local)
         place = local_place(local, true)
         if place.mem: e_zero(place.v, tsize(type_id))
         else: e_mov(place.v, zero_val(type_id))
-        if is_managed(type_id): scope_locals[scope_locals.len() - 1].push(local)
+        if is_managed(type_id):
+            scope_locals[scope_locals.len() - 1].push(local)
+            zero_note(local, true)
         return
     if exact_lower_active: exm_fresh_array(s)
     if nodes[s].nlist > 0:
@@ -3658,9 +3663,10 @@ gen_vardecl = (s: int):
                 store_val(el, e_gaddr(global_addr_off(g)), 0, load_val(el, ea, 0))
             else:
                 l = int(nodes[id].sym)
+                zero_declare(l)
                 if is_shared(l): new_cell(l)
                 write_place(local_place(l, true), el, load_val(el, ea, 0))
-                scope_add_local(l)
+                scope_add_local(l, true)
         return
     if has_flag(s, NF_GLOBAL):
         g = int(nodes[s].sym)
@@ -3673,11 +3679,12 @@ gen_vardecl = (s: int):
         return
     l = int(nodes[s].sym)
     t = int(locals[l].type)
+    zero_declare(l)
     if partition_mode and nodes[s].aux2 == 1 and partition_descs.has(l): return
     if parallel_scalar_decl(s, l): return
     if copies_on and copy_bindings.has(l) and nodes[s].aux2 == 1:
         write_place(local_place(l, true), t, gen_expr(int(nodes[s].b)).v)
-        scope_add_local(l)
+        scope_add_local(l, true)
         return
     if nodes[s].aux2 == 1 and int(locals[l].flags) & LF_PARAM != 0: return
     if held_views.contains(l):
@@ -3710,7 +3717,7 @@ gen_vardecl = (s: int):
     else:
         if pl.mem: e_zero(pl.v, tsize(t))
         else: e_mov(pl.v, zero_val(t))
-    scope_add_local(l)
+    scope_add_local(l, true)
 
 view_decl = (s: int, l: int) -> bool:
     if copies_on and copy_strict(s): return false

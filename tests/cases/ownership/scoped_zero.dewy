@@ -1,0 +1,58 @@
+# Locals declared in loops, arms and early exits are dropped exactly once without entry zeroing.
+$runtime_checks
+let drops:int64=0
+Leaf=type of [value:int64
+    $__drop__=():>void=>{drops+=1}
+]
+find=(n:int64):>Leaf?=>{
+    if n %2 =? 0 return Leaf[n]
+    return none
+}
+loops=(n:int64):>int64=>{
+    let total:int64=0
+    loop i in [0..n) {
+        if i =? 2 continue
+        let a=Leaf[i]
+        total+=a.value
+        if i =? 6 break
+        let b=Leaf[i+10]
+        total+=b.value
+    }
+    return total
+}
+arms=(k:int64):>int64=>{
+    if k =? 0 {
+        let a=Leaf[1]
+        return a.value
+    }
+    else if k =? 1 {
+        let b=Leaf[2]
+        let c=Leaf[3]
+        return b.value+c.value
+    }
+    let d=Leaf[4]
+    if k =? 2 return d.value
+    let e:Leaf?=find(k)
+    if e is? Leaf return e.value
+    return 0
+}
+words=(n:int64):>string=>{
+    let out=""
+    loop i in [0..n) {
+        let w="w{i}"
+        if i %3 =? 0 continue
+        out="{out}{w}"
+    }
+    return out
+}
+main=()=>{
+    $runtime_assert(loops(10)=?(0+10+1+11+3+13+4+14+5+15+6))
+    $runtime_assert(drops=?11)
+    drops=0
+    let sum:int64=0
+    loop k in [0..6) {sum+=arms(k)}
+    $runtime_assert(sum=?(1+5+4+0+4+0))
+    $runtime_assert(drops=?(1+2+1+1+2+1))
+    $runtime_assert(words(7)=?"w1w2w4w5")
+    printl"ok"
+}

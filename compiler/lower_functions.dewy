@@ -12,18 +12,18 @@ from p"math_lower.jo" import (math_writes_ready math_has_mutable)
 from p"exact_guards.jo" import (eg_active)
 from p"exact.jo" import (exact_lower_active)
 from p"check.jo" import (want_cpu_flag FK_INIT FK_LAMBDA FK_PARTIAL LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_MUTPARAM LF_PARAM fns locals modules prelude runtime_memeq runtime_streq syms target_arm64 target_wasm want_loop_watch)
-from p"lower.jo" import (HK LK_HELPER LK_INST LowerZero VC_AGG VC_VOID building cond_depth ctl cur_block cur_block_i cur_fn cur_ret env_v find_ids lfuncs loops lop_watch lower_entry lower_epoch lower_has_nops lower_mark_serial lower_planning lower_zeros lpath_ids lpath_parents scope_defers scope_locals sret_v stack_closure_fn tl_cond tl_items tl_nop tl_values)
+from p"lower.jo" import (HK LK_HELPER LK_INST LowerZero VC_AGG VC_VOID building cond_depth ctl cur_block cur_block_i cur_fn cur_ret env_v find_ids lfuncs loops lop_watch lower_entry lower_epoch lower_has_nops lower_mark_serial lower_planning lower_zeros lpath_ids lpath_parents scope_defers scope_locals sret_v stack_closure_fn tl_cond tl_items tl_nop tl_values zero_ctls zero_state zero_wait)
 from p"icount.jo" import (IC_OWNERSHIP)
 from p"icount_ops.dewy" import (ic_phase ic_restore)
 from p"ir_types.dewy" import (Ins Op)
 from p"ast.jo" import (NF_GLOBAL has_flag kid mk nkids nodes)
-from p"types.jo" import (T_MATH_INT prune talign tsize types)
+from p"types.jo" import (T_MATH_INT prune talign tkind tsize types)
 from p"type_ops.dewy" import (is_managed)
 from p"ir.jo" import (VI dbg_on ir ir_pos)
 from p"copies.jo" import (copies_on copy_inputs)
 from p"copy_ops.dewy" import (copies_prepare)
 from p"exact_guards.jo" import (eg_demanded)
-from p"lower_storage.dewy" import (endc iff load_val new_temp norm ret_vt scope_add_local scope_push store_type store_val vc vt_of)
+from p"lower_storage.dewy" import (endc iff is_shared load_val new_temp norm ret_vt scope_add_local scope_push store_type store_val vc vt_of)
 from p"exact_loop_walks.dewy" import (exact_loop_plan)
 from p"exact_loop_rare.dewy" import (exact_loop_guard)
 from p"exact.jo" import (exact_nodes exact_owners)
@@ -71,6 +71,7 @@ begin_fn=(name:string idx:LFnWord):>void=>$unsafe {
     cond_depth=0
     scope_locals=[]
     scope_defers=[]
+    zero_ctls.clear();
     loops=[]
     tl_items.clear();
     tl_values.clear();
@@ -245,11 +246,19 @@ lower_inst=(lf:LFnWord f:LFnWord):>void=>$unsafe {
         if vc(t) =? VC_AGG or fl & LF_ADDR not=? 0 or ownership_type(t) {
             let s=new_slot(tsize(t) talign(t))
             locals.ptr[l].offset = int32<overflow='wrap'>(s);
-            if is_managed(t) {e_zero(e_slot(s) tsize(t));}
+            if is_managed(t) {
+                let at=ir.code.length
+                e_zero(e_slot(s) tsize(t));
+                zero_defer(l t fl at);
+            }
             continue
         }
         locals.ptr[l].vreg = int32<overflow='wrap'>(vreg(vt_of(t)));
-        if is_managed(t) {e_mov(LFnWord(locals.ptr[l].vreg) e_iconst(0));}
+        if is_managed(t) {
+            let at=ir.code.length
+            e_mov(LFnWord(locals.ptr[l].vreg) e_iconst(0));
+            zero_defer(l t fl at);
+        }
     }
     exm_censuses.clear(); lower_entry=[]
     exm_produced_flags.clear(); exm_produced_widths.clear()
@@ -269,6 +278,7 @@ lower_inst=(lf:LFnWord f:LFnWord):>void=>$unsafe {
         }
         ir.code = [ir.code[..exm_start)... lower_entry... ir.code[exm_start..]...];
     }
+    zero_finish(f);
     if vc(cur_ret) =? VC_AGG {e_ret(sret_v);}
     else if vc(cur_ret) =? VC_VOID {e_ret(-1);}
     else {e_trap();}
@@ -278,6 +288,28 @@ lower_inst=(lf:LFnWord f:LFnWord):>void=>$unsafe {
         loop l in fns.ptr[f].locals {
             if LFnWord(locals.ptr[l].flags) & LF_PARAM =? 0 {ir.dbg_locals.push(l);}
         }
+    }
+}
+# Entry zeroing that a declaration may make dead (see zero_wait in lower.jo).
+zero_defer=(l:LFnWord t:LFnWord fl:LFnWord at:LFnWord):>void=>$unsafe {
+    if dbg_on or fl & LF_ADDR not=? 0 or ownership_type(t) or is_shared(l) {return}
+    if tkind(t) =? 'fn_' or tkind(t) =? 'polyfn' {return}
+    loop zero_wait.length <=? l {
+        zero_wait.push(-1);
+        zero_state.push(0);
+    }
+    zero_wait.ptr[l] = (at << 8) | (ir.code.length - at);
+}
+zero_finish=(f:LFnWord):>void=>$unsafe {
+    loop l in fns.ptr[f].locals {
+        if l >=? zero_wait.length or zero_wait.ptr[l] <? 0 {continue}
+        let w=zero_wait.ptr[l]
+        if zero_state.ptr[l] =? 1 << 32 {
+            loop i in [w >> 8..(w >> 8) + (w & 255)) {ir.code.ptr[i].op = 'nop';}
+            lower_has_nops=true
+        }
+        zero_wait.ptr[l] = -1;
+        zero_state.ptr[l] = 0;
     }
 }
 lower_inst_body=(f:LFnWord body:LFnWord):>void=>$unsafe {

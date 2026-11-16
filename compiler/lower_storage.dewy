@@ -3,7 +3,7 @@ $runtime_checks
 from p"lower_primitives.dewy" import (e_daddr e_gaddr global_addr_off lf_helper lf_of_inst rt rt_global)
 from p"lower_closures.dewy" import (closure_scalar_environment drop_stack_closure)
 from p"ir.jo" import (A_RC1 M_FLOAT M_HDR M_SIGNED VF VI VS ir ir_cold ir_pos)
-from p"lower.jo" import (BOX_HDR BuildItem HK LowerTypePlan LowerZero Place TempItem VC_AGG VC_FLT VC_INT VC_VOID Val arg_snapshots box_dflt_data building cond_depth ctl env_v lop_watch lower_epoch lower_has_nops lower_mark_serial lower_planning lower_types lower_zeros mt_active_off opt_release pinned_box pinned_type ro_starts rodata scope_defers scope_locals tl_cond tl_items tl_nop tl_values)
+from p"lower.jo" import (BOX_HDR BuildItem HK LowerTypePlan LowerZero Place TempItem VC_AGG VC_FLT VC_INT VC_VOID Val arg_snapshots box_dflt_data building cond_depth ctl env_v lop_watch lower_epoch lower_has_nops lower_mark_serial lower_planning lower_types lower_zeros mt_active_off opt_release pinned_box pinned_type ro_starts rodata scope_defers scope_locals tl_cond tl_items tl_nop tl_values zero_ctls zero_state zero_wait)
 from p"ir.jo" import (CALL_IF_SHARED CALL_RC_DEC CALL_RC_INC)
 from p"checker_state.dewy" import (SK)
 from p"checks_thin.dewy" import (jd)
@@ -499,14 +499,30 @@ brif_to=(c:LSWord level:LSWord):>void=>$unsafe {
 scope_push=():>void=>$unsafe {
     scope_locals.push([]);
     scope_defers.push([]);
+    zero_ctls.push(ctl);
 }
-scope_add_local=(l:LSWord):>void=>$unsafe {
+# Each lowered declaration of l must be matched by a registration that its
+# declaration wrote at the scope's own control depth; anything else keeps l's
+# entry zeroing (zero_state -1). Bit 32 records a matched registration: a
+# local no declaration registers keeps its zero too. See zero_wait in lower.jo.
+zero_declare=(l:LSWord):>void=>$unsafe {
+    if l >=? zero_wait.length or zero_wait.ptr[l] <? 0 {return}
+    if zero_state.ptr[l] >=? 0 {zero_state.ptr[l] += 1;}
+}
+zero_note=(l:LSWord written:bool):>void=>$unsafe {
+    if l >=? zero_wait.length or zero_wait.ptr[l] <? 0 {return}
+    let n=zero_state.ptr[l]
+    if not written or n & 0xFFFFFFFF <=? 0 or ctl not=? zero_ctls.ptr[zero_ctls.length - 1] {zero_state.ptr[l] = -1;}
+    else {zero_state.ptr[l] = (n - 1) | (1 << 32);}
+}
+scope_add_local=(l:LSWord written:bool=false):>void=>$unsafe {
     if scope_locals.length =? 0 {return}
     let f:LSWord=LSWord(locals.ptr[l].flags)
     if not is_managed(store_type(l)) or f & (LF_CAPTURE | LF_ALIAS | LF_BYREF) not=? 0 {return}
     if f & LF_PARAM not=? 0 and not copy_inputs.has(l) {return}
     if ownership_type(store_type(l)) {owner_register(LSWord(locals.ptr[l].offset) store_type(l));}
     scope_locals.ptr[scope_locals.length - 1].push(l);
+    zero_note(l written);
 }
 opt_has=(addr:LSWord inner:LSWord):>int64=>$unsafe {
     if quantity_base(inner) =? T_MATH_INT {return e_bin('ne' VI e_load(VI addr 0 8) e_iconst(0))}

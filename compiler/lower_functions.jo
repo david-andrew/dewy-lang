@@ -65,6 +65,7 @@ begin_fn = (name: str, idx: int):
     cond_depth = 0
     scope_locals = []
     scope_defers = []
+    zero_ctls = []
     loops = []
     tl_items.clear()
     tl_values.clear()
@@ -221,10 +222,16 @@ lower_inst = (lf: int, f: int):
         if vc(t) == VC_AGG or fl & LF_ADDR != 0 or ownership_type(t):
             s = new_slot(tsize(t), talign(t))
             locals[l].offset = i32(s)
-            if is_managed(t): e_zero(e_slot(s), tsize(t))
+            if is_managed(t):
+                at = ir.code.len()
+                e_zero(e_slot(s), tsize(t))
+                zero_defer(l, t, fl, at)
             continue
         locals[l].vreg = i32(vreg(vt_of(t)))
-        if is_managed(t): e_mov(int(locals[l].vreg), e_iconst(0))
+        if is_managed(t):
+            at = ir.code.len()
+            e_mov(int(locals[l].vreg), e_iconst(0))
+            zero_defer(l, t, fl, at)
     exm_censuses = {}; lower_entry = []
     exm_produced_flags = {}; exm_produced_widths = {}
     exm_start = ir.code.len()
@@ -240,6 +247,7 @@ lower_inst = (lf: int, f: int):
         loop i in [0..lower_zeros.len()):
             if lower_zeros[i].mark >> 32 >= exm_start: lower_zeros[i].mark += lower_entry.len() << 32
         ir.code = ir.code[..exm_start) + lower_entry + ir.code[exm_start..]
+    zero_finish(f)
     if vc(cur_ret) == VC_AGG: e_ret(sret_v)
     else if vc(cur_ret) == VC_VOID: e_ret(-1)
     else: e_trap()
@@ -249,6 +257,25 @@ lower_inst = (lf: int, f: int):
         loop l in fns[f].locals:
             if int(locals[l].flags) & LF_PARAM == 0: ir.dbg_locals.push(l)
 
+
+# Entry zeroing that a declaration may make dead (see zero_wait in lower.jo).
+zero_defer = (l: int, t: int, fl: int, at: int):
+    if dbg_on or fl & LF_ADDR != 0 or ownership_type(t) or is_shared(l): return
+    if tkind(t) == .fn_ or tkind(t) == .polyfn: return
+    loop zero_wait.len() <= l:
+        zero_wait.push(-1)
+        zero_state.push(0)
+    zero_wait[l] = (at << 8) | (ir.code.len() - at)
+
+zero_finish = (f: int):
+    loop l in fns[f].locals:
+        if l >= zero_wait.len() or zero_wait[l] < 0: continue
+        w = zero_wait[l]
+        if zero_state[l] == 1 << 32:
+            loop i in [w >> 8..(w >> 8) + (w & 255)): ir.code[i].op = .nop
+            lower_has_nops = true
+        zero_wait[l] = -1
+        zero_state[l] = 0
 
 lower_inst_body = (f: int, body: int) -> void:
     guarded = lower_length_guards.len()

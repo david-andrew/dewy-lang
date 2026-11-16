@@ -444,14 +444,30 @@ brif_to = (c: int, level: int): e_brif(c, ctl - level)
 scope_push = ():
     scope_locals.push([])
     scope_defers.push([])
+    zero_ctls.push(ctl)
 
-scope_add_local = (l: int):
+# Each lowered declaration of l must be matched by a registration that its
+# declaration wrote at the scope's own control depth; anything else keeps l's
+# entry zeroing (zero_state -1). Bit 32 records a matched registration: a
+# local no declaration registers keeps its zero too. See zero_wait in lower.jo.
+zero_declare = (l: int):
+    if l >= zero_wait.len() or zero_wait[l] < 0: return
+    if zero_state[l] >= 0: zero_state[l] += 1
+
+zero_note = (l: int, written: bool):
+    if l >= zero_wait.len() or zero_wait[l] < 0: return
+    n = zero_state[l]
+    if not written or n & 0xFFFFFFFF <= 0 or ctl != zero_ctls[zero_ctls.len() - 1]: zero_state[l] = -1
+    else: zero_state[l] = (n - 1) | (1 << 32)
+
+scope_add_local = (l: int, written: bool = false):
     if scope_locals.len() == 0: return
     f = int(locals[l].flags)
     if not is_managed(store_type(l)) or f & (LF_CAPTURE | LF_ALIAS | LF_BYREF) != 0: return
     if f & LF_PARAM != 0 and not copy_inputs.has(l): return
     if ownership_type(store_type(l)): owner_register(int(locals[l].offset), store_type(l))
     scope_locals[scope_locals.len() - 1].push(l)
+    zero_note(l, written)
 
 opt_has = (addr: int, inner: int) -> int:
     if quantity_base(inner) == T_MATH_INT: return e_bin(.ne, VI, e_load(VI, addr, 0, 8), e_iconst(0))
