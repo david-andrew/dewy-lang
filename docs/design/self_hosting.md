@@ -212,6 +212,21 @@ only for string-length dialect/runtime requests. It returns the first diagnostic
 as a seed-compatible status; Jo retains reporting. Its path remains a value
 snapshot, while all arena headers are borrowed across reentrant calls.
 
+`refine_transfers.dewy` owns refinement projection, value construction and
+assumption transfer. Its three entry points borrow the existing mutable
+`FactState`; Jo retains predicate tables, holder context, arenas and memo stores.
+Projection selectors and matching fields keep their original order. Value offsets
+publish the same ordered difference rows with the existing sixteen-row incident
+cap; an interval is shifted only when both endpoints fit. Lengths used as unsigned
+bounds retain their biased encoding, and an absent holder contributes no stored
+element assumption. Branch snapshots keep the existing copy-on-write ownership.
+
+The group visits only requested projection paths, field runs and predicate rows,
+using the existing demanded fact services. It adds no pass, context copy, callback
+or mutable query API. Machine indices and offset payloads use wrapping words;
+public scalar and array signatures keep the plain-word ABI. Scalar arena reads
+are reacquired after calls, and nested predicate rows use ordinary indexed reads.
+
 `refine_metadata.dewy` owns the demanded representation, storage-place and
 predicate queries from `refine.jo`. It reads the existing node, type, local,
 field and predicate arenas directly; Jo retains their storage and every writer.
