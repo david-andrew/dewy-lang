@@ -11,6 +11,7 @@ CHECKS_HOMES = {path.stem: match[1] for path in (Path(__file__).resolve().parent
 # not the leaf reads the leaf's functions from the module, a double or the real one)
 LEAF_HOMES = {
     'warn_if_facts': 'warn_if.jo',
+    'refine_metadata': 'refine.jo',
     'witness_nodes': 'witness.jo',
     'source_warnings': 'util.jo',
 

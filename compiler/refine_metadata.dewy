@@ -1,0 +1,176 @@
+$runtime_checks
+from p"ast.jo" import (kid kids nkids nodes)
+from p"check.jo" import (LF_ALIAS globals locals)
+from p"expr.jo" import (CV ntype)
+from p"facts_values.dewy" import (fact_type)
+from p"refine.jo" import (ref_pair_checks ref_predicates ref_self_active ref_self_direct ref_self_elements)
+from p"refine_predicates.dewy" import (ref_atoms_have_kind ref_atoms_interval)
+from p"refinement_types.dewy" import (FACT_MIN FactBound)
+from p"safe_paths.jo" import (ut_safe_used)
+from p"types.jo" import (T_U64 fields has_var is_int is_union prune struct_targ structs targ tkind type_eq types)
+
+RefineWord:type=int64<overflow='wrap'>
+representation_type=(t0:int64):>int64=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind =? 'refined' {return prune(RefineWord(types.ptr[t].elem))}
+    t
+}
+# Reads retain opaque storage brands, while numeric refinements keep their
+# existing value representation. This is metadata only, with the same layout.
+refine_read_type=(t0:int64):>int64=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind =? 'refined' and types.ptr[t].bits =? -2 {return t}
+    representation_type(t)
+}
+# the string set a type is, or 0
+str_set_of=(t0:int64):>int64=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind not=? 'enum_' {return 0}
+    RefineWord(structs.ptr[RefineWord(types.ptr[t].st)].lit_set)
+}
+is_total_dict=(t0:int64):>bool=>$unsafe {
+    let t=prune(t0)
+    types.ptr[t].kind =? 'refined' and types.ptr[t].bits =? -1
+}
+refine_storage=(n:int64 fallback:int64):>int64=>$unsafe {
+    if nodes.ptr[n].kind =? 'field' {
+        let t=representation_type(ntype(RefineWord(nodes.ptr[n].a)))
+        if types.ptr[t].kind =? 'tuple' and nodes.ptr[n].aux =? -2 {return targ(t nodes.ptr[n].ival)}
+        if types.ptr[t].kind =? 'struct_' and nodes.ptr[n].aux >=? 0 {
+            return RefineWord(fields.ptr[RefineWord(structs.ptr[RefineWord(types.ptr[t].st)].fields) + RefineWord(nodes.ptr[n].aux)].type)
+        }
+    }
+    if nodes.ptr[n].kind =? 'index' and nodes.ptr[n].aux =? 0 {
+        let t=representation_type(ntype(RefineWord(nodes.ptr[n].a)))
+        if ref_self_active and types.ptr[t].kind =? 'array' {
+            let element=ref_self_elements.get(prune(refine_storage(RefineWord(nodes.ptr[n].a) ntype(RefineWord(nodes.ptr[n].a)))))
+            if element not=? none {return element}
+        }
+        if types.ptr[t].kind =? 'array' or types.ptr[t].kind =? 'fixed' {return RefineWord(types.ptr[t].elem)}
+    }
+    if nodes.ptr[n].kind =? 'ident' {
+        if nodes.ptr[n].aux =? int32(1) {
+            let l=RefineWord(nodes.ptr[n].sym)
+            if RefineWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 {return refine_storage(RefineWord(locals.ptr[l].alias) fallback)}
+        }
+        if nodes.ptr[n].aux =? int32(1) {return RefineWord(locals.ptr[RefineWord(nodes.ptr[n].sym)].type)}
+        if nodes.ptr[n].aux =? int32(2) {return RefineWord(globals.ptr[RefineWord(nodes.ptr[n].sym)].type)}
+    }
+    if nodes.ptr[n].kind =? 'unwrap' {
+        # Narrowed aliases read the payload representation, but writes still
+        # owe the payload contract declared on the containing optional place.
+        let a=RefineWord(nodes.ptr[n].a)
+        let t=representation_type(refine_storage(a ntype(a)))
+        if types.ptr[t].kind =? 'opt' {return RefineWord(types.ptr[t].elem)}
+    }
+    if nodes.ptr[n].kind =? 'narrow' {
+        # The tag selects a declared union member even after the payload's
+        # read type has erased its outer refinement. Resolve through optional
+        # and local aliases first, just as for an unwrapped optional payload.
+        let a=RefineWord(nodes.ptr[n].a)
+        let t=representation_type(refine_storage(a ntype(a)))
+        if is_union(t) {return struct_targ(RefineWord(types.ptr[t].st) RefineWord(nodes.ptr[n].aux))}
+    }
+    if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.union_)) {
+        # A narrowed subset retains its declared member types; the conversion
+        # is a view of the same union storage, not an unrefined replacement.
+        return ntype(n)
+    }
+    fallback
+}
+# A requested check later wrapped in place (an optional's or union's arm,
+# `return i` from `:>addr<…> | none`) moved below its wrapping conversions.
+ref_wrapped_check=(n0:int64):>int64=>$unsafe {
+    let n=n0
+    loop depth in [0..8) {
+        if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux not=? int32(int64(CV.refinement)) and nodes.ptr[n].a not=? 0 {n=RefineWord(nodes.ptr[n].a)}
+        else if nodes.ptr[n].kind =? 'call' and nodes.ptr[n].aux =? 3 and nkids(n) =? 1 {n=kid(n 0)}
+        else {break}
+    }
+    n
+}
+# uint64 intervals use the signed ordering of (bits xor MIN), never signed
+# reinterpretation of an endpoint. Arithmetic remains unknown at this width.
+ref_encoded=(value:int64 base:int64):>int64=>{
+    if fact_type(base) =? T_U64 {return RefineWord(value) xor RefineWord(FACT_MIN)}
+    value
+}
+# b narrowed by the atoms of t's contract that compare the value with a
+# literal; relations to other values need a fact state (ref_assume). O(atoms).
+ref_interval=(t0:int64 b:FactBound):>FactBound=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind not=? 'refined' or representation_type(t) =? T_U64 {return b}
+    ref_atoms_interval(ref_predicates[RefineWord(types.ptr[t].st)] b)
+}
+ref_has_formals=(t0:int64):>bool=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind not=? 'refined' {return false}
+    ref_atoms_have_kind(ref_predicates[RefineWord(types.ptr[t].st)] 2)
+}
+# A length (an int64 fact, never negative) may bound a uint64: its facts are
+# mirrored into the biased uint64 order (ref_value).
+ref_repr_match=(actual:int64 expected:int64 path:array<int64>):>bool=>{
+    if has_var(actual) or has_var(expected) or type_eq(actual expected) {return true}
+    expected =? T_U64 and path.length >? 0 and path[RefineWord(path.length) - 1] =? -1
+}
+ref_has_fields=(t0:int64):>bool=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind not=? 'refined' {return false}
+    ref_atoms_have_kind(ref_predicates[RefineWord(types.ptr[t].st)] 5)
+}
+ref_dependent_record=(t:int64):>bool=>$unsafe {
+    if tkind(t) not=? 'struct_' {return false}
+    let si=RefineWord(types.ptr[prune(t)].st)
+    loop i in [RefineWord(0)..RefineWord(structs.ptr[si].nfields)) {
+        if ref_has_fields(RefineWord(fields.ptr[RefineWord(structs.ptr[si].fields) + i].type)) {return true}
+    }
+    false
+}
+# Follow declaration aliases on demand, retaining the checked field/index route.
+# O(alias depth); declarations only refer to previously established places.
+ref_place_alias=(n:int64):>int64=>$unsafe {
+    let value=n
+    loop nodes.ptr[value].kind =? 'ident' and nodes.ptr[value].aux =? int32(1) {
+        let l=RefineWord(nodes.ptr[value].sym)
+        if RefineWord(locals.ptr[l].flags) & LF_ALIAS =? 0 or locals.ptr[l].alias =? 0 {break}
+        value=RefineWord(locals.ptr[l].alias)
+    }
+    value
+}
+ref_safe_path_ancestor=(n:int64):>bool=>$unsafe {
+    let value=ref_place_alias(n)
+    loop nodes.ptr[value].kind =? 'field' or nodes.ptr[value].kind =? 'index' or nodes.ptr[value].kind =? 'unwrap' or nodes.ptr[value].kind =? 'narrow' {
+        value=RefineWord(nodes.ptr[value].a)
+        let t=prune(refine_storage(value ntype(value)))
+        if types.ptr[t].kind =? 'refined' and types.ptr[t].bits =? -2 {return true}
+        value=ref_place_alias(value)
+    }
+    false
+}
+# Is s a record check of a run (ref_pair_validation, ref_pair_reads) whose every contract is
+# proven? Then it is facts only, and lowering emits nothing for it. O(fields).
+ref_pair_erased=(s:int64):>bool=>$unsafe {
+    if ref_pair_checks.length =? 0 or not ref_pair_checks.has(s) {return false}
+    loop c in kids(RefineWord(nodes.ptr[s].a)) {
+        if nodes.ptr[c].kind =? 'conv' and nodes.ptr[c].aux =? int32(int64(CV.refinement)) and nodes.ptr[c].ival not=? 1 {return false}
+    }
+    true
+}
+ref_dependent_ancestor=(n:int64):>bool=>$unsafe {
+    if ut_safe_used and ref_safe_path_ancestor(n) {return true}
+    let value=ref_place_alias(n)
+    loop nodes.ptr[value].kind =? 'field' or nodes.ptr[value].kind =? 'index' {
+        value=RefineWord(nodes.ptr[value].a)
+        if ref_dependent_record(representation_type(ntype(value))) {return true}
+        value=ref_place_alias(value)
+    }
+    false
+}
+# Does a swap have the array itself, in place of a private candidate?
+ref_self_direct_place=(a:int64):>bool=>{
+    ref_self_direct.length >? 0 and ref_self_direct.has(a)
+}
+ref_self_stored=(t0:int64):>bool=>$unsafe {
+    let t=prune(t0)
+    types.ptr[t].kind =? 'refined' and ref_atoms_have_kind(ref_predicates[RefineWord(types.ptr[t].st)] 6) and tkind(t) not=? 'array' and is_int(representation_type(t))
+}

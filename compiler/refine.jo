@@ -1,3 +1,4 @@
+use 'refine_metadata.dewy'
 use 'safe_paths.jo'
 use 'facts_values.dewy'
 use 'checks_assign_hooks.dewy'
@@ -99,17 +100,7 @@ ref_sib_sums: {int: int} = {}
 ref_fact_holder = 0
 ref_gen_site = 0
 
-representation_type = (t0: int) -> int:
-    t = prune(t0)
-    if types[t].kind == .refined: return prune(int(types[t].elem))
-    t
 
-# Reads retain opaque storage brands, while numeric refinements keep their
-# existing value representation. This is metadata only, with the same layout.
-refine_read_type = (t0: int) -> int:
-    t = prune(t0)
-    if types[t].kind == .refined and types[t].bits == -2: return t
-    representation_type(t)
 
 # String literal sets (`'a'|'b'`): an enum whose variant i is member i, so a
 # value is one word at run time (the member's index); `=?`, `is?` and `match`
@@ -119,11 +110,6 @@ str_set_types: int[] = [0]
 substitution_refinements = TypeSubstituteRefinements(&ref_predicates, ref_span_copy)
 substitution_refinement_binding = type_substitute_refinements(&substitution_refinements)
 
-# the string set a type is, or 0
-str_set_of = (t0: int) -> int:
-    t = prune(t0)
-    if types[t].kind != .enum_: return 0
-    int(structs[int(types[t].st)].lit_set)
 
 # totaldict<K V>: a dictionary with an entry for every value of its finite key
 # type. A refined Map (marked by bits -1, with no predicate) whose literal is
@@ -131,9 +117,6 @@ str_set_of = (t0: int) -> int:
 # be partial does not become.
 total_literals: {int: bool} = {}
 
-is_total_dict = (t0: int) -> bool:
-    t = prune(t0)
-    types[t].kind == .refined and types[t].bits == -1
 
 refine_reset = ():
     nd_contracts_reset()
@@ -208,51 +191,7 @@ resolve_refinement = (n: int) -> int:
     if not ref_spans.has(predicate): ref_spans[predicate] = nodes[n].pos
     mk_refined(base, predicate)
 
-refine_storage = (n: int, fallback: int) -> int:
-    if nodes[n].kind == .field:
-        t = representation_type(ntype(int(nodes[n].a)))
-        if types[t].kind == .tuple and nodes[n].aux == -2: return targ(t, nodes[n].ival)
-        if types[t].kind == .struct_ and nodes[n].aux >= 0:
-            return int(fields[int(structs[int(types[t].st)].fields) + int(nodes[n].aux)].type)
-    if nodes[n].kind == .index and nodes[n].aux == 0:
-        t = representation_type(ntype(int(nodes[n].a)))
-        if ref_self_active and types[t].kind == .array:
-            if let element = ref_self_elements.get(prune(refine_storage(int(nodes[n].a), ntype(int(nodes[n].a))))): return element
-        if types[t].kind == .array or types[t].kind == .fixed: return int(types[t].elem)
-    if nodes[n].kind == .ident:
-        if nodes[n].aux == i32(int(SK.local)):
-            l = int(nodes[n].sym)
-            if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0: return refine_storage(int(locals[l].alias), fallback)
-        if nodes[n].aux == i32(int(SK.local)): return int(locals[int(nodes[n].sym)].type)
-        if nodes[n].aux == i32(int(SK.global)): return int(globals[int(nodes[n].sym)].type)
-    if nodes[n].kind == .unwrap:
-        # Narrowed aliases read the payload representation, but writes still
-        # owe the payload contract declared on the containing optional place.
-        a = int(nodes[n].a)
-        t = representation_type(refine_storage(a, ntype(a)))
-        if types[t].kind == .opt: return int(types[t].elem)
-    if nodes[n].kind == .narrow:
-        # The tag selects a declared union member even after the payload's
-        # read type has erased its outer refinement. Resolve through optional
-        # and local aliases first, just as for an unwrapped optional payload.
-        a = int(nodes[n].a)
-        t = representation_type(refine_storage(a, ntype(a)))
-        if is_union(t): return struct_targ(int(types[t].st), int(nodes[n].aux))
-    if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.union_)):
-        # A narrowed subset retains its declared member types; the conversion
-        # is a view of the same union storage, not an unrefined replacement.
-        return ntype(n)
-    fallback
 
-# A requested check later wrapped in place (an optional's or union's arm,
-# `return i` from `:>addr<…> | none`) moved below its wrapping conversions.
-ref_wrapped_check = (n0: int) -> int:
-    n = n0
-    loop depth in [0..8):
-        if nodes[n].kind == .conv and nodes[n].aux != i32(int(CV.refinement)) and nodes[n].a != 0: n = int(nodes[n].a)
-        else if nodes[n].kind == .call and nodes[n].aux == 3 and nkids(n) == 1: n = kid(n, 0)
-        else: break
-    n
 
 refine_coerce = (n: int, target: int) -> int:
     t = prune(target)
@@ -282,11 +221,6 @@ refine_coerce = (n: int, target: int) -> int:
     refine_owners[owner] = true
     n
 
-# uint64 intervals use the signed ordering of (bits xor MIN), never signed
-# reinterpretation of an endpoint. Arithmetic remains unknown at this width.
-ref_encoded = (value: int, base: int) -> int:
-    if fact_type(base) == T_U64: return value xor FACT_MIN
-    value
 
 ref_project = (term: RefTerm, value0: int, s: mut FactState) -> int:
     value = value0
@@ -351,12 +285,6 @@ ref_assume = (t0: int, self: int, args: int[], s: mut FactState):
         v = fact_new(s, fact_domain(T_BOOL), FactTerm(atom.op, a, b))
         fact_assume(s, v, true)
 
-# b narrowed by the atoms of t's contract that compare the value with a
-# literal; relations to other values need a fact state (ref_assume). O(atoms).
-ref_interval = (t0: int, b: FactBound) -> FactBound:
-    t = prune(t0)
-    if types[t].kind != .refined or representation_type(t) == T_U64: return b
-    ref_atoms_interval(ref_predicates[int(types[t].st)], b)
 
 ref_check = (n: int, self: int, args: int[], s: mut FactState):
     held = ref_fact_holder
@@ -623,10 +551,6 @@ ref_validate_signature = (params: int[], ret: int, mask: int, pos: int):
     loop yes in done:
         if not yes: fatal(pos, "cyclic dependent scalar refinements")
 
-ref_has_formals = (t0: int) -> bool:
-    t = prune(t0)
-    if types[t].kind != .refined: return false
-    ref_atoms_have_kind(ref_predicates[int(types[t].st)], 2)
 
 # (the parameter type finish_arg is coercing an argument to: its formals are that call's)
 refine_arg_target = 0
@@ -635,11 +559,6 @@ refine_arg_target = 0
 ref_storage_contract = (t0: int) -> bool:
     ref_types_storage(types, structs, fields, type_args, ref_fields_host, t0)
 
-# A length (an int64 fact, never negative) may bound a uint64: its facts are
-# mirrored into the biased uint64 order (ref_value).
-ref_repr_match = (actual: int, expected: int, path: int[]) -> bool:
-    if has_var(actual) or has_var(expected) or type_eq(actual, expected): return true
-    expected == T_U64 and path.len() > 0 and path[path.len() - 1] == -1
 
 # Resolve a projection against its concrete binder before publishing a contract.
 ref_projection_type = (root: int, path: int[], pos: int) -> int:
@@ -659,17 +578,7 @@ ref_fact_current_entry = (s: mut FactState) -> int[]:
         if int(locals[l].flags) & LF_MUTPARAM != 0: args[i] = fact_read(s, mk_ident_local(l, locals[l].pos))
     args
 
-ref_has_fields = (t0: int) -> bool:
-    t = prune(t0)
-    if types[t].kind != .refined: return false
-    ref_atoms_have_kind(ref_predicates[int(types[t].st)], 5)
 
-ref_dependent_record = (t: int) -> bool:
-    if tkind(t) != .struct_: return false
-    si = int(types[prune(t)].st)
-    loop i in [0..int(structs[si].nfields)):
-        if ref_has_fields(int(fields[int(structs[si].fields) + i].type)): return true
-    false
 
 # (a record's own declaration errors: the notes of the statement whose type named
 # it first, a tuple slot write's among them, are not theirs)
@@ -715,15 +624,6 @@ ref_validate_record_fields = (t: int, pos: int):
     loop yes in done:
         if not yes: fatal(pos, "cyclic dependent field refinements")
 
-# Follow declaration aliases on demand, retaining the checked field/index route.
-# O(alias depth); declarations only refer to previously established places.
-ref_place_alias = (n: int) -> int:
-    value = n
-    loop nodes[value].kind == .ident and nodes[value].aux == i32(int(SK.local)):
-        l = int(nodes[value].sym)
-        if int(locals[l].flags) & LF_ALIAS == 0 or locals[l].alias == 0: break
-        value = int(locals[l].alias)
-    value
 
 ref_field_store = (statement: int, target: int) -> int:
     lhs = ref_place_alias(int(nodes[statement].a))
@@ -789,14 +689,6 @@ ref_field_store = (statement: int, target: int) -> int:
 # still holds. Only these nodes, never another `@` argument. O(1))
 ref_nd_receivers: {int: bool} = {}
 
-ref_safe_path_ancestor = (n: int) -> bool:
-    value = ref_place_alias(n)
-    loop nodes[value].kind == .field or nodes[value].kind == .index or nodes[value].kind == .unwrap or nodes[value].kind == .narrow:
-        value = int(nodes[value].a)
-        t = prune(refine_storage(value, ntype(value)))
-        if types[t].kind == .refined and types[t].bits == -2: return true
-        value = ref_place_alias(value)
-    false
 
 ref_mutable_authority = (n: int):
     if ut_safe_used and ref_safe_path_ancestor(n): fatal(nodes[n].pos, "a SafePath's representation cannot be exposed for mutation; replace the whole SafePath with a proven path")
@@ -833,13 +725,6 @@ ref_pair_outer_index = -1
 # every run ends with that check, so its checks hold without proof (ref_pair_held). O(fields).
 ref_pair_held: {int: bool} = {}
 
-# Is s a record check of a run (ref_pair_validation, ref_pair_reads) whose every contract is
-# proven? Then it is facts only, and lowering emits nothing for it. O(fields).
-ref_pair_erased = (s: int) -> bool:
-    if ref_pair_checks.len() == 0 or not ref_pair_checks.has(s): return false
-    loop c in kids(int(nodes[s].a)):
-        if nodes[c].kind == .conv and nodes[c].aux == i32(int(CV.refinement)) and nodes[c].ival != 1: return false
-    true
 
 # Other length-changing operations execute on a private candidate. Later argument
 # effects run before that candidate is published, so callbacks cannot observe
@@ -915,14 +800,6 @@ ref_record_conversion = (from: int, to: int) -> bool:
         if not can_coerce(0, a, b): return false
     true
 
-ref_dependent_ancestor = (n: int) -> bool:
-    if ut_safe_used and ref_safe_path_ancestor(n): return true
-    value = ref_place_alias(n)
-    loop nodes[value].kind == .field or nodes[value].kind == .index:
-        value = int(nodes[value].a)
-        if ref_dependent_record(representation_type(ntype(value))): return true
-        value = ref_place_alias(value)
-    false
 
 ref_nested_formals = (t0: int, nested: bool = false, depth: int = 0) -> bool:
     ref_types_nested_formals(types, type_args, ref_predicates, t0, nested, depth)
@@ -1082,12 +959,7 @@ ref_self_gen = (n: int, atom: RefAtom, self: int):
 
 ref_selector_message = "a store into a self-length array selects with names, literals, arithmetic, lengths and element reads, none of which can change the array: give this selector a name first, `let at = ...`"
 
-# Does a swap have the array itself, in place of a private candidate?
-ref_self_direct_place = (a: int) -> bool: ref_self_direct.len() > 0 and ref_self_direct.has(a)
 
-ref_self_stored = (t0: int) -> bool:
-    t = prune(t0)
-    types[t].kind == .refined and ref_atoms_have_kind(ref_predicates[int(types[t].st)], 6) and tkind(t) != .array and is_int(representation_type(t))
 
 ref_atoms = (n: int, binder: int, out: mut RefAtom[], depth: int = 0):
     ref_resolve_atoms(nodes, types, names, refine_bindings, ref_resolve_host, n, binder, out, depth)

@@ -220,8 +220,8 @@ steps, and predicate/field scans visit only the requested rows. The existing
 inference-chain pruning remains a direct service. Scalar arena views do not
 survive calls that can grow their owners; nested managed predicate rows use
 ordinary indexed reads. Queries introduce no callbacks, context copies or
-mutable fact-state API. IDs and offsets use wrapping machine words, with plain
-word results preserving Jo collection inference. Storage reads retain optional
+mutable fact-state API. Index and offset arithmetic uses wrapping machine words;
+plain-word signatures preserve existing host records and Jo collection inference. Storage reads retain optional
 and union payload contracts, opaque brands and paired-run erasure rules.
 
 `refine_strings.dewy` owns string-set construction/publication and checked member
