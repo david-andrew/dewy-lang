@@ -1,0 +1,1790 @@
+$runtime_checks
+from p"ast.jo" import (NF_SQUOTE NF_INDEX_CAPTURED NF_COMPREHENSION NF_GLOBAL NF_INBOUNDS NF_INCLUSIVE NF_MAP_KEY NF_PRIVATE_SETLEN NF_STEP NF_STMT NF_UNSCOPED RANGE_EXHAUSTION UNPACK_OBLIGATION has_flag kid nkids nodes set_list)
+from p"check.jo" import (LF_MUTPARAM LF_PARAM fns globals index_update_arrays index_update_sources locals sa_fits)
+from p"checker_tokens.dewy" import (Tok)
+from p"checks_static.dewy" import (assertion_refuted)
+from p"checks_thin_expr.dewy" import (is_fn_type is_map_type)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"directive_queries.dewy" import (dir_index dir_policy)
+from p"directive_rules.dewy" import (dir_defer)
+from p"directives.jo" import (DIR_STATIC dir_assumed_bounds_any)
+from p"effect_owners.dewy" import (loan_error)
+from p"effect_types.dewy" import (PlaceIdentity)
+from p"exact.jo" import (exact_fact_signed exact_fact_store exact_has_node exact_has_store exact_marks exact_progress_math exact_rep_owners exact_shift_fact exact_value_fact)
+from p"expr.jo" import (CV IN is_map_entries_type ntype rational_constants)
+from p"facts.jo" import (FACT_ACTIVE FACT_ASCII_TEXT FACT_CAP FACT_ELEMENT_COPY FACT_ELEMENT_LENGTH FACT_KEYS_SOURCE FACT_KEY_SOURCE FACT_MAP_POSITIONS FACT_MEMBER FACT_PREP_CAPTURE FACT_PREP_INDEXED FACT_PREP_MAPPED FACT_SIB_BOUND FACT_TEXT_ID FACT_VALUE FactLoop FactLoan FactProjection FactRoute FactState FactSummary fact_comparison fact_comprehension_sources fact_comprehensions fact_constructor_actuals fact_constructor_budget fact_constructor_calls fact_covered fact_divisors fact_either_wanted fact_equal_arrays fact_fork_entries fact_fork_nodes fact_loans fact_loop_exhausted fact_loop_steps fact_loops fact_member_shared fact_member_template fact_name_rational_lt fact_name_vals fact_owner fact_pending_defers fact_policy fact_probe_on fact_push_frames fact_query fact_route_call fact_route_reuse fact_route_selectors fact_saving fact_selector_sources fact_shared_literals fact_speculating fact_step_limit fact_sum_operand fact_summary_field fact_summary_owner fact_terms fact_validated)
+from p"facts_arith.dewy" import (fact_arithmetic fact_fresh fact_preread fact_selected fact_selected_rows fact_sum_source fact_unknown)
+from p"facts_arrays.dewy" import (fact_array_call fact_array_call_check fact_single_bcast_call fact_slice_elements)
+from p"facts_changes.dewy" import (fact_changes fact_enum_cast fact_handle_opaque fact_length_comparison fact_partial_opaque fact_partial_place fact_pure_binary fact_pure_conversion fact_pure_intrinsic fact_unit_erased)
+from p"facts_collect.dewy" import (fact_collect)
+from p"facts_compare.dewy" import (fact_add_fits fact_assume fact_compare fact_open_endpoint fact_saved_boolean)
+from p"facts_conditions.dewy" import (fact_condition fact_pattern_tag fact_tag)
+from p"facts_elements.dewy" import (fact_fixed_check fact_permuted_elements fact_stepped)
+from p"facts_forgets.dewy" import (fact_builtin_formatter fact_callback_writes_nothing fact_drop_block fact_drop_exit fact_drop_footprint fact_drop_forget fact_drop_statement fact_ends_path fact_exposed fact_forget fact_path_call_effects fact_pointer_cast)
+from p"facts_forks.dewy" import (fact_call_arguments fact_fork_record fact_key_callback fact_key_record fact_parallel_array fact_parallel_record fact_slice_capture)
+from p"facts_index_writes.dewy" import (fact_add_projection fact_add_value fact_bind fact_constant fact_new fact_set_bound)
+from p"facts_joins.dewy" import (fact_hull fact_hull_type fact_join fact_join_length)
+from p"facts_lengths.dewy" import (fact_difference fact_heap_length fact_length_max fact_shrunk_elements)
+from p"facts_library.dewy" import (fact_chosen fact_chosen_call fact_clamped fact_copy_length_call fact_count_call fact_empty_array_call fact_endpoint fact_endpoint_call fact_entry_count_call fact_exact_sum_call fact_exact_sum_check fact_field_args fact_gpu_index_call fact_gpu_index_check fact_heap_call fact_heap_type fact_integer_gcd_call fact_length_through fact_library_call fact_nonempty_call fact_nonempty_check fact_prelude_call fact_same_length_call)
+from p"facts_lifecycle.dewy" import (fact_owner_value fact_parallel_count_check fact_parallel_range_call fact_refinements_unreachable fact_scope_exit)
+from p"facts_loops.dewy" import (fact_loop_body fact_loop_bound_demands fact_loop_bound_entry fact_loop_bounds fact_loop_prepare fact_while)
+from p"facts_maps.dewy" import (fact_ensured_close fact_keys_copy fact_keys_element fact_map_bounded fact_map_bounded_call fact_map_call fact_map_check fact_map_clear fact_map_clear_call fact_map_entry fact_map_insert_call fact_map_key fact_map_literal fact_map_member fact_map_of fact_map_optional fact_map_position fact_map_receiver fact_map_snapshot fact_map_snapshot_call fact_map_store fact_map_store_call fact_reflexive_key)
+from p"facts_members.dewy" import (fact_member_block fact_member_literal)
+from p"facts_numeric.dewy" import (fact_bitwise fact_divisor fact_extremum fact_extremum_call fact_floor fact_floor_unsigned fact_mod_call fact_power_call fact_power_check fact_rational_constructor fact_rational_divmod fact_rational_made fact_rational_promotion fact_rational_zero_test fact_shift_obliged)
+from p"facts_pools.dewy" import (fact_pool_call fact_pool_capture)
+from p"facts_probes.dewy" import (fact_probe_divisor fact_probe_index fact_probe_record)
+from p"facts_projection_queries.dewy" import (fact_projection_after fact_projection_find fact_projection_first)
+from p"facts_pushes.dewy" import (fact_counted_lengths fact_counted_pushes fact_counted_sums fact_growing_lengths fact_growing_pushes fact_iterate fact_push_close fact_push_open fact_push_record fact_scaled_lengths fact_scaled_pushes)
+from p"facts_ranges.dewy" import (fact_floor_call fact_narrow_check fact_nonnegative fact_range fact_range_assumed fact_range_first fact_refinement_covers fact_step_check)
+from p"facts_routes.dewy" import (fact_after_call fact_component fact_default_value fact_read fact_receiver_route fact_replace fact_route fact_route_values fact_store_pattern fact_store_route)
+from p"facts_row_queries.dewy" import (fact_incident)
+from p"facts_slice_prep.dewy" import (fact_slice_flags)
+from p"facts_summaries.dewy" import (fact_constructor_join fact_summary fact_summary_actual fact_summary_kept_upper fact_summary_length fact_summary_payload fact_summary_payload_publish fact_summary_record)
+from p"facts_text.dewy" import (fact_affix_call fact_byte_slice fact_byte_view fact_find_start fact_lines_call fact_regex_search_result fact_removal fact_search_call fact_search_reads_only fact_search_result fact_split_call fact_string_call fact_string_index fact_string_slice fact_words_call)
+from p"facts_value_queries.dewy" import (fact_binding fact_bound fact_slot fact_truth)
+from p"facts_values.dewy" import (fact_bcast_common fact_domain fact_literal fact_place fact_project fact_scalar fact_string_set fact_type fact_unmodeled)
+from p"float_ops.dewy" import (ff_conversion_operand ff_diverges ff_integer_demand ff_integer_record)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"lower.jo" import (VC_VOID)
+from p"lower_storage.dewy" import (vc)
+from p"nd_contract_ops.dewy" import (fact_nd_capture fact_nd_need)
+from p"nd_contracts.jo" import (fact_nd_call nd_mutable_handle nd_mutable_signatures)
+from p"ownership.jo" import (ownership_decls ownership_fact_cleanup)
+from p"ownership_types.dewy" import (ownership_fact_type)
+from p"place_routes.dewy" import (place_route)
+from p"predicate_summaries.dewy" import (fact_predicate_apply fact_predicate_summary)
+from p"proof_ops.dewy" import (proof_call proof_exit ref_arm_publish result_exit result_publish)
+from p"proofs.jo" import (proof_active proof_decls result_active)
+from p"refine.jo" import (fact_pair_transient ref_assume ref_check ref_fact_current_entry ref_pair_stmts ref_self_active refine_owners refine_storage representation_type str_set_of)
+from p"refine_rare.dewy" import (ref_self_place_read)
+from p"refine_siblings.dewy" import (ref_sib_contract ref_sib_map_read)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
+from p"string_domains.jo" import (string_set_obligations string_set_owners string_set_tests)
+from p"type_ops.dewy" import (dt fixed_len simple_enum)
+from p"types.jo" import (T_BOOL T_INT T_MATH_INT T_NEVER T_STR T_U64 fields is_int is_union is_vec prune struct_targ structs telem tkind type_eq types variants)
+from p"util.jo" import (files intern name_of pos_file)
+from p"warn_if.jo" import (wi_fact_calls wi_fact_check)
+from p"witness.jo" import (WitSide wit_obligation)
+from p"witness_ops.dewy" import (wit_assertion wit_fail wit_index wit_operation wit_side wit_slice)
+
+
+# Bind Jo-owned write places once. Recursive calls never copy this shared state.
+let capture_comprehension_sources:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
+let capture_comprehensions:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
+let capture_constructor_actuals:ptr<dict<int64 array<int64>>>=$unsafe (uint64(0) as ptr<dict<int64 array<int64>>>)
+let capture_constructor_budget:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let capture_covered:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let capture_either_wanted:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let capture_equal_arrays:ptr<dict<int64 [int64 int64 int64]>>=$unsafe (uint64(0) as ptr<dict<int64 [int64 int64 int64]>>)
+let capture_loans:ptr<array<FactLoan>>=$unsafe (uint64(0) as ptr<array<FactLoan>>)
+let capture_loop_exhausted:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let capture_loop_steps:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let capture_loops:ptr<array<FactLoop>>=$unsafe (uint64(0) as ptr<array<FactLoop>>)
+let capture_name_vals:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let capture_pair_transient:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let capture_pending_defers:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let capture_query:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let capture_route_call:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let capture_route_reuse:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let capture_route_selectors:ptr<dict<int64 [int64 int64]>>=$unsafe (uint64(0) as ptr<dict<int64 [int64 int64]>>)
+let capture_saving:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let capture_selector_sources:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
+let capture_shared_literals:ptr<array<[int64 int64]>>=$unsafe (uint64(0) as ptr<array<[int64 int64]>>)
+let capture_sum_operand:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let capture_terms:ptr<array<FactTerm>>=$unsafe (uint64(0) as ptr<array<FactTerm>>)
+let capture_validated:ptr<dict<int64 bool>>=$unsafe (uint64(0) as ptr<dict<int64 bool>>)
+let capture_wit_obligation:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+facts_capture_bind=(fact_comprehension_sources:ptr<dict<int64 int64>> fact_comprehensions:ptr<dict<int64 int64>> fact_constructor_actuals:ptr<dict<int64 array<int64>>> fact_constructor_budget:ptr<int64> fact_covered:ptr<int64> fact_either_wanted:ptr<int64> fact_equal_arrays:ptr<dict<int64 [int64 int64 int64]>> fact_loans:ptr<array<FactLoan>> fact_loop_exhausted:ptr<bool> fact_loop_steps:ptr<int64> fact_loops:ptr<array<FactLoop>> fact_name_vals:ptr<int64> fact_pair_transient:ptr<bool> fact_pending_defers:ptr<int64> fact_query:ptr<bool> fact_route_call:ptr<int64> fact_route_reuse:ptr<int64> fact_route_selectors:ptr<dict<int64 [int64 int64]>> fact_saving:ptr<bool> fact_selector_sources:ptr<dict<int64 int64>> fact_shared_literals:ptr<array<[int64 int64]>> fact_sum_operand:ptr<int64> fact_terms:ptr<array<FactTerm>> fact_validated:ptr<dict<int64 bool>> wit_obligation:ptr<int64>):>int64=>{
+    capture_comprehension_sources=fact_comprehension_sources
+    capture_comprehensions=fact_comprehensions
+    capture_constructor_actuals=fact_constructor_actuals
+    capture_constructor_budget=fact_constructor_budget
+    capture_covered=fact_covered
+    capture_either_wanted=fact_either_wanted
+    capture_equal_arrays=fact_equal_arrays
+    capture_loans=fact_loans
+    capture_loop_exhausted=fact_loop_exhausted
+    capture_loop_steps=fact_loop_steps
+    capture_loops=fact_loops
+    capture_name_vals=fact_name_vals
+    capture_pair_transient=fact_pair_transient
+    capture_pending_defers=fact_pending_defers
+    capture_query=fact_query
+    capture_route_call=fact_route_call
+    capture_route_reuse=fact_route_reuse
+    capture_route_selectors=fact_route_selectors
+    capture_saving=fact_saving
+    capture_selector_sources=fact_selector_sources
+    capture_shared_literals=fact_shared_literals
+    capture_sum_operand=fact_sum_operand
+    capture_terms=fact_terms
+    capture_validated=fact_validated
+    capture_wit_obligation=wit_obligation
+    0
+}
+
+# Checked node operators use the frozen Tok ordinals; text unions have no numeric cast.
+let capture_tokens:array<Tok>=[Tok.eof Tok.newline Tok.indent Tok.dedent Tok.ident Tok.int_lit Tok.float_lit Tok.str_lit Tok.kw_struct Tok.kw_enum Tok.kw_if Tok.kw_else Tok.kw_in Tok.kw_break Tok.kw_continue Tok.kw_return Tok.kw_match Tok.kw_import Tok.kw_as Tok.kw_const Tok.kw_true Tok.kw_false Tok.kw_none Tok.kw_null Tok.kw_and Tok.kw_or Tok.kw_not Tok.kw_mut Tok.kw_when Tok.kw_defer Tok.kw_extern Tok.kw_test Tok.kw_build Tok.kw_use Tok.kw_pass Tok.lparen Tok.rparen Tok.lbrack Tok.rbrack Tok.lbrace Tok.rbrace Tok.comma Tok.colon Tok.semi Tok.dot Tok.dotdot Tok.arrow Tok.assign Tok.pluseq Tok.minuseq Tok.stareq Tok.slasheq Tok.percenteq Tok.ampeq Tok.pipeeq Tok.careteq Tok.shleq Tok.shreq Tok.plus Tok.minus Tok.star Tok.slash Tok.percent Tok.amp Tok.pipe Tok.caret Tok.tilde Tok.shl Tok.shr Tok.eq Tok.ne Tok.lt Tok.le Tok.gt Tok.ge Tok.question Tok.qq Tok.bang Tok.at Tok.starstar Tok.kw_loop Tok.kw_let Tok.kw_xor Tok.kw_is Tok.ellipsis Tok.dotop Tok.lazy]
+CaptureWord:type=int64<overflow='wrap'>
+fact_index_success=(n:CaptureWord @s:FactState index:CaptureWord length:CaptureWord):>void=>$unsafe {
+    if fact_speculating not=? 0 or fact_query or dir_policy(nodes.ptr[n].pos) =? DIR_STATIC {return}
+    if proof_active and fact_owner >? 0 and proof_decls.has(CaptureWord(fns.ptr[fact_owner].decl)) {return}
+    if index =? 0 or length =? 0 or not s.live {return}
+    fact_assume(@s fact_new(@s fact_domain(T_BOOL) FactTerm('le' fact_constant(@s 0) index n)) true)
+    fact_assume(@s fact_new(@s fact_domain(T_BOOL) FactTerm('lt' index length n)) true)
+}
+# Capture representation obligations around the recursive value transfer.
+# Preserve source order and the shared state at each direct recursive call.
+fact_capture=(n:CaptureWord @s:FactState):>int64=>$unsafe {
+    let marks=if n >? 0 and n <? exact_marks.length {CaptureWord(exact_marks[n])} else {0}
+    if marks & 67 =? 0 {
+        let value=fact_capture_value(n @s)
+        if n >? 0 and fact_speculating =? 0 and (fact_owner <? exact_rep_owners.length and exact_rep_owners[fact_owner]) and prune(ntype(n)) =? T_MATH_INT {exact_value_fact(n value s)}
+        return value
+    }
+    if n >? 0 and nodes.ptr[n].kind =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.fixed_abs)) {
+        let value=fact_capture(kid(n 0) @s)
+        let b=fact_bound(s value)
+        if not b.wide and b.lo >=? 0 {return value}
+        if not b.wide and b.lo >? FACT_MIN {
+            let hi=max((-CaptureWord(b.lo)) b.hi)
+            let lo=if b.hi <? 0 {-CaptureWord(b.hi)} else {0}
+            return fact_new(@s FactBound(lo hi) FactTerm(type=ntype(n)))
+        }
+        return fact_unmodeled(@s n 'unsupported')
+    }
+    if n >? 0 and exact_has_node(n) and nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].op =? int32(79) {
+        fact_capture(CaptureWord(nodes.ptr[n].a) @s);
+        let exponent=fact_capture(CaptureWord(nodes.ptr[n].b) @s)
+        exact_shift_fact(n exponent s)
+        return fact_unmodeled(@s n 'unsupported')
+    }
+    if marks & 64 not=? 0 {
+        let value=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+        if ff_integer_demand(n) {ff_integer_record(n value s)}
+        return fact_new(@s fact_domain(ntype(n)) FactTerm(type=ntype(n)))
+    }
+    if n >? 0 and exact_has_store(n) {return exact_fact_store(n fact_capture(CaptureWord(nodes.ptr[n].a) @s) @s)}
+    let value=fact_capture_value(n @s)
+    if n >? 0 and fact_speculating =? 0 and (exact_has_node(n) or (fact_owner <? exact_rep_owners.length and exact_rep_owners[fact_owner]) and prune(ntype(n)) =? T_MATH_INT) {exact_value_fact(n value s)}
+    value
+}
+fact_capture_value=(n:CaptureWord @s:FactState):>int64=>$unsafe {
+    if n =? 0 {return 0}
+    if not s.live {
+        if refine_owners.length >? 0 {fact_refinements_unreachable(n)}
+        return 0
+    }
+    if fact_speculating >? 0 {
+        if fact_constructor_budget >=? 0 {
+            if fact_constructor_budget =? 0 {
+                capture_loop_exhausted[0]=true
+                return 0
+            }
+            capture_constructor_budget[0]=CaptureWord(fact_constructor_budget) - 1
+        }
+        capture_loop_steps[0]=CaptureWord(fact_loop_steps) + 1
+        if fact_loop_steps >? fact_step_limit {
+            capture_loop_exhausted[0]=true
+            return 0
+        }
+    }
+    let mark=fact_slice_flags(n)
+    if mark & FACT_MEMBER not=? 0 {
+        if mark & FACT_ACTIVE =? 0 {return 0}
+        let k=nodes.ptr[n].kind
+        let control=k =? 'index' or k =? 'block' or k =? 'if_' or k =? 'iflet' or k =? 'match_' or k =? 'while_' or k =? 'for_' or k =? 'return_' or k =? 'break_' or k =? 'continue_' or k =? 'and_' or k =? 'or_' or k =? 'coalesce'
+        if not control and mark & FACT_VALUE =? 0 {return fact_slice_capture(n @s)}
+    }
+    let k=nodes.ptr[n].kind
+    if (k =? 'call' or k =? 'conv') and rational_constants.length >? 0 {
+        let fraction=rational_constants.get(n)
+        if fraction not=? none {
+            let value=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+            if CaptureWord(s.projections.length) + 2 <? FACT_CAP {
+                fact_add_projection(@s FactProjection(value intern("numerator") false fact_constant(@s fraction[0])))
+                fact_add_projection(@s FactProjection(value intern("denominator") false fact_constant(@s fraction[1])))
+            }
+            return value
+        }
+    }
+    if k =? 'block' and has_flag(n NF_COMPREHENSION) and nkids(n) >? 1 and nodes.ptr[kid(n 0)].kind =? 'vardecl' {
+        capture_comprehensions[0][kid(n 1)]=CaptureWord(nodes.ptr[kid(n 0)].sym)
+        # (this evaluation's source only: fact_map_of)
+        if fact_comprehension_sources.length >? 0 {capture_comprehension_sources[0].remove(kid(n 1));}
+    }
+    if k =? 'dotname' and tkind(ntype(n)) =? 'enum_' and simple_enum(ntype(n)) {
+        let si=CaptureWord(types.ptr[prune(ntype(n))].st)
+        return fact_constant(@s variants.ptr[CaptureWord(structs.ptr[si].variants) + CaptureWord(nodes.ptr[n].aux)].value n)
+    }
+    if k =? 'int_lit' or k =? 'bool_lit' {
+        loop shared in fact_shared_literals {
+            if shared[0] =? n and fact_slot(s shared[1]) >=? 0 {return shared[1]}
+        }
+        return fact_literal(@s n)
+    }
+    if k =? 'str_lit' and fact_member_template >=? 0 and fact_member_literal(n) {return fact_new(@s FactBound() FactTerm(type=T_STR))}
+    # (an ASCII string literal's length is its byte count; "\r\n" is one grapheme)
+    if k =? 'str_lit' and nodes.ptr[n].aux not=? 1 and fact_type(ntype(n)) =? T_STR and nodes.ptr[n].sval >=? 0 {
+        let text=name_of(CaptureWord(nodes.ptr[n].sval))
+        let ascii=true
+        loop c in (text as array<uint8>) {
+            if c >=? 128 or c =? 13 {ascii=false}
+        }
+        if ascii {
+            let origin=if string_set_owners.length >? 0 and string_set_owners.has(fact_owner) {n} else {0}
+            let value=fact_new(@s FactBound() FactTerm(origin=origin type=T_STR))
+            # (and its byte view's: `"abc" as array<uint8>` has 3 elements)
+            if CaptureWord(s.projections.length) + 4 <? FACT_CAP {
+                fact_add_projection(@s FactProjection(value FACT_ASCII_TEXT false fact_constant(@s 1)))
+                let count=fact_constant(@s (text as array<uint8>).length)
+                fact_add_projection(@s FactProjection(value (-1) false count))
+                fact_add_projection(@s FactProjection(fact_byte_view(@s value) (-1) false count))
+            }
+            return value
+        }
+        # (another is one value too, so guards on its byte view reach `byte_slice`)
+        if nodes.ptr[n].aux =? 0 and nkids(n) =? 0 {return fact_new(@s FactBound() FactTerm(origin=n type=T_STR))}
+    }
+    # An optional's or union's tag (-3: 0 for none, 1 for a value, or the
+    # member) and payload (-4) are projections of its immutable evaluation.
+    if k =? 'istype' {
+        let value=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+        if nodes.ptr[n].aux =? -3 {return fact_constant(@s 1)}
+        let tag=fact_project(@s value (-3) false T_INT)
+        let wanted=if nodes.ptr[n].aux >=? 0 {CaptureWord(nodes.ptr[n].aux)} else if nodes.ptr[n].aux =? -2 {1} else {0}
+        let other=fact_constant(@s wanted)
+        return fact_new(@s fact_domain(T_BOOL) FactTerm('eq' tag other))
+    }
+    if k =? 'narrow' or k =? 'unwrap' {
+        let value=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+        return fact_project(@s value (-4) false ntype(n))
+    }
+    if k =? 'ident' {return fact_read(@s n)}
+    if k =? 'field' and (nodes.ptr[n].aux >=? 0 and tkind(ntype(CaptureWord(nodes.ptr[n].a))) =? 'struct_' or nodes.ptr[n].aux =? -2 and tkind(ntype(CaptureWord(nodes.ptr[n].a))) =? 'tuple') {
+        let base=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+        let selector=if nodes.ptr[n].aux =? -2 {CaptureWord(nodes.ptr[n].ival)} else {CaptureWord(nodes.ptr[n].name)}
+        let stored=refine_storage(n ntype(n))
+        let held=fact_project(@s base selector false stored)
+        if ref_self_active {
+            ref_self_place_read(n held @s)
+            # (a field a call or a sibling's store kept: the record holds its bound again)
+            if not fact_pair_transient and ref_sib_contract(stored) {ref_assume(stored held fact_field_args(@s base) @s)}
+        }
+        return held
+    }
+    if k =? 'tuple' {
+        let value=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+        loop i in [CaptureWord(0)..nkids(n)) {
+            let v=fact_capture(kid(n i) @s)
+            if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(value i false v))}
+        }
+        return value
+    }
+    # A slice reads its source, then its bounds, and has their difference as
+    # its length: 0 <=? lo <=? hi <=? length (an inclusive end is hi+1).
+    if k =? 'index' and nodes.ptr[n].aux =? 1 and nodes.ptr[nodes.ptr[n].b].kind =? 'range' and not has_flag(CaptureWord(nodes.ptr[n].b) NF_STEP) {
+        let r=CaptureWord(nodes.ptr[n].b)
+        let base=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+        let t=fact_type(ntype(CaptureWord(nodes.ptr[n].a)))
+        if types.ptr[t].kind not=? 'array' and types.ptr[t].kind not=? 'fixed' {return fact_unmodeled(@s n 'unsupported')}
+        let length=if types.ptr[t].kind =? 'fixed' {fact_constant(@s fixed_len(t))} else {fact_project(@s base (-1) false T_INT)}
+        let lo=if nodes.ptr[r].a not=? 0 {fact_capture(CaptureWord(nodes.ptr[r].a) @s)} else {fact_constant(@s 0)}
+        let hi=length
+        if nodes.ptr[r].b not=? 0 {
+            hi=fact_capture(CaptureWord(nodes.ptr[r].b) @s)
+            if has_flag(r NF_INCLUSIVE) {hi=fact_arithmetic(@s CaptureWord(nodes.ptr[r].b) 'plus' hi fact_constant(@s 1))}
+        }
+        if fact_speculating =? 0 and (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) {
+            let zero=fact_constant(@s 0)
+            let checks:array<int64>=[fact_compare(s 'le' zero lo) fact_compare(s 'le' lo hi) fact_compare(s 'le' hi length)]
+            # (a probe records its answer: never a report)
+            if fact_probe_on {fact_probe_record(n checks[0] =? 1 and checks[1] =? 1 and checks[2] =? 1)}
+            else if checks[0] not=? 1 or checks[1] not=? 1 or checks[2] not=? 1 {wit_slice(n @s lo hi length checks)}
+        }
+        let value=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+        let size=length
+        if nodes.ptr[r].a not=? 0 or nodes.ptr[r].b not=? 0 {size=fact_arithmetic(@s (if nodes.ptr[r].b not=? 0 {CaptureWord(nodes.ptr[r].b)} else {CaptureWord(nodes.ptr[r].a)}) 'minus' hi lo)}
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(value (-1) false size))}
+        if ownership_decls.length =? 0 or not ownership_fact_type(ntype(n)) {fact_slice_elements(@s base value lo hi)}
+        return value
+    }
+    if k =? 'index' and nodes.ptr[n].b not=? 0 {
+        let base:CaptureWord=0
+        let index:CaptureWord=0
+        # (an `int` index's narrowing is the index's own obligation: in bounds, it fits)
+        let outer=fact_covered
+        let kind=types.ptr[representation_type(ntype(CaptureWord(nodes.ptr[n].a)))].kind
+        capture_covered[0]=if kind =? 'array' or kind =? 'fixed' {CaptureWord(nodes.ptr[n].b)} else {0}
+        if nodes.ptr[CaptureWord(nodes.ptr[n].a)].kind =? 'ident' {
+            index=fact_capture(CaptureWord(nodes.ptr[n].b) @s)
+            base=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+        }
+        else {
+            base=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+            index=fact_capture(CaptureWord(nodes.ptr[n].b) @s)
+        }
+        capture_covered[0]=outer
+        if fact_route_call not=? 0 {capture_route_selectors[0][n]=[fact_route_call index]}
+        let t=fact_type(ntype(CaptureWord(nodes.ptr[n].a)))
+        if types.ptr[t].kind =? 'array' or types.ptr[t].kind =? 'fixed' {
+            let length=if types.ptr[t].kind =? 'fixed' {fact_constant(@s fixed_len(t))} else {fact_project(@s base (-1) false T_INT)}
+            if fact_speculating =? 0 and fact_probe_on and fact_policy not=? 'RequireStatic' {fact_probe_index(n @s index length)}
+            # (an index the compiler generated in bounds, as an elementwise loop's reads)
+            else if fact_speculating =? 0 and (fact_policy =? 'RequireStatic' or fact_query) and not has_flag(n NF_INBOUNDS) {
+                let zero=fact_constant(@s 0)
+                let lo=fact_compare(s 'le' zero index)
+                let hi=fact_compare(s 'lt' index length)
+                if fact_probe_on {fact_probe_record(n lo =? 1 and hi =? 1)}
+                else {
+                    dir_index(n lo =? 1 and hi =? 1)
+                    if lo not=? 1 or hi not=? 1 {wit_index(n @s index length lo hi)}
+                }
+                if lo not=? 1 or hi not=? 1 {fact_index_success(n @s index length)}
+            }
+            return fact_keys_element(@s base fact_project(@s base index true CaptureWord(types.ptr[t].elem)))
+        }
+        return fact_unmodeled(@s n 'unsupported')
+    }
+    # `fill(x n)`, an array of n copies (none when n is negative): the value,
+    # then the count, which is the length.
+    if k =? 'array' and nodes.ptr[n].b not=? 0 and nkids(n) =? 1 and tkind(fact_type(ntype(n))) =? 'array' {
+        let element=fact_capture(kid(n 0) @s)
+        let count=fact_capture(CaptureWord(nodes.ptr[n].b) @s)
+        let value=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+        let c=fact_bound(s count)
+        # (the length is max(0, n): n itself whenever n is nonnegative, as
+        # the allocation succeeded)
+        let size=if c.lo <? 0 or c.hi >? fact_length_max() {fact_clamped(@s count n)} else {count}
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(value (-1) false size))}
+        if value not=? 0 and element not=? 0 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(n))) and s.projections.length <? FACT_CAP {
+            fact_add_projection(@s FactProjection(value FACT_ELEMENT_COPY false element))
+        }
+        return value
+    }
+    if k =? 'array' and nodes.ptr[n].aux =? 0 {
+        let value=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+        loop i in [CaptureWord(0)..nkids(n)) {
+            let v=fact_capture(kid(n i) @s)
+            if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(value fact_constant(@s i) true v))}
+        }
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(value (-1) false fact_constant(@s nkids(n))))}
+        return value
+    }
+    if k =? 'map_lit' {
+        let kt=struct_targ(CaptureWord(types.ptr[fact_type(ntype(n))].st) 0)
+        if (fact_scalar(kt) or kt =? T_STR) and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(n))) {
+            let keys:array<int64>=[]
+            let raw:array<int64>=[]
+            let payloads:array<int64>=[]
+            loop j in [CaptureWord(0)..nkids(n)) {
+                let pair=kid(n j)
+                let e=CaptureWord(nodes.ptr[pair].a)
+                let key=fact_capture(e @s)
+                keys.push(fact_map_key(@s e key))
+                raw.push(key)
+                payloads.push(fact_capture(CaptureWord(nodes.ptr[pair].b) @s))
+            }
+            let value=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+            loop key in keys {
+                if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(value key true fact_constant(@s 1)))}
+            }
+            # (`[]` has no entries: a sibling bound on a dictionary's values holds of it)
+            if keys.length =? 0 and ref_self_active and s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(value (-1) false fact_constant(@s 0)))}
+            fact_map_literal(n @s value keys raw payloads)
+            return value
+        }
+    }
+    # (a summary's `none` too: an optional result's present arm excludes it)
+    if k =? 'none_lit' and (result_active or fact_summary_owner not=? 0 or fact_summary_payload(fact_type(ntype(n))) not=? 0) {
+        let value=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+        fact_add_projection(@s FactProjection(value (-3) false fact_constant(@s 0)))
+        return value
+    }
+    if k =? 'str_lit' and nodes.ptr[n].aux =? 0 or k =? 'float_lit' or k =? 'none_lit' or k =? 'null_lit' or k =? 'dotname' {return 0}
+    if k =? 'str_lit' {
+        # Interpolation evaluates each part in order, then calls its formatter,
+        # which (like any opaque call) may write exposed roots; a builtin
+        # number's, boolean's or string's writes nothing.
+        loop j in [CaptureWord(0)..nkids(n)) {
+            let part=kid(n j)
+            if nodes.ptr[part].kind not=? 'pair' {continue}
+            fact_capture(CaptureWord(nodes.ptr[part].a) @s);
+            if not fact_builtin_formatter(part) {fact_forget(@s part 'call')}
+        }
+        return fact_new(@s FactBound(reason='unsupported' witness=n))
+    }
+    if k =? 'addr' or k =? 'parallel_region' {return fact_capture(CaptureWord(nodes.ptr[n].a) @s)}
+    # Creating a closure evaluates nothing (defaults are the actuals of its
+    # calls) and writes nothing: its body runs only when called, and every
+    # call that can reach it, indirect or through a callee's summary, forgets
+    # what the body may write. (Ownership may move captures: still opaque.)
+    if nd_mutable_signatures.length not=? 0 and nd_mutable_handle(n) {fact_nd_need(n @s 'eq' fact_fresh(@s T_INT) fact_constant(@s 1) "function handle checks its mutable shaped parameters on entry");}
+    if k =? 'lambda' and fact_speculating =? 0 and fact_fork_nodes.has(n) {fact_fork_record(n @s)}
+    if k =? 'lambda' and ownership_decls.length =? 0 {return 0}
+    # (a partial application evaluates its arguments, holes aside, and saves
+    # them, and a handle its closure value: the values its calls read; those
+    # calls forget what the function may write)
+    if k =? 'lambda' or k =? 'fnref' or k =? 'partial' {
+        fact_capture(CaptureWord(nodes.ptr[n].a) @s);
+        loop j in [CaptureWord(0)..nkids(n)) {fact_capture(kid(n j) @s);}
+        if k =? 'lambda' or k =? 'partial' and fact_partial_opaque(n) or k =? 'fnref' and fact_handle_opaque(n) {fact_forget(@s n 'call' k =? 'partial' and fact_partial_place(n))}
+        return 0
+    }
+    if k =? 'unary' {
+        let a=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+        if nodes.ptr[n].op =? int32(59) and fact_scalar(ntype(n)) {
+            return fact_arithmetic(@s n 'minus' fact_constant(@s 0) a)
+        }
+        return fact_unmodeled(@s n 'unsupported')
+    }
+    if k =? 'exprstmt' {return fact_capture(CaptureWord(nodes.ptr[n].a) @s)}
+    if k =? 'block' {
+        if fact_member_shared and nkids(n) >? 1 and fact_member_block(n @s) {return 0}
+        let r:CaptureWord=0
+        let defers:array<int64>=[]
+        let pending=fact_pending_defers
+        let first=s.bindings.length
+        let boundary=fact_terms.length
+        let collect_at=max(32 CaptureWord(s.ids.length) * 2)
+        let long_block=nkids(n) >? 32
+        loop j in [CaptureWord(0)..nkids(n)) {
+            let c=kid(n j)
+            if nodes.ptr[c].kind =? 'defer_' {
+                defers.push(CaptureWord(nodes.ptr[c].a))
+                capture_pending_defers[0]=CaptureWord(fact_pending_defers) + 1
+            }
+            else if ref_pair_stmts.length >? 0 and ref_pair_stmts.has(c) {
+                # (a statement of a run changing tied fields: the record's contract may not hold)
+                let held=fact_pair_transient
+                capture_pair_transient[0]=true
+                r=fact_capture(c @s)
+                capture_pair_transient[0]=held
+            }
+            else {
+                r=fact_capture(c @s)
+                # A statement's end drops its temporaries and replaced
+                # owners: forget what their hooks may write (facts_forgets).
+                if ownership_fact_cleanup and s.live {fact_drop_forget(@s c fact_drop_statement(c))}
+                if long_block and s.live and s.ids.length >=? collect_at {
+                    fact_collect(@s boundary r)
+                    collect_at=CaptureWord(s.ids.length) + max(32 s.ids.length)
+                }
+            }
+        }
+        loop i in [CaptureWord(0)..defers.length) {fact_capture(defers[CaptureWord(defers.length) - 1 - i] @s);}
+        capture_pending_defers[0]=pending
+        # (then the block's own owners drop; an unscoped `( ... )` block's belong to the
+        # enclosing block, as do its bindings)
+        let unscoped=has_flag(n NF_UNSCOPED)
+        if ownership_fact_cleanup and s.live and not unscoped {fact_drop_forget(@s n fact_drop_block(n))}
+        if s.live and s.bindings.length >? first and not unscoped {fact_scope_exit(@s n first)}
+        if s.live and s.ids.length >? 64 {fact_collect(@s boundary r)}
+        return r
+    }
+    if k =? 'return_' {
+        let r=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+        if ownership_decls.length not=? 0 {r=fact_owner_value(CaptureWord(nodes.ptr[n].a) r @s)}
+        # (the exit drops every owner still live, before the caller reads)
+        if ownership_fact_cleanup and s.live {fact_drop_forget(@s n fact_drop_exit(fact_owner))}
+        if proof_active and proof_decls.has(CaptureWord(fns.ptr[fact_owner].decl)) {proof_exit(fact_owner n @s)}
+        if result_active {result_exit(fact_owner r n @s)}
+        if fact_summary_owner not=? 0 and fact_summary_owner =? fact_owner {fact_summary_record(@s r)}
+        s.live=false
+        return r
+    }
+    if k =? 'break_' or k =? 'continue_' {
+        if fact_pending_defers >? 0 {fact_forget(@s n 'write' true)}
+        # (the jump drops the crossed scopes' owners: at most the function's)
+        if ownership_fact_cleanup and s.live {fact_drop_forget(@s n fact_drop_exit(fact_owner))}
+        let level=CaptureWord(fact_loops.length) - 1 - CaptureWord(nodes.ptr[n].ival)
+        if level >=? 0 {
+            if k =? 'break_' {capture_loops[0][level].exits=fact_join(fact_loops[level].exits s n)}
+            else {capture_loops[0][level].back=fact_join(fact_loops[level].back s n)}
+        }
+        s.live=false
+        return 0
+    }
+    if k =? 'vardecl' {
+        if nodes.ptr[n].sym >? 0 and not has_flag(n NF_GLOBAL) and index_update_sources.length >? 0 {
+            let source=index_update_sources.get(CaptureWord(nodes.ptr[n].name))
+            if source not=? none {
+                if source =? CaptureWord(nodes.ptr[n].b) {capture_selector_sources[0][CaptureWord(nodes.ptr[n].sym)]=source}
+            }
+        }
+        let saving=fact_saving
+        capture_saving[0]=fact_saved_boolean(CaptureWord(nodes.ptr[n].b))
+        # (an update's captured array selector, `xs[u] += 1` for an `int` u:
+        # the bounds check at its uses is the narrowing's, as for a read)
+        let outer=fact_covered
+        let init=CaptureWord(nodes.ptr[n].b)
+        if index_update_arrays.length >? 0 and index_update_arrays.has(CaptureWord(nodes.ptr[n].name)) and init not=? 0 and nodes.ptr[init].kind =? 'conv' and nodes.ptr[init].aux =? int32(int64(CV.int_)) {capture_covered[0]=init}
+        let r=if nodes.ptr[n].b not=? 0 {fact_capture(CaptureWord(nodes.ptr[n].b) @s)} else {fact_default_value(n @s)}
+        capture_covered[0]=outer
+        capture_saving[0]=saving
+        # (the key's identity, still a member of any snapshot it came source_type)
+        if has_flag(n NF_MAP_KEY) {
+            let key=fact_map_key(@s CaptureWord(nodes.ptr[n].b) r)
+            let source=if key not=? r {fact_projection_find(s r FACT_KEY_SOURCE false)} else {-1}
+            if source >=? 0 and s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(key FACT_KEY_SOURCE false s.projections[source].value))}
+            r=key
+        }
+        if ownership_decls.length not=? 0 {r=fact_owner_value(CaptureWord(nodes.ptr[n].b) r @s)}
+        let l=CaptureWord(nodes.ptr[n].sym)
+        if nkids(n) >? 0 and not has_flag(n NF_GLOBAL) {
+            # (unpacking: each name binds its component)
+            loop i in [CaptureWord(0)..nkids(n)) {
+                let c=kid(n i)
+                if nodes.ptr[c].kind =? 'hole' {continue}
+                if nodes.ptr[c].sym <=? 0 or has_flag(c NF_GLOBAL) {fact_forget(@s n 'write' true); return 0}
+                let cl=CaptureWord(nodes.ptr[c].sym)
+                fact_bind(@s PlaceIdentity('local' CaptureWord(locals.ptr[cl].owner) cl) fact_component(@s r ntype(CaptureWord(nodes.ptr[n].b)) i CaptureWord(locals.ptr[cl].type)))
+            }
+            return r
+        }
+        if nkids(n) >? 0 or l =? 0 {fact_forget(@s n 'write' true); return 0}
+        if has_flag(n NF_GLOBAL) {fact_bind(@s PlaceIdentity('global' 0 l) r)}
+        else if not (nodes.ptr[n].aux2 =? 1 and CaptureWord(locals.ptr[l].flags) & LF_PARAM not=? 0) {fact_bind(@s PlaceIdentity('local' CaptureWord(locals.ptr[l].owner) l) r)}
+        return r
+    }
+    if k =? 'assign' {
+        let a=CaptureWord(nodes.ptr[n].a)
+        let old:CaptureWord=0
+        let compound=nodes.ptr[n].op not=? int32(47)
+        if compound {
+            # (the read keeps its selectors' values, tagged with this update,
+            # and the store's route reuses them: each selector runs once)
+            let outer_call=fact_route_call
+            capture_route_call[0]=n
+            old=fact_capture(a @s)
+            capture_route_call[0]=outer_call
+        }
+        let r=fact_capture(CaptureWord(nodes.ptr[n].b) @s)
+        if ownership_decls.length not=? 0 {r=fact_owner_value(CaptureWord(nodes.ptr[n].b) r @s)}
+        let op=capture_tokens[nodes.ptr[n].op]
+        if (op =? 'shleq' or op =? 'shreq') and fact_shift_obliged(n) {fact_nonnegative(n @s r CaptureWord(nodes.ptr[n].b) "the shift count")}
+        if nodes.ptr[a].kind =? 'tuple' and op =? 'assign' {
+            fact_store_pattern(@s a r n)
+            return r
+        }
+        if nodes.ptr[n].aux =? 0 and (op =? 'pluseq' or op =? 'minuseq') {
+            let arithmetic_op=if op =? 'pluseq' {Tok.plus} else {Tok.minus}
+            r=fact_arithmetic(@s a arithmetic_op old r)
+        }
+        else if op not=? 'assign' or nodes.ptr[n].aux not=? 0 {r=fact_new(@s fact_domain(ntype(a) 'write' n))}
+        # (a compound one's target was read above, with its obligations)
+        let outer_reuse=fact_route_reuse
+        if compound {capture_route_reuse[0]=n}
+        let route=fact_route(a @s)
+        capture_route_reuse[0]=outer_reuse
+        fact_store_route(@s route r n op =? 'assign')
+        return r
+    }
+    if k =? 'if_' {
+        # (a refuted conjunction continues only past a branch that leaves, or
+        # into an else: fact_either)
+        let outer_either=fact_either_wanted
+        capture_either_wanted[0]=1 | (if nodes.ptr[n].c not=? 0 or ff_diverges(CaptureWord(nodes.ptr[n].b)) {2} else {0})
+        let paths=fact_condition(CaptureWord(nodes.ptr[n].a) s)
+        capture_either_wanted[0]=outer_either
+        let y=fact_capture(CaptureWord(nodes.ptr[n].b) @paths.yes)
+        let z=fact_capture(CaptureWord(nodes.ptr[n].c) @paths.no)
+        # Allocate the shared result only after its operands finish: a long
+        # condition/arm may collect unrooted temporary values. Both incoming
+        # frames name this evaluation, each with its own checked evidence.
+        let selected:CaptureWord=0
+        if mark & FACT_VALUE not=? 0 and fact_scalar(ntype(n)) and paths.yes.ids.length <? FACT_CAP and paths.no.ids.length <? FACT_CAP and fact_terms.length <? 0x80000000 {
+            selected=fact_terms.length
+            capture_terms[0].push(FactTerm(type=fact_hull_type(ntype(n) paths.yes y paths.no z)))
+            fact_add_value(@paths.yes selected fact_bound(paths.yes y))
+            fact_add_value(@paths.no selected fact_bound(paths.no z))
+        }
+        if selected not=? 0 {
+            fact_selected(@paths.yes selected y n)
+            fact_selected(@paths.no selected z n)
+            s=fact_join(paths.yes paths.no n)
+            fact_selected_rows(@s paths.yes paths.no selected)
+            fact_selected_rows(@s paths.no paths.yes selected)
+            return selected
+        }
+        let result=fact_hull(fact_bound(paths.yes y) fact_bound(paths.no z) n)
+        let hull=fact_hull_type(ntype(n) paths.yes y paths.no z)
+        if not paths.yes.live {result=fact_bound(paths.no z); hull=fact_terms[z].type}
+        if not paths.no.live {result=fact_bound(paths.yes y); hull=fact_terms[y].type}
+        if fact_summary_field not=? 0 and type_eq(fact_type(ntype(n)) fact_type(CaptureWord(fns.ptr[fact_summary_owner].ret))) {
+            return fact_constructor_join(n paths y z result hull @s)
+        }
+        s=fact_join(paths.yes paths.no n)
+        let joined=fact_new(@s result FactTerm(type=hull))
+        if mark & FACT_VALUE not=? 0 {fact_join_length(@s joined paths.yes y paths.no z n)}
+        return joined
+    }
+    if k =? 'and_' or k =? 'or_' {
+        if string_set_owners.length >? 0 and string_set_owners.has(fact_owner) and string_set_tests.has(n) {return fact_string_set(n @s)}
+        if fact_summary_owner not=? 0 or mark not=? 0 and mark & FACT_VALUE =? 0 {
+            let paths=fact_condition(n s)
+            let result=fact_domain(T_BOOL)
+            if not paths.yes.live {result=FactBound(0 0)}
+            if not paths.no.live {result=FactBound(1 1 true)}
+            s=fact_join(paths.yes paths.no n)
+            return fact_new(@s result)
+        }
+        # Evaluate a saved Boolean once, retaining the operand identities.
+        # Split only for short circuiting; the RHS result needs no extra
+        # true/false state copies. O(1) transfer per demanded connective plus
+        # the existing bounded join. Effects still replace storage identities.
+        let a=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+        let budget:int64=if fact_saving {32} else {0}
+        let shared=fact_shared_literals.length
+        fact_preread(CaptureWord(nodes.ptr[n].b) @s @budget)
+        let rhs=s
+        let take=k =? 'and_'
+        fact_assume(@rhs a take)
+        fact_assume(@s a not take)
+        # (each operand is its own statement: its temporaries drop before the next)
+        if ownership_fact_cleanup {
+            let drops=fact_drop_statement(CaptureWord(nodes.ptr[n].a))
+            fact_drop_forget(@rhs n drops)
+            fact_drop_forget(@s n drops)
+        }
+        let b=fact_capture(CaptureWord(nodes.ptr[n].b) @rhs)
+        capture_shared_literals[0].truncate(shared)
+        let result=fact_domain(T_BOOL)
+        if not rhs.live {result=FactBound((if take {0} else {1}) (if take {0} else {1}) not take)}
+        else if not s.live {result=fact_bound(rhs b)}
+        else if fact_truth(rhs b) =? (if take {0} else {1}) {result=FactBound((if take {0} else {1}) (if take {0} else {1}) not take)}
+        s=fact_join(s rhs n)
+        return fact_new(@s result FactTerm((if take {Tok.kw_and} else {Tok.kw_or}) a b))
+    }
+    if (k =? 'while_' or k =? 'for_') and fact_loops.length =? 0 and fact_speculating =? 0 {
+        capture_loop_steps[0]=0
+        capture_loop_exhausted[0]=false
+    }
+    if k =? 'while_' and nodes.ptr[n].aux =? 0 {
+        fact_while(n @s)
+        return 0
+    }
+    if k =? 'for_' and nodes.ptr[n].aux =? 0 and not has_flag(CaptureWord(nodes.ptr[n].a) NF_STEP) {
+        fact_range(n @s)
+        return 0
+    }
+    if k =? 'for_' and nodes.ptr[n].aux =? 0 and nodes.ptr[CaptureWord(nodes.ptr[n].a)].kind =? 'range' and nodes.ptr[CaptureWord(nodes.ptr[n].a)].c not=? 0 {
+        fact_stepped(n @s)
+        return 0
+    }
+    if k =? 'while_' or k =? 'for_' {
+        # An indexed array loop evaluates its source once, before the loop.
+        let base:CaptureWord=0
+        # (`loop @x in xs`, aux 2, cannot resize or replace xs: its length is read once too)
+        let indexed=k =? 'for_' and (nodes.ptr[n].aux =? 1 or nodes.ptr[n].aux =? 2) and nodes.ptr[n].c not=? 0 and files[pos_file(nodes.ptr[n].pos)].is_dewy
+        let mapped=k =? 'for_' and nodes.ptr[n].aux =? 3 and is_map_entries_type(fact_type(ntype(CaptureWord(nodes.ptr[n].a))))
+        if indexed or mapped {base=fact_capture(CaptureWord(nodes.ptr[n].a) @s)}
+        if indexed and fact_comprehensions.has(n) {capture_comprehension_sources[0][n]=base}
+        let pushes:array<[int64 int64]>=[]
+        let growers:array<[int64 int64]>=[]
+        let sums:array<[int64 FactBound]>=[]
+        let scaled:array<[int64 int64 int64]>=[]
+        if indexed {
+            pushes=fact_counted_pushes(n @s)
+            growers=fact_growing_pushes(n @s pushes)
+            scaled=fact_scaled_pushes(n @s)
+            # (one iteration per element of the evaluated source; every
+            # length is within the enabled address-space ceiling)
+            let t=fact_type(ntype(CaptureWord(nodes.ptr[n].a)))
+            let trips=fact_length_max()
+            if types.ptr[t].kind =? 'fixed' {trips=fixed_len(t)}
+            else {
+                let base_length=fact_project(@s base (-1) false T_INT)
+                let b=fact_bound(s base_length)
+                if not b.wide {trips=max(0 min(trips b.hi))}
+            }
+            sums=fact_counted_sums(n s trips)
+        }
+        # (positions the body keeps below a length: fact_loop_bounds)
+        let demands=fact_loop_bound_entry(fact_loop_bound_demands(n) @s)
+        let hulls=indexed and fact_push_open(n @s base)
+        let iterated=indexed and fact_iterate(n @s false base 0 0 [pushes... growers...] sums)
+        if not iterated {
+            fact_changes(n @s n)
+            loop sum in sums {
+                let i=fact_binding(s PlaceIdentity('local' CaptureWord(locals.ptr[sum[0]].owner) sum[0]))
+                if i >=? 0 {fact_set_bound(@s s.bindings[i].value sum[1])}
+            }
+        }
+        let prep=if indexed {FACT_PREP_INDEXED} else if mapped {FACT_PREP_MAPPED} else {FACT_PREP_CAPTURE}
+        let bounded=demands.length >? 0 and fact_loop_bounds(n @s demands prep base 0 0 [pushes... growers...])
+        let after=s
+        let body=s
+        fact_loop_prepare(n @body prep base [pushes... growers...])
+        let edges=fact_loop_body(n @body)
+        # (an iterated or bounded header holds at every head, not inside the
+        # body: a break joins it)
+        s=if iterated or bounded {fact_join(after edges.exits n)} else {after}
+        if indexed and nodes.ptr[n].aux =? 1 and base not=? 0 and edges.back.live and not edges.exits.live {fact_ensured_close(n base @edges.back @s)}
+        if hulls {fact_push_close(n @s)}
+        fact_growing_lengths(@s growers)
+        if pushes.length >? 0 or scaled.length >? 0 {
+            let t=fact_type(ntype(CaptureWord(nodes.ptr[n].a)))
+            let count=if types.ptr[t].kind =? 'fixed' {fact_constant(@s fixed_len(t))} else {fact_project(@s base (-1) false T_INT)}
+            fact_counted_lengths(n @s pushes count)
+            fact_scaled_lengths(n @s scaled count)
+        }
+        return 0
+    }
+    if k =? 'not_' {
+        let a=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+        let v=fact_truth(s a)
+        let b=if v <? 0 {fact_domain(T_BOOL)} else {FactBound(CaptureWord(1) - v CaptureWord(1) - v v =? 0)}
+        return fact_new(@s b FactTerm('kw_not' a 0 n))
+    }
+    if k =? 'binary' {
+        let sum_operand=fact_sum_operand
+        if nodes.ptr[n].op =? int32(68) or nodes.ptr[n].op =? int32(61) {capture_sum_operand[0]=fact_sum_source(CaptureWord(nodes.ptr[n].a))}
+        let a=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+        capture_sum_operand[0]=sum_operand
+        if result_active and nodes.ptr[CaptureWord(nodes.ptr[n].b)].kind =? 'none_lit' and tkind(ntype(CaptureWord(nodes.ptr[n].a))) =? 'opt' {
+            let tag=fact_project(@s a (-3) false T_INT)
+            let zero=fact_constant(@s 0)
+            return fact_new(@s fact_domain(T_BOOL) FactTerm(capture_tokens[nodes.ptr[n].op] tag zero))
+        }
+        let b=fact_capture(CaptureWord(nodes.ptr[n].b) @s)
+        let op=capture_tokens[nodes.ptr[n].op]
+        let set_proof=string_set_owners.length >? 0 and string_set_owners.has(fact_owner)
+        if set_proof and string_set_tests.has(n) {return fact_string_set(n @s)}
+        if (op =? 'shl' or op =? 'shr') and fact_shift_obliged(n) {fact_nonnegative(n @s b CaptureWord(nodes.ptr[n].b) "the shift count")}
+        if set_proof and nodes.ptr[n].aux =? 2 and (op =? 'eq' or op =? 'ne') {
+            let x=fact_project(@s a FACT_TEXT_ID false T_INT)
+            let y=fact_project(@s b FACT_TEXT_ID false T_INT)
+            let truth=fact_compare(s op x y)
+            let result=if truth >=? 0 {FactBound(truth truth truth not=? 0)} else {fact_domain(T_BOOL)}
+            return fact_new(@s result FactTerm(op x y n))
+        }
+        let literal_words=set_proof and (op =? 'eq' or op =? 'ne') and str_set_of(ntype(CaptureWord(nodes.ptr[n].a))) not=? 0 and str_set_of(ntype(CaptureWord(nodes.ptr[n].b))) not=? 0
+        if nodes.ptr[n].aux =? 0 and (literal_words or fact_scalar(ntype(CaptureWord(nodes.ptr[n].a))) and fact_scalar(ntype(CaptureWord(nodes.ptr[n].b)))) and fact_comparison(op) {
+            let unsigned_a=fact_type(ntype(CaptureWord(nodes.ptr[n].a))) =? T_U64
+            let unsigned_b=fact_type(ntype(CaptureWord(nodes.ptr[n].b))) =? T_U64
+            if unsigned_a not=? unsigned_b {
+                if unsigned_a {a=exact_fact_signed(@s a)}
+                else {b=exact_fact_signed(@s b)}
+            }
+            let truth=fact_compare(s op a b)
+            let x=fact_bound(s a)
+            let y=fact_bound(s b)
+            let reason=if x.lo not=? x.hi {x} else {y}
+            let result=fact_domain(T_BOOL reason.reason reason.witness)
+            if truth >=? 0 {result=FactBound(truth truth truth not=? 0)}
+            return fact_new(@s result FactTerm(op a b n))
+        }
+        if nodes.ptr[n].aux =? 0 and fact_scalar(ntype(n)) and (op =? 'plus' or op =? 'minus' or op =? 'star') {return fact_arithmetic(@s n op a b)}
+        if fact_speculating =? 0 and fact_policy =? 'RequireStatic' and nodes.ptr[n].aux =? 0 and (op =? 'slash' or op =? 'percent') and is_int(ntype(CaptureWord(nodes.ptr[n].b))) {
+            let proven=fact_divisor(@s n a b op =? 'percent')
+            if fact_probe_on {fact_probe_record(n proven)}
+        }
+        else if fact_speculating =? 0 and fact_probe_on and nodes.ptr[n].aux =? 0 and (op =? 'slash' or op =? 'percent') and is_int(ntype(CaptureWord(nodes.ptr[n].b))) {
+            fact_probe_divisor(n @s b CaptureWord(nodes.ptr[n].b))
+        }
+        if nodes.ptr[n].aux =? 0 and (op =? 'slash' or op =? 'percent') and fact_type(ntype(n)) =? T_U64 and fact_type(ntype(CaptureWord(nodes.ptr[n].a))) =? T_U64 and fact_type(ntype(CaptureWord(nodes.ptr[n].b))) =? T_U64 {
+            return fact_floor_unsigned(@s n (if op =? 'slash' {1} else {2}) a b)
+        }
+        if nodes.ptr[n].aux =? 0 and (op =? 'slash' or op =? 'percent') and fact_scalar(ntype(n)) and fact_type(ntype(n)) not=? T_U64 and fact_scalar(ntype(CaptureWord(nodes.ptr[n].a))) and fact_scalar(ntype(CaptureWord(nodes.ptr[n].b))) {
+            return fact_floor(@s n (if op =? 'slash' {1} else {2}) a b files[pos_file(nodes.ptr[n].pos)].is_dewy)
+        }
+        if nodes.ptr[n].aux =? 0 and (op =? 'amp' or op =? 'pipe' or op =? 'caret' or op =? 'shr' or op =? 'shl') and fact_scalar(ntype(n)) and is_int(ntype(n)) {
+            exact_shift_fact(n b s)
+            return fact_bitwise(@s n op a b)
+        }
+        if fact_length_comparison(n) {
+            let at=fact_type(ntype(CaptureWord(nodes.ptr[n].a)))
+            let bt=fact_type(ntype(CaptureWord(nodes.ptr[n].b)))
+            let al=if tkind(at) =? 'fixed' {fact_constant(@s fixed_len(at))} else {fact_project(@s a (-1) false T_INT)}
+            let bl=if tkind(bt) =? 'fixed' {fact_constant(@s fixed_len(bt))} else {fact_project(@s b (-1) false T_INT)}
+            let v=fact_new(@s fact_domain(T_BOOL) FactTerm(a=al b=bl origin=n type=T_BOOL))
+            if tkind(at) =? 'array' and tkind(bt) =? 'array' and telem(at) =? T_INT and telem(bt) =? T_INT {capture_equal_arrays[0][n]=[v a b]}
+            return v
+        }
+        if nodes.ptr[n].aux not=? 0 and not fact_pure_binary(n) {fact_forget(@s n 'call')}
+        return fact_unmodeled(@s n 'unsupported')
+    }
+    if fact_enum_cast(n) or fact_pointer_cast(n) {
+        fact_capture(CaptureWord(nodes.ptr[n].a) @s);
+        return fact_fresh(@s ntype(n))
+    }
+    if k =? 'conv' {
+        let outer=fact_covered
+        if nodes.ptr[n].aux =? int32(int64(CV.refinement)) {capture_covered[0]=fact_refinement_covers(n)}
+        let a=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+        capture_covered[0]=outer
+        # Only parser-originated oversized literals carry this sign marker.
+        # O(1) at a demanded conversion; open endpoints are not exact values.
+        if nodes.ptr[n].aux =? int32(int64(CV.big2math)) and nodes.ptr[n].aux2 not=? 0 {
+            let bound=if nodes.ptr[n].aux2 <? 0 {FactBound(FACT_MIN (-1) true)} else {FactBound(1 FACT_MAX true)}
+            return fact_new(@s bound FactTerm(origin=n type=T_MATH_INT))
+        }
+        # Widening a signed word/exact word expression to int is the same
+        # mathematical value, even when its interval is unbounded. Reuse its
+        # value and provenance; unsigned coordinates still need decoding below.
+        if nodes.ptr[n].aux =? int32(int64(CV.int_)) and ntype(n) =? T_MATH_INT and ntype(CaptureWord(nodes.ptr[n].a)) =? T_INT {return a}
+        if nodes.ptr[n].aux =? int32(int64(CV.opt)) {
+            if ownership_decls.length not=? 0 {a=fact_owner_value(CaptureWord(nodes.ptr[n].a) a @s)}
+            let value=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+            if CaptureWord(s.projections.length) + 2 <? FACT_CAP {
+                fact_add_projection(@s FactProjection(value (-3) false fact_constant(@s 1)))
+                fact_add_projection(@s FactProjection(value (-4) false a))
+            }
+            return value
+        }
+        if nodes.ptr[n].aux =? int32(int64(CV.refinement)) {
+            ref_check(n a ref_fact_current_entry(@s) @s)
+            return a
+        }
+        if nodes.ptr[n].aux =? int32(int64(CV.explicit_copy)) {
+            if ownership_decls.length not=? 0 and ownership_fact_type(ntype(n)) {
+                fact_forget(@s n 'call' true)
+                return fact_new(@s fact_domain(ntype(n) 'call' n) FactTerm(type=ntype(n)))
+            }
+            return a
+        }
+        if nodes.ptr[n].aux =? int32(int64(CV.fixed2arr)) {return a}
+        if nodes.ptr[n].aux =? int32(int64(CV.arr2fixed)) {
+            fact_fixed_check(n @s a)
+            if not fact_pure_conversion(n) {fact_forget(@s n 'call')}
+            return fact_fresh(@s ntype(n))
+        }
+        if ff_integer_demand(n) {
+            ff_integer_record(n a s)
+            return fact_fresh(@s ntype(n))
+        }
+        if nodes.ptr[n].aux =? int32(int64(CV.set_text)) {return fact_new(@s FactBound() FactTerm(type=ntype(n)))}
+        # (an exact quantity and its number are one value: lowering erases the
+        # unit, so `b not=? 0kg` guards `a / b`'s rational divisor. O(1))
+        # (an integer quantity's number too, and a unit constant, `3s` or `cm`, is its number)
+        if (nodes.ptr[n].aux =? int32(int64(CV.none_)) or nodes.ptr[n].aux =? int32(int64(CV.quantity_const))) and fact_unit_erased(ntype(CaptureWord(nodes.ptr[n].a)) ntype(n)) {return a}
+        let b=fact_bound(s a)
+        let source_type=fact_type(ntype(CaptureWord(nodes.ptr[n].a)))
+        let to=fact_type(ntype(n))
+        if nodes.ptr[n].aux =? int32(int64(CV.int_)) and types.ptr[source_type].kind =? 'enum_' and simple_enum(source_type) and is_int(to) {
+            if not b.wide and sa_fits(b.lo to) and sa_fits(b.hi to) {return a}
+            return fact_unmodeled(@s n 'unsupported')
+        }
+        if nodes.ptr[n].aux =? int32(int64(CV.wrap_int)) or nodes.ptr[n].aux =? int32(int64(CV.saturate_int)) {
+            if not b.wide and source_type =? to and (to =? T_U64 or sa_fits(b.lo to) and sa_fits(b.hi to)) {return a}
+            if not b.wide and to =? T_U64 and source_type not=? T_U64 and b.lo >=? 0 {
+                return fact_new(@s FactBound(b.lo xor FACT_MIN b.hi xor FACT_MIN) FactTerm(type=T_U64))
+            }
+            if not b.wide and source_type not=? T_U64 and to not=? T_U64 and sa_fits(b.lo to) and sa_fits(b.hi to) {return a}
+            return fact_new(@s fact_domain(to 'unsupported' n) FactTerm(type=to))
+        }
+        # (an `int` narrowed to a fixed width: the proven narrowing, an
+        # obligation; effect_failure asks whether it fits)
+        if nodes.ptr[n].aux =? int32(int64(CV.int_)) and prune(ntype(CaptureWord(nodes.ptr[n].a))) =? T_MATH_INT and prune(ntype(n)) not=? T_MATH_INT and fact_scalar(ntype(n)) {
+            let proven=fact_narrow_check(n @s a)
+            # A progress-axiom narrowing supplies its fixed storage domain;
+            # its mathematical intermediate must not remain unbounded downstream.
+            if proven and exact_progress_math.has(n) {return fact_new(@s fact_domain(to) FactTerm(type=to))}
+            if to not=? T_U64 {
+                # Successful checked narrowing preserves the mathematical
+                # value too. Its obligation is still checked above; a summary
+                # describes only returning paths. O(1) interval intersection.
+                let domain=fact_domain(to)
+                b.lo=max(b.lo domain.lo)
+                b.hi=min(b.hi domain.hi)
+                b.wide=false
+                # Keep the existing witness when no proof established this
+                # conversion: later uses know its value, not why it fitted.
+                if not proven and n not=? fact_covered {b.reason='unsupported'; b.witness=n}
+                fact_set_bound(@s a b true)
+                return a
+            }
+            if not proven or b.lo <? 0 {return fact_unmodeled(@s n 'unsupported')}
+            # (an open or wide upper end, capped by a guard, is uint64's own)
+            let top=if b.wide or b.hi =? FACT_MAX and fact_open_endpoint(s a true) {FACT_MAX} else {b.hi xor FACT_MIN}
+            return fact_new(@s FactBound(b.lo xor FACT_MIN top) FactTerm(type=T_U64))
+        }
+        if source_type =? to and nodes.ptr[n].aux =? int32(int64(CV.int_)) {return a}
+        # (uint64 values, `uint64<overflow='wrap'>` too, hold encoded intervals: fact_type)
+        if source_type not=? to and (to =? T_U64 or source_type =? T_U64) {
+            # (a value both types hold converts exactly: decode or encode its interval)
+            if fact_scalar(ntype(n)) and fact_scalar(ntype(CaptureWord(nodes.ptr[n].a))) and nodes.ptr[n].aux =? int32(int64(CV.int_)) {
+                if to =? T_U64 and b.lo >=? 0 {return fact_new(@s FactBound(b.lo xor FACT_MIN b.hi xor FACT_MIN) FactTerm(type=T_U64))}
+                if to not=? T_U64 and b.hi <? 0 and sa_fits(b.lo xor FACT_MIN ntype(n)) and sa_fits(b.hi xor FACT_MIN ntype(n)) {
+                    let r=FactBound(b.lo xor FACT_MIN b.hi xor FACT_MIN)
+                    r.nz=r.lo >? 0
+                    return fact_new(@s r FactTerm(type=ntype(n)))
+                }
+                # (a uint64 interval reaching past int64's top, as an `int`: its
+                # low end stays, the top is open, and the term remembers its
+                # origin, so fact_u64_capped knows it is at most 2^64-1)
+                if to =? T_MATH_INT and not b.wide and b.lo <? 0 and b.hi >=? 0 and (b.lo xor FACT_MIN) <? FACT_MAX {return fact_new(@s FactBound(b.lo xor FACT_MIN FACT_MAX (b.lo xor FACT_MIN) >? 0) FactTerm(origin=n type=to))}
+            }
+            return fact_unmodeled(@s n 'unsupported')
+        }
+        if fact_scalar(ntype(n)) and fact_scalar(ntype(CaptureWord(nodes.ptr[n].a))) and (nodes.ptr[n].aux =? int32(int64(CV.int_)) or nodes.ptr[n].aux =? int32(int64(CV.none_))) {
+            let fits=sa_fits(b.lo ntype(n)) and sa_fits(b.hi ntype(n))
+            if fits {return a}
+            return fact_unmodeled(@s n 'unsupported')
+        }
+        # (a float truncated to an integer: within the truncated ends of the
+        # range the float walk finds for it, as the conversion fails outside
+        # the target and for NaN. O(1) after one memoized walk of the owner)
+        if nodes.ptr[n].aux =? int32(int64(CV.float2int)) and fact_scalar(ntype(n)) and is_int(to) and to not=? T_U64 {
+            let r=ff_conversion_operand(fact_owner n)
+            if r not=? none {
+                if r.lo >? -9.0e18 and r.hi <? 9.0e18 and r.lo <=? r.hi {
+                    let domain=fact_domain(to)
+                    let lo=max(int64(r.lo) domain.lo)
+                    let hi=min(int64(r.hi) domain.hi)
+                    if lo <=? hi {return fact_new(@s FactBound(lo hi lo >? 0 or hi <? 0) FactTerm(type=ntype(n)))}
+                }
+            }
+        }
+        if not fact_pure_conversion(n) {fact_forget(@s n 'call')}
+        return fact_new(@s FactBound(reason='unsupported' witness=n))
+    }
+    if k =? 'intrinsic' {
+        # (a GPU program, compiled source_type its literal function: the call runs nothing here)
+        if nodes.ptr[n].aux =? int32(int64(IN.gpu_kernel)) {return fact_fresh(@s ntype(n))}
+        let id=nodes.ptr[n].aux as IN
+        # (an array's or string's raw pointer reads its value and may make the array its own,
+        # which changes no value; later writes through it are a call's or a store's)
+        if id =? IN.arrdata and nkids(n) =? 1 {
+            fact_capture(kid(n 0) @s);
+            return fact_fresh(@s ntype(n))
+        }
+        if id =? IN.setlen {
+            let size=fact_capture(kid(n 1) @s)
+            let route=fact_route(kid(n 0) @s)
+            let fresh=fact_new(@s FactBound() FactTerm(type=ntype(kid(n 0))))
+            # Only the compiler's private dotted output is known to have just
+            # been allocated and reserved. An arbitrary user call may detach
+            # a shared array and lose its spare capacity before this write.
+            if has_flag(n NF_PRIVATE_SETLEN) and s.projections.length <? FACT_CAP {
+                fact_add_projection(@s FactProjection(fresh (-1) false size))
+            }
+            fact_store_route(@s route fresh n true)
+            return fact_fresh(@s ntype(n))
+        }
+        if id =? IN.lend {
+            let extra=fact_capture(kid(n 1) @s)
+            let base=fact_capture(kid(n 0) @s)
+            let length=fact_project(@s base (-1) false T_INT)
+            # (typed by the reservation: the `$lend` block itself is not an integer)
+            let limit=fact_arithmetic(@s kid(n 1) 'plus' length extra)
+            # (the constant first: a by-value state argument is taken before later arguments run)
+            let zero=fact_constant(@s 0)
+            if fact_speculating =? 0 and fact_compare(s 'ge' extra zero) =? 0 {
+                loan_error(n "negative reservation")
+            }
+            capture_loans[0].push(FactLoan(place_route(kid(n 0)) limit))
+            let result=fact_capture(kid(n 2) @s)
+            capture_loans[0].pop();
+            return result
+        }
+        if id =? IN.loan_length {
+            let value=fact_capture(kid(n 1) @s)
+            if fact_speculating =? 0 {
+                loop loan in fact_loans {
+                    if loan.place =? place_route(kid(n 0)) {
+                        let zero=fact_constant(@s 0)
+                        let lo=fact_compare(s 'ge' value zero)
+                        let hi=fact_compare(s 'le' value loan.capacity)
+                        if lo =? 0 or hi =? 0 {loan_error(n "set_length exceeds the reserved capacity")}
+                        if fact_policy =? 'RequireStatic' and (lo not=? 1 or hi not=? 1) {fact_unknown(n fact_bound(s value) "loan capacity")}
+                    }
+                }
+            }
+            let route=fact_route(kid(n 0) @s)
+            let fresh=fact_new(@s FactBound() FactTerm(type=ntype(kid(n 0))))
+            fact_add_projection(@s FactProjection(fresh (-1) false value))
+            fact_store_route(@s route fresh n)
+            return 0
+        }
+        if id =? IN.loan_address or id =? IN.loan_load or id =? IN.loan_store {
+            # Raw writes invalidate element facts; no address becomes evidence.
+            if id =? IN.loan_store {fact_forget(@s n 'write' true)}
+            return fact_fresh(@s ntype(n))
+        }
+        # (a float square root, rounding, min/max or vector constructor reads
+        # its operands and writes nothing)
+        if fact_pure_intrinsic(id) {
+            loop j in [CaptureWord(0)..nkids(n)) {fact_capture(kid(n j) @s);}
+            return fact_fresh(@s ntype(n))
+        }
+        # (`bytes(text)`, which `text as array<uint8>` is: the text's byte view)
+        if id =? IN.to_bytes and nkids(n) =? 1 and tkind(ntype(kid(n 0))) =? 'str_' {return fact_byte_view(@s fact_capture(kid(n 0) @s))}
+        if id =? IN.len {
+            let base=fact_capture(kid(n 0) @s)
+            let t=fact_type(ntype(kid(n 0)))
+            if types.ptr[t].kind =? 'fixed' {return fact_constant(@s fixed_len(t))}
+            return fact_project(@s base (-1) false T_INT)
+        }
+        if id =? IN.push or id =? IN.pop or id =? IN.clear or id =? IN.reserve or id =? IN.insert or id =? IN.remove {
+            let a=kid(n 0)
+            # Intrinsics lower value/selector operands before reacquiring the
+            # receiver. Insertion evaluates its position before its value.
+            let position:CaptureWord=0
+            loop i in [CaptureWord(1)..nkids(n)) {
+                let captured=fact_capture(kid(n i) @s)
+                if i =? 1 or id not=? IN.insert {position=captured}
+            }
+            if id =? IN.push and fact_push_frames.length >? 0 {fact_push_record(n @s position)}
+            let route=fact_route(a @s)
+            let values=fact_route_values(@s route)
+            let base=if values.length >? 0 {values[CaptureWord(values.length) - 1]} else {0}
+            let length=fact_project(@s base (-1) false T_INT)
+            if id =? IN.reserve {return 0}
+            if (id =? IN.pop or id =? IN.remove) and fact_speculating =? 0 and (fact_policy =? 'RequireStatic' or fact_query) {fact_removal(n @s position length)}
+            let fresh=fact_new(@s FactBound() FactTerm(type=ntype(a)))
+            let result:CaptureWord=0
+            let plain=ownership_decls.length =? 0 or not ownership_fact_type(ntype(a))
+            if plain and id =? IN.pop {
+                let last=fact_arithmetic(@s a 'minus' length fact_constant(@s 1))
+                result=fact_project(@s base last true ntype(n))
+            }
+            let size=fact_new(@s FactBound(0 fact_length_max() reason='write' witness=n))
+            if id =? IN.clear {size=fact_constant(@s 0)}
+            else {
+                let old=fact_bound(s length)
+                let delta=if id =? IN.push or id =? IN.insert {1} else {-1}
+                if old.lo >=? 0 and (delta <? 0 or old.hi <? FACT_MAX) {
+                    size=fact_new(@s FactBound(max(0 CaptureWord(old.lo) + delta) min(fact_length_max() max(0 CaptureWord(old.hi) + delta))))
+                }
+                # (the new length is the old one plus or minus one exactly: a
+                # row where an interval cannot say it (`let i=xs.length`,
+                # `xs.push(v)`, `return i` below the new length), outside
+                # loops, and for a removal in them, which an insertion can undo)
+                # (and in a run changing a record's tied fields, which its end checks together)
+                if old.lo not=? old.hi and (fact_loops.length =? 0 or delta <? 0 or fact_pair_transient) {
+                    fact_difference(@s size length delta n)
+                    fact_difference(@s length size (-delta) n)
+                }
+                # (in a loop, an insertion's row only says it grew: a head keeps a length the backedge
+                # holds at least at entry's, fact_loop_shape)
+                else if old.lo not=? old.hi and delta >? 0 and fact_incident(s length) >=? 0 {fact_difference(@s length size 0 n)}
+                # (a sibling bound's elements stay below a length that only grew, though it was a constant)
+                else if old.lo =? old.hi and delta >? 0 and ref_self_active {fact_difference(@s length size 0 n)}
+            }
+            if plain and id =? IN.push and position not=? 0 and fact_loops.length =? 0 and tkind(fact_type(ntype(kid(n 1)))) =? 'array' {
+                let appended=fact_replace(@s base length true position ntype(a))
+                fresh=fact_replace(@s appended (-1) false size ntype(a))
+            }
+            else if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh (-1) false size))}
+            if ref_self_active and plain and (id =? IN.pop or id =? IN.remove) {fact_shrunk_elements(@s base fresh)}
+            fact_store_route(@s route fresh n true)
+            return if result not=? 0 {result} else {fact_fresh(@s ntype(n))}
+        }
+        # `xs.extend(ys)` grows by ys's length, `truncate(k)` never grows,
+        # `resize(k)` makes max(0, k): the operand first, then the receiver,
+        # as push's.
+        if id =? IN.extend or id =? IN.truncate or id =? IN.resize {
+            let operand=fact_capture(kid(n 1) @s)
+            let a=kid(n 0)
+            let route=fact_route(a @s)
+            let values=fact_route_values(@s route)
+            let base=if values.length >? 0 {values[CaptureWord(values.length) - 1]} else {0}
+            let length=fact_project(@s base (-1) false T_INT)
+            let old=fact_bound(s length)
+            let size:CaptureWord=0
+            if id =? IN.resize {size=fact_clamped(@s operand n)}
+            else if id =? IN.truncate {
+                if fact_speculating =? 0 and (fact_policy =? 'RequireStatic' or fact_query) and files[pos_file(nodes.ptr[n].pos)].is_dewy {
+                    let zero=fact_constant(@s 0)
+                    let c=fact_compare(s 'ge' operand zero)
+                    if c not=? 1 {wit_operation(n @s 'ge' wit_side(operand kid(n 1)) WitSide(zero 0 "0" false true) c "truncate's count is negative" "truncate's count is nonnegative")}
+                }
+                let count=fact_bound(s operand)
+                size=fact_new(@s FactBound(min(old.lo max(0 count.lo)) min(old.hi max(0 count.hi)) reason='write' witness=n))
+                fact_difference(@s size length 0 n)
+                # (a count known within the length is the new length exactly: `truncate(half)`)
+                if not count.wide and count.lo >=? 0 and fact_compare(s 'le' operand length) =? 1 {
+                    fact_difference(@s size operand 0 n)
+                    fact_difference(@s operand size 0 n)
+                }
+            }
+            else {
+                let ot=fact_type(ntype(kid(n 1)))
+                let added=if tkind(ot) =? 'fixed' {fact_constant(@s fixed_len(ot))} else if tkind(ot) =? 'array' {fact_project(@s operand (-1) false T_INT)} else {0}
+                let grown=if added not=? 0 {fact_bound(s added)} else {FactBound(0 fact_length_max())}
+                let lo=if old.lo >=? 0 and grown.lo >=? 0 and fact_add_fits(old.lo grown.lo) {min(CaptureWord(old.lo) + grown.lo fact_length_max())} else {0}
+                let hi=if old.hi >=? 0 and grown.hi >=? 0 and fact_add_fits(old.hi grown.hi) {min(CaptureWord(old.hi) + grown.hi fact_length_max())} else {fact_length_max()}
+                size=fact_new(@s FactBound(lo hi reason='write' witness=n))
+                fact_difference(@s length size 0 n)
+                if added not=? 0 and grown.lo =? grown.hi {
+                    fact_difference(@s size length grown.lo n)
+                    fact_difference(@s length size (-grown.lo) n)
+                }
+                # (an empty receiver, as `[s...]`'s: the new length is the operand's)
+                else if added not=? 0 and old.lo =? 0 and old.hi =? 0 {size=added}
+                # (a receiver of known length, as `[x ys...]`'s: the operand's length plus it)
+                else if added not=? 0 and not old.wide and old.lo =? old.hi and old.lo >? 0 {
+                    fact_difference(@s size added old.lo n)
+                    fact_difference(@s added size (-old.lo) n)
+                }
+            }
+            let fresh=fact_new(@s FactBound() FactTerm(type=ntype(a)))
+            if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh (-1) false size))}
+            if ref_self_active and id =? IN.truncate and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(a))) {fact_shrunk_elements(@s base fresh)}
+            # Extending an empty value copies exactly the evaluated source.
+            # Keep its key provenance and element inventory, never its mutable
+            # place or exact positions. Hooked copies retain no such evidence.
+            # O(1) indexed transfer, demanded by a later element consumer.
+            if id =? IN.extend and not old.wide and old.lo =? 0 and old.hi =? 0 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(a))) {
+                fact_keys_copy(@s operand fresh)
+                fact_permuted_elements(@s operand fresh)
+            }
+            fact_store_route(@s route fresh n true)
+            return fact_fresh(@s ntype(n))
+        }
+        if id =? IN.panic or id =? IN.unreachable {
+            # Never returns: its message is evaluated, then the path ends.
+            loop j in [CaptureWord(0)..nkids(n)) {fact_capture(kid(n j) @s);}
+            s.live=false
+            return 0
+        }
+        if id =? IN.assert and nodes.ptr[n].aux2 =? int32(RANGE_EXHAUSTION) {
+            let paths=fact_condition(kid(n 0) s)
+            if fact_speculating =? 0 {
+                capture_validated[0][n]=true
+                let proven=not paths.no.live or fact_range_assumed(n)
+                if fact_probe_on {fact_probe_record(n proven)}
+                else if not proven {
+                    if not dir_defer(n "cannot prove the open range does not exhaust its integer type" true) {wit_fail(nodes.ptr[n].pos "cannot prove the open range does not exhaust its integer type")}
+                }
+            }
+            s=paths.yes
+            return 0
+        }
+        if id =? IN.static_assert {
+            if nkids(n) =? 0 or fact_speculating >? 0 {return 0}
+            capture_validated[0][n]=true
+            capture_query[0]=true
+            let paths=fact_condition(kid(n 0) s)
+            capture_query[0]=false
+            if (not paths.yes.live or paths.no.live) and string_set_obligations.has(n) {fatal(nodes.ptr[n].pos "cannot prove this value is {dt(string_set_obligations[n])}; test it with `is?`, or read it with the literal-union type constructor");}
+            if not paths.yes.live or paths.no.live {wit_assertion(kid(n 0) (if nkids(n) >? 1 {kid(n 1)} else {0}) paths s)}
+            return 0
+        }
+        if id =? IN.assert and nodes.ptr[n].aux2 =? int32(UNPACK_OBLIGATION) and fact_speculating =? 0 and nkids(n) >? 0 {
+            # (an unpacking's or a spread's length: proven, its check goes; unproven, it stays
+            # where the scope allows a runtime check, and is an error elsewhere)
+            capture_validated[0][n]=true
+            capture_query[0]=true
+            let paths=fact_condition(kid(n 0) s)
+            capture_query[0]=false
+            if paths.yes.live and not paths.no.live {
+                nodes.ptr[n].aux=int32(int64(IN.static_assert))
+                set_list(n [])
+                return 0
+            }
+            capture_wit_obligation[0]=n
+            wit_assertion(kid(n 0) (if nkids(n) >? 1 {kid(n 1)} else {0}) paths s)
+            capture_wit_obligation[0]=0
+            s=paths.yes
+            return 0
+        }
+        if id =? IN.runtime_assert or id =? IN.assert {
+            let paths=fact_condition(kid(n 0) s)
+            if fact_speculating =? 0 and id =? IN.runtime_assert and not paths.yes.live {assertion_refuted(kid(n 0) 0)}
+            s=paths.yes
+            # Messages execute only on failure, never on this success edge.
+            return 0
+        }
+    }
+    if k =? 'call' {
+        if nodes.ptr[n].aux =? 3 {
+            # A payload-free enumeration is its ordinal, including in an
+            # explicit integer conversion. No payload expression executes.
+            if tkind(fact_type(ntype(n))) =? 'enum_' and simple_enum(fact_type(ntype(n))) {
+                let si=CaptureWord(types.ptr[fact_type(ntype(n))].st)
+                return fact_constant(@s variants.ptr[CaptureWord(structs.ptr[si].variants) + CaptureWord(nodes.ptr[n].aux2)].value n)
+            }
+            let payload=fact_capture(kid(n 0) @s)
+            if ownership_decls.length not=? 0 {payload=fact_owner_value(kid(n 0) payload @s)}
+            let value=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+            if CaptureWord(s.projections.length) + 2 <? FACT_CAP {
+                fact_add_projection(@s FactProjection(value (-3) false fact_constant(@s CaptureWord(nodes.ptr[n].aux2))))
+                fact_add_projection(@s FactProjection(value (-4) false payload))
+            }
+            return value
+        }
+        if proof_active and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 and proof_decls.has(CaptureWord(fns.ptr[CaptureWord(nodes.ptr[n].sym)].decl)) {
+            proof_call(n @s)
+            return 0
+        }
+        fact_capture(CaptureWord(nodes.ptr[n].a) @s);
+        let outer_call=fact_route_call
+        capture_route_call[0]=n
+        let sum_operand=fact_sum_operand
+        if fact_floor_call(n) =? 1 {capture_sum_operand[0]=fact_sum_source(kid(n 0))}
+        let values=fact_call_arguments(n @s)
+        capture_sum_operand[0]=sum_operand
+        capture_route_call[0]=outer_call
+        if fact_map_snapshot_call(n) {return fact_map_snapshot(n @s values[0])}
+        if fact_comprehension_sources.length >? 0 {
+            let made=fact_map_of(n @s)
+            if made not=? 0 {return made}
+        }
+        if dir_assumed_bounds_any and fact_parallel_range_call(n) {fact_parallel_count_check(n @s)}
+        if fact_parallel_array(n) {fact_parallel_record(n @s values[0])}
+        else if fact_fork_entries.length >? 0 and fact_key_callback(n) >? 0 {fact_key_record(n @s values[0])}
+        if wi_fact_calls.length >? 0 and wi_fact_calls.has(n) {wi_fact_check(n values @s)}
+        if fact_speculating =? 0 {
+            let floor_probe=fact_probe_on and nkids(n) =? 2 and (fact_floor_call(n) =? 1 or fact_floor_call(n) =? 2)
+            # (a divisor's call keeps its two operands: a wrapper takes the
+            # obligation along, expr.jo move_divisor)
+            let obligation=if values.length =? 2 {fact_divisors.get(n) ?? (if fact_rational_constructor(n) or fact_rational_divmod(n) {1} else {0})} else {0}
+            if obligation not=? 0 {
+                let proven=fact_divisor(@s n values[0] values[1] obligation =? 2)
+                if floor_probe {fact_probe_record(n proven)}
+            }
+            else if floor_probe {fact_probe_divisor(n @s values[1] kid(n 1))}
+            if values.length =? 2 and fact_power_call(n) {fact_power_check(n @s values[1] values[0])}
+            let first=fact_range_first(n true)
+            if first >=? 0 and values.length =? nkids(n) {fact_step_check(n @s values[first] values[CaptureWord(first) + 1] kid(n first) kid(n CaptureWord(first) + 1))}
+        }
+        # (a dictionary's or set's entry count is a length of its value)
+        if fact_entry_count_call(n) {return fact_project(@s values[0] (-1) false T_INT)}
+        # __bcast([n]) returns n for every integer n. Use the evaluated
+        # argument's length and element facts, including values produced by a
+        # caller, rather than the syntax of the generated dotted expression.
+        if fact_single_bcast_call(n) and values.length =? 1 and values[0] not=? 0 {
+            let count=fact_project(@s values[0] (-1) false T_INT)
+            let one=fact_constant(@s 1)
+            if fact_compare(s 'eq' count one) =? 1 {
+                let zero=fact_constant(@s 0)
+                return fact_project(@s values[0] zero true T_INT)
+            }
+        }
+        if fact_same_length_call(n) and s.projections.length <? FACT_CAP {
+            let length=if values.length =? 1 and values[0] not=? 0 {fact_project(@s values[0] (-1) false T_INT)} else {fact_length_through(kid(n 0) @s 0)}
+            if length not=? 0 {
+                let fresh=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+                fact_add_projection(@s FactProjection(fresh (-1) false length))
+                let source=if values.length =? 1 {values[0]} else {0}
+                if is_map_type(fact_type(ntype(kid(n 0)))) {
+                    let name=name_of(CaptureWord(nodes.ptr[CaptureWord(fns.ptr[CaptureWord(nodes.ptr[n].sym)].decl)].name))
+                    let kt=representation_type(struct_targ(CaptureWord(types.ptr[fact_type(ntype(kid(n 0)))].st) 0))
+                    # User equality/hash hooks need their own proof; even a
+                    # snapshot key need not compare equal to itself.
+                    if source not=? 0 and name not=? "values" and (fact_scalar(kt) or kt =? T_STR or fact_reflexive_key(kt)) and s.projections.length <? FACT_CAP {
+                        fact_add_projection(@s FactProjection(fresh FACT_KEYS_SOURCE false source))
+                        # (its key positions, which a later entry change keeps: fact_map_member)
+                        if fact_name_vals =? 0 {capture_name_vals[0]=intern("vals")}
+                        fact_project(@s source FACT_MAP_POSITIONS false T_INT);
+                    }
+                }
+                else {fact_keys_copy(@s source fresh)}
+                return fresh
+            }
+        }
+        let endpoint=fact_endpoint_call(n)
+        if endpoint not=? 0 {return fact_endpoint(n @s values[0] endpoint)}
+        if fact_chosen_call(n) and values.length >=? 1 {return fact_chosen(n @s values[0])}
+        if fact_affix_call(n) {
+            let length=fact_project(@s values[0] (-1) false T_INT)
+            let pattern=fact_project(@s values[1] (-1) false T_INT)
+            return fact_new(@s fact_domain(T_BOOL) FactTerm(a=length b=pattern origin=n))
+        }
+        if fact_empty_array_call(n) {
+            let t=fact_type(ntype(kid(n 0)))
+            let length=if types.ptr[t].kind =? 'fixed' {fact_constant(@s fixed_len(t))} else {fact_project(@s values[0] (-1) false T_INT)}
+            return fact_new(@s fact_domain(T_BOOL) FactTerm('eq' length fact_constant(@s 0)))
+        }
+        let nd=fact_nd_call(n)
+        if nd not=? 0 {return fact_nd_capture(n @s values nd)}
+        let array=fact_array_call(n)
+        if array not=? 0 {fact_array_call_check(n @s values array)}
+        # (a dotted expression's common length: its operands', proven equal)
+        if array =? 40 {
+            let common=fact_bcast_common(n @s)
+            if common not=? 0 {return common}
+        }
+        if fact_gpu_index_call(n) {fact_gpu_index_check(n @s values)}
+        if fact_nonempty_call(n) {fact_nonempty_check(n @s values)}
+        else if fact_exact_sum_call(n) {fact_exact_sum_check(n @s values)}
+        if array =? 4 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(kid(n 0)))) {
+            let route=fact_receiver_route(n @s)
+            let held=fact_route_values(@s route)
+            let base=if held.length >? 0 {held[CaptureWord(held.length) - 1]} else {values[0]}
+            let t=ntype(kid(n 0))
+            let element=telem(fact_type(t))
+            let left=fact_project(@s base values[1] true element)
+            let right=fact_project(@s base values[2] true element)
+            let first=fact_replace(@s base values[1] true right t)
+            let fresh=fact_replace(@s first values[2] true left t)
+            # (the second store keeps the first only for distinct positions,
+            # but a swap's first position holds the other's old element even
+            # when both are one: then the two elements are one value)
+            let kept=false
+            let pi=fact_projection_first(s fresh)
+            loop pi >=? 0 and not kept {
+                kept=s.projections[pi].element and s.projections[pi].selector =? values[1]
+                pi=fact_projection_after(s pi)
+            }
+            if not kept and s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh values[1] true right))}
+            fact_store_route(@s route fresh n true)
+            return 0
+        }
+        if array =? 6 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(kid(n 0)))) {
+            let route=fact_receiver_route(n @s)
+            let p=fact_place(route.root)
+            let callback=nkids(n) >? 1 and is_fn_type(ntype(kid(n 1)))
+            let element=fact_type(telem(fact_type(ntype(kid(n 0)))))
+            let plain=not callback and (fact_scalar(element) or element =? T_STR)
+            let reverse=name_of(CaptureWord(nodes.ptr[CaptureWord(fns.ptr[CaptureWord(nodes.ptr[n].sym)].decl)].name)) =? "reverse"
+            # (an exposed receiver keeps its length too when the callback
+            # writes nothing: only the permutation itself changes it)
+            let unexposed=p.declaration not=? 0 and (not fact_exposed(p) or callback and fact_callback_writes_nothing(kid(n 1)))
+            if p.declaration not=? 0 and (plain or reverse or unexposed) {
+                let held=fact_route_values(@s route)
+                let length=fact_project(@s held[CaptureWord(held.length) - 1] (-1) false T_INT)
+                fact_path_call_effects(n @s)
+                let fresh=fact_new(@s FactBound() FactTerm(type=ntype(kid(n 0))))
+                fact_add_projection(@s FactProjection(fresh (-1) false length))
+                # A callback receives scalar/string values, not their slots.
+                # With an unexposed receiver, or one the callback cannot
+                # write (fact_callback_writes_nothing), it cannot change the inventory.
+                # Its ordinary effects above still invalidate other roots; key
+                # provenance names the old dictionary, never its replacement.
+                if plain or reverse or callback and (fact_scalar(element) or element =? T_STR) and unexposed {
+                    fact_keys_copy(@s held[CaptureWord(held.length) - 1] fresh)
+                    fact_permuted_elements(@s held[CaptureWord(held.length) - 1] fresh)
+                }
+                fact_store_route(@s route fresh n)
+                return 0
+            }
+        }
+        if array =? 5 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(kid(n 0)))) {
+            let route=fact_receiver_route(n @s)
+            let held=fact_route_values(@s route)
+            let length=fact_project(@s (if held.length >? 0 {held[CaptureWord(held.length) - 1]} else {values[0]}) (-1) false T_INT)
+            let old=fact_bound(s length)
+            let fresh=fact_new(@s FactBound() FactTerm(type=ntype(kid(n 0))))
+            let size=fact_new(@s FactBound(min(fact_length_max() CaptureWord(old.lo) + 1) fact_length_max()))
+            if old.hi <? fact_length_max() {fact_set_bound(@s size FactBound(CaptureWord(old.lo) + 1 CaptureWord(old.hi) + 1))}
+            # (one longer exactly: `xs.insert(xs.pop() 0)` keeps the length)
+            if old.lo not=? old.hi {
+                fact_difference(@s size length 1 n)
+                fact_difference(@s length size (-1) n)
+            }
+            fact_add_projection(@s FactProjection(fresh (-1) false size))
+            fact_store_route(@s route fresh n)
+            return 0
+        }
+        if array =? 30 or array =? 31 {
+            # (a slice assignment changes elements, not the length)
+            let a=kid(n 0)
+            let route=fact_receiver_route(n @s)
+            let held=fact_route_values(@s route)
+            let length=fact_project(@s (if held.length >? 0 {held[CaptureWord(held.length) - 1]} else {values[0]}) (-1) false T_INT)
+            let fresh=fact_new(@s FactBound() FactTerm(type=ntype(a)))
+            if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh (-1) false length))}
+            fact_store_route(@s route fresh n true)
+            return fact_fresh(@s ntype(n))
+        }
+        let pool=if fact_policy =? 'RequireStatic' or fact_query or fact_probe_on {fact_pool_call(n)} else {0}
+        if pool not=? 0 {return fact_pool_capture(n @s values pool)}
+        if (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) and fact_map_insert_call(n) {
+            let stored=fact_map_store(n @s values fact_map_receiver(@s n values[0]))
+            if stored not=? 0 {return stored}
+        }
+        if ref_self_active and (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) and values.length >=? 2 and values[0] not=? 0 and fact_projection_find(s values[0] FACT_SIB_BOUND false) >=? 0 {
+            let bounded=fact_map_bounded_call(n)
+            if bounded not=? 0 and (bounded =? 1 or values.length =? 3) {
+                let result=fact_map_bounded(n @s values bounded)
+                if result not=? 0 {return result}
+            }
+        }
+        if ref_self_active and (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) and fact_map_clear_call(n) and s.projections.length <? FACT_CAP and fact_map_clear(n @s) {return 0}
+        let map=if fact_policy =? 'RequireStatic' or fact_query or fact_probe_on {fact_map_call(n)} else {0}
+        if map >=? 2 and map <=? 4 {fact_map_check(n @s values)}
+        if map not=? 0 {
+            let before=fact_map_receiver(@s n values[0])
+            # (asking for a builtin key, or for its entry's position, reads the
+            # dictionary and nothing else: an exposed one is not forgotten, as
+            # its summary, through the hashing's generic calls, would have it)
+            let kt=representation_type(ntype(kid(n 1)))
+            let builtin=fact_scalar(kt) or kt =? T_STR
+            if map =? 5 and fact_map_store_call(n) {
+                let stored=fact_map_store(n @s values before)
+                if stored not=? 0 {return stored}
+            }
+            if map =? 6 and builtin and fact_map_optional(n) {
+                let result=fact_fresh(@s ntype(n))
+                let member=fact_map_member(@s n values[0] values[1])
+                if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(result (-3) false member))}
+                if ref_self_active {ref_sib_map_read(@s values[0] result n)}
+                return result
+            }
+            if map >? 3 or not builtin {fact_path_call_effects(n @s)}
+            if map =? 1 {return fact_map_member(@s n before values[1])}
+            # (the entry, of the dictionary's value after the hashing's calls)
+            if map =? 2 {
+                let entry=fact_map_entry(@s n (if builtin {before} else {fact_map_receiver(@s n values[0])}) values[1])
+                if ref_self_active {ref_sib_map_read(@s values[0] entry n)}
+                return entry
+            }
+            # (the entry is there now, in d's value after the change, and so is
+            # every key known there before: a store removes none)
+            if map =? 3 or map =? 5 {
+                let after=fact_map_receiver(@s n values[0])
+                if after not=? before {
+                    let keys:array<int64>=[]
+                    let i=fact_projection_first(s before)
+                    loop i >=? 0 {
+                        let q=s.projections[i]
+                        i=fact_projection_after(s i)
+                        if q.element and fact_truth(s q.value) =? 1 {keys.push(q.selector)}
+                    }
+                    loop key in keys {fact_assume(@s fact_project(@s after key true T_BOOL) true)}
+                }
+                fact_assume(@s fact_map_member(@s n after values[1]) true)
+                if map =? 3 {return fact_map_position(@s n after values[1])}
+            }
+            let other=fact_new(@s fact_domain(ntype(n) 'missing' n) FactTerm(type=ntype(n)))
+            if ref_self_active and (map =? 4 or map =? 6) {ref_sib_map_read(@s values[0] other n)}
+            return other
+        }
+        let zero_test=fact_rational_zero_test(n)
+        if zero_test >=? 0 and values[zero_test] not=? 0 {
+            let numerator=fact_project(@s values[zero_test] intern("numerator") false T_MATH_INT)
+            let nothing=fact_constant(@s 0)
+            if CaptureWord(nodes.ptr[CaptureWord(fns.ptr[CaptureWord(nodes.ptr[n].sym)].decl)].name) =? fact_name_rational_lt {
+                return fact_new(@s fact_domain(T_BOOL) if zero_test =? 0 {FactTerm('lt' numerator nothing)} else {FactTerm('lt' nothing numerator)})
+            }
+            return fact_new(@s fact_domain(T_BOOL) FactTerm('eq' numerator nothing))
+        }
+        if values.length =? 2 and values[0] not=? 0 and values[1] not=? 0 and fact_rational_constructor(n) {return fact_rational_made(@s n values[0] values[1])}
+        if values.length =? 1 and values[0] not=? 0 and fact_rational_promotion(n) {
+            let result=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+            if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(result intern("numerator") false values[0]))}
+            return result
+        }
+        let string=fact_string_call(n)
+        if string =? 4 {return fact_byte_slice(n @s values)}
+        if string =? 5 {fact_find_start(n @s values[2] fact_project(@s values[0] (-1) false T_INT))}
+        else if string not=? 0 {
+            let length=fact_project(@s values[0] (-1) false T_INT)
+            if string =? 1 {return length}
+            if string =? 3 {return fact_string_slice(n @s values length)}
+            fact_string_index(n @s values[1] length)
+            return fact_new(@s fact_domain(ntype(n)) FactTerm(type=ntype(n)))
+        }
+        if nodes.ptr[n].aux =? 2 {
+            let result=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+            let si=CaptureWord(types.ptr[fact_type(ntype(n))].st)
+            loop i in CaptureWord(0).. and captured in values {
+                let name=CaptureWord(fields.ptr[CaptureWord(structs.ptr[si].fields) + i].name)
+                let value=if kid(n i) =? 0 {fact_constant(@s 0)} else {captured}
+                if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(result name false value))}
+            }
+            # (a new heap holds as many entries as its items: none unless given)
+            if fact_heap_type(ntype(n)) and values.length >=? 1 and s.projections.length <? FACT_CAP {
+                let items=if kid(n 0) =? 0 {fact_constant(@s 0)} else {fact_project(@s values[0] (-1) false T_INT)}
+                fact_add_projection(@s FactProjection(result (-1) false items))
+            }
+            return result
+        }
+        if ntype(n) =? T_BOOL and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 {
+            let predicate=fact_predicate_summary(CaptureWord(nodes.ptr[n].sym))
+            if predicate not=? 0 {
+                let value=fact_predicate_apply(predicate values @s)
+                if value not=? 0 {return value}
+            }
+        }
+        let gcd_nonzero=false
+        if values.length =? 2 and fact_integer_gcd_call(n) {
+            let zero=fact_constant(@s 0)
+            gcd_nonzero=fact_compare(s 'ne' values[0] zero) =? 1 or fact_compare(s 'ne' values[1] zero) =? 1
+        }
+        # (an exact `int` power returns only for a nonnegative exponent: a base
+        # of at least one gives at least one, a nonzero base a nonzero power)
+        let power_base=FactBound(0 0)
+        if values.length =? 2 and fact_power_call(n) and fact_type(ntype(n)) =? T_MATH_INT {power_base=fact_bound(s values[0])}
+        # (a heap's push or pop changes its entry count by exactly one: its place
+        # holds a new value with that count, as an array's `insert` does)
+        let heap=fact_heap_call(n)
+        let heap_route=FactRoute()
+        let heap_length:CaptureWord=0
+        if heap not=? 0 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(kid(n 0)))) {
+            heap_route=fact_receiver_route(n @s)
+            if heap_route.root not=? 0 and fact_place(heap_route.root).declaration not=? 0 and not fact_exposed(fact_place(heap_route.root)) {
+                let held=fact_route_values(@s heap_route)
+                heap_length=fact_project(@s held[CaptureWord(held.length) - 1] (-1) false T_INT)
+            }
+        }
+        if not fact_search_reads_only(n) {fact_path_call_effects(n @s)}
+        if heap_length not=? 0 {
+            let fresh=fact_new(@s FactBound() FactTerm(type=ntype(kid(n 0))))
+            let delta=if heap =? 1 {1} else {-1}
+            if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh (-1) false fact_heap_length(@s heap_length delta n)))}
+            fact_store_route(@s heap_route fresh n)
+        }
+        let floor=fact_floor_call(n)
+        if floor not=? 0 and fact_type(ntype(n)) =? T_U64 {return fact_floor_unsigned(@s n floor values[0] values[1])}
+        if floor not=? 0 {return fact_floor(@s n floor values[0] values[1] true)}
+        # (the prelude's `mod(a b)`, floored: the same remainder as `a % b`)
+        if fact_mod_call(n) {return fact_floor(@s n 2 values[0] values[1] true)}
+        if fact_extremum_call(n) {return fact_extremum(@s n values[0] values[1] fact_prelude_call(n "min"))}
+        if fact_ends_path(n) {s.live=false}
+        let result=fact_new(@s fact_domain(ntype(n) 'missing' n) FactTerm(type=ntype(n)))
+        # gcd(a, b) is zero exactly when both inputs are zero. Evaluate this
+        # reviewed prelude contract only at a demanded call; O(1) fact queries.
+        if result not=? 0 and gcd_nonzero {
+            let bound=fact_bound(s result)
+            bound.nz=true
+            fact_set_bound(@s result bound)
+        }
+        if result not=? 0 and not power_base.wide and (power_base.nz or power_base.lo >? 0 or power_base.hi <? 0) {
+            let bound=fact_bound(s result)
+            bound.nz=true
+            if power_base.lo >=? 1 {bound.lo=max(bound.lo 1)}
+            fact_set_bound(@s result bound)
+        }
+        if result not=? 0 and fact_constructor_calls.has(n) {
+            capture_terms[0][result].origin=n
+            capture_constructor_actuals[0][result]=values
+        }
+        if nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 {
+            let f=CaptureWord(nodes.ptr[n].sym)
+            let entry=values
+            loop i in [CaptureWord(0)..values.length) {
+                if i <? fns[f].params.length and CaptureWord(locals.ptr[fns[f].params[i]].flags) & LF_MUTPARAM not=? 0 {values[i]=fact_after_call(n kid(n i) @s)}
+            }
+            ref_assume(CaptureWord(fns.ptr[f].ret) result values @s)
+            ref_arm_publish(f result values @s)
+            if fact_search_call(n) {fact_search_result(n result entry @s)}
+            if nkids(n) =? 1 or nkids(n) =? 3 {fact_regex_search_result(n result entry @s)}
+            if result_active {result_publish(f result values @s)}
+            # (reviewed prelude contracts: `parallel_range(n f)` has max(0, n)
+            # results, `parallel_map(xs f)` one per element)
+            if nkids(n) =? 2 and tkind(fact_type(ntype(n))) =? 'array' {
+                if fact_library_call(n "parallel_range") and fact_scalar(ntype(kid(n 0))) {
+                    fact_add_projection(@s FactProjection(result (-1) false fact_clamped(@s entry[0] n)))
+                }
+                else if fact_library_call(n "parallel_map") and tkind(fact_type(ntype(kid(n 0)))) =? 'array' {
+                    fact_add_projection(@s FactProjection(result (-1) false fact_project(@s entry[0] (-1) false T_INT)))
+                }
+            }
+            if fact_copy_length_call(n) and s.projections.length <? FACT_CAP {
+                fact_add_projection(@s FactProjection(result (-1) false fact_project(@s entry[0] (-1) false T_INT)))
+                fact_keys_copy(@s entry[0] result)
+                fact_permuted_elements(@s entry[0] result)
+            }
+            if fact_words_call(n) and s.projections.length <? FACT_CAP {
+                fact_add_projection(@s FactProjection(result FACT_ELEMENT_LENGTH false fact_new(@s FactBound(1 fact_length_max()))))
+            }
+            if fact_lines_call(n) {
+                let source_length=fact_project(@s entry[0] (-1) false T_INT)
+                let source=fact_bound(s source_length)
+                let length=fact_project(@s result (-1) false T_INT)
+                let bound=fact_bound(s length)
+                if source.lo >? 0 {bound.lo=max(1 bound.lo)}
+                if source.hi =? 0 {bound.hi=0}
+                fact_set_bound(@s length bound)
+            }
+            if fact_split_call(n) {
+                let separator=fact_project(@s entry[1] (-1) false T_INT)
+                if fact_bound(s separator).lo >? 0 {
+                    let length=fact_project(@s result (-1) false T_INT)
+                    let bound=fact_bound(s length)
+                    bound.lo=max(1 bound.lo)
+                    fact_set_bound(@s length bound)
+                }
+            }
+            let counted=fact_count_call(n)
+            if counted {
+                let length=fact_project(@s entry[0] (-1) false T_INT)
+                fact_set_bound(@s result FactBound(0 fact_bound(s length).hi))
+                fact_difference(@s result length 0 n)
+            }
+            let summary=if counted {FactSummary()} else {fact_summary(f)}
+            if summary.seen {
+                fact_summary_kept_upper(n f entry summary @s)
+                let payload=fact_summary_payload(fact_type(CaptureWord(fns.ptr[f].ret)))
+                if payload not=? 0 {fact_summary_payload_publish(f result entry payload summary @s)}
+                else if tkind(fact_type(CaptureWord(fns.ptr[f].ret))) =? 'array' {
+                    let length=fact_project(@s result (-1) false T_INT)
+                    let b=fact_bound(s length)
+                    fact_set_bound(@s length FactBound(max(b.lo summary.length.lo) min(b.hi summary.length.hi)))
+                    if summary.same >=? 0 and summary.same <? entry.length {
+                        let at=fact_type(ntype(kid(n summary.same)))
+                        let other=if tkind(at) =? 'fixed' {fact_constant(@s fixed_len(at))} else if fact_scalar(at) {fact_clamped(@s entry[summary.same] n)} else {fact_project(@s entry[summary.same] (-1) false T_INT)}
+                        fact_difference(@s length other summary.delta n)
+                        fact_difference(@s other length (-summary.delta) n)
+                        let o=fact_bound(s other)
+                        b=fact_bound(s length)
+                        let lo=if o.lo >=? 0 and fact_add_fits(o.lo summary.delta) {max(b.lo CaptureWord(o.lo) + summary.delta)} else {b.lo}
+                        let hi=if o.hi <=? fact_length_max() and fact_add_fits(o.hi summary.delta) {min(b.hi CaptureWord(o.hi) + summary.delta)} else {b.hi}
+                        fact_set_bound(@s length FactBound(lo hi))
+                    }
+                }
+                else {
+                    let b=fact_bound(s result)
+                    fact_set_bound(@s result FactBound(max(b.lo summary.value.lo) min(b.hi summary.value.hi) b.nz or summary.value.nz))
+                    if summary.host and result not=? 0 {capture_terms[0][result].type=T_INT}
+                    if summary.upper >=? 0 and summary.upper <? entry.length {
+                        let other=fact_summary_length(@s entry[summary.upper] summary.upper_field f summary.upper)
+                        fact_difference(@s result other summary.upper_delta n)
+                    }
+                    if summary.global_post >? 0 {
+                        # Effects have run. Relate to this exit snapshot only;
+                        # subsequent writes invalidate it by ordinary routing.
+                        let g=summary.global_post
+                        let place=PlaceIdentity('global' 0 g)
+                        let binding_index=fact_binding(s place)
+                        let after:CaptureWord=0
+                        if binding_index >=? 0 {after=s.bindings[binding_index].value}
+                        else {
+                            after=fact_new(@s FactBound() FactTerm(type=CaptureWord(globals.ptr[g].type)))
+                            fact_bind(@s place after)
+                        }
+                        fact_difference(@s result fact_project(@s after (-1) false T_INT) (-1) n)
+                    }
+                    if summary.post >=? 0 {
+                        let after=fact_summary_actual(n summary.post @s)
+                        if after not=? 0 {
+                            let length=fact_summary_length(@s after summary.post_field f summary.post)
+                            fact_difference(@s result length (-1) n)
+                        }
+                    }
+                }
+            }
+        }
+        else if nodes.ptr[n].aux =? 1 {
+            let ft=prune(ntype(CaptureWord(nodes.ptr[n].a)))
+            if types.ptr[ft].kind =? 'fn_' {ref_assume(CaptureWord(types.ptr[ft].elem) result values @s)}
+        }
+        return result
+    }
+    if k =? 'coalesce' or k =? 'iflet' {
+        # The value path knows the tag and binds the payload; the other path
+        # knows none. Each path's own writes invalidate as anywhere else.
+        let value=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+        let yes=s
+        fact_tag(@yes value 1 true)
+        fact_tag(@s value 1 false)
+        let y:CaptureWord=0
+        if k =? 'coalesce' {
+            # The present arm retains the optional's payload contract even if
+            # the fallback widens the expression's result type. O(1), demanded
+            # only while transferring this coalesce; no extra body walk.
+            let optional=fact_type(ntype(CaptureWord(nodes.ptr[n].a)))
+            let payload=if tkind(optional) =? 'opt' {telem(optional)} else {ntype(n)}
+            y=if nodes.ptr[n].aux =? 1 {value} else {fact_project(@yes value (-4) false payload)}
+        }
+        else {
+            let l=CaptureWord(nodes.ptr[n].sym)
+            if l not=? 0 {fact_bind(@yes PlaceIdentity('local' CaptureWord(locals.ptr[l].owner) l) fact_project(@yes value (-4) false CaptureWord(locals.ptr[l].type)))}
+            y=fact_capture(CaptureWord(nodes.ptr[n].b) @yes)
+        }
+        let z=fact_capture((if k =? 'coalesce' {CaptureWord(nodes.ptr[n].b)} else {CaptureWord(nodes.ptr[n].c)}) @s)
+        let result=fact_hull(fact_bound(yes y) fact_bound(s z) n)
+        let hull=fact_hull_type(ntype(n) yes y s z)
+        if not yes.live {result=fact_bound(s z); hull=fact_terms[z].type}
+        if not s.live {result=fact_bound(yes y); hull=fact_terms[y].type}
+        let no=s
+        s=fact_join(yes no n)
+        # (an owned binding ends here; its hook may write exposed storage)
+        if k =? 'iflet' and ownership_fact_cleanup and s.live and ownership_fact_type(ntype(CaptureWord(nodes.ptr[n].a))) {fact_drop_forget(@s n fact_drop_footprint(ntype(CaptureWord(nodes.ptr[n].a))))}
+        let joined=fact_new(@s result FactTerm(type=hull))
+        if mark & FACT_VALUE not=? 0 {fact_join_length(@s joined yes y no z n)}
+        return joined
+    }
+    if k =? 'map_lit' {
+        # (each entry is inserted by a call: an unknown callee's effects)
+        let keys:array<[int64 int64]>=[]
+        loop j in [CaptureWord(0)..nkids(n)) {
+            let p=kid(n j)
+            keys.push([CaptureWord(nodes.ptr[p].a) fact_capture(CaptureWord(nodes.ptr[p].a) @s)])
+            fact_capture(CaptureWord(nodes.ptr[p].b) @s);
+            fact_forget(@s n 'call')
+        }
+        let result=fact_fresh(@s ntype(n))
+        # (every key written is in it: fact_map_check)
+        if is_map_type(representation_type(ntype(n))) {
+            loop key in keys {fact_assume(@s fact_project(@s result fact_map_key(@s key[0] key[1]) true T_BOOL) true)}
+        }
+        return result
+    }
+    if k =? 'match_' {
+        # Arms are tried in order: each sees its predecessors' pattern
+        # operands and failed tags, and a matched arm knows its tag.
+        let subject=CaptureWord(nodes.ptr[n].a)
+        let value=fact_capture(subject @s)
+        let hidden=CaptureWord(nodes.ptr[n].sym)
+        if hidden not=? 0 {fact_bind(@s PlaceIdentity('local' CaptureWord(locals.ptr[hidden].owner) hidden) value)}
+        let exits=FactState(live=false)
+        let result=FactBound()
+        let first=true
+        loop j in [CaptureWord(0)..nkids(n)) {
+            let arm=kid(n j)
+            let wild=false
+            let low:CaptureWord=0
+            let high:CaptureWord=0
+            loop ki in [CaptureWord(0)..nkids(arm)) {
+                let p=kid(arm ki)
+                if nodes.ptr[p].kind =? 'pwild' {wild=true}
+                if nodes.ptr[p].kind =? 'plit' or nodes.ptr[p].kind =? 'prange' {low=fact_capture(CaptureWord(nodes.ptr[p].a) @s)}
+                if nodes.ptr[p].kind =? 'prange' {high=fact_capture(CaptureWord(nodes.ptr[p].b) @s)}
+            }
+            let path=s
+            # (a range arm, as a guard `k:int64<0 <=? k <? 3>` becomes: its bounds hold in the body)
+            if nkids(arm) =? 1 and nodes.ptr[kid(arm 0)].kind =? 'prange' and fact_scalar(ntype(subject)) and is_int(fact_type(ntype(subject))) and types.ptr[fact_type(ntype(subject))].sign {
+                fact_assume(@path fact_new(@path fact_domain(T_BOOL) FactTerm('le' low value)) true)
+                let upper=if has_flag(kid(arm 0) NF_INCLUSIVE) {Tok.le} else {Tok.lt}
+                fact_assume(@path fact_new(@path fact_domain(T_BOOL) FactTerm(upper value high)) true)
+            }
+            let wanted=if nkids(arm) =? 1 {fact_pattern_tag(kid(arm 0) prune(ntype(subject)))} else {-1}
+            if wanted >=? 0 {
+                fact_tag(@path value wanted true)
+                # (a literal can fail on its own member)
+                if nodes.ptr[kid(arm 0)].kind not=? 'plit' or not is_union(prune(ntype(subject))) {fact_tag(@s value wanted false)}
+            }
+            let r=fact_capture(CaptureWord(nodes.ptr[arm].b) @path)
+            if path.live {
+                result=if first {fact_bound(path r)} else {fact_hull(result fact_bound(path r) n)}
+                first=false
+            }
+            exits=fact_join(exits path n)
+            if wild {s.live=false}
+        }
+        # Without a value, no arm matching falls through; with one, it panics.
+        let valued=not has_flag(n NF_STMT) and vc(ntype(n)) not=? VC_VOID and ntype(n) not=? T_NEVER
+        if not valued {exits=fact_join(exits s n)}
+        s=exits
+        # (an arm's owned binding, or the subject the match owns, ends here)
+        if ownership_fact_cleanup and s.live and ownership_fact_type(ntype(subject)) {fact_drop_forget(@s n fact_drop_footprint(ntype(subject)))}
+        return fact_new(@s if first {fact_domain(ntype(n))} else {result})
+    }
+    # (a partial application's hole is a parameter of the function it makes)
+    if k =? 'hole' {return 0}
+    if k =? 'field' and nodes.ptr[n].aux =? -3 {
+        # (a variant's payload field, bound by a match arm)
+        fact_capture(CaptureWord(nodes.ptr[n].a) @s);
+        return fact_fresh(@s ntype(n))
+    }
+    if k =? 'field' and nodes.ptr[n].aux =? -4 and is_vec(ntype(CaptureWord(nodes.ptr[n].a))) {
+        # (a vector lane or swizzle read, `p.x`: reads its vector, writes
+        # nothing. One lane is a projection of the vector's value, as a
+        # field is, so `id.x` read twice is one value; a swizzle stays fresh)
+        let base=fact_capture(CaptureWord(nodes.ptr[n].a) @s)
+        if base not=? 0 and not is_vec(ntype(n)) {return fact_project(@s base CaptureWord(nodes.ptr[n].name) false ntype(n))}
+        return fact_fresh(@s ntype(n))
+    }
+    # Opaque forms cannot export facts; evaluate each child source_type top so control
+    # alternatives, implicit hooks and raw aliases cannot mint stale evidence.
+    fact_forget(@s n 'unsupported' true)
+    let mask=isolation_children(k)
+    if mask & 1 not=? 0 and mask >=? 0 {fact_capture(CaptureWord(nodes.ptr[n].a) @s);}
+    if mask & 2 not=? 0 and mask >=? 0 {fact_capture(CaptureWord(nodes.ptr[n].b) @s);}
+    if mask & 4 not=? 0 and mask >=? 0 {fact_capture(CaptureWord(nodes.ptr[n].c) @s);}
+    if mask & 16 not=? 0 and mask >=? 0 {
+        loop j in [CaptureWord(0)..nkids(n)) {
+            let c=kid(n j)
+            fact_forget(@s n 'unsupported' true)
+            fact_capture(c @s);
+        }
+    }
+    fact_forget(@s n 'unsupported' true)
+    return fact_new(@s FactBound(reason='unsupported' witness=n))
+}
