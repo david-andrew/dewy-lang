@@ -58,8 +58,12 @@ parallel_map[T, U] = (xs: T[], f: (T) -> U) -> U[]:
     out: U[]
     n = xs.len()
     if n == 0: return out
-    out.resize(n)
-    op = data(out)
+    # (fill-once output: every slot is written below before out is a value, so refined
+    # results need no zeroed inhabitants)
+    out.reserve(n)
+    __set_len(out, n)
+    # (stores only f's results, already of the element type)
+    op = __permutable_data(out)
     # (only read: a stored element keeps its refinement)
     ip = __permutable_data(xs)
     __parallel_run(n, (lo: int, hi: int):
@@ -73,7 +77,8 @@ parallel_update[T] = (xs: mut T[], f: (T) -> T):
     n = xs.len()
     if n == 0: return
     xs.reserve(n)                      # make the storage unique before sharing it
-    p = data(xs)
+    # (reads elements and stores f's results, already of the element type)
+    p = __permutable_data(xs)
     __parallel_run(n, (lo: int, hi: int):
         loop i in [lo..hi): p[i] = f(p[i])
     )
@@ -83,8 +88,11 @@ parallel_update[T] = (xs: mut T[], f: (T) -> T):
 parallel_range[U] = (n: int, f: (int) -> U) -> U[]:
     out: U[]
     if n <= 0: return out
-    out.resize(n)
-    op = data(out)
+    # (fill-once output, as parallel_map's)
+    out.reserve(n)
+    __set_len(out, n)
+    # (stores only f's results, already of the element type)
+    op = __permutable_data(out)
     __parallel_run(n, (lo: int, hi: int):
         loop i in [lo..hi): op[i] = f(i)
     )

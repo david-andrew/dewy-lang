@@ -4317,9 +4317,10 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         if not types[t].sign and value < 0: add_flag(n, NF_U64)
         return t
     let args = args0
-    # `__permutable_data(xs)`: data() for code that only reads elements or moves them between
-    # slots (the library's swap and reorderings, parallel kernels' inputs), so an element's
-    # refinement holds without a proof per element: refined storage is not refused
+    # `__permutable_data(xs)`: data() for code that only reads elements, moves them between
+    # slots or stores values already of the element type (the library's swap and reorderings,
+    # parallel kernels' inputs and outputs), so an element's refinement holds without a proof
+    # per element: refined storage is not refused
     permute = id == .arrdata_permute
     if permute:
         if not pos_in_lib(nodes[n].pos): fatal(nodes[n].pos, "__permutable_data is the library's")
@@ -4516,7 +4517,8 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         # Generated dotted output is private reserved storage, filled once
         # by checked element stores before it becomes a value. Its temporary
         # zeroed slots are never exposed as inhabitants of the element type.
-        private_output = id == .setlen and has_flag(n, NF_PRIVATE_SETLEN)
+        # The library's `__set_len` is its parallel kernels' fill-once output in the same way.
+        private_output = id == .setlen and (has_flag(n, NF_PRIVATE_SETLEN) or pos_in_lib(nodes[n].pos))
         if refine_active and (id == .resize or id == .setlen) and not private_output and ref_storage_contract(int(types[t].elem)):
             fatal(nodes[n].pos, "refined elements cannot be created by unchecked zero initialization")
     else if id == .task_data:

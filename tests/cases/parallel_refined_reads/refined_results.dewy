@@ -1,0 +1,21 @@
+# Parallel loops give refined results: each slot is written once with a value
+# already of the element type, so no zeroed SafePath or refined integer exists.
+const root = p"workspace"
+Item:type = [name:string file:SafePath]
+Small:type = int64<(>=? 0)>
+Tiny:type = int64<t => 0 <=? t and t <? 1000>
+
+main = () => {
+    let items:array<Item> = []
+    loop k in [0..3) {
+        let safe = root.confine(p"{root}/f{k}") ?? continue
+        items.push(Item["f{k}" safe])
+    }
+    let files = [parallel item in items item.file]
+    printl"{files}"
+    let squares:array<Small> = [parallel k in [0..4) k * k]
+    printl"{squares}"
+    let doubled:array<Tiny> = [3 1 2]
+    parallel @x in doubled { x = (x + 1) // 2 }
+    printl"{doubled}"
+}
