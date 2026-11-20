@@ -240,74 +240,11 @@ ref_projection_type = (root: int, path: int[], pos: int) -> int:
 
 
 
-ref_field_store = (statement: int, target: int) -> int:
-    lhs = ref_place_alias(int(nodes[statement].a))
-    if nodes[lhs].kind != .field: return 0
-    if ut_safe_used and ref_safe_path_ancestor(lhs): fatal(nodes[statement].pos, "a SafePath's representation cannot be mutated; replace the whole SafePath with a proven path")
-    parent = int(nodes[lhs].a)
-    t = representation_type(ntype(parent))
-    if not ref_dependent_record(t) and not ref_dependent_ancestor(parent): return 0
-    # (a field no contract mentions, in a record no contract above holds: an ordinary store)
-    if ref_dependent_record(t) and not ref_dependent_ancestor(parent) and ref_field_free(t, int(nodes[lhs].aux)): return 0
-    pos = nodes[statement].pos
-    before: int[]
-    path = index_update_path(parent)
-    # A compound read captures selectors before evaluating the RHS. A plain
-    # store evaluates its RHS first, exactly as gen_assign does.
-    compound = nodes[statement].op != i32(int(Tok.assign))
-    if compound:
-        j = path.len() - 1
-        loop j >= 0:
-            part = path[j]; j -= 1
-            if nodes[part].kind == .index and nodes[part].b != 0:
-                nodes[part].b = i32(capture_value(int(nodes[part].b), ntype(int(nodes[part].b)), before))
-    value = int(nodes[statement].b)
-    if compound: value = compound_checked(statement, copy_place(lhs), value, representation_type(target))
-    else:
-        check_expr(value, representation_type(target))
-        value = last_checked
-    coerce(value, representation_type(target))
-    value = capture_value(value, representation_type(target), before)
-    if not compound:
-        j = path.len() - 1
-        loop j >= 0:
-            part = path[j]; j -= 1
-            if nodes[part].kind == .index and nodes[part].b != 0:
-                nodes[part].b = i32(capture_value(int(nodes[part].b), ntype(int(nodes[part].b)), before))
-    snapshot = capture_value(copy_place(parent), t, before)
-    si = int(types[t].st)
-    args: int[]
-    loop i in [0..int(structs[si].nfields)):
-        f = int(structs[si].fields) + i
-        field = value
-        if i != int(nodes[lhs].aux):
-            field = bc_field(snapshot, name_of(int(fields[f].name)), pos)
-            check_expr(field, 0)
-            field = last_checked
-        # Distinct AST nodes prevent one field's wrapper modifying another use.
-        field = copy_checked(field)
-        coerce(field, int(fields[f].type))
-        args.push(field)
-    ctor = mk(.call, pos)
-    nodes[ctor] = Node(kind = .call, pos = pos, aux = 2, type = i32(t), flags = i32(NF_CHECKED))
-    set_list(ctor, args)
-    store = mk(.assign, pos)
-    nodes[store].a = i32(parent)
-    nodes[store].b = i32(ctor)
-    nodes[store].op = i32(int(Tok.assign))
-    store = check_assign(store)
-    before.push(store)
-    return bc_block(before, pos)
-
 # (the receiver of a write the compiler made into an N-D array's own elements, `m[i j] = v`,
 # `m[[a..b) c] = v`: the library setters keep its shape and storage, so a shaped field's contract
 # still holds. Only these nodes, never another `@` argument. O(1))
 ref_nd_receivers: {int: bool} = {}
 
-
-ref_mutable_authority = (n: int):
-    if ut_safe_used and ref_safe_path_ancestor(n): fatal(nodes[n].pos, "a SafePath's representation cannot be exposed for mutation; replace the whole SafePath with a proven path")
-    if ref_dependent_ancestor(n): fatal(nodes[n].pos, "mutable refinement access needs the full record invariant authority; pass the whole record with `@`")
 
 # ---------------- paired length operations (docs/LANGUAGE.md, records) ----------------
 # Fields whose contracts tie their lengths, `values:array<V length =? keys.length>`, change
@@ -339,82 +276,6 @@ ref_pair_outer_index = -1
 # known before the run changes them: every write outside a run checks the whole record, and
 # every run ends with that check, so its checks hold without proof (ref_pair_held). O(fields).
 ref_pair_held: {int: bool} = {}
-
-
-# Other length-changing operations execute on a private candidate. Later argument
-# effects run before that candidate is published, so callbacks cannot observe
-# an intermediate violation of the destination's storage contract.
-ref_length_mutation = (n: int, r: int) -> int:
-    id = nodes[n].aux as IN
-    if id != .push and id != .pop and id != .insert and id != .remove and id != .clear and id != .extend and id != .resize and id != .truncate and id != .setlen: return r
-    place = kid(n, 0)
-    t = prune(refine_storage(place, ntype(place)))
-    if types[t].kind != .refined and not ref_dependent_ancestor(place): return r
-    # (a dependent record's sibling may bound this length: it publishes a candidate whole)
-    if ref_self_active and ref_self_contract(t) and not ref_dependent_ancestor(place) and ref_self_grow(n, id, place, t): return r
-    # (a change that keeps a sibling bound on elements: ref_sib_in_place)
-    if ref_self_active and ref_sib_in_place(n, id, place, t): return r
-    # (fields whose lengths are tied change in a run of statements: ref_pair_role)
-    hints_from = -1
-    if id != .resize and id != .setlen and ref_pair_record(place) != 0:
-        role = ref_pair_role(n, place)
-        if role != 0: return ref_pair_rewrite(n, ref_pair_record(place), role, place, r)
-        hints_from = refine_requests.len()
-    hint = if hints_from >= 0: ref_pair_hint(place, ref_pair_op_name(id)) else: ""
-    before: int[]
-    args = kids(n)
-    # The receiver's selectors, then the operands, as gen_intrinsic evaluates them.
-    path = index_update_path(place)
-    j = path.len() - 1
-    loop j >= 0:
-        part = path[j]; j -= 1
-        if nodes[part].kind == .index and nodes[part].b != 0: nodes[part].b = i32(capture_value(int(nodes[part].b), ntype(int(nodes[part].b)), before))
-    loop i in [1..args.len()): args[i] = capture_value(args[i], ntype(args[i]), before)
-    candidate = 0
-    if ref_length_route(place, t):
-        direct = ref_length_direct(id, place, t, args, nodes[n].pos)
-        if direct > 0: before.push(bc_stmt(direct, nodes[n].pos))
-        if direct < 0: candidate = -1
-    else: candidate = -1
-    if candidate != 0:
-        candidate = capture_value(copy_place(place), representation_type(t), before)
-        args[0] = candidate
-    operation = copy_checked(n)
-    add_flag(operation, NF_CHECKED)
-    set_list(operation, args)
-    result = 0
-    if r != T_VOID: result = capture_value(operation, r, before)
-    else: before.push(bc_stmt(operation, nodes[n].pos))
-    if candidate != 0:
-        store = bc_assign(place, copy_checked(candidate), nodes[n].pos)
-        assigned = store
-        store = check_assign(store)
-        before.push(store)
-        if ref_self_active and ref_self_contract(t): ref_self_shrink(assigned, place, id)
-    if result != 0: before.push(bc_stmt(result, nodes[n].pos))
-    nodes[n] = nodes[bc_block(before, nodes[n].pos)]
-    nodes[n].type = i32(r)
-    nodes[n].aux = 1
-    add_flag(n, NF_CHECKED)
-    if hint != "":
-        loop k in [hints_from..refine_requests.len()): ref_pair_hints[refine_requests[k].node] = hint
-    r
-
-# Structural record conversion checks target fields after one source capture.
-# Nominal records and mutable element-contract changes retain exact identity.
-ref_record_conversion = (from: int, to: int) -> bool:
-    if types[from].kind != .struct_ or types[to].kind != .struct_: return false
-    fs = int(types[from].st); ts = int(types[to].st)
-    if structs[fs].decl != structs[ts].decl or not has_flag(int(structs[fs].decl), NF_RECORD): return false
-    if not ref_storage_contract(from) and not ref_storage_contract(to): return false
-    check_struct_fields(fs)
-    check_struct_fields(ts)
-    loop i in [0..int(structs[ts].nfields)):
-        a = int(fields[int(structs[fs].fields) + i].type)
-        b = int(fields[int(structs[ts].fields) + i].type)
-        if not can_coerce(0, a, b): return false
-    true
-
 
 
 # Library array mutations on refined storage use the same private-candidate

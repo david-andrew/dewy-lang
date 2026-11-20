@@ -275,6 +275,17 @@ running one pass per parameter, so a common signature costs one pass where Jo
 paid P passes on every call. Arena views are
 reacquired after projection resolution and sibling/self checks.
 
+`refine_rare.dewy` owns the checked rewrites of mutations on refined storage:
+dependent field stores, length-changing operations and their private candidates,
+the mutable-authority check and structural record conversion. Selectors and
+operands are captured in the order gen_assign and gen_intrinsic evaluate them,
+paired-field runs and sibling/self shortcuts are tried first, and the rewritten
+block, its hints and its shrink candidates keep their original order. Jo keeps the
+paired-run tables, written as direct element stores. Node and type arena reads are
+reacquired after every checker call that can grow them. An unrefined operation
+costs its two queries, as before; a rewrite costs the receiver path, operands and
+fields it captures.
+
 `refine_strings.dewy` owns string-set construction/publication and checked member
 constants. Its `CheckerInternHost` borrows whole-string interning; the set, type,
 structure, variant and node arenas stay with Jo, with the current field count

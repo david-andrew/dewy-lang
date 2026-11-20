@@ -1,8 +1,8 @@
 $runtime_checks
 
-from p"expr.jo" import (CV)
-from p"ast.jo" import (NF_CHECKED NF_MUT NF_RDONLY add_flag clone has_flag kid kids mk nkids nodes set_list)
-from p"check.jo" import (LF_CONST LF_MUTPARAM assign_value ceval ctxs cx dewy_at fns globals locals runtime_fn syms)
+from p"expr.jo" import (CV can_coerce)
+from p"ast.jo" import (NF_CHECKED NF_MUT NF_RDONLY add_flag clone has_flag kid kids mk nkids nodes set_list NF_RECORD)
+from p"check.jo" import (LF_CONST LF_MUTPARAM assign_value ceval ctxs cx dewy_at fns globals locals runtime_fn syms index_update_path compound_checked check_struct_fields)
 from p"checker_expr.dewy" import (check_expr check_intrinsic lookup)
 from p"checks_assign_hooks.dewy" import (assign_update)
 from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_let bc_stmt bc_str)
@@ -24,11 +24,11 @@ from p"lower_group.dewy" import (gen_expr)
 from p"lower_storage.dewy" import (arr_len release)
 from p"math_ops.dewy" import (math_call math_word)
 from p"node_store.dewy" import (Node)
-from p"refine.jo" import (RefArrayCall mk_refined ref_addr_type ref_declaring ref_gen_site ref_holder_name ref_intern ref_predicates ref_selector_message ref_self_active ref_self_elements ref_self_established ref_span_copy ref_spans refine_bindings refine_coerce refine_owners refine_requests str_sets total_literals)
+from p"refine.jo" import (RefArrayCall mk_refined ref_addr_type ref_declaring ref_gen_site ref_holder_name ref_intern ref_predicates ref_selector_message ref_self_active ref_self_elements ref_self_established ref_span_copy ref_spans refine_bindings refine_coerce refine_owners refine_requests str_sets total_literals ref_pair_hints)
 from p"refine_transfers.dewy" import (ref_assume ref_value)
-from p"refine_metadata.dewy" import (is_total_dict ref_dependent_ancestor ref_interval ref_place_alias refine_storage representation_type str_set_of)
-from p"refine_siblings.dewy" import (ref_held_element ref_sib_holder ref_pair_call_finish)
-from p"refine_ops.dewy" import (call_result_type copy_checked ref_addr_max ref_length_literal ref_own_length ref_path_length ref_self_contract ref_self_k ref_self_lower_bound ref_self_published ref_type_contains str_set_const total_dict_keys)
+from p"refine_metadata.dewy" import (is_total_dict ref_dependent_ancestor ref_interval ref_place_alias refine_storage representation_type str_set_of ref_safe_path_ancestor ref_dependent_record ref_storage_contract)
+from p"refine_siblings.dewy" import (ref_held_element ref_sib_holder ref_pair_call_finish ref_sib_in_place ref_pair_record ref_pair_role ref_pair_rewrite ref_pair_hint ref_pair_op_name)
+from p"refine_ops.dewy" import (call_result_type copy_checked ref_addr_max ref_length_literal ref_own_length ref_path_length ref_self_contract ref_self_k ref_self_lower_bound ref_self_published ref_type_contains str_set_const total_dict_keys ref_self_shrink)
 from p"refine_predicates.dewy" import (ref_atoms_have_kind)
 from p"refine_resolve.dewy" import (ref_resolve_atoms)
 from p"refine_resolve_host.dewy" import (RefResolveLimit)
@@ -42,6 +42,7 @@ from p"type_value_arguments.dewy" import (integer_parameter_literal integer_para
 from p"types.jo" import (T_I16 T_I32 T_I8 T_INT T_MATH_INT T_STR T_U16 T_U32 T_U64 T_U8 T_VOID fields has_var is_int prune struct_targ structs tkind type_eq types)
 from p"util.jo" import (files name_of names pos_file pos_off)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"safe_paths.jo" import (ut_safe_used)
 
 RefineRareWord:type=int64<overflow='wrap'>
 # a dictionary literal given for a totaldict: an entry for every key
@@ -699,4 +700,165 @@ ref_self_establish=(statement:RefineRareWord):>void=>$unsafe {
     if value =? 0 {return}
     nodes.ptr[value].ival=1
     ref_self_established[value]=true
+}
+# Other length-changing operations execute on a private candidate. Later argument
+# effects run before that candidate is published, so callbacks cannot observe
+# an intermediate violation of the destination's storage contract.
+ref_length_mutation=(n:int64 r:int64):>int64=>$unsafe {
+    let id=nodes.ptr[n].aux as IN
+    if id not=? IN.push and id not=? IN.pop and id not=? IN.insert and id not=? IN.remove and id not=? IN.clear and id not=? IN.extend and id not=? IN.resize and id not=? IN.truncate and id not=? IN.setlen {return r}
+    let place=kid(n 0)
+    let t=prune(refine_storage(place ntype(place)))
+    if types.ptr[t].kind not=? 'refined' and not ref_dependent_ancestor(place) {return r}
+    # (a dependent record's sibling may bound this length: it publishes a candidate whole)
+    if ref_self_active and ref_self_contract(t) and not ref_dependent_ancestor(place) and ref_self_grow(n id place t) {return r}
+    # (a change that keeps a sibling bound on elements: ref_sib_in_place)
+    if ref_self_active and ref_sib_in_place(n id place t) {return r}
+    # (fields whose lengths are tied change in a run of statements: ref_pair_role)
+    let hints_from:RefineRareWord=-1
+    if id not=? IN.resize and id not=? IN.setlen and ref_pair_record(place) not=? 0 {
+        let role=ref_pair_role(n place)
+        if role not=? 0 {return ref_pair_rewrite(n ref_pair_record(place) role place r)}
+        hints_from=refine_requests.length
+    }
+    let hint=if hints_from >=? 0 {ref_pair_hint(place ref_pair_op_name(id))} else {""}
+    let before:array<int64>=[]
+    let args=kids(n)
+    # The receiver's selectors, then the operands, as gen_intrinsic evaluates them.
+    let path=index_update_path(place)
+    let j=RefineRareWord(path.length) - 1
+    loop j >=? 0 {
+        let part=path[j]
+        j -= 1
+        if nodes.ptr[part].kind =? 'index' and nodes.ptr[part].b not=? 0 {
+            let captured=capture_value(RefineRareWord(nodes.ptr[part].b) ntype(RefineRareWord(nodes.ptr[part].b)) @before)
+            nodes.ptr[part].b=int32(captured)
+        }
+    }
+    loop i in [1..args.length) {args[i]=capture_value(args[i] ntype(args[i]) @before)}
+    let candidate:RefineRareWord=0
+    if ref_length_route(place t) {
+        let direct=ref_length_direct(id place t args nodes.ptr[n].pos)
+        if direct >? 0 {before.push(bc_stmt(direct nodes.ptr[n].pos))}
+        if direct <? 0 {candidate=-1}
+    }
+    else {candidate=-1}
+    if candidate not=? 0 {
+        candidate=capture_value(copy_place(place) representation_type(t) @before)
+        args[0]=candidate
+    }
+    let operation=copy_checked(n)
+    add_flag(operation NF_CHECKED)
+    set_list(operation args)
+    let result:RefineRareWord=0
+    if r not=? T_VOID {result=capture_value(operation r @before)}
+    else {before.push(bc_stmt(operation nodes.ptr[n].pos))}
+    if candidate not=? 0 {
+        let assigned=bc_assign(place copy_checked(candidate) nodes.ptr[n].pos)
+        before.push(check_assign(assigned))
+        if ref_self_active and ref_self_contract(t) {ref_self_shrink(assigned place id)}
+    }
+    if result not=? 0 {before.push(bc_stmt(result nodes.ptr[n].pos))}
+    let block=bc_block(before nodes.ptr[n].pos)
+    nodes.ptr[n]=nodes.ptr[block]
+    nodes.ptr[n].type=int32(r)
+    nodes.ptr[n].aux=1
+    add_flag(n NF_CHECKED)
+    if hint not=? "" {
+        loop k in [hints_from..refine_requests.length) {ref_pair_hints[refine_requests[k].node]=hint}
+    }
+    r
+}
+ref_field_store=(statement:int64 target:int64):>int64=>$unsafe {
+    let lhs=ref_place_alias(RefineRareWord(nodes.ptr[statement].a))
+    if nodes.ptr[lhs].kind not=? 'field' {return 0}
+    if ut_safe_used and ref_safe_path_ancestor(lhs) {fatal(nodes.ptr[statement].pos "a SafePath's representation cannot be mutated; replace the whole SafePath with a proven path");}
+    let parent=RefineRareWord(nodes.ptr[lhs].a)
+    let t=representation_type(ntype(parent))
+    if not ref_dependent_record(t) and not ref_dependent_ancestor(parent) {return 0}
+    # (a field no contract mentions, in a record no contract above holds: an ordinary store)
+    if ref_dependent_record(t) and not ref_dependent_ancestor(parent) and ref_field_free(t RefineRareWord(nodes.ptr[lhs].aux)) {return 0}
+    let pos=RefineRareWord(nodes.ptr[statement].pos)
+    let before:array<int64>=[]
+    let path=index_update_path(parent)
+    # A compound read captures selectors before evaluating the RHS. A plain
+    # store evaluates its RHS first, exactly as gen_assign does. (47: the frozen Tok.assign)
+    let compound=nodes.ptr[statement].op not=? int32(47)
+    if compound {
+        let j=RefineRareWord(path.length) - 1
+        loop j >=? 0 {
+            let part=path[j]
+            j -= 1
+            if nodes.ptr[part].kind =? 'index' and nodes.ptr[part].b not=? 0 {
+                let captured=capture_value(RefineRareWord(nodes.ptr[part].b) ntype(RefineRareWord(nodes.ptr[part].b)) @before)
+                nodes.ptr[part].b=int32(captured)
+            }
+        }
+    }
+    let value=RefineRareWord(nodes.ptr[statement].b)
+    if compound {value=compound_checked(statement copy_place(lhs) value representation_type(target))}
+    else {
+        check_expr(value representation_type(target));
+        value=last_checked
+    }
+    coerce(value representation_type(target));
+    value=capture_value(value representation_type(target) @before)
+    if not compound {
+        let j=RefineRareWord(path.length) - 1
+        loop j >=? 0 {
+            let part=path[j]
+            j -= 1
+            if nodes.ptr[part].kind =? 'index' and nodes.ptr[part].b not=? 0 {
+                let captured=capture_value(RefineRareWord(nodes.ptr[part].b) ntype(RefineRareWord(nodes.ptr[part].b)) @before)
+                nodes.ptr[part].b=int32(captured)
+            }
+        }
+    }
+    let snapshot=capture_value(copy_place(parent) t @before)
+    let si=RefineRareWord(types.ptr[t].st)
+    let args:array<int64>=[]
+    loop i in [0..RefineRareWord(structs.ptr[si].nfields)) {
+        let f=RefineRareWord(structs.ptr[si].fields) + i
+        let field=value
+        if i not=? RefineRareWord(nodes.ptr[lhs].aux) {
+            field=bc_field(snapshot name_of(RefineRareWord(fields.ptr[f].name)) pos)
+            check_expr(field 0);
+            field=last_checked
+        }
+        # Distinct AST nodes prevent one field's wrapper modifying another use.
+        field=copy_checked(field)
+        coerce(field RefineRareWord(fields.ptr[RefineRareWord(structs.ptr[si].fields) + i].type));
+        args.push(field)
+    }
+    let ctor=mk('call' pos)
+    nodes.ptr[ctor]=Node(kind='call' pos=pos aux=2 type=int32(t) flags=int32(NF_CHECKED))
+    set_list(ctor args)
+    let store=mk('assign' pos)
+    nodes.ptr[store].a=int32(parent)
+    nodes.ptr[store].b=int32(ctor)
+    nodes.ptr[store].op=int32(47)
+    store=check_assign(store)
+    before.push(store)
+    bc_block(before pos)
+}
+ref_mutable_authority=(n:int64):>void=>$unsafe {
+    if ut_safe_used and ref_safe_path_ancestor(n) {fatal(nodes.ptr[n].pos "a SafePath's representation cannot be exposed for mutation; replace the whole SafePath with a proven path");}
+    if ref_dependent_ancestor(n) {fatal(nodes.ptr[n].pos "mutable refinement access needs the full record invariant authority; pass the whole record with `@`");}
+}
+# Structural record conversion checks target fields after one source capture.
+# Nominal records and mutable element-contract changes retain exact identity.
+ref_record_conversion=(source:int64 target:int64):>bool=>$unsafe {
+    if types.ptr[source].kind not=? 'struct_' or types.ptr[target].kind not=? 'struct_' {return false}
+    let fs=RefineRareWord(types.ptr[source].st)
+    let ts=RefineRareWord(types.ptr[target].st)
+    if structs.ptr[fs].decl not=? structs.ptr[ts].decl or not has_flag(RefineRareWord(structs.ptr[fs].decl) NF_RECORD) {return false}
+    if not ref_storage_contract(source) and not ref_storage_contract(target) {return false}
+    check_struct_fields(fs)
+    check_struct_fields(ts)
+    loop i in [0..RefineRareWord(structs.ptr[ts].nfields)) {
+        let a=RefineRareWord(fields.ptr[RefineRareWord(structs.ptr[fs].fields) + i].type)
+        let b=RefineRareWord(fields.ptr[RefineRareWord(structs.ptr[ts].fields) + i].type)
+        if not can_coerce(0 a b) {return false}
+    }
+    true
 }
