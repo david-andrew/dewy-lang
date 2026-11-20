@@ -1,0 +1,654 @@
+$runtime_checks
+
+from p"ir_types.dewy" import (Ins Op)
+from p"ir.jo" import (M_FLOAT M_INDEX M_SIGNED VF VI VOP_SPLAT_B VOP_SPLAT_C VS ir ir_use_count)
+from p"ir_builders.dewy" import (ir_operands ir_use is_kv k_vreg kv_of vreg vtype)
+from p"opt_workspace.dewy" import (o_regs)
+from p"opt.jo" import (o_defines o_resize o_resize_one)
+
+# Vregs, slots, lanes and offsets wrap as Jo words did; lengths stay plain bounds.
+# Shift counts are masked as the machine masked them in Jo.
+SraWord:type=int64<overflow='wrap'>
+SraI32:type=int32<overflow='wrap'>
+
+# ---------------- small slots to registers ----------------
+# Non-escaping slots of at most four lanes (32 bytes) become registers. Standalone byte and
+# two-byte slots use one integer lane. Four-byte lanes cover vec2..vec4 and small i32/f32
+# records; eight-byte lanes cover i64/f64 records. Mixed-width accesses, incompatible lane
+# kinds, and escaping addresses retain memory storage. Address discovery also selects lane
+# widths, without another full optimization pass. Larger records stay in memory to bound
+# register pressure. One function-local indexed workspace, shared by discovery, escape
+# validation and rewriting. Its storage is reused, but no pointer escapes an optimization.
+SraValue:type=[
+    slot:SraWord=-1
+    offset:SraWord
+]
+
+SraSlot:type=[
+    width:SraWord=8
+    ok:bool
+]
+
+SraLane:type=[
+    kind:SraWord # 0 untyped bits, 1 float, 2 integer
+    reg:SraWord=-1
+]
+
+let sra_value_storage:array<SraValue>=[]
+let sra_slot_storage:array<SraSlot>=[]
+let sra_lane_storage:array<SraLane>=[]
+let sra_values:ptr<SraValue>=$unsafe (uint64(0) as ptr<SraValue>)
+let sra_slots:ptr<SraSlot>=$unsafe (uint64(0) as ptr<SraSlot>)
+let sra_lanes:ptr<SraLane>=$unsafe (uint64(0) as ptr<SraLane>)
+let sra_nv:int64=0
+
+sra_workspace=(nv:int64 ns:int64):>void=>$unsafe {
+    let lanes=int64(SraWord(ns) * 4)
+    if sra_value_storage.length <? nv {sra_value_storage.resize(nv)}
+    if sra_slot_storage.length <? ns {sra_slot_storage.resize(ns)}
+    if sra_lane_storage.length <? lanes {sra_lane_storage.resize(lanes)}
+    sra_values=sra_value_storage.ptr
+    sra_slots=sra_slot_storage.ptr
+    sra_lanes=sra_lane_storage.ptr
+    # Other fields belong to a definition, a resolved address, or a lane.
+    # Initialize them when publishing that state, not for every unused vreg.
+    loop v in [0..nv) {sra_values[v].slot=-1}
+    let sizes=ir.slot_size.ptr
+    loop slot in [0..ns) {
+        let size=SraWord(sizes[slot])
+        let width:SraWord=8
+        if size =? 1 or size =? 2 {width=size}
+        else if size & 7 not=? 0 {width=4}
+        sra_slots[slot]=SraSlot(width false)
+    }
+}
+
+sra_shift=(width:SraWord):>SraWord=>if width =? 8 {3} else {width >> 1}
+
+# May this byte range be used as lanes of kind k (0: just bits, copied)?
+sra_lane_use=(s:SraWord off:SraWord bytes:SraWord k:SraWord):>bool=>$unsafe {
+    let width=sra_slots[s].width
+    let shift=sra_shift(width) & 63
+    let size=SraWord(ir.slot_size.ptr[s])
+    if size >> shift >? 4 {return false}
+    if k =? 1 and width <? 4 {return false}
+    if off <? 0 or off & (width - 1) not=? 0 or bytes & (width - 1) not=? 0 or off + bytes >? size {return false}
+    let first=s * 4 + (off >> shift)
+    loop i in [0..(bytes >> shift)) {
+        if k not=? 0 {
+            let j=first + i
+            if sra_lanes[j].kind not=? 0 and sra_lanes[j].kind not=? k {return false}
+            sra_lanes[j].kind=k
+        }
+    }
+    true
+}
+
+# Copies join lanes into classes. The forward pass keeps integer and float memory apart, so a
+# copy between lanes and memory must access each word as what it is: a lane that is only copied
+# (kind 0) takes the one kind its class shows. A class showing neither kind, or both, that a copy
+# joins to memory keeps its slots in memory (each slot leaving makes its other classes reach
+# memory too), where the copy stays a copy. O(P + L log L) for P pending operations and L lanes;
+# nothing is allocated for a function whose slots meet no copy.
+sra_find=(@parent:array<SraWord> j0:SraWord):>SraWord=>$unsafe {
+    let j=j0
+    loop parent[j] not=? j {
+        parent[j]=parent[parent[j]]
+        j=parent[j]
+    }
+    j
+}
+
+sra_lane_first=(v:SraWord):>SraWord=>$unsafe {
+    let slot=sra_values[v].slot
+    slot * 4 + (sra_values[v].offset >> (sra_shift(sra_slots[slot].width) & 63))
+}
+sra_lane_count=(s:SraWord):>SraWord=>$unsafe {SraWord(ir.slot_size.ptr[s]) >> (sra_shift(sra_slots[s].width) & 63)}
+
+sra_copy_kinds=(code:ptr<Ins> pending:array<int64> ns:SraWord):>void=>$unsafe {
+    let copies:array<int64>=[]
+    loop pos in pending {
+        if code[pos].op =? 'copy' {copies.push(pos)}
+    }
+    if copies.length =? 0 {return}
+    let n=ns * 4
+    let parent=fill(SraWord(0) int64(n))
+    loop j in [0..n) {parent[j]=j}
+    let flags=fill(SraWord(0) int64(n)) # at a class root: 1 float, 2 integer, 4 reaches memory
+    loop pos in copies {
+        let ins=code + pos
+        let a=SraWord(ins[0].a)
+        let b=SraWord(ins[0].b)
+        let pa=sra_is_p(a)
+        let pb=sra_is_p(b)
+        if not pa and not pb {continue}
+        let m=SraWord(ins[0].imm) >> (sra_shift(sra_slots[sra_values[if pa {a} else {b}].slot].width) & 63)
+        loop i in [0..m) {
+            if pa and pb {
+                let ra=sra_find(@parent sra_lane_first(a) + i)
+                let rb=sra_find(@parent sra_lane_first(b) + i)
+                if ra not=? rb {
+                    parent[ra]=rb
+                    flags[rb]=flags[rb] | flags[ra]
+                }
+            } else {
+                let r=sra_find(@parent sra_lane_first(if pa {a} else {b}) + i)
+                flags[r]=flags[r] | 4
+            }
+        }
+    }
+    let head=fill(SraWord(-1) int64(n)) # at a class root: its first lane; then each lane's next
+    let next=fill(SraWord(-1) int64(n))
+    loop s in [0..ns) {
+        if not sra_slots[s].ok {continue}
+        loop i in [0..sra_lane_count(s)) {
+            let j=s * 4 + i
+            let r=sra_find(@parent j)
+            flags[r]=flags[r] | sra_lanes[j].kind
+            next[j]=head[r]
+            head[r]=j
+        }
+    }
+    # slots of the classes with no single kind that reach memory leave, which can make more
+    # classes reach memory: each slot leaves once
+    let work:array<SraWord>=[]
+    loop s in [0..ns) {
+        if not sra_slots[s].ok {continue}
+        loop i in [0..sra_lane_count(s)) {
+            let f=flags[sra_find(@parent s * 4 + i)]
+            if f & 4 not=? 0 and (f & 3 =? 0 or f & 3 =? 3) {
+                work.push(s)
+                break
+            }
+        }
+    }
+    loop work.length >? 0 {
+        let s=work.pop()
+        if not sra_slots[s].ok {continue}
+        sra_slots[s].ok=false
+        loop i in [0..sra_lane_count(s)) {
+            let r=sra_find(@parent s * 4 + i)
+            if flags[r] & 4 not=? 0 {continue}
+            flags[r]=flags[r] | 4
+            if flags[r] & 3 =? 1 or flags[r] & 3 =? 2 {continue}
+            let j=head[r]
+            loop j >=? 0 {
+                work.push(j >> 2)
+                j=next[j]
+            }
+        }
+    }
+    loop s in [0..ns) {
+        if not sra_slots[s].ok {continue}
+        loop i in [0..sra_lane_count(s)) {
+            let lane=s * 4 + i
+            let f=flags[sra_find(@parent lane)] & 3
+            if sra_lanes[lane].kind =? 0 and (f =? 1 or f =? 2) {sra_lanes[lane].kind=f}
+        }
+    }
+}
+
+sra_is_p=(v:SraWord):>bool=>$unsafe {v >=? 0 and v <? sra_nv and sra_values[v].slot >=? 0 and sra_slots[sra_values[v].slot].ok}
+sra_lane_of=(v:SraWord i:SraWord):>SraWord=>$unsafe {
+    let slot=sra_values[v].slot
+    sra_lanes[slot * 4 + (sra_values[v].offset >> (sra_shift(sra_slots[slot].width) & 63)) + i].reg
+}
+
+# Definition updates are O(removed + emitted operations), with no rebuild.
+# SRA preserves control structure. Uses/CFG are indexed once after its rewrite;
+# forward maintains output use counts, shared by DCE and cleanup.
+let sra_index_nv:int64=0
+sra_emit=(@out:array<Ins> ins:Ins):>void=>$unsafe {
+    loop sra_index_nv <? ir.vtypes.length {
+        o_resize_one(sra_index_nv)
+        sra_index_nv=int64(SraWord(sra_index_nv) + 1)
+    }
+    if ins.dst >=? 0 and o_defines(ins.op) {o_regs[int64(ins.dst)].ndef+=1}
+    out.push(ins)
+}
+
+# A lane as vreg type ty, preserving bits between equal-width float/integer lanes.
+sra_as_ty=(@out:array<Ins> x:SraWord ty:SraWord):>SraWord=>$unsafe {
+    if vtype(x) =? ty {return x}
+    let t=SraWord(vreg(ty))
+    if ty not=? VI {sra_emit(@out Ins('bits2f' SraI32(ty) SraI32(t) SraI32(x) 0 0 0))}
+    else {sra_emit(@out Ins('f2bits' SraI32(vtype(x)) SraI32(t) SraI32(x) 0 0 0))}
+    t
+}
+
+# Resolve only address definitions that have a use. The chain follows strictly
+# earlier definitions, so it is acyclic; each candidate is memoized once. The
+# explicit stack avoids compiler-stack growth for long address chains.
+let sra_chain:array<SraWord>=[]
+sra_resolve_address=(value:SraWord):>SraWord=>$unsafe {
+    sra_chain.clear()
+    let code=ir.code.ptr
+    let v=value
+    loop sra_values[v].slot =? -2 {
+        let pos=o_regs[v].defpos
+        if o_regs[v].ndef not=? 1 {
+            sra_values[v].slot=-1
+            break
+        }
+        let ins=code + pos
+        let a=SraWord(ins[0].a)
+        if sra_values[a].slot =? -1 or o_regs[a].defpos >=? pos {
+            sra_values[v].slot=-1
+            break
+        }
+        if ins[0].op =? 'add' {
+            let b=SraWord(ins[0].b)
+            if not is_kv(b) and not (o_regs[b].ndef =? 1 and code[o_regs[b].defpos].op =? 'iconst' and o_regs[b].defpos <? pos) {
+                sra_values[v].slot=-1
+                break
+            }
+        }
+        sra_chain.push(v)
+        v=a
+    }
+    loop sra_chain.length >? 0 {
+        let d=sra_chain.pop()
+        let ins=code + o_regs[d].defpos
+        let a=SraWord(ins[0].a)
+        sra_values[d].slot=sra_values[a].slot
+        if sra_values[a].slot >=? 0 {
+            let offset=sra_values[a].offset
+            if ins[0].op =? 'add' {
+                let b=SraWord(ins[0].b)
+                offset+=if is_kv(b) {SraWord(kv_of(b))} else {SraWord(code[o_regs[b].defpos].imm)}
+            }
+            sra_values[d].offset=offset
+        }
+    }
+    sra_values[value].slot
+}
+
+# Keep the overwhelmingly common cached query separate from chain resolution.
+sra_address=(value:SraWord):>SraWord=>$unsafe {
+    if value <? 0 {return -1}
+    let slot=sra_values[value].slot
+    if slot =? -2 {return sra_resolve_address(value)}
+    slot
+}
+
+sra_escape=(value:SraWord):>void=>$unsafe {
+    let slot=sra_address(value)
+    if slot >=? 0 {sra_slots[slot].ok=false}
+}
+
+# A slot address of 8-byte lanes defined earlier, accessed with another width.
+sra_narrow=(slot:SraWord a:SraWord pos:int64 mode:SraWord):>void=>$unsafe {
+    if o_regs[a].defpos <? pos and sra_slots[slot].width =? 8 and mode & 15 not=? 8 {sra_slots[slot].width=4}
+}
+
+# A copy or zero of 8-byte lanes at an unaligned offset or length.
+sra_narrow_copy=(slot:SraWord a:SraWord pos:int64 bytes:SraWord):>void=>$unsafe {
+    if slot >=? 0 and o_regs[a].defpos <? pos and sra_slots[slot].width =? 8 and (sra_values[a].offset & 7 not=? 0 or bytes & 7 not=? 0) {sra_slots[slot].width=4}
+}
+
+# Every use of a slot address in a memory operation must take whole lanes.
+sra_use_lanes=(v:SraWord off:SraWord bytes:SraWord k:SraWord):>void=>$unsafe {
+    if v >=? 0 and sra_values[v].slot >=? 0 and not sra_lane_use(sra_values[v].slot sra_values[v].offset + off bytes k) {sra_slots[sra_values[v].slot].ok=false}
+}
+
+# A use that keeps the slot it addresses in memory.
+sra_keep=(v:SraWord):>void=>$unsafe {
+    if v >=? 0 and sra_values[v].slot >=? 0 {sra_slots[sra_values[v].slot].ok=false}
+}
+
+# Zero lanes as their vreg types.
+sra_zero_lane=(@out:array<Ins> t:SraWord):>void=>$unsafe {
+    if vtype(t) not=? VI {sra_emit(@out Ins('fconst' SraI32(vtype(t)) SraI32(t) 0 0 0 0))}
+    else {sra_emit(@out Ins('mov' SraI32(VI) SraI32(t) SraI32(k_vreg(0)) 0 0 0))}
+}
+
+# O(N + U + A + M + output): one definition index, one use walk, and a
+# worklist containing only M slot-memory operations. Address resolution visits
+# each of A demanded definitions once. The final rewrite runs only on success.
+# Operand fields are read where an operation needs them.
+let sra_nested:bool=false
+o_sra=():>void=>$unsafe {
+    sra_nested=false
+    o_resize(ir.vtypes.length)
+    let ns=ir.slot_size.length
+    if ns =? 0 {return}
+    let code=ir.code.ptr
+    let count=ir.code.length
+    let nv=ir.vtypes.length
+    sra_nv=nv
+    sra_workspace(nv ns)
+    let sizes=ir.slot_size.ptr
+    let roots:array<int64>=[]
+    loop pos in [0..count) {
+        let ins=code + pos
+        let d=SraWord(ins[0].dst)
+        let op=ins[0].op
+        if d <? 0 or not o_defines(op) {continue}
+        o_regs[d].ndef+=1
+        o_regs[d].defpos=SraI32(pos)
+        if op =? 'slot' {roots.push(pos)}
+        else if op =? 'mov' or op =? 'add' {sra_values[d].slot=-2}
+    }
+    let any=false
+    loop pos in roots {
+        let ins=code + pos
+        let d=SraWord(ins[0].dst)
+        let slot=SraWord(ins[0].a)
+        if o_regs[d].ndef =? 1 and sizes[slot] <=? 32 {
+            sra_values[d].slot=slot
+            sra_values[d].offset=0
+            sra_slots[slot].ok=true
+            any=true
+        } else {sra_values[d].slot=-1}
+    }
+    if not any {return}
+    let pending:array<int64>=[]
+    loop pos in [0..count) {
+        let ins=code + pos
+        match ins[0].op {
+            <'slot'|'zeroslots'|'nop'|'iconst'|'fconst'|'gaddr'|'daddr'|'faddr'|'block'|'loop'|'end'|'else_'|'br'|'trap'|'vzu'> => {}
+            <'mov'> => {
+                if sra_address(SraWord(ins[0].dst)) <? 0 {sra_escape(SraWord(ins[0].a))}
+            }
+            <'add'> => {
+                if sra_address(SraWord(ins[0].dst)) <? 0 {
+                    sra_escape(SraWord(ins[0].a))
+                    sra_escape(SraWord(ins[0].b))
+                }
+            }
+            <'load'> => {
+                let a=SraWord(ins[0].a)
+                let c=SraWord(ins[0].c)
+                let sa=sra_address(a)
+                if sa >=? 0 {
+                    sra_narrow(sa a pos c)
+                    if c & M_INDEX =? 0 {pending.push(pos)}
+                    else {
+                        sra_escape(a)
+                        sra_escape(SraWord(ins[0].b))
+                    }
+                } else if c & M_INDEX not=? 0 {sra_escape(SraWord(ins[0].b))}
+            }
+            <'store'> => {
+                let a=SraWord(ins[0].a)
+                let sa=sra_address(a)
+                let sb=sra_address(SraWord(ins[0].b))
+                if sb >=? 0 {sra_slots[sb].ok=false}
+                if SraWord(ins[0].c) & M_INDEX not=? 0 {
+                    let sd=sra_address(SraWord(ins[0].dst))
+                    if sd >=? 0 {sra_slots[sd].ok=false}
+                }
+                if sa >=? 0 {
+                    sra_narrow(sa a pos SraWord(ins[0].c))
+                    pending.push(pos)
+                }
+            }
+            <'vop'> => {
+                let a=SraWord(ins[0].a)
+                let b=SraWord(ins[0].b)
+                let c=SraWord(ins[0].c)
+                let sa=sra_address(a)
+                let sb=sra_address(b)
+                let sc=sra_address(c)
+                if sa >=? 0 and o_regs[a].defpos <? pos {sra_slots[sa].width=4}
+                if sb >=? 0 and o_regs[b].defpos <? pos {sra_slots[sb].width=4}
+                if sc >=? 0 and o_regs[c].defpos <? pos {sra_slots[sc].width=4}
+                if sa >=? 0 or sb >=? 0 or sc >=? 0 {pending.push(pos)}
+            }
+            <'copy'> => {
+                let a=SraWord(ins[0].a)
+                let b=SraWord(ins[0].b)
+                let sa=sra_address(a)
+                let sb=sra_address(b)
+                sra_narrow_copy(sa a pos SraWord(ins[0].imm))
+                sra_narrow_copy(sb b pos SraWord(ins[0].imm))
+                if sa >=? 0 or sb >=? 0 {pending.push(pos)}
+            }
+            <'zero'> => {
+                let a=SraWord(ins[0].a)
+                let sa=sra_address(a)
+                sra_narrow_copy(sa a pos SraWord(ins[0].imm))
+                if sa >=? 0 {pending.push(pos)}
+            }
+            <'intr'|'call'|'syscall'> => {
+                let args=ir.args.ptr
+                let a=SraWord(ins[0].a)
+                loop k in [0..SraWord(ins[0].b)) {sra_escape(SraWord(args[a + k]))}
+            }
+            <'calli'|'callc'> => {
+                let args=ir.args.ptr
+                let a=SraWord(ins[0].a)
+                loop k in [0..SraWord(ins[0].b)) {sra_escape(SraWord(args[a + k]))}
+                sra_escape(SraWord(ins[0].c))
+            }
+            <'ret'> => {
+                let a=SraWord(ins[0].a)
+                if a >=? 0 {sra_escape(a)}
+            }
+            <'if_'|'brif'|'brtable'|'assume'|'neg'|'not_'|'fneg'|'fsqrt'|'fabs'|'ffloor'|'fceil'|'ftrunc'|'sext8'|'sext16'|'sext32'|'zext8'|'zext16'|'zext32'|'i2f'|'u2f'|'f2i'|'f2f'|'bits2f'|'f2bits'|'vsplat'> => {
+                sra_escape(SraWord(ins[0].a))
+            }
+            <'memcpy'|'memset'|'select'|'memeq'|'findbyte'|'scanbytes'|'findb'> => {
+                sra_escape(SraWord(ins[0].a))
+                sra_escape(SraWord(ins[0].b))
+                sra_escape(SraWord(ins[0].c))
+            }
+            <'vst'> => {
+                sra_escape(SraWord(ins[0].a))
+                sra_escape(SraWord(ins[0].b))
+                sra_escape(SraWord(ins[0].dst))
+            }
+            _ => {
+                sra_escape(SraWord(ins[0].a))
+                sra_escape(SraWord(ins[0].b))
+            }
+        }
+    }
+    # Lanes keep their observed numeric kind; copy-only lanes contain integer bits.
+    any=false
+    loop s in [0..ns) {
+        let size=SraWord(sizes[s])
+        let width=sra_slots[s].width
+        if size & (width - 1) not=? 0 or size >> (sra_shift(width) & 63) >? 4 {sra_slots[s].ok=false}
+        if sra_slots[s].ok {any=true}
+    }
+    if not any {return}
+    loop lane in [0..SraWord(ns) * 4) {sra_lanes[lane].kind=0}
+    loop pos in pending {
+        let ins=code + pos
+        match ins[0].op {
+            <'load'> => {
+                let a=SraWord(ins[0].a)
+                let c=SraWord(ins[0].c)
+                if a >=? 0 and sra_values[a].slot >=? 0 and c & M_INDEX =? 0 {
+                    let slot=sra_values[a].slot
+                    let kind:SraWord=if c & M_FLOAT not=? 0 {1} else {2}
+                    if c & 15 not=? sra_slots[slot].width or not sra_lane_use(slot sra_values[a].offset + SraWord(ins[0].imm) c & 15 kind) {sra_slots[slot].ok=false}
+                } else {
+                    ir_operands(ins[0]);
+                    loop operand_index in [0..ir_use_count) {sra_keep(SraWord(ir_use(operand_index)))}
+                }
+            }
+            <'store'> => {
+                let a=SraWord(ins[0].a)
+                let c=SraWord(ins[0].c)
+                sra_keep(SraWord(ins[0].b))
+                if c & M_INDEX not=? 0 {sra_keep(SraWord(ins[0].dst))}
+                if a >=? 0 and sra_values[a].slot >=? 0 {
+                    let slot=sra_values[a].slot
+                    let kind:SraWord=if c & M_FLOAT not=? 0 {1} else {2}
+                    if c & M_INDEX not=? 0 or c & 15 not=? sra_slots[slot].width or not sra_lane_use(slot sra_values[a].offset + SraWord(ins[0].imm) c & 15 kind) {sra_slots[slot].ok=false}
+                }
+            }
+            <'vop'> => {
+                let imm=SraWord(ins[0].imm)
+                let bytes=((imm >> 4) & 7) * 4
+                sra_use_lanes(SraWord(ins[0].a) 0 bytes 1)
+                if imm & VOP_SPLAT_B not=? 0 {sra_keep(SraWord(ins[0].b))}
+                else {sra_use_lanes(SraWord(ins[0].b) 0 bytes 1)}
+                if imm & VOP_SPLAT_C not=? 0 {sra_keep(SraWord(ins[0].c))}
+                else {sra_use_lanes(SraWord(ins[0].c) 0 bytes 1)}
+            }
+            <'copy'> => {
+                let a=SraWord(ins[0].a)
+                let b=SraWord(ins[0].b)
+                # Keep one side in memory when copy endpoints use different lane widths.
+                if a >=? 0 and b >=? 0 and sra_values[a].slot >=? 0 and sra_values[b].slot >=? 0 and sra_slots[sra_values[a].slot].width not=? sra_slots[sra_values[b].slot].width {
+                    if sra_slots[sra_values[a].slot].width >? sra_slots[sra_values[b].slot].width {sra_slots[sra_values[a].slot].ok=false}
+                    else {sra_slots[sra_values[b].slot].ok=false}
+                }
+                sra_use_lanes(a 0 SraWord(ins[0].imm) 0)
+                sra_use_lanes(b 0 SraWord(ins[0].imm) 0)
+            }
+            <'zero'> => {sra_use_lanes(SraWord(ins[0].a) 0 SraWord(ins[0].imm) 0)}
+            _ => {
+                ir_operands(ins[0]);
+                loop operand_index in [0..ir_use_count) {sra_keep(SraWord(ir_use(operand_index)))}
+            }
+        }
+    }
+    sra_copy_kinds(code pending SraWord(ns))
+    # a register per lane
+    any=false
+    loop s in [0..ns) {
+        if not sra_slots[s].ok {continue}
+        let width=sra_slots[s].width
+        loop i in [0..(SraWord(sizes[s]) >> (sra_shift(width) & 63))) {
+            let lane=SraWord(s) * 4 + i
+            let ty=if sra_lanes[lane].kind =? 1 {if width =? 8 {VF} else {VS}} else {VI}
+            sra_lanes[lane].reg=SraWord(vreg(ty))
+            any=true
+        }
+    }
+    if not any {return}
+    # Rewrite, updating the shared definition index at each mutation.
+    sra_index_nv=nv
+    let out:array<Ins>=[]
+    out.reserve(count + (count >> 2))
+    loop input_pos in [0..count) {
+        let ins=code + input_pos
+        match ins[0].op {
+            <'slot'|'add'|'mov'> => {
+                let d=SraWord(ins[0].dst)
+                if sra_is_p(d) {o_regs[d].ndef-=1}
+                else {out.push(ins[0])}
+            }
+            <'load'> => {
+                let a=SraWord(ins[0].a)
+                if sra_is_p(a) {
+                    let d=SraWord(ins[0].dst)
+                    let c=SraWord(ins[0].c)
+                    o_regs[d].ndef-=1
+                    let width=sra_slots[sra_values[a].slot].width
+                    let ty=if width =? 8 {VF} else {VS}
+                    let x=sra_lane_of(a SraWord(ins[0].imm) >> (sra_shift(width) & 63))
+                    if c & M_FLOAT not=? 0 {sra_emit(@out Ins('mov' SraI32(ty) SraI32(d) SraI32(sra_as_ty(@out x ty)) 0 0 0))}
+                    else if width =? 8 {sra_emit(@out Ins('mov' SraI32(VI) SraI32(d) SraI32(sra_as_ty(@out x VI)) 0 0 0))}
+                    else {
+                        let conv:Op=if width =? 1 {'zext8'} else if width =? 2 {'zext16'} else {'zext32'}
+                        if c & M_SIGNED not=? 0 {conv=if width =? 1 {'sext8'} else if width =? 2 {'sext16'} else {'sext32'}}
+                        sra_emit(@out Ins(conv SraI32(VI) SraI32(d) SraI32(sra_as_ty(@out x VI)) 0 0 0))
+                    }
+                } else {out.push(ins[0])}
+            }
+            <'store'> => {
+                let a=SraWord(ins[0].a)
+                if sra_is_p(a) {
+                    let b=SraWord(ins[0].b)
+                    if sra_address(b) >=? 0 {sra_nested=true}
+                    let x=sra_lane_of(a SraWord(ins[0].imm) >> (sra_shift(sra_slots[sra_values[a].slot].width) & 63))
+                    sra_emit(@out Ins('mov' SraI32(vtype(x)) SraI32(x) SraI32(sra_as_ty(@out b SraWord(vtype(x)))) 0 0 0))
+                } else {out.push(ins[0])}
+            }
+            <'vop'> => {
+                let a=SraWord(ins[0].a)
+                let b=SraWord(ins[0].b)
+                let c=SraWord(ins[0].c)
+                let imm=SraWord(ins[0].imm)
+                if sra_is_p(a) or (imm & VOP_SPLAT_B =? 0 and sra_is_p(b)) or (imm & VOP_SPLAT_C =? 0 and sra_is_p(c)) {
+                    let which=imm & 3
+                    let fop:Op=if which =? 0 {'fadd'} else if which =? 1 {'fsub'} else if which =? 2 {'fmul'} else {'fdiv'}
+                    loop i in [0..((imm >> 4) & 7)) {
+                        let x=b
+                        if imm & VOP_SPLAT_B =? 0 {
+                            if sra_is_p(b) {x=sra_as_ty(@out sra_lane_of(b i) VS)}
+                            else {
+                                x=SraWord(vreg(VS))
+                                sra_emit(@out Ins('load' SraI32(VS) SraI32(x) SraI32(b) 0 SraI32(4 | M_FLOAT) i * 4))
+                            }
+                        }
+                        let y=c
+                        if imm & VOP_SPLAT_C =? 0 {
+                            if sra_is_p(c) {y=sra_as_ty(@out sra_lane_of(c i) VS)}
+                            else {
+                                y=SraWord(vreg(VS))
+                                sra_emit(@out Ins('load' SraI32(VS) SraI32(y) SraI32(c) 0 SraI32(4 | M_FLOAT) i * 4))
+                            }
+                        }
+                        let r=SraWord(vreg(VS))
+                        sra_emit(@out Ins(fop SraI32(VS) SraI32(r) SraI32(x) SraI32(y) 0 0))
+                        # (lane i of the result needs only lane i of the operands: written at once, so
+                        # it is computed right into its lane, even when the destination is a source)
+                        if sra_is_p(a) {
+                            let t=sra_lane_of(a i)
+                            sra_emit(@out Ins('mov' SraI32(vtype(t)) SraI32(t) SraI32(sra_as_ty(@out r SraWord(vtype(t)))) 0 0 0))
+                        } else {sra_emit(@out Ins('store' SraI32(VS) 0 SraI32(a) SraI32(r) SraI32(4 | M_FLOAT) i * 4))}
+                    }
+                } else {out.push(ins[0])}
+            }
+            <'copy'> => {
+                let a=SraWord(ins[0].a)
+                let b=SraWord(ins[0].b)
+                let pa=sra_is_p(a)
+                let pb=sra_is_p(b)
+                if pa or pb {
+                    let width=sra_slots[sra_values[if pa {a} else {b}].slot].width
+                    let n=SraWord(ins[0].imm) >> (sra_shift(width) & 63)
+                    let xs:array<SraWord>=[]
+                    loop i in [0..n) {
+                        if pb {xs.push(sra_lane_of(b i))}
+                        else {
+                            let ty=if pa {SraWord(vtype(sra_lane_of(a i)))} else {SraWord(VI)}
+                            let x=SraWord(vreg(ty))
+                            let m=width
+                            if ty not=? VI {m=width | M_FLOAT}
+                            sra_emit(@out Ins('load' SraI32(ty) SraI32(x) SraI32(b) 0 SraI32(m) width * i))
+                            xs.push(x)
+                        }
+                    }
+                    loop i in [0..n) {
+                        if pa {
+                            let t=sra_lane_of(a i)
+                            sra_emit(@out Ins('mov' SraI32(vtype(t)) SraI32(t) SraI32(sra_as_ty(@out xs[i] SraWord(vtype(t)))) 0 0 0))
+                        } else {
+                            let m=width
+                            if vtype(xs[i]) not=? VI {m=width | M_FLOAT}
+                            sra_emit(@out Ins('store' SraI32(vtype(xs[i])) 0 SraI32(a) SraI32(xs[i]) SraI32(m) width * i))
+                        }
+                    }
+                } else {out.push(ins[0])}
+            }
+            <'zero'> => {
+                let a=SraWord(ins[0].a)
+                if sra_is_p(a) {
+                    loop i in [0..(SraWord(ins[0].imm) >> (sra_shift(sra_slots[sra_values[a].slot].width) & 63))) {sra_zero_lane(@out sra_lane_of(a i))}
+                } else {out.push(ins[0])}
+            }
+            <'zeroslots'> => {
+                out.push(ins[0])
+                # (lanes of slots cleared here start at zero)
+                let args=ir.args.ptr
+                let a=SraWord(ins[0].a)
+                loop k in [0..SraWord(ins[0].b)) {
+                    let item=SraWord(args[a + k])
+                    if item & 1 =? 0 and sra_slots[item >> 1].ok {
+                        let s=item >> 1
+                        loop i in [0..(SraWord(sizes[s]) >> (sra_shift(sra_slots[s].width) & 63))) {sra_zero_lane(@out sra_lanes[s * 4 + i].reg)}
+                    }
+                }
+            }
+            _ => {out.push(ins[0])}
+        }
+    }
+    ir.code=out
+}

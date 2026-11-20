@@ -10,7 +10,7 @@ from tests.support import compiler
 def test_sra_definition_index(compiler, tmp_path):
     root = Path(__file__).resolve().parents[1]
     source = tmp_path / 'sra-index.jo'
-    source.write_text(f"use '{root}/compiler/ir_types.dewy'\nuse '{root}/compiler/ir.jo'\nuse '{root}/compiler/ir_builders.dewy'\nuse '{root}/compiler/opt.jo'\n" + '''
+    source.write_text(f"use '{root}/compiler/ir_types.dewy'\nuse '{root}/compiler/ir.jo'\nuse '{root}/compiler/ir_builders.dewy'\nuse '{root}/compiler/opt.jo'\nuse '{root}/compiler/opt_sra.dewy'\n" + '''
 setup = (name: str, nv: int):
     ir_begin(name, 0)
     ir.vtypes = fill(i8(VI), nv)

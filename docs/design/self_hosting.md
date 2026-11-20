@@ -107,6 +107,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `wasm_emit` | `wasm_emit.jo` | Dewy whole-function wasm emission, locals and frame layout | Module host supplies import/source facts once; no per-instruction host callbacks. |
 | `backend_analysis` | `backend_analysis.jo` | Dewy final-IR use/lifetime/call/loop analysis | Shared native workspace; direct allocator/emitter views, no host callbacks. |
 | `opt_returns` | `opt_returns.jo` | Dewy recursive return sinking | Borrows code/types at the release-pass boundary; guarded end-index construction, no host callbacks. |
+| `opt_sra` | `opt_sra.jo` | Dewy scalar replacement of small slots | Own lane workspace; shares the optimizer register table; operands read per opcode; flagship optimize phase −1.9% to −2.4%. |
 
 ### Boundary lessons that constrain the next cutover
 
@@ -558,6 +559,16 @@ move checks, canonical integer constants, branch positions and shared snapshots.
 The scan and end table take O(N) time/space; following adjacent ends retains the
 existing O(B * D) worst case for B branches and nesting depth D. The frozen twin
 keeps the original array implementation as a differential reference.
+
+`opt_sra.dewy` owns scalar replacement: address discovery, lane kinds, copy
+classes and the rewrite. Its value, slot, lane and chain workspace is private;
+`optimize` resets the shared register table before it runs, and SRA records
+definitions there and keeps their counts current while rewriting. Lanes, vregs
+and offsets are wrapping words, shift counts are masked as the machine masked
+them, and only the fields an opcode uses are read. Address resolution is
+memoized and follows strictly earlier definitions; the walks stay
+O(N + U + A + M + output) and copy classes O(P + L log L). It reports a nested
+slot store through `sra_nested`; the bounded retry stays with `optimize`.
 
 ## Shared backend analysis boundary
 
