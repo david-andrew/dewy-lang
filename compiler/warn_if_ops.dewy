@@ -12,10 +12,10 @@ from p"refinement_types.dewy" import (FactRequest RefAtom RefTerm)
 from p"safe_paths.jo" import (ut_p_name ut_paths_used)
 from p"safe_path_walk.dewy" import (ut_names_safe)
 from p"types.jo" import (has_var is_union prune type_eq types union_members)
-from p"util.jo" import (intern name_of pos_in_lib)
+from p"util.jo" import (intern name_of pos_file pos_in_lib)
 from p"source_warnings.dewy" import (warn)
 from p"diagnostic_exit.dewy" import (fatal)
-from p"directives.jo" import (dir_runtime_policies)
+from p"directives.jo" import (dir_find dir_module_start dir_runtime_policies dir_scopes)
 from p"warn_if.jo" import (WI_FACTS WI_PATH WI_TYPE WarnIf wi_any wi_decls wi_fact_calls wi_fact_requests wi_fact_targs)
 
 WarnWord:type=int64<overflow='wrap'>
@@ -150,15 +150,16 @@ wi_call=(n:WarnWord f:WarnWord decl:WarnWord):>void=>$unsafe {
         let x=kid(n w.param)
         let r=wi_is(wi_arg_type(x) subst(w.type fns.ptr[f].targs))
         if w.negated and r =? 1 or not w.negated and r =? 0 {continue}
-        if not w.negated and wi_named_policy(x) and types.ptr[prune(w.type)].kind =? 'none_lit' {continue}
+        if not w.negated and wi_named_policy(x nodes.ptr[n].pos) and types.ptr[prune(w.type)].kind =? 'none_lit' {continue}
         # (a parameter's default is the caller's to fix: at the call)
         warn(if pos_in_lib(nodes.ptr[x].pos) {nodes.ptr[n].pos} else {nodes.ptr[x].pos} w.message)
     }
 }
 # A setting a function inherits at run time (`$time.zone` read where no scope of its own sets
 # it) falls back to the entry file's name, so it is never none unless some scope sets the zone
-# from a run-time value. O(1).
-wi_named_policy=(x0:WarnWord):>bool=>$unsafe {
+# from a run-time value. A call inside a scope that sets the zone from a run-time value reads
+# that zone, never none. O(1) plus one scope lookup.
+wi_named_policy=(x0:WarnWord at:WarnWord):>bool=>$unsafe {
     let x=x0
     if nodes.ptr[x].kind =? 'conv' and nodes.ptr[x].a not=? 0 {x=WarnWord(nodes.ptr[x].a)}
     if nodes.ptr[x].kind not=? 'call' or nkids(x) not=? 2 {return false}
@@ -167,6 +168,10 @@ wi_named_policy=(x0:WarnWord):>bool=>$unsafe {
     if name_of(WarnWord(nodes.ptr[WarnWord(fns.ptr[f].decl)].name)) not=? "__settings_policy_read" {return false}
     let fallback=kid(x 1)
     if nodes.ptr[fallback].kind =? 'conv' and nodes.ptr[fallback].a not=? 0 {fallback=WarnWord(nodes.ptr[fallback].a)}
+    if nodes.ptr[kid(x 0)].kind =? 'int_lit' and nodes.ptr[kid(x 0)].ival =? 1 and at >? 0 {
+        let local=dir_find(intern("time.zone") at)
+        if local >=? 0 and dir_scopes[local].start not=? dir_module_start(pos_file(at)) and dir_scopes[local].value <? -1 {return true}
+    }
     nodes.ptr[fallback].kind =? 'str_lit' and not dir_runtime_policies.has(intern("__zone_values"))
 }
 # (the argument's own type, under the conversion to the parameter's)

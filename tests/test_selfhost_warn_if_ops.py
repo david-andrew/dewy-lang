@@ -47,6 +47,20 @@ name_of = (n: int) -> str:
     if n == 3: return "__settings_policy_read"
     "name{n}"
 pos_in_lib = (pos: int) -> bool: pos >= 1000
+pos_file = (pos: int) -> int: 0
+struct DirScope:
+    start: int
+    end: int
+    setting: int
+    value: int
+# (a function's zone set from a run-time value, -3, around position 25; a named one around 26)
+dir_scopes: DirScope[] = [DirScope(0, 100, 91, 5), DirScope(24, 25, 91, -3), DirScope(26, 26, 91, 7)]
+dir_module_start = (file: int) -> int: 0
+dir_find = (setting: int, p: int, skip: int = -1) -> int:
+    if p == 25: return 1
+    if p == 26: return 2
+    if p == 27: return 0
+    -1
 resolve_type = (n: int) -> int: 200 + n
 subst = (t: int, targs: int[]) -> int:
     print("subst {t} {targs}")
@@ -121,6 +135,10 @@ facts = ():
     keys.sort()
     loop k in keys: print("fact {k} {wi_fact_calls[k]} {wi_fact_targs[k]}")
     loop r in wi_fact_requests: print("request {r.node} {r.owner}")
+zoned_read = (pos: int) -> int:
+    n = policy(pos, 2, kind_only(.none_lit), false)
+    nodes[kid(n, 0)].ival = 1
+    n
 policy = (pos: int, f: int, fallback: int, wrap: bool) -> int:
     n = call_at(pos, [typed(T_INT), fallback])
     nodes[n].sym = i32(f)
@@ -254,6 +272,8 @@ main = ():
     loop a in policy_args: wi_call(call_at(20, [a]), 1, wn)
     dir_runtime_policies[90] = true
     wi_call(call_at(20, [policy(308, 2, text(80, 0), false)]), 1, wn)
+    # (a zone read inside a scope that sets it from a run-time value is never none)
+    loop at in [25, 26, 27]: wi_call(call_at(at, [zoned_read(284 + at)]), 1, wn)
     wi_reset()
     show()
     print("{wi_fact_calls.len()} {wi_fact_targs.len()} {wi_fact_requests.len()}")
@@ -273,5 +293,5 @@ def test_warn_if_twins(compiler, tmp_path, release):  # noqa: F811
     for text in (b'unsupported `$warn_if` condition', b'a soft precondition takes', b'warn 900: t is', b"'name62'", b'name65'):
         assert text in output, text
     # (an inherited zone read whose fallback is a name never warns of none; other reads still do)
-    warned = {line.split(b':')[0] for line in output.splitlines() if line.startswith(b'warn 30') and line.endswith(b'no zone')}
-    assert warned == {b'warn 302', b'warn 303', b'warn 304', b'warn 305', b'warn 306', b'warn 307', b'warn 308'}, warned
+    warned = {line.split(b':')[0] for line in output.splitlines() if line.startswith(b'warn 3') and line.endswith(b'no zone')}
+    assert warned == {b'warn 302', b'warn 303', b'warn 304', b'warn 305', b'warn 306', b'warn 307', b'warn 308', b'warn 310', b'warn 311'}, warned
