@@ -9,7 +9,7 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 | Measure | Now (2026-11-07) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 135/135 | all |
+| Acceptance ladder, design surface | 138/138 (+1 held on D40) | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
 | No traps by default | census 2,557 sites in 1,032 of 2,252 programs, down from 3,600 on 10-26 | ordinary code proves without opt-ins |
 | Compile throughput, single thread, default build, every processed line | flagships 145.0k lines/s (11-11; 161.5k on 11-09 before the flagships began proving statically, +14% source cost) | 200–250k on every flagship |
@@ -44,7 +44,8 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
 4. **Runtime speed vs C:** full landings now gate kernel instructions
    (`bench --baseline`; waive with `bench: accept <reason>`). The push family is
    reopened: arena reached 1.42×; the last large saving needs an arena-residency
-   proof. Next: callback inlining on default, then dictionary helpers.
+   proof. Default builds already inline known callbacks (checked 11-20). Next:
+   dictionary helpers.
 5. **Decided surface still to build** ([decisions.md](docs/design/decisions.md)):
    the rest of the time system; self-length refinements (D17); R-value units;
    examples needing `$runtime_checks`, 21 of 29 as of 11-06, toward zero.
