@@ -639,8 +639,13 @@ math_word_expr = (e: int) -> int:
             a = freeze_scalar(math_low_word(int(nodes[e].a)), T_INT)
             return e_bin(.and_, VI, a, math_low_word(int(nodes[e].b)))
         a = freeze_scalar(math_word_expr(int(nodes[e].a)), T_INT)
-        b = math_word_expr(int(nodes[e].b))
-        return e_bin(int_op(nodes[e].op as Tok, true), VI, a, b)
+        op = nodes[e].op as Tok
+        b = int(nodes[e].b)
+        if op == .shl or op == .shr:
+            count = math_shift_count(b)
+            if types[prune(ntype(b))].sign: math_int_guard(e_bin(.lts, VI, count, e_iconst(0)))
+            return wide_shift(op, true, a, count, b)
+        return e_bin(int_op(op, true), VI, a, math_word_expr(b))
     value = gen_borrowed(e).v
     if exact_small_math(e) >= 0: return math_untag(value)
     math_signed(value)

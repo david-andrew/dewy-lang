@@ -28,7 +28,7 @@ from p"facts_progress.dewy" import (fact_progress_strip)
 from p"util.jo" import (files name_of pos_file)
 from p"lower_group.dewy" import (gen_borrowed gen_expr gen_for gen_loop_body gen_owned gen_stmt local_place scope_pop)
 from p"lower_helpers.dewy" import (helper_params)
-from p"lower_scalars.dewy" import (int_op math_int_guard)
+from p"lower_scalars.dewy" import (int_op math_int_guard wide_shift)
 from p"expr.jo" import (integer_constant mk_ident_local ntype)
 from p"math_lower.jo" import (math_decl_depth math_has_mutable math_loop_parent math_loop_sites math_static_regs math_static_widths math_versioning math_word_captures math_word_limits math_word_regs math_word_updates math_write_loop math_writes math_writes_ready)
 from p"lower_views.dewy" import (plain_read)
@@ -675,8 +675,14 @@ math_word_expr=(e:MathWord):>int64=>$unsafe {
             return e_bin('and_' VI a math_low_word(MathWord(nodes.ptr[e].b)))
         }
         let a=freeze_scalar(math_word_expr(MathWord(nodes.ptr[e].a)) T_INT)
-        let b=math_word_expr(MathWord(nodes.ptr[e].b))
-        return e_bin(int_op(cx_token_values.ptr[MathWord(nodes.ptr[e].op)] true) VI a b)
+        let op=cx_token_values.ptr[MathWord(nodes.ptr[e].op)]
+        let b=MathWord(nodes.ptr[e].b)
+        if op =? 'shl' or op =? 'shr' {
+            let count=math_shift_count(b)
+            if types.ptr[prune(ntype(b))].sign {math_int_guard(e_bin('lts' VI count e_iconst(0)));}
+            return wide_shift(op true a count b)
+        }
+        return e_bin(int_op(op true) VI a math_word_expr(b))
     }
     let value=gen_borrowed(e).v
     if exact_small_math(e) >=? 0 {return math_untag(value)}
