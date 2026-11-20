@@ -63,9 +63,9 @@ object_of = (hash:uint64):>SafePath => p"{vault}/objects/{hash}"
 
 # Hashing is pure work over loaded bytes, so it runs in parallel; this
 # function caps its share of the machine whatever the caller allows.
-hash_all = (contents:array<array<uint8>>):>array<uint64> => {
+hash_all = (files:array<[name:string file:SafePath bytes:array<uint8>]>):>array<uint64> => {
     $program.max_cores = 2
-    [parallel bytes in contents fnv(bytes)]
+    [parallel item in files fnv(item.bytes)]
 }
 
 backup = (n:int64<(>=? 1)> stop:Atomic<int64>) => {
@@ -74,7 +74,7 @@ backup = (n:int64<(>=? 1)> stop:Atomic<int64>) => {
         let previous = load_manifest(n - 1) or_throw
         let files = scan() or_throw
     )
-    let hashes = hash_all([loop item in files item.bytes])
+    let hashes = hash_all(files)
     p"{vault}/objects".make_dirs or_throw;
     let report = Report[0 0 0 false]
     let entries:array<Entry> = []
