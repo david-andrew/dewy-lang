@@ -19,12 +19,17 @@ const T_A = 7
 const T_B = 8
 const T_C = 9
 const T_ABC = 10
+const T_NONEV = 11
 nodes: Node[] = [Node()]
 lists: i32[]
 fns: FnInst[] = [FnInst(), FnInst()]
 ctxs: FnCtx[] = [FnCtx(), FnCtx(inst=12)]
 cx = -1
-types: TypeInfo[] = [TypeInfo(), TypeInfo(), TypeInfo(kind=.str_), TypeInfo(kind=.opt), TypeInfo(), TypeInfo(), TypeInfo(), TypeInfo(), TypeInfo(), TypeInfo(), TypeInfo()]
+types: TypeInfo[] = [TypeInfo(), TypeInfo(), TypeInfo(kind=.str_), TypeInfo(kind=.opt), TypeInfo(), TypeInfo(), TypeInfo(), TypeInfo(), TypeInfo(), TypeInfo(), TypeInfo(), TypeInfo(kind=.none_lit)]
+dir_runtime_policies: {int: bool} = {}
+intern = (s: str) -> int:
+    if s == "__zone_values": return 90
+    91
 ut_paths_used = false
 ut_p_name = 40
 kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])
@@ -39,6 +44,7 @@ warn = (pos: int, msg: str): print("warn {pos}: {msg}")
 name_of = (n: int) -> str:
     if n == 1: return "warn_if"
     if n == 2: return "length"
+    if n == 3: return "__settings_policy_read"
     "name{n}"
 pos_in_lib = (pos: int) -> bool: pos >= 1000
 resolve_type = (n: int) -> int: 200 + n
@@ -115,6 +121,14 @@ facts = ():
     keys.sort()
     loop k in keys: print("fact {k} {wi_fact_calls[k]} {wi_fact_targs[k]}")
     loop r in wi_fact_requests: print("request {r.node} {r.owner}")
+policy = (pos: int, f: int, fallback: int, wrap: bool) -> int:
+    n = call_at(pos, [typed(T_INT), fallback])
+    nodes[n].sym = i32(f)
+    nodes[n].type = i32(T_OPT)
+    if not wrap: return n
+    c = term(.conv, n, 0, 0, 0)
+    nodes[c].type = i32(T_OPT)
+    c
 main = ():
     # Declarations: none attached, other attributes, every malformed attribute, then one read once.
     wi_read_decl(mk(.fn_, 1))
@@ -223,6 +237,23 @@ main = ():
         nodes[next].type = i32(T_C + i)
         chain = next
     print("{wi_arg_type(conv)} {wi_arg_type(no_inner)} {wi_arg_type(wrapper)} {wi_arg_type(other_aux)} {wi_arg_type(resolved)} {wi_arg_type(pair)} {wi_arg_type(chain)} {wi_arg_type(typed(T_B))}")
+    # An inherited setting with the entry file's name as its fallback is never none.
+    wn = decl_of(params, [])
+    wi_decls[wn] = [WarnIf(WI_TYPE, 0, false, false, T_NONEV, [], "no zone"), WarnIf(WI_TYPE, 0, false, true, T_NONEV, [], "has zone")]
+    reader = mk(.fn_, 1)
+    nodes[reader].name = 3
+    other_reader = mk(.fn_, 1)
+    nodes[other_reader].name = 4
+    fns.push(FnInst(decl=i32(reader)))
+    fns.push(FnInst(decl=i32(other_reader)))
+    fns.push(FnInst())
+    wrapped_name = term(.conv, text(80, 0), 0, 0, 0)
+    policy_args = [policy(300, 2, text(80, 0), false), policy(301, 2, wrapped_name, true), policy(302, 2, kind_only(.none_lit), false),
+                   policy(303, 3, text(80, 0), false), policy(304, 4, text(80, 0), false), policy(305, 0, text(80, 0), false),
+                   policy(306, 99, text(80, 0), false), call_at(307, [text(80, 0)])]
+    loop a in policy_args: wi_call(call_at(20, [a]), 1, wn)
+    dir_runtime_policies[90] = true
+    wi_call(call_at(20, [policy(308, 2, text(80, 0), false)]), 1, wn)
     wi_reset()
     show()
     print("{wi_fact_calls.len()} {wi_fact_targs.len()} {wi_fact_requests.len()}")
@@ -237,7 +268,10 @@ def test_warn_if_twins(compiler, tmp_path, release):  # noqa: F811
     output = compare_narrow(compiler, tmp_path, release,
                             ('checker_tokens', 'node_store', 'checker_types', 'checker_state', 'refinement_types', 'refine_predicates', 'warn_if_ops'), DRIVER,
                             doubles={'services.jo': SERVICES, 'warn_if.jo': "use 'services.jo'\nuse 'refinement_types.dewy'\n" + state},
-                            services=('ast', 'check', 'checked_eval', 'expr', 'facts', 'safe_paths', 'types', 'util'))
+                            services=('ast', 'check', 'checked_eval', 'directives', 'expr', 'facts', 'safe_paths', 'types', 'util'))
     assert output.endswith(b'warn_if ok\n')
     for text in (b'unsupported `$warn_if` condition', b'a soft precondition takes', b'warn 900: t is', b"'name62'", b'name65'):
         assert text in output, text
+    # (an inherited zone read whose fallback is a name never warns of none; other reads still do)
+    warned = {line.split(b':')[0] for line in output.splitlines() if line.startswith(b'warn 30') and line.endswith(b'no zone')}
+    assert warned == {b'warn 302', b'warn 303', b'warn 304', b'warn 305', b'warn 306', b'warn 307', b'warn 308'}, warned

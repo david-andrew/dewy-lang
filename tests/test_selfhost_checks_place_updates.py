@@ -6,7 +6,8 @@ from tests.support import ROOT, compiler  # noqa: F401
 
 DIRS = ('tuple_slot_write', 'pool_fixed_update', 'end', 'refine_selection_output', 'slice_assign_extents', 'nd_contracts',
         'notraps16_shapes', 'notraps24', 'copies', 'argument', 'dict_refine', 'juxtaposition', 'multi', 'semicolon_narrow',
-        'numbers', 'compound', 'grouped_place', 'refine_lent_annotation', 'positional')
+        'numbers', 'compound', 'grouped_place', 'refine_lent_annotation', 'positional',
+        'decided_generic_lengths')
 
 
 def test_checks_place_updates_match_twin(compiler, tmp_path, monkeypatch):

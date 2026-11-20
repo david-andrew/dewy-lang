@@ -21,6 +21,7 @@ from p"refine.jo" import (ref_nd_receivers refine_active)
 from p"refine_metadata.dewy" import (refine_storage)
 from p"refine_ops.dewy" import (total_dict_keys)
 from p"type_ops.dewy" import (dt mk_fixed)
+from p"type_value_arguments.dewy" import (integer_parameter_literal)
 from p"types.jo" import (T_INT T_MATH_INT T_NEVER is_float is_int is_numeric is_union prune structs targ tkind ts_dewy type_eq types union_members)
 from p"unit_ops.dewy" import (quantity_int_promotes)
 from p"unit_rare.dewy" import (time_core_type)
@@ -408,10 +409,15 @@ shape_dim_decl=(s:PlaceUpdateWord):>void=>$unsafe {
     let sym=lookup(PlaceUpdateWord(nodes.ptr[s].name))
     if sym =? 0 {return}
     let sk=syms.ptr[sym].kind
-    if sk not=? 'local' and sk not=? 'global' and sk not=? 'const_' {return}
     let dim=PlaceUpdateWord(nodes.ptr[s].b)
     let known=mk('ident' nodes.ptr[s].pos)
     nodes.ptr[known].name=nodes.ptr[s].name
+    # (an integer type parameter, `<R C>(g:array<T length=[R C]>)`, is a known value too)
+    if sk =? 'type_' {
+        known=integer_parameter_literal(known)
+        if known =? 0 {return}
+    }
+    else if sk not=? 'local' and sk not=? 'global' and sk not=? 'const_' {return}
     let check=bc_call("__shape_check" [kid(dim 0) kid(dim 1) known] nodes.ptr[s].pos)
     nodes.ptr[s]=Node(kind='exprstmt' pos=nodes.ptr[s].pos a=int32(check))
 }

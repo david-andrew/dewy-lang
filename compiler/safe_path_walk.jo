@@ -838,7 +838,8 @@ ut_visit = (n: int):
     if k == .conv and nodes[n].aux == i32(int(CV.refinement)) and ut_safe_contract(int(nodes[n].aux2)):
         value = int(nodes[n].a)
         ut_visit(value)
-        if ut_first and not pos_in_lib(nodes[n].pos) and not ut_safe(value): ut_contract_failures.push(value)
+        # (a fallback that leaves, as `?? return none` or `?? continue`, stores nothing)
+        if ut_first and not pos_in_lib(nodes[n].pos) and not ut_safe(value) and not ut_exits(ut_strip(value)): ut_contract_failures.push(value)
         return
     if k == .lambda or k == .fn_ or k == .struct_ or k == .enum_ or k == .typealias or k == .tname or k == .fnref: return
     if k == .block:

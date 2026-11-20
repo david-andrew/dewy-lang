@@ -28,6 +28,7 @@ use 'checker_vardecls.dewy'
 use 'checker_for_loops.dewy'
 use 'checker_statements.dewy'
 use 'checker_exprstmts.dewy'
+use 'type_value_arguments.dewy'
 use 'checker_returns.dewy'
 use 'checker_loops.dewy'
 use 'checker_zonk.dewy'
@@ -487,10 +488,14 @@ shape_dim_decl = (s: int):
     sym = lookup(int(nodes[s].name))
     if sym == 0: return
     sk = syms[sym].kind
-    if sk != .local and sk != .global and sk != .const_: return
     dim = int(nodes[s].b)
     known = mk(.ident, nodes[s].pos)
     nodes[known].name = nodes[s].name
+    # (an integer type parameter, `<R C>(g:array<T length=[R C]>)`, is a known value too)
+    if sk == .type_:
+        known = integer_parameter_literal(known)
+        if known == 0: return
+    else if sk != .local and sk != .global and sk != .const_: return
     check = bc_call("__shape_check", [kid(dim, 0), kid(dim, 1), known], nodes[s].pos)
     nodes[s] = Node(kind = .exprstmt, pos = nodes[s].pos, a = i32(check))
 # `let m:array<T length=[2 3]>=value`: the value's rank and dimensions are

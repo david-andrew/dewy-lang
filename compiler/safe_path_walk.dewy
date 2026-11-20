@@ -998,7 +998,8 @@ ut_visit=(n:PathWalkWord):>void=>$unsafe {
     if k =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.refinement)) and ut_safe_contract(PathWalkWord(nodes.ptr[n].aux2)) {
         let value=PathWalkWord(nodes.ptr[n].a)
         ut_visit(value)
-        if ut_first and not pos_in_lib(nodes.ptr[n].pos) and not ut_safe(value) {ut_contract_failures.push(value)}
+        # (a fallback that leaves, as `?? return none` or `?? continue`, stores nothing)
+        if ut_first and not pos_in_lib(nodes.ptr[n].pos) and not ut_safe(value) and not ut_exits(ut_strip(value)) {ut_contract_failures.push(value)}
         return
     }
     if k =? 'lambda' or k =? 'fn_' or k =? 'struct_' or k =? 'enum_' or k =? 'typealias' or k =? 'tname' or k =? 'fnref' {return}

@@ -14,6 +14,7 @@ use 'facts.jo'
 use 'facts_compare.dewy'
 use 'safe_paths.jo'
 use 'safe_path_walk.dewy'
+use 'directives.jo'
 
 wi_reset = ():
     wi_decls = {}
@@ -122,10 +123,24 @@ wi_call = (n: int, f: int, decl: int):
         x = kid(n, w.param)
         r = wi_is(wi_arg_type(x), subst(w.type, fns[f].targs))
         if w.negated and r == 1 or not w.negated and r == 0: continue
+        if not w.negated and wi_named_policy(x) and types[prune(w.type)].kind == .none_lit: continue
         # (a parameter's default is the caller's to fix: at the call)
         at = nodes[x].pos
         if pos_in_lib(at): at = nodes[n].pos
         warn(at, w.message)
+# A setting a function inherits at run time (`$time.zone` read where no scope of its own sets
+# it) falls back to the entry file's name, so it is never none unless some scope sets the zone
+# from a run-time value. O(1).
+wi_named_policy = (x0: int) -> bool:
+    x = x0
+    if nodes[x].kind == .conv and nodes[x].a != 0: x = int(nodes[x].a)
+    if nodes[x].kind != .call or nkids(x) != 2: return false
+    f = int(nodes[x].sym)
+    if f <= 0 or f >= fns.len() or fns[f].decl == 0: return false
+    if name_of(int(nodes[int(fns[f].decl)].name)) != "__settings_policy_read": return false
+    fallback = kid(x, 1)
+    if nodes[fallback].kind == .conv and nodes[fallback].a != 0: fallback = int(nodes[fallback].a)
+    nodes[fallback].kind == .str_lit and not dir_runtime_policies.has(intern("__zone_values"))
 # (the argument's own type, under the conversion to the parameter's)
 wi_arg_type = (x0: int) -> int:
     x = x0

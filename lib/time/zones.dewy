@@ -970,7 +970,12 @@ local_zone_error=(l:LocalDateTime z:Zone fold:_FoldChoice|none gap:_GapChoice|no
 
 # By a pattern, with `XXX` and `VV` for its offset and zone.
 zoned_pattern_error=(p:string):>string?=>pattern.pattern_error(p true true true)
-zoned_pattern_only=(p:string):>string?=>zoned_pattern_error(p) ?? ""
+# (a pattern that cannot drop an offset's seconds proves the call; `XXX` may, so it only passes)
+zoned_pattern_only=(p:string):>string?=>{
+    let wrong=zoned_pattern_error(p)
+    if wrong isnt? none {return wrong}
+    if pattern.offset_loss_error(p 1) is? none {none} else {""}
+}
 zoned_format_error=(z:ZonedDateTime p:string):>string?=>{
     let wrong=zoned_pattern_error(p)
     if wrong isnt? none {return wrong}

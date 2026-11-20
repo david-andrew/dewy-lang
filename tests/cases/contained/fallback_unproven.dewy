@@ -1,0 +1,4 @@
+# A fallback that gives an unproven path still breaks the SafePath contract.
+const root = p"ws"
+pick = (name:string):>SafePath => root.confine(p"{root}/{name}") ?? p"{root}/{name}"
+main = () => printl(pick("x"))

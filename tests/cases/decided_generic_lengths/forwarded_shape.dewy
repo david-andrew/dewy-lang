@@ -1,0 +1,8 @@
+# Integer type parameters named in a shaped parameter are its dimensions, and forward on.
+inner = <R C>(g:array<int64 length=[R C]>):>int64 => R * 10 + C
+outer = <R C>(g:array<int64 length=[R C]>):>int64 => inner<R C>(g)
+main = () => {
+    let g:array<int64 length=[2 3]> = [1 2 3
+                                       4 5 6]
+    printl(outer<2 3>(g))
+}

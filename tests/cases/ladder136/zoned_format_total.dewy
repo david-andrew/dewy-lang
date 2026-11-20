@@ -1,0 +1,6 @@
+# A constant pattern that cannot drop an offset's seconds proves a zoned format total.
+clock = (t:ZonedDateTime):>string => t.format("EEE d MMM HH:mm")
+main = () => {
+    let ny = zone("America/New_York") or_throw
+    printl(clock(instant"2026-10-27T13:00:00Z".in_zone(ny)))
+}

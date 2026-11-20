@@ -1,0 +1,15 @@
+# A `??` fallback that leaves stores nothing, so the confined path keeps its SafePath contract.
+const root = p"ws"
+Entry:type = [file:SafePath]
+entry = (name:string):>Entry | none => {
+    let file = root.confine(p"{root}/{name}") ?? return none
+    Entry[file]
+}
+main = () => {
+    let kept:array<SafePath> = []
+    loop name in ["notes.txt" "../secret" "a/b.txt"] {
+        kept.push(root.confine(p"{root}/{name}") ?? continue)
+        printl"{name}: {entry(name) isnt? none}"
+    }
+    printl(kept.length)
+}
