@@ -7,7 +7,7 @@ from tests.support import ROOT, compiler  # noqa: F401
 
 @pytest.mark.parametrize('release', [False, True])
 def test_policy_literal_strict_validation_matches_twins(compiler, tmp_path, release):
-    services=SERVICES.replace('intern = (s: str) -> int: 1', 'intern = (s: str) -> int: if s == "time.fold": 2 else: 1').replace('''ct_run = (n: int) -> int:
+    services=SERVICES.replace('intern = (s: str) -> int: 1', 'intern = (s: str) -> int: if s == "time.fold": 2 else if s == "__zone_values": 3 else: 1').replace('''ct_run = (n: int) -> int:
     print(''','''ct_run = (n: int) -> int:
     loop a in kids(n): print("arg {nodes[a].kind == .none_lit} {nodes[a].type} {nodes[a].flags}")
     print(''')
@@ -44,6 +44,14 @@ def test_policy_literal_strict_validation_matches_twins(compiler, tmp_path, rele
     # (a delimited call is not a literal)
     files[0].src = "zoned(\"2026\""
     print(cc_call(literal(T_OPT), 1, decl))
+    # (a computed zone alone: the same strict reading, not a refusal)
+    dir_runtime_policies = {}
+    dir_runtime_policies[3] = true
+    files[0].src = "zoned\"2026\""
+    next_value = verdict(T_OPT, 0, "", [])
+    computed = literal(T_OPT)
+    print(cc_call(computed, 1, decl))
+    print("computed {nodes[computed].kind == .narrow}")
     print("policy literals ok")
 '''
     result=compare_narrow(compiler,tmp_path,release,
@@ -51,6 +59,6 @@ def test_policy_literal_strict_validation_matches_twins(compiler, tmp_path, rele
         doubles={'services.jo':services,'check_constant.jo':(ROOT/'compiler/check_constant.jo').read_text()},
         services=('directives','checker_expr','ast','check','expr','types','util','errors','error_ops','comptime','warn_if_ops','constant_folds','unit_rare'))
     assert result.endswith(b'policy literals ok\n')
-    for text in (b'arg true 30 128', b'true true', b'not a zoned time: happens more than once (functions here set time policies',
+    for text in (b'computed true', b'arg true 30 128', b'true true', b'not a zoned time: happens more than once (functions here set time policies',
                  b'literal validation through inherited run-time time policies is not yet supported'):
         assert text in result, (text, result)

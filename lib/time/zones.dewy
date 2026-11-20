@@ -616,8 +616,9 @@ _zone_for=(written:Zone|none given:Zone|none scope:string|none running:bool):>Zo
     if not running and (scope is? none or scope =? 'system') {
         return MissingContext["there is no zone to read this in, and a literal cannot assume one: write it in the text, `2026-10-26T09:00[America/New_York]`, pass `zone=`, or set `$time.zone`"]
     }
-    # (unspecified means the running machine, and the call has already warned)
-    if scope isnt? none {
+    # (unspecified means the running machine, and the call has already warned; a computed
+    # zone's binding exists only while the program runs)
+    if running and scope isnt? none {
         let bound=__settings_zone_bound(scope)
         if bound >=? 0 {return Zone[bound]}
     }

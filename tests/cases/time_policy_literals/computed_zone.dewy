@@ -1,0 +1,19 @@
+# A zone computed at run time is a policy like the others: literals that name
+# their zone and a time that happens once still compile beside it.
+const LAUNCH = zoned"2026-10-26T09:00[America/New_York]"
+
+office = (z:Zone):>void => {
+    $time.zone = z
+    let text:string = "2026-10-26T09:00"
+    let local = zoned(text)
+    if local is? ZonedDateTime printl"office reads {local}"
+    printl"sydney {zoned"2026-10-26T09:00[Australia/Sydney]"}"
+    printl"launch {LAUNCH} is {LAUNCH.nominal.in_zone(z)} there"
+}
+
+main = () => {
+    printl"tokyo {zoned"2026-10-26T09:00[Asia/Tokyo]"}"
+    printl"zone {zone"Europe/Berlin"}"
+    let name:string = "Europe/Berlin"
+    office(zone(name) ?? zone"UTC")
+}
