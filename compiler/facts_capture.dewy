@@ -1515,7 +1515,8 @@ fact_capture_value=(n:CaptureWord @s:FactState):>int64=>$unsafe {
                 heap_length=fact_project(@s held[CaptureWord(held.length) - 1] (-1) false T_INT)
             }
         }
-        if not fact_search_reads_only(n) {fact_path_call_effects(n @s)}
+        # (the library's floor helpers are arithmetic: they write no place of the caller)
+        if not fact_search_reads_only(n) and fact_floor_call(n) =? 0 {fact_path_call_effects(n @s)}
         if heap_length not=? 0 {
             let fresh=fact_new(@s FactBound() FactTerm(type=ntype(kid(n 0))))
             let delta=if heap =? 1 {1} else {-1}

@@ -355,7 +355,13 @@ fact_floor=(@s:FactState n:NumericWord kind:NumericWord a:NumericWord b:NumericW
     if y.lo <? 1 and y.hi >=? 1 {y.lo=max(y.lo fact_relational(s b false))}
     # Shrinking an unbounded mathematical value does not make it a word.
     # Endpoint sentinels must not become finite merely by division/shift.
-    if (kind =? 1 or kind =? 3) and (not fact_host_endpoint(s a false) or not fact_host_endpoint(s a true)) {return fact_unmodeled(@s n 'unsupported')}
+    # A real nonnegative floor under an open top still shrinks: the quotient keeps that
+    # floor divided and its top open (`i // 64` of an `int<(>=? 0)>` is at least 0).
+    let open_top=false
+    if (kind =? 1 or kind =? 3) and (not fact_host_endpoint(s a false) or not fact_host_endpoint(s a true)) {
+        if not fact_host_endpoint(s a false) or x.lo <? 0 or x.hi not=? FACT_MAX {return fact_unmodeled(@s n 'unsupported')}
+        open_top=true
+    }
     # (a shift count stays below the word; a mask is any nonnegative value)
     if kind =? 3 or kind =? 4 {
         if y.lo <? 0 or kind =? 3 and y.hi >? 62 {return fact_unmodeled(@s n 'unsupported')}
@@ -410,6 +416,7 @@ fact_floor=(@s:FactState n:NumericWord kind:NumericWord a:NumericWord b:NumericW
         r.lo=NumericWord(x.lo) >> NumericWord(y.hi)
         r.hi=NumericWord(x.hi) >> NumericWord(y.lo)
     }
+    if open_top {r.hi=FACT_MAX}
     let v=fact_new(@s r FactTerm('eof' a b n ntype(n)))
     fact_set_bound(@s v r)
     if kind =? 2 {fact_difference(@s v b (-1) n)}

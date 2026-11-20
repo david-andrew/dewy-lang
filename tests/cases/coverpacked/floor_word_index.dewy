@@ -1,0 +1,25 @@
+# A word index from a nonnegative `int` by floor division keeps its floor, and a
+# power-of-two remainder computed before the store forgets nothing about the array.
+Bits:type = [words:array<uint64>]
+
+set_bit = (@b:Bits i:int<(>=? 0)>):>void => {
+    let w = i // 64
+    if w >=? b.words.length return
+    let bit = uint64(i % 64)
+    b.words[w] = b.words[w] | (uint64(1) << bit)
+}
+
+slot = (xs:array<uint64> i:int<(>=? 0)>):>uint64 => {
+    let w = i // 3
+    if w >=? xs.length return 0
+    xs[w]
+}
+
+main = () => {
+    let b = Bits[[0 0]]
+    set_bit(@b 3)
+    set_bit(@b 70)
+    set_bit(@b 200)
+    printl(b.words)
+    printl"{slot([10 20 30] 7)} {slot([10 20 30] 9)}"
+}

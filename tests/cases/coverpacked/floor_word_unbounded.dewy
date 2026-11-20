@@ -1,0 +1,6 @@
+# The quotient of an `int` with no upper bound keeps an open top: it is not a word.
+f = (i:int<(>=? 0)>):>int64 => {
+    let w = i // 64
+    int64(w)
+}
+main = () => printl(f(5))

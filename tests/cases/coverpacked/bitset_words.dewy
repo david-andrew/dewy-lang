@@ -1,0 +1,24 @@
+# A bitset packed into 64-bit words: set, test, count.
+Bits:type = [words:array<uint64>]
+
+make = (n:int<(>=? 0)>):>Bits => Bits[[loop _ in [0..(n + 63) // 64) uint64(0)]]
+
+set = (@b:Bits i:int<(>=? 0)>):>void => {
+    let w = i // 64
+    if w >=? b.words.length return
+    b.words[w] = b.words[w] | (uint64(1) << uint64(i % 64))
+}
+
+has = (b:Bits i:int<(>=? 0)>):>bool => {
+    let w = i // 64
+    if w >=? b.words.length return false
+    (b.words[w] >> uint64(i % 64)) & 1 =? 1
+}
+
+main = () => {
+    let b = make(200)
+    loop i in [0..200) { if i % 7 =? 0 set(@b i) }
+    let count = 0
+    loop i in [0..200) { if has(b i) count += 1 }
+    printl"{count} {has(b 63)} {has(b 70)} {b.words.length}"
+}

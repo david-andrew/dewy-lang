@@ -1282,7 +1282,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             if heap_route.root != 0 and fact_place(heap_route.root).declaration != 0 and not fact_exposed(fact_place(heap_route.root)):
                 held = fact_route_values(s, heap_route)
                 heap_length = fact_project(s, held[held.len() - 1], -1, false, T_INT)
-        if not fact_search_reads_only(n): fact_path_call_effects(n, s)
+        # (the library's floor helpers are arithmetic: they write no place of the caller)
+        if not fact_search_reads_only(n) and fact_floor_call(n) == 0: fact_path_call_effects(n, s)
         if heap_length != 0:
             fresh = fact_new(s, FactBound(), FactTerm(type = ntype(kid(n, 0))))
             delta = if heap == 1: 1 else: -1
