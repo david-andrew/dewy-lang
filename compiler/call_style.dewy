@@ -46,9 +46,10 @@ call_style_value_context=(p:StyleWord n:StyleWord):>bool=>$unsafe {
     if bytes[i] =? 61 and i >? 0 and bytes[i - 1] not=? 61 and bytes[i - 1] not=? 33 and bytes[i - 1] not=? 60 and bytes[i - 1] not=? 62 and bytes[i - 1] not=? 63 {
         let first=start
         loop first <? i and (bytes[first] =? 32 or bytes[first] =? 9) {first+=1}
-        return src.byte_slice(first first + 4) =? "let "
+        return first + 3 <? i and bytes[first] =? 108 and bytes[first + 1] =? 101 and bytes[first + 2] =? 116 and bytes[first + 3] =? 32
     }
-    i >=? 5 and src.byte_slice(i - 5 i + 1) =? "return" and (i =? 5 or not (call_style_word(bytes[i - 6])))
+    # The six bytes before the call can start in the middle of a UTF-8 character.
+    i >=? 5 and bytes[i - 5] =? 114 and bytes[i - 4] =? 101 and bytes[i - 3] =? 116 and bytes[i - 2] =? 117 and bytes[i - 1] =? 114 and bytes[i] =? 110 and (i =? 5 or not (call_style_word(bytes[i - 6])))
 }
 # Whether the word before p is `in`: a loop's header, which treats a bare member as a sequence.
 call_style_after_in=(p:StyleWord):>bool=>$unsafe {

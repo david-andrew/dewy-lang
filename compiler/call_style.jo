@@ -42,8 +42,9 @@ call_style_value_context = (p: int, n: int) -> bool:
     if src[i] == 61 and i > 0 and src[i - 1] != 61 and src[i - 1] != 33 and src[i - 1] != 60 and src[i - 1] != 62 and src[i - 1] != 63:
         first = start
         loop first < i and (src[first] == 32 or src[first] == 9): first += 1
-        return src[first..first + 4) == "let "
-    i >= 5 and src[i - 5..i + 1) == "return" and (i == 5 or not call_style_word(src[i - 6]))
+        return first + 3 < i and src[first] == 108 and src[first + 1] == 101 and src[first + 2] == 116 and src[first + 3] == 32
+    # The six bytes before the call can start in the middle of a UTF-8 character.
+    i >= 5 and src[i - 5] == 114 and src[i - 4] == 101 and src[i - 3] == 116 and src[i - 2] == 117 and src[i - 1] == 114 and src[i] == 110 and (i == 5 or not call_style_word(src[i - 6]))
 # Whether the word before p is `in`: a loop's header, which treats a bare member as a sequence.
 call_style_after_in = (p: int) -> bool:
     src = files[pos_file(p)].src
