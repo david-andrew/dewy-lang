@@ -66,9 +66,17 @@ xo_check=(n:XOWord expected:XOWord ex:XOWord):>CheckerOptionalResult=>$unsafe {
     if xo_types[0].ptr[at].kind not=? 'opt' {xo_host[0].error(n at unwrap)}
     let inner=XOWord(xo_types[0].ptr[at].elem)
     if unwrap {return [type=inner bypass=false]}
+    let fallback=XOWord(xo_nodes[0].ptr[n].b)
+    let infer_exact=ex =? 0 and xo_dewy(n) and inner not=? xo_math_int[0] and xo_types[0].ptr[tu_prune(inner)].kind =? 'int_'
     let h2=inner
     if ex not=? 0 {h2=ex}
-    let btt=tu_prune(xo_host[0].check(XOWord(xo_nodes[0].ptr[n].b) h2))
+    if infer_exact {
+        # A hard fixed-width hint on a value control narrows its arms before
+        # the coalesce can see and preserve their exact arithmetic.
+        let k=xo_nodes[0].ptr[fallback].kind
+        if k =? 'if_' or k =? 'iflet' or k =? 'match_' or k =? 'coalesce' or k =? 'block' {h2=0}
+    }
+    let btt=tu_prune(xo_host[0].check(fallback h2))
     let t=inner
     # Prefer the payload when the fallback fits it, including an inner none.
     # A fallback needing the outer optional keeps that result's extra layer.
@@ -76,7 +84,7 @@ xo_check=(n:XOWord expected:XOWord ex:XOWord):>CheckerOptionalResult=>$unsafe {
         xo_host[0].coerce(XOWord(xo_nodes[0].ptr[n].b) at);
         t=at
         xo_nodes[0][n].aux=1
-    } else if xo_dewy(n) and ex =? 0 and xo_types[0].ptr[tu_prune(inner)].kind =? 'int_' and inner not=? xo_math_int[0] and btt =? xo_math_int[0] and xo_host[0].exact(XOWord(xo_nodes[0].ptr[n].b)) {
+    } else if infer_exact and btt =? xo_math_int[0] and xo_host[0].exact(fallback) {
         t=xo_math_int[0]
     } else if ex not=? 0 and xo_host[0].union(ex) {
         xo_host[0].coerce(XOWord(xo_nodes[0].ptr[n].b) ex);

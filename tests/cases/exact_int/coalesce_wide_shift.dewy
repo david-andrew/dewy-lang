@@ -1,0 +1,12 @@
+$runtime_checks
+$no_assumed_bounds
+
+main = ():>void => {
+    let n:int64 = -4
+    let missing:int64? = none
+    let present:int64? = 11
+    printl(missing ?? (match missing {value:int64 => value <none> => n << 63}))
+    printl(missing ?? (if missing is? none n << 63 else n))
+    printl(missing ?? (missing ?? (n << 63)))
+    printl(present ?? (match missing {value:int64 => value <none> => n << 63}))
+}
