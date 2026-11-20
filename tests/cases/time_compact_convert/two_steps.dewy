@@ -1,0 +1,14 @@
+# A compact duration column made the way the diagnostic says: the Duration first.
+main = () => {
+    let laps:array<Duration> = [83500ms 81250ms 90s]
+    let compact:array<Duration<width=64>> = []
+    loop d in laps {
+        match convert<Duration<width=64>>(d) {
+            c:Duration<width=64> => compact.push(c)
+            _ => printl"too long"
+        }
+    }
+    let total:Duration = 0s
+    loop c in compact { total = total + (c as Duration) }
+    printl"{compact.length} laps, {total}"
+}
