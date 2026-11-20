@@ -1,0 +1,28 @@
+# Function-scoped time policies govern their own dynamic extent: zoned literals
+# elsewhere that name their zone and a time that happens once still compile.
+$time.zone = 'UTC'
+
+const LAUNCH = zoned"2026-10-26T09:00[America/New_York]"
+
+berlin = ():>void => {
+    $time.zone = 'Europe/Berlin'
+    printl"berlin reads {zoned"2026-10-26T09:00"}"
+    printl"berlin keeps {zoned"2026-10-26T09:00[Asia/Tokyo]"}"
+}
+
+handoff = ():>void => {
+    $time.fold = 'later'
+    $time.gap = 'next'
+    printl"handoff {zoned"2026-11-01T01:30[America/New_York]"}"
+}
+
+helper = ():>string => "{zoned"2026-03-29T03:30[Europe/Berlin]"}"
+
+main = () => {
+    printl"launch {LAUNCH}"
+    printl"week later {LAUNCH + 1week}"
+    printl"helper {helper()}"
+    berlin()
+    handoff()
+    printl"date {date"2026-10-24"}"
+}

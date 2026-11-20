@@ -112,7 +112,19 @@ cc_call=(n:ConstantWord f:ConstantWord decl:ConstantWord):>ConstantWord=>$unsafe
             let src=files[pos_file(nodes[n].pos)].src as array<uint8>
             let literal=pos_file(nodes[kid(n 0)].pos) =? pos_file(nodes[n].pos) and start >=? 0 and stop >? start and stop <=? src.length
             if literal {loop i in [start..stop) {if src[i] =? 40 {literal=false;break}}}
-            if literal {fatal(nodes[n].pos "literal validation through inherited run-time time policies is not yet supported; use a delimited zoned(text) call and handle its failures")}
+            if not literal {continue}
+            # (a policy read at run time stands as none, the strictest: a literal that names its
+            # zone and a local time that happens once means the same under every policy)
+            let args=cc_arguments(kids(n) c true)
+            if args.length not=? c.params.length {fatal(nodes[n].pos "literal validation through inherited run-time time policies is not yet supported; use a delimited zoned(text) call and handle its failures")}
+            let pos=cc_check_pos(n c)
+            let said=cc_verdict(c args pos)
+            if said isnt? none {
+                if said =? "" {return 0}
+                fatal(pos "{c.message}: {said} (functions here set time policies as the program runs, so a literal reads without them)")
+            }
+            cc_passed[n]=true
+            return cc_narrow(n)
         }
     }
     # (the first check whose arguments are all closed decides)
@@ -208,7 +220,8 @@ cc_choose=(n:ConstantWord decls:array<int64> args:array<array<int64>> params:arr
     plain
 }
 # The constants a check's parameters are given, as its validator takes them; short when one is not.
-cc_arguments=(xs:array<int64> c:CheckConstant):>array<int64>=>$unsafe {
+# open_none: an open argument of an optional parameter stands as none.
+cc_arguments=(xs:array<int64> c:CheckConstant open_none:bool=false):>array<int64>=>$unsafe {
     let args:array<int64>=[]
     loop p in c.params {
         if p >=? xs.length {return args}
@@ -221,10 +234,14 @@ cc_arguments=(xs:array<int64> c:CheckConstant):>array<int64>=>$unsafe {
             nodes.ptr[arg].type=int32(T_STR)
             add_flag(arg NF_CHECKED)
             args.push(arg)
-        } else {
-            if not cc_closed_expr(x 0) {return args}
-            args.push(x)
+        } else if cc_closed_expr(x 0) {args.push(x)}
+        else if open_none and tkind(prune(ntype(x))) =? 'opt' {
+            let none_arg=mk('none_lit' nodes.ptr[x].pos)
+            nodes.ptr[none_arg].type=int32(prune(ntype(x)))
+            add_flag(none_arg NF_CHECKED)
+            args.push(none_arg)
         }
+        else {return args}
     }
     args
 }

@@ -1885,7 +1885,9 @@ alter the ordinary single-result call's type.
 
 `$time.zone = 'America/New_York'` at the top of the entry file supplies the default
 zone. At the top inside a function or block, it sets the zone for that scope's
-calls and tasks and restores the caller's policy on return. A non-entry file's
+calls and tasks and restores the caller's policy on return. A literal outside such a
+scope cannot know which caller's policies it runs under, so it reads none: one that
+names its zone and a local time that happens once compiles anywhere. A non-entry file's
 header applies only when that file runs as the entry; its functions can still
 set their own policies. `'system'` reads the
 name of the machine's zone when the program runs, and `'build'` pins the zone of the machine building it.

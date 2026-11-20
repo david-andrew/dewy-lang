@@ -106,7 +106,17 @@ cc_call = (n: int, f: int, decl: int) -> int:
                     if src[i] == 40:
                         literal = false
                         break
-            if literal: fatal(nodes[n].pos, "literal validation through inherited run-time time policies is not yet supported; use a delimited zoned(text) call and handle its failures")
+            if not literal: continue
+            # (a policy read at run time stands as none, the strictest: a literal that names its
+            # zone and a local time that happens once means the same under every policy)
+            args = cc_arguments(kids(n), c, true)
+            if args.len() != c.params.len(): fatal(nodes[n].pos, "literal validation through inherited run-time time policies is not yet supported; use a delimited zoned(text) call and handle its failures")
+            pos = cc_check_pos(n, c)
+            if let said = cc_verdict(c, args, pos):
+                if said == "": return 0
+                fatal(pos, "{c.message}: {said} (functions here set time policies as the program runs, so a literal reads without them)")
+            cc_passed[n] = true
+            return cc_narrow(n)
     # (the first check whose arguments are all closed decides)
     loop c in cc_decls[decl]:
         if c.params.len() == 1 and c.params[0] < nkids(n) and time_grid_proven(c.validator, kid(n, c.params[0])): return cc_narrow(n, "OffGrid")
@@ -182,7 +192,8 @@ cc_choose = (n: int, decls: int[], args: int[][], params: int[][]) -> int[]:
     if constant and failed_pos != 0: fatal(failed_pos, failed)
     plain
 
-cc_arguments = (xs: int[], c: CheckConstant) -> int[]:
+# open_none: an open argument of an optional parameter stands as none.
+cc_arguments = (xs: int[], c: CheckConstant, open_none: bool = false) -> int[]:
     args: int[]
     loop p in c.params:
         if p >= xs.len(): return args
@@ -195,9 +206,13 @@ cc_arguments = (xs: int[], c: CheckConstant) -> int[]:
             nodes[arg].type = i32(T_STR)
             add_flag(arg, NF_CHECKED)
             args.push(arg)
-        else:
-            if not cc_closed_expr(x, 0): return args
-            args.push(x)
+        else if cc_closed_expr(x, 0): args.push(x)
+        else if open_none and tkind(prune(ntype(x))) == .opt:
+            none_arg = mk(.none_lit, nodes[x].pos)
+            nodes[none_arg].type = i32(prune(ntype(x)))
+            add_flag(none_arg, NF_CHECKED)
+            args.push(none_arg)
+        else: return args
     args
 
 # A call that cannot fail: its type without the exceptions, or its value when that is one plain record.
