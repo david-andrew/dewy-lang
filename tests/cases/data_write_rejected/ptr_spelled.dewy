@@ -1,0 +1,7 @@
+# quick
+# The diagnostic names the spelling the program used: `xs.ptr`.
+write=(xs:array<int64>):>void=>{
+    let p=xs.ptr
+    $unsafe p[0]=42
+}
+main=()=>{let xs:array<int64>=[10] write(xs) printl(xs)}

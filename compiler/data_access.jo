@@ -10,6 +10,19 @@ use 'util.jo'
 use 'source_warnings.dewy'
 use 'diagnostic_exit.dewy'
 # Frozen parameter-data diagnostics for the independent bootstrap.
+# (the program wrote `xs.ptr` here, not `xs.data()`: the first of the two on the line from p)
+data_spelled_ptr = (p: int) -> bool:
+    f = pos_file(p)
+    if p <= 0 or f < 0 or f >= files.len(): return false
+    src = files[f].src
+    i = pos_off(p)
+    loop i >= 0 and i + 3 < len(src) and src[i] != '\n':
+        if src[i] == 'd' and i + 4 < len(src) and src[i + 1] == 'a' and src[i + 2] == 't' and src[i + 3] == 'a' and src[i + 4] == '(': return false
+        if src[i] == '.' and src[i + 1] == 'p' and src[i + 2] == 't' and src[i + 3] == 'r':
+            after = if i + 4 < len(src): src[i + 4] else: ' '
+            if not (after >= 'a' and after <= 'z' or after >= 'A' and after <= 'Z' or after >= '0' and after <= '9' or after == '_'): return true
+        i += 1
+    false
 data_functions: {int: bool}
 data_access_reset = ():
     data_functions.clear(); ptr_reads_reset()
@@ -41,6 +54,7 @@ data_access_finalize = ():
         l = data_parameter(kid(n, 0))
         if l == 0: continue
         name = name_of(int(locals[l].name))
-        message = "data() of plain parameter '{name}' may be written through or escape; the caller cannot see writes to its private copy: take `@{name}` and pass `@{name}`, or copy into a local first"
+        spelled = if data_spelled_ptr(nodes[n].pos): "`{name}.ptr`" else: "data()"
+        message = "{spelled} of plain parameter '{name}' may be written through or escape; the caller cannot see writes to its private copy: take `@{name}` and pass `@{name}`, or copy into a local first"
         if ffi_unsafe_at(nodes[n].pos): warn(nodes[n].pos, message)
         else: fatal(nodes[n].pos, message)

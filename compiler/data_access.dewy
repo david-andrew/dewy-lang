@@ -7,7 +7,7 @@ from p"types.jo" import tkind
 from p"refine_metadata.dewy" import (representation_type)
 from p"lower_ptr_reads.dewy" import (pr_find pr_parent pr_written ptr_reads ptr_reads_reset)
 from p"ffi_checks.dewy" import ffi_unsafe_at
-from p"util.jo" import (name_of)
+from p"util.jo" import (files name_of pos_file pos_off)
 from p"source_warnings.dewy" import (warn)
 from p"diagnostic_exit.dewy" import (fatal)
 # Only data() sites rooted in value parameters demand a check. Reuse the indexed
@@ -31,6 +31,22 @@ data_parameter=(source:DAWord):>DAWord=>$unsafe {
     }
     0
 }
+# (the program wrote `xs.ptr` here, not `xs.data()`: the first of the two on the line from p)
+data_spelled_ptr=(p:DAWord):>bool=>$unsafe {
+    let f=pos_file(p)
+    if p <=? 0 or f <? 0 or f >=? files.length {return false}
+    let src=files[f].src as array<uint8>
+    let i=pos_off(p)
+    loop i >=? 0 and i + 3 <? src.length and src[i] not=? b'\n' {
+        if src[i] =? b'd' and i + 4 <? src.length and src[i + 1] =? b'a' and src[i + 2] =? b't' and src[i + 3] =? b'a' and src[i + 4] =? b'(' {return false}
+        if src[i] =? b'.' and src[i + 1] =? b'p' and src[i + 2] =? b't' and src[i + 3] =? b'r' {
+            let after=if i + 4 <? src.length {src[i + 4]} else {b' '}
+            if not (after >=? b'a' and after <=? b'z' or after >=? b'A' and after <=? b'Z' or after >=? b'0' and after <=? b'9' or after =? b'_') {return true}
+        }
+        i += 1
+    }
+    false
+}
 data_access_note=(n:DAWord source:DAWord f:DAWord):>void=>$unsafe {
     if dewy_at(nodes.ptr[n].pos) and data_parameter(source) not=? 0 {data_functions[f]=true}
 }
@@ -47,7 +63,8 @@ data_access_finalize=():>void=>$unsafe {
         let l=data_parameter(kid(n 0))
         if l =? 0 {continue}
         let name=name_of(DAWord(locals.ptr[l].name))
-        let message="data() of plain parameter '{name}' may be written through or escape; the caller cannot see writes to its private copy: take `@{name}` and pass `@{name}`, or copy into a local first"
+        let spelled=if data_spelled_ptr(nodes.ptr[n].pos) {"`{name}.ptr`"} else {"data()"}
+        let message="{spelled} of plain parameter '{name}' may be written through or escape; the caller cannot see writes to its private copy: take `@{name}` and pass `@{name}`, or copy into a local first"
         if ffi_unsafe_at(nodes.ptr[n].pos) {warn(nodes.ptr[n].pos message)}
         else {fatal(nodes.ptr[n].pos message)}
     }

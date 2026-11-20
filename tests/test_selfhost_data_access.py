@@ -12,6 +12,11 @@ JO['util.jo'] = '''use 'driver.jo'
 name_of = (n: int) -> str: names[n]
 warn = (pos: int, text: str): print("warning:{text}")
 fatal = (pos: int, text: str): print("error:{text}"); exit(43)
+struct SourceText:
+    src: str
+files: SourceText[] = [SourceText("let p = xs.data()\nlet q = xs.ptr\n")]
+pos_file = (p: int) -> int: 0
+pos_off = (p: int) -> int: source_off
 '''
 JO['ffi_checks.dewy'] = '''from p"driver.jo" import unsafe_mode
 ffi_unsafe_at=(pos:int64):>bool=>unsafe_mode
@@ -21,6 +26,7 @@ ffi_unsafe_at = (pos: int) -> bool: unsafe_mode
 '''
 DRIVER = DRIVER + r'''
 unsafe_mode = false
+source_off = 0
 make_site = (flags: int = LF_VALUEPARAM) -> int:
     l = lp_local(flags); locals[l].name = i32(intern_text("xs"))
     a = lp_ident(l, int(tb_mk_array(T_INT))); p = lp_data(a)
@@ -40,6 +46,11 @@ MAIN = r'''main = ():
     unsafe_mode = true
     p = make_site(); data_access_finalize()
     data_access_reset()
+    # (the program's own spelling: `xs.ptr` on the second line)
+    source_off = 18
+    p = make_site(); data_access_finalize()
+    data_access_reset()
+    source_off = 0
     # Mutable parameters supply their caller's owned storage.
     p = make_site(LF_PARAM | LF_MUTPARAM); assert(data_functions.len() == 0)
     data_access_finalize()
@@ -56,6 +67,7 @@ def test_data_access_twins(compiler, tmp_path, release):
     output = compare_leaf(compiler, tmp_path, release, DRIVER + MAIN,
                           extra_stems=('data_access', 'lower_ptr_reads'), jo_doubles=JO)
     assert b'warning:data() of plain parameter' in output
+    assert b"warning:`xs.ptr` of plain parameter 'xs'" in output
     assert output.endswith(b'ok\n')
 
 
