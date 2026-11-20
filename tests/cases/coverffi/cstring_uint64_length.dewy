@@ -1,0 +1,12 @@
+# modes: native native-release
+# A C length declared uint64 may exceed int64, so the walk below it cannot index:
+# the diagnostic names the declaration to write.
+$extern
+strnlen = (s:ptr<uint8> max:uint64):>uint64
+count = (p:ptr<uint8> cap:uint64):>uint64 => $unsafe {
+    let n = strnlen(p cap)
+    let i:uint64 = 0
+    loop i <? n and p[i] not=? 0 { i += 1 }
+    i
+}
+main = () => printl(0)

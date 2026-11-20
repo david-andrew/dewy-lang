@@ -1,0 +1,37 @@
+# modes: native native-release
+# Walking C strings until NUL proves its int64 index from the bound the walk has:
+# an array's length, an int64 counter, or a C length declared int64<(>=? 0)>.
+$extern
+strdup = (s:string):>ptr<uint8>?
+$extern
+free = (p:ptr<uint8>?):>void
+$extern
+strlen = (s:ptr<uint8>):>int64<(>=? 0)>
+
+in_buffer = (buf:array<uint8>):>int => $unsafe {
+    let p = buf.ptr
+    let i = 0
+    loop i <? buf.length and p[i] not=? 0 { i += 1 }
+    i
+}
+
+counted = (p:ptr<uint8>):>int64 => $unsafe {
+    let i:int64 = 0
+    loop p[i] not=? 0 { i += 1 }
+    i
+}
+
+copied = (p:ptr<uint8>):>string => $unsafe {
+    let out:array<uint8> = []
+    loop i in [0..strlen(p)) { out.push(p[i]) }
+    out as string | none ?? "?"
+}
+
+main = () => $unsafe {
+    let b = bytes("ab")
+    b.push(0)
+    b.push(7)
+    let p = strdup("walk me") ?? return
+    printl"{in_buffer(b)} {counted(p)} {copied(p)}"
+    free(p)
+}

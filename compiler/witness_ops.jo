@@ -512,6 +512,7 @@ wit_unknown = (n: int, b: FactBound, what: str, contract: int = 0, relation: str
     wit_context(contract)
     wit_help(relation, runtime, contract)
     wit_counter_help(n, b)
+    wit_unsigned_length_help(n)
     wit_int_parameter_help(n)
     wit_int_global_help(n)
     wit_field_divisor_help(divisor)
@@ -542,6 +543,17 @@ wit_counter_help = (n: int, b: FactBound):
     if nodes[v].kind != .ident or nodes[v].aux != i32(int(SK.local)) or prune(ntype(v)) != T_MATH_INT or not dewy_at(nodes[n].pos): return
     name = name_of(int(nodes[v].name))
     err_notes.push((-1, "help: or declare `{name}` a 64-bit counter where it is made (`let {name}:{dt(ntype(n))} = 0`): the counter-progress assumption covers 64-bit counters, not an `int` converted afterwards"))
+# (`loop i in [0..n)` with `n` a C length declared `uint64`, then `p[i]`: a uint64 may exceed
+# int64, and the C declaration is where the length's real range is stated. O(1))
+wit_unsigned_length_help = (n: int):
+    if n <= 0 or nodes[n].a == 0 or not dewy_at(nodes[n].pos): return
+    to = representation_type(ref_narrowing.get(n) ?? ntype(n))
+    if not is_int(to) or types[to].bits != 64 or not types[to].sign: return
+    v = int(nodes[n].a)
+    loop nodes[v].kind == .narrow or nodes[v].kind == .conv and nodes[v].a != 0: v = int(nodes[v].a)
+    if representation_type(ntype(v)) != T_U64: return
+    name = if nodes[v].kind == .ident: "`{name_of(int(nodes[v].name))}`" else: "this value"
+    err_notes.push((-1, "help: {name} is a uint64, which may exceed int64: if it counts up to a C length, declare that C result `int64<(>=? 0)>` (`strlen = (s:ptr<uint8>):>int64<(>=? 0)>`), so the length and its loop are int64"))
 # (`bins:int` given where an int64 is wanted, `fill(0 bins)`: an `int` parameter holds any
 # integer, while one declared with the width moves the proof to each caller. O(1))
 wit_int_parameter_help = (n: int):
