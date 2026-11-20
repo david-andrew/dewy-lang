@@ -1,0 +1,80 @@
+"""Refinement IR checks (terms, call arguments, entry snapshots) emit the same images as frozen Jo."""
+from tests.selfhost_facts_double import compare_facts
+from tests.support import ROOT, compiler  # noqa: F401
+
+LEAVES = ('refine_ops',)
+# Programs whose checks stay at run time: scalar, unsigned, math-int, offset, sibling,
+# self-length, mutable-entry and narrowing failures, and the passing paths beside them.
+CASES = [
+    'array/comparison_narrow_variable',
+    'array/comparison_negative',
+    'array/comparison_overflow',
+    'array/context_variable_element',
+    'bigint/refined_failure',
+    'conversion/checked_narrowing',
+    'conversion/refuted_narrowing',
+    'conversion/width_checked',
+    'conversion/width_refuted',
+    'dict_refine/runtime_store',
+    'dict_sibling/runtime_shrink_fails',
+    'dict_sibling/runtime_store',
+    'directives/prototype_narrowing',
+    'directives/runtime_refinement_values',
+    'dogfood/107_seat_booking',
+    'exact_int/record_field_narrow',
+    'facts/nd_semantic_index_huge_checked',
+    'facts/signed_bitwise_opposite',
+    'generic/constructor_narrow_overflow',
+    'generic_record_defaults/overflow',
+    'length_in_place/extend_operand_runs_first',
+    'length_in_place/extend_runtime_fails',
+    'length_in_place/runtime_operand_runs_first',
+    'length_in_place/runtime_pop_fails',
+    'length_in_place/runtime_push_fails',
+    'library_contracts/sum_exact_cancelling_runtime',
+    'library_contracts/sum_exact_final_overflow_runtime',
+    'main/exit_code_unproven',
+    'match/union_literal_overflow',
+    'misc/hex_too_large',
+    'misc/literal_too_large',
+    'misc/narrow_literal_overflow',
+    'misc/negative_too_large',
+    'misc/signed_literal_overflow',
+    'mutable_entry_contract/checked_at_run_time',
+    'mutable_entry_contract/handle_at_run_time',
+    'nd_contracts/entry_storage',
+    'notraps12/dictionary_runtime_store',
+    'notraps12/fill_narrow_reject',
+    'notraps18_predicates/changed_element',
+    'numeric/array_error_42',
+    'numeric/array_error_43',
+    'numeric/array_error_44',
+    'numeric/array_error_45',
+    'numeric/array_error_46',
+    'numeric/array_unsigned_negative',
+    'product_bounds/wrapping_corner_overflow',
+    'random/random_int_unproven_checked',
+    'record/int_fields_narrow_overflow',
+    'record_paired_fields/runtime_unbalanced',
+    'refinements/container_store',
+    'refinements/string_length_runtime',
+    'refinements/uint_length_bound_runtime',
+    'self_length/runtime_extend_fails',
+    'self_length/runtime_shrink_fails',
+    'self_length/runtime_slice_fails',
+    'self_length/runtime_store_fails',
+    'self_length/runtime_store_uses_current_length',
+    'set/literal_range',
+    'sibling_length/runtime_extend_fails',
+    'sibling_length/runtime_shrink_fails',
+    'singleton/integer_union_checked',
+    'tensor/shaped_mismatch',
+]
+PATTERNS = ('refinements/*.dewy', 'uint64_ceiling/*.dewy', 'mutable_entry_contract/*.dewy',
+            'nd_contracts/*.dewy', 'refine_length_helpers/*.dewy')
+
+
+def test_refine_ir_check_program_twins(compiler, tmp_path, monkeypatch):
+    found = {str(p.relative_to(ROOT / 'tests/cases'))[:-5]
+             for pattern in PATTERNS for p in (ROOT / 'tests/cases').glob(pattern)}
+    assert compare_facts(compiler, tmp_path, monkeypatch, sorted(found | set(CASES)), leaves=LEAVES) > 80

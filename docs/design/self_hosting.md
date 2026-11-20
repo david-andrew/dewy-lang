@@ -240,6 +240,18 @@ current entry by value, rereading only mutable parameters. Cost is the requested
 predicate rows plus one read per parameter; there is no new pass, callback or
 context copy.
 
+`refine_ops.dewy` owns the refinement IR checks: projected terms, the check
+emitted for a refined value, per-call argument checks and the function-entry
+snapshot. Jo keeps the check site, holder text and entry array, written through
+places bound once; the term type that a term leaves for its check is the leaf's
+own. Terms read entry snapshots or reread a mutable parameter, project lengths
+and fields in path order, and emit the same failure text, observed values,
+unsigned bias, tagged-word inequality and exact offset comparison. Mutable call
+arguments are loaded once, before the first refined argument. Cost is the call's
+arguments plus the requested predicate rows; there is no new pass, callback or
+context copy. Measured alone, the argument walk moved one flagship +0.0018%;
+with the checks it calls, every flagship is cheaper.
+
 `refine_metadata.dewy` owns the demanded representation, storage-place and
 predicate queries from `refine.jo`. It reads the existing node, type, local,
 field and predicate arenas directly; Jo retains their storage and every writer.

@@ -1,29 +1,39 @@
 $runtime_checks
 
 from p"ast.jo" import (nodes)
-from p"check.jo" import (fns runtime_fn)
+from p"check.jo" import (fns runtime_fn LF_MUTPARAM locals)
 from p"checker_types.dewy" import (TypeInfo)
 from p"checks_thin.dewy" import (resolve_type)
-from p"expr.jo" import (CV IN is_nd)
+from p"expr.jo" import (CV IN is_nd ntype mk_ident_local)
 from p"host_binds.jo" import (ref_intern_host)
 from p"lower.jo" import (Val cur_fn)
 from p"lower_group.dewy" import (gen_expr)
-from p"nd_contract_ops.dewy" import (nd_field_shape)
-from p"refine.jo" import (ref_gen_check ref_holder_elems ref_nd_receivers ref_predicates ref_self_shrinks refine_active refine_ir_entry str_set_types str_sets)
+from p"nd_contract_ops.dewy" import (nd_field_shape nd_ir_projection)
+from p"refine.jo" import (ref_holder_elems ref_narrowing ref_nd_receivers ref_predicates ref_self_active ref_self_gen ref_self_shrinks refine_active refine_ir_entry refine_owners str_set_types str_sets)
 from p"refine_metadata.dewy" import (representation_type)
-from p"refine_siblings.dewy" import (ref_sib_contract)
-from p"refine_rare.dewy" import (ref_self_array)
+from p"refine_siblings.dewy" import (ref_sib_contract ref_sib_gen)
+from p"refine_rare.dewy" import (ref_self_array ref_ir_holder_length ref_math_term)
 from p"refine_keys.dewy" import (ref_finite_keys)
 from p"refine_predicates.dewy" import (ref_atoms_have_kind)
 from p"refine_queries.dewy" import (ref_types_contain)
 from p"refine_strings.dewy" import (ref_string_set_const ref_string_set_type)
-from p"refinement_types.dewy" import (RefAtom RefTerm)
-from p"type_ops.dewy" import (dt)
+from p"refinement_types.dewy" import (RefAtom RefTerm FACT_MAX FACT_MIN)
+from p"type_ops.dewy" import (dt fixed_len zonk)
 from p"type_refinement.dewy" import (tr_deep)
 from p"type_substitute.dewy" import (ts_ref_subst)
-from p"types.jo" import (T_MATH_INT fields mk_type prune ptr_size struct_targ structs tkind type_args types variants)
+from p"types.jo" import (T_MATH_INT fields mk_type prune ptr_size struct_targ structs tkind type_args types variants T_INT is_int)
 from p"util.jo" import (files pos_file)
-from p"diagnostic_exit.dewy" import (fatal)
+from p"diagnostic_exit.dewy" import (fatal ice)
+from p"lower_storage.dewy" import (load_val arr_len endc field_val_addr freeze_scalar iff release)
+from p"ir.jo" import (VI)
+from p"ir_builders.dewy" import (e_bin e_call e_iconst)
+from p"ir_types.dewy" import (Op)
+from p"lower_primitives.dewy" import (e_call_nr e_daddr loc_data rt str_data)
+from p"math_ops.dewy" import (math_binary math_compare math_word)
+from p"secrets.jo" import (secret_checks)
+from p"witness.jo" import (wit_holder_text)
+from p"witness_nodes.dewy" import (wit_text)
+from p"witness_ops.dewy" import (wit_op wit_ref_text)
 
 RefineOpWord:type=int64<overflow='wrap'>
 ref_addr_max=():>int64=>{
@@ -133,4 +143,196 @@ ref_self_published=(statement:RefineOpWord):>int64=>$unsafe {
 ref_self_shrink=(statement:RefineOpWord place:RefineOpWord id:IN):>void=>{
     let value=ref_self_published(statement)
     if value not=? 0 {ref_self_shrinks[value]=[place id]}
+}
+# The IR checks write Jo's check site, holder text and entry snapshot through places bound once.
+let ops_gen_site:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let ops_holder_text:ptr<string>=$unsafe (uint64(0) as ptr<string>)
+let ops_ir_entry:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+refine_ops_bind=(gen_site:ptr<int64> holder_text:ptr<string> ir_entry:ptr<array<int64>>):>int64=>{
+    ops_gen_site=gen_site
+    ops_holder_text=holder_text
+    ops_ir_entry=ir_entry
+    0
+}
+# (the type of the value ref_ir_term last gave: 0 for a constant)
+let ref_term_type:int64=0
+ref_ir_term=(term:RefTerm self:int64 args:array<int64> self_type:int64 arg_types:array<int64>):>int64=>$unsafe {
+    ref_term_type=0
+    if term.kind =? 1 {return e_iconst(term.value)}
+    let value=self
+    let t=self_type
+    if term.kind =? 2 or term.kind =? 5 {
+        if term.value >=? args.length {ice("missing refinement entry snapshot")}
+        value=args[term.value]
+        t=arg_types[term.value]
+        if value =? -1 {value=gen_expr(mk_ident_local(fns.ptr[cur_fn].params[term.value] (-1))).v}
+    }
+    else if term.kind =? 3 {
+        t=RefineOpWord(locals.ptr[term.value].type)
+        value=gen_expr(mk_ident_local(term.value locals.ptr[term.value].pos)).v
+    }
+    else if term.kind =? 6 {
+        ref_term_type=T_INT
+        return ref_ir_holder_length()
+    }
+    else if term.kind not=? 0 {fatal((-1) "unresolved generic refinement bound");}
+    loop selector in term.path {
+        t=representation_type(t)
+        if selector <=? -2 {
+            value=nd_ir_projection(value t selector)
+            t=T_INT
+        }
+        else if selector =? -1 {
+            if types.ptr[t].kind =? 'fixed' {value=e_iconst(fixed_len(t))}
+            else if types.ptr[t].kind =? 'str_' {value=e_call(rt("__dewy_string_length") [value] VI)}
+            else {value=arr_len(value)}
+            t=T_INT
+        }
+        else {
+            let si=RefineOpWord(types.ptr[t].st)
+            let fi:RefineOpWord=-1
+            loop i in [0..RefineOpWord(structs.ptr[si].nfields)) {
+                let f=RefineOpWord(structs.ptr[si].fields) + i
+                if int64(fields.ptr[f].name) =? selector {fi=f}
+            }
+            if fi <? 0 {ice("unresolved refinement field")}
+            t=RefineOpWord(fields.ptr[fi].type)
+            value=load_val(t field_val_addr(fi value) 0)
+        }
+    }
+    ref_term_type=representation_type(t)
+    value
+}
+ref_gen_check=(n:int64 self:int64 args:array<int64> arg_types:array<int64>):>void=>$unsafe {
+    if nodes.ptr[n].ival =? 1 {return}
+    let t=zonk(RefineOpWord(nodes.ptr[n].aux2))
+    let biased=is_int(representation_type(t)) and not types.ptr[representation_type(t)].sign
+    let shown=wit_text(RefineOpWord(nodes.ptr[n].a))
+    if shown =? "" {shown="the value"}
+    ops_gen_site[0]=n
+    if ref_self_active and nodes.ptr[n].b not=? 0 {ops_holder_text[0]=wit_text(RefineOpWord(nodes.ptr[n].b))}
+    loop atom in ref_predicates[RefineOpWord(types.ptr[t].st)] {
+        if atom.a.kind =? 6 and (atom.b.kind =? 5 or atom.b.kind =? 6) {
+            ref_sib_gen(n t atom self args arg_types)
+            continue
+        }
+        if atom.a.kind =? 6 {
+            ref_self_gen(n atom self)
+            continue
+        }
+        let a=ref_ir_term(atom.a self args RefineOpWord(types.ptr[t].elem) arg_types)
+        let a_type=ref_term_type
+        let b=ref_ir_term(atom.b self args RefineOpWord(types.ptr[t].elem) arg_types)
+        let b_type=ref_term_type
+        # (a Dewy `int` is a tagged word or a BigInt: both sides compare as ints, exactly)
+        let math=a_type =? T_MATH_INT or b_type =? T_MATH_INT
+        # (`x not=? k`, k a constant in the tagged range: a value has one representation,
+        # so its word decides, and a value failing it is k)
+        let tagged_ne:RefineOpWord=0
+        if math and atom.op =? 'ne' and atom.b.offset =? 0 {
+            if atom.a.kind =? 1 and b_type =? T_MATH_INT and ref_tagged_fits(atom.a.value) {
+                tagged_ne=e_bin('ne' VI b e_iconst(RefineOpWord(atom.a.value) << 1))
+                b=a
+            }
+            else if atom.b.kind =? 1 and a_type =? T_MATH_INT and ref_tagged_fits(atom.b.value) {
+                tagged_ne=e_bin('ne' VI a e_iconst(RefineOpWord(atom.b.value) << 1))
+                a=b
+            }
+            if tagged_ne not=? 0 {math=false}
+        }
+        # The failure names the violated requirement and the observed values,
+        # the constrained value first (contracts are stored as `a < b`).
+        let left=wit_ref_text(atom.a shown)
+        let right=wit_ref_text(atom.b shown)
+        # (a bound from another parameter's entry value has no name here)
+        if left =? "" {left="the bound"}
+        if right =? "" {right="the bound"}
+        let seen_left=if atom.a.kind =? 1 {""} else {left}
+        let seen_right=if atom.b.kind =? 1 {""} else {right}
+        # (a value on its way into a secret is not shown: secrets.jo)
+        if secret_checks.length >? 0 and secret_checks.has(n) {
+            seen_left=""
+            seen_right=""
+        }
+        # (`a op b + c`: the right side's observed value is the sum)
+        let c=atom.b.offset
+        let made:array<int64>=[]
+        if math {
+            a=ref_math_term(a a_type @made)
+            b=ref_math_term(b b_type @made)
+        }
+        let sum=b
+        if c not=? 0 and math {
+            sum=math_binary('plus' b math_word(e_iconst(c)).v).v
+            made.push(sum)
+        }
+        else if c not=? 0 {sum=e_bin('add' VI b e_iconst(c))}
+        let first=a
+        let second=sum
+        let relation=atom.op
+        if atom.b.kind =? 0 and atom.a.kind not=? 0 and (relation =? 'lt' or relation =? 'le') {
+            let text=left
+            left=right
+            right=text
+            text=seen_left
+            seen_left=seen_right
+            seen_right=text
+            first=sum
+            second=a
+            relation=if relation =? 'lt' {'gt'} else {'ge'}
+        }
+        let message="refinement failed: `{left} {wit_op(relation)} {right}`"
+        if ref_narrowing.has(n) {message="integer overflow: value does not fit {dt(ref_narrowing[n])}"}
+        let op:Op=if atom.op =? 'lt' {'lts'} else if atom.op =? 'le' {'les'} else {'ne'}
+        let condition:RefineOpWord=0
+        if tagged_ne not=? 0 {condition=tagged_ne}
+        else if math {condition=math_compare(atom.op a sum)}
+        else if c not=? 0 {
+            # Exactly, without comparing a wrapped word: a sum past int64
+            # holds (upward) or fails (downward). Offsets are signed only.
+            let past=if c >? 0 {e_bin('lts' VI e_iconst(RefineOpWord(FACT_MAX) - RefineOpWord(c)) b)} else {e_bin('lts' VI b e_iconst(RefineOpWord(FACT_MIN) - RefineOpWord(c)))}
+            let compared=e_bin(op VI a sum)
+            condition=if c >? 0 or atom.op =? 'ne' {e_bin('or_' VI past compared)} else {e_bin('and_' VI e_bin('eq' VI past e_iconst(0)) compared)}
+        }
+        else {
+            if biased and atom.op not=? 'ne' {
+                # Bias both operands for an exact unsigned comparison on every target.
+                a=e_bin('xor' VI a e_iconst(FACT_MIN))
+                b=e_bin('xor' VI b e_iconst(FACT_MIN))
+            }
+            condition=e_bin(op VI a b)
+        }
+        iff(e_bin('eq' VI condition e_iconst(0)));
+        let fail=if math {"__mi_requirement_fail"} else {"__requirement_fail"}
+        e_call_nr(rt(fail) [e_daddr(str_data(message)) e_daddr(loc_data(nodes.ptr[n].pos)) e_daddr(str_data(seen_left)) first e_daddr(str_data(seen_right)) second] (-1));
+        endc();
+        loop v in made {release(v T_MATH_INT)}
+    }
+}
+# Each refined argument of a call is checked against the arguments as passed;
+# mutable arguments are read through their places once, before the first check.
+refine_gen_args=(args:array<int64> values:array<int64> offset:int64 mutmask:int64=0):>void=>$unsafe {
+    let captured:array<int64>=[]
+    let arg_types:array<int64>=[]
+    loop arg in args {arg_types.push(ntype(arg))}
+    loop i in [offset..values.length) {captured.push(values[i])}
+    let loaded=false
+    loop i in 0.. and n in args {
+        if nodes.ptr[n].kind not=? 'conv' or nodes.ptr[n].aux not=? int32(int64(CV.refinement)) {continue}
+        if not loaded {
+            loaded=true
+            loop j in 0.. and t in arg_types {
+                if j <? 62 and mutmask & (1 << j) not=? 0 {captured[j]=load_val(representation_type(t) captured[j] 0)}
+            }
+        }
+        ref_gen_check(n captured[i] captured arg_types)
+    }
+}
+refine_gen_entry=(f:int64):>void=>$unsafe {
+    ops_ir_entry[0]=[]
+    if not refine_owners.has(f) {return}
+    loop l in fns.ptr[f].params {
+        if RefineOpWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 {ops_ir_entry[0].push(-1)}
+        else {ops_ir_entry[0].push(freeze_scalar(RefineOpWord(locals.ptr[l].vreg) representation_type(RefineOpWord(locals.ptr[l].type))))}
+    }
 }

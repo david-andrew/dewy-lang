@@ -47,6 +47,7 @@ use 'util.jo'
 use 'diagnostic_exit.dewy'
 use 'witness.jo'
 use 'witness_ops.dewy'
+use 'witness_nodes.dewy'
 use 'secrets.jo'
 use 'node_store.dewy'
 use 'math_lower.jo'
@@ -124,3 +125,157 @@ ref_self_published = (statement: int) -> int:
 ref_self_shrink = (statement: int, place: int, id: IN):
     value = ref_self_published(statement)
     if value != 0: ref_self_shrinks[value] = (place, id)
+refine_ops_bind = (gen_site: *(int), holder_text: *(str), ir_entry: *(int[])) -> int: 0
+
+# (the type of the value ref_ir_term last gave: 0 for a constant)
+ref_term_type = 0
+
+ref_ir_term = (term: RefTerm, self: int, args: int[], self_type: int, arg_types: int[]) -> int:
+    ref_term_type = 0
+    if term.kind == 1: return e_iconst(term.value)
+    value = self
+    t = self_type
+    if term.kind == 2 or term.kind == 5:
+        if term.value >= args.len(): ice("missing refinement entry snapshot")
+        value = args[term.value]
+        t = arg_types[term.value]
+        if value == -1:
+            value = gen_expr(mk_ident_local(fns[cur_fn].params[term.value], -1)).v
+    else if term.kind == 3:
+        t = int(locals[term.value].type)
+        value = gen_expr(mk_ident_local(term.value, locals[term.value].pos)).v
+    else if term.kind == 6:
+        ref_term_type = T_INT
+        return ref_ir_holder_length()
+    else if term.kind != 0: fatal(-1, "unresolved generic refinement bound")
+    loop selector in term.path:
+        t = representation_type(t)
+        if selector <= -2:
+            value = nd_ir_projection(value, t, selector)
+            t = T_INT
+        else if selector == -1:
+            if types[t].kind == .fixed: value = e_iconst(fixed_len(t))
+            else if types[t].kind == .str_: value = e_call(rt("__dewy_string_length"), [value], VI)
+            else: value = arr_len(value)
+            t = T_INT
+        else:
+            si = int(types[t].st)
+            fi = -1
+            loop i in [0..int(structs[si].nfields)):
+                f = int(structs[si].fields) + i
+                if int(fields[f].name) == selector: fi = f
+            if fi < 0: ice("unresolved refinement field")
+            t = int(fields[fi].type)
+            value = load_val(t, field_val_addr(fi, value), 0)
+    ref_term_type = representation_type(t)
+    value
+
+ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
+    if nodes[n].ival == 1: return
+    t = zonk(int(nodes[n].aux2))
+    unsigned = is_int(representation_type(t)) and not types[representation_type(t)].sign
+    shown = wit_text(int(nodes[n].a))
+    if shown == "": shown = "the value"
+    ref_gen_site = n
+    if ref_self_active and nodes[n].b != 0: wit_holder_text = wit_text(int(nodes[n].b))
+    loop atom in ref_predicates[int(types[t].st)]:
+        if atom.a.kind == 6 and (atom.b.kind == 5 or atom.b.kind == 6):
+            ref_sib_gen(n, t, atom, self, args, arg_types)
+            continue
+        if atom.a.kind == 6:
+            ref_self_gen(n, atom, self)
+            continue
+        a = ref_ir_term(atom.a, self, args, int(types[t].elem), arg_types)
+        a_type = ref_term_type
+        b = ref_ir_term(atom.b, self, args, int(types[t].elem), arg_types)
+        b_type = ref_term_type
+        # (a Dewy `int` is a tagged word or a BigInt: both sides compare as ints, exactly)
+        math = a_type == T_MATH_INT or b_type == T_MATH_INT
+        # (`x not=? k`, k a constant in the tagged range: a value has one representation,
+        # so its word decides, and a value failing it is k)
+        tagged_ne = 0
+        if math and atom.op == .ne and atom.b.offset == 0:
+            if atom.a.kind == 1 and b_type == T_MATH_INT and ref_tagged_fits(atom.a.value):
+                tagged_ne = e_bin(.ne, VI, b, e_iconst(atom.a.value << 1))
+                b = a
+            else if atom.b.kind == 1 and a_type == T_MATH_INT and ref_tagged_fits(atom.b.value):
+                tagged_ne = e_bin(.ne, VI, a, e_iconst(atom.b.value << 1))
+                a = b
+            if tagged_ne != 0: math = false
+        # The failure names the violated requirement and the observed values,
+        # the constrained value first (contracts are stored as `a < b`).
+        left = wit_ref_text(atom.a, shown); right = wit_ref_text(atom.b, shown)
+        # (a bound from another parameter's entry value has no name here)
+        if left == "": left = "the bound"
+        if right == "": right = "the bound"
+        seen_left = if atom.a.kind == 1: "" else: left
+        seen_right = if atom.b.kind == 1: "" else: right
+        # (a value on its way into a secret is not shown: secrets.jo)
+        if secret_checks.len() > 0 and secret_checks.has(n):
+            seen_left = ""
+            seen_right = ""
+        # (`a op b + c`: the right side's observed value is the sum)
+        c = atom.b.offset
+        made: int[]
+        if math:
+            a = ref_math_term(a, a_type, made)
+            b = ref_math_term(b, b_type, made)
+        sum = b
+        if c != 0 and math:
+            sum = math_binary(.plus, b, math_word(e_iconst(c)).v).v
+            made.push(sum)
+        else if c != 0: sum = e_bin(.add, VI, b, e_iconst(c))
+        first = a; second = sum
+        relation = atom.op
+        if atom.b.kind == 0 and atom.a.kind != 0 and (relation == .lt or relation == .le):
+            text = left; left = right; right = text
+            text = seen_left; seen_left = seen_right; seen_right = text
+            first = sum; second = a
+            relation = if relation == .lt: Tok.gt else: Tok.ge
+        message = "refinement failed: `{left} {wit_op(relation)} {right}`"
+        if let width = ref_narrowing.get(n): message = "integer overflow: value does not fit {dt(width)}"
+        op = if atom.op == .lt: Op.lts else if atom.op == .le: Op.les else: Op.ne
+        condition = 0
+        if tagged_ne != 0: condition = tagged_ne
+        else if math: condition = math_compare(atom.op, a, sum)
+        else if c != 0:
+            # Exactly, without comparing a wrapped word: a sum past int64
+            # holds (upward) or fails (downward). Offsets are signed only.
+            past = if c > 0: e_bin(.lts, VI, e_iconst(FACT_MAX - c), b) else: e_bin(.lts, VI, b, e_iconst(FACT_MIN - c))
+            compared = e_bin(op, VI, a, sum)
+            condition = if c > 0 or atom.op == .ne: e_bin(.or_, VI, past, compared) else: e_bin(.and_, VI, e_bin(.eq, VI, past, e_iconst(0)), compared)
+        else:
+            if unsigned and atom.op != .ne:
+                # Bias both operands for an exact unsigned comparison on every target.
+                a = e_bin(.xor, VI, a, e_iconst(FACT_MIN))
+                b = e_bin(.xor, VI, b, e_iconst(FACT_MIN))
+            condition = e_bin(op, VI, a, b)
+        iff(e_bin(.eq, VI, condition, e_iconst(0)))
+        fail = if math: "__mi_requirement_fail" else: "__requirement_fail"
+        e_call_nr(rt(fail), [e_daddr(str_data(message)), e_daddr(loc_data(nodes[n].pos)), e_daddr(str_data(seen_left)), first, e_daddr(str_data(seen_right)), second], -1)
+        endc()
+        loop v in made: release(v, T_MATH_INT)
+
+refine_gen_args = (args: int[], values: int[], offset: int, mutmask: int = 0):
+    captured: int[]
+    arg_types: int[]
+    loop arg in args: arg_types.push(ntype(arg))
+    loop i in [offset..values.len()): captured.push(values[i])
+    loaded = false
+    loop i in [0..args.len()):
+        n = args[i]
+        if nodes[n].kind != .conv or nodes[n].aux != i32(int(CV.refinement)): continue
+        # (a contract may name what a mutable argument projects: that argument is its place's
+        # address, so read the value it holds now, before the call)
+        if not loaded:
+            loaded = true
+            loop j in [0..args.len()):
+                if j < 62 and mutmask & (1 << j) != 0: captured[j] = load_val(representation_type(arg_types[j]), captured[j], 0)
+        ref_gen_check(n, captured[i], captured, arg_types)
+
+refine_gen_entry = (f: int):
+    refine_ir_entry = []
+    if not refine_owners.has(f): return
+    loop l in fns[f].params:
+        if int(locals[l].flags) & LF_MUTPARAM != 0: refine_ir_entry.push(-1)
+        else: refine_ir_entry.push(freeze_scalar(int(locals[l].vreg), representation_type(int(locals[l].type))))
