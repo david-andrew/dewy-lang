@@ -755,3 +755,97 @@ ref_record_conversion = (from: int, to: int) -> bool:
         b = int(fields[int(structs[ts].fields) + i].type)
         if not can_coerce(0, a, b): return false
     true
+
+refine_rare_bind = (declaring: *(int)) -> int: 0
+
+# A parameter or field: most have no array type, so O(1) without a call deeper.
+ref_holder_candidate = (binding: int):
+    tn = int(nodes[binding].a)
+    if tn != 0 and (nodes[tn].kind == .tarray or nodes[tn].kind == .trefined): ref_holder_mark(tn, int(nodes[binding].name))
+
+ref_holder_arm = (tn: int, name: int):
+    ref_declaring = name
+    ref_holder_mark(tn, name)
+
+ref_holder_mark = (tn: int, name: int):
+    if tn == 0 or name == 0: return
+    node = tn
+    if nodes[node].kind == .trefined:
+        if nodes[node].b == 0: return
+        node = int(nodes[node].a)
+    if nodes[node].kind != .tarray or nodes[node].ival != 0 or nodes[node].b != 0 or nodes[node].aux >= 2: return
+    element = int(nodes[node].a)
+    if element == 0 or nodes[element].kind != .trefined or not ref_holder_mentioned(int(nodes[element].b), name, 0): return
+    if node != tn: fatal(nodes[tn].pos, "a self-length array cannot have a length contract as well")
+    inner = nodes.len()
+    nodes.push(nodes[tn])
+    nodes[tn] = Node(kind = .trefined, pos = nodes[inner].pos, a = i32(inner), name = i32(name))
+
+ref_array_call_prepare = (decl: int, args: mut int[], ptypes: int[], written: int[]) -> RefArrayCall:
+    out = RefArrayCall()
+    if args.len() == 0 or not pos_in_lib(nodes[decl].pos): return out
+    name = name_of(int(nodes[decl].name))
+    if name != "__dewy_insert" and name != "swap" and name != "reverse" and name != "sort" and name != "sort_by" and name != "sort_with": return out
+    place = args[0]
+    t = prune(refine_storage(place, ntype(place)))
+    if tkind(representation_type(t)) != .array or (types[t].kind != .refined and not ref_dependent_ancestor(place)): return out
+    if not type_eq(representation_type(t), ptypes[0]): return out
+    # (an insertion into a field whose length another's is tied to: a run, ref_pair_role)
+    if name == "__dewy_insert" and ref_pair_record(place) != 0:
+        role = ref_pair_role(0, place)
+        if role == 0:
+            lone = ref_pair_hint(place, "insert")
+            fatal(nodes[place].pos, lone[6..])
+        ref_nd_receivers[place] = true
+        if role & 1 != 0: ref_pair_reads(int(nodes[place].a), out.before, nodes[place].pos)
+        if role & 2 != 0: ref_pair_after[place] = ref_pair_validation(int(nodes[place].a), nodes[place].pos)
+        out.place = place
+        out.candidate = -1
+        return out
+    # (an insertion into a field bounded by a sibling: its value checked, then in place)
+    sibling = name == "__dewy_insert" and ref_self_active and ref_sib_free(place, t)
+    # (a permutation of a field bounded by a sibling, or of a sibling only such bounds name, keeps
+    # the values and lengths, whatever a callback does: in place, as an `@` argument)
+    if name != "__dewy_insert" and ref_self_active and ref_sib_permutable(place, t):
+        ref_nd_receivers[place] = true
+        return out
+    if not sibling: ref_mutable_authority(place)
+    check_place(place, true)
+    self_length = ref_self_active and ref_self_contract(t)
+    # (a swap changes neither the length nor the values, and has no callback to see it)
+    if name == "swap" and (self_length or ref_length_route(place, t)):
+        ref_self_direct[place] = true
+        return out
+    # Receiver selectors, then explicit operands in source order, once.
+    path = index_update_path(place)
+    j = path.len() - 1
+    loop j >= 0:
+        part = path[j]; j -= 1
+        if nodes[part].kind == .index and nodes[part].b != 0: nodes[part].b = i32(capture_value(int(nodes[part].b), ntype(int(nodes[part].b)), out.before))
+    loop source in written:
+        a = unnamed(source)
+        loop i in [1..args.len()):
+            if args[i] != a: continue
+            finish_arg(a, ptypes[i], false)
+            args[i] = capture_value(a, representation_type(ptypes[i]), out.before)
+            break
+    # (an inserted value's check stands alone, after every operand ran: the
+    # argument keeps its parameter's type)
+    if self_length and name == "__dewy_insert" and args.len() > 1:
+        checked = copy_checked(args[1])
+        ref_self_value(checked, t, 1, place)
+        out.before.push(bc_stmt(checked, nodes[checked].pos))
+    if sibling and args.len() > 1:
+        checked = copy_checked(args[1])
+        ref_self_value(checked, t, 0, place)
+        out.before.push(bc_stmt(checked, nodes[checked].pos))
+        ref_nd_receivers[place] = true
+        out.place = place
+        out.candidate = -1
+        return out
+    out.place = place
+    out.self_length = self_length
+    out.candidate = capture_value(copy_place(place), representation_type(t), out.before)
+    args[0] = copy_checked(out.candidate)
+    add_flag(args[0], NF_MUT)
+    out
