@@ -55,7 +55,11 @@
   "53": "Binary frame decoding",
   "54": "Explicit arena accounting",
   "55": "Soft catalog contracts",
-  "56": "Non-Send telemetry rejection"
+  "56": "Non-Send telemetry rejection",
+  "57": "Calendars across time zones",
+  "58": "Signal-aware systems tools",
+  "59": "Generic game boards sized by integer type arguments",
+  "60": "Resources that clean themselves up"
  },
  "tiers": {
   "1\u20132": [
@@ -76,7 +80,7 @@
   ],
   "6": [
    47,
-   56
+   60
   ]
  },
  "programs": {
@@ -605,6 +609,23 @@
    "milestone": 49,
    "note": "A compiled C image library passes and returns small and large structs by value, uses layout queries for buffers and writes nullable pointer out-parameters.",
    "c_library": "image"
+  },
+  "136_team_calendar": {
+   "milestone": 57,
+   "note": "Team meeting planner over stdin across the 2026 daylight-saving changes: zones read at run time, local working hours as Range<Instant> intersections minus busy blocks, function-scoped $time.zone office reports reading the same pins differently, $time.fold/$time.gap settings for handoffs in a repeated and a skipped hour, weekly zoned standups and clamped monthly periods; zoneinfo oracle."
+  },
+  "137_snapshot_backup": {
+   "milestone": 58,
+   "note": "Incremental content-addressed backup over a stdin edit script: workspace, restore and manifest paths confined before any file operation, SafePath record fields and arrays (confine ?? continue), previous manifest and current scan loaded together in parallel ( ... ), FNV hashing in [parallel ...] under a function-scoped $program.max_cores, Ctrl-C listened for beside the work in the same parallel block (closes when the backup returns), and a lease released by an assigned $__drop__."
+  },
+  "138_crate_puzzle": {
+   "milestone": 59,
+   "note": "Crate-pushing puzzle replaying stdin moves on built-in 7x5 and 9x6 levels: one generic Game<W H> specialized by named integer constants, shaped [H W] grids whose integer type parameters forward between generic functions, every grid index proven by guards, unscoped ( ... ) match arms declaring the step for use after the match, and undo by keeping whole copied states."
+  },
+  "139_staged_release": {
+   "milestone": 60,
+   "open": "D40 Q2 (cleanup at block end or after last use) and Q6 (a visible exit where a local cleanup can fail); also needs self-closing files (open(path 'w')) and a fallible assigned $__abandon__ (D40 Q1/Q4, decided, not built).",
+   "note": "Atomic site releases: files staged through self-closing handles under a Staged owner whose assigned $__abandon__ removes the staged directory unless commit consumes it; a refused release leaves nothing behind and its cleanup failure would be the function's result."
   }
  },
  "design_passing": [
@@ -742,6 +763,9 @@
   "132_packet_checksum",
   "133_concurrent_job_router",
   "134_command_formatter",
-  "135_ffi_image_tool"
+  "135_ffi_image_tool",
+  "136_team_calendar",
+  "137_snapshot_backup",
+  "138_crate_puzzle"
  ]
 }

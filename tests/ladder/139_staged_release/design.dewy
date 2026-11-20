@@ -1,0 +1,79 @@
+# Tier 6 / 139 / milestone 60
+# Acceptance: Publish site releases atomically: each release is staged in its own
+# directory through files that flush and close themselves, and a staging owner
+# whose assigned `$__abandon__` removes everything it staged unless `commit`
+# publishes it. A release that fails a check, or whose cleanup fails, leaves
+# nothing behind and reports why. Held on D40 Q2 (cleanup at block end or last
+# use) and Q6 (a visible exit where a local cleanup can fail).
+
+const staging = p"staging"
+const releases = p"releases"
+
+ReleaseRefused:type = type of error
+
+# Work staged for one release. Dropping it unpublished throws the work away;
+# a failure to remove it becomes the result of the function that dropped it.
+Staged:type = [
+    version:int64
+    dir:SafePath
+    files:array<SafePath>
+    $__abandon__ = ():>void | FileError => {
+        dir.remove_tree or_throw;
+        printl"  abandoned v{version}: removed {files.length} staged files"
+    }
+]
+
+# Publishing consumes the staged work, so nothing is abandoned afterwards.
+commit = (staged:Staged):>SafePath | FileError => {
+    let published = p"{releases}/v{staged.version}"
+    staged.dir.rename(published) or_throw;
+    published
+}
+
+stage_file = (@staged:Staged name:string text:string) => {
+    let target = staged.dir.confine(p"{staged.dir}/{name}") ?? return ReleaseRefused["{name} leaves the release"]
+    (staged.dir.confine(target.parent) or_throw).make_dirs or_throw;
+    # The file flushes and closes itself; closing explicitly puts a failed
+    # close at this line instead of at the end of the loop body.
+    let out = open(target 'w') or_throw
+    out.write_text(text) or_throw;
+    out.close() or_throw
+    staged.files.push(target)
+}
+
+publish = (version:int64 files:array<[name:string text:string]>) => {
+    let staged = Staged[version p"{staging}/v{version}" []]
+    staged.dir.make_dirs or_throw;
+    loop file in files { stage_file(@staged file.name file.text) or_throw }
+    let count = staged.files.length
+    let published = commit(staged) or_throw
+    printl"  published {published} with {count} files"
+}
+
+main = () => {
+    let text = read_stdin or_throw
+    let plans:array<[version:int64 files:array<[name:string text:string]>]> = []
+    loop raw in text.split("\n") {
+        let line = raw.trim
+        if line.length =? 0 or line.startswith("#") continue
+        let [kind ...rest] = line.split(" ")
+        if kind =? "release" {
+            let v = to_int(rest.get(0) ?? "") ?? continue
+            if v <? 1 or v >? 9999 continue
+            plans.push([version=int64(v) files=[]])
+        } else if kind =? "file" and plans.length >? 0 and rest.length >=? 2 {
+            plans[plans.length - 1].files.push([name=rest[0] text=rest[$clamp 1..).join(" ")])
+        }
+    }
+    loop plan in plans {
+        printl"release v{plan.version}: {plan.files.length} files"
+        match publish(plan.version plan.files) {
+            refused:ReleaseRefused => printl"  refused: {refused.message}"
+            failed:error => printl"  failed: {failed}"
+            _ => {}
+        }
+    }
+    let published = (releases.list ?? []).sorted
+    printl"published: {published.join(" ")}"
+    printl"staging left: {(staging.list ?? []).length}"
+}

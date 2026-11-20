@@ -1,0 +1,146 @@
+# Tier 6 / 138 / milestone 59
+# Acceptance: A crate-pushing puzzle with built-in levels of different sizes:
+# board dimensions as named integer type arguments specializing one generic
+# game, shaped 2-D grids indexed without runtime checks, unscoped `( ... )`
+# match arms declaring a move's direction for use after the match, and undo
+# by keeping whole copied game states. Moves are replayed from stdin.
+
+const SMALL_W = 7
+const SMALL_H = 5
+const WIDE_W = 9
+const WIDE_H = 6
+
+Game:type = <W H>[
+    walls:array<bool length=[H W]>
+    goals:array<bool length=[H W]>
+    crates:array<bool length=[H W]>
+    x:int64
+    y:int64
+    moves:int
+    pushes:int
+]
+
+# The levels are part of the game, so their sizes are known when it compiles.
+const FIRST:array<string length=[SMALL_H]> = [
+    "#######"
+    "#     #"
+    "# @$ .#"
+    "#     #"
+    "#######"
+]
+const SECOND:array<string length=[WIDE_H]> = [
+    "#########"
+    "#   .   #"
+    "# $ # $ #"
+    "#  @  . #"
+    "#       #"
+    "#########"
+]
+
+parse = <W H>(rows:array<string length=[H]>):>Game<W H> | string => {
+    let walls:array<bool length=[H W]> = reshape([loop _ in [0..H * W) false] H W)
+    let goals = walls
+    let crates = walls
+    let x:int64 = -1
+    let y:int64 = -1
+    loop r in [0..H) {
+        let row = rows[r] as array<uint8>
+        if row.length not=? W return "row {r} is {row.length} wide, not {W}"
+        loop c in [0..W) {
+            match row[c] {
+                <b'#'> => { walls[r c] = true }
+                <b'.'> => { goals[r c] = true }
+                <b'$'> => { crates[r c] = true }
+                <b'@'> => { x = c; y = r }
+                <b' '> => {}
+                _ => return "unknown tile at row {r} column {c}"
+            }
+        }
+    }
+    if x <? 0 return "the level has no player"
+    Game<W H>[walls goals crates x y 0 0]
+}
+
+# One step; a crate ahead moves too when the square past it is free.
+step = <W H>(@g:Game<W H> dx:int64 dy:int64):>bool => {
+    let nx = g.x + dx
+    let ny = g.y + dy
+    if nx <? 0 or nx >=? W or ny <? 0 or ny >=? H return false
+    if g.walls[ny nx] return false
+    if g.crates[ny nx] {
+        let bx = nx + dx
+        let by = ny + dy
+        if bx <? 0 or bx >=? W or by <? 0 or by >=? H return false
+        if g.walls[by bx] or g.crates[by bx] return false
+        g.crates[ny nx] = false
+        g.crates[by bx] = true
+        g.pushes += 1
+    }
+    g.x = nx
+    g.y = ny
+    g.moves += 1
+    true
+}
+
+solved = <W H>(g:Game<W H>):>bool => {
+    loop r in [0..H) loop c in [0..W) {
+        if g.crates[r c] and not g.goals[r c] return false
+    }
+    true
+}
+
+render = <W H>(g:Game<W H>):>void => {
+    loop r in [0..H) {
+        let line = [loop c in [0..W) {
+            if g.walls[r c] "#"
+            else if r =? g.y and c =? g.x { if g.goals[r c] "+" else "@" }
+            else if g.crates[r c] { if g.goals[r c] "*" else "$" }
+            else if g.goals[r c] "."
+            else " "
+        }].join("")
+        printl"  {line}"
+    }
+}
+
+play = <W H>(name:string rows:array<string length=[H]> script:string):>void => {
+    let start = parse<W H>(rows)
+    if start is? string {
+        printl"{name}: bad level: {start}"
+        return
+    }
+    let game = start
+    # Every earlier state, whole: value semantics make undo a pop.
+    let history:array<Game<W H>> = []
+    let bumps = 0
+    let undos = 0
+    loop key in script.split("") {
+        if key =? "Z" {
+            if history.length >? 0 {
+                game = history.pop()
+                undos += 1
+            }
+            continue
+        }
+        # Unscoped arms: each declares the direction the code after the match uses.
+        match key {
+            <"U"> => (let dx:int64 = 0; let dy:int64 = -1)
+            <"D"> => (let dx:int64 = 0; let dy:int64 = 1)
+            <"L"> => (let dx:int64 = -1; let dy:int64 = 0)
+            <"R"> => (let dx:int64 = 1; let dy:int64 = 0)
+            _ => continue
+        }
+        let before = game
+        if step<W H>(@game dx dy) { history.push(before) } else { bumps += 1 }
+        if solved<W H>(game) break
+    }
+    let verdict = if solved<W H>(game) "solved" else "unsolved"
+    printl"{name} ({W}x{H}): {verdict} in {game.moves} moves, {game.pushes} pushes, {bumps} bumps, {undos} undos"
+    render<W H>(game)
+    printl"  start state kept: player at {start.x},{start.y}, {start.moves} moves"
+}
+
+main = () => {
+    let lines = (read_stdin ?? "").split("\n")
+    play<SMALL_W SMALL_H>("first" FIRST lines.get(0) ?? "")
+    play<WIDE_W WIDE_H>("second" SECOND lines.get(1) ?? "")
+}

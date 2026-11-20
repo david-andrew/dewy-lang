@@ -1,0 +1,234 @@
+# Tier 6 / 136 / milestone 57
+# Acceptance: Plan meetings for a team spread over five zones across the 2026
+# daylight-saving changes: zones read at run time, local working hours as
+# instant intervals, intersections and busy-time differences, calendar periods,
+# explicit fold and gap policies, and each office's report under its own
+# function-scoped `$time.zone`.
+# The planning default is UTC; each office's report sets its own zone.
+$time.zone = 'UTC'
+import p"@lib/ranges.dewy" as ranges
+import p"@lib/time/intervals.dewy" as intervals
+
+Member:type = [name:string zone:Zone start:TimeOfDay finish:TimeOfDay]
+Busy:type = [name:string span:Range<Instant>]
+Slot:type = [day:Date span:Range<Instant>]
+Plan:type = [
+    first:Date
+    weeks:int64
+    members:array<Member>
+    busy:array<Busy>
+    pins:array<string>
+    recurring:array<array<string>>
+]
+
+const MEETING = 30minute
+
+# Counts in the input are small; a larger one is a typing mistake.
+small_count = (text:string limit:int64):>int64 | none => {
+    let n = to_int(text) ?? return none
+    if n <? 1 or n >? limit return none
+    int64(n)
+}
+
+parse_member = (fields:array<string>):>Member | string => {
+    if fields.length not=? 5 return "a member needs a name, a zone and two times"
+    let z = zone(fields[2])
+    if z is? error return "unknown zone {fields[2]}"
+    let start = time_of_day(fields[3])
+    let finish = time_of_day(fields[4])
+    if start is? error or finish is? error return "working hours are written HH:MM"
+    if finish <=? start return "{fields[1]}'s day ends before it starts"
+    Member[fields[1] z start finish]
+}
+
+# Busy blocks are local times in the member's own zone; a block written in a
+# repeated hour takes its first reading, one in a skipped hour moves forward.
+parse_busy = (fields:array<string> members:array<Member>):>Busy | string => {
+    $time.fold = 'earlier'
+    $time.gap = 'next'
+    if fields.length not=? 4 return "a busy block needs a name and two local times"
+    let name = fields[1]
+    let owner = members.find((m) => m.name =? name)
+    if owner is? none return "no member called {name}"
+    let begins = local(fields[2])
+    let until = local(fields[3])
+    if begins is? error or until is? error return "busy times are written YYYY-MM-DDTHH:MM"
+    Busy[owner.name [begins.in_zone(owner.zone).nominal..until.in_zone(owner.zone).nominal)]
+}
+
+# A member's working hours on a calendar date, in their zone. Offices keep their
+# local hours, so a daylight-saving change moves the window on the shared clock.
+hours = (m:Member day:Date):>Range<Instant> => {
+    $time.fold = 'earlier'
+    $time.gap = 'next'
+    [day.at(m.start).in_zone(m.zone).nominal..day.at(m.finish).in_zone(m.zone).nominal)
+}
+
+common_hours = (members:array<Member> day:Date):>Range<Instant> | none => {
+    let first = members.get(0)
+    if first is? none return none
+    let common = hours(first day)
+    loop m in members {
+        let both = ranges.intersection(common hours(m day))
+        if both is? none return none
+        common = both
+    }
+    common
+}
+
+free_time = (window:Range<Instant> busy:array<Busy>):>array<Range<Instant>> => {
+    let free = [window]
+    loop b in busy {
+        let rest:array<Range<Instant>> = []
+        loop part in free {
+            loop piece in intervals.difference(part b.span) { rest.push(piece) }
+        }
+        free = rest
+    }
+    free
+}
+
+utc_clock = (t:Instant):>string => t.in_zone(UTC).format("HH:mm")
+minutes = (r:Range<Instant>):>rational => intervals.measure(r) / 1minute
+span_text = (r:Range<Instant>):>string => "{utc_clock(r.first)}-{utc_clock(r.last)}Z"
+
+const UTC = zone"UTC"
+
+schedule = (plan:Plan):>array<Slot> => {
+    let slots:array<Slot> = []
+    let last = plan.first + plan.weeks * 1week
+    loop day in [plan.first..last) {
+        if day.weekday >=? 5 continue
+        let label = day.format("EEE d MMM")
+        let window = common_hours(plan.members day)
+        if window is? none {
+            printl"{label}: no common working hours"
+            continue
+        }
+        let free = free_time(window plan.busy)
+        let chosen = free.find((r) => intervals.measure(r) >=? MEETING)
+        let shown = [loop r in free span_text(r)].join(" ")
+        if chosen is? none {
+            printl"{label}: common {span_text(window)}, free [{shown}], no {MEETING / 1minute} minute slot"
+            continue
+        }
+        printl"{label}: common {span_text(window)}, free [{shown}], meet {span_text(chosen)} ({minutes(chosen)} min)"
+        slots.push(Slot[day chosen])
+    }
+    slots
+}
+
+# The pins are proposals written in the organizing office's own clock time,
+# so each office reads the same text under its own zone.
+review_pins = (office:string pins:array<string> slots:array<Slot>):>void => {
+    loop text in pins {
+        let pinned = zoned(text)
+        if pinned is? error {
+            printl"{office}: {text} is not a local time"
+            continue
+        }
+        let fits = slots.find((s) => pinned.nominal in? s.span)
+        let local_time = pinned.format("EEE d MMM HH:mm XXX")
+        if fits is? none { printl"{office}: {local_time} ({utc_clock(pinned.nominal)}Z) misses every slot" }
+        else { printl"{office}: {local_time} ({utc_clock(pinned.nominal)}Z) fits {fits.day.format("EEE")} {span_text(fits.span)}" }
+    }
+}
+
+berlin_office = (plan:Plan slots:array<Slot>):>void => {
+    $time.zone = 'Europe/Berlin'
+    review_pins("Berlin" plan.pins slots)
+}
+
+new_york_office = (plan:Plan slots:array<Slot>):>void => {
+    $time.zone = 'America/New_York'
+    review_pins("New York" plan.pins slots)
+}
+
+# A weekly standup keeps its local time in its own zone; other offices see it
+# move by an hour when only one side changes clocks.
+standup = (fields:array<string> members:array<Member>):>void => {
+    if fields.length not=? 4 return
+    let home = zone(fields[1]) ?? return
+    let first = zoned(fields[2] zone=home) ?? return
+    let count = small_count(fields[3] 60) ?? return
+    loop k in [0..count) {
+        let meeting = first + k * 1week
+        let seen = [loop m in members "{m.name} {meeting.nominal.in_zone(m.zone).format("HH:mm")}"].join(", ")
+        printl"standup {meeting.format("d MMM HH:mm")} {fields[1]}: {seen}"
+    }
+}
+
+# A monthly retrospective on the 31st clamps to each month's last day; every
+# date is computed from the anchor so short months do not drift the series.
+retro = (fields:array<string> start:Date):>void => {
+    if fields.length not=? 3 return
+    let anchor = date(fields[1]) ?? return
+    let count = small_count(fields[2] 60) ?? return
+    loop k in [1..count] {
+        let day = anchor.add(k * 1month overflow='clamp')
+        printl"retro {day} {day.weekday_name}, {(day - start).total_days} days after planning starts"
+    }
+}
+
+# Nightly handoffs at a fixed local time: the repeated autumn hour takes its
+# later reading and the skipped spring hour keeps its displacement.
+handoff = (fields:array<string>):>void => {
+    $time.fold = 'later'
+    $time.gap = 'preserve_displacement'
+    if fields.length not=? 5 return
+    let home = zone(fields[1]) ?? return
+    let at = time_of_day(fields[2]) ?? return
+    let first = date(fields[3]) ?? return
+    let count = small_count(fields[4] 60) ?? return
+    let previous:Instant | none = none
+    loop day in [first..first + count * 1day) {
+        let moment = day.at(at).in_zone(home)
+        let gap = if previous is? none "" else ", {(moment.nominal - previous) / 1hour} h after the last"
+        printl"handoff {day} {fields[2]} -> {moment.format("HH:mm XXX")} ({utc_clock(moment.nominal)}Z){gap}"
+        previous = moment.nominal
+    }
+}
+
+parse = (text:string):>Plan => {
+    let plan = Plan[date"2026-01-05" 1 [] [] [] []]
+    loop n in 1.. and raw in text.split("\n") {
+        let line = raw.trim
+        if line.length =? 0 or line.startswith("#") continue
+        let fields = line.split(" ")
+        match fields.get(0) ?? "" {
+            <"plan"> => {
+                let first = date(fields.get(1) ?? "")
+                let weeks = small_count(fields.get(2) ?? "" 52)
+                if first is? error or weeks is? none { printl"line {n}: plan needs a date and a week count" }
+                else { plan.first = first; plan.weeks = weeks }
+            }
+            <"member"> => match parse_member(fields) {
+                m:Member => plan.members.push(m)
+                why:string => printl"line {n}: {why}"
+            }
+            <"busy"> => match parse_busy(fields plan.members) {
+                b:Busy => plan.busy.push(b)
+                why:string => printl"line {n}: {why}"
+            }
+            <"pin"> => plan.pins.push(fields.get(1) ?? "")
+            _ => plan.recurring.push(fields)
+        }
+    }
+    plan
+}
+
+main = () => {
+    let plan = parse(read_stdin ?? "")
+    printl"team: {[loop m in plan.members "{m.name} ({m.zone})"].join(", ")}"
+    let slots = schedule(plan)
+    berlin_office(plan slots)
+    new_york_office(plan slots)
+    loop fields in plan.recurring {
+        match fields.get(0) ?? "" {
+            <"standup"> => standup(fields plan.members)
+            <"retro"> => retro(fields plan.first)
+            <"handoff"> => handoff(fields)
+            _ => printl"unknown request {fields.join(" ")}"
+        }
+    }
+}

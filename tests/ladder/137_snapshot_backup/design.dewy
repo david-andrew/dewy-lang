@@ -1,0 +1,204 @@
+# Tier 6 / 137 / milestone 58
+# Acceptance: An incremental, content-addressed backup tool driven by a stdin
+# script: workspace paths confined before any file operation, SafePath record
+# fields and arrays, the previous manifest and the current scan loaded together
+# in `parallel ( ... )`, hashing in parallel under a function-scoped core cap,
+# Ctrl-C handled beside the work, and leases released by an assigned drop hook.
+import p"@lib/std/signals.dewy" as signals
+
+const workspace = p"workspace"
+const vault = p"vault"
+
+# A file as one snapshot saw it. Its path is proven inside the workspace.
+Entry:type = [name:string file:SafePath size:int hash:uint64]
+Report:type = [copied:int reused:int removed:int stopped:bool]
+
+# One lease per running backup; the vault refuses a second concurrent run.
+let leases_open:int64 = 0
+let leases_released:int64 = 0
+Lease:type = [snapshot:int64 $__drop__ = ():>void => { leases_released += 1 }]
+
+fnv = (bytes:array<uint8>):>uint64 => {
+    let h:uint64<overflow='wrap'> = 14695981039346656037
+    loop b in bytes { h = (h xor uint64(b)) * 1099511628211 }
+    h
+}
+
+# The workspace-relative name of a walked file.
+relative = (f:Path):>string => (f as string).remove_prefix("{workspace}/")
+
+# Every file under the workspace with its bytes. Each walked path is confined
+# again: a name from the file system is outside data like any other.
+scan = ():>array<[name:string file:SafePath bytes:array<uint8>]> | FileError | FileNotFound | PathEscape | Canceled | InvalidUtf8 | FileAccessDenied | IsDirectory | FileExists => {
+    let found:array<[name:string file:SafePath bytes:array<uint8>]> = []
+    if not workspace.exists return found
+    loop f in workspace.walk or_throw {
+        let safe = workspace.confine(f) or_throw
+        found.push([name=relative(f) file=safe bytes=safe.read_bytes or_throw])
+    }
+    found
+}
+
+# The manifest of snapshot n: one `hash size name` line per file.
+manifest_of = (n:int64):>SafePath => p"{vault}/{n}/manifest"
+
+load_manifest = (n:int64):>dict<string Entry> | Canceled => {
+    let entries = dict<string Entry>()
+    if n <? 1 return entries
+    let text = manifest_of(n).read_text or_throw<Canceled> ?? return entries
+    loop line in text.split("\n") {
+        let fields = line.split(" ")
+        if fields.length not=? 3 continue
+        let hash = to_int(fields[0]) ?? continue
+        let size = to_int(fields[1]) ?? continue
+        if hash <? 0 or hash >? 18446744073709551615 continue
+        # Names in a manifest are outside data until confined.
+        let file = workspace.confine(p"{workspace}/{fields[2]}") ?? continue
+        entries[fields[2]] = Entry[fields[2] file size uint64(hash)]
+    }
+    entries
+}
+
+object_of = (hash:uint64):>SafePath => p"{vault}/objects/{hash}"
+
+# Hashing is pure work over loaded bytes, so it runs in parallel; this
+# function caps its share of the machine whatever the caller allows.
+hash_all = (contents:array<array<uint8>>):>array<uint64> => {
+    $program.max_cores = 2
+    [parallel bytes in contents fnv(bytes)]
+}
+
+backup = (n:int64<(>=? 1)> stop:Atomic<int64>) => {
+    # The previous manifest and the current files are independent reads.
+    parallel (
+        let previous = load_manifest(n - 1) or_throw
+        let files = scan() or_throw
+    )
+    let hashes = hash_all([loop item in files item.bytes])
+    p"{vault}/objects".make_dirs or_throw;
+    let report = Report[0 0 0 false]
+    let entries:array<Entry> = []
+    let staged:array<SafePath> = []
+    loop i in 0.. and item in files and hash in hashes {
+        if stop.load =? 1 {
+            report.stopped = true
+            break
+        }
+        let entry = Entry[item.name item.file item.bytes.length hash]
+        entries.push(entry)
+        let object = object_of(hash)
+        if object.exists {
+            report.reused += 1
+            continue
+        }
+        object.write_bytes(item.bytes) or_throw;
+        staged.push(object)
+        report.copied += 1
+    }
+    loop name in previous.keys.sorted {
+        if not entries.any((e) => e.name =? name) report.removed += 1
+    }
+    let lines = [loop e in entries "{e.hash} {e.size} {e.name}"]
+    p"{vault}/{n}".make_dirs or_throw;
+    manifest_of(n).write_text(lines.join("\n")) or_throw;
+    printl"snapshot {n}: {entries.length} files, {report.copied} stored, {report.reused} reused, {report.removed} removed"
+    loop object in staged { printl"  stored {object.name} ({object.size or_throw} bytes)" }
+    report
+}
+
+# Ctrl-C asks the running backup to stop between files; the listener closes
+# by itself once the backup returns, so an uninterrupted run just finishes.
+run_backup = (n:int64<(>=? 1)>) => {
+    # Held until this function ends, however it ends.
+    let lease = Lease[n]
+    leases_open += 1
+    let stop = atomic(0)
+    parallel (
+        let report = backup(n stop) or_throw
+        loop _ in signals.ctrl_c {
+            printl"interrupt: finishing the current file"
+            stop.store(1)
+        }
+    )
+    if report.stopped printl"snapshot {lease.snapshot} is partial"
+}
+
+edit = (name:string text:string | none) => {
+    let wanted = p"{workspace}/{name}"
+    if not workspace.contains(wanted) {
+        printl"refused {name}: outside the workspace"
+        return
+    }
+    if text is? none {
+        wanted.unlink or_throw;
+        printl"removed {name}"
+        return
+    }
+    # The folder holding a confined file is inside the workspace too, but that
+    # is a fact about this name, so it is confined like any other path.
+    (workspace.confine(wanted.parent) or_throw).make_dirs or_throw;
+    wanted.write_text(text) or_throw;
+    printl"wrote {name}"
+}
+
+restore = (n:int64 name:string) => {
+    let entries = load_manifest(n) or_throw
+    let entry = entries.get(name)
+    if entry is? none {
+        printl"snapshot {n} has no {name}"
+        return
+    }
+    let restored = p"restored/{n}"
+    let target = restored.confine(p"{restored}/{name}") or_throw
+    let bytes = object_of(entry.hash).read_bytes or_throw
+    if fnv(bytes) not=? entry.hash {
+        printl"object for {name} is damaged"
+        return
+    }
+    (restored.confine(target.parent) or_throw).make_dirs or_throw;
+    target.write_bytes(bytes) or_throw;
+    printl"restored {name} from snapshot {n}: {target.read_text or_throw}"
+}
+
+verify = (snapshots:int64) => {
+    let checked = 0
+    let damaged = 0
+    loop n in [1..snapshots] {
+        loop entry in (load_manifest(n) or_throw).values {
+            let bytes = object_of(entry.hash).read_bytes ?? []
+            if fnv(bytes) =? entry.hash and bytes.length =? entry.size { checked += 1 } else { damaged += 1 }
+        }
+    }
+    printl"verified {checked} entries in {snapshots} snapshots, {damaged} damaged"
+}
+
+main = () => {
+    let snapshots:int64 = 0
+    let script = read_stdin or_throw
+    loop raw in script.split("\n") {
+        let line = raw.trim
+        if line.length =? 0 or line.startswith("#") continue
+        let [command ...rest] = line.split(" ")
+        match command {
+            <"write"> => {
+                if rest.length <? 2 continue
+                edit(rest[0] rest[$clamp 1..).join(" ")) or_throw
+            }
+            <"remove"> => { if rest.length >? 0 edit(rest[0] none) or_throw }
+            <"backup"> => {
+                if snapshots >=? 1000 continue
+                snapshots += 1
+                run_backup(snapshots) or_throw
+            }
+            <"restore"> => {
+                if rest.length not=? 2 continue
+                let n = to_int(rest[0]) ?? continue
+                if n <? 1 or n >? snapshots continue
+                restore(int64(n) rest[1]) or_throw
+            }
+            <"verify"> => verify(snapshots) or_throw
+            _ => printl"unknown command {command}"
+        }
+    }
+    printl"leases opened {leases_open}, released {leases_released}"
+}
