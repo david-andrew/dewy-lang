@@ -1,0 +1,12 @@
+# modes: native native-release
+# Reduce angles with remquo, which reports the quotient's low bits through a pointer.
+$extern(lib='m')
+remquo = (x:float64 y:float64 quo:ptr<int32>):>float64
+
+main = () => {
+    let q:array<int32> = [0]
+    loop angle in [10.0 -7.5 2.0] {
+        let r = $unsafe remquo(angle 3.0 q.ptr)
+        printl"{angle} = {q[0]} * 3 + {r}"
+    }
+}

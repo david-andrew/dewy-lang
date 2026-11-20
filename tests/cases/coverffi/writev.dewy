@@ -1,0 +1,18 @@
+# modes: native native-release
+# Gather three buffers into one write with writev and an iovec array (to standard error).
+IoVec:type = [base:ptr<uint8> length:uint64]
+$extern
+writev = (fd:int32 vectors:ptr<IoVec> count:int32):>int64
+
+main = () => $unsafe {
+    let head = bytes("status: ")
+    let body = bytes("ok")
+    let tail = bytes("\n")
+    let parts:array<IoVec> = [
+        IoVec[head.ptr uint64(head.length)]
+        IoVec[body.ptr uint64(body.length)]
+        IoVec[tail.ptr uint64(tail.length)]
+    ]
+    let n = writev(2 parts.ptr int32(parts.length))
+    printl"wrote {n} bytes"
+}

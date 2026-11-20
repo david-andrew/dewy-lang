@@ -1,0 +1,22 @@
+# An 8x8 board of small cells inside a record: place, copy the game, compare.
+Board:type = [cells:array<array<uint8 length=8> length=8> turn:uint8]
+
+main = () => {
+    let row:array<uint8 length=8> = [0 0 0 0 0 0 0 0]
+    let empty:array<array<uint8 length=8> length=8> = [row row row row row row row row]
+    let game = Board[empty 1]
+    game.cells[3][4] = 2
+    game.cells[4][3] = 1
+    let before = game
+    game.cells[2][3] = 1
+    game.turn = 2
+    let changed = 0
+    loop r in [0..8) {
+        loop c in [0..8) {
+            if game.cells[r][c] not=? before.cells[r][c] { changed += 1 }
+        }
+    }
+    printl"{changed} changed, turn {before.turn}->{game.turn}"
+    printl(game.cells[3])
+    printl(size_of<Board>)
+}

@@ -1,0 +1,17 @@
+# Slots that may hold a point: an array of optional records.
+Point:type = [x:int32 y:int32]
+
+main = () => {
+    let slots:array<Point?> = [Point[1 2] none Point[-3 4]]
+    slots.push(none)
+    slots[1] = Point[9 9]
+    let total = 0
+    loop s in slots {
+        if s isnt? none { total += int(s.x) + int(s.y) }
+    }
+    printl"{total} {slots.length}"
+    let firsts = [loop s in slots if s is? none -1 else int(s.x)]
+    printl(firsts)
+    let nested:array<array<Point?>> = [[none Point[1 1]] []]
+    printl((nested.get(0) ?? []).length)
+}

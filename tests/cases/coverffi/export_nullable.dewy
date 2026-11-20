@@ -1,0 +1,15 @@
+# modes: native native-release
+# An exported function takes an optional pointer: C may pass NULL.
+$export
+total = (xs:ptr<int64>? n:int64):>int64 => $unsafe {
+    if xs is? none return -1
+    let sum:int64 = 0
+    loop i in [0..n) { sum += xs[i] }
+    sum
+}
+
+main = () => {
+    let values:array<int64> = [3 4 5]
+    printl(total(values.ptr 3))
+    printl(total(none 0))
+}

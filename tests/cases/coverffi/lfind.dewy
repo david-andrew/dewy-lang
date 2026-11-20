@@ -1,0 +1,17 @@
+# modes: native native-release
+# A C library calls back into Dewy many times: lsearch-style linear search with lfind.
+$extern
+lfind = (key:ptr<int64> base:ptr<int64> count:ptr<uint64> size:uint64 compare:((a:ptr<int64> b:ptr<int64>):>int32)):>ptr<int64>?
+
+$export
+same = (a:ptr<int64> b:ptr<int64>):>int32 => $unsafe (if a[0] =? b[0] 0 else 1)
+
+main = () => {
+    let ids:array<int64> = [900 41 77 1024]
+    let count:array<uint64> = [uint64(ids.length)]
+    loop wanted in [77 5] {
+        let key:array<int64> = [wanted]
+        let hit = $unsafe lfind(key.ptr ids.ptr count.ptr size_of<int64> @same)
+        printl"{wanted}: {hit isnt? none}"
+    }
+}

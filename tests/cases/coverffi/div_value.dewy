@@ -1,0 +1,25 @@
+# modes: native native-release
+# Integer division with C's lldiv returning a struct by value, used in a loop.
+LLDiv:type = [quot:int64 rem:int64]
+$extern
+lldiv = (n:int64 d:int64):>LLDiv
+$extern
+abs = (x:int32):>int32
+
+digits = (n0:int64):>array<int64> => $unsafe {
+    let out:array<int64> = []
+    let n = n0
+    loop n >? 0 {
+        let r = lldiv(n 10)
+        out.push(r.rem)
+        n = r.quot
+    }
+    out
+}
+
+main = () => {
+    printl(digits(9071))
+    printl($unsafe abs(-42))
+    let parts = $unsafe lldiv(-7 2)
+    printl"{parts.quot} {parts.rem}"
+}

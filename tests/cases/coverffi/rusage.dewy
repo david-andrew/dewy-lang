@@ -1,0 +1,22 @@
+# modes: native native-release
+# Read this process's CPU time with getrusage: a struct holding two timeval structs.
+TimeVal:type = [seconds:int64 micros:int64]
+Usage:type = [
+    user:TimeVal system:TimeVal
+    maxrss:int64 ixrss:int64 idrss:int64 isrss:int64 minflt:int64 majflt:int64 nswap:int64
+    inblock:int64 oublock:int64 msgsnd:int64 msgrcv:int64 nsignals:int64 nvcsw:int64 nivcsw:int64
+]
+$extern
+getrusage = (who:int32 out:ptr<Usage>):>int32
+
+main = () => {
+    let zero = TimeVal[0 0]
+    let usage:array<Usage> = [Usage[zero zero 0 0 0 0 0 0 0 0 0 0 0 0 0 0]]
+    let total = 0
+    loop i in [0..200000) { total += i % 3 }
+    if $unsafe getrusage(0 usage.ptr) =? 0 {
+        let u = usage[0]
+        printl"cpu fields sane: {u.user.micros >=? 0 and u.user.micros <? 1000000}, rss known: {u.maxrss >? 0}"
+    }
+    printl"{total} {size_of<Usage>}"
+}

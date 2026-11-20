@@ -1,0 +1,19 @@
+# Records holding a small union field and an optional: grouped and rewritten.
+Token:type = [line:int32 value:int64 | string | bool kind:uint8?]
+
+main = () => {
+    let toks:array<Token> = [Token[1 42 none] Token[1 "x" 3] Token[2 true none] Token[3 -7 1]]
+    let ints = 0
+    loop t in toks {
+        match t.value {
+            n:int64 => {ints += int(n)}
+            s:string => printl"text {s} at {t.line}"
+            b:bool => printl"flag {b}"
+        }
+    }
+    printl(ints)
+    toks[0].value = "replaced"
+    toks[2].kind = 9
+    printl([loop t in toks t.kind ?? 0])
+    printl(toks[0].value is? string)
+}

@@ -1,0 +1,13 @@
+# modes: native native-release
+# Copy a block of particle records between arrays with memcpy and size_of.
+Particle:type = [x:float32 y:float32 alive:bool kind:uint8]
+$extern
+memcpy = (dst:ptr<Particle> src:ptr<Particle> n:uint64):>ptr<Particle>
+
+main = () => {
+    let source:array<Particle> = [Particle[1.0 2.0 true 3] Particle[4.5 -1.0 false 7] Particle[0.0 0.0 true 1]]
+    let into:array<Particle> = [loop _ in [0..3) Particle[0.0 0.0 false 0]]
+    $unsafe memcpy(into.ptr source.ptr uint64(source.length) * size_of<Particle>);
+    printl([loop p in into "{p.x},{p.y},{p.alive},{p.kind}"])
+    printl"particle: {size_of<Particle>} bytes"
+}

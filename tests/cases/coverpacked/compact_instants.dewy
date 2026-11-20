@@ -1,0 +1,19 @@
+# A column of compact 64-bit instants: narrow, compare, measure and widen back.
+main = () => {
+    let wide = [instant"2026-01-01T00:00:00Z" instant"2026-06-15T12:30:00Z" instant"2100-01-01T00:00:00Z"]
+    let column:array<Instant<width=64>> = []
+    loop t in wide {
+        match convert<Instant<width=64>>(t) {
+            c:Instant<width=64> => column.push(c)
+            _ => printl"out of range"
+        }
+    }
+    printl(column.length)
+    if column.length >=? 2 {
+        let first = column[0]
+        let last = column[column.length - 1]
+        printl(last >? first)
+        printl(last as Instant)
+    }
+    printl(size_of<Instant<width=64>> size_of<Instant>)
+}

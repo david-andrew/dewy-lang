@@ -1,0 +1,20 @@
+# modes: native native-release
+# Strings to C: interpolated, non-ASCII and empty text, measured and searched by C.
+$extern
+strlen = (s:string):>uint64
+$extern
+strchr = (s:string c:int32):>ptr<uint8>?
+$extern
+strcmp = (a:string b:string):>int32
+
+main = () => $unsafe {
+    let name = "Zoë"
+    let greeting = "hello {name}!"
+    printl(strlen(greeting))
+    printl(strlen(""))
+    printl(strchr(greeting 33) isnt? none)
+    printl(strchr(greeting 63) is? none)
+    printl(strcmp("apple" "banana") <? 0)
+    let parts = ["a" "b" "c"]
+    printl(strlen(parts.join("-")))
+}

@@ -1,0 +1,19 @@
+# modes: native native-release
+# Look up keys in a sorted table with C's bsearch and a Dewy comparison.
+$extern
+bsearch = (key:ptr<int32> base:ptr<int32> count:uint64 size:uint64 compare:((a:ptr<int32> b:ptr<int32>):>int32)):>ptr<int32>?
+
+$export
+by_value = (a:ptr<int32> b:ptr<int32>):>int32 => $unsafe {
+    if a[0] <? b[0] -1 else if a[0] >? b[0] 1 else 0
+}
+
+main = () => {
+    let table:array<int32> = [2 3 5 7 11 13 17 19 23]
+    loop wanted in [7 8 23 1] {
+        let key:array<int32> = [int32(wanted)]
+        let found = $unsafe bsearch(key.ptr table.ptr uint64(table.length) size_of<int32> @by_value)
+        if found is? none { printl"{wanted}: absent" }
+        else { printl"{wanted}: present ({$unsafe found[0]})" }
+    }
+}

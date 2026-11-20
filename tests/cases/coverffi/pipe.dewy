@@ -1,0 +1,22 @@
+# modes: native native-release
+# Move bytes through a pipe with pipe, write, read and close.
+$extern
+pipe = (fds:ptr<int32>):>int32
+$extern
+write = (fd:int32 data:ptr<uint8> count:uint64):>int64
+$extern
+read = (fd:int32 data:ptr<uint8> count:uint64):>int64
+$extern
+close = (fd:int32):>int32
+
+main = () => $unsafe {
+    let fds:array<int32> = [0 0]
+    if pipe(fds.ptr) not=? 0 { printl"no pipe"; return }
+    let message = bytes("through the pipe")
+    let sent = write(fds[1] message.ptr uint64(message.length))
+    close(fds[1]);
+    let into:array<uint8> = [loop _ in [0..64) uint8(0)]
+    let got = read(fds[0] into.ptr 64)
+    close(fds[0]);
+    printl"sent {sent}, got {got}: {into[$clamp 0..int(got)) as string | none ?? "?"}"
+}

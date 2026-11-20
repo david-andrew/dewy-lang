@@ -1,0 +1,19 @@
+# modes: native native-release
+# Split floats with frexp and modf, which return a part through a pointer.
+$extern(lib='m')
+frexp = (x:float64 exponent:ptr<int32>):>float64
+$extern(lib='m')
+modf = (x:float64 whole:ptr<float64>):>float64
+$extern(lib='m')
+hypot = (x:float64 y:float64):>float64
+
+main = () => $unsafe {
+    let e:array<int32> = [0]
+    let w:array<float64> = [0.0]
+    loop x in [8.0 0.75 -12.5] {
+        let m = frexp(x e.ptr)
+        let f = modf(x w.ptr)
+        printl"{x}: mantissa {m} exponent {e[0]}, whole {w[0]} fraction {f}"
+    }
+    printl(hypot(3.0 4.0))
+}

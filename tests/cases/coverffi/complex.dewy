@@ -1,0 +1,18 @@
+# modes: native native-release
+# Complex arithmetic from libm: a pair of doubles crosses by value both ways.
+Complex:type = [re:float64 im:float64]
+$extern(lib='m')
+cexp = (z:Complex):>Complex
+$extern(lib='m')
+cabs = (z:Complex):>float64
+$extern(lib='m')
+conj = (z:Complex):>Complex
+
+main = () => $unsafe {
+    let z = Complex[0.0 3.141592653589793]
+    let e = cexp(z)
+    printl"{round(e.re * 1000.0) / 1000.0} {round(e.im * 1000.0) / 1000.0}"
+    printl(cabs(Complex[3.0 4.0]))
+    let c = conj(Complex[1.5 -2.5])
+    printl"{c.re} {c.im}"
+}

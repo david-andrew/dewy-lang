@@ -1,0 +1,20 @@
+# modes: native native-release
+# Wait on a pipe with poll: pollfd has an int and two shorts.
+PollFd:type = [fd:int32 events:int16 revents:int16]
+$extern
+pipe = (fds:ptr<int32>):>int32
+$extern
+write = (fd:int32 data:ptr<uint8> count:uint64):>int64
+$extern
+poll = (fds:ptr<PollFd> count:uint64 timeout_ms:int32):>int32
+
+main = () => $unsafe {
+    let fds:array<int32> = [0 0]
+    if pipe(fds.ptr) not=? 0 return
+    let watch:array<PollFd> = [PollFd[fds[0] 1 0]]
+    printl"before: {poll(watch.ptr 1 0)} ready"
+    let msg = bytes("x")
+    write(fds[1] msg.ptr 1);
+    printl"after: {poll(watch.ptr 1 0)} ready, revents {watch[0].revents}"
+    printl(size_of<PollFd>)
+}

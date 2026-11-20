@@ -1,0 +1,26 @@
+# modes: native native-release
+# Format a UTC calendar time with gmtime_r and strftime into a byte buffer.
+Tm:type = [
+    sec:int32 min:int32 hour:int32 mday:int32 mon:int32 year:int32
+    wday:int32 yday:int32 isdst:int32 gmtoff:int64 zone:ptr<uint8>?
+]
+$extern
+gmtime_r = (t:ptr<int64> out:ptr<Tm>):>ptr<Tm>?
+$extern
+strftime = (buf:ptr<uint8> max:uint64 format:string tm:ptr<Tm>):>uint64
+
+format_utc = (seconds:int64 pattern:string):>string => $unsafe {
+    let t:array<int64> = [seconds]
+    let tm:array<Tm> = [Tm[0 0 0 0 0 0 0 0 0 0 none]]
+    if gmtime_r(t.ptr tm.ptr) is? none return "?"
+    let buf:array<uint8> = [loop _ in [0..64) uint8(0)]
+    let n = strftime(buf.ptr 64 pattern tm.ptr)
+    let used = buf[$clamp 0..int(n))
+    used as string | none ?? "?"
+}
+
+main = () => {
+    printl(format_utc(0 "%Y-%m-%d %H:%M:%S"))
+    printl(format_utc(1700000000 "%A %d %B %Y"))
+    printl"tm is {size_of<Tm>} bytes, aligned to {align_of<Tm>}"
+}

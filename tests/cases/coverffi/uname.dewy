@@ -1,0 +1,28 @@
+# modes: native native-release
+# Ask the kernel for its name with uname: a struct of fixed character arrays.
+UtsName:type = [
+    sysname:array<uint8 length=65>
+    nodename:array<uint8 length=65>
+    release:array<uint8 length=65>
+    version:array<uint8 length=65>
+    machine:array<uint8 length=65>
+    domain:array<uint8 length=65>
+]
+$extern
+uname = (out:ptr<UtsName>):>int32
+
+c_text = (field:array<uint8 length=65>):>string => {
+    let out:array<uint8> = []
+    loop b in field {
+        if b =? 0 break
+        out.push(b)
+    }
+    out as string | none ?? "?"
+}
+
+main = () => {
+    let blank:array<uint8 length=65> = [loop _ in [0..65) uint8(0)]
+    let info:array<UtsName> = [UtsName[blank blank blank blank blank blank]]
+    if $unsafe uname(info.ptr) =? 0 { printl(c_text(info[0].sysname)) }
+    printl(size_of<UtsName>)
+}

@@ -1,0 +1,15 @@
+# Colour palettes: fixed arrays of small records inside records, copied and edited.
+Rgb:type = [r:uint8 g:uint8 b:uint8]
+Palette:type = [name:string colors:array<Rgb length=4>]
+
+main = () => {
+    let base = Palette["base" [Rgb[0 0 0] Rgb[255 0 0] Rgb[0 255 0] Rgb[0 0 255]]]
+    let warm = base
+    warm.name = "warm"
+    warm.colors[2] = Rgb[255 128 0]
+    warm.colors[3].b = 64
+    printl"{base.colors[2].g} {warm.colors[2].g} {base.colors[3].b} {warm.colors[3].b}"
+    let bright = 0
+    loop c in warm.colors { if int(c.r) + int(c.g) + int(c.b) >? 200 bright += 1 }
+    printl"{warm.name}: {bright} bright, {size_of<Rgb>} bytes each"
+}

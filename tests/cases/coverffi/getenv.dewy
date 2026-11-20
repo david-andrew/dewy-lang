@@ -1,0 +1,20 @@
+# modes: native native-release
+# Read an environment variable as a Dewy string, copying the C bytes: a refined
+# strlen result bounds the copy loop.
+$extern
+getenv = (name:string):>ptr<uint8>?
+$extern
+strlen = (s:ptr<uint8>):>int64<(>=? 0)>
+
+c_env = (name:string):>string | none => $unsafe {
+    let p = getenv(name) ?? return none
+    let n = strlen(p)
+    let out:array<uint8> = []
+    loop i in [0..n) { out.push(p[i]) }
+    out as string | none
+}
+
+main = () => {
+    printl((c_env("PATH") ?? "").length >? 0)
+    printl(c_env("DEWY_FFI_SURELY_MISSING_42") ?? "unset")
+}

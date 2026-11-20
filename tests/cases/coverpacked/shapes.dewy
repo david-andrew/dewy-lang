@@ -1,0 +1,23 @@
+# Arrays of a union of records: match on each, change some in place.
+Circle:type = [r:float64]
+Rect:type = [w:float64 h:float64]
+Label:type = [text:string]
+Shape:type = Circle | Rect | Label
+
+area = (s:Shape):>float64 => match s {
+    c:Circle => 3.0 * c.r * c.r
+    r:Rect => r.w * r.h
+    _:Label => 0.0
+}
+
+main = () => {
+    let shapes:array<Shape> = [Circle[1.0] Rect[2.0 3.0] Label["hi"] Rect[1.5 1.5]]
+    printl([loop s in shapes area(s)])
+    loop i in [0..shapes.length) {
+        let s = shapes[i]
+        if s is? Rect { shapes[i] = Rect[s.w * 2.0 s.h] }
+    }
+    printl([loop s in shapes area(s)])
+    shapes[2] = Circle[2.0]
+    printl(area(shapes[2]))
+}

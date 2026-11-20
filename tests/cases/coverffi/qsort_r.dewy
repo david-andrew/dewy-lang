@@ -1,0 +1,18 @@
+# modes: native native-release
+# Sort indices by an external key table, passing the table as qsort_r's context.
+$extern
+qsort_r = (base:ptr<int32> count:uint64 size:uint64 compare:((a:ptr<int32> b:ptr<int32> keys:ptr<float64>):>int32) keys:ptr<float64>):>void
+
+$export
+by_key = (a:ptr<int32> b:ptr<int32> keys:ptr<float64>):>int32 => $unsafe {
+    let ka = keys[int(a[0])]
+    let kb = keys[int(b[0])]
+    if ka <? kb -1 else if ka >? kb 1 else 0
+}
+
+main = () => {
+    let keys:array<float64> = [0.5 -1.0 3.25 0.0]
+    let order:array<int32> = [0 1 2 3]
+    $unsafe qsort_r(order.ptr uint64(order.length) size_of<int32> @by_key keys.ptr)
+    printl(order)
+}

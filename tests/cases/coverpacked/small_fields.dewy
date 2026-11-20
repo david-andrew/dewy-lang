@@ -1,0 +1,14 @@
+# A sensor sample packs small fields; arrays of them are sorted, copied and summed.
+Sample:type = [id:uint16 level:uint8 ok:bool temp:int16]
+
+main = () => {
+    let samples:array<Sample> = [Sample[7 200 true -40] Sample[3 15 false 125] Sample[9 99 true 0]]
+    let copy = samples
+    copy[0].level = 1
+    printl"{samples[0].level} {copy[0].level}"
+    let sorted = samples.sorted(key=(s) => s.id)
+    printl([loop s in sorted s.id])
+    let total = 0
+    loop s in samples { if s.ok { total += int(s.level) + int(s.temp) } }
+    printl"{total} {size_of<Sample>} {align_of<Sample>}"
+}

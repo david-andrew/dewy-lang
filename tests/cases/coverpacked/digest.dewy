@@ -1,0 +1,19 @@
+# A record holding a fixed 16-byte digest: compare, copy and change one byte.
+Digest:type = [bytes:array<uint8 length=16> label:string]
+
+checksum = (d:Digest):>int => {
+    let s = 0
+    loop b in d.bytes { s = (s * 31 + int(b)) % 1000003 }
+    s
+}
+
+main = () => {
+    let raw:array<uint8 length=16> = [loop i in [0..16) uint8(i * 17 % 256)]
+    let a = Digest[raw "a"]
+    let b = a
+    b.bytes[3] = 0
+    b.label = "b"
+    printl"{checksum(a)} {checksum(b)} {a.bytes[3]} {b.bytes[3]} {a.label}{b.label}"
+    printl(a.bytes =? raw)
+    printl(size_of<array<uint8 length=16>>)
+}

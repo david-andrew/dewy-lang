@@ -1,0 +1,12 @@
+# Mixed float32 and float64 fields: layout, arithmetic and round trips.
+Vertex:type = [x:float32 y:float32 z:float32 weight:float64 tag:uint8]
+
+main = () => {
+    let vs:array<Vertex> = [Vertex[1.0 2.0 3.0 0.5 1] Vertex[-1.0 0.5 2.0 0.25 2]]
+    let sx:float64 = 0.0
+    loop v in vs { sx += float64(v.x) * v.weight }
+    printl(sx)
+    vs[1].z = vs[0].z + float32(1.5)
+    printl(vs[1].z)
+    printl"{size_of<Vertex>} {align_of<Vertex>}"
+}

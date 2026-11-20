@@ -1,0 +1,16 @@
+# modes: native native-release
+# Install a C signal handler written in Dewy, raise the signal, observe the flag.
+$extern
+signal = (sig:int32 handler:((sig:int32):>void)):>ptr<uint8>?
+$extern(name='raise')
+raise_signal = (sig:int32):>int32
+
+let seen = atomic(0)
+$export
+on_usr1 = (sig:int32):>void => { seen.store(int64(sig)) }
+
+main = () => $unsafe {
+    signal(10 @on_usr1);
+    raise_signal(10);
+    printl"handler saw signal {seen.load}"
+}

@@ -1,0 +1,25 @@
+# modes: native native-release
+# Build a C binary tree with tsearch and walk it, counting visits from a void callback.
+$extern
+tsearch = (key:ptr<int64> root:ptr<ptr<uint8>?> compare:((a:ptr<int64> b:ptr<int64>):>int32)):>ptr<uint8>?
+$extern
+twalk = (root:ptr<uint8> action:((node:ptr<uint8> which:int32 depth:int32):>void)):>void
+
+let leaves:int64 = 0
+$export
+by_key = (a:ptr<int64> b:ptr<int64>):>int32 => $unsafe (if a[0] <? b[0] -1 else if a[0] >? b[0] 1 else 0)
+$export
+visit = (node:ptr<uint8> which:int32 depth:int32):>void => {
+    if which =? 3 { leaves += 1 }
+}
+
+main = () => $unsafe {
+    let keys:array<int64> = [50 20 80 10 30 70 90]
+    let root:array<ptr<uint8>?> = [none]
+    loop i in [0..keys.length) {
+        tsearch(keys.ptr + i root.ptr @by_key);
+    }
+    let top = root[0]
+    if top isnt? none { twalk(top @visit) }
+    printl"leaves: {leaves}"
+}

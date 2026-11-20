@@ -1,0 +1,21 @@
+# modes: native native-release
+# Measure elapsed time with clock_gettime and a timespec out-parameter.
+TimeSpec:type = [seconds:int64 nanos:int64]
+$extern
+clock_gettime = (clock:int32 out:ptr<TimeSpec>):>int32
+
+now = ():>TimeSpec => $unsafe {
+    let slot:array<TimeSpec> = [TimeSpec[0 0]]
+    if clock_gettime(1 slot.ptr) not=? 0 return TimeSpec[0 0]
+    slot[0]
+}
+
+main = () => {
+    let a = now()
+    let total = 0
+    loop i in [0..100000) { total += i % 7 }
+    let b = now()
+    let ns = (b.seconds - a.seconds) * 1000000000 + (b.nanos - a.nanos)
+    printl"work {total}, clock moved forward: {ns >=? 0}"
+    printl"timespec is {size_of<TimeSpec>} bytes"
+}

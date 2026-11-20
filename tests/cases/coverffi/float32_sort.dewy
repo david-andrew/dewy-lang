@@ -1,0 +1,20 @@
+# modes: native native-release
+# Sort float32 samples and uint16 ids with qsort and narrow-typed callbacks.
+$extern
+qsort = (base:ptr<float32> count:uint64 size:uint64 compare:((a:ptr<float32> b:ptr<float32>):>int32)):>void
+$extern(name='qsort')
+qsort16 = (base:ptr<uint16> count:uint64 size:uint64 compare:((a:ptr<uint16> b:ptr<uint16>):>int32)):>void
+
+$export
+by_f32 = (a:ptr<float32> b:ptr<float32>):>int32 => $unsafe (if a[0] <? b[0] -1 else if a[0] >? b[0] 1 else 0)
+$export
+by_u16 = (a:ptr<uint16> b:ptr<uint16>):>int32 => $unsafe (int32(a[0]) - int32(b[0]))
+
+main = () => $unsafe {
+    let xs:array<float32> = [2.5 -1.0 0.25 9.0]
+    qsort(xs.ptr uint64(xs.length) size_of<float32> @by_f32)
+    printl(xs)
+    let ids:array<uint16> = [65535 3 400 0]
+    qsort16(ids.ptr uint64(ids.length) size_of<uint16> @by_u16)
+    printl(ids)
+}

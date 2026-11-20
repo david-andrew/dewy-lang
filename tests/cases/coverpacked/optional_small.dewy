@@ -1,0 +1,20 @@
+# Readings that may be missing: arrays of small optionals, filled and summarized.
+main = () => {
+    let readings:array<int16?> = [12 none -3 none 7]
+    let present = 0
+    let sum = 0
+    loop r in readings {
+        if r isnt? none {
+            present += 1
+            sum += int(r)
+        }
+    }
+    printl"{present} present, sum {sum}"
+    readings[1] = 100
+    readings[0] = none
+    printl(readings)
+    let flags:array<bool?> = [true none false]
+    printl([loop f in flags if f is? none "?" else if f "y" else "n"])
+    let bytes_seen:array<uint8?> = [loop i in [0..5) if i % 2 =? 0 uint8(i) else none]
+    printl(bytes_seen)
+}

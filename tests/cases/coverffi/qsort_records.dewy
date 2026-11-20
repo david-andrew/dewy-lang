@@ -1,0 +1,20 @@
+# modes: native native-release
+# Sort inventory records in place with qsort, comparing a field.
+Item:type = [sku:int32 stock:int32 price:float64]
+$extern
+qsort = (base:ptr<Item> count:uint64 size:uint64 compare:((a:ptr<Item> b:ptr<Item>):>int32)):>void
+
+$export
+by_price = (a:ptr<Item> b:ptr<Item>):>int32 => $unsafe {
+    if a[0].price <? b[0].price -1 else if a[0].price >? b[0].price 1 else 0
+}
+$export
+by_stock_desc = (a:ptr<Item> b:ptr<Item>):>int32 => $unsafe (if a[0].stock <? b[0].stock 1 else if a[0].stock >? b[0].stock -1 else 0)
+
+main = () => {
+    let items:array<Item> = [Item[101 5 9.5] Item[102 40 2.25] Item[103 0 14.0] Item[104 12 2.0]]
+    $unsafe qsort(items.ptr uint64(items.length) size_of<Item> @by_price)
+    printl([loop it in items it.sku])
+    $unsafe qsort(items.ptr uint64(items.length) size_of<Item> @by_stock_desc)
+    printl([loop it in items "{it.sku}:{it.stock}"])
+}
