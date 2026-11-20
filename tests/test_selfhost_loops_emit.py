@@ -7,6 +7,7 @@ import pytest
 
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+from tools.compiler.speed_equivalent import freeze
 
 
 DRIVER = r'''
@@ -43,10 +44,8 @@ def test_loops_emit_direct_twins(compiler, tmp_path, monkeypatch, release):  # n
         source_dir = directory / 'compiler'
         shutil.copytree(ROOT / 'compiler', source_dir)
         if extension == 'jo':
-            path = source_dir / 'loops.jo'
-            path.write_text(path.read_text().replace("'loops_emit.dewy'", "'loops_emit.jo'"))
-            path = source_dir / 'loops_vector_emit.dewy'
-            path.write_text(path.read_text().replace('"loops_emit.dewy"', '"loops_emit.jo"'))
+            # (every import of the leaf, from Jo and Dewy modules, leads to its twin)
+            freeze(source_dir, ('loops_emit',))
         source = directory / 'driver.jo'
         binary = directory / 'driver'
         imports = ''.join(f"use '{source_dir / name}'\n" for name in

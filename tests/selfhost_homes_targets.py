@@ -5,6 +5,7 @@
 LEAF_HOMES = {
     'loops_emit': 'loops.jo',
     'loops_vector_emit': 'loops.jo',
+    'loops_version': 'loops.jo',
     'opt_copy_forward': 'opt.jo',
     'opt_licm': 'opt.jo',
     'optimizer_queries': 'opt.jo',

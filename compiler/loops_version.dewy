@@ -1,0 +1,653 @@
+$runtime_checks
+
+from p"ir_types.dewy" import (Ins Op)
+from p"ir.jo" import (M_FLOAT M_INDEX M_NULLF VI ir ir_use_count)
+from p"ir_builders.dewy" import (ir_has_use ir_operands ir_use is_kv k_vreg kv_of mem_index vreg vtype)
+from p"opt_workspace.dewy" import (o_regs)
+from p"opt.jo" import (o_defines o_pure o_resize_one)
+from p"exact_loop.jo" import (exact_map_functions)
+from p"loops.jo" import (CLoop LCheck VPlan lx_vec_on)
+from p"loops_emit.dewy" import (lx_copy lx_endpoint lx_sum)
+from p"loops_vector_emit.dewy" import (lx_vec_emit lx_vec_plan)
+
+# Loop transformations on optimized IR, including bounded default-build kernels.
+#
+# Versioning: a counting loop (rotated by lowering: `block { brif done; loop { body; ctr += 1;
+# brif ctr < end, loop } }`) whose bounds checks index by the counter (plus a constant) or by
+# something the loop does not change, with lengths it does not change, gets a test in front:
+# if every check passes for every counter value the loop can take, a copy of the loop without
+# them runs, else the original, which fails where it always did. The copy is what vectorizing
+# needs, and is faster anyway. Positions, vregs and offsets wrap as Jo words did; lengths stay
+# plain bounds. The loop layouts and the vectorizer's shared state stay in loops.jo.
+LoopWord:type=int64<overflow='wrap'>
+LoopI32:type=int32<overflow='wrap'>
+
+# where each construct starting at a position ends (-1 elsewhere)
+lx_ends=(code:array<Ins>):>array<int64>=>$unsafe {
+    let ends=fill(int64(-1) code.length)
+    let open:array<int64>=[]
+    loop i in 0.. and ins in code {
+        let op=ins.op
+        if op =? 'block' or op =? 'loop' or op =? 'if_' {open.push(i)}
+        else if op =? 'end' {ends[open.pop()]=i}
+    }
+    ends
+}
+
+lx_is_const=(v:int64 k:int64):>bool=>v >=? 0 and is_kv(v) and kv_of(v) =? k
+
+# is v defined anywhere in [s, e]?
+lx_defined_in=(code:array<Ins> v:int64 s:int64 e:int64):>bool=>$unsafe {
+    loop p in [s..e] {
+        let ins=code[p]
+        if int64(ins.dst) =? v and o_defines(ins.op) {return true}
+        if ins.op =? 'zeroslots' {
+            let a=LoopWord(ins.a)
+            loop k in [0..LoopWord(ins.b)) {
+                let item=LoopWord(ir.args[a + k])
+                if item & 1 =? 1 and item >> 1 =? v {return true}
+            }
+        }
+    }
+    false
+}
+
+# the innermost counting loops
+lx_counting=(code:array<Ins> ends:array<int64>):>array<CLoop>=>$unsafe {
+    let out:array<CLoop>=[]
+    loop i in 0.. and ins in code {
+        if ins.op not=? 'loop' {continue}
+        let e=LoopWord(ends[i])
+        if e <? LoopWord(i) + 4 {continue}
+        let br=code[e - 1]
+        let cmp=code[e - 2]
+        let inc=code[e - 3]
+        if br.op not=? 'brif' or br.imm not=? 0 or br.a not=? cmp.dst {continue}
+        if cmp.op not=? 'lts' and cmp.op not=? 'ltu' {continue}
+        let ctr=int64(cmp.a)
+        let endv=int64(cmp.b)
+        # (the increment defines the counter: the bound must be another vreg)
+        if endv =? ctr or int64(inc.dst) not=? ctr {continue}
+        let step=inc
+        # CSE can reuse a stencil's i+1 as the loop increment. The
+        # temporary must have one definition in this iteration, from i+1.
+        if inc.op =? 'mov' {
+            let at=lx_def_at(code int64(inc.a) LoopWord(i) + 1 e - 3)
+            if at <? 0 {continue}
+            # The reused addition must execute on every path to the latch.
+            # A branch can skip a definition in an enclosing block; a value
+            # made inside a conditional is not an induction step either.
+            let dominates=true
+            loop q in [LoopWord(i) + 1..LoopWord(at)) {
+                let op=code[q].op
+                if op =? 'br' or op =? 'brif' or op =? 'brtable' {dominates=false}
+                if op =? 'if_' and ends[q] >=? at {dominates=false}
+            }
+            if not dominates {continue}
+            step=code[at]
+        }
+        if step.op not=? 'add' or int64(step.a) not=? ctr or not lx_is_const(int64(step.b) 1) {continue}
+        # (nothing else changes the counter or the bound, and no loop is nested)
+        let ok=true
+        loop p in [LoopWord(i) + 1..e - 3) {
+            let ins2=code[p]
+            let op=ins2.op
+            if op =? 'loop' or op =? 'zeroslots' or (o_defines(op) and (int64(ins2.dst) =? ctr or int64(ins2.dst) =? endv)) {
+                ok=false
+                break
+            }
+        }
+        if ok {out.push(CLoop(i int64(e) ctr endv int64(e - 3) cmp.op =? 'lts'))}
+    }
+    out
+}
+
+# the position of the definition of v in [s, e) when there is exactly one there (-1 otherwise)
+lx_def_at=(code:array<Ins> v:int64 s:int64 e:int64):>int64=>$unsafe {
+    let at:int64=-1
+    loop p in [s..e) {
+        if int64(code[p].dst) =? v and o_defines(code[p].op) {
+            if at >=? 0 {return -1}
+            at=p
+        }
+    }
+    at
+}
+
+# x as the counter times lx_tc, plus the terms, plus lx_tk: from additions and subtractions the loop
+# makes before position p of what it does not change; false when it is something else
+let lx_terms:array<int64>=[]
+let lx_tk:int64=0
+let lx_tc:int64=0
+
+lx_decomp=(code:array<Ins> L:CLoop x:int64 sgn:int64 p:int64 depth:int64):>bool=>$unsafe {
+    if x =? L.ctr {
+        lx_tc=int64(LoopWord(lx_tc) + sgn)
+        return true
+    }
+    if is_kv(x) {
+        let kv=kv_of(x)
+        if kv <? -(1 << 40) or kv >? (1 << 40) {return false}
+        lx_tk=int64(LoopWord(lx_tk) + LoopWord(sgn) * kv)
+        return true
+    }
+    let body=LoopWord(L.pl) + 1
+    if not lx_defined_in(code x body L.pe) {
+        lx_terms.push(int64(LoopWord(sgn) * (LoopWord(x) + 1)))
+        return true
+    }
+    if depth >? 4 {return false}
+    let q=lx_def_at(code x body L.inc)
+    if q <? 0 or q >? p {return false}
+    let xi=code[q]
+    let next=LoopWord(depth) + 1
+    if (xi.op =? 'checked_add' or xi.op =? 'checked_sub') and xi.c not=? 0 {return false}
+    if xi.op =? 'add' or xi.op =? 'checked_add' {return lx_decomp(code L int64(xi.a) sgn q next) and lx_decomp(code L int64(xi.b) sgn q next)}
+    if xi.op =? 'sub' or xi.op =? 'checked_sub' {return lx_decomp(code L int64(xi.a) sgn q next) and lx_decomp(code L int64(xi.b) int64(-LoopWord(sgn)) q next)}
+    if xi.op =? 'mov' {return lx_decomp(code L int64(xi.a) sgn q next)}
+    if lx_inv_made(code L x p depth) {
+        lx_terms.push(int64(LoopWord(sgn) * (LoopWord(x) + 1)))
+        return true
+    }
+    false
+}
+
+# is v made in the loop (before p, once) from what it does not change, by arithmetic that cannot trap?
+lx_inv_made=(code:array<Ins> L:CLoop v:int64 p:int64 depth:int64):>bool=>$unsafe {
+    if v =? L.ctr or depth >? 5 {return false}
+    let body=LoopWord(L.pl) + 1
+    if is_kv(v) or not lx_defined_in(code v body L.pe) {return true}
+    let q=lx_def_at(code v body L.inc)
+    if q <? 0 or q >? p {return false}
+    let xi=code[q]
+    let next=LoopWord(depth) + 1
+    if xi.op =? 'mov' {return lx_inv_made(code L int64(xi.a) q next)}
+    if xi.op not=? 'add' and xi.op not=? 'sub' and xi.op not=? 'mul' and xi.op not=? 'shl' and xi.op not=? 'and_' and xi.op not=? 'or_' and xi.op not=? 'xor' {return false}
+    lx_inv_made(code L int64(xi.a) q next) and lx_inv_made(code L int64(xi.b) q next)
+}
+
+lx_terms_fit=():>bool=>lx_tk >? -(1 << 40) and lx_tk <? (1 << 40) and lx_terms.length <=? 4
+
+# Discover checks that can be guarded before a fast copy of the loop.
+lx_checks=(code:array<Ins> ends:array<int64> L:CLoop):>array<LCheck>=>$unsafe {
+    let out:array<LCheck>=[]
+    let body=LoopWord(L.pl) + 1
+    loop p in [body..LoopWord(L.inc)) {
+        let ins=code[p]
+        if ins.op =? 'checked_add' or ins.op =? 'checked_sub' {
+            if not L.signed or ins.c not=? 0 {continue}
+            lx_terms=[]
+            lx_tk=0
+            lx_tc=0
+            let sign:int64=if ins.op =? 'checked_sub' {-1} else {1}
+            if lx_decomp(code L int64(ins.a) 1 p 0) and lx_decomp(code L int64(ins.b) sign p 0) {
+                if lx_tc =? 1 and lx_terms_fit() {out.push(LCheck(p p (-1) 5 int64(ins.dst) lx_tk 0 lx_terms))}
+            }
+            continue
+        }
+        if ins.op not=? 'if_' {continue}
+        let q=LoopWord(ends[p])
+        # the body: argument setup and a call that never returns
+        let last=code[q - 1]
+        if not (last.op =? 'call' and last.c =? 1) {continue}
+        let plain=true
+        loop r in [p + 1..q - 1) {
+            let op=code[r].op
+            if not (op =? 'daddr' or op =? 'iconst' or op =? 'mov' or op =? 'add' or op =? 'gaddr') {plain=false}
+        }
+        if not plain {continue}
+        let c=int64(ins.a)
+        let d=lx_def_at(code c body L.inc)
+        if d <? 0 {continue}
+        let cd=code[d]
+        if cd.op =? 'geu' {
+            let x=int64(cd.a)
+            let len=int64(cd.b)
+            if lx_defined_in(code len body L.pe) {continue}
+            if x =? L.ctr {
+                out.push(LCheck(p int64(q) d 0 x 0 len []))
+                continue
+            }
+            if not lx_defined_in(code x body L.pe) {
+                out.push(LCheck(p int64(q) d 1 x 0 len []))
+                continue
+            }
+            let xd=lx_def_at(code x body L.inc)
+            if xd >=? 0 and code[xd].op =? 'add' and int64(code[xd].a) =? L.ctr and is_kv(int64(code[xd].b)) and lx_def_at(code L.ctr body L.inc) <? 0 {
+                out.push(LCheck(p int64(q) d 3 x kv_of(int64(code[xd].b)) len []))
+                continue
+            }
+            if lx_def_at(code L.ctr body L.inc) >=? 0 {continue}
+            lx_terms=[]
+            lx_tk=0
+            lx_tc=0
+            if not lx_decomp(code L x 1 p 0) {continue}
+            if lx_tk <=? -(1 << 40) or lx_tk >=? (1 << 40) or lx_terms.length >? 4 {continue}
+            if lx_tc =? 1 and lx_terms.length =? 0 {out.push(LCheck(p int64(q) d 3 x lx_tk len []))}
+            else if lx_tc =? 1 {out.push(LCheck(p int64(q) d 3 x lx_tk len lx_terms))}
+            else if lx_tc =? 0 {out.push(LCheck(p int64(q) d 4 0 lx_tk len lx_terms))}
+            continue
+        }
+        if cd.op =? 'eq' and lx_is_const(int64(cd.b) 0) and not lx_defined_in(code int64(cd.a) body L.pe) {out.push(LCheck(p int64(q) d 2 int64(cd.a) 0 0 []))}
+    }
+    out
+}
+
+# A proven access has no bounds-check branch left to identify its affine
+# index. Recognize that index directly, but guard its exact endpoints before
+# vectorizing: word wrap must not turn a contiguous vector into scalar jumps.
+# Only memory-index uses demand this bounded decomposition (at most 4 levels).
+lx_proven_indexes=(code:array<Ins> L:CLoop checks:array<LCheck>):>array<LCheck>=>$unsafe {
+    let out:array<LCheck>=[]
+    let seen:dict<int64 bool>=[]
+    loop ch in checks {
+        if ch.kind =? 3 {seen[ch.x]=true}
+    }
+    loop p in [LoopWord(L.pl) + 1..LoopWord(L.inc)) {
+        let ins=code[p]
+        if (ins.op not=? 'load' and ins.op not=? 'store') or int64(ins.c) & M_INDEX =? 0 {continue}
+        let x=mem_index(ins)
+        if x =? L.ctr or seen.has(x) {continue}
+        seen[x]=true
+        lx_terms=[]
+        lx_tk=0
+        lx_tc=0
+        if not lx_decomp(code L x 1 p 0) or lx_tc not=? 1 {continue}
+        if lx_tk <=? -(1 << 40) or lx_tk >=? (1 << 40) or lx_terms.length >? 4 {continue}
+        out.push(LCheck((-1) (-1) (-1) 6 x lx_tk 0 lx_terms))
+    }
+    out
+}
+
+# o_regs.repl as the identity for every vreg made so far (it renames uses in copies)
+let lx_known:int64=0
+lx_sync=():>void=>$unsafe {
+    let n=ir.vtypes.length
+    if n =? 0 {return}
+    o_resize_one(int64(LoopWord(n) - 1))
+    loop v in [LoopWord(lx_known)..LoopWord(n)) {o_regs[v].repl=LoopI32(v)}
+    lx_known=n
+}
+
+# to the checking loop if c (out of the innermost block)
+lx_fail=(@out:array<Ins> c:int64):>void=>{out.push(Ins('brif' 0 0 LoopI32(c) 0 0 0))}
+
+# does the counter of L start at a constant >= 0 (set just before the loop)?
+lx_starts_nonneg=(code:array<Ins> L:CLoop):>bool=>$unsafe {
+    let p=LoopWord(L.pl) - 1
+    let floor=LoopWord(L.pl) - 16
+    loop p >=? 0 and p >=? floor {
+        let ins=code[p]
+        let op=ins.op
+        if op =? 'loop' or op =? 'end' or op =? 'if_' or op =? 'else_' {return false}
+        if o_defines(op) and int64(ins.dst) =? L.ctr {
+            if op =? 'mov' and is_kv(int64(ins.a)) {return kv_of(int64(ins.a)) >=? 0}
+            if op =? 'iconst' {return ins.imm >=? 0}
+            return false
+        }
+        p-=1
+    }
+    false
+}
+
+lx_bin=(@out:array<Ins> op:Op a:int64 b:int64):>int64=>{
+    let d=vreg(VI)
+    out.push(Ins(op VI LoopI32(d) LoopI32(a) LoopI32(b) 0 0))
+    d
+}
+
+# ---------------- vectorization ----------------
+# where each vreg first and last appears (defined or used), worked out on first need:
+# most loops fail their plan on an instruction kind before asking
+let lx_first:array<int64>=[]
+let lx_last:array<int64>=[]
+let lx_span_ready:bool=false
+lx_spans=(code:array<Ins>):>void=>$unsafe {
+    if lx_span_ready {return}
+    lx_span_ready=true
+    lx_first=fill(code.length ir.vtypes.length)
+    lx_last=fill(int64(-1) ir.vtypes.length)
+    loop p in 0.. and ins in code {
+        let d=ir_operands(ins)
+        if d >=? 0 {
+            if p <? lx_first[d] {lx_first[d]=p}
+            if p >? lx_last[d] {lx_last[d]=p}
+        }
+        loop operand_index in [0..ir_use_count) {
+            let u=ir_use(operand_index)
+            if p <? lx_first[u] {lx_first[u]=p}
+            if p >? lx_last[u] {lx_last[u]=p}
+        }
+    }
+}
+
+# does v appear only in L / after it?
+lx_within=(code:array<Ins> v:int64 L:CLoop):>bool=>{
+    lx_spans(code)
+    lx_first[v] >=? L.pl and lx_last[v] <=? L.pe
+}
+lx_after=(code:array<Ins> v:int64 L:CLoop):>bool=>{
+    lx_spans(code)
+    lx_last[v] >? L.pe
+}
+
+lx_kind_of_mode=(c:int64):>int64=>{
+    let size=c & 15
+    if c & M_FLOAT not=? 0 {
+        if size =? 4 {return 0}
+        return 1
+    }
+    if size =? 4 {return 2}
+    3
+}
+
+lx_in_check=(p:int64 checks:array<LCheck>):>bool=>{
+    loop ch in checks {
+        if (p >=? ch.pi and p <=? ch.pend) or p =? ch.pc {return true}
+    }
+    false
+}
+
+# A checked affine index may be built in several steps (base+i, then
+# plus/minus a row stride). Every use of each intermediate must lead only
+# to another such index or to its checked memory access; scalar value uses
+# must retain their meaning and reject this vector plan.
+lx_vec_index=(code:array<Ins> L:CLoop checks:array<LCheck> p:int64 depth:int64=0):>bool=>$unsafe {
+    if depth >? 5 {return false}
+    let ins=code[p]
+    if ins.op not=? 'add' and ins.op not=? 'sub' {return false}
+    let d=int64(ins.dst)
+    if not lx_within(code d L) {return false}
+    lx_terms.clear()
+    lx_tk=0
+    lx_tc=0
+    if not lx_decomp(code L d 1 int64(LoopWord(p) + 1) 0) or lx_tc not=? 1 {return false}
+    let checked=false
+    loop ch in checks {
+        if (ch.kind =? 3 or ch.kind =? 6) and ch.x =? d {checked=true}
+    }
+    let used=false
+    loop q in [LoopWord(L.pl) + 1..LoopWord(L.pe)] {
+        if q =? p or lx_in_check(q checks) {continue}
+        let qi=code[q]
+        ir_operands(qi);
+        let reads=ir_has_use(d)
+        if not reads {continue}
+        used=true
+        if q =? L.inc and qi.op =? 'mov' and int64(qi.dst) =? L.ctr and int64(qi.a) =? d {continue}
+        if qi.op =? 'load' or qi.op =? 'store' {
+            if not checked or mem_index(qi) not=? d or int64(qi.a) =? d or (qi.op =? 'store' and int64(qi.b) =? d) {return false}
+        } else if q <=? p or not lx_vec_index(code L checks q int64(LoopWord(depth) + 1)) {return false}
+    }
+    used
+}
+
+# the instructions a vector plan can take (outside the checks it drops)
+lx_vec_op=(op:Op):>bool=>match op {
+    <'block'|'end'|'nop'|'iconst'|'fconst'|'load'|'store'|'sext32'|'zext32'|'fneg'|'fsqrt'|'shl'|'shrs'|'shru'> => true
+    <'add'|'sub'|'mul'|'and_'|'or_'|'xor'|'fadd'|'fsub'|'fmul'|'fdiv'|'fmin'|'fmax'> => true
+    <'gts'|'lts'|'ges'|'les'|'select'> => true
+    _ => false
+}
+
+# Only an adjacent signed comparison selecting its own operands is a word
+# min/max. Its boolean must have no other use (it is not a vector of 0/1).
+lx_minmax=(code:array<Ins> L:CLoop p:int64):>int64=>$unsafe {
+    let ins=code[p]
+    if ins.op not=? 'select' or ins.ty not=? VI or p <=? LoopWord(L.pl) + 1 {return 0}
+    let cmp=code[LoopWord(p) - 1]
+    let greater=cmp.op =? 'gts' or cmp.op =? 'ges'
+    if not greater and cmp.op not=? 'lts' and cmp.op not=? 'les' {return 0}
+    if cmp.ty not=? VI or cmp.dst not=? ins.a or cmp.dst =? cmp.a or cmp.dst =? cmp.b {return 0}
+    let direct=ins.b =? cmp.a and ins.c =? cmp.b
+    let reverse=ins.b =? cmp.b and ins.c =? cmp.a
+    if not direct and not reverse {return 0}
+    lx_spans(code)
+    if lx_first[int64(cmp.dst)] not=? LoopWord(p) - 1 or lx_last[int64(cmp.dst)] not=? p {return 0}
+    if greater =? direct {return 5}
+    4
+}
+
+# how many instructions in [lo, hi] name v (define or use it)
+lx_appears=(code:array<Ins> v:int64 lo:int64 hi:int64):>int64=>$unsafe {
+    let n:LoopWord=0
+    loop p in [lo..LoopWord(hi) + 1) {
+        let d=ir_operands(code[p])
+        if d =? v {
+            n+=1
+            continue
+        }
+        loop operand_index in [0..ir_use_count) {
+            if ir_use(operand_index) =? v {
+                n+=1
+                break
+            }
+        }
+    }
+    n
+}
+
+# the vectorized part of L, in front of what finishes it one element at a time
+fast_vectorize=():>void=>$unsafe {
+    if not lx_vec_on {return}
+    let large=ir.code.length >? 400 and (ir.fn_index <? 0 or ir.fn_index >=? exact_map_functions.length or not exact_map_functions[ir.fn_index])
+    let candidate=false
+    let has_loop=false
+    let floating=false
+    loop ins in ir.code {
+        let op=ins.op
+        if op =? 'fadd' or op =? 'fsub' or op =? 'fmul' or op =? 'fdiv' or op =? 'fneg' {
+            candidate=true
+            floating=true
+        }
+        if op =? 'load' and int64(ins.c) & M_INDEX not=? 0 {candidate=true}
+        if op =? 'loop' {has_loop=true}
+    }
+    if candidate and has_loop and (not large or floating) {loop_versioning(true)}
+}
+
+# Reject loop shapes that cannot form a vector plan before decomposing any
+# indexes or allocating vreg spans. This bounded O(body instructions) sieve
+# grants no proofs: lx_checks and lx_vec_plan still validate every candidate.
+lx_vec_candidate=(code:array<Ins> ends:array<int64> L:CLoop):>bool=>$unsafe {
+    let p=LoopWord(L.pl) + 1
+    loop p <? L.inc {
+        let ins=code[p]
+        if ins.op =? 'if_' {
+            let q=LoopWord(ends[p])
+            let last=code[q - 1]
+            if last.op not=? 'call' or last.c not=? 1 {return false}
+            loop r in [p + 1..q - 1) {
+                let op=code[r].op
+                if op not=? 'daddr' and op not=? 'iconst' and op not=? 'mov' and op not=? 'add' and op not=? 'gaddr' {return false}
+            }
+            p=q + 1
+            continue
+        }
+        if not lx_vec_op(ins.op) and ins.op not=? 'checked_add' and ins.op not=? 'checked_sub' and ins.op not=? 'geu' and ins.op not=? 'eq' {return false}
+        p+=1
+    }
+    true
+}
+
+# version the counting loops of the current function that have checks to drop
+let lx_dbg_read:bool=false
+let lx_dbg:string=""
+loop_versioning=(vector_only:bool=false):>void=>$unsafe {
+    if not lx_dbg_read {
+        lx_dbg_read=true
+        lx_dbg=env("DEWY_LXDBG") ?? ""
+    }
+    if (lx_dbg as array<uint8>).length >? 0 and (find(ir.name lx_dbg) ?? -1) <? 0 {return}
+    let code=ir.code
+    let ends=lx_ends(code)
+    let cl=lx_counting(code ends)
+    if cl.length =? 0 {return}
+    let nv=ir.vtypes.length
+    lx_known=0
+    let synced=false
+    lx_span_ready=false
+    let out:array<Ins>=[]
+    let at:int64=0
+    loop L in cl {
+        if LoopWord(L.pe) - L.pl >? 400 {continue}
+        if vector_only and not lx_vec_candidate(code ends L) {continue}
+        let checks=lx_checks(code ends L)
+        # Only affine overflow obligations demand this copy. The guarded
+        # operations become ordinary arithmetic for planning and vector emission;
+        # the original code remains the slow path, with its checks in order.
+        let fast_code=code
+        let vector_checks:array<LCheck>=[]
+        loop ch in checks {
+            if ch.kind =? 5 {
+                let instruction=fast_code[ch.pi]
+                instruction.op=if instruction.op =? 'checked_add' {'add'} else {'sub'}
+                instruction.imm=0
+                fast_code[ch.pi]=instruction
+            } else {vector_checks.push(ch)}
+        }
+        let plan=VPlan(false 0 false [] [] [] [] [])
+        if lx_vec_on {
+            let index_checks=lx_proven_indexes(fast_code L vector_checks)
+            vector_checks.extend(index_checks)
+            plan=lx_vec_plan(fast_code L vector_checks)
+            if plan.ok {checks.extend(index_checks)}
+        }
+        if vector_only and not plan.ok {continue}
+        # (one check costs about as much as testing for it in front: not worth a copy)
+        if not plan.ok and checks.length <? 2 {continue}
+        if not synced {
+            # (o_regs as the identity, once a loop is to be copied)
+            synced=true
+            out.reserve(int64(LoopWord(code.length) * 2))
+            lx_sync()
+        }
+        loop p in [at..L.pl) {out.push(code[p])}
+        let wrap:int64=0
+        if checks.length >? 0 {
+            # the test of every check over the whole range:
+            #   block { block { brif fails...; fast loop; br out }; loop }
+            out.push(Ins('block' 0 0 0 0 0 0))
+            out.push(Ins('block' 0 0 0 0 0 0))
+            wrap=2
+        }
+        # The endpoint proof describes a nonempty increasing interval. Keep
+        # the checked loop for a do-first shape whose initial counter is already
+        # at/past its end; its first iteration still has to check its indexes.
+        loop ch in checks {
+            if ch.kind =? 0 or ch.kind =? 3 or ch.kind =? 5 or ch.kind =? 6 {
+                let ge:Op=if L.signed {'ges'} else {'geu'}
+                lx_fail(@out lx_bin(@out ge L.ctr L.endv))
+                break
+            }
+        }
+        let start_nonneg=lx_starts_nonneg(code L)
+        let done_len:array<int64>=[]
+        loop ch in checks {
+            let lo:int64=0
+            let hi:int64=0
+            let low_high:int64=0
+            let high:int64=0
+            if ch.kind =? 0 {
+                # (one test per length: the smallest and largest offsets against it)
+                if done_len.contains(ch.len) {continue}
+                done_len.push(ch.len)
+                let kmin=ch.k
+                let kmax=ch.k
+                loop c2 in checks {
+                    if c2.kind =? 0 and c2.len =? ch.len {
+                        kmin=min(kmin c2.k)
+                        kmax=max(kmax c2.k)
+                    }
+                }
+                if not (start_nonneg and kmin >=? 0) {
+                    [lo high]=lx_endpoint(code L L.ctr [] kmin @out)
+                    lx_fail(@out lx_bin(@out 'ne' high k_vreg(0)))
+                }
+                [hi high]=lx_endpoint(code L L.endv [] kmax @out)
+                lx_fail(@out lx_bin(@out 'ne' high k_vreg(0)))
+                lx_fail(@out lx_bin(@out 'gtu' hi ch.len))
+            } else if ch.kind =? 3 {
+                # The entry guard establishes an increasing nonempty interval.
+                # Its exact first and last endpoints bound every index in it.
+                [lo low_high]=lx_endpoint(code L L.ctr ch.terms ch.k @out)
+                let upper=lx_bin(@out 'sub' L.endv k_vreg(1))
+                [hi high]=lx_endpoint(code L upper ch.terms ch.k @out)
+                lx_fail(@out lx_bin(@out 'ne' low_high k_vreg(0)))
+                lx_fail(@out lx_bin(@out 'ne' high k_vreg(0)))
+                lx_fail(@out lx_bin(@out 'geu' hi ch.len))
+            } else if ch.kind =? 5 or ch.kind =? 6 {
+                [lo low_high]=lx_endpoint(code L L.ctr ch.terms ch.k @out)
+                let upper=lx_bin(@out 'sub' L.endv k_vreg(1))
+                [hi high]=lx_endpoint(code L upper ch.terms ch.k @out)
+                lx_fail(@out lx_bin(@out 'ne' low_high lx_bin(@out 'shrs' lo k_vreg(63))))
+                lx_fail(@out lx_bin(@out 'ne' high lx_bin(@out 'shrs' hi k_vreg(63))))
+            } else if ch.kind =? 1 {lx_fail(@out lx_bin(@out 'geu' ch.x ch.len))}
+            else if ch.kind =? 4 {lx_fail(@out lx_bin(@out 'geu' lx_sum(code L ch.terms ch.k @out) ch.len))}
+            else {lx_fail(@out lx_bin(@out 'eq' ch.x k_vreg(0)))}
+        }
+        # the copy without the checks: values made and used only in the loop get names of their own
+        lx_sync()
+        let renamed:array<int64>=[]
+        let ren=fill(int64(-1) nv)
+        lx_spans(code)
+        loop p in [L.pl..L.pe] {
+            let d=int64(code[p].dst)
+            if d >=? 0 and d <? nv and o_defines(code[p].op) and ren[d] <? 0 and lx_first[d] >=? L.pl and lx_last[d] <=? L.pe and not is_kv(d) and d >=? ir.nparams {
+                ren[d]=vreg(vtype(d))
+                renamed.push(d)
+            }
+        }
+        lx_sync()
+        loop d in renamed {o_regs[d].repl=LoopI32(ren[d])}
+        if plan.ok {
+            # vectors first, then the rest one at a time (if any is left)
+            lx_vec_emit(fast_code L vector_checks plan @out)
+            out.push(Ins('block' 0 0 0 0 0 0))
+            let ge:Op=if L.signed {'ges'} else {'geu'}
+            lx_fail(@out lx_bin(@out ge L.ctr L.endv))
+            lx_copy(code L.pl L.pe checks ren @out int64(LoopWord(wrap) + 1))
+            out.push(Ins('end' 0 0 0 0 0 0))
+        } else {lx_copy(code L.pl L.pe checks ren @out wrap)}
+        loop v in renamed {o_regs[v].repl=LoopI32(v)}
+        if checks.length >? 0 {
+            out.push(Ins('br' 0 0 0 0 0 1))
+            out.push(Ins('end' 0 0 0 0 0 0))
+            let empty:array<int64>=[]
+            let nochecks:array<LCheck>=[]
+            lx_copy(code L.pl L.pe nochecks empty @out 1)
+            out.push(Ins('end' 0 0 0 0 0 0))
+        }
+        at=int64(LoopWord(L.pe) + 1)
+    }
+    if at =? 0 {return}
+    loop p in [at..code.length) {out.push(code[p])}
+    ir.code=lx_dce(out)
+}
+
+# drop pure instructions whose results are unused (what the checks computed, in the copies)
+lx_dce=(code:array<Ins>):>array<Ins>=>$unsafe {
+    let nuse=fill(LoopWord(0) ir.vtypes.length)
+    loop ins in code {
+        ir_operands(ins);
+        loop operand_index in [0..ir_use_count) {nuse[ir_use(operand_index)]+=1}
+    }
+    let keep=fill(true code.length)
+    let i=LoopWord(code.length) - 1
+    loop i >=? 0 {
+        let ins=code[i]
+        let d=int64(ins.dst)
+        if o_pure(ins.op) and d >=? 0 and nuse[d] =? 0 and not (ins.op =? 'load' and int64(ins.c) & M_NULLF not=? 0) {
+            keep[i]=false
+            ir_operands(ins);
+            loop operand_index in [0..ir_use_count) {nuse[ir_use(operand_index)]-=1}
+        }
+        i-=1
+    }
+    let out:array<Ins>=[]
+    out.reserve(code.length)
+    loop j in 0.. and ins in code {
+        if keep[j] {out.push(ins)}
+    }
+    out
+}

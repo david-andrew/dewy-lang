@@ -109,6 +109,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `opt_returns` | `opt_returns.jo` | Dewy recursive return sinking | Borrows code/types at the release-pass boundary; guarded end-index construction, no host callbacks. |
 | `opt_sra` | `opt_sra.jo` | Dewy scalar replacement of small slots | Own lane workspace; shares the optimizer register table; operands read per opcode; flagship optimize phase −1.9% to −2.4%. |
 | `opt_core` | `opt_core.jo` | Dewy optimizer entry and opcode decode table | Once-per-process table from an ABI-order list; ordinal-indexed queries and register reset stay Jo. |
+| `loops_version` | `loops_version.jo` | Dewy loop versioning and vectorization entry | Layouts and shared vectorizer state stay in `loops.jo`; flagship totals −0.0003% to +0.0004%. |
 
 ### Boundary lessons that constrain the next cutover
 
@@ -589,6 +590,16 @@ them, and only the fields an opcode uses are read. Address resolution is
 memoized and follows strictly earlier definitions; the walks stay
 O(N + U + A + M + output) and copy classes O(P + L log L). It reports a nested
 slot store through `sra_nested`; the bounded retry stays with `optimize`.
+
+`loops_version.dewy` owns loop versioning: counting-loop and check discovery,
+affine index decomposition, endpoint guards, the fast and checked copies and
+their DCE, and the vectorization entry with its candidate sieve. `loops.jo`
+keeps the `CLoop`, `LCheck` and `VPlan` layouts and the vectorizer state the
+emitters share (`lx_vec_on`, reductions); the decomposition terms, vreg spans
+and rename watermark are private to the leaf. Calls into `loops_emit` and
+`loops_vector_emit` are plain calls inside the compiler cycle. Work stays
+O(loop body) per candidate, with the existing 400-instruction, depth-5 and
+four-term caps; positions and offsets are wrapping words.
 
 ## Shared backend analysis boundary
 
