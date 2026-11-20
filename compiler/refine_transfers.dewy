@@ -1,21 +1,44 @@
 $runtime_checks
-from p"check.jo" import (locals)
+from p"ast.jo" import (nodes)
+from p"check.jo" import (LF_MUTPARAM fns locals)
+from p"checks_thin_expr.dewy" import (is_map_type)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"expr.jo" import (mk_ident_local)
-from p"facts.jo" import (FactState fact_terms)
-from p"facts_compare.dewy" import (fact_add_fits fact_assume)
+from p"facts.jo" import (FactState fact_owner fact_policy fact_probe fact_probe_on fact_speculating fact_terms fact_validated)
+from p"facts_capture.dewy" import (fact_capture)
+from p"facts_compare.dewy" import (fact_add_fits fact_assume fact_compare)
 from p"facts_index_writes.dewy" import (fact_constant fact_new)
 from p"facts_lengths.dewy" import (fact_difference)
 from p"facts_routes.dewy" import (fact_read)
 from p"facts_value_queries.dewy" import (fact_bound)
 from p"facts_values.dewy" import (fact_domain fact_project)
 from p"nd_contract_ops.dewy" import (fact_nd_projection)
-from p"refine.jo" import (ref_fact_holder ref_predicates)
+from p"nd_contracts.jo" import (nd_mutable_entry)
+from p"refine.jo" import (ref_fact_holder ref_pair_held ref_pair_hints ref_predicates ref_self_active ref_self_established ref_self_fail ref_self_shrinks refine_entry)
 from p"refine_metadata.dewy" import (ref_encoded representation_type)
-from p"refine_rare.dewy" import (ref_self_assume)
-from p"refine_siblings.dewy" import (ref_sib_assume)
+from p"refine_ops.dewy" import (ref_self_k)
+from p"refine_rare.dewy" import (ref_self_assume ref_self_truth ref_self_written_truth)
+from p"refine_siblings.dewy" import (ref_sib_assume ref_sib_fail ref_sib_literal_truth ref_sib_truth)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm RefTerm)
+from p"string_domains.jo" import (int_domain_proven)
+from p"type_ops.dewy" import (zonk)
 from p"types.jo" import (T_BOOL T_INT T_U64 fields prune structs types)
+from p"util.jo" import (err_notes)
+from p"witness.jo" import (wit_holder_text)
+from p"witness_nodes.dewy" import (wit_text)
+from p"witness_ops.dewy" import (wit_refinement)
+
+# Checks and entries write Jo's holder, holder text and entry through places bound once;
+# validation, probe and note tables take direct element writes, as in the other fact leaves.
+let checks_holder:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let checks_holder_text:ptr<string>=$unsafe (uint64(0) as ptr<string>)
+let checks_entry:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+refine_transfers_bind=(holder:ptr<int64> holder_text:ptr<string> entry:ptr<array<int64>>):>int64=>{
+    checks_holder=holder
+    checks_holder_text=holder_text
+    checks_entry=entry
+    0
+}
 
 RefineTransferWord:type=int64<overflow='wrap'>
 ref_project=(term:RefTerm value0:int64 @s:FactState):>int64=>$unsafe {
@@ -90,4 +113,98 @@ ref_assume=(t0:int64 self:int64 args:array<int64> @s:FactState):>void=>$unsafe {
         let v=fact_new(@s fact_domain(T_BOOL) FactTerm(atom.op a b))
         fact_assume(@s v true)
     }
+}
+ref_check=(n:int64 self:int64 args:array<int64> @s:FactState):>void=>$unsafe {
+    let held=ref_fact_holder
+    checks_holder[0]=0
+    if ref_self_active and nodes.ptr[n].b not=? 0 {
+        let holder=fact_capture(RefineTransferWord(nodes.ptr[n].b) @s)
+        checks_holder[0]=holder
+        checks_holder_text[0]=wit_text(RefineTransferWord(nodes.ptr[n].b))
+    }
+    ref_check_held(n self args @s)
+    checks_holder[0]=held
+}
+ref_check_held=(n:int64 self:int64 args:array<int64> @s:FactState):>void=>$unsafe {
+    if fact_speculating >? 0 {
+        ref_assume(zonk(RefineTransferWord(nodes.ptr[n].aux2)) self args @s)
+        return
+    }
+    let t=zonk(RefineTransferWord(nodes.ptr[n].aux2))
+    nodes.ptr[n].aux2=int32(t)
+    if not s.live {return}
+    # (a permutation of the array, or a growth whose new values were checked: ref_self_establish)
+    if ref_self_active and ref_self_established.has(n) {
+        nodes.ptr[n].ival=1
+        fact_validated[n]=true
+        ref_assume(t self args @s)
+        return
+    }
+    # (a binding whose every written value the type holds: string_domains.jo; a record's tied
+    # fields read before a run changes them: ref_pair_reads)
+    if int_domain_proven.has(n) or ref_pair_held.length >? 0 and ref_pair_held.has(n) {
+        nodes.ptr[n].ival=1
+        fact_validated[n]=true
+        ref_assume(t self args @s)
+        return
+    }
+    let base=RefineTransferWord(types.ptr[t].elem)
+    let proven=true
+    loop atom in ref_predicates[RefineTransferWord(types.ptr[t].st)] {
+        if atom.a.kind =? 6 and (atom.b.kind =? 5 or atom.b.kind =? 6) {
+            let truth=ref_sib_truth(@s self atom args)
+            if truth <? 0 and is_map_type(representation_type(t)) {truth=ref_sib_literal_truth(@s n atom args)}
+            if truth =? 0 {ref_sib_fail(n t atom true)}
+            if truth <? 0 {
+                proven=false
+                if fact_policy =? 'RequireStatic' {ref_sib_fail(n t atom false)}
+            }
+            continue
+        }
+        if atom.a.kind =? 6 {
+            let truth=ref_self_truth(@s self ref_self_k(atom))
+            if truth <? 0 and ref_self_shrinks.has(n) {truth=ref_self_written_truth(@s self t ref_self_k(atom))}
+            if truth =? 0 {ref_self_fail(n t self s true)}
+            if truth <? 0 {
+                proven=false
+                if fact_policy =? 'RequireStatic' {ref_self_fail(n t self s false)}
+            }
+            continue
+        }
+        let a=ref_value(atom.a self args base @s)
+        let b=ref_value(atom.b self args base @s)
+        let truth=fact_compare(s atom.op a b)
+        if (truth =? 0 or truth <? 0 and fact_policy =? 'RequireStatic') and ref_pair_hints.length >? 0 and ref_pair_hints.has(n) {err_notes.push([(-1) ref_pair_hints[n]])}
+        if truth =? 0 {wit_refinement(n t atom self a b s true)}
+        if truth <? 0 {
+            proven=false
+            if fact_policy =? 'RequireStatic' {wit_refinement(n t atom self a b s false)}
+        }
+    }
+    # Keep metadata even when erased so calls can publish checked guarantees.
+    nodes.ptr[n].ival=if proven {1} else {0}
+    if fact_probe_on {fact_probe[n]=proven and (fact_probe.get(n) ?? true)}
+    fact_validated[n]=true
+    # (what is proven adds nothing, and its rows would crowd out relations a later proof needs:
+    # fact_difference keeps eight per term, and `r[0]` read often is a fresh constant each time)
+    if not proven {ref_assume(t self args @s)}
+}
+refine_fact_entry=(f:int64 @s:FactState):>void=>$unsafe {
+    checks_entry[0]=[]
+    loop l in fns.ptr[f].params {
+        let e=mk_ident_local(l locals.ptr[l].pos)
+        let value=fact_read(@s e)
+        checks_entry[0].push(value)
+    }
+    loop i in 0.. and t in fns.ptr[f].ptypes {ref_assume(t refine_entry[i] refine_entry @s)}
+    nd_mutable_entry(f @s)
+}
+ref_fact_current_entry=(@s:FactState):>array<int64>=>$unsafe {
+    let args=refine_entry
+    if fact_owner <=? 0 {return args}
+    let f=fact_owner
+    loop i in 0.. and l in fns.ptr[f].params {
+        if RefineTransferWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 {args[i]=fact_read(@s mk_ident_local(l locals.ptr[l].pos))}
+    }
+    args
 }

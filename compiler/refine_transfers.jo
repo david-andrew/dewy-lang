@@ -127,3 +127,86 @@ ref_assume = (t0: int, self: int, args: int[], s: mut FactState):
         b = ref_value(atom.b, self, args, base, s)
         v = fact_new(s, fact_domain(T_BOOL), FactTerm(atom.op, a, b))
         fact_assume(s, v, true)
+
+refine_transfers_bind = (holder: *(int), holder_text: *(str), entry: *(int[])) -> int: 0
+
+ref_check = (n: int, self: int, args: int[], s: mut FactState):
+    held = ref_fact_holder
+    ref_fact_holder = 0
+    if ref_self_active and nodes[n].b != 0:
+        ref_fact_holder = fact_capture(int(nodes[n].b), s)
+        wit_holder_text = wit_text(int(nodes[n].b))
+    ref_check_held(n, self, args, s)
+    ref_fact_holder = held
+
+ref_check_held = (n: int, self: int, args: int[], s: mut FactState):
+    if fact_speculating > 0:
+        ref_assume(zonk(int(nodes[n].aux2)), self, args, s)
+        return
+    t = zonk(int(nodes[n].aux2))
+    nodes[n].aux2 = i32(t)
+    if not s.live: return
+    # (a permutation of the array, or a growth whose new values were checked: ref_self_establish)
+    if ref_self_active and ref_self_established.has(n):
+        nodes[n].ival = 1
+        fact_validated[n] = true
+        ref_assume(t, self, args, s)
+        return
+    # (a binding whose every written value the type holds: string_domains.jo; a record's tied
+    # fields read before a run changes them: ref_pair_reads)
+    if int_domain_proven.has(n) or ref_pair_held.len() > 0 and ref_pair_held.has(n):
+        nodes[n].ival = 1
+        fact_validated[n] = true
+        ref_assume(t, self, args, s)
+        return
+    base = int(types[t].elem)
+    proven = true
+    loop atom in ref_predicates[int(types[t].st)]:
+        if atom.a.kind == 6 and (atom.b.kind == 5 or atom.b.kind == 6):
+            truth = ref_sib_truth(s, self, atom, args)
+            if truth < 0 and is_map_type(representation_type(t)): truth = ref_sib_literal_truth(s, n, atom, args)
+            if truth == 0: ref_sib_fail(n, t, atom, true)
+            if truth < 0:
+                proven = false
+                if fact_policy == .RequireStatic: ref_sib_fail(n, t, atom, false)
+            continue
+        if atom.a.kind == 6:
+            truth = ref_self_truth(s, self, ref_self_k(atom))
+            if truth < 0 and ref_self_shrinks.has(n): truth = ref_self_written_truth(s, self, t, ref_self_k(atom))
+            if truth == 0: ref_self_fail(n, t, self, s, true)
+            if truth < 0:
+                proven = false
+                if fact_policy == .RequireStatic: ref_self_fail(n, t, self, s, false)
+            continue
+        a = ref_value(atom.a, self, args, base, s)
+        b = ref_value(atom.b, self, args, base, s)
+        truth = fact_compare(s, atom.op, a, b)
+        if (truth == 0 or truth < 0 and fact_policy == .RequireStatic) and ref_pair_hints.len() > 0 and ref_pair_hints.has(n): err_notes.push((-1, ref_pair_hints[n]))
+        if truth == 0: wit_refinement(n, t, atom, self, a, b, s, true)
+        if truth < 0:
+            proven = false
+            if fact_policy == .RequireStatic: wit_refinement(n, t, atom, self, a, b, s, false)
+    # Keep metadata even when erased so calls can publish checked guarantees.
+    nodes[n].ival = if proven: 1 else: 0
+    if fact_probe_on: fact_probe[n] = proven and (fact_probe.get(n) ?? true)
+    fact_validated[n] = true
+    # (what is proven adds nothing, and its rows would crowd out relations a later proof needs:
+    # fact_difference keeps eight per term, and `r[0]` read often is a fresh constant each time)
+    if not proven: ref_assume(t, self, args, s)
+
+refine_fact_entry = (f: int, s: mut FactState):
+    refine_entry = []
+    loop l in fns[f].params:
+        e = mk_ident_local(l, locals[l].pos)
+        refine_entry.push(fact_read(s, e))
+    loop i in [0..fns[f].ptypes.len()): ref_assume(fns[f].ptypes[i], refine_entry[i], refine_entry, s)
+    nd_mutable_entry(f, s)
+ref_fact_current_entry = (s: mut FactState) -> int[]:
+    args = refine_entry
+    if fact_owner <= 0: return args
+    f = fact_owner
+    loop i in [0..fns[f].params.len()):
+        l = fns[f].params[i]
+        if int(locals[l].flags) & LF_MUTPARAM != 0: args[i] = fact_read(s, mk_ident_local(l, locals[l].pos))
+    args
+

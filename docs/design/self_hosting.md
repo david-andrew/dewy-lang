@@ -227,6 +227,19 @@ or mutable query API. Machine indices and offset payloads use wrapping words;
 public scalar and array signatures keep the plain-word ABI. Scalar arena reads
 are reacquired after calls, and nested predicate rows use ordinary indexed reads.
 
+The same leaf owns the refinement check transfer and function-entry transfers;
+a separate module measured more source cost. Jo keeps the holder, holder text
+and entry array, written through places bound once and read directly; the
+validation, probe and note tables take direct element writes. A check saves and
+restores the outer holder, so nested captures stay reentrant. Speculation and
+dead states return before validation; established, domain-proven and paired
+reads still assume the contract. Predicate rows, sibling/self/scalar truth,
+witnesses, the paired-field hint and the unproven assumption keep their order.
+Entries read each parameter once, assume its contract in order and return the
+current entry by value, rereading only mutable parameters. Cost is the requested
+predicate rows plus one read per parameter; there is no new pass, callback or
+context copy.
+
 `refine_metadata.dewy` owns the demanded representation, storage-place and
 predicate queries from `refine.jo`. It reads the existing node, type, local,
 field and predicate arenas directly; Jo retains their storage and every writer.
