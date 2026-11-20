@@ -108,6 +108,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `backend_analysis` | `backend_analysis.jo` | Dewy final-IR use/lifetime/call/loop analysis | Shared native workspace; direct allocator/emitter views, no host callbacks. |
 | `opt_returns` | `opt_returns.jo` | Dewy recursive return sinking | Borrows code/types at the release-pass boundary; guarded end-index construction, no host callbacks. |
 | `opt_sra` | `opt_sra.jo` | Dewy scalar replacement of small slots | Own lane workspace; shares the optimizer register table; operands read per opcode; flagship optimize phase −1.9% to −2.4%. |
+| `opt_core` | `opt_core.jo` | Dewy optimizer entry and opcode decode table | Once-per-process table from an ABI-order list; ordinal-indexed queries and register reset stay Jo. |
 
 ### Boundary lessons that constrain the next cutover
 
@@ -515,12 +516,18 @@ alone is not self-hosting progress.
 
 The rewrite/cleanup group has one non-reentrant workspace, preserving the
 existing optimizer lifetime. Its independent globals preserve alias information
-between scalar updates and arena views. Jo's coarse `optimize` entry runs SRA, binds the
-current `IrFn`, opcode tables, target policies and constant-cache views, then
-enters Dewy. Its bounded SRA retry happens after Dewy returns. No instruction,
-operand, folding or metadata operation calls back into Jo. Jo sibling passes
-retain their direct rewrite/register-reset helpers and share the same register
-table; those helpers are not adapters on the Dewy execution path.
+between scalar updates and arena views. `opt_core.dewy` owns the coarse `optimize`
+entry: it runs SRA, binds the opcode tables, target policies and constant-cache
+views, then runs the rewrite group, and retries once after a nested slot store.
+A Jo helper binds the addresses of the current `IrFn`, the instruction slots and
+the operand tuple, since Dewy has no address-of; top-level binding would depend
+on the C seed's initialization order. No instruction, operand,
+folding or metadata operation calls back into Jo. `opt_core` also builds the
+opcode decode table, O(opcodes) once per process from an ABI-order opcode list.
+Jo keeps the ordinal-indexed per-instruction queries (`o_defines`, `o_pure`,
+`kills_memory`, `cse_arity`, `o_rewrite`), since Dewy reads an opcode's text, not
+its ordinal, and the register-table reset: a Dewy reset spends one more sign
+extension per register (+0.013% on a flagship). Every sibling pass inlines them.
 
 `opt_ir` borrows the original function for the complete call. Input code stays
 stable until final publication; output uses a separate arena. Every arena grow
@@ -562,8 +569,8 @@ keeps the original array implementation as a differential reference.
 
 `opt_sra.dewy` owns scalar replacement: address discovery, lane kinds, copy
 classes and the rewrite. Its value, slot, lane and chain workspace is private;
-`optimize` resets the shared register table before it runs, and SRA records
-definitions there and keeps their counts current while rewriting. Lanes, vregs
+it resets the shared register table, records definitions there and keeps their
+counts current while rewriting. Lanes, vregs
 and offsets are wrapping words, shift counts are masked as the machine masked
 them, and only the fields an opcode uses are read. Address resolution is
 memoized and follows strictly earlier definitions; the walks stay

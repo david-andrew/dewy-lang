@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
-from tests.test_selfhost_opt_cleanup import function
+from tests.test_selfhost_opt_cleanup import decode_source, function
 
 
 MODULES = ('ir_types', 'ir_operands', 'opt_workspace', 'opt_cleanup', 'opt_rewrite')
@@ -124,12 +124,8 @@ main = ():
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_opt_rewrite_twins(compiler, tmp_path, release):  # noqa: F811
-    original = (ROOT / 'compiler/opt.jo').read_text()
-    decode = original[original.index('o_rewrite_mask ='):original.index('const MIN_INT')]
+    decode = decode_source('o_resize')
     decode += function((ROOT / 'compiler/optimizer_queries.jo').read_text(), 'o_boolean_op')
-    decode += '\n'.join(function(original, name) for name in (
-        'o_pure_classify', 'cse_arity_classify', 'o_defines_classify',
-        'kills_memory_classify', 'o_retargetable_classify', 'o_resize'))
     ir = (ROOT / 'compiler/ir.jo').read_text()
     walker = ir[ir.index('ir_use_count = 0'):ir.index('ir_operand_layout: int[]')]
     builders = (ROOT / 'compiler/ir_builders.jo').read_text()

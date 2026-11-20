@@ -1,0 +1,133 @@
+use 'ir_types.dewy'
+use 'ir.jo'
+use 'ir_builders.dewy'
+use 'opt_workspace.dewy'
+use 'opt_rewrite.dewy'
+use 'opt_sra.dewy'
+use 'opt.jo'
+
+# Frozen optimizer opcode tables, register reset and entry from opt.jo.
+
+# Compact opcode decoding shared by all optimizer walks. Operands stay in Ins
+# and IrFn.args; masks describe their locations rather than copying uses.
+o_rewrite_mask = (op: Op) -> int:
+    match op:
+        nop, block, loop, end, else_, br, trap, zeroslots, iconst, fconst, slot, gaddr, daddr, faddr, vzu: 0
+        intr, call, syscall: 16
+        calli, callc: 20
+        if_, brif, zero, brtable, assume: 1
+        ret: 32
+        memcpy, memset, select, vop, memeq, findbyte, scanbytes, findb: 7
+        load: 65
+        store: 131
+        vst: 11
+        mov, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits, vsplat: 1
+        _: 3
+
+o_simplify_kind = (op: Op) -> int:
+    match op:
+        iconst: 1
+        mov: 2
+        neg, not_, sext8, sext16, sext32, zext8, zext16, zext32: 3
+        overflow_add, overflow_sub, overflow_mul, add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, rot32, eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: 4
+        checked_add, checked_sub, checked_mul: 5
+        select: 6
+        calli: 7
+        _: 0
+
+# The control class also serves the forward and cleanup cursors. Ordinary
+# operations take one direct edge rather than redispatching every control opcode.
+o_control_kind = (op: Op) -> int:
+    match op:
+        nop: 1
+        block: 2
+        loop: 3
+        if_: 4
+        else_: 5
+        end: 6
+        br: 7
+        brif: 8
+        brtable: 9
+        ret: 10
+        trap: 11
+        call: 12
+        mov: 13
+        copy: 14
+        zeroslots: 15
+        _: 0
+
+o_make_decode = () -> int[]:
+    result: int[]
+    loop i in [0..int(Op.findb) + 1):
+        op = i as Op
+        flags = int(o_defines_classify(op)) | (int(o_pure_classify(op)) << 1) | (int(kills_memory_classify(op)) << 2) | (int(o_retargetable_classify(op)) << 3)
+        control = o_control_kind(op)
+        special = control >= 1 and control <= 6 or control == 8 or control == 15
+        flags = flags | (control << 20) | (int(special) << 24)
+        result.push(flags | ((cse_arity_classify(op, 0) + 1) << 4) | (o_rewrite_mask(op) << 8) | (o_simplify_kind(op) << 16))
+    result
+
+o_pure_classify = (op: Op) -> bool:
+    match op:
+        select: true
+        iconst, fconst, mov, slot, gaddr, daddr, faddr, load: true
+        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, rot32, neg, not_, mulhs, mulhu, overflow_add, overflow_sub, overflow_mul: true
+        eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
+        fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc: true
+        feq, fne, flt, fle, fgt, fge: true
+        sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits: true
+        vld, vbin, vsplat, memeq, streq, findbyte, scanbytes: true
+        _: false
+
+# (results may be replaced by an existing equal value)
+cse_arity_classify = (op: Op, mode: int) -> int:
+    match op:
+        iconst, fconst, slot, gaddr, daddr, faddr: 0
+        load: if mode & M_INDEX != 0: 2 else: 1
+        neg, not_, fneg, fsqrt, ffloor, fceil, fabs, ftrunc: 1
+        sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits: 1
+        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, rot32, mulhs, mulhu, overflow_add, overflow_sub, overflow_mul: 2
+        eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: 2
+        fadd, fsub, fmul, fdiv, fmin, fmax, feq, fne, flt, fle, fgt, fge: 2
+        _: -1
+
+o_defines_classify = (op: Op) -> bool:
+    match op:
+        nop, block, loop, end, else_, br, brif, brtable, if_, ret, trap, store, copy, zero, memcpy, memset, zeroslots, assume, vop, vst, vzu: false
+        _: true
+
+kills_memory_classify = (op: Op) -> bool:
+    match op:
+        store, copy, zero, memcpy, memset, zeroslots, call, calli, callc, syscall, intr, vop: true
+        _: false
+
+sra_retry = false
+optimize = ():
+    o_sra()
+    nested = sra_nested
+    opt_decode = o_decode
+    opt_operands = data(ir_operand_layout)
+    opt_checked_flags = checked_flags
+    opt_rotate32_ok = rotate32_ok
+    opt_mulh_ok = mulh_ok
+    opt_kc_val = data(kc_val)
+    opt_kc_reg = data(kc_reg)
+    opt_kc_epoch = data(kc_epoch)
+    opt_kc_fn = kc_fn
+    opt_bind_addresses()
+    opt_rewrite()
+    if nested and not sra_retry:
+        sra_retry = true
+        optimize()
+        sra_retry = false
+
+o_retargetable_classify = (op: Op) -> bool:
+    match op:
+        # Native flags consume the operands before assigning the result. Wasm
+        # checks the saved operands afterwards, so it must retain a fresh local.
+        checked_add, checked_sub, checked_mul: checked_flags
+        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, rot32, neg, not_, load, mov, mulhs, mulhu, memeq, streq, findbyte, scanbytes, overflow_add, overflow_sub, overflow_mul: true
+        eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
+        fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc: true
+        sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits, fconst, iconst: true
+        _: false

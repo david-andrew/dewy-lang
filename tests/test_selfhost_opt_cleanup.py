@@ -135,13 +135,22 @@ def function(text, name):
     return re.search(rf'^{name} =.*?(?=^\w|\Z)', text, re.M | re.S)[0]
 
 
-@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
-def test_opt_cleanup_twins(compiler, tmp_path, release):  # noqa: F811
+def decode_source(*extra):
+    """The frozen opcode tables (opt_core.jo) and opt.jo's ordinal-indexed queries, as Jo text."""
+    core = (ROOT / 'compiler/opt_core.jo').read_text()
     original = (ROOT / 'compiler/opt.jo').read_text()
-    decode = original[original.index('o_rewrite_mask ='):original.index('const MIN_INT')]
-    decode += '\n'.join(function(original, name) for name in (
+    text = '\n'.join(function(core, name) for name in (
+        'o_rewrite_mask', 'o_simplify_kind', 'o_control_kind', 'o_make_decode'))
+    text += original[original.index('o_decode_storage ='):original.index('const MIN_INT')]
+    text += '\n'.join(function(core, name) for name in (
         'o_pure_classify', 'cse_arity_classify', 'o_defines_classify',
         'kills_memory_classify', 'o_retargetable_classify'))
+    return text + '\n'.join(function(original, name) for name in extra)
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_opt_cleanup_twins(compiler, tmp_path, release):  # noqa: F811
+    decode = decode_source()
     rewrite = (ROOT / 'compiler/opt_rewrite.jo').read_text()
     flow = '\n'.join(function(rewrite, name) for name in (
         'ow_flow_begin', 'ow_flow_exit', 'ow_flow_end_dead', 'ow_flow_emit',
