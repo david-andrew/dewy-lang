@@ -136,12 +136,22 @@ __tstate: *int = null
 __ts_foreign: *int = null
 __ts_lock = 0
 __main_sp = 0
-__c_threads = false             # (a @cabi function has been called: from then on, by stack)
+# The main thread's state while no other thread runs Sloppy code; 0 before any state exists, 1
+# from when a @cabi function is first entered (then each thread's is found by its stack). Every
+# thread the runtime starts (fork_join's workers, tasks' threads) and every thread C makes enters
+# through a @cabi function, whose first act stores the 1 (lower_functions.jo's cabi entry).
+__ts_main = 0
 
 __ts = () -> *int:
+    t = __ts_main
+    if t <= 1: return __ts_slow()
+    t as *int
+
+@noinline
+__ts_slow = () -> *int:
     if __tstate == null: __ts_init()
-    if __c_threads: return __ts_by_stack()
-    __tstate + __tid() * __TS_WORDS
+    if __ts_main == 1: return __ts_by_stack()
+    __tstate
 
 @noinline
 __ts_by_stack = () -> *int:
@@ -166,6 +176,8 @@ __ts_init = ():
     __ts_foreign = __tstate + (__MAX_THREADS + 1) * __TS_WORDS
     when TARGET != "wasm":
         __main_sp = __stack_ptr() as int
+    # (unless a @cabi function was entered first: C's threads may be running)
+    __atomic_cas(&__ts_main, 0, __tstate as int)
 
 # number of live heap allocations (useful for leak tests)
 alloc_count = () -> int:

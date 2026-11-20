@@ -1778,10 +1778,9 @@ gen_intrinsic_push = (e: int, arg_start: int) -> Val:
 
 # (lower_group.dewy explains this)
 first_push_bump = (pl: Place, at: int, esz: int, slotp: int, slow: int):
-    state = rt_global_word("__tstate")
-    brif_to(e_bin(.eq, VI, state, e_iconst(0)), slow)
+    state = rt_global_word("__ts_main")
+    brif_to(e_bin(.les, VI, state, e_iconst(1)), slow)
     brif_to(e_bin(.ne, VI, rt_global_word("__tstack_base"), e_iconst(0)), slow)
-    brif_to(e_bin(.ne, VI, rt_global("__c_threads"), e_iconst(0)), slow)
     control = e_load(VI, state, rt_const("__TS_ARENA") * 8, 8)
     brif_to(e_bin(.eq, VI, control, e_iconst(0)), slow)
     brif_to(e_bin(.ges, VI, e_load(VI, control, 40, 8), e_iconst(0)), slow)

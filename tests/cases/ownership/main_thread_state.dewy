@@ -1,0 +1,36 @@
+# Allocation by the main thread alone, by worker threads, then by the main thread again: until a
+# worker starts, the main thread's allocator state is found without a thread lookup.
+$runtime_checks
+tree=(n:int64 offset:int64):>array<int64>=>{
+    if n <=? 0 return [offset]
+    let parts=[parallel i in [0..2) tree(n-1 offset*2+i)]
+    let out:array<int64>=[]
+    loop p in parts {loop v in p {out.push(v)}}
+    return out
+}
+rows=(n:int64):>int64=>{
+    let total:int64=0
+    loop r in [0..n) {
+        let ints:array<int64>=[]
+        loop c in [0..9) {ints.push(r+c)}
+        total+=ints[8]+ints.length
+    }
+    return total
+}
+work=():>void=>{
+    let scratch=Arena[]
+    printl"{$allocator(@scratch) rows(100)}"
+    scratch.reset()
+    let first=tree(3 0)
+    printl"{first}"
+    let second=tree(8 1)
+    let sum:int64=0
+    loop v in second {sum+=v}
+    printl"{second.length} {sum}"
+    printl"{$allocator(@scratch) rows(100)}"
+    scratch.reset()
+    let names:array<string>=[]
+    loop k in [0..50) {names.push("n{k}")}
+    printl"{names.length} {names[49]}"
+}
+main=():>void=>{work()}

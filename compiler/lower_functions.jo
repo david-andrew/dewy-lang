@@ -169,8 +169,8 @@ lower_inst = (lf: int, f: int):
     # what Sloppy code expects of them)
     if fns[f].cabi:
         # (C may call it from a thread of its own: the allocator tells threads apart from now on)
-        if let ct = prelude.get(intern("__c_threads")):
-            if syms[ct].kind == .global: e_store(e_gaddr(global_addr_off(int(syms[ct].ref))), 0, e_iconst(1), 1)
+        if let ct = prelude.get(intern("__ts_main")):
+            if syms[ct].kind == .global: e_store(e_gaddr(global_addr_off(int(syms[ct].ref))), 0, e_iconst(1), 8)
         loop l in fns[f].params:
             t = prune(int(locals[l].type))
             if types[t].kind == .int_ and tsize(t) < 8 and int(locals[l].flags) & LF_MUTPARAM == 0: e_mov(int(locals[l].vreg), norm(int(locals[l].vreg), t))

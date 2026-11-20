@@ -183,9 +183,9 @@ lower_inst=(lf:LFnWord f:LFnWord):>void=>$unsafe {
     }
     if fns.ptr[f].cabi {
         # (C may call it from a thread of its own: the allocator tells threads apart from now on)
-        let ct=prelude.get(intern("__c_threads"))
+        let ct=prelude.get(intern("__ts_main"))
         if ct not=? none {
-            if syms.ptr[ct].kind =? SK.global {e_store(e_gaddr(global_addr_off(LFnWord(syms.ptr[ct].ref))) 0 e_iconst(1) 1);}
+            if syms.ptr[ct].kind =? SK.global {e_store(e_gaddr(global_addr_off(LFnWord(syms.ptr[ct].ref))) 0 e_iconst(1) 8);}
         }
         loop l in fns.ptr[f].params {
             let t=prune(LFnWord(locals.ptr[l].type))

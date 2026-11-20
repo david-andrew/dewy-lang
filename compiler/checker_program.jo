@@ -234,8 +234,8 @@ check_program = (main_path: str):
     loop nm in optional_runtime:
         if nm != "__mac_syscall" or target_macos: runtime_demand(nm)
     if float_int_demanded: runtime_demand("__float_int_fail")
-    # (@cabi functions set __c_threads: lib/core/rt.jo)
-    if let ct = prelude.get(intern("__c_threads")):
+    # (@cabi functions set __ts_main: lib/core/rt.jo)
+    if let ct = prelude.get(intern("__ts_main")):
         if syms[ct].kind == .global: ensure_global(int(syms[ct].ref), 0)
     # (vectorized code reads __cpu_avx2: its initializer must be checked with the rest)
     if want_cpu_flag:

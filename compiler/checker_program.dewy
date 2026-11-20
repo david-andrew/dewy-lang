@@ -227,7 +227,7 @@ check_program=(main_path:string):>void=>$unsafe {
         if nm not=? "__mac_syscall" or target_macos {runtime_demand(nm)}
     }
     if float_int_demanded {runtime_demand("__float_int_fail")}
-    let program_option4=prelude.get(intern("__c_threads"))
+    let program_option4=prelude.get(intern("__ts_main"))
     if program_option4 not=? none {
         let ct=program_option4
         if syms.ptr[ct].kind =? 'global' {ensure_global(PGWord(syms.ptr[ct].ref) 0)}
