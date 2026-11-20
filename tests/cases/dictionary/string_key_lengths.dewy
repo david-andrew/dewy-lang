@@ -1,0 +1,15 @@
+# String keys of 6 to 84 bytes, past the 4, 8, 16, 32 and 64 byte boundaries of the keyed hash
+$runtime_checks
+
+main=()=>{
+    let counts:dict<string int64>=[]
+    let total:int64=0
+    loop round in [0..3) {
+        loop n in [0..40) {
+            let word="key-{n}-{repeat("x" n)}"
+            if word in? counts {counts[word]+=1} else {counts[word]=1}
+        }
+    }
+    loop [word count] in counts {total+=count*word.length as int64}
+    printl"{counts.length} {total} {counts["key-0-"]} {counts["key-39-{repeat("x" 39)}"]}"
+}

@@ -160,23 +160,26 @@ __hk_word = (x: u64) -> u64:
     (a * b) xor high
 
 # n bytes at p: sixteen at a time (the last sixteen overlapping the ones before), the state
-# starting from the key and the length
+# starting from the key and the length. Sixteen bytes or fewer, the common key, return early:
+# no loop, and fewer values live through the function.
 __hk_bytes = (p: *u8, n: int) -> u64:
     k = __hash_key
     k1 = k xor 0xE7037ED1A0B428DB
+    if n <= 16:
+        a: u64 = 0
+        b: u64 = 0
+        if n > 8:
+            a = (p as *u64)[0]
+            b = ((p + (n - 8)) as *u64)[0]
+        else if n >= 4: a = u64((p as *u32)[0]) | (u64(((p + (n - 4)) as *u32)[0]) << 32)
+        else if n > 0: a = u64(p[0]) | (u64(p[n >> 1]) << 8) | (u64(p[n - 1]) << 16)
+        return __hk_mum(__hk_mum(a xor k1, b xor k xor (u64(n) * 0x9E3779B97F4A7C15)) xor k, u64(n) xor k1)
     h = k xor (u64(n) * 0x9E3779B97F4A7C15)
     i = 0
     loop n - i > 16:
         h = __hk_mum(((p + i) as *u64)[0] xor k1, ((p + (i + 8)) as *u64)[0] xor h)
         i += 16
-    a: u64 = 0
-    b: u64 = 0
-    if n > 8:
-        a = ((p + (n - 16 + (if n < 16: 16 - n else: 0))) as *u64)[0]
-        b = ((p + (n - 8)) as *u64)[0]
-    else if n >= 4: a = u64((p as *u32)[0]) | (u64(((p + (n - 4)) as *u32)[0]) << 32)
-    else if n > 0: a = u64(p[0]) | (u64(p[n >> 1]) << 8) | (u64(p[n - 1]) << 16)
-    h = __hk_mum(a xor k1, b xor h)
+    h = __hk_mum(((p + (n - 16)) as *u64)[0] xor k1, ((p + (n - 8)) as *u64)[0] xor h)
     __hk_mum(h xor k, u64(n) xor k1)
 
 # The compiler turns this on: its keyed value hash (`__hash_value(x, true)`) mixes every member
