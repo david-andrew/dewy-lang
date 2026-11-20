@@ -1,13 +1,21 @@
 $runtime_checks
 from p"ast.jo" import (kid kids nkids nodes)
 from p"check.jo" import (LF_ALIAS globals locals)
-from p"expr.jo" import (CV ntype)
+from p"expr.jo" import (CV ntype is_nd)
 from p"facts_values.dewy" import (fact_type)
-from p"refine.jo" import (ref_pair_checks ref_predicates ref_self_active ref_self_direct ref_self_elements)
+from p"refine.jo" import (ref_pair_checks ref_predicates ref_self_active ref_self_direct ref_self_elements ref_projection_type ref_self_misplaced ref_sib_fields)
 from p"refine_predicates.dewy" import (ref_atoms_have_kind ref_atoms_interval)
-from p"refinement_types.dewy" import (FACT_MIN FactBound)
+from p"refinement_types.dewy" import (FACT_MIN FactBound RefTerm)
 from p"safe_paths.jo" import (ut_safe_used)
-from p"types.jo" import (T_U64 fields has_var is_int is_union prune struct_targ structs targ tkind type_eq types)
+from p"types.jo" import (T_U64 fields has_var is_int is_union prune struct_targ structs targ tkind type_eq types type_args T_INT T_MATH_INT)
+from p"host_binds.jo" import (ref_fields_host)
+from p"refine_storage.dewy" import (ref_types_storage)
+from p"refine_queries.dewy" import (ref_types_nested_formals)
+from p"nd_contracts.jo" import (nd_shape_predicates)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"util.jo" import (err_notes name_of)
+from p"type_ops.dewy" import (dt)
+from p"checks_thin_expr.dewy" import (is_map_type)
 
 RefineWord:type=int64<overflow='wrap'>
 representation_type=(t0:int64):>int64=>$unsafe {
@@ -173,4 +181,131 @@ ref_self_direct_place=(a:int64):>bool=>{
 ref_self_stored=(t0:int64):>bool=>$unsafe {
     let t=prune(t0)
     types.ptr[t].kind =? 'refined' and ref_atoms_have_kind(ref_predicates[RefineWord(types.ptr[t].st)] 6) and tkind(t) not=? 'array' and is_int(representation_type(t))
+}
+# One shared, noncapturing service; resolution owns its reentrant context.
+ref_storage_contract=(t0:int64):>bool=>{
+    ref_types_storage(@types @structs @fields @type_args @ref_fields_host t0)
+}
+ref_nested_formals=(t0:int64 nested:bool=false depth:int64=0):>bool=>{
+    ref_types_nested_formals(@types @type_args @ref_predicates t0 nested depth)
+}
+# One dependency of a contract in a signature: parameter j, named by type i
+# (a parameter, or the result at i = params.length).
+ref_signature_term=(params:array<int64> t:int64 i:int64 term:RefTerm mask:int64 pos:int64):>void=>$unsafe {
+    if term.kind not=? 2 {return}
+    let j=term.value
+    if j >=? params.length {fatal(pos "missing refinement parameter");}
+    # (a by-value parameter may name what a mutable one projects: the contract holds
+    # at entry, as a fact about the values it read then, which writes invalidate)
+    let entry_projection=i <? params.length and term.path.length >? 0 and mask & (RefineWord(1) << i) =? 0
+    if mask & (RefineWord(1) << j) not=? 0 and (i <? params.length or term.path.length =? 0) and not entry_projection and not (term.path.length =? 1 and term.path[0] <=? -2 and is_nd(representation_type(params[j]))) {fatal(pos "mutable refinement dependencies are only valid in projected postconditions");}
+    let rep=representation_type(t)
+    let a=if tkind(rep) =? 'array' or tkind(rep) =? 'str_' or is_nd(rep) {T_INT} else {rep}
+    let b=ref_projection_type(params[j] term.path pos)
+    let shape_int=b =? T_MATH_INT and nd_shape_predicates.has(RefineWord(types.ptr[t].st))
+    if not shape_int and not ref_repr_match(b a term.path) {fatal(pos "dependent scalar refinement requires matching integer representations");}
+}
+# Type i's contract dependencies, in atom order; whether it is refined at all.
+ref_signature_type=(params:array<int64> t0:int64 i:int64 mask:int64 pos:int64):>bool=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind not=? 'refined' {return false}
+    loop atom in ref_predicates[RefineWord(types.ptr[t].st)] {
+        ref_signature_term(params t i atom.a mask pos)
+        ref_signature_term(params t i atom.b mask pos)
+    }
+    true
+}
+ref_validate_signature=(params:array<int64> ret:int64 mask:int64 pos:int64):>void=>$unsafe {
+    loop t in params {
+        if ref_nested_formals(t) {fatal(pos "dependent element contracts require instantiated storage authority");}
+    }
+    let result=prune(ret)
+    loop types.ptr[result].kind =? 'opt' {result=prune(RefineWord(types.ptr[result].elem))}
+    # (an element contract on formals would escape into the caller's storage,
+    # where no call binds them)
+    if ref_nested_formals(result) {fatal(pos "a result's element contract cannot depend on parameters");}
+    let refined=false
+    loop i in 0.. and t in params {
+        if ref_signature_type(params t i mask pos) {refined=true}
+    }
+    ref_signature_type(params result params.length mask pos);
+    # Dependency cycles cannot define a self-justifying set of contracts.
+    # (with no refined parameter, every parameter is ready at once)
+    if not refined {return}
+    let done=fill(false params.length)
+    let changed=true
+    loop changed {
+        changed=false
+        loop i in 0.. and p in params {
+            if done[i] {continue}
+            let ready=true
+            let t=prune(p)
+            if types.ptr[t].kind =? 'refined' {
+                loop atom in ref_predicates[RefineWord(types.ptr[t].st)] {
+                    if atom.a.kind =? 2 and not done[atom.a.value] {ready=false}
+                    if atom.b.kind =? 2 and not done[atom.b.value] {ready=false}
+                }
+            }
+            if ready {
+                done[i]=true
+                changed=true
+            }
+        }
+    }
+    loop yes in done {
+        if not yes {fatal(pos "cyclic dependent scalar refinements");}
+    }
+}
+# (a record's own declaration errors: the notes of the statement whose type named
+# it first, a tuple slot write's among them, are not theirs)
+ref_validate_record=(t:int64 pos:int64):>void=>$unsafe {
+    let held=err_notes
+    err_notes=[]
+    ref_validate_record_fields(t pos)
+    err_notes=held
+}
+ref_validate_record_fields=(t:int64 pos:int64):>void=>$unsafe {
+    let si=RefineWord(types.ptr[prune(t)].st)
+    ref_sib_fields(si pos)
+    let count=RefineWord(structs.ptr[si].nfields)
+    let done=fill(false count)
+    loop _ in [0..count) {
+        loop i in [0..count) {
+            if done[i] {continue}
+            let ft=prune(RefineWord(fields.ptr[RefineWord(structs.ptr[si].fields) + i].type))
+            if types.ptr[ft].kind not=? 'refined' {ref_self_misplaced(ft i RefineWord(fields.ptr[RefineWord(structs.ptr[si].fields) + i].name) pos 0)}
+            let ready=true
+            if types.ptr[ft].kind =? 'refined' {
+                loop atom in ref_predicates[RefineWord(types.ptr[ft].st)] {
+                    loop term in [atom.a atom.b] {
+                        if term.kind not=? 5 {continue}
+                        let j=term.value
+                        if j >=? count {fatal(pos "refinement field is outside its record");}
+                        # (an alias's free name met the field it types: written on the field,
+                        # its own name is its value, but the alias cannot know that name)
+                        if j =? i {
+                            let name=name_of(RefineWord(fields.ptr[RefineWord(structs.ptr[si].fields) + i].name))
+                            fatal(pos "the refinement of field '{name}' names '{name}', the field itself, through a type alias: name the value with a binder in the alias (`int64<v => 0 <=? v and v <? 10>`), or write the refinement on the field, where its own name is its value");
+                        }
+                        if not done[j] {ready=false}
+                        let dep=RefineWord(fields.ptr[RefineWord(structs.ptr[si].fields) + j].type)
+                        let bound=ref_projection_type(dep term.path pos)
+                        let rep=representation_type(ft)
+                        let expected=if tkind(rep) =? 'array' or tkind(rep) =? 'str_' or is_nd(rep) or is_map_type(rep) {T_INT} else {rep}
+                        if not ref_repr_match(bound expected term.path) {
+                            # (`head:int<v => v <? items.length>`: a length is an int64, so the
+                            # field holding a position is one too)
+                            let name=name_of(RefineWord(fields.ptr[RefineWord(structs.ptr[si].fields) + i].name))
+                            if tkind(ft) =? 'refined' and is_int(expected) and is_int(bound) {fatal(pos "dependent field refinement requires matching integer representations: field '{name}' is {dt(expected)} and what it is compared with is {dt(bound)}, so declare it `{name}:{dt(bound)}<...>`");}
+                            fatal(pos "dependent field refinement requires matching integer representations");
+                        }
+                    }
+                }
+            }
+            if ready {done[i]=true}
+        }
+    }
+    loop yes in done {
+        if not yes {fatal(pos "cyclic dependent field refinements");}
+    }
 }

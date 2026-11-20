@@ -195,3 +195,92 @@ ref_self_direct_place = (a: int) -> bool: ref_self_direct.len() > 0 and ref_self
 ref_self_stored = (t0: int) -> bool:
     t = prune(t0)
     types[t].kind == .refined and ref_atoms_have_kind(ref_predicates[int(types[t].st)], 6) and tkind(t) != .array and is_int(representation_type(t))
+# One shared, noncapturing service; resolution owns its reentrant context.
+ref_storage_contract = (t0: int) -> bool:
+    ref_types_storage(types, structs, fields, type_args, ref_fields_host, t0)
+ref_nested_formals = (t0: int, nested: bool = false, depth: int = 0) -> bool:
+    ref_types_nested_formals(types, type_args, ref_predicates, t0, nested, depth)
+
+ref_validate_signature = (params: int[], ret: int, mask: int, pos: int):
+    loop t in params:
+        if ref_nested_formals(t): fatal(pos, "dependent element contracts require instantiated storage authority")
+    result = prune(ret)
+    loop types[result].kind == .opt: result = prune(int(types[result].elem))
+    # (an element contract on formals would escape into the caller's storage,
+    # where no call binds them)
+    if ref_nested_formals(result): fatal(pos, "a result's element contract cannot depend on parameters")
+    all = params + [result]
+    loop i in [0..all.len()):
+        t = prune(all[i])
+        if types[t].kind != .refined: continue
+        loop atom in ref_predicates[int(types[t].st)]:
+            loop term in [atom.a, atom.b]:
+                if term.kind != 2: continue
+                j = term.value
+                if j >= params.len(): fatal(pos, "missing refinement parameter")
+                # (a by-value parameter may name what a mutable one projects: the contract holds
+                # at entry, as a fact about the values it read then, which writes invalidate)
+                entry_projection = i < params.len() and term.path.len() > 0 and mask & (1 << i) == 0
+                if mask & (1 << j) != 0 and (i < params.len() or term.path.len() == 0) and not entry_projection and not (term.path.len() == 1 and term.path[0] <= -2 and is_nd(representation_type(params[j]))): fatal(pos, "mutable refinement dependencies are only valid in projected postconditions")
+                a = if tkind(representation_type(t)) == .array or tkind(representation_type(t)) == .str_ or is_nd(representation_type(t)): T_INT else: representation_type(t)
+                b = ref_projection_type(params[j], term.path, pos)
+                shape_int = b == T_MATH_INT and nd_shape_predicates.has(int(types[t].st))
+                if not shape_int and not ref_repr_match(b, a, term.path): fatal(pos, "dependent scalar refinement requires matching integer representations")
+    # Dependency cycles cannot define a self-justifying set of contracts.
+    done = fill(false, params.len())
+    loop _ in [0..params.len()):
+        loop i in [0..params.len()):
+            if done[i]: continue
+            ready = true
+            t = prune(params[i])
+            if types[t].kind == .refined:
+                loop atom in ref_predicates[int(types[t].st)]:
+                    loop term in [atom.a, atom.b]:
+                        if term.kind == 2 and not done[term.value]: ready = false
+            if ready: done[i] = true
+    loop yes in done:
+        if not yes: fatal(pos, "cyclic dependent scalar refinements")
+
+# (a record's own declaration errors: the notes of the statement whose type named
+# it first, a tuple slot write's among them, are not theirs)
+ref_validate_record = (t: int, pos: int):
+    held = err_notes
+    err_notes = []
+    ref_validate_record_fields(t, pos)
+    err_notes = held
+
+ref_validate_record_fields = (t: int, pos: int):
+    si = int(types[prune(t)].st)
+    ref_sib_fields(si, pos)
+    count = int(structs[si].nfields)
+    done = fill(false, count)
+    loop _ in [0..count):
+        loop i in [0..count):
+            if done[i]: continue
+            ft = prune(int(fields[int(structs[si].fields) + i].type))
+            if types[ft].kind != .refined: ref_self_misplaced(ft, i, int(fields[int(structs[si].fields) + i].name), pos, 0)
+            ready = true
+            if types[ft].kind == .refined:
+                loop atom in ref_predicates[int(types[ft].st)]:
+                    loop term in [atom.a, atom.b]:
+                        if term.kind != 5: continue
+                        j = term.value
+                        if j >= count: fatal(pos, "refinement field is outside its record")
+                        # (an alias's free name met the field it types: written on the field,
+                        # its own name is its value, but the alias cannot know that name)
+                        if j == i:
+                            name = name_of(int(fields[int(structs[si].fields) + i].name))
+                            fatal(pos, "the refinement of field '{name}' names '{name}', the field itself, through a type alias: name the value with a binder in the alias (`int64<v => 0 <=? v and v <? 10>`), or write the refinement on the field, where its own name is its value")
+                        if not done[j]: ready = false
+                        dep = int(fields[int(structs[si].fields) + j].type)
+                        bound = ref_projection_type(dep, term.path, pos)
+                        expected = if tkind(representation_type(ft)) == .array or tkind(representation_type(ft)) == .str_ or is_nd(representation_type(ft)) or is_map_type(representation_type(ft)): T_INT else: representation_type(ft)
+                        if not ref_repr_match(bound, expected, term.path):
+                            # (`head:int<v => v <? items.length>`: a length is an int64, so the
+                            # field holding a position is one too)
+                            name = name_of(int(fields[int(structs[si].fields) + i].name))
+                            if tkind(ft) == .refined and is_int(expected) and is_int(bound): fatal(pos, "dependent field refinement requires matching integer representations: field '{name}' is {dt(expected)} and what it is compared with is {dt(bound)}, so declare it `{name}:{dt(bound)}<...>`")
+                            fatal(pos, "dependent field refinement requires matching integer representations")
+            if ready: done[i] = true
+    loop yes in done:
+        if not yes: fatal(pos, "cyclic dependent field refinements")

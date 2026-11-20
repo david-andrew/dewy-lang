@@ -263,6 +263,15 @@ ordinary indexed reads. Queries introduce no callbacks, context copies or
 mutable fact-state API. Index and offset arithmetic uses wrapping machine words;
 plain-word signatures preserve existing host records and Jo collection inference. Storage reads retain optional
 and union payload contracts, opaque brands and paired-run erasure rules.
+The leaf also owns the storage-contract and nested-formal entry points, which
+borrow the arenas and predicate table for their pure walkers, and declaration
+validation of dependent signatures and records. Validation keeps parameter,
+field and predicate order and every diagnostic; records swap Jo's note list
+directly, as other diagnostic leaves do (a bound place measured more source cost). A signature's cycle check is skipped when no
+parameter is refined and stops once a pass readies nothing, instead of always
+running one pass per parameter, so a common signature costs one pass where Jo
+paid P passes on every call. Arena views are
+reacquired after projection resolution and sibling/self checks.
 
 `refine_strings.dewy` owns string-set construction/publication and checked member
 constants. Its `CheckerInternHost` borrows whole-string interning; the set, type,
