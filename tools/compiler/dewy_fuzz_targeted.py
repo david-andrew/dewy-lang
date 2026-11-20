@@ -813,8 +813,7 @@ def gen_strings(r, p):
             part = s[:r.randint(0, n)] if r.random() < .6 else r.choice(CHARS)
             checks.append(printing(f's.startswith({quote(part)})', 'true' if s.startswith(part) else 'false'))
         elif op == 'upper':
-            # (simple one-to-one mappings: ß stays ß)
-            checks.append(printing('s.upper()', ''.join(c.upper() if len(c.upper()) == 1 else c for c in s)))
+            checks.append(printing('s.upper()', s.upper()))
         elif op == 'loop':
             checks.append(('loop c in s { if c =? " " continue; if c =? "=" break; print"<{c}>" }\nprintl""',
                            ''.join(f'<{c}>' for c in s.split('=')[0] if c != ' ') + '\n'))
