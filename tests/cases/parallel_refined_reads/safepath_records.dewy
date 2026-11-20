@@ -1,0 +1,22 @@
+# Parallel loops read records whose fields are refined (SafePath) without a
+# proof per element: a stored element already satisfies its refinement.
+const root = p"workspace"
+Item:type = [name:string file:SafePath bytes:array<uint8>]
+
+total = (bytes:array<uint8>):>int => {
+    let s = 0
+    loop b in bytes { s += int(b) }
+    s
+}
+
+main = () => {
+    let items:array<Item> = []
+    loop k in [0..4) {
+        let safe = root.confine(p"{root}/f{k}") ?? continue
+        items.push(Item["f{k}" safe [uint8(k) 2 3]])
+    }
+    printl"{[parallel item in items total(item.bytes)]}"
+    printl"{[parallel item in items "{item.name}={item.file}"]}"
+    let small:array<int<(>=? 0)>> = [3 1 2]
+    printl"{[parallel x in small x * 2]}"
+}

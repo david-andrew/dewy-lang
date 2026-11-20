@@ -4317,9 +4317,9 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         if not types[t].sign and value < 0: add_flag(n, NF_U64)
         return t
     let args = args0
-    # `__permutable_data(xs)`: data() for code that only moves elements between slots (the
-    # library's swap and reorderings), so an element's refinement holds without a proof per
-    # element: refined storage is not refused
+    # `__permutable_data(xs)`: data() for code that only reads elements or moves them between
+    # slots (the library's swap and reorderings, parallel kernels' inputs), so an element's
+    # refinement holds without a proof per element: refined storage is not refused
     permute = id == .arrdata_permute
     if permute:
         if not pos_in_lib(nodes[n].pos): fatal(nodes[n].pos, "__permutable_data is the library's")

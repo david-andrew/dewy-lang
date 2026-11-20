@@ -1,0 +1,16 @@
+# A parallel statement loop reads refined record fields too.
+const root = p"workspace"
+Item:type = [name:string file:SafePath]
+
+main = () => {
+    let items:array<Item> = []
+    loop k in [0..4) {
+        let safe = root.confine(p"{root}/f{k}") ?? continue
+        items.push(Item["f{k}" safe])
+    }
+    let seen = atomic(0)
+    parallel item in items {
+        if item.file.name =? item.name seen.add(1)
+    }
+    printl"{seen.load} files named as recorded"
+}

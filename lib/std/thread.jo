@@ -60,7 +60,8 @@ parallel_map[T, U] = (xs: T[], f: (T) -> U) -> U[]:
     if n == 0: return out
     out.resize(n)
     op = data(out)
-    ip = data(xs)
+    # (only read: a stored element keeps its refinement)
+    ip = __permutable_data(xs)
     __parallel_run(n, (lo: int, hi: int):
         loop i in [lo..hi): op[i] = f(ip[i])
     )
@@ -110,7 +111,8 @@ __dewy_parallel_collect[U] = (r: IntRange, f: (int) -> U) -> U[]:
 
 @parallel
 __dewy_parallel_each[T] = (xs: T[], f: (T) -> void):
-    p = data(xs)
+    # (only read: a stored element keeps its refinement)
+    p = __permutable_data(xs)
     __parallel_run(xs.len(), (lo: int, hi: int):
         loop i in [lo..hi): f(p[i])
     )
