@@ -123,7 +123,8 @@ exact_fact_store = (n: int, value: int, s: mut FactState) -> int:
                 if dewy_at(nodes[n].pos) and operand != "this operation is outside the fact language": err_notes.push((-1, "note: {operand}"))
                 wit_operand_changed(int(nodes[n].a), s)
                 wit_help("{dt(t)}.min <=? ({shown}) and ({shown}) <=? {dt(t)}.max")
-            err_notes.push((-1, "help: widen the destination to `int`, state the domain as a refinement (or prove it with a guard), or choose `overflow='wrap'|'saturate'`; " + dir_panic_fix(nodes[n].pos, true)))
+            if exact_shader_owners.has(exact_stores.get(n) ?? 0): err_notes.push((-1, "help: state the domain as a refinement or prove it with a guard before the operation, or choose `overflow='wrap'` (GPU code cannot check it)"))
+            else: err_notes.push((-1, "help: widen the destination to `int`, state the domain as a refinement (or prove it with a guard), or choose `overflow='wrap'|'saturate'`; " + dir_panic_fix(nodes[n].pos, true)))
             fatal(nodes[n].pos, what)
     # The continuation is dominated by either a proof or its runtime check.
     if ok: return value

@@ -14,6 +14,7 @@ from p"checker_tokens.dewy" import (Tok)
 from p"directives.jo" import (DIR_STATIC)
 from p"directive_queries.dewy" import (dir_policy)
 from p"directive_rules.dewy" import (dir_defer)
+from p"exact.jo" import (exact_shader_owners)
 from p"expr.jo" import (CV IN intrinsics is_dewy_set_type ntype shown_fn_name)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"facts.jo" import (FactPaths FactState fact_comparison fact_owner fact_query fact_retry_owner fact_terms)
@@ -157,6 +158,11 @@ wit_help=(relation:string runtime:bool=true contract:WitWord=0 before:string="")
     let call=if noted {wit_call_text(after 0)} else {""}
     if proof_active and fact_owner >? 0 and fact_owner <? fns.length and proof_decls.has(WitWord(fns.ptr[fact_owner].decl)) {
         err_notes.push([(-1) "help: establish {want} with a stronger proof precondition, a call to another proof or a current guard; erased proofs cannot check at run time"])
+    }
+    # (GPU code cannot check at run time either: exact_shader_owners)
+    else if runtime and fact_owner >? 0 and exact_shader_owners.has(fact_owner) {
+        let at=if call not=? "" {" after `{call}`"} else {""}
+        err_notes.push([(-1) "help: establish {want}{at} with a current guard or a stronger checked contract"])
     }
     else if runtime and call not=? "" {err_notes.push([(-1) "help: establish {want} after `{call}` with a current guard, or check it at run time with `$runtime_assert`"])}
     else if runtime {err_notes.push([(-1) "help: establish {want} with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`"])}

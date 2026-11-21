@@ -1,0 +1,15 @@
+# GPU code's diagnostics offer only proofs: a shader cannot run `$runtime_assert` or a check.
+$runtime_checks
+
+P:type=[pos:float32 hits:int32]
+U:type=[parts:GpuBuffer<P>]
+hit=(id:int64 u:U):>void=>{
+    if id <? 0 or id >=? u.parts.length {return}
+    let p=u.parts[id]
+    u.parts[id]=P(p.pos p.hits+int32(1))
+}
+main=()=>{
+    let b=gpu_buffer([P(1.0 0)])
+    dispatch(compute(@hit) 1 U(b))
+    printl(cpu(b))
+}

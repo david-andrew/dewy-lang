@@ -37,6 +37,7 @@ use 'proofs.jo'
 use 'directives.jo'
 use 'directive_queries.dewy'
 use 'directive_rules.dewy'
+use 'exact.jo'
 use 'ide.jo'
 use 'isolation.jo'
 use 'isolation_ops.dewy'
@@ -139,6 +140,9 @@ wit_help = (relation: str, runtime: bool = true, contract: int = 0, before: str 
     call = if noted: wit_call_text(after, 0) else: ""
     if proof_active and fact_owner > 0 and fact_owner < fns.len() and proof_decls.has(int(fns[fact_owner].decl)):
         err_notes.push((-1, "help: establish {want} with a stronger proof precondition, a call to another proof or a current guard; erased proofs cannot check at run time"))
+    # (GPU code cannot check at run time either: exact_shader_owners)
+    else if runtime and fact_owner > 0 and exact_shader_owners.has(fact_owner):
+        err_notes.push((-1, "help: establish {want}" + (if call != "": " after `{call}`" else: "") + " with a current guard or a stronger checked contract"))
     else if runtime and call != "": err_notes.push((-1, "help: establish {want} after `{call}` with a current guard, or check it at run time with `$runtime_assert`"))
     else if runtime: err_notes.push((-1, "help: establish {want} with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`"))
     else: err_notes.push((-1, "help: establish {want} with a current guard or a stronger checked contract; erased proofs have no runtime fallback"))

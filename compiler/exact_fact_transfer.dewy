@@ -7,7 +7,7 @@ from p"exact_static_widths.dewy" import (exact_width_bits)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"directive_ops.dewy" import (dir_panic_fix)
 from p"directive_rules.dewy" import (dir_defer)
-from p"exact.jo" import (exact_marks exact_measure_on exact_measure_sites exact_range_meta exact_ranges exact_shader_owners exact_shifts)
+from p"exact.jo" import (exact_marks exact_measure_on exact_measure_sites exact_range_meta exact_ranges exact_shader_owners exact_shifts exact_stores)
 from p"exact_marks.dewy" import (exact_decide exact_decided exact_has_node exact_proved)
 from p"exact_check_hooks.dewy" import (exact_representation)
 from p"exact_count_bounds.dewy" import (exact_count_bound)
@@ -134,7 +134,8 @@ exact_fact_store=(n:TransferWord value:TransferWord @s:FactState):>int64=>$unsaf
                     wit_operand_changed(int64(nodes.ptr[n].a) s)
                     wit_help("{dt(t)}.min <=? ({shown}) and ({shown}) <=? {dt(t)}.max")
                 }
-                err_notes.push([(-1) "help: widen the destination to `int`, state the domain as a refinement (or prove it with a guard), or choose `overflow='wrap'|'saturate'`; {dir_panic_fix(nodes.ptr[n].pos true)}"])
+                if exact_shader_owners.has(exact_stores.get(n) ?? 0) {err_notes.push([(-1) "help: state the domain as a refinement or prove it with a guard before the operation, or choose `overflow='wrap'` (GPU code cannot check it)"])}
+                else {err_notes.push([(-1) "help: widen the destination to `int`, state the domain as a refinement (or prove it with a guard), or choose `overflow='wrap'|'saturate'`; {dir_panic_fix(nodes.ptr[n].pos true)}"])}
                 fatal(nodes.ptr[n].pos what)
             }
         }
