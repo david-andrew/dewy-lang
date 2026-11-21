@@ -110,6 +110,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `opt_sra` | `opt_sra.jo` | Dewy scalar replacement of small slots | Own lane workspace; shares the optimizer register table; operands read per opcode; flagship optimize phase −1.9% to −2.4%. |
 | `opt_core` | `opt_core.jo` | Dewy optimizer entry and opcode decode table | Once-per-process table from an ABI-order list; ordinal-indexed queries and register reset stay Jo. |
 | `loops_version` | `loops_version.jo` | Dewy loop versioning and vectorization entry | Layouts and shared vectorizer state stay in `loops.jo`; flagship totals −0.0003% to +0.0004%. |
+| `exact_emit` | `exact_emit.jo` | Dewy exact fixed-width emission | Planning state stays in `exact.jo`; flagship totals −0.0017% to −0.0003%. |
 
 ### Boundary lessons that constrain the next cutover
 
@@ -600,6 +601,15 @@ and rename watermark are private to the leaf. Calls into `loops_emit` and
 `loops_vector_emit` are plain calls inside the compiler cycle. Work stays
 O(loop body) per candidate, with the existing 400-instruction, depth-5 and
 four-term caps; positions and offsets are wrapping words.
+
+`exact_emit.dewy` owns exact fixed-width emission: an expression's machine
+words and low word, the native-flag remainder, narrowing stores, policy
+conversions and the mathematical-int and float boundaries. `exact.jo` keeps
+the planning state and its queries (marks, widths, ranges, shifts, midpoints,
+proofs) and the join and chain registers that lowering and `exact_chain_walks`
+share. Emission reads those queries directly and adds no pass: work stays
+O(emitted words) per demanded node, and the existing chain plan, the 16-node
+cap and the cold fallbacks are unchanged.
 
 ## Shared backend analysis boundary
 

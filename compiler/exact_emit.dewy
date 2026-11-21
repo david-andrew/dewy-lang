@@ -1,0 +1,566 @@
+$runtime_checks
+
+from p"ast.jo" import (NF_U64 has_flag kid kids nkids nodes)
+from p"check.jo" import (dewy_at sa_fits target_arm64 target_wasm)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"checker_tokens.dewy" import (Tok)
+from p"diagnostic_exit.dewy" import (fatal ice)
+from p"exact.jo" import (exact_bits exact_chain_active exact_chain_saved exact_has_node exact_join_blocks exact_midpoint exact_proved exact_range_flags exact_representation exact_shifts exact_type_width)
+from p"exact_chain_walks.dewy" import (exact_affine_store exact_chain_store exact_offset_store)
+from p"exact_guard_ops.dewy" import (eg_fits)
+from p"exact_loop.jo" import (exact_loop_fast exact_map_active exact_map_stores)
+from p"exact_words.dewy" import (exact_add exact_compare exact_div exact_extend exact_mul exact_neg exact_select exact_shift exact_shift_literal)
+from p"expr.jo" import (CV IN integer_constant ntype)
+from p"facts_index_proofs.dewy" import (positive_bound)
+from p"ir.jo" import (VI checked_flags ir_cold)
+from p"ir_builders.dewy" import (e_addi e_bin e_call e_call1 e_fconst e_iconst e_mov e_slot e_store e_un emit new_slot vreg)
+from p"ir_types.dewy" import (Op)
+from p"lower.jo" import (Val)
+from p"lower_group.dewy" import (gen_borrowed gen_expr gen_iflet gen_match gen_place gen_stmt scope_pop)
+from p"lower_primitives.dewy" import (e_call_nr1 e_daddr loc_data rt)
+from p"lower_scalars.dewy" import (int_op math_int_guard)
+from p"lower_storage.dewy" import (V els endc enter_cond freeze_scalar iff leave_cond norm opt_has opt_value place_addr scope_push stmt_begin stmt_end vt_of)
+from p"math_ops.dewy" import (math_pack_word math_proven_word math_shift_count)
+from p"types.jo" import (T_F32 T_INT T_MATH_INT is_int prune types)
+
+# Exact fixed-width emission: an expression's machine words, stores that narrow
+# them, policy conversions and the mathematical-int and float boundaries. The
+# planning state (widths, marks, ranges, proofs) stays with exact.jo. Node IDs,
+# vregs and word counts wrap as Jo words did; shift counts are masked as the
+# machine masked them.
+ExactEmitWord:type=int64<overflow='wrap'>
+
+# A node's operator token.
+exact_emit_op=(n:ExactEmitWord):>Tok=>$unsafe {cx_token_values.ptr[ExactEmitWord(nodes.ptr[n].op)]}
+
+# The significant bits of a nonnegative bound, with at most six tests.
+exact_emit_bits=(bound0:ExactEmitWord):>ExactEmitWord=>{
+    let bound=bound0
+    let bits:ExactEmitWord=1
+    let shift:ExactEmitWord=32
+    loop shift >? 0 {
+        if bound >> (shift & 63) not=? 0 {
+            bound=bound >> (shift & 63)
+            bits+=shift
+        }
+        shift=shift >> 1
+    }
+    if bound not=? 0 {bits+=1}
+    bits
+}
+
+# Lowering already knows bounded induction variables and the range shared by
+# every write to a local. Reuse those facts rather than demand relational states
+# merely to choose the number of machine words in an exact expression.
+exact_lower_bits=(n:ExactEmitWord):>int64=>{
+    let width=exact_bits(n)
+    # Consumers select whole machine words. Once one word suffices, no
+    # induction/range query can change their representation.
+    if width <=? 64 {return width}
+    let bound=positive_bound(n true)
+    if bound <? 0 {return width}
+    min(width int64(exact_emit_bits(bound)))
+}
+
+# A positive remainder of one potentially overflowing word operation has a
+# native fast path. Evaluate operands once; OF selects a shared exact fallback.
+exact_word_remainder=(n:ExactEmitWord):>array<int64>=>$unsafe {
+    let empty:array<int64>=[]
+    if not checked_flags or not dewy_at(nodes.ptr[n].pos) {return empty}
+    let [known divisor]=integer_constant(ExactEmitWord(nodes.ptr[n].b))
+    if not known or divisor <=? 0 or ExactEmitWord(divisor) & (ExactEmitWord(divisor) - 1) =? 0 {return empty}
+    let source=ExactEmitWord(nodes.ptr[n].a)
+    if nodes.ptr[source].kind not=? 'binary' or nodes.ptr[source].aux not=? 0 or not exact_has_node(source) or exact_lower_bits(source) <=? 64 {return empty}
+    let op=exact_emit_op(source)
+    if op not=? 'plus' and op not=? 'minus' and op not=? 'star' {return empty}
+    let a=ExactEmitWord(nodes.ptr[source].a)
+    let b=ExactEmitWord(nodes.ptr[source].b)
+    if exact_lower_bits(a) >? 64 or exact_lower_bits(b) >? 64 {return empty}
+    let av=exact_value(a)
+    let bv=exact_value(b)
+    if av.length not=? 1 or bv.length not=? 1 {ice("word remainder width mismatch")}
+    let modulus=e_iconst(divisor)
+    let result=vreg(VI)
+    let plain:Op=if op =? 'plus' {'add'} else if op =? 'minus' {'sub'} else {'mul'}
+    let flagged:Op=if op =? 'plus' {'overflow_add'} else if op =? 'minus' {'overflow_sub'} else {'overflow_mul'}
+    let value=e_bin(plain VI av[0] bv[0])
+    let overflow=e_bin(flagged VI av[0] bv[0])
+    iff(overflow);
+    let cold=ir_cold
+    ir_cold=true
+    let words=if op =? 'star' {exact_mul(av bv 2)} else {exact_add(av bv 2 op =? 'minus')}
+    e_mov(result e_call(rt("__exact_i128_mod_pos") [words[0] words[1] modulus] VI));
+    ir_cold=cold
+    els();
+    e_mov(result exact_div(n [value] [modulus] 1 true)[0]);
+    endc();
+    [result]
+}
+
+# A consumer of only the low machine word needs no carries or high products.
+# Ring operations commute with reduction modulo 2^64. Other operations keep
+# their full exact operands, including division, comparisons and right shifts.
+exact_low_word=(n:ExactEmitWord):>int64=>$unsafe {
+    if exact_chain_active and exact_chain_saved.has(n) {return exact_chain_saved[n]}
+    let k=nodes.ptr[n].kind
+    if k not=? 'block' and not exact_has_node(n) {return freeze_scalar(gen_expr(n).v exact_representation(ntype(n)))}
+    if exact_has_node(n) {
+        if k =? 'binary' {
+            let op=exact_emit_op(n)
+            if op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'amp' or op =? 'pipe' or op =? 'caret' {
+                let a=exact_low_word(ExactEmitWord(nodes.ptr[n].a))
+                let b=exact_low_word(ExactEmitWord(nodes.ptr[n].b))
+                return e_bin(int_op(op true) VI a b)
+            }
+        }
+        if k =? 'unary' and exact_emit_op(n) =? 'minus' {return e_un('neg' VI exact_low_word(ExactEmitWord(nodes.ptr[n].a)))}
+        if k =? 'exprstmt' or k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.int_)) or nodes.ptr[n].aux =? int32(int64(CV.none_))) {return exact_low_word(ExactEmitWord(nodes.ptr[n].a))}
+    }
+    exact_value(n)[0]
+}
+
+# count fresh word registers
+exact_emit_words=(count:ExactEmitWord):>array<int64>=>{
+    let out:array<int64>=[]
+    loop i in [0..count) {out.push(vreg(VI))}
+    out
+}
+
+# Copy words into registers, extended to count words.
+exact_emit_move=(out:array<int64> words0:array<int64> count:ExactEmitWord):>void=>{
+    let words=exact_extend(words0 count)
+    loop i in [0..count) {e_mov(out[i] words[i]);}
+}
+
+exact_value=(n:ExactEmitWord):>array<int64>=>$unsafe {
+    if exact_chain_active and exact_chain_saved.has(n) {return [exact_chain_saved[n]]}
+    let [mid_lo mid_hi]=exact_midpoint(n)
+    if mid_lo not=? 0 {
+        let lo=gen_expr(mid_lo).v
+        let hi=gen_expr(mid_hi).v
+        let half=e_bin('shrs' VI e_bin('xor' VI lo hi) e_iconst(1))
+        return [e_bin('add' VI e_bin('and_' VI lo hi) half)]
+    }
+    let k=nodes.ptr[n].kind
+    if k =? 'block' {
+        scope_push();
+        let out:array<int64>=[]
+        let last=ExactEmitWord(nkids(n)) - 1
+        loop i in [0..ExactEmitWord(nkids(n))) {
+            let statement=kid(n i)
+            if i =? last and nodes.ptr[n].aux not=? 0 {
+                stmt_begin();
+                let words=exact_value(ExactEmitWord(nodes.ptr[statement].a))
+                loop word in words {
+                    let saved=vreg(VI)
+                    e_mov(saved word);
+                    out.push(saved)
+                }
+                stmt_end();
+            } else {gen_stmt(statement);}
+        }
+        scope_pop();
+        return out
+    }
+    if not exact_has_node(n) {
+        let t=exact_representation(ntype(n))
+        let word=freeze_scalar(gen_expr(n).v t)
+        if is_int(t) and not types.ptr[t].sign and types.ptr[t].bits =? 64 or k =? 'int_lit' and has_flag(n NF_U64) and nodes.ptr[n].ival <? 0 {return [word e_iconst(0)]}
+        return [word]
+    }
+    let count=(ExactEmitWord(exact_lower_bits(n)) + 63) >> 6
+    if k =? 'binary' {
+        let op=exact_emit_op(n)
+        if count =? 1 and (op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'amp' or op =? 'pipe' or op =? 'caret') {return [exact_low_word(n)]}
+        if op =? 'percent' {
+            let [known divisor]=integer_constant(ExactEmitWord(nodes.ptr[n].b))
+            if dewy_at(nodes.ptr[n].pos) and known and divisor >? 0 and ExactEmitWord(divisor) & (ExactEmitWord(divisor) - 1) =? 0 {
+                return [e_bin('and_' VI exact_low_word(ExactEmitWord(nodes.ptr[n].a)) e_iconst(int64(ExactEmitWord(divisor) - 1)))]
+            }
+            let word=exact_word_remainder(n)
+            if word.length >? 0 {return word}
+        }
+        let a=exact_value(ExactEmitWord(nodes.ptr[n].a))
+        if op =? 'shl' or op =? 'shr' {
+            let count_node=ExactEmitWord(nodes.ptr[n].b)
+            let [known_count literal_count]=integer_constant(count_node)
+            if known_count {return exact_shift_literal(a literal_count count op =? 'shr')}
+            let by:int64=0
+            if exact_representation(ntype(count_node)) =? T_MATH_INT {by=math_shift_count(count_node)}
+            else {
+                let words=exact_value(count_node)
+                by=words[0]
+                let high=e_iconst(0)
+                loop i in [1..words.length) {high=e_bin('or_' VI high words[i])}
+                by=exact_select(e_bin('ne' VI high e_iconst(0)) [e_iconst((-1))] [by] 1)[0]
+            }
+            return exact_shift(a by count op =? 'shr')
+        }
+        if op =? 'starstar' {
+            let exponent_node=ExactEmitWord(nodes.ptr[n].b)
+            let exponent_type=exact_representation(ntype(exponent_node))
+            let [fixed_base constant]=integer_constant(ExactEmitWord(nodes.ptr[n].a))
+            let exponent:int64=0
+            let parity:int64=0
+            let negative=e_iconst(0)
+            let zero=e_iconst(0)
+            if exponent_type =? T_MATH_INT {
+                let value=gen_borrowed(exponent_node).v
+                negative=e_bin('lts' VI e_call(rt("__mi_compare") [value e_iconst(0)] VI) e_iconst(0))
+                iff(negative);
+                e_call_nr1(rt("__negative_integer_power") e_daddr(loc_data(nodes.ptr[n].pos)) (-1));
+                endc();
+                exponent=e_call1(rt("__mi_count") value VI)
+                zero=e_bin('eq' VI exponent e_iconst(0))
+                # Saturating a huge count preserves zero/nonzero, but not parity.
+                parity=if fixed_base and constant =? -1 {e_call1(rt("__mi_low_word") value VI)} else {exponent}
+            } else {
+                let words=exact_value(exponent_node)
+                exponent=words[0]
+                parity=exponent
+                zero=exact_compare('eq' words [e_iconst(0)])
+                negative=e_bin('lts' VI words[ExactEmitWord(words.length) - 1] e_iconst(0))
+            }
+            if exponent_type not=? T_MATH_INT {
+                iff(negative);
+                e_call_nr1(rt("__negative_integer_power") e_daddr(loc_data(nodes.ptr[n].pos)) (-1));
+                endc();
+            }
+            if fixed_base and constant >=? -1 and constant <=? 1 and (constant >=? 0 or types.ptr[exact_representation(ntype(ExactEmitWord(nodes.ptr[n].a)))].sign) {
+                if constant =? 1 {return [e_iconst(1)]}
+                if constant =? 0 {return [zero]}
+                return [e_bin('sub' VI e_iconst(1) e_bin('shl' VI e_bin('and_' VI parity e_iconst(1)) e_iconst(1)))]
+            }
+            let result=exact_extend([e_iconst(1)] count)
+            let base=exact_extend(a count)
+            let maximum=ExactEmitWord(exact_shifts.get(n) ?? 0)
+            let bit:ExactEmitWord=1
+            loop bit <=? maximum {
+                result=exact_select(e_bin('and_' VI exponent e_iconst(bit)) exact_mul(result base count) result count)
+                bit=bit * 2
+                if bit <=? maximum {base=exact_mul(base base count)}
+            }
+            return result
+        }
+        let b=exact_value(ExactEmitWord(nodes.ptr[n].b))
+        if op =? 'plus' or op =? 'minus' {return exact_add(a b count op =? 'minus')}
+        if op =? 'star' {return exact_mul(a b count)}
+        if op =? 'slash' or op =? 'percent' {
+            let [known divisor]=integer_constant(ExactEmitWord(nodes.ptr[n].b))
+            if dewy_at(nodes.ptr[n].pos) and known and divisor >? 0 and ExactEmitWord(divisor) & (ExactEmitWord(divisor) - 1) =? 0 {
+                if op =? 'percent' {return [e_bin('and_' VI a[0] e_iconst(int64(ExactEmitWord(divisor) - 1)))]}
+                let shift:ExactEmitWord=0
+                let d=ExactEmitWord(divisor)
+                loop d >? 1 {
+                    d=d >> 1
+                    shift+=1
+                }
+                return exact_extend(exact_shift_literal(a shift max(count ExactEmitWord(a.length)) true) count)
+            }
+            if known and divisor >? 0 and (positive_bound(ExactEmitWord(nodes.ptr[n].a) true) >=? 0 or a.length =? 1 and (exact_range_flags(ExactEmitWord(nodes.ptr[n].a)) & 1 not=? 0)) {
+                let divide:Op=if op =? 'percent' {'remu'} else {'divu'}
+                return [e_bin(divide VI a[0] b[0])]
+            }
+            let work=max(count max(ExactEmitWord(a.length) ExactEmitWord(b.length)))
+            return exact_extend(exact_div(n a b work op =? 'percent') count)
+        }
+        if op =? 'amp' or op =? 'pipe' or op =? 'caret' {
+            let wa=exact_extend(a count)
+            let wb=exact_extend(b count)
+            let out:array<int64>=[]
+            let bitwise=int_op(op true)
+            loop i in [0..count) {out.push(e_bin(bitwise VI wa[i] wb[i]))}
+            return out
+        }
+        return [exact_compare(op a b)]
+    }
+    if k =? 'coalesce' {
+        let a=ExactEmitWord(nodes.ptr[n].a)
+        let ot=prune(ntype(a))
+        let inner=ExactEmitWord(types.ptr[ot].elem)
+        let pa=place_addr(gen_place(a false) ot)
+        let out=exact_emit_words(count)
+        iff(opt_has(pa inner));
+        let words=[opt_value(pa inner)]
+        let t=exact_representation(inner)
+        if not types.ptr[t].sign and types.ptr[t].bits =? 64 {words.push(e_iconst(0))}
+        exact_emit_move(out words count);
+        els();
+        enter_cond();
+        exact_emit_move(out exact_value(ExactEmitWord(nodes.ptr[n].b)) count);
+        leave_cond();
+        endc();
+        return out
+    }
+    if k =? 'intrinsic' and (nodes.ptr[n].aux as IN) =? IN.fixed_abs {
+        let a=exact_value(kid(n 0))
+        return exact_select(e_bin('lts' VI a[ExactEmitWord(a.length) - 1] e_iconst(0)) exact_neg(a count) a count)
+    }
+    if k =? 'unary' {return exact_neg(exact_value(ExactEmitWord(nodes.ptr[n].a)) count)}
+    if k =? 'conv' or k =? 'exprstmt' {return exact_value(ExactEmitWord(nodes.ptr[n].a))}
+    if k =? 'iflet' or k =? 'match_' {
+        let out=exact_emit_words(count)
+        let bodies:array<int64>=[]
+        if k =? 'iflet' {bodies=[ExactEmitWord(nodes.ptr[n].b) ExactEmitWord(nodes.ptr[n].c)]}
+        else {
+            loop arm in kids(n) {bodies.push(ExactEmitWord(nodes.ptr[arm].b))}
+        }
+        loop body in bodies {exact_join_blocks[body]=out}
+        if k =? 'iflet' {gen_iflet(n ntype(n));}
+        else {gen_match(n true);}
+        loop body in bodies {exact_join_blocks.remove(body);}
+        return out
+    }
+    if k =? 'if_' {
+        let condition=gen_expr(ExactEmitWord(nodes.ptr[n].a)).v
+        let out=exact_emit_words(count)
+        iff(condition);
+        enter_cond();
+        exact_emit_move(out exact_value(ExactEmitWord(nodes.ptr[n].b)) count);
+        leave_cond();
+        els();
+        enter_cond();
+        exact_emit_move(out exact_value(ExactEmitWord(nodes.ptr[n].c)) count);
+        leave_cond();
+        endc();
+        return out
+    }
+    fatal(nodes.ptr[n].pos "exact fixed-width value is not implemented for this control")
+    [e_iconst(0)]
+}
+
+# The native flag-checked operation of a word store.
+exact_emit_checked=(op:Tok):>Op=>if op =? 'plus' {'checked_add'} else if op =? 'minus' {'checked_sub'} else {'checked_mul'}
+exact_emit_plain=(op:Tok):>Op=>if op =? 'plus' {'add'} else if op =? 'minus' {'sub'} else {'mul'}
+
+exact_gen_store=(n:ExactEmitWord):>Val=>$unsafe {
+    if exact_loop_fast {return gen_expr(ExactEmitWord(nodes.ptr[n].a))}
+    if exact_map_active and exact_map_stores.has(n) {
+        exact_loop_fast=true
+        let value=gen_expr(ExactEmitWord(nodes.ptr[n].a))
+        exact_loop_fast=false
+        return value
+    }
+    let t=exact_representation(ntype(n))
+    let source=ExactEmitWord(nodes.ptr[n].a)
+    let proven=exact_proved(n)
+    if not proven {
+        let bound=positive_bound(source true)
+        proven=bound >=? 0 and sa_fits(bound t)
+    }
+    if not proven and t =? T_INT and eg_fits(source) {proven=true}
+    let bits=types.ptr[t].bits
+    let signed=types.ptr[t].sign
+    let binary=nodes.ptr[source].kind =? 'binary'
+    if proven and bits <=? 64 {return V(exact_low_word(source) false)}
+    if not proven and not target_wasm and not target_arm64 and bits =? 32 and binary {
+        let op=exact_emit_op(source)
+        let a=ExactEmitWord(nodes.ptr[source].a)
+        let b=ExactEmitWord(nodes.ptr[source].b)
+        let aw=ExactEmitWord(exact_type_width(a))
+        let bw=ExactEmitWord(exact_type_width(b))
+        let fits=aw >? 0 and bw >? 0 and (if signed {aw >> 1 <=? 32 and bw >> 1 <=? 32} else {aw & bw & 1 not=? 0 and aw >> 1 <=? 33 and bw >> 1 <=? 33})
+        if fits and (op =? 'plus' or op =? 'minus' or op =? 'star') {
+            let av=exact_low_word(a)
+            let bv=exact_low_word(b)
+            let result=vreg(VI)
+            emit(exact_emit_checked(op) VI result av bv 32 | int64(not signed) rt("__int_overflow"));
+            return V(result false)
+        }
+    }
+    # Negation has the same single-word overflow obligation as 0 - operand.
+    # Keep a wide intermediate when the operand itself can exceed one word.
+    if bits =? 64 and signed and nodes.ptr[source].kind =? 'unary' and exact_emit_op(source) =? 'minus' {
+        let operand=ExactEmitWord(nodes.ptr[source].a)
+        if exact_bits(operand) <=? 64 {
+            let value=exact_low_word(operand)
+            if proven {return V(e_un('neg' VI value) false)}
+            let result=vreg(VI)
+            emit('checked_sub' VI result e_iconst(0) value 0 rt("__int_overflow"));
+            return V(result false)
+        }
+    }
+    # At an immediate signed-word store, native overflow flags implement the
+    # narrowing directly. Intermediates that escape this store still widen.
+    if bits =? 64 and signed and binary {
+        let op=exact_emit_op(source)
+        let a=ExactEmitWord(nodes.ptr[source].a)
+        let b=ExactEmitWord(nodes.ptr[source].b)
+        if (op =? 'plus' or op =? 'minus' or op =? 'star') and exact_bits(a) <=? 64 and exact_bits(b) <=? 64 {
+            let av=exact_low_word(a)
+            let bv=exact_low_word(b)
+            if proven {return V(e_bin(exact_emit_plain(op) VI av bv) false)}
+            let result=vreg(VI)
+            emit(exact_emit_checked(op) VI result av bv 0 rt("__int_overflow"));
+            return V(result false)
+        }
+    }
+    if bits =? 64 and not signed and binary {
+        let op=exact_emit_op(source)
+        let a=ExactEmitWord(nodes.ptr[source].a)
+        let b=ExactEmitWord(nodes.ptr[source].b)
+        let aw=ExactEmitWord(exact_type_width(a))
+        let bw=ExactEmitWord(exact_type_width(b))
+        if (op =? 'plus' or op =? 'minus' or op =? 'star') and aw >? 0 and bw >? 0 and aw & bw & 1 not=? 0 and aw >> 1 <=? 65 and bw >> 1 <=? 65 {
+            let av=exact_low_word(a)
+            let bv=exact_low_word(b)
+            if proven {return V(e_bin(exact_emit_plain(op) VI av bv) false)}
+            let result=vreg(VI)
+            emit(exact_emit_checked(op) VI result av bv 1 rt("__int_overflow"));
+            return V(result false)
+        }
+    }
+    if not proven and not target_wasm and not target_arm64 and bits =? 64 and signed {
+        let offset=exact_offset_store(n)
+        if offset >=? 0 {return V(offset false)}
+    }
+    if not proven and bits =? 64 and signed {
+        let affine=exact_affine_store(n)
+        if affine >=? 0 {return V(affine false)}
+        let fast=exact_chain_store(n)
+        if fast >=? 0 {return V(fast false)}
+    }
+    let words=exact_value(source)
+    if not proven {
+        let normalized=norm(words[0] t)
+        let bad=e_bin('ne' VI normalized words[0])
+        let sign=if signed {e_bin('shrs' VI normalized e_iconst(63))} else {e_iconst(0)}
+        loop i in [1..words.length) {bad=e_bin('or_' VI bad e_bin('ne' VI words[i] sign))}
+        # A signed single-word result stored unsigned must be nonnegative.
+        if not signed and words.length =? 1 {bad=e_bin('or_' VI bad e_bin('lts' VI words[0] e_iconst(0)))}
+        math_int_guard(bad);
+    }
+    V(words[0] false)
+}
+
+exact_gen_policy=(n:ExactEmitWord):>Val=>$unsafe {
+    let a=exact_value(ExactEmitWord(nodes.ptr[n].a))
+    let t=exact_representation(ntype(n))
+    if nodes.ptr[n].aux =? int32(int64(CV.wrap_int)) {return V(norm(a[0] t) false)}
+    let bits=ExactEmitWord(types.ptr[t].bits)
+    let hi:ExactEmitWord=if bits =? 64 {-1} else {(ExactEmitWord(1) << (bits & 63)) - 1}
+    let lo:ExactEmitWord=0
+    if types.ptr[t].sign {
+        hi=ExactEmitWord(uint64<overflow='wrap'>(hi) >> 1)
+        lo=-hi - 1
+    }
+    let high=if not types.ptr[t].sign and bits =? 64 {[e_iconst(hi) e_iconst(0)]} else {[e_iconst(hi)]}
+    let out=exact_select(exact_compare('lt' a [e_iconst(lo)]) [e_iconst(lo)] a max(ExactEmitWord(a.length) ExactEmitWord(high.length)))
+    out=exact_select(exact_compare('gt' a high) high out out.length)
+    V(out[0] false)
+}
+
+# A deliberate conversion to mathematical int is an allocation boundary;
+# evaluating the fixed-width source above it never allocated a bigint.
+exact_gen_math=(n:ExactEmitWord):>Val=>{
+    if math_proven_word(n) {return math_pack_word(n exact_low_word(n))}
+    exact_pack_words(n exact_value(n))
+}
+
+exact_pack_words=(n:ExactEmitWord words:array<int64>):>Val=>$unsafe {
+    if words.length =? 1 {return math_pack_word(n words[0])}
+    # Most statically wide expressions still produce an immediate at runtime.
+    # Test its signed payload and extension words before constructing a bigint.
+    let tagged=e_bin('shl' VI words[0] e_iconst(1))
+    let small=e_bin('eq' VI e_bin('shrs' VI tagged e_iconst(1)) words[0])
+    let sign=e_bin('shrs' VI words[0] e_iconst(63))
+    loop i in [1..words.length) {small=e_bin('and_' VI small e_bin('eq' VI words[i] sign))}
+    let result=vreg(VI)
+    iff(small);
+    e_mov(result tagged);
+    els();
+    let old=ir_cold
+    ir_cold=true
+    # This is a representation boundary, not a chain of bigint arithmetic.
+    # Copy the finite two's-complement words once; the runtime forms limbs in
+    # O(words) without pulling in shifts and every generic arithmetic helper.
+    let buffer=e_slot(new_slot(int64(ExactEmitWord(words.length) * 8) 8))
+    loop i in [0..words.length) {e_store(buffer int64(ExactEmitWord(i) * 8) words[i] 8);}
+    e_mov(result e_call(rt("__mi_words") [buffer e_iconst(words.length)] VI));
+    ir_cold=old
+    endc();
+    V(result true)
+}
+
+# Round a static multiword integer directly to the destination float precision.
+# Reduction retains 63 bits plus a sticky bit (round-to-odd), so the hardware
+# conversion performs the only rounding. No mathematical-int allocation.
+exact_gen_float=(n:ExactEmitWord to:ExactEmitWord):>Val=>$unsafe {
+    # Rounding a signed word commutes with positive power-of-two scaling.
+    # Scale is finite in either format; zero retains its positive sign. This
+    # avoids materializing a double word and calling its rounding helper.
+    if nodes.ptr[n].kind =? 'binary' and exact_emit_op(n) =? 'star' {
+        let a=ExactEmitWord(nodes.ptr[n].a)
+        let b=ExactEmitWord(nodes.ptr[n].b)
+        let [known scale]=integer_constant(b)
+        if known and scale >? 0 and ExactEmitWord(scale) & (ExactEmitWord(scale) - 1) =? 0 and exact_lower_bits(a) <=? 64 {
+            let ft=vt_of(to)
+            return V(e_bin('fmul' ft e_un('i2f' ft exact_low_word(a)) e_fconst(float64(scale) ft)) false)
+        }
+    }
+    let source=exact_value(n)
+    if source.length =? 1 {return V(e_un('i2f' vt_of(to) source[0]) false)}
+    if source.length =? 2 {
+        let helper=if to =? T_F32 {"__exact_i128_f32"} else {"__exact_i128_f64"}
+        return V(e_call(rt(helper) source vt_of(to)) false)
+    }
+    let size=ExactEmitWord(source.length)
+    let negative=e_bin('lts' VI source[size - 1] e_iconst(0))
+    let magnitude=exact_select(negative exact_neg(source size) source size)
+    let words:array<int64>=[]
+    loop word in magnitude {
+        let saved=vreg(VI)
+        e_mov(saved word);
+        words.push(saved)
+    }
+    let shift=vreg(VI)
+    e_mov(shift e_iconst(0));
+    let sticky=vreg(VI)
+    e_mov(sticky e_iconst(0));
+    let step:ExactEmitWord=1
+    loop step <? size * 64 {step=step * 2}
+    loop step >? 0 {
+        let cut=62 + step
+        if cut <? size * 64 {
+            let high=e_bin('shru' VI words[cut >> 6] e_iconst(cut & 63))
+            loop i in [(cut >> 6) + 1..size) {high=e_bin('or_' VI high words[i])}
+            iff(e_bin('ne' VI high e_iconst(0)));
+            let lost=e_iconst(0)
+            loop i in [0..step >> 6) {lost=e_bin('or_' VI lost words[i])}
+            if step & 63 not=? 0 {lost=e_bin('or_' VI lost e_bin('and_' VI words[step >> 6] e_iconst((ExactEmitWord(1) << (step & 63)) - 1)))}
+            e_mov(sticky e_bin('or_' VI sticky lost));
+            let next:array<int64>=[]
+            loop i in [0..size) {
+                let at=i + (step >> 6)
+                let word=if at <? size {words[at]} else {e_iconst(0)}
+                if step & 63 not=? 0 {
+                    word=e_bin('shru' VI word e_iconst(step & 63))
+                    if at + 1 <? size {word=e_bin('or_' VI word e_bin('shl' VI words[at + 1] e_iconst(64 - (step & 63))))}
+                }
+                let saved=vreg(VI)
+                e_mov(saved word);
+                next.push(saved)
+            }
+            loop i in [0..size) {e_mov(words[i] next[i]);}
+            e_mov(shift e_addi(shift step));
+            endc();
+        }
+        step=step >> 1
+    }
+    let significand=e_bin('or_' VI words[0] e_bin('ne' VI sticky e_iconst(0)))
+    let precision=vt_of(to)
+    let bias:ExactEmitWord=if to =? T_F32 {127} else {1023}
+    let fraction:ExactEmitWord=if to =? T_F32 {23} else {52}
+    let exponent=vreg(VI)
+    e_mov(exponent e_addi(shift bias));
+    iff(e_bin('gts' VI exponent e_iconst(2 * bias + 1)));
+    e_mov(exponent e_iconst(2 * bias + 1));
+    endc();
+    let scale=e_un('bits2f' precision e_bin('shl' VI exponent e_iconst(fraction)))
+    let result=vreg(precision)
+    e_mov(result e_bin('fmul' precision e_un('u2f' precision significand) scale));
+    iff(negative);
+    e_mov(result e_un('fneg' precision result));
+    endc();
+    V(result false)
+}
