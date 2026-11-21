@@ -1,0 +1,31 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_expr.dewy'
+use 'expr.jo'
+use 'ffi_checks.dewy'
+use 'node_store.dewy'
+use 'util.jo'
+
+expr_module = (m: int, name: int) -> int: module_lookup(m, name)
+
+index_deref = (pos: int, bt: int):
+    ffi_deref(pos, bt)
+    return
+
+# (Dewy's `xs.length` is `xs.len()`; `xs.ptr`, where an array's elements are, is
+# `xs.data()`: a ptr<T> for C (provisional spelling))
+member_call = (n: int, data: bool, expected: int) -> int:
+    method = mk(.field, nodes[n].pos)
+    nodes[method].a = nodes[n].a
+    if data: nodes[method].name = i32(intern("data"))
+    else: nodes[method].name = i32(intern("len"))
+    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
+    check_expr(n, expected)
+
+member_receiver = (n: int, expected: int) -> int:
+    saved_receiver = type_receiver_at
+    type_receiver_at = int(nodes[n].a)
+    bt = check_expr(int(nodes[n].a), receiver_literal_hint(int(nodes[n].a), int(nodes[n].name), 0, expected, nodes[n].pos))
+    type_receiver_at = saved_receiver
+    nodes[n].a = i32(last_checked)
+    bt

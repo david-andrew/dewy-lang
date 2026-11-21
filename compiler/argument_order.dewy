@@ -1,0 +1,60 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED add_flag mk nodes set_list)
+from p"check.jo" import (subst)
+from p"checker_call_cost.dewy" import (Cand)
+from p"expr.jo" import (ntype)
+from p"call_argument_checks.dewy" import (unnamed)
+from p"literal_context.dewy" import (is_lit)
+from p"select_checks.dewy" import (select_call select_written_priority)
+from p"types.jo" import (T_INT prune type_eq)
+from p"util.jo" import (files pos_file)
+
+ArgOrderWord:type=int64<overflow='wrap'>
+
+# how many of a candidate's arguments (not literals) have exactly their parameter's type
+exact_args=(cd:Cand):>int64=>$unsafe {
+    let count:ArgOrderWord=0
+    loop i in 0.. and a in cd.args {
+        if i >=? cd.sig.params.length {break}
+        if a =? 0 or is_lit(a) or nodes.ptr[a].type =? 0 {continue}
+        if type_eq(prune(ntype(a)) prune(subst(cd.sig.params[i] cd.binds))) {count += 1}
+    }
+    count
+}
+
+# Keep parameter slots canonical for types/ABI, but evaluate explicitly supplied
+# Dewy arguments in source order, then omitted defaults in parameter order.
+# c holds a list of integer-literal slot numbers only when reordering is needed.
+# checker_call_queries.dewy's save_call_order leaves the host the calls whose arguments
+# are not written in parameter order.
+call_order_rest=(n:int64 given:array<int64> final:array<int64>):>void=>$unsafe {
+    if not files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {return}
+    let ordered=given.length <=? final.length
+    if ordered {
+        loop i in 0.. and arg in given {
+            if unnamed(arg) not=? final[i] {ordered=false; break}
+        }
+    }
+    if ordered {return}
+    let order:array<int64>=[]
+    loop a in given {
+        let value=unnamed(a)
+        loop i in 0.. and f in final {if f =? value {order.push(i)}}
+    }
+    loop i in [0..final.length) {if not order.contains(i) {order.push(i)}}
+    let changed=false
+    loop i in 0.. and slot in order {if i not=? slot {changed=true}}
+    if not changed {return}
+    let entries:array<int64>=[]
+    loop slot in order {
+        let e=mk('int_lit' nodes.ptr[n].pos)
+        nodes.ptr[e].ival=slot
+        nodes.ptr[e].type=int32(T_INT)
+        add_flag(e NF_CHECKED)
+        entries.push(e)
+    }
+    let metadata=mk('array' nodes.ptr[n].pos)
+    set_list(metadata entries)
+    nodes.ptr[n].c=int32(metadata)
+    if select_call(n) {select_written_priority(n)}
+}

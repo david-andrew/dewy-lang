@@ -2,6 +2,8 @@ use 'ast.jo'
 use 'checker_tokens.dewy'
 use 'checks_thin_expr.dewy'
 use 'expr.jo'
+use 'checker_expr.dewy'
+use 'set_type_queries.dewy'
 use 'record_construction.dewy'
 use 'refine.jo'
 use 'refine_metadata.dewy'
@@ -82,3 +84,20 @@ union_text_target = (n: int, ms: int[]) -> int:
             continue
         if can_coerce(n, T_STR, m): return i
     looked_up
+
+is_lit = (n: int) -> bool: has_flag(n, NF_LITERAL)
+
+# a literal behind the conversions checking gave it
+kid_lit = (e0: int) -> int:
+    e = e0
+    loop nodes[e].kind == .conv: e = int(nodes[e].a)
+    e
+
+finalize_literal = (n: int) -> int:
+    if is_lit(n): coerce(n, lit_default(n))
+    ntype(n)
+
+check_to = (n: int, target: int) -> int:
+    check_expr(n, target)
+    coerce(n, target)
+    target

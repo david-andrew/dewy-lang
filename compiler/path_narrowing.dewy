@@ -1,7 +1,8 @@
 $runtime_checks
+from p"checker_expr.dewy" import (lookup)
 from p"ast.jo" import (NF_CHECKED add_flag mk nodes)
-from p"check.jo" import (LF_ALIAS locals new_local)
-from p"expr.jo" import (copy_path narrow_expr narrow_local narrow_root_local ntype path_key path_narrows path_rooted_g path_rooted_l)
+from p"check.jo" import (LF_ALIAS LF_UNNARROWED ctxs cx locals new_local syms)
+from p"expr.jo" import (CV mk_ident_local narrow_expr narrow_root_local ntype path_key path_narrows path_rooted_g path_rooted_l)
 from p"types.jo" import (is_union prune types union_members)
 from p"util.jo" import (intern)
 
@@ -94,4 +95,79 @@ narrow_some=(tests:array<int64>):>void=>{
         count=PathNarrowWord(count) + 1
         narrow_expr(copy_path(a0) sel nodes[a0].pos path_name(key))
     }
+}
+
+const PATH_NARROW_GLOBAL:int32=2 # SK.global in the frozen node ABI.
+
+# a checked copy of a field path
+copy_path=(n:PathNarrowWord):>PathNarrowWord=>$unsafe {
+    let copy=nodes.length
+    nodes.push(nodes[n])
+    if nodes.ptr[n].kind =? 'field' {
+        let child=copy_path(PathNarrowWord(nodes.ptr[n].a))
+        nodes.ptr[copy].a=int32(child)
+    }
+    copy
+}
+
+# Declaration aliases preserve path identity. Narrowing aliases retain their
+# own roots so forgetting a parent can also retire paths below its payload.
+# O(alias/path depth), with no allocation for an unrelated local.
+path_decl_alias=(l:PathNarrowWord):>PathNarrowWord=>$unsafe {
+    if PathNarrowWord(locals.ptr[l].flags) & LF_ALIAS =? 0 {return 0}
+    let alias=PathNarrowWord(locals.ptr[l].alias)
+    if alias =? 0 {return 0}
+    let root=alias
+    loop nodes.ptr[root].kind =? 'field' and nodes.ptr[root].a not=? 0 {root=PathNarrowWord(nodes.ptr[root].a)}
+    if nodes.ptr[root].kind =? 'ident' {return alias}
+    0
+}
+
+# might the field path (or name) n have a narrowed scope entry: its root is marked
+path_rooted=(n0:PathNarrowWord):>bool=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'field' and nodes.ptr[n].a not=? 0 {n=PathNarrowWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind not=? 'ident' {return false}
+    let id=PathNarrowWord(nodes.ptr[n].sym)
+    if nodes.ptr[n].aux =? PATH_NARROW_LOCAL {
+        let a=path_decl_alias(id)
+        if a not=? 0 {return path_rooted(a)}
+        return id <? path_rooted_l.length and path_rooted_l.ptr[id]
+    }
+    if nodes.ptr[n].aux =? PATH_NARROW_GLOBAL {return id <? path_rooted_g.length and path_rooted_g.ptr[id]}
+    false
+}
+
+# the alias local a field path (or global) is narrowed to here, or -1
+path_alias=(n:PathNarrowWord):>PathNarrowWord=>$unsafe {
+    if not path_rooted(n) {return -1}
+    let key=path_key(n)
+    if key.length =? 0 {return -1}
+    let s=lookup(intern(key))
+    if s =? 0 or syms.ptr[s].kind not=? 'local' {return -1}
+    let alias=PathNarrowWord(syms.ptr[s].ref)
+    if locals.ptr[alias].owner not=? ctxs.ptr[cx].inst or PathNarrowWord(locals.ptr[alias].flags) & LF_UNNARROWED not=? 0 {return -1}
+    alias
+}
+
+# the `x is M` tests (of members) an or-chain is made of; false: it has something else too
+or_tests=(c:PathNarrowWord @out:array<int64>):>bool=>$unsafe {
+    let k=nodes.ptr[c].kind
+    if k =? 'or_' {return or_tests(PathNarrowWord(nodes.ptr[c].a) @out) and or_tests(PathNarrowWord(nodes.ptr[c].b) @out)}
+    if k =? 'istype' and nodes.ptr[c].aux >=? 0 {
+        out.push(int64(c))
+        return true
+    }
+    false
+}
+
+# from here on, union variable l is known to hold one of members ms: its name stands for that
+# member (one) or the smaller union of them (converted from the variable's value when used)
+narrow_local=(l:PathNarrowWord ms:array<int64> pos:PathNarrowWord):>void=>$unsafe {
+    let root=mk_ident_local(l pos)
+    if PathNarrowWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 {
+        let a=PathNarrowWord(locals.ptr[l].alias)
+        if nodes.ptr[a].kind =? 'conv' and nodes.ptr[a].aux =? int32(int64(CV.union_)) {root=copy_path(PathNarrowWord(nodes.ptr[a].a))}
+    }
+    narrow_expr(root ms pos PathNarrowWord(locals.ptr[l].name))
 }

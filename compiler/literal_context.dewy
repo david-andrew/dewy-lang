@@ -1,8 +1,10 @@
 $runtime_checks
-from p"ast.jo" import (NF_U64 has_flag kid kids nkids nodes)
+from p"checker_expr.dewy" import (check_expr)
+from p"ast.jo" import (NF_LITERAL NF_U64 has_flag kid kids nkids nodes)
 from p"checker_tokens.dewy" import (Tok)
 from p"checks_thin_expr.dewy" import (dewy_set_literal int_intervals is_map_type)
-from p"expr.jo" import (can_coerce is_dewy_set_type kid_lit)
+from p"expr.jo" import (can_coerce coerce lit_default ntype)
+from p"set_type_queries.dewy" import (is_dewy_set_type)
 from p"record_construction.dewy" import (dewy_record_target)
 from p"refine.jo" import (str_sets)
 from p"refine_metadata.dewy" import (str_set_of)
@@ -103,4 +105,24 @@ union_text_target=(n:LiteralContextWord ms:array<int64>):>LiteralContextWord=>{
         if can_coerce(n T_STR m) {return i}
     }
     looked_up
+}
+
+is_lit=(n:int64):>bool=>$unsafe (LiteralContextWord(nodes.ptr[n].flags) & NF_LITERAL) not=? 0
+
+# a literal behind the conversions checking gave it
+kid_lit=(e0:LiteralContextWord):>LiteralContextWord=>$unsafe {
+    let e=e0
+    loop nodes.ptr[e].kind =? 'conv' {e=LiteralContextWord(nodes.ptr[e].a)}
+    e
+}
+
+finalize_literal=(n:int64):>int64=>{
+    if is_lit(n) {coerce(n lit_default(n));}
+    ntype(n)
+}
+
+check_to=(n:int64 target:int64):>int64=>{
+    check_expr(n target);
+    coerce(n target);
+    target
 }

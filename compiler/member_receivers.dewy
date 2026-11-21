@@ -1,0 +1,35 @@
+$runtime_checks
+from p"ast.jo" import (mk nodes)
+from p"check.jo" import (module_lookup)
+from p"checker_expr.dewy" import (check_expr)
+from p"expr.jo" import (last_checked receiver_literal_hint type_receiver_at)
+from p"ffi_checks.dewy" import (ffi_deref)
+from p"node_store.dewy" import (Node)
+from p"util.jo" import (intern)
+
+MemberReceiverWord:type=int64<overflow='wrap'>
+
+expr_module=(m:int64 name:int64):>int64=>module_lookup(m name)
+
+index_deref=(pos:int64 bt:int64):>void=>{ffi_deref(pos bt)}
+
+# (Dewy's `xs.length` is `xs.len()`; `xs.ptr`, where an array's elements are, is
+# `xs.data()`: a ptr<T> for C (provisional spelling))
+member_call=(n:MemberReceiverWord data:bool expected:MemberReceiverWord):>int64=>$unsafe {
+    let method=mk('field' nodes.ptr[n].pos)
+    nodes.ptr[method].a=nodes.ptr[n].a
+    nodes.ptr[method].name=int32(intern(if data {"data"} else {"len"}))
+    nodes[n]=Node(kind='call' pos=nodes.ptr[n].pos a=int32(method))
+    check_expr(n expected)
+}
+
+member_receiver=(n:MemberReceiverWord expected:MemberReceiverWord):>int64=>$unsafe {
+    let at=@type_receiver_at
+    let saved=at
+    let receiver=MemberReceiverWord(nodes.ptr[n].a)
+    at=receiver
+    let bt=check_expr(receiver receiver_literal_hint(receiver MemberReceiverWord(nodes.ptr[n].name) 0 expected nodes.ptr[n].pos))
+    at=saved
+    nodes.ptr[n].a=int32(last_checked)
+    bt
+}

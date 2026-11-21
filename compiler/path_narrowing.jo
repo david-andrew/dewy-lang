@@ -2,6 +2,7 @@ use 'ast.jo'
 use 'check.jo'
 use 'checker_state.dewy'
 use 'expr.jo'
+use 'checker_expr.dewy'
 use 'types.jo'
 use 'util.jo'
 
@@ -76,3 +77,67 @@ narrow_some = (tests: int[]):
     else:
         path_narrows += 1
         narrow_expr(copy_path(a0), sel, nodes[a0].pos, path_name(key))
+
+# a checked copy of a field path
+copy_path = (n: int) -> int:
+    c = nodes.len()
+    nodes.push(nodes[n])
+    if nodes[n].kind == .field: nodes[c].a = i32(copy_path(int(nodes[n].a)))
+    c
+
+# Declaration aliases preserve path identity. Narrowing aliases retain their
+# own roots so forgetting a parent can also retire paths below its payload.
+# O(alias/path depth), with no allocation for an unrelated local.
+path_decl_alias = (l: int) -> int:
+    if int(locals[l].flags) & LF_ALIAS == 0: return 0
+    a = int(locals[l].alias)
+    if a == 0: return 0
+    # Path keys represent declaration roots and fields, not array selectors.
+    # Keep an element alias's own stable root for narrowing inside its value.
+    root = a
+    loop nodes[root].kind == .field and nodes[root].a != 0: root = int(nodes[root].a)
+    if nodes[root].kind == .ident: return a
+    0
+
+# might the field path (or name) n have a narrowed scope entry: its root is marked
+path_rooted = (n0: int) -> bool:
+    n = n0
+    loop nodes[n].kind == .field and nodes[n].a != 0: n = int(nodes[n].a)
+    if nodes[n].kind != .ident: return false
+    id = int(nodes[n].sym)
+    if nodes[n].aux == i32(int(SK.local)):
+        a = path_decl_alias(id)
+        if a != 0: return path_rooted(a)
+        return id < path_rooted_l.len() and path_rooted_l[id]
+    if nodes[n].aux == i32(int(SK.global)): return id < path_rooted_g.len() and path_rooted_g[id]
+    false
+
+# the alias local a field path (or global) is narrowed to here, or -1
+path_alias = (n: int) -> int:
+    if not path_rooted(n): return -1
+    key = path_key(n)
+    if len(key) == 0: return -1
+    s = lookup(intern(key))
+    if s == 0 or syms[s].kind != .local: return -1
+    al = int(syms[s].ref)
+    if int(locals[al].owner) != int(ctxs[cx].inst) or int(locals[al].flags) & LF_UNNARROWED != 0: return -1
+    al
+
+# the `x is M` tests (of members) an or-chain is made of; false: it has something else too
+or_tests = (c: int, out: mut int[]) -> bool:
+    k = nodes[c].kind
+    if k == .or_: return or_tests(int(nodes[c].a), out) and or_tests(int(nodes[c].b), out)
+    if k == .istype and nodes[c].aux >= 0:
+        out.push(c)
+        return true
+    false
+
+# from here on, union variable l is known to hold one of members ms: its name stands for that
+# member (one) or the smaller union of them (converted from the variable's value when used)
+narrow_local = (l: int, ms: int[], pos: int):
+    # (a variable already narrowed to some of its members: narrow the variable itself)
+    root = mk_ident_local(l, pos)
+    if int(locals[l].flags) & LF_ALIAS != 0:
+        al = int(locals[l].alias)
+        if nodes[al].kind == .conv and nodes[al].aux == i32(int(CV.union_)): root = copy_path(int(nodes[al].a))
+    narrow_expr(root, ms, pos, int(locals[l].name))

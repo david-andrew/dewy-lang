@@ -4,6 +4,9 @@ use 'checker_call_queries.dewy'
 use 'checker_expr.dewy'
 use 'checks_thin.dewy'
 use 'expr.jo'
+use 'call_argument_checks.dewy'
+use 'call_lookup_context.dewy'
+use 'literal_context.dewy'
 use 'rational_types.dewy'
 use 'types.jo'
 use 'util.jo'
@@ -62,3 +65,19 @@ exact_members_for = (decls: int[], name: int, args: int[]) -> int[]:
             collect_in(rm, name, 0, &out)
             return out
     decls
+
+exact_family_name = (name: int) -> bool:
+    if exact_named.len() == 0:
+        ids = [ci(28, "abs"), ci(44, "min"), ci(45, "max"), ci(46, "sign")]
+        top = 0
+        loop id in ids:
+            if id > top: top = id
+        exact_named = fill(false, top + 1)
+        loop id in ids: exact_named[id] = true
+    name < exact_named.len() and exact_named[name]
+
+exact_families_changed = ():
+    ml_bump_name(ci(28, "abs"))
+    ml_bump_name(ci(44, "min"))
+    ml_bump_name(ci(45, "max"))
+    ml_bump_name(ci(46, "sign"))

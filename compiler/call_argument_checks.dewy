@@ -1,0 +1,49 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_COMPREHENSION add_flag has_flag kid nkids nodes)
+from p"check.jo" import (dewy_at)
+from p"checker_expr.dewy" import (check_expr)
+from p"collection_checks.dewy" import (comprehension_self_typed)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (coerce ntype)
+from p"types.jo" import (prune)
+
+CallArgWord:type=int64<overflow='wrap'>
+
+unnamed=(a:int64):>int64=>$unsafe {
+    if nodes.ptr[a].kind =? 'namedarg' {return int64(nodes.ptr[a].a)}
+    a
+}
+
+# Check unchecked comprehension arguments whose elements need no context, so
+# overload selection sees their own element type. O(argument syntax).
+comprehension_settle=(args:array<int64>):>bool=>$unsafe {
+    let settled=false
+    loop a0 in args {
+        let a=unnamed(a0)
+        if nodes.ptr[a].kind not=? 'block' or not has_flag(a NF_COMPREHENSION) or has_flag(a NF_CHECKED) or nkids(a) not=? 3 {continue}
+        if not dewy_at(nodes.ptr[a].pos) or not comprehension_self_typed(kid(a 1)) {continue}
+        check_expr(a 0);
+        add_flag(a NF_CHECKED)
+        settled=true
+    }
+    settled
+}
+
+# ---------------- intrinsics ----------------
+arg_type=(args:array<int64> i:CallArgWord expected:CallArgWord):>int64=>$unsafe {
+    let a=args[i]
+    if nodes.ptr[a].kind =? 'namedarg' {fatal(nodes.ptr[a].pos "named arguments are not supported here")}
+    if not has_flag(a NF_CHECKED) or nodes.ptr[a].type =? 0 {
+        check_expr(a expected);
+        add_flag(a NF_CHECKED)
+    }
+    if expected not=? 0 {coerce(a expected);}
+    prune(ntype(a))
+}
+
+nargs_check=(n:int64 nargs:int64 lo:int64 hi:int64 name:string):>void=>$unsafe {
+    if nargs <? lo or nargs >? hi {
+        if lo =? hi {fatal(nodes.ptr[n].pos "{name} expects {lo} argument(s), got {nargs}")}
+        fatal(nodes.ptr[n].pos "{name} expects {lo} to {hi} arguments, got {nargs}")
+    }
+}

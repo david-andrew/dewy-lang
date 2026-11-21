@@ -1,0 +1,37 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"check.jo" import (lib_dir)
+from p"checks_thin_expr.dewy" import (is_map_type)
+from p"expr.jo" import (bare_generic_ok)
+from p"refine_metadata.dewy" import (str_set_of)
+from p"types.jo" import (prune struct_targ structs types)
+from p"util.jo" import (files pos_file)
+
+SetQueryWord:type=int64<overflow='wrap'>
+
+bare_generic_set=(on:bool):>bool=>{
+    let flag=@bare_generic_ok
+    let was=flag
+    flag=on
+    was
+}
+
+is_dewy_set_type=(t:int64):>bool=>$unsafe {
+    let p=prune(t)
+    if types.ptr[p].kind not=? 'struct_' {return false}
+    let st=SetQueryWord(types.ptr[p].st)
+    if structs.ptr[st].name not=? "Set" {return false}
+    let d=SetQueryWord(structs.ptr[st].decl)
+    d not=? 0 and files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/dewy_sets.jo"
+}
+
+# the string-literal union a container's members or keys are (0 if not one)
+membership_str_set_of=(t0:SetQueryWord):>SetQueryWord=>$unsafe {
+    let t=prune(t0)
+    let k=types.ptr[t].kind
+    let key:SetQueryWord=0
+    if k =? 'array' or k =? 'fixed' {key=SetQueryWord(types.ptr[t].elem)}
+    else if is_map_type(t) or is_dewy_set_type(t) {key=struct_targ(SetQueryWord(types.ptr[t].st) 0)}
+    else {return 0}
+    if str_set_of(key) not=? 0 {prune(key)} else {0}
+}

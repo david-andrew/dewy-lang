@@ -1,4 +1,6 @@
 use 'exact_preparation.dewy'
+use 'call_argument_checks.dewy'
+use 'set_type_queries.dewy'
 use 'union_conversion_nodes.dewy'
 use 'numeric_library_types.dewy'
 use 'integer_conversions.dewy'
@@ -300,7 +302,6 @@ register_intrinsics = ():
     float_key_names = [intern("__dewy_make_set"), intern("set"), intern("k"), intern("value")]
     habit_names = [intern("line"), intern("text"), intern("clear"), intern("fill"), intern("push"), intern("pop"), intern("map"), intern("atan"), intern("random")]
 
-is_lit = (n: int) -> bool: has_flag(n, NF_LITERAL)
 lit_default = (n: int) -> int:
     k = nodes[n].kind
     if k == .float_lit and nodes[n].sval != 0: return decimal_type(nodes[n].pos)
@@ -870,15 +871,6 @@ coerce = (n: int, target: int) -> int:
     fatal(nodes[n].pos, "type mismatch: expected {dt_named(to)}, found {dt_named(from)}{why}{coerce_hint}")
     n
 
-check_to = (n: int, target: int) -> int:
-    check_expr(n, target)
-    coerce(n, target)
-    target
-
-finalize_literal = (n: int) -> int:
-    if is_lit(n): coerce(n, lit_default(n))
-    ntype(n)
-
 num_join = (a0: int, b0: int) -> int:
     a = prune(a0)
     b = prune(b0)
@@ -1189,19 +1181,6 @@ struct Rejection:
     ptx: int
     cd: Cand
 
-unnamed = (a: int) -> int:
-    if nodes[a].kind == .namedarg: return int(nodes[a].a)
-    a
-
-# how many of a candidate's arguments (not literals) have exactly their parameter's type
-exact_args = (cd: Cand) -> int:
-    k = 0
-    loop i in 0.. and a in cd.args:
-        if i >= cd.sig.params.len(): break
-        if a == 0 or is_lit(a) or nodes[a].type == 0: continue
-        if type_eq(prune(ntype(a)), prune(subst(cd.sig.params[i], cd.binds))): k += 1
-    k
-
 literal_typed_names: {int: bool} = {}
 literal_typed_elements: {int: bool} = {}
 
@@ -1284,46 +1263,6 @@ rest_inst_binds = (decl: int, args: int[], params: int[], binds: int[]) -> int[]
         return binds + [mk_fixed(telem(t), k)]
     binds
 
-# Keep parameter slots canonical for types/ABI, but evaluate explicitly supplied
-# Dewy arguments in source order, then omitted defaults in parameter order.
-# c holds a list of integer-literal slot numbers only when reordering is needed.
-# checker_call_queries.dewy's save_call_order leaves the host the calls whose arguments
-# are not written in parameter order.
-call_order_rest = (n: int, given: int[], final: int[]):
-    if not files[pos_file(nodes[n].pos)].is_dewy: return
-    # Most calls already have their written arguments in parameter order.
-    # Omitted trailing defaults follow them without any ordering metadata.
-    ordered = given.len() <= final.len()
-    if ordered:
-        loop i in [0..given.len()):
-            if unnamed(given[i]) != final[i]:
-                ordered = false
-                break
-    if ordered: return
-    order: int[]
-    loop a in given:
-        value = unnamed(a)
-        loop i in 0.. and f in final:
-            if f == value: order.push(i)
-    loop i in [0..final.len()):
-        if not order.contains(i): order.push(i)
-    changed = false
-    loop i in 0.. and slot in order:
-        if i != slot: changed = true
-    if not changed: return
-    entries: int[]
-    loop slot in order:
-        e = mk(.int_lit, nodes[n].pos)
-        nodes[e].ival = slot
-        nodes[e].type = i32(T_INT)
-        add_flag(e, NF_CHECKED)
-        entries.push(e)
-    metadata = mk(.array, nodes[n].pos)
-    set_list(metadata, entries)
-    nodes[n].c = i32(metadata)
-    # Select's index priority follows this written order, after named binding.
-    if select_call(n): select_written_priority(n)
-
 match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int: tm_match(pat0, a0, binds, depth)
 
 # Branch bodies must be checked in their own scopes, with the selected parameter
@@ -1352,19 +1291,6 @@ call_string_cost = (a: int, p: int, sp: int, binds: mut int[]) -> int:
             return if str_sets[ps].contains(name_of(int(nodes[e].sval))): 0 else: -1
         return 2
     -2
-
-# Check unchecked comprehension arguments whose elements need no context, so
-# overload selection sees their own element type. O(argument syntax).
-comprehension_settle = (args: int[]) -> bool:
-    settled = false
-    loop a0 in args:
-        a = unnamed(a0)
-        if nodes[a].kind != .block or not has_flag(a, NF_COMPREHENSION) or has_flag(a, NF_CHECKED) or nkids(a) != 3: continue
-        if not dewy_at(nodes[a].pos) or not comprehension_self_typed(kid(a, 1)): continue
-        check_expr(a, 0)
-        add_flag(a, NF_CHECKED)
-        settled = true
-    settled
 
 # check_args_untyped (each argument's literal shape and function-value marks before an
 # overload is picked) is checker_expr.dewy's; members(U) and spread records are host services.
@@ -1678,11 +1604,6 @@ type_sequences: {int: int[]} = {}
 # (ct_resolve_family) a bare generic name is the union of that type's instances, a family the
 # test narrows to the tested value's members; elsewhere it still needs its arguments.
 bare_generic_ok = false
-bare_generic_set = (on: bool) -> bool:
-    was = bare_generic_ok
-    bare_generic_ok = on
-    was
-
 # The instances of generic declaration d made so far, as one type: a family when there are
 # several (nominal_families, under d's own negative key), 0 when there is none. O(structs).
 generic_family_cache: {int: (int, int)} = {}
@@ -2110,11 +2031,6 @@ dewy_surface = (name: int, decl: int) -> int:
     if t != 0 and nodes[t].kind == .tname and name_of(int(nodes[t].name)) == "str": return 2
     0
 
-# (is the code being checked Dewy's? the library's own code is Sloppy)
-caller_dewy = () -> bool:
-    m = cur_mod()
-    m >= 0 and files[int(modules[m].file)].is_dewy
-
 # (declarations collect_in left out for the caller's language, since the last call_by_name)
 surface_hidden: int[]
 
@@ -2129,16 +2045,6 @@ dewy_surface_check = (n: int, name: int):
 
 # (by name: abs, min, max or sign; built on first use)
 exact_named: bool[]
-exact_family_name = (name: int) -> bool:
-    if exact_named.len() == 0:
-        ids = [ci(28, "abs"), ci(44, "min"), ci(45, "max"), ci(46, "sign")]
-        top = 0
-        loop id in ids:
-            if id > top: top = id
-        exact_named = fill(false, top + 1)
-        loop id in ids: exact_named[id] = true
-    name < exact_named.len() and exact_named[name]
-
 # The bundled rational's module, or -1 while it is not loaded: probed again only once more
 # modules are loaded. O(1) amortized.
 rational_module_found = -1
@@ -2148,12 +2054,6 @@ rational_module_probed = 0
 # O(modules + imports), again for a module only once imports are added.
 rational_reach: int[]
 import_edges = 0
-
-exact_families_changed = ():
-    ml_bump_name(ci(28, "abs"))
-    ml_bump_name(ci(44, "min"))
-    ml_bump_name(ci(45, "max"))
-    ml_bump_name(ci(46, "sign"))
 
 # (collect_named, checker_call_queries.dewy: its families by name, kept while the name's
 # stamp stands, with the spellings they hid)
@@ -2312,25 +2212,6 @@ dewy_quantity_name = (name: int) -> bool:
 
 # (a constant name, interned the first time it is asked for, as `intern` would: its id kept by slot)
 ci_ids: int[]
-ci = (slot: int, s: str) -> int:
-    if slot < ci_ids.len() and ci_ids[slot] != 0: return ci_ids[slot]
-    if ci_ids.len() <= slot: ci_ids.resize(slot + 64)
-    id = intern(s)
-    ci_ids[slot] = id
-    id
-
-# `p"a/b.txt"` (a `p` written against its quote) is a path literal in Dewy: its `p` is the
-# library's, whatever the program binds to p (`let p = r` below it). The library module that
-# declares it, or -1 for any other call. O(1).
-path_literal_module = (n: int, callee: int, args: int[]) -> int:
-    if int(nodes[callee].name) != ci(43, "p") or args.len() != 1 or not dewy_at(nodes[n].pos): return -1
-    src = files[pos_file(nodes[callee].pos)].src
-    off = pos_off(nodes[callee].pos) + 1
-    if off >= len(src) or (src[off] != '"' and src[off] != '\''): return -1
-    s = prelude.get(int(nodes[callee].name)) ?? dewy_prelude_lookup(int(nodes[callee].name))
-    if s == 0 or syms[s].decl == 0: return -1
-    int(nodes[int(syms[s].decl)].mod)
-
 # call_by_name's services (checker_expr.dewy runs it). Each answers a type, or -1 to go on.
 # The core library's rewrites by name: completion, searches, saturating get, Dewy arithmetic,
 # quantities and abs.
@@ -2728,21 +2609,6 @@ choose_from_types = (name: int, decls: int[], ts: int[], pos: int, required: boo
     by_types_binds = bestb
     true
 
-# ---------------- intrinsics ----------------
-arg_type = (args: int[], i: int, expected: int) -> int:
-    a = args[i]
-    if nodes[a].kind == .namedarg: fatal(nodes[a].pos, "named arguments are not supported here")
-    if not has_flag(a, NF_CHECKED) or nodes[a].type == 0:
-        check_expr(a, expected)
-        add_flag(a, NF_CHECKED)
-    if expected != 0: coerce(a, expected)
-    prune(ntype(a))
-
-nargs_check = (n: int, nargs: int, lo: int, hi: int, name: str):
-    if nargs < lo or nargs > hi:
-        if lo == hi: fatal(nodes[n].pos, "{name} expects {lo} argument(s), got {nargs}")
-        fatal(nodes[n].pos, "{name} expects {lo} to {hi} arguments, got {nargs}")
-
 struct WordFormatRequest:
     part: int
     binding: int
@@ -2908,14 +2774,6 @@ is_dewy_range_type = (t: int, name: str) -> bool:
     if structs[st].name != name: return false
     d = int(structs[st].decl)
     d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/dewy_ranges.jo"
-
-is_dewy_set_type = (t: int) -> bool:
-    p = prune(t)
-    if types[p].kind != .struct_: return false
-    st = int(types[p].st)
-    if structs[st].name != "Set": return false
-    d = int(structs[st].decl)
-    d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/dewy_sets.jo"
 
 is_value_collection_type = (t: int) -> bool:
     if is_dewy_set_type(t): return true
@@ -3801,16 +3659,6 @@ type_node_of = (t: int, pos: int) -> int:
     nodes[n].ival = t
     n
 
-# the string-literal union a container's members or keys are (0 if not one)
-membership_str_set_of = (t0: int) -> int:
-    t = prune(t0)
-    k = types[t].kind
-    if k == .array or k == .fixed: return if str_set_of(int(types[t].elem)) != 0: prune(int(types[t].elem)) else: 0
-    if is_map_type(t) or is_dewy_set_type(t):
-        key = struct_targ(int(types[t].st), 0)
-        return if str_set_of(key) != 0: prune(key) else: 0
-    0
-
 # `word in? members(Op)` with a plain string: a text that is no member is simply not in the
 # container, so it is tested first, `word is? Op and ...`, rather than converted (which fails).
 # The needle and then the container are evaluated once each, in that order. 0: not this case.
@@ -4335,12 +4183,6 @@ quat_nodes: {int: bool} = {}
 quat_locals: {int: bool} = {}
 quat_globals: {int: bool} = {}
 
-# a literal behind the conversions checking gave it
-kid_lit = (e0: int) -> int:
-    e = e0
-    loop nodes[e].kind == .conv: e = int(nodes[e].a)
-    e
-
 # A refined integer type pattern on an integer scrutinee (`<-1|1>`,
 # `small:int64<small <? 100>`): range patterns over the values it admits. high: a uint64
 # scrutinee's values from 2^63 on (int_intervals_wide), besides those of domain.
@@ -4736,23 +4578,6 @@ mk_ident_local = (l: int, pos: int) -> int:
 # The interpolation checked last, for an unknown name inside one: ident_unknown.
 interpolation_last = 0
 
-member_receiver = (n: int, expected: int) -> int:
-    saved_receiver = type_receiver_at
-    type_receiver_at = int(nodes[n].a)
-    bt = check_expr(int(nodes[n].a), receiver_literal_hint(int(nodes[n].a), int(nodes[n].name), 0, expected, nodes[n].pos))
-    type_receiver_at = saved_receiver
-    nodes[n].a = i32(last_checked)
-    bt
-# (Dewy's `xs.length` is `xs.len()`; `xs.ptr`, where an array's elements are, is
-# `xs.data()`: a ptr<T> for C (provisional spelling))
-member_call = (n: int, data: bool, expected: int) -> int:
-    method = mk(.field, nodes[n].pos)
-    nodes[method].a = nodes[n].a
-    if data: nodes[method].name = i32(intern("data"))
-    else: nodes[method].name = i32(intern("len"))
-    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
-    check_expr(n, expected)
-
 member_missing = (n: int, bt: int, expected: int, bypass: mut bool) -> int:
     fname = int(nodes[n].name)
     bk = types[bt].kind
@@ -4866,23 +4691,12 @@ dewy_bracket_call = (n: int) -> bool:
     set_list(n, [items])
     true
 
-index_deref = (pos: int, bt: int):
-    ffi_deref(pos, bt)
-    return
-
-expr_module = (m: int, name: int) -> int: module_lookup(m, name)
-
 # The statements `if v is? none` checking their then-branch, whose top level may fill v
 # (opt_fill_subject): v (a variable, global or field path), the branch, and the alias of
 # v's latest fill there.
 # (OptFill: checker_state.dewy)
 opt_fill_watch: OptFill[]
 
-# `if` and `if let` run in checker_conditionals.dewy; these are its services.
-cond_block = (b: int, expected: int, value: bool, jumps: mut int) -> int:
-    jumps = narrow_jumps.len()
-    check_block(b, expected, value)
-cond_narrow = (cond: int, holds: bool) -> void: narrow_by(cond, holds)
 # (the writes an earlier branch logged, restored for its sibling and merged after it;
 # a stack, as conditionals nest)
 cond_restored: int[][]
@@ -5063,16 +4877,6 @@ narrow_var = (isn: int, holds: bool):
     if types[ut].kind != .opt or (vi == -2) != holds: return
     opt_unwrap_alias(l, pos)
 
-# from here on, union variable l is known to hold one of members ms: its name stands for that
-# member (one) or the smaller union of them (converted from the variable's value when used)
-narrow_local = (l: int, ms: int[], pos: int):
-    # (a variable already narrowed to some of its members: narrow the variable itself)
-    root = mk_ident_local(l, pos)
-    if int(locals[l].flags) & LF_ALIAS != 0:
-        al = int(locals[l].alias)
-        if nodes[al].kind == .conv and nodes[al].aux == i32(int(CV.union_)): root = copy_path(int(nodes[al].a))
-    narrow_expr(root, ms, pos, int(locals[l].name))
-
 # the name `name` stands for root (a variable or field path) narrowed to members ms of its union
 narrow_expr = (root: int, ms: int[], pos: int, name: int):
     rt = prune(ntype(root))
@@ -5109,20 +4913,6 @@ path_narrows = 0                # (none yet: field accesses need not look)
 no_narrow_at = 0                # (the target of an assignment: the field or global itself, not what it narrows to; a narrowed
                                 # path it is a part of, as x in x.hp = 7, is still narrowed)
 
-# Declaration aliases preserve path identity. Narrowing aliases retain their
-# own roots so forgetting a parent can also retire paths below its payload.
-# O(alias/path depth), with no allocation for an unrelated local.
-path_decl_alias = (l: int) -> int:
-    if int(locals[l].flags) & LF_ALIAS == 0: return 0
-    a = int(locals[l].alias)
-    if a == 0: return 0
-    # Path keys represent declaration roots and fields, not array selectors.
-    # Keep an element alias's own stable root for narrowing inside its value.
-    root = a
-    loop nodes[root].kind == .field and nodes[root].a != 0: root = int(nodes[root].a)
-    if nodes[root].kind == .ident: return a
-    0
-
 path_key = (n: int) -> str:
     k = nodes[n].kind
     if k == .ident:
@@ -5144,46 +4934,6 @@ path_key = (n: int) -> str:
 # any other has no scope entry, so there is nothing to look up or forget for it
 path_rooted_l: bool[]
 path_rooted_g: bool[]
-
-# might the field path (or name) n have a narrowed scope entry: its root is marked
-path_rooted = (n0: int) -> bool:
-    n = n0
-    loop nodes[n].kind == .field and nodes[n].a != 0: n = int(nodes[n].a)
-    if nodes[n].kind != .ident: return false
-    id = int(nodes[n].sym)
-    if nodes[n].aux == i32(int(SK.local)):
-        a = path_decl_alias(id)
-        if a != 0: return path_rooted(a)
-        return id < path_rooted_l.len() and path_rooted_l[id]
-    if nodes[n].aux == i32(int(SK.global)): return id < path_rooted_g.len() and path_rooted_g[id]
-    false
-
-# a checked copy of a field path
-copy_path = (n: int) -> int:
-    c = nodes.len()
-    nodes.push(nodes[n])
-    if nodes[n].kind == .field: nodes[c].a = i32(copy_path(int(nodes[n].a)))
-    c
-
-# the alias local a field path (or global) is narrowed to here, or -1
-path_alias = (n: int) -> int:
-    if not path_rooted(n): return -1
-    key = path_key(n)
-    if len(key) == 0: return -1
-    s = lookup(intern(key))
-    if s == 0 or syms[s].kind != .local: return -1
-    al = int(syms[s].ref)
-    if int(locals[al].owner) != int(ctxs[cx].inst) or int(locals[al].flags) & LF_UNNARROWED != 0: return -1
-    al
-
-# the `x is M` tests (of members) an or-chain is made of; false: it has something else too
-or_tests = (c: int, out: mut int[]) -> bool:
-    k = nodes[c].kind
-    if k == .or_: return or_tests(int(nodes[c].a), out) and or_tests(int(nodes[c].b), out)
-    if k == .istype and nodes[c].aux >= 0:
-        out.push(c)
-        return true
-    false
 
 # the variable a narrowed alias local stands for (l itself when it is not one)
 narrow_root_local = (l0: int) -> int:

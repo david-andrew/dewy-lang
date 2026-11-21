@@ -1,13 +1,14 @@
 $runtime_checks
+from p"prelude_ops.dewy" import (dewy_prelude_lookup)
 from p"checker_expr.dewy" import (check_expr)
 from p"checker_state.dewy" import (FnCtx)
 from p"ast.jo" import (nkids nodes)
-from p"check.jo" import (check_scopes ctxs cur_mod cx demand_name fns get_fn_inst method_modules modules prelude syms)
+from p"check.jo" import (check_scopes ctxs cur_mod cx demand_name dewy_at fns get_fn_inst method_modules modules prelude syms)
 from p"checker_signature.dewy" import (fn_sig)
-from p"expr.jo" import (call_collect_fns call_collect_module decl_in_prelude exact_families_changed match_type named_first rational_reach)
-from p"rational_lookup.dewy" import (rational_module reaches_rational)
+from p"expr.jo" import (call_collect_fns call_collect_module ci_ids decl_in_prelude match_type named_first rational_reach)
+from p"rational_lookup.dewy" import (exact_families_changed rational_module reaches_rational)
 from p"types.jo" import (prune structs tkind type_eq types)
-from p"util.jo" import (files intern pos_file)
+from p"util.jo" import (files intern pos_file pos_off)
 
 LookupWord:type=int64<overflow='wrap'>
 
@@ -97,4 +98,32 @@ prelude_reach=(m:int64 dm:int64):>void=>{
     if rm <? 0 or not reaches_rational(dm rm) or rational_reach[m] =? 1 {return}
     rational_reach[m]=1
     exact_families_changed()
+}
+
+# (is the code being checked Dewy's? the library's own code is Sloppy)
+caller_dewy=():>bool=>$unsafe {
+    let m=cur_mod()
+    m >=? 0 and files.ptr[LookupWord(modules.ptr[m].file)].is_dewy
+}
+
+ci=(slot:LookupWord s:string):>LookupWord=>$unsafe {
+    if slot <? ci_ids.length and ci_ids.ptr[slot] not=? 0 {return ci_ids.ptr[slot]}
+    if ci_ids.length <=? slot {ci_ids.resize(slot + 64)}
+    let id=intern(s)
+    ci_ids[slot]=id
+    id
+}
+
+# `p"a/b.txt"` (a `p` written against its quote) is a path literal in Dewy: its `p` is the
+# library's, whatever the program binds to p (`let p = r` below it). The library module that
+# declares it, or -1 for any other call. O(1).
+path_literal_module=(n:LookupWord callee:LookupWord args:array<int64>):>LookupWord=>$unsafe {
+    if LookupWord(nodes.ptr[callee].name) not=? ci(43 "p") or args.length not=? 1 or not dewy_at(nodes.ptr[n].pos) {return -1}
+    let src=files.ptr[pos_file(nodes.ptr[callee].pos)].src as array<uint8>
+    let off=LookupWord(pos_off(nodes.ptr[callee].pos)) + 1
+    if off >=? src.length or (src[off] not=? 34 and src[off] not=? 39) {return -1}
+    let name=LookupWord(nodes.ptr[callee].name)
+    let s=prelude.get(int64(name)) ?? dewy_prelude_lookup(name)
+    if s =? 0 or syms.ptr[s].decl =? 0 {return -1}
+    LookupWord(nodes.ptr[LookupWord(syms.ptr[s].decl)].mod)
 }

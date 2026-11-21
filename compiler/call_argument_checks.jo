@@ -1,0 +1,39 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_expr.dewy'
+use 'collection_checks.dewy'
+use 'diagnostic_exit.dewy'
+use 'expr.jo'
+use 'types.jo'
+
+unnamed = (a: int) -> int:
+    if nodes[a].kind == .namedarg: return int(nodes[a].a)
+    a
+
+# Check unchecked comprehension arguments whose elements need no context, so
+# overload selection sees their own element type. O(argument syntax).
+comprehension_settle = (args: int[]) -> bool:
+    settled = false
+    loop a0 in args:
+        a = unnamed(a0)
+        if nodes[a].kind != .block or not has_flag(a, NF_COMPREHENSION) or has_flag(a, NF_CHECKED) or nkids(a) != 3: continue
+        if not dewy_at(nodes[a].pos) or not comprehension_self_typed(kid(a, 1)): continue
+        check_expr(a, 0)
+        add_flag(a, NF_CHECKED)
+        settled = true
+    settled
+
+# ---------------- intrinsics ----------------
+arg_type = (args: int[], i: int, expected: int) -> int:
+    a = args[i]
+    if nodes[a].kind == .namedarg: fatal(nodes[a].pos, "named arguments are not supported here")
+    if not has_flag(a, NF_CHECKED) or nodes[a].type == 0:
+        check_expr(a, expected)
+        add_flag(a, NF_CHECKED)
+    if expected != 0: coerce(a, expected)
+    prune(ntype(a))
+
+nargs_check = (n: int, nargs: int, lo: int, hi: int, name: str):
+    if nargs < lo or nargs > hi:
+        if lo == hi: fatal(nodes[n].pos, "{name} expects {lo} argument(s), got {nargs}")
+        fatal(nodes[n].pos, "{name} expects {lo} to {hi} arguments, got {nargs}")

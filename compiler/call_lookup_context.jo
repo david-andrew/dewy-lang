@@ -3,6 +3,7 @@ use 'check.jo'
 use 'checker_call_queries.dewy'
 use 'checker_signature.dewy'
 use 'expr.jo'
+use 'prelude_ops.dewy'
 use 'rational_lookup.dewy'
 use 'checker_expr.dewy'
 use 'checker_state.dewy'
@@ -80,3 +81,27 @@ prelude_reach = (m: int, dm: int):
     if rm < 0 or not reaches_rational(dm, rm) or rational_reach[m] == 1: return
     rational_reach[m] = 1
     exact_families_changed()
+
+# (is the code being checked Dewy's? the library's own code is Sloppy)
+caller_dewy = () -> bool:
+    m = cur_mod()
+    m >= 0 and files[int(modules[m].file)].is_dewy
+
+ci = (slot: int, s: str) -> int:
+    if slot < ci_ids.len() and ci_ids[slot] != 0: return ci_ids[slot]
+    if ci_ids.len() <= slot: ci_ids.resize(slot + 64)
+    id = intern(s)
+    ci_ids[slot] = id
+    id
+
+# `p"a/b.txt"` (a `p` written against its quote) is a path literal in Dewy: its `p` is the
+# library's, whatever the program binds to p (`let p = r` below it). The library module that
+# declares it, or -1 for any other call. O(1).
+path_literal_module = (n: int, callee: int, args: int[]) -> int:
+    if int(nodes[callee].name) != ci(43, "p") or args.len() != 1 or not dewy_at(nodes[n].pos): return -1
+    src = files[pos_file(nodes[callee].pos)].src
+    off = pos_off(nodes[callee].pos) + 1
+    if off >= len(src) or (src[off] != '"' and src[off] != '\''): return -1
+    s = prelude.get(int(nodes[callee].name)) ?? dewy_prelude_lookup(int(nodes[callee].name))
+    if s == 0 or syms[s].decl == 0: return -1
+    int(nodes[int(syms[s].decl)].mod)

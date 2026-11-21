@@ -1,0 +1,58 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_call_cost.dewy'
+use 'expr.jo'
+use 'call_argument_checks.dewy'
+use 'literal_context.dewy'
+use 'select_checks.dewy'
+use 'types.jo'
+use 'util.jo'
+
+# how many of a candidate's arguments (not literals) have exactly their parameter's type
+exact_args = (cd: Cand) -> int:
+    k = 0
+    loop i in 0.. and a in cd.args:
+        if i >= cd.sig.params.len(): break
+        if a == 0 or is_lit(a) or nodes[a].type == 0: continue
+        if type_eq(prune(ntype(a)), prune(subst(cd.sig.params[i], cd.binds))): k += 1
+    k
+
+# Keep parameter slots canonical for types/ABI, but evaluate explicitly supplied
+# Dewy arguments in source order, then omitted defaults in parameter order.
+# c holds a list of integer-literal slot numbers only when reordering is needed.
+# checker_call_queries.dewy's save_call_order leaves the host the calls whose arguments
+# are not written in parameter order.
+call_order_rest = (n: int, given: int[], final: int[]):
+    if not files[pos_file(nodes[n].pos)].is_dewy: return
+    # Most calls already have their written arguments in parameter order.
+    # Omitted trailing defaults follow them without any ordering metadata.
+    ordered = given.len() <= final.len()
+    if ordered:
+        loop i in [0..given.len()):
+            if unnamed(given[i]) != final[i]:
+                ordered = false
+                break
+    if ordered: return
+    order: int[]
+    loop a in given:
+        value = unnamed(a)
+        loop i in 0.. and f in final:
+            if f == value: order.push(i)
+    loop i in [0..final.len()):
+        if not order.contains(i): order.push(i)
+    changed = false
+    loop i in 0.. and slot in order:
+        if i != slot: changed = true
+    if not changed: return
+    entries: int[]
+    loop slot in order:
+        e = mk(.int_lit, nodes[n].pos)
+        nodes[e].ival = slot
+        nodes[e].type = i32(T_INT)
+        add_flag(e, NF_CHECKED)
+        entries.push(e)
+    metadata = mk(.array, nodes[n].pos)
+    set_list(metadata, entries)
+    nodes[n].c = i32(metadata)
+    # Select's index priority follows this written order, after named binding.
+    if select_call(n): select_written_priority(n)

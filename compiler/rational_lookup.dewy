@@ -1,10 +1,13 @@
 $runtime_checks
+from p"call_lookup_context.dewy" import (ci)
 from p"ast.jo" import (NF_CHECKED has_flag nodes)
 from p"checker_expr.dewy" import (lookup)
-from p"check.jo" import (cur_mod lib_dir locals modules syms)
+from p"check.jo" import (cur_mod lib_dir locals ml_bump_name modules syms)
 from p"checker_call_queries.dewy" import (collect_in)
 from p"checks_thin.dewy" import (find_module)
-from p"expr.jo" import (exact_family_name import_edges is_lit ntype rational_module_found rational_module_probed rational_reach unnamed)
+from p"expr.jo" import (exact_named import_edges ntype rational_module_found rational_module_probed rational_reach)
+from p"call_argument_checks.dewy" import (unnamed)
+from p"literal_context.dewy" import (is_lit)
 from p"rational_types.dewy" import (bundled_rational_type bundled_word_rational_type)
 from p"types.jo" import (prune)
 from p"util.jo" import (files)
@@ -73,4 +76,23 @@ exact_members_for=(decls:array<int64> name:RationalLookupWord args:array<int64>)
         }
     }
     decls
+}
+
+exact_family_name=(name:RationalLookupWord):>bool=>$unsafe {
+    let named=@exact_named
+    if named.length =? 0 {
+        let ids=[ci(28 "abs") ci(44 "min") ci(45 "max") ci(46 "sign")]
+        let top:RationalLookupWord=0
+        loop id in ids {if id >? top {top=id}}
+        named=fill(false top + 1)
+        loop id in ids {named[id]=true}
+    }
+    name <? named.length and named.ptr[name]
+}
+
+exact_families_changed=():>void=>{
+    ml_bump_name(ci(28 "abs"))
+    ml_bump_name(ci(44 "min"))
+    ml_bump_name(ci(45 "max"))
+    ml_bump_name(ci(46 "sign"))
 }

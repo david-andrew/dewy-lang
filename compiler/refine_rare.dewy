@@ -1,6 +1,7 @@
 $runtime_checks
 
-from p"expr.jo" import (CV can_coerce check_place unnamed is_nd)
+from p"expr.jo" import (CV can_coerce check_place is_nd)
+from p"call_argument_checks.dewy" import (unnamed)
 from p"ast.jo" import (NF_CHECKED NF_MUT NF_RDONLY add_flag clone has_flag kid kids mk nkids nodes set_list NF_RECORD)
 from p"check.jo" import (LF_CONST LF_MUTPARAM ceval ctxs cx dewy_at fns globals locals runtime_fn syms check_struct_fields lib_dir refine_deferred)
 from p"checker_store_checks.dewy" import (assign_value)
@@ -11,7 +12,8 @@ from p"checks_assign_hooks.dewy" import (assign_update)
 from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_let bc_stmt bc_str)
 from p"checks_thin.dewy" import (check_assign readonly_global refine_resume resolve_type)
 from p"checks_thin_expr.dewy" import (ref_literal_holds str_set_within is_map_type)
-from p"expr.jo" import (CV IN bc_assign bc_bin capture_value coerce copy_place kid_lit last_checked ntype type_node_of wrap_conv)
+from p"expr.jo" import (CV IN bc_assign bc_bin capture_value coerce copy_place last_checked ntype type_node_of wrap_conv)
+from p"literal_context.dewy" import (kid_lit)
 from p"callable_checks.dewy" import (callable_shape_eq)
 from p"facts.jo" import (FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_COPY FACT_ELEMENT_VALUE FACT_SELF_BOUND FactProjection FactState fact_requests fact_terms)
 from p"facts_values.dewy" import (fact_domain fact_project)
