@@ -46,7 +46,8 @@ def test_anonymous_record_checks_exact_fields_when_stored_as_its_shape():
     (2688174, 0, '-207525870829232455680\n'),
 ))
 def test_round8_overflow_replays(seed, exit_code, observed):
-    program, _ = g.generate(seed)
+    # (these programs predate narrow widths, which draw from their own stream)
+    program, _ = g.generate(seed, narrow=False)
     output, status = program.outcome()
     assert status == exit_code
     assert observed in output

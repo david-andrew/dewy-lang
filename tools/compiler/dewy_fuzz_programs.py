@@ -61,6 +61,10 @@ class Ty:
 
 
 I, U, F, B, S = (Ty(k) for k in ('int64', 'uint64', 'float64', 'bool', 'string'))
+# Narrow fixed widths: storage only, their arithmetic is exact (docs/LANGUAGE.md).
+I8, I16, I32, U8, U16, U32 = (Ty(k) for k in ('int8', 'int16', 'int32', 'uint8', 'uint16', 'uint32'))
+NARROW = (I8, I16, I32, U8, U16, U32)
+FIXED = (I, U) + NARROW
 INT = Ty('int')  # mathematical integer: Python's unbounded integers are the oracle
 Q = Ty('rational')
 VOID, RANGE, HIDDEN = Ty('void'), Ty('range'), Ty('hidden')
@@ -78,7 +82,7 @@ PAIR = Ty('rec', (('left', F), ('right', I)))
 RECORDS = (ITEM, CELL, PAIR)
 BAD = Ty('rec', (('code', I),), 'Bad')  # `Bad:type=type of error & [code:int64]`
 RESULT = Ty('union', (I, BAD))
-INTS = (I, U, INT)
+INTS = (I, U, INT) + NARROW
 SCALARS = (I, U, F, B, S)
 AITEM = Ty('array', (ITEM,))
 VALUE_TYPES = (I, U, F, B, S, AI, AS, AF, AAI, DII, DSA, SI, SS, OI, OS, UIS, ITEM, CELL, PAIR, AITEM)
@@ -859,7 +863,7 @@ class Narrow(Expr):
 
     def eval(self, m, env):
         value = m.eval(self.x, env)
-        if not (0 <= value < 2 ** 64 if self.ty == U else -2 ** 63 <= value < 2 ** 63):
+        if wrap(value, self.ty) != value:
             raise Panicked('integer overflow')
         return value
 
@@ -1195,14 +1199,23 @@ class Jumped(Exception):
         self.word = word
 
 
+def bits(ty):
+    """(width, signed) of a fixed-width integer type."""
+    return int(ty.kind.lstrip('uint')), not ty.kind.startswith('u')
+
+
+def bounds(ty):
+    width, signed = bits(ty)
+    return (-2 ** (width - 1), 2 ** (width - 1) - 1) if signed else (0, 2 ** width - 1)
+
+
 def wrap(value, ty):
     if ty == INT:
         return int(value)
-    if ty == I:
-        value = int(value) & (2 ** 64 - 1)
-        return value - 2 ** 64 if value >= 2 ** 63 else value
-    if ty == U:
-        return int(value) & (2 ** 64 - 1)
+    if ty in FIXED:
+        width, signed = bits(ty)
+        value = int(value) & (2 ** width - 1)
+        return value - 2 ** width if signed and value >= 2 ** (width - 1) else value
     if ty == F:
         return float(value)
     return value
@@ -1222,7 +1235,7 @@ def store(value, ty):
     if ty.kind == 'rec' and not ty.name:
         for name, field in ty.args:
             store(value.fields[name], field)
-    if ty in (I, U) and wrap(value, ty) != value:
+    if ty in FIXED and wrap(value, ty) != value:
         raise Panicked('exact integer result does not fit')
     return value
 
@@ -1659,8 +1672,11 @@ class V:
 
 
 class Generator:
-    def __init__(self, seed, features=None):
+    def __init__(self, seed, features=None, narrow=True):
         self.r = random.Random(seed)
+        # (narrow widths draw from their own stream: without them, or when a seed's
+        # program takes none, it generates what it did before they were added)
+        self.widths = random.Random(f'{seed}:narrow') if narrow else None
         self.shared = set()  # variables a closure shares (`$capture @name`)
         self.features = tuple(features or FEATURES)
         self.serial = 0
@@ -1711,6 +1727,11 @@ class Generator:
 
     def int_literal(self, ty=I):
         r = self.r
+        if ty in NARROW:
+            lo, hi = bounds(ty)
+            if self.chance(.2):
+                return Lit(ty, r.choice((lo, hi, lo + 1, hi - 1, 0)))
+            return Lit(ty, r.randint(max(lo, -20), min(hi, 40)))
         if ty == U:
             return Lit(U, r.choice((0, 1, 2, 3, 7, 10, 255, 2 ** 32, 2 ** 63, 2 ** 64 - 1))
                        if self.chance(.2) else r.randint(0, 40))
@@ -1879,6 +1900,30 @@ class Generator:
         if choice == 'convert':
             return self.convert(U, self.expr(I, d))
         return self.cond(U, d)
+
+    def expr_narrow(self, ty, depth):
+        """int8 through uint32: exact intermediates (a sign change, a product or a
+        shift past the width), narrowed only where stored."""
+        r = self.r
+        if depth >= 3 or self.chance(.3):
+            return self.leaf(ty)
+        d = depth + 1
+        if self.chance(.2):
+            return self.cond(ty, d)
+        width, signed = bits(ty)
+        op = r.choice(('+', '-', '*', '//', '%', 'xor', 'and', 'or', '<<', '>>'))
+        left = self.expr(ty, d)
+        if op in ('//', '%'):
+            divisors = [k for k in (-7, -3, -1, 1, 2, 3, 5, 8, 10, 100, 1000, 2 ** 16 + 1) if bounds(ty)[0] <= k <= bounds(ty)[1] and k]
+            if self.chance(.3):
+                # (a computed divisor: the right operand is the exact intermediate)
+                return Bin(ty, op, left, Bin(ty, '+', self.expr(ty, d), Lit(ty, r.choice([k for k in divisors if k > 0]))))
+            return Bin(ty, op, left, Lit(ty, r.choice(divisors)))
+        if op in ('<<', '>>'):
+            return Bin(ty, op, left, Lit(I, r.randrange(width + 8)))
+        return Bin(ty, op, left, self.expr(ty, d))
+
+    expr_int8 = expr_int16 = expr_int32 = expr_uint8 = expr_uint16 = expr_uint32 = expr_narrow
 
     def expr_float64(self, ty, depth):
         r = self.r
@@ -2277,7 +2322,7 @@ class Generator:
 
     def new_variable(self, ty=None, const=False):
         ty = ty or self.r.choice(VALUE_TYPES)
-        name = self.fresh({'int64': 'n', 'uint64': 'u', 'float64': 'f', 'bool': 'b', 'string': 's', 'array': 'xs',
+        name = self.fresh({'int64': 'n', 'uint64': 'u', **{t.kind: 'w' for t in NARROW}, 'float64': 'f', 'bool': 'b', 'string': 's', 'array': 'xs',
                            'dict': 'd', 'set': 'st', 'opt': 'o', 'union': 'un', 'rec': 'r'}[ty.kind])
         value = self.expr_array(ty, 1, nonempty=self.chance(.8)) if ty.kind == 'array' else self.expr(ty, 1)
         self.declare(name, ty, not const, minlen(value, self.visible()))
@@ -2287,7 +2332,7 @@ class Generator:
         """One change to a mutable variable, keeping the generator's length bounds."""
         r = self.r
         t = Var(v.ty, v.name)
-        if v.ty in (I, U, F):
+        if v.ty in FIXED or v.ty == F:
             return Assign(t, self.expr(v.ty, depth), r.choice(('', '+', '-', '*')))
         if v.ty in (B, S, OI, OS, UIS):
             return Assign(t, self.expr(v.ty, depth))
@@ -2470,6 +2515,8 @@ class Generator:
 
     def block_arithmetic(self):
         ty = self.r.choice((I, I, U))
+        if self.widths and self.widths.random() < .25:
+            ty = self.widths.choice(NARROW)
         let = self.new_variable(ty)
         v = self.visible()[let.name]
         return [let, self.mutation(v, 1), self.print_value(Var(ty, v.name)),
@@ -2754,6 +2801,8 @@ class Generator:
             out.append(self.print_value(Var(INT, name)))
         z = Var(INT, out[-2].name)
         choice = r.choice(('int64', 'int64', 'uint64', 'update', 'update'))
+        if choice == 'uint64' and self.widths and self.widths.random() < .5:
+            choice = 'narrow'
         if choice == 'int64':
             # Literals alone in an int64 context are int64 (and wrap): an `int` variable
             # keeps the arithmetic checked.
@@ -2761,6 +2810,13 @@ class Generator:
             out.append(Let(name, I, Narrow(I, Bin(INT, r.choice(('+', '-', '*')), z, self.expr(INT, 1)))))
             self.declare(name, I)
             out.append(self.print_value(Var(I, name)))
+        elif choice == 'narrow':
+            # A narrow destination checks the exact `int` against its own range.
+            ty = self.widths.choice(NARROW)
+            name = self.fresh('w')
+            out.append(Let(name, ty, Narrow(ty, z)))
+            self.declare(name, ty)
+            out.append(self.print_value(Var(ty, name)))
         elif choice == 'uint64':
             # A negative `int` stored as uint64 is a checked failure, not a wrap.
             name = self.fresh('u')
@@ -2872,7 +2928,7 @@ def fill_asserts(program: Program) -> Program:
             value = observed.get(node.tag)
             if value is None and node.tag not in observed:
                 return _Seq(())  # never executed
-            if node.expr.ty in (I, U) and wrap(value, node.expr.ty) != value:
+            if node.expr.ty in FIXED and wrap(value, node.expr.ty) != value:
                 return _Seq(())  # an exact result past the type has no literal of that type
             return replace(node, expected=Lit(node.expr.ty, value))
         return node
@@ -2880,11 +2936,11 @@ def fill_asserts(program: Program) -> Program:
     return replace(filled, body=tuple(flatten(filled.body)))
 
 
-def generate(seed: int, features=None, attempts: int = 25) -> tuple[Program, int]:
+def generate(seed: int, features=None, attempts: int = 25, narrow: bool = True) -> tuple[Program, int]:
     """A valid program for this seed and how many candidates were discarded."""
     for attempt in range(attempts):
         try:
-            program = fill_asserts(Generator(f'{seed}:{attempt}', features).program())
+            program = fill_asserts(Generator(f'{seed}:{attempt}', features, narrow).program())
             program.expected()
             if scope_errors(program):
                 raise InvalidProgram('scope')

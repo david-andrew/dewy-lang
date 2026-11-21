@@ -426,8 +426,11 @@ def gen_arith(r, p):
     Explicit wrap conversions keep the fixed-width subexpressions at their modeled
     widths; ordinary arithmetic inside each conversion is exact. Division, remainder
     and power retain their widening model. Mathematical-int operands remain exact.
+    Half the fixed-width tests have no conversions: every intermediate is exact
+    (a sign change, a product or a shift past the width), and only a store checks.
     """
     t = r.choice(FIXED + ('int', 'int64', 'int64', 'uint64'))
+    exact = t != 'int' and r.random() < .5
     names = [f'a{i}' for i in range(r.randint(2, 4))]
     values = {n: interesting(r, t) for n in names}
     zval = interesting(r, 'int')
@@ -448,7 +451,10 @@ def gen_arith(r, p):
         return 'int' if 'int' in (x, y) else x if x == y else 'int64'
 
     def word(text, ty):
-        return text if ty == 'int' else f"{ty}({ty}<overflow='wrap'>({text}))"
+        return text if ty == 'int' or exact else f"{ty}({ty}<overflow='wrap'>({text}))"
+
+    def cut(v, ty):
+        return v if exact else wrap(v, ty)
 
     def leaf():
         if mixed and r.random() < .25:
@@ -466,10 +472,10 @@ def gen_arith(r, p):
         ty = a[2]
         if op == 'big':
             return f'bigint({a[0]})', a[1], 'int'
-        if op == 'not':
+        if op == 'not' and not exact:
             return word(f'(not {a[0]})', ty), wrap(~a[1], ty), ty
         if op == 'neg' and (ty == 'int' or WIDTHS[ty][1]):
-            return word(f'(-{a[0]})', ty), wrap(-a[1], ty), ty
+            return word(f'(-{a[0]})', ty), cut(-a[1], ty), ty
         if op in ('<<', '>>'):
             k = r.randrange(bits + 3) if r.random() < .8 else r.choice((0, 1, bits - 1))
             count = str(k)
@@ -477,7 +483,12 @@ def gen_arith(r, p):
                 # A runtime count: a fixed-width count is unsigned, so a negative one is huge.
                 c = r.choice(counts)
                 count, k = c, values[c] % (1 << WIDTHS[t][0])
+                if exact and k >= bits + 3:
+                    raise Discard  # (an exact left shift that far has no machine width)
             x = a[1]
+            if exact:
+                v = x << k if op == '<<' else x >> k
+                return f'({a[0]} {op} {count})', v, ty
             if ty == 'int':
                 v = x << k if op == '<<' else x >> k
             elif k >= WIDTHS[ty][0]:
@@ -493,13 +504,17 @@ def gen_arith(r, p):
             b = (str(d) if d > 0 else f'({d})', d, ty) if fits(d, ty) and r.random() < .7 else expr(depth + 1)
             if b[1] == 0:
                 raise Discard
-            ty = 'int' if 'int' in (ty, b[2]) else exact_type if ty == b[2] == t else join(ty, b[2])
             v = a[1] // b[1] if op == '//' else a[1] % b[1]
+            if exact:
+                return f'({a[0]} {op} {b[0]})', v, join(ty, b[2])
+            ty = 'int' if 'int' in (ty, b[2]) else exact_type if ty == b[2] == t else join(ty, b[2])
             if not fits(v, ty):
                 raise Discard
             return f'{ty}({a[0]} {op} {b[0]})', v, ty
         if op == '^':
             k = r.randrange(4)
+            if exact:
+                return f'({a[0]} ^ {k})', a[1] ** k, ty
             ty = 'int' if ty == 'int' else exact_type if ty == t else ty
             v = a[1] ** k
             if not fits(v, ty):
@@ -518,7 +533,7 @@ def gen_arith(r, p):
         ty = join(a[2], b[2])
         x, y = a[1], b[1]
         v = {'+': x + y, '-': x - y, '*': x * y, 'and': x & y, 'or': x | y, 'xor': x ^ y}[op]
-        return word(f'({a[0]} {op} {b[0]})', ty), wrap(v, ty), ty
+        return word(f'({a[0]} {op} {b[0]})', ty), cut(v, ty), ty
 
     checks = []
     for _ in range(r.randint(2, 6)):
@@ -540,7 +555,9 @@ def gen_arith(r, p):
             target = r.choice(names)
             op = r.choice(('+', '-', '*'))
             old = values[target]
-            new = wrap({'+': old + v, '-': old - v, '*': old * v}[op], t)
+            new = cut({'+': old + v, '-': old - v, '*': old * v}[op], t)
+            if not fits(new, t):
+                continue  # (an exact update past the width is a checked failure)
             values[target] = new
             update = word(f'{target} {op} {text}', t)
             checks.append((f'{target} = {update}\nprintl({target})', f'{new}\n'))
@@ -555,7 +572,7 @@ def gen_arith(r, p):
                           'not=?': x != y}[o] for o, (_, x, _), (_, y, _) in zip(chosen, parts, parts[1:]))
             text = parts[0][0] + ''.join(f' {o} {e}' for o, (e, _, _) in zip(chosen, parts[1:]))
             checks.append(printing(f'({text})', 'true' if result else 'false'))
-        elif t in ('int', 'int64') and roll < .9:
+        elif t in ('int', 'int64') and not exact and roll < .9:
             a, b = expr(1), expr(1)
             if b[1] == 0 or {a[2], b[2]} != {t}:
                 continue
