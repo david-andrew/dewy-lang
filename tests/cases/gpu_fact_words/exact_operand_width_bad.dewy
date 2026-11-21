@@ -1,0 +1,16 @@
+# modes: native native-release
+# An exact `int` compared with a buffer's length in GPU code: the diagnostic names the fix,
+# giving the exact local a width.
+$runtime_checks
+
+M:type=[a:GpuBuffer<float32> c:GpuBuffer<float32> n:int32]
+twice=(id:int64 u:M):>void=>{
+    if u.n <=? 0 or u.n >? 64 or id <? 0 or id >=? u.c.length {return}
+    let i=id*2+1
+    if i <? u.a.length { u.c[id]=u.a[i] }
+}
+main=()=>{
+    let c=gpu_buffer<float32>(2)
+    dispatch(compute(@twice) 2 M(gpu_buffer([float32(1.0) 2.0 3.0 4.0]) c 2))
+    printl(cpu(c))
+}

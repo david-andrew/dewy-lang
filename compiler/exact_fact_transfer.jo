@@ -133,6 +133,11 @@ exact_fact_store = (n: int, value: int, s: mut FactState) -> int:
         bounded.hi = min(bounded.hi, b.hi)
     fact_new(s, bounded, FactTerm(type = t))
 
+# Whether a representation owner's facts record n's range (exact_value_fact): an exact `int`'s,
+# or in GPU code a 64-bit integer's, which a shader holds in a 32-bit word (sl_exact_range).
+exact_rep_value = (n: int, owner: int) -> bool:
+    t = prune(ntype(n))
+    t == T_MATH_INT or types[t].kind == .int_ and types[t].bits > 32 and exact_shader_owners.has(owner)
 exact_value_fact = (n: int, value: int, s: FactState):
     if not s.live: return
     if n >= exact_ranges.len():

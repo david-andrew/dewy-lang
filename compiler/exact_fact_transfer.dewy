@@ -7,7 +7,7 @@ from p"exact_static_widths.dewy" import (exact_width_bits)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"directive_ops.dewy" import (dir_panic_fix)
 from p"directive_rules.dewy" import (dir_defer)
-from p"exact.jo" import (exact_marks exact_measure_on exact_measure_sites exact_range_meta exact_ranges exact_shifts)
+from p"exact.jo" import (exact_marks exact_measure_on exact_measure_sites exact_range_meta exact_ranges exact_shader_owners exact_shifts)
 from p"exact_marks.dewy" import (exact_decide exact_decided exact_has_node exact_proved)
 from p"exact_check_hooks.dewy" import (exact_representation)
 from p"exact_count_bounds.dewy" import (exact_count_bound)
@@ -23,7 +23,7 @@ from p"facts_value_queries.dewy" import (fact_bound)
 from p"facts_values.dewy" import (fact_domain fact_type fact_unmodeled)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
 from p"type_ops.dewy" import (dt)
-from p"types.jo" import (T_INT T_MATH_INT T_U64 types)
+from p"types.jo" import (T_INT T_MATH_INT T_U64 prune types)
 from p"util.jo" import (err_notes)
 from p"witness_nodes.dewy" import (wit_text)
 from p"witness_ops.dewy" import (wit_help wit_operand_changed wit_unsupported)
@@ -148,6 +148,12 @@ exact_fact_store=(n:TransferWord value:TransferWord @s:FactState):>int64=>$unsaf
     fact_new(@s bounded FactTerm(type=t))
 }
 
+# Whether a representation owner's facts record n's range (exact_value_fact): an exact `int`'s,
+# or in GPU code a 64-bit integer's, which a shader holds in a 32-bit word (sl_exact_range).
+exact_rep_value=(n:TransferWord owner:TransferWord):>bool=>$unsafe {
+    let t=prune(ntype(n))
+    t =? T_MATH_INT or types.ptr[t].kind =? 'int_' and types.ptr[t].bits >? 32 and exact_shader_owners.has(owner)
+}
 exact_value_fact=(n:TransferWord value:TransferWord s:FactState):>void=>$unsafe {
     if not s.live {return}
     if n >=? exact_ranges.length {

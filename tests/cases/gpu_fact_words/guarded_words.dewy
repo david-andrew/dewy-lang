@@ -1,0 +1,22 @@
+# Exact `int` values in GPU code fit a shader's 32-bit word when the facts bound them: a
+# remainder or quotient of a guarded index, and a neighbour offset stored as int64.
+$runtime_checks
+
+G:type=[dst:GpuBuffer<int32> w:int32 h:int32]
+cell=(id:int64 u:G):>void=>{
+    if u.w <=? 0 or u.h <=? 0 or u.w >? 4096 or u.h >? 4096 {return}
+    if id <? 0 or id >=? u.dst.length or id >=? 1048576 {return}
+    let w=int64(u.w)
+    let x=id % w
+    let y=id // w
+    if y <? 1000 and x <? 1000 { u.dst[id]=int32(y*1000+x) }
+    loop dx in [-1..1] {
+        let xx:int64=x+dx
+        if xx >=? 0 and xx <? w and xx <? 1000 { u.dst[id]=int32(xx) }
+    }
+}
+main=()=>{
+    let out=gpu_buffer<int32>(6)
+    dispatch(compute(@cell) 6 G(out 4 2))
+    printl(cpu(out))
+}

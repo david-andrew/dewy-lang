@@ -163,10 +163,8 @@ gl_binop = (op: Tok) -> str:
 gl_expr = (e: int) -> str:
     k = nodes[e].kind
     t = sl_type(ntype(e))
-    # (an exact `int` proven to fit in an int32 is one: sl_exact_range)
-    if t == T_MATH_INT and sl_exact_range(e).len() == 0:
-        if nodes[e].kind == .int_lit: gl_err(nodes[e].pos, "this number is an exact `int` here, and a shader holds only 32 bits: give it a width, `int32(...)`")
-        gl_err(nodes[e].pos, "this exact `int` is not proven to fit in 32 bits, all a shader holds: give it a width, `int32(...)`, or bound it (a counting loop over literals is)")
+    # (an integer the shader's 32-bit word holds: sl_word_check)
+    sl_word_check(e)
     if k == .int_lit:
         if types[t].kind == .float_: return gl_float(f64(nodes[e].ival))
         if nodes[e].ival < -2147483648 or nodes[e].ival > 4294967295: gl_err(nodes[e].pos, "shader integers are 32 bits, and this number does not fit in one (a hash written for 64 bits gives other values here)")

@@ -52,6 +52,9 @@ exact_shader_demand=():>array<int64>=>$unsafe {
         if f <=? 0 or f >=? fns.length or seen.has(f) or fns.ptr[f].body =? 0 or fn_in_lib(f) {continue}
         seen[f] = true
         exact_shader_owners[f] = true
+        # (the facts' ranges of its exact values: what a shader's 32-bit words hold, sl_exact_range)
+        if f >=? exact_rep_owners.length {exact_rep_owners.resize(max(f + 1 fns.length))}
+        exact_rep_owners[f]=true
         out.push(f)
         exact_shader_calls(PrepareWord(fns.ptr[f].body) @work)
     }
