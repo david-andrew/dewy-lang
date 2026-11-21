@@ -185,6 +185,13 @@ use 'expr_node_queries.dewy'
 use 'checks_assign_hooks.dewy'
 use 'embed_walk.dewy'
 use 'union_fields.dewy'
+use 'call_wait_inference.dewy'
+use 'game_call_checks.dewy'
+use 'index_end_walks.dewy'
+use 'optional_fill.dewy'
+use 'enum_expressions.dewy'
+use 'rational_literals.dewy'
+use 'vector_swizzles.dewy'
 use 'vector_checks.dewy'
 use 'callable_policies.dewy'
 
@@ -289,21 +296,7 @@ ntype = (n: int) -> int: int(nodes[n].type)
 # parts, without parsing text or rounding through a float at run time.
 decimal_cached_type = 0
 
-decimal_type = (pos: int) -> int:
-    if decimal_cached_type != 0: return decimal_cached_type
-    ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
-    ty = bc_field(bc_ident("$dewy_rational", pos), "Rational", pos)
-    decimal_cached_type = telem(check_expr(ty, 0))
-    decimal_cached_type
-
 word_rational_cached_type = 0
-
-word_rational_type = (pos: int) -> int:
-    if word_rational_cached_type != 0: return word_rational_cached_type
-    ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
-    ty = bc_field(bc_ident("$dewy_rational", pos), "RationalWord", pos)
-    word_rational_cached_type = telem(check_expr(ty, 0))
-    word_rational_cached_type
 
 # Rationals folded at compilation, by node: their normalized word parts, and how
 # they print (the library's `_shown`: 1 a decimal literal, 2 a written fraction).
@@ -319,109 +312,6 @@ word_rational_source = (n: int, from0: int) -> bool:
     if known: return value >= 0 or types[from].sign or from == T_MATH_INT
     if from == T_MATH_INT: return false
     int_widens(from, T_INT)
-
-# An exact division's only failure is a zero divisor: the caller's obligation,
-# as an integer division's (facts.jo fact_divisor): an integer divisor, or a
-# rational one, whose numerator a constant or a guard (`b not=? 0`) gives.
-rational_divisor = (n: int):
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return
-    d = int(fns[int(nodes[n].sym)].decl)
-    if d == 0 or files[pos_file(nodes[d].pos)].path != lib_dir + "/rational.dewy": return
-    e = kid(n, 1)
-    loop nodes[e].kind == .conv: e = int(nodes[e].a)
-    # (a quantity divides as its number: the same obligation, said as one)
-    t = quantity_base(prune(ntype(e)))
-    if is_int(t) or t == T_MATH_INT or rational_constants.has(e) or bundled_rational_type(t): fact_divisors[n] = 1
-
-decimal_part = (digits: str, pos: int) -> int:
-    ensure_bundled_import("bigint.dewy", "$dewy_decimal_bigint", pos)
-    negative = len(digits) > 0 and digits[0] == '-'
-    limbs: u64[]
-    loop c in digits:
-        if c == '-' or c == '+': continue
-        carry = u64(c - '0')
-        loop i in [0..limbs.len()):
-            word = limbs[i] * 10 + carry
-            limbs[i] = word & 0xFFFFFFFF
-            carry = word >> 32
-        if carry != 0: limbs.push(carry)
-    items: int[]
-    loop limb in limbs:
-        item = mk(.int_lit, pos)
-        nodes[item].ival = int(limb)
-        items.push(item)
-    magnitude = mk(.array, pos)
-    set_list(magnitude, items)
-    sign = mk(.int_lit, pos)
-    nodes[sign].ival = if limbs.len() == 0: 0 else if negative: -1 else: 1
-    result = mk(.call, pos)
-    nodes[result].a = i32(bc_field(bc_ident("$dewy_decimal_bigint", pos), "BigInt", pos))
-    set_list(result, [sign, magnitude])
-    result
-
-# The normalized constant numerator/denominator (denominator nonzero, both
-# above the minimum word) as a direct construction: no runtime reduction.
-rational_constant_parts = (numerator: int, denominator: int) -> (int, int):
-    let numerator = numerator
-    let denominator = denominator
-    if denominator < 0:
-        numerator = -numerator
-        denominator = -denominator
-    common = quantity_gcd(numerator, denominator)
-    if common > 1:
-        numerator = numerator / common
-        denominator = denominator / common
-    if numerator == 0: denominator = 1
-    (numerator, denominator)
-
-rational_constant = (numerator: int, denominator: int, pos: int, word: bool = false, shown: int = 0) -> int:
-    parts = rational_constant_parts(numerator, denominator)
-    ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
-    decimal_type(pos)
-    type_name = if word: "RationalWord" else: "Rational"
-    result = mk(.call, pos)
-    nodes[result].a = i32(bc_field(bc_ident("$dewy_rational", pos), type_name, pos))
-    set_list(result, [bc_int(parts.0, pos), bc_int(parts.1, pos), bc_int(shown, pos)])
-    result
-
-exact_decimal = (n: int) -> int:
-    pos = nodes[n].pos
-    text = lower(name_of(int(nodes[n].sval)))
-    exponent = 0
-    parts = split(text, "e")
-    if parts.len() == 2:
-        parsed = to_int(parts[1])
-        if parsed == none: fatal(pos, "decimal exponent is too large")
-        exponent = parsed!
-    digits = parts[0]
-    fraction = split(digits, ".")
-    if fraction.len() == 2:
-        exponent -= len(fraction[1])
-        digits = fraction[0] + fraction[1]
-    denominator = "1"
-    if exponent > 0: digits += repeat("0", exponent)
-    else if exponent < 0: denominator += repeat("0", -exponent)
-    # Word-sized decimals fold to their reduced fraction at compilation.
-    magnitude = digits
-    negative = len(magnitude) > 0 and magnitude[0] == '-'
-    if len(magnitude) > 0 and (magnitude[0] == '-' or magnitude[0] == '+'): magnitude = magnitude[1..]
-    loop len(magnitude) > 1 and magnitude[0] == '0': magnitude = magnitude[1..]
-    if len(magnitude) <= 18 and len(denominator) <= 19:
-        if let top = to_int(magnitude):
-            if let bottom = to_int(denominator):
-                signed = if negative: -top else: top
-                nodes[n] = nodes[rational_constant(signed, bottom, pos, shown = 1)]
-                t = check_expr(n, 0)
-                rational_constants[n] = rational_constant_parts(signed, bottom)
-                rational_shown[n] = 1
-                return t
-    ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
-    decimal_type(pos)
-    numerator = decimal_part(digits, pos)
-    divisor = decimal_part(denominator, pos)
-    nodes[n] = Node(kind = .call, pos = pos, a = i32(bc_field(bc_ident("$dewy_rational", pos), "_decimal", pos)))
-    set_list(n, [numerator, divisor])
-    check_expr(n, 0)
 
 # replace node n by a conversion of its old content
 wrap_conv = (n: int, cv: CV, to: int):
@@ -665,14 +555,6 @@ str_set_coerced = (n: int, to: int) -> bool:
             if ms != 0 and str_set_within(fs, ms): fits = true
         if not fits: str_set_text_of(n)
     false
-
-# ordering at pos is the program's Dewy code's: Dewy source, or the library's code inside an
-# instance the innermost program call that made it is Dewy's
-dewy_ordering = (pos: int) -> bool:
-    if not pos_in_lib(pos): return dewy_at(pos)
-    k = err_trail.len() - 1
-    loop k >= 0 and (err_trail[k] <= 0 or pos_in_lib(err_trail[k])): k -= 1
-    k >= 0 and dewy_at(err_trail[k])
 
 # An anonymous record whose numeric fields convert as scalars do (`[x:int]` where
 # `[x:int64]` or `[x:float64]` is wanted): field by field, each `int` field the
@@ -1549,20 +1431,6 @@ struct Rejection:
     ptx: int
     cd: Cand
 
-# the enum `.name` means where a value of type t is expected: t itself, or (t a union) the one
-# member enum with that variant
-variant_enum = (t0: int, name: int) -> int:
-    t = prune(t0)
-    if not is_union(t): return t
-    found = 0
-    loop m in union_members(t):
-        pm = prune(m)
-        if types[pm].kind == .enum_ and not is_union(pm) and find_variant(int(types[pm].st), name) >= 0:
-            if found != 0: return t
-            found = pm
-    if found == 0: return t
-    found
-
 unnamed = (a: int) -> int:
     if nodes[a].kind == .namedarg: return int(nodes[a].a)
     a
@@ -1601,79 +1469,8 @@ expected_binds = (cd: mut Cand, expected: int, given: int[]):
     loop i in 0.. and b in eb:
         if expected_bind_fits(b): cd.binds[i] = b
 
-# Does the unchecked call a take its type from the parameter it meets, as a literal does
-# (node_store.dewy)? 1: the name's one function has a type parameter no parameter mentions
-# (`text=<A>(s:string):>Node<A>`); 2: a bare literal alone gives one, and a is an element of an
-# array literal argument. An array literal argument marks those elements and answers 0.
-# O(parameters) once per name, then skipped (call_waits_never) when the answer was no.
-call_waits = (a: int) -> int:
-    if nodes[a].kind == .array:
-        loop i in [0..nkids(a)):
-            e = kid(a, i)
-            if nodes[e].kind == .call and nodes[e].type == 0 and nodes[int(nodes[e].a)].kind == .ident and not call_waits_skips(int(nodes[int(nodes[e].a)].name)) and literal_typed_call(e):
-                literal_typed_elements[e] = true
-                literal_typed_names[int(nodes[int(nodes[e].a)].name)] = true
-                if int(nodes[int(nodes[e].a)].name) < call_waits_never.len(): call_waits_never[int(nodes[int(nodes[e].a)].name)] = false
-        return 0
-    if nodes[a].kind != .call or nodes[a].type != 0 or nodes[int(nodes[a].a)].kind != .ident: return 0
-    if literal_typed_elements.has(a): return 2
-    name = int(nodes[int(nodes[a].a)].name)
-    s = lookup(name)
-    if s != 0 and syms[s].kind == .local: return 0
-    if s == 0 or syms[s].kind != .fns or syms[s].decl == 0 or nodes[int(syms[s].decl)].nlist2 == 0:
-        call_waits_mark(name)
-        return 0
-    found = false
-    d = call_waits_decl(name)
-    if d != 0:
-        sig = fn_sig(d)
-        if sig.ret != 0:
-            loop id in [0..int(nodes[d].nlist2)):
-                binds = call_waits_binds(int(sig.ntp), id)
-                mentioned = false
-                loop p in sig.params:
-                    if subst_partial(p, binds) != p: mentioned = true
-                if not mentioned and subst_partial(int(sig.ret), binds) != int(sig.ret): found = true
-    # (a generic function of the same name in another module may be missed: its call then says
-    # `cannot infer`, not wrong code)
-    if not found: call_waits_mark(name)
-    if found: 1 else: 0
-
 literal_typed_names: {int: bool} = {}
 literal_typed_elements: {int: bool} = {}
-
-# (the name's one generic function, or 0)
-call_waits_decl = (name: int) -> int:
-    own: int[]
-    collect_fns(name, &own)
-    if own.len() != 1 or nodes[own[0]].nlist2 == 0: return 0
-    own[0]
-
-literal_typed_call = (e: int) -> bool:
-    if nodes[int(nodes[e].a)].kind != .ident: return false
-    name = int(nodes[int(nodes[e].a)].name)
-    if call_waits_local(name): return false
-    s = lookup(name)
-    if s == 0 or syms[s].kind != .fns or syms[s].decl == 0 or nodes[int(syms[s].decl)].nlist2 == 0:
-        call_waits_mark(name)
-        return false
-    d = call_waits_decl(name)
-    if d == 0:
-        call_waits_mark(name)
-        return false
-    sig = fn_sig(d)
-    if nkids(e) > sig.params.len(): return false
-    loop id in [0..int(nodes[d].nlist2)):
-        literal = false
-        other = false
-        binds = call_waits_binds(int(sig.ntp), id)
-        loop i in 0.. and p in sig.params:
-            given = subst_partial(p, binds)
-            if given == p: continue
-            if i >= nkids(e) or given != T_INT or not (is_lit(kid(e, i)) or text_literal(kid(e, i))): other = true
-            else: literal = true
-        if literal and not other: return true
-    false
 
 # map call args to parameter slots; returns error message ("" on success)
 # kinds: per parameter, 1 keyword-only (after `...`), 2 position-only (`<v:T>`), 3 rest
@@ -1795,12 +1592,6 @@ call_order_rest = (n: int, given: int[], final: int[]):
     if select_call(n): select_written_priority(n)
 
 match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int: tm_match(pat0, a0, binds, depth)
-
-find_variant = (si: int, name: int) -> int:
-    check_struct_fields(si)
-    loop v in [0..int(structs[si].nvariants)):
-        if int(variants[int(structs[si].variants) + v].name) == name: return v
-    -1
 
 # Recognize scalar arithmetic without checking or folding it before context is
 # known. This also lets numeric branches rule out nonnumeric overloads.
@@ -2953,19 +2744,6 @@ conversion = (n: int, to0: int, args: int[]) -> int:
     if ft == T_MATH_INT and tk == .int_ and dewy_at(nodes[n].pos): int_domain_conversion(n, to)
     to
 
-# (Key(n): a simple enum's variant by its number, as int(Key.a) gives it, its variants numbered
-# 0, 1, 2... in order; one that is not there stops the program, saying which)
-enum_from_int = (n: int, et: int, a: int) -> int:
-    si = int(types[prune(et)].st)
-    nv = int(structs[si].nvariants)
-    loop v in [0..nv):
-        if variants[int(structs[si].variants) + v].value != v: fatal(nodes[n].pos, "{dt(et)}(n) needs its variants numbered 0, 1, 2... in order (some are given numbers of their own)")
-    pos = nodes[n].pos
-    c = bc_call("__enum_from", [a, bc_int(nv, pos), bc_str(dt(et), pos)], pos)
-    check_expr(c, T_INT)
-    nodes[n] = Node(kind = .conv, pos = pos, a = i32(last_checked), aux = i32(int(CV.int_)), type = i32(et), flags = i32(NF_CHECKED))
-    et
-
 # (collect_in's marks, by declaration: the pass that found it in `out` already;
 # checker_call_queries.dewy keeps the passes, and asks here for room)
 cin_mark: i32[]
@@ -3604,60 +3382,6 @@ habit_rest = (n: int, name: int, args: int[]):
     if nm == "random" and na == 1:
         if nodes[unnamed(args[0])].kind == .array: fatal(pos, "a random element is `random_item(xs)`")
         if num(args[0]): fatal(pos, "random takes where it starts and ends: `random(0, 10)` (a whole number: `random_int(0, 10)`)")
-
-# draw(prog, quad, Other(...)) where prog = make_shader(shader(vs, fs)) takes U: a Shader does not
-# carry its uniforms' type, so the one its functions take is found where the global is made
-shader_draw_check = (decl: int, args: int[]):
-    fnm = name_of(int(nodes[decl].name))
-    if fnm != "draw" and not starts_with(fnm, "draw_instanced") and not starts_with(fnm, "draw_indirect"): return
-    if args.len() < 3 or args[0] == 0: return
-    a0 = unnamed(args[0])
-    if nodes[a0].kind != .ident or nodes[a0].aux != i32(int(SK.global)) or nodes[a0].type == 0 or dt(ntype(a0)) != "Shader": return
-    g = int(nodes[a0].sym)
-    if g <= 0 or globals[g].decl == 0: return
-    ut = shader_uniforms_in(int(nodes[int(globals[g].decl)].b))
-    if ut == 0: return
-    loop i in [0..min(args.len(), nkids(decl))):
-        if name_of(int(nodes[kid(decl, i)].name)) != "params" or args[i] == 0: continue
-        a = unnamed(args[i])
-        if nodes[a].type == 0 or type_eq(prune(ntype(a)), prune(ut)): return
-        gn = name_of(int(globals[g].name))
-        fatal(nodes[a].pos, "{gn}'s shader functions take {dt(ut)} as their uniforms, and this is {dt(ntype(a))}: give it a {dt(ut)}")
-
-# the uniforms type of the shader functions named in e (make_shader(shader(vs, fs))), or 0
-shader_uniforms_in = (e: int) -> int:
-    if e == 0: return 0
-    if nodes[e].kind == .fnref:
-        f = int(nodes[e].sym)
-        if f > 0 and fns[f].ptypes.len() == 2 and type_eq(int(fns[f].ret), T_VEC4): return fns[f].ptypes[1]
-        return 0
-    if nodes[e].kind == .lambda or nodes[e].kind == .fn_: return 0
-    r = shader_uniforms_in(int(nodes[e].a))
-    if r != 0: return r
-    loop i in [0..nkids(e)):
-        r = shader_uniforms_in(kid(e, i))
-        if r != 0: return r
-    0
-
-# rotation_y(45): an angle in degrees given where radians go
-angle_check = (decl: int, args: int[]):
-    fnm = name_of(int(nodes[decl].name))
-    loop i in [0..min(args.len(), nkids(decl))):
-        a = args[i]
-        if a == 0 or not has_flag(a, NF_LITERAL): continue
-        txt = ""
-        v = 0.0
-        if nodes[a].kind == .int_lit:
-            v = f64(nodes[a].ival)
-            txt = "{nodes[a].ival}"
-        else if nodes[a].kind == .float_lit:
-            v = nodes[a].fval
-            txt = "{v}"
-        else: continue
-        if abs(v) <= 6.3: continue
-        pn = name_of(int(nodes[kid(decl, i)].name))
-        if pn == "angle" or pn == "yaw" or pn == "pitch" or pn == "roll" or (pn == "a" and (starts_with(fnm, "rotation") or starts_with(fnm, "quat_"))):
-            warn(nodes[a].pos, "{txt} radians is more than a whole turn: angles are in radians (a turn is TAU, 6.28); `{txt}deg` is {txt} degrees")
 
 # x.f where x is a union whose members are all structs with a field f of one type: n becomes
 # `let u = x; if u is A: u.f else ...` (x itself when it is a variable or field); -1 if not
@@ -5279,14 +5003,6 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
     r
 
 swizzle_chars = "xyzwrgbastpq"
-# whether every letter of a member name is a vector component letter (`xy`, `rgb`)
-swizzle_name = (name: int) -> bool:
-    s = name_of(name)
-    if len(s) < 1 or len(s) > 4: return false
-    loop i in [0..len(s)):
-        if swizzle_index(s[i]) < 0: return false
-    true
-
 # ---------------- operators ----------------
 # a call with n arguments can go to declaration d (as many parameters, or fewer with defaults)
 args_fit = (d: int, n: int) -> bool:
@@ -5400,24 +5116,6 @@ type_node_of = (t: int, pos: int) -> int:
     nodes[n].aux = -7
     nodes[n].ival = t
     n
-
-# a one-character string literal standing for its character code
-# the character of the source at position p (0 past its end)
-# (the value of an argument written as a whole number alone, 6 and not 6.0 or 5 + 1, even where
-# it became a float; -1 for anything else: 5 + 1 says the number is meant)
-written_int = (a: int) -> int:
-    if a == 0 or not is_lit(a): return -1
-    if nodes[a].kind != .int_lit and nodes[a].kind != .float_lit: return -1
-    f = pos_file(nodes[a].pos)
-    if f < 0 or f >= files.len(): return -1
-    src = files[f].src
-    o = pos_off(nodes[a].pos)
-    if o >= len(src) or not is_digit(src[o]): return -1
-    loop o < len(src) and is_digit(src[o]): o += 1
-    loop o < len(src) and src[o] == ' ': o += 1
-    if o >= len(src) or (src[o] != ')' and src[o] != ','): return -1
-    if nodes[a].kind == .int_lit: return nodes[a].ival
-    int(nodes[a].fval)
 
 charlike = (n: int) -> bool: nodes[n].kind == .str_lit and has_flag(n, NF_CHARLIKE)
 
@@ -6646,97 +6344,11 @@ index_deref = (pos: int, bt: int):
 
 expr_module = (m: int, name: int) -> int: module_lookup(m, name)
 
-# a swizzle whose components follow each other in memory (.x, .xy, .yzw): a place of its own
-swizzle_run = (n: int) -> bool:
-    s = name_of(int(nodes[n].name))
-    loop i in [1..len(s)):
-        if swizzle_index(s[i]) != swizzle_index(s[i - 1]) + 1: return false
-    true
-
-check_swizzle = (n: int, bt: int) -> int:
-    s = name_of(int(nodes[n].name))
-    nb = vec_n(bt)
-    if bt == T_MAT4: fatal(nodes[n].pos, "use m[i] to access matrix columns")
-    # (v.normalized, v.magnitude: Unity's properties, functions here)
-    if s == "normalized": fatal(nodes[n].pos, "a vector's direction is `normalize(v)`")
-    if s == "magnitude" or s == "length" or s == "Length": fatal(nodes[n].pos, "a vector's length is `v.norm`")
-    if s == "sqrMagnitude" or s == "lengthSquared": fatal(nodes[n].pos, "a vector's length squared is `length_sq(v)`")
-    if len(s) < 1 or len(s) > 4: fatal(nodes[n].pos, "invalid vector component '{s}' (a vector has x, y, z and w; `v.norm`, `normalize(v)`, `dot(a, b)` and the like are functions)")
-    loop i in [0..len(s)):
-        ci = swizzle_index(s[i])
-        if ci < 0 or ci >= nb: fatal(nodes[n].pos, "{dt(bt)} has no component '{byte_str(int(s[i]))}'")
-    nodes[n].aux = -4
-    if len(s) == 1: return vec_comp_type(bt)
-    if types[bt].sign:
-        if len(s) == 2: return T_IVEC2
-        if len(s) == 3: return T_IVEC3
-        return T_IVEC4
-    if len(s) == 2: return T_VEC2
-    if len(s) == 3: return T_VEC3
-    T_VEC4
-
 # The statements `if v is? none` checking their then-branch, whose top level may fill v
 # (opt_fill_subject): v (a variable, global or field path), the branch, and the alias of
 # v's latest fill there.
 # (OptFill: checker_state.dewy)
 opt_fill_watch: OptFill[]
-
-# A Dewy statement `if v is? none` (or `v =? none`) over an optional v, a variable not
-# narrowed or a global or field path: v, else 0. A then-branch that fills v at its top level
-# (opt_fill_at) and keeps it filled leaves v holding a value after the if. O(path length).
-opt_fill_subject = (cond: int) -> int:
-    k = nodes[cond].kind
-    a = 0
-    if k == .istype and nodes[cond].aux == -1: a = int(nodes[cond].a)
-    else if k == .binary and nodes[cond].op == i32(int(Tok.eq)) and nodes[int(nodes[cond].b)].kind == .none_lit: a = int(nodes[cond].a)
-    if a == 0 or not files[pos_file(nodes[cond].pos)].is_dewy or types[prune(ntype(a))].kind != .opt: return 0
-    if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)):
-        if int(locals[int(nodes[a].sym)].flags) & LF_ALIAS != 0: return 0
-        return a
-    if (nodes[a].kind == .field or nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.global))) and len(path_key(a)) > 0: return a
-    0
-
-# v = value (value not optional) at the top level of a branch watching v: its watch, else -1.
-# O(nesting of watching ifs * path length).
-opt_fill_at = (lhs: int, rt: int, value: int) -> int:
-    if types[rt].kind == .opt: return -1
-    local = nodes[lhs].kind == .ident and nodes[lhs].aux == i32(int(SK.local))
-    key = ""
-    if not local:
-        key = path_key(lhs)
-        if len(key) == 0: return -1
-    loop j in [0..opt_fill_watch.len()):
-        w = opt_fill_watch[j]
-        if int(w.block) != sibling_block: continue
-        sub = int(w.subject)
-        if local and nodes[sub].kind == .ident and nodes[sub].aux == i32(int(SK.local)) and nodes[sub].sym == nodes[lhs].sym or not local and path_key(sub) == key:
-            if can_coerce(value, rt, int(types[prune(ntype(sub))].elem)): return j
-            return -1
-    -1
-
-# after that assignment: v holds a value from here on, until written again (a path: as the
-# assignment narrowed it)
-opt_fill = (j: int, lhs: int, pos: int):
-    sub = int(opt_fill_watch[j].subject)
-    al = 0
-    if nodes[sub].kind == .ident and nodes[sub].aux == i32(int(SK.local)): al = opt_unwrap_alias(int(nodes[sub].sym), pos)
-    else:
-        al = path_alias(lhs)
-        if al < 0 or nodes[int(locals[al].alias)].kind != .unwrap: al = 0
-    opt_fill_watch[j].alias = i32(al)
-
-# from here on, optional variable l's name stands for its value
-opt_unwrap_alias = (l: int, pos: int) -> int:
-    e = mk(.unwrap, pos)
-    t = int(types[prune(int(locals[l].type))].elem)
-    nodes[e].a = i32(mk_ident_local(l, pos))
-    nodes[e].type = i32(t)
-    add_flag(e, NF_CHECKED)
-    nl = new_local(int(locals[l].name), t, pos)
-    locals[nl].flags = i32(LF_ALIAS)
-    locals[nl].alias = i32(e)
-    narrow_store_register(nl)
-    nl
 
 # `if` and `if let` run in checker_conditionals.dewy; these are its services.
 cond_block = (b: int, expected: int, value: bool, jumps: mut int) -> int:
@@ -6826,34 +6438,6 @@ neg_index_check = (b: int):
     e = "end"
     if k > 1: e = "end - {k - 1}"
     fatal(nodes[b].pos, "an index counts from 0; from the end it is `{e}` (`xs[end]` is the last, `xs[end - 2..]` the last three)")
-
-# Integer arithmetic around `end` cannot change the receiver. Other index
-# expressions retain a value snapshot before invoking user code.
-dewy_end_arithmetic = (n: int, name: int) -> bool:
-    if n == 0: return true
-    k = nodes[n].kind
-    if k == .int_lit: return true
-    if k == .ident:
-        if nodes[n].name == i32(name): return true
-        s = lookup(int(nodes[n].name))
-        if s == 0 or syms[s].kind != .local: return false
-        l = int(syms[s].ref)
-        # An alias can stand for a getter or a deferred element read. Keep its
-        # snapshot; an ordinary local (including a parameter) is just a value.
-        if int(locals[l].flags) & (LF_ALIAS | LF_UNNARROWED) != 0: return false
-        return is_int(int(locals[l].type))
-    if k == .binary or k == .unary or k == .range:
-        return dewy_end_arithmetic(int(nodes[n].a), name) and dewy_end_arithmetic(int(nodes[n].b), name) and dewy_end_arithmetic(int(nodes[n].c), name)
-    false
-
-dewy_end_substitute = (e: int, names: int[], source: int, pos: int):
-    if e == 0: return
-    if nodes[e].kind == .ident and names.contains(int(nodes[e].name)):
-        nodes[e] = nodes[dewy_index_end(clone(source), nodes[e].pos)]
-        return
-    loop c in [int(nodes[e].a), int(nodes[e].b), kid_c(e), kid_d(e)]: dewy_end_substitute(c, names, source, pos)
-    loop c in kids(e):
-        if c != int(nodes[e].b): dewy_end_substitute(c, names, source, pos)
 
 # xs[b] with b a bool[] (a mask) or int[] (indexes): the function that picks (or sets) them
 index_array_fn = (b: int, base: str) -> str:

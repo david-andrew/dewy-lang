@@ -1,0 +1,41 @@
+$runtime_checks
+from p"ast.jo" import (clone kid_c kid_d kids nodes)
+from p"check.jo" import (LF_ALIAS LF_UNNARROWED locals syms)
+from p"checker_expr.dewy" import (lookup)
+from p"checks_thin_expr.dewy" import (dewy_index_end)
+from p"types.jo" import (is_int)
+
+EndWord:type=int64<overflow='wrap'>
+# Integer arithmetic around `end` cannot change the receiver. Other index
+# expressions retain a value snapshot before invoking user code.
+dewy_end_arithmetic=(n:EndWord name:EndWord):>bool=>{
+    if n =? 0 {return true}
+    let k=nodes[n].kind
+    if k =? 'int_lit' {return true}
+    if k =? 'ident' {
+        if nodes[n].name =? int32(name) {return true}
+        let s=lookup(EndWord(nodes[n].name))
+        if s =? 0 or syms[s].kind not=? 'local' {return false}
+        let l=EndWord(syms[s].ref)
+        # An alias can stand for a getter or a deferred element read. Keep its
+        # snapshot; an ordinary local (including a parameter) is just a value.
+        if EndWord(locals[l].flags) & (LF_ALIAS | LF_UNNARROWED) not=? 0 {return false}
+        return is_int(EndWord(locals[l].type))
+    }
+    if k =? 'binary' or k =? 'unary' or k =? 'range' {
+        return dewy_end_arithmetic(EndWord(nodes[n].a) name) and dewy_end_arithmetic(EndWord(nodes[n].b) name) and dewy_end_arithmetic(EndWord(nodes[n].c) name)
+    }
+    false
+}
+dewy_end_substitute=(e:EndWord names:array<int64> source:EndWord pos:EndWord):>void=>{
+    if e =? 0 {return}
+    if nodes[e].kind =? 'ident' and names.contains(EndWord(nodes[e].name)) {
+        let replacement=dewy_index_end(clone(source) nodes[e].pos)
+        nodes[e]=nodes[replacement]
+        return
+    }
+    loop c in [EndWord(nodes[e].a) EndWord(nodes[e].b) kid_c(e) kid_d(e)] {dewy_end_substitute(c names source pos)}
+    loop c in kids(e) {
+        if c not=? EndWord(nodes[e].b) {dewy_end_substitute(c names source pos)}
+    }
+}

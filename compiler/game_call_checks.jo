@@ -1,0 +1,76 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_state.dewy'
+use 'diagnostic_exit.dewy'
+use 'expr.jo'
+use 'source_warnings.dewy'
+use 'type_ops.dewy'
+use 'types.jo'
+use 'util.jo'
+
+# draw(prog, quad, Other(...)) where prog = make_shader(shader(vs, fs)) takes U: a Shader does not
+# carry its uniforms' type, so the one its functions take is found where the global is made
+shader_draw_check = (decl: int, args: int[]):
+    fnm = name_of(int(nodes[decl].name))
+    if fnm != "draw" and not starts_with(fnm, "draw_instanced") and not starts_with(fnm, "draw_indirect"): return
+    if args.len() < 3 or args[0] == 0: return
+    a0 = unnamed(args[0])
+    if nodes[a0].kind != .ident or nodes[a0].aux != i32(int(SK.global)) or nodes[a0].type == 0 or dt(ntype(a0)) != "Shader": return
+    g = int(nodes[a0].sym)
+    if g <= 0 or globals[g].decl == 0: return
+    ut = shader_uniforms_in(int(nodes[int(globals[g].decl)].b))
+    if ut == 0: return
+    loop i in [0..min(args.len(), nkids(decl))):
+        if name_of(int(nodes[kid(decl, i)].name)) != "params" or args[i] == 0: continue
+        a = unnamed(args[i])
+        if nodes[a].type == 0 or type_eq(prune(ntype(a)), prune(ut)): return
+        gn = name_of(int(globals[g].name))
+        fatal(nodes[a].pos, "{gn}'s shader functions take {dt(ut)} as their uniforms, and this is {dt(ntype(a))}: give it a {dt(ut)}")
+# the uniforms type of the shader functions named in e (make_shader(shader(vs, fs))), or 0
+shader_uniforms_in = (e: int) -> int:
+    if e == 0: return 0
+    if nodes[e].kind == .fnref:
+        f = int(nodes[e].sym)
+        if f > 0 and fns[f].ptypes.len() == 2 and type_eq(int(fns[f].ret), T_VEC4): return fns[f].ptypes[1]
+        return 0
+    if nodes[e].kind == .lambda or nodes[e].kind == .fn_: return 0
+    r = shader_uniforms_in(int(nodes[e].a))
+    if r != 0: return r
+    loop i in [0..nkids(e)):
+        r = shader_uniforms_in(kid(e, i))
+        if r != 0: return r
+    0
+# rotation_y(45): an angle in degrees given where radians go
+angle_check = (decl: int, args: int[]):
+    fnm = name_of(int(nodes[decl].name))
+    loop i in [0..min(args.len(), nkids(decl))):
+        a = args[i]
+        if a == 0 or not has_flag(a, NF_LITERAL): continue
+        txt = ""
+        v = 0.0
+        if nodes[a].kind == .int_lit:
+            v = f64(nodes[a].ival)
+            txt = "{nodes[a].ival}"
+        else if nodes[a].kind == .float_lit:
+            v = nodes[a].fval
+            txt = "{v}"
+        else: continue
+        if abs(v) <= 6.3: continue
+        pn = name_of(int(nodes[kid(decl, i)].name))
+        if pn == "angle" or pn == "yaw" or pn == "pitch" or pn == "roll" or (pn == "a" and (starts_with(fnm, "rotation") or starts_with(fnm, "quat_"))):
+            warn(nodes[a].pos, "{txt} radians is more than a whole turn: angles are in radians (a turn is TAU, 6.28); `{txt}deg` is {txt} degrees")
+# (the value of an argument written as a whole number alone, 6 and not 6.0 or 5 + 1, even where
+# it became a float; -1 for anything else: 5 + 1 says the number is meant)
+written_int = (a: int) -> int:
+    if a == 0 or not is_lit(a): return -1
+    if nodes[a].kind != .int_lit and nodes[a].kind != .float_lit: return -1
+    f = pos_file(nodes[a].pos)
+    if f < 0 or f >= files.len(): return -1
+    src = files[f].src
+    o = pos_off(nodes[a].pos)
+    if o >= len(src) or not is_digit(src[o]): return -1
+    loop o < len(src) and is_digit(src[o]): o += 1
+    loop o < len(src) and src[o] == ' ': o += 1
+    if o >= len(src) or (src[o] != 41 and src[o] != 44): return -1
+    if nodes[a].kind == .int_lit: return nodes[a].ival
+    int(nodes[a].fval)

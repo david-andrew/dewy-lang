@@ -1,0 +1,76 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED add_flag mk nodes)
+from p"check.jo" import (LF_ALIAS locals narrow_store_register new_local)
+from p"expr.jo" import (can_coerce mk_ident_local ntype opt_fill_watch path_alias path_key)
+from p"sibling_types.jo" import (sibling_block)
+from p"types.jo" import (prune types)
+from p"util.jo" import (files pos_file)
+
+FillWord:type=int64<overflow='wrap'>
+# Node.op stores the ordinal of Tok.eq. For an identifier, Node.aux stores the SK ordinal.
+const FILL_EQ:int32=69
+const FILL_LOCAL:int32=1
+const FILL_GLOBAL:int32=2
+
+# A Dewy statement `if v is? none` (or `v =? none`) over an optional v, a variable not
+# narrowed or a global or field path: v, else 0. A then-branch that fills v at its top level
+# (opt_fill_at) and keeps it filled leaves v holding a value after the if. O(path length).
+opt_fill_subject=(cond:FillWord):>FillWord=>$unsafe {
+    let k=nodes.ptr[cond].kind
+    let a:FillWord=0
+    if k =? 'istype' and nodes.ptr[cond].aux =? -1 {a=FillWord(nodes.ptr[cond].a)}
+    else if k =? 'binary' and nodes.ptr[cond].op =? FILL_EQ and nodes.ptr[FillWord(nodes.ptr[cond].b)].kind =? 'none_lit' {a=FillWord(nodes.ptr[cond].a)}
+    if a =? 0 or not files[pos_file(nodes.ptr[cond].pos)].is_dewy or types.ptr[prune(ntype(a))].kind not=? 'opt' {return 0}
+    if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? FILL_LOCAL {
+        if FillWord(locals.ptr[FillWord(nodes.ptr[a].sym)].flags) & LF_ALIAS not=? 0 {return 0}
+        return a
+    }
+    if (nodes.ptr[a].kind =? 'field' or nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? FILL_GLOBAL) and (path_key(a) as array<uint8>).length >? 0 {return a}
+    0
+}
+# v = value (value not optional) at the top level of a branch watching v: its watch, else -1.
+# O(nesting of watching ifs * path length).
+opt_fill_at=(lhs:FillWord rt:FillWord value:FillWord):>FillWord=>$unsafe {
+    if types.ptr[rt].kind =? 'opt' {return -1}
+    let local=nodes.ptr[lhs].kind =? 'ident' and nodes.ptr[lhs].aux =? FILL_LOCAL
+    let key=""
+    if not local {
+        key=path_key(lhs)
+        if (key as array<uint8>).length =? 0 {return -1}
+    }
+    loop j in 0.. and w in opt_fill_watch {
+        if int64(w.block) not=? sibling_block {continue}
+        let sub=int64(w.subject)
+        if local and nodes.ptr[sub].kind =? 'ident' and nodes.ptr[sub].aux =? FILL_LOCAL and nodes.ptr[sub].sym =? nodes.ptr[lhs].sym or not local and path_key(sub) =? key {
+            if can_coerce(value rt FillWord(types.ptr[prune(ntype(sub))].elem)) {return j}
+            return -1
+        }
+    }
+    -1
+}
+# after that assignment: v holds a value from here on, until written again (a path: as the
+# assignment narrowed it)
+opt_fill=(j:FillWord lhs:FillWord pos:FillWord):>void=>$unsafe {
+    let sub=FillWord(opt_fill_watch[j].subject)
+    let al:FillWord=0
+    if nodes.ptr[sub].kind =? 'ident' and nodes.ptr[sub].aux =? FILL_LOCAL {al=opt_unwrap_alias(FillWord(nodes.ptr[sub].sym) pos)}
+    else {
+        al=path_alias(lhs)
+        if al <? 0 or nodes.ptr[FillWord(locals.ptr[al].alias)].kind not=? 'unwrap' {al=0}
+    }
+    opt_fill_watch[j].alias=int32(al)
+}
+# from here on, optional variable l's name stands for its value
+opt_unwrap_alias=(l:FillWord pos:FillWord):>FillWord=>$unsafe {
+    let e=mk('unwrap' pos)
+    let t=FillWord(types.ptr[prune(FillWord(locals.ptr[l].type))].elem)
+    let subject=mk_ident_local(l pos)
+    nodes[e].a=int32(subject)
+    nodes.ptr[e].type=int32(t)
+    add_flag(e NF_CHECKED)
+    let nl=new_local(FillWord(locals.ptr[l].name) t pos)
+    locals.ptr[nl].flags=int32(LF_ALIAS)
+    locals.ptr[nl].alias=int32(e)
+    narrow_store_register(nl)
+    nl
+}

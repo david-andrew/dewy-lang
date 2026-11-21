@@ -1,0 +1,97 @@
+$runtime_checks
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (syms)
+from p"checker_expr.dewy" import (lookup)
+from p"checker_signature.dewy" import (fn_sig)
+from p"checks_thin_expr.dewy" import (call_waits_binds call_waits_local call_waits_mark call_waits_skips subst_partial text_literal)
+from p"expr.jo" import (call_collect_fns is_lit literal_typed_elements literal_typed_names)
+from p"node_store.dewy" import (call_waits_never)
+from p"types.jo" import (T_INT)
+
+WaitWord:type=int64<overflow='wrap'>
+# Does the unchecked call a take its type from the parameter it meets, as a literal does
+# (node_store.dewy)? 1: the name's one function has a type parameter no parameter mentions
+# (`text=<A>(s:string):>Node<A>`); 2: a bare literal alone gives one, and a is an element of an
+# array literal argument. An array literal argument marks those elements and answers 0.
+# O(parameters) once per name, then skipped (call_waits_never) when the answer was no.
+call_waits=(a:int64):>int64=>$unsafe {
+    if nodes.ptr[a].kind =? 'array' {
+        loop i in [0..nkids(a)) {
+            let e=kid(a i)
+            if nodes.ptr[e].kind not=? 'call' or nodes.ptr[e].type not=? 0 {continue}
+            let head=WaitWord(nodes.ptr[e].a)
+            if nodes.ptr[head].kind not=? 'ident' {continue}
+            let name=WaitWord(nodes.ptr[head].name)
+            if call_waits_skips(name) or not literal_typed_call(e) {continue}
+            literal_typed_elements[e]=true
+            literal_typed_names[name]=true
+            if name <? call_waits_never.length {call_waits_never[name]=false}
+        }
+        return 0
+    }
+    if nodes.ptr[a].kind not=? 'call' or nodes.ptr[a].type not=? 0 or nodes.ptr[WaitWord(nodes.ptr[a].a)].kind not=? 'ident' {return 0}
+    if literal_typed_elements.has(a) {return 2}
+    let name=WaitWord(nodes.ptr[WaitWord(nodes.ptr[a].a)].name)
+    let s=lookup(name)
+    if s not=? 0 and syms.ptr[s].kind =? 'local' {return 0}
+    if s =? 0 or syms.ptr[s].kind not=? 'fns' or syms.ptr[s].decl =? 0 or nodes.ptr[WaitWord(syms.ptr[s].decl)].nlist2 =? 0 {
+        call_waits_mark(name)
+        return 0
+    }
+    let found=false
+    let d=call_waits_decl(name)
+    if d not=? 0 {
+        let sig=fn_sig(d)
+        if sig.ret not=? 0 {
+            loop id in [0..WaitWord(nodes.ptr[d].nlist2)) {
+                let binds=call_waits_binds(int64(sig.ntp) id)
+                let mentioned=false
+                loop p in sig.params {
+                    if subst_partial(p @binds) not=? p {mentioned=true}
+                }
+                if not mentioned and subst_partial(int64(sig.ret) @binds) not=? int64(sig.ret) {found=true}
+            }
+        }
+    }
+    # (a generic function of the same name in another module may be missed: its call then says
+    # `cannot infer`, not wrong code)
+    if not found {call_waits_mark(name)}
+    if found {1} else {0}
+}
+# (the name's one generic function, or 0)
+call_waits_decl=(name:WaitWord):>WaitWord=>$unsafe {
+    let own:array<int64>=[]
+    call_collect_fns(name @own)
+    if own.length not=? 1 or nodes.ptr[own[0]].nlist2 =? 0 {return 0}
+    own[0]
+}
+literal_typed_call=(e:WaitWord):>bool=>$unsafe {
+    if nodes.ptr[WaitWord(nodes.ptr[e].a)].kind not=? 'ident' {return false}
+    let name=WaitWord(nodes.ptr[WaitWord(nodes.ptr[e].a)].name)
+    if call_waits_local(name) {return false}
+    let s=lookup(name)
+    if s =? 0 or syms.ptr[s].kind not=? 'fns' or syms.ptr[s].decl =? 0 or nodes.ptr[WaitWord(syms.ptr[s].decl)].nlist2 =? 0 {
+        call_waits_mark(name)
+        return false
+    }
+    let d=call_waits_decl(name)
+    if d =? 0 {
+        call_waits_mark(name)
+        return false
+    }
+    let sig=fn_sig(d)
+    if nkids(e) >? sig.params.length {return false}
+    loop id in [0..WaitWord(nodes.ptr[d].nlist2)) {
+        let literal=false
+        let other=false
+        let binds=call_waits_binds(int64(sig.ntp) id)
+        loop i in 0.. and p in sig.params {
+            let given=subst_partial(p @binds)
+            if given =? p {continue}
+            if i >=? nkids(e) or given not=? T_INT or not (is_lit(kid(e i)) or text_literal(kid(e i))) {other=true}
+            else {literal=true}
+        }
+        if literal and not other {return true}
+    }
+    false
+}

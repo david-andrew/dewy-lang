@@ -1,0 +1,93 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (is_digit starts_with)
+from p"ast.jo" import (NF_LITERAL has_flag kid nkids nodes)
+from p"check.jo" import (fns globals)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (is_lit ntype unnamed)
+from p"source_warnings.dewy" import (warn)
+from p"type_ops.dewy" import (dt)
+from p"types.jo" import (T_VEC4 prune type_eq)
+from p"util.jo" import (files name_of pos_file pos_off)
+
+GameCheckWord:type=int64<overflow='wrap'>
+# draw(prog, quad, Other(...)) where prog = make_shader(shader(vs, fs)) takes U: a Shader does not
+# carry its uniforms' type, so the one its functions take is found where the global is made
+shader_draw_check=(decl:GameCheckWord args:array<int64>):>void=>$unsafe {
+    let fnm=name_of(GameCheckWord(nodes.ptr[decl].name))
+    if fnm not=? "draw" and not starts_with(fnm "draw_instanced") and not starts_with(fnm "draw_indirect") {return}
+    if args.length <? 3 or args[0] =? 0 {return}
+    let a0=unnamed(args[0])
+    if nodes.ptr[a0].kind not=? 'ident' or nodes.ptr[a0].aux not=? int32(2) or nodes.ptr[a0].type =? 0 or dt(ntype(a0)) not=? "Shader" {return}
+    let g=GameCheckWord(nodes.ptr[a0].sym)
+    if g <=? 0 or globals.ptr[g].decl =? 0 {return}
+    let ut=shader_uniforms_in(GameCheckWord(nodes.ptr[GameCheckWord(globals.ptr[g].decl)].b))
+    if ut =? 0 {return}
+    let params=nkids(decl)
+    let count:GameCheckWord=if params <? args.length {params} else {args.length}
+    loop i in [0..count) {
+        if name_of(GameCheckWord(nodes.ptr[kid(decl i)].name)) not=? "params" or args[i] =? 0 {continue}
+        let a=unnamed(args[i])
+        if nodes.ptr[a].type =? 0 or type_eq(prune(ntype(a)) prune(ut)) {return}
+        let gn=name_of(GameCheckWord(globals.ptr[g].name))
+        fatal(nodes.ptr[a].pos "{gn}'s shader functions take {dt(ut)} as their uniforms, and this is {dt(ntype(a))}: give it a {dt(ut)}");
+    }
+}
+# the uniforms type of the shader functions named in e (make_shader(shader(vs, fs))), or 0
+shader_uniforms_in=(e:GameCheckWord):>GameCheckWord=>$unsafe {
+    if e =? 0 {return 0}
+    if nodes.ptr[e].kind =? 'fnref' {
+        let f=GameCheckWord(nodes.ptr[e].sym)
+        if f >? 0 and fns.ptr[f].ptypes.length =? 2 and type_eq(GameCheckWord(fns.ptr[f].ret) T_VEC4) {return fns.ptr[f].ptypes[1]}
+        return 0
+    }
+    if nodes.ptr[e].kind =? 'lambda' or nodes.ptr[e].kind =? 'fn_' {return 0}
+    let r=shader_uniforms_in(GameCheckWord(nodes.ptr[e].a))
+    if r not=? 0 {return r}
+    loop i in [0..nkids(e)) {
+        r=shader_uniforms_in(kid(e i))
+        if r not=? 0 {return r}
+    }
+    0
+}
+# rotation_y(45): an angle in degrees given where radians go
+angle_check=(decl:GameCheckWord args:array<int64>):>void=>$unsafe {
+    let fnm=name_of(GameCheckWord(nodes.ptr[decl].name))
+    let params=nkids(decl)
+    let count:GameCheckWord=if params <? args.length {params} else {args.length}
+    loop i in [0..count) {
+        let a=args[i]
+        if a =? 0 or not has_flag(a NF_LITERAL) {continue}
+        let txt=""
+        let v:float64=0.0
+        if nodes.ptr[a].kind =? 'int_lit' {
+            v=float64(nodes.ptr[a].ival)
+            txt="{nodes.ptr[a].ival}"
+        }
+        else if nodes.ptr[a].kind =? 'float_lit' {
+            v=nodes.ptr[a].fval
+            txt="{v}"
+        }
+        else {continue}
+        if abs(v) <=? 6.3 {continue}
+        let pn=name_of(GameCheckWord(nodes.ptr[kid(decl i)].name))
+        if pn =? "angle" or pn =? "yaw" or pn =? "pitch" or pn =? "roll" or (pn =? "a" and (starts_with(fnm "rotation") or starts_with(fnm "quat_"))) {
+            warn(nodes.ptr[a].pos "{txt} radians is more than a whole turn: angles are in radians (a turn is TAU, 6.28); `{txt}deg` is {txt} degrees")
+        }
+    }
+}
+# (the value of an argument written as a whole number alone, 6 and not 6.0 or 5 + 1, even where
+# it became a float; -1 for anything else: 5 + 1 says the number is meant)
+written_int=(a:GameCheckWord):>GameCheckWord=>$unsafe {
+    if a =? 0 or not is_lit(a) {return -1}
+    if nodes.ptr[a].kind not=? 'int_lit' and nodes.ptr[a].kind not=? 'float_lit' {return -1}
+    let f=pos_file(nodes.ptr[a].pos)
+    if f <? 0 or f >=? files.length {return -1}
+    let src=files[f].src as array<uint8>
+    let o:GameCheckWord=pos_off(nodes.ptr[a].pos)
+    if o >=? src.length or not is_digit(src[o]) {return -1}
+    loop o <? src.length and is_digit(src[o]) {o += 1}
+    loop o <? src.length and src[o] =? b' ' {o += 1}
+    if o >=? src.length or (src[o] not=? b')' and src[o] not=? b',') {return -1}
+    if nodes.ptr[a].kind =? 'int_lit' {return nodes.ptr[a].ival}
+    int64(nodes.ptr[a].fval)
+}

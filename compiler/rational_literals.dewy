@@ -1,0 +1,154 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (lower repeat split to_int)
+from p"ast.jo" import (kid mk nkids nodes set_list)
+from p"check.jo" import (ensure_bundled_import fns lib_dir)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_field bc_ident bc_int)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (decimal_cached_type ntype rational_constants rational_shown word_rational_cached_type)
+from p"facts.jo" import (fact_divisors)
+from p"node_store.dewy" import (Node)
+from p"rational_types.dewy" import (bundled_rational_type)
+from p"types.jo" import (T_MATH_INT is_int prune telem)
+from p"unit_ops.dewy" import (quantity_gcd)
+from p"units.jo" import (quantity_base)
+from p"util.jo" import (files name_of pos_file)
+
+RationalWord:type=int64<overflow='wrap'>
+decimal_type=(pos:int64):>int64=>{
+    rational_literal_type(@decimal_cached_type "Rational" pos)
+}
+word_rational_type=(pos:RationalWord):>RationalWord=>{
+    rational_literal_type(@word_rational_cached_type "RationalWord" pos)
+}
+rational_literal_type=(@cached:int64 name:string pos:RationalWord):>RationalWord=>{
+    if cached not=? 0 {return cached}
+    ensure_bundled_import("rational.dewy" "$dewy_rational" pos)
+    let ty=bc_field(bc_ident("$dewy_rational" pos) name pos)
+    cached=telem(check_expr(ty 0))
+    cached
+}
+
+# An exact division's only failure is a zero divisor: the caller's obligation,
+# as an integer division's (facts.jo fact_divisor): an integer divisor, or a
+# rational one, whose numerator a constant or a guard (`b not=? 0`) gives.
+rational_divisor=(n:RationalWord):>void=>{
+    if nodes[n].kind not=? 'call' or nodes[n].aux not=? 0 or nodes[n].sym <=? 0 or nkids(n) not=? 2 {return}
+    let d=RationalWord(fns[RationalWord(nodes[n].sym)].decl)
+    if d =? 0 or files[pos_file(nodes[d].pos)].path not=? "{lib_dir}/rational.dewy" {return}
+    let e=kid(n 1)
+    loop nodes[e].kind =? 'conv' {e=RationalWord(nodes[e].a)}
+    # (a quantity divides as its number: the same obligation, said as one)
+    let t=quantity_base(prune(ntype(e)))
+    if is_int(t) or t =? T_MATH_INT or rational_constants.has(e) or bundled_rational_type(t) {fact_divisors[n]=1}
+}
+decimal_part=(digits:string pos:RationalWord):>RationalWord=>{
+    ensure_bundled_import("bigint.dewy" "$dewy_decimal_bigint" pos)
+    let bytes=digits as array<uint8>
+    let negative=bytes.length >? 0 and bytes[0] =? b'-'
+    let limbs:array<uint64>=[]
+    loop c in bytes {
+        if c =? b'-' or c =? b'+' {continue}
+        let carry=uint64<overflow='wrap'>(c - b'0')
+        loop i in [0..limbs.length) {
+            let word=uint64<overflow='wrap'>(limbs[i]) * 10 + carry
+            limbs[i]=word & 0xFFFFFFFF
+            carry=word >> 32
+        }
+        if carry not=? 0 {limbs.push(carry)}
+    }
+    let items:array<int64>=[]
+    loop limb in limbs {
+        let item=mk('int_lit' pos)
+        nodes[item].ival=RationalWord(limb)
+        items.push(item)
+    }
+    let magnitude=mk('array' pos)
+    set_list(magnitude items)
+    let sign=mk('int_lit' pos)
+    nodes[sign].ival=if limbs.length =? 0 {0} else if negative {-1} else {1}
+    let result=mk('call' pos)
+    nodes[result].a=int32(bc_field(bc_ident("$dewy_decimal_bigint" pos) "BigInt" pos))
+    set_list(result [sign magnitude])
+    result
+}
+# The normalized constant numerator/denominator (denominator nonzero, both
+# above the minimum word) as a direct construction: no runtime reduction.
+rational_constant_parts=(numerator:RationalWord denominator:RationalWord):>[int64 int64]=>{
+    let top=numerator
+    let bottom=denominator
+    if bottom <? 0 {
+        top=-top
+        bottom=-bottom
+    }
+    let common=quantity_gcd(top bottom)
+    if common >? 1 {
+        top=top // common
+        bottom=bottom // common
+    }
+    if top =? 0 {bottom=1}
+    [top bottom]
+}
+rational_constant=(numerator:RationalWord denominator:RationalWord pos:RationalWord word:bool=false shown:RationalWord=0):>RationalWord=>{
+    let parts=rational_constant_parts(numerator denominator)
+    ensure_bundled_import("rational.dewy" "$dewy_rational" pos)
+    decimal_type(pos);
+    let type_name=if word {"RationalWord"} else {"Rational"}
+    let result=mk('call' pos)
+    nodes[result].a=int32(bc_field(bc_ident("$dewy_rational" pos) type_name pos))
+    set_list(result [bc_int(parts[0] pos) bc_int(parts[1] pos) bc_int(shown pos)])
+    result
+}
+exact_decimal=(n:RationalWord):>RationalWord=>{
+    let pos=nodes[n].pos
+    let text=lower(name_of(RationalWord(nodes[n].sval)))
+    let exponent:RationalWord=0
+    let parts=split(text "e")
+    if parts.length =? 2 {
+        let parsed=to_int(parts[1])
+        if parsed =? none {fatal(pos "decimal exponent is too large")}
+        exponent=parsed
+    }
+    let digits=parts[0]
+    let fraction=split(digits ".")
+    if fraction.length =? 2 {
+        exponent -= (fraction[1] as array<uint8>).length
+        digits="{fraction[0]}{fraction[1]}"
+    }
+    let denominator="1"
+    if exponent >? 0 {
+        let zeros=repeat("0" exponent)
+        digits="{digits}{zeros}"
+    }
+    else if exponent <? 0 {
+        let zeros=repeat("0" (-exponent))
+        denominator="1{zeros}"
+    }
+    # Word-sized decimals fold to their reduced fraction at compilation.
+    let bytes=digits as array<uint8>
+    let negative=bytes.length >? 0 and bytes[0] =? b'-'
+    let start:RationalWord=0
+    if bytes.length >? 0 and (negative or bytes[0] =? b'+') {start=1}
+    loop start + 1 <? bytes.length and bytes[start] =? b'0' {start += 1}
+    if RationalWord(bytes.length) - start <=? 18 and (denominator as array<uint8>).length <=? 19 {
+        let top=to_int(digits[start..])
+        if top not=? none {
+            let bottom=to_int(denominator)
+            if bottom not=? none {
+                let signed=if negative {-RationalWord(top)} else {RationalWord(top)}
+                nodes[n]=nodes[rational_constant(signed bottom pos shown=1)]
+                let t=check_expr(n 0)
+                rational_constants[n]=rational_constant_parts(signed bottom)
+                rational_shown[n]=1
+                return t
+            }
+        }
+    }
+    ensure_bundled_import("rational.dewy" "$dewy_rational" pos)
+    decimal_type(pos);
+    let numerator=decimal_part(digits pos)
+    let divisor=decimal_part(denominator pos)
+    nodes[n]=Node(kind='call' pos=pos a=int32(bc_field(bc_ident("$dewy_rational" pos) "_decimal" pos)))
+    set_list(n [numerator divisor])
+    check_expr(n 0)
+}

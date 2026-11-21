@@ -1,0 +1,48 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_expr.dewy'
+use 'checks_builders.dewy'
+use 'diagnostic_exit.dewy'
+use 'expr.jo'
+use 'node_store.dewy'
+use 'type_ops.dewy'
+use 'types.jo'
+use 'util.jo'
+
+# ordering at pos is the program's Dewy code's: Dewy source, or the library's code inside an
+# instance the innermost program call that made it is Dewy's
+dewy_ordering = (pos: int) -> bool:
+    if not pos_in_lib(pos): return dewy_at(pos)
+    k = err_trail.len() - 1
+    loop k >= 0 and (err_trail[k] <= 0 or pos_in_lib(err_trail[k])): k -= 1
+    k >= 0 and dewy_at(err_trail[k])
+# the enum `.name` means where a value of type t is expected: t itself, or (t a union) the one
+# member enum with that variant
+variant_enum = (t0: int, name: int) -> int:
+    t = prune(t0)
+    if not is_union(t): return t
+    found = 0
+    loop m in union_members(t):
+        pm = prune(m)
+        if types[pm].kind == .enum_ and not is_union(pm) and find_variant(int(types[pm].st), name) >= 0:
+            if found != 0: return t
+            found = pm
+    if found == 0: return t
+    found
+find_variant = (si: int, name: int) -> int:
+    check_struct_fields(si)
+    loop v in [0..int(structs[si].nvariants)):
+        if int(variants[int(structs[si].variants) + v].name) == name: return v
+    -1
+# (Key(n): a simple enum's variant by its number, as int(Key.a) gives it, its variants numbered
+# 0, 1, 2... in order; one that is not there stops the program, saying which)
+enum_from_int = (n: int, et: int, a: int) -> int:
+    si = int(types[prune(et)].st)
+    nv = int(structs[si].nvariants)
+    loop v in [0..nv):
+        if variants[int(structs[si].variants) + v].value != v: fatal(nodes[n].pos, "{dt(et)}(n) needs its variants numbered 0, 1, 2... in order (some are given numbers of their own)")
+    pos = nodes[n].pos
+    c = bc_call("__enum_from", [a, bc_int(nv, pos), bc_str(dt(et), pos)], pos)
+    check_expr(c, T_INT)
+    nodes[n] = Node(kind = .conv, pos = pos, a = i32(last_checked), aux = i32(int(CV.int_)), type = i32(et), flags = i32(NF_CHECKED))
+    et

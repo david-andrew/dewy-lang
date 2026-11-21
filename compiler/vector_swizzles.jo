@@ -1,0 +1,41 @@
+use 'ast.jo'
+use 'checks_thin_expr.dewy'
+use 'diagnostic_exit.dewy'
+use 'type_ops.dewy'
+use 'types.jo'
+use 'util.jo'
+
+# whether every letter of a member name is a vector component letter (`xy`, `rgb`)
+swizzle_name = (name: int) -> bool:
+    s = name_of(name)
+    if len(s) < 1 or len(s) > 4: return false
+    loop i in [0..len(s)):
+        if swizzle_index(s[i]) < 0: return false
+    true
+# a swizzle whose components follow each other in memory (.x, .xy, .yzw): a place of its own
+swizzle_run = (n: int) -> bool:
+    s = name_of(int(nodes[n].name))
+    loop i in [1..len(s)):
+        if swizzle_index(s[i]) != swizzle_index(s[i - 1]) + 1: return false
+    true
+check_swizzle = (n: int, bt: int) -> int:
+    s = name_of(int(nodes[n].name))
+    nb = vec_n(bt)
+    if bt == T_MAT4: fatal(nodes[n].pos, "use m[i] to access matrix columns")
+    # (v.normalized, v.magnitude: Unity's properties, functions here)
+    if s == "normalized": fatal(nodes[n].pos, "a vector's direction is `normalize(v)`")
+    if s == "magnitude" or s == "length" or s == "Length": fatal(nodes[n].pos, "a vector's length is `v.norm`")
+    if s == "sqrMagnitude" or s == "lengthSquared": fatal(nodes[n].pos, "a vector's length squared is `length_sq(v)`")
+    if len(s) < 1 or len(s) > 4: fatal(nodes[n].pos, "invalid vector component '{s}' (a vector has x, y, z and w; `v.norm`, `normalize(v)`, `dot(a, b)` and the like are functions)")
+    loop i in [0..len(s)):
+        ci = swizzle_index(s[i])
+        if ci < 0 or ci >= nb: fatal(nodes[n].pos, "{dt(bt)} has no component '{byte_str(int(s[i]))}'")
+    nodes[n].aux = -4
+    if len(s) == 1: return vec_comp_type(bt)
+    if types[bt].sign:
+        if len(s) == 2: return T_IVEC2
+        if len(s) == 3: return T_IVEC3
+        return T_IVEC4
+    if len(s) == 2: return T_VEC2
+    if len(s) == 3: return T_VEC3
+    T_VEC4

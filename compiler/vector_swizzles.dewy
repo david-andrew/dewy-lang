@@ -1,0 +1,54 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (byte_str)
+from p"ast.jo" import (nodes)
+from p"checks_thin_expr.dewy" import (swizzle_index vec_comp_type vec_n)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"type_ops.dewy" import (dt)
+from p"types.jo" import (T_IVEC2 T_IVEC3 T_IVEC4 T_MAT4 T_VEC2 T_VEC3 T_VEC4 types)
+from p"util.jo" import (name_of)
+
+SwizzleWord:type=int64<overflow='wrap'>
+# whether every letter of a member name is a vector component letter (`xy`, `rgb`)
+swizzle_name=(name:SwizzleWord):>bool=>{
+    let letters=name_of(name) as array<uint8>
+    if letters.length <? 1 or letters.length >? 4 {return false}
+    loop letter in letters {
+        if swizzle_index(letter) <? 0 {return false}
+    }
+    true
+}
+
+# a swizzle whose components follow each other in memory (.x, .xy, .yzw): a place of its own
+swizzle_run=(n:SwizzleWord):>bool=>{
+    let letters=name_of(SwizzleWord(nodes[n].name)) as array<uint8>
+    loop i in [1..letters.length) {
+        if swizzle_index(letters[i]) not=? SwizzleWord(swizzle_index(letters[SwizzleWord(i) - 1])) + 1 {return false}
+    }
+    true
+}
+
+check_swizzle=(n:SwizzleWord bt:SwizzleWord):>SwizzleWord=>{
+    let s=name_of(SwizzleWord(nodes[n].name))
+    let letters=s as array<uint8>
+    let nb=vec_n(bt)
+    if bt =? T_MAT4 {fatal(nodes[n].pos "use m[i] to access matrix columns")}
+    # (v.normalized, v.magnitude: Unity's properties, functions here)
+    if s =? "normalized" {fatal(nodes[n].pos "a vector's direction is `normalize(v)`")}
+    if s =? "magnitude" or s =? "length" or s =? "Length" {fatal(nodes[n].pos "a vector's length is `v.norm`")}
+    if s =? "sqrMagnitude" or s =? "lengthSquared" {fatal(nodes[n].pos "a vector's length squared is `length_sq(v)`")}
+    if letters.length <? 1 or letters.length >? 4 {fatal(nodes[n].pos "invalid vector component '{s}' (a vector has x, y, z and w; `v.norm`, `normalize(v)`, `dot(a, b)` and the like are functions)")}
+    loop letter in letters {
+        let ci=swizzle_index(letter)
+        if ci <? 0 or ci >=? nb {fatal(nodes[n].pos "{dt(bt)} has no component '{byte_str(SwizzleWord(letter))}'")}
+    }
+    nodes[n].aux=-4
+    if letters.length =? 1 {return vec_comp_type(bt)}
+    if types[bt].sign {
+        if letters.length =? 2 {return T_IVEC2}
+        if letters.length =? 3 {return T_IVEC3}
+        return T_IVEC4
+    }
+    if letters.length =? 2 {return T_VEC2}
+    if letters.length =? 3 {return T_VEC3}
+    T_VEC4
+}

@@ -1,0 +1,58 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED nodes)
+from p"check.jo" import (check_struct_fields dewy_at)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_call bc_int bc_str)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (CV last_checked)
+from p"node_store.dewy" import (Node)
+from p"type_ops.dewy" import (dt)
+from p"types.jo" import (T_INT is_union prune structs types union_members variants)
+from p"util.jo" import (err_trail pos_in_lib)
+
+EnumExprWord:type=int64<overflow='wrap'>
+# ordering at pos is the program's Dewy code's: Dewy source, or the library's code inside an
+# instance the innermost program call that made it is Dewy's
+dewy_ordering=(pos:EnumExprWord):>bool=>{
+    if not pos_in_lib(pos) {return dewy_at(pos)}
+    let k=EnumExprWord(err_trail.length) - 1
+    loop k >=? 0 and (err_trail[k] <=? 0 or pos_in_lib(err_trail[k])) {k -= 1}
+    k >=? 0 and dewy_at(err_trail[k])
+}
+# the enum `.name` means where a value of type t is expected: t itself, or (t a union) the one
+# member enum with that variant
+variant_enum=(t0:EnumExprWord name:EnumExprWord):>EnumExprWord=>$unsafe {
+    let t=prune(t0)
+    if not is_union(t) {return t}
+    let found:EnumExprWord=0
+    loop m in union_members(t) {
+        let pm=prune(m)
+        if types.ptr[pm].kind =? 'enum_' and not is_union(pm) and find_variant(EnumExprWord(types.ptr[pm].st) name) >=? 0 {
+            if found not=? 0 {return t}
+            found=pm
+        }
+    }
+    if found =? 0 {return t}
+    found
+}
+find_variant=(si:EnumExprWord name:EnumExprWord):>EnumExprWord=>$unsafe {
+    check_struct_fields(si)
+    loop v in [0..EnumExprWord(structs.ptr[si].nvariants)) {
+        if EnumExprWord(variants.ptr[EnumExprWord(structs.ptr[si].variants) + v].name) =? name {return v}
+    }
+    -1
+}
+# (Key(n): a simple enum's variant by its number, as int(Key.a) gives it, its variants numbered
+# 0, 1, 2... in order; one that is not there stops the program, saying which)
+enum_from_int=(n:EnumExprWord et:EnumExprWord a:EnumExprWord):>EnumExprWord=>$unsafe {
+    let si=EnumExprWord(types.ptr[prune(et)].st)
+    let nv=EnumExprWord(structs.ptr[si].nvariants)
+    loop v in [0..nv) {
+        if variants.ptr[EnumExprWord(structs.ptr[si].variants) + v].value not=? v {fatal(nodes.ptr[n].pos "{dt(et)}(n) needs its variants numbered 0, 1, 2... in order (some are given numbers of their own)")}
+    }
+    let pos=nodes.ptr[n].pos
+    let c=bc_call("__enum_from" [a bc_int(nv pos) bc_str(dt(et) pos)] pos)
+    check_expr(c T_INT);
+    nodes.ptr[n]=Node(kind='conv' pos=pos a=int32(last_checked) aux=int32(int64(CV.int_)) type=int32(et) flags=int32(NF_CHECKED))
+    et
+}
