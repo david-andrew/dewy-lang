@@ -286,7 +286,11 @@ failure reports and run-time element checks, misplaced field names, sibling fiel
 contracts, dictionary sibling calls, refinement resolution, coercion into a
 refined type, projection types and span copies. Jo keeps the predicate table,
 interning, spans and requests; resolution swaps the binders and holder name
-through places bound once and restores them in the same order. Selectors and
+through places bound once and restores them in the same order. The
+compilation reset replaces every refinement table whole, written directly as a
+single pass at the start of checking. `refine_metadata.dewy` also owns predicate
+interning and refined-type construction over Jo's predicate and span tables, so
+`refine.jo` now holds only refinement state and its imports. Selectors and
 operands are captured in the order gen_assign and gen_intrinsic evaluate them,
 paired-field runs and sibling/self shortcuts are tried first, and the rewritten
 block, its hints and its shrink candidates keep their original order. Jo keeps the

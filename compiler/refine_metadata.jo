@@ -286,3 +286,8 @@ ref_validate_record_fields = (t: int, pos: int):
             if ready: done[i] = true
     loop yes in done:
         if not yes: fatal(pos, "cyclic dependent field refinements")
+
+# Predicate tables stay with their owner; the leaf borrows the interner.
+ref_intern = (atoms: RefAtom[]) -> int: ref_atoms_intern(ref_predicates, atoms)
+
+mk_refined = (base0: int, predicate: int) -> int: tr_make(base0, predicate, ref_spans.get(predicate) ?? -1)

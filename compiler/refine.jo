@@ -119,34 +119,6 @@ substitution_refinement_binding = type_substitute_refinements(&substitution_refi
 total_literals: {int: bool} = {}
 
 
-refine_reset = ():
-    nd_contracts_reset()
-    str_sets = [[]]
-    total_literals = {}
-    str_set_types = [0]
-    ref_predicates = [[]]
-    refine_active = false
-    refine_bindings.fields = []
-    ref_addr_type = 0
-    refine_bindings.formals = []
-    refine_bindings.self = 0
-    refine_requests = []
-    refine_owners = {}
-    ref_narrowing = {}
-    ref_spans = {}
-    ref_holder_elems = {}
-    ref_holder_name = 0
-    ref_self_active = false
-    ref_self_elements = {}
-    ref_self_established = {}
-    ref_self_shrinks = {}
-    ref_self_direct = {}
-    ref_sib_sums = {}
-
-# Predicate tables stay with their owner; the leaf borrows the interner.
-ref_intern = (atoms: RefAtom[]) -> int: ref_atoms_intern(ref_predicates, atoms)
-
-mk_refined = (base0: int, predicate: int) -> int: tr_make(base0, predicate, ref_spans.get(predicate) ?? -1)
 
 # (the parameter type finish_arg is coercing an argument to: its formals are that call's)
 refine_arg_target = 0

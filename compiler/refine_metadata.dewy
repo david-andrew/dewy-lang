@@ -3,9 +3,9 @@ from p"ast.jo" import (kid kids nkids nodes)
 from p"check.jo" import (LF_ALIAS globals locals)
 from p"expr.jo" import (CV ntype is_nd)
 from p"facts_values.dewy" import (fact_type)
-from p"refine.jo" import (ref_pair_checks ref_predicates ref_self_active ref_self_direct ref_self_elements)
-from p"refine_predicates.dewy" import (ref_atoms_have_kind ref_atoms_interval)
-from p"refinement_types.dewy" import (FACT_MIN FactBound RefTerm)
+from p"refine.jo" import (ref_pair_checks ref_predicates ref_self_active ref_self_direct ref_self_elements ref_spans)
+from p"refine_predicates.dewy" import (ref_atoms_have_kind ref_atoms_interval ref_atoms_intern)
+from p"refinement_types.dewy" import (FACT_MIN FactBound RefTerm RefAtom)
 from p"safe_paths.jo" import (ut_safe_used)
 from p"types.jo" import (T_U64 fields has_var is_int is_union prune struct_targ structs targ tkind type_eq types type_args T_INT T_MATH_INT)
 from p"host_binds.jo" import (ref_fields_host)
@@ -17,6 +17,7 @@ from p"util.jo" import (err_notes name_of)
 from p"type_ops.dewy" import (dt)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"refine_rare.dewy" import (ref_self_misplaced ref_sib_fields ref_projection_type)
+from p"type_refinement.dewy" import (tr_make)
 
 RefineWord:type=int64<overflow='wrap'>
 representation_type=(t0:int64):>int64=>$unsafe {
@@ -309,4 +310,11 @@ ref_validate_record_fields=(t:int64 pos:int64):>void=>$unsafe {
     loop yes in done {
         if not yes {fatal(pos "cyclic dependent field refinements");}
     }
+}
+# Predicate tables stay with their owner; the leaf borrows the interner.
+ref_intern=(atoms:array<RefAtom>):>int64=>{
+    ref_atoms_intern(@ref_predicates atoms)
+}
+mk_refined=(base0:int64 predicate:int64):>int64=>{
+    tr_make(base0 predicate ref_spans.get(predicate) ?? -1)
 }
