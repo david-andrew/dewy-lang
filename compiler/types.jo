@@ -1,3 +1,4 @@
+use 'type_access.dewy'
 use 'host_binds.jo'
 use 'type_refinement.dewy'
 use 'type_match.dewy'
@@ -79,19 +80,19 @@ T_IVEC2 = 0
 T_IVEC3 = 0
 T_IVEC4 = 0
 
-targ = (t: int, i: int) -> int: int(type_args[int(types[t].args) + i])
-tkind = (t: int) -> TK: types[prune(t)].kind
-telem = (t: int) -> int: int(types[prune(t)].elem)
-has_var = (t: int) -> bool: int(types[t].flags) & TF_HAS_VAR != 0
+targ = (t: int, i: int) -> int: type_access_targ(t, i)
+tkind = (t: int) -> TK: type_access_tkind(t)
+telem = (t: int) -> int: type_access_telem(t)
+has_var = (t: int) -> bool: type_access_has_var(t)
 
-mk_type = (t: TypeInfo, args: int[]) -> int: type_intern(&t, args)
+mk_type = (t: TypeInfo, args: int[]) -> int: type_access_mk_type(t, args)
 
 # secret<T> (docs/design/decisions.md): T's value under a compile-time wrapper. Its
 # representation is T's (layout, lowering: quantity_base strips it); only the checker tells them
 # apart, so the value reaches no output except as `<redacted>` and leaves only through `.reveal`.
 secrets_seen = false     # (a secret type was made: until then secret_repr has nothing to do)
 
-fn_type_pack = (t: int) -> bool: types[t].kind == .fn_ and types[t].sign
+fn_type_pack = (t: int) -> bool: type_access_fn_type_pack(t)
 
 values_any = false   # (some value of several values was made: their checks run only then)
 
@@ -100,37 +101,20 @@ var_counter = 0
 # has no type a zonk would change)
 type_binds = 0
 
-prune = (t0: int) -> int:
-    t = t0
-    loop t != 0 and types[t].kind == .var and types[t].ref != 0: t = int(types[t].ref)
-    t
+prune = (t0: int) -> int: type_access_prune(t0)
 
-is_int = (t: int) -> bool: types[prune(t)].kind == .int_
-is_float = (t: int) -> bool: types[prune(t)].kind == .float_
-is_numeric = (t: int) -> bool:
-    k = types[prune(t)].kind
-    k == .int_ or k == .float_
-is_vec = (t: int) -> bool: types[prune(t)].kind == .vec
+is_int = (t: int) -> bool: type_access_is_int(t)
+is_float = (t: int) -> bool: type_access_is_float(t)
+is_numeric = (t: int) -> bool: type_access_is_numeric(t)
+is_vec = (t: int) -> bool: type_access_is_vec(t)
 
-struct_targ = (si: int, i: int) -> int: int(type_args[int(structs[si].targs) + i])
+struct_targ = (si: int, i: int) -> int: type_access_struct_targ(si, i)
 
-type_eq = (a0: int, b0: int) -> bool:
-    a = prune(a0)
-    b = prune(b0)
-    if a == b: return true
-    if a == 0 or b == 0: return false
-    if not has_var(a) and not has_var(b): return false
-    type_query_equal_shape(types, structs, type_args, a, b)
+type_eq = (a0: int, b0: int) -> bool: type_access_type_eq(a0, b0)
 
-align_up = (x: int, a: int) -> int: (x + a - 1) & ~(a - 1)
-tsize = (t: int) -> int:
-    layout(t)
-    int(types[prune(t)].size)
-talign = (t: int) -> int:
-    layout(t)
-    a = int(types[prune(t)].align)
-    if a == 0: return 1
-    a
+align_up = (x: int, a: int) -> int: type_access_align_up(x, a)
+tsize = (t: int) -> int: type_access_tsize(t)
+talign = (t: int) -> int: type_access_talign(t)
 
 # (a type's text is cut short past 150 of its parts: types built from aliases of aliases,
 # (F, F) -> int with F = (G, G) -> int..., would spell out exponentially)
@@ -148,15 +132,9 @@ ts_params: int[]
 # ---------- unions ----------
 # A | B | C is a tagged value laid out like an enum: variant i holds member i. Members are flat,
 # distinct and sorted by type id, so A | B is B | A; T | none is T?, and a single member is itself.
-is_union = (t0: int) -> bool:
-    t = prune(t0)
-    types[t].kind == .enum_ and structs[int(types[t].st)].union_
+is_union = (t0: int) -> bool: type_access_is_union(t0)
 
-union_members = (t0: int) -> int[]:
-    si = int(types[prune(t0)].st)
-    out: int[]
-    loop i in [0..int(structs[si].ntargs)): out.push(struct_targ(si, i))
-    out
+union_members = (t0: int) -> int[]: type_access_union_members(t0)
 
 # mk_union supplies flat, sorted member IDs. Concrete unions are canonical;
 # unresolved members still need structural matching until inference finishes.

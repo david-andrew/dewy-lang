@@ -6,6 +6,7 @@ LEAF_HOMES = {
     'ast_access': 'ast.jo',
     'directive_index': 'directives.jo',
     'nd_contract_query': 'nd_contracts.jo',
+    'type_access': 'types.jo',
     'util_ops': 'util.jo',
     'loops_emit': 'loops.jo',
     'loops_vector_emit': 'loops.jo',

@@ -76,7 +76,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `node_store` | `node_store.jo` | Dewy node/layout/list operations | Flagships +0.13%; lex+parse +0.25%, resolve+check +0.29%; borrowed arenas. |
 | `ast_access` | `ast_access.jo` | Dewy child and flag operations and declaration queries | Direct arena reads inline. Writes retain the node and list stores' copy-on-write behavior. |
 | `intern`, `util_ops` | Same stems + `.jo` | Dewy hash/probe/insert, name publication and source-position queries | Hits borrow the input bytes. New names use the raw byte slice primitive. |
-| `directive_index` | `directive_index.jo` | Dewy scope indexing, cache and policy lookup | Stable generations skip index synchronization. Pushes extend the index; truncations rebuild it. |
+| `directive_index` | `directive_index.jo` | Dewy scope indexing, cache and policy lookup | Stable generations skip index synchronization. Pushes extend the index, and truncations rebuild it. |
 | `nd_contract_query` | `nd_contract_query.jo` | Dewy N-D call classification and mutable entry checks | Per-instance classification cache, existing borrowed argument routes and shape tables. |
 | `dewy_lexer` | `dewy_lexer.jo` | Dewy tokenizing loop | O(bytes + amortized interning); presized slots, borrowed tables/host. |
 | `dewy_scan` | `dewy_scan.jo` | Dewy bracket/arm scans | O(requested tokens); no whole-file prepass. |
@@ -97,7 +97,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `refine_queries` | `refine_queries.jo` | Dewy containment/formals | Requested type occurrences + inference links; depth cap 32. |
 | `refine_intervals` | `refine_intervals.jo` | Dewy integer type domains | O(inference links + A log A); retain unsigned upper-half bits. |
 | `refine_keys` | `refine_keys.jo` | Dewy finite dictionary keys | Requested edges + emitted keys; reject distances >4096, including wrapped negative spans. |
-| `type_queries` | `type_queries.jo` | Dewy equality/occurs-check | O(visited occurrences + inference links); hot root guards stay Jo. |
+| `type_queries`, `type_access` | Same stems + `.jo` | Dewy equality/occurs-check, type and layout queries, and interning requests | O(visited occurrences + inference links). Root guards read arena fields directly. |
 | `checker_services`, `refine_strings` | `checker_services.jo`, `refine_strings.jo` | Dewy interning interface, set publication/constants | O(S*M²) search; one host call per new member/constant; peak flagship phase +0.115%. |
 | `refine_storage` | `refine_storage.jo` | Dewy storage-contract traversal | O(V * D), D≤32; private ancestor stack, unresolved-record callbacks; peak flagship phase +0.054%. |
 | `refine_projection` | `refine_projection.jo` | Dewy projection validation | O(path + scanned field runs + inference links); lazy fields, dialect/runtime request and first-error status. |

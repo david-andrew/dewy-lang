@@ -1,0 +1,78 @@
+$runtime_checks
+
+from p"checker_types.dewy" import (TK TypeInfo)
+from p"type_intern.dewy" import type_intern
+from p"type_ops.dewy" import layout
+from p"type_queries.dewy" import type_query_equal_shape
+from p"types.jo" import (TF_HAS_VAR structs type_args types)
+
+TypeAccessWord:type=int64<overflow='wrap'>
+
+# The interner consumes the request synchronously and never retains its address.
+let type_access_inputs:array<TypeInfo>=[TypeInfo[]]
+let type_access_input:ptr<TypeInfo>=$unsafe type_access_inputs.ptr
+
+type_access_targ=(t:TypeAccessWord i:TypeAccessWord):>int64=>$unsafe type_args.ptr[TypeAccessWord(types.ptr[t].args) + i]
+type_access_tkind=(t:int64):>TK=>$unsafe types.ptr[type_access_prune(t)].kind
+type_access_telem=(t:int64):>int64=>$unsafe types.ptr[type_access_prune(t)].elem
+type_access_has_var=(t:TypeAccessWord):>bool=>$unsafe (TypeAccessWord(types.ptr[t].flags) & TF_HAS_VAR) not=? 0
+
+type_access_mk_type=(t:TypeInfo args:array<int64>):>int64=>$unsafe {
+    type_access_input[0]=t
+    type_intern(type_access_input args)
+}
+
+type_access_fn_type_pack=(t:TypeAccessWord):>bool=>$unsafe types.ptr[t].kind =? 'fn_' and types.ptr[t].sign
+
+type_access_prune=(t0:TypeAccessWord):>int64=>$unsafe {
+    let t=t0
+    let rows=types.ptr
+    loop t not=? 0 and rows[t].kind =? 'var' and rows[t].ref not=? 0 {
+        t=TypeAccessWord(rows[t].ref)
+    }
+    t
+}
+
+type_access_is_int=(t:int64):>bool=>$unsafe types.ptr[type_access_prune(t)].kind =? 'int_'
+type_access_is_float=(t:int64):>bool=>$unsafe types.ptr[type_access_prune(t)].kind =? 'float_'
+type_access_is_numeric=(t:int64):>bool=>$unsafe {
+    let k=types.ptr[type_access_prune(t)].kind
+    k =? 'int_' or k =? 'float_'
+}
+type_access_is_vec=(t:int64):>bool=>$unsafe types.ptr[type_access_prune(t)].kind =? 'vec'
+
+type_access_struct_targ=(si:TypeAccessWord i:TypeAccessWord):>int64=>$unsafe type_args.ptr[TypeAccessWord(structs.ptr[si].targs) + i]
+
+type_access_type_eq=(a0:int64 b0:int64):>bool=>{
+    let a=type_access_prune(a0)
+    let b=type_access_prune(b0)
+    if a =? b {return true}
+    if a =? 0 or b =? 0 {return false}
+    if not type_access_has_var(a) and not type_access_has_var(b) {return false}
+    type_query_equal_shape(@types @structs @type_args a b)
+}
+
+type_access_align_up=(x:TypeAccessWord a:TypeAccessWord):>int64=>(x + a - 1) & ~(a - 1)
+type_access_tsize=(t:int64):>int64=>$unsafe {
+    layout(t)
+    int64(types.ptr[type_access_prune(t)].size)
+}
+type_access_talign=(t:int64):>int64=>$unsafe {
+    layout(t)
+    let a=types.ptr[type_access_prune(t)].align
+    if a =? 0 {return 1}
+    int64(a)
+}
+
+type_access_is_union=(t0:int64):>bool=>$unsafe {
+    let t=type_access_prune(t0)
+    types.ptr[t].kind =? 'enum_' and structs.ptr[TypeAccessWord(types.ptr[t].st)].union_
+}
+
+type_access_union_members=(t0:int64):>array<int64>=>$unsafe {
+    let si=TypeAccessWord(types.ptr[type_access_prune(t0)].st)
+    let count=int64(structs.ptr[si].ntargs)
+    let out:array<int64>=[]
+    loop i in [0..count) {out.push(type_access_struct_targ(si i))}
+    out
+}
