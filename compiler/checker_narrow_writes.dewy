@@ -1,0 +1,53 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED add_flag nodes)
+from p"check.jo" import (LF_ALIAS LF_UNNARROWED ctxs cx locals narrow_store_heads narrow_store_next narrowed_var new_sym push_scope_sym syms)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checks_thin.dewy" import (narrow_invalidate narrow_store_keeps)
+from p"expr.jo" import (last_checked path_forget path_narrows path_rooted_l)
+from p"types.jo" import (prune)
+
+NarrowWriteWord:type=int64<overflow='wrap'>
+
+narrow_store_root=(l0:NarrowWriteWord):>NarrowWriteWord=>{
+    let l=l0
+    loop (NarrowWriteWord(locals[l].flags) & LF_ALIAS) not=? 0 and locals[l].alias not=? 0 {
+        let u=narrowed_var(l)
+        if u not=? 0 {l=u}
+        else {
+            let a=NarrowWriteWord(locals[l].alias)
+            if nodes[a].kind not=? 'ident' or nodes[a].aux not=? 1 {return 0}
+            l=NarrowWriteWord(nodes[a].sym)
+        }
+    }
+    l
+}
+
+# A whole-variable replacement invalidates tag evidence through every name
+# for that storage. Payload writes of the same member retain their tag.
+unnarrow_assign=(s:NarrowWriteWord):>void=>{
+    let lhs=NarrowWriteWord(nodes[s].a)
+    if nodes[lhs].kind not=? 'ident' {return}
+    let sy=lookup(NarrowWriteWord(nodes[lhs].name))
+    if sy =? 0 or syms[sy].kind not=? 'local' {return}
+    let l=NarrowWriteWord(syms[sy].ref)
+    let u=narrowed_var(l)
+    let head:NarrowWriteWord=0
+    if narrow_store_heads.length >? 0 {head=narrow_store_heads.get(narrow_store_root(l)) ?? 0}
+    if u =? 0 and head =? 0 {return}
+    let rt=prune(check_expr(NarrowWriteWord(nodes[s].b) 0))
+    let rhs=last_checked
+    nodes[s].b=int32<overflow='wrap'>(rhs)
+    add_flag(rhs NF_CHECKED)
+    loop head not=? 0 {
+        let a=head
+        head=narrow_store_next.get(a) ?? 0
+        if locals[a].owner not=? ctxs[cx].inst or (NarrowWriteWord(locals[a].flags) & LF_UNNARROWED) not=? 0 {continue}
+        if not narrow_store_keeps(a rhs rt) {narrow_invalidate(a)}
+        # Replacing the parent also retires narrowed paths inside its payload.
+        if path_narrows >? 0 and a <? path_rooted_l.length and path_rooted_l[a] {path_forget("#L{a}")}
+    }
+    if u =? 0 or narrow_store_keeps(l rhs rt) {return}
+    narrow_invalidate(l)
+    let nm=NarrowWriteWord(nodes[lhs].name)
+    push_scope_sym(nm new_sym(nm 'local' u 0))
+}

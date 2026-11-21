@@ -1,0 +1,86 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (lower starts_with upper)
+from p"ast.jo" import (nodes)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_DECL LF_ELEMALIAS LF_MUTPARAM LF_PARAM LF_QUIET LF_READ LF_SHARED LF_SOAELEM copy_writes dewy_target_dropped fns globals locals modules)
+from p"checker_warning_queries.dewy" import (dewy_unused_name_hint target_dropped_use)
+from p"checks_thin.dewy" import (warn_unused_copy)
+from p"dewy_method_ops.dewy" import (dewy_is_method)
+from p"poly_closure.jo" import (poly_families poly_pending_warnings)
+from p"source_warnings.dewy" import (warn)
+from p"spelling.dewy" import (edit_distance)
+from p"util.jo" import (files name_of pos_file pos_in_lib)
+
+LocalWarningWord:type=int64<overflow='wrap'>
+
+# a function's variables whose fields or elements it changes but whose value it never reads: a
+# copy changed for nothing (`if let e = enemies.find(...): e.hp -= 5` leaves the enemy as it was)
+copy_write_warnings=(f:LocalWarningWord):>void=>{
+    if poly_families.length >? 1 and (poly_pending_warnings.get(f) ?? false) {return}
+    unused_local_warnings(f)
+    if copy_writes.length =? 0 {return}
+    let skip=LF_READ | LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_ELEMALIAS | LF_SOAELEM | LF_SHARED
+    loop l in fns[f].locals {
+        if not copy_writes.has(l) or LocalWarningWord(locals[l].flags) & skip not=? 0 {continue}
+        let nm=name_of(LocalWarningWord(locals[l].name))
+        if starts_with(nm "#") or starts_with(nm "$") or starts_with(nm "__") or pos_in_lib(locals[l].pos) {continue}
+        warn_unused_copy(copy_writes[l] nm)
+    }
+}
+
+# Jo's hints compare the encoded bytes of names and slice paths at a byte offset.
+jo_unused_name_hint=(name:string l:LocalWarningWord):>string=>{
+    let bytes=name as array<uint8>
+    let limit:LocalWarningWord=if bytes.length >=? 6 {2} else {1}
+    loop gi in [0..globals.length) {
+        let gn=name_of(LocalWarningWord(globals[gi].name))
+        let gb=gn as array<uint8>
+        if gn not=? name and bytes.length >=? 3 and gb.length >? 0 and gb[0] =? bytes[0] and not globals[gi].is_const and not modules[LocalWarningWord(globals[gi].mod)].is_prelude and gn not=? upper(gn) and lower(gn) not=? lower(name) and edit_distance(gn name limit) <=? limit {
+            return " (did you mean the variable '{gn}'? that one is changed by writing its name exactly)"
+        }
+        let gf=LocalWarningWord(modules[LocalWarningWord(globals[gi].mod)].file)
+        let lf=pos_file(locals[l].pos)
+        if gn =? name and not modules[LocalWarningWord(globals[gi].mod)].is_prelude and gf >=? 0 and lf >=? 0 and gf not=? lf {
+            let shown=files[gf].path
+            let prefix="{files[lf].dir}/"
+            if starts_with(shown prefix) {shown=shown.byte_slice((prefix as array<uint8>).length (shown as array<uint8>).length)}
+            return ": it is a variable of this function's own, as the global '{gn}' of {shown} is not seen from this file (`use '{shown}'` at its top lets it change that one)"
+        }
+    }
+    ""
+}
+
+# (scor = 1 in a function, for the global score: a variable of its own, made and never read)
+unused_local_warnings=(f:LocalWarningWord):>void=>{
+    let skip=LF_READ | LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_ELEMALIAS | LF_SOAELEM | LF_SHARED | LF_QUIET
+    loop l in fns[f].locals {
+        let flags=LocalWarningWord(locals[l].flags)
+        if flags & LF_DECL =? 0 or flags & skip not=? 0 or copy_writes.has(l) {continue}
+        let nm=name_of(LocalWarningWord(locals[l].name))
+        # Reserved names from desugaring are outside the user's source.
+        if nm =? "" or starts_with(nm "_") or starts_with(nm "#") or starts_with(nm "$") or pos_in_lib(locals[l].pos) {continue}
+        if dewy_target_dropped.length >? 0 and target_dropped_use(f l) {continue}
+        let near=""
+        if files[pos_file(locals[l].pos)].is_dewy {
+            let m=LocalWarningWord(fns[f].mod)
+            near=dewy_unused_name_hint(nm m)
+            if near =? "" and m >=? 0 {
+                loop used in modules[m].uses {
+                    near=dewy_unused_name_hint(nm used)
+                    if near not=? "" {break}
+                }
+            }
+        } else {near=jo_unused_name_hint(nm l)}
+        if flags & LF_ASSIGNED =? 0 and near =? "" and files[pos_file(locals[l].pos)].is_dewy {
+            loop p in fns[f].params {
+                if locals[p].name =? locals[l].name and locals[p].pos =? locals[l].pos {near=" (a parameter kept for the function's type can be named `_{nm}`)"}
+            }
+        }
+        let fnm=""
+        let decl=LocalWarningWord(fns[f].decl)
+        if decl not=? 0 and nodes[decl].kind =? 'fn_' {fnm=name_of(LocalWarningWord(nodes[decl].name))}
+        if flags & LF_ASSIGNED not=? 0 and near =? "" and (fnm =? "update" or fnm =? "draw") and not dewy_is_method(decl) {
+            warn(locals[l].pos "'{nm}' starts again here each frame, as a variable made in {fnm} belongs to that one run, and is never read: to keep it from frame to frame, give it its first value at the top of the file, outside the functions")
+        } else if flags & LF_ASSIGNED not=? 0 and near =? "" {warn(locals[l].pos "'{nm}' is given a value here, and changed, but never read")}
+        else {warn(locals[l].pos "'{nm}' is given a value here but never used{near}")}
+    }
+}

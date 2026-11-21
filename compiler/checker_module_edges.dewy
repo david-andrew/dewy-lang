@@ -1,5 +1,7 @@
 $runtime_checks
-from p"check.jo" import (mod_bits mod_uses modules prelude_used)
+from p"ast.jo" import (nodes)
+from p"prelude.jo" import (dp_loaded)
+from p"check.jo" import (dfs_state mod_bits mod_uses modules prelude_used syms)
 from p"util.jo" import (files)
 
 ModuleEdgeWord:type=int64<overflow='wrap'>
@@ -19,4 +21,25 @@ use_added=(m:ModuleEdgeWord u:ModuleEdgeWord):>void=>{
         if prelude_used.length <=? m {prelude_used.resize(m * 2 + 16)}
         prelude_used[m]=true
     }
+}
+
+# Publish dependencies before the module, visiting each module once.
+order_modules=(m:ModuleEdgeWord @out:array<int64>):>void=>{
+    if dfs_state[m] {return}
+    dfs_state[m]=true
+    loop d in modules[m].decls {
+        if nodes[d].kind not=? 'import_' {continue}
+        if nodes[d].aux =? 2 or nodes[d].aux =? 3 {
+            order_modules(ModuleEdgeWord(nodes[d].sym) @out)
+        } else if nodes[d].aux =? 1 {
+            loop u in modules[m].uses {order_modules(u @out)}
+        } else {
+            let s=modules[m].names.get(ModuleEdgeWord(nodes[d].name)) ?? 0
+            if s not=? 0 and syms[s].kind =? 'module' {order_modules(ModuleEdgeWord(syms[s].ref) @out)}
+        }
+    }
+    if dp_loaded.length >? 0 and files[ModuleEdgeWord(modules[m].file)].is_dewy {
+        loop dm in dp_loaded {order_modules(dm @out)}
+    }
+    out.push(m)
 }

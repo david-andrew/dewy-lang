@@ -1,0 +1,69 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_home_index.dewy'
+use 'checker_state.dewy'
+use 'diagnostic_exit.dewy'
+use 'expr.jo'
+use 'prelude_ops.dewy'
+use 'source_queries.dewy'
+use 'util.jo'
+
+bind_module_name = (m: int, name: int, s: int):
+    modules[m].names[name] = s
+    if homes_built: home_add(m, name)
+    name_bind(m, name, s)
+
+prelude_bind = (name: int, s: int):
+    prelude[name] = s
+    if prelude_syms.len() <= name: prelude_syms.resize(name * 2 + 64)
+    prelude_syms[name] = s
+
+name_bind = (m: int, name: int, s: int):
+    if name_first.len() <= name: name_first.resize(name * 2 + 64)
+    e = name_first[name]
+    loop e != 0:
+        if name_mod[e - 1] == m:
+            name_sym[e - 1] = s
+            return
+        e = name_next[e - 1]
+    name_mod.push(m)
+    name_sym.push(s)
+    name_next.push(name_first[name])
+    name_first[name] = name_mod.len()
+
+scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
+    ml_bump_name(name)
+    # (look the name up in place: holding a copy of the table would make the insert below copy it)
+    found: int? = none
+    if modules[m].is_prelude: found = prelude.get(name)
+    else: found = modules[m].names.get(name)
+    if let ex = found:
+        if syms[ex].kind == .fns and kind == .fns:
+            s = new_sym(name, kind, r, decl)
+            if decl != 0 and modules[m].is_prelude: syms[s].surface = i32(dewy_surface(name, decl))
+            if modules[m].is_prelude:
+                prev = 0
+                e = ex
+                loop e != 0 and not prelude_decl_before(decl, int(syms[e].decl)):
+                    prev = e
+                    e = int(syms[e].next)
+                syms[s].next = i32(e)
+                if prev == 0: prelude_bind(name, s)
+                else: syms[prev].next = i32(s)
+                return prelude[name]
+            e = ex
+            loop syms[e].next != 0: e = int(syms[e].next)
+            syms[e].next = i32(s)
+            return ex
+        if decl != 0 and syms[ex].decl != 0:
+            if syms[ex].kind == .const_ and kind == .global: fatal(nodes[decl].pos, "'{name_of(name)}' is a constant ({pos_str(nodes[int(syms[ex].decl)].pos)}): it cannot change")
+            fatal(nodes[decl].pos, "'{name_of(name)}' is already defined at {pos_str(nodes[int(syms[ex].decl)].pos)}")
+    s = new_sym(name, kind, r, decl)
+    if kind == .fns and decl != 0 and modules[m].is_prelude: syms[s].surface = i32(dewy_surface(name, decl))
+    if modules[m].is_prelude: prelude_bind(name, s)
+    else:
+        bind_module_name(m, name, s)
+        if kind == .const_:
+            loop own_consts.len() <= name: own_consts.push(false)
+            own_consts[name] = true
+    s

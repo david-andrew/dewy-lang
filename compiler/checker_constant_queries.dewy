@@ -1,0 +1,32 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"check.jo" import (binding_const_init syms)
+from p"checker_expr.dewy" import (lookup)
+from p"type_value_arguments.dewy" import (integer_parameter_literal)
+from p"types.jo" import (prune types)
+
+ConstantQueryWord:type=int64<overflow='wrap'>
+
+constant_binding=(e:int64):>int64=>{
+    if nodes[e].type not=? 0 {
+        if nodes[e].aux =? 1 {return binding_const_init('local' ConstantQueryWord(nodes[e].sym) nodes[e].pos)}
+        if nodes[e].aux =? 2 {return binding_const_init('global' ConstantQueryWord(nodes[e].sym) nodes[e].pos)}
+    }
+    let s=lookup(ConstantQueryWord(nodes[e].name))
+    if s =? 0 {return 0}
+    if syms[s].kind =? 'type_' {return integer_parameter_literal(e)}
+    binding_const_init(syms[s].kind ConstantQueryWord(syms[s].ref) nodes[e].pos)
+}
+
+sa_fits=(v:ConstantQueryWord t0:ConstantQueryWord):>bool=>{
+    let t=prune(t0)
+    if t =? 0 {return false}
+    if types[t].kind not=? 'int_' {return types[t].kind =? 'bool_'}
+    let bits=ConstantQueryWord(types[t].bits)
+    if bits >=? 64 {return types[t].sign or v >=? 0}
+    if types[t].sign {
+        let limit=ConstantQueryWord(1) << ((bits - 1) & 63)
+        return v >=? -limit and v <? limit
+    }
+    v >=? 0 and v <? (ConstantQueryWord(1) << (bits & 63))
+}

@@ -1,0 +1,161 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (file_exists)
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_EXTERN NF_GLOBAL add_flag has_flag kid kids mk nkids nodes)
+from p"check.jo" import (build_node export_decls from_imports globals lib_dir modules syms test_decls test_mode)
+from p"checker_module_names.dewy" import (scope_add_module)
+from p"checker_assignment_decls.dewy" import (assign_declares assign_to_decl)
+from p"checker_binding_inputs.dewy" import (flatten_binding_leaves)
+from p"checker_global_instances.dewy" import (new_global)
+from p"checker_import_discovery.dewy" import (module_source)
+from p"checker_load_module.dewy" import (load_module)
+from p"checker_module_edges.dewy" import (use_added)
+from p"checker_registration.dewy" import (eval_when_toplevel register_module)
+from p"checker_state.dewy" import (Global)
+from p"checks_builders.dewy" import (bc_ident)
+from p"checks_thin.dewy" import (ml_bump)
+from p"checks_thin_expr.dewy" import (import_edge_added)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"error_ops.dewy" import (nominal_declaration)
+from p"errors.jo" import (nominal_ready)
+from p"expr.jo" import (bc_assign)
+from p"module_paths.dewy" import (missing_module_hint module_search_stems package_file package_name use_path)
+from p"pkg.jo" import (pkg_dirs pkg_errs)
+from p"pkg_ops.dewy" import (pkg_main)
+from p"source_warnings.dewy" import (warn)
+from p"util.jo" import (files name_of pos_in_lib)
+from p"watch_ops.dewy" import (watch_missing_input)
+
+ModuleDeclWord:type=int64<overflow='wrap'>
+ModuleDeclI32:type=int32<overflow='wrap'>
+
+# Imports named by file, package, and bare module have different search paths.
+registration_import_path=(m:ModuleDeclWord d:ModuleDeclWord rel:string):>string=>{
+    if nodes[d].aux2 =? 1 {
+        let path=use_path(rel modules[m].dir lib_dir)
+        let pn=package_name(rel)
+        if not starts_with(rel "@lib/") and not file_exists(path) and pn not=? "" {
+            let why=pkg_errs.get(pn)
+            if why not=? none {fatal(nodes[d].pos why)}
+            let pd=pkg_dirs.get(pn)
+            if pd not=? none {path=package_file(rel pd)}
+        }
+        if not file_exists(path) {
+            watch_missing_input(path)
+            fatal(nodes[d].pos "cannot find '{rel}' (looked for {path})")
+        }
+        return path
+    }
+    if pkg_dirs.get(rel) not=? none or pkg_errs.get(rel) not=? none {
+        let why=pkg_errs.get(rel)
+        if why not=? none {fatal(nodes[d].pos why)}
+        let path=pkg_main(rel pkg_dirs[rel]) ?? ""
+        if path =? "" {fatal(nodes[d].pos "package '{rel}' has no main file ({rel}.jo, or only one .jo file at its root): import one of its files, as import '{rel}/file.jo'")}
+        return path
+    }
+    # Local files win. Within a directory, try the importing language first
+    # and exclude the importing file itself.
+    let file=ModuleDeclWord(modules[m].file)
+    let current=files[file].path
+    let dewy=files[file].is_dewy
+    let stems=module_search_stems(modules[m].dir lib_dir rel)
+    let path=module_source(stems[0] dewy current true)
+    if path not=? "" and not pos_in_lib(nodes[d].pos) and module_source(stems[1] dewy) not=? "" {
+        warn(nodes[d].pos "this imports {path}, not the library's {rel} (a file beside this one has its name)")
+    }
+    let searched:ModuleDeclWord=1
+    loop path =? "" and searched <? stems.length {
+        path=module_source(stems[searched] dewy)
+        searched += 1
+    }
+    if path =? "" {fatal(nodes[d].pos "cannot find module '{rel}'{missing_module_hint(rel)}")}
+    path
+}
+
+register_decls=(m:ModuleDeclWord decls:array<int64>):>void=>{
+    loop d in decls {
+        nodes[d].mod=ModuleDeclI32(m)
+        if nodes[d].kind =? 'assign' and assign_declares(d m) {assign_to_decl(d)}
+        let kind=nodes[d].kind
+        let name=ModuleDeclWord(nodes[d].name)
+        # A function assigned after a global callback declaration replaces its value.
+        if kind =? 'fn_' and not modules[m].is_prelude and not has_flag(d NF_EXTERN) {
+            let found=modules[m].names.get(name)
+            if found not=? none and syms[found].kind =? 'global' {
+                let lam=mk('lambda' nodes[d].pos)
+                nodes[lam]=nodes[d]
+                nodes[lam].kind='lambda'
+                nodes[lam].name=0
+                let assignment=bc_assign(bc_ident(name_of(name) nodes[d].pos) lam nodes[d].pos)
+                nodes[d]=nodes[assignment]
+                nodes[d].mod=ModuleDeclI32(m)
+                modules[m].inits.push(d)
+                continue
+            }
+        }
+        if kind =? 'fn_' {
+            scope_add_module(m name 'fns' 0 d);
+            let attrs=ModuleDeclWord(nodes[d].c)
+            if attrs not=? 0 {
+                loop i in [0..nkids(attrs)) {
+                    if name_of(ModuleDeclWord(nodes[kid(attrs i)].name)) =? "export" {export_decls.push(d)}
+                }
+            }
+        } else if kind =? 'struct_' {
+            if nominal_ready and nominal_declaration(d) {fatal(nodes[d].pos "nominal types must be declared before function checking; late nominal imports are not yet implemented")}
+            scope_add_module(m name 'struct_' d d);
+        } else if kind =? 'enum_' {
+            scope_add_module(m name 'enum_' d d);
+        } else if kind =? 'typealias' {
+            scope_add_module(m name 'alias_' d d);
+        } else if kind =? 'const_' {
+            globals.push(Global(name=ModuleDeclI32(name) decl=ModuleDeclI32(d) mod=ModuleDeclI32(m) is_const=true))
+            scope_add_module(m name 'const_' ModuleDeclWord(globals.length) - 1 d);
+        } else if kind =? 'import_' {
+            let rel=name_of(ModuleDeclWord(nodes[d].sval))
+            let path=registration_import_path(m d rel)
+            if path =? "{lib_dir}/bigint.dewy" and not starts_with(name_of(ModuleDeclWord(nodes[d].name)) "$") and files[ModuleDeclWord(modules[m].file)].is_dewy and not pos_in_lib(nodes[d].pos) {
+                fatal(nodes[d].pos "`bigint` is built in, so there is nothing to import: `let n:bigint = 2^100`, and `to_int(text)` reads decimal text (`none` when it is not a number)")
+            }
+            let imported=load_module(path false nodes[d].pos)
+            modules[m].imports.push([imported nodes[d].pos])
+            import_edge_added()
+            if nodes[d].aux =? 1 {
+                ml_bump()
+                use_added(m imported)
+                register_module(imported)
+            } else if nodes[d].aux =? 2 or nodes[d].aux =? 3 {
+                # Bind selective and splat imports after all module names are known.
+                nodes[d].sym=ModuleDeclI32(imported)
+                from_imports.push(d)
+            } else {scope_add_module(m name 'module' imported d);}
+        } else if kind =? 'when_' {eval_when_toplevel(m d)}
+        else if kind =? 'build_' {
+            if modules[m].is_main {
+                let setting = @build_node
+                setting=d
+            }
+        } else if kind =? 'test_' {
+            if test_mode and modules[m].is_main {test_decls.push(d)}
+        } else if kind =? 'vardecl' {
+            if nodes[d].nlist >? 0 {
+                loop id in flatten_binding_leaves(kids(d)) {
+                    if nodes[id].kind =? 'hole' {continue}
+                    let g=new_global(ModuleDeclWord(nodes[id].name) d m)
+                    nodes[id].sym=ModuleDeclI32(g)
+                    add_flag(id NF_GLOBAL)
+                    scope_add_module(m ModuleDeclWord(nodes[id].name) 'global' g id);
+                }
+            } else {
+                let g=new_global(name d m)
+                nodes[d].sym=ModuleDeclI32(g)
+                scope_add_module(m name 'global' g d);
+            }
+            add_flag(d NF_GLOBAL)
+            if not modules[m].is_prelude {modules[m].inits.push(d)}
+        } else {
+            if modules[m].is_prelude {fatal(nodes[d].pos "statements are not allowed at the top level of library modules")}
+            modules[m].inits.push(d)
+        }
+    }
+}

@@ -1,0 +1,147 @@
+$runtime_checks
+from p"ast.jo" import (NF_INDEX_CAPTURED NF_LIB_INDEX NF_LOOPCOUNT add_flag clone has_flag mk nodes set_list)
+from p"check.jo" import (elem_tmp_n ensure_bundled_import module_of_type)
+from p"checker_expr.dewy" import (check_expr)
+from p"checker_selector_capture.dewy" import (index_update_path)
+from p"checks_builders.dewy" import (bc_block bc_field bc_ident bc_let)
+from p"checks_place_updates.dewy" import (dewy_end_place index_update_capture pool_direct_update)
+from p"checks_thin.dewy" import (check_stmt)
+from p"checks_thin_expr.dewy" import (is_map_type)
+from p"expr.jo" import (bc_assign bc_count is_part_index last_checked)
+from p"node_store.dewy" import (Node)
+from p"parser_shared.dewy" import (comp_ident)
+from p"slice_checks.dewy" import (dewy_index_end_bindings)
+from p"type_ops.dewy" import (is_soa)
+from p"types.jo" import (prune types)
+from p"util.jo" import (intern)
+
+IndexWriteWord:type=int64<overflow='wrap'>
+IndexWriteI32:type=int32<overflow='wrap'>
+
+# Capture the receiver's indices from the root outward before checking the write.
+capture_receiver_indices=(receiver:IndexWriteWord @stmts:array<int64>):>void=>{
+    let path=index_update_path(receiver)
+    let j=IndexWriteWord(path.length) - 1
+    loop j >=? 0 {
+        let part=path[j]
+        j -= 1
+        if nodes[part].kind =? 'index' and nodes[part].b not=? 0 {index_update_capture(part @stmts);}
+    }
+}
+
+dewy_end_assign=(s:IndexWriteWord):>IndexWriteWord=>{
+    let ix:IndexWriteWord=0
+    let part=IndexWriteWord(nodes[s].a)
+    loop nodes[part].kind =? 'field' or nodes[part].kind =? 'index' {
+        if nodes[part].kind =? 'index' and nodes[part].sval not=? 0 {ix=part}
+        part=IndexWriteWord(nodes[part].a)
+    }
+    if ix =? 0 {return 0}
+    let pos=nodes[ix].pos
+    let receiver=IndexWriteWord(nodes[ix].a)
+    let source_type=prune(check_expr(clone(receiver) 0))
+    let stable=dewy_end_place(last_checked)
+    let stmts:array<int64>=[]
+    capture_receiver_indices(receiver @stmts)
+    let count = @bc_count
+    let name="$index_target{count}"
+    count += 1
+    let end_source=clone(receiver)
+    if not stable {
+        stmts.push(bc_let(name end_source pos))
+        end_source=bc_ident(name pos)
+        nodes[ix].a=IndexWriteI32(bc_ident(name pos))
+    }
+    loop binding in dewy_index_end_bindings(ix end_source source_type) {stmts.push(binding)}
+    nodes[ix].sval=0
+    let update=IndexWriteWord(nodes.length)
+    nodes.push(nodes[s])
+    stmts.push(update)
+    if not stable {stmts.push(bc_assign(receiver bc_ident(name pos) pos))}
+    let block=bc_block(stmts pos)
+    check_stmt(block)
+    block
+}
+
+elem_field_assign=(s:IndexWriteWord):>IndexWriteWord=>{
+    if has_flag(s NF_INDEX_CAPTURED) {return 0}
+    let lhs=IndexWriteWord(nodes[s].a)
+    let path=index_update_path(lhs)
+    let ix:IndexWriteWord=0
+    let direct_pool:IndexWriteWord=-1
+    let i=IndexWriteWord(path.length) - 1
+    loop i >=? 0 {
+        let candidate=path[i]
+        i -= 1
+        if nodes[candidate].kind not=? 'index' or nodes[candidate].b =? 0 {continue}
+        if candidate =? lhs and nodes[s].op =? 47 {continue}
+        # Checking an overloaded index rewrites it. Keep the original receiver for writeback.
+        let bt=prune(check_expr(clone(IndexWriteWord(nodes[candidate].a)) 0))
+        if types[bt].kind =? 'struct_' and not is_map_type(bt) and not is_soa(bt) and not is_part_index(candidate bt) {
+            ix=candidate
+            if pool_direct_update(s ix bt) {direct_pool=module_of_type(bt)}
+            break
+        }
+    }
+    if ix =? 0 {return 0}
+    let pos=nodes[s].pos
+    let stmts:array<int64>=[]
+    capture_receiver_indices(IndexWriteWord(nodes[ix].a) @stmts)
+    let iname=index_update_capture(ix @stmts)
+    if direct_pool >=? 0 or ix =? lhs {
+        if direct_pool >=? 0 {
+            let recv=IndexWriteWord(nodes[ix].a)
+            # A local function cannot intercept the qualified library lookup.
+            ensure_bundled_import("std/pool.jo" "$dewy_pool" pos)
+            let library=bc_ident("$dewy_pool" pos)
+            let checked=mk('call' pos)
+            nodes[checked].a=IndexWriteI32(bc_field(library "__pool_index" pos))
+            set_list(checked [clone(recv) comp_ident(iname pos)])
+            let storage=bc_field(recv "items" pos)
+            nodes[ix]=Node(kind='index' pos=pos a=IndexWriteI32(storage) b=IndexWriteI32(checked))
+            add_flag(ix NF_LIB_INDEX)
+        }
+        let copy=IndexWriteWord(nodes.length)
+        nodes.push(nodes[s])
+        if direct_pool <? 0 {add_flag(copy NF_INDEX_CAPTURED)}
+        stmts.push(copy)
+        let block=mk('block' pos)
+        set_list(block stmts)
+        check_stmt(block)
+        return block
+    }
+
+    let read_receiver=clone(IndexWriteWord(nodes[ix].a))
+    let write_receiver=clone(IndexWriteWord(nodes[ix].a))
+    let serial = @elem_tmp_n
+    serial += 1
+    let ename=intern("__elem{serial}")
+    let read=mk('index' pos)
+    nodes[read].a=IndexWriteI32(read_receiver)
+    nodes[read].b=IndexWriteI32(comp_ident(iname pos))
+    let decl=mk('vardecl' pos)
+    nodes[decl].name=IndexWriteI32(ename)
+    nodes[decl].b=IndexWriteI32(read)
+    stmts.push(decl)
+    # Apply the rest of the field/index chain to the selected value.
+    let field=lhs
+    loop IndexWriteWord(nodes[field].a) not=? ix {field=IndexWriteWord(nodes[field].a)}
+    nodes[field].a=IndexWriteI32(comp_ident(ename pos))
+    let update_at=IndexWriteWord(stmts.length)
+    stmts.push(s)
+    let write=mk('index' pos)
+    nodes[write].a=IndexWriteI32(write_receiver)
+    nodes[write].b=IndexWriteI32(comp_ident(iname pos))
+    let back=mk('assign' pos)
+    nodes[back].op=47
+    nodes[back].a=IndexWriteI32(write)
+    nodes[back].b=IndexWriteI32(comp_ident(ename pos))
+    stmts.push(back)
+    let block=mk('block' pos)
+    let copy=IndexWriteWord(nodes.length)
+    nodes.push(nodes[s])
+    stmts[update_at]=copy
+    set_list(block stmts)
+    check_stmt(block)
+    block
+}

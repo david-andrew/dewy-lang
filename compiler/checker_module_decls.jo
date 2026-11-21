@@ -1,0 +1,130 @@
+use 'checker_module_names.dewy'
+use 'ast.jo'
+use 'check.jo'
+use 'checker_assignment_decls.dewy'
+use 'checker_global_instances.dewy'
+use 'checker_import_discovery.dewy'
+use 'checker_load_module.dewy'
+use 'checker_module_edges.dewy'
+use 'checker_registration.dewy'
+use 'checker_state.dewy'
+use 'checks_builders.dewy'
+use 'checks_thin.dewy'
+use 'checks_thin_expr.dewy'
+use 'diagnostic_exit.dewy'
+use 'error_ops.dewy'
+use 'errors.jo'
+use 'expr.jo'
+use 'module_paths.dewy'
+use 'pkg.jo'
+use 'pkg_ops.dewy'
+use 'source_warnings.dewy'
+use 'util.jo'
+use 'watch_ops.dewy'
+
+register_decls = (m: int, decls: int[]):
+    loop d in decls:
+        nodes[d].mod = i32(m)
+        if nodes[d].kind == .assign and assign_declares(d, m): assign_to_decl(d)
+        k = nodes[d].kind
+        nm = int(nodes[d].name)
+        # (on_hit = (n: int): ... after `on_hit: (int) -> void = ...`: a new value for that variable)
+        if k == .fn_ and not modules[m].is_prelude and not has_flag(d, NF_EXTERN):
+            if let ex = modules[m].names.get(nm):
+                if syms[ex].kind == .global:
+                    lam = mk(.lambda, nodes[d].pos)
+                    nodes[lam] = nodes[d]
+                    nodes[lam].kind = .lambda
+                    nodes[lam].name = 0
+                    nodes[d] = nodes[bc_assign(bc_ident(name_of(nm), nodes[d].pos), lam, nodes[d].pos)]
+                    nodes[d].mod = i32(m)
+                    modules[m].inits.push(d)
+                    continue
+        if k == .fn_:
+            scope_add_module(m, nm, .fns, 0, d)
+            if nodes[d].c != 0:
+                loop ai in [0..nkids(int(nodes[d].c))):
+                    if name_of(int(nodes[kid(int(nodes[d].c), ai)].name)) == "export": export_decls.push(d)
+        else if k == .struct_:
+            if nominal_ready and nominal_declaration(d): fatal(nodes[d].pos, "nominal types must be declared before function checking; late nominal imports are not yet implemented")
+            scope_add_module(m, nm, .struct_, d, d)
+        else if k == .enum_: scope_add_module(m, nm, .enum_, d, d)
+        else if k == .typealias: scope_add_module(m, nm, .alias_, d, d)
+        else if k == .const_:
+            globals.push(Global(name = i32(nm), decl = i32(d), mod = i32(m), is_const = true))
+            scope_add_module(m, nm, .const_, globals.len() - 1, d)
+        else if k == .import_:
+            rel = name_of(int(nodes[d].sval))
+            path = "{modules[m].dir}/{rel}.jo"
+            if nodes[d].aux2 == 1:
+                # use 'file.jo': relative to the importing file
+                path = use_path(rel, modules[m].dir, lib_dir)
+                # ('package/file.jo': a file of a package)
+                pn = package_name(rel)
+                if not starts_with(rel, "@lib/") and not file_exists(path) and len(pn) > 0:
+                    if let why = pkg_errs.get(pn): fatal(nodes[d].pos, why)
+                    if let pd = pkg_dirs.get(pn): path = package_file(rel, pd)
+                if not file_exists(path):
+                    watch_missing_input(path)
+                    fatal(nodes[d].pos, "cannot find '{rel}' (looked for {path})")
+            else if pkg_dirs.get(rel) != none or pkg_errs.get(rel) != none:
+                # a package (pkg.jo): its main file
+                if let why = pkg_errs.get(rel): fatal(nodes[d].pos, why)
+                pd = pkg_dirs[rel]
+                path = pkg_main(rel, pd) ?? ""
+                if len(path) == 0: fatal(nodes[d].pos, "package '{rel}' has no main file ({rel}.jo, or only one .jo file at its root): import one of its files, as import '{rel}/file.jo'")
+            else:
+                # Named modules may be written in either language. Prefer the
+                # importer's language within each directory; local files win.
+                # Exclude the importing file itself (physics.dewy may import
+                # the bundled physics implementation).
+                current = files[int(modules[m].file)].path
+                dewy = files[int(modules[m].file)].is_dewy
+                stems = module_search_stems(modules[m].dir, lib_dir, rel)
+                path = module_source(stems[0], dewy, current, true)
+                # (a file beside it with a library module's name: that file, said once)
+                if len(path) > 0 and not pos_in_lib(nodes[d].pos) and len(module_source(stems[1], dewy)) > 0:
+                    warn(nodes[d].pos, "this imports {path}, not the library's {rel} (a file beside this one has its name)")
+                searched = 1
+                loop len(path) == 0 and searched < stems.len():
+                    path = module_source(stems[searched], dewy)
+                    searched += 1
+                if len(path) == 0: fatal(nodes[d].pos, "cannot find module '{rel}'{missing_module_hint(rel)}")
+            # (the library behind `bigint` is the compiler's: the type is built in)
+            if path == lib_dir + "/bigint.dewy" and not starts_with(name_of(int(nodes[d].name)), "$") and files[int(modules[m].file)].is_dewy and not pos_in_lib(nodes[d].pos):
+                fatal(nodes[d].pos, "`bigint` is built in, so there is nothing to import: `let n:bigint = 2^100`, and `to_int(text)` reads decimal text (`none` when it is not a number)")
+            im = load_module(path, false, nodes[d].pos)
+            modules[m].imports.push((im, nodes[d].pos))
+            import_edge_added()
+            if nodes[d].aux == 1:
+                ml_bump()
+                use_added(m, im)
+                register_module(im)
+            else if nodes[d].aux == 2 or nodes[d].aux == 3:
+                # from x import a, b (and Dewy's import p"x.dewy", every name): bound once every
+                # module's names are known (bind_from_imports)
+                nodes[d].sym = i32(im)
+                from_imports.push(d)
+            else: scope_add_module(m, nm, .module, im, d)
+        else if k == .when_: eval_when_toplevel(m, d)
+        else if k == .build_:
+            if modules[m].is_main: build_node = d
+        else if k == .test_:
+            if test_mode and modules[m].is_main: test_decls.push(d)
+        else if k == .vardecl:
+            if nodes[d].nlist > 0:
+                loop id in binding_leaves(kids(d)):
+                    if nodes[id].kind == .hole: continue
+                    g = new_global(int(nodes[id].name), d, m)
+                    nodes[id].sym = i32(g)
+                    add_flag(id, NF_GLOBAL)
+                    scope_add_module(m, int(nodes[id].name), .global, g, id)
+            else:
+                g = new_global(nm, d, m)
+                nodes[d].sym = i32(g)
+                scope_add_module(m, nm, .global, g, d)
+            add_flag(d, NF_GLOBAL)
+            if not modules[m].is_prelude: modules[m].inits.push(d)
+        else:
+            if modules[m].is_prelude: fatal(nodes[d].pos, "statements are not allowed at the top level of library modules")
+            modules[m].inits.push(d)

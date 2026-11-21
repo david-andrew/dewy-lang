@@ -1,0 +1,83 @@
+$runtime_checks
+from p"ast.jo" import (kids nodes)
+from p"check.jo" import (cx globals module_lookup own_consts syms)
+from p"checker_binding_inputs.dewy" import (flatten_binding_leaves)
+from p"checker_expr.dewy" import (lookup)
+from p"checks_thin.dewy" import (decl_shadowable is_private)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"source_queries.dewy" import (line_col pos_str)
+from p"util.jo" import (files name_of pos_file pos_in_lib)
+
+AssignmentDeclWord:type=int64<overflow='wrap'>
+
+# `x = value` where no variable x exists yet is a declaration
+# (m >= 0: at the top level of module m, where only that module's globals count)
+assign_declares=(s:AssignmentDeclWord m:AssignmentDeclWord):>bool=>{
+    # The checked node stores the frozen Tok.assign ordinal.
+    if nodes[s].kind not=? 'assign' or nodes[s].op not=? 47 {return false}
+    let lhs=AssignmentDeclWord(nodes[s].a)
+    let kind=nodes[lhs].kind
+    if kind =? 'ident' {return not name_assignable(AssignmentDeclWord(nodes[lhs].name) m)}
+    if kind not=? 'tuple' {return false}
+    let any_name=false
+    loop child in flatten_binding_leaves(kids(lhs)) {
+        let ck=nodes[child].kind
+        if ck =? 'hole' {continue}
+        if ck not=? 'ident' or name_assignable(AssignmentDeclWord(nodes[child].name) m) {return false}
+        any_name=true
+    }
+    any_name
+}
+
+# (at the top level: the module's own variables, and those of the modules it `use`s and of the
+# library, as in a function: `ui_style = ...` there changes the library's, not a new one)
+# Another module's __ name (its own state) is not changed so: the line makes one of this module's
+# (and in the library, whose modules share their names, it is an error to have two)
+name_assignable=(nm:AssignmentDeclWord m:AssignmentDeclWord):>bool=>{
+    if m <? 0 {return var_visible(nm)}
+    let s=module_lookup(m nm)
+    if s =? 0 or syms[s].kind not=? 'global' {return false}
+    not is_private(nm) or globals[AssignmentDeclWord(syms[s].ref)].mod =? m
+}
+
+# is there a variable of this name in scope (assigning to it changes it)?
+var_visible=(nm:AssignmentDeclWord):>bool=>{
+    let s=lookup(nm)
+    if s =? 0 {return false}
+    let kind=syms[s].kind
+    kind =? 'local' or kind =? 'global'
+}
+
+assign_to_decl=(s:AssignmentDeclWord):>void=>{
+    let lhs=AssignmentDeclWord(nodes[s].a)
+    if nodes[lhs].kind =? 'ident' and files[pos_file(nodes[s].pos)].is_dewy {
+        let cs=lookup(AssignmentDeclWord(nodes[lhs].name))
+        if cs not=? 0 and syms[cs].kind =? 'const_' and not decl_shadowable(AssignmentDeclWord(syms[cs].decl)) {
+            fatal(nodes[lhs].pos "cannot modify const '{name_of(AssignmentDeclWord(nodes[lhs].name))}'; use let to declare a new binding")
+        }
+        # Module functions are const bindings too. Plain assignment can shadow a
+        # function only when its declaration allows it.
+        if cs not=? 0 and syms[cs].kind =? 'fns' and syms[cs].decl not=? 0 and not decl_shadowable(AssignmentDeclWord(syms[cs].decl)) and cx >=? 0 {
+            fatal(nodes[lhs].pos "'{name_of(AssignmentDeclWord(nodes[lhs].name))}' is a function ({pos_str(nodes[AssignmentDeclWord(syms[cs].decl)].pos)}): it cannot be shadowed by assignment; use let to declare a new binding")
+        }
+    }
+    if nodes[lhs].kind =? 'ident' and cx >=? 0 and AssignmentDeclWord(nodes[lhs].name) <? own_consts.length and own_consts[AssignmentDeclWord(nodes[lhs].name)] {
+        let cs=lookup(AssignmentDeclWord(nodes[lhs].name))
+        if cs not=? 0 and syms[cs].kind =? 'const_' and syms[cs].decl not=? 0 and not decl_shadowable(AssignmentDeclWord(syms[cs].decl)) {
+            let name=name_of(AssignmentDeclWord(nodes[lhs].name))
+            let cp=nodes[AssignmentDeclWord(syms[cs].decl)].pos
+            if pos_in_lib(cp) {fatal(nodes[lhs].pos "'{name}' is a constant of the library: it cannot change (`let {name} = ...` makes a variable of that name)")}
+            let [line _]=line_col(cp)
+            fatal(nodes[lhs].pos "'{name}' is a constant (`const` on line {line}): it cannot change; to change it as the game runs, make it a variable there, without `const`")
+        }
+    }
+    nodes[s].kind='vardecl'
+    nodes[s].a=0
+    if nodes[lhs].kind =? 'ident' {
+        nodes[s].name=nodes[lhs].name
+        nodes[s].pos=nodes[lhs].pos
+    } else {
+        nodes[s].list=nodes[lhs].list
+        nodes[s].nlist=nodes[lhs].nlist
+    }
+}

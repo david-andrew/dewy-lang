@@ -1,0 +1,86 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"check.jo" import (homes_built ml_bump_name modules name_first name_mod name_next name_sym new_sym own_consts prelude prelude_syms syms)
+from p"checker_home_index.dewy" import (home_add)
+from p"checker_state.dewy" import (SK)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (dewy_surface)
+from p"prelude_ops.dewy" import (prelude_decl_before)
+from p"source_queries.dewy" import (pos_str)
+from p"util.jo" import (name_of)
+
+ModuleNameWord:type=int64<overflow='wrap'>
+ModuleNameI32:type=int32<overflow='wrap'>
+
+bind_module_name=(m:ModuleNameWord name:ModuleNameWord s:ModuleNameWord):>void=>{
+    modules[m].names[name]=s
+    if homes_built {home_add(m name)}
+    name_bind(m name s)
+}
+
+prelude_bind=(name:ModuleNameWord s:ModuleNameWord):>void=>{
+    prelude[name]=s
+    if prelude_syms.length <=? name {prelude_syms.resize(name * 2 + 64)}
+    prelude_syms[name]=s
+}
+
+name_bind=(m:ModuleNameWord name:ModuleNameWord s:ModuleNameWord):>void=>{
+    if name_first.length <=? name {name_first.resize(name * 2 + 64)}
+    let e=ModuleNameWord(name_first[name])
+    loop e not=? 0 {
+        if name_mod[e - 1] =? m {
+            name_sym[e - 1]=s
+            return
+        }
+        e=name_next[e - 1]
+    }
+    name_mod.push(m)
+    name_sym.push(s)
+    name_next.push(name_first[name])
+    name_first[name]=name_mod.length
+}
+
+scope_add_module=(m:ModuleNameWord name:ModuleNameWord kind:SK r:ModuleNameWord decl:ModuleNameWord):>ModuleNameWord=>{
+    ml_bump_name(name)
+    # Probe in place: a copied table would have to detach when this binding is inserted.
+    let found=if modules[m].is_prelude {prelude.get(name)} else {modules[m].names.get(name)}
+    if found not=? none {
+        let ex=found ?? 0
+        if syms[ex].kind =? 'fns' and kind =? 'fns' {
+            let s=new_sym(name kind r decl)
+            if decl not=? 0 and modules[m].is_prelude {syms[s].surface=ModuleNameI32(dewy_surface(name decl))}
+            if modules[m].is_prelude {
+                let prev:ModuleNameWord=0
+                let e=ModuleNameWord(ex)
+                loop e not=? 0 and not prelude_decl_before(decl ModuleNameWord(syms[e].decl)) {
+                    prev=e
+                    e=ModuleNameWord(syms[e].next)
+                }
+                syms[s].next=ModuleNameI32(e)
+                if prev =? 0 {prelude_bind(name s)}
+                else {syms[prev].next=ModuleNameI32(s)}
+                return prelude[name]
+            }
+            let e=ModuleNameWord(ex)
+            loop syms[e].next not=? 0 {e=ModuleNameWord(syms[e].next)}
+            syms[e].next=ModuleNameI32(s)
+            return ex
+        }
+        if decl not=? 0 and syms[ex].decl not=? 0 {
+            let where=pos_str(nodes[ModuleNameWord(syms[ex].decl)].pos)
+            if syms[ex].kind =? 'const_' and kind =? 'global' {fatal(nodes[decl].pos "'{name_of(name)}' is a constant ({where}): it cannot change")}
+            fatal(nodes[decl].pos "'{name_of(name)}' is already defined at {where}")
+        }
+    }
+    let s=new_sym(name kind r decl)
+    if kind =? 'fns' and decl not=? 0 and modules[m].is_prelude {syms[s].surface=ModuleNameI32(dewy_surface(name decl))}
+    if modules[m].is_prelude {prelude_bind(name s)}
+    else {
+        bind_module_name(m name s)
+        if kind =? 'const_' {
+            loop own_consts.length <=? name {own_consts.push(false)}
+            own_consts[name]=true
+        }
+    }
+    s
+}

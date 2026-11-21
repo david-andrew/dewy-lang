@@ -1,3 +1,10 @@
+use 'checker_assignment_entry.dewy'
+use 'checker_narrow_writes.dewy'
+use 'checker_module_names.dewy'
+use 'checker_index_writebacks.dewy'
+use 'checker_selector_capture.dewy'
+use 'checker_append_assign.dewy'
+use 'checker_assignment_decls.dewy'
 use 'checker_place_escapes.dewy'
 use 'checker_global_instances.dewy'
 use 'checker_loop_routes.dewy'
@@ -288,43 +295,6 @@ new_sym = (name: int, kind: SK, r: int, decl: int) -> int:
 
 own_consts: bool[]            # by name: a constant of the program's own (not the library's)
 
-scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
-    ml_bump_name(name)
-    # (look the name up in place: holding a copy of the table would make the insert below copy it)
-    found: int? = none
-    if modules[m].is_prelude: found = prelude.get(name)
-    else: found = modules[m].names.get(name)
-    if let ex = found:
-        if syms[ex].kind == .fns and kind == .fns:
-            s = new_sym(name, kind, r, decl)
-            if decl != 0 and modules[m].is_prelude: syms[s].surface = i32(dewy_surface(name, decl))
-            if modules[m].is_prelude:
-                prev = 0
-                e = ex
-                loop e != 0 and not prelude_decl_before(decl, int(syms[e].decl)):
-                    prev = e
-                    e = int(syms[e].next)
-                syms[s].next = i32(e)
-                if prev == 0: prelude_bind(name, s)
-                else: syms[prev].next = i32(s)
-                return prelude[name]
-            e = ex
-            loop syms[e].next != 0: e = int(syms[e].next)
-            syms[e].next = i32(s)
-            return ex
-        if decl != 0 and syms[ex].decl != 0:
-            if syms[ex].kind == .const_ and kind == .global: fatal(nodes[decl].pos, "'{name_of(name)}' is a constant ({pos_str(nodes[int(syms[ex].decl)].pos)}): it cannot change")
-            fatal(nodes[decl].pos, "'{name_of(name)}' is already defined at {pos_str(nodes[int(syms[ex].decl)].pos)}")
-    s = new_sym(name, kind, r, decl)
-    if kind == .fns and decl != 0 and modules[m].is_prelude: syms[s].surface = i32(dewy_surface(name, decl))
-    if modules[m].is_prelude: prelude_bind(name, s)
-    else:
-        bind_module_name(m, name, s)
-        if kind == .const_:
-            loop own_consts.len() <= name: own_consts.push(false)
-            own_consts[name] = true
-    s
-
 # (a dominating `i =? k` on a local, in force until its branch's scope closes)
 struct PositionGuard:
     local: i32
@@ -377,11 +347,6 @@ homes_built = false
 home_first: int[]
 home_mod: int[]
 home_next: int[]
-bind_module_name = (m: int, name: int, s: int):
-    modules[m].names[name] = s
-    if homes_built: home_add(m, name)
-    name_bind(m, name, s)
-
 # The same bindings indexed for checker_call_queries.dewy's name_family: the prelude's by name
 # (0: none), and each module's through a list by name from name_first[name] (an entry + 1; 0
 # ends it) of (module, binding). Kept by prelude_bind and name_bind, the tables' only writers
@@ -391,23 +356,6 @@ name_first: int[]
 name_mod: int[]
 name_sym: int[]
 name_next: int[]
-prelude_bind = (name: int, s: int):
-    prelude[name] = s
-    if prelude_syms.len() <= name: prelude_syms.resize(name * 2 + 64)
-    prelude_syms[name] = s
-name_bind = (m: int, name: int, s: int):
-    if name_first.len() <= name: name_first.resize(name * 2 + 64)
-    e = name_first[name]
-    loop e != 0:
-        if name_mod[e - 1] == m:
-            name_sym[e - 1] = s
-            return
-        e = name_next[e - 1]
-    name_mod.push(m)
-    name_sym.push(s)
-    name_next.push(name_first[name])
-    name_first[name] = name_mod.len()
-
 # By module, for checker_call_queries.dewy's collect_fns: 1 a prelude module, 2 a Dewy file
 # (mod_bits), and its uses (mod_uses, as modules[m].uses)
 mod_bits: int[]
@@ -535,179 +483,9 @@ ensure_bundled_import = (file: str, alias: str, pos: int): register_bundled_impo
 # checking the source type; registration and declaration detection need leaves.
 binding_leaves = (bindings: int[]) -> int[]: flatten_binding_leaves(bindings)
 
-# `x = value` where no variable x exists yet is a declaration
-# (m >= 0: at the top level of module m, where only that module's globals count)
-assign_declares = (s: int, m: int) -> bool:
-    if nodes[s].kind != .assign or nodes[s].op != i32(int(Tok.assign)): return false
-    lhs = int(nodes[s].a)
-    lk = nodes[lhs].kind
-    if lk == .ident: return not name_assignable(int(nodes[lhs].name), m)
-    if lk != .tuple: return false
-    any = false
-    loop c in binding_leaves(kids(lhs)):
-        ck = nodes[c].kind
-        if ck == .hole: continue
-        if ck != .ident: return false
-        if name_assignable(int(nodes[c].name), m): return false
-        any = true
-    any
-
-# (at the top level: the module's own variables, and those of the modules it `use`s and of the
-# library, as in a function: `ui_style = ...` there changes the library's, not a new one)
-# Another module's __ name (its own state) is not changed so: the line makes one of this module's
-# (and in the library, whose modules share their names, it is an error to have two)
-name_assignable = (nm: int, m: int) -> bool:
-    if m < 0: return var_visible(nm)
-    s = module_lookup(m, nm)
-    if s == 0 or syms[s].kind != .global: return false
-    if is_private(nm) and int(globals[int(syms[s].ref)].mod) != m: return false
-    true
-
-assign_to_decl = (s: int):
-    lhs = int(nodes[s].a)
-    if nodes[lhs].kind == .ident and files[pos_file(nodes[s].pos)].is_dewy:
-        cs = lookup(int(nodes[lhs].name))
-        if cs != 0 and syms[cs].kind == .const_ and not decl_shadowable(int(syms[cs].decl)):
-            fatal(nodes[lhs].pos, "cannot modify const '{name_of(int(nodes[lhs].name))}'; use let to declare a new binding")
-        # (a module's function is a const binding too: only a `$shadowable` one, as the
-        # prelude's are, is shadowed by a plain `name = ...`)
-        if cs != 0 and syms[cs].kind == .fns and syms[cs].decl != 0 and not decl_shadowable(int(syms[cs].decl)) and cx >= 0:
-            fatal(nodes[lhs].pos, "'{name_of(int(nodes[lhs].name))}' is a function ({pos_str(nodes[int(syms[cs].decl)].pos)}): it cannot be shadowed by assignment; use let to declare a new binding")
-    if nodes[lhs].kind == .ident and cx >= 0 and int(nodes[lhs].name) < own_consts.len() and own_consts[int(nodes[lhs].name)]:
-        # (MAX = 4 would make a variable hiding the program's constant MAX)
-        cs = lookup(int(nodes[lhs].name))
-        if cs != 0 and syms[cs].kind == .const_ and syms[cs].decl != 0 and not decl_shadowable(int(syms[cs].decl)):
-            cn = name_of(int(nodes[lhs].name))
-            cp = nodes[int(syms[cs].decl)].pos
-            if pos_in_lib(cp): fatal(nodes[lhs].pos, "'{cn}' is a constant of the library: it cannot change (`let {cn} = ...` makes a variable of that name)")
-            ln, cc = line_col(cp)
-            fatal(nodes[lhs].pos, "'{cn}' is a constant (`const` on line {ln}): it cannot change; to change it as the game runs, make it a variable there, without `const`")
-    nodes[s].kind = .vardecl
-    nodes[s].a = 0
-    if nodes[lhs].kind == .ident:
-        nodes[s].name = nodes[lhs].name
-        nodes[s].pos = nodes[lhs].pos
-    else:
-        nodes[s].list = nodes[lhs].list
-        nodes[s].nlist = nodes[lhs].nlist
-
 # (a module `use`d by another is registered first, so that a top-level `x = ...` there sees the
 # used module's x: name_assignable)
 registered: bool[]
-
-register_decls = (m: int, decls: int[]):
-    loop d in decls:
-        nodes[d].mod = i32(m)
-        if nodes[d].kind == .assign and assign_declares(d, m): assign_to_decl(d)
-        k = nodes[d].kind
-        nm = int(nodes[d].name)
-        # (on_hit = (n: int): ... after `on_hit: (int) -> void = ...`: a new value for that variable)
-        if k == .fn_ and not modules[m].is_prelude and not has_flag(d, NF_EXTERN):
-            if let ex = modules[m].names.get(nm):
-                if syms[ex].kind == .global:
-                    lam = mk(.lambda, nodes[d].pos)
-                    nodes[lam] = nodes[d]
-                    nodes[lam].kind = .lambda
-                    nodes[lam].name = 0
-                    nodes[d] = nodes[bc_assign(bc_ident(name_of(nm), nodes[d].pos), lam, nodes[d].pos)]
-                    nodes[d].mod = i32(m)
-                    modules[m].inits.push(d)
-                    continue
-        if k == .fn_:
-            scope_add_module(m, nm, .fns, 0, d)
-            if nodes[d].c != 0:
-                loop ai in [0..nkids(int(nodes[d].c))):
-                    if name_of(int(nodes[kid(int(nodes[d].c), ai)].name)) == "export": export_decls.push(d)
-        else if k == .struct_:
-            if nominal_ready and nominal_declaration(d): fatal(nodes[d].pos, "nominal types must be declared before function checking; late nominal imports are not yet implemented")
-            scope_add_module(m, nm, .struct_, d, d)
-        else if k == .enum_: scope_add_module(m, nm, .enum_, d, d)
-        else if k == .typealias: scope_add_module(m, nm, .alias_, d, d)
-        else if k == .const_:
-            globals.push(Global(name = i32(nm), decl = i32(d), mod = i32(m), is_const = true))
-            scope_add_module(m, nm, .const_, globals.len() - 1, d)
-        else if k == .import_:
-            rel = name_of(int(nodes[d].sval))
-            path = "{modules[m].dir}/{rel}.jo"
-            if nodes[d].aux2 == 1:
-                # use 'file.jo': relative to the importing file
-                path = use_path(rel, modules[m].dir, lib_dir)
-                # ('package/file.jo': a file of a package)
-                pn = package_name(rel)
-                if not starts_with(rel, "@lib/") and not file_exists(path) and len(pn) > 0:
-                    if let why = pkg_errs.get(pn): fatal(nodes[d].pos, why)
-                    if let pd = pkg_dirs.get(pn): path = package_file(rel, pd)
-                if not file_exists(path):
-                    watch_missing_input(path)
-                    fatal(nodes[d].pos, "cannot find '{rel}' (looked for {path})")
-            else if pkg_dirs.get(rel) != none or pkg_errs.get(rel) != none:
-                # a package (pkg.jo): its main file
-                if let why = pkg_errs.get(rel): fatal(nodes[d].pos, why)
-                pd = pkg_dirs[rel]
-                path = pkg_main(rel, pd) ?? ""
-                if len(path) == 0: fatal(nodes[d].pos, "package '{rel}' has no main file ({rel}.jo, or only one .jo file at its root): import one of its files, as import '{rel}/file.jo'")
-            else:
-                # Named modules may be written in either language. Prefer the
-                # importer's language within each directory; local files win.
-                # Exclude the importing file itself (physics.dewy may import
-                # the bundled physics implementation).
-                current = files[int(modules[m].file)].path
-                dewy = files[int(modules[m].file)].is_dewy
-                stems = module_search_stems(modules[m].dir, lib_dir, rel)
-                path = module_source(stems[0], dewy, current, true)
-                # (a file beside it with a library module's name: that file, said once)
-                if len(path) > 0 and not pos_in_lib(nodes[d].pos) and len(module_source(stems[1], dewy)) > 0:
-                    warn(nodes[d].pos, "this imports {path}, not the library's {rel} (a file beside this one has its name)")
-                searched = 1
-                loop len(path) == 0 and searched < stems.len():
-                    path = module_source(stems[searched], dewy)
-                    searched += 1
-                if len(path) == 0: fatal(nodes[d].pos, "cannot find module '{rel}'{missing_module_hint(rel)}")
-            # (the library behind `bigint` is the compiler's: the type is built in)
-            if path == lib_dir + "/bigint.dewy" and not starts_with(name_of(int(nodes[d].name)), "$") and files[int(modules[m].file)].is_dewy and not pos_in_lib(nodes[d].pos):
-                fatal(nodes[d].pos, "`bigint` is built in, so there is nothing to import: `let n:bigint = 2^100`, and `to_int(text)` reads decimal text (`none` when it is not a number)")
-            im = load_module(path, false, nodes[d].pos)
-            modules[m].imports.push((im, nodes[d].pos))
-            import_edge_added()
-            if nodes[d].aux == 1:
-                ml_bump()
-                use_added(m, im)
-                register_module(im)
-            else if nodes[d].aux == 2 or nodes[d].aux == 3:
-                # from x import a, b (and Dewy's import p"x.dewy", every name): bound once every
-                # module's names are known (bind_from_imports)
-                nodes[d].sym = i32(im)
-                from_imports.push(d)
-            else: scope_add_module(m, nm, .module, im, d)
-        else if k == .when_: eval_when_toplevel(m, d)
-        else if k == .build_:
-            if modules[m].is_main: build_node = d
-        else if k == .test_:
-            if test_mode and modules[m].is_main: test_decls.push(d)
-        else if k == .vardecl:
-            if nodes[d].nlist > 0:
-                loop id in binding_leaves(kids(d)):
-                    if nodes[id].kind == .hole: continue
-                    g = new_global(int(nodes[id].name), d, m)
-                    nodes[id].sym = i32(g)
-                    add_flag(id, NF_GLOBAL)
-                    scope_add_module(m, int(nodes[id].name), .global, g, id)
-            else:
-                g = new_global(nm, d, m)
-                nodes[d].sym = i32(g)
-                scope_add_module(m, nm, .global, g, d)
-            add_flag(d, NF_GLOBAL)
-            if not modules[m].is_prelude: modules[m].inits.push(d)
-        else:
-            if modules[m].is_prelude: fatal(nodes[d].pos, "statements are not allowed at the top level of library modules")
-            modules[m].inits.push(d)
-
-# is there a variable of this name in scope (assigning to it changes it)?
-var_visible = (nm: int) -> bool:
-    s = lookup(nm)
-    if s == 0: return false
-    k = syms[s].kind
-    k == .local or k == .global
 
 # ---------------- type resolution ----------------
 values_type_ok = false   # (resolve_binding_type: a binding's whole type may be several values)
@@ -1187,15 +965,6 @@ soa_loop = (s: int):
 # (how many soa element aliases were made: none, and no name is one)
 soa_aliases = 0
 
-# the soa element alias local a name stands for here, or 0
-soa_alias_of = (e: int) -> int:
-    if nodes[e].kind != .ident: return 0
-    s = lookup(int(nodes[e].name))
-    if s == 0 or syms[s].kind != .local: return 0
-    l = int(syms[s].ref)
-    if int(locals[l].flags) & LF_SOAELEM == 0: return 0
-    l
-
 # loop a, b in xs (an array of pairs): loop t in xs: let a, b = t
 unpack_loop = (s: int):
     dewy = files[pos_file(nodes[s].pos)].is_dewy
@@ -1490,73 +1259,8 @@ const ASSIGN_OPS = 0
 # cross a function boundary, including a closure checked inside the loop.
 loop_labels: LoopLabel[]
 
-compound_op = (op: int) -> int:
-    k = op as Tok
-    match k:
-        pluseq: int(Tok.plus)
-        minuseq: int(Tok.minus)
-        stareq: int(Tok.star)
-        slasheq: int(Tok.slash)
-        percenteq: int(Tok.percent)
-        ampeq: int(Tok.amp)
-        pipeeq: int(Tok.pipe)
-        careteq: int(Tok.caret)
-        shleq: int(Tok.shl)
-        shreq: int(Tok.shr)
-        _: 0
-
 int_update_lhs = 0      # (the integer binding a compound update is checked for, as `total` in `total += x`,
 int_update_pos = 0      # and the update's position)
-
-# Dewy's arithmetic helpers implement floor division, exact division and power.
-# Keep the update as an assignment until its place and indices are resolved.
-compound_value = (s: int, left: int, right: int) -> int:
-    if nodes[s].sval != 0:
-        n = bc_call(name_of(int(nodes[s].sval)), [left, right], nodes[s].pos)
-        if has_flag(s, NF_BROADCAST): add_flag(n, NF_BROADCAST)
-        return n
-    # (Dewy's `and=`/`or=`: the logical operator, short-circuiting on booleans)
-    logical = nodes[s].aux2 == 1 and not has_flag(s, NF_BROADCAST)
-    kind = NK.binary
-    if logical:
-        kind = NK.or_
-        if nodes[s].op == i32(int(Tok.ampeq)): kind = NK.and_
-    n = mk(kind, nodes[s].pos)
-    nodes[n].op = i32(compound_op(int(nodes[s].op)))
-    if has_flag(s, NF_BROADCAST):
-        nodes[n].aux = i32(tok_text(nodes[n].op as Tok)[0])
-        nodes[n].op = i32(int(Tok.dotop))
-    nodes[n].a = i32(left)
-    nodes[n].b = i32(right)
-    n
-
-compound_checked = (s: int, left: int, right: int, target: int) -> int:
-    # (t -= 5°C on a temperature takes away a difference: the literal reads as one)
-    literal = is_quantity(target) and quantity_literal_syntax(right)
-    n = compound_value(s, left, right)
-    if literal: quantity_update_right = right
-    # (`let total = 0` then `total += x` with a float x: var_type_error says where total was made)
-    # (`x /= 2` keeps its own hint, `//=`)
-    if nodes[left].kind == .ident and (nodes[left].aux == i32(int(SK.local)) or nodes[left].aux == i32(int(SK.global))) and is_int(representation_type(prune(target))) and nodes[s].op != i32(int(Tok.slasheq)):
-        int_update_lhs = mk(.ident, nodes[left].pos)
-        nodes[int_update_lhs].aux = nodes[left].aux
-        nodes[int_update_lhs].sym = nodes[left].sym
-        nodes[int_update_lhs].name = nodes[left].name
-        if nodes[left].name == 0: nodes[int_update_lhs].name = if nodes[left].aux == i32(int(SK.local)): locals[int(nodes[left].sym)].name else: globals[int(nodes[left].sym)].name
-        int_update_pos = nodes[s].pos
-    result = prune(check_expr(n, (if has_flag(s, NF_BROADCAST): target else: 0)))
-    quantity_update_right = 0
-    if is_quantity(target) and quantity_point(target) and quantity_is_delta(result): fatal(nodes[s].pos, "this update leaves a difference, not a temperature point, so the point cannot hold it: subtract a difference (`5K`), or keep the difference in a new binding")
-    t = prune(target)
-    if decimal_target != 0 and decimal_float_write(result, t): return last_checked
-    quantity_float_update(s, target, result)
-    # Built-in compound arithmetic keeps the destination's fixed width,
-    # just as += does, even when a library helper computes in 64 bits.
-    if nodes[s].sval != 0 and ((is_int(t) and is_int(result)) or (is_float(t) and is_float(result))):
-        if result != t: wrap_conv(last_checked, (if is_int(t): CV.int_ else: CV.float_), t)
-    r = coerce(last_checked, target)
-    int_update_lhs = 0
-    r
 
 # the variable a narrowing alias (see narrow_var) stands for, or 0
 narrowed_var = (l: int) -> int:
@@ -1584,17 +1288,6 @@ narrow_jumps: NarrowJump[]
 narrow_store_heads: {int: int}
 narrow_store_next: {int: int}
 
-narrow_store_root = (l0: int) -> int:
-    l = l0
-    loop int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
-        u = narrowed_var(l)
-        if u != 0: l = u
-        else:
-            a = int(locals[l].alias)
-            if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return 0
-            l = int(nodes[a].sym)
-    l
-
 narrow_store_register = (l: int):
     if narrowed_var(l) == 0: return
     root = narrow_store_root(l)
@@ -1602,74 +1295,17 @@ narrow_store_register = (l: int):
     narrow_store_next[l] = narrow_store_heads.get(root) ?? 0
     narrow_store_heads[root] = l
 
-# A whole-variable replacement invalidates tag evidence through every name
-# for that storage. Payload writes of the same member retain their tag.
-unnarrow_assign = (s: int):
-    lhs = int(nodes[s].a)
-    if nodes[lhs].kind != .ident: return
-    sy = lookup(int(nodes[lhs].name))
-    if sy == 0 or syms[sy].kind != .local: return
-    l = int(syms[sy].ref)
-    u = narrowed_var(l)
-    head = 0
-    if narrow_store_heads.len() > 0: head = narrow_store_heads.get(narrow_store_root(l)) ?? 0
-    if u == 0 and head == 0: return
-    rt = prune(check_expr(int(nodes[s].b), 0))
-    rhs = last_checked
-    nodes[s].b = i32(rhs)
-    add_flag(rhs, NF_CHECKED)
-    loop head != 0:
-        alias = head
-        head = narrow_store_next.get(alias) ?? 0
-        if int(locals[alias].owner) != int(ctxs[cx].inst): continue
-        if int(locals[alias].flags) & LF_UNNARROWED != 0: continue
-        if not narrow_store_keeps(alias, rhs, rt): narrow_invalidate(alias)
-        # Replacing the parent also retires narrowed paths inside its payload.
-        if path_narrows > 0 and alias < path_rooted_l.len() and path_rooted_l[alias]: path_forget("#L{alias}")
-    if u == 0 or narrow_store_keeps(l, rhs, rt): return
-    narrow_invalidate(l)
-    nm = int(nodes[lhs].name)
-    push_scope_sym(nm, new_sym(nm, .local, u, 0))
-
 # returns the (possibly replaced) statement node
 # `x = ...` in a function, where x is a global declared below the function in the same file:
 # that reads like a new local variable, but changes the global, so it gets a warning (a loop
 # counter `k` in a helper quietly being the script's `k` further down). Declaring the global
 # above the function says it is meant.
 late_warned: {int: bool}
-check_late_global = (s: int):
-    if cx < 0 or nodes[s].op != i32(int(Tok.assign)): return
-    if ctxs[cx].mod >= 0 and modules[int(ctxs[cx].mod)].is_prelude: return
-    lhs = int(nodes[s].a)
-    if nodes[lhs].kind != .ident: return
-    inst = int(ctxs[cx].inst)
-    if inst <= 0 or inst >= fns.len(): return
-    fd = int(fns[inst].decl)
-    if fd == 0: return
-    nm = int(nodes[lhs].name)
-    sym = lookup(nm)
-    if sym == 0 or syms[sym].kind != .global or syms[sym].decl == 0: return
-    gpos = nodes[int(syms[sym].decl)].pos
-    fpos = nodes[fd].pos
-    if pos_file(gpos) != pos_file(fpos) or pos_off(gpos) <= pos_off(fpos): return
-    # (an error, not a warning: a global added further down would quietly change what the
-    # function does)
-    fatal(nodes[lhs].pos, "'{name_of(nm)}' is the global variable declared below this function (at {pos_str(gpos)}), so this would change it: for a variable of the function's own, write `let {name_of(nm)} = ...` (or use another name); to mean the global, declare it above the function")
-
 # An update through a custom [] / []= pair reads, edits and writes back the
 # selected value. Walk from the root outward so nested containers compose:
 #     e = pool[h]; e.inventory[i] = v; pool[h] = e
 # Receiver indices and the custom index are captured once, in source order.
 elem_tmp_n = 0
-
-# The path from an expression back to its root, outermost access first.
-index_update_path = (n: int) -> int[]:
-    path: int[]
-    let n = n
-    loop nodes[n].kind == .field or nodes[n].kind == .index:
-        path.push(n)
-        n = int(nodes[n].a)
-    path
 
 # Capture an index even when it is a variable: the update's right side may
 # change that variable before the selected value is written back.
@@ -1680,269 +1316,14 @@ index_update_arrays: {int: bool} = {}   # captured names used only to index arra
 
 
 
-# A compound update reads its target and writes it back. Each selector that
-# can run code is evaluated exactly once, from the root outward (left to
-# right), before both: `d[f()]["x"] += 1` calls f once. O(path).
-compound_selector_capture = (s: int) -> int:
-    if nodes[s].op == i32(int(Tok.assign)) or has_flag(s, NF_BROADCAST) or has_flag(s, NF_INDEX_CAPTURED): return 0
-    lhs = int(nodes[s].a)
-    if nodes[lhs].kind != .index and nodes[lhs].kind != .field: return 0
-    pos = nodes[s].pos
-    stmts: int[]
-    path = index_update_path(lhs)
-    i = path.len() - 1
-    loop i >= 0:
-        part = path[i]
-        i -= 1
-        if nodes[part].kind != .index or has_flag(part, NF_LIB_INDEX): continue
-        selectors = if nodes[part].b != 0: [int(nodes[part].b)] else: kids(part)
-        captured: int[]
-        loop selector in selectors:
-            if nodes[selector].kind == .range or nodes[selector].kind == .hole or not compound_selector_runs(selector):
-                captured.push(selector)
-                continue
-            name = "$selector{bc_count}"
-            bc_count += 1
-            index_update_sources[intern(name)] = selector
-            stmts.push(bc_let(name, selector, pos))
-            captured.push(bc_ident(name, pos))
-        if nodes[part].b != 0: nodes[part].b = i32(captured[0])
-        else: set_list(part, captured)
-    if stmts.len() == 0: return 0
-    update = nodes.len()
-    nodes.push(nodes[s])
-    stmts.push(update)
-    blk = bc_block(stmts, pos)
-    check_stmt(blk)
-    blk
-
-elem_field_assign = (s: int) -> int:
-    if has_flag(s, NF_INDEX_CAPTURED): return 0
-    lhs = int(nodes[s].a)
-    path = index_update_path(lhs)
-    ix = 0
-    direct_pool = -1
-    i = path.len() - 1
-    loop i >= 0:
-        candidate = path[i]
-        i -= 1
-        if nodes[candidate].kind != .index or nodes[candidate].b == 0: continue
-        if candidate == lhs and nodes[s].op == i32(int(Tok.assign)): continue
-        # Inspect a copy: checking an overloaded index rewrites it to a call,
-        # but the original receiver path is needed for capture and writeback.
-        bt = prune(check_expr(clone(int(nodes[candidate].a)), 0))
-        if types[bt].kind == .struct_ and not is_map_type(bt) and not is_soa(bt) and not is_part_index(candidate, bt):
-            ix = candidate
-            if pool_direct_update(s, ix, bt): direct_pool = module_of_type(bt)
-            break
-    if ix == 0: return 0
-    pos = nodes[s].pos
-    stmts: int[]
-    receiver_path = index_update_path(int(nodes[ix].a))
-    j = receiver_path.len() - 1
-    loop j >= 0:
-        part = receiver_path[j]
-        j -= 1
-        if nodes[part].kind == .index and nodes[part].b != 0:
-            index_update_capture(part, stmts)
-    iname = index_update_capture(ix, stmts)
-    if direct_pool >= 0:
-        recv = int(nodes[ix].a)
-        # Qualify the library helper so a local function with the same name
-        # cannot intercept the compiler-generated lookup.
-        ensure_bundled_import("std/pool.jo", "$dewy_pool", pos)
-        library = bc_ident("$dewy_pool", pos)
-        checked_index = mk(.call, pos)
-        nodes[checked_index].a = i32(bc_field(library, "__pool_index", pos))
-        set_list(checked_index, [clone(recv), comp_ident(iname, pos)])
-        storage = bc_field(recv, "items", pos)
-        nodes[ix] = Node(kind = .index, pos = pos, a = i32(storage), b = i32(checked_index))
-        add_flag(ix, NF_LIB_INDEX)
-        c0 = nodes.len()
-        nodes.push(nodes[s])
-        stmts.push(c0)
-        blk0 = mk(.block, pos)
-        set_list(blk0, stmts)
-        check_stmt(blk0)
-        return blk0
-    if ix == lhs:
-        c0 = nodes.len()
-        nodes.push(nodes[s])
-        add_flag(c0, NF_INDEX_CAPTURED)
-        stmts.push(c0)
-        blk0 = mk(.block, pos)
-        set_list(blk0, stmts)
-        check_stmt(blk0)
-        return blk0
-    r0 = clone(int(nodes[ix].a))
-    r1 = clone(int(nodes[ix].a))
-    elem_tmp_n += 1
-    ename = intern("__elem{elem_tmp_n}")
-    rd = mk(.index, pos)
-    nodes[rd].a = i32(r0)
-    nodes[rd].b = i32(comp_ident(iname, pos))
-    de = mk(.vardecl, pos)
-    nodes[de].name = i32(ename)
-    nodes[de].b = i32(rd)
-    stmts.push(de)
-    # The remaining field/index path operates on the selected value.
-    f = lhs
-    loop int(nodes[f].a) != ix: f = int(nodes[f].a)
-    nodes[f].a = i32(comp_ident(ename, pos))
-    update_at = stmts.len()
-    stmts.push(s)
-    wr = mk(.index, pos)
-    nodes[wr].a = i32(r1)
-    nodes[wr].b = i32(comp_ident(iname, pos))
-    back = mk(.assign, pos)
-    nodes[back].op = i32(int(Tok.assign))
-    nodes[back].a = i32(wr)
-    nodes[back].b = i32(comp_ident(ename, pos))
-    stmts.push(back)
-    blk = mk(.block, pos)
-    # (the original statement, now e.f = v, is checked inside the block)
-    c = nodes.len()
-    nodes.push(nodes[s])
-    stmts[update_at] = c
-    set_list(blk, stmts)
-    check_stmt(blk)
-    blk
-
-# s = s + x on text or an array: s += x, which adds to the end in place; the other copies all of
-# s each time, and a loop of them takes time growing with the square of the length
-append_assign = (s: int):
-    lhs = int(nodes[s].a)
-    if nodes[lhs].kind != .ident: return
-    spine: int[]
-    n = int(nodes[s].b)
-    loop nodes[n].kind == .binary and nodes[n].op == i32(int(Tok.plus)):
-        spine.push(n)
-        n = int(nodes[n].a)
-    if spine.len() == 0 or nodes[n].kind != .ident or nodes[n].name != nodes[lhs].name: return
-    sy = lookup(int(nodes[lhs].name))
-    if sy == 0 or (syms[sy].kind != .local and syms[sy].kind != .global): return
-    t = prune(check_expr(clone(lhs), 0))
-    if tkind(t) != .str_ and tkind(t) != .array: return
-    # (s + a + b is (s + a) + b: s, then the rest in order, appended)
-    rest = int(nodes[spine[spine.len() - 1]].b)
-    if spine.len() == 1: nodes[s].b = i32(rest)
-    else: nodes[spine[spine.len() - 2]].a = i32(rest)
-    nodes[s].op = i32(int(Tok.pluseq))
-
 # Dewy's s = "{s}..." on a text variable: appended in place, as s += "..." would be in the
 # implementation language; the other copies all of s each time (a loop of them is quadratic).
 # The variable is read first either way, so only a local that nothing else can change while
 # the rest is evaluated (no closure shares it) is appended to.
 interp_appends: {int: bool} = {}
 
-interp_append_assign = (s: int):
-    lhs = int(nodes[s].a)
-    rhs = int(nodes[s].b)
-    if nodes[lhs].kind != .ident or nodes[rhs].kind != .str_lit or nodes[rhs].aux != 1 or nkids(rhs) < 2: return
-    first = kid(rhs, 0)
-    if nodes[first].kind != .pair or nodes[first].sval != -1: return
-    v = int(nodes[first].a)
-    if nodes[v].kind != .ident or nodes[v].name != nodes[lhs].name: return
-    sy = lookup(int(nodes[lhs].name))
-    if sy == 0 or syms[sy].kind != .local: return
-    l = int(syms[sy].ref)
-    if int(locals[l].flags) & (LF_CAPTURED | LF_SHARED | LF_BYREF | LF_CAPTURE | LF_ALIAS | LF_ELEMALIAS | LF_SOAELEM | LF_CONST) != 0: return
-    if prune(int(locals[l].type)) != T_STR: return
-    rest = kids(rhs)
-    rest.remove(0)
-    set_list(rhs, rest)
-    nodes[s].op = i32(int(Tok.pluseq))
-    interp_appends[s] = true
-
-dewy_end_assign = (s: int) -> int:
-    ix = 0
-    part = int(nodes[s].a)
-    loop nodes[part].kind == .field or nodes[part].kind == .index:
-        if nodes[part].kind == .index and nodes[part].sval != 0: ix = part
-        part = int(nodes[part].a)
-    if ix == 0: return 0
-    pos = nodes[ix].pos
-    receiver = int(nodes[ix].a)
-    source_type = prune(check_expr(clone(receiver), 0))
-    stable = dewy_end_place(last_checked)
-    stmts: int[]
-    receiver_path = index_update_path(receiver)
-    j = receiver_path.len() - 1
-    loop j >= 0:
-        part = receiver_path[j]
-        j -= 1
-        if nodes[part].kind == .index and nodes[part].b != 0: index_update_capture(part, stmts)
-    name = "$index_target{bc_count}"
-    bc_count += 1
-    end_source = clone(receiver)
-    if not stable:
-        stmts.push(bc_let(name, end_source, pos))
-        end_source = bc_ident(name, pos)
-        nodes[ix].a = i32(bc_ident(name, pos))
-    loop binding in dewy_index_end_bindings(ix, end_source, source_type): stmts.push(binding)
-    nodes[ix].sval = 0
-    update = nodes.len()
-    nodes.push(nodes[s])
-    stmts.push(update)
-    if not stable: stmts.push(bc_assign(receiver, bc_ident(name, pos), pos))
-    blk = bc_block(stmts, pos)
-    check_stmt(blk)
-    blk
-
-# Only dictionary update paths need this work. O(path^2 + RHS): capture keys
-# and ordinary indices before the old-value read/RHS, never entry positions.
-# Each dictionary's receiver copy contains at most the preceding path.
-# Plain RHSs retain the existing single-lookup compound update.
-map_update_capture = (lhs: int, rhs: int, before: mut int[]):
-    if nodes[lhs].kind != .field and nodes[lhs].kind != .index: return
-    path = index_update_path(lhs)
-    found = false
-    loop part in path:
-        if map_place_index(part): found = true
-    if not found or not compound_selector_runs(rhs): return
-    i = path.len() - 1
-    loop i >= 0:
-        part = path[i]; i -= 1
-        if nodes[part].kind != .index or nodes[part].b == 0: continue
-        entry = map_place_index(part)
-        selector = if entry: kid(int(nodes[part].b), 1) else: int(nodes[part].b)
-        kept = selector
-        sk = nodes[selector].kind
-        literal = sk == .int_lit or sk == .float_lit or sk == .bool_lit or sk == .str_lit and nkids(selector) == 0
-        if not literal:
-            kept = capture_value(selector, ntype(selector), before)
-            if entry:
-                add_flag(before[before.len() - 1], NF_MAP_KEY)
-                add_flag(kept, NF_MAP_KEY)
-        if entry:
-            call = int(nodes[part].b)
-            # map_elem_place copied the receiver before these selectors were
-            # captured. Refresh it too (rows[i][key] must keep i as well).
-            receiver = copy_place(int(nodes[int(nodes[part].a)].a))
-            add_flag(receiver, NF_MUT)
-            set_kid(call, 0, receiver)
-            set_kid(call, 1, kept)
-            add_flag(part, NF_RELOOKUP)
-        else: nodes[part].b = i32(kept)
-
 # Assignments run in checker_assigns.dewy; these are its services.
 assign_before: int[]    # (selectors captured before the values of the assignments being checked)
-# The source's forms: a `[end]`-indexed target's update (returned), `x = x + ...` appends,
-# narrowing undone by a write, a soa element's write to its array.
-assign_prelude = (s: int) -> int:
-    if files[pos_file(nodes[s].pos)].is_dewy:
-        end_update = dewy_end_assign(s)
-        if end_update != 0: return end_update
-    if nodes[s].op == i32(int(Tok.assign)):
-        unnarrow_assign(s)
-        if dewy_at(nodes[s].pos): interp_append_assign(s)
-        else: append_assign(s)
-    sl = soa_alias_of(int(nodes[s].a))
-    if sl != 0:
-        # p = value in `loop mut p in ps`: ps[i] = value
-        if int(locals[sl].flags) & LF_SOAMUT == 0: fatal(nodes[s].pos, "cannot modify loop variable '{name_of(int(locals[sl].name))}' (use `{mutable_loop_syntax(nodes[s].pos)}`)")
-        nodes[s].a = i32(clone(int(locals[sl].soa)))
-    0
 # An indexed target's forms (checker_assigns.dewy va_index, given the receiver's type bt):
 # 1 Dewy ranges made values, 2 a range of an array's elements, 3 a stepped range off an
 # n-dimensional array refused, 4 a record's soa element, part or `[]=` call, 5 an array's
@@ -2015,74 +1396,11 @@ zonk_collect_writes = false
 # change as that body goes on)
 type_exposures = 0
 
-# a function's variables whose fields or elements it changes but whose value it never reads: a
-# copy changed for nothing (`if let e = enemies.find(...): e.hp -= 5` leaves the enemy as it was)
-copy_write_warnings = (f: int):
-    if poly_families.len() > 1 and poly_pending_warnings.get(f) == true: return
-    unused_local_warnings(f)
-    if copy_writes.len() == 0: return
-    skip = LF_READ | LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_ELEMALIAS | LF_SOAELEM | LF_SHARED
-    loop l in fns[f].locals:
-        if not copy_writes.has(l) or int(locals[l].flags) & skip != 0: continue
-        nm = name_of(int(locals[l].name))
-        if starts_with(nm, "#") or starts_with(nm, "$") or starts_with(nm, "__") or pos_in_lib(locals[l].pos): continue
-        warn_unused_copy(copy_writes[l], nm)
-
 
 # Names used in arms a `$target` or `$build` test left out, by position (dw_target_dropped).
 dewy_target_dropped: {int: int[]}
 
 
-
-# (scor = 1 in a function, for the global score: a variable of its own, made and never read)
-unused_local_warnings = (f: int):
-    skip = LF_READ | LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_ELEMALIAS | LF_SOAELEM | LF_SHARED | LF_QUIET
-    loop l in fns[f].locals:
-        fl = int(locals[l].flags)
-        if fl & LF_DECL == 0 or fl & skip != 0 or copy_writes.has(l): continue
-        nm = name_of(int(locals[l].name))
-        # Dewy desugaring uses reserved $ names for evaluation-order captures.
-        # Their values may be overridden; they are not bindings the user can fix.
-        if len(nm) == 0 or starts_with(nm, "_") or starts_with(nm, "#") or starts_with(nm, "$") or pos_in_lib(locals[l].pos): continue
-        if dewy_target_dropped.len() > 0 and target_dropped_use(f, l): continue
-        near = ""
-        if files[pos_file(locals[l].pos)].is_dewy:
-            m = int(fns[f].mod)
-            near = dewy_unused_name_hint(nm, m)
-            if len(near) == 0 and m >= 0:
-                loop used in modules[m].uses:
-                    near = dewy_unused_name_hint(nm, used)
-                    if len(near) > 0: break
-        else:
-            loop gi in [0..globals.len()):
-                gn = name_of(int(globals[gi].name))
-                lim = 1
-                if len(nm) >= 6: lim = 2
-                if gn != nm and len(nm) >= 3 and len(gn) > 0 and gn[0] == nm[0] and not globals[gi].is_const and not modules[int(globals[gi].mod)].is_prelude and gn != upper(gn) and lower(gn) != lower(nm) and edit_distance(gn, nm, lim) <= lim:
-                    near = " (did you mean the variable '{gn}'? that one is changed by writing its name exactly)"
-                    break
-                # (the global of a file this one does not use: the assignment made a variable of the
-                # function's own instead of changing it)
-                gf = int(modules[int(globals[gi].mod)].file)
-                lf = pos_file(locals[l].pos)
-                if gn == nm and not modules[int(globals[gi].mod)].is_prelude and gf >= 0 and lf >= 0 and gf != lf:
-                    # (as `use` would name it from here)
-                    shown = files[gf].path
-                    if starts_with(shown, files[lf].dir + "/"): shown = shown[len(files[lf].dir) + 1..]
-                    near = ": it is a variable of this function's own, as the global '{gn}' of {shown} is not seen from this file (`use '{shown}'` at its top lets it change that one)"
-                    break
-        # (a parameter a function type asks for, `(waiting:[int int] tick:int)` for a controller
-        # that reads only the tick: an underscore says it is unused on purpose)
-        if fl & LF_ASSIGNED == 0 and len(near) == 0 and files[pos_file(locals[l].pos)].is_dewy:
-            loop p in fns[f].params:
-                if locals[p].name == locals[l].name and locals[p].pos == locals[l].pos: near = " (a parameter kept for the function's type can be named `_{nm}`)"
-        # (score = 0 in update, then score += 1: it starts again each frame, and nothing reads it)
-        fnm = ""
-        if fns[f].decl != 0 and nodes[int(fns[f].decl)].kind == .fn_: fnm = name_of(int(nodes[int(fns[f].decl)].name))
-        if fl & LF_ASSIGNED != 0 and len(near) == 0 and (fnm == "update" or fnm == "draw") and not dewy_is_method(int(fns[f].decl)):
-            warn(locals[l].pos, "'{nm}' starts again here each frame, as a variable made in {fnm} belongs to that one run, and is never read: to keep it from frame to frame, give it its first value at the top of the file, outside the functions")
-        else if fl & LF_ASSIGNED != 0 and len(near) == 0: warn(locals[l].pos, "'{nm}' is given a value here, and changed, but never read")
-        else: warn(locals[l].pos, "'{nm}' is given a value here but never used{near}")
 
 
 
@@ -2093,15 +1411,6 @@ unused_local_warnings = (f: int):
 # disprove closed-program ownership. Init/lambda bodies remain unsummarized.
 zonk_indexes = 0
 zonk_user_globals = 0
-
-constant_binding = (e: int) -> int:
-    if nodes[e].type != 0 and (nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global))):
-        return binding_const_init(nodes[e].aux as SK, int(nodes[e].sym), nodes[e].pos)
-    s = lookup(int(nodes[e].name))
-    if s != 0:
-        if syms[s].kind == .type_: return integer_parameter_literal(e)
-        return binding_const_init(syms[s].kind, int(syms[s].ref), nodes[e].pos)
-    0
 
 ceval = (e: int) -> CVal: constant_eval(nodes, names, files, constant_host, e)
 
@@ -2117,15 +1426,6 @@ struct SVal:
     s: str
 
 sa_blocker = 0
-
-sa_fits = (v: int, t0: int) -> bool:
-    t = prune(t0)
-    if t == 0: return false
-    if types[t].kind != .int_: return types[t].kind == .bool_
-    bits = int(types[t].bits)
-    if bits >= 64: return types[t].sign or v >= 0
-    if types[t].sign: return v >= -(1 << (bits - 1)) and v < (1 << (bits - 1))
-    v >= 0 and v < (1 << bits)
 
 # ---------------- program ----------------
 runtime_memeq = -1            # private bounded memory comparison, native lowering
@@ -2165,20 +1465,6 @@ dfs_state: bool[]
 skip_main = false
 export_decls: int[]
 export_fns: int[]
-order_modules = (m: int, out: mut int[]):
-    if dfs_state[m]: return
-    dfs_state[m] = true
-    loop d in modules[m].decls:
-        if nodes[d].kind == .import_:
-            if nodes[d].aux == 2 or nodes[d].aux == 3: order_modules(int(nodes[d].sym), out)
-            else if nodes[d].aux == 1:
-                loop u in modules[m].uses: order_modules(u, out)
-            else if let s = modules[m].names.get(int(nodes[d].name)):
-                if syms[s].kind == .module: order_modules(int(syms[s].ref), out)
-    if dp_loaded.len() > 0 and files[int(modules[m].file)].is_dewy:
-        loop dm in dp_loaded: order_modules(dm, out)
-    out.push(m)
-
 program_named = false         # (the build block gave the name)
 
 # Generated helpers preserve collection semantics and record protocols defined

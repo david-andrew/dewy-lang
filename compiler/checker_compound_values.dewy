@@ -1,0 +1,87 @@
+$runtime_checks
+from p"ast.jo" import (NF_BROADCAST add_flag has_flag mk nodes)
+from p"check.jo" import (globals int_update_lhs int_update_pos locals)
+from p"checked_eval.dewy" import (cx_token)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_call)
+from p"decimal_ops.dewy" import (decimal_float_write)
+from p"decimals.jo" import (decimal_target)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (CV coerce last_checked wrap_conv)
+from p"lexer_helpers.dewy" import (tok_text)
+from p"node_store.dewy" import (NK)
+from p"refine_metadata.dewy" import (representation_type)
+from p"types.jo" import (is_float is_int prune)
+from p"unit_ops.dewy" import (quantity_float_update quantity_is_delta quantity_literal_syntax quantity_point)
+from p"units.jo" import (is_quantity quantity_update_right)
+from p"util.jo" import (name_of)
+
+CompoundWord:type=int64<overflow='wrap'>
+CompoundI32:type=int32<overflow='wrap'>
+
+# The frozen tokens pluseq..shreq (48..57) map to plus..shr (58..68), skipping unary tilde before the shifts.
+compound_op=(raw:int64):>int64=>{
+    let op=CompoundWord(raw)
+    if op >=? 48 and op <=? 55 {return op + 10}
+    if op =? 56 or op =? 57 {return op + 11}
+    0
+}
+
+# Dewy's arithmetic helpers implement floor division, exact division and power.
+# Keep the update as an assignment until its place and indices are resolved.
+compound_value=(s:CompoundWord left:CompoundWord right:CompoundWord):>CompoundWord=>{
+    if nodes[s].sval not=? 0 {
+        let n=bc_call(name_of(CompoundWord(nodes[s].sval)) [left right] nodes[s].pos)
+        if has_flag(s NF_BROADCAST) {add_flag(n NF_BROADCAST)}
+        return n
+    }
+    let kind:NK='binary'
+    if nodes[s].aux2 =? 1 and not has_flag(s NF_BROADCAST) {
+        kind=if nodes[s].op =? 53 {'and_'} else {'or_'}
+    }
+    let n=mk(kind nodes[s].pos)
+    nodes[n].op=CompoundI32(compound_op(CompoundWord(nodes[s].op)))
+    if has_flag(s NF_BROADCAST) {
+        let text=tok_text(cx_token(CompoundWord(nodes[n].op)))
+        nodes[n].aux=CompoundI32((text as array<uint8>)[0])
+        nodes[n].op=85 # Tok.dotop
+    }
+    nodes[n].a=CompoundI32(left)
+    nodes[n].b=CompoundI32(right)
+    n
+}
+
+compound_checked=(s:CompoundWord left:CompoundWord right:CompoundWord target:CompoundWord):>CompoundWord=>{
+    let literal=is_quantity(target) and quantity_literal_syntax(right)
+    let n=compound_value(s left right)
+    let updating_right = @quantity_update_right
+    if literal {updating_right=right}
+    let updating_lhs = @int_update_lhs
+    # A numeric update may need the original binding to explain a storage mismatch.
+    if nodes[left].kind =? 'ident' and (nodes[left].aux =? 1 or nodes[left].aux =? 2) and is_int(representation_type(prune(target))) and nodes[s].op not=? 51 {
+        updating_lhs=mk('ident' nodes[left].pos)
+        nodes[updating_lhs].aux=nodes[left].aux
+        nodes[updating_lhs].sym=nodes[left].sym
+        nodes[updating_lhs].name=nodes[left].name
+        if nodes[left].name =? 0 {
+            nodes[updating_lhs].name=if nodes[left].aux =? 1 {locals[CompoundWord(nodes[left].sym)].name} else {globals[CompoundWord(nodes[left].sym)].name}
+        }
+        let position = @int_update_pos
+        position=nodes[s].pos
+    }
+    let expected=if has_flag(s NF_BROADCAST) {target} else {0}
+    let result=prune(check_expr(n expected))
+    updating_right=0
+    if is_quantity(target) and quantity_point(target) and quantity_is_delta(result) {
+        fatal(nodes[s].pos "this update leaves a difference, not a temperature point, so the point cannot hold it: subtract a difference (`5K`), or keep the difference in a new binding")
+    }
+    let t=prune(target)
+    if decimal_target not=? 0 and decimal_float_write(result t) {return last_checked}
+    quantity_float_update(s target result)
+    if nodes[s].sval not=? 0 and ((is_int(t) and is_int(result)) or (is_float(t) and is_float(result))) {
+        if result not=? t {wrap_conv(last_checked if is_int(t) {CV.int_} else {CV.float_} t)}
+    }
+    let r=coerce(last_checked target)
+    updating_lhs=0
+    r
+}

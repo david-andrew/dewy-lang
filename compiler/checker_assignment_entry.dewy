@@ -1,0 +1,63 @@
+$runtime_checks
+from p"ast.jo" import (clone nodes)
+from p"check.jo" import (LF_SOAELEM LF_SOAMUT ctxs cx dewy_at fns locals modules syms)
+from p"checker_append_assign.dewy" import (append_assign interp_append_assign)
+from p"checker_expr.dewy" import (lookup)
+from p"checker_index_writebacks.dewy" import (dewy_end_assign)
+from p"checker_narrow_writes.dewy" import (unnarrow_assign)
+from p"checks_thin.dewy" import (mutable_loop_syntax)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"source_queries.dewy" import (pos_str)
+from p"util.jo" import (files name_of pos_file pos_off)
+
+AssignmentEntryWord:type=int64<overflow='wrap'>
+
+# the soa element alias local a name stands for here, or 0
+soa_alias_of=(e:AssignmentEntryWord):>AssignmentEntryWord=>{
+    if nodes[e].kind not=? 'ident' {return 0}
+    let s=lookup(AssignmentEntryWord(nodes[e].name))
+    if s =? 0 or syms[s].kind not=? 'local' {return 0}
+    let l=AssignmentEntryWord(syms[s].ref)
+    if (AssignmentEntryWord(locals[l].flags) & LF_SOAELEM) =? 0 {return 0}
+    l
+}
+
+# The source's forms: a `[end]`-indexed target's update (returned), `x = x + ...` appends,
+# narrowing undone by a write, a soa element's write to its array.
+assign_prelude=(s:AssignmentEntryWord):>AssignmentEntryWord=>{
+    if files[pos_file(nodes[s].pos)].is_dewy {
+        let update=dewy_end_assign(s)
+        if update not=? 0 {return update}
+    }
+    if nodes[s].op =? 47 {
+        unnarrow_assign(s)
+        if dewy_at(nodes[s].pos) {interp_append_assign(s)} else {append_assign(s)}
+    }
+    let sl=soa_alias_of(AssignmentEntryWord(nodes[s].a))
+    if sl not=? 0 {
+        # p = value in a mutable loop over soa elements writes the corresponding pool item.
+        if (AssignmentEntryWord(locals[sl].flags) & LF_SOAMUT) =? 0 {
+            fatal(nodes[s].pos "cannot modify loop variable '{name_of(AssignmentEntryWord(locals[sl].name))}' (use `{mutable_loop_syntax(nodes[s].pos)}`)")
+        }
+        nodes[s].a=int32<overflow='wrap'>(clone(AssignmentEntryWord(locals[sl].soa)))
+    }
+    0
+}
+
+check_late_global=(s:AssignmentEntryWord):>void=>{
+    if cx <? 0 or nodes[s].op not=? 47 {return}
+    if ctxs[cx].mod >=? 0 and modules[AssignmentEntryWord(ctxs[cx].mod)].is_prelude {return}
+    let lhs=AssignmentEntryWord(nodes[s].a)
+    if nodes[lhs].kind not=? 'ident' {return}
+    let inst=AssignmentEntryWord(ctxs[cx].inst)
+    if inst <=? 0 or inst >=? fns.length {return}
+    let fd=AssignmentEntryWord(fns[inst].decl)
+    if fd =? 0 {return}
+    let nm=AssignmentEntryWord(nodes[lhs].name)
+    let sym=lookup(nm)
+    if sym =? 0 or syms[sym].kind not=? 'global' or syms[sym].decl =? 0 {return}
+    let gpos=nodes[AssignmentEntryWord(syms[sym].decl)].pos
+    let fpos=nodes[fd].pos
+    if pos_file(gpos) not=? pos_file(fpos) or pos_off(gpos) <=? pos_off(fpos) {return}
+    fatal(nodes[lhs].pos "'{name_of(nm)}' is the global variable declared below this function (at {pos_str(gpos)}), so this would change it: for a variable of the function's own, write `let {name_of(nm)} = ...` (or use another name); to mean the global, declare it above the function")
+}

@@ -1,0 +1,24 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_expr.dewy'
+use 'checker_state.dewy'
+use 'type_value_arguments.dewy'
+use 'types.jo'
+
+constant_binding = (e: int) -> int:
+    if nodes[e].type != 0 and (nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global))):
+        return binding_const_init(nodes[e].aux as SK, int(nodes[e].sym), nodes[e].pos)
+    s = lookup(int(nodes[e].name))
+    if s != 0:
+        if syms[s].kind == .type_: return integer_parameter_literal(e)
+        return binding_const_init(syms[s].kind, int(syms[s].ref), nodes[e].pos)
+    0
+
+sa_fits = (v: int, t0: int) -> bool:
+    t = prune(t0)
+    if t == 0: return false
+    if types[t].kind != .int_: return types[t].kind == .bool_
+    bits = int(types[t].bits)
+    if bits >= 64: return types[t].sign or v >= 0
+    if types[t].sign: return v >= -(1 << (bits - 1)) and v < (1 << (bits - 1))
+    v >= 0 and v < (1 << bits)

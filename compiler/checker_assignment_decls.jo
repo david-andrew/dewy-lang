@@ -1,0 +1,71 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_expr.dewy'
+use 'checker_tokens.dewy'
+use 'checks_thin.dewy'
+use 'diagnostic_exit.dewy'
+use 'source_queries.dewy'
+use 'util.jo'
+
+# `x = value` where no variable x exists yet is a declaration
+# (m >= 0: at the top level of module m, where only that module's globals count)
+assign_declares = (s: int, m: int) -> bool:
+    if nodes[s].kind != .assign or nodes[s].op != i32(int(Tok.assign)): return false
+    lhs = int(nodes[s].a)
+    lk = nodes[lhs].kind
+    if lk == .ident: return not name_assignable(int(nodes[lhs].name), m)
+    if lk != .tuple: return false
+    any = false
+    loop c in binding_leaves(kids(lhs)):
+        ck = nodes[c].kind
+        if ck == .hole: continue
+        if ck != .ident: return false
+        if name_assignable(int(nodes[c].name), m): return false
+        any = true
+    any
+
+# (at the top level: the module's own variables, and those of the modules it `use`s and of the
+# library, as in a function: `ui_style = ...` there changes the library's, not a new one)
+# Another module's __ name (its own state) is not changed so: the line makes one of this module's
+# (and in the library, whose modules share their names, it is an error to have two)
+name_assignable = (nm: int, m: int) -> bool:
+    if m < 0: return var_visible(nm)
+    s = module_lookup(m, nm)
+    if s == 0 or syms[s].kind != .global: return false
+    if is_private(nm) and int(globals[int(syms[s].ref)].mod) != m: return false
+    true
+
+# is there a variable of this name in scope (assigning to it changes it)?
+var_visible = (nm: int) -> bool:
+    s = lookup(nm)
+    if s == 0: return false
+    k = syms[s].kind
+    k == .local or k == .global
+
+assign_to_decl = (s: int):
+    lhs = int(nodes[s].a)
+    if nodes[lhs].kind == .ident and files[pos_file(nodes[s].pos)].is_dewy:
+        cs = lookup(int(nodes[lhs].name))
+        if cs != 0 and syms[cs].kind == .const_ and not decl_shadowable(int(syms[cs].decl)):
+            fatal(nodes[lhs].pos, "cannot modify const '{name_of(int(nodes[lhs].name))}'; use let to declare a new binding")
+        # (a module's function is a const binding too: only a `$shadowable` one, as the
+        # prelude's are, is shadowed by a plain `name = ...`)
+        if cs != 0 and syms[cs].kind == .fns and syms[cs].decl != 0 and not decl_shadowable(int(syms[cs].decl)) and cx >= 0:
+            fatal(nodes[lhs].pos, "'{name_of(int(nodes[lhs].name))}' is a function ({pos_str(nodes[int(syms[cs].decl)].pos)}): it cannot be shadowed by assignment; use let to declare a new binding")
+    if nodes[lhs].kind == .ident and cx >= 0 and int(nodes[lhs].name) < own_consts.len() and own_consts[int(nodes[lhs].name)]:
+        # (MAX = 4 would make a variable hiding the program's constant MAX)
+        cs = lookup(int(nodes[lhs].name))
+        if cs != 0 and syms[cs].kind == .const_ and syms[cs].decl != 0 and not decl_shadowable(int(syms[cs].decl)):
+            cn = name_of(int(nodes[lhs].name))
+            cp = nodes[int(syms[cs].decl)].pos
+            if pos_in_lib(cp): fatal(nodes[lhs].pos, "'{cn}' is a constant of the library: it cannot change (`let {cn} = ...` makes a variable of that name)")
+            ln, cc = line_col(cp)
+            fatal(nodes[lhs].pos, "'{cn}' is a constant (`const` on line {ln}): it cannot change; to change it as the game runs, make it a variable there, without `const`")
+    nodes[s].kind = .vardecl
+    nodes[s].a = 0
+    if nodes[lhs].kind == .ident:
+        nodes[s].name = nodes[lhs].name
+        nodes[s].pos = nodes[lhs].pos
+    else:
+        nodes[s].list = nodes[lhs].list
+        nodes[s].nlist = nodes[lhs].nlist
