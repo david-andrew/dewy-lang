@@ -1,0 +1,9 @@
+read = (xs:array<int64> i:int rounds:int):>int64 => {
+    if i <? 0 or i >=? xs.length { return 0 }
+    loop k in [0..rounds) { xs.push(7) }
+    let first = xs[i]
+    loop k in [0..rounds) { xs.push(8) xs[0] = 42 }
+    if first =? 40 { xs[i] } else { 0 }
+}
+printl(read([40] 0 0))
+printl(read([40] 0 2))

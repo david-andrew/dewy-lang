@@ -1,0 +1,7 @@
+replace = (@xs:array<int64>):>int64 => { xs = [7] return 9 }
+read = (xs:array<int64> i:int rounds:int):>int64 => {
+    if i <? 0 or i >=? xs.length { return 0 }
+    loop k in [0..rounds) { xs.push(8) xs[0] = replace(@xs) }
+    xs[i]
+}
+printl(read([40 2] 1 1))

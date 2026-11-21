@@ -1,0 +1,8 @@
+read = (rounds:int):>int64 => {
+    let rows:array<array<int64>> = [[42]]
+    loop k in [0..rounds) {
+        if k % 2 =? 0 { rows.push([7]) } else { rows[0] = [] }
+    }
+    rows[0][0]
+}
+printl(read(2))

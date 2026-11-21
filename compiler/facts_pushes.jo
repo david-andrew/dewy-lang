@@ -156,6 +156,10 @@ fact_literal_trips = (n: int) -> int:
     loop i in [0..nkids(it)):
         if has_flag(kid(it, i), NF_SPREAD): return -1
     nkids(it)
+fact_push_element_store = (target: int, l: int) -> bool:
+    if nodes[target].kind != .index or nkids(target) > 1 or fact_push_receiver(int(nodes[target].a)) != l: return false
+    selector = int(nodes[target].b)
+    selector != 0 and not fact_mentions(selector, l) and (nkids(target) == 0 or not fact_mentions(kid(target, 0), l))
 fact_push_flow = (n: int, l: int, trips: {int: FactBound} = {}, minimum: bool = false) -> (int, int):
     if n == 0: return (0, -2)
     k = nodes[n].kind
@@ -167,7 +171,9 @@ fact_push_flow = (n: int, l: int, trips: {int: FactBound} = {}, minimum: bool = 
     if k == .lambda: return (0, -2)
     if k == .intrinsic and nodes[n].aux == i32(int(IN.push)) and nkids(n) == 2 and fact_push_receiver(kid(n, 0)) == l:
         return fact_push_then(fact_push_flow(kid(n, 1), l, trips, minimum), (1, -2))
-    if k == .assign and fact_mentions(int(nodes[n].a), l): return (-1, -1)
+    if k == .assign:
+        target = int(nodes[n].a)
+        if fact_mentions(target, l) and not fact_push_element_store(target, l): return (-1, -1)
     if (k == .addr or k == .intrinsic and nodes[n].aux != i32(int(IN.len))) and fact_mentions(n, l): return (-1, -1)
     if k == .call and fact_call_may_write(n, l): return (-1, -1)
     # A nested loop may exit this one only with a labeled edge. Any return
@@ -378,7 +384,7 @@ fact_growing_pushes = (n: int, s: mut FactState, counted: (int, int)[]) -> (int,
         length = fact_project(s, s.bindings[i].value, -1, false, T_INT)
         if fact_bound(s, length).lo <= 0 and fact_incident(s, length) < 0: continue
         sites: int[]
-        if fact_push_only(body, l, sites): found.push((l, length))
+        if fact_push_only(body, l, sites, true): found.push((l, length))
     found
 fact_push_candidates = (n: int, out: mut int[]):
     if n == 0 or out.len() >= 8: return
@@ -409,6 +415,7 @@ fact_counted_lengths = (n: int, s: mut FactState, pushes: (int, int)[], count: i
             fact_difference(s, total, count, e.lo, n)
             fact_difference(s, count, total, -e.lo, n)
         if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(s.bindings[i].value, -1, false, total))
+    fact_growing_lengths(s, pushes)
 # Relations a range loop keeps between scalars it changes (`low <=? high`
 # while tracking a minimum and maximum): pairs of changed scalar places whose
 # entry values a row (or one shared value) relates. Candidates only, to be
@@ -696,25 +703,27 @@ fact_iterate = (n: int, s: mut FactState, range: bool, base: int, lo: int, hi: i
 # values the slice demands; O(body) per such loop, O(frames) per push.
 # Whether n changes l only by `l.push(v)`, collecting those pushes. Reads are
 # free; any other mention by a write, call or mutating intrinsic fails.
-fact_push_only = (n: int, l: int, sites: mut int[]) -> bool:
+fact_push_only = (n: int, l: int, sites: mut int[], lengths_only: bool = false) -> bool:
     if n == 0: return true
     k = nodes[n].kind
     if k == .intrinsic and nodes[n].aux == i32(int(IN.push)) and nkids(n) == 2 and fact_push_receiver(kid(n, 0)) == l:
         sites.push(n)
-        return fact_push_only(kid(n, 1), l, sites)
-    if k == .intrinsic and nodes[n].aux == i32(int(IN.len)): return true
-    if k == .assign and fact_mentions(int(nodes[n].a), l): return false
+        return fact_push_only(kid(n, 1), l, sites, lengths_only)
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.len)): return fact_push_only(kid(n, 0), l, sites, lengths_only)
+    if k == .assign:
+        target = int(nodes[n].a)
+        if fact_mentions(target, l) and not (lengths_only and fact_push_element_store(target, l)): return false
     if (k == .call or k == .addr or k == .intrinsic) and fact_mentions(n, l): return false
     if k == .for_ and nodes[n].aux == 2 and fact_mentions(int(nodes[n].a), l): return false
     mask = isolation_children(k)
     if mask < 0: return k == .lambda or not fact_mentions(n, l)
-    if mask & 1 != 0 and not fact_push_only(int(nodes[n].a), l, sites): return false
-    if mask & 2 != 0 and not fact_push_only(int(nodes[n].b), l, sites): return false
-    if mask & 4 != 0 and not fact_push_only(int(nodes[n].c), l, sites): return false
+    if mask & 1 != 0 and not fact_push_only(int(nodes[n].a), l, sites, lengths_only): return false
+    if mask & 2 != 0 and not fact_push_only(int(nodes[n].b), l, sites, lengths_only): return false
+    if mask & 4 != 0 and not fact_push_only(int(nodes[n].c), l, sites, lengths_only): return false
     if mask & 16 != 0:
         loop i in [0..nkids(n)):
             c = kid(n, i)
-            if not fact_push_only(c, l, sites): return false
+            if not fact_push_only(c, l, sites, lengths_only): return false
     true
 fact_push_open = (n: int, s: mut FactState, base: int = 0) -> bool:
     acc = fact_comprehensions.get(n) ?? 0
