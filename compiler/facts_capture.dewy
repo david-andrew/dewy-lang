@@ -637,7 +637,7 @@ fact_capture_value=(n:CaptureWord @s:FactState):>int64=>$unsafe {
         let hull=fact_hull_type(ntype(n) paths.yes y paths.no z)
         if not paths.yes.live {result=fact_bound(paths.no z); hull=fact_terms[z].type}
         if not paths.no.live {result=fact_bound(paths.yes y); hull=fact_terms[y].type}
-        if fact_summary_field not=? 0 and type_eq(fact_type(ntype(n)) fact_type(CaptureWord(fns.ptr[fact_summary_owner].ret))) {
+        if fact_summary_field >? 0 and type_eq(fact_type(ntype(n)) fact_type(CaptureWord(fns.ptr[fact_summary_owner].ret))) {
             return fact_constructor_join(n paths y z result hull @s)
         }
         s=fact_join(paths.yes paths.no n)

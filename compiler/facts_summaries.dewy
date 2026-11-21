@@ -7,7 +7,7 @@ from p"effects.jo" import (effect_unavailable)
 from p"expr.jo" import (is_nd mk_ident_local ntype)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"checks_shaped.dewy" import (shape_field_type)
-from p"facts.jo" import (FACT_CAP FACT_STEPS FactPaths FactProjection FactState FactSummary fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_types fact_hull_owner fact_length_forced fact_loop_exhausted fact_loop_steps fact_loops fact_owner fact_pending_defers fact_probe_on fact_push_frames fact_query fact_record_array_types fact_shape_summaries fact_slice fact_slice_prepare fact_speculating fact_step_limit fact_summaries fact_summary_acc fact_summary_assumed fact_summary_entry fact_summary_field fact_summary_fields fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms)
+from p"facts.jo" import (FACT_CAP FACT_STEPS FactPaths FactProjection FactSlice FactState FactSummary fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_types fact_hull_owner fact_length_forced fact_loop_exhausted fact_loop_steps fact_loops fact_owner fact_pending_defers fact_probe_on fact_push_frames fact_query fact_record_array_types fact_shape_summaries fact_slice fact_slice_prepare fact_speculating fact_step_limit fact_summaries fact_summary_acc fact_summary_assumed fact_summary_entry fact_summary_field fact_summary_fields fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms)
 from p"facts_capture.dewy" import (fact_capture)
 from p"facts_slice_prep.dewy" import (fact_slice_push_children)
 from p"facts_values.dewy" import (fact_domain fact_scalar fact_type fact_pair_key fact_place fact_project)
@@ -83,6 +83,24 @@ fact_summary_relation=(s:FactState length:SummaryWord):>[int64 int64]=>{
     [(-1) 0]
 }
 fact_summary_record=(@s:FactState r0:SummaryWord):>void=>$unsafe {
+    # A negative selector asks only whether one written global keeps its length.
+    # Check every return, including absent optionals, before examining the result.
+    if fact_summary_field <? 0 {
+        let g=-SummaryWord(fact_summary_field)
+        let b=fact_binding(s PlaceIdentity('global' 0 g))
+        let mode:SummaryWord=0
+        if b >=? 0 and fact_pending_defers =? 0 and not fact_drop_pending(fact_summary_owner) {
+            let before=fact_summary_entry[0]
+            let after=fact_project(@s s.bindings[b].value (-1) false T_INT)
+            if before not=? 0 and after not=? 0 and fact_entails(s before after 0) {
+                mode=if (not fact_summary_acc.seen or fact_summary_acc.lengths[0] =? 1) and fact_entails(s after before 0) {1} else {2}
+            }
+        }
+        fact_summary_acc.seen=true
+        fact_summary_acc.lengths=[mode]
+        if mode =? 0 {fact_loop_exhausted=true}
+        return
+    }
     let t=fact_type(SummaryWord(fns.ptr[fact_summary_owner].ret))
     let r=r0
     let payload=fact_summary_payload(t)
@@ -422,7 +440,7 @@ fact_summary_field_type=(t:SummaryWord field:SummaryWord):>SummaryWord=>$unsafe 
 }
 fact_summary=(f:SummaryWord places:bool=false field:SummaryWord=0):>FactSummary=>$unsafe {
     let strict=dir_assumed_bounds_any and fact_length_strict()
-    let key0=if field =? 0 {f} else {fact_pair_key(f field)}
+    let key0=if field =? 0 {f} else {fact_pair_key(f (if field <? 0 {0x80000000 - field} else {field}))}
     # (a strict caller's summaries are cached apart: fact_length_max)
     let key=if strict {-1 - key0} else {key0}
     let known=fact_summaries.get(key)
@@ -431,7 +449,7 @@ fact_summary=(f:SummaryWord places:bool=false field:SummaryWord=0):>FactSummary=
     let d=SummaryWord(fns.ptr[f].decl)
     let t=fact_type(SummaryWord(fns.ptr[f].ret))
     if fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 or fns.ptr[f].kind =? FK_INIT or fns.ptr[f].caps.length not=? 0 or d not=? 0 and has_flag(d NF_EXTERN) or effect_unavailable.has(f) {return unknown}
-    if field not=? 0 {t=fact_summary_field_type(t field)}
+    if field >? 0 {t=fact_summary_field_type(t field)}
     else if fact_summary_payload(t) not=? 0 {t=fact_summary_payload(t)}
     if tkind(t) not=? 'array' and not (fact_scalar(t) and is_int(t)) and not places {return unknown}
     if (field not=? 0 or fact_constructor_budget >=? 0) and not fact_constructor_body(f) {
@@ -483,7 +501,14 @@ fact_summary=(f:SummaryWord places:bool=false field:SummaryWord=0):>FactSummary=
     refine_entry=[]
     if refine_active or refine_owners.has(f) {refine_fact_entry(f @state)}
     fact_summary_entry=[]
-    if places or tkind(t) =? 'array' or fact_scalar(t) and is_int(t) and t not=? T_U64 {
+    if field <? 0 {
+        let g=-field
+        let t=fact_type(SummaryWord(globals.ptr[g].type))
+        let v=fact_new(@state FactBound() FactTerm(type=t))
+        fact_bind(@state PlaceIdentity('global' 0 g) v)
+        fact_summary_entry.push(fact_project(@state v (-1) false T_INT))
+    }
+    else if places or tkind(t) =? 'array' or fact_scalar(t) and is_int(t) and t not=? T_U64 {
         loop l in fns.ptr[f].params {
             let pt=fact_type(SummaryWord(locals.ptr[l].type))
             let v:SummaryWord=0
@@ -535,8 +560,10 @@ fact_summary=(f:SummaryWord places:bool=false field:SummaryWord=0):>FactSummary=
             }
         }
     }
-    fact_slice_prepare(f true)
-    if places {
+    # A global may be written without feeding the return or a mutable formal.
+    # Visit the complete small body under the same shared 128-step budget.
+    if field <? 0 {fact_slice=FactSlice()} else {fact_slice_prepare(f true)}
+    if places and field >=? 0 {
         loop i in [0..fact_summary_entry.length) {
             let l=fns.ptr[f].params[i]
             fact_summary_assumed.push(if fact_summary_entry[i] not=? 0 and tkind(fact_type(SummaryWord(locals.ptr[l].type))) =? 'array' and SummaryWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 {1} else {0})

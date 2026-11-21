@@ -397,6 +397,18 @@ fact_call_effects = (n: int, s: mut FactState):
             t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
             value = fact_new(s, fact_domain(t, .call, n), FactTerm(type = t))
             fact_holds_contract(s, t, value)
+            if route.root == .global and tkind(fact_type(t)) == .array and checked_call_mutmask(n) == 0:
+                q = fact_projection_find(s, old, -1, false)
+                if q >= 0:
+                    before = s.projections[q].value
+                    summary = fact_summary(f, true, -p.declaration)
+                    if summary.seen and summary.lengths.len() > 0 and s.projections.len() < FACT_CAP:
+                        if summary.lengths[0] == 1: fact_add_projection(s, FactProjection(value, -1, false, before))
+                        else if summary.lengths[0] == 2:
+                            after = fact_project(s, value, -1, false, T_INT)
+                            fact_difference(s, before, after, 0, n)
+                            b = fact_bound(s, after)
+                            fact_set_bound(s, after, FactBound(max(b.lo, fact_bound(s, before).lo), b.hi))
             fact_rebind(s, p, value, n, old)
             continue
         g = fact_index_get(by_root, i)

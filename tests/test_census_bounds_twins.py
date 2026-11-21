@@ -19,3 +19,11 @@ def test_facts_pushes_keeps_entry_bound(compiler, tmp_path, monkeypatch):
 def test_loop_sort_lengths(compiler, tmp_path, monkeypatch):
     cases = ['census_bounds/loop_sort', 'census_bounds/loop_sort_callback_shrinks']
     assert compare_facts(compiler, tmp_path, monkeypatch, cases) == 1
+
+
+def test_global_write_summaries(compiler, tmp_path, monkeypatch):
+    # facts_forgets requests the facts_summaries transfer. facts_capture
+    # visits all exits, including absent optional results.
+    cases = ['census_bounds/global_helpers', 'census_bounds/global_optional_shrink',
+             'census_bounds/global_grow_is_not_exact']
+    assert compare_facts(compiler, tmp_path, monkeypatch, cases) == 1

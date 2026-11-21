@@ -1,0 +1,9 @@
+let xs:array<int64> = []
+grow = ():>void => { xs.push(7) }
+read = (other:array<int64>):>int64 => {
+    if xs.length not=? other.length { return 0 }
+    grow()
+    other[xs.length - 1]
+}
+xs = [40]
+printl(read([40]))

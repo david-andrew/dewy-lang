@@ -1,0 +1,13 @@
+let xs:array<int64> = []
+edit = (shrink:bool):>int? => {
+    if shrink { xs = [] return none }
+    xs.push(7)
+    1
+}
+read = (i:int shrink:bool):>int64 => {
+    if i <? 0 or i >=? xs.length { return 0 }
+    let result = edit(shrink)
+    xs[i]
+}
+xs = [42]
+printl(read(0 true))

@@ -1,0 +1,11 @@
+let xs:array<int64>=[]
+touch=():>void=>{if xs.length >? 0 { xs[0]=5 }}
+grow=():>void=>{xs.push(7)}
+read=(i:int):>int64=>{
+    if i <? 0 or i >=? xs.length {return 0}
+    touch()
+    grow()
+    xs[i]
+}
+xs=[40]
+printl(read(0))

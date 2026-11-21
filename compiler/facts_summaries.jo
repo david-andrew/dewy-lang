@@ -118,6 +118,19 @@ fact_summary_relation = (s: FactState, length: int) -> (int, int):
             if fact_distance(s, length, l, c) and fact_distance(s, l, length, -c): return (i, c)
     (-1, 0)
 fact_summary_record = (s: mut FactState, r0: int):
+    if fact_summary_field < 0:
+        g = -fact_summary_field
+        b = fact_binding(s, PlaceIdentity(.global, 0, g))
+        mode = 0
+        if b >= 0 and fact_pending_defers == 0 and not fact_drop_pending(fact_summary_owner):
+            before = fact_summary_entry[0]
+            after = fact_project(s, s.bindings[b].value, -1, false, T_INT)
+            if before != 0 and after != 0 and fact_entails(s, before, after, 0):
+                mode = if (not fact_summary_acc.seen or fact_summary_acc.lengths[0] == 1) and fact_entails(s, after, before, 0): 1 else: 2
+        fact_summary_acc.seen = true
+        fact_summary_acc.lengths = [mode]
+        if mode == 0: fact_loop_exhausted = true
+        return
     t = fact_type(int(fns[fact_summary_owner].ret))
     r = r0
     payload = fact_summary_payload(t)
@@ -395,7 +408,7 @@ fact_summary_field_type = (t: int, field: int) -> int:
     fact_type(shape_field_type(t, field))
 fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     strict = dir_assumed_bounds_any and fact_length_strict()
-    key0 = if field == 0: f else: fact_pair_key(f, field)
+    key0 = if field == 0: f else: fact_pair_key(f, (if field < 0: 0x80000000 - field else: field))
     # (a strict caller's summaries are cached apart: fact_length_max)
     key = if strict: -1 - key0 else: key0
     if let known = fact_summaries.get(key): return known
@@ -403,7 +416,7 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     d = int(fns[f].decl)
     t = fact_type(int(fns[f].ret))
     if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or fns[f].caps.len() != 0 or d != 0 and has_flag(d, NF_EXTERN) or effect_unavailable.has(f): return unknown
-    if field != 0: t = fact_summary_field_type(t, field)
+    if field > 0: t = fact_summary_field_type(t, field)
     else if fact_summary_payload(t) != 0: t = fact_summary_payload(t)
     if tkind(t) != .array and not (fact_scalar(t) and is_int(t)) and not places: return unknown
     if (field != 0 or fact_constructor_budget >= 0) and not fact_constructor_body(f):
@@ -454,7 +467,13 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     refine_entry = []
     if refine_active or refine_owners.has(f): refine_fact_entry(f, state)
     fact_summary_entry = []
-    if places or tkind(t) == .array or fact_scalar(t) and is_int(t) and t != T_U64:
+    if field < 0:
+        g = -field
+        gt = fact_type(int(globals[g].type))
+        v = fact_new(state, FactBound(), FactTerm(type = gt))
+        fact_bind(state, PlaceIdentity(.global, 0, g), v)
+        fact_summary_entry.push(fact_project(state, v, -1, false, T_INT))
+    else if places or tkind(t) == .array or fact_scalar(t) and is_int(t) and t != T_U64:
         loop l in fns[f].params:
             pt = fact_type(int(locals[l].type))
             v = 0
@@ -495,8 +514,9 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
                         fact_bind(state, place, value)
                 length = fact_project(state, fact_project(state, value, name, false, ft), -1, false, T_INT)
                 if length != 0: fact_summary_fields.push((i, name, length))
-    fact_slice_prepare(f, true)
-    if places:
+    if field < 0: fact_slice = FactSlice()
+    else: fact_slice_prepare(f, true)
+    if places and field >= 0:
         loop i in [0..fact_summary_entry.len()):
             l = fns[f].params[i]
             fact_summary_assumed.push(if fact_summary_entry[i] != 0 and tkind(fact_type(int(locals[l].type))) == .array and int(locals[l].flags) & LF_MUTPARAM != 0: 1 else: 0)
