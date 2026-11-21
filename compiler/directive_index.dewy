@@ -1,0 +1,126 @@
+$runtime_checks
+
+from p"directive_code.dewy" import dir_code_current
+from p"directive_rules.dewy" import dir_find_scan
+from p"directives.jo" import (dir_cache_best dir_cache_hi dir_cache_lo dir_cache_setting dir_code_any dir_code_by_inst dir_code_names dir_index_file dir_index_gen dir_index_group_next dir_index_head dir_index_len dir_index_next dir_index_setting dir_index_tail dir_index_wide dir_scopes dir_scopes_gen)
+from p"util.jo" import pos_file
+
+DirIndexWord:type=int64<overflow='wrap'>
+
+dir_index_module_start=(file:DirIndexWord):>int64=>file << 40
+dir_index_module_end=(file:DirIndexWord):>int64=>(file << 40) | 0xFFFFFFFFFF
+
+# The chain of a setting's scopes in a file, or -1 when absent.
+dir_index_group=(setting:int64 file:DirIndexWord):>int64=>$unsafe {
+    if file >=? dir_index_file.length {return -1}
+    let g=dir_index_file.ptr[file] - 1
+    loop g >=? 0 and dir_index_setting.ptr[g] not=? setting {g=dir_index_group_next.ptr[g]}
+    g
+}
+
+# Extend the index after pushes, rebuild it after a truncation.
+dir_index_sync=():>void=>$unsafe {
+    let n=dir_scopes.length
+    let index_len=DirIndexWord(dir_index_len)
+    let gen=DirIndexWord(dir_scopes_gen)
+    let old_gen=DirIndexWord(dir_index_gen)
+    if old_gen =? gen and index_len =? n {return}
+    loop c in [0..4) {dir_cache_setting[c]=-1}
+    let wide=dir_index_wide
+    if n <? index_len or gen - old_gen not=? DirIndexWord(n) - index_len {
+        index_len=0
+        wide=false
+        dir_index_file=[]
+        dir_index_setting=[]
+        dir_index_group_next=[]
+        dir_index_head=[]
+        dir_index_tail=[]
+        dir_index_next=[]
+    }
+    loop i in [index_len..n) {
+        dir_index_next.push(-1)
+        if wide {continue}
+        let setting=dir_scopes.ptr[i].setting
+        let file=DirIndexWord(pos_file(dir_scopes.ptr[i].start))
+        if file <? 0 or file >=? 1 << 23 or pos_file(dir_scopes.ptr[i].end) not=? file {
+            wide=true
+            continue
+        }
+        let g=DirIndexWord(dir_index_group(setting file))
+        if g >=? 0 {
+            dir_index_next[dir_index_tail.ptr[g]]=i
+            dir_index_tail[g]=i
+            continue
+        }
+        if file >=? dir_index_file.length {dir_index_file.resize(file + 1)}
+        g=dir_index_head.length
+        dir_index_setting.push(setting)
+        dir_index_group_next.push(DirIndexWord(dir_index_file.ptr[file]) - 1)
+        dir_index_file[file]=g + 1
+        dir_index_head.push(i)
+        dir_index_tail.push(i)
+    }
+    dir_index_len=n
+    dir_index_gen=gen
+    dir_index_wide=wide
+}
+
+# The innermost scope wins, with direct settings taking priority over bundles.
+dir_index_find=(setting:DirIndexWord p:DirIndexWord skip:DirIndexWord):>int64=>$unsafe {
+    if dir_index_gen not=? dir_scopes_gen or dir_index_len not=? dir_scopes.length {dir_index_sync()}
+    if dir_index_wide or p <? 0 {return dir_find_scan(setting p skip)}
+    let c=setting & 3
+    if skip <? 0 and dir_cache_setting.ptr[c] =? setting and p >=? dir_cache_lo.ptr[c] and p <=? dir_cache_hi.ptr[c] {return dir_cache_best.ptr[c]}
+    let file=pos_file(p)
+    let lo=DirIndexWord(dir_index_module_start(file))
+    let hi=DirIndexWord(dir_index_module_end(file))
+    let best:DirIndexWord=-1
+    let g=DirIndexWord(dir_index_group(setting file))
+    let i=if g >=? 0 {DirIndexWord(dir_index_head.ptr[g])} else {-1}
+    loop i >=? 0 {
+        let s=dir_scopes.ptr[i]
+        if p <? s.start {hi=min(hi DirIndexWord(s.start) - 1)}
+        else if p >? s.end {lo=max(lo DirIndexWord(s.end) + 1)}
+        else {
+            lo=max(lo DirIndexWord(s.start))
+            hi=min(hi DirIndexWord(s.end))
+            if i not=? skip {
+                if best <? 0 {best=i}
+                else {
+                    let b=dir_scopes.ptr[best]
+                    if s.start >? b.start or s.start =? b.start and (s.bundle =? 0 or b.bundle not=? 0) {best=i}
+                }
+            }
+        }
+        i=dir_index_next.ptr[i]
+    }
+    if skip <? 0 {
+        dir_cache_setting[c]=setting
+        dir_cache_lo[c]=lo
+        dir_cache_hi[c]=hi
+        dir_cache_best[c]=best
+    }
+    best
+}
+
+dir_index_value=(setting:int64 p:int64):>int64=>$unsafe {
+    if dir_scopes.length =? 0 {return -1}
+    let i=DirIndexWord(dir_index_find(setting p -1))
+    if dir_code_any and dir_code_by_inst.length not=? 0 {
+        if i >=? 0 and dir_scopes.ptr[i].start not=? dir_index_module_start(pos_file(p)) {return dir_scopes.ptr[i].value}
+        let code=DirIndexWord(dir_code_current())
+        if code not=? 0 {
+            let slot=DirIndexWord(dir_index_code_slot(setting))
+            if slot >=? 0 {return ((code >> ((slot * 2) & 63)) & 3) - 1}
+        }
+    }
+    if i <? 0 {return -1}
+    dir_scopes.ptr[i].value
+}
+
+dir_index_code_slot=(setting:int64):>int64=>{
+    loop i in 0.. and name in dir_code_names {
+        if name =? setting {return i}
+    }
+    -1
+}

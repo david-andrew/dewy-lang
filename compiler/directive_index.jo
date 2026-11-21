@@ -1,0 +1,104 @@
+use 'directives.jo'
+use 'directive_code.dewy'
+use 'directive_rules.dewy'
+use 'util.jo'
+
+# Frozen bootstrap twin of directive_index.dewy.
+dir_index_module_start = (file: int) -> int: file << 40
+
+dir_index_module_end = (file: int) -> int: (file << 40) | 0xFFFFFFFFFF
+
+# (the chain of a setting's scopes in a file, -1 none)
+dir_index_group = (setting: int, file: int) -> int:
+    if file >= dir_index_file.len(): return -1
+    g = dir_index_file[file] - 1
+    loop g >= 0 and dir_index_setting[g] != setting: g = dir_index_group_next[g]
+    g
+
+dir_index_sync = ():
+    n = dir_scopes.len()
+    if dir_index_gen == dir_scopes_gen and dir_index_len == n: return
+    loop c in [0..4): dir_cache_setting[c] = -1
+    # (only pushes since the last sync: extend; otherwise the scopes were truncated: rebuild)
+    if n < dir_index_len or dir_scopes_gen - dir_index_gen != n - dir_index_len:
+        dir_index_len = 0
+        dir_index_wide = false
+        dir_index_file = []
+        dir_index_setting = []
+        dir_index_group_next = []
+        dir_index_head = []
+        dir_index_tail = []
+        dir_index_next = []
+    loop i in [dir_index_len..n):
+        dir_index_next.push(-1)
+        if dir_index_wide: continue
+        setting = dir_scopes[i].setting
+        file = pos_file(dir_scopes[i].start)
+        if file < 0 or file >= 1 << 23 or pos_file(dir_scopes[i].end) != file:
+            dir_index_wide = true
+            continue
+        g = dir_index_group(setting, file)
+        if g >= 0:
+            dir_index_next[dir_index_tail[g]] = i
+            dir_index_tail[g] = i
+            continue
+        if file >= dir_index_file.len(): dir_index_file.resize(file + 1)
+        g = dir_index_head.len()
+        dir_index_setting.push(setting)
+        dir_index_group_next.push(dir_index_file[file] - 1)
+        dir_index_file[file] = g + 1
+        dir_index_head.push(i)
+        dir_index_tail.push(i)
+    dir_index_len = n
+    dir_index_gen = dir_scopes_gen
+
+# The innermost scope of a setting at a position (-1: none). A setting written
+# directly wins over a bundle's at the same scope.
+dir_index_find = (setting: int, p: int, skip: int) -> int:
+    if dir_index_gen != dir_scopes_gen or dir_index_len != dir_scopes.len(): dir_index_sync()
+    if dir_index_wide or p < 0: return dir_find_scan(setting, p, skip)
+    c = setting & 3
+    if skip < 0 and dir_cache_setting[c] == setting and p >= dir_cache_lo[c] and p <= dir_cache_hi[c]: return dir_cache_best[c]
+    file = pos_file(p)
+    lo = dir_index_module_start(file)
+    hi = dir_index_module_end(file)
+    best = -1
+    g = dir_index_group(setting, file)
+    i = if g >= 0: dir_index_head[g] else: -1
+    loop i >= 0:
+        s = dir_scopes[i]
+        if p < s.start: hi = min(hi, s.start - 1)
+        else if p > s.end: lo = max(lo, s.end + 1)
+        else:
+            lo = max(lo, s.start)
+            hi = min(hi, s.end)
+            if i != skip:
+                if best < 0: best = i
+                else:
+                    b = dir_scopes[best]
+                    if s.start > b.start or s.start == b.start and (s.bundle == 0 or b.bundle != 0): best = i
+        i = dir_index_next[i]
+    if skip < 0:
+        dir_cache_setting[c] = setting
+        dir_cache_lo[c] = lo
+        dir_cache_hi[c] = hi
+        dir_cache_best[c] = best
+    best
+
+dir_index_value = (setting: int, p: int) -> int:
+    if dir_scopes.len() == 0: return -1
+    i = dir_index_find(setting, p, -1)
+    if dir_code_any and dir_code_by_inst.len() != 0:
+        if i >= 0 and dir_scopes[i].start != dir_index_module_start(pos_file(p)): return dir_scopes[i].value
+        code = dir_code_current()
+        if code != 0:
+            slot = dir_index_code_slot(setting)
+            if slot >= 0: return ((code >> (slot * 2)) & 3) - 1
+    if i < 0: return -1
+    dir_scopes[i].value
+
+# (dir_index_value inlines it)
+dir_index_code_slot = (setting: int) -> int:
+    loop i in [0..dir_code_names.len()):
+        if dir_code_names[i] == setting: return i
+    -1

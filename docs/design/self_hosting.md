@@ -75,6 +75,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `dewy_grammar` | `dewy_grammar.jo` | Dewy grammar queries | Panel ≤+0.02%, lex+parse +0.03%; hot caller guards stay inline. |
 | `node_store` | `node_store.jo` | Dewy node/layout/list operations | Flagships +0.13%; lex+parse +0.25%, resolve+check +0.29%; borrowed arenas. |
 | `intern`, `util_ops` | Same stems + `.jo` | Dewy hash/probe/insert, name publication and source-position queries | Hits borrow the input bytes. New names use the raw byte slice primitive. |
+| `directive_index` | `directive_index.jo` | Dewy scope indexing, cache and policy lookup | Stable generations skip index synchronization. Pushes extend the index; truncations rebuild it. |
 | `dewy_lexer` | `dewy_lexer.jo` | Dewy tokenizing loop | O(bytes + amortized interning); presized slots, borrowed tables/host. |
 | `dewy_scan` | `dewy_scan.jo` | Dewy bracket/arm scans | O(requested tokens); no whole-file prepass. |
 | `dewy_parser` | `dewy_parser.jo` | Dewy context and word cache | Word classification O(1) hit / O(18) miss; report/hint O(1). |
