@@ -1,0 +1,37 @@
+use 'ast.jo'
+use 'diagnostic_exit.dewy'
+use 'expr.jo'
+use 'node_store.dewy'
+use 'types.jo'
+use 'word_overflow.dewy'
+
+# Fold mathematical powers and floor operations before selecting their runtime
+# overload. Every intermediate is checked, including exponentiation by squaring.
+dewy_math_fold = (n: int, a: int, b: int, power: bool, modulo: bool) -> bool:
+    if prune(ntype(a)) != T_MATH_INT: return false
+    known_a, x = integer_constant(a)
+    known_b, y = integer_constant(b)
+    if not known_a or not known_b: return false
+    value = 0
+    if power:
+        if y < 0: return false
+        value = 1
+        loop y > 0:
+            if y & 1 == 1:
+                if math_word_overflow(2, value, x): return false
+                value *= x
+            y = y >> 1
+            if y > 0:
+                if math_word_overflow(2, x, x): return false
+                x *= x
+    else:
+        if y == 0: fatal(nodes[n].pos, "integer division by zero in constant expression")
+        if not modulo and math_word_overflow(3, x, y): return false
+        if modulo:
+            if y != -1: value = x % y
+            if value != 0 and (value < 0) != (y < 0): value += y
+        else:
+            value = x / y
+            if x - value * y != 0 and (x < 0) != (y < 0): value -= 1
+    nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = value, type = i32(T_MATH_INT), flags = i32(NF_CHECKED))
+    true

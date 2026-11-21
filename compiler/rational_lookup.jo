@@ -1,0 +1,64 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_call_queries.dewy'
+use 'checker_expr.dewy'
+use 'checks_thin.dewy'
+use 'expr.jo'
+use 'rational_types.dewy'
+use 'types.jo'
+use 'util.jo'
+
+rational_module = () -> int:
+    if rational_module_found >= 0 or modules.len() == rational_module_probed: return rational_module_found
+    rational_module_probed = modules.len()
+    rational_module_found = find_module(lib_dir + "/rational.dewy")
+    rational_module_found
+
+reach_walk = (m: int, rm: int, seen: mut bool[]) -> bool:
+    if m == rm or rational_reach[m] == 1: return true
+    seen[m] = true
+    loop edge in modules[m].imports:
+        # (the shared prelude's imports are no module's own)
+        if not seen[edge.0] and not modules[edge.0].is_prelude and reach_walk(edge.0, rm, seen): return true
+    false
+
+reaches_rational = (m: int, rm: int) -> bool:
+    if rational_reach.len() < modules.len(): rational_reach.resize(modules.len())
+    r = rational_reach[m]
+    if r == 1 or r == import_edges + 2: return r == 1
+    seen = fill(false, modules.len())
+    found = reach_walk(m, rm, seen)
+    rational_reach[m] = if found: 1 else: import_edges + 2
+    found
+
+# (checker_call_queries.dewy's collect_fns in a Dewy module: the bundled rational's exact
+# members of an exact family name, when the module's imports reach it)
+collect_rational = (m: int, name: int, out: *(int[])):
+    if not exact_family_name(name): return
+    rm = rational_module()
+    if rm >= 0 and rm != m and reaches_rational(m, rm): collect_in(rm, name, 0, out)
+
+# (a fraction passed where the module's imports do not reach the bundled rational, as to an
+# instance of a generic helper: its exact members join the prelude's family for the call, as
+# its imports' would. Calls of numbers alone keep the prelude's members)
+exact_members_for = (decls: int[], name: int, args: int[]) -> int[]:
+    rm = rational_module()
+    m = cur_mod()
+    if rm < 0 or m < 0 or m == rm or decls.len() == 0 or modules[m].is_prelude: return decls
+    if not modules[int(nodes[decls[0]].mod)].is_prelude or not files[int(modules[m].file)].is_dewy: return decls
+    loop d in decls:
+        if int(nodes[d].mod) == rm: return decls
+    if reaches_rational(m, rm): return decls
+    loop a0 in args:
+        a = unnamed(a0)
+        if is_lit(a): continue
+        t = 0
+        if has_flag(a, NF_CHECKED): t = prune(ntype(a))
+        else if nodes[a].kind == .ident:
+            s = lookup(int(nodes[a].name))
+            if s != 0 and syms[s].kind == .local: t = prune(int(locals[int(syms[s].ref)].type))
+        if t != 0 and (bundled_rational_type(t) or bundled_word_rational_type(t)):
+            out = decls
+            collect_in(rm, name, 0, &out)
+            return out
+    decls

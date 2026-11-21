@@ -1,0 +1,29 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"check.jo" import (lib_dir)
+from p"expr.jo" import (is_lit)
+from p"types.jo" import (prune structs types)
+from p"util.jo" import (files name_of pos_file)
+
+NumericLibWord:type=int64<overflow='wrap'>
+
+bundled_bigint_type=(t0:int64):>bool=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind not=? 'struct_' {return false}
+    let decl=NumericLibWord(structs.ptr[NumericLibWord(types.ptr[t].st)].decl)
+    name_of(NumericLibWord(nodes.ptr[decl].name)) =? "BigInt" and files.ptr[pos_file(nodes.ptr[decl].pos)].path =? "{lib_dir}/bigint.dewy"
+}
+
+# A literal can take the bundled BigInt's expected type without a runtime
+# decimal conversion. Ordinary integer variables keep their fixed-width type.
+dewy_bigint_literal_target=(n:NumericLibWord t0:NumericLibWord):>bool=>$unsafe {
+    if n =? 0 or nodes.ptr[n].kind not=? 'int_lit' or not is_lit(n) {return false}
+    files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy and bundled_bigint_type(t0)
+}
+
+math_rep_type=(t0:int64):>bool=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind not=? 'struct_' {return false}
+    let decl=NumericLibWord(structs.ptr[NumericLibWord(types.ptr[t].st)].decl)
+    name_of(NumericLibWord(nodes.ptr[decl].name)) =? "__CTMathRep" and files.ptr[pos_file(nodes.ptr[decl].pos)].path =? "{lib_dir}/math_eval.jo"
+}

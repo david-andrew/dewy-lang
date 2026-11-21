@@ -1,12 +1,14 @@
 $runtime_checks
-from p"ast.jo" import (NF_CHECKED NF_LITERAL clear_flag clone has_flag kid nkids nodes set_list)
+from p"checks_thin_expr.dewy" import (dewy_set_literal is_map_type)
+from p"util.jo" import (files pos_file)
+from p"ast.jo" import (NF_CHECKED NF_LITERAL NF_SPREAD clear_flag clone has_flag kid nkids nodes set_list)
 from p"check.jo" import (ceval dewy_at sink_pack_hit sink_pack_site syms)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checks_builders.dewy" import (bc_int)
 from p"checks_thin.dewy" import (readonly_global)
 from p"concurrency_types.dewy" import (concurrency_require_zero)
 from p"diagnostic_exit.dewy" import (fatal)
-from p"expr.jo" import (coerce ntype struct_default)
+from p"expr.jo" import (coerce is_dewy_set_type ntype struct_default)
 from p"refine.jo" import (refine_active)
 from p"refine_metadata.dewy" import (ref_storage_contract)
 from p"type_ops.dewy" import (fixed_len)
@@ -72,4 +74,13 @@ values_spread_call=(c:AggregateSourceWord):>bool=>{
     if s =? 0 {return false}
     let k=syms[s].kind
     k =? 'fns' or k =? 'local' or k =? 'global'
+}
+
+dewy_classify_spread=(n:int64):>void=>$unsafe {
+    if nodes.ptr[n].kind not=? 'array' or nodes.ptr[n].b not=? 0 or nkids(n) =? 0 {return}
+    let first=kid(n 0)
+    if not has_flag(first NF_SPREAD) or not files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {return}
+    if dewy_set_literal(first) {return}
+    let t=dewy_spread_source_type(first)
+    if types.ptr[t].kind =? 'struct_' and not is_map_type(t) and not is_dewy_set_type(t) {nodes.ptr[n].kind='record_lit'}
 }

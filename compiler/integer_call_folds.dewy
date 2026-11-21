@@ -1,0 +1,48 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED nodes)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (integer_constant ntype)
+from p"node_store.dewy" import (Node)
+from p"types.jo" import (T_MATH_INT prune)
+from p"word_overflow.dewy" import (math_word_overflow)
+
+IntFoldWord:type=int64<overflow='wrap'>
+
+# Fold mathematical powers and floor operations before selecting their runtime
+# overload. Every intermediate is checked, including exponentiation by squaring.
+dewy_math_fold=(n:IntFoldWord a:IntFoldWord b:IntFoldWord power:bool modulo:bool):>bool=>$unsafe {
+    if prune(ntype(a)) not=? T_MATH_INT {return false}
+    let [known_a raw_x]=integer_constant(a)
+    let [known_b raw_y]=integer_constant(b)
+    if not known_a or not known_b {return false}
+    let x=IntFoldWord(raw_x)
+    let y=IntFoldWord(raw_y)
+    let value:IntFoldWord=0
+    if power {
+        if y <? 0 {return false}
+        value=1
+        loop y >? 0 {
+            if y & 1 =? 1 {
+                if math_word_overflow(2 value x) {return false}
+                value *= x
+            }
+            y=y >> 1
+            if y >? 0 {
+                if math_word_overflow(2 x x) {return false}
+                x *= x
+            }
+        }
+    }
+    else {
+        if y =? 0 {fatal(nodes.ptr[n].pos "integer division by zero in constant expression")}
+        if modulo {
+            if y not=? -1 {value=x % y}
+        }
+        else {
+            if math_word_overflow(3 x y) {return false}
+            value=x // y
+        }
+    }
+    nodes[n]=Node(kind='int_lit' pos=nodes.ptr[n].pos ival=value type=int32(T_MATH_INT) flags=int32(NF_CHECKED))
+    true
+}

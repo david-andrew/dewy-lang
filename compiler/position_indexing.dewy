@@ -1,0 +1,70 @@
+$runtime_checks
+from p"ast.jo" import (NF_U64 has_flag kid mk nkids nodes set_list)
+from p"check.jo" import (binding_const_init syms)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checks_builders.dewy" import (bc_block bc_ident bc_let bc_stmt)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"type_ops.dewy" import (dt mk_fixed mk_union)
+from p"types.jo" import (targ types)
+
+PositionIndexWord:type=int64<overflow='wrap'>
+
+# (a constant index's position)
+dewy_position_known=(b:PositionIndexWord pos:PositionIndexWord):>[bool int64]=>$unsafe {
+    if nodes.ptr[b].kind =? 'int_lit' and not has_flag(b NF_U64) {return [true nodes.ptr[b].ival]}
+    if nodes.ptr[b].kind =? 'ident' {
+        let s=lookup(PositionIndexWord(nodes.ptr[b].name))
+        if s not=? 0 {
+            let init=binding_const_init(syms.ptr[s].kind PositionIndexWord(syms.ptr[s].ref) pos)
+            if init not=? 0 and nodes.ptr[init].kind =? 'int_lit' and not has_flag(init NF_U64) {return [true nodes.ptr[init].ival]}
+        }
+    }
+    [false 0]
+}
+
+# `pair[i]` of a `[int64 string]`: a constant position reads that position's
+# element, with its own type; any other index the union of the element types,
+# from a fixed array of them, so its bounds are proven as an array index's are.
+dewy_position_index=(n:PositionIndexWord bt:PositionIndexWord expected:PositionIndexWord):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let b=PositionIndexWord(nodes.ptr[n].b)
+    let count=PositionIndexWord(types.ptr[bt].nargs)
+    if b =? 0 or nkids(n) not=? 1 or nodes.ptr[b].kind =? 'range' or nodes.ptr[b].kind =? 'namedarg' {
+        fatal(pos "an array with a type per position takes one index (`pair[0]`); unpack it to take its parts (`let [a b] = pair`)")
+    }
+    let [known at]=dewy_position_known(b pos)
+    if known {
+        if at <? 0 or at >=? count {fatal(nodes.ptr[b].pos "index {at} is outside this {dt(bt)}: its positions are 0 to {count - 1}")}
+        nodes.ptr[n].kind='field'
+        nodes.ptr[n].aux=-2
+        nodes.ptr[n].ival=at
+        nodes.ptr[n].b=0
+        set_list(n [])
+        return check_expr(n expected)
+    }
+    let members:array<int64>=[]
+    loop i in [0..count) {members.push(targ(bt i))}
+    let source="$positions{n}"
+    let elements="$position_values{n}"
+    let reads:array<int64>=[]
+    loop i in [0..count) {
+        let f=mk('field' pos)
+        nodes.ptr[f].a=int32(bc_ident(source pos))
+        nodes.ptr[f].aux=-2
+        nodes.ptr[f].ival=i
+        reads.push(f)
+    }
+    let values=mk('array' pos)
+    set_list(values reads)
+    let shape=mk('tname' pos)
+    nodes.ptr[shape].aux=-7
+    nodes.ptr[shape].ival=mk_fixed(mk_union(members) count)
+    let declared=bc_let(elements values pos)
+    nodes.ptr[declared].a=int32(shape)
+    let read=mk('index' pos)
+    nodes.ptr[read].a=int32(bc_ident(elements pos))
+    nodes.ptr[read].b=int32(b)
+    set_list(read [b])
+    nodes[n]=nodes[bc_block([bc_let(source PositionIndexWord(nodes.ptr[n].a) pos) declared bc_stmt(read pos)] pos)]
+    check_expr(n expected)
+}

@@ -1,0 +1,113 @@
+$runtime_checks
+from p"ast.jo" import (NF_CABI NF_CHECKED NF_STMT add_flag clear_flag mk nodes set_list)
+from p"cancel_hints.dewy" import (cancel_reject)
+from p"check.jo" import (dewy_at or_throw_returns syms universe)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_block bc_call bc_ident bc_let bc_method bc_stmt)
+from p"directive_ops.dewy" import (dir_explicit_cancellation)
+from p"error_ops.dewy" import (value_members)
+from p"expr.jo" import (coerce collection_contributions is_dewy_set_type type_node_of)
+from p"type_ops.dewy" import (mk_array mk_union)
+from p"types.jo" import (T_NEVER is_union prune struct_targ tkind types)
+from p"util.jo" import (intern)
+
+CollectWord:type=int64<overflow='wrap'>
+
+collection_check=(n:CollectWord expected:CollectWord):>CollectWord=>$unsafe {
+    if not collection_contributions.has(n) {return -1}
+    let pack=collection_contributions[n]
+    collection_contributions.remove(n);
+    clear_flag(n NF_CABI)
+    let t=check_expr(n expected)
+    if pack {collection_array(n t)} else {collection_value(n t)}
+}
+
+# A collector's direct contribution forwards cancellation, never storing it as
+# an element. Indexed type membership is demand-only; O(type members + rewrite).
+collection_value=(n:CollectWord t:CollectWord):>CollectWord=>$unsafe {
+    if not dewy_at(nodes.ptr[n].pos) {return t}
+    if not is_union(t) and tkind(t) not=? 'opt' and tkind(t) not=? 'struct_' {return t}
+    let canceled=CollectWord(syms.ptr[universe[intern("Canceled")]].ref)
+    let members=value_members(t)
+    if not members.contains(int64(canceled)) {return t}
+    let pos=nodes.ptr[n].pos
+    if dir_explicit_cancellation(pos) {cancel_reject(n false "this collector")}
+    let inner=nodes.length
+    nodes.push(nodes[n])
+    add_flag(inner NF_CHECKED)
+    let name="$collect{n}"
+    let ret=mk('return_' pos)
+    or_throw_returns[pos]=true
+    nodes.ptr[ret].a=int32(bc_ident(name pos))
+    let stmts=[bc_let(name inner pos)]
+    if members.length =? 1 {stmts.push(ret)}
+    else {
+        let condition=mk('istype' pos)
+        nodes.ptr[condition].a=int32(bc_ident(name pos))
+        nodes.ptr[condition].b=int32(type_node_of(canceled pos))
+        let branch=mk('if_' pos)
+        nodes.ptr[branch].a=int32(condition)
+        nodes.ptr[branch].b=int32(bc_block([ret] pos))
+        add_flag(branch NF_STMT)
+        stmts.push(branch)
+        stmts.push(bc_stmt(bc_ident(name pos) pos))
+    }
+    nodes[n]=nodes[bc_block(stmts pos)]
+    check_expr(n 0)
+}
+
+# A spread or parallel collector drains the retained array contributions before
+# exposing its result. O(element-type members) checking; O(elements) at runtime,
+# only for an element type that includes Canceled.
+collection_array=(n:CollectWord t0:CollectWord):>CollectWord=>$unsafe {
+    let t=prune(t0)
+    if not dewy_at(nodes.ptr[n].pos) {return t0}
+    let kind=tkind(t)
+    let set_source=kind =? 'struct_' and is_dewy_set_type(t)
+    if kind not=? 'array' and kind not=? 'fixed' and not set_source {return t0}
+    let elem=if set_source {struct_targ(CollectWord(types.ptr[t].st) 0)} else {CollectWord(types.ptr[t].elem)}
+    if not is_union(elem) and tkind(elem) not=? 'opt' and tkind(elem) not=? 'struct_' {return t0}
+    let canceled=CollectWord(syms.ptr[universe[intern("Canceled")]].ref)
+    let members=value_members(elem)
+    if not members.contains(int64(canceled)) {return t0}
+    if dir_explicit_cancellation(nodes.ptr[n].pos) {cancel_reject(n false "this collector")}
+    if kind =? 'fixed' {coerce(n mk_array(elem));}
+    else if set_source {
+        let source_node=nodes.length
+        nodes.push(nodes[n])
+        add_flag(source_node NF_CHECKED)
+        nodes[n]=nodes[bc_call("__dewy_set_values" [source_node] nodes.ptr[n].pos)]
+        check_expr(n mk_array(elem));
+    }
+    let kept:array<int64>=[]
+    loop m in members {if m not=? canceled {kept.push(m)}}
+    let success=if kept.length =? 0 {T_NEVER} else if kept.length =? 1 {kept[0]} else {mk_union(kept)}
+    let pos=nodes.ptr[n].pos
+    let inner=nodes.length
+    nodes.push(nodes[n])
+    add_flag(inner NF_CHECKED)
+    let source="$collect_array{n}"
+    let item="$collect_item{n}"
+    let result="$collect_result{n}"
+    let empty=mk('array' pos)
+    let output=bc_let(result empty pos)
+    nodes.ptr[output].a=int32(type_node_of(mk_array(success) pos))
+    let each=mk('for_' pos)
+    set_list(each [bc_ident(item pos)])
+    nodes.ptr[each].a=int32(bc_ident(source pos))
+    let condition=mk('istype' pos)
+    nodes.ptr[condition].a=int32(bc_ident(item pos))
+    nodes.ptr[condition].b=int32(type_node_of(canceled pos))
+    let ret=mk('return_' pos)
+    or_throw_returns[pos]=true
+    nodes.ptr[ret].a=int32(bc_ident(item pos))
+    let branch=mk('if_' pos)
+    nodes.ptr[branch].a=int32(condition)
+    nodes.ptr[branch].b=int32(bc_block([ret] pos))
+    add_flag(branch NF_STMT)
+    let body=[branch]
+    if success not=? T_NEVER {body.push(bc_stmt(bc_method(bc_ident(result pos) "push" [bc_ident(item pos)] pos) pos))}
+    nodes.ptr[each].b=int32(bc_block(body pos))
+    nodes[n]=nodes[bc_block([bc_let(source inner pos) output each bc_stmt(bc_ident(result pos) pos)] pos)]
+    check_expr(n 0)
+}

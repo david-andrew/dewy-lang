@@ -1,12 +1,13 @@
 $runtime_checks
-from p"ast.jo" import (NF_GENERIC NF_RECORD add_flag mk nodes set_list set_list2)
+from p"ast.jo" import (NF_GENERIC NF_RECORD NF_U64 add_flag has_flag mk nkids nodes set_list set_list2)
 from p"check.jo" import (check_struct_fields ctxs cx)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"expr.jo" import (dewy_record_shapes ntype struct_defaults_known)
+from p"integer_conversions.dewy" import (int_widens)
 from p"refine.jo" import (refine_active)
 from p"refine_metadata.dewy" import (ref_storage_contract)
 from p"type_ops.dewy" import (get_struct_inst)
-from p"types.jo" import (fields is_union prune structs types)
+from p"types.jo" import (T_MATH_INT fields is_union prune structs tkind type_eq types variants)
 from p"util.jo" import (intern name_of)
 
 RecordCtorWord:type=int64<overflow='wrap'>
@@ -77,4 +78,54 @@ dewy_record_schema=(n:RecordCtorWord args:array<int64>):>RecordCtorWord=>{
     let t=get_struct_inst(decl targs)
     check_struct_fields(RecordCtorWord(types[t].st))
     t
+}
+
+dewy_record_target=(expected:RecordCtorWord):>RecordCtorWord=>$unsafe {
+    let target=prune(expected)
+    if target =? 0 {return 0}
+    if types.ptr[target].kind =? 'opt' {target=prune(RecordCtorWord(types.ptr[target].elem))}
+    if types.ptr[target].kind =? 'struct_' and not is_map_type(target) {return target}
+    0
+}
+
+# An anonymous record whose numeric fields convert as scalars do (`[x:int]` where
+# `[x:int64]` or `[x:float64]` is wanted): field by field, each `int` field the
+# proven narrowing, an integer to a float as a scalar converts. O(fields); other
+# field types must agree.
+record_int_conversion=(source:RecordCtorWord target:RecordCtorWord):>bool=>$unsafe {
+    let fs=RecordCtorWord(types.ptr[source].st)
+    let ts=RecordCtorWord(types.ptr[target].st)
+    if structs.ptr[fs].decl not=? structs.ptr[ts].decl or not has_flag(RecordCtorWord(structs.ptr[fs].decl) NF_RECORD) {return false}
+    check_struct_fields(fs)
+    check_struct_fields(ts)
+    loop i in [0..RecordCtorWord(structs.ptr[ts].nfields)) {
+        let a=prune(RecordCtorWord(fields.ptr[RecordCtorWord(structs.ptr[fs].fields) + i].type))
+        let b=prune(RecordCtorWord(fields.ptr[RecordCtorWord(structs.ptr[ts].fields) + i].type))
+        if type_eq(a b) {continue}
+        if types.ptr[a].kind =? 'int_' and types.ptr[b].kind =? 'float_' {continue}
+        if types.ptr[a].kind not=? 'int_' or types.ptr[b].kind not=? 'int_' {return false}
+        if a not=? T_MATH_INT and b not=? T_MATH_INT and not int_widens(a b) {return false}
+    }
+    true
+}
+
+# A field default whose value is the zero bytes, which the slot's fill already wrote: `none` for
+# an optional, `[]` for a fixed array, a machine integer's 0, 0.0 (not -0.0), false, an
+# enumeration's first member
+default_is_zero=(dv:RecordCtorWord ft:RecordCtorWord):>bool=>$unsafe {
+    let k=nodes.ptr[dv].kind
+    let fk=tkind(ft)
+    if k =? 'none_lit' {return fk =? 'opt'}
+    if k =? 'int_lit' and nodes.ptr[dv].ival =? 0 and not has_flag(dv NF_U64) {return fk =? 'int_' and prune(ft) not=? T_MATH_INT}
+    if k =? 'float_lit' and fk =? 'float_' {return nodes.ptr[dv].fval =? 0.0 and 1.0 / nodes.ptr[dv].fval >? 0.0}
+    if k =? 'bool_lit' and nodes.ptr[dv].ival =? 0 {return fk =? 'bool_'}
+    let name:RecordCtorWord=0
+    if k =? 'str_lit' and nodes.ptr[dv].nlist =? 0 {name=RecordCtorWord(nodes.ptr[dv].sval)}
+    else if k =? 'dotname' {name=RecordCtorWord(nodes.ptr[dv].name)}
+    if name not=? 0 and fk =? 'enum_' and not is_union(ft) {
+        let si=RecordCtorWord(types.ptr[prune(ft)].st)
+        check_struct_fields(si)
+        return structs.ptr[si].nvariants >? 0 and RecordCtorWord(variants.ptr[RecordCtorWord(structs.ptr[si].variants)].name) =? name
+    }
+    k =? 'array' and nkids(dv) =? 0 and nodes.ptr[dv].b =? 0 and fk =? 'fixed'
 }

@@ -1,0 +1,30 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"checker_expr.dewy" import (lookup)
+from p"check.jo" import (globals locals syms)
+from p"types.jo" import (is_numeric)
+
+NumericBranchWord:type=int64<overflow='wrap'>
+
+# Recognize scalar arithmetic without checking or folding it before context is
+# known. This also lets numeric branches rule out nonnumeric overloads.
+branch_numeric=(a:NumericBranchWord hidden:array<int64>):>bool=>$unsafe {
+    let k=nodes.ptr[a].kind
+    if k =? 'int_lit' or k =? 'float_lit' {return true}
+    if k =? 'ident' and not hidden.contains(int64(nodes.ptr[a].name)) {
+        let sym=lookup(NumericBranchWord(nodes.ptr[a].name))
+        if sym not=? 0 and syms.ptr[sym].kind =? 'local' {return is_numeric(NumericBranchWord(locals.ptr[NumericBranchWord(syms.ptr[sym].ref)].type))}
+        if sym not=? 0 and syms.ptr[sym].kind =? 'global' {
+            let t=NumericBranchWord(globals.ptr[NumericBranchWord(syms.ptr[sym].ref)].type)
+            if t not=? 0 {return is_numeric(t)}
+        }
+    }
+    if k =? 'unary' {return branch_numeric(NumericBranchWord(nodes.ptr[a].a) hidden)}
+    if k =? 'binary' {
+        # The five arithmetic Tok ordinals are contiguous, from plus to percent.
+        let op=nodes.ptr[a].op
+        if op <? 58 or op >? 62 {return false}
+        return branch_numeric(NumericBranchWord(nodes.ptr[a].a) hidden) and branch_numeric(NumericBranchWord(nodes.ptr[a].b) hidden)
+    }
+    false
+}

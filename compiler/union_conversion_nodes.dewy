@@ -1,0 +1,32 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED nodes set_list)
+from p"facts.jo" import (fact_divisors fact_fixed_requests)
+from p"node_store.dewy" import (Node)
+
+UnionConvWord:type=int64<overflow='wrap'>
+
+# (a wrapper replaces node n and the old content moves to inner: the divisor
+# obligation belongs to the moved call)
+move_divisor=(n:UnionConvWord inner:UnionConvWord):>void=>{
+    let kind=fact_divisors.get(int64(n))
+    if kind not=? none {
+        fact_divisors.remove(int64(n));
+        fact_divisors[inner]=kind ?? 0
+    }
+}
+
+# A cast node takes its coerced operand's node (xc_take): the operand's pending
+# fixed-size boundary, registered just before by coerce, now lives at `to`.
+fact_fixed_moved=(source:UnionConvWord target:UnionConvWord):>void=>$unsafe {
+    let last=UnionConvWord(fact_fixed_requests.length) - 1
+    if last >=? 0 and fact_fixed_requests.ptr[last].node =? source {fact_fixed_requests[last].node=target}
+}
+
+# replace node n by the union value holding it as member vi
+wrap_union=(n:UnionConvWord vi:UnionConvWord target:UnionConvWord):>void=>$unsafe {
+    let inner=nodes.length
+    nodes.push(nodes[n])
+    move_divisor(n inner)
+    nodes[n]=Node(kind='call' pos=nodes.ptr[inner].pos aux=3 aux2=int32(vi) type=int32(target) flags=int32(NF_CHECKED))
+    set_list(n [inner])
+}

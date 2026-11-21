@@ -2,6 +2,7 @@ use 'ast.jo'
 use 'check.jo'
 use 'checks_thin_expr.dewy'
 use 'expr.jo'
+use 'integer_conversions.dewy'
 use 'refine.jo'
 use 'refine_metadata.dewy'
 use 'type_ops.dewy'
@@ -67,3 +68,46 @@ dewy_record_schema = (n: int, args: int[]) -> int:
     t = get_struct_inst(decl, targs)
     check_struct_fields(int(types[t].st))
     t
+
+dewy_record_target = (expected: int) -> int:
+    target = prune(expected)
+    if target == 0: return 0
+    if types[target].kind == .opt: target = prune(int(types[target].elem))
+    if types[target].kind == .struct_ and not is_map_type(target): return target
+    0
+
+# An anonymous record whose numeric fields convert as scalars do (`[x:int]` where
+# `[x:int64]` or `[x:float64]` is wanted): field by field, each `int` field the
+# proven narrowing, an integer to a float as a scalar converts. O(fields); other
+# field types must agree.
+record_int_conversion = (from: int, to: int) -> bool:
+    fs = int(types[from].st); ts = int(types[to].st)
+    if structs[fs].decl != structs[ts].decl or not has_flag(int(structs[fs].decl), NF_RECORD): return false
+    check_struct_fields(fs)
+    check_struct_fields(ts)
+    loop i in [0..int(structs[ts].nfields)):
+        a = prune(int(fields[int(structs[fs].fields) + i].type))
+        b = prune(int(fields[int(structs[ts].fields) + i].type))
+        if type_eq(a, b): continue
+        if types[a].kind == .int_ and types[b].kind == .float_: continue
+        if types[a].kind != .int_ or types[b].kind != .int_: return false
+        if a != T_MATH_INT and b != T_MATH_INT and not int_widens(a, b): return false
+    true
+
+# A field default whose value is the zero bytes, which the slot's fill already wrote: `none` for
+# an optional, `[]` for a fixed array, a machine integer's 0, 0.0 (not -0.0), false, an
+# enumeration's first member
+default_is_zero = (dv: int, ft: int) -> bool:
+    k = nodes[dv].kind
+    fk = tkind(ft)
+    if k == .none_lit: return fk == .opt
+    if k == .int_lit and nodes[dv].ival == 0 and not has_flag(dv, NF_U64): return fk == .int_ and prune(ft) != T_MATH_INT
+    if k == .float_lit and fk == .float_: return nodes[dv].fval == 0.0 and 1.0 / nodes[dv].fval > 0.0
+    if k == .bool_lit and nodes[dv].ival == 0: return fk == .bool_
+    # (`'first'` in Dewy, `.first` in Sloppy)
+    word = if k == .str_lit and nodes[dv].nlist == 0: int(nodes[dv].sval) else: if k == .dotname: int(nodes[dv].name) else: 0
+    if word != 0 and fk == .enum_ and not is_union(ft):
+        si = int(types[prune(ft)].st)
+        check_struct_fields(si)
+        return int(structs[si].nvariants) > 0 and int(variants[int(structs[si].variants)].name) == word
+    k == .array and nkids(dv) == 0 and nodes[dv].b == 0 and fk == .fixed

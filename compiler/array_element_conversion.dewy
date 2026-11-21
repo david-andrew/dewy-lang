@@ -1,0 +1,37 @@
+$runtime_checks
+from p"checks_thin_expr.dewy" import (int_intervals_wide)
+from p"intervals.dewy" import (interval_missing)
+from p"refine_metadata.dewy" import (representation_type)
+from p"types.jo" import (T_MATH_INT prune type_eq types)
+
+ElementConversionWord:type=int64<overflow='wrap'>
+
+elem_subsumes=(f0:ElementConversionWord t0:ElementConversionWord):>bool=>$unsafe {
+    let f=prune(f0)
+    let t=prune(t0)
+    if f =? t or type_eq(f t) {return true}
+    let fk=types.ptr[f].kind
+    let tk=types.ptr[t].kind
+    if fk not=? 'refined' and tk not=? 'refined' {return array_elems_subsume(f t)}
+    if fk =? 'refined' and types.ptr[f].bits =? -1 or tk =? 'refined' and types.ptr[t].bits =? -1 {return false}
+    let base=representation_type(f)
+    if base not=? representation_type(t) or types.ptr[base].kind not=? 'int_' or base =? T_MATH_INT {return false}
+    let [fknown flow fhigh]=int_intervals_wide(f)
+    let [tknown tlow thigh]=int_intervals_wide(t)
+    fknown and tknown and interval_missing(flow tlow).length =? 0 and interval_missing(fhigh thigh).length =? 0
+}
+
+# An array whose elements carry a tighter refinement, read where a looser one is
+# wanted: every value its element type admits, the wanted element type admits
+# (constant bounds), with the same representation and length; arrays nested inside
+# follow the same rule. The value is an immutable share, so no write through the
+# looser type can reach the tighter array; `@` places stay invariant (refine.jo).
+# O(intervals) per level.
+array_elems_subsume=(source:ElementConversionWord target:ElementConversionWord):>bool=>$unsafe {
+    let f=prune(source)
+    let t=prune(target)
+    let fk=types.ptr[f].kind
+    if fk not=? types.ptr[t].kind or fk not=? 'array' and fk not=? 'fixed' {return false}
+    if fk =? 'fixed' and types.ptr[f].bits not=? types.ptr[t].bits {return false}
+    elem_subsumes(ElementConversionWord(types.ptr[f].elem) ElementConversionWord(types.ptr[t].elem))
+}

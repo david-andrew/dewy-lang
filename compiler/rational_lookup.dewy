@@ -1,0 +1,76 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED has_flag nodes)
+from p"checker_expr.dewy" import (lookup)
+from p"check.jo" import (cur_mod lib_dir locals modules syms)
+from p"checker_call_queries.dewy" import (collect_in)
+from p"checks_thin.dewy" import (find_module)
+from p"expr.jo" import (exact_family_name import_edges is_lit ntype rational_module_found rational_module_probed rational_reach unnamed)
+from p"rational_types.dewy" import (bundled_rational_type bundled_word_rational_type)
+from p"types.jo" import (prune)
+from p"util.jo" import (files)
+
+RationalLookupWord:type=int64<overflow='wrap'>
+
+rational_module=():>RationalLookupWord=>{
+    let found=@rational_module_found
+    let probed=@rational_module_probed
+    if found >=? 0 or modules.length =? probed {return found}
+    probed=modules.length
+    found=find_module("{lib_dir}/rational.dewy")
+    found
+}
+
+reach_walk=(m:RationalLookupWord rm:RationalLookupWord @seen:array<bool>):>bool=>$unsafe {
+    if m =? rm or rational_reach.ptr[m] =? 1 {return true}
+    seen[m]=true
+    loop edge in modules.ptr[m].imports {
+        if not seen[edge[0]] and not modules.ptr[edge[0]].is_prelude and reach_walk(edge[0] rm @seen) {return true}
+    }
+    false
+}
+
+reaches_rational=(m:RationalLookupWord rm:RationalLookupWord):>bool=>$unsafe {
+    if rational_reach.length <? modules.length {rational_reach.resize(modules.length)}
+    let cached=rational_reach.ptr[m]
+    if cached =? 1 or cached =? RationalLookupWord(import_edges) + 2 {return cached =? 1}
+    let seen=fill(false modules.length)
+    let found=reach_walk(m rm @seen)
+    rational_reach[m]=if found 1 else RationalLookupWord(import_edges) + 2
+    found
+}
+
+# (checker_call_queries.dewy's collect_fns in a Dewy module: the bundled rational's exact
+# members of an exact family name, when the module's imports reach it)
+collect_rational=(m:int64 name:int64 out:ptr<array<int64>>):>void=>{
+    if not exact_family_name(name) {return}
+    let rm=rational_module()
+    if rm >=? 0 and rm not=? m and reaches_rational(m rm) {collect_in(rm name 0 out)}
+}
+
+# (a fraction passed where the module's imports do not reach the bundled rational, as to an
+# instance of a generic helper: its exact members join the prelude's family for the call, as
+# its imports' would. Calls of numbers alone keep the prelude's members)
+exact_members_for=(decls:array<int64> name:RationalLookupWord args:array<int64>):>array<int64>=>$unsafe {
+    let rm=rational_module()
+    let m=cur_mod()
+    if rm <? 0 or m <? 0 or m =? rm or decls.length =? 0 or modules.ptr[m].is_prelude {return decls}
+    if not modules.ptr[RationalLookupWord(nodes.ptr[decls[0]].mod)].is_prelude or not files.ptr[RationalLookupWord(modules.ptr[m].file)].is_dewy {return decls}
+    loop d in decls {if RationalLookupWord(nodes.ptr[d].mod) =? rm {return decls}}
+    if reaches_rational(m rm) {return decls}
+    loop a0 in args {
+        let a=unnamed(a0)
+        if is_lit(a) {continue}
+        let t:RationalLookupWord=0
+        if has_flag(a NF_CHECKED) {t=prune(ntype(a))}
+        else if nodes.ptr[a].kind =? 'ident' {
+            let s=lookup(RationalLookupWord(nodes.ptr[a].name))
+            if s not=? 0 and syms.ptr[s].kind =? 'local' {t=prune(RationalLookupWord(locals.ptr[RationalLookupWord(syms.ptr[s].ref)].type))}
+        }
+        if t not=? 0 and (bundled_rational_type(t) or bundled_word_rational_type(t)) {
+            let out:array<array<int64>>=[decls]
+            collect_in(rm name 0 out.ptr)
+            return out[0]
+        }
+    }
+    decls
+}

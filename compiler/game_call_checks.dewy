@@ -1,14 +1,15 @@
 $runtime_checks
+from p"dewy_method_ops.dewy" import (dewy_is_method)
 from p"call_lookup_context.dewy" import (program_fn_named)
 from p"@lib/core/str.jo" import (is_digit starts_with)
 from p"ast.jo" import (NF_LITERAL has_flag kid nkids nodes)
-from p"check.jo" import (fns globals)
+from p"check.jo" import (ctxs cx fns globals modules)
 from p"diagnostic_exit.dewy" import (fatal)
-from p"expr.jo" import (is_lit ntype unnamed)
+from p"expr.jo" import (DRAWING_FNS back_to_screen draw_to_at drew_in is_lit ntype unnamed)
 from p"source_warnings.dewy" import (warn)
 from p"type_ops.dewy" import (dt)
 from p"types.jo" import (T_VEC4 prune type_eq)
-from p"util.jo" import (files name_of pos_file pos_off)
+from p"util.jo" import (files intern name_of pos_file pos_off)
 
 GameCheckWord:type=int64<overflow='wrap'>
 # draw(prog, quad, Other(...)) where prog = make_shader(shader(vs, fs)) takes U: a Shader does not
@@ -123,4 +124,32 @@ habit_number=(a:GameCheckWord):>bool=>{
     if k not=? 'unary' {return false}
     let inner=nodes[GameCheckWord(nodes[e].a)].kind
     inner =? 'int_lit' or inner =? 'float_lit'
+}
+
+# drawing in update, clearing after drawing, sleeping in a frame: done where it shows nothing,
+# covers what was drawn, or stops the game
+frame_call_check=(n:GameCheckWord decl:GameCheckWord):>void=>$unsafe {
+    if cx <? 0 {return}
+    let ci=GameCheckWord(ctxs.ptr[cx].inst)
+    if ci <=? 0 or fns.ptr[ci].decl =? 0 {return}
+    let fd=GameCheckWord(fns.ptr[ci].decl)
+    let mm=GameCheckWord(nodes.ptr[fd].mod)
+    if not modules.ptr[mm].is_main {return}
+    let here=if dewy_is_method(fd) {""} else {name_of(GameCheckWord(nodes.ptr[fd].name))}
+    let fnm=name_of(GameCheckWord(nodes.ptr[decl].name))
+    if DRAWING_FNS.contains(fnm) {
+        if here =? "update" {
+            if modules.ptr[mm].names.has(intern("draw")) {warn(nodes.ptr[n].pos "{fnm} draws, and update is for changing things: what it draws here is covered when draw clears the screen; draw it in `draw`")}
+            else {warn(nodes.ptr[n].pos "{fnm} draws, and update is for changing things: drawing goes in a function of its own, `draw = ():`, which the game calls each frame after update")}
+        }
+        drew_in[ci]=true
+    }
+    if fnm =? "draw_to" or fnm =? "draw_to_screen" or starts_with(fnm "begin_") or fnm =? "camera3d" {drew_in.remove(ci);}
+    if here =? "draw" and fnm =? "draw_to" and not draw_to_at.has(ci) {draw_to_at[ci]=nodes.ptr[n].pos}
+    if here =? "draw" and fnm =? "draw_to_screen" {back_to_screen[ci]=true}
+    if fnm =? "clear" and drew_in.has(ci) and here =? "draw" {warn(nodes.ptr[n].pos "clear covers everything drawn before it in this frame: clear the screen first, at the top of draw")}
+    if (fnm =? "input" or fnm =? "input_int" or fnm =? "input_float" or fnm =? "read_line" and nkids(decl) =? 0) and (here =? "update" or here =? "draw") {
+        warn(nodes.ptr[n].pos "{fnm} waits for a line typed in the terminal, and the game stops while it waits: in the window, `hud_text_field(rect, name)` is a box to type in (or `text_input()`, what was typed this frame)")
+    }
+    if fnm =? "sleep" and (here =? "update" or here =? "draw") {warn(nodes.ptr[n].pos "sleep stops the whole game, every frame: to wait, count down a timer (`wait -= dt`, act when it is below 0), or `every(1, 2.0)`")}
 }

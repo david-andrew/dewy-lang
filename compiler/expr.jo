@@ -1,4 +1,9 @@
 use 'exact_preparation.dewy'
+use 'union_conversion_nodes.dewy'
+use 'numeric_library_types.dewy'
+use 'integer_conversions.dewy'
+use 'integer_call_folds.dewy'
+use 'array_element_conversion.dewy'
 use 'call_style_lookup.dewy'
 use 'character_literals.dewy'
 use 'default_arguments.dewy'
@@ -369,16 +374,6 @@ integer_constant = (n: int) -> (bool, int):
         else: value = value & ((1 << bits) - 1)
     (true, value)
 
-check_integer_boundary = (n: int, from: int, to: int):
-    if to == T_MATH_INT: return
-    if from != T_MATH_INT and to != T_MATH_INT: return
-    if int_widens(from, to): return
-    known, value = integer_constant(n)
-    if not known: return
-    fits = int_fits(value, to)
-    if not types[from].sign and value < 0 and types[to].sign: fits = false
-    if not fits: fatal(nodes[n].pos, "integer overflow in constant conversion to {dt(to)}")
-
 # An integer stored into a width that cannot hold every value of its own:
 # the proven conversion, a refinement of the source to the target's range
 # (proven from facts, or checked when the program runs), then the conversion.
@@ -404,35 +399,6 @@ narrow_int = (n: int, from: int, to: int):
     refine_active = active
     ref_narrowing[inner] = to
     nodes[n] = Node(kind = .conv, pos = nodes[inner].pos, a = i32(inner), aux = i32(int(CV.int_)), type = i32(to), flags = i32(NF_CHECKED))
-
-int_widens = (f: int, t: int) -> bool:
-    if t == T_MATH_INT: return true
-    if f == T_MATH_INT: return false
-    fb = int(types[f].bits)
-    tb = int(types[t].bits)
-    if types[f].sign == types[t].sign: return tb >= fb
-    if not types[f].sign and types[t].sign: return tb > fb
-    false
-
-# A literal can take the bundled BigInt's expected type without a runtime
-# decimal conversion. Ordinary integer variables keep their fixed-width type.
-dewy_bigint_literal_target = (n: int, t0: int) -> bool:
-    if n == 0 or nodes[n].kind != .int_lit or not is_lit(n): return false
-    if not files[pos_file(nodes[n].pos)].is_dewy: return false
-    bundled_bigint_type(t0)
-
-bundled_bigint_type = (t0: int) -> bool:
-    t = prune(t0)
-    if types[t].kind != .struct_: return false
-    decl = int(structs[int(types[t].st)].decl)
-    if name_of(int(nodes[decl].name)) != "BigInt": return false
-    files[pos_file(nodes[decl].pos)].path == "{lib_dir}/bigint.dewy"
-
-math_rep_type = (t0: int) -> bool:
-    t = prune(t0)
-    if types[t].kind != .struct_: return false
-    decl = int(structs[int(types[t].st)].decl)
-    name_of(int(nodes[decl].name)) == "__CTMathRep" and files[pos_file(nodes[decl].pos)].path == "{lib_dir}/math_eval.jo"
 
 can_coerce = (n: int, from0: int, to0: int) -> bool:
     from = prune(from0)
@@ -509,34 +475,6 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if fk == .ptr and tk == .ptr and (to == T_RAWPTR or from == T_RAWPTR): return true
     false
 
-# An array whose elements carry a tighter refinement, read where a looser one is
-# wanted: every value its element type admits, the wanted element type admits
-# (constant bounds), with the same representation and length; arrays nested inside
-# follow the same rule. The value is an immutable share, so no write through the
-# looser type can reach the tighter array; `@` places stay invariant (refine.jo).
-# O(intervals) per level.
-array_elems_subsume = (from0: int, to0: int) -> bool:
-    from = prune(from0)
-    to = prune(to0)
-    fk = types[from].kind
-    if fk != types[to].kind or fk != .array and fk != .fixed: return false
-    if fk == .fixed and types[from].bits != types[to].bits: return false
-    elem_subsumes(int(types[from].elem), int(types[to].elem))
-
-elem_subsumes = (f0: int, t0: int) -> bool:
-    f = prune(f0)
-    t = prune(t0)
-    if f == t or type_eq(f, t): return true
-    fk = types[f].kind
-    tk = types[t].kind
-    if fk != .refined and tk != .refined: return array_elems_subsume(f, t)
-    if fk == .refined and types[f].bits == -1 or tk == .refined and types[t].bits == -1: return false
-    base = representation_type(f)
-    if base != representation_type(t) or types[base].kind != .int_ or base == T_MATH_INT: return false
-    fknown, flow, fhigh = int_intervals_wide(f)
-    tknown, tlow, thigh = int_intervals_wide(t)
-    fknown and tknown and interval_missing(flow, tlow).len() == 0 and interval_missing(fhigh, thigh).len() == 0
-
 # n coerced to `to` where a string set is on either side: true when done (a
 # string or set into a set; a set into a string), and a set going where only
 # its text fits (an optional string, a union with a string) is made text first
@@ -563,24 +501,6 @@ str_set_coerced = (n: int, to: int) -> bool:
         if not fits: str_set_text_of(n)
     false
 
-# An anonymous record whose numeric fields convert as scalars do (`[x:int]` where
-# `[x:int64]` or `[x:float64]` is wanted): field by field, each `int` field the
-# proven narrowing, an integer to a float as a scalar converts. O(fields); other
-# field types must agree.
-record_int_conversion = (from: int, to: int) -> bool:
-    fs = int(types[from].st); ts = int(types[to].st)
-    if structs[fs].decl != structs[ts].decl or not has_flag(int(structs[fs].decl), NF_RECORD): return false
-    check_struct_fields(fs)
-    check_struct_fields(ts)
-    loop i in [0..int(structs[ts].nfields)):
-        a = prune(int(fields[int(structs[fs].fields) + i].type))
-        b = prune(int(fields[int(structs[ts].fields) + i].type))
-        if type_eq(a, b): continue
-        if types[a].kind == .int_ and types[b].kind == .float_: continue
-        if types[a].kind != .int_ or types[b].kind != .int_: return false
-        if a != T_MATH_INT and b != T_MATH_INT and not int_widens(a, b): return false
-    true
-
 # the member of union u a value of type `from` becomes (an exact match first), or -1
 union_target = (n: int, from: int, u: int) -> int:
     f = from
@@ -592,53 +512,6 @@ union_target = (n: int, from: int, u: int) -> int:
     loop i in 0.. and m in ms:
         if can_coerce(n, from, m): return i
     -1
-
-# (a wrapper replaces node n and the old content moves to inner: the divisor
-# obligation belongs to the moved call)
-move_divisor = (n: int, inner: int):
-    if let kind = fact_divisors.get(n):
-        fact_divisors.remove(n)
-        fact_divisors[inner] = kind
-
-# replace node n by the union value holding it as member vi
-wrap_union = (n: int, vi: int, to: int):
-    inner = nodes.len()
-    nodes.push(nodes[n])
-    move_divisor(n, inner)
-    nodes[n] = Node(kind = .call, pos = nodes[inner].pos, aux = 3, aux2 = i32(vi), type = i32(to), flags = i32(NF_CHECKED))
-    set_list(n, [inner])
-
-# can integer type t hold v?
-int_fits = (v: int, t: int) -> bool:
-    bits = int(types[t].bits)
-    if bits >= 64: return types[t].sign or v >= 0
-    if types[t].sign: return v >= -(1 << (bits - 1)) and v <= (1 << (bits - 1)) - 1
-    v >= 0 and v <= (1 << bits) - 1
-
-# can integer type t hold literal n? (one above the i64 range fits u64, and the 64-bit signed
-# types as its bits, e.g. hash constants)
-lit_fits = (n: int, t: int) -> bool:
-    if t == T_MATH_INT: return true
-    if has_flag(n, NF_U64):
-        if files[pos_file(nodes[n].pos)].is_dewy:
-            return int(types[t].bits) >= 64 and not types[t].sign
-        return int(types[t].bits) >= 64
-    int_fits(nodes[n].ival, t)
-
-coerce_int_literal = (n: int, to: int) -> int:
-    v = nodes[n].ival
-    if not lit_fits(n, to):
-        if has_flag(n, NF_U64): fatal(nodes[n].pos, "value {u64(v)} does not fit in {dt(to)}")
-        fatal(nodes[n].pos, "value {v} does not fit in {dt(to)}")
-    nodes[n].type = i32(to)
-    clear_flag(n, NF_LITERAL)
-    n
-
-# A cast node takes its coerced operand's node (xc_take): the operand's pending
-# fixed-size boundary, registered just before by coerce, now lives at `to`.
-fact_fixed_moved = (from: int, to: int):
-    last = fact_fixed_requests.len() - 1
-    if last >= 0 and fact_fixed_requests[last].node == from: fact_fixed_requests[last].node = to
 
 coerce = (n: int, target: int) -> int:
     if target == 0: return n
@@ -1453,22 +1326,6 @@ call_order_rest = (n: int, given: int[], final: int[]):
 
 match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int: tm_match(pat0, a0, binds, depth)
 
-# Recognize scalar arithmetic without checking or folding it before context is
-# known. This also lets numeric branches rule out nonnumeric overloads.
-branch_numeric = (a: int, hidden: int[]) -> bool:
-    k = nodes[a].kind
-    if k == .int_lit or k == .float_lit: return true
-    if k == .ident and not (int(nodes[a].name) in hidden):
-        sym = lookup(int(nodes[a].name))
-        if sym != 0 and syms[sym].kind == .local: return is_numeric(int(locals[int(syms[sym].ref)].type))
-        if sym != 0 and syms[sym].kind == .global and globals[int(syms[sym].ref)].type != 0: return is_numeric(int(globals[int(syms[sym].ref)].type))
-    if k == .unary: return branch_numeric(int(nodes[a].a), hidden)
-    if k == .binary:
-        op = nodes[a].op as Tok
-        if op != .plus and op != .minus and op != .star and op != .slash and op != .percent: return false
-        return branch_numeric(int(nodes[a].a), hidden) and branch_numeric(int(nodes[a].b), hidden)
-    false
-
 # Branch bodies must be checked in their own scopes, with the selected parameter
 # type. Only score literal results here; bindings and statements wait until then.
 call_string_cost = (a: int, p: int, sp: int, binds: mut int[]) -> int:
@@ -1690,13 +1547,6 @@ struct_default = (t0: int, pos: int) -> int:
 struct_defaults_known: {int: bool} = {}
 dewy_record_shapes: {str: int} = {}
 
-dewy_record_target = (expected: int) -> int:
-    target = prune(expected)
-    if target == 0: return 0
-    if types[target].kind == .opt: target = prune(int(types[target].elem))
-    if types[target].kind == .struct_ and not is_map_type(target): return target
-    0
-
 literal_union_member = (n: int, expected: int) -> int:
     u = prune(expected)
     if u == 0: return 0
@@ -1738,16 +1588,6 @@ literal_union_member = (n: int, expected: int) -> int:
             found = m
     if found == 0 and tuple > 0: return tuple
     found
-
-dewy_classify_spread = (n: int):
-    if nodes[n].kind != .array or nodes[n].b != 0 or nkids(n) == 0: return
-    first = kid(n, 0)
-    if not has_flag(first, NF_SPREAD) or not files[pos_file(nodes[n].pos)].is_dewy: return
-    # Leave set literals contextual, including an empty set whose member type
-    # comes from the surrounding array/set or a selected overload.
-    if dewy_set_literal(first): return
-    t = dewy_spread_source_type(first)
-    if types[t].kind == .struct_ and not is_map_type(t) and not is_dewy_set_type(t): nodes[n].kind = .record_lit
 
 # A record field whose value is a type (decisions.md, batch 7): one interned typeval per type, so
 # records with the same type members share one shape instance. It has no runtime storage.
@@ -2079,24 +1919,6 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
         set_list(n, statements)
     t
 
-# A field default whose value is the zero bytes, which the slot's fill already wrote: `none` for
-# an optional, `[]` for a fixed array, a machine integer's 0, 0.0 (not -0.0), false, an
-# enumeration's first member
-default_is_zero = (dv: int, ft: int) -> bool:
-    k = nodes[dv].kind
-    fk = tkind(ft)
-    if k == .none_lit: return fk == .opt
-    if k == .int_lit and nodes[dv].ival == 0 and not has_flag(dv, NF_U64): return fk == .int_ and prune(ft) != T_MATH_INT
-    if k == .float_lit and fk == .float_: return nodes[dv].fval == 0.0 and 1.0 / nodes[dv].fval > 0.0
-    if k == .bool_lit and nodes[dv].ival == 0: return fk == .bool_
-    # (`'first'` in Dewy, `.first` in Sloppy)
-    word = if k == .str_lit and nodes[dv].nlist == 0: int(nodes[dv].sval) else: if k == .dotname: int(nodes[dv].name) else: 0
-    if word != 0 and fk == .enum_ and not is_union(ft):
-        si = int(types[prune(ft)].st)
-        check_struct_fields(si)
-        return int(structs[si].nvariants) > 0 and int(variants[int(structs[si].variants)].name) == word
-    k == .array and nkids(dv) == 0 and nodes[dv].b == 0 and fk == .fixed
-
 # (P(1) for struct P: x: f64; y: f64: values given in order stop short of a field without a
 # default, which would be zero unnoticed; T() and names only, T(x = 1), leave fields out on purpose)
 missing_field_check = (n: int, decl: int, si: int, args: int[], mapped: int[]):
@@ -2305,13 +2127,6 @@ dewy_surface_check = (n: int, name: int):
     hint = dewy_surface_table().get(name) ?? ""
     if hint != "": fatal(nodes[n].pos, "'{name_of(name)}' is not Dewy's: {hint}")
 
-# (checker_call_queries.dewy's collect_fns in a Dewy module: the bundled rational's exact
-# members of an exact family name, when the module's imports reach it)
-collect_rational = (m: int, name: int, out: *(int[])):
-    if not exact_family_name(name): return
-    rm = rational_module()
-    if rm >= 0 and rm != m and reaches_rational(m, rm): collect_in(rm, name, 0, out)
-
 # (by name: abs, min, max or sign; built on first use)
 exact_named: bool[]
 exact_family_name = (name: int) -> bool:
@@ -2328,12 +2143,6 @@ exact_family_name = (name: int) -> bool:
 # modules are loaded. O(1) amortized.
 rational_module_found = -1
 rational_module_probed = 0
-rational_module = () -> int:
-    if rational_module_found >= 0 or modules.len() == rational_module_probed: return rational_module_found
-    rational_module_probed = modules.len()
-    rational_module_found = find_module(lib_dir + "/rational.dewy")
-    rational_module_found
-
 # By module, whether its imports reach the bundled rational module: 1 for good (imports only
 # grow), else 2 + the import count as of which they do not (0: not asked). A walk is
 # O(modules + imports), again for a module only once imports are added.
@@ -2346,85 +2155,12 @@ exact_families_changed = ():
     ml_bump_name(ci(45, "max"))
     ml_bump_name(ci(46, "sign"))
 
-reaches_rational = (m: int, rm: int) -> bool:
-    if rational_reach.len() < modules.len(): rational_reach.resize(modules.len())
-    r = rational_reach[m]
-    if r == 1 or r == import_edges + 2: return r == 1
-    seen = fill(false, modules.len())
-    found = reach_walk(m, rm, seen)
-    rational_reach[m] = if found: 1 else: import_edges + 2
-    found
-
-# (a fraction passed where the module's imports do not reach the bundled rational, as to an
-# instance of a generic helper: its exact members join the prelude's family for the call, as
-# its imports' would. Calls of numbers alone keep the prelude's members)
-exact_members_for = (decls: int[], name: int, args: int[]) -> int[]:
-    rm = rational_module()
-    m = cur_mod()
-    if rm < 0 or m < 0 or m == rm or decls.len() == 0 or modules[m].is_prelude: return decls
-    if not modules[int(nodes[decls[0]].mod)].is_prelude or not files[int(modules[m].file)].is_dewy: return decls
-    loop d in decls:
-        if int(nodes[d].mod) == rm: return decls
-    if reaches_rational(m, rm): return decls
-    loop a0 in args:
-        a = unnamed(a0)
-        if is_lit(a): continue
-        t = 0
-        if has_flag(a, NF_CHECKED): t = prune(ntype(a))
-        else if nodes[a].kind == .ident:
-            s = lookup(int(nodes[a].name))
-            if s != 0 and syms[s].kind == .local: t = prune(int(locals[int(syms[s].ref)].type))
-        if t != 0 and (bundled_rational_type(t) or bundled_word_rational_type(t)):
-            out = decls
-            collect_in(rm, name, 0, &out)
-            return out
-    decls
-
-reach_walk = (m: int, rm: int, seen: mut bool[]) -> bool:
-    if m == rm or rational_reach[m] == 1: return true
-    seen[m] = true
-    loop edge in modules[m].imports:
-        # (the shared prelude's imports are no module's own)
-        if not seen[edge.0] and not modules[edge.0].is_prelude and reach_walk(edge.0, rm, seen): return true
-    false
-
 # (collect_named, checker_call_queries.dewy: its families by name, kept while the name's
 # stamp stands, with the spellings they hid)
 named_first: int[]
 named_families: NamedFamily[]
 named_decls: int[]
 named_hidden: int[]
-# Fold mathematical powers and floor operations before selecting their runtime
-# overload. Every intermediate is checked, including exponentiation by squaring.
-dewy_math_fold = (n: int, a: int, b: int, power: bool, modulo: bool) -> bool:
-    if prune(ntype(a)) != T_MATH_INT: return false
-    known_a, x = integer_constant(a)
-    known_b, y = integer_constant(b)
-    if not known_a or not known_b: return false
-    value = 0
-    if power:
-        if y < 0: return false
-        value = 1
-        loop y > 0:
-            if y & 1 == 1:
-                if math_word_overflow(2, value, x): return false
-                value *= x
-            y = y >> 1
-            if y > 0:
-                if math_word_overflow(2, x, x): return false
-                x *= x
-    else:
-        if y == 0: fatal(nodes[n].pos, "integer division by zero in constant expression")
-        if not modulo and math_word_overflow(3, x, y): return false
-        if modulo:
-            if y != -1: value = x % y
-            if value != 0 and (value < 0) != (y < 0): value += y
-        else:
-            value = x / y
-            if x - value * y != 0 and (x < 0) != (y < 0): value -= 1
-    nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = value, type = i32(T_MATH_INT), flags = i32(NF_CHECKED))
-    true
-
 dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
     literal_divisor = nodes[args[1]].kind == .int_lit
     # (t/°C: a unit written by name)
@@ -2567,58 +2303,6 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
     if dir_panics_demanded() and not power and helper == name and is_int(ntype(a)) and is_int(ntype(b)):
         fact_divisors[n] = if modulo: 2 else: 1
     result
-
-# (a constant index's position)
-dewy_position_known = (b: int, pos: int) -> (bool, int):
-    if nodes[b].kind == .int_lit and not has_flag(b, NF_U64): return (true, nodes[b].ival)
-    if nodes[b].kind == .ident:
-        s = lookup(int(nodes[b].name))
-        if s != 0:
-            init = binding_const_init(syms[s].kind, int(syms[s].ref), pos)
-            if init != 0 and nodes[init].kind == .int_lit and not has_flag(init, NF_U64): return (true, nodes[init].ival)
-    (false, 0)
-
-# `pair[i]` of a `[int64 string]`: a constant position reads that position's
-# element, with its own type; any other index the union of the element types,
-# from a fixed array of them, so its bounds are proven as an array index's are.
-dewy_position_index = (n: int, bt: int, expected: int) -> int:
-    pos = nodes[n].pos
-    b = int(nodes[n].b)
-    count = int(types[bt].nargs)
-    if b == 0 or nkids(n) != 1 or nodes[b].kind == .range or nodes[b].kind == .namedarg: fatal(pos, "an array with a type per position takes one index (`pair[0]`); unpack it to take its parts (`let [a b] = pair`)")
-    known, at = dewy_position_known(b, pos)
-    if known:
-        if at < 0 or at >= count: fatal(nodes[b].pos, "index {at} is outside this {dt(bt)}: its positions are 0 to {count - 1}")
-        nodes[n].kind = .field
-        nodes[n].aux = -2
-        nodes[n].ival = at
-        nodes[n].b = 0
-        set_list(n, [])
-        return check_expr(n, expected)
-    members: int[]
-    loop i in [0..count): members.push(targ(bt, i))
-    source = "$positions{n}"
-    elements = "$position_values{n}"
-    reads: int[]
-    loop i in [0..count):
-        f = mk(.field, pos)
-        nodes[f].a = i32(bc_ident(source, pos))
-        nodes[f].aux = -2
-        nodes[f].ival = i
-        reads.push(f)
-    values = mk(.array, pos)
-    set_list(values, reads)
-    shape = mk(.tname, pos)
-    nodes[shape].aux = -7
-    nodes[shape].ival = mk_fixed(mk_union(members), count)
-    declared = bc_let(elements, values, pos)
-    nodes[declared].a = i32(shape)
-    read = mk(.index, pos)
-    nodes[read].a = i32(bc_ident(elements, pos))
-    nodes[read].b = i32(b)
-    set_list(read, [b])
-    nodes[n] = nodes[bc_block([bc_let(source, int(nodes[n].a), pos), declared, bc_stmt(read, pos)], pos)]
-    check_expr(n, expected)
 
 # (the library functions Dewy calls with physical quantities: dewy_quantity_call)
 quantity_call_names: int[]
@@ -2779,36 +2463,6 @@ DRAWING_FNS = ["circle", "rect", "line", "text", "text_centered", "text_wrapped"
     "circle_gradient", "rect_gradient", "quad_gradient", "triangle", "arc", "draw_mesh", "draw_tilemap", "draw_anim",
     "draw_model", "draw_sprite", "image_draw"]
 
-# drawing in update, clearing after drawing, sleeping in a frame: done where it shows nothing,
-# covers what was drawn, or stops the game
-frame_call_check = (n: int, decl: int):
-    if cx < 0: return
-    ci = int(ctxs[cx].inst)
-    if ci <= 0 or fns[ci].decl == 0: return
-    fd = int(fns[ci].decl)
-    if not modules[int(nodes[fd].mod)].is_main: return
-    # (a type's method named update or draw is not the game's)
-    here = if dewy_is_method(fd): "" else: name_of(int(nodes[fd].name))
-    fnm = name_of(int(nodes[decl].name))
-    drawing = false
-    loop d in DRAWING_FNS:
-        if d == fnm: drawing = true
-    if drawing:
-        if here == "update":
-            mm = int(nodes[fd].mod)
-            if modules[mm].names.get(intern("draw")) != none: warn(nodes[n].pos, "{fnm} draws, and update is for changing things: what it draws here is covered when draw clears the screen; draw it in `draw`")
-            else: warn(nodes[n].pos, "{fnm} draws, and update is for changing things: drawing goes in a function of its own, `draw = ():`, which the game calls each frame after update")
-        drew_in[ci] = true
-    # (into a render target, then the screen: clearing that is the start of another picture)
-    if fnm == "draw_to" or fnm == "draw_to_screen" or starts_with(fnm, "begin_") or fnm == "camera3d": drew_in.remove(ci)
-    # (draw_to(rt) in draw and never draw_to_screen(): the rest of the frame goes into rt)
-    if here == "draw" and fnm == "draw_to" and not draw_to_at.has(ci): draw_to_at[ci] = nodes[n].pos
-    if here == "draw" and fnm == "draw_to_screen": back_to_screen[ci] = true
-    if fnm == "clear" and drew_in.get(ci) != none and here == "draw": warn(nodes[n].pos, "clear covers everything drawn before it in this frame: clear the screen first, at the top of draw")
-    if (fnm == "input" or fnm == "input_int" or fnm == "input_float" or fnm == "read_line" and nkids(decl) == 0) and (here == "update" or here == "draw"):
-        warn(nodes[n].pos, "{fnm} waits for a line typed in the terminal, and the game stops while it waits: in the window, `hud_text_field(rect, name)` is a box to type in (or `text_input()`, what was typed this frame)")
-    if fnm == "sleep" and (here == "update" or here == "draw"): warn(nodes[n].pos, "sleep stops the whole game, every frame: to wait, count down a timer (`wait -= dt`, act when it is below 0), or `every(1, 2.0)`")
-
 fmt_plain: {int: bool} = {}       # (__fmt_fields nodes that format the fields, not the program's str)
 
 # (an __fmt_fields node's aux2: 1 inside a container, FMT_DEWY in Dewy's literal syntax)
@@ -2849,103 +2503,6 @@ console_type = () -> int:
 # Generated collector arguments retain their original syntax for contextual
 # overload selection. The expression flag demands one indexed callback only.
 collection_contributions: {int: bool} = {}
-collection_check = (n: int, expected: int) -> int:
-    if not collection_contributions.has(n): return -1
-    pack = collection_contributions[n]
-    collection_contributions.remove(n)
-    clear_flag(n, NF_CABI)
-    t = check_expr(n, expected)
-    if pack: collection_array(n, t) else: collection_value(n, t)
-
-# A collector's direct contribution forwards cancellation, never storing it as
-# an element. Indexed type membership is demand-only; O(type members + rewrite).
-collection_value = (n: int, t: int) -> int:
-    if not dewy_at(nodes[n].pos): return t
-    if not is_union(t) and tkind(t) != .opt and tkind(t) != .struct_: return t
-    canceled = int(syms[universe[intern("Canceled")]].ref)
-    members = value_members(t)
-    if not members.contains(canceled): return t
-    pos = nodes[n].pos
-    if dir_explicit_cancellation(pos): cancel_reject(n, false, "this collector")
-    inner = nodes.len()
-    nodes.push(nodes[n])
-    add_flag(inner, NF_CHECKED)
-    name = "$collect{n}"
-    ret = mk(.return_, pos)
-    or_throw_returns[pos] = true
-    nodes[ret].a = i32(bc_ident(name, pos))
-    stmts = [bc_let(name, inner, pos)]
-    if members.len() == 1: stmts.push(ret)
-    else:
-        condition = mk(.istype, pos)
-        nodes[condition].a = i32(bc_ident(name, pos))
-        nodes[condition].b = i32(type_node_of(canceled, pos))
-        branch = mk(.if_, pos)
-        nodes[branch].a = i32(condition)
-        nodes[branch].b = i32(bc_block([ret], pos))
-        add_flag(branch, NF_STMT)
-        stmts.push(branch)
-        stmts.push(bc_stmt(bc_ident(name, pos), pos))
-    nodes[n] = nodes[bc_block(stmts, pos)]
-    check_expr(n, 0)
-
-# A spread or parallel collector drains the retained array contributions before
-# exposing its result. O(element-type members) checking; O(elements) at runtime,
-# only for an element type that includes Canceled.
-collection_array = (n: int, t0: int) -> int:
-    t = prune(t0)
-    if not dewy_at(nodes[n].pos): return t0
-    kind = tkind(t)
-    set_source = kind == .struct_ and is_dewy_set_type(t)
-    if kind != .array and kind != .fixed and not set_source: return t0
-    elem = if set_source: struct_targ(int(types[t].st), 0) else: int(types[t].elem)
-    if not is_union(elem) and tkind(elem) != .opt and tkind(elem) != .struct_: return t0
-    canceled = int(syms[universe[intern("Canceled")]].ref)
-    members = value_members(elem)
-    if not members.contains(canceled): return t0
-    if dir_explicit_cancellation(nodes[n].pos): cancel_reject(n, false, "this collector")
-    # Normalize only a demanded failure-bearing spread, preserving ordinary
-    # fixed-array and set contextual typing on the common path.
-    if kind == .fixed: coerce(n, mk_array(elem))
-    else if set_source:
-        source_node = nodes.len()
-        nodes.push(nodes[n])
-        add_flag(source_node, NF_CHECKED)
-        nodes[n] = nodes[bc_call("__dewy_set_values", [source_node], nodes[n].pos)]
-        check_expr(n, mk_array(elem))
-    kept: int[]
-    loop m in members:
-        if m != canceled: kept.push(m)
-    success = if kept.len() == 0: T_NEVER else if kept.len() == 1: kept[0] else: mk_union(kept)
-    pos = nodes[n].pos
-    inner = nodes.len()
-    nodes.push(nodes[n])
-    add_flag(inner, NF_CHECKED)
-    source = "$collect_array{n}"
-    item = "$collect_item{n}"
-    result = "$collect_result{n}"
-    empty = mk(.array, pos)
-    output = bc_let(result, empty, pos)
-    nodes[output].a = i32(type_node_of(mk_array(success), pos))
-    each = mk(.for_, pos)
-    set_list(each, [bc_ident(item, pos)])
-    nodes[each].a = i32(bc_ident(source, pos))
-    condition = mk(.istype, pos)
-    nodes[condition].a = i32(bc_ident(item, pos))
-    nodes[condition].b = i32(type_node_of(canceled, pos))
-    ret = mk(.return_, pos)
-    or_throw_returns[pos] = true
-    nodes[ret].a = i32(bc_ident(item, pos))
-    branch = mk(.if_, pos)
-    nodes[branch].a = i32(condition)
-    nodes[branch].b = i32(bc_block([ret], pos))
-    add_flag(branch, NF_STMT)
-    body = [branch]
-    if success != T_NEVER: body.push(bc_stmt(bc_method(bc_ident(result, pos), "push", [bc_ident(item, pos)], pos), pos))
-    nodes[each].b = i32(bc_block(body, pos))
-    nodes[n] = nodes[bc_block([bc_let(source, inner, pos), output, each, bc_stmt(bc_ident(result, pos), pos)], pos)]
-    check_expr(n, 0)
-
 # the member a Dewy program wrote, for a library function standing for it
 shown_fn_name = (name: str) -> str:
     if name == "__dewy_find": return "find"

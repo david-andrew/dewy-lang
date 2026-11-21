@@ -3,6 +3,7 @@ use 'check.jo'
 use 'checker_state.dewy'
 use 'diagnostic_exit.dewy'
 use 'expr.jo'
+use 'dewy_method_ops.dewy'
 use 'checker_call_queries.dewy'
 use 'source_warnings.dewy'
 use 'type_ops.dewy'
@@ -103,3 +104,33 @@ habit_rest = (n: int, name: int, args: int[]):
     if nm == "random" and na == 1:
         if nodes[unnamed(args[0])].kind == .array: fatal(pos, "a random element is `random_item(xs)`")
         if num(args[0]): fatal(pos, "random takes where it starts and ends: `random(0, 10)` (a whole number: `random_int(0, 10)`)")
+
+# drawing in update, clearing after drawing, sleeping in a frame: done where it shows nothing,
+# covers what was drawn, or stops the game
+frame_call_check = (n: int, decl: int):
+    if cx < 0: return
+    ci = int(ctxs[cx].inst)
+    if ci <= 0 or fns[ci].decl == 0: return
+    fd = int(fns[ci].decl)
+    if not modules[int(nodes[fd].mod)].is_main: return
+    # (a type's method named update or draw is not the game's)
+    here = if dewy_is_method(fd): "" else: name_of(int(nodes[fd].name))
+    fnm = name_of(int(nodes[decl].name))
+    drawing = false
+    loop d in DRAWING_FNS:
+        if d == fnm: drawing = true
+    if drawing:
+        if here == "update":
+            mm = int(nodes[fd].mod)
+            if modules[mm].names.get(intern("draw")) != none: warn(nodes[n].pos, "{fnm} draws, and update is for changing things: what it draws here is covered when draw clears the screen; draw it in `draw`")
+            else: warn(nodes[n].pos, "{fnm} draws, and update is for changing things: drawing goes in a function of its own, `draw = ():`, which the game calls each frame after update")
+        drew_in[ci] = true
+    # (into a render target, then the screen: clearing that is the start of another picture)
+    if fnm == "draw_to" or fnm == "draw_to_screen" or starts_with(fnm, "begin_") or fnm == "camera3d": drew_in.remove(ci)
+    # (draw_to(rt) in draw and never draw_to_screen(): the rest of the frame goes into rt)
+    if here == "draw" and fnm == "draw_to" and not draw_to_at.has(ci): draw_to_at[ci] = nodes[n].pos
+    if here == "draw" and fnm == "draw_to_screen": back_to_screen[ci] = true
+    if fnm == "clear" and drew_in.get(ci) != none and here == "draw": warn(nodes[n].pos, "clear covers everything drawn before it in this frame: clear the screen first, at the top of draw")
+    if (fnm == "input" or fnm == "input_int" or fnm == "input_float" or fnm == "read_line" and nkids(decl) == 0) and (here == "update" or here == "draw"):
+        warn(nodes[n].pos, "{fnm} waits for a line typed in the terminal, and the game stops while it waits: in the window, `hud_text_field(rect, name)` is a box to type in (or `text_input()`, what was typed this frame)")
+    if fnm == "sleep" and (here == "update" or here == "draw"): warn(nodes[n].pos, "sleep stops the whole game, every frame: to wait, count down a timer (`wait -= dt`, act when it is below 0), or `every(1, 2.0)`")

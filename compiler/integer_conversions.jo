@@ -1,0 +1,51 @@
+use 'ast.jo'
+use 'diagnostic_exit.dewy'
+use 'expr.jo'
+use 'type_ops.dewy'
+use 'types.jo'
+use 'util.jo'
+
+int_widens = (f: int, t: int) -> bool:
+    if t == T_MATH_INT: return true
+    if f == T_MATH_INT: return false
+    fb = int(types[f].bits)
+    tb = int(types[t].bits)
+    if types[f].sign == types[t].sign: return tb >= fb
+    if not types[f].sign and types[t].sign: return tb > fb
+    false
+
+# can integer type t hold v?
+int_fits = (v: int, t: int) -> bool:
+    bits = int(types[t].bits)
+    if bits >= 64: return types[t].sign or v >= 0
+    if types[t].sign: return v >= -(1 << (bits - 1)) and v <= (1 << (bits - 1)) - 1
+    v >= 0 and v <= (1 << bits) - 1
+
+# can integer type t hold literal n? (one above the i64 range fits u64, and the 64-bit signed
+# types as its bits, e.g. hash constants)
+lit_fits = (n: int, t: int) -> bool:
+    if t == T_MATH_INT: return true
+    if has_flag(n, NF_U64):
+        if files[pos_file(nodes[n].pos)].is_dewy:
+            return int(types[t].bits) >= 64 and not types[t].sign
+        return int(types[t].bits) >= 64
+    int_fits(nodes[n].ival, t)
+
+check_integer_boundary = (n: int, from: int, to: int):
+    if to == T_MATH_INT: return
+    if from != T_MATH_INT and to != T_MATH_INT: return
+    if int_widens(from, to): return
+    known, value = integer_constant(n)
+    if not known: return
+    fits = int_fits(value, to)
+    if not types[from].sign and value < 0 and types[to].sign: fits = false
+    if not fits: fatal(nodes[n].pos, "integer overflow in constant conversion to {dt(to)}")
+
+coerce_int_literal = (n: int, to: int) -> int:
+    v = nodes[n].ival
+    if not lit_fits(n, to):
+        if has_flag(n, NF_U64): fatal(nodes[n].pos, "value {u64(v)} does not fit in {dt(to)}")
+        fatal(nodes[n].pos, "value {v} does not fit in {dt(to)}")
+    nodes[n].type = i32(to)
+    clear_flag(n, NF_LITERAL)
+    n

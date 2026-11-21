@@ -1,0 +1,61 @@
+$runtime_checks
+from p"ast.jo" import (NF_LITERAL NF_U64 clear_flag has_flag nodes)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (integer_constant)
+from p"type_ops.dewy" import (dt)
+from p"types.jo" import (T_MATH_INT types)
+from p"util.jo" import (files pos_file)
+
+IntConvWord:type=int64<overflow='wrap'>
+
+int_widens=(f:int64 t:int64):>bool=>$unsafe {
+    if t =? T_MATH_INT {return true}
+    if f =? T_MATH_INT {return false}
+    let fb=types.ptr[f].bits
+    let tb=types.ptr[t].bits
+    if types.ptr[f].sign =? types.ptr[t].sign {return tb >=? fb}
+    if not types.ptr[f].sign and types.ptr[t].sign {return tb >? fb}
+    false
+}
+
+# can integer type t hold v?
+int_fits=(v:int64 t:int64):>bool=>$unsafe {
+    let bits=IntConvWord(types.ptr[t].bits)
+    if bits >=? 64 {return types.ptr[t].sign or v >=? 0}
+    if types.ptr[t].sign {
+        let high_bit=IntConvWord(1) << ((bits - 1) & 63)
+        return v >=? -high_bit and v <=? high_bit - 1
+    }
+    v >=? 0 and v <=? (IntConvWord(1) << (bits & 63)) - 1
+}
+
+# can integer type t hold literal n? (one above the i64 range fits u64, and the 64-bit signed
+# types as its bits, e.g. hash constants)
+lit_fits=(n:IntConvWord t:IntConvWord):>bool=>$unsafe {
+    if t =? T_MATH_INT {return true}
+    if has_flag(n NF_U64) {
+        if files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {return types.ptr[t].bits >=? 64 and not types.ptr[t].sign}
+        return types.ptr[t].bits >=? 64
+    }
+    int_fits(nodes.ptr[n].ival t)
+}
+
+check_integer_boundary=(n:IntConvWord source:IntConvWord target:IntConvWord):>void=>$unsafe {
+    if target =? T_MATH_INT or source not=? T_MATH_INT or int_widens(source target) {return}
+    let [known value]=integer_constant(n)
+    if not known {return}
+    if not int_fits(value target) or not types.ptr[source].sign and value <? 0 and types.ptr[target].sign {
+        fatal(nodes.ptr[n].pos "integer overflow in constant conversion to {dt(target)}")
+    }
+}
+
+coerce_int_literal=(n:IntConvWord target:IntConvWord):>IntConvWord=>$unsafe {
+    let value=nodes.ptr[n].ival
+    if not lit_fits(n target) {
+        if has_flag(n NF_U64) {fatal(nodes.ptr[n].pos "value {uint64<overflow='wrap'>(value)} does not fit in {dt(target)}")}
+        fatal(nodes.ptr[n].pos "value {value} does not fit in {dt(target)}")
+    }
+    nodes.ptr[n].type=int32(target)
+    clear_flag(n NF_LITERAL)
+    n
+}

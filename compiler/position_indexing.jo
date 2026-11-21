@@ -1,0 +1,59 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_expr.dewy'
+use 'checks_builders.dewy'
+use 'diagnostic_exit.dewy'
+use 'type_ops.dewy'
+use 'types.jo'
+
+# (a constant index's position)
+dewy_position_known = (b: int, pos: int) -> (bool, int):
+    if nodes[b].kind == .int_lit and not has_flag(b, NF_U64): return (true, nodes[b].ival)
+    if nodes[b].kind == .ident:
+        s = lookup(int(nodes[b].name))
+        if s != 0:
+            init = binding_const_init(syms[s].kind, int(syms[s].ref), pos)
+            if init != 0 and nodes[init].kind == .int_lit and not has_flag(init, NF_U64): return (true, nodes[init].ival)
+    (false, 0)
+
+# `pair[i]` of a `[int64 string]`: a constant position reads that position's
+# element, with its own type; any other index the union of the element types,
+# from a fixed array of them, so its bounds are proven as an array index's are.
+dewy_position_index = (n: int, bt: int, expected: int) -> int:
+    pos = nodes[n].pos
+    b = int(nodes[n].b)
+    count = int(types[bt].nargs)
+    if b == 0 or nkids(n) != 1 or nodes[b].kind == .range or nodes[b].kind == .namedarg: fatal(pos, "an array with a type per position takes one index (`pair[0]`); unpack it to take its parts (`let [a b] = pair`)")
+    known, at = dewy_position_known(b, pos)
+    if known:
+        if at < 0 or at >= count: fatal(nodes[b].pos, "index {at} is outside this {dt(bt)}: its positions are 0 to {count - 1}")
+        nodes[n].kind = .field
+        nodes[n].aux = -2
+        nodes[n].ival = at
+        nodes[n].b = 0
+        set_list(n, [])
+        return check_expr(n, expected)
+    members: int[]
+    loop i in [0..count): members.push(targ(bt, i))
+    source = "$positions{n}"
+    elements = "$position_values{n}"
+    reads: int[]
+    loop i in [0..count):
+        f = mk(.field, pos)
+        nodes[f].a = i32(bc_ident(source, pos))
+        nodes[f].aux = -2
+        nodes[f].ival = i
+        reads.push(f)
+    values = mk(.array, pos)
+    set_list(values, reads)
+    shape = mk(.tname, pos)
+    nodes[shape].aux = -7
+    nodes[shape].ival = mk_fixed(mk_union(members), count)
+    declared = bc_let(elements, values, pos)
+    nodes[declared].a = i32(shape)
+    read = mk(.index, pos)
+    nodes[read].a = i32(bc_ident(elements, pos))
+    nodes[read].b = i32(b)
+    set_list(read, [b])
+    nodes[n] = nodes[bc_block([bc_let(source, int(nodes[n].a), pos), declared, bc_stmt(read, pos)], pos)]
+    check_expr(n, expected)

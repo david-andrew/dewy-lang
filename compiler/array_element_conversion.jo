@@ -1,0 +1,32 @@
+use 'checks_thin_expr.dewy'
+use 'intervals.dewy'
+use 'refine_metadata.dewy'
+use 'types.jo'
+
+elem_subsumes = (f0: int, t0: int) -> bool:
+    f = prune(f0)
+    t = prune(t0)
+    if f == t or type_eq(f, t): return true
+    fk = types[f].kind
+    tk = types[t].kind
+    if fk != .refined and tk != .refined: return array_elems_subsume(f, t)
+    if fk == .refined and types[f].bits == -1 or tk == .refined and types[t].bits == -1: return false
+    base = representation_type(f)
+    if base != representation_type(t) or types[base].kind != .int_ or base == T_MATH_INT: return false
+    fknown, flow, fhigh = int_intervals_wide(f)
+    tknown, tlow, thigh = int_intervals_wide(t)
+    fknown and tknown and interval_missing(flow, tlow).len() == 0 and interval_missing(fhigh, thigh).len() == 0
+
+# An array whose elements carry a tighter refinement, read where a looser one is
+# wanted: every value its element type admits, the wanted element type admits
+# (constant bounds), with the same representation and length; arrays nested inside
+# follow the same rule. The value is an immutable share, so no write through the
+# looser type can reach the tighter array; `@` places stay invariant (refine.jo).
+# O(intervals) per level.
+array_elems_subsume = (from0: int, to0: int) -> bool:
+    from = prune(from0)
+    to = prune(to0)
+    fk = types[from].kind
+    if fk != types[to].kind or fk != .array and fk != .fixed: return false
+    if fk == .fixed and types[from].bits != types[to].bits: return false
+    elem_subsumes(int(types[from].elem), int(types[to].elem))
