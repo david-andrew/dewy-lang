@@ -1,0 +1,37 @@
+$runtime_checks
+from p"ast.jo" import (kids nodes)
+from p"checker_values.dewy" import (values_init)
+from p"checks_thin.dewy" import (resolve_binding_type)
+from p"expr.jo" import (coerce last_checked)
+from p"types.jo" import (prune)
+
+BindingInputWord:type=int64<overflow='wrap'>
+# The names in a destructuring pattern, in source order. Keep the tree until
+# checking the source type; registration and declaration detection need leaves.
+flatten_binding_leaves=(bindings:array<int64>):>array<int64>=>$unsafe {
+    let nested=false
+    loop b in bindings {
+        if nodes.ptr[b].kind =? 'tuple' {nested=true; break}
+    }
+    if not nested {return bindings}
+    let leaves:array<int64>=[]
+    loop b in bindings {
+        if nodes.ptr[b].kind =? 'tuple' {
+            loop leaf in flatten_binding_leaves(kids(b)) {leaves.push(leaf)}
+        } else {leaves.push(b)}
+    }
+    leaves
+}
+
+# A type on the whole pattern supplies context before extracting its leaves.
+check_binding_input=(s:BindingInputWord):>BindingInputWord=>$unsafe {
+    let expected:BindingInputWord=0
+    if nodes.ptr[s].a not=? 0 {expected=resolve_binding_type(BindingInputWord(nodes.ptr[s].a))}
+    let t=prune(values_init(BindingInputWord(nodes.ptr[s].b) expected nodes.ptr[s].nlist >? 0))
+    nodes.ptr[s].b=int32<overflow='wrap'>(last_checked)
+    if expected not=? 0 {
+        nodes.ptr[s].b=int32<overflow='wrap'>(coerce(BindingInputWord(nodes.ptr[s].b) expected))
+        t=prune(expected)
+    }
+    t
+}

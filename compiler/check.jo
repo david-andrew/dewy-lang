@@ -176,6 +176,7 @@ use 'repl_signature.dewy'
 use 'source_frontend.dewy'
 use 'checker_narrow_rollback.dewy'
 use 'checker_import_discovery.dewy'
+use 'checker_binding_inputs.dewy'
 
 struct Module:
     name: i32
@@ -602,17 +603,7 @@ eval_when_toplevel = (m: int, w: int):
 
 # The names in a destructuring pattern, in source order. Keep the tree until
 # checking the source type; registration and declaration detection need leaves.
-binding_leaves = (bindings: int[]) -> int[]:
-    nested = false
-    loop b in bindings:
-        if nodes[b].kind == .tuple: nested = true; break
-    if not nested: return bindings
-    leaves: int[]
-    loop b in bindings:
-        if nodes[b].kind == .tuple:
-            loop leaf in binding_leaves(kids(b)): leaves.push(leaf)
-        else: leaves.push(b)
-    leaves
+binding_leaves = (bindings: int[]) -> int[]: flatten_binding_leaves(bindings)
 
 # `x = value` where no variable x exists yet is a declaration
 # (m >= 0: at the top level of module m, where only that module's globals count)
@@ -2185,16 +2176,6 @@ assign_value = (s: int, lt: int, settle: int) -> int:
     if nodes[v].kind != .intrinsic or nodes[v].aux != i32(int(IN.zeroed)): nodes[s].b = i32(coerce(v, lt))
     rt
 
-# A type on the whole pattern supplies context before extracting its leaves.
-check_binding_input = (s: int) -> int:
-    expected = 0
-    if nodes[s].a != 0: expected = resolve_binding_type(int(nodes[s].a))
-    t = prune(values_init(int(nodes[s].b), expected, nodes[s].nlist > 0))
-    nodes[s].b = i32(last_checked)
-    if expected != 0:
-        nodes[s].b = i32(coerce(int(nodes[s].b), expected))
-        t = prune(expected)
-    t
 
 # `let cursor = @xs[i]`, `let entry = @table[k]`, `let f = @r.a`, `let p = @xs`:
 # a local name for the element, entry, field or variable itself, its key or

@@ -1,0 +1,30 @@
+use 'check.jo'
+use 'ast.jo'
+use 'checker_values.dewy'
+use 'checks_thin.dewy'
+use 'expr.jo'
+use 'types.jo'
+
+# The names in a destructuring pattern, in source order. Keep the tree until
+# checking the source type; registration and declaration detection need leaves.
+flatten_binding_leaves = (bindings: int[]) -> int[]:
+    nested = false
+    loop b in bindings:
+        if nodes[b].kind == .tuple: nested = true; break
+    if not nested: return bindings
+    leaves: int[]
+    loop b in bindings:
+        if nodes[b].kind == .tuple:
+            loop leaf in binding_leaves(kids(b)): leaves.push(leaf)
+        else: leaves.push(b)
+    leaves
+# A type on the whole pattern supplies context before extracting its leaves.
+check_binding_input = (s: int) -> int:
+    expected = 0
+    if nodes[s].a != 0: expected = resolve_binding_type(int(nodes[s].a))
+    t = prune(values_init(int(nodes[s].b), expected, nodes[s].nlist > 0))
+    nodes[s].b = i32(last_checked)
+    if expected != 0:
+        nodes[s].b = i32(coerce(int(nodes[s].b), expected))
+        t = prune(expected)
+    t
