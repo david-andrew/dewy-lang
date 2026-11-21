@@ -1,0 +1,15 @@
+# args: a
+# A parallel collection keeps the length a loop comprehension has: one result per position.
+main=(argv:array<string>):>void=>{
+    let a=[loop x in [0..2000) x*x]
+    printl(a[1999])
+    let b=[parallel x in [0..2000) x*x]
+    printl(b[1999])
+    let n=argv.length+3
+    let c=[parallel x in [0..n) x+1]
+    if n >? 2 { printl(c[2]) }
+    let d=[parallel x in [1..5] x*10]
+    printl(d[4])
+    let e=[parallel s in ["a" "bb"] s.length]
+    printl(e[1])
+}

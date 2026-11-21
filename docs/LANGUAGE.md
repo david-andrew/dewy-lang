@@ -3565,6 +3565,9 @@ parallel x in shifted { $runtime_assert(x >=? 2) }
 $runtime_assert(saved[0] =? 1 and shifted[0] =? 2)
 ```
 
+A collection has one result per element or position, as a `loop` comprehension does, so
+`[parallel i in [0..n) f(i)]` has length `n` for a nonnegative `n`.
+
 An ordinary binding is read-only. A mutable `@x` binding owns one
 array element for the body, including its managed fields. Saved copies keep their original values. Other captured variables and
 globals may be read but cannot be changed, including through called functions.

@@ -146,6 +146,23 @@ fact_capture = (n: int, s: mut FactState) -> int:
     value = fact_capture_value(n, s)
     if n > 0 and fact_speculating == 0 and (exact_has_node(n) or (fact_owner < exact_rep_owners.len() and exact_rep_owners[fact_owner]) and exact_rep_value(n, fact_owner)): exact_value_fact(n, value, s)
     value
+# The positions of an unstepped range literal a parallel collection visits (`__dewy_range(a
+# second b step inclusive)`): `[0..n)`'s are max(0, n), related to n (through conversions); two literal ends' a
+# constant; else 0 (unknown). Its ends are literals or locals, whose values reading again
+# changes nothing. O(1).
+fact_parallel_range_count = (r: int, s: mut FactState) -> int:
+    if nkids(r) != 5 or not fact_library_call(r, "__dewy_range"): return 0
+    a = kid(r, 0)
+    b = kid(r, 2)
+    loop nodes[b].kind == .conv: b = int(nodes[b].a)
+    step = kid(r, 3)
+    last = kid(r, 4)
+    if nodes[step].kind != .bool_lit or nodes[step].ival != 0 or nodes[last].kind != .bool_lit: return 0
+    if nodes[a].kind != .int_lit or nodes[b].kind != .int_lit and nodes[b].kind != .ident: return 0
+    inclusive = nodes[last].ival != 0
+    if nodes[b].kind == .int_lit: return fact_constant(s, max(0, int(nodes[b].ival - nodes[a].ival) + (if inclusive: 1 else: 0)))
+    if nodes[a].ival != 0 or inclusive: return 0
+    fact_clamped(s, fact_capture(b, s), r)
 fact_capture_value = (n: int, s: mut FactState) -> int:
     if n == 0: return 0
     if not s.live:
@@ -1328,8 +1345,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             if nkids(n) == 2 and tkind(fact_type(ntype(n))) == .array:
                 if fact_library_call(n, "parallel_range") and fact_scalar(ntype(kid(n, 0))):
                     fact_add_projection(s, FactProjection(result, -1, false, fact_clamped(s, entry[0], n)))
-                else if fact_library_call(n, "parallel_map") and tkind(fact_type(ntype(kid(n, 0)))) == .array:
+                else if (fact_library_call(n, "parallel_map") or fact_library_call(n, "__dewy_parallel_collect")) and tkind(fact_type(ntype(kid(n, 0)))) == .array:
                     fact_add_projection(s, FactProjection(result, -1, false, fact_project(s, entry[0], -1, false, T_INT)))
+                # (`[parallel x in [0..n) e]`: one result per position, as `[loop x in [0..n) e]` has)
+                else if fact_library_call(n, "__dewy_parallel_collect"):
+                    count = fact_parallel_range_count(kid(n, 0), s)
+                    if count != 0: fact_add_projection(s, FactProjection(result, -1, false, count))
             if fact_copy_length_call(n) and s.projections.len() < FACT_CAP:
                 fact_add_projection(s, FactProjection(result, -1, false, fact_project(s, entry[0], -1, false, T_INT)))
                 fact_keys_copy(s, entry[0], result)
