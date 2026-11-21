@@ -1,0 +1,13 @@
+# A 64-bit store in GPU code must fit the shader's 32-bit word: a guard proving only int64 is not enough.
+$runtime_checks
+U:type=[out:GpuBuffer<float32> m:int32]
+k=(id:int64 u:U):>void=>{
+    if id <? 0 or id >=? u.out.length or id >=? 4096 {return}
+    let big:int64=id*int64(1000000000)+int64(u.m)
+    u.out[id]=float32(big)
+}
+main=()=>{
+    let out=gpu_buffer<float32>(4)
+    dispatch(compute(@k) 4 U(out 7))
+    printl(cpu(out))
+}

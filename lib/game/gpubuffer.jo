@@ -71,16 +71,25 @@ gpu_compute = () -> bool:
 @plain
 gpu_buffer[T] = (n: int) -> GpuBuffer[T]:
     if n < 0: panic("a GPU buffer cannot have {n} elements")
+    __gb_check_size(n, size_of(T))
     id = __gb_make(n * size_of(T), size_of(T), null)
     GpuBuffer[T](__gb[id].addr, n, id, __gb[id].host as *T, __gb[id].token)
 
 # a buffer holding a copy of xs
 @plain
 gpu_buffer[T] = (xs: T[]) -> GpuBuffer[T]:
+    __gb_check_size(xs.len(), size_of(T))
     id = __gb_make(xs.len() * size_of(T), size_of(T), data(xs) as *u8)
     GpuBuffer[T](__gb[id].addr, xs.len(), id, __gb[id].host as *T, __gb[id].token)
 
 len[T] = (b: GpuBuffer[T]) -> int: b.n
+
+# Shaders index a buffer with 32-bit words, so a buffer holds at most int32.max elements, and
+# as words() views it, at most int32.max 32-bit words: more is beyond GPU capacity, an
+# environmental failure (the facts take each GPU buffer's length to be at most int32.max:
+# compiler/facts_values.dewy)
+__gb_check_size = (n: int, elem: int):
+    if n > 2147483647 or n * elem / 4 > 2147483647: __environment_failure("a GPU buffer of {n} elements is too large (at most 2147483647, and 8 GiB)")
 
 # all the elements, or count of them from first (after what the GPU was given to do has run)
 cpu[T] = (b: GpuBuffer[T]) -> T[]: cpu(b, 0, b.n)

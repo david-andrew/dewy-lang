@@ -1,0 +1,14 @@
+# modes: native native-release
+# 64-bit arithmetic in GPU code is computed in 32-bit words: two int32s widened and added may not fit.
+$runtime_checks
+U:type=[out:GpuBuffer<float32> a:int32 b:int32]
+k=(id:int64 u:U):>void=>{
+    if id <? 0 or id >=? u.out.length {return}
+    let s:int64=int64(u.a)+int64(u.b)
+    u.out[id]=float32(s)
+}
+main=()=>{
+    let out=gpu_buffer<float32>(1)
+    dispatch(compute(@k) 1 U(out 2000000000 2000000000))
+    printl(cpu(out))
+}

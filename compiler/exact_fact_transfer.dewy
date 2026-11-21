@@ -23,7 +23,7 @@ from p"facts_value_queries.dewy" import (fact_bound)
 from p"facts_values.dewy" import (fact_domain fact_type fact_unmodeled)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
 from p"type_ops.dewy" import (dt)
-from p"types.jo" import (T_INT T_MATH_INT T_U64 prune types)
+from p"types.jo" import (T_I32 T_INT T_MATH_INT T_U32 T_U64 prune types)
 from p"util.jo" import (err_notes)
 from p"witness_nodes.dewy" import (wit_text)
 from p"witness_ops.dewy" import (wit_help wit_operand_changed wit_unsupported)
@@ -85,6 +85,10 @@ exact_fact_store=(n:TransferWord value:TransferWord @s:FactState):>int64=>$unsaf
         return value
     }
     let t=exact_representation(ntype(n))
+    # (GPU code holds a 64-bit integer in a 32-bit word: a store there must fit the word)
+    let shader=exact_shader_owners.has(exact_stores.get(n) ?? 0)
+    let stored=t
+    if shader and types.ptr[t].kind =? 'int_' and types.ptr[t].bits >? 32 {t=if types.ptr[t].sign {T_I32} else {T_U32}}
     let b=fact_bound(s value)
     let ok=not b.wide and b.reason not=? 'unsupported' and sa_fits(b.lo t) and sa_fits(b.hi t)
     if ok and value not=? 0 and (b.hi =? FACT_MAX and fact_open_endpoint(s value true) or b.lo =? FACT_MIN and fact_open_endpoint(s value false)) {ok=false}
@@ -134,7 +138,8 @@ exact_fact_store=(n:TransferWord value:TransferWord @s:FactState):>int64=>$unsaf
                     wit_operand_changed(int64(nodes.ptr[n].a) s)
                     wit_help("{dt(t)}.min <=? ({shown}) and ({shown}) <=? {dt(t)}.max")
                 }
-                if exact_shader_owners.has(exact_stores.get(n) ?? 0) {err_notes.push([(-1) "help: state the domain as a refinement or prove it with a guard before the operation, or choose `overflow='wrap'` (GPU code cannot check it)"])}
+                if t not=? stored {err_notes.push([(-1) "note: GPU code holds {dt(stored)} values in 32-bit words, so this must fit {dt(t)}"])}
+                if shader {err_notes.push([(-1) "help: state the domain as a refinement or prove it with a guard before the operation, or choose `overflow='wrap'` (GPU code cannot check it)"])}
                 else {err_notes.push([(-1) "help: widen the destination to `int`, state the domain as a refinement (or prove it with a guard), or choose `overflow='wrap'|'saturate'`; {dir_panic_fix(nodes.ptr[n].pos true)}"])}
                 fatal(nodes.ptr[n].pos what)
             }

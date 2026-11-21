@@ -3531,7 +3531,11 @@ on the CPU. GPU functions must use shader-compatible numeric values and cannot
 capture closures or allocate managed collections. Shaders hold 32-bit words: a
 64-bit integer in GPU memory (a GPU function's parameters or a buffer's elements)
 is an error, so declare it `int32` or `uint32`, and an exact `int` there must be
-proven to fit in an `int32`, as a counting loop over literals is. A shader cannot run a check, so
+proven to fit in an `int32`, as a counting loop over literals is or a guard bounds it. A shader
+holds a 64-bit local in a 32-bit word too, so a value stored in one or computed from them
+must be proven to fit that word (`let big:int64 = id*1000` needs `id` bounded enough). A
+GPU buffer holds at most `int32.max` elements (more is a GPU capacity failure), so an index
+below its length fits a word. A shader cannot run a check, so
 every obligation in a GPU function (`x+1` into an `int32`, a divisor, a conversion, a
 buffer index: `if id <? u.dst.length`) must be proven, even under `$runtime_checks`; wrapping types need no overflow proof. These restrictions are checked
 at compilation even if execution will use the CPU fallback. Exact rational

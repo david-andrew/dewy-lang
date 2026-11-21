@@ -1,0 +1,8 @@
+# exit: 1
+$runtime_checks
+# A GPU buffer holds at most int32.max elements (shaders index it with 32-bit words).
+main=()=>{
+    let n:int64=3000000000
+    let b=gpu_buffer<int32>(n)
+    printl(b.length)
+}

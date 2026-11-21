@@ -1,0 +1,19 @@
+# 64-bit values in GPU code that guards keep within 32-bit words prove: a guarded product, a
+# neighbour index below the buffer's length (a GPU buffer has at most int32.max elements), and
+# a sum of two bounded int32s.
+$runtime_checks
+
+U:type=[src:GpuBuffer<int32> dst:GpuBuffer<float32> a:int32 b:int32]
+k=(id:int64 u:U):>void=>{
+    if id <? 0 or id >=? u.dst.length or id >=? u.src.length {return}
+    let big:int64=if id <? 1000 id*int64(1000000) else 0
+    let left=if id >? 0 and id + 1 <? u.src.length float32(u.src[id-1])+float32(u.src[id+1]) else float32(0.0)
+    let s:int64=if u.a <? 1000000 and u.b <? 1000000 and u.a >? -1000000 and u.b >? -1000000 int64(u.a)+int64(u.b) else 0
+    u.dst[id]=float32(big)+left+float32(s)
+}
+main=()=>{
+    let src=gpu_buffer([int32(1) 2 3 4])
+    let dst=gpu_buffer<float32>(4)
+    dispatch(compute(@k) 4 U(src dst 5 7))
+    printl(cpu(dst))
+}

@@ -28,6 +28,7 @@ from p"refine_rare.dewy" import (ref_self_element_row)
 from p"refine_siblings.dewy" import (ref_sib_element_row)
 
 from p"ast.jo" import (kid kids)
+from p"checks_thin_expr.dewy" import (is_gpu_buffer)
 
 ValueBuildWord:type=int64<overflow='wrap'>
 
@@ -131,7 +132,8 @@ fact_project=(@s:FactState base:ValueBuildWord selector:ValueBuildWord element:b
         }
     }
     let v:ValueBuildWord=fact_new(@s fact_domain(t) FactTerm(type=t))
-    if not element and selector =? -1 {fact_set_bound(@s v FactBound(0 fact_length_max()))}
+    # (a GPU buffer has at most int32.max elements, as shaders index it: gpu_buffer refuses more)
+    if not element and selector =? -1 {fact_set_bound(@s v FactBound(0 if is_gpu_buffer(ValueBuildWord(fact_terms[base].type)) {2147483647} else {fact_length_max()}))}
     if element and fact_hull_owner =? fact_owner {
         let hull:ValueBuildWord=fact_projection_find(s base FACT_ELEMENT_VALUE false)
         if hull >=? 0 {

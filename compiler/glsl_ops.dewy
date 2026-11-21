@@ -1,7 +1,7 @@
 $runtime_checks
 
 from p"ast.jo" import (NF_INCLUSIVE has_flag nodes)
-from p"check.jo" import (LF_ALIAS LF_ASSIGNED LF_MUTPARAM fns locals)
+from p"check.jo" import (LF_ALIAS LF_ASSIGNED LF_MUTPARAM dewy_at fns locals)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"exact.jo" import (exact_ranges)
 from p"exact_marks.dewy" import (exact_proved)
@@ -45,9 +45,10 @@ gl_store_check=(e:GlslWord t:GlslWord):>void=>$unsafe {
     if not sl_ring_exact(GlslWord(nodes.ptr[e].a)) {gl_err(nodes.ptr[e].pos "this integer expression needs intermediates wider than a shader's 32-bit words: store each step that divides or shifts right in its own variable, or use a wrapping type")}
 }
 # Reject an integer a shader's 32-bit word might not hold, before its parts are translated: an
-# exact `int` without a range (sl_exact_range), and a store (CV.fixed_store) gl_store_check
-# rejects. The proof of a store of at most 32 bits, or of one the facts bound within 32, covers
-# the words under it (sl_proved): their ring arithmetic computes the stored value exactly.
+# exact `int` without a range (sl_exact_range); a 64-bit integer's arithmetic, or one widened
+# from an unsigned 32-bit word, without one; and a store (CV.fixed_store) gl_store_check
+# rejects. A store's proof (within the 32-bit word) covers the words under it (sl_proved):
+# their ring arithmetic computes the stored value exactly.
 # O(nodes under e), each once.
 sl_word_check=(e:GlslWord):>void=>$unsafe {
     if sl_proved.has(e) {return}
@@ -60,10 +61,21 @@ sl_word_check=(e:GlslWord):>void=>$unsafe {
         if k =? 'conv' {gl_err(pos "this {dt(sl_type(ntype(GlslWord(nodes.ptr[e].a))))} takes part in exact `int` arithmetic here, which is not proven to fit in 32 bits, all a shader holds: give the exact operand a width (`let i:int64 = ...`, which a guard proves)")}
         gl_err(pos "this exact `int` is not proven to fit in 32 bits, all a shader holds: give it a width, `int32(...)`, or bound it (a counting loop over literals is)")
     }
-    if types.ptr[t].kind not=? 'int_' or k not=? 'conv' or nodes.ptr[e].aux not=? int32(int64(CV.fixed_store)) {return}
-    gl_store_check(e t)
-    let a=GlslWord(nodes.ptr[e].a)
-    if types.ptr[t].bits <=? 32 or a <? exact_ranges.length and exact_ranges.ptr[a] >? 0 and exact_ranges.ptr[a] <=? 32 {sl_prove(a)}
+    if types.ptr[t].kind not=? 'int_' {return}
+    if k =? 'conv' and nodes.ptr[e].aux =? int32(int64(CV.fixed_store)) {
+        # (the facts proved the stored value fits t, a 64-bit one within its 32-bit word: exact_fact_store)
+        gl_store_check(e t)
+        sl_prove(GlslWord(nodes.ptr[e].a))
+        return
+    }
+    # (Jo's library shaders hold its `int` words in 32 bits by design)
+    if types.ptr[t].bits <=? 32 or not dewy_at(pos) {return}
+    let wide=k =? 'binary' or k =? 'unary'
+    if k =? 'conv' {
+        let from_=sl_type(ntype(GlslWord(nodes.ptr[e].a)))
+        wide=types.ptr[t].sign and types.ptr[from_].kind =? 'int_' and not types.ptr[from_].sign and types.ptr[from_].bits >=? 32
+    }
+    if wide and sl_exact_range(e).length =? 0 {gl_err(pos "a shader holds {dt(t)} values in 32-bit words, and this one is not proven to fit in one: bound its operands with a guard (`if x <? 1000`), or compute it in `int32`")}
 }
 # the words under a proven store: its arithmetic, down to its operands
 sl_prove=(e:GlslWord):>void=>$unsafe {
