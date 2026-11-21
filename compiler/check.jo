@@ -1,3 +1,6 @@
+use 'checker_contexts.dewy'
+use 'checker_symbol_spelling.dewy'
+use 'checker_decl_slots.dewy'
 use 'checker_assignment_entry.dewy'
 use 'checker_narrow_writes.dewy'
 use 'checker_module_names.dewy'
@@ -364,18 +367,6 @@ mod_uses: int[][]
 # (by module, whether a prelude module is among its uses: then each use is asked in turn)
 prelude_used: bool[]
 
-# The one use of module m whose table can bind name, -1 for none; -2 when its uses must each be
-# asked in order (a prelude among them, or more than one module binding the name; bound_in
-# tells which may). O(uses).
-use_home = (m: int, name: int) -> int:
-    if modules[m].uses.len() == 0: return -1
-    if not homes_built: homes_build()
-    if m < prelude_used.len() and prelude_used[m]: return -2
-    if name >= home_first.len() or home_first[name] == 0: return -1
-    h = home_first[name] - 1
-    if home_next[h] != 0: return -2
-    if modules[m].uses.contains(home_mod[h]): home_mod[h] else: -1
-
 # module_lookup's last answer for each name: the module asked from, the binding, and its stamp
 ml_sym: int[]
 ml_mod: int[]
@@ -404,33 +395,6 @@ module_lookup = (m: int, name: int) -> int:
         ml_sym[name] = s
     s
 
-module_lookup_now = (m: int, name: int) -> int:
-    demand_name(name)
-    user = m >= 0 and not modules[m].is_prelude
-    if m >= 0:
-        if modules[m].is_prelude:
-            if let s = prelude.get(name): return s
-        else:
-            if let s = modules[m].names.get(name): return s
-            h = use_home(m, name)
-            if h >= 0 and not is_private(name):
-                if let s = modules[h].names.get(name): return s
-            if h == -2:
-                loop u in modules[m].uses:
-                    if modules[u].is_prelude:
-                        if let s = prelude.get(name):
-                            if not lib_private(name): return s
-                    else if bound_in(u, name):
-                        if let s = modules[u].names.get(name):
-                            if not is_private(name): return s
-            if files[int(modules[m].file)].is_dewy and not is_private(name):
-                s = dewy_prelude_lookup(name)
-                if s != 0: return s
-    if let s = prelude.get(name):
-        if not user or not lib_private(name): return s
-    if let s = universe.get(name): return s
-    0
-
 # from m import a, b as c: each name bound in the importing module (functions join any of its
 # own with that name, as overloads)
 from_imports: int[]
@@ -439,23 +403,6 @@ from_imports: int[]
 # resolved to the builtin, not a binding of the program's) is rejected. Only
 # text the source spells counts, not names the compiler builds at its positions.
 jo_type_names: bool[]           # (by name)
-jo_type_spelling = (nm: int, s: int, pos: int):
-    if jo_type_names.len() == 0:
-        loop w in ["str", "byte", "f32", "f64", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"]:
-            id = intern(w)
-            if jo_type_names.len() <= id: jo_type_names.resize(id + 1)
-            jo_type_names[id] = true
-    if nm >= jo_type_names.len() or not jo_type_names[nm] or s == 0 or not dewy_at(pos) or (universe.get(nm) ?? 0) != s: return
-    w = name_of(nm)
-    src = files[pos_file(pos)].src
-    off = pos_off(pos)
-    stop = off + len(w)
-    if stop > len(src) or (stop < len(src) and is_ident_char(src[stop])): return
-    loop i in [0..len(w)):
-        if src[off + i] != w[i]: return
-    dewy = dewy_type_word(w)
-    fatal(pos, "`{w}` is not a Dewy type name: write `{dewy}`")
-
 repl_sig_query = false          # (the REPL's `:type name`: a function's versions go to repl_sig)
 repl_sig = ""
 
@@ -489,84 +436,6 @@ registered: bool[]
 
 # ---------------- type resolution ----------------
 values_type_ok = false   # (resolve_binding_type: a binding's whole type may be several values)
-resolve_type_name = (tn: int) -> CheckerTypeName:
-    if nodes[tn].aux == -8: fatal(nodes[tn].pos, "Effect row is not a value type")
-    nm = int(nodes[tn].name)
-    s = 0
-    if nodes[tn].sval != 0:
-        # (`(@w).Closed`: a type a named wait gives, decisions.md batch 7)
-        wait_member = named_wait_type(tn)
-        if wait_member != 0: return CheckerTypeName(0, wait_member)
-        ms = lookup(int(nodes[tn].sval))
-        if ms != 0 and syms[ms].kind == .reflected and name_of(nm) == "type": return CheckerTypeName(0, int(fields[int(syms[ms].ref)].type))
-        # (`heart.<Tick>`: the type itself, selected on a wait, decisions.md batch 7)
-        if ms != 0 and (syms[ms].kind == .local or syms[ms].kind == .global) and name_of(nm) == "<>":
-            if nkids(tn) != 1: fatal(nodes[tn].pos, "`{name_of(int(nodes[tn].sval))}.<T>` selects one type")
-            return CheckerTypeName(0, resolve_type(kid(tn, 0)))
-        # (`r.Png`, `heart.Tick`: a value's type member, decisions.md batch 7)
-        if ms != 0 and syms[ms].kind != .module:
-            member = value_type_member(ms, nm, nodes[tn].pos)
-            if member != 0: return CheckerTypeName(0, member)
-            if syms[ms].kind == .local or syms[ms].kind == .global:
-                q = name_of(int(nodes[tn].sval))
-                vt = if syms[ms].kind == .local: int(locals[int(syms[ms].ref)].type) else: int(globals[int(syms[ms].ref)].type)
-                why = handle_member_error(q, vt, nm)
-                if len(why) > 0: fatal(nodes[tn].pos, why)
-                fatal(nodes[tn].pos, "'{q}' has no member '{name_of(nm)}' that is a type")
-        if ms == 0 or syms[ms].kind != .module: fatal(nodes[tn].pos, "unknown module '{name_of(int(nodes[tn].sval))}'")
-        s = module_lookup(int(syms[ms].ref), nm)
-        if name_of(int(nodes[tn].sval))[0] != '$' and files[pos_file(nodes[tn].pos)].is_dewy: rational_one_spelling(int(syms[ms].ref), nm, nodes[tn].pos, "")
-    else:
-        if ide_sentinel != 0 and nm == ide_sentinel: ide_complete_types()
-        s = lookup(nm)
-        jo_type_spelling(nm, s, nodes[tn].pos)
-        if nm == ut_safe_name: ut_note_type_name(nm, nodes[tn].pos)
-        # `rational`: the builtin exact type (the bundled library's), unless a type shadows it.
-        if name_of(nm) == "rational" and (s == 0 or syms[s].kind == .fns) and files[pos_file(nodes[tn].pos)].is_dewy:
-            return CheckerTypeName(5, 0)
-    # `secret<T>`: the builtin wrapper (types.jo's mk_secret), unless a type shadows it
-    if nm == secret_name and nodes[tn].sval == 0 and (s == 0 or not secret_type_sym(syms[s].kind)):
-        if nkids(tn) != 1: fatal(nodes[tn].pos, jd(nodes[tn].pos, "`secret` takes one type argument: `secret[str]`", "`secret` takes one type argument: `secret<string>`"))
-        return CheckerTypeName(4, 0)
-    if s == 0:
-        if name_of(nm) == "none": return CheckerTypeName(0, T_NONE)
-        # (push = (h: mut Heap[T], x: T): a generic function names its type parameters)
-        tn_s = name_of(nm)
-        if len(tn_s) <= 2 and tn_s[0] >= 'A' and tn_s[0] <= 'Z' and cx >= 0 and fns.len() > int(ctxs[cx].inst):
-            fatal(nodes[tn].pos, jd(nodes[tn].pos, "unknown type '{tn_s}' (a generic function names its type parameters after its name: `f[{tn_s}] = (x: {tn_s}) -> {tn_s}: ...`; a generic struct, `struct Heap[{tn_s}]:`)", "unknown type '{tn_s}' (a generic function declares its type parameters first: `f = <{tn_s}>(x:{tn_s}):>{tn_s} => ...`; a generic record, `Heap:type = <{tn_s}>[items:array<{tn_s}>]`)"))
-        if name_of(nm) == "Cancelled": fatal(nodes[tn].pos, "unknown type `Cancelled`; use `Canceled` (US spelling)")
-        fatal(nodes[tn].pos, "unknown type '{name_of(nm)}'{suggestion(name_of(nm), type_names())}")
-    sk = syms[s].kind
-    # (str = (b: Big) -> str: a function of the program's named as a type, its `str` there
-    # still the type)
-    if sk == .fns:
-        if let u = universe.get(nm):
-            s = u
-            sk = syms[s].kind
-    if ide_on: ide_sym_ref(tn, s)
-    if sk == .alias_: return CheckerTypeName(1, int(syms[s].ref))
-    if sk == .type_:
-        t = int(syms[s].ref)
-        if nodes[tn].nlist == 0:
-            if tkind(t) == .effect: fatal(nodes[tn].pos, "Effect row is not a value type")
-            return CheckerTypeName(0, nominal_family(t))
-        return CheckerTypeName(3, t)
-    if sk == .struct_ or sk == .enum_:
-        d = int(syms[s].ref)
-        if nkids2(d) == 0 and nkids(tn) == 0: return CheckerTypeName(0, nominal_family(get_struct_inst(d, [])))
-        # (`<Closed>`, `is? Closed`: every instance, while a test's type is resolved)
-        if bare_generic_ok and nkids(tn) == 0 and nkids2(d) > 0 and nodes[kid2(d, 0)].b == 0:
-            family = generic_family_type(d)
-            if family != 0: return CheckerTypeName(0, family)
-        return CheckerTypeName(2, d)
-    if dewy_at(nodes[tn].pos):
-        integer = named_integer_type(tn, s)
-        if integer != 0: return CheckerTypeName(0, integer)
-    h = habit_name(name_of(nm))
-    if len(h) > 0: fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type (use {h})")
-    fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type")
-    CheckerTypeName()
-
 binding_const_init = (kind: SK, ref: int, pos: int) -> int:
     if kind == .const_:
         if globals[ref].init != 0: return int(globals[ref].init)
@@ -632,10 +501,6 @@ method_modules = (t0: int) -> int[]:
     out
 
 # ---------------- functions ----------------
-decl_info = (decl: int) -> int:
-    if nodes[decl].sym != 0: return int(nodes[decl].sym)
-    cs_decl_info(decl)
-
 # Modules whose parse would have turned the program-wide refinement machinery on, held off
 # until one of their declarations is resolved (dewy_prelude_module): `mod` of floats does not
 # pay for the refined divisor of `mod` of integers.
@@ -643,26 +508,6 @@ refine_deferred: {int: bool}
 
 # (operators get names: ([]) is op_index, shown as such in backtraces: lib/std/backtrace.jo)
 OP_NAMES = ["[]", "index", "[]=", "set", "+", "add", "-", "sub", "*", "mul", "/", "div", "%", "mod", "==", "eq", "<", "lt", "^", "pow"]
-
-sanitize = (s: str) -> str:
-    if len(s) > 0 and not is_alnum(s[0]) and s[0] != '_':
-        i = 0
-        loop i < OP_NAMES.len():
-            if OP_NAMES[i] == s: return "op_{OP_NAMES[i + 1]}"
-            i += 2
-        return "op"
-    # (a name of letters and digits, not too long, is its own)
-    plain = len(s) <= 41
-    loop c in s:
-        if not plain: break
-        if not is_alnum(c): plain = false
-    if plain: return s
-    b: u8[]
-    loop c in s:
-        if is_alnum(c): b.push(c)
-        else: b.push('X')
-        if b.len() > 40: break
-    str_from_bytes(b)
 
 # (@no_web("why"): a function that does nothing in a browser, said where a web build's program
 # calls it)
@@ -674,9 +519,6 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int: ci_get_fn_inst(dec
 # (--internal-collide-locals, a self-test: a checked loop's index local takes the loop's own
 # node number, so a walk reading the loop's c as a node meets the loop again and never ends)
 collide_locals = false
-collide_local = (s: int):
-    if collide_locals and locals.len() < s: locals.resize(s)
-
 new_local = (name: int, t: int, pos: int) -> int:
     inst = int(ctxs[cx].inst)
     locals.push(Local(name = i32(name), type = i32(t), owner = i32(inst), pos = pos, dloops = i32(loop_serials.len())))
@@ -721,15 +563,6 @@ note_write = (r: int, via_closure: bool, pos: int):
 
 module_ctx: int[]
 module_frames: FnCtx[]
-
-# Module state outlives a check, but temporary function contexts are a stack.
-# Keep inactive module frames outside that stack so loading another module
-# during an expression cannot interfere with its caller's push/pop lifetime.
-enter_module_context = (m: int) -> bool:
-    if module_ctx[m] >= 0: return false
-    module_ctx[m] = ctxs.len()
-    ctxs.push(module_frames[m])
-    true
 
 # the global a narrowed name's place (g.f narrowed by `is`) belongs to, or -1
 alias_global = (l: int) -> int:
@@ -927,227 +760,15 @@ check_block = (b: int, expected: int, want_value: bool) -> int: bk_block(b, expe
 
 pack_result_ok = false
 
-# loop p in ps (ps a soa array): loop i in [0..len(ps)): p = ps[i]
-soa_loop = (s: int):
-    it = int(nodes[s].a)
-    if nodes[it].kind == .range: return
-    t = prune(check_expr(it, 0))
-    it = last_checked
-    nodes[s].a = i32(it)
-    if not is_soa(t): return
-    pos = nodes[s].pos
-    ik = nodes[it].kind
-    if ik != .ident and ik != .field: fatal(pos, "a loop over a soa array needs the array in a variable")
-    nv = nkids(s)
-    if nv == 2 and nodes[s].ival != 1: fatal(pos, "`loop a, b in` unpacks pairs; to count the elements write `loop i in 0.. and p in ps`")
-    pv = kid(s, nv - 1)
-    ixn = "__sl{bc_count}"
-    bc_count += 1
-    if nv == 2: ixn = name_of(int(nodes[kid(s, 0)].name))
-    r = mk(.range, pos)
-    nodes[r].a = i32(bc_int(0, pos))
-    nodes[r].b = i32(bc_call("len", [clone(it)], pos))
-    ix = mk(.index, pos)
-    nodes[ix].a = i32(clone(it))
-    nodes[ix].b = i32(bc_ident(ixn, pos))
-    body = int(nodes[s].b)
-    # p stands for ps[i]: p.x is ps.x[i]; only a use of p as a whole reads every field
-    el = bc_let(name_of(int(nodes[pv].name)), ix, pos)
-    add_flag(el, NF_SOA)
-    if has_flag(s, NF_MUT): add_flag(el, NF_MUT)
-    clear_flag(s, NF_MUT)
-    stmts = [el]
-    loop x in kids(body): stmts.push(x)
-    set_list(body, stmts)
-    set_list(s, [bc_ident(ixn, pos)])
-    nodes[s].a = i32(r)
-
 # (how many soa element aliases were made: none, and no name is one)
 soa_aliases = 0
-
-# loop a, b in xs (an array of pairs): loop t in xs: let a, b = t
-unpack_loop = (s: int):
-    dewy = files[pos_file(nodes[s].pos)].is_dewy
-    if nkids(s) < 2 or (not dewy and nkids(s) != 2) or nodes[s].ival == 1: return
-    it = int(nodes[s].a)
-    if nodes[it].kind == .range: fatal(nodes[s].pos, "`loop a, b in` unpacks pairs; a range has single numbers")
-    t = prune(check_expr(it, 0))
-    nodes[s].a = i32(last_checked)
-    if types[t].kind != .array and types[t].kind != .fixed: return
-    pos = nodes[s].pos
-    et = prune(int(types[t].elem))
-    if not dewy and (types[et].kind != .tuple or int(types[et].nargs) != 2): fatal(pos, "`loop a, b in xs` unpacks pairs, but the elements are {dt(et)}; to count them write `loop i in 0.. and x in xs`")
-    if has_flag(s, NF_MUT): fatal(pos, "`loop mut` cannot unpack pairs")
-    tn = "__lt{bc_count}"
-    bc_count += 1
-    d = mk(.vardecl, pos)
-    set_list(d, kids(s))
-    nodes[d].b = i32(bc_ident(tn, pos))
-    body = int(nodes[s].b)
-    stmts = [d]
-    loop x in kids(body): stmts.push(x)
-    set_list(body, stmts)
-    set_list(s, [bc_ident(tn, pos)])
-
-# `loop mut k, v in m` over a map: { __map_tidy(m); the loop } (nothing in it gone, so that the
-# loop's indexes are its entries'); true when s was made that block, and checked
-map_tidy_first = (s: int) -> bool:
-    if not has_flag(s, NF_MUT) or map_tidied.has(s): return false
-    it = int(nodes[s].a)
-    if nodes[it].kind == .range: return false
-    t = prune(check_expr(it, 0))
-    nodes[s].a = i32(last_checked)
-    if not is_map_type(t): return false
-    pos = nodes[s].pos
-    l = nodes.len()
-    nodes.push(nodes[s])
-    map_tidied[l] = true
-    mc = copy_place(int(nodes[s].a))
-    add_flag(mc, NF_MUT)
-    tidy = synth_call("__map_tidy", [mc], pos)
-    b = mk(.block, pos)
-    set_list(b, [tidy, l])
-    nodes[s] = nodes[b]
-    check_stmt(s)
-    true
 
 # (loops made by map_tidy_first: the map is tidied already)
 map_tidied: {int: bool} = {}
 
-# A cursor loop is ordinary scoped control flow over a retained input and a
-# mutable boundary cursor. Advance before the body so continue needs no fixup.
-dewy_cursor_loop = (s: int) -> bool:
-    it = int(nodes[s].a)
-    if not is_dewy_cursor_iter(ntype(it)): return false
-    pos = nodes[s].pos
-    nv = nkids(s)
-    if has_flag(s, NF_MUT) or nv > 1 and nodes[s].ival != 1: fatal(pos, "this iterator binds one value; use `i in 0.. and value in sequence` to count")
-    tag = "__grapheme{bc_count}"
-    bc_count += 1
-    seq = tag + "s"
-    index = tag + "i"
-    if nv == 2: index = name_of(int(nodes[kid(s, 0)].name))
-    name = int(nodes[kid(s, nv - 1)].name)
-    add_flag(it, NF_CHECKED)
-    setup = [bc_let(seq, it, pos), bc_let(index, bc_int(-1, pos), pos)]
-    done = bc_call("__dewy_iter_done", [bc_ident(seq, pos), bc_ident(index, pos)], pos)
-    value = bc_call("__dewy_iter_value", [bc_ident(seq, pos), bc_ident(index, pos)], pos)
-    advance: int[]
-    if is_dewy_range_type(ntype(it), "__DewyRangeIter"):
-        # Keep a counted range's hot state in scalar locals. Passing a mutable
-        # iterator record to a helper would load/store it on every iteration.
-        loop field in ["cursor", "delta", "remaining", "done"]:
-            initial = bc_field(bc_ident(seq, pos), field, pos)
-            if field == "cursor" or field == "delta": initial = bc_call("__dewy_range_cursor", [initial], pos)
-            if field == "remaining": initial = bc_call("__dewy_range_remaining", [initial], pos)
-            setup.push(bc_let(tag + field, initial, pos))
-        done = bc_ident(tag + "done", pos)
-        value = bc_call("__dewy_range_word", [bc_ident(tag + "cursor", pos)], pos)
-        advance.push(lx_assign(bc_ident(tag + "cursor", pos), .pluseq, bc_ident(tag + "delta", pos), pos))
-    head = [lx_assign(bc_ident(index, pos), .pluseq, bc_int(1, pos), pos), lx_if(done, mk(.break_, pos), pos), lx_let(name, value, pos)]
-    if is_dewy_range_type(ntype(it), "__DewyRangeIter"): head.remove(1)
-    loop item in advance: head.push(item)
-    loop item in kids(int(nodes[s].b)): head.push(item)
-    if is_dewy_range_type(ntype(it), "__DewyRangeIter"):
-        # An inclusive unsigned counter also represents all 2^64 values when
-        # remaining is zero. Reuse the normal counted-loop backend and keep
-        # the empty test outside its back edge.
-        range = mk(.range, pos)
-        nodes[range].a = i32(bc_call("u64", [bc_int(0, pos)], pos))
-        nodes[range].b = i32(bc_bin(.minus, bc_ident(tag + "remaining", pos), bc_int(1, pos), pos))
-        add_flag(range, NF_INCLUSIVE)
-        loop_ = mk(.for_, pos)
-        nodes[loop_].sval = nodes[s].sval
-        nodes[loop_].a = i32(range)
-        nodes[loop_].b = i32(lx_block(head, pos))
-        set_list(loop_, [bc_ident(tag + "counter", pos)])
-        setup.push(lx_if(bc_bin(.eq, done, lx_bool(false, pos), pos), loop_, pos))
-        nodes[s] = nodes[lx_block(setup, pos)]
-        check_stmt(s)
-        return true
-    w = mk(.while_, pos)
-    nodes[w].sval = nodes[s].sval
-    tr = mk(.bool_lit, pos)
-    nodes[tr].ival = 1
-    nodes[w].a = i32(tr)
-    nodes[w].b = i32(lx_block(head, pos))
-    setup.push(w)
-    nodes[s] = nodes[lx_block(setup, pos)]
-    check_stmt(s)
-    true
-
 # An iterator loop's iterable written with `or_throw` after it (`loop x in inbox or_throw {`),
 # by its node: the failures to forward (a type node), or 0 for all of them.
 throwing_iters: {int: int} = {}
-
-dewy_iterator_loop = (s: int, place: int = 0) -> bool:
-    it = int(nodes[s].a)
-    pos = nodes[s].pos
-    if place == 0 and (nodes[it].kind == .range or not dewy_at(pos) or not dewy_iterator_type(prune(ntype(it)))): return false
-    # (`loop x in inbox or_throw {`: each step's failures leave the function, so x is the payload)
-    throwing = place == 0 and throwing_iters.has(it)
-    if has_flag(s, NF_MUT): fatal(pos, "an iterator yields values; `loop @item in items` needs stored array elements")
-    if nkids(s) != 1: fatal(pos, "an iterator loop binds one value; unpack it in the body")
-    step = "__step{bc_count}"
-    setup: int[]
-    receiver = place
-    if place == 0:
-        iterator = "__iterator{bc_count}"
-        add_flag(it, NF_CHECKED)
-        setup.push(bc_let(iterator, it, pos))
-        receiver = bc_ident(iterator, pos)
-    bc_count += 1
-    add_flag(receiver, NF_MUT)
-    taken = bc_let(step, bc_method(receiver, "next", [], pos), pos)
-    finished = mk(.istype, pos)
-    nodes[finished].a = i32(bc_ident(step, pos))
-    none_type = mk(.tname, pos)
-    nodes[none_type].name = i32(intern("none"))
-    nodes[finished].b = i32(none_type)
-    # Event sources use Closed<T> for normal exhaustion. This is the ordinary
-    # iterator protocol, independent of the source's module or concrete type.
-    outcomes = handle_outcomes(prune(ntype(it)))
-    terminal: int[]
-    canceled = false
-    event_source = false
-    if outcomes != 0:
-        loop outcome in value_members(outcomes):
-            if outcome == T_NONE: terminal.push(none_type)
-            if standard_wait_outcome(outcome) == intern("Closed"):
-                terminal.push(type_node_of(outcome, pos))
-                event_source = true
-            if outcome == int(syms[universe[intern("Canceled")]].ref): canceled = true
-    if terminal.len() > 0:
-        end_types = mk(.tunion, pos)
-        set_list(end_types, terminal)
-        nodes[finished].b = i32(end_types)
-    binder = kid(s, 0)
-    element = mk(.vardecl, nodes[binder].pos)
-    if nodes[binder].kind == .tuple: set_list(element, kids(binder))
-    else:
-        nodes[element].name = nodes[binder].name
-        nodes[element].a = nodes[binder].a
-    nodes[element].b = i32(bc_ident(step, pos))
-    if not throwing and event_source and canceled:
-        propagated = mk(.propagate, nodes[binder].pos)
-        nodes[propagated].a = nodes[element].b
-        nodes[propagated].b = i32(type_node_of(int(syms[universe[intern("Canceled")]].ref), pos))
-        nodes[element].b = i32(propagated)
-    if throwing:
-        # (after the none test, so only the payload and its failures remain)
-        thrown = mk(.propagate, nodes[binder].pos)
-        nodes[thrown].a = nodes[element].b
-        nodes[thrown].b = i32(throwing_iters[it])
-        nodes[element].b = i32(thrown)
-    body = lx_block([taken, lx_if(finished, mk(.break_, pos), pos), element] + kids(int(nodes[s].b)), pos)
-    steps = mk(.while_, pos)
-    nodes[steps].a = i32(bc_bool(true, pos))
-    nodes[steps].b = i32(body)
-    nodes[steps].sval = nodes[s].sval
-    setup.push(steps)
-    nodes[s] = nodes[lx_block(setup, pos)]
-    check_stmt(s)
-    true
 
 # A written `loop x in xs` binder (Dewy; O(1) per write, plus one declaration per written
 # binder): x starts each step as a copy of the element and belongs to the step, as if the
@@ -1162,72 +783,6 @@ struct LoopCopyWrite:
 
 loop_copy_writes: {int: LoopCopyWrite} = {}
 loop_copy_refined: {int: int} = {}    # a written binder's element type, when refined
-
-# Indexed user containers use their existing length / [] operations. Retain the
-# input value and length once, then reuse the ordinary counted-loop lowering.
-dewy_sequence_loop = (s: int) -> bool:
-    it = int(nodes[s].a)
-    if nodes[it].kind == .range: return false
-    t = prune(ntype(it))
-    if types[t].kind != .struct_ or is_map_type(t) or is_map_entries_type(t) or is_soa(t) or is_dewy_cursor_iter(t): return false
-    if structs[int(types[t].st)].name == "Range" and for_date_range_value(s, it, t): return true
-    pos = nodes[s].pos
-    if has_flag(s, NF_MUT): fatal(pos, "custom sequence iteration yields values; update the container through its indices")
-    tag = "__sequence{bc_count}"
-    bc_count += 1
-    add_flag(it, NF_CHECKED)
-    seq = bc_let(tag, it, pos)
-    index = tag + "i"
-    bindings = kids(s)
-    counted = bindings.len() == 2 and nodes[s].ival == 1
-    if counted: index = name_of(int(nodes[bindings[0]].name))
-    read = lx_index(bc_ident(tag, pos), bc_ident(index, pos), pos)
-    binding = mk(.vardecl, pos)
-    nodes[binding].b = i32(read)
-    if bindings.len() == 1 or counted:
-        nodes[binding].name = nodes[bindings[bindings.len() - 1]].name
-    else: set_list(binding, bindings)
-    body = lx_block([binding] + kids(int(nodes[s].b)), pos)
-    range = mk(.range, pos)
-    nodes[range].a = i32(bc_int(0, pos))
-    nodes[range].b = i32(bc_method(bc_ident(tag, pos), sequence_length_name(t), [], pos))
-    counted_loop = mk(.for_, pos)
-    nodes[counted_loop].a = i32(range)
-    nodes[counted_loop].b = i32(body)
-    nodes[counted_loop].sval = nodes[s].sval
-    set_list(counted_loop, [bc_ident(index, pos)])
-    nodes[s] = nodes[lx_block([seq, counted_loop], pos)]
-    check_stmt(s)
-    true
-
-# A nested loop binding first receives the ordinary iteration value, then uses
-# the same destructuring declaration as local code. This also handles a map's
-# value without changing its key/value iteration or snapshot behavior.
-dewy_nested_loop_bindings = (s: int):
-    if not files[pos_file(nodes[s].pos)].is_dewy: return
-    declarations: int[]
-    loop i in [0..nkids(s)):
-        binding = kid(s, i)
-        if nodes[binding].kind != .tuple and nodes[binding].a == 0: continue
-        # Array/custom-sequence patterns keep their field names until unpacked.
-        # A dictionary's key/value binders are separate iteration values.
-        if nodes[binding].kind != .tuple:
-            it = prune(ntype(int(nodes[s].a)))
-            if not is_map_type(it) and not is_map_entries_type(it): continue
-        if has_flag(s, NF_MUT): fatal(nodes[binding].pos, "nested loop bindings yield independent values, not mutable aliases")
-        name = "$unpack_loop{bc_count}"
-        bc_count += 1
-        d = mk(.vardecl, nodes[binding].pos)
-        if nodes[binding].kind == .tuple: set_list(d, kids(binding))
-        else:
-            nodes[d].name = nodes[binding].name
-            nodes[d].a = nodes[binding].a
-        nodes[d].b = i32(bc_ident(name, nodes[binding].pos))
-        declarations.push(d)
-        set_kid(s, i, bc_ident(name, nodes[binding].pos))
-    if declarations.len() > 0:
-        body = int(nodes[s].b)
-        set_list(body, declarations + kids(body))
 
 # (the value variables of loops over dictionaries: a change is made through the key)
 map_loop_values: {int: bool} = {}
@@ -1340,38 +895,15 @@ position_guard_note = (c: int, holds: bool):
     position_guards.push(PositionGuard(local = nodes[a].sym, value = i32(nodes[b].ival), mark = i32(scope_mark())))
     push_scope_sym(intern("$position_guard"), 0)
 
-assign_place = (lhs: int):
-    check_place(lhs, false)
-    return
 # (1 the refined storage written, 2 a refined field's checked store (or 0), 3 a text
 # domain's write, 4 an integer domain's)
-assign_refine = (s: int, lt: int, code: int) -> int:
-    lhs = int(nodes[s].a)
-    op = int(nodes[s].op)
-    if code == 1: return refine_storage(lhs, lt)
-    if code == 2:
-        if ref_self_active and ref_self_stored(lt): return ref_self_store(s, lt)
-        return ref_field_store(s, lt)
-    if code == 3: string_domain_write(lhs, if op == int(Tok.assign): int(nodes[s].b) else: 0)
-    else: int_domain_write(lhs, int(nodes[s].b), if op == int(Tok.assign): 0 else: op)
-    0
 # The value checked to lt (settle 1: converted to lt, but for a release's zeroed bytes;
 # 2: a variable's value of another type refused first)
-assign_value = (s: int, lt: int, settle: int) -> int:
-    rt = prune(if values_any and is_values(lt): values_init(int(nodes[s].b), lt) else: check_expr(int(nodes[s].b), lt))
-    if settle == 0: return rt
-    v = last_checked
-    if settle == 2 and rt != lt and not can_coerce(v, rt, lt): var_type_error(int(nodes[s].a), lt, rt, nodes[v].pos)
-    if nodes[v].kind != .intrinsic or nodes[v].aux != i32(int(IN.zeroed)): nodes[s].b = i32(coerce(v, lt))
-    rt
-
 
 # `let cursor = @xs[i]`, `let entry = @table[k]`, `let f = @r.a`, `let p = @xs`:
 # a local name for the element, entry, field or variable itself, its key or
 # index evaluated once.
 local_place_count = 0
-
-decl_values = (e: int, expected: int) -> int: values_init(e, expected)
 
 # A shaped parameter's dimension (dw_shape_prologue): a name already bound to a
 # value is checked against the argument's dimension; otherwise the name binds it.
@@ -1379,14 +911,6 @@ const SHAPE_DIM = 1789
 
 # `x = value` (or `a, b = value`) that declares x, made a declaration; otherwise a spawn's
 # handle and a global declared below are looked at
-stmt_assign = (s: int) -> bool:
-    if assign_declares(s, -1):
-        assign_to_decl(s)
-        return true
-    if nodes[int(nodes[s].b)].kind == .call and nodes[int(nodes[s].b)].aux2 == 17: spawn_value_error(nodes[int(nodes[s].b)].pos)
-    check_late_global(s)
-    false
-
 # Sparse preorder events for lowering's integer write proofs. Negative loop
 # nodes close the enclosing-loop stack; nested closures contribute only their
 # boundary. Save/restore around finalization, which can check other instances.

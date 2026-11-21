@@ -27,6 +27,10 @@ main = ():
     print("{module_ctx.len()}:{module_frames.len()}:{module_ctx[0]}:{module_ctx[1]}")
     print("{modules[0].init_fn}:{module_frames[0].inst}:{module_frames[1].inst == inst}:{module_frames[1].mod}")
     print("{nodes[b].kind == .block}:{nkids(b)}:{kid(b, 0) == d}")
+    saved = ctxs.len()
+    first = enter_module_context(1)
+    again = enter_module_context(1)
+    print("{first}:{again}:{module_ctx[1] == saved}:{ctxs.len() == saved + 1}:{ctxs[saved].inst == inst}")
 """
 
 
@@ -35,4 +39,4 @@ def test_checker_contexts_twins(compiler, tmp_path, monkeypatch):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     for binary in selfhost_lsp_double.leaf_compilers(compiler, tmp_path, ('checker_contexts',)):
         result = subprocess.run([binary], check=True, capture_output=True, timeout=60)
-        assert result.stdout == b'1:0:-1\n-1\n2:2:-1:-1\n7:7:true:1\ntrue:1:true\n'
+        assert result.stdout == b'1:0:-1\n-1\n2:2:-1:-1\n7:7:true:1\ntrue:1:true\ntrue:false:true:true:true\n'

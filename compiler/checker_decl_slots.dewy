@@ -1,0 +1,16 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"check.jo" import (collide_locals locals)
+from p"checker_signature.dewy" import (cs_decl_info)
+
+DeclSlotWord:type=int64<overflow='wrap'>
+
+decl_info=(decl:DeclSlotWord):>DeclSlotWord=>{
+    let slot=DeclSlotWord(nodes[decl].sym)
+    if slot not=? 0 {return slot}
+    cs_decl_info(decl)
+}
+
+collide_local=(s:DeclSlotWord):>void=>{
+    if collide_locals and locals.length <? s {locals.resize(s)}
+}

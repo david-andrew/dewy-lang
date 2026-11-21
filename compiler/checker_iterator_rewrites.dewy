@@ -1,0 +1,204 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_INCLUSIVE NF_MUT add_flag has_flag kid kids mk nkids nodes set_list)
+from p"check.jo" import (dewy_at syms throwing_iters universe)
+from p"checks_builders.dewy" import (bc_bool bc_call bc_field bc_ident bc_int bc_let bc_method)
+from p"checks_stmt_hooks.dewy" import (for_date_range_value)
+from p"checks_thin.dewy" import (check_stmt dewy_iterator_type)
+from p"checks_thin_expr.dewy" import (is_dewy_cursor_iter is_map_type sequence_length_name)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"error_ops.dewy" import (value_members)
+from p"expr.jo" import (bc_bin bc_count is_dewy_range_type is_map_entries_type ntype type_node_of)
+from p"parser_ops.dewy" import (lx_assign)
+from p"parser_shared.dewy" import (lx_block lx_bool lx_if lx_index lx_let)
+from p"select_checks.dewy" import (standard_wait_outcome)
+from p"type_member_checks.dewy" import (handle_outcomes)
+from p"type_ops.dewy" import (is_soa)
+from p"types.jo" import (T_NONE prune structs types)
+from p"util.jo" import (intern name_of)
+
+IteratorRewriteWord:type=int64<overflow='wrap'>
+IteratorRewriteI32:type=int32<overflow='wrap'>
+
+# A cursor loop is ordinary scoped control flow over a retained input and a
+# mutable boundary cursor. Advance before the body so continue needs no fixup.
+dewy_cursor_loop=(s:IteratorRewriteWord):>bool=>{
+    let it=IteratorRewriteWord(nodes[s].a)
+    if not is_dewy_cursor_iter(ntype(it)) {return false}
+    let pos=nodes[s].pos
+    let nv=IteratorRewriteWord(nkids(s))
+    if has_flag(s NF_MUT) or (nv >? 1 and nodes[s].ival not=? 1) {fatal(pos "this iterator binds one value; use `i in 0.. and value in sequence` to count")}
+    let serial = @bc_count
+    let tag="__grapheme{serial}"
+    serial=IteratorRewriteWord(serial) + 1
+    let seq="{tag}s"
+    let index="{tag}i"
+    if nv =? 2 {index=name_of(IteratorRewriteWord(nodes[kid(s 0)].name))}
+    let name=IteratorRewriteWord(nodes[kid(s nv - 1)].name)
+    add_flag(it NF_CHECKED)
+    let setup:array<int64>=[bc_let(seq it pos) bc_let(index bc_int(-1 pos) pos)]
+    let done=bc_call("__dewy_iter_done" [bc_ident(seq pos) bc_ident(index pos)] pos)
+    let value=bc_call("__dewy_iter_value" [bc_ident(seq pos) bc_ident(index pos)] pos)
+    let advance:array<int64>=[]
+    let counted=is_dewy_range_type(ntype(it) "__DewyRangeIter")
+    if counted {
+        # Retain a counted range's hot state in scalar locals.
+        loop field in ["cursor" "delta" "remaining" "done"] {
+            let initial=bc_field(bc_ident(seq pos) field pos)
+            if field =? "cursor" or field =? "delta" {initial=bc_call("__dewy_range_cursor" [initial] pos)}
+            if field =? "remaining" {initial=bc_call("__dewy_range_remaining" [initial] pos)}
+            setup.push(bc_let("{tag}{field}" initial pos))
+        }
+        done=bc_ident("{tag}done" pos)
+        value=bc_call("__dewy_range_word" [bc_ident("{tag}cursor" pos)] pos)
+        advance.push(lx_assign(bc_ident("{tag}cursor" pos) 'pluseq' bc_ident("{tag}delta" pos) pos))
+    }
+    let head:array<int64>=[lx_assign(bc_ident(index pos) 'pluseq' bc_int(1 pos) pos) lx_if(done mk('break_' pos) pos) lx_let(name value pos)]
+    if counted {head.pop(1);}
+    loop item in advance {head.push(item)}
+    loop item in kids(IteratorRewriteWord(nodes[s].b)) {head.push(item)}
+    if counted {
+        # An inclusive counter also represents all 2^64 values when remaining is zero.
+        let r=mk('range' pos)
+        nodes[r].a=IteratorRewriteI32(bc_call("u64" [bc_int(0 pos)] pos))
+        nodes[r].b=IteratorRewriteI32(bc_bin('minus' bc_ident("{tag}remaining" pos) bc_int(1 pos) pos))
+        add_flag(r NF_INCLUSIVE)
+        let counted_loop=mk('for_' pos)
+        nodes[counted_loop].sval=nodes[s].sval
+        nodes[counted_loop].a=IteratorRewriteI32(r)
+        nodes[counted_loop].b=IteratorRewriteI32(lx_block(head pos))
+        set_list(counted_loop [bc_ident("{tag}counter" pos)])
+        setup.push(lx_if(bc_bin('eq' done lx_bool(false pos) pos) counted_loop pos))
+    } else {
+        let w=mk('while_' pos)
+        nodes[w].sval=nodes[s].sval
+        let tr=mk('bool_lit' pos)
+        nodes[tr].ival=1
+        nodes[w].a=IteratorRewriteI32(tr)
+        nodes[w].b=IteratorRewriteI32(lx_block(head pos))
+        setup.push(w)
+    }
+    let replacement=lx_block(setup pos)
+    nodes[s]=nodes[replacement]
+    check_stmt(s)
+    true
+}
+
+dewy_iterator_loop=(s:IteratorRewriteWord place:IteratorRewriteWord=0):>bool=>{
+    let it=IteratorRewriteWord(nodes[s].a)
+    let pos=nodes[s].pos
+    if place =? 0 and (nodes[it].kind =? 'range' or not dewy_at(pos) or not dewy_iterator_type(prune(ntype(it)))) {return false}
+    let throwing=place =? 0 and throwing_iters.has(it)
+    if has_flag(s NF_MUT) {fatal(pos "an iterator yields values; `loop @item in items` needs stored array elements")}
+    if nkids(s) not=? 1 {fatal(pos "an iterator loop binds one value; unpack it in the body")}
+    let serial = @bc_count
+    let step="__step{serial}"
+    let setup:array<int64>=[]
+    let receiver=place
+    if place =? 0 {
+        let iterator="__iterator{serial}"
+        add_flag(it NF_CHECKED)
+        setup.push(bc_let(iterator it pos))
+        receiver=bc_ident(iterator pos)
+    }
+    serial=IteratorRewriteWord(serial) + 1
+    add_flag(receiver NF_MUT)
+    let taken=bc_let(step bc_method(receiver "next" [] pos) pos)
+    let finished=mk('istype' pos)
+    nodes[finished].a=IteratorRewriteI32(bc_ident(step pos))
+    let none_type=mk('tname' pos)
+    nodes[none_type].name=IteratorRewriteI32(intern("none"))
+    nodes[finished].b=IteratorRewriteI32(none_type)
+    # An event source exhausts normally on Closed<T>.
+    let outcomes=handle_outcomes(prune(ntype(it)))
+    let terminal:array<int64>=[]
+    let canceled=false
+    let event_source=false
+    if outcomes not=? 0 {
+        loop outcome in value_members(outcomes) {
+            if outcome =? T_NONE {terminal.push(none_type)}
+            if standard_wait_outcome(outcome) =? intern("Closed") {
+                terminal.push(type_node_of(outcome pos))
+                event_source=true
+            }
+            if outcome =? IteratorRewriteWord(syms[universe[intern("Canceled")]].ref) {canceled=true}
+        }
+    }
+    if terminal.length >? 0 {
+        let end_types=mk('tunion' pos)
+        set_list(end_types terminal)
+        nodes[finished].b=IteratorRewriteI32(end_types)
+    }
+    let binder=kid(s 0)
+    let element=mk('vardecl' nodes[binder].pos)
+    if nodes[binder].kind =? 'tuple' {set_list(element kids(binder))}
+    else {
+        nodes[element].name=nodes[binder].name
+        nodes[element].a=nodes[binder].a
+    }
+    nodes[element].b=IteratorRewriteI32(bc_ident(step pos))
+    if not throwing and event_source and canceled {
+        let propagated=mk('propagate' nodes[binder].pos)
+        nodes[propagated].a=nodes[element].b
+        nodes[propagated].b=IteratorRewriteI32(type_node_of(IteratorRewriteWord(syms[universe[intern("Canceled")]].ref) pos))
+        nodes[element].b=IteratorRewriteI32(propagated)
+    }
+    if throwing {
+        let thrown=mk('propagate' nodes[binder].pos)
+        nodes[thrown].a=nodes[element].b
+        nodes[thrown].b=IteratorRewriteI32(throwing_iters[it])
+        nodes[element].b=IteratorRewriteI32(thrown)
+    }
+    let stmts:array<int64>=[taken lx_if(finished mk('break_' pos) pos) element]
+    loop x in kids(IteratorRewriteWord(nodes[s].b)) {stmts.push(x)}
+    let body=lx_block(stmts pos)
+    let steps=mk('while_' pos)
+    nodes[steps].a=IteratorRewriteI32(bc_bool(true pos))
+    nodes[steps].b=IteratorRewriteI32(body)
+    nodes[steps].sval=nodes[s].sval
+    setup.push(steps)
+    let replacement=lx_block(setup pos)
+    nodes[s]=nodes[replacement]
+    check_stmt(s)
+    true
+}
+
+# Indexed user containers use their existing length / [] operations. Retain the
+# input value and length once, then reuse the ordinary counted-loop lowering.
+dewy_sequence_loop=(s:IteratorRewriteWord):>bool=>{
+    let it=IteratorRewriteWord(nodes[s].a)
+    if nodes[it].kind =? 'range' {return false}
+    let t=prune(ntype(it))
+    if types[t].kind not=? 'struct_' or is_map_type(t) or is_map_entries_type(t) or is_soa(t) or is_dewy_cursor_iter(t) {return false}
+    if structs[IteratorRewriteWord(types[t].st)].name =? "Range" and for_date_range_value(s it t) {return true}
+    let pos=nodes[s].pos
+    if has_flag(s NF_MUT) {fatal(pos "custom sequence iteration yields values; update the container through its indices")}
+    let serial = @bc_count
+    let tag="__sequence{serial}"
+    serial=IteratorRewriteWord(serial) + 1
+    add_flag(it NF_CHECKED)
+    let seq=bc_let(tag it pos)
+    let index="{tag}i"
+    let bindings=kids(s)
+    let counted=bindings.length =? 2 and nodes[s].ival =? 1
+    if counted {index=name_of(IteratorRewriteWord(nodes[bindings[0]].name))}
+    let read=lx_index(bc_ident(tag pos) bc_ident(index pos) pos)
+    let binding=mk('vardecl' pos)
+    nodes[binding].b=IteratorRewriteI32(read)
+    if bindings.length =? 1 or counted {nodes[binding].name=nodes[bindings[bindings.length - 1]].name}
+    else {set_list(binding bindings)}
+    let stmts:array<int64>=[binding]
+    loop x in kids(IteratorRewriteWord(nodes[s].b)) {stmts.push(x)}
+    let body=lx_block(stmts pos)
+    let r=mk('range' pos)
+    nodes[r].a=IteratorRewriteI32(bc_int(0 pos))
+    nodes[r].b=IteratorRewriteI32(bc_method(bc_ident(tag pos) sequence_length_name(t) [] pos))
+    let counted_loop=mk('for_' pos)
+    nodes[counted_loop].a=IteratorRewriteI32(r)
+    nodes[counted_loop].b=IteratorRewriteI32(body)
+    nodes[counted_loop].sval=nodes[s].sval
+    set_list(counted_loop [bc_ident(index pos)])
+    let replacement=lx_block([seq counted_loop] pos)
+    nodes[s]=nodes[replacement]
+    check_stmt(s)
+    true
+}

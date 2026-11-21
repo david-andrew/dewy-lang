@@ -1,0 +1,139 @@
+$runtime_checks
+from p"ast.jo" import (NF_MUT NF_SOA add_flag clear_flag clone has_flag kid kids mk nkids nodes set_kid set_list)
+from p"check.jo" import (map_tidied)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_call bc_ident bc_int bc_let)
+from p"checks_program.dewy" import (synth_call)
+from p"checks_thin.dewy" import (check_stmt)
+from p"checks_thin_expr.dewy" import (is_map_type)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (bc_count copy_place is_map_entries_type last_checked ntype)
+from p"type_ops.dewy" import (dt is_soa)
+from p"types.jo" import (prune types)
+from p"util.jo" import (files name_of pos_file)
+
+LoopBindingWord:type=int64<overflow='wrap'>
+LoopBindingI32:type=int32<overflow='wrap'>
+
+# loop p in ps (ps a soa array): loop i in [0..len(ps)): p = ps[i]
+soa_loop=(s:LoopBindingWord):>void=>{
+    let it=LoopBindingWord(nodes[s].a)
+    if nodes[it].kind =? 'range' {return}
+    let t=prune(check_expr(it 0))
+    it=last_checked
+    nodes[s].a=LoopBindingI32(it)
+    if not is_soa(t) {return}
+    let pos=nodes[s].pos
+    let ik=nodes[it].kind
+    if ik not=? 'ident' and ik not=? 'field' {fatal(pos "a loop over a soa array needs the array in a variable")}
+    let nv=LoopBindingWord(nkids(s))
+    if nv =? 2 and nodes[s].ival not=? 1 {fatal(pos "`loop a, b in` unpacks pairs; to count the elements write `loop i in 0.. and p in ps`")}
+    let pv=kid(s nv - 1)
+    let serial = @bc_count
+    let index="__sl{serial}"
+    serial=LoopBindingWord(serial) + 1
+    if nv =? 2 {index=name_of(LoopBindingWord(nodes[kid(s 0)].name))}
+    let r=mk('range' pos)
+    nodes[r].a=LoopBindingI32(bc_int(0 pos))
+    nodes[r].b=LoopBindingI32(bc_call("len" [clone(it)] pos))
+    let ix=mk('index' pos)
+    nodes[ix].a=LoopBindingI32(clone(it))
+    nodes[ix].b=LoopBindingI32(bc_ident(index pos))
+    let body=LoopBindingWord(nodes[s].b)
+    # An element aliases the indexed pool item. Reading one field reads just its column.
+    let el=bc_let(name_of(LoopBindingWord(nodes[pv].name)) ix pos)
+    add_flag(el NF_SOA)
+    if has_flag(s NF_MUT) {add_flag(el NF_MUT)}
+    clear_flag(s NF_MUT)
+    let stmts:array<int64>=[el]
+    loop x in kids(body) {stmts.push(x)}
+    set_list(body stmts)
+    set_list(s [bc_ident(index pos)])
+    nodes[s].a=LoopBindingI32(r)
+}
+
+# loop a, b in xs (an array of pairs): loop t in xs: let a, b = t
+unpack_loop=(s:LoopBindingWord):>void=>{
+    let dewy=files[pos_file(nodes[s].pos)].is_dewy
+    if nkids(s) <? 2 or (not dewy and nkids(s) not=? 2) or nodes[s].ival =? 1 {return}
+    let it=LoopBindingWord(nodes[s].a)
+    if nodes[it].kind =? 'range' {fatal(nodes[s].pos "`loop a, b in` unpacks pairs; a range has single numbers")}
+    let t=prune(check_expr(it 0))
+    nodes[s].a=LoopBindingI32(last_checked)
+    if types[t].kind not=? 'array' and types[t].kind not=? 'fixed' {return}
+    let pos=nodes[s].pos
+    let et=prune(LoopBindingWord(types[t].elem))
+    if not dewy and (types[et].kind not=? 'tuple' or types[et].nargs not=? 2) {
+        fatal(pos "`loop a, b in xs` unpacks pairs, but the elements are {dt(et)}; to count them write `loop i in 0.. and x in xs`")
+    }
+    if has_flag(s NF_MUT) {fatal(pos "`loop mut` cannot unpack pairs")}
+    let serial = @bc_count
+    let name="__lt{serial}"
+    serial=LoopBindingWord(serial) + 1
+    let d=mk('vardecl' pos)
+    set_list(d kids(s))
+    nodes[d].b=LoopBindingI32(bc_ident(name pos))
+    let body=LoopBindingWord(nodes[s].b)
+    let stmts:array<int64>=[d]
+    loop x in kids(body) {stmts.push(x)}
+    set_list(body stmts)
+    set_list(s [bc_ident(name pos)])
+}
+
+# `loop mut k, v in m` over a map: { __map_tidy(m); the loop } (nothing in it gone, so that the
+# loop's indexes are its entries'); true when s was made that block, and checked
+map_tidy_first=(s:LoopBindingWord):>bool=>{
+    if not has_flag(s NF_MUT) or map_tidied.has(s) {return false}
+    let it=LoopBindingWord(nodes[s].a)
+    if nodes[it].kind =? 'range' {return false}
+    let t=prune(check_expr(it 0))
+    nodes[s].a=LoopBindingI32(last_checked)
+    if not is_map_type(t) {return false}
+    let pos=nodes[s].pos
+    let l=nodes.length
+    nodes.push(nodes[s])
+    map_tidied[l]=true
+    let mc=copy_place(LoopBindingWord(nodes[s].a))
+    add_flag(mc NF_MUT)
+    let tidy=synth_call("__map_tidy" [mc] pos)
+    let b=mk('block' pos)
+    set_list(b [tidy l])
+    nodes[s]=nodes[b]
+    check_stmt(s)
+    true
+}
+
+# A nested loop binding first receives the ordinary iteration value, then uses
+# the same destructuring declaration as local code. This also handles a map's
+# value without changing its key/value iteration or snapshot behavior.
+dewy_nested_loop_bindings=(s:LoopBindingWord):>void=>{
+    if not files[pos_file(nodes[s].pos)].is_dewy {return}
+    let declarations:array<int64>=[]
+    loop i in [0..nkids(s)) {
+        let binding=kid(s i)
+        if nodes[binding].kind not=? 'tuple' and nodes[binding].a =? 0 {continue}
+        # Array and custom-sequence patterns keep their field names until unpacked.
+        if nodes[binding].kind not=? 'tuple' {
+            let it=prune(ntype(LoopBindingWord(nodes[s].a)))
+            if not is_map_type(it) and not is_map_entries_type(it) {continue}
+        }
+        if has_flag(s NF_MUT) {fatal(nodes[binding].pos "nested loop bindings yield independent values, not mutable aliases")}
+        let serial = @bc_count
+        let name="$unpack_loop{serial}"
+        serial=LoopBindingWord(serial) + 1
+        let d=mk('vardecl' nodes[binding].pos)
+        if nodes[binding].kind =? 'tuple' {set_list(d kids(binding))}
+        else {
+            nodes[d].name=nodes[binding].name
+            nodes[d].a=nodes[binding].a
+        }
+        nodes[d].b=LoopBindingI32(bc_ident(name nodes[binding].pos))
+        declarations.push(d)
+        set_kid(s i bc_ident(name nodes[binding].pos))
+    }
+    if declarations.length >? 0 {
+        let body=LoopBindingWord(nodes[s].b)
+        loop x in kids(body) {declarations.push(x)}
+        set_list(body declarations)
+    }
+}

@@ -1,0 +1,57 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"checker_assignment_decls.dewy" import (assign_declares assign_to_decl)
+from p"checker_assignment_entry.dewy" import (check_late_global)
+from p"checker_expr.dewy" import (check_expr)
+from p"checker_values.dewy" import (values_init)
+from p"checks_place_updates.dewy" import (var_type_error)
+from p"checks_thin_expr.dewy" import (spawn_value_error)
+from p"expr.jo" import (IN can_coerce check_place coerce last_checked)
+from p"refine.jo" import (ref_self_active)
+from p"refine_metadata.dewy" import (ref_self_stored refine_storage)
+from p"refine_rare.dewy" import (ref_field_store ref_self_store)
+from p"string_domain_ops.dewy" import (int_domain_write string_domain_write)
+from p"type_ops.dewy" import (is_values)
+from p"types.jo" import (prune values_any)
+
+StoreCheckWord:type=int64<overflow='wrap'>
+
+assign_place=(lhs:StoreCheckWord):>void=>{check_place(lhs false)}
+
+assign_refine=(s:StoreCheckWord lt:StoreCheckWord code:StoreCheckWord):>StoreCheckWord=>{
+    let lhs=StoreCheckWord(nodes[s].a)
+    let op=StoreCheckWord(nodes[s].op)
+    if code =? 1 {return refine_storage(lhs lt)}
+    if code =? 2 {
+        if ref_self_active and ref_self_stored(lt) {return ref_self_store(s lt)}
+        return ref_field_store(s lt)
+    }
+    if code =? 3 {string_domain_write(lhs if op =? 47 {StoreCheckWord(nodes[s].b)} else {0})}
+    else {int_domain_write(lhs StoreCheckWord(nodes[s].b) if op =? 47 {0} else {op})}
+    0
+}
+
+assign_value=(s:StoreCheckWord lt:StoreCheckWord settle:StoreCheckWord):>StoreCheckWord=>{
+    let rhs=StoreCheckWord(nodes[s].b)
+    let rt=prune(if values_any and is_values(lt) {values_init(rhs lt)} else {check_expr(rhs lt)})
+    if settle =? 0 {return rt}
+    let v=last_checked
+    if settle =? 2 and rt not=? lt and not can_coerce(v rt lt) {var_type_error(StoreCheckWord(nodes[s].a) lt rt nodes[v].pos)}
+    if nodes[v].kind not=? 'intrinsic' or nodes[v].aux not=? int32(int64(IN.zeroed)) {
+        nodes[s].b=int32<overflow='wrap'>(coerce(v lt))
+    }
+    rt
+}
+
+stmt_assign=(s:StoreCheckWord):>bool=>{
+    if assign_declares(s -1) {
+        assign_to_decl(s)
+        return true
+    }
+    let rhs=StoreCheckWord(nodes[s].b)
+    if nodes[rhs].kind =? 'call' and nodes[rhs].aux2 =? 17 {spawn_value_error(nodes[rhs].pos)}
+    check_late_global(s)
+    false
+}
+
+decl_values=(e:StoreCheckWord expected:StoreCheckWord):>StoreCheckWord=>values_init(e expected)

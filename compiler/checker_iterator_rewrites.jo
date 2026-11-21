@@ -1,0 +1,184 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checks_builders.dewy'
+use 'checks_stmt_hooks.dewy'
+use 'checks_thin.dewy'
+use 'checks_thin_expr.dewy'
+use 'diagnostic_exit.dewy'
+use 'error_ops.dewy'
+use 'expr.jo'
+use 'parser_ops.dewy'
+use 'parser_shared.dewy'
+use 'select_checks.dewy'
+use 'type_member_checks.dewy'
+use 'type_ops.dewy'
+use 'types.jo'
+use 'util.jo'
+
+# A cursor loop is ordinary scoped control flow over a retained input and a
+# mutable boundary cursor. Advance before the body so continue needs no fixup.
+dewy_cursor_loop = (s: int) -> bool:
+    it = int(nodes[s].a)
+    if not is_dewy_cursor_iter(ntype(it)): return false
+    pos = nodes[s].pos
+    nv = nkids(s)
+    if has_flag(s, NF_MUT) or nv > 1 and nodes[s].ival != 1: fatal(pos, "this iterator binds one value; use `i in 0.. and value in sequence` to count")
+    tag = "__grapheme{bc_count}"
+    bc_count += 1
+    seq = tag + "s"
+    index = tag + "i"
+    if nv == 2: index = name_of(int(nodes[kid(s, 0)].name))
+    name = int(nodes[kid(s, nv - 1)].name)
+    add_flag(it, NF_CHECKED)
+    setup = [bc_let(seq, it, pos), bc_let(index, bc_int(-1, pos), pos)]
+    done = bc_call("__dewy_iter_done", [bc_ident(seq, pos), bc_ident(index, pos)], pos)
+    value = bc_call("__dewy_iter_value", [bc_ident(seq, pos), bc_ident(index, pos)], pos)
+    advance: int[]
+    if is_dewy_range_type(ntype(it), "__DewyRangeIter"):
+        # Keep a counted range's hot state in scalar locals. Passing a mutable
+        # iterator record to a helper would load/store it on every iteration.
+        loop field in ["cursor", "delta", "remaining", "done"]:
+            initial = bc_field(bc_ident(seq, pos), field, pos)
+            if field == "cursor" or field == "delta": initial = bc_call("__dewy_range_cursor", [initial], pos)
+            if field == "remaining": initial = bc_call("__dewy_range_remaining", [initial], pos)
+            setup.push(bc_let(tag + field, initial, pos))
+        done = bc_ident(tag + "done", pos)
+        value = bc_call("__dewy_range_word", [bc_ident(tag + "cursor", pos)], pos)
+        advance.push(lx_assign(bc_ident(tag + "cursor", pos), .pluseq, bc_ident(tag + "delta", pos), pos))
+    head = [lx_assign(bc_ident(index, pos), .pluseq, bc_int(1, pos), pos), lx_if(done, mk(.break_, pos), pos), lx_let(name, value, pos)]
+    if is_dewy_range_type(ntype(it), "__DewyRangeIter"): head.remove(1)
+    loop item in advance: head.push(item)
+    loop item in kids(int(nodes[s].b)): head.push(item)
+    if is_dewy_range_type(ntype(it), "__DewyRangeIter"):
+        # An inclusive unsigned counter also represents all 2^64 values when
+        # remaining is zero. Reuse the normal counted-loop backend and keep
+        # the empty test outside its back edge.
+        range = mk(.range, pos)
+        nodes[range].a = i32(bc_call("u64", [bc_int(0, pos)], pos))
+        nodes[range].b = i32(bc_bin(.minus, bc_ident(tag + "remaining", pos), bc_int(1, pos), pos))
+        add_flag(range, NF_INCLUSIVE)
+        loop_ = mk(.for_, pos)
+        nodes[loop_].sval = nodes[s].sval
+        nodes[loop_].a = i32(range)
+        nodes[loop_].b = i32(lx_block(head, pos))
+        set_list(loop_, [bc_ident(tag + "counter", pos)])
+        setup.push(lx_if(bc_bin(.eq, done, lx_bool(false, pos), pos), loop_, pos))
+        nodes[s] = nodes[lx_block(setup, pos)]
+        check_stmt(s)
+        return true
+    w = mk(.while_, pos)
+    nodes[w].sval = nodes[s].sval
+    tr = mk(.bool_lit, pos)
+    nodes[tr].ival = 1
+    nodes[w].a = i32(tr)
+    nodes[w].b = i32(lx_block(head, pos))
+    setup.push(w)
+    nodes[s] = nodes[lx_block(setup, pos)]
+    check_stmt(s)
+    true
+
+dewy_iterator_loop = (s: int, place: int = 0) -> bool:
+    it = int(nodes[s].a)
+    pos = nodes[s].pos
+    if place == 0 and (nodes[it].kind == .range or not dewy_at(pos) or not dewy_iterator_type(prune(ntype(it)))): return false
+    # (`loop x in inbox or_throw {`: each step's failures leave the function, so x is the payload)
+    throwing = place == 0 and throwing_iters.has(it)
+    if has_flag(s, NF_MUT): fatal(pos, "an iterator yields values; `loop @item in items` needs stored array elements")
+    if nkids(s) != 1: fatal(pos, "an iterator loop binds one value; unpack it in the body")
+    step = "__step{bc_count}"
+    setup: int[]
+    receiver = place
+    if place == 0:
+        iterator = "__iterator{bc_count}"
+        add_flag(it, NF_CHECKED)
+        setup.push(bc_let(iterator, it, pos))
+        receiver = bc_ident(iterator, pos)
+    bc_count += 1
+    add_flag(receiver, NF_MUT)
+    taken = bc_let(step, bc_method(receiver, "next", [], pos), pos)
+    finished = mk(.istype, pos)
+    nodes[finished].a = i32(bc_ident(step, pos))
+    none_type = mk(.tname, pos)
+    nodes[none_type].name = i32(intern("none"))
+    nodes[finished].b = i32(none_type)
+    # Event sources use Closed<T> for normal exhaustion. This is the ordinary
+    # iterator protocol, independent of the source's module or concrete type.
+    outcomes = handle_outcomes(prune(ntype(it)))
+    terminal: int[]
+    canceled = false
+    event_source = false
+    if outcomes != 0:
+        loop outcome in value_members(outcomes):
+            if outcome == T_NONE: terminal.push(none_type)
+            if standard_wait_outcome(outcome) == intern("Closed"):
+                terminal.push(type_node_of(outcome, pos))
+                event_source = true
+            if outcome == int(syms[universe[intern("Canceled")]].ref): canceled = true
+    if terminal.len() > 0:
+        end_types = mk(.tunion, pos)
+        set_list(end_types, terminal)
+        nodes[finished].b = i32(end_types)
+    binder = kid(s, 0)
+    element = mk(.vardecl, nodes[binder].pos)
+    if nodes[binder].kind == .tuple: set_list(element, kids(binder))
+    else:
+        nodes[element].name = nodes[binder].name
+        nodes[element].a = nodes[binder].a
+    nodes[element].b = i32(bc_ident(step, pos))
+    if not throwing and event_source and canceled:
+        propagated = mk(.propagate, nodes[binder].pos)
+        nodes[propagated].a = nodes[element].b
+        nodes[propagated].b = i32(type_node_of(int(syms[universe[intern("Canceled")]].ref), pos))
+        nodes[element].b = i32(propagated)
+    if throwing:
+        # (after the none test, so only the payload and its failures remain)
+        thrown = mk(.propagate, nodes[binder].pos)
+        nodes[thrown].a = nodes[element].b
+        nodes[thrown].b = i32(throwing_iters[it])
+        nodes[element].b = i32(thrown)
+    body = lx_block([taken, lx_if(finished, mk(.break_, pos), pos), element] + kids(int(nodes[s].b)), pos)
+    steps = mk(.while_, pos)
+    nodes[steps].a = i32(bc_bool(true, pos))
+    nodes[steps].b = i32(body)
+    nodes[steps].sval = nodes[s].sval
+    setup.push(steps)
+    nodes[s] = nodes[lx_block(setup, pos)]
+    check_stmt(s)
+    true
+
+# Indexed user containers use their existing length / [] operations. Retain the
+# input value and length once, then reuse the ordinary counted-loop lowering.
+dewy_sequence_loop = (s: int) -> bool:
+    it = int(nodes[s].a)
+    if nodes[it].kind == .range: return false
+    t = prune(ntype(it))
+    if types[t].kind != .struct_ or is_map_type(t) or is_map_entries_type(t) or is_soa(t) or is_dewy_cursor_iter(t): return false
+    if structs[int(types[t].st)].name == "Range" and for_date_range_value(s, it, t): return true
+    pos = nodes[s].pos
+    if has_flag(s, NF_MUT): fatal(pos, "custom sequence iteration yields values; update the container through its indices")
+    tag = "__sequence{bc_count}"
+    bc_count += 1
+    add_flag(it, NF_CHECKED)
+    seq = bc_let(tag, it, pos)
+    index = tag + "i"
+    bindings = kids(s)
+    counted = bindings.len() == 2 and nodes[s].ival == 1
+    if counted: index = name_of(int(nodes[bindings[0]].name))
+    read = lx_index(bc_ident(tag, pos), bc_ident(index, pos), pos)
+    binding = mk(.vardecl, pos)
+    nodes[binding].b = i32(read)
+    if bindings.len() == 1 or counted:
+        nodes[binding].name = nodes[bindings[bindings.len() - 1]].name
+    else: set_list(binding, bindings)
+    body = lx_block([binding] + kids(int(nodes[s].b)), pos)
+    range = mk(.range, pos)
+    nodes[range].a = i32(bc_int(0, pos))
+    nodes[range].b = i32(bc_method(bc_ident(tag, pos), sequence_length_name(t), [], pos))
+    counted_loop = mk(.for_, pos)
+    nodes[counted_loop].a = i32(range)
+    nodes[counted_loop].b = i32(body)
+    nodes[counted_loop].sval = nodes[s].sval
+    set_list(counted_loop, [bc_ident(index, pos)])
+    nodes[s] = nodes[lx_block([seq, counted_loop], pos)]
+    check_stmt(s)
+    true

@@ -1,5 +1,8 @@
 $runtime_checks
-from p"check.jo" import (home_first home_mod home_next homes_built modules)
+from p"checks_thin.dewy" import (is_private lib_private)
+from p"prelude_ops.dewy" import (dewy_prelude_lookup)
+from p"util.jo" import (files)
+from p"check.jo" import (demand_name home_first home_mod home_next homes_built modules prelude prelude_used universe)
 
 HomeIndexWord:type=int64<overflow='wrap'>
 home_add=(m:HomeIndexWord name:HomeIndexWord):>void=>{
@@ -28,4 +31,58 @@ bound_in=(m:HomeIndexWord name:HomeIndexWord):>bool=>{
         h=home_next[h - 1]
     }
     false
+}
+
+# The one use of module m whose table can bind name, -1 for none; -2 when its uses must each be
+# asked in order (a prelude among them, or more than one module binding the name; bound_in
+# tells which may). O(uses).
+use_home=(m:int64 name:int64):>int64=>{
+    if modules[m].uses.length =? 0 {return -1}
+    if not homes_built {homes_build()}
+    if m <? prelude_used.length and prelude_used[m] {return -2}
+    if name >=? home_first.length or home_first[name] =? 0 {return -1}
+    let h=HomeIndexWord(home_first[name]) - 1
+    if home_next[h] not=? 0 {return -2}
+    let hm=home_mod[h]
+    if modules[m].uses.contains(hm) {return hm}
+    -1
+}
+
+# Defer imported and prelude lookups until a module misses its own table.
+module_lookup_now=(m:HomeIndexWord name:HomeIndexWord):>HomeIndexWord=>{
+    demand_name(name)
+    if m >=? 0 and not modules[m].is_prelude {
+        let own=modules[m].names.get(name)
+        if own not=? none {return own ?? 0}
+        return lookup_imported_name(m name)
+    }
+    let built_in=prelude.get(name)
+    if built_in not=? none {return built_in ?? 0}
+    universe.get(name) ?? 0
+}
+
+lookup_imported_name=(m:HomeIndexWord name:HomeIndexWord):>HomeIndexWord=>{
+    let h=use_home(m name)
+    if h >=? 0 and not is_private(name) {
+        let sym=modules[h].names.get(name)
+        if sym not=? none {return sym ?? 0}
+    }
+    if h =? -2 {
+        loop u in modules[m].uses {
+            if modules[u].is_prelude {
+                let sym=prelude.get(name)
+                if sym not=? none and not lib_private(name) {return sym ?? 0}
+            } else if bound_in(u name) {
+                let sym=modules[u].names.get(name)
+                if sym not=? none and not is_private(name) {return sym ?? 0}
+            }
+        }
+    }
+    if files[HomeIndexWord(modules[m].file)].is_dewy and not is_private(name) {
+        let s=dewy_prelude_lookup(name)
+        if s not=? 0 {return s}
+    }
+    let built_in=prelude.get(name)
+    if built_in not=? none and not lib_private(name) {return built_in ?? 0}
+    universe.get(name) ?? 0
 }

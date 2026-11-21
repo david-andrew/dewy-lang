@@ -1,6 +1,7 @@
 $runtime_checks
 from p"ast.jo" import (mk set_list)
-from p"check.jo" import (FK_INIT ctxs cx fns module_ctx module_frames modules sanitize)
+from p"check.jo" import (FK_INIT ctxs cx fns module_ctx module_frames modules)
+from p"checker_symbol_spelling.dewy" import (sanitize)
 from p"checker_state.dewy" import (FnCtx)
 from p"checks_thin.dewy" import (new_inst)
 from p"types.jo" import (T_VOID)
@@ -32,4 +33,18 @@ setup_module_contexts=(prelude_init:ContextWord):>void=>{
         module_frames.push(FnCtx(ContextI32(inst) (-1) ContextI32(T_VOID) false 0 ContextI32(mi) 0))
         module_ctx.push(-1)
     }
+}
+
+push_module_frame=(m:ContextWord):>void=>{
+    module_ctx[m]=ctxs.length
+    ctxs.push(module_frames[m])
+}
+
+# Module state outlives a check, but temporary function contexts are a stack.
+# Keep inactive module frames outside that stack so loading another module
+# during an expression cannot interfere with its caller's push/pop lifetime.
+enter_module_context=(m:ContextWord):>bool=>{
+    if module_ctx[m] >=? 0 {return false}
+    push_module_frame(m)
+    true
 }

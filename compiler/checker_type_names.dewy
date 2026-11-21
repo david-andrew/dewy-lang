@@ -1,0 +1,144 @@
+$runtime_checks
+from p"check_metadata.dewy" import (dewy_type_word)
+from p"lexer_helpers.dewy" import (is_ident_char)
+from p"ast.jo" import (kid kid2 nkids nkids2 nodes)
+from p"check.jo" import (ctxs cx dewy_at fns globals jo_type_names locals module_lookup syms universe)
+from p"checker_expr.dewy" import (lookup)
+from p"checker_resolve.dewy" import (CheckerTypeName)
+from p"checks_hints.dewy" import (habit_name suggestion type_names)
+from p"checks_thin.dewy" import (jd rational_one_spelling resolve_type)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"error_ops.dewy" import (nominal_family)
+from p"expr.jo" import (bare_generic_ok value_type_member)
+from p"ide.jo" import (ide_on ide_sentinel)
+from p"ide_index.dewy" import (ide_complete_types ide_sym_ref)
+from p"safe_path_ops.dewy" import (ut_note_type_name)
+from p"safe_paths.jo" import (ut_safe_name)
+from p"secret_checks.dewy" import (secret_type_sym)
+from p"secrets.jo" import (secret_name)
+from p"select_checks.dewy" import (named_wait_type)
+from p"type_member_checks.dewy" import (generic_family_type handle_member_error)
+from p"type_ops.dewy" import (get_struct_inst)
+from p"type_value_arguments.dewy" import (named_integer_type)
+from p"types.jo" import (T_NONE fields tkind)
+from p"util.jo" import (files intern name_of pos_file pos_off)
+
+TypeNameWord:type=int64<overflow='wrap'>
+
+resolve_type_name=(tn:TypeNameWord):>CheckerTypeName=>{
+    if nodes[tn].aux =? -8 {fatal(nodes[tn].pos "Effect row is not a value type")}
+    let nm=TypeNameWord(nodes[tn].name)
+    let s:TypeNameWord=0
+    if nodes[tn].sval not=? 0 {
+        let wait_member=named_wait_type(tn)
+        if wait_member not=? 0 {return CheckerTypeName[0 wait_member]}
+        let ms=lookup(TypeNameWord(nodes[tn].sval))
+        if ms not=? 0 and syms[ms].kind =? 'reflected' and name_of(nm) =? "type" {
+            return CheckerTypeName[0 TypeNameWord(fields[TypeNameWord(syms[ms].ref)].type)]
+        }
+        if ms not=? 0 and (syms[ms].kind =? 'local' or syms[ms].kind =? 'global') and name_of(nm) =? "<>" {
+            if nkids(tn) not=? 1 {fatal(nodes[tn].pos "`{name_of(TypeNameWord(nodes[tn].sval))}.<T>` selects one type")}
+            return CheckerTypeName[0 resolve_type(kid(tn 0))]
+        }
+        if ms not=? 0 and syms[ms].kind not=? 'module' {
+            let member=value_type_member(ms nm nodes[tn].pos)
+            if member not=? 0 {return CheckerTypeName[0 member]}
+            if syms[ms].kind =? 'local' or syms[ms].kind =? 'global' {
+                let q=name_of(TypeNameWord(nodes[tn].sval))
+                let ref=TypeNameWord(syms[ms].ref)
+                let vt=if syms[ms].kind =? 'local' {locals[ref].type} else {globals[ref].type}
+                let why=handle_member_error(q TypeNameWord(vt) nm)
+                if (why as array<uint8>).length >? 0 {fatal(nodes[tn].pos why)}
+                fatal(nodes[tn].pos "'{q}' has no member '{name_of(nm)}' that is a type")
+            }
+        }
+        if ms =? 0 or syms[ms].kind not=? 'module' {fatal(nodes[tn].pos "unknown module '{name_of(TypeNameWord(nodes[tn].sval))}'")}
+        let m=TypeNameWord(syms[ms].ref)
+        s=module_lookup(m nm)
+        if (name_of(TypeNameWord(nodes[tn].sval)) as array<uint8>)[0] not=? b'$' and files[pos_file(nodes[tn].pos)].is_dewy {rational_one_spelling(m nm nodes[tn].pos "")}
+    } else {
+        if ide_sentinel not=? 0 and nm =? ide_sentinel {ide_complete_types()}
+        s=lookup(nm)
+        jo_type_spelling(nm s nodes[tn].pos)
+        if nm =? ut_safe_name {ut_note_type_name(nm nodes[tn].pos)}
+        if name_of(nm) =? "rational" and (s =? 0 or syms[s].kind =? 'fns') and files[pos_file(nodes[tn].pos)].is_dewy {return CheckerTypeName[5 0]}
+    }
+    if nm =? secret_name and nodes[tn].sval =? 0 and (s =? 0 or not secret_type_sym(syms[s].kind)) {
+        if nkids(tn) not=? 1 {fatal(nodes[tn].pos jd(nodes[tn].pos "`secret` takes one type argument: `secret[str]`" "`secret` takes one type argument: `secret<string>`"))}
+        return CheckerTypeName[4 0]
+    }
+    if s =? 0 {
+        let name=name_of(nm)
+        if name =? "none" {return CheckerTypeName[0 T_NONE]}
+        let bytes=name as array<uint8>
+        if bytes.length <=? 2 and bytes[0] >=? b'A' and bytes[0] <=? b'Z' and cx >=? 0 and fns.length >? ctxs[cx].inst {
+            fatal(nodes[tn].pos jd(nodes[tn].pos "unknown type '{name}' (a generic function names its type parameters after its name: `f[{name}] = (x: {name}) -> {name}: ...`; a generic struct, `struct Heap[{name}]:`)" "unknown type '{name}' (a generic function declares its type parameters first: `f = <{name}>(x:{name}):>{name} => ...`; a generic record, `Heap:type = <{name}>[items:array<{name}>]`)"))
+        }
+        if name =? "Cancelled" {fatal(nodes[tn].pos "unknown type `Cancelled`; use `Canceled` (US spelling)")}
+        fatal(nodes[tn].pos "unknown type '{name}'{suggestion(name type_names())}")
+    }
+    let sk=syms[s].kind
+    if sk =? 'fns' {
+        let original=universe.get(nm)
+        if original not=? none {
+            s=original ?? 0
+            sk=syms[s].kind
+        }
+    }
+    if ide_on {ide_sym_ref(tn s)}
+    if sk =? 'alias_' {return CheckerTypeName[1 TypeNameWord(syms[s].ref)]}
+    if sk =? 'type_' {
+        let t=TypeNameWord(syms[s].ref)
+        if nodes[tn].nlist =? 0 {
+            if tkind(t) =? 'effect' {fatal(nodes[tn].pos "Effect row is not a value type")}
+            return CheckerTypeName[0 nominal_family(t)]
+        }
+        return CheckerTypeName[3 t]
+    }
+    if sk =? 'struct_' or sk =? 'enum_' {
+        let d=TypeNameWord(syms[s].ref)
+        if nkids2(d) =? 0 and nkids(tn) =? 0 {return CheckerTypeName[0 nominal_family(get_struct_inst(d []))]}
+        if bare_generic_ok and nkids(tn) =? 0 and nkids2(d) >? 0 and nodes[kid2(d 0)].b =? 0 {
+            let family=generic_family_type(d)
+            if family not=? 0 {return CheckerTypeName[0 family]}
+        }
+        return CheckerTypeName[2 d]
+    }
+    if dewy_at(nodes[tn].pos) {
+        let integer=named_integer_type(tn s)
+        if integer not=? 0 {return CheckerTypeName[0 integer]}
+    }
+    let h=habit_name(name_of(nm))
+    if (h as array<uint8>).length >? 0 {fatal(nodes[tn].pos "'{name_of(nm)}' is not a type (use {h})")}
+    fatal(nodes[tn].pos "'{name_of(nm)}' is not a type")
+    CheckerTypeName[]
+}
+
+register_jo_type_names=():>void=>{
+    loop w in ["str" "byte" "f32" "f64" "i8" "i16" "i32" "i64" "u8" "u16" "u32" "u64"] {
+        let id=TypeNameWord(intern(w))
+        if jo_type_names.length <=? id {jo_type_names.resize(id + 1)}
+        jo_type_names[id]=true
+    }
+}
+
+reject_spelled_jo_type=(nm:TypeNameWord pos:TypeNameWord):>void=>{
+    let w=name_of(nm)
+    let src=files[pos_file(pos)].src as array<uint8>
+    let bytes=w as array<uint8>
+    let off=TypeNameWord(pos_off(pos))
+    let stop=off + bytes.length
+    if stop >? src.length or (stop <? src.length and is_ident_char(src[stop])) {return}
+    loop i in 0.. and c in bytes {if src[off + i] not=? c {return}}
+    fatal(pos "`{w}` is not a Dewy type name: write `{dewy_type_word(w)}`")
+}
+
+jo_type_spelling=(nm:TypeNameWord s:TypeNameWord pos:TypeNameWord):>void=>{
+    let bound=jo_type_names.length
+    if bound =? 0 {
+        register_jo_type_names()
+        bound=jo_type_names.length
+    }
+    if nm >=? bound or not jo_type_names[nm] or s =? 0 {return}
+    if dewy_at(pos) and (universe.get(nm) ?? 0) =? s {reject_spelled_jo_type(nm pos)}
+}

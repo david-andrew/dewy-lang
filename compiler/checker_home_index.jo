@@ -1,3 +1,6 @@
+use 'checks_thin.dewy'
+use 'prelude_ops.dewy'
+use 'util.jo'
 use 'check.jo'
 
 home_add = (m: int, name: int):
@@ -20,3 +23,42 @@ bound_in = (m: int, name: int) -> bool:
         if home_mod[h - 1] == m: return true
         h = home_next[h - 1]
     false
+
+# The one use of module m whose table can bind name, -1 for none; -2 when its uses must each be
+# asked in order (a prelude among them, or more than one module binding the name; bound_in
+# tells which may). O(uses).
+use_home = (m: int, name: int) -> int:
+    if modules[m].uses.len() == 0: return -1
+    if not homes_built: homes_build()
+    if m < prelude_used.len() and prelude_used[m]: return -2
+    if name >= home_first.len() or home_first[name] == 0: return -1
+    h = home_first[name] - 1
+    if home_next[h] != 0: return -2
+    if modules[m].uses.contains(home_mod[h]): home_mod[h] else: -1
+
+module_lookup_now = (m: int, name: int) -> int:
+    demand_name(name)
+    user = m >= 0 and not modules[m].is_prelude
+    if m >= 0:
+        if modules[m].is_prelude:
+            if let s = prelude.get(name): return s
+        else:
+            if let s = modules[m].names.get(name): return s
+            h = use_home(m, name)
+            if h >= 0 and not is_private(name):
+                if let s = modules[h].names.get(name): return s
+            if h == -2:
+                loop u in modules[m].uses:
+                    if modules[u].is_prelude:
+                        if let s = prelude.get(name):
+                            if not lib_private(name): return s
+                    else if bound_in(u, name):
+                        if let s = modules[u].names.get(name):
+                            if not is_private(name): return s
+            if files[int(modules[m].file)].is_dewy and not is_private(name):
+                s = dewy_prelude_lookup(name)
+                if s != 0: return s
+    if let s = prelude.get(name):
+        if not user or not lib_private(name): return s
+    if let s = universe.get(name): return s
+    0

@@ -30,3 +30,25 @@ main = ():
     for binary in selfhost_lsp_double.leaf_compilers(compiler, tmp_path, ('checker_home_index',)):
         result = subprocess.run([binary], check=True, capture_output=True, timeout=30)
         assert result.stdout == b'true:true:false:false:false:2\n'
+
+
+def test_use_home_classifies_visible_module_sources(compiler, tmp_path, monkeypatch):
+    driver = """use 'main.jo'
+use 'check.jo'
+use 'checker_home_index.dewy'
+main = ():
+    modules = [Module(), Module(), Module()]
+    modules[0].uses = [1]
+    modules[1].names[5] = 17
+    modules[2].names[6] = 18
+    print("{use_home(1, 5)}:{use_home(0, 5)}:{use_home(0, 6)}:{use_home(0, 7)}")
+    home_add(2, 5)
+    print(use_home(0, 5))
+    prelude_used = [true]
+    print(use_home(0, 6))
+"""
+    monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
+    monkeypatch.setattr(selfhost_lsp_double, 'DRIVER', driver)
+    for binary in selfhost_lsp_double.leaf_compilers(compiler, tmp_path, ('checker_home_index',)):
+        result = subprocess.run([binary], check=True, capture_output=True, timeout=30)
+        assert result.stdout == b'-1:1:-1:-1\n-2\n-2\n'
