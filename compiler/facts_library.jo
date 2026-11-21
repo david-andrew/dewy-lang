@@ -310,7 +310,7 @@ fact_exact_sum_call = (n: int) -> bool:
     if fact_name_sum == 0: fact_name_sum = intern("sum")
     if int(nodes[d].name) != fact_name_sum: return false
     fact_exact_sum_element(fact_type(ntype(kid(n, 0))), files[pos_file(nodes[d].pos)].path) != 0
-# (the checked 64-bit element type of a summed array, or 0)
+# (the checked integer element type of a summed array, or 0)
 fact_exact_sum_element = (t: int, path: str) -> int:
     e = 0
     if is_nd(representation_type(t)):
@@ -318,7 +318,7 @@ fact_exact_sum_element = (t: int, path: str) -> int:
     else if path == lib_dir + "/core/array.jo" and (tkind(t) == .array or tkind(t) == .fixed): e = telem(t)
     if e == 0: return 0
     e = fact_type(e)
-    if not is_int(e) or e == T_MATH_INT or types[e].bits != 64 or int_policy(e) != 0: return 0
+    if not is_int(e) or e == T_MATH_INT or types[e].bits > 64 or int_policy(e) != 0: return 0
     e
 fact_exact_sum_check = (n: int, s: mut FactState, values: int[]):
     if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
@@ -359,6 +359,11 @@ fact_exact_sum_fits = (s: mut FactState, base: int, count: FactBound, hull: Fact
     unsigned = e == T_U64
     top = if unsigned: u64(18446744073709551615) else: u64(FACT_MAX)
     bottom = if unsigned: u64(0) else: top + u64(1)
+    # (a narrower word's range: its bounds are plain signed ones)
+    bits = int(types[e].bits)
+    if bits < 64:
+        top = if types[e].sign: u64((1 << (bits - 1)) - 1) else: u64((1 << bits) - 1)
+        bottom = if types[e].sign: u64(1 << (bits - 1)) else: u64(0)
     up = u64(0); down = u64(0)
     parts = fact_inventory(s, base)
     if parts.len() > 0:

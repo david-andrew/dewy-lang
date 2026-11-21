@@ -1,0 +1,7 @@
+# A narrow integer array's sum keeps its element type, so its exact sum fitting is the
+# caller's obligation, as an int64 array's is: no hidden run-time overflow.
+main=()=>{
+    let b:array<uint8>=[]
+    loop i in [0..16) { b.push(uint8((i*37+11) % 256)) }
+    printl(b.sum)
+}

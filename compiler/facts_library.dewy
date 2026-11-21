@@ -299,7 +299,7 @@ fact_exact_sum_call=(n:LibraryWord):>bool=>$unsafe {
     if LibraryWord(nodes.ptr[d].name) not=? fact_name_sum {return false}
     fact_exact_sum_element(fact_type(ntype(kid(n 0))) files[pos_file(nodes.ptr[d].pos)].path) not=? 0
 }
-# (the checked 64-bit element type of a summed array, or 0)
+# (the checked integer element type of a summed array, or 0)
 fact_exact_sum_element=(t:LibraryWord path:string):>LibraryWord=>$unsafe {
     let e:LibraryWord=0
     if is_nd(representation_type(t)) {
@@ -308,7 +308,7 @@ fact_exact_sum_element=(t:LibraryWord path:string):>LibraryWord=>$unsafe {
     else if path =? "{lib_dir}/core/array.jo" and (tkind(t) =? 'array' or tkind(t) =? 'fixed') {e=telem(t)}
     if e =? 0 {return 0}
     e=fact_type(e)
-    if not is_int(e) or e =? T_MATH_INT or types.ptr[e].bits not=? 64 or int_policy(e) not=? 0 {return 0}
+    if not is_int(e) or e =? T_MATH_INT or types.ptr[e].bits >? 64 or int_policy(e) not=? 0 {return 0}
     e
 }
 fact_exact_sum_check=(n:LibraryWord @s:FactState values:array<int64>):>void=>$unsafe {
@@ -351,10 +351,16 @@ fact_element_hull=(@s:FactState base:LibraryWord e:LibraryWord):>FactBound=>{
 # Whether every running sum of base's elements fits e (int64 or uint64):
 # the positive upper bounds' total within e's maximum and the negative lower
 # bounds' within its minimum, as unsigned magnitudes. O(parts).
-fact_exact_sum_fits=(@s:FactState base:LibraryWord count:FactBound hull:FactBound e:LibraryWord):>bool=>{
+fact_exact_sum_fits=(@s:FactState base:LibraryWord count:FactBound hull:FactBound e:LibraryWord):>bool=>$unsafe {
     let unsigned=e =? T_U64
     let top=if unsigned {uint64<overflow='wrap'>(18446744073709551615)} else {uint64<overflow='wrap'>(FACT_MAX)}
     let bottom=if unsigned {uint64<overflow='wrap'>(0)} else {top + uint64<overflow='wrap'>(1)}
+    # (a narrower word's range: its bounds are plain signed ones)
+    let bits=LibraryWord(types.ptr[e].bits)
+    if bits <? 64 {
+        top=if types.ptr[e].sign {uint64<overflow='wrap'>((LibraryWord(1) << (bits - 1)) - 1)} else {uint64<overflow='wrap'>((LibraryWord(1) << bits) - 1)}
+        bottom=if types.ptr[e].sign {uint64<overflow='wrap'>(LibraryWord(1) << (bits - 1))} else {uint64<overflow='wrap'>(0)}
+    }
     let up=uint64<overflow='wrap'>(0)
     let down=uint64<overflow='wrap'>(0)
     let parts=fact_inventory(s base)
