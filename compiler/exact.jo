@@ -70,6 +70,7 @@ use 'facts_value_queries.dewy'
 use 'facts_index_writes.dewy'
 use 'facts_lengths.dewy'
 use 'exact_check_hooks.dewy'
+use 'exact_marks.dewy'
 
 # exact_potential and exact_math_operand run in checker_exact.dewy.
 exact_query_input = CheckerExactInput(&nodes, &lists, &types, &files, &T_INT, &T_U64, &T_MATH_INT)
@@ -131,19 +132,6 @@ exact_shifts: {int: int} = {}
 # Dense membership for the fact-transfer hot path; maps retain sparse iteration.
 # Preparation allocates O(N) bits once and writes each demanded node once.
 exact_marks: u8[]
-exact_has_node = (n: int) -> bool: not exact_loop_fast and n >= 0 and n < exact_marks.len() and exact_marks[n] & 1 != 0
-exact_has_store = (n: int) -> bool: n >= 0 and n < exact_marks.len() and exact_marks[n] & 2 != 0
-exact_decided = (n: int) -> bool: exact_marks[n] & 8 != 0
-exact_proved = (n: int) -> bool: exact_marks[n] & 16 != 0
-exact_decide = (n: int, proven: bool):
-    exact_marks[n] = (exact_marks[n] & 239) | 8 | (if proven: 16 else: 0)
-exact_mark = (n: int):
-    if n >= exact_marks.len(): exact_reserve(n)
-    if exact_marks[n] & 1 == 0: exact_nodes.push(n)
-    exact_marks[n] |= 1
-exact_unmark = (n: int):
-    exact_marks[n] &= 254
-
 exact_word_formats: {int: bool} = {}
 
 # Context-free width facts are demanded only by a storage boundary. Cache one
@@ -245,9 +233,6 @@ exact_chain_saved: {int: int} = {}
 # demanded graph and O(1) joins/lookups; no hash work per expression visit.
 exact_ranges: int[]
 exact_range_meta: u8[]
-exact_range_flags = (n: int) -> int:
-    if n < 0 or n >= exact_range_meta.len(): return 0
-    int(exact_range_meta[n])
 exact_reset = ():
     exr_plans.clear()
     exr_call_target = 0
@@ -294,12 +279,6 @@ exact_reset = ():
     exact_ranges = []
     exact_range_meta = []
     exact_join_blocks = {}
-
-exact_match_literals = (n: int) -> bool:
-    loop arm in kids(n):
-        loop pattern in kids(arm):
-            if nodes[pattern].kind != .plit and nodes[pattern].kind != .pwild: return false
-    true
 
 # Reuse the existing write-index induction proof for fixed counters as well as
 # mathematical ones. Only a demanded exact function's assigned scalar with a

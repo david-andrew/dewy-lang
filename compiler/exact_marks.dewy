@@ -1,0 +1,52 @@
+$runtime_checks
+
+from p"exact.jo" import (exact_marks exact_nodes exact_range_meta)
+from p"ast.jo" import (kids nodes)
+from p"exact_cold_walk.dewy" import (exact_reserve)
+from p"exact_loop.jo" import (exact_loop_fast)
+
+ExactMarkWord:type=int64<overflow='wrap'>
+
+exact_has_node=(n:ExactMarkWord):>bool=>$unsafe {
+    not exact_loop_fast and n >=? 0 and n <? exact_marks.length and exact_marks[n] & 1 not=? 0
+}
+
+exact_has_store=(n:ExactMarkWord):>bool=>$unsafe {
+    n >=? 0 and n <? exact_marks.length and exact_marks[n] & 2 not=? 0
+}
+
+exact_decided=(n:ExactMarkWord):>bool=>$unsafe {
+    exact_marks[n] & 8 not=? 0
+}
+
+exact_proved=(n:ExactMarkWord):>bool=>$unsafe {
+    exact_marks[n] & 16 not=? 0
+}
+
+exact_decide=(n:ExactMarkWord proven:bool):>void=>$unsafe {
+    exact_marks[n] = (exact_marks[n] & 239) | 8 | (if proven {16} else {0})
+}
+
+exact_mark=(n:ExactMarkWord):>void=>$unsafe {
+    if n >=? exact_marks.length {exact_reserve(n)}
+    if exact_marks[n] & 1 =? 0 {exact_nodes.push(n)}
+    exact_marks[n] |= 1
+}
+
+exact_unmark=(n:ExactMarkWord):>void=>$unsafe {
+    exact_marks[n] &= 254
+}
+
+exact_range_flags=(n:ExactMarkWord):>int64=>$unsafe {
+    if n <? 0 or n >=? exact_range_meta.length {return 0}
+    ExactMarkWord(exact_range_meta[n])
+}
+
+exact_match_literals=(n:ExactMarkWord):>bool=>$unsafe {
+    loop arm in kids(n) {
+        loop pattern in kids(arm) {
+            if nodes.ptr[pattern].kind not=? 'plit' and nodes.ptr[pattern].kind not=? 'pwild' {return false}
+        }
+    }
+    true
+}

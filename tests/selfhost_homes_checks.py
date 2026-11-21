@@ -20,6 +20,7 @@ LEAF_HOMES = {
     'source_queries': 'util.jo',
     'exact_preparation': 'exact.jo',
     'exact_check_hooks': 'exact.jo',
+    'exact_marks': 'exact.jo',
     'exact_cold_walk': 'exact.jo',
     'exact_measure': 'exact.jo',
     'repl_signature': 'check.jo',

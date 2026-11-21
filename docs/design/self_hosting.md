@@ -615,9 +615,8 @@ four-term caps; positions and offsets are wrapping words.
 `exact_emit.dewy` owns exact fixed-width emission: an expression's machine
 words and low word, the native-flag remainder, narrowing stores, policy
 conversions and the mathematical-int and float boundaries. `exact.jo` keeps
-the planning state and its queries (marks, widths, ranges, shifts, midpoints,
-proofs) and the join and chain registers that lowering and `exact_chain_walks`
-share. Emission reads those queries directly and adds no pass: work stays
+the planning tables and the join and chain registers shared by lowering and
+`exact_chain_walks`. Emission reads mark, width and proof queries directly. Its work stays
 O(emitted words) per demanded node, and the existing chain plan, the 16-node
 cap and the cold fallbacks are unchanged.
 
@@ -643,6 +642,10 @@ It inspects scalar leaf kinds before entering the full traversal.
 `exact_check_hooks.dewy` classifies fixed-width operations during checking,
 places narrowing conversions on selected control arms, and records candidate
 nodes for each demanded owner.
+
+`exact_marks.dewy` maintains the dense per-node demand, store and proof bits
+in the shared mark array. It records the first visit to an exact node and
+reads the range metadata computed by fact transfer.
 
 ## Shared backend analysis boundary
 
