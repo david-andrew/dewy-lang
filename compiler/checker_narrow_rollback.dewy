@@ -1,0 +1,33 @@
+$runtime_checks
+from p"check.jo" import (LF_UNNARROWED ctxs cx locals narrow_changes narrow_jumps)
+from p"checks_stmt_hooks.dewy" import (stmt_terminates)
+
+RollbackWord:type=int64<overflow='wrap'>
+narrow_restore=(mark:int64):>array<int64>=>{
+    if narrow_changes.length =? mark {return []}
+    let changed:array<int64>=[]
+    loop i in [mark..narrow_changes.length) {
+        let l=narrow_changes[i]
+        locals[l].flags=int32<overflow='wrap'>(RollbackWord(locals[l].flags) & ~LF_UNNARROWED)
+        changed.push(l)
+    }
+    narrow_changes.truncate(mark)
+    changed
+}
+
+# A returning arm cannot change the state on the path after it. Jumps to an
+# enclosing loop must retain writes; jumps contained in the arm do not escape.
+# Log targets while checking instead of walking checked ASTs again. Callees
+# and nested closures have their own context IDs and cannot exit this branch.
+narrow_returned=(mark:RollbackWord jumps:RollbackWord body:RollbackWord):>void=>{
+    if not stmt_terminates(body) {return}
+    loop i in [jumps..narrow_jumps.length) {
+        let jump=narrow_jumps[i]
+        if jump.context =? int32<overflow='wrap'>(cx) and jump.depth <=? ctxs[cx].loop_depth {return}
+    }
+    loop i in [mark..narrow_changes.length) {
+        let l=narrow_changes[i]
+        locals[l].flags=int32<overflow='wrap'>(RollbackWord(locals[l].flags) & ~LF_UNNARROWED)
+    }
+    narrow_changes.truncate(mark)
+}

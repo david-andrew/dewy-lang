@@ -169,6 +169,7 @@ use 'checker_tree_queries.dewy'
 use 'open_globals.dewy'
 use 'repl_signature.dewy'
 use 'source_frontend.dewy'
+use 'checker_narrow_rollback.dewy'
 
 struct Module:
     name: i32
@@ -1851,29 +1852,7 @@ narrow_changes: int[]
 
 narrow_jumps: NarrowJump[]
 
-narrow_restore = (mark: int) -> int[]:
-    if narrow_changes.len() == mark: return []
-    changed: int[]
-    loop i in [mark..narrow_changes.len()):
-        l = narrow_changes[i]
-        locals[l].flags = i32(int(locals[l].flags) & ~LF_UNNARROWED)
-        changed.push(l)
-    narrow_changes.truncate(mark)
-    changed
 
-# A returning arm cannot change the state on the path after it. Jumps to an
-# enclosing loop must retain writes; jumps contained in the arm do not escape.
-# Log targets while checking instead of walking checked ASTs again. Callees
-# and nested closures have their own context IDs and cannot exit this branch.
-narrow_returned = (mark: int, jumps: int, body: int):
-    if not stmt_terminates(body): return
-    loop i in [jumps..narrow_jumps.len()):
-        jump = narrow_jumps[i]
-        if jump.context == i32(cx) and jump.depth <= ctxs[cx].loop_depth: return
-    loop i in [mark..narrow_changes.len()):
-        l = narrow_changes[i]
-        locals[l].flags = i32(int(locals[l].flags) & ~LF_UNNARROWED)
-    narrow_changes.truncate(mark)
 
 # Index narrowing aliases by their underlying local declaration. Writes visit
 # only that root's aliases: O(alias depth + dependent narrowings), with O(1)

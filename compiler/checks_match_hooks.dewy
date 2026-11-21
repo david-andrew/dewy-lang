@@ -7,7 +7,7 @@ from p"refine_metadata.dewy" import (representation_type)
 from p"checks_thin.dewy" import (jd)
 from p"expr.jo" import (CV)
 from p"ast.jo" import (NF_CHECKED add_flag kids mk nkids nodes)
-from p"check.jo" import (check_block narrow_jumps narrow_returned scope_reset syms)
+from p"check.jo" import (check_block narrow_jumps scope_reset syms)
 from p"checks_thin.dewy" import (narrow_merge)
 from p"checker_expr.dewy" import (lookup)
 from p"checker_match.dewy" import (xh_match)
@@ -26,6 +26,7 @@ from p"type_ops.dewy" import (dt mk_union type_str union_index)
 from p"util.jo" import (files intern name_of pos_file)
 from p"source_warnings.dewy" import (warn)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"checker_narrow_rollback.dewy" import (narrow_returned)
 
 MatchHookWord:type=int64<overflow='wrap'>
 # A bare name arm matches every value and binds it, shadowing what the name meant:
