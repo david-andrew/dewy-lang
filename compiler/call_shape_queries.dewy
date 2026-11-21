@@ -1,0 +1,57 @@
+$runtime_checks
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (check_struct_fields)
+from p"checker_signature.dewy" import (fn_sig)
+from p"checks_thin_expr.dewy" import (is_fn_type)
+from p"expr.jo" import (call_collect_named)
+from p"types.jo" import (fields prune structs tkind types)
+from p"util.jo" import (name_of)
+
+CallShapeWord:type=int64<overflow='wrap'>
+
+# ---------------- operators ----------------
+# a call with n arguments can go to declaration d (as many parameters, or fewer with defaults)
+args_fit=(d:CallShapeWord n:CallShapeWord):>bool=>{
+    let params=nkids(d)
+    if n >? params {return false}
+    loop i in [n..params) {
+        if nodes[kid(d i)].b =? 0 {return false}
+    }
+    true
+}
+
+# d's first parameter is an array or a string as written (or has no type: generic)
+takes_seq=(d:CallShapeWord):>bool=>{
+    if nkids(d) =? 0 {return false}
+    let tn=CallShapeWord(nodes[kid(d 0)].a)
+    if tn =? 0 {return true}
+    nodes[tn].kind =? 'tarray' or (nodes[tn].kind =? 'tname' and name_of(CallShapeWord(nodes[tn].name)) =? "str")
+}
+
+# Whether the receiver type t has a field called name: `x.name` then reads the field, not a call
+# of the function (the call style check, call_style.dewy).
+call_style_has_field=(t0:CallShapeWord name:CallShapeWord):>bool=>{
+    let t=prune(t0)
+    if tkind(t) =? 'ptr' {t=prune(CallShapeWord(types[t].elem))}
+    if tkind(t) not=? 'struct_' {return false}
+    let si=CallShapeWord(types[t].st)
+    check_struct_fields(si)
+    loop i in [0..CallShapeWord(structs[si].nfields)) {
+        if CallShapeWord(fields[CallShapeWord(structs[si].fields) + i].name) =? name {return true}
+    }
+    false
+}
+
+# How a bare use of the visible functions `name` behaves: 0 when none can be
+# called with no arguments, 1 when one can, 2 when that call makes a function.
+bare_fns_call=(name:int64 mod:int64):>int64=>{
+    let decls:array<int64>=[]
+    call_collect_named(name mod @decls)
+    loop d in decls {
+        if args_fit(d 0) {
+            let sig=fn_sig(d)
+            return if sig.ret not=? 0 and is_fn_type(CallShapeWord(sig.ret)) {2} else {1}
+        }
+    }
+    0
+}

@@ -1,0 +1,78 @@
+use 'ast.jo'
+use 'checker_expr.dewy'
+use 'checks_builders.dewy'
+use 'checks_thin_expr.dewy'
+use 'effect_contracts.dewy'
+use 'expr.jo'
+use 'ownership_types.dewy'
+use 'refine_rare.dewy'
+use 'types.jo'
+use 'util.jo'
+
+# The one member of an expected union a literal builds, or 0 when none or
+# several could: a record literal takes the record whose fields it names
+# (every field without a default among them), a dictionary literal the
+# dictionary, any other array literal the array (or, when the union has
+# none, the positional array type with as many positions: `[string int64]`).
+# A lambda where an optional or a union of function types is wanted: the function member with its
+# parameter count gives its parameters their types (a union with two has no one answer). O(members).
+lambda_member = (n: int, expected: int) -> int:
+    found = function_member(expected, nkids(n))
+    if found != 0: found else: expected
+
+# (of an optional or a union, the one function member taking `count` parameters, any number at -1; 0
+# for none or two)
+function_member = (expected: int, count: int = -1) -> int:
+    u = prune(expected)
+    if u == 0: return 0
+    if types[u].kind == .opt: u = prune(int(types[u].elem))
+    members = if is_union(u): union_members(u) else: [u]
+    found = 0
+    loop m0 in members:
+        m = prune(m0)
+        base = if types[m].kind == .callable: prune(callable_base(m)) else: m
+        if types[base].kind == .fn_ and (count < 0 or int(types[base].nargs) == count):
+            if found != 0: return 0
+            found = m
+    found
+
+callable_fits = (from0: int, to0: int) -> bool:
+    if ownership_callable_cap(from0) > ownership_callable_cap(to0): return false
+    if not effect_contract_fits(from0, to0): return false
+    from = callable_base(from0)
+    to = callable_base(to0)
+    if types[from].kind != .fn_ or types[to].kind != .fn_: return false
+    # (one value and several are different results: `<():>array<int64>>` is not `<():>(int64 int64)>`)
+    if types[from].sign != types[to].sign: return false
+    if types[from].mutmask != types[to].mutmask or types[from].nargs != types[to].nargs: return false
+    if types[to].bits != 0 and types[from].bits != types[to].bits: return false
+    loop i in [0..int(types[from].nargs)):
+        if types[from].mutmask & i32(1 << i) != 0:
+            if not type_eq(targ(from, i), targ(to, i)): return false
+        else if is_fn_type(targ(to, i)) and is_fn_type(targ(from, i)):
+            if not callable_fits(targ(to, i), targ(from, i)): return false
+        else if not refine_implies(targ(to, i), targ(from, i)): return false
+    if is_fn_type(int(types[from].elem)) and is_fn_type(int(types[to].elem)): return callable_fits(int(types[from].elem), int(types[to].elem))
+    prune(int(types[from].elem)) == T_NEVER or refine_implies(int(types[from].elem), int(types[to].elem))
+
+# `(a b) => f(a b)` in place of `@f`, checked against the expected function type.
+fn_adapter = (n: int, et: int, expected: int) -> int:
+    pos = nodes[n].pos
+    params: int[]
+    args: int[]
+    loop i in [0..int(types[et].nargs)):
+        param = mk(.param, pos)
+        nodes[param].name = i32(intern("$arg{i}"))
+        nodes[param].a = i32(type_node_of(targ(et, i), pos))
+        params.push(param)
+        args.push(bc_ident("$arg{i}", pos))
+    callee = mk(.ident, pos)
+    nodes[callee].name = nodes[n].name
+    call = mk(.call, pos)
+    nodes[call].a = i32(callee)
+    set_list(call, args)
+    lam = mk(.lambda, pos)
+    set_list(lam, params)
+    nodes[lam].b = i32(bc_block([bc_stmt(call, pos)], pos))
+    nodes[n] = nodes[lam]
+    check_expr(n, expected)

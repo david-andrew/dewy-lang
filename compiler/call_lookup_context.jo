@@ -1,0 +1,60 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_call_queries.dewy'
+use 'checker_signature.dewy'
+use 'expr.jo'
+use 'types.jo'
+use 'util.jo'
+
+# Inside a generic instance a local's type may be a function for this instance
+# only; its bare name stays a value there.
+in_generic_instance = () -> bool:
+    c = cx
+    loop c >= 0:
+        inst = int(ctxs[c].inst)
+        if inst > 0 and fns[inst].targs.len() > 0: return true
+        c = int(ctxs[c].parent)
+    false
+
+# a function of the program's own (not the prelude's) by this name
+program_fn_named = (name: int) -> bool:
+    own: int[]
+    collect_fns(name, &own)
+    loop d in own:
+        if not decl_in_prelude(d): return true
+    false
+
+# the program's `str` for type t (str = (b: Big) -> str, beside the type), as an instance, or 0
+program_str_fn = (t0: int, pos: int) -> int:
+    t = prune(t0)
+    if tkind(t) != .struct_ and tkind(t) != .enum_: return 0
+    d0 = int(structs[int(types[t].st)].decl)
+    if d0 == 0 or modules[int(nodes[d0].mod)].is_prelude: return 0
+    fd: int[]
+    collect_module(int(nodes[d0].mod), intern("str"), &fd)
+    loop d in fd:
+        if decl_in_prelude(d) or nkids(d) != 1: continue
+        sig = fn_sig(d)
+        if sig.generic or sig.params.len() != 1 or not type_eq(prune(sig.params[0]), t): continue
+        return get_fn_inst(d, [], pos)
+    0
+
+# (does a library function `len`, as Heap's and Pool's, take a t first: Dewy's `.length` reads
+# it. A `len` written in Dewy is not the protocol: that is a `length` function)
+library_len_fits = (t0: int) -> bool:
+    t = prune(t0)
+    nm = intern("len")
+    demand_name(nm)
+    tables = [modules[cur_mod()].names, prelude]
+    loop tm in method_modules(t):
+        if tm != cur_mod(): tables.push(modules[tm].names)
+    loop tbl in tables:
+        s = tbl.get(nm) ?? 0
+        loop s != 0:
+            if syms[s].kind == .fns and syms[s].decl != 0 and nkids(int(syms[s].decl)) > 0 and not files[pos_file(nodes[int(syms[s].decl)].pos)].is_dewy:
+                sig = fn_sig(int(syms[s].decl))
+                if sig.params.len() > 0:
+                    rb = fill(0, int(sig.ntp))
+                    if match_type(sig.params[0], t, rb, 0) >= 0: return true
+            s = int(syms[s].next)
+    false

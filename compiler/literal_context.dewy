@@ -1,0 +1,105 @@
+$runtime_checks
+from p"ast.jo" import (NF_U64 has_flag kid kids nkids nodes)
+from p"checker_tokens.dewy" import (Tok)
+from p"checks_thin_expr.dewy" import (dewy_set_literal int_intervals is_map_type)
+from p"expr.jo" import (can_coerce dewy_record_target is_dewy_set_type kid_lit)
+from p"refine.jo" import (str_sets)
+from p"refine_metadata.dewy" import (str_set_of)
+from p"types.jo" import (T_STR prune types)
+from p"util.jo" import (name_of)
+
+LiteralContextWord:type=int64<overflow='wrap'>
+
+# Node.op stores the frozen Tok ordinal (minus 59, eq 69, ne 70).
+binary_context=(e:LiteralContextWord t:LiteralContextWord op:LiteralContextWord):>bool=>literal_operand_context(e t op =? 69 or op =? 70)
+
+# Collection literals take their element context from a typed operand.
+# Unwrap an optional only for the literal; the normal equality path adds its tag.
+binary_literal_context=(n:LiteralContextWord t0:LiteralContextWord op:Tok):>bool=>literal_operand_context(n t0 op =? 'eq' or op =? 'ne')
+
+literal_operand_context=(n:LiteralContextWord t0:LiteralContextWord equality:bool):>bool=>{
+    let t=prune(t0)
+    if types[t].kind =? 'opt' {t=prune(LiteralContextWord(types[t].elem))}
+    if dewy_set_literal(n) {return is_dewy_set_type(t)}
+    if not equality {return false}
+    if nodes[n].kind =? 'record_lit' {return dewy_record_target(t) not=? 0}
+    if nodes[n].kind =? 'map_lit' {return is_map_type(t)}
+    if nodes[n].kind =? 'array' {
+        if nkids(n) =? 0 and (is_map_type(t) or dewy_record_target(t) not=? 0) {return true}
+        return types[t].kind =? 'array' or types[t].kind =? 'fixed' or types[t].kind =? 'tuple' and nkids(n) =? LiteralContextWord(types[t].nargs)
+    }
+    false
+}
+
+# (a literal made only of literals: checking it twice has no other effect)
+literal_tree=(e:LiteralContextWord):>bool=>{
+    let k=nodes[e].kind
+    if k =? 'int_lit' or k =? 'float_lit' or k =? 'str_lit' or k =? 'bool_lit' or k =? 'none_lit' {return true}
+    if k =? 'unary' {return literal_tree(LiteralContextWord(nodes[e].a))}
+    if k =? 'map_lit' {
+        loop pair in kids(e) {
+            if not literal_tree(LiteralContextWord(nodes[pair].a)) or not literal_tree(LiteralContextWord(nodes[pair].b)) {return false}
+        }
+        return true
+    }
+    if k not=? 'array' or nodes[e].a not=? 0 or nodes[e].b not=? 0 {return false}
+    loop i in [0..nkids(e)) {
+        if not literal_tree(kid(e i)) {return false}
+    }
+    true
+}
+
+has_lambda=(n:LiteralContextWord):>bool=>{
+    if n =? 0 {return false}
+    if nodes[n].kind =? 'lambda' {return true}
+    if has_lambda(LiteralContextWord(nodes[n].a)) or has_lambda(LiteralContextWord(nodes[n].b)) {return true}
+    loop k in kids(n) {
+        if has_lambda(k) {return true}
+    }
+    false
+}
+
+# lo..hi holds at most limit + 1 values (without overflowing on wide intervals)
+small_span=(lo:int64 hi:int64 limit:int64):>bool=>lo >=? -(LiteralContextWord(1) << 40) and hi <=? (LiteralContextWord(1) << 40) and LiteralContextWord(hi) - LiteralContextWord(lo) <=? limit
+
+call_refined_literal_cost=(a:LiteralContextWord pat:LiteralContextWord):>LiteralContextWord=>{
+    let value:LiteralContextWord=0
+    let literal=true
+    if nodes[a].kind =? 'int_lit' and not has_flag(a NF_U64) {value=nodes[a].ival}
+    else if nodes[a].kind =? 'unary' and nodes[a].op =? int32(59) and nodes[LiteralContextWord(nodes[a].a)].kind =? 'int_lit' {
+        value= -LiteralContextWord(nodes[LiteralContextWord(nodes[a].a)].ival)
+    }
+    else {literal=false}
+    let [known intervals]=int_intervals(pat)
+    if literal and known {
+        loop k in [0..(LiteralContextWord(intervals.length) >> 1)) {
+            if value >=? intervals[2*k] and value <=? intervals[2*k + 1] {return 0}
+        }
+        return -1
+    }
+    -2
+}
+
+# Text going into a union with a string set: a literal the set lists is its word, a literal it
+# does not list is not offered to it, and other text prefers a member that takes any text, since
+# a set would look it up and panic.
+union_text_target=(n:LiteralContextWord ms:array<int64>):>LiteralContextWord=>{
+    let e=if n not=? 0 {kid_lit(n)} else {0}
+    let literal=e not=? 0 and nodes[e].kind =? 'str_lit' and nodes[e].aux not=? 1
+    let text=if literal {name_of(LiteralContextWord(nodes[e].sval))} else {""}
+    if literal {
+        loop i in 0.. and m in ms {
+            let set=str_set_of(m)
+            if set not=? 0 and str_sets[set].contains(text) {return i}
+        }
+    }
+    let looked_up:LiteralContextWord= -1
+    loop i in 0.. and m in ms {
+        if str_set_of(m) not=? 0 {
+            if not literal and looked_up <? 0 {looked_up=i}
+            continue
+        }
+        if can_coerce(n T_STR m) {return i}
+    }
+    looked_up
+}

@@ -1,0 +1,93 @@
+$runtime_checks
+from p"ast.jo" import (mk nkids nodes set_list)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_block bc_ident bc_stmt)
+from p"checks_thin_expr.dewy" import (is_fn_type)
+from p"effect_contracts.dewy" import (callable_base effect_contract_fits)
+from p"expr.jo" import (type_node_of)
+from p"ownership_types.dewy" import (ownership_callable_cap)
+from p"refine_rare.dewy" import (refine_implies)
+from p"types.jo" import (T_NEVER is_union prune targ type_eq types union_members)
+from p"util.jo" import (intern)
+
+CallableCompatWord:type=int64<overflow='wrap'>
+
+# The one member of an expected union a literal builds, or 0 when none or
+# several could: a record literal takes the record whose fields it names
+# (every field without a default among them), a dictionary literal the
+# dictionary, any other array literal the array (or, when the union has
+# none, the positional array type with as many positions: `[string int64]`).
+# A lambda where an optional or a union of function types is wanted: the function member with its
+# parameter count gives its parameters their types (a union with two has no one answer). O(members).
+lambda_member=(n:CallableCompatWord expected:CallableCompatWord):>CallableCompatWord=>{
+    let found=function_member(expected nkids(n))
+    if found not=? 0 {found} else {expected}
+}
+
+# (of an optional or a union, the one function member taking `count` parameters, any number at -1; 0
+# for none or two)
+function_member=(expected:CallableCompatWord count:CallableCompatWord= -1):>CallableCompatWord=>{
+    let u=prune(expected)
+    if u =? 0 {return 0}
+    if types[u].kind =? 'opt' {u=prune(CallableCompatWord(types[u].elem))}
+    let members=if is_union(u) {union_members(u)} else {[u]}
+    let found:CallableCompatWord=0
+    loop m0 in members {
+        let m=prune(m0)
+        let base=if types[m].kind =? 'callable' {prune(callable_base(m))} else {m}
+        if types[base].kind =? 'fn_' and (count <? 0 or CallableCompatWord(types[base].nargs) =? count) {
+            if found not=? 0 {return 0}
+            found=m
+        }
+    }
+    found
+}
+
+callable_fits=(source:CallableCompatWord target:CallableCompatWord):>bool=>{
+    if ownership_callable_cap(source) >? ownership_callable_cap(target) {return false}
+    if not effect_contract_fits(source target) {return false}
+    let src=callable_base(source)
+    let dst=callable_base(target)
+    if types[src].kind not=? 'fn_' or types[dst].kind not=? 'fn_' {return false}
+    # One result holding an array and several returned values have different ABIs.
+    if types[src].sign not=? types[dst].sign {return false}
+    if types[src].mutmask not=? types[dst].mutmask or types[src].nargs not=? types[dst].nargs {return false}
+    if types[dst].bits not=? 0 and types[src].bits not=? types[dst].bits {return false}
+    loop i in [0..CallableCompatWord(types[src].nargs)) {
+        if types[src].mutmask & int32(CallableCompatWord(1) << (i & 63)) not=? 0 {
+            if not type_eq(targ(src i) targ(dst i)) {return false}
+        }
+        else if is_fn_type(targ(dst i)) and is_fn_type(targ(src i)) {
+            if not callable_fits(targ(dst i) targ(src i)) {return false}
+        }
+        else if not refine_implies(targ(dst i) targ(src i)) {return false}
+    }
+    let src_result=CallableCompatWord(types[src].elem)
+    let dst_result=CallableCompatWord(types[dst].elem)
+    if is_fn_type(src_result) and is_fn_type(dst_result) {return callable_fits(src_result dst_result)}
+    prune(src_result) =? T_NEVER or refine_implies(src_result dst_result)
+}
+
+# `(a b) => f(a b)` in place of `@f`, checked against the expected function type.
+fn_adapter=(n:CallableCompatWord et:CallableCompatWord expected:CallableCompatWord):>CallableCompatWord=>{
+    let pos=nodes[n].pos
+    let params:array<int64>=[]
+    let args:array<int64>=[]
+    loop i in [0..CallableCompatWord(types[et].nargs)) {
+        let param=mk('param' pos)
+        nodes[param].name=int32(intern("$arg{i}"))
+        nodes[param].a=int32(type_node_of(targ(et i) pos))
+        params.push(param)
+        args.push(bc_ident("$arg{i}" pos))
+    }
+    let callee=mk('ident' pos)
+    nodes[callee].name=nodes[n].name
+    let call=mk('call' pos)
+    nodes[call].a=int32(callee)
+    set_list(call args)
+    let lam=mk('lambda' pos)
+    set_list(lam params)
+    nodes[lam].b=int32(bc_block([bc_stmt(call pos)] pos))
+    nodes[n]=nodes[lam]
+    check_expr(n expected)
+}

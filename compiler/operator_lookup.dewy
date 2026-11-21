@@ -1,0 +1,98 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED add_flag nodes set_list)
+from p"call_shape_queries.dewy" import (args_fit)
+from p"check.jo" import (module_of_type)
+from p"checker_call_cost.dewy" import (arg_cost)
+from p"checker_call_resolve.dewy" import (resolve_fn_call)
+from p"checker_signature.dewy" import (fn_sig)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"directive_rules.dewy" import (dir_panics_demanded)
+from p"expr.jo" import (call_collect_fns call_collect_module ntype)
+from p"node_store.dewy" import (Node)
+from p"rational_literals.dewy" import (rational_divisor)
+from p"type_ops.dewy" import (dt)
+from p"types.jo" import (T_BOOL prune)
+from p"util.jo" import (intern)
+
+OperatorLookupWord:type=int64<overflow='wrap'>
+
+# Dewy's named operator functions use the same overloads and specialization as
+# implementation-language symbolic declarations. Keep their real names intact
+# so explicit calls, imports and editor references remain ordinary functions.
+dewy_operator_name=(op:string unary:bool):>string=>{
+    if unary {
+        if op =? "-" {return "__unary_sub__"}
+        if op =? "~" {return "__not__"}
+        return ""
+    }
+    match op {
+        <"+"> => "__add__"
+        <"-"> => "__sub__"
+        <"*"> => "__mul__"
+        <"/"> => "__truediv__"
+        <"//"> => "__floordiv__"
+        <"**"> => "__pow__"
+        <"%"> => "__mod__"
+        <"=="> => "__eq__"
+        <"!="> => "__ne__"
+        <"<"> => "__lt__"
+        <"<="> => "__le__"
+        <">"> => "__gt__"
+        <">="> => "__ge__"
+        <"<<"> => "__lshift__"
+        <">>"> => "__rshift__"
+        <"&"> => "__and__"
+        <"|"> => "__or__"
+        <"^"> => "__xor__"
+        _ => ""
+    }
+}
+
+op_overload=(n:OperatorLookupWord opname:string):>OperatorLookupWord=>{
+    let decls:array<int64>=[]
+    let nm=intern(opname)
+    call_collect_fns(nm @decls)
+    let tm=module_of_type(ntype(OperatorLookupWord(nodes[n].a)))
+    if tm >=? 0 {call_collect_module(tm nm @decls)}
+    if nodes[n].b not=? 0 {
+        let tm2=module_of_type(ntype(OperatorLookupWord(nodes[n].b)))
+        if tm2 >=? 0 {call_collect_module(tm2 nm @decls)}
+    }
+    let protocol=dewy_operator_name(opname nodes[n].b =? 0)
+    if protocol not=? "" {
+        let pn=intern(protocol)
+        call_collect_fns(pn @decls)
+        if tm >=? 0 {call_collect_module(tm pn @decls)}
+        if nodes[n].b not=? 0 {
+            let pm=module_of_type(ntype(OperatorLookupWord(nodes[n].b)))
+            if pm >=? 0 {call_collect_module(pm pn @decls)}
+        }
+    }
+    if decls.length =? 0 {return 0}
+    let a=OperatorLookupWord(nodes[n].a)
+    let b=OperatorLookupWord(nodes[n].b)
+    let ops:array<int64>=[a]
+    if b not=? 0 {ops.push(b)}
+    let fit:array<int64>=[]
+    loop d in decls {
+        if not args_fit(d ops.length) {continue}
+        let sig=fn_sig(d)
+        let binds:array<int64>=fill(0 int64(sig.ntp))
+        let ok=true
+        loop i in 0.. and x in ops {
+            if arg_cost(x sig.params[i] @binds) <? 0 {ok=false}
+        }
+        if ok {fit.push(d)}
+    }
+    if fit.length =? 0 {return 0}
+    add_flag(a NF_CHECKED)
+    if b not=? 0 {add_flag(b NF_CHECKED)}
+    nodes[n]=Node(kind='call' pos=nodes[n].pos)
+    set_list(n ops)
+    let result=resolve_fn_call(n nm fit ops 0)
+    if b not=? 0 and (opname =? "/" or opname =? "//" or opname =? "%") and dir_panics_demanded() {rational_divisor(n)}
+    if ["==" "!=" "<" "<=" ">" ">="].contains(opname) and prune(result) not=? T_BOOL {
+        fatal(nodes[n].pos "comparison operator {opname} must return bool, found {dt(result)}")
+    }
+    result
+}

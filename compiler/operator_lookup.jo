@@ -1,0 +1,96 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_call_cost.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_signature.dewy'
+use 'diagnostic_exit.dewy'
+use 'directive_rules.dewy'
+use 'expr.jo'
+use 'node_store.dewy'
+use 'rational_literals.dewy'
+use 'type_ops.dewy'
+use 'types.jo'
+use 'util.jo'
+
+# Dewy's named operator functions use the same overloads and specialization as
+# implementation-language symbolic declarations. Keep their real names intact
+# so explicit calls, imports and editor references remain ordinary functions.
+dewy_operator_name = (op: str, unary: bool) -> str:
+    if unary:
+        if op == "-": return "__unary_sub__"
+        if op == "~": return "__not__"
+        return ""
+    match op:
+        "+": "__add__"
+        "-": "__sub__"
+        "*": "__mul__"
+        "/": "__truediv__"
+        "//": "__floordiv__"
+        "**": "__pow__"
+        "%": "__mod__"
+        "==": "__eq__"
+        "!=": "__ne__"
+        "<": "__lt__"
+        "<=": "__le__"
+        ">": "__gt__"
+        ">=": "__ge__"
+        "<<": "__lshift__"
+        ">>": "__rshift__"
+        "&": "__and__"
+        "|": "__or__"
+        "^": "__xor__"
+        _: ""
+
+op_overload = (n: int, opname: str) -> int:
+    decls: int[]
+    nm = intern(opname)
+    collect_fns(nm, &decls)
+    tm = module_of_type(ntype(int(nodes[n].a)))
+    if tm >= 0: collect_module(tm, nm, &decls)
+    if nodes[n].b != 0:
+        tm2 = module_of_type(ntype(int(nodes[n].b)))
+        if tm2 >= 0: collect_module(tm2, nm, &decls)
+    protocol = dewy_operator_name(opname, nodes[n].b == 0)
+    if protocol != "":
+        pn = intern(protocol)
+        collect_fns(pn, &decls)
+        if tm >= 0: collect_module(tm, pn, &decls)
+        if nodes[n].b != 0:
+            pm = module_of_type(ntype(int(nodes[n].b)))
+            if pm >= 0: collect_module(pm, pn, &decls)
+    if decls.len() == 0: return 0
+    a = int(nodes[n].a)
+    b = int(nodes[n].b)
+    # (only overloads the operands could be given to: otherwise the operator is just undefined
+    # for these types, which says more than why some unrelated overload does not fit)
+    ops = [a]
+    if b != 0: ops.push(b)
+    fit: int[]
+    loop d in decls:
+        if nkids(d) < ops.len(): continue
+        # (parameters past the operands take their defaults: a caller's `$time.fold`)
+        defaulted = true
+        loop i in [ops.len()..nkids(d)):
+            if nodes[kid(d, i)].b == 0: defaulted = false
+        if not defaulted: continue
+        sig = fn_sig(d)
+        binds = fill(0, int(sig.ntp))
+        ok = true
+        loop i in 0.. and x in ops:
+            if arg_cost(x, sig.params[i], binds) < 0: ok = false
+        if ok: fit.push(d)
+    if fit.len() == 0: return 0
+    decls = fit
+    add_flag(a, NF_CHECKED)
+    args = [a]
+    if b != 0:
+        add_flag(b, NF_CHECKED)
+        args.push(b)
+    nodes[n] = Node(kind = .call, pos = nodes[n].pos)
+    set_list(n, args)
+    result = resolve_fn_call(n, nm, decls, args, 0)
+    if b != 0 and (opname == "/" or opname == "//" or opname == "%") and dir_panics_demanded(): rational_divisor(n)
+    if opname in ["==", "!=", "<", "<=", ">", ">="] and prune(result) != T_BOOL:
+        fatal(nodes[n].pos, "comparison operator {opname} must return bool, found {dt(result)}")
+    result

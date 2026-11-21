@@ -1,0 +1,49 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_call_queries.dewy'
+use 'checker_signature.dewy'
+use 'checks_thin_expr.dewy'
+use 'types.jo'
+use 'util.jo'
+
+# ---------------- operators ----------------
+# a call with n arguments can go to declaration d (as many parameters, or fewer with defaults)
+args_fit = (d: int, n: int) -> bool:
+    np = nkids(d)
+    if n > np: return false
+    loop i in [n..np):
+        if nodes[kid(d, i)].b == 0: return false
+    true
+
+# d's first parameter is an array or a string as written (or has no type: generic)
+takes_seq = (d: int) -> bool:
+    if nkids(d) == 0: return false
+    tn = int(nodes[kid(d, 0)].a)
+    if tn == 0: return true
+    nodes[tn].kind == .tarray or (nodes[tn].kind == .tname and name_of(int(nodes[tn].name)) == "str")
+
+# Whether the receiver type t has a field called name: `x.name` then reads the field, not a call
+# of the function (the call style check, call_style.dewy).
+call_style_has_field = (t0: int, name: int) -> bool:
+    t = prune(t0)
+    if tkind(t) == .ptr: t = prune(int(types[t].elem))
+    if tkind(t) != .struct_: return false
+    si = int(types[t].st)
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        if int(fields[int(structs[si].fields) + i].name) == name: return true
+    false
+
+# How a bare use of the visible functions `name` behaves: 0 when none can be
+# called with no arguments, 1 when one can, 2 when that call makes a function.
+bare_fns_call = (name: int, mod: int) -> int:
+    decls: int[]
+    collect_named(name, mod, &decls)
+    loop d in decls:
+        required = 0
+        loop i in [0..nkids(d)):
+            if nodes[kid(d, i)].b == 0: required += 1
+        if required == 0:
+            sig = fn_sig(d)
+            return if sig.ret != 0 and is_fn_type(int(sig.ret)): 2 else: 1
+    0

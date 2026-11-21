@@ -1,0 +1,59 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_STMT add_flag mk nkids2 nodes)
+from p"check.jo" import (check_struct_fields)
+from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_let bc_stmt)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"error_ops.dewy" import (exception_member nominal_generic_instance value_members)
+from p"expr.jo" import (struct_ctor type_node_of)
+from p"type_ops.dewy" import (dt get_struct_inst)
+from p"types.jo" import (T_NONE T_VOID fields prune structs types)
+from p"util.jo" import (name_of)
+
+TaskFailureWord:type=int64<overflow='wrap'>
+
+# A field-less generic exception's erased instance (`Closed<void>`, errors.jo): the member of
+# `exception` every instance is reported as, since that family lists no generic instance.
+nominal_erased=(decl:TaskFailureWord):>TaskFailureWord=>get_struct_inst(decl fill(T_VOID nkids2(decl)))
+
+# The statements reporting a task's failure `vn` (a name), known to hold member, to the group
+# named gn: the value itself; a field-less generic exception's erased instance; `Unsent<T>`'s
+# reason, each of its members reported the same way.
+task_failure_calls=(gn:string vn:string member:TaskFailureWord pos:TaskFailureWord):>array<int64>=>{
+    if member =? T_NONE {return [bc_stmt(bc_call("__task_fail" [bc_ident(gn pos) mk('none_lit' pos)] pos) pos)]}
+    if not nominal_generic_instance(member) {return [bc_stmt(bc_call("__task_fail" [bc_ident(gn pos) bc_ident(vn pos)] pos) pos)]}
+    let si=TaskFailureWord(types[prune(member)].st)
+    check_struct_fields(si)
+    if structs[si].nfields =? 0 {
+        let erased=nominal_erased(TaskFailureWord(structs[si].decl))
+        let value=mk('call' pos)
+        struct_ctor(value erased TaskFailureWord(structs[TaskFailureWord(types[erased].st)].decl) [] 0);
+        add_flag(value NF_CHECKED)
+        return [bc_stmt(bc_call("__task_fail" [bc_ident(gn pos) value] pos) pos)]
+    }
+    let reason:TaskFailureWord=0
+    loop i in [0..TaskFailureWord(structs[si].nfields)) {
+        let index=TaskFailureWord(structs[si].fields) + i
+        if name_of(TaskFailureWord(fields[index].name)) =? "reason" {reason=TaskFailureWord(fields[index].type)}
+    }
+    if reason =? 0 {fatal(pos "a task's failure {dt(member)} cannot be reported: a generic exception reports its `reason`")}
+    let rn="{vn}_reason"
+    let out=[bc_let(rn bc_field(bc_ident(vn pos) "reason" pos) pos)]
+    let held=value_members(reason)
+    loop m in held {
+        if not exception_member(m) {continue}
+        let calls=task_failure_calls(gn rn m pos)
+        if held.length =? 1 {
+            out.extend(calls)
+            continue
+        }
+        let condition=mk('istype' pos)
+        nodes[condition].a=int32(bc_ident(rn pos))
+        nodes[condition].b=int32(type_node_of(m pos))
+        let branch=mk('if_' pos)
+        nodes[branch].a=int32(condition)
+        nodes[branch].b=int32(bc_block(calls pos))
+        add_flag(branch NF_STMT)
+        out.push(branch)
+    }
+    out
+}

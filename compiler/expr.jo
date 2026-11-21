@@ -1,4 +1,11 @@
 use 'exact_preparation.dewy'
+use 'record_construction.dewy'
+use 'policy_value_queries.dewy'
+use 'operator_lookup.dewy'
+use 'literal_context.dewy'
+use 'callable_compatibility.dewy'
+use 'call_shape_queries.dewy'
+use 'call_lookup_context.dewy'
 use 'source_queries.dewy'
 use 'facts_values.dewy'
 use 'data_access.dewy'
@@ -574,14 +581,6 @@ record_int_conversion = (from: int, to: int) -> bool:
         if a != T_MATH_INT and b != T_MATH_INT and not int_widens(a, b): return false
     true
 
-# a function of the program's own (not the prelude's) by this name
-program_fn_named = (name: int) -> bool:
-    own: int[]
-    collect_fns(name, &own)
-    loop d in own:
-        if not decl_in_prelude(d): return true
-    false
-
 # the member of union u a value of type `from` becomes (an exact match first), or -1
 union_target = (n: int, from: int, u: int) -> int:
     f = from
@@ -593,25 +592,6 @@ union_target = (n: int, from: int, u: int) -> int:
     loop i in 0.. and m in ms:
         if can_coerce(n, from, m): return i
     -1
-
-# Text going into a union with a string set: a literal the set lists is its word, a literal it
-# does not list is not offered to it, and other text prefers a member that takes any text, since
-# a set would look it up and panic.
-union_text_target = (n: int, ms: int[]) -> int:
-    e = if n != 0: kid_lit(n) else: 0
-    literal = e != 0 and nodes[e].kind == .str_lit and nodes[e].aux != 1
-    text = if literal: name_of(int(nodes[e].sval)) else: ""
-    if literal:
-        loop i in 0.. and m in ms:
-            set = str_set_of(m)
-            if set != 0 and str_sets[set].contains(text): return i
-    looked_up = -1
-    loop i in 0.. and m in ms:
-        if str_set_of(m) != 0:
-            if not literal and looked_up < 0: looked_up = i
-            continue
-        if can_coerce(n, T_STR, m): return i
-    looked_up
 
 # (a wrapper replaces node n and the old content moves to inner: the divisor
 # obligation belongs to the moved call)
@@ -1636,21 +1616,6 @@ call_string_cost = (a: int, p: int, sp: int, binds: mut int[]) -> int:
         return 2
     -2
 
-call_refined_literal_cost = (a: int, pat: int) -> int:
-    # (a literal for a refined integer parameter, `d:0` or `d:int64 & ~0`: the overload
-    # whose values hold it, ahead of a plain integer one)
-    v = 0
-    lit = true
-    if nodes[a].kind == .int_lit and not has_flag(a, NF_U64): v = nodes[a].ival
-    else if nodes[a].kind == .unary and nodes[a].op == i32(int(Tok.minus)) and nodes[int(nodes[a].a)].kind == .int_lit: v = -nodes[int(nodes[a].a)].ival
-    else: lit = false
-    known, intervals = int_intervals(pat)
-    if lit and known:
-        loop k in [0..intervals.len() / 2):
-            if v >= intervals[2 * k] and v <= intervals[2 * k + 1]: return 0
-        return -1
-    -2
-
 # Check unchecked comprehension arguments whose elements need no context, so
 # overload selection sees their own element type. O(argument syntax).
 comprehension_settle = (args: int[]) -> bool:
@@ -2019,21 +1984,6 @@ struct_default = (t0: int, pos: int) -> int:
     d
 
 struct_defaults_known: {int: bool} = {}
-struct_has_defaults = (si: int, depth: int) -> bool:
-    if let k = struct_defaults_known.get(si): return k
-    if depth > 16: return false
-    check_struct_fields(si)
-    has = false
-    loop i in [0..int(structs[si].nfields)):
-        f = fields[int(structs[si].fields) + i]
-        if f.defval != 0 or refine_active and ref_storage_contract(int(f.type)): has = true
-        else:
-            ft = prune(int(f.type))
-            if types[ft].kind == .struct_ and not is_map_type(ft) and not is_union(ft) and struct_has_defaults(int(types[ft].st), depth + 1): has = true
-        if has: break
-    struct_defaults_known[si] = has
-    has
-
 dewy_record_shapes: {str: int} = {}
 
 dewy_record_target = (expected: int) -> int:
@@ -2042,33 +1992,6 @@ dewy_record_target = (expected: int) -> int:
     if types[target].kind == .opt: target = prune(int(types[target].elem))
     if types[target].kind == .struct_ and not is_map_type(target): return target
     0
-
-# The one member of an expected union a literal builds, or 0 when none or
-# several could: a record literal takes the record whose fields it names
-# (every field without a default among them), a dictionary literal the
-# dictionary, any other array literal the array (or, when the union has
-# none, the positional array type with as many positions: `[string int64]`).
-# A lambda where an optional or a union of function types is wanted: the function member with its
-# parameter count gives its parameters their types (a union with two has no one answer). O(members).
-lambda_member = (n: int, expected: int) -> int:
-    found = function_member(expected, nkids(n))
-    if found != 0: found else: expected
-
-# (of an optional or a union, the one function member taking `count` parameters, any number at -1; 0
-# for none or two)
-function_member = (expected: int, count: int = -1) -> int:
-    u = prune(expected)
-    if u == 0: return 0
-    if types[u].kind == .opt: u = prune(int(types[u].elem))
-    members = if is_union(u): union_members(u) else: [u]
-    found = 0
-    loop m0 in members:
-        m = prune(m0)
-        base = if types[m].kind == .callable: prune(callable_base(m)) else: m
-        if types[base].kind == .fn_ and (count < 0 or int(types[base].nargs) == count):
-            if found != 0: return 0
-            found = m
-    found
 
 literal_union_member = (n: int, expected: int) -> int:
     u = prune(expected)
@@ -2256,47 +2179,6 @@ bare_generic_set = (on: bool) -> bool:
     bare_generic_ok = on
     was
 
-# A field-less generic exception's erased instance (`Closed<void>`, errors.jo): the member of
-# `exception` every instance is reported as, since that family lists no generic instance.
-nominal_erased = (d: int) -> int: get_struct_inst(d, fill(T_VOID, nkids2(d)))
-
-# The statements reporting a task's failure `vn` (a name), known to hold member, to the group
-# named gn: the value itself; a field-less generic exception's erased instance; `Unsent<T>`'s
-# reason, each of its members reported the same way.
-task_failure_calls = (gn: str, vn: str, member: int, pos: int) -> int[]:
-    if member == T_NONE: return [bc_stmt(bc_call("__task_fail", [bc_ident(gn, pos), mk(.none_lit, pos)], pos), pos)]
-    if not nominal_generic_instance(member): return [bc_stmt(bc_call("__task_fail", [bc_ident(gn, pos), bc_ident(vn, pos)], pos), pos)]
-    si = int(types[prune(member)].st)
-    check_struct_fields(si)
-    if structs[si].nfields == 0:
-        erased = nominal_erased(int(structs[si].decl))
-        value = mk(.call, pos)
-        struct_ctor(value, erased, int(structs[int(types[erased].st)].decl), [], 0)
-        add_flag(value, NF_CHECKED)
-        return [bc_stmt(bc_call("__task_fail", [bc_ident(gn, pos), value], pos), pos)]
-    reason = 0
-    loop i in [0..int(structs[si].nfields)):
-        if name_of(int(fields[int(structs[si].fields) + i].name)) == "reason": reason = int(fields[int(structs[si].fields) + i].type)
-    if reason == 0: fatal(pos, "a task's failure {dt(member)} cannot be reported: a generic exception reports its `reason`")
-    rn = "{vn}_reason"
-    out = [bc_let(rn, bc_field(bc_ident(vn, pos), "reason", pos), pos)]
-    held = value_members(reason)
-    loop m in held:
-        if not exception_member(m): continue
-        calls = task_failure_calls(gn, rn, m, pos)
-        if held.len() == 1:
-            out += calls
-            continue
-        condition = mk(.istype, pos)
-        nodes[condition].a = i32(bc_ident(rn, pos))
-        nodes[condition].b = i32(type_node_of(m, pos))
-        branch = mk(.if_, pos)
-        nodes[branch].a = i32(condition)
-        nodes[branch].b = i32(bc_block(calls, pos))
-        add_flag(branch, NF_STMT)
-        out.push(branch)
-    out
-
 # The instances of generic declaration d made so far, as one type: a family when there are
 # several (nominal_families, under d's own negative key), 0 when there is none. O(structs).
 generic_family_cache: {int: (int, int)} = {}
@@ -2325,51 +2207,6 @@ value_type_member = (s: int, name: int, pos: int) -> int:
 # The clash rule (decisions.md, batch 7): an outcome whose short name the handle's type already
 # has as a member gets no shorthand; the member wins, with this warning, once per type.
 handle_clash_warned: {int: bool} = {}
-
-# Type annotations and inferred literals share the same structural identity.
-# Each member carries its resolved type; source values remain separate.
-dewy_record_schema = (n: int, args: int[]) -> int:
-    # Small record schemas use insertion sort; source argument storage is separate.
-    ordered: int[]
-    loop field in args:
-        ordered.push(field)
-        i = ordered.len() - 1
-        loop i > 0 and name_of(int(nodes[ordered[i - 1]].name)) > name_of(int(nodes[field].name)):
-            ordered[i] = ordered[i - 1]
-            i -= 1
-        ordered[i] = field
-    # Intern the shape once. Its field types are ordinary type arguments, so
-    # generic matching, substitution and specialization need no separate path.
-    key = ""
-    targs: int[]
-    loop field in ordered:
-        key += "{int(nodes[field].name)};"
-        targs.push(prune(ntype(field)))
-    decl = dewy_record_shapes.get(key) ?? 0
-    if decl == 0:
-        decl = mk(.struct_, nodes[n].pos)
-        nodes[decl].name = i32(intern("<record>"))
-        nodes[decl].mod = ctxs[cx].mod
-        add_flag(decl, NF_RECORD)
-        add_flag(decl, NF_GENERIC)
-        members: int[]
-        params: int[]
-        loop i in 0.. and field in ordered:
-            param = mk(.ident, nodes[field].pos)
-            nodes[param].name = i32(intern("__Field{i}"))
-            params.push(param)
-            member = mk(.vardecl, nodes[field].pos)
-            nodes[member].name = nodes[field].name
-            tn = mk(.tname, nodes[field].pos)
-            nodes[tn].name = nodes[param].name
-            nodes[member].a = i32(tn)
-            members.push(member)
-        set_list(decl, members)
-        set_list2(decl, params)
-        dewy_record_shapes[key] = decl
-    t = get_struct_inst(decl, targs)
-    check_struct_fields(int(types[t].st))
-    t
 
 # (set by the compiler's own default-value constructions, T() as `x: T` starts: those fill what
 # has no default with zero; a construction written in Dewy may not)
@@ -3340,21 +3177,6 @@ fmt_plain: {int: bool} = {}       # (__fmt_fields nodes that format the fields, 
 # (an __fmt_fields node's aux2: 1 inside a container, FMT_DEWY in Dewy's literal syntax)
 const FMT_DEWY = 2
 
-# the program's `str` for type t (str = (b: Big) -> str, beside the type), as an instance, or 0
-program_str_fn = (t0: int, pos: int) -> int:
-    t = prune(t0)
-    if tkind(t) != .struct_ and tkind(t) != .enum_: return 0
-    d0 = int(structs[int(types[t].st)].decl)
-    if d0 == 0 or modules[int(nodes[d0].mod)].is_prelude: return 0
-    fd: int[]
-    collect_module(int(nodes[d0].mod), intern("str"), &fd)
-    loop d in fd:
-        if decl_in_prelude(d) or nkids(d) != 1: continue
-        sig = fn_sig(d)
-        if sig.generic or sig.params.len() != 1 or not type_eq(prune(sig.params[0]), t): continue
-        return get_fn_inst(d, [], pos)
-    0
-
 # a library function called as another language's of the same name is (p5's line(x1, y1, x2,
 # y2), fill(r, g, b) and push(); atan(y, x)): what it is here, before its overloads are tried
 # checker_call_queries.dewy's habit_call_check leaves the host the names and argument
@@ -3636,18 +3458,6 @@ call_style_nothing = (t0: int) -> bool:
         if not (tkind(m) == .void_ or exception_member(m)): return false
     true
 
-# Whether the receiver type t has a field called name: `x.name` then reads the field, not a call
-# of the function (the call style check, call_style.dewy).
-call_style_has_field = (t0: int, name: int) -> bool:
-    t = prune(t0)
-    if tkind(t) == .ptr: t = prune(int(types[t].elem))
-    if tkind(t) != .struct_: return false
-    si = int(types[t].st)
-    check_struct_fields(si)
-    loop i in [0..int(structs[si].nfields)):
-        if int(fields[int(structs[si].fields) + i].name) == name: return true
-    false
-
 # (the Dewy prelude's module declaring name, as a table of the methods a Dewy module's `x.name`
 # finds beside the receiver's own: `p.modified` of a Path, lib/prelude/files.dewy; -1 for none)
 dewy_prelude_method_module = (name: int) -> int:
@@ -3686,26 +3496,6 @@ member_call_without_arguments = (t: int, name: int, prelude_methods: bool = fals
 receiver_text = (n: int) -> str:
     if nodes[n].kind == .ident: return name_of(int(nodes[n].name))
     "x"
-
-# (does a library function `len`, as Heap's and Pool's, take a t first: Dewy's `.length` reads
-# it. A `len` written in Dewy is not the protocol: that is a `length` function)
-library_len_fits = (t0: int) -> bool:
-    t = prune(t0)
-    nm = intern("len")
-    demand_name(nm)
-    tables = [modules[cur_mod()].names, prelude]
-    loop tm in method_modules(t):
-        if tm != cur_mod(): tables.push(modules[tm].names)
-    loop tbl in tables:
-        s = tbl.get(nm) ?? 0
-        loop s != 0:
-            if syms[s].kind == .fns and syms[s].decl != 0 and nkids(int(syms[s].decl)) > 0 and not files[pos_file(nodes[int(syms[s].decl)].pos)].is_dewy:
-                sig = fn_sig(int(syms[s].decl))
-                if sig.params.len() > 0:
-                    rb = fill(0, int(sig.ntp))
-                    if match_type(sig.params[0], t, rb, 0) >= 0: return true
-            s = int(syms[s].next)
-    false
 
 # Membership in fn_names_for without building a diagnostic's complete list.
 fn_name_for = (t: int, name: int) -> bool:
@@ -5003,105 +4793,7 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
     r
 
 swizzle_chars = "xyzwrgbastpq"
-# ---------------- operators ----------------
-# a call with n arguments can go to declaration d (as many parameters, or fewer with defaults)
-args_fit = (d: int, n: int) -> bool:
-    np = nkids(d)
-    if n > np: return false
-    loop i in [n..np):
-        if nodes[kid(d, i)].b == 0: return false
-    true
-
-# d's first parameter is an array or a string as written (or has no type: generic)
-takes_seq = (d: int) -> bool:
-    if nkids(d) == 0: return false
-    tn = int(nodes[kid(d, 0)].a)
-    if tn == 0: return true
-    nodes[tn].kind == .tarray or (nodes[tn].kind == .tname and name_of(int(nodes[tn].name)) == "str")
-
 decl_in_prelude = (d: int) -> bool: d != 0 and modules[int(nodes[d].mod)].is_prelude
-
-# Dewy's named operator functions use the same overloads and specialization as
-# implementation-language symbolic declarations. Keep their real names intact
-# so explicit calls, imports and editor references remain ordinary functions.
-dewy_operator_name = (op: str, unary: bool) -> str:
-    if unary:
-        if op == "-": return "__unary_sub__"
-        if op == "~": return "__not__"
-        return ""
-    match op:
-        "+": "__add__"
-        "-": "__sub__"
-        "*": "__mul__"
-        "/": "__truediv__"
-        "//": "__floordiv__"
-        "**": "__pow__"
-        "%": "__mod__"
-        "==": "__eq__"
-        "!=": "__ne__"
-        "<": "__lt__"
-        "<=": "__le__"
-        ">": "__gt__"
-        ">=": "__ge__"
-        "<<": "__lshift__"
-        ">>": "__rshift__"
-        "&": "__and__"
-        "|": "__or__"
-        "^": "__xor__"
-        _: ""
-
-op_overload = (n: int, opname: str) -> int:
-    decls: int[]
-    nm = intern(opname)
-    collect_fns(nm, &decls)
-    tm = module_of_type(ntype(int(nodes[n].a)))
-    if tm >= 0: collect_module(tm, nm, &decls)
-    if nodes[n].b != 0:
-        tm2 = module_of_type(ntype(int(nodes[n].b)))
-        if tm2 >= 0: collect_module(tm2, nm, &decls)
-    protocol = dewy_operator_name(opname, nodes[n].b == 0)
-    if protocol != "":
-        pn = intern(protocol)
-        collect_fns(pn, &decls)
-        if tm >= 0: collect_module(tm, pn, &decls)
-        if nodes[n].b != 0:
-            pm = module_of_type(ntype(int(nodes[n].b)))
-            if pm >= 0: collect_module(pm, pn, &decls)
-    if decls.len() == 0: return 0
-    a = int(nodes[n].a)
-    b = int(nodes[n].b)
-    # (only overloads the operands could be given to: otherwise the operator is just undefined
-    # for these types, which says more than why some unrelated overload does not fit)
-    ops = [a]
-    if b != 0: ops.push(b)
-    fit: int[]
-    loop d in decls:
-        if nkids(d) < ops.len(): continue
-        # (parameters past the operands take their defaults: a caller's `$time.fold`)
-        defaulted = true
-        loop i in [ops.len()..nkids(d)):
-            if nodes[kid(d, i)].b == 0: defaulted = false
-        if not defaulted: continue
-        sig = fn_sig(d)
-        binds = fill(0, int(sig.ntp))
-        ok = true
-        loop i in 0.. and x in ops:
-            if arg_cost(x, sig.params[i], binds) < 0: ok = false
-        if ok: fit.push(d)
-    if fit.len() == 0: return 0
-    decls = fit
-    add_flag(a, NF_CHECKED)
-    args = [a]
-    if b != 0:
-        add_flag(b, NF_CHECKED)
-        args.push(b)
-    nodes[n] = Node(kind = .call, pos = nodes[n].pos)
-    set_list(n, args)
-    result = resolve_fn_call(n, nm, decls, args, 0)
-    if b != 0 and (opname == "/" or opname == "//" or opname == "%") and dir_panics_demanded(): rational_divisor(n)
-    if opname in ["==", "!=", "<", "<=", ">", ">="] and prune(result) != T_BOOL:
-        fatal(nodes[n].pos, "comparison operator {opname} must return bool, found {dt(result)}")
-    result
 
 is_struct_like = (t0: int) -> bool:
     t = prune(t0)
@@ -5131,20 +4823,6 @@ charlike_to_int = (n: int):
     nodes[n].aux = 1
     add_flag(n, NF_LITERAL)
     clear_flag(n, NF_CHARLIKE)
-
-# Collection literals take their element context from a typed operand.
-# Unwrap an optional only for the literal; the normal equality path adds its tag.
-binary_literal_context = (n: int, t0: int, op: Tok) -> bool:
-    t = prune(t0)
-    if types[t].kind == .opt: t = prune(int(types[t].elem))
-    if dewy_set_literal(n): return is_dewy_set_type(t)
-    if op != .eq and op != .ne: return false
-    if nodes[n].kind == .record_lit: return dewy_record_target(t) != 0
-    if nodes[n].kind == .map_lit: return is_map_type(t)
-    if nodes[n].kind == .array:
-        if nkids(n) == 0 and (is_map_type(t) or dewy_record_target(t) != 0): return true
-        return types[t].kind == .array or types[t].kind == .fixed or types[t].kind == .tuple and nkids(n) == int(types[t].nargs)
-    false
 
 # the string-literal union a container's members or keys are (0 if not one)
 membership_str_set_of = (t0: int) -> int:
@@ -5760,17 +5438,6 @@ str_set_patterns = (arm: int, st: int, covered: str[], union_lits: str[]):
             out.push(q)
     set_list(arm, out)
 
-# lo..hi holds at most limit + 1 values (without overflowing on wide intervals)
-small_span = (lo: int, hi: int, limit: int) -> bool: lo >= -(1 << 40) and hi <= (1 << 40) and hi - lo <= limit
-
-has_lambda = (n: int) -> bool:
-    if n == 0: return false
-    if nodes[n].kind == .lambda: return true
-    if has_lambda(int(nodes[n].a)) or has_lambda(int(nodes[n].b)): return true
-    loop k in kids(n):
-        if has_lambda(k): return true
-    false
-
 struct ShapeArm:
     cond: int      # the condition (0: always)
     record: int    # the record whose field values it tests
@@ -5786,42 +5453,6 @@ struct ShapeArm:
 # Lambda bodies capture the same managed snapshot directly. No new callable ABI.
 setting_value_wrapped: {int: bool}
 setting_value_targets: {int: int}
-setting_value_target = (n: int) -> int:
-    # A later callable conversion may replace a generated value. Follow only
-    # the exact construction tail that was recorded, never stale metadata.
-    if nodes[n].kind != .block or nkids(n) == 0: return n
-    target = setting_value_targets.get(n) ?? 0
-    if target == 0: return n
-    tail = kid(n, nkids(n) - 1)
-    if nodes[tail].kind == .exprstmt: tail = int(nodes[tail].a)
-    if tail == target: return target
-    if tail != n and setting_value_target(tail) == target: return target
-    n
-setting_value_needed = (n: int) -> bool:
-    dir_runtime_policies.len() != 0 and not setting_value_wrapped.has(n) and dewy_at(nodes[n].pos) and not pos_in_lib(nodes[n].pos)
-
-# `(a b) => f(a b)` in place of `@f`, checked against the expected function type.
-fn_adapter = (n: int, et: int, expected: int) -> int:
-    pos = nodes[n].pos
-    params: int[]
-    args: int[]
-    loop i in [0..int(types[et].nargs)):
-        param = mk(.param, pos)
-        nodes[param].name = i32(intern("$arg{i}"))
-        nodes[param].a = i32(type_node_of(targ(et, i), pos))
-        params.push(param)
-        args.push(bc_ident("$arg{i}", pos))
-    callee = mk(.ident, pos)
-    nodes[callee].name = nodes[n].name
-    call = mk(.call, pos)
-    nodes[call].a = i32(callee)
-    set_list(call, args)
-    lam = mk(.lambda, pos)
-    set_list(lam, params)
-    nodes[lam].b = i32(bc_block([bc_stmt(call, pos)], pos))
-    nodes[n] = nodes[lam]
-    check_expr(n, expected)
-
 fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, closure: int = 0) -> int:
     decls: int[]
     if closure != 0: decls.push(poly_families[int(types[prune(ntype(closure))].st)].decl)
@@ -5973,30 +5604,6 @@ dewy_bare_fn = (n: int, is_callee: bool) -> bool:
         if nodes[n].aux2 == 1 or starts_with(name_of(int(nodes[n].name)), "$"): return false
     if cur_assign != 0 and int(nodes[cur_assign].a) == n: return false
     files[pos_file(nodes[n].pos)].is_dewy
-
-# Inside a generic instance a local's type may be a function for this instance
-# only; its bare name stays a value there.
-in_generic_instance = () -> bool:
-    c = cx
-    loop c >= 0:
-        inst = int(ctxs[c].inst)
-        if inst > 0 and fns[inst].targs.len() > 0: return true
-        c = int(ctxs[c].parent)
-    false
-
-# How a bare use of the visible functions `name` behaves: 0 when none can be
-# called with no arguments, 1 when one can, 2 when that call makes a function.
-bare_fns_call = (name: int, mod: int) -> int:
-    decls: int[]
-    collect_named(name, mod, &decls)
-    loop d in decls:
-        required = 0
-        loop i in [0..nkids(d)):
-            if nodes[kid(d, i)].b == 0: required += 1
-        if required == 0:
-            sig = fn_sig(d)
-            return if sig.ret != 0 and is_fn_type(int(sig.ret)): 2 else: 1
-    0
 
 # `f` alone: the call f(), checked in place of n.
 bare_call = (n: int, expected: int) -> int:
@@ -6359,20 +5966,6 @@ cond_narrow = (cond: int, holds: bool) -> void: narrow_by(cond, holds)
 # a stack, as conditionals nest)
 cond_restored: int[][]
 
-# (a literal made only of literals: checking it twice has no other effect)
-literal_tree = (e: int) -> bool:
-    k = nodes[e].kind
-    if k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit or k == .none_lit: return true
-    if k == .unary: return literal_tree(int(nodes[e].a))
-    if k == .map_lit:
-        loop pair in kids(e):
-            if not literal_tree(int(nodes[pair].a)) or not literal_tree(int(nodes[pair].b)): return false
-        return true
-    if k != .array or nodes[e].a != 0 or nodes[e].b != 0: return false
-    loop i in [0..nkids(e)):
-        if not literal_tree(kid(e, i)): return false
-    true
-
 # ---------------- struct-of-arrays ----------------
 # soa P[] is a struct with an array per field of P; these rewrite its array operations into
 # operations on the field arrays
@@ -6463,25 +6056,6 @@ bc_assign = (target: int, v: int, pos: int) -> int:
 # value, so the element's contract and defaults are not consulted. The store lets go of what
 # the element held. The declaration's own body serves earlier compilers.
 release_name = intern("__release_at")
-
-callable_fits = (from0: int, to0: int) -> bool:
-    if ownership_callable_cap(from0) > ownership_callable_cap(to0): return false
-    if not effect_contract_fits(from0, to0): return false
-    from = callable_base(from0)
-    to = callable_base(to0)
-    if types[from].kind != .fn_ or types[to].kind != .fn_: return false
-    # (one value and several are different results: `<():>array<int64>>` is not `<():>(int64 int64)>`)
-    if types[from].sign != types[to].sign: return false
-    if types[from].mutmask != types[to].mutmask or types[from].nargs != types[to].nargs: return false
-    if types[to].bits != 0 and types[from].bits != types[to].bits: return false
-    loop i in [0..int(types[from].nargs)):
-        if types[from].mutmask & i32(1 << i) != 0:
-            if not type_eq(targ(from, i), targ(to, i)): return false
-        else if is_fn_type(targ(to, i)) and is_fn_type(targ(from, i)):
-            if not callable_fits(targ(to, i), targ(from, i)): return false
-        else if not refine_implies(targ(to, i), targ(from, i)): return false
-    if is_fn_type(int(types[from].elem)) and is_fn_type(int(types[to].elem)): return callable_fits(int(types[from].elem), int(types[to].elem))
-    prune(int(types[from].elem)) == T_NEVER or refine_implies(int(types[from].elem), int(types[to].elem))
 
 is_nd = (t0: int) -> bool:
     t = prune(t0)
@@ -6859,8 +6433,6 @@ call_collect_module = (mod: int, name: int, out: mut int[]): collect_module(mod,
 call_collect_named = (name: int, mod: int, out: mut int[]): collect_named(name, mod, &out)
 
 call_collect_fns = (name: int, out: mut int[]): collect_fns(name, &out)
-
-binary_context = (e: int, t: int, op: int) -> bool: binary_literal_context(e, t, op as Tok)
 
 # (check_binary's end for numbers: division, literal folding, the joined type; it runs in
 # checker_numeric.dewy, these are its services)

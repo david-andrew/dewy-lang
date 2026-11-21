@@ -1,0 +1,50 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checks_builders.dewy'
+use 'diagnostic_exit.dewy'
+use 'error_ops.dewy'
+use 'expr.jo'
+use 'type_ops.dewy'
+use 'types.jo'
+use 'util.jo'
+
+# A field-less generic exception's erased instance (`Closed<void>`, errors.jo): the member of
+# `exception` every instance is reported as, since that family lists no generic instance.
+nominal_erased = (d: int) -> int: get_struct_inst(d, fill(T_VOID, nkids2(d)))
+
+# The statements reporting a task's failure `vn` (a name), known to hold member, to the group
+# named gn: the value itself; a field-less generic exception's erased instance; `Unsent<T>`'s
+# reason, each of its members reported the same way.
+task_failure_calls = (gn: str, vn: str, member: int, pos: int) -> int[]:
+    if member == T_NONE: return [bc_stmt(bc_call("__task_fail", [bc_ident(gn, pos), mk(.none_lit, pos)], pos), pos)]
+    if not nominal_generic_instance(member): return [bc_stmt(bc_call("__task_fail", [bc_ident(gn, pos), bc_ident(vn, pos)], pos), pos)]
+    si = int(types[prune(member)].st)
+    check_struct_fields(si)
+    if structs[si].nfields == 0:
+        erased = nominal_erased(int(structs[si].decl))
+        value = mk(.call, pos)
+        struct_ctor(value, erased, int(structs[int(types[erased].st)].decl), [], 0)
+        add_flag(value, NF_CHECKED)
+        return [bc_stmt(bc_call("__task_fail", [bc_ident(gn, pos), value], pos), pos)]
+    reason = 0
+    loop i in [0..int(structs[si].nfields)):
+        if name_of(int(fields[int(structs[si].fields) + i].name)) == "reason": reason = int(fields[int(structs[si].fields) + i].type)
+    if reason == 0: fatal(pos, "a task's failure {dt(member)} cannot be reported: a generic exception reports its `reason`")
+    rn = "{vn}_reason"
+    out = [bc_let(rn, bc_field(bc_ident(vn, pos), "reason", pos), pos)]
+    held = value_members(reason)
+    loop m in held:
+        if not exception_member(m): continue
+        calls = task_failure_calls(gn, rn, m, pos)
+        if held.len() == 1:
+            out += calls
+            continue
+        condition = mk(.istype, pos)
+        nodes[condition].a = i32(bc_ident(rn, pos))
+        nodes[condition].b = i32(type_node_of(m, pos))
+        branch = mk(.if_, pos)
+        nodes[branch].a = i32(condition)
+        nodes[branch].b = i32(bc_block(calls, pos))
+        add_flag(branch, NF_STMT)
+        out.push(branch)
+    out

@@ -1,0 +1,83 @@
+use 'ast.jo'
+use 'checker_tokens.dewy'
+use 'checks_thin_expr.dewy'
+use 'expr.jo'
+use 'refine.jo'
+use 'refine_metadata.dewy'
+use 'types.jo'
+use 'util.jo'
+
+binary_context = (e: int, t: int, op: int) -> bool: binary_literal_context(e, t, op as Tok)
+
+# Collection literals take their element context from a typed operand.
+# Unwrap an optional only for the literal; the normal equality path adds its tag.
+binary_literal_context = (n: int, t0: int, op: Tok) -> bool:
+    t = prune(t0)
+    if types[t].kind == .opt: t = prune(int(types[t].elem))
+    if dewy_set_literal(n): return is_dewy_set_type(t)
+    if op != .eq and op != .ne: return false
+    if nodes[n].kind == .record_lit: return dewy_record_target(t) != 0
+    if nodes[n].kind == .map_lit: return is_map_type(t)
+    if nodes[n].kind == .array:
+        if nkids(n) == 0 and (is_map_type(t) or dewy_record_target(t) != 0): return true
+        return types[t].kind == .array or types[t].kind == .fixed or types[t].kind == .tuple and nkids(n) == int(types[t].nargs)
+    false
+
+# (a literal made only of literals: checking it twice has no other effect)
+literal_tree = (e: int) -> bool:
+    k = nodes[e].kind
+    if k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit or k == .none_lit: return true
+    if k == .unary: return literal_tree(int(nodes[e].a))
+    if k == .map_lit:
+        loop pair in kids(e):
+            if not literal_tree(int(nodes[pair].a)) or not literal_tree(int(nodes[pair].b)): return false
+        return true
+    if k != .array or nodes[e].a != 0 or nodes[e].b != 0: return false
+    loop i in [0..nkids(e)):
+        if not literal_tree(kid(e, i)): return false
+    true
+
+has_lambda = (n: int) -> bool:
+    if n == 0: return false
+    if nodes[n].kind == .lambda: return true
+    if has_lambda(int(nodes[n].a)) or has_lambda(int(nodes[n].b)): return true
+    loop k in kids(n):
+        if has_lambda(k): return true
+    false
+
+# lo..hi holds at most limit + 1 values (without overflowing on wide intervals)
+small_span = (lo: int, hi: int, limit: int) -> bool: lo >= -(1 << 40) and hi <= (1 << 40) and hi - lo <= limit
+
+call_refined_literal_cost = (a: int, pat: int) -> int:
+    # (a literal for a refined integer parameter, `d:0` or `d:int64 & ~0`: the overload
+    # whose values hold it, ahead of a plain integer one)
+    v = 0
+    lit = true
+    if nodes[a].kind == .int_lit and not has_flag(a, NF_U64): v = nodes[a].ival
+    else if nodes[a].kind == .unary and nodes[a].op == i32(int(Tok.minus)) and nodes[int(nodes[a].a)].kind == .int_lit: v = -nodes[int(nodes[a].a)].ival
+    else: lit = false
+    known, intervals = int_intervals(pat)
+    if lit and known:
+        loop k in [0..intervals.len() / 2):
+            if v >= intervals[2 * k] and v <= intervals[2 * k + 1]: return 0
+        return -1
+    -2
+
+# Text going into a union with a string set: a literal the set lists is its word, a literal it
+# does not list is not offered to it, and other text prefers a member that takes any text, since
+# a set would look it up and panic.
+union_text_target = (n: int, ms: int[]) -> int:
+    e = if n != 0: kid_lit(n) else: 0
+    literal = e != 0 and nodes[e].kind == .str_lit and nodes[e].aux != 1
+    text = if literal: name_of(int(nodes[e].sval)) else: ""
+    if literal:
+        loop i in 0.. and m in ms:
+            set = str_set_of(m)
+            if set != 0 and str_sets[set].contains(text): return i
+    looked_up = -1
+    loop i in 0.. and m in ms:
+        if str_set_of(m) != 0:
+            if not literal and looked_up < 0: looked_up = i
+            continue
+        if can_coerce(n, T_STR, m): return i
+    looked_up
