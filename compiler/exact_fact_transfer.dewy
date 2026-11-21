@@ -140,7 +140,11 @@ exact_fact_store=(n:TransferWord value:TransferWord @s:FactState):>int64=>$unsaf
                 }
                 if t not=? stored {err_notes.push([(-1) "note: GPU code holds {dt(stored)} values in 32-bit words, so this must fit {dt(t)}"])}
                 if shader {err_notes.push([(-1) "help: state the domain as a refinement or prove it with a guard before the operation, or choose `overflow='wrap'` (GPU code cannot check it)"])}
-                else {err_notes.push([(-1) "help: widen the destination to `int`, state the domain as a refinement (or prove it with a guard), or choose `overflow='wrap'|'saturate'`; {dir_panic_fix(nodes.ptr[n].pos true)}"])}
+                else {
+                    let width=dt(t)
+                    err_notes.push([(-1) "help: widen the destination to `int` or state the domain as a refinement. For wrapping use `{width}<overflow='wrap'>`. For saturation use `{width}<overflow='saturate'>`"])
+                    err_notes.push([(-1) "help: {dir_panic_fix(nodes.ptr[n].pos true)}"])
+                }
                 fatal(nodes.ptr[n].pos what)
             }
         }
