@@ -1,0 +1,121 @@
+$runtime_checks
+
+from p"exact.jo" import (exact_candidate_heads exact_candidate_next exact_candidate_nodes exact_measure_on exact_owners)
+from p"ast.jo" import (kids nodes)
+from p"check.jo" import (ctxs cx dewy_at fns lib_dir)
+from p"checker_exact.dewy" import (exact_math_operand exact_potential)
+from p"checker_signature.dewy" import (fn_sig)
+from p"checks_assign_hooks.dewy" import (block_value)
+from p"exact_measure.dewy" import (exact_measure_candidate)
+from p"expr.jo" import (CV IN coerce ntype resolve_by_types wrap_conv)
+from p"lower_scalars.dewy" import (positive_modulus)
+from p"refine_metadata.dewy" import (representation_type)
+from p"type_ops.dewy" import (int_policy)
+from p"types.jo" import (T_INT T_MATH_INT T_NEVER T_U64 is_int types)
+from p"util.jo" import (files intern pos_file)
+
+ExactCheckWord:type=int64<overflow='wrap'>
+# Fixed Tok ordinals in the checked node operator field.
+const HOOK_TOK_MINUS:int32=59
+const HOOK_TOK_PLUS:int32=58
+const HOOK_TOK_STAR:int32=60
+const HOOK_TOK_STARSTAR:int32=79
+const HOOK_TOK_SLASH:int32=61
+const HOOK_TOK_SHL:int32=67
+const HOOK_TOK_AMP:int32=63
+const HOOK_TOK_PIPE:int32=64
+const HOOK_TOK_CARET:int32=65
+
+exact_representation=(t0:ExactCheckWord):>int64=>$unsafe {
+    # A concrete integer has no type variable, refinement or secret wrapper.
+    if types.ptr[t0].kind =? 'int_' {return t0}
+    let t=representation_type(t0)
+    loop types.ptr[t].kind =? 'secret' {t=representation_type(ExactCheckWord(types.ptr[t].elem))}
+    t
+}
+
+exact_type=(t0:int64 pos:int64):>bool=>$unsafe {
+    # The common implementation words have no wrappers or overflow policy.
+    if t0 =? T_INT or t0 =? T_U64 {return dewy_at(pos)}
+    if t0 =? T_MATH_INT {return false}
+    let t=exact_representation(t0)
+    if not is_int(t) or t =? T_MATH_INT or int_policy(t) not=? 0 {return false}
+    # Jo's implementation word remains a machine word. Narrow Jo integers
+    # and every Dewy fixed-width integer have storage-only widths.
+    dewy_at(pos) or types.ptr[t].bits <? 64
+}
+
+exact_narrow_control=(n:ExactCheckWord to:ExactCheckWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'block' and nodes.ptr[n].aux not=? 0 {
+        coerce(block_value(n) to);
+    }
+    else if k =? 'if_' or k =? 'iflet' {
+        loop arm in [ExactCheckWord(nodes.ptr[n].b) ExactCheckWord(nodes.ptr[n].c)] {
+            if ntype(arm) not=? T_NEVER and not exact_narrow_control(arm to) {coerce(arm to);}
+        }
+    }
+    else if k =? 'match_' {
+        loop arm in kids(n) {
+            let body=ExactCheckWord(nodes.ptr[arm].b)
+            if ntype(body) not=? T_NEVER and not exact_narrow_control(body to) {coerce(body to);}
+        }
+    }
+    else {return false}
+    nodes.ptr[n].type = int32(to)
+    true
+}
+
+exact_format_word=(n:ExactCheckWord writer:string buffer:ExactCheckWord pos:ExactCheckWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'conv' {return false}
+    let source=exact_math_operand(n)
+    if source =? n {return false}
+    # This runs before exact preparation. Source storage types are not yet
+    # arithmetic width facts; a positive remainder alone supplies its own bound.
+    if positive_modulus(source) <=? 0 {return false}
+    let decl=resolve_by_types(intern(writer) [buffer T_MATH_INT] pos true true)
+    if writer =? "__dewy_fmt" {
+        if files.ptr[pos_file(nodes.ptr[decl].pos)].path not=? "{lib_dir}/core/fmt.jo" or not fn_sig(decl).generic {return false}
+        decl=resolve_by_types(intern("__fmt") [buffer T_MATH_INT] pos true true)
+    }
+    files.ptr[pos_file(nodes.ptr[decl].pos)].path =? "{lib_dir}/math_int.jo"
+}
+
+exact_int_result=(n:ExactCheckWord observe_unsigned:bool=false):>int64=>$unsafe {
+    if not dewy_at(nodes.ptr[n].pos) {return ntype(n)}
+    if ntype(n) not=? T_INT and not (observe_unsigned and exact_type(ntype(n) nodes.ptr[n].pos) and exact_potential(n)) {return ntype(n)}
+    wrap_conv(n CV.int_ T_MATH_INT)
+    exact_note(ExactCheckWord(nodes.ptr[n].a))
+    T_MATH_INT
+}
+
+exact_operation=(n:ExactCheckWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'intrinsic' {return nodes.ptr[n].aux =? int32(int64(IN.fixed_abs))}
+    if k =? 'unary' {
+        if nodes.ptr[n].op not=? HOOK_TOK_MINUS {return false}
+    }
+    else if k =? 'binary' and nodes.ptr[n].aux =? 0 {
+        let op=nodes.ptr[n].op
+        if op not=? HOOK_TOK_PLUS and op not=? HOOK_TOK_MINUS and op not=? HOOK_TOK_STAR and op not=? HOOK_TOK_STARSTAR and op not=? HOOK_TOK_SLASH and op not=? HOOK_TOK_SHL {return false}
+    }
+    else {return false}
+    if nodes.ptr[n].type =? 0 or not exact_type(ntype(n) nodes.ptr[n].pos) {return false}
+    k not=? 'binary' or nodes.ptr[n].op not=? HOOK_TOK_SLASH or types.ptr[exact_representation(ntype(n))].sign
+}
+
+exact_note=(n:ExactCheckWord):>void=>$unsafe {
+    if cx <? 0 {return}
+    let k=nodes.ptr[n].kind
+    let control=k =? 'if_' or k =? 'iflet' or k =? 'coalesce' or k =? 'match_'
+    let bitwise=k =? 'binary' and (nodes.ptr[n].op =? HOOK_TOK_AMP or nodes.ptr[n].op =? HOOK_TOK_PIPE or nodes.ptr[n].op =? HOOK_TOK_CARET)
+    if not exact_operation(n) and not ((control or bitwise) and exact_potential(n)) and not (k =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.int2float)) and exact_potential(ExactCheckWord(nodes.ptr[n].a))) and not (exact_measure_on and exact_measure_candidate(n)) {return}
+    let f=ExactCheckWord(ctxs.ptr[cx].inst)
+    if f >? 0 {
+        exact_owners[f] = true
+        if f >=? exact_candidate_heads.length {exact_candidate_heads.resize(max(f + 1 fns.length))}
+        exact_candidate_nodes.push(n)
+        exact_candidate_next.push(exact_candidate_heads[f])
+        exact_candidate_heads[f] = exact_candidate_nodes.length
+    }
+}

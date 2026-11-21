@@ -10,6 +10,7 @@ use 'check.jo'
 use 'expr.jo'
 use 'lower.jo'
 use 'exact.jo'
+use 'exact_check_hooks.dewy'
 
 eg_local = (n: int) -> int:
     if n <= 0 or nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)) or exact_representation(ntype(n)) != T_INT: return 0

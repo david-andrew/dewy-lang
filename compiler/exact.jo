@@ -69,16 +69,11 @@ use 'exact_cold_walk.dewy'
 use 'facts_value_queries.dewy'
 use 'facts_index_writes.dewy'
 use 'facts_lengths.dewy'
+use 'exact_check_hooks.dewy'
 
 # exact_potential and exact_math_operand run in checker_exact.dewy.
 exact_query_input = CheckerExactInput(&nodes, &lists, &types, &files, &T_INT, &T_U64, &T_MATH_INT)
 exact_query_binding = checker_exact_bind(&exact_query_input)
-
-# Secret wrapping changes visibility, never an integer's arithmetic domain.
-exact_representation = (t0: int) -> int:
-    t = representation_type(t0)
-    loop types[t].kind == .secret: t = representation_type(int(types[t].elem))
-    t
 
 struct ExactMeasure:
     owner: int
@@ -149,79 +144,7 @@ exact_mark = (n: int):
 exact_unmark = (n: int):
     exact_marks[n] &= 254
 
-exact_type = (t0: int, pos: int) -> bool:
-    # The common implementation words have no wrappers or overflow policy.
-    if t0 == T_INT or t0 == T_U64: return dewy_at(pos)
-    if t0 == T_MATH_INT: return false
-    t = exact_representation(t0)
-    if not is_int(t) or t == T_MATH_INT or int_policy(t) != 0: return false
-    # Jo's implementation word remains a machine word. Narrow Jo integers
-    # and every Dewy fixed-width integer have storage-only widths.
-    dewy_at(pos) or types[t].bits < 64
-
-# Distribute a demanded scalar conversion into selected value arms. This
-# preserves evaluation order and puts the fit check on the executed arm only.
-exact_narrow_control = (n: int, to: int) -> bool:
-    k = nodes[n].kind
-    if k == .block and nodes[n].aux != 0:
-        coerce(block_value(n), to)
-    else if k == .if_ or k == .iflet:
-        loop arm in [int(nodes[n].b), int(nodes[n].c)]:
-            if ntype(arm) != T_NEVER and not exact_narrow_control(arm, to): coerce(arm, to)
-    else if k == .match_:
-        loop arm in kids(n):
-            body = int(nodes[arm].b)
-            if ntype(body) != T_NEVER and not exact_narrow_control(body, to): coerce(body, to)
-    else: return false
-    nodes[n].type = i32(to)
-    true
-
 exact_word_formats: {int: bool} = {}
-
-exact_format_word = (n: int, writer: str, buffer: int, pos: int) -> bool:
-    if nodes[n].kind != .conv: return false
-    source = exact_math_operand(n)
-    if source == n: return false
-    # This runs before exact preparation. Source storage types are not yet
-    # arithmetic width facts; a positive remainder alone supplies its own bound.
-    if positive_modulus(source) <= 0: return false
-    decl = resolve_by_types(intern(writer), [buffer, T_MATH_INT], pos, true, true)
-    if writer == "__dewy_fmt":
-        if files[pos_file(nodes[decl].pos)].path != lib_dir + "/core/fmt.jo" or not fn_sig(decl).generic: return false
-        decl = resolve_by_types(intern("__fmt"), [buffer, T_MATH_INT], pos, true, true)
-    files[pos_file(nodes[decl].pos)].path == lib_dir + "/math_int.jo"
-
-exact_int_result = (n: int, observe_unsigned: bool = false) -> int:
-    if not dewy_at(nodes[n].pos): return ntype(n)
-    if ntype(n) != T_INT and not (observe_unsigned and exact_type(ntype(n), nodes[n].pos) and exact_potential(n)): return ntype(n)
-    wrap_conv(n, .int_, T_MATH_INT)
-    exact_note(int(nodes[n].a))
-    T_MATH_INT
-
-exact_operation = (n: int) -> bool:
-    k = nodes[n].kind
-    if k == .intrinsic: return nodes[n].aux == i32(int(IN.fixed_abs))
-    if k == .unary:
-        if nodes[n].op != i32(int(Tok.minus)): return false
-    else if k == .binary and nodes[n].aux == 0:
-        op = nodes[n].op as Tok
-        if op != .plus and op != .minus and op != .star and op != .starstar and op != .slash and op != .shl: return false
-    else: return false
-    if nodes[n].type == 0 or not exact_type(ntype(n), nodes[n].pos): return false
-    k != .binary or nodes[n].op != i32(int(Tok.slash)) or types[exact_representation(ntype(n))].sign
-
-exact_note = (n: int):
-    if cx < 0: return
-    control = nodes[n].kind == .if_ or nodes[n].kind == .iflet or nodes[n].kind == .coalesce or nodes[n].kind == .match_
-    bitwise = nodes[n].kind == .binary and (nodes[n].op == i32(int(Tok.amp)) or nodes[n].op == i32(int(Tok.pipe)) or nodes[n].op == i32(int(Tok.caret)))
-    if not exact_operation(n) and not ((control or bitwise) and exact_potential(n)) and not (nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int2float)) and exact_potential(int(nodes[n].a))) and not (exact_measure_on and exact_measure_candidate(n)): return
-    f = int(ctxs[cx].inst)
-    if f > 0:
-        exact_owners[f] = true
-        if f >= exact_candidate_heads.len(): exact_candidate_heads.resize(max(f + 1, fns.len()))
-        exact_candidate_nodes.push(n)
-        exact_candidate_next.push(exact_candidate_heads[f])
-        exact_candidate_heads[f] = exact_candidate_nodes.len()
 
 # Context-free width facts are demanded only by a storage boundary. Cache one
 # signed width and a nonnegative bit per expression; 0 means not computed and

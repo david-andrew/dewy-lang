@@ -640,6 +640,10 @@ including shader call graphs, exact shift counts and immutable word operands.
 The recursive walk reuses the write inventory and the per-node visit marks.
 It inspects scalar leaf kinds before entering the full traversal.
 
+`exact_check_hooks.dewy` classifies fixed-width operations during checking,
+places narrowing conversions on selected control arms, and records candidate
+nodes for each demanded owner.
+
 ## Shared backend analysis boundary
 
 `backend_analysis.dewy` owns the complete final-IR analysis used by x64 and
