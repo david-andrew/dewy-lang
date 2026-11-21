@@ -1,0 +1,11 @@
+forward = (grid:NDArray<float64>):>NDArray<float64> => grid
+probe = ():>float64 => {
+    let grid = reshape([20.0 22.0 1.0 2.0] as array<float64> 2 2)
+    let kept = forward(grid)
+    grid = zeros(1 1)
+    let boxed = [kept]
+    let present:NDArray<float64>? = boxed[0]
+    if present is? none {return -1.0}
+    present[0 1]
+}
+printl(probe())

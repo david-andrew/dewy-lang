@@ -1,7 +1,7 @@
 $runtime_checks
 
 from p"ast.jo" import (kid mk nkids nodes)
-from p"check.jo" import (fns lib_dir subst)
+from p"check.jo" import (FK_NORMAL LF_MUTPARAM fns lib_dir locals subst)
 from p"checks_thin_expr.dewy" import nd_elem
 from p"effect_values.dewy" import effect_share
 from p"expr.jo" import (CV is_nd ntype)
@@ -15,7 +15,7 @@ from p"refine.jo" import refine_entry
 from p"refine_metadata.dewy" import representation_type
 from p"refine_transfers.dewy" import (ref_assume ref_check)
 from p"sequence_selectors.dewy" import fact_sequence_classify
-from p"types.jo" import (T_F32 T_FLOAT T_MATH_INT is_int telem tkind)
+from p"types.jo" import (T_F32 T_FLOAT T_MATH_INT is_int prune structs telem tkind types)
 from p"util.jo" import (files intern pos_file pos_in_lib)
 
 NdQueryWord:type=int64<overflow='wrap'>
@@ -36,10 +36,43 @@ nd_query_call=(n:NdQueryWord):>int64=>$unsafe {
     kind
 }
 
+# A direct return of a by-value argument preserves its shape snapshot.
+# Classification examines a fixed number of checked nodes per demanded instance.
+fact_nd_identity=(f:NdQueryWord):>bool=>$unsafe {
+    let t=prune(NdQueryWord(fns.ptr[f].ret))
+    if not is_nd(t) or fns.ptr[f].kind not=? FK_NORMAL or fns.ptr[f].state not=? 2 or fns.ptr[f].params.length not=? 1 {return false}
+    let param=NdQueryWord(fns.ptr[f].params.ptr[0])
+    if prune(NdQueryWord(locals.ptr[param].type)) not=? t or NdQueryWord(locals.ptr[param].flags) & LF_MUTPARAM not=? 0 {return false}
+    let body=NdQueryWord(fns.ptr[f].body)
+    if body =? 0 {return false}
+    let value=param
+    if nodes.ptr[body].kind =? 'block' {
+        let count=nkids(body)
+        if count =? 2 {
+            # Dewy gives a value parameter a private local at entry.
+            let binding=kid(body 0)
+            if nodes.ptr[binding].kind not=? 'vardecl' or nodes.ptr[binding].aux2 not=? 1 or nkids(binding) not=? 0 {return false}
+            let incoming=NdQueryWord(nodes.ptr[binding].b)
+            if nodes.ptr[incoming].kind not=? 'ident' or nodes.ptr[incoming].aux not=? int32(1) or NdQueryWord(nodes.ptr[incoming].sym) not=? param {return false}
+            value=NdQueryWord(nodes.ptr[binding].sym)
+        } else if count not=? 1 {return false}
+        body=kid(body count - 1)
+    }
+    if nodes.ptr[body].kind =? 'return_' or nodes.ptr[body].kind =? 'exprstmt' {body=NdQueryWord(nodes.ptr[body].a)}
+    # The checked identifier's aux field stores the Jo local-symbol ordinal.
+    if nodes.ptr[body].kind not=? 'ident' or nodes.ptr[body].aux not=? int32(1) or NdQueryWord(nodes.ptr[body].sym) not=? value {return false}
+    let declared=NdQueryWord(structs.ptr[NdQueryWord(types.ptr[t].st)].decl)
+    if declared =? 0 or files.ptr[pos_file(nodes.ptr[declared].pos)].path not=? "{lib_dir}/std/nd.jo" {return false}
+    effect_share(nd_elem(t)) and not (ownership_decls.length not=? 0 and ownership_fact_type(t))
+}
+
 fact_nd_classify=(n:NdQueryWord):>int64=>$unsafe {
     if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return 0}
-    let d=NdQueryWord(fns.ptr[NdQueryWord(nodes.ptr[n].sym)].decl)
-    if d =? 0 or not pos_in_lib(nodes.ptr[d].pos) {return 0}
+    let f=NdQueryWord(nodes.ptr[n].sym)
+    let d=NdQueryWord(fns.ptr[f].decl)
+    if d =? 0 {return 0}
+    # Kind 115 passes the evaluated first operand through unchanged.
+    if not pos_in_lib(nodes.ptr[d].pos) {return if nkids(n) =? 1 and fact_nd_identity(f) {115} else {0}}
     if fact_nd_names.length =? 0 {
         loop name in ["zeros" "ones" "rand" "randn"] {fact_nd_names[intern(name)]=1}
         fact_nd_names[intern("eye")]=2

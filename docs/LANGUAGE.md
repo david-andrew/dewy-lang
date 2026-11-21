@@ -3272,6 +3272,8 @@ indexing work too. Scalar indexing requires the rank to equal the number of
 indices and `0 <=? index <? matrix.length[axis]` on every axis. Constructors,
 literals, `reshape` and shaped parameters supply these facts; loops over the
 extents and guards on `.length` prove the bounds without a runtime-check opt-in.
+A function that directly returns its by-value array parameter preserves the
+argument's shape and data length at the call site.
 A shaped array replaced in a loop, a counted one included, keeps its shape when
 every replacement has it (`plate = step(plate)` with a shaped result,
 `loop _ in [0..k) result = result * p`).

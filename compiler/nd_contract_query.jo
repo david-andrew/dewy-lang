@@ -1,6 +1,7 @@
 use 'nd_contracts.jo'
 use 'ast.jo'
 use 'check.jo'
+use 'checker_state.dewy'
 use 'checks_thin_expr.dewy'
 use 'effect_values.dewy'
 use 'expr.jo'
@@ -26,10 +27,41 @@ nd_query_call = (n: int) -> int:
     fact_nd_functions[f] = kind
     kind
 
+# A single, by-value argument returned directly retains its shape snapshot.
+# Only demanded N-D calls use this summary. Classify the checked body once
+# per instance, with constant work and no traversal of arbitrary callees.
+fact_nd_identity = (f: int) -> bool:
+    t = prune(int(fns[f].ret))
+    if not is_nd(t) or fns[f].kind != FK_NORMAL or fns[f].state != 2 or fns[f].params.len() != 1: return false
+    param = fns[f].params[0]
+    if prune(int(locals[param].type)) != t or int(locals[param].flags) & LF_MUTPARAM != 0: return false
+    body = int(fns[f].body)
+    if body == 0: return false
+    value = param
+    if nodes[body].kind == .block:
+        count = nkids(body)
+        if count == 2:
+            # Dewy gives a value parameter a private local at entry.
+            binding = kid(body, 0)
+            if nodes[binding].kind != .vardecl or nodes[binding].aux2 != 1 or nkids(binding) != 0: return false
+            incoming = int(nodes[binding].b)
+            if nodes[incoming].kind != .ident or nodes[incoming].aux != i32(int(SK.local)) or int(nodes[incoming].sym) != param: return false
+            value = int(nodes[binding].sym)
+        else if count != 1: return false
+        body = kid(body, count - 1)
+    if nodes[body].kind == .return_ or nodes[body].kind == .exprstmt: body = int(nodes[body].a)
+    if nodes[body].kind != .ident or nodes[body].aux != i32(int(SK.local)) or int(nodes[body].sym) != value: return false
+    declared = int(structs[int(types[t].st)].decl)
+    if declared == 0 or files[pos_file(nodes[declared].pos)].path != lib_dir + "/std/nd.jo": return false
+    effect_share(nd_elem(t)) and not (ownership_decls.len() != 0 and ownership_fact_type(t))
+
 fact_nd_classify = (n: int) -> int:
     if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return 0
-    d = int(fns[int(nodes[n].sym)].decl)
-    if d == 0 or not pos_in_lib(nodes[d].pos): return 0
+    f = int(nodes[n].sym)
+    d = int(fns[f].decl)
+    if d == 0: return 0
+    # Kind 115 passes the evaluated first operand through unchanged.
+    if not pos_in_lib(nodes[d].pos): return if nkids(n) == 1 and fact_nd_identity(f): 115 else: 0
     if fact_nd_names.len() == 0:
         loop name in ["zeros", "ones", "rand", "randn"]: fact_nd_names[intern(name)] = 1
         fact_nd_names[intern("eye")] = 2
