@@ -1,0 +1,43 @@
+$runtime_checks
+
+from p"@lib/core/str.jo" import starts_with
+from p"intern.dewy" import (hash_bytes name_add name_find)
+from p"util.jo" import (files lib_root name_hash name_tab names)
+
+UtilWord:type=int64<overflow='wrap'>
+
+util_intern=(s:string):>int64=>util_intern_sub(s 0 (s as array<uint8>).length)
+
+# Borrow the input bytes for the probe. A hit needs no substring allocation.
+util_intern_sub=(s:string start:UtilWord n:int64):>int64=>$unsafe {
+    let p=(s as array<uint8>).ptr + start
+    let h=hash_bytes(p n)
+    let id=name_find(@names @name_hash @name_tab p n h)
+    if id >=? 0 {return id}
+    util_intern_new(s start n h)
+}
+
+# Use the byte slice primitive so even malformed source bytes survive intact.
+util_intern_new=(s:string start:UtilWord n:UtilWord h:int64):>int64=>{
+    if start =? 0 and n =? (s as array<uint8>).length {return name_add(@names @name_hash @name_tab s h)}
+    name_add(@names @name_hash @name_tab __str_slice(s start start + n) h)
+}
+
+util_name_of=(id:int64):>string=>names[id]
+
+util_name_known=(s:string):>bool=>$unsafe {
+    let p=(s as array<uint8>).ptr
+    let n=(s as array<uint8>).length
+    name_find(@names @name_hash @name_tab p n hash_bytes(p n)) >=? 0
+}
+
+# The file index occupies the high bits, the byte offset the low 40 bits.
+util_mkpos=(file:UtilWord off:UtilWord):>int64=>(file << 40) | off
+util_pos_file=(p:UtilWord):>int64=>p >> 40
+util_pos_off=(p:UtilWord):>int64=>p & 0xFFFFFFFFFF
+
+util_pos_in_lib=(p:int64):>bool=>{
+    if p <=? 0 or (lib_root as array<uint8>).length =? 0 {return false}
+    let f=util_pos_file(p)
+    f <? files.length and starts_with(files[f].path lib_root)
+}

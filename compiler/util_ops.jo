@@ -1,0 +1,34 @@
+use 'util.jo'
+use 'intern.dewy'
+
+# Frozen bootstrap twin of util_ops.dewy.
+util_intern = (s: str) -> int: util_intern_sub(s, 0, len(s))
+
+# Intern s[start..start + n] without allocating unless the name is new (an existing name is
+# found by its bytes alone, s not passed beside the table: no reference counting)
+util_intern_sub = (s: str, start: int, n: int) -> int:
+    p = data(s) + start
+    h = hash_bytes(p, n)
+    id = name_find(names, name_hash, name_tab, p, n, h)
+    if id >= 0: return id
+    util_intern_new(s, start, n, h)
+
+# (a new name: cut from s unless it is all of s)
+util_intern_new = (s: str, start: int, n: int, h: int) -> int:
+    if start == 0 and n == len(s): return name_add(names, name_hash, name_tab, s, h)
+    name_add(names, name_hash, name_tab, s[start..start + n), h)
+
+util_name_of = (id: int) -> str: names[id]
+
+# Whether s is an interned name already, without interning it
+util_name_known = (s: str) -> bool: name_find(names, name_hash, name_tab, data(s), len(s), hash_bytes(data(s), len(s))) >= 0
+
+# position encoding: file index in the high bits, byte offset in the low 40 bits
+util_mkpos = (file: int, off: int) -> int: (file << 40) | off
+util_pos_file = (p: int) -> int: p >> 40
+util_pos_off = (p: int) -> int: p & 0xFFFFFFFFFF
+
+util_pos_in_lib = (p: int) -> bool:
+    if p <= 0 or len(lib_root) == 0: return false
+    f = util_pos_file(p)
+    f < files.len() and starts_with(files[f].path, lib_root)

@@ -74,7 +74,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `dewy_syntax` | `dewy_syntax.jo` | Dewy kind names; old tree retired | No separate syntax-tree construction or projection remains. |
 | `dewy_grammar` | `dewy_grammar.jo` | Dewy grammar queries | Panel ≤+0.02%, lex+parse +0.03%; hot caller guards stay inline. |
 | `node_store` | `node_store.jo` | Dewy node/layout/list operations | Flagships +0.13%; lex+parse +0.25%, resolve+check +0.29%; borrowed arenas. |
-| `intern` | `intern.jo` | Dewy hash/probe/insert | Panel −0.04% to +0.12%; lex+parse −0.04%; new-byte slicing stays Jo. |
+| `intern`, `util_ops` | Same stems + `.jo` | Dewy hash/probe/insert, name publication and source-position queries | Hits borrow the input bytes. New names use the raw byte slice primitive. |
 | `dewy_lexer` | `dewy_lexer.jo` | Dewy tokenizing loop | O(bytes + amortized interning); presized slots, borrowed tables/host. |
 | `dewy_scan` | `dewy_scan.jo` | Dewy bracket/arm scans | O(requested tokens); no whole-file prepass. |
 | `dewy_parser` | `dewy_parser.jo` | Dewy context and word cache | Word classification O(1) hit / O(18) miss; report/hint O(1). |
@@ -141,8 +141,8 @@ one. Fixed-size schedules and one doubled word per rotation made SHA viable;
 the naive two-shift SHA-256 port cost +51%. Gate generated code, not source size.
 
 Arbitrary bytes remain a boundary requirement: names can contain malformed UTF-8
-and NUL. Dewy's checked byte slices/conversions cannot manufacture those strings;
-Jo cuts new names, and byte-oriented leaves retain bytes. A proven ten-byte
+and NUL. `util_ops` uses `__str_slice` to preserve those bytes when publishing a
+new name. A proven ten-byte
 `byte_slice` still cost 430 versus 355 instructions (release 335 versus 275).
 A manual manifest scan cost 9.2 instructions/byte versus library `find`'s 2.4.
 Do not replace a cheap library scan or host cut merely to move a line of code.

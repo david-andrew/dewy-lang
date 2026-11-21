@@ -1,3 +1,4 @@
+use 'util_ops.dewy'
 use 'source_queries.dewy'
 use 'source_types.dewy'
 use 'lazy_bodies.jo'
@@ -28,31 +29,16 @@ names: str[]
 name_hash: int[]
 name_tab: i32[]
 
-intern = (s: str) -> int: intern_sub(s, 0, len(s))
-
-# intern s[start..start + n] without allocating unless the name is new (an existing name is
-# found by its bytes alone, s not passed beside the table: no reference counting)
-intern_sub = (s: str, start: int, n: int) -> int:
-    p = data(s) + start
-    h = hash_bytes(p, n)
-    id = name_find(names, name_hash, name_tab, p, n, h)
-    if id >= 0: return id
-    intern_new(s, start, n, h)
-
-# (a new name: cut from s unless it is all of s)
-intern_new = (s: str, start: int, n: int, h: int) -> int:
-    if start == 0 and n == len(s): return name_add(names, name_hash, name_tab, s, h)
-    name_add(names, name_hash, name_tab, s[start..start + n), h)
-
-name_of = (id: int) -> str: names[id]
-
-# Whether s is an interned name already, without interning it
-name_known = (s: str) -> bool: name_find(names, name_hash, name_tab, data(s), len(s), hash_bytes(data(s), len(s))) >= 0
-
-# position encoding: file index in the high bits, byte offset in the low 40 bits
-mkpos = (file: int, off: int) -> int: (file << 40) | off
-pos_file = (p: int) -> int: p >> 40
-pos_off = (p: int) -> int: p & 0xFFFFFFFFFF
+# Shared entry points for Jo and Dewy users of the utility tables.
+intern = (s: str) -> int: util_intern(s)
+intern_sub = (s: str, start: int, n: int) -> int: util_intern_sub(s, start, n)
+intern_new = (s: str, start: int, n: int, h: int) -> int: util_intern_new(s, start, n, h)
+name_of = (id: int) -> str: util_name_of(id)
+name_known = (s: str) -> bool: util_name_known(s)
+mkpos = (file: int, off: int) -> int: util_mkpos(file, off)
+pos_file = (p: int) -> int: util_pos_file(p)
+pos_off = (p: int) -> int: util_pos_off(p)
+pos_in_lib = (p: int) -> bool: util_pos_in_lib(p)
 
 # each file's lines (line_table.dewy)
 src_lines: LineTable
@@ -87,11 +73,6 @@ pl_files: int[]                  # the files parsed (counted when the report is 
 pl_units: int[]                  # library units parsed on their own (prelude.jo): file, start, end
 pl_reached: int[]                # lazy library bodies parsed on demand (ensure_body): file, start, end
 pl_inst_decls: int[]             # the declaration of each generic instance made
-
-pos_in_lib = (p: int) -> bool:
-    if p <= 0 or len(lib_root) == 0: return false
-    f = pos_file(p)
-    f < files.len() and starts_with(files[f].path, lib_root)
 
 # (the facts pass decides each function's obligations on its own: while err_held_on, an
 # unproven one is held, not shown, and the pass shows all it held in source order at its end)

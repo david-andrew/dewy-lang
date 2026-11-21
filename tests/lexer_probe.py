@@ -32,6 +32,17 @@ def lexer_span_helpers(compiler, out):
     else:
         source_layout = ''
         source_start = util.index('struct SrcFile:')
+    if (directory / 'util_ops.dewy').exists():
+        copy_leaf('util_ops.dewy')
+        (out / 'util.jo').write_text(
+            "use 'util_ops.dewy'\n" + source_layout
+            + util[source_start:util.index("# each file's lines")]
+            + 'lib_root = ""\n'
+        )
+        utility = source_layout + "use 'util.jo'"
+    else:
+        utility = (source_layout + util[source_start:util.index('# position encoding')]
+                   + 'mkpos = (file: int, off: int) -> int: (file << 40) | off\n')
     lex = (directory / 'lex.jo').read_text()
     helpers = (directory / 'lexer_helpers.jo').read_text()
     twin = (directory / 'dewy_fast_lex.jo').read_text()
@@ -50,8 +61,7 @@ def lexer_span_helpers(compiler, out):
         "use 'dewy_tokens.dewy'\nuse 'dewy_lex.dewy'\nuse 'dewy_lexer.dewy'\nuse 'intern.dewy'\nuse 'dewy_parser.dewy'",
         lex[lex.index('lx_cls:'):lex.index('\n', lex.index('lx_cls:')) + 1]
         + helpers[helpers.index('lx_init_classes ='):helpers.index('is_ident_start =')],
-        source_layout + util[source_start:util.index('# position encoding')],
-        'mkpos = (file: int, off: int) -> int: (file << 40) | off\n'
+        utility,
         'fatal = (pos: int, message: str): panic(message)\n'
         'err_notes: (int, str)[]',
         'dc_parser: ParserContext',
