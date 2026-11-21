@@ -111,6 +111,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `opt_core` | `opt_core.jo` | Dewy optimizer entry and opcode decode table | Once-per-process table from an ABI-order list; ordinal-indexed queries and register reset stay Jo. |
 | `loops_version` | `loops_version.jo` | Dewy loop versioning and vectorization entry | Layouts and shared vectorizer state stay in `loops.jo`; flagship totals −0.0003% to +0.0004%. |
 | `exact_emit` | `exact_emit.jo` | Dewy exact fixed-width emission | Planning state stays in `exact.jo`; flagship totals −0.0017% to −0.0003%. |
+| `exact_static_widths` | `exact_static_widths.jo` | Dewy context-free exact widths and constant folding | Width/value indexes stay in `exact.jo`; flagship totals −0.0028% to −0.0005%. |
 
 ### Boundary lessons that constrain the next cutover
 
@@ -610,6 +611,14 @@ proofs) and the join and chain registers that lowering and `exact_chain_walks`
 share. Emission reads those queries directly and adds no pass: work stays
 O(emitted words) per demanded node, and the existing chain plan, the 16-node
 cap and the cold fallbacks are unchanged.
+
+`exact_static_widths.dewy` owns the context-free width facts a storage boundary
+demands: literal and folded constant widths, bound constants, conversions,
+masks, remainders, literal shifts and the midpoint pattern. Its width and
+magnitude indexes stay in `exact.jo` with the reset. Each demanded edge is
+visited once, O(N + E) time and O(N) space; constant folding uses one unsigned
+magnitude word and falls back to width bounds on overflow. Type predicates are
+evaluated only on the branch that needs them, as in Jo.
 
 ## Shared backend analysis boundary
 
