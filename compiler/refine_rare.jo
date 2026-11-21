@@ -757,7 +757,7 @@ ref_record_conversion = (from: int, to: int) -> bool:
         if not can_coerce(0, a, b): return false
     true
 
-refine_rare_bind = (declaring: *(int)) -> int: 0
+refine_rare_bind = (declaring: *(int), holder_name: *(int), bindings: *(RefineBindings), safe_used: *(bool)) -> int: 0
 
 # A parameter or field: most have no array type, so O(1) without a call deeper.
 ref_holder_candidate = (binding: int):
@@ -931,3 +931,84 @@ ref_sib_dict_call = (decl: int, args: mut int[], ptypes: int[]):
         ref_self_value(args[2], t, 0, place)
     else if name != "remove" and name != "clear" and name != "pop" and name != "reserve" and name != "__map_tidy": return
     ref_nd_receivers[place] = true
+
+ref_span_copy = (from: int, to: int):
+    if from != to and not ref_spans.has(to):
+        if let at = ref_spans.get(from): ref_spans[to] = at
+
+resolve_refinement = (n: int) -> int:
+    if nodes[n].b == 0: return ref_self_resolve(n)
+    # (a refinement of a module whose declarations were not asked for yet, met another way)
+    if not refine_active and refine_deferred.len() > 0:
+        loop m, _ in refine_deferred: refine_resume(m)
+    base = resolve_type(int(nodes[n].a))
+    binder = if nodes[n].name != 0: int(nodes[n].name) else: refine_bindings.self
+    if ref_self_active and ref_self_contract(base): fatal(nodes[n].pos, "a self-length array cannot have a length contract as well")
+    atoms: RefAtom[]
+    previous_base = refine_bindings.base_type
+    refine_bindings.base_type = base
+    # (the direct element of an array that names its own binding: that name is the array)
+    previous_holder = ref_holder_name
+    ref_holder_name = if ref_holder_elems.len() > 0: ref_holder_elems.get(n) ?? 0 else: 0
+    fields_before = refine_bindings.fields
+    formals_before = refine_bindings.formals
+    if ref_holder_name != 0:
+        refine_bindings.fields = ref_without_name(refine_bindings.fields, ref_holder_name)
+        refine_bindings.formals = ref_without_name(refine_bindings.formals, ref_holder_name)
+    ref_resolve_atoms(nodes, types, names, refine_bindings, ref_resolve_host, int(nodes[n].b), binder, atoms, 0)
+    ref_holder_name = previous_holder
+    refine_bindings.fields = fields_before
+    refine_bindings.formals = formals_before
+    refine_bindings.base_type = previous_base
+    if ref_atoms_have_kind(atoms, 6): ref_self_validate(atoms, base, nodes[n].pos)
+    expected = if tkind(representation_type(base)) == .array or tkind(representation_type(base)) == .str_: T_INT else: representation_type(base)
+    loop atom in atoms:
+        loop term in [atom.a, atom.b]:
+            if refine_bindings.fields.len() > 0 and term.kind == 2: fatal(nodes[n].pos, "record field refinement dependencies must name siblings or stable lexical bindings")
+            root = 0
+            if term.kind == 0: root = base
+            else if term.kind == 3: root = int(locals[term.value].type)
+            if root == 0: continue
+            actual = ref_projection_type(root, term.path, nodes[n].pos)
+            if not has_var(actual) and not is_int(actual): fatal(nodes[n].pos, "refinement comparisons require scalar or length projections")
+            if not ref_repr_match(actual, expected, term.path): fatal(nodes[n].pos, "dependent scalar refinement requires matching integer representations")
+    predicate = ref_intern(atoms)
+    if not ref_spans.has(predicate): ref_spans[predicate] = nodes[n].pos
+    mk_refined(base, predicate)
+
+refine_coerce = (n: int, target: int) -> int:
+    t = prune(target)
+    if types[t].bits == -1: return total_dict_coerce(n, t)
+    # Path containment is proved by the demanded SafePath pass. Keep the
+    # obligation node through checking; it has no numeric predicate or runtime test.
+    if types[t].bits == -2:
+        ut_safe_used = true
+        if prune(ntype(n)) == t: return n
+        coerce(n, int(types[t].elem))
+        wrap_conv(n, .refinement, int(types[t].elem))
+        nodes[n].aux2 = i32(t)
+        nodes[n].ival = 1
+        return n
+    coerce(n, int(types[t].elem))
+    if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.refinement)) and nodes[n].aux2 == i32(t): return n
+    owner = if cx >= 0: int(ctxs[cx].inst) else: 0
+    # A contract on formals is checked against the arguments of a call to its
+    # function, or against the entry of the function itself. Elsewhere (a
+    # literal compared with a call's optional result) nothing binds them: the
+    # value keeps its base type, and the type's contract is not assumed for it.
+    if ref_has_formals(t) and t != refine_arg_target and not ref_signature_has(owner, t): return n
+    wrap_conv(n, .refinement, int(types[t].elem))
+    nodes[n].aux2 = i32(t)
+    if dewy_at(nodes[n].pos): int_domain_conversion(n, t)
+    refine_requests.push(FactRequest(n, owner))
+    refine_owners[owner] = true
+    n
+
+# Resolve a projection against its concrete binder before publishing a contract.
+ref_projection_type = (root: int, path: int[], pos: int) -> int:
+    if path.len() == 1 and path[0] <= -2 and is_nd(representation_type(root)): return T_INT
+    result = ref_types_projection(types, structs, fields, ref_fields_host, ref_projection_host, root, path, pos, T_INT)
+    if result.error == 1: fatal(pos, "refinement length requires an array or a string")
+    if result.error == 2: fatal(pos, "refinement field requires a record")
+    if result.error == 3: fatal(pos, "unknown refinement field")
+    result.type

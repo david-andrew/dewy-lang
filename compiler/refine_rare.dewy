@@ -1,12 +1,12 @@
 $runtime_checks
 
-from p"expr.jo" import (CV can_coerce check_place unnamed)
+from p"expr.jo" import (CV can_coerce check_place unnamed is_nd)
 from p"ast.jo" import (NF_CHECKED NF_MUT NF_RDONLY add_flag clone has_flag kid kids mk nkids nodes set_list NF_RECORD)
-from p"check.jo" import (LF_CONST LF_MUTPARAM assign_value ceval ctxs cx dewy_at fns globals locals runtime_fn syms index_update_path compound_checked check_struct_fields lib_dir)
+from p"check.jo" import (LF_CONST LF_MUTPARAM assign_value ceval ctxs cx dewy_at fns globals locals runtime_fn syms index_update_path compound_checked check_struct_fields lib_dir refine_deferred)
 from p"checker_expr.dewy" import (check_expr check_intrinsic lookup finish_arg)
 from p"checks_assign_hooks.dewy" import (assign_update)
 from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_let bc_stmt bc_str)
-from p"checks_thin.dewy" import (check_assign readonly_global)
+from p"checks_thin.dewy" import (check_assign readonly_global refine_resume resolve_type)
 from p"checks_thin_expr.dewy" import (ref_literal_holds str_set_within is_map_type)
 from p"expr.jo" import (CV IN bc_assign bc_bin capture_value coerce copy_place kid_lit last_checked ntype type_node_of wrap_conv)
 from p"callable_checks.dewy" import (callable_shape_eq)
@@ -19,21 +19,21 @@ from p"facts_index_writes.dewy" import (fact_add_projection)
 from p"facts_value_queries.dewy" import (fact_bound)
 from p"facts_projection_queries.dewy" import (fact_projection_find)
 from p"facts_elements.dewy" import (fact_inventory)
-from p"host_binds.jo" import (ref_resolve_host)
+from p"host_binds.jo" import (ref_resolve_host ref_fields_host ref_projection_host)
 from p"lower_group.dewy" import (gen_expr)
 from p"lower_storage.dewy" import (arr_len release endc iff)
 from p"math_ops.dewy" import (math_call math_word)
 from p"node_store.dewy" import (Node)
-from p"refine.jo" import (RefArrayCall mk_refined ref_addr_type ref_declaring ref_gen_site ref_holder_name ref_intern ref_predicates ref_selector_message ref_self_active ref_self_elements ref_self_established ref_span_copy ref_spans refine_bindings refine_coerce refine_owners refine_requests str_sets total_literals ref_pair_hints ref_nd_receivers ref_pair_after ref_self_direct ref_self_shrinks)
+from p"refine.jo" import (RefArrayCall mk_refined ref_addr_type ref_declaring ref_gen_site ref_holder_name ref_intern ref_predicates ref_selector_message ref_self_active ref_self_elements ref_self_established ref_spans refine_bindings refine_owners refine_requests str_sets total_literals ref_pair_hints ref_nd_receivers ref_pair_after ref_self_direct ref_self_shrinks ref_holder_elems refine_arg_target refine_active)
 from p"refine_transfers.dewy" import (ref_assume ref_value)
-from p"refine_metadata.dewy" import (is_total_dict ref_dependent_ancestor ref_interval ref_place_alias refine_storage representation_type str_set_of ref_safe_path_ancestor ref_dependent_record ref_storage_contract)
+from p"refine_metadata.dewy" import (is_total_dict ref_dependent_ancestor ref_interval ref_place_alias refine_storage representation_type str_set_of ref_safe_path_ancestor ref_dependent_record ref_storage_contract ref_repr_match ref_has_formals)
 from p"refine_siblings.dewy" import (ref_held_element ref_sib_holder ref_pair_call_finish ref_sib_in_place ref_pair_record ref_pair_role ref_pair_rewrite ref_pair_hint ref_pair_op_name ref_pair_reads ref_pair_validation ref_sib_free ref_sib_permutable ref_sib_dict_field ref_sib_field)
-from p"refine_ops.dewy" import (call_result_type copy_checked ref_addr_max ref_length_literal ref_own_length ref_path_length ref_self_contract ref_self_k ref_self_lower_bound ref_self_published ref_type_contains str_set_const total_dict_keys ref_self_shrink)
+from p"refine_ops.dewy" import (call_result_type copy_checked ref_addr_max ref_length_literal ref_own_length ref_path_length ref_self_contract ref_self_k ref_self_lower_bound ref_self_published ref_type_contains str_set_const total_dict_keys ref_self_shrink ref_self_resolve ref_without_name)
 from p"refine_predicates.dewy" import (ref_atoms_have_kind)
 from p"refine_resolve.dewy" import (ref_resolve_atoms)
 from p"refine_resolve_host.dewy" import (RefResolveLimit)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactRequest FactTerm RefAtom RefTerm)
-from p"string_domain_ops.dewy" import (string_domain_conversion)
+from p"string_domain_ops.dewy" import (string_domain_conversion int_domain_conversion)
 from p"string_domains.jo" import (domain_literals)
 from p"string_domains.jo" import (string_domain_conversion_stops string_domain_proofs string_domains string_set_obligations)
 from p"type_ops.dewy" import (dt mk_array)
@@ -49,6 +49,8 @@ from p"witness_nodes.dewy" import (wit_text)
 from p"ir.jo" import (VI)
 from p"ir_builders.dewy" import (e_bin e_call e_iconst)
 from p"lower_primitives.dewy" import (e_call_nr e_daddr loc_data rt str_data)
+from p"refine_projection.dewy" import (ref_types_projection)
+from p"checker_state.dewy" import (RefineBindings)
 
 RefineRareWord:type=int64<overflow='wrap'>
 # a dictionary literal given for a totaldict: an entry for every key
@@ -868,10 +870,17 @@ ref_record_conversion=(source:int64 target:int64):>bool=>$unsafe {
     }
     true
 }
-# The declared binding's name is Jo's, written through a place bound once.
+# The declared binding's name, the holder name, the resolution binders and the SafePath
+# flag are Jo's, written through places bound once.
 let rare_declaring:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
-refine_rare_bind=(declaring:ptr<int64>):>int64=>{
+let rare_holder_name:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let rare_bindings:ptr<RefineBindings>=$unsafe (uint64(0) as ptr<RefineBindings>)
+let rare_safe_used:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+refine_rare_bind=(declaring:ptr<int64> holder_name:ptr<int64> bindings:ptr<RefineBindings> safe_used:ptr<bool>):>int64=>{
     rare_declaring=declaring
+    rare_holder_name=holder_name
+    rare_bindings=bindings
+    rare_safe_used=safe_used
     0
 }
 # A parameter or field: most have no array type, so O(1) without a call deeper.
@@ -1077,4 +1086,92 @@ ref_sib_dict_call=(decl:int64 @args:array<int64> ptypes:array<int64>):>void=>$un
     }
     else if name not=? "remove" and name not=? "clear" and name not=? "pop" and name not=? "reserve" and name not=? "__map_tidy" {return}
     ref_nd_receivers[place]=true
+}
+ref_span_copy=(source:int64 target:int64):>void=>{
+    if source not=? target and not ref_spans.has(target) {
+        if ref_spans.has(source) {ref_spans[target]=ref_spans[source]}
+    }
+}
+resolve_refinement=(n:int64):>int64=>$unsafe {
+    if nodes.ptr[n].b =? 0 {return ref_self_resolve(n)}
+    # (a refinement of a module whose declarations were not asked for yet, met another way)
+    if not refine_active and refine_deferred.length >? 0 {
+        loop [m _] in refine_deferred {refine_resume(m)}
+    }
+    let base=resolve_type(RefineRareWord(nodes.ptr[n].a))
+    let binder=if nodes.ptr[n].name not=? 0 {RefineRareWord(nodes.ptr[n].name)} else {refine_bindings.self}
+    if ref_self_active and ref_self_contract(base) {fatal(nodes.ptr[n].pos "a self-length array cannot have a length contract as well");}
+    let atoms:array<RefAtom>=[]
+    let previous_base=refine_bindings.base_type
+    rare_bindings[0].base_type=base
+    # (the direct element of an array that names its own binding: that name is the array)
+    let previous_holder=ref_holder_name
+    rare_holder_name[0]=if ref_holder_elems.length >? 0 {ref_holder_elems.get(n) ?? 0} else {0}
+    let fields_before=refine_bindings.fields
+    let formals_before=refine_bindings.formals
+    if ref_holder_name not=? 0 {
+        rare_bindings[0].fields=ref_without_name(refine_bindings.fields ref_holder_name)
+        rare_bindings[0].formals=ref_without_name(refine_bindings.formals ref_holder_name)
+    }
+    ref_resolve_atoms(@nodes @types @names @refine_bindings @ref_resolve_host RefineRareWord(nodes.ptr[n].b) binder @atoms 0)
+    rare_holder_name[0]=previous_holder
+    rare_bindings[0].fields=fields_before
+    rare_bindings[0].formals=formals_before
+    rare_bindings[0].base_type=previous_base
+    if ref_atoms_have_kind(atoms 6) {ref_self_validate(atoms base nodes.ptr[n].pos)}
+    let rep=representation_type(base)
+    let expected=if tkind(rep) =? 'array' or tkind(rep) =? 'str_' {T_INT} else {rep}
+    loop atom in atoms {
+        loop term in [atom.a atom.b] {
+            if refine_bindings.fields.length >? 0 and term.kind =? 2 {fatal(nodes.ptr[n].pos "record field refinement dependencies must name siblings or stable lexical bindings");}
+            let root:RefineRareWord=0
+            if term.kind =? 0 {root=base}
+            else if term.kind =? 3 {root=RefineRareWord(locals.ptr[term.value].type)}
+            if root =? 0 {continue}
+            let actual=ref_projection_type(root term.path nodes.ptr[n].pos)
+            if not has_var(actual) and not is_int(actual) {fatal(nodes.ptr[n].pos "refinement comparisons require scalar or length projections");}
+            if not ref_repr_match(actual expected term.path) {fatal(nodes.ptr[n].pos "dependent scalar refinement requires matching integer representations");}
+        }
+    }
+    let predicate=ref_intern(atoms)
+    if not ref_spans.has(predicate) {ref_spans[predicate]=nodes.ptr[n].pos}
+    mk_refined(base predicate)
+}
+refine_coerce=(n:int64 target:int64):>int64=>$unsafe {
+    let t=prune(target)
+    if types.ptr[t].bits =? -1 {return total_dict_coerce(n t)}
+    # Path containment is proved by the demanded SafePath pass. Keep the
+    # obligation node through checking; it has no numeric predicate or runtime test.
+    if types.ptr[t].bits =? -2 {
+        rare_safe_used[0]=true
+        if prune(ntype(n)) =? t {return n}
+        coerce(n RefineRareWord(types.ptr[t].elem));
+        wrap_conv(n CV.refinement RefineRareWord(types.ptr[t].elem))
+        nodes.ptr[n].aux2=int32(t)
+        nodes.ptr[n].ival=1
+        return n
+    }
+    coerce(n RefineRareWord(types.ptr[t].elem));
+    if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.refinement)) and nodes.ptr[n].aux2 =? int32(t) {return n}
+    let owner=if cx >=? 0 {RefineRareWord(ctxs.ptr[cx].inst)} else {0}
+    # A contract on formals is checked against the arguments of a call to its
+    # function, or against the entry of the function itself. Elsewhere (a
+    # literal compared with a call's optional result) nothing binds them: the
+    # value keeps its base type, and the type's contract is not assumed for it.
+    if ref_has_formals(t) and t not=? refine_arg_target and not ref_signature_has(owner t) {return n}
+    wrap_conv(n CV.refinement RefineRareWord(types.ptr[t].elem))
+    nodes.ptr[n].aux2=int32(t)
+    if dewy_at(nodes.ptr[n].pos) {int_domain_conversion(n t)}
+    refine_requests.push(FactRequest(n owner))
+    refine_owners[owner]=true
+    n
+}
+# Resolve a projection against its concrete binder before publishing a contract.
+ref_projection_type=(root:int64 path:array<int64> pos:int64):>int64=>$unsafe {
+    if path.length =? 1 and path[0] <=? -2 and is_nd(representation_type(root)) {return T_INT}
+    let result=ref_types_projection(@types @structs @fields @ref_fields_host @ref_projection_host root path pos T_INT)
+    if result.error =? 1 {fatal(pos "refinement length requires an array or a string");}
+    if result.error =? 2 {fatal(pos "refinement field requires a record");}
+    if result.error =? 3 {fatal(pos "unknown refinement field");}
+    result.type
 }
