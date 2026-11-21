@@ -12,7 +12,7 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 | Acceptance ladder, design surface | 138/138 (+1 held on D40) | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
 | No traps by default | census 2,557 sites in 1,032 of 2,252 programs, down from 3,600 on 10-26 | ordinary code proves without opt-ins |
-| Compile throughput, single thread, default build, every processed line | flagships 145.0k lines/s (11-11; 161.5k on 11-09 before the flagships began proving statically, +14% source cost) | 200–250k on every flagship |
+| Compile throughput, single thread, default build, every processed line | flagships 153.4k lines/s (11-20, desktop; 161.5k on 11-09 before the flagships began proving statically, +14% source cost) | 200–250k on every flagship |
 | Hello-world compile | 7.5 ms (instruction-derived) | ≤20 ms |
 | Kernels vs C -O2 (time, default, `bench` on redfox) | 18 of 28 at ≤1.2×; worst byte_find 2.85×, callbacks_literal 2.34× (fair C about 1.47×), name_table 1.67×, graph 1.54×, dict_words 1.51×, arena 1.43× | ≤1.2× |
 | Quick / full suite | about 25 s / about 9.5 min at 4 workers | ≤30 s / ≤5 min |
@@ -34,12 +34,15 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
    they would still need about 8–11% less compiler work. Allocator, isel, dense
    storage, frames, optimizer structure, normalization and non-leaf inlining all
    bounded under 1%, and profile-driven work cuts have nothing left bounded at
-   0.5%. The next round needs a new structural idea to test, not another profile.
+   0.5%. [Structural round 1](docs/design/proposals/compile-speed/structural-round1.md)
+   bounded three ideas at 7–15%; pilots running: one checked body per uniform
+   reflection loop (99), word formatting from a proven range (100).
 3. **Self-hosting** ([readiness](docs/design/self_hosting.md)): the front end,
    checker state, statement and expression layers, call group, ownership and
-   loans, the optimizer, the emitters and nearly all of lower.jo run in Dewy.
-   Next: lower.jo's last functions and ir.jo, then the rest of expr.jo, check.jo
-   and facts/effects; close milestone 1 (Dewy owns all subsystem execution), then
+   loans, the optimizer, the emitters, lowering, IR, loops and refinements run in
+   Dewy. Jo functions left (11-21): expr 261, check 140, exact 36, types 18, ast 18,
+   nd_contracts 11, util 9, opt 7, directives 7, facts 6. Next: exact and the small
+   modules, then expr.jo, check.jo and facts/effects; close milestone 1 (Dewy owns all subsystem execution), then
    milestone 3 (a pinned C-reproducible seed that retires the frozen twins).
 4. **Runtime speed vs C:** full landings now gate kernel instructions
    (`bench --baseline`; waive with `bench: accept <reason>`). The push family is
