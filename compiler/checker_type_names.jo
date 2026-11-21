@@ -77,6 +77,13 @@ resolve_type_name = (tn: int) -> CheckerTypeName:
         if let u = universe.get(nm):
             s = u
             sk = syms[s].kind
+    # (`let u8 = ...` beside `x:uint8`: a value never names a builtin integer type,
+    # whose internal name a local may share)
+    if (sk == .local or sk == .global) and nodes[tn].sval == 0:
+        if let u = universe.get(nm):
+            if syms[u].kind == .type_ and is_int(int(syms[u].ref)):
+                s = u
+                sk = .type_
     if ide_on: ide_sym_ref(tn, s)
     if sk == .alias_: return CheckerTypeName(1, int(syms[s].ref))
     if sk == .type_:

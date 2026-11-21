@@ -20,7 +20,7 @@ from p"select_checks.dewy" import (named_wait_type)
 from p"type_member_checks.dewy" import (generic_family_type handle_member_error)
 from p"type_ops.dewy" import (get_struct_inst)
 from p"type_value_arguments.dewy" import (named_integer_type)
-from p"types.jo" import (T_NONE fields tkind)
+from p"types.jo" import (T_NONE fields is_int tkind)
 from p"util.jo" import (files intern name_of pos_file pos_off)
 
 TypeNameWord:type=int64<overflow='wrap'>
@@ -83,6 +83,15 @@ resolve_type_name=(tn:TypeNameWord):>CheckerTypeName=>{
         if original not=? none {
             s=original ?? 0
             sk=syms[s].kind
+        }
+    }
+    # (`let u8 = ...` beside `x:uint8`: a value never names a builtin integer type,
+    # whose internal name a local may share)
+    if (sk =? 'local' or sk =? 'global') and nodes[tn].sval =? 0 {
+        let builtin=universe.get(nm) ?? 0
+        if builtin not=? 0 and syms[builtin].kind =? 'type_' and is_int(TypeNameWord(syms[builtin].ref)) {
+            s=builtin
+            sk='type_'
         }
     }
     if ide_on {ide_sym_ref(tn s)}
