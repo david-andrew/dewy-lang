@@ -1,3 +1,4 @@
+use 'exact_fact_transfer.dewy'
 use 'facts_lifecycle.dewy'
 use 'facts_values.dewy'
 use 'lower_scalars.dewy'
@@ -644,114 +645,6 @@ exact_count_nodes: (int, int)[]
 exact_count_index: int[]
 exact_count_bounds: FactBound[]
 
-exact_shift_fact = (n: int, value: int, s: FactState):
-    if fact_speculating > 0 or not exact_has_node(n) or (nodes[n].op != i32(int(Tok.shl)) and nodes[n].op != i32(int(Tok.starstar))): return
-    b = fact_bound(s, value)
-    hi = fact_relational(s, value, true)
-    bounded = not b.wide
-    if value != 0 and fact_type(fact_terms[value].type) == T_U64:
-        if b.lo < 0 and hi < 0:
-            b.lo = b.lo xor FACT_MIN
-            hi = hi xor FACT_MIN
-        else: bounded = false
-    limit = if bounded and hi < 1048576: max(0, hi) else: -1
-    # A slice may omit a count unrelated to its obligation. Preserve the
-    # independent immutable bound, including the extent used by power lowering.
-    if limit < 0:
-        bound = exact_count_bound(int(nodes[n].b))
-        if not bound.wide and bound.hi < 1048576:
-            exact_shifts[n] = max(0, bound.hi)
-            return
-    if let previous = exact_shifts.get(n):
-        if previous < 0 or limit < 0: limit = -1
-        else: limit = max(previous, limit)
-    exact_shifts[n] = limit
-
-# value within t's range through fact_compare's relations. An interval end
-# that is real and fits needs no compare; a 64-bit word's MIN/MAX (sentinel
-# constants) is approached as > MIN, < MAX. Two compares: O(fact_compare).
-exact_fits_relation = (s: mut FactState, value: int, t: int) -> bool:
-    bits = int(types[t].bits)
-    sign = types[t].sign
-    if bits <= 0 or bits > 64: return false
-    low = if not sign: 0 else if bits >= 64: FACT_MIN + 1 else: -(1 << (bits - 1))
-    high = if bits >= 64: FACT_MAX - 1 else if sign: (1 << (bits - 1)) - 1 else: (1 << bits) - 1
-    b = fact_bound(s, value)
-    lo_real = b.lo != FACT_MIN and b.lo >= low or b.lo == FACT_MIN and sign and bits >= 64 and not fact_open_endpoint(s, value, false)
-    hi_real = b.hi != FACT_MAX and b.hi <= high or b.hi == FACT_MAX and bits >= 64 and not fact_open_endpoint(s, value, true)
-    # (each constant first: an argument copies the state before it is added)
-    if not lo_real:
-        floor = fact_constant(s, low)
-        if fact_compare(s, .ge, value, floor) != 1: return false
-    if hi_real: return true
-    ceiling = fact_constant(s, high)
-    fact_compare(s, .le, value, ceiling) == 1
-
-exact_fact_store = (n: int, value: int, s: mut FactState) -> int:
-    if not s.live:
-        if not exact_decided(n): exact_decide(n, true)
-        return value
-    t = exact_representation(ntype(n))
-    b = fact_bound(s, value)
-    # Values outside the interval engine's signed word range remain unknown.
-    ok = not b.wide and b.reason != .unsupported and sa_fits(b.lo, t) and sa_fits(b.hi, t)
-    # (an open `int` end is infinite, not the word's MIN/MAX)
-    if ok and value != 0 and (b.hi == FACT_MAX and fact_open_endpoint(s, value, true) or b.lo == FACT_MIN and fact_open_endpoint(s, value, false)): ok = false
-    # (an open end may still sit inside the word through a relation:
-    # `r*cols` below `rows*cols =? cells.length`. Only an unproven store asks)
-    if not ok and value != 0 and t != T_U64 and not b.wide and b.reason != .unsupported: ok = exact_fits_relation(s, value, t)
-    if t == T_U64: ok = not b.wide and value != 0 and fact_terms[value].type == T_U64 and b.reason != .unsupported
-    assumed = exact_marks[n] & 32 != 0
-    if assumed:
-        if ok: return value
-        # An assumed narrowing still supplies its storage domain downstream;
-        # it cannot leak an unknown wide intermediate into later proofs.
-        bounded = fact_domain(t)
-        if types[t].sign:
-            bounded.lo = max(bounded.lo, b.lo)
-            bounded.hi = min(bounded.hi, b.hi)
-        if value != 0:
-            fact_set_bound(s, value, bounded)
-            return value
-        return fact_new(s, bounded, FactTerm(type = t))
-    if not ok:
-        independent = exact_count_bound(int(nodes[n].a))
-        if not independent.wide and sa_fits(independent.lo, t) and sa_fits(independent.hi, t): ok = true
-    if not ok:
-        syntax_bound = positive_bound(int(nodes[n].a), false)
-        if syntax_bound >= 0 and sa_fits(syntax_bound, t): ok = true
-    if fact_speculating == 0:
-        if exact_decided(n): ok = ok and exact_proved(n)
-        exact_decide(n, ok)
-        if exact_measure_on:
-            site = exact_measure_sites[n]
-            site.category = if ok: "proven" else: "runtime-check"
-            site.lo = b.lo; site.hi = b.hi
-            exact_measure_sites[n] = site
-    if not ok and fact_speculating == 0:
-        what = "cannot prove exact integer result fits {dt(t)}"
-        if not dir_defer(n, what, true):
-            # (what overflows, as written, and the `int` route: Dewy's integer
-            # arithmetic is exact, so the wider result fits an `int`)
-            shown = wit_text(n)
-            if shown != "":
-                err_notes.push((-1, "note: nothing bounds `{shown}` within {dt(t)} here"))
-                inner = n
-                loop inner != 0 and nodes[inner].kind == .conv: inner = int(nodes[inner].a)
-                operand = wit_unsupported(inner)
-                if dewy_at(nodes[n].pos) and operand != "this operation is outside the fact language": err_notes.push((-1, "note: {operand}"))
-                wit_operand_changed(int(nodes[n].a), s)
-                wit_help("{dt(t)}.min <=? ({shown}) and ({shown}) <=? {dt(t)}.max")
-            err_notes.push((-1, "help: widen the destination to `int`, state the domain as a refinement (or prove it with a guard), or choose `overflow='wrap'|'saturate'`; " + dir_panic_fix(nodes[n].pos, true)))
-            fatal(nodes[n].pos, what)
-    # The continuation is dominated by either a proof or its runtime check.
-    if ok: return value
-    bounded = fact_domain(t)
-    if value != 0 and fact_type(fact_terms[value].type) == fact_type(t):
-        bounded.lo = max(bounded.lo, b.lo)
-        bounded.hi = min(bounded.hi, b.hi)
-    fact_new(s, bounded, FactTerm(type = t))
-
 exact_bits = (n: int) -> int:
     if n < exact_widths.len() and exact_widths[n] > 0: return exact_widths[n]
     t = exact_representation(ntype(n))
@@ -827,73 +720,6 @@ exact_range_meta: u8[]
 exact_range_flags = (n: int) -> int:
     if n < 0 or n >= exact_range_meta.len(): return 0
     int(exact_range_meta[n])
-exact_value_fact = (n: int, value: int, s: FactState):
-    if not s.live: return
-    if n >= exact_ranges.len():
-        exact_ranges.resize(max(n + 1, nodes.len()))
-        exact_range_meta.resize(exact_ranges.len())
-    if value == 0 or exact_representation(ntype(n)) == T_U64:
-        exact_ranges[n] = -1
-        exact_range_meta[n] = 4
-        return
-    b = fact_bound(s, value)
-    flags = (if not b.wide and b.lo >= 0: 1 else: 0) | (if not b.wide and b.lo > FACT_MIN: 2 else: 0)
-    old = int(exact_range_meta[n])
-    if old & 4 != 0: flags &= old
-    exact_range_meta[n] = u8(flags | 4)
-    # (an exact word's value may itself be an open `int`, `r*cols` of two
-    # unbounded int64s: its MIN/MAX ends are infinite, never 64 bits)
-    if b.wide or b.reason == .unsupported or (exact_representation(ntype(n)) == T_MATH_INT or fact_type(fact_terms[value].type) == T_MATH_INT) and not fact_host_finite(s, value):
-        exact_ranges[n] = -1
-        return
-    if exact_ranges[n] < 0: return
-    # Count the non-sign bits, with at most six tests per endpoint.
-    magnitude = max((if b.lo < 0: -(b.lo + 1) else: b.lo), (if b.hi < 0: -(b.hi + 1) else: b.hi))
-    width = 1
-    loop shift in [32, 16, 8, 4, 2, 1]:
-        if magnitude >> shift != 0:
-            magnitude = magnitude >> shift
-            width += shift
-    if magnitude != 0: width += 1
-    exact_ranges[n] = max(exact_ranges[n], width)
-
-exact_unsigned_fact = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
-    x = fact_bound(s, a); y = fact_bound(s, b)
-    if x.wide or y.wide: return fact_unmodeled(s, n, .unsupported)
-    m = u64(18446744073709551615)
-    xl = u64(x.lo xor FACT_MIN); xh = u64(x.hi xor FACT_MIN)
-    yl = u64(y.lo xor FACT_MIN); yh = u64(y.hi xor FACT_MIN)
-    lo = u64(0); hi = u64(0)
-    if op == .plus:
-        if xh > m - yh:
-            xh = u64(fact_relational(s, a, true) xor FACT_MIN)
-        if xh > m - yh:
-            yh = u64(fact_relational(s, b, true) xor FACT_MIN)
-        if xh > m - yh:
-            return fact_unmodeled(s, n, .unsupported)
-        lo = xl + yl; hi = xh + yh
-    else if op == .minus:
-        if not (xl >= yh or fact_compare(s, .ge, a, b) == 1):
-            return fact_unmodeled(s, n, .unsupported)
-        lo = if xl >= yh: xl - yh else: u64(0)
-        hi = if xh >= yl: xh - yl else: u64(0)
-    else if op == .star:
-        if xh != 0 and yh > m / xh:
-            return fact_unmodeled(s, n, .unsupported)
-        lo = xl * yl; hi = xh * yh
-    else:
-        return fact_unmodeled(s, n, .unsupported)
-    v = fact_new(s, FactBound(int(lo) xor FACT_MIN, int(hi) xor FACT_MIN), FactTerm(type = T_U64))
-    small = u64(1) << u64(62)
-    if (op == .plus or op == .minus) and yl == yh and yl < small:
-        d = if op == .plus: int(yl) else: -int(yl)
-        fact_difference(s, v, a, d)
-        fact_difference(s, a, v, -d)
-    if op == .plus and xl == xh and xl < small:
-        fact_difference(s, v, b, int(xl))
-        fact_difference(s, b, v, -int(xl))
-    v
-
 exact_reset = ():
     exr_plans.clear()
     exr_call_target = 0
@@ -940,15 +766,6 @@ exact_reset = ():
     exact_ranges = []
     exact_range_meta = []
     exact_join_blocks = {}
-
-# Mixed signed/unsigned comparisons must not compare biased and plain bounds.
-# Rebase small unsigned intervals; larger ones exceed this interval engine.
-exact_fact_signed = (s: mut FactState, value: int) -> int:
-    b = fact_bound(s, value)
-    if b.wide or b.hi >= 0: return fact_new(s, FactBound(wide = true), FactTerm(type = T_INT))
-    b.lo = b.lo xor FACT_MIN
-    b.hi = b.hi xor FACT_MIN
-    fact_new(s, b, FactTerm(type = T_INT))
 
 exact_match_literals = (n: int) -> bool:
     loop arm in kids(n):

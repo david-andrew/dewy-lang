@@ -629,6 +629,12 @@ visited once, O(N + E) time and O(N) space; constant folding uses one unsigned
 magnitude word and falls back to width bounds on overflow. Type predicates are
 evaluated only on the branch that needs them, as in Jo.
 
+`exact_fact_transfer.dewy` transfers demanded store and shift obligations,
+joins expression width facts, and rebases unsigned intervals for arithmetic
+and mixed comparisons. It uses the existing bounded fact queries and witness
+services. Only the store, relational fit, and unsigned operations mutate the
+borrowed fact state.
+
 ## Shared backend analysis boundary
 
 `backend_analysis.dewy` owns the complete final-IR analysis used by x64 and

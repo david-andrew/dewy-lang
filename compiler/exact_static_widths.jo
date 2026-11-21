@@ -34,15 +34,20 @@ exact_midpoint = (n: int) -> (int, int):
     if nodes[lo].sym != nodes[repeated].sym: return empty
     (lo, hi)
 
-exact_constant_width = (n: int, magnitude: u64, negative0: bool) -> int:
-    negative = negative0 and magnitude != 0
-    value = magnitude - u64(negative)
+exact_width_bits = (magnitude: u64) -> int:
+    value = magnitude
     bits = 1
     loop shift in [32, 16, 8, 4, 2, 1]:
         if value >> shift != 0:
             value = value >> shift
             bits += shift
     if value != 0: bits += 1
+    bits
+
+exact_constant_width = (n: int, magnitude: u64, negative0: bool) -> int:
+    negative = negative0 and magnitude != 0
+    value = magnitude - u64(negative)
+    bits = exact_width_bits(value)
     width = bits * 2 + int(not negative)
     exact_type_values[n] = magnitude
     exact_type_widths[n] = -width

@@ -1,0 +1,223 @@
+$runtime_checks
+
+from p"ast.jo" import (nodes)
+from p"check.jo" import (dewy_at sa_fits)
+from p"checker_tokens.dewy" import (Tok)
+from p"exact_static_widths.dewy" import (exact_width_bits)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"directive_ops.dewy" import (dir_panic_fix)
+from p"directive_rules.dewy" import (dir_defer)
+from p"exact.jo" import (exact_decide exact_decided exact_has_node exact_marks exact_measure_on exact_measure_sites exact_proved exact_range_meta exact_ranges exact_representation exact_shifts)
+from p"exact_count_bounds.dewy" import (exact_count_bound)
+from p"expr.jo" import (ntype)
+from p"facts.jo" import (FactState fact_speculating fact_terms)
+from p"facts_arith.dewy" import (fact_relational)
+from p"facts_compare.dewy" import (fact_compare fact_open_endpoint)
+from p"facts_index_proofs.dewy" import (positive_bound)
+from p"facts_index_writes.dewy" import (fact_constant fact_new fact_set_bound)
+from p"facts_joins.dewy" import (fact_host_finite)
+from p"facts_lengths.dewy" import (fact_difference)
+from p"facts_value_queries.dewy" import (fact_bound)
+from p"facts_values.dewy" import (fact_domain fact_type fact_unmodeled)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
+from p"type_ops.dewy" import (dt)
+from p"types.jo" import (T_INT T_MATH_INT T_U64 types)
+from p"util.jo" import (err_notes)
+from p"witness_nodes.dewy" import (wit_text)
+from p"witness_ops.dewy" import (wit_help wit_operand_changed wit_unsupported)
+
+TransferWord:type=int64<overflow='wrap'>
+TransferUnsigned:type=uint64<overflow='wrap'>
+
+exact_shift_fact=(n:TransferWord value:TransferWord s:FactState):>void=>$unsafe {
+    # Tok.shl and Tok.starstar in the checked node's operator field.
+    if fact_speculating >? 0 or not exact_has_node(n) {return}
+    let op=nodes.ptr[n].op
+    if op not=? 67 and op not=? 79 {return}
+    let b=fact_bound(s value)
+    let hi=fact_relational(s value true)
+    let bounded=not b.wide
+    if value not=? 0 and fact_type(fact_terms[value].type) =? T_U64 {
+        if b.lo <? 0 and hi <? 0 {
+            b.lo=b.lo xor FACT_MIN
+            hi=hi xor FACT_MIN
+        } else {bounded=false}
+    }
+    let limit:TransferWord=if bounded and hi <? 1048576 {max(0 hi)} else {-1}
+    # A sliced proof can omit the count while preparation retains an immutable bound.
+    if limit <? 0 {
+        let bound=exact_count_bound(int64(nodes.ptr[n].b))
+        if not bound.wide and bound.hi <? 1048576 {
+            exact_shifts[n]=max(0 bound.hi)
+            return
+        }
+    }
+    if exact_shifts.has(n) {
+        let previous=exact_shifts[n]
+        if previous <? 0 or limit <? 0 {limit=-1} else {limit=max(previous limit)}
+    }
+    exact_shifts[n]=limit
+}
+
+exact_fits_relation=(@s:FactState value:TransferWord t:TransferWord):>bool=>$unsafe {
+    let bits=TransferWord(types.ptr[t].bits)
+    let sign=types.ptr[t].sign
+    if bits <=? 0 or bits >? 64 {return false}
+    let low:TransferWord=if not sign {0} else if bits >=? 64 {TransferWord(FACT_MIN) + 1} else {-(TransferWord(1) << (bits - 1))}
+    let high:TransferWord=if bits >=? 64 {TransferWord(FACT_MAX) - 1} else if sign {(TransferWord(1) << (bits - 1)) - 1} else {(TransferWord(1) << bits) - 1}
+    let b=fact_bound(s value)
+    let lo_real=b.lo not=? FACT_MIN and b.lo >=? low or b.lo =? FACT_MIN and sign and bits >=? 64 and not fact_open_endpoint(s value false)
+    let hi_real=b.hi not=? FACT_MAX and b.hi <=? high or b.hi =? FACT_MAX and bits >=? 64 and not fact_open_endpoint(s value true)
+    if not lo_real {
+        let floor=fact_constant(@s low)
+        if fact_compare(s 'ge' value floor) not=? 1 {return false}
+    }
+    if hi_real {return true}
+    let ceiling=fact_constant(@s high)
+    fact_compare(s 'le' value ceiling) =? 1
+}
+
+exact_fact_store=(n:TransferWord value:TransferWord @s:FactState):>int64=>$unsafe {
+    if not s.live {
+        if not exact_decided(n) {exact_decide(n true);}
+        return value
+    }
+    let t=exact_representation(ntype(n))
+    let b=fact_bound(s value)
+    let ok=not b.wide and b.reason not=? 'unsupported' and sa_fits(b.lo t) and sa_fits(b.hi t)
+    if ok and value not=? 0 and (b.hi =? FACT_MAX and fact_open_endpoint(s value true) or b.lo =? FACT_MIN and fact_open_endpoint(s value false)) {ok=false}
+    if not ok and value not=? 0 and t not=? T_U64 and not b.wide and b.reason not=? 'unsupported' {ok=exact_fits_relation(@s value t)}
+    if t =? T_U64 {ok=not b.wide and value not=? 0 and fact_terms[value].type =? T_U64 and b.reason not=? 'unsupported'}
+    if exact_marks[n] & 32 not=? 0 {
+        if ok {return value}
+        let bounded=fact_domain(t)
+        if types.ptr[t].sign {
+            bounded.lo=max(bounded.lo b.lo)
+            bounded.hi=min(bounded.hi b.hi)
+        }
+        if value not=? 0 {
+            fact_set_bound(@s value bounded)
+            return value
+        }
+        return fact_new(@s bounded FactTerm(type=t))
+    }
+    if not ok {
+        let independent=exact_count_bound(int64(nodes.ptr[n].a))
+        if not independent.wide and sa_fits(independent.lo t) and sa_fits(independent.hi t) {ok=true}
+    }
+    if not ok {
+        let syntax_bound=positive_bound(int64(nodes.ptr[n].a) false)
+        if syntax_bound >=? 0 and sa_fits(syntax_bound t) {ok=true}
+    }
+    if fact_speculating =? 0 {
+        if exact_decided(n) {ok=ok and exact_proved(n)}
+        exact_decide(n ok)
+        if exact_measure_on {
+            let site=exact_measure_sites[n]
+            site.category=if ok {"proven"} else {"runtime-check"}
+            site.lo=b.lo
+            site.hi=b.hi
+            exact_measure_sites[n]=site
+        }
+        if not ok {
+            let what="cannot prove exact integer result fits {dt(t)}"
+            if not dir_defer(n what true) {
+                let shown=wit_text(n)
+                if shown not=? "" {
+                    err_notes.push([(-1) "note: nothing bounds `{shown}` within {dt(t)} here"])
+                    let inner=n
+                    loop inner not=? 0 and nodes.ptr[inner].kind =? 'conv' {inner=int64(nodes.ptr[inner].a)}
+                    let operand=wit_unsupported(inner)
+                    if dewy_at(nodes.ptr[n].pos) and operand not=? "this operation is outside the fact language" {err_notes.push([(-1) "note: {operand}"])}
+                    wit_operand_changed(int64(nodes.ptr[n].a) s)
+                    wit_help("{dt(t)}.min <=? ({shown}) and ({shown}) <=? {dt(t)}.max")
+                }
+                err_notes.push([(-1) "help: widen the destination to `int`, state the domain as a refinement (or prove it with a guard), or choose `overflow='wrap'|'saturate'`; {dir_panic_fix(nodes.ptr[n].pos true)}"])
+                fatal(nodes.ptr[n].pos what)
+            }
+        }
+    }
+    if ok {return value}
+    let bounded=fact_domain(t)
+    if value not=? 0 and fact_type(fact_terms[value].type) =? fact_type(t) {
+        bounded.lo=max(bounded.lo b.lo)
+        bounded.hi=min(bounded.hi b.hi)
+    }
+    fact_new(@s bounded FactTerm(type=t))
+}
+
+exact_value_fact=(n:TransferWord value:TransferWord s:FactState):>void=>$unsafe {
+    if not s.live {return}
+    if n >=? exact_ranges.length {
+        exact_ranges.resize(max(n + 1 nodes.length))
+        exact_range_meta.resize(exact_ranges.length)
+    }
+    let t=if value =? 0 {T_U64} else {exact_representation(ntype(n))}
+    if t =? T_U64 {
+        exact_ranges[n]=-1
+        exact_range_meta[n]=4
+        return
+    }
+    let b=fact_bound(s value)
+    let flags:TransferWord=(if not b.wide and b.lo >=? 0 {1} else {0}) | (if not b.wide and b.lo >? FACT_MIN {2} else {0})
+    let old=TransferWord(exact_range_meta[n])
+    if old & 4 not=? 0 {flags &= old}
+    exact_range_meta[n]=uint8(flags | 4)
+    if b.wide or b.reason =? 'unsupported' or (t =? T_MATH_INT or fact_type(fact_terms[value].type) =? T_MATH_INT) and not fact_host_finite(s value) {
+        exact_ranges[n]=-1
+        return
+    }
+    if exact_ranges[n] <? 0 {return}
+    let low:TransferWord=if b.lo <? 0 {-(TransferWord(b.lo) + 1)} else {b.lo}
+    let high:TransferWord=if b.hi <? 0 {-(TransferWord(b.hi) + 1)} else {b.hi}
+    let width=exact_width_bits(TransferUnsigned(max(low high)))
+    exact_ranges[n]=max(exact_ranges[n] width)
+}
+
+exact_unsigned_fact=(@s:FactState n:TransferWord op:Tok a:TransferWord b:TransferWord):>int64=>{
+    let x=fact_bound(s a)
+    let y=fact_bound(s b)
+    if x.wide or y.wide {return fact_unmodeled(@s n 'unsupported')}
+    let m=TransferUnsigned(18446744073709551615)
+    let xl=TransferUnsigned(x.lo xor FACT_MIN)
+    let xh=TransferUnsigned(x.hi xor FACT_MIN)
+    let yl=TransferUnsigned(y.lo xor FACT_MIN)
+    let yh=TransferUnsigned(y.hi xor FACT_MIN)
+    let lo=TransferUnsigned(0)
+    let hi=TransferUnsigned(0)
+    if op =? 'plus' {
+        if xh >? m - yh {xh=TransferUnsigned(fact_relational(s a true) xor FACT_MIN)}
+        if xh >? m - yh {yh=TransferUnsigned(fact_relational(s b true) xor FACT_MIN)}
+        if xh >? m - yh {return fact_unmodeled(@s n 'unsupported')}
+        lo=xl + yl
+        hi=xh + yh
+    } else if op =? 'minus' {
+        if not (xl >=? yh or fact_compare(s 'ge' a b) =? 1) {return fact_unmodeled(@s n 'unsupported')}
+        lo=if xl >=? yh {xl - yh} else {TransferUnsigned(0)}
+        hi=if xh >=? yl {xh - yl} else {TransferUnsigned(0)}
+    } else if op =? 'star' {
+        if xh not=? 0 and yh >? m // xh {return fact_unmodeled(@s n 'unsupported')}
+        lo=xl * yl
+        hi=xh * yh
+    } else {return fact_unmodeled(@s n 'unsupported')}
+    let v=fact_new(@s FactBound(TransferWord(lo) xor FACT_MIN TransferWord(hi) xor FACT_MIN) FactTerm(type=T_U64))
+    let small=TransferUnsigned(1) << TransferUnsigned(62)
+    if (op =? 'plus' or op =? 'minus') and yl =? yh and yl <? small {
+        let d=if op =? 'plus' {TransferWord(yl)} else {-TransferWord(yl)}
+        fact_difference(@s v a d)
+        fact_difference(@s a v (-d))
+    }
+    if op =? 'plus' and xl =? xh and xl <? small {
+        fact_difference(@s v b TransferWord(xl))
+        fact_difference(@s b v (-TransferWord(xl)))
+    }
+    v
+}
+
+exact_fact_signed=(@s:FactState value:TransferWord):>int64=>{
+    let b=fact_bound(s value)
+    if b.wide or b.hi >=? 0 {return fact_new(@s FactBound(wide=true) FactTerm(type=T_INT))}
+    b.lo=b.lo xor FACT_MIN
+    b.hi=b.hi xor FACT_MIN
+    fact_new(@s b FactTerm(type=T_INT))
+}
