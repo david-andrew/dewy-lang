@@ -1,0 +1,8 @@
+order = (xs:array<int64> i:int rounds:int):>int64 => {
+    if i <? 0 or i >=? xs.length { return 0 }
+    let calls:int64 = 0
+    let less = ($capture @calls a:int64 b:int64):>bool => { calls = 1 return a <? b }
+    loop k in [0..rounds) { xs.sort_with(@less) }
+    xs[i]
+}
+printl(order([9 4] 0 2))

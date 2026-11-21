@@ -14,3 +14,8 @@ def test_facts_pushes_keeps_entry_bound(compiler, tmp_path, monkeypatch):
              'census_bounds/push_in_selector', 'census_bounds/push_replaced_in_rhs',
              'census_bounds/conditional_push_replaces_element']
     assert compare_facts(compiler, tmp_path, monkeypatch, cases) == 2
+
+
+def test_loop_sort_lengths(compiler, tmp_path, monkeypatch):
+    cases = ['census_bounds/loop_sort', 'census_bounds/loop_sort_callback_shrinks']
+    assert compare_facts(compiler, tmp_path, monkeypatch, cases) == 1

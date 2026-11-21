@@ -371,7 +371,9 @@ fact_changes_walk=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='lo
     # (a direct call havocs what its summary writes; reading lengths and
     # erased or failing assertions write nothing; a record is built in place)
     # (a swap, as a selection store, keeps the length: facts_arrays.dewy, kind 4)
-    if k =? 'call' and nodes.ptr[n].aux =? 0 and (fact_sequence_store_call(n) or fact_array_call(n) =? 4) {fact_sequence_store(n @s at reason)}
+    let array=if k =? 'call' and nodes.ptr[n].aux =? 0 {fact_array_call(n)} else {0}
+    if array =? 6 {fact_permutation_change(n @s)}
+    else if k =? 'call' and nodes.ptr[n].aux =? 0 and (fact_sequence_store_call(n) or array =? 4) {fact_sequence_store(n @s at reason)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and fact_nd_plain_store(n) {fact_nd_store(n @s at reason)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and fact_pool_call(n) =? 4 {fact_pool_store_changes(n @s)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and (fact_map_store_call(n) or fact_map_insert_call(n)) {fact_map_store_changes(n @s at reason)}
@@ -392,6 +394,23 @@ fact_changes_walk=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='lo
     if mask & 4 not=? 0 {fact_changes_walk(ChangeWord(nodes.ptr[n].c) @s at reason)}
     if mask & 16 not=? 0 {
         loop i in [0..nkids(n)) {fact_changes_walk(kid(n i) @s at reason)}
+    }
+}
+# A permutation preserves the length of a private receiver even across a
+# loop backedge. Apply the callback's ordinary effects to everything else.
+# Only an already tracked length is transferred, with indexed lookups.
+fact_permutation_change=(n:ChangeWord @s:FactState):>void=>{
+    let p=fact_place(kid(n 0))
+    let i=fact_binding(s p)
+    let length:ChangeWord=0
+    if i >=? 0 and not fact_exposed(p) and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(kid(n 0)))) {
+        let q=fact_projection_find(s s.bindings[i].value (-1) false)
+        if q >=? 0 {length=s.projections[q].value}
+    }
+    fact_path_call_effects(n @s)
+    if length not=? 0 and s.projections.length <? FACT_CAP {
+        let b=fact_binding(s p)
+        if b >=? 0 {fact_add_projection(@s FactProjection(s.bindings[b].value (-1) false length))}
     }
 }
 # A loop's havoc of a push or extend: the length it leaves is at least the one it found, so a

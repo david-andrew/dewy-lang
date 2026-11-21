@@ -357,7 +357,9 @@ fact_changes_walk = (n: int, s: mut FactState, at: int, reason: FactReason = .lo
             fact_change_route(s, kid(n, 0), true, at, reason)
     # (a direct call havocs what its summary writes; reading lengths and
     # erased or failing assertions write nothing; a record is built in place)
-    if k == .call and nodes[n].aux == 0 and (fact_sequence_store_call(n) or fact_array_call(n) == 4): fact_sequence_store(n, s, at, reason)
+    array = if k == .call and nodes[n].aux == 0: fact_array_call(n) else: 0
+    if array == 6: fact_permutation_change(n, s)
+    else if k == .call and nodes[n].aux == 0 and (fact_sequence_store_call(n) or array == 4): fact_sequence_store(n, s, at, reason)
     else if k == .call and nodes[n].aux == 0 and fact_nd_plain_store(n): fact_nd_store(n, s, at, reason)
     else if k == .call and nodes[n].aux == 0 and fact_pool_call(n) == 4: fact_pool_store_changes(n, s)
     else if k == .call and nodes[n].aux == 0 and (fact_map_store_call(n) or fact_map_insert_call(n)): fact_map_store_changes(n, s, at, reason)
@@ -378,6 +380,20 @@ fact_changes_walk = (n: int, s: mut FactState, at: int, reason: FactReason = .lo
     if mask & 4 != 0: fact_changes_walk(int(nodes[n].c), s, at, reason)
     if mask & 16 != 0:
         loop i in [0..nkids(n)): fact_changes_walk(kid(n, i), s, at, reason)
+# A permutation preserves the length of a private receiver even across a
+# loop backedge. Apply the callback's ordinary effects to everything else.
+# Only an already tracked length is transferred, with indexed lookups.
+fact_permutation_change = (n: int, s: mut FactState):
+    p = fact_place(kid(n, 0))
+    i = fact_binding(s, p)
+    length = 0
+    if i >= 0 and not fact_exposed(p) and (ownership_decls.len() == 0 or not ownership_fact_type(ntype(kid(n, 0)))):
+        q = fact_projection_find(s, s.bindings[i].value, -1, false)
+        if q >= 0: length = s.projections[q].value
+    fact_path_call_effects(n, s)
+    if length != 0 and s.projections.len() < FACT_CAP:
+        b = fact_binding(s, p)
+        if b >= 0: fact_add_projection(s, FactProjection(s.bindings[b].value, -1, false, length))
 fact_growth_change = (n: int, s: mut FactState, at: int, reason: FactReason):
     found = fact_held_length(s, kid(n, 0))
     fact_change_route(s, kid(n, 0), true, at, reason)
