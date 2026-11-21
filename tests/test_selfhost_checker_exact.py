@@ -49,6 +49,12 @@ main = ():
     loop op in [63, 64, 65, 58]:
         potential(wire(mk(.binary, T_INT, op, 2), no, yes))
         potential(wire(mk(.binary, T_INT, op, 2), no, no))
+    # An unsigned quotient follows either operand; a remainder its divisor.
+    loop op in [61, 62]:
+        loop aux in [0, 2]:
+            potential(wire(mk(.binary, T_U64, op, aux), no, yes))
+            potential(wire(mk(.binary, T_U64, op, aux), yes, no))
+            potential(wire(mk(.binary, T_U64, op, aux), no, no))
     loop aux in [0, 1, 2]: potential(wire(mk(.conv, T_MATH_INT, 0, aux), yes))
     loop k in [NK.if_, NK.iflet]:
         potential(wire(mk(k, T_INT), no, no, yes))

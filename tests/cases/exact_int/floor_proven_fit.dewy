@@ -1,0 +1,10 @@
+# Exact intermediates under `//` and `%` that provably fit their destination
+# need no runtime check.
+avg=(a:uint64 b:uint64):>uint64 => (a + b) // 2
+half=(x:uint8):>uint8 => (x + 255) // 2
+square_mod=(a:uint64 m:uint32<(>? 0)>):>uint32 => (a * a) % m
+main=()=>{
+    printl(avg(18446744073709551615 18446744073709551615))
+    printl(half(255))
+    printl(square_mod(18446744073709551615 1000000007))
+}

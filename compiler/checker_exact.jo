@@ -63,6 +63,10 @@ exact_potential = (n: int) -> bool:
     k = ex_nodes[0][n].kind
     op = int(ex_nodes[0][n].op)
     if k == .binary and (op == 63 or op == 64 or op == 65): return exact_potential(int(ex_nodes[0][n].a)) or exact_potential(int(ex_nodes[0][n].b))
+    # An exact dividend or divisor can put a quotient outside its operands'
+    # storage; a remainder takes its divisor's sign and stays below it.
+    if k == .binary and ex_nodes[0][n].aux == 0 and op == 61: return exact_potential(int(ex_nodes[0][n].a)) or exact_potential(int(ex_nodes[0][n].b))
+    if k == .binary and ex_nodes[0][n].aux == 0 and op == 62: return exact_potential(int(ex_nodes[0][n].b))
     if k == .conv and (ex_nodes[0][n].aux == 1 or ex_nodes[0][n].aux == 0): return exact_potential(int(ex_nodes[0][n].a))
     if k == .if_ or k == .iflet: return exact_potential(int(ex_nodes[0][n].b)) or exact_potential(int(ex_nodes[0][n].c))
     if k == .coalesce: return exact_potential(int(ex_nodes[0][n].b))

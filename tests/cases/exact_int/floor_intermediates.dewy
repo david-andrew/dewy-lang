@@ -1,0 +1,72 @@
+$runtime_checks
+
+unsigned8=(x:uint8):>void=>{
+    printl((x - 254) // 2)
+    printl((x - 254) % 2)
+    printl((x << 8) // 3)
+    printl((x << 8) % 3)
+}
+unsigned16=(x:uint16):>void=>{
+    printl((x * x) // 3)
+    printl((x * x) % 3)
+}
+unsigned32=(x:uint32):>void=>{
+    printl((x * x) // 3)
+    printl((x * x) % 3)
+}
+unsigned64=(x:uint64 y:uint64):>void=>{
+    printl((x - 4) // 2)
+    printl((x - 5) % 3)
+    printl((y << 62) // 1)
+    printl((y << 62) % 5)
+    printl((y << 62) * y // 3)
+    printl((y << 62) * y % 3)
+    printl(7 // (x - 4))
+    printl(7 % (x - 4))
+    printl(y // (y << 62))
+    printl(y % (y << 62))
+}
+show=(n:int):>void=>printl(n)
+signed8=(x:int8):>void=>{
+    show((x - 127) // 2)
+    show((x - 127) % 2)
+    show(7 // (x - 1))
+    show((-7) % (x * x))
+}
+signed16=(x:int16):>void=>{
+    show((x << 16) // 3)
+    show((x << 16) % 3)
+}
+signed32=(x:int32):>void=>{
+    show((x * x) // 3)
+    show((x * x) % 3)
+    show(5 % (x * x))
+    show((x - 2147483647) // 2)
+}
+signed64=(x:int64):>void=>{
+    printl((x * 3) // 2)
+    printl((x * 3) % 5)
+    printl(7 // (x - 1))
+    printl(7 % (x - 1))
+}
+consumers=(x:uint64 y:uint64):>void=>{
+    printl((x - 4) // 2 <? 0)
+    show((x - 4) // 2)
+    show(7 % (x - 4))
+    printl(int((y << 62) // 3))
+    let q:int = (x - 4) // 2
+    printl(q)
+    printl((x - 4) // 2 % 5)
+    printl((x - 4) // 2 + 1)
+}
+main=()=>{
+    unsigned8(1)
+    unsigned16(65534)
+    unsigned32(4294967295)
+    unsigned64(0 21)
+    signed8(-128)
+    signed16(-32123)
+    signed32(-2147483648)
+    signed64(-9223372036854775808)
+    consumers(0 21)
+}

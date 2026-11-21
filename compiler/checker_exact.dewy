@@ -59,7 +59,7 @@ ex_type=(t0:EXWord pos:int64):>bool=>$unsafe {
     if ex_types[0].ptr[t].kind not=? 'int_' or t =? ex_math_int[0] or ex_types[0].ptr[t].st not=? 0 {return false}
     ex_dewy(pos) or ex_types[0].ptr[t].bits <? 64
 }
-# Frozen Tok ordinals: plus 58, minus 59, star 60, slash 61, amp 63, pipe 64, caret 65,
+# Frozen Tok ordinals: plus 58, minus 59, star 60, slash 61, percent 62, amp 63, pipe 64, caret 65,
 # shl 67, starstar 79; IN.fixed_abs 89.
 ex_operation=(n:EXWord):>bool=>$unsafe {
     let node=ex_nodes[0].ptr + n
@@ -85,6 +85,10 @@ exact_potential=(n0:int64):>bool=>$unsafe {
     let node=ex_nodes[0].ptr + n
     let k=node[0].kind
     if k =? 'binary' and (node[0].op =? 63 or node[0].op =? 64 or node[0].op =? 65) {return exact_potential(int64(node[0].a)) or exact_potential(int64(ex_nodes[0].ptr[n].b))}
+    # An exact dividend or divisor can put a quotient outside its operands'
+    # storage; a remainder takes its divisor's sign and stays below it.
+    if k =? 'binary' and node[0].aux =? 0 and node[0].op =? 61 {return exact_potential(int64(node[0].a)) or exact_potential(int64(ex_nodes[0].ptr[n].b))}
+    if k =? 'binary' and node[0].aux =? 0 and node[0].op =? 62 {return exact_potential(int64(ex_nodes[0].ptr[n].b))}
     # CV.none_ 0, CV.int_ 1
     if k =? 'conv' and (node[0].aux =? 1 or node[0].aux =? 0) {return exact_potential(int64(node[0].a))}
     if k =? 'if_' or k =? 'iflet' {return exact_potential(int64(node[0].b)) or exact_potential(int64(ex_nodes[0].ptr[n].c))}
