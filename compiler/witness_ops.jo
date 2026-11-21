@@ -558,13 +558,21 @@ wit_unsigned_length_help = (n: int):
     if representation_type(ntype(v)) != T_U64: return
     name = if nodes[v].kind == .ident: "`{name_of(int(nodes[v].name))}`" else: "this value"
     err_notes.push((-1, "help: {name} is a uint64, which may exceed int64: if it counts up to a C length, declare that C result `int64<(>=? 0)>` (`strlen = (s:ptr<uint8>):>int64<(>=? 0)>`), so the length and its loop are int64"))
-# (`bins:int` given where an int64 is wanted, `fill(0 bins)`: an `int` parameter holds any
-# integer, while one declared with the width moves the proof to each caller. O(1))
+# A bare int parameter or field can carry the checked width at its declaration.
 wit_int_parameter_help = (n: int):
     if n <= 0 or nodes[n].a == 0 or not is_int(ntype(n)) or prune(ntype(n)) == T_MATH_INT or not dewy_at(nodes[n].pos): return
     v = int(nodes[n].a)
     loop nodes[v].kind == .narrow: v = int(nodes[v].a)
-    if nodes[v].kind != .ident or nodes[v].aux != i32(int(SK.local)) or prune(ntype(v)) != T_MATH_INT: return
+    if prune(ntype(v)) != T_MATH_INT: return
+    if nodes[v].kind == .field and nodes[v].aux >= 0:
+        record = representation_type(ntype(int(nodes[v].a)))
+        if tkind(record) != .struct_: return
+        decl = int(structs[int(types[record].st)].decl)
+        if decl == 0 or not dewy_at(nodes[decl].pos) or pos_in_lib(nodes[decl].pos): return
+        name = name_of(int(nodes[v].name))
+        err_notes.push((-1, "help: or declare the field `{name}:{dt(ntype(n))}` in `{dt(record)}` to check the width on each write"))
+        return
+    if nodes[v].kind != .ident or nodes[v].aux != i32(int(SK.local)): return
     if int(locals[int(nodes[v].sym)].flags) & LF_VALUEPARAM == 0: return
     name = name_of(int(nodes[v].name))
     err_notes.push((-1, "help: or declare the parameter `{name}:{dt(ntype(n))}`: an `int` parameter holds any integer, and one with a width moves the proof to each caller"))

@@ -672,13 +672,23 @@ wit_int_global_help=(n:WitWord):>void=>$unsafe {
     let name=name_of(WitWord(nodes.ptr[v].name))
     err_notes.push([(-1) "help: or declare `{name}` with its width where it is made (`let {name}:{dt(ntype(n))} = ...`): an `int` holds any integer, and one with a width proves each write instead"])
 }
-# (`bins:int` given where an int64 is wanted, `fill(0 bins)`: an `int` parameter holds any
-# integer, while one declared with the width moves the proof to each caller. O(1))
+# A bare int parameter or record field can carry the checked width where
+# callers supply it or values are stored. O(1), only on a diagnostic path.
 wit_int_parameter_help=(n:WitWord):>void=>$unsafe {
     if n <=? 0 or nodes.ptr[n].a =? 0 or not is_int(ntype(n)) or prune(ntype(n)) =? T_MATH_INT or not dewy_at(nodes.ptr[n].pos) {return}
     let v=WitWord(nodes.ptr[n].a)
     loop nodes.ptr[v].kind =? 'narrow' {v=WitWord(nodes.ptr[v].a)}
-    if nodes.ptr[v].kind not=? 'ident' or nodes.ptr[v].aux not=? int32(1) or prune(ntype(v)) not=? T_MATH_INT {return}
+    if prune(ntype(v)) not=? T_MATH_INT {return}
+    if nodes.ptr[v].kind =? 'field' and nodes.ptr[v].aux >=? 0 {
+        let record=representation_type(ntype(WitWord(nodes.ptr[v].a)))
+        if tkind(record) not=? 'struct_' {return}
+        let decl=WitWord(structs.ptr[WitWord(types.ptr[record].st)].decl)
+        if decl =? 0 or not dewy_at(nodes.ptr[decl].pos) or pos_in_lib(nodes.ptr[decl].pos) {return}
+        let name=name_of(WitWord(nodes.ptr[v].name))
+        err_notes.push([(-1) "help: or declare the field `{name}:{dt(ntype(n))}` in `{dt(record)}` to check the width on each write"])
+        return
+    }
+    if nodes.ptr[v].kind not=? 'ident' or nodes.ptr[v].aux not=? int32(1) {return}
     if WitWord(locals.ptr[WitWord(nodes.ptr[v].sym)].flags) & LF_VALUEPARAM =? 0 {return}
     let name=name_of(WitWord(nodes.ptr[v].name))
     err_notes.push([(-1) "help: or declare the parameter `{name}:{dt(ntype(n))}`: an `int` parameter holds any integer, and one with a width moves the proof to each caller"])
