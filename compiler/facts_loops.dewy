@@ -1,6 +1,7 @@
 $runtime_checks
 
 from p"ast.jo" import (kid nkids nodes)
+from p"isolation_ops.dewy" import (isolation_children)
 from p"check.jo" import (globals locals)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"effect_types.dewy" import (PlaceIdentity)
@@ -236,14 +237,18 @@ fact_loop_header=(@entry:FactState back:FactState old:FactState at:LoopWord wide
         if widen and previous >=? 0 {
             let before=fact_bound(old old.bindings[previous].value)
             let domain=fact_domain(t 'loop_' at)
-            bound.lo=if bound.lo <? before.lo {domain.lo} else {before.lo}
+            # (a narrow local the body compares with constants stops first at the nearest one,
+            # fact_loop_threshold: a 64-bit counter has the counter-progress axiom instead)
+            let local=if binding.place.root =? 'local' and types.ptr[fact_type(t)].kind =? 'int_' and types.ptr[fact_type(t)].bits <? 64 {binding.place.declaration} else {0}
+            bound.lo=if bound.lo >=? before.lo {before.lo} else if local >? 0 {max(domain.lo fact_loop_threshold(at local bound.lo false))} else {domain.lo}
             # (a counter the condition tests at an offset, growing below any
             # length, stops first at the largest length, where a guard on a
             # length or a bound below one holds it (`loop i+1 <? stop`); past
             # it, at the domain)
             let limit=fact_length_max()
             let offset=offsets.length >? 0 and binding.place.root =? 'local' and binding.place.declaration in? offsets
-            bound.hi=if bound.hi <=? before.hi {before.hi} else if offset and before.hi <? limit and bound.hi <=? limit and domain.hi >? limit {limit} else {domain.hi}
+            let stop=if local >? 0 and bound.hi >? before.hi {min(domain.hi fact_loop_threshold(at local bound.hi true))} else {domain.hi}
+            bound.hi=if bound.hi <=? before.hi {before.hi} else if offset and before.hi <? limit and bound.hi <=? limit and domain.hi >? limit {limit} else {stop}
         }
         # Stable values keep their immutable identities and projection facts.
         let original=fact_binding(entry binding.place)
@@ -330,6 +335,50 @@ fact_loop_header=(@entry:FactState back:FactState old:FactState at:LoopWord wide
         fact_set_bound(@s b y)
     }
     s
+}
+# Widening's threshold for integer local l of loop at: the nearest constant c (or c+1 above,
+# c-1 below) at least `past` (up) or at most it (down) that the loop compares l with directly
+# (`if near <? 10 { near += 1 }` stops at 10), else the domain's end. The next header keeps it
+# only when the body holds l there; each widening moves past it, so a loop settles after at
+# most one stop per constant. O(loop nodes) per widened local.
+fact_loop_threshold=(at:LoopWord l:LoopWord past:LoopWord up:bool):>LoopWord=>$unsafe {
+    let best=if up {FACT_MAX} else {FACT_MIN}
+    let work:array<int64>=[at]
+    let seen:LoopWord=0
+    loop work.length >? 0 and seen <? 4096 {
+        let n=work.pop()
+        seen += 1
+        if n <=? 0 {continue}
+        let k=nodes.ptr[n].kind
+        if k =? 'binary' {
+            let op=cx_token_values.ptr[LoopWord(nodes.ptr[n].op)]
+            if op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' or op =? 'eq' or op =? 'ne' {
+                let a=LoopWord(nodes.ptr[n].a)
+                let b=LoopWord(nodes.ptr[n].b)
+                loop nodes.ptr[a].kind =? 'conv' {a=LoopWord(nodes.ptr[a].a)}
+                loop nodes.ptr[b].kind =? 'conv' {b=LoopWord(nodes.ptr[b].a)}
+                let c=if nodes.ptr[b].kind =? 'int_lit' and nodes.ptr[a].kind =? 'ident' and LoopWord(nodes.ptr[a].sym) =? l {b} else if nodes.ptr[a].kind =? 'int_lit' and nodes.ptr[b].kind =? 'ident' and LoopWord(nodes.ptr[b].sym) =? l {a} else {0}
+                if c >? 0 {
+                    let v=nodes.ptr[c].ival
+                    if v >? -(LoopWord(1) << 62) and v <? (LoopWord(1) << 62) {
+                        loop candidate in [v (if up {v + 1} else {v - 1})] {
+                            if up and candidate >=? past and candidate <? best {best=candidate}
+                            if not up and candidate <=? past and candidate >? best {best=candidate}
+                        }
+                    }
+                }
+            }
+        }
+        let mask=isolation_children(k)
+        if mask <=? 0 {continue}
+        if mask & 1 not=? 0 {work.push(LoopWord(nodes.ptr[n].a))}
+        if mask & 2 not=? 0 {work.push(LoopWord(nodes.ptr[n].b))}
+        if mask & 4 not=? 0 {work.push(LoopWord(nodes.ptr[n].c))}
+        if mask & 16 not=? 0 {
+            loop i in [0..nkids(n)) {work.push(kid(n i))}
+        }
+    }
+    best
 }
 # Locals a loop condition compares at a constant offset (`i+2 <? n`), through
 # `and`/`or`. O(condition nodes), at most 16 deep.

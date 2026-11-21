@@ -1,0 +1,11 @@
+# A second, unbounded increment keeps the counter's bound unknown after the loop.
+count=(xs:array<int64>):>int32=>{
+    let near:int32=0
+    loop x in xs {
+        if x >? 0 and near <? 10 { near+=1 }
+        if x >? 5 and near <? int32.max { near+=1 }
+    }
+    let out:int32=near*100
+    return out
+}
+main=()=>printl(count([1 7 3]))

@@ -1,0 +1,21 @@
+# A counter a loop increases only under a guard against a constant keeps that bound after
+# the loop (widening stops at the constant first), so later fixed-width arithmetic proves.
+count=(xs:array<int64>):>int32=>{
+    let near:int32=0
+    loop x in xs {
+        if x >? 0 and near <? 10 { near+=1 }
+    }
+    let out:int32=near*100+near
+    return out
+}
+down=(w:int64):>int8=>{
+    let left:int8=0
+    loop dx in [-1..1] {
+        if dx+w >? 0 and left >? -100 { left-=1 }
+    }
+    return left-27
+}
+main=()=>{
+    printl(count([1 -2 3]))
+    printl(down(0))
+}

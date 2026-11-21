@@ -259,14 +259,18 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
         if widen and previous >= 0:
             before = fact_bound(old, old.bindings[previous].value)
             domain = fact_domain(t, .loop_, at)
-            bound.lo = if bound.lo < before.lo: domain.lo else: before.lo
+            # (a narrow local the body compares with constants stops first at the nearest one,
+            # fact_loop_threshold: a 64-bit counter has the counter-progress axiom instead)
+            local = if binding.place.root == .local and types[fact_type(t)].kind == .int_ and types[fact_type(t)].bits < 64: binding.place.declaration else: 0
+            bound.lo = if bound.lo >= before.lo: before.lo else if local > 0: max(domain.lo, fact_loop_threshold(at, local, bound.lo, false)) else: domain.lo
             # (a counter the condition tests at an offset, growing below any
             # length, stops first at the largest length, where a guard on a
             # length or a bound below one holds it (`loop i+1 <? stop`); past
             # it, at the domain)
             limit = fact_length_max()
             offset = offsets.len() > 0 and binding.place.root == .local and binding.place.declaration in offsets
-            bound.hi = if bound.hi <= before.hi: before.hi else if offset and before.hi < limit and bound.hi <= limit and domain.hi > limit: limit else: domain.hi
+            stop = if local > 0 and bound.hi > before.hi: min(domain.hi, fact_loop_threshold(at, local, bound.hi, true)) else: domain.hi
+            bound.hi = if bound.hi <= before.hi: before.hi else if offset and before.hi < limit and bound.hi <= limit and domain.hi > limit: limit else: stop
         # Stable values keep their immutable identities and projection facts.
         original = fact_binding(entry, binding.place)
         if original >= 0 and entry.bindings[original].value == v and v == peer_value:
@@ -340,6 +344,42 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
         fact_set_bound(s, a, x)
         fact_set_bound(s, b, y)
     s
+# Widening's threshold for integer local l of loop at: the nearest constant c (or c+1 above,
+# c-1 below) at least `past` (up) or at most it (down) that the loop compares l with directly
+# (`if near <? 10 { near += 1 }` stops at 10), else the domain's end. The next header keeps it
+# only when the body holds l there; each widening moves past it, so a loop settles after at
+# most one stop per constant. O(loop nodes) per widened local.
+fact_loop_threshold = (at: int, l: int, past: int, up: bool) -> int:
+    best = if up: FACT_MAX else: FACT_MIN
+    work: int[] = [at]
+    seen = 0
+    loop work.len() > 0 and seen < 4096:
+        n = work.pop()
+        seen += 1
+        if n <= 0: continue
+        k = nodes[n].kind
+        if k == .binary:
+            op = nodes[n].op as Tok
+            if op == .lt or op == .le or op == .gt or op == .ge or op == .eq or op == .ne:
+                a = int(nodes[n].a)
+                b = int(nodes[n].b)
+                loop nodes[a].kind == .conv: a = int(nodes[a].a)
+                loop nodes[b].kind == .conv: b = int(nodes[b].a)
+                c = if nodes[b].kind == .int_lit and nodes[a].kind == .ident and int(nodes[a].sym) == l: b else if nodes[a].kind == .int_lit and nodes[b].kind == .ident and int(nodes[b].sym) == l: a else: 0
+                if c > 0:
+                    v = int(nodes[c].ival)
+                    if v > -(1 << 62) and v < (1 << 62):
+                        loop candidate in [v, if up: v + 1 else: v - 1]:
+                            if up and candidate >= past and candidate < best: best = candidate
+                            if not up and candidate <= past and candidate > best: best = candidate
+        mask = isolation_children(k)
+        if mask <= 0: continue
+        if mask & 1 != 0: work.push(int(nodes[n].a))
+        if mask & 2 != 0: work.push(int(nodes[n].b))
+        if mask & 4 != 0: work.push(int(nodes[n].c))
+        if mask & 16 != 0:
+            loop i in [0..nkids(n)): work.push(kid(n, i))
+    best
 # Locals a loop condition compares at a constant offset (`i+2 <? n`), through
 # `and`/`or`. O(condition nodes), at most 16 deep.
 fact_offset_guarded = (e: int, out: mut int[], depth: int):

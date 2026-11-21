@@ -1038,6 +1038,8 @@ An `int` that only ever holds fixed-width values or literals (a branch, a functi
 returns, a loop's running `max`) stays within `int64`. A counter that a loop changes
 at most once per iteration by a small fixed step (`n += 1`, `t += b` for a byte `b`)
 stays within its entry value plus that many steps per element or range position.
+A narrower counter a loop changes only under a guard against a constant
+(`if near <? 10 { near += 1 }`) stays within that constant.
 Array and range loops settle what they carry the way condition loops do (a running
 `max` over `loop x in xs` stays within `int64`), and an integer array built by a
 loop that only pushes onto it (a comprehension, filtered or not) keeps the range of
