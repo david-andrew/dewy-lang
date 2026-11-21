@@ -1,0 +1,10 @@
+use 'check.jo'
+use 'checker_state.dewy'
+use 'util.jo'
+
+new_global = (name: int, decl: int, m: int) -> int:
+    inst_counter += 1
+    globals.push(Global(name = i32(name), decl = i32(decl), mod = i32(m), sym = "g_{name_of(name)}_{inst_counter}"))
+    g = globals.len() - 1
+    global_ids.push(g)
+    g

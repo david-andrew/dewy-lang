@@ -1,0 +1,23 @@
+use 'check.jo'
+use 'ast.jo'
+use 'checker_state.dewy'
+use 'checks_thin.dewy'
+use 'types.jo'
+
+eval_when_toplevel = (m: int, w: int):
+    saved = cx
+    ctxs.push(FnCtx(0, -1, i32(T_VOID), false, 0, i32(m), i32(check_scopes.names.len())))
+    cx = ctxs.len() - 1
+    cond = const_eval_bool(int(nodes[w].a))
+    ctxs.pop()
+    cx = saved
+    blk = int(nodes[w].c)
+    if cond: blk = int(nodes[w].b)
+    if blk == 0: return
+    register_decls(m, kids(blk))
+
+register_module = (m: int):
+    loop registered.len() <= m: registered.push(false)
+    if registered[m]: return
+    registered[m] = true
+    register_decls(m, modules[m].decls)

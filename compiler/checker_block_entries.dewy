@@ -1,0 +1,29 @@
+$runtime_checks
+from p"ast.jo" import (kid nkids nodes)
+from p"checker_sinks.dewy" import (sink_open)
+from p"checks_assign_hooks.dewy" import (block_sink_mode)
+from p"checks_thin.dewy" import (const_eval_bool)
+from p"refine.jo" import (refine_active)
+from p"refine_siblings.dewy" import (ref_pair_discard)
+
+BlockEntryWord:type=int64<overflow='wrap'>
+
+expand_when=(@out:array<int64> s:BlockEntryWord):>void=>{
+    if nodes[s].kind not=? 'when_' {
+        out.push(s)
+        return
+    }
+    let block=BlockEntryWord(nodes[s].c)
+    if const_eval_bool(BlockEntryWord(nodes[s].a)) {block=BlockEntryWord(nodes[s].b)}
+    if block =? 0 {return}
+    loop i in [0..nkids(block)) {expand_when(@out kid(block i))}
+}
+
+block_open=(b:BlockEntryWord mode:BlockEntryWord):>BlockEntryWord=>{
+    if mode >=? 0 {
+        sink_open(b mode)
+        return mode
+    }
+    if refine_active and nkids(b) =? 1 {ref_pair_discard(b)}
+    block_sink_mode(b mode =? -2)
+}

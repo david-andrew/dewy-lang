@@ -1,7 +1,9 @@
 $runtime_checks
 from p"ast.jo" import (NF_GENERIC NF_LANG_BODY NF_LOOPCOUNT NF_LITERAL NF_MUT NF_VOID clone has_flag kid kids nkids nodes)
 from p"ast_rest.dewy" import (lambda_captures)
-from p"check.jo" import (LF_CAPTURE LF_MUTPARAM LF_PARAM SINK_BODY check_block check_scopes ctxs cx dewy_at fns locals narrowed_var new_local returned_place scope_mark scope_reset sink_body_mode sink_fn sink_lambda_pack sink_no_tuple sink_want_elem sink_want_n sinks syms void_arm_end)
+from p"check.jo" import (LF_CAPTURE LF_MUTPARAM LF_PARAM SINK_BODY check_block check_scopes ctxs cx dewy_at fns locals narrowed_var new_local scope_mark scope_reset sink_body_mode sink_fn sink_lambda_pack sink_no_tuple sink_want_elem sink_want_n sinks syms)
+from p"checker_place_escapes.dewy" import (returned_place)
+from p"checker_body_end.dewy" import (void_arm_end)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checker_sinks.dewy" import (pack_written sink_body_kind sink_pack_body sink_written)
 from p"checker_state.dewy" import (FnCtx)

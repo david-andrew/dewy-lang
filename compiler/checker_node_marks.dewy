@@ -1,0 +1,12 @@
+$runtime_checks
+
+NodeMarkWord:type=int64<overflow='wrap'>
+
+node_mark=(@marks:array<bool> n:NodeMarkWord):>void=>{
+    if marks.length <=? n {marks.resize(n * 2 + 64)}
+    marks[n]=true
+}
+
+node_marked=(marks:array<bool> n:NodeMarkWord):>bool=>{
+    n <? marks.length and marks[n]
+}

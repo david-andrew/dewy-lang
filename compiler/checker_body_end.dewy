@@ -1,0 +1,34 @@
+$runtime_checks
+from p"ast.jo" import (kids mk nodes set_list)
+from p"checks_thin.dewy" import (check_stmt)
+from p"checks_thin_expr.dewy" import (is_chain_end)
+from p"types.jo" import (is_union tkind union_members)
+
+BodyEndWord:type=int64<overflow='wrap'>
+
+value_capable=(s:BodyEndWord):>bool=>{
+    let kind=nodes[s].kind
+    if kind =? 'exprstmt' {return true}
+    if (kind =? 'if_' or kind =? 'iflet') and nodes[s].c not=? 0 {return true}
+    kind =? 'if_' and is_chain_end(BodyEndWord(nodes[s].a))
+}
+
+# A union with a void member (`:>void | E`): a bare return or the end of the body gives it.
+union_has_void=(t:BodyEndWord):>bool=>{
+    if not is_union(t) {return false}
+    loop member in union_members(t) {
+        if tkind(member) =? 'void_' {return true}
+    }
+    false
+}
+
+# a `:>void | E` body that runs off its end gives its void member: a final bare return
+void_arm_end=(body:BodyEndWord r:BodyEndWord):>bool=>{
+    if not union_has_void(r) {return false}
+    let ret=mk('return_' nodes[body].pos)
+    check_stmt(ret)
+    let items=kids(body)
+    items.push(ret)
+    set_list(body items)
+    true
+}

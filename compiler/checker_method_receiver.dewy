@@ -1,0 +1,18 @@
+$runtime_checks
+from p"check.jo" import (decl_info decl_infos)
+from p"checker_signature.dewy" import (fn_sig)
+from p"error_ops.dewy" import (family_annotation value_members)
+from p"types.jo" import (prune type_eq types)
+
+MethodReceiverWord:type=int64<overflow='wrap'>
+
+# Shared by named member lookup and the complete diagnostic/IDE listing.
+# Read the cached signature in place; no candidate needs a signature copy.
+method_decl_for=(decl:MethodReceiverWord rt:MethodReceiverWord):>bool=>{
+    let di=decl_info(decl)
+    if not decl_infos[di].sig.done {fn_sig(decl);}
+    if decl_infos[di].sig.params.length =? 0 {return false}
+    let p=prune(decl_infos[di].sig.params[0])
+    if types[p].kind =? 'var' {return false}
+    types[p].kind =? types[rt].kind or type_eq(p rt) or family_annotation(p) and value_members(p).contains(rt)
+}

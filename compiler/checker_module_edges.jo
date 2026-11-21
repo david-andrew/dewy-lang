@@ -1,0 +1,17 @@
+use 'check.jo'
+use 'util.jo'
+
+module_added = (m: int):
+    bits = 0
+    if modules[m].is_prelude: bits = 1
+    if files[int(modules[m].file)].is_dewy: bits |= 2
+    mod_bits.push(bits)
+    none_yet: int[]
+    mod_uses.push(none_yet)
+
+use_added = (m: int, u: int):
+    modules[m].uses.push(u)
+    mod_uses[m].push(u)
+    if modules[u].is_prelude:
+        if prelude_used.len() <= m: prelude_used.resize(m * 2 + 16)
+        prelude_used[m] = true

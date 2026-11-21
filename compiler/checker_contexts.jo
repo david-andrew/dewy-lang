@@ -1,0 +1,26 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_state.dewy'
+use 'checks_thin.dewy'
+use 'types.jo'
+use 'util.jo'
+
+ctx_for_inst = (inst: int) -> int:
+    c = cx
+    loop c >= 0:
+        if int(ctxs[c].inst) == inst: return c
+        c = int(ctxs[c].parent)
+    -1
+
+setup_module_contexts = (prelude_init: int):
+    first = module_ctx.len()
+    loop mi in [first..modules.len()):
+        inst = prelude_init
+        if not modules[mi].is_prelude:
+            inst = new_inst(FK_INIT, mi, "init_{sanitize(name_of(int(modules[mi].name)))}")
+            b = mk(.block, mkpos(int(modules[mi].file), 0))
+            set_list(b, modules[mi].inits)
+            fns[inst].body = i32(b)
+        modules[mi].init_fn = i32(inst)
+        module_frames.push(FnCtx(i32(inst), -1, i32(T_VOID), false, 0, i32(mi), 0))
+        module_ctx.push(-1)

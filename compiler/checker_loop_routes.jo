@@ -1,0 +1,20 @@
+use 'ast.jo'
+use 'checker_state.dewy'
+use 'util.jo'
+
+route_text = (n: int) -> str:
+    k = nodes[n].kind
+    if k == .ident and (nodes[n].aux == i32(int(SK.local)) or nodes[n].aux == i32(int(SK.global))):
+        nm = name_of(int(nodes[n].name))
+        return if len(nm) > 0 and nm[0] != '$': nm else: ""
+    if k == .field:
+        base = route_text(int(nodes[n].a))
+        return if base == "": "" else: "{base}.{name_of(int(nodes[n].name))}"
+    ""
+
+same_route = (a: int, b: int) -> bool:
+    k = nodes[a].kind
+    if k != nodes[b].kind: return false
+    if k == .ident: return nodes[a].aux == nodes[b].aux and nodes[a].sym == nodes[b].sym
+    if k == .field: return nodes[a].name == nodes[b].name and same_route(int(nodes[a].a), int(nodes[b].a))
+    false

@@ -1,0 +1,28 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (nodes)
+from p"util.jo" import (name_of)
+
+LoopRouteWord:type=int64<overflow='wrap'>
+
+route_text=(n:LoopRouteWord):>string=>{
+    let kind=nodes[n].kind
+    # Identifiers store the frozen local (1) or global (2) symbol ordinal.
+    if kind =? 'ident' and (nodes[n].aux =? 1 or nodes[n].aux =? 2) {
+        let name=name_of(LoopRouteWord(nodes[n].name))
+        if starts_with(name "$") {return ""}
+        return name
+    }
+    if kind =? 'field' {
+        let base=route_text(LoopRouteWord(nodes[n].a))
+        if base not=? "" {return "{base}.{name_of(LoopRouteWord(nodes[n].name))}"}
+    }
+    ""
+}
+
+same_route=(a:LoopRouteWord b:LoopRouteWord):>bool=>{
+    let kind=nodes[a].kind
+    if kind not=? nodes[b].kind {return false}
+    if kind =? 'ident' {return nodes[a].aux =? nodes[b].aux and nodes[a].sym =? nodes[b].sym}
+    kind =? 'field' and nodes[a].name =? nodes[b].name and same_route(LoopRouteWord(nodes[a].a) LoopRouteWord(nodes[b].a))
+}

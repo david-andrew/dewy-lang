@@ -1,3 +1,6 @@
+use 'checker_place_escapes.dewy'
+use 'checker_global_instances.dewy'
+use 'checker_loop_routes.dewy'
 use 'checker_update_selectors.dewy'
 use 'checker_value_protocols.dewy'
 use 'checker_ffi_layout.dewy'
@@ -178,6 +181,9 @@ use 'checker_narrow_rollback.dewy'
 use 'checker_import_discovery.dewy'
 use 'checker_binding_inputs.dewy'
 use 'checker_home_index.dewy'
+use 'checker_registration.dewy'
+use 'checker_module_edges.dewy'
+use 'checker_load_module.dewy'
 
 struct Module:
     name: i32
@@ -406,22 +412,9 @@ name_bind = (m: int, name: int, s: int):
 # (mod_bits), and its uses (mod_uses, as modules[m].uses)
 mod_bits: int[]
 mod_uses: int[][]
-module_added = (m: int):
-    bits = 0
-    if modules[m].is_prelude: bits = 1
-    if files[int(modules[m].file)].is_dewy: bits |= 2
-    mod_bits.push(bits)
-    none_yet: int[]
-    mod_uses.push(none_yet)
 
 # (by module, whether a prelude module is among its uses: then each use is asked in turn)
 prelude_used: bool[]
-use_added = (m: int, u: int):
-    modules[m].uses.push(u)
-    mod_uses[m].push(u)
-    if modules[u].is_prelude:
-        if prelude_used.len() <= m: prelude_used.resize(m * 2 + 16)
-        prelude_used[m] = true
 
 # The one use of module m whose table can bind name, -1 for none; -2 when its uses must each be
 # asked in order (a prelude among them, or more than one module binding the name; bound_in
@@ -518,16 +511,6 @@ jo_type_spelling = (nm: int, s: int, pos: int):
 repl_sig_query = false          # (the REPL's `:type name`: a function's versions go to repl_sig)
 repl_sig = ""
 
-# Shared by named member lookup and the complete diagnostic/IDE listing.
-# Read the cached signature in place; no candidate needs a signature copy.
-method_decl_for = (decl: int, rt: int) -> bool:
-    di = decl_info(decl)
-    if not decl_infos[di].sig.done: fn_sig(decl)
-    if decl_infos[di].sig.params.len() == 0: return false
-    p0 = prune(decl_infos[di].sig.params[0])
-    # (a method of a minted parent takes its family, which this type is in)
-    types[p0].kind != .var and (types[p0].kind == types[rt].kind or type_eq(p0, rt) or family_annotation(p0) and value_members(p0).contains(rt))
-
 cur_mod = () -> int:
     if cx >= 0: return int(ctxs[cx].mod)
     0
@@ -541,47 +524,12 @@ bound_here = (name: int) -> bool:
 
 
 
-load_module = (path: str, is_prelude: bool, from: int) -> int:
-    key = module_path_key(path)
-    ex = module_by_path.get(key) ?? -1
-    if ex >= 0: return ex
-    src = read_source(path)
-    if src == none: fatal(from, "cannot read '{path}'")
-    d = path_dir(path)
-    files.push(SrcFile(path, d, src!, ends_with(path, ".dewy")))
-    fi = files.len() - 1
-    library_module = is_prelude or prelude_jo_module(key)
-    m = Module(name = i32(intern(path_stem(path))), file = i32(fi), dir = d, is_prelude = library_module)
-    modules.push(m)
-    mi = modules.len() - 1
-    module_added(mi)
-    module_by_path[key] = mi
-    p_lazy = is_prelude and not ide_on
-    if pl_on: pl_files.push(fi)
-    # (parsing an imported module is frontend work, whatever phase meets the import)
-    icl = ic_mod(IC_LOAD, mi)
-    decls = source_declarations(fi)
-    ic_restore(icl)
-    p_lazy = false
-    modules[mi].decls = decls
-    mi
 
 late_module_imports = false
 # The seed resolves this entry directly from expr.jo's checker import.
 ensure_bundled_import = (file: str, alias: str, pos: int): register_bundled_import(file, alias, pos)
 
 
-eval_when_toplevel = (m: int, w: int):
-    saved = cx
-    ctxs.push(FnCtx(0, -1, i32(T_VOID), false, 0, i32(m), i32(check_scopes.names.len())))
-    cx = ctxs.len() - 1
-    cond = const_eval_bool(int(nodes[w].a))
-    ctxs.pop()
-    cx = saved
-    blk = int(nodes[w].c)
-    if cond: blk = int(nodes[w].b)
-    if blk == 0: return
-    register_decls(m, kids(blk))
 
 # The names in a destructuring pattern, in source order. Keep the tree until
 # checking the source type; registration and declaration detection need leaves.
@@ -646,11 +594,6 @@ assign_to_decl = (s: int):
 # (a module `use`d by another is registered first, so that a top-level `x = ...` there sees the
 # used module's x: name_assignable)
 registered: bool[]
-register_module = (m: int):
-    loop registered.len() <= m: registered.push(false)
-    if registered[m]: return
-    registered[m] = true
-    register_decls(m, modules[m].decls)
 
 register_decls = (m: int, decls: int[]):
     loop d in decls:
@@ -766,13 +709,6 @@ var_visible = (nm: int) -> bool:
     k = syms[s].kind
     k == .local or k == .global
 
-new_global = (name: int, decl: int, m: int) -> int:
-    inst_counter += 1
-    globals.push(Global(name = i32(name), decl = i32(decl), mod = i32(m), sym = "g_{name_of(name)}_{inst_counter}"))
-    g = globals.len() - 1
-    global_ids.push(g)
-    g
-
 # ---------------- type resolution ----------------
 values_type_ok = false   # (resolve_binding_type: a binding's whole type may be several values)
 resolve_type_name = (tn: int) -> CheckerTypeName:
@@ -866,18 +802,6 @@ binding_const_init = (kind: SK, ref: int, pos: int) -> int:
         if int(locals[ref].flags) & LF_CONST != 0: return int(locals[ref].const_init)
     0
 
-# the size of a fixed-size array type: a number or a compile-time constant
-fixed_size = (n: int) -> int:
-    if dewy_at(nodes[n].pos): return checked_array_length(n)
-    v = 0
-    if nodes[n].kind == .tname:
-        e = mk(.ident, nodes[n].pos)
-        nodes[e].name = nodes[n].name
-        v = ceval(e).i
-    else: v = ceval(n).i
-    if v < 1: fatal(nodes[n].pos, "the size of a fixed-size array must be at least 1 (found {v})")
-    if v > (1 << 28): fatal(nodes[n].pos, "fixed-size array too large ({v} elements; use {jd(nodes[n].pos, "T[]", "array<T>")} for big arrays)")
-    v
 
 # A generic type's arguments with those left out filled in from its declaration: `Date` is
 # `Date<Gregorian>` when it says `<C=Gregorian>`. The defaults read in the declaration's own scope.
@@ -966,14 +890,6 @@ sanitize = (s: str) -> str:
 # calls it)
 no_web_warned: {int: bool}
 
-# (a lazy body's lexing and parsing is frontend work, whoever asks for it first)
-load_body = (decl: int, f: int):
-    b = int(nodes[decl].b)
-    if b == 0 or not has_flag(b, NF_LAZY): return
-    icl = ic_fn(IC_LOAD, f)
-    ensure_body(decl)
-    ic_restore(icl)
-
 get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int: ci_get_fn_inst(decl, targs, use_pos)
 
 
@@ -990,13 +906,6 @@ new_local = (name: int, t: int, pos: int) -> int:
     fns[inst].locals.push(l)
     if name != 0 and name_of(name) != "_": push_scope_sym(name, new_sym(name, .local, l, 0))
     l
-
-ctx_for_inst = (inst: int) -> int:
-    c = cx
-    loop c >= 0:
-        if int(ctxs[c].inst) == inst: return c
-        c = int(ctxs[c].parent)
-    -1
 
 
 
@@ -1043,19 +952,6 @@ enter_module_context = (m: int) -> bool:
     module_ctx[m] = ctxs.len()
     ctxs.push(module_frames[m])
     true
-
-setup_module_contexts = (prelude_init: int):
-    first = module_ctx.len()
-    loop mi in [first..modules.len()):
-        inst = prelude_init
-        if not modules[mi].is_prelude:
-            inst = new_inst(FK_INIT, mi, "init_{sanitize(name_of(int(modules[mi].name)))}")
-            b = mk(.block, mkpos(int(modules[mi].file), 0))
-            set_list(b, modules[mi].inits)
-            fns[inst].body = i32(b)
-        modules[mi].init_fn = i32(inst)
-        module_frames.push(FnCtx(i32(inst), -1, i32(T_VOID), false, 0, i32(mi), 0))
-        module_ctx.push(-1)
 
 # the global a narrowed name's place (g.f narrowed by `is`) belongs to, or -1
 alias_global = (l: int) -> int:
@@ -1178,33 +1074,6 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
 # (written for `=`, `+=` or `return true`)
 discarding = false        # (checking `_ = value`: dropped on purpose, no warning)
 
-has_break = (n: int, depth: int = 0) -> bool:
-    if n == 0: return false
-    k = nodes[n].kind
-    if k == .break_: return nodes[n].ival == depth
-    if k == .lambda: return false
-    if k == .while_ or k == .for_: return has_break(int(nodes[n].a), depth) or has_break(int(nodes[n].b), depth + 1)
-    if has_break(int(nodes[n].a), depth) or has_break(int(nodes[n].b), depth): return true
-    if has_break(int(nodes[n].c), depth): return true
-    loop i in [0..nkids(n)):
-        if has_break(kid(n, i), depth): return true
-    false
-
-value_capable = (s: int) -> bool:
-    k = nodes[s].kind
-    if k == .exprstmt: return true
-    if (k == .if_ or k == .iflet) and nodes[s].c != 0: return true
-    if k == .if_ and nodes[s].c == 0 and is_chain_end(int(nodes[s].a)): return true
-    false
-
-expand_when = (out: mut int[], s: int):
-    if nodes[s].kind != .when_:
-        out.push(s)
-        return
-    blk = int(nodes[s].c)
-    if const_eval_bool(int(nodes[s].a)): blk = int(nodes[s].b)
-    if blk == 0: return
-    loop i in [0..nkids(blk)): expand_when(out, kid(blk, i))
 
 # ---------------- multiple expressions (docs/design/multi_expressions.md) ----------------
 # A Dewy block expresses each non-void value its statements give, in source order, through
@@ -1235,10 +1104,6 @@ sink_want_n = 0          # (a written `:>(T T)` body about to open: its count an
 sink_want_elem = 0
 sink_lambda_pack = 0     # (a lambda checked as a function type giving several values: their type)
 spread_calls: bool[]   # (by node: calls spread into an array, `[f()...]`: they may give several values)
-node_marked = (marks: bool[], n: int) -> bool: n < marks.len() and marks[n]
-node_mark = (marks: mut bool[], n: int):
-    if marks.len() <= n: marks.resize(n * 2 + 64)
-    marks[n] = true
 sink_splice: {int: int[]}        # (a held value's statement: the statements it becomes, sink_hold)
 sink_no_tuple = false            # (a body about to open whose values are always pushed onto an array)
 sink_bind_next = 0               # (the block a binding is about to check as its value: a BIND ...)
@@ -1281,19 +1146,6 @@ check_block = (b: int, expected: int, want_value: bool) -> int: bk_block(b, expe
 # Blocks run in checker_blocks.dewy; these are its services.
 # (a sink opened for b in mode; mode -1 or -2 (wanting a value): how a discarding block's
 # values go, worked out here)
-block_open = (b: int, mode: int) -> int:
-    if mode >= 0:
-        sink_open(b, mode)
-        return mode
-    if refine_active and nkids(b) == 1: ref_pair_discard(b)
-    block_sink_mode(b, mode == -2)
-
-# A union with a void member (`:>void | E`): a bare return or the end of the body gives it.
-union_has_void = (t: int) -> bool:
-    if not is_union(t): return false
-    loop m in union_members(t):
-        if tkind(m) == .void_: return true
-    false
 
 pack_result_ok = false
 
@@ -1622,23 +1474,6 @@ dewy_at = (pos: int) -> bool:
 # (ValueLoop: checker_state.dewy)
 value_loops: ValueLoop[]
 
-route_text = (n: int) -> str:
-    k = nodes[n].kind
-    if k == .ident and (nodes[n].aux == i32(int(SK.local)) or nodes[n].aux == i32(int(SK.global))):
-        nm = name_of(int(nodes[n].name))
-        return if len(nm) > 0 and nm[0] != '$': nm else: ""
-    if k == .field:
-        base = route_text(int(nodes[n].a))
-        return if base == "": "" else: "{base}.{name_of(int(nodes[n].name))}"
-    ""
-
-same_route = (a: int, b: int) -> bool:
-    k = nodes[a].kind
-    if k != nodes[b].kind: return false
-    if k == .ident: return nodes[a].aux == nodes[b].aux and nodes[a].sym == nodes[b].sym
-    if k == .field: return nodes[a].name == nodes[b].name and same_route(int(nodes[a].a), int(nodes[b].a))
-    false
-
 value_loop_resize = (receiver: int, operation: str, pos: int):
     i = value_loops.len() - 1
     loop i >= 0:
@@ -1842,15 +1677,6 @@ index_update_sources: {int: int} = {}   # a captured index's name -> the express
 index_update_arrays: {int: bool} = {}   # captured names used only to index arrays (facts.jo)
 
 
-# a `:>void | E` body that runs off its end gives its void member: a final bare return
-void_arm_end = (body: int, r: int) -> bool:
-    if not union_has_void(r): return false
-    ret = mk(.return_, nodes[body].pos)
-    check_stmt(ret)
-    items = kids(body)
-    items.push(ret)
-    set_list(body, items)
-    true
 
 
 
@@ -2164,34 +1990,7 @@ assign_value = (s: int, lt: int, settle: int) -> int:
 # index evaluated once.
 local_place_count = 0
 
-# `let p = @q[0]` at the top level: p would be a global, and a global holds a value, not a
-# place (it would silently be a copy). Function handles (`@f`, `@r.f`) stay values.
-global_place_decl = (d: int):
-    init = int(nodes[d].b)
-    if nodes[d].a != 0 or has_flag(d, NF_RDONLY) or not has_flag(init, NF_MUT) or not files[pos_file(nodes[d].pos)].is_dewy: return
-    k = nodes[init].kind
-    if k != .ident and k != .index and k != .field: return
-    probe = clone(init)
-    if is_fn_type(check_expr(probe, 0)): return
-    if k == .ident and nodes[probe].kind != .ident or k == .ident and nodes[probe].aux != i32(int(SK.local)) and nodes[probe].aux != i32(int(SK.global)): return
-    nm = name_of(int(nodes[d].name))
-    fatal(nodes[init].pos, "'{nm}' is declared at the top level, so it would be a global, and a global cannot be a place (it would hold a copy): declare the place inside a function or a block (`main = () => \{ let {nm} = @... }`), or copy the value without `@`")
-
 decl_values = (e: int, expected: int) -> int: values_init(e, expected)
-
-# `return @a`: a place goes only to an `@` parameter or a local place binding;
-# a function gives back a value. (`@f` of a function is its handle, a value.)
-returned_place = (v: int):
-    k = nodes[v].kind
-    if not has_flag(v, NF_MUT) or k != .ident and k != .field and k != .index or not files[pos_file(nodes[v].pos)].is_dewy: return
-    if k == .ident:
-        s = lookup(int(nodes[v].name))
-        if s == 0 or syms[s].kind == .fns: return
-        if syms[s].kind == .local and is_fn_type(int(locals[int(syms[s].ref)].type)): return
-        if syms[s].kind == .global and is_fn_type(int(globals[int(syms[s].ref)].type)): return
-    else:
-        if is_fn_type(check_expr(clone(v), 0)): return
-    fatal(nodes[v].pos, "a function gives back a value, not a place: drop the `@` (a place goes to an `@` parameter or `let name = @place`)")
 
 # A shaped parameter's dimension (dw_shape_prologue): a name already bound to a
 # value is checked against the argument's dimension; otherwise the name binds it.
@@ -2215,13 +2014,6 @@ zonk_collect_writes = false
 # (a function's return type given out while its body is still being checked: what has it may
 # change as that body goes on)
 type_exposures = 0
-
-# the variable at the bottom of a place (v in v.f[2].g), or 0
-place_root = (n: int) -> int:
-    r = n
-    loop r != 0 and (nodes[r].kind == .field or nodes[r].kind == .index): r = int(nodes[r].a)
-    if r != 0 and nodes[r].kind == .ident: return r
-    0
 
 # a function's variables whose fields or elements it changes but whose value it never reads: a
 # copy changed for nothing (`if let e = enemies.find(...): e.hp -= 5` leaves the enemy as it was)

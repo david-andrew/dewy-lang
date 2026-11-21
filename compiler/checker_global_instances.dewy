@@ -1,0 +1,16 @@
+$runtime_checks
+from p"check.jo" import (global_ids globals inst_counter)
+from p"checker_state.dewy" import (Global)
+from p"util.jo" import (name_of)
+
+GlobalInstWord:type=int64<overflow='wrap'>
+GlobalInstI32:type=int32<overflow='wrap'>
+
+new_global=(name:GlobalInstWord decl:GlobalInstWord m:GlobalInstWord):>GlobalInstWord=>{
+    let counter = @inst_counter
+    counter += 1
+    globals.push(Global(name=GlobalInstI32(name) decl=GlobalInstI32(decl) mod=GlobalInstI32(m) sym="g_{name_of(name)}_{counter}"))
+    let g=GlobalInstWord(globals.length) - 1
+    global_ids.push(g)
+    g
+}

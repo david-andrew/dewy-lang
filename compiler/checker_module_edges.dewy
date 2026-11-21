@@ -1,0 +1,22 @@
+$runtime_checks
+from p"check.jo" import (mod_bits mod_uses modules prelude_used)
+from p"util.jo" import (files)
+
+ModuleEdgeWord:type=int64<overflow='wrap'>
+
+module_added=(m:ModuleEdgeWord):>void=>{
+    let bits:ModuleEdgeWord=0
+    if modules[m].is_prelude {bits=1}
+    if files[ModuleEdgeWord(modules[m].file)].is_dewy {bits |= 2}
+    mod_bits.push(bits)
+    mod_uses.push([])
+}
+
+use_added=(m:ModuleEdgeWord u:ModuleEdgeWord):>void=>{
+    modules[m].uses.push(u)
+    mod_uses[m].push(u)
+    if modules[u].is_prelude {
+        if prelude_used.length <=? m {prelude_used.resize(m * 2 + 16)}
+        prelude_used[m]=true
+    }
+}

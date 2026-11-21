@@ -32,3 +32,29 @@ pushes_into=(n:TreeQueryWord names:dict<int64 bool>):>bool=>$unsafe {
     }
     false
 }
+
+has_break=(n:TreeQueryWord depth:TreeQueryWord=0):>bool=>{
+    if n =? 0 {return false}
+    let kind=nodes[n].kind
+    if kind =? 'break_' {return nodes[n].ival =? depth}
+    if kind =? 'lambda' {return false}
+    if kind =? 'while_' or kind =? 'for_' {
+        return has_break(TreeQueryWord(nodes[n].a) depth) or has_break(TreeQueryWord(nodes[n].b) depth + 1)
+    }
+    if has_break(TreeQueryWord(nodes[n].a) depth) or has_break(TreeQueryWord(nodes[n].b) depth) {return true}
+    if has_break(TreeQueryWord(nodes[n].c) depth) {return true}
+    loop i in [0..nkids(n)) {
+        if has_break(kid(n i) depth) {return true}
+    }
+    false
+}
+
+# the variable at the bottom of a place (v in v.f[2].g), or 0
+place_root=(n:TreeQueryWord):>TreeQueryWord=>{
+    let r=n
+    loop r not=? 0 and (nodes[r].kind =? 'field' or nodes[r].kind =? 'index') {
+        r=TreeQueryWord(nodes[r].a)
+    }
+    if r not=? 0 and nodes[r].kind =? 'ident' {return r}
+    0
+}

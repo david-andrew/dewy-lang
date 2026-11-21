@@ -1,0 +1,39 @@
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'diagnostic_exit.dewy'
+use 'icount.jo'
+use 'icount_ops.dewy'
+use 'ide.jo'
+use 'ide_decls.dewy'
+use 'module_paths.dewy'
+use 'parse.jo'
+use 'prelude_ops.dewy'
+use 'source_frontend.dewy'
+use 'source_types.dewy'
+use 'util.jo'
+use 'checker_module_edges.dewy'
+
+load_module = (path: str, is_prelude: bool, from: int) -> int:
+    key = module_path_key(path)
+    ex = module_by_path.get(key) ?? -1
+    if ex >= 0: return ex
+    src = read_source(path)
+    if src == none: fatal(from, "cannot read '{path}'")
+    d = path_dir(path)
+    files.push(SrcFile(path, d, src!, ends_with(path, ".dewy")))
+    fi = files.len() - 1
+    library_module = is_prelude or prelude_jo_module(key)
+    m = Module(name = i32(intern(path_stem(path))), file = i32(fi), dir = d, is_prelude = library_module)
+    modules.push(m)
+    mi = modules.len() - 1
+    module_added(mi)
+    module_by_path[key] = mi
+    p_lazy = is_prelude and not ide_on
+    if pl_on: pl_files.push(fi)
+    # (parsing an imported module is frontend work, whatever phase meets the import)
+    icl = ic_mod(IC_LOAD, mi)
+    decls = source_declarations(fi)
+    ic_restore(icl)
+    p_lazy = false
+    modules[mi].decls = decls
+    mi

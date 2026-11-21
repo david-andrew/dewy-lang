@@ -1,0 +1,27 @@
+$runtime_checks
+from p"ast.jo" import (kids nodes)
+from p"check.jo" import (check_scopes ctxs cx modules register_decls registered)
+from p"checker_state.dewy" import (FnCtx)
+from p"checks_thin.dewy" import (const_eval_bool)
+from p"types.jo" import (T_VOID)
+
+RegistrationWord:type=int64<overflow='wrap'>
+
+eval_when_toplevel=(m:RegistrationWord w:RegistrationWord):>void=>{
+    let context = @cx
+    let saved=context
+    ctxs.push(FnCtx(0 (-1) int32<overflow='wrap'>(T_VOID) false 0 int32<overflow='wrap'>(m) int32<overflow='wrap'>(check_scopes.names.length)))
+    context=RegistrationWord(ctxs.length) - 1
+    let selected=const_eval_bool(RegistrationWord(nodes[w].a))
+    ctxs.pop();
+    context=saved
+    let block=if selected {nodes[w].b} else {nodes[w].c}
+    if block not=? 0 {register_decls(m kids(RegistrationWord(block)))}
+}
+
+register_module=(m:RegistrationWord):>void=>{
+    loop registered.length <=? m {registered.push(false)}
+    if registered[m] {return}
+    registered[m]=true
+    register_decls(m modules[m].decls)
+}

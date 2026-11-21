@@ -1,0 +1,16 @@
+$runtime_checks
+from p"ast.jo" import (NF_LAZY has_flag nodes)
+from p"icount.jo" import (IC_LOAD)
+from p"icount_ops.dewy" import (ic_fn ic_restore)
+from p"parser_text.dewy" import (ensure_body)
+
+LazyBodyWord:type=int64<overflow='wrap'>
+
+# (a lazy body's lexing and parsing is frontend work, whoever asks for it first)
+load_body=(decl:LazyBodyWord f:LazyBodyWord):>void=>{
+    let body=LazyBodyWord(nodes[decl].b)
+    if body =? 0 or not has_flag(body NF_LAZY) {return}
+    let previous=ic_fn(IC_LOAD f)
+    ensure_body(decl)
+    ic_restore(previous)
+}

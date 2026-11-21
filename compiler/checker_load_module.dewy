@@ -1,0 +1,45 @@
+$runtime_checks
+from p"check.jo" import (Module module_by_path modules)
+from p"checks_thin.dewy" import (module_path_key)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"icount.jo" import (IC_LOAD)
+from p"icount_ops.dewy" import (ic_mod ic_restore)
+from p"ide.jo" import (ide_on)
+from p"ide_decls.dewy" import (read_source)
+from p"module_paths.dewy" import (path_dir path_stem)
+from p"parse.jo" import (p_lazy)
+from p"prelude_ops.dewy" import (prelude_jo_module)
+from p"source_frontend.dewy" import (source_declarations)
+from p"source_types.dewy" import (SrcFile)
+from p"util.jo" import (files intern pl_files pl_on)
+from p"@lib/core/str.jo" import (ends_with)
+from p"checker_module_edges.dewy" import (module_added)
+
+ModuleLoadWord:type=int64<overflow='wrap'>
+ModuleLoadI32:type=int32<overflow='wrap'>
+
+load_module=(path:string is_prelude:bool origin:ModuleLoadWord):>ModuleLoadWord=>{
+    let key=module_path_key(path)
+    let previous=module_by_path.get(key) ?? -1
+    if previous >=? 0 {return previous}
+    let src=read_source(path)
+    if src =? none {fatal(origin "cannot read '{path}'")}
+    let directory=path_dir(path)
+    files.push(SrcFile(path directory (src ?? "") ends_with(path ".dewy")))
+    let fi=ModuleLoadWord(files.length) - 1
+    let library_module=is_prelude or prelude_jo_module(key)
+    modules.push(Module(name=ModuleLoadI32(intern(path_stem(path))) file=ModuleLoadI32(fi) dir=directory is_prelude=library_module))
+    let mi=ModuleLoadWord(modules.length) - 1
+    module_added(mi)
+    module_by_path[key]=mi
+    let lazy = @p_lazy
+    lazy=is_prelude and not ide_on
+    if pl_on {pl_files.push(fi)}
+    # Charge parsing to frontend work even for a module discovered by the checker.
+    let previous_bucket=ic_mod(IC_LOAD mi)
+    let decls=source_declarations(fi)
+    ic_restore(previous_bucket)
+    lazy=false
+    modules[mi].decls=decls
+    mi
+}

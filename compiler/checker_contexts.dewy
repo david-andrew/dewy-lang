@@ -1,0 +1,35 @@
+$runtime_checks
+from p"ast.jo" import (mk set_list)
+from p"check.jo" import (FK_INIT ctxs cx fns module_ctx module_frames modules sanitize)
+from p"checker_state.dewy" import (FnCtx)
+from p"checks_thin.dewy" import (new_inst)
+from p"types.jo" import (T_VOID)
+from p"util.jo" import (mkpos name_of)
+
+ContextWord:type=int64<overflow='wrap'>
+ContextI32:type=int32<overflow='wrap'>
+
+ctx_for_inst=(inst:ContextWord):>ContextWord=>{
+    let c=cx
+    loop c >=? 0 {
+        if ctxs[c].inst =? inst {return c}
+        c=ContextWord(ctxs[c].parent)
+    }
+    -1
+}
+
+setup_module_contexts=(prelude_init:ContextWord):>void=>{
+    loop mi in [module_ctx.length..modules.length) {
+        let inst=prelude_init
+        if not modules[mi].is_prelude {
+            let name=sanitize(name_of(ContextWord(modules[mi].name)))
+            inst=new_inst(FK_INIT mi "init_{name}")
+            let body=mk('block' mkpos(ContextWord(modules[mi].file) 0))
+            set_list(body modules[mi].inits)
+            fns[inst].body=ContextI32(body)
+        }
+        modules[mi].init_fn=ContextI32(inst)
+        module_frames.push(FnCtx(ContextI32(inst) (-1) ContextI32(T_VOID) false 0 ContextI32(mi) 0))
+        module_ctx.push(-1)
+    }
+}

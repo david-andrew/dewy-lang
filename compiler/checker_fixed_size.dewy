@@ -1,0 +1,25 @@
+$runtime_checks
+from p"ast.jo" import (mk nodes)
+from p"check.jo" import (ceval dewy_at)
+from p"checks_thin.dewy" import (jd)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"type_value_arguments.dewy" import (checked_array_length)
+
+FixedSizeWord:type=int64<overflow='wrap'>
+
+# The size of a fixed-size array type is a number or a compile-time constant.
+fixed_size=(n:FixedSizeWord):>FixedSizeWord=>{
+    if dewy_at(nodes[n].pos) {return checked_array_length(n)}
+    let expr=n
+    if nodes[n].kind =? 'tname' {
+        expr=mk('ident' nodes[n].pos)
+        nodes[expr].name=nodes[n].name
+    }
+    let v=FixedSizeWord(ceval(expr).i)
+    if v <? 1 {fatal(nodes[n].pos "the size of a fixed-size array must be at least 1 (found {v})")}
+    if v >? (1 << 28) {
+        let array_name=jd(nodes[n].pos "T[]" "array<T>")
+        fatal(nodes[n].pos "fixed-size array too large ({v} elements; use {array_name} for big arrays)")
+    }
+    v
+}

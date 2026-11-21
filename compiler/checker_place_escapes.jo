@@ -1,0 +1,34 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_expr.dewy'
+use 'checker_state.dewy'
+use 'checks_thin_expr.dewy'
+use 'diagnostic_exit.dewy'
+use 'util.jo'
+
+# `let p = @q[0]` at the top level: p would be a global, and a global holds a value, not a
+# place (it would silently be a copy). Function handles (`@f`, `@r.f`) stay values.
+global_place_decl = (d: int):
+    init = int(nodes[d].b)
+    if nodes[d].a != 0 or has_flag(d, NF_RDONLY) or not has_flag(init, NF_MUT) or not files[pos_file(nodes[d].pos)].is_dewy: return
+    k = nodes[init].kind
+    if k != .ident and k != .index and k != .field: return
+    probe = clone(init)
+    if is_fn_type(check_expr(probe, 0)): return
+    if k == .ident and nodes[probe].kind != .ident or k == .ident and nodes[probe].aux != i32(int(SK.local)) and nodes[probe].aux != i32(int(SK.global)): return
+    nm = name_of(int(nodes[d].name))
+    fatal(nodes[init].pos, "'{nm}' is declared at the top level, so it would be a global, and a global cannot be a place (it would hold a copy): declare the place inside a function or a block (`main = () => \{ let {nm} = @... }`), or copy the value without `@`")
+
+# `return @a`: a place goes only to an `@` parameter or a local place binding;
+# a function gives back a value. (`@f` of a function is its handle, a value.)
+returned_place = (v: int):
+    k = nodes[v].kind
+    if not has_flag(v, NF_MUT) or k != .ident and k != .field and k != .index or not files[pos_file(nodes[v].pos)].is_dewy: return
+    if k == .ident:
+        s = lookup(int(nodes[v].name))
+        if s == 0 or syms[s].kind == .fns: return
+        if syms[s].kind == .local and is_fn_type(int(locals[int(syms[s].ref)].type)): return
+        if syms[s].kind == .global and is_fn_type(int(globals[int(syms[s].ref)].type)): return
+    else:
+        if is_fn_type(check_expr(clone(v), 0)): return
+    fatal(nodes[v].pos, "a function gives back a value, not a place: drop the `@` (a place goes to an `@` parameter or `let name = @place`)")

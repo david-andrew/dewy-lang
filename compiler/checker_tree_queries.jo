@@ -173,3 +173,22 @@ pushes_into = (n: int, names: {int: bool}) -> bool:
     loop i in [0..nkids(n)):
         if pushes_into(kid(n, i), names): return true
     false
+
+has_break = (n: int, depth: int = 0) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .break_: return nodes[n].ival == depth
+    if k == .lambda: return false
+    if k == .while_ or k == .for_: return has_break(int(nodes[n].a), depth) or has_break(int(nodes[n].b), depth + 1)
+    if has_break(int(nodes[n].a), depth) or has_break(int(nodes[n].b), depth): return true
+    if has_break(int(nodes[n].c), depth): return true
+    loop i in [0..nkids(n)):
+        if has_break(kid(n, i), depth): return true
+    false
+
+# the variable at the bottom of a place (v in v.f[2].g), or 0
+place_root = (n: int) -> int:
+    r = n
+    loop r != 0 and (nodes[r].kind == .field or nodes[r].kind == .index): r = int(nodes[r].a)
+    if r != 0 and nodes[r].kind == .ident: return r
+    0

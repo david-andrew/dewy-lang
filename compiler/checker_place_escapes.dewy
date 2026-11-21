@@ -1,0 +1,38 @@
+$runtime_checks
+from p"ast.jo" import (NF_MUT NF_RDONLY clone has_flag nodes)
+from p"check.jo" import (globals locals syms)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checks_thin_expr.dewy" import (is_fn_type)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"util.jo" import (files name_of pos_file)
+
+PlaceEscapeWord:type=int64<overflow='wrap'>
+
+# `let p = @q[0]` at the top level: p would be a global, and a global holds a value, not a
+# place (it would silently be a copy). Function handles (`@f`, `@r.f`) stay values.
+global_place_decl=(d:PlaceEscapeWord):>void=>{
+    let init=PlaceEscapeWord(nodes[d].b)
+    if nodes[d].a not=? 0 or has_flag(d NF_RDONLY) or not has_flag(init NF_MUT) or not files[pos_file(nodes[d].pos)].is_dewy {return}
+    let kind=nodes[init].kind
+    if kind not=? 'ident' and kind not=? 'index' and kind not=? 'field' {return}
+    let probe=clone(init)
+    if is_fn_type(check_expr(probe 0)) {return}
+    # The checked identifier stores the frozen local (1) or global (2) symbol ordinal.
+    if kind =? 'ident' and (nodes[probe].kind not=? 'ident' or (nodes[probe].aux not=? 1 and nodes[probe].aux not=? 2)) {return}
+    let nm=name_of(PlaceEscapeWord(nodes[d].name))
+    fatal(nodes[init].pos "'{nm}' is declared at the top level, so it would be a global, and a global cannot be a place (it would hold a copy): declare the place inside a function or a block (`main = () => \{ let {nm} = @... }`), or copy the value without `@`")
+}
+
+# `return @a`: a place goes only to an `@` parameter or a local place binding;
+# a function gives back a value. (`@f` of a function is its handle, a value.)
+returned_place=(v:PlaceEscapeWord):>void=>{
+    let kind=nodes[v].kind
+    if not has_flag(v NF_MUT) or (kind not=? 'ident' and kind not=? 'field' and kind not=? 'index') or not files[pos_file(nodes[v].pos)].is_dewy {return}
+    if kind =? 'ident' {
+        let s=lookup(PlaceEscapeWord(nodes[v].name))
+        if s =? 0 or syms[s].kind =? 'fns' {return}
+        if syms[s].kind =? 'local' and is_fn_type(PlaceEscapeWord(locals[PlaceEscapeWord(syms[s].ref)].type)) {return}
+        if syms[s].kind =? 'global' and is_fn_type(PlaceEscapeWord(globals[PlaceEscapeWord(syms[s].ref)].type)) {return}
+    } else if is_fn_type(check_expr(clone(v) 0)) {return}
+    fatal(nodes[v].pos "a function gives back a value, not a place: drop the `@` (a place goes to an `@` parameter or `let name = @place`)")
+}
