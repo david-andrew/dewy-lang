@@ -76,6 +76,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `node_store` | `node_store.jo` | Dewy node/layout/list operations | Flagships +0.13%; lex+parse +0.25%, resolve+check +0.29%; borrowed arenas. |
 | `intern`, `util_ops` | Same stems + `.jo` | Dewy hash/probe/insert, name publication and source-position queries | Hits borrow the input bytes. New names use the raw byte slice primitive. |
 | `directive_index` | `directive_index.jo` | Dewy scope indexing, cache and policy lookup | Stable generations skip index synchronization. Pushes extend the index; truncations rebuild it. |
+| `nd_contract_query` | `nd_contract_query.jo` | Dewy N-D call classification and mutable entry checks | Per-instance classification cache, existing borrowed argument routes and shape tables. |
 | `dewy_lexer` | `dewy_lexer.jo` | Dewy tokenizing loop | O(bytes + amortized interning); presized slots, borrowed tables/host. |
 | `dewy_scan` | `dewy_scan.jo` | Dewy bracket/arm scans | O(requested tokens); no whole-file prepass. |
 | `dewy_parser` | `dewy_parser.jo` | Dewy context and word cache | Word classification O(1) hit / O(18) miss; report/hint O(1). |

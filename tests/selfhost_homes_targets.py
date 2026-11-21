@@ -4,6 +4,7 @@
 # not the leaf reads the leaf's functions from the module, a double or the real one)
 LEAF_HOMES = {
     'directive_index': 'directives.jo',
+    'nd_contract_query': 'nd_contracts.jo',
     'util_ops': 'util.jo',
     'loops_emit': 'loops.jo',
     'loops_vector_emit': 'loops.jo',

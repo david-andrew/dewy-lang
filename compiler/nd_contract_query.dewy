@@ -1,0 +1,265 @@
+$runtime_checks
+
+from p"ast.jo" import (kid mk nkids nodes)
+from p"check.jo" import (fns lib_dir subst)
+from p"checks_thin_expr.dewy" import nd_elem
+from p"effect_values.dewy" import effect_share
+from p"expr.jo" import (CV is_nd ntype)
+from p"facts.jo" import (FactState fact_probe_on)
+from p"facts_probes.dewy" import fact_probe_record
+from p"facts_routes.dewy" import fact_after_call
+from p"nd_contracts.jo" import (fact_nd_functions fact_nd_names nd_mutable_checks nd_mutable_instances nd_mutable_signatures nd_shape_predicates nd_span_shared)
+from p"ownership.jo" import ownership_decls
+from p"ownership_types.dewy" import (ownership_fact_type ownership_type)
+from p"refine.jo" import refine_entry
+from p"refine_metadata.dewy" import representation_type
+from p"refine_transfers.dewy" import (ref_assume ref_check)
+from p"sequence_selectors.dewy" import fact_sequence_classify
+from p"types.jo" import (T_F32 T_FLOAT T_MATH_INT is_int telem tkind)
+from p"util.jo" import (files intern pos_file pos_in_lib)
+
+NdQueryWord:type=int64<overflow='wrap'>
+
+# Memoize the class by function instance, including negative answers.
+nd_query_call=(n:NdQueryWord):>int64=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return 0}
+    let f=NdQueryWord(nodes.ptr[n].sym)
+    let count=fact_nd_functions.length
+    if f <? count {
+        let cached=fact_nd_functions.ptr[f]
+        if cached >=? 0 {return cached}
+    }
+    let kind=fact_nd_classify(n)
+    let current=fact_nd_functions.length
+    if f >=? current {fact_nd_functions.extend(fill(int64(-1) NdQueryWord(fns.length) + 64 - NdQueryWord(current)))}
+    fact_nd_functions[f]=kind
+    kind
+}
+
+fact_nd_classify=(n:NdQueryWord):>int64=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return 0}
+    let d=NdQueryWord(fns.ptr[NdQueryWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 or not pos_in_lib(nodes.ptr[d].pos) {return 0}
+    if fact_nd_names.length =? 0 {
+        loop name in ["zeros" "ones" "rand" "randn"] {fact_nd_names[intern(name)]=1}
+        fact_nd_names[intern("eye")]=2
+        fact_nd_names[intern("__array2")]=3
+        fact_nd_names[intern("__nd_length")]=4
+        fact_nd_names[intern("ndim")]=5
+        fact_nd_names[intern("__shape_dim")]=6
+        fact_nd_names[intern("size")]=7
+        fact_nd_names[intern("flatten")]=8
+        fact_nd_names[intern("transpose")]=9
+        fact_nd_names[intern("__nd_count")]=10
+        fact_nd_names[intern("__nd_axis_slice")]=11
+        fact_nd_names[intern("__nd_axis")]=12
+        fact_nd_names[intern("__dewy_range")]=13
+        fact_nd_names[intern("__dewy_slice_range")]=14
+        fact_nd_names[intern("rows")]=100
+        fact_nd_names[intern("cols")]=101
+        fact_nd_names[intern("__shape_rank")]=102
+        fact_nd_names[intern("__shape_check")]=103
+        fact_nd_names[intern("__shape_value")]=104
+        fact_nd_names[intern("__nd_1d")]=105
+        fact_nd_names[intern("gpu")]=108
+        fact_nd_names[intern("cpu")]=114
+        fact_nd_names[intern("to")]=115
+        fact_nd_names[intern("dot")]=109
+        fact_nd_names[intern("row")]=112
+        fact_nd_names[intern("col")]=113
+        fact_nd_names[intern("reshape")]=106
+        fact_nd_names[intern("ndarray")]=106
+        fact_nd_names[intern("[]")]=110
+        fact_nd_names[intern("[]=")]=111
+        fact_nd_names[intern("inverse")]=120
+        fact_nd_names[intern("solve")]=121
+        fact_nd_names[intern("det")]=122
+        fact_nd_names[intern("*")]=130
+        fact_nd_names[intern("__bcast_shape")]=140
+        fact_nd_names[intern("__bcast_data")]=141
+        fact_nd_names[intern("__nd_slice")]=150
+        fact_nd_names[intern("__nd_slice_set")]=151
+        fact_nd_names[intern("__nd_bound_part")]=154
+        fact_nd_names[intern("__pick")]=160
+        fact_nd_names[intern("__put")]=161
+        fact_nd_names[intern("__dewy_pick_slice")]=163
+        fact_nd_names[intern("__dewy_put_slice")]=164
+        fact_nd_names[intern("__pick_indices")]=166
+        fact_nd_names[intern("__put_indices")]=167
+        fact_nd_names[intern("__pick_mask")]=169
+        fact_nd_names[intern("__put_mask")]=170
+    }
+    let kind=NdQueryWord(fact_nd_names.get(NdQueryWord(nodes.ptr[d].name)) ?? 0)
+    if kind =? 0 or nkids(n) =? 0 {return 0}
+    let path=files.ptr[pos_file(nodes.ptr[d].pos)].path
+    if kind >=? 160 {return fact_sequence_classify(n kind path)}
+    if kind =? 13 or kind =? 14 {
+        let arity=if kind =? 13 {5} else {7}
+        return if nkids(n) =? arity and path =? "{lib_dir}/std/dewy_ranges.jo" {kind} else {0}
+    }
+    # Uploading a plain array gives rank one. N-D inputs prove storage and rank.
+    if kind =? 108 {
+        if nkids(n) not=? 1 or path not=? "{lib_dir}/game/gpuarray.jo" {return 0}
+        let t=representation_type(ntype(kid(n 0)))
+        if is_nd(t) {return kind}
+        let tk=tkind(t)
+        return if tk =? 'array' or tk =? 'fixed' {kind} else {0}
+    }
+    if kind =? 114 {
+        return if nkids(n) =? 1 and path =? "{lib_dir}/game/gpuarray.jo" and is_nd(representation_type(ntype(n))) {kind} else {0}
+    }
+    if path not=? "{lib_dir}/std/nd.jo" and path not=? "{lib_dir}/prelude/nd.dewy" {return 0}
+    # Moving to a device preserves the shape of values without lifecycle hooks.
+    if kind =? 115 {
+        return if nkids(n) =? 2 and not (ownership_decls.length not=? 0 and ownership_fact_type(representation_type(ntype(kid(n 0))))) {kind} else {0}
+    }
+    if kind <=? 3 {return if is_nd(representation_type(ntype(n))) {kind} else {0}}
+    if kind =? 109 {
+        let a=representation_type(ntype(kid(n 0)))
+        return if nkids(n) =? 2 and tkind(a) =? 'array' and telem(a) =? T_FLOAT and representation_type(ntype(kid(n 1))) =? a {kind} else {0}
+    }
+    if kind =? 12 and nkids(n) =? 1 {
+        let picks=representation_type(ntype(kid(n 0)))
+        if tkind(picks) =? 'array' and telem(picks) =? T_MATH_INT {return 155}
+    }
+    if kind =? 140 or kind =? 10 or kind =? 12 {return if nkids(n) =? 1 {kind} else {0}}
+    if kind =? 11 {return if nkids(n) =? 7 {kind} else {0}}
+    if kind =? 154 {return if nkids(n) =? 2 {kind} else {0}}
+    let base=representation_type(ntype(kid(n 0)))
+    if not is_nd(base) and not (kind >=? 102 and kind <=? 106 or kind =? 6) {return 0}
+    if kind =? 9 or kind =? 141 {
+        if nkids(n) not=? 1 or not effect_share(nd_elem(base)) {return 0}
+        if ownership_decls.length not=? 0 and ownership_fact_type(base) {return 0}
+    }
+    if kind >=? 120 and kind <=? 122 {
+        let arity=if kind =? 121 {2} else {1}
+        if nkids(n) not=? arity or nd_elem(base) not=? T_FLOAT {return 0}
+        if ownership_decls.length not=? 0 and ownership_fact_type(base) {return 0}
+    }
+    if kind =? 130 {
+        if nkids(n) not=? 2 or nd_elem(base) not=? T_FLOAT and nd_elem(base) not=? T_F32 {return 0}
+        let other=representation_type(ntype(kid(n 1)))
+        if is_nd(other) {
+            if nd_elem(other) not=? nd_elem(base) {return 0}
+        } else {
+            if tkind(other) not=? 'array' or telem(other) not=? nd_elem(base) {return 0}
+            kind=131
+        }
+        if ownership_decls.length not=? 0 and ownership_fact_type(base) {return 0}
+    }
+    if kind =? 150 or kind =? 151 {
+        let arity=if kind =? 150 {2} else {3}
+        if nkids(n) not=? arity {return 0}
+        if ownership_type(nd_elem(base)) or not effect_share(nd_elem(base)) {return 0}
+        if kind =? 151 {
+            let other=representation_type(ntype(kid(n 2)))
+            if is_nd(other) {kind=153}
+            else if tkind(other) =? 'array' {kind=152}
+        }
+    }
+    if kind =? 112 or kind =? 113 {
+        if nkids(n) not=? 2 or not is_int(representation_type(ntype(kid(n 1)))) {return 0}
+    }
+    if kind =? 110 or kind =? 111 {
+        if ownership_type(nd_elem(base)) or not effect_share(nd_elem(base)) {return 0}
+        let receivers=if kind =? 110 {1} else {2}
+        let count=NdQueryWord(nkids(n)) - receivers
+        if count <? 1 or count >? 4 {return 0}
+        loop i in [1..count + 1) {
+            if not is_int(representation_type(ntype(kid(n i)))) {return 0}
+        }
+    }
+    kind
+}
+
+# Stores without lifecycle hooks replace data while preserving shape.
+nd_query_plain_store=(n:NdQueryWord):>bool=>{
+    let k=nd_query_call(n)
+    if k not=? 111 and not (k >=? 151 and k <=? 153) {return false}
+    effect_share(nd_elem(representation_type(ntype(kid(n 0)))))
+}
+
+# A shaped place parameter constrains the entry value, independent of storage authority.
+nd_mutable_types=(f:NdQueryWord):>array<int64>=>$unsafe {
+    if nd_mutable_signatures.length =? 0 or f <=? 0 {return []}
+    let cached=nd_mutable_instances.get(f)
+    if cached not=? none {return cached}
+    let declared=nd_mutable_signatures.get(NdQueryWord(fns.ptr[f].decl)) ?? []
+    let instantiated:array<int64>=[]
+    loop t in declared {
+        instantiated.push(if t =? 0 {0} else {subst(t fns.ptr[f].targs)})
+    }
+    nd_mutable_instances[f]=instantiated
+    instantiated
+}
+
+nd_query_mutable_call=(n:NdQueryWord):>bool=>$unsafe {
+    nd_mutable_signatures.length not=? 0 and nodes.ptr[n].kind =? 'call' and nodes.ptr[n].aux =? 0 and nd_mutable_types(NdQueryWord(nodes.ptr[n].sym)).length not=? 0
+}
+
+nd_query_mutable_entry=(f:NdQueryWord @s:FactState):>void=>$unsafe {
+    let contracts=nd_mutable_types(f)
+    loop i in 0.. and contract in contracts {
+        if contract not=? 0 {ref_assume(contract refine_entry.ptr[i] refine_entry @s)}
+    }
+}
+
+nd_query_mutable_check=(n:NdQueryWord @s:FactState values:array<int64>):>void=>$unsafe {
+    if not nd_query_mutable_call(n) {return}
+    let checks=nd_mutable_checks.get(n) ?? []
+    if checks.length =? 0 {
+        let contracts=nd_mutable_types(NdQueryWord(nodes.ptr[n].sym))
+        loop i in 0.. and contract in contracts {
+            if contract =? 0 {checks.push(0); continue}
+            let arg=kid(n i)
+            let c=mk('conv' nodes.ptr[arg].pos)
+            nodes[c].a=int32<overflow='wrap'>(arg)
+            nodes[c].aux=int32(int64(CV.refinement))
+            nodes[c].aux2=int32<overflow='wrap'>(contract)
+            nodes[c].type=int32<overflow='wrap'>(representation_type(contract))
+            checks.push(c)
+        }
+        nd_mutable_checks[n]=checks
+    }
+    let value_ptr=values.ptr
+    loop i in 0.. and check in checks {
+        if check not=? 0 {
+            ref_check(check value_ptr[i] values @s)
+            if fact_probe_on {fact_probe_record(n nodes.ptr[check].ival =? 1)}
+        }
+    }
+}
+
+# These classifications read value snapshots without invoking element callbacks.
+nd_query_reads_only=(n:NdQueryWord):>bool=>{
+    let k=nd_query_call(n)
+    if k =? 160 or k =? 163 or k =? 166 or k =? 169 {return true}
+    if k >=? 4 and k <=? 14 or k >=? 100 and k <=? 105 or k =? 114 or k =? 115 or k >=? 120 and k <=? 122 or k =? 130 or k =? 131 or k =? 140 or k =? 141 or k =? 150 or k =? 154 or k =? 155 {return true}
+    k =? 110 and effect_share(nd_elem(representation_type(ntype(kid(n 0)))))
+}
+
+# Handles retain the original entry obligation, enforced by the generated prologue.
+nd_query_mutable_handle=(n:NdQueryWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    (k =? 'fnref' or k =? 'lambda' or k =? 'partial') and nd_mutable_types(NdQueryWord(nodes.ptr[n].sym)).length not=? 0
+}
+
+# Re-read borrowed routes after all arguments evaluate, using their saved selectors.
+nd_query_call_entry=(n:NdQueryWord @s:FactState @values:array<int64>):>void=>$unsafe {
+    if nd_query_plain_store(n) {values[0]=fact_after_call(n kid(n 0) @s)}
+    if not nd_query_mutable_call(n) {return}
+    let contracts=nd_mutable_types(NdQueryWord(nodes.ptr[n].sym))
+    loop i in 0.. and contract in contracts {
+        if contract not=? 0 {values[i]=fact_after_call(n kid(n i) @s)}
+    }
+}
+
+nd_query_reset=():>void=>{
+    nd_span_shared=dict<int64 bool>()
+    nd_shape_predicates=dict<int64 bool>()
+    nd_mutable_signatures=dict<int64 array<int64>>()
+    nd_mutable_instances=dict<int64 array<int64>>()
+    nd_mutable_checks=dict<int64 array<int64>>()
+    fact_nd_names=dict<int64 int64>()
+    fact_nd_functions=[]
+}
