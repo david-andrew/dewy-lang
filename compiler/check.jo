@@ -1,3 +1,4 @@
+use 'checker_startup.dewy'
 use 'checker_captures.dewy'
 use 'ast_rest.dewy'
 use 'source_queries.dewy'
@@ -548,14 +549,6 @@ bound_here = (name: int) -> bool:
     m = cur_mod()
     m >= 0 and m < modules.len() and not modules[m].is_prelude and modules[m].names.has(name)
 
-# The main module m's own function the game calls by this name (main, update, draw), as its
-# symbol; a type's method of that name (`Shape:type = [draw = () => ...]`) is not one.
-game_fn = (m: int, name: str) -> int?:
-    e = modules[m].names.get(intern(name)) ?? 0
-    loop e != 0 and syms[e].kind == .fns and syms[e].decl != 0 and dewy_is_method(int(syms[e].decl)): e = int(syms[e].next)
-    if e == 0: return none
-    if name == "main" and files[int(modules[m].file)].is_dewy and (syms[e].decl == 0 or int(nodes[int(syms[e].decl)].mod) != m): return none
-    e
 
 # ---------------- modules ----------------
 module_source = (stem: str, dewy: bool, exclude: str = "", watch_candidates: bool = false) -> str:
@@ -2657,37 +2650,7 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
     ctxs.pop()
     cx = parent
 
-# a call of the function `name` with no arguments, anywhere in n but inside function literals
-calls_named = (n: int, name: str) -> bool:
-    if n == 0: return false
-    k = nodes[n].kind
-    if k == .lambda or k == .fn_: return false
-    if k == .call and nkids(n) == 0 and nodes[n].a != 0 and nodes[int(nodes[n].a)].kind == .ident and name_of(int(nodes[int(nodes[n].a)].name)) == name: return true
-    if calls_named(int(nodes[n].a), name) or calls_named(int(nodes[n].b), name): return true
-    if k != .for_ and calls_named(int(nodes[n].c), name): return true
-    loop i in [0..nkids(n)):
-        if calls_named(kid(n, i), name): return true
-    false
 
-# (enemies = [] at the top level, filled by a function: that function is checked first, so the
-# type of what it pushes is known where enemies is read)
-check_pushers_first = ():
-    names: {int: bool}
-    loop mi in [0..modules.len()):
-        if modules[mi].is_prelude: continue
-        loop d in modules[mi].decls:
-            if nodes[d].kind == .vardecl and nodes[d].nlist == 0 and nodes[d].a == 0 and nodes[d].b != 0 and nodes[int(nodes[d].b)].kind == .array and nkids(int(nodes[d].b)) == 0:
-                names[int(nodes[d].name)] = true
-                dc_force_module(mi)
-    if names.len() == 0: return
-    dc_force_all()
-    loop m in modules:
-        if m.is_prelude: continue
-        loop d in m.decls:
-            if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and nodes[d].b != 0 and pushes_into(int(nodes[d].b), names) and not fn_sig(d).generic and not decl_has_rest(d):
-                f = get_fn_inst(d, [], nodes[d].pos)
-                # (before the top level's code, too, which may read it)
-                if fns[f].state == 0: check_fn_body(f)
 
 # Count index nodes during the existing finalization walk. A negative summary
 # lets lowering avoid path proofs that cannot discover an indexed array.
@@ -2749,17 +2712,6 @@ runtime_insts: {str: int} = {}
 runtime_ffi_scan = 1
 runtime_ffi_done = false
 
-# (new instances since the last call: an extern among them brings in what its thunk calls)
-runtime_ffi_demand = () -> bool:
-    if runtime_ffi_done: return false
-    loop runtime_ffi_scan < fns.len():
-        d = int(fns[runtime_ffi_scan].decl)
-        runtime_ffi_scan += 1
-        if d != 0 and has_flag(d, NF_EXTERN):
-            runtime_ffi_done = true
-            loop nm in ["__c_str", "__ffi_resolve", "__ffi_missing"]: runtime_demand(nm)
-            return true
-    false
 
 runtime_fn = (name: str) -> int:
     if let f = runtime_insts.get(name): return f
@@ -2771,94 +2723,8 @@ runtime_fn = (name: str) -> int:
     if starts_with(name, "__mi_") or starts_with(name, "__exact_"): check_pending_functions(f)
     f
 
-add_universe = ():
-    ml_bump()
-    demanded = []
-    exception_builtins()
-    tys = [("__dewy_int", T_MATH_INT), ("int", T_INT), ("i8", T_I8), ("i16", T_I16), ("i32", T_I32), ("i64", T_INT), ("u8", T_U8), ("byte", T_U8),
-        ("u16", T_U16), ("u32", T_U32), ("u64", T_U64), ("f64", T_FLOAT), ("f32", T_F32),
-        ("int8", T_I8), ("int16", T_I16), ("int32", T_I32), ("int64", T_INT),
-        ("uint8", T_U8), ("uint16", T_U16), ("uint32", T_U32), ("uint64", T_U64),
-        ("float32", T_F32), ("float64", T_FLOAT), ("string", T_STR),
-        ("bool", T_BOOL), ("str", T_STR), ("void", T_VOID), ("never", T_NEVER), ("vec2", T_VEC2), ("vec3", T_VEC3), ("vec4", T_VEC4),
-        ("mat4", T_MAT4), ("ivec2", T_IVEC2), ("ivec3", T_IVEC3), ("ivec4", T_IVEC4)]
-    loop t in tys:
-        nm = intern(t.0)
-        universe[nm] = new_sym(nm, .type_, t.1, 0)
-    active = refine_active
-    addr_atoms = [RefAtom(.le, RefTerm(1, 0), RefTerm()), RefAtom(.le, RefTerm(), RefTerm(1, ref_addr_max()))]
-    ref_addr_type = mk_refined(T_INT, ref_intern(addr_atoms))
-    universe[intern("addr")] = new_sym(intern("addr"), .type_, ref_addr_type, 0)
-    refine_active = active
-    # Register the order domain lazily. An unused builtin must not enable
-    # finite-string-domain analysis for every ordinary program.
-    order = mk(.typealias, 0)
-    nodes[order].name = i32(intern("MemoryOrder"))
-    nodes[order].aux = -7
-    universe[intern("MemoryOrder")] = new_sym(intern("MemoryOrder"), .alias_, order, order)
-    tv = mk(.str_lit, 0)
-    nodes[tv].sval = i32(intern(target_const()))
-    # (the processor: x86_64, arm64 or wasm32)
-    av = mk(.str_lit, 0)
-    arch = "x86_64"
-    if target_wasm: arch = "wasm32"
-    if target_arm64: arch = "arm64"
-    nodes[av].sval = i32(intern(arch))
-    # (a debug build: anything but a release build)
-    tr = mk(.bool_lit, 0)
-    if not release_build: nodes[tr].ival = 1
-    fl = mk(.bool_lit, 0)
-    wv = mk(.bool_lit, 0)
-    if watch_build: nodes[wv].ival = 1
-    pn = mk(.str_lit, 0)
-    nodes[pn].sval = i32(intern(program_name))
-    # (the icon's bytes: set by check_build_block)
-    icon_node = mk(.str_lit, 0)
-    nodes[icon_node].sval = i32(intern(""))
-    consts = [("TARGET", tv, T_STR), ("ARCH", av, T_STR), ("DEBUG", tr, T_BOOL), ("BOOTSTRAP", fl, T_BOOL), ("WATCH", wv, T_BOOL), ("PROGRAM_NAME", pn, T_STR),
-        ("PROGRAM_ICON", icon_node, T_STR)]
-    loop c in consts:
-        nm = intern(c.0)
-        globals.push(Global(name = i32(nm), is_const = true, init = i32(c.1), state = 2, type = i32(c.2)))
-        universe[nm] = new_sym(nm, .const_, globals.len() - 1, 0)
-    register_quantity_names()
-    register_intrinsics()
-    ml_bump()
 
-# TARGET's value
-target_const = () -> str:
-    tgt = "linux"
-    if target_wasm: tgt = "wasm"
-    if target_windows: tgt = "windows"
-    if target_macos: tgt = "macos"
-    tgt
 
-load_prelude = ():
-    # all .jo files in lib/core, lib/std and lib/game are loaded into the shared prelude scope
-    # (lib/core must stay compilable by the C bootstrap compiler; lib/std need not)
-    prelude_lazy_setup()
-    concurrency_thread_module = -1
-    concurrency_task_module = -1
-    concurrency_task_core_module = -1
-    concurrency_protocol_module = -1
-    concurrency_first_ok_module = -1
-    loop sub in ["core", "std", "game"]:
-        names_ = list_dir("{lib_dir}/{sub}")
-        names_.sort()
-        loop n in names_:
-            if not ends_with(n, ".jo"): continue
-            path = "{lib_dir}/{sub}/{n}"
-            m = -1
-            if defer_prelude(path, sub): m = modules.len() - 1
-            else: m = load_module(path, true, -1)
-            if sub == "std":
-                if n == "thread.jo": concurrency_thread_module = m
-                if n == "tasks.jo": concurrency_task_module = m
-                if n == "task_core.jo": concurrency_task_core_module = m
-    prelude_known_names()
-    # Keep existing fixed-width overloads first for widening ties. Separate from
-    # the seed-scanned prelude: old seeds do not know the mathematical type.
-    if file_exists(lib_dir + "/math_int.jo"): load_module(lib_dir + "/math_int.jo", true, -1)
 
 dfs_state: bool[]
 skip_main = false

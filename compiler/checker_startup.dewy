@@ -1,0 +1,225 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (file_exists list_dir)
+from p"@lib/core/str.jo" import (ends_with)
+from p"ast.jo" import (mk NF_EXTERN decl_has_rest has_flag kid nkids nodes)
+from p"check.jo" import (fns get_fn_inst lib_dir load_module modules runtime_ffi_done runtime_ffi_scan syms target_macos target_wasm target_windows)
+from p"checker_signature.dewy" import (fn_sig)
+from p"checker_tree_queries.dewy" import (pushes_into)
+from p"checks_thin.dewy" import (check_fn_body runtime_demand)
+from p"concurrency.jo" import (concurrency_first_ok_module concurrency_protocol_module concurrency_task_core_module concurrency_task_module concurrency_thread_module)
+from p"dewy_method_ops.dewy" import (dewy_is_method)
+from p"lazy_force.dewy" import (dc_force_all dc_force_module)
+from p"prelude_ops.dewy" import (defer_prelude prelude_known_names prelude_lazy_setup)
+from p"util.jo" import (files intern name_of)
+
+from p"checker_state.dewy" import Global
+from p"check.jo" import (demanded globals icon_node new_sym program_name release_build target_arm64 universe watch_build)
+from p"checks_thin.dewy" import ml_bump
+from p"error_ops.dewy" import exception_builtins
+from p"expr.jo" import register_intrinsics
+from p"refinement_types.dewy" import (RefAtom RefTerm)
+from p"refine.jo" import (ref_addr_type refine_active)
+from p"refine_metadata.dewy" import (mk_refined ref_intern)
+from p"refine_ops.dewy" import ref_addr_max
+from p"unit_rare.dewy" import register_quantity_names
+from p"types.jo" import (T_MATH_INT T_INT T_I8 T_I16 T_I32 T_U8 T_U16 T_U32 T_U64 T_FLOAT T_F32 T_STR T_BOOL T_VOID T_NEVER T_VEC2 T_VEC3 T_VEC4 T_MAT4 T_IVEC2 T_IVEC3 T_IVEC4)
+
+StartupWord:type=int64<overflow='wrap'>
+# The main module m's own function the game calls by this name (main, update, draw), as its
+# symbol; a type's method of that name (`Shape:type = [draw = () => ...]`) is not one.
+game_fn=(m:StartupWord name:string):>StartupWord | none=>$unsafe {
+    let e=modules[m].names.get(intern(name)) ?? 0
+    loop e not=? 0 and syms.ptr[e].kind =? 'fns' and syms.ptr[e].decl not=? 0 and dewy_is_method(StartupWord(syms.ptr[e].decl)) {e=StartupWord(syms.ptr[e].next)}
+    if e =? 0 {return none}
+    if name =? "main" and files[StartupWord(modules[m].file)].is_dewy and (syms.ptr[e].decl =? 0 or StartupWord(nodes.ptr[StartupWord(syms.ptr[e].decl)].mod) not=? m) {return none}
+    e
+}
+# a call of the function `name` with no arguments, anywhere in n but inside function literals
+calls_named=(n:StartupWord name:string):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'fn_' {return false}
+    if k =? 'call' and nkids(n) =? 0 and nodes.ptr[n].a not=? 0 and nodes.ptr[StartupWord(nodes.ptr[n].a)].kind =? 'ident' and name_of(StartupWord(nodes.ptr[StartupWord(nodes.ptr[n].a)].name)) =? name {return true}
+    if calls_named(StartupWord(nodes.ptr[n].a) name) or calls_named(StartupWord(nodes.ptr[n].b) name) {return true}
+    if k not=? 'for_' and calls_named(StartupWord(nodes.ptr[n].c) name) {return true}
+    loop i in [0..nkids(n)) {
+        if calls_named(kid(n i) name) {return true}
+    }
+    false
+}
+# (enemies = [] at the top level, filled by a function: that function is checked first, so the
+# type of what it pushes is known where enemies is read)
+check_pushers_first=():>void=>$unsafe {
+    let names=dict<int64 bool>()
+    loop mi in [0..modules.length) {
+        if modules[mi].is_prelude {continue}
+        loop d in modules[mi].decls {
+            if nodes.ptr[d].kind =? 'vardecl' and nodes.ptr[d].nlist =? 0 and nodes.ptr[d].a =? 0 and nodes.ptr[d].b not=? 0 and nodes.ptr[StartupWord(nodes.ptr[d].b)].kind =? 'array' and nkids(StartupWord(nodes.ptr[d].b)) =? 0 {
+                names[StartupWord(nodes.ptr[d].name)]=true
+                dc_force_module(mi)
+            }
+        }
+    }
+    if names.length =? 0 {return}
+    dc_force_all()
+    loop m in modules {
+        if m.is_prelude {continue}
+        loop d in m.decls {
+            if nodes.ptr[d].kind =? 'fn_' and not has_flag(d NF_EXTERN) and nodes.ptr[d].b not=? 0 and pushes_into(StartupWord(nodes.ptr[d].b) names) and not fn_sig(d).generic and not decl_has_rest(d) {
+                let f=get_fn_inst(d [] nodes.ptr[d].pos)
+                # (before the top level's code, too, which may read it)
+                if fns.ptr[f].state =? 0 {check_fn_body(f)}
+            }
+        }
+    }
+}
+# (new instances since the last call: an extern among them brings in what its thunk calls)
+runtime_ffi_demand=():>bool=>$unsafe {
+    let done = @runtime_ffi_done
+    if done {return false}
+    let scan = @runtime_ffi_scan
+    loop scan <? fns.length {
+        let d=StartupWord(fns.ptr[scan].decl)
+        scan = StartupWord(scan) + 1
+        if d not=? 0 and has_flag(d NF_EXTERN) {
+            done = true
+            loop nm in ["__c_str" "__ffi_resolve" "__ffi_missing"] {runtime_demand(nm)}
+            return true
+        }
+    }
+    false
+}
+register_universe_type=(name:string ty:int64):>void=>{
+    let nm = intern(name)
+    universe[nm] = new_sym(nm 'type_' ty 0)
+}
+
+register_universe_constant=(name:string value:int64 ty:int64):>void=>{
+    let nm = intern(name)
+    globals.push(Global(name=int32<overflow='wrap'>(nm) is_const=true init=int32<overflow='wrap'>(value) state=2 type=int32<overflow='wrap'>(ty)))
+    universe[nm] = new_sym(nm 'const_' (StartupWord(globals.length) - 1) 0)
+}
+
+add_universe=():>void=>{
+    ml_bump()
+    let demand = @demanded
+    demand = []
+    exception_builtins()
+    register_universe_type("__dewy_int" T_MATH_INT)
+    register_universe_type("int" T_INT)
+    register_universe_type("i8" T_I8)
+    register_universe_type("i16" T_I16)
+    register_universe_type("i32" T_I32)
+    register_universe_type("i64" T_INT)
+    register_universe_type("u8" T_U8)
+    register_universe_type("byte" T_U8)
+    register_universe_type("u16" T_U16)
+    register_universe_type("u32" T_U32)
+    register_universe_type("u64" T_U64)
+    register_universe_type("f64" T_FLOAT)
+    register_universe_type("f32" T_F32)
+    register_universe_type("int8" T_I8)
+    register_universe_type("int16" T_I16)
+    register_universe_type("int32" T_I32)
+    register_universe_type("int64" T_INT)
+    register_universe_type("uint8" T_U8)
+    register_universe_type("uint16" T_U16)
+    register_universe_type("uint32" T_U32)
+    register_universe_type("uint64" T_U64)
+    register_universe_type("float32" T_F32)
+    register_universe_type("float64" T_FLOAT)
+    register_universe_type("string" T_STR)
+    register_universe_type("bool" T_BOOL)
+    register_universe_type("str" T_STR)
+    register_universe_type("void" T_VOID)
+    register_universe_type("never" T_NEVER)
+    register_universe_type("vec2" T_VEC2)
+    register_universe_type("vec3" T_VEC3)
+    register_universe_type("vec4" T_VEC4)
+    register_universe_type("mat4" T_MAT4)
+    register_universe_type("ivec2" T_IVEC2)
+    register_universe_type("ivec3" T_IVEC3)
+    register_universe_type("ivec4" T_IVEC4)
+    let active = @refine_active
+    let saved = active
+    let addr = @ref_addr_type
+    let atoms = [RefAtom('le' RefTerm(1 0) RefTerm()) RefAtom('le' RefTerm() RefTerm(1 ref_addr_max()))]
+    addr = mk_refined(T_INT ref_intern(atoms))
+    universe[intern("addr")] = new_sym(intern("addr") 'type_' addr 0)
+    active = saved
+    # An unused MemoryOrder must not enable finite-string-domain analysis.
+    let order = mk('typealias' 0)
+    nodes[order].name = int32<overflow='wrap'>(intern("MemoryOrder"))
+    nodes[order].aux = -7
+    universe[intern("MemoryOrder")] = new_sym(intern("MemoryOrder") 'alias_' order order)
+    let tv = mk('str_lit' 0)
+    nodes[tv].sval = int32<overflow='wrap'>(intern(target_const()))
+    let av = mk('str_lit' 0)
+    let arch = "x86_64"
+    if target_wasm {arch = "wasm32"}
+    if target_arm64 {arch = "arm64"}
+    nodes[av].sval = int32<overflow='wrap'>(intern(arch))
+    let tr = mk('bool_lit' 0)
+    if not release_build {nodes[tr].ival = 1}
+    let fl = mk('bool_lit' 0)
+    let wv = mk('bool_lit' 0)
+    if watch_build {nodes[wv].ival = 1}
+    let pn = mk('str_lit' 0)
+    nodes[pn].sval = int32<overflow='wrap'>(intern(program_name))
+    let icon = @icon_node
+    icon = mk('str_lit' 0)
+    nodes[icon].sval = int32<overflow='wrap'>(intern(""))
+    register_universe_constant("TARGET" tv T_STR)
+    register_universe_constant("ARCH" av T_STR)
+    register_universe_constant("DEBUG" tr T_BOOL)
+    register_universe_constant("BOOTSTRAP" fl T_BOOL)
+    register_universe_constant("WATCH" wv T_BOOL)
+    register_universe_constant("PROGRAM_NAME" pn T_STR)
+    register_universe_constant("PROGRAM_ICON" icon T_STR)
+    register_quantity_names()
+    register_intrinsics()
+    ml_bump()
+}
+# TARGET's value
+target_const=():>string=>{
+    let tgt="linux"
+    if target_wasm {tgt="wasm"}
+    if target_windows {tgt="windows"}
+    if target_macos {tgt="macos"}
+    tgt
+}
+load_prelude=():>void=>{
+    # all .jo files in lib/core, lib/std and lib/game are loaded into the shared prelude scope
+    # (lib/core must stay compilable by the C bootstrap compiler; lib/std need not)
+    prelude_lazy_setup()
+    let thread_mod = @concurrency_thread_module
+    thread_mod = -1
+    let task_mod = @concurrency_task_module
+    task_mod = -1
+    let task_core_mod = @concurrency_task_core_module
+    task_core_mod = -1
+    let protocol_mod = @concurrency_protocol_module
+    protocol_mod = -1
+    let first_ok_mod = @concurrency_first_ok_module
+    first_ok_mod = -1
+    loop sub in ["core" "std" "game"] {
+        let names_=list_dir("{lib_dir}/{sub}")
+        names_.sort()
+        loop n in names_ {
+            if not ends_with(n ".jo") {continue}
+            let path="{lib_dir}/{sub}/{n}"
+            let m:StartupWord=-1
+            if defer_prelude(path sub) {m=StartupWord(modules.length) - 1} else {m=load_module(path true (-1))}
+            if sub =? "std" {
+                if n =? "thread.jo" {thread_mod = m}
+                if n =? "tasks.jo" {task_mod = m}
+                if n =? "task_core.jo" {task_core_mod = m}
+            }
+        }
+    }
+    prelude_known_names()
+    # Keep existing fixed-width overloads first for widening ties. Separate from
+    # the seed-scanned prelude: old seeds do not know the mathematical type.
+    let math = "{lib_dir}/math_int.jo"
+    if file_exists(math) {load_module(math true (-1));}
+}
