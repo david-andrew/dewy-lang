@@ -1,0 +1,22 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHARLIKE NF_LITERAL add_flag clear_flag nodes)
+from p"util.jo" import (name_of)
+
+CharLiteralWord:type=int64<overflow='wrap'>
+
+charlike=(n:CharLiteralWord):>bool=>$unsafe nodes.ptr[n].kind =? 'str_lit' and (CharLiteralWord(nodes.ptr[n].flags) & NF_CHARLIKE) not=? 0
+
+charlike_to_int=(n:CharLiteralWord):>void=>$unsafe {
+    let bytes=name_of(CharLiteralWord(nodes.ptr[n].sval)) as array<uint8>
+    let v=CharLiteralWord(bytes[0])
+    if bytes.length >? 1 {
+        # Decode the UTF-8 scalar carried by this one-character literal.
+        v=v & (CharLiteralWord(0x3f) >> ((CharLiteralWord(bytes.length) - 1) & 63))
+        loop i in [1..bytes.length) {v=(v << 6) | (CharLiteralWord(bytes[i]) & 0x3f)}
+    }
+    nodes.ptr[n].kind='int_lit'
+    nodes.ptr[n].ival=v
+    nodes.ptr[n].aux=1
+    add_flag(n NF_LITERAL)
+    clear_flag(n NF_CHARLIKE)
+}

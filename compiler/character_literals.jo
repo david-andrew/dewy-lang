@@ -1,0 +1,17 @@
+use 'ast.jo'
+use 'util.jo'
+
+charlike = (n: int) -> bool: nodes[n].kind == .str_lit and has_flag(n, NF_CHARLIKE)
+
+charlike_to_int = (n: int):
+    s = name_of(int(nodes[n].sval))
+    v = int(s[0])
+    if len(s) > 1:
+        # UTF-8 sequence -> code point
+        v = v & (0x3f >> (len(s) - 1))
+        loop i in [1..len(s)): v = (v << 6) | (int(s[i]) & 0x3f)
+    nodes[n].kind = .int_lit
+    nodes[n].ival = v
+    nodes[n].aux = 1
+    add_flag(n, NF_LITERAL)
+    clear_flag(n, NF_CHARLIKE)

@@ -1,4 +1,8 @@
 use 'exact_preparation.dewy'
+use 'call_style_lookup.dewy'
+use 'character_literals.dewy'
+use 'default_arguments.dewy'
+use 'literal_number_forms.dewy'
 use 'type_expression_forms.dewy'
 use 'time_rule_packs.dewy'
 use 'path_narrowing.dewy'
@@ -315,16 +319,6 @@ word_rational_cached_type = 0
 # they print (the library's `_shown`: 1 a decimal literal, 2 a written fraction).
 rational_constants: {int: (int, int)}
 rational_shown: {int: int}
-
-# Does the value n of type from fit rational<int64> exactly, for every value?
-word_rational_source = (n: int, from0: int) -> bool:
-    from = prune(from0)
-    if rational_constants.has(n): return true
-    if not is_int(from): return false
-    known, value = integer_constant(n)
-    if known: return value >= 0 or types[from].sign or from == T_MATH_INT
-    if from == T_MATH_INT: return false
-    int_widens(from, T_INT)
 
 # replace node n by a conversion of its old content
 wrap_conv = (n: int, cv: CV, to: int):
@@ -1518,162 +1512,8 @@ comprehension_settle = (args: int[]) -> bool:
 # check_args_untyped (each argument's literal shape and function-value marks before an
 # overload is picked) is checker_expr.dewy's; members(U) and spread records are host services.
 
-# A place route starts at its owning binding. Narrowing aliases and shared
-# captures still designate that same storage; private captures are independent.
-mutable_route = (n: int, route: mut int[]) -> int:
-    k = nodes[n].kind
-    if k == .field or k == .index:
-        root = mutable_route(int(nodes[n].a), route)
-        route.push(n)
-        return root
-    if k == .unwrap or k == .narrow or k == .conv:
-        return mutable_route(int(nodes[n].a), route)
-    if k == .ident and nodes[n].aux == i32(int(SK.local)):
-        l = int(nodes[n].sym)
-        if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
-            return mutable_route(int(locals[l].alias), route)
-        if int(locals[l].flags) & LF_CAPTURE != 0 and int(locals[l].flags) & LF_VALUECAP == 0:
-            return mutable_route(mk_ident_local(int(locals[l].outer), nodes[n].pos), route)
-    n
-
-mutable_overlap = (a: int, b: int) -> bool:
-    left: int[]
-    right: int[]
-    ar = mutable_route(a, left)
-    br = mutable_route(b, right)
-    if nodes[ar].kind != .ident or nodes[br].kind != .ident: return false
-    if nodes[ar].aux != nodes[br].aux or nodes[ar].sym != nodes[br].sym: return mutable_borrowed_overlap(ar, br)
-    loop i in [0..min(left.len(), right.len())):
-        x = left[i]
-        y = right[i]
-        if nodes[x].kind != nodes[y].kind: return true
-        if nodes[x].kind == .field:
-            if nodes[x].aux >= 0 and nodes[y].aux >= 0 and nodes[x].aux != nodes[y].aux: return false
-            if nodes[x].aux == -2 and nodes[y].aux == -2 and nodes[x].ival != nodes[y].ival: return false
-        else:
-            xi = mutable_index(int(nodes[x].b))
-            yi = mutable_index(int(nodes[y].b))
-            if nodes[xi].kind == .int_lit and nodes[yi].kind == .int_lit and nodes[xi].ival != nodes[yi].ival: return false
-    # Equal routes and parent/child routes overlap. Unknown indices can overlap.
-    true
-
-# Two different roots are different storage, except that an `@` parameter
-# borrows its caller's place: a global or another function's variable (a
-# shared capture) may be that same place. Distinct `@` parameters of one
-# function were proven apart where it was called.
-mutable_borrowed_overlap = (a: int, b: int) -> bool:
-    x = if nodes[a].aux == i32(int(SK.local)): int(nodes[a].sym) else: 0
-    y = if nodes[b].aux == i32(int(SK.local)): int(nodes[b].sym) else: 0
-    bx = x != 0 and int(locals[x].flags) & LF_MUTPARAM != 0
-    by = y != 0 and int(locals[y].flags) & LF_MUTPARAM != 0
-    if not bx and not by: return false
-    x == 0 or y == 0 or locals[x].owner != locals[y].owner
-
-# checker_call_queries.dewy's check_mutable_arguments leaves the host two or more.
-mutable_arguments_rest = (args: int[], mask: int, pos: int):
-    if mask == 0 or mask & (mask - 1) == 0 or not dewy_at(pos): return
-    loop i in [0..args.len()):
-        if mask & (1 << i) == 0 or nodes[args[i]].kind == .hole: continue
-        loop j in [0..i):
-            if mask & (1 << j) == 0 or nodes[args[j]].kind == .hole: continue
-            if not partition_disjoint(args[j], args[i]) and mutable_overlap(args[j], args[i]):
-                fatal(nodes[args[i]].pos, "mutable arguments {j + 1} and {i + 1} overlap; pass disjoint places")
-
 # checker_expr.dewy's finish_arg leaves the host mutable arguments, values written with
 # `@` and coercions that change something; the steps already done are skipped here.
-
-default_arg = (decl: int, i: int, pt: int, given: int[] = [], captured: bool = false, targs: int[] = []) -> int:
-    d = clone(int(nodes[kid(decl, i)].b))
-    # (h: f64 = w: a default naming an earlier parameter takes that argument)
-    if given.len() > 0 and not captured: subst_params(d, decl, given)
-    saved = cx
-    ctxs.push(FnCtx(ctxs[cx].inst, -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(check_scopes.names.len())))
-    cx = ctxs.len() - 1
-    mark = scope_mark()
-    push_type_params(decl, targs)
-    if captured:
-        loop j in 0.. and value in given:
-            name = int(nodes[kid(decl, j)].name)
-            push_scope_sym(name, new_sym(name, .local, int(nodes[value].sym), kid(decl, j)))
-    check_expr(d, pt)
-    if pt != 0: coerce(d, pt)
-    else: finalize_literal(d)
-    scope_reset(mark)
-    ctxs.pop()
-    cx = saved
-    d
-
-# a default value's names of earlier parameters (of function decl) replaced by their arguments
-subst_params = (n: int, decl: int, given: int[]):
-    if n == 0: return
-    k = nodes[n].kind
-    if k == .lambda: return
-    if k == .ident:
-        loop j in 0.. and v in given:
-            if v != 0 and int(nodes[kid(decl, j)].name) == int(nodes[n].name):
-                if not simple_arg(v): fatal(nodes[v].pos, "the default of a later parameter uses this argument, so it is computed again there: give a variable or a value (`w = make_w()` first)")
-                nodes[n] = nodes[clone(v)]
-                return
-        return
-    subst_params(int(nodes[n].a), decl, given)
-    subst_params(int(nodes[n].b), decl, given)
-    if k != .for_:
-        subst_params(int(nodes[n].c), decl, given)
-        if k != .partial: subst_params(int(nodes[n].d), decl, given)
-    loop i in [0..nkids(n)): subst_params(kid(n, i), decl, given)
-
-default_uses_params = (n: int, decl: int, before: int) -> bool:
-    if n == 0: return false
-    names: int[]
-    loop i in [0..before): names.push(int(nodes[kid(decl, i)].name))
-    default_uses_names(n, names)
-
-# Whether a default names one of `names` (earlier parameters or fields), outside
-# the bindings it makes itself.
-default_uses_names = (n: int, names: int[], hidden: int[] = []) -> bool:
-    if n == 0: return false
-    if nodes[n].kind == .ident:
-        if hidden.contains(int(nodes[n].name)): return false
-        return names.contains(int(nodes[n].name))
-    if nodes[n].kind == .vardecl:
-        return default_uses_names(int(nodes[n].b), names, hidden)
-    if nodes[n].kind == .lambda:
-        local_hidden = hidden
-        loop i in [0..nkids(n)):
-            param = kid(n, i)
-            if default_uses_names(int(nodes[param].b), names, local_hidden): return true
-            local_hidden.push(int(nodes[param].name))
-        return default_uses_names(int(nodes[n].b), names, local_hidden)
-    if nodes[n].kind == .block:
-        local_hidden = hidden
-        loop i in [0..nkids(n)):
-            statement = kid(n, i)
-            if default_uses_names(statement, names, local_hidden): return true
-            if nodes[statement].kind == .vardecl:
-                local_hidden.push(int(nodes[statement].name))
-                loop binding in binding_leaves(kids(statement)): local_hidden.push(int(nodes[binding].name))
-        return false
-    if nodes[n].kind == .for_:
-        if default_uses_names(int(nodes[n].a), names, hidden): return true
-        local_hidden = hidden
-        loop binder in binding_leaves(kids(n)): local_hidden.push(int(nodes[binder].name))
-        return default_uses_names(int(nodes[n].b), names, local_hidden)
-    if nodes[n].kind == .match_:
-        if default_uses_names(int(nodes[n].a), names, hidden): return true
-        loop i in [0..nkids(n)):
-            arm = kid(n, i)
-            local_hidden = hidden
-            loop j in [0..nkids(arm)):
-                pattern = kid(arm, j)
-                if nodes[pattern].name != 0: local_hidden.push(int(nodes[pattern].name))
-            if default_uses_names(int(nodes[arm].b), names, local_hidden): return true
-        return false
-    if default_uses_names(int(nodes[n].a), names, hidden) or default_uses_names(int(nodes[n].b), names, hidden): return true
-    if default_uses_names(int(nodes[n].c), names, hidden) or default_uses_names(int(nodes[n].d), names, hidden): return true
-    loop i in [0..nkids(n)):
-        child = kid(n, i)
-        if default_uses_names(child, names, hidden): return true
-    false
 
 # A captured value's unnamed local -> the expression it holds (for messages).
 capture_sources: {int: int} = {}
@@ -1694,17 +1534,6 @@ capture_value = (a: int, pt: int, statements: mut int[]) -> int:
 call_targs: int[]              # type arguments written at the call being resolved (f[T](...))
 cur_assign = 0                 # the assignment whose target is being checked (`x = ...`, `x += ...`)
 early_set: {int: bool} = {}    # globals top-level code assigns above their own line
-
-# Whether parameter i of declaration d is written as a builtin integer type (refined or not),
-# read from its annotation alone
-written_int_param = (d: int, i: int) -> bool:
-    if i >= nkids(d): return false
-    tn = int(nodes[kid(d, i)].a)
-    if tn != 0 and nodes[tn].kind == .trefined: tn = int(nodes[tn].a)
-    if tn == 0 or nodes[tn].kind != .tname or nkids(tn) != 0 or nodes[tn].sval != 0: return false
-    s = universe.get(int(nodes[tn].name)) ?? 0
-    if s == 0 or syms[s].kind != .type_ or module_lookup(int(nodes[d].mod), int(nodes[tn].name)) != s: return false
-    tkind(int(syms[s].ref)) == .int_
 
 # `upper = (s:string):>string => s.upper`: a Dewy function whose whole body calls
 # itself again with its own parameters or literals never ends. O(1) per call.
@@ -1736,17 +1565,6 @@ struct CallFailure:
     last_err_tie: bool
     last_err_map: int
     rejected: Rejection[]
-
-call_tie_error = (n: int, name: int, args: int[], cands: Cand[], best: int):
-    loop ci in 0.. and cd in cands:
-        if ci != best and cd.cost == cands[best].cost and cd.sig.generic == cands[best].sig.generic and decl_in_prelude(cd.decl) == decl_in_prelude(cands[best].decl) and (rest_bundles.len() == 0 or decl_has_rest(cd.decl) == decl_has_rest(cands[best].decl)):
-            ats = ""
-            loop ai in 0.. and a0 in args:
-                if ai > 0: ats += ", "
-                if nodes[unnamed(a0)].type != 0: ats += dt(ntype(unnamed(a0)))
-            if nodes[n].aux2 == i32(AUX2_PARTIAL) and dewy_at(nodes[n].pos):
-                fatal(nodes[n].pos, "ambiguous partial application of '{name_of(name)}': more than one overload takes these arguments (candidates at {pos_str(nodes[cands[best].decl].pos)} and {pos_str(nodes[cd.decl].pos)}); annotate the binding with the callable type it should have, as in `let f:(b:string:>string) = @{name_of(name)}(...)`")
-            fatal(nodes[n].pos, "ambiguous call to '{name_of(name)}({ats})': candidates at {pos_str(nodes[cands[best].decl].pos)} and {pos_str(nodes[cd.decl].pos)}")
 
 call_decl_checks = (n: int, name: int, decl: int, args: int[], cd: Cand, np: int, ufcs: bool):
     # (draw() inside draw: as a way to draw it again, it calls itself without end)
@@ -1934,21 +1752,6 @@ dewy_classify_spread = (n: int):
 # A record field whose value is a type (decisions.md, batch 7): one interned typeval per type, so
 # records with the same type members share one shape instance. It has no runtime storage.
 type_member_types: {int: int} = {}
-
-# Is e written as a type (a type's name, or `r.Png` naming a type member)? Such a record
-# field's value is not captured: it has no storage.
-type_value_expr = (e: int) -> bool:
-    k = nodes[e].kind
-    if k == .ident:
-        s = lookup(int(nodes[e].name))
-        if s == 0: return false
-        sk = syms[s].kind
-        return sk == .type_ or sk == .struct_ or sk == .enum_ or sk == .alias_
-    if k == .binary and (nodes[e].op as Tok == .pipe or nodes[e].op as Tok == .amp): return type_value_expr(int(nodes[e].a)) and type_value_expr(int(nodes[e].b))
-    if k == .field and nodes[e].b == 0 and nodes[int(nodes[e].a)].kind == .ident:
-        s = lookup(int(nodes[int(nodes[e].a)].name))
-        return s != 0 and syms[s].kind != .module and value_type_member(s, int(nodes[e].name), nodes[e].pos) != 0
-    false
 
 # `f([Png Jpeg] ...)`, `$named[Png Jpeg]` (decisions.md, batch 7): a call of a Dewy function given
 # a sequence of types is specialized on that sequence. Its body is checked in place, the first
@@ -2765,14 +2568,6 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
         fact_divisors[n] = if modulo: 2 else: 1
     result
 
-# (literal numbers and arithmetic on them: their type comes from the call)
-number_literal_tree = (n: int) -> bool:
-    k = nodes[n].kind
-    if k == .int_lit or k == .float_lit: return true
-    if k == .unary: return number_literal_tree(int(nodes[n].a))
-    if k == .binary: return number_literal_tree(int(nodes[n].a)) and number_literal_tree(int(nodes[n].b))
-    false
-
 # (a constant index's position)
 dewy_position_known = (b: int, pos: int) -> (bool, int):
     if nodes[b].kind == .int_lit and not has_flag(b, NF_U64): return (true, nodes[b].ival)
@@ -2824,15 +2619,6 @@ dewy_position_index = (n: int, bt: int, expected: int) -> int:
     set_list(read, [b])
     nodes[n] = nodes[bc_block([bc_let(source, int(nodes[n].a), pos), declared, bc_stmt(read, pos)], pos)]
     check_expr(n, expected)
-
-# literal numbers with a decimal literal among them (`2.5`, `-2.5`, `1.5*3`):
-# exact until a float context makes them floats
-decimal_literal_tree = (n: int) -> bool:
-    k = nodes[n].kind
-    if k == .float_lit: return nodes[n].sval != 0
-    if k == .unary: return decimal_literal_tree(int(nodes[n].a))
-    if k == .binary: return number_literal_tree(n) and (decimal_literal_tree(int(nodes[n].a)) or decimal_literal_tree(int(nodes[n].b)))
-    false
 
 # (the library functions Dewy calls with physical quantities: dewy_quantity_call)
 quantity_call_names: int[]
@@ -3173,66 +2959,10 @@ shown_fn_name = (name: str) -> str:
     if name == "__dewy_keys": return "keys"
     name
 
-# the functions that may be called with a dot on a value of type t (for messages)
-# Whether `x.name` alone can call a function of x: an array or text builtin
-# that takes nothing else, or a visible function whose other parameters all
-# have defaults.
-# A result with nothing in it: `void`, or `void` with the errors a call may give (the zero-argument
-# call style check, call_style.dewy).
-call_style_nothing = (t0: int) -> bool:
-    t = prune(t0)
-    if tkind(t) == .void_: return true
-    if not is_union(t) and tkind(t) != .opt: return false
-    loop m in value_members(t):
-        if not (tkind(m) == .void_ or exception_member(m)): return false
-    true
-
-# (the Dewy prelude's module declaring name, as a table of the methods a Dewy module's `x.name`
-# finds beside the receiver's own: `p.modified` of a Path, lib/prelude/files.dewy; -1 for none)
-dewy_prelude_method_module = (name: int) -> int:
-    if not caller_dewy(): return -1
-    m = dewy_prelude_module(name)
-    if m == cur_mod(): return -1
-    m
-
-member_call_without_arguments = (t: int, name: int, prelude_methods: bool = false) -> bool:
-    tk = types[t].kind
-    ii = intrinsic_of(name)
-    if ii >= 0 and intrinsics[ii].arr and (tk == .array or tk == .str_):
-        id = intrinsics[ii].id
-        return id == .len or id == .arrcap or id == .pop or id == .clear or id == .arrdata
-    demand_name(name)
-    tables = [modules[cur_mod()].names, prelude]
-    loop tm in method_modules(t):
-        if tm != cur_mod(): tables.push(modules[tm].names)
-    # (the zero-argument call style check leaves them out: it has never asked of `x.to_int64()`)
-    dm = if prelude_methods: dewy_prelude_method_module(name) else: -1
-    if dm >= 0: tables.push(modules[dm].names)
-    loop table in tables:
-        if not table.has(name): continue
-        s = table[name]
-        loop s != 0:
-            if syms[s].kind == .fns and syms[s].decl != 0:
-                d = int(syms[s].decl)
-                required = 0
-                loop i in [0..nkids(d)):
-                    if nodes[kid(d, i)].b == 0: required += 1
-                if nkids(d) >= 1 and required <= 1: return true
-            s = int(syms[s].next)
-    ii >= 0 and not intrinsics[ii].arr
-
 # A short spelling of a receiver for a suggested call.
 receiver_text = (n: int) -> str:
     if nodes[n].kind == .ident: return name_of(int(nodes[n].name))
     "x"
-
-# Membership in fn_names_for without building a diagnostic's complete list.
-fn_name_for = (t: int, name: int) -> bool:
-    if method_name_for(t, name): return true
-    ii = intrinsic_of(name)
-    if ii < 0: return false
-    tk = types[t].kind
-    intrinsics[ii].arr == (tk == .array or tk == .str_)
 
 id_len = 0
 # (the object of `x.member` or `x[...]` being checked: a type there is the type)
@@ -4514,21 +4244,6 @@ type_node_of = (t: int, pos: int) -> int:
     nodes[n].ival = t
     n
 
-charlike = (n: int) -> bool: nodes[n].kind == .str_lit and has_flag(n, NF_CHARLIKE)
-
-charlike_to_int = (n: int):
-    s = name_of(int(nodes[n].sval))
-    v = int(s[0])
-    if len(s) > 1:
-        # UTF-8 sequence -> code point
-        v = v & (0x3f >> (len(s) - 1))
-        loop i in [1..len(s)): v = (v << 6) | (int(s[i]) & 0x3f)
-    nodes[n].kind = .int_lit
-    nodes[n].ival = v
-    nodes[n].aux = 1
-    add_flag(n, NF_LITERAL)
-    clear_flag(n, NF_CHARLIKE)
-
 # the string-literal union a container's members or keys are (0 if not one)
 membership_str_set_of = (t0: int) -> int:
     t = prune(t0)
@@ -5283,32 +4998,7 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
 # Dewy function names. A bare name calls its function; `@f` is the function
 # itself, and `@f(args)` partially evaluates it.
 
-# Whether a name or member read at n is a bare Dewy function use: not `@f`,
-# not a callee, not an assignment target.
-dewy_bare_type_value = (n: int, tt: int, is_callee: bool, expected: int) -> bool:
-    if is_callee or n == type_receiver_at or not dewy_at(nodes[n].pos) or types[tt].kind != .struct_: return false
-    if expected != 0 and tkind(expected) == .typeval: return false
-    if is_map_type(tt) or is_dewy_set_type(tt): return false
-    si = int(types[tt].st)
-    d = int(structs[si].decl)
-    # (the program's own types, by the names it wrote: the library's are built on as types)
-    if d == 0 or nodes[d].kind != .struct_ or pos_in_lib(nodes[d].pos) or starts_with(name_of(int(nodes[n].name)), "$"): return false
-    check_struct_fields(si)
-    loop i in [0..int(structs[si].nfields)):
-        if fields[int(structs[si].fields) + i].defval == 0: return false
-    true
-
 capture_decl = 0 # a `$capture name` being checked: names a binding, never calls it
-
-dewy_bare_fn = (n: int, is_callee: bool) -> bool:
-    # (a member call's receiver is marked as a place it may change: `names.join(", ")` still calls names)
-    receiver = n == type_receiver_at and not has_flag(n, NF_AT)
-    if is_callee or (has_flag(n, NF_MUT) and not receiver) or n == assign_root or n == capture_decl: return false
-    if nodes[n].kind == .ident:
-        # A synthesized parameter copy or temporary.
-        if nodes[n].aux2 == 1 or starts_with(name_of(int(nodes[n].name)), "$"): return false
-    if cur_assign != 0 and int(nodes[cur_assign].a) == n: return false
-    files[pos_file(nodes[n].pos)].is_dewy
 
 # The walk of one function body for a named wait (rules 3 and 4). In source order it finds w's
 # declaration and the call, and every assignment and `$capture @x` closure on w or a place its
@@ -5650,19 +5340,6 @@ cond_restored: int[][]
 # elements, broadcast like numpy (a dimension of length 1, or a missing leading one, stretches).
 bc_count = 0
 
-# Brackets also construct records and call user-defined indexing operators. Keep
-# range syntax until the receiver type is known: NDArray uses axis slices, while
-# other multi-argument brackets receive ordinary stored range values.
-dewy_index_ranges = (n: int, receiver: int):
-    if not files[pos_file(nodes[n].pos)].is_dewy or is_nd(receiver): return
-    if nkids(n) < 2 and types[receiver].kind != .typeval: return
-    loop i in [0..nkids(n)):
-        r = kid(n, i)
-        if nodes[r].kind == .range:
-            value = dewy_range_value(r)
-            set_kid(n, i, value)
-            if nodes[n].b == r: nodes[n].b = i32(value)
-
 # A matrix part can use literal ranges, stored IntRange values or index arrays.
 is_part_index = (n: int, receiver: int = 0) -> bool:
     ixs = kids(n)
@@ -5682,26 +5359,6 @@ bc_bin = (op: Tok, a: int, b: int, pos: int) -> int:
     nodes[n].a = i32(a)
     nodes[n].b = i32(b)
     n
-
-# (xs[-1], s[-3..]: counting from the end, as Python and JavaScript do)
-neg_index_check = (b: int):
-    if nodes[b].kind != .int_lit or nodes[b].ival >= 0: return
-    k = -nodes[b].ival
-    e = "end"
-    if k > 1: e = "end - {k - 1}"
-    fatal(nodes[b].pos, "an index counts from 0; from the end it is `{e}` (`xs[end]` is the last, `xs[end - 2..]` the last three)")
-
-# xs[b] with b a bool[] (a mask) or int[] (indexes): the function that picks (or sets) them
-index_array_fn = (b: int, base: str) -> str:
-    expected = if nodes[b].kind == .array and nkids(b) == 0 and nodes[b].b == 0: mk_array(T_INT) else: T_INT
-    it = prune(check_expr(b, expected))
-    if is_dewy_range_type(it, "IntRange"): return base
-    if types[it].kind != .array and types[it].kind != .fixed: return ""
-    et = prune(int(types[it].elem))
-    if types[et].kind == .bool_: return base + "_mask"
-    if et == T_INT or et == T_MATH_INT: return base + "_indices"
-    fatal(nodes[b].pos, jd(nodes[b].pos, "an array of indexes is int[], or a mask bool[] (found {dt(it)})", "an array of indexes is array<int64>, or a mask array<bool> (found {dt(it)})"))
-    ""
 
 bc_assign = (target: int, v: int, pos: int) -> int:
     a = mk(.assign, pos)

@@ -1,0 +1,85 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"check.jo" import (LF_ALIAS LF_CAPTURE LF_MUTPARAM LF_VALUECAP dewy_at locals)
+from p"checks_thin_expr.dewy" import (mutable_index)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (mk_ident_local)
+from p"partition_ops.dewy" import (partition_disjoint)
+
+MutableRouteWord:type=int64<overflow='wrap'>
+const MUTABLE_ROUTE_LOCAL:int32=1 # SK.local in Node.aux.
+
+# checker_call_queries.dewy's check_mutable_arguments leaves the host two or more.
+mutable_arguments_rest=(args:array<int64> mask:int64 pos:int64):>void=>$unsafe {
+    let bits=MutableRouteWord(mask)
+    if bits =? 0 or bits & (bits - 1) =? 0 or not dewy_at(pos) {return}
+    loop i in 0.. and a in args {
+        if bits & (MutableRouteWord(1) << (i & 63)) =? 0 or nodes.ptr[a].kind =? 'hole' {continue}
+        loop j in [0..i) {
+            let b=args[j]
+            if bits & (MutableRouteWord(1) << (j & 63)) =? 0 or nodes.ptr[b].kind =? 'hole' {continue}
+            if not partition_disjoint(b a) and mutable_overlap(b a) {
+                fatal(nodes.ptr[a].pos "mutable arguments {j + 1} and {i + 1} overlap; pass disjoint places")
+            }
+        }
+    }
+}
+
+# Two different roots are different storage, except that an `@` parameter
+# borrows its caller's place: a global or another function's variable (a
+# shared capture) may be that same place. Distinct `@` parameters of one
+# function were proven apart where it was called.
+mutable_borrowed_overlap=(a:MutableRouteWord b:MutableRouteWord):>bool=>$unsafe {
+    let x=if nodes.ptr[a].aux =? MUTABLE_ROUTE_LOCAL {MutableRouteWord(nodes.ptr[a].sym)} else {0}
+    let y=if nodes.ptr[b].aux =? MUTABLE_ROUTE_LOCAL {MutableRouteWord(nodes.ptr[b].sym)} else {0}
+    let bx=x not=? 0 and MutableRouteWord(locals.ptr[x].flags) & LF_MUTPARAM not=? 0
+    let by=y not=? 0 and MutableRouteWord(locals.ptr[y].flags) & LF_MUTPARAM not=? 0
+    if not bx and not by {return false}
+    x =? 0 or y =? 0 or locals.ptr[x].owner not=? locals.ptr[y].owner
+}
+
+mutable_overlap=(a:MutableRouteWord b:MutableRouteWord):>bool=>$unsafe {
+    let left:array<int64>=[]
+    let right:array<int64>=[]
+    let ar=mutable_route(a @left)
+    let br=mutable_route(b @right)
+    if nodes.ptr[ar].kind not=? 'ident' or nodes.ptr[br].kind not=? 'ident' {return false}
+    if nodes.ptr[ar].aux not=? nodes.ptr[br].aux or nodes.ptr[ar].sym not=? nodes.ptr[br].sym {return mutable_borrowed_overlap(ar br)}
+    loop x in left and y in right {
+        if nodes.ptr[x].kind not=? nodes.ptr[y].kind {return true}
+        if nodes.ptr[x].kind =? 'field' {
+            if nodes.ptr[x].aux >=? 0 and nodes.ptr[y].aux >=? 0 and nodes.ptr[x].aux not=? nodes.ptr[y].aux {return false}
+            if nodes.ptr[x].aux =? -2 and nodes.ptr[y].aux =? -2 and nodes.ptr[x].ival not=? nodes.ptr[y].ival {return false}
+        }
+        else {
+            let xi=mutable_index(MutableRouteWord(nodes.ptr[x].b))
+            let yi=mutable_index(MutableRouteWord(nodes.ptr[y].b))
+            if nodes.ptr[xi].kind =? 'int_lit' and nodes.ptr[yi].kind =? 'int_lit' and nodes.ptr[xi].ival not=? nodes.ptr[yi].ival {return false}
+        }
+    }
+    true
+}
+
+# A place route starts at its owning binding. Narrowing aliases and shared
+# captures still designate that same storage; private captures are independent.
+mutable_route=(n:MutableRouteWord @route:array<int64>):>MutableRouteWord=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'field' or k =? 'index' {
+        let root=mutable_route(MutableRouteWord(nodes.ptr[n].a) @route)
+        route.push(n)
+        return root
+    }
+    if k =? 'unwrap' or k =? 'narrow' or k =? 'conv' {
+        return mutable_route(MutableRouteWord(nodes.ptr[n].a) @route)
+    }
+    if k =? 'ident' and nodes.ptr[n].aux =? MUTABLE_ROUTE_LOCAL {
+        let l=MutableRouteWord(nodes.ptr[n].sym)
+        if MutableRouteWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 {
+            return mutable_route(MutableRouteWord(locals.ptr[l].alias) @route)
+        }
+        if MutableRouteWord(locals.ptr[l].flags) & LF_CAPTURE not=? 0 and MutableRouteWord(locals.ptr[l].flags) & LF_VALUECAP =? 0 {
+            return mutable_route(mk_ident_local(MutableRouteWord(locals.ptr[l].outer) nodes.ptr[n].pos) @route)
+        }
+    }
+    n
+}

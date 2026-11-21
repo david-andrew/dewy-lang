@@ -1,0 +1,36 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"expr.jo" import (int_widens integer_constant rational_constants)
+from p"types.jo" import (T_INT T_MATH_INT is_int prune types)
+
+NumberFormWord:type=int64<overflow='wrap'>
+
+# (literal numbers and arithmetic on them: their type comes from the call)
+number_literal_tree=(n:NumberFormWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' or k =? 'float_lit' {return true}
+    if k =? 'unary' {return number_literal_tree(NumberFormWord(nodes.ptr[n].a))}
+    if k =? 'binary' {return number_literal_tree(NumberFormWord(nodes.ptr[n].a)) and number_literal_tree(NumberFormWord(nodes.ptr[n].b))}
+    false
+}
+
+# literal numbers with a decimal literal among them (`2.5`, `-2.5`, `1.5*3`):
+# exact until a float context makes them floats
+decimal_literal_tree=(n:NumberFormWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'float_lit' {return nodes.ptr[n].sval not=? 0}
+    if k =? 'unary' {return decimal_literal_tree(NumberFormWord(nodes.ptr[n].a))}
+    if k =? 'binary' {return number_literal_tree(n) and (decimal_literal_tree(NumberFormWord(nodes.ptr[n].a)) or decimal_literal_tree(NumberFormWord(nodes.ptr[n].b)))}
+    false
+}
+
+# Does the value n of type from fit rational<int64> exactly, for every value?
+word_rational_source=(n:NumberFormWord source:NumberFormWord):>bool=>$unsafe {
+    let t=prune(source)
+    if rational_constants.has(n) {return true}
+    if not is_int(t) {return false}
+    let [known value]=integer_constant(n)
+    if known {return value >=? 0 or types.ptr[t].sign or t =? T_MATH_INT}
+    if t =? T_MATH_INT {return false}
+    int_widens(t T_INT)
+}

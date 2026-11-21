@@ -1,0 +1,49 @@
+$runtime_checks
+from p"ast.jo" import (kid nkids nodes set_kid)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_thin.dewy" import (jd)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (is_dewy_range_type is_nd)
+from p"range_checks.dewy" import (dewy_range_value)
+from p"type_ops.dewy" import (dt mk_array)
+from p"types.jo" import (T_INT T_MATH_INT prune types)
+from p"util.jo" import (files pos_file)
+
+IndexOperandWord:type=int64<overflow='wrap'>
+
+# Brackets also construct records and call user-defined indexing operators. Keep
+# range syntax until the receiver type is known: NDArray uses axis slices, while
+# other multi-argument brackets receive ordinary stored range values.
+dewy_index_ranges=(n:IndexOperandWord receiver:IndexOperandWord):>void=>$unsafe {
+    if not files[pos_file(nodes.ptr[n].pos)].is_dewy or is_nd(receiver) {return}
+    if nkids(n) <? 2 and types.ptr[receiver].kind not=? 'typeval' {return}
+    loop i in [0..nkids(n)) {
+        let r=kid(n i)
+        if nodes.ptr[r].kind =? 'range' {
+            let value=dewy_range_value(r)
+            set_kid(n i value)
+            if int64(nodes.ptr[n].b) =? r {nodes.ptr[n].b=int32(value)}
+        }
+    }
+}
+
+# xs[b] with b a bool[] (a mask) or int[] (indexes): the function that picks (or sets) them
+index_array_fn=(b:IndexOperandWord base:string):>string=>$unsafe {
+    let expected=if nodes.ptr[b].kind =? 'array' and nkids(b) =? 0 and nodes.ptr[b].b =? 0 {mk_array(T_INT)} else {T_INT}
+    let it=prune(check_expr(b expected))
+    if is_dewy_range_type(it "IntRange") {return base}
+    if types.ptr[it].kind not=? 'array' and types.ptr[it].kind not=? 'fixed' {return ""}
+    let et=prune(IndexOperandWord(types.ptr[it].elem))
+    if types.ptr[et].kind =? 'bool_' {return "{base}_mask"}
+    if et =? T_INT or et =? T_MATH_INT {return "{base}_indices"}
+    fatal(nodes.ptr[b].pos jd(nodes.ptr[b].pos "an array of indexes is int[], or a mask bool[] (found {dt(it)})" "an array of indexes is array<int64>, or a mask array<bool> (found {dt(it)})"))
+    ""
+}
+
+# (xs[-1], s[-3..]: counting from the end, as Python and JavaScript do)
+neg_index_check=(b:IndexOperandWord):>void=>$unsafe {
+    if nodes.ptr[b].kind not=? 'int_lit' or nodes.ptr[b].ival >=? 0 {return}
+    let k= -IndexOperandWord(nodes.ptr[b].ival)
+    let e=if k >? 1 {"end - {k - 1}"} else {"end"}
+    fatal(nodes.ptr[b].pos "an index counts from 0; from the end it is `{e}` (`xs[end]` is the last, `xs[end - 2..]` the last three)")
+}

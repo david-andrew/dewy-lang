@@ -1,15 +1,17 @@
 $runtime_checks
-from p"ast.jo" import (kid mk nkids nkids2 nodes)
-from p"check.jo" import (prelude syms)
+from p"@lib/core/str.jo" import (starts_with)
+from p"checks_thin_expr.dewy" import (is_map_type)
+from p"ast.jo" import (NF_AT NF_MUT has_flag kid mk nkids nkids2 nodes)
+from p"check.jo" import (assign_root check_struct_fields dewy_at prelude syms)
 from p"checker_expr.dewy" import (lookup)
 from p"checks_thin.dewy" import (resolve_type)
 from p"diagnostic_exit.dewy" import (fatal)
-from p"expr.jo" import (ntype)
+from p"expr.jo" import (capture_decl cur_assign is_dewy_set_type ntype type_receiver_at value_type_member)
 from p"reflect_ops.dewy" import (reflect_member)
 from p"reflection.jo" import (reflect_active)
 from p"type_ops.dewy" import (get_struct_inst mk_array)
-from p"types.jo" import (telem)
-from p"util.jo" import (intern)
+from p"types.jo" import (fields structs telem tkind types)
+from p"util.jo" import (files intern name_of pos_file pos_in_lib)
 
 TypeFormWord:type=int64<overflow='wrap'>
 
@@ -42,4 +44,51 @@ expr_as_type=(e:TypeFormWord):>TypeFormWord=>{
     }
     fatal(nodes[e].pos "expected a type")
     0
+}
+
+# Is e written as a type (a type's name, or `r.Png` naming a type member)? Such a record
+# field's value is not captured: it has no storage.
+type_value_expr=(e:TypeFormWord):>bool=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k =? 'ident' {
+        let s=lookup(TypeFormWord(nodes.ptr[e].name))
+        if s =? 0 {return false}
+        let sk=syms.ptr[s].kind
+        return sk =? 'type_' or sk =? 'struct_' or sk =? 'enum_' or sk =? 'alias_'
+    }
+    # Node.op stores the frozen Tok.pipe (64) and Tok.amp (63) ordinals.
+    if k =? 'binary' and (nodes.ptr[e].op =? 64 or nodes.ptr[e].op =? 63) {
+        return type_value_expr(TypeFormWord(nodes.ptr[e].a)) and type_value_expr(TypeFormWord(nodes.ptr[e].b))
+    }
+    if k =? 'field' and nodes.ptr[e].b =? 0 and nodes.ptr[TypeFormWord(nodes.ptr[e].a)].kind =? 'ident' {
+        let s=lookup(TypeFormWord(nodes.ptr[TypeFormWord(nodes.ptr[e].a)].name))
+        return s not=? 0 and syms.ptr[s].kind not=? 'module' and value_type_member(s TypeFormWord(nodes.ptr[e].name) nodes.ptr[e].pos) not=? 0
+    }
+    false
+}
+
+# Whether a name or member read at n is a bare Dewy function use: not `@f`,
+# not a callee, not an assignment target.
+dewy_bare_type_value=(n:TypeFormWord tt:TypeFormWord is_callee:bool expected:TypeFormWord):>bool=>$unsafe {
+    if is_callee or n =? type_receiver_at or not dewy_at(nodes.ptr[n].pos) or types.ptr[tt].kind not=? 'struct_' {return false}
+    if expected not=? 0 and tkind(expected) =? 'typeval' {return false}
+    if is_map_type(tt) or is_dewy_set_type(tt) {return false}
+    let si=TypeFormWord(types.ptr[tt].st)
+    let d=TypeFormWord(structs.ptr[si].decl)
+    if d =? 0 or nodes.ptr[d].kind not=? 'struct_' or pos_in_lib(nodes.ptr[d].pos) or starts_with(name_of(TypeFormWord(nodes.ptr[n].name)) "$") {return false}
+    check_struct_fields(si)
+    loop i in [0..TypeFormWord(structs.ptr[si].nfields)) {
+        if fields.ptr[TypeFormWord(structs.ptr[si].fields) + i].defval =? 0 {return false}
+    }
+    true
+}
+
+dewy_bare_fn=(n:int64 is_callee:bool):>bool=>$unsafe {
+    let receiver=n =? type_receiver_at and not has_flag(n NF_AT)
+    if is_callee or (has_flag(n NF_MUT) and not receiver) or n =? assign_root or n =? capture_decl {return false}
+    if nodes.ptr[n].kind =? 'ident' {
+        if nodes.ptr[n].aux2 =? 1 or starts_with(name_of(TypeFormWord(nodes.ptr[n].name)) "$") {return false}
+    }
+    if cur_assign not=? 0 and TypeFormWord(nodes.ptr[cur_assign].a) =? n {return false}
+    files[pos_file(nodes.ptr[n].pos)].is_dewy
 }

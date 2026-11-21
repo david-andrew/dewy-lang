@@ -1,0 +1,41 @@
+$runtime_checks
+from p"ast.jo" import (decl_has_rest kid nkids nodes rest_bundles)
+from p"check.jo" import (dewy_at module_lookup syms universe)
+from p"checker_call_cost.dewy" import (Cand)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (AUX2_PARTIAL decl_in_prelude ntype unnamed)
+from p"source_queries.dewy" import (pos_str)
+from p"type_ops.dewy" import (dt)
+from p"types.jo" import (tkind)
+from p"util.jo" import (name_of)
+
+OverloadDiagWord:type=int64<overflow='wrap'>
+
+call_tie_error=(n:OverloadDiagWord name:OverloadDiagWord args:array<int64> cands:array<Cand> best:OverloadDiagWord):>void=>$unsafe {
+    loop index in 0.. and cd in cands {
+        if index =? best or cd.cost not=? cands[best].cost or cd.sig.generic not=? cands[best].sig.generic {continue}
+        if decl_in_prelude(cd.decl) not=? decl_in_prelude(cands[best].decl) or rest_bundles.length not=? 0 and decl_has_rest(cd.decl) not=? decl_has_rest(cands[best].decl) {continue}
+        let ats=""
+        loop ai in 0.. and a0 in args {
+            if ai >? 0 {ats="{ats}, "}
+            if nodes.ptr[unnamed(a0)].type not=? 0 {ats="{ats}{dt(ntype(unnamed(a0)))}"}
+        }
+        if nodes.ptr[n].aux2 =? int32(AUX2_PARTIAL) and dewy_at(nodes.ptr[n].pos) {
+            fatal(nodes.ptr[n].pos "ambiguous partial application of '{name_of(name)}': more than one overload takes these arguments (candidates at {pos_str(nodes.ptr[cands[best].decl].pos)} and {pos_str(nodes.ptr[cd.decl].pos)}); annotate the binding with the callable type it should have, as in `let f:(b:string:>string) = @{name_of(name)}(...)`")
+        }
+        fatal(nodes.ptr[n].pos "ambiguous call to '{name_of(name)}({ats})': candidates at {pos_str(nodes.ptr[cands[best].decl].pos)} and {pos_str(nodes.ptr[cd.decl].pos)}")
+    }
+}
+
+# Whether parameter i of declaration d is written as a builtin integer type (refined or not),
+# read from its annotation alone
+written_int_param=(d:OverloadDiagWord i:OverloadDiagWord):>bool=>$unsafe {
+    if i >=? nkids(d) {return false}
+    let tn=OverloadDiagWord(nodes.ptr[kid(d i)].a)
+    if tn not=? 0 and nodes.ptr[tn].kind =? 'trefined' {tn=OverloadDiagWord(nodes.ptr[tn].a)}
+    if tn =? 0 or nodes.ptr[tn].kind not=? 'tname' or nkids(tn) not=? 0 or nodes.ptr[tn].sval not=? 0 {return false}
+    let name=OverloadDiagWord(nodes.ptr[tn].name)
+    let s=universe.get(name) ?? 0
+    if s =? 0 or syms.ptr[s].kind not=? 'type_' or module_lookup(OverloadDiagWord(nodes.ptr[d].mod) name) not=? s {return false}
+    tkind(OverloadDiagWord(syms.ptr[s].ref)) =? 'int_'
+}

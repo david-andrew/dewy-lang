@@ -1,0 +1,42 @@
+use 'ast.jo'
+use 'checker_expr.dewy'
+use 'checks_thin.dewy'
+use 'diagnostic_exit.dewy'
+use 'expr.jo'
+use 'range_checks.dewy'
+use 'type_ops.dewy'
+use 'types.jo'
+use 'util.jo'
+
+# Brackets also construct records and call user-defined indexing operators. Keep
+# range syntax until the receiver type is known: NDArray uses axis slices, while
+# other multi-argument brackets receive ordinary stored range values.
+dewy_index_ranges = (n: int, receiver: int):
+    if not files[pos_file(nodes[n].pos)].is_dewy or is_nd(receiver): return
+    if nkids(n) < 2 and types[receiver].kind != .typeval: return
+    loop i in [0..nkids(n)):
+        r = kid(n, i)
+        if nodes[r].kind == .range:
+            value = dewy_range_value(r)
+            set_kid(n, i, value)
+            if nodes[n].b == r: nodes[n].b = i32(value)
+
+# xs[b] with b a bool[] (a mask) or int[] (indexes): the function that picks (or sets) them
+index_array_fn = (b: int, base: str) -> str:
+    expected = if nodes[b].kind == .array and nkids(b) == 0 and nodes[b].b == 0: mk_array(T_INT) else: T_INT
+    it = prune(check_expr(b, expected))
+    if is_dewy_range_type(it, "IntRange"): return base
+    if types[it].kind != .array and types[it].kind != .fixed: return ""
+    et = prune(int(types[it].elem))
+    if types[et].kind == .bool_: return base + "_mask"
+    if et == T_INT or et == T_MATH_INT: return base + "_indices"
+    fatal(nodes[b].pos, jd(nodes[b].pos, "an array of indexes is int[], or a mask bool[] (found {dt(it)})", "an array of indexes is array<int64>, or a mask array<bool> (found {dt(it)})"))
+    ""
+
+# (xs[-1], s[-3..]: counting from the end, as Python and JavaScript do)
+neg_index_check = (b: int):
+    if nodes[b].kind != .int_lit or nodes[b].ival >= 0: return
+    k = -nodes[b].ival
+    e = "end"
+    if k > 1: e = "end - {k - 1}"
+    fatal(nodes[b].pos, "an index counts from 0; from the end it is `{e}` (`xs[end]` is the last, `xs[end - 2..]` the last three)")

@@ -1,0 +1,79 @@
+$runtime_checks
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (cur_mod demand_name method_modules modules prelude syms)
+from p"checker_call_queries.dewy" import (intrinsic_of)
+from p"checks_hints.dewy" import (method_name_for)
+from p"error_ops.dewy" import (exception_member value_members)
+from p"expr.jo" import (IN caller_dewy intrinsics)
+from p"prelude_ops.dewy" import (dewy_prelude_module)
+from p"types.jo" import (is_union prune tkind types)
+
+CallStyleLookupWord:type=int64<overflow='wrap'>
+
+# the functions that may be called with a dot on a value of type t (for messages)
+# Whether `x.name` alone can call a function of x: an array or text builtin
+# that takes nothing else, or a visible function whose other parameters all
+# have defaults.
+# A result with nothing in it: `void`, or `void` with the errors a call may give (the zero-argument
+# call style check, call_style.dewy).
+call_style_nothing=(t0:CallStyleLookupWord):>bool=>{
+    let t=prune(t0)
+    if tkind(t) =? 'void_' {return true}
+    if not is_union(t) and tkind(t) not=? 'opt' {return false}
+    loop m in value_members(t) {
+        if tkind(m) not=? 'void_' and not exception_member(m) {return false}
+    }
+    true
+}
+
+# (the Dewy prelude's module declaring name, as a table of the methods a Dewy module's `x.name`
+# finds beside the receiver's own: `p.modified` of a Path, lib/prelude/files.dewy; -1 for none)
+dewy_prelude_method_module=(name:CallStyleLookupWord):>CallStyleLookupWord=>{
+    if not caller_dewy() {return -1}
+    let m=dewy_prelude_module(name)
+    if m =? cur_mod() {return -1}
+    m
+}
+
+member_call_without_arguments=(t:CallStyleLookupWord name:CallStyleLookupWord prelude_methods:bool=false):>bool=>$unsafe {
+    let tk=types.ptr[t].kind
+    let ii=intrinsic_of(name)
+    if ii >=? 0 and intrinsics.ptr[ii].arr and (tk =? 'array' or tk =? 'str_') {
+        let id=intrinsics.ptr[ii].id
+        return id =? IN.len or id =? IN.arrcap or id =? IN.pop or id =? IN.clear or id =? IN.arrdata
+    }
+    demand_name(name)
+    let tables=[modules[cur_mod()].names prelude]
+    loop tm in method_modules(t) {
+        if tm not=? cur_mod() {tables.push(modules[tm].names)}
+    }
+    if prelude_methods {
+        let dm=dewy_prelude_method_module(name)
+        if dm >=? 0 {tables.push(modules[dm].names)}
+    }
+    loop table in tables {
+        let s=table.get(name) ?? 0
+        loop s not=? 0 {
+            if syms.ptr[s].kind =? 'fns' and syms.ptr[s].decl not=? 0 {
+                let d=CallStyleLookupWord(syms.ptr[s].decl)
+                let required:CallStyleLookupWord=0
+                let count=nkids(d)
+                loop i in [0..count) {
+                    if nodes.ptr[kid(d i)].b =? 0 {required += 1}
+                }
+                if count >=? 1 and required <=? 1 {return true}
+            }
+            s=CallStyleLookupWord(syms.ptr[s].next)
+        }
+    }
+    ii >=? 0 and not intrinsics.ptr[ii].arr
+}
+
+# Membership in fn_names_for without building a diagnostic's complete list.
+fn_name_for=(t:CallStyleLookupWord name:CallStyleLookupWord):>bool=>$unsafe {
+    if method_name_for(t name) {return true}
+    let ii=intrinsic_of(name)
+    if ii <? 0 {return false}
+    let tk=types.ptr[t].kind
+    intrinsics.ptr[ii].arr =? (tk =? 'array' or tk =? 'str_')
+}
