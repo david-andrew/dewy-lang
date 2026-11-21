@@ -26,6 +26,8 @@ from p"facts_elements.dewy" import (fact_inventory fact_inventory_bound)
 from p"facts_library.dewy" import (fact_field_args)
 from p"refine_rare.dewy" import (ref_self_element_row)
 from p"refine_siblings.dewy" import (ref_sib_element_row)
+from p"utf8_text.dewy" import (utf8_run)
+from p"util.jo" import (name_of)
 
 from p"ast.jo" import (kid kids)
 from p"checks_thin_expr.dewy" import (is_gpu_buffer)
@@ -107,6 +109,27 @@ fact_projection_key=(base:ValueBuildWord selector:ValueBuildWord element:bool):>
 }
 fact_place=(e:ValueBuildWord):>PlaceIdentity=>place_scalar_root(e)
 
+# Adjacent ASCII scalars break except CRLF, and an ASCII control breaks on
+# both sides. Other Unicode scalars can attach to their neighbors.
+# O(literal bytes), on the first length projection of a literal value.
+fact_literal_grapheme_floor=(text:string):>ValueBuildWord=>{
+    let bytes=text as array<uint8>
+    let count:ValueBuildWord=0
+    let previous:ValueBuildWord=-1
+    let at:ValueBuildWord=0
+    loop at <? bytes.length {
+        let width=utf8_run(text at)
+        if width <=? 0 {return 0}
+        let current=ValueBuildWord(bytes[at])
+        if previous not=? 13 or current not=? 10 {
+            if previous <? 32 or previous =? 127 or current <? 32 or current =? 127 or previous <? 128 and current <? 128 {count += 1}
+        }
+        previous=current
+        at += width
+    }
+    count
+}
+
 # Evaluated identities own projections. Keep first-match order, publication
 # order and caps; reacquire arena elements after recursive/growing calls.
 fact_project=(@s:FactState base:ValueBuildWord selector:ValueBuildWord element:bool t:ValueBuildWord):>int64=>$unsafe {
@@ -132,8 +155,17 @@ fact_project=(@s:FactState base:ValueBuildWord selector:ValueBuildWord element:b
         }
     }
     let v:ValueBuildWord=fact_new(@s fact_domain(t) FactTerm(type=t))
-    # (a GPU buffer has at most int32.max elements, as shaders index it: gpu_buffer refuses more)
-    if not element and selector =? -1 {fact_set_bound(@s v FactBound(0 if is_gpu_buffer(ValueBuildWord(fact_terms[base].type)) {2147483647} else {fact_length_max()}))}
+    if not element and selector =? -1 {
+        # (a GPU buffer has at most int32.max elements, as shaders index it: gpu_buffer refuses more)
+        let length=FactBound(0 if is_gpu_buffer(ValueBuildWord(fact_terms[base].type)) {2147483647} else {fact_length_max()})
+        # Most ASCII literals already carry their length. Jo byte length
+        # shares this projection, so retain only a lower bound here.
+        let origin=ValueBuildWord(fact_terms.ptr[base].origin)
+        if fact_terms.ptr[base].type =? T_STR and origin >? 0 and nodes.ptr[origin].kind =? 'str_lit' and nodes.ptr[origin].aux =? 0 and nodes.ptr[origin].sval >=? 0 {
+            length.lo=fact_literal_grapheme_floor(name_of(ValueBuildWord(nodes.ptr[origin].sval)))
+        }
+        fact_set_bound(@s v length)
+    }
     if element and fact_hull_owner =? fact_owner {
         let hull:ValueBuildWord=fact_projection_find(s base FACT_ELEMENT_VALUE false)
         if hull >=? 0 {

@@ -5419,7 +5419,9 @@ checks when these proofs do not apply. This directive does not forbid fresh
 allocation or panics, and is not a separate no-detach guarantee.
 
 String length, indexing, slicing and iteration use extended grapheme clusters.
-`"é🙂".length` is 2. String loops stream from an independent input snapshot;
+`"é🙂".length` is 2. A text literal can supply enough grapheme length
+information to prove its index and slice bounds. String loops stream from an
+independent input snapshot;
 changing the source variable does not change the remaining input. They create
 one independent string per visited grapheme, so `break` and `return` avoid
 collecting or scanning the remaining text. `graphemes(text)` explicitly collects
