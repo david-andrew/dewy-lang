@@ -11,7 +11,7 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 |---|---|---|
 | Acceptance ladder, design surface | 138/138 (+1 held on D40) | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
-| No traps by default | census 2,557 sites in 1,032 of 2,252 programs, down from 3,600 on 10-26 | ordinary code proves without opt-ins |
+| No traps by default | census 2,073 sites in 929 of 2,252 programs (11-21, `tools/compiler/census.py`), down from 3,600 on 10-26 | ordinary code proves without opt-ins |
 | Compile throughput, single thread, default build, every processed line | flagships 153.4k lines/s (11-20, desktop; 161.5k on 11-09 before the flagships began proving statically, +14% source cost) | 200–250k on every flagship |
 | Hello-world compile | 7.5 ms (instruction-derived) | ≤20 ms |
 | Kernels vs C -O2 (time, default, `bench` on redfox) | 18 of 28 at ≤1.2×; worst byte_find 2.85×, callbacks_literal 2.34× (fair C about 1.47×), name_table 1.67×, graph 1.54×, dict_words 1.51×, arena 1.43× | ≤1.2× |
