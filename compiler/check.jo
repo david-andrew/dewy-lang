@@ -1,3 +1,4 @@
+use 'checker_warning_queries.dewy'
 use 'checker_startup.dewy'
 use 'checker_captures.dewy'
 use 'ast_rest.dewy'
@@ -1257,33 +1258,6 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
     leave_module_context(m, entered)
     cx = saved
 
-# xs.sorted(), s.trim() as a statement: a library function that gives a new value of its first
-# argument's type, changing none of its arguments, called for nothing (it changes nothing)
-unused_result = (x: int, pos: int):
-    if discarding: return
-    if nodes[x].kind != .call or nodes[x].a != 0 or nodes[x].sym <= 0 or nkids(x) == 0: return
-    f = int(nodes[x].sym)
-    d = int(fns[f].decl)
-    # (the library's: a program's own may well do more, as writing files, and give back something)
-    if d == 0 or not modules[int(nodes[d].mod)].is_prelude: return
-    if fns[f].ptypes.len() == 0 or nkids(d) != fns[f].ptypes.len() or has_flag(d, NF_EXTERN): return
-    r = prune(int(fns[f].ret))
-    if tkind(r) == .void_ or r == T_NEVER or not type_eq(r, prune(fns[f].ptypes[0])): return
-    # (values: a number or a flag given back is as often a handle or how it went)
-    rk = tkind(r)
-    if rk != .str_ and rk != .array and rk != .vec and rk != .struct_ and rk != .fixed: return
-    if starts_with(name_of(int(nodes[d].name)), "__"): return
-    loop i in [0..nkids(d)):
-        if has_flag(kid(d, i), NF_MUT): return
-    # (at the interactive prompt the value is shown: that is what it is for)
-    if files[pos_file(pos)].path == "<input>": return
-    fname = name_of(int(nodes[d].name))
-    a0 = kid(x, 0)
-    how = ""
-    if nodes[a0].kind == .ident:
-        v = name_of(int(nodes[a0].name))
-        how = " (`{v} = {v}.{fname}(...)` keeps it)"
-    warn(pos, "{fname} gives a new {dt(r)} and leaves its argument as it was: this does nothing{how}")
 
 # `x == 6`, `speed + 1`, `true` as a statement: a value made and dropped, which changes nothing
 # (written for `=`, `+=` or `return true`)
@@ -2398,74 +2372,11 @@ copy_write_warnings = (f: int):
         if starts_with(nm, "#") or starts_with(nm, "$") or starts_with(nm, "__") or pos_in_lib(locals[l].pos): continue
         warn_unused_copy(copy_writes[l], nm)
 
-# Dewy suggestions use names visible here, including explicit import aliases.
-# A similarly named global in an unrelated loaded file is not a useful hint.
-dewy_unused_name_hint = (name: str, module: int) -> str:
-    if module < 0 or modules[module].is_prelude or len(name) < 3: return ""
-    limit = if len(name) >= 6: 2 else: 1
-    loop nm, sym in modules[module].names:
-        if syms[sym].kind != .global or globals[int(syms[sym].ref)].is_const or lookup(nm) != sym: continue
-        candidate = name_of(nm)
-        if candidate == name or len(candidate) == 0 or candidate[0] != name[0]: continue
-        if candidate == upper(candidate) or lower(candidate) == lower(name): continue
-        if edit_distance(candidate, name, limit) <= limit:
-            return " (did you mean the visible variable '{candidate}'?)"
-    ""
 
 # Names used in arms a `$target` or `$build` test left out, by position (dw_target_dropped).
 dewy_target_dropped: {int: int[]}
 
-# (local l of function f is named in an arm its target or build mode leaves out: a
-# parameter only a debug build reads is not unused; f spans to the next declaration)
-target_dropped_use = (f: int, l: int) -> bool:
-    uses = dewy_target_dropped.get(int(locals[l].name)) ?? []
-    if uses.len() == 0 or fns[f].decl == 0: return false
-    start = nodes[int(fns[f].decl)].pos
-    file = pos_file(start)
-    end = -1
-    if int(fns[f].mod) >= 0:
-        loop d in modules[int(fns[f].mod)].decls:
-            p = nodes[d].pos
-            if pos_file(p) == file and p > start and (end < 0 or p < end): end = p
-    loop u in uses:
-        if pos_file(u) == file and u > start and (end < 0 or u < end): return true
-    false
 
-# A program function named as a library method, taking the same kind of first argument:
-# `x.name` calls the program's everywhere in the module, which may surprise. Demanded by the
-# program's own functions: a name lookup and a signature match each.
-hidden_method_warnings = (m: int):
-    loop d in modules[m].decls:
-        if nodes[d].kind != .fn_ or nkids(d) == 0 or has_flag(d, NF_EXTERN): continue
-        name = int(nodes[d].name)
-        dn = name_of(name)
-        if starts_with(dn, "_") or starts_with(dn, "(") or starts_with(dn, "op_") or dn == "main": continue
-        # (a built-in array or string method, not a library function)
-        ii = intrinsic_of(name)
-        if ii >= 0 and intrinsics[ii].arr:
-            own = fn_sig(d)
-            at = if own.params.len() > 0: tkind(own.params[0]) else: TK.void_
-            if at == .array or at == .str_:
-                warn(nodes[d].pos, hidden_method_message(dn, own.params[0]))
-                continue
-        found: int[]
-        dm = cl_prelude_module(name)
-        if dm >= 0: collect_in(dm, name, 0, &found)
-        else: collect_in(-1, name, 2, &found)
-        loop c in found:
-            if c == d or not decl_in_prelude(c) or nkids(c) != nkids(d): continue
-            mine = fn_sig(d)
-            theirs = fn_sig(c)
-            if theirs.params.len() == 0 or mine.params.len() == 0: continue
-            first = prune(theirs.params[0])
-            if types[first].kind == .param or contains(files[pos_file(nodes[c].pos)].path, "/game/"): continue
-            # (an argument conversion is an overload, not the same method)
-            binds = fill(0, int(theirs.ntp))
-            if has_var(first):
-                if match_type(first, mine.params[0], binds, 1) < 0: continue
-            else if not type_eq(first, mine.params[0]): continue
-            warn(nodes[d].pos, hidden_method_message(dn, mine.params[0]))
-            break
 
 # (scor = 1 in a function, for the global score: a variable of its own, made and never read)
 unused_local_warnings = (f: int):
@@ -2840,6 +2751,7 @@ values_hint_label: str[]    # (... and the parameters they fill, once the call i
 values_hint_mark = 0        # (the first of the hints the arguments being expanded made)
 values_hits: bool[]    # (by node: call arguments checked early that gave several values)
 
+warning_collect_in = (mod: int, name: int, hide: int, ds: mut int[]): collect_in(mod, name, hide, &ds)
 values_collect_fns = (name: int, ds: mut int[]): collect_fns(name, &ds)
 values_collect_module = (mod: int, name: int, ds: mut int[]): collect_module(mod, name, &ds)
 
