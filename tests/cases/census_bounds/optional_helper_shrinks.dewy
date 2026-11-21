@@ -1,0 +1,12 @@
+edit=(@xs:array<int64> shrink:bool):>int?=>{
+    if shrink {xs=[] return none}
+    xs.push(42)
+    3
+}
+read=(@xs:array<int64> i:int n:int):>int64=>{
+    if i <? 0 or i >=? xs.length {return 0}
+    loop k in [0..n) {edit(@xs k =? 1);}
+    xs[i]
+}
+let xs:array<int64>=[9]
+printl(read(@xs 0 2))

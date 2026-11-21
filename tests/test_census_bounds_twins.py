@@ -27,3 +27,8 @@ def test_global_write_summaries(compiler, tmp_path, monkeypatch):
     cases = ['census_bounds/global_helpers', 'census_bounds/global_optional_shrink',
              'census_bounds/global_grow_is_not_exact']
     assert compare_facts(compiler, tmp_path, monkeypatch, cases) == 1
+
+
+def test_optional_place_summaries(compiler, tmp_path, monkeypatch):
+    cases = ['census_bounds/optional_helper_grows', 'census_bounds/optional_helper_shrinks']
+    assert compare_facts(compiler, tmp_path, monkeypatch, cases) == 1

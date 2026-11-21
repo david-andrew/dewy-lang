@@ -133,6 +133,7 @@ fact_summary_record = (s: mut FactState, r0: int):
         return
     t = fact_type(int(fns[fact_summary_owner].ret))
     r = r0
+    if fact_summary_places_only: t = T_VOID; r = 0
     payload = fact_summary_payload(t)
     if payload != 0 and fact_summary_field == 0:
         # (a present return's payload; a known `none` adds nothing)
@@ -408,7 +409,8 @@ fact_summary_field_type = (t: int, field: int) -> int:
     fact_type(shape_field_type(t, field))
 fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     strict = dir_assumed_bounds_any and fact_length_strict()
-    key0 = if field == 0: f else: fact_pair_key(f, (if field < 0: 0x80000000 - field else: field))
+    places_only = places and field == 0 and fact_summary_payload(fact_type(int(fns[f].ret))) != 0
+    key0 = if places_only: fact_pair_key(f, 0x80000000) else if field == 0: f else: fact_pair_key(f, (if field < 0: 0x80000000 - field else: field))
     # (a strict caller's summaries are cached apart: fact_length_max)
     key = if strict: -1 - key0 else: key0
     if let known = fact_summaries.get(key): return known
@@ -425,6 +427,8 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     fact_summaries[key] = unknown
     constructor_root = field != 0 and fact_constructor_budget < 0
     if constructor_root: fact_constructor_budget = 128
+    saved_places = fact_summary_places_only
+    fact_summary_places_only = places_only
     saved_field = fact_summary_field
     saved_limit = fact_step_limit
     fact_step_limit = if field != 0: 128 else: FACT_STEPS
@@ -564,6 +568,7 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     fact_summary_shape_mask = saved_shape_mask
     fact_summary_assumed = saved_assumed
     fact_summary_used = saved_used
+    fact_summary_places_only = saved_places
     fact_summary_field = saved_field
     fact_step_limit = saved_limit
     # A constructor's tighter budget must not poison an ordinary summary
