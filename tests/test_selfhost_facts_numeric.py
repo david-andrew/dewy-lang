@@ -13,6 +13,8 @@ CASES = [
     'exact_int/constant_width_reject_divide',
     'notraps17_word/small_destination',
     'object/static_reads',
+    'exact_int/wide_unsigned_divisor',
+    'exact_int/wide_unsigned_divisor_zero',
 ]
 
 

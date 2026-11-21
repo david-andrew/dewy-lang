@@ -1,0 +1,15 @@
+# An exact uint64 sum or product past 2^64-1 never wraps to zero: with a
+# positive operand it is a nonzero divisor, printed or returned as `int`.
+a=(x:uint64 m:uint64<(>? 0)>):>void => printl(7 % (x + m))
+c=(x:uint64 m:uint64<(>? 0)>):>int => 7 // (x + m)
+d=(y:uint64<(>? 0)> z:uint64<(>? 0)>):>int => 9 % (y * z)
+e=(x:uint64):>int => 100 // (x + 1)
+main=()=>{
+    a(18446744073709551615 1)
+    a(3 1)
+    printl(c(1 2))
+    printl(c(18446744073709551615 18446744073709551615))
+    printl(d(2 3))
+    printl(e(18446744073709551615))
+    printl(e(3))
+}

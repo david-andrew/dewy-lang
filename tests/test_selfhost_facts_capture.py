@@ -82,7 +82,8 @@ def test_facts_capture_state_twins(compiler, tmp_path, release):
 def test_facts_capture_program_twins(compiler, tmp_path, monkeypatch):
     patterns = ('facts/*.dewy', 'block_scope/*.dewy', 'loan/*.dewy',
                 'broadcast_facts/*.dewy', 'refine_proven_rows/*.dewy',
-                'uint64_ceiling/*.dewy', 'optional/*.dewy', 'match/*.dewy')
+                'uint64_ceiling/*.dewy', 'optional/*.dewy', 'match/*.dewy',
+                'exact_int/wide_unsigned_divisor*.dewy')
     cases = sorted({str(p.relative_to(ROOT / 'tests/cases'))[:-5]
                     for pattern in patterns for p in (ROOT / 'tests/cases').glob(pattern)})
     assert compare_facts(compiler, tmp_path, monkeypatch, cases, leaves=LEAVES) > 30

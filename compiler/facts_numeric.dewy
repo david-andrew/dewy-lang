@@ -233,6 +233,10 @@ fact_divisor=(@s:FactState n:NumericWord a:NumericWord b:NumericWord modulo:bool
         if truth not=? 1 {wit_divisor(n s numerator nothing operand truth =? 0)}
         return truth =? 1
     }
+    # (a wide value marked nonzero is nonzero in either encoding: a uint64
+    # zero is biased, so the comparison's wide test cannot see it)
+    let bound=fact_bound(s b)
+    if bound.wide and bound.nz {return true}
     let zero=fact_constant(@s ref_encoded(0 ntype(operand)))
     let truth=fact_compare(s 'ne' b zero)
     if truth not=? 1 {wit_divisor(n s b zero operand truth =? 0)}

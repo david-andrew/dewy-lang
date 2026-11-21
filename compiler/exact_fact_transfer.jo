@@ -178,6 +178,16 @@ exact_value_fact = (n: int, value: int, s: FactState):
     if magnitude != 0: width += 1
     exact_ranges[n] = max(exact_ranges[n], width)
 
+# An exact unsigned sum or product beyond a word never wraps to zero: a
+# positive addend, or two positive factors, keep it nonzero.
+exact_unsigned_wide = (s: mut FactState, n: int, positive: bool) -> int:
+    v = fact_unmodeled(s, n, .unsupported)
+    b = fact_bound(s, v)
+    if positive and b.wide:
+        b.nz = true
+        fact_set_bound(s, v, b)
+    v
+
 exact_unsigned_fact = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     x = fact_bound(s, a); y = fact_bound(s, b)
     if x.wide or y.wide: return fact_unmodeled(s, n, .unsupported)
@@ -190,8 +200,7 @@ exact_unsigned_fact = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int
             xh = u64(fact_relational(s, a, true) xor FACT_MIN)
         if xh > m - yh:
             yh = u64(fact_relational(s, b, true) xor FACT_MIN)
-        if xh > m - yh:
-            return fact_unmodeled(s, n, .unsupported)
+        if xh > m - yh: return exact_unsigned_wide(s, n, xl != 0 or yl != 0)
         lo = xl + yl; hi = xh + yh
     else if op == .minus:
         if not (xl >= yh or fact_compare(s, .ge, a, b) == 1):
@@ -199,8 +208,7 @@ exact_unsigned_fact = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int
         lo = if xl >= yh: xl - yh else: u64(0)
         hi = if xh >= yl: xh - yl else: u64(0)
     else if op == .star:
-        if xh != 0 and yh > m / xh:
-            return fact_unmodeled(s, n, .unsupported)
+        if xh != 0 and yh > m / xh: return exact_unsigned_wide(s, n, xl != 0 and yl != 0)
         lo = xl * yl; hi = xh * yh
     else:
         return fact_unmodeled(s, n, .unsupported)

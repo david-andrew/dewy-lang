@@ -785,6 +785,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if from == to and nodes[n].aux == i32(int(CV.int_)): return a
         # (uint64 values, `uint64<overflow='wrap'>` too, hold encoded intervals: fact_type)
         if from != to and (to == T_U64 or from == T_U64):
+            # (an exact uint64 value past a word, known nonzero, stays nonzero as
+            # an `int`; no origin, since it can pass 2^64-1: fact_u64_valued)
+            if to == T_MATH_INT and b.wide and b.nz: return fact_new(s, FactBound(reason = .unsupported, witness = n, wide = true, nz = true), FactTerm(type = to))
             # (a value both types hold converts exactly: decode or encode its interval)
             if fact_scalar(ntype(n)) and fact_scalar(ntype(int(nodes[n].a))) and nodes[n].aux == i32(int(CV.int_)):
                 if to == T_U64 and b.lo >= 0: return fact_new(s, FactBound(b.lo xor FACT_MIN, b.hi xor FACT_MIN), FactTerm(type = T_U64))
