@@ -142,19 +142,51 @@ member_match_body = (m: mut MemberMatch) -> bool:
     true
 
 
-member_lower_table = (parts: MemberLowered[]) -> int:
+# Keep the same rodata and frame layout as the old IR merge. On native x64
+# a slot advances the end by align_up(end + size, alignment). After the
+# largest alignment in a row, the ending residue repeats on every row.
+member_lower_layout = (first: MemberLowered, count: int):
+    offset = 0
+    stride = 0
+    loop pass_no in [0..2):
+        before = offset
+        loop j in [first.slots..first.slot_end):
+            a = int(ir.slot_align[j])
+            offset = (offset + int(ir.slot_size[j]) + a - 1) & (0 - a)
+        stride = offset - before
+    padding = stride * (count - 1)
+    # Slot sizes are signed 32-bit. Every stride and chunk is 8-byte aligned.
+    loop padding > 0:
+        chunk = min(padding, 2147483640)
+        new_slot(chunk, 8)
+        padding -= chunk
+
+member_lower_table = (parts: MemberLowered[], index: int, count: int) -> int:
+    columns: int[][]
+    if index >= 0:
+        t = member_templates[index]
+        has_text = false
+        loop literal in parts[0].literals:
+            columns.push(t.values[t.columns[literal.pos]])
+            if literal.kind == 1: has_text = true
+        if has_text:
+            loop text in t.texts: str_data(text)
+        member_lower_layout(parts[0], count)
     loop rodata.len() % 8 != 0: rodata.push(0)
     base = rodata.len()
     ro_starts.push(base)
     width = parts[0].literals.len()
     # Relative offsets refer only within this block, including fused workers.
-    text_at = width * parts.len() * 8
+    text_at = width * count * 8
     strings: str[]
-    loop part in parts:
-        loop literal in part.literals:
-            if literal.kind == 0: push_i64(rodata, literal.value)
+    loop row in [0..count):
+        literals = if index >= 0: parts[0].literals else: parts[row].literals
+        loop j in [0..width):
+            literal = literals[j]
+            value = if index >= 0: columns[j][row] else: literal.value
+            if literal.kind == 0: push_i64(rodata, value)
             else:
-                text = name_of(literal.value)
+                text = name_of(value)
                 push_i64(rodata, text_at)
                 strings.push(text)
                 text_at += (24 + len(text) + 1 + 7) / 8 * 8
@@ -169,15 +201,16 @@ member_lower_table = (parts: MemberLowered[]) -> int:
     base
 
 
-member_lower_emit = (parts: MemberLowered[]):
+member_lower_emit = (parts: MemberLowered[], index: int = -1):
+    count = if index >= 0: member_templates[index].texts.len() else: parts.len()
     first = parts[0]
     body = ir.code[first.start..first.end)
     ir.code.truncate(first.start)
     lower_zeros.truncate(first.zero_end)
-    table = e_daddr(member_lower_table(parts))
+    table = e_daddr(member_lower_table(parts, index, count))
     row = vreg(VI)
     e_mov(row, table)
-    limit = e_addi(table, parts.len() * first.literals.len() * 8)
+    limit = e_addi(table, count * first.literals.len() * 8)
     e_loop()
     values: {int: int} = {}
     loop i in [0..first.literals.len()):
@@ -211,8 +244,10 @@ member_lower_block = (b: int) -> bool:
     if index < 0 or not member_templates[index].okay or nkids(b) != member_templates[index].texts.len(): return false
     # A checking-only mode is also a byte-identity oracle for fallback lowering.
     if (env("DEWY_MEMBERS") ?? "") == "checked": return false
-    loop scope in kids(b):
-        if (member_scopes.get(scope) ?? -1) != index or not member_scope_locals.has(scope): return false
+    compact = member_templates[index].compact and member_templates[index].block == b
+    if not compact:
+        loop scope in kids(b):
+            if (member_scopes.get(scope) ?? -1) != index or not member_scope_locals.has(scope): return false
     parts: MemberLowered[]
     loop i in [0..nkids(b)):
         scope = kid(b, i)
@@ -221,7 +256,7 @@ member_lower_block = (b: int) -> bool:
         member_lower_literals = []
         cur_block = b
         cur_block_i = i
-        gen_stmt(scope)
+        gen_stmt(if compact: member_templates[index].body else: scope)
         member_lower_active = -1
         part.end = ir.code.len()
         part.reg_end = ir.vtypes.len()
@@ -229,7 +264,12 @@ member_lower_block = (b: int) -> bool:
         part.zero_end = lower_zeros.len()
         part.literals = member_lower_literals
         parts.push(part)
+        if compact: break
     first = parts[0]
+    if compact:
+        if member_trace: eprint("member lowering {pos_str(nodes[b].pos)}: true, {nkids(b)} members, one parameterized body")
+        member_lower_emit(parts, index)
+        return true
     okay = first.literals.len() > 0
     m = MemberMatch(first = first, regs = fill(-1, ir.vtypes.len()), reverse = fill(-1, ir.vtypes.len()), slots = fill(-1, ir.slot_size.len()), slot_reverse = fill(-1, ir.slot_size.len()), literal = fill(-1, ir.vtypes.len()), next_literal = fill(-1, ir.vtypes.len()))
     loop i in [1..parts.len()):

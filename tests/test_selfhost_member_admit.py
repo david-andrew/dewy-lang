@@ -50,6 +50,8 @@ fact_divisors: {int: int} = {}
 fact_requests: FactRequest[]
 refine_requests: FactRequest[]
 str_sets: str[][] = [[], ["a", "b"], ["a", "b", "c"], ["c", "x"], ["x", "y"]]
+sibling_block = 0
+sibling_index = 0
 sibling_known: {int: int} = {}
 sibling_flow: {int: int} = {}
 wi_fact_calls: {int: int} = {}

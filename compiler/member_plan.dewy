@@ -1,0 +1,272 @@
+$runtime_checks
+
+from p"arena.jo" import (arena_fns)
+from p"ast.jo" import (NF_CHECKED NF_INBOUNDS NF_UNSCOPED has_flag kid kids mk nkids nodes set_list)
+from p"check.jo" import (FK_NORMAL fns lib_dir locals new_local target_arm64 target_macos target_wasm target_windows watch_build)
+from p"checked_eval.dewy" import (cx_token)
+from p"checks_builders.dewy" import (bc_block bc_int)
+from p"directive_code.dewy" import (dir_code_inst dir_code_mask)
+from p"directive_queries.dewy" import (dir_policy)
+from p"directives.jo" import (DIR_STATIC dir_code_any dir_copies_any dir_deadlocks_any dir_floats_any dir_proven dir_rows_any)
+from p"effects.jo" import (effect_policy effects_active loan_owners)
+from p"exact.jo" import (exact_owners)
+from p"expr.jo" import (IN mk_ident_local ntype)
+from p"facts.jo" import (fact_comparison fact_member_admitted fact_member_failed fact_member_owner fact_member_shared fact_plan_forget fact_policy fact_validated)
+from p"facts_members.dewy" import (fact_member_same)
+from p"isolation.jo" import (isolation_node_limit isolation_replayed)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"lower.jo" import (opt_release)
+from p"main.jo" import (debug_vars host_ir repl_image)
+from p"member_admit.dewy" import (member_copy member_replay_scope)
+from p"member_replay.jo" import (MemberTemplate member_compact_enabled member_compact_owners member_scopes member_templates member_words)
+from p"node_store.dewy" import (Node)
+from p"ownership.jo" import (ownership_decls)
+from p"partition.jo" import (partition_active)
+from p"proofs.jo" import (proof_active result_active)
+from p"refine_metadata.dewy" import (str_set_of)
+from p"type_ops.dewy" import (mk_array)
+from p"types.jo" import (T_INT T_STR has_var prune telem tkind)
+from p"util.jo" import (files intern name_of pos_file)
+
+# Checking and lowering visit O(B) body nodes. Filling the substitution columns
+# takes O(M*C) for M members and C literal sites. Only a member-specific
+# consumer materializes M checked bodies.
+PlanWord:type=int64<overflow='wrap'>
+
+# Checker replay has already proved the overloads and conversions for the domain.
+# Record a column only for a use that lowering handles as an ordinary value.
+member_column_sites=(n:PlanWord @t:MemberTemplate allowed:bool word:bool @sites:array<int64> @seen:dict<int64 bool>):>bool=>$unsafe {
+    if n =? 0 {return true}
+    let nd=nodes.ptr[n]
+    let k=nd.kind
+    if (k =? 'str_lit' or k =? 'dotname') and t.positions.has(nd.pos) {
+        if not allowed or k =? 'dotname' and not word or k =? 'str_lit' and nd.aux not=? 0 or nd.nlist not=? 0 {return false}
+        let set=if k =? 'dotname' {str_set_of(ntype(n))} else {0}
+        if (t.columns.get(nd.pos) ?? set) not=? set {return false}
+        t.columns[nd.pos]=set
+        sites.push(n)
+        return true
+    }
+    if k =? 'ident' {return nd.aux =? 1 and not has_var(prune(PlanWord(locals.ptr[PlanWord(nd.sym)].type)))}
+    if k =? 'str_lit' {return nd.aux =? 0 and nd.nlist =? 0}
+    if k =? 'int_lit' or k =? 'bool_lit' {return true}
+    # Keep the walk linear even for a shared subtree.
+    if seen.has(n) {return false}
+    seen[n]=true
+    let args=false
+    let words=false
+    if k =? 'call' {
+        if nd.aux not=? 0 {return false}
+        let d=PlanWord(fns.ptr[PlanWord(nd.sym)].decl)
+        if files.ptr[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/core/map.jo" {return false}
+        let nm=name_of(PlanWord(nodes.ptr[d].name))
+        if nm not=? "[]=" and nm not=? "contains" and nm not=? "__map_entry_present" and nm not=? "__map_entry" {return false}
+        args=nm =? "[]="
+        words=args
+    }
+    else if k =? 'intrinsic' {
+        let id=nd.aux as IN
+        if id not=? IN.runtime_assert and id not=? IN.len and id not=? IN.push and id not=? IN.to_bytes {return false}
+        args=id =? IN.push or id =? IN.to_bytes
+    }
+    else if k =? 'array' {
+        if nd.b not=? 0 or tkind(ntype(n)) not=? 'array' or telem(ntype(n)) not=? T_STR {return false}
+        args=true
+    }
+    else if k =? 'binary' {
+        if nd.aux not=? 0 or not fact_comparison(cx_token(PlanWord(nd.op))) {return false}
+    }
+    else if k not=? 'block' and k not=? 'exprstmt' and k not=? 'vardecl' and k not=? 'and_' and k not=? 'or_' and k not=? 'not_' and k not=? 'if_' and k not=? 'index' and k not=? 'field' {return false}
+    let mask=isolation_children(k)
+    if mask & 1 not=? 0 and not member_column_sites(PlanWord(nd.a) @t false false @sites @seen) {return false}
+    if mask & 2 not=? 0 and not member_column_sites(PlanWord(nd.b) @t false false @sites @seen) {return false}
+    if mask & 4 not=? 0 and not member_column_sites(PlanWord(nd.c) @t false false @sites @seen) {return false}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {
+            let value_arg=args and (k =? 'array' or k =? 'intrinsic' and nd.aux =? int32(int64(IN.to_bytes)) or i >? 0)
+            if not member_column_sites(kid(n i) @t value_arg (words and i =? 2) @sites @seen) {return false}
+        }
+    }
+    true
+}
+
+member_unconditional_literal=(t:MemberTemplate):>bool=>$unsafe {
+    # At least one top-level value reaches lowering irrespective of branches.
+    loop stmt in kids(t.body) {
+        let value=if nodes.ptr[stmt].kind =? 'vardecl' {PlanWord(nodes.ptr[stmt].b)} else if nodes.ptr[stmt].kind =? 'exprstmt' {PlanWord(nodes.ptr[stmt].a)} else {0}
+        if value =? 0 or nodes.ptr[value].kind not=? 'intrinsic' and nodes.ptr[value].kind not=? 'call' {continue}
+        loop arg in kids(value) {
+            if (nodes.ptr[arg].kind =? 'str_lit' or nodes.ptr[arg].kind =? 'dotname') and t.columns.has(nodes.ptr[arg].pos) {return true}
+        }
+    }
+    false
+}
+
+member_columns=(@t:MemberTemplate):>void=>{
+    # The checked view and lowering share each ordered substitution column.
+    loop [pos set] in t.columns {
+        if t.values.has(set) {continue}
+        let vals:array<int64>=[]
+        loop text in t.texts {vals.push(if set =? 0 {intern(text)} else {member_words[set][text]})}
+        t.values[set]=vals
+    }
+}
+
+# Other checked-tree consumers see an executable range over the immutable
+# columns. Each destination string set indexes its own ordering of the words.
+member_checked_view=(@t:MemberTemplate sites:array<int64> at:PlanWord):>PlanWord=>$unsafe {
+    let idx=new_local(0 T_INT at)
+    let range=mk('range' at)
+    let lo=bc_int(0 at)
+    let hi=bc_int(t.texts.length at)
+    nodes.ptr[lo].type=int32(T_INT)
+    nodes.ptr[hi].type=int32(T_INT)
+    nodes.ptr[range].a=int32(lo)
+    nodes.ptr[range].b=int32(hi)
+    let nm=dict<int64 int64>()
+    let lm=dict<int64 int64>()
+    let body=member_copy(t.body t t.texts[0] lm @nm)
+    loop [original copy] in nm {
+        let k=nodes.ptr[original].kind
+        if k =? 'index' or k =? 'intrinsic' {
+            t.view_proofs.push(original)
+            t.view_proofs.push(copy)
+        }
+    }
+    let arrays=dict<int64 int64>()
+    loop site in sites {
+        let dst=nm[site]
+        let ty=ntype(site)
+        let arr=arrays.get(ty) ?? 0
+        if arr =? 0 {
+            let values:array<int64>=[]
+            let set=t.columns[nodes.ptr[site].pos]
+            loop i in [0..t.texts.length) {
+                let v=nodes.length
+                nodes.push(nodes.ptr[site])
+                if set =? 0 {nodes.ptr[v].sval=int32(t.values[set][i])}
+                else {
+                    nodes.ptr[v].aux=int32(t.values[set][i])
+                    nodes.ptr[v].name=int32(intern(t.texts[i]))
+                }
+                values.push(v)
+            }
+            arr=mk('array' at)
+            nodes.ptr[arr].type=int32(mk_array(ty))
+            set_list(arr values)
+            arrays[ty]=arr
+        }
+        let pos=nodes.ptr[site].pos
+        let counter=mk_ident_local(idx pos)
+        nodes.ptr[dst]=Node(kind='index' pos=pos type=int32(ty) a=int32(arr) b=int32(counter) flags=int32(NF_INBOUNDS | NF_CHECKED))
+    }
+    let loop_node=mk('for_' at)
+    nodes.ptr[loop_node].a=int32(range)
+    nodes.ptr[loop_node].b=int32(body)
+    nodes.ptr[loop_node].sym=int32(idx)
+    bc_block([loop_node] at)
+}
+
+member_plan_scope=(scope:PlanWord):>void=>$unsafe {
+    let index=member_scopes.get(scope) ?? -1
+    if index <? 0 or member_templates.ptr[index].scopes.length <? 2 or member_templates.ptr[index].scopes[0] not=? scope {return}
+    let t=member_templates.ptr[index]
+    if not t.okay or nodes.ptr[t.body].kind not=? 'block' {return}
+    # Every iteration must close its own locals and cleanup scope.
+    if nodes.ptr[t.body].aux =? 5 or has_flag(t.body NF_UNSCOPED) {return}
+    if not member_compact_enabled or target_windows or target_macos or target_wasm or target_arm64 or debug_vars or watch_build or repl_image or opt_release or host_ir {return}
+    if fact_policy not=? 'RequireStatic' or dir_policy(nodes.ptr[scope].pos) not=? DIR_STATIC {return}
+    if t.requests.length >? 0 or t.refinements.length >? 0 or member_observed(t.owner) {return}
+    let owner=fns.ptr[t.owner]
+    if owner.kind not=? FK_NORMAL or owner.params.length not=? 0 or owner.targs.length not=? 0 or owner.has_env or owner.decl =? 0 {return}
+    if t.block =? 0 or kid(t.block 0) not=? scope {return}
+    let seen=dict<int64 bool>()
+    let sites:array<int64>=[]
+    if not member_column_sites(t.body @t false false @sites @seen) or sites.length =? 0 or t.columns.length not=? t.positions.length {return}
+    if not member_unconditional_literal(t) {return}
+    member_columns(@t)
+    let at=nodes.ptr[scope].pos
+    t.view=member_checked_view(@t sites at)
+    nodes.ptr[scope]=nodes.ptr[t.view]
+    t.compact=true
+    t.empty=bc_block([] at)
+    member_templates.ptr[index]=t
+    let ids:array<int64>=member_compact_owners.get(t.owner) ?? []
+    ids.push(index)
+    member_compact_owners[t.owner]=ids
+}
+
+# Materialize before any consumer that needs member-specific facts, including
+# speculation, summaries and the retry after a failed universal proof.
+member_expand_owner=(f:PlanWord):>void=>$unsafe {
+    if not member_compact_owners.has(f) {return}
+    loop index in member_compact_owners[f] {
+        let t=member_templates.ptr[index]
+        if not t.compact {continue}
+        member_templates.ptr[index].compact=false
+        nodes.ptr[t.scopes[0]]=nodes.ptr[t.body]
+        loop i in [1..t.scopes.length) {
+            let scope=t.scopes[i]
+            let copies=dict<int64 int64>()
+            let body=member_replay_scope(index scope t.texts[i] @copies)
+            if t.body <? isolation_node_limit and body >=? isolation_node_limit {
+                loop j in [0..nkids(body)) {isolation_replayed[kid(body j)]=kid(t.body j)}
+            }
+            if t.shared_proofs {
+                loop [original copy] in copies {
+                    let proven=dir_proven.get(original)
+                    if proven not=? none {dir_proven[copy]=proven}
+                    if fact_validated.has(original) {fact_validated[copy]=true}
+                }
+            }
+            nodes.ptr[scope]=nodes.ptr[body]
+        }
+    }
+    if fact_member_shared and f =? fact_member_owner {fact_member_failed=true}
+    member_compact_owners.remove(f);
+    fact_plan_forget(f);
+}
+
+# A reused fact slice can bypass discovery of the member blocks. Its transfer
+# cannot stand for every iteration unless this trial admitted each live plan.
+member_fact_ready=(f:PlanWord):>bool=>{
+    if not member_compact_owners.has(f) {return true}
+    loop index in member_compact_owners[f] {
+        if not fact_member_admitted.has(member_templates[index].block) {return false}
+    }
+    true
+}
+
+member_fact_view=(f:PlanWord enter:bool success:bool=false):>void=>$unsafe {
+    if not member_compact_owners.has(f) {return}
+    if enter {
+        loop index in member_compact_owners[f] {
+            let t=member_templates.ptr[index]
+            let pairs:array<int64>=[]
+            if not fact_member_same(t.body t.body index @pairs) {
+                member_expand_owner(f)
+                return
+            }
+        }
+    }
+    loop index in member_compact_owners[f] {
+        let t=member_templates.ptr[index]
+        nodes.ptr[t.scopes[0]]=nodes.ptr[if enter {t.body} else {t.view}]
+        if success and fact_member_admitted.has(t.block) {member_templates.ptr[index].shared_proofs=true}
+    }
+}
+
+# Whole-program policies can be discovered after the owner was checked.
+member_observed=(f:PlanWord):>bool=>$unsafe {
+    if dir_copies_any or dir_rows_any or dir_floats_any or dir_deadlocks_any {return true}
+    if dir_code_any and (dir_code_inst(f) not=? 0 or dir_code_mask(pos_file(nodes.ptr[PlanWord(fns.ptr[f].body)].pos)) not=? 0) {return true}
+    if proof_active or result_active or effects_active or effect_policy.prohibitions not=? 0 {return true}
+    ownership_decls.length not=? 0 or partition_active or arena_fns.length not=? 0 or loan_owners.length not=? 0 or exact_owners.has(f)
+}
+
+member_settle=():>void=>{
+    if member_compact_owners.length =? 0 {return}
+    loop f in member_compact_owners.keys() {
+        if member_observed(f) {member_expand_owner(f)}
+    }
+}

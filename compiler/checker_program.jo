@@ -1,5 +1,6 @@
 use 'exact_preparation.dewy'
 use 'directives.jo'
+use 'member_plan.dewy'
 use 'directive_code.dewy'
 use 'data_access.dewy'
 use 'checker_hooks.dewy'
@@ -305,6 +306,7 @@ check_program = (main_path: str):
         k = run_pending_functions(k)
         if runtime_ffi_demand(): k = run_pending_functions(k)
         if open_globals.len() > 0: settle_open_globals()
+    member_settle()
     ut_run()
     if late_module_imports:
         order = init_module_order(mainm)

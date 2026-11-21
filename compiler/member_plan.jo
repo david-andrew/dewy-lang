@@ -1,0 +1,232 @@
+# Checking and lowering visit O(B) body nodes. Filling the substitution columns
+# takes O(M*C) for M members and C literal sites. Only a member-specific
+# consumer materializes M checked bodies.
+use 'member_replay.jo'
+use 'checker_state.dewy'
+use 'node_store.dewy'
+use 'member_admit.dewy'
+use 'ast.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'checker_tokens.dewy'
+use 'checks_builders.dewy'
+use 'isolation_ops.dewy'
+use 'refine_metadata.dewy'
+use 'facts.jo'
+use 'proofs.jo'
+use 'ownership.jo'
+use 'directives.jo'
+use 'effects.jo'
+use 'exact.jo'
+use 'main.jo'
+use 'lower.jo'
+use 'util.jo'
+use 'directive_queries.dewy'
+use 'directive_code.dewy'
+use 'facts_members.dewy'
+use 'refinement_types.dewy'
+use 'partition.jo'
+use 'arena.jo'
+use 'isolation.jo'
+
+member_column_sites = (n: int, t: mut MemberTemplate, allowed: bool, word: bool, sites: mut int[], seen: mut {int: bool}) -> bool:
+    if n == 0: return true
+    nd = nodes[n]
+    k = nd.kind
+    if (k == .str_lit or k == .dotname) and t.positions.has(nd.pos):
+        if not allowed or k == .dotname and not word or k == .str_lit and nd.aux != 0 or nd.nlist != 0: return false
+        set = if k == .dotname: str_set_of(ntype(n)) else: 0
+        if (t.columns.get(nd.pos) ?? set) != set: return false
+        t.columns[nd.pos] = set
+        sites.push(n)
+        return true
+    if k == .ident:
+        return nd.aux == i32(int(SK.local)) and not has_var(prune(int(locals[int(nd.sym)].type)))
+    if k == .str_lit: return nd.aux == 0 and nd.nlist == 0
+    if k == .int_lit or k == .bool_lit: return true
+    # Replay has already checked the graph. Keep this proof linear for shared nodes.
+    if seen.has(n): return false
+    seen[n] = true
+    args = false
+    words = false
+    if k == .call:
+        if nd.aux != 0: return false
+        d = int(fns[int(nd.sym)].decl)
+        if files[pos_file(nodes[d].pos)].path != lib_dir + "/core/map.jo": return false
+        nm = name_of(int(nodes[d].name))
+        if nm != "[]=" and nm != "contains" and nm != "__map_entry_present" and nm != "__map_entry": return false
+        args = nm == "[]="
+        words = args
+    else if k == .intrinsic:
+        id = nd.aux as IN
+        if id != .runtime_assert and id != .len and id != .push and id != .to_bytes: return false
+        args = id == .push or id == .to_bytes
+    else if k == .array:
+        if nd.b != 0 or tkind(ntype(n)) != .array or telem(ntype(n)) != T_STR: return false
+        args = true
+    else if k == .binary:
+        if nd.aux != 0 or not fact_comparison(nd.op as Tok): return false
+    else if k != .block and k != .exprstmt and k != .vardecl and k != .and_ and k != .or_ and k != .not_ and k != .if_ and k != .index and k != .field: return false
+    mask = isolation_children(k)
+    if mask & 1 != 0 and not member_column_sites(int(nd.a), t, false, false, sites, seen): return false
+    if mask & 2 != 0 and not member_column_sites(int(nd.b), t, false, false, sites, seen): return false
+    if mask & 4 != 0 and not member_column_sites(int(nd.c), t, false, false, sites, seen): return false
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)):
+            value_arg = args and (k == .array or k == .intrinsic and nd.aux == i32(int(IN.to_bytes)) or i > 0)
+            if not member_column_sites(kid(n, i), t, value_arg, words and i == 2, sites, seen): return false
+    true
+
+member_unconditional_literal = (t: MemberTemplate) -> bool:
+    # At least one top-level value reaches lowering irrespective of branches.
+    loop stmt in kids(t.body):
+        value = if nodes[stmt].kind == .vardecl: int(nodes[stmt].b) else if nodes[stmt].kind == .exprstmt: int(nodes[stmt].a) else: 0
+        if value == 0 or nodes[value].kind != .intrinsic and nodes[value].kind != .call: continue
+        loop arg in kids(value):
+            if (nodes[arg].kind == .str_lit or nodes[arg].kind == .dotname) and t.columns.has(nodes[arg].pos): return true
+    false
+
+member_columns = (t: mut MemberTemplate):
+    # Column values are recorded in source order once and used both by the
+    # checked view and by lowering. String-set variants use their set ordinal.
+    loop pos, set in t.columns:
+        if t.values.has(set): continue
+        vals: int[]
+        loop text in t.texts: vals.push(if set == 0: intern(text) else: member_words[set][text])
+        t.values[set] = vals
+
+# The ordinary checked tree remains executable for clients of the AST. The
+# range counter indexes immutable literal columns; checked per-member types
+# survive even when two destinations order their words differently.
+member_checked_view = (t: mut MemberTemplate, sites: int[], at: int) -> int:
+    idx = new_local(0, T_INT, at)
+    range = mk(.range, at)
+    lo = bc_int(0, at)
+    hi = bc_int(t.texts.len(), at)
+    nodes[lo].type = i32(T_INT); nodes[hi].type = i32(T_INT)
+    nodes[range].a = i32(lo); nodes[range].b = i32(hi)
+    nm: {int: int} = {}
+    lm: {int: int} = {}
+    body = member_copy(t.body, t, t.texts[0], lm, nm)
+    loop original, copy in nm:
+        k = nodes[original].kind
+        if k == .index or k == .intrinsic:
+            t.view_proofs.push(original)
+            t.view_proofs.push(copy)
+    arrays: {int: int} = {}
+    loop site in sites:
+        dst = nm[site]
+        ty = ntype(site)
+        arr = arrays.get(ty) ?? 0
+        if arr == 0:
+            values: int[]
+            set = t.columns[nodes[site].pos]
+            loop i in [0..t.texts.len()):
+                v = nodes.len()
+                nodes.push(nodes[site])
+                if set == 0: nodes[v].sval = i32(t.values[set][i])
+                else:
+                    nodes[v].aux = i32(t.values[set][i])
+                    nodes[v].name = i32(intern(t.texts[i]))
+                values.push(v)
+            arr = mk(.array, at)
+            nodes[arr].type = i32(mk_array(ty))
+            set_list(arr, values)
+            arrays[ty] = arr
+        pos = nodes[site].pos
+        counter = mk_ident_local(idx, pos)
+        nodes[dst] = Node(kind = .index, pos = pos, type = i32(ty), a = i32(arr), b = i32(counter), flags = i32(NF_INBOUNDS | NF_CHECKED))
+    loop_node = mk(.for_, at)
+    nodes[loop_node].a = i32(range)
+    nodes[loop_node].b = i32(body)
+    nodes[loop_node].sym = i32(idx)
+    bc_block([loop_node], at)
+
+member_plan_scope = (scope: int):
+    index = member_scopes.get(scope) ?? -1
+    if index < 0 or member_templates[index].scopes.len() < 2 or member_templates[index].scopes[0] != scope: return
+    t = member_templates[index]
+    if not t.okay or nodes[t.body].kind != .block: return
+    # Every iteration must close its own locals and cleanup scope.
+    if nodes[t.body].aux == 5 or has_flag(t.body, NF_UNSCOPED): return
+    if not member_compact_enabled or target_windows or target_macos or target_wasm or target_arm64 or debug_vars or watch_build or repl_image or opt_release or host_ir: return
+    if fact_policy != .RequireStatic or dir_policy(nodes[scope].pos) != DIR_STATIC: return
+    if t.requests.len() > 0 or t.refinements.len() > 0 or member_observed(t.owner): return
+    owner = fns[t.owner]
+    if owner.kind != FK_NORMAL or owner.params.len() != 0 or owner.targs.len() != 0 or owner.has_env or owner.decl == 0: return
+    if t.block == 0 or kid(t.block, 0) != scope: return
+    seen: {int: bool} = {}
+    sites: int[]
+    if not member_column_sites(t.body, t, false, false, sites, seen) or sites.len() == 0 or t.columns.len() != t.positions.len(): return
+    if not member_unconditional_literal(t): return
+    member_columns(t)
+    at = nodes[scope].pos
+    t.view = member_checked_view(t, sites, at)
+    nodes[scope] = nodes[t.view]
+    t.compact = true
+    t.empty = bc_block([], at)
+    member_templates[index] = t
+    ids = member_compact_owners.get(t.owner) ?? []
+    ids.push(index)
+    member_compact_owners[t.owner] = ids
+
+# Materialize before any consumer that needs member-specific facts. This
+# includes speculative probes, summaries, and a failed universal proof.
+member_expand_owner = (f: int):
+    if not member_compact_owners.has(f): return
+    loop index in member_compact_owners[f]:
+        t = member_templates[index]
+        if not t.compact: continue
+        member_templates[index].compact = false
+        nodes[t.scopes[0]] = nodes[t.body]
+        loop i in [1..t.scopes.len()):
+            scope = t.scopes[i]
+            copies: {int: int} = {}
+            body = member_replay_scope(index, scope, t.texts[i], copies)
+            if t.body < isolation_node_limit and body >= isolation_node_limit:
+                loop j in [0..nkids(body)): isolation_replayed[kid(body, j)] = kid(t.body, j)
+            if t.shared_proofs:
+                loop original, copy in copies:
+                    if let proven = dir_proven.get(original): dir_proven[copy] = proven
+                    if fact_validated.has(original): fact_validated[copy] = true
+            nodes[scope] = nodes[body]
+    if fact_member_shared and f == fact_member_owner: fact_member_failed = true
+    member_compact_owners.remove(f)
+    fact_plan_forget(f)
+
+# A reused fact slice can bypass discovery of the member blocks. Its transfer
+# cannot stand for every iteration unless this trial admitted each live plan.
+member_fact_ready = (f: int) -> bool:
+    if not member_compact_owners.has(f): return true
+    loop index in member_compact_owners[f]:
+        if not fact_member_admitted.has(member_templates[index].block): return false
+    true
+
+member_fact_view = (f: int, enter: bool, success: bool = false):
+    if not member_compact_owners.has(f): return
+    if enter:
+        loop index in member_compact_owners[f]:
+            t = member_templates[index]
+            pairs: int[]
+            if not fact_member_same(t.body, t.body, index, pairs):
+                member_expand_owner(f)
+                return
+    loop index in member_compact_owners[f]:
+        t = member_templates[index]
+        nodes[t.scopes[0]] = nodes[if enter: t.body else: t.view]
+        if success and fact_member_admitted.has(t.block): member_templates[index].shared_proofs = true
+
+
+# Whole-program policies can be discovered after the owner was checked.
+member_observed = (f: int) -> bool:
+    if dir_copies_any or dir_rows_any or dir_floats_any or dir_deadlocks_any: return true
+    if dir_code_any and (dir_code_inst(f) != 0 or dir_code_mask(pos_file(nodes[int(fns[f].body)].pos)) != 0): return true
+    if proof_active or result_active or effects_active or effect_policy.prohibitions != 0: return true
+    ownership_decls.len() != 0 or partition_active or arena_fns.len() != 0 or loan_owners.len() != 0 or exact_owners.has(f)
+
+member_settle = ():
+    if member_compact_owners.len() == 0: return
+    loop f in member_compact_owners.keys():
+        if member_observed(f): member_expand_owner(f)

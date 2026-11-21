@@ -1,0 +1,9 @@
+build_table=()=>{
+    let entries:dict<string uint8>=[]
+    loop word in members('alpha'|'b'|'gamma') {
+        let raw=bytes(word)
+        entries[word]=raw[1]
+    }
+    return entries
+}
+printl(build_table())

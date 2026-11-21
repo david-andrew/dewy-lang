@@ -1,4 +1,5 @@
 use 'facts.jo'
+use 'member_plan.dewy'
 use 'facts_capture.dewy'
 use 'source_queries.dewy'
 use 'facts_forks.dewy'
@@ -106,6 +107,9 @@ fact_member_admit = (b: int) -> bool:
     if member_templates[index].requests.len() != 0 or member_templates[index].refinements.len() != 0: return false
     template = kid(b, 0)
     pairs: int[]
+    if member_templates[index].compact and member_templates[index].block == b:
+        fact_member_admitted[b] = member_templates[index].view_proofs
+        return true
     loop i in [0..nkids(b)):
         scope = kid(b, i)
         if (member_scopes.get(scope) ?? -1) != index or not member_scope_locals.has(scope): return false
@@ -133,6 +137,7 @@ fact_member_decide = (f: int) -> bool:
     proven = dir_proven
     validated = fact_validated
     notes = err_notes
+    member_fact_view(f, true)
     fact_member_shared = true
     fact_member_owner = f
     fact_member_failed = false
@@ -143,7 +148,8 @@ fact_member_decide = (f: int) -> bool:
     if refine_active or refine_requests.len() > 0: refine_fact_entry(f, state)
     if fact_fork_entries.len() > 0 or fact_parallel_bounds.len() > 0: fact_fork_seed(f, state)
     fact_slice_prepare(f)
-    fact_capture(int(fns[f].body), state)
+    if member_fact_ready(f): fact_capture(int(fns[f].body), state)
+    else: fact_member_failed = true
     failed = fact_member_failed or wit_tentative_failed
     if member_trace and fact_member_admitted.len() != 0:
         verdict = "shared"
@@ -153,6 +159,7 @@ fact_member_decide = (f: int) -> bool:
     wit_tentative_failed = false
     fact_member_shared = false
     fact_member_owner = 0
+    member_fact_view(f, false, not failed)
     fact_member_admitted = {}
     if not failed: return true
     dir_proven = proven

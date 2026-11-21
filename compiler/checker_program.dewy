@@ -38,6 +38,7 @@ from p"ide.jo" import (ide_doc ide_force ide_on)
 from p"ide_ops.dewy" import (ide_find_file)
 from p"cycle_ops.dewy" import (init_module_order merge_cycle_inits)
 from p"string_domain_ops.dewy" import (int_domains_finish string_domains_finish string_domains_materialize)
+from p"member_plan.dewy" import (member_settle)
 from p"member_admit.dewy" import (member_reset)
 from p"ownership_hooks.dewy" import (ownership_finalize ownership_reset)
 from p"module_paths.dewy" import (path_norm)
@@ -310,6 +311,7 @@ check_program=(main_path:string):>void=>$unsafe {
         if runtime_ffi_demand() {k=run_pending_functions(k)}
         if open_globals.length >? 0 {settle_open_globals()}
     }
+    member_settle()
     ut_run()
     if late_module_imports {
         order=init_module_order(mainm)

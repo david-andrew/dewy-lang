@@ -33,6 +33,9 @@ struct IsolationRow:
 isolation_rows: IsolationRow[]
 isolation_stack: int[]
 isolation_seen: int[]
+# Entry statements of member copies materialized after the checked generation
+# closed. Their original checked statements have the same isolation edges.
+isolation_replayed: {int: int}
 isolation_serial = 0
 isolation_limit = 0
 isolation_node_limit = 0

@@ -1,4 +1,5 @@
 use 'check.jo'
+use 'member_plan.dewy'
 use 'check_cold_queries.dewy'
 use 'checks_place_updates.dewy'
 use 'checks_thin.dewy'
@@ -376,6 +377,7 @@ stmt_special = (s: int, code: int):
         reflect_active = active
         scope_reset(mark)
         nodes[s] = nodes[body]
+        member_plan_scope(s)
     else if code == 5:
         if expectation_ifs.has(s): expectation_refuted(s)
     else:

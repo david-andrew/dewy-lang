@@ -1,5 +1,7 @@
 $runtime_checks
 
+from p"member_plan.dewy" import (member_fact_ready member_fact_view)
+
 from p"@lib/core/os.jo" import (eprint)
 from p"ast.jo" import (kid nkids nodes)
 from p"check.jo" import (fns locals)
@@ -81,6 +83,10 @@ fact_member_admit=(b:MemberWord):>bool=>{
     if member_templates[index].requests.length not=? 0 or member_templates[index].refinements.length not=? 0 {return false}
     let template=kid(b 0)
     let pairs:array<int64>=[]
+    if member_templates[index].compact and member_templates[index].block =? b {
+        fact_member_admitted[b]=member_templates[index].view_proofs
+        return true
+    }
     loop i in [0..nkids(b)) {
         let scope=kid(b i)
         if (member_scopes.get(scope) ?? -1) not=? index or not member_scope_locals.has(scope) {return false}
@@ -114,6 +120,7 @@ fact_member_decide=(f:MemberWord):>bool=>$unsafe {
     let proven=dir_proven
     let validated=fact_validated
     let notes=err_notes
+    member_fact_view(f true)
     fact_member_shared=true
     fact_member_owner=f
     fact_member_failed=false
@@ -124,7 +131,8 @@ fact_member_decide=(f:MemberWord):>bool=>$unsafe {
     if refine_active or refine_requests.length >? 0 {refine_fact_entry(f @state)}
     if fact_fork_entries.length >? 0 or fact_parallel_bounds.length >? 0 {fact_fork_seed(f @state)}
     fact_slice_prepare(f)
-    fact_capture(MemberWord(fns.ptr[f].body) @state);
+    if member_fact_ready(f) {fact_capture(MemberWord(fns.ptr[f].body) @state);}
+    else {fact_member_failed=true}
     let failed=fact_member_failed or wit_tentative_failed
     if member_trace and fact_member_admitted.length not=? 0 {
         let verdict="shared"
@@ -135,6 +143,7 @@ fact_member_decide=(f:MemberWord):>bool=>$unsafe {
     wit_tentative_failed=false
     fact_member_shared=false
     fact_member_owner=0
+    member_fact_view(f false not failed)
     fact_member_admitted=dict<int64 array<int64>>()
     if not failed {return true}
     dir_proven=proven

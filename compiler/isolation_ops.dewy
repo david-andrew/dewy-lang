@@ -2,7 +2,7 @@ $runtime_checks
 
 from p"check.jo" import (FK_INIT LF_ADDR LF_CAPTURE fns locals)
 from p"expr.jo" import (IN ntype)
-from p"isolation.jo" import (IsolationReason IsolationRow isolation_limit isolation_node_limit isolation_rows isolation_seen isolation_serial isolation_stack)
+from p"isolation.jo" import (IsolationReason IsolationRow isolation_limit isolation_node_limit isolation_replayed isolation_rows isolation_seen isolation_serial isolation_stack)
 from p"ast.jo" import (NF_EXTERN NF_GLOBAL has_flag kid kid2 nkids nkids2 nodes)
 from p"node_store.dewy" import (NK)
 from p"effect_classifiers.dewy" import (effect_library_class)
@@ -21,6 +21,7 @@ IsolationWord:type=int64<overflow='wrap'>
 # or any instances discovered after this boundary. No incremental invalidation.
 isolation_reset=():>void=>$unsafe {
     isolation_rows=fill(IsolationRow[] fns.length)
+    isolation_replayed=dict<int64 int64>()
     isolation_seen=fill(0 nodes.length)
     isolation_stack=[]
     isolation_serial=0
@@ -146,6 +147,7 @@ isolation_scan=(f:IsolationWord):>array<int64>=>$unsafe {
     loop todo.length >? 0 {
         let n=todo.pop()
         if n =? 0 {continue}
+        if n >=? isolation_node_limit {n=isolation_replayed.get(n) ?? n}
         if n <? 0 or n >=? isolation_node_limit {
             isolation_block(f IsolationReason.node n);
             break

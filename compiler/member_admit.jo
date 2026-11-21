@@ -26,6 +26,7 @@ use 'isolation.jo'
 use 'isolation_ops.dewy'
 
 member_reset = ():
+    member_compact_owners = {}
     member_templates = []
     member_scopes = {}
     member_scope_locals = {}
@@ -36,6 +37,7 @@ member_reset = ():
     # Debug variables include generated names derived from node IDs. Keep
     # their allocation order as well as their values byte-identical under -g.
     member_enabled = mode != "reference" and not debug_vars
+    member_compact_enabled = member_enabled and mode != "checked" and mode != "expanded"
     member_trace = mode == "trace"
 member_dependencies = (n: int, name: int, memo: mut {int: bool}) -> bool:
     if n == 0: return false
@@ -122,6 +124,11 @@ member_prepare = (scopes: int[], body: int):
     member_dependencies(body, int(nodes[scopes[0]].name), t.dependent)
     if not member_syntax(body, int(nodes[scopes[0]].name), t): return
     if t.positions.len() == 0: return
+    # The statement cursor identifies a direct child of the function body in O(1).
+    if sibling_block > 0 and sibling_block == int(fns[t.owner].body):
+        stmt = kid(sibling_block, sibling_index)
+        if nodes[stmt].kind == .for_ and int(nodes[stmt].b) == body: t.block = stmt
+    t.scopes = scopes
     index = member_templates.len()
     member_templates.push(t)
     loop scope in scopes: member_scopes[scope] = index
@@ -249,6 +256,16 @@ member_scope = (scope: int) -> bool:
         member_record = previous
         if member_trace: eprint("member template {pos_str(nodes[scope].pos)}: {t.okay}, {t.locals.len()} locals, {t.requests.len()} obligations, {t.refinements.len()} refinements")
         return true
+    if member_templates[index].compact:
+        nodes[scope].b = i32(member_templates[index].empty)
+        return true
+    text = name_of(int(nodes[int(nodes[scope].a)].sval))
+    copies: {int: int} = {}
+    body = member_replay_scope(index, scope, text, copies)
+    nodes[scope].b = i32(body)
+    true
+
+member_replay_scope = (index: int, scope: int, text: str, nm: mut {int: int}) -> int:
     t = member_templates[index]
     lm: {int: int} = {}
     copied_locals: int[]
@@ -259,16 +276,13 @@ member_scope = (scope: int) -> bool:
         lm[old] = l
         copied_locals.push(l)
         if let write = copy_writes.get(old): copy_writes[l] = write
-    nm: {int: int} = {}
-    text = name_of(int(nodes[int(nodes[scope].a)].sval))
     body = member_copy(t.body, t, text, lm, nm)
     loop request in t.requests:
         if let copy = nm.get(request): fact_requests.push(FactRequest(copy, t.owner))
     loop request in t.refinements:
         if let copy = nm.get(request): refine_requests.push(FactRequest(copy, t.owner))
-    nodes[scope].b = i32(body)
     member_scope_locals[scope] = copied_locals
-    true
+    body
 # A destination domain intersects the source in this many members; compute it
 # once per body/destination. A partial intersection makes a literal overload's
 # score differ between members, so the whole loop uses ordinary checking.

@@ -5,13 +5,11 @@ use 'refinement_types.dewy'
 # The first copy is checked normally. Restricted syntax excludes escapes, new type
 # inference, compile-time member evaluation and narrowing. Unknown decisions fall
 # back before the second copy; the first copy is already the ordinary result.
-# Literal destinations and overload membership scores cover every member. Replayed
-# copies get their own locals, literal values, and deferred proof requests. Facts
-# and lowering see exactly those per-member copies, never a union-typed substitute.
-# O(B + D + T + M*B + sum(S)) time and storage: B body nodes, D source
-# domain, T reachable types, M copies, S destination domains. All relocation and domain
-# membership is indexed. No work for non-reflective loops; reference mode is the
-# differential oracle (DEWY_MEMBERS=reference, trace prints admission decisions).
+# Partial destinations and overload scores fall back. The bounded native path
+# keeps ordered literal columns and one checked body. Consumers that need
+# individual decisions can materialize the original checked bodies on demand.
+# DEWY_MEMBERS=reference disables all replay, checked tests only checker replay,
+# expanded retains IR matching, and trace reports the selected path.
 use 'reflection.jo'
 use 'main.jo'
 use 'ast.jo'
@@ -42,15 +40,27 @@ struct MemberTemplate:
     locals: int[]
     requests: int[]
     refinements: int[]
+    # Ordered scope identities and literal destinations for a parameterized body.
+    scopes: int[]
+    values: {int: int[]}
+    columns: {int: int}       # source position -> string set, or 0 for text
+    view_proofs: int[]        # (checked site, site in the executable view) pairs
+    view: int = 0
+    empty: int = 0
+    block: int = 0
+    compact: bool = false
+    shared_proofs: bool = false
     okay: bool = true
 
 member_templates: MemberTemplate[]
 member_scopes: {int: int}
 member_scope_locals: {int: int[]}
+member_compact_owners: {int: int[]}
 member_words: {int: {str: int}}
 member_plain_types: {int: bool}
 member_record = -1
 member_enabled = false
+member_compact_enabled = false
 member_trace = false
 
 # (Dewy's unions have no numbers; a trace reports the kind by its ordinal)

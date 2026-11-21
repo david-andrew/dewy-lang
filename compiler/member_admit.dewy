@@ -11,11 +11,11 @@ from p"facts.jo" import (fact_divisors fact_requests)
 from p"ide.jo" import (ide_on)
 from p"isolation_ops.dewy" import (isolation_children)
 from p"main.jo" import (debug_vars)
-from p"member_replay.jo" import (MemberTemplate member_enabled member_kind_ordinal member_plain_types member_record member_scope_locals member_scopes member_templates member_trace member_words)
+from p"member_replay.jo" import (MemberTemplate member_compact_enabled member_compact_owners member_enabled member_kind_ordinal member_plain_types member_record member_scope_locals member_scopes member_templates member_trace member_words)
 from p"refine.jo" import (ref_narrowing refine_requests str_sets)
 from p"refine_metadata.dewy" import (str_set_of)
 from p"refinement_types.dewy" import (FactRequest)
-from p"sibling_types.jo" import (sibling_flow sibling_known)
+from p"sibling_types.jo" import (sibling_block sibling_index sibling_flow sibling_known)
 from p"types.jo" import (T_MATH_INT T_STR has_var prune struct_targ structs telem types)
 from p"util.jo" import (intern name_of shown_warnings)
 from p"source_queries.dewy" import (pos_str)
@@ -23,6 +23,7 @@ from p"warn_if.jo" import (wi_fact_calls)
 
 MemberWord:type=int64<overflow='wrap'>
 member_reset=():>void=>{
+    member_compact_owners=dict<int64 array<int64>>()
     member_templates=[]
     member_scopes=dict<int64 int64>()
     member_scope_locals=dict<int64 array<int64>>()
@@ -33,6 +34,7 @@ member_reset=():>void=>{
     # Debug variables include generated names derived from node IDs. Keep
     # their allocation order as well as their values byte-identical under -g.
     member_enabled=mode not=? "reference" and not debug_vars
+    member_compact_enabled=member_enabled and mode not=? "checked" and mode not=? "expanded"
     member_trace=mode =? "trace"
 }
 member_dependencies=(n:MemberWord name:MemberWord @memo:dict<int64 bool>):>bool=>$unsafe {
@@ -145,6 +147,12 @@ member_prepare=(scopes:array<int64> body:MemberWord):>void=>$unsafe {
     member_dependencies(body MemberWord(nodes.ptr[scopes[0]].name) @t.dependent);
     if not member_syntax(body MemberWord(nodes.ptr[scopes[0]].name) @t) {return}
     if t.positions.length =? 0 {return}
+    # The statement cursor identifies a direct child of the function body in O(1).
+    if sibling_block >? 0 and sibling_block =? MemberWord(fns.ptr[t.owner].body) {
+        let stmt=kid(sibling_block sibling_index)
+        if nodes.ptr[stmt].kind =? 'for_' and MemberWord(nodes.ptr[stmt].b) =? body {t.block=stmt}
+    }
+    t.scopes=scopes
     let index=member_templates.length
     member_templates.push(t)
     loop scope in scopes {member_scopes[scope]=index}
@@ -302,6 +310,17 @@ member_scope=(scope:MemberWord):>bool=>$unsafe {
         if member_trace {eprint("member template {pos_str(nodes.ptr[scope].pos)}: {t.okay}, {t.locals.length} locals, {t.requests.length} obligations, {t.refinements.length} refinements")}
         return true
     }
+    if member_templates[index].compact {
+        nodes.ptr[scope].b=int32(member_templates[index].empty)
+        return true
+    }
+    let text=name_of(MemberWord(nodes.ptr[MemberWord(nodes.ptr[scope].a)].sval))
+    let copies=dict<int64 int64>()
+    let body=member_replay_scope(index scope text @copies)
+    nodes.ptr[scope].b=int32(body)
+    true
+}
+member_replay_scope=(index:MemberWord scope:MemberWord text:string @nm:dict<int64 int64>):>MemberWord=>$unsafe {
     let t=member_templates[index]
     let lm=dict<int64 int64>()
     let copied_locals:array<int64>=[]
@@ -314,8 +333,6 @@ member_scope=(scope:MemberWord):>bool=>$unsafe {
         let write=copy_writes.get(old)
         if write not=? none {copy_writes[l]=write}
     }
-    let nm=dict<int64 int64>()
-    let text=name_of(MemberWord(nodes.ptr[MemberWord(nodes.ptr[scope].a)].sval))
     let body=member_copy(t.body t text lm @nm)
     loop request in t.requests {
         let copy=nm.get(request)
@@ -325,9 +342,8 @@ member_scope=(scope:MemberWord):>bool=>$unsafe {
         let copy=nm.get(request)
         if copy not=? none {refine_requests.push(FactRequest(copy t.owner))}
     }
-    nodes.ptr[scope].b=int32(body)
     member_scope_locals[scope]=copied_locals
-    true
+    body
 }
 # A destination domain intersects the source in this many members; compute it
 # once per body/destination. A partial intersection makes a literal overload's

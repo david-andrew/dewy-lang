@@ -19,6 +19,7 @@ use 'lower_helpers.dewy'
 # or any instances discovered after this boundary. No incremental invalidation.
 isolation_reset = ():
     isolation_rows = fill(IsolationRow(), fns.len())
+    isolation_replayed = {}
     isolation_seen = fill(0, nodes.len())
     isolation_stack = []
     isolation_serial = 0
@@ -137,6 +138,7 @@ isolation_scan = (f: int) -> int[]:
     loop todo.len() > 0:
         n = todo.pop()
         if n == 0: continue
+        if n >= isolation_node_limit: n = isolation_replayed.get(n) ?? n
         if n < 0 or n >= isolation_node_limit:
             isolation_block(f, .node, n)
             break

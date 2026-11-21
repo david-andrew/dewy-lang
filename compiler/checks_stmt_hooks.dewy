@@ -1,5 +1,7 @@
 $runtime_checks
 
+from p"member_plan.dewy" import (member_plan_scope)
+
 from p"facts_ranges.dewy" import (fact_open_range)
 from p"error_ops.dewy" import (infer_note_return)
 from p"error_ops.dewy" import (infer_finish)
@@ -434,6 +436,7 @@ stmt_special=(s:int64 code:int64):>void=>$unsafe {
         reflect_active=active
         scope_reset(mark)
         nodes.ptr[s]=nodes.ptr[body]
+        member_plan_scope(s)
     }
     else if code =? 5 {
         if expectation_ifs.has(s) {expectation_refuted(s)}

@@ -292,6 +292,9 @@ def test_checker_program_early_exit(compiler, tmp_path, case, status, message):
 JO['checker_hooks.dewy'] = 'from p"check.jo" import check_pending_functions\nrun_pending_functions=(start:int64):>int64=>check_pending_functions(start)\n'
 JO['checker_hooks.jo'] = "use 'check.jo'\nrun_pending_functions = (start: int) -> int: check_pending_functions(start)\n"
 
+JO['member_plan.dewy'] = 'member_settle=():>void=>{}\n'
+JO['member_plan.jo'] = 'member_settle = (): return\n'
+
 # Parameter data diagnostics run for normal and errors-only checking alike.
 JO['data_access.dewy'] = 'data_access_reset=():>void=>{}\ndata_access_finalize=():>void=>{}\n'
 JO['data_access.jo'] = 'data_access_reset = (): return\ndata_access_finalize = (): return\n'

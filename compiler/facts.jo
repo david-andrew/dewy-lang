@@ -1,3 +1,5 @@
+use 'member_plan.dewy'
+use 'member_replay.jo'
 use 'facts_capture.dewy'
 use 'facts_index_proofs.dewy'
 use 'facts_values.dewy'
@@ -894,6 +896,8 @@ fact_mark_begin = ():
     fact_mark_touched = []
 
 fact_slice_prepare = (f: int, summary: bool = false):
+    if member_compact_owners.len() != 0 and (not fact_member_shared or summary or fact_probe_on or fact_query or f != fact_member_owner):
+        member_expand_owner(f)
     key = (f << 4) | int(summary) | (int(fact_probe_on) << 1) | (int(fact_policy == .RequireStatic) << 2) | (int(result_active or proof_active) << 3)
     # A mode retains its original plan through effect settlement, as before.
     # Dependencies gate sharing with a mode that has not prepared its plan yet;

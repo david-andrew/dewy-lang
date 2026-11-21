@@ -1,0 +1,11 @@
+build_tables=()=>{
+    let first:dict<string 'a'|'é'|'💧'>=[]
+    let second:dict<string '0'|'a'|'z'|'é'|'💧'>=[]
+    loop word in members('💧'|'é'|'a') {
+        first[word]=word
+        second[word]=word
+    }
+    printl(first)
+    return second
+}
+printl(build_tables())
