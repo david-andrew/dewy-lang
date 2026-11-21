@@ -1,0 +1,137 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_CHECKED NF_LANG_BODY NF_LOOPCOUNT NF_MUT add_flag has_flag mk nodes)
+from p"ast_rest.dewy" import (lambda_captures)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_MUTPARAM LF_OWNERBORROW LF_SHARED LF_VALUECAP LF_CAPTURED LF_CONST LF_DECL LF_PARTBORROW ctxs cx dewy_at fns locals loop_serials narrow_store_register narrowed_var new_local)
+from p"checker_state.dewy" import (Capture Local)
+from p"checks_thin.dewy" import (jd)
+from p"checks_loop_copies.dewy" import (loop_copy_write)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (mk_ident_local)
+from p"narrowing_checks.dewy" import (opt_rest_rebase)
+from p"ownership.jo" import (ownership_decls)
+from p"ownership_types.dewy" import (ownership_fact_type)
+from p"partition.jo" import (partition_active)
+from p"string_domain_ops.dewy" import (int_domain_capture string_domain_capture)
+from p"types.jo" import (T_MATH_INT T_STR tkind)
+from p"util.jo" import (files name_of pos_file)
+
+CaptureWord:type=int64<overflow='wrap'>
+# Explicit $capture parameters share only names marked with @. Unlisted Dewy
+# captures own values; implementation-language closures keep lexical sharing.
+value_capture=(inst:CaptureWord name:CaptureWord):>bool=>{
+    let d=CaptureWord(fns[inst].decl)
+    if d =? 0 or not files[pos_file(nodes[d].pos)].is_dewy {return false}
+    loop cap in lambda_captures(d) {
+        if nodes[cap].name =? int32<overflow='wrap'>(name) {return not has_flag(cap NF_MUT)}
+    }
+    true
+}
+
+# `$capture @x` of what an enclosing task or `parallel` body holds as its own copy of an
+# outer x: the writes would reach only that copy.
+task_copy_shared=(r:CaptureWord pos:CaptureWord):>void=>{
+    let fl=CaptureWord(locals[r].flags)
+    if fl & LF_CAPTURE =? 0 or fl & LF_VALUECAP =? 0 {return}
+    let owner=CaptureWord(fns[CaptureWord(locals[r].owner)].decl)
+    if owner =? 0 or nodes[owner].kind not=? 'lambda' or nodes[owner].aux2 not=? 17 and not has_flag(owner NF_LANG_BODY) {return}
+    let nm=name_of(CaptureWord(locals[r].name))
+    fatal(pos "`$capture @{nm}` would share the copy of '{nm}' that the enclosing task or `parallel` body holds, not the '{nm}' outside it, so its changes would be lost: send results back through a task's result, a channel or an atomic, or make the variable inside the body")
+}
+
+capture_in=(c:CaptureWord l:CaptureWord):>CaptureWord=>{
+    let inst=CaptureWord(ctxs[c].inst)
+    if CaptureWord(locals[l].owner) =? inst or ctxs[c].parent <? 0 {return l}
+    let outer=capture_in(CaptureWord(ctxs[c].parent) l)
+    loop cap in fns[inst].caps {
+        if int64(cap.outer) =? outer {return int64(cap.inner)}
+    }
+    let flags=LF_CAPTURE
+    if value_capture(inst CaptureWord(locals[l].name)) {
+        flags |= LF_VALUECAP | LF_DECL
+        flags |= CaptureWord(locals[outer].flags) & LF_CONST
+        locals[outer].flags=locals[outer].flags | int32<overflow='wrap'>(LF_CAPTURED)
+    } else if CaptureWord(locals[outer].flags) & (LF_MUTPARAM | LF_PARTBORROW) not=? 0 and tkind(CaptureWord(locals[outer].type)) =? 'array' {
+        flags |= LF_PARTBORROW
+        let active = @partition_active
+        active = true
+        locals[outer].flags |= int32<overflow='wrap'>(LF_CAPTURED)
+    } else if (ownership_decls.length not=? 0 and ownership_fact_type(CaptureWord(locals[outer].type))) or (CaptureWord(locals[outer].flags) & LF_MUTPARAM not=? 0 and starts_with(name_of(CaptureWord(locals[outer].name)) "$self")) {
+        # (a method's receiver captured by place, `$capture @count`: the closure
+        # cannot outlive the method, dewy_methods.jo)
+        flags |= LF_OWNERBORROW
+        locals[outer].flags |= int32<overflow='wrap'>(LF_ADDR | LF_CAPTURED)
+    } else {
+        let r=outer
+        loop CaptureWord(locals[r].flags) & LF_CAPTURE not=? 0 and CaptureWord(locals[r].flags) & LF_VALUECAP =? 0 {r=CaptureWord(locals[r].outer)}
+        let d=CaptureWord(fns[inst].decl)
+        if d not=? 0 and files[pos_file(nodes[d].pos)].is_dewy {
+            task_copy_shared(r nodes[d].pos)
+            check_shareable(r nodes[d].pos)
+            locals[r].flags=locals[r].flags | int32<overflow='wrap'>(LF_SHARED)
+        }
+        capture_root(r)
+    }
+    locals.push(Local(name=locals[l].name type=locals[l].type owner=int32<overflow='wrap'>(inst) flags=int32<overflow='wrap'>(flags) pos=locals[l].pos outer=int32<overflow='wrap'>(outer)))
+    let inner=CaptureWord(locals.length) - 1
+    if flags & LF_VALUECAP not=? 0 and locals[inner].type =? int32<overflow='wrap'>(T_STR) {string_domain_capture(inner outer)}
+    if flags & LF_VALUECAP not=? 0 and locals[inner].type =? int32<overflow='wrap'>(T_MATH_INT) {int_domain_capture(inner outer)}
+    fns[inst].caps.push(Capture(int32<overflow='wrap'>(outer) int32<overflow='wrap'>(inner)))
+    fns[inst].locals.push(inner)
+    inner
+}
+
+capture_local=(l:CaptureWord):>CaptureWord=>{
+    capture_in(cx l)
+}
+
+capture_root=(l:CaptureWord):>void=>{
+    let f=CaptureWord(locals[l].flags) | LF_CAPTURED
+    let w=CaptureWord(locals[l].wloop)
+    let d=CaptureWord(locals[l].dloops)
+    if not files[pos_file(locals[l].pos)].is_dewy and w not=? 0 and loop_serials.length >? d and loop_serials[d] =? w {f |= LF_SHARED}
+    locals[l].flags=int32<overflow='wrap'>(f)
+    if f & LF_SHARED not=? 0 {check_shareable(l locals[l].pos)}
+}
+
+check_shareable=(r:CaptureWord pos:CaptureWord):>void=>{
+    if CaptureWord(locals[r].flags) & LF_DECL not=? 0 {return}
+    # (`loop x in xs`: shared, x is the step's own variable)
+    if CaptureWord(locals[r].flags) & LF_BYREF not=? 0 and dewy_at(pos) {
+        loop_copy_write(r pos true false)
+        return
+    }
+    let nm=name_of(CaptureWord(locals[r].name))
+    # (loop mut g in gems: steps.then(0.1, (): g.scale = 0.0): the element, changed later)
+    if CaptureWord(locals[r].flags) & LF_ALIAS not=? 0 {fatal(pos "'{nm}' stands for an element only while the loop is there, and the function changing it runs later: change the element by its position, {jd(pos "`loop i in 0.. and {nm} in xs:` and then `(): xs[i]...`" "`loop i in 0.. and {nm} in xs \{ ... }` and then `() => xs[i]...`")} in the function")}
+    if files[pos_file(locals[r].pos)].is_dewy {
+        # (docs/LANGUAGE.md: a mutable parameter cannot escape through a shared capture)
+        if CaptureWord(locals[r].flags) & LF_MUTPARAM not=? 0 {fatal(pos "'{nm}' is an `@` parameter, its caller's place: a closure cannot share it (`$capture @{nm}`), since the closure could outlive the call; copy its value into a local first: `let v = {nm}`")}
+        fatal(pos "'{nm}' cannot be shared with a closure: only a `let` local or a by-value parameter can be (copy it first: `let v = {nm}`)")
+    }
+    fatal(pos "'{nm}' is captured by a closure and modified: only variables declared with `=` can be shared like that (copy it first: `let v = {nm}`)")
+}
+
+# a closure using a narrowed name of the function around it: it captures the variable itself
+# (so that it sees later changes, as with any captured variable) and narrows it again inside
+capture_narrowed=(l:CaptureWord pos:CaptureWord):>CaptureWord=>{
+    let u=narrowed_var(l)
+    let inner:CaptureWord=0
+    # (a name narrowed twice: its variable's narrowing first)
+    if narrowed_var(u) not=? 0 {inner=capture_narrowed(u pos)} else {inner=capture_local(u)}
+    let al=CaptureWord(locals[l].alias)
+    let e:CaptureWord=0
+    if nodes[al].kind =? 'if_' {e=opt_rest_rebase(al inner pos)} else {
+        e=mk(nodes[al].kind pos)
+        nodes[e].aux=nodes[al].aux
+        nodes[e].type=nodes[al].type
+        nodes[e].a=int32<overflow='wrap'>(mk_ident_local(inner pos))
+        add_flag(e NF_CHECKED)
+    }
+    let nl=new_local(0 CaptureWord(locals[l].type) pos)
+    locals[nl].name=locals[l].name
+    locals[nl].flags=int32<overflow='wrap'>(LF_ALIAS)
+    locals[nl].alias=int32<overflow='wrap'>(e)
+    narrow_store_register(nl)
+    nl
+}

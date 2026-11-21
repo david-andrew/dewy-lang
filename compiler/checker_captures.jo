@@ -1,0 +1,114 @@
+use 'ast.jo'
+use 'ast_rest.dewy'
+use 'check.jo'
+use 'checker_state.dewy'
+use 'checks_thin.dewy'
+use 'checks_loop_copies.dewy'
+use 'diagnostic_exit.dewy'
+use 'expr.jo'
+use 'narrowing_checks.dewy'
+use 'ownership.jo'
+use 'ownership_types.dewy'
+use 'partition.jo'
+use 'string_domain_ops.dewy'
+use 'types.jo'
+use 'util.jo'
+
+# Explicit $capture parameters share only names marked with @. Unlisted Dewy
+# captures own values; implementation-language closures keep lexical sharing.
+value_capture = (inst: int, name: int) -> bool:
+    d = int(fns[inst].decl)
+    if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy: return false
+    loop cap in lambda_captures(d):
+        if nodes[cap].name == i32(name): return not has_flag(cap, NF_MUT)
+    true
+# `$capture @x` of what an enclosing task or `parallel` body holds as its own copy of an
+# outer x: the writes would reach only that copy.
+task_copy_shared = (r: int, pos: int):
+    fl = int(locals[r].flags)
+    if fl & LF_CAPTURE == 0 or fl & LF_VALUECAP == 0: return
+    owner = int(fns[int(locals[r].owner)].decl)
+    if owner == 0 or nodes[owner].kind != .lambda or nodes[owner].aux2 != 17 and not has_flag(owner, NF_LANG_BODY): return
+    nm = name_of(int(locals[r].name))
+    fatal(pos, "`$capture @{nm}` would share the copy of '{nm}' that the enclosing task or `parallel` body holds, not the '{nm}' outside it, so its changes would be lost: send results back through a task's result, a channel or an atomic, or make the variable inside the body")
+capture_in = (c: int, l: int) -> int:
+    inst = int(ctxs[c].inst)
+    if int(locals[l].owner) == inst or ctxs[c].parent < 0: return l
+    outer = capture_in(int(ctxs[c].parent), l)
+    loop cap in fns[inst].caps:
+        if int(cap.outer) == outer: return int(cap.inner)
+    flags = LF_CAPTURE
+    if value_capture(inst, int(locals[l].name)):
+        flags |= LF_VALUECAP | LF_DECL
+        flags |= int(locals[outer].flags) & LF_CONST
+        locals[outer].flags = locals[outer].flags | i32(LF_CAPTURED)
+    else if int(locals[outer].flags) & (LF_MUTPARAM | LF_PARTBORROW) != 0 and tkind(int(locals[outer].type)) == .array:
+        flags |= LF_PARTBORROW
+        partition_active = true
+        locals[outer].flags |= i32(LF_CAPTURED)
+    else if (ownership_decls.len() != 0 and ownership_fact_type(int(locals[outer].type))) or (int(locals[outer].flags) & LF_MUTPARAM != 0 and starts_with(name_of(int(locals[outer].name)), "$self")):
+        # (a method's receiver captured by place, `$capture @count`: the closure
+        # cannot outlive the method, dewy_methods.jo)
+        flags |= LF_OWNERBORROW
+        locals[outer].flags |= i32(LF_ADDR | LF_CAPTURED)
+    else:
+        r = outer
+        loop int(locals[r].flags) & LF_CAPTURE != 0 and int(locals[r].flags) & LF_VALUECAP == 0: r = int(locals[r].outer)
+        d = int(fns[inst].decl)
+        if d != 0 and files[pos_file(nodes[d].pos)].is_dewy:
+            task_copy_shared(r, nodes[d].pos)
+            check_shareable(r, nodes[d].pos)
+            locals[r].flags = locals[r].flags | i32(LF_SHARED)
+        capture_root(r)
+    locals.push(Local(name = locals[l].name, type = locals[l].type, owner = i32(inst), flags = i32(flags), pos = locals[l].pos, outer = i32(outer)))
+    inner = locals.len() - 1
+    if flags & LF_VALUECAP != 0 and locals[inner].type == i32(T_STR): string_domain_capture(inner, outer)
+    if flags & LF_VALUECAP != 0 and locals[inner].type == i32(T_MATH_INT): int_domain_capture(inner, outer)
+    fns[inst].caps.push(Capture(i32(outer), i32(inner)))
+    fns[inst].locals.push(inner)
+    inner
+capture_local = (l: int) -> int: capture_in(cx, l)
+capture_root = (l: int):
+    f = int(locals[l].flags) | LF_CAPTURED
+    w = int(locals[l].wloop)
+    d = int(locals[l].dloops)
+    if not files[pos_file(locals[l].pos)].is_dewy and w != 0 and loop_serials.len() > d and loop_serials[d] == w: f |= LF_SHARED
+    locals[l].flags = i32(f)
+    if f & LF_SHARED != 0: check_shareable(l, locals[l].pos)
+check_shareable = (r: int, pos: int):
+    if int(locals[r].flags) & LF_DECL != 0: return
+    # (`loop x in xs`: shared, x is the step's own variable)
+    if int(locals[r].flags) & LF_BYREF != 0 and dewy_at(pos):
+        loop_copy_write(r, pos, true, false)
+        return
+    nm = name_of(int(locals[r].name))
+    # (loop mut g in gems: steps.then(0.1, (): g.scale = 0.0): the element, changed later)
+    if int(locals[r].flags) & LF_ALIAS != 0: fatal(pos, "'{nm}' stands for an element only while the loop is there, and the function changing it runs later: change the element by its position, {jd(pos, "`loop i in 0.. and {nm} in xs:` and then `(): xs[i]...`", "`loop i in 0.. and {nm} in xs \{ ... }` and then `() => xs[i]...`")} in the function")
+    if files[pos_file(locals[r].pos)].is_dewy:
+        # (docs/LANGUAGE.md: a mutable parameter cannot escape through a shared capture)
+        if int(locals[r].flags) & LF_MUTPARAM != 0: fatal(pos, "'{nm}' is an `@` parameter, its caller's place: a closure cannot share it (`$capture @{nm}`), since the closure could outlive the call; copy its value into a local first: `let v = {nm}`")
+        fatal(pos, "'{nm}' cannot be shared with a closure: only a `let` local or a by-value parameter can be (copy it first: `let v = {nm}`)")
+    fatal(pos, "'{nm}' is captured by a closure and modified: only variables declared with `=` can be shared like that (copy it first: `let v = {nm}`)")
+# a closure using a narrowed name of the function around it: it captures the variable itself
+# (so that it sees later changes, as with any captured variable) and narrows it again inside
+capture_narrowed = (l: int, pos: int) -> int:
+    u = narrowed_var(l)
+    inner = 0
+    # (a name narrowed twice: its variable's narrowing first)
+    if narrowed_var(u) != 0: inner = capture_narrowed(u, pos)
+    else: inner = capture_local(u)
+    al = int(locals[l].alias)
+    e = 0
+    if nodes[al].kind == .if_: e = opt_rest_rebase(al, inner, pos)
+    else:
+        e = mk(nodes[al].kind, pos)
+        nodes[e].aux = nodes[al].aux
+        nodes[e].type = nodes[al].type
+        nodes[e].a = i32(mk_ident_local(inner, pos))
+        add_flag(e, NF_CHECKED)
+    nl = new_local(0, int(locals[l].type), pos)
+    locals[nl].name = locals[l].name
+    locals[nl].flags = i32(LF_ALIAS)
+    locals[nl].alias = i32(e)
+    narrow_store_register(nl)
+    nl
