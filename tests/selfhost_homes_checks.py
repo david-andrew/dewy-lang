@@ -90,6 +90,8 @@ def _doubled(text, names):
 
 
 def checker_homes(text, modules):
+    if 'fixed_index.jo' in modules and 'fixed_index.dewy' not in modules:
+        text = text.replace('fixed_index.dewy', 'fixed_index.jo')
     if 'main.jo' not in modules:
         for stem, home in CHECKS_HOMES.items():
             text = text.replace(stem + '.dewy', home).replace(stem + '.jo', home)

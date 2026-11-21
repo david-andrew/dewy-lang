@@ -1,5 +1,6 @@
 $runtime_checks
 
+from p"fixed_index.dewy" import (fi_begin fi_event fi_template fi_children fi_declaration fi_index fi_finish FI_OPEN FI_CLOSE FI_RANGE)
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import TypeInfo
 from p"checker_state.dewy" import (FnInst Local Global)
@@ -152,7 +153,7 @@ xz_summary=(root:XZWord):>void=>$unsafe {
 # Pre-order, as a recursive walk would go; a for or while loop's -n marks the end of
 # its children. Only a type with variables in it can change, and only those are zonked.
 # Reentrant through nothing: zonking only reads and makes types.
-xz_tree=(root:XZWord):>void=>$unsafe {
+xz_walk=<Proofs>(root:XZWord):>void=>$unsafe {
     if root =? 0 {return}
     if xz_stack.length <? 256 {xz_stack.resize(256)}
     let st=xz_stack.ptr
@@ -163,6 +164,7 @@ xz_tree=(root:XZWord):>void=>$unsafe {
     loop sp >? 0 {
         sp=sp - 1
         let n=XZWord(st[sp])
+        if Proofs =? 1 and n >=? FI_OPEN {fi_event(n); continue}
         if n <? 0 {
             if xz_collect[0] {xz_sites[0].push(int64(n))}
             continue
@@ -181,6 +183,20 @@ xz_tree=(root:XZWord):>void=>$unsafe {
         # for a body containing one instead of recording its children.
         if k =? 'fn_' {xz_collect[0]=false}
         if xz_collect[0] and (k =? 'vardecl' or k =? 'assign' or k =? 'for_' or k =? 'while_' or k =? 'lambda' or k =? 'return_' or k =? 'break_' or k =? 'continue_') {xz_sites[0].push(int64(n))}
+        if Proofs =? 1 {
+            if k =? 'fn_' {fi_template()}
+            if k =? 'index' {fi_index(n)}
+            if k =? 'vardecl' {fi_declaration(n)}
+            if k =? 'if_' or k =? 'and_' or k =? 'or_' or k =? 'block' {
+                let next=fi_children(n @xz_stack sp)
+                if next >=? 0 {
+                    sp=next
+                    st=xz_stack.ptr
+                    cap=xz_stack.length
+                    continue
+                }
+            }
+        }
         if k =? 'lambda' {continue}
         if k =? 'for_' or k =? 'while_' {
             if sp + 1 >? cap {
@@ -195,8 +211,9 @@ xz_tree=(root:XZWord):>void=>$unsafe {
         # c, b and a, as a recursive walk visits them.
         let n1=XZWord(node[0].nlist)
         let n2=XZWord(node[0].nlist2)
-        if sp + n1 + n2 + 4 >? cap {
-            cap=(sp + n1 + n2 + 4) * 2
+        let slots:XZWord=if Proofs =? 1 {7} else {4}
+        if sp + n1 + n2 + slots >? cap {
+            cap=(sp + n1 + n2 + slots) * 2
             xz_stack.resize(cap)
             st=xz_stack.ptr
         }
@@ -230,7 +247,13 @@ xz_tree=(root:XZWord):>void=>$unsafe {
                 sp=sp + 1
             }
         }
-        if node[0].b not=? 0 {
+        if Proofs =? 1 and k =? 'for_' and node[0].b not=? 0 {
+            st[sp]=FI_CLOSE
+            st[sp+1]=int64(node[0].b)
+            st[sp+2]=int64(FI_RANGE + n)
+            st[sp+3]=FI_OPEN
+            sp=sp+4
+        } else if node[0].b not=? 0 {
             st[sp]=int64(node[0].b)
             sp=sp + 1
         }
@@ -240,6 +263,7 @@ xz_tree=(root:XZWord):>void=>$unsafe {
         }
     }
 }
+xz_tree=(root:XZWord):>void=>{xz_walk<0>(root)}
 # Frozen FK_NORMAL ordinal 0 and LF_ASSIGNED 16.
 xz_finalize=(f:XZWord vars0:XZWord binds0:XZWord exposed0:XZWord da_mark:XZWord):>void=>$unsafe {
     let body=XZWord(xz_fns[0].ptr[f].body)
@@ -260,7 +284,11 @@ xz_finalize=(f:XZWord vars0:XZWord binds0:XZWord exposed0:XZWord da_mark:XZWord)
     # A normal body checked without making or binding a type variable, nor taking a
     # result still being worked out, has no type a zonk would change.
     let quiet=normal and not xz_collect[0] and xz_var_counter[0] =? vars0 and xz_type_binds[0] =? binds0 and xz_type_exposures[0] =? exposed0
-    if quiet {xz_summary(body)} else {xz_tree(body)}
+    if normal and fi_begin(f) {
+        fi_event(FI_OPEN)
+        xz_walk<1>(body)
+        fi_finish()
+    } else if quiet {xz_summary(body)} else {xz_tree(body)}
     xz_fns[0][f].write_sites=xz_sites[0]
     xz_fns[0][f].writes_ready=xz_collect[0]
     xz_sites[0]=saved_sites

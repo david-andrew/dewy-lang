@@ -1,0 +1,9 @@
+read=(xs:array<int64 length=4> i:int64 j:int64):>int64=>{
+    if i <? 0 or i >=? 4 return 0
+    if j >=? 0 {
+        let i=j
+        return xs[i]
+    }
+    return xs[i]
+}
+main=()=>printl(read([1 2 3 4] 1 4))

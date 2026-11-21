@@ -100,6 +100,7 @@ main = ():
     run(index(arr, item(T_INT)))
     run(index(arr, item(T_INT, .int_lit)))
     run(index(fixed, item(T_INT, .int_lit)))
+    run(index(fixed, item(T_INT)))
     run(index(arr, item(int(tb_mk_array(T_BOOL)))), arr)
     run(index(arr, item(int(tb_mk_array(T_INT)))))
     run(index(fixed, item(int(tb_mk_array(T_MATH_INT)))))
@@ -124,6 +125,7 @@ main = ():
 
 # The Jo services checker_indexes calls, routed to the driver.
 INDEX_JO = {
+    'fixed_index.jo': {'fi_request': 'fi_request = (n: int): events.push("fixed-index:{n}")'},
     'expr.jo': {
         'check_to': 'check_to = (n: int, target: int) -> int: xx_check_to_host(n, target)',
         'index_construct': 'index_construct = (n: int, bt: int, expected: int) -> int: xx_construct_host(n, bt, expected)',

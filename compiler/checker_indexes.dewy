@@ -1,5 +1,6 @@
 $runtime_checks
 
+from p"fixed_index.dewy" import fi_request
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
@@ -126,6 +127,7 @@ xx_index=(n:XXWord expected:XXWord bt:XXWord):>CheckerIndexResult=>$unsafe {
         let t=XXWord(xx_types[0].ptr[bt].elem)
         let ib=XXWord(xx_nodes[0].ptr[n].b)
         if bk =? 'fixed' and xx_nodes[0].ptr[ib].kind =? 'int_lit' and (xx_nodes[0].ptr[ib].ival <? 0 or xx_nodes[0].ptr[ib].ival >=? XXWord(xx_types[0].ptr[tu_prune(bt)].bits)) {index_error(ib 4 bt)}
+        if bk =? 'fixed' and xx_nodes[0].ptr[ib].kind not=? 'int_lit' {fi_request(n)}
         return [type=t bypass=false]
     }
     if bk =? 'str_' {

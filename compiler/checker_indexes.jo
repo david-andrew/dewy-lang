@@ -1,3 +1,4 @@
+use 'fixed_index.dewy'
 # Frozen index-expression checker extracted from expr.jo.
 use 'node_store.dewy'
 use 'checker_types.dewy'
@@ -106,6 +107,7 @@ xx_index = (n: int, expected: int, bt: int) -> CheckerIndexResult:
         t = int(xx_types[0][bt].elem)
         ib = int(xx_nodes[0][n].b)
         if bk == .fixed and xx_nodes[0][ib].kind == .int_lit and (xx_nodes[0][ib].ival < 0 or xx_nodes[0][ib].ival >= int(xx_types[0][int(tu_prune(bt))].bits)): index_error(ib, 4, bt)
+        if bk == .fixed and xx_nodes[0][ib].kind != .int_lit: fi_request(n)
         return CheckerIndexResult(t, false)
     if bk == .str_:
         check_to(b, xx_int_type[0])

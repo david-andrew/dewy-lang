@@ -98,6 +98,18 @@ main = ():
 
 # The Jo services checker_zonk calls, routed to the driver.
 ZONK_JO = {
+    'fixed_index.jo': {
+        'FI_OPEN': 'const FI_OPEN = 1 << 32',
+        'fi_begin': 'fi_begin = (f: int) -> bool: false',
+        'fi_event': 'fi_event = (n: int): pass',
+        'fi_index': 'fi_index = (n: int): pass',
+        'FI_CLOSE': 'const FI_CLOSE = 2 << 32',
+        'FI_RANGE': 'const FI_RANGE = 5 << 32',
+        'fi_declaration': 'fi_declaration = (n: int): pass',
+        'fi_children': 'fi_children = (n: int, stack: mut int[], sp: int) -> int: -1',
+        'fi_finish': 'fi_finish = (): pass',
+        'fi_template': 'fi_template = (): pass',
+    },
     'check.jo': {
         'zonk_prelude': 'zonk_prelude = (m: int) -> bool: xz_prelude_host(m)',
         'zonk_local_error': 'zonk_local_error = (l: int): xz_local_error_host(l)',

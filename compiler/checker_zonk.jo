@@ -1,3 +1,4 @@
+use 'fixed_index.dewy'
 # Frozen body finalization and zonking extracted from check.jo.
 use 'node_store.dewy'
 use 'checker_types.dewy'
@@ -110,7 +111,7 @@ xz_summary = (root: int):
         if xz_nodes[0][n].a != 0:
             xz_summary_stack[sp] = int(xz_nodes[0][n].a)
             sp = sp + 1
-xz_tree = (root: int):
+xz_walk = (root: int, proofs: bool):
     if root == 0: return
     if xz_stack.len() < 256: xz_stack.resize(256)
     xz_stack[0] = root
@@ -118,6 +119,9 @@ xz_tree = (root: int):
     loop sp > 0:
         sp = sp - 1
         n = xz_stack[sp]
+        if proofs and n >= FI_OPEN:
+            fi_event(n)
+            continue
         if n < 0:
             if xz_collect[0]: xz_sites[0].push(n)
             continue
@@ -128,6 +132,15 @@ xz_tree = (root: int):
         if k == .ident and xz_user_global(xz_nodes[0][n].aux, xz_nodes[0][n].sym): xz_user_globals[0] = xz_user_globals[0] + 1
         if k == .fn_: xz_collect[0] = false
         if xz_collect[0] and (k == .vardecl or k == .assign or k == .for_ or k == .while_ or k == .lambda or k == .return_ or k == .break_ or k == .continue_): xz_sites[0].push(n)
+        if proofs:
+            if k == .fn_: fi_template()
+            if k == .index: fi_index(n)
+            if k == .vardecl: fi_declaration(n)
+            if k == .if_ or k == .and_ or k == .or_ or k == .block:
+                next = fi_children(n, mut xz_stack, sp)
+                if next >= 0:
+                    sp = next
+                    continue
         if k == .lambda: continue
         if k == .for_ or k == .while_:
             if sp + 1 > xz_stack.len(): xz_stack.resize((sp + 1) * 2)
@@ -135,7 +148,7 @@ xz_tree = (root: int):
             sp = sp + 1
         n1 = int(xz_nodes[0][n].nlist)
         n2 = int(xz_nodes[0][n].nlist2)
-        if sp + n1 + n2 + 4 > xz_stack.len(): xz_stack.resize((sp + n1 + n2 + 4) * 2)
+        if sp + n1 + n2 + (if proofs: 7 else: 4) > xz_stack.len(): xz_stack.resize((sp + n1 + n2 + (if proofs: 7 else: 4)) * 2)
         l2 = int(xz_nodes[0][n].list2)
         i = n2 - 1
         loop i >= 0:
@@ -159,12 +172,19 @@ xz_tree = (root: int):
             if xz_nodes[0][n].c != 0:
                 xz_stack[sp] = int(xz_nodes[0][n].c)
                 sp = sp + 1
-        if xz_nodes[0][n].b != 0:
+        if proofs and k == .for_ and xz_nodes[0][n].b != 0:
+            xz_stack[sp] = FI_CLOSE
+            xz_stack[sp+1] = int(xz_nodes[0][n].b)
+            xz_stack[sp+2] = FI_RANGE + n
+            xz_stack[sp+3] = FI_OPEN
+            sp += 4
+        else if xz_nodes[0][n].b != 0:
             xz_stack[sp] = int(xz_nodes[0][n].b)
             sp = sp + 1
         if xz_nodes[0][n].a != 0:
             xz_stack[sp] = int(xz_nodes[0][n].a)
             sp = sp + 1
+xz_tree = (root: int): xz_walk(root, false)
 xz_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int):
     body = int(xz_fns[0][f].body)
     index_mark = xz_indexes[0]
@@ -178,7 +198,11 @@ xz_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int):
         loop l in xz_fns[0][f].locals:
             if int(tu_prune(int(xz_locals[0][l].type))) == xz_math_int[0] and int(xz_locals[0][l].flags) & 16 != 0: xz_collect[0] = true
     quiet = normal and not xz_collect[0] and xz_var_counter[0] == vars0 and xz_type_binds[0] == binds0 and xz_type_exposures[0] == exposed0
-    if quiet: xz_summary(body)
+    if normal and fi_begin(f):
+        fi_event(FI_OPEN)
+        xz_walk(body, true)
+        fi_finish()
+    else if quiet: xz_summary(body)
     else: xz_tree(body)
     xz_fns[0][f].write_sites = xz_sites[0]
     xz_fns[0][f].writes_ready = xz_collect[0]

@@ -1,0 +1,7 @@
+read=(xs:array<int64 length=4> i:int64 take:bool):>int64=>{
+    if i <? 0 or i >=? 4 {
+        if take return 0
+    }
+    return xs[i]
+}
+main=()=>printl(read([1 2 3 4] 4 false))

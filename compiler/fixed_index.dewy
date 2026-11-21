@@ -1,0 +1,265 @@
+$runtime_checks
+from p"ast.jo" import (NF_ALIASDECL NF_EXCL_FIRST NF_GLOBAL NF_INBOUNDS NF_INCLUSIVE NF_STEP NF_U64 add_flag has_flag kid nkids nodes)
+from p"check.jo" import (FK_NORMAL LF_ASSIGNED LF_RESIZED LF_ADDR LF_MUTPARAM LF_SHARED LF_CAPTURE LF_CAPTURED LF_BYREF LF_EXPOSED LF_ALIAS LF_ELEMALIAS LF_SOAELEM LF_PARTBORROW LF_OWNERBORROW ctxs cx fns locals)
+from p"directive_queries.dewy" import (dir_policy)
+from p"directives.jo" import (DIR_STATIC)
+from p"expr.jo" import ntype
+from p"member_replay.jo" import (member_compact_owners)
+from p"types.jo" import (T_BOOL T_INT T_MATH_INT prune types)
+
+IndexWord:type=int64<overflow='wrap'>
+# Only a static fixed-array subscript requests range state for its owner.
+FixedIndexRange:type=[nonnegative:bool=false limit:IndexWord=0]
+FixedIndexUndo:type=[local:IndexWord previous:FixedIndexRange]
+
+let fi_owners:dict<int64 bool>=dict<int64 bool>()
+let fi_requested:dict<int64 bool>=dict<int64 bool>()
+let fi_bounds:dict<int64 FixedIndexRange>=dict<int64 FixedIndexRange>()
+let fi_undo:array<FixedIndexUndo>=[]
+let fi_marks:array<int64>=[]
+let fi_answers:dict<int64 bool>=dict<int64 bool>()
+let fi_owner:IndexWord=0
+let fi_publish=false
+
+# Nodes have positive signed 32-bit IDs. High-word events share the zonk stack
+# with node visits and the existing negative end-of-loop markers.
+const FI_OPEN:IndexWord=1 << 32
+const FI_CLOSE:IndexWord=2 << 32
+const FI_TRUE:IndexWord=3 << 32
+const FI_FALSE:IndexWord=4 << 32
+const FI_RANGE:IndexWord=5 << 32
+
+# Frozen checker token and conversion ordinals (compared against the Jo twin).
+const FI_INT_CONVERSION:int32=1
+const FI_LOCAL:int32=1
+const FI_MODULO:int32=62
+const FI_LT:int32=71
+const FI_LE:int32=72
+const FI_GT:int32=73
+const FI_GE:int32=74
+
+fi_reset=():>void=>{
+    fi_owners.clear()
+    fi_requested.clear()
+    fi_answers.clear()
+    fi_bounds.clear()
+    fi_undo=[]
+    fi_marks=[]
+    fi_owner=0
+}
+fi_word=(n:IndexWord):>IndexWord=>$unsafe {
+    if nodes.ptr[n].type =? int32(T_INT) and nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? FI_INT_CONVERSION {
+        let a=IndexWord(nodes.ptr[n].a)
+        if nodes.ptr[a].type =? int32(T_MATH_INT) {return a}
+    }
+    n
+}
+fi_local=(n:IndexWord):>IndexWord=>$unsafe {
+    if nodes.ptr[n].kind not=? 'ident' or nodes.ptr[n].aux not=? FI_LOCAL {return 0}
+    if nodes.ptr[n].type not=? int32(T_INT) and nodes.ptr[n].type not=? int32(T_MATH_INT) {return 0}
+    IndexWord(nodes.ptr[n].sym)
+}
+fi_request=(n:IndexWord):>void=>$unsafe {
+    let l=fi_local(fi_word(IndexWord(nodes.ptr[n].b)))
+    if l =? 0 or cx <? 0 or has_flag(n NF_INBOUNDS) {return}
+    let owner=IndexWord(ctxs.ptr[cx].inst)
+    if owner =? 0 or fns.ptr[owner].kind not=? int32(FK_NORMAL) or locals.ptr[l].owner not=? int32(owner) or dir_policy(nodes.ptr[n].pos) not=? DIR_STATIC {return}
+    fi_owners[owner]=true
+    fi_requested[l]=true
+}
+fi_begin=(owner:IndexWord):>bool=>$unsafe {
+    if fi_owners.length =? 0 or not fi_owners.has(owner) {return false}
+    fi_owners.remove(owner);
+    # Compact reflected bodies can be replayed with different literal columns.
+    # Their shared decisions belong to the member-aware facts path.
+    if member_compact_owners.has(owner) {
+        loop l in fns.ptr[owner].locals {fi_requested.remove(l);}
+        return false
+    }
+    fi_owner=owner
+    fi_publish=true
+    true
+}
+fi_constant=(node:IndexWord):>IndexWord=>$unsafe {
+    let n=node
+    # Only small nonnegative word constants can delimit the fixed extents.
+    if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? FI_INT_CONVERSION and nodes.ptr[n].type =? int32(T_MATH_INT) {n=IndexWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind not=? 'int_lit' or (nodes.ptr[n].type not=? int32(T_INT) and nodes.ptr[n].type not=? int32(T_MATH_INT)) or has_flag(n NF_U64) {return -1}
+    let v=nodes.ptr[n].ival
+    if v <? 0 or v >? 2147483647 {return -1}
+    v
+}
+fi_refine=(l:IndexWord lower:bool limit:IndexWord):>void=>{
+    let old=fi_bounds.get(l) ?? FixedIndexRange[]
+    let upper=old.limit
+    if limit >? 0 and (upper =? 0 or limit <? upper) {upper=limit}
+    if upper =? old.limit and (not lower or old.nonnegative) {return}
+    fi_undo.push(FixedIndexUndo[l old])
+    fi_bounds[l]=FixedIndexRange[nonnegative=lower or old.nonnegative limit=upper]
+}
+# A fixed depth cap bounds work per edge even in a long short-circuit chain.
+# O(finalizer visits + scoped guard events + index uses) for a demanded body.
+fi_guard=(n:IndexWord holds:bool depth:IndexWord):>void=>$unsafe {
+    if depth =? 5 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'and_' and holds or k =? 'or_' and not holds {
+        fi_guard(IndexWord(nodes.ptr[n].a) holds depth + 1)
+        fi_guard(IndexWord(nodes.ptr[n].b) holds depth + 1)
+        return
+    }
+    if k not=? 'binary' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].type not=? int32(T_BOOL) {return}
+    if nodes.ptr[IndexWord(nodes.ptr[n].a)].type not=? nodes.ptr[IndexWord(nodes.ptr[n].b)].type {return}
+    let l=fi_local(IndexWord(nodes.ptr[n].a))
+    if l =? 0 or not fi_requested.has(l) {return}
+    let v=fi_constant(IndexWord(nodes.ptr[n].b))
+    if v <? 0 {return}
+    let op=nodes.ptr[n].op
+    if op =? FI_LT or op =? FI_GE {
+        if holds =? (op =? FI_GE) {fi_refine(l true 0)}
+        else {fi_refine(l false v)}
+    }
+    if op =? FI_LE or op =? FI_GT {
+        if holds =? (op =? FI_GT) {fi_refine(l true 0)}
+        else {fi_refine(l false v + 1)}
+    }
+}
+fi_exit=(n:IndexWord):>bool=>$unsafe {
+    let b=n
+    if nodes.ptr[b].kind =? 'block' {
+        if nkids(b) =? 0 {return false}
+        b=kid(b nkids(b) - 1)
+    }
+    let k=nodes.ptr[b].kind
+    k =? 'return_' or k =? 'break_' or k =? 'continue_'
+}
+fi_scope_end=():>void=>{
+    let mark=fi_marks.pop()
+    loop fi_undo.length >? mark {
+        let u=fi_undo.pop()
+        fi_bounds[u.local]=u.previous
+    }
+}
+fi_event=(event:IndexWord):>void=>{
+    let tag=event & (not IndexWord(4294967295))
+    if tag =? FI_OPEN {fi_marks.push(fi_undo.length)}
+    else if tag =? FI_CLOSE {fi_scope_end()}
+    else if tag =? FI_RANGE {fi_loop(event & 4294967295)}
+    else {fi_guard(event & 4294967295 tag =? FI_TRUE 0)}
+}
+# Checked function templates and closures never contribute guards. Binding
+# IDs are unique; an assignment anywhere in the body (including a back edge),
+# capture, indirect parameter or exposed address invalidates all its uses.
+fi_stable=(l:IndexWord):>bool=>$unsafe {
+    if l <=? 0 or l >=? locals.length or locals.ptr[l].owner not=? int32(fi_owner) {return false}
+    let fl=IndexWord(locals.ptr[l].flags)
+    fl & (LF_ASSIGNED | LF_RESIZED | LF_ADDR | LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_EXPOSED | LF_ALIAS | LF_ELEMALIAS | LF_SOAELEM | LF_PARTBORROW | LF_OWNERBORROW) =? 0
+}
+# Compound stores can bind an index once for both the read and the write.
+# A scalar snapshot has the source range at entry to this declaration.
+fi_declaration=(s:IndexWord):>void=>$unsafe {
+    let l=IndexWord(nodes.ptr[s].sym)
+    if has_flag(s NF_GLOBAL | NF_ALIASDECL) or not fi_stable(l) {return}
+    let t=IndexWord(locals.ptr[l].type)
+    if t not=? T_INT and t not=? T_MATH_INT {return}
+    let b=IndexWord(nodes.ptr[s].b)
+    if nodes.ptr[b].type not=? int32(t) {return}
+    if nodes.ptr[b].kind =? 'conv' and nodes.ptr[b].aux =? FI_INT_CONVERSION and t =? T_MATH_INT and nodes.ptr[IndexWord(nodes.ptr[b].a)].type =? int32(T_INT) {b=IndexWord(nodes.ptr[b].a)}
+    let source=fi_local(b)
+    if source not=? 0 and fi_stable(source) {
+        let r=fi_bounds.get(source) ?? FixedIndexRange[]
+        fi_refine(l r.nonnegative r.limit)
+    }
+    else if fi_requested.has(l) and nodes.ptr[b].kind =? 'binary' and nodes.ptr[b].op =? FI_MODULO and nodes.ptr[b].aux =? 0 and nodes.ptr[b].aux2 =? -1 {
+        let divisor=fi_constant(IndexWord(nodes.ptr[b].b))
+        if divisor >? 0 {fi_refine(l true divisor)}
+    }
+}
+fi_index=(n:IndexWord):>void=>$unsafe {
+    if nodes.ptr[n].aux not=? 0 or has_flag(n NF_INBOUNDS) {return}
+    let l=fi_local(fi_word(IndexWord(nodes.ptr[n].b)))
+    let proven=false
+    if fi_stable(l) {
+        let bt=prune(ntype(IndexWord(nodes.ptr[n].a)))
+        if types.ptr[bt].kind =? 'fixed' {
+            let bound=fi_bounds.get(l) ?? FixedIndexRange[]
+            proven=bound.nonnegative and bound.limit >? 0 and bound.limit <=? IndexWord(types.ptr[bt].bits)
+        }
+    }
+    # A shared child can still have an unsettled type on its first visit.
+    # Any unknown incoming visit vetoes publication, even if a later one proves.
+    if not proven or not fi_answers.has(n) {fi_answers[n]=proven}
+}
+fi_loop=(s:IndexWord):>void=>$unsafe {
+    let it=IndexWord(nodes.ptr[s].a)
+    if nodes.ptr[s].aux not=? 0 or nodes.ptr[it].kind not=? 'range' or has_flag(it NF_STEP | NF_INCLUSIVE | NF_EXCL_FIRST) {return}
+    let l=IndexWord(nodes.ptr[s].sym)
+    if not fi_requested.has(l) or not fi_stable(l) {return}
+    if locals.ptr[l].type not=? nodes.ptr[IndexWord(nodes.ptr[it].a)].type or locals.ptr[l].type not=? nodes.ptr[IndexWord(nodes.ptr[it].b)].type {return}
+    if fi_constant(IndexWord(nodes.ptr[it].a)) <? 0 {return}
+    let stop=fi_constant(IndexWord(nodes.ptr[it].b))
+    if stop >? 0 {fi_refine(l true stop)}
+}
+# An embedded function template is finalized in its own instance.
+fi_template=():>void=>{
+    fi_publish=false
+}
+fi_finish=():>void=>$unsafe {
+    if fi_publish {
+        loop [n proven] in fi_answers {
+            if proven {add_flag(n NF_INBOUNDS)}
+        }
+    }
+    fi_answers.clear()
+    loop l in fns.ptr[fi_owner].locals {fi_requested.remove(l);}
+    fi_scope_end()
+    fi_bounds.clear()
+    fi_owner=0
+}
+# Replace only ordinary child schedules for which the control edge is known.
+# Pushing in reverse keeps zonking and write events in their original order.
+fi_children=(n:IndexWord @stack:array<int64> start:IndexWord):>IndexWord=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if nodes.ptr[n].d not=? 0 or nodes.ptr[n].nlist2 not=? 0 {return -1}
+    let sp=start
+    if k =? 'block' {
+        if nodes.ptr[n].a not=? 0 or nodes.ptr[n].b not=? 0 or nodes.ptr[n].c not=? 0 {return -1}
+        let count=IndexWord(nkids(n))
+        if sp + count * 2 + 2 >? stack.length {stack.resize((sp + count * 2 + 2) * 2)}
+        stack.ptr[sp]=FI_CLOSE
+        sp += 1
+        let i:IndexWord=count - 1
+        loop i >=? 0 {
+            let s=kid(n i)
+            if nodes.ptr[s].kind =? 'if_' and nodes.ptr[s].c =? 0 and fi_exit(IndexWord(nodes.ptr[s].b)) {
+                stack.ptr[sp]=FI_FALSE + IndexWord(nodes.ptr[s].a)
+                sp += 1
+            }
+            if s not=? 0 {
+                stack.ptr[sp]=s
+                sp += 1
+            }
+            i -= 1
+        }
+        stack.ptr[sp]=FI_OPEN
+        return sp + 1
+    }
+    if nkids(n) not=? 0 {return -1}
+    let a=IndexWord(nodes.ptr[n].a)
+    let b=IndexWord(nodes.ptr[n].b)
+    let c=IndexWord(nodes.ptr[n].c)
+    if a =? 0 or b =? 0 or (k not=? 'if_' and c not=? 0) {return -1}
+    if sp + 9 >? stack.length {stack.resize((sp + 9) * 2)}
+    if c not=? 0 {
+        stack.ptr[sp]=FI_CLOSE
+        stack.ptr[sp + 1]=c
+        stack.ptr[sp + 2]=FI_FALSE + a
+        stack.ptr[sp + 3]=FI_OPEN
+        sp += 4
+    }
+    stack.ptr[sp]=FI_CLOSE
+    stack.ptr[sp + 1]=b
+    stack.ptr[sp + 2]=(if k =? 'or_' {FI_FALSE} else {FI_TRUE}) + a
+    stack.ptr[sp + 3]=FI_OPEN
+    stack.ptr[sp + 4]=a
+    sp + 5
+}

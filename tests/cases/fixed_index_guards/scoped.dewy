@@ -1,0 +1,11 @@
+read=(xs:array<int64 length=4> i:int64):>int64 & no panics=>{
+    if i <? 0 or i >=? 4 or xs[i] <? 0 return 0
+    let copy=i
+    return xs[copy]
+}
+main=()=>{
+    let xs:array<int64 length=4>=[3 5 7 9]
+    loop i in [0..4) {printl(read(xs i))}
+    printl(read(xs -1))
+    printl(read(xs 4))
+}

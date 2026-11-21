@@ -1,0 +1,7 @@
+change=(@i:int64):>void=>{i=4}
+read=(xs:array<int64 length=4> i:int64):>int64=>{
+    if i <? 0 or i >=? 4 return 0
+    change(@i)
+    return xs[i]
+}
+main=()=>printl(read([1 2 3 4] 1))
