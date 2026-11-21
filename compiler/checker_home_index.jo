@@ -1,0 +1,14 @@
+use 'check.jo'
+
+home_add = (m: int, name: int):
+    if home_first.len() <= name: home_first.resize(name * 2 + 64)
+    h = home_first[name]
+    if h != 0 and home_mod[h - 1] == m: return
+    home_mod.push(m)
+    home_next.push(h)
+    home_first[name] = home_mod.len()
+homes_build = ():
+    homes_built = true
+    loop m in [0..modules.len()):
+        if modules[m].is_prelude: continue
+        loop k, v in modules[m].names: home_add(m, k)
