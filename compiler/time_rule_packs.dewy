@@ -1,0 +1,26 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (read_file)
+from p"check.jo" import (lib_dir)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"directives.jo" import (dir_program_values dir_scopes)
+from p"module_paths.dewy" import (is_abs_path path_norm)
+from p"util.jo" import (files intern name_of pos_file)
+
+# The zone rules this program uses: the pack a Dewy version ships, unless the main file says
+# `$time.rules = 'file'` (beside the main file, made with tools/time/gen_rules.py).
+time_rules_path=(path:string):>string=>{
+    if path not=? path_norm("{lib_dir}/time/rules/current.bin") {return path}
+    let setting=intern("time.rules")
+    let scope=dir_program_values.get(setting) ?? -1
+    if scope <? 0 or dir_scopes[scope].value <? 2 {return path}
+    let rel=name_of(int64<overflow='wrap'>(dir_scopes[scope].value) - 2)
+    let i=pos_file(dir_scopes[scope].start)
+    let chosen=if is_abs_path(rel) {rel} else {"{files[i].dir}/{rel}"}
+    let data=read_file(chosen)
+    if data =? none {fatal(dir_scopes[scope].at "`$time.rules`: cannot read '{chosen}'");}
+    let bytes=(data ?? "") as array<uint8>
+    if bytes.length <? 4 or bytes[0] not=? b'D' or bytes[1] not=? b'Z' or bytes[2] not=? b'P' or bytes[3] not=? b'2' {
+        fatal(dir_scopes[scope].at "`$time.rules`: '{chosen}' is not a rule pack; tools/time/gen_rules.py makes one")
+    }
+    path_norm(chosen)
+}

@@ -1,0 +1,78 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_state.dewy'
+use 'expr.jo'
+use 'types.jo'
+use 'util.jo'
+
+# Optional operations keep their declared optional view even when an alias is
+# known to hold a value. Ordinary nonoptional operands remain type errors.
+narrow_optional_source = (a: int) -> int:
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return a
+    l = int(nodes[a].sym)
+    if int(locals[l].flags) & LF_ALIAS == 0: return a
+    al = int(locals[l].alias)
+    if al != 0 and nodes[al].kind == .unwrap: return int(nodes[al].a)
+    a
+
+# a narrowed path's key as a scope name, its root marked
+path_name = (key: str) -> int:
+    i = 2
+    id = 0
+    loop i < len(key) and key[i] >= '0' and key[i] <= '9':
+        id = id * 10 + int(key[i] - '0')
+        i += 1
+    if key[1] == 'L':
+        if path_rooted_l.len() <= id: path_rooted_l.resize(id * 2 + 64)
+        path_rooted_l[id] = true
+    else:
+        if path_rooted_g.len() <= id: path_rooted_g.resize(id * 2 + 64)
+        path_rooted_g[id] = true
+    intern(key)
+
+narrow_path = (a: int, vi: int, holds: bool):
+    key = path_key(a)
+    if len(key) == 0: return
+    ut = prune(ntype(a))
+    pos = nodes[a].pos
+    path_narrows += 1
+    if is_union(ut):
+        sel: int[]
+        loop i in 0.. and m in union_members(ut):
+            if (i == vi) == holds: sel.push(m)
+        narrow_expr(copy_path(a), sel, pos, path_name(key))
+    else if types[ut].kind == .opt and (vi == -2) == holds:
+        e = mk(.unwrap, pos)
+        nodes[e].a = i32(copy_path(a))
+        nodes[e].type = types[ut].elem
+        add_flag(e, NF_CHECKED)
+        nl = new_local(path_name(key), int(types[ut].elem), pos)
+        locals[nl].flags = i32(LF_ALIAS)
+        locals[nl].alias = i32(e)
+
+# x is A or x is B ... holding: x is one of those members (when all test the same x)
+narrow_some = (tests: int[]):
+    a0 = int(nodes[tests[0]].a)
+    ut = prune(ntype(a0))
+    if not is_union(ut): return
+    local = nodes[a0].kind == .ident and nodes[a0].aux == i32(int(SK.local))
+    key = ""
+    if not local:
+        key = path_key(a0)
+        if len(key) == 0: return
+    sel: int[]
+    loop t in tests:
+        a = int(nodes[t].a)
+        if local:
+            # (a later test sees the variable narrowed by the earlier ones failing)
+            if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return
+            if narrow_root_local(int(nodes[a].sym)) != narrow_root_local(int(nodes[a0].sym)): return
+        else if path_key(a) != key: return
+        at = prune(ntype(a))
+        if not is_union(at): return
+        m = union_members(at)[int(nodes[t].aux)]
+        if not sel.contains(m): sel.push(m)
+    if local: narrow_local(int(nodes[a0].sym), sel, nodes[a0].pos)
+    else:
+        path_narrows += 1
+        narrow_expr(copy_path(a0), sel, nodes[a0].pos, path_name(key))

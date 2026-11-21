@@ -1,0 +1,25 @@
+use 'ast.jo'
+use 'diagnostic_exit.dewy'
+use 'expr.jo'
+use 'isolation_ops.dewy'
+use 'type_ops.dewy'
+use 'util.jo'
+
+dewy_data_of_given = (e: int, given: int[], call: int):
+    if e == 0: return
+    k = nodes[e].kind
+    if k == .lambda or k == .fn_: return
+    if k == .intrinsic and (nodes[e].aux as IN) == .arrdata and nkids(e) == 1:
+        x = kid(e, 0)
+        loop nodes[x].kind == .conv: x = int(nodes[x].a)
+        if nodes[x].kind == .ident and given.contains(int(nodes[x].aux) * 1000000000 + int(nodes[x].sym)):
+            nm = name_of(int(nodes[x].name))
+            what = dt(ntype(call))
+            fatal(nodes[e].pos, "data({nm}) reads '{nm}' after it was moved into the {what} (an earlier argument): it unshares the variable's own copy, so the pointer would not point into the array the {what} holds; take `p = data({nm})` before, and pass p")
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: dewy_data_of_given(int(nodes[e].a), given, call)
+    if mask & 2 != 0: dewy_data_of_given(int(nodes[e].b), given, call)
+    if mask & 4 != 0: dewy_data_of_given(int(nodes[e].c), given, call)
+    if mask & 16 != 0:
+        loop c in kids(e): dewy_data_of_given(c, given, call)

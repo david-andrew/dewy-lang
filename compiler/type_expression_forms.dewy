@@ -1,0 +1,45 @@
+$runtime_checks
+from p"ast.jo" import (kid mk nkids nkids2 nodes)
+from p"check.jo" import (prelude syms)
+from p"checker_expr.dewy" import (lookup)
+from p"checks_thin.dewy" import (resolve_type)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (ntype)
+from p"reflect_ops.dewy" import (reflect_member)
+from p"reflection.jo" import (reflect_active)
+from p"type_ops.dewy" import (get_struct_inst mk_array)
+from p"types.jo" import (telem)
+from p"util.jo" import (intern)
+
+TypeFormWord:type=int64<overflow='wrap'>
+
+# ---------------- type expressions written as expressions ----------------
+expr_as_type=(e:TypeFormWord):>TypeFormWord=>{
+    let k=nodes[e].kind
+    if k =? 'field' and reflect_active and reflect_member(e) {return telem(ntype(e))}
+    if k =? 'ident' {
+        let tn=mk('tname' nodes[e].pos)
+        nodes[tn].name=nodes[e].name
+        return resolve_type(tn)
+    }
+    if k =? 'index' and nodes[TypeFormWord(nodes[e].a)].kind =? 'ident' {
+        let s=lookup(TypeFormWord(nodes[TypeFormWord(nodes[e].a)].name))
+        if s =? 0 or (syms[s].kind not=? 'struct_' and syms[s].kind not=? 'enum_') {fatal(nodes[e].pos "expected a type")}
+        let targs:array<int64>=[]
+        if nodes[e].b not=? 0 {targs.push(expr_as_type(TypeFormWord(nodes[e].b)))}
+        else {
+            loop i in [0..nkids(e)) {targs.push(expr_as_type(kid(e i)))}
+        }
+        let d=TypeFormWord(syms[s].ref)
+        if targs.length not=? nkids2(d) {fatal(nodes[e].pos "wrong number of type arguments")}
+        return get_struct_inst(d targs)
+    }
+    if k =? 'array' and nkids(e) =? 1 {return mk_array(expr_as_type(kid(e 0)))}
+    if k =? 'map_lit' and nkids(e) =? 1 {
+        let pair=kid(e 0)
+        let s=prelude.get(intern("Map")) ?? 0
+        if s not=? 0 {return get_struct_inst(TypeFormWord(syms[s].ref) [expr_as_type(TypeFormWord(nodes[pair].a)) expr_as_type(TypeFormWord(nodes[pair].b))])}
+    }
+    fatal(nodes[e].pos "expected a type")
+    0
+}

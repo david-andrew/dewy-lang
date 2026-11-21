@@ -1,0 +1,128 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED add_flag clone mk nodes)
+from p"cancel_hints.dewy" import (cancel_reject)
+from p"check.jo" import (dewy_at or_throw_returns syms universe)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_block bc_ident bc_let bc_stmt)
+from p"checks_thin.dewy" import (resolve_type)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"directive_ops.dewy" import (dir_explicit_cancellation)
+from p"error_ops.dewy" import (exception_member family_annotation nominal_descends value_members)
+from p"expr.jo" import (coerce coerce_hint last_checked type_node_of)
+from p"expr_hints.dewy" import (coalesce_names_canceled)
+from p"ide.jo" import (ide_on)
+from p"ide_index.dewy" import (ide_esc)
+from p"ide_ops.dewy" import (ide_emit ide_pos_str)
+from p"type_ops.dewy" import (dt mk_opt mk_union)
+from p"types.jo" import (T_NEVER T_NONE T_VOID is_union prune tkind)
+from p"util.jo" import (intern name_of pos_in_lib)
+
+CoalesceWord:type=int64<overflow='wrap'>
+
+# `??<A | B>` (nodes[n].c, the kinds' type) covers only those kinds (none only when listed),
+# and what it does not cover passes through as a value.
+coalesce_failures=(n:int64 at:int64 expected:int64):>int64=>{
+    let pos=nodes[n].pos
+    let a=last_checked
+    add_flag(a NF_CHECKED)
+    let name="$coalesce{n}"
+    let members=value_members(at)
+    let canceled=CoalesceWord(syms[universe[intern("Canceled")]].ref)
+    let cancel_named=nodes[n].c not=? 0 and coalesce_names_canceled(CoalesceWord(nodes[n].c) canceled)
+    let listed:array<int64>=[]
+    if nodes[n].c not=? 0 {
+        let lt=prune(resolve_type(CoalesceWord(nodes[n].c)))
+        listed=if is_union(lt) or tkind(lt) =? 'opt' {value_members(lt)} else {[lt]}
+        loop l in listed {
+            if not exception_member(l) {fatal(pos "`??<...>` lists the failures it covers: {dt(l)} is not an exception or none")}
+            let held=false
+            loop m in members {
+                if m =? l or m not=? T_NONE and l not=? T_NONE and nominal_descends(m l) {held=true}
+            }
+            if not held and not family_annotation(lt) {fatal(pos "`??<...>` lists {dt(l)}, which {dt(at)} never holds")}
+        }
+    }
+    let covered:array<string>=[]
+    let passed:array<string>=[]
+    let covers:array<bool>=[]
+    loop m in members {
+        let c=false
+        if listed.length =? 0 {c=exception_member(m)}
+        else {
+            loop l in listed {
+                if m =? l or m not=? T_NONE and l not=? T_NONE and nominal_descends(m l) {c=true}
+            }
+        }
+        if m =? canceled and not cancel_named {c=false}
+        covers.push(c)
+        if c {covered.push(if m =? T_NONE {"none"} else {dt(m)})}
+        else if exception_member(m) {passed.push(if m =? T_NONE {"none"} else {dt(m)})}
+    }
+    if members.contains(canceled) and not cancel_named and dir_explicit_cancellation(pos) {cancel_reject(a covered.length >? 0 "this `??`")}
+    if ide_on and not pos_in_lib(pos) {
+        let text="?? gives the fallback for {covered.join(', ')}"
+        if passed.length >? 0 {text="{text}; passes on {passed.join(', ')}"}
+        ide_emit("I\t{ide_pos_str(pos)}\t{ide_esc(text)}")
+    }
+    let fallback=CoalesceWord(nodes[n].b)
+    let void_fallback=nodes[fallback].kind =? 'ident' and nodes[fallback].name =? int32(intern("void"))
+    if void_fallback {fallback=bc_block([] nodes[fallback].pos)}
+    let values:array<int64>=[]
+    loop i in 0.. and m in members {
+        if not covers[i] and (m not=? canceled or cancel_named) {values.push(m)}
+    }
+    let target=if expected not=? 0 and is_union(expected) {expected} else if values.length =? 1 {values[0]} else {mk_union(values)}
+    let probe=clone(fallback)
+    let hint = @coerce_hint
+    let held_hint=hint
+    if values.length =? 1 and prune(values[0]) =? T_VOID and dewy_at(pos) {
+        let called=if nodes[a].kind =? 'call' and nodes[a].a not=? 0 and nodes[CoalesceWord(nodes[a].a)].kind =? 'ident' {"`{name_of(CoalesceWord(nodes[CoalesceWord(nodes[a].a)].name))}`"} else {"this call"}
+        hint=" ({called} gives no value when it succeeds, so `??` has no value to default: `or_throw` passes its failure on, or `match` it)"
+    }
+    let pt=prune(check_expr(probe target))
+    if prune(target) =? T_VOID and pt not=? T_VOID and pt not=? T_NEVER {coerce(probe T_VOID);}
+    if tkind(pt) =? 'opt' or pt =? T_NONE {target=mk_opt(target)}
+    let chain:CoalesceWord=0
+    let j=CoalesceWord(members.length) - 1
+    let used=false
+    loop j >=? 0 {
+        let member=members[j]
+        let failure=covers[j]
+        let value=bc_ident(name pos)
+        if member =? canceled and not cancel_named {
+            let ret=mk('return_' pos)
+            or_throw_returns[pos]=true
+            nodes[ret].a=int32(value)
+            value=bc_block([ret] pos)
+        }
+        else if failure and (void_fallback or prune(target) =? T_VOID) {
+            value=if used {clone(fallback)} else {fallback}
+            used=true
+        }
+        else if failure {
+            let typed=bc_let("{name}_fallback" (if used {clone(fallback)} else {fallback}) pos)
+            nodes[typed].a=int32(type_node_of(target pos))
+            value=bc_block([typed bc_stmt(bc_ident("{name}_fallback" pos) pos)] pos)
+            used=true
+        }
+        let body=bc_block([bc_stmt(value pos)] pos)
+        if chain =? 0 {chain=body}
+        else {
+            let condition=mk('istype' pos)
+            nodes[condition].a=int32(bc_ident(name pos))
+            nodes[condition].b=int32(type_node_of(member pos))
+            let branch=mk('if_' pos)
+            nodes[branch].a=int32(condition)
+            nodes[branch].b=int32(body)
+            nodes[branch].c=int32(chain)
+            if values.length >? 1 {nodes[branch].aux2= -8} # Explicit union join.
+            chain=bc_block([bc_stmt(branch pos)] pos)
+        }
+        j -= 1
+    }
+    let result_block=bc_block([bc_let(name a pos) bc_stmt(chain pos)] pos)
+    nodes[n]=nodes[result_block]
+    let result=check_expr(n expected)
+    hint=held_hint
+    result
+}

@@ -1,4 +1,5 @@
 $runtime_checks
+from p"call_lookup_context.dewy" import (program_fn_named)
 from p"@lib/core/str.jo" import (is_digit starts_with)
 from p"ast.jo" import (NF_LITERAL has_flag kid nkids nodes)
 from p"check.jo" import (fns globals)
@@ -90,4 +91,36 @@ written_int=(a:GameCheckWord):>GameCheckWord=>$unsafe {
     if o >=? src.length or (src[o] not=? b')' and src[o] not=? b',') {return -1}
     if nodes.ptr[a].kind =? 'int_lit' {return nodes.ptr[a].ival}
     int64(nodes.ptr[a].fval)
+}
+
+# a library function called as another language's of the same name is (p5's line(x1, y1, x2,
+# y2), fill(r, g, b) and push(); atan(y, x)): what it is here, before its overloads are tried
+# checker_call_queries.dewy's habit_call_check leaves the host the names and argument
+# counts a habit may have.
+habit_rest=(n:int64 name:int64 args:array<int64>):>void=>{
+    let nm=name_of(name)
+    if program_fn_named(name) {return}
+    let na=args.length
+    let pos=nodes[n].pos
+    if nm =? "line" and na >=? 4 and habit_number(args[0]) and habit_number(args[1]) {fatal(pos "line takes two points: `line(vec2(x1, y1), vec2(x2, y2), width, color)`")}
+    if nm =? "text" and na >=? 3 and habit_number(args[1]) and habit_number(args[2]) {fatal(pos "where text goes is one vec2: `text(s, vec2(x, y), size, color)`")}
+    if nm =? "clear" and na =? 1 and nodes[unnamed(args[0])].kind =? 'tuple' {fatal(pos "clear takes a color: `clear(rgb(0.1, 0.1, 0.1))` (each from 0 to 1)")}
+    if nm =? "fill" and na >=? 3 and habit_number(args[0]) and habit_number(args[1]) and habit_number(args[2]) {fatal(pos "there is no fill color: each shape takes its color, `circle(pos, r, rgb(1, 0, 0))` (fill(x, n) makes an array of n copies of x)")}
+    if nm =? "push" and na =? 0 {fatal(pos "push() here is push_transform() (and pop() is pop_transform()); xs.push(x) adds to an array")}
+    if nm =? "pop" and na =? 0 {fatal(pos "pop() here is pop_transform(), after push_transform(); xs.pop() takes from an array")}
+    if nm =? "map" and na =? 5 {fatal(pos "the range a..b moved to c..d is `remap(x, a, b, c, d)`; map(xs, f) is f of each element")}
+    if nm =? "atan" and na =? 2 {fatal(pos "the angle of (x, y) is `atan2(y, x)`; atan takes one number")}
+    if nm =? "random" and na =? 1 {
+        if nodes[unnamed(args[0])].kind =? 'array' {fatal(pos "a random element is `random_item(xs)`")}
+        if habit_number(args[0]) {fatal(pos "random takes where it starts and ends: `random(0, 10)` (a whole number: `random_int(0, 10)`)")}
+    }
+}
+
+habit_number=(a:GameCheckWord):>bool=>{
+    let e=unnamed(a)
+    let k=nodes[e].kind
+    if k =? 'int_lit' or k =? 'float_lit' {return true}
+    if k not=? 'unary' {return false}
+    let inner=nodes[GameCheckWord(nodes[e].a)].kind
+    inner =? 'int_lit' or inner =? 'float_lit'
 }

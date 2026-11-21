@@ -1,0 +1,54 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_INBOUNDS NF_MUT add_flag kid mk nodes)
+from p"check.jo" import (check_struct_fields)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_call)
+from p"checks_thin_expr.dewy" import (is_map_type struct_ctor_zero)
+from p"expr.jo" import (copy_place last_checked ntype)
+from p"node_store.dewy" import (Node)
+from p"refine.jo" import (refine_active)
+from p"refine_metadata.dewy" import (representation_type)
+from p"types.jo" import (fields prune struct_targ structs types)
+from p"util.jo" import (files intern pos_file)
+
+MapEntryWord:type=int64<overflow='wrap'>
+
+# m[k] changed in place (m[k] += 1, m[k].push(x), m[k].x = 5, loop mut x in m[k]): the value
+# stored in m, m.vals[__map_entry_present(m, k)] in Dewy (a missing key fails)
+map_elem_place=(n:MapEntryWord):>void=>{
+    let pos=nodes[n].pos
+    let m=kid(n 0)
+    let key=kid(n 1)
+    let mt=prune(ntype(m))
+    let vt=struct_targ(MapEntryWord(types[mt].st) 1)
+    let receiver=copy_place(m)
+    add_flag(receiver NF_MUT)
+    let args:array<int64>=[receiver key]
+    let pv=prune(vt)
+    let present=files[pos_file(pos)].is_dewy
+    if not present and types[pv].kind =? 'struct_' and not is_map_type(pv) {
+        let si=MapEntryWord(types[pv].st)
+        check_struct_fields(si)
+        let has_default=false
+        loop i in [0..MapEntryWord(structs[si].nfields)) {
+            if fields[MapEntryWord(structs[si].fields) + i].defval not=? 0 {has_default=true}
+        }
+        if has_default {
+            let d=mk('call' pos)
+            struct_ctor_zero(d pv MapEntryWord(structs[si].decl));
+            add_flag(d NF_CHECKED)
+            args.push(d)
+        }
+    }
+    let entry=if present {"__map_entry_present"} else {"__map_entry"}
+    let call=bc_call(entry args pos)
+    check_expr(call 0);
+    call=last_checked
+    let f=mk('field' pos)
+    nodes[f].a=int32(m)
+    nodes[f].name=int32(intern("vals"))
+    check_expr(f 0);
+    f=last_checked
+    let rt=if refine_active {representation_type(vt)} else {vt}
+    nodes[n]=Node(kind='index' pos=pos a=int32(f) b=int32(call) type=int32(rt) flags=int32(NF_CHECKED | NF_INBOUNDS))
+}

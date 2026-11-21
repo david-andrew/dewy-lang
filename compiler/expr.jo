@@ -1,4 +1,10 @@
 use 'exact_preparation.dewy'
+use 'type_expression_forms.dewy'
+use 'time_rule_packs.dewy'
+use 'path_narrowing.dewy'
+use 'moved_argument_data.dewy'
+use 'map_entry_places.dewy'
+use 'aggregate_sources.dewy'
 use 'record_construction.dewy'
 use 'policy_value_queries.dewy'
 use 'operator_lookup.dewy'
@@ -997,33 +1003,6 @@ coerce = (n: int, target: int) -> int:
     fatal(nodes[n].pos, "type mismatch: expected {dt_named(to)}, found {dt_named(from)}{why}{coerce_hint}")
     n
 
-# make array literal n (already checked as T[]) the fixed-size array type `to`
-fixed_literal = (n: int, to: int):
-    et = int(types[prune(to)].elem)
-    if nkids(n) == 0 and fixed_len(to) > 0: concurrency_require_zero(n, et)
-    if refine_active and nkids(n) == 0 and fixed_len(to) > 0 and ref_storage_contract(et):
-        value = struct_default(et, nodes[n].pos)
-        if value != 0:
-            set_list(n, [value])
-            nodes[n].b = i32(bc_int(fixed_len(to), nodes[n].pos))
-            nodes[int(nodes[n].b)].type = i32(T_INT)
-    if nodes[n].b != 0:
-        c = int(nodes[n].b)
-        # (a module const's count, `fill(1 N)` with `const N = NAMES.length`: its value)
-        root = c
-        loop nodes[root].kind == .conv: root = int(nodes[root].a)
-        if nodes[root].kind == .ident and dewy_at(nodes[n].pos) and (nodes[root].aux == i32(int(SK.global)) and readonly_global(int(nodes[root].sym)) or nodes[root].aux == i32(int(SK.const_))):
-            if ceval(root).i == fixed_len(to):
-                nodes[n].b = i32(bc_int(fixed_len(to), nodes[n].pos))
-                c = int(nodes[n].b)
-                nodes[c].type = i32(T_INT)
-        if nodes[c].kind != .int_lit or nodes[c].ival != fixed_len(to): fatal(nodes[n].pos, "a fixed-size array of {fixed_len(to)} elements needs the count {fixed_len(to)} here")
-        coerce(kid(n, 0), et)
-    else:
-        loop i in [0..nkids(n)): coerce(kid(n, i), et)
-    nodes[n].type = i32(to)
-    clear_flag(n, NF_LITERAL)
-
 check_to = (n: int, target: int) -> int:
     check_expr(n, target)
     coerce(n, target)
@@ -1149,47 +1128,6 @@ copy_place = (n: int) -> int:
     if k == .field or k == .index: nodes[c].a = i32(copy_place(int(nodes[n].a)))
     else if k == .call and nkids(n) > 0: set_list(c, [copy_place(kid(n, 0))] + kids(n)[1..])
     c
-
-# m[k] changed in place (m[k] += 1, m[k].push(x), m[k].x = 5, loop mut x in m[k]): the value
-# stored in m, m.vals[__map_entry_present(m, k)] in Dewy (a missing key fails)
-map_elem_place = (n: int):
-    pos = nodes[n].pos
-    m = kid(n, 0)
-    key = kid(n, 1)
-    mt = prune(ntype(m))
-    vt = struct_targ(int(types[mt].st), 1)
-    mc = copy_place(m)
-    add_flag(mc, NF_MUT)
-    args = [mc, key]
-    pv = prune(vt)
-    # (Dewy: the key must be there, as for reading m[k]; nothing is invented for a missing one)
-    present = files[pos_file(pos)].is_dewy
-    if present: pass
-    else if types[pv].kind == .struct_ and not is_map_type(pv):
-        # (a struct with default field values starts with them)
-        si = int(types[pv].st)
-        check_struct_fields(si)
-        has_def = false
-        loop i in [0..int(structs[si].nfields)):
-            if fields[int(structs[si].fields) + i].defval != 0: has_def = true
-        if has_def:
-            d = mk(.call, pos)
-            struct_ctor_zero(d, pv, int(structs[si].decl))
-            add_flag(d, NF_CHECKED)
-            args.push(d)
-    entry = "__map_entry"
-    if present: entry = "__map_entry_present"
-    call = bc_call(entry, args, pos)
-    check_expr(call, 0)
-    call = last_checked
-    f = mk(.field, pos)
-    nodes[f].a = i32(m)
-    nodes[f].name = i32(intern("vals"))
-    check_expr(f, 0)
-    f = last_checked
-    # (a refined value reads as its base, as an array element does; stores into it are checked)
-    rt = if refine_active: representation_type(vt) else: vt
-    nodes[n] = Node(kind = .index, pos = pos, a = i32(f), b = i32(call), type = i32(rt), flags = i32(NF_CHECKED | NF_INBOUNDS))
 
 # The generated entry-position selector of a dictionary place, not a user's
 # array index. Its key can survive a call; its position cannot.
@@ -1373,33 +1311,6 @@ note_storage_access = (n: int):
         if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
             note_storage_access(int(locals[l].alias))
 
-# ---------------- type expressions written as expressions ----------------
-expr_as_type = (e: int) -> int:
-    k = nodes[e].kind
-    if k == .field and reflect_active and reflect_member(e): return telem(ntype(e))
-    if k == .ident:
-        tn = mk(.tname, nodes[e].pos)
-        nodes[tn].name = nodes[e].name
-        return resolve_type(tn)
-    if k == .index and nodes[int(nodes[e].a)].kind == .ident:
-        s = lookup(int(nodes[int(nodes[e].a)].name))
-        if s == 0 or (syms[s].kind != .struct_ and syms[s].kind != .enum_): fatal(nodes[e].pos, "expected a type")
-        targs: int[]
-        if nodes[e].b != 0: targs.push(expr_as_type(int(nodes[e].b)))
-        else:
-            loop i in [0..nkids(e)): targs.push(expr_as_type(kid(e, i)))
-        d = int(syms[s].ref)
-        if targs.len() != nkids2(d): fatal(nodes[e].pos, "wrong number of type arguments")
-        return get_struct_inst(d, targs)
-    if k == .array and nkids(e) == 1: return mk_array(expr_as_type(kid(e, 0)))
-    # ({str: P}: a map type, written where an expression is parsed, as from_json[{str: P}])
-    if k == .map_lit and nkids(e) == 1:
-        pr = kid(e, 0)
-        s = prelude.get(intern("Map")) ?? 0
-        if s != 0: return get_struct_inst(int(syms[s].ref), [expr_as_type(int(nodes[pr].a)), expr_as_type(int(nodes[pr].b))])
-    fatal(nodes[e].pos, "expected a type")
-    0
-
 # ---------------- calls ----------------
 # a candidate turned down at an argument, its message made only if no candidate fits: of
 # argument fi (from 0), a, whose parameter's type there is ptx (d negative: a mutable
@@ -1423,31 +1334,6 @@ exact_args = (cd: Cand) -> int:
         if a == 0 or is_lit(a) or nodes[a].type == 0: continue
         if type_eq(prune(ntype(a)), prune(subst(cd.sig.params[i], cd.binds))): k += 1
     k
-
-# (`let s:set<Op> = set(['push'])`, `let x:Box<Op> = box('push')`: a type parameter bound only by arguments that take their
-# type from where they go, as the text in an array literal, takes what the expected result
-# gives it, as such a literal written there would; only where the call as bound would not
-# give the expected type, so a call that fits keeps its types)
-expected_binds = (cd: mut Cand, expected: int, given: int[]):
-    held = cd.binds
-    # (a match can rest on a literal's own type coercing inside a container, `Box<string>` for
-    # `Box<Choice>`: such a result still would not fit, so the literal takes the expected one)
-    if match_type(int(cd.sig.ret), expected, held, 0) >= 0:
-        fitted = subst_partial(int(cd.sig.ret), held)
-        if has_var(fitted) or can_coerce(0, fitted, expected):
-            loop i in 0.. and b in held:
-                if cd.binds[i] == 0 and expected_bind_fits(b): cd.binds[i] = b
-            return
-    ret = subst_partial(int(cd.sig.ret), cd.binds)
-    if not has_var(ret) and can_coerce(0, ret, expected): return
-    eb = fill(0, int(cd.sig.ntp))
-    loop i in 0.. and t in given: eb[i] = t
-    loop i in 0.. and a in cd.args:
-        if a == 0 or is_lit(a) or ctx_dependent(a) or nodes[a].type == 0 or text_literal(a): continue
-        if match_type(cd.sig.params[i], ntype(a), eb, 0) < 0: return
-    if match_type(int(cd.sig.ret), expected, eb, 0) < 0: return
-    loop i in 0.. and b in eb:
-        if expected_bind_fits(b): cd.binds[i] = b
 
 literal_typed_names: {int: bool} = {}
 literal_typed_elements: {int: bool} = {}
@@ -2034,31 +1920,6 @@ literal_union_member = (n: int, expected: int) -> int:
             found = m
     if found == 0 and tuple > 0: return tuple
     found
-
-# With no written field names, the first spread distinguishes `[xs...]` from
-# `[record...]`. Inspect a clone so contextual checking retains the source AST.
-dewy_spread_source_type = (n: int) -> int:
-    # Call arguments may already have become checked constructor calls. Their
-    # original type syntax is gone; retain the checked type instead of cloning
-    # them as unchecked syntax and trying to resolve them again.
-    if nodes[n].type != 0 and has_flag(n, NF_CHECKED): return prune(ntype(n))
-    copy = clone(n)
-    # (`[pair()...]`: a function expressing several values spreads them as an array would)
-    saved_site = sink_pack_site
-    sink_pack_site = copy
-    t = check_expr(copy, 0)
-    sink_pack_site = saved_site
-    sink_pack_hit = 0
-    prune(t)
-
-# (`[f()...]`, f a function or function value by name: it may give several values)
-values_spread_call = (c: int) -> bool:
-    callee = int(nodes[c].a)
-    if nodes[callee].kind != .ident or has_flag(c, NF_CHECKED): return false
-    s = lookup(int(nodes[callee].name))
-    if s == 0: return false
-    k = syms[s].kind
-    k == .fns or k == .local or k == .global
 
 dewy_classify_spread = (n: int):
     if nodes[n].kind != .array or nodes[n].b != 0 or nkids(n) == 0: return
@@ -2682,14 +2543,6 @@ exact_families_changed = ():
     ml_bump_name(ci(45, "max"))
     ml_bump_name(ci(46, "sign"))
 
-# (a function of the Dewy prelude's module dm called from m, such as `rational(1 3)`: m reaches
-# what dm's imports do, the bundled rational included)
-prelude_reach = (m: int, dm: int):
-    rm = rational_module()
-    if rm < 0 or not reaches_rational(dm, rm) or rational_reach[m] == 1: return
-    rational_reach[m] = 1
-    exact_families_changed()
-
 reaches_rational = (m: int, rm: int) -> bool:
     if rational_reach.len() < modules.len(): rational_reach.resize(modules.len())
     r = rational_reach[m]
@@ -2738,8 +2591,6 @@ named_first: int[]
 named_families: NamedFamily[]
 named_decls: int[]
 named_hidden: int[]
-named_grow = (name: int): named_first.resize(name * 2 + 64)
-
 # Fold mathematical powers and floor operations before selecting their runtime
 # overload. Every intermediate is checked, including exponentiation by squaring.
 dewy_math_fold = (n: int, a: int, b: int, power: bool, modulo: bool) -> bool:
@@ -3177,34 +3028,6 @@ fmt_plain: {int: bool} = {}       # (__fmt_fields nodes that format the fields, 
 # (an __fmt_fields node's aux2: 1 inside a container, FMT_DEWY in Dewy's literal syntax)
 const FMT_DEWY = 2
 
-# a library function called as another language's of the same name is (p5's line(x1, y1, x2,
-# y2), fill(r, g, b) and push(); atan(y, x)): what it is here, before its overloads are tried
-# checker_call_queries.dewy's habit_call_check leaves the host the names and argument
-# counts a habit may have.
-habit_rest = (n: int, name: int, args: int[]):
-    nm = name_of(name)
-    # (the program's own function of the name: its call)
-    own: int[]
-    collect_fns(name, &own)
-    loop d in own:
-        if not decl_in_prelude(d): return
-    na = args.len()
-    num = (a: int) -> bool:
-        k = nodes[unnamed(a)].kind
-        k == .int_lit or k == .float_lit or (k == .unary and (nodes[int(nodes[unnamed(a)].a)].kind == .int_lit or nodes[int(nodes[unnamed(a)].a)].kind == .float_lit))
-    pos = nodes[n].pos
-    if nm == "line" and na >= 4 and num(args[0]) and num(args[1]): fatal(pos, "line takes two points: `line(vec2(x1, y1), vec2(x2, y2), width, color)`")
-    if nm == "text" and na >= 3 and num(args[1]) and num(args[2]): fatal(pos, "where text goes is one vec2: `text(s, vec2(x, y), size, color)`")
-    if nm == "clear" and na == 1 and nodes[unnamed(args[0])].kind == .tuple: fatal(pos, "clear takes a color: `clear(rgb(0.1, 0.1, 0.1))` (each from 0 to 1)")
-    if nm == "fill" and na >= 3 and num(args[0]) and num(args[1]) and num(args[2]): fatal(pos, "there is no fill color: each shape takes its color, `circle(pos, r, rgb(1, 0, 0))` (fill(x, n) makes an array of n copies of x)")
-    if nm == "push" and na == 0: fatal(pos, "push() here is push_transform() (and pop() is pop_transform()); xs.push(x) adds to an array")
-    if nm == "pop" and na == 0: fatal(pos, "pop() here is pop_transform(), after push_transform(); xs.pop() takes from an array")
-    if nm == "map" and na == 5: fatal(pos, "the range a..b moved to c..d is `remap(x, a, b, c, d)`; map(xs, f) is f of each element")
-    if nm == "atan" and na == 2: fatal(pos, "the angle of (x, y) is `atan2(y, x)`; atan takes one number")
-    if nm == "random" and na == 1:
-        if nodes[unnamed(args[0])].kind == .array: fatal(pos, "a random element is `random_item(xs)`")
-        if num(args[0]): fatal(pos, "random takes where it starts and ends: `random(0, 10)` (a whole number: `random_int(0, 10)`)")
-
 # x.f where x is a union whose members are all structs with a field f of one type: n becomes
 # `let u = x; if u is A: u.f else ...` (x itself when it is a variable or field); -1 if not
 # Common-field lowering retains its source route for witnesses and stable keys.
@@ -3337,100 +3160,6 @@ collection_array = (n: int, t0: int) -> int:
     nodes[n] = nodes[bc_block([bc_let(source, inner, pos), output, each, bc_stmt(bc_ident(result, pos), pos)], pos)]
     check_expr(n, 0)
 
-# `??<A | B>` (nodes[n].c, the kinds' type) covers only those kinds (none only when listed),
-# and what it does not cover passes through as a value.
-coalesce_failures = (n: int, at: int, expected: int) -> int:
-    pos = nodes[n].pos
-    a = last_checked
-    add_flag(a, NF_CHECKED)
-    name = "$coalesce{n}"
-    members = value_members(at)
-    canceled = int(syms[universe[intern("Canceled")]].ref)
-    cancel_named = nodes[n].c != 0 and coalesce_names_canceled(int(nodes[n].c), canceled)
-    listed: int[]
-    if nodes[n].c != 0:
-        lt = prune(resolve_type(int(nodes[n].c)))
-        listed = if is_union(lt) or tkind(lt) == .opt: value_members(lt) else: [lt]
-        loop l in listed:
-            if not exception_member(l): fatal(pos, "`??<...>` lists the failures it covers: {dt(l)} is not an exception or none")
-            held = false
-            loop m in members:
-                if m == l or m != T_NONE and l != T_NONE and nominal_descends(m, l): held = true
-            if not held and not family_annotation(lt): fatal(pos, "`??<...>` lists {dt(l)}, which {dt(at)} never holds")
-    covered: str[]
-    passed: str[]
-    covers: bool[]
-    loop m in members:
-        c = false
-        if listed.len() == 0: c = exception_member(m)
-        else:
-            loop l in listed:
-                if m == l or m != T_NONE and l != T_NONE and nominal_descends(m, l): c = true
-        if m == canceled and not cancel_named: c = false
-        covers.push(c)
-        if c: covered.push(if m == T_NONE: "none" else: dt(m))
-        else if exception_member(m): passed.push(if m == T_NONE: "none" else: dt(m))
-    if members.contains(canceled) and not cancel_named and dir_explicit_cancellation(pos): cancel_reject(a, covered.len() > 0, "this `??`")
-    if ide_on and not pos_in_lib(pos):
-        text = "?? gives the fallback for " + join(covered, ", ")
-        if passed.len() > 0: text += "; passes on " + join(passed, ", ")
-        ide_emit("I\t{ide_pos_str(pos)}\t{ide_esc(text)}")
-    fallback = int(nodes[n].b)
-    void_fallback = nodes[fallback].kind == .ident and nodes[fallback].name == i32(intern("void"))
-    if void_fallback: fallback = bc_block([], nodes[fallback].pos)
-    # (the fallback converts to the value's type, as an optional's does; an optional
-    # fallback keeps the result optional)
-    values: int[]
-    loop i in 0.. and m in members:
-        if not covers[i] and (m != canceled or cancel_named): values.push(m)
-    target = if expected != 0 and is_union(expected): expected else if values.len() == 1: values[0] else: mk_union(values)
-    probe = clone(fallback)
-    # (`sleep(1s) ?? 0`: the call gives nothing when it succeeds, so there is no value to default)
-    held_hint = coerce_hint
-    if values.len() == 1 and prune(values[0]) == T_VOID and dewy_at(pos):
-        called = if nodes[a].kind == .call and nodes[a].a != 0 and nodes[int(nodes[a].a)].kind == .ident: "`{name_of(int(nodes[int(nodes[a].a)].name))}`" else: "this call"
-        coerce_hint = " ({called} gives no value when it succeeds, so `??` has no value to default: `or_throw` passes its failure on, or `match` it)"
-    pt = prune(check_expr(probe, target))
-    if prune(target) == T_VOID and pt != T_VOID and pt != T_NEVER: coerce(probe, T_VOID)
-    if tkind(pt) == .opt or pt == T_NONE: target = mk_opt(target)
-    chain = 0
-    j = members.len() - 1
-    used = false
-    loop j >= 0:
-        member = members[j]
-        failure = covers[j]
-        value = bc_ident(name, pos)
-        if member == canceled and not cancel_named:
-            ret = mk(.return_, pos)
-            or_throw_returns[pos] = true
-            nodes[ret].a = i32(value)
-            value = bc_block([ret], pos)
-        else if failure and (void_fallback or prune(target) == T_VOID):
-            value = if used: clone(fallback) else: fallback
-            used = true
-        else if failure:
-            typed = bc_let("{name}_fallback", (if used: clone(fallback) else: fallback), pos)
-            nodes[typed].a = i32(type_node_of(target, pos))
-            value = bc_block([typed, bc_stmt(bc_ident("{name}_fallback", pos), pos)], pos)
-            used = true
-        body = bc_block([bc_stmt(value, pos)], pos)
-        if chain == 0: chain = body
-        else:
-            condition = mk(.istype, pos)
-            nodes[condition].a = i32(bc_ident(name, pos))
-            nodes[condition].b = i32(type_node_of(member, pos))
-            branch = mk(.if_, pos)
-            nodes[branch].a = i32(condition)
-            nodes[branch].b = i32(body)
-            nodes[branch].c = i32(chain)
-            if values.len() > 1: nodes[branch].aux2 = -8  # explicit union join, not numeric branch promotion
-            chain = bc_block([bc_stmt(branch, pos)], pos)
-        j -= 1
-    nodes[n] = nodes[bc_block([bc_let(name, a, pos), bc_stmt(chain, pos)], pos)]
-    result = check_expr(n, expected)
-    coerce_hint = held_hint
-    result
-
 # the member a Dewy program wrote, for a library function standing for it
 shown_fn_name = (name: str) -> str:
     if name == "__dewy_find": return "find"
@@ -3505,34 +3234,10 @@ fn_name_for = (t: int, name: int) -> bool:
     tk = types[t].kind
     intrinsics[ii].arr == (tk == .array or tk == .str_)
 
-check_expr_in_module = (n: int, m: int, expected: int = 0) -> int:
-    saved = cx
-    ctxs.push(FnCtx(ctxs[cx].inst, i32(cx), ctxs[cx].ret, false, 0, i32(m), i32(check_scopes.names.len())))
-    cx = ctxs.len() - 1
-    t = check_expr(n, expected)
-    ctxs.pop()
-    cx = saved
-    t
-
 id_len = 0
 # (the object of `x.member` or `x[...]` being checked: a type there is the type)
 type_receiver_at = 0
 empty_index_receiver = 0      # the receiver of an empty index, `E[]`: a type there is constructed by it
-
-# A declared member wins over the synthesized value operation, including on
-# an alternative of a union. Leave those unions to ordinary member forwarding.
-copy_member = (t0: int, name: int) -> bool:
-    t = prune(t0)
-    if is_union(t):
-        loop m in union_members(t):
-            if copy_member(m, name): return true
-    else if tkind(t) == .opt: return copy_member(telem(t), name)
-    else if tkind(t) == .struct_:
-        si = int(types[t].st)
-        check_struct_fields(si)
-        loop i in [0..int(structs[si].nfields)):
-            if fields[int(structs[si].fields) + i].name == i32(name): return true
-    false
 
 synthetic_copy = (t: int, name: int, pos: int) -> bool:
     if name_of(name) != "copy" or not files[pos_file(pos)].is_dewy: return false
@@ -5605,18 +5310,6 @@ dewy_bare_fn = (n: int, is_callee: bool) -> bool:
     if cur_assign != 0 and int(nodes[cur_assign].a) == n: return false
     files[pos_file(nodes[n].pos)].is_dewy
 
-# `f` alone: the call f(), checked in place of n.
-bare_call = (n: int, expected: int) -> int:
-    callee = nodes.len()
-    nodes.push(nodes[n])
-    clear_flag(callee, NF_CHECKED)
-    nodes[callee].type = 0
-    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee))
-    t = check_expr(n, expected)
-    call_style_implicit(n, int(nodes[callee].name) * 8 + 1, t)
-    last_checked = n
-    t
-
 # The walk of one function body for a named wait (rules 3 and 4). In source order it finds w's
 # declaration and the call, and every assignment and `$capture @x` closure on w or a place its
 # receiver path overlaps. From the declaration through the call, and around any loop the call is
@@ -5783,25 +5476,6 @@ dewy_data_after_give = (n: int):
             given.push(int(nodes[v].aux) * 1000000000 + int(nodes[v].sym))
             continue
         if given.len() > 0: dewy_data_of_given(a, given, n)
-
-dewy_data_of_given = (e: int, given: int[], call: int):
-    if e == 0: return
-    k = nodes[e].kind
-    if k == .lambda or k == .fn_: return
-    if k == .intrinsic and (nodes[e].aux as IN) == .arrdata and nkids(e) == 1:
-        x = kid(e, 0)
-        loop nodes[x].kind == .conv: x = int(nodes[x].a)
-        if nodes[x].kind == .ident and given.contains(int(nodes[x].aux) * 1000000000 + int(nodes[x].sym)):
-            nm = name_of(int(nodes[x].name))
-            what = dt(ntype(call))
-            fatal(nodes[e].pos, "data({nm}) reads '{nm}' after it was moved into the {what} (an earlier argument): it unshares the variable's own copy, so the pointer would not point into the array the {what} holds; take `p = data({nm})` before, and pass p")
-    mask = isolation_children(k)
-    if mask < 0: return
-    if mask & 1 != 0: dewy_data_of_given(int(nodes[e].a), given, call)
-    if mask & 2 != 0: dewy_data_of_given(int(nodes[e].b), given, call)
-    if mask & 4 != 0: dewy_data_of_given(int(nodes[e].c), given, call)
-    if mask & 16 != 0:
-        loop c in kids(e): dewy_data_of_given(c, given, call)
 
 mk_ident_local = (l: int, pos: int) -> int:
     n = mk(.ident, pos)
@@ -5989,21 +5663,6 @@ dewy_index_ranges = (n: int, receiver: int):
             set_kid(n, i, value)
             if nodes[n].b == r: nodes[n].b = i32(value)
 
-# The zone rules this program uses: the pack a Dewy version ships, unless the main file says
-# `$time.rules = 'file'` (beside the main file, made with tools/time/gen_rules.py).
-time_rules_path = (path: str) -> str:
-    if path != path_norm(lib_dir + "/time/rules/current.bin"): return path
-    setting = intern("time.rules")
-    scope = dir_program_values.get(setting) ?? -1
-    if scope < 0 or dir_scopes[scope].value < 2: return path
-    rel = name_of(dir_scopes[scope].value - 2)
-    i = pos_file(dir_scopes[scope].start)
-    chosen = if is_abs_path(rel): rel else: "{files[i].dir}/{rel}"
-    d = read_file(chosen)
-    if d == none: fatal(dir_scopes[scope].at, "`$time.rules`: cannot read '{chosen}'")
-    if len(d!) < 4 or d![..4) != "DZP2": fatal(dir_scopes[scope].at, "`$time.rules`: '{chosen}' is not a rule pack; tools/time/gen_rules.py makes one")
-    path_norm(chosen)
-
 # A matrix part can use literal ranges, stored IntRange values or index arrays.
 is_part_index = (n: int, receiver: int = 0) -> bool:
     ixs = kids(n)
@@ -6079,16 +5738,6 @@ map_presence_fn = (call: int) -> int:
         if files[pos_file(nodes[candidate].pos)].path == path:
             return get_fn_inst(candidate, fns[f].targs, nodes[call].pos)
     0
-
-# Optional operations keep their declared optional view even when an alias is
-# known to hold a value. Ordinary nonoptional operands remain type errors.
-narrow_optional_source = (a: int) -> int:
-    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return a
-    l = int(nodes[a].sym)
-    if int(locals[l].flags) & LF_ALIAS == 0: return a
-    al = int(locals[l].alias)
-    if al != 0 and nodes[al].kind == .unwrap: return int(nodes[al].a)
-    a
 
 # Only condition-created aliases escape a guard, never locals declared in an arm.
 narrow_promote = (first: int, limit: int):
@@ -6282,21 +5931,6 @@ path_key = (n: int) -> str:
 path_rooted_l: bool[]
 path_rooted_g: bool[]
 
-# a narrowed path's key as a scope name, its root marked
-path_name = (key: str) -> int:
-    i = 2
-    id = 0
-    loop i < len(key) and key[i] >= '0' and key[i] <= '9':
-        id = id * 10 + int(key[i] - '0')
-        i += 1
-    if key[1] == 'L':
-        if path_rooted_l.len() <= id: path_rooted_l.resize(id * 2 + 64)
-        path_rooted_l[id] = true
-    else:
-        if path_rooted_g.len() <= id: path_rooted_g.resize(id * 2 + 64)
-        path_rooted_g[id] = true
-    intern(key)
-
 # might the field path (or name) n have a narrowed scope entry: its root is marked
 path_rooted = (n0: int) -> bool:
     n = n0
@@ -6328,26 +5962,6 @@ path_alias = (n: int) -> int:
     if int(locals[al].owner) != int(ctxs[cx].inst) or int(locals[al].flags) & LF_UNNARROWED != 0: return -1
     al
 
-narrow_path = (a: int, vi: int, holds: bool):
-    key = path_key(a)
-    if len(key) == 0: return
-    ut = prune(ntype(a))
-    pos = nodes[a].pos
-    path_narrows += 1
-    if is_union(ut):
-        sel: int[]
-        loop i in 0.. and m in union_members(ut):
-            if (i == vi) == holds: sel.push(m)
-        narrow_expr(copy_path(a), sel, pos, path_name(key))
-    else if types[ut].kind == .opt and (vi == -2) == holds:
-        e = mk(.unwrap, pos)
-        nodes[e].a = i32(copy_path(a))
-        nodes[e].type = types[ut].elem
-        add_flag(e, NF_CHECKED)
-        nl = new_local(path_name(key), int(types[ut].elem), pos)
-        locals[nl].flags = i32(LF_ALIAS)
-        locals[nl].alias = i32(e)
-
 # the `x is M` tests (of members) an or-chain is made of; false: it has something else too
 or_tests = (c: int, out: mut int[]) -> bool:
     k = nodes[c].kind
@@ -6356,33 +5970,6 @@ or_tests = (c: int, out: mut int[]) -> bool:
         out.push(c)
         return true
     false
-
-# x is A or x is B ... holding: x is one of those members (when all test the same x)
-narrow_some = (tests: int[]):
-    a0 = int(nodes[tests[0]].a)
-    ut = prune(ntype(a0))
-    if not is_union(ut): return
-    local = nodes[a0].kind == .ident and nodes[a0].aux == i32(int(SK.local))
-    key = ""
-    if not local:
-        key = path_key(a0)
-        if len(key) == 0: return
-    sel: int[]
-    loop t in tests:
-        a = int(nodes[t].a)
-        if local:
-            # (a later test sees the variable narrowed by the earlier ones failing)
-            if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return
-            if narrow_root_local(int(nodes[a].sym)) != narrow_root_local(int(nodes[a0].sym)): return
-        else if path_key(a) != key: return
-        at = prune(ntype(a))
-        if not is_union(at): return
-        m = union_members(at)[int(nodes[t].aux)]
-        if not sel.contains(m): sel.push(m)
-    if local: narrow_local(int(nodes[a0].sym), sel, nodes[a0].pos)
-    else:
-        path_narrows += 1
-        narrow_expr(copy_path(a0), sel, nodes[a0].pos, path_name(key))
 
 # the variable a narrowed alias local stands for (l itself when it is not one)
 narrow_root_local = (l0: int) -> int:

@@ -2,8 +2,8 @@
 
 import pytest
 
-from tests.selfhost_build_double import compare_builds
-from tests.support import ROOT, compiler  # noqa: F401
+from tests.selfhost_build_double import compare_golden_cases
+from tests.support import compiler  # noqa: F401
 
 
 @pytest.mark.parametrize(("leaf", "cases"), [
@@ -26,8 +26,4 @@ from tests.support import ROOT, compiler  # noqa: F401
                              "queue_cancel_wait/channel_failure_diag", "tasks/first_ok_race_many")),
 ], ids=lambda arg: arg if isinstance(arg, str) else None)
 def test_expr_lookup_twins(compiler, tmp_path, monkeypatch, leaf, cases):  # noqa: F811
-    paths = [ROOT / "tests" / "cases" / f"{case}.dewy" for case in cases]
-    assert all(p.is_file() for p in paths)
-    results = compare_builds(compiler, tmp_path, monkeypatch, (leaf,), paths, flags=((), ("--release",)))
-    for path, _, status, *_ in results:
-        assert (status == 0) == (not (ROOT / path).with_suffix(".err").exists()), path
+    compare_golden_cases(compiler, tmp_path, monkeypatch, leaf, cases, flags=((), ("--release",)))

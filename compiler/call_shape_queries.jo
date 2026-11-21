@@ -1,4 +1,8 @@
 use 'ast.jo'
+use 'call_style.dewy'
+use 'checker_expr.dewy'
+use 'expr.jo'
+use 'node_store.dewy'
 use 'check.jo'
 use 'checker_call_queries.dewy'
 use 'checker_signature.dewy'
@@ -47,3 +51,30 @@ bare_fns_call = (name: int, mod: int) -> int:
             sig = fn_sig(d)
             return if sig.ret != 0 and is_fn_type(int(sig.ret)): 2 else: 1
     0
+
+# `f` alone: the call f(), checked in place of n.
+bare_call = (n: int, expected: int) -> int:
+    callee = nodes.len()
+    nodes.push(nodes[n])
+    clear_flag(callee, NF_CHECKED)
+    nodes[callee].type = 0
+    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee))
+    t = check_expr(n, expected)
+    call_style_implicit(n, int(nodes[callee].name) * 8 + 1, t)
+    last_checked = n
+    t
+
+# A declared member wins over the synthesized value operation, including on
+# an alternative of a union. Leave those unions to ordinary member forwarding.
+copy_member = (t0: int, name: int) -> bool:
+    t = prune(t0)
+    if is_union(t):
+        loop m in union_members(t):
+            if copy_member(m, name): return true
+    else if tkind(t) == .opt: return copy_member(telem(t), name)
+    else if tkind(t) == .struct_:
+        si = int(types[t].st)
+        check_struct_fields(si)
+        loop i in [0..int(structs[si].nfields)):
+            if fields[int(structs[si].fields) + i].name == i32(name): return true
+    false

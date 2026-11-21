@@ -1,0 +1,97 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED add_flag mk nodes)
+from p"check.jo" import (LF_ALIAS locals new_local)
+from p"expr.jo" import (copy_path narrow_expr narrow_local narrow_root_local ntype path_key path_narrows path_rooted_g path_rooted_l)
+from p"types.jo" import (is_union prune types union_members)
+from p"util.jo" import (intern)
+
+PathNarrowWord:type=int64<overflow='wrap'>
+const PATH_NARROW_LOCAL:int32=1 # SK.local in the frozen node ABI.
+
+# Optional operations keep their declared optional view even when an alias is
+# known to hold a value. Ordinary nonoptional operands remain type errors.
+narrow_optional_source=(a:int64):>int64=>{
+    if nodes[a].kind not=? 'ident' or nodes[a].aux not=? PATH_NARROW_LOCAL {return a}
+    let l=PathNarrowWord(nodes[a].sym)
+    if PathNarrowWord(locals[l].flags) & LF_ALIAS =? 0 {return a}
+    let al=PathNarrowWord(locals[l].alias)
+    if al not=? 0 and nodes[al].kind =? 'unwrap' {return int64(nodes[al].a)}
+    a
+}
+
+# a narrowed path's key as a scope name, its root marked
+path_name=(key:string):>PathNarrowWord=>{
+    let bytes=key as array<uint8>
+    let i:PathNarrowWord=2
+    let id:PathNarrowWord=0
+    loop i <? bytes.length and bytes[i] >=? b'0' and bytes[i] <=? b'9' {
+        id=id*10 + PathNarrowWord(bytes[i] - b'0')
+        i += 1
+    }
+    if bytes[1] =? b'L' {
+        if path_rooted_l.length <=? id {path_rooted_l.resize(id*2 + 64)}
+        path_rooted_l[id]=true
+    }
+    else {
+        if path_rooted_g.length <=? id {path_rooted_g.resize(id*2 + 64)}
+        path_rooted_g[id]=true
+    }
+    intern(key)
+}
+
+narrow_path=(a:PathNarrowWord vi:PathNarrowWord holds:bool):>void=>{
+    let key=path_key(a)
+    if key =? "" {return}
+    let ut=prune(ntype(a))
+    let pos=nodes[a].pos
+    let count = @path_narrows
+    count=PathNarrowWord(count) + 1
+    if is_union(ut) {
+        let sel:array<int64>=[]
+        loop i in 0.. and m in union_members(ut) {
+            if (i =? vi) =? holds {sel.push(m)}
+        }
+        narrow_expr(copy_path(a) sel pos path_name(key))
+    }
+    else if types[ut].kind =? 'opt' and (vi =? -2) =? holds {
+        let e=mk('unwrap' pos)
+        nodes[e].a=int32(copy_path(a))
+        nodes[e].type=types[ut].elem
+        add_flag(e NF_CHECKED)
+        let nl=new_local(path_name(key) PathNarrowWord(types[ut].elem) pos)
+        locals[nl].flags=int32(LF_ALIAS)
+        locals[nl].alias=int32(e)
+    }
+}
+
+# x is A or x is B ... holding: x is one of those members (when all test the same x)
+narrow_some=(tests:array<int64>):>void=>{
+    let a0=PathNarrowWord(nodes[tests[0]].a)
+    let ut=prune(ntype(a0))
+    if not is_union(ut) {return}
+    let local=nodes[a0].kind =? 'ident' and nodes[a0].aux =? PATH_NARROW_LOCAL
+    let key=""
+    if not local {
+        key=path_key(a0)
+        if key =? "" {return}
+    }
+    let sel:array<int64>=[]
+    loop t in tests {
+        let a=PathNarrowWord(nodes[t].a)
+        if local {
+            if nodes[a].kind not=? 'ident' or nodes[a].aux not=? PATH_NARROW_LOCAL {return}
+            if narrow_root_local(PathNarrowWord(nodes[a].sym)) not=? narrow_root_local(PathNarrowWord(nodes[a0].sym)) {return}
+        }
+        else if path_key(a) not=? key {return}
+        let at=prune(ntype(a))
+        if not is_union(at) {return}
+        let m=union_members(at)[PathNarrowWord(nodes[t].aux)]
+        if not sel.contains(m) {sel.push(m)}
+    }
+    if local {narrow_local(PathNarrowWord(nodes[a0].sym) sel nodes[a0].pos)}
+    else {
+        let count = @path_narrows
+        count=PathNarrowWord(count) + 1
+        narrow_expr(copy_path(a0) sel nodes[a0].pos path_name(key))
+    }
+}

@@ -1,10 +1,13 @@
 $runtime_checks
-from p"ast.jo" import (kid nkids nodes)
+from p"call_style.dewy" import (call_style_implicit)
+from p"checker_expr.dewy" import (check_expr)
+from p"node_store.dewy" import (Node)
+from p"ast.jo" import (NF_CHECKED clear_flag kid nkids nodes)
 from p"check.jo" import (check_struct_fields)
 from p"checker_signature.dewy" import (fn_sig)
 from p"checks_thin_expr.dewy" import (is_fn_type)
-from p"expr.jo" import (call_collect_named)
-from p"types.jo" import (fields prune structs tkind types)
+from p"expr.jo" import (call_collect_named last_checked)
+from p"types.jo" import (fields is_union prune structs telem tkind types union_members)
 from p"util.jo" import (name_of)
 
 CallShapeWord:type=int64<overflow='wrap'>
@@ -54,4 +57,38 @@ bare_fns_call=(name:int64 mod:int64):>int64=>{
         }
     }
     0
+}
+
+# `f` alone: the call f(), checked in place of n.
+bare_call=(n:int64 expected:int64):>int64=>{
+    let callee=nodes.length
+    nodes.push(nodes[n])
+    clear_flag(callee NF_CHECKED)
+    nodes[callee].type=0
+    nodes[n]=Node(kind='call' pos=nodes[n].pos a=int32(callee))
+    let t=check_expr(n expected)
+    call_style_implicit(n CallShapeWord(nodes[callee].name)*8 + 1 t)
+    let last = @last_checked
+    last=n
+    t
+}
+
+# A declared member wins over the synthesized value operation, including on
+# an alternative of a union. Leave those unions to ordinary member forwarding.
+copy_member=(t0:CallShapeWord name:CallShapeWord):>bool=>{
+    let t=prune(t0)
+    if is_union(t) {
+        loop m in union_members(t) {
+            if copy_member(m name) {return true}
+        }
+    }
+    else if tkind(t) =? 'opt' {return copy_member(telem(t) name)}
+    else if tkind(t) =? 'struct_' {
+        let si=CallShapeWord(types[t].st)
+        check_struct_fields(si)
+        loop i in [0..CallShapeWord(structs[si].nfields)) {
+            if fields[CallShapeWord(structs[si].fields) + i].name =? int32(name) {return true}
+        }
+    }
+    false
 }

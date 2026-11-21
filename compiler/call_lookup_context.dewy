@@ -1,8 +1,10 @@
 $runtime_checks
+from p"checker_expr.dewy" import (check_expr)
+from p"checker_state.dewy" import (FnCtx)
 from p"ast.jo" import (nkids nodes)
-from p"check.jo" import (cur_mod ctxs cx demand_name fns get_fn_inst method_modules modules prelude syms)
+from p"check.jo" import (check_scopes ctxs cur_mod cx demand_name fns get_fn_inst method_modules modules prelude syms)
 from p"checker_signature.dewy" import (fn_sig)
-from p"expr.jo" import (call_collect_fns call_collect_module decl_in_prelude match_type)
+from p"expr.jo" import (call_collect_fns call_collect_module decl_in_prelude exact_families_changed match_type named_first rational_module rational_reach reaches_rational)
 from p"types.jo" import (prune structs tkind type_eq types)
 from p"util.jo" import (files intern pos_file)
 
@@ -72,4 +74,26 @@ library_len_fits=(t0:LookupWord):>bool=>{
         }
     }
     false
+}
+
+check_expr_in_module=(n:LookupWord m:LookupWord expected:LookupWord=0):>LookupWord=>{
+    let context = @cx
+    let saved=context
+    ctxs.push(FnCtx(ctxs[saved].inst int32(saved) ctxs[saved].ret false 0 int32(m) int32(check_scopes.names.length)))
+    context=LookupWord(ctxs.length) - 1
+    let t=check_expr(n expected)
+    ctxs.pop();
+    context=saved
+    t
+}
+
+named_grow=(name:int64):>void=>{named_first.resize(LookupWord(name)*2 + 64)}
+
+# (a function of the Dewy prelude's module dm called from m, such as `rational(1 3)`: m reaches
+# what dm's imports do, the bundled rational included)
+prelude_reach=(m:int64 dm:int64):>void=>{
+    let rm=rational_module()
+    if rm <? 0 or not reaches_rational(dm rm) or rational_reach[m] =? 1 {return}
+    rational_reach[m]=1
+    exact_families_changed()
 }

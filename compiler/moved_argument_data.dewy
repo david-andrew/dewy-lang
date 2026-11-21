@@ -1,0 +1,32 @@
+$runtime_checks
+from p"ast.jo" import (kid kids nkids nodes)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (IN ntype)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"type_ops.dewy" import (dt)
+from p"util.jo" import (name_of)
+
+MovedDataWord:type=int64<overflow='wrap'>
+
+dewy_data_of_given=(e:MovedDataWord given:array<int64> call:MovedDataWord):>void=>{
+    if e =? 0 {return}
+    let k=nodes[e].kind
+    if k =? 'lambda' or k =? 'fn_' {return}
+    if k =? 'intrinsic' and (nodes[e].aux as IN) =? IN.arrdata and nkids(e) =? 1 {
+        let x=kid(e 0)
+        loop nodes[x].kind =? 'conv' {x=MovedDataWord(nodes[x].a)}
+        if nodes[x].kind =? 'ident' and given.contains(MovedDataWord(nodes[x].aux)*1000000000 + MovedDataWord(nodes[x].sym)) {
+            let nm=name_of(MovedDataWord(nodes[x].name))
+            let what=dt(ntype(call))
+            fatal(nodes[e].pos "data({nm}) reads '{nm}' after it was moved into the {what} (an earlier argument): it unshares the variable's own copy, so the pointer would not point into the array the {what} holds; take `p = data({nm})` before, and pass p")
+        }
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {dewy_data_of_given(MovedDataWord(nodes[e].a) given call)}
+    if mask & 2 not=? 0 {dewy_data_of_given(MovedDataWord(nodes[e].b) given call)}
+    if mask & 4 not=? 0 {dewy_data_of_given(MovedDataWord(nodes[e].c) given call)}
+    if mask & 16 not=? 0 {
+        loop c in kids(e) {dewy_data_of_given(c given call)}
+    }
+}

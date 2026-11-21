@@ -4,6 +4,7 @@ import subprocess
 
 from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT
+from tools.cases import parse
 
 
 def build_all(binary, tmp_path, label, paths, flags=((),)):
@@ -36,3 +37,12 @@ def compare_builds(compiler, tmp_path, monkeypatch, leaves, paths, flags=((),)):
         assert a[:5] == b[:5] and a[5].keys() == b[5].keys(), (a[:5], b[:5])
         assert a[5] == b[5], (a[0], a[1], [name for name in a[5] if a[5][name] != b[5][name]])
     return expected
+
+
+def compare_golden_cases(compiler, tmp_path, monkeypatch, leaf, cases, flags=((),)):
+    """Compare both compilers and require the build outcome specified by each golden case."""
+    paths = [ROOT / 'tests' / 'cases' / f'{case}.dewy' for case in cases]
+    should_build = {str(path): parse(path).kind != 'reject' for path in paths}
+    results = compare_builds(compiler, tmp_path, monkeypatch, (leaf,), paths, flags)
+    for path, _, status, *_ in results:
+        assert (status == 0) == should_build[path], path

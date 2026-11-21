@@ -1,0 +1,75 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_LITERAL clear_flag clone has_flag kid nkids nodes set_list)
+from p"check.jo" import (ceval dewy_at sink_pack_hit sink_pack_site syms)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checks_builders.dewy" import (bc_int)
+from p"checks_thin.dewy" import (readonly_global)
+from p"concurrency_types.dewy" import (concurrency_require_zero)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (coerce ntype struct_default)
+from p"refine.jo" import (refine_active)
+from p"refine_metadata.dewy" import (ref_storage_contract)
+from p"type_ops.dewy" import (fixed_len)
+from p"types.jo" import (T_INT prune types)
+
+AggregateSourceWord:type=int64<overflow='wrap'>
+const AGGREGATE_GLOBAL:int32=2 # SK.global
+const AGGREGATE_CONST:int32=6 # SK.const_
+
+# make array literal n (already checked as T[]) the fixed-size array type `to`
+fixed_literal=(n:AggregateSourceWord to:AggregateSourceWord):>void=>{
+    let et=AggregateSourceWord(types[prune(to)].elem)
+    if nkids(n) =? 0 and fixed_len(to) >? 0 {concurrency_require_zero(n et)}
+    if refine_active and nkids(n) =? 0 and fixed_len(to) >? 0 and ref_storage_contract(et) {
+        let value=struct_default(et nodes[n].pos)
+        if value not=? 0 {
+            set_list(n [value])
+            nodes[n].b=int32(bc_int(fixed_len(to) nodes[n].pos))
+            nodes[AggregateSourceWord(nodes[n].b)].type=int32(T_INT)
+        }
+    }
+    if nodes[n].b not=? 0 {
+        let c=AggregateSourceWord(nodes[n].b)
+        let root=c
+        loop nodes[root].kind =? 'conv' {root=AggregateSourceWord(nodes[root].a)}
+        if nodes[root].kind =? 'ident' and dewy_at(nodes[n].pos) and (nodes[root].aux =? AGGREGATE_GLOBAL and readonly_global(AggregateSourceWord(nodes[root].sym)) or nodes[root].aux =? AGGREGATE_CONST) {
+            if ceval(root).i =? fixed_len(to) {
+                nodes[n].b=int32(bc_int(fixed_len(to) nodes[n].pos))
+                c=AggregateSourceWord(nodes[n].b)
+                nodes[c].type=int32(T_INT)
+            }
+        }
+        if nodes[c].kind not=? 'int_lit' or nodes[c].ival not=? fixed_len(to) {fatal(nodes[n].pos "a fixed-size array of {fixed_len(to)} elements needs the count {fixed_len(to)} here")}
+        coerce(kid(n 0) et);
+    }
+    else {
+        loop i in [0..nkids(n)) {coerce(kid(n i) et);}
+    }
+    nodes[n].type=int32(to)
+    clear_flag(n NF_LITERAL)
+}
+
+# With no written field names, the first spread distinguishes `[xs...]` from
+# `[record...]`. Inspect a clone so contextual checking retains the source AST.
+dewy_spread_source_type=(n:AggregateSourceWord):>AggregateSourceWord=>{
+    if nodes[n].type not=? 0 and has_flag(n NF_CHECKED) {return prune(ntype(n))}
+    let copy=clone(n)
+    let site = @sink_pack_site
+    let saved=site
+    site=copy
+    let t=check_expr(copy 0)
+    site=saved
+    let hit = @sink_pack_hit
+    hit=0
+    prune(t)
+}
+
+# (`[f()...]`, f a function or function value by name: it may give several values)
+values_spread_call=(c:AggregateSourceWord):>bool=>{
+    let callee=AggregateSourceWord(nodes[c].a)
+    if nodes[callee].kind not=? 'ident' or has_flag(c NF_CHECKED) {return false}
+    let s=lookup(AggregateSourceWord(nodes[callee].name))
+    if s =? 0 {return false}
+    let k=syms[s].kind
+    k =? 'fns' or k =? 'local' or k =? 'global'
+}

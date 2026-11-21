@@ -1,0 +1,52 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_expr.dewy'
+use 'checks_builders.dewy'
+use 'checks_thin_expr.dewy'
+use 'expr.jo'
+use 'node_store.dewy'
+use 'refine.jo'
+use 'refine_metadata.dewy'
+use 'types.jo'
+use 'util.jo'
+
+# m[k] changed in place (m[k] += 1, m[k].push(x), m[k].x = 5, loop mut x in m[k]): the value
+# stored in m, m.vals[__map_entry_present(m, k)] in Dewy (a missing key fails)
+map_elem_place = (n: int):
+    pos = nodes[n].pos
+    m = kid(n, 0)
+    key = kid(n, 1)
+    mt = prune(ntype(m))
+    vt = struct_targ(int(types[mt].st), 1)
+    mc = copy_place(m)
+    add_flag(mc, NF_MUT)
+    args = [mc, key]
+    pv = prune(vt)
+    # (Dewy: the key must be there, as for reading m[k]; nothing is invented for a missing one)
+    present = files[pos_file(pos)].is_dewy
+    if present: pass
+    else if types[pv].kind == .struct_ and not is_map_type(pv):
+        # (a struct with default field values starts with them)
+        si = int(types[pv].st)
+        check_struct_fields(si)
+        has_def = false
+        loop i in [0..int(structs[si].nfields)):
+            if fields[int(structs[si].fields) + i].defval != 0: has_def = true
+        if has_def:
+            d = mk(.call, pos)
+            struct_ctor_zero(d, pv, int(structs[si].decl))
+            add_flag(d, NF_CHECKED)
+            args.push(d)
+    entry = "__map_entry"
+    if present: entry = "__map_entry_present"
+    call = bc_call(entry, args, pos)
+    check_expr(call, 0)
+    call = last_checked
+    f = mk(.field, pos)
+    nodes[f].a = i32(m)
+    nodes[f].name = i32(intern("vals"))
+    check_expr(f, 0)
+    f = last_checked
+    # (a refined value reads as its base, as an array element does; stores into it are checked)
+    rt = if refine_active: representation_type(vt) else: vt
+    nodes[n] = Node(kind = .index, pos = pos, a = i32(f), b = i32(call), type = i32(rt), flags = i32(NF_CHECKED | NF_INBOUNDS))

@@ -3,6 +3,8 @@ use 'check.jo'
 use 'checker_call_queries.dewy'
 use 'checker_signature.dewy'
 use 'expr.jo'
+use 'checker_expr.dewy'
+use 'checker_state.dewy'
 use 'types.jo'
 use 'util.jo'
 
@@ -58,3 +60,22 @@ library_len_fits = (t0: int) -> bool:
                     if match_type(sig.params[0], t, rb, 0) >= 0: return true
             s = int(syms[s].next)
     false
+
+check_expr_in_module = (n: int, m: int, expected: int = 0) -> int:
+    saved = cx
+    ctxs.push(FnCtx(ctxs[cx].inst, i32(cx), ctxs[cx].ret, false, 0, i32(m), i32(check_scopes.names.len())))
+    cx = ctxs.len() - 1
+    t = check_expr(n, expected)
+    ctxs.pop()
+    cx = saved
+    t
+
+named_grow = (name: int): named_first.resize(name * 2 + 64)
+
+# (a function of the Dewy prelude's module dm called from m, such as `rational(1 3)`: m reaches
+# what dm's imports do, the bundled rational included)
+prelude_reach = (m: int, dm: int):
+    rm = rational_module()
+    if rm < 0 or not reaches_rational(dm, rm) or rational_reach[m] == 1: return
+    rational_reach[m] = 1
+    exact_families_changed()

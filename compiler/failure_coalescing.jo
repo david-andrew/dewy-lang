@@ -1,0 +1,111 @@
+use 'ast.jo'
+use 'cancel_hints.dewy'
+use 'check.jo'
+use 'checker_expr.dewy'
+use 'checks_builders.dewy'
+use 'checks_thin.dewy'
+use 'diagnostic_exit.dewy'
+use 'directive_ops.dewy'
+use 'error_ops.dewy'
+use 'expr.jo'
+use 'expr_hints.dewy'
+use 'ide.jo'
+use 'ide_index.dewy'
+use 'ide_ops.dewy'
+use 'type_ops.dewy'
+use 'types.jo'
+use 'util.jo'
+
+# `??<A | B>` (nodes[n].c, the kinds' type) covers only those kinds (none only when listed),
+# and what it does not cover passes through as a value.
+coalesce_failures = (n: int, at: int, expected: int) -> int:
+    pos = nodes[n].pos
+    a = last_checked
+    add_flag(a, NF_CHECKED)
+    name = "$coalesce{n}"
+    members = value_members(at)
+    canceled = int(syms[universe[intern("Canceled")]].ref)
+    cancel_named = nodes[n].c != 0 and coalesce_names_canceled(int(nodes[n].c), canceled)
+    listed: int[]
+    if nodes[n].c != 0:
+        lt = prune(resolve_type(int(nodes[n].c)))
+        listed = if is_union(lt) or tkind(lt) == .opt: value_members(lt) else: [lt]
+        loop l in listed:
+            if not exception_member(l): fatal(pos, "`??<...>` lists the failures it covers: {dt(l)} is not an exception or none")
+            held = false
+            loop m in members:
+                if m == l or m != T_NONE and l != T_NONE and nominal_descends(m, l): held = true
+            if not held and not family_annotation(lt): fatal(pos, "`??<...>` lists {dt(l)}, which {dt(at)} never holds")
+    covered: str[]
+    passed: str[]
+    covers: bool[]
+    loop m in members:
+        c = false
+        if listed.len() == 0: c = exception_member(m)
+        else:
+            loop l in listed:
+                if m == l or m != T_NONE and l != T_NONE and nominal_descends(m, l): c = true
+        if m == canceled and not cancel_named: c = false
+        covers.push(c)
+        if c: covered.push(if m == T_NONE: "none" else: dt(m))
+        else if exception_member(m): passed.push(if m == T_NONE: "none" else: dt(m))
+    if members.contains(canceled) and not cancel_named and dir_explicit_cancellation(pos): cancel_reject(a, covered.len() > 0, "this `??`")
+    if ide_on and not pos_in_lib(pos):
+        text = "?? gives the fallback for " + join(covered, ", ")
+        if passed.len() > 0: text += "; passes on " + join(passed, ", ")
+        ide_emit("I\t{ide_pos_str(pos)}\t{ide_esc(text)}")
+    fallback = int(nodes[n].b)
+    void_fallback = nodes[fallback].kind == .ident and nodes[fallback].name == i32(intern("void"))
+    if void_fallback: fallback = bc_block([], nodes[fallback].pos)
+    # (the fallback converts to the value's type, as an optional's does; an optional
+    # fallback keeps the result optional)
+    values: int[]
+    loop i in 0.. and m in members:
+        if not covers[i] and (m != canceled or cancel_named): values.push(m)
+    target = if expected != 0 and is_union(expected): expected else if values.len() == 1: values[0] else: mk_union(values)
+    probe = clone(fallback)
+    # (`sleep(1s) ?? 0`: the call gives nothing when it succeeds, so there is no value to default)
+    held_hint = coerce_hint
+    if values.len() == 1 and prune(values[0]) == T_VOID and dewy_at(pos):
+        called = if nodes[a].kind == .call and nodes[a].a != 0 and nodes[int(nodes[a].a)].kind == .ident: "`{name_of(int(nodes[int(nodes[a].a)].name))}`" else: "this call"
+        coerce_hint = " ({called} gives no value when it succeeds, so `??` has no value to default: `or_throw` passes its failure on, or `match` it)"
+    pt = prune(check_expr(probe, target))
+    if prune(target) == T_VOID and pt != T_VOID and pt != T_NEVER: coerce(probe, T_VOID)
+    if tkind(pt) == .opt or pt == T_NONE: target = mk_opt(target)
+    chain = 0
+    j = members.len() - 1
+    used = false
+    loop j >= 0:
+        member = members[j]
+        failure = covers[j]
+        value = bc_ident(name, pos)
+        if member == canceled and not cancel_named:
+            ret = mk(.return_, pos)
+            or_throw_returns[pos] = true
+            nodes[ret].a = i32(value)
+            value = bc_block([ret], pos)
+        else if failure and (void_fallback or prune(target) == T_VOID):
+            value = if used: clone(fallback) else: fallback
+            used = true
+        else if failure:
+            typed = bc_let("{name}_fallback", (if used: clone(fallback) else: fallback), pos)
+            nodes[typed].a = i32(type_node_of(target, pos))
+            value = bc_block([typed, bc_stmt(bc_ident("{name}_fallback", pos), pos)], pos)
+            used = true
+        body = bc_block([bc_stmt(value, pos)], pos)
+        if chain == 0: chain = body
+        else:
+            condition = mk(.istype, pos)
+            nodes[condition].a = i32(bc_ident(name, pos))
+            nodes[condition].b = i32(type_node_of(member, pos))
+            branch = mk(.if_, pos)
+            nodes[branch].a = i32(condition)
+            nodes[branch].b = i32(body)
+            nodes[branch].c = i32(chain)
+            if values.len() > 1: nodes[branch].aux2 = -8  # explicit union join, not numeric branch promotion
+            chain = bc_block([bc_stmt(branch, pos)], pos)
+        j -= 1
+    nodes[n] = nodes[bc_block([bc_let(name, a, pos), bc_stmt(chain, pos)], pos)]
+    result = check_expr(n, expected)
+    coerce_hint = held_hint
+    result

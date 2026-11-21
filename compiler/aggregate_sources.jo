@@ -1,0 +1,65 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_expr.dewy'
+use 'checker_state.dewy'
+use 'checks_builders.dewy'
+use 'checks_thin.dewy'
+use 'concurrency_types.dewy'
+use 'diagnostic_exit.dewy'
+use 'expr.jo'
+use 'refine.jo'
+use 'refine_metadata.dewy'
+use 'type_ops.dewy'
+use 'types.jo'
+
+# make array literal n (already checked as T[]) the fixed-size array type `to`
+fixed_literal = (n: int, to: int):
+    et = int(types[prune(to)].elem)
+    if nkids(n) == 0 and fixed_len(to) > 0: concurrency_require_zero(n, et)
+    if refine_active and nkids(n) == 0 and fixed_len(to) > 0 and ref_storage_contract(et):
+        value = struct_default(et, nodes[n].pos)
+        if value != 0:
+            set_list(n, [value])
+            nodes[n].b = i32(bc_int(fixed_len(to), nodes[n].pos))
+            nodes[int(nodes[n].b)].type = i32(T_INT)
+    if nodes[n].b != 0:
+        c = int(nodes[n].b)
+        # (a module const's count, `fill(1 N)` with `const N = NAMES.length`: its value)
+        root = c
+        loop nodes[root].kind == .conv: root = int(nodes[root].a)
+        if nodes[root].kind == .ident and dewy_at(nodes[n].pos) and (nodes[root].aux == i32(int(SK.global)) and readonly_global(int(nodes[root].sym)) or nodes[root].aux == i32(int(SK.const_))):
+            if ceval(root).i == fixed_len(to):
+                nodes[n].b = i32(bc_int(fixed_len(to), nodes[n].pos))
+                c = int(nodes[n].b)
+                nodes[c].type = i32(T_INT)
+        if nodes[c].kind != .int_lit or nodes[c].ival != fixed_len(to): fatal(nodes[n].pos, "a fixed-size array of {fixed_len(to)} elements needs the count {fixed_len(to)} here")
+        coerce(kid(n, 0), et)
+    else:
+        loop i in [0..nkids(n)): coerce(kid(n, i), et)
+    nodes[n].type = i32(to)
+    clear_flag(n, NF_LITERAL)
+
+# With no written field names, the first spread distinguishes `[xs...]` from
+# `[record...]`. Inspect a clone so contextual checking retains the source AST.
+dewy_spread_source_type = (n: int) -> int:
+    # Call arguments may already have become checked constructor calls. Their
+    # original type syntax is gone; retain the checked type instead of cloning
+    # them as unchecked syntax and trying to resolve them again.
+    if nodes[n].type != 0 and has_flag(n, NF_CHECKED): return prune(ntype(n))
+    copy = clone(n)
+    # (`[pair()...]`: a function expressing several values spreads them as an array would)
+    saved_site = sink_pack_site
+    sink_pack_site = copy
+    t = check_expr(copy, 0)
+    sink_pack_site = saved_site
+    sink_pack_hit = 0
+    prune(t)
+
+# (`[f()...]`, f a function or function value by name: it may give several values)
+values_spread_call = (c: int) -> bool:
+    callee = int(nodes[c].a)
+    if nodes[callee].kind != .ident or has_flag(c, NF_CHECKED): return false
+    s = lookup(int(nodes[callee].name))
+    if s == 0: return false
+    k = syms[s].kind
+    k == .fns or k == .local or k == .global
