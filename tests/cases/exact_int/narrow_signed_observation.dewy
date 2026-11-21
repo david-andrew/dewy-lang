@@ -1,0 +1,27 @@
+$runtime_checks
+# Printing observes a narrow signed result exactly; only a store checks its width.
+s8=(x:int8):>void=>{
+    printl(x + 100)
+    printl((x + 100) // 1)
+    printl(5 % (x + 100))
+    printl((-1) % (x + 100))
+    printl("v={x * x}")
+    printl(x - 1 + 1)
+    printl(x)
+}
+s16=(x:int16):>void=>{
+    printl((x << 16) // 3)
+    printl((x << 16) % 3)
+    printl(x * x)
+}
+s32=(x:int32):>void=>{
+    printl((x * x) // 3)
+    printl(x - 2147483647)
+    let y:int32 = x // 2
+    printl(y)
+}
+main=()=>{
+    s8(127)
+    s16(-32123)
+    s32(-2147483648)
+}
