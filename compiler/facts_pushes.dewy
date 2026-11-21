@@ -541,7 +541,8 @@ fact_range_sums=(n:PushWord s:FactState lo:PushWord hi:PushWord):>array<[int64 F
     fact_counted_sums(n s count)
 }
 # The sums of a loop that runs at most count times (see fact_range_sums).
-fact_counted_sums=(n:PushWord s:FactState count:PushWord):>array<[int64 FactBound]>=>$unsafe {
+# A stepped loop may also supply the bounds of its unmodified induction value.
+fact_counted_sums=(n:PushWord s:FactState count:PushWord induction:PushWord=0 bounds:FactBound=FactBound()):>array<[int64 FactBound]>=>$unsafe {
     let out:array<[int64 FactBound]>=[]
     let exact=exact_proof_demands.has(fact_owner) and count <=? 1048576
     let work=[PushWord(nodes.ptr[n].b)]
@@ -568,6 +569,11 @@ fact_counted_sums=(n:PushWord s:FactState count:PushWord):>array<[int64 FactBoun
                     if exact and fact_exact_demand(store) {operation=fact_progress_strip(PushWord(nodes.ptr[store].a))}
                 }
                 else if fact_type(PushWord(locals.ptr[l].type)) =? T_MATH_INT {operation=fact_progress_strip(store)}
+                else if induction not=? 0 and nodes.ptr[store].kind =? 'conv' and nodes.ptr[store].aux =? int32(int64(CV.int_)) and fact_type(ntype(PushWord(nodes.ptr[store].a))) =? T_MATH_INT {
+                    # The checked conversion preserves the exact sum on every
+                    # path that completes the assignment.
+                    operation=PushWord(nodes.ptr[store].a)
+                }
                 if operation >? 0 and nodes.ptr[operation].kind =? 'binary' and nodes.ptr[operation].aux =? 0 and (nodes.ptr[operation].op =? int32(58) or nodes.ptr[operation].op =? int32(59)) and fact_progress_same(a PushWord(nodes.ptr[operation].a)) and not exact_has_node(PushWord(nodes.ptr[operation].b)) {
                     stores.push([l operation])
                 }
@@ -601,6 +607,7 @@ fact_counted_sums=(n:PushWord s:FactState count:PushWord):>array<[int64 FactBoun
         let delta=fact_domain(ntype(rhs))
         # (a literal step is its own interval; a mathematical int is unbounded)
         if nodes.ptr[rhs].kind =? 'int_lit' and not oversized_literal(rhs) and not has_flag(rhs NF_U64) {delta=FactBound(nodes.ptr[rhs].ival nodes.ptr[rhs].ival)}
+        else if induction not=? 0 and nodes.ptr[rhs].kind =? 'ident' and nodes.ptr[rhs].aux =? int32(1) and PushWord(nodes.ptr[rhs].sym) =? induction {delta=bounds}
         else if fact_type(ntype(rhs)) =? T_MATH_INT {continue}
         if entry.wide or delta.wide or delta.lo <? -2147483648 or delta.hi >? 2147483647 {continue}
         let low=min(0 delta.lo)

@@ -1040,6 +1040,8 @@ at most once per iteration by a small fixed step (`n += 1`, `t += b` for a byte 
 stays within its entry value plus that many steps per element or range position.
 A narrower counter a loop changes only under a guard against a constant
 (`if near <? 10 { near += 1 }`) stays within that constant.
+A bounded stepped loop can use its unchanged index as that increment when
+its index bounds and trip limit prove the accumulator stays in range.
 Array and range loops settle what they carry the way condition loops do (a running
 `max` over `loop x in xs` stays within `int64`), and an integer array built by a
 loop that only pushes onto it (a comprehension, filtered or not) keeps the range of

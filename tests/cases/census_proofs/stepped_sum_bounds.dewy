@@ -1,0 +1,16 @@
+$no_assumed_bounds
+
+math = ():>uint8 => {
+    let total:int = 0
+    loop i in 1,3..10 {total += i}
+    loop i in 11,9..5 {total += i}
+    total as uint8
+}
+word = ():>int64 => {
+    let total:int64 = 0
+    loop i in 1,3..10 {total += i}
+    loop i in 11,9..5 {total += i}
+    total
+}
+printl(math())
+printl(word())

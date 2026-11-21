@@ -26,7 +26,9 @@ from p"facts_joins.dewy" import (fact_hull fact_join fact_known_none)
 from p"facts_loops.dewy" import (fact_loop_body)
 from p"facts_maps.dewy" import (fact_keys_element)
 from p"facts_probes.dewy" import (fact_probe_record)
-from p"facts_pushes.dewy" import (fact_iterate fact_mentions)
+from p"facts_pushes.dewy" import (fact_counted_bounds fact_counted_sums fact_iterate fact_mentions)
+from p"facts_index_proofs.dewy" import (stable_loop_index)
+from p"facts.jo" import (fact_slice)
 from p"facts_summaries.dewy" import (fact_summary_payload)
 from p"isolation_ops.dewy" import (isolation_children)
 from p"lower_views.dewy" import (comprehension_value)
@@ -34,7 +36,7 @@ from p"ownership.jo" import (ownership_decls)
 from p"ownership_types.dewy" import (ownership_fact_type ownership_type)
 from p"refine_metadata.dewy" import (representation_type)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
-from p"types.jo" import (T_BOOL T_INT T_MATH_INT T_STR fields structs targ telem tkind type_eq types)
+from p"types.jo" import (T_BOOL T_INT T_MATH_INT T_STR T_U64 fields structs targ telem tkind type_eq types)
 from p"type_ops.dewy" import (fixed_len is_managed)
 from p"util.jo" import (files pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
@@ -223,9 +225,30 @@ fact_stepped=(n:ElementWord @s:FactState):>void=>$unsafe {
     let up=fact_compare(s 'lt' first second) =? 1
     let down=fact_compare(s 'lt' second first) =? 1
     if not up and not down or fact_probe_on {fact_step_check(n @s first second ElementWord(nodes.ptr[iterator].a) ElementWord(nodes.ptr[iterator].c))}
+    let sums:array<[int64 FactBound]>=[]
+    let index=ElementWord(nodes.ptr[n].sym)
+    if fact_slice.carried and end_ not=? 0 and (up or down) and index >? 0 and stable_loop_index(index) and fact_type(ElementWord(locals.ptr[index].type)) not=? T_U64 {
+        let start=fact_bound(s first)
+        let stop=fact_bound(s end_)
+        let low=if up {start.lo} else {stop.lo}
+        let high=if up {stop.hi} else {start.hi}
+        # A nonzero integer step visits each value at most once. Bound the
+        # number of trips by the interval even if the stride is not constant.
+        if not start.wide and not stop.wide and low >? FACT_MIN and high <? FACT_MAX and fact_add_fits(high (-low)) {
+            let count=max(0 ElementWord(high) - low)
+            if count <? 1048576 {
+                let inclusive=has_flag(iterator NF_INCLUSIVE)
+                if inclusive {count += 1}
+                sums=fact_counted_sums(n s count index FactBound(low high))
+            }
+        }
+    }
     let entry=s
-    let iterated=fact_iterate(n @s true second first end_ [] [])
-    if not iterated {fact_changes(n @s n)}
+    let iterated=fact_iterate(n @s true second first end_ [] sums)
+    if not iterated {
+        fact_changes(n @s n)
+        fact_counted_bounds(@s sums)
+    }
     let after=s
     let body=fact_stepped_body(n s first second end_)
     let edges=fact_loop_body(n @body)

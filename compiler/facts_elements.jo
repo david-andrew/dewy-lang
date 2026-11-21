@@ -71,6 +71,7 @@ use 'facts_changes.dewy'
 use 'facts_library.dewy'
 use 'facts_summaries.dewy'
 use 'facts_pushes.dewy'
+use 'facts_index_proofs.dewy'
 use 'facts_text.dewy'
 use 'facts_arrays.dewy'
 use 'facts_maps.dewy'
@@ -239,11 +240,24 @@ fact_stepped = (n: int, s: mut FactState):
     up = fact_compare(s, .lt, first, second) == 1
     down = fact_compare(s, .lt, second, first) == 1
     if not up and not down or fact_probe_on: fact_step_check(n, s, first, second, int(nodes[iterator].a), int(nodes[iterator].c))
+    sums: (int, FactBound)[]
+    index = int(nodes[n].sym)
+    if fact_slice.carried and end != 0 and (up or down) and index > 0 and stable_loop_index(index) and fact_type(int(locals[index].type)) != T_U64:
+        start = fact_bound(s, first)
+        stop = fact_bound(s, end)
+        low = if up: start.lo else: stop.lo
+        high = if up: stop.hi else: start.hi
+        if not start.wide and not stop.wide and low > FACT_MIN and high < FACT_MAX and fact_add_fits(high, -low):
+            count = max(0, high - low)
+            if count < 1048576:
+                if has_flag(iterator, NF_INCLUSIVE): count += 1
+                sums = fact_counted_sums(n, s, count, index, FactBound(low, high))
     entry = s
     pushes: (int, int)[]
-    sums: (int, FactBound)[]
     iterated = fact_iterate(n, s, true, second, first, end, pushes, sums)
-    if not iterated: fact_changes(n, s, n)
+    if not iterated:
+        fact_changes(n, s, n)
+        fact_counted_bounds(s, sums)
     after = s
     body = fact_stepped_body(n, s, first, second, end)
     edges = fact_loop_body(n, body)
