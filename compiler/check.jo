@@ -401,13 +401,6 @@ name_bind = (m: int, name: int, s: int):
     name_sym.push(s)
     name_next.push(name_first[name])
     name_first[name] = name_mod.len()
-bound_in = (m: int, name: int) -> bool:
-    if name >= home_first.len(): return false
-    h = home_first[name]
-    loop h != 0:
-        if home_mod[h - 1] == m: return true
-        h = home_next[h - 1]
-    false
 
 # By module, for checker_call_queries.dewy's collect_fns: 1 a prelude module, 2 a Dewy file
 # (mod_bits), and its uses (mod_uses, as modules[m].uses)

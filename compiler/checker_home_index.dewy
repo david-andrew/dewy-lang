@@ -19,3 +19,13 @@ homes_build=():>void=>{
         loop [k _] in modules[m].names {home_add(m k)}
     }
 }
+
+bound_in=(m:HomeIndexWord name:HomeIndexWord):>bool=>{
+    if name >=? home_first.length {return false}
+    let h=HomeIndexWord(home_first[name])
+    loop h not=? 0 {
+        if home_mod[h - 1] =? m {return true}
+        h=home_next[h - 1]
+    }
+    false
+}

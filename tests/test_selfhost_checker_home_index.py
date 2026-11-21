@@ -1,6 +1,9 @@
 """The module name index chooses the same homes and reports the same ambiguous imports as its twin."""
+import subprocess
+
+from tests import selfhost_lsp_double
 from tests.selfhost_build_double import compare_builds
-from tests.support import compiler  # noqa: F401
+from tests.support import ROOT, compiler  # noqa: F401
 
 
 def test_checker_home_index_twins(compiler, tmp_path, monkeypatch):  # noqa: F811
@@ -10,3 +13,20 @@ def test_checker_home_index_twins(compiler, tmp_path, monkeypatch):  # noqa: F81
     results = compare_builds(compiler, tmp_path, monkeypatch, ('checker_home_index',), paths)
     assert results[0][2] == results[1][2] == 0
     assert results[2][2] != 0
+
+
+def test_bound_in_walks_all_module_homes(compiler, tmp_path, monkeypatch):
+    driver = """use 'main.jo'
+use 'check.jo'
+use 'checker_home_index.dewy'
+main = ():
+    home_add(1, 2)
+    home_add(3, 2)
+    home_add(3, 2)
+    print("{bound_in(1, 2)}:{bound_in(3, 2)}:{bound_in(2, 2)}:{bound_in(1, 0)}:{bound_in(1, 1000)}:{home_mod.len()}")
+"""
+    monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
+    monkeypatch.setattr(selfhost_lsp_double, 'DRIVER', driver)
+    for binary in selfhost_lsp_double.leaf_compilers(compiler, tmp_path, ('checker_home_index',)):
+        result = subprocess.run([binary], check=True, capture_output=True, timeout=30)
+        assert result.stdout == b'true:true:false:false:false:2\n'

@@ -12,3 +12,11 @@ homes_build = ():
     loop m in [0..modules.len()):
         if modules[m].is_prelude: continue
         loop k, v in modules[m].names: home_add(m, k)
+
+bound_in = (m: int, name: int) -> bool:
+    if name >= home_first.len(): return false
+    h = home_first[name]
+    loop h != 0:
+        if home_mod[h - 1] == m: return true
+        h = home_next[h - 1]
+    false
