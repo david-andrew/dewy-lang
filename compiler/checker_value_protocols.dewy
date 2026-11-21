@@ -1,0 +1,114 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"check.jo" import (fns module_of_type runtime_fn values_collect_module value_equal_fns value_hash_fns value_helper_types)
+from p"checker_signature.dewy" import (fn_sig)
+from p"checks_thin_expr.dewy" import (resolve_from_types)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (can_coerce is_value_collection_type resolve_by_types)
+from p"type_ops.dewy" import (dt layout)
+from p"types.jo" import (T_BOOL T_MATH_INT T_STR T_U64 fields has_var prune structs targ telem tkind type_eq types variants)
+from p"units.jo" import (quantity_base)
+from p"util.jo" import (intern name_of)
+
+ProtocolWord:type=int64<overflow='wrap'>
+record_value_member=(t:ProtocolWord hashing:bool):>ProtocolWord=>$unsafe {
+    let m=module_of_type(t)
+    if m <? 0 {return 0}
+    let protocol_names=[intern("==") intern("__eq__")]
+    let ts:array<int64>=[t t]
+    if hashing {
+        protocol_names=[intern("hash")]
+        ts=[t]
+    }
+    let decls:array<int64>=[]
+    loop name in protocol_names {values_collect_module(m name @decls)}
+    let own:array<int64>=[]
+    loop d in decls {
+        if ProtocolWord(nodes.ptr[d].mod) =? m and fn_sig(d).mutmask =? 0 {own.push(d)}
+    }
+    if own.length =? 0 {return 0}
+    let pos=nodes.ptr[ProtocolWord(structs.ptr[ProtocolWord(types.ptr[t].st)].decl)].pos
+    let f=resolve_from_types(protocol_names[0] own ts pos false)
+    if f =? 0 {return 0}
+    # Helpers pass the record's address directly; conversions belong to explicit calls.
+    loop pt in fns.ptr[f].ptypes {
+        if not type_eq(pt t) {return 0}
+    }
+    let expected=if hashing {T_U64} else {T_BOOL}
+    let result=ProtocolWord(fns.ptr[f].ret)
+    let compatible=if hashing {can_coerce(0 result expected)} else {type_eq(result expected)}
+    if not compatible {
+        fatal(pos "the value protocol '{name_of(protocol_names[0])}' for {dt(t)} must return {dt(expected)}");
+    }
+    f
+}
+
+check_value_members=(t0:ProtocolWord hashing:bool @seen:dict<int64 bool>):>void=>$unsafe {
+    let t=prune(t0)
+    let key=ProtocolWord(t) * 2 + int64(hashing)
+    if seen.has(key) or has_var(t) {return}
+    seen[key]=true
+    if is_value_collection_type(t) {
+        if hashing and not value_hash_fns.has(t) {
+            value_hash_fns[t]=resolve_by_types(intern("hash") [t] 0 true)
+        } else if not hashing and not value_equal_fns.has(t) {
+            value_equal_fns[t]=resolve_by_types(intern("==") [t t] 0 true)
+        }
+        # Checking these functions discovers the member operations they use.
+        # Their backing-storage representation does not need value helpers.
+        return
+    }
+    let k=types.ptr[t].kind
+    if k =? 'secret' {
+        # Implicit equality of a field/element needs its runtime helpers checked
+        # before lowering, even without a directly written secret comparison.
+        if not hashing {
+            let et=quantity_base(ProtocolWord(types.ptr[t].elem))
+            if et =? T_STR or tkind(et) =? 'array' or tkind(et) =? 'fixed' or tkind(et) =? 'struct_' or tkind(et) =? 'tuple' {runtime_fn("__ct_str_eq");}
+            if et =? T_MATH_INT or tkind(et) =? 'array' and quantity_base(telem(et)) =? T_MATH_INT {runtime_fn("__mi_ct_compare");}
+        }
+        check_value_members(ProtocolWord(types.ptr[t].elem) hashing @seen)
+        return
+    }
+    if k =? 'struct_' {
+        let f:ProtocolWord=0
+        if hashing {
+            if not value_hash_fns.has(t) {value_hash_fns[t]=record_value_member(t true)}
+            f=value_hash_fns[t]
+        } else {
+            if not value_equal_fns.has(t) {value_equal_fns[t]=record_value_member(t false)}
+            f=value_equal_fns[t]
+        }
+        if f not=? 0 {return}
+    }
+    if k =? 'array' or k =? 'fixed' or k =? 'opt' {
+        check_value_members(ProtocolWord(types.ptr[t].elem) hashing @seen)
+    } else if k =? 'tuple' {
+        loop i in [0..ProtocolWord(types.ptr[t].nargs)) {check_value_members(targ(t i) hashing @seen)}
+    } else if k =? 'struct_' or k =? 'enum_' {
+        layout(t)
+        let si=ProtocolWord(types.ptr[t].st)
+        if k =? 'struct_' {
+            loop i in [0..ProtocolWord(structs.ptr[si].nfields)) {
+                check_value_members(ProtocolWord(fields.ptr[ProtocolWord(structs.ptr[si].fields) + i].type) hashing @seen)
+            }
+        } else {
+            loop i in [0..ProtocolWord(structs.ptr[si].nvariants)) {
+                let vi=ProtocolWord(structs.ptr[si].variants) + i
+                loop j in [0..ProtocolWord(variants.ptr[vi].nfields)) {
+                    check_value_members(ProtocolWord(fields.ptr[ProtocolWord(variants.ptr[vi].fields) + j].type) hashing @seen)
+                }
+            }
+        }
+    }
+}
+
+prepare_value_helpers=():>bool=>{
+    let before=fns.length
+    let seen=dict<int64 bool>()
+    loop [t demand] in value_helper_types {
+        if demand & 1 not=? 0 {check_value_members(t false @seen)}
+        if demand & 2 not=? 0 {check_value_members(t true @seen)}
+    }
+    fns.length >? before
+}
