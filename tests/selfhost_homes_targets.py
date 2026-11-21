@@ -12,6 +12,7 @@ LEAF_HOMES = {
     'checker_narrow_rollback': 'check.jo',
     'checker_startup': 'check.jo',
     'checker_captures': 'check.jo',
+    'vector_checks': 'expr.jo',
     'ast_access': 'ast.jo',
     'directive_index': 'directives.jo',
     'nd_contract_query': 'nd_contracts.jo',

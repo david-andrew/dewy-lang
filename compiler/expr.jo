@@ -184,6 +184,7 @@ use 'bigint_literal.dewy'
 use 'expr_node_queries.dewy'
 use 'embed_walk.dewy'
 use 'union_fields.dewy'
+use 'vector_checks.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -5172,39 +5173,6 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
     if refine_active: return ref_length_mutation(n, r)
     r
 
-check_vec_ctor = (n: int, t: int, args: int[]) -> int:
-    # vecN(x, y, ...) with scalars and/or smaller vectors; vecN(s) splats; mat4(...) 16 floats or none
-    total = 0
-    ct = vec_comp_type(t)
-    loop a in args:
-        if nodes[a].kind == .namedarg: fatal(nodes[a].pos, "named arguments are not supported here")
-        at = prune(check_expr(a, ct))
-        add_flag(a, NF_CHECKED)
-        if types[at].kind == .vec:
-            total += vec_n(at)
-        else:
-            if is_int(ct) and is_int(at) and not is_lit(a) and not can_coerce(a, at, ct):
-                # (ivec2(x, y) with ints: their i32s, as i32(x) makes them)
-                c = mk(.call, nodes[a].pos)
-                nodes[c].a = i32(bc_ident(type_str(ct), nodes[a].pos))
-                inner = nodes.len()
-                nodes.push(nodes[a])
-                set_list(c, [inner])
-                nodes[a] = nodes[c]
-                check_expr(a, ct)
-            else if is_lit(a) or is_numeric(at) or (is_float(ct) and bundled_rational_type(at)): coerce(a, ct)
-            else: fatal(nodes[a].pos, "expected a number or vector, found {dt(at)}")
-            total += 1
-    want = vec_n(t)
-    if args.len() != 0 and total != want and not (args.len() == 1 and total == 1):
-        fatal(nodes[n].pos, "{dt(t)}(...) needs {want} components, got {total}")
-    nodes[n].kind = .intrinsic
-    nodes[n].aux = i32(int(IN.vec_ctor))
-    set_list(n, args)
-    nodes[n].a = 0
-    nodes[n].type = i32(t)
-    t
-
 swizzle_chars = "xyzwrgbastpq"
 # whether every letter of a member name is a vector component letter (`xy`, `rgb`)
 swizzle_name = (name: int) -> bool:
@@ -5908,52 +5876,6 @@ binary_rest = (n: int, expected: int, a0: int, b0: int, ta0: int, tb0: int, hint
 quat_nodes: {int: bool} = {}
 quat_locals: {int: bool} = {}
 quat_globals: {int: bool} = {}
-
-check_vec_binary = (n: int, op: Tok, ta: int, tb: int) -> int:
-    a = int(nodes[n].a)
-    b = int(nodes[n].b)
-    if op == .star and not pos_in_lib(nodes[n].pos):
-        if type_eq(ta, T_VEC4) and type_eq(tb, T_VEC4) and (is_quat(a) or is_quat(b)):
-            warn(nodes[n].pos, "* multiplies the parts of two vec4s one by one, which for quaternions is no rotation: quat_mul(a, b) turns by b, then by a")
-        if type_eq(ta, T_VEC4) and type_eq(tb, T_VEC3): fatal(nodes[n].pos, "cannot apply * to vec4 and vec3 (a quaternion turns a vector with quat_rotate(q, v))")
-        if ta == T_MAT4 and type_eq(tb, T_VEC3): fatal(nodes[n].pos, "cannot apply * to mat4 and vec3 (transform_point(m, p) moves a point, transform_dir(m, d) turns a direction; or m * vec4(p, 1))")
-    if op == .eq or op == .ne:
-        if not type_eq(ta, tb): cmp_error(n, ta, tb)
-        nodes[n].aux = 1
-        nodes[n].type = i32(T_BOOL)
-        return T_BOOL
-    if op != .plus and op != .minus and op != .star and op != .slash: fatal(nodes[n].pos, "operator {op_text(op, nodes[n].pos)} is not defined for vectors")
-    if is_vec(ta) and is_vec(tb):
-        if ta == T_MAT4 and tb == T_MAT4:
-            if op != .star: fatal(nodes[n].pos, "matrices only support *")
-            runtime_demand("__mat4_mul")
-            nodes[n].aux = 7
-            nodes[n].type = i32(T_MAT4)
-            return T_MAT4
-        if ta == T_MAT4 and tb == T_VEC4 and op == .star:
-            runtime_demand("__mat4_mul_vec4")
-            nodes[n].aux = 8
-            nodes[n].type = i32(T_VEC4)
-            return T_VEC4
-        if not type_eq(ta, tb):
-            # (a point on the ground, 2D, into 3D: x and z)
-            g = ""
-            if (ta == T_VEC3 and tb == T_VEC2) or (ta == T_VEC2 and tb == T_VEC3): g = " (a 2D vector into 3D, on the ground: `vec3(p.x, 0, p.y)`; or `vec3(p, 0)` for x and y)"
-            fatal(nodes[n].pos, "cannot apply {op_text(op, nodes[n].pos)} to {dt(ta)} and {dt(tb)}{g}")
-        nodes[n].aux = 9
-        nodes[n].type = i32(ta)
-        return ta
-    # vector op scalar / scalar op vector
-    if is_vec(ta):
-        coerce(b, vec_comp_type(ta))
-        nodes[n].aux = 10
-        nodes[n].type = i32(ta)
-        return ta
-    if op != .star and op != .slash and op != .plus and op != .minus: fatal(nodes[n].pos, "invalid vector operation")
-    coerce(a, vec_comp_type(tb))
-    nodes[n].aux = 11
-    nodes[n].type = i32(tb)
-    tb
 
 # a literal behind the conversions checking gave it
 kid_lit = (e0: int) -> int:

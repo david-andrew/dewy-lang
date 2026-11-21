@@ -1,0 +1,114 @@
+$runtime_checks
+
+from p"ast.jo" import (NF_CHECKED add_flag mk nodes set_list)
+from p"check_metadata.dewy" import op_text
+from p"checker_expr.dewy" import check_expr
+from p"checker_tokens.dewy" import Tok
+from p"checks_builders.dewy" import bc_ident
+from p"checks_compare_hints.dewy" import cmp_error
+from p"checks_thin.dewy" import runtime_demand
+from p"checks_thin_expr.dewy" import (vec_comp_type vec_n)
+from p"diagnostic_exit.dewy" import fatal
+from p"expr.jo" import (IN can_coerce coerce is_lit)
+from p"expr_node_queries.dewy" import is_quat
+from p"rational_types.dewy" import bundled_rational_type
+from p"source_warnings.dewy" import warn
+from p"type_ops.dewy" import (dt type_str)
+from p"types.jo" import (T_BOOL T_MAT4 T_VEC2 T_VEC3 T_VEC4 is_float is_int is_numeric is_vec prune type_eq types)
+from p"util.jo" import pos_in_lib
+
+VectorWord:type = int64<overflow='wrap'>
+
+check_vec_ctor = (n:VectorWord t:VectorWord args:array<int64>):>int64 => {
+    # A single scalar splats. Otherwise scalars and smaller vectors supply all lanes.
+    let total:VectorWord = 0
+    let ct = vec_comp_type(t)
+    loop a in args {
+        if nodes[a].kind =? 'namedarg' {fatal(nodes[a].pos "named arguments are not supported here")}
+        let at = prune(check_expr(a ct))
+        add_flag(a NF_CHECKED)
+        if types[at].kind =? 'vec' {total += vec_n(at)}
+        else {
+            if is_int(ct) and is_int(at) and not is_lit(a) and not can_coerce(a at ct) {
+                # Convert a word argument to the component type as an explicit i32(x) would.
+                let c = mk('call' nodes[a].pos)
+                nodes[c].a = int32(bc_ident(type_str(ct) nodes[a].pos))
+                let inner = nodes.length
+                nodes.push(nodes[a])
+                set_list(c [inner])
+                nodes[a] = nodes[c]
+                check_expr(a ct);
+            }
+            else if is_lit(a) or is_numeric(at) or (is_float(ct) and bundled_rational_type(at)) {coerce(a ct);}
+            else {fatal(nodes[a].pos "expected a number or vector, found {dt(at)}")}
+            total += 1
+        }
+    }
+    let want = vec_n(t)
+    if args.length not=? 0 and total not=? want and not (args.length =? 1 and total =? 1) {
+        fatal(nodes[n].pos "{dt(t)}(...) needs {want} components, got {total}")
+    }
+    nodes[n].kind = 'intrinsic'
+    nodes[n].aux = int32(int64(IN.vec_ctor))
+    set_list(n args)
+    nodes[n].a = 0
+    nodes[n].type = int32(t)
+    t
+}
+
+check_vec_binary = (n:VectorWord op:Tok ta:VectorWord tb:VectorWord):>int64 => {
+    let a = VectorWord(nodes[n].a)
+    let b = VectorWord(nodes[n].b)
+    if op =? 'star' and not pos_in_lib(nodes[n].pos) {
+        if type_eq(ta T_VEC4) and type_eq(tb T_VEC4) and (is_quat(a) or is_quat(b)) {
+            warn(nodes[n].pos "* multiplies the parts of two vec4s one by one, which for quaternions is no rotation: quat_mul(a, b) turns by b, then by a")
+        }
+        if type_eq(ta T_VEC4) and type_eq(tb T_VEC3) {fatal(nodes[n].pos "cannot apply * to vec4 and vec3 (a quaternion turns a vector with quat_rotate(q, v))")}
+        if ta =? T_MAT4 and type_eq(tb T_VEC3) {fatal(nodes[n].pos "cannot apply * to mat4 and vec3 (transform_point(m, p) moves a point, transform_dir(m, d) turns a direction; or m * vec4(p, 1))")}
+    }
+    if op =? 'eq' or op =? 'ne' {
+        if not type_eq(ta tb) {cmp_error(n ta tb)}
+        nodes[n].aux = 1
+        nodes[n].type = int32(T_BOOL)
+        return T_BOOL
+    }
+    if op not=? 'plus' and op not=? 'minus' and op not=? 'star' and op not=? 'slash' {
+        fatal(nodes[n].pos "operator {op_text(op nodes[n].pos)} is not defined for vectors")
+    }
+    if is_vec(ta) and is_vec(tb) {
+        if ta =? T_MAT4 and tb =? T_MAT4 {
+            if op not=? 'star' {fatal(nodes[n].pos "matrices only support *")}
+            runtime_demand("__mat4_mul")
+            nodes[n].aux = 7
+            nodes[n].type = int32(T_MAT4)
+            return T_MAT4
+        }
+        if ta =? T_MAT4 and tb =? T_VEC4 and op =? 'star' {
+            runtime_demand("__mat4_mul_vec4")
+            nodes[n].aux = 8
+            nodes[n].type = int32(T_VEC4)
+            return T_VEC4
+        }
+        if not type_eq(ta tb) {
+            let hint = ""
+            if (ta =? T_VEC3 and tb =? T_VEC2) or (ta =? T_VEC2 and tb =? T_VEC3) {
+                hint = " (a 2D vector into 3D, on the ground: `vec3(p.x, 0, p.y)`; or `vec3(p, 0)` for x and y)"
+            }
+            fatal(nodes[n].pos "cannot apply {op_text(op nodes[n].pos)} to {dt(ta)} and {dt(tb)}{hint}")
+        }
+        nodes[n].aux = 9
+        nodes[n].type = int32(ta)
+        return ta
+    }
+    if is_vec(ta) {
+        coerce(b vec_comp_type(ta));
+        nodes[n].aux = 10
+        nodes[n].type = int32(ta)
+        return ta
+    }
+    if op not=? 'star' and op not=? 'slash' and op not=? 'plus' and op not=? 'minus' {fatal(nodes[n].pos "invalid vector operation")}
+    coerce(a vec_comp_type(tb));
+    nodes[n].aux = 11
+    nodes[n].type = int32(tb)
+    tb
+}
