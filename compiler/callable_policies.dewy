@@ -1,0 +1,159 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_MUT add_flag kid kids mk nkids nodes set_list)
+from p"check.jo" import (fns)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_block bc_call bc_ident bc_let bc_stmt)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"effect_contracts.dewy" import (callable_base)
+from p"expr.jo" import (setting_value_target setting_value_targets setting_value_wrapped type_node_of)
+from p"type_ops.dewy" import (mk_fn)
+from p"types.jo" import (types)
+from p"util.jo" import (intern)
+
+PolicyWord:type=int64<overflow='wrap'>
+setting_value_body=(body:PolicyWord snapshot:string pos:PolicyWord):>PolicyWord=>{
+    let active="$policy_active{body}"
+    let enter=bc_let(active bc_call("__settings_policy_enter" [bc_ident(snapshot pos)] pos) pos)
+    let cleanup=mk('defer_' pos)
+    # This compiler cleanup restores policy only; it never borrows a user owner.
+    nodes[cleanup].aux2=1788  # SETTING_SCOPE_PREFIX in setting_scopes.dewy
+    nodes[cleanup].a=int32(bc_stmt(bc_call("__settings_policy_leave" [bc_ident(active pos)] pos) pos))
+    if nodes[body].kind =? 'block' {
+        let statements=[enter cleanup]
+        loop child in kids(body) {statements.push(child)}
+        set_list(body statements)
+        return body
+    }
+    bc_block([enter cleanup bc_stmt(body pos)] pos)
+}
+setting_value_lambda=(n:PolicyWord expected:PolicyWord):>PolicyWord=>{
+    let pos=nodes[n].pos
+    setting_value_defaults(n pos)
+    let snapshot="$policy_snapshot{n}"
+    let lam=nodes.length
+    nodes.push(nodes[n])
+    nodes[lam].b=int32(setting_value_body(PolicyWord(nodes[lam].b) snapshot pos))
+    let block=bc_block([bc_let(snapshot bc_call("__settings_policy_capture" [] pos) pos) bc_stmt(lam pos)] pos)
+    nodes[n]=nodes[block]
+    setting_value_wrapped[lam]=true
+    # Coercion must still recognize the one-shot spawn body through this block.
+    setting_value_targets[n]=lam
+    let result=check_expr(n expected)
+    setting_value_targets[n]=lam
+    result
+}
+# Default keepers execute before the closure installs its captured policy.
+# Only simple literals are independent of that ordering. Computed defaults can
+# read time transitively, including through implicit zero-argument calls.
+setting_default_policy=(n:PolicyWord):>bool=>{
+    if n =? 0 {return false}
+    let k=nodes[n].kind
+    if k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'none_lit' or k =? 'null_lit' {return false}
+    if k =? 'str_lit' {return nkids(n) not=? 0}
+    if k =? 'unary' or k =? 'not_' {
+        let inner=nodes[PolicyWord(nodes[n].a)].kind
+        return inner not=? 'int_lit' and inner not=? 'float_lit' and inner not=? 'bool_lit'
+    }
+    true
+}
+setting_value_defaults=(decl:PolicyWord pos:PolicyWord):>void=>{
+    loop param in kids(decl) {
+        if nodes[param].kind =? 'param' and setting_default_policy(PolicyWord(nodes[param].b)) {
+            fatal(pos "capturing time policies in a function value with computed or setting-dependent defaults is not yet supported; use a lambda such as `()=>today` so its defaults run under the captured policy")
+        }
+    }
+}
+setting_value_named=(n:PolicyWord t:PolicyWord _expected:PolicyWord):>PolicyWord=>{
+    if nodes[n].aux =? 1 {return t}
+    if nodes[n].aux =? 2 {return t}
+    let pos=nodes[n].pos
+    let f=PolicyWord(nodes[n].sym)
+    let decl=PolicyWord(fns[f].decl)
+    if PolicyWord(types[callable_base(t)].bits) not=? 0 {setting_value_defaults(decl pos)}
+    let params:array<int64>=[]
+    let args:array<int64>=[]
+    loop i in [0..fns[f].ptypes.length) {
+        let param=mk('param' pos)
+        nodes[param].name=int32(intern("$policy_arg{i}"))
+        nodes[param].a=int32(type_node_of(fns[f].ptypes[i] pos))
+        if PolicyWord(types[callable_base(t)].mutmask) & (PolicyWord(1) << (i & 63)) not=? 0 {add_flag(param NF_MUT)}
+        params.push(param)
+        let arg=bc_ident("$policy_arg{i}" pos)
+        if PolicyWord(types[callable_base(t)].mutmask) & (PolicyWord(1) << (i & 63)) not=? 0 {add_flag(arg NF_MUT)}
+        args.push(arg)
+    }
+    let call=mk('call' pos)
+    nodes[call].sym=int32(f)
+    nodes[call].type=fns[f].ret
+    add_flag(call NF_CHECKED)
+    set_list(call args)
+    # The arguments need binding in the wrapper before the direct call is checked.
+    nodes[call].flags=0
+    nodes[call].type=0
+    let head=mk('fnref' pos)
+    nodes[head].sym=int32(f)
+    nodes[head].type=int32(t)
+    add_flag(head NF_CHECKED)
+    nodes[call].a=int32(head)
+    nodes[call].aux=1
+    let lam=mk('lambda' pos)
+    set_list(lam params)
+    nodes[lam].b=int32(bc_block([bc_stmt(call pos)] pos))
+    nodes[n]=nodes[lam]
+    setting_value_lambda(n t);
+    # Retain the named target's defaults and callable contract on the wrapper.
+    nodes[n].type=int32(t)
+    t
+}
+# Partial arguments are evaluated once at creation; the wrapper captures the
+# same values together with the policy snapshot. Mutable bound arguments have
+# the language's existing partial-application diagnostic.
+setting_value_partial=(n:PolicyWord t:PolicyWord ptypes:array<int64> mutmask:PolicyWord ret:PolicyWord):>PolicyWord=>{
+    let pos=nodes[n].pos
+    let prefix:array<int64>=[]
+    let params:array<int64>=[]
+    let args:array<int64>=[]
+    let target=PolicyWord(nodes[n].sym)
+    let head=PolicyWord(nodes[n].a)
+    if nodes[n].aux =? 0 and target >? 0 {
+        head=mk('fnref' pos)
+        nodes[head].sym=int32(target)
+        nodes[head].type=int32(mk_fn(ptypes ret mutmask))
+        add_flag(head NF_CHECKED)
+    }
+    else {
+        let name="$policy_target{n}"
+        prefix.push(bc_let(name head pos))
+        head=bc_ident(name pos)
+    }
+    loop i in [0..nkids(n)) {
+        let arg=kid(n i)
+        let name="$policy_bound{n}_{i}"
+        if nodes[arg].kind =? 'hole' {
+            let param=mk('param' pos)
+            nodes[param].name=int32(intern(name))
+            nodes[param].a=int32(type_node_of(ptypes[i] pos))
+            if mutmask & (PolicyWord(1) << (i & 63)) not=? 0 {add_flag(param NF_MUT)}
+            params.push(param)
+        }
+        else {
+            if mutmask & (PolicyWord(1) << (i & 63)) not=? 0 {fatal(nodes[arg].pos "cannot partially apply a `mut` argument; use `_` for it")}
+            prefix.push(bc_let(name arg pos))
+        }
+        let value=bc_ident(name pos)
+        if mutmask & (PolicyWord(1) << (i & 63)) not=? 0 {add_flag(value NF_MUT)}
+        args.push(value)
+    }
+    let call=mk('call' pos)
+    nodes[call].a=int32(head)
+    set_list(call args)
+    let lam=mk('lambda' pos)
+    set_list(lam params)
+    nodes[lam].b=int32(bc_block([bc_stmt(call pos)] pos))
+    prefix.push(bc_stmt(lam pos))
+    let block=bc_block(prefix pos)
+    nodes[n]=nodes[block]
+    let result=check_expr(n t)
+    setting_value_targets[n]=setting_value_target(lam)
+    result
+}
