@@ -26,6 +26,7 @@ from p"refine_metadata.dewy" import (representation_type)
 from p"refinement_types.dewy" import (FactBound FactReason FactTerm)
 from p"types.jo" import (T_BOOL T_INT is_int telem tkind)
 from p"type_ops.dewy" import (fixed_len mk_array)
+from p"witness_nodes.dewy" import (wit_text)
 
 SequenceWord:type=int64<overflow='wrap'>
 fact_sequence_classify=(n:SequenceWord kind:SequenceWord path:string):>SequenceWord=>$unsafe {
@@ -108,7 +109,13 @@ fact_sequence_select=(n:SequenceWord @s:FactState values:array<int64> kind:Seque
         let size_bound=fact_bound(s size)
         let complete=not size_bound.wide and size_bound.lo =? size_bound.hi and size_bound.lo =? entries.length
         if kind >=? 169 {
-            fact_nd_need(n @s 'eq' size length "mask length equals array length");
+            let relation="mask length equals array length"
+            if read and fact_compare(s 'eq' size length) not=? 1 {
+                let mask=wit_text(kid(n 1))
+                let source=wit_text(kid(n 0))
+                if mask not=? "" and source not=? "" {relation="{mask}.length =? {source}.length"}
+            }
+            fact_nd_need(n @s 'eq' size length relation);
             let selected=0
             let exact=complete
             loop entry in entries {
