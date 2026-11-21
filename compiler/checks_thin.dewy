@@ -20,7 +20,7 @@ from p"checker_zonk.dewy" import (xz_finalize xz_tree)
 from p"checks_call_hints.dewy" import (a_type)
 from p"checks_loop_copies.dewy" import (for_copied_binder)
 from p"dewy_methods.jo" import (dewy_decl_members)
-from p"expr.jo" import (can_coerce decl_in_prelude fn_used is_map_entries_type ntype)
+from p"expr.jo" import (can_coerce decl_in_prelude fn_used format_word_finish is_map_entries_type ntype)
 from p"checks_thin_expr.dewy" import (is_dewy_cursor_iter is_map_type)
 from p"module_paths.dewy" import (module_key)
 from p"pcheck.jo" import (pc_child)
@@ -267,6 +267,7 @@ body_expression=(f:ThinWord decl:ThinWord):>void=>{
 }
 # Finalization runs in checker_zonk.dewy; these are its services.
 body_finalize=(f:ThinWord vars0:ThinWord binds0:ThinWord exposed0:ThinWord da_mark:ThinWord):>void=>{
+    format_word_finish(f)
     xz_finalize(f vars0 binds0 exposed0 da_mark)
 }
 warn_unused_copy=(pos:ThinWord name:string):>void=>{

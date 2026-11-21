@@ -9,7 +9,7 @@ from p"type_inference.dewy" import (tu_prune tu_targ)
 from p"checker_coerce.dewy" import cq_settled
 from p"check.jo" import (decl_values new_local)
 from p"checks_stmt_hooks.dewy" import (decl_form decl_binding_type decl_storage decl_value_param decl_temperature decl_pattern decl_error)
-from p"expr.jo" import (struct_default coerce)
+from p"expr.jo" import (struct_default coerce format_word_define)
 from p"sibling_ops.dewy" import (sibling_syntax_type)
 # `let name = value`, `let name:T`, `let name:T = value`, once its other forms (a
 # spawned task's handle, soa and element aliases, lent and local places, shaped
@@ -291,6 +291,7 @@ vd_decl=(s:VWord):>void=>$unsafe {
     if VWord(vd_nodes[0].ptr[s].flags) & 33554432 not=? 0 {vd_locals[0][l].flags=int32<overflow='wrap'>(66048)}
     if vd_nodes[0].ptr[s].aux2 =? 1 {vd_or_flags(l 524288)}
     vd_nodes[0][s].sym=int32<overflow='wrap'>(l)
+    if t =? vd_math_int_type[0] and b not=? 0 and not unset {format_word_define(s l)}
     if unset {decl_after(s l t 9)}
     if vd_ide[0] and not typed {decl_after(s l t 10)}
     if vd_nodes[0].ptr[s].aux2 =? 1792 {decl_after(s l t 11)}

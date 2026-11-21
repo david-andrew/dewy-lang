@@ -182,6 +182,7 @@ use 'expr_error_context.dewy'
 use 'soa_helpers.dewy'
 use 'bigint_literal.dewy'
 use 'expr_node_queries.dewy'
+use 'checks_assign_hooks.dewy'
 use 'embed_walk.dewy'
 use 'union_fields.dewy'
 use 'vector_checks.dewy'
@@ -4167,7 +4168,11 @@ resolve_by_types = (name: int, ts: int[], pos: int, required: bool, choice_only:
         if let c = by_types_seen.get(key):
             if c.gen == ml_stamp(name):
                 loop d in c.hidden: surface_hidden.push(d)
-                return if choice_only: c.decl else: get_fn_inst(c.decl, c.binds, pos)
+                if choice_only:
+                    by_types_decl = c.decl
+                    by_types_binds = c.binds
+                    return c.decl
+                return get_fn_inst(c.decl, c.binds, pos)
     gen = ml_stamp(name)
     hidden_mark = surface_hidden.len()
     decls: int[]
@@ -4232,6 +4237,107 @@ nargs_check = (n: int, nargs: int, lo: int, hi: int, name: str):
         if lo == hi: fatal(nodes[n].pos, "{name} expects {lo} argument(s), got {nargs}")
         fatal(nodes[n].pos, "{name} expects {lo} to {hi} arguments, got {nargs}")
 
+struct WordFormatRequest:
+    part: int
+    binding: int
+    decl: int
+    binds: int[]
+    next: int
+
+format_word_defs: {int: int}
+format_word_heads: {int: int}
+format_word_requests: WordFormatRequest[]
+format_word_inst = 0
+const FORMAT_WORD_UNSTABLE = LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_EXPOSED | LF_ALIAS | LF_BYREF
+
+format_word_reset = ():
+    format_word_defs.clear()
+    format_word_heads.clear()
+    format_word_requests = []
+    format_word_inst = 0
+
+# Only checked, initialized lexical declarations enter the index. Their
+# binding IDs are in scope only after the initializer has been checked.
+format_word_define = (s: int, l: int):
+    k = nodes[int(nodes[s].b)].kind
+    if k == .match_ or k == .if_ or k == .iflet: format_word_defs[l] = s
+
+# Inspect the value-producing arms only. A terminating arm yields no value.
+# Result blocks may have effects, which still run at the original definition.
+format_word_range = (n: int) -> bool:
+    if n == 0: return false
+    t = prune(ntype(n))
+    if t == T_NEVER: return true
+    k = nodes[n].kind
+    if k == .block and nodes[n].aux != 0: return format_word_range(block_value(n))
+    if k == .match_:
+        loop i in [0..nkids(n)):
+            if not format_word_range(int(nodes[kid(n, i)].b)): return false
+        return true
+    if k == .if_ or k == .iflet:
+        return format_word_range(int(nodes[n].b)) and format_word_range(int(nodes[n].c))
+    if k == .conv and t == T_MATH_INT:
+        a = int(nodes[n].a)
+        if nodes[n].aux == i32(int(CV.none_)):
+            at = prune(ntype(a))
+            if at == T_NEVER or at == T_MATH_INT: return format_word_range(a)
+        if exact_format_remainder(n): return true
+        if nodes[n].aux == i32(int(CV.int_)) and nodes[a].kind == .int_lit: return format_word_range(a)
+    k == .int_lit and is_int(t) and (nodes[n].ival >= 0 or types[t].sign and not has_flag(n, NF_U64))
+
+format_word_select = (part: int):
+    if format_word_inst == 0: format_word_inst = runtime_fn("__fmt_word")
+    nodes[part].sym = i32(format_word_inst)
+
+# Resolve the normal overload at the observation. Delay its instantiation
+# until all writes, captures and address-taking in this body are known.
+format_word_try = (part: int, writer: str, buffer: int, pos: int) -> bool:
+    value = int(nodes[part].a)
+    remainder = exact_format_remainder(value)
+    l = 0
+    owner = 0
+    if not remainder:
+        if nodes[value].kind != .ident or nodes[value].aux != i32(int(SK.local)) or cx < 0: return false
+        l = int(nodes[value].sym)
+        if not format_word_defs.has(l) or int(locals[l].flags) & FORMAT_WORD_UNSTABLE != 0: return false
+        owner = int(ctxs[cx].inst)
+        if owner == 0 or int(locals[l].owner) != owner or fns[owner].kind != FK_NORMAL: return false
+    decl = resolve_by_types(intern(writer), [buffer, T_MATH_INT], pos, true, true)
+    binds = by_types_binds
+    inner = decl
+    if writer == "__dewy_fmt":
+        if files[pos_file(nodes[decl].pos)].path == lib_dir + "/core/fmt.jo" and fn_sig(decl).generic:
+            inner = resolve_by_types(intern("__fmt"), [buffer, T_MATH_INT], pos, true, true)
+        else: inner = 0
+    if inner == 0 or files[pos_file(nodes[inner].pos)].path != lib_dir + "/math_int.jo":
+        nodes[part].sym = i32(get_fn_inst(decl, binds, pos))
+    else if remainder: format_word_select(part)
+    else:
+        next = format_word_heads.get(owner) ?? 0
+        format_word_requests.push(WordFormatRequest(part, l, decl, binds, next))
+        format_word_heads[owner] = format_word_requests.len()
+    true
+
+# No body walk: settle only requested observations, with one range query per
+# defining write. A later write can precede a read on a loop back edge or in
+# deferred code, so reject any write other than the initializer.
+format_word_finish = (owner: int):
+    if format_word_heads.len() == 0: return
+    head = format_word_heads.get(owner) ?? 0
+    if head == 0: return
+    format_word_heads.remove(owner)
+    bounds: {int: bool} = {}
+    loop head != 0:
+        r = format_word_requests[head - 1]
+        head = r.next
+        s = format_word_defs[r.binding]
+        if int(locals[r.binding].flags) & FORMAT_WORD_UNSTABLE == 0 and nodes[s].kind == .vardecl and int(nodes[s].sym) == r.binding:
+            if not bounds.has(s): bounds[s] = format_word_range(int(nodes[s].b))
+            if bounds[s]:
+                format_word_select(r.part)
+                continue
+        nodes[r.part].sym = i32(get_fn_inst(r.decl, r.binds, nodes[r.part].pos))
+
 fmt_part = (part: int, pos: int):
     # Formatting observes the exact result; it is not a uint64 store.
     # Reveal an unsigned arithmetic node to mathematical int before overload selection.
@@ -4286,10 +4392,8 @@ fmt_part = (part: int, pos: int):
         # Select the representation before instantiating the generic formatter.
         # The semantic overload is still chosen first; only the bundled default
         # may use a proved word, with no new fixed-width storage obligation.
-        if t == T_MATH_INT and exact_format_word(int(nodes[part].a), writer, bt, pos):
-            exact_word_formats[part] = true
-            nodes[part].sym = i32(runtime_fn("__fmt_word"))
-        else: nodes[part].sym = i32(resolve_by_types(intern(writer), [bt, t], pos, true))
+        if t == T_MATH_INT and format_word_try(part, writer, bt, pos): return
+        nodes[part].sym = i32(resolve_by_types(intern(writer), [bt, t], pos, true))
 
 is_dewy_range_type = (t: int, name: str) -> bool:
     p = prune(t)

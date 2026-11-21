@@ -1,0 +1,14 @@
+# modes: native native-release
+__dewy_fmt = (@buf:array<uint8> value:int):>void => {
+    buf.push(if value =? 1 b'Y' else b'N')
+}
+
+show = (first:bool):>void => {
+    let n = match first {<true> => 1 _ => 2}
+    printl("custom {n}")
+}
+
+main = ():>void => {
+    show(true)
+    show(false)
+}

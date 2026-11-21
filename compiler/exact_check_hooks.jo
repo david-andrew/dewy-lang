@@ -3,7 +3,6 @@ use 'ast.jo'
 use 'checker_tokens.dewy'
 use 'check.jo'
 use 'checker_exact.dewy'
-use 'checker_signature.dewy'
 use 'checks_assign_hooks.dewy'
 use 'exact_measure.dewy'
 use 'expr.jo'
@@ -11,7 +10,6 @@ use 'lower_scalars.dewy'
 use 'refine_metadata.dewy'
 use 'type_ops.dewy'
 use 'types.jo'
-use 'util.jo'
 
 # Secret wrapping changes visibility, never an integer's arithmetic domain.
 exact_representation = (t0: int) -> int:
@@ -46,18 +44,12 @@ exact_narrow_control = (n: int, to: int) -> bool:
     nodes[n].type = i32(to)
     true
 
-exact_format_word = (n: int, writer: str, buffer: int, pos: int) -> bool:
+exact_format_remainder = (n: int) -> bool:
     if nodes[n].kind != .conv: return false
     source = exact_math_operand(n)
-    if source == n: return false
     # This runs before exact preparation. Source storage types are not yet
-    # arithmetic width facts; a positive remainder alone supplies its own bound.
-    if positive_modulus(source) <= 0: return false
-    decl = resolve_by_types(intern(writer), [buffer, T_MATH_INT], pos, true, true)
-    if writer == "__dewy_fmt":
-        if files[pos_file(nodes[decl].pos)].path != lib_dir + "/core/fmt.jo" or not fn_sig(decl).generic: return false
-        decl = resolve_by_types(intern("__fmt"), [buffer, T_MATH_INT], pos, true, true)
-    files[pos_file(nodes[decl].pos)].path == lib_dir + "/math_int.jo"
+    # arithmetic width facts; a positive remainder supplies its own bound.
+    source != n and positive_modulus(source) > 0
 
 exact_int_result = (n: int, observe_unsigned: bool = false) -> int:
     if not dewy_at(nodes[n].pos): return ntype(n)

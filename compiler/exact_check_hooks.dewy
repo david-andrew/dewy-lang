@@ -2,17 +2,15 @@ $runtime_checks
 
 from p"exact.jo" import (exact_candidate_heads exact_candidate_next exact_candidate_nodes exact_measure_on exact_owners)
 from p"ast.jo" import (kids nodes)
-from p"check.jo" import (ctxs cx dewy_at fns lib_dir)
+from p"check.jo" import (ctxs cx dewy_at fns)
 from p"checker_exact.dewy" import (exact_math_operand exact_potential)
-from p"checker_signature.dewy" import (fn_sig)
 from p"checks_assign_hooks.dewy" import (block_value)
 from p"exact_measure.dewy" import (exact_measure_candidate)
-from p"expr.jo" import (CV IN coerce ntype resolve_by_types wrap_conv)
+from p"expr.jo" import (CV IN coerce ntype wrap_conv)
 from p"lower_scalars.dewy" import (positive_modulus)
 from p"refine_metadata.dewy" import (representation_type)
 from p"type_ops.dewy" import (int_policy)
 from p"types.jo" import (T_INT T_MATH_INT T_NEVER T_U64 is_int types)
-from p"util.jo" import (files intern pos_file)
 
 ExactCheckWord:type=int64<overflow='wrap'>
 # Fixed Tok ordinals in the checked node operator field.
@@ -66,19 +64,12 @@ exact_narrow_control=(n:ExactCheckWord to:ExactCheckWord):>bool=>$unsafe {
     true
 }
 
-exact_format_word=(n:ExactCheckWord writer:string buffer:ExactCheckWord pos:ExactCheckWord):>bool=>$unsafe {
+exact_format_remainder=(n:ExactCheckWord):>bool=>$unsafe {
     if nodes.ptr[n].kind not=? 'conv' {return false}
     let source=exact_math_operand(n)
-    if source =? n {return false}
     # This runs before exact preparation. Source storage types are not yet
-    # arithmetic width facts; a positive remainder alone supplies its own bound.
-    if positive_modulus(source) <=? 0 {return false}
-    let decl=resolve_by_types(intern(writer) [buffer T_MATH_INT] pos true true)
-    if writer =? "__dewy_fmt" {
-        if files.ptr[pos_file(nodes.ptr[decl].pos)].path not=? "{lib_dir}/core/fmt.jo" or not fn_sig(decl).generic {return false}
-        decl=resolve_by_types(intern("__fmt") [buffer T_MATH_INT] pos true true)
-    }
-    files.ptr[pos_file(nodes.ptr[decl].pos)].path =? "{lib_dir}/math_int.jo"
+    # arithmetic width facts; a positive remainder supplies its own bound.
+    source not=? n and positive_modulus(source) >? 0
 }
 
 exact_int_result=(n:ExactCheckWord observe_unsigned:bool=false):>int64=>$unsafe {

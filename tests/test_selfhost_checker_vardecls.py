@@ -266,6 +266,7 @@ DECL_JO = {
     'expr.jo': {
         'struct_default': 'struct_default = (t0: int, pos: int) -> int: dv_default(t0, pos)',
         'coerce': 'coerce = (n: int, target: int) -> int: dv_coerce(n, target)',
+        'format_word_define': 'format_word_define = (s: int, l: int): events.push("format-word:{s}:{l}")',
     },
     'sibling_types.jo': {
         'sibling_syntax_type': 'sibling_syntax_type = (v: int) -> int: dv_syntax_type(v)',

@@ -132,7 +132,6 @@ exact_shifts: {int: int} = {}
 # Dense membership for the fact-transfer hot path; maps retain sparse iteration.
 # Preparation allocates O(N) bits once and writes each demanded node once.
 exact_marks: u8[]
-exact_word_formats: {int: bool} = {}
 
 # Context-free width facts are demanded only by a storage boundary. Cache one
 # signed width and a nonnegative bit per expression; 0 means not computed and
@@ -238,7 +237,7 @@ exact_reset = ():
     exr_call_target = 0
     exr_fast = false
     exr_locals = []
-    exact_word_formats.clear()
+    format_word_reset()
     exact_rep_demands = []
     exact_rep_owners = []
     exact_effect_owners = []

@@ -297,7 +297,9 @@ check_body_now = (f: int): cb_check_body_now(f)
 # A body's result obligations run in checker_body_results.dewy; these are its services.
 body_expression = (f: int, decl: int): xe_body(f, decl)
 # Finalization runs in checker_zonk.dewy; these are its services.
-body_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int): xz_finalize(f, vars0, binds0, exposed0, da_mark)
+body_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int):
+    format_word_finish(f)
+    xz_finalize(f, vars0, binds0, exposed0, da_mark)
 warn_unused_copy = (pos: int, name: str):
     alias = if files[pos_file(pos)].is_dewy: "loop @e in xs" else: "loop mut e in xs"
     warn(pos, "'{name}' is changed here but never read: it holds a copy (structs and arrays are values), so what it was copied from stays as it was; change that instead (`xs[i].hp -= 5`, `{alias}`)")

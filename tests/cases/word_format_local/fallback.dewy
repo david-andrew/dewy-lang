@@ -1,0 +1,43 @@
+# modes: native native-release
+wide_arm = (small:bool):>void => {
+    let n = match small {<true> => 3 _ => 18446744073709551616}
+    printl("wide {n}")
+}
+
+reassigned = (small:bool):>void => {
+    let n = match small {<true> => 3 _ => 4}
+    n = 9223372036854775808
+    printl("assigned {n}")
+}
+
+backedge = (small:bool):>void => {
+    let n = match small {<true> => 3 _ => 4}
+    loop i in [0..2) {
+        printl("loop {n}")
+        n = 9223372036854775808
+    }
+}
+
+captured = (small:bool):>void => {
+    let n = match small {<true> => 3 _ => 4}
+    printl("before capture {n}")
+    let read = () => n
+    printl("after capture {read()}")
+}
+
+widen = (@n:int):>void => {n = 9223372036854775808}
+
+mutable_arg = (small:bool):>void => {
+    let n = match small {<true> => 3 _ => 4}
+    printl("before call {n}")
+    widen(@n)
+    printl("after call {n}")
+}
+
+main = ():>void => {
+    wide_arm(false)
+    reassigned(true)
+    backedge(true)
+    captured(true)
+    mutable_arg(true)
+}

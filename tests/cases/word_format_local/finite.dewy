@@ -1,0 +1,38 @@
+# quick
+# modes: native native-release
+kind = (_value:int):>string => "exact"
+kind = (_value:int64):>string => "word"
+
+show = (selector:int64):>void => {
+    let n:int = match selector {
+        <0> => -9223372036854775808
+        <1> => 9223372036854775807
+        <2> => {
+            printl("arm")
+            -17
+        }
+        <3> => {return}
+        _ => 0
+    }
+    printl("{kind(n)} {n} {n}")
+}
+
+conditional = (left:bool):>void => {
+    let n = if left 42 else -9
+    printl("{n}")
+}
+
+remainder = (value:int64):>void => {
+    printl("remainder {value % 97}")
+}
+
+main = ():>void => {
+    show(0)
+    show(1)
+    show(2)
+    show(3)
+    show(4)
+    conditional(true)
+    conditional(false)
+    remainder(-1)
+}

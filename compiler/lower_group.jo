@@ -873,7 +873,7 @@ gen_interp = (e: int) -> Val:
             continue
         f = int(nodes[p].sym)
         x = int(nodes[p].a)
-        if exact_word_formats.has(p) or nodes[p].sval < 0 and prune(ntype(x)) == T_MATH_INT and math_proven_word(x) and math_default_formatter(f):
+        if (f > 0 and f == format_word_inst) or nodes[p].sval < 0 and prune(ntype(x)) == T_MATH_INT and math_proven_word(x) and math_default_formatter(f):
             e_call2(rt("__fmt_word"), e_slot(bs), math_word_expr(x), -1)
             continue
         val = gen_expr(x)
