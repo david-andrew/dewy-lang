@@ -1,0 +1,422 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_exact.dewy'
+use 'checks_assign_hooks.dewy'
+use 'checks_thin.dewy'
+use 'directive_queries.dewy'
+use 'directives.jo'
+use 'effects.jo'
+use 'exact.jo'
+use 'exact_cold_walk.dewy'
+use 'exact_count_bounds.dewy'
+use 'exact_measure.dewy'
+use 'exact_static_widths.dewy'
+use 'expr.jo'
+use 'facts.jo'
+use 'facts_lifecycle.dewy'
+use 'facts_progress.dewy'
+use 'facts_ranges.dewy'
+use 'isolation_ops.dewy'
+use 'node_store.dewy'
+use 'pcheck_drive.dewy'
+use 'types.jo'
+use 'checker_tokens.dewy'
+use 'checker_state.dewy'
+
+# Demand proofs of the exact stores in GPU programs' functions and the program's functions they
+# call (exact_shader_roots), before the facts pass chooses its bodies: those it must visit.
+# O(their nodes), once.
+exact_shader_demand = () -> int[]:
+    seen: {int: bool} = {}
+    out: int[]
+    work = exact_shader_roots
+    exact_shader_roots = []
+    loop work.len() > 0:
+        f = work.pop()
+        if f <= 0 or f >= fns.len() or seen.has(f) or fns[f].body == 0 or fn_in_lib(f): continue
+        seen[f] = true
+        exact_shader_owners[f] = true
+        out.push(f)
+        exact_shader_calls(int(fns[f].body), work)
+    out
+
+# A boundary wrapper has the same ABI and type as the value it stores.
+exact_store = (n: int, owner: int):
+    if not exact_has_node(n) or exact_has_store(n): return
+    t = ntype(n)
+    if not exact_type(t, nodes[n].pos): return
+    k = nodes[n].kind
+    if k == .block and nodes[n].aux != 0:
+        exact_store(block_value(n), owner)
+        exact_unmark(n)
+        return
+    if k == .if_ or k == .iflet or k == .match_:
+        if k == .match_:
+            loop arm in kids(n): exact_store(int(nodes[arm].b), owner)
+        else:
+            exact_store(int(nodes[n].b), owner)
+            exact_store(int(nodes[n].c), owner)
+        exact_unmark(n)
+        return
+    width = exact_type_width(n)
+    fits = width > 0 and (if types[exact_representation(t)].sign: width / 2 <= types[exact_representation(t)].bits else: width & 1 != 0 and width / 2 <= types[exact_representation(t)].bits + 1)
+    if fits:
+        if exact_measure_on: exact_measure_sites[n] = ExactMeasure(owner, t, "proven")
+        return
+    inner = nodes.len()
+    nodes.push(nodes[n])
+    if let shift = exact_shifts.get(n): exact_shifts[inner] = shift
+    exact_mark(inner)
+    nodes[n] = Node(kind = .conv, pos = nodes[inner].pos, a = i32(inner), aux = i32(int(CV.fixed_store)), type = i32(t), flags = i32(NF_CHECKED))
+    exact_unmark(n)
+    exact_stores[n] = owner
+    exact_marks[n] |= 2
+    if n < exact_type_widths.len(): exact_type_widths[n] = 0
+    if exact_measure_on: exact_measure_sites[n] = ExactMeasure(owner, t, "runtime-check")
+
+# Only immutable names can supply a context-free initializer. Stored globals
+# remain loads, and their word bound includes the value before initialization.
+exact_named_constant = (n: int) -> bool:
+    if nodes[n].kind != .ident: return false
+    if nodes[n].aux == i32(int(SK.global)):
+        g = int(nodes[n].sym)
+        return readonly_global(g) and not globals[g].exposed
+    nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_CONST != 0
+
+exact_constant_use = (n: int) -> bool:
+    if exact_named_constant(n): return true
+    if nodes[n].kind == .binary and nodes[n].aux == 0:
+        return exact_named_constant(int(nodes[n].a)) or exact_named_constant(int(nodes[n].b))
+    false
+
+# After checking has seen every write, an immutable mathematical local with a
+# word-sized initializer can feed static exact arithmetic without a tagged
+# temporary. The conversion is a representation proof, not a fit obligation.
+exact_prepare_operand = (n: int) -> int:
+    word = exact_math_operand(n)
+    if word != n or prune(ntype(n)) != T_MATH_INT: return word
+    if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int_)):
+        source = int(nodes[n].a)
+        t = exact_representation(ntype(source))
+        # A stored signed policy word has the same value when lifted to int.
+        # Keep its policy operation intact beneath an identity conversion.
+        if is_int(t) and types[t].sign and types[t].bits == 64:
+            word = mk(.conv, nodes[n].pos)
+            nodes[word] = Node(kind = .conv, pos = nodes[n].pos, a = i32(source), aux = i32(int(CV.none_)), type = i32(T_INT), flags = i32(NF_CHECKED))
+            return word
+    if nodes[n].kind != .ident: return n
+    # A local constant may be an inferred `int`. Stored globals retain their
+    # read and include their initial zero in exact_count_bound below.
+    local = nodes[n].aux == i32(int(SK.local))
+    if local and int(locals[int(nodes[n].sym)].flags) & LF_CONST != 0:
+        width = exact_type_width(n)
+        index = exact_type_widths[n]
+        if index < -1 and width / 2 <= 64:
+            value = int(exact_type_values[n])
+            if index & 1 == 0: value = -value
+            word = mk(.int_lit, nodes[n].pos)
+            nodes[word].type = i32(T_INT)
+            nodes[word].ival = value
+            add_flag(word, NF_CHECKED)
+            return word
+    if not local and nodes[n].aux != i32(int(SK.global)): return n
+    bound = exact_count_bound(n)
+    if bound.wide: return n
+    word = mk(.conv, nodes[n].pos)
+    nodes[word].a = i32(n)
+    nodes[word].aux = i32(int(CV.int_))
+    nodes[word].type = i32(T_INT)
+    exact_word_reads[word] = true
+    word
+
+exact_prepare_math = (n: int) -> bool:
+    if nodes[n].kind != .call and nodes[n].kind != .binary and nodes[n].kind != .unary: return false
+    if nodes[n].aux != 0 or prune(ntype(n)) != T_MATH_INT or not dewy_at(nodes[n].pos): return false
+    if nodes[n].kind == .unary:
+        if nodes[n].op != i32(int(Tok.minus)): return false
+        a = exact_prepare_operand(int(nodes[n].a))
+        if exact_representation(ntype(a)) != T_INT: return false
+        nodes[n].a = i32(a)
+        nodes[n].type = i32(T_INT)
+        wrap_conv(n, .int_, T_MATH_INT)
+        return true
+    if nodes[n].kind == .call:
+        floor = fact_floor_call(n)
+        if floor < 1 or floor > 4: return false
+        a = exact_prepare_operand(kid(n, 0)); b = exact_prepare_operand(kid(n, 1))
+        if exact_representation(ntype(a)) != T_INT or exact_representation(ntype(b)) != T_INT: return false
+        nodes[n] = Node(kind = .binary, pos = nodes[n].pos, a = i32(a), b = i32(b), type = i32(T_INT), op = i32(int((if floor == 1: Tok.slash else if floor == 2: Tok.percent else if floor == 3: Tok.shr else: Tok.amp))), aux2 = -1, flags = i32(NF_CHECKED))
+        wrap_conv(n, .int_, T_MATH_INT)
+        return true
+    if nodes[n].kind != .binary: return false
+    op = nodes[n].op as Tok
+    right = int(nodes[n].b)
+    if op == .shl or op == .shr:
+        # Dynamic int64 shifts preserve unsigned count interpretation in a
+        # wrapper. A final nonnegative bound proves that wrapper is an identity.
+        count_type = exact_representation(ntype(right))
+        if nodes[right].kind == .conv and nodes[right].aux == i32(int(CV.wrap_int)) and is_int(count_type) and not types[count_type].sign and types[count_type].bits == 64:
+            source = int(nodes[right].a)
+            if exact_bounded_count(source): right = source
+        known, count = integer_constant(right)
+        if not known or count < 0 or count >= 1048576:
+            if not exact_bounded_count(right): return false
+    else if op != .plus and op != .minus and op != .star and op != .amp and op != .pipe and op != .caret: return false
+    a = exact_prepare_operand(int(nodes[n].a)); b = exact_prepare_operand(right)
+    if exact_representation(ntype(a)) != T_INT: return false
+    if exact_representation(ntype(b)) != T_INT:
+        # A bounded shift count keeps its original fixed storage width.
+        if op != .shl and op != .shr or not is_int(ntype(b)) or prune(ntype(b)) == T_MATH_INT: return false
+    nodes[n].a = i32(a); nodes[n].b = i32(b)
+    nodes[n].type = i32(T_INT)
+    wrap_conv(n, .int_, T_MATH_INT)
+    true
+
+# Children of arithmetic and value controls remain intermediates. Other
+# consumers take stored values (including call actuals and aggregate fields).
+exact_prepare_node = (n: int, owner: int, store: bool):
+    if n <= 0: return
+    # Scalar leaves carry no arithmetic or writes. Strings may contain
+    # interpolation expressions, so retain their ordinary child traversal.
+    if (nodes[n].kind >= .int_lit and nodes[n].kind <= .ident) and nodes[n].kind != .str_lit: return
+    if n >= exact_marks.len(): exact_reserve(n)
+    if exact_marks[n] & 4 != 0:
+        if store: exact_store(n, owner)
+        return
+    exact_marks[n] |= 4
+    # Reveal/wrap nodes around scalar arithmetic are representation identities.
+    # Keep the checked visibility type, but do not make them storage boundaries.
+    # Refinement conversions retain their own nodes and redacted diagnostics.
+    loop nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.none_)):
+        child = int(nodes[n].a)
+        t = ntype(n); ct = ntype(child)
+        if not is_int(exact_representation(t)) or exact_representation(t) != exact_representation(ct): break
+        kind = nodes[child].kind
+        if kind != .binary and kind != .unary and kind != .ident and kind != .int_lit and not (kind == .conv and nodes[child].aux == i32(int(CV.none_))): break
+        nodes[n] = nodes[child]
+        nodes[n].type = i32(t)
+    # Local compound arithmetic has the same left-before-right evaluation as
+    # a simple binary assignment. Expose it before write/representation proofs.
+    if nodes[n].kind == .assign and nodes[n].aux == 0 and nodes[n].op != i32(int(Tok.assign)):
+        target = int(nodes[n].a)
+        if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)) and prune(ntype(target)) == T_MATH_INT:
+            op = compound_op(int(nodes[n].op)) as Tok
+            if op == .plus or op == .minus or op == .star or op == .amp or op == .pipe or op == .caret:
+                left = nodes.len(); nodes.push(nodes[target])
+                value = mk(.binary, nodes[n].pos)
+                nodes[value] = Node(kind = .binary, pos = nodes[n].pos, a = i32(left), b = nodes[n].b, op = i32(int(op)), type = i32(T_MATH_INT), flags = i32(NF_CHECKED))
+                nodes[n].b = i32(value)
+                nodes[n].op = i32(int(Tok.assign))
+    k = nodes[n].kind
+    if k == .array and has_flag(n, NF_BROADCAST) and tkind(ntype(n)) == .array and exact_representation(telem(ntype(n))) == T_MATH_INT: exact_demands[owner] = true
+    if exact_collect_writes and (k == .vardecl or k == .assign or k == .for_ or k == .while_ or k == .lambda or k == .fn_ or k == .return_ or k == .break_ or k == .continue_): exact_lower_sites.push(n)
+    if k == .lambda or k == .fn_: return
+    if exact_measure_on:
+        if store: exact_measure_boundary(n, owner)
+        else: exact_measure_visit(n, owner, false)
+    # Classify only the relevant kind. This demanded walk already has k;
+    # unrelated nodes need neither arithmetic/type queries nor policy tests.
+    math = false
+    operator = false
+    cmp = false
+    conversion = false
+    policy = false
+    control = false
+    match k:
+        binary:
+            math = exact_operation(n)
+            operator = nodes[n].aux == 0 and exact_type(ntype(n), nodes[n].pos)
+            cmp = nodes[n].aux == 0 and ntype(n) == T_BOOL
+        unary, intrinsic: math = exact_operation(n)
+        conv:
+            conversion = (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))) and exact_type(ntype(n), nodes[n].pos)
+            policy = nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int)) or nodes[n].aux == i32(int(CV.int2float)) or ntype(n) == T_MATH_INT
+        if_, iflet, block, exprstmt, match_, arm, coalesce: control = true
+        else: pass
+    if math and nodes[n].kind == .binary and (nodes[n].op == i32(int(Tok.shl)) or nodes[n].op == i32(int(Tok.starstar))):
+        (known, count) = integer_constant(int(nodes[n].b))
+        if count < 0 and not types[exact_representation(ntype(int(nodes[n].b)))].sign: known = false
+        if known and count < 1048576: exact_shifts[n] = max(0, count)
+        else:
+            exact_demands[owner] = true
+            exact_count_nodes.push((n, owner))
+            exact_marks[n] |= 128
+    previous_control = exact_control_head
+    if k == .while_ or k == .for_:
+        exact_control_values.push(int(nodes[n].a))
+        exact_control_parents.push(previous_control)
+        exact_control_head = exact_control_values.len()
+    if policy and k == .conv and (nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int))) and exact_named_constant(int(nodes[n].a)):
+        nodes[n].a = i32(exact_prepare_operand(int(nodes[n].a)))
+    mask = isolation_children(k)
+    if mask > 0:
+        if mask & 1 != 0: exact_prepare_node(int(nodes[n].a), owner, not (math or operator or cmp or conversion or policy or k == .exprstmt or k == .match_ and exact_match_literals(n)))
+        if mask & 2 != 0: exact_prepare_node(int(nodes[n].b), owner, not (math or operator or cmp or control))
+        if mask & 4 != 0: exact_prepare_node(int(nodes[n].c), owner, not control)
+        if mask & 16 != 0:
+            loop i in [0..nkids(n)): exact_prepare_node(kid(n, i), owner, not math and k != .block and k != .match_)
+    if (k == .call or k == .binary or k == .unary) and prune(ntype(n)) == T_MATH_INT and exact_prepare_math(n):
+        exact_marks[n] &= 251
+        exact_prepare_node(n, owner, store)
+        return
+    if conversion and prune(ntype(int(nodes[n].a))) == T_MATH_INT:
+        source = int(nodes[n].a)
+        if exact_named_constant(source) and not exact_word_reads.has(n):
+            word = exact_prepare_operand(source)
+            if word != source:
+                nodes[n].a = i32(word)
+                exact_mark(n) # narrower destinations still need their own fit proof
+        if nodes[n].a == i32(source):
+            if nodes[source].kind == .conv and nodes[source].aux == i32(int(CV.int_)) and exact_type(ntype(int(nodes[source].a)), nodes[n].pos): nodes[n].a = nodes[source].a
+            else if not exact_word_reads.has(n): exact_demands[owner] = true
+    # Arm coercion rewrites the tail after check_block cached its type.
+    # Keep both directions synchronized: a word arm widened to int must not
+    # be read as an untagged word, and a narrowed arm must expose its fit check.
+    if k == .block and nodes[n].aux != 0:
+        tail = block_value(n)
+        if prune(ntype(n)) == T_MATH_INT or prune(ntype(tail)) == T_MATH_INT: nodes[n].type = nodes[tail].type
+    expanded = math or operator and (exact_has_node(int(nodes[n].a)) or exact_has_node(int(nodes[n].b)))
+    if conversion or k == .exprstmt: expanded = exact_has_node(int(nodes[n].a))
+    if k == .if_ or k == .iflet: expanded = exact_has_node(int(nodes[n].b)) or exact_has_node(int(nodes[n].c))
+    if k == .block and nodes[n].aux != 0: expanded = exact_has_node(block_value(n))
+    if k == .match_:
+        loop arm in kids(n):
+            if exact_has_node(int(nodes[arm].b)): expanded = true
+    if expanded and nodes[n].type != 0 and exact_type(ntype(n), nodes[n].pos): exact_mark(n)
+    if cmp and (exact_has_node(int(nodes[n].a)) or exact_has_node(int(nodes[n].b))): exact_mark(n)
+    if k == .coalesce and exact_has_node(int(nodes[n].b)) and exact_type(ntype(n), nodes[n].pos): exact_mark(n)
+    if store or k == .conv and has_flag(n, NF_EXPLICIT_INTEGER): exact_store(n, owner)
+    # A dynamic mathematical shift may still have a word-sized value at this
+    # use. Ask the existing flow proof before choosing the tagged shift helper.
+    # This is representation demand, never an added source fit obligation.
+    if k == .binary and nodes[n].aux == 0 and nodes[n].op == i32(int(Tok.shl)) and prune(ntype(n)) == T_MATH_INT:
+        if owner >= exact_rep_owners.len(): exact_rep_owners.resize(max(owner + 1, fns.len()))
+        exact_rep_owners[owner] = true
+        if n >= exact_rep_demands.len(): exact_rep_demands.resize(nodes.len())
+        exact_rep_demands[n] = true
+        exact_proof_demands[owner] = true
+    if k == .for_ and nodes[n].aux == 0:
+        it = int(nodes[n].a)
+        loop endpoint in [int(nodes[it].a), int(nodes[it].b), int(nodes[it].c)]:
+            if endpoint != 0 and prune(ntype(endpoint)) == T_MATH_INT and exact_count_bound(endpoint).wide:
+                if owner >= exact_rep_owners.len(): exact_rep_owners.resize(max(owner + 1, fns.len()))
+                exact_rep_owners[owner] = true
+                if endpoint >= exact_rep_demands.len(): exact_rep_demands.resize(nodes.len())
+                exact_rep_demands[endpoint] = true
+                exact_proof_demands[owner] = true
+    if k == .for_ and (nodes[n].aux == 0 or nodes[n].aux == 1) and nodes[n].sym > 0 and not has_flag(n, NF_MUT):
+        l = int(nodes[n].sym)
+        if l >= exact_iteration_sources.len(): exact_iteration_sources.resize(locals.len())
+        exact_iteration_sources[l] = int(nodes[n].a)
+    if k == .vardecl and nodes[n].sym > 0 and not has_flag(n, NF_GLOBAL):
+        l = int(nodes[n].sym)
+        if l >= exact_initializers.len(): exact_initializers.resize(max(l + 1, locals.len()))
+        exact_initializers[l] = int(nodes[n].b)
+    if k == .call and nodes[n].aux == 0 and nodes[n].sym > 0:
+        called = int(nodes[n].sym)
+        loop i in [0..min(nkids(n), fns[called].params.len())):
+            if int(locals[fns[called].params[i]].flags) & LF_MUTPARAM == 0: continue
+            root = fact_progress_root(kid(n, i))
+            if nodes[root].kind == .ident and nodes[root].aux == i32(int(SK.local)):
+                l = int(nodes[root].sym)
+                if l >= exact_progress_opaque.len(): exact_progress_opaque.resize(locals.len())
+                exact_progress_opaque[l] = true
+    if k == .intrinsic and nkids(n) > 0:
+        id = nodes[n].aux as IN
+        if id == .push or id == .insert or id == .extend or id == .fill or id == .resize or id == .truncate or id == .reserve:
+            root = fact_progress_root(kid(n, 0))
+            if nodes[root].kind == .ident and nodes[root].aux == i32(int(SK.local)):
+                l = int(nodes[root].sym)
+                if l >= exact_progress_opaque.len(): exact_progress_opaque.resize(locals.len())
+                exact_progress_opaque[l] = true
+    if k == .assign:
+        exact_progress_assignments.push(n)
+        target = int(nodes[n].a)
+        root = fact_progress_root(target)
+        if nodes[root].kind == .ident and nodes[root].aux == i32(int(SK.local)):
+            l = int(nodes[root].sym)
+            if l >= exact_write_heads.len(): exact_write_heads.resize(max(l + 1, locals.len()))
+            exact_write_values.push(int(nodes[n].b))
+            exact_write_plain.push(nodes[n].op == i32(int(Tok.assign)) and nodes[n].aux == 0)
+            exact_write_targets.push(target)
+            exact_write_seen.push(0)
+            exact_write_controls.push(exact_control_head)
+            exact_write_next.push(exact_write_heads[l])
+            exact_write_heads[l] = exact_write_values.len()
+    if exact_collect_writes and (k == .while_ or k == .for_): exact_lower_sites.push(-1)
+    exact_control_head = previous_control
+
+exact_pure_float_tree = (n: int) -> bool:
+    if n < exact_float_purity.len() and exact_float_purity[n] != 0: return exact_float_purity[n] == 2
+    k = nodes[n].kind
+    pure = k == .ident or k == .int_lit or k == .bool_lit
+    if k == .unary or k == .conv: pure = exact_pure_float_tree(int(nodes[n].a))
+    else if k == .binary and nodes[n].aux == 0: pure = exact_pure_float_tree(int(nodes[n].a)) and exact_pure_float_tree(int(nodes[n].b))
+    if n >= exact_float_purity.len(): exact_float_purity.resize(max(n + 1, nodes.len()))
+    exact_float_purity[n] = if pure: 2 else: 1
+    pure
+
+exact_prepare_floats = (f: int) -> bool:
+    if exact_measure_on or exact_full_owners.has(f) or f >= exact_candidate_heads.len() or exact_candidate_heads[f] == 0: return false
+    at = exact_candidate_heads[f]
+    loop at > 0:
+        n = exact_candidate_nodes[at - 1]
+        if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int2float)) and exact_pure_float_tree(n): exact_prepare_node(n, f, false)
+        at = exact_candidate_next[at - 1]
+    at = exact_candidate_heads[f]
+    loop at > 0:
+        n = exact_candidate_nodes[at - 1]
+        if n >= exact_marks.len() or exact_marks[n] & 4 == 0: return false
+        at = exact_candidate_next[at - 1]
+    true
+
+exact_prepare = ():
+    if exact_owners.len() > 0: exact_marks = fill(u8(0), nodes.len() * 2 + 64)
+    owners: int[]
+    loop f, _ in exact_owners: owners.push(f)
+    owners.sort()
+    loop f in owners:
+        # A checking worker reports this demand alongside its closed-state
+        # summary. Restore only demanded bodies before obligations are decided.
+        pc_restore(f)
+        if f <= 0 or f >= fns.len() or fns[f].state != 2 or effect_unavailable.has(f): continue
+        if f >= exact_effect_owners.len(): exact_effect_owners.resize(fns.len())
+        exact_effect_owners[f] = true
+        body = int(fns[f].body)
+        if exact_prepare_floats(f): continue
+        fact_plan_forget(f)
+        # Reuse this demanded traversal for lowering's write inventory.
+        # Each write/control boundary is recorded once, O(N+E); lowering
+        # replays O(writes + controls) instead of walking the body again.
+        exact_collect_writes = not fns[f].writes_ready
+        exact_lower_sites = []
+        exact_prepare_node(body, f, false)
+        if exact_collect_writes:
+            fns[f].write_sites = exact_lower_sites
+            fns[f].writes_ready = true
+        exact_collect_writes = false
+        exact_lower_sites = []
+        if nodes[body].kind == .block and nodes[body].aux != 0:
+            if exact_measure_on: exact_measure_boundary(block_value(body), f)
+            exact_store(block_value(body), f)
+    loop candidate in exact_count_nodes:
+        original = candidate.0
+        n = if exact_has_store(original): int(nodes[original].a) else: original
+        bound = exact_count_bound(int(nodes[n].b))
+        if not bound.wide and bound.hi < 1048576:
+            exact_shifts[n] = max(0, bound.hi)
+            exact_marks[original] &= 127
+        else: exact_proof_demands[candidate.1] = true
+    loop assignment in exact_progress_assignments: fact_progress_note(assignment)
+    loop n, owner in exact_stores:
+        if not exact_decided(n):
+            exact_demands[owner] = true
+            if dir_policy(nodes[n].pos) == DIR_STATIC: exact_proof_demands[owner] = true
+    # Exact stores rewrite existing checked nodes as well as appending them.
+    effect_ix_nodes = 0
+    effect_ix_locals = 0
+    if effect_seen.len() > 0: effect_seen.resize(nodes.len())
+    exact_local_widths = []
+    exact_raw_values = []
+
+exact_preparation_bind = (exact_control_head: *(int), exact_collect_writes: *(bool), effect_ix_nodes: *(int), effect_ix_locals: *(int), exact_marks: *(u8[])) -> int: 0

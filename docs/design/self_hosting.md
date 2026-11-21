@@ -635,6 +635,11 @@ and mixed comparisons. It uses the existing bounded fact queries and witness
 services. Only the store, relational fit, and unsigned operations mutate the
 borrowed fact state.
 
+`exact_preparation.dewy` prepares demanded owners and their storage boundaries,
+including shader call graphs, exact shift counts and immutable word operands.
+The recursive walk reuses the write inventory and the per-node visit marks.
+It inspects scalar leaf kinds before entering the full traversal.
+
 ## Shared backend analysis boundary
 
 `backend_analysis.dewy` owns the complete final-IR analysis used by x64 and

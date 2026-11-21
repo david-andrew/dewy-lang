@@ -18,6 +18,7 @@ LEAF_HOMES = {
 
     'ast_rest': 'ast.jo',
     'source_queries': 'util.jo',
+    'exact_preparation': 'exact.jo',
     'exact_cold_walk': 'exact.jo',
     'exact_measure': 'exact.jo',
     'repl_signature': 'check.jo',
