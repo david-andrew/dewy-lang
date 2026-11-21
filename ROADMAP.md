@@ -35,8 +35,10 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
    storage, frames, optimizer structure, normalization and non-leaf inlining all
    bounded under 1%, and profile-driven work cuts have nothing left bounded at
    0.5%. [Structural round 1](docs/design/proposals/compile-speed/structural-round1.md)
-   bounded three ideas at 7–15%; pilots running: one checked body per uniform
-   reflection loop (99), word formatting from a proven range (100).
+   bounded three ideas at 7–15%; one checked body per uniform
+   reflection loop (99) and word formatting from a proven range (100) both landed
+   (−10.9% and −9.0% instructions on their flagships, 11-21). Next: structural
+   round 2 (new bounded ideas; 99 and 100 still need about 25–40% more).
 3. **Self-hosting** ([readiness](docs/design/self_hosting.md)): the front end,
    checker state, statement and expression layers, call group, ownership and
    loans, the optimizer, the emitters, lowering, IR, loops and refinements run in
