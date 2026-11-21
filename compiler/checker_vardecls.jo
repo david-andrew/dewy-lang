@@ -198,6 +198,7 @@ vd_decl = (s: int):
             if not cq_settled(vd_nodes, vd_types, v, t): vd_nodes[0][s].b = i32(coerce(v, t))
         else:
             t = et
+            if vd_dewy_at(pos): t = decl_observed(s, t)
             k = vd_kind(t)
             if k == .tuple and vd_sibling_literals[0].has(int(vd_nodes[0][s].b)): t = decl_sibling(s, t, 1)
             else if k == .struct_ and vd_dewy_at(pos) and vd_scalar_followed(s, t): t = decl_sibling(s, t, 2)

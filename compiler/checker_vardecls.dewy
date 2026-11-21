@@ -7,7 +7,7 @@ from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (Local FnCtx StatementWatch)
 from p"type_inference.dewy" import (tu_prune tu_targ)
 from p"checker_coerce.dewy" import cq_settled
-from p"check.jo" import (new_local)
+from p"check.jo" import (decl_observed new_local)
 from p"checker_store_checks.dewy" import (decl_values)
 from p"checks_stmt_hooks.dewy" import (decl_form decl_binding_type decl_storage decl_value_param decl_temperature decl_pattern decl_error)
 from p"expr.jo" import (struct_default coerce format_word_define)
@@ -245,6 +245,7 @@ vd_decl=(s:VWord):>void=>$unsafe {
             if not cq_settled(vd_nodes vd_types v t) {vd_nodes[0][s].b=int32<overflow='wrap'>(coerce(v t))}
         } else {
             t=et
+            if dewy {t=decl_observed(s t)}
             let k=vd_kind(t)
             if k =? 'tuple' and vd_sibling_literals[0].has(VWord(vd_nodes[0].ptr[s].b)) {t=decl_sibling(s t 1)}
             # (`let s = Circle[...]` that the block later gives a Square: their union, followed)

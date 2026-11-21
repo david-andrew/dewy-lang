@@ -72,6 +72,8 @@ use 'refinement_types.dewy'
 use 'member_replay.jo'
 use 'member_admit.dewy'
 use 'exact.jo'
+use 'exact_check_hooks.dewy'
+use 'checker_exact.dewy'
 use 'concurrency.jo'
 use 'partition.jo'
 use 'lazy_bodies.jo'
@@ -904,6 +906,15 @@ position_guard_note = (c: int, holds: bool):
 # a local name for the element, entry, field or variable itself, its key or
 # index evaluated once.
 local_place_count = 0
+
+# A comparison chain's temporary (dewy_node_builds dw_chain_temp) holds its
+# operand's exact value, not a fixed-width store: `a <? b + c <? d` compares
+# the exact sum. O(1) unless the value is fixed-width arithmetic.
+decl_observed = (s: int, t: int) -> int:
+    v = int(nodes[s].b)
+    if v == 0 or t == T_MATH_INT or not exact_type(t, nodes[s].pos) or not exact_potential(v): return t
+    if not starts_with(name_of(int(nodes[s].name)), "$chain"): return t
+    exact_int_result(v, true)
 
 # A shaped parameter's dimension (dw_shape_prologue): a name already bound to a
 # value is checked against the argument's dimension; otherwise the name binds it.

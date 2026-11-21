@@ -63,6 +63,10 @@ dv_literal = (s: int) -> int:
 dv_storage = (s: int, t: int) -> int:
     events.push("storage:{s}:{t}")
     t
+# (an inferred Dewy binding's observed type: a chain temporary's exact value)
+dv_observed = (s: int, t: int) -> int:
+    events.push("observed:{s}:{t}")
+    t
 dv_value_param = (s: int, t: int) -> int:
     events.push("value-param:{s}:{t}")
     t
@@ -256,6 +260,7 @@ DECL_JO = {
         'decl_literal': 'decl_literal = (s: int) -> int: dv_literal(s)',
         'decl_quantity_literal': 'decl_quantity_literal = (s: int, t: int) -> int: t',
         'decl_storage': 'decl_storage = (s: int, t: int) -> int: dv_storage(s, t)',
+        'decl_observed': 'decl_observed = (s: int, t: int) -> int: dv_observed(s, t)',
         'decl_value_param': 'decl_value_param = (s: int, t: int) -> int: dv_value_param(s, t)',
         'decl_temperature': 'decl_temperature = (s: int, t: int, unit: int) -> int: dv_temperature(s, t, unit)',
         'new_local': 'new_local = (name: int, t: int, pos: int) -> int: dv_binding(name, t, pos)',

@@ -1,0 +1,19 @@
+$runtime_checks
+# A comparison chain evaluates each operand once and compares exact values:
+# its held operand is not a fixed-width store.
+main = ():>void => {
+    let a1:uint64 = 1
+    let a3:uint64 = 13970449377750381815
+    printl((((a1 or a3) + (a3 + 4611686018427387904)) >=? (a3 + 2) >=? ((a1 - a3) and (a3 - a3))))
+    let b0:uint16 = 7
+    let b1:uint16 = 48
+    printl(((b1 << 11) <=? ((b1 and b0) >> 15) <? b1))
+    let c1:int32 = 2147483647
+    let c3:int32 = -1948845570
+    printl((((c1 * c1) - 8) >=? c3 >? (c1 xor (c3 and c1))))
+    let d0:uint8 = 255
+    let d1:uint8 = 3
+    printl(0 <? d1 - 4 <? 10)
+    printl(-5 <? d1 - 4 <? 0)
+    printl(d0 <? d0 * d0 <? 65026)
+}
