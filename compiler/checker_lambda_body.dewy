@@ -1,0 +1,144 @@
+$runtime_checks
+from p"ast.jo" import (NF_GENERIC NF_LANG_BODY NF_LOOPCOUNT NF_LITERAL NF_MUT NF_VOID clone has_flag kid kids nkids nodes)
+from p"ast_rest.dewy" import (lambda_captures)
+from p"check.jo" import (LF_CAPTURE LF_MUTPARAM LF_PARAM SINK_BODY check_block check_scopes ctxs cx dewy_at fns locals narrowed_var new_local returned_place scope_mark scope_reset sink_body_mode sink_fn sink_lambda_pack sink_no_tuple sink_want_elem sink_want_n sinks syms void_arm_end)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checker_sinks.dewy" import (pack_written sink_body_kind sink_pack_body sink_written)
+from p"checker_state.dewy" import (FnCtx)
+from p"checks_assign_hooks.dewy" import (block_value)
+from p"checks_stmt_hooks.dewy" import (body_result_throws)
+from p"checks_thin.dewy" import (push_type_params resolve_result_type set_block_value)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"errors.jo" import (infer_returns infer_throws)
+from p"expr.jo" import (capture_decl coerce lit_default)
+from p"refine.jo" import (refine_active refine_bindings)
+from p"refine_metadata.dewy" import (ref_validate_signature)
+from p"refine_rare.dewy" import (ref_decl_mask)
+from p"type_ops.dewy" import (dt is_values mk_var unify)
+from p"types.jo" import (T_NEVER T_VOID has_var prune targ tkind types)
+
+LambdaBodyWord:type=int64<overflow='wrap'>
+check_lambda_body=(f:LambdaBodyWord lam:LambdaBodyWord ret_hint:LambdaBodyWord):>void=>{
+    fns[f].state=1
+    let context = @cx
+    let parent=context
+    ctxs.push(FnCtx(int32<overflow='wrap'>(f) int32<overflow='wrap'>(parent) 0 false 0 ctxs[parent].mod ctxs[parent].floor))
+    context=LambdaBodyWord(ctxs.length) - 1
+    let mark=scope_mark()
+    if has_flag(lam NF_GENERIC) {push_type_params(lam fns[f].targs)}
+    let capture = @capture_decl
+    loop original in lambda_captures(lam) {
+        let cap=if has_flag(lam NF_GENERIC) {clone(original)} else {original}
+        let nm=LambdaBodyWord(nodes[cap].name)
+        let s=lookup(nm)
+        # Folded lexical constants need no environment slot, but they are
+        # still valid explicit captures. Keep the capture declaration intact.
+        if s not=? 0 and syms[s].kind =? 'const_' and nm <? check_scopes.top.length and check_scopes.top[nm] >=? LambdaBodyWord(ctxs[context].floor) and check_scopes.syms[check_scopes.top[nm]] =? s {
+            check_expr(clone(cap) 0);
+            continue
+        }
+        capture=cap
+        check_expr(cap 0);
+        capture=0
+        let local:LambdaBodyWord=0
+        if nodes[cap].kind =? 'ident' and nodes[cap].aux =? int32<overflow='wrap'>(1) {
+            local=LambdaBodyWord(nodes[cap].sym)
+            loop narrowed_var(local) not=? 0 {local=narrowed_var(local)}
+        }
+        if local =? 0 or LambdaBodyWord(locals[local].flags) & LF_CAPTURE =? 0 {
+            fatal(nodes[cap].pos "a capture must name an enclosing local variable");
+        }
+    }
+    loop i in 0.. and pt in fns[f].ptypes {
+        let p=kid(lam i)
+        let l=new_local(LambdaBodyWord(nodes[p].name) pt nodes[p].pos)
+        let fl=LF_PARAM
+        if has_flag(p NF_MUT) {fl |= LF_MUTPARAM}
+        locals[l].flags=int32<overflow='wrap'>(fl)
+        fns[f].params.push(l)
+    }
+    let declared:LambdaBodyWord=0
+    let spawned_hint:LambdaBodyWord=0
+    let bindings = @refine_bindings
+    let old_formals=bindings.formals
+    let old_self=bindings.self
+    if refine_active {
+        bindings.formals=[]
+        bindings.self=0
+        loop p in kids(lam) {bindings.formals.push(LambdaBodyWord(nodes[p].name))}
+    }
+    if nodes[lam].a not=? 0 {
+        declared=resolve_result_type(LambdaBodyWord(nodes[lam].a))
+        pack_written(f LambdaBodyWord(nodes[lam].a))
+    } else if has_flag(lam NF_VOID) {declared=T_VOID}
+    bindings.formals=old_formals
+    bindings.self=old_self
+    if refine_active {ref_validate_signature(fns[f].ptypes declared ref_decl_mask(lam) nodes[lam].pos)}
+    if declared not=? 0 {ctxs[context].ret=int32<overflow='wrap'>(declared)} else if ret_hint not=? 0 and not has_var(prune(ret_hint)) {ctxs[context].ret=int32<overflow='wrap'>(ret_hint)} else {
+        # (a `spawn` body infers what it throws, as a function with no declared result does;
+        # its result, with them, then settles what the call wants)
+        if nodes[lam].aux2 =? 17 and dewy_at(nodes[lam].pos) {
+            spawned_hint=ret_hint
+            ctxs[context].ret=int32<overflow='wrap'>(mk_var())
+            infer_throws[f]=[]
+            infer_returns[f]=[]
+        } else if ret_hint not=? 0 {ctxs[context].ret=int32<overflow='wrap'>(ret_hint)} else {ctxs[context].ret=int32<overflow='wrap'>(mk_var())}
+        ctxs[context].infer_ret=true
+    }
+    let body=LambdaBodyWord(fns[f].body)
+    let infer=ctxs[context].infer_ret
+    let want=infer or tkind(LambdaBodyWord(ctxs[context].ret)) not=? 'void_'
+    let exp:LambdaBodyWord=0
+    if not infer {exp=LambdaBodyWord(ctxs[context].ret)}
+    if want and nkids(body) >? 0 and nodes[kid(body (LambdaBodyWord(nkids(body)) - 1))].kind =? 'exprstmt' {returned_place(LambdaBodyWord(nodes[kid(body (LambdaBodyWord(nkids(body)) - 1))].a))}
+    let sink = @sink_fn
+    let mode = @sink_body_mode
+    let pack = @sink_lambda_pack
+    let no_tuple = @sink_no_tuple
+    let saved_sink=sink
+    mode=sink_body_kind(body infer and types[prune(LambdaBodyWord(ctxs[context].ret))].kind =? 'var' want LambdaBodyWord(ctxs[context].ret) not infer and sink_written(lam))
+    if fns[f].pack_n >? 0 {exp=sink_pack_body(f)} else if pack not=? 0 {
+        # (as the type says: `(int64 int64)`, that many values, as a written result; an array's
+        # element, any number of them, pushed)
+        mode=SINK_BODY
+        let element = @sink_want_elem
+        let lp=prune(pack)
+        if is_values(lp) {
+            let arity = @sink_want_n
+            arity=LambdaBodyWord(types[lp].nargs)
+            element=targ(lp 0)
+        } else {
+            element=LambdaBodyWord(types[lp].elem)
+            no_tuple=true
+        }
+        exp=0
+    }
+    pack=0
+    # (a parallel or spawn body the compiler made keeps its values as the array it collects)
+    if has_flag(lam NF_LANG_BODY) and mode =? SINK_BODY {no_tuple=true}
+    sink=sinks.length
+    let bt=check_block(body exp want)
+    sink=saved_sink
+    let r=prune(LambdaBodyWord(ctxs[context].ret))
+    if infer {
+        if types[r].kind =? 'var' {
+            if nodes[body].aux not=? 0 {
+                let v=block_value(body)
+                if has_flag(v NF_LITERAL) {
+                    bt=lit_default(v)
+                    set_block_value(body coerce(v bt))
+                }
+                if not unify(r bt) {fatal(nodes[body].pos "lambda returns {dt(bt)}, expected {dt(r)}");}
+            } else {unify(r T_VOID);}
+        } else if types[r].kind =? 'void_' {nodes[body].aux=0} else if nodes[body].aux not=? 0 {set_block_value(body coerce(block_value(body) r))} else if bt not=? T_NEVER and not void_arm_end(body r) {fatal(nodes[body].pos "lambda must return a value of type {dt(r)}");}
+    } else if want {
+        if nodes[body].aux not=? 0 {set_block_value(body coerce(block_value(body) r))} else if bt not=? T_NEVER and not void_arm_end(body r) {fatal(nodes[body].pos "lambda must return a value of type {dt(r)}");}
+    } else {nodes[body].aux=0}
+    body_result_throws(f body)
+    if spawned_hint not=? 0 {unify(spawned_hint LambdaBodyWord(ctxs[context].ret));}
+    fns[f].ret=ctxs[context].ret
+    fns[f].state=2
+    scope_reset(mark)
+    ctxs.pop();
+    context=parent
+}
