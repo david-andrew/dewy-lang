@@ -1,0 +1,17 @@
+# args: a
+# Float edge cases: conversions, rounding, NaN and signed zero, min/max.
+$runtime_checks
+main=(argv:array<string>):>void=>{
+    let z=float64(argv.length - 2)
+    let nan=z/z
+    let inf=1.0/z
+    printl"{nan} {inf} {-inf} {-z} {1.0/(-z)}"
+    printl"{min(1.0 nan)} {max(nan 1.0)} {min(-z z)} {max(-z z)}"
+    let xs=[0.5 1.5 2.5 -0.5 -1.5 -2.5 1e300 -1e-300 3.999999999 -7.25]
+    loop x in xs { printl"{x} {floor(x)} {ceil(x)} {round(x)} {trunc(x)}" }
+    loop x in [2.9 -2.9 1e18 -9.2e18] { printl(int64(x)) }
+    let f:float32=float32(16777217.0)
+    printl"{f} {float64(f) * 3.0} {float32(0.1)+float32(0.2)} {0.1+0.2}"
+    printl"{sqrt(2.0)} {1.0e-310 * 1.0e10} {5e-324} {float64(2.0)^float64(0.5)} {float64(10.0)^float64(-3.0)}"
+    printl"{to_float("1e400") ?? 0.0} {to_float("-0.0") ?? 1.0} {to_float("nan") ?? 0.0}"
+}

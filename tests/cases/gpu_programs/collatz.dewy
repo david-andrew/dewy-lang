@@ -1,0 +1,21 @@
+# Collatz step counts with a bounded loop in a compute function.
+$runtime_checks
+
+U:type=[out:GpuBuffer<int32>]
+steps=(id:int64 u:U):>void=>{
+    if id <? 0 or id >=? u.out.length or id >=? 100000 {return}
+    let n:int32=int32(id)+1
+    let count:int32=0
+    loop i in [0..500) {
+        if n >? 1 and n <? 100000000 {
+            n=if n % 2 =? 0 n // 2 else 3*n+1
+            count=int32(i+1)
+        }
+    }
+    u.out[id]=count
+}
+main=()=>{
+    let out=gpu_buffer<int32>(12)
+    dispatch(compute(@steps) 12 U(out))
+    printl(cpu(out))
+}

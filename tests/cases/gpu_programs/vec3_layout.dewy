@@ -1,0 +1,18 @@
+# vec3 and vec4 fields in buffer elements, read and written back.
+$runtime_checks
+
+Light:type=[color:vec3 power:float32 dir:vec4 on:bool]
+U:type=[lights:GpuBuffer<Light> sums:GpuBuffer<float32>]
+shade=(id:int64 u:U):>void=>{
+    if id <? 0 or id >=? u.lights.length or id >=? u.sums.length {return}
+    let l=u.lights[id]
+    u.sums[id]=if l.on (l.color.x+l.color.y+l.color.z)*l.power+l.dir.w else float32(0.0)
+    u.lights[id]=Light(l.color*float32(2.0) l.power l.dir on=not l.on)
+}
+main=()=>{
+    let ls=gpu_buffer([Light(vec3(1.0 0.5 0.25) 2.0 vec4(0.0 1.0 0.0 9.0) true) Light(vec3(0.1 0.2 0.3) 10.0 vec4(1.0 0.0 0.0 -1.0) false)])
+    let sums=gpu_buffer<float32>(2)
+    dispatch(compute(@shade) 2 U(ls sums))
+    printl(cpu(sums))
+    printl(cpu(ls))
+}

@@ -1,0 +1,12 @@
+# Text: UTF-8, slicing, formatting, searching, splitting.
+main=()=>{
+    let s="Grüße, 世界! naïve café"
+    printl"{s.length} {s.upper} {s.lower}"
+    printl"{s.split(" ")} {s.find("世界") ?? -1} {s.replace("é" "e")}"
+    let parts=["a" "bb" "ccc"]
+    printl"{parts.join("-")} {"x".repeat(5)} {fmt'.2f'(3.14159)}"
+    let n=0
+    loop c in s { if c.is_alpha { n+=1 } }
+    printl"{n} {s.startswith("Gr")} {s.endswith("café")}"
+    printl"{to_int("-9223372036854775808") ?? 0} {to_int("123456789012345678901234567890") ?? 0}"
+}

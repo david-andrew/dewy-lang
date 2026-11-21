@@ -1,0 +1,17 @@
+# Buffer elements mixing widths: padding between small and large fields.
+$runtime_checks
+
+Cell:type=[alive:bool age:uint8 heat:float32 tag:int16 count:int32]
+U:type=[cells:GpuBuffer<Cell>]
+tick=(id:int64 u:U):>void=>{
+    if id <? 0 or id >=? u.cells.length {return}
+    let c=u.cells[id]
+    let age:uint8=if c.age <? 250 c.age+uint8(1) else c.age
+    let count:int32=if c.count <? 1000000 c.count+int32(10) else c.count
+    u.cells[id]=Cell(not c.alive age c.heat*float32(0.5) c.tag count)
+}
+main=()=>{
+    let cs=gpu_buffer([Cell(true 3 8.0 -7 1) Cell(false 250 1.0 300 -5) Cell(true 0 -2.0 0 999999)])
+    dispatch(compute(@tick) 3 U(cs))
+    printl(cpu(cs))
+}

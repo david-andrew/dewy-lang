@@ -1,0 +1,31 @@
+# A 2D blur over a grid stored row by row; edges clamp.
+$runtime_checks
+
+G:type=[src:GpuBuffer<float32> dst:GpuBuffer<float32> w:int32 h:int32]
+blur=(id:int64 u:G):>void=>{
+    if u.w <=? 0 or u.h <=? 0 or u.w >? 4096 or u.h >? 4096 {return}
+    if id <? 0 or id >=? u.dst.length or id >=? int64(u.w)*int64(u.h) {return}
+    let w:int64=int64(u.w)
+    let x:int64=id % w
+    let y:int64=id // w
+    let s:float32=0.0
+    let n:float32=0.0
+    loop dy in [-1..1] {
+        loop dx in [-1..1] {
+            let xx:int64=x+dx
+            let yy:int64=y+dy
+            if xx >=? 0 and xx <? w and yy >=? 0 and yy <? int64(u.h) {
+                let j:int64=yy*w+xx
+                if j >=? 0 and j <? u.src.length { s+=u.src[j]; n+=1.0 }
+            }
+        }
+    }
+    u.dst[id]=if n >? 0.0 s/n else float32(0.0)
+}
+main=()=>{
+    let xs:array<float32>=[0 0 0 0 9 0 0 0 0 0 0 0]
+    let src=gpu_buffer(xs)
+    let dst=gpu_buffer<float32>(12)
+    dispatch(compute(@blur) 12 G(src dst 4 3))
+    printl(cpu(dst))
+}

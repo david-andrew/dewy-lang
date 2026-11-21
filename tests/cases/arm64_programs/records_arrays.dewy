@@ -1,0 +1,16 @@
+# Records with mixed fields, arrays of them, sorting and dictionaries.
+$runtime_checks
+Item:type=[name:string qty:int32 price:float64 flags:uint8 code:int16]
+main=()=>{
+    let items:array<Item>=[Item("bolt" 120 0.05 3 -2) Item("nut" 300 0.02 1 7) Item("gear" 4 12.5 255 300) Item("axle" 9 8.75 0 -32768)]
+    let total=0.0
+    loop it in items { total+=float64(it.qty)*it.price }
+    printl(total)
+    let by=items.sorted(key=(it:Item)=>it.price)
+    loop it in by { printl(it) }
+    let d:dict<string Item>=[]
+    loop it in items { d[it.name]=it }
+    printl"{d["gear"].flags} {d["axle"].code} {d.length}"
+    let fixed:array<int16 length=4>=[1 -2 3 -4]
+    printl"{fixed} {[loop x in fixed int64(x)*int64(x)]}"
+}

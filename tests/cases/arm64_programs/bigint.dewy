@@ -1,0 +1,10 @@
+# Exact integers beyond 64 bits.
+main=()=>{
+    let f=1
+    loop i in [1..30] { f*=i }
+    printl"{f} {f % 1000000007} {f // 12345678901234567}"
+    let p=2^127 - 1
+    printl"{p} {p.to_int64() ?? -1} {(p*p) % 97}"
+    let a=-(10^25) + 3
+    printl"{a // 7} {a % 7} {a.abs} {gcd(2^64 6^20)}"
+}

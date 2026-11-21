@@ -1,0 +1,28 @@
+# Row sums and maxima of a matrix into a record buffer.
+$runtime_checks
+
+Stat:type=[sum:float32 max:float32 argmax:int32]
+U:type=[m:GpuBuffer<float32> out:GpuBuffer<Stat> cols:int32]
+rows=(id:int64 u:U):>void=>{
+    if u.cols <=? 0 or u.cols >? 1024 {return}
+    if id <? 0 or id >=? u.out.length or id >=? 65536 {return}
+    let c=int64(u.cols)
+    let s:float32=0.0
+    let best:float32=-1.0e30
+    let arg:int32=-1
+    loop j in [0..1024) {
+        let k:int64=id*c+int64(j)
+        if int64(j) <? c and k <? u.m.length {
+            let v=u.m[k]
+            s+=v
+            if v >? best { best=v; arg=int32(j) }
+        }
+    }
+    u.out[id]=Stat(s best arg)
+}
+main=()=>{
+    let m:array<float32>=[1 5 2 -1 -3 -2 0 0 7 7 1 2]
+    let out=gpu_buffer<Stat>(3)
+    dispatch(compute(@rows) 3 U(gpu_buffer(m) out 4))
+    printl(cpu(out))
+}

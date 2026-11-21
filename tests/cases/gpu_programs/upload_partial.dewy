@@ -1,0 +1,18 @@
+# Partial uploads, element reads and writes, and ranged downloads of a buffer.
+$runtime_checks
+
+U:type=[b:GpuBuffer<int32> add:int32]
+bump=(id:int64 u:U):>void=>{
+    if id <? 0 or id >=? u.b.length {return}
+    let v=u.b[id]
+    if v <? 1000000 and v >? -1000000 and u.add <? 1000 and u.add >? -1000 { u.b[id]=v+u.add }
+}
+main=()=>{
+    let b=gpu_buffer<int32>(6)
+    upload(b [int32(1) 2 3] 2)
+    b[0]=int32(-4)
+    dispatch(compute(@bump) 6 U(b 10))
+    printl(cpu(b))
+    printl(cpu(b 1 3))
+    printl"{b[4]} {b.length}"
+}

@@ -1,0 +1,15 @@
+# Fused GPU array expressions over a named Dewy function, on a matrix.
+$runtime_checks
+
+smooth=(x:float32):>float32=>{
+    let t=if x <? 0.0 float32(0.0) else if x >? 1.0 float32(1.0) else x
+    return t*t*(3.0-2.0*t)
+}
+main=()=>{
+    let xs:array<float32>=[-0.5 0.0 0.25 0.5 0.75 1.0 1.5 0.1]
+    let g=gpu(xs)
+    let y=smooth.(g .* 1.0) .+ 0.5
+    printl(cpu(y).data)
+    printl([loop x in xs smooth(x)+0.5])
+    printl"{sum(g)} {max(g)} {min(g)}"
+}

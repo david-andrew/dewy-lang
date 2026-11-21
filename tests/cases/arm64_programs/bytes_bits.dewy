@@ -1,0 +1,18 @@
+# Bytes and bit manipulation: packing, popcount-like loops, rotations.
+main=()=>{
+    let b:array<uint8>=[]
+    loop i in [0..16) { b.push(uint8((i*37+11) % 256)) }
+    let word:uint64=0
+    loop i in [0..8) { word=word or (uint64(b[i]) << (8*i)) }
+    printl"{word} {word xor 0xFFFF} {word and 0xFF00FF00}"
+    let ones=0
+    let v=word
+    loop v not=? 0 { ones+=int64(v and 1); v=v >> 1 }
+    printl(ones)
+    let r:uint32=0x80000001
+    let rot:uint32<overflow='wrap'>=uint32<overflow='wrap'>(r) << 1 or uint32<overflow='wrap'>(r >> 31)
+    printl(rot)
+    let total:int64=0
+    loop x in b { total+=int64(x) }
+    printl"{total} {b.max} {b.min}"
+}

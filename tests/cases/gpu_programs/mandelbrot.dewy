@@ -1,0 +1,36 @@
+# Iteration counts of a tiny Mandelbrot grid.
+$runtime_checks
+
+U:type=[out:GpuBuffer<int32> w:int32 h:int32]
+mandel=(id:int64 u:U):>void=>{
+    if u.w <=? 0 or u.h <=? 0 or u.w >? 1024 or u.h >? 1024 {return}
+    if id <? 0 or id >=? u.out.length or id >=? int64(u.w)*int64(u.h) {return}
+    let x=id % int64(u.w)
+    let y=id // int64(u.w)
+    let cr:float32=float32(x)/float32(u.w)*3.0-2.0
+    let ci:float32=float32(y)/float32(u.h)*2.0-1.0
+    let zr:float32=0.0
+    let zi:float32=0.0
+    let n:int32=0
+    loop i in [0..50) {
+        if zr*zr+zi*zi <=? 4.0 {
+            let t=zr*zr-zi*zi+cr
+            zi=2.0*zr*zi+ci
+            zr=t
+            n=int32(i+1)
+        }
+    }
+    u.out[id]=n
+}
+main=()=>{
+    let w=8
+    let h=5
+    let out=gpu_buffer<int32>(w*h)
+    dispatch(compute(@mandel) w*h U(out w h))
+    let cs=cpu(out)
+    loop y in [0..h) {
+        let line=""
+        loop x in [0..w) { line="{line}{if cs[y*w+x] >=? 50 "#" else "."}" }
+        printl(line)
+    }
+}

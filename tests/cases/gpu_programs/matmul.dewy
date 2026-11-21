@@ -1,0 +1,25 @@
+# A small matrix product, one invocation per output element.
+$runtime_checks
+
+M:type=[a:GpuBuffer<float32> b:GpuBuffer<float32> c:GpuBuffer<float32> n:int32]
+matmul=(id:int64 u:M):>void=>{
+    if u.n <=? 0 or u.n >? 64 {return}
+    let n=int64(u.n)
+    if id <? 0 or id >=? n*n or id >=? u.c.length {return}
+    let row=id // n
+    let col=id % n
+    let s:float32=0.0
+    loop k in [0..n) {
+        let ai:int64=row*n+k
+        let bi:int64=k*n+col
+        if ai <? u.a.length and bi <? u.b.length { s+=u.a[ai]*u.b[bi] }
+    }
+    u.c[id]=s
+}
+main=()=>{
+    let a:array<float32>=[1 2 3 4 5 6 7 8 9]
+    let b:array<float32>=[9 8 7 6 5 4 3 2 1]
+    let c=gpu_buffer<float32>(9)
+    dispatch(compute(@matmul) 9 M(gpu_buffer(a) gpu_buffer(b) c 3))
+    printl(cpu(c))
+}

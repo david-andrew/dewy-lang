@@ -1,0 +1,12 @@
+# Calls with more integer and float arguments than registers, mixed.
+mix=(a:int64 b:float64 c:int32 d:float32 e:int64 f:float64 g:uint8 h:float64 i:int64 j:float64 k:int16 l:float64 m:int64 n:float64 o:int64 p:float32 q:int64 r:float64 s:bool t:int64):>float64=>{
+    let total=float64(a)+b+float64(c)+float64(d)+float64(e)+f+float64(g)+h+float64(i)+j
+    let rest=float64(k)+l+float64(m)+n+float64(o)+float64(p)+float64(q)+r+(if s 1.0 else 0.0)+float64(t)
+    return total*1000.0+rest
+}
+Pair:type=[x:int64 y:float64]
+swap=(p:Pair a:int32 b:int32 _c:int64 _d:int64 _e:int64 _f:int64 g:int32 h:int32 q:Pair):>Pair=>Pair(int64(a)+int64(h)+p.x*0+(q.x % 1000) p.y+float64(int64(b)+int64(g))+q.y)
+main=()=>{
+    printl(mix(1 2.5 3 4.5 5 6.5 7 8.5 9 10.5 -11 12.5 13 14.5 15 16.5 17 18.5 true 20))
+    printl(swap(Pair(1 2.0) 1 2 3 4 5 6 7 8 Pair(100 200.0)))
+}

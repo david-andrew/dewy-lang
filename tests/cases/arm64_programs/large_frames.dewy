@@ -1,0 +1,21 @@
+# Large fixed-size local arrays: frame offsets beyond short immediate ranges.
+$runtime_checks
+fill_all=(seed:int64):>int64=>{
+    let a:array<int64 length=6000>=fill(int64(0) 6000)
+    let b:array<float64 length=5000>=fill(0.0 5000)
+    let c:array<uint8 length=70000>=fill(uint8(0) 70000)
+    loop i in [0..6000) { a[i]=(i*seed) % 977 }
+    loop i in [0..5000) { b[i]=float64(a[i % 6000])*0.5 }
+    loop i in [0..70000) { c[i]=uint8((i+seed) % 251) }
+    let s:int64=0
+    loop i in [0..6000) { s+=a[i] }
+    let t=0.0
+    loop i in [0..5000) { t+=b[i] }
+    let u:int64=0
+    loop i in [0..70000) { u+=int64(c[i]) }
+    return s+int64(t)+u+a[5999]+int64(c[69999])
+}
+main=()=>{
+    printl(fill_all(3))
+    printl(fill_all(11))
+}

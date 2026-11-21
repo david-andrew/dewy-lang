@@ -1,0 +1,16 @@
+# Particles with vec2 position and velocity, stepped on the GPU.
+$runtime_checks
+
+Particle:type=[pos:vec2 vel:vec2]
+Step:type=[parts:GpuBuffer<Particle> dt:float32]
+step=(id:int64 u:Step):>void=>{
+    if id <? 0 or id >=? u.parts.length {return}
+    let p=u.parts[id]
+    u.parts[id]=Particle(p.pos+p.vel*u.dt p.vel)
+}
+main=()=>{
+    let ps=gpu_buffer([Particle(vec2(0.0 0.0) vec2(1.0 2.0)) Particle(vec2(5.0 -1.0) vec2(-0.5 0.25)) Particle(vec2(1.0 1.0) vec2(0.0 0.0))])
+    let k=compute(@step)
+    loop i in [0..4) { dispatch(k 3 Step(ps float32(0.5))) }
+    printl(cpu(ps))
+}

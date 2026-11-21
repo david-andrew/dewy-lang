@@ -1,0 +1,17 @@
+# y = a*x + y with a few scalar parameters of different types next to the buffers.
+$runtime_checks
+
+S:type=[flag:bool x:GpuBuffer<float32> scale:int32 y:GpuBuffer<float32> a:float32 offset:uint32]
+saxpy=(id:int64 u:S):>void=>{
+    if id <? 0 or id >=? u.y.length or id >=? u.x.length {return}
+    let bias:float32=if u.flag float32(u.scale) else float32(u.offset)
+    u.y[id]=u.a*u.x[id]+u.y[id]+bias
+}
+main=()=>{
+    let x=gpu_buffer([float32(1.0) 2.0 3.0 4.0])
+    let y=gpu_buffer([float32(10.0) 20.0 30.0 40.0])
+    dispatch(compute(@saxpy) 4 S(true x 100 y 2.0 7))
+    printl(cpu(y))
+    dispatch(compute(@saxpy) 4 S(false x 100 y -1.0 7))
+    printl(cpu(y))
+}

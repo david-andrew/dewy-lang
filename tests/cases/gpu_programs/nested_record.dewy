@@ -1,0 +1,18 @@
+# Nested records in buffer elements.
+$runtime_checks
+
+V:type=[x:float32 y:float32 z:float32]
+Body:type=[pos:V mass:float32 id:uint32]
+U:type=[bodies:GpuBuffer<Body> out:GpuBuffer<float32>]
+weigh=(id:int64 u:U):>void=>{
+    if id <? 0 or id >=? u.bodies.length or id >=? u.out.length {return}
+    let b=u.bodies[id]
+    u.out[id]=(b.pos.x+b.pos.y+b.pos.z)*b.mass+float32(b.id)
+}
+main=()=>{
+    let bs=gpu_buffer([Body(V(1.0 2.0 3.0) 2.0 100) Body(V(-1.0 0.5 0.25) 4.0 7)])
+    let out=gpu_buffer<float32>(2)
+    dispatch(compute(@weigh) 2 U(bs out))
+    printl(cpu(out))
+    printl(cpu(bs))
+}

@@ -1,0 +1,21 @@
+# A histogram of byte-sized values counted with atomics.
+$runtime_checks
+
+H:type=[data:GpuBuffer<uint32> bins:GpuBuffer<uint32>]
+count=(id:int64 u:H):>void=>{
+    if id <? 0 or id >=? u.data.length {return}
+    let bin=u.data[id] % 8
+    if bin <? u.bins.length { atomic_add(u.bins bin uint32(1)); }
+}
+main=()=>{
+    let xs:array<uint32>=[]
+    loop i in [0..100) { xs.push(uint32((i*i+3*i) % 13)) }
+    let data=gpu_buffer(xs)
+    let bins=gpu_buffer<uint32>(8)
+    dispatch(compute(@count) xs.length H(data bins))
+    let got=cpu(bins)
+    printl(got)
+    let total:uint32=0
+    loop b in got { total+=b }
+    printl(total)
+}

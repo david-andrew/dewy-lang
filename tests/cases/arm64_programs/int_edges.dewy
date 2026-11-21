@@ -1,0 +1,22 @@
+# args: a
+# Integer edge cases: division, remainder, shifts and wrapping at the limits.
+$runtime_checks
+W:type=int64<overflow='wrap'>
+S:type=int32<overflow='saturate'>
+main=(argv:array<string>):>void=>{
+    let n=int64(argv.length)
+    let big:int64=if n >? 0 and n <? 100 int64.max - n + 1 else 0
+    let small:int64=if n >? 0 and n <? 100 int64.min + n - 1 else 0
+    printl"{big // 7} {big % 7} {small // 7} {small % 7} {small // -7} {small % -7}"
+    let w:W=W(int64.min) + W(n - 1)
+    printl"{w * W(-1)} {w - W(1)} {w // W(-1)}"
+    let s:S=S(int32.max - 5)
+    printl"{s + S(100)} {S(int32.min + 2) - S(10)}"
+    let u:uint64=uint64.max - uint64(n) + 1
+    printl"{u} {u // 3} {u % 1000} {u >> 63} {u >> 1}"
+    let x:int64=if n >? 0 and n <? 100 -1 - n else 0
+    printl"{x >> 1} {x >> 63} {abs(x)} {-x}"
+    loop k in [0..70) { if k % 13 =? 0 or k =? 63 { printl"{k} {uint64(1) << (k % 64)}" } }
+    let m:int8=int8(-128 + int64(argv.length) - 1)
+    printl"{m} {int64(m) * int64(m)}"
+}

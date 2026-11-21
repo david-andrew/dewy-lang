@@ -1,0 +1,17 @@
+# args: a
+# Products summed in a loop: results must not depend on fused multiply-add.
+main=(argv:array<string>):>void=>{
+    let a=0.1 + float64(argv.length - 1)
+    let s=0.0
+    let t:float32=0.0
+    loop i in [0..1000) {
+        let x=float64(i)*a
+        s=s+x*x*1.0000001-x*0.3
+        t=t+float32(x)*float32(1.1)-float32(0.7)
+    }
+    printl"{s} {t}"
+    let p=1.0/3.0
+    printl"{p*3.0-1.0} {p*p-p/3.0} {0.1*10.0-1.0}"
+    let e:float64=1.0 + 1e-16*float64(argv.length)
+    printl(e*e - 1.0)
+}

@@ -1,0 +1,21 @@
+# Errors, optionals and unions flowing through calls.
+NotFound:type=[key:string]
+Bad:type=[why:string code:int32]
+look=(d:dict<string int64> k:string):>int64 | NotFound=>if d.has(k) d[k] else NotFound(k)
+parse=(s:string):>int64 | Bad=>{
+    let v=to_int(s) ?? return Bad("not a number: {s}" 2)
+    if v <? 0 { return Bad("negative" 3) }
+    return int64(v % 1000)
+}
+main=()=>{
+    let d:dict<string int64>=["a" -> 1 "b" -> 2]
+    loop k in ["a" "z" "b"] {
+        match look(d k) {
+            nf:NotFound => printl"missing {nf.key}"
+            v:int64 => printl(v)
+        }
+    }
+    loop s in ["12" "x" "-4" "123456"] { printl(parse(s)) }
+    let o:int64?=none
+    printl"{o ?? 9} {(if d.has("a") d["a"] else 0) + 1}"
+}

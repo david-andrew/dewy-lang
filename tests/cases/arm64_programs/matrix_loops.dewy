@@ -1,0 +1,18 @@
+# Numeric loops: a matrix product, a stencil and a prefix sum.
+$runtime_checks
+main=()=>{
+    let n=24
+    let a:array<float64>=[]
+    let b:array<float64>=[]
+    loop i in [0..n*n) { a.push(float64(i % 7) - 3.0); b.push(float64((i*5) % 11) * 0.5) }
+    let c:array<float64>=[]
+    loop i in [0..n) { loop j in [0..n) {
+        let s=0.0
+        loop k in [0..n) { s+=a[i*n+k]*b[k*n+j] }
+        c.push(s)
+    } }
+    printl"{c.sum} {c[0]} {c[n*n-1]}"
+    let p:array<int64>=[0]
+    loop i in [1..1000] { p.push(p[p.length-1] + i*i) }
+    printl"{p[1000]} {p[500]}"
+}

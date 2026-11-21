@@ -1,0 +1,15 @@
+# Parallel workers and atomics: totals must be exact on a weakly ordered machine.
+$runtime_checks
+$program.max_cores = 4
+main=()=>{
+    let hits=atomic(int64(0))
+    let parts=[parallel i in [0..64) {
+        let s:int64=0
+        loop j in [0..1000) { s+=int64((i*j) % 7) }
+        hits.add(1);
+        s
+    }]
+    printl"{parts.sum} {hits.load}"
+    let squares=[parallel x in [0..2000) x*x]
+    printl"{squares.sum} {squares[1999]}"
+}
