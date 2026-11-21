@@ -49,8 +49,8 @@ main = ():
     loop op in [63, 64, 65, 58]:
         potential(wire(mk(.binary, T_INT, op, 2), no, yes))
         potential(wire(mk(.binary, T_INT, op, 2), no, no))
-    # An unsigned quotient follows either operand; a remainder its divisor.
-    loop op in [61, 62]:
+    # An unsigned quotient follows either operand; a remainder its divisor; a right shift its value.
+    loop op in [61, 62, 68]:
         loop aux in [0, 2]:
             potential(wire(mk(.binary, T_U64, op, aux), no, yes))
             potential(wire(mk(.binary, T_U64, op, aux), yes, no))

@@ -1,0 +1,11 @@
+$runtime_checks
+# A right shift of an exact intermediate keeps the bits above the width.
+f=(a:uint32 b:int16 c:uint64):>void=>{
+    printl("<{(((a + a) * (a * a)) >> 33)}>")
+    printl((b * b * b) >> 3)
+    printl((c * c) >> 64)
+    printl((c - 9) >> 1)
+    let r:uint32 = ((a * a) >> 40)
+    printl(r)
+}
+main=()=>f(1948601421 (-32768) 18446744073709551615)
