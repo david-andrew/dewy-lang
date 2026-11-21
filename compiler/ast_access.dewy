@@ -1,0 +1,44 @@
+$runtime_checks
+
+from p"ast.jo" import (dewy_len_members dewy_param_kinds id_dewy_len lists nodes)
+from p"node_store.dewy" import (NK node_clone node_kids node_kids2 node_mk node_set_list node_set_list2)
+
+AstWord:type=int64<overflow='wrap'>
+
+ast_mk=(kind:NK pos:int64):>int64=>node_mk(@nodes kind pos)
+ast_set_list=(n:int64 xs:array<int64>):>void=>node_set_list(@nodes @lists n xs)
+ast_set_list2=(n:int64 xs:array<int64>):>void=>node_set_list2(@nodes @lists n xs)
+
+ast_kid=(n:AstWord i:AstWord):>int64=>$unsafe lists.ptr[AstWord(nodes.ptr[n].list) + i]
+ast_kid2=(n:AstWord i:AstWord):>int64=>$unsafe lists.ptr[AstWord(nodes.ptr[n].list2) + i]
+ast_nkids=(n:AstWord):>int64=>$unsafe nodes.ptr[n].nlist
+ast_nkids2=(n:AstWord):>int64=>$unsafe nodes.ptr[n].nlist2
+ast_set_kid=(n:AstWord i:AstWord v:int64):>void=>$unsafe {
+    lists[AstWord(nodes.ptr[n].list) + i]=int32<overflow='wrap'>(v)
+}
+
+# Checked loop nodes store local IDs in c and d. Partial nodes store a function ID in d.
+ast_kid_c=(n:AstWord):>int64=>$unsafe {
+    if nodes.ptr[n].kind =? 'for_' {0} else {int64(nodes.ptr[n].c)}
+}
+ast_kid_d=(n:AstWord):>int64=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'for_' or k =? 'partial' {0} else {int64(nodes.ptr[n].d)}
+}
+ast_kids=(n:int64):>array<int64>=>node_kids(@nodes @lists n)
+ast_kids2=(n:int64):>array<int64>=>node_kids2(@nodes @lists n)
+
+ast_has_flag=(n:AstWord f:AstWord):>bool=>$unsafe (AstWord(nodes.ptr[n].flags) & f) not=? 0
+ast_add_flag=(n:AstWord f:AstWord):>void=>$unsafe {
+    nodes[n].flags=int32<overflow='wrap'>(AstWord(nodes.ptr[n].flags) | f)
+}
+ast_clear_flag=(n:AstWord f:AstWord):>void=>$unsafe {
+    nodes[n].flags=int32<overflow='wrap'>(AstWord(nodes.ptr[n].flags) & ~f)
+}
+ast_clone=(n:int64):>int64=>node_clone(@nodes @lists n)
+
+ast_note_member=(n:AstWord):>void=>$unsafe {
+    if AstWord(nodes.ptr[n].name) =? id_dewy_len {dewy_len_members[n]=nodes.ptr[n].pos}
+}
+
+ast_decl_has_rest=(d:int64):>bool=>(dewy_param_kinds.get(d) ?? []).contains(3)

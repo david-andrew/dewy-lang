@@ -74,6 +74,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `dewy_syntax` | `dewy_syntax.jo` | Dewy kind names; old tree retired | No separate syntax-tree construction or projection remains. |
 | `dewy_grammar` | `dewy_grammar.jo` | Dewy grammar queries | Panel ≤+0.02%, lex+parse +0.03%; hot caller guards stay inline. |
 | `node_store` | `node_store.jo` | Dewy node/layout/list operations | Flagships +0.13%; lex+parse +0.25%, resolve+check +0.29%; borrowed arenas. |
+| `ast_access` | `ast_access.jo` | Dewy child and flag operations and declaration queries | Direct arena reads inline. Writes retain the node and list stores' copy-on-write behavior. |
 | `intern`, `util_ops` | Same stems + `.jo` | Dewy hash/probe/insert, name publication and source-position queries | Hits borrow the input bytes. New names use the raw byte slice primitive. |
 | `directive_index` | `directive_index.jo` | Dewy scope indexing, cache and policy lookup | Stable generations skip index synchronization. Pushes extend the index; truncations rebuild it. |
 | `nd_contract_query` | `nd_contract_query.jo` | Dewy N-D call classification and mutable entry checks | Per-instance classification cache, existing borrowed argument routes and shape tables. |
