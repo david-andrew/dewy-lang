@@ -1,0 +1,35 @@
+use 'check.jo'
+use 'diagnostic_exit.dewy'
+use 'type_ops.dewy'
+use 'types.jo'
+use 'util.jo'
+
+# Recursive value fields use private managed boxes, so their containing layout
+# cannot be passed to C as an ordinary struct (including through a typed pointer).
+check_c_boxes = (t0: int, pos: int):
+    t = prune(t0)
+    if types[t].kind == .ptr: t = prune(int(types[t].elem))
+    pending = [t]
+    seen: {int: bool} = {}
+    loop pending.len() > 0:
+        current = prune(pending.pop())
+        if seen.has(current): continue
+        seen[current] = true
+        if current == T_MATH_INT: fatal(pos, "mathematical int cannot cross the C ABI; use an explicit fixed-width integer")
+        k = types[current].kind
+        if k == .opt or k == .fixed: pending.push(int(types[current].elem))
+        else if k == .tuple:
+            loop i in [0..int(types[current].nargs)): pending.push(targ(current, i))
+        else if k == .struct_ or k == .enum_:
+            si = int(types[current].st)
+            check_struct_fields(si)
+            decide_boxes(si)
+            fs: int[]
+            loop i in [0..int(structs[si].nfields)): fs.push(int(structs[si].fields) + i)
+            loop v in [0..int(structs[si].nvariants)):
+                vi = int(structs[si].variants) + v
+                loop i in [0..int(variants[vi].nfields)): fs.push(int(variants[vi].fields) + i)
+            loop f in fs:
+                if fields[f].boxed:
+                    fatal(pos, "recursive value field '{name_of(int(fields[f].name))}' in {dt(current)} uses managed storage and cannot cross the C ABI; use an explicit pointer-based C representation")
+                pending.push(int(fields[f].type))

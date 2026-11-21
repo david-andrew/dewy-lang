@@ -1,0 +1,45 @@
+$runtime_checks
+from p"check.jo" import (check_struct_fields)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"type_ops.dewy" import (decide_boxes dt)
+from p"types.jo" import (T_MATH_INT fields prune structs targ types variants)
+from p"util.jo" import (name_of)
+
+FfiLayoutWord:type=int64<overflow='wrap'>
+# Recursive value fields use private managed boxes, so their containing layout
+# cannot be passed to C as an ordinary struct (including through a typed pointer).
+check_c_boxes=(t0:FfiLayoutWord pos:FfiLayoutWord):>void=>{
+    let t=prune(t0)
+    if types[t].kind =? 'ptr' {t=prune(FfiLayoutWord(types[t].elem))}
+    # A scalar has no child layout to inspect. Most foreign signatures contain only these.
+    let root_kind=types[t].kind
+    if t not=? T_MATH_INT and root_kind not=? 'opt' and root_kind not=? 'fixed' and root_kind not=? 'tuple' and root_kind not=? 'struct_' and root_kind not=? 'enum_' {return}
+    let pending=[t]
+    let seen=dict<int64 bool>()
+    loop pending.length >? 0 {
+        let current=prune(pending.pop())
+        if seen.has(current) {continue}
+        seen[current]=true
+        if current =? T_MATH_INT {fatal(pos "mathematical int cannot cross the C ABI; use an explicit fixed-width integer");}
+        let k=types[current].kind
+        if k =? 'opt' or k =? 'fixed' {pending.push(FfiLayoutWord(types[current].elem))} else if k =? 'tuple' {
+            loop i in [0..FfiLayoutWord(types[current].nargs)) {pending.push(targ(current i))}
+        } else if k =? 'struct_' or k =? 'enum_' {
+            let si=FfiLayoutWord(types[current].st)
+            check_struct_fields(si)
+            decide_boxes(si)
+            let fs:array<int64>=[]
+            loop i in [0..FfiLayoutWord(structs[si].nfields)) {fs.push(FfiLayoutWord(structs[si].fields) + i)}
+            loop v in [0..FfiLayoutWord(structs[si].nvariants)) {
+                let vi=FfiLayoutWord(structs[si].variants) + v
+                loop i in [0..FfiLayoutWord(variants[vi].nfields)) {fs.push(FfiLayoutWord(variants[vi].fields) + i)}
+            }
+            loop f in fs {
+                if fields[f].boxed {
+                    fatal(pos "recursive value field '{name_of(FfiLayoutWord(fields[f].name))}' in {dt(current)} uses managed storage and cannot cross the C ABI; use an explicit pointer-based C representation");
+                }
+                pending.push(FfiLayoutWord(fields[f].type))
+            }
+        }
+    }
+}
