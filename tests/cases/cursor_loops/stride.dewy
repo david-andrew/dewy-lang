@@ -1,0 +1,8 @@
+f = (stop:int64 go:bool):>int64 => {
+    if stop <? 0 or stop >? 100 return 0
+    let i:int64 = 0
+    loop i <? stop and go { i += 2 }
+    $assert i <=? stop
+    return i
+}
+printl(f(3 true))

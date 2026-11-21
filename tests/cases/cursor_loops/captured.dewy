@@ -1,0 +1,9 @@
+f = (stop:int64):>int64 => {
+    if stop <? 0 or stop >? 100 return 0
+    let i:int64 = 0
+    let pred = ($capture @i):>bool => { i = 101; return true }
+    loop i <? stop and pred() { i += 1 }
+    $assert i <=? stop
+    return i
+}
+printl(f(3))

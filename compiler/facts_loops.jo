@@ -717,12 +717,107 @@ fact_loop_roots = (n: int, s: mut FactState, budget: mut int):
     else if k == .conv or fact_field_node(n): fact_loop_roots(int(nodes[n].a), s, budget)
     else if k == .call and fact_string_call(n) == 1 or k == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1:
         fact_loop_roots(kid(n, 0), s, budget)
+# A private local whose declaration is the actual storage the ident reads.
+fact_cursor_local = (n: int) -> bool:
+    if not fact_preread_local(n): return false
+    flags = int(locals[int(nodes[n].sym)].flags)
+    flags & (LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_EXPOSED | LF_ELEMALIAS | LF_SOAELEM) == 0
+# Only boolean combinations of scalar reads, byte indexing and direct,
+# checked byte predicates whose complete write footprint is empty.
+fact_cursor_predicate = (n: int, cursor: int, budget: mut int) -> bool:
+    if n == 0 or budget <= 0: return false
+    budget -= 1
+    k = nodes[n].kind
+    a = int(nodes[n].a)
+    b = int(nodes[n].b)
+    if k == .and_ or k == .or_ or k == .binary and nodes[n].aux == 0 and fact_comparison(nodes[n].op as Tok):
+        return fact_cursor_predicate(a, cursor, budget) and fact_cursor_predicate(b, cursor, budget)
+    if k == .not_: return fact_cursor_predicate(a, cursor, budget)
+    if k == .int_lit or k == .bool_lit: return true
+    if k == .ident: return fact_cursor_local(n) and (ntype(n) == T_BOOL or ntype(n) == T_U8)
+    if k == .index:
+        return fact_cursor_local(a) and tkind(ntype(a)) == .array and telem(ntype(a)) == T_U8 and nkids(n) == 1 and kid(n, 0) == b and fact_preread_local(b) and int(nodes[b].sym) == cursor
+    if k != .call or a != 0 or nodes[n].aux != 0 or nkids(n) != 1 or ntype(n) != T_BOOL: return false
+    f = int(nodes[n].sym)
+    if f <= 0 or f >= fns.len() or fns[f].state != 2 or fns[f].body == 0 or fns[f].has_env or fns[f].params.len() != 1: return false
+    arg = kid(n, 0)
+    param = fns[f].params[0]
+    if locals[param].type != T_U8 or int(locals[param].flags) & LF_MUTPARAM != 0 or ntype(arg) != T_U8 or not fact_cursor_predicate(arg, cursor, budget): return false
+    if fact_summary_owner != 0 and (f >= effect_summaries.len() or not effect_summaries[f].done): return false
+    if not effects_demand(f, true) or effect_summaries[f].cut or effect_summaries[f].callbacks != 0 or effect_summaries[f].opaque_other: return false
+    loop event in effect_summaries[f].events:
+        if event.atom.kind != .read and event.atom.kind != .panic: return false
+    true
+# On the demanded while transfer only. The conjunction's first operand must
+# guard the very local that advances once on the sole continuing edge.
+fact_cursor_shape = (n: int) -> bool:
+    condition = int(nodes[n].a)
+    guard = int(nodes[condition].a)
+    body = int(nodes[n].b)
+    if nodes[guard].kind != .binary or nodes[guard].aux != 0 or (nodes[guard].op as Tok) != .lt or nodes[body].kind != .block or nkids(body) != 1: return false
+    cursor = int(nodes[guard].a)
+    limit = int(nodes[guard].b)
+    if not fact_cursor_local(cursor) or not fact_cursor_local(limit) or ntype(cursor) != T_INT or ntype(limit) != T_INT or nodes[cursor].sym == nodes[limit].sym: return false
+    store = kid(body, 0)
+    target = int(nodes[store].a)
+    if nodes[store].kind != .assign or nodes[store].aux != 0 or not fact_preread_local(target) or nodes[target].sym != nodes[cursor].sym or ntype(target) != T_INT: return false
+    rhs = int(nodes[store].b)
+    op = nodes[store].op as Tok
+    if op == .assign:
+        # A checked int64 compound update is lowered to a fixed store of i+1.
+        if nodes[rhs].kind == .conv and nodes[rhs].aux == i32(int(CV.fixed_store)) and ntype(rhs) == T_INT: rhs = int(nodes[rhs].a)
+        if nodes[rhs].kind != .binary or nodes[rhs].aux != 0 or (nodes[rhs].op as Tok) != .plus or ntype(rhs) != T_INT: return false
+        read = int(nodes[rhs].a)
+        if not fact_preread_local(read) or nodes[read].sym != nodes[cursor].sym: return false
+        rhs = int(nodes[rhs].b)
+    else if op != .pluseq: return false
+    if nodes[rhs].kind != .int_lit or nodes[rhs].ival != 1 or ntype(rhs) != T_INT: return false
+    budget = 64
+    fact_cursor_predicate(int(nodes[condition].b), int(nodes[cursor].sym), budget)
+# O(predicate size + demanded effect rows) once per candidate. Bounds and
+# relations depend on this entry, so recompute them even on a shape cache hit.
+fact_cursor_header = (n: int, entry: FactState, header: mut FactState) -> bool:
+    if ownership_fact_cleanup or fact_loop_exhausted: return false
+    yes = false
+    if let known = fact_cursor_shapes.get(n): yes = known
+    else:
+        yes = fact_cursor_shape(n)
+        fact_cursor_shapes[n] = yes
+    if not yes: return false
+    guard = int(nodes[int(nodes[n].a)].a)
+    place = fact_place(int(nodes[guard].a))
+    start = fact_guard_value(int(nodes[guard].a), entry)
+    stop = fact_guard_value(int(nodes[guard].b), entry)
+    if start == 0 or stop == 0 or entry.ids.len() >= FACT_CAP: return false
+    x = fact_bound(entry, start)
+    y = fact_bound(entry, stop)
+    if x.wide or y.wide: return false
+    # Preserve the exact entry if the old transfer can refute the first
+    # trip (including a byte or flag known false only at the entry cursor).
+    outer = fact_speculating
+    fact_speculating += 1
+    first = fact_condition(int(nodes[n].a), entry)
+    fact_speculating = outer
+    if fact_loop_exhausted: return false
+    if not first.yes.live: return true
+    # Every header is either entry or the result of adding one below stop.
+    # Strict comparison makes this representable even when stop is INT64_MAX.
+    # The only write replaces this private scalar. All other bindings survive.
+    value = fact_new(header, FactBound(x.lo, max(x.hi, y.hi), reason = .loop_, witness = n), FactTerm(type = T_INT))
+    if value == 0: return false
+    fact_rebind(header, place, value, n, start)
+    fact_difference(header, start, value, 0, n)
+    if fact_entails(entry, start, stop, 0): fact_difference(header, value, stop, 0, n)
+    true
 fact_while = (n: int, s: mut FactState):
     roots = 32
     fact_loop_roots(int(nodes[n].a), s, roots)
     outer = fact_speculating
     entry = s
     header = s
+    if nodes[int(nodes[n].a)].kind == .and_ and fact_cursor_header(n, entry, header):
+        s = fact_while_exit(n, entry, header)
+        return
     settled = false
     fact_speculating += 1
     # Eager interval widening converges quickly; a fourth round lets
@@ -756,12 +851,14 @@ fact_while = (n: int, s: mut FactState):
         # normally. Speculative obligation answers are never published.
         header = entry
         fact_changes(n, header, n, .budget)
+    s = fact_while_exit(n, entry, header)
+fact_while_exit = (n: int, entry: mut FactState, header: mut FactState) -> FactState:
     # (positions the body keeps below a length: fact_loop_bounds)
     demands = fact_loop_bound_entry(fact_loop_bound_demands(n), entry)
     if demands.len() > 0: fact_loop_bounds(n, header, demands, FACT_PREP_CONDITION, 0, 0, 0, [])
     paths = fact_condition(int(nodes[n].a), header)
     edges = fact_loop_body(n, paths.yes)
-    s = fact_join(paths.no, edges.exits, n)
+    fact_join(paths.no, edges.exits, n)
 
 use 'facts_elements.dewy'
 use 'refine_siblings.dewy'

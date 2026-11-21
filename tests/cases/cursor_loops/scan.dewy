@@ -1,0 +1,27 @@
+letter = (c:uint8):>bool => b'a' <=? c and c <=? b'z'
+scan = (src:array<uint8> start:int64 stop:int64):>int64 => {
+    if start <? 0 or stop >? src.length return -1
+    let i = start
+    loop i <? stop and (letter(src[i]) or src[i] =? b'_') { i += 1 }
+    $assert start <=? i
+    return i
+}
+advance = (start:int64 stop:int64 go:bool):>int64 => {
+    if start >? stop return start
+    let i = start
+    loop i <? stop and go { i += 1 }
+    $assert i <=? stop
+    return i
+}
+known_stop = (stop:int64 go:bool):>int64 => {
+    if go return -1
+    let i:int64 = 0
+    loop i <? stop and go { i += 1 }
+    $assert i =? 0
+    return i
+}
+main = ():>void => {
+    let src = b"az_!"
+    printl("{scan(src 0 4)} {scan(src 3 4)} {scan(src 3 2)} {scan(src 4 4)}")
+    printl("{advance(int64.max-1 int64.max true)} {advance(7 9 false)} {known_stop(20 false)}")
+}

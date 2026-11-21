@@ -1,0 +1,14 @@
+let visits:int64 = 0
+count = (c:uint8):>bool => {
+    visits = 1
+    return c =? b'a'
+}
+f = (src:array<uint8>):>int64 => {
+    let stop = src.length
+    let i:int64 = 0
+    visits = 0
+    loop i <? stop and count(src[i]) { i += 1 }
+    $assert visits =? 0
+    return i
+}
+printl(f(b"a"))

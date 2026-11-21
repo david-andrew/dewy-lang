@@ -24,7 +24,7 @@ from p"exact_marks.dewy" import (exact_decided exact_has_store)
 from p"exact_preparation.dewy" import (exact_shader_demand)
 from p"exact_fact_transfer.dewy" import (exact_fact_store)
 from p"expr.jo" import (CV IN ntype)
-from p"facts.jo" import (FactPlanDependency FACT_LENT FactBinding FactSlice FactState fact_call_field_types fact_carried_cache fact_comprehension_sources fact_comprehensions fact_constant_globals fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_calls fact_constructor_types fact_dead_refinements fact_decided fact_deferred fact_deferred_checks fact_deferred_proving fact_divisors fact_fixed_requests fact_fork_entries fact_fork_nodes fact_grown_roots fact_has_deferred fact_internal_policy fact_key_params fact_owner fact_panic_collect fact_panic_pending fact_panic_sites fact_parallel_bounds fact_plan_dependencies fact_plan_forget fact_plan_serial fact_policy fact_policy_default fact_probe_on fact_probe_runs fact_pushed_rows_cache fact_query fact_regex_counts fact_requests fact_retry_owner fact_return_escapes_cache fact_returns_cache fact_root_key fact_saving fact_search_predicate fact_selector_sources fact_shape_summaries fact_shared_literals fact_slice fact_slice_cache fact_slice_prepare fact_speculating fact_sum_operand fact_summaries fact_summary_assumed fact_summary_field fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_text_sinks fact_validated)
+from p"facts.jo" import (FactPlanDependency FACT_LENT FactBinding FactSlice FactState fact_call_field_types fact_carried_cache fact_comprehension_sources fact_comprehensions fact_constant_globals fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_calls fact_constructor_types fact_dead_refinements fact_decided fact_deferred fact_deferred_checks fact_deferred_proving fact_divisors fact_fixed_requests fact_fork_entries fact_fork_nodes fact_grown_roots fact_has_deferred fact_internal_policy fact_key_params fact_owner fact_panic_collect fact_panic_pending fact_panic_sites fact_parallel_bounds fact_plan_dependencies fact_plan_forget fact_plan_serial fact_policy fact_policy_default fact_probe_on fact_probe_runs fact_pushed_rows_cache fact_query fact_regex_counts fact_requests fact_retry_owner fact_return_escapes_cache fact_returns_cache fact_cursor_shapes fact_root_key fact_saving fact_search_predicate fact_selector_sources fact_shape_summaries fact_shared_literals fact_slice fact_slice_cache fact_slice_prepare fact_speculating fact_sum_operand fact_summaries fact_summary_assumed fact_summary_field fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_text_sinks fact_validated)
 from p"facts_slice_prep.dewy" import (fact_slice_push_children)
 from p"facts_values.dewy" import (fact_domain fact_type)
 from p"facts_elements.dewy" import (fact_fixed_check fact_fixed_node)
@@ -370,6 +370,7 @@ facts_reset=():>void=>{
     fact_panic_pending=[]
     fact_policy_default=false
     fact_probe_runs=dict<int64 FactProbeRun>()
+    fact_cursor_shapes=dict<int64 bool>()
     fact_returns_cache=dict<int64 bool>()
     fact_return_escapes_cache=dict<int64 bool>()
     fact_carried_cache=dict<int64 array<int64>>()
