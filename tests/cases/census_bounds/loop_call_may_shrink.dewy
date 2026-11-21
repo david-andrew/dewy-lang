@@ -1,0 +1,10 @@
+edit = (@xs:array<int64> replace:bool):>void => {
+    if replace { xs = [] } else { xs.push(9) }
+}
+read = (@xs:array<int64> i:int rounds:int):>int64 => {
+    if i <? 0 or i >=? xs.length { return 0 }
+    loop k in [0..rounds) { edit(@xs k =? 1) }
+    xs[i]
+}
+let xs:array<int64> = [40]
+printl(read(@xs 0 2))

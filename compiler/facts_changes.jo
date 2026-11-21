@@ -362,8 +362,9 @@ fact_changes_walk = (n: int, s: mut FactState, at: int, reason: FactReason = .lo
     else if k == .call and nodes[n].aux == 0 and fact_pool_call(n) == 4: fact_pool_store_changes(n, s)
     else if k == .call and nodes[n].aux == 0 and (fact_map_store_call(n) or fact_map_insert_call(n)): fact_map_store_changes(n, s, at, reason)
     else if k == .call and nodes[n].aux == 0 and (fact_map_reads_only(n) or fact_nd_reads_only(n) or fact_map_entries_call(n)): s = s
-    else if k == .call and nodes[n].aux == 0 and (nodes[n].sym == i32(fact_owner) or nd_mutable_call(n)): fact_path_call_effects(n, s)
-    else if k == .call and nodes[n].aux == 0: fact_call_effects(n, s)
+    # Across any number of calls, exact lengths stay equal and non-shrinking
+    # lengths retain their entry lower bound. Reuse the demand-driven transfer.
+    else if k == .call and nodes[n].aux == 0: fact_path_call_effects(n, s)
     else if k == .call and nodes[n].aux == 2: s = s
     else if k == .intrinsic and (fact_reads_only(nodes[n].aux as IN) or fact_hook_free_resize(n)): s = s
     # (a closure's, partial application's or handle's creation writes nothing,

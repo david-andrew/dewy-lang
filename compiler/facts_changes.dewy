@@ -6,7 +6,7 @@ from p"check.jo" import (LF_ALIAS LF_MUTPARAM fns lib_dir locals)
 from p"effect_values.dewy" import (effect_value)
 from p"expr.jo" import (CV IN ntype)
 from p"checks_thin_expr.dewy" import (is_map_type oversized_literal)
-from p"facts.jo" import (FACT_ACTIVE FACT_CAP FACT_ELEMENT_LENGTH FACT_ELEMENT_SAME_LENGTH FACT_MAP_DENSE FACT_MAP_POSITIONS FACT_MEMBER FACT_POOL_POSITIONS FACT_ROW_SOURCE FactProjection FactState fact_name_vals fact_owner fact_return_escapes_cache)
+from p"facts.jo" import (FACT_ACTIVE FACT_CAP FACT_ELEMENT_LENGTH FACT_ELEMENT_SAME_LENGTH FACT_MAP_DENSE FACT_MAP_POSITIONS FACT_MEMBER FACT_POOL_POSITIONS FACT_ROW_SOURCE FactProjection FactState fact_name_vals fact_return_escapes_cache)
 from p"facts_slice_prep.dewy" import (fact_slice_flags)
 from p"facts_slice_prep.dewy" import (fact_slice_children)
 from p"facts_values.dewy" import (fact_domain fact_type fact_place fact_project)
@@ -16,7 +16,7 @@ from p"facts_index_writes.dewy" import (fact_add_projection)
 from p"facts_value_queries.dewy" import (fact_binding fact_bound fact_truth)
 from p"facts_projection_queries.dewy" import (fact_projection_after fact_projection_find fact_projection_first)
 from p"facts_row_queries.dewy" import (fact_incident)
-from p"facts_forgets.dewy" import (fact_drop_forget fact_drop_region fact_call_effects fact_call_write fact_forget fact_forget_call fact_holds_contract fact_path_call_effects fact_exposed)
+from p"facts_forgets.dewy" import (fact_drop_forget fact_drop_region fact_call_write fact_forget fact_forget_call fact_holds_contract fact_path_call_effects fact_exposed)
 from p"facts_ranges.dewy" import (fact_floor_call)
 from p"facts_arrays.dewy" import (fact_array_call)
 from p"facts_joins.dewy" import (fact_field_node fact_hull fact_payload_node)
@@ -26,7 +26,7 @@ from p"facts_pools.dewy" import (fact_pool_call fact_pool_keep fact_pool_store_c
 from p"facts_progress.dewy" import (fact_progress_strip)
 from p"isolation_ops.dewy" import (isolation_children)
 from p"lower_helpers.dewy" import (helper_value_members)
-from p"nd_contracts.jo" import (ND_STORAGE_VALID fact_nd_plain_store fact_nd_reads_only nd_mutable_call)
+from p"nd_contracts.jo" import (ND_STORAGE_VALID fact_nd_plain_store fact_nd_reads_only)
 from p"nd_contract_ops.dewy" import (fact_nd_store)
 from p"ownership.jo" import (ownership_decls ownership_fact_cleanup)
 from p"ownership_types.dewy" import (ownership_fact_type)
@@ -376,8 +376,9 @@ fact_changes_walk=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='lo
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and fact_pool_call(n) =? 4 {fact_pool_store_changes(n @s)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and (fact_map_store_call(n) or fact_map_insert_call(n)) {fact_map_store_changes(n @s at reason)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and (fact_map_reads_only(n) or fact_nd_reads_only(n) or fact_map_entries_call(n)) {s=s}
-    else if k =? 'call' and nodes.ptr[n].aux =? 0 and (nodes.ptr[n].sym =? int32(fact_owner) or nd_mutable_call(n)) {fact_path_call_effects(n @s)}
-    else if k =? 'call' and nodes.ptr[n].aux =? 0 {fact_call_effects(n @s)}
+    # Across any number of calls, exact lengths stay equal and non-shrinking
+    # lengths retain their entry lower bound. Reuse the demand-driven transfer.
+    else if k =? 'call' and nodes.ptr[n].aux =? 0 {fact_path_call_effects(n @s)}
     else if k =? 'call' and nodes.ptr[n].aux =? 2 {s=s}
     else if k =? 'intrinsic' and (fact_reads_only(nodes.ptr[n].aux as IN) or fact_hook_free_resize(n)) {s=s}
     # (a closure's, partial application's or handle's creation writes nothing,

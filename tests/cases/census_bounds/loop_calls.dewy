@@ -1,0 +1,15 @@
+touch = (@xs:array<int64> @other:array<int64>):>void => {
+    if xs.length >? 0 { xs[0] = 42 }
+    other = []
+}
+append = (@xs:array<int64>):>void => { xs.push(9) }
+read = (@xs:array<int64> i:int rounds:int):>int64 => {
+    if i <? 0 or i >=? xs.length { return 0 }
+    let other:array<int64> = [7]
+    loop k in [0..rounds) { touch(@xs @other) }
+    loop k in [0..rounds) { append(@xs) }
+    xs[i]
+}
+let xs:array<int64> = [40]
+printl(read(@xs 0 0))
+printl(read(@xs 0 2))
