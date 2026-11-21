@@ -175,6 +175,7 @@ use 'open_globals.dewy'
 use 'repl_signature.dewy'
 use 'source_frontend.dewy'
 use 'checker_narrow_rollback.dewy'
+use 'checker_import_discovery.dewy'
 
 struct Module:
     name: i32
@@ -556,15 +557,6 @@ bound_here = (name: int) -> bool:
     m >= 0 and m < modules.len() and not modules[m].is_prelude and modules[m].names.has(name)
 
 
-# ---------------- modules ----------------
-module_source = (stem: str, dewy: bool, exclude: str = "", watch_candidates: bool = false) -> str:
-    # (the importer by any spelling: `physics.dewy` checked from its folder is ./physics.dewy)
-    skip = if len(exclude) > 0: module_path_key(exclude) else: ""
-    loop path in module_candidates(stem, dewy):
-        if len(skip) > 0 and module_path_key(path) == skip: continue
-        if file_exists(path): return path
-        if watch_candidates: watch_missing_input(path)
-    ""
 
 load_module = (path: str, is_prelude: bool, from: int) -> int:
     key = module_path_key(path)
@@ -592,34 +584,9 @@ load_module = (path: str, is_prelude: bool, from: int) -> int:
     mi
 
 late_module_imports = false
+# The seed resolves this entry directly from expr.jo's checker import.
+ensure_bundled_import = (file: str, alias: str, pos: int): register_bundled_import(file, alias, pos)
 
-# Some language operations need a bundled module only once their types are
-# known. Add an ordinary qualified import and initialize any newly discovered
-# modules, without rebinding imports that have already been processed.
-ensure_bundled_import = (file: str, alias: str, pos: int):
-    m = cur_mod()
-    name = intern(alias)
-    if modules[m].names.get(name) != none: return
-    # (a library writer, such as __dewy_fmt for an array of quantities, imports once)
-    if modules[m].is_prelude and prelude.get(name) != none: return
-    if files[int(modules[m].file)].path == lib_dir + "/" + file:
-        scope_add_module(m, name, .module, m, 0)
-        return
-    first_module = modules.len()
-    first_import = from_imports.len()
-    d = mk(.import_, pos)
-    nodes[d].aux2 = 1
-    nodes[d].sval = i32(intern("@lib/{file}"))
-    nodes[d].name = i32(name)
-    register_decls(m, [d])
-    modules[m].decls.push(d)
-    mi = first_module
-    loop mi < modules.len():
-        register_module(mi)
-        mi += 1
-    bind_from_imports(first_import)
-    if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
-    late_module_imports = true
 
 eval_when_toplevel = (m: int, w: int):
     saved = cx

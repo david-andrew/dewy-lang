@@ -3,6 +3,7 @@
 # (a leaf moved out of a Jo module without state of its own: an isolated build that has that module but
 # not the leaf reads the leaf's functions from the module, a double or the real one)
 LEAF_HOMES = {
+    'checker_import_discovery': 'check.jo',
     'checker_update_selectors': 'check.jo',
     'checker_value_protocols': 'check.jo',
     'checker_ffi_layout': 'check.jo',

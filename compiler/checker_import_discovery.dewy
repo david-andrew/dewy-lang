@@ -1,0 +1,54 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (file_exists)
+from p"ast.jo" import (mk nodes)
+from p"check.jo" import (cur_mod from_imports init_fns late_module_imports lib_dir module_ctx modules prelude register_decls register_module scope_add_module setup_module_contexts)
+from p"checks_imports.dewy" import (bind_from_imports)
+from p"checks_thin.dewy" import (module_path_key)
+from p"module_paths.dewy" import (module_candidates)
+from p"util.jo" import (files intern)
+from p"watch_ops.dewy" import (watch_missing_input)
+
+ImportWord:type=int64<overflow='wrap'>
+# ---------------- modules ----------------
+module_source=(stem:string dewy:bool exclude:string="" watch_candidates:bool=false):>string=>{
+    # (the importer by any spelling: `physics.dewy` checked from its folder is ./physics.dewy)
+    let skip=if (exclude as array<uint8>).length >? 0 {module_path_key(exclude)} else {""}
+    loop path in module_candidates(stem dewy) {
+        if (skip as array<uint8>).length >? 0 and module_path_key(path) =? skip {continue}
+        if file_exists(path) {return path}
+        if watch_candidates {watch_missing_input(path)}
+    }
+    ""
+}
+
+# Some language operations need a bundled module only once their types are
+# known. Add an ordinary qualified import and initialize any newly discovered
+# modules, without rebinding imports that have already been processed.
+register_bundled_import=(file:string alias:string pos:ImportWord):>void=>$unsafe {
+    let m=cur_mod()
+    let name=intern(alias)
+    if modules[m].names.get(name) not=? none {return}
+    # (a library writer, such as __dewy_fmt for an array of quantities, imports once)
+    if modules[m].is_prelude and prelude.get(name) not=? none {return}
+    if files[ImportWord(modules[m].file)].path =? "{lib_dir}/{file}" {
+        scope_add_module(m name 'module' m 0);
+        return
+    }
+    let first_module=modules.length
+    let first_import=from_imports.length
+    let d=mk('import_' pos)
+    nodes.ptr[d].aux2=1
+    nodes.ptr[d].sval=int32<overflow='wrap'>(intern("@lib/{file}"))
+    nodes.ptr[d].name=int32<overflow='wrap'>(name)
+    register_decls(m [d])
+    modules[m].decls.push(d)
+    let mi=ImportWord(first_module)
+    loop mi <? modules.length {
+        register_module(mi)
+        mi += 1
+    }
+    bind_from_imports(first_import)
+    if module_ctx.length >? 0 {setup_module_contexts(init_fns[0])}
+    let late = @late_module_imports
+    late=true
+}
