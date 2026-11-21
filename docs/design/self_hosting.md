@@ -281,7 +281,9 @@ reacquired after projection resolution and sibling/self checks.
 `refine_rare.dewy` owns the checked rewrites of mutations on refined storage:
 dependent field stores, length-changing operations and their private candidates,
 the mutable-authority check, structural record conversion, refined library array
-calls (insert, swap, reverse, sort) and self-length holder marking. Selectors and
+calls (insert, swap, reverse, sort), self-length holder marking, self-length
+failure reports and run-time element checks, misplaced field names, sibling field
+contracts, dictionary sibling calls and the atom resolution entry point. Selectors and
 operands are captured in the order gen_assign and gen_intrinsic evaluate them,
 paired-field runs and sibling/self shortcuts are tried first, and the rewritten
 block, its hints and its shrink candidates keep their original order. Jo keeps the

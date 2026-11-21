@@ -2,12 +2,12 @@ $runtime_checks
 
 from p"expr.jo" import (CV can_coerce check_place unnamed)
 from p"ast.jo" import (NF_CHECKED NF_MUT NF_RDONLY add_flag clone has_flag kid kids mk nkids nodes set_list NF_RECORD)
-from p"check.jo" import (LF_CONST LF_MUTPARAM assign_value ceval ctxs cx dewy_at fns globals locals runtime_fn syms index_update_path compound_checked check_struct_fields)
+from p"check.jo" import (LF_CONST LF_MUTPARAM assign_value ceval ctxs cx dewy_at fns globals locals runtime_fn syms index_update_path compound_checked check_struct_fields lib_dir)
 from p"checker_expr.dewy" import (check_expr check_intrinsic lookup finish_arg)
 from p"checks_assign_hooks.dewy" import (assign_update)
 from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_let bc_stmt bc_str)
 from p"checks_thin.dewy" import (check_assign readonly_global)
-from p"checks_thin_expr.dewy" import (ref_literal_holds str_set_within)
+from p"checks_thin_expr.dewy" import (ref_literal_holds str_set_within is_map_type)
 from p"expr.jo" import (CV IN bc_assign bc_bin capture_value coerce copy_place kid_lit last_checked ntype type_node_of wrap_conv)
 from p"callable_checks.dewy" import (callable_shape_eq)
 from p"facts.jo" import (FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_COPY FACT_ELEMENT_VALUE FACT_SELF_BOUND FactProjection FactState fact_requests fact_terms)
@@ -21,13 +21,13 @@ from p"facts_projection_queries.dewy" import (fact_projection_find)
 from p"facts_elements.dewy" import (fact_inventory)
 from p"host_binds.jo" import (ref_resolve_host)
 from p"lower_group.dewy" import (gen_expr)
-from p"lower_storage.dewy" import (arr_len release)
+from p"lower_storage.dewy" import (arr_len release endc iff)
 from p"math_ops.dewy" import (math_call math_word)
 from p"node_store.dewy" import (Node)
-from p"refine.jo" import (RefArrayCall mk_refined ref_addr_type ref_declaring ref_gen_site ref_holder_name ref_intern ref_predicates ref_selector_message ref_self_active ref_self_elements ref_self_established ref_span_copy ref_spans refine_bindings refine_coerce refine_owners refine_requests str_sets total_literals ref_pair_hints ref_nd_receivers ref_pair_after ref_self_direct)
+from p"refine.jo" import (RefArrayCall mk_refined ref_addr_type ref_declaring ref_gen_site ref_holder_name ref_intern ref_predicates ref_selector_message ref_self_active ref_self_elements ref_self_established ref_span_copy ref_spans refine_bindings refine_coerce refine_owners refine_requests str_sets total_literals ref_pair_hints ref_nd_receivers ref_pair_after ref_self_direct ref_self_shrinks)
 from p"refine_transfers.dewy" import (ref_assume ref_value)
 from p"refine_metadata.dewy" import (is_total_dict ref_dependent_ancestor ref_interval ref_place_alias refine_storage representation_type str_set_of ref_safe_path_ancestor ref_dependent_record ref_storage_contract)
-from p"refine_siblings.dewy" import (ref_held_element ref_sib_holder ref_pair_call_finish ref_sib_in_place ref_pair_record ref_pair_role ref_pair_rewrite ref_pair_hint ref_pair_op_name ref_pair_reads ref_pair_validation ref_sib_free ref_sib_permutable)
+from p"refine_siblings.dewy" import (ref_held_element ref_sib_holder ref_pair_call_finish ref_sib_in_place ref_pair_record ref_pair_role ref_pair_rewrite ref_pair_hint ref_pair_op_name ref_pair_reads ref_pair_validation ref_sib_free ref_sib_permutable ref_sib_dict_field ref_sib_field)
 from p"refine_ops.dewy" import (call_result_type copy_checked ref_addr_max ref_length_literal ref_own_length ref_path_length ref_self_contract ref_self_k ref_self_lower_bound ref_self_published ref_type_contains str_set_const total_dict_keys ref_self_shrink)
 from p"refine_predicates.dewy" import (ref_atoms_have_kind)
 from p"refine_resolve.dewy" import (ref_resolve_atoms)
@@ -40,9 +40,15 @@ from p"type_ops.dewy" import (dt mk_array)
 from p"type_refinement.dewy" import (tr_limit)
 from p"type_value_arguments.dewy" import (integer_parameter_literal integer_parameter_type)
 from p"types.jo" import (T_I16 T_I32 T_I8 T_INT T_MATH_INT T_STR T_U16 T_U32 T_U64 T_U8 T_VOID fields has_var is_int prune struct_targ structs tkind type_eq types)
-from p"util.jo" import (files name_of names pos_file pos_off pos_in_lib)
+from p"util.jo" import (files name_of names pos_file pos_off pos_in_lib err_notes)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"safe_paths.jo" import (ut_safe_used)
+from p"directive_rules.dewy" import (dir_defer)
+from p"witness_ops.dewy" import (wit_context wit_fail)
+from p"witness_nodes.dewy" import (wit_text)
+from p"ir.jo" import (VI)
+from p"ir_builders.dewy" import (e_bin e_call e_iconst)
+from p"lower_primitives.dewy" import (e_call_nr e_daddr loc_data rt str_data)
 
 RefineRareWord:type=int64<overflow='wrap'>
 # a dictionary literal given for a totaldict: an entry for every key
@@ -978,4 +984,97 @@ ref_array_call_prepare=(decl:int64 @args:array<int64> ptypes:array<int64> writte
     args[0]=copy_checked(out.candidate)
     add_flag(args[0] NF_MUT)
     out
+}
+# (a field's name deeper inside its own type than its direct element: it would mean no one array)
+ref_self_misplaced=(t0:int64 field:int64 name:int64 pos:int64 depth:int64):>void=>$unsafe {
+    let t=prune(t0)
+    if depth >? 32 {return}
+    let k=types.ptr[t].kind
+    if k =? 'refined' {
+        loop atom in ref_predicates[RefineRareWord(types.ptr[t].st)] {
+            loop term in [atom.a atom.b] {
+                if term.kind =? 5 and term.value =? field and ref_path_length(term.path) {fatal(pos "'{name_of(name)}' is the field being declared: its length can bound the direct element of its array, as in `array<int64<(<? {name_of(name)}.length)>>`, and nothing else");}
+            }
+        }
+    }
+    if k =? 'refined' or k =? 'array' or k =? 'fixed' or k =? 'opt' {ref_self_misplaced(RefineRareWord(types.ptr[t].elem) field name pos (depth + 1))}
+}
+ref_self_fail=(n:int64 t:int64 _self:int64 _s:FactState refuted:bool):>void=>$unsafe {
+    let contract=ref_spans.get(RefineRareWord(types.ptr[t].st)) ?? 0
+    let shown=wit_text(RefineRareWord(nodes.ptr[n].a))
+    if shown =? "" {shown="this array"}
+    let what="cannot prove every element of {shown} is a valid index of it"
+    let help="help: a literal, `fill`, a `push` loop or an array with this same contract proves it; a slice or another call's result does not, so build it with `push`, or put `$runtime_checks` on this statement to check every element when it runs"
+    if refuted {what="refinement refuted: an element of {shown} is not a valid index of it"}
+    if ref_self_shrinks.has(n) {
+        let name=wit_text(ref_self_shrinks[n][0])
+        if name =? "" {name="this array"}
+        what="cannot prove every element of {name} stays a valid index: this makes it shorter, and an element may be past its new end"
+        if refuted {what="refinement refuted: {name} gets shorter, and an element is past its new end"}
+        help="help: only `{name}.clear()` shortens it for certain; to shorten it otherwise, build a new array with `push`, or put `$runtime_checks` on this statement to check every element when it runs"
+    }
+    if not refuted and dir_defer(n what true) {return}
+    err_notes.push([(-1) help])
+    wit_context(contract)
+    wit_fail(nodes.ptr[n].pos what)
+}
+# Every element of a whole array value: a loop, only under `$runtime_checks`. O(length).
+ref_self_gen=(n:int64 atom:RefAtom self:int64):>void=>$unsafe {
+    let bound=e_bin('add' VI arr_len(self) e_iconst(ref_self_k(atom)))
+    if nodes.ptr[n].b not=? 0 {bound=e_bin('add' VI bound ref_ir_holder_length())}
+    let at=e_call(rt("__first_element_above") [self bound] VI)
+    iff(e_bin('les' VI e_iconst(0) at));
+    let message="refinement failed: an element is not a valid index of its array"
+    e_call_nr(rt("__requirement_fail") [e_daddr(str_data(message)) e_daddr(loc_data(nodes.ptr[n].pos)) e_daddr(str_data("the position of the element")) at e_daddr(str_data("the bound")) bound] (-1));
+    endc();
+}
+ref_atoms=(n:int64 binder:int64 @out:array<RefAtom> depth:int64=0):>void=>{
+    # (the borrowed arenas may not alias the caller's list: resolve into a private one, then hand it back)
+    let atoms=out
+    out=[]
+    ref_resolve_atoms(@nodes @types @names @refine_bindings @ref_resolve_host n binder @atoms depth)
+    out=atoms
+}
+# (only an element refinement written on the field's own array: a type argument's, as a
+# dictionary's values in its library record, is another record's)
+ref_sib_fields=(si:int64 pos:int64):>void=>$unsafe {
+    let d=RefineRareWord(structs.ptr[si].decl)
+    if d =? 0 or nodes.ptr[d].kind not=? 'struct_' {return}
+    loop k in [0..nkids(d)) {
+        let tn=RefineRareWord(nodes.ptr[kid(d k)].a)
+        if tn =? 0 {continue}
+        if nodes.ptr[tn].kind =? 'trefined' and nodes.ptr[tn].b not=? 0 {tn=RefineRareWord(nodes.ptr[tn].a)}
+        let dict=nodes.ptr[tn].kind =? 'tmap' and nodes.ptr[tn].b not=? 0 and nodes.ptr[RefineRareWord(nodes.ptr[tn].b)].kind =? 'trefined'
+        if not dict and (nodes.ptr[tn].kind not=? 'tarray' or nodes.ptr[tn].a =? 0 or nodes.ptr[RefineRareWord(nodes.ptr[tn].a)].kind not=? 'trefined') {continue}
+        let name=RefineRareWord(nodes.ptr[kid(d k)].name)
+        loop i in [0..RefineRareWord(structs.ptr[si].nfields)) {
+            let f=RefineRareWord(structs.ptr[si].fields) + i
+            if RefineRareWord(fields.ptr[f].name) not=? name {continue}
+            let made=if dict {ref_sib_dict_field(RefineRareWord(fields.ptr[f].type) name pos nodes.ptr[tn].aux =? 1)} else {ref_sib_field(RefineRareWord(fields.ptr[f].type) name pos)}
+            if made not=? 0 {fields.ptr[RefineRareWord(structs.ptr[si].fields) + i].type=int32(made)}
+        }
+    }
+}
+# A dictionary field bounded by a sibling changes in place: a value stored or inserted is checked
+# against the sibling's length, as an array's pushed element is; removing entries keeps the bound.
+# A change of a value in place (`d[k] += 1`) has no value to check first, so it is refused. O(1).
+ref_sib_dict_call=(decl:int64 @args:array<int64> ptypes:array<int64>):>void=>$unsafe {
+    if args.length =? 0 or args[0] =? 0 or not ref_self_active {return}
+    let place=args[0]
+    let t=prune(refine_storage(place ntype(place)))
+    if types.ptr[t].kind not=? 'refined' or not is_map_type(representation_type(t)) or not ref_sib_free(place t) {return}
+    let name=name_of(RefineRareWord(nodes.ptr[decl].name))
+    let path=files[pos_file(nodes.ptr[decl].pos)].path
+    if path not=? "{lib_dir}/core/map.jo" and not (name =? "pop" and path =? "{lib_dir}/std/dewy.jo") {return}
+    if name =? "__map_entry" or name =? "__map_entry_present" {
+        err_notes.push([(-1) "help: store the new value whole, `d[k] = d[k] + 1`: a stored value is checked against the sibling's length"])
+        fatal(nodes.ptr[place].pos "a value of this dictionary is bounded by a sibling's length, so it cannot be changed in place");
+    }
+    if name =? "[]=" or name =? "insert_if_absent" {
+        if args.length <? 3 or args[2] =? 0 {return}
+        finish_arg(args[2] ptypes[2] false)
+        ref_self_value(args[2] t 0 place)
+    }
+    else if name not=? "remove" and name not=? "clear" and name not=? "pop" and name not=? "reserve" and name not=? "__map_tidy" {return}
+    ref_nd_receivers[place]=true
 }
