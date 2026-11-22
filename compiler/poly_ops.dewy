@@ -1,6 +1,7 @@
 from p"directives.jo" import (dir_code_any dir_code_by_inst)
 from p"directive_code.dewy" import (dir_code_inst dir_code_request)
 $runtime_checks
+from p"checked_expression_nodes.dewy" import (mk_ident_local)
 
 from p"ast.jo" import (NF_CHECKED NF_MUT add_flag clone has_flag kid mk nkids nodes set_list)
 from p"check.jo" import (FK_LAMBDA LF_PARAM LF_UNNARROWED check_scopes ctxs cur_mod cx decl_infos fn_instances fns locals loop_serials narrowed_var new_local new_sym push_scope_sym scope_mark scope_reset subst syms)
@@ -14,7 +15,7 @@ from p"checker_state.dewy" import (FnCtx FnInstanceKey)
 from p"checker_types.dewy" import (TypeInfo)
 from p"dewy_method_ops.dewy" import (dewy_is_method)
 from p"effect_contracts.dewy" import (mk_callable_contract)
-from p"expr.jo" import (dewy_literal_method_name fn_value match_type mk_ident_local)
+from p"expr.jo" import (dewy_literal_method_name fn_value match_type)
 from p"literal_context.dewy" import (finalize_literal)
 from p"narrowing_checks.dewy" import (opt_rest_rebase)
 from p"lower_storage.dewy" import (check_cell_type is_shared store_type)

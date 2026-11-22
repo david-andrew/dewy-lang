@@ -1,0 +1,41 @@
+$runtime_checks
+from p"expr.jo" import (capture_sources)
+from p"checker_tokens.dewy" import (Tok)
+from p"check.jo" import (LF_DECL LF_QUIET LF_READ locals new_local)
+from p"node_store.dewy" import (Node)
+from p"ast.jo" import (NF_CHECKED add_flag mk nodes)
+# Load the checker state before the parser so the lexer pins the dictionary key first.
+from p"parser_ops.dewy" import (lx_assign lx_bin)
+
+bc_bin=(op:Tok a:int64 b:int64 pos:int64):>int64=>lx_bin(op a b pos)
+
+bc_assign=(target:int64 v:int64 pos:int64):>int64=>lx_assign(target 'assign' v pos)
+
+# a type expression node for an already resolved type (for synthesized declarations)
+type_node_of=(t:int64 pos:int64):>int64=>{
+    let n=nodes.length
+    nodes.push(Node[kind='tname' pos=pos aux=-7 ival=t])
+    n
+}
+
+mk_ident_local=(l:int64 pos:int64):>int64=>{
+    let n=nodes.length
+    # aux is the frozen SK.local ordinal.
+    nodes.push(Node[kind='ident' pos=pos name=locals[l].name sym=int32(l)
+                    type=locals[l].type aux=1 flags=int32(NF_CHECKED)])
+    n
+}
+
+capture_value=(a:int64 pt:int64 @statements:array<int64>):>int64=>{
+    let local=new_local(0 pt nodes[a].pos)
+    capture_sources[local]=a
+    locals[local].flags=int32(LF_DECL | LF_QUIET | LF_READ)
+    let binding=mk('vardecl' nodes[a].pos)
+    nodes[binding].a=int32(type_node_of(pt nodes[a].pos))
+    nodes[binding].b=int32(a)
+    nodes[binding].sym=int32(local)
+    nodes[binding].type=int32(pt)
+    add_flag(binding NF_CHECKED)
+    statements.push(binding)
+    mk_ident_local(local nodes[a].pos)
+}

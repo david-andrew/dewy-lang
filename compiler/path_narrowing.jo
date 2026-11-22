@@ -1,3 +1,6 @@
+use 'type_ops.dewy'
+use 'checks_thin.dewy'
+use 'checked_expression_nodes.dewy'
 use 'ast.jo'
 use 'check.jo'
 use 'checker_state.dewy'
@@ -141,3 +144,39 @@ narrow_local = (l: int, ms: int[], pos: int):
         al = int(locals[l].alias)
         if nodes[al].kind == .conv and nodes[al].aux == i32(int(CV.union_)): root = copy_path(int(nodes[al].a))
     narrow_expr(root, ms, pos, int(locals[l].name))
+
+# the variable a narrowed alias local stands for (l itself when it is not one)
+narrow_root_local = (l0: int) -> int:
+    l = l0
+    loop int(locals[l].flags) & LF_ALIAS != 0:
+        al = int(locals[l].alias)
+        if nodes[al].kind != .conv and nodes[al].kind != .narrow: return l
+        inner = int(nodes[al].a)
+        if nodes[inner].kind != .ident or nodes[inner].aux != i32(int(SK.local)): return l
+        l = int(nodes[inner].sym)
+    l
+
+# the path (and paths inside it) may hold another value from here on: forget their narrowing
+path_forget = (key: str, same_type: int = 0):
+    if path_narrows == 0 or len(key) == 0: return
+    prefix = key + "."
+    i = check_scopes.names.len() - 1
+    floor = int(ctxs[cx].floor)
+    loop i >= floor:
+        nm = name_of(check_scopes.names[i])
+        if nm == key or starts_with(nm, prefix):
+            sy = check_scopes.syms[i]
+            if syms[sy].kind == .local:
+                l = int(syms[sy].ref)
+                if int(locals[l].flags) & LF_ALIAS != 0:
+                    # Replacing a known member with the same member preserves
+                    # its tag, but invalidates any facts about fields inside it.
+                    keep = false
+                    if nm == key and same_type != 0:
+                        t = prune(int(locals[l].type))
+                        keep = type_eq(t, same_type) or (is_union(t) and union_index(t, same_type) >= 0)
+                    if not keep: narrow_invalidate(l)
+                    # Nested paths can use this alias as their root after the
+                    # parent was narrowed, rather than the original path text.
+                    path_forget("#L{l}")
+        i -= 1

@@ -1,0 +1,48 @@
+use 'checker_state.dewy'
+use 'expr.jo'
+use 'checker_tokens.dewy'
+use 'check.jo'
+use 'ast.jo'
+
+bc_bin = (op: Tok, a: int, b: int, pos: int) -> int:
+    n = mk(.binary, pos)
+    nodes[n].op = i32(int(op))
+    nodes[n].a = i32(a)
+    nodes[n].b = i32(b)
+    n
+
+bc_assign = (target: int, v: int, pos: int) -> int:
+    a = mk(.assign, pos)
+    nodes[a].op = i32(int(Tok.assign))
+    nodes[a].a = i32(target)
+    nodes[a].b = i32(v)
+    a
+
+# a type expression node for an already resolved type (for synthesized declarations)
+type_node_of = (t: int, pos: int) -> int:
+    n = mk(.tname, pos)
+    nodes[n].aux = -7
+    nodes[n].ival = t
+    n
+
+mk_ident_local = (l: int, pos: int) -> int:
+    n = mk(.ident, pos)
+    nodes[n].name = locals[l].name
+    nodes[n].sym = i32(l)
+    nodes[n].type = locals[l].type
+    nodes[n].aux = i32(int(SK.local))
+    add_flag(n, NF_CHECKED)
+    n
+
+capture_value = (a: int, pt: int, statements: mut int[]) -> int:
+    local = new_local(0, pt, nodes[a].pos)
+    capture_sources[local] = a
+    locals[local].flags = i32(LF_DECL | LF_QUIET | LF_READ)
+    binding = mk(.vardecl, nodes[a].pos)
+    nodes[binding].a = i32(type_node_of(pt, nodes[a].pos))
+    nodes[binding].b = i32(a)
+    nodes[binding].sym = i32(local)
+    nodes[binding].type = i32(pt)
+    add_flag(binding, NF_CHECKED)
+    statements.push(binding)
+    mk_ident_local(local, nodes[a].pos)

@@ -1,9 +1,10 @@
 $runtime_checks
+from p"path_narrowing.dewy" import (path_forget)
 from p"ast.jo" import (NF_CHECKED add_flag nodes)
 from p"check.jo" import (LF_ALIAS LF_UNNARROWED ctxs cx locals narrow_store_heads narrow_store_next narrowed_var new_sym push_scope_sym syms)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checks_thin.dewy" import (narrow_invalidate narrow_store_keeps)
-from p"expr.jo" import (last_checked path_forget path_narrows path_rooted_l)
+from p"expr.jo" import (last_checked path_narrows path_rooted_l)
 from p"types.jo" import (prune)
 
 NarrowWriteWord:type=int64<overflow='wrap'>

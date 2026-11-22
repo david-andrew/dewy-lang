@@ -1,3 +1,4 @@
+use 'type_member_checks.dewy'
 use 'ast.jo'
 use 'check.jo'
 use 'checker_expr.dewy'
@@ -79,3 +80,19 @@ dewy_bare_fn = (n: int, is_callee: bool) -> bool:
         if nodes[n].aux2 == 1 or starts_with(name_of(int(nodes[n].name)), "$"): return false
     if cur_assign != 0 and int(nodes[cur_assign].a) == n: return false
     files[pos_file(nodes[n].pos)].is_dewy
+
+# `r.Png` written as a type, r a local or global: the type its member holds, 0 when r is no such
+# value or that member is no type.
+value_type_member = (s: int, name: int, pos: int) -> int:
+    k = syms[s].kind
+    t = 0
+    if k == .local: t = int(locals[int(syms[s].ref)].type)
+    else if k == .global:
+        ensure_global(int(syms[s].ref), pos)
+        t = int(globals[int(syms[s].ref)].type)
+    if t == 0: return 0
+    member = record_type_member(t, name)
+    if member == 0 and not record_has_member(t, name): member = handle_type_member(t, name)
+    if member != 0 and k == .local: locals[int(syms[s].ref)].flags |= i32(LF_READ)
+    if handle_outcomes(t) != 0: handle_clash_warning(t, pos)
+    member

@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checked_expression_nodes.dewy" import (mk_ident_local)
 
 from p"ast.jo" import (NF_ALIASDECL NF_AT NF_GLOBAL NF_LITERAL NF_LOOPCOUNT NF_MUT NF_RDONLY NF_STMT add_flag clear_flag clone has_flag kid kid_c kid_d kids mk nkids nodes set_kid set_list)
 from p"check.jo" import (check_block check_struct_fields ctxs cx fns lib_dir locals scope_mark scope_reset syms)
@@ -6,7 +7,7 @@ from p"checks_thin.dewy" import (check_stmt check_vardecl push_type_params resol
 from p"checks_stmt_hooks.dewy" import (stmt_terminates)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"deadlock.jo" import (deadlock_fns)
-from p"expr.jo" import (AUX2_PLACE mk_ident_local)
+from p"expr.jo" import (AUX2_PLACE)
 from p"call_style_lookup.dewy" import (fn_name_for)
 from p"checks_builders.dewy" import (bc_block bc_ident bc_let bc_method bc_stmt)
 from p"place_methods.jo" import (AUX2_PLACE_TAKEN PlaceMethod place_call_decl place_count place_hidden place_methods)

@@ -1,4 +1,5 @@
 $runtime_checks
+from p"intrinsic_registration.dewy" import (register_intrinsics)
 from p"@lib/core/os.jo" import (file_exists list_dir)
 from p"@lib/core/str.jo" import (ends_with)
 from p"ast.jo" import (mk NF_EXTERN decl_has_rest has_flag kid nkids nodes)
@@ -17,7 +18,6 @@ from p"checker_state.dewy" import Global
 from p"check.jo" import (demanded globals icon_node new_sym program_name release_build target_arm64 universe watch_build)
 from p"checks_thin.dewy" import ml_bump
 from p"error_ops.dewy" import exception_builtins
-from p"expr.jo" import register_intrinsics
 from p"refinement_types.dewy" import (RefAtom RefTerm)
 from p"refine.jo" import (ref_addr_type refine_active)
 from p"refine_metadata.dewy" import (mk_refined ref_intern)

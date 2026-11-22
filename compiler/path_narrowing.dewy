@@ -1,10 +1,14 @@
 $runtime_checks
+from p"type_ops.dewy" import (union_index)
+from p"checks_thin.dewy" import (narrow_invalidate)
+from p"@lib/core/str.jo" import (starts_with)
+from p"checked_expression_nodes.dewy" import (mk_ident_local)
 from p"checker_expr.dewy" import (lookup)
 from p"ast.jo" import (NF_CHECKED add_flag mk nodes)
-from p"check.jo" import (LF_ALIAS LF_UNNARROWED ctxs cx locals new_local syms)
-from p"expr.jo" import (CV mk_ident_local narrow_expr narrow_root_local ntype path_key path_narrows path_rooted_g path_rooted_l)
-from p"types.jo" import (is_union prune types union_members)
-from p"util.jo" import (intern)
+from p"check.jo" import (LF_ALIAS LF_UNNARROWED check_scopes ctxs cx locals new_local syms)
+from p"expr.jo" import (CV narrow_expr ntype path_key path_narrows path_rooted_g path_rooted_l)
+from p"types.jo" import (is_union prune type_eq types union_members)
+from p"util.jo" import (intern name_of)
 
 PathNarrowWord:type=int64<overflow='wrap'>
 const PATH_NARROW_LOCAL:int32=1 # SK.local in the frozen node ABI.
@@ -170,4 +174,45 @@ narrow_local=(l:PathNarrowWord ms:array<int64> pos:PathNarrowWord):>void=>$unsaf
         if nodes.ptr[a].kind =? 'conv' and nodes.ptr[a].aux =? int32(int64(CV.union_)) {root=copy_path(PathNarrowWord(nodes.ptr[a].a))}
     }
     narrow_expr(root ms pos PathNarrowWord(locals.ptr[l].name))
+}
+
+# the variable a narrowed alias local stands for (l itself when it is not one)
+narrow_root_local=(l0:PathNarrowWord):>PathNarrowWord=>{
+    let l=l0
+    loop PathNarrowWord(locals[l].flags) & LF_ALIAS not=? 0 {
+        let al=PathNarrowWord(locals[l].alias)
+        if nodes[al].kind not=? 'conv' and nodes[al].kind not=? 'narrow' {return l}
+        let inner=PathNarrowWord(nodes[al].a)
+        if nodes[inner].kind not=? 'ident' or nodes[inner].aux not=? PATH_NARROW_LOCAL {return l}
+        l=PathNarrowWord(nodes[inner].sym)
+    }
+    l
+}
+
+# the path (and paths inside it) may hold another value from here on: forget their narrowing
+path_forget=(key:string same_type:PathNarrowWord=0):>void=>{
+    if path_narrows =? 0 or key.length =? 0 {return}
+    let prefix="{key}."
+    let i=PathNarrowWord(check_scopes.names.length) - 1
+    let floor=PathNarrowWord(ctxs[cx].floor)
+    loop i >=? floor {
+        let nm=name_of(check_scopes.names[i])
+        if nm =? key or starts_with(nm prefix) {
+            let sy=check_scopes.syms[i]
+            if syms[sy].kind =? 'local' {
+                let l=PathNarrowWord(syms[sy].ref)
+                if PathNarrowWord(locals[l].flags) & LF_ALIAS not=? 0 {
+                    # Assigning the same member preserves its tag. Its fields can change.
+                    let keep=false
+                    if nm =? key and same_type not=? 0 {
+                        let t=prune(PathNarrowWord(locals[l].type))
+                        keep=type_eq(t same_type) or (is_union(t) and union_index(t same_type) >=? 0)
+                    }
+                    if not keep {narrow_invalidate(l)}
+                    path_forget("#L{l}")
+                }
+            }
+        }
+        i -= 1
+    }
 }

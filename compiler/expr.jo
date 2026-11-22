@@ -1,3 +1,5 @@
+use 'checked_expression_nodes.dewy'
+use 'intrinsic_registration.dewy'
 use 'exact_preparation.dewy'
 use 'call_argument_checks.dewy'
 use 'set_type_queries.dewy'
@@ -290,17 +292,6 @@ intrinsic_names: int[]         # interned name -> intrinsic index + 1; 0 means n
 dewy_set_name = -1             # the interned `__dewy_set`
 float_key_names: int[]         # interned `__dewy_make_set`, `set`, `k`, `value` (map_float_key)
 habit_names: int[]             # interned line, text, clear, fill, push, pop, map, atan, random (habit_call_check)
-
-register_intrinsics = ():
-    intrinsic_names = []
-    loop i in 0.. and it in intrinsics:
-        nm = intern(it.name)
-        loop intrinsic_names.len() <= nm: intrinsic_names.push(0)
-        intrinsic_names[nm] = i + 1
-        if it.id == .dewy_set: dewy_set_name = nm
-        universe[nm] = new_sym(nm, .builtin, int(it.id), 0)
-    float_key_names = [intern("__dewy_make_set"), intern("set"), intern("k"), intern("value")]
-    habit_names = [intern("line"), intern("text"), intern("clear"), intern("fill"), intern("push"), intern("pop"), intern("map"), intern("atan"), intern("random")]
 
 lit_default = (n: int) -> int:
     k = nodes[n].kind
@@ -1301,19 +1292,6 @@ call_string_cost = (a: int, p: int, sp: int, binds: mut int[]) -> int:
 # A captured value's unnamed local -> the expression it holds (for messages).
 capture_sources: {int: int} = {}
 
-capture_value = (a: int, pt: int, statements: mut int[]) -> int:
-    local = new_local(0, pt, nodes[a].pos)
-    capture_sources[local] = a
-    locals[local].flags = i32(LF_DECL | LF_QUIET | LF_READ)
-    binding = mk(.vardecl, nodes[a].pos)
-    nodes[binding].a = i32(type_node_of(pt, nodes[a].pos))
-    nodes[binding].b = i32(a)
-    nodes[binding].sym = i32(local)
-    nodes[binding].type = i32(pt)
-    add_flag(binding, NF_CHECKED)
-    statements.push(binding)
-    mk_ident_local(local, nodes[a].pos)
-
 call_targs: int[]              # type arguments written at the call being resolved (f[T](...))
 cur_assign = 0                 # the assignment whose target is being checked (`x = ...`, `x += ...`)
 early_set: {int: bool} = {}    # globals top-level code assigns above their own line
@@ -1612,22 +1590,6 @@ generic_family_cache: {int: (int, int)} = {}
 # produce): the result of its type's own zero-argument `receive`, or else `next` (a channel's
 # `T | Closed | Canceled`, a ticker's `Tick | Canceled`); 0 when it has neither. Once per type.
 handle_outcomes_cache: {int: int} = {}
-
-# `r.Png` written as a type, r a local or global: the type its member holds, 0 when r is no such
-# value or that member is no type.
-value_type_member = (s: int, name: int, pos: int) -> int:
-    k = syms[s].kind
-    t = 0
-    if k == .local: t = int(locals[int(syms[s].ref)].type)
-    else if k == .global:
-        ensure_global(int(syms[s].ref), pos)
-        t = int(globals[int(syms[s].ref)].type)
-    if t == 0: return 0
-    member = record_type_member(t, name)
-    if member == 0 and not record_has_member(t, name): member = handle_type_member(t, name)
-    if member != 0 and k == .local: locals[int(syms[s].ref)].flags |= i32(LF_READ)
-    if handle_outcomes(t) != 0: handle_clash_warning(t, pos)
-    member
 
 # The clash rule (decisions.md, batch 7): an outcome whose short name the handle's type already
 # has as a member gets no shorthand; the member wins, with this warning, once per type.
@@ -3652,13 +3614,6 @@ is_struct_like = (t0: int) -> bool:
 
 spread_count = 0
 
-# a type expression node for an already resolved type (for synthesized declarations)
-type_node_of = (t: int, pos: int) -> int:
-    n = mk(.tname, pos)
-    nodes[n].aux = -7
-    nodes[n].ival = t
-    n
-
 # `word in? members(Op)` with a plain string: a text that is no member is simply not in the
 # container, so it is tested first, `word is? Op and ...`, rather than converted (which fails).
 # The needle and then the container are evaluated once each, in that order. 0: not this case.
@@ -4566,15 +4521,6 @@ dewy_data_after_give = (n: int):
             continue
         if given.len() > 0: dewy_data_of_given(a, given, n)
 
-mk_ident_local = (l: int, pos: int) -> int:
-    n = mk(.ident, pos)
-    nodes[n].name = locals[l].name
-    nodes[n].sym = i32(l)
-    nodes[n].type = locals[l].type
-    nodes[n].aux = i32(int(SK.local))
-    add_flag(n, NF_CHECKED)
-    n
-
 # The interpolation checked last, for an unknown name inside one: ident_unknown.
 interpolation_last = 0
 
@@ -4723,20 +4669,6 @@ is_part_index = (n: int, receiver: int = 0) -> bool:
             if is_dewy_range_type(t, "IntRange"): return true
             if (tkind(t) == .array or tkind(t) == .fixed) and is_int(telem(t)): return true
     false
-
-bc_bin = (op: Tok, a: int, b: int, pos: int) -> int:
-    n = mk(.binary, pos)
-    nodes[n].op = i32(int(op))
-    nodes[n].a = i32(a)
-    nodes[n].b = i32(b)
-    n
-
-bc_assign = (target: int, v: int, pos: int) -> int:
-    a = mk(.assign, pos)
-    nodes[a].op = i32(int(Tok.assign))
-    nodes[a].a = i32(target)
-    nodes[a].b = i32(v)
-    a
 
 # The library's `__release_at(xs, i)` (lib/core/map.jo), when a call resolves to that
 # declaration: xs[i] = the zero bytes of its element type, an intrinsic that makes no checked
@@ -4934,42 +4866,6 @@ path_key = (n: int) -> str:
 # any other has no scope entry, so there is nothing to look up or forget for it
 path_rooted_l: bool[]
 path_rooted_g: bool[]
-
-# the variable a narrowed alias local stands for (l itself when it is not one)
-narrow_root_local = (l0: int) -> int:
-    l = l0
-    loop int(locals[l].flags) & LF_ALIAS != 0:
-        al = int(locals[l].alias)
-        if nodes[al].kind != .conv and nodes[al].kind != .narrow: return l
-        inner = int(nodes[al].a)
-        if nodes[inner].kind != .ident or nodes[inner].aux != i32(int(SK.local)): return l
-        l = int(nodes[inner].sym)
-    l
-
-# the path (and paths inside it) may hold another value from here on: forget their narrowing
-path_forget = (key: str, same_type: int = 0):
-    if path_narrows == 0 or len(key) == 0: return
-    prefix = key + "."
-    i = check_scopes.names.len() - 1
-    floor = int(ctxs[cx].floor)
-    loop i >= floor:
-        nm = name_of(check_scopes.names[i])
-        if nm == key or starts_with(nm, prefix):
-            sy = check_scopes.syms[i]
-            if syms[sy].kind == .local:
-                l = int(syms[sy].ref)
-                if int(locals[l].flags) & LF_ALIAS != 0:
-                    # Replacing a known member with the same member preserves
-                    # its tag, but invalidates any facts about fields inside it.
-                    keep = false
-                    if nm == key and same_type != 0:
-                        t = prune(int(locals[l].type))
-                        keep = type_eq(t, same_type) or (is_union(t) and union_index(t, same_type) >= 0)
-                    if not keep: narrow_invalidate(l)
-                    # Nested paths can use this alias as their root after the
-                    # parent was narrowed, rather than the original path text.
-                    path_forget("#L{l}")
-        i -= 1
 
 relocate_name = intern("__relocate_at")
 

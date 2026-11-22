@@ -1,12 +1,13 @@
 $runtime_checks
+from p"type_member_checks.dewy" import (handle_clash_warning handle_outcomes handle_type_member record_has_member record_type_member)
 from p"@lib/core/str.jo" import (starts_with)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"ast.jo" import (NF_AT NF_MUT has_flag kid mk nkids nkids2 nodes)
-from p"check.jo" import (assign_root check_struct_fields dewy_at prelude syms)
+from p"check.jo" import (LF_READ assign_root check_struct_fields dewy_at ensure_global globals locals prelude syms)
 from p"checker_expr.dewy" import (lookup)
 from p"checks_thin.dewy" import (resolve_type)
 from p"diagnostic_exit.dewy" import (fatal)
-from p"expr.jo" import (capture_decl cur_assign ntype type_receiver_at value_type_member)
+from p"expr.jo" import (capture_decl cur_assign ntype type_receiver_at)
 from p"set_type_queries.dewy" import (is_dewy_set_type)
 from p"reflect_ops.dewy" import (reflect_member)
 from p"reflection.jo" import (reflect_active)
@@ -92,4 +93,22 @@ dewy_bare_fn=(n:int64 is_callee:bool):>bool=>$unsafe {
     }
     if cur_assign not=? 0 and TypeFormWord(nodes.ptr[cur_assign].a) =? n {return false}
     files[pos_file(nodes.ptr[n].pos)].is_dewy
+}
+
+# `r.Png` written as a type, r a local or global: the type its member holds, 0 when r is no such
+# value or that member is no type.
+value_type_member=(s:TypeFormWord name:TypeFormWord pos:TypeFormWord):>int64=>{
+    let k=syms[s].kind
+    let t:TypeFormWord=0
+    if k =? 'local' {t=TypeFormWord(locals[TypeFormWord(syms[s].ref)].type)}
+    else if k =? 'global' {
+        ensure_global(TypeFormWord(syms[s].ref) pos)
+        t=TypeFormWord(globals[TypeFormWord(syms[s].ref)].type)
+    }
+    if t =? 0 {return 0}
+    let member=record_type_member(t name)
+    if member =? 0 and not record_has_member(t name) {member=handle_type_member(t name)}
+    if member not=? 0 and k =? 'local' {locals[TypeFormWord(syms[s].ref)].flags |= int32(LF_READ)}
+    if handle_outcomes(t) not=? 0 {handle_clash_warning(t pos)}
+    member
 }

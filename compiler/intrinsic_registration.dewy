@@ -1,0 +1,26 @@
+$runtime_checks
+from p"util.jo" import (intern names)
+from p"expr.jo" import (IN dewy_set_name float_key_names habit_names intrinsic_names intrinsics)
+from p"check.jo" import (new_sym universe)
+
+register_intrinsics=():>void=>{
+    let ids=@intrinsic_names
+    # Interning each intrinsic creates at most one name. Publish only the occupied prefix.
+    ids=[]
+    ids.resize(int64<overflow='wrap'>(names.length) + intrinsics.length)
+    let used:int64<overflow='wrap'>=0
+    let set_name=@dewy_set_name
+    loop i in 0.. and it in intrinsics {
+        let nm=intern(it.name)
+        if used <=? nm {used=int64<overflow='wrap'>(nm) + 1}
+        ids[nm]=int64<overflow='wrap'>(i) + 1
+        if it.id =? IN.dewy_set {set_name=nm}
+        let sym=new_sym(nm 'builtin' int64(it.id) 0)
+        universe[nm]=sym
+    }
+    ids.truncate(used)
+    let float_names=@float_key_names
+    float_names=[intern("__dewy_make_set") intern("set") intern("k") intern("value")]
+    let habits=@habit_names
+    habits=[intern("line") intern("text") intern("clear") intern("fill") intern("push") intern("pop") intern("map") intern("atan") intern("random")]
+}
