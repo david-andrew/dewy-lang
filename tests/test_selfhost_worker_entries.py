@@ -34,7 +34,11 @@ DRIVER = r'''main = ():
 @pytest.mark.parametrize('workers', ['1', '3', '-2', 'invalid'])
 def test_worker_entries_twins(compiler, tmp_path, monkeypatch, release, workers):
     monkeypatch.setenv('DEWY_EMIT_WORKERS', workers)
-    out = compare_narrow(compiler, tmp_path, release, ('worker_entries',), DRIVER,
+    # (the fallback for an invalid setting is the machine's CPU count: record that it was taken)
+    driver = DRIVER if workers != 'invalid' else DRIVER.replace(
+        'print("workers:{emit_workers()}")', 'print("fallback:{emit_workers() == min(cpu_count(), 16)}")')
+    out = compare_narrow(compiler, tmp_path, release, ('worker_entries',), driver,
                          doubles={'services.jo': SERVICES}, services=('par',))
     assert out.endswith(b'ok\n')
     if workers != 'invalid': assert out.startswith(f'workers:{workers}\n'.encode())
+    else: assert out.startswith(b'fallback:true\n')
