@@ -67,8 +67,10 @@ math_word=(word:MathWord):>Val=>$unsafe {
 }
 math_pack_word=(e:MathWord word:MathWord):>Val=>$unsafe {
     if exact_small_math(e) >=? 0 {return V(e_bin('shl' VI word e_iconst(1)) false)}
+    # An expanded fixed-width expression keeps its storage type in the AST;
+    # only its exact bound, not that type, fits it in the tagged payload.
     let t=representation_type(ntype(e))
-    if t not=? T_MATH_INT and is_int(t) and types.ptr[t].bits <? 63 {
+    if t not=? T_MATH_INT and is_int(t) and types.ptr[t].bits <? 63 and not exact_has_node(e) {
         let bound=fact_domain(t)
         if bound.lo >=? -4611686018427387904 and bound.hi <=? 4611686018427387903 {
             return V(e_bin('shl' VI word e_iconst(1)) false)

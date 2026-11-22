@@ -1,0 +1,24 @@
+$runtime_checks
+$no_assumed_bounds
+
+# Fixed-width products between 2^62 and 2^64 exceed the tagged int payload
+# although their storage type is narrower.
+unsigned32=(z:int a:uint32):>void=>{
+    printl((a * 2147483647) + z)
+    printl((a * 2147483647) * (z + 10))
+    printl(z - (a * 2147483647))
+}
+signed32=(z:int d:int32):>void=>{
+    printl((d * d) + z)
+    printl((d * 2147483647) - z)
+    printl((d * (-2147483648)) * z)
+}
+main = ():>void => {
+    let a0:uint32 = 4158282318
+    let z:int = 36
+    printl((a0 * 2147483647) * ((a0 + z) + 10))
+    unsigned32(36 4158282318)
+    unsigned32((-36) 4294967295)
+    signed32(36 (-2147483648))
+    signed32((-36) 2147483647)
+}
