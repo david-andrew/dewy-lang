@@ -133,7 +133,8 @@ def evaluate(compiler: Path, directory: Path, version: str, scratch: Path, env: 
         binary = binary.with_suffix('.exe')
     stdin = directory / 'stdin.txt'
     with run_dir(f'{directory.name}-{version}', work) as cwd:
-        ran = step(on_cores([binary], 2), RUN_TIMEOUT, stdin if stdin.exists() else None, cwd)
+        argv = [str(word).replace('{dir}', str(directory.resolve())) for word in (entry or {}).get('args', [])]
+        ran = step(on_cores([binary, *argv], 2), RUN_TIMEOUT, stdin if stdin.exists() else None, cwd)
     expected = (directory / 'expected.out').read_text()
     if ran.returncode != 0:
         detail = first_error(ran.stderr + ran.stdout) if (ran.stderr + ran.stdout).strip() else ''

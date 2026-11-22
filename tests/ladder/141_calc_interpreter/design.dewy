@@ -1,0 +1,267 @@
+# Tier 6 / 141 / milestone 11
+# Acceptance: A line-oriented calculator language read from stdin: a lexer
+# with columns, a precedence-climbing parser building a recursive expression
+# union, and a tree-walking evaluator over exact integers and booleans with
+# `let` globals, user functions with recursion (`def f(n) = ...`), `if ...
+# then ... else ...`, a few built-ins, and every mistake (bad character,
+# unexpected token, unknown name, wrong arity, type mismatch, division by
+# zero, runaway recursion) reported as a value with its column.
+
+CalcError:type = type of error & [col:int64 message:string]
+
+Token:type = [kind:string text:string col:int64]
+
+Num:type = [value:int]
+Flag:type = [value:bool]
+Ref:type = [name:string col:int64]
+Negate:type = [col:int64 operand:Expr]
+Binary:type = [op:string col:int64 left:Expr right:Expr]
+Choice:type = [col:int64 test:Expr yes:Expr no:Expr]
+Call:type = [name:string col:int64 args:array<Expr>]
+Expr:type = Num | Flag | Ref | Negate | Binary | Choice | Call
+
+Value:type = int | bool
+Function:type = [params:array<string> body:Expr]
+Machine:type = [globals:dict<string Value> functions:dict<string Function> depth:int64]
+
+const KEYWORDS = set["let" "def" "if" "then" "else" "true" "false"]
+const OPERATORS = set["==" "!=" "<=" ">=" "<" ">" "+" "-" "*" "/" "%" "(" ")" "," "="]
+const MAX_DEPTH = 200
+
+lex = (line:string):>array<Token> | CalcError => {
+    let tokens:array<Token> = []
+    let chars = line.chars
+    let i:int64 = 0
+    loop i <? chars.length {
+        let ch = chars[i]
+        let col = i + 1
+        if ch.is_space { i += 1; continue }
+        if ch.is_digit or ch.is_alpha or ch =? "_" {
+            let start = i
+            loop i <? chars.length and (chars[i].is_alnum or chars[i] =? "_") i += 1
+            let text = chars[start..i).join("")
+            let kind = if ch.is_digit "num" else if text in? KEYWORDS "keyword" else "name"
+            if kind =? "num" and not text.is_digit return CalcError[col "malformed number {text}"]
+            tokens.push(Token[kind text col])
+            continue
+        }
+        let pair = if i + 1 <? chars.length "{ch}{chars[i + 1]}" else ch
+        let text = if pair in? OPERATORS pair else ch
+        if text not in? OPERATORS return CalcError[col "unexpected character '{ch}'"]
+        tokens.push(Token["op" text col])
+        i += text.length
+    }
+    tokens.push(Token["end" "" chars.length + 1])
+    tokens
+}
+
+Parser:type = [tokens:array<Token> at:int64]
+
+peek = (p:Parser):>Token => p.tokens.get(p.at) ?? Token["end" "" 0]
+advance = (@p:Parser):>Token => {
+    let token = peek(p)
+    if p.at <? p.tokens.length p.at += 1
+    token
+}
+is_op = (t:Token text:string):>bool => (t.kind =? "op" or t.kind =? "keyword") and t.text =? text
+describe = (t:Token):>string => if t.kind =? "end" "end of line" else "'{t.text}'"
+
+expect = (@p:Parser text:string):>Token | CalcError => {
+    let t = advance(@p)
+    if not is_op(t text) return CalcError[t.col "expected '{text}', found {describe(t)}"]
+    t
+}
+
+# Binding strength of each infix operator; 0 means "not an infix operator".
+strength = (t:Token):>int64 => {
+    if t.kind not=? "op" return 0
+    match t.text {
+        <"==" | "!=" | "<" | "<=" | ">" | ">="> => 1
+        <"+" | "-"> => 2
+        <"*" | "/" | "%"> => 3
+        _ => 0
+    }
+}
+
+# Precedence climbing: comparisons do not chain, arithmetic is left-associative.
+expression = (@p:Parser floor:int64 = 1):>Expr | CalcError => {
+    let left = unary(@p) or_throw
+    loop true {
+        let t = peek(p)
+        let s = strength(t)
+        if s <? floor break
+        advance(@p);
+        let right = expression(@p s + 1) or_throw
+        left = Binary[t.text t.col left right]
+        if s =? 1 and strength(peek(p)) =? 1 {
+            let next = peek(p)
+            return CalcError[next.col "comparisons do not chain; add parentheses"]
+        }
+    }
+    left
+}
+
+unary = (@p:Parser):>Expr | CalcError => {
+    let t = peek(p)
+    if is_op(t "-") {
+        advance(@p);
+        return Negate[t.col unary(@p) or_throw]
+    }
+    primary(@p)
+}
+
+primary = (@p:Parser):>Expr | CalcError => {
+    let t = advance(@p)
+    if t.kind =? "num" return Num[to_int(t.text) ?? 0]
+    if is_op(t "true") return Flag[true]
+    if is_op(t "false") return Flag[false]
+    if is_op(t "(") {
+        let inner = expression(@p) or_throw
+        expect(@p ")") or_throw;
+        return inner
+    }
+    if is_op(t "if") {
+        let test = expression(@p) or_throw
+        expect(@p "then") or_throw;
+        let yes = expression(@p) or_throw
+        expect(@p "else") or_throw;
+        return Choice[t.col test yes expression(@p) or_throw]
+    }
+    if t.kind not=? "name" return CalcError[t.col "unexpected {describe(t)}"]
+    if not is_op(peek(p) "(") return Ref[t.text t.col]
+    advance(@p);
+    let args:array<Expr> = []
+    if not is_op(peek(p) ")") {
+        args.push(expression(@p) or_throw)
+        loop is_op(peek(p) ",") {
+            advance(@p);
+            args.push(expression(@p) or_throw)
+        }
+    }
+    expect(@p ")") or_throw;
+    Call[t.text t.col args]
+}
+
+number = (v:Value col:int64 what:string):>int | CalcError => {
+    if v is? int return v
+    CalcError[col "{what} needs a number, not {v}"]
+}
+
+evaluate = (@m:Machine e:Expr locals:dict<string Value>):>Value | CalcError => {
+    match e {
+        n:Num => n.value
+        f:Flag => f.value
+        r:Ref => locals.get(r.name) ?? m.globals.get(r.name) ?? CalcError[r.col "unknown name {r.name}"]
+        u:Negate => -(number(evaluate(@m u.operand locals) or_throw u.col "-") or_throw)
+        c:Choice => {
+            let test = evaluate(@m c.test locals) or_throw
+            if test is? int return CalcError[c.col "if needs true or false, not {test}"]
+            evaluate(@m (if test c.yes else c.no) locals)
+        }
+        b:Binary => {
+            let left = evaluate(@m b.left locals) or_throw
+            let right = evaluate(@m b.right locals) or_throw
+            if b.op =? "==" return left =? right
+            if b.op =? "!=" return left not=? right
+            let x = number(left b.col "'{b.op}'") or_throw
+            let y = number(right b.col "'{b.op}'") or_throw
+            match b.op {
+                <"+"> => x + y
+                <"-"> => x - y
+                <"*"> => x * y
+                <"<"> => x <? y
+                <"<="> => x <=? y
+                <">"> => x >? y
+                <">="> => x >=? y
+                _ => {
+                    if y =? 0 return CalcError[b.col "division by zero"]
+                    if b.op =? "/" x // y else x % y
+                }
+            }
+        }
+        c:Call => {
+            let args = [loop a in c.args evaluate(@m a locals) or_throw]
+            call(@m c args)
+        }
+    }
+}
+
+call = (@m:Machine c:Call args:array<Value>):>Value | CalcError => {
+    if c.name =? "abs" or c.name =? "max" or c.name =? "min" {
+        let ns = [loop a in args number(a c.col c.name) or_throw]
+        if ns.is_empty return CalcError[c.col "{c.name} needs at least one argument"]
+        if c.name =? "abs" {
+            if ns.length not=? 1 return CalcError[c.col "abs takes 1 argument, not {ns.length}"]
+            return abs(ns[0])
+        }
+        return if c.name =? "max" ns.max else ns.min
+    }
+    let f = m.functions.get(c.name) ?? return CalcError[c.col "unknown function {c.name}"]
+    if f.params.length not=? args.length {
+        let noun = if f.params.length =? 1 "argument" else "arguments"
+        return CalcError[c.col "{c.name} takes {f.params.length} {noun}, not {args.length}"]
+    }
+    if m.depth >=? MAX_DEPTH return CalcError[c.col "recursion deeper than {MAX_DEPTH} calls"]
+    let locals:dict<string Value> = [loop name in f.params and value in args name -> value]
+    m.depth += 1
+    let result = evaluate(@m f.body locals)
+    m.depth -= 1
+    result
+}
+
+# One input line: a definition, a global binding, or an expression to show.
+run_line = (@m:Machine line:string):>string | CalcError => {
+    let p = Parser[lex(line) or_throw 0]
+    let first = peek(p)
+    if is_op(first "def") {
+        advance(@p);
+        let name = advance(@p)
+        if name.kind not=? "name" return CalcError[name.col "expected a function name, found {describe(name)}"]
+        expect(@p "(") or_throw;
+        let params:array<string> = []
+        loop not is_op(peek(p) ")") {
+            if not params.is_empty expect(@p ",") or_throw;
+            let param = advance(@p)
+            if param.kind not=? "name" return CalcError[param.col "expected a parameter name, found {describe(param)}"]
+            if param.text in? params return CalcError[param.col "parameter {param.text} appears twice"]
+            params.push(param.text)
+        }
+        advance(@p);
+        expect(@p "=") or_throw;
+        let body = expression(@p) or_throw
+        if peek(p).kind not=? "end" return CalcError[peek(p).col "unexpected {describe(peek(p))}"]
+        m.functions[name.text] = Function[params body]
+        return "defined {name.text}/{params.length}"
+    }
+    let target = if is_op(first "let") {
+        advance(@p);
+        let name = advance(@p)
+        if name.kind not=? "name" return CalcError[name.col "expected a name, found {describe(name)}"]
+        expect(@p "=") or_throw;
+        name.text
+    } else ""
+    let tree = expression(@p) or_throw
+    if peek(p).kind not=? "end" return CalcError[peek(p).col "unexpected {describe(peek(p))}"]
+    let value = evaluate(@m tree []) or_throw
+    if target.is_empty return "{value}"
+    m.globals[target] = value
+    "{target} = {value}"
+}
+
+main = () => {
+    let machine = Machine[[] [] 0]
+    let ok = 0
+    let failed = 0
+    loop number in 1.. and line in (read_stdin ?? "").lines {
+        if line.trim.is_empty or line.startswith("#") continue
+        match run_line(@machine line) {
+            shown:string => { printl"{number}: {shown}"; ok += 1 }
+            e:CalcError => {
+                printl"{number}: error at column {e.col}: {e.message}"
+                machine.depth = 0
+                failed += 1
+            }
+        }
+    }
+    printl"{ok} lines evaluated, {failed} errors, {machine.functions.length} functions, {machine.globals.length} globals"
+}

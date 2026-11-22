@@ -626,6 +626,30 @@
    "milestone": 60,
    "open": "D40 Q2 (cleanup at block end or after last use) and Q6 (a visible exit where a local cleanup can fail); also needs self-closing files (open(path 'w')) and a fallible assigned $__abandon__ (D40 Q1/Q4, decided, not built).",
    "note": "Atomic site releases: files staged through self-closing handles under a Staged owner whose assigned $__abandon__ removes the staged directory unless commit consumes it; a refused release leaves nothing behind and its cleanup failure would be the function's result."
+  },
+  "140_word_tally": {
+   "milestone": 1,
+   "args": [
+    "top=8",
+    "min_length=3",
+    "exclude=the,and,a",
+    "-i",
+    "{dir}/input/poem.txt",
+    "missing.txt",
+    "{dir}/input/notes.md",
+    "out=report.tsv",
+    "--",
+    "{dir}/input/mixed.txt"
+   ],
+   "note": "Command-line word tally: name=value, --flag and -f options with -- ending them, files read as text with a missing one reported on stderr and skipped, wc-style counts, the most frequent words with alphabetical ties, and a tab-separated report written to out= and read back."
+  },
+  "141_calc_interpreter": {
+   "milestone": 11,
+   "note": "Line calculator over stdin: a lexer with columns, a precedence-climbing parser building a recursive Expr union, a tree-walking evaluator over exact int and bool values with let globals, recursive user functions, if/then/else and built-ins, and every lexing, parsing and run-time mistake returned as a CalcError value with its column."
+  },
+  "142_clinic_simulation": {
+   "milestone": 18,
+   "note": "Replicated discrete-event clinic days through bounded channels: a producer and three workers over two-slot channels, splitmix64 streams, exponential arrivals and visits, urgent-first lines, a bounded waiting room, a time-ordered Heap of events carrying patients by value, a local mean closure inside spawned work, and job-ordered per-scenario means, spreads and nearest-rank percentiles."
   }
  },
  "design_passing": [
@@ -766,6 +790,9 @@
   "135_ffi_image_tool",
   "136_team_calendar",
   "137_snapshot_backup",
-  "138_crate_puzzle"
+  "138_crate_puzzle",
+  "140_word_tally",
+  "141_calc_interpreter",
+  "142_clinic_simulation"
  ]
 }

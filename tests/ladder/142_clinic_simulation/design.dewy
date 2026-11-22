@@ -1,0 +1,169 @@
+# Tier 6 / 142 / milestone 18
+# Acceptance: A discrete-event simulation of a walk-in clinic, run as
+# replicated experiments through a bounded pipeline: a producer task feeds
+# scenario jobs into a two-slot channel, three worker tasks each simulate a
+# day (seeded splitmix64 stream, exponential arrivals and visits, urgent
+# patients first, a bounded waiting room, an event heap ordered by time) and
+# send summaries through a second bounded channel, and the collector restores
+# job order and reports per-scenario means, spreads and percentiles.
+
+Job:type = [id:int64 doctors:int64 seed:uint64]
+
+Day:type = [
+    id:int64
+    doctors:int64
+    seen:int64
+    turned_away:int64
+    mean_wait:float64
+    p90_wait:float64
+    max_wait:float64
+    urgent_wait:float64
+    utilization:float64
+    longest_queue:int64
+    closed_at:float64
+]
+
+const OPEN_MINUTES = 480.0
+const MEAN_GAP = 4.0
+const MEAN_VISIT = 9.0
+const MEAN_URGENT_VISIT = 14.0
+const URGENT_SHARE = 0.25
+const WAITING_ROOM = 8
+const SEEDS = 5
+const WORKERS = 3
+
+# splitmix64: a fixed stream per seed, so every run of a job is the same day.
+Random:type = [state:uint64<overflow='wrap'>]
+next_word = (@r:Random):>uint64 => {
+    r.state += 0x9e3779b97f4a7c15
+    let z = r.state
+    z = (z xor (z >> 30)) * 0xbf58476d1ce4e5b9
+    z = (z xor (z >> 27)) * 0x94d049bb133111eb
+    uint64(z xor (z >> 31))
+}
+uniform = (@r:Random):>float64 => float64(next_word(@r) >> 11) / 9007199254740992.0
+exponential = (@r:Random mean:float64):>float64 => -mean * log(1.0 - uniform(@r))
+
+Patient:type = [arrival:float64 urgent:bool visit:float64]
+Event:type = [patient:Patient leaving:bool]
+
+simulate = (job:Job):>Day => {
+    let random = Random[job.seed]
+    # Today's patients, drawn up front: arrival gap, urgency, visit length.
+    let patients:array<Patient> = []
+    let clock = exponential(@random MEAN_GAP)
+    loop clock <? OPEN_MINUTES {
+        let urgent = uniform(@random) <? URGENT_SHARE
+        let visit = exponential(@random if urgent MEAN_URGENT_VISIT else MEAN_VISIT)
+        patients.push(Patient[clock urgent visit])
+        clock += exponential(@random MEAN_GAP)
+    }
+
+    let events:Heap<Event> = []
+    loop patient in patients events.push(Event[patient false] patient.arrival)
+    let urgent_line:array<Patient> = []
+    let normal_line:array<Patient> = []
+    let free = job.doctors
+    let waits:array<float64> = []
+    let urgent_waits:array<float64> = []
+    let busy = 0.0
+    let turned_away:int64 = 0
+    let longest_queue:int64 = 0
+    let now = 0.0
+
+    loop events.length >? 0 {
+        let time = events.peek_priority
+        let event = events.pop
+        now = time
+        if event.leaving {
+            free += 1
+        } else {
+            let waiting = urgent_line.length + normal_line.length
+            if free =? 0 and waiting >=? WAITING_ROOM {
+                turned_away += 1
+                continue
+            }
+            if event.patient.urgent urgent_line.push(event.patient) else normal_line.push(event.patient)
+            longest_queue = max(longest_queue urgent_line.length + normal_line.length)
+        }
+        # Any free doctor takes the next patient, urgent ones first.
+        loop free >? 0 {
+            let patient = if not urgent_line.is_empty urgent_line.pop(0)
+                else if not normal_line.is_empty normal_line.pop(0)
+                else break
+            let wait = now - patient.arrival
+            waits.push(wait)
+            if patient.urgent urgent_waits.push(wait)
+            busy += patient.visit
+            free -= 1
+            events.push(Event[patient true] now + patient.visit)
+        }
+    }
+
+    let order = waits.sorted
+    let mean = (values:array<float64>) => if values.is_empty 0.0 else values.sum / float64(values.length)
+    # Nearest-rank percentile: the smallest wait at least 90% of patients had.
+    let p90 = order.get((9 * order.length + 9) // 10 - 1) ?? 0.0
+    Day[
+        id=job.id
+        doctors=job.doctors
+        seen=waits.length
+        turned_away=turned_away
+        mean_wait=mean(waits)
+        p90_wait=p90
+        max_wait=if order.is_empty 0.0 else order.last
+        urgent_wait=mean(urgent_waits)
+        utilization=busy / (float64(job.doctors) * now)
+        longest_queue=longest_queue
+        closed_at=now
+    ]
+}
+
+worker = (jobs:Channel<Job> days:Channel<Day>):>void | Unsent<Day> | Canceled => {
+    loop true {
+        let job = jobs.receive
+        if job is? Closed break
+        days.send(simulate(job or_throw)) or_throw
+    }
+}
+
+feed = (jobs:Channel<Job> plan:array<Job>):>void | Unsent<Job> => {
+    loop job in plan jobs.send(job) or_throw
+    jobs.close()
+}
+
+spread = (values:array<float64>):>string => {
+    let n = float64(values.length)
+    let mean = values.sum / n
+    let variance = [loop v in values (v - mean) ^ 2].sum / (n - 1.0)
+    "{fmt'6.2f'(mean)} ± {fmt'5.2f'(sqrt(variance))}"
+}
+
+main = () => {
+    let plan = [loop doctors in [2 3] loop s in [1..SEEDS] Job[(doctors - 2) * SEEDS + s - 1 doctors uint64(1000 * doctors + s)]]
+    let jobs = channel<Job>(2)
+    let results = channel<Day>(2)
+    let days:array<Day> = []
+    concurrent {
+        spawn feed(jobs plan)
+        loop _ in [0..WORKERS) spawn worker(jobs results)
+        loop _ in plan {
+            days.push(results.receive or_throw)
+        }
+    }
+    # Workers finish in any order; the report follows the plan.
+    days.sort(key=(d:Day) => d.id)
+
+    printl"job doctors  seen away  mean wait  p90 wait  max wait  urgent  busy  queue  closed"
+    loop d in days {
+        printl"{fmt'>3'(d.id)} {fmt'>7'(d.doctors)} {fmt'>5'(d.seen)} {fmt'>4'(d.turned_away)} {fmt'>10.2f'(d.mean_wait)} {fmt'>9.2f'(d.p90_wait)} {fmt'>9.2f'(d.max_wait)} {fmt'>7.2f'(d.urgent_wait)} {fmt'>4.0%'(d.utilization)} {fmt'>6'(d.longest_queue)} {fmt'>7.1f'(d.closed_at)}"
+    }
+    loop doctors in [2 3] {
+        let group = [loop d in days if d.doctors =? doctors d]
+        printl"{doctors} doctors over {group.length} days:"
+        printl"  mean wait   {spread([loop d in group d.mean_wait])} min"
+        printl"  urgent wait {spread([loop d in group d.urgent_wait])} min"
+        printl"  turned away {spread([loop d in group float64(d.turned_away)])} patients"
+        printl"  utilization {spread([loop d in group 100.0 * d.utilization])} %"
+    }
+}

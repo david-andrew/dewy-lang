@@ -1,0 +1,157 @@
+# Tier 6 / 140 / milestone 1
+# Acceptance: A `wc`-plus-frequency command-line tool. Options follow the
+# decided argparse convention (`name=value`, `--flag`, `-f`, `--` ends
+# options) through a hand-written scanner until that library exists. Each
+# named file is read as text: a missing one is reported on standard error and
+# skipped, and the run goes on. It prints per-file line, word and byte counts,
+# the longest line, the most frequent words (ties alphabetical), writes the
+# same table as tab-separated text to `out=`, and reads it back to check it.
+
+Options:type = [
+    files:array<string>
+    top:int64 = 5
+    min_length:int64 = 1
+    ignore_case:bool = false
+    exclude:set<string>
+    out:string? = none
+]
+
+UsageError:type = type of error & [message:string]
+
+USAGE = "usage: tally [top=N] [min_length=N] [exclude=w,w] [out=FILE] [-i|--ignore-case] [--] FILE..."
+
+# A whole number for an option, or a usage error naming the option.
+count_option = (name:string text:string low:int64 high:int64):>int64 | UsageError => {
+    let n = to_int(text) ?? return UsageError["{name}={text}: not a whole number"]
+    if n <? low or n >? high return UsageError["{name}={text}: must be {low} to {high}"]
+    n
+}
+
+parse_options = (argv:array<string>):>Options | UsageError => {
+    let options = Options[files=[] exclude=set[]]
+    let only_files = false
+    loop word in argv[$clamp 1..) {
+        if only_files or not (word.startswith("-") or "=" in? word) {
+            options.files.push(word)
+            continue
+        }
+        if word =? "--" { only_files = true; continue }
+        if word =? "-i" or word =? "--ignore-case" { options.ignore_case = true; continue }
+        let at = word.find("=") ?? return UsageError["unknown option {word}"]
+        let name = word[..at)
+        let value = word[$clamp at + 1..]
+        match name {
+            <"top"> => { options.top = count_option(name value 1 1000) or_throw }
+            <"min_length"> => { options.min_length = count_option(name value 1 80) or_throw }
+            <"out"> => { options.out = value }
+            <"exclude"> => { loop w in value.split(",") options.exclude.push(w.lower) }
+            _ => return UsageError["unknown option {name}="]
+        }
+    }
+    if options.files.is_empty return UsageError["no files given"]
+    options
+}
+
+FileStats:type = [name:string lines:int64 words:int64 bytes:int64 longest:int64 longest_at:int64]
+
+# Letters, digits, apostrophes and hyphens make up a word; anything else splits.
+word_char = (ch:string):>bool => ch.is_alnum or ch =? "'" or ch =? "-"
+
+words_of = (line:string):>array<string> => {
+    let found:array<string> = []
+    let current = ""
+    loop ch in line {
+        if word_char(ch) { current = "{current}{ch}" }
+        else if not current.is_empty { found.push(current); current = "" }
+    }
+    if not current.is_empty found.push(current)
+    # A word is never only punctuation: "--ignore-case" counts as "ignore-case".
+    [loop w in found {
+        let clean = w.trim("'-")
+        if not clean.is_empty clean
+    }]
+}
+
+tally_file = (path:Path options:Options @counts:dict<string int64>) => {
+    let text = path.read_text or_throw
+    let stats = FileStats[path.name 0 0 (text as array<uint8>).length 0 0]
+    loop number in 1.. and raw in text.lines {
+        let line = raw.remove_suffix("\r")
+        stats.lines += 1
+        if line.length >? stats.longest {
+            stats.longest = line.length
+            stats.longest_at = number
+        }
+        loop word in words_of(line) {
+            stats.words += 1
+            let key = if options.ignore_case word.lower else word
+            if key.length <? options.min_length or key.lower in? options.exclude continue
+            if key in? counts counts[key] += 1 else counts[key] = 1
+        }
+    }
+    stats
+}
+
+row = (name:string lines:string words:string bytes:string longest:string):>string => {
+    "{fmt'<14'(name)}{fmt'>6'(lines)}{fmt'>7'(words)}{fmt'>7'(bytes)}{fmt'>12'(longest)}"
+}
+
+# Most frequent first; equal counts in alphabetical order.
+Ranked:type = [word:string count:int64]
+ranking = (counts:dict<string int64> top:int64):>array<Ranked> => {
+    let all = [loop [word count] in counts Ranked[word count]]
+    all.sorted(key=(r:Ranked) => r.word).sorted(key=(r:Ranked) => r.count reverse=true)[$clamp ..top)
+}
+
+report = (all:array<FileStats> ranked:array<Ranked>):>string => {
+    let lines = ["file\tlines\twords\tbytes\tlongest"]
+    loop s in all lines.push("{s.name}\t{s.lines}\t{s.words}\t{s.bytes}\t{s.longest}@{s.longest_at}")
+    loop r in ranked lines.push("word\t{r.word}\t{r.count}")
+    "{lines.join("\n")}\n"
+}
+
+main = (argv:array<string>) => {
+    let options = parse_options(argv)
+    if options is? UsageError {
+        printl(USAGE file=stderr)
+        return options
+    }
+    let counts:dict<string int64> = []
+    let all:array<FileStats> = []
+    let skipped:array<string> = []
+    loop name in options.files {
+        match tally_file(p(name) options @counts) {
+            stats:FileStats => all.push(stats)
+            <FileNotFound> => {
+                printl("tally: {name}: no such file" file=stderr)
+                skipped.push(p(name).name)
+            }
+            failure:exception => return failure
+        }
+    }
+
+    printl(row("file" "lines" "words" "bytes" "longest"))
+    let total = FileStats["total" 0 0 0 0 0]
+    loop s in all {
+        printl(row(s.name "{s.lines}" "{s.words}" "{s.bytes}" "{s.longest} @{s.longest_at}"))
+        total.lines += s.lines
+        total.words += s.words
+        total.bytes += s.bytes
+    }
+    printl(row("total" "{total.lines}" "{total.words}" "{total.bytes}" "-"))
+    if not skipped.is_empty printl"skipped: {skipped.join(", ")}"
+
+    let case = if options.ignore_case "any case" else "exact case"
+    printl"top {options.top} of {counts.length} words ({case}, at least {options.min_length} long):"
+    let ranked = ranking(counts options.top)
+    loop r in ranked printl"  {fmt'>3'(r.count)}  {r.word}"
+
+    if options.out is? string {
+        let target = p(options.out)
+        let text = report(all ranked)
+        let written = target.write_text(text) or_throw
+        let back = target.read_text or_throw
+        let same = if back =? text "matches" else "DIFFERS"
+        printl"wrote {text.lines.length} rows ({written} bytes) to {target.name}; reread {same}"
+    }
+}

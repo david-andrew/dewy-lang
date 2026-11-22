@@ -6,6 +6,7 @@ Recent programs may keep a standalone `oracle.py` beside `design.dewy`; run it w
 Map it to its ROADMAP.md milestone in `ladder.json`, with a one-line acceptance statement as `note`; `python3 -m tools.core ladder` prints the scoreboard and `--update-ratchet` records design passes.
 
 - **Input.** A `stdin.txt` beside the sources is fed to both versions; otherwise stdin is empty.
+- **Command line.** An entry's `"args"` list is passed to both versions after the program name; `{dir}` in a word becomes the program's directory, for input files kept beside the sources. The program runs in a fresh directory, so relative paths it writes stay there.
 - **C fixtures.** An entry with `"c_library": "image"` builds the adjacent `image.c` with `cc` as a native shared library before checking and building either version. Its isolated directory is on the child's loader path, so `$extern(lib='image')` finds it even when the executable runs in another directory. A C build failure fails the program.
 - **Programs that must be rejected.** Give the entry `"expect": {"kind": "compile-error", "diagnostic": REGEX, "line": N}` and mark the offending line with a `# REJECT` comment just above it.
   The design passes only when `check` fails with an error whose message matches REGEX (case-insensitive) at line N of `design.dewy` (`line` is optional).
