@@ -39,11 +39,11 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
    reflection loop (99) and word formatting from a proven range (100) both landed
    (−10.9% and −9.0% instructions on their flagships, 11-21). Next: structural
    round 2 (new bounded ideas; 99 and 100 still need about 25–40% more).
-3. **Self-hosting** ([readiness](docs/design/self_hosting.md)): nearly every
-   subsystem now runs in Dewy. Jo functions left (11-22): expr and check 3 raw-array
-   adapters each, exact 4 finalization, opt 7 ordinal-table queries, facts 6; Jo
-   keeps the shared state and tables. Next: decide those last ~23, close milestone 1,
-   then milestone 3 (a pinned C-reproducible seed that retires the frozen twins).
+3. **Self-hosting** ([readiness](docs/design/self_hosting.md)): milestone 1 closed
+   11-22: Dewy runs the driver and every subsystem walk; Jo keeps shared state, opcode
+   tables and storage bridges. Next: milestone 3 per
+   [milestone3-round1](docs/design/proposals/self-hosting/milestone3-round1.md), a
+   pinned 2.77 MB source archive as the C bootstrap root, then delete the live twins.
 4. **Runtime speed vs C:** full landings now gate kernel instructions
    (`bench --baseline`; waive with `bench: accept <reason>`). The push family is
    reopened: arena reached 1.42×; the last large saving needs an arena-residency
