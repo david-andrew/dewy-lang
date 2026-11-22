@@ -1,0 +1,44 @@
+{
+ "test_checker_call_resolve_errors[a = node(.ident); d = cr_decl([T_INT], mask=1, defaults=[a]); cr_run([d], [])-32-error:3:0:false]": [
+  {
+   "args": [],
+   "status": 32,
+   "stdout": "[\"untyped:[]\", \"map:4:[0]\", \"picked:4\", \"instance:4:[]\"]\nerror:3:0:false\n"
+  }
+ ],
+ "test_checker_call_resolve_errors[d = cr_decl([T_INT]); a = cr_arg(.int_lit, 0, true); nodes[a].ival = -1; cr_run([d], [a])-31-no-candidate:1:false]": [
+  {
+   "args": [],
+   "status": 31,
+   "stdout": "[\"untyped:[]\", \"rejections:[1]\"]\nno-candidate:1:false\n"
+  }
+ ],
+ "test_checker_call_resolve_errors[d = cr_decl([]); call_targs = [T_INT]; cr_run([d], [])-31-no-candidate:9:true]": [
+  {
+   "args": [],
+   "status": 31,
+   "stdout": "[\"untyped:[]\"]\nno-candidate:9:true\n"
+  }
+ ],
+ "test_checker_call_resolve_errors[p = types.len(); types.push(TypeInfo(kind=.param, flags=1)); d = cr_decl([], 1, true); cr_run([d], [])-32-error:5:0:false]": [
+  {
+   "args": [],
+   "status": 32,
+   "stdout": "[\"untyped:[]\", \"picked:2\"]\nerror:5:0:false\n"
+  }
+ ],
+ "test_checker_call_resolve_twins[default]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "result:3:call:257:0:0:3\n[\"members:[4]\", \"untyped:[]\", \"picked:4\", \"instance:4:[]\", \"ide\", \"finish:2:3:false:0\", \"mutable:0\", \"list:5:[2]\", \"contracts:false:0\", \"order:[2]:[2]\"]\nresult:3:call:258:0:0:3\n[\"untyped:[]\", \"ties:2\", \"picked:4\", \"instance:4:[]\", \"finish:2:3:false:0\", \"mutable:0\", \"list:266:[2]\", \"order:[2]:[2]\"]\nresult:3:call:259:0:0:3\n[\"untyped:[]\", \"settle\", \"untyped:[]\", \"picked:268\", \"instance:268:[]\", \"finish:2:3:false:0\", \"mutable:0\", \"list:269:[2]\", \"order:[2]:[2]\"]\nresult:3:call:260:0:0:3\n[\"untyped:[]\", \"ties:1\", \"picked:4\", \"instance:4:[]\", \"finish:2:3:false:0\", \"mutable:0\", \"list:270:[2]\", \"order:[2]:[2]\"]\nresult:3:call:261:0:0:3\n[\"untyped:[]\", \"picked:272\", \"instance:272:[3]\", \"finish:273:3:false:0\", \"mutable:0\", \"list:274:[273]\", \"order:[273]:[273]\"]\nresult:3:call:262:0:0:3\n[\"untyped:[]\", \"picked:272\", \"check:275:283\", \"instance:272:[3]\", \"finish:275:3:false:0\", \"mutable:0\", \"list:276:[275]\", \"order:[275]:[275]\"]\nresult:3:call:263:0:0:3\n[\"untyped:[]\", \"picked:272\", \"instance:272:[3]\", \"finish:2:3:false:0\", \"mutable:0\", \"list:277:[2]\", \"order:[2]:[2]\"]\nresult:3:call:264:0:0:3\n[\"untyped:[]\", \"map:280:[0]\", \"picked:280\", \"instance:280:[2]\", \"default:0:2:[]:false:[2]\", \"mutable:0\", \"list:281:[282]\", \"order:[]:[282]\"]\nresult:3:call:265:0:0:3\n[\"untyped:[]\", \"map:286:[2, 0]\", \"picked:286\", \"instance:286:[]\", \"finish:2:3:false:0\", \"capture:2\", \"finish:2:3:false:0\", \"default:1:3:[2]:true:[]\", \"capture:288\", \"finish:288:3:false:0\", \"mutable:0\", \"list:287:[2, 288]\", \"capture-block:[2, 288]\"]\nresult:3:call:266:0:0:3\n[\"untyped:[]\", \"picked:290\", \"instance:290:[]\", \"finish:2:3:true:99\", \"mutable:1\", \"list:291:[2]\", \"order:[2]:[2]\"]\nresult:2:call:267:0:0:1\n[\"untyped:[]\", \"picked:290\", \"instance:290:[]\", \"finish:2:3:true:99\", \"mutable:1\", \"list:292:[2]\", \"order:[2]:[2]\"]\nresult:3:call:268:0:0:0\n[\"untyped:[]\", \"picked:4\", \"instance:4:[]\", \"finish:293:3:false:0\", \"mutable:0\", \"list:294:[293]\", \"partial:[3]:0\"]\nresult:3:call:0:1:2:3\n[\"untyped:[]\", \"picked:4\", \"instance:4:[]\", \"finish:2:3:false:0\", \"mutable:0\", \"list:295:[2]\", \"order:[2]:[2]\"]\nresult:2:call:270:0:0:3\n[\"untyped:[]\", \"picked:4\", \"instance:4:[]\", \"finish:2:3:false:0\", \"mutable:0\", \"list:552:[2]\", \"order:[2]:[2]\"]\nok\n"
+  }
+ ],
+ "test_checker_call_resolve_twins[release]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "result:3:call:257:0:0:3\n[\"members:[4]\", \"untyped:[]\", \"picked:4\", \"instance:4:[]\", \"ide\", \"finish:2:3:false:0\", \"mutable:0\", \"list:5:[2]\", \"contracts:false:0\", \"order:[2]:[2]\"]\nresult:3:call:258:0:0:3\n[\"untyped:[]\", \"ties:2\", \"picked:4\", \"instance:4:[]\", \"finish:2:3:false:0\", \"mutable:0\", \"list:266:[2]\", \"order:[2]:[2]\"]\nresult:3:call:259:0:0:3\n[\"untyped:[]\", \"settle\", \"untyped:[]\", \"picked:268\", \"instance:268:[]\", \"finish:2:3:false:0\", \"mutable:0\", \"list:269:[2]\", \"order:[2]:[2]\"]\nresult:3:call:260:0:0:3\n[\"untyped:[]\", \"ties:1\", \"picked:4\", \"instance:4:[]\", \"finish:2:3:false:0\", \"mutable:0\", \"list:270:[2]\", \"order:[2]:[2]\"]\nresult:3:call:261:0:0:3\n[\"untyped:[]\", \"picked:272\", \"instance:272:[3]\", \"finish:273:3:false:0\", \"mutable:0\", \"list:274:[273]\", \"order:[273]:[273]\"]\nresult:3:call:262:0:0:3\n[\"untyped:[]\", \"picked:272\", \"check:275:283\", \"instance:272:[3]\", \"finish:275:3:false:0\", \"mutable:0\", \"list:276:[275]\", \"order:[275]:[275]\"]\nresult:3:call:263:0:0:3\n[\"untyped:[]\", \"picked:272\", \"instance:272:[3]\", \"finish:2:3:false:0\", \"mutable:0\", \"list:277:[2]\", \"order:[2]:[2]\"]\nresult:3:call:264:0:0:3\n[\"untyped:[]\", \"map:280:[0]\", \"picked:280\", \"instance:280:[2]\", \"default:0:2:[]:false:[2]\", \"mutable:0\", \"list:281:[282]\", \"order:[]:[282]\"]\nresult:3:call:265:0:0:3\n[\"untyped:[]\", \"map:286:[2, 0]\", \"picked:286\", \"instance:286:[]\", \"finish:2:3:false:0\", \"capture:2\", \"finish:2:3:false:0\", \"default:1:3:[2]:true:[]\", \"capture:288\", \"finish:288:3:false:0\", \"mutable:0\", \"list:287:[2, 288]\", \"capture-block:[2, 288]\"]\nresult:3:call:266:0:0:3\n[\"untyped:[]\", \"picked:290\", \"instance:290:[]\", \"finish:2:3:true:99\", \"mutable:1\", \"list:291:[2]\", \"order:[2]:[2]\"]\nresult:2:call:267:0:0:1\n[\"untyped:[]\", \"picked:290\", \"instance:290:[]\", \"finish:2:3:true:99\", \"mutable:1\", \"list:292:[2]\", \"order:[2]:[2]\"]\nresult:3:call:268:0:0:0\n[\"untyped:[]\", \"picked:4\", \"instance:4:[]\", \"finish:293:3:false:0\", \"mutable:0\", \"list:294:[293]\", \"partial:[3]:0\"]\nresult:3:call:0:1:2:3\n[\"untyped:[]\", \"picked:4\", \"instance:4:[]\", \"finish:2:3:false:0\", \"mutable:0\", \"list:295:[2]\", \"order:[2]:[2]\"]\nresult:2:call:270:0:0:3\n[\"untyped:[]\", \"picked:4\", \"instance:4:[]\", \"finish:2:3:false:0\", \"mutable:0\", \"list:552:[2]\", \"order:[2]:[2]\"]\nok\n"
+  }
+ ]
+}

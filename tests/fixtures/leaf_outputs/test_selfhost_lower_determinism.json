@@ -1,0 +1,23 @@
+{
+ "test_lower_determinism_service_error": [
+  {
+   "args": [],
+   "status": 44,
+   "stdout": "warning-error\n"
+  }
+ ],
+ "test_lower_determinism_twins[False]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[\"4:tick is netplay.session's tick, and here it changes the global 'counter', which a rollback does not put back (ticks are played again from an earlier game): keep it in the game\", \"6:tick is netplay.session's tick, and here it reads the clock (time()), which can differ between machines and cause a desync; count ticks in the game and use a fixed timestep\"]\n[\"144:rng, and here it takes random numbers (random()), which can differ between machines and cause a desync; make them from the game (`hash(g.tick * 7 + i)`), or from an Rng kept in it\", \"147:clock, and here it reads the clock (unix_time()), which can differ between machines and cause a desync; count ticks in the game and use a fixed timestep\", \"149:callback, and here it takes random numbers (randn()), which can differ between machines and cause a desync; make them from the game (`hash(g.tick * 7 + i)`), or from an Rng kept in it\", \"151:callback, and here it takes random numbers (shuffle()), which can differ between machines and cause a desync; make them from the game (`hash(g.tick * 7 + i)`), or from an Rng kept in it\", \"153:callback, and here it reads the frame count (fps()), which can differ between machines and cause a desync; count ticks in the game and use a fixed timestep\", \"155:callback, and here it reads the input (key_down()), which can differ between machines and cause a desync; read it in update, and give it to the tick as the player's input\", \"157:callback, and here it reads the clock (elapsed()), which can differ between machines and cause a desync; count ticks in the game and use a fixed timestep\", \"159:callback, and here it reads the clock (now()), which can differ between machines and cause a desync; count ticks in the game and use a fixed timestep\"]\nok\n"
+  }
+ ],
+ "test_lower_determinism_twins[True]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[\"4:tick is netplay.session's tick, and here it changes the global 'counter', which a rollback does not put back (ticks are played again from an earlier game): keep it in the game\", \"6:tick is netplay.session's tick, and here it reads the clock (time()), which can differ between machines and cause a desync; count ticks in the game and use a fixed timestep\"]\n[\"144:rng, and here it takes random numbers (random()), which can differ between machines and cause a desync; make them from the game (`hash(g.tick * 7 + i)`), or from an Rng kept in it\", \"147:clock, and here it reads the clock (unix_time()), which can differ between machines and cause a desync; count ticks in the game and use a fixed timestep\", \"149:callback, and here it takes random numbers (randn()), which can differ between machines and cause a desync; make them from the game (`hash(g.tick * 7 + i)`), or from an Rng kept in it\", \"151:callback, and here it takes random numbers (shuffle()), which can differ between machines and cause a desync; make them from the game (`hash(g.tick * 7 + i)`), or from an Rng kept in it\", \"153:callback, and here it reads the frame count (fps()), which can differ between machines and cause a desync; count ticks in the game and use a fixed timestep\", \"155:callback, and here it reads the input (key_down()), which can differ between machines and cause a desync; read it in update, and give it to the tick as the player's input\", \"157:callback, and here it reads the clock (elapsed()), which can differ between machines and cause a desync; count ticks in the game and use a fixed timestep\", \"159:callback, and here it reads the clock (now()), which can differ between machines and cause a desync; count ticks in the game and use a fixed timestep\"]\nok\n"
+  }
+ ]
+}

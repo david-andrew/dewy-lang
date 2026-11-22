@@ -27,7 +27,7 @@ TWIN_PREFIX = 'test_selfhost_'
 # Inputs of every twin test: the toolchain build and the test harness.
 GLOBAL = ('lib/', 'stage0/', 'bootstrap/', 'tools/compiler/build.py', 'tools/core.py', 'tools/headless.py',
           'tools/scratch.py', 'tools/filelock.py', 'tests/conftest.py', 'tests/support.py',
-          'tests/driver_cache.py', 'VERSION', 'LICENSE', 'pyproject.toml')
+          'tests/driver_cache.py', 'tests/leaf_oracle.py', 'VERSION', 'LICENSE', 'pyproject.toml')
 # Directories whose mention by name is not a dependency on their contents (the repository root, the
 # output cache, and trees whose members a test names one by one), and the harness every test imports.
 NOT_WHOLE = ('', '.', 'tests', 'tests/cases', 'tests/fixtures', 'tests/fixtures/selfhost', 'bench', '__dewycache__')
@@ -128,6 +128,8 @@ def inputs(test: Path, graph: dict[str, set[str]], root: Path = ROOT, memo: dict
     stems = memo.setdefault('stems', frozenset(p.stem for p in (root / 'compiler').iterdir()))
     reach = memo.setdefault('closures', {})
     found, named, seen, todo = set(), set(), set(), [test]
+    # (its recorded leaf outputs, tests/leaf_oracle.py)
+    found.add(f'tests/fixtures/leaf_outputs/{test.stem}.json')
     while todo:
         module = todo.pop()
         if module in seen:

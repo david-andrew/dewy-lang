@@ -1,4 +1,5 @@
 """Mark growth and copy-on-write snapshots agree for the live leaf and its twin."""
+from tests import leaf_oracle
 from tests.driver_cache import build_driver
 from tests.leaf_driver import DriverPair
 from tests.support import ROOT, compiler  # noqa: F401
@@ -16,7 +17,7 @@ def test_checker_node_marks_twins(compiler):
     print("{marks.len()}:{marks[0]}:{marks[62]}:{marks[63]}:{marks[64]}")
 """
     binaries = []
-    for suffix in ('dewy', 'jo'):
+    for suffix in ('dewy', 'jo') if leaf_oracle.builds_twin() else ('dewy',):
         name = f'checker_node_marks.{suffix}'
         modules = {name: (ROOT / 'compiler' / name).read_text(),
                    'driver.jo': f"use '{name}'\n" + driver}

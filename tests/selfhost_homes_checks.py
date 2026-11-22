@@ -1,11 +1,20 @@
 """Where a moved checking leaf's functions live in an isolated build that lacks the leaf: the module it left."""
 from functools import lru_cache
-import re
-from pathlib import Path
 
-# (each moved checking leaf's twin first uses the module it left: an isolated driver's table for that module stands for it)
-CHECKS_HOMES = {path.stem: match[1] for path in (Path(__file__).resolve().parents[1] / 'compiler').glob('checks_*.jo')
-                if (match := re.match(r"use '(\w+\.jo)'\n", path.read_text()))}
+# (each moved checking leaf stands, in an isolated driver, for the module it left: that module's table
+# answers for it. Recorded from the twins' first `use`, so the table outlives them.)
+CHECKS_HOMES = {stem: home for home, stems in (
+    ('check.jo', (
+        'checks_assign_hooks', 'checks_const_views', 'checks_hints', 'checks_imports', 'checks_loop_copies',
+        'checks_main', 'checks_place_updates', 'checks_program', 'checks_static', 'checks_stmt_hooks',
+        'checks_thin', 'checks_type_hooks', 'checks_unpack',
+    )),
+    ('expr.jo', (
+        'checks_builders', 'checks_call_errors', 'checks_call_hints', 'checks_cast_hooks', 'checks_cond_hooks',
+        'checks_ident_hooks', 'checks_index_hooks', 'checks_match_hooks', 'checks_member_hooks',
+        'checks_read_code', 'checks_shaped', 'checks_thin_expr', 'checks_value_hooks',
+    )),
+) for stem in stems}
 
 # (a leaf moved out of a Jo module without state of its own: an isolated build that has that module but
 # not the leaf reads the leaf's functions from the module, a double or the real one)

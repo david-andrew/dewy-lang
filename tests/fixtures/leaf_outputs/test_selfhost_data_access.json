@@ -1,0 +1,23 @@
+{
+ "test_data_access_rejection_twins": [
+  {
+   "args": [],
+   "status": 43,
+   "stdout": "error:data() of plain parameter 'xs' may be written through or escape; the caller cannot see writes to its private copy: take `@xs` and pass `@xs`, or copy into a local first\n"
+  }
+ ],
+ "test_data_access_twins[False]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "warning:data() of plain parameter 'xs' may be written through or escape; the caller cannot see writes to its private copy: take `@xs` and pass `@xs`, or copy into a local first\nwarning:`xs.ptr` of plain parameter 'xs' may be written through or escape; the caller cannot see writes to its private copy: take `@xs` and pass `@xs`, or copy into a local first\nok\n"
+  }
+ ],
+ "test_data_access_twins[True]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "warning:data() of plain parameter 'xs' may be written through or escape; the caller cannot see writes to its private copy: take `@xs` and pass `@xs`, or copy into a local first\nwarning:`xs.ptr` of plain parameter 'xs' may be written through or escape; the caller cannot see writes to its private copy: take `@xs` and pass `@xs`, or copy into a local first\nok\n"
+  }
+ ]
+}

@@ -6,13 +6,25 @@ from pathlib import Path
 
 import pytest
 
+from tests import leaf_oracle
 from tools import headless
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def pytest_addoption(parser):
+    parser.addoption('--leaf-oracle', choices=leaf_oracle.MODES, default='both',
+                     help='leaf probe oracle (tests/leaf_oracle.py)')
+    parser.addoption('--leaf-capture', default=None, help='directory for --leaf-oracle=capture records')
+
+
+def pytest_runtest_setup(item):
+    leaf_oracle.current = (item.path.stem, item.name)
+
+
 def pytest_configure(config):
     headless.activate()
+    leaf_oracle.configure(config)
 
 
 def scope_twins(items):

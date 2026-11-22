@@ -4,6 +4,7 @@ import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
 
+from tests import leaf_oracle
 from tests.compiler_modules import module_text
 from tests.driver_cache import build_driver
 from tests.module_redirects import module_rewriter
@@ -14,6 +15,8 @@ from tests.support import ROOT
 @dataclass(frozen=True)
 class DriverPair:
     binaries: tuple
+    # (a whole-compiler graph prints program images; its oracle is the program's own behaviour)
+    probe: bool = True
 
     def compare(self, arguments=(), status=0, *, with_stderr=False):
         outputs = []
@@ -21,7 +24,10 @@ class DriverPair:
             ran = subprocess.run([binary, *arguments], capture_output=True, timeout=60, check=False)
             assert ran.returncode == status, ran.stdout[-6000:] + ran.stderr
             outputs.append(ran.stdout + ran.stderr if with_stderr else ran.stdout)
-        assert outputs[0] == outputs[1]
+        if len(outputs) == 2:
+            assert outputs[0] == outputs[1]
+        if self.probe:
+            leaf_oracle.check(arguments, status, outputs[0])
         return outputs[0]
 
 
@@ -74,22 +80,25 @@ def build_pair(compiler, release, driver, extra_stems=(), doubles=None, jo_doubl
             'parameterized_array_type = (node: int, element: int) -> int: 0\n'
             'integer_parameter_literal = (node: int) -> int: 0\n'
             'integer_parameter_type = (node: int) -> int: 0\n')
+    # (the second graph links the frozen twins; for a probe, a recorded output can stand in for it)
+    probe = 'main.jo' not in jo_doubles
+    extensions = ('dewy', 'jo') if leaf_oracle.builds_twin() or not probe else ('dewy',)
     sources = tuple((f'{stem}.{extension}', module_text(ROOT / f'compiler/{stem}.{extension}'))
-                    for stem in stems if stem not in doubles for extension in ('dewy', 'jo'))
-    variants = tuple((stem, (texts['dewy'], texts['jo'])) for stem, texts in doubles.items())
-    for modules in _graphs(stems, extra_stems, variants, tuple(jo_doubles.items()), driver, sources):
+                    for stem in stems if stem not in doubles for extension in extensions)
+    variants = tuple((stem, (texts['dewy'], texts.get('jo'))) for stem, texts in doubles.items())
+    for modules in _graphs(stems, extra_stems, variants, tuple(jo_doubles.items()), driver, sources, extensions):
         binaries.append(build_driver(compiler, modules, release))
-    return DriverPair(tuple(binaries))
+    return DriverPair(tuple(binaries), probe)
 
 
 @lru_cache(maxsize=64)
-def _graphs(stems, extra_stems, doubles, jo_doubles, driver, sources):
+def _graphs(stems, extra_stems, doubles, jo_doubles, driver, sources, extensions):
     sources = dict(sources)
     doubles = dict(doubles)
     jo_doubles = dict(jo_doubles)
     graphs = []
     rewrite = module_rewriter(effect_services, jo_doubles)
-    for extension in ('dewy', 'jo'):
+    for extension in extensions:
         modules = {}
         for stem in stems:
             if stem in doubles:
