@@ -1,0 +1,114 @@
+{
+ "test_pkg_ops_twins[default]": [
+  {
+   "args": [
+    "all",
+    "<tmp>/repository",
+    "ec4c574a0c8e96d2a0d2a3d01a790d1c13bc853d",
+    "<tmp>/inner"
+   ],
+   "status": 0,
+   "stdout": "[\"all\", \"<tmp>/repository\", \"ec4c574a0c8e96d2a0d2a3d01a790d1c13bc853d\", \"<tmp>/run/inner\"]\n<tmp>/cache\n<tmp>/packages\n<tmp>/cache/dewy/core-cache\ntrue\ntrue\n0\ntrue\ntrue\ntrue\ntrue\nec4c574a0c8e96d2a0d2a3d01a790d1c13bc853d\n\n<tmp>/repository has no 'missing' (a tag, a branch, or a whole 40-character commit)\n\n'two' at <tmp>/repository names both refs/heads/two and refs/tags/two: ask for one by its whole name, as 'refs/heads/two'\n\ngit could not reach /no/such/repository\ntrue\nec4c574a0c8e96d2a0d2a3d01a790d1c13bc853d\nvalue = 1\n\nfalse\n0\ndir abs <tmp>/run/inner\ndir inner ./local_pkg/../inner\ndir local ./local_pkg\nerr dash package 'dash': '-x' is not a directory or a git URL\nerr gone package 'gone': there is no directory ./no_dir\n5\nnone\nerr offline package 'offline' is not fetched yet (`dewy-core build` fetches it)\n1\ndir online <tmp>/packages/<tmp>_repository@ec4c574a0c8e\nerr bad package 'bad': file://<tmp>/repository has no 'missing' (a tag, a branch, or a whole 40-character commit)\nerr unsafe package 'unsafe': 'file://<tmp>/repository' is not a git URL (or the tag, branch or commit is not one)\n3\ndir online <tmp>/packages/<tmp>_repository@ec4c574a0c8e\n1\n# the commits of the packages in this program's build block (dewy-core build writes this: keep it\n# with the program; delete a line to take the newest commit again)\nonline file://<tmp>/repository main ec4c574a0c8e96d2a0d2a3d01a790d1c13bc853d\n\ndir online <tmp>/packages/<tmp>_repository@ec4c574a0c8e\n1\n1\none_file/only.jo\ntwo_files/named.jo\nnone\n1\npkg ok\n\n--stderr--\ngit: 'no-such-command' is not a git command. See 'git --help'.\nfatal: '/no/such/repository' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\nfatal: '/no/such/repository' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\nfatal: '/no/such/repository' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\nfetching online (file://<tmp>/repository at ec4c574a0c8e)\n\n--observed--\n[('fetched/.dewy-fetched', b'ec4c574a0c8e96d2a0d2a3d01a790d1c13bc853d'), ('fetched/lib.jo', b'value = 1\\n'), ('game.jo', b'value = 1\\n'), ('local_pkg/local.jo', b'build:\\n    inner = package(\"../inner\")\\n'), ('main.jo', b''), ('one_file/only.jo', b''), ('scanned/a.jo', b'build:\\n    a = package(\"../inner\")\\n'), ('scanned/b.txt', b'build:\\n    b = package(\"../inner\")\\n'), ('sub/dewy.lock', b\"# the commits of the packages in this program's build block (dewy-core build writes this: keep it\\n# with the program; delete a line to take the newest commit again)\\nonline file://<tmp>/repository main ec4c574a0c8e96d2a0d2a3d01a790d1c13bc853d\\n\"), ('two_files/named.jo', b''), ('two_files/notes.txt', b''), ('two_files/second.jo', b'')]"
+  },
+  {
+   "args": [
+    "add"
+   ],
+   "status": 2,
+   "stdout": "[\"add\"]\n\n--stderr--\nusage: dewy-core add <git URL or directory> [name] [file.jo]   (a package, in the build block of file.jo: the .jo file here, if there is one)\n\n--observed--\n[('game.jo', b'value = 1\\n'), ('local_pkg/local.jo', b'build:\\n    inner = package(\"../inner\")\\n'), ('one_file/only.jo', b''), ('scanned/a.jo', b'build:\\n    a = package(\"../inner\")\\n'), ('scanned/b.txt', b'build:\\n    b = package(\"../inner\")\\n'), ('two_files/named.jo', b''), ('two_files/notes.txt', b''), ('two_files/second.jo', b'')]"
+  },
+  {
+   "args": [
+    "add",
+    "inner"
+   ],
+   "status": 0,
+   "stdout": "[\"add\", \"inner\"]\nadded inner to game.jo: import inner\n\n--observed--\n[('game.jo', b'build:\\n    inner = package(\"inner\")\\n\\nvalue = 1\\n'), ('local_pkg/local.jo', b'build:\\n    inner = package(\"../inner\")\\n'), ('one_file/only.jo', b''), ('scanned/a.jo', b'build:\\n    a = package(\"../inner\")\\n'), ('scanned/b.txt', b'build:\\n    b = package(\"../inner\")\\n'), ('two_files/named.jo', b''), ('two_files/notes.txt', b''), ('two_files/second.jo', b'')]"
+  },
+  {
+   "args": [
+    "add",
+    "inner",
+    "my_name",
+    "game.jo"
+   ],
+   "status": 0,
+   "stdout": "[\"add\", \"inner\", \"my_name\", \"game.jo\"]\nadded my_name to game.jo: import my_name\n\n--observed--\n[('game.jo', b'build:\\n    my_name = package(\"inner\")\\n\\nvalue = 1\\n'), ('local_pkg/local.jo', b'build:\\n    inner = package(\"../inner\")\\n'), ('one_file/only.jo', b''), ('scanned/a.jo', b'build:\\n    a = package(\"../inner\")\\n'), ('scanned/b.txt', b'build:\\n    b = package(\"../inner\")\\n'), ('two_files/named.jo', b''), ('two_files/notes.txt', b''), ('two_files/second.jo', b'')]"
+  },
+  {
+   "args": [
+    "add",
+    "no_dir",
+    "x"
+   ],
+   "status": 1,
+   "stdout": "[\"add\", \"no_dir\", \"x\"]\n\n--stderr--\nerror: package 'x': there is no directory ./no_dir\n\n--observed--\n[('game.jo', b'value = 1\\n'), ('local_pkg/local.jo', b'build:\\n    inner = package(\"../inner\")\\n'), ('one_file/only.jo', b''), ('scanned/a.jo', b'build:\\n    a = package(\"../inner\")\\n'), ('scanned/b.txt', b'build:\\n    b = package(\"../inner\")\\n'), ('two_files/named.jo', b''), ('two_files/notes.txt', b''), ('two_files/second.jo', b'')]"
+  },
+  {
+   "args": [
+    "add",
+    "inner",
+    "value",
+    "missing.jo"
+   ],
+   "status": 0,
+   "stdout": "[\"add\", \"inner\", \"value\", \"missing.jo\"]\nadded value to missing.jo: import value\n\n--observed--\n[('game.jo', b'value = 1\\n'), ('local_pkg/local.jo', b'build:\\n    inner = package(\"../inner\")\\n'), ('missing.jo', b'build:\\n    value = package(\"inner\")\\n\\n'), ('one_file/only.jo', b''), ('scanned/a.jo', b'build:\\n    a = package(\"../inner\")\\n'), ('scanned/b.txt', b'build:\\n    b = package(\"../inner\")\\n'), ('two_files/named.jo', b''), ('two_files/notes.txt', b''), ('two_files/second.jo', b'')]"
+  }
+ ],
+ "test_pkg_ops_twins[release]": [
+  {
+   "args": [
+    "all",
+    "<tmp>/repository",
+    "ec4c574a0c8e96d2a0d2a3d01a790d1c13bc853d",
+    "<tmp>/inner"
+   ],
+   "status": 0,
+   "stdout": "[\"all\", \"<tmp>/repository\", \"ec4c574a0c8e96d2a0d2a3d01a790d1c13bc853d\", \"<tmp>/run/inner\"]\n<tmp>/cache\n<tmp>/packages\n<tmp>/cache/dewy/core-cache\ntrue\ntrue\n0\ntrue\ntrue\ntrue\ntrue\nec4c574a0c8e96d2a0d2a3d01a790d1c13bc853d\n\n<tmp>/repository has no 'missing' (a tag, a branch, or a whole 40-character commit)\n\n'two' at <tmp>/repository names both refs/heads/two and refs/tags/two: ask for one by its whole name, as 'refs/heads/two'\n\ngit could not reach /no/such/repository\ntrue\nec4c574a0c8e96d2a0d2a3d01a790d1c13bc853d\nvalue = 1\n\nfalse\n0\ndir abs <tmp>/run/inner\ndir inner ./local_pkg/../inner\ndir local ./local_pkg\nerr dash package 'dash': '-x' is not a directory or a git URL\nerr gone package 'gone': there is no directory ./no_dir\n5\nnone\nerr offline package 'offline' is not fetched yet (`dewy-core build` fetches it)\n1\ndir online <tmp>/packages/<tmp>_repository@ec4c574a0c8e\nerr bad package 'bad': file://<tmp>/repository has no 'missing' (a tag, a branch, or a whole 40-character commit)\nerr unsafe package 'unsafe': 'file://<tmp>/repository' is not a git URL (or the tag, branch or commit is not one)\n3\ndir online <tmp>/packages/<tmp>_repository@ec4c574a0c8e\n1\n# the commits of the packages in this program's build block (dewy-core build writes this: keep it\n# with the program; delete a line to take the newest commit again)\nonline file://<tmp>/repository main ec4c574a0c8e96d2a0d2a3d01a790d1c13bc853d\n\ndir online <tmp>/packages/<tmp>_repository@ec4c574a0c8e\n1\n1\none_file/only.jo\ntwo_files/named.jo\nnone\n1\npkg ok\n\n--stderr--\ngit: 'no-such-command' is not a git command. See 'git --help'.\nfatal: '/no/such/repository' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\nfatal: '/no/such/repository' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\nfatal: '/no/such/repository' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\nfetching online (file://<tmp>/repository at ec4c574a0c8e)\n\n--observed--\n[('fetched/.dewy-fetched', b'ec4c574a0c8e96d2a0d2a3d01a790d1c13bc853d'), ('fetched/lib.jo', b'value = 1\\n'), ('game.jo', b'value = 1\\n'), ('local_pkg/local.jo', b'build:\\n    inner = package(\"../inner\")\\n'), ('main.jo', b''), ('one_file/only.jo', b''), ('scanned/a.jo', b'build:\\n    a = package(\"../inner\")\\n'), ('scanned/b.txt', b'build:\\n    b = package(\"../inner\")\\n'), ('sub/dewy.lock', b\"# the commits of the packages in this program's build block (dewy-core build writes this: keep it\\n# with the program; delete a line to take the newest commit again)\\nonline file://<tmp>/repository main ec4c574a0c8e96d2a0d2a3d01a790d1c13bc853d\\n\"), ('two_files/named.jo', b''), ('two_files/notes.txt', b''), ('two_files/second.jo', b'')]"
+  },
+  {
+   "args": [
+    "add"
+   ],
+   "status": 2,
+   "stdout": "[\"add\"]\n\n--stderr--\nusage: dewy-core add <git URL or directory> [name] [file.jo]   (a package, in the build block of file.jo: the .jo file here, if there is one)\n\n--observed--\n[('game.jo', b'value = 1\\n'), ('local_pkg/local.jo', b'build:\\n    inner = package(\"../inner\")\\n'), ('one_file/only.jo', b''), ('scanned/a.jo', b'build:\\n    a = package(\"../inner\")\\n'), ('scanned/b.txt', b'build:\\n    b = package(\"../inner\")\\n'), ('two_files/named.jo', b''), ('two_files/notes.txt', b''), ('two_files/second.jo', b'')]"
+  },
+  {
+   "args": [
+    "add",
+    "inner"
+   ],
+   "status": 0,
+   "stdout": "[\"add\", \"inner\"]\nadded inner to game.jo: import inner\n\n--observed--\n[('game.jo', b'build:\\n    inner = package(\"inner\")\\n\\nvalue = 1\\n'), ('local_pkg/local.jo', b'build:\\n    inner = package(\"../inner\")\\n'), ('one_file/only.jo', b''), ('scanned/a.jo', b'build:\\n    a = package(\"../inner\")\\n'), ('scanned/b.txt', b'build:\\n    b = package(\"../inner\")\\n'), ('two_files/named.jo', b''), ('two_files/notes.txt', b''), ('two_files/second.jo', b'')]"
+  },
+  {
+   "args": [
+    "add",
+    "inner",
+    "my_name",
+    "game.jo"
+   ],
+   "status": 0,
+   "stdout": "[\"add\", \"inner\", \"my_name\", \"game.jo\"]\nadded my_name to game.jo: import my_name\n\n--observed--\n[('game.jo', b'build:\\n    my_name = package(\"inner\")\\n\\nvalue = 1\\n'), ('local_pkg/local.jo', b'build:\\n    inner = package(\"../inner\")\\n'), ('one_file/only.jo', b''), ('scanned/a.jo', b'build:\\n    a = package(\"../inner\")\\n'), ('scanned/b.txt', b'build:\\n    b = package(\"../inner\")\\n'), ('two_files/named.jo', b''), ('two_files/notes.txt', b''), ('two_files/second.jo', b'')]"
+  },
+  {
+   "args": [
+    "add",
+    "no_dir",
+    "x"
+   ],
+   "status": 1,
+   "stdout": "[\"add\", \"no_dir\", \"x\"]\n\n--stderr--\nerror: package 'x': there is no directory ./no_dir\n\n--observed--\n[('game.jo', b'value = 1\\n'), ('local_pkg/local.jo', b'build:\\n    inner = package(\"../inner\")\\n'), ('one_file/only.jo', b''), ('scanned/a.jo', b'build:\\n    a = package(\"../inner\")\\n'), ('scanned/b.txt', b'build:\\n    b = package(\"../inner\")\\n'), ('two_files/named.jo', b''), ('two_files/notes.txt', b''), ('two_files/second.jo', b'')]"
+  },
+  {
+   "args": [
+    "add",
+    "inner",
+    "value",
+    "missing.jo"
+   ],
+   "status": 0,
+   "stdout": "[\"add\", \"inner\", \"value\", \"missing.jo\"]\nadded value to missing.jo: import value\n\n--observed--\n[('game.jo', b'value = 1\\n'), ('local_pkg/local.jo', b'build:\\n    inner = package(\"../inner\")\\n'), ('missing.jo', b'build:\\n    value = package(\"inner\")\\n\\n'), ('one_file/only.jo', b''), ('scanned/a.jo', b'build:\\n    a = package(\"../inner\")\\n'), ('scanned/b.txt', b'build:\\n    b = package(\"../inner\")\\n'), ('two_files/named.jo', b''), ('two_files/notes.txt', b''), ('two_files/second.jo', b'')]"
+  }
+ ]
+}

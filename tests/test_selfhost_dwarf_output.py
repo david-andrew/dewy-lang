@@ -1,4 +1,6 @@
 """DWARF demand: no line rows, no sections; a module is the user's unless the prelude's."""
+from pathlib import Path
+
 import pytest
 
 from tests.selfhost_narrow import compare_narrow
@@ -35,8 +37,9 @@ main = ():
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_dwarf_output_twins(compiler, tmp_path, release):  # noqa: F811
-    run = tmp_path / 'run'
-    run.mkdir()
-    output = compare_narrow(compiler, tmp_path, release, STEMS, DRIVER, doubles={'check.jo': CHECK}, run_in=lambda: run)
+    # (the sections name the working directory; the root is the same on every machine, so their
+    # recorded bytes are too. The driver writes nothing.)
+    output = compare_narrow(compiler, tmp_path, release, STEMS, DRIVER, doubles={'check.jo': CHECK},
+                            run_in=lambda: Path(tmp_path.anchor))
     assert output.split()[:5] == [b'false', b'false', b'true', b'false', b'false']
     assert output.rstrip().endswith(b'0')

@@ -2,6 +2,7 @@
 import re
 import subprocess
 
+from tests import leaf_oracle
 from tests.selfhost_effect_double import CHECKS_HOMES, LEAF_HOMES
 from tests.support import ROOT
 
@@ -28,15 +29,18 @@ def compare_narrow(compiler, tmp_path, release, stems, driver, doubles=None, run
                     text = text.replace(f'{quote}{stem}.{extension}{quote}', f'{quote}services.jo{quote}')
         return text
 
-    # (what a real module imports comes too, down to the services and doubles)
+    # (what a real module imports comes too, down to the services and doubles; a recorded output
+    # stands in for the frozen twins when they are not built, tests/leaf_oracle.py)
+    extensions = ('dewy', 'jo') if leaf_oracle.builds_twin() else ('dewy',)
     stems = list(stems)
     for stem in stems:
+        twin = ROOT / f'compiler/{stem}.jo'
         for name in (re.findall(r'(?m)^\s*from p"(\w+)\.dewy"', (ROOT / f'compiler/{stem}.dewy').read_text())
-                     + re.findall(r"(?m)^use '(\w+)\.dewy'", (ROOT / f'compiler/{stem}.jo').read_text())):
+                     + (re.findall(r"(?m)^use '(\w+)\.dewy'", twin.read_text()) if 'jo' in extensions else [])):
             if name not in stems and name not in services and name not in doubled and f'{name}.dewy' not in (doubles or {}):
                 stems.append(name)
     outputs = []
-    for extension in ('dewy', 'jo'):
+    for extension in extensions:
         directory = tmp_path / extension
         directory.mkdir()
         for name, text in (doubles or {}).items():
@@ -60,10 +64,14 @@ def compare_narrow(compiler, tmp_path, release, stems, driver, doubles=None, run
             assert ran.returncode == status, (arguments, ran.stdout[-3000:], ran.stderr)
             runs.append((ran.stdout, ran.stderr, observe(where) if observe else None))
         outputs.append(runs)
-    for index, (dewy, jo) in enumerate(zip(*outputs)):
+    for index, (dewy, jo) in enumerate(zip(*outputs) if len(outputs) == 2 else ()):
         for field, (a, b) in zip(('stdout', 'stderr', 'observed'), zip(dewy, jo)):
             if a != b:
                 at = next((i for i, pair in enumerate(zip(a, b)) if pair[0] != pair[1]), min(len(a), len(b)))
                 raise AssertionError(f'run {index} {field} differs at {at}: dewy {a[max(0, at - 80):at + 160]!r} jo {b[max(0, at - 80):at + 160]!r}')
+    for (arguments, status), (stdout, stderr, observed) in zip(invocations, outputs[0]):
+        payload = stdout + (b'\n--stderr--\n' + stderr if stderr else b'')
+        payload += b'\n--observed--\n' + repr(observed).encode() if observe else b''
+        leaf_oracle.check(arguments, status, leaf_oracle.without(tmp_path, payload))
     stdout = [run[0] for run in outputs[0]]
     return stdout[0] if len(stdout) == 1 else stdout

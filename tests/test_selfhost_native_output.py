@@ -46,7 +46,11 @@ def snapshot(directory):
         elif stat.S_ISDIR(info.st_mode):
             found.append((name, 'dir'))
         else:
-            found.append((name, stat.S_IMODE(info.st_mode), hashlib.sha256(path.read_bytes()).hexdigest()))
+            # (a PDB's bytes hold the absolute run directory, which differs per run; tests/test_selfhost_pdb_format.py
+            # checks its contents, so its recorded size stands for them)
+            contents = path.read_bytes()
+            digest = len(contents) if path.suffix == '.pdb' else hashlib.sha256(contents).hexdigest()
+            found.append((name, stat.S_IMODE(info.st_mode), digest))
     return found
 
 
