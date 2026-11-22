@@ -1,0 +1,16 @@
+$runtime_checks
+
+from p"@lib/core/str.jo" import ends_with
+from p"dewy_fmt.jo" import df_file
+from p"fmt.jo" import fmt_try_tokens
+from p"source_types.dewy" import SrcFile
+from p"util.jo" import files
+
+fmt_lexes=(path:string src:string):>array<string> | none=>{
+    let saved=df_file()
+    files.push(SrcFile(path "." src ends_with(path ".dewy")))
+    let tokens=fmt_try_tokens(files.length - 1 src)
+    if tokens is? none {df_file(saved)}
+    files.pop();
+    tokens
+}

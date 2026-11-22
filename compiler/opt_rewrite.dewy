@@ -121,19 +121,22 @@ ow_rewrite=(ins:ptr<Ins>):>void=>$unsafe {
             opt_args[k]=o_regs[int64(opt_args[k])].repl
         }
     }
-    else {
-        if (((mask & 1) not=? 0) or ((((mask & 32) not=? 0) and (ins[0].a >=? 0)))) {
-            ins[0].a=o_regs[int64(ins[0].a)].repl
-        }
-        if (((mask & 2) not=? 0) or ((((mask & 64) not=? 0) and ((int64(ins[0].c) & 128) not=? 0)))) {
-            ins[0].b=o_regs[int64(ins[0].b)].repl
-        }
-        if (((mask & 8) not=? 0) or ((((mask & 128) not=? 0) and ((int64(ins[0].c) & 128) not=? 0)))) {
-            ins[0].dst=o_regs[int64(ins[0].dst)].repl
-        }
-    }
+    else {ow_rewrite_fields(@ins[0] mask)}
     if ((mask & 4) not=? 0) {
         ins[0].c=o_regs[int64(ins[0].c)].repl
+    }
+}
+
+ow_rewrite_fields=(@ins:Ins mask:int64):>void=>$unsafe {
+    let regs=o_regs
+    if (((mask & 1) not=? 0) or ((((mask & 32) not=? 0) and (ins.a >=? 0)))) {
+        ins.a=regs[int64(ins.a)].repl
+    }
+    if (((mask & 2) not=? 0) or ((((mask & 64) not=? 0) and ((int64(ins.c) & 128) not=? 0)))) {
+        ins.b=regs[int64(ins.b)].repl
+    }
+    if (((mask & 8) not=? 0) or ((((mask & 128) not=? 0) and ((int64(ins.c) & 128) not=? 0)))) {
+        ins.dst=regs[int64(ins.dst)].repl
     }
 }
 

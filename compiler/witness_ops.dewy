@@ -21,7 +21,8 @@ from p"exact.jo" import (exact_shader_owners)
 from p"expr.jo" import (CV IN intrinsics)
 from p"set_type_queries.dewy" import (is_dewy_set_type)
 from p"checks_thin_expr.dewy" import (is_map_type)
-from p"facts.jo" import (FactPaths FactState fact_comparison fact_owner fact_query fact_retry_owner fact_terms)
+from p"facts.jo" import (FactPaths FactState fact_owner fact_query fact_retry_owner fact_terms)
+from p"facts_slice_builder.dewy" import (fact_comparison_raw)
 from p"facts_compare.dewy" import (fact_compare)
 from p"facts_index_writes.dewy" import (fact_constant)
 from p"facts_value_queries.dewy" import (fact_binding fact_bound)
@@ -715,7 +716,7 @@ wit_comparison=(c:WitWord paths:FactPaths refuted:bool):>[string string]=>$unsaf
     let missing=""
     let s=paths.no
     let reason=paths.reason
-    if paths.value >? 0 and nodes.ptr[c].kind =? 'binary' and fact_comparison(cx_token_values.ptr[WitWord(nodes.ptr[c].op)]) {
+    if paths.value >? 0 and nodes.ptr[c].kind =? 'binary' and fact_comparison_raw(nodes.ptr[c].op) {
         let term=fact_terms[paths.value]
         if term.op =? (cx_token_values.ptr[WitWord(nodes.ptr[c].op)]) and term.origin =? c {
             let a=wit_side(term.a WitWord(nodes.ptr[c].a))

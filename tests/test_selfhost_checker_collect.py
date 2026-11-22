@@ -126,6 +126,13 @@ main = ():
                         if again == 1 and mod == 1: assert(before == [method])
                         if again == 1 and mod == 0: assert(before == [16])
                         show("named:{round}:{c}:{name}:{mod}:{again}", out)
+    # Every visible candidate is already present. Filtering an earlier hidden
+    # declaration must detach even if collection never appends.
+    prefilled = [16, 11, 12, 13, 15, method]
+    original = prefilled
+    collect_named(2, 1, prefilled)
+    assert(original == [16, 11, 12, 13, 15, method])
+    assert(prefilled == [16, 13, 15, method])
     print("families:{cl_named.len()}:{cl_named_decls.len()}:{cl_named_hidden.len()}")
     print("ok")
 '''

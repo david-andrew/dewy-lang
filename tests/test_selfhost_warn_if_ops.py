@@ -76,7 +76,9 @@ union_members = (t: int) -> int[]:
     [T_A, T_B, T_C]
 ut_names_safe = (n: int) -> bool: nodes[n].kind == .dotname
 cx_token = (x: int) -> Tok: x as Tok
-fact_comparison = (t: Tok) -> bool: t == .lt or t == .le or t == .gt or t == .ge or t == .eq or t == .ne
+fact_comparison_raw = (raw: i32) -> bool:
+    t = raw as Tok
+    t == .lt or t == .le or t == .gt or t == .ge or t == .eq or t == .ne
 fact_inverse = (t: Tok) -> Tok:
     if t == .lt: return .ge
     if t == .ge: return .lt

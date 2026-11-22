@@ -2,6 +2,8 @@
 import re
 import subprocess
 
+import pytest
+
 from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT, compiler  # noqa: F401
 
@@ -71,9 +73,10 @@ def outcome(binary, tmp_path, label):
     return results, tree(root)
 
 
-def test_fmt_ops_matches_twin(compiler, tmp_path, monkeypatch):
+@pytest.mark.parametrize("leaf", ("fmt_ops", "formatter_lexing"))
+def test_formatter_matches_twin(compiler, tmp_path, monkeypatch, leaf):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
-    dewy, jo = leaf_compilers(compiler, tmp_path, ('fmt_ops',))
+    dewy, jo = leaf_compilers(compiler, tmp_path, (leaf,))
     expected = outcome(jo, tmp_path, 'jo')
     assert outcome(dewy, tmp_path, 'dewy') == expected
     results, files = expected

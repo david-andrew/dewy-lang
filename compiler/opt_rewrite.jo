@@ -79,11 +79,13 @@ ow_rewrite = (ins: *Ins):
     if mask & 16 != 0:
         loop k in [int(ins.a)..int(ins.a) + int(ins.b)):
             opt_args[k] = o_regs[int(opt_args[k])].repl
-    else:
-        if mask & 1 != 0 or (mask & 32 != 0 and ins.a >= 0): ins.a = o_regs[int(ins.a)].repl
-        if mask & 2 != 0 or (mask & 64 != 0 and int(ins.c) & 128 != 0): ins.b = o_regs[int(ins.b)].repl
-        if mask & 8 != 0 or (mask & 128 != 0 and int(ins.c) & 128 != 0): ins.dst = o_regs[int(ins.dst)].repl
+    else: ow_rewrite_fields(ins[0], mask)
     if mask & 4 != 0: ins.c = o_regs[int(ins.c)].repl
+
+ow_rewrite_fields = (ins: mut Ins, mask: int):
+    if mask & 1 != 0 or (mask & 32 != 0 and ins.a >= 0): ins.a = o_regs[int(ins.a)].repl
+    if mask & 2 != 0 or (mask & 64 != 0 and int(ins.c) & 128 != 0): ins.b = o_regs[int(ins.b)].repl
+    if mask & 8 != 0 or (mask & 128 != 0 and int(ins.c) & 128 != 0): ins.dst = o_regs[int(ins.dst)].repl
 
 ow_log2_exact = (x: int) -> int:
     if x <= 0 or x & (x - 1) != 0: return -1

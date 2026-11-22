@@ -1,0 +1,464 @@
+$runtime_checks
+from p"lower.jo" import HK
+from p"dwarf_format.dewy" import (dw_data_addr)
+from p"macho_format.dewy" import (MACHO_BASE MACHO_WATCH_CODE macho_dwarf macho_layout)
+from p"elf_format.dewy" import (ELF_BASE elf_extra elf_layout elf_machine elf_page elf_syms)
+from p"driver_pipeline.dewy" import (emit_function emit_queued prune_emit_queue queue_emit release_pipeline)
+from p"x64_allocate.dewy" import (ra_dump ra_only ra_prio)
+from p"x64_emit.dewy" import (ra_save_cost ra_save_x ra_stat rsp_rows)
+from p"@lib/core/rt.jo" import (__str_slice)
+from p"@lib/core/fmt.jo" import (__format_valid)
+from p"@lib/core/os.jo" import (env eprint exit time)
+from p"@lib/core/str.jo" import (ends_with)
+from p"arena_ops.dewy" import (arena_finalize)
+from p"arm64_ops.dewy" import (arm64_entry arm64_entry_mac arm64_resolve arm64_stubs)
+from p"ast.jo" import (NF_EXTERN has_flag nodes set_list)
+from p"callback_ops.dewy" import (callback_prepare)
+from p"check.jo" import (draw_fn export_fns fns global_ids globals init_fns main_entry_fn main_error_payloads main_fn modules nchk_wanted prelude program_icon program_name program_named syms target_arm64 target_macos target_wasm target_windows test_mode update_fn want_cpu_flag want_loop_watch watch_build)
+from p"checker_program.dewy" import (check_program)
+from p"checker_runtime_functions.dewy" import (runtime_fn)
+from p"checks_main.dewy" import (print_exit_codes)
+from p"concurrency.jo" import (concurrency_ffi_start)
+from p"copies.jo" import (copies_on)
+from p"copy_ops.dewy" import (copies_reset copy_strict)
+from p"diagnostic_exit.dewy" import (fatal stop)
+from p"directive_ops.dewy" import (dir_force dir_panics_finalize directives_after_facts)
+from p"driver_cli.dewy" import (extern_lib_check scan_build_block setup_target source_counts web_save_name_check)
+from p"dwarf_output.dewy" import (dwarf_sections)
+from p"effect_loans.dewy" import (loans_finalize)
+from p"effects.jo" import (effect_panics_demanded)
+from p"facts_lifecycle.dewy" import (facts_finalize)
+from p"float_ops.dewy" import (floats_after_facts)
+from p"fused.jo" import (fz_layout fz_ready)
+from p"fused_drive.dewy" import (fz_replay)
+from p"fused_ops.dewy" import (fused_fork)
+from p"host_ir_values.dewy" import (dump_host_values)
+from p"icount.jo" import (IC_EFFECTS IC_EMIT IC_FACTS IC_LOWER IC_OTHER IC_OWNERSHIP IC_SHARED)
+from p"icount_ops.dewy" import (ic_lf ic_lines_report ic_report ic_restore ic_start ic_switch)
+from p"ide.jo" import (ide_skip)
+from p"inline_ops.dewy" import (rel_collect)
+from p"ir.jo" import (checked_flags dbg_on ir_pos main_code main_exit_lf mulh_ok rotate32_ok)
+from p"isolation_ops.dewy" import (isolation_reset)
+from p"lazy_force.dewy" import (dc_flush_warnings)
+from p"loops.jo" import (lx_vec_on)
+from p"lower.jo" import (LK_INST data_size global_off late_binding lfuncs mt_active_off opt_release rodata)
+from p"lower_determinism.dewy" import (det_check_program)
+from p"lower_entries.dewy" import (once_prepare)
+from p"lower_ffi.dewy" import (lower_extern_thunk)
+from p"lower_functions.dewy" import (lower_function)
+from p"lower_primitives.dewy" import (global_addr_off lf_helper lf_of_inst)
+from p"lower_views.dewy" import (find_unique_globals)
+from p"macho_output.dewy" import (macho_watch_loader macos_bundle write_macho)
+from p"main.jo" import (DEWY_CORE_VERSION bss_reserve debug_info debug_vars exit_codes_only host_ir img_data_addr img_ro_addr img_text_addr lower_only repl_image timing)
+from p"module_paths.dewy" import (strip_ext)
+from p"native_debug.dewy" import (pe_backtrace_info x64_frame_table x64_line_table)
+from p"native_output.dewy" import (write_elf write_pdb write_pe)
+from p"ownership.jo" import (ownership_decls ownership_functions)
+from p"partition_ops.dewy" import (partition_finalize)
+from p"pcheck_drive.dewy" import (pc_after_facts pc_before_facts)
+from p"pdb_format.dewy" import (pdb_guid pdb_name)
+from p"pe_format.dewy" import (PE_BASE pe_layout pe_section_headers)
+from p"prelude_ops.dewy" import (order_prelude_globals)
+from p"program_settings.dewy" import (dir_program_finalize)
+from p"repl_ops.dewy" import (repl_set_main)
+from p"type_ops.dewy" import (init_types)
+from p"types.jo" import (T_MATH_INT is_int prune)
+from p"util.jo" import (error_exit errors_only intern pl_on)
+from p"wasm_output.dewy" import (wasm_module write_html)
+from p"watch.jo" import (watch_first)
+from p"watch_ops.dewy" import (draw_present watch_lower_inits watch_lower_migrate watch_make_patch watch_record_image)
+from p"witness_ops.dewy" import (wit_skip_close)
+from p"x64.jo" import (code entry_end_lf ra_spill_cost ra_total ra_verbose)
+from p"x64_ops.dewy" import (x64_entry x64_entry_win x64_resolve x64_stubs)
+
+DriverWord:type=int64<overflow='wrap'>
+compile=(path:string out0:string):>string=>$unsafe {
+    let late_binding_slot=@late_binding
+    let pl_on_slot=@pl_on
+    let ra_stat_slot=@ra_stat
+    let ra_verbose_slot=@ra_verbose
+    let ra_prio_slot=@ra_prio
+    let ra_dump_slot=@ra_dump
+    let ra_only_slot=@ra_only
+    let opt_release_slot=@opt_release
+    let main_error_payloads_slot=@main_error_payloads
+    let dbg_on_slot=@dbg_on
+    let want_cpu_flag_slot=@want_cpu_flag
+    let want_loop_watch_slot=@want_loop_watch
+    let mulh_ok_slot=@mulh_ok
+    let rotate32_ok_slot=@rotate32_ok
+    let checked_flags_slot=@checked_flags
+    let queue_emit_slot=@queue_emit
+    let nchk_wanted_slot=@nchk_wanted
+    let main_code_slot=@main_code
+    let main_exit_lf_slot=@main_exit_lf
+    let entry_end_lf_slot=@entry_end_lf
+    let lx_vec_on_slot=@lx_vec_on
+    let ir_pos_slot=@ir_pos
+    let img_text_addr_slot=@img_text_addr
+    let img_ro_addr_slot=@img_ro_addr
+    let img_data_addr_slot=@img_data_addr
+    let dw_data_addr_slot=@dw_data_addr
+    let elf_machine_slot=@elf_machine
+    let elf_page_slot=@elf_page
+    if watch_build and not watch_first {late_binding_slot=true}
+    let t0=time()
+    if timing {
+        pl_on_slot=true
+        ic_start()
+    }
+    ra_stat_slot=env("DEWY_RASTAT") not=? none
+    ra_verbose_slot=(env("DEWY_RASTAT") ?? "") =? "v"
+    if env("DEWY_RA_LINEAR") not=? none {ra_prio_slot=false}
+    ra_dump_slot=env("DEWY_RADUMP") ?? ""
+    ra_only_slot=env("DEWY_RA_ONLY") ?? ""
+    scan_build_block(path)
+    if lower_only {opt_release_slot=false}
+    main_error_payloads_slot=debug_vars
+    setup_target()
+    if host_ir {
+        if target_wasm or target_arm64 or target_windows or watch_build or repl_image or lower_only {
+            eprint("--host-ir requires a Linux x86-64 build")
+            exit(2)
+        }
+        opt_release_slot=true
+        printl("DEWY_HOST_IR 1")
+    }
+    # (debug information for variables: x86-64 and arm64 Linux, macOS, Windows)
+    dbg_on_slot=debug_vars and debug_info and not watch_build and not lower_only and not target_wasm
+    let out=out0
+    if target_wasm and not ends_with(out ".html") and not ends_with(out ".zip") {out="{out}.html"}
+    if target_windows {
+        if ends_with(out ".bin") {out=__str_slice(out 0 (out as array<uint8>).length - 4)}
+        if not ends_with(out ".exe") {out="{out}.exe"}
+    }
+    init_types()
+    want_cpu_flag_slot=(opt_release_slot or not dbg_on_slot and not watch_build and not repl_image) and not target_wasm and not target_arm64 and not lower_only
+    want_loop_watch_slot=target_wasm and not opt_release_slot and not lower_only
+    mulh_ok_slot=not target_wasm
+    rotate32_ok_slot=not target_wasm and not target_arm64
+    checked_flags_slot=not target_wasm
+    # (code made after lowering everything, except where code is patched in place as it is made)
+    queue_emit_slot=not watch_build and not repl_image and not lower_only
+    # (x86-64 Linux: null arrays found by the fault of their index checks, x64_emit.dewy)
+    nchk_wanted_slot=not dbg_on_slot and not target_arm64 and not target_windows and not target_wasm and not watch_build and not repl_image and not host_ir and not lower_only
+    check_program(path)
+    if exit_codes_only {
+        dc_flush_warnings()
+        if errors_only {stop(error_exit);}
+        print_exit_codes()
+        exit(0)
+    }
+    dc_flush_warnings()
+    # (a run for the errors after the first: the proofs are decided too, then nothing is built)
+    if not errors_only {
+        if target_wasm and not program_named {web_save_name_check()}
+        # (functions left unchecked after errors in them cannot be lowered)
+        if lower_only and ide_skip.length >? 0 {return ""}
+        if lower_only {det_check_program()}
+        if repl_image {repl_set_main()}
+    }
+    else {wit_skip_close()}
+    ic_switch(IC_OWNERSHIP IC_SHARED);
+    isolation_reset()
+    loans_finalize()
+    arena_finalize()
+    partition_finalize()
+    ic_switch(IC_FACTS IC_SHARED);
+    # (a row excluding panics needs the program's deferred obligations named)
+    if effect_panics_demanded {dir_force()}
+    pc_before_facts()
+    facts_finalize()
+    pc_after_facts()
+    if errors_only {stop(error_exit);}
+    directives_after_facts()
+    floats_after_facts()
+    ic_switch(IC_EFFECTS IC_SHARED);
+    dir_panics_finalize()
+    dir_program_finalize()
+    ic_switch(IC_OWNERSHIP IC_SHARED);
+    copies_reset()
+    if ownership_decls.length not=? 0 {
+        # Initialize thread bookkeeping before construction can acquire a resource.
+        init_fns.insert(runtime_fn("__owner_start") 1)
+    }
+    if concurrency_ffi_start not=? 0 {init_fns.insert(concurrency_ffi_start 1)}
+    find_unique_globals(not watch_build and not repl_image and not lower_only)
+    once_prepare(not watch_build and not repl_image and not lower_only)
+    if not dbg_on_slot and not watch_build and not repl_image and not lower_only {callback_prepare()}
+    let t1=time()
+    ic_switch(IC_LOWER IC_SHARED);
+    let roots:array<int64>=[]
+    loop f in init_fns {roots.push(lf_of_inst(f))}
+    # Source promises apply to checked bodies even when no caller reaches
+    # them. The emitter still prunes unreachable code in ordinary builds.
+    if copies_on {
+        loop f in [1..fns.length) {
+            let body=DriverWord(fns.ptr[f].body)
+            if body not=? 0 and (copy_strict(body) or ownership_functions.has(f)) {lf_of_inst(f);}
+        }
+    }
+    # exports from user code are always kept; library exports only when their module is used
+    let exp_done=fill(false export_fns.length)
+    let pending_exports=DriverWord(export_fns.length)
+    let used_mods=dict<int64 bool>()
+    loop k in 0.. and f in export_fns {
+        if not modules[DriverWord(fns.ptr[f].mod)].is_prelude {
+            lf_of_inst(f);
+            exp_done[k]=true
+            pending_exports -= 1
+        }
+    }
+    let main_lf:DriverWord=-1
+    let entry_fn=if main_entry_fn not=? 0 {main_entry_fn} else {main_fn}
+    if entry_fn not=? 0 {
+        main_lf=lf_of_inst(entry_fn)
+        if prune(DriverWord(fns.ptr[entry_fn].ret)) =? T_MATH_INT {main_lf=lf_helper(HK.math_main T_MATH_INT entry_fn)}
+    }
+    # (main = () -> int: its value is the exit code)
+    main_code_slot=entry_fn not=? 0 and is_int(prune(DriverWord(fns.ptr[entry_fn].ret)))
+    main_exit_lf_slot=-1
+    if main_code_slot and target_wasm {main_exit_lf_slot=lf_of_inst(runtime_fn("exit"))}
+    # (after main: what print has collected, written out)
+    entry_end_lf_slot=-1
+    if not target_wasm and not lower_only and not repl_image {entry_end_lf_slot=lf_of_inst(runtime_fn("__end_flush"))}
+    let pinit=init_fns[0]
+    let pinit_lf=roots[0]
+    # (vectorized loops ask whether the processor has AVX2: the runtime finds out at start)
+    lx_vec_on_slot=want_cpu_flag_slot and not host_ir
+    if lx_vec_on_slot {
+        let cs=prelude.get(intern("__cpu_avx2")) ?? 0
+        if cs not=? 0 and syms.ptr[cs].kind =? 'global' {global_addr_off(DriverWord(syms.ptr[cs].ref));}
+        else {lx_vec_on_slot=false}
+    }
+    # (worker processes lower, optimize and emit most functions: fused.jo)
+    fused_fork(pinit_lf);
+    let tlow=time()
+    let i:DriverWord=0
+    loop true {
+        loop i <? lfuncs.length {
+            if i =? pinit_lf {
+                i += 1
+                continue
+            }
+            let fi:DriverWord=0
+            let fd:DriverWord=0
+            if lfuncs.ptr[i].kind =? LK_INST {
+                fi=lfuncs.ptr[i].inst
+                fd=DriverWord(fns.ptr[fi].decl)
+                if pending_exports >? 0 and fd not=? 0 {
+                    let fm=DriverWord(nodes.ptr[fd].mod)
+                    if not used_mods.has(fm) {
+                        used_mods[fm]=true
+                        loop k in 0.. and f in export_fns {
+                            if not exp_done[k] and nodes.ptr[DriverWord(fns.ptr[f].decl)].mod =? int32<overflow='wrap'>(fm) {
+                                exp_done[k]=true
+                                pending_exports -= 1
+                                lf_of_inst(f);
+                            }
+                        }
+                    }
+                }
+            }
+            if fd not=? 0 and has_flag(fd NF_EXTERN) {
+                if target_wasm or lower_only {
+                    i += 1
+                    continue
+                }
+                if (fns.ptr[fi].clib as array<uint8>).length =? 0 {fatal(nodes.ptr[DriverWord(fns.ptr[fi].decl)].pos "extern functions need @lib(\"library.so\") on native targets");}
+                extern_lib_check(fi)
+                # (fused.jo's programs: no source position of its own, not one left by whichever
+                # function came before)
+                if fz_layout {ir_pos_slot=0}
+                lower_extern_thunk(i fi)
+                emit_function()
+                i += 1
+                continue
+            }
+            if fz_ready and fz_replay(i) {
+                i += 1
+                continue
+            }
+            let icb=ic_lf(IC_LOWER i)
+            lower_function(i)
+            if opt_release_slot {rel_collect()}
+            else {emit_function()}
+            ic_restore(icb)
+            i += 1
+        }
+        # library globals: initialize only the ones compiled code refers to (fixed point)
+        let nglob=global_off.length
+        let decls:array<int64>=[]
+        loop g in global_ids {
+            if not modules[DriverWord(globals.ptr[g].mod)].is_prelude or global_off.get(g) =? none {continue}
+            let d=DriverWord(globals.ptr[g].decl)
+            if not decls.contains(d) {decls.push(d)}
+        }
+        order_prelude_globals(@decls)
+        set_list(DriverWord(fns.ptr[pinit].body) decls)
+        let nl=lfuncs.length
+        lower_function(pinit_lf)
+        if lfuncs.length >? nl or global_off.length >? nglob {continue}
+        if opt_release_slot {rel_collect()}
+        else {emit_function()}
+        break
+    }
+    if lower_only {return ""}
+    if env("DEWY_PAR_TIME") not=? none {eprint("lower: {__format_valid((time() - tlow) * 1000.0 ".1f")} ms here")}
+    if watch_build and not watch_first {
+        watch_lower_inits()
+        watch_lower_migrate()
+    }
+    ic_switch(IC_EMIT IC_SHARED);
+    if opt_release_slot {release_pipeline()}
+    if queue_emit_slot {
+        if opt_release_slot and not watch_build and not repl_image {
+            prune_emit_queue([roots... main_lf main_exit_lf_slot entry_end_lf_slot] lfuncs.length)
+        }
+        emit_queued()
+    }
+    let t2=time()
+    ic_switch(IC_OTHER IC_SHARED);
+    if host_ir {
+        printl("META {data_size} {main_lf} {main_code_slot} {entry_end_lf_slot} {mt_active_off}")
+        dump_host_values("ROOTS" roots)
+        dump_host_values("DATA" rodata)
+        return ""
+    }
+    let ok=false
+    let size:DriverWord=0
+    if target_wasm {
+        let mod=wasm_module(roots main_lf (-1))
+        size=mod.length
+        ok=write_html(out mod program_name program_icon)
+    }
+    else if target_windows {
+        x64_stubs()
+        let entry=x64_entry_win(roots main_lf)
+        let [text_rva ro_rva data_rva idata_size]=pe_layout(code.length rodata.length)
+        img_text_addr_slot=PE_BASE + text_rva
+        img_ro_addr_slot=PE_BASE + ro_rva
+        img_data_addr_slot=PE_BASE + data_rva + idata_size
+        x64_resolve(img_text_addr_slot img_ro_addr_slot img_data_addr_slot)
+        # (dewy watch: after the first build, a patch for the program running)
+        if watch_build and not watch_first {ok=watch_make_patch()}
+        else {
+            # (debuggers get a PDB beside what `dewy build` writes)
+            let pdb=""
+            let guid:array<uint8>=[]
+            if debug_info and not watch_build {
+                pdb="{strip_ext(out)}.pdb"
+                guid=pdb_guid(code)
+            }
+            ok=write_pe(out code entry rodata data_size + 8 + bss_reserve (update_fn not=? 0 or draw_fn not=? 0) and not test_mode pe_backtrace_info() program_icon pdb_name(pdb) guid)
+            if ok and (pdb as array<uint8>).length >? 0 {ok=write_pdb(pdb guid code.length pe_section_headers path "dewy-core {DEWY_CORE_VERSION}")}
+            if ok and watch_build {watch_record_image()}
+        }
+        size=code.length
+    }
+    else if target_macos {
+        arm64_stubs()
+        let entry=arm64_entry_mac(roots main_lf)
+        let info=pe_backtrace_info()
+        if watch_build and (update_fn not=? 0 or draw_present()) {
+            # (dewy watch, a game: the code and read-only data run from a region of their own,
+            # copied there by a loader, macho.jo; after the first build, a patch for the game)
+            let ro_at=(code.length + 15) & ~15
+            let blob_len=(ro_at + rodata.length + 7) & ~7
+            let loader_len=macho_watch_loader(0 0 0 0).length
+            let [text_off ro_off info_off text_size]=macho_layout(loader_len blob_len info.length)
+            img_text_addr_slot=MACHO_WATCH_CODE
+            img_ro_addr_slot=MACHO_WATCH_CODE + ro_at
+            img_data_addr_slot=MACHO_BASE + text_size
+            arm64_resolve(img_text_addr_slot img_ro_addr_slot img_data_addr_slot)
+            if not watch_first {ok=watch_make_patch()}
+            else {
+                let blob=code
+                loop blob.length <? ro_at {blob.push(0)}
+                loop b in rodata {blob.push(b)}
+                loop blob.length <? blob_len {blob.push(0)}
+                let loader=macho_watch_loader(img_data_addr_slot MACHO_BASE + ro_off blob_len entry)
+                elf_syms=[]
+                ok=write_macho(out loader 0 blob info data_size + 8 + bss_reserve program_name true)
+                if ok {watch_record_image()}
+            }
+        }
+        else {
+            let [text_off ro_off info_off text_size]=macho_layout(code.length rodata.length info.length)
+            img_text_addr_slot=MACHO_BASE + text_off
+            img_ro_addr_slot=MACHO_BASE + ro_off
+            img_data_addr_slot=MACHO_BASE + text_size
+            arm64_resolve(img_text_addr_slot img_ro_addr_slot img_data_addr_slot)
+            macho_dwarf=[]
+            # (with -g only: the same compiler, built on Linux and on a Mac, is the same bytes, with
+            # no paths of either in it)
+            dw_data_addr_slot=img_data_addr_slot
+            if debug_vars and not watch_build {macho_dwarf=dwarf_sections(img_text_addr_slot code.length path DEWY_CORE_VERSION)}
+            let mac_out=out
+            if ends_with(out ".app") and not watch_build {
+                mac_out=macos_bundle(out program_name program_icon)
+                if (mac_out as array<uint8>).length =? 0 {fatal(0 "cannot make the app bundle {out}");}
+            }
+            ok=write_macho(mac_out code entry rodata info data_size + 8 + bss_reserve program_name false)
+            if ok and watch_build {watch_record_image()}
+        }
+        size=code.length
+    }
+    else if target_arm64 {
+        elf_machine_slot=183
+        elf_page_slot=0x10000
+        arm64_stubs()
+        let entry=arm64_entry(roots main_lf)
+        let [text_off ro_off data_off]=elf_layout(code.length rodata.length)
+        img_text_addr_slot=ELF_BASE + text_off
+        img_ro_addr_slot=ELF_BASE + ro_off
+        img_data_addr_slot=ELF_BASE + data_off
+        arm64_resolve(img_text_addr_slot img_ro_addr_slot img_data_addr_slot)
+        # (dewy watch: after the first build, a patch for the program running)
+        if watch_build and not watch_first {ok=watch_make_patch()}
+        else {
+            elf_extra=[[".dewy_lines" x64_line_table()]]
+            # (with -g only, as on macOS)
+            dw_data_addr_slot=img_data_addr_slot
+            if debug_vars {elf_extra=[elf_extra... dwarf_sections(img_text_addr_slot code.length path DEWY_CORE_VERSION)...]}
+            ok=write_elf(out code entry rodata data_size + 8 + bss_reserve)
+            if ok and watch_build {watch_record_image()}
+        }
+        size=code.length
+    }
+    else {
+        x64_stubs()
+        let entry=x64_entry(roots main_lf)
+        let [text_off ro_off data_off]=elf_layout(code.length rodata.length)
+        img_text_addr_slot=ELF_BASE + text_off
+        img_ro_addr_slot=ELF_BASE + ro_off
+        img_data_addr_slot=ELF_BASE + data_off
+        x64_resolve(img_text_addr_slot img_ro_addr_slot img_data_addr_slot)
+        # (dewy watch: after the first build, a patch for the program running)
+        if watch_build and not watch_first {ok=watch_make_patch()}
+        else {
+            # (backtraces always; debuggers and profilers get DWARF in what `dewy build` writes)
+            elf_extra=[[".dewy_lines" x64_line_table()]]
+            if rsp_rows.length >? 0 {elf_extra.push([".dewy_frames" x64_frame_table()])}
+            dw_data_addr_slot=img_data_addr_slot
+            if debug_info {elf_extra=[elf_extra... dwarf_sections(img_text_addr_slot code.length path DEWY_CORE_VERSION)...]}
+            ok=write_elf(out code entry rodata data_size + 8 + bss_reserve)
+            if ok and watch_build {watch_record_image()}
+        }
+        size=code.length
+    }
+    let t3=time()
+    if ra_stat_slot {eprint("regalloc: spill cost {ra_spill_cost}, save cost {ra_save_cost} (int) {ra_save_x} (float), of {ra_total} weighted accesses\n")}
+    if timing {
+        eprint("check {__format_valid((t1 - t0) * 1000.0 ".1f")} ms, lower+codegen {__format_valid((t2 - t1) * 1000.0 ".1f")} ms, write {__format_valid((t3 - t2) * 1000.0 ".1f")} ms; {lfuncs.length} functions, {nodes.length} nodes, {size} bytes of code")
+        ic_report()
+        ic_lines_report()
+        source_counts()
+    }
+    if not ok {
+        # (a patch for dewy watch tells its own trouble)
+        if not watch_build or watch_first {eprint("error: cannot write {out} (a directory there, or no permission?)")}
+        return ""
+    }
+    out
+}

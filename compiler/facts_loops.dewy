@@ -11,7 +11,8 @@ from p"effect_control.dewy" import (effects_demand)
 from p"effects.jo" import (effect_summaries)
 from p"expr.jo" import (CV IN)
 from p"checks_thin_expr.dewy" import (is_map_type)
-from p"facts.jo" import (FACT_CAP FACT_PREP_CONDITION FACT_PROJECTION_SCAN FactDifference FactLoop FactPaths FactProjection FactState fact_cursor_shapes fact_comparison fact_grown_roots fact_loop_exhausted fact_loops fact_returns_cache fact_speculating fact_summary_owner fact_terms)
+from p"facts.jo" import (FACT_CAP FACT_PREP_CONDITION FACT_PROJECTION_SCAN FactDifference FactLoop FactPaths FactProjection FactState fact_cursor_shapes fact_grown_roots fact_loop_exhausted fact_loops fact_returns_cache fact_speculating fact_summary_owner fact_terms)
+from p"facts_slice_builder.dewy" import (fact_comparison_raw)
 from p"facts_capture.dewy" import (fact_capture)
 from p"facts_slice_prep.dewy" import (fact_slice_children)
 from p"facts_values.dewy" import (fact_domain fact_scalar fact_type fact_place fact_project)
@@ -395,7 +396,7 @@ fact_offset_guarded=(e:LoopWord @out:array<int64> depth:LoopWord):>void=>$unsafe
         fact_offset_guarded(LoopWord(nodes.ptr[e].b) @out depth + 1)
         return
     }
-    if k not=? 'binary' or not fact_comparison(cx_token_values.ptr[LoopWord(nodes.ptr[e].op)]) {return}
+    if k not=? 'binary' or not fact_comparison_raw(nodes.ptr[e].op) {return}
     loop side in [LoopWord(nodes.ptr[e].a) LoopWord(nodes.ptr[e].b)] {
         let x=side
         loop x not=? 0 and nodes.ptr[x].kind =? 'conv' {x=LoopWord(nodes.ptr[x].a)}
@@ -446,7 +447,7 @@ fact_guarded_rows=(e:LoopWord back:FactState changing:dict<int64 bool> @carried:
         fact_guarded_rows(LoopWord(nodes.ptr[e].b) back changing @carried depth + 1)
         return
     }
-    if k not=? 'binary' or nodes.ptr[e].aux not=? 0 or not fact_comparison(cx_token_values.ptr[LoopWord(nodes.ptr[e].op)]) {return}
+    if k not=? 'binary' or nodes.ptr[e].aux not=? 0 or not fact_comparison_raw(nodes.ptr[e].op) {return}
     let sides=[LoopWord(nodes.ptr[e].a) LoopWord(nodes.ptr[e].b)]
     loop direction in [0..2) {
         let a=sides[direction]
@@ -778,7 +779,7 @@ fact_loop_roots=(n:LoopWord @s:FactState @budget:LoopWord):>void=>$unsafe {
     if k =? 'ident' {
         if fact_preread_local(n) {fact_read(@s n);}
     }
-    else if k =? 'and_' or k =? 'or_' or k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison(cx_token_values.ptr[LoopWord(nodes.ptr[n].op)]) {
+    else if k =? 'and_' or k =? 'or_' or k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison_raw(nodes.ptr[n].op) {
         fact_loop_roots(LoopWord(nodes.ptr[n].a) @s @budget)
         fact_loop_roots(LoopWord(nodes.ptr[n].b) @s @budget)
     }
@@ -801,7 +802,7 @@ fact_cursor_predicate=(n:LoopWord cursor:LoopWord @budget:LoopWord):>bool=>$unsa
     let k=nodes.ptr[n].kind
     let a=LoopWord(nodes.ptr[n].a)
     let b=LoopWord(nodes.ptr[n].b)
-    if k =? 'and_' or k =? 'or_' or k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison(cx_token_values.ptr[LoopWord(nodes.ptr[n].op)]) {
+    if k =? 'and_' or k =? 'or_' or k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison_raw(nodes.ptr[n].op) {
         return fact_cursor_predicate(a cursor @budget) and fact_cursor_predicate(b cursor @budget)
     }
     if k =? 'not_' {return fact_cursor_predicate(a cursor @budget)}

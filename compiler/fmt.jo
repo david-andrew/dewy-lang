@@ -51,27 +51,19 @@ f_depth_at: int[]       # brackets open after each token
 fmt_jbuf: *u8 = null
 fmt_failed = false      # a file did not lex, or could not be formatted
 
-# the tokens, or none when the text does not lex (the lexer has said why)
-fmt_lexes = (path: str, src: str) -> str[]?:
-    saved_dn_file = df_file()
-    files.push(SrcFile(path, ".", src, ends_with(path, ".dewy")))
-    f = files.len() - 1
+# The jump target must remain in the calling frame while the lexer runs.
+fmt_try_tokens = (f: int, src: str) -> str[]?:
     when not BOOTSTRAP:
         if fmt_jbuf == null: fmt_jbuf = __alloc(192)
         if __setjmp(fmt_jbuf) == 0:
             __repl_jmp = fmt_jbuf
             toks = fmt_tokens(f, src)
             __repl_jmp = null
-            files.pop()
             return toks
         __repl_jmp = null
-        df_file(saved_dn_file)
-        files.pop()
         return none
     else:
-        toks = fmt_tokens(f, src)
-        files.pop()
-        return toks
+        return fmt_tokens(f, src)
 
 # dewy fmt [--check] files or directories... | dewy fmt - (standard input to standard output)
 

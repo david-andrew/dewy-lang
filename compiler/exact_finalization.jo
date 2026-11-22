@@ -1,0 +1,96 @@
+use 'checker_tokens.dewy'
+use 'ast.jo'
+use 'check.jo'
+use 'checker_source_positions.dewy'
+use 'checks_assign_hooks.dewy'
+use 'diagnostic_exit.dewy'
+use 'exact.jo'
+use 'exact_check_hooks.dewy'
+use 'exact_fact_transfer.dewy'
+use 'exact_guards.jo'
+use 'exact_marks.dewy'
+use 'exact_measure.dewy'
+use 'exact_static_widths.dewy'
+use 'expression_types.dewy'
+use 'facts.jo'
+use 'integer_conversions.dewy'
+use 'lower.jo'
+use 'math_lower.jo'
+use 'math_ops.dewy'
+use 'refinement_types.dewy'
+use 'types.jo'
+use 'util.jo'
+
+exact_bits = (n: int) -> int:
+    if n < exact_widths.len() and exact_widths[n] > 0: return exact_widths[n]
+    t = exact_representation(ntype(n))
+    width = if is_int(t): int(types[t].bits) + int(not types[t].sign) else: 1
+    if nodes[n].kind == .int_lit and has_flag(n, NF_U64) and nodes[n].ival < 0: width = 65
+    if exact_has_node(n):
+        k = nodes[n].kind
+        if k == .binary:
+            a = exact_bits(int(nodes[n].a)); b = exact_bits(int(nodes[n].b))
+            op = nodes[n].op as Tok
+            width = max(a, b)
+            if op == .plus or op == .minus: width += 1
+            else if op == .star: width = a + b
+            else if op == .slash: width = a + int(not (exact_range_flags(int(nodes[n].a)) & 2 != 0))
+            else if op == .percent: width = if dewy_at(nodes[n].pos): b else: min(a, b)
+            else if op == .shr: width = a
+            else if op == .shl or op == .starstar:
+                limit = exact_shifts.get(n) ?? -1
+                if not exact_shifts.has(n):
+                    (known, literal) = integer_constant(int(nodes[n].b))
+                    if literal < 0 and not types[exact_representation(ntype(int(nodes[n].b)))].sign: known = false
+                    if known and literal < 1048576: limit = max(0, literal)
+                (fixed_base, base) = integer_constant(int(nodes[n].a))
+                independent = fixed_base and (op == .shl and base == 0 or op == .starstar and base >= -1 and base <= 1 and (base >= 0 or types[exact_representation(ntype(int(nodes[n].a)))].sign))
+                if limit < 0 and independent: limit = 0
+                if limit < 0:
+                    err_notes.push((-1, "help: bound the shift count or exponent with a guard, compute in explicit int, or choose an overflow policy type"))
+                    fatal(nodes[n].pos, "cannot prove a finite machine width for exact shift or power")
+                width = if op == .starstar: max(2, a * limit + 1) else: a + limit
+        else if k == .unary: width = exact_bits(int(nodes[n].a)) + 1
+        else if k == .intrinsic: width = exact_bits(kid(n, 0)) + 1
+        else if k == .conv or k == .exprstmt: width = exact_bits(int(nodes[n].a))
+        else if k == .if_ or k == .iflet: width = max(exact_bits(int(nodes[n].b)), exact_bits(int(nodes[n].c)))
+        else if k == .block: width = exact_bits(block_value(n))
+        else if k == .coalesce: width = max(width, exact_bits(int(nodes[n].b)))
+        else if k == .match_:
+            loop arm in kids(n): width = max(width, exact_bits(int(nodes[arm].b)))
+    syntax = exact_type_width(n)
+    if syntax > 0: width = min(width, syntax / 2)
+    if n < exact_ranges.len() and exact_ranges[n] > 0: width = min(width, exact_ranges[n])
+    if n >= exact_widths.len(): exact_widths.resize(max(n + 1, nodes.len()))
+    exact_widths[n] = width
+    width
+exact_finish = ():
+    loop n, owner in exact_stores:
+        if not exact_decided(n):
+            fact_retry_owner = owner
+            fact_terms = [FactTerm()]
+            s = FactState()
+            exact_fact_store(n, 0, s)
+        exact_bits(int(nodes[n].a))
+        if not exact_proved(n) and exact_representation(ntype(n)) == T_INT:
+            if owner >= eg_demanded.len(): eg_demanded.resize(fns.len())
+            eg_demanded[owner] = true
+    loop n in exact_nodes:
+        if exact_has_node(n): exact_bits(n)
+    fact_retry_owner = 0
+    if exact_measure_on: exact_measure_report()
+# Reuse the existing write-index induction proof for fixed counters as well as
+# mathematical ones. Only a demanded exact function's assigned scalar with a
+# nonnegative constant initializer requests it; all writes must fit the proof.
+exact_counter_bound = (s: int):
+    l = int(nodes[s].sym)
+    if l <= 0 or prune(int(locals[l].type)) != T_INT or not exact_owners.has(cur_fn): return
+    flags = int(locals[l].flags)
+    if flags & LF_ASSIGNED == 0 or flags & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_QUIET | LF_EXPOSED | LF_SOAELEM | LF_ELEMALIAS) != 0: return
+    init = int(nodes[s].b)
+    if init <= 0 or nodes[init].kind != .int_lit or has_flag(init, NF_U64) or nodes[init].ival < 0: return
+    math_prepare_writes()
+    writes = math_writes.get(l) ?? []
+    if writes.len() == 0: return
+    limit = math_length_counter_limit(s, writes)
+    if limit >= 0: math_word_limits[l] = limit

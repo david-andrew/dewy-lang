@@ -1,3 +1,5 @@
+use 'opt_rewrite.dewy'
+use 'opt_registers.dewy'
 use 'ir_types.dewy'
 use 'ir.jo'
 use 'ir_builders.dewy'
@@ -159,7 +161,7 @@ sra_lane_of = (v: int, i: int) -> int: sra_lanes[sra_values[v].slot * 4 + (sra_v
 sra_index_nv = 0
 sra_emit = (out: mut Ins[], ins: Ins):
     loop sra_index_nv < ir.vtypes.len():
-        o_resize_one(sra_index_nv)
+        ow_resize_one(sra_index_nv)
         sra_index_nv += 1
     if ins.dst >= 0 and o_defines(ins.op):
         o_regs[int(ins.dst)].ndef += 1

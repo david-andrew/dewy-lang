@@ -9,7 +9,7 @@ from p"exact.jo" import (exact_initializers exact_local_widths exact_raw_values 
 from p"exact_check_hooks.dewy" import (exact_representation)
 from p"exact_static_widths.dewy" import (exact_type_width)
 from p"expr.jo" import (CV)
-from p"facts.jo" import (fact_comparison)
+from p"facts_slice_builder.dewy" import (fact_comparison_raw)
 from p"types.jo" import (T_MATH_INT is_int prune)
 
 RawWord:type=int64<overflow='wrap'>
@@ -110,7 +110,7 @@ exact_effect_representation=(n:RawWord):>void=>$unsafe {
         let a=RawWord(nodes.ptr[n].a)
         if prune(ntype(a)) =? T_MATH_INT and nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1) and exact_local_width(RawWord(nodes.ptr[a].sym)) >? 0 {exact_raw_tree(RawWord(nodes.ptr[n].b))}
     }
-    else if k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison(cx_token_values.ptr[RawWord(nodes.ptr[n].op)]) {
+    else if k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison_raw(nodes.ptr[n].op) {
         let a=RawWord(nodes.ptr[n].a)
         let b=RawWord(nodes.ptr[n].b)
         if prune(ntype(a)) not=? T_MATH_INT and prune(ntype(b)) not=? T_MATH_INT {return}

@@ -10,6 +10,7 @@ DRIVER = '''use 'main.jo'
 use 'ast.jo'
 use 'node_store.dewy'
 use 'facts.jo'
+use 'facts_slice_builder.dewy'
 use 'facts_index_writes.dewy'
 use 'facts_value_queries.dewy'
 main = ():

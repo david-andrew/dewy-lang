@@ -1,3 +1,4 @@
+use 'opt_rewrite.dewy'
 use 'ir_types.dewy'
 use 'ir.jo'
 use 'ir_builders.dewy'
@@ -213,7 +214,7 @@ lx_known = 0
 lx_sync = ():
     n = ir.vtypes.len()
     if n == 0: return
-    o_resize_one(n - 1)
+    ow_resize_one(n - 1)
     loop v in [lx_known..n): o_regs[v].repl = i32(v)
     lx_known = n
 

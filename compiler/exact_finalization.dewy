@@ -1,0 +1,117 @@
+$runtime_checks
+from p"ast.jo" import (NF_U64 has_flag kid kids nodes)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_PARAM LF_QUIET LF_SHARED LF_SOAELEM fns locals)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"checks_assign_hooks.dewy" import (block_value)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"exact.jo" import (exact_measure_on exact_nodes exact_owners exact_ranges exact_shifts exact_stores exact_widths)
+from p"exact_check_hooks.dewy" import (exact_representation)
+from p"exact_fact_transfer.dewy" import (exact_fact_store)
+from p"exact_guards.jo" import (eg_demanded)
+from p"exact_marks.dewy" import (exact_decided exact_has_node exact_proved exact_range_flags)
+from p"exact_measure.dewy" import (exact_measure_report)
+from p"exact_static_widths.dewy" import (exact_type_width)
+from p"expression_types.dewy" import (ntype)
+from p"facts.jo" import (FactState fact_retry_owner fact_terms)
+from p"integer_conversions.dewy" import (integer_constant)
+from p"lower.jo" import (cur_fn)
+from p"math_lower.jo" import (math_word_limits math_writes)
+from p"math_ops.dewy" import (math_length_counter_limit math_prepare_writes)
+from p"refinement_types.dewy" import (FactTerm)
+from p"types.jo" import (T_INT is_int prune types)
+from p"util.jo" import (err_notes)
+
+FinalWidth:type=int64<overflow='wrap'>
+exact_bits=(n:FinalWidth):>FinalWidth=>$unsafe {
+    if n <? exact_widths.length and exact_widths.ptr[n] >? 0 {return exact_widths.ptr[n]}
+    let t=exact_representation(ntype(n))
+    let width:FinalWidth=if is_int(t) {FinalWidth(types.ptr[t].bits) + FinalWidth(int64(not types.ptr[t].sign))} else {1}
+    if nodes.ptr[n].kind =? 'int_lit' and has_flag(n NF_U64) and nodes.ptr[n].ival <? 0 {width=65}
+    if exact_has_node(n) {
+        let k=nodes.ptr[n].kind
+        if k =? 'binary' {
+            let a=exact_bits(FinalWidth(nodes.ptr[n].a))
+            let b=exact_bits(FinalWidth(nodes.ptr[n].b))
+
+            # Raw Tok ordinals keep the width walk on the node representation.
+            let op=nodes.ptr[n].op
+            width=max(a b)
+            if op =? 58 or op =? 59 {width += 1}
+            else if op =? 60 {width=a + b}
+            else if op =? 61 {width=a + FinalWidth(int64(exact_range_flags(FinalWidth(nodes.ptr[n].a)) & 2 =? 0))}
+            else if op =? 62 {width=if dewy_at(nodes.ptr[n].pos) {b} else {min(a b)}}
+            else if op =? 68 {width=a}
+            else if op =? 67 or op =? 79 {
+                let limit:FinalWidth=exact_shifts.get(n) ?? -1
+                if not exact_shifts.has(n) {
+                    let [known literal]=integer_constant(FinalWidth(nodes.ptr[n].b))
+                    if literal <? 0 and not types.ptr[exact_representation(ntype(FinalWidth(nodes.ptr[n].b)))].sign {known=false}
+                    if known and literal <? 1048576 {limit=max(0 literal)}
+                }
+                let [fixed_base base]=integer_constant(FinalWidth(nodes.ptr[n].a))
+                let independent=fixed_base and (op =? 67 and base =? 0 or op =? 79 and base >=? -1 and base <=? 1 and (base >=? 0 or types.ptr[exact_representation(ntype(FinalWidth(nodes.ptr[n].a)))].sign))
+                if limit <? 0 and independent {limit=0}
+                if limit <? 0 {
+                    err_notes.push([(-1) "help: bound the shift count or exponent with a guard, compute in explicit int, or choose an overflow policy type"])
+                    fatal(nodes.ptr[n].pos "cannot prove a finite machine width for exact shift or power");
+                }
+                width=if op =? 79 {max(2 a * limit + 1)} else {a + limit}
+            }
+        }
+        else if k =? 'unary' {width=exact_bits(FinalWidth(nodes.ptr[n].a)) + 1}
+        else if k =? 'intrinsic' {width=exact_bits(kid(n 0)) + 1}
+        else if k =? 'conv' or k =? 'exprstmt' {width=exact_bits(FinalWidth(nodes.ptr[n].a))}
+        else if k =? 'if_' or k =? 'iflet' {width=max(exact_bits(FinalWidth(nodes.ptr[n].b)) exact_bits(FinalWidth(nodes.ptr[n].c)))}
+        else if k =? 'block' {width=exact_bits(block_value(n))}
+        else if k =? 'coalesce' {width=max(width exact_bits(FinalWidth(nodes.ptr[n].b)))}
+        else if k =? 'match_' {
+            loop arm in kids(n) {width=max(width exact_bits(FinalWidth(nodes.ptr[arm].b)))}
+        }
+    }
+    let syntax=FinalWidth(exact_type_width(n))
+    if syntax >? 0 {
+        let syntax_bits:FinalWidth=syntax >> 1
+        width=min(width syntax_bits)
+    }
+    if n <? exact_ranges.length and exact_ranges.ptr[n] >? 0 {width=min(width exact_ranges.ptr[n])}
+    if n >=? exact_widths.length {exact_widths.resize(max(n + 1 nodes.length))}
+    exact_widths[n]=width
+    width
+}
+exact_finish=():>void=>$unsafe {
+    let retry=@fact_retry_owner
+    loop [n owner] in exact_stores {
+        if not exact_decided(n) {
+            retry=owner
+            fact_terms=[FactTerm()]
+            let s=FactState()
+            exact_fact_store(n 0 @s);
+        }
+        exact_bits(FinalWidth(nodes.ptr[n].a));
+        if not exact_proved(n) and exact_representation(ntype(n)) =? T_INT {
+            if owner >=? eg_demanded.length {eg_demanded.resize(fns.length)}
+            eg_demanded[owner]=true
+        }
+    }
+    loop n in exact_nodes {
+        if exact_has_node(n) {exact_bits(n);}
+    }
+    retry=0
+    if exact_measure_on {exact_measure_report()}
+}
+# Reuse the existing write-index induction proof for fixed counters as well as
+# mathematical ones. Only a demanded exact function's assigned scalar with a
+# nonnegative constant initializer requests it; all writes must fit the proof.
+exact_counter_bound=(s:FinalWidth):>void=>$unsafe {
+    let l=FinalWidth(nodes.ptr[s].sym)
+    if l <=? 0 or prune(FinalWidth(locals.ptr[l].type)) not=? T_INT or not exact_owners.has(cur_fn) {return}
+    let flags=FinalWidth(locals.ptr[l].flags)
+    if (flags & LF_ASSIGNED) =? 0 or (flags & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_QUIET | LF_EXPOSED | LF_SOAELEM | LF_ELEMALIAS)) not=? 0 {return}
+    let init=FinalWidth(nodes.ptr[s].b)
+    if init <=? 0 or nodes.ptr[init].kind not=? 'int_lit' or has_flag(init NF_U64) or nodes.ptr[init].ival <? 0 {return}
+    math_prepare_writes()
+    let writes=math_writes.get(l) ?? []
+    if writes.length =? 0 {return}
+    let limit=math_length_counter_limit(s writes)
+    if limit >=? 0 {math_word_limits[l]=limit}
+}

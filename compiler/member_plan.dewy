@@ -14,7 +14,8 @@ from p"directives.jo" import (DIR_STATIC dir_code_any dir_copies_any dir_deadloc
 from p"effects.jo" import (effect_policy effects_active loan_owners)
 from p"exact.jo" import (exact_owners)
 from p"expr.jo" import (IN)
-from p"facts.jo" import (fact_comparison fact_member_admitted fact_member_failed fact_member_owner fact_member_shared fact_policy fact_validated)
+from p"facts.jo" import (fact_member_admitted fact_member_failed fact_member_owner fact_member_shared fact_policy fact_validated)
+from p"facts_slice_builder.dewy" import (fact_comparison_raw)
 from p"facts_plan_cache.dewy" import (fact_plan_forget)
 from p"facts_members.dewy" import (fact_member_same)
 from p"isolation.jo" import (isolation_node_limit isolation_replayed)
@@ -78,7 +79,7 @@ member_column_sites=(n:PlanWord @t:MemberTemplate allowed:bool word:bool @sites:
         args=true
     }
     else if k =? 'binary' {
-        if nd.aux not=? 0 or not fact_comparison(cx_token(PlanWord(nd.op))) {return false}
+        if nd.aux not=? 0 or not fact_comparison_raw(nd.op) {return false}
     }
     else if k not=? 'block' and k not=? 'exprstmt' and k not=? 'vardecl' and k not=? 'and_' and k not=? 'or_' and k not=? 'not_' and k not=? 'if_' and k not=? 'index' and k not=? 'field' {return false}
     let mask=isolation_children(k)

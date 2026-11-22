@@ -1,0 +1,11 @@
+$runtime_checks
+
+from p"checks_thin.dewy" import check_fn_body
+from p"check.jo" import fns
+from p"member_replay.jo" import member_compact_owners
+from p"member_plan.dewy" import member_expand_owner
+
+checked_member_body=(f:int64):>void=>{
+    check_fn_body(f)
+    if member_compact_owners.length >? 0 and fns[f].state =? 2 {member_expand_owner(f)}
+}

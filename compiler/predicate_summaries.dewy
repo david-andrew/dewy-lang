@@ -7,7 +7,8 @@ from p"ast.jo" import (NF_EXPLICIT_INTEGER NF_U64 has_flag kid nkids nodes)
 from p"check.jo" import (FK_INIT LF_MUTPARAM fns locals)
 from p"checker_tokens.dewy" import (Tok)
 from p"expr.jo" import (CV IN)
-from p"facts.jo" import (FactState fact_comparison)
+from p"facts.jo" import (FactState)
+from p"facts_slice_builder.dewy" import (fact_comparison_raw)
 from p"facts_values.dewy" import (fact_domain fact_scalar fact_type fact_project)
 from p"facts_index_writes.dewy" import (fact_constant fact_new)
 from p"ownership.jo" import (ownership_fact_cleanup)
@@ -81,7 +82,7 @@ fact_predicate_tree=(n:PredicateWord params:dict<int64 int64> @budget:PredicateW
         term.a=fact_predicate_tree(PredicateWord(nodes.ptr[n].a) params @budget)
         if term.a =? 0 {return 0}
     }
-    else if k =? 'and_' or k =? 'or_' or k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison(cx_token(int64(nodes.ptr[n].op))) {
+    else if k =? 'and_' or k =? 'or_' or k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison_raw(nodes.ptr[n].op) {
         if k =? 'binary' {
             let a=fact_type(ntype(PredicateWord(nodes.ptr[n].a)))
             let b=fact_type(ntype(PredicateWord(nodes.ptr[n].b)))

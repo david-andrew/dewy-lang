@@ -485,7 +485,7 @@ cl_named_now=(name:CGWord mod:CGWord @out:array<int64>):>void=>$unsafe {
             e=CGWord(cg_syms[0].ptr[e].next)
         }
         if keep {
-            out.ptr[kept]=d
+            if kept not=? i {out[kept]=d}
             kept=kept + 1
         }
         i=i + 1

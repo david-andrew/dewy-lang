@@ -1,0 +1,55 @@
+$runtime_checks
+
+from p"ir.jo" import ir
+from p"ir_types.dewy" import Ins
+from p"opt.jo" import o_operand_mask
+from p"opt_workspace.dewy" import (OptReg o_regs o_reg_storage o_reg_count o_fact_scope o_fact_nbr)
+from p"opt_rewrite.dewy" import ow_rewrite_fields
+
+RegisterWord:type=int64<overflow='wrap'>
+RegisterIndex:type=int32<overflow='wrap'>
+
+o_resize=(n:RegisterWord):>void=>$unsafe {
+    if o_reg_count <? n {
+        o_reg_storage.resize(n)
+        o_regs=o_reg_storage.ptr
+        o_reg_count=n
+        o_fact_scope.resize(n * 2)
+        o_fact_nbr.resize(n * 2)
+    }
+    # Each pair shares one cursor update. Keep the word-sized bound and reset any odd tail.
+    let pairs=n & -2
+    let v:RegisterWord=0
+    let reg=o_regs
+    loop v <? pairs {
+        o_reset_register(reg v)
+        o_reset_register(reg + 1 v + 1)
+        reg=reg + 2
+        v+=2
+    }
+    if v <? n {o_reset_register(reg v)}
+}
+
+o_reset_register=(reg:ptr<OptReg> v:RegisterWord):>void=>$unsafe {
+    reg[0].ndef=0
+    reg[0].stable=false
+    reg[0].defpos=-1
+    reg[0].first=2147483647
+    reg[0].nuse=0
+    reg[0].constant=false
+    reg[0].repl=RegisterIndex(v)
+    reg[0].ver=0
+    reg[0].dop=-1
+}
+
+# The copier may have grown ir.args since the rewrite pass bound opt_args.
+o_rewrite=(@ins:Ins):>void=>$unsafe {
+    let mask=o_operand_mask(ins.op)
+    if mask & 16 not=? 0 {
+        loop k in [int64(ins.a)..RegisterWord(ins.a) + RegisterWord(ins.b)) {
+            ir.args[k]=o_regs[int64(ir.args[k])].repl
+        }
+    }
+    else {ow_rewrite_fields(@ins mask)}
+    if mask & 4 not=? 0 {ins.c=o_regs[int64(ins.c)].repl}
+}

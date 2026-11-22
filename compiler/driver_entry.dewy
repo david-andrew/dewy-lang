@@ -1,0 +1,135 @@
+$runtime_checks
+from p"watch_drive.dewy" import (watch_build_child)
+from p"settings.jo" import (build_target cli_mode cli_target)
+from p"check.jo" import (lib_dir test_mode)
+from p"@lib/core/rt.jo" import (__copies_min __str_slice)
+from p"@lib/core/str.jo" import (ends_with find rfind split to_int)
+from p"@lib/core/os.jo" import (args exit is_terminal make_dirs)
+from p"checker_program.dewy" import (check_program)
+from p"diagnostic_exit.dewy" import (stop)
+from p"directive_ops.dewy" import (dir_print_obligations)
+from p"directives.jo" import (dir_obligations)
+from p"driver_check.dewy" import (driver_check_arguments)
+from p"driver_cli.dewy" import (find_lib_dir internal_options scan_build_block setup_target usage)
+from p"driver_commands.dewy" import (driver_build_arguments driver_build_output driver_run_command)
+from p"driver_compile.dewy" import (compile)
+from p"driver_dispatch.dewy" import (driver_cold_dispatch)
+from p"driver_options.dewy" import (driver_early_options)
+from p"ide.jo" import (ide_skip)
+from p"lazy_bodies.jo" import (dc_eager)
+from p"lazy_force.dewy" import (dc_flush_warnings)
+from p"main.jo" import (debug_info host_ir lower_only)
+from p"parse.jo" import (stop_after)
+from p"pkg.jo" import (pkg_fetch)
+from p"type_ops.dewy" import (init_types)
+from p"util.jo" import (err_prior err_skips error_exit errors_only lib_root mkpos more_errors shown_warnings)
+
+EntryWord:type=int64<overflow='wrap'>
+driver_main=():>void=>{
+    let copies_min=@__copies_min
+    let dc_eager_slot=@dc_eager
+    let errors_only_slot=@errors_only
+    let more_errors_slot=@more_errors
+    let lib_dir_slot=@lib_dir
+    let lib_root_slot=@lib_root
+    let test_mode_slot=@test_mode
+    let cli_mode_slot=@cli_mode
+    let debug_info_slot=@debug_info
+    let cli_target_slot=@cli_target
+    let pkg_fetch_slot=@pkg_fetch
+    let lower_only_slot=@lower_only
+    copies_min=0
+    let a=args()
+    if a.length >? 2 and a[1] =? "--eager-bodies" {
+        dc_eager_slot=true
+        a=[a[0] a[2..a.length)...]
+    }
+    a=internal_options(a)
+    if driver_early_options(a) {return}
+    # (the next errors after one in a function: next_error_run, ide.jo)
+    if a.length >? 4 and a[1] =? "--skip-fns" {
+        # (and the errors the runs before found: position, then the error as shown)
+        if (a[3] as array<uint8>).length >? 0 {
+            loop e in split(a[3] "\u{1e}") {
+                let c=find(e "\u{1f}")
+                if c >? 0 {err_prior.push([to_int(__str_slice(e 0 c)) ?? 0 __str_slice(e c + 1 (e as array<uint8>).length)])}
+            }
+        }
+        loop s in split(a[2] ",") {
+            let c=find(s ":")
+            # (w and a warning's place and length: shown by the run before)
+            if (s as array<uint8>).length >? 0 and (s as array<uint8>)[0] =? b'w' {shown_warnings.push(s)}
+            else if c >? 0 {
+                err_skips.push(s)
+                ide_skip[mkpos(to_int(__str_slice(s 0 c)) ?? 0 to_int(__str_slice(s c + 1 (s as array<uint8>).length)) ?? 0)]=true
+            }
+        }
+        errors_only_slot=true
+        let rest=[a[0]]
+        loop i in [4..a.length) {rest.push(a[i])}
+        a=rest
+    }
+    if a.length >? 2 and a[1] =? "--eager-bodies" {
+        dc_eager_slot=true
+        a=[a[0] a[2..a.length)...]
+    }
+    a=internal_options(a)
+    if a.length >=? 2 and (a[1] =? "build" or a[1] =? "check" or a[1] =? "test" or a[1] =? "run" or ends_with(a[1] ".jo") or ends_with(a[1] ".dewy")) {more_errors_slot=true}
+    lib_dir_slot=find_lib_dir()
+    lib_root_slot=lib_dir_slot
+    if driver_cold_dispatch(a lib_dir_slot) {return}
+    # (dewy watch on Windows: each build in a process of its own: watch.jo, w32_compile)
+    if $target.os =? 'windows' {
+        if a.length >=? 8 and a[1] =? "watch" and a[2] =? "--build" {
+            if a.length >? 8 {test_mode_slot=a[8] =? "1"}
+            if a.length >? 9 {cli_mode_slot=if a[9] =? "1" {"release"} else if a[9] =? "d" {"debug"} else {""}}
+            watch_build_child(a[3] a[4] a[5] a[6] =? "1" a[7])
+            return
+        }
+    }
+    if a[1] =? "build" {
+        if a.length <? 3 {usage()}
+        debug_info_slot=true
+        let [path out]=driver_build_arguments(a)
+        if (path as array<uint8>).length =? 0 {usage()}
+        scan_build_block(path)
+        if (out as array<uint8>).length =? 0 {out=driver_build_output(path)}
+        # (-o game.zip, -o game.html, -o game.exe: what is asked for, without --target or a
+        # `$target` in the file)
+        if (cli_target_slot as array<uint8>).length =? 0 and (build_target as array<uint8>).length =? 0 {
+            if ends_with(out ".html") or ends_with(out ".zip") {cli_target_slot="wasm32"}
+            else if ends_with(out ".exe") {cli_target_slot="x86_64-windows"}
+        }
+        # (-o dist/game.zip: the directory made if it is not there)
+        let sl=max(rfind(out "/") rfind(out "\\"))
+        if sl >? 0 {make_dirs(__str_slice(out 0 sl));}
+        let made=compile(path out)
+        if host_ir {return}
+        if (made as array<uint8>).length =? 0 {exit(1)}
+        # (where it is, said at a terminal: a script that builds gets no line it did not ask for)
+        if is_terminal() {printl("made {made}")}
+        return
+    }
+    # (building and running fetch the packages a program names; the language server does not)
+    pkg_fetch_slot=true
+    if a[1] =? "check" {
+        let path=driver_check_arguments(a)
+        if (stop_after as array<uint8>).length >? 0 {
+            scan_build_block(path)
+            setup_target()
+            init_types()
+            check_program(path)
+            dc_flush_warnings()
+            if errors_only_slot {stop(error_exit);}
+            return
+        }
+        # (and lowered without making code: some errors are found there, as a `loop mut` that
+        # resizes its array, a data race, a shader's)
+        lower_only_slot=true
+        compile(path "");
+        if errors_only_slot {stop(error_exit);}
+        if dir_obligations {dir_print_obligations()}
+        return
+    }
+    driver_run_command(a)
+}

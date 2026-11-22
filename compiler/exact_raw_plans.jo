@@ -42,6 +42,7 @@ use 'witness_ops.dewy'
 use 'util.jo'
 use 'diagnostic_exit.dewy'
 use 'facts.jo'
+use 'facts_slice_builder.dewy'
 use 'facts_arith.dewy'
 use 'facts_ranges.dewy'
 use 'facts_joins.dewy'
@@ -136,7 +137,7 @@ exact_effect_representation = (n: int):
     else if k == .assign:
         a = int(nodes[n].a)
         if prune(ntype(a)) == T_MATH_INT and nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and exact_local_width(int(nodes[a].sym)) > 0: exact_raw_tree(int(nodes[n].b))
-    else if k == .binary and nodes[n].aux == 0 and fact_comparison(nodes[n].op as Tok):
+    else if k == .binary and nodes[n].aux == 0 and fact_comparison_raw(nodes[n].op):
         a = int(nodes[n].a); b = int(nodes[n].b)
         if prune(ntype(a)) != T_MATH_INT and prune(ntype(b)) != T_MATH_INT: return
         aw = exact_plan_bits(a); bw = exact_plan_bits(b)

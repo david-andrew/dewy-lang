@@ -29,7 +29,7 @@ from p"effect_sites.dewy" import (effect_scalar_sites effect_use_sites)
 from p"effect_sources.dewy" import (effect_source_row)
 from p"exact_count_bounds.dewy" import (exact_small_math)
 from p"exact_raw_plans.dewy" import (exact_effect_representation exact_local_width exact_raw_value)
-from p"facts.jo" import (fact_comparison)
+from p"facts_slice_builder.dewy" import (fact_comparison_raw)
 from p"facts_numeric.dewy" import (fact_shift_obliged)
 from p"facts_ranges.dewy" import (fact_floor_call fact_open_range fact_stepped_loop)
 from p"facts_elements.dewy" import (fact_fixed_comprehension fact_fixed_comprehension_exact)
@@ -837,7 +837,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         # (a small counter against a word widened to `int`: compared as two
         # words, so the widened word is never packed)
         }
-        if not supported and nodes.ptr[n].aux =? 0 and effect_scalar(ntype(n)) and fact_comparison(cx_token_values.ptr[EffectScanWord(nodes.ptr[n].op)]) {
+        if not supported and nodes.ptr[n].aux =? 0 and effect_scalar(ntype(n)) and fact_comparison_raw(nodes.ptr[n].op) {
             let a=effect_unwidened(EffectScanWord(nodes.ptr[n].a))
             let b=effect_unwidened(EffectScanWord(nodes.ptr[n].b))
             if (a not=? EffectScanWord(nodes.ptr[n].a) or b not=? EffectScanWord(nodes.ptr[n].b)) and effect_word(a) and effect_word(b) {
@@ -851,10 +851,10 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
             }
         }
         if not supported and nodes.ptr[n].aux =? 2 and types.ptr[representation_type(ntype(EffectScanWord(nodes.ptr[n].a)))].kind =? 'str_' and types.ptr[representation_type(ntype(EffectScanWord(nodes.ptr[n].b)))].kind =? 'str_' {
-            supported=fact_comparison(cx_token_values.ptr[EffectScanWord(nodes.ptr[n].op)]) or nodes.ptr[n].op =? int32<overflow='wrap'>(58)
+            supported=fact_comparison_raw(nodes.ptr[n].op) or nodes.ptr[n].op =? int32<overflow='wrap'>(58)
             if nodes.ptr[n].op =? int32<overflow='wrap'>(58) {effect_plan_cost(f n 1 << 2);}
         }
-        if not supported and nodes.ptr[n].aux =? 0 and fact_comparison(cx_token_values.ptr[EffectScanWord(nodes.ptr[n].op)]) and effect_integer(EffectScanWord(nodes.ptr[n].a)) and effect_integer(EffectScanWord(nodes.ptr[n].b)) {supported=true}
+        if not supported and nodes.ptr[n].aux =? 0 and fact_comparison_raw(nodes.ptr[n].op) and effect_integer(EffectScanWord(nodes.ptr[n].a)) and effect_integer(EffectScanWord(nodes.ptr[n].b)) {supported=true}
         if not supported and nodes.ptr[n].aux =? 0 and prune(ntype(n)) =? T_MATH_INT and effect_integer(EffectScanWord(nodes.ptr[n].a)) and effect_integer(EffectScanWord(nodes.ptr[n].b)) and (nodes.ptr[n].op =? int32<overflow='wrap'>(58) or nodes.ptr[n].op =? int32<overflow='wrap'>(59) or nodes.ptr[n].op =? int32<overflow='wrap'>(60)) {
             supported=true
             effect_plan_cost(f n 1 << 2);

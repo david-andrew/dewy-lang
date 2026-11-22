@@ -18,6 +18,7 @@ use 'checks_builders.dewy'
 use 'isolation_ops.dewy'
 use 'refine_metadata.dewy'
 use 'facts.jo'
+use 'facts_slice_builder.dewy'
 use 'facts_plan_cache.dewy'
 use 'proofs.jo'
 use 'ownership.jo'
@@ -71,7 +72,7 @@ member_column_sites = (n: int, t: mut MemberTemplate, allowed: bool, word: bool,
         if nd.b != 0 or tkind(ntype(n)) != .array or telem(ntype(n)) != T_STR: return false
         args = true
     else if k == .binary:
-        if nd.aux != 0 or not fact_comparison(nd.op as Tok): return false
+        if nd.aux != 0 or not fact_comparison_raw(nd.op): return false
     else if k != .block and k != .exprstmt and k != .vardecl and k != .and_ and k != .or_ and k != .not_ and k != .if_ and k != .index and k != .field: return false
     mask = isolation_children(k)
     if mask & 1 != 0 and not member_column_sites(int(nd.a), t, false, false, sites, seen): return false

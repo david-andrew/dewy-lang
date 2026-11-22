@@ -5,6 +5,11 @@ ABI. This document records ownership boundaries and the costs that constrain the
 remaining cutovers. [GOALS.md](../GOALS.md) is the contract;
 [ROADMAP.md](../../ROADMAP.md) owns the work queue. Commit messages record results.
 
+**Milestone 1 is closed.** Dewy runs the compiler driver and every subsystem walk.
+The remaining live Jo functions provide access to shared storage and opcode tables,
+platform operations and entry adapters. The C bootstrap uses the frozen Jo twins
+until milestone 3. [Live Jo bridge inventory](../../tests/test_selfhost_live_jo.py)
+
 ## Mixed-language and bootstrap contract
 
 | Boundary | Rule |

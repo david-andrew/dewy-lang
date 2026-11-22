@@ -13,6 +13,7 @@ use 'check.jo'
 use 'checks_thin.dewy'
 use 'expr.jo'
 use 'facts.jo'
+use 'facts_slice_builder.dewy'
 use 'facts_compare.dewy'
 use 'safe_paths.jo'
 use 'safe_path_walk.dewy'
@@ -79,7 +80,7 @@ wi_negation = (decl: int, c: int, out: mut RefAtom[]):
     if k == .not_:
         wi_affirm(decl, int(nodes[c].a), out)
         return
-    if k == .binary and fact_comparison(nodes[c].op as Tok):
+    if k == .binary and fact_comparison_raw(nodes[c].op):
         ref_add(fact_inverse(nodes[c].op as Tok), wi_term(decl, int(nodes[c].a)), wi_term(decl, int(nodes[c].b)), out)
         return
     wi_unsupported(c)
@@ -93,7 +94,7 @@ wi_affirm = (decl: int, c: int, out: mut RefAtom[]):
     if k == .not_:
         wi_negation(decl, int(nodes[c].a), out)
         return
-    if k == .binary and fact_comparison(nodes[c].op as Tok):
+    if k == .binary and fact_comparison_raw(nodes[c].op):
         ref_add(nodes[c].op as Tok, wi_term(decl, int(nodes[c].a)), wi_term(decl, int(nodes[c].b)), out)
         return
     wi_unsupported(c)

@@ -32,6 +32,7 @@ use 'exact.jo'
 use 'exact_raw_plans.dewy'
 use 'exact_count_bounds.dewy'
 use 'facts.jo'
+use 'facts_slice_builder.dewy'
 use 'facts_numeric.dewy'
 use 'facts_ranges.dewy'
 use 'facts_elements.dewy'
@@ -767,7 +768,7 @@ effect_scan_node = (f: int, n: int):
             supported = effect_small(n) >= 0 or (effect_word_op(nodes[n].op as Tok) and effect_scalar(ntype(n)))
         # (a small counter against a word widened to `int`: compared as two
         # words, so the widened word is never packed)
-        if not supported and nodes[n].aux == 0 and effect_scalar(ntype(n)) and fact_comparison(nodes[n].op as Tok):
+        if not supported and nodes[n].aux == 0 and effect_scalar(ntype(n)) and fact_comparison_raw(nodes[n].op):
             a = effect_unwidened(int(nodes[n].a))
             b = effect_unwidened(int(nodes[n].b))
             if (a != int(nodes[n].a) or b != int(nodes[n].b)) and effect_word(a) and effect_word(b):
@@ -779,9 +780,9 @@ effect_scan_node = (f: int, n: int):
         # allocates; `int`s compare as words or by reading a big payload, and
         # `+ - *` on one may grow it into a big integer, which allocates)
         if not supported and nodes[n].aux == 2 and types[representation_type(ntype(int(nodes[n].a)))].kind == .str_ and types[representation_type(ntype(int(nodes[n].b)))].kind == .str_:
-            supported = fact_comparison(nodes[n].op as Tok) or nodes[n].op == i32(int(Tok.plus))
+            supported = fact_comparison_raw(nodes[n].op) or nodes[n].op == i32(int(Tok.plus))
             if nodes[n].op == i32(int(Tok.plus)): effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
-        if not supported and nodes[n].aux == 0 and fact_comparison(nodes[n].op as Tok) and effect_integer(int(nodes[n].a)) and effect_integer(int(nodes[n].b)): supported = true
+        if not supported and nodes[n].aux == 0 and fact_comparison_raw(nodes[n].op) and effect_integer(int(nodes[n].a)) and effect_integer(int(nodes[n].b)): supported = true
         if not supported and nodes[n].aux == 0 and prune(ntype(n)) == T_MATH_INT and effect_integer(int(nodes[n].a)) and effect_integer(int(nodes[n].b)) and (nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.star))):
             supported = true
             effect_plan_cost(f, n, 1 << int(EffectKind.alloc))

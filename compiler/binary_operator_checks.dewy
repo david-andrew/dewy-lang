@@ -23,7 +23,7 @@ from p"member_receivers.dewy" import (is_struct_like)
 from p"checks_thin_expr.dewy" import (is_map_type quantity_record_operand)
 from p"literal_context.dewy" import (finalize_literal is_lit kid_lit)
 from p"diagnostic_exit.dewy" import (fatal)
-from p"facts.jo" import (fact_comparison)
+from p"facts_slice_builder.dewy" import (fact_comparison_raw)
 from p"exact_check_hooks.dewy" import (exact_int_result exact_operation)
 from p"rational_literals.dewy" import (exact_decimal)
 from p"util.jo" import (err_notes err_trail_names name_of pos_in_lib)
@@ -481,8 +481,8 @@ binary_rest=(n:int64 expected:int64 a0:int64 b0:int64 ta0:int64 tb0:int64 hint:i
             let tested=if tkb =? 'bool_' {b} else {a}
             let other=if tkb =? 'bool_' {a} else {b}
             let shown=wit_text(other)
-            let left=if nodes.ptr[tested].kind =? 'binary' and fact_comparison(cx_token_values[BinaryOperatorChecksWord(nodes.ptr[tested].op)]) {wit_text(BinaryOperatorChecksWord(nodes.ptr[tested].a))} else {""}
-            let right=if nodes.ptr[tested].kind =? 'binary' and fact_comparison(cx_token_values[BinaryOperatorChecksWord(nodes.ptr[tested].op)]) {wit_text(BinaryOperatorChecksWord(nodes.ptr[tested].b))} else {""}
+            let left=if nodes.ptr[tested].kind =? 'binary' and fact_comparison_raw(nodes.ptr[tested].op) {wit_text(BinaryOperatorChecksWord(nodes.ptr[tested].a))} else {""}
+            let right=if nodes.ptr[tested].kind =? 'binary' and fact_comparison_raw(nodes.ptr[tested].op) {wit_text(BinaryOperatorChecksWord(nodes.ptr[tested].b))} else {""}
             let mask=if shown not=? "" and left not=? "" and right not=? "" {": to test a mask, group it first, `({shown} {word} {left}) {op_text(cx_token_values[BinaryOperatorChecksWord(nodes.ptr[tested].op)] nodes.ptr[n].pos)} {right}`"} else {""}
             fatal(nodes.ptr[n].pos "`{word}` joins two truth values or two integers, not {dt(ta)} and {dt(tb)}, and a test binds tighter than it{mask}; to test an integer, compare it, as `x not=? 0`")
         }

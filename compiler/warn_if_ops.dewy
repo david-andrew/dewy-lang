@@ -6,7 +6,7 @@ from p"ast.jo" import (kid kids nkids nodes)
 from p"check.jo" import (ctxs cx fns)
 from p"checks_thin.dewy" import (resolve_type)
 from p"checked_eval.dewy" import (cx_token)
-from p"facts.jo" import (fact_comparison)
+from p"facts_slice_builder.dewy" import (fact_comparison_raw)
 from p"facts_compare.dewy" import (fact_inverse)
 from p"refine_predicates.dewy" import (ref_add)
 from p"refinement_types.dewy" import (FactRequest RefAtom RefTerm)
@@ -94,7 +94,7 @@ wi_negation=(decl:WarnWord c:WarnWord @out:array<RefAtom>):>void=>$unsafe {
         wi_affirm(decl WarnWord(nodes.ptr[c].a) @out)
         return
     }
-    if k =? 'binary' and fact_comparison(cx_token(nodes.ptr[c].op)) {
+    if k =? 'binary' and fact_comparison_raw(nodes.ptr[c].op) {
         ref_add(fact_inverse(cx_token(nodes.ptr[c].op)) wi_term(decl WarnWord(nodes.ptr[c].a)) wi_term(decl WarnWord(nodes.ptr[c].b)) @out)
         return
     }
@@ -112,7 +112,7 @@ wi_affirm=(decl:WarnWord c:WarnWord @out:array<RefAtom>):>void=>$unsafe {
         wi_negation(decl WarnWord(nodes.ptr[c].a) @out)
         return
     }
-    if k =? 'binary' and fact_comparison(cx_token(nodes.ptr[c].op)) {
+    if k =? 'binary' and fact_comparison_raw(nodes.ptr[c].op) {
         ref_add(cx_token(nodes.ptr[c].op) wi_term(decl WarnWord(nodes.ptr[c].a)) wi_term(decl WarnWord(nodes.ptr[c].b)) @out)
         return
     }

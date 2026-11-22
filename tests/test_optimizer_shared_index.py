@@ -3,14 +3,37 @@ from pathlib import Path
 import subprocess
 
 import pytest
+import shutil
+
+from tools.compiler.speed_equivalent import freeze
 
 from tests.support import compiler
 
 
-def test_shared_optimizer_index(compiler, tmp_path):
+def compare_operands(compiler, tmp_path, extension):
     root = Path(__file__).resolve().parents[1]
+    directory = tmp_path / 'compiler'
+    shutil.copytree(root / 'compiler', directory)
+    if extension == 'jo':
+        freeze(directory, ('opt_registers',))
     source = tmp_path / 'shared-index.jo'
-    source.write_text(f"use '{root}/compiler/ir_types.dewy'\nuse '{root}/compiler/ir.jo'\nuse '{root}/compiler/ir_builders.dewy'\nuse '{root}/compiler/opt.jo'\nuse '{root}/compiler/opt_core.dewy'\nuse '{root}/compiler/opt_sra.dewy'\nuse '{root}/compiler/opt_workspace.dewy'\n" + '''
+    source.write_text(f"use '{directory}/ir_types.dewy'\nuse '{directory}/ir.jo'\nuse '{directory}/ir_builders.dewy'\nuse '{directory}/opt_registers.{extension}'\nuse '{directory}/opt.jo'\nuse '{directory}/opt_core.dewy'\nuse '{directory}/opt_sra.dewy'\nuse '{directory}/opt_workspace.dewy'\n" + '''
+# Reset an odd prefix of an existing bank. Fields outside the reset contract stay intact.
+o_resize(5)
+loop v in [0..5):
+    o_regs[v].ndef = 7; o_regs[v].stable = true; o_regs[v].defpos = 8
+    o_regs[v].first = 9; o_regs[v].nuse = 3; o_regs[v].constant = true
+    o_regs[v].repl = -1; o_regs[v].ver = 11; o_regs[v].dop = 12
+    o_regs[v].cval = 100 + v
+o_resize(3)
+o_resize(0)
+loop v in [0..3):
+    r = o_regs[v]
+    assert(r.ndef == 0 and not r.stable and r.defpos == -1 and r.first == 2147483647)
+    assert(r.nuse == 0 and not r.constant and r.repl == i32(v) and r.ver == 0 and r.dop == -1)
+    assert(r.cval == 100 + v)
+assert(o_regs[3].ndef == 7 and o_regs[4].repl == -1)
+
 # Rewrite every operand shape, including indexed memory and indirect targets.
 loop opcode in [0..int(Op.findb) + 1):
     loop indexed in [0, M_INDEX]:
@@ -25,7 +48,9 @@ loop opcode in [0..int(Op.findb) + 1):
         expected: int[]
         defined = ir_operands(ins)
         loop k in [0..ir_use_count): expected.push(ir_use(k) + 16)
+        saved = ir.args
         o_rewrite(ins)
+        assert(saved == [i32(0), i32(5), i32(6), i32(0)])
         got = ir_operands(ins)
         if got != defined or ir_use_count != expected.len(): print("definition mismatch {opcode}")
         loop k in [0..ir_use_count):
@@ -59,3 +84,8 @@ print("shared index ok")
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout == 'shared index ok\n', ran.stdout
+
+
+@pytest.mark.parametrize("extension", ("dewy", "jo"))
+def test_opt_registers_shared_index_twins(compiler, tmp_path, extension):
+    compare_operands(compiler, tmp_path, extension)

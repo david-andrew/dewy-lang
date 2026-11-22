@@ -145,7 +145,7 @@ def decode_source(*extra):
     text += '\n'.join(function(core, name) for name in (
         'o_pure_classify', 'cse_arity_classify', 'o_defines_classify',
         'kills_memory_classify', 'o_retargetable_classify'))
-    return text + '\n'.join(function(original, name) for name in extra)
+    return text + '\n'.join(function((ROOT / 'compiler/opt_registers.jo').read_text(), name) for name in extra)
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])

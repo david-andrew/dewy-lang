@@ -11,6 +11,7 @@ use 'ast.jo'
 use 'check.jo'
 use 'types.jo'
 use 'facts.jo'
+use 'facts_slice_builder.dewy'
 use 'ownership.jo'
 use 'facts_forgets.dewy'
 use 'refine.jo'
@@ -71,7 +72,7 @@ fact_predicate_tree = (n: int, params: {int: int}, budget: mut int) -> int:
         term.op = .kw_not
         term.a = fact_predicate_tree(int(nodes[n].a), params, budget)
         if term.a == 0: return 0
-    else if k == .and_ or k == .or_ or k == .binary and nodes[n].aux == 0 and fact_comparison(nodes[n].op as Tok):
+    else if k == .and_ or k == .or_ or k == .binary and nodes[n].aux == 0 and fact_comparison_raw(nodes[n].op):
         if k == .binary:
             a = fact_type(ntype(int(nodes[n].a))); b = fact_type(ntype(int(nodes[n].b)))
             if not is_int(a) or not is_int(b) or a == T_U64 or b == T_U64: return 0

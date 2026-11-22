@@ -23,12 +23,12 @@ loop k in [0..wasm.len()):
 checked_flags = true
 print("table {o_make_decode().len()}")
 
-# The entry's register table (reset in Jo): growth, reuse and an entry past the end.
+# The entry's register table: growth, reuse and an entry past the end.
 o_resize(3)
 o_regs[1].ndef = 5
 o_regs[2].repl = 0
 o_regs[2].nuse = 7
-o_resize_one(40)
+ow_resize_one(40)
 o_resize(2)
 loop v in [0..41): print("{v} {o_regs[v].ndef} {o_regs[v].repl} {o_regs[v].defpos} {o_regs[v].first} {o_regs[v].nuse} {o_regs[v].dop}")
 print("count {o_reg_count} {o_fact_scope.len()} {o_fact_nbr.len()}")
@@ -83,7 +83,7 @@ def compare_core(compiler, tmp_path, release):
             freeze(source_dir, ('opt_core',))
         imports = ''.join(f"use '{source_dir / name}'\n" for name in
                           ('ir_types.dewy', 'ir.jo', 'ir_builders.dewy', 'opt_workspace.dewy',
-                           'opt.jo', 'opt_sra.dewy', f'opt_core.{extension}'))
+                           'opt.jo', 'opt_registers.dewy', 'opt_rewrite.dewy', 'opt_sra.dewy', f'opt_core.{extension}'))
         source = directory / 'driver.jo'
         binary = directory / 'driver'
         source.write_text(imports + DRIVER)

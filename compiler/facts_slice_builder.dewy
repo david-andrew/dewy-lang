@@ -1,0 +1,569 @@
+$runtime_checks
+from p"ast.jo" import (NF_COMPREHENSION NF_GLOBAL NF_INBOUNDS has_flag kid nkids nodes)
+from p"check.jo" import (LF_ALIAS LF_MUTPARAM fns locals)
+from p"checked_expression_nodes.dewy" import (mk_ident_local)
+from p"checker_tokens.dewy" import (Tok)
+from p"checks_thin.dewy" import (library_exit_call)
+from p"directives.jo" import (dir_assumed_bounds_any dir_floats_any)
+from p"effect_lattice.dewy" import (place_base)
+from p"effect_types.dewy" import (PlaceIdentity)
+from p"effects.jo" import (effect_summaries)
+from p"exact.jo" import (exact_marks exact_owners exact_rep_demands exact_rep_owners)
+from p"expr.jo" import (CV IN)
+from p"expression_types.dewy" import (ntype)
+from p"facts.jo" import (FACT_ACTIVE FACT_CONTRACT FACT_MEMBER FACT_VALUE FactSlice FactSliceEdges fact_constructor_calls fact_divisors fact_fork_nodes fact_mark_flags fact_mark_gen fact_mark_head fact_mark_stamp fact_mark_touched fact_member_admitted fact_member_owner fact_member_shared fact_owner fact_plan_serial fact_policy fact_probe_on fact_query fact_slice fact_slice_cache)
+from p"facts_arrays.dewy" import (fact_array_call)
+from p"facts_changes.dewy" import (fact_enum_cast fact_handle_opaque fact_partial_opaque fact_pure_binary fact_pure_conversion fact_pure_intrinsic)
+from p"facts_forgets.dewy" import (fact_exposed fact_fn_in_lib fact_own_local fact_pointer_cast fact_written_root)
+from p"facts_forks.dewy" import (fact_key_callback fact_parallel_array)
+from p"facts_index_writes.dewy" import (fact_index_put fact_index_sized)
+from p"facts_library.dewy" import (fact_chosen_call fact_copy_length_call fact_empty_array_call fact_endpoint_call fact_entry_count_call fact_exact_sum_call fact_gpu_index_call fact_heap_call fact_integer_gcd_call fact_library_call fact_nonempty_call fact_same_length_call)
+from p"facts_lifecycle.dewy" import (fact_bounded_index fact_exact_demand fact_parallel_range_call)
+from p"facts_loops.dewy" import (fact_loop_index_local fact_loop_step fact_loop_unbounded_field)
+from p"facts_maps.dewy" import (fact_map_bounded_call fact_map_call fact_map_clear_call fact_map_insert_call fact_map_snapshot_call)
+from p"facts_members.dewy" import (fact_member_admit)
+from p"facts_numeric.dewy" import (fact_extremum_call fact_mod_call fact_power_call fact_rational_constructor fact_rational_divmod fact_rational_promotion fact_rational_zero_test fact_shift_obliged)
+from p"facts_plan_cache.dewy" import (fact_plan_version)
+from p"facts_plans.dewy" import (fact_int_components fact_plan_current)
+from p"facts_pools.dewy" import (fact_pool_call)
+from p"facts_pushes.dewy" import (fact_carried_type fact_push_receiver fact_row_array)
+from p"facts_ranges.dewy" import (fact_floor_call fact_open_range fact_range_call fact_range_first fact_stepped_loop)
+from p"facts_slice_prep.dewy" import (fact_mark_of fact_mark_parent fact_mark_set fact_slice_contract_actuals fact_slice_member fact_slice_place_arguments fact_slice_push_children fact_slice_root fact_slice_target fact_slice_writer)
+from p"facts_summaries.dewy" import (fact_constructor_body fact_constructor_type fact_record_arrays fact_summary_payload)
+from p"facts_text.dewy" import (fact_affix_call fact_lines_call fact_regex_call fact_search_call fact_split_call fact_string_call fact_words_call)
+from p"facts_value_queries.dewy" import (fact_index_get)
+from p"facts_values.dewy" import (fact_place fact_scalar fact_type)
+from p"float_ops.dewy" import (ff_integer_demand)
+from p"floats.jo" import (ff_conversions)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"member_plan.dewy" import (member_expand_owner)
+from p"member_replay.jo" import (member_compact_owners)
+from p"nd_contracts.jo" import (fact_nd_call nd_mutable_call nd_mutable_handle nd_mutable_signatures)
+from p"numeric_library_types.dewy" import (is_nd)
+from p"ownership.jo" import (ownership_decls)
+from p"ownership_types.dewy" import (ownership_fact_type)
+from p"predicate_summaries.dewy" import (fact_predicate_summary)
+from p"proof_ops.dewy" import (ref_refined_result)
+from p"proofs.jo" import (proof_active result_active)
+from p"refine.jo" import (ref_self_active)
+from p"types.jo" import (T_BOOL T_MATH_INT T_NEVER T_U64 is_int prune tkind types)
+from p"warn_if.jo" import (wi_fact_calls)
+
+SliceWord:type=int64<overflow='wrap'>
+# Node.op uses the six consecutive frozen Tok ordinals eq through ge.
+fact_comparison_raw=(op:int32):>bool=>op >=? 69 and op <=? 74
+fact_comparison=(op:Tok):>bool=>{
+    op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge'
+}
+fact_root_key=(p:PlaceIdentity):>SliceWord=>{
+    let tag:SliceWord=match p.root {
+        <'local'> => 0
+        <'global'> => 1
+        <'formal'> => 2
+        <'capture'> => 3
+        <'resource'> => 4
+    }
+    (SliceWord(p.declaration) << 3) | tag
+}
+fact_mark_begin=():>void=>{
+    let gen=@fact_mark_gen
+    if fact_mark_stamp.length <? nodes.length {
+        fact_mark_stamp=fill(0 SliceWord(nodes.length) * 2 + 64)
+        fact_mark_flags=fill(0 fact_mark_stamp.length)
+        fact_mark_head=fill(0 fact_mark_stamp.length)
+        gen=0
+    }
+    gen=SliceWord(gen) + 1
+    fact_mark_touched=[]
+}
+fact_slice_prepare=(f:SliceWord summary:bool=false):>void=>$unsafe {
+    if member_compact_owners.length not=? 0 and (not fact_member_shared or summary or fact_probe_on or fact_query or f not=? fact_member_owner) {
+        member_expand_owner(f)
+    }
+    let key=(f << 4) | SliceWord(int64(summary)) | (SliceWord(int64(fact_probe_on)) << 1) | (SliceWord(int64(fact_policy =? 'RequireStatic')) << 2) | (SliceWord(int64(result_active or proof_active)) << 3)
+    # A mode retains its original plan through effect settlement, as before.
+    # Dependencies gate sharing with a mode that has not prepared its plan yet;
+    # refreshing an established mode would change its proof/witness budget.
+    let cached=fact_slice_cache.get(key)
+    if cached not=? none {fact_slice=cached; return}
+    # Static probes and finalizers have the same demand roots except floor
+    # probes. Share their canonical plan only with unchanged dependencies.
+    let share=not summary and fact_policy =? 'RequireStatic'
+    let peer=key xor 2
+    if share {
+        let cached=fact_slice_cache.get(peer)
+        if cached not=? none {
+            if not cached.probe_only and fact_plan_current(cached) {
+                fact_slice=cached
+                fact_slice_cache[key]=cached
+                return
+            }
+        }
+    }
+    # (O(body nodes + edges) for the slice: node-indexed scratch marks, an
+    # expected O(1) index for writers and for the finished slice)
+    fact_mark_begin()
+    let parents=FactSliceEdges()
+    let writers=FactSliceEdges()
+    let roots:array<int64>=[]
+    let exposed_writes:array<int64>=[]
+    let opaque_writes:array<int64>=[]
+    let work:array<int64>=[SliceWord(fns.ptr[f].body)]
+    let values:array<int64>=[]
+    let active:array<int64>=[]
+    let forks:array<int64>=[]
+    let accumulators=dict<int64 bool>()
+    let dependencies=dict<int64 bool>()
+    let callees:array<int64>=[]
+    let versions:array<int64>=[]
+    let exact_demands:array<int64>=[]
+    let index_demands:array<int64>=[]
+    let loop_indexes:array<int64>=[]
+    # (locals assigned other than by a step of their own value or a record's
+    # unrefined integer field, and those so assigned: loop_indexes keeps
+    # positions of the first kind only)
+    let plain_writes=dict<int64 bool>()
+    let stepped_writes=dict<int64 bool>()
+    let carried=false
+    let rows=false
+    let probe_only=false
+    let members=fact_member_shared and f =? fact_member_owner and not summary
+    # Preparation visits only exact owners. Gate its node indexes once per
+    # slice; unrelated bodies and summary slices have no exact value roots.
+    let exact=not summary and exact_marks.length >? 0 and exact_owners.has(f)
+    let representation=exact and f <? exact_rep_owners.length and exact_rep_owners.ptr[f]
+    if summary or result_active {values.push(SliceWord(fns.ptr[f].body))}
+    if summary {
+        loop l in fns.ptr[f].params {
+            if SliceWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 and (tkind(fact_type(SliceWord(locals.ptr[l].type))) =? 'array' or is_nd(fact_type(SliceWord(locals.ptr[l].type))) or fact_record_arrays(fact_type(SliceWord(locals.ptr[l].type)))) {
+                values.push(mk_ident_local(l locals.ptr[l].pos))
+            }
+        }
+    }
+    let cursor:SliceWord=0
+    loop cursor <? work.length {
+        let n=work.ptr[cursor]
+        cursor += 1
+        if n =? 0 or fact_mark_of(n) & FACT_MEMBER not=? 0 {continue}
+        fact_mark_set(n FACT_MEMBER)
+        let k=nodes.ptr[n].kind
+        if exact {
+            if fact_exact_demand(n) {
+                values.push(n)
+                if share {exact_demands.push(n)}
+            }
+            else if representation and n <? exact_rep_demands.length and exact_rep_demands.ptr[n] {values.push(n)}
+        }
+        # (children visited in place, a, b, c then kids: no list per node)
+        let mask=isolation_children(k)
+        # (`parallel` under `$no_assumed_bounds`: its range's size is an obligation)
+        if k =? 'parallel_region' and dir_assumed_bounds_any {fact_slice_member(@parents @work SliceWord(nodes.ptr[n].a) n)}
+        if mask >? 0 {
+            if mask & 1 not=? 0 {fact_slice_member(@parents @work SliceWord(nodes.ptr[n].a) n)}
+            if mask & 2 not=? 0 {fact_slice_member(@parents @work SliceWord(nodes.ptr[n].b) n)}
+            if mask & 4 not=? 0 {fact_slice_member(@parents @work SliceWord(nodes.ptr[n].c) n)}
+            if mask & 16 not=? 0 {
+                let walk=nkids(n)
+                if members and k =? 'block' and walk >? 1 and fact_member_admit(n) {walk=1}
+                loop i in [0..walk) {fact_slice_member(@parents @work kid(n i) n)}
+            }
+        }
+        if k =? 'block' and has_flag(n NF_COMPREHENSION) and nkids(n) >? 0 and nodes.ptr[kid(n 0)].kind =? 'vardecl' {accumulators[SliceWord(nodes.ptr[kid(n 0)].sym)]=true}
+        if k =? 'vardecl' {
+            if ownership_decls.length not=? 0 and nodes.ptr[n].b not=? 0 and ownership_fact_type(ntype(SliceWord(nodes.ptr[n].b))) {active.push(n)}
+            let l=SliceWord(nodes.ptr[n].sym)
+            if l not=? 0 {
+                let p=if has_flag(n NF_GLOBAL) {PlaceIdentity('global' 0 l)} else {PlaceIdentity('local' SliceWord(locals.ptr[l].owner) l)}
+                fact_slice_writer(@writers p n)
+            }
+            loop j in [0..nkids(n)) {
+                let c=kid(n j)
+                l=SliceWord(nodes.ptr[c].sym)
+                if l >? 0 and not has_flag(c NF_GLOBAL) {fact_slice_writer(@writers PlaceIdentity('local' SliceWord(locals.ptr[l].owner) l) n)}
+            }
+        }
+        if not rows and k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.push)) and nkids(n) =? 2 and fact_push_receiver(kid(n 0)) >? 0 and fact_row_array(ntype(kid(n 0))) {rows=true}
+        if k =? 'assign' {
+            let target=SliceWord(nodes.ptr[n].a)
+            if nodes.ptr[target].kind =? 'ident' and nodes.ptr[target].aux =? int32(1) and fact_carried_type(SliceWord(locals.ptr[SliceWord(nodes.ptr[target].sym)].type) f) {carried=true}
+            if nodes.ptr[target].kind =? 'ident' and nodes.ptr[target].aux =? int32(1) {
+                if fact_loop_step(SliceWord(nodes.ptr[n].b) SliceWord(nodes.ptr[target].sym)) or fact_loop_unbounded_field(SliceWord(nodes.ptr[n].b)) {stepped_writes[SliceWord(nodes.ptr[target].sym)]=true}
+                else {plain_writes[SliceWord(nodes.ptr[target].sym)]=true}
+            }
+            fact_slice_target(@writers target n)
+            if not summary and (fact_probe_on or fact_policy =? 'RequireStatic') and fact_shift_obliged(n) {values.push(n)}
+            let root=target
+            let raw=false
+            loop nodes.ptr[root].kind =? 'field' or nodes.ptr[root].kind =? 'index' {
+                if nodes.ptr[root].kind =? 'index' and tkind(fact_type(ntype(SliceWord(nodes.ptr[root].a)))) =? 'ptr' {raw=true}
+                root=SliceWord(nodes.ptr[root].a)
+            }
+            let p=fact_place(root)
+            # (a store through a raw pointer writes what raw access exposed: fact_route_raw)
+            if raw or p.declaration not=? 0 and fact_exposed(p) and not fact_own_local(p) {exposed_writes.push(n)}
+            else if p.declaration =? 0 {opaque_writes.push(n)}
+        }
+        if k =? 'for_' or k =? 'iflet' or k =? 'match_' {
+            let l=SliceWord(nodes.ptr[n].sym)
+            if l >? 0 {fact_slice_writer(@writers PlaceIdentity('local' SliceWord(locals.ptr[l].owner) l) n)}
+            if k =? 'for_' and nodes.ptr[n].aux =? 3 and nodes.ptr[n].aux2 >? 0 {
+                let vl=SliceWord(nodes.ptr[n].aux2)
+                fact_slice_writer(@writers PlaceIdentity('local' SliceWord(locals.ptr[vl].owner) vl) n)
+            }
+            if k =? 'for_' and not summary and (fact_probe_on or fact_policy =? 'RequireStatic') and (fact_stepped_loop(n) or fact_open_range(n)) {values.push(n)}
+        }
+        if k =? 'if_' or k =? 'while_' or k =? 'for_' or k =? 'iflet' or k =? 'match_' or k =? 'and_' or k =? 'or_' or k =? 'coalesce' {
+            # A while can prevent a later obligation from being reached,
+            # even when none of its writes feed that obligation.
+            if k =? 'while_' {active.push(n)}
+        }
+        else if k =? 'return_' {
+            active.push(n)
+            if summary or result_active {values.push(SliceWord(nodes.ptr[n].a))}
+        }
+        else if k =? 'break_' or k =? 'continue_' or k =? 'defer_' {active.push(n)}
+        else if k =? 'call' {
+            if ntype(n) =? T_NEVER or nodes.ptr[n].aux =? 0 and library_exit_call(n) {active.push(n)}
+            if not summary and (fact_probe_on or fact_policy =? 'RequireStatic') and (fact_library_call(n "parallel_range") or fact_library_call(n "parallel_map") or fact_parallel_array(n)) {
+                loop j in [0..nkids(n)) {
+                    let arg=kid(n j)
+                    if nodes.ptr[arg].kind =? 'lambda' and nodes.ptr[arg].sym >? 0 {
+                        fact_fork_nodes[arg]=true
+                        forks.push(arg)
+                    }
+                }
+                if fact_parallel_array(n) {
+                    values.push(n)
+                    values.push(kid(n 0))
+                }
+            }
+            if not summary and dir_assumed_bounds_any and fact_parallel_range_call(n) {
+                active.push(n)
+                values.push(n)
+                if fact_library_call(kid(n 0) "__dewy_range") {
+                    values.push(kid(kid(n 0) 0))
+                    values.push(kid(kid(n 0) 2))
+                }
+            }
+            if not summary and (fact_probe_on or fact_policy =? 'RequireStatic') and fact_key_callback(n) >? 0 {
+                let arg=fact_key_callback(n)
+                fact_fork_nodes[arg]=true
+                forks.push(arg)
+                values.push(n)
+                values.push(kid(n 0))
+            }
+            if result_active or proof_active or fact_divisors.has(n) or fact_rational_constructor(n) or fact_rational_promotion(n) or fact_rational_divmod(n) {values.push(n)}
+            else if not summary and (fact_probe_on or fact_policy =? 'RequireStatic') and fact_string_call(n) >=? 2 {values.push(n)}
+            else if not summary and (fact_probe_on or fact_policy =? 'RequireStatic') and fact_rational_zero_test(n) >=? 0 {
+                values.push(n)
+                values.push(kid(n fact_rational_zero_test(n)))
+            }
+            else if not summary and (fact_probe_on or fact_policy =? 'RequireStatic') and fact_power_call(n) {
+                values.push(n)
+                values.push(kid(n 1))
+                values.push(kid(n 0))
+            }
+            else if not summary and (fact_probe_on or fact_policy =? 'RequireStatic') and fact_range_call(n) {
+                let first=fact_range_first(n true)
+                values.push(n)
+                values.push(kid(n first))
+                values.push(kid(n first + 1))
+            }
+            else if not summary and (fact_probe_on or fact_policy =? 'RequireStatic') and (nd_mutable_call(n) or fact_array_call(n) not=? 0 or fact_map_call(n) not=? 0 or fact_map_insert_call(n) or ref_self_active and (fact_map_clear_call(n) or fact_map_bounded_call(n) not=? 0) or fact_nonempty_call(n) or fact_heap_call(n) not=? 0 or fact_exact_sum_call(n) or fact_pool_call(n) not=? 0 or fact_gpu_index_call(n)) {
+                active.push(n)
+                values.push(n)
+                loop j in [0..nkids(n)) {values.push(kid(n j))}
+            }
+            else if (fact_probe_on or share) and fact_floor_call(n) not=? 0 {
+                if fact_probe_on {values.push(n)}
+                probe_only=true
+            }
+            loop j in [0..nkids(n)) {
+                let arg=kid(n j)
+                if ownership_decls.length not=? 0 and ownership_fact_type(ntype(arg)) {active.push(n)}
+                if nodes.ptr[arg].kind =? 'conv' and nodes.ptr[arg].aux =? int32(int64(CV.refinement)) {
+                    if nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 {
+                        fact_mark_set(n fact_mark_of(n) | FACT_CONTRACT)
+                        fact_slice_contract_actuals(n arg @values)
+                    }
+                    else {values.push(n)}
+                }
+            }
+            if wi_fact_calls.length >? 0 and wi_fact_calls.has(n) {
+                values.push(n)
+                loop j in [0..nkids(n)) {values.push(kid(n j))}
+            }
+            let callee=SliceWord(nodes.ptr[n].sym)
+            if share and nodes.ptr[n].aux =? 0 and callee >? 0 and not dependencies.has(callee) {
+                dependencies[callee]=true
+                callees.push(callee)
+                versions.push(fact_plan_version(callee))
+            }
+            if nodes.ptr[n].aux =? 0 and callee >? 0 and ref_refined_result(SliceWord(fns.ptr[callee].ret)) {values.push(n)}
+            if nodes.ptr[n].aux =? 0 and callee >? 0 and callee <? effect_summaries.length and effect_summaries.ptr[callee].done {
+                let opaque=false
+                loop event in effect_summaries.ptr[SliceWord(nodes.ptr[n].sym)].events {
+                    if event.atom.kind =? 'opaque' or event.atom.kind =? 'escape' or event.atom.kind =? 'io' and fact_fn_in_lib(f) {
+                        exposed_writes.push(n)
+                        opaque=true
+                    }
+                    if event.atom.kind not=? 'write' {continue}
+                    let p=place_base(event.atom.place)
+                    if p.root =? 'formal' {
+                        let i=p.declaration - 1
+                        p=if i >=? 0 and i <? nkids(n) {fact_written_root(kid(n i))} else {PlaceIdentity('local' 0 0)}
+                    }
+                    if p.declaration =? 0 {exposed_writes.push(n)}
+                    else {
+                        fact_slice_writer(@writers p n)
+                        if fact_exposed(p) and not fact_own_local(p) {exposed_writes.push(n)}
+                    }
+                }
+                # (an opaque callee writes its place arguments too: fact_call_effects forgets them)
+                if opaque {fact_slice_place_arguments(@writers n)}
+            }
+            else if nodes.ptr[n].aux not=? 2 and nodes.ptr[n].aux not=? 3 {
+                exposed_writes.push(n)
+                fact_slice_place_arguments(@writers n)
+            }
+        }
+        else if k =? 'intrinsic' {
+            let id=nodes.ptr[n].aux as IN
+            if id =? IN.push or id =? IN.pop or id =? IN.clear or id =? IN.reserve or id =? IN.insert or id =? IN.remove or id =? IN.extend or id =? IN.truncate or id =? IN.resize {
+                fact_slice_target(@writers kid(n 0) n)
+                # (as an assignment's: a write to an exposed root, a global or an
+                # `@` parameter, may change every other exposed root)
+                let p=fact_slice_root(kid(n 0))
+                if p.declaration =? 0 {opaque_writes.push(n)}
+                else if fact_exposed(p) and not fact_own_local(p) {exposed_writes.push(n)}
+                # (removing needs an element, truncating a nonnegative count)
+                if not summary and fact_policy =? 'RequireStatic' and (id =? IN.pop or id =? IN.remove or id =? IN.truncate) {
+                    active.push(n)
+                    values.push(n)
+                }
+            }
+            else if id =? IN.static_assert or id =? IN.runtime_assert or id =? IN.assert or id =? IN.panic or id =? IN.unreachable or id =? IN.lend or id =? IN.loan_length or id =? IN.loan_store {values.push(n)}
+            else if id not=? IN.len and not fact_pure_intrinsic(id) {opaque_writes.push(n)}
+        }
+        else if k =? 'index' {
+            if not summary and (fact_probe_on or fact_policy =? 'RequireStatic') and not has_flag(n NF_INBOUNDS) and fact_bounded_index(n) {
+                if share {index_demands.push(n)}
+                if fact_loop_index_local(n) >? 0 {loop_indexes.push(n)}
+                active.push(n)
+                values.push(SliceWord(nodes.ptr[n].b))
+                if types.ptr[fact_type(ntype(SliceWord(nodes.ptr[n].a)))].kind not=? 'fixed' {values.push(SliceWord(nodes.ptr[n].a))}
+            }
+        }
+        else if k =? 'conv' {
+            if ff_integer_demand(n) {values.push(n)}
+            if nodes.ptr[n].aux =? int32(int64(CV.refinement)) or nodes.ptr[n].aux =? int32(int64(CV.arr2fixed)) {values.push(n)}
+            # (an `int` narrowed to a fixed width: an obligation, and effect_failure asks whether it fits)
+            else if (fact_probe_on or fact_policy =? 'RequireStatic') and not summary and nodes.ptr[n].aux =? int32(int64(CV.int_)) and prune(ntype(SliceWord(nodes.ptr[n].a))) =? T_MATH_INT and prune(ntype(n)) not=? T_MATH_INT {values.push(n)}
+            else if ownership_decls.length not=? 0 and nodes.ptr[n].aux =? int32(int64(CV.explicit_copy)) and ownership_fact_type(ntype(n)) {opaque_writes.push(n)}
+            else if nodes.ptr[n].aux not=? int32(int64(CV.int_)) and nodes.ptr[n].aux not=? int32(int64(CV.none_)) and nodes.ptr[n].aux not=? int32(int64(CV.fixed2arr)) and not fact_pure_conversion(n) {exposed_writes.push(n)}
+        }
+        else if k =? 'binary' {
+            if nodes.ptr[n].aux not=? 0 and not fact_pure_binary(n) {exposed_writes.push(n)}
+            else if not summary and (fact_probe_on or fact_policy =? 'RequireStatic') and (nodes.ptr[n].op =? int32(61) or nodes.ptr[n].op =? int32(62) or fact_shift_obliged(n)) {values.push(n)}
+        }
+        # (a closure writes only when called: fact_capture)
+        else if k =? 'lambda' and ownership_decls.length =? 0 {}
+        else if k =? 'lambda' or k =? 'partial' and fact_partial_opaque(n) or k =? 'fnref' and fact_handle_opaque(n) or k =? 'map_lit' or k =? 'cast' and not fact_enum_cast(n) and not fact_pointer_cast(n) or mask <? 0 {opaque_writes.push(n)}
+        else if k =? 'str_lit' and nodes.ptr[n].aux not=? 0 {exposed_writes.push(n)}
+        if not summary and nd_mutable_signatures.length not=? 0 and nd_mutable_handle(n) {values.push(n)}
+    }
+    # (a fork closure's creation reads its captures: their definitions)
+    loop lam in forks {
+        values.push(lam)
+        loop cap in fns.ptr[SliceWord(nodes.ptr[lam].sym)].caps {
+            let o=int64(cap.outer)
+            if o <=? 0 {continue}
+            let edge=fact_index_get(writers.heads fact_root_key(PlaceIdentity('local' SliceWord(locals.ptr[o].owner) o)))
+            loop edge >=? 0 {
+                let definition=writers.nodes.ptr[edge]
+                edge=writers.next.ptr[edge]
+                if nodes.ptr[definition].kind =? 'call' {active.push(definition)}
+                else {values.push(definition)}
+            }
+        }
+    }
+    cursor=0
+    let acursor:SliceWord=0
+    let any_root=false
+    let any_exposed=false
+    loop cursor <? values.length or acursor <? active.length {
+        if acursor <? active.length {
+            let n=active.ptr[acursor]
+            acursor += 1
+            if n =? 0 {continue}
+            let mark=fact_mark_of(n)
+            if mark & FACT_ACTIVE not=? 0 {continue}
+            fact_mark_set(n mark | FACT_ACTIVE)
+            let edge=fact_mark_parent(n)
+            loop edge >=? 0 {
+                active.push(parents.nodes.ptr[edge])
+                edge=parents.next.ptr[edge]
+            }
+            let k=nodes.ptr[n].kind
+            # A demanded plain alias store still evaluates an indexed route.
+            # Its declaration has no runtime initializer left in the body;
+            # demand the alias so its selectors and container definitions feed
+            # the bounds/membership obligation in fact_store_route. O(1) here,
+            # with the existing node-indexed worklist visiting each route once.
+            if k =? 'assign' {
+                let target=SliceWord(nodes.ptr[n].a)
+                if nodes.ptr[target].kind =? 'ident' and nodes.ptr[target].aux =? int32(1) {
+                    let l=SliceWord(nodes.ptr[target].sym)
+                    if SliceWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 {values.push(target)}
+                }
+            }
+            if k =? 'if_' or k =? 'while_' or k =? 'for_' or k =? 'iflet' or k =? 'match_' or k =? 'and_' or k =? 'or_' or k =? 'coalesce' {
+                values.push(SliceWord(nodes.ptr[n].a))
+                if k =? 'match_' {
+                    loop j in [0..nkids(n)) {
+                        let arm=kid(n j)
+                        loop ki in [0..nkids(arm)) {values.push(kid(arm ki))}
+                    }
+                }
+            }
+            continue
+        }
+        let n=values.ptr[cursor]
+        cursor += 1
+        if n =? 0 {continue}
+        let mark=fact_mark_of(n)
+        if mark & FACT_VALUE not=? 0 {continue}
+        fact_mark_set(n mark | FACT_VALUE)
+        active.push(n)
+        let k=nodes.ptr[n].kind
+        if k =? 'ident' {
+            let p=fact_place(n)
+            let root=fact_root_key(p)
+            if fact_index_get(roots root) <? 0 {
+                fact_index_put(@roots root 0)
+                let edge=fact_index_get(writers.heads root)
+                loop edge >=? 0 {
+                    let definition=writers.nodes.ptr[edge]
+                    edge=writers.next.ptr[edge]
+                    if nodes.ptr[definition].kind =? 'call' {active.push(definition)}
+                    else {values.push(definition)}
+                }
+            }
+            if not any_root {
+                any_root=true
+                loop w in opaque_writes {values.push(w)}
+            }
+            if not any_exposed and p.declaration not=? 0 and fact_exposed(p) {
+                any_exposed=true
+                loop write in exposed_writes {
+                    if nodes.ptr[write].kind =? 'call' {active.push(write)}
+                    else {values.push(write)}
+                }
+            }
+            if nodes.ptr[n].aux =? int32(1) {
+                let l=SliceWord(nodes.ptr[n].sym)
+                if SliceWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 {values.push(SliceWord(locals.ptr[l].alias))}
+            }
+        }
+        if k =? 'block' {
+            if nkids(n) >? 0 {values.push(kid(n nkids(n) - 1))}
+        }
+        else if k =? 'for_' or k =? 'while_' {values.push(SliceWord(nodes.ptr[n].a))}
+        # (a store's check reads the array it stores into)
+        else if k =? 'conv' and nodes.ptr[n].b not=? 0 and nodes.ptr[n].aux =? int32(int64(CV.refinement)) {
+            values.push(SliceWord(nodes.ptr[n].a))
+            values.push(SliceWord(nodes.ptr[n].b))
+        }
+        # (a fork closure's creation reads its captures, pushed above, not its body)
+        else if k =? 'lambda' {}
+        else if k =? 'call' and fact_nd_call(n) not=? 0 {
+            loop j in [0..nkids(n)) {values.push(kid(n j))}
+        }
+        else if k =? 'call' and ntype(n) =? T_BOOL and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 and fact_predicate_summary(SliceWord(nodes.ptr[n].sym)) not=? 0 {
+            loop j in [0..nkids(n)) {values.push(kid(n j))}
+        }
+        else if k =? 'call' and fact_map_snapshot_call(n) {values.push(kid(n 0))}
+        else if k =? 'call' and fact_regex_call(n) {
+            loop j in [0..nkids(n)) {values.push(kid(n j))}
+        }
+        else if k =? 'call' and fact_integer_gcd_call(n) {
+            loop j in [0..nkids(n)) {values.push(kid(n j))}
+        }
+        # (a length-preserving call's length is its receiver's: `let ks = d.keys` then `ks.values`
+        # needs ks's definition)
+        else if k =? 'call' and (fact_copy_length_call(n) or fact_endpoint_call(n) not=? 0 or fact_same_length_call(n) or fact_chosen_call(n)) {values.push(kid(n 0))}
+        else if k =? 'call' and nodes.ptr[n].aux =? 0 and not result_active and not proof_active and not fact_divisors.has(n) and not fact_rational_constructor(n) and not fact_rational_promotion(n) and not fact_rational_divmod(n) and fact_floor_call(n) =? 0 and fact_string_call(n) =? 0 and not fact_extremum_call(n) and not fact_mod_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n) and not ref_refined_result(SliceWord(fns.ptr[SliceWord(nodes.ptr[n].sym)].ret)) {
+            # Ordinary summaries start from unknown formals: their return
+            # facts do not depend on the actual values. Argument obligations
+            # and effects remain separate roots of this slice.
+            let ret=fact_type(SliceWord(fns.ptr[SliceWord(nodes.ptr[n].sym)].ret))
+            let constructor=(types.ptr[ret].kind =? 'struct_' or types.ptr[ret].kind =? 'tuple') and fact_constructor_type(ret) and fact_constructor_body(SliceWord(nodes.ptr[n].sym))
+            if constructor {fact_constructor_calls[n]=true}
+            let array_result=tkind(ret) =? 'array' or constructor
+            # Array lengths also bound scalar search results. Demand these
+            # actuals only for result kinds the summary domain can describe.
+            if array_result or fact_scalar(ret) and is_int(ret) and ret not=? T_U64 or fact_summary_payload(ret) not=? 0 {
+                loop j in [0..nkids(n)) {
+                    let arg=kid(n j)
+                    let at=fact_type(ntype(arg))
+                    if tkind(at) =? 'array' or tkind(at) =? 'fixed' or array_result and fact_scalar(at) and is_int(at) and at not=? T_U64 {values.push(arg)}
+                    # (a record's array field bounds a scalar result too: fact_summary_fields)
+                    else if not array_result and fact_record_arrays(at) {values.push(arg)}
+                }
+            }
+        }
+        else if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.remove)) {
+            values.push(kid(n 0))
+            values.push(kid(n 1))
+        }
+        else if k =? 'intrinsic' and (nodes.ptr[n].aux =? int32(int64(IN.push)) or nodes.ptr[n].aux =? int32(int64(IN.pop)) or nodes.ptr[n].aux =? int32(int64(IN.clear)) or nodes.ptr[n].aux =? int32(int64(IN.reserve)) or nodes.ptr[n].aux =? int32(int64(IN.insert))) {
+            values.push(kid(n 0))
+            if nodes.ptr[n].aux =? int32(int64(IN.push)) and nkids(n) =? 2 and tkind(fact_type(ntype(kid(n 1)))) =? 'array' {values.push(kid(n 1))}
+            # (an integer comprehension's pushes join its element hull)
+            if nodes.ptr[n].aux =? int32(int64(IN.push)) and nkids(n) =? 2 and accumulators.has(fact_push_receiver(kid(n 0))) and (fact_scalar(ntype(kid(n 1))) and is_int(ntype(kid(n 1))) or fact_int_components(fact_type(ntype(kid(n 1)))) >? 0) {values.push(kid(n 1))}
+        }
+        else if k =? 'intrinsic' and (nodes.ptr[n].aux =? int32(int64(IN.extend)) or nodes.ptr[n].aux =? int32(int64(IN.truncate)) or nodes.ptr[n].aux =? int32(int64(IN.resize)) or nodes.ptr[n].aux =? int32(int64(IN.setlen))) {
+            values.push(kid(n 0))
+            values.push(kid(n 1))
+        }
+        else {fact_slice_push_children(@values n)}
+    }
+    let lo=SliceWord(nodes.length)
+    let hi:SliceWord=-1
+    let count:SliceWord=0
+    loop n in fact_mark_touched {
+        if fact_mark_flags.ptr[n] not=? 0 {
+            lo=min(lo n)
+            hi=max(hi n)
+            count += 1
+        }
+    }
+    if hi >=? lo and hi - lo <? 4 * count + 64 {
+        let flags:array<int64>=fill(int64(0) hi - lo + 1)
+        loop n in fact_mark_touched {
+            if fact_mark_flags.ptr[n] not=? 0 {flags.ptr[n - lo]=fact_mark_flags.ptr[n]}
+        }
+        fact_slice=FactSlice(flags probe_only lo carried rows)
+    }
+    else {
+        let flags=fact_index_sized(count)
+        loop n in fact_mark_touched {
+            if fact_mark_flags.ptr[n] not=? 0 {fact_index_put(@flags n fact_mark_flags.ptr[n])}
+        }
+        fact_slice=FactSlice(flags probe_only carried=carried rows=rows)
+    }
+    let serial=@fact_plan_serial
+    serial=SliceWord(serial) + 1
+    fact_slice.plan=fact_plan_serial
+    fact_slice.callees=callees
+    fact_slice.versions=versions
+    fact_slice.exact_demands=exact_demands
+    fact_slice.index_demands=index_demands
+    loop m in loop_indexes {
+        let x=fact_loop_index_local(m)
+        if plain_writes.has(x) and not stepped_writes.has(x) {fact_slice.loop_indexes.push(m)}
+    }
+    if share {fact_slice.float_context=dir_floats_any or ff_conversions.has(fact_owner)}
+    # (a plan that walks only member templates serves only the shared decide run)
+    if not members or fact_member_admitted.length =? 0 {fact_slice_cache[key]=fact_slice}
+}

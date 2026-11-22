@@ -29,7 +29,9 @@ fns: FnInst[] = [FnInst()]
 locals: Local[] = [Local()]
 fact_type = (t: int) -> int: t
 fact_scalar = (t: int) -> bool: t != T_OTHER
-fact_comparison = (op: Tok) -> bool: op == .lt or op == .eq or op == .le
+fact_comparison_raw = (raw: i32) -> bool:
+    op = raw as Tok
+    op == .lt or op == .eq or op == .le
 has_flag = (n: int, f: int) -> bool: int(nodes[n].flags) & f != 0
 ref_encoded = (x: int, t: int) -> int: x * 2 + t
 cx_token = (value: int) -> Tok: value as Tok

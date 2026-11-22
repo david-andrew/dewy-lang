@@ -2,7 +2,7 @@ use 'check.jo'
 use 'checks_thin.dewy'
 use 'member_plan.dewy'
 use 'member_replay.jo'
-# Check a body, then expand it if its member loop was kept compact.
+# Frozen implementation. Check a body, then expand it if its member loop was kept compact.
 checked_member_body = (f: int):
     check_fn_body(f)
     if member_compact_owners.len() > 0 and fns[f].state == 2: member_expand_owner(f)

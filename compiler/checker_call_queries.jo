@@ -340,7 +340,7 @@ cl_named_now = (name: int, mod: int, out: mut int[]):
             if ed == d and ed != 0 and not cl_method(ed): keep = true
             e = int(cg_syms[0][e].next)
         if keep:
-            out[kept] = d
+            if kept != i: out[kept] = d
             kept += 1
     loop out.len() > kept: out.pop()
 collect_named = (name: int, mod: int, out: mut int[]):
