@@ -35,6 +35,7 @@ def effect_services(text, modules):
 
 def type_helpers_home(text):
     """An isolated harness whose types.jo is a double reads the moved type helpers from that double."""
-    for stem in ('type_ops', 'word_overflow'):
-        text = text.replace(stem + '.dewy', 'types.jo').replace(stem + '.jo', 'types.jo')
+    for stem, home in (('type_ops', 'types.jo'), ('word_overflow', 'types.jo'),
+                       ('checker_type_entries', 'check.jo')):
+        text = text.replace(stem + '.dewy', home).replace(stem + '.jo', home)
     return text

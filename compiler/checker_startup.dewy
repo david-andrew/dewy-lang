@@ -1,9 +1,11 @@
 $runtime_checks
+from p"checker_type_entries.dewy" import (get_fn_inst)
+from p"checker_scope_symbols.dewy" import (new_sym)
 from p"intrinsic_registration.dewy" import (register_intrinsics)
 from p"@lib/core/os.jo" import (file_exists list_dir)
 from p"@lib/core/str.jo" import (ends_with)
 from p"ast.jo" import (mk NF_EXTERN decl_has_rest has_flag kid nkids nodes)
-from p"check.jo" import (fns get_fn_inst lib_dir modules runtime_ffi_done runtime_ffi_scan syms target_macos target_wasm target_windows)
+from p"check.jo" import (fns lib_dir modules runtime_ffi_done runtime_ffi_scan syms target_macos target_wasm target_windows)
 from p"checker_load_module.dewy" import (load_module)
 from p"checker_signature.dewy" import (fn_sig)
 from p"checker_tree_queries.dewy" import (pushes_into)
@@ -15,7 +17,7 @@ from p"prelude_ops.dewy" import (defer_prelude prelude_known_names prelude_lazy_
 from p"util.jo" import (files intern name_of)
 
 from p"checker_state.dewy" import Global
-from p"check.jo" import (demanded globals icon_node new_sym program_name release_build target_arm64 universe watch_build)
+from p"check.jo" import (demanded globals icon_node program_name release_build target_arm64 universe watch_build)
 from p"checks_thin.dewy" import ml_bump
 from p"error_ops.dewy" import exception_builtins
 from p"refinement_types.dewy" import (RefAtom RefTerm)

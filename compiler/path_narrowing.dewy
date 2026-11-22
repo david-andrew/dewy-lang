@@ -1,12 +1,14 @@
 $runtime_checks
+from p"checker_scope_symbols.dewy" import (new_local)
+from p"expression_types.dewy" import (ntype)
 from p"type_ops.dewy" import (union_index)
 from p"checks_thin.dewy" import (narrow_invalidate)
 from p"@lib/core/str.jo" import (starts_with)
 from p"checked_expression_nodes.dewy" import (mk_ident_local)
 from p"checker_expr.dewy" import (lookup)
 from p"ast.jo" import (NF_CHECKED add_flag mk nodes)
-from p"check.jo" import (LF_ALIAS LF_UNNARROWED check_scopes ctxs cx locals new_local syms)
-from p"expr.jo" import (CV narrow_expr ntype path_key path_narrows path_rooted_g path_rooted_l)
+from p"check.jo" import (LF_ALIAS LF_UNNARROWED check_scopes ctxs cx locals syms)
+from p"expr.jo" import (CV narrow_expr path_key path_narrows path_rooted_g path_rooted_l)
 from p"types.jo" import (is_union prune type_eq types union_members)
 from p"util.jo" import (intern name_of)
 

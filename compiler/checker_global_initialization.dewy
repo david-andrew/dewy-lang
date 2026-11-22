@@ -1,0 +1,162 @@
+$runtime_checks
+from p"checker_values.dewy" import (values_init)
+from p"checks_unpack.dewy" import (unpack_binding)
+from p"temperature_kinds.jo" import (tk_bindings)
+from p"temperature_ops.dewy" import (temperature_binding tk_literal_unit)
+from p"refine.jo" import (refine_active)
+from p"refine_rare.dewy" import (ref_holder_arm)
+from p"unit_ops.dewy" import (quantity_constant_scale)
+from p"util.jo" import (name_of)
+from p"checks_thin.dewy" import (jd leave_module_context resolve_binding_type)
+from p"units.jo" import (is_quantity)
+from p"string_domain_ops.dewy" import (int_domain_declare string_domain_declare)
+from p"checker_place_escapes.dewy" import (global_place_decl)
+from p"cycle_ops.dewy" import (global_cycle_across_modules)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"checker_contexts.dewy" import (enter_module_context)
+from p"import_cycles.jo" import (ensuring_globals)
+from p"checks_hints.dewy" import (empty_hint)
+from p"checks_stmt_hooks.dewy" import (empty_braces empty_braces_text)
+from p"type_ops.dewy" import (dt zonk)
+from p"definite_walk.dewy" import (dg_record)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"decimal_ops.dewy" import (decimal_binding_type decimal_global decimal_quantity_start)
+from p"expr.jo" import (coerce last_checked lit_default quat_globals quat_nodes struct_default)
+from p"check.jo" import (check_scopes ctxs cx globals module_ctx open_globals)
+from p"checker_binding_inputs.dewy" import (check_binding_input)
+from p"types.jo" import (T_MATH_INT T_STR has_var prune targ tkind types)
+from p"ast.jo" import (NF_CHECKED NF_LITERAL NF_RDONLY add_flag clone has_flag kid kids nkids nodes set_list)
+
+GlobalInitWord:type=int64<overflow='wrap'>
+
+# (in_flow: its declaration reached among the top-level statements, after what they narrowed,
+# `if r == none: panic(...)` say, which it then sees; elsewhere it is checked on its own)
+ensure_global=(g:GlobalInitWord use_pos:int64 in_flow:bool=false):>void=>$unsafe {
+    let cx_slot=@cx
+    if globals.ptr[g].state =? 2 {return}
+    if globals.ptr[g].state =? 1 {
+        let gn=name_of(GlobalInitWord(globals.ptr[g].name))
+        global_cycle_across_modules(g use_pos)
+        let binding=jd(use_pos "`{gn} = 0`" "`let {gn} = 0`")
+        fatal(use_pos "'{gn}' is used in its own first value, before it has one: give it one first ({binding} on a line above), then change it")
+    }
+    globals[g].state = 1
+    ensuring_globals.push(g)
+    let saved=cx_slot
+    let m=GlobalInitWord(globals.ptr[g].mod)
+    let entered=enter_module_context(m)
+    let flow=in_flow and cx_slot =? module_ctx[m]
+    cx_slot=module_ctx[m]
+    let saved_floor=ctxs.ptr[cx_slot].floor
+    if not flow {ctxs[cx_slot].floor = int32<overflow='wrap'>(check_scopes.names.length)}
+    let d=GlobalInitWord(globals.ptr[g].decl)
+    if globals.ptr[g].is_const {
+        let t:GlobalInitWord=0
+        if nodes.ptr[d].a not=? 0 {
+            ref_holder_arm(GlobalInitWord(nodes.ptr[d].a) GlobalInitWord(nodes.ptr[d].name))
+            t=resolve_binding_type(GlobalInitWord(nodes.ptr[d].a))
+        }
+        let cl=clone(GlobalInitWord(nodes.ptr[d].b))
+        let et=values_init(cl t)
+        cl=last_checked
+        if t not=? 0 {cl=coerce(cl t)}
+        else if has_flag(cl NF_LITERAL) {
+            t=lit_default(cl)
+        }
+        else {t=et}
+        globals[g].type = int32<overflow='wrap'>(zonk(t))
+        globals[g].init = nodes.ptr[d].b # unchecked original: each use checks a fresh copy
+    }
+    else if nodes.ptr[d].nlist >? 0 {
+        if not has_flag(d NF_CHECKED) {
+            let t=check_binding_input(d)
+            let unpacked=unpack_binding(GlobalInitWord(nodes.ptr[d].b) t kids(d) nodes.ptr[d].pos)
+            t=unpacked[0]
+            set_list(d unpacked[1])
+            nodes[d].b = int32<overflow='wrap'>(last_checked)
+            if types.ptr[t].kind not=? 'tuple' or GlobalInitWord(types.ptr[t].nargs) not=? nkids(d) {fatal(nodes.ptr[d].pos "expected a tuple with {nkids(d)} elements (or an array), found {dt(t)}")}
+            loop k in [0..nkids(d)) {
+                let id=kid(d k)
+                if nodes.ptr[id].kind =? 'hole' {continue}
+                let gg=GlobalInitWord(nodes.ptr[id].sym)
+                globals[gg].type = int32<overflow='wrap'>(zonk(targ(t k)))
+                globals[gg].state = 2
+            }
+            add_flag(d NF_CHECKED)
+            nodes[d].type = int32<overflow='wrap'>(t)
+        }
+    }
+    else {
+        let t:GlobalInitWord=0
+        if nodes.ptr[d].a not=? 0 {
+            ref_holder_arm(GlobalInitWord(nodes.ptr[d].a) GlobalInitWord(nodes.ptr[d].name))
+            t=resolve_binding_type(GlobalInitWord(nodes.ptr[d].a))
+        }
+        if refine_active and types.ptr[prune(t)].kind =? 'refined' and nodes.ptr[d].b =? 0 {nodes[d].b = int32<overflow='wrap'>(struct_default(t nodes.ptr[d].pos))}
+        # (x: T, a struct with default field values: it starts with them)
+        if nodes.ptr[d].b =? 0 and t not=? 0 {nodes[d].b = int32<overflow='wrap'>(struct_default(t nodes.ptr[d].pos))}
+        # (Dewy's `let g:T` with no value: given one before any read, dg_check_program)
+        if nodes.ptr[d].b =? 0 and dewy_at(nodes.ptr[d].pos) {dg_record(g)}
+        let tk_unit:GlobalInitWord=0
+        if nodes.ptr[d].b not=? 0 {
+            global_place_decl(d)
+            if t =? 0 and dewy_at(nodes.ptr[d].pos) {tk_unit=tk_literal_unit(GlobalInitWord(nodes.ptr[d].b))}
+            let et=values_init(GlobalInitWord(nodes.ptr[d].b) t)
+            nodes[d].b = int32<overflow='wrap'>(last_checked)
+            if quat_nodes.has(GlobalInitWord(nodes.ptr[d].b)) {quat_globals[g] = true}
+            if t not=? 0 {nodes[d].b = int32<overflow='wrap'>(coerce(GlobalInitWord(nodes.ptr[d].b) t))}
+            else {
+                t=et
+                if has_flag(GlobalInitWord(nodes.ptr[d].b) NF_LITERAL) {
+                    t=decimal_binding_type(nodes.ptr[d].pos lit_default(GlobalInitWord(nodes.ptr[d].b)))
+                    nodes[d].b = int32<overflow='wrap'>(coerce(GlobalInitWord(nodes.ptr[d].b) t))
+                    decimal_global(g nodes.ptr[d].pos t)
+                }
+                else if is_quantity(t) {
+                    let exact=t
+                    t=decimal_quantity_start(nodes.ptr[d].pos GlobalInitWord(nodes.ptr[d].b) exact)
+                    if t not=? exact {nodes[d].b = int32<overflow='wrap'>(coerce(GlobalInitWord(nodes.ptr[d].b) t))}
+                    decimal_global(g nodes.ptr[d].pos t)
+                }
+            }
+        }
+        t=zonk(t)
+        if t =? 0 {fatal(nodes.ptr[d].pos "global needs a type or a value")}
+        if tk_unit not=? 0 {
+            t=temperature_binding(d t tk_unit true)
+            tk_bindings[-g - 1] = d
+        }
+        if has_var(prune(t)) {
+            # (enemies = [] at the top level: its elements' type comes from a function that pushes
+            # one, as a local's does; settled once everything is checked)
+            let vk=nodes.ptr[GlobalInitWord(nodes.ptr[d].b)].kind
+            if nodes.ptr[d].a =? 0 and vk =? 'array' and nkids(GlobalInitWord(nodes.ptr[d].b)) =? 0 and tkind(t) =? 'array' {open_globals.push(g)}
+            else {fatal(nodes.ptr[d].pos "cannot infer the type of '{name_of(GlobalInitWord(globals[g].name))}'; add a type annotation{empty_hint(name_of(GlobalInitWord(globals[g].name)) t)}")}
+        }
+        if tkind(t) =? 'void_' {
+            if empty_braces(GlobalInitWord(nodes.ptr[d].b)) {fatal(nodes.ptr[d].pos empty_braces_text(name_of(GlobalInitWord(globals.ptr[g].name))))}
+            fatal(nodes.ptr[d].pos "cannot assign a value of type void")
+        }
+        if tkind(t) =? 'null_' {
+            let name=name_of(GlobalInitWord(globals.ptr[g].name))
+            let binding=jd(nodes.ptr[d].pos "`{name}: Enemy? = none`" "`let {name}:Enemy? = none`")
+            fatal(nodes.ptr[d].pos "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {binding}")
+        }
+        if tkind(t) =? 'typeval' or tkind(t) =? 'module' {fatal(nodes.ptr[d].pos "'{name_of(GlobalInitWord(globals[g].name))}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")}
+        globals[g].type = int32<overflow='wrap'>(t)
+        if t =? T_STR and nodes.ptr[d].a =? 0 and dewy_at(nodes.ptr[d].pos) {string_domain_declare(-g - 1 GlobalInitWord(nodes.ptr[d].b))}
+        else if t =? T_MATH_INT and nodes.ptr[d].a =? 0 and dewy_at(nodes.ptr[d].pos) {int_domain_declare(-g - 1 GlobalInitWord(nodes.ptr[d].b))}
+        # Exact quantity constants have no runtime storage or initialization.
+        if has_flag(d NF_RDONLY) and is_quantity(t) and quantity_constant_scale(GlobalInitWord(nodes.ptr[d].b)) >=? 0 {
+            globals[g].is_const = true
+            globals[g].init = nodes.ptr[d].b
+            nodes[d].kind = 'const_'
+        }
+        add_flag(d NF_CHECKED)
+    }
+    globals[g].state = 2
+    ensuring_globals.pop();
+    ctxs[cx_slot].floor = saved_floor
+    leave_module_context(m entered)
+    cx_slot=saved
+}

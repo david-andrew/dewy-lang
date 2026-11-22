@@ -48,3 +48,16 @@ enter_module_context=(m:ContextWord):>bool=>{
     push_module_frame(m)
     true
 }
+
+cur_mod=():>int64=>$unsafe {
+    if cx >=? 0 {return int64(ctxs.ptr[cx].mod)}
+    0
+}
+
+# The current module binds name itself, by a declaration or `from m import name`: its
+# choice, which Dewy's own reading of a prelude name (the strict `to_int`, a grapheme
+# `find`) does not replace: an import may shadow the prelude's. O(1).
+bound_here=(name:ContextWord):>bool=>$unsafe {
+    let m=cur_mod()
+    m >=? 0 and m <? modules.length and not modules.ptr[m].is_prelude and modules.ptr[m].names.has(name)
+}

@@ -1,3 +1,6 @@
+use 'checker_narrow_writes.dewy'
+use 'checker_source_positions.dewy'
+use 'checker_scope_symbols.dewy'
 use 'checked_expression_nodes.dewy'
 use 'ast.jo'
 use 'ast_rest.dewy'
@@ -113,3 +116,14 @@ capture_narrowed = (l: int, pos: int) -> int:
     locals[nl].alias = i32(e)
     narrow_store_register(nl)
     nl
+
+# root variable r is modified (inside a closure if via_closure)
+note_write = (r: int, via_closure: bool, pos: int):
+    if files[pos_file(locals[r].pos)].is_dewy: return
+    f = int(locals[r].flags)
+    if via_closure or f & LF_CAPTURED != 0:
+        locals[r].flags = i32(f | LF_SHARED)
+        check_shareable(r, pos)
+    else:
+        d = int(locals[r].dloops)
+        if loop_serials.len() > d: locals[r].wloop = i32(loop_serials[d])

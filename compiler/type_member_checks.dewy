@@ -1,8 +1,10 @@
 $runtime_checks
+from p"checker_type_entries.dewy" import (check_struct_fields)
+from p"checker_scope_symbols.dewy" import (new_sym push_scope_sym scope_mark scope_reset)
 
 from p"@lib/core/str.jo" import (join)
 from p"ast.jo" import (kid kid2 nkids nkids2 nodes)
-from p"check.jo" import (FK_INIT check_scopes check_struct_fields ctxs cx modules new_sym push_scope_sym scope_mark scope_reset)
+from p"check.jo" import (FK_INIT check_scopes ctxs cx modules)
 from p"checker_state.dewy" import (FnCtx)
 from p"checks_thin.dewy" import (new_inst resolve_type)
 from p"dewy_method_ops.dewy" import (dewy_is_method dewy_type_method)

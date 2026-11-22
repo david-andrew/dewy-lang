@@ -1,4 +1,7 @@
 $runtime_checks
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"checker_binding_inputs.dewy" import (binding_leaves)
+from p"expression_types.dewy" import (ntype)
 from p"checked_expression_nodes.dewy" import (bc_assign capture_value mk_ident_local)
 
 from p"decimal_ops.dewy" import (decimal_float_write)
@@ -6,7 +9,7 @@ from p"ast.jo" import NF_INDEX_CAPTURED
 from p"ast.jo" import NF_SQUOTE
 from p"@lib/core/str.jo" import (join)
 from p"ast.jo" import (NF_BROADCAST NF_CHECKED NF_COMPREHENSION NF_DISCARD NF_MUT NF_RELOOKUP NF_STMT add_flag clear_flag clone has_flag kid kids mk nkids nodes set_kid set_list)
-from p"check.jo" import (SINK_ARM SINK_BIND SINK_BODY SINK_COLLECTOR SINK_NONE SINK_ONE assign_before binding_leaves copy_writes ctxs cx dewy_at discarding elem_tmp_n fns gcopy_writes index_update_arrays index_update_sources interp_appends or_throw_returns sink_arm_next sink_bind_next sink_body_mode sink_final sink_fn sink_pack_hit sink_pack_site sinks values_hint_first values_hint_label values_hint_pos values_index_base)
+from p"check.jo" import (SINK_ARM SINK_BIND SINK_BODY SINK_COLLECTOR SINK_NONE SINK_ONE assign_before copy_writes ctxs cx discarding elem_tmp_n fns gcopy_writes index_update_arrays index_update_sources interp_appends or_throw_returns sink_arm_next sink_bind_next sink_body_mode sink_final sink_fn sink_pack_hit sink_pack_site sinks values_hint_first values_hint_label values_hint_pos values_index_base)
 from p"checker_compound_values.dewy" import (compound_checked compound_value)
 from p"checker_index_writebacks.dewy" import (elem_field_assign)
 from p"checker_selector_capture.dewy" import (compound_selector_capture index_update_path map_update_capture)
@@ -21,7 +24,7 @@ from p"checker_tokens.dewy" import (Tok)
 from p"checker_values.dewy" import (values_init)
 from p"checks_unpack.dewy" import (unpack_binding unpack_length_check)
 from p"exact_check_hooks.dewy" import (exact_type)
-from p"expr.jo" import (can_coerce check_place coerce copy_place is_nd is_part_index last_checked lit_default narrow_expr ntype path_key path_narrows)
+from p"expr.jo" import (can_coerce check_place coerce copy_place is_nd is_part_index last_checked lit_default narrow_expr path_key path_narrows)
 from p"path_narrowing.dewy" import (copy_path path_forget path_rooted)
 from p"literal_context.dewy" import (is_lit)
 from p"index_operand_checks.dewy" import (dewy_index_ranges index_array_fn)

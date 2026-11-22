@@ -1,4 +1,6 @@
 $runtime_checks
+from p"diagnostic_exit.dewy" import (fatal)
+from p"check.jo" import (value_loops cx)
 from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (nodes)
 from p"util.jo" import (name_of)
@@ -25,4 +27,17 @@ same_route=(a:LoopRouteWord b:LoopRouteWord):>bool=>{
     if kind not=? nodes[b].kind {return false}
     if kind =? 'ident' {return nodes[a].aux =? nodes[b].aux and nodes[a].sym =? nodes[b].sym}
     kind =? 'field' and nodes[a].name =? nodes[b].name and same_route(LoopRouteWord(nodes[a].a) LoopRouteWord(nodes[b].a))
+}
+
+value_loop_resize=(receiver:int64 operation:string pos:int64):>void=>$unsafe {
+    let i=LoopRouteWord(value_loops.length) - 1
+    loop i >=? 0 {
+        let v=value_loops.ptr[i]
+        if v.context =? cx and same_route(v.route receiver) {
+            let src=route_text(v.route)
+            let el=if v.name not=? 0 {name_of(v.name)} else {"item"}
+            fatal(pos "`{operation}` changes the length of `{src}`, which `loop {el} in {src}` iterates by its value at loop entry, so the loop would not see the change: write `loop {el} in @{src}` to iterate the live array, or bind a snapshot first (`let snapshot = {src}` then `loop {el} in snapshot`)")
+        }
+        i -= 1
+    }
 }

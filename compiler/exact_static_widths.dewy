@@ -1,7 +1,9 @@
 $runtime_checks
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"expression_types.dewy" import (ntype)
 
 from p"ast.jo" import (NF_U64 has_flag nodes)
-from p"check.jo" import (LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CONST LF_EXPOSED LF_MUTPARAM LF_SHARED dewy_at globals locals)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CONST LF_EXPOSED LF_MUTPARAM LF_SHARED globals locals)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"checker_tokens.dewy" import (Tok)
 from p"checks_thin.dewy" import (readonly_global)
@@ -9,7 +11,7 @@ from p"exact.jo" import (exact_type_values exact_type_widths exact_word_reads)
 from p"exact_marks.dewy" import (exact_has_node)
 from p"exact_check_hooks.dewy" import (exact_representation)
 from p"exact_count_bounds.dewy" import (exact_count_bound)
-from p"expr.jo" import (CV integer_constant ntype)
+from p"expr.jo" import (CV integer_constant)
 from p"type_ops.dewy" import (int_policy)
 from p"types.jo" import (T_INT T_MATH_INT is_int types)
 

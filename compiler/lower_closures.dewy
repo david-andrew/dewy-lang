@@ -1,4 +1,5 @@
 $runtime_checks
+from p"expression_types.dewy" import (ntype)
 
 from p"lower_primitives.dewy" import (lf_helper)
 from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_SHARED LF_VALUECAP fns locals)
@@ -8,7 +9,6 @@ from p"type_ops.dewy" import (is_managed type_has_fn)
 from p"lower_storage.dewy" import (check_cell_type endc iff is_shared store_type)
 from p"lower_closure_borrow.dewy" import (closure_borrow_param stack_closure_params)
 from p"lower.jo" import (HK cur_fn stack_closure_fn stack_closure_locals stack_closure_passed stack_closure_targets)
-from p"expr.jo" import (ntype)
 from p"checks_thin_expr.dewy" import (is_fn_type)
 from p"ast.jo" import (kid kid2 nkids nkids2 nodes)
 from p"ownership_types.dewy" import (ownership_callable_cap ownership_type)

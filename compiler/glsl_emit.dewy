@@ -1,14 +1,15 @@
 $runtime_checks
+from p"checker_type_entries.dewy" import (check_struct_fields)
+from p"expression_types.dewy" import (ntype)
 from p"@lib/core/fmt.jo" import __fmt
 from p"@lib/core/math.jo" import __INF
 from p"@lib/core/str.jo" import find
 
 from p"@lib/core/rt.jo" import (__str_from_bytes)
 from p"ast.jo" import (kid nkids nodes)
-from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURED LF_MUTPARAM LF_PARAM check_struct_fields locals)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURED LF_MUTPARAM LF_PARAM locals)
 from p"checker_symbol_spelling.dewy" import (sanitize)
 from p"checks_thin_expr.dewy" import (is_gpu_buffer)
-from p"expr.jo" import (ntype)
 from p"glsl.jo" import (gl_decls gl_done_structs gl_out gl_param_copies gl_temps)
 from p"glsl_stmts.dewy" import (gl_expr gl_read gl_stmt)
 from p"glsl_ops.dewy" import (gl_err gl_first gl_wrap gl_wrapped ind sl_type)

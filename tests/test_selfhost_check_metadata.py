@@ -15,6 +15,7 @@ use 'ast.jo'
 use 'node_store.dewy'
 use 'util.jo'
 use 'check.jo'
+use 'checker_scope_symbols.dewy'
 main = ():
     files = [SrcFile(path="case.dewy", src=" use", is_dewy=true), SrcFile(path="case.jo", src=" use", is_dewy=false)]
     nodes = [Node()]

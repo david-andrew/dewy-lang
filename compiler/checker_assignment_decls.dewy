@@ -1,6 +1,11 @@
 $runtime_checks
+from p"@lib/core/str.jo" import (starts_with)
+from p"checker_exact.dewy" import (exact_potential)
+from p"exact_check_hooks.dewy" import (exact_type exact_int_result)
+from p"types.jo" import (T_MATH_INT)
+from p"checker_module_lookup.dewy" import (module_lookup)
 from p"ast.jo" import (kids nodes)
-from p"check.jo" import (cx globals module_lookup own_consts syms)
+from p"check.jo" import (cx globals own_consts syms)
 from p"checker_binding_inputs.dewy" import (flatten_binding_leaves)
 from p"checker_expr.dewy" import (lookup)
 from p"checks_thin.dewy" import (decl_shadowable is_private)
@@ -80,4 +85,14 @@ assign_to_decl=(s:AssignmentDeclWord):>void=>{
         nodes[s].list=nodes[lhs].list
         nodes[s].nlist=nodes[lhs].nlist
     }
+}
+
+# A comparison chain's temporary (dewy_node_builds dw_chain_temp) holds its
+# operand's exact value, not a fixed-width store: `a <? b + c <? d` compares
+# the exact sum. O(1) unless the value is fixed-width arithmetic.
+decl_observed=(s:AssignmentDeclWord t:AssignmentDeclWord):>AssignmentDeclWord=>$unsafe {
+    let v=AssignmentDeclWord(nodes.ptr[s].b)
+    if v =? 0 or t =? T_MATH_INT or not exact_type(t nodes.ptr[s].pos) or not exact_potential(v) {return t}
+    if not starts_with(name_of(AssignmentDeclWord(nodes.ptr[s].name)) "$chain") {return t}
+    exact_int_result(v true)
 }

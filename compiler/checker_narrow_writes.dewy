@@ -1,10 +1,11 @@
 $runtime_checks
+from p"checker_scope_symbols.dewy" import (new_sym push_scope_sym)
 from p"path_narrowing.dewy" import (path_forget)
 from p"ast.jo" import (NF_CHECKED add_flag nodes)
-from p"check.jo" import (LF_ALIAS LF_UNNARROWED ctxs cx locals narrow_store_heads narrow_store_next narrowed_var new_sym push_scope_sym syms)
+from p"check.jo" import (LF_ALIAS LF_UNNARROWED ctxs cx locals narrow_store_heads narrow_store_next syms)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checks_thin.dewy" import (narrow_invalidate narrow_store_keeps)
-from p"expr.jo" import (last_checked path_narrows path_rooted_l)
+from p"expr.jo" import (CV last_checked opt_rest_aliases path_narrows path_rooted_l)
 from p"types.jo" import (prune)
 
 NarrowWriteWord:type=int64<overflow='wrap'>
@@ -51,4 +52,32 @@ unnarrow_assign=(s:NarrowWriteWord):>void=>{
     narrow_invalidate(l)
     let nm=NarrowWriteWord(nodes[lhs].name)
     push_scope_sym(nm new_sym(nm 'local' u 0))
+}
+
+# the global a narrowed name's place (g.f narrowed by `is`) belongs to, or -1
+alias_global=(l:NarrowWriteWord):>NarrowWriteWord=>$unsafe {
+    if NarrowWriteWord(locals.ptr[l].flags) & LF_ALIAS =? 0 or locals.ptr[l].alias =? 0 {return -1}
+    let n=NarrowWriteWord(locals.ptr[l].alias)
+    loop nodes.ptr[n].kind =? 'field' or nodes.ptr[n].kind =? 'index' or nodes.ptr[n].kind =? 'narrow' or nodes.ptr[n].kind =? 'unwrap' or nodes.ptr[n].kind =? 'conv' {n=NarrowWriteWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].aux =? 2 {return NarrowWriteWord(nodes.ptr[n].sym)}
+    -1
+}
+
+# the variable a narrowing alias (see narrow_var) stands for, or 0
+narrowed_var=(l:NarrowWriteWord):>NarrowWriteWord=>$unsafe {
+    if NarrowWriteWord(locals.ptr[l].flags) & LF_ALIAS =? 0 {return 0}
+    let e=NarrowWriteWord(locals.ptr[l].alias)
+    if nodes.ptr[e].kind =? 'if_' and opt_rest_aliases.has(e) {e=NarrowWriteWord(nodes.ptr[e].a)}
+    else if nodes.ptr[e].kind not=? 'narrow' and nodes.ptr[e].kind not=? 'unwrap' and (nodes.ptr[e].kind not=? 'conv' or nodes.ptr[e].aux not=? int32(int64(CV.union_))) {return 0}
+    let a=NarrowWriteWord(nodes.ptr[e].a)
+    if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? 1 {return 0}
+    NarrowWriteWord(nodes.ptr[a].sym)
+}
+
+narrow_store_register=(l:NarrowWriteWord):>void=>{
+    if narrowed_var(l) =? 0 {return}
+    let root=narrow_store_root(l)
+    if root =? 0 {return}
+    narrow_store_next[l]=narrow_store_heads.get(root) ?? 0
+    narrow_store_heads[root]=l
 }

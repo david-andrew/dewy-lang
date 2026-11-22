@@ -1,0 +1,8 @@
+$runtime_checks
+from p"util.jo" import (files pos_file)
+
+# Suggestions are spelled in the language of the source they are about.
+dewy_at=(pos:int64):>bool=>$unsafe {
+    let f=pos_file(pos)
+    pos >? 0 and f <? files.length and files.ptr[f].is_dewy
+}

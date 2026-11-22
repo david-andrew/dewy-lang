@@ -1,9 +1,12 @@
 $runtime_checks
+from p"checker_narrow_writes.dewy" import (narrow_store_register narrowed_var)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"checker_scope_symbols.dewy" import (new_local)
 from p"checked_expression_nodes.dewy" import (mk_ident_local)
 from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (NF_CHECKED NF_LANG_BODY NF_LOOPCOUNT NF_MUT add_flag has_flag mk nodes)
 from p"ast_rest.dewy" import (lambda_captures)
-from p"check.jo" import (LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_MUTPARAM LF_OWNERBORROW LF_SHARED LF_VALUECAP LF_CAPTURED LF_CONST LF_DECL LF_PARTBORROW ctxs cx dewy_at fns locals loop_serials narrow_store_register narrowed_var new_local)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST LF_DECL LF_MUTPARAM LF_OWNERBORROW LF_PARTBORROW LF_SHARED LF_VALUECAP ctxs cx fns locals loop_serials)
 from p"checker_state.dewy" import (Capture Local)
 from p"checks_thin.dewy" import (jd)
 from p"checks_loop_copies.dewy" import (loop_copy_write)
@@ -134,4 +137,17 @@ capture_narrowed=(l:CaptureWord pos:CaptureWord):>CaptureWord=>{
     locals[nl].alias=int32<overflow='wrap'>(e)
     narrow_store_register(nl)
     nl
+}
+
+# root variable r is modified (inside a closure if via_closure)
+note_write=(r:CaptureWord via_closure:bool pos:CaptureWord):>void=>$unsafe {
+    if files.ptr[pos_file(locals.ptr[r].pos)].is_dewy {return}
+    let f=CaptureWord(locals.ptr[r].flags)
+    if via_closure or f & LF_CAPTURED not=? 0 {
+        locals[r].flags=int32<overflow='wrap'>(f | LF_SHARED)
+        check_shareable(r pos)
+    } else {
+        let d=CaptureWord(locals.ptr[r].dloops)
+        if loop_serials.length >? d {locals[r].wloop=int32<overflow='wrap'>(loop_serials.ptr[d])}
+    }
 }

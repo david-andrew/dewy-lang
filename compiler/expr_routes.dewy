@@ -1,9 +1,10 @@
 $runtime_checks
+from p"checker_type_entries.dewy" import (check_struct_fields)
 from p"checked_expression_nodes.dewy" import (mk_ident_local)
 
 from p"@lib/core/rt.jo" import (__str_slice)
 from p"ast.jo" import (NF_CHECKED NF_MUT add_flag clone has_flag kid mk nkids nodes set_list)
-from p"check.jo" import (LF_READ check_scopes check_struct_fields ctxs cx locals release_build syms)
+from p"check.jo" import (LF_READ check_scopes ctxs cx locals release_build syms)
 from p"checker_call_resolve.dewy" import (resolve_fn_call)
 from p"checker_call_values.dewy" import (value_call)
 from p"checker_expr.dewy" import (check_expr)

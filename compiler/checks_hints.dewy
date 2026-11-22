@@ -1,11 +1,13 @@
 $runtime_checks
+from p"checker_module_lookup.dewy" import (demand_name)
+from p"checker_contexts.dewy" import (cur_mod)
 
 from p"checks_text.dewy" import (byte_find)
 from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (kid nkids nodes)
-from p"check.jo" import (LF_DECL decl_infos check_scopes ctxs cur_mod cx demand_name fns locals method_modules modules prelude syms universe)
+from p"check.jo" import (LF_DECL decl_infos check_scopes ctxs cx fns locals modules prelude syms universe)
 from p"checker_decl_slots.dewy" import (decl_info)
-from p"checker_method_receiver.dewy" import (method_decl_for)
+from p"checker_method_receiver.dewy" import (method_decl_for method_modules)
 from p"check_metadata.dewy" import (dewy_type_word)
 from p"expr.jo" import (dewy_surface_table)
 from p"call_style_lookup.dewy" import (dewy_prelude_method_module)

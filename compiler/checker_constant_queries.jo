@@ -1,3 +1,9 @@
+use 'checker_global_initialization.dewy'
+use 'evaluator_state.dewy'
+use 'util.jo'
+use 'host_binds.jo'
+use 'constant_eval.dewy'
+use 'checks_thin.dewy'
 use 'ast.jo'
 use 'check.jo'
 use 'checker_expr.dewy'
@@ -22,3 +28,18 @@ sa_fits = (v: int, t0: int) -> bool:
     if bits >= 64: return types[t].sign or v >= 0
     if types[t].sign: return v >= -(1 << (bits - 1)) and v < (1 << (bits - 1))
     v >= 0 and v < (1 << bits)
+
+binding_const_init = (kind: SK, ref: int, pos: int) -> int:
+    if kind == .const_:
+        if globals[ref].init != 0: return int(globals[ref].init)
+        if globals[ref].decl != 0: return int(nodes[int(globals[ref].decl)].b)
+    else if kind == .global and readonly_global(ref):
+        ensure_global(ref, pos)
+        return int(nodes[int(globals[ref].decl)].b)
+    else if kind == .local:
+        let ref = ref
+        loop int(locals[ref].flags) & LF_CAPTURE != 0: ref = int(locals[ref].outer)
+        if int(locals[ref].flags) & LF_CONST != 0: return int(locals[ref].const_init)
+    0
+
+ceval = (e: int) -> CVal: constant_eval(nodes, names, files, constant_host, e)

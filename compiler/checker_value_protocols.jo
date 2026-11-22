@@ -1,3 +1,5 @@
+use 'checker_runtime_functions.dewy'
+use 'checker_method_receiver.dewy'
 use 'check.jo'
 use 'ast.jo'
 use 'checker_call_queries.dewy'
@@ -91,3 +93,9 @@ prepare_value_helpers = () -> bool:
         if demand & 1 != 0: check_value_members(t, false, seen)
         if demand & 2 != 0: check_value_members(t, true, seen)
     fns.len() > before
+
+note_value_helpers = (t: int, hashing: bool = false):
+    k = tkind(t)
+    if k == .array or k == .fixed or k == .opt or k == .struct_ or k == .tuple or k == .enum_:
+        bit = if hashing: 2 else: 1
+        value_helper_types[t] = (value_helper_types.get(t) ?? 0) | bit

@@ -1,8 +1,16 @@
 $runtime_checks
+from p"checker_global_initialization.dewy" import (ensure_global)
+from p"checker_runtime_functions.dewy" import (runtime_fn)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"checker_type_entries.dewy" import (check_struct_fields)
+from p"checker_method_receiver.dewy" import (method_modules)
+from p"checker_module_lookup.dewy" import (demand_name module_lookup)
+from p"checker_contexts.dewy" import (bound_here cur_mod)
+from p"expression_types.dewy" import (ntype)
 
 from p"checker_call_values.dewy" import value_call
 from p"call_forward.dewy" import (fmt_literal_call value_binding_forward value_call_forward)
-from p"expr.jo" import (IN call_collect_fns call_collect_module call_collect_named call_numeric_member call_targs call_totaldict_member callee_at can_coerce coerce console_type conversion decl_in_prelude dewy_arithmetic_call dewy_len_check dewy_member_name dewy_method_field dewy_quantity_name dewy_surface_check id_breakpoint id_len intrinsics last_checked method_str_set_key ntype race_spread release_name relocate_name select_id struct_ctor surface_hidden synthetic_copy take_name type_sequence_call)
+from p"expr.jo" import (IN call_collect_fns call_collect_module call_collect_named call_numeric_member call_targs call_totaldict_member callee_at can_coerce coerce console_type conversion decl_in_prelude dewy_arithmetic_call dewy_len_check dewy_member_name dewy_method_field dewy_quantity_name dewy_surface_check id_breakpoint id_len intrinsics last_checked method_str_set_key race_spread release_name relocate_name select_id struct_ctor surface_hidden synthetic_copy take_name type_sequence_call)
 from p"call_argument_checks.dewy" import (nargs_check)
 from p"call_lookup_context.dewy" import (ci check_expr_in_module program_fn_named)
 from p"literal_context.dewy" import (is_lit)
@@ -25,7 +33,7 @@ from p"type_ops.dewy" import (fixed_len get_struct_inst int_policy is_soa policy
 from p"rational_types.dewy" import (bundled_word_rational_type)
 from p"unit_ops.dewy" import (dewy_quantity_call)
 from p"checker_expr.dewy" import (call_by_name check_expr check_intrinsic finish_arg lookup)
-from p"check.jo" import (bound_here check_struct_fields cur_mod demand_name dewy_at ensure_global globals locals method_modules module_lookup modules prelude runtime_fn syms universe)
+from p"check.jo" import (globals locals modules prelude syms universe)
 from p"checker_type_names.dewy" import (jo_type_spelling)
 from p"checks_thin.dewy" import (resolve_alias resolve_type)
 from p"dewy_method_ops.dewy" import (dewy_type_method)

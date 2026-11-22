@@ -1,4 +1,7 @@
 $runtime_checks
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"checker_constant_queries.dewy" import (binding_const_init)
+from p"checker_scope_symbols.dewy" import (new_local new_sym push_scope_sym scope_mark scope_reset)
 
 from p"proof_ops.dewy" import (result_signature)
 from p"proof_ops.dewy" import (proof_atom_type)
@@ -7,7 +10,7 @@ from p"refine_rare.dewy" import (ref_holder_candidate ref_atoms)
 from p"checks_thin.dewy" import (jd)
 from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (NF_EXTERN NF_LITERAL NF_MUT clone has_flag kid kid2 kids mk nkids nkids2 nodes)
-from p"check.jo" import (FK_INIT FK_NORMAL binding_const_init check_scopes ctxs cx dewy_at fns new_local new_sym prelude push_scope_sym refine_deferred scope_mark scope_reset syms target_wasm)
+from p"check.jo" import (FK_INIT FK_NORMAL check_scopes ctxs cx fns prelude refine_deferred syms target_wasm)
 from p"checker_symbol_spelling.dewy" import (sanitize)
 from p"checker_lazy_body.dewy" import (load_body)
 from p"checker_ffi_layout.dewy" import (check_c_boxes)

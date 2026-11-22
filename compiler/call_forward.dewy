@@ -1,4 +1,7 @@
 $runtime_checks
+from p"checker_module_lookup.dewy" import (demand_name)
+from p"checker_contexts.dewy" import (bound_here cur_mod)
+from p"expression_types.dewy" import (ntype)
 
 # Calls of what a forwarding function gives: `fmt'.2f'(x)`, or `f2(x)` after `const f2=fmt'.2f'`,
 # check as a direct call of the function `fmt` hands its parameters to, `_fmt_apply('.2f' x)`, in
@@ -11,8 +14,8 @@ from p"check_constant.jo" import (cc_forwards cc_passed)
 from p"constant_checks.dewy" import (cc_constant)
 from p"ast.jo" import (NF_CHECKED NF_SPREAD add_flag has_flag kid kids mk nkids nkids2 nodes set_list)
 from p"frontend.jo" import (source_force_body)
-from p"expr.jo" import (AUX2_PARTIAL call_collect_named last_checked ntype)
-from p"check.jo" import (bound_here check_scopes ctxs cur_mod cx demand_name fns modules prelude syms universe)
+from p"expr.jo" import (AUX2_PARTIAL call_collect_named last_checked)
+from p"check.jo" import (check_scopes ctxs cx fns modules prelude syms universe)
 from p"checker_home_index.dewy" import (use_home)
 from p"checker_expr.dewy" import (call_by_name check_expr)
 from p"checker_call_resolve.dewy" import (resolve_fn_call)

@@ -1,6 +1,8 @@
 $runtime_checks
+from p"checker_runtime_functions.dewy" import (runtime_fn)
+from p"checker_method_receiver.dewy" import (module_of_type)
 from p"ast.jo" import (nodes)
-from p"check.jo" import (fns module_of_type runtime_fn values_collect_module value_equal_fns value_hash_fns value_helper_types)
+from p"check.jo" import (fns value_equal_fns value_hash_fns value_helper_types values_collect_module)
 from p"checker_signature.dewy" import (fn_sig)
 from p"checks_thin_expr.dewy" import (resolve_from_types)
 from p"diagnostic_exit.dewy" import (fatal)
@@ -111,4 +113,12 @@ prepare_value_helpers=():>bool=>{
         if demand & 2 not=? 0 {check_value_members(t true @seen)}
     }
     fns.length >? before
+}
+
+note_value_helpers=(t:ProtocolWord hashing:bool=false):>void=>{
+    let k=tkind(t)
+    if k =? 'array' or k =? 'fixed' or k =? 'opt' or k =? 'struct_' or k =? 'tuple' or k =? 'enum_' {
+        let bit=if hashing {2} else {1}
+        value_helper_types[t]=(value_helper_types.get(t) ?? 0) | bit
+    }
 }

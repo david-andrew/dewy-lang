@@ -1,14 +1,16 @@
 $runtime_checks
+from p"checker_constant_queries.dewy" import (binding_const_init)
+from p"expression_types.dewy" import (ntype)
 
 from p"comptime_ops.dewy" import (ct_run)
 from p"ast.jo" import nkids
 from p"ast.jo" import (NF_INBOUNDS has_flag kid nodes set_list)
-from p"check.jo" import (binding_const_init ctxs cx fns)
+from p"check.jo" import (ctxs cx fns)
 from p"checks_static.dewy" import (assertion_refuted prove_assertion)
 from p"checker_state.dewy" import (SK)
 from p"comptime.jo" import (ct_values)
 from p"directives.jo" import (dir_floats_any)
-from p"expr.jo" import (CV IN ntype)
+from p"expr.jo" import (CV IN)
 from p"facts.jo" import (FACT_CAP FACT_COMPONENT_FACTS FACT_ELEMENT_BELOW FACT_ELEMENT_VALUE FACT_ROW_ELEMENTS FactProjection FactSlice FactState fact_owner fact_plan_version fact_requests)
 from p"facts_values.dewy" import (fact_scalar fact_type fact_project)
 from p"facts_lengths.dewy" import (fact_difference)

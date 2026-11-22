@@ -1,14 +1,16 @@
 $runtime_checks
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"expression_types.dewy" import (ntype)
 
 from p"ast.jo" import (NF_INCLUSIVE NF_STEP RANGE_EXHAUSTION has_flag kid nkids nodes)
-from p"check.jo" import (LF_DECL dewy_at fns locals)
+from p"check.jo" import (LF_DECL fns locals)
 from p"checker_tokens.dewy" import (Tok)
 from p"directives.jo" import (DIR_STATIC dir_name_assumed_bounds dir_value)
 from p"directive_queries.dewy" import (dir_policy)
 from p"directive_rules.dewy" import (dir_defer)
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"exact.jo" import (exact_progress_math exact_word_reads)
-from p"expr.jo" import (CV IN ntype)
+from p"expr.jo" import (CV IN)
 from p"checks_thin_expr.dewy" import (int_intervals)
 from p"facts.jo" import (FACT_CAP FACT_PREP_RANGE FactLoop FactState fact_covered fact_loop_exhausted fact_name_axis_slice fact_name_open_range fact_name_range fact_name_slice_range fact_owner fact_policy fact_probe_on fact_query fact_speculating fact_summary_owner fact_terms fact_validated)
 from p"facts_capture.dewy" import (fact_capture)

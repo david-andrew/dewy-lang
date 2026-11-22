@@ -129,3 +129,9 @@ def test_type_layout_twins(compiler, tmp_path, release):  # noqa: F811
         outputs.append(ran.stdout)
     assert outputs[0] == outputs[1]
     assert outputs[0].endswith(b'ok\n')
+
+
+def test_type_layout_struct_fields(compiler, tmp_path, monkeypatch):
+    from tests.selfhost_build_double import compare_golden_cases
+
+    compare_golden_cases(compiler, tmp_path, monkeypatch, 'type_layout', ('type_members/records',))

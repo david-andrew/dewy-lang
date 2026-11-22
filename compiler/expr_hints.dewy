@@ -1,11 +1,13 @@
 $runtime_checks
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"checker_contexts.dewy" import (cur_mod)
 
 from p"checks_text.dewy" import (byte_rfind)
 from p"@lib/core/os.jo" import (read_file)
 from p"@lib/core/rt.jo" import (__str_slice)
 from p"@lib/core/str.jo" import (is_digit split starts_with)
 from p"ast.jo" import (NF_U64 dewy_param_kinds has_flag kid kids nkids nodes)
-from p"check.jo" import (cur_mod dewy_at modules syms)
+from p"check.jo" import (modules syms)
 from p"checker_tokens.dewy" import (Tok)
 from p"checks_thin.dewy" import (is_private resolve_type)
 from p"checks_thin_expr.dewy" import (int_intervals_wide ref_literal_holds)

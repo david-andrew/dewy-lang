@@ -1,3 +1,17 @@
+use 'checker_global_initialization.dewy'
+use 'checker_runtime_functions.dewy'
+use 'checker_value_protocols.dewy'
+use 'checker_loop_routes.dewy'
+use 'checker_captures.dewy'
+use 'checker_narrow_writes.dewy'
+use 'checker_source_positions.dewy'
+use 'checker_import_discovery.dewy'
+use 'checker_type_entries.dewy'
+use 'checker_method_receiver.dewy'
+use 'checker_module_lookup.dewy'
+use 'checker_contexts.dewy'
+use 'checker_scope_symbols.dewy'
+use 'expression_types.dewy'
 use 'checked_expression_nodes.dewy'
 use 'intrinsic_registration.dewy'
 use 'exact_preparation.dewy'
@@ -302,8 +316,6 @@ lit_default = (n: int) -> int:
         if lit_default(int(nodes[n].a)) == T_FLOAT or lit_default(int(nodes[n].b)) == T_FLOAT: return T_FLOAT
     if files[pos_file(nodes[n].pos)].is_dewy: return T_MATH_INT
     T_INT
-
-ntype = (n: int) -> int: int(nodes[n].type)
 
 # Decimal source text survives parsing until its numeric context is known.
 # A float context consumes fval directly; otherwise construct exact BigInt

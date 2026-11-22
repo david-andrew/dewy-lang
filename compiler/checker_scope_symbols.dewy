@@ -1,0 +1,66 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"util.jo" import (intern name_of)
+from p"checker_state.dewy" import (SK Sym Local)
+from p"check.jo" import (PositionGuard check_scopes ctxs cx fns locals loop_serials position_guards syms)
+
+CheckerScopeSymbolsWord:type=int64<overflow='wrap'>
+
+new_sym=(name:CheckerScopeSymbolsWord kind:SK r:CheckerScopeSymbolsWord decl:CheckerScopeSymbolsWord):>CheckerScopeSymbolsWord=>{
+    let s=syms.length
+    syms.push(Sym[name=int32<overflow='wrap'>(name) kind=kind ref=int32<overflow='wrap'>(r) decl=int32<overflow='wrap'>(decl)])
+    s
+}
+
+push_scope_sym=(name:CheckerScopeSymbolsWord sym:CheckerScopeSymbolsWord):>void=>{
+    loop check_scopes.top.length <=? name {check_scopes.top.push(-1)}
+    check_scopes.prev.push(check_scopes.top[name])
+    check_scopes.top[name]=check_scopes.names.length
+    check_scopes.names.push(name)
+    check_scopes.syms.push(sym)
+}
+
+scope_mark=():>int64=>check_scopes.names.length
+
+scope_reset=(mark:int64):>void=>{
+    loop position_guards.length >? 0 and position_guards[CheckerScopeSymbolsWord(position_guards.length) - 1].mark >=? mark {position_guards.pop();}
+    let i=CheckerScopeSymbolsWord(check_scopes.names.length) - 1
+    loop i >=? mark {
+        check_scopes.top[check_scopes.names[i]]=check_scopes.prev[i]
+        i -= 1
+    }
+    check_scopes.names.truncate(mark)
+    check_scopes.syms.truncate(mark)
+    check_scopes.prev.truncate(mark)
+}
+
+new_local=(name:int64 t:int64 pos:int64):>int64=>{
+    let inst=CheckerScopeSymbolsWord(ctxs[cx].inst)
+    let l=locals.length
+    locals.push(Local[name=int32<overflow='wrap'>(name) type=int32<overflow='wrap'>(t) owner=int32(inst) pos=pos dloops=int32(loop_serials.length)])
+    fns[inst].locals.push(l)
+    if name not=? 0 and name_of(name) not=? "_" {push_scope_sym(name new_sym(name 'local' l 0))}
+    l
+}
+
+# An indexed target's forms (checker_assigns.dewy va_index, given the receiver's type bt):
+# 1 Dewy ranges made values, 2 a range of an array's elements, 3 a stepped range off an
+# n-dimensional array refused, 4 a record's soa element, part or `[]=` call, 5 an array's
+# elements picked by a mask or indexes; the rewritten statement, or 0
+# A condition that has just been found to hold or not: `i =? k` on a local is noted, with a scope
+# entry so that the branch's reset takes it back. O(1).
+position_guard_note=(c:int64 holds:bool):>void=>$unsafe {
+    let op=nodes.ptr[c].op
+    # Frozen Tok.eq and Tok.ne ordinals.
+    if not (op =? 69 and holds or op =? 70 and not holds) {return}
+    let a=CheckerScopeSymbolsWord(nodes.ptr[c].a)
+    let b=CheckerScopeSymbolsWord(nodes.ptr[c].b)
+    if nodes.ptr[a].kind =? 'int_lit' {
+        let literal=a
+        a=b
+        b=literal
+    }
+    if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? 1 or nodes.ptr[b].kind not=? 'int_lit' {return}
+    position_guards.push(PositionGuard(local=nodes.ptr[a].sym value=int32<overflow='wrap'>(nodes.ptr[b].ival) mark=int32(scope_mark())))
+    push_scope_sym(intern("$position_guard") 0)
+}

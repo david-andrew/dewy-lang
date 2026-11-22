@@ -20,3 +20,10 @@ CASES = [
 
 def test_msl_emit_twins(compiler, tmp_path, monkeypatch):
     assert compare_moved(compiler, tmp_path, monkeypatch, CASES, ('--target', 'aarch64-mac')) > 0
+
+
+def test_msl_ops_expression_types(compiler, tmp_path, monkeypatch):
+    from tests.selfhost_build_double import compare_golden_cases
+
+    compare_golden_cases(compiler, tmp_path, monkeypatch, 'msl_ops',
+                         ('gpu_ieee/vector_nan',), (('--target', 'aarch64-mac'),))

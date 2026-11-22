@@ -1,10 +1,14 @@
 from p"directives.jo" import (dir_scoped_cores dir_header_cores dir_runtime_policies dir_runtime_settings dir_runtime_caps dir_code_files dir_code_any dir_find dir_name_runtime dir_name_prototype)
 from p"directive_code.dewy" import (dir_code_can_vary)
 $runtime_checks
+from p"checker_global_initialization.dewy" import (ensure_global)
+from p"checker_runtime_functions.dewy" import (runtime_fn)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"checker_type_entries.dewy" import (get_fn_inst)
 
 from p"data_access.dewy" import (data_access_reset data_access_finalize)
 from p"checker_hooks.dewy" import (run_pending_functions)
-from p"check.jo" import (decl_infos dewy_at FK_INIT check_all cx draw_fn ensure_global export_decls export_fns float_int_demanded fns get_fn_inst global_ids globals init_fns late_module_imports lib_dir main_fn module_ctx module_frames modules open_globals optional_runtime prelude runtime_fn runtime_memeq runtime_names runtime_streq skip_main syms nchk_wanted target_macos target_wasm test_mode update_fn want_cpu_flag want_loop_watch)
+from p"check.jo" import (decl_infos FK_INIT check_all cx draw_fn export_decls export_fns float_int_demanded fns global_ids globals init_fns late_module_imports lib_dir main_fn module_ctx module_frames modules open_globals optional_runtime prelude runtime_memeq runtime_names runtime_streq skip_main syms nchk_wanted target_macos target_wasm test_mode update_fn want_cpu_flag want_loop_watch)
 from p"checker_contexts.dewy" import (setup_module_contexts)
 from p"checker_load_module.dewy" import (load_module)
 from p"checker_registration.dewy" import (register_module)

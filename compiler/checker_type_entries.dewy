@@ -1,0 +1,46 @@
+$runtime_checks
+from p"checks_thin.dewy" import (new_inst resolve_type)
+from p"checker_state.dewy" import (FnCtx)
+from p"ast.jo" import (kid2 nkids2 nodes)
+from p"check.jo" import (FK_INIT cx ctxs check_scopes)
+from p"checker_scope_symbols.dewy" import (scope_mark scope_reset)
+from p"types.jo" import (T_VOID structs)
+from p"type_substitute.dewy" import (ts_subst)
+from p"checker_instances.dewy" import (ci_get_fn_inst)
+from p"checker_fields.dewy" import (cf_check_struct_fields)
+
+check_struct_fields=(si:int64):>void=>$unsafe {
+    if not structs.ptr[si].resolved {cf_check_struct_fields(si)}
+}
+
+get_fn_inst=(decl:int64 targs:array<int64> use_pos:int64):>int64=>ci_get_fn_inst(decl targs use_pos)
+
+subst=(t0:int64 targs:array<int64>):>int64=>ts_subst(t0 targs)
+
+CheckerTypeEntriesWord:type=int64<overflow='wrap'>
+
+# A generic type's arguments with those left out filled in from its declaration: `Date` is
+# `Date<Gregorian>` when it says `<C=Gregorian>`. The defaults read in the declaration's own scope.
+type_param_defaults=(d:CheckerTypeEntriesWord targs:array<int64> inferred:array<int64>=[]):>array<int64>=>$unsafe {
+    if targs.length >=? nkids2(d) {return targs}
+    let out=targs
+    let context=@cx
+    loop i in [targs.length..nkids2(d)) {
+        if i <? inferred.length and inferred.ptr[i] not=? 0 {
+            out.push(inferred.ptr[i])
+            continue
+        }
+        let fallback=CheckerTypeEntriesWord(nodes.ptr[kid2(d i)].b)
+        if fallback =? 0 {return targs}
+        let saved=context
+        let inst=new_inst(FK_INIT CheckerTypeEntriesWord(nodes.ptr[d].mod) "typedef")
+        ctxs.push(FnCtx(int32(inst) (-1) int32(T_VOID) false 0 nodes.ptr[d].mod int32(check_scopes.names.length)))
+        context=CheckerTypeEntriesWord(ctxs.length) - 1
+        let mark=scope_mark()
+        out.push(resolve_type(fallback))
+        scope_reset(mark)
+        ctxs.pop();
+        context=saved
+    }
+    out
+}

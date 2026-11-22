@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checker_blocks.dewy" import (bk_block)
 from p"ast.jo" import (kid nkids nodes)
 from p"checker_sinks.dewy" import (sink_open)
 from p"checks_assign_hooks.dewy" import (block_sink_mode)
@@ -27,3 +28,22 @@ block_open=(b:BlockEntryWord mode:BlockEntryWord):>BlockEntryWord=>{
     if refine_active and nkids(b) =? 1 {ref_pair_discard(b)}
     block_sink_mode(b mode =? -2)
 }
+
+# `value` pushed (or a pack extended) onto sink i's accumulator, in exprstmt s.
+# The value(s) of exprstmt s, a statement of BODY/BIND i's own block while their number is
+# static, held in locals: the block gives them at its end as `(T T)` (sink_close), with no
+# array. A BODY's values have one type, as an array's elements would.
+# Several values held as one `(T T)` (a group or a binding) expressed into sink i: each pushed.
+# Sink i's pending values pushed in order (it needs an accumulator after all).
+# Exprstmt s gives a value of type t in the innermost sink (a pack when `pack`).
+# A value expressed into BODY r, written `:>(T T)`: counted when it is a statement of the
+# body's own block, outside loops; another (in a branch or loop) has no static count.
+# Arm block b of `if`/`match` e, which ends a BODY or ARM: its values go to the BODY.
+# Function f's body, written `:>(T T)`, is about to be checked: a BODY that must express
+# exactly that many values of T (no expected type for each: they are pushed as T).
+# A value-giving `if`/`match` whose arms gave their values to a BODY that became a
+# pack: a statement now, its arms' last values pushed.
+# (a block ending in an `if` made a statement: the statement itself, as check_stmt has it)
+# The end of block b, sink i: a BODY whose values are more than its last one
+# becomes a pack, `{ $pack = [] ... $pack.push(v) ... $pack }`.
+check_block=(b:int64 expected:int64 want_value:bool):>int64=>bk_block(b expected want_value)

@@ -1,6 +1,13 @@
 $runtime_checks
+from p"checker_global_initialization.dewy" import (ensure_global)
+from p"evaluator_state.dewy" import (CVal)
+from p"util.jo" import (files names)
+from p"host_binds.jo" import (constant_host)
+from p"constant_eval.dewy" import (constant_eval)
+from p"checks_thin.dewy" import (readonly_global)
+from p"checker_state.dewy" import (SK)
 from p"ast.jo" import (nodes)
-from p"check.jo" import (binding_const_init syms)
+from p"check.jo" import (LF_CAPTURE LF_CONST globals locals syms)
 from p"checker_expr.dewy" import (lookup)
 from p"type_value_arguments.dewy" import (integer_parameter_literal)
 from p"types.jo" import (prune types)
@@ -30,3 +37,20 @@ sa_fits=(v:ConstantQueryWord t0:ConstantQueryWord):>bool=>{
     }
     v >=? 0 and v <? (ConstantQueryWord(1) << (bits & 63))
 }
+
+binding_const_init=(kind:SK ref:ConstantQueryWord pos:ConstantQueryWord):>ConstantQueryWord=>$unsafe {
+    if kind =? 'const_' {
+        if globals.ptr[ref].init not=? 0 {return ConstantQueryWord(globals.ptr[ref].init)}
+        if globals.ptr[ref].decl not=? 0 {return ConstantQueryWord(nodes.ptr[ConstantQueryWord(globals.ptr[ref].decl)].b)}
+    } else if kind =? 'global' and readonly_global(ref) {
+        ensure_global(ref pos)
+        return ConstantQueryWord(nodes.ptr[ConstantQueryWord(globals.ptr[ref].decl)].b)
+    } else if kind =? 'local' {
+        let l=ref
+        loop ConstantQueryWord(locals.ptr[l].flags) & LF_CAPTURE not=? 0 {l=ConstantQueryWord(locals.ptr[l].outer)}
+        if ConstantQueryWord(locals.ptr[l].flags) & LF_CONST not=? 0 {return ConstantQueryWord(locals.ptr[l].const_init)}
+    }
+    0
+}
+
+ceval=(e:int64):>CVal=>constant_eval(@nodes @names @files @constant_host e)

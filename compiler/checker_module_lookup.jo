@@ -1,0 +1,33 @@
+use 'checker_home_index.dewy'
+use 'prelude_ops.dewy'
+use 'ide.jo'
+use 'check.jo'
+
+ml_bump_name = (name: int):
+    ml_tick += 1
+    if ml_name_tick.len() <= name: ml_name_tick.resize(name * 2 + 64)
+    ml_name_tick[name] = ml_tick
+
+ml_stamp = (name: int) -> int:
+    if name < ml_name_tick.len() and ml_name_tick[name] > ml_struct: return ml_name_tick[name]
+    ml_struct
+
+demand_name = (name: int):
+    if name < demanded.len() and demanded[name]: return
+    if demanded.len() <= name: demanded.resize(name * 2 + 64)
+    demanded[name] = true
+    demand_prelude_name(name)
+
+module_lookup = (m: int, name: int) -> int:
+    if name < ml_at.len() and ml_at[name] == ml_stamp(name) and ml_mod[name] == m: return ml_sym[name]
+    s = module_lookup_now(m, name)
+    if not ide_on:
+        if ml_at.len() <= name:
+            grown = name * 2 + 64
+            ml_at.resize(grown)
+            ml_mod.resize(grown)
+            ml_sym.resize(grown)
+        ml_at[name] = ml_stamp(name)
+        ml_mod[name] = m
+        ml_sym[name] = s
+    s

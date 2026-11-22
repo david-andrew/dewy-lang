@@ -1,0 +1,43 @@
+$runtime_checks
+from p"checker_home_index.dewy" import (module_lookup_now)
+from p"prelude_ops.dewy" import (demand_prelude_name)
+from p"ide.jo" import (ide_on)
+from p"check.jo" import (ml_tick ml_name_tick ml_struct demanded ml_at ml_mod ml_sym)
+
+CheckerModuleLookupWord:type=int64<overflow='wrap'>
+
+ml_bump_name=(name:CheckerModuleLookupWord):>void=>{
+    let tick=@ml_tick
+    tick=CheckerModuleLookupWord(tick) + 1
+    if ml_name_tick.length <=? name {ml_name_tick.resize(name * 2 + 64)}
+    ml_name_tick[name]=tick
+}
+
+ml_stamp=(name:CheckerModuleLookupWord):>CheckerModuleLookupWord=>$unsafe {
+    if name <? ml_name_tick.length and ml_name_tick.ptr[name] >? ml_struct {return ml_name_tick.ptr[name]}
+    ml_struct
+}
+
+demand_name=(name:int64):>void=>$unsafe {
+    if name <? demanded.length and demanded.ptr[name] {return}
+    if demanded.length <=? name {demanded.resize(CheckerModuleLookupWord(name) * 2 + 64)}
+    demanded[name]=true
+    demand_prelude_name(name)
+}
+
+module_lookup=(m:CheckerModuleLookupWord name:CheckerModuleLookupWord):>CheckerModuleLookupWord=>$unsafe {
+    if name <? ml_at.length and ml_at.ptr[name] =? ml_stamp(name) and ml_mod.ptr[name] =? m {return ml_sym.ptr[name]}
+    let s=module_lookup_now(m name)
+    if not ide_on {
+        if ml_at.length <=? name {
+            let grown=name * 2 + 64
+            ml_at.resize(grown)
+            ml_mod.resize(grown)
+            ml_sym.resize(grown)
+        }
+        ml_at[name]=ml_stamp(name)
+        ml_mod[name]=m
+        ml_sym[name]=s
+    }
+    s
+}

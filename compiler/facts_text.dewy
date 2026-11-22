@@ -1,13 +1,16 @@
 $runtime_checks
+from p"checker_type_entries.dewy" import (get_fn_inst)
+from p"checker_module_lookup.dewy" import (module_lookup)
+from p"expression_types.dewy" import (ntype)
 
 from p"comptime_ops.dewy" import (ct_run)
 from p"ast.jo" import (NF_CHECKED add_flag kid mk nkids nodes set_list)
-from p"check.jo" import (fns get_fn_inst lib_dir module_lookup syms)
+from p"check.jo" import (fns lib_dir syms)
 from p"comptime.jo" import (ct_values)
 from p"constant_checks.dewy" import (cc_constant)
 from p"directive_rules.dewy" import (dir_defer)
 from p"effect_values.dewy" import (effect_float effect_scalar)
-from p"expr.jo" import (IN ntype)
+from p"expr.jo" import (IN)
 from p"facts.jo" import (FACT_ASCII_TEXT FACT_BYTE_VIEW FACT_CAP FactProjection FactState fact_name_byte_slice fact_name_ends_with fact_name_find fact_name_regex fact_name_regex_find fact_name_rfind fact_name_starts_with fact_name_string_index fact_name_string_length fact_name_string_slice fact_policy fact_probe_on fact_query fact_regex_counts fact_search_predicate fact_speculating fact_terms fact_text_from_predicate fact_text_search_predicate)
 from p"facts_values.dewy" import (fact_type fact_project)
 from p"facts_compare.dewy" import (fact_compare)

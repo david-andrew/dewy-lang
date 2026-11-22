@@ -1,11 +1,13 @@
 $runtime_checks
+from p"checker_runtime_functions.dewy" import (runtime_fn)
+from p"expression_types.dewy" import (ntype)
 from p"checked_expression_nodes.dewy" import (type_node_of)
 
-from p"check.jo" import (LF_ADDR LF_PARTBORROW fns globals lib_dir locals modules runtime_fn target_macos target_wasm target_windows)
+from p"check.jo" import (LF_ADDR LF_PARTBORROW fns globals lib_dir locals modules target_macos target_wasm target_windows)
 from p"checks_thin.dewy" import (check_pending_functions)
 from p"ast.jo" import (NF_CHECKED NF_EXTERN NF_STMT add_flag has_flag kid kid2 kids mk nkids nkids2 nodes)
 from p"types.jo" import (T_MATH_INT T_NONE T_VOID tkind)
-from p"expr.jo" import (last_checked ntype)
+from p"expr.jo" import (last_checked)
 from p"policy_value_queries.dewy" import (setting_value_target)
 from p"task_failure_values.dewy" import (task_failure_calls)
 from p"select_checks.dewy" import (select_call select_check queue_payload_clash)

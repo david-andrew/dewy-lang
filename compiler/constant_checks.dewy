@@ -1,5 +1,7 @@
 from p"directives.jo" import dir_runtime_policies
 $runtime_checks
+from p"checker_type_entries.dewy" import (get_fn_inst)
+from p"expression_types.dewy" import (ntype)
 
 # Demand-driven: nothing is read unless a declaration has a constant check. Cost: O(1) per
 # declaration, O(1) per call of one, and one compile-time run of the validator per call with a
@@ -8,8 +10,8 @@ from p"comptime_ops.dewy" import (checked_const_init ct_run)
 from p"check_constant.jo" import (cc_passed CheckConstant cc_any cc_decls cc_errors cc_forwards cc_verdicts)
 from p"checker_expr.dewy" import lookup
 from p"ast.jo" import (NF_CHECKED add_flag kid kids mk nkids nodes set_list)
-from p"check.jo" import (lib_dir fns get_fn_inst syms)
-from p"expr.jo" import (CV ntype)
+from p"check.jo" import (lib_dir fns syms)
+from p"expr.jo" import (CV)
 from p"constant_fold_ops.dewy" import (cc_closed_expr cc_fold_first cc_fold_after)
 from p"types.jo" import (T_STR is_union prune tkind union_members)
 from p"type_ops.dewy" import (dt mk_union union_index)

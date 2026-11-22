@@ -1,14 +1,16 @@
 $runtime_checks
+from p"checker_type_entries.dewy" import (check_struct_fields)
+from p"checker_constant_queries.dewy" import (binding_const_init)
+from p"expression_types.dewy" import (ntype)
 
 from p"comptime_ops.dewy" import (ct_literal ct_run)
 from p"checks_text.dewy" import (sym_kind_of)
 from p"ast.jo" import (kid nkids nodes)
-from p"check.jo" import (binding_const_init check_struct_fields fns)
+from p"check.jo" import (fns)
 from p"checker_state.dewy" import (SK)
 from p"comptime.jo" import (ct_values)
 from p"directives.jo" import (dir_rules_from_host)
 from p"error_ops.dewy" import (exception_member)
-from p"expr.jo" import (ntype)
 from p"types.jo" import (fields is_int is_union prune structs tkind types union_members)
 from p"unit_ops.dewy" import (quantity_constant_scale)
 from p"units.jo" import (is_quantity)

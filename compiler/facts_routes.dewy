@@ -1,4 +1,5 @@
 $runtime_checks
+from p"expression_types.dewy" import (ntype)
 
 from p"ast.jo" import NF_INDEX_CAPTURED
 from p"@lib/core/str.jo" import (starts_with)
@@ -6,7 +7,7 @@ from p"ast.jo" import (NF_GLOBAL NF_COMPREHENSION NF_INBOUNDS NF_RELOOKUP NF_SPR
 from p"check.jo" import (LF_ALIAS globals locals)
 from p"checks_thin.dewy" import (readonly_global)
 from p"directive_queries.dewy" import (dir_index)
-from p"expr.jo" import (CV IN ntype rational_constants)
+from p"expr.jo" import (CV IN rational_constants)
 from p"checks_thin_expr.dewy" import (oversized_literal)
 from p"facts.jo" import (FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_COPY FACT_ELEMENT_LENGTH FACT_ELEMENT_SAME_LENGTH FACT_ELEMENT_SOURCE FACT_ELEMENT_VALUE FACT_FIELD_KEYS FACT_KEYS_POSITIONS FACT_KEYS_SOURCE FACT_MAP_DENSE FACT_MAP_POSITIONS FACT_POOL_POSITIONS FACT_ROW_SOURCE FACT_SELF_BOUND FACT_SIB_BOUND FactProjection FactRoute FactState fact_constant_globals fact_covered fact_name_vals fact_policy fact_probe_on fact_query fact_route_reuse fact_route_selectors fact_speculating fact_terms)
 from p"facts_capture.dewy" import (fact_capture fact_index_success)

@@ -1,3 +1,8 @@
+use 'checker_exact.dewy'
+use 'exact_check_hooks.dewy'
+use 'types.jo'
+use 'checker_binding_inputs.dewy'
+use 'checker_module_lookup.dewy'
 use 'ast.jo'
 use 'check.jo'
 use 'checker_expr.dewy'
@@ -69,3 +74,12 @@ assign_to_decl = (s: int):
     else:
         nodes[s].list = nodes[lhs].list
         nodes[s].nlist = nodes[lhs].nlist
+
+# A comparison chain's temporary (dewy_node_builds dw_chain_temp) holds its
+# operand's exact value, not a fixed-width store: `a <? b + c <? d` compares
+# the exact sum. O(1) unless the value is fixed-width arithmetic.
+decl_observed = (s: int, t: int) -> int:
+    v = int(nodes[s].b)
+    if v == 0 or t == T_MATH_INT or not exact_type(t, nodes[s].pos) or not exact_potential(v): return t
+    if not starts_with(name_of(int(nodes[s].name)), "$chain"): return t
+    exact_int_result(v, true)

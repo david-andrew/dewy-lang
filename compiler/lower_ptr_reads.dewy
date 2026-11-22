@@ -1,4 +1,5 @@
 $runtime_checks
+from p"expression_types.dewy" import (ntype)
 
 from p"lower_analysis.dewy" import (raw_view checked_call_mutmask)
 # ---- pointers only read through ----
@@ -13,7 +14,7 @@ from p"lower_analysis.dewy" import (raw_view checked_call_mutmask)
 # (one union-find for all functions: its keys, nodes and locals, are each one function's)
 from p"ast.jo" import (nodes nkids nkids2 kid kid2 has_flag NF_MUT NF_AT NF_GLOBAL NF_EXTERN)
 from p"check.jo" import (locals fns LF_CAPTURED LF_CAPTURE LF_SHARED LF_ADDR LF_BYREF LF_ALIAS LF_MUTPARAM)
-from p"expr.jo" import (ntype IN)
+from p"expr.jo" import (IN)
 from p"types.jo" import (tkind)
 from p"lower.jo" import (cur_fn)
 # Node.aux stores the existing SK.local ordinal (1), not a Dewy string value.

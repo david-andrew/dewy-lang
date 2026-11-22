@@ -1,10 +1,14 @@
 from p"directives.jo" import (dir_code_any dir_code_by_inst)
 from p"directive_code.dewy" import (dir_code_inst dir_code_request)
 $runtime_checks
+from p"checker_narrow_writes.dewy" import (narrowed_var)
+from p"checker_type_entries.dewy" import (subst)
+from p"checker_contexts.dewy" import (cur_mod)
+from p"checker_scope_symbols.dewy" import (new_local new_sym push_scope_sym scope_mark scope_reset)
 from p"checked_expression_nodes.dewy" import (mk_ident_local)
 
 from p"ast.jo" import (NF_CHECKED NF_MUT add_flag clone has_flag kid mk nkids nodes set_list)
-from p"check.jo" import (FK_LAMBDA LF_PARAM LF_UNNARROWED check_scopes ctxs cur_mod cx decl_infos fn_instances fns locals loop_serials narrowed_var new_local new_sym push_scope_sym scope_mark scope_reset subst syms)
+from p"check.jo" import (FK_LAMBDA LF_PARAM LF_UNNARROWED check_scopes ctxs cx decl_infos fn_instances fns locals loop_serials syms)
 from p"checker_decl_slots.dewy" import (decl_info)
 from p"checker_local_warnings.dewy" import (copy_write_warnings)
 from p"checker_lambda_body.dewy" import (check_lambda_body)

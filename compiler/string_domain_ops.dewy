@@ -1,10 +1,13 @@
 $runtime_checks
+from p"checker_narrow_writes.dewy" import (alias_global narrowed_var)
+from p"checker_contexts.dewy" import (cur_mod)
+from p"expression_types.dewy" import (ntype)
 
 from p"ast.jo" import (NF_CHECKED NF_U64 add_flag has_flag kid kids mk nkids nodes set_list)
-from p"check.jo" import (FK_NORMAL LF_CAPTURE LF_VALUECAP alias_global ctxs cur_mod cx fns locals narrowed_var statement_watch syms)
+from p"check.jo" import (FK_NORMAL LF_CAPTURE LF_VALUECAP ctxs cx fns locals statement_watch syms)
 from p"checks_thin.dewy" import (new_inst)
 from p"checker_expr.dewy" import (check_expr lookup)
-from p"expr.jo" import (last_checked ntype)
+from p"expr.jo" import (last_checked)
 from p"checks_thin_expr.dewy" import (int_intervals)
 from p"checks_builders.dewy" import (bc_block)
 from p"int_domains.dewy" import (IntDomain INT_CAPTURE INT_DECL INT_DELTA INT_OPEN INT_POINT id_intervals id_record id_settle id_text)

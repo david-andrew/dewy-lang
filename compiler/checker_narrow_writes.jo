@@ -1,3 +1,4 @@
+use 'checker_scope_symbols.dewy'
 use 'path_narrowing.dewy'
 use 'ast.jo'
 use 'check.jo'
@@ -46,3 +47,29 @@ unnarrow_assign = (s: int):
     narrow_invalidate(l)
     nm = int(nodes[lhs].name)
     push_scope_sym(nm, new_sym(nm, .local, u, 0))
+
+# the global a narrowed name's place (g.f narrowed by `is`) belongs to, or -1
+alias_global = (l: int) -> int:
+    if int(locals[l].flags) & LF_ALIAS == 0 or locals[l].alias == 0: return -1
+    n = int(locals[l].alias)
+    loop nodes[n].kind == .field or nodes[n].kind == .index or nodes[n].kind == .narrow or nodes[n].kind == .unwrap or nodes[n].kind == .conv: n = int(nodes[n].a)
+    if nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.global)): return int(nodes[n].sym)
+    -1
+
+# the variable a narrowing alias (see narrow_var) stands for, or 0
+narrowed_var = (l: int) -> int:
+    if int(locals[l].flags) & LF_ALIAS == 0: return 0
+    e = int(locals[l].alias)
+    # (an optional union's kept members: x in its condition, `x != none`)
+    if nodes[e].kind == .if_ and opt_rest_aliases.has(e): e = int(nodes[e].a)
+    else if nodes[e].kind != .narrow and nodes[e].kind != .unwrap and (nodes[e].kind != .conv or nodes[e].aux != i32(int(CV.union_))): return 0
+    a = int(nodes[e].a)
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return 0
+    int(nodes[a].sym)
+
+narrow_store_register = (l: int):
+    if narrowed_var(l) == 0: return
+    root = narrow_store_root(l)
+    if root == 0: return
+    narrow_store_next[l] = narrow_store_heads.get(root) ?? 0
+    narrow_store_heads[root] = l

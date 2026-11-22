@@ -1,8 +1,10 @@
 $runtime_checks
+from p"checker_binding_inputs.dewy" import (binding_leaves)
+from p"checker_scope_symbols.dewy" import (new_local new_sym push_scope_sym)
 from p"checked_expression_nodes.dewy" import (bc_assign mk_ident_local)
 
 from p"ast.jo" import (NF_CHECKED NF_UNSCOPED add_flag has_flag kids mk nodes set_list)
-from p"check.jo" import (LF_DECL binding_leaves locals new_local new_sym push_scope_sym)
+from p"check.jo" import (LF_DECL locals)
 from p"checker_state.dewy" import SK
 from p"type_ops.dewy" import (dt mk_var unify)
 from p"types.jo" import (T_VOID T_NEVER prune types)

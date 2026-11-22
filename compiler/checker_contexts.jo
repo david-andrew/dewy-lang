@@ -34,3 +34,14 @@ enter_module_context = (m: int) -> bool:
     module_ctx[m] = ctxs.len()
     ctxs.push(module_frames[m])
     true
+
+cur_mod = () -> int:
+    if cx >= 0: return int(ctxs[cx].mod)
+    0
+
+# The current module binds name itself, by a declaration or `from m import name`: its
+# choice, which Dewy's own reading of a prelude name (the strict `to_int`, a grapheme
+# `find`) does not replace: an import may shadow the prelude's. O(1).
+bound_here = (name: int) -> bool:
+    m = cur_mod()
+    m >= 0 and m < modules.len() and not modules[m].is_prelude and modules[m].names.has(name)

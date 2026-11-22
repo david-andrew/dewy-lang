@@ -1,3 +1,12 @@
+use 'checker_global_initialization.dewy'
+use 'checker_runtime_functions.dewy'
+use 'checker_source_positions.dewy'
+use 'checker_block_entries.dewy'
+use 'checker_type_entries.dewy'
+use 'checker_method_receiver.dewy'
+use 'checker_constant_queries.dewy'
+use 'checker_module_lookup.dewy'
+use 'checker_scope_symbols.dewy'
 use 'checker_contexts.dewy'
 use 'checker_symbol_spelling.dewy'
 use 'checker_decl_slots.dewy'
@@ -294,10 +303,6 @@ icon_node = 0                   # PROGRAM_ICON's value: the icon's bytes (Linux 
 program_name = ""               # PROGRAM_NAME: the build block's name, else the main file's (set in check_program)
 global_ids: int[]
 
-new_sym = (name: int, kind: SK, r: int, decl: int) -> int:
-    syms.push(Sym(i32(name), kind, i32(r), i32(decl), 0))
-    syms.len() - 1
-
 own_consts: bool[]            # by name: a constant of the program's own (not the library's)
 
 # (a dominating `i =? k` on a local, in force until its branch's scope closes)
@@ -310,24 +315,6 @@ position_guards: PositionGuard[]
 # Scopes are one stack of (name, symbol); each name also links its bindings, newest first, so
 # a lookup is one step instead of a scan: check_scopes.top[name] -> newest index, check_scopes.prev[i] -> older one.
 
-push_scope_sym = (name: int, sym: int):
-    loop check_scopes.top.len() <= name: check_scopes.top.push(-1)
-    check_scopes.prev.push(check_scopes.top[name])
-    check_scopes.top[name] = check_scopes.names.len()
-    check_scopes.names.push(name)
-    check_scopes.syms.push(sym)
-
-scope_mark = () -> int: check_scopes.names.len()
-scope_reset = (mark: int):
-    loop position_guards.len() > 0 and int(position_guards[position_guards.len() - 1].mark) >= mark: position_guards.pop()
-    i = check_scopes.names.len() - 1
-    loop i >= mark:
-        check_scopes.top[check_scopes.names[i]] = check_scopes.prev[i]
-        i -= 1
-    check_scopes.names.truncate(mark)
-    check_scopes.syms.truncate(mark)
-    check_scopes.prev.truncate(mark)
-
 # What a name reaches at module level changes only with a binding of that name or with the
 # module structure (imports; the universe, complete before checking starts). Each change takes
 # the next tick: ml_stamp(name) is the tick as of which name's answers stand, and an answer kept
@@ -335,14 +322,6 @@ scope_reset = (mark: int):
 ml_tick = 1
 ml_struct = 1
 ml_name_tick: int[]
-ml_bump_name = (name: int):
-    ml_tick += 1
-    if ml_name_tick.len() <= name: ml_name_tick.resize(name * 2 + 64)
-    ml_name_tick[name] = ml_tick
-ml_stamp = (name: int) -> int:
-    if name < ml_name_tick.len() and ml_name_tick[name] > ml_struct: return ml_name_tick[name]
-    ml_struct
-
 # By name, the modules (not the prelude) whose own tables bind it: a list through home_next from
 # home_first[name] (an entry + 1; 0 ends it), built from every table when first asked (most
 # programs' modules use none: Dewy imports) and kept from then on by bind_module_name. A table
@@ -377,26 +356,6 @@ ml_at: int[]
 # demand_prelude_name, once per name: after its first call for a name it has nothing left to do
 # for it (its units are parsed and registered, or it has none; the math runtimes are loaded)
 demanded: bool[]
-demand_name = (name: int):
-    if name < demanded.len() and demanded[name]: return
-    if demanded.len() <= name: demanded.resize(name * 2 + 64)
-    demanded[name] = true
-    demand_prelude_name(name)
-
-module_lookup = (m: int, name: int) -> int:
-    if name < ml_at.len() and ml_at[name] == ml_stamp(name) and ml_mod[name] == m: return ml_sym[name]
-    s = module_lookup_now(m, name)
-    if not ide_on:
-        if ml_at.len() <= name:
-            grown = name * 2 + 64
-            ml_at.resize(grown)
-            ml_mod.resize(grown)
-            ml_sym.resize(grown)
-        ml_at[name] = ml_stamp(name)
-        ml_mod[name] = m
-        ml_sym[name] = s
-    s
-
 # from m import a, b as c: each name bound in the importing module (functions join any of its
 # own with that name, as overloads)
 from_imports: int[]
@@ -408,29 +367,11 @@ jo_type_names: bool[]           # (by name)
 repl_sig_query = false          # (the REPL's `:type name`: a function's versions go to repl_sig)
 repl_sig = ""
 
-cur_mod = () -> int:
-    if cx >= 0: return int(ctxs[cx].mod)
-    0
-
-# The current module binds name itself, by a declaration or `from m import name`: its
-# choice, which Dewy's own reading of a prelude name (the strict `to_int`, a grapheme
-# `find`) does not replace: an import may shadow the prelude's. O(1).
-bound_here = (name: int) -> bool:
-    m = cur_mod()
-    m >= 0 and m < modules.len() and not modules[m].is_prelude and modules[m].names.has(name)
-
 
 
 
 late_module_imports = false
-# The seed resolves this entry directly from expr.jo's checker import.
-ensure_bundled_import = (file: str, alias: str, pos: int): register_bundled_import(file, alias, pos)
 
-
-
-# The names in a destructuring pattern, in source order. Keep the tree until
-# checking the source type; registration and declaration detection need leaves.
-binding_leaves = (bindings: int[]) -> int[]: flatten_binding_leaves(bindings)
 
 # (a module `use`d by another is registered first, so that a top-level `x = ...` there sees the
 # used module's x: name_assignable)
@@ -438,69 +379,12 @@ registered: bool[]
 
 # ---------------- type resolution ----------------
 values_type_ok = false   # (resolve_binding_type: a binding's whole type may be several values)
-binding_const_init = (kind: SK, ref: int, pos: int) -> int:
-    if kind == .const_:
-        if globals[ref].init != 0: return int(globals[ref].init)
-        if globals[ref].decl != 0: return int(nodes[int(globals[ref].decl)].b)
-    else if kind == .global and readonly_global(ref):
-        ensure_global(ref, pos)
-        return int(nodes[int(globals[ref].decl)].b)
-    else if kind == .local:
-        let ref = ref
-        loop int(locals[ref].flags) & LF_CAPTURE != 0: ref = int(locals[ref].outer)
-        if int(locals[ref].flags) & LF_CONST != 0: return int(locals[ref].const_init)
-    0
-
-
-# A generic type's arguments with those left out filled in from its declaration: `Date` is
-# `Date<Gregorian>` when it says `<C=Gregorian>`. The defaults read in the declaration's own scope.
-type_param_defaults = (d: int, targs: int[], inferred: int[] = []) -> int[]:
-    if targs.len() >= nkids2(d): return targs
-    out = targs
-    loop i in [targs.len()..nkids2(d)):
-        if i < inferred.len() and inferred[i] != 0:
-            out.push(inferred[i])
-            continue
-        fallback = int(nodes[kid2(d, i)].b)
-        if fallback == 0: return targs
-        saved = cx
-        ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "typedef")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(check_scopes.names.len())))
-        cx = ctxs.len() - 1
-        mark = scope_mark()
-        out.push(resolve_type(fallback))
-        scope_reset(mark)
-        ctxs.pop()
-        cx = saved
-    out
-
-subst = (t0: int, targs: int[]) -> int: ts_subst(t0, targs)
 
 # Intersection records (`A & B & [f:T]`, dewy_parse's dw_intersection): their
 # declaration's operand types, and each record type's operand records, which a
 # value of it becomes field by field.
 struct_components: {int: int[]} = {}
 intersection_parts: {int: int[]} = {}
-
-check_struct_fields = (si: int):
-    if structs[si].resolved: return
-    cf_check_struct_fields(si)
-
-module_of_type = (t0: int) -> int:
-    t = prune(t0)
-    k = types[t].kind
-    if (k == .struct_ or k == .enum_) and types[t].st != 0 or (k == .struct_ or k == .enum_): return int(nodes[int(structs[int(types[t].st)].decl)].mod)
-    -1
-
-# The modules whose functions are methods of t: its own, then those of the types it is
-# minted under (a minted child has its parents' methods, wherever they were declared)
-method_modules = (t0: int) -> int[]:
-    out: int[]
-    t = prune(t0)
-    loop t != 0:
-        m = module_of_type(t)
-        if m >= 0 and not out.contains(m): out.push(m)
-        t = nominal_parent.get(t, 0)
-    out
 
 # ---------------- functions ----------------
 # Modules whose parse would have turned the program-wide refinement machinery on, held off
@@ -515,20 +399,10 @@ OP_NAMES = ["[]", "index", "[]=", "set", "+", "add", "-", "sub", "*", "mul", "/"
 # calls it)
 no_web_warned: {int: bool}
 
-get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int: ci_get_fn_inst(decl, targs, use_pos)
-
 
 # (--internal-collide-locals, a self-test: a checked loop's index local takes the loop's own
 # node number, so a walk reading the loop's c as a node meets the loop again and never ends)
 collide_locals = false
-new_local = (name: int, t: int, pos: int) -> int:
-    inst = int(ctxs[cx].inst)
-    locals.push(Local(name = i32(name), type = i32(t), owner = i32(inst), pos = pos, dloops = i32(loop_serials.len())))
-    l = locals.len() - 1
-    fns[inst].locals.push(l)
-    if name != 0 and name_of(name) != "_": push_scope_sym(name, new_sym(name, .local, l, 0))
-    l
-
 
 
 
@@ -551,136 +425,9 @@ struct ConstView:
 
 const_views: ConstView[]
 
-# root variable r is modified (inside a closure if via_closure)
-note_write = (r: int, via_closure: bool, pos: int):
-    if files[pos_file(locals[r].pos)].is_dewy: return
-    f = int(locals[r].flags)
-    if via_closure or f & LF_CAPTURED != 0:
-        locals[r].flags = i32(f | LF_SHARED)
-        check_shareable(r, pos)
-    else:
-        d = int(locals[r].dloops)
-        if loop_serials.len() > d: locals[r].wloop = i32(loop_serials[d])
-
 
 module_ctx: int[]
 module_frames: FnCtx[]
-
-# the global a narrowed name's place (g.f narrowed by `is`) belongs to, or -1
-alias_global = (l: int) -> int:
-    if int(locals[l].flags) & LF_ALIAS == 0 or locals[l].alias == 0: return -1
-    n = int(locals[l].alias)
-    loop nodes[n].kind == .field or nodes[n].kind == .index or nodes[n].kind == .narrow or nodes[n].kind == .unwrap or nodes[n].kind == .conv: n = int(nodes[n].a)
-    if nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.global)): return int(nodes[n].sym)
-    -1
-
-# (in_flow: its declaration reached among the top-level statements, after what they narrowed,
-# `if r == none: panic(...)` say, which it then sees; elsewhere it is checked on its own)
-ensure_global = (g: int, use_pos: int, in_flow: bool = false):
-    if globals[g].state == 2: return
-    if globals[g].state == 1:
-        gn = name_of(int(globals[g].name))
-        global_cycle_across_modules(g, use_pos)
-        fatal(use_pos, "'{gn}' is used in its own first value, before it has one: give it one first ({jd(use_pos, "`{gn} = 0`", "`let {gn} = 0`")} on a line above), then change it")
-    globals[g].state = 1
-    ensuring_globals.push(g)
-    saved = cx
-    m = int(globals[g].mod)
-    entered = enter_module_context(m)
-    flow = in_flow and cx == module_ctx[m]
-    cx = module_ctx[m]
-    saved_floor = ctxs[cx].floor
-    if not flow: ctxs[cx].floor = i32(check_scopes.names.len())
-    d = int(globals[g].decl)
-    if globals[g].is_const:
-        t = 0
-        if nodes[d].a != 0:
-            ref_holder_arm(int(nodes[d].a), int(nodes[d].name))
-            t = resolve_binding_type(int(nodes[d].a))
-        cl = clone(int(nodes[d].b))
-        et = values_init(cl, t)
-        cl = last_checked
-        if t != 0: cl = coerce(cl, t)
-        else if has_flag(cl, NF_LITERAL):
-            t = lit_default(cl)
-        else: t = et
-        globals[g].type = i32(zonk(t))
-        globals[g].init = nodes[d].b      # unchecked original: each use checks a fresh copy
-    else if nodes[d].nlist > 0:
-        if not has_flag(d, NF_CHECKED):
-            t = check_binding_input(d)
-            unpacked = unpack_binding(int(nodes[d].b), t, kids(d), nodes[d].pos)
-            t = unpacked.0
-            set_list(d, unpacked.1)
-            nodes[d].b = i32(last_checked)
-            if types[t].kind != .tuple or int(types[t].nargs) != nkids(d): fatal(nodes[d].pos, "expected a tuple with {nkids(d)} elements (or an array), found {dt(t)}")
-            loop k in [0..nkids(d)):
-                id = kid(d, k)
-                if nodes[id].kind == .hole: continue
-                gg = int(nodes[id].sym)
-                globals[gg].type = i32(zonk(targ(t, k)))
-                globals[gg].state = 2
-            add_flag(d, NF_CHECKED)
-            nodes[d].type = i32(t)
-    else:
-        t = 0
-        if nodes[d].a != 0:
-            ref_holder_arm(int(nodes[d].a), int(nodes[d].name))
-            t = resolve_binding_type(int(nodes[d].a))
-        if refine_active and types[prune(t)].kind == .refined and nodes[d].b == 0: nodes[d].b = i32(struct_default(t, nodes[d].pos))
-        # (x: T, a struct with default field values: it starts with them)
-        if nodes[d].b == 0 and t != 0: nodes[d].b = i32(struct_default(t, nodes[d].pos))
-        # (Dewy's `let g:T` with no value: given one before any read, dg_check_program)
-        if nodes[d].b == 0 and dewy_at(nodes[d].pos): dg_record(g)
-        tk_unit = 0
-        if nodes[d].b != 0:
-            global_place_decl(d)
-            if t == 0 and dewy_at(nodes[d].pos): tk_unit = tk_literal_unit(int(nodes[d].b))
-            et = values_init(int(nodes[d].b), t)
-            nodes[d].b = i32(last_checked)
-            if quat_nodes.has(int(nodes[d].b)): quat_globals[g] = true
-            if t != 0: nodes[d].b = i32(coerce(int(nodes[d].b), t))
-            else:
-                t = et
-                if has_flag(int(nodes[d].b), NF_LITERAL):
-                    t = decimal_binding_type(nodes[d].pos, lit_default(int(nodes[d].b)))
-                    nodes[d].b = i32(coerce(int(nodes[d].b), t))
-                    decimal_global(g, nodes[d].pos, t)
-                else if is_quantity(t):
-                    exact = t
-                    t = decimal_quantity_start(nodes[d].pos, int(nodes[d].b), exact)
-                    if t != exact: nodes[d].b = i32(coerce(int(nodes[d].b), t))
-                    decimal_global(g, nodes[d].pos, t)
-        t = zonk(t)
-        if t == 0: fatal(nodes[d].pos, "global needs a type or a value")
-        if tk_unit != 0:
-            t = temperature_binding(d, t, tk_unit, true)
-            tk_bindings[-g - 1] = d
-        if has_var(prune(t)):
-            # (enemies = [] at the top level: its elements' type comes from a function that pushes
-            # one, as a local's does; settled once everything is checked)
-            vk = nodes[int(nodes[d].b)].kind
-            if nodes[d].a == 0 and vk == .array and nkids(int(nodes[d].b)) == 0 and tkind(t) == .array: open_globals.push(g)
-            else: fatal(nodes[d].pos, "cannot infer the type of '{name_of(int(globals[g].name))}'; add a type annotation{empty_hint(name_of(int(globals[g].name)), t)}")
-        if tkind(t) == .void_:
-            if empty_braces(int(nodes[d].b)): fatal(nodes[d].pos, empty_braces_text(name_of(int(globals[g].name))))
-            fatal(nodes[d].pos, "cannot assign a value of type void")
-        if tkind(t) == .null_: fatal(nodes[d].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(nodes[d].pos, "`{name_of(int(globals[g].name))}: Enemy? = none`", "`let {name_of(int(globals[g].name))}:Enemy? = none`")}")
-        if tkind(t) == .typeval or tkind(t) == .module: fatal(nodes[d].pos, "'{name_of(int(globals[g].name))}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
-        globals[g].type = i32(t)
-        if t == T_STR and nodes[d].a == 0 and dewy_at(nodes[d].pos): string_domain_declare(-g - 1, int(nodes[d].b))
-        else if t == T_MATH_INT and nodes[d].a == 0 and dewy_at(nodes[d].pos): int_domain_declare(-g - 1, int(nodes[d].b))
-        # Exact quantity constants have no runtime storage or initialization.
-        if has_flag(d, NF_RDONLY) and is_quantity(t) and quantity_constant_scale(int(nodes[d].b)) >= 0:
-            globals[g].is_const = true
-            globals[g].init = nodes[d].b
-            nodes[d].kind = .const_
-        add_flag(d, NF_CHECKED)
-    globals[g].state = 2
-    ensuring_globals.pop()
-    ctxs[cx].floor = saved_floor
-    leave_module_context(m, entered)
-    cx = saved
 
 
 # `x == 6`, `speed + 1`, `true` as a statement: a value made and dropped, which changes nothing
@@ -738,24 +485,6 @@ values_index_base = 0     # (the base of an index being checked: `pair[0]` says 
 # Several values (type t) used at n: taken where a consumer asked; elsewhere it is one value's place.
 mv_count = 0
 
-# `value` pushed (or a pack extended) onto sink i's accumulator, in exprstmt s.
-# The value(s) of exprstmt s, a statement of BODY/BIND i's own block while their number is
-# static, held in locals: the block gives them at its end as `(T T)` (sink_close), with no
-# array. A BODY's values have one type, as an array's elements would.
-# Several values held as one `(T T)` (a group or a binding) expressed into sink i: each pushed.
-# Sink i's pending values pushed in order (it needs an accumulator after all).
-# Exprstmt s gives a value of type t in the innermost sink (a pack when `pack`).
-# A value expressed into BODY r, written `:>(T T)`: counted when it is a statement of the
-# body's own block, outside loops; another (in a branch or loop) has no static count.
-# Arm block b of `if`/`match` e, which ends a BODY or ARM: its values go to the BODY.
-# Function f's body, written `:>(T T)`, is about to be checked: a BODY that must express
-# exactly that many values of T (no expected type for each: they are pushed as T).
-# A value-giving `if`/`match` whose arms gave their values to a BODY that became a
-# pack: a statement now, its arms' last values pushed.
-# (a block ending in an `if` made a statement: the statement itself, as check_stmt has it)
-# The end of block b, sink i: a BODY whose values are more than its last one
-# becomes a pack, `{ $pack = [] ... $pack.push(v) ... $pack }`.
-check_block = (b: int, expected: int, want_value: bool) -> int: bk_block(b, expected, want_value)
 # Blocks run in checker_blocks.dewy; these are its services.
 # (a sink opened for b in mode; mode -1 or -2 (wanting a value): how a discarding block's
 # values go, worked out here)
@@ -789,26 +518,11 @@ loop_copy_refined: {int: int} = {}    # a written binder's element type, when re
 # (the value variables of loops over dictionaries: a change is made through the key)
 map_loop_values: {int: bool} = {}
 
-# Suggestions are spelled in the language of the source they are about.
-dewy_at = (pos: int) -> bool:
-    f = pos_file(pos)
-    pos > 0 and f < files.len() and files[f].is_dewy
-
 # Arrays a Dewy loop iterates by value (`loop x in xs`), while their bodies are
 # checked: the loop sees the value at entry, so changing the array's length in
 # the body is an error naming the two meanings the program could have wanted.
 # (ValueLoop: checker_state.dewy)
 value_loops: ValueLoop[]
-
-value_loop_resize = (receiver: int, operation: str, pos: int):
-    i = value_loops.len() - 1
-    loop i >= 0:
-        v = value_loops[i]
-        if v.context == cx and same_route(v.route, receiver):
-            src = route_text(v.route)
-            el = if v.name != 0: name_of(v.name) else: "item"
-            fatal(pos, "`{operation}` changes the length of `{src}`, which `loop {el} in {src}` iterates by its value at loop entry, so the loop would not see the change: write `loop {el} in @{src}` to iterate the live array, or bind a snapshot first (`let snapshot = {src}` then `loop {el} in snapshot`)")
-        i -= 1
 
 const ASSIGN_OPS = 0
 
@@ -818,17 +532,6 @@ loop_labels: LoopLabel[]
 
 int_update_lhs = 0      # (the integer binding a compound update is checked for, as `total` in `total += x`,
 int_update_pos = 0      # and the update's position)
-
-# the variable a narrowing alias (see narrow_var) stands for, or 0
-narrowed_var = (l: int) -> int:
-    if int(locals[l].flags) & LF_ALIAS == 0: return 0
-    e = int(locals[l].alias)
-    # (an optional union's kept members: x in its condition, `x != none`)
-    if nodes[e].kind == .if_ and opt_rest_aliases.has(e): e = int(nodes[e].a)
-    else if nodes[e].kind != .narrow and nodes[e].kind != .unwrap and (nodes[e].kind != .conv or nodes[e].aux != i32(int(CV.union_))): return 0
-    a = int(nodes[e].a)
-    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return 0
-    int(nodes[a].sym)
 
 
 # Only writes to narrowed aliases need rollback between sibling branches.
@@ -844,13 +547,6 @@ narrow_jumps: NarrowJump[]
 # expected indexed links and one entry per narrowing. No scan of all locals.
 narrow_store_heads: {int: int}
 narrow_store_next: {int: int}
-
-narrow_store_register = (l: int):
-    if narrowed_var(l) == 0: return
-    root = narrow_store_root(l)
-    if root == 0: return
-    narrow_store_next[l] = narrow_store_heads.get(root) ?? 0
-    narrow_store_heads[root] = l
 
 # returns the (possibly replaced) statement node
 # `x = ...` in a function, where x is a global declared below the function in the same file:
@@ -881,22 +577,6 @@ interp_appends: {int: bool} = {}
 
 # Assignments run in checker_assigns.dewy; these are its services.
 assign_before: int[]    # (selectors captured before the values of the assignments being checked)
-# An indexed target's forms (checker_assigns.dewy va_index, given the receiver's type bt):
-# 1 Dewy ranges made values, 2 a range of an array's elements, 3 a stepped range off an
-# n-dimensional array refused, 4 a record's soa element, part or `[]=` call, 5 an array's
-# elements picked by a mask or indexes; the rewritten statement, or 0
-# A condition that has just been found to hold or not: `i =? k` on a local is noted, with a scope
-# entry so that the branch's reset takes it back. O(1).
-position_guard_note = (c: int, holds: bool):
-    op = int(nodes[c].op)
-    if not (op == int(Tok.eq) and holds or op == int(Tok.ne) and not holds): return
-    a = int(nodes[c].a)
-    b = int(nodes[c].b)
-    if nodes[a].kind == .int_lit: a, b = b, a
-    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)) or nodes[b].kind != .int_lit: return
-    position_guards.push(PositionGuard(local = nodes[a].sym, value = i32(nodes[b].ival), mark = i32(scope_mark())))
-    push_scope_sym(intern("$position_guard"), 0)
-
 # (1 the refined storage written, 2 a refined field's checked store (or 0), 3 a text
 # domain's write, 4 an integer domain's)
 # The value checked to lt (settle 1: converted to lt, but for a release's zeroed bytes;
@@ -906,15 +586,6 @@ position_guard_note = (c: int, holds: bool):
 # a local name for the element, entry, field or variable itself, its key or
 # index evaluated once.
 local_place_count = 0
-
-# A comparison chain's temporary (dewy_node_builds dw_chain_temp) holds its
-# operand's exact value, not a fixed-width store: `a <? b + c <? d` compares
-# the exact sum. O(1) unless the value is fixed-width arithmetic.
-decl_observed = (s: int, t: int) -> int:
-    v = int(nodes[s].b)
-    if v == 0 or t == T_MATH_INT or not exact_type(t, nodes[s].pos) or not exact_potential(v): return t
-    if not starts_with(name_of(int(nodes[s].name)), "$chain"): return t
-    exact_int_result(v, true)
 
 # A shaped parameter's dimension (dw_shape_prologue): a name already bound to a
 # value is checked against the argument's dimension; otherwise the name binds it.
@@ -946,8 +617,6 @@ dewy_target_dropped: {int: int[]}
 # disprove closed-program ownership. Init/lambda bodies remain unsummarized.
 zonk_indexes = 0
 zonk_user_globals = 0
-
-ceval = (e: int) -> CVal: constant_eval(nodes, names, files, constant_host, e)
 
 # ---------------- static assertions ----------------
 # Closed `$assert` requests keep this constant/evaluator fast path. facts.jo
@@ -983,16 +652,6 @@ runtime_ffi_scan = 1
 runtime_ffi_done = false
 
 
-runtime_fn = (name: str) -> int:
-    if let f = runtime_insts.get(name): return f
-    demand_name(intern(name))
-    s = prelude.get(intern(name)) ?? 0
-    if s == 0 or syms[s].kind != .fns: ice("missing runtime function {name}")
-    f = get_fn_inst(int(syms[s].decl), [], nodes[int(syms[s].decl)].pos)
-    runtime_insts[name] = f
-    if starts_with(name, "__mi_") or starts_with(name, "__exact_"): check_pending_functions(f)
-    f
-
 
 
 
@@ -1007,12 +666,6 @@ program_named = false         # (the build block gave the name)
 value_helper_types: {int: int} = {}  # bit 0: equality, bit 1: hashing
 value_equal_fns: {int: int} = {}
 value_hash_fns: {int: int} = {}
-
-note_value_helpers = (t: int, hashing: bool = false):
-    k = tkind(t)
-    if k == .array or k == .fixed or k == .opt or k == .struct_ or k == .tuple or k == .enum_:
-        bit = if hashing: 2 else: 1
-        value_helper_types[t] = (value_helper_types.get(t) ?? 0) | bit
 
 
 

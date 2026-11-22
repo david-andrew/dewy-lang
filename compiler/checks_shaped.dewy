@@ -1,13 +1,15 @@
 $runtime_checks
+from p"checker_block_entries.dewy" import (check_block)
+from p"checker_type_entries.dewy" import (check_struct_fields)
+from p"expression_types.dewy" import (ntype)
 from p"checked_expression_nodes.dewy" import (bc_assign bc_bin type_node_of)
 
 from p"ast.jo" import (NF_LOOPCOUNT NF_STMT add_flag clone has_flag kid kids mk nkids nodes set_list)
-from p"check.jo" import (check_block check_struct_fields)
 from p"checks_thin.dewy" import (resolve_type)
 from p"checker_expr.dewy" import (check_expr)
 from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_int bc_stmt bc_str)
 from p"checks_read_code.dewy" import (bc_logic)
-from p"expr.jo" import (ShapeArm last_checked ntype)
+from p"expr.jo" import (ShapeArm last_checked)
 from p"literal_context.dewy" import (finalize_literal kid_lit has_lambda small_span)
 from p"checks_thin_expr.dewy" import (int_intervals is_map_type plain_path)
 from p"intervals.dewy" import (interval_missing interval_text)

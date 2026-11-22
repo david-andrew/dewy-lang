@@ -1,0 +1,23 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (starts_with)
+from p"diagnostic_exit.dewy" import (ice)
+from p"checks_thin.dewy" import (check_pending_functions)
+from p"util.jo" import (intern)
+from p"ast.jo" import (nodes)
+from p"check.jo" import (prelude runtime_insts syms)
+from p"checker_module_lookup.dewy" import (demand_name)
+from p"checker_type_entries.dewy" import (get_fn_inst)
+
+runtime_fn=(name:string):>int64=>$unsafe {
+    let cached=runtime_insts.get(name)
+    if cached not=? none {return cached ?? 0}
+    let id=intern(name)
+    demand_name(id)
+    let s=prelude.get(id) ?? 0
+    if s =? 0 or syms.ptr[s].kind not=? 'fns' {ice("missing runtime function {name}")}
+    let d=int64(syms.ptr[s].decl)
+    let f=get_fn_inst(d [] nodes.ptr[d].pos)
+    runtime_insts[name]=f
+    if starts_with(name "__mi_") or starts_with(name "__exact_") {check_pending_functions(f);}
+    f
+}

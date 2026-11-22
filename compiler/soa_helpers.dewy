@@ -1,13 +1,14 @@
 $runtime_checks
+from p"checker_scope_symbols.dewy" import (scope_mark scope_reset)
+from p"expression_types.dewy" import (ntype)
 
 from p"ast.jo" import (NF_CHECKED add_flag clone mk nodes set_list)
-from p"check.jo" import (scope_mark scope_reset)
 from p"checker_expr.dewy" import (check_expr)
 from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_let bc_method bc_stmt)
 from p"checks_thin.dewy" import (check_stmt)
 from p"checks_thin_expr.dewy" import (soa_again)
 from p"diagnostic_exit.dewy" import (fatal)
-from p"expr.jo" import (bc_count last_checked ntype)
+from p"expr.jo" import (bc_count last_checked)
 from p"type_ops.dewy" import (dt soa_elem)
 from p"types.jo" import (fields prune structs types)
 from p"util.jo" import (intern name_of)

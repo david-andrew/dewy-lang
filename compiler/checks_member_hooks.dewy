@@ -1,10 +1,13 @@
 $runtime_checks
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"checker_type_entries.dewy" import (check_struct_fields)
+from p"checker_module_lookup.dewy" import (module_lookup)
 from p"checked_expression_nodes.dewy" import (mk_ident_local)
 
 from p"error_ops.dewy" import (forward_member)
 from p"dewy_method_ops.dewy" import (dewy_type_method)
 from p"ast.jo" import (NF_CHECKED NF_MUT NF_U64 add_flag kid mk nkids nodes)
-from p"check.jo" import (check_struct_fields dewy_at locals module_lookup modules)
+from p"check.jo" import (locals modules)
 from p"checker_assignment_entry.dewy" import (soa_alias_of)
 from p"checks_thin.dewy" import (rational_one_spelling)
 from p"checker_expr.dewy" import (check_expr)
