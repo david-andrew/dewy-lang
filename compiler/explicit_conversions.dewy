@@ -1,0 +1,185 @@
+$runtime_checks
+from p"check.jo" import (float_int_demanded)
+from p"refine_metadata.dewy" import (str_set_of)
+from p"expr_cold_queries.dewy" import (src_char)
+from p"checks_thin.dewy" import (jd runtime_demand)
+from p"unit_ops.dewy" import (rational_helper_call)
+from p"expression_types.dewy" import (ntype)
+from p"util.jo" import (name_of pos_in_lib)
+from p"literal_context.dewy" import (is_lit)
+from p"string_domain_ops.dewy" import (int_domain_conversion)
+from p"float_ops.dewy" import (ff_note_conversion)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"error_ops.dewy" import (exception_member)
+from p"checker_exact.dewy" import (exact_math_operand exact_potential)
+from p"rational_literals.dewy" import (exact_decimal)
+from p"type_ops.dewy" import (dt int_policy mk_opt simple_enum)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"ir.jo" import (dbg_on)
+from p"vector_checks.dewy" import (check_vec_ctor)
+from p"integer_conversions.dewy" import (check_integer_boundary int_widens lit_fits narrow_int wrap_conv)
+from p"checker_expr.dewy" import (check_expr)
+from p"character_literals.dewy" import (charlike charlike_to_int)
+from p"checks_thin_expr.dewy" import (bytes_text_warning str_set_unnumbered)
+from p"rational_types.dewy" import (bundled_rational_type bundled_word_rational_type)
+from p"numeric_library_types.dewy" import (bundled_bigint_type math_rep_type)
+from p"checks_call_hints.dewy" import (a_type)
+from p"types.jo" import (T_F32 T_FLOAT T_INT T_MATH_INT T_U8 is_float is_int is_numeric is_union prune type_eq types union_members)
+from p"node_store.dewy" import (Node)
+from p"ast.jo" import (NF_CHECKED NF_EXPLICIT_INTEGER NF_LITERAL NF_RECORD add_flag clear_flag mk nodes set_list)
+from p"expr.jo" import (CV)
+from p"coerce_expression.dewy" import (coerce)
+
+ExplicitConversionsWord:type=int64<overflow='wrap'>
+
+conversion=(n:int64 to0:int64 args:array<int64>):>int64=>$unsafe {
+    let to=prune(to0)
+    let tk=types.ptr[to].kind
+    if args.length =? 1 and charlike(args[0]) and tk =? 'int_' {
+        # (int("5") reads as the number 5 to a Python programmer, but a one-character string is its code)
+        let a0=args[0]
+        if nodes.ptr[a0].kind =? 'str_lit' and not type_eq(to T_U8) and src_char(nodes.ptr[a0].pos) =? b'"' {
+            # (int('0') in single quotes, as character arithmetic writes it, is the code)
+            let w=name_of(ExplicitConversionsWord(nodes.ptr[a0].sval))
+            if (w as array<uint8>).length =? 1 and (w as array<uint8>).ptr[0] >=? b'0' and (w as array<uint8>).ptr[0] <=? b'9' {
+                fatal(nodes.ptr[n].pos "{dt(to0)}(\"{w}\") would be the code of the character {w} ({ExplicitConversionsWord((w as array<uint8>).ptr[0])}): `to_int(\"{w}\")` reads the number, and `{jd(nodes.ptr[n].pos "u8" "uint8")}('{w}')` is the code")
+            }
+        }
+        charlike_to_int(args[0])
+    }
+    if tk =? 'vec' {return check_vec_ctor(n to args)}
+    if args.length not=? 1 or nodes.ptr[args[0]].kind =? 'namedarg' {fatal(nodes.ptr[n].pos "{dt(to0)}(...) takes one argument")}
+    if tk =? 'str_' {
+        if dewy_at(nodes.ptr[n].pos) and not pos_in_lib(nodes.ptr[n].pos) {
+            let ft=prune(check_expr(args[0] 0))
+            add_flag(args[0] NF_CHECKED)
+            bytes_text_warning(n ft)
+        }
+        let part=mk('pair' nodes.ptr[n].pos)
+        nodes[part].a = int32<overflow='wrap'>(args[0])
+        nodes[part].sval = -1
+        nodes[n] = Node(kind = 'str_lit' pos = nodes.ptr[n].pos aux = 1)
+        set_list(n [part])
+        return check_expr(n 0)
+    }
+    let a=args[0]
+    check_expr(a if tk =? 'float_' and nodes.ptr[a].kind =? 'float_lit' {to} else {0});
+    let ft=prune(ntype(a))
+    if nodes.ptr[a].kind =? 'int_lit' and int_policy(to) not=? 0 and not dbg_on and lit_fits(a to) {
+        nodes[n] = nodes.ptr[a]
+        nodes[n].type = int32<overflow='wrap'>(to)
+        clear_flag(n NF_LITERAL)
+        return to
+    }
+    if ft =? T_MATH_INT and to not=? T_MATH_INT and (is_int(to) or is_float(to)) {
+        if not is_lit(a) and is_int(to) and int_policy(to) =? 0 {check_integer_boundary(a ft to)}
+        a=exact_math_operand(a)
+        ft=prune(ntype(a))
+    }
+    if to not=? T_MATH_INT and int_policy(to) =? 0 and is_int(to) and is_int(ft) and ft not=? T_MATH_INT and exact_potential(a) {
+        nodes[n] = Node(kind = 'conv' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(a) aux = int32<overflow='wrap'>(int64(CV.int_)) type = int32<overflow='wrap'>(to) flags = int32<overflow='wrap'>(NF_CHECKED | NF_EXPLICIT_INTEGER))
+        return to
+    }
+    if int_policy(to) not=? 0 and not is_int(ft) {fatal(nodes.ptr[n].pos "overflow policy conversion requires an integer")}
+    if int_policy(to) not=? 0 and is_int(ft) {
+        nodes[n] = nodes.ptr[a]
+        wrap_conv(n (if int_policy(to) =? 1 {CV.wrap_int} else {CV.saturate_int}) to)
+        return to
+    }
+    if tk =? 'int_' and nodes.ptr[a].kind =? 'float_lit' and nodes.ptr[a].sval not=? 0 {ft=exact_decimal(a)}
+    if tk =? 'int_' and (bundled_rational_type(ft) or bundled_word_rational_type(ft)) {
+        let source=nodes.length
+        nodes.push(nodes.ptr[a])
+        add_flag(source NF_CHECKED)
+        rational_helper_call(a "_truncate" source T_MATH_INT);
+        if to not=? T_MATH_INT {coerce(a to);}
+        nodes[n] = nodes.ptr[a]
+        return to
+    }
+    if (ft =? T_MATH_INT and (bundled_bigint_type(to) or math_rep_type(to))) or (to =? T_MATH_INT and (bundled_bigint_type(ft) or math_rep_type(ft))) {
+        coerce(a to);
+        nodes[n] = nodes.ptr[a]
+        return to
+    }
+    if bundled_rational_type(ft) and tk =? 'float_' {
+        coerce(a to);
+        nodes[n] = nodes.ptr[a]
+        return to
+    }
+    if is_lit(a) and nodes.ptr[a].kind =? 'float_lit' and tk =? 'int_' and to =? T_MATH_INT {
+        coerce(a T_FLOAT);
+        nodes[n] = nodes.ptr[a]
+        wrap_conv(n CV.float2int to)
+        return to
+    }
+    if is_lit(a) and nodes.ptr[a].kind =? 'float_lit' and tk =? 'int_' {
+        nodes[a].kind = 'int_lit'
+        nodes[a].ival = int64(nodes.ptr[a].fval)
+    }
+    if is_lit(a) and is_numeric(to) {
+        coerce(a to);
+        nodes[n] = nodes.ptr[a]
+        return to
+    }
+    let fk=types.ptr[ft].kind
+    let cv:ExplicitConversionsWord=-1
+    # (uint64(x) between fixed widths keeps the value: proven from facts, or checked
+    # when it runs; an overflow='wrap' type keeps the bits)
+    if tk =? 'int_' and fk =? 'int_' and ft not=? T_MATH_INT and to not=? T_MATH_INT and not int_widens(ft to) and dewy_at(nodes.ptr[n].pos) {
+        nodes[n] = nodes.ptr[a]
+        narrow_int(n ft to)
+        return to
+    }
+    if tk =? 'int_' {
+        if fk =? 'int_' {check_integer_boundary(a ft to)}
+        if fk =? 'int_' or fk =? 'bool_' {cv=int64(CV.int_)}
+        else if fk =? 'float_' {
+            cv=int64(CV.float2int)
+            # (a checked conversion's failure report: demanded by its first use)
+            if to not=? T_MATH_INT and dewy_at(nodes.ptr[n].pos) {
+                let demanded=@float_int_demanded
+                demanded=true
+            }
+            # (an obligation: floats.jo ff_int_obligation)
+            if dewy_at(nodes.ptr[n].pos) and not pos_in_lib(nodes.ptr[n].pos) {ff_note_conversion()}
+        }
+        else if fk =? 'enum_' and simple_enum(ft) {
+            if str_set_of(ft) not=? 0 and dewy_at(nodes.ptr[n].pos) and not pos_in_lib(nodes.ptr[n].pos) {str_set_unnumbered(nodes.ptr[n].pos ft)}
+            cv=int64(CV.int_)
+        }
+        else if fk =? 'ptr' {cv=int64(CV.ptr)}
+    }
+    else if tk =? 'float_' {
+        if fk =? 'int_' {
+            cv=int64(CV.int2float)
+            if exact_potential(a) {runtime_demand(if to =? T_F32 {"__exact_i128_f32"} else {"__exact_i128_f64"})}
+        }
+        else if fk =? 'float_' {cv=int64(CV.float_)}
+    }
+    else if tk =? 'bool_' {
+        if fk =? 'bool_' {cv=int64(CV.none_)}
+    }
+    if cv <? 0 {
+        let hint=""
+        let read_int=if dewy_at(nodes.ptr[n].pos) {T_MATH_INT} else {T_INT}
+        if fk =? 'str_' and tk =? 'int_' {
+            hint=" (`to_int(s)` reads a number from text: it gives {a_type(mk_opt(read_int))}, none when the text is not one)"
+            if dewy_at(nodes.ptr[n].pos) {hint=" (`to_int(s)` reads a number from text: it gives an int, or `NotAnInteger` when the text is not one; `to_int(s) ?? 0` falls back)"}
+        }
+        if fk =? 'str_' and tk =? 'float_' {hint=" (`to_float(s)` reads a number from text: it gives {a_type(mk_opt(T_FLOAT))}, none when the text is not one)"}
+        # (`int(input("n? "))`: what a failure there would mean is the program's to say)
+        if hint =? "" and dewy_at(nodes.ptr[n].pos) and is_union(ft) {
+            loop m in union_members(ft) {
+                if exception_member(prune(m)) {hint=" (it may hold a failure such as {dt(m)}: handle that first, with `?? fallback` or `or_throw`)"}
+            }
+        }
+        fatal(nodes.ptr[n].pos "cannot convert {dt(ft)} to {dt(to)}{hint}")
+    }
+    if type_eq(ft to) {
+        nodes[n] = nodes.ptr[a]
+        return to
+    }
+    nodes[n] = Node(kind = 'conv' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(a) aux = int32<overflow='wrap'>(cv) type = int32<overflow='wrap'>(to) flags = int32<overflow='wrap'>(NF_CHECKED))
+    if ft =? T_MATH_INT and tk =? 'int_' and dewy_at(nodes.ptr[n].pos) {int_domain_conversion(n to)}
+    to
+}

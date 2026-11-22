@@ -3,6 +3,15 @@
 # (a leaf moved out of a Jo module without state of its own: an isolated build that has that module but
 # not the leaf reads the leaf's functions from the module, a double or the real one)
 LEAF_HOMES = {
+    'missing_member_checks': 'expr.jo',
+    'function_value_checks': 'expr.jo',
+    'unresolved_call_names': 'expr.jo',
+    'arithmetic_calls': 'expr.jo',
+    'explicit_conversions': 'expr.jo',
+    'struct_construction': 'expr.jo',
+    'binary_operator_checks': 'expr.jo',
+    'intrinsic_expressions': 'expr.jo',
+    'coerce_expression': 'expr.jo',
     'match_pattern_sets': 'expr.jo',
     'overload_type_lookup': 'expr.jo',
     'storage_place_checks': 'expr.jo',

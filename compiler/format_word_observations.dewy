@@ -1,4 +1,5 @@
 $runtime_checks
+from p"coerce_expression.dewy" import (coerce)
 from p"overload_type_lookup.dewy" import (resolve_by_types)
 from p"source_warnings.dewy" import (warn)
 from p"checks_compare_hints.dewy" import (void_rec_hint)
@@ -21,7 +22,7 @@ from p"checks_builders.dewy" import (bc_str)
 from p"types.jo" import (T_MATH_INT T_NEVER T_STR T_U8 is_int prune types)
 from p"ast.jo" import (NF_U64 has_flag kid nkids nodes)
 from p"check.jo" import (FK_NORMAL LF_ASSIGNED LF_CAPTURE LF_CAPTURED LF_SHARED LF_ADDR LF_EXPOSED LF_ALIAS LF_BYREF ctxs cx fns lib_dir locals)
-from p"expr.jo" import (CV WordFormatRequest by_types_binds coerce format_word_defs format_word_heads format_word_inst format_word_requests)
+from p"expr.jo" import (CV WordFormatRequest by_types_binds format_word_defs format_word_heads format_word_inst format_word_requests)
 
 FormatWordObservationsWord:type=int64<overflow='wrap'>
 

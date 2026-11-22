@@ -1,0 +1,233 @@
+use 'coerce_expression.dewy'
+use 'checker_state.dewy'
+use 'ide.jo'
+use 'ast.jo'
+use 'node_store.dewy'
+use 'types.jo'
+use 'checked_expression_nodes.dewy'
+use 'checker_expr.dewy'
+use 'check.jo'
+use 'checker_type_entries.dewy'
+use 'expr.jo'
+use 'concurrency_types.dewy'
+use 'concurrency.jo'
+use 'checker_call_queries.dewy'
+use 'record_construction.dewy'
+use 'default_arguments.dewy'
+use 'checker_source_positions.dewy'
+use 'type_ops.dewy'
+use 'diagnostic_exit.dewy'
+use 'util.jo'
+use 'literal_context.dewy'
+use 'ide_text.dewy'
+use 'argument_order.dewy'
+use 'call_argument_checks.dewy'
+use 'aggregate_sources.dewy'
+use 'checker_scope_symbols.dewy'
+use 'expression_types.dewy'
+use 'checks_thin.dewy'
+use 'refine_metadata.dewy'
+use 'checks_thin_expr.dewy'
+
+struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> int:
+    if decl != 0 and dewy_at(nodes[n].pos):
+        module = int(nodes[decl].mod)
+        if module == concurrency_thread_module and name_of(int(nodes[decl].name)) == "Atomic":
+            fatal(nodes[n].pos, "construct Atomic with atomic(value); its storage is private")
+        if module == concurrency_task_module or module == concurrency_task_core_module:
+            name = name_of(int(nodes[decl].name))
+            if name == "Task" or name == "TaskGroup": fatal(nodes[n].pos, "task handles are created by concurrent and spawn; their storage is private")
+    fills_zero = ctor_fills_zero
+    ctor_fills_zero = false
+    t = st_type
+    if t == 0 and nkids2(decl) == 0: t = get_struct_inst(decl, [])
+    if t == 0:
+        ntp = nkids2(decl)
+        binds = fill(0, ntp)
+        ex = prune(expected)
+        if expected != 0 and types[ex].kind == .struct_ and int(structs[int(types[ex].st)].decl) == decl: t = ex
+        else:
+            mark = scope_mark()
+            loop i in [0..ntp):
+                nm = int(nodes[kid2(decl, i)].name)
+                push_scope_sym(nm, new_sym(nm, .type_, mk_param(i), 0))
+            check_args_untyped(args)
+            pnames: int[]
+            hasdef: bool[]
+            loop i in [0..nkids(decl)):
+                pnames.push(int(nodes[kid(decl, i)].name))
+                hasdef.push(true)
+            mapped: int[]
+            err = map_args(pnames, hasdef, args, mapped, dewy_param_kinds.get(decl) ?? [])
+            if len(err) > 0: fatal(nodes[n].pos, err)
+            loop i in [0..nkids(decl)):
+                a = mapped[i]
+                if a == 0 or ctx_dependent(a) or is_lit(a): continue
+                f = kid(decl, i)
+                if nodes[f].a == 0: continue
+                pat = resolve_type(int(nodes[f].a))
+                match_type(pat, ntype(a), binds, 0)
+            # A literal does not override a declared type default. Known
+            # nonliteral fields constrain the type before defaults are filled.
+            loop i in [0..nkids(decl)):
+                a = mapped[i]
+                if a == 0 or not is_lit(a): continue
+                f = kid(decl, i)
+                if nodes[f].a == 0: continue
+                inferred = binds
+                match_type(resolve_type(int(nodes[f].a)), lit_default(a), inferred, 0)
+                loop j in [0..ntp):
+                    if binds[j] == 0 and nodes[kid2(decl, j)].b == 0: binds[j] = inferred[j]
+            defaults = type_param_defaults(decl, [], binds)
+            loop i in [0..defaults.len()):
+                if binds[i] == 0: binds[i] = defaults[i]
+            loop i in [0..nkids(decl)):
+                a = mapped[i]
+                if a == 0 or not is_lit(a): continue
+                f = kid(decl, i)
+                if nodes[f].a == 0: continue
+                pat = resolve_type(int(nodes[f].a))
+                hint = subst_partial(pat, binds)
+                if has_var(hint): finalize_literal(a)
+                else: coerce(a, hint)
+                match_type(pat, ntype(a), binds, 0)
+            # As with function calls, first collect known argument types, then
+            # check contextual literals/callbacks against the partially bound
+            # field types. Empty collections can use another field's type.
+            loop i in [0..nkids(decl)):
+                a = mapped[i]
+                if a == 0 or not ctx_dependent(a) or nodes[a].kind == .hole: continue
+                f = kid(decl, i)
+                if nodes[f].a == 0: continue
+                pat = resolve_type(int(nodes[f].a))
+                check_expr(a, subst_partial(pat, binds))
+                add_flag(a, NF_CHECKED)
+                match_type(pat, ntype(a), binds, 0)
+            scope_reset(mark)
+            loop i in [0..ntp):
+                if binds[i] == 0:
+                    sn = name_of(int(nodes[decl].name))
+                    more = ""
+                    if ntp > 1: more = " ..."
+                    how = ""
+                    if dewy_at(nodes[n].pos): how = " (nothing given says what it is: name it, as in `{sn}<int64{more}>[...]`, or annotate the variable)"
+                    fatal(nodes[n].pos, "cannot infer type parameter '{name_of(int(nodes[kid2(decl, i)].name))}' of {sn}{how}")
+            t = get_struct_inst(decl, binds)
+    si = int(types[prune(t)].st)
+    check_struct_fields(si)
+    nf = int(structs[si].nfields)
+    pnames: int[]
+    hasdef: bool[]
+    loop i in [0..nf):
+        pnames.push(int(fields[int(structs[si].fields) + i].name))
+        hasdef.push(true)
+    mapped: int[]
+    err = map_args(pnames, hasdef, args, mapped)
+    if len(err) > 0: fatal(nodes[n].pos, "in {name_of(int(nodes[decl].name))}(...): {err}")
+    if not fills_zero and files[pos_file(nodes[decl].pos)].is_dewy:
+        # (a Dewy object is built from what is given and its defaults, never from invented zeros)
+        loop i in [0..nf):
+            fi = int(structs[si].fields) + i
+            # (an optional field defaults to none)
+            if mapped[i] == 0 and int(fields[fi].defval) == 0 and tkind(int(fields[fi].type)) != .opt:
+                fatal(nodes[n].pos, "{dt(t)} needs its field '{name_of(int(fields[fi].name))}', which has no default")
+    missing_field_check(n, decl, si, args, mapped)
+    if ide_on:
+        fts: int[]
+        loop i in [0..nf): fts.push(int(fields[int(structs[si].fields) + i].type))
+        ide_named_args(args, decl, IK_FIELD, fts)
+    # (a struct that holds itself, a: A, says so before its fields' defaults are made: they would
+    # make one another without end)
+    layout(t)
+    # A default naming an earlier field takes the value this construction gives it:
+    # explicit values are kept first, in written order, then defaults in field order.
+    dependent = false
+    if files[pos_file(nodes[decl].pos)].is_dewy:
+        names: int[]
+        loop i in [0..nf):
+            fi = int(structs[si].fields) + i
+            if mapped[i] == 0 and default_uses_names(int(fields[fi].defval), names): dependent = true
+            names.push(int(fields[fi].name))
+    captured = fill(0, nf)
+    statements: int[]
+    if dependent:
+        loop source in args:
+            a = unnamed(source)
+            loop i in [0..nf):
+                if mapped[i] != a and mapped[i] != source: continue
+                if nodes[a].kind == .hole: fatal(nodes[a].pos, "partial application of constructors is not supported")
+                ft = representation_type(int(fields[int(structs[si].fields) + i].type))
+                finish_arg(a, ft, false)
+                captured[i] = capture_value(a, ft, statements)
+                break
+    fin: int[]
+    loop i in [0..nf):
+        fi = int(structs[si].fields) + i
+        a = mapped[i]
+        if dependent and a != 0:
+            finish_arg(captured[i], int(fields[fi].type), false)
+            fin.push(captured[i])
+            continue
+        if a == 0:
+            dv = int(fields[fi].defval)
+            if dv != 0 and not dependent and default_is_zero(dv, int(fields[fi].type)):
+                concurrency_require_zero(n, int(fields[fi].type))
+                # (filled in place with zeros, not built aside and copied in)
+                fin.push(0)
+                continue
+            if dv != 0:
+                d = clone(dv)
+                saved = cx
+                ctxs.push(FnCtx(ctxs[cx].inst, -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(check_scopes.names.len())))
+                cx = ctxs.len() - 1
+                mark = scope_mark()
+                targs: int[]
+                loop j in [0..int(structs[si].ntargs)): targs.push(struct_targ(si, j))
+                push_type_params(decl, targs)
+                if dependent:
+                    loop j in [0..i):
+                        if captured[j] == 0: continue
+                        name = int(fields[int(structs[si].fields) + j].name)
+                        push_scope_sym(name, new_sym(name, .local, int(nodes[captured[j]].sym), 0))
+                check_expr(d, representation_type(int(fields[fi].type)))
+                coerce(d, representation_type(int(fields[fi].type)))
+                scope_reset(mark)
+                ctxs.pop()
+                cx = saved
+                if dependent:
+                    d = capture_value(d, representation_type(int(fields[fi].type)), statements)
+                    finish_arg(d, int(fields[fi].type), false)
+                finish_arg(d, int(fields[fi].type), false)
+                captured[i] = d
+                fin.push(d)
+            else:
+                d = struct_default(int(fields[fi].type), nodes[n].pos)
+                if d == 0: concurrency_require_zero(n, int(fields[fi].type))
+                if dependent and d != 0:
+                    d = capture_value(d, representation_type(int(fields[fi].type)), statements)
+                    finish_arg(d, int(fields[fi].type), false)
+                captured[i] = d
+                fin.push(d)
+            continue
+        if nodes[a].kind == .hole: fatal(nodes[a].pos, "partial application of constructors is not supported")
+        # (a type member has no storage: nothing is evaluated or stored for it)
+        if tkind(int(fields[fi].type)) == .typeval:
+            fin.push(0)
+            continue
+        finish_arg(a, int(fields[fi].type), false)
+        fin.push(a)
+    nodes[n].kind = .call
+    nodes[n].aux = 2
+    if not dependent: save_call_order(n, args, fin)
+    set_list(n, fin)
+    nodes[n].type = i32(t)
+    nodes[n].a = 0
+    if dependent:
+        call = nodes.len()
+        nodes.push(nodes[n])
+        result = mk(.exprstmt, nodes[n].pos)
+        nodes[result].a = i32(call)
+        statements.push(result)
+        nodes[n] = Node(kind = .block, pos = nodes[n].pos, type = i32(t), aux = 1)
+        set_list(n, statements)
+    t

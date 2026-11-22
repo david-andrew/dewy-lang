@@ -1,0 +1,142 @@
+$runtime_checks
+from p"checks_thin.dewy" import (jd)
+from p"union_fields.dewy" import (union_field)
+from p"expr_hints.dewy" import (surface_names)
+from p"member_receivers.dewy" import (receiver_text)
+from p"checks_hints.dewy" import (pushed_type suggestion)
+from p"ide_index.dewy" import (never_cascade)
+from p"call_lookup_context.dewy" import (library_len_fits)
+from p"numeric_library_types.dewy" import (is_nd)
+from p"checks_thin_expr.dewy" import (is_map_type)
+from p"check.jo" import (fns globals open_globals)
+from p"expr_node_queries.dewy" import (fn_names_for)
+from p"call_style_lookup.dewy" import (fn_name_for member_call_without_arguments)
+from p"util.jo" import (files intern name_of pos_file pos_in_lib)
+from p"types.jo" import (fields is_union prune structs tkind types)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"type_ops.dewy" import (dt)
+from p"expr.jo" import (cur_assign last_checked)
+from p"checker_type_entries.dewy" import (check_struct_fields)
+from p"checker_expr.dewy" import (check_expr)
+from p"call_style.dewy" import (call_style_implicit)
+from p"checks_builders.dewy" import (bc_block bc_call bc_int bc_stmt)
+from p"node_store.dewy" import (Node)
+from p"ast.jo" import (NF_CHECKED NF_MUT add_flag id_dewy_len mk nodes)
+
+MissingMemberChecksWord:type=int64<overflow='wrap'>
+
+member_missing=(n:int64 bt:int64 expected:int64 @bypass:bool):>int64=>$unsafe {
+    let last_checked_slot=@last_checked
+    let fname=MissingMemberChecksWord(nodes.ptr[n].name)
+    let bk=types.ptr[bt].kind
+    let t:MissingMemberChecksWord=0
+    # (`pair.length` of a `[int64 string]`: its number of positions)
+    if t =? 0 and bk =? 'tuple' and (fname =? id_dewy_len or name_of(fname) =? "length") and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {
+        let receiver=MissingMemberChecksWord(nodes.ptr[n].a)
+        add_flag(receiver NF_CHECKED)
+        let count=bc_int(MissingMemberChecksWord(types.ptr[bt].nargs) nodes.ptr[n].pos)
+        # (a receiver that could do something still runs)
+        if nodes.ptr[receiver].kind not=? 'ident' {count=bc_block([bc_stmt(receiver nodes.ptr[n].pos) bc_stmt(count nodes.ptr[n].pos)] nodes.ptr[n].pos)}
+        nodes[n] = nodes.ptr[count]
+        bypass=true
+        return check_expr(n expected)
+    }
+    if t =? 0 {
+        if bk =? 'opt' {
+            let et=prune(MissingMemberChecksWord(types.ptr[bt].elem))
+            let has=false
+            if types.ptr[et].kind =? 'struct_' {
+                let esi=MissingMemberChecksWord(types.ptr[et].st)
+                check_struct_fields(esi)
+                loop i in [0..MissingMemberChecksWord(structs.ptr[esi].nfields)) {
+                    if MissingMemberChecksWord(fields.ptr[MissingMemberChecksWord(structs.ptr[esi].fields) + i].name) =? fname {has=true}
+                }
+            }
+            if has {
+                if files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {
+                    fatal(nodes.ptr[n].pos "this {dt(bt)} may be none (nothing), which has no {name_of(fname)}: check it with `is?none` before accessing the field")
+                }
+                fatal(nodes.ptr[n].pos "this {dt(bt)} may be none (nothing), which has no {name_of(fname)}: `x!.{name_of(fname)}` when it cannot be none, or `if let v = x: v.{name_of(fname)}`")
+            }
+        }
+        # (transform.position: a function's name, with a field after it)
+        if tkind(bt) =? 'fn_' {
+            let bn=MissingMemberChecksWord(nodes.ptr[n].a)
+            let fnn=""
+            if nodes.ptr[bn].kind =? 'ident' {fnn=name_of(MissingMemberChecksWord(nodes.ptr[bn].name))}
+            else if nodes.ptr[bn].kind =? 'fnref' and nodes.ptr[bn].sym >? 0 and fns.ptr[MissingMemberChecksWord(nodes.ptr[bn].sym)].decl not=? 0 {fnn=name_of(MissingMemberChecksWord(nodes.ptr[MissingMemberChecksWord(fns.ptr[MissingMemberChecksWord(nodes.ptr[bn].sym)].decl)].name))}
+            if fnn =? "transform" {fatal(nodes.ptr[n].pos "there are no GameObjects or transforms: where a thing is, is a field of your struct (`pos: vec3`), drawn with `draw_mesh(mesh, translation(pos))`")}
+            if (fnn as array<uint8>).length >? 0 {fatal(nodes.ptr[n].pos "'{fnn}' is a function, which has no field '{name_of(fname)}': `{fnn}(...)` gives what it makes")}
+        }
+        # (b.velocity, b.position on a physics Body: a handle, asked of its world)
+        if types.ptr[bt].kind =? 'struct_' and dt(bt) =? "Body" and pos_in_lib(nodes.ptr[MissingMemberChecksWord(structs.ptr[MissingMemberChecksWord(types.ptr[bt].st)].decl)].pos) {
+            fatal(nodes.ptr[n].pos "a Body is a handle into its world: ask the world, `w.pos(b)`, `w.velocity(b)`, `w.rotation(b)`, and change it there, `w.set_pos(b, p)`, `w.set_velocity(b, v)`, `w.push(b, impulse)`")
+        }
+        # (Dewy's length of an n-dimensional array: its shape, tensors.md)
+        if name_of(fname) =? "length" and is_nd(bt) and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy and not (cur_assign not=? 0 and MissingMemberChecksWord(nodes.ptr[cur_assign].a) =? n) {
+            nodes[n] = nodes.ptr[bc_call("__nd_length" [MissingMemberChecksWord(nodes.ptr[n].a)] nodes.ptr[n].pos)]
+            bypass=true
+            return check_expr(n expected)
+        }
+        # (Dewy's length of a library container or a sequence, as Heap and Pool: its `len`)
+        if files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy and name_of(fname) =? "length" and fn_name_for(bt intern("len")) and library_len_fits(bt) and not (cur_assign not=? 0 and MissingMemberChecksWord(nodes.ptr[cur_assign].a) =? n) {
+            # (a member: found through the object, as methods are, whatever `len` names here)
+            let method=mk('field' nodes.ptr[n].pos)
+            nodes[method].a = nodes.ptr[n].a
+            nodes[method].name = int32<overflow='wrap'>(intern("len"))
+            nodes[n] = Node(kind = 'call' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(method))
+            bypass=true
+            return check_expr(n expected)
+        }
+        if fn_name_for(bt fname) {
+            if files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {
+                # Zero-argument calls may omit their parentheses:
+                # `xs.pop` is `xs.pop()`. A field of that name wins.
+                if member_call_without_arguments(bt fname true) {
+                    add_flag(MissingMemberChecksWord(nodes.ptr[n].a) NF_MUT)
+                    let method=mk('field' nodes.ptr[n].pos)
+                    nodes[method].a = nodes.ptr[n].a
+                    nodes[method].name = int32<overflow='wrap'>(fname)
+                    nodes[n] = Node(kind = 'call' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(method) aux2 = -9)
+                    bypass=true
+                    t=check_expr(n expected)
+                    call_style_implicit(n fname * 8 + 5 t)
+                    return t
+                }
+                fatal(nodes.ptr[n].pos "'{name_of(fname)}' needs arguments: `{receiver_text(MissingMemberChecksWord(nodes.ptr[n].a))}.{name_of(fname)}(...)`")
+            }
+            fatal(nodes.ptr[n].pos "'{name_of(fname)}' is a function: call it, `x.{name_of(fname)}()`")
+        }
+        if is_union(bt) {
+            # (a field every member has, of one type: read from whichever it holds)
+            if not (cur_assign not=? 0 and MissingMemberChecksWord(nodes.ptr[cur_assign].a) =? n) {
+                let uf=union_field(n bt fname)
+                if uf >=? 0 {
+                    last_checked_slot=n
+                    bypass=true
+                    return check_expr(n expected)
+                }
+            }
+            fatal(nodes.ptr[n].pos "{dt(bt)} has no field '{name_of(fname)}' (it is one of its members: find out which first, with {jd(nodes.ptr[n].pos "`match x:` and an arm for each, or `if x is ...:`" "`match x \{ ... }` and an arm for each, or `if x is? ... \{ }`")})")
+        }
+        if is_map_type(bt) {fatal(nodes.ptr[n].pos "{dt(bt)} has no field '{name_of(fname)}' (a map's entries are `m[\"{name_of(fname)}\"]`; for fields by name, make a struct)")}
+        # (an element of enemies = [] read before anything checked so far pushed one)
+        loop g in open_globals {
+            let gt=prune(MissingMemberChecksWord(globals.ptr[g].type))
+            if tkind(gt) =? 'array' and prune(MissingMemberChecksWord(types.ptr[gt].elem)) =? bt {
+                let gn=name_of(MissingMemberChecksWord(globals.ptr[g].name))
+                let et=pushed_type(gn)
+                if (et as array<uint8>).length =? 0 {et="Thing"}
+                fatal(nodes.ptr[n].pos "the type of what '{gn}' holds is not known here (it starts empty): write it where '{gn}' is made, as {jd(nodes.ptr[n].pos "`{gn}: {et}[] = []`" "`let {gn}:array<{et}> = []`")}")
+            }
+        }
+        never_cascade(nodes.ptr[n].pos bt)
+        let cands=fn_names_for(bt)
+        if types.ptr[bt].kind =? 'struct_' {
+            let si=MissingMemberChecksWord(types.ptr[bt].st)
+            loop i in [0..MissingMemberChecksWord(structs.ptr[si].nfields)) {cands.push(MissingMemberChecksWord(fields.ptr[MissingMemberChecksWord(structs.ptr[si].fields) + i].name))}
+        }
+        fatal(nodes.ptr[n].pos "{dt(bt)} has no field '{name_of(fname)}'{suggestion(name_of(fname) surface_names(cands nodes.ptr[n].pos) bt)}")
+    }
+    0
+}

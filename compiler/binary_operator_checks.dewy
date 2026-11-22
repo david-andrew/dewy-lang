@@ -1,0 +1,511 @@
+$runtime_checks
+from p"checks_thin.dewy" import (jd)
+from p"parser_ops.dewy" import (tok_ordinal)
+from p"checker_numeric.dewy" import (xw_numeric)
+from p"witness_nodes.dewy" import (wit_text)
+from p"source_warnings.dewy" import (warn)
+from p"type_member_checks.dewy" import (type_meet type_member_type)
+from p"lexer_helpers.dewy" import (tok_text)
+from p"expr_error_context.dewy" import (str_set_unordered)
+from p"refine_metadata.dewy" import (str_set_of)
+from p"checker_call_queries.dewy" import (save_call_order)
+from p"refine.jo" import (refine_active str_sets)
+from p"unit_ops.dewy" import (quantity_binary)
+from p"units.jo" import (quantity_base quantity_left_literal quantity_right_literal)
+from p"check_metadata.dewy" import (op_text)
+from p"operator_lookup.dewy" import (op_overload)
+from p"expression_types.dewy" import (ntype)
+from p"checker_value_protocols.dewy" import (note_value_helpers)
+from p"concat_hints.dewy" import (no_concat_error)
+from p"ide_index.dewy" import (never_cascade)
+from p"index_operand_checks.dewy" import (map_presence_fn)
+from p"member_receivers.dewy" import (is_struct_like)
+from p"checks_thin_expr.dewy" import (is_map_type quantity_record_operand)
+from p"literal_context.dewy" import (finalize_literal is_lit kid_lit)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"facts.jo" import (fact_comparison)
+from p"exact_check_hooks.dewy" import (exact_int_result exact_operation)
+from p"rational_literals.dewy" import (exact_decimal)
+from p"util.jo" import (err_notes err_trail_names name_of pos_in_lib)
+from p"type_ops.dewy" import (dt fixed_len mk_array mk_union policy_int)
+from p"enum_expressions.dewy" import (dewy_ordering)
+from p"dewy_method_ops.dewy" import (dewy_is_method)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"check.jo" import (ctxs cx fns)
+from p"checks_compare_hints.dewy" import (cmp_error opt_cmp_error uncalled_hint union_operand_why union_or_optional void_rec_hint)
+from p"vector_checks.dewy" import (check_vec_binary)
+from p"checker_expr.dewy" import (check_expr)
+from p"coercion_queries.dewy" import (can_coerce join_types)
+from p"coerce_expression.dewy" import (coerce)
+from p"integer_conversions.dewy" import (integer_constant)
+from p"unit_rare.dewy" import (calendar_period_why hidden_unit_why)
+from p"rational_types.dewy" import (bundled_rational_type)
+from p"numeric_library_types.dewy" import (bundled_bigint_type)
+from p"checks_builders.dewy" import (bc_call)
+from p"checker_tokens.dewy" import (Tok)
+from p"types.jo" import (T_BOOL T_INT T_MATH_INT T_STR T_U64 is_float is_int is_numeric is_union is_vec prune telem tkind type_eq types)
+from p"node_store.dewy" import (Node)
+from p"ast.jo" import (NF_BROADCAST NF_SQUOTE NF_U64 has_flag kids mk nodes)
+
+BinaryOperatorChecksWord:type=int64<overflow='wrap'>
+
+# Every operand pair but two plain numbers, both checked (flags: 1 and 2 a quantity
+# literal written left and right, 4 and 8 a character added left and right).
+binary_rest=(n:int64 expected:int64 a0:int64 b0:int64 ta0:int64 tb0:int64 hint:int64 flags:int64):>int64=>$unsafe {
+    let a=a0
+    let b=b0
+    let ta=ta0
+    let tb=tb0
+    if refine_active and types.ptr[ta].kind =? 'refined' and types.ptr[ta].bits =? -2 {
+        ta=BinaryOperatorChecksWord(types.ptr[ta].elem)
+        coerce(a ta);
+    }
+    if refine_active and types.ptr[tb].kind =? 'refined' and types.ptr[tb].bits =? -2 {
+        tb=BinaryOperatorChecksWord(types.ptr[tb].elem)
+        coerce(b tb);
+    }
+    let op=cx_token_values[BinaryOperatorChecksWord(nodes.ptr[n].op)]
+    let is_cmp=op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge'
+    let is_shift=op =? 'shl' or op =? 'shr'
+    let q_lit_a=flags & 1 not=? 0
+    let q_lit_b=flags & 2 not=? 0
+    let a_char=flags & 4 not=? 0
+    let b_char=flags & 8 not=? 0
+    if (op =? 'eq' or op =? 'ne') and types.ptr[ta].kind =? 'fixed' and types.ptr[tb].kind =? 'fixed' and fixed_len(ta) not=? fixed_len(tb) and type_eq(BinaryOperatorChecksWord(types.ptr[ta].elem) BinaryOperatorChecksWord(types.ptr[tb].elem)) {
+        # (arrays of different exact lengths are unequal, compared as arrays)
+        ta=mk_array(BinaryOperatorChecksWord(types.ptr[ta].elem))
+        coerce(a ta);
+        coerce(b ta);
+        tb=ta
+    }
+    # (x =? 'member' or x =? y with x a literal union's optional: the literal is that member,
+    # y is one already, and the optional compares)
+    if (op =? 'eq' or op =? 'ne') and str_sets.length >? 1 {
+        if tkind(ta) =? 'opt' and str_set_of(prune(telem(ta))) not=? 0 and (nodes.ptr[kid_lit(b)].kind =? 'str_lit' or prune(telem(ta)) =? tb) {
+            if tb not=? prune(telem(ta)) {coerce(b prune(telem(ta)));}
+            nodes[n].b = int32<overflow='wrap'>(coerce(b ta))
+            b=BinaryOperatorChecksWord(nodes.ptr[n].b)
+            tb=ta
+        }
+        else if tkind(tb) =? 'opt' and str_set_of(prune(telem(tb))) not=? 0 and (nodes.ptr[kid_lit(a)].kind =? 'str_lit' or prune(telem(tb)) =? ta) {
+            if ta not=? prune(telem(tb)) {coerce(a prune(telem(tb)));}
+            nodes[n].a = int32<overflow='wrap'>(coerce(a tb))
+            a=BinaryOperatorChecksWord(nodes.ptr[n].a)
+            ta=tb
+        }
+    }
+    # (Dewy's, and the library's inside a call Dewy made, are errors: a set's members are unordered)
+    if is_cmp and op not=? 'eq' and op not=? 'ne' and str_sets.length >? 1 and (str_set_of(ta) not=? 0 or str_set_of(tb) not=? 0) and dewy_ordering(nodes.ptr[n].pos) {
+        str_set_unordered(nodes.ptr[n].pos ta tb)
+    }
+    # (Sloppy orders a set's members as its enum's: by position, as its frozen twin does)
+    let sloppy_order=ta =? tb and op not=? 'eq' and op not=? 'ne' and not dewy_at(nodes.ptr[n].pos)
+    if str_sets.length >? 1 and (str_set_of(ta) not=? 0 or str_set_of(tb) not=? 0) and not sloppy_order {
+        # (a set's word against a member literal or the same set: compared as words; else as text)
+        let same=ta =? tb
+        if (op =? 'eq' or op =? 'ne') and not same {
+            if str_set_of(ta) not=? 0 and nodes.ptr[kid_lit(b)].kind =? 'str_lit' {
+                coerce(b ta);
+                tb=ta
+                same=true
+            }
+            else if str_set_of(tb) not=? 0 and nodes.ptr[kid_lit(a)].kind =? 'str_lit' {
+                coerce(a tb);
+                ta=tb
+                same=true
+            }
+        }
+        # (a number against a set's word: told while the set is still known, before it is made text)
+        if is_cmp and not same and (str_set_of(ta) not=? 0 and is_numeric(tb) or str_set_of(tb) not=? 0 and is_numeric(ta)) {cmp_error(n ta tb)}
+        if not same or op not=? 'eq' and op not=? 'ne' {
+            if str_set_of(ta) not=? 0 {
+                coerce(a T_STR);
+                ta=T_STR
+            }
+            if str_set_of(tb) not=? 0 {
+                coerce(b T_STR);
+                tb=T_STR
+            }
+        }
+    }
+    # (`"#" * n` of an `int`: a count of zero or less repeats nothing and one past any memory
+    # cannot be made, so the count saturates into a word rather than narrowing with a check)
+    if op =? 'star' and dewy_at(nodes.ptr[n].pos) and (ta =? T_STR and tb =? T_MATH_INT and not is_lit(b) or tb =? T_STR and ta =? T_MATH_INT and not is_lit(a)) {
+        let count=if ta =? T_STR {b} else {a}
+        let word=policy_int(T_INT 2 nodes.ptr[n].pos)
+        coerce(count word);
+        if ta =? T_STR {tb=word} else {ta = word}
+    }
+    let pending_decimal=(nodes.ptr[a].kind =? 'float_lit' and nodes.ptr[a].sval not=? 0 and is_lit(a)) or (nodes.ptr[b].kind =? 'float_lit' and nodes.ptr[b].sval not=? 0 and is_lit(b))
+    # (a quantity operand is exact or floating by its number: 0.5 * 2s stays exact)
+    let na=if types.ptr[ta].kind =? 'quantity' {quantity_base(ta)} else {ta}
+    let nb=if types.ptr[tb].kind =? 'quantity' {quantity_base(tb)} else {tb}
+    let exact_operands=pending_decimal and (is_numeric(na) or bundled_rational_type(na) or bundled_bigint_type(na)) and (is_numeric(nb) or bundled_rational_type(nb) or bundled_bigint_type(nb))
+    if exact_operands and not is_float(hint) and not (is_float(na) and not is_lit(a)) and not (is_float(nb) and not is_lit(b)) {
+        if nodes.ptr[a].kind =? 'float_lit' and nodes.ptr[a].sval not=? 0 and is_lit(a) {ta=exact_decimal(a)}
+        if nodes.ptr[b].kind =? 'float_lit' and nodes.ptr[b].sval not=? 0 and is_lit(b) {tb=exact_decimal(b)}
+    }
+    # (a record's own operators take a quantity, Instant + 90minute: the record case below)
+    if (types.ptr[ta].kind =? 'quantity' or types.ptr[tb].kind =? 'quantity') and not quantity_record_operand(ta tb) {
+        let quantity_left_literal_slot=@quantity_left_literal
+        quantity_left_literal_slot=q_lit_a
+        let quantity_right_literal_slot=@quantity_right_literal
+        quantity_right_literal_slot=q_lit_b
+        return quantity_binary(n a b expected)
+    }
+    if not is_shift and ta =? T_MATH_INT and (bundled_bigint_type(tb) or bundled_rational_type(tb)) {
+        coerce(a tb);
+        ta=tb
+    }
+    # (`q / n` keeps an `int` divisor for the library's `(Rational int)` division, so a
+    # guard on n proves it nonzero, as for a word divisor: rational_divisor)
+    else if not is_shift and tb =? T_MATH_INT and (bundled_bigint_type(ta) or bundled_rational_type(ta)) and not (op =? 'slash' and bundled_rational_type(ta)) {
+        coerce(b ta);
+        tb=ta
+    }
+    if is_float(tb) and bundled_rational_type(ta) {
+        coerce(a tb);
+        ta=tb
+    }
+    else if is_float(ta) and bundled_rational_type(tb) {
+        coerce(b ta);
+        tb=ta
+    }
+    # (y == 650 in update, y moved by speed * dt: it steps over 650, never on it)
+    if op =? 'eq' and is_float(ta) and (nodes.ptr[a].kind =? 'ident' or nodes.ptr[a].kind =? 'field') and (nodes.ptr[b].kind =? 'int_lit' or nodes.ptr[b].kind =? 'float_lit') and cx >=? 0 and not pos_in_lib(nodes.ptr[n].pos) {
+        let lv:float64=0.0
+        if nodes.ptr[b].kind =? 'int_lit' {lv=float64(nodes.ptr[b].ival)}
+        else if nodes.ptr[b].kind =? 'float_lit' {lv=nodes.ptr[b].fval}
+        let ci=BinaryOperatorChecksWord(ctxs.ptr[cx].inst)
+        if lv not=? 0.0 and ci >? 0 and fns.ptr[ci].decl not=? 0 and name_of(BinaryOperatorChecksWord(nodes.ptr[BinaryOperatorChecksWord(fns.ptr[ci].decl)].name)) =? "update" and not dewy_is_method(BinaryOperatorChecksWord(fns.ptr[ci].decl)) {
+            let lt="{lv}"
+            if lv =? floor(lv) and abs(lv) <? 1e15 {lt="{int64(lv)}"}
+            let nm="it"
+            if nodes.ptr[a].kind =? 'ident' {nm=name_of(BinaryOperatorChecksWord(nodes.ptr[a].name))}
+            else if nodes.ptr[a].kind =? 'field' {nm=".{name_of(BinaryOperatorChecksWord(nodes.ptr[a].name))}"}
+            warn(nodes.ptr[n].pos "a number with a fraction, moved a little each frame, steps past {lt} ({lv - 0.3}, then {lv + 0.2}) and is rarely exactly {lt}: `>=` (or `<=`) is true once {nm} gets there")
+        }
+    }
+    # (s[0] + "!": a byte and a character's code added, which reads like text joined)
+    if b_char and is_int(ta) and not is_lit(a) and is_int(tb) and not has_flag(b NF_SQUOTE) {
+        let ch=name_of(BinaryOperatorChecksWord(nodes.ptr[b].sval))
+        if nodes.ptr[a].kind =? 'ident' {
+            let an=name_of(BinaryOperatorChecksWord(nodes.ptr[a].name))
+            warn(nodes.ptr[n].pos "this adds the character code of {ch} to a number, not text to text: for text, write `\"\{{an}}{ch}\"` (and when {an} is a character from s[i], `chr({an}) + \"{ch}\"`)")
+        }
+        else {warn(nodes.ptr[n].pos "this adds the character code of {ch} to a number, not text to text (s[i] is a character's code): `chr(s[i]) + \"{ch}\"` joins text")}
+    }
+    if a_char and is_int(tb) and not is_lit(b) and is_int(ta) and not has_flag(a NF_SQUOTE) {
+        warn(nodes.ptr[n].pos "this adds a character code and a number: for text, ... + chr(x)")
+    }
+    # (`types = Png | Jpeg`, `r.types & (Tick | Closed)`: a type made of types, decisions.md batch 7)
+    if (op =? 'pipe' or op =? 'amp') and types.ptr[ta].kind =? 'typeval' and types.ptr[tb].kind =? 'typeval' and dewy_at(nodes.ptr[n].pos) {
+        if op =? 'pipe' {return type_member_type(mk_union([telem(ta) telem(tb)]))}
+        return type_member_type(type_meet([telem(ta) telem(tb)] nodes.ptr[n].pos))
+    }
+    if types.ptr[ta].kind =? 'typeval' or types.ptr[tb].kind =? 'typeval' {fatal(nodes.ptr[n].pos "a type name cannot be used as a value here")}
+    # vectors
+    if is_cmp and (op =? 'eq' or op =? 'ne') {
+        note_value_helpers(ta)
+        note_value_helpers(tb)
+        # (x == v with x: T? and v: T: v as a T?, so none is never equal to it)
+        if tkind(ta) =? 'opt' and tkind(tb) not=? 'opt' and tkind(tb) not=? 'none_lit' and type_eq(prune(BinaryOperatorChecksWord(types.ptr[ta].elem)) tb) {
+            nodes[n].b = int32<overflow='wrap'>(coerce(b ta))
+            b=BinaryOperatorChecksWord(nodes.ptr[n].b)
+            tb=ta
+        }
+        else if tkind(tb) =? 'opt' and tkind(ta) not=? 'opt' and tkind(ta) not=? 'none_lit' and type_eq(prune(BinaryOperatorChecksWord(types.ptr[tb].elem)) ta) {
+            nodes[n].a = int32<overflow='wrap'>(coerce(a tb))
+            a=BinaryOperatorChecksWord(nodes.ptr[n].a)
+            ta=tb
+        }
+        # (a union and one of its members, `back =? n`: the member joins the
+        # union, so a different member compares unequal)
+        else if not type_eq(ta tb) and union_or_optional(ta) and not union_or_optional(tb) and can_coerce(b tb ta) {
+            nodes[n].b = int32<overflow='wrap'>(coerce(b ta))
+            b=BinaryOperatorChecksWord(nodes.ptr[n].b)
+            tb=ta
+        }
+        else if not type_eq(ta tb) and union_or_optional(tb) and not union_or_optional(ta) and can_coerce(a ta tb) {
+            nodes[n].a = int32<overflow='wrap'>(coerce(a tb))
+            a=BinaryOperatorChecksWord(nodes.ptr[n].a)
+            ta=tb
+        }
+    }
+    # ("v is " + v: a vector joined to text)
+    if op =? 'plus' and (tkind(ta) =? 'str_' and is_vec(tb) or is_vec(ta) and tkind(tb) =? 'str_') {
+        let vt=tb
+        if is_vec(ta) {vt=ta}
+        fatal(nodes.ptr[n].pos "cannot add a {dt(vt)} to text: put the value inside the string (\"v is \{v}\")")
+    }
+    if is_vec(ta) or is_vec(tb) {return check_vec_binary(n op ta tb)}
+    if types.ptr[ta].kind =? 'fixed' or types.ptr[tb].kind =? 'fixed' {
+        if op not=? 'eq' and op not=? 'ne' {fatal(nodes.ptr[n].pos "operator {op_text(op nodes.ptr[n].pos)} is not defined for {dt(ta)} and {dt(tb)} (fixed-size arrays can be compared with {op_text('eq' nodes.ptr[n].pos)} and {op_text('ne' nodes.ptr[n].pos)})")}
+        if types.ptr[ta].kind =? 'fixed' {coerce(b ta);}
+        else {coerce(a tb);}
+        nodes[n].aux = 1
+        nodes[n].type = int32<overflow='wrap'>(T_BOOL)
+        return T_BOOL
+    }
+    if is_struct_like(ta) or is_struct_like(tb) {
+        let opn=tok_text(op)
+        let r=op_overload(n opn)
+        if r not=? 0 {return r}
+        if op =? 'ne' {
+            let eqn=mk('binary' nodes.ptr[n].pos)
+            nodes[eqn].op = 69
+            nodes[eqn].a = int32<overflow='wrap'>(a)
+            nodes[eqn].b = int32<overflow='wrap'>(b)
+            let r2=op_overload(eqn "==")
+            if r2 not=? 0 {
+                nodes[n] = Node(kind = 'not_' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(eqn) type = int32<overflow='wrap'>(T_BOOL))
+                return T_BOOL
+            }
+        }
+        if op =? 'gt' or op =? 'le' or op =? 'ge' {
+            # from `<` alone: a > b is b < a, a <= b is not (b < a), a >= b is not (a < b)
+            let ltn=mk('binary' nodes.ptr[n].pos)
+            nodes[ltn].op = 71
+            nodes[ltn].a = int32<overflow='wrap'>(b)
+            nodes[ltn].b = int32<overflow='wrap'>(a)
+            if op =? 'ge' {
+                nodes[ltn].a = int32<overflow='wrap'>(a)
+                nodes[ltn].b = int32<overflow='wrap'>(b)
+            }
+            let r2=op_overload(ltn "<")
+            if r2 not=? 0 {
+                # Deriving > / <= reverses the parameter slots, not the
+                # evaluation order of the source operands.
+                save_call_order(ltn [a b] kids(ltn))
+                if op =? 'gt' {nodes[n] = nodes.ptr[ltn]}
+                else {nodes[n] = Node(kind = 'not_' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(ltn) type = int32<overflow='wrap'>(T_BOOL))}
+                return r2
+            }
+        }
+        if op =? 'eq' or op =? 'ne' {
+            if not type_eq(ta tb) {cmp_error(n ta tb)}
+            nodes[n].aux = 1
+            nodes[n].type = int32<overflow='wrap'>(T_BOOL)
+            return T_BOOL
+        }
+        let why=""
+        if is_union(ta) or is_union(tb) {why=union_operand_why(n if is_union(ta) {ta} else {tb})}
+        else if type_eq(ta tb) and types.ptr[ta].kind =? 'struct_' and not is_map_type(ta) {
+            why=" (a struct has the operators defined for it: `({opn}) = (a: {dt(ta)}, b: {dt(ta)}) -> ...`)"
+            if op =? 'gt' or op =? 'le' or op =? 'ge' {why=" (define `(<) = (a: {dt(ta)}, b: {dt(ta)}) -> bool: ...` and >, <= and >= come from it)"}
+            if dewy_at(nodes.ptr[n].pos) {why=" (a record has the operators defined for it, such as `__add__ = (a:{dt(ta)} b:{dt(ta)}):>{dt(ta)} => ...` for + or `__lt__` for <?)"}
+        }
+        never_cascade(nodes.ptr[n].pos ta)
+        never_cascade(nodes.ptr[n].pos tb)
+        if dewy_at(nodes.ptr[n].pos) {
+            if nodes.ptr[n].a not=? 0 and nodes.ptr[n].b not=? 0 {why="{why}{calendar_period_why(BinaryOperatorChecksWord(nodes.ptr[n].a) BinaryOperatorChecksWord(nodes.ptr[n].b))}{hidden_unit_why(n BinaryOperatorChecksWord(nodes.ptr[n].a) BinaryOperatorChecksWord(nodes.ptr[n].b))}"}
+        }
+        fatal(nodes.ptr[n].pos "operator {opn} is not defined for {dt(ta)} and {dt(tb)}{why}")
+    }
+    if is_shift and dewy_at(nodes.ptr[n].pos) and nodes.ptr[b].kind =? 'int_lit' and nodes.ptr[b].ival <? 0 and not has_flag(b NF_U64) {
+        fatal(nodes.ptr[b].pos "a shift count is unsigned, and {nodes.ptr[b].ival} is negative")
+    }
+    if is_shift and not (is_lit(a) and is_lit(b)) {
+        finalize_literal(a);
+        finalize_literal(b);
+        ta=prune(ntype(a))
+        tb=prune(ntype(b))
+        if not is_int(ta) or not is_int(tb) {fatal(nodes.ptr[n].pos "shift operands must be integers")}
+        # An unsigned subtraction may be negative before the shift. Keep its
+        # exact signed value instead of first narrowing it to an unsigned word.
+        if op =? 'shr' and ta =? T_U64 and nodes.ptr[a].kind =? 'binary' and nodes.ptr[a].op =? 59 and exact_operation(a) {
+            ta=exact_int_result(a true)
+        }
+        if ta =? T_MATH_INT {
+            let [known_b y]=integer_constant(b)
+            if known_b and y <? 0 and types.ptr[tb].sign {fatal(nodes.ptr[n].pos "shift count must be nonnegative")}
+        }
+        # Fixed shifts only distinguish counts below their word width. Saturating
+        # a mathematical count to a signed word preserves that distinction,
+        # including negative counts interpreted as unsigned continuation counts.
+        if ta not=? T_MATH_INT and (ta not=? T_INT or op =? 'shr') and tb =? T_MATH_INT and dewy_at(nodes.ptr[n].pos) {
+            let [known count]=integer_constant(b)
+            coerce(b (if known {T_INT} else {policy_int(T_INT 2 nodes.ptr[n].pos)}));
+        }
+        nodes[n].type = int32<overflow='wrap'>(ta)
+        if ta =? T_INT and dewy_at(nodes.ptr[n].pos) {
+            let [known count]=integer_constant(b)
+            if op =? 'shl' and (not known or count >=? 1048576) {
+                # Preserve the fixed operand's unsigned count interpretation.
+                # Counts beyond a realizable bigint saturate before conversion;
+                # in particular zero shifted by a negative runtime count is zero.
+                if prune(ntype(b)) =? T_MATH_INT {coerce(b policy_int(T_INT 2 nodes.ptr[n].pos));}
+                coerce(b policy_int(T_U64 1 nodes.ptr[n].pos));
+                coerce(a T_MATH_INT);
+                nodes[n].type = int32<overflow='wrap'>(T_MATH_INT)
+                return T_MATH_INT
+            }
+            return exact_int_result(n)
+        }
+        return ta
+    }
+    let tka=types.ptr[ta].kind
+    let tkb=types.ptr[tb].kind
+    # (an elementwise mask, `xs .* (ys .>? 0.0)`: a bool counts as 1 or 0, as in NumPy)
+    if op =? 'star' and has_flag(n NF_BROADCAST) and ((tka =? 'bool_' and is_numeric(tb)) or (tkb =? 'bool_' and is_numeric(ta))) {
+        let value=if tka =? 'bool_' {b} else {a}
+        let keep=if tka =? 'bool_' {a} else {b}
+        nodes[n] = nodes.ptr[bc_call("__mask_mul" [value keep] nodes.ptr[n].pos)]
+        return check_expr(n expected)
+    }
+    if op =? 'plus' and dewy_at(nodes.ptr[n].pos) and (tka =? 'str_' or tkb =? 'str_' or tka =? 'array' or tka =? 'fixed' or tkb =? 'array' or tkb =? 'fixed') {
+        no_concat_error(n a b tka =? 'str_' or tkb =? 'str_')
+    }
+    if op =? 'plus' and tka =? 'str_' {
+        if is_numeric(tb) or tkb =? 'bool_' {fatal(nodes.ptr[b].pos "cannot add this {dt(tb)} to text: put the value inside the string (\"...\{x}\") or convert it ({jd(nodes.ptr[b].pos "str(x)" "string(x)")})")}
+        coerce(b T_STR);
+        nodes[n].aux = 2
+        nodes[n].type = int32<overflow='wrap'>(T_STR)
+        return T_STR
+    }
+    if op =? 'plus' and tka =? 'array' {
+        if tkb not=? 'array' and is_numeric(BinaryOperatorChecksWord(types.ptr[ta].elem)) and (is_numeric(tb) or is_lit(b)) {
+            fatal(nodes.ptr[n].pos "+ joins two arrays; to add {dt(tb)} to each element, use .+ (xs .+ 1.0)")
+        }
+        coerce(b ta);
+        nodes[n].aux = 3
+        nodes[n].type = int32<overflow='wrap'>(ta)
+        return ta
+    }
+    if tka =? 'ptr' and (op =? 'plus' or op =? 'minus') and (is_int(tb) or is_lit(b)) {
+        coerce(b T_INT);
+        nodes[n].aux = 4
+        nodes[n].type = int32<overflow='wrap'>(ta)
+        return ta
+    }
+    if tka =? 'ptr' and tkb =? 'ptr' and op =? 'minus' {
+        nodes[n].aux = 5
+        nodes[n].type = int32<overflow='wrap'>(T_INT)
+        return T_INT
+    }
+    if is_cmp {
+        if tka =? 'str_' or tkb =? 'str_' {
+            if not type_eq(ta tb) {cmp_error(n ta tb)}
+            nodes[n].aux = 2
+            nodes[n].type = int32<overflow='wrap'>(T_BOOL)
+            return T_BOOL
+        }
+        if tka =? 'opt' or tkb =? 'opt' or tka =? 'none_lit' or tkb =? 'none_lit' {
+            if op not=? 'eq' and op not=? 'ne' {opt_cmp_error(n a b ta tb)}
+            if nodes.ptr[b].kind =? 'none_lit' or nodes.ptr[a].kind =? 'none_lit' {
+                if nodes.ptr[a].kind =? 'none_lit' {
+                    nodes[n].a = int32<overflow='wrap'>(b)
+                    nodes[n].b = int32<overflow='wrap'>(a)
+                }
+                if tkind(ntype(BinaryOperatorChecksWord(nodes.ptr[n].a))) not=? 'opt' {fatal(nodes.ptr[n].pos "only optionals can be compared with none")}
+                nodes[n].aux = 6
+                nodes[n].aux2 = int32<overflow='wrap'>(map_presence_fn(BinaryOperatorChecksWord(nodes.ptr[n].a)))
+                nodes[n].type = int32<overflow='wrap'>(T_BOOL)
+                return T_BOOL
+            }
+            join_types(a b nodes.ptr[n].pos);
+            nodes[n].aux = 1
+            nodes[n].type = int32<overflow='wrap'>(T_BOOL)
+            return T_BOOL
+        }
+        if tka =? 'array' or tkb =? 'array' {
+            if op not=? 'eq' and op not=? 'ne' {
+                let why=""
+                let ot=op_text(op nodes.ptr[n].pos)
+                if (tka =? 'array' and is_numeric(BinaryOperatorChecksWord(types.ptr[ta].elem))) or (tkb =? 'array' and is_numeric(BinaryOperatorChecksWord(types.ptr[tb].elem))) {why=" (for each element: .{ot}, as in xs .{ot} 2.0, gives {dt(mk_array(T_BOOL))})"}
+                # (a sort key written `[a b]` is an array: Python's tuple key is a Dewy tuple)
+                if pos_in_lib(nodes.ptr[n].pos) and err_trail_names.length >? 0 and err_trail_names[0] in? ["sort" "sorted" "min_by" "max_by"] {
+                    why=""
+                    err_notes.push([-1 "help: a key of several parts is a tuple, which orders part by part: give the key function a tuple result, `key=(x):>[T T] => [a b]`"])
+                }
+                fatal(nodes.ptr[n].pos "arrays can only be compared with {op_text('eq' nodes.ptr[n].pos)} and {op_text('ne' nodes.ptr[n].pos)}{why}")
+            }
+            if not can_coerce(b tb ta) and tkb not=? 'array' and tka =? 'array' and is_numeric(BinaryOperatorChecksWord(types.ptr[ta].elem)) and (is_numeric(tb) or is_lit(b)) {
+                let ot=op_text(op nodes.ptr[n].pos)
+                fatal(nodes.ptr[n].pos "an array compared with {dt(tb)}: for each element use .{ot} (xs .{ot} 2.0 gives {dt(mk_array(T_BOOL))})")
+            }
+            if not can_coerce(b tb ta) {cmp_error(n ta tb)}
+            coerce(b ta);
+            nodes[n].aux = 1
+            nodes[n].type = int32<overflow='wrap'>(T_BOOL)
+            return T_BOOL
+        }
+        if tka =? 'bool_' or tka =? 'enum_' or tka =? 'ptr' or tka =? 'null_' or tka =? 'fn_' or tka =? 'cfn' {
+            if tka =? 'null_' {
+                nodes[n].a = int32<overflow='wrap'>(b)
+                nodes[n].b = int32<overflow='wrap'>(a)
+                a=BinaryOperatorChecksWord(nodes.ptr[n].a)
+                b=BinaryOperatorChecksWord(nodes.ptr[n].b)
+                let x=ta
+                ta=tb
+                tb=x
+            }
+            if not can_coerce(b tb ta) and not type_eq(ta tb) {cmp_error(n ta tb)}
+            if types.ptr[ta].kind =? 'fn_' {fatal(nodes.ptr[n].pos "functions cannot be compared")}
+            coerce(b ta);
+            nodes[n].type = int32<overflow='wrap'>(T_BOOL)
+            return T_BOOL
+        }
+    }
+    if op =? 'amp' or op =? 'pipe' or op =? 'caret' {
+        if tka =? 'bool_' and tkb =? 'bool_' {
+            nodes[n].type = int32<overflow='wrap'>(T_BOOL)
+            return T_BOOL
+        }
+    }
+    if not is_numeric(ta) or not is_numeric(tb) {
+        let r=op_overload(n tok_text(op))
+        if r not=? 0 {return r}
+        if tka =? 'opt' and is_numeric(BinaryOperatorChecksWord(types.ptr[ta].elem)) {fatal(nodes.ptr[n].pos "this {dt(ta)} may be none (nothing), so {tok_text(op)} cannot use it: say what to use then (`x ?? 0`){jd(nodes.ptr[n].pos ", or `x!` when it cannot be none" ", or check it first: `if x isnt? none \{ ... }`")}")}
+        let why=""
+        if is_union(ta) or is_union(tb) {why=union_operand_why(n if is_union(ta) {ta} else {tb})}
+        if tka =? 'array' and is_int(tb) and op =? 'star' {
+            why=" (fill(x, n) makes an array of n copies of x)"
+            if is_numeric(BinaryOperatorChecksWord(types.ptr[ta].elem)) {why=" (fill(x, n) makes an array of n copies of x; xs .* n multiplies each element)"}
+        }
+        else if (tka =? 'array' and is_numeric(BinaryOperatorChecksWord(types.ptr[ta].elem))) or (tkb =? 'array' and is_numeric(BinaryOperatorChecksWord(types.ptr[tb].elem))) {
+            if op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'slash' or op =? 'percent' {why=" (for each element: .{tok_text(op)}, as in xs .{tok_text(op)} 2.0)"}
+        }
+        if (why as array<uint8>).length =? 0 and op =? 'percent' and tka =? 'str_' {why=" (a value goes into text inside braces, with its format: \"\{x:.2f}\")"}
+        # (age + 1 with age from read_line: text, not a number)
+        if (why as array<uint8>).length =? 0 {
+            let sa=tka =? 'str_' or (tka =? 'opt' and tkind(BinaryOperatorChecksWord(types.ptr[ta].elem)) =? 'str_')
+            let sb=tkb =? 'str_' or (tkb =? 'opt' and tkind(BinaryOperatorChecksWord(types.ptr[tb].elem)) =? 'str_')
+            if (sa and is_numeric(tb)) or (sb and is_numeric(ta)) {why=" (text is not a number, even when it holds digits: `to_int(s)` or `input_int(...)` makes a number, and `\"\{x}\"` puts a number in text)"}
+        }
+        if (why as array<uint8>).length =? 0 {why="{void_rec_hint(a)}{void_rec_hint(b)}{uncalled_hint(a 0)}{uncalled_hint(b 0)}"}
+        # (`x and 1 =? 1`: the word operators join two truth values or two integers, and a test binds tighter)
+        if (op =? 'amp' or op =? 'pipe' or op =? 'caret') and dewy_at(nodes.ptr[n].pos) and (tkb =? 'bool_' and is_int(ta) or tka =? 'bool_' and is_int(tb)) {
+            let word=if op =? 'amp' {"and"} else if op =? 'pipe' {"or"} else {"xor"}
+            let tested=if tkb =? 'bool_' {b} else {a}
+            let other=if tkb =? 'bool_' {a} else {b}
+            let shown=wit_text(other)
+            let left=if nodes.ptr[tested].kind =? 'binary' and fact_comparison(cx_token_values[BinaryOperatorChecksWord(nodes.ptr[tested].op)]) {wit_text(BinaryOperatorChecksWord(nodes.ptr[tested].a))} else {""}
+            let right=if nodes.ptr[tested].kind =? 'binary' and fact_comparison(cx_token_values[BinaryOperatorChecksWord(nodes.ptr[tested].op)]) {wit_text(BinaryOperatorChecksWord(nodes.ptr[tested].b))} else {""}
+            let mask=if shown not=? "" and left not=? "" and right not=? "" {": to test a mask, group it first, `({shown} {word} {left}) {op_text(cx_token_values[BinaryOperatorChecksWord(nodes.ptr[tested].op)] nodes.ptr[n].pos)} {right}`"} else {""}
+            fatal(nodes.ptr[n].pos "`{word}` joins two truth values or two integers, not {dt(ta)} and {dt(tb)}, and a test binds tighter than it{mask}; to test an integer, compare it, as `x not=? 0`")
+        }
+        # (square(4) + 1 with a square that prints: it gives nothing back)
+        if (why as array<uint8>).length =? 0 {
+            loop x in [a b] {
+                if tkind(ntype(x)) =? 'void_' and nodes.ptr[x].kind =? 'call' and nodes.ptr[x].sym >? 0 and BinaryOperatorChecksWord(nodes.ptr[x].sym) <? fns.length and fns.ptr[BinaryOperatorChecksWord(nodes.ptr[x].sym)].decl not=? 0 {
+                    let fnm=name_of(BinaryOperatorChecksWord(nodes.ptr[BinaryOperatorChecksWord(fns.ptr[BinaryOperatorChecksWord(nodes.ptr[x].sym)].decl)].name))
+                    why=" ('{fnm}' gives nothing back (printing is not giving back): end it with the value it should give, and write {jd(nodes.ptr[n].pos "`-> int`" "`:>int64`")} after its parameters)"
+                    break
+                }
+            }
+        }
+        never_cascade(nodes.ptr[n].pos ta)
+        never_cascade(nodes.ptr[n].pos tb)
+        if dewy_at(nodes.ptr[n].pos) {why="{why}{calendar_period_why(a b)}{hidden_unit_why(n a b)}"}
+        fatal(nodes.ptr[n].pos "operator {tok_text(op)} is not defined for {dt(ta)} and {dt(tb)}{why}")
+    }
+    binary_numeric(n op a b ta tb is_cmp)
+}
+
+# (check_binary's end for numbers: division, literal folding, the joined type; it runs in
+# checker_numeric.dewy, these are its services)
+binary_numeric=(n:int64 op:Tok a:int64 b:int64 ta:int64 tb:int64 is_cmp:bool):>int64=>$unsafe {
+    xw_numeric(n tok_ordinal(op) a b ta tb is_cmp)
+}

@@ -7,6 +7,15 @@ from tests.support import compiler  # noqa: F401
 
 
 @pytest.mark.parametrize(("leaf", "cases"), [
+    ("struct_construction", ("object/zero_defaults", "object/positional_literal_extra", "generic/type_defaults")),
+    ("explicit_conversions", ("conversion/float_int", "conversion/string_to_int_hint", "conversion/transmute_record")),
+    ("arithmetic_calls", ("rational/powers", "exact_int/constant_width_reject_divide", "rational/mixed")),
+    ("unresolved_call_names", ("ffi/intrinsic_unknown", "surface/missing_member", "overload/unknown_named_argument")),
+    ("function_value_checks", ("overload/group_value", "overload/group_generic", "type_members/handles")),
+    ("missing_member_checks", ("surface/missing_member", "surface/index_optional_member", "type_members/missing_member")),
+    ("coerce_expression", ("conversion/int_float", "conversion/refuted_narrowing", "literal_union_proof/cast")),
+    ("binary_operator_checks", ("exact_int/wide_modulo", "membership/return_type", "surface/compare_union_number")),
+    ("intrinsic_expressions", ("ffi/intrinsic", "ffi/intrinsic_unknown", "word_format_local/finite")),
     ("integer_conversions", ("misc/narrow_integers", "exact_int/wrap_either_side")),
     ("coercion_queries", ("rational/float_array_argument_hint", "literal_union_proof/assignment")),
     ("storage_place_checks", ("grouped_place/routes", "grouped_place/misuse_operand")),

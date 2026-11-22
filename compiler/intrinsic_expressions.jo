@@ -1,0 +1,924 @@
+use 'checker_call_queries.dewy'
+use 'overload_type_lookup.dewy'
+use 'integer_conversions.dewy'
+use 'coerce_expression.dewy'
+use 'storage_place_checks.dewy'
+use 'expr.jo'
+use 'refinement_types.dewy'
+use 'ast.jo'
+use 'node_store.dewy'
+use 'types.jo'
+use 'arena_ops.dewy'
+use 'call_argument_checks.dewy'
+use 'collection_checks.dewy'
+use 'checks_static.dewy'
+use 'checked_expression_nodes.dewy'
+use 'checks_builders.dewy'
+use 'rational_types.dewy'
+use 'checker_expr.dewy'
+use 'checker_type_entries.dewy'
+use 'literal_context.dewy'
+use 'call_lookup_context.dewy'
+use 'concurrency_tasks.dewy'
+use 'concurrency_types.dewy'
+use 'check.jo'
+use 'data_access.dewy'
+use 'checker_module_lookup.dewy'
+use 'checker_source_positions.dewy'
+use 'checks_thin.dewy'
+use 'checks_thin_expr.dewy'
+use 'directives.jo'
+use 'program_settings.dewy'
+use 'type_ops.dewy'
+use 'embed_walk.dewy'
+use 'util.jo'
+use 'exact.jo'
+use 'type_expression_forms.dewy'
+use 'facts_plans.dewy'
+use 'facts_ranges.dewy'
+use 'facts.jo'
+use 'diagnostic_exit.dewy'
+use 'checker_signature.dewy'
+use 'gpu_type_checks.dewy'
+use 'module_paths.dewy'
+use 'member_receivers.dewy'
+use 'set_type_queries.dewy'
+use 'map_entry_places.dewy'
+use 'numeric_library_types.dewy'
+use 'units.jo'
+use 'effects.jo'
+use 'unit_ops.dewy'
+use 'path_narrowing.dewy'
+use 'checker_value_protocols.dewy'
+use 'expression_types.dewy'
+use 'ownership_types.dewy'
+use 'checks_read_code.dewy'
+use 'refine_rare.dewy'
+use 'refine_metadata.dewy'
+use 'refine.jo'
+use 'refine_ops.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_runtime_functions.dewy'
+use 'secret_checks.dewy'
+use 'string_domains.jo'
+use 'time_rule_packs.dewy'
+use 'checks_call_errors.dewy'
+use 'checker_loop_routes.dewy'
+
+# The intrinsics checker_expr.dewy's check_intrinsic leaves to the host: every one but len, cap, push,
+# pop, clear, syscall, mem_copy, mem_set, panic and bytes.
+intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
+    let id = iid as IN
+    if id == .range_max:
+        t = representation_type(check_expr(args0[0], 0))
+        bits = int(types[t].bits)
+        value = if bits == 64: -1 else: (1 << bits) - 1
+        if types[t].sign: value = int(u64(value) >> 1)
+        nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, type = i32(t), ival = value, flags = i32(NF_CHECKED))
+        if not types[t].sign and value < 0: add_flag(n, NF_U64)
+        return t
+    let args = args0
+    # `__permutable_data(xs)`: data() for code that only reads elements, moves them between
+    # slots or stores values already of the element type (the library's swap and reorderings,
+    # parallel kernels' inputs and outputs), so an element's refinement holds without a proof
+    # per element: refined storage is not refused
+    permute = id == .arrdata_permute
+    if permute:
+        if not pos_in_lib(nodes[n].pos): fatal(nodes[n].pos, "__permutable_data is the library's")
+        id = .arrdata
+    nodes[n].kind = .intrinsic
+    nodes[n].aux = i32(int(id))
+    set_list(n, args)
+    nodes[n].a = 0
+    nargs = args.len()
+    r = T_VOID
+    if id == .secret_wrap:
+        # secret(x): x's value as a secret (secrets.jo)
+        nargs_check(n, nargs, 1, 1, "secret")
+        want = 0
+        if expected != 0 and tkind(expected) == .secret: want = prune(telem(expected))
+        t = prune(arg_type(args, 0, want))
+        if is_lit(args[0]): t = prune(finalize_literal(args[0]))
+        nodes[n] = nodes[args[0]]
+        if types[t].kind == .secret: return t
+        return secret_wrap(n, t)
+    if id == .secret_value:
+        # __secret_value(x): x, or a secret's value (the library's: a dictionary hashes a
+        # secret key as its value)
+        nargs_check(n, nargs, 1, 1, "__secret_value")
+        if not pos_in_lib(nodes[n].pos): fatal(nodes[n].pos, "__secret_value is the library's: `x.reveal` gives a secret's value")
+        t = prune(arg_type(args, 0, expected))
+        nodes[n] = nodes[args[0]]
+        if types[t].kind != .secret: return t
+        secret_reveal(n)
+        return prune(ntype(n))
+    if id == .task_duration:
+        nargs_check(n, nargs, 1, 1, "__task_nanoseconds")
+        return task_duration_value(n, args[0])
+    if id == .task_report:
+        nargs_check(n, nargs, 2, 2, "__task_report")
+        return concurrency_report(n, args)
+    if id == .arena_result:
+        nargs_check(n, nargs, 2, 2, "$allocator_result")
+        return arena_check_result(n, args[0], arg_type(args, 0, expected), nodes[args[1]].ival != 0)
+    if id == .lend:
+        nargs_check(n, nargs, 3, 3, "$lend")
+        if has_flag(args[0], NF_MUT): add_flag(n, NF_MUT)
+        if nodes[args[0]].kind == .addr:
+            add_flag(n, NF_MUT)
+            args[0] = int(nodes[args[0]].a)
+            set_list(n, args)
+        t = arg_type(args, 0, 0)
+        if t != mk_array(T_U8): fatal(nodes[n].pos, "$lend needs a named array<uint8> owner")
+        if nodes[args[0]].kind != .ident: fatal(nodes[n].pos, "$lend needs stable named storage")
+        if has_flag(n, NF_MUT): check_place(args[0], false)
+        arg_type(args, 1, T_INT)
+        if not has_flag(n, NF_MUT) and (nodes[args[1]].kind != .int_lit or nodes[args[1]].ival != 0): fatal(nodes[n].pos, "reservation requires a writable loan")
+        nodes[n].ival = locals.len()
+        r = arg_type(args, 2, expected)
+        loan_owners[if cx >= 0: int(ctxs[cx].inst) else: 0] = true
+    else if id == .loan_address or id == .loan_load or id == .loan_store or id == .loan_length:
+        nargs_check(n, nargs, (if id == .loan_store or id == .loan_length: 2 else: 1), (if id == .loan_store or id == .loan_length: 2 else: 1), "scoped byte operation")
+        if id == .loan_address or id == .loan_length:
+            if arg_type(args, 0, 0) != mk_array(T_U8): fatal(nodes[n].pos, "scoped byte operation needs array<uint8>")
+        else: arg_type(args, 0, T_INT)
+        if nargs == 2: arg_type(args, 1, T_INT)
+        if id == .loan_address: r = T_INT
+        if id == .loan_load: r = T_U8
+        loan_owners[if cx >= 0: int(ctxs[cx].inst) else: 0] = true
+    else if id == .dewy_set:
+        nargs_check(n, nargs, 1, 1, "set literal")
+        ex = prune(expected)
+        if types[ex].kind == .opt: ex = prune(int(types[ex].elem))
+        if is_union(ex):
+            selected = 0
+            loop member in union_members(ex):
+                if is_dewy_set_type(member):
+                    if selected != 0: selected = 0; break
+                    selected = member
+            if selected != 0: ex = selected
+        if is_dewy_set_type(ex):
+            check_to(args[0], mk_array(struct_targ(int(types[ex].st), 0)))
+            add_flag(args[0], NF_CHECKED)
+        else if nodes[args[0]].kind == .array and nkids(args[0]) == 0:
+            fatal(nodes[n].pos, "cannot infer the type of an empty set; add a type annotation: `let values:set<int64> = set[]`")
+        nodes[n] = nodes[bc_call("__dewy_make_set", args, nodes[n].pos)]
+        return check_expr(n, expected)
+    else if id == .dewy_iter:
+        nargs_check(n, nargs, 1, 1, "__dewy_iter")
+        # (`loop x in inbox or_throw {`: for an iterator the failures are each step's, not the iterator's)
+        if nodes[args[0]].kind == .propagate and dewy_at(nodes[n].pos):
+            inner = int(nodes[args[0]].a)
+            if dewy_iterator_type(prune(check_expr(inner, 0))):
+                add_flag(last_checked, NF_CHECKED)
+                throwing_iters[n] = int(nodes[args[0]].b)
+                args[0] = last_checked
+        t = arg_type(args, 0, 0)
+        add_flag(args[0], NF_CHECKED)
+        if tkind(t) == .str_:
+            nodes[n] = nodes[bc_call("__dewy_grapheme_iter", args, nodes[n].pos)]
+        else if is_dewy_range_type(t, "IntRange"):
+            nodes[n] = nodes[bc_call("__dewy_range_iter", args, nodes[n].pos)]
+        else if is_dewy_set_type(t):
+            # (loop k in d.keys: the dictionary's keys in order, without making the set)
+            src = args[0]
+            if nodes[src].kind == .call and nkids(src) == 1 and nodes[src].a == 0 and nodes[src].sym > 0 and int(nodes[src].sym) < fns.len() and fns[int(nodes[src].sym)].decl != 0 and name_of(int(nodes[int(fns[int(nodes[src].sym)].decl)].name)) == "__dewy_keys":
+                m = kid(src, 0)
+                add_flag(m, NF_CHECKED)
+                nodes[n] = nodes[bc_call("keys", [m], nodes[n].pos)]
+            else: nodes[n] = nodes[bc_call("__dewy_set_values", args, nodes[n].pos)]
+        else if is_map_type(t) and not ownership_fact_type(t):
+            # Combined loops index a retained dense entry list. Compact deleted
+            # entries once, just as ordinary dictionary iteration does.
+            nodes[n] = nodes[bc_call("__map_entries", args, nodes[n].pos)]
+        else: nodes[n] = nodes[args[0]]
+        return check_expr(n, expected)
+    else if id == .dewy_iter_done or id == .dewy_iter_value or id == .dewy_iter_pair:
+        nargs_check(n, nargs, 2, 2, "Dewy loop iterator")
+        t = arg_type(args, 0, 0)
+        add_flag(args[0], NF_CHECKED)
+        pos = nodes[n].pos
+        if is_dewy_cursor_iter(t):
+            prefix = if is_dewy_grapheme_iter(t): "__dewy_grapheme" else if is_dewy_range_type(t, "__DewyOpenRangeIter"): "__dewy_open_range" else: "__dewy_range"
+            name = prefix + "_done"
+            if id != .dewy_iter_done:
+                name = prefix + "_value"
+                add_flag(args[0], NF_MUT)
+            nodes[n] = nodes[bc_call(name, [args[0]], pos)]
+        else if id == .dewy_iter_done:
+            # (an entry list's length is its key array's, which the value reads)
+            length = if is_map_entries_type(t): bc_call("len", [bc_map_keys(args[0], pos)], pos) else if tkind(t) == .struct_: bc_method(args[0], sequence_length_name(t), [], pos) else: bc_call("len", [args[0]], pos)
+            nodes[n] = nodes[bc_bin(.ge, args[1], length, pos)]
+        else if (is_map_type(t) or is_map_entries_type(t)) and id == .dewy_iter_pair:
+            nodes[n] = nodes[bc_call("__map_pair_at", args, pos)]
+        else:
+            ix = mk(.index, pos)
+            nodes[ix].a = i32(if is_map_type(t) or is_map_entries_type(t): bc_map_keys(args[0], pos) else: args[0])
+            nodes[ix].b = i32(args[1])
+            nodes[n] = nodes[ix]
+        return check_expr(n, expected)
+    else if id == .live_len:
+        t = prune(arg_type(args, 0, 0))
+        if types[t].kind != .array: fatal(nodes[n].pos, "`loop item in @items` iterates a growable array or a bound iterator live, not {dt(t)}; iterate its value with `loop item in items`")
+        nodes[n].aux = i32(int(IN.len))
+        r = T_INT
+    else if id == .insert:
+        nargs_check(n, nargs, 3, 3, "insert")
+        t = arg_type(args, 0, 0)
+        if types[t].kind != .array: fatal(nodes[n].pos, "insert() needs an array")
+        if value_loops.len() > 0: value_loop_resize(args[0], "insert", nodes[n].pos)
+        check_place(args[0], false)
+        arg_type(args, 1, T_INT)
+        arg_type(args, 2, int(types[t].elem))
+    else if id == .remove:
+        nargs_check(n, nargs, 2, 2, "remove")
+        t = arg_type(args, 0, 0)
+        if types[t].kind != .array: fatal(nodes[n].pos, "remove() needs an array")
+        if value_loops.len() > 0: value_loop_resize(args[0], "remove", nodes[n].pos)
+        check_place(args[0], false)
+        # (gems.remove(g): by value, as C#'s List.Remove; here by position)
+        coerce_hint = if dewy_at(nodes[n].pos): " (remove takes a position. To take out things that are done: mark them in the loop (`a.gone = true`), then after it `xs.retain((a) => not a.gone)`; or `xs.retain((y) => y not=? x)` for what is equal to x)" else: " (remove takes a position. To take out things that are done, as Scratch's \"delete this clone\": mark them in the loop (`a.gone = true`), then after it `xs.retain((a): not a.gone)`; or `xs.retain((y): y != x)` for what is equal to x)"
+        arg_type(args, 1, T_INT)
+        coerce_hint = ""
+        r = int(types[t].elem)
+    else if id == .extend:
+        nargs_check(n, nargs, 2, 2, "extend")
+        t = arg_type(args, 0, 0)
+        if types[t].kind != .array: fatal(nodes[n].pos, "extend() needs an array")
+        if value_loops.len() > 0: value_loop_resize(args[0], "extend", nodes[n].pos)
+        check_place(args[0], false)
+        source = args[1]
+        if dewy_set_literal(source) and nodes[kid(source, 0)].kind == .array and nkids(kid(source, 0)) == 0:
+            # Empty-set spreading contributes no elements or effects. Avoid
+            # instantiating Set[T] before a later element can infer T.
+            source = kid(source, 0)
+        hint = t
+        if dewy_set_literal(source):
+            set_sym = prelude.get(ci(18, "Set")) ?? 0
+            if set_sym == 0: fatal(nodes[source].pos, "Set type is not available")
+            hint = get_struct_inst(int(syms[set_sym].ref), [int(types[t].elem)])
+        source_type = prune(check_expr(source, hint))
+        source = last_checked
+        add_flag(source, NF_CHECKED)
+        if is_map_type(source_type) and dewy_at(nodes[n].pos): fatal(nodes[source].pos, "a dictionary cannot be spread into an array or added to one: take its keys (`[d.keys...]`), its values (`d.values`), or its entries as records (`[loop [key value] in d [key=key value=value]]`)")
+        if is_dewy_set_type(source_type): source = bc_call("__dewy_set_values", [source], nodes[source].pos)
+        if types[source_type].kind == .fixed and has_var(int(types[t].elem)):
+            unify(int(types[t].elem), int(types[source_type].elem))
+        expanded = [args[0], source]
+        arg_type(expanded, 1, t)
+        set_list(n, expanded)
+    else if id == .reserve or id == .resize or id == .truncate or id == .setlen:
+        nargs_check(n, nargs, 2, 2, "reserve/resize/truncate")
+        t = arg_type(args, 0, 0)
+        if types[t].kind != .array: fatal(nodes[n].pos, "this operation needs an array")
+        if value_loops.len() > 0 and id != .reserve: value_loop_resize(args[0], (if id == .resize: "resize" else if id == .truncate: "truncate" else: "set_length"), nodes[n].pos)
+        check_place(args[0], false)
+        arg_type(args, 1, T_INT)
+        if id == .resize or id == .setlen: concurrency_require_zero(n, int(types[t].elem))
+        # Generated dotted output is private reserved storage, filled once
+        # by checked element stores before it becomes a value. Its temporary
+        # zeroed slots are never exposed as inhabitants of the element type.
+        # The library's `__set_len` is its parallel kernels' fill-once output in the same way.
+        private_output = id == .setlen and (has_flag(n, NF_PRIVATE_SETLEN) or pos_in_lib(nodes[n].pos))
+        if refine_active and (id == .resize or id == .setlen) and not private_output and ref_storage_contract(int(types[t].elem)):
+            fatal(nodes[n].pos, "refined elements cannot be created by unchecked zero initialization")
+    else if id == .task_data:
+        nargs_check(n, nargs, 1, 1, "__task_data")
+        if not pos_in_lib(nodes[n].pos): fatal(nodes[n].pos, "shared raw storage is private to the trusted task runtime")
+        t = arg_type(args, 0, 0)
+        if tkind(t) != .array: fatal(nodes[n].pos, "task storage must be an array")
+        r = mk_ptr(telem(t))
+    else if id == .arrdata:
+        nargs_check(n, nargs, 1, 1, "data")
+        # A pointer reaches the elements, never the descriptor's length.
+        t = arg_type(args, 0, 0)
+        if tkind(representation_type(t)) == .array: t = representation_type(t)
+        if types[t].kind == .str_: r = T_RAWPTR
+        else if types[t].kind == .array: r = mk_ptr(int(types[t].elem))
+        else: fatal(nodes[n].pos, "data() needs an array or string")
+        if not permute and refine_active and ref_storage_contract(t): fatal(nodes[n].pos, "mutable refinement access through raw data is not supported")
+        note_storage_access(args[0])
+        if cx >= 0 and types[t].kind == .array: data_access_note(n, args[0], int(ctxs[cx].inst))
+    else if id == .integer_mode:
+        # Private library dispatch: signedness and overflow policy, erased now.
+        nargs_check(n, nargs, 1, 1, "__integer_mode")
+        t = representation_type(expr_as_type(args[0]))
+        mode = if t == T_MATH_INT: -2 else if not is_int(t): -1 else: 2 * int_policy(t) + int(types[t].sign)
+        nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = mode, type = i32(T_INT), flags = i32(NF_LITERAL | NF_CHECKED))
+        return T_INT
+    else if id == .sizeof or id == .alignof:
+        nargs_check(n, nargs, 1, 1, "size_of")
+        if files[pos_file(nodes[n].pos)].is_dewy:
+            nm = if id == .sizeof: "size_of" else: "align_of"
+            fatal(nodes[n].pos, "write `{nm}<T>`: the type goes in angle brackets")
+        t = expr_as_type(args[0])
+        layout(t)
+        v = tsize(t)
+        if id == .alignof: v = talign(t)
+        nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = v, type = i32(T_INT), flags = i32(NF_LITERAL | NF_CHECKED))
+        return T_INT
+    else if id == .unreachable: r = T_NEVER
+    else if id == .assert or id == .runtime_assert:
+        if nodes[n].aux2 == i32(RANGE_EXHAUSTION):
+            t = representation_type(arg_type(args, 2, 0))
+            initial = integer_constant(args[2])
+            nodes[n].ival = int(is_int(t) and types[t].bits == 64 and initial.0 and (types[t].sign or initial.1 >= 0) and initial.1 >= -72057594037927936 and initial.1 <= 72057594037927936)
+            args = [args[0], args[1]]
+            set_list(n, args)
+            nargs = 2
+            if not fact_range_assumed(n): fact_requests.push(FactRequest(n, int(ctxs[cx].inst)))
+        nargs_check(n, nargs, 1, 2, "assert")
+        arg_type(args, 0, T_BOOL)
+        if nargs == 2: arg_type(args, 1, T_STR)
+        # A runtime assertion whose condition is known to fail is an error.
+        if id == .runtime_assert and static_truth(args[0]) == 0: assertion_refuted(args[0], 0)
+        # Execution continues only where the condition held: narrow as after
+        # `if not cond return` (`$runtime_assert r isnt? Oops`).
+        if id == .runtime_assert: narrow_by(args[0], true)
+    else if id == .static_assert:
+        nargs_check(n, nargs, 1, 2, "$assert")
+        captures_before = if cx >= 0: fns[int(ctxs[cx].inst)].caps.len() else: 0
+        arg_type(args, 0, T_BOOL)
+        if nargs == 2: arg_type(args, 1, T_STR)
+        # An erased read must not introduce an environment allocation. Existing
+        # runtime/explicit captures are supported; proof-only captures await a
+        # separate compile-time binding representation.
+        if cx >= 0 and fns[int(ctxs[cx].inst)].caps.len() > captures_before and fact_open(args[0]):
+            err_notes.push((nodes[args[0]].pos, "note: an erased operand would introduce a runtime capture here"))
+            fatal(nodes[n].pos, "cannot prove assertion: unsupported erased operand; erased operand would introduce a runtime capture")
+        if string_set_obligations.has(n):
+            owner = if cx >= 0: int(ctxs[cx].inst) else: 0
+            string_set_owners[owner] = true
+            fact_requests.push(FactRequest(n, owner))
+        else: fact_queue(n, args[0], if nargs == 2: args[1] else: 0)
+    else if id == .print or id == .dewy_print:
+        # (Dewy's print: no line break; its printl is the library's print)
+        s = mk(.str_lit, nodes[n].pos)
+        nodes[s].aux = 1
+        parts: int[]
+        # (Dewy's `print(x file=stderr)`: the stream it goes to)
+        stream = 0
+        values: int[]
+        loop a in args:
+            if nodes[a].kind == .namedarg and dewy_at(nodes[a].pos) and name_of(int(nodes[a].name)) == "file" and stream == 0: stream = int(nodes[a].a)
+            else: values.push(a)
+        loop i in 0.. and a in values:
+            if nodes[a].kind == .namedarg:
+                if dewy_at(nodes[a].pos): fatal(nodes[a].pos, "print's only named argument is `file=`, the stream: `print(x file=stderr)`")
+                fatal(nodes[a].pos, "print() does not take named arguments (`write(s)` prints without a line break; print puts a space between its values)")
+            if i > 0:
+                sp = mk(.str_lit, nodes[n].pos)
+                nodes[sp].sval = i32(ci(19, " "))
+                parts.push(sp)
+            part = mk(.pair, nodes[n].pos)
+            nodes[part].a = i32(a)
+            nodes[part].sval = -1
+            parts.push(part)
+        set_list(s, parts)
+        if values.len() == 1 and nodes[values[0]].kind == .str_lit and nodes[values[0]].aux == 0: s = values[0]
+        if stream != 0:
+            put = bc_call("__console_put", [stream, s, bc_bool(id == .print, nodes[n].pos)], nodes[n].pos)
+            nodes[n] = nodes[put]
+            return check_expr(n, expected)
+        check_expr(s, 0)
+        nodes[n].kind = .call
+        nodes[n].aux = 0
+        set_list(n, [s])
+        printer = "__print_str"
+        if id == .dewy_print: printer = "write"
+        nodes[n].sym = i32(runtime_fn(printer))
+        nodes[n].type = i32(T_VOID)
+        return T_VOID
+    else if id == .embed:
+        nargs_check(n, nargs, 1, 1, "embed")
+        a = args[0]
+        if nodes[a].kind != .str_lit or nodes[a].aux != 0: fatal(nodes[n].pos, "embed() needs a string literal path")
+        rel = name_of(int(nodes[a].sval))
+        path = rel
+        if not is_abs_path(rel): path = "{files[pos_file(nodes[n].pos)].dir}/{rel}"
+        path = path_norm(path)
+        path = time_rules_path(path)
+        if not embedded_files.contains(path): embedded_files.push(path)
+        d = read_file(path)
+        if d == none:
+            # (Cat1.png for cat1.png: a file's name with its capitals another way)
+            dir = path[..max(rfind(path, "/"), 0))
+            base = path[max(rfind(path, "/"), -1) + 1..]
+            if len(dir) > 0:
+                loop f in list_dir(dir):
+                    if lower(f) == lower(base) and f != base: fatal(nodes[n].pos, "embed: there is no '{base}' next to the program, but there is '{f}': file names care about capital letters")
+            fatal(nodes[n].pos, "embed: cannot read '{path}'")
+        nodes[n].sval = i32(intern(d!))
+        r = mk_array(T_U8)
+    else if id == .embed_dir:
+        # embed_dir("assets"): {"a.png": embed("assets/a.png"), "sfx/hit.wav": ...}, every file under
+        # it (sub-directories' with their path; hidden ones left out)
+        nargs_check(n, nargs, 1, 1, "embed_dir")
+        a = args[0]
+        if nodes[a].kind != .str_lit or nodes[a].aux != 0: fatal(nodes[n].pos, "embed_dir() needs a string literal path")
+        rel = name_of(int(nodes[a].sval))
+        path = rel
+        if not is_abs_path(rel): path = "{files[pos_file(nodes[n].pos)].dir}/{rel}"
+        if not is_dir(path): fatal(nodes[n].pos, "embed_dir: '{path}' is not a directory")
+        names: str[]
+        embed_dir_walk(path, "", names)
+        pos = nodes[n].pos
+        pairs: int[]
+        loop nm in names:
+            pr = mk(.pair, pos)
+            nodes[pr].a = i32(bc_str(nm, pos))
+            nodes[pr].b = i32(bc_call("embed", [bc_str("{rel}/{nm}", pos)], pos))
+            pairs.push(pr)
+        if pairs.len() == 0: fatal(nodes[n].pos, "embed_dir: '{path}' has no files")
+        m = mk(.map_lit, pos)
+        set_list(m, pairs)
+        nodes[n] = nodes[m]
+        return check_expr(n, expected)
+    else if id == .from_bytes:
+        nargs_check(n, nargs, 1, 1, "str_from_bytes")
+        arg_type(args, 0, mk_array(T_U8))
+        nodes[n].kind = .call
+        nodes[n].aux = 0
+        nodes[n].sym = i32(runtime_fn("__str_from_bytes"))
+        nodes[n].type = i32(T_STR)
+        return T_STR
+    else if id == .argv: r = T_RAWPTR
+    else if id == .offset_unit:
+        nargs_check(n, nargs, 3, 3, "__offset_unit")
+        if nodes[args[0]].kind != .str_lit: fatal(nodes[args[0]].pos, "an offset unit's symbol is a string literal")
+        arg_type(args, 1, 0)
+        arg_type(args, 2, 0)
+        return quantity_offset_unit(n, name_of(int(nodes[args[0]].sval)), args[1], args[2])
+    else if id == .mul_hi:
+        # (the high 64 bits of a 128-bit product: the dictionaries' keyed hash, lib/core/map.jo)
+        nargs_check(n, nargs, 2, 2, "__mul_hi")
+        arg_type(args, 0, T_U64)
+        arg_type(args, 1, T_U64)
+        runtime_demand("__mul_hi_soft")      # (WebAssembly has no high multiply)
+        r = T_U64
+    else if id == .sqrt:
+        nargs_check(n, nargs, 1, 1, "sqrt")
+        t = arg_type(args, 0, 0)
+        # (the root of a temperature is of its difference reading)
+        if is_quantity(t) and quantity_tag(t) != 0:
+            args[0] = quantity_delta_reading(args[0])
+            t = prune(ntype(args[0]))
+        # (the root of a quantity halves its dimension's powers: sqrt of an area is a length)
+        if is_quantity(t) and dewy_at(nodes[n].pos):
+            # (odd powers give rational ones: sqrt of a frequency is Time^(-1/2), as in V/sqrt(Hz))
+            dim = power_dimension(quantity_dimension(t), 1, nodes[n].pos, 2)
+            number = quantity_number(args[0])
+            base = quantity_base(t)
+            if types[base].kind != .float_:
+                coerce(number, T_FLOAT)
+                base = T_FLOAT
+            args[0] = number
+            set_list(n, args)
+            nodes[n].type = i32(base)
+            add_flag(n, NF_CHECKED)
+            wrap_conv(n, .none_, mk_quantity(base, dim))
+            last_checked = n
+            return ntype(n)
+        if is_lit(args[0]) or types[t].kind == .int_ or bundled_rational_type(t):
+            coerce(args[0], T_FLOAT)
+            t = T_FLOAT
+        if types[t].kind != .float_: fatal(nodes[n].pos, jd(nodes[n].pos, "sqrt() needs a float", "sqrt needs a float64 or float32 (found {dt(t)})"))
+        r = t
+    else if id == .json_fields:
+        nargs_check(n, nargs, 4, 4, "__json_fields")
+        # These calls are emitted by lowering, so check and finalize their
+        # bodies now rather than instantiating new functions during emission.
+        loop name in ["__json_key", "__json_sep", "__json_newline", "__json_write_str"]: runtime_fn(name)
+        bt = mk_array(T_U8)
+        arg_type(args, 0, bt)
+        t = prune(arg_type(args, 1, 0))
+        # Serialization reads the Path representation without weakening storage.
+        if types[t].kind == .refined and types[t].bits == -2:
+            t = representation_type(t)
+            coerce(args[1], t)
+        arg_type(args, 2, T_INT)
+        arg_type(args, 3, T_INT)
+        k = types[t].kind
+        fts: int[]
+        if k == .fixed: fts.push(int(types[t].elem))
+        else if k == .struct_:
+            si = int(types[t].st)
+            check_struct_fields(si)
+            loop i in [0..int(structs[si].nfields)): fts.push(int(fields[int(structs[si].fields) + i].type))
+        else if k == .tuple:
+            loop i in [0..int(types[t].nargs)): fts.push(targ(t, i))
+        else if k == .enum_:
+            si = int(types[t].st)
+            check_struct_fields(si)
+            loop v in [0..int(structs[si].nvariants)):
+                vi = int(structs[si].variants) + v
+                loop i in [0..int(variants[vi].nfields)): fts.push(int(fields[int(variants[vi].fields) + i].type))
+        else if k == .vec:
+            ct = if types[t].sign: T_I32 else: T_F32
+            count = if t == T_MAT4: 16 else: int(types[t].bits)
+            loop i in [0..count): fts.push(ct)
+        else if k == .secret: fatal(nodes[n].pos, "a {dt(t)} is never written as JSON: its value is hidden (a field holding `x.reveal` writes it, where showing it is intended)")
+        else: fatal(nodes[n].pos, "a value of type {dt(t)} cannot be written as JSON")
+        refs: int[]
+        loop ft in fts:
+            ref = mk(.fnref, nodes[n].pos)
+            # Lowering passes the field's exact storage. Do not select an
+            # array overload that expects an implicit fixed-to-dynamic copy.
+            writer = if tkind(ft) == .fixed: "__json_write_fixed" else: "__json_write_value"
+            nodes[ref].sym = i32(resolve_by_types(intern(writer), [bt, ft, T_INT, T_INT], nodes[n].pos, true))
+            refs.push(ref)
+        set_list2(n, refs)
+    else if id == .fmt_struct:
+        nargs_check(n, nargs, 2, 2, "__fmt_fields")
+        arg_type(args, 0, 0)
+        t = arg_type(args, 1, 0)
+        if is_quantity(t):
+            nodes[n] = nodes[bc_call("__fmt", [args[0], quantity_number(args[1])], nodes[n].pos)]
+            return check_expr(n, 0)
+        # (a type with the program's own `str = (b: Big) -> str`: shown as the text it gives,
+        # and to_text, while it writes, as its fields: `if __text_exact: fields else: str(x)`)
+        sf = 0
+        if not fmt_plain.has(n) and int(nodes[n].aux2) & FMT_DEWY == 0: sf = program_str_fn(t, nodes[n].pos)
+        if sf != 0:
+            pos = nodes[n].pos
+            plain = nodes.len()
+            nodes.push(nodes[n])
+            fmt_plain[plain] = true
+            pt = check_intrinsic(plain, int(IN.fmt_struct), args, 0)
+            if nodes[plain].type == 0: nodes[plain].type = i32(pt)
+            add_flag(plain, NF_CHECKED)
+            inner = mk(.call, pos)
+            nodes[inner].a = i32(bc_ident("str", pos))
+            set_list(inner, [args[1]])
+            nodes[inner].sym = i32(sf)
+            nodes[inner].type = i32(T_STR)
+            add_flag(inner, NF_CHECKED)
+            b0 = clone(args[0])
+            clear_flag(b0, NF_CHECKED)
+            shown = bc_call("__buf_append_str", [b0, inner], pos)
+            iff = mk(.if_, pos)
+            nodes[iff].a = i32(bc_ident("__text_exact", pos))
+            nodes[iff].b = i32(bc_block([bc_stmt(plain, pos)], pos))
+            nodes[iff].c = i32(bc_block([bc_stmt(shown, pos)], pos))
+            nodes[n] = nodes[iff]
+            return check_expr(n, 0)
+        bt = mk_array(T_U8)
+        fts: int[]
+        k = types[t].kind
+        if k == .struct_:
+            si = int(types[t].st)
+            check_struct_fields(si)
+            loop i in fmt_field_order(si):
+                ft = int(fields[int(structs[si].fields) + i].type)
+                if not fmt_hidden(ft, nodes[n].aux2): fts.push(ft)
+        else if k == .tuple:
+            loop i in [0..int(types[t].nargs)): fts.push(targ(t, i))
+        else if k == .enum_:
+            si = int(types[t].st)
+            check_struct_fields(si)
+            loop v in [0..int(structs[si].nvariants)):
+                vi = int(structs[si].variants) + v
+                loop i in [0..int(variants[vi].nfields)): fts.push(int(fields[int(variants[vi].fields) + i].type))
+        else if k == .vec: runtime_demand(if types[t].sign: "__fmt_i32" else: "__fmt_f32")
+        else if k == .fn_: pass
+        else: fatal(nodes[n].pos, "cannot format a value of type {dt(t)}")
+        refs: int[]
+        # (a union shows just its value: quoted inside a container, as a string would be)
+        dewy = int(nodes[n].aux2) & FMT_DEWY != 0
+        top = is_union(t) and int(nodes[n].aux2) & 1 == 0
+        fname = ci(20, "__fmt_elem")
+        if top: fname = ci(21, "__fmt")
+        if dewy and top: fname = ci(22, "__dewy_fmt")
+        else if dewy: fname = ci(23, "__dewy_fmt_elem")
+        loop ft in fts:
+            ref = mk(.fnref, nodes[n].pos)
+            # (a union's void member shows as `void`: the text lowering appends)
+            if is_union(t) and tkind(ft) == .void_: nodes[ref].sym = i32(resolve_by_types(intern("__buf_append_str"), [bt, T_STR], nodes[n].pos, true))
+            else: nodes[ref].sym = i32(resolve_by_types(fname, [bt, ft], nodes[n].pos, true))
+            refs.push(ref)
+        set_list2(n, refs)
+    else if id == .hash:
+        # (a second argument, `true`: the dictionaries' keyed hash, lib/core/map.jo)
+        nargs_check(n, nargs, 1, 2, "__hash_value")
+        hashed = arg_type(args, 0, 0)
+        if nargs == 1 and (is_union(hashed) or tkind(hashed) == .opt): return union_hash(n, args[0], hashed, expected)
+        note_value_helpers(hashed, true)
+        if nargs == 2:
+            arg_type(args, 1, T_BOOL)
+            if nodes[args[1]].kind != .bool_lit: fatal(nodes[args[1]].pos, "__hash_value's second argument is a literal `true` (keyed)")
+            demand_name(intern("__hash_key"))
+            loop name in ["__hk_word", "__hk_mix", "__str_khash"]: runtime_demand(name)
+        r = T_U64
+    else if id == .shader:
+        nargs_check(n, nargs, 2, 2, "shader")
+        # (the fragment function first: a generic vertex function, as the library's effect_vs[U],
+        # is made for its input and uniforms)
+        loop i in [1, 0]:
+            a = args[i]
+            if nodes[a].kind != .ident: fatal(nodes[a].pos, "shader() takes the names of a vertex and a fragment function")
+            want = 0
+            if i == 0 and nodes[args[1]].kind == .fnref:
+                ff = int(nodes[args[1]].sym)
+                vd: int[]
+                collect_fns(int(nodes[a].name), &vd)
+                if vd.len() == 1 and fn_sig(vd[0]).generic and nkids(vd[0]) == 2 and fns[ff].ptypes.len() == 2:
+                    want = mk_fn([fn_sig(vd[0]).params[0], fns[ff].ptypes[1]], fns[ff].ptypes[0], 0)
+            check_expr(a, want)
+            if nodes[a].kind != .fnref: fatal(nodes[a].pos, "expected a function name")
+            f = int(nodes[a].sym)
+            np = fns[f].ptypes.len()
+            if np != 2 and not (i == 0 and np == 3): fatal(nodes[a].pos, "shader functions take (input, uniforms); vertex functions may also take (input, instance, uniforms)")
+        vsf = int(nodes[args[0]].sym)
+        fsf = int(nodes[args[1]].sym)
+        if not type_eq(int(fns[vsf].ret), fns[fsf].ptypes[0]): fatal(nodes[n].pos, "the fragment function's input must be the vertex function's output type")
+        if not type_eq(fns[vsf].ptypes[fns[vsf].ptypes.len() - 1], fns[fsf].ptypes[1]): fatal(nodes[n].pos, "both shader functions must take the same uniforms type")
+        if not type_eq(int(fns[fsf].ret), T_VEC4): fatal(nodes[n].pos, "the fragment function must return a vec4 color")
+        # The shader intrinsic synthesizes this type without a source-level
+        # reference, so it must demand the module just like an ordinary name.
+        s = module_lookup(-1, ci(24, "ShaderSource"))
+        if s == 0: fatal(nodes[n].pos, "ShaderSource is not available")
+        r = get_struct_inst(int(syms[s].ref), [])
+    else if id == .setjmp:
+        nargs_check(n, nargs, 1, 1, "__setjmp")
+        arg_type(args, 0, T_RAWPTR)
+        r = T_INT
+    else if id == .longjmp:
+        nargs_check(n, nargs, 2, 2, "__longjmp")
+        arg_type(args, 0, T_RAWPTR)
+        arg_type(args, 1, T_INT)
+        r = T_NEVER
+    else if id == .jump:
+        nargs_check(n, nargs, 2, 2, "__jump")
+        arg_type(args, 0, T_RAWPTR)
+        arg_type(args, 1, T_RAWPTR)
+        r = T_NEVER
+    else if id == .clone_thread:
+        nargs_check(n, nargs, 3, 3, "__clone_thread")
+        arg_type(args, 0, T_RAWPTR)
+        arg_type(args, 1, T_INT)
+        arg_type(args, 2, T_RAWPTR)
+        r = T_INT
+    else if id == .atomic_add:
+        nargs_check(n, nargs, 2, 2, "__atomic_add")
+        arg_type(args, 0, mk_ptr(T_INT))
+        arg_type(args, 1, T_INT)
+        r = T_INT
+    else if id == .atomic_cas:
+        nargs_check(n, nargs, 3, 3, "__atomic_cas")
+        arg_type(args, 0, mk_ptr(T_INT))
+        arg_type(args, 1, T_INT)
+        arg_type(args, 2, T_INT)
+        r = T_INT
+    else if id == .gpu_kernel:
+        # __gpu_kernel(lambda, desc): the GLSL fragment program (see glsl_kernel)
+        nargs_check(n, nargs, 2, 2, "__gpu_kernel")
+        if nodes[args[0]].kind != .lambda or nodes[args[1]].kind != .str_lit: fatal(nodes[n].pos, "__gpu_kernel takes a function literal and a string")
+        check_expr(args[0], 0)
+        exact_shader_roots.push(int(nodes[args[0]].sym))
+        r = T_STR
+    else if id == .compute:
+        # compute(f): a GPU program run once per element, f(id: int, params: P) (lib/game/gpubuffer.jo),
+        # or once per cell of a grid, f(id: ivec2 or ivec3, params: P); becomes
+        # __compute(__compute_spirv(f), f) (__compute2 or __compute3 for a grid): the program for
+        # Vulkan, and f itself for the CPU
+        nargs_check(n, nargs, 1, 1, "compute")
+        a = args[0]
+        if nodes[a].kind != .ident: fatal(nodes[a].pos, "compute() takes the name of a function (id: int, params: P)")
+        # (of the functions with that name, the one shaped like a compute function)
+        want = 0
+        decls: int[]
+        collect_fns(int(nodes[a].name), &decls)
+        loop d in decls:
+            sig = fn_sig(d)
+            if not sig.generic and sig.params.len() == 2 and (prune(sig.params[0]) == T_INT or prune(sig.params[0]) == T_IVEC2 or prune(sig.params[0]) == T_IVEC3) and tkind(sig.params[1]) == .struct_ and tkind(int(sig.ret)) == .void_:
+                want = mk_fn(sig.params, T_VOID, 0)
+        check_expr(a, want)
+        if nodes[a].kind != .fnref: fatal(nodes[a].pos, "expected a function name")
+        f = int(nodes[a].sym)
+        it0 = prune(fns[f].ptypes[0])
+        if fns[f].ptypes.len() != 2 or (it0 != T_INT and it0 != T_IVEC2 and it0 != T_IVEC3) or tkind(fns[f].ptypes[1]) != .struct_:
+            fatal(nodes[a].pos, "a compute function takes (id: int, params: P), P a struct (or id: ivec2 or ivec3, over a grid)")
+        if tkind(int(fns[f].ret)) != .void_: fatal(nodes[a].pos, "a compute function returns nothing: it writes its results into GPU buffers")
+        if fns[f].decl != 0 and files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy and not pos_in_lib(nodes[int(fns[f].decl)].pos):
+            gpu_word_memory(fns[f].ptypes[1], dt(prune(fns[f].ptypes[1])), nodes[a].pos, 0)
+        exact_shader_roots.push(f)
+        ref = mk(.fnref, nodes[a].pos)
+        nodes[ref].sym = nodes[a].sym
+        nodes[ref].type = nodes[a].type
+        ref2 = mk(.fnref, nodes[a].pos)
+        nodes[ref2].sym = nodes[a].sym
+        nodes[ref2].type = nodes[a].type
+        mkname = "__compute"
+        if prune(fns[f].ptypes[0]) == T_IVEC2: mkname = "__compute2"
+        if prune(fns[f].ptypes[0]) == T_IVEC3: mkname = "__compute3"
+        call = bc_call(mkname, [bc_call("__compute_spirv", [ref], nodes[n].pos), bc_call("__compute_textures", [ref2], nodes[n].pos), a], nodes[n].pos)
+        nodes[n] = nodes[call]
+        return check_expr(n, expected)
+    else if id == .compute_spirv or id == .compute_textures:
+        nargs_check(n, nargs, 1, 1, "__compute_spirv")
+        if nodes[args[0]].kind != .fnref: fatal(nodes[n].pos, "__compute_spirv takes a function")
+        r = T_STR
+    else if id == .default_init:
+        # __default_init(x): a struct gets its fields' default values (anything else is zero already)
+        nargs_check(n, nargs, 1, 1, "__default_init")
+        t = prune(arg_type(args, 0, 0))
+        pos = nodes[n].pos
+        stmts: int[]
+        if types[t].kind == .struct_ and not is_map_type(t):
+            si = int(types[t].st)
+            check_struct_fields(si)
+            has_def = false
+            loop i in [0..int(structs[si].nfields)):
+                if fields[int(structs[si].fields) + i].defval != 0: has_def = true
+            if has_def:
+                d = mk(.call, pos)
+                struct_ctor_zero(d, t, int(structs[si].decl))
+                add_flag(d, NF_CHECKED)
+                stmts.push(bc_assign(bc_ident(name_of(int(nodes[args[0]].name)), pos), d, pos))
+        nodes[n] = nodes[bc_block(stmts, pos)]
+        return check_expr(n, expected)
+    else if id == .setting_read:
+        # __setting_read("time.zone"), `$time.zone`: the setting where this is read, or at the
+        # call a parameter's default is filled in for; none when no scope sets it
+        setting = int(nodes[args[0]].sval)
+        if setting == intern("__zone_values"):
+            nodes[n] = Node(kind = .bool_lit, pos = nodes[n].pos, ival = int(dir_runtime_policies.has(setting)))
+            return check_expr(n, expected)
+        if setting == intern("__rule_packs"):
+            nodes[n] = Node(kind = .bool_lit, pos = nodes[n].pos, ival = int(dir_runtime_policies.has(intern("time.rules"))))
+            return check_expr(n, expected)
+        if setting == intern("__core_caps"):
+            nodes[n] = Node(kind = .bool_lit, pos = nodes[n].pos, ival = int(dir_runtime_caps))
+            return check_expr(n, expected)
+        if setting == intern("__runtime_settings"):
+            nodes[n] = Node(kind = .bool_lit, pos = nodes[n].pos, ival = int(dir_runtime_settings))
+            return check_expr(n, expected)
+        # An explicit constant policy in this lexical scope wins over the caller.
+        # Keep it constant for validators and plain calendar operations.
+        if cx >= 0 and dir_runtime_policies.has(setting):
+            site = nodes[n].pos
+            if setting_site != 0: site = setting_site
+            local = dir_find(setting, site)
+            if local >= 0 and dir_scopes[local].value >= 2 and dir_scopes[local].start != dir_module_start(pos_file(site)):
+                value = dir_scopes[local].value - 2
+                if setting == intern("time.zone") and value == intern("build"):
+                    host = __system_zone_name()
+                    if len(host) == 0: fatal(dir_scopes[local].at, "`$time.zone = 'build'` needs the building machine to name its zone")
+                    value = intern(host)
+                nodes[n] = Node(kind = .str_lit, pos = nodes[n].pos, sval = i32(value))
+                return check_expr(n, expected)
+        runtime_kind = -1
+        if cx >= 0 and dir_runtime_policies.has(setting):
+            if setting == intern("time.zone"): runtime_kind = 1
+            else if setting == intern("time.gap"): runtime_kind = 2
+            else if setting == intern("time.fold"): runtime_kind = 3
+            else if setting == intern("time.zone_source"): runtime_kind = 4
+            else if setting == intern("time.rules"): runtime_kind = 5
+        if runtime_kind >= 0:
+            fallback = mk(.none_lit, nodes[n].pos)
+            held = dir_program_values.get(setting) ?? dir_find(setting, nodes[n].pos)
+            if held >= 0 and dir_scopes[held].value >= 2:
+                value = dir_scopes[held].value - 2
+                if setting == intern("time.zone") and value == intern("build"):
+                    pinned = __system_zone_name()
+                    if len(pinned) == 0: fatal(dir_scopes[held].at, "`$time.zone = 'build'` needs the building machine to name its zone; set an explicit zone instead")
+                    value = intern(pinned)
+                fallback = bc_str(name_of(value), nodes[n].pos)
+            call = bc_call("__settings_policy_read", [bc_int(runtime_kind, nodes[n].pos), fallback], nodes[n].pos)
+            policy_type = prune(expected)
+            if expected != 0 and types[policy_type].kind == .opt: policy_type = prune(int(types[policy_type].elem))
+            text_policy = expected != 0 and policy_type == T_STR
+            if runtime_kind == 2 and not text_policy:
+                reader = "__settings_gap_read"
+                if expected != 0:
+                    gap_type = prune(expected)
+                    if types[gap_type].kind == .opt: gap_type = prune(int(types[gap_type].elem))
+                    gap_set = str_set_of(gap_type)
+                    if gap_set != 0 and not str_sets[gap_set].contains("skip"): reader = "__settings_gap_one_read"
+                call = bc_call(reader, [fallback], nodes[n].pos)
+            else if runtime_kind == 3 and not text_policy: call = bc_call("__settings_fold_read", [fallback], nodes[n].pos)
+            nodes[n] = nodes[call]
+            return check_expr(n, expected)
+        pos = nodes[n].pos
+        scope = dir_find(int(nodes[args[0]].sval), if setting_site != 0: setting_site else: pos)
+        if dir_program_setting(name_of(int(nodes[args[0]].sval))):
+            scope = dir_program_values.get(int(nodes[args[0]].sval)) ?? -1
+        if scope < 0 or dir_scopes[scope].value < 2:
+            nodes[n] = Node(kind = .none_lit, pos = pos)
+            return check_expr(n, expected)
+        value = dir_scopes[scope].value - 2
+        # (`$time.zone = 'build'`: the machine doing this build, pinned now)
+        if value == intern("build") and name_of(int(nodes[args[0]].sval)) == "time.zone":
+            host = __system_zone_name()
+            if len(host) == 0: fatal(dir_scopes[scope].at, "`$time.zone = 'build'` pins the zone of the machine building this, and this machine does not name one: name the zone instead, as `$time.zone = 'America/New_York'`")
+            value = intern(host)
+        nodes[n] = Node(kind = .str_lit, pos = pos, sval = i32(value))
+        return check_expr(n, expected)
+    else if id == .read_fields:
+        # __read_fields(r, x): the code that reads a struct, tuple, enum, union, vector or fixed-size
+        # array from text, field by field (lib/std/text.jo)
+        nargs_check(n, nargs, 2, 2, "__read_fields")
+        arg_type(args, 0, 0)
+        t = prune(arg_type(args, 1, 0))
+        pos = nodes[n].pos
+        stmts = read_code(t, name_of(int(nodes[args[0]].name)), name_of(int(nodes[args[1]].name)), pos)
+        nodes[n] = nodes[bc_block(stmts, pos)]
+        return check_expr(n, expected)
+    else if id == .fmt_elem:
+        # __fmt_elem_value(buf, x): x inside a container (strings quoted): a union formats its
+        # member that way; anything else is __fmt(buf, x)
+        nargs_check(n, nargs, 2, 2, "__fmt_elem_value")
+        t = arg_type(args, 1, 0)
+        if is_union(t):
+            nodes[n].aux = i32(int(IN.fmt_struct))
+            nodes[n].aux2 = 1
+            return check_intrinsic(n, int(IN.fmt_struct), args, expected)
+        # (a Dewy object with its own text, `__as__` to string, as a rational in a matrix: that text)
+        if tkind(t) == .struct_ and as_conversion(prune(t), T_STR) != 0:
+            nodes[n] = nodes[bc_call("__dewy_fmt_elem", args, nodes[n].pos)]
+            return check_expr(n, expected)
+        c = mk(.call, nodes[n].pos)
+        callee = mk(.ident, nodes[n].pos)
+        nodes[callee].name = i32(ci(25, "__fmt"))
+        nodes[c].a = i32(callee)
+        set_list(c, args)
+        nodes[n] = nodes[c]
+        return check_expr(n, expected)
+    else if id == .dewy_fmt or id == .dewy_fmt_elem:
+        # __dewy_fmt_value(buf, x): Dewy's text for what the library's overloads leave: an
+        # object through its `__as__` to string, or field by field as [x=1 name="q"]; a union
+        # as its member; anything else (numbers, library types) as the library writes it
+        elem = id == .dewy_fmt_elem
+        nargs_check(n, nargs, 2, 2, "__dewy_fmt_value")
+        arg_type(args, 0, 0)
+        t = arg_type(args, 1, 0)
+        pos = nodes[n].pos
+        if is_quantity(t):
+            shown = quantity_display(args[1])
+            if shown == 0: shown = quantity_number(args[1])
+            nodes[n] = nodes[bc_call("__dewy_fmt", [args[0], shown], pos)]
+            return check_expr(n, 0)
+        bt = mk_array(T_U8)
+        k = types[t].kind
+        own = is_union(t) or k == .tuple or str_set_of(t) != 0
+        if k == .struct_:
+            conv = as_conversion(t, T_STR)
+            if conv != 0:
+                inner = mk(.call, pos)
+                nodes[inner].a = i32(bc_ident("__as__", pos))
+                set_list(inner, [args[1]])
+                nodes[inner].type = i32(resolve_fn_call(inner, ci(26, "__as__"), [conv], [args[1]], T_STR))
+                add_flag(inner, NF_CHECKED)
+                nodes[n] = nodes[bc_call("__buf_append_str", [args[0], inner], pos)]
+                return check_expr(n, 0)
+            # (a library type the library writes, as a BigInt: as it writes it)
+            jo = resolve_by_types(ci(27, "__fmt"), [bt, t], pos, false)
+            own = jo == 0 or fmt_fallback(jo)
+        if own:
+            nodes[n].aux = i32(int(IN.fmt_struct))
+            nodes[n].aux2 = i32(FMT_DEWY)
+            if elem: nodes[n].aux2 = i32(FMT_DEWY | 1)
+            return check_intrinsic(n, int(IN.fmt_struct), args, expected)
+        # (inside a structure, a container as it is on its own: a call, which copies a
+        # fixed-size array into the T[] the library's overload takes)
+        writer = "__fmt"
+        # (a matrix in a list: on one line, as the library writes one inside a structure, not
+        # as a T[], which it is only when 1-D)
+        if elem: writer = if is_nd(t): "__fmt_elem" else: "__dewy_fmt"
+        # (refined elements are written as their base: the library's overloads take the base)
+        plain = representation_deep(t)
+        if not type_eq(plain, t): wrap_conv(args[1], .none_, plain)
+        c = bc_call(writer, args, pos)
+        nodes[n] = nodes[c]
+        return check_expr(n, expected)
+    else if id == .fill:
+        # fill(value, n): an array of n copies of value
+        nargs_check(n, nargs, 2, 2, "fill")
+        arr = mk(.array, nodes[n].pos)
+        set_list(arr, [args[0]])
+        nodes[arr].b = i32(args[1])
+        nodes[n] = nodes[arr]
+        return check_expr(n, expected)
+    else if id == .cpu_features:
+        # bit 0: AVX2 can be used (the processor has it and the system saves its registers)
+        nargs_check(n, nargs, 0, 0, "__cpu_features")
+        r = T_INT
+    else if id == .code_sync:
+        # machine code written at p (n bytes) made ready to run (arm64: through the caches)
+        nargs_check(n, nargs, 2, 2, "__code_sync")
+        arg_type(args, 0, T_RAWPTR)
+        arg_type(args, 1, T_INT)
+        r = T_INT
+    else if id == .stack_ptr:
+        nargs_check(n, nargs, 0, 0, "__stack_ptr")
+        r = T_RAWPTR
+    else if id == .callc:
+        # __call_raw(f, args...): call the code at f the way Sloppy functions are called (the
+        # software renderer's shader functions: the address of a function with pointer arguments)
+        if nargs < 1: fatal(nodes[n].pos, "__call_raw takes a function's address and its arguments")
+        loop i in [0..nargs): arg_type(args, i, T_RAWPTR)
+        r = T_VOID
+    else: fatal(nodes[n].pos, "unsupported intrinsic")
+    nodes[n].type = i32(r)
+    if refine_active: return ref_length_mutation(n, r)
+    r

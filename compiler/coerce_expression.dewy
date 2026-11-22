@@ -1,0 +1,494 @@
+$runtime_checks
+from p"function_value_checks.dewy" import (fn_value)
+from p"literal_number_forms.dewy" import (word_rational_source)
+from p"source_warnings.dewy" import (warn)
+from p"checks_compare_hints.dewy" import (variant_hint void_rec_hint)
+from p"checks_place_updates.dewy" import (var_type_error)
+from p"unit_rare.dewy" import (time_constant_duration)
+from p"soa_helpers.dewy" import (soa_from_array)
+from p"sibling_ops.dewy" import (sibling_array_source sibling_to_array)
+from p"policy_value_queries.dewy" import (setting_value_target)
+from p"secret_checks.dewy" import (secret_coerce)
+from p"refine_metadata.dewy" import (representation_type)
+from p"refine.jo" import (refine_active str_sets)
+from p"refine_rare.dewy" import (ref_convert_record ref_record_conversion refine_coerce)
+from p"record_construction.dewy" import (record_int_conversion)
+from p"numeric_constants.dewy" import (rational_wrap)
+from p"unit_ops.dewy" import (quantity_coerce)
+from p"source_queries.dewy" import (pos_str)
+from p"ownership_types.dewy" import (ownership_callable_cap)
+from p"expr_source_hints.dewy" import (optional_hint)
+from p"expression_types.dewy" import (ntype)
+from p"union_conversion_nodes.dewy" import (move_divisor union_target wrap_union)
+from p"expr_cold_queries.dewy" import (intersection_within)
+from p"string_domain_ops.dewy" import (int_domain_conversion)
+from p"callable_checks.dewy" import (fn_value_adapter fn_value_adapts)
+from p"checks_thin_expr.dewy" import (fixed_literal_ok is_map_type nd_elem union_within)
+from p"aggregate_sources.dewy" import (fixed_literal)
+from p"literal_context.dewy" import (finalize_literal is_lit lit_default)
+from p"diagnostic_exit.dewy" import (fatal ice)
+from p"facts.jo" import (fact_fixed_requests)
+from p"error_ops.dewy" import (exception_member)
+from p"exact_check_hooks.dewy" import (exact_narrow_control)
+from p"checker_exact.dewy" import (exact_math_operand)
+from p"rational_literals.dewy" import (exact_decimal rational_constant rational_constant_parts)
+from p"util.jo" import (err_trail err_trail_names files intern name_of pos_file pos_in_lib pos_off)
+from p"checker_import_discovery.dewy" import (ensure_bundled_import)
+from p"@lib/core/str.jo" import (ends_with replace)
+from p"effects.jo" import (effects_active)
+from p"effect_sources.dewy" import (effect_infer_callable)
+from p"type_ops.dewy" import (dt dt_named fixed_len int_policy is_soa soa_elem unify union_index)
+from p"bigint_literal.dewy" import (dewy_coerce_bigint_literal)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"ir.jo" import (dbg_on)
+from p"check.jo" import (ctxs cx int_update_lhs int_update_pos intersection_parts)
+from p"integer_conversions.dewy" import (check_integer_boundary coerce_int_literal int_widens lit_fits integer_constant narrow_int wrap_conv)
+from p"checker_expr.dewy" import (check_expr)
+from p"character_literals.dewy" import (charlike charlike_to_int)
+from p"callable_compatibility.dewy" import (callable_fits)
+from p"effect_contracts.dewy" import (callable_base callable_contract mk_callable_contract)
+from p"rational_types.dewy" import (bundled_rational_type bundled_word_rational_type)
+from p"numeric_library_types.dewy" import (bundled_bigint_type dewy_bigint_literal_target is_nd math_rep_type)
+from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_int bc_stmt)
+from p"array_element_conversion.dewy" import (array_elems_subsume elem_subsumes)
+from p"expr_hints.dewy" import (array_elems_gap_text duration_hint regroup_note)
+from p"types.jo" import (T_F32 T_INT T_MATH_INT T_NEVER T_RAWPTR T_U64 T_U8 has_var is_float is_int is_numeric is_union prune targ telem tkind type_eq types union_members)
+from p"node_store.dewy" import (Node)
+from p"ast.jo" import (NF_CHECKED NF_LITERAL NF_U64 add_flag clear_flag has_flag mk nodes set_list)
+from p"refinement_types.dewy" import (FactRequest)
+from p"expr.jo" import (CV call_collect_fns coerce_hint rational_constants rational_shown)
+from p"coercion_queries.dewy" import (can_coerce str_set_coerced)
+
+CoerceExpressionWord:type=int64<overflow='wrap'>
+
+coerce=(n:int64 target:int64):>int64=>$unsafe {
+    if target =? 0 {return n}
+    # (a settled value already of the type: none of the cases below applies but to literals,
+    # refinements and callables)
+    if nodes.ptr[n].type not=? 0 and not is_lit(n) and nodes.ptr[n].kind not=? 'str_lit' and nodes.ptr[n].kind not=? 'float_lit' {
+        let to=prune(target)
+        if prune(ntype(n)) =? to and types.ptr[to].kind not=? 'refined' and types.ptr[to].kind not=? 'callable' {return n}
+    }
+    # (an integer literal into a fixed-width integer type: none of the cases before the
+    # literal's below applies; its range is checked there and here alike)
+    if nodes.ptr[n].kind =? 'int_lit' and is_lit(n) {
+        let to=prune(target)
+        let source_type=prune(ntype(n))
+        if source_type not=? 0 and to not=? T_MATH_INT and types.ptr[source_type].kind =? 'int_' and types.ptr[to].kind =? 'int_' {
+            if source_type not=? T_MATH_INT or not dbg_on and lit_fits(n to) {return coerce_int_literal(n to)}
+        }
+    }
+    if refine_active and types.ptr[prune(target)].kind =? 'refined' {return refine_coerce(n target)}
+    if nodes.ptr[n].kind =? 'float_lit' and nodes.ptr[n].sval not=? 0 and is_lit(n) and tkind(target) =? 'struct_' {
+        exact_decimal(n);
+    }
+    if charlike(n) and is_int(target) {
+        charlike_to_int(n)
+        nodes[n].type = int32<overflow='wrap'>(target)
+        return n
+    }
+    if effects_active and callable_contract(target) not=? 0 {nodes[n].type = int32<overflow='wrap'>(effect_infer_callable(n target))}
+    if str_sets.length >? 1 and str_set_coerced(n prune(target)) {return n}
+    let source_type=prune(ntype(n))
+    let to=prune(target)
+    if source_type =? 0 {ice("unchecked expression at {pos_str(nodes.ptr[n].pos)}")}
+    # An immediately consumed exact arithmetic result needs no tagged boundary.
+    # The fixed-width consumer below remains the sole narrowing obligation.
+    if source_type =? T_MATH_INT and (is_int(representation_type(to)) and representation_type(to) not=? T_MATH_INT or is_float(to)) {
+        if not is_lit(n) and is_int(to) and int_policy(to) =? 0 {check_integer_boundary(n source_type to)}
+        if exact_narrow_control(n to) {return n}
+        let source=exact_math_operand(n)
+        if source not=? n {
+            nodes[n] = nodes.ptr[source]
+            source_type=prune(ntype(n))
+        }
+    }
+    if source_type not=? to and int_policy(to) not=? 0 and is_int(source_type) {
+        if is_lit(n) {
+            if nodes.ptr[n].kind =? 'int_lit' {
+                nodes[n].type = int32<overflow='wrap'>(if has_flag(n NF_U64) {T_U64} else {T_INT})
+                clear_flag(n NF_LITERAL)
+            }
+            else {finalize_literal(n);}
+        }
+        wrap_conv(n (if int_policy(to) =? 1 {CV.wrap_int} else {CV.saturate_int}) to)
+        return n
+    }
+    # Settled identical scalar/aggregate types require no conversion node.
+    if source_type =? to and not is_lit(n) {return n}
+    # Branded path reads keep their type for inference; an ordinary Path
+    # consumer gets the same representation through a value-only view.
+    if refine_active and types.ptr[source_type].kind =? 'refined' and types.ptr[source_type].bits =? -2 and types.ptr[to].kind not=? 'var' and types.ptr[to].kind not=? 'param' and not (is_union(to) and union_index(to source_type) >=? 0) and not (types.ptr[to].kind =? 'opt' and prune(CoerceExpressionWord(types.ptr[to].elem)) =? source_type) {
+        wrap_conv(n CV.none_ CoerceExpressionWord(types.ptr[source_type].elem))
+        return coerce(n to)
+    }
+    if source_type =? T_NEVER {
+        # (what never comes back taken as a value, "a" + panic(...): marked, so code is made for
+        # it as for any value of that type, never used)
+        if to not=? T_NEVER and types.ptr[to].kind not=? 'void_' and types.ptr[to].kind not=? 'var' and types.ptr[to].kind not=? 'param' {wrap_conv(n CV.none_ to)}
+        return n
+    }
+    let tk=types.ptr[to].kind
+    if tk =? 'secret' or types.ptr[source_type].kind =? 'secret' {
+        let r=secret_coerce(n source_type to)
+        if r >=? 0 {return r}
+    }
+    if types.ptr[source_type].kind =? 'tuple' and tk =? 'array' and sibling_array_source(n source_type CoerceExpressionWord(types.ptr[to].elem)) {return sibling_to_array(n source_type to)}
+    if (source_type =? T_MATH_INT and math_rep_type(to)) or (to =? T_MATH_INT and math_rep_type(source_type)) {
+        wrap_conv(n CV.none_ to)
+        return n
+    }
+    if to =? T_MATH_INT and bundled_bigint_type(source_type) {
+        wrap_conv(n CV.big2math to)
+        return n
+    }
+    if source_type =? T_MATH_INT and bundled_bigint_type(to) {
+        wrap_conv(n CV.math2big to)
+        return n
+    }
+    if types.ptr[source_type].kind =? 'quantity' and tk =? 'quantity' {
+        return quantity_coerce(n to)
+    }
+    if types.ptr[source_type].kind =? 'quantity' and tk =? 'struct_' and time_constant_duration(n source_type to) {
+        let pos=nodes.ptr[n].pos
+        let source=nodes.length
+        nodes.push(nodes.ptr[n])
+        add_flag(source NF_CHECKED)
+        ensure_bundled_import("time/core.dewy" "$dewy_time" pos)
+        nodes[n] = Node(kind = 'call' pos = pos a = int32<overflow='wrap'>(bc_field(bc_ident("$dewy_time" pos) "duration_of" pos)))
+        set_list(n [source])
+        check_expr(n to);
+        return n
+    }
+    if bundled_word_rational_type(source_type) and bundled_rational_type(to) {return rational_wrap(n "_widen" to)}
+    if bundled_word_rational_type(source_type) and tk =? 'float_' {
+        let convert=if to =? T_F32 {"_word_float32"} else {"_word_float64"}
+        return rational_wrap(n convert to)
+    }
+    if bundled_word_rational_type(to) and word_rational_source(n source_type) {
+        let pos=nodes.ptr[n].pos
+        ensure_bundled_import("rational.dewy" "$dewy_rational" pos)
+        let parts=rational_constants.get(n)
+        if parts isnt? none {
+            nodes[n] = nodes.ptr[rational_constant(parts[0] parts[1] pos true rational_shown.get(n) ?? 0)]
+        }
+        else {
+            let source=nodes.length
+            nodes.push(nodes.ptr[n])
+            add_flag(source NF_CHECKED)
+            nodes[n] = Node(kind = 'call' pos = pos a = int32<overflow='wrap'>(bc_field(bc_ident("$dewy_rational" pos) "RationalWord" pos)))
+            set_list(n [source bc_int(1 pos)])
+        }
+        check_expr(n to);
+        return n
+    }
+    if tk =? 'struct_' and is_int(source_type) and bundled_rational_type(to) {
+        # (an integer constant is a rational constant: `x/2` divides by a known nonzero)
+        let [known value]=integer_constant(n)
+        if known and (value >=? 0 or types.ptr[source_type].sign or source_type =? T_MATH_INT) {
+            nodes[n] = nodes.ptr[rational_constant(value 1 nodes.ptr[n].pos)]
+            check_expr(n to);
+            rational_constants[n] = rational_constant_parts(value 1)
+            return n
+        }
+        let source=nodes.length
+        nodes.push(nodes.ptr[n])
+        let pos=nodes.ptr[n].pos
+        ensure_bundled_import("rational.dewy" "$dewy_rational" pos)
+        nodes[n] = Node(kind = 'call' pos = pos a = int32<overflow='wrap'>(bc_field(bc_ident("$dewy_rational" pos) "rational" pos)))
+        set_list(n [source])
+        check_expr(n to);
+        return n
+    }
+    if tk =? 'float_' and bundled_rational_type(source_type) {
+        let source=nodes.length
+        nodes.push(nodes.ptr[n])
+        move_divisor(n source)
+        # (checked already: an operator's call, `-x`, has no callee to check again)
+        add_flag(source NF_CHECKED)
+        let name=if to =? T_F32 {"to_float32"} else {"to_float64"}
+        let callee=bc_field(source name nodes.ptr[n].pos)
+        nodes[n] = Node(kind = 'call' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(callee))
+        check_expr(n to);
+        return n
+    }
+    if types.ptr[source_type].kind =? 'polyfn' and tk =? 'fn_' {
+        let source=nodes.length
+        nodes.push(nodes.ptr[n])
+        fn_value(n to closure = source);
+        source_type=prune(ntype(n))
+    }
+    if types.ptr[source_type].kind =? 'fn_' and tk =? 'fn_' and not callable_fits(source_type to) and fn_value_adapts(n source_type to) {return fn_value_adapter(n to)}
+    if dewy_bigint_literal_target(n to) {
+        dewy_coerce_bigint_literal(n to)
+        return n
+    }
+    if is_lit(n) {
+        let k=nodes.ptr[n].kind
+        if k =? 'int_lit' and tk =? 'int_' {return coerce_int_literal(n to)}
+        if k =? 'int_lit' and tk =? 'float_' {
+            nodes[n].kind = 'float_lit'
+            nodes[n].fval = float64(nodes.ptr[n].ival)
+            if has_flag(n NF_U64) {nodes[n].fval = float64(uint64<overflow='wrap'>(nodes.ptr[n].ival))}
+            nodes[n].type = int32<overflow='wrap'>(to)
+            clear_flag(n NF_LITERAL)
+            return n
+        }
+        if k =? 'float_lit' and tk =? 'float_' {
+            if nodes.ptr[n].sval not=? 0 and nodes.ptr[n].fval - nodes.ptr[n].fval not=? 0.0 {fatal(nodes.ptr[n].pos "real literal exceeds float64")}
+            nodes[n].type = int32<overflow='wrap'>(to)
+            clear_flag(n NF_LITERAL)
+            return n
+        }
+        if tk =? 'opt' and is_numeric(CoerceExpressionWord(types.ptr[to].elem)) {
+            coerce(n CoerceExpressionWord(types.ptr[to].elem));
+            wrap_conv(n CV.opt to)
+            return n
+        }
+        if tk =? 'var' {
+            let d=lit_default(n)
+            # Defaulting must construct the value too: an exact decimal's
+            # rational representation is not its parsed floating-point bits.
+            coerce(n d);
+            unify(to d);
+            return n
+        }
+    }
+    if type_eq(source_type to) {
+        clear_flag(n NF_LITERAL)
+        return n
+    }
+    let fk=types.ptr[source_type].kind
+    # (the same storage read at the looser type: no conversion node, so copies, moves and
+    # facts see the value itself)
+    if (fk =? 'array' or fk =? 'fixed') and fk =? tk and array_elems_subsume(source_type to) {
+        nodes[n].type = int32<overflow='wrap'>(to)
+        return n
+    }
+    if refine_active and fk =? 'struct_' and tk =? 'struct_' and ref_record_conversion(source_type to) {return ref_convert_record(n to)}
+    if fk =? 'struct_' and tk =? 'struct_' and record_int_conversion(source_type to) {return ref_convert_record(n to)}
+    # (an intersection's value where one of its operand records is wanted: those fields)
+    if fk =? 'struct_' and tk =? 'struct_' and intersection_parts.length >? 0 and intersection_within(source_type to) {return ref_convert_record(n to)}
+    if fk =? 'array' and is_soa(to) and can_coerce(0 CoerceExpressionWord(types.ptr[source_type].elem) soa_elem(to)) {
+        soa_from_array(n to);
+        return n
+    }
+    if fk =? 'fixed' and tk =? 'array' and elem_subsumes(CoerceExpressionWord(types.ptr[source_type].elem) CoerceExpressionWord(types.ptr[to].elem)) {
+        wrap_conv(n CV.fixed2arr to)
+        return n
+    }
+    if fk =? 'callable' or tk =? 'callable' {
+        # (a spawn body is called once and released by its task, which so owns its captures)
+        let source=setting_value_target(n)
+        let spawned=nodes.ptr[source].kind =? 'lambda' and nodes.ptr[source].aux2 =? 17
+        if ownership_callable_cap(source_type) >? ownership_callable_cap(to) and not spawned {fatal(nodes.ptr[n].pos "callable conversion would erase capture ownership")}
+        let fits=if spawned {mk_callable_contract(callable_base(source_type) callable_contract(source_type))} else {source_type}
+        if not callable_fits(fits to) {fatal(nodes.ptr[n].pos "cannot prove callable effect contract")}
+        wrap_conv(n CV.none_ to)
+        return n
+    }
+    if fk =? 'fn_' and tk =? 'fn_' and callable_fits(source_type to) {
+        nodes[n].type = int32<overflow='wrap'>(to)
+        return n
+    }
+    if tk =? 'array' and is_nd(source_type) and type_eq(nd_elem(source_type) CoerceExpressionWord(types.ptr[to].elem)) {
+        # a 1-D T[,] where a T[] is expected: its elements (checked to be 1-D when it runs)
+        let inner=nodes.length
+        nodes.push(nodes.ptr[n])
+        nodes[n] = nodes.ptr[bc_call("__nd_1d" [inner] nodes.ptr[n].pos)]
+        check_expr(n to);
+        return n
+    }
+    if fk =? 'array' and tk =? 'fixed' {
+        if nodes.ptr[n].kind not=? 'array' and elem_subsumes(CoerceExpressionWord(types.ptr[source_type].elem) CoerceExpressionWord(types.ptr[to].elem)) {
+            wrap_conv(n CV.arr2fixed to)
+            # Register the boundary, including deferred/opaque control paths.
+            # Its operand's evaluated length is proved only by the facts pass.
+            fact_fixed_requests.push(FactRequest(n if cx >=? 0 {CoerceExpressionWord(ctxs.ptr[cx].inst)} else {0}))
+            return n
+        }
+        if not fixed_literal_ok(n to) {
+            let els="{fixed_len(to)} elements"
+            if fixed_len(to) =? 1 {els="1 element"}
+            fatal(nodes.ptr[n].pos "type mismatch: expected {dt_named(to)}, found {dt_named(source_type)} (a fixed-size array is made from a literal with {els})")
+        }
+        fixed_literal(n to)
+        return n
+    }
+    if tk =? 'enum_' and not is_union(source_type) and is_union(to) {
+        let vi=union_target(n source_type to)
+        if vi <? 0 {fatal(nodes.ptr[n].pos "type mismatch: expected {dt_named(to)}, found {dt_named(source_type)}{duration_hint(n source_type to)}")}
+        coerce(n union_members(to)[vi]);
+        wrap_union(n vi to)
+        return n
+    }
+    if is_union(source_type) and is_union(to) and union_within(source_type to) {
+        wrap_conv(n CV.union_ to)
+        return n
+    }
+    if has_var(source_type) or has_var(to) {
+        if unify(source_type to) {return n}
+        if tk =? 'opt' and unify(source_type CoerceExpressionWord(types.ptr[to].elem)) {
+            wrap_conv(n CV.opt to)
+            return n
+        }
+    }
+    if fk =? 'int_' and tk =? 'int_' {
+        if source_type =? T_MATH_INT or to =? T_MATH_INT {
+            check_integer_boundary(n source_type to)
+            wrap_conv(n CV.int_ to)
+            if source_type =? T_MATH_INT and dewy_at(nodes.ptr[n].pos) {int_domain_conversion(n to)}
+            return n
+        }
+        if int_widens(source_type to) {
+            wrap_conv(n CV.int_ to)
+            return n
+        }
+        if dewy_at(nodes.ptr[n].pos) {
+            narrow_int(n source_type to)
+            return n
+        }
+        fatal(nodes.ptr[n].pos "cannot implicitly convert {dt(source_type)} to {dt(to)} (use {dt(to)}(x) to convert explicitly)")
+    }
+    if fk =? 'int_' and tk =? 'float_' {
+        if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].op =? 61 {
+            # (hits / shots * 100.0: the division drops the fraction before it becomes a float)
+            let a=CoerceExpressionWord(nodes.ptr[n].a)
+            let an="a"
+            if nodes.ptr[a].kind =? 'ident' {an=name_of(CoerceExpressionWord(nodes.ptr[a].name))}
+            warn(nodes.ptr[n].pos "this divides whole numbers, dropping the fraction (7 / 2 is 3) before it becomes a float: `f64({an}) / ...` keeps the fraction")
+        }
+        wrap_conv(n CV.int2float to)
+        return n
+    }
+    if fk =? 'float_' and tk =? 'float_' {
+        wrap_conv(n CV.float_ to)
+        return n
+    }
+    if tk =? 'opt' {
+        if fk =? 'none_lit' {
+            nodes[n].type = int32<overflow='wrap'>(to)
+            return n
+        }
+        # T may itself be optional: wrapping it must preserve a present none.
+        # A bare none above still means the outer optional is absent.
+        if type_eq(source_type CoerceExpressionWord(types.ptr[to].elem)) {
+            wrap_conv(n CV.opt to)
+            return n
+        }
+        if fk =? 'opt' {
+            if tkind(CoerceExpressionWord(types.ptr[source_type].elem)) =? 'var' {
+                unify(CoerceExpressionWord(types.ptr[source_type].elem) CoerceExpressionWord(types.ptr[to].elem));
+                nodes[n].type = int32<overflow='wrap'>(to)
+                return n
+            }
+            if can_coerce(0 telem(source_type) telem(to)) {
+                let source=nodes.length
+                nodes.push(nodes.ptr[n])
+                add_flag(source NF_CHECKED)
+                let pos=nodes.ptr[n].pos
+                let name="$optional{n}"
+                let yes=bc_block([bc_stmt(bc_ident(name pos) pos)] pos)
+                let no=bc_block([bc_stmt(mk('none_lit' pos) pos)] pos)
+                nodes[n] = Node(kind = 'iflet' pos = pos a = int32<overflow='wrap'>(source) b = int32<overflow='wrap'>(yes) c = int32<overflow='wrap'>(no) name = int32<overflow='wrap'>(intern(name)))
+                check_expr(n to);
+                return n
+            }
+            fatal(nodes.ptr[n].pos "type mismatch: expected {dt_named(to)}, found {dt_named(source_type)}")
+        }
+        coerce(n CoerceExpressionWord(types.ptr[to].elem));
+        wrap_conv(n CV.opt to)
+        return n
+    }
+    if fk =? 'null_' and (tk =? 'ptr' or tk =? 'cfn') {
+        nodes[n].type = int32<overflow='wrap'>(to)
+        return n
+    }
+    if fk =? 'ptr' and tk =? 'ptr' and (to =? T_RAWPTR or source_type =? T_RAWPTR) {
+        wrap_conv(n CV.ptr to)
+        return n
+    }
+    # (a type member's value, `[Png = Png]`, where that member's type is expected)
+    if fk =? 'typeval' and tk =? 'typeval' and type_eq(prune(telem(source_type)) prune(telem(to))) {
+        nodes[n].type = int32<overflow='wrap'>(to)
+        return n
+    }
+    if fk =? 'typeval' {fatal(nodes.ptr[n].pos "expected a value of type {dt(to)}, found a type name")}
+    let why=variant_hint(n to)
+    # (`let d:Duration = q`, q a time known at run time or a float: only a constant is known to fit)
+    if fk =? 'quantity' {
+        let hint=duration_hint(n source_type to)
+        if hint not=? "" {why=hint}
+    }
+    if fk =? 'opt' and tk not=? 'opt' {why=if dewy_at(nodes.ptr[n].pos) {optional_hint(n source_type)} else {" (this value may be none; narrow it before using its value)"}}
+    # (shown += c with c from a loop over a string: a character's code)
+    if (why as array<uint8>).length =? 0 and tkind(to) =? 'str_' and type_eq(prune(source_type) T_U8) {why=" (a string's elements are character codes, numbers: `chr(c)` is the character as text)"}
+    if fk =? 'void_' {why=void_rec_hint(n)}
+    if fk =? 'null_' {why=" (`null` is for C's pointers; a value that may be missing is `none`)"}
+    if fk =? 'fn_' and tk =? 'fn_' and CoerceExpressionWord(types.ptr[prune(source_type)].nargs) =? CoerceExpressionWord(types.ptr[prune(to)].nargs) {
+        # (which part differs: update = (dt: f32) where (dt: f64) is wanted)
+        loop i in [0..CoerceExpressionWord(types.ptr[prune(source_type)].nargs)) {
+            if not type_eq(targ(prune(source_type) i) targ(prune(to) i)) {
+                why=" (parameter {i + 1} is {dt(targ(prune(source_type) i))}, where {dt(targ(prune(to) i))} is wanted)"
+                break
+            }
+        }
+    }
+    let dewy=dewy_at(nodes.ptr[n].pos)
+    if fk =? 'opt' and tk =? 'bool_' {why=if dewy {" (an optional is not true or false: `x isnt? none` asks, and narrows x inside `if x isnt? none \{ }`)"} else {" (an optional is not true or false: `if let v = x:` runs when there is a value and names it, `x != none` asks)"}}
+    if fk =? 'float_' and tk =? 'int_' {why=if dewy {" (int64(x) makes it a whole number, dropping the fraction)"} else {" (int(x) makes it a whole number, dropping the fraction)"}}
+    if tk =? 'int_' and (fk =? 'float_' or bundled_rational_type(source_type)) and int_update_lhs not=? 0 and nodes.ptr[n].pos =? int_update_pos {var_type_error(int_update_lhs to source_type int_update_pos)}
+    if dewy and tk =? 'int_' and bundled_rational_type(source_type) {why=" (`/` gives an exact fraction: `//` divides whole numbers, and `q.floor()` or `q.round()` gives a whole number)"}
+    if tk =? 'bool_' and (fk =? 'array' or fk =? 'str_' or is_map_type(source_type)) {why=if dewy {" (not true or false: `xs.length >? 0` asks if it has anything)"} else {" (not true or false: `xs.len() > 0` asks if it has anything)"}}
+    if tk =? 'bool_' and (fk =? 'int_' or fk =? 'float_') {why=if dewy {" (a number is not true or false: `x not=? 0` asks)"} else {" (a number is not true or false: `x != 0` asks)"}}
+    if tk =? 'bool_' and fk =? 'int_' and nodes.ptr[n].kind =? 'int_lit' {why=if dewy {" (to do something {nodes.ptr[n].ival} times: `loop i in [1..{nodes.ptr[n].ival}] \{ }`)"} else {" (to do something {nodes.ptr[n].ival} times: `loop i in [1..{nodes.ptr[n].ival}]:`)"}}
+    # (`words.is_empty` with words from read_line(): the exceptions forwarded through members)
+    if dewy and (why as array<uint8>).length =? 0 and tk =? 'bool_' and is_union(source_type) {
+        let failures:array<string>=[]
+        let rest:CoerceExpressionWord=0
+        loop m in union_members(source_type) {
+            if exception_member(prune(m)) {failures.push(dt(m))}
+            else if can_coerce(0 m to) {rest += 1}
+        }
+        if failures.length >? 0 and rest >? 0 {why=" (it may be {join(failures " | ")}, carried along from where the value was made: handle that there, with `if x is? exception ...`, `or_throw` or `?? fallback`)"}
+    }
+    # (an array of looser refined elements where tighter ones are wanted: the values in between)
+    if dewy and (why as array<uint8>).length =? 0 {why=array_elems_gap_text(source_type to)}
+    # (`out.push(ready)`, ready an `array<int64>` comprehension where an
+    # `array<int>` is wanted: arrays never convert element by element)
+    if dewy and (why as array<uint8>).length =? 0 and fk =? 'array' and tk =? 'array' {
+        let fe=telem(prune(source_type))
+        let te=telem(prune(to))
+        loop tkind(fe) =? 'array' and tkind(te) =? 'array' {
+            fe=telem(prune(fe)); te = telem(prune(te))
+        }
+        if not type_eq(prune(fe) prune(te)) and can_coerce(0 fe te) {
+            let named=if nodes.ptr[n].kind =? 'ident' {name_of(CoerceExpressionWord(nodes.ptr[n].name))} else {"xs"}
+            why=" (an array's elements are not converted one by one: give it its type where it is made, `let {named}:{dt(to)} = ...`, so its elements are {dt(te)} from the start)"
+        }
+    }
+    # (a parameter named like a function, as that function's default: the name is the parameter's)
+    if dewy and (why as array<uint8>).length =? 0 and tk =? 'fn_' and fk not=? 'fn_' and nodes.ptr[n].kind =? 'ident' {
+        let shadowed:array<int64>=[]
+        call_collect_fns(CoerceExpressionWord(nodes.ptr[n].name) @shadowed)
+        if shadowed.length >? 0 {
+            let held=name_of(CoerceExpressionWord(nodes.ptr[n].name))
+            why=" (`{held}` names a {dt(source_type)} here, not the function `{held}`: give that {dt(source_type)} another name to reach the function)"
+        }
+    }
+    # (`[1 2 ; 3 4]` where one row is wanted: a row break makes the literal 2-D)
+    if dewy and tk =? 'array' and is_nd(source_type) and pos_off(nodes.ptr[n].pos) <? (files.ptr[pos_file(nodes.ptr[n].pos)].src as array<uint8>).length and (files.ptr[pos_file(nodes.ptr[n].pos)].src as array<uint8>).ptr[pos_off(nodes.ptr[n].pos)] =? b'[' {why=" (this literal has rows, so it is 2-D: for one row, leave out the row breaks, and end a line with `\\` to continue the row on the next line)"}
+    # (`convert<T>(x)` asks a time form for a type it does not give: each form makes one
+    # type, so the program's call is told which, never the library's own mismatch)
+    if pos_in_lib(nodes.ptr[n].pos) and err_trail.length >? 0 and err_trail_names[err_trail_names.length - 1] =? "convert" and ends_with(files.ptr[pos_file(nodes.ptr[n].pos)].path "/prelude/time.dewy") and not pos_in_lib(err_trail[err_trail.length - 1]) {
+        let asked:array<string>=[]
+        loop m in union_members(prune(to)) {
+            if not exception_member(prune(m)) {asked.push(replace(replace(dt(m) "Duration_width_64" "Duration<width=64>") "Instant_width_64" "Instant<width=64>"))}
+        }
+        let wanted=if asked.length =? 1 {"`{asked[0]}`"} else {"that type"}
+        fatal(err_trail[err_trail.length - 1] "`convert` has no form that makes {wanted} from this value: a time quantity makes a `Duration`, a `Duration` its `Duration<width=64>` and an `Instant` its `Instant<width=64>`. For a compact duration from a quantity, make the `Duration` first: `let d:Duration = 90s`, then `convert<Duration<width=64>>(d)`")
+    }
+    regroup_note(n)
+    fatal(nodes.ptr[n].pos "type mismatch: expected {dt_named(to)}, found {dt_named(source_type)}{why}{coerce_hint}")
+    n
+}
