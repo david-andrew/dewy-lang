@@ -6,6 +6,7 @@
     python3 -m tools.core build example.dewy --release -o /tmp/example
     python3 -m tools.core fmt example.dewy
     python3 -m tools.core --bootstrap test
+    python3 -m tools.core --bootstrap-archive test
     python3 -m tools.core path
     python3 -m tools.core cases [-k expression] [--update]
     python3 -m tools.core ladder [--update-ratchet]
@@ -46,6 +47,11 @@ def build(*args, **kwargs):
 
 def source_paths(root: Path) -> list[Path]:
     paths = [root / 'tools/compiler/build.py', root / 'LICENSE']
+    paths.extend((root / 'tools/compiler').glob('seed_archive.py'))
+    for name in ('pin.json', 'source.tar.xz', 'members.json', 'build-g2.sh'):
+        path = root / 'bootstrap-seed' / name
+        if path.is_file():
+            paths.append(path)
     for directory in ('compiler', 'lib', 'stage0', 'bootstrap'):
         paths.extend(path for path in (root / directory).rglob('*')
                      if path.is_file() and path.name != 'sloppy0' and '__pycache__' not in path.parts)
@@ -116,7 +122,8 @@ def test_runner_options(python: Path, arguments: list[str]) -> list[str]:
     return options
 
 
-def toolchain(*, bootstrap: bool = False, cache: Path = CACHE, root: Path = ROOT) -> Path:
+def toolchain(*, bootstrap: bool = False, bootstrap_archive: bool = False, seed_cache: Path | None = None,
+              cache: Path = CACHE, root: Path = ROOT) -> Path:
     cache.mkdir(parents=True, exist_ok=True)
     # Serialize cache publication/builds. Running commands retain an immutable
     # toolchain directory when another invocation rebuilds newer sources.
@@ -124,20 +131,25 @@ def toolchain(*, bootstrap: bool = False, cache: Path = CACHE, root: Path = ROOT
         lock_exclusive(lock)
         stamp = source_stamp(root)
         state, seed = cached_state(cache)
-        if (not bootstrap and seed is not None and state.get('source_stamp') == stamp
+        forced = bootstrap or bootstrap_archive
+        if (not forced and seed is not None and state.get('source_stamp') == stamp
                 and state.get('binary_stamp') == file_stamp(seed)):
             return seed
         identity = source_identity(root)
-        if not bootstrap and seed is not None and state.get('source_identity') == identity:
+        if not forced and seed is not None and state.get('source_identity') == identity:
             state['source_stamp'] = stamp
             state['binary_stamp'] = file_stamp(seed)
             publish_state(cache, state)
             return seed
         output = cache / f'build-{time.time_ns()}'
-        from_c = bootstrap or seed is None
-        print('Building the compact core' + (' from C…' if from_c else ' from the previous core…'),
-              file=sys.stderr, flush=True)
-        binary = build(output, bootstrap=from_c, seed=None if from_c else seed)
+        if bootstrap_archive:
+            print('Building the compact core from the pinned source bootstrap…', file=sys.stderr, flush=True)
+            binary = build(output, bootstrap_archive=True, seed_cache=seed_cache)
+        else:
+            from_c = bootstrap or seed is None
+            print('Building the compact core' + (' from C…' if from_c else ' from the previous core…'),
+                  file=sys.stderr, flush=True)
+            binary = build(output, bootstrap=from_c, seed=None if from_c else seed)
         # A source edit during compilation must not publish a misleading cache
         # hit. The built snapshot remains available for diagnosis/reuse manually.
         if source_identity(root) != identity or source_stamp(root) != stamp:
@@ -331,12 +343,17 @@ HARNESSES = ('test', 'cases', 'ladder', 'speed', 'bench', 'fuzz')
 
 def main(argv: list[str] | None = None) -> int:
     cli = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    cli.add_argument('--bootstrap', action='store_true', help='force an independent build from C')
+    routes = cli.add_mutually_exclusive_group()
+    routes.add_argument('--bootstrap', action='store_true', help='force an independent build from C')
+    routes.add_argument('--bootstrap-archive', action='store_true', help='build from the pinned G2 and verify convergence')
+    cli.add_argument('--seed-cache', type=Path, help='G2 cache directory for --bootstrap-archive')
     cli.add_argument('command', choices=('path', 'test', 'cases', 'ladder', 'build', 'check', 'run', 'watch', 'new', 'lsp',
                                         'fmt', 'speed', 'bench', 'fuzz'))
     cli.add_argument('arguments', nargs=argparse.REMAINDER,
                      help='arguments for pytest, speed, bench or the compiler; test --quick selects the smoke suite')
     args = cli.parse_args(argv)
+    if args.seed_cache is not None and not args.bootstrap_archive:
+        cli.error('--seed-cache requires --bootstrap-archive')
     if args.command in HARNESSES:
         headless.activate()
     if args.command == 'path' and args.arguments:
@@ -369,7 +386,10 @@ def main(argv: list[str] | None = None) -> int:
         from importlib import import_module
         return import_module(f'tools.{args.command}').main(args.arguments)
     try:
-        binary = toolchain(bootstrap=args.bootstrap)
+        if args.bootstrap_archive:
+            binary = toolchain(bootstrap_archive=True, seed_cache=args.seed_cache)
+        else:
+            binary = toolchain(bootstrap=args.bootstrap)
     except (OSError, RuntimeError) as error:
         print(f'dewy development: {error}', file=sys.stderr)
         return 1

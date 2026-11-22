@@ -25,6 +25,7 @@ python3 -m tools.core check examples/tour.dewy
 python3 -m tools.core build examples/tour.dewy --release -o /tmp/tour
 python3 -m tools.core path                       # immutable executable for scripts/benchmarks
 python3 -m tools.core --bootstrap test           # also verify the independent C bootstrap
+python3 -m tools.core --bootstrap-archive test   # build through the pinned G2 and run the same gate
 ```
 
 The first command builds from C. Later commands reuse the compiler when its
@@ -159,6 +160,26 @@ bootstrap requires Linux x86-64. Rebuild from an existing compiler without C:
 ```sh
 python3 -m tools.compiler.build --seed /tmp/dewy-core/bin/dewy-core --output /tmp/dewy-core-next
 ```
+
+On Linux x86-64, `--bootstrap-archive` builds the historical G2 from the
+checked-in source capsule. It also accepts a digest-verified G2 from the seed
+cache. Use an empty cache directory for a cold, offline build.
+
+```sh
+python3 tools/compiler/build.py --bootstrap-archive --seed-cache ./seed-cache --output ./live
+```
+
+The builder compiles the checkout's compiler and library with G2, then compares
+adjacent live builds at the same output path. An older G2 can require three live
+builds. A mismatch on the third build keeps the last two executables and reports
+the first differing byte. The seed digest, cache hit or miss, live generation
+hashes and build steps are recorded in `build.json`.
+
+`bootstrap-seed/pin.json` identifies the historical commit, build recipe, host
+toolchain, flags and reference digests. From a clone containing that commit,
+`python3 tools/compiler/seed_archive.py generate REV DEST` recreates the archive
+and member inventory. The offline comparison test mounts each builder's output
+at `/dewy/live` so both compilers embed identical paths.
 
 For a quick compiler edit, reuse an existing toolchain's libraries:
 

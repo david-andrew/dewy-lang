@@ -12,6 +12,11 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+if __package__:
+    from . import seed_archive
+else:  # python3 tools/compiler/build.py
+    import seed_archive
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 
@@ -78,18 +83,19 @@ def first_difference(left: Path, right: Path, chunk: int = 1 << 20) -> int | Non
             offset += len(x)
 
 
-def check_fixed_point(binary: Path, rebuild: Callable[[Path, Path], None]) -> None:
-    """Generation N is `binary`. Move it aside, have it rebuild itself at the same path (so every
-    embedded path agrees) through rebuild(compiler, output), and require generation N+1 to match
-    N byte for byte. A mismatch keeps both files and names the first differing offset."""
+def check_fixed_point(binary: Path, rebuild: Callable[[Path, Path], None], *, older_seed: bool = False) -> None:
+    """Compare adjacent live builds at the same path. An older G2 may need one extra
+    generation before the live compiler stabilizes. Keep the last pair on failure."""
     previous = binary.with_name(binary.name + '.generation-n')
-    binary.rename(previous)
-    rebuild(previous, binary)
-    at = first_difference(previous, binary)
-    if at is not None:
-        raise RuntimeError(f'not a fixed point: {binary} (generation N+1, {binary.stat().st_size} bytes) differs from '
-                           f'{previous} (generation N, {previous.stat().st_size} bytes) at byte offset {at}')
-    previous.unlink()
+    for _ in range(2 if older_seed else 1):
+        binary.replace(previous)
+        rebuild(previous, binary)
+        at = first_difference(previous, binary)
+        if at is None:
+            previous.unlink()
+            return
+    raise RuntimeError(f'not a fixed point: {binary} (generation N+1, {binary.stat().st_size} bytes) differs from '
+                       f'{previous} (generation N, {previous.stat().st_size} bytes) at byte offset {at}')
 
 
 # Written first into every output directory, so a later run may replace one
@@ -126,14 +132,26 @@ def claim_output(output: Path) -> Path | None:
     return previous
 
 
-def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False, fixed_point: bool = False) -> Path:
+def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False, fixed_point: bool = False,
+          bootstrap_archive: bool = False, seed_cache: Path | None = None) -> Path:
     """Build into `output`, replacing an earlier build's output there. A failed build keeps both
     its own files (logs, a non-fixed-point pair of executables) and the earlier output, at
     `<output>.previous`."""
+    if bootstrap_archive and (bootstrap or seed is not None):
+        raise ValueError('--bootstrap-archive selects its own pinned seed')
+    if seed_cache is not None and not bootstrap_archive:
+        raise ValueError('--seed-cache requires --bootstrap-archive')
     output = output.resolve()
+    if bootstrap_archive:
+        if seed_cache is None:
+            seed_cache = ROOT / '__dewycache__' / 'bootstrap-seed'
+        seed_cache = seed_cache.resolve()
+        if seed_cache.is_relative_to(output):
+            raise ValueError('the G2 cache must be outside the replaceable --output directory')
     previous = claim_output(output)
     try:
-        binary = build_into(output, seed=seed, bootstrap=bootstrap, fixed_point=fixed_point)
+        binary = build_into(output, seed=seed, bootstrap=bootstrap, fixed_point=fixed_point,
+                            bootstrap_archive=bootstrap_archive, seed_cache=seed_cache)
     except BaseException:
         if previous is not None:
             print(f'build failed; the earlier output is kept at {previous}', file=sys.stderr)
@@ -143,8 +161,10 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False, fi
     return binary
 
 
-def build_into(output: Path, *, seed: Path | None, bootstrap: bool, fixed_point: bool) -> Path:
-    for name in ('compiler', 'lib', 'stage0', 'bootstrap'):
+def build_into(output: Path, *, seed: Path | None, bootstrap: bool, fixed_point: bool,
+               bootstrap_archive: bool = False, seed_cache: Path | None = None) -> Path:
+    directories = ('compiler', 'lib') if bootstrap_archive else ('compiler', 'lib', 'stage0', 'bootstrap')
+    for name in directories:
         shutil.copytree(ROOT / name, output / name, ignore=shutil.ignore_patterns('sloppy0', '__pycache__'))
     shutil.copy2(ROOT / 'LICENSE', output / 'LICENSE')
     sources = {str(p.relative_to(output)): identity(p) for p in sorted(output.rglob('*')) if p.is_file() and p != output / OUTPUT_MARKER}
@@ -166,6 +186,14 @@ def build_into(output: Path, *, seed: Path | None, bootstrap: bool, fixed_point:
             raise RuntimeError(f'{log}:\n{result.stdout}{result.stderr}')
 
     bootstrap_hashes = []
+    provenance = {}
+    if bootstrap_archive:
+        assert seed_cache is not None  # resolved before claiming output
+        seed, pin = seed_archive.obtain(seed_cache, log=output / 'archive-bootstrap.log')
+        provenance['seed_archive'] = pin
+        if not pin['cache_hit']:
+            steps.append(pin.pop('build_step'))
+            bootstrap_hashes = list(pin['built_sha256'].values())
     if bootstrap:
         # Build the implementation-language frontend first. This permits the
         # main compiler to use features outside the intentionally small C seed.
@@ -202,9 +230,9 @@ def build_into(output: Path, *, seed: Path | None, bootstrap: bool, fixed_point:
     binary = binary_dir / 'dewy-core'
     try:
         run([seed, 'build', output / 'compiler/main.jo', '-o', binary],
-            'self-build.log' if bootstrap else 'core-build.log')
+            'self-build.log' if bootstrap or bootstrap_archive else 'core-build.log')
     except RuntimeError as direct:
-        if bootstrap:
+        if bootstrap or bootstrap_archive:
             raise
         # An older seed may not read the Dewy modules (or the library they
         # reach) as the sources now write them: build through their twins,
@@ -219,15 +247,23 @@ def build_into(output: Path, *, seed: Path | None, bootstrap: bool, fixed_point:
             for path, text in originals.items():
                 path.write_text(text)
         run([interim, 'build', output / 'compiler/main.jo', '-o', binary], 'core-build.log')
-    if fixed_point:
-        check_fixed_point(binary, lambda compiler, target: run(
-            [compiler, 'build', output / 'compiler/main.jo', '-o', target], 'fixed-point.log'))
+    if fixed_point or bootstrap_archive:
+        generations = [identity(binary)]
+
+        def rebuild(compiler: Path, target: Path) -> None:
+            log = 'fixed-point.log' if len(generations) == 1 else 'fixed-point-2.log'
+            run([compiler, 'build', output / 'compiler/main.jo', '-o', target], log)
+            generations.append(identity(target))
+
+        check_fixed_point(binary, rebuild, older_seed=bootstrap_archive)
+        provenance['live_generations_sha256'] = generations
     (output / 'build.json').write_text(json.dumps({
         'seed_sha256': identity(seed),
         'core_sha256': identity(binary),
         'sources_sha256': sources,
         'bootstrap_generations_sha256': bootstrap_hashes,
         'build_steps': steps,
+        **provenance,
     }, indent=2) + '\n')
     return binary
 
@@ -237,11 +273,16 @@ if __name__ == '__main__':
     seeds = cli.add_mutually_exclusive_group(required=True)
     seeds.add_argument('--seed', type=Path, help='existing native Dewy core compiler')
     seeds.add_argument('--bootstrap', action='store_true', help='build from the independent C bootstrap')
+    seeds.add_argument('--bootstrap-archive', action='store_true', help='build with the pinned G2 and verify live convergence')
+    cli.add_argument('--seed-cache', type=Path, help='G2 cache for --bootstrap-archive (default: __dewycache__/bootstrap-seed)')
     cli.add_argument('--output', type=Path, required=True, help='directory for the standalone toolchain (an earlier build'"'"'s output there is replaced)')
     cli.add_argument('--fixed-point', action='store_true',
                      help='rebuild the compiler with itself and fail unless the bytes are identical')
     args = cli.parse_args()
+    if args.seed_cache is not None and not args.bootstrap_archive:
+        cli.error('--seed-cache requires --bootstrap-archive')
     try:
-        print(build(args.output, seed=args.seed, bootstrap=args.bootstrap, fixed_point=args.fixed_point))
+        print(build(args.output, seed=args.seed, bootstrap=args.bootstrap, fixed_point=args.fixed_point,
+                    bootstrap_archive=args.bootstrap_archive, seed_cache=args.seed_cache))
     except OutputDirectoryError as error:
         raise SystemExit(f'build.py: {error}') from None
