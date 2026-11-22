@@ -140,7 +140,8 @@ spread = (values:array<float64>):>string => {
 }
 
 main = () => {
-    let plan = [loop doctors in [2 3] loop s in [1..SEEDS] Job[(doctors - 2) * SEEDS + s - 1 doctors uint64(1000 * doctors + s)]]
+    let plan = [loop doctors in [2 3] loop s in [1..SEEDS] Job[0 doctors uint64(1000 * doctors + s)]]
+    loop i in 0.. and @job in plan job.id = i
     let jobs = channel<Job>(2)
     let results = channel<Day>(2)
     let days:array<Day> = []

@@ -641,7 +641,7 @@
     "--",
     "{dir}/input/mixed.txt"
    ],
-   "note": "Command-line word tally: name=value, --flag and -f options with -- ending them, files read as text with a missing one reported on stderr and skipped, wc-style counts, the most frequent words with alphabetical ties, and a tab-separated report written to out= and read back."
+   "note": "Command-line word tally: name=value, --flag and -f options with -- ending them, files read as text with a missing one reported on stderr and skipped, wc-style counts, words counted with counts[w] = (counts.get(w) ?? 0) + 1, the most frequent words with alphabetical ties, and a tab-separated report written to out= and read back."
   },
   "141_calc_interpreter": {
    "milestone": 11,
@@ -649,7 +649,7 @@
   },
   "142_clinic_simulation": {
    "milestone": 18,
-   "note": "Replicated discrete-event clinic days through bounded channels: a producer and three workers over two-slot channels, splitmix64 streams, exponential arrivals and visits, urgent-first lines, a bounded waiting room, a time-ordered Heap of events carrying patients by value, a local mean closure inside spawned work, and job-ordered per-scenario means, spreads and nearest-rank percentiles."
+   "note": "Replicated discrete-event clinic days through bounded channels: a producer and three workers over two-slot channels, splitmix64 streams, exponential arrivals and visits, urgent-first lines, a bounded waiting room, a time-ordered Heap of events carrying patients by value, a local mean closure inside spawned work, job numbers written through loop i in 0.. and @job in plan, and job-ordered per-scenario means, spreads and nearest-rank percentiles."
   }
  },
  "design_passing": [

@@ -86,7 +86,7 @@ tally_file = (path:Path options:Options @counts:dict<string int64>) => {
             stats.words += 1
             let key = if options.ignore_case word.lower else word
             if key.length <? options.min_length or key.lower in? options.exclude continue
-            if key in? counts counts[key] += 1 else counts[key] = 1
+            counts[key] = (counts.get(key) ?? 0) + 1
         }
     }
     stats
