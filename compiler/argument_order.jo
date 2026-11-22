@@ -1,3 +1,4 @@
+use 'type_ops.dewy'
 use 'checker_type_entries.dewy'
 use 'expression_types.dewy'
 use 'ast.jo'
@@ -58,3 +59,24 @@ call_order_rest = (n: int, given: int[], final: int[]):
     nodes[n].c = i32(metadata)
     # Select's index priority follows this written order, after named binding.
     if select_call(n): select_written_priority(n)
+
+# The type arguments of a call's instance: a function with a rest parameter adds the type its
+# rest argument has (rest_bundle), a fixed array when its length is written (no spread). Each
+# count then has its own instance, whose indexing that length proves, and the arguments are
+# passed in place, off the heap. The rest parameter is marked NF_SPREAD for the instance
+# (checker_instances: its parameter type is this extra argument).
+rest_inst_binds = (decl: int, args: int[], params: int[], binds: int[]) -> int[]:
+    if rest_bundles.len() == 0: return binds
+    kinds = dewy_param_kinds.get(decl) ?? []
+    if kinds.len() == 0: return binds
+    loop i in [0..kinds.len()):
+        if kinds[i] != 3 or i >= args.len() or i >= params.len(): continue
+        b = args[i]
+        if b == 0 or not rest_bundles.has(b): return binds
+        add_flag(kid(decl, i), NF_SPREAD)
+        t = prune(subst(params[i], binds))
+        if tkind(t) != .array: return binds
+        k = rest_bundles[b]
+        if k <= 0: return binds + [t]
+        return binds + [mk_fixed(telem(t), k)]
+    binds

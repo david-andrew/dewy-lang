@@ -35,3 +35,13 @@ membership_str_set_of=(t0:SetQueryWord):>SetQueryWord=>$unsafe {
     else {return 0}
     if str_set_of(key) not=? 0 {prune(key)} else {0}
 }
+
+is_value_collection_type=(t:int64):>bool=>$unsafe {
+    if is_dewy_set_type(t) {return true}
+    let p=prune(t)
+    if types.ptr[p].kind not=? 'struct_' {return false}
+    let st=SetQueryWord(types.ptr[p].st)
+    if structs.ptr[st].name not=? "Map" {return false}
+    let d=SetQueryWord(structs.ptr[st].decl)
+    d not=? 0 and files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/map.jo"
+}

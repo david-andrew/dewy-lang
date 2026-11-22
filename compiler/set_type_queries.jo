@@ -28,3 +28,12 @@ membership_str_set_of = (t0: int) -> int:
         key = struct_targ(int(types[t].st), 0)
         return if str_set_of(key) != 0: prune(key) else: 0
     0
+
+is_value_collection_type = (t: int) -> bool:
+    if is_dewy_set_type(t): return true
+    p = prune(t)
+    if types[p].kind != .struct_: return false
+    st = int(types[p].st)
+    if structs[st].name != "Map": return false
+    d = int(structs[st].decl)
+    d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/core/map.jo"

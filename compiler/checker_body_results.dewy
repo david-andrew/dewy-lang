@@ -1,4 +1,5 @@
 $runtime_checks
+from p"literal_context.dewy" import (lit_default)
 
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo TK)
@@ -9,7 +10,7 @@ from p"checker_coerce.dewy" import cq_settled
 from p"checker_body_end.dewy" import (void_arm_end)
 from p"checks_thin.dewy" import (never_skip_result)
 from p"checks_stmt_hooks.dewy" import (body_result_entry body_result_init body_result_check stmt_terminates body_result_throws body_result_hint body_result_error)
-from p"expr.jo" import (lit_default coerce)
+from p"expr.jo" import (coerce)
 # A function body's result obligations: an inferred result from its value, its end
 # or nothing; a declared result given on every path; `never` functions not finishing;
 # inferred throws finished. Work is O(1) beyond checking the body and the demanded

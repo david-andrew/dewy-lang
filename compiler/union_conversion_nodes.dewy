@@ -1,4 +1,9 @@
 $runtime_checks
+from p"refine.jo" import (str_sets)
+from p"literal_context.dewy" import (is_lit union_text_target)
+from p"expr.jo" import (can_coerce)
+from p"literal_context.dewy" import (lit_default)
+from p"types.jo" import (T_STR prune type_eq union_members)
 from p"ast.jo" import (NF_CHECKED nodes set_list)
 from p"facts.jo" import (fact_divisors fact_fixed_requests)
 from p"node_store.dewy" import (Node)
@@ -29,4 +34,19 @@ wrap_union=(n:UnionConvWord vi:UnionConvWord target:UnionConvWord):>void=>$unsaf
     move_divisor(n inner)
     nodes[n]=Node(kind='call' pos=nodes.ptr[inner].pos aux=3 aux2=int32(vi) type=int32(target) flags=int32(NF_CHECKED))
     set_list(n [inner])
+}
+
+# the member of union u a value of type `from` becomes (an exact match first), or -1
+union_target=(n:int64 source_type:int64 u:int64):>int64=>$unsafe {
+    let f=source_type
+    if n not=? 0 and is_lit(n) {f=lit_default(n)}
+    let ms=union_members(u)
+    loop i in 0.. and m in ms {
+        if type_eq(m f) {return i}
+    }
+    if str_sets.length >? 1 and prune(source_type) =? T_STR {return union_text_target(n ms)}
+    loop i in 0.. and m in ms {
+        if can_coerce(n source_type m) {return i}
+    }
+    -1
 }

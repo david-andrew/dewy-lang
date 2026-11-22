@@ -1,3 +1,6 @@
+use 'checker_state.dewy'
+use 'call_argument_checks.dewy'
+use 'types.jo'
 use 'expression_types.dewy'
 use 'ast.jo'
 use 'diagnostic_exit.dewy'
@@ -24,3 +27,26 @@ dewy_data_of_given = (e: int, given: int[], call: int):
     if mask & 4 != 0: dewy_data_of_given(int(nodes[e].c), given, call)
     if mask & 16 != 0:
         loop c in kids(e): dewy_data_of_given(c, given, call)
+
+# Sloppy: `S(cell, data(cell))` gives the array cell to the record, then data(cell) reads cell
+# after that move: it unshares the variable's own copy from the one given, so the pointer points
+# into storage the record does not hold (and that goes with the variable). The arguments in
+# their evaluation order; one walk of each.
+dewy_data_after_give = (n: int):
+    given: int[]
+    order: int[]
+    meta = int(nodes[n].c)
+    if meta != 0:
+        loop e in kids(meta): order.push(nodes[e].ival)
+    else:
+        loop i in [0..nkids(n)): order.push(i)
+    loop i in order:
+        a = kid(n, i)
+        if a == 0: continue
+        a = unnamed(a)
+        v = a
+        loop nodes[v].kind == .conv: v = int(nodes[v].a)
+        if nodes[v].kind == .ident and (nodes[v].aux == i32(int(SK.local)) or nodes[v].aux == i32(int(SK.global))) and tkind(ntype(v)) == .array:
+            given.push(int(nodes[v].aux) * 1000000000 + int(nodes[v].sym))
+            continue
+        if given.len() > 0: dewy_data_of_given(a, given, n)

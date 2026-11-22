@@ -1,15 +1,20 @@
 $runtime_checks
-from p"checker_scope_symbols.dewy" import (new_local)
+from p"string_domains.jo" import (string_set_tests)
+from p"optional_fill.dewy" import (opt_unwrap_alias)
+from p"checks_thin_expr.dewy" import (opt_rest_expr)
+from p"narrowing_checks.dewy" import (narrow_string_set opt_wild_narrow_path)
+from p"checker_narrow_writes.dewy" import (narrow_store_register narrowed_var)
+from p"checker_scope_symbols.dewy" import (new_local new_sym position_guard_note push_scope_sym)
 from p"expression_types.dewy" import (ntype)
-from p"type_ops.dewy" import (union_index)
+from p"type_ops.dewy" import (mk_opt mk_union union_index)
 from p"checks_thin.dewy" import (narrow_invalidate)
 from p"@lib/core/str.jo" import (starts_with)
 from p"checked_expression_nodes.dewy" import (mk_ident_local)
 from p"checker_expr.dewy" import (lookup)
 from p"ast.jo" import (NF_CHECKED add_flag mk nodes)
 from p"check.jo" import (LF_ALIAS LF_UNNARROWED check_scopes ctxs cx locals syms)
-from p"expr.jo" import (CV narrow_expr path_key path_narrows path_rooted_g path_rooted_l)
-from p"types.jo" import (is_union prune type_eq types union_members)
+from p"expr.jo" import (CV opt_rest_aliases path_narrows path_rooted_g path_rooted_l)
+from p"types.jo" import (is_union prune telem tkind type_eq types union_members)
 from p"util.jo" import (intern name_of)
 
 PathNarrowWord:type=int64<overflow='wrap'>
@@ -217,4 +222,180 @@ path_forget=(key:string same_type:PathNarrowWord=0):>void=>{
         }
         i -= 1
     }
+}
+
+path_key=(n:int64):>string=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {
+        if nodes.ptr[n].aux =? 1 {
+            let a=path_decl_alias(PathNarrowWord(nodes.ptr[n].sym))
+            if a not=? 0 {return path_key(a)}
+            return "#L{nodes[n].sym}"
+        }
+        if nodes.ptr[n].aux =? 2 {return "#G{nodes[n].sym}"}
+        return ""
+    }
+    if k =? 'field' and nodes.ptr[n].aux >=? 0 and nodes.ptr[n].a not=? 0 {
+        let a=PathNarrowWord(nodes.ptr[n].a)
+        if tkind(ntype(a)) not=? 'struct_' {return ""}
+        let b=path_key(a)
+        if (b as array<uint8>).length =? 0 {return ""}
+        return "{b}.{nodes[n].aux}"
+    }
+    ""
+}
+
+# Only condition-created aliases escape a guard, never locals declared in an arm.
+narrow_promote=(first:int64 limit:int64):>void=>$unsafe {
+    loop l in [first..limit) {
+        if PathNarrowWord(locals.ptr[l].flags) & (LF_ALIAS | LF_UNNARROWED) not=? LF_ALIAS {continue}
+        let nm=PathNarrowWord(locals.ptr[l].name)
+        if nm not=? 0 {push_scope_sym(nm new_sym(nm 'local' l 0))}
+    }
+}
+
+narrow_var=(isn:int64 holds:bool):>void=>$unsafe {
+    let a=PathNarrowWord(nodes.ptr[isn].a)
+    if nodes.ptr[a].kind =? 'field' or (nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? 2) {
+        narrow_path(a PathNarrowWord(nodes.ptr[isn].aux) holds)
+        return
+    }
+    if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? 1 {return}
+    let l=PathNarrowWord(nodes.ptr[a].sym)
+    let ut=prune(PathNarrowWord(locals.ptr[l].type))
+    let vi=PathNarrowWord(nodes.ptr[isn].aux)
+    let pos=nodes.ptr[a].pos
+    if is_union(ut) {
+        let ms=union_members(ut)
+        if holds {narrow_local(l [ms[vi]] pos)}
+        else {
+            # (not that member: one of the others)
+            let rest:array<int64>=[]
+            loop i in 0.. and m in ms {
+                if i not=? vi {rest.push(m)}
+            }
+            narrow_local(l rest pos)
+        }
+        return
+    }
+    if types.ptr[ut].kind not=? 'opt' or (vi =? -2) not=? holds {return}
+    opt_unwrap_alias(l pos);
+}
+
+# the name `name` stands for root (a variable or field path) narrowed to members ms of its union
+narrow_expr=(root:int64 ms:array<int64> pos:int64 name:int64):>void=>$unsafe {
+    let rt=prune(ntype(root))
+    if ms.length =? 0 {return}
+    let e:PathNarrowWord=0
+    let t:PathNarrowWord=0
+    if types.ptr[rt].kind =? 'opt' {
+        if ms.length not=? 1 or not type_eq(ms[0] telem(rt)) {return}
+        e=mk('unwrap' pos)
+        t=telem(rt)
+    }
+    else if not is_union(rt) {return}
+    else if ms.length =? 1 {
+        e=mk('narrow' pos)
+        nodes[e].aux = int32<overflow='wrap'>(union_index(rt ms[0]))
+        t=ms[0]
+    }
+    else {
+        t=mk_union(ms)
+        if type_eq(t rt) {return}
+        e=mk('conv' pos)
+        nodes[e].aux = int32<overflow='wrap'>(int64(CV.union_))
+    }
+    nodes[e].a = int32<overflow='wrap'>(root)
+    nodes[e].type = int32<overflow='wrap'>(t)
+    add_flag(e NF_CHECKED)
+    let nl=new_local(name t pos)
+    locals[nl].flags = int32<overflow='wrap'>(LF_ALIAS)
+    locals[nl].alias = int32<overflow='wrap'>(e)
+    narrow_store_register(nl)
+}
+
+# `x is? C` on x: (A | B | C)? is `x != none and x is? C` (check_istype); when it fails,
+# x is none or one of the other members: an (A | B)?. x a field path or a global: as the `_`
+# arm of a match on it (opt_wild_narrow_path). O(members).
+narrow_opt_rest_by=(c:int64):>void=>$unsafe {
+    let a=PathNarrowWord(nodes.ptr[c].a)
+    if nodes.ptr[a].kind not=? 'binary' or nodes.ptr[a].op not=? 70 or nodes.ptr[PathNarrowWord(nodes.ptr[a].b)].kind not=? 'none_lit' {return}
+    let x=PathNarrowWord(nodes.ptr[a].a)
+    let local=nodes.ptr[x].kind =? 'ident' and nodes.ptr[x].aux =? 1
+    let l:PathNarrowWord=0
+    let key=""
+    if local {l=PathNarrowWord(nodes.ptr[x].sym)}
+    else {
+        key=path_key(x)
+        if (key as array<uint8>).length =? 0 {return}
+    }
+    let ut=prune(ntype(x))
+    if local {ut=prune(PathNarrowWord(locals.ptr[l].type))}
+    if types.ptr[ut].kind not=? 'opt' or not is_union(prune(PathNarrowWord(types.ptr[ut].elem))) {return}
+    let u=prune(PathNarrowWord(types.ptr[ut].elem))
+    let tests:array<int64>=[]
+    if not or_tests(PathNarrowWord(nodes.ptr[c].b) @tests) {return}
+    let excluded:array<int64>=[]
+    loop t in tests {
+        # (each test reads x's payload: the alias `x != none` gave it)
+        let ta=PathNarrowWord(nodes.ptr[t].a)
+        if nodes.ptr[ta].kind not=? 'ident' or nodes.ptr[ta].aux not=? 1 {return}
+        let tl=PathNarrowWord(nodes.ptr[ta].sym)
+        if PathNarrowWord(locals.ptr[tl].flags) & LF_ALIAS =? 0 or locals.ptr[tl].alias =? 0 {return}
+        let al=PathNarrowWord(locals.ptr[tl].alias)
+        if nodes.ptr[al].kind not=? 'unwrap' {return}
+        let inner=PathNarrowWord(nodes.ptr[al].a)
+        if local and (nodes.ptr[inner].kind not=? 'ident' or PathNarrowWord(nodes.ptr[inner].sym) not=? l) {return}
+        if not local and path_key(inner) not=? key {return}
+        if not type_eq(prune(ntype(ta)) u) {return}
+        excluded.push(union_members(u)[PathNarrowWord(nodes.ptr[t].aux)])
+    }
+    let keep:array<int64>=[]
+    loop m in union_members(u) {
+        if not excluded.contains(m) {keep.push(m)}
+    }
+    if keep.length =? 0 {return}
+    let pos=nodes.ptr[x].pos
+    if not local {
+        opt_wild_narrow_path(x key ut excluded false pos)
+        return
+    }
+    # (x already narrowed so: narrow its variable, as narrow_local does)
+    loop PathNarrowWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and opt_rest_aliases.has(PathNarrowWord(locals.ptr[l].alias)) {l=narrowed_var(l)}
+    let inner=keep[0]
+    if keep.length >? 1 {inner=mk_union(keep)}
+    let nl=new_local(PathNarrowWord(locals.ptr[l].name) mk_opt(inner) pos)
+    locals[nl].flags = int32<overflow='wrap'>(LF_ALIAS)
+    locals[nl].alias = int32<overflow='wrap'>(opt_rest_expr(l keep pos))
+    narrow_store_register(nl)
+}
+
+# where condition c is `holds` (true or false), variables it tests with `is` stand for the member
+narrow_by=(c:int64 holds:bool):>void=>$unsafe {
+    if holds and string_set_tests.has(c) {narrow_string_set(c)}
+    let k=nodes.ptr[c].kind
+    if k =? 'istype' {narrow_var(c holds)}
+    else if k =? 'binary' and (nodes.ptr[c].op =? 70 or nodes.ptr[c].op =? 69) and nodes.ptr[PathNarrowWord(nodes.ptr[c].b)].kind =? 'none_lit' {
+        # x != none: as `x is T` holding (x is its value from here)
+        let isn=mk('istype' nodes.ptr[c].pos)
+        nodes[isn].a = nodes.ptr[c].a
+        nodes[isn].aux = -2
+        narrow_var(isn holds =? (nodes.ptr[c].op =? 70))
+    }
+    else if k =? 'not_' {narrow_by(PathNarrowWord(nodes.ptr[c].a) not holds)}
+    else if k =? 'and_' and holds {
+        narrow_by(PathNarrowWord(nodes.ptr[c].a) true)
+        narrow_by(PathNarrowWord(nodes.ptr[c].b) true)
+    }
+    else if k =? 'or_' and not holds {
+        narrow_by(PathNarrowWord(nodes.ptr[c].a) false)
+        narrow_by(PathNarrowWord(nodes.ptr[c].b) false)
+    }
+    else if k =? 'or_' and holds {
+        # x is A or x is B: x is an A | B
+        let tests:array<int64>=[]
+        if or_tests(c @tests) {narrow_some(tests)}
+    }
+    else if k =? 'and_' and not holds {narrow_opt_rest_by(c)}
+    else if k =? 'binary' {position_guard_note(c holds)}
 }

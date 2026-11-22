@@ -1,4 +1,12 @@
 $runtime_checks
+from p"warn_if_ops.dewy" import (wi_call)
+from p"warn_if.jo" import (wi_any)
+from p"proofs.jo" import (proof_active proof_calls proof_decls)
+from p"float_ops.dewy" import (ff_note_call)
+from p"directives.jo" import (dir_floats_any)
+from p"check.jo" import (ctxs cx fns)
+from p"check_constant.jo" import (cc_decls)
+from p"refinement_types.dewy" import (FactRequest)
 from p"checker_source_positions.dewy" import (dewy_at)
 from p"expression_types.dewy" import (ntype)
 from p"ast.jo" import (NF_CHECKED NF_COMPREHENSION add_flag has_flag kid nkids nodes)
@@ -47,4 +55,41 @@ nargs_check=(n:int64 nargs:int64 lo:int64 hi:int64 name:string):>void=>$unsafe {
         if lo =? hi {fatal(nodes.ptr[n].pos "{name} expects {lo} argument(s), got {nargs}")}
         fatal(nodes.ptr[n].pos "{name} expects {lo} to {hi} arguments, got {nargs}")
     }
+}
+
+# `upper = (s:string):>string => s.upper`: a Dewy function whose whole body calls
+# itself again with its own parameters or literals never ends. O(1) per call.
+self_call_is_body=(n:int64 decl:int64 args:array<int64>):>bool=>$unsafe {
+    let ci=CallArgWord(ctxs.ptr[cx].inst)
+    if ci <=? 0 or CallArgWord(fns.ptr[ci].decl) not=? decl or nodes.ptr[decl].kind not=? 'fn_' {return false}
+    let b=CallArgWord(nodes.ptr[decl].b)
+    loop b not=? 0 and b not=? n and nodes.ptr[b].kind not=? 'call' {
+        let k=nodes.ptr[b].kind
+        if k =? 'return_' or k =? 'exprstmt' {b=CallArgWord(nodes.ptr[b].a)}
+        else if k =? 'block' and nkids(b) >? 0 {
+            # (after the copies of the parameters a Dewy body starts with)
+            let last=nkids(b) - 1
+            loop i in [0..last) {
+                let c=kid(b i)
+                if nodes.ptr[c].kind not=? 'vardecl' or nodes.ptr[c].b =? 0 or nodes.ptr[CallArgWord(nodes.ptr[c].b)].kind not=? 'ident' {return false}
+            }
+            b=kid(b last)
+        }
+        else {return false}
+    }
+    if b not=? n {return false}
+    loop a in args {
+        let k=nodes.ptr[unnamed(a)].kind
+        if k not=? 'ident' and k not=? 'int_lit' and k not=? 'bool_lit' and not (k =? 'str_lit' and nkids(unnamed(a)) =? 0) {return false}
+    }
+    true
+}
+
+call_note_contracts=(n:int64 f:int64 decl:int64 partial:bool closure:int64):>void=>$unsafe {
+    if proof_active and proof_decls.has(decl) {
+        if partial {fatal(nodes.ptr[n].pos "a proof cannot be used as a value; use a direct statement call")}
+        proof_calls.push(FactRequest(n CallArgWord(ctxs.ptr[cx].inst)))
+    }
+    if wi_any and nodes.ptr[decl].c not=? 0 and not partial and closure =? 0 and not cc_decls.has(decl) {wi_call(n f decl)}
+    if dir_floats_any and not partial and closure =? 0 {ff_note_call(f decl)}
 }

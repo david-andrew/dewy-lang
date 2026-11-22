@@ -1,22 +1,30 @@
 $runtime_checks
+from p"type_expression_forms.dewy" import (type_value_expr)
+from p"expr_cold_queries.dewy" import (type_short_name)
+from p"expr_rare.dewy" import (rename_idents type_sequence)
+from p"checker_scope_symbols.dewy" import (new_sym push_scope_sym scope_mark scope_reset)
+from p"prelude_ops.dewy" import (dewy_prelude_lookup)
+from p"checker_contexts.dewy" import (cur_mod)
+from p"node_store.dewy" import (Node)
+from p"checker_state.dewy" import (Global)
 from p"checker_source_positions.dewy" import (dewy_at)
 from p"checker_constant_queries.dewy" import (ceval)
 from p"expression_types.dewy" import (ntype)
 from p"checks_thin_expr.dewy" import (dewy_set_literal is_map_type)
-from p"util.jo" import (files pos_file)
-from p"ast.jo" import (NF_CHECKED NF_LITERAL NF_SPREAD clear_flag clone has_flag kid nkids nodes set_list)
-from p"check.jo" import (sink_pack_hit sink_pack_site syms)
+from p"util.jo" import (files name_of pos_file pos_in_lib)
+from p"ast.jo" import (NF_CHECKED NF_LITERAL NF_SPREAD clear_flag clone has_flag kid kids nkids nodes set_list)
+from p"check.jo" import (globals sink_pack_hit sink_pack_site syms)
 from p"checker_expr.dewy" import (check_expr lookup)
-from p"checks_builders.dewy" import (bc_int)
+from p"checks_builders.dewy" import (bc_int bc_let)
 from p"checks_thin.dewy" import (readonly_global)
 from p"concurrency_types.dewy" import (concurrency_require_zero)
 from p"diagnostic_exit.dewy" import (fatal)
-from p"expr.jo" import (coerce struct_default)
+from p"expr.jo" import (coerce struct_default type_sequences)
 from p"set_type_queries.dewy" import (is_dewy_set_type)
 from p"refine.jo" import (refine_active)
 from p"refine_metadata.dewy" import (ref_storage_contract)
-from p"type_ops.dewy" import (fixed_len)
-from p"types.jo" import (T_INT prune types)
+from p"type_ops.dewy" import (dt fixed_len)
+from p"types.jo" import (T_INT T_VOID prune types)
 
 AggregateSourceWord:type=int64<overflow='wrap'>
 const AGGREGATE_GLOBAL:int32=2 # SK.global
@@ -87,4 +95,93 @@ dewy_classify_spread=(n:int64):>void=>$unsafe {
     if dewy_set_literal(first) {return}
     let t=dewy_spread_source_type(first)
     if types.ptr[t].kind =? 'struct_' and not is_map_type(t) and not is_dewy_set_type(t) {nodes.ptr[n].kind='record_lit'}
+}
+
+# `f([Png Jpeg] ...)`, `$named[Png Jpeg]` (decisions.md, batch 7): a call of a Dewy function given
+# a sequence of types is specialized on that sequence. Its body is checked in place, the first
+# parameter standing for the types and the other arguments bound by name, as a block giving
+# its value. -1 when n is no such call. Checked once per call; O(1) for any other call.
+type_sequence_call=(n:int64 expected:int64):>int64=>$unsafe {
+    if nkids(n) =? 0 {return -1}
+    let first=kid(n 0)
+    if nodes.ptr[first].kind not=? 'array' or nkids(first) =? 0 or not dewy_at(nodes.ptr[n].pos) or not type_value_expr(kid(first 0)) {return -1}
+    let callee=AggregateSourceWord(nodes.ptr[n].a)
+    let fname=AggregateSourceWord(nodes.ptr[callee].name)
+    let s=lookup(fname)
+    # (the prelude's `named`, loaded when first called)
+    if s =? 0 {s=dewy_prelude_lookup(fname)}
+    if s =? 0 or syms.ptr[s].kind not=? 'fns' {return -1}
+    let pos=nodes.ptr[n].pos
+    let named_args:array<int64>=[]
+    loop i in [1..nkids(n)) {
+        let a=kid(n i)
+        if nodes.ptr[a].kind not=? 'namedarg' {fatal(nodes.ptr[a].pos "after its types, a call specialized on them takes named arguments")}
+        named_args.push(a)
+    }
+    # (the overload whose parameters are the sequence and those names)
+    let d:AggregateSourceWord=0
+    let candidates:array<int64>=[]
+    loop s not=? 0 {
+        if syms.ptr[s].name =? int32<overflow='wrap'>(fname) and syms.ptr[s].kind =? 'fns' and syms.ptr[s].decl not=? 0 {candidates.push(AggregateSourceWord(syms.ptr[s].decl))}
+        s=AggregateSourceWord(syms.ptr[s].next)
+    }
+    loop c in candidates {
+        if nodes.ptr[c].kind not=? 'fn_' or nkids(c) not=? named_args.length + 1 {continue}
+        let fits=true
+        loop a in named_args {
+            let found=false
+            loop j in [1..nkids(c)) {
+                if nodes.ptr[kid(c j)].name =? nodes.ptr[a].name {found=true}
+            }
+            if not found {fits=false}
+        }
+        if fits {
+            d=c
+            break
+        }
+    }
+    if d =? 0 {fatal(pos "no {name_of(AggregateSourceWord(nodes[callee].name))} takes a sequence of types with these arguments")}
+    let seq=type_sequence(first)
+    # (`$named`'s strict rule, the registry's: every type has a name, and no name twice)
+    if pos_in_lib(nodes.ptr[d].pos) and name_of(fname) =? "named" {
+        let seen:dict<string bool>=[]
+        loop i in 0.. and t in seq {
+            let text=type_short_name(t)
+            let at=nodes.ptr[kid(first i)].pos
+            if (text as array<uint8>).length =? 0 {fatal(at "{dt(t)} has no name of its own, so `$named` cannot name its member (give it one, `Name:type = ...`)")}
+            if seen.has(text) {fatal(at "field {text} is listed twice")}
+            seen[text] = true
+        }
+    }
+    let mark=scope_mark()
+    let g=globals.length
+    let pname=AggregateSourceWord(nodes.ptr[kid(d 0)].name)
+    globals.push(Global(name = int32<overflow='wrap'>(pname) type = int32<overflow='wrap'>(T_VOID) mod = int32<overflow='wrap'>(cur_mod()) is_const = true state = 2))
+    type_sequences[g] = seq
+    push_scope_sym(pname new_sym(pname 'const_' g 0))
+    let statements:array<int64>=[]
+    # (`each=@handle`, a function by name: the specialized body calls it by that name, so a
+    # generic one is specialized per type rather than needing a value's type)
+    let renames:array<int64>=[]
+    loop a in named_args {
+        let v=AggregateSourceWord(nodes.ptr[a].a)
+        let fs=if nodes.ptr[v].kind =? 'ident' {lookup(AggregateSourceWord(nodes.ptr[v].name))} else {0}
+        if fs not=? 0 and syms.ptr[fs].kind =? 'fns' {
+            renames.push(AggregateSourceWord(nodes.ptr[a].name))
+            renames.push(AggregateSourceWord(nodes.ptr[v].name))
+        }
+        else {statements.push(bc_let(name_of(AggregateSourceWord(nodes.ptr[a].name)) v nodes.ptr[a].pos))}
+    }
+    loop st in kids(AggregateSourceWord(nodes.ptr[d].b)) {
+        # (the parameters' own bindings: given above)
+        if nodes.ptr[st].kind =? 'vardecl' and nodes.ptr[st].aux2 =? 1 {continue}
+        let copy=clone(st)
+        if renames.length >? 0 {rename_idents(copy renames)}
+        statements.push(copy)
+    }
+    nodes[n] = Node(kind = 'block' pos = pos aux = 1)
+    set_list(n statements)
+    let t=check_expr(n expected)
+    scope_reset(mark)
+    t
 }

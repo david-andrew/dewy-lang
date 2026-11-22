@@ -1,0 +1,119 @@
+use 'expr_cold_queries.dewy'
+use 'check.jo'
+use 'select_checks.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'type_expression_forms.dewy'
+use 'type_ops.dewy'
+use 'dewy_method_ops.dewy'
+use 'partial_checks.dewy'
+use 'checker_source_positions.dewy'
+use 'concurrency.jo'
+use 'checker_type_entries.dewy'
+use 'checker_expr.dewy'
+use 'checks_builders.dewy'
+use 'types.jo'
+use 'node_store.dewy'
+use 'ast.jo'
+use 'expr.jo'
+
+select_id = () -> int:
+    if select_name_id == 0: select_name_id = intern("select")
+    select_name_id
+
+race_spread = (n: int, expected: int) -> int:
+    if race_name_ids.len() == 0:
+        race_name_ids = [intern("race"), intern("first_ok")]
+        race_needs_id = intern("$race_needs")
+    callee = int(nodes[n].a)
+    name = int(nodes[callee].name)
+    if name == race_needs_id: return race_needs(n)
+    if not race_name_ids.contains(name): return -1
+    ds: int[]
+    call_collect_named(name, -1, ds)
+    if concurrency_first_ok_module < 0 or not dewy_at(nodes[n].pos): return -1
+    if ds.len() == 0: return -1
+    loop d in ds:
+        if int(nodes[d].mod) != concurrency_first_ok_module: return -1
+    args = kids(n)
+    spreads: int[]
+    loop i in [0..args.len()):
+        a = args[i]
+        if nodes[a].kind == .namedarg: continue
+        if not has_flag(a, NF_SPREAD): return -1
+        # (already bound: this is the call the rewrite below made)
+        if nodes[a].kind == .ident and starts_with(name_of(int(nodes[a].name)), "$race_spread"): return -1
+        spreads.push(i)
+    pos = nodes[n].pos
+    word = name_of(name)
+    if spreads.len() == 0: fatal(pos, "{word} needs a call to run: give it calls, or spread an array of them")
+    stmts: int[]
+    held: int[]
+    loop i in spreads:
+        e = args[i]
+        held_name = "$race_spread{bc_count}"
+        bc_count += 1
+        clear_flag(e, NF_SPREAD)
+        stmts.push(bc_let(held_name, e, nodes[e].pos))
+        spread = bc_ident(held_name, nodes[e].pos)
+        add_flag(spread, NF_SPREAD)
+        args[i] = spread
+        held.push(bc_ident(held_name, nodes[e].pos))
+    needs = bc_call("$race_needs", held, pos)
+    nodes[needs].ival = name
+    call = clone(n)
+    set_list(call, args)
+    stmts.push(bc_stmt(needs, pos))
+    stmts.push(bc_stmt(call, pos))
+    nodes[n] = Node(kind = .block, pos = pos, aux = 1)
+    set_list(n, stmts)
+    check_expr(n, expected)
+
+# `T.name` on a name that is a type (a type parameter, a `loop t in members(U)` binder, a
+# declared type): its short name, as a checked text literal. A member of that name the type
+# has wins, as an ordinary read. O(1) unless the member is `name`.
+type_name_member = (n: int) -> bool:
+    if type_name_id == 0: type_name_id = intern("name")
+    if nodes[n].name != i32(type_name_id) or nodes[n].b != 0: return false
+    receiver = int(nodes[n].a)
+    if nodes[receiver].kind != .ident or not dewy_at(nodes[n].pos): return false
+    s = lookup(int(nodes[receiver].name))
+    if s == 0: return false
+    k = syms[s].kind
+    if k != .type_ and k != .struct_ and k != .enum_ and k != .alias_: return false
+    t = if k == .type_: int(syms[s].ref) else: prune(expr_as_type(receiver))
+    if tkind(t) == .struct_:
+        si = int(types[t].st)
+        if structs[si].decl != 0 and dewy_type_method(int(structs[si].decl), type_name_id) >= 0: return false
+        check_struct_fields(si)
+        loop i in [0..int(structs[si].nfields)):
+            if fields[int(structs[si].fields) + i].name == i32(type_name_id): return false
+    text = type_short_name(t)
+    # (`Img:type = Png | Jpeg`: an alias whose right side has no name gives its own)
+    if len(text) == 0 and k == .alias_: text = name_of(int(nodes[receiver].name))
+    if len(text) == 0: fatal(nodes[n].pos, "{dt(t)} has no name of its own: an anonymous record, a union or a computed type has none (give it one, `Name:type = ...`)")
+    nodes[n] = Node(kind = .str_lit, pos = nodes[n].pos, sval = i32(intern(text)), type = i32(T_STR), flags = i32(NF_CHECKED))
+    last_checked = n
+    true
+
+# `@x.method` (decisions.md, batch 4): the method as a function of its remaining
+# parameters, with x evaluated now, as `@x.method()` gives; a data member stays a place.
+# -1 when n is not such a handle. O(the record's fields), only for `@` on a member.
+dewy_method_handle = (n: int, expected: int) -> int:
+    if not has_flag(n, NF_AT) or nodes[n].b != 0 or nodes[n].aux2 == i32(AUX2_PLACE) or not dewy_at(nodes[n].pos): return -1
+    rt = prune(check_expr(int(nodes[n].a), 0))
+    nodes[n].a = i32(last_checked)
+    add_flag(last_checked, NF_CHECKED)
+    st = if types[rt].kind == .ptr: prune(int(types[rt].elem)) else: rt
+    if types[st].kind != .struct_: return -1
+    si = int(types[st].st)
+    if structs[si].decl == 0 or dewy_type_method(int(structs[si].decl), int(nodes[n].name)) < 0: return -1
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        if fields[int(structs[si].fields) + i].name == nodes[n].name: return -1
+    callee = nodes.len()
+    nodes.push(nodes[n])
+    clear_flag(callee, NF_AT | NF_MUT | NF_CHECKED)
+    nodes[callee].type = 0
+    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee), aux2 = i32(AUX2_PARTIAL))
+    dewy_partial(n, expected)

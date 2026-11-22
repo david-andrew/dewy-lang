@@ -24,3 +24,7 @@ math_rep_type = (t0: int) -> bool:
     if types[t].kind != .struct_: return false
     decl = int(structs[int(types[t].st)].decl)
     name_of(int(nodes[decl].name)) == "__CTMathRep" and files[pos_file(nodes[decl].pos)].path == "{lib_dir}/math_eval.jo"
+
+is_nd = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .struct_ and structs[int(types[t].st)].name == "NDArray"

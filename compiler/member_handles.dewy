@@ -1,0 +1,139 @@
+$runtime_checks
+from p"expr_cold_queries.dewy" import (type_short_name)
+from p"check.jo" import (syms)
+from p"@lib/core/str.jo" import (starts_with)
+from p"select_checks.dewy" import (race_needs)
+from p"util.jo" import (intern name_of)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"type_expression_forms.dewy" import (expr_as_type)
+from p"type_ops.dewy" import (dt)
+from p"dewy_method_ops.dewy" import (dewy_type_method)
+from p"partial_checks.dewy" import (dewy_partial)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"concurrency.jo" import (concurrency_first_ok_module)
+from p"checker_type_entries.dewy" import (check_struct_fields)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checks_builders.dewy" import (bc_call bc_ident bc_let bc_stmt)
+from p"types.jo" import (T_STR fields prune structs tkind types)
+from p"node_store.dewy" import (Node)
+from p"ast.jo" import (NF_AT NF_CHECKED NF_MUT NF_SPREAD add_flag clear_flag clone has_flag kids nodes set_list)
+from p"expr.jo" import (AUX2_PARTIAL AUX2_PLACE bc_count call_collect_named last_checked race_name_ids race_needs_id select_name_id type_name_id)
+
+MemberHandlesWord:type=int64<overflow='wrap'>
+
+select_id=():>int64=>$unsafe {
+    let select_name_id_slot=@select_name_id
+    if select_name_id_slot =? 0 {select_name_id_slot=intern("select")}
+    select_name_id_slot
+}
+
+race_spread=(n:int64 expected:int64):>int64=>$unsafe {
+    let bc_count_slot=@bc_count
+    let race_name_ids_slot=@race_name_ids
+    let race_needs_id_slot=@race_needs_id
+    if race_name_ids_slot.length =? 0 {
+        race_name_ids_slot=[intern("race") intern("first_ok")]
+        race_needs_id_slot=intern("$race_needs")
+    }
+    let callee=MemberHandlesWord(nodes.ptr[n].a)
+    let name=MemberHandlesWord(nodes.ptr[callee].name)
+    if name =? race_needs_id_slot {return race_needs(n)}
+    if not race_name_ids_slot.contains(name) {return -1}
+    let ds:array<int64>=[]
+    call_collect_named(name (-1) @ds)
+    if concurrency_first_ok_module <? 0 or not dewy_at(nodes.ptr[n].pos) {return -1}
+    if ds.length =? 0 {return -1}
+    loop d in ds {
+        if MemberHandlesWord(nodes.ptr[d].mod) not=? concurrency_first_ok_module {return -1}
+    }
+    let args=kids(n)
+    let spreads:array<int64>=[]
+    loop i in 0.. and a in args {
+        if nodes.ptr[a].kind =? 'namedarg' {continue}
+        if not has_flag(a NF_SPREAD) {return -1}
+        # (already bound: this is the call the rewrite below made)
+        if nodes.ptr[a].kind =? 'ident' and starts_with(name_of(MemberHandlesWord(nodes.ptr[a].name)) "$race_spread") {return -1}
+        spreads.push(i)
+    }
+    let pos=nodes.ptr[n].pos
+    let word=name_of(name)
+    if spreads.length =? 0 {fatal(pos "{word} needs a call to run: give it calls, or spread an array of them")}
+    let stmts:array<int64>=[]
+    let held:array<int64>=[]
+    loop i in spreads {
+        let e=args[i]
+        let held_name="$race_spread{bc_count_slot}"
+        bc_count_slot += 1
+        clear_flag(e NF_SPREAD)
+        stmts.push(bc_let(held_name e nodes.ptr[e].pos))
+        let spread=bc_ident(held_name nodes.ptr[e].pos)
+        add_flag(spread NF_SPREAD)
+        args[i] = spread
+        held.push(bc_ident(held_name nodes.ptr[e].pos))
+    }
+    let needs=bc_call("$race_needs" held pos)
+    nodes[needs].ival = name
+    let call=clone(n)
+    set_list(call args)
+    stmts.push(bc_stmt(needs pos))
+    stmts.push(bc_stmt(call pos))
+    nodes[n] = Node(kind = 'block' pos = pos aux = 1)
+    set_list(n stmts)
+    check_expr(n expected)
+}
+
+# `T.name` on a name that is a type (a type parameter, a `loop t in members(U)` binder, a
+# declared type): its short name, as a checked text literal. A member of that name the type
+# has wins, as an ordinary read. O(1) unless the member is `name`.
+type_name_member=(n:int64):>bool=>$unsafe {
+    let last_checked_slot=@last_checked
+    let type_name_id_slot=@type_name_id
+    if type_name_id_slot =? 0 {type_name_id_slot=intern("name")}
+    if nodes.ptr[n].name not=? int32<overflow='wrap'>(type_name_id_slot) or nodes.ptr[n].b not=? 0 {return false}
+    let receiver=MemberHandlesWord(nodes.ptr[n].a)
+    if nodes.ptr[receiver].kind not=? 'ident' or not dewy_at(nodes.ptr[n].pos) {return false}
+    let s=lookup(MemberHandlesWord(nodes.ptr[receiver].name))
+    if s =? 0 {return false}
+    let k=syms.ptr[s].kind
+    if k not=? 'type_' and k not=? 'struct_' and k not=? 'enum_' and k not=? 'alias_' {return false}
+    let t=if k =? 'type_' {MemberHandlesWord(syms.ptr[s].ref)} else {prune(expr_as_type(receiver))}
+    if tkind(t) =? 'struct_' {
+        let si=MemberHandlesWord(types.ptr[t].st)
+        if structs.ptr[si].decl not=? 0 and dewy_type_method(MemberHandlesWord(structs.ptr[si].decl) type_name_id_slot) >=? 0 {return false}
+        check_struct_fields(si)
+        loop i in [0..MemberHandlesWord(structs.ptr[si].nfields)) {
+            if fields.ptr[MemberHandlesWord(structs.ptr[si].fields) + i].name =? int32<overflow='wrap'>(type_name_id_slot) {return false}
+        }
+    }
+    let text=type_short_name(t)
+    # (`Img:type = Png | Jpeg`: an alias whose right side has no name gives its own)
+    if (text as array<uint8>).length =? 0 and k =? 'alias_' {text=name_of(MemberHandlesWord(nodes.ptr[receiver].name))}
+    if (text as array<uint8>).length =? 0 {fatal(nodes.ptr[n].pos "{dt(t)} has no name of its own: an anonymous record, a union or a computed type has none (give it one, `Name:type = ...`)")}
+    nodes[n] = Node(kind = 'str_lit' pos = nodes.ptr[n].pos sval = int32<overflow='wrap'>(intern(text)) type = int32<overflow='wrap'>(T_STR) flags = int32<overflow='wrap'>(NF_CHECKED))
+    last_checked_slot=n
+    true
+}
+
+# `@x.method` (decisions.md, batch 4): the method as a function of its remaining
+# parameters, with x evaluated now, as `@x.method()` gives; a data member stays a place.
+# -1 when n is not such a handle. O(the record's fields), only for `@` on a member.
+dewy_method_handle=(n:int64 expected:int64):>int64=>$unsafe {
+    if not has_flag(n NF_AT) or nodes.ptr[n].b not=? 0 or nodes.ptr[n].aux2 =? int32<overflow='wrap'>(AUX2_PLACE) or not dewy_at(nodes.ptr[n].pos) {return -1}
+    let rt=prune(check_expr(MemberHandlesWord(nodes.ptr[n].a) 0))
+    nodes[n].a = int32<overflow='wrap'>(last_checked)
+    add_flag(last_checked NF_CHECKED)
+    let st=if types.ptr[rt].kind =? 'ptr' {prune(MemberHandlesWord(types.ptr[rt].elem))} else {rt}
+    if types.ptr[st].kind not=? 'struct_' {return -1}
+    let si=MemberHandlesWord(types.ptr[st].st)
+    if structs.ptr[si].decl =? 0 or dewy_type_method(MemberHandlesWord(structs.ptr[si].decl) MemberHandlesWord(nodes.ptr[n].name)) <? 0 {return -1}
+    check_struct_fields(si)
+    loop i in [0..MemberHandlesWord(structs.ptr[si].nfields)) {
+        if fields.ptr[MemberHandlesWord(structs.ptr[si].fields) + i].name =? nodes.ptr[n].name {return -1}
+    }
+    let callee=nodes.length
+    nodes.push(nodes.ptr[n])
+    clear_flag(callee NF_AT | NF_MUT | NF_CHECKED)
+    nodes[callee].type = 0
+    nodes[n] = Node(kind = 'call' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(callee) aux2 = int32<overflow='wrap'>(AUX2_PARTIAL))
+    dewy_partial(n expected)
+}

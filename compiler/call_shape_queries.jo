@@ -79,3 +79,7 @@ copy_member = (t0: int, name: int) -> bool:
         loop i in [0..int(structs[si].nfields)):
             if fields[int(structs[si].fields) + i].name == i32(name): return true
     false
+
+call_totaldict_member = (name: int) -> bool: name_of(name) == "pop" or name_of(name) == "clear"
+
+call_numeric_member = (name: int) -> bool: name_of(name) == "wrap" or name_of(name) == "bitcast"

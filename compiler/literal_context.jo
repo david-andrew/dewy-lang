@@ -1,3 +1,4 @@
+use 'rational_literals.dewy'
 use 'expression_types.dewy'
 use 'ast.jo'
 use 'checker_tokens.dewy'
@@ -102,3 +103,13 @@ check_to = (n: int, target: int) -> int:
     check_expr(n, target)
     coerce(n, target)
     target
+
+lit_default = (n: int) -> int:
+    k = nodes[n].kind
+    if k == .float_lit and nodes[n].sval != 0: return decimal_type(nodes[n].pos)
+    if k == .float_lit: return T_FLOAT
+    if k == .unary or k == .conv: return lit_default(int(nodes[n].a))
+    if k == .binary:
+        if lit_default(int(nodes[n].a)) == T_FLOAT or lit_default(int(nodes[n].b)) == T_FLOAT: return T_FLOAT
+    if files[pos_file(nodes[n].pos)].is_dewy: return T_MATH_INT
+    T_INT

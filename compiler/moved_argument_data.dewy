@@ -1,4 +1,6 @@
 $runtime_checks
+from p"call_argument_checks.dewy" import (unnamed)
+from p"types.jo" import (tkind)
 from p"expression_types.dewy" import (ntype)
 from p"ast.jo" import (kid kids nkids nodes)
 from p"diagnostic_exit.dewy" import (fatal)
@@ -29,5 +31,33 @@ dewy_data_of_given=(e:MovedDataWord given:array<int64> call:MovedDataWord):>void
     if mask & 4 not=? 0 {dewy_data_of_given(MovedDataWord(nodes[e].c) given call)}
     if mask & 16 not=? 0 {
         loop c in kids(e) {dewy_data_of_given(c given call)}
+    }
+}
+
+# Sloppy: `S(cell, data(cell))` gives the array cell to the record, then data(cell) reads cell
+# after that move: it unshares the variable's own copy from the one given, so the pointer points
+# into storage the record does not hold (and that goes with the variable). The arguments in
+# their evaluation order; one walk of each.
+dewy_data_after_give=(n:int64):>void=>$unsafe {
+    let given:array<int64>=[]
+    let order:array<int64>=[]
+    let meta=MovedDataWord(nodes.ptr[n].c)
+    if meta not=? 0 {
+        loop e in kids(meta) {order.push(nodes.ptr[e].ival)}
+    }
+    else {
+        loop i in [0..nkids(n)) {order.push(i)}
+    }
+    loop i in order {
+        let a=kid(n i)
+        if a =? 0 {continue}
+        a=unnamed(a)
+        let v=a
+        loop nodes.ptr[v].kind =? 'conv' {v=MovedDataWord(nodes.ptr[v].a)}
+        if nodes.ptr[v].kind =? 'ident' and (nodes.ptr[v].aux =? 1 or nodes.ptr[v].aux =? 2) and tkind(ntype(v)) =? 'array' {
+            given.push(MovedDataWord(nodes.ptr[v].aux) * 1000000000 + MovedDataWord(nodes.ptr[v].sym))
+            continue
+        }
+        if given.length >? 0 {dewy_data_of_given(a given n)}
     }
 }

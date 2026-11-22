@@ -1,12 +1,13 @@
 $runtime_checks
+from p"type_ops.dewy" import (mk_fixed)
 from p"checker_type_entries.dewy" import (subst)
 from p"expression_types.dewy" import (ntype)
-from p"ast.jo" import (NF_CHECKED add_flag mk nodes set_list)
+from p"ast.jo" import (NF_CHECKED NF_SPREAD add_flag dewy_param_kinds kid mk nodes rest_bundles set_list)
 from p"checker_call_cost.dewy" import (Cand)
 from p"call_argument_checks.dewy" import (unnamed)
 from p"literal_context.dewy" import (is_lit)
 from p"select_checks.dewy" import (select_call select_written_priority)
-from p"types.jo" import (T_INT prune type_eq)
+from p"types.jo" import (T_INT prune telem tkind type_eq)
 from p"util.jo" import (files pos_file)
 
 ArgOrderWord:type=int64<overflow='wrap'>
@@ -57,4 +58,27 @@ call_order_rest=(n:int64 given:array<int64> final:array<int64>):>void=>$unsafe {
     set_list(metadata entries)
     nodes.ptr[n].c=int32(metadata)
     if select_call(n) {select_written_priority(n)}
+}
+
+# The type arguments of a call's instance: a function with a rest parameter adds the type its
+# rest argument has (rest_bundle), a fixed array when its length is written (no spread). Each
+# count then has its own instance, whose indexing that length proves, and the arguments are
+# passed in place, off the heap. The rest parameter is marked NF_SPREAD for the instance
+# (checker_instances: its parameter type is this extra argument).
+rest_inst_binds=(decl:int64 args:array<int64> params:array<int64> binds:array<int64>):>array<int64>=>$unsafe {
+    if rest_bundles.length =? 0 {return binds}
+    let kinds=dewy_param_kinds.get(decl) ?? []
+    if kinds.length =? 0 {return binds}
+    loop i in 0.. and kind in kinds {
+        if kind not=? 3 or i >=? args.length or i >=? params.length {continue}
+        let b=args[i]
+        if b =? 0 or not rest_bundles.has(b) {return binds}
+        add_flag(kid(decl i) NF_SPREAD)
+        let t=prune(subst(params[i] binds))
+        if tkind(t) not=? 'array' {return binds}
+        let k=rest_bundles[b]
+        if k <=? 0 {return [binds... t]}
+        return [binds... mk_fixed(telem(t) k)]
+    }
+    binds
 }

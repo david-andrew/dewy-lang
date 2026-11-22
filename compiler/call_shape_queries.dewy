@@ -92,3 +92,11 @@ copy_member=(t0:CallShapeWord name:CallShapeWord):>bool=>{
     }
     false
 }
+
+call_totaldict_member=(name:int64):>bool=>$unsafe {
+    name_of(name) =? "pop" or name_of(name) =? "clear"
+}
+
+call_numeric_member=(name:int64):>bool=>$unsafe {
+    name_of(name) =? "wrap" or name_of(name) =? "bitcast"
+}

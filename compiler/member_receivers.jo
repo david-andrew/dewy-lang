@@ -1,3 +1,7 @@
+use 'type_ops.dewy'
+use 'types.jo'
+use 'poly_closure.jo'
+use 'dewy_method_ops.dewy'
 use 'checker_module_lookup.dewy'
 use 'ast.jo'
 use 'check.jo'
@@ -30,3 +34,30 @@ member_receiver = (n: int, expected: int) -> int:
     type_receiver_at = saved_receiver
     nodes[n].a = i32(last_checked)
     bt
+
+is_dewy_range_type = (t: int, name: str) -> bool:
+    p = prune(t)
+    if types[p].kind != .struct_: return false
+    st = int(types[p].st)
+    if structs[st].name != name: return false
+    d = int(structs[st].decl)
+    d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/dewy_ranges.jo"
+
+# A record literal's method: a closure stored in the object, taking the object first.
+# (a record literal's method is kept in the object, but it is not one of its fields:
+# formatting leaves it out)
+dewy_method_field = (t0: int) -> int:
+    t = prune(t0)
+    if tkind(t) != .polyfn: return 0
+    d = poly_families[int(types[t].st)].decl
+    if dewy_is_method(d): d else: 0
+
+is_struct_like = (t0: int) -> bool:
+    t = prune(t0)
+    k = types[t].kind
+    k == .struct_ or k == .tuple or (k == .enum_ and not simple_enum(t))
+
+# A short spelling of a receiver for a suggested call.
+receiver_text = (n: int) -> str:
+    if nodes[n].kind == .ident: return name_of(int(nodes[n].name))
+    "x"

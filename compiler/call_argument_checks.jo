@@ -1,3 +1,10 @@
+use 'warn_if_ops.dewy'
+use 'warn_if.jo'
+use 'proofs.jo'
+use 'float_ops.dewy'
+use 'directives.jo'
+use 'check_constant.jo'
+use 'refinement_types.dewy'
 use 'checker_source_positions.dewy'
 use 'expression_types.dewy'
 use 'ast.jo'
@@ -39,3 +46,33 @@ nargs_check = (n: int, nargs: int, lo: int, hi: int, name: str):
     if nargs < lo or nargs > hi:
         if lo == hi: fatal(nodes[n].pos, "{name} expects {lo} argument(s), got {nargs}")
         fatal(nodes[n].pos, "{name} expects {lo} to {hi} arguments, got {nargs}")
+
+# `upper = (s:string):>string => s.upper`: a Dewy function whose whole body calls
+# itself again with its own parameters or literals never ends. O(1) per call.
+self_call_is_body = (n: int, decl: int, args: int[]) -> bool:
+    ci = int(ctxs[cx].inst)
+    if ci <= 0 or int(fns[ci].decl) != decl or nodes[decl].kind != .fn_: return false
+    b = int(nodes[decl].b)
+    loop b != 0 and b != n and nodes[b].kind != .call:
+        k = nodes[b].kind
+        if k == .return_ or k == .exprstmt: b = int(nodes[b].a)
+        else if k == .block and nkids(b) > 0:
+            # (after the copies of the parameters a Dewy body starts with)
+            last = nkids(b) - 1
+            loop i in [0..last):
+                c = kid(b, i)
+                if nodes[c].kind != .vardecl or nodes[c].b == 0 or nodes[int(nodes[c].b)].kind != .ident: return false
+            b = kid(b, last)
+        else: return false
+    if b != n: return false
+    loop a in args:
+        k = nodes[unnamed(a)].kind
+        if k != .ident and k != .int_lit and k != .bool_lit and not (k == .str_lit and nkids(unnamed(a)) == 0): return false
+    true
+
+call_note_contracts = (n: int, f: int, decl: int, partial: bool, closure: int):
+    if proof_active and proof_decls.has(decl):
+        if partial: fatal(nodes[n].pos, "a proof cannot be used as a value; use a direct statement call")
+        proof_calls.push(FactRequest(n, int(ctxs[cx].inst)))
+    if wi_any and nodes[decl].c != 0 and not partial and closure == 0 and not cc_decls.has(decl): wi_call(n, f, decl)
+    if dir_floats_any and not partial and closure == 0: ff_note_call(f, decl)

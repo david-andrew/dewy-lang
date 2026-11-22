@@ -10,7 +10,7 @@ from p"checker_state.dewy" import (FnCtx)
 from p"ast.jo" import (nkids nodes)
 from p"check.jo" import (check_scopes ctxs cx fns modules prelude syms)
 from p"checker_signature.dewy" import (fn_sig)
-from p"expr.jo" import (call_collect_fns call_collect_module ci_ids decl_in_prelude match_type named_first rational_reach)
+from p"expr.jo" import (call_collect_fns call_collect_module ci_ids cin_mark id_at match_type named_first rational_reach)
 from p"rational_lookup.dewy" import (exact_families_changed rational_module reaches_rational)
 from p"types.jo" import (prune structs tkind type_eq types)
 from p"util.jo" import (files intern pos_file pos_off)
@@ -131,4 +131,20 @@ path_literal_module=(n:LookupWord callee:LookupWord args:array<int64>):>LookupWo
     let s=prelude.get(int64(name)) ?? dewy_prelude_lookup(name)
     if s =? 0 or syms.ptr[s].decl =? 0 {return -1}
     LookupWord(nodes.ptr[LookupWord(syms.ptr[s].decl)].mod)
+}
+
+cin_grow=(d:int64):>void=>$unsafe {
+    cin_mark.resize(max(d + 1 nodes.length) + 1024)
+}
+
+decl_in_prelude=(d:int64):>bool=>$unsafe {
+    d not=? 0 and modules.ptr[LookupWord(nodes.ptr[d].mod)].is_prelude
+}
+
+is_unchecked_at=(n:int64):>bool=>$unsafe {
+    let id_at_slot=@id_at
+    let callee=LookupWord(nodes.ptr[n].a)
+    if nodes.ptr[callee].kind not=? 'ident' or nkids(n) not=? 2 {return false}
+    if id_at_slot =? 0 {id_at_slot=intern("__at")}
+    LookupWord(nodes.ptr[callee].name) =? id_at_slot and modules.ptr[cur_mod()].is_prelude
 }

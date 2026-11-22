@@ -1,3 +1,7 @@
+use 'refine.jo'
+use 'literal_context.dewy'
+use 'expr.jo'
+use 'types.jo'
 use 'ast.jo'
 use 'facts.jo'
 use 'node_store.dewy'
@@ -22,3 +26,15 @@ wrap_union = (n: int, vi: int, to: int):
     move_divisor(n, inner)
     nodes[n] = Node(kind = .call, pos = nodes[inner].pos, aux = 3, aux2 = i32(vi), type = i32(to), flags = i32(NF_CHECKED))
     set_list(n, [inner])
+
+# the member of union u a value of type `from` becomes (an exact match first), or -1
+union_target = (n: int, from: int, u: int) -> int:
+    f = from
+    if n != 0 and is_lit(n): f = lit_default(n)
+    ms = union_members(u)
+    loop i in 0.. and m in ms:
+        if type_eq(m, f): return i
+    if str_sets.len() > 1 and prune(from) == T_STR: return union_text_target(n, ms)
+    loop i in 0.. and m in ms:
+        if can_coerce(n, from, m): return i
+    -1

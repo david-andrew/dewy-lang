@@ -1,16 +1,18 @@
 $runtime_checks
+from p"call_lookup_context.dewy" import (decl_in_prelude)
+from p"check.jo" import (fns lib_dir)
 from p"checker_type_entries.dewy" import (check_struct_fields)
 from p"expression_types.dewy" import (ntype)
-from p"ast.jo" import (NF_CHECKED NF_INBOUNDS NF_MUT add_flag kid mk nodes)
+from p"ast.jo" import (NF_CHECKED NF_INBOUNDS NF_MUT add_flag has_flag kid kids mk nkids nodes set_list)
 from p"checker_expr.dewy" import (check_expr)
 from p"checks_builders.dewy" import (bc_call)
 from p"checks_thin_expr.dewy" import (is_map_type struct_ctor_zero)
-from p"expr.jo" import (copy_place last_checked)
+from p"expr.jo" import (last_checked)
 from p"node_store.dewy" import (Node)
 from p"refine.jo" import (refine_active)
 from p"refine_metadata.dewy" import (representation_type)
 from p"types.jo" import (fields prune struct_targ structs types)
-from p"util.jo" import (files intern pos_file)
+from p"util.jo" import (files intern name_of pos_file)
 
 MapEntryWord:type=int64<overflow='wrap'>
 
@@ -52,4 +54,42 @@ map_elem_place=(n:MapEntryWord):>void=>{
     f=last_checked
     let rt=if refine_active {representation_type(vt)} else {vt}
     nodes[n]=Node(kind='index' pos=pos a=int32(f) b=int32(call) type=int32(rt) flags=int32(NF_CHECKED | NF_INBOUNDS))
+}
+
+# m[k] for a map m (a call of its `[]`)
+is_map_get=(n:int64):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nkids(n) not=? 2 or nodes.ptr[n].sym =? 0 {return false}
+    let d=MapEntryWord(fns.ptr[MapEntryWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 or name_of(MapEntryWord(nodes.ptr[d].name)) not=? "[]" or not decl_in_prelude(d) {return false}
+    let mt=prune(ntype(kid(n 0)))
+    types.ptr[mt].kind =? 'struct_' and structs.ptr[MapEntryWord(types.ptr[mt].st)].name =? "Map"
+}
+
+# a copy of a place expression (variables, fields, elements) to evaluate it again
+copy_place=(n:int64):>int64=>$unsafe {
+    let c=nodes.length
+    nodes.push(nodes.ptr[n])
+    let k=nodes.ptr[n].kind
+    if k =? 'field' or k =? 'index' {nodes[c].a = int32<overflow='wrap'>(copy_place(MapEntryWord(nodes.ptr[n].a)))}
+    else if k =? 'call' and nkids(n) >? 0 {set_list(c [copy_place(kid(n 0)) kids(n)[1..]...])}
+    c
+}
+
+# The generated entry-position selector of a dictionary place, not a user's
+# array index. Its key can survive a call; its position cannot.
+map_place_index=(n:int64):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'index' or not has_flag(n NF_INBOUNDS) {return false}
+    let call=MapEntryWord(nodes.ptr[n].b)
+    if nodes.ptr[call].kind not=? 'call' or nodes.ptr[call].aux not=? 0 or nodes.ptr[call].sym <=? 0 or nkids(call) not=? 2 {return false}
+    let d=MapEntryWord(fns.ptr[MapEntryWord(nodes.ptr[call].sym)].decl)
+    d not=? 0 and decl_in_prelude(d) and name_of(MapEntryWord(nodes.ptr[d].name)) =? "__map_entry_present"
+}
+
+is_map_entries_type=(t:int64):>bool=>$unsafe {
+    let p=prune(t)
+    if types.ptr[p].kind not=? 'struct_' {return false}
+    let st=MapEntryWord(types.ptr[p].st)
+    if structs.ptr[st].name not=? "__MapEntries" {return false}
+    let d=MapEntryWord(structs.ptr[st].decl)
+    d not=? 0 and files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/map.jo"
 }

@@ -1,16 +1,17 @@
 $runtime_checks
+from p"rational_literals.dewy" import (decimal_type)
 from p"expression_types.dewy" import (ntype)
 from p"checker_expr.dewy" import (check_expr)
 from p"ast.jo" import (NF_LITERAL NF_U64 has_flag kid kids nkids nodes)
 from p"checker_tokens.dewy" import (Tok)
 from p"checks_thin_expr.dewy" import (dewy_set_literal int_intervals is_map_type)
-from p"expr.jo" import (can_coerce coerce lit_default)
+from p"expr.jo" import (can_coerce coerce)
 from p"set_type_queries.dewy" import (is_dewy_set_type)
 from p"record_construction.dewy" import (dewy_record_target)
 from p"refine.jo" import (str_sets)
 from p"refine_metadata.dewy" import (str_set_of)
-from p"types.jo" import (T_STR prune types)
-from p"util.jo" import (name_of)
+from p"types.jo" import (T_FLOAT T_INT T_MATH_INT T_STR prune types)
+from p"util.jo" import (files name_of pos_file)
 
 LiteralContextWord:type=int64<overflow='wrap'>
 
@@ -126,4 +127,16 @@ check_to=(n:int64 target:int64):>int64=>{
     check_expr(n target);
     coerce(n target);
     target
+}
+
+lit_default=(n:int64):>int64=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'float_lit' and nodes.ptr[n].sval not=? 0 {return decimal_type(nodes.ptr[n].pos)}
+    if k =? 'float_lit' {return T_FLOAT}
+    if k =? 'unary' or k =? 'conv' {return lit_default(LiteralContextWord(nodes.ptr[n].a))}
+    if k =? 'binary' {
+        if lit_default(LiteralContextWord(nodes.ptr[n].a)) =? T_FLOAT or lit_default(LiteralContextWord(nodes.ptr[n].b)) =? T_FLOAT {return T_FLOAT}
+    }
+    if files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {return T_MATH_INT}
+    T_INT
 }

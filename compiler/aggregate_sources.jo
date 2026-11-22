@@ -1,3 +1,10 @@
+use 'type_expression_forms.dewy'
+use 'expr_cold_queries.dewy'
+use 'expr_rare.dewy'
+use 'checker_scope_symbols.dewy'
+use 'prelude_ops.dewy'
+use 'checker_contexts.dewy'
+use 'node_store.dewy'
 use 'checker_source_positions.dewy'
 use 'checker_constant_queries.dewy'
 use 'expression_types.dewy'
@@ -79,3 +86,80 @@ dewy_classify_spread = (n: int):
     if dewy_set_literal(first): return
     t = dewy_spread_source_type(first)
     if types[t].kind == .struct_ and not is_map_type(t) and not is_dewy_set_type(t): nodes[n].kind = .record_lit
+
+# `f([Png Jpeg] ...)`, `$named[Png Jpeg]` (decisions.md, batch 7): a call of a Dewy function given
+# a sequence of types is specialized on that sequence. Its body is checked in place, the first
+# parameter standing for the types and the other arguments bound by name, as a block giving
+# its value. -1 when n is no such call. Checked once per call; O(1) for any other call.
+type_sequence_call = (n: int, expected: int) -> int:
+    if nkids(n) == 0: return -1
+    first = kid(n, 0)
+    if nodes[first].kind != .array or nkids(first) == 0 or not dewy_at(nodes[n].pos) or not type_value_expr(kid(first, 0)): return -1
+    callee = int(nodes[n].a)
+    fname = int(nodes[callee].name)
+    s = lookup(fname)
+    # (the prelude's `named`, loaded when first called)
+    if s == 0: s = dewy_prelude_lookup(fname)
+    if s == 0 or syms[s].kind != .fns: return -1
+    pos = nodes[n].pos
+    named_args: int[]
+    loop i in [1..nkids(n)):
+        a = kid(n, i)
+        if nodes[a].kind != .namedarg: fatal(nodes[a].pos, "after its types, a call specialized on them takes named arguments")
+        named_args.push(a)
+    # (the overload whose parameters are the sequence and those names)
+    d = 0
+    candidates: int[]
+    loop s != 0:
+        if syms[s].name == i32(fname) and syms[s].kind == .fns and syms[s].decl != 0: candidates.push(int(syms[s].decl))
+        s = int(syms[s].next)
+    loop c in candidates:
+        if nodes[c].kind != .fn_ or nkids(c) != named_args.len() + 1: continue
+        fits = true
+        loop a in named_args:
+            found = false
+            loop j in [1..nkids(c)):
+                if nodes[kid(c, j)].name == nodes[a].name: found = true
+            if not found: fits = false
+        if fits:
+            d = c
+            break
+    if d == 0: fatal(pos, "no {name_of(int(nodes[callee].name))} takes a sequence of types with these arguments")
+    seq = type_sequence(first)
+    # (`$named`'s strict rule, the registry's: every type has a name, and no name twice)
+    if pos_in_lib(nodes[d].pos) and name_of(fname) == "named":
+        seen: {str: bool} = {}
+        loop i in 0.. and t in seq:
+            text = type_short_name(t)
+            at = nodes[kid(first, i)].pos
+            if len(text) == 0: fatal(at, "{dt(t)} has no name of its own, so `$named` cannot name its member (give it one, `Name:type = ...`)")
+            if seen.has(text): fatal(at, "field {text} is listed twice")
+            seen[text] = true
+    mark = scope_mark()
+    g = globals.len()
+    pname = int(nodes[kid(d, 0)].name)
+    globals.push(Global(name = i32(pname), type = i32(T_VOID), mod = i32(cur_mod()), is_const = true, state = 2))
+    type_sequences[g] = seq
+    push_scope_sym(pname, new_sym(pname, .const_, g, 0))
+    statements: int[]
+    # (`each=@handle`, a function by name: the specialized body calls it by that name, so a
+    # generic one is specialized per type rather than needing a value's type)
+    renames: int[]
+    loop a in named_args:
+        v = int(nodes[a].a)
+        fs = if nodes[v].kind == .ident: lookup(int(nodes[v].name)) else: 0
+        if fs != 0 and syms[fs].kind == .fns:
+            renames.push(int(nodes[a].name))
+            renames.push(int(nodes[v].name))
+        else: statements.push(bc_let(name_of(int(nodes[a].name)), v, nodes[a].pos))
+    loop st in kids(int(nodes[d].b)):
+        # (the parameters' own bindings: given above)
+        if nodes[st].kind == .vardecl and nodes[st].aux2 == 1: continue
+        copy = clone(st)
+        if renames.len() > 0: rename_idents(copy, renames)
+        statements.push(copy)
+    nodes[n] = Node(kind = .block, pos = pos, aux = 1)
+    set_list(n, statements)
+    t = check_expr(n, expected)
+    scope_reset(mark)
+    t

@@ -1,3 +1,9 @@
+use 'checker_tokens.dewy'
+use 'string_domains.jo'
+use 'optional_fill.dewy'
+use 'checks_thin_expr.dewy'
+use 'narrowing_checks.dewy'
+use 'checker_narrow_writes.dewy'
 use 'checker_scope_symbols.dewy'
 use 'expression_types.dewy'
 use 'type_ops.dewy'
@@ -182,3 +188,154 @@ path_forget = (key: str, same_type: int = 0):
                     # parent was narrowed, rather than the original path text.
                     path_forget("#L{l}")
         i -= 1
+
+path_key = (n: int) -> str:
+    k = nodes[n].kind
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.local)):
+            a = path_decl_alias(int(nodes[n].sym))
+            if a != 0: return path_key(a)
+            return "#L{nodes[n].sym}"
+        if nodes[n].aux == i32(int(SK.global)): return "#G{nodes[n].sym}"
+        return ""
+    if k == .field and nodes[n].aux >= 0 and nodes[n].a != 0:
+        a = int(nodes[n].a)
+        if tkind(ntype(a)) != .struct_: return ""
+        b = path_key(a)
+        if len(b) == 0: return ""
+        return "{b}.{nodes[n].aux}"
+    ""
+
+# Only condition-created aliases escape a guard, never locals declared in an arm.
+narrow_promote = (first: int, limit: int):
+    loop l in [first..limit):
+        if int(locals[l].flags) & (LF_ALIAS | LF_UNNARROWED) != LF_ALIAS: continue
+        nm = int(locals[l].name)
+        if nm != 0: push_scope_sym(nm, new_sym(nm, .local, l, 0))
+
+narrow_var = (isn: int, holds: bool):
+    a = int(nodes[isn].a)
+    if nodes[a].kind == .field or (nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.global))):
+        narrow_path(a, int(nodes[isn].aux), holds)
+        return
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return
+    l = int(nodes[a].sym)
+    ut = prune(int(locals[l].type))
+    vi = int(nodes[isn].aux)
+    pos = nodes[a].pos
+    if is_union(ut):
+        ms = union_members(ut)
+        if holds: narrow_local(l, [ms[vi]], pos)
+        else:
+            # (not that member: one of the others)
+            rest: int[]
+            loop i in 0.. and m in ms:
+                if i != vi: rest.push(m)
+            narrow_local(l, rest, pos)
+        return
+    if types[ut].kind != .opt or (vi == -2) != holds: return
+    opt_unwrap_alias(l, pos)
+
+# the name `name` stands for root (a variable or field path) narrowed to members ms of its union
+narrow_expr = (root: int, ms: int[], pos: int, name: int):
+    rt = prune(ntype(root))
+    if ms.len() == 0: return
+    e = 0
+    t = 0
+    if types[rt].kind == .opt:
+        if ms.len() != 1 or not type_eq(ms[0], telem(rt)): return
+        e = mk(.unwrap, pos)
+        t = telem(rt)
+    else if not is_union(rt): return
+    else if ms.len() == 1:
+        e = mk(.narrow, pos)
+        nodes[e].aux = i32(union_index(rt, ms[0]))
+        t = ms[0]
+    else:
+        t = mk_union(ms)
+        if type_eq(t, rt): return
+        e = mk(.conv, pos)
+        nodes[e].aux = i32(int(CV.union_))
+    nodes[e].a = i32(root)
+    nodes[e].type = i32(t)
+    add_flag(e, NF_CHECKED)
+    nl = new_local(name, t, pos)
+    locals[nl].flags = i32(LF_ALIAS)
+    locals[nl].alias = i32(e)
+    narrow_store_register(nl)
+
+# `x is? C` on x: (A | B | C)? is `x != none and x is? C` (check_istype); when it fails,
+# x is none or one of the other members: an (A | B)?. x a field path or a global: as the `_`
+# arm of a match on it (opt_wild_narrow_path). O(members).
+narrow_opt_rest_by = (c: int):
+    a = int(nodes[c].a)
+    if nodes[a].kind != .binary or nodes[a].op != i32(int(Tok.ne)) or nodes[int(nodes[a].b)].kind != .none_lit: return
+    x = int(nodes[a].a)
+    local = nodes[x].kind == .ident and nodes[x].aux == i32(int(SK.local))
+    l = 0
+    key = ""
+    if local: l = int(nodes[x].sym)
+    else:
+        key = path_key(x)
+        if len(key) == 0: return
+    ut = prune(ntype(x))
+    if local: ut = prune(int(locals[l].type))
+    if types[ut].kind != .opt or not is_union(prune(int(types[ut].elem))): return
+    u = prune(int(types[ut].elem))
+    tests: int[]
+    if not or_tests(int(nodes[c].b), tests): return
+    excluded: int[]
+    loop t in tests:
+        # (each test reads x's payload: the alias `x != none` gave it)
+        ta = int(nodes[t].a)
+        if nodes[ta].kind != .ident or nodes[ta].aux != i32(int(SK.local)): return
+        tl = int(nodes[ta].sym)
+        if int(locals[tl].flags) & LF_ALIAS == 0 or locals[tl].alias == 0: return
+        al = int(locals[tl].alias)
+        if nodes[al].kind != .unwrap: return
+        inner = int(nodes[al].a)
+        if local and (nodes[inner].kind != .ident or int(nodes[inner].sym) != l): return
+        if not local and path_key(inner) != key: return
+        if not type_eq(prune(ntype(ta)), u): return
+        excluded.push(union_members(u)[int(nodes[t].aux)])
+    keep: int[]
+    loop m in union_members(u):
+        if not excluded.contains(m): keep.push(m)
+    if keep.len() == 0: return
+    pos = nodes[x].pos
+    if not local:
+        opt_wild_narrow_path(x, key, ut, excluded, false, pos)
+        return
+    # (x already narrowed so: narrow its variable, as narrow_local does)
+    loop int(locals[l].flags) & LF_ALIAS != 0 and opt_rest_aliases.has(int(locals[l].alias)): l = narrowed_var(l)
+    inner = keep[0]
+    if keep.len() > 1: inner = mk_union(keep)
+    nl = new_local(int(locals[l].name), mk_opt(inner), pos)
+    locals[nl].flags = i32(LF_ALIAS)
+    locals[nl].alias = i32(opt_rest_expr(l, keep, pos))
+    narrow_store_register(nl)
+
+# where condition c is `holds` (true or false), variables it tests with `is` stand for the member
+narrow_by = (c: int, holds: bool):
+    if holds and string_set_tests.has(c): narrow_string_set(c)
+    k = nodes[c].kind
+    if k == .istype: narrow_var(c, holds)
+    else if k == .binary and (nodes[c].op == i32(int(Tok.ne)) or nodes[c].op == i32(int(Tok.eq))) and nodes[int(nodes[c].b)].kind == .none_lit:
+        # x != none: as `x is T` holding (x is its value from here)
+        isn = mk(.istype, nodes[c].pos)
+        nodes[isn].a = nodes[c].a
+        nodes[isn].aux = -2
+        narrow_var(isn, holds == (nodes[c].op == i32(int(Tok.ne))))
+    else if k == .not_: narrow_by(int(nodes[c].a), not holds)
+    else if k == .and_ and holds:
+        narrow_by(int(nodes[c].a), true)
+        narrow_by(int(nodes[c].b), true)
+    else if k == .or_ and not holds:
+        narrow_by(int(nodes[c].a), false)
+        narrow_by(int(nodes[c].b), false)
+    else if k == .or_ and holds:
+        # x is A or x is B: x is an A | B
+        tests: int[]
+        if or_tests(c, tests): narrow_some(tests)
+    else if k == .and_ and not holds: narrow_opt_rest_by(c)
+    else if k == .binary: position_guard_note(c, holds)

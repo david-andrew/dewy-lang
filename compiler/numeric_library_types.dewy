@@ -27,3 +27,8 @@ math_rep_type=(t0:int64):>bool=>$unsafe {
     let decl=NumericLibWord(structs.ptr[NumericLibWord(types.ptr[t].st)].decl)
     name_of(NumericLibWord(nodes.ptr[decl].name)) =? "__CTMathRep" and files.ptr[pos_file(nodes.ptr[decl].pos)].path =? "{lib_dir}/math_eval.jo"
 }
+
+is_nd=(t0:int64):>bool=>$unsafe {
+    let t=prune(t0)
+    types.ptr[t].kind =? 'struct_' and structs.ptr[NumericLibWord(types.ptr[t].st)].name =? "NDArray"
+}

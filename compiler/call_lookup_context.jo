@@ -110,3 +110,13 @@ path_literal_module = (n: int, callee: int, args: int[]) -> int:
     s = prelude.get(int(nodes[callee].name)) ?? dewy_prelude_lookup(int(nodes[callee].name))
     if s == 0 or syms[s].decl == 0: return -1
     int(nodes[int(syms[s].decl)].mod)
+
+cin_grow = (d: int): cin_mark.resize(max(d + 1, nodes.len()) + 1024)
+
+decl_in_prelude = (d: int) -> bool: d != 0 and modules[int(nodes[d].mod)].is_prelude
+
+is_unchecked_at = (n: int) -> bool:
+    callee = int(nodes[n].a)
+    if nodes[callee].kind != .ident or nkids(n) != 2: return false
+    if id_at == 0: id_at = intern("__at")
+    int(nodes[callee].name) == id_at and modules[cur_mod()].is_prelude

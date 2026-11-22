@@ -1,11 +1,16 @@
 $runtime_checks
+from p"type_ops.dewy" import (simple_enum)
+from p"types.jo" import (prune structs tkind types)
+from p"poly_closure.jo" import (poly_families)
+from p"check.jo" import (lib_dir)
+from p"dewy_method_ops.dewy" import (dewy_is_method)
 from p"checker_module_lookup.dewy" import (module_lookup)
 from p"ast.jo" import (mk nodes)
 from p"checker_expr.dewy" import (check_expr)
 from p"expr.jo" import (last_checked receiver_literal_hint type_receiver_at)
 from p"ffi_checks.dewy" import (ffi_deref)
 from p"node_store.dewy" import (Node)
-from p"util.jo" import (intern)
+from p"util.jo" import (files intern name_of pos_file)
 
 MemberReceiverWord:type=int64<overflow='wrap'>
 
@@ -32,4 +37,35 @@ member_receiver=(n:MemberReceiverWord expected:MemberReceiverWord):>int64=>$unsa
     at=saved
     nodes.ptr[n].a=int32(last_checked)
     bt
+}
+
+is_dewy_range_type=(t:int64 name:string):>bool=>$unsafe {
+    let p=prune(t)
+    if types.ptr[p].kind not=? 'struct_' {return false}
+    let st=MemberReceiverWord(types.ptr[p].st)
+    if structs.ptr[st].name not=? name {return false}
+    let d=MemberReceiverWord(structs.ptr[st].decl)
+    d not=? 0 and files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/dewy_ranges.jo"
+}
+
+# A record literal's method: a closure stored in the object, taking the object first.
+# (a record literal's method is kept in the object, but it is not one of its fields:
+# formatting leaves it out)
+dewy_method_field=(t0:int64):>int64=>$unsafe {
+    let t=prune(t0)
+    if tkind(t) not=? 'polyfn' {return 0}
+    let d=poly_families[MemberReceiverWord(types.ptr[t].st)].decl
+    if dewy_is_method(d) {d} else {0}
+}
+
+is_struct_like=(t0:int64):>bool=>$unsafe {
+    let t=prune(t0)
+    let k=types.ptr[t].kind
+    k =? 'struct_' or k =? 'tuple' or (k =? 'enum_' and not simple_enum(t))
+}
+
+# A short spelling of a receiver for a suggested call.
+receiver_text=(n:int64):>string=>$unsafe {
+    if nodes.ptr[n].kind =? 'ident' {return name_of(MemberReceiverWord(nodes.ptr[n].name))}
+    "x"
 }
