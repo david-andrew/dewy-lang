@@ -1,10 +1,10 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_module)
 from p"refine_metadata.dewy" import (representation_type)
 from p"checker_type_entries.dewy" import (get_fn_inst)
 from p"check.jo" import (fns lib_dir syms)
 from p"collection_checks.dewy" import (dewy_whole_collection)
 from p"checker_source_positions.dewy" import (dewy_at)
-from p"expr.jo" import (call_collect_module)
 from p"call_shape_queries.dewy" import (bare_fns_call)
 from p"numeric_library_types.dewy" import (is_nd)
 from p"member_receivers.dewy" import (is_dewy_range_type)
@@ -107,7 +107,7 @@ map_presence_fn=(call:int64):>int64=>$unsafe {
     let path="{lib_dir}/core/map.jo"
     if files.ptr[pos_file(nodes.ptr[d].pos)].path not=? path {return 0}
     let decls:array<int64>=[]
-    call_collect_module(IndexOperandWord(nodes.ptr[d].mod) intern("has") @decls)
+    collect_module(IndexOperandWord(nodes.ptr[d].mod) intern("has") @decls)
     loop candidate in decls {
         if files.ptr[pos_file(nodes.ptr[candidate].pos)].path =? path {
             return get_fn_inst(candidate fns.ptr[f].targs nodes.ptr[call].pos)

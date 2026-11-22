@@ -161,7 +161,7 @@ exprstmt_repl = (e: int):
     sy = lookup(int(nodes[e].name))
     if sy != 0 and syms[sy].kind == .fns:
         ds: int[]
-        collect_fns(int(nodes[e].name), &ds)
+        collect_fns(int(nodes[e].name), ds)
         loop d in ds:
             if len(repl_sig) > 0: repl_sig += "\n"
             repl_sig += ide_fn_header(d)

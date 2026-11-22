@@ -1,8 +1,9 @@
 $runtime_checks
 
+from p"checker_call_queries.dewy" import (collect_fns)
 from p"@lib/core/str.jo" import (replace)
 from p"ast.jo" import (nodes)
-from p"check.jo" import (repl_sig syms values_collect_fns)
+from p"check.jo" import (repl_sig syms)
 from p"checker_expr.dewy" import (lookup)
 from p"ide_text.dewy" import (ide_doc_of ide_fn_header)
 from p"node_store.dewy" import (Node)
@@ -14,7 +15,7 @@ exprstmt_repl=(e:int64):>void=>$unsafe {
     let sy=lookup(ReplSignatureWord(nodes.ptr[e].name))
     if sy not=? 0 and syms.ptr[sy].kind =? 'fns' {
         let ds:array<int64>=[]
-        values_collect_fns(ReplSignatureWord(nodes.ptr[e].name) @ds)
+        collect_fns(ReplSignatureWord(nodes.ptr[e].name) @ds)
         loop d in ds {
             if (repl_sig as array<uint8>).length >? 0 {repl_sig="{repl_sig}\n"}
             repl_sig="{repl_sig}{ide_fn_header(d)}"

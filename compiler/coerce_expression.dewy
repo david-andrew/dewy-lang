@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_fns)
 from p"function_value_checks.dewy" import (fn_value)
 from p"literal_number_forms.dewy" import (word_rational_source)
 from p"source_warnings.dewy" import (warn)
@@ -56,7 +57,7 @@ from p"types.jo" import (T_F32 T_INT T_MATH_INT T_NEVER T_RAWPTR T_U64 T_U8 has_
 from p"node_store.dewy" import (Node)
 from p"ast.jo" import (NF_CHECKED NF_LITERAL NF_U64 add_flag clear_flag has_flag mk nodes set_list)
 from p"refinement_types.dewy" import (FactRequest)
-from p"expr.jo" import (CV call_collect_fns coerce_hint rational_constants rational_shown)
+from p"expr.jo" import (CV coerce_hint rational_constants rational_shown)
 from p"coercion_queries.dewy" import (can_coerce str_set_coerced)
 
 CoerceExpressionWord:type=int64<overflow='wrap'>
@@ -470,7 +471,7 @@ coerce=(n:int64 target:int64):>int64=>$unsafe {
     # (a parameter named like a function, as that function's default: the name is the parameter's)
     if dewy and (why as array<uint8>).length =? 0 and tk =? 'fn_' and fk not=? 'fn_' and nodes.ptr[n].kind =? 'ident' {
         let shadowed:array<int64>=[]
-        call_collect_fns(CoerceExpressionWord(nodes.ptr[n].name) @shadowed)
+        collect_fns(CoerceExpressionWord(nodes.ptr[n].name) @shadowed)
         if shadowed.length >? 0 {
             let held=name_of(CoerceExpressionWord(nodes.ptr[n].name))
             why=" (`{held}` names a {dt(source_type)} here, not the function `{held}`: give that {dt(source_type)} another name to reach the function)"

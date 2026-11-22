@@ -289,7 +289,7 @@ values_argument_hints = (n: int, expected: int) -> int[]:
                 loop symbol != 0:
                     if syms[symbol].decl != 0: decls.push(int(syms[symbol].decl))
                     symbol = int(syms[symbol].next)
-            else: call_collect_named(int(nodes[callee].name), -1, decls)
+            else: collect_named(int(nodes[callee].name), -1, decls)
         else if nodes[callee].type != 0: ft = callable_base(ntype(callee))
     else if nodes[callee].kind == .field and nodes[callee].b == 0:
         recv = int(nodes[callee].a)
@@ -302,7 +302,7 @@ values_argument_hints = (n: int, expected: int) -> int[]:
         nodes[callee].a = i32(recv)
         add_flag(recv, NF_CHECKED)
         k = types[rt].kind
-        if k == .module: call_collect_named(name, int(types[rt].mod), decls)
+        if k == .module: collect_named(name, int(types[rt].mod), decls)
         else if k == .typeval:
             tt = prune(telem(rt))
             if types[tt].kind == .struct_:
@@ -338,15 +338,15 @@ values_argument_hints = (n: int, expected: int) -> int[]:
                 # unless call_by_name selects a user-defined sequence overload.
                 if k == .array and args.len() == 1 and (name_of(name) == "push" or name_of(name) == "extend"):
                     own: int[]
-                    values_collect_module(cur_mod(), name, own)
+                    collect_module(cur_mod(), name, own)
                     loop d in own:
                         if not decl_in_prelude(d) and args_fit(d, 2) and takes_seq(d): decls.push(d)
                     if decls.len() == 0:
                         hint = if name_of(name) == "push": telem(rt) else: rt
                         return [hint]
                     return fns_argument_hints(decls, [recv] + args, recv)[1..]
-                values_collect_fns(name, decls)
-                loop m in method_modules(rt): values_collect_module(m, name, decls)
+                collect_fns(name, decls)
+                loop m in method_modules(rt): collect_module(m, name, decls)
                 receiver = recv
     if receiver != 0: args = [receiver] + args
     hints: int[]
@@ -445,7 +445,7 @@ values_call = (n: int, expected: int) -> int:
                 if fn_decls_read == 0:
                     fn_decls_read = 1
                     s = lookup(int(nodes[callee].name))
-                    if s != 0 and syms[s].kind == .fns: call_collect_named(int(nodes[callee].name), -1, fn_decls)
+                    if s != 0 and syms[s].kind == .fns: collect_named(int(nodes[callee].name), -1, fn_decls)
                 field = fns_param_hint(fn_decls, i, nkids(n))
             else:
                 if not hints_read:

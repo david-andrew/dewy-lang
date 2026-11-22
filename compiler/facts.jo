@@ -221,26 +221,7 @@ struct FactPlanDependency:
     version: int
     atoms: EffectAtom[]
 fact_plan_dependencies: {int: FactPlanDependency} = {}
-fact_plan_version = (f: int) -> int:
-    if f <= 0 or f >= effect_summaries.len() or not effect_summaries[f].done: return 0
-    stamp = effect_summaries[f].stamp
-    tick = effect_summaries[f].changed_at
-    old = fact_plan_dependencies.get(f) ?? FactPlanDependency(-1, -1, 0, [])
-    if old.stamp == stamp and old.tick == tick: return old.version
-    atoms: EffectAtom[]
-    loop event in effect_summaries[f].events:
-        if event.atom.kind == .write or event.atom.kind == .opaque or event.atom.kind == .escape: atoms.push(event.atom)
-    version = old.version
-    if version == 0 or old.atoms != atoms:
-        fact_plan_serial += 1
-        version = fact_plan_serial
-    fact_plan_dependencies[f] = FactPlanDependency(stamp, tick, version, atoms)
-    version
 
-# Body/demand rewrites discard every mode and any completed probe together.
-fact_plan_forget = (f: int):
-    loop key in [0..16): fact_slice_cache.remove((f << 4) | key)
-    fact_probe_runs.remove(f)
 
 fact_loans: FactLoan[]
 # The arguments a call has evaluated while its later ones run (a record
@@ -1399,3 +1380,4 @@ const FACT_PREP_INDEXED = 2
 const FACT_PREP_MAPPED = 3
 const FACT_PREP_CAPTURE = 4
 # Loop-bound preparation and proof execution live in facts_loops.dewy.
+use 'facts_plan_cache.dewy'

@@ -3,6 +3,8 @@
 # (a leaf moved out of a Jo module without state of its own: an isolated build that has that module but
 # not the leaf reads the leaf's functions from the module, a double or the real one)
 LEAF_HOMES = {
+    'facts_plan_cache': 'facts.jo',
+    'exact_lifecycle': 'exact.jo',
     'missing_member_checks': 'expr.jo',
     'function_value_checks': 'expr.jo',
     'unresolved_call_names': 'expr.jo',

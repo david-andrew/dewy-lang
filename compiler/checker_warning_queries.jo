@@ -88,8 +88,8 @@ hidden_method_warnings = (m: int):
                 continue
         found: int[]
         dm = cl_prelude_module(name)
-        if dm >= 0: collect_in(dm, name, 0, &found)
-        else: collect_in(-1, name, 2, &found)
+        if dm >= 0: collect_in(dm, name, 0, found)
+        else: collect_in(-1, name, 2, found)
         loop c in found:
             if c == d or not decl_in_prelude(c) or nkids(c) != nkids(d): continue
             mine = fn_sig(d)

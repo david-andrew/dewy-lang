@@ -29,7 +29,7 @@ in_generic_instance = () -> bool:
 # a function of the program's own (not the prelude's) by this name
 program_fn_named = (name: int) -> bool:
     own: int[]
-    collect_fns(name, &own)
+    collect_fns(name, own)
     loop d in own:
         if not decl_in_prelude(d): return true
     false
@@ -41,7 +41,7 @@ program_str_fn = (t0: int, pos: int) -> int:
     d0 = int(structs[int(types[t].st)].decl)
     if d0 == 0 or modules[int(nodes[d0].mod)].is_prelude: return 0
     fd: int[]
-    collect_module(int(nodes[d0].mod), intern("str"), &fd)
+    collect_module(int(nodes[d0].mod), intern("str"), fd)
     loop d in fd:
         if decl_in_prelude(d) or nkids(d) != 1: continue
         sig = fn_sig(d)

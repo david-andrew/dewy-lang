@@ -1,3 +1,4 @@
+from p"checker_call_queries.dewy" import (collect_fns collect_module collect_named ctx_dependent intrinsic_of)
 from p"policy_value_queries.dewy" import (setting_value_needed)
 from p"callable_policies.dewy" import (setting_value_partial)
 $runtime_checks
@@ -12,14 +13,13 @@ from p"checker_contexts.dewy" import (cur_mod)
 from p"ast.jo" import (NF_CHECKED NF_MUT NF_SPREAD add_flag decl_has_rest has_flag kid kids mk nkids nodes rest_bundles set_list)
 from p"check.jo" import (FK_PARTIAL fns lib_dir syms)
 from p"checker_call_cost.dewy" import (arg_cost)
-from p"checker_call_queries.dewy" import (ctx_dependent intrinsic_of)
 from p"checker_call_resolve.dewy" import (resolve_fn_call)
 from p"checker_expr.dewy" import (check_args_untyped check_call check_expr lookup)
 from p"checker_signature.dewy" import (fn_sig)
 from p"checks_thin.dewy" import (new_inst)
 from p"checks_thin_expr.dewy" import (constant_default)
 from p"dewy_method_ops.dewy" import (dewy_type_method dewy_is_method)
-from p"expr.jo" import (AUX2_PARTIAL call_collect_fns call_collect_module call_collect_named callee_at intrinsics last_checked)
+from p"expr.jo" import (AUX2_PARTIAL callee_at intrinsics last_checked)
 from p"refine.jo" import (refine_active)
 from p"refine_metadata.dewy" import (ref_has_formals)
 from p"select_checks.dewy" import (select_place)
@@ -54,7 +54,7 @@ values_rest_call=(c:PartialWord):>bool=>$unsafe {
     let s=lookup(PartialWord(nodes.ptr[callee].name))
     if s =? 0 or syms.ptr[s].kind not=? 'fns' {return false}
     let ds:array<int64>=[]
-    call_collect_named(PartialWord(nodes.ptr[callee].name) (-1) @ds)
+    collect_named(PartialWord(nodes.ptr[callee].name) (-1) @ds)
     loop d in ds {
         if decl_has_rest(d) {return true}
     }
@@ -173,9 +173,9 @@ dewy_partial=(n:PartialWord expected:PartialWord):>int64=>$unsafe {
     if s not=? 0 and syms.ptr[s].kind =? 'fns' {
         let decls:array<int64>=[]
         if receiver {
-            if mod >=? 0 {call_collect_module(mod PartialWord(nodes.ptr[callee].name) @decls)} else {call_collect_fns(PartialWord(nodes.ptr[callee].name) @decls)}
+            if mod >=? 0 {collect_module(mod PartialWord(nodes.ptr[callee].name) @decls)} else {collect_fns(PartialWord(nodes.ptr[callee].name) @decls)}
         }
-        else {call_collect_named(PartialWord(nodes.ptr[callee].name) mod @decls)}
+        else {collect_named(PartialWord(nodes.ptr[callee].name) mod @decls)}
         # The one ordinary function of that name these arguments fit; the
         # program's own come before the prelude's.
         let d:PartialWord=0

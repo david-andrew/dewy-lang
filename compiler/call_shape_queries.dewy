@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_named)
 from p"checker_type_entries.dewy" import (check_struct_fields)
 from p"call_style.dewy" import (call_style_implicit)
 from p"checker_expr.dewy" import (check_expr)
@@ -6,7 +7,7 @@ from p"node_store.dewy" import (Node)
 from p"ast.jo" import (NF_CHECKED clear_flag kid nkids nodes)
 from p"checker_signature.dewy" import (fn_sig)
 from p"checks_thin_expr.dewy" import (is_fn_type)
-from p"expr.jo" import (call_collect_named last_checked)
+from p"expr.jo" import (last_checked)
 from p"types.jo" import (fields is_union prune structs telem tkind types union_members)
 from p"util.jo" import (name_of)
 
@@ -49,7 +50,7 @@ call_style_has_field=(t0:CallShapeWord name:CallShapeWord):>bool=>{
 # called with no arguments, 1 when one can, 2 when that call makes a function.
 bare_fns_call=(name:int64 mod:int64):>int64=>{
     let decls:array<int64>=[]
-    call_collect_named(name mod @decls)
+    collect_named(name mod @decls)
     loop d in decls {
         if args_fit(d 0) {
             let sig=fn_sig(d)

@@ -1,3 +1,4 @@
+use 'checker_call_queries.dewy'
 use 'expr_cold_queries.dewy'
 use 'check.jo'
 use 'select_checks.dewy'
@@ -30,7 +31,7 @@ race_spread = (n: int, expected: int) -> int:
     if name == race_needs_id: return race_needs(n)
     if not race_name_ids.contains(name): return -1
     ds: int[]
-    call_collect_named(name, -1, ds)
+    collect_named(name, -1, ds)
     if concurrency_first_ok_module < 0 or not dewy_at(nodes[n].pos): return -1
     if ds.len() == 0: return -1
     loop d in ds:

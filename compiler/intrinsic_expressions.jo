@@ -620,7 +620,7 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
             if i == 0 and nodes[args[1]].kind == .fnref:
                 ff = int(nodes[args[1]].sym)
                 vd: int[]
-                collect_fns(int(nodes[a].name), &vd)
+                collect_fns(int(nodes[a].name), vd)
                 if vd.len() == 1 and fn_sig(vd[0]).generic and nkids(vd[0]) == 2 and fns[ff].ptypes.len() == 2:
                     want = mk_fn([fn_sig(vd[0]).params[0], fns[ff].ptypes[1]], fns[ff].ptypes[0], 0)
             check_expr(a, want)
@@ -687,7 +687,7 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         # (of the functions with that name, the one shaped like a compute function)
         want = 0
         decls: int[]
-        collect_fns(int(nodes[a].name), &decls)
+        collect_fns(int(nodes[a].name), decls)
         loop d in decls:
             sig = fn_sig(d)
             if not sig.generic and sig.params.len() == 2 and (prune(sig.params[0]) == T_INT or prune(sig.params[0]) == T_IVEC2 or prune(sig.params[0]) == T_IVEC3) and tkind(sig.params[1]) == .struct_ and tkind(int(sig.ret)) == .void_:

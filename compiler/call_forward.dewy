@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_named)
 from p"checker_module_lookup.dewy" import (demand_name)
 from p"checker_contexts.dewy" import (bound_here cur_mod)
 from p"expression_types.dewy" import (ntype)
@@ -14,7 +15,7 @@ from p"check_constant.jo" import (cc_forwards cc_passed)
 from p"constant_checks.dewy" import (cc_constant)
 from p"ast.jo" import (NF_CHECKED NF_SPREAD add_flag has_flag kid kids mk nkids nkids2 nodes set_list)
 from p"frontend.jo" import (source_force_body)
-from p"expr.jo" import (AUX2_PARTIAL call_collect_named last_checked)
+from p"expr.jo" import (AUX2_PARTIAL last_checked)
 from p"check.jo" import (check_scopes ctxs cx fns modules prelude syms universe)
 from p"checker_home_index.dewy" import (use_home)
 from p"checker_expr.dewy" import (call_by_name check_expr)
@@ -152,7 +153,7 @@ value_call_forward=(n:FwdWord giver:FwdWord decls:array<int64> args:array<int64>
     # of them wins anyway, and only its signature is read, so `_fmt_apply` of a float64 never
     # reads another's)
     let family:array<int64>=[]
-    call_collect_named(f[0] mod @family)
+    collect_named(f[0] mod @family)
     let exact:array<int64>=[]
     let plain:array<int64>=[]
     loop d in family {

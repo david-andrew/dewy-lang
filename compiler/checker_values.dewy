@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_named ctx_dependent)
 from p"checker_global_initialization.dewy" import (ensure_global)
 from p"checker_source_positions.dewy" import (dewy_at)
 from p"checker_type_entries.dewy" import (check_struct_fields get_fn_inst)
@@ -6,7 +7,7 @@ from p"expression_types.dewy" import (ntype)
 from p"checked_expression_nodes.dewy" import (capture_value mk_ident_local)
 
 from p"ast.jo" import (NF_CHECKED NF_COMPREHENSION NF_GENERIC NF_INBOUNDS NF_MUT NF_SPREAD NF_WRITTEN_VOID NF_INDEX_CAPTURED TUPLE_VALUES add_flag clone dewy_param_kinds has_flag kid kids mk nkids nkids2 nodes set_list)
-from p"expr.jo" import (call_collect_named last_checked)
+from p"expr.jo" import (last_checked)
 from p"call_argument_checks.dewy" import (unnamed)
 from p"checks_builders.dewy" import (bc_block bc_stmt)
 from p"checker_expr.dewy" import (check_expr lookup)
@@ -14,7 +15,6 @@ from p"check.jo" import (fns globals locals sink_bind_expect sink_bind_next sink
 from p"checker_node_marks.dewy" import (node_marked)
 from p"checks_thin.dewy" import (check_fn_body pack_result_count)
 from p"checks_assign_hooks.dewy" import (values_init_error)
-from p"checker_call_queries.dewy" import (ctx_dependent)
 from p"types.jo" import (fn_type_pack prune types)
 from p"type_ops.dewy" import (get_struct_inst is_values mk_values)
 from p"effect_contracts.dewy" import (callable_base)
@@ -162,7 +162,7 @@ values_candidate=(c:int64):>bool=>$unsafe {
     else if sk not=? 'fns' {return false}
     else {
         let ds:array<int64>=[]
-        call_collect_named(VAWord(nodes.ptr[c].name) -1 @ds)
+        collect_named(VAWord(nodes.ptr[c].name) -1 @ds)
         if ds.length not=? 1 {return false}
         let d=ds[0]
         if has_flag(d NF_GENERIC) or nkids(d) >? 0 and nodes.ptr[kid(d 0)].b =? 0 {return false}
@@ -201,7 +201,7 @@ values_arity=(n:int64):>int64=>$unsafe {
     let s=lookup(VAWord(nodes.ptr[callee].name))
     if s =? 0 or syms.ptr[s].kind not=? 'fns' {return -1}
     let ds:array<int64>=[]
-    call_collect_named(VAWord(nodes.ptr[callee].name) -1 @ds)
+    collect_named(VAWord(nodes.ptr[callee].name) -1 @ds)
     if ds.length not=? 1 {return -1}
     let d=ds[0]
     let kinds=dewy_param_kinds.get(d) ?? []

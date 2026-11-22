@@ -1,3 +1,4 @@
+use 'checker_call_queries.dewy'
 use 'arithmetic_calls.dewy'
 use 'explicit_conversions.dewy'
 use 'struct_construction.dewy'
@@ -280,7 +281,7 @@ call_own_sequence_fn = (name: int) -> bool:
     cm = cur_mod()
     if cm < 0 or modules[cm].is_prelude: return false
     all_d: int[]
-    call_collect_module(cm, name, all_d)
+    collect_module(cm, name, all_d)
     loop d in all_d:
         if not decl_in_prelude(d) and takes_seq(d): return true
     false
@@ -365,7 +366,7 @@ call_name_array = (n: int, name: int, mod_scope: int, args: int[], expected: int
         cm = cur_mod()
         if (not ufcs or mod_scope < 0) and cm >= 0 and not modules[cm].is_prelude:
             all_d: int[]
-            call_collect_module(cm, name, all_d)
+            collect_module(cm, name, all_d)
             loop d in all_d:
                 if not decl_in_prelude(d) and args_fit(d, args.len()) and takes_seq(d): own.push(d)
         if own.len() > 0: return resolve_fn_call(n, name, own, args, expected)
@@ -418,7 +419,7 @@ call_name_sym = (n: int, name: int, mod_scope: int, s: int, args: int[], expecte
         at = prune(check_expr(args[0], 0))
         add_flag(args[0], NF_CHECKED)
         fd: int[]
-        call_collect_fns(name, fd)
+        collect_fns(name, fd)
         takes = false
         loop d in fd:
             sig = fn_sig(d)
@@ -429,7 +430,7 @@ call_name_sym = (n: int, name: int, mod_scope: int, s: int, args: int[], expecte
     else if sk == .fns and args.len() == 2 and name == release_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return release_call(n, args, expected)
     else if sk == .const_ or sk == .module: call_dispatch_error(9, n, name, 0, 0, 0, 0, 0, 0)
     else if sk == .builtin and not hidden_assert:
-        call_collect_fns(name, decls)
+        collect_fns(name, decls)
         if decls.len() == 0:
             if ide_on: ide_builtin_ref(n, name)
             return check_intrinsic(n, int(syms[s].ref), args, expected)
@@ -446,9 +447,9 @@ call_name_collect = (n: int, name: int, mod_scope: int, args: int[], expected: i
         return -1
     surface_hidden.clear()
     if ufcs:
-        if mod_scope >= 0: call_collect_module(mod_scope, name, decls)
-        else: call_collect_fns(name, decls)
-    else: call_collect_named(name, mod_scope, decls)
+        if mod_scope >= 0: collect_module(mod_scope, name, decls)
+        else: collect_fns(name, decls)
+    else: collect_named(name, mod_scope, decls)
     if name == ci(7, "to_int") and mod_scope < 0 and files[pos_file(nodes[n].pos)].is_dewy and not bound_here(name):
         own = false
         loop d in decls:
@@ -461,7 +462,7 @@ call_name_collect = (n: int, name: int, mod_scope: int, args: int[], expected: i
             if args.len() == 2 and to_int_word_limit(args[1]): parser = intern("__mi_parse_word")
             demand_name(parser)
             decls = []
-            call_collect_fns(parser, decls)
+            collect_fns(parser, decls)
             return resolve_fn_call(n, parser, decls, args, expected)
     # Index operators belong to the receiver's module, just like methods. A
     # selected import of a container type must also make its operators usable.
@@ -471,13 +472,13 @@ call_name_collect = (n: int, name: int, mod_scope: int, args: int[], expected: i
             check_expr(args[0], 0)
             add_flag(args[0], NF_CHECKED)
         tms = method_modules(ntype(args[0]))
-        loop tm in tms: call_collect_module(tm, name, decls)
+        loop tm in tms: collect_module(tm, name, decls)
         tm = if tms.len() > 0: tms[0] else: -1
         if indexed:
             protocol_text = if name == ci(11, "[]"): "__index__" else: "__setindex__"
             protocol = intern(protocol_text)
-            if mod_scope >= 0: call_collect_module(mod_scope, protocol, decls)
-            else: call_collect_fns(protocol, decls)
-            if tm >= 0: call_collect_module(tm, protocol, decls)
+            if mod_scope >= 0: collect_module(mod_scope, protocol, decls)
+            else: collect_fns(protocol, decls)
+            if tm >= 0: collect_module(tm, protocol, decls)
     if surface_hidden.len() > 0: dewy_surface_check(n, name)
     -1

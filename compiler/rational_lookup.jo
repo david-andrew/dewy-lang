@@ -39,7 +39,7 @@ reaches_rational = (m: int, rm: int) -> bool:
 
 # (checker_call_queries.dewy's collect_fns in a Dewy module: the bundled rational's exact
 # members of an exact family name, when the module's imports reach it)
-collect_rational = (m: int, name: int, out: *(int[])):
+collect_rational = (m: int, name: int, out: mut int[]):
     if not exact_family_name(name): return
     rm = rational_module()
     if rm >= 0 and rm != m and reaches_rational(m, rm): collect_in(rm, name, 0, out)
@@ -65,7 +65,7 @@ exact_members_for = (decls: int[], name: int, args: int[]) -> int[]:
             if s != 0 and syms[s].kind == .local: t = prune(int(locals[int(syms[s].ref)].type))
         if t != 0 and (bundled_rational_type(t) or bundled_word_rational_type(t)):
             out = decls
-            collect_in(rm, name, 0, &out)
+            collect_in(rm, name, 0, out)
             return out
     decls
 

@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_fns collect_module)
 from p"call_argument_checks.dewy" import (match_type)
 from p"checker_narrow_writes.dewy" import (narrowed_var)
 from p"checker_method_receiver.dewy" import (module_of_type)
@@ -10,7 +11,6 @@ from p"checker_signature.dewy" import (fn_sig)
 from p"checks_compare_hints.dewy" import (local_decl_in)
 from p"error_ops.dewy" import (nominal_family)
 from p"errors.jo" import (nominal_parent)
-from p"expr.jo" import (call_collect_fns call_collect_module)
 from p"path_narrowing.dewy" import (path_alias)
 from p"isolation_ops.dewy" import (isolation_children)
 from p"ownership_checks.dewy" import (LF_ALIAS LF_MUTPARAM)
@@ -60,9 +60,9 @@ dewy_whole_collection=(x:CollectionWord):>bool=>$unsafe {
 as_conversion=(ft:CollectionWord tt:CollectionWord):>int64=>{
     let name=intern("__as__")
     let decls:array<int64>=[]
-    call_collect_fns(name @decls)
+    collect_fns(name @decls)
     let tm=module_of_type(ft)
-    if tm >=? 0 {call_collect_module(tm name @decls)}
+    if tm >=? 0 {collect_module(tm name @decls)}
     # (the type's own conversion; then, for a minted child, its nearest
     # ancestor's, whose methods take the family they are written for)
     let owner=prune(ft)

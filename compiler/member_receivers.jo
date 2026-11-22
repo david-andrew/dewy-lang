@@ -79,8 +79,8 @@ synthetic_copy = (t: int, name: int, pos: int) -> bool:
     if copy_member(t, name): return false
     # Uniform-call methods are user declarations too.
     decls: int[]
-    collect_fns(name, &decls)
-    loop m in method_modules(t): collect_module(m, name, &decls)
+    collect_fns(name, decls)
+    loop m in method_modules(t): collect_module(m, name, decls)
     loop d in decls:
         if nkids(d) == 0: continue
         sig = fn_sig(d)
@@ -102,7 +102,7 @@ receiver_literal_hint = (recv: int, name: int, nargs: int, expected: int, pos: i
     wk = tkind(want)
     if wk != .array and not is_map_type(want) and not is_dewy_set_type(want): return 0
     decls: int[]
-    collect_fns(name, &decls)
+    collect_fns(name, decls)
     if decls.len() == 0: return if name_of(name) == "copy": want else: 0
     some = false
     loop d in decls:

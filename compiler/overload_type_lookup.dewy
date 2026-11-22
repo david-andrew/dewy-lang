@@ -1,5 +1,5 @@
 $runtime_checks
-from p"check.jo" import (warning_collect_in)
+from p"checker_call_queries.dewy" import (collect_fns collect_in collect_module)
 from p"ast.jo" import (nkids)
 from p"util.jo" import (name_of)
 from p"checker_method_receiver.dewy" import (module_of_type)
@@ -12,7 +12,7 @@ from p"checker_signature.dewy" import (fn_sig)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"type_ops.dewy" import (dt)
 from p"checker_contexts.dewy" import (cur_mod)
-from p"expr.jo" import (ByTypesChoice ByTypesKey by_types_binds by_types_decl by_types_seen call_collect_fns call_collect_module surface_hidden)
+from p"expr.jo" import (ByTypesChoice ByTypesKey by_types_binds by_types_decl by_types_seen surface_hidden)
 
 OverloadTypeLookupWord:type=int64<overflow='wrap'>
 
@@ -41,11 +41,11 @@ resolve_by_types=(name:int64 ts:array<int64> pos:int64 required:bool choice_only
     let gen=ml_stamp(name)
     let hidden_mark=surface_hidden.length
     let decls:array<int64>=[]
-    call_collect_fns(name @decls)
-    warning_collect_in(-1 name 0 @decls)
+    collect_fns(name @decls)
+    collect_in(-1 name 0 @decls)
     if ts.length >? 0 {
         let tm=module_of_type(ts[ts.length - 1])
-        if tm >=? 0 {call_collect_module(tm name @decls)}
+        if tm >=? 0 {collect_module(tm name @decls)}
     }
     if not choose_from_types(name decls ts pos required) {return 0}
     let decl=by_types_decl_slot

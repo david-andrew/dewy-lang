@@ -41,9 +41,9 @@ cl_dp_host = (name: int) -> int:
     print("prelude_module:{name}")
     -1
 cl_reach_host = (m: int, dm: int): print("reach:{m}:{dm}")
-cl_rational_host = (m: int, name: int, out: *(int[])):
+cl_rational_host = (m: int, name: int, out: mut int[]):
     print("rational:{m}:{name}")
-    out[0].push(99)
+    out.push(99)
 cl_grow = (d: int): cl_marks.resize(d + 4)
 cl_named_first: int[]
 cl_named_grow = (name: int):
@@ -87,18 +87,18 @@ main = ():
             cl_cx = c
             loop name in [1, 2, pn, qn]:
                 out: int[]
-                collect_fns(name, &out)
+                collect_fns(name, out)
                 show("fns:{round}:{c}:{name}", out)
         cl_cx = 1
         loop m in [-1, 0, 1, 2, 3]:
             loop name in [1, 2, qn]:
                 out: int[] = [12]
-                collect_module(m, name, &out)
+                collect_module(m, name, out)
                 show("module:{round}:{m}:{name}", out)
         loop hide in [0, 1, 2]:
             out: int[] = [13]
-            collect_in(1, qn, hide, &out)
-            collect_in(-1, pn, hide, &out)
+            collect_in(1, qn, hide, out)
+            collect_in(-1, pn, hide, out)
             show("in:{round}:{hide}", out)
     # collect_named: a Dewy module's own non-method declarations shadow the rest (methods,
     # first parameter `$self...`, stay); kept by name, module and current module per stamp
@@ -121,7 +121,10 @@ main = ():
                         out: int[]
                         if again == 1 and mod == 1: out.push(method)
                         if again == 1 and mod == 0: out.push(16)
-                        collect_named(name, mod, &out)
+                        before = out
+                        collect_named(name, mod, out)
+                        if again == 1 and mod == 1: assert(before == [method])
+                        if again == 1 and mod == 0: assert(before == [16])
                         show("named:{round}:{c}:{name}:{mod}:{again}", out)
     print("families:{cl_named.len()}:{cl_named_decls.len()}:{cl_named_hidden.len()}")
     print("ok")

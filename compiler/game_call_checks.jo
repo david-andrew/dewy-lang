@@ -89,7 +89,7 @@ habit_rest = (n: int, name: int, args: int[]):
     nm = name_of(name)
     # (the program's own function of the name: its call)
     own: int[]
-    collect_fns(name, &own)
+    collect_fns(name, own)
     loop d in own:
         if not decl_in_prelude(d): return
     na = args.len()

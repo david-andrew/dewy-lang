@@ -170,7 +170,7 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
             nodes[b].type = i32(T_INT) # generated shift count, not the divisor
     if nodes[n].a != 0: nodes[int(nodes[n].a)].name = i32(helper)
     declarations: int[]
-    collect_fns(helper, &declarations)
+    collect_fns(helper, declarations)
     result = resolve_fn_call(n, helper, declarations, checked, expected)
     # Internal scalar policy: retain the builtin operation's captured actuals.
     # Custom operators and the proven positive power-of-two path are separate.

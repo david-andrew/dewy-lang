@@ -1,11 +1,12 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_module)
 from p"overload_type_lookup.dewy" import (resolve_by_types)
 from p"coercion_queries.dewy" import (can_coerce)
 from p"set_type_queries.dewy" import (is_value_collection_type)
 from p"checker_runtime_functions.dewy" import (runtime_fn)
 from p"checker_method_receiver.dewy" import (module_of_type)
 from p"ast.jo" import (nodes)
-from p"check.jo" import (fns value_equal_fns value_hash_fns value_helper_types values_collect_module)
+from p"check.jo" import (fns value_equal_fns value_hash_fns value_helper_types)
 from p"checker_signature.dewy" import (fn_sig)
 from p"checks_thin_expr.dewy" import (resolve_from_types)
 from p"diagnostic_exit.dewy" import (fatal)
@@ -25,7 +26,7 @@ record_value_member=(t:ProtocolWord hashing:bool):>ProtocolWord=>$unsafe {
         ts=[t]
     }
     let decls:array<int64>=[]
-    loop name in protocol_names {values_collect_module(m name @decls)}
+    loop name in protocol_names {collect_module(m name @decls)}
     let own:array<int64>=[]
     loop d in decls {
         if ProtocolWord(nodes.ptr[d].mod) =? m and fn_sig(d).mutmask =? 0 {own.push(d)}

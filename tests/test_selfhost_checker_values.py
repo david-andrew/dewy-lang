@@ -3,7 +3,9 @@ import re
 import pytest
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import compare
-from tests.test_selfhost_checker_call_convert import DRIVER as BASE, JO as BASE_JO, DOUBLES
+from tests.test_selfhost_checker_call_convert import DRIVER as BASE, JO as BASE_JO, DOUBLES as BASE_DOUBLES
+
+DOUBLES = {name: dict(pair) for name, pair in BASE_DOUBLES.items()}
 
 JO = dict(BASE_JO)
 
@@ -35,7 +37,7 @@ bc_stmt = (v: int, pos: int) -> int:
     n = mk(.exprstmt, pos); nodes[n].a = i32(v); n
 bc_block = (xs: int[], pos: int) -> int:
     n = mk(.block, pos); set_list(n, xs); n
-call_collect_named = (name: int, mod: int, ds: mut int[]):
+va_collect_named = (name: int, mod: int, ds: mut int[]):
     events.push("collect:{name}")
     loop d in candidates: ds.push(d)
 '''
@@ -83,6 +85,13 @@ JO['types.jo'] += r'''get_struct_inst = (d: int, ts: int[]) -> int:
     va_struct_type = cv_type(.struct_)
     types[va_struct_type].st = 7
     va_struct_type
+'''
+
+DOUBLES['checker_call_queries']['jo'] += '''use 'expr.jo'
+collect_named = (name: int, mod: int, ds: mut int[]): va_collect_named(name, mod, ds)
+'''
+DOUBLES['checker_call_queries']['dewy'] += '''from p"expr.jo" import (va_collect_named)
+collect_named=(name:int64 mod:int64 @ds:array<int64>):>void=>va_collect_named(name mod @ds)
 '''
 
 DRIVER = BASE + r'''

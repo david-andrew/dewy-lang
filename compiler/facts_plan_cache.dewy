@@ -1,0 +1,30 @@
+$runtime_checks
+from p"effect_types.dewy" import (EffectAtom)
+from p"effects.jo" import (effect_summaries)
+from p"facts.jo" import (FactPlanDependency fact_plan_dependencies fact_plan_serial fact_probe_runs fact_slice_cache)
+
+PlanCacheWord:type=int64<overflow='wrap'>
+fact_plan_version=(f:PlanCacheWord):>PlanCacheWord=>$unsafe {
+    if f <=? 0 or f >=? effect_summaries.length or not effect_summaries.ptr[f].done {return 0}
+    let stamp=effect_summaries.ptr[f].stamp
+    let tick=effect_summaries.ptr[f].changed_at
+    let old=fact_plan_dependencies.get(f) ?? FactPlanDependency[-1 (-1) 0 []]
+    if old.stamp =? stamp and old.tick =? tick {return old.version}
+    let atoms:array<EffectAtom>=[]
+    loop event in effect_summaries.ptr[f].events {
+        if event.atom.kind =? 'write' or event.atom.kind =? 'opaque' or event.atom.kind =? 'escape' {atoms.push(event.atom)}
+    }
+    let version=old.version
+    if version =? 0 or old.atoms not=? atoms {
+        let serial=@fact_plan_serial
+        serial=PlanCacheWord(serial) + 1
+        version=serial
+    }
+    fact_plan_dependencies[f]=FactPlanDependency[stamp tick version atoms]
+    version
+}
+# Body/demand rewrites discard every mode and any completed probe together.
+fact_plan_forget=(f:PlanCacheWord):>void=>{
+    loop key in [0..16) {fact_slice_cache.remove((f << 4) | key);}
+    fact_probe_runs.remove(f);
+}

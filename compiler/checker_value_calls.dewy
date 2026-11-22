@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_fns collect_module collect_named ctx_dependent)
 from p"coerce_expression.dewy" import (coerce)
 from p"argument_order.dewy" import (map_args)
 from p"member_receivers.dewy" import (dewy_member_name receiver_literal_hint)
@@ -14,11 +15,11 @@ from p"checker_sinks.dewy" import (sink_values_use)
 from p"ast.jo" import (NF_CHECKED NF_INBOUNDS NF_SPREAD TUPLE_VALUES add_flag clear_flag dewy_param_kinds has_flag kid kids mk nkids nkids2 nodes set_kid set_list)
 from p"types.jo" import (T_STR fields has_var prune structs targ telem tkind type_eq types)
 from p"type_ops.dewy" import (fixed_len is_values mk_values)
-from p"check.jo" import (ValuesItem sink_pack_hit sink_pack_site spread_calls syms values_collect_fns values_collect_module values_hint_first values_hint_mark values_hint_pos values_hits)
+from p"check.jo" import (ValuesItem sink_pack_hit sink_pack_site spread_calls syms values_hint_first values_hint_mark values_hint_pos values_hits)
 from p"checker_node_marks.dewy" import (node_mark node_marked)
 from p"checks_thin.dewy" import (values_count_label values_expand_error0 values_expand_error1 values_expand_error2 values_expand_error3 values_expand_error4 values_group_error0)
 from p"checks_assign_hooks.dewy" import (values_call_labels values_dynamic values_internal_callee values_length_check values_shift_warning)
-from p"expr.jo" import (call_collect_named last_checked type_receiver_at)
+from p"expr.jo" import (last_checked type_receiver_at)
 from p"call_argument_checks.dewy" import (match_type unnamed)
 from p"literal_context.dewy" import (finalize_literal)
 from p"call_lookup_context.dewy" import (decl_in_prelude program_fn_named)
@@ -27,7 +28,6 @@ from p"partial_checks.dewy" import (values_rest_call)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"checks_builders.dewy" import (bc_block bc_stmt)
 from p"checker_expr.dewy" import (check_expr lookup)
-from p"checker_call_queries.dewy" import (ctx_dependent)
 from p"dewy_methods.jo" import (dewy_methods)
 from p"dewy_method_ops.dewy" import (dewy_is_method dewy_type_method)
 from p"checker_signature.dewy" import (fn_sig)
@@ -328,7 +328,7 @@ values_argument_hints=(n:int64 expected:int64):>array<int64>=>$unsafe {
                     if syms.ptr[symbol].decl not=? 0 {decls.push(VCWord(syms.ptr[symbol].decl))}
                     symbol=VCWord(syms.ptr[symbol].next)
                 }
-            } else {call_collect_named(VCWord(nodes.ptr[callee].name) -1 @decls)}
+            } else {collect_named(VCWord(nodes.ptr[callee].name) -1 @decls)}
         } else if nodes.ptr[callee].type not=? 0 {ft=callable_base(ntype(callee))}
     }
     else if nodes.ptr[callee].kind =? 'field' and nodes.ptr[callee].b =? 0 {
@@ -342,7 +342,7 @@ values_argument_hints=(n:int64 expected:int64):>array<int64>=>$unsafe {
         nodes.ptr[callee].a = int32(recv)
         add_flag(recv NF_CHECKED)
         let k=types.ptr[rt].kind
-        if k =? 'module' {call_collect_named(name VCWord(types.ptr[rt].mod) @decls)}
+        if k =? 'module' {collect_named(name VCWord(types.ptr[rt].mod) @decls)}
         else if k =? 'typeval' {
             let tt:VCWord=prune(telem(rt))
             if types.ptr[tt].kind =? 'struct_' {
@@ -383,7 +383,7 @@ values_argument_hints=(n:int64 expected:int64):>array<int64>=>$unsafe {
                 name=dewy_member_name(callee rt name args)
                 if k =? 'array' and args.length =? 1 and (name_of(name) =? "push" or name_of(name) =? "extend") {
                     let own:array<int64>=[]
-                    values_collect_module(cur_mod() name @own)
+                    collect_module(cur_mod() name @own)
                     loop d in own {
                         if not decl_in_prelude(d) and args_fit(d 2) and takes_seq(d) {decls.push(d)}
                     }
@@ -393,8 +393,8 @@ values_argument_hints=(n:int64 expected:int64):>array<int64>=>$unsafe {
                     }
                     return fns_argument_hints(decls [recv args...] recv)[1..]
                 }
-                values_collect_fns(name @decls)
-                loop m in method_modules(rt) {values_collect_module(m name @decls)}
+                collect_fns(name @decls)
+                loop m in method_modules(rt) {collect_module(m name @decls)}
                 receiver=recv
             }
         }
@@ -500,7 +500,7 @@ values_call=(n:int64 expected:int64):>int64=>$unsafe {
                 if fn_decls_read =? 0 {
                     fn_decls_read=1
                     let s=lookup(VCWord(nodes.ptr[callee].name))
-                    if s not=? 0 and syms.ptr[s].kind =? 'fns' {call_collect_named(VCWord(nodes.ptr[callee].name) -1 @fn_decls)}
+                    if s not=? 0 and syms.ptr[s].kind =? 'fns' {collect_named(VCWord(nodes.ptr[callee].name) -1 @fn_decls)}
                 }
                 field=fns_param_hint(fn_decls i nkids(n))
             }

@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_fns)
 from p"checker_global_initialization.dewy" import (ensure_global)
 from p"checker_type_entries.dewy" import (check_struct_fields)
 
@@ -6,7 +7,7 @@ from p"@lib/core/rt.jo" import (__str_slice)
 from p"ast.jo" import (NF_CHECKED NF_EXCL_FIRST NF_JUXT NF_SPREAD add_flag has_flag kid kids nkids nodes set_kid)
 from p"check.jo" import (globals locals syms)
 from p"checker_expr.dewy" import (check_expr lookup)
-from p"expr.jo" import (AUX2_PARTIAL call_collect_fns last_checked)
+from p"expr.jo" import (AUX2_PARTIAL last_checked)
 from p"numeric_library_types.dewy" import (bundled_bigint_type is_nd)
 from p"checks_call_hints.dewy" import (a_type)
 from p"lexer_helpers.dewy" import (is_ident_char)
@@ -279,7 +280,7 @@ juxt_shadow_check=(r:JuxtWord h:JuxtWord t:JuxtWord):>void=>$unsafe {
     if not (juxt_numeric(t) or tk =? 'array' or tk =? 'fixed' or is_nd(t)) {return}
     if pos_in_lib(nodes.ptr[r].pos) {return}
     let fns_:array<int64>=[]
-    call_collect_fns(JuxtWord(nodes.ptr[h].name) @fns_)
+    collect_fns(JuxtWord(nodes.ptr[h].name) @fns_)
     if fns_.length =? 0 {return}
     let nm=name_of(JuxtWord(nodes.ptr[h].name))
     if juxt_numeric(t) {warn(nodes.ptr[h].pos "`{nm}` here is {a_type(t)}, which hides the function `{nm}`, so `{nm}(...)` multiplies by it instead of calling the function: rename the value, or write `{nm} * (...)` to keep the product")}

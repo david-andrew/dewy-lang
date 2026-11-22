@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_fns)
 from p"@lib/core/os.jo" import (is_dir list_dir read_file)
 from p"@lib/core/rt.jo" import (__str_slice)
 from p"checker_loop_routes.dewy" import (value_loop_resize)
@@ -62,7 +63,7 @@ from p"types.jo" import (T_BOOL T_F32 T_FLOAT T_I32 T_INT T_IVEC2 T_IVEC3 T_MAT4
 from p"node_store.dewy" import (Node)
 from p"ast.jo" import (NF_CHECKED NF_LITERAL NF_MUT NF_PRIVATE_SETLEN NF_SQUOTE NF_U64 RANGE_EXHAUSTION add_flag clear_flag clone has_flag kid mk nkids nodes set_list set_list2)
 from p"refinement_types.dewy" import (FactRequest)
-from p"expr.jo" import (CV FMT_DEWY IN call_collect_fns coerce_hint embedded_files fmt_plain last_checked setting_site)
+from p"expr.jo" import (CV FMT_DEWY IN coerce_hint embedded_files fmt_plain last_checked setting_site)
 from p"storage_place_checks.dewy" import (check_place note_storage_access)
 from p"coerce_expression.dewy" import (coerce)
 from p"integer_conversions.dewy" import (integer_constant wrap_conv)
@@ -715,7 +716,7 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
             if i =? 0 and nodes.ptr[args[1]].kind =? 'fnref' {
                 let ff=IntrinsicExpressionsWord(nodes.ptr[args[1]].sym)
                 let vd:array<int64>=[]
-                call_collect_fns(IntrinsicExpressionsWord(nodes.ptr[a].name) @vd)
+                collect_fns(IntrinsicExpressionsWord(nodes.ptr[a].name) @vd)
                 if vd.length =? 1 and fn_sig(vd[0]).generic and nkids(vd[0]) =? 2 and fns.ptr[ff].ptypes.length =? 2 {
                     want=mk_fn([fn_sig(vd[0]).params[0] fns.ptr[ff].ptypes[1]] fns.ptr[ff].ptypes[0] 0)
                 }
@@ -793,7 +794,7 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
         # (of the functions with that name, the one shaped like a compute function)
         let want:IntrinsicExpressionsWord=0
         let decls:array<int64>=[]
-        call_collect_fns(IntrinsicExpressionsWord(nodes.ptr[a].name) @decls)
+        collect_fns(IntrinsicExpressionsWord(nodes.ptr[a].name) @decls)
         loop d in decls {
             let sig=fn_sig(d)
             if not sig.generic and sig.params.length =? 2 and (prune(sig.params[0]) =? T_INT or prune(sig.params[0]) =? T_IVEC2 or prune(sig.params[0]) =? T_IVEC3) and tkind(sig.params[1]) =? 'struct_' and tkind(IntrinsicExpressionsWord(sig.ret)) =? 'void_' {

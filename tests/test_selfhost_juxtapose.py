@@ -86,10 +86,8 @@ check_expr = (n: int, e: int) -> int:
         nodes.push(Node(kind=nodes[n].kind))
         last_checked = nodes.len() - 1
     checked_type
-call_collect_fns = (name: int, out: mut int[]):
+collect_fns = (name: int, out: mut int[]):
     if functions.has(name): out.push(name)
-collect_fns = (name: int, out: *(int[])):
-    if functions.has(name): out[0].push(name)
 fatal = (pos: int, msg: str): print("fatal {pos}: {msg}")
 warn = (pos: int, msg: str): print("warn {pos}: {msg}")
 pos_file = (pos: int) -> int: pos >> 40

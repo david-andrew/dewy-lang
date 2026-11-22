@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_fns collect_module collect_named)
 from p"arithmetic_calls.dewy" import (dewy_arithmetic_call)
 from p"explicit_conversions.dewy" import (conversion)
 from p"struct_construction.dewy" import (struct_ctor)
@@ -20,7 +21,7 @@ from p"expression_types.dewy" import (ntype)
 
 from p"checker_call_values.dewy" import value_call
 from p"call_forward.dewy" import (fmt_literal_call value_binding_forward value_call_forward)
-from p"expr.jo" import (IN call_collect_fns call_collect_module call_collect_named call_targs callee_at id_breakpoint id_len intrinsics last_checked release_name relocate_name surface_hidden take_name)
+from p"expr.jo" import (IN call_targs callee_at id_breakpoint id_len intrinsics last_checked release_name relocate_name surface_hidden take_name)
 from p"call_argument_checks.dewy" import (nargs_check)
 from p"call_lookup_context.dewy" import (check_expr_in_module ci decl_in_prelude program_fn_named)
 from p"literal_context.dewy" import (is_lit)
@@ -295,7 +296,7 @@ call_value=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
         let s=lookup(name)
         if s not=? 0 and syms.ptr[s].kind =? 'fns' {
             let decls:array<int64>=[]
-            call_collect_named(name -1 @decls)
+            collect_named(name -1 @decls)
             let direct=value_call_forward(n callee decls args expected)
             if direct >=? 0 {return direct}
         }
@@ -323,7 +324,7 @@ call_own_sequence_fn=(name:CDWord):>bool=>$unsafe {
     let cm=cur_mod()
     if cm <? 0 or modules.ptr[cm].is_prelude {return false}
     let all_d:array<int64>=[]
-    call_collect_module(cm name @all_d)
+    collect_module(cm name @all_d)
     loop d in all_d {
         if not decl_in_prelude(d) and takes_seq(d) {return true}
     }
@@ -423,7 +424,7 @@ call_name_array=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expecte
         let cm=cur_mod()
         if (not ufcs or mod_scope <? 0) and cm >=? 0 and not modules.ptr[cm].is_prelude {
             let all_d:array<int64>=[]
-            call_collect_module(cm name @all_d)
+            collect_module(cm name @all_d)
             loop d in all_d {
                 if not decl_in_prelude(d) and args_fit(d args.length) and takes_seq(d) {own.push(d)}
             }
@@ -481,7 +482,7 @@ call_name_sym=(n:CDWord name:CDWord mod_scope:CDWord s:CDWord args:array<int64> 
         let at:CDWord=prune(check_expr(args.ptr[0] 0))
         add_flag(args.ptr[0] NF_CHECKED)
         let fd:array<int64>=[]
-        call_collect_fns(name @fd)
+        collect_fns(name @fd)
         let takes=false
         loop d in fd {
             let sig=fn_sig(d)
@@ -494,7 +495,7 @@ call_name_sym=(n:CDWord name:CDWord mod_scope:CDWord s:CDWord args:array<int64> 
     else if sk =? 'fns' and args.length =? 2 and name =? release_name and (prelude.get(name) ?? 0) =? s and pos_in_lib(nodes.ptr[n].pos) {return release_call(n args expected)}
     else if sk =? 'const_' or sk =? 'module' {call_dispatch_error(9 n name 0 0 0 0 0 0)}
     else if sk =? 'builtin' and not hidden_assert {
-        call_collect_fns(name @decls)
+        collect_fns(name @decls)
         if decls.length =? 0 {
             if ide_on {ide_builtin_ref(n name)}
             return check_intrinsic(n CDWord(syms.ptr[s].ref) args expected)
@@ -515,10 +516,10 @@ call_name_collect=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expec
     }
     surface_hidden.clear()
     if ufcs {
-        if mod_scope >=? 0 {call_collect_module(mod_scope name @decls)}
-        else {call_collect_fns(name @decls)}
+        if mod_scope >=? 0 {collect_module(mod_scope name @decls)}
+        else {collect_fns(name @decls)}
     }
-    else {call_collect_named(name mod_scope @decls)}
+    else {collect_named(name mod_scope @decls)}
     if name =? ci(7 "to_int") and mod_scope <? 0 and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy and not bound_here(name) {
         let own=false
         loop d in decls {
@@ -530,7 +531,7 @@ call_name_collect=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expec
             if args.length =? 2 and to_int_word_limit(args.ptr[1]) {parser=intern("__mi_parse_word")}
             demand_name(parser)
             decls=[]
-            call_collect_fns(parser @decls)
+            collect_fns(parser @decls)
             return resolve_fn_call(n parser decls args expected)
         }
     }
@@ -541,14 +542,14 @@ call_name_collect=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expec
             add_flag(args.ptr[0] NF_CHECKED)
         }
         let tms=method_modules(ntype(args.ptr[0]))
-        loop tm in tms {call_collect_module(tm name @decls)}
+        loop tm in tms {collect_module(tm name @decls)}
         let tm=if tms.length >? 0 {tms[0]} else {-1}
         if indexed {
             let protocol_text=if name =? ci(11 "[]") {"__index__"} else {"__setindex__"}
             let protocol=intern(protocol_text)
-            if mod_scope >=? 0 {call_collect_module(mod_scope protocol @decls)}
-            else {call_collect_fns(protocol @decls)}
-            if tm >=? 0 {call_collect_module(tm protocol @decls)}
+            if mod_scope >=? 0 {collect_module(mod_scope protocol @decls)}
+            else {collect_fns(protocol @decls)}
+            if tm >=? 0 {collect_module(tm protocol @decls)}
         }
     }
     if surface_hidden.length >? 0 {dewy_surface_check(n name)}

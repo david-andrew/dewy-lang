@@ -152,7 +152,7 @@ values_candidate = (c: int) -> bool:
     else:
         # (`add(fn)`, fn giving several values: the bare name calls it)
         ds: int[]
-        call_collect_named(int(nodes[c].name), -1, ds)
+        collect_named(int(nodes[c].name), -1, ds)
         if ds.len() != 1: return false
         d = ds[0]
         if has_flag(d, NF_GENERIC) or nkids(d) > 0 and nodes[kid(d, 0)].b == 0: return false
@@ -186,7 +186,7 @@ values_arity = (n: int) -> int:
     s = lookup(int(nodes[callee].name))
     if s == 0 or syms[s].kind != .fns: return -1
     ds: int[]
-    call_collect_named(int(nodes[callee].name), -1, ds)
+    collect_named(int(nodes[callee].name), -1, ds)
     if ds.len() != 1: return -1
     d = ds[0]
     kinds = dewy_param_kinds.get(d) ?? []

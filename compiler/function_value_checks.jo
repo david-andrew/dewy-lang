@@ -34,7 +34,7 @@ use 'checks_thin.dewy'
 fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, closure: int = 0) -> int:
     decls: int[]
     if closure != 0: decls.push(poly_families[int(types[prune(ntype(closure))].st)].decl)
-    else: collect_named(int(nodes[n].name), mod, &decls)
+    else: collect_named(int(nodes[n].name), mod, decls)
     if mod < 0 and closure == 0 and nodes[n].name == i32(intern("to_int")) and dewy_at(nodes[n].pos) and not bound_here(int(nodes[n].name)):
         own = false
         loop d in decls:
@@ -43,7 +43,7 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
             parser = intern("__mi_parse")
             demand_name(parser)
             decls = []
-            collect_fns(parser, &decls)
+            collect_fns(parser, decls)
     if proof_active:
         loop d in decls:
             if proof_decls.has(d): fatal(nodes[n].pos, "a proof cannot be used as a value")

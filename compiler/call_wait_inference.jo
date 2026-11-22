@@ -53,7 +53,7 @@ call_waits = (a: int) -> int:
 # (the name's one generic function, or 0)
 call_waits_decl = (name: int) -> int:
     own: int[]
-    collect_fns(name, &own)
+    collect_fns(name, own)
     if own.len() != 1 or nodes[own[0]].nlist2 == 0: return 0
     own[0]
 literal_typed_call = (e: int) -> bool:

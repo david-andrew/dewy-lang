@@ -398,7 +398,7 @@ coerce = (n: int, target: int) -> int:
     # (a parameter named like a function, as that function's default: the name is the parameter's)
     if dewy and len(why) == 0 and tk == .fn_ and fk != .fn_ and nodes[n].kind == .ident:
         shadowed: int[]
-        collect_fns(int(nodes[n].name), &shadowed)
+        collect_fns(int(nodes[n].name), shadowed)
         if len(shadowed) > 0:
             held = name_of(int(nodes[n].name))
             why = " (`{held}` names a {dt(from)} here, not the function `{held}`: give that {dt(from)} another name to reach the function)"

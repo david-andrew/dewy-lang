@@ -414,7 +414,7 @@ call_argument_error = (kind: int, a: int, pt: int):
 call_type_member_error = (callee: int, tt: int, fname: int) -> int:
     why = ""
     fd: int[]
-    collect_fns(fname, &fd)
+    collect_fns(fname, fd)
     if fd.len() > 0:
         why = " (functions are not kept in types: call it as `{name_of(fname)}(x)` or `x.{name_of(fname)}()`)"
         # (Date.now(): a function of nothing is called by itself)

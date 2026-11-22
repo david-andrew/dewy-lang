@@ -244,7 +244,7 @@ CheckerCollectHost:type=[
     use_home:<(m:int64 name:int64):>int64>
     prelude_module:<(name:int64):>int64>
     prelude_reach:<(m:int64 dm:int64):>void>
-    rational:<(m:int64 name:int64 out:ptr<array<int64>>):>void>
+    rational:<(m:int64 name:int64 @out:array<int64>):>void>
     cin_grow:<(d:int64):>void>
     named_grow:<(name:int64):>void>
 ]
@@ -312,16 +312,16 @@ cl_mark=(d:CGWord):>void=>$unsafe {
 }
 # Module m's family of name (m < 0: the prelude's; hide as name_family's), the
 # declarations not in `out` yet.
-collect_in=(m:CGWord name:CGWord hide:CGWord out:ptr<array<int64>>):>void=>$unsafe {
+collect_in=(m:CGWord name:CGWord hide:CGWord @out:array<int64>):>void=>$unsafe {
     let s=name_family(m name hide)
     if s =? 0 {return}
     let cm=cl_cur_mod()
     let dewy=cm >=? 0 and (cl_in[0].mod_bits[0].ptr[cm] & 2) not=? 0
     cl_pass=cl_pass + 1
     let i:CGWord=0
-    let count=out[0].length
+    let count=out.length
     loop i <? count {
-        cl_mark(out[0].ptr[i])
+        cl_mark(out.ptr[i])
         i=i + 1
     }
     let o=s
@@ -334,7 +334,7 @@ collect_in=(m:CGWord name:CGWord hide:CGWord out:ptr<array<int64>>):>void=>$unsa
         if surface not=? 0 and surface not=? 1 {hidden=dewy}
         if hidden {cl_in[0].surface_hidden[0].push(d)}
         else if not cl_marked(d) {
-            out[0].push(d)
+            out.push(d)
             cl_mark(d)
         }
         o=CGWord(sym[0].next)
@@ -367,27 +367,27 @@ cl_bound_in=(m:CGWord name:CGWord):>bool=>$unsafe {
     }
     false
 }
-collect_module=(m:CGWord name:CGWord out:ptr<array<int64>>):>void=>$unsafe {
+collect_module=(m:CGWord name:CGWord @out:array<int64>):>void=>$unsafe {
     if m <? 0 {return}
     cl_demand(name)
     if (cl_in[0].mod_bits[0].ptr[m] & 1) not=? 0 {
-        collect_in(-1 name 0 out)
+        collect_in(-1 name 0 @out)
         return
     }
-    collect_in(m name 0 out)
+    collect_in(m name 0 @out)
     let nu=cl_in[0].mod_uses[0].ptr[m].length
     if nu =? 0 {return}
     let h=cl_use_home(m name)
     if h >=? 0 {
-        collect_in(h name 1 out)
+        collect_in(h name 1 @out)
         return
     }
     if h not=? -2 {return}
     let i:CGWord=0
     loop i <? nu {
         let u=cl_in[0].mod_uses[0].ptr[m].ptr[i]
-        if (cl_in[0].mod_bits[0].ptr[u] & 1) not=? 0 {collect_in(-1 name 2 out)}
-        else if cl_bound_in(u name) {collect_in(u name 1 out)}
+        if (cl_in[0].mod_bits[0].ptr[u] & 1) not=? 0 {collect_in(-1 name 2 @out)}
+        else if cl_bound_in(u name) {collect_in(u name 1 @out)}
         i=i + 1
     }
 }
@@ -410,10 +410,10 @@ cl_prelude_reach=(m:CGWord dm:CGWord):>void=>$unsafe {
     if m <? cl_in[0].rational_reach[0].length and cl_in[0].rational_reach[0].ptr[m] =? 1 {return}
     cl_in[0].host[0].prelude_reach(m dm)
 }
-collect_fns=(name:CGWord out:ptr<array<int64>>):>void=>$unsafe {
+collect_fns=(name:CGWord @out:array<int64>):>void=>$unsafe {
     cl_demand(name)
     let m=cl_cur_mod()
-    collect_module(m name out)
+    collect_module(m name @out)
     let user=false
     let dewy=false
     if m >=? 0 {
@@ -425,7 +425,7 @@ collect_fns=(name:CGWord out:ptr<array<int64>>):>void=>$unsafe {
         let dm=cl_prelude_module(name)
         if dm >=? 0 and name_family(dm name 0) not=? 0 {
             if dm not=? m {
-                collect_in(dm name 0 out)
+                collect_in(dm name 0 @out)
                 cl_prelude_reach(m dm)
             }
             return
@@ -433,10 +433,10 @@ collect_fns=(name:CGWord out:ptr<array<int64>>):>void=>$unsafe {
     }
     let hide:CGWord=0
     if user {hide=2}
-    collect_in(-1 name hide out)
+    collect_in(-1 name hide @out)
     if dewy {
         let ex=cl_in[0].exact_named
-        if ex[0].length =? 0 or (name <? ex[0].length and ex[0].ptr[name]) {cl_in[0].host[0].rational(m name out)}
+        if ex[0].length =? 0 or (name <? ex[0].length and ex[0].ptr[name]) {cl_in[0].host[0].rational(m name @out)}
     }
 }
 # (the tick as of which name's module-level answers stand: check.jo's ml_stamp)
@@ -456,8 +456,8 @@ cl_method=(d:CGWord):>bool=>$unsafe {
 # A bare name in a Dewy module names one binding: the module's own declarations of it
 # shadow the families it would otherwise see, as a whole (methods, reached through their
 # object, stay).
-cl_named_now=(name:CGWord mod:CGWord out:ptr<array<int64>>):>void=>$unsafe {
-    if mod >=? 0 {collect_module(mod name out)} else {collect_fns(name out)}
+cl_named_now=(name:CGWord mod:CGWord @out:array<int64>):>void=>$unsafe {
+    if mod >=? 0 {collect_module(mod name @out)} else {collect_fns(name @out)}
     let m=if mod >=? 0 {mod} else {cl_cur_mod()}
     if m <? 0 {return}
     let bits=cl_in[0].mod_bits[0].ptr[m]
@@ -474,9 +474,9 @@ cl_named_now=(name:CGWord mod:CGWord out:ptr<array<int64>>):>void=>$unsafe {
     if not owned {return}
     let kept:CGWord=0
     let i:CGWord=0
-    let count=out[0].length
+    let count=out.length
     loop i <? count {
-        let d=out[0].ptr[i]
+        let d=out.ptr[i]
         let keep=cl_method(d)
         let e=s
         loop not keep and e not=? 0 {
@@ -485,19 +485,19 @@ cl_named_now=(name:CGWord mod:CGWord out:ptr<array<int64>>):>void=>$unsafe {
             e=CGWord(cg_syms[0].ptr[e].next)
         }
         if keep {
-            out[0].ptr[kept]=d
+            out.ptr[kept]=d
             kept=kept + 1
         }
         i=i + 1
     }
-    loop out[0].length >? kept {out[0].pop();}
+    loop out.length >? kept {out.pop();}
 }
 # collect_fns (mod < 0) or collect_module(mod), with the Dewy module's own binding
 # shadowing, into an empty `out`: kept by name, module and current module while the
 # name's stamp stands. O(entries for the name) a hit, plus the declarations copied.
-collect_named=(name:CGWord mod:CGWord out:ptr<array<int64>>):>void=>$unsafe {
-    if out[0].length >? 0 or cl_in[0].ide[0] {
-        cl_named_now(name mod out)
+collect_named=(name:CGWord mod:CGWord @out:array<int64>):>void=>$unsafe {
+    if out.length >? 0 or cl_in[0].ide[0] {
+        cl_named_now(name mod @out)
         return
     }
     let cur=cl_cur_mod()
@@ -514,7 +514,7 @@ collect_named=(name:CGWord mod:CGWord out:ptr<array<int64>>):>void=>$unsafe {
                     let i=f[0].decls
                     let stop=i + f[0].ndecls
                     loop i <? stop {
-                        out[0].push(decls[0].ptr[i])
+                        out.push(decls[0].ptr[i])
                         i=i + 1
                     }
                     let hidden=cl_in[0].named_hidden
@@ -534,13 +534,13 @@ collect_named=(name:CGWord mod:CGWord out:ptr<array<int64>>):>void=>$unsafe {
         }
     }
     let mark=cl_in[0].surface_hidden[0].length
-    cl_named_now(name mod out)
+    cl_named_now(name mod @out)
     if cl_stamp(name) not=? gen {return}
     let decls=cl_in[0].named_decls
     let start=decls[0].length
     let i:CGWord=0
-    loop i <? out[0].length {
-        decls[0].push(out[0].ptr[i])
+    loop i <? out.length {
+        decls[0].push(out.ptr[i])
         i=i + 1
     }
     let hidden=cl_in[0].named_hidden
@@ -551,7 +551,7 @@ collect_named=(name:CGWord mod:CGWord out:ptr<array<int64>>):>void=>$unsafe {
         hidden[0].push(surface[0].ptr[i])
         i=i + 1
     }
-    let nd=out[0].length
+    let nd=out.length
     let nh=hidden[0].length - hstart
     if found >=? 0 {
         let f=fams[0].ptr + found

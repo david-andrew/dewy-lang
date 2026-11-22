@@ -24,7 +24,7 @@ record_value_member = (t: int, hashing: bool) -> int:
         protocol_names = [intern("hash")]
         ts = [t]
     decls: int[]
-    loop name in protocol_names: collect_module(m, name, &decls)
+    loop name in protocol_names: collect_module(m, name, decls)
     own: int[]
     loop d in decls:
         if int(nodes[d].mod) == m and fn_sig(d).mutmask == 0: own.push(d)

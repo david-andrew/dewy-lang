@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_fns collect_module)
 from p"checker_method_receiver.dewy" import (module_of_type)
 from p"expression_types.dewy" import (ntype)
 from p"ast.jo" import (NF_CHECKED add_flag nodes set_list)
@@ -8,7 +9,6 @@ from p"checker_call_resolve.dewy" import (resolve_fn_call)
 from p"checker_signature.dewy" import (fn_sig)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"directive_rules.dewy" import (dir_panics_demanded)
-from p"expr.jo" import (call_collect_fns call_collect_module)
 from p"node_store.dewy" import (Node)
 from p"rational_literals.dewy" import (rational_divisor)
 from p"type_ops.dewy" import (dt)
@@ -52,21 +52,21 @@ dewy_operator_name=(op:string unary:bool):>string=>{
 op_overload=(n:OperatorLookupWord opname:string):>OperatorLookupWord=>{
     let decls:array<int64>=[]
     let nm=intern(opname)
-    call_collect_fns(nm @decls)
+    collect_fns(nm @decls)
     let tm=module_of_type(ntype(OperatorLookupWord(nodes[n].a)))
-    if tm >=? 0 {call_collect_module(tm nm @decls)}
+    if tm >=? 0 {collect_module(tm nm @decls)}
     if nodes[n].b not=? 0 {
         let tm2=module_of_type(ntype(OperatorLookupWord(nodes[n].b)))
-        if tm2 >=? 0 {call_collect_module(tm2 nm @decls)}
+        if tm2 >=? 0 {collect_module(tm2 nm @decls)}
     }
     let protocol=dewy_operator_name(opname nodes[n].b =? 0)
     if protocol not=? "" {
         let pn=intern(protocol)
-        call_collect_fns(pn @decls)
-        if tm >=? 0 {call_collect_module(tm pn @decls)}
+        collect_fns(pn @decls)
+        if tm >=? 0 {collect_module(tm pn @decls)}
         if nodes[n].b not=? 0 {
             let pm=module_of_type(ntype(OperatorLookupWord(nodes[n].b)))
-            if pm >=? 0 {call_collect_module(pm pn @decls)}
+            if pm >=? 0 {collect_module(pm pn @decls)}
         }
     }
     if decls.length =? 0 {return 0}

@@ -185,7 +185,7 @@ values_rest_call = (c: int) -> bool:
     s = lookup(int(nodes[callee].name))
     if s == 0 or syms[s].kind != .fns: return false
     ds: int[]
-    call_collect_named(int(nodes[callee].name), -1, ds)
+    collect_named(int(nodes[callee].name), -1, ds)
     loop d in ds:
         if decl_has_rest(d): return true
     false
@@ -287,9 +287,9 @@ dewy_partial = (n: int, expected: int) -> int:
     if s != 0 and syms[s].kind == .fns:
         decls: int[]
         if receiver:
-            if mod >= 0: collect_module(mod, int(nodes[callee].name), &decls)
-            else: collect_fns(int(nodes[callee].name), &decls)
-        else: collect_named(int(nodes[callee].name), mod, &decls)
+            if mod >= 0: collect_module(mod, int(nodes[callee].name), decls)
+            else: collect_fns(int(nodes[callee].name), decls)
+        else: collect_named(int(nodes[callee].name), mod, decls)
         # The one ordinary function of that name these arguments fit; the
         # program's own come before the prelude's.
         d = 0

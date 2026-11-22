@@ -1,0 +1,83 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (env)
+from p"exact.jo" import (ExactMeasure exact_candidate_heads exact_candidate_next exact_candidate_nodes exact_collect_writes exact_count_bounds exact_count_index exact_count_nodes exact_demands exact_dependency_epoch exact_dependency_seen exact_effect_owners exact_float_purity exact_full_owners exact_initializers exact_iteration_sources exact_join_blocks exact_local_widths exact_lower_sites exact_marks exact_measure_on exact_measure_sites exact_nodes exact_owners exact_progress_assignments exact_progress_math exact_progress_opaque exact_proof_demands exact_range_meta exact_ranges exact_raw_values exact_rep_demands exact_rep_owners exact_shader_owners exact_shader_roots exact_shifts exact_stores exact_type_values exact_type_widths exact_widths exact_word_reads exact_write_heads exact_write_next exact_write_seen exact_write_targets exact_write_values)
+from p"exact_guards.jo" import (eg_demanded eg_hi eg_lo eg_owner eg_stack eg_version)
+from p"exact_loop.jo" import (exact_map_functions)
+from p"exact_reset_loop.jo" import (exr_call_target exr_fast exr_locals exr_plans)
+from p"facts.jo" import (positive_cache positive_collecting_writes positive_epoch positive_stamp)
+from p"fixed_index.dewy" import (fi_reset)
+from p"format_word_observations.dewy" import (format_word_reset)
+from p"math_lower.jo" import (math_word_captures)
+
+exact_reset=():>void=>{
+    exr_plans.clear()
+    let call_target=@exr_call_target
+    call_target=0
+    let fast=@exr_fast
+    fast=false
+    exr_locals=[]
+    format_word_reset()
+    fi_reset()
+    exact_rep_demands=[]
+    exact_rep_owners=[]
+    exact_effect_owners=[]
+    exact_local_widths=[]
+    exact_raw_values=[]
+    math_word_captures=dict<int64 bool>()
+    eg_lo=[]
+    eg_hi=[]
+    eg_owner=[]
+    eg_version=[]
+    eg_stack=[]
+    eg_demanded=[]
+    exact_map_functions=[]
+    exact_progress_assignments=[]
+    exact_write_heads=[]
+    exact_write_values=[]
+    exact_write_next=[]
+    exact_write_targets=[]
+    exact_write_seen=[]
+    exact_progress_opaque=[]
+    exact_dependency_seen=[]
+    let dependency_epoch=@exact_dependency_epoch
+    dependency_epoch=0
+    let collecting_positive=@positive_collecting_writes
+    collecting_positive=false
+    positive_cache=[]
+    positive_stamp=[]
+    let epoch=@positive_epoch
+    epoch=int64<overflow='wrap'>(epoch) + 1
+    let measure=@exact_measure_on
+    measure=env("DEWY_NOWRAP_MEASURE") not=? none
+    exact_measure_sites=dict<int64 ExactMeasure>()
+    exact_owners=dict<int64 bool>()
+    exact_full_owners=dict<int64 bool>()
+    exact_candidate_heads=[]
+    exact_candidate_nodes=[]
+    exact_candidate_next=[]
+    exact_float_purity=[]
+    exact_lower_sites=[]
+    let collecting=@exact_collect_writes
+    collecting=false
+    exact_demands=dict<int64 bool>()
+    exact_proof_demands=dict<int64 bool>()
+    exact_shader_roots=[]
+    exact_shader_owners=dict<int64 bool>()
+    exact_progress_math=dict<int64 bool>()
+    exact_word_reads=dict<int64 bool>()
+    exact_initializers=[]
+    exact_iteration_sources=[]
+    exact_nodes=[]
+    exact_stores=dict<int64 int64>()
+    exact_widths=[]
+    exact_type_widths=[]
+    exact_type_values=[]
+    exact_shifts=dict<int64 int64>()
+    exact_count_nodes=[]
+    exact_count_index=[]
+    exact_count_bounds=[]
+    exact_marks=[]
+    exact_ranges=[]
+    exact_range_meta=[]
+    exact_join_blocks=dict<int64 array<int64>>()
+}

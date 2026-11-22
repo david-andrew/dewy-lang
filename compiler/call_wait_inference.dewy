@@ -1,15 +1,15 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_fns ctx_dependent)
 from p"coercion_queries.dewy" import (can_coerce)
 from p"call_argument_checks.dewy" import (match_type)
 from p"expression_types.dewy" import (ntype)
 from p"checker_call_cost.dewy" import (Cand)
-from p"checker_call_queries.dewy" import (ctx_dependent)
 from p"ast.jo" import (kid nkids nodes)
 from p"check.jo" import (syms)
 from p"checker_expr.dewy" import (lookup)
 from p"checker_signature.dewy" import (fn_sig)
 from p"checks_thin_expr.dewy" import (call_waits_binds call_waits_local call_waits_mark call_waits_skips expected_bind_fits subst_partial text_literal)
-from p"expr.jo" import (call_collect_fns literal_typed_elements literal_typed_names)
+from p"expr.jo" import (literal_typed_elements literal_typed_names)
 from p"literal_context.dewy" import (is_lit)
 from p"node_store.dewy" import (call_waits_never)
 from p"types.jo" import (T_INT has_var)
@@ -67,7 +67,7 @@ call_waits=(a:int64):>int64=>$unsafe {
 # (the name's one generic function, or 0)
 call_waits_decl=(name:WaitWord):>WaitWord=>$unsafe {
     let own:array<int64>=[]
-    call_collect_fns(name @own)
+    collect_fns(name @own)
     if own.length not=? 1 or nodes.ptr[own[0]].nlist2 =? 0 {return 0}
     own[0]
 }

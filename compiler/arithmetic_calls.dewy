@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_fns)
 from p"parser_ops.dewy" import (tok_ordinal)
 from p"checks_thin.dewy" import (runtime_demand)
 from p"checker_call_resolve.dewy" import (resolve_fn_call)
@@ -22,7 +23,7 @@ from p"directive_rules.dewy" import (dir_panics_demanded)
 from p"integer_call_folds.dewy" import (dewy_math_fold)
 from p"checker_source_positions.dewy" import (dewy_at)
 from p"checker_expr.dewy" import (check_expr)
-from p"expr.jo" import (call_collect_fns last_checked rational_constants rational_shown)
+from p"expr.jo" import (last_checked rational_constants rational_shown)
 from p"coerce_expression.dewy" import (coerce)
 from p"integer_conversions.dewy" import (integer_constant)
 from p"coercion_queries.dewy" import (join_types num_join)
@@ -202,7 +203,7 @@ dewy_arithmetic_call=(n:int64 name:int64 args:array<int64> expected:int64):>int6
     }
     if nodes.ptr[n].a not=? 0 {nodes[ArithmeticCallsWord(nodes[n].a)].name = int32<overflow='wrap'>(helper)}
     let declarations:array<int64>=[]
-    call_collect_fns(helper @declarations)
+    collect_fns(helper @declarations)
     let result=resolve_fn_call(n helper declarations checked expected)
     # Internal scalar policy: retain the builtin operation's captured actuals.
     # Custom operators and the proven positive power-of-two path are separate.

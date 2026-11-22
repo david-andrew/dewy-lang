@@ -157,7 +157,7 @@ struct CheckerCollectHost:
     use_home: (int, int) -> int
     prelude_module: (int) -> int
     prelude_reach: (int, int) -> void
-    rational: (int, int, *(int[])) -> void
+    rational: (int, int, mut int[]) -> void
     cin_grow: (int) -> void
     named_grow: (int) -> void
 struct NamedFamily:
@@ -213,14 +213,14 @@ cl_marked = (d: int) -> bool: d < cl_in[0].cin_mark[0].len() and int(cl_in[0].ci
 cl_mark = (d: int):
     if d >= cl_in[0].cin_mark[0].len(): cl_in[0].host[0].cin_grow(d)
     cl_in[0].cin_mark[0][d] = i32(cl_pass)
-collect_in = (m: int, name: int, hide: int, out: *(int[])):
+collect_in = (m: int, name: int, hide: int, out: mut int[]):
     s = name_family(m, name, hide)
     if s == 0: return
     cm = cl_cur_mod()
     dewy = cm >= 0 and cl_in[0].mod_bits[0][cm] & 2 != 0
     cl_pass += 1
-    count = out[0].len()
-    loop i in [0..count): cl_mark(out[0][i])
+    count = out.len()
+    loop i in [0..count): cl_mark(out[i])
     o = s
     loop o != 0:
         d = int(cg_syms[0][o].decl)
@@ -230,7 +230,7 @@ collect_in = (m: int, name: int, hide: int, out: *(int[])):
         if surface != 0 and surface != 1: hidden = dewy
         if hidden: cl_in[0].surface_hidden[0].push(d)
         else if not cl_marked(d):
-            out[0].push(d)
+            out.push(d)
             cl_mark(d)
         o = int(cg_syms[0][o].next)
 cl_use_home = (m: int, name: int) -> int:
@@ -252,7 +252,7 @@ cl_bound_in = (m: int, name: int) -> bool:
         if cl_in[0].home_mod[0][h - 1] == m: return true
         h = cl_in[0].home_next[0][h - 1]
     false
-collect_module = (m: int, name: int, out: *(int[])):
+collect_module = (m: int, name: int, out: mut int[]):
     if m < 0: return
     cl_demand(name)
     if cl_in[0].mod_bits[0][m] & 1 != 0:
@@ -282,7 +282,7 @@ cl_prelude_reach = (m: int, dm: int):
     if cl_in[0].rational_found[0] < 0 and cl_in[0].mod_bits[0].len() == cl_in[0].rational_probed[0]: return
     if m < cl_in[0].rational_reach[0].len() and cl_in[0].rational_reach[0][m] == 1: return
     cl_in[0].host[0].prelude_reach(m, dm)
-collect_fns = (name: int, out: *(int[])):
+collect_fns = (name: int, out: mut int[]):
     cl_demand(name)
     m = cl_cur_mod()
     collect_module(m, name, out)
@@ -312,7 +312,7 @@ cl_method = (d: int) -> bool:
     if cg_nodes[0][d].nlist < 1: return false
     p = int(cg_lists[0][int(cg_nodes[0][d].list)])
     starts_with(cg_names[0][int(cg_nodes[0][p].name)], "$self")
-cl_named_now = (name: int, mod: int, out: *(int[])):
+cl_named_now = (name: int, mod: int, out: mut int[]):
     if mod >= 0: collect_module(mod, name, out)
     else: collect_fns(name, out)
     m = mod
@@ -330,9 +330,9 @@ cl_named_now = (name: int, mod: int, out: *(int[])):
         o = int(cg_syms[0][o].next)
     if not owned: return
     kept = 0
-    count = out[0].len()
+    count = out.len()
     loop i in [0..count):
-        d = out[0][i]
+        d = out[i]
         keep = cl_method(d)
         e = s
         loop not keep and e != 0:
@@ -340,11 +340,11 @@ cl_named_now = (name: int, mod: int, out: *(int[])):
             if ed == d and ed != 0 and not cl_method(ed): keep = true
             e = int(cg_syms[0][e].next)
         if keep:
-            out[0][kept] = d
+            out[kept] = d
             kept += 1
-    loop out[0].len() > kept: out[0].pop()
-collect_named = (name: int, mod: int, out: *(int[])):
-    if out[0].len() > 0 or cl_in[0].ide[0]:
+    loop out.len() > kept: out.pop()
+collect_named = (name: int, mod: int, out: mut int[]):
+    if out.len() > 0 or cl_in[0].ide[0]:
         cl_named_now(name, mod, out)
         return
     cur = cl_cur_mod()
@@ -356,7 +356,7 @@ collect_named = (name: int, mod: int, out: *(int[])):
             f = cl_in[0].named[0][e - 1]
             if f.mod == mod and f.cur == cur:
                 if f.gen == gen:
-                    loop i in [f.decls..f.decls + f.ndecls): out[0].push(cl_in[0].named_decls[0][i])
+                    loop i in [f.decls..f.decls + f.ndecls): out.push(cl_in[0].named_decls[0][i])
                     loop i in [f.hidden..f.hidden + f.nhidden): cl_in[0].surface_hidden[0].push(cl_in[0].named_hidden[0][i])
                     return
                 found = e - 1
@@ -366,10 +366,10 @@ collect_named = (name: int, mod: int, out: *(int[])):
     cl_named_now(name, mod, out)
     if cl_stamp(name) != gen: return
     start = cl_in[0].named_decls[0].len()
-    loop i in [0..out[0].len()): cl_in[0].named_decls[0].push(out[0][i])
+    loop i in [0..out.len()): cl_in[0].named_decls[0].push(out[i])
     hstart = cl_in[0].named_hidden[0].len()
     loop i in [mark..cl_in[0].surface_hidden[0].len()): cl_in[0].named_hidden[0].push(cl_in[0].surface_hidden[0][i])
-    nd = out[0].len()
+    nd = out.len()
     nh = cl_in[0].named_hidden[0].len() - hstart
     if found >= 0:
         cl_in[0].named[0][found].gen = gen

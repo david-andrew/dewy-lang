@@ -47,20 +47,20 @@ dewy_operator_name = (op: str, unary: bool) -> str:
 op_overload = (n: int, opname: str) -> int:
     decls: int[]
     nm = intern(opname)
-    collect_fns(nm, &decls)
+    collect_fns(nm, decls)
     tm = module_of_type(ntype(int(nodes[n].a)))
-    if tm >= 0: collect_module(tm, nm, &decls)
+    if tm >= 0: collect_module(tm, nm, decls)
     if nodes[n].b != 0:
         tm2 = module_of_type(ntype(int(nodes[n].b)))
-        if tm2 >= 0: collect_module(tm2, nm, &decls)
+        if tm2 >= 0: collect_module(tm2, nm, decls)
     protocol = dewy_operator_name(opname, nodes[n].b == 0)
     if protocol != "":
         pn = intern(protocol)
-        collect_fns(pn, &decls)
-        if tm >= 0: collect_module(tm, pn, &decls)
+        collect_fns(pn, decls)
+        if tm >= 0: collect_module(tm, pn, decls)
         if nodes[n].b != 0:
             pm = module_of_type(ntype(int(nodes[n].b)))
-            if pm >= 0: collect_module(pm, pn, &decls)
+            if pm >= 0: collect_module(pm, pn, decls)
     if decls.len() == 0: return 0
     a = int(nodes[n].a)
     b = int(nodes[n].b)

@@ -19,9 +19,9 @@ args_fit = (d: int, n: int) -> bool: false
 bc_field = (recv: int, name: str, pos: int) -> int: 0
 bc_ident = (name: str, pos: int) -> int: 0
 breakpoint_call = (n: int) -> int: 0
-call_collect_fns = (name: int, out: mut int[]): return
-call_collect_module = (mod: int, name: int, out: mut int[]): return
-call_collect_named = (name: int, mod: int, out: mut int[]): return
+cs_collect_fns = (name: int, out: mut int[]): return
+cs_collect_module = (mod: int, name: int, out: mut int[]): return
+cs_collect_named = (name: int, mod: int, out: mut int[]): return
 call_dispatch_error = (kind: int, n: int, name: int, callee: int, expected: int, rt: int, fname: int, et: int, tt: int): return
 call_fixed_array_error = (n: int, name: int, t0: int, ii: int): return
 call_numeric_member = (name: int) -> bool: false
@@ -204,7 +204,7 @@ replace_service('expr.jo', 'dewy_member_name', 'dewy_member_name = (callee: int,
 replace_service('expr.jo', 'method_str_set_key', 'method_str_set_key = (n: int, recv: int, rt: int, name: int, xs: mut int[], expected: int) -> int: xs.push(recv); 0')
 replace_service('expr.jo', 'value_call', 'value_call = (n: int, callee: int, xs: int[], expected: int = 0) -> int: events.push("value:{callee}:{xs}"); T_BOOL')
 replace_service('expr.jo', 'variant_ctor', 'variant_ctor = (n: int, et: int, vi: int, xs: int[]) -> int: events.push("variant:{et}:{vi}"); T_BOOL')
-replace_service('expr.jo', 'call_collect_named', 'call_collect_named = (name: int, mod: int, ds: mut int[]): ds.push(77); events.push("collect:{name}:{mod}")')
+replace_service('expr.jo', 'cs_collect_named', 'cs_collect_named = (name: int, mod: int, ds: mut int[]): ds.push(77); events.push("collect:{name}:{mod}")')
 replace_service('expr.jo', 'expr_as_type', 'expr_as_type = (n: int) -> int: T_INT')
 replace_service('check.jo', 'dewy_at', 'dewy_at = (pos: int) -> bool: true')
 replace_service('effects.jo', 'effect_generic_argument', 'effect_generic_argument = (n: int) -> int: T_INT')
@@ -248,6 +248,17 @@ for _file in list(JO):
     JO[_file] = ("use 'driver.jo'\nuse 'node_store.dewy'\nuse 'checker_state.dewy'\nuse 'checker_types.dewy'\n"
                  + ''.join(f"use '{other}'\n" for other in JO if other.endswith('.jo')
                            and other != _file and not other.startswith('checker_call_'))) + JO[_file]
+
+DOUBLES['checker_call_queries']['jo'] += '''use 'expr.jo'
+collect_named = (name: int, mod: int, ds: mut int[]): cs_collect_named(name, mod, ds)
+collect_module = (mod: int, name: int, ds: mut int[]): cs_collect_module(mod, name, ds)
+collect_fns = (name: int, ds: mut int[]): cs_collect_fns(name, ds)
+'''
+DOUBLES['checker_call_queries']['dewy'] += '''from p"expr.jo" import (cs_collect_named cs_collect_module cs_collect_fns)
+collect_named=(name:int64 mod:int64 @ds:array<int64>):>void=>cs_collect_named(name mod @ds)
+collect_module=(mod:int64 name:int64 @ds:array<int64>):>void=>cs_collect_module(mod name @ds)
+collect_fns=(name:int64 @ds:array<int64>):>void=>cs_collect_fns(name @ds)
+'''
 
 DRIVER = "use 'checker_call_convert.dewy'\n" + ''.join(f"use '{name}'\n" for name in EXTRA) + CONVERT_DRIVER + r'''
 cs_fields_error = false

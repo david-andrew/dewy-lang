@@ -31,11 +31,11 @@ resolve_by_types = (name: int, ts: int[], pos: int, required: bool, choice_only:
     gen = ml_stamp(name)
     hidden_mark = surface_hidden.len()
     decls: int[]
-    collect_fns(name, &decls)
-    collect_in(-1, name, 0, &decls)
+    collect_fns(name, decls)
+    collect_in(-1, name, 0, decls)
     if ts.len() > 0:
         tm = module_of_type(ts[ts.len() - 1])
-        if tm >= 0: collect_module(tm, name, &decls)
+        if tm >= 0: collect_module(tm, name, decls)
     if not choose_from_types(name, decls, ts, pos, required): return 0
     decl = by_types_decl
     binds = by_types_binds

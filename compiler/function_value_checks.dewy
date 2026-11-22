@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (collect_fns collect_named)
 from p"checks_thin.dewy" import (jd)
 from p"policy_value_queries.dewy" import (setting_value_needed)
 from p"callable_policies.dewy" import (setting_value_named)
@@ -25,7 +26,7 @@ from p"checker_module_lookup.dewy" import (demand_name)
 from p"call_lookup_context.dewy" import (decl_in_prelude)
 from p"type_ops.dewy" import (decl_fn_labels dt mk_cfn mk_fn)
 from p"effect_contracts.dewy" import (callable_base callable_contract effect_contract_fits effect_subst mk_callable_contract)
-from p"expr.jo" import (call_collect_fns call_collect_named fn_used quantity_call_names)
+from p"expr.jo" import (fn_used quantity_call_names)
 from p"coercion_queries.dewy" import (can_coerce)
 from p"checker_contexts.dewy" import (bound_here)
 from p"checks_compare_hints.dewy" import (bare_variant_hint)
@@ -36,7 +37,7 @@ FunctionValueChecksWord:type=int64<overflow='wrap'>
 fn_value=(n:int64 expected:int64 explicit_types:array<int64>=[] mod:int64=-1 closure:int64=0):>int64=>$unsafe {
     let decls:array<int64>=[]
     if closure not=? 0 {decls.push(poly_families[FunctionValueChecksWord(types.ptr[prune(ntype(closure))].st)].decl)}
-    else {call_collect_named(FunctionValueChecksWord(nodes.ptr[n].name) mod @decls)}
+    else {collect_named(FunctionValueChecksWord(nodes.ptr[n].name) mod @decls)}
     if mod <? 0 and closure =? 0 and nodes.ptr[n].name =? int32<overflow='wrap'>(intern("to_int")) and dewy_at(nodes.ptr[n].pos) and not bound_here(FunctionValueChecksWord(nodes.ptr[n].name)) {
         let own=false
         loop d in decls {
@@ -46,7 +47,7 @@ fn_value=(n:int64 expected:int64 explicit_types:array<int64>=[] mod:int64=-1 clo
             let parser=intern("__mi_parse")
             demand_name(parser)
             decls=[]
-            call_collect_fns(parser @decls)
+            collect_fns(parser @decls)
         }
     }
     if proof_active {

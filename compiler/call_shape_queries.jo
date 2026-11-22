@@ -43,7 +43,7 @@ call_style_has_field = (t0: int, name: int) -> bool:
 # called with no arguments, 1 when one can, 2 when that call makes a function.
 bare_fns_call = (name: int, mod: int) -> int:
     decls: int[]
-    collect_named(name, mod, &decls)
+    collect_named(name, mod, decls)
     loop d in decls:
         required = 0
         loop i in [0..nkids(d)):

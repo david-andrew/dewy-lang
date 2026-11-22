@@ -95,7 +95,7 @@ map_presence_fn = (call: int) -> int:
     path = lib_dir + "/core/map.jo"
     if files[pos_file(nodes[d].pos)].path != path: return 0
     decls: int[]
-    collect_module(int(nodes[d].mod), intern("has"), &decls)
+    collect_module(int(nodes[d].mod), intern("has"), decls)
     loop candidate in decls:
         if files[pos_file(nodes[candidate].pos)].path == path:
             return get_fn_inst(candidate, fns[f].targs, nodes[call].pos)
