@@ -3,6 +3,10 @@
 # (a leaf moved out of a Jo module without state of its own: an isolated build that has that module but
 # not the leaf reads the leaf's functions from the module, a double or the real one)
 LEAF_HOMES = {
+    'match_pattern_sets': 'expr.jo',
+    'overload_type_lookup': 'expr.jo',
+    'storage_place_checks': 'expr.jo',
+    'coercion_queries': 'expr.jo',
     'string_membership': 'expr.jo',
     'format_word_observations': 'expr.jo',
     'surface_names': 'expr.jo',

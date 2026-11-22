@@ -1,4 +1,5 @@
 $runtime_checks
+from p"coercion_queries.dewy" import (can_coerce)
 from p"checker_binding_inputs.dewy" import (binding_leaves)
 from p"checker_scope_symbols.dewy" import (new_local new_sym push_scope_sym)
 from p"checked_expression_nodes.dewy" import (bc_assign mk_ident_local)
@@ -12,7 +13,7 @@ from p"checks_builders.dewy" import (bc_block bc_stmt)
 from p"checks_thin.dewy" import check_stmt
 from p"checks_stmt_hooks.dewy" import stmt_terminates
 from p"checker_expr.dewy" import check_expr
-from p"expr.jo" import (callee_at can_coerce last_checked)
+from p"expr.jo" import (callee_at last_checked)
 from p"definite_walk.dewy" import da_record
 from p"isolation_ops.dewy" import isolation_children
 from p"ownership_types.dewy" import ownership_fact_type

@@ -1,9 +1,23 @@
 $runtime_checks
-from p"ast.jo" import (NF_LITERAL NF_U64 clear_flag has_flag nodes)
+from p"checks_thin.dewy" import (runtime_demand)
+from p"refine_rare.dewy" import (refine_coerce)
+from p"refine.jo" import (ref_narrowing refine_active)
+from p"expression_types.dewy" import (ntype)
+from p"union_conversion_nodes.dewy" import (move_divisor)
+from p"refine_metadata.dewy" import (mk_refined ref_intern representation_type)
+from p"checker_exact.dewy" import (exact_potential)
+from p"exact.jo" import (exact_full_owners exact_owners)
+from p"exact_preparation.dewy" import (exact_constant_use)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"ir.jo" import (dbg_on)
+from p"check.jo" import (ctxs cx)
+from p"refinement_types.dewy" import (RefAtom RefTerm)
+from p"node_store.dewy" import (Node)
+from p"ast.jo" import (NF_CHECKED NF_LITERAL NF_U64 clear_flag has_flag nodes)
 from p"diagnostic_exit.dewy" import (fatal)
-from p"expr.jo" import (integer_constant)
+from p"expr.jo" import (CV setting_value_targets)
 from p"type_ops.dewy" import (dt)
-from p"types.jo" import (T_MATH_INT types)
+from p"types.jo" import (T_F32 T_INT T_MATH_INT prune types)
 from p"util.jo" import (files pos_file)
 
 IntConvWord:type=int64<overflow='wrap'>
@@ -58,4 +72,95 @@ coerce_int_literal=(n:IntConvWord target:IntConvWord):>IntConvWord=>$unsafe {
     nodes.ptr[n].type=int32(target)
     clear_flag(n NF_LITERAL)
     n
+}
+
+# replace node n by a conversion of its old content
+wrap_conv=(n:int64 cv:CV to:int64):>void=>$unsafe {
+    # An unchanged word value needs only its result type. Operators keep their
+    # own checked/policy type: retagging arithmetic would change its evaluation.
+    # Debug variable names contain arena IDs. Keep that allocation history in
+    # -g builds; ordinary builds need neither copies nor a second ID mapping.
+    if (cv =? CV.wrap_int or cv =? CV.saturate_int) and not dbg_on {
+        let k=nodes.ptr[n].kind
+        if k =? 'int_lit' and lit_fits(n to) {
+            nodes[n].type = int32<overflow='wrap'>(to)
+            clear_flag(n NF_LITERAL)
+            return
+        }
+        if k =? 'ident' or k =? 'field' or k =? 'index' {
+            let source_type=prune(ntype(n))
+            if source_type not=? T_MATH_INT and types.ptr[source_type].bits =? types.ptr[to].bits and types.ptr[source_type].sign =? types.ptr[to].sign {
+                nodes[n].type = int32<overflow='wrap'>(to)
+                return
+            }
+        }
+    }
+    if cv =? CV.int2float and exact_potential(n) {runtime_demand(if to =? T_F32 {"__exact_i128_f32"} else {"__exact_i128_f64"})}
+    let inner=nodes.length
+    nodes.push(nodes.ptr[n])
+    # A callable coercion moves the exact policy-construction block to `inner`.
+    if nodes.ptr[n].kind =? 'block' {
+        let target=setting_value_targets.get(n)
+        if target isnt? none {setting_value_targets[inner] = target}
+    }
+    move_divisor(n inner)
+    nodes[n] = Node(kind = 'conv' pos = nodes.ptr[inner].pos a = int32<overflow='wrap'>(inner) aux = int32<overflow='wrap'>(int64(cv)) type = int32<overflow='wrap'>(to) flags = int32<overflow='wrap'>(NF_CHECKED))
+    if (cv =? CV.int_ and to =? T_INT or (cv =? CV.wrap_int or cv =? CV.saturate_int) and ntype(inner) =? T_MATH_INT and exact_constant_use(inner)) and representation_type(ntype(inner)) =? T_MATH_INT and dewy_at(nodes.ptr[n].pos) and cx >=? 0 {
+        let owner=IntConvWord(ctxs.ptr[cx].inst)
+        if owner >? 0 {
+            exact_owners[owner] = true
+            exact_full_owners[owner] = true
+        }
+    }
+}
+
+# ---------------- coercion ----------------
+# Values already fixed to a scalar type can still be compile-time constants.
+# This deliberately excludes calls and reads, whose effects must remain visible.
+integer_constant=(n:int64):>[bool int64]=>$unsafe {
+    if nodes.ptr[n].kind =? 'int_lit' {
+        # (an `int` literal above the i64 range holds only its low word: not a word constant)
+        if has_flag(n NF_U64) and prune(ntype(n)) =? T_MATH_INT {return [false 0]}
+        return [true nodes.ptr[n].ival]
+    }
+    if nodes.ptr[n].kind not=? 'conv' or nodes.ptr[n].aux not=? int32<overflow='wrap'>(int64(CV.int_)) {return [false 0]}
+    let [known value]=integer_constant(IntConvWord(nodes.ptr[n].a))
+    if not known {return [false 0]}
+    let t=prune(ntype(n))
+    let bits=IntConvWord(types.ptr[t].bits)
+    if bits <? 64 {
+        if types.ptr[t].sign {value=(value << (64 - bits)) >> (64 - bits)}
+        else {value=value & ((1 << bits) - 1)}
+    }
+    [true value]
+}
+
+# An integer stored into a width that cannot hold every value of its own:
+# the proven conversion, a refinement of the source to the target's range
+# (proven from facts, or checked when the program runs), then the conversion.
+narrow_int=(n:int64 source_type:int64 to:int64):>void=>$unsafe {
+    if exact_potential(n) {
+        wrap_conv(n CV.int_ to)
+        return
+    }
+    let atoms:array<RefAtom>=[]
+    let fbits=IntConvWord(types.ptr[source_type].bits)
+    let tbits=IntConvWord(types.ptr[to].bits)
+    if types.ptr[source_type].sign and (not types.ptr[to].sign or tbits <? fbits) {
+        let lo=if types.ptr[to].sign {-(IntConvWord(1) << (tbits - 1))} else {0}
+        atoms.push(RefAtom('le' RefTerm(1 lo) RefTerm()))
+    }
+    let hi=if types.ptr[to].sign {(IntConvWord(1) << (tbits - 1)) - 1} else if tbits <? 64 {(IntConvWord(1) << tbits) - 1} else {-1}
+    let from_hi=if types.ptr[source_type].sign {(IntConvWord(1) << (fbits - 1)) - 1} else if fbits <? 64 {(IntConvWord(1) << fbits) - 1} else {-1}
+    if hi >=? 0 and (from_hi <? 0 or hi <? from_hi) {atoms.push(RefAtom('le' RefTerm() RefTerm(1 hi)))}
+    let inner=nodes.length
+    nodes.push(nodes.ptr[n])
+    # (a width's range is a local obligation, solved where it is demanded: it does not turn on
+    # the program-wide refinement machinery that declared refinements need)
+    let active_slot=@refine_active
+    let active=active_slot
+    refine_coerce(inner mk_refined(source_type ref_intern(atoms)));
+    active_slot=active
+    ref_narrowing[inner] = to
+    nodes[n] = Node(kind = 'conv' pos = nodes.ptr[inner].pos a = int32<overflow='wrap'>(inner) aux = int32<overflow='wrap'>(int64(CV.int_)) type = int32<overflow='wrap'>(to) flags = int32<overflow='wrap'>(NF_CHECKED))
 }

@@ -1,0 +1,266 @@
+$runtime_checks
+from p"literal_number_forms.dewy" import (word_rational_source)
+from p"union_conversion_nodes.dewy" import (union_target)
+from p"unit_rare.dewy" import (time_constant_duration)
+from p"sibling_ops.dewy" import (sibling_array_source)
+from p"secret_checks.dewy" import (secret_can_coerce)
+from p"refine_metadata.dewy" import (representation_type str_set_of)
+from p"refine.jo" import (refine_active str_sets)
+from p"refine_rare.dewy" import (ref_record_conversion str_set_coerce str_set_text_of)
+from p"record_construction.dewy" import (record_int_conversion)
+from p"unit_ops.dewy" import (quantity_constant_fits quantity_int_promotes)
+from p"units.jo" import (quantity_base)
+from p"poly_ops.dewy" import (poly_matches)
+from p"expression_types.dewy" import (ntype)
+from p"ast.jo" import (nodes)
+from p"expr_cold_queries.dewy" import (intersection_within)
+from p"check.jo" import (intersection_parts)
+from p"integer_conversions.dewy" import (int_widens)
+from p"callable_checks.dewy" import (fn_value_adapts fn_without_defaults)
+from p"checks_thin_expr.dewy" import (fixed_literal_ok nd_elem str_set_within union_within)
+from p"literal_context.dewy" import (finalize_literal is_lit lit_default)
+from p"util.jo" import (files pos_file)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"error_ops.dewy" import (exception_join)
+from p"type_ops.dewy" import (dt int_policy is_soa mk_opt mk_union soa_elem union_index)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"expr.jo" import (coerce)
+from p"callable_compatibility.dewy" import (callable_fits)
+from p"rational_types.dewy" import (bundled_rational_type bundled_word_rational_type)
+from p"numeric_library_types.dewy" import (bundled_bigint_type dewy_bigint_literal_target is_nd math_rep_type)
+from p"array_element_conversion.dewy" import (array_elems_subsume elem_subsumes)
+from p"types.jo" import (T_MATH_INT T_NEVER T_RAWPTR has_var is_float is_int is_numeric is_union prune structs telem tkind type_eq types union_members)
+
+CoercionQueriesWord:type=int64<overflow='wrap'>
+
+can_coerce=(n:int64 from0:int64 to0:int64):>bool=>$unsafe {
+    let source_type=prune(from0)
+    let to=prune(to0)
+    if type_eq(source_type to) {return true}
+    if source_type =? T_MATH_INT and (math_rep_type(to) or (n not=? 0 and bundled_bigint_type(to))) {return true}
+    if to =? T_MATH_INT and (math_rep_type(source_type) or (n not=? 0 and bundled_bigint_type(source_type))) {return true}
+    if n not=? 0 and is_float(to) and bundled_rational_type(source_type) {return true}
+    # An integer promotes to the exact rational with the same value.
+    if n not=? 0 and is_int(source_type) and bundled_rational_type(to) {return true}
+    # rational<int64> widens to rational and rounds into a float context; a
+    # value enters it only when it always fits (a word, a folded constant).
+    if n not=? 0 and bundled_word_rational_type(source_type) and (bundled_rational_type(to) or is_float(to)) {return true}
+    if n not=? 0 and bundled_word_rational_type(to) and word_rational_source(n source_type) {return true}
+    if source_type =? T_NEVER {return true}
+    let fk=types.ptr[source_type].kind
+    let tk=types.ptr[to].kind
+    if fk =? 'secret' or tk =? 'secret' {
+        let r=secret_can_coerce(n source_type to)
+        if r >=? 0 {return r =? 1}
+    }
+    if fk =? 'tuple' and tk =? 'array' and n not=? 0 and sibling_array_source(n source_type CoercionQueriesWord(types.ptr[to].elem)) {return true}
+    if fk =? 'quantity' and tk =? 'struct_' and time_constant_duration(n source_type to) {return true}
+    if str_sets.length >? 1 {
+        let fs=str_set_of(source_type)
+        let ts=str_set_of(to)
+        # (by type alone, as library overloads are chosen, a set is not its text)
+        if ts not=? 0 and (fk =? 'str_' and n not=? 0 or fs not=? 0 and (str_set_within(fs ts) or n not=? 0 and dewy_at(nodes.ptr[n].pos))) {return true}
+        if fs not=? 0 and tk =? 'str_' and n not=? 0 {return true}
+    }
+    if fk =? 'refined' or tk =? 'refined' {return can_coerce(n representation_type(source_type) representation_type(to))}
+    if (fk =? 'array' or fk =? 'fixed') and fk =? tk and array_elems_subsume(source_type to) {return true}
+    if refine_active and fk =? 'struct_' and tk =? 'struct_' and ref_record_conversion(source_type to) {return true}
+    if fk =? 'struct_' and tk =? 'struct_' and record_int_conversion(source_type to) {return true}
+    if fk =? 'struct_' and tk =? 'struct_' and intersection_parts.length >? 0 and intersection_within(source_type to) {return true}
+    if fk =? 'quantity' or tk =? 'quantity' {
+        if fk =? 'var' or tk =? 'var' {return true}
+        if fk =? 'quantity' and tk =? 'quantity' {
+            if types.ptr[source_type].st not=? types.ptr[to].st {return false}
+            # (an int quantity promotes to the exact rational one, as an int does)
+            if n not=? 0 and quantity_int_promotes(source_type to) {return true}
+            return quantity_constant_fits(n to) or can_coerce(0 quantity_base(source_type) quantity_base(to))
+        }
+        if tk not=? 'opt' and not is_union(to) {return false}
+    }
+    if fk =? 'polyfn' and tk =? 'fn_' {return poly_matches(source_type to)}
+    if has_var(source_type) or has_var(to) {
+        if fk =? 'var' or tk =? 'var' {return true}
+        if fk =? tk and fk =? 'array' {
+            let fe=prune(CoercionQueriesWord(types.ptr[source_type].elem))
+            let te=prune(CoercionQueriesWord(types.ptr[to].elem))
+            return types.ptr[fe].kind =? 'var' or types.ptr[te].kind =? 'var' or type_eq(fe te)
+        }
+        if fk =? 'opt' and tk =? 'opt' {return true}
+    }
+    if n not=? 0 and is_lit(n) {
+        if nodes.ptr[n].kind =? 'float_lit' and nodes.ptr[n].sval not=? 0 and bundled_rational_type(to) {return true}
+        if dewy_bigint_literal_target(n to) {return true}
+        if nodes.ptr[n].kind =? 'int_lit' and (tk =? 'int_' or tk =? 'float_') {return true}
+        if nodes.ptr[n].kind =? 'float_lit' and tk =? 'float_' {return true}
+    }
+    if fk =? 'int_' and tk =? 'int_' {return source_type =? T_MATH_INT or to =? T_MATH_INT or int_widens(source_type to) or n not=? 0 and dewy_at(nodes.ptr[n].pos)}
+    if fk =? 'int_' and tk =? 'float_' {return true}
+    if fk =? 'float_' and tk =? 'float_' {return true}
+    if tk =? 'enum_' and not is_union(source_type) and is_union(to) {return union_target(n source_type to) >=? 0}
+    if is_union(source_type) and is_union(to) {return union_within(source_type to)}
+    if fk =? 'array' and is_soa(to) {return can_coerce(0 CoercionQueriesWord(types.ptr[source_type].elem) soa_elem(to))}
+    if fk =? 'fixed' and tk =? 'array' {return elem_subsumes(CoercionQueriesWord(types.ptr[source_type].elem) CoercionQueriesWord(types.ptr[to].elem))}
+    if tk =? 'array' and is_nd(source_type) {return type_eq(nd_elem(source_type) CoercionQueriesWord(types.ptr[to].elem))}
+    if (fk =? 'callable' or tk =? 'callable') and callable_fits(source_type to) {return true}
+    if fk =? 'fn_' and tk =? 'fn_' and (callable_fits(source_type to) or n not=? 0 and fn_value_adapts(n source_type to)) {return true}
+    if fk =? 'array' and tk =? 'fixed' {
+        if n not=? 0 and fixed_literal_ok(n to) {return true}
+        return n not=? 0 and nodes.ptr[n].kind not=? 'array' and elem_subsumes(CoercionQueriesWord(types.ptr[source_type].elem) CoercionQueriesWord(types.ptr[to].elem))
+    }
+    if tk =? 'opt' {
+        if fk =? 'none_lit' {return true}
+        if type_eq(source_type CoercionQueriesWord(types.ptr[to].elem)) {return true}
+        if fk =? 'opt' {return can_coerce(0 telem(source_type) telem(to))}
+        return can_coerce(n source_type CoercionQueriesWord(types.ptr[to].elem))
+    }
+    if fk =? 'null_' and (tk =? 'ptr' or tk =? 'cfn') {return true}
+    if fk =? 'ptr' and tk =? 'ptr' and (to =? T_RAWPTR or source_type =? T_RAWPTR) {return true}
+    false
+}
+
+# n coerced to `to` where a string set is on either side: true when done (a
+# string or set into a set; a set into a string), and a set going where only
+# its text fits (an optional string, a union with a string) is made text first
+str_set_coerced=(n:int64 to:int64):>bool=>$unsafe {
+    let source_type=prune(ntype(n))
+    if source_type =? to {return false}
+    if str_set_of(to) not=? 0 {
+        if types.ptr[source_type].kind =? 'str_' or str_set_of(source_type) not=? 0 {
+            str_set_coerce(n to);
+            return true
+        }
+        return false
+    }
+    let fs=str_set_of(source_type)
+    if fs =? 0 {return false}
+    let tk=types.ptr[to].kind
+    if tk =? 'str_' {
+        str_set_text_of(n)
+        return true
+    }
+    if tk =? 'opt' and types.ptr[prune(CoercionQueriesWord(types.ptr[to].elem))].kind =? 'str_' {str_set_text_of(n)}
+    else if is_union(to) and union_index(to source_type) <? 0 {
+        let fits=false
+        loop m in union_members(to) {
+            let ms=str_set_of(m)
+            if ms not=? 0 and str_set_within(fs ms) {fits=true}
+        }
+        if not fits {str_set_text_of(n)}
+    }
+    false
+}
+
+num_join=(a0:int64 b0:int64):>int64=>$unsafe {
+    let a=prune(a0)
+    let b=prune(b0)
+    if type_eq(a b) {return a}
+    let ka=types.ptr[a].kind
+    let kb=types.ptr[b].kind
+    if ka =? 'float_' and kb =? 'float_' {
+        if CoercionQueriesWord(types.ptr[a].bits) >=? CoercionQueriesWord(types.ptr[b].bits) {return a}
+        return b
+    }
+    if ka =? 'float_' and kb =? 'int_' {return a}
+    if kb =? 'float_' and ka =? 'int_' {return b}
+    if ka =? 'int_' and kb =? 'int_' {
+        if a =? T_MATH_INT or b =? T_MATH_INT {return T_MATH_INT}
+        # (one width and sign: a policy on either side decides; two different ones have no join)
+        if int_policy(a) not=? int_policy(b) and types.ptr[a].bits =? types.ptr[b].bits and types.ptr[a].sign =? types.ptr[b].sign {
+            if int_policy(b) =? 0 {return a}
+            if int_policy(a) =? 0 {return b}
+            return 0
+        }
+        if int_widens(a b) {return b}
+        if int_widens(b a) {return a}
+    }
+    0
+}
+
+join_types=(a:int64 b:int64 pos:int64):>int64=>$unsafe {
+    let ta=prune(ntype(a))
+    let tb=prune(ntype(b))
+    if ta =? T_NEVER {return finalize_literal(b)}
+    if tb =? T_NEVER {return finalize_literal(a)}
+    # A branch without a path guarantee widens a branded peer to Path; it
+    # cannot acquire the peer's storage obligation through join ordering.
+    if refine_active and ta not=? tb and (types.ptr[ta].kind =? 'refined' and types.ptr[ta].bits =? -2 or types.ptr[tb].kind =? 'refined' and types.ptr[tb].bits =? -2) and type_eq(representation_type(ta) representation_type(tb)) {
+        let t=representation_type(ta)
+        coerce(a t);
+        coerce(b t);
+        return t
+    }
+    let la=is_lit(a)
+    let lb=is_lit(b)
+    # (two values of one number type, neither a literal: nothing to convert)
+    if ta =? tb and not la and not lb and is_numeric(ta) and nodes.ptr[a].kind not=? 'str_lit' and nodes.ptr[b].kind not=? 'str_lit' {return ta}
+    if la and not lb and can_coerce(a ta tb) {
+        coerce(a tb);
+        return tb
+    }
+    if lb and not la and can_coerce(b tb ta) {
+        coerce(b ta);
+        return ta
+    }
+    if la and lb {
+        let t=lit_default(a)
+        if nodes.ptr[a].kind =? 'float_lit' {t=lit_default(a)}
+        else if nodes.ptr[b].kind =? 'float_lit' {t=lit_default(b)}
+        coerce(a t);
+        coerce(b t);
+        return t
+    }
+    if is_numeric(ta) and is_numeric(tb) {
+        let j=num_join(ta tb)
+        if j =? 0 {fatal(pos "cannot mix {dt(ta)} and {dt(tb)}; convert one explicitly")}
+        coerce(a j);
+        coerce(b j);
+        return j
+    }
+    if types.ptr[ta].kind =? 'none_lit' or (types.ptr[ta].kind =? 'opt' and tkind(CoercionQueriesWord(types.ptr[ta].elem)) =? 'var') {
+        let t=tb
+        if types.ptr[tb].kind not=? 'opt' {t=mk_opt(tb)}
+        coerce(a t);
+        coerce(b t);
+        return t
+    }
+    if types.ptr[tb].kind =? 'none_lit' or (types.ptr[tb].kind =? 'opt' and tkind(CoercionQueriesWord(types.ptr[tb].elem)) =? 'var') {
+        let t=ta
+        if types.ptr[ta].kind not=? 'opt' {t=mk_opt(ta)}
+        coerce(a t);
+        coerce(b t);
+        return t
+    }
+    if types.ptr[ta].kind =? 'opt' and can_coerce(b tb ta) {
+        coerce(b ta);
+        return ta
+    }
+    if types.ptr[tb].kind =? 'opt' and can_coerce(a ta tb) {
+        coerce(a tb);
+        return tb
+    }
+    # (handles of two functions with defaults: the joined value keeps neither's)
+    if types.ptr[ta].kind =? 'fn_' and types.ptr[tb].kind =? 'fn_' and types.ptr[ta].bits not=? types.ptr[tb].bits {
+        let t=fn_without_defaults(ta)
+        coerce(a t);
+        coerce(b t);
+        return t
+    }
+    # (branches failing in different ways: `int | Bad` and `int | Worse` give `int | Bad | Worse`)
+    if not type_eq(ta tb) and not can_coerce(b tb ta) and files.ptr[pos_file(nodes.ptr[a].pos)].is_dewy {
+        if can_coerce(a ta tb) {
+            coerce(a tb);
+            return tb
+        }
+        let t=exception_join(ta tb)
+        # Distinct anonymous shapes are distinct union members. Compatible
+        # numeric fields still use the ordinary structural conversion above.
+        if types.ptr[ta].kind =? 'struct_' and types.ptr[tb].kind =? 'struct_' and structs.ptr[CoercionQueriesWord(types.ptr[ta].st)].record_ and structs.ptr[CoercionQueriesWord(types.ptr[tb].st)].record_ {t=mk_union([ta tb])}
+        if t not=? 0 {
+            coerce(a t);
+            coerce(b t);
+            return t
+        }
+    }
+    coerce(b ta);
+    ta
+}

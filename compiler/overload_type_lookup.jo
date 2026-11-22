@@ -1,0 +1,78 @@
+use 'checker_call_queries.dewy'
+use 'check.jo'
+use 'ast.jo'
+use 'util.jo'
+use 'checker_method_receiver.dewy'
+use 'checker_module_lookup.dewy'
+use 'call_argument_checks.dewy'
+use 'ide.jo'
+use 'types.jo'
+use 'checker_type_entries.dewy'
+use 'checker_signature.dewy'
+use 'diagnostic_exit.dewy'
+use 'type_ops.dewy'
+use 'checker_contexts.dewy'
+use 'expr.jo'
+
+resolve_by_types = (name: int, ts: int[], pos: int, required: bool, choice_only: bool = false) -> int:
+    settled = not ide_on
+    loop t in ts:
+        if has_var(t): settled = false
+    key = ByTypesKey(name, cur_mod(), ts)
+    if settled:
+        if let c = by_types_seen.get(key):
+            if c.gen == ml_stamp(name):
+                loop d in c.hidden: surface_hidden.push(d)
+                if choice_only:
+                    by_types_decl = c.decl
+                    by_types_binds = c.binds
+                    return c.decl
+                return get_fn_inst(c.decl, c.binds, pos)
+    gen = ml_stamp(name)
+    hidden_mark = surface_hidden.len()
+    decls: int[]
+    collect_fns(name, &decls)
+    collect_in(-1, name, 0, &decls)
+    if ts.len() > 0:
+        tm = module_of_type(ts[ts.len() - 1])
+        if tm >= 0: collect_module(tm, name, &decls)
+    if not choose_from_types(name, decls, ts, pos, required): return 0
+    decl = by_types_decl
+    binds = by_types_binds
+    if settled and ml_stamp(name) == gen: by_types_seen[key] = ByTypesChoice(gen, decl, binds, surface_hidden[hidden_mark..])
+    if choice_only: decl else: get_fn_inst(decl, binds, pos)
+
+# (the cheapest of decls for arguments of types ts: by_types_decl and its by_types_binds; false
+# when none fits and none is required)
+choose_from_types = (name: int, decls: int[], ts: int[], pos: int, required: bool) -> bool:
+    best = -1
+    bestcost = 1 << 30
+    bestb: int[]
+    bestgen = false
+    loop k in 0.. and d in decls:
+        sig = fn_sig(d)
+        if nkids(d) != ts.len(): continue
+        binds = fill(0, int(sig.ntp))
+        cost = 0
+        ok = true
+        loop i in [0..ts.len()):
+            r = match_type(sig.params[i], ts[i], binds, 0)
+            if r < 0 or (int(sig.mutmask) & (1 << i) != 0 and r == 1):
+                ok = false
+                break
+            cost += r
+        if not ok: continue
+        # (a tie: the one without type parameters, as __fmt(m: f64[,]) over __fmt[T](m: T[,]))
+        if cost < bestcost or (cost == bestcost and sig.ntp == 0 and bestgen):
+            best = k
+            bestcost = cost
+            bestb = binds
+            bestgen = sig.ntp > 0
+    if best < 0:
+        if not required: return false
+        last = "()"
+        if ts.len() > 0: last = dt(ts[ts.len() - 1])
+        fatal(pos, "no function '{name_of(name)}' accepting {last}")
+    by_types_decl = decls[best]
+    by_types_binds = bestb
+    true

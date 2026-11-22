@@ -1,0 +1,98 @@
+$runtime_checks
+from p"check.jo" import (warning_collect_in)
+from p"ast.jo" import (nkids)
+from p"util.jo" import (name_of)
+from p"checker_method_receiver.dewy" import (module_of_type)
+from p"checker_module_lookup.dewy" import (ml_stamp)
+from p"call_argument_checks.dewy" import (match_type)
+from p"ide.jo" import (ide_on)
+from p"types.jo" import (has_var)
+from p"checker_type_entries.dewy" import (get_fn_inst)
+from p"checker_signature.dewy" import (fn_sig)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"type_ops.dewy" import (dt)
+from p"checker_contexts.dewy" import (cur_mod)
+from p"expr.jo" import (ByTypesChoice ByTypesKey by_types_binds by_types_decl by_types_seen call_collect_fns call_collect_module surface_hidden)
+
+OverloadTypeLookupWord:type=int64<overflow='wrap'>
+
+resolve_by_types=(name:int64 ts:array<int64> pos:int64 required:bool choice_only:bool=false):>int64=>$unsafe {
+    let by_types_binds_slot=@by_types_binds
+    let by_types_decl_slot=@by_types_decl
+    let settled=not ide_on
+    loop t in ts {
+        if has_var(t) {settled=false}
+    }
+    let key=ByTypesKey(name cur_mod() ts)
+    if settled {
+        let c=by_types_seen.get(key)
+        if c isnt? none {
+            if c.gen =? ml_stamp(name) {
+                loop d in c.hidden {surface_hidden.push(d)}
+                if choice_only {
+                    by_types_decl_slot=c.decl
+                    by_types_binds_slot=c.binds
+                    return c.decl
+                }
+                return get_fn_inst(c.decl c.binds pos)
+            }
+        }
+    }
+    let gen=ml_stamp(name)
+    let hidden_mark=surface_hidden.length
+    let decls:array<int64>=[]
+    call_collect_fns(name @decls)
+    warning_collect_in(-1 name 0 @decls)
+    if ts.length >? 0 {
+        let tm=module_of_type(ts[ts.length - 1])
+        if tm >=? 0 {call_collect_module(tm name @decls)}
+    }
+    if not choose_from_types(name decls ts pos required) {return 0}
+    let decl=by_types_decl_slot
+    let binds=by_types_binds_slot
+    if settled and ml_stamp(name) =? gen {by_types_seen[key] = ByTypesChoice(gen decl binds surface_hidden[hidden_mark..])}
+    if choice_only {decl} else {get_fn_inst(decl binds pos)}
+}
+
+# (the cheapest of decls for arguments of types ts: by_types_decl and its by_types_binds; false
+# when none fits and none is required)
+choose_from_types=(name:int64 decls:array<int64> ts:array<int64> pos:int64 required:bool):>bool=>$unsafe {
+    let by_types_binds_slot=@by_types_binds
+    let by_types_decl_slot=@by_types_decl
+    let best:OverloadTypeLookupWord=-1
+    let bestcost:OverloadTypeLookupWord=1 << 30
+    let bestb:array<int64>=[]
+    let bestgen=false
+    loop k in 0.. and d in decls {
+        let sig=fn_sig(d)
+        if nkids(d) not=? ts.length {continue}
+        let binds:array<int64>=fill(0 OverloadTypeLookupWord(sig.ntp))
+        let cost:OverloadTypeLookupWord=0
+        let ok=true
+        loop i in 0.. and t in ts {
+            let r=match_type(sig.params[i] t @binds 0)
+            if r <? 0 or (OverloadTypeLookupWord(sig.mutmask) & (1 << i) not=? 0 and r =? 1) {
+                ok=false
+                break
+            }
+            cost += r
+        }
+        if not ok {continue}
+        # (a tie: the one without type parameters, as __fmt(m: f64[,]) over __fmt[T](m: T[,]))
+        if cost <? bestcost or (cost =? bestcost and sig.ntp =? 0 and bestgen) {
+            best=k
+            bestcost=cost
+            bestb=binds
+            bestgen=sig.ntp >? 0
+        }
+    }
+    if best <? 0 {
+        if not required {return false}
+        let last="()"
+        if ts.length >? 0 {last=dt(ts[ts.length - 1])}
+        fatal(pos "no function '{name_of(name)}' accepting {last}")
+    }
+    by_types_decl_slot=decls[best]
+    by_types_binds_slot=bestb
+    true
+}

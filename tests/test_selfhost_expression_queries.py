@@ -7,6 +7,11 @@ from tests.support import compiler  # noqa: F401
 
 
 @pytest.mark.parametrize(("leaf", "cases"), [
+    ("integer_conversions", ("misc/narrow_integers", "exact_int/wrap_either_side")),
+    ("coercion_queries", ("rational/float_array_argument_hint", "literal_union_proof/assignment")),
+    ("storage_place_checks", ("grouped_place/routes", "grouped_place/misuse_operand")),
+    ("overload_type_lookup", ("overload/group_types", "word_format_local/custom")),
+    ("match_pattern_sets", ("literal_union_proof/sparse_guard", "literal_union_proof/changed_guard")),
     ("literal_context", ("default/reference_float", "exact_int/chain_exact_operands")),
     ("union_conversion_nodes", ("default_proofs/refuted_literal_union", "surface/union_operand_failure")),
     ("map_entry_places", ("dogfood24_proofs/dict_entries_then_insert", "unpack/dictionary_entries")),

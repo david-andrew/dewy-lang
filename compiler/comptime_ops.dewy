@@ -1,10 +1,11 @@
 $runtime_checks
+from p"integer_conversions.dewy" import (wrap_conv)
 from p"checker_constant_queries.dewy" import (binding_const_init)
 
 from p"@lib/core/rt.jo" import (__str_from_bytes __str_slice)
 from p"checked_eval.dewy" import (cx_literal cx_run)
 from p"checks_text.dewy" import (sym_kind_of)
-from p"expr.jo" import (CV wrap_conv)
+from p"expr.jo" import (CV)
 
 # (the checked evaluator's host: Jo's enums as numbers, and Jo's byte-wise string cuts)
 checked_const_init=(kind:int64 ref:int64 pos:int64):>int64=>binding_const_init(sym_kind_of(kind) ref pos)

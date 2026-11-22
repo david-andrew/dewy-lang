@@ -1,0 +1,104 @@
+$runtime_checks
+from p"refine.jo" import (str_sets)
+from p"refine_metadata.dewy" import (str_set_of)
+from p"checks_thin.dewy" import (resolve_type)
+from p"types.jo" import (is_union prune type_eq types union_members)
+from p"intervals.dewy" import (interval_meet)
+from p"checks_thin_expr.dewy" import (int_intervals_wide)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"type_ops.dewy" import (dt type_str union_index)
+from p"checks_builders.dewy" import (bc_int bc_str)
+from p"ast.jo" import (NF_INCLUSIVE NF_U64 add_flag kids mk nodes set_list)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN)
+
+MatchPatternSetsWord:type=int64<overflow='wrap'>
+
+# A refined integer type pattern on an integer scrutinee (`<-1|1>`,
+# `small:int64<small <? 100>`): range patterns over the values it admits. high: a uint64
+# scrutinee's values from 2^63 on (int_intervals_wide), besides those of domain.
+refined_patterns=(arm:int64 domain:array<int64> st:int64 high:array<int64>=[]):>void=>$unsafe {
+    let out:array<int64>=[]
+    loop p in kids(arm) {
+        if nodes.ptr[p].kind not=? 'ptype' {
+            out.push(p)
+            continue
+        }
+        let pt=prune(resolve_type(MatchPatternSetsWord(nodes.ptr[p].a)))
+        let [known values wide]=int_intervals_wide(pt)
+        if types.ptr[pt].kind not=? 'refined' or not known {
+            out.push(p)
+            continue
+        }
+        values=interval_meet(values domain)
+        # (the values from 2^63 on both admit: their bits, negative, ordered as the values are;
+        # one range across 2^63 when they join)
+        let above=interval_meet(wide high)
+        if above.length >? 0 and values.length >? 0 and values[values.length - 1] =? FACT_MAX and above[0] =? FACT_MIN {
+            values[values.length - 1] = above[1]
+            above.pop(0);
+            above.pop(0);
+        }
+        values.extend(above)
+        if values.length =? 0 {fatal(nodes.ptr[p].pos "this arm is unreachable: no {dt(st)} is a {type_str(pt true)}")}
+        loop k in [0..values.length >> 1) {
+            let r=mk('prange' nodes.ptr[p].pos)
+            nodes[r].a = int32<overflow='wrap'>(bc_int(values[2 * k] nodes.ptr[p].pos))
+            nodes[r].b = int32<overflow='wrap'>(bc_int(values[2 * k + 1] nodes.ptr[p].pos))
+            if high.length >? 0 and values[2 * k] <? 0 {add_flag(MatchPatternSetsWord(nodes.ptr[r].a) NF_U64)}
+            if high.length >? 0 and values[2 * k + 1] <? 0 {add_flag(MatchPatternSetsWord(nodes.ptr[r].b) NF_U64)}
+            add_flag(r NF_INCLUSIVE)
+            if k =? 0 {nodes[r].name = nodes.ptr[p].name}
+            out.push(r)
+        }
+    }
+    set_list(arm out)
+}
+
+# A string set type pattern (`<'n'|'s'>`, `other:'e'|'w'`) on a string: one
+# literal pattern per member the scrutinee can hold and no earlier arm matches
+# (`covered`, or `union_lits` on a union); the first keeps the binding, typed as the set.
+str_set_patterns=(arm:int64 st:int64 covered:array<string> union_lits:array<string>):>void=>$unsafe {
+    let out:array<int64>=[]
+    loop p in kids(arm) {
+        let pt=if nodes.ptr[p].kind =? 'ptype' {prune(resolve_type(MatchPatternSetsWord(nodes.ptr[p].a)))} else {0}
+        let set=if pt not=? 0 {str_set_of(pt)} else {0}
+        if set =? 0 or type_eq(pt st) and str_set_of(st) =? 0 or is_union(st) and union_index(st pt) >=? 0 {
+            out.push(p)
+            continue
+        }
+        # (only the members the scrutinee can hold: `x:'a'|'b'|'c'` on `'b'|'c' | int64`)
+        let held=str_set_of(st)
+        let prefix=""
+        if is_union(st) {
+            loop vi in 0.. and m in union_members(st) {
+                if str_set_of(m) not=? 0 {
+                    held=str_set_of(m)
+                    prefix="{vi}"
+                }
+            }
+        }
+        let values:array<string>=[]
+        let any=false
+        loop value in str_sets[set] {
+            if held not=? 0 and not str_sets[held].contains(value) {continue}
+            any=true
+            if covered.contains(value) or held not=? 0 and union_lits.contains("{prefix}'{value}") {continue}
+            values.push(value)
+        }
+        if not any {
+            out.push(p)
+            continue
+        }
+        if values.length =? 0 {fatal(nodes.ptr[p].pos "this arm is unreachable: earlier arms already match every value it does")}
+        loop k in 0.. and value in values {
+            let q=mk('plit' nodes.ptr[p].pos)
+            nodes[q].a = int32<overflow='wrap'>(bc_str(value nodes.ptr[p].pos))
+            if k =? 0 {
+                nodes[q].name = nodes.ptr[p].name
+                nodes[q].type = int32<overflow='wrap'>(pt)
+            }
+            out.push(q)
+        }
+    }
+    set_list(arm out)
+}

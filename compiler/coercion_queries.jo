@@ -1,0 +1,229 @@
+use 'literal_number_forms.dewy'
+use 'union_conversion_nodes.dewy'
+use 'unit_rare.dewy'
+use 'sibling_ops.dewy'
+use 'secret_checks.dewy'
+use 'refine_metadata.dewy'
+use 'refine.jo'
+use 'refine_rare.dewy'
+use 'record_construction.dewy'
+use 'unit_ops.dewy'
+use 'units.jo'
+use 'poly_ops.dewy'
+use 'expression_types.dewy'
+use 'ast.jo'
+use 'expr_cold_queries.dewy'
+use 'check.jo'
+use 'integer_conversions.dewy'
+use 'callable_checks.dewy'
+use 'checks_thin_expr.dewy'
+use 'literal_context.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'error_ops.dewy'
+use 'type_ops.dewy'
+use 'checker_source_positions.dewy'
+use 'expr.jo'
+use 'callable_compatibility.dewy'
+use 'rational_types.dewy'
+use 'numeric_library_types.dewy'
+use 'array_element_conversion.dewy'
+use 'types.jo'
+
+can_coerce = (n: int, from0: int, to0: int) -> bool:
+    from = prune(from0)
+    to = prune(to0)
+    if type_eq(from, to): return true
+    if from == T_MATH_INT and (math_rep_type(to) or (n != 0 and bundled_bigint_type(to))): return true
+    if to == T_MATH_INT and (math_rep_type(from) or (n != 0 and bundled_bigint_type(from))): return true
+    if n != 0 and is_float(to) and bundled_rational_type(from): return true
+    # An integer promotes to the exact rational with the same value.
+    if n != 0 and is_int(from) and bundled_rational_type(to): return true
+    # rational<int64> widens to rational and rounds into a float context; a
+    # value enters it only when it always fits (a word, a folded constant).
+    if n != 0 and bundled_word_rational_type(from) and (bundled_rational_type(to) or is_float(to)): return true
+    if n != 0 and bundled_word_rational_type(to) and word_rational_source(n, from): return true
+    if from == T_NEVER: return true
+    fk = types[from].kind
+    tk = types[to].kind
+    if fk == .secret or tk == .secret:
+        r = secret_can_coerce(n, from, to)
+        if r >= 0: return r == 1
+    if fk == .tuple and tk == .array and n != 0 and sibling_array_source(n, from, int(types[to].elem)): return true
+    if fk == .quantity and tk == .struct_ and time_constant_duration(n, from, to): return true
+    if str_sets.len() > 1:
+        fs = str_set_of(from)
+        ts = str_set_of(to)
+        # (by type alone, as library overloads are chosen, a set is not its text)
+        if ts != 0 and (fk == .str_ and n != 0 or fs != 0 and (str_set_within(fs, ts) or n != 0 and dewy_at(nodes[n].pos))): return true
+        if fs != 0 and tk == .str_ and n != 0: return true
+    if fk == .refined or tk == .refined: return can_coerce(n, representation_type(from), representation_type(to))
+    if (fk == .array or fk == .fixed) and fk == tk and array_elems_subsume(from, to): return true
+    if refine_active and fk == .struct_ and tk == .struct_ and ref_record_conversion(from, to): return true
+    if fk == .struct_ and tk == .struct_ and record_int_conversion(from, to): return true
+    if fk == .struct_ and tk == .struct_ and intersection_parts.len() > 0 and intersection_within(from, to): return true
+    if fk == .quantity or tk == .quantity:
+        if fk == .var or tk == .var: return true
+        if fk == .quantity and tk == .quantity:
+            if types[from].st != types[to].st: return false
+            # (an int quantity promotes to the exact rational one, as an int does)
+            if n != 0 and quantity_int_promotes(from, to): return true
+            return quantity_constant_fits(n, to) or can_coerce(0, quantity_base(from), quantity_base(to))
+        if tk != .opt and not is_union(to): return false
+    if fk == .polyfn and tk == .fn_: return poly_matches(from, to)
+    if has_var(from) or has_var(to):
+        if fk == .var or tk == .var: return true
+        if fk == tk and fk == .array:
+            fe = prune(int(types[from].elem))
+            te = prune(int(types[to].elem))
+            return types[fe].kind == .var or types[te].kind == .var or type_eq(fe, te)
+        if fk == .opt and tk == .opt: return true
+    if n != 0 and is_lit(n):
+        if nodes[n].kind == .float_lit and nodes[n].sval != 0 and bundled_rational_type(to): return true
+        if dewy_bigint_literal_target(n, to): return true
+        if nodes[n].kind == .int_lit and (tk == .int_ or tk == .float_): return true
+        if nodes[n].kind == .float_lit and tk == .float_: return true
+    if fk == .int_ and tk == .int_: return from == T_MATH_INT or to == T_MATH_INT or int_widens(from, to) or n != 0 and dewy_at(nodes[n].pos)
+    if fk == .int_ and tk == .float_: return true
+    if fk == .float_ and tk == .float_: return true
+    if tk == .enum_ and not is_union(from) and is_union(to): return union_target(n, from, to) >= 0
+    if is_union(from) and is_union(to): return union_within(from, to)
+    if fk == .array and is_soa(to): return can_coerce(0, int(types[from].elem), soa_elem(to))
+    if fk == .fixed and tk == .array: return elem_subsumes(int(types[from].elem), int(types[to].elem))
+    if tk == .array and is_nd(from): return type_eq(nd_elem(from), int(types[to].elem))
+    if (fk == .callable or tk == .callable) and callable_fits(from, to): return true
+    if fk == .fn_ and tk == .fn_ and (callable_fits(from, to) or n != 0 and fn_value_adapts(n, from, to)): return true
+    if fk == .array and tk == .fixed:
+        if n != 0 and fixed_literal_ok(n, to): return true
+        return n != 0 and nodes[n].kind != .array and elem_subsumes(int(types[from].elem), int(types[to].elem))
+    if tk == .opt:
+        if fk == .none_lit: return true
+        if type_eq(from, int(types[to].elem)): return true
+        if fk == .opt: return can_coerce(0, telem(from), telem(to))
+        return can_coerce(n, from, int(types[to].elem))
+    if fk == .null_ and (tk == .ptr or tk == .cfn): return true
+    if fk == .ptr and tk == .ptr and (to == T_RAWPTR or from == T_RAWPTR): return true
+    false
+
+# n coerced to `to` where a string set is on either side: true when done (a
+# string or set into a set; a set into a string), and a set going where only
+# its text fits (an optional string, a union with a string) is made text first
+str_set_coerced = (n: int, to: int) -> bool:
+    from = prune(ntype(n))
+    if from == to: return false
+    if str_set_of(to) != 0:
+        if types[from].kind == .str_ or str_set_of(from) != 0:
+            str_set_coerce(n, to)
+            return true
+        return false
+    fs = str_set_of(from)
+    if fs == 0: return false
+    tk = types[to].kind
+    if tk == .str_:
+        str_set_text_of(n)
+        return true
+    if tk == .opt and types[prune(int(types[to].elem))].kind == .str_: str_set_text_of(n)
+    else if is_union(to) and union_index(to, from) < 0:
+        fits = false
+        loop m in union_members(to):
+            ms = str_set_of(m)
+            if ms != 0 and str_set_within(fs, ms): fits = true
+        if not fits: str_set_text_of(n)
+    false
+
+num_join = (a0: int, b0: int) -> int:
+    a = prune(a0)
+    b = prune(b0)
+    if type_eq(a, b): return a
+    ka = types[a].kind
+    kb = types[b].kind
+    if ka == .float_ and kb == .float_:
+        if int(types[a].bits) >= int(types[b].bits): return a
+        return b
+    if ka == .float_ and kb == .int_: return a
+    if kb == .float_ and ka == .int_: return b
+    if ka == .int_ and kb == .int_:
+        if a == T_MATH_INT or b == T_MATH_INT: return T_MATH_INT
+        # (one width and sign: a policy on either side decides; two different ones have no join)
+        if int_policy(a) != int_policy(b) and types[a].bits == types[b].bits and types[a].sign == types[b].sign:
+            if int_policy(b) == 0: return a
+            if int_policy(a) == 0: return b
+            return 0
+        if int_widens(a, b): return b
+        if int_widens(b, a): return a
+    0
+
+join_types = (a: int, b: int, pos: int) -> int:
+    ta = prune(ntype(a))
+    tb = prune(ntype(b))
+    if ta == T_NEVER: return finalize_literal(b)
+    if tb == T_NEVER: return finalize_literal(a)
+    # A branch without a path guarantee widens a branded peer to Path; it
+    # cannot acquire the peer's storage obligation through join ordering.
+    if refine_active and ta != tb and (types[ta].kind == .refined and types[ta].bits == -2 or types[tb].kind == .refined and types[tb].bits == -2) and type_eq(representation_type(ta), representation_type(tb)):
+        t = representation_type(ta)
+        coerce(a, t)
+        coerce(b, t)
+        return t
+    la = is_lit(a)
+    lb = is_lit(b)
+    # (two values of one number type, neither a literal: nothing to convert)
+    if ta == tb and not la and not lb and is_numeric(ta) and nodes[a].kind != .str_lit and nodes[b].kind != .str_lit: return ta
+    if la and not lb and can_coerce(a, ta, tb):
+        coerce(a, tb)
+        return tb
+    if lb and not la and can_coerce(b, tb, ta):
+        coerce(b, ta)
+        return ta
+    if la and lb:
+        t = lit_default(a)
+        if nodes[a].kind == .float_lit: t = lit_default(a)
+        else if nodes[b].kind == .float_lit: t = lit_default(b)
+        coerce(a, t)
+        coerce(b, t)
+        return t
+    if is_numeric(ta) and is_numeric(tb):
+        j = num_join(ta, tb)
+        if j == 0: fatal(pos, "cannot mix {dt(ta)} and {dt(tb)}; convert one explicitly")
+        coerce(a, j)
+        coerce(b, j)
+        return j
+    if types[ta].kind == .none_lit or (types[ta].kind == .opt and tkind(int(types[ta].elem)) == .var):
+        t = tb
+        if types[tb].kind != .opt: t = mk_opt(tb)
+        coerce(a, t)
+        coerce(b, t)
+        return t
+    if types[tb].kind == .none_lit or (types[tb].kind == .opt and tkind(int(types[tb].elem)) == .var):
+        t = ta
+        if types[ta].kind != .opt: t = mk_opt(ta)
+        coerce(a, t)
+        coerce(b, t)
+        return t
+    if types[ta].kind == .opt and can_coerce(b, tb, ta):
+        coerce(b, ta)
+        return ta
+    if types[tb].kind == .opt and can_coerce(a, ta, tb):
+        coerce(a, tb)
+        return tb
+    # (handles of two functions with defaults: the joined value keeps neither's)
+    if types[ta].kind == .fn_ and types[tb].kind == .fn_ and types[ta].bits != types[tb].bits:
+        t = fn_without_defaults(ta)
+        coerce(a, t)
+        coerce(b, t)
+        return t
+    # (branches failing in different ways: `int | Bad` and `int | Worse` give `int | Bad | Worse`)
+    if not type_eq(ta, tb) and not can_coerce(b, tb, ta) and files[pos_file(nodes[a].pos)].is_dewy:
+        if can_coerce(a, ta, tb):
+            coerce(a, tb)
+            return tb
+        t = exception_join(ta, tb)
+        # Distinct anonymous shapes are distinct union members. Compatible
+        # numeric fields still use the ordinary structural conversion above.
+        if types[ta].kind == .struct_ and types[tb].kind == .struct_ and structs[int(types[ta].st)].record_ and structs[int(types[tb].st)].record_: t = mk_union([ta, tb])
+        if t != 0:
+            coerce(a, t)
+            coerce(b, t)
+            return t
+    coerce(b, ta)
+    ta

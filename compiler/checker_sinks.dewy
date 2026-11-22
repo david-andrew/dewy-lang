@@ -1,4 +1,5 @@
 $runtime_checks
+from p"coercion_queries.dewy" import (can_coerce)
 from p"expression_types.dewy" import (ntype)
 from p"checked_expression_nodes.dewy" import (capture_value mk_ident_local type_node_of)
 
@@ -11,7 +12,7 @@ from p"ast.jo" import (NF_INDEX_CAPTURED NF_CHECKED NF_MUT NF_STMT NF_WRITTEN_VO
 from p"checker_exprstmts.dewy" import (Sink)
 from p"types.jo" import (T_VOID prune targ types)
 from p"type_ops.dewy" import (is_values mk_array mk_values)
-from p"expr.jo" import (can_coerce coerce last_checked)
+from p"expr.jo" import (coerce last_checked)
 from p"literal_context.dewy" import (finalize_literal is_lit lit_default)
 from p"collection_cancellation.dewy" import (collection_array collection_value)
 from p"checks_builders.dewy" import (bc_block)

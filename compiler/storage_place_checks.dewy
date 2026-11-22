@@ -1,0 +1,221 @@
+$runtime_checks
+from p"vector_swizzles.dewy" import (swizzle_run)
+from p"string_domains.jo" import (string_domains)
+from p"@lib/core/str.jo" import (starts_with)
+from p"sibling_types.jo" import (sibling_known)
+from p"sibling_ops.dewy" import (sibling_forget)
+from p"expression_types.dewy" import (ntype)
+from p"checker_captures.dewy" import (note_write)
+from p"checks_thin.dewy" import (jd mutable_loop_syntax note_global_write readonly_global)
+from p"checks_loop_copies.dewy" import (loop_copy_write)
+from p"checker_expr.dewy" import (lookup)
+from p"checks_thin_expr.dewy" import (is_map_type place_fatal)
+from p"map_entry_places.dewy" import (is_map_get map_elem_place)
+from p"util.jo" import (intern name_of)
+from p"string_domain_ops.dewy" import (int_domain_write string_domain_write)
+from p"expr_error_context.dewy" import (implicit_capture_write)
+from p"expr_cold_queries.dewy" import (implicit_capture)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"expr.jo" import (cp_inner place_method place_write_pos)
+from p"select_checks.dewy" import (consumed_receiver)
+from p"checks_const_views.dewy" import (const_view_write)
+from p"checker_narrow_writes.dewy" import (alias_global narrowed_var)
+from p"types.jo" import (T_MATH_INT T_STR prune types)
+from p"ast.jo" import (NF_RDONLY has_flag kid nkids nodes)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CONST LF_EXPOSED LF_MUTPARAM LF_PARAM LF_RESIZED LF_SOAELEM LF_VALUECAP const_views fns globals locals loop_copy_writes modules)
+
+StoragePlaceChecksWord:type=int64<overflow='wrap'>
+
+check_place=(n:int64 for_mut:bool):>void=>$unsafe {
+    let cp_inner_slot=@cp_inner
+    let place_write_pos_slot=@place_write_pos
+    if is_map_get(n) {map_elem_place(n)}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {
+        if nodes.ptr[n].aux =? 1 {
+            let l=StoragePlaceChecksWord(nodes.ptr[n].sym)
+            let f=StoragePlaceChecksWord(locals.ptr[l].flags)
+            let nm=name_of(StoragePlaceChecksWord(locals.ptr[l].name))
+            if f & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 and narrowed_var(l) =? 0 {
+                let alias=StoragePlaceChecksWord(locals.ptr[l].alias)
+                if nodes.ptr[alias].kind =? 'unwrap' or nodes.ptr[alias].kind =? 'narrow' {
+                    # A narrowed field path still writes its owning binding.
+                    # In particular, a private capture's environment must be
+                    # copied when mutation goes through an optional child.
+                    locals.ptr[l].flags |= int32<overflow='wrap'>(LF_ASSIGNED)
+                    let saved=place_write_pos_slot
+                    if saved =? 0 {place_write_pos_slot=nodes.ptr[n].pos}
+                    check_place(alias for_mut)
+                    place_write_pos_slot=saved
+                    return
+                }
+            }
+            if f & LF_SOAELEM not=? 0 {fatal(nodes.ptr[n].pos "'{nm}' stands for an element of a soa array: assign it a whole value (in `loop mut`) or change its fields")}
+            # a closure modifying a variable it captured modifies the variable itself
+            # (and a narrowed name stands for its variable, which a closure may have captured)
+            let r=l
+            let via_closure=false
+            loop true {
+                if StoragePlaceChecksWord(locals.ptr[r].flags) & LF_CAPTURE not=? 0 and StoragePlaceChecksWord(locals.ptr[r].flags) & LF_VALUECAP =? 0 {
+                    r=StoragePlaceChecksWord(locals.ptr[r].outer)
+                    via_closure=true
+                }
+                else if narrowed_var(r) not=? 0 {r=narrowed_var(r)}
+                else {break}
+            }
+            let rf=StoragePlaceChecksWord(locals.ptr[r].flags)
+            if (rf & LF_BYREF not=? 0 or loop_copy_writes.length >? 0 and loop_copy_writes.has(r)) and dewy_at(nodes.ptr[n].pos) {
+                # (`loop x in xs`: x is the loop's own copy, which this write makes real)
+                loop_copy_write(r nodes.ptr[n].pos via_closure for_mut)
+                rf=StoragePlaceChecksWord(locals.ptr[r].flags)
+                if r =? l {f=rf}
+            }
+            if rf & LF_CONST not=? 0 {place_fatal(nodes.ptr[n].pos "cannot modify const '{nm}'; copy it with `let {nm} = {nm}`")}
+            if rf & (LF_CAPTURE | LF_VALUECAP) =? LF_CAPTURE | LF_VALUECAP and implicit_capture(r) {implicit_capture_write(r if place_write_pos_slot not=? 0 {place_write_pos_slot} else {nodes.ptr[n].pos})}
+            let ag=alias_global(r)
+            if ag >=? 0 and readonly_global(ag) {place_fatal(nodes.ptr[n].pos "cannot modify const '{nm}'")}
+            if rf & LF_PARAM not=? 0 and rf & LF_MUTPARAM =? 0 and not consumed_receiver(r) {place_fatal(nodes.ptr[n].pos "cannot modify parameter '{nm}' (parameters are read-only; {jd(nodes.ptr[n].pos "mark it `mut`" "take it by place, `@{nm}`,")} or copy it with `let {nm} = {nm}`)")}
+            if rf & LF_BYREF not=? 0 and via_closure {fatal(nodes.ptr[n].pos "cannot modify loop variable '{nm}', a copy of an element, and the function changing it runs later: change the element by its position, `loop i in 0.. and {nm} in xs:` and then `(): xs[i]...` in the function")}
+            if rf & LF_BYREF not=? 0 {place_fatal(nodes.ptr[n].pos "cannot modify loop variable '{nm}' (use `{mutable_loop_syntax(nodes.ptr[n].pos)}` to modify elements)")}
+            let nf=f | LF_ASSIGNED
+            if cp_inner_slot =? 0 {nf |= LF_RESIZED}
+            if for_mut and f & LF_CAPTURE =? 0 {nf |= LF_ADDR}
+            locals[l].flags = int32<overflow='wrap'>(nf)
+            if r not=? l {
+                rf |= LF_ASSIGNED
+                if cp_inner_slot =? 0 {rf |= LF_RESIZED}
+                locals[r].flags = int32<overflow='wrap'>(rf)
+            }
+            if const_views.length >? 0 {const_view_write(r nodes.ptr[n].pos)}
+            if for_mut and string_domains.length >? 0 and ntype(n) =? T_STR {string_domain_write(n 0)}
+            if for_mut and ntype(n) =? T_MATH_INT {int_domain_write(n 0 (-1))}
+            note_write(r via_closure nodes.ptr[n].pos)
+            if sibling_known.length >? 0 {sibling_forget(r)}
+            if ag >=? 0 {note_global_write(ag)}
+            return
+        }
+        if nodes.ptr[n].aux =? 2 {
+            if readonly_global(StoragePlaceChecksWord(nodes.ptr[n].sym)) {place_fatal(nodes.ptr[n].pos "cannot modify const '{name_of(StoragePlaceChecksWord(nodes.ptr[n].name))}'")}
+            if for_mut and string_domains.length >? 0 and ntype(n) =? T_STR {string_domain_write(n 0)}
+            if for_mut and ntype(n) =? T_MATH_INT {int_domain_write(n 0 (-1))}
+            if for_mut and not is_map_type(ntype(n)) {globals[StoragePlaceChecksWord(nodes[n].sym)].exposed = true}
+            note_global_write(StoragePlaceChecksWord(nodes.ptr[n].sym))
+            return
+        }
+        fatal(nodes.ptr[n].pos "cannot assign to '{name_of(StoragePlaceChecksWord(nodes.ptr[n].name))}'")
+    }
+    if k =? 'field' {
+        let bt=prune(ntype(StoragePlaceChecksWord(nodes.ptr[n].a)))
+        if types.ptr[bt].kind =? 'ptr' {return}
+        if nodes.ptr[n].aux =? -4 {
+            let s=name_of(StoragePlaceChecksWord(nodes.ptr[n].name))
+            loop i in [0..(s as array<uint8>).length) {
+                loop j in [0..i) {
+                    if s[i] =? s[j] {fatal(nodes.ptr[n].pos "cannot assign to '.{s}': it names a component twice")}
+                }
+            }
+            if for_mut and not swizzle_run(n) {fatal(nodes.ptr[n].pos "'.{s}' is not a run of components in order (as .xy or .yzw are), so it cannot be passed as {jd(nodes.ptr[n].pos "a `mut`" "an `@`")} argument")}
+        }
+        cp_inner_slot += 1
+        check_place(StoragePlaceChecksWord(nodes.ptr[n].a) for_mut)
+        cp_inner_slot -= 1
+        return
+    }
+    if k =? 'index' {
+        if has_flag(n NF_RDONLY) {fatal(nodes.ptr[n].pos "cannot modify loop variable '{name_of(StoragePlaceChecksWord(nodes.ptr[n].name))}' (use `{mutable_loop_syntax(nodes.ptr[n].pos)}`)")}
+        let bt=prune(ntype(StoragePlaceChecksWord(nodes.ptr[n].a)))
+        let bk=types.ptr[bt].kind
+        if bk =? 'ptr' {return}
+        if bk =? 'str_' {fatal(nodes.ptr[n].pos "a string's characters cannot be changed in place: make a new string, `s = s[..i) + \"x\" + s[i + 1..]`, or change `cs = chars(s)` and `join(cs)` it back")}
+        if bk =? 'fixed' and nodes.ptr[n].aux =? 1 {fatal(nodes.ptr[n].pos "a fixed-array slice is a copy; pass the whole array as a mutable argument")}
+        cp_inner_slot += 1
+        if bk =? 'vec' or bk =? 'fixed' {
+            check_place(StoragePlaceChecksWord(nodes.ptr[n].a) for_mut)
+            cp_inner_slot -= 1
+            return
+        }
+        if bk not=? 'array' {fatal(nodes.ptr[n].pos "cannot assign to this index expression")}
+        if nodes.ptr[n].aux =? 1 and not for_mut {fatal(nodes.ptr[n].pos "cannot assign to a slice")}
+        check_place(StoragePlaceChecksWord(nodes.ptr[n].a) for_mut)
+        cp_inner_slot -= 1
+        return
+    }
+    if k =? 'unwrap' or k =? 'narrow' {
+        # (x!.hp = 7: the value inside the optional or union, in place)
+        cp_inner_slot += 1
+        check_place(StoragePlaceChecksWord(nodes.ptr[n].a) for_mut)
+        cp_inner_slot -= 1
+        return
+    }
+    if for_mut and place_method not=? 0 {fatal(nodes.ptr[n].pos "'{name_of(place_method)}' changes its object, so it is called on a variable or a field, not on a temporary value")}
+    if for_mut {fatal(nodes.ptr[n].pos "{jd(nodes.ptr[n].pos "a `mut`" "an `@`")} argument must be a variable, field or element")}
+    # (w.pos(b).y = 3: a value a function gave back, changed where nothing keeps it)
+    if k =? 'call' {
+        let fnm=""
+        let fm:StoragePlaceChecksWord=-1
+        let cal=StoragePlaceChecksWord(nodes.ptr[n].a)
+        if cal not=? 0 and (nodes.ptr[cal].kind =? 'ident' or nodes.ptr[cal].kind =? 'field') {fnm=name_of(StoragePlaceChecksWord(nodes.ptr[cal].name))}
+        if nodes.ptr[n].sym >? 0 and StoragePlaceChecksWord(nodes.ptr[n].sym) <? fns.length and fns.ptr[StoragePlaceChecksWord(nodes.ptr[n].sym)].decl not=? 0 {
+            let fd=StoragePlaceChecksWord(fns.ptr[StoragePlaceChecksWord(nodes.ptr[n].sym)].decl)
+            fnm=name_of(StoragePlaceChecksWord(nodes.ptr[fd].name))
+            fm=StoragePlaceChecksWord(nodes.ptr[fd].mod)
+        }
+        if dewy_at(nodes.ptr[n].pos) and fnm =? "__dewy_string_index" {fatal(nodes.ptr[n].pos "a string cannot be changed in place: make a new one")}
+        if dewy_at(nodes.ptr[n].pos) and starts_with(fnm "__") {fatal(nodes.ptr[n].pos "this is a copy, so changing it changes nothing")}
+        # (`pool[h].items.push(x)`: a container's `[]` gives its entry back as a value)
+        if dewy_at(nodes.ptr[n].pos) and fnm =? "[]" {
+            let shown=""
+            if nkids(n) =? 2 {
+                let parts=[kid(n 0) kid(n 1)]
+                loop i in [0..2) {
+                    loop parts[i] >? 0 and (nodes.ptr[parts[i]].kind =? 'addr' or nodes.ptr[parts[i]].kind =? 'narrow' or nodes.ptr[parts[i]].kind =? 'conv') {parts[i] = StoragePlaceChecksWord(nodes.ptr[parts[i]].a)}
+                }
+                if nodes.ptr[parts[0]].kind =? 'ident' and nodes.ptr[parts[1]].kind =? 'ident' and nodes.ptr[parts[0]].name not=? 0 and nodes.ptr[parts[1]].name not=? 0 {
+                    let container=name_of(StoragePlaceChecksWord(nodes.ptr[parts[0]].name))
+                    let key=name_of(StoragePlaceChecksWord(nodes.ptr[parts[1]].name))
+                    if not starts_with(container "$") and not starts_with(container "__") and not starts_with(key "$") and not starts_with(key "__") {shown="{container}[{key}]"}
+                }
+            }
+            let entry="this entry"
+            let place="pool[h]"
+            if shown not=? "" {
+                entry="`{shown}`"
+                place=shown
+            }
+            fatal(nodes.ptr[n].pos "{entry} is a copy of the entry, so changing it changes nothing: copy it out, change the copy and store it back (`let e = {place}` ... `{place} = e`)")
+        }
+        if (fnm as array<uint8>).length >? 0 {
+            let setter=""
+            if lookup(intern("set_{fnm}")) not=? 0 or (fm >=? 0 and modules.ptr[fm].names.get(intern("set_{fnm}")) not=? none) {setter=": `set_{fnm}(...)` changes it"}
+            fatal(nodes.ptr[n].pos "this is a copy that {fnm}(...) gave back, so changing it changes nothing{setter}")
+        }
+    }
+    # (const gens = [1, 2], then gens.push(3): a const is its value, written where it is used)
+    if k =? 'array' or k =? 'int_lit' or k =? 'float_lit' or k =? 'str_lit' or k =? 'map_lit' or (k =? 'ident' and nodes.ptr[n].aux =? 6) {
+        fatal(nodes.ptr[n].pos "this is a const, which never changes: made without `const`, it is a variable, which can")
+    }
+    fatal(nodes.ptr[n].pos "cannot assign to this expression")
+}
+
+# Raw addresses can write without a checked assignment. Keep their
+# owning bindings out of read-only view optimizations, and make copied private
+# closure environments independent even when their only write is through a pointer.
+note_storage_access=(n:int64):>void=>$unsafe {
+    if string_domains.length >? 0 and ntype(n) =? T_STR {string_domain_write(n 0)}
+    if ntype(n) =? T_MATH_INT {int_domain_write(n 0 (-1))}
+    let k=nodes.ptr[n].kind
+    if k =? 'field' or k =? 'index' or k =? 'unwrap' or k =? 'narrow' {
+        note_storage_access(StoragePlaceChecksWord(nodes.ptr[n].a))
+    }
+    else if k =? 'ident' and nodes.ptr[n].aux =? 2 {
+        globals[StoragePlaceChecksWord(nodes[n].sym)].exposed = true
+    }
+    else if k =? 'ident' and nodes.ptr[n].aux =? 1 {
+        let l=StoragePlaceChecksWord(nodes.ptr[n].sym)
+        locals.ptr[l].flags |= int32<overflow='wrap'>(LF_EXPOSED)
+        if StoragePlaceChecksWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 {
+            note_storage_access(StoragePlaceChecksWord(locals.ptr[l].alias))
+        }
+    }
+}

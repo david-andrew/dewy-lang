@@ -1,4 +1,6 @@
 $runtime_checks
+from p"storage_place_checks.dewy" import (check_place)
+from p"coercion_queries.dewy" import (can_coerce)
 from p"call_argument_checks.dewy" import (call_string_cost match_type)
 from p"aggregate_sources.dewy" import (literal_union_member)
 from p"union_conversion_nodes.dewy" import (union_target)
@@ -12,7 +14,6 @@ from p"type_ops.dewy" import (mk_array)
 from p"ast.jo" import (NF_CHECKED NF_U64 NF_COMPREHENSION NF_GENERIC NF_SPREAD add_flag clone has_flag kid kids nkids nodes)
 from p"checker_call_cost.dewy" import (arg_cost)
 from p"literal_snapshots.dewy" import (literal_snapshot_argument)
-from p"expr.jo" import (can_coerce)
 from p"literal_context.dewy" import (is_lit lit_default)
 from p"set_type_queries.dewy" import (is_dewy_set_type)
 from p"numeric_library_types.dewy" import (bundled_bigint_type dewy_bigint_literal_target is_nd)
@@ -492,7 +493,7 @@ arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
     }
     r
 }
-from p"expr.jo" import (check_place coerce)
+from p"expr.jo" import (coerce)
 from p"checks_thin_expr.dewy" import (written_at)
 from p"checks_call_errors.dewy" import (call_argument_error)
 from p"refine.jo" import (ref_nd_receivers refine_arg_target)
