@@ -510,13 +510,16 @@ class MultiLit(Expr):
     def render(self, typed=False):
         return '[' + ' '.join(render(x, typed) for x in self.items) + ']'
 
-    def eval(self, m, env):
+    def element(self):
         # The first element fixes an unannotated collector's element type.
         # Arithmetic yields int, while a stored int64 read keeps its width.
         first = self.items[0]
         while isinstance(first, (MultiBlock, MultiIf)):
             first = (first.items if isinstance(first, MultiBlock) else first.then or first.other or ())[0]
-        element = INT if (first.ty == INT or isinstance(first, (Bin, Unary)) and first.ty in (I, U)) else first.ty
+        return INT if (first.ty == INT or isinstance(first, (Bin, Unary)) and first.ty in (I, U)) else first.ty
+
+    def eval(self, m, env):
+        element = self.element()
         out = []
         for x in self.items:
             if isinstance(x, (MultiBlock, MultiIf)):
@@ -1235,6 +1238,15 @@ def store(value, ty):
     if ty.kind == 'rec' and not ty.name:
         for name, field in ty.args:
             store(value.fields[name], field)
+    # An element of a fixed-width collection narrows too: `[x * 12]` stored as
+    # array<int64> needs each element to fit, whatever the literal inferred.
+    if ty.kind in ('array', 'set'):
+        for item in (value.items if isinstance(value, DSet) else value):
+            store(item, ty.args[0])
+    if ty.kind == 'dict':
+        for key, item in value.items():
+            store(key, ty.args[0])
+            store(item, ty.args[1])
     if ty in FIXED and wrap(value, ty) != value:
         raise Panicked('exact integer result does not fit')
     return value
@@ -3018,6 +3030,8 @@ def variant_outline(program: Program, r: random.Random) -> Program | None:
                     and not any(isinstance(x, Is) or isinstance(x, (ArrayLit, DictLit, SetLit)) and not x.items
                                 # (a helper's declared result would narrow an anonymous literal's exact fields)
                                 or isinstance(x, RecLit) and not x.ty.name
+                                # (or an unannotated collector's inferred int elements)
+                                or isinstance(x, MultiLit) and x.element() == INT
                                 for x in walk(n))):
                 candidates.append(n)
     r.shuffle(candidates)
