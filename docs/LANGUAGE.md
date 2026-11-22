@@ -3831,7 +3831,7 @@ handle, like a `Mutex`, and its payload must be `Send`:
 ```dewy
 produce = (out:Channel<int64> n:int64):>void | Unsent<int64> => {
     loop i in [0..n) { out.send(i) or_throw }   # waits while out is full
-    out.close
+    out.close()
 }
 main = () => {
     let numbers = channel<int64>(16)
@@ -4177,7 +4177,7 @@ main = () => {
                 spawn fill(jobs 100)
                 spawn fill(jobs 100)
             }
-            jobs.close
+            jobs.close()
         }
         loop true {
             let job = jobs.receive

@@ -2,7 +2,8 @@ $runtime_checks
 
 from p"expr.jo" import (IN ntype)
 from p"policy_value_queries.dewy" import (setting_value_target)
-from p"check.jo" import (FK_NORMAL LF_CAPTURE fns lib_dir locals)
+from p"check.jo" import (FK_NORMAL LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE fns lib_dir locals)
+from p"checks_compare_hints.dewy" import (local_decl_in)
 from p"ast.jo" import (NF_MUT has_flag kid kid2 kids nkids nkids2 nodes)
 from p"lower_analysis.dewy" import (checked_call_mutmask place_var)
 from p"util.jo" import (files name_of pos_file)
@@ -73,6 +74,23 @@ race_direct_param=(a0:LRWord):>bool=>$unsafe {
     let l:LRWord=LRWord(nodes.ptr[a].sym)
     if LRWord(locals.ptr[l].flags) & LF_CAPTURE not=? 0 {return false}
     return parsafe_is_param(a) and fns.ptr[LRWord(locals.ptr[l].owner)].kind =? FK_NORMAL
+}
+# The function literal a local is bound to once (`let twice = (x:int64) => x * 2`), or 0;
+# with owner > 0, only a local of that function. O(the owning function's body), on demand.
+local_literal_fn=(a0:LRWord owner:LRWord):>LRWord=>$unsafe {
+    let a=setting_value_target(a0)
+    loop nodes.ptr[a].kind =? 'conv' {a=LRWord(nodes.ptr[a].a)}
+    if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? int32<overflow='wrap'>(1) {return 0}
+    let l:LRWord=LRWord(nodes.ptr[a].sym)
+    let f:LRWord=LRWord(locals.ptr[l].owner)
+    if owner >? 0 and f not=? owner or f <=? 0 or f >=? fns.length {return 0}
+    if LRWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_BYREF | LF_ADDR | LF_ALIAS | LF_CAPTURE) not=? 0 {return 0}
+    let d:LRWord=local_decl_in(LRWord(fns.ptr[f].body) l)
+    if d =? 0 {return 0}
+    let init:LRWord=LRWord(nodes.ptr[d].b)
+    loop init not=? 0 and nodes.ptr[init].kind =? 'conv' {init=LRWord(nodes.ptr[init].a)}
+    if init =? 0 or nodes.ptr[init].kind not=? 'lambda' {return 0}
+    LRWord(nodes.ptr[init].sym)
 }
 parallel_direct=(f:LRWord pos:LRWord):>void=>$unsafe {
     if f >? 0 and fns.ptr[f].parallel_api and not in_lib(pos) {
@@ -149,9 +167,10 @@ race_scan=(n:LRWord f:LRWord who:string captures:bool):>void=>$unsafe {
                 }
             }
         }
-        # (calling a function value: which one, the compiler cannot tell; the library's are its own,
+        # (calling a function value: which one, the compiler cannot tell unless a local of f holds a
+        # literal race_scan checks where it is written; the library's are its own,
         # and a callback parameter's are its function's callers' to check, which a task's call demands)
-        else if aux =? 1 and not in_lib(nodes.ptr[n].pos) and not parsafe_vouched(LRWord(nodes.ptr[n].a)) and not race_direct_param(LRWord(nodes.ptr[n].a)) and not (who.startswith("spawn") and parsafe_demand_task(LRWord(nodes.ptr[n].a) n)) {
+        else if aux =? 1 and not in_lib(nodes.ptr[n].pos) and not parsafe_vouched(LRWord(nodes.ptr[n].a)) and not race_direct_param(LRWord(nodes.ptr[n].a)) and local_literal_fn(LRWord(nodes.ptr[n].a) f) =? 0 and not (who.startswith("spawn") and parsafe_demand_task(LRWord(nodes.ptr[n].a) n)) {
             fatal(nodes.ptr[n].pos "{who} runs this code on many threads at once, so the compiler checks it for data races, which it cannot do through a call of a function value it cannot trace to its caller: call a function by name, or take the function as a parameter, so each call's argument is checked");
         }
     }

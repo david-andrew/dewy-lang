@@ -1,0 +1,17 @@
+# modes: native native-release
+# A local bound once to a function literal is checked where it is written, so
+# spawned work and parallel bodies may call it directly.
+doubled_mean = (xs:array<float64>):>float64 => {
+    let average = (values:array<float64>) => if values.is_empty 0.0 else values.sum / float64(values.length)
+    let scaled = (x:float64):>float64 => x * 2.0
+    scaled(average(xs))
+}
+main = () => {
+    concurrent {
+        let a = spawn doubled_mean([1.0 2.0 3.0])
+        let b = spawn doubled_mean([])
+    }
+    printl"{a} {b}"
+    let halves = [parallel x in [2 4 6] doubled_mean([float64(x)])]
+    printl(halves)
+}

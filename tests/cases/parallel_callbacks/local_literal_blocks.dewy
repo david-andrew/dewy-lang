@@ -1,0 +1,8 @@
+# A parallel body walks the literal a local holds: one that prints may block.
+shout = (x:int64):>int64 => {
+    let say = (v:int64):>int64 => { printl(v); v }
+    say(x)
+}
+main = () => {
+    printl([parallel x in [0..3) shout(x)])
+}

@@ -118,3 +118,19 @@ def test_lower_races_entry_errors(compiler, tmp_path, monkeypatch, case, expecte
     out = compare_leaf(compiler, tmp_path, False, driver, status=41,
                        extra_stems=('lower_races',), jo_doubles=modules)
     assert expected in out and b'unreachable' not in out
+
+
+@pytest.mark.parametrize('case, accepted', [('parallel_callbacks/local_literal', True),
+                                            ('parallel_callbacks/local_literal_rebound', False)],
+                         ids=['literal', 'rebound'])
+def test_lower_races_local_literals(compiler, tmp_path, monkeypatch, case, accepted):
+    """A call through a local bound once to a literal is checked at the literal, in both twins."""
+    monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
+    source = ROOT / 'tests/cases' / (case + '.dewy')
+    modules = modules_for(source, tmp_path / 'program', 'lower_races')
+    diagnostic_status(modules, 'fatal')
+    out = compare_leaf(compiler, tmp_path, False,
+                       "use 'main.jo'\nmain = ():\n    lower_test_cli()\n    print(\"lowered\")\n",
+                       status=0 if accepted else 41, extra_stems=('lower_races',), jo_doubles=modules)
+    assert (b'lowered' in out) == accepted
+    assert (b'cannot trace to its caller' in out) != accepted

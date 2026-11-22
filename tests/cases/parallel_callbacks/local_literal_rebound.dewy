@@ -1,0 +1,14 @@
+# modes: native native-release
+# A local that is assigned again may hold any function value: still refused.
+double = (x:int64):>int64 => x * 2
+work = (n:int64 pick:bool):>int64 => {
+    let f = (x:int64):>int64 => x + 1
+    if pick { f = @double }
+    f(n)
+}
+main = () => {
+    concurrent {
+        let a = spawn work(3 true)
+    }
+    printl"{a}"
+}

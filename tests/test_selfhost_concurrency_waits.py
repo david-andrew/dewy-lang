@@ -84,7 +84,8 @@ def test_concurrency_waits_execution(compiler, tmp_path, monkeypatch, optimized)
     assert out == b'waiting ok\n'
 
 
-@pytest.mark.parametrize('case', ['parallel_callbacks/blocking_callback', 'channels/parallel_wait'])
+@pytest.mark.parametrize('case', ['parallel_callbacks/blocking_callback', 'channels/parallel_wait',
+                                  'parallel_callbacks/local_literal_blocks'])
 def test_concurrency_waits_diagnostics(compiler, tmp_path, monkeypatch, case):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     source = ROOT / 'tests/cases' / (case + '.dewy')
@@ -94,3 +95,15 @@ def test_concurrency_waits_diagnostics(compiler, tmp_path, monkeypatch, case):
                        "use 'main.jo'\nmain = ():\n    lower_test_cli()\n",
                        status=41, extra_stems=('concurrency_waits',), jo_doubles=modules)
     assert b'parallel body may block' in out
+
+
+def test_concurrency_waits_local_literal(compiler, tmp_path, monkeypatch):
+    """A parallel body walks the literal a local holds instead of refusing the call."""
+    monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
+    source = ROOT / 'tests/cases/parallel_callbacks/local_literal.dewy'
+    modules = modules_for(source, tmp_path / 'program', 'concurrency_waits')
+    diagnostic_status(modules, 'fatal')
+    out = compare_leaf(compiler, tmp_path, False,
+                       "use 'main.jo'\nmain = ():\n    lower_test_cli()\n    print(\"lowered\")\n",
+                       extra_stems=('concurrency_waits',), jo_doubles=modules)
+    assert b'lowered' in out and b'may block' not in out

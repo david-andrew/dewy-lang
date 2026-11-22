@@ -18,6 +18,7 @@ from p"types.jo" import (tkind)
 from p"ownership_hooks.dewy" import (ownership_literal_print)
 from p"lower_helpers.dewy" import (value_helper_calls)
 from p"concurrency_parsafe.dewy" import (parsafe_is_param parsafe_vouched_nonblocking)
+from p"lower_races.dewy" import (local_literal_fn)
 # Demanded waiting-effect queries; shared state has one owner in concurrency.jo.
 WaitingWord:type=int64<overflow='wrap'>
 concurrency_fn_blocks=(f:WaitingWord):>bool=>$unsafe {
@@ -96,7 +97,12 @@ concurrency_blocks_node=(n:WaitingWord @seen:dict<int64 bool> sharing:bool=false
         if nodes.ptr[n].aux =? 0 and sharing and concurrency_given_blocks(n @seen) {return true}
         if nodes.ptr[n].aux =? 0 and concurrency_blocks(WaitingWord(nodes.ptr[n].sym) @seen sharing) {return true}
         # (a callback parameter's callers check that what they give does not wait: parsafe)
-        if (nodes.ptr[n].aux =? 1 or nodes.ptr[n].aux =? 4) and not parsafe_vouched_nonblocking(WaitingWord(nodes.ptr[n].a)) and not (sharing and parsafe_is_param(WaitingWord(nodes.ptr[n].a))) {
+        # (a local bound once to a literal: walk that literal, as for one given to a call)
+        let literal:WaitingWord=if nodes.ptr[n].aux =? 1 {local_literal_fn(WaitingWord(nodes.ptr[n].a) 0)} else {0}
+        if literal >? 0 {
+            if concurrency_blocks(literal @seen sharing) {return true}
+        }
+        else if (nodes.ptr[n].aux =? 1 or nodes.ptr[n].aux =? 4) and not parsafe_vouched_nonblocking(WaitingWord(nodes.ptr[n].a)) and not (sharing and parsafe_is_param(WaitingWord(nodes.ptr[n].a))) {
             let contract=callable_contract(ntype(WaitingWord(nodes.ptr[n].a)))
             if contract =? 0 {
                 contract=effect_source_row(WaitingWord(nodes.ptr[n].a))

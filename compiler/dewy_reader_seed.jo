@@ -1843,7 +1843,11 @@ rt_dc_capture_list = (left: int, pos: int, first_at: int) -> int:
 
 rt_dc_in_mistake = (pos: int) -> int:
     if not dc_parser.flags.report_now or dc_parser.reader.dn_in_interpolation > 0 or dc_parser.reader.dc_head_depth == dc_parser.depth: return 0
-    rt_dc_report(pos, "`in` names a loop's values, as in `loop item in items \{ ... }`; membership is `in?`, as in `if x in? xs \{ ... }`")
+    binder = rt_dc_token_from(pos_off(pos))
+    # (`loop key value in m`: two names where the loop takes one binding)
+    if binder > 1 and dc_parser.tokens[binder].kind == .identifier and dc_parser.tokens[binder - 1].kind == .identifier and rt_dn_payload(dc_parser.tokens[binder - 2]) == "loop":
+        rt_dc_report(mkpos(dc_parser.file, dc_parser.tokens[binder - 1].start), "a loop takes one binding before `in`: unpack a key and value, or any pair, in brackets, as in `loop [key value] in m \{ ... }`")
+    else: rt_dc_report(pos, "`in` names a loop's values, as in `loop item in items \{ ... }`; membership is `in?`, as in `if x in? xs \{ ... }`")
     dc_parser.at += 1
     rt_dc_expr(dn_power(.kw_in) + 1)
 

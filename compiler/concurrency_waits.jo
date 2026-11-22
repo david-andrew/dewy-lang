@@ -19,6 +19,7 @@ use 'ownership.jo'
 use 'ownership_hooks.dewy'
 use 'lower_helpers.dewy'
 use 'concurrency_parsafe.dewy'
+use 'lower_races.dewy'
 
 concurrency_fn_blocks = (f: int) -> bool:
     if concurrency_block_memo.has(f): return concurrency_block_memo[f]
@@ -92,7 +93,11 @@ concurrency_blocks_node = (n: int, seen: mut {int: bool}, sharing: bool = false)
         if nodes[n].aux == 0 and sharing and concurrency_given_blocks(n, seen): return true
         if nodes[n].aux == 0 and concurrency_blocks(int(nodes[n].sym), seen, sharing): return true
         # (a callback parameter's callers check that what they give does not wait: parsafe)
-        if (nodes[n].aux == 1 or nodes[n].aux == 4) and not parsafe_vouched_nonblocking(int(nodes[n].a)) and not (sharing and parsafe_is_param(int(nodes[n].a))):
+        # (a local bound once to a literal: walk that literal, as for one given to a call)
+        literal = if nodes[n].aux == 1: local_literal_fn(int(nodes[n].a), 0) else: 0
+        if literal > 0:
+            if concurrency_blocks(literal, seen, sharing): return true
+        else if (nodes[n].aux == 1 or nodes[n].aux == 4) and not parsafe_vouched_nonblocking(int(nodes[n].a)) and not (sharing and parsafe_is_param(int(nodes[n].a))):
             contract = callable_contract(ntype(int(nodes[n].a)))
             if contract == 0:
                 contract = effect_source_row(int(nodes[n].a))

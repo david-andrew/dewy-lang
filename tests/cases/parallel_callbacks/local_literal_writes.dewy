@@ -1,0 +1,14 @@
+# modes: native native-release
+# The literal itself is still checked: one that changes a global is refused.
+let total:int64 = 0
+work = (n:int64):>int64 => {
+    let bump = (x:int64):>void => { total += x }
+    bump(n)
+    n
+}
+main = () => {
+    concurrent {
+        let a = spawn work(3)
+    }
+    printl"{a}"
+}
