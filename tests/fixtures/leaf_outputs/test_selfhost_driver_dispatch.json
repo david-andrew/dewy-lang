@@ -1,0 +1,650 @@
+{
+ "test_driver_dispatch_twins[default]": [
+  {
+   "args": [
+    "watch"
+   ],
+   "status": 0,
+   "stdout": "first version\nsecond version\ncrash\nthird version",
+   "stderr": "dewy-core watch: <dir>/main.dewy (saving a file reloads it; r + enter restarts, q + enter quits)\ndewy-core watch: the program ended (exit status 0); waiting for changes (r + enter runs it again)\npanic: stop\n    in main (main.dewy:1)\ndewy-core watch: the program ended (a panic); waiting for changes (r + enter runs it again)\ndewy-core watch: the program ended (exit status 0); waiting for changes (r + enter runs it again)",
+   "files": []
+  },
+  {
+   "args": [
+    "lsp"
+   ],
+   "status": 0,
+   "stdout": "[\"{\\\"id\\\": 1, \\\"jsonrpc\\\": \\\"2.0\\\", \\\"result\\\": {\\\"capabilities\\\": {\\\"codeActionProvider\\\": {\\\"codeActionKinds\\\": [\\\"quickfix\\\"]}, \\\"codeLensProvider\\\": {\\\"resolveProvider\\\": false}, \\\"completionProvider\\\": {\\\"triggerCharacters\\\": [\\\".\\\", \\\"$\\\", \\\"/\\\", \\\"\\\\\\\"\\\"]}, \\\"definitionProvider\\\": true, \\\"documentFormattingProvider\\\": true, \\\"documentHighlightProvider\\\": true, \\\"documentSymbolProvider\\\": true, \\\"hoverProvider\\\": true, \\\"inlayHintProvider\\\": true, \\\"referencesProvider\\\": true, \\\"renameProvider\\\": {\\\"prepareProvider\\\": true}, \\\"semanticTokensProvider\\\": {\\\"full\\\": true, \\\"legend\\\": {\\\"tokenModifiers\\\": [\\\"declaration\\\", \\\"readonly\\\", \\\"defaultLibrary\\\"], \\\"tokenTypes\\\": [\\\"namespace\\\", \\\"type\\\", \\\"struct\\\", \\\"enum\\\", \\\"parameter\\\", \\\"variable\\\", \\\"property\\\", \\\"enumMember\\\", \\\"function\\\", \\\"method\\\"]}}, \\\"signatureHelpProvider\\\": {\\\"retriggerCharacters\\\": [\\\",\\\"], \\\"triggerCharacters\\\": [\\\"(\\\", \\\",\\\"]}, \\\"textDocumentSync\\\": {\\\"change\\\": 1, \\\"openClose\\\": true, \\\"save\\\": {\\\"includeText\\\": false}}, \\\"workspaceSymbolProvider\\\": true}, \\\"serverInfo\\\": {\\\"name\\\": \\\"dewy-core\\\"}}}\", \"{\\\"id\\\": 2, \\\"jsonrpc\\\": \\\"2.0\\\", \\\"result\\\": []}\", \"{\\\"id\\\": 3, \\\"jsonrpc\\\": \\\"2.0\\\", \\\"result\\\": null}\"]"
+  },
+  {
+   "args": [
+    "--print-lib"
+   ],
+   "status": 0,
+   "stdout": "<root>/lib\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "--print-lib",
+    "extra"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "usage: dewy-core                         (a terminal: the interactive prompt; piped input: run it as a program)\n       dewy-core [run] [--release|--debug] [--target T] file.dewy [args...]\n       dewy-core [--release|--debug] [--target T] [--web] [--time]   (the program read from standard input)\n       dewy-core build file.dewy [-o output] [--target x86_64-linux|aarch64-linux|aarch64-mac|x86_64-windows|wasm32] [--release|--debug] [--time] [--exit-codes]\n       dewy-core check [--obligations] file.dewy\n       dewy-core test [--watch] [--release|--debug] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\n--release and --debug choose the build mode and --target the target, overriding the file's\n`$build.mode = ...` and `$target = ...` (with a warning where they differ); the default is a\ndebug build for this machine.\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "new"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "usage: dewy-core new <directory> [game|arcade|platformer|3d|story|online|program] (game is the default)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "-dash"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "usage: dewy-core new <directory> [game|arcade|platformer|3d|story|online|program] (game is the default)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "project",
+    "unknown-template"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "dewy-core: no template 'unknown-template'\nusage: dewy-core new <directory> [game|arcade|platformer|3d|story|online|program] (game is the default)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "",
+    "",
+    "--print-lib"
+   ],
+   "status": 0,
+   "stdout": "<root>/lib\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "",
+    "",
+    "add"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "usage: dewy-core add <git URL or directory> [name] [file.jo]   (a package, in the build block of file.jo: the .jo file here, if there is one)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "",
+    "",
+    "fmt"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "usage: dewy-core fmt [--check] file.dewy or directory...   (fmt -: Dewy on standard input/output)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/passthrough.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "run",
+    "<tmp>/passthrough.dewy"
+   ],
+   "status": 0,
+   "stdout": "passthrough\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "<tmp>/passthrough.dewy",
+    "--help"
+   ],
+   "status": 0,
+   "stdout": "passthrough\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/passthrough.dewy",
+    "-o",
+    "<tmp>/passthrough"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "passthrough": {
+     "run": {
+      "status": 0,
+      "stdout": "passthrough\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "fmt"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "usage: dewy-core fmt [--check] file.dewy or directory...   (fmt -: Dewy on standard input/output)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "--check",
+    "<tmp>/formatted/tree"
+   ],
+   "status": 1,
+   "stdout": "tree/a.dewy\ntree/sub/b.jo\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "<tmp>/formatted/tree"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "--check",
+    "<tmp>/formatted/tree"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "-"
+   ],
+   "status": 0,
+   "stdout": "main = () => { printl(1) }\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "-"
+   ],
+   "status": 0,
+   "stdout": {
+    "sha256": "a5a668d4bfd882167bd6d3101d8ff40010d31994a1aeb502277dbc9a3ffd5f76",
+    "bytes": 70030
+   },
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "-"
+   ],
+   "status": 1,
+   "stdout": "main=()=>{(}\n",
+   "stderr": "dewy-core fmt: <stdin>.dewy: unbalanced or excessively nested delimiters; left unchanged\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "missing.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "dewy-core fmt: cannot read missing.dewy\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project",
+    "game"
+   ],
+   "status": 0,
+   "stdout": "Created Café Project/main.dewy. See Café Project/README.md to run, check and build it.\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project",
+    "arcade"
+   ],
+   "status": 0,
+   "stdout": "Created Café Project/caf-project.dewy. See Café Project/README.md to run, check and build it.\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project",
+    "platformer"
+   ],
+   "status": 0,
+   "stdout": "Created Café Project/main.dewy. See Café Project/README.md to run, check and build it.\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project",
+    "3d"
+   ],
+   "status": 0,
+   "stdout": "Created Café Project/main.dewy. See Café Project/README.md to run, check and build it.\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project",
+    "story"
+   ],
+   "status": 0,
+   "stdout": "Created Café Project/caf-project.dewy. See Café Project/README.md to run, check and build it.\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project",
+    "online"
+   ],
+   "status": 0,
+   "stdout": "Created Café Project/caf-project.dewy. See Café Project/README.md to run, check and build it.\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project",
+    "program"
+   ],
+   "status": 0,
+   "stdout": "Created Café Project/main.dewy. See Café Project/README.md to run, check and build it.\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "dewy-core: Café Project already exists; choose a new directory\n",
+   "files": {}
+  }
+ ],
+ "test_driver_dispatch_twins[release]": [
+  {
+   "args": [
+    "watch"
+   ],
+   "status": 0,
+   "stdout": "first version\nsecond version\ncrash\nthird version",
+   "stderr": "dewy-core watch: <dir>/main.dewy (saving a file reloads it; r + enter restarts, q + enter quits)\ndewy-core watch: the program ended (exit status 0); waiting for changes (r + enter runs it again)\npanic: stop\n    in main (main.dewy:1)\ndewy-core watch: the program ended (a panic); waiting for changes (r + enter runs it again)\ndewy-core watch: the program ended (exit status 0); waiting for changes (r + enter runs it again)",
+   "files": []
+  },
+  {
+   "args": [
+    "lsp"
+   ],
+   "status": 0,
+   "stdout": "[\"{\\\"id\\\": 1, \\\"jsonrpc\\\": \\\"2.0\\\", \\\"result\\\": {\\\"capabilities\\\": {\\\"codeActionProvider\\\": {\\\"codeActionKinds\\\": [\\\"quickfix\\\"]}, \\\"codeLensProvider\\\": {\\\"resolveProvider\\\": false}, \\\"completionProvider\\\": {\\\"triggerCharacters\\\": [\\\".\\\", \\\"$\\\", \\\"/\\\", \\\"\\\\\\\"\\\"]}, \\\"definitionProvider\\\": true, \\\"documentFormattingProvider\\\": true, \\\"documentHighlightProvider\\\": true, \\\"documentSymbolProvider\\\": true, \\\"hoverProvider\\\": true, \\\"inlayHintProvider\\\": true, \\\"referencesProvider\\\": true, \\\"renameProvider\\\": {\\\"prepareProvider\\\": true}, \\\"semanticTokensProvider\\\": {\\\"full\\\": true, \\\"legend\\\": {\\\"tokenModifiers\\\": [\\\"declaration\\\", \\\"readonly\\\", \\\"defaultLibrary\\\"], \\\"tokenTypes\\\": [\\\"namespace\\\", \\\"type\\\", \\\"struct\\\", \\\"enum\\\", \\\"parameter\\\", \\\"variable\\\", \\\"property\\\", \\\"enumMember\\\", \\\"function\\\", \\\"method\\\"]}}, \\\"signatureHelpProvider\\\": {\\\"retriggerCharacters\\\": [\\\",\\\"], \\\"triggerCharacters\\\": [\\\"(\\\", \\\",\\\"]}, \\\"textDocumentSync\\\": {\\\"change\\\": 1, \\\"openClose\\\": true, \\\"save\\\": {\\\"includeText\\\": false}}, \\\"workspaceSymbolProvider\\\": true}, \\\"serverInfo\\\": {\\\"name\\\": \\\"dewy-core\\\"}}}\", \"{\\\"id\\\": 2, \\\"jsonrpc\\\": \\\"2.0\\\", \\\"result\\\": []}\", \"{\\\"id\\\": 3, \\\"jsonrpc\\\": \\\"2.0\\\", \\\"result\\\": null}\"]"
+  },
+  {
+   "args": [
+    "--print-lib"
+   ],
+   "status": 0,
+   "stdout": "<root>/lib\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "--print-lib",
+    "extra"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "usage: dewy-core                         (a terminal: the interactive prompt; piped input: run it as a program)\n       dewy-core [run] [--release|--debug] [--target T] file.dewy [args...]\n       dewy-core [--release|--debug] [--target T] [--web] [--time]   (the program read from standard input)\n       dewy-core build file.dewy [-o output] [--target x86_64-linux|aarch64-linux|aarch64-mac|x86_64-windows|wasm32] [--release|--debug] [--time] [--exit-codes]\n       dewy-core check [--obligations] file.dewy\n       dewy-core test [--watch] [--release|--debug] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\n--release and --debug choose the build mode and --target the target, overriding the file's\n`$build.mode = ...` and `$target = ...` (with a warning where they differ); the default is a\ndebug build for this machine.\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "new"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "usage: dewy-core new <directory> [game|arcade|platformer|3d|story|online|program] (game is the default)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "-dash"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "usage: dewy-core new <directory> [game|arcade|platformer|3d|story|online|program] (game is the default)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "project",
+    "unknown-template"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "dewy-core: no template 'unknown-template'\nusage: dewy-core new <directory> [game|arcade|platformer|3d|story|online|program] (game is the default)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "",
+    "",
+    "--print-lib"
+   ],
+   "status": 0,
+   "stdout": "<root>/lib\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "",
+    "",
+    "add"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "usage: dewy-core add <git URL or directory> [name] [file.jo]   (a package, in the build block of file.jo: the .jo file here, if there is one)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "",
+    "",
+    "fmt"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "usage: dewy-core fmt [--check] file.dewy or directory...   (fmt -: Dewy on standard input/output)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/passthrough.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "run",
+    "<tmp>/passthrough.dewy"
+   ],
+   "status": 0,
+   "stdout": "passthrough\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "<tmp>/passthrough.dewy",
+    "--help"
+   ],
+   "status": 0,
+   "stdout": "passthrough\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/passthrough.dewy",
+    "-o",
+    "<tmp>/passthrough"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "passthrough": {
+     "run": {
+      "status": 0,
+      "stdout": "passthrough\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "fmt"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "usage: dewy-core fmt [--check] file.dewy or directory...   (fmt -: Dewy on standard input/output)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "--check",
+    "<tmp>/formatted/tree"
+   ],
+   "status": 1,
+   "stdout": "tree/a.dewy\ntree/sub/b.jo\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "<tmp>/formatted/tree"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "--check",
+    "<tmp>/formatted/tree"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "-"
+   ],
+   "status": 0,
+   "stdout": "main = () => { printl(1) }\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "-"
+   ],
+   "status": 0,
+   "stdout": {
+    "sha256": "a5a668d4bfd882167bd6d3101d8ff40010d31994a1aeb502277dbc9a3ffd5f76",
+    "bytes": 70030
+   },
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "-"
+   ],
+   "status": 1,
+   "stdout": "main=()=>{(}\n",
+   "stderr": "dewy-core fmt: <stdin>.dewy: unbalanced or excessively nested delimiters; left unchanged\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "missing.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "dewy-core fmt: cannot read missing.dewy\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project",
+    "game"
+   ],
+   "status": 0,
+   "stdout": "Created Café Project/main.dewy. See Café Project/README.md to run, check and build it.\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project",
+    "arcade"
+   ],
+   "status": 0,
+   "stdout": "Created Café Project/caf-project.dewy. See Café Project/README.md to run, check and build it.\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project",
+    "platformer"
+   ],
+   "status": 0,
+   "stdout": "Created Café Project/main.dewy. See Café Project/README.md to run, check and build it.\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project",
+    "3d"
+   ],
+   "status": 0,
+   "stdout": "Created Café Project/main.dewy. See Café Project/README.md to run, check and build it.\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project",
+    "story"
+   ],
+   "status": 0,
+   "stdout": "Created Café Project/caf-project.dewy. See Café Project/README.md to run, check and build it.\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project",
+    "online"
+   ],
+   "status": 0,
+   "stdout": "Created Café Project/caf-project.dewy. See Café Project/README.md to run, check and build it.\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project",
+    "program"
+   ],
+   "status": 0,
+   "stdout": "Created Café Project/main.dewy. See Café Project/README.md to run, check and build it.\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "new",
+    "<tmp>/created/Café Project"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "dewy-core: Café Project already exists; choose a new directory\n",
+   "files": {}
+  }
+ ]
+}

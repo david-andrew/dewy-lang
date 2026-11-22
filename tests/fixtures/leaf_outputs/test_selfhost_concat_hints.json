@@ -1,0 +1,40 @@
+{
+ "test_concat_hints_match_twin": [
+  {
+   "args": [
+    "pieces"
+   ],
+   "status": 0,
+   "stdout": "ident:{left}:right\nhidden:{x}:xs:{y}:ys\nliteral:literal\nslice:line[2..5)\ninclusive:line[2..5]\nopen:line[2..]\nfield:{line.keys}\ntuple:{line[3]}\nnumber:{2}\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "text"
+   ],
+   "status": 41,
+   "stdout": "`+` does not join text: interpolate, `\"{left}{right}\"`, or join many pieces, `pieces.join`\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "mixed"
+   ],
+   "status": 41,
+   "stdout": "`+` is reserved for elementwise math on arrays, not yet defined: `.+` adds element by element (`xs .+ 1`), and a spread literal joins arrays, `[xs... ys...]`\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "array"
+   ],
+   "status": 41,
+   "stdout": "`+` does not join arrays (on arrays it is reserved for elementwise math): spread them into one, `[left... right...]`; `.+` adds element by element\n",
+   "stderr": "",
+   "files": {}
+  }
+ ]
+}

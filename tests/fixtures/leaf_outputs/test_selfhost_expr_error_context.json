@@ -1,0 +1,31 @@
+{
+ "test_expr_error_context_matches_twin": [
+  {
+   "args": [
+    "time"
+   ],
+   "status": 0,
+   "stdout": "scalar:false:gap:true\nambiguous:true\nother:false\nuser:false\nmissing:false\npolicy: (a zoned time's date can land in a clock change's gap or repeated hour: say what that means with `z.add(1day fold='later' gap='next')`, or `$time.fold` and `$time.gap` for the scope; a `const` zoned time is checked while compiling)\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "strings"
+   ],
+   "status": 41,
+   "stdout": "0: 'red' | 'green' | 'blue' | 'orange' has no order: the members of a union of string literals are unordered, so `<?`, `>?`, `min`, `max` and sorting don't apply; order by a key you choose (`const RANK:totaldict<'red' | 'green' | 'blue' | 'orange' int64> = ['red' -> 0 'green' -> 1 'blue' -> 2 ...]`, then `xs.sorted(key=(p:'red' | 'green' | 'blue' | 'orange') => RANK[p])`) or by the text (`\"{p}\"`)\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "capture"
+   ],
+   "status": 41,
+   "stdout": "2: this closure changes 'count', which it captures implicitly: capture it explicitly\n",
+   "stderr": "",
+   "files": {}
+  }
+ ]
+}

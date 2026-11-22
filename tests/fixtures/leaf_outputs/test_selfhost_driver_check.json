@@ -1,0 +1,612 @@
+{
+ "test_driver_check_twins[default]": [
+  {
+   "args": [
+    "check"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "usage: dewy-core                         (a terminal: the interactive prompt; piped input: run it as a program)\n       dewy-core [run] [--release|--debug] [--target T] file.dewy [args...]\n       dewy-core [--release|--debug] [--target T] [--web] [--time]   (the program read from standard input)\n       dewy-core build file.dewy [-o output] [--target x86_64-linux|aarch64-linux|aarch64-mac|x86_64-windows|wasm32] [--release|--debug] [--time] [--exit-codes]\n       dewy-core check [--obligations] file.dewy\n       dewy-core test [--watch] [--release|--debug] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\n--release and --debug choose the build mode and --target the target, overriding the file's\n`$build.mode = ...` and `$target = ...` (with a warning where they differ); the default is a\ndebug build for this machine.\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "error: cannot read '--obligations'\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy",
+    "--obligations"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/good.dewy",
+    "--obligations"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy",
+    "ignored",
+    "--obligations"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/ragged-\udcff.jo"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "missing.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "error: cannot read 'missing.dewy'\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/tests-bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "tests-bad.dewy:3:28: error: type mismatch: expected int64, found string\n    bad=():>void=>{let x:int64=\"test error\";}\n                               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "",
+    "",
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "--eager-bodies",
+    "--skip-fns",
+    "",
+    "",
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "",
+    "",
+    "--eager-bodies",
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/two-errors.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "two-errors.dewy:1:18: error: type mismatch: expected int64, found string\n    first=():>int64=>\"one\"\n                     ^\n\ntwo-errors.dewy:2:19: error: type mismatch: expected int64, found string\n    second=():>int64=>\"two\"\n                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "w17.2,1:4,ignored,0:bad",
+    "0\u001fheld diagnostic\u001eignored\u001e:\u001fsecond held",
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "held diagnostic\n\nsecond held\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "w\u0301,\udcff:2,:4,,w",
+    "bad\u001fraw-\udcff\u001fstill in message\u001e\u001fignored",
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": {
+    "sha256": "b70fe7b6cd37e1c4f30208e2404c30fc388ba8e9217a535a6f9ac056fdb66d8b",
+    "bytes": 23
+   },
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "0:0,0:0",
+    "0\u001f\u001e0\u001frepeated",
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "\n\nrepeated\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  }
+ ],
+ "test_driver_check_twins[release]": [
+  {
+   "args": [
+    "check"
+   ],
+   "status": 2,
+   "stdout": "",
+   "stderr": "usage: dewy-core                         (a terminal: the interactive prompt; piped input: run it as a program)\n       dewy-core [run] [--release|--debug] [--target T] file.dewy [args...]\n       dewy-core [--release|--debug] [--target T] [--web] [--time]   (the program read from standard input)\n       dewy-core build file.dewy [-o output] [--target x86_64-linux|aarch64-linux|aarch64-mac|x86_64-windows|wasm32] [--release|--debug] [--time] [--exit-codes]\n       dewy-core check [--obligations] file.dewy\n       dewy-core test [--watch] [--release|--debug] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\n--release and --debug choose the build mode and --target the target, overriding the file's\n`$build.mode = ...` and `$target = ...` (with a warning where they differ); the default is a\ndebug build for this machine.\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "error: cannot read '--obligations'\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy",
+    "--obligations"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/good.dewy",
+    "--obligations"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy",
+    "ignored",
+    "--obligations"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/ragged-\udcff.jo"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "missing.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "error: cannot read 'missing.dewy'\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/tests-bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "tests-bad.dewy:3:28: error: type mismatch: expected int64, found string\n    bad=():>void=>{let x:int64=\"test error\";}\n                               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "",
+    "",
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "--eager-bodies",
+    "--skip-fns",
+    "",
+    "",
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "",
+    "",
+    "--eager-bodies",
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/two-errors.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "two-errors.dewy:1:18: error: type mismatch: expected int64, found string\n    first=():>int64=>\"one\"\n                     ^\n\ntwo-errors.dewy:2:19: error: type mismatch: expected int64, found string\n    second=():>int64=>\"two\"\n                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "w17.2,1:4,ignored,0:bad",
+    "0\u001fheld diagnostic\u001eignored\u001e:\u001fsecond held",
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "held diagnostic\n\nsecond held\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "w\u0301,\udcff:2,:4,,w",
+    "bad\u001fraw-\udcff\u001fstill in message\u001e\u001fignored",
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": {
+    "sha256": "b70fe7b6cd37e1c4f30208e2404c30fc388ba8e9217a535a6f9ac056fdb66d8b",
+    "bytes": 23
+   },
+   "files": {}
+  },
+  {
+   "args": [
+    "--skip-fns",
+    "0:0,0:0",
+    "0\u001f\u001e0\u001frepeated",
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "\n\nrepeated\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/good.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  }
+ ]
+}

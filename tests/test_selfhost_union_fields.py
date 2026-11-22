@@ -1,7 +1,8 @@
 """Common-field union lowering preserves places, temporaries and rejection paths."""
 import subprocess
+
+from tests import leaf_oracle, selfhost_lsp_double
 from tests.selfhost_build_double import compare_builds
-from tests import selfhost_lsp_double
 from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT, compiler  # noqa: F401
 
@@ -24,7 +25,7 @@ def test_union_fields_program_matches_twin(compiler, tmp_path, monkeypatch):
     source.write_text(SOURCE)
     results = compare_builds(compiler, tmp_path, monkeypatch, ('union_fields',), [source])
     assert results[0][2] == 0, results[0][:5]
-    for label in ('dewy', 'jo'):
+    for label in ('dewy', 'jo') if leaf_oracle.builds_twin() else ('dewy',):
         result = subprocess.run([tmp_path / label / 'p0-0'], capture_output=True, timeout=30)
         assert result.returncode == 0 and result.stderr == b''
         assert result.stdout == b'7\n9\n'

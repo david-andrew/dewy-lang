@@ -1,0 +1,24 @@
+{
+ "test_proc_sys_game_watch_matches_twin": [
+  {
+   "args": [
+    "watch"
+   ],
+   "status": 0,
+   "stdout": "label=one value=22\nlabel=two value=22",
+   "stderr": "dewy-core watch: <dir>/game.dewy (saving a file reloads it; r + enter restarts, q + enter quits)\n<dir>/game.dewy:9:9: warning: 'dt' is given a value here but never used (a parameter kept for the function's type can be named `_dt`)\n<dir>/game.dewy:10:5: warning: 'state' is changed here but never read: it holds a copy (structs and arrays are values), so what it was copied from stays as it was; change that instead (`xs[i].hp -= 5`, `loop @e in xs`)\n<dir>/game.dewy:9:9: warning: 'dt' is given a value here but never used (a parameter kept for the function's type can be named `_dt`)\n<dir>/game.dewy:10:5: warning: 'state' is changed here but never read: it holds a copy (structs and arrays are values), so what it was copied from stays as it was; change that instead (`xs[i].hp -= 5`, `loop @e in xs`)\ndewy-core watch log: sending a patch of 201 bytes\ndewy-core watch: reloaded in N ms: label\n<dir>/helper.dewy:1:11: error: unknown name 'missing' (did you mean 'Missing'? names care about capital letters)\n    label=()=>missing\n              ^\ndewy-core watch: the program keeps running the last version that compiled",
+   "files": []
+  }
+ ],
+ "test_proc_sys_program_watch_matches_twin": [
+  {
+   "args": [
+    "watch"
+   ],
+   "status": 0,
+   "stdout": "first version\nsecond version\ncrash",
+   "stderr": "dewy-core watch: <dir>/main.dewy (saving a file reloads it; r + enter restarts, q + enter quits)\ndewy-core watch: the program ended (exit status 0); waiting for changes (r + enter runs it again)\npanic: stop\n    in main (main.dewy:1)\ndewy-core watch: the program ended (a panic); waiting for changes (r + enter runs it again)\npanic: stop\n    in main (main.dewy:1)\ndewy-core watch: the program ended (a panic); waiting for changes (r + enter runs it again)",
+   "files": []
+  }
+ ]
+}

@@ -1,0 +1,52 @@
+{
+ "test_cancel_hints_match_twin": [
+  {
+   "args": [
+    "pieces"
+   ],
+   "status": 0,
+   "stdout": {
+    "sha256": "4bd4539f97cfcaa3165134e586581a96061891bdd79a4185ea9926857125f101",
+    "bytes": 263
+   },
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "spread"
+   ],
+   "status": 41,
+   "stdout": "`items` may be `Canceled`, which this spread would pass on unwritten under `$explicit_cancellation`: write `[loop v in items v or_throw<Canceled>]...` to forward it\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "coalesce"
+   ],
+   "status": 41,
+   "stdout": "`items...` may be `Canceled`, which this value would pass on unwritten under `$explicit_cancellation`: write `items... or_throw<Canceled>` to forward it, or `??<Canceled>` to default it\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "replace"
+   ],
+   "status": 41,
+   "stdout": "`items...` may be `Canceled`, which this `??` would pass on unwritten under `$explicit_cancellation`: write `items... or_throw<Canceled>` in place of the whole `??` to forward it (it has no other failure to default), or `??<Canceled>` to default it\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "parallel"
+   ],
+   "status": 41,
+   "stdout": "this `parallel` loop's elements may be `Canceled`, which it would pass on unwritten under `$explicit_cancellation`, and a `parallel` body cannot forward it with `or_throw<Canceled>` yet: default it in the body with `??<Canceled>`, or opt this scope out with `$explicit_cancellation=false`\n",
+   "stderr": "",
+   "files": {}
+  }
+ ]
+}

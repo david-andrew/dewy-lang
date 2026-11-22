@@ -1,11 +1,13 @@
 """Custom differential probes follow the same leaf selection as their services."""
 import pytest
 
-from tests import selfhost_lsp_double
+from tests import leaf_oracle, selfhost_lsp_double
 
 
 @pytest.mark.parametrize('quote', ["'", '"'])
 def test_custom_probe_imports_follow_twin(tmp_path, monkeypatch, quote):
+    if not leaf_oracle.builds_twin():
+        pytest.skip('checks how the twin graph is linked; no twin is built')
     leaf = 'lexer_helpers'
     probe = f'use {quote}{leaf}.dewy{quote}\nmain = (): init_keywords()\n'
     service = f'from p"{leaf}.dewy" import init_keywords\n'

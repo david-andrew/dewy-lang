@@ -14,6 +14,7 @@ import subprocess
 import threading
 import time
 
+from tests import leaf_oracle
 from tests.selfhost_build_double import build_all
 from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT, patience
@@ -150,7 +151,15 @@ def compare_watch(compiler, tmp_path, monkeypatch, leaves, files, steps, **optio
     expected = watch_session(jo, tmp_path / 'jo', files, steps, **options)
     got = watch_session(dewy, tmp_path / 'dewy', files, steps, **options)
     assert got == expected, (got, expected)
+    session_outcome(['watch'], got[2], '\n'.join(got[0]), '\n'.join(got[1]), got[3])
     return expected
+
+
+def session_outcome(arguments, status, out, err, files=()):
+    """Hold a session the recording compiler ran to its record (tests/leaf_oracle.py)."""
+    leaf_oracle.check_entry(lambda: {'args': arguments, 'status': status,
+                                     'stdout': leaf_oracle.text_or_digest(out.encode()),
+                                     'stderr': leaf_oracle.text_or_digest(err.encode()), 'files': list(files)})
 
 
 def _type_lines(process, master, data, deadline):
@@ -235,6 +244,8 @@ def compare_repl(compiler, tmp_path, monkeypatch, leaves, transcripts, paced=Fal
                          history.read_bytes() if history.exists() else b''))
         results.append(runs)
     assert results[1] == results[0]
+    for i, (code, out, err, history) in enumerate(results[1]):
+        session_outcome(['repl', str(i)], code, out, err + history.decode(errors='replace'))
     return results[0]
 
 

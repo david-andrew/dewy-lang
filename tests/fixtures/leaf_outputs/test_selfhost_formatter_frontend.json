@@ -1,0 +1,77 @@
+{
+ "test_formatter_frontend_twins": [
+  {
+   "args": [
+    "fmt",
+    "-"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "-"
+   ],
+   "status": 0,
+   "stdout": "main = () => { let x = 1\n    printl(x) }\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "-"
+   ],
+   "status": 0,
+   "stdout": "# tail\nmain = () => {\n    # nested #{block}#\n    printl(\"{1}\")\n}\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "-"
+   ],
+   "status": 0,
+   "stdout": "main = () => { let é = \"café\"\n    printl(é) }\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "-"
+   ],
+   "status": 1,
+   "stdout": "main=()=>{printl(\"unterminated)\n",
+   "stderr": "<stdin>.dewy:1:18: error: unterminated string\n    main=()=>{printl(\"unterminated)\n                     ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "-"
+   ],
+   "status": 1,
+   "stdout": "main=()=>{(}\n",
+   "stderr": "dewy-core fmt: <stdin>.dewy: unbalanced or excessively nested delimiters; left unchanged\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "fmt",
+    "-"
+   ],
+   "status": 0,
+   "stdout": {
+    "sha256": "d82f7f828509cac286ecf7b151eb5a26c72a1e41bb955744ea91cd620a8cfa05",
+    "bytes": 46
+   },
+   "stderr": "",
+   "files": {}
+  }
+ ]
+}

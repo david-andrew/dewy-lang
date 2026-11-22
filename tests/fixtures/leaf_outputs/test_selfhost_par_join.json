@@ -1,0 +1,256 @@
+{
+ "test_par_join_debug_and_release_match_twin": [
+  {
+   "args": [
+    "build",
+    "-g",
+    "<tmp>/synthetic.dewy",
+    "-o",
+    "<tmp>/dewy1/p0-0"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "25314304.420102213\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<tmp>/synthetic.dewy",
+    "-o",
+    "<tmp>/dewy1/p0-1"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-1": {
+     "run": {
+      "status": 0,
+      "stdout": "25314304.420102213\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "-g",
+    "<root>/examples/rollback_model.dewy",
+    "-o",
+    "<tmp>/dewy1/p1-0"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/examples/rollback_model.dewy:33:9: warning: nothing in this file runs: it only makes functions, and making fresh does not run it. Lines at the top of the file run when the program starts (`fresh()` there calls it); a game's `update = (dt:float64):>void => {...}` runs every frame, where `if key_pressed(Key.space) ...` checks a key. (A file that other files import is fine like this.)\n",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/examples/rollback_model.dewy",
+    "-o",
+    "<tmp>/dewy1/p1-1"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/examples/rollback_model.dewy:33:9: warning: nothing in this file runs: it only makes functions, and making fresh does not run it. Lines at the top of the file run when the program starts (`fresh()` there calls it); a game's `update = (dt:float64):>void => {...}` runs every frame, where `if key_pressed(Key.space) ...` checks a key. (A file that other files import is fine like this.)\n",
+   "files": {
+    "p1-1": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "-g",
+    "<tmp>/synthetic.dewy",
+    "-o",
+    "<tmp>/dewy2/p0-0"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "25314304.420102213\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<tmp>/synthetic.dewy",
+    "-o",
+    "<tmp>/dewy2/p0-1"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-1": {
+     "run": {
+      "status": 0,
+      "stdout": "25314304.420102213\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "-g",
+    "<root>/examples/rollback_model.dewy",
+    "-o",
+    "<tmp>/dewy2/p1-0"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/examples/rollback_model.dewy:33:9: warning: nothing in this file runs: it only makes functions, and making fresh does not run it. Lines at the top of the file run when the program starts (`fresh()` there calls it); a game's `update = (dt:float64):>void => {...}` runs every frame, where `if key_pressed(Key.space) ...` checks a key. (A file that other files import is fine like this.)\n",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/examples/rollback_model.dewy",
+    "-o",
+    "<tmp>/dewy2/p1-1"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/examples/rollback_model.dewy:33:9: warning: nothing in this file runs: it only makes functions, and making fresh does not run it. Lines at the top of the file run when the program starts (`fresh()` there calls it); a game's `update = (dt:float64):>void => {...}` runs every frame, where `if key_pressed(Key.space) ...` checks a key. (A file that other files import is fine like this.)\n",
+   "files": {
+    "p1-1": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "-g",
+    "<tmp>/synthetic.dewy",
+    "-o",
+    "<tmp>/dewy4/p0-0"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "25314304.420102213\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<tmp>/synthetic.dewy",
+    "-o",
+    "<tmp>/dewy4/p0-1"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-1": {
+     "run": {
+      "status": 0,
+      "stdout": "25314304.420102213\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "-g",
+    "<root>/examples/rollback_model.dewy",
+    "-o",
+    "<tmp>/dewy4/p1-0"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/examples/rollback_model.dewy:33:9: warning: nothing in this file runs: it only makes functions, and making fresh does not run it. Lines at the top of the file run when the program starts (`fresh()` there calls it); a game's `update = (dt:float64):>void => {...}` runs every frame, where `if key_pressed(Key.space) ...` checks a key. (A file that other files import is fine like this.)\n",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/examples/rollback_model.dewy",
+    "-o",
+    "<tmp>/dewy4/p1-1"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/examples/rollback_model.dewy:33:9: warning: nothing in this file runs: it only makes functions, and making fresh does not run it. Lines at the top of the file run when the program starts (`fresh()` there calls it); a game's `update = (dt:float64):>void => {...}` runs every frame, where `if key_pressed(Key.space) ...` checks a key. (A file that other files import is fine like this.)\n",
+   "files": {
+    "p1-1": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

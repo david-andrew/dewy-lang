@@ -1,0 +1,450 @@
+{
+ "test_completion_stops_between_characters": [
+  {
+   "args": [
+    "repl",
+    "0"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'éa'\n    éa\n    ^\nlet éaé=1\nlet éaè=2\néa\n:quit\n",
+   "files": []
+  }
+ ],
+ "test_cursor_goes_by_display_columns": [
+  {
+   "args": [
+    "repl",
+    "0"
+   ],
+   "status": 0,
+   "stdout": "Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> �\u001b[K\r\u001b[5C\r>>> �\u001b[K\r\u001b[6C\r>>> 中\u001b[K\r\u001b[6C\r>>> 中\u001b[K\r\u001b[6C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n",
+   "stderr": "<input>:1:1: error: unknown name '中' (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)\n    中\n    ^\n中\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "1"
+   ],
+   "status": 0,
+   "stdout": "Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> �\u001b[K\r\u001b[5C\r>>> �\u001b[K\r\u001b[6C\r>>> �\u001b[K\r\u001b[7C\r>>> 😀\u001b[K\r\u001b[6C\r>>> 😀\u001b[K\r\u001b[6C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n",
+   "stderr": "<input>:1:1: error: unknown name '😀' (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)\n    😀\n    ^\n😀\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "2"
+   ],
+   "status": 0,
+   "stdout": "Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> e\u001b[K\r\u001b[5C\r>>> e�\u001b[K\r\u001b[6C\r>>> é\u001b[K\r\u001b[5C\r>>> é\u001b[K\r\u001b[5C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n",
+   "stderr": "<input>:1:1: error: unknown name 'é'\n    é\n    ^\né\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "3"
+   ],
+   "status": 0,
+   "stdout": "Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> a\u001b[K\r\u001b[5C\r>>> a�\u001b[K\r\u001b[6C\r>>> a�\u001b[K\r\u001b[7C\r>>> a中\u001b[K\r\u001b[7C\r>>> a中�\u001b[K\r\u001b[8C\r>>> a中�\u001b[K\r\u001b[9C\r>>> a中�\u001b[K\r\u001b[10C\r>>> a中😀\u001b[K\r\u001b[9C\r>>> a中😀e\u001b[K\r\u001b[10C\r>>> a中😀e�\u001b[K\r\u001b[11C\r>>> a中😀é\u001b[K\r\u001b[10C\r>>> a中😀é\u001b[K\r\u001b[10C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n",
+   "stderr": "<input>:1:1: error: unknown name 'a中😀é'\n    a中😀é\n    ^\na中😀é\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "4"
+   ],
+   "status": 0,
+   "stdout": "Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> �\u001b[K\r\u001b[5C\r>>> �\u001b[K\r\u001b[6C\r>>> 中\u001b[K\r\u001b[6C\r>>> 中\u001b[K\r\u001b[4C\r>>> \u001b[K\r\u001b[4C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n",
+   "stderr": ":quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "5"
+   ],
+   "status": 0,
+   "stdout": "Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> x\u001b[K\r\u001b[5C\r>>> x�\u001b[K\r\u001b[6C\r>>> x�\u001b[K\r\u001b[7C\r>>> x中\u001b[K\r\u001b[7C\r>>> x中\u001b[K\r\u001b[5C\r>>> x\u001b[K\r\u001b[5C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n",
+   "stderr": "<input>:1:1: error: unknown name 'x'\n    x\n    ^\nx\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "6"
+   ],
+   "status": 0,
+   "stdout": "Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> x\u001b[K\r\u001b[5C\r>>> x�\u001b[K\r\u001b[6C\r>>> x�\u001b[K\r\u001b[7C\r>>> x中\u001b[K\r\u001b[7C\r>>> x中\u001b[K\r\u001b[5C\r>>> x中\u001b[K\r\u001b[4C\r>>> 中\u001b[K\r\u001b[4C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n",
+   "stderr": "<input>:1:1: error: unknown name '中' (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)\n    中\n    ^\n中\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "7"
+   ],
+   "status": 0,
+   "stdout": "Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> e\u001b[K\r\u001b[5C\r>>> e�\u001b[K\r\u001b[6C\r>>> é\u001b[K\r\u001b[5C\r>>> é\u001b[K\r\u001b[5C\r>>> e\u001b[K\r\u001b[5C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n",
+   "stderr": "<input>:1:1: error: unknown name 'e' (did you mean 'E'? names care about capital letters)\n    e\n    ^\ne\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "8"
+   ],
+   "status": 0,
+   "stdout": "Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> e\u001b[K\r\u001b[5C\r>>> e�\u001b[K\r\u001b[6C\r>>> é\u001b[K\r\u001b[5C\r>>> é\u001b[K\r\u001b[5C\r>>> é\u001b[K\r\u001b[4C\r>>> ́\u001b[K\r\u001b[4C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n",
+   "stderr": "<input>:1:1: error: unknown name '́'\n    ́\n    ^\ń\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "9"
+   ],
+   "status": 0,
+   "stdout": "Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> �\u001b[K\r\u001b[5C\r>>> �\u001b[K\r\u001b[6C\r>>> �\u001b[K\r\u001b[7C\r>>> 😀\u001b[K\r\u001b[6C\r>>> 😀�\u001b[K\r\u001b[7C\r>>> 😀�\u001b[K\r\u001b[8C\r>>> 😀中\u001b[K\r\u001b[8C\r>>> 😀中\u001b[K\r\u001b[6C\r>>> 😀中\u001b[K\r\u001b[8C\r>>> 😀中\u001b[K\r\u001b[8C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n",
+   "stderr": "<input>:1:1: error: unknown name '😀中' (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)\n    😀中\n    ^\n😀中\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "10"
+   ],
+   "status": 0,
+   "stdout": "Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> �\u001b[K\r\u001b[5C\r>>> �\u001b[K\r\u001b[6C\r>>> 中\u001b[K\r\u001b[6C\r>>> 中�\u001b[K\r\u001b[7C\r>>> 中�\u001b[K\r\u001b[8C\r>>> 中�\u001b[K\r\u001b[9C\r>>> 中😀\u001b[K\r\u001b[8C\r>>> 中😀\u001b[K\r\u001b[4C\r>>> 中😀\u001b[K\r\u001b[6C\r>>> 中\u001b[K\r\u001b[6C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n",
+   "stderr": "<input>:1:1: error: unknown name '中' (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)\n    中\n    ^\n中\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "11"
+   ],
+   "status": 0,
+   "stdout": "Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> �\u001b[K\r\u001b[5C\r>>> �\u001b[K\r\u001b[6C\r>>> 中\u001b[K\r\u001b[6C\r>>> 中a\u001b[K\r\u001b[7C\r>>> 中ab\u001b[K\r\u001b[8C\r>>> 中ab\u001b[K\r\u001b[4C\r>>> ab\u001b[K\r\u001b[4C\r>>> b\u001b[K\r\u001b[4C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n",
+   "stderr": "<input>:1:1: error: unknown name 'b'\n    b\n    ^\nb\n:quit\n",
+   "files": []
+  }
+ ],
+ "test_editing_keys_take_whole_characters": [
+  {
+   "args": [
+    "repl",
+    "0"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'xé'\n    xé\n    ^\nxé\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "1"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'y'\n    y\n    ^\ny\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "2"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name '中😀' (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)\n    中😀\n    ^\n中😀\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "3"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": ":quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "4"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'é😀' (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)\n    é😀\n    ^\né😀\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "5"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:6: error: expected an expression, found '!' (`not x` negates, and `x not=? y` asks whether two values differ)\n    é中!\n         ^\né中!\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "6"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:3: error: expected an expression, found '!' (`not x` negates, and `x not=? y` asks whether two values differ)\n    é!😀\n      ^\né!😀\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "7"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'é中' (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)\n    é中\n    ^\né中\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "8"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:2: error: unknown name 'é中😀' (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)\n    +é中😀\n     ^\n+é中😀\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "9"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'ab'\n    ab\n    ^\nab\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "10"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'a中cb'\n    a中cb\n    ^\na中cb\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "11"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'e' (did you mean 'E'? names care about capital letters)\n    e\n    ^\ne\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "12"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'e' (did you mean 'E'? names care about capital letters)\n    e-x\n    ^\ne-x\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "13"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'é'\n    é\n    ^\né\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "14"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'a�b'\n    a�b\n    ^\na�b\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "15"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'a�b'\n    a�b\n    ^\na�b\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "16"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'b'\n    b\n    ^\nb\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "17"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name '�z'\n    �z\n    ^\n�z\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "18"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name '�'\n    �\n    ^\n�\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "19"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'q'\n    q\n    ^\nq\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "20"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name '�'\n    �\n    ^\n�\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "21"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name '����' (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)\n    ����\n    ^\n����\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "22"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name '���' (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)\n    ���\n    ^\n���\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "23"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name '��'\n    ��\n    ^\n��\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "24"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:2:1: error: expected a member name\nÀ.\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "25"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": ":quit\n",
+   "files": []
+  }
+ ],
+ "test_repl_multibyte_matches_twin": [
+  {
+   "args": [
+    "repl",
+    "0"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:1:1: error: unknown name 'éa'\n    éa\n    ^\nlet éaé=1\nlet éaè=2\néa\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "1"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<input>:2:1: error: expected an expression\n1+\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "2"
+   ],
+   "status": 0,
+   "stdout": "\"é\"\n",
+   "stderr": "\"é\"\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "3"
+   ],
+   "status": 0,
+   "stdout": "\"\"\n",
+   "stderr": "\"\"\n:quit\n",
+   "files": []
+  },
+  {
+   "args": [
+    "repl",
+    "4"
+   ],
+   "status": 0,
+   "stdout": "\"😀\"\n3\n",
+   "stderr": "<input>:1:3: error: unknown name 'é'\n    1+é\n      ^\nlet y=\"😀é\"\n\"😀\"\n1+é\nlet é=3\né é\n:quit\n",
+   "files": []
+  }
+ ]
+}

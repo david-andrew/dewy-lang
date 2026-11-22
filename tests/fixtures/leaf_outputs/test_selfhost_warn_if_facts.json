@@ -1,4 +1,132 @@
 {
+ "test_warn_if_facts_real_warnings_match_twin[default]": [
+  {
+   "args": [
+    "check",
+    "<tmp>/warnings.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<tmp>/warnings.dewy:18:17: warning: only a Small is cheap\n<tmp>/warnings.dewy:10:7: warning: 'xs' is given a value here but never used (a parameter kept for the function's type can be named `_xs`)\n<tmp>/warnings.dewy:14:12: warning: a large count is slow\n<tmp>/warnings.dewy:22:12: warning: the index may be outside the array\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/warnings.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<tmp>/warnings.dewy:18:17: warning: only a Small is cheap\n<tmp>/warnings.dewy:10:7: warning: 'xs' is given a value here but never used (a parameter kept for the function's type can be named `_xs`)\n<tmp>/warnings.dewy:14:12: warning: a large count is slow\n<tmp>/warnings.dewy:22:12: warning: the index may be outside the array\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "20\n2\n2\n1\n2\n1\n1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/warnings.dewy"
+   ],
+   "status": 0,
+   "stdout": "<tmp>/warnings.dewy:6:30: runtime check: exact integer result fits int64 ($runtime_checks)\n",
+   "stderr": "<tmp>/warnings.dewy:18:17: warning: only a Small is cheap\n<tmp>/warnings.dewy:10:7: warning: 'xs' is given a value here but never used (a parameter kept for the function's type can be named `_xs`)\n<tmp>/warnings.dewy:14:12: warning: a large count is slow\n<tmp>/warnings.dewy:22:12: warning: the index may be outside the array\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "--internal-fact-policy=require-static",
+    "check",
+    "<tmp>/warnings.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<tmp>/warnings.dewy:18:17: warning: only a Small is cheap\n<tmp>/warnings.dewy:10:7: warning: 'xs' is given a value here but never used (a parameter kept for the function's type can be named `_xs`)\n<tmp>/warnings.dewy:14:12: warning: a large count is slow\n<tmp>/warnings.dewy:22:12: warning: the index may be outside the array\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/ladder/121_catalog_warnings/design.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/ladder/121_catalog_warnings/design.dewy:19:17: warning: check unusually large order\n",
+   "files": {}
+  }
+ ],
+ "test_warn_if_facts_real_warnings_match_twin[release]": [
+  {
+   "args": [
+    "check",
+    "<tmp>/warnings.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<tmp>/warnings.dewy:18:17: warning: only a Small is cheap\n<tmp>/warnings.dewy:10:7: warning: 'xs' is given a value here but never used (a parameter kept for the function's type can be named `_xs`)\n<tmp>/warnings.dewy:14:12: warning: a large count is slow\n<tmp>/warnings.dewy:22:12: warning: the index may be outside the array\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/warnings.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<tmp>/warnings.dewy:18:17: warning: only a Small is cheap\n<tmp>/warnings.dewy:10:7: warning: 'xs' is given a value here but never used (a parameter kept for the function's type can be named `_xs`)\n<tmp>/warnings.dewy:14:12: warning: a large count is slow\n<tmp>/warnings.dewy:22:12: warning: the index may be outside the array\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "20\n2\n2\n1\n2\n1\n1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "check",
+    "--obligations",
+    "<tmp>/warnings.dewy"
+   ],
+   "status": 0,
+   "stdout": "<tmp>/warnings.dewy:6:30: runtime check: exact integer result fits int64 ($runtime_checks)\n",
+   "stderr": "<tmp>/warnings.dewy:18:17: warning: only a Small is cheap\n<tmp>/warnings.dewy:10:7: warning: 'xs' is given a value here but never used (a parameter kept for the function's type can be named `_xs`)\n<tmp>/warnings.dewy:14:12: warning: a large count is slow\n<tmp>/warnings.dewy:22:12: warning: the index may be outside the array\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "--internal-fact-policy=require-static",
+    "check",
+    "<tmp>/warnings.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<tmp>/warnings.dewy:18:17: warning: only a Small is cheap\n<tmp>/warnings.dewy:10:7: warning: 'xs' is given a value here but never used (a parameter kept for the function's type can be named `_xs`)\n<tmp>/warnings.dewy:14:12: warning: a large count is slow\n<tmp>/warnings.dewy:22:12: warning: the index may be outside the array\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/ladder/121_catalog_warnings/design.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/ladder/121_catalog_warnings/design.dewy:19:17: warning: check unusually large order\n",
+   "files": {}
+  }
+ ],
  "test_warn_if_facts_state_matches_twin[default]": [
   {
    "args": [],

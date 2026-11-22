@@ -97,6 +97,41 @@ def _expected(module):
     return _loaded[module]
 
 
+_logs = []
+_recording = set()
+
+
+def recording(binary, tmp_path, cli=True):
+    """A stand-in for binary that records each invocation (tests/leaf_record.py) for check_logs().
+    cli: binary is the compiler's command line, which starts the interactive prompt bare."""
+    stand_in = Path(tmp_path) / f'leaf-compiler-{len(_logs)}'
+    log = stand_in.with_suffix('.jsonl')
+    stand_in.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{ROOT / "tests/leaf_record.py"}" '
+                        f'"{log}" "{binary}" "{tmp_path}" {int(cli)} "$0" "$@"\n')
+    stand_in.chmod(0o755)
+    _logs.append(log)
+    _recording.add(str(stand_in))
+    return stand_in
+
+
+def recorded(binary):
+    """Whether this compiler is a recording stand-in (its sessions are recorded by the caller)."""
+    return str(binary) in _recording
+
+
+def drop_logs():
+    _logs.clear()
+
+
+def check_logs():
+    """Hold the invocations the stand-ins recorded in this test to their records."""
+    logs = list(_logs)
+    _logs.clear()
+    for log in logs:
+        for line in log.read_text().splitlines() if log.exists() else ():
+            check_entry(lambda line=line: json.loads(line))
+
+
 def check(arguments, status, output):
     """Hold this probe run to its recorded output (or record it, when capturing)."""
     check_entry(lambda: record(arguments, status, output))
@@ -143,7 +178,12 @@ def merge(directory):
         for test, runs in tests.items():
             assert sorted(runs) == list(range(len(runs))), (module, test)
             merged[test] = [runs[i] for i in range(len(runs))]
-        path.write_text(json.dumps(dict(sorted(merged.items())), indent=1, ensure_ascii=False) + '\n')
+        text = json.dumps(dict(sorted(merged.items())), indent=1, ensure_ascii=False)
+        try:
+            text.encode()
+        except UnicodeEncodeError:  # (output that is not UTF-8 stays escaped)
+            text = json.dumps(dict(sorted(merged.items())), indent=1)
+        path.write_text(text + '\n')
     return sum(len(tests) for tests in found.values())
 
 

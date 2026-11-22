@@ -14,9 +14,10 @@ DRIVER = CLI_DRIVER
 _default_modules_for = modules_for
 
 
-def leaf_compilers(compiler, tmp_path, leaves):
-    """The compiler built with the leaves, then with their twins (None when recorded outcomes stand in
-    for the twins, tests/leaf_oracle.py)."""
+def leaf_compilers(compiler, tmp_path, leaves, recorded=True):
+    """The compiler built with the leaves, then with their twins. Recorded outcomes stand in for the
+    twins (tests/leaf_oracle.py): the first compiler records each invocation, checked when the test
+    ends, and without twins the second is the first again (or None when not recorded)."""
     built = []
     for extension in ('dewy', 'jo') if leaf_oracle.builds_twin() else ('dewy',):
         # Custom probes keep their exact graph. Ordinary live CLI builds share one
@@ -34,7 +35,9 @@ def leaf_compilers(compiler, tmp_path, leaves):
                                 .replace(f'"{leaf}.dewy"', f'"{leaf}.jo"'))
                 modules[name] = text
         built.append(cached_driver(compiler, tmp_path, False, modules))
-    return built if len(built) == 2 else [built[0], None]
+    if not recorded:
+        return built if len(built) == 2 else [built[0], None]
+    return [leaf_oracle.recording(built[0], tmp_path, DRIVER == CLI_DRIVER), built[1] if len(built) == 2 else built[0]]
 
 
 class Recorder(Client):
@@ -75,4 +78,12 @@ def session(compiler, root, steps):
     finally:
         client.process.kill()
         client.process.wait()
-    return json.dumps(client.log, sort_keys=True)
+    transcript = json.dumps(client.log, sort_keys=True)
+    if leaf_oracle.recorded(compiler):
+        # (the language server's messages, its project directory named: tests/leaf_oracle.py. A
+        # notification may come before or after a reply, or again, so the record holds each distinct
+        # message once, sorted.)
+        messages = json.dumps(sorted({json.dumps(m, sort_keys=True) for m in client.log}))
+        leaf_oracle.check_entry(lambda: {'args': ['lsp'], 'status': 0, 'stdout': leaf_oracle.text_or_digest(
+            leaf_oracle.without(root, messages.encode()))})
+    return transcript

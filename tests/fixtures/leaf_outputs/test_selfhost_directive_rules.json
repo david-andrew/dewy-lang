@@ -1,0 +1,1732 @@
+{
+ "test_directive_rules_match_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/boolean_forms.dewy",
+    "-o",
+    "<tmp>/dewy/p0"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0": {
+     "run": {
+      "status": 0,
+      "stdout": "5 4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/boolean_nonliteral.dewy",
+    "-o",
+    "<tmp>/dewy/p1"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/boolean_nonliteral.dewy:2:16: error: `$prototype` takes a literal true or false\n        $prototype=1\n                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/bulletproof_float_identity.dewy",
+    "-o",
+    "<tmp>/dewy/p2"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2": {
+     "run": {
+      "status": 0,
+      "stdout": "ok\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/fast_math.dewy",
+    "-o",
+    "<tmp>/dewy/p3"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/fast_math.dewy:9:9: warning: `to_float64` is not compiled under `$fast_math`. This call uses the library's numerics.\n<root>/tests/cases/directives/fast_math.dewy:5:5: warning: 'dot' hides the library's method `array<float64>.dot`: this function takes over every `x.dot` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p3": {
+     "run": {
+      "status": 0,
+      "stdout": "32.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/forbid_copies_off.dewy",
+    "-o",
+    "<tmp>/dewy/p4"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/forbid_copies_off.dewy:4:5: error: `$explicit_copies=false` is not allowed inside `$no_hidden_costs`, which sets `$explicit_copies`; opt this scope out first with `$no_hidden_costs=false`\n        $explicit_copies=false\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/forbid_prototype.dewy",
+    "-o",
+    "<tmp>/dewy/p5"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/forbid_prototype.dewy:1:1: error: `$prototype` is not allowed inside `$no_hidden_costs`, which sets `$prototype=false`; opt this scope out first with `$no_hidden_costs=false`\n    $prototype\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/forbid_runtime_checks.dewy",
+    "-o",
+    "<tmp>/dewy/p6"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/forbid_runtime_checks.dewy:4:5: error: `$runtime_checks` is not allowed inside `$no_hidden_costs`, which sets `$runtime_checks=false`; opt this scope out first with `$no_hidden_costs=false`\n        $runtime_checks\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/nested_opt_out.dewy",
+    "-o",
+    "<tmp>/dewy/p7"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p7": {
+     "run": {
+      "status": 0,
+      "stdout": "4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_hidden_costs.dewy",
+    "-o",
+    "<tmp>/dewy/p8"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p8": {
+     "run": {
+      "status": 0,
+      "stdout": "100 -4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_hidden_costs_allocation.dewy",
+    "-o",
+    "<tmp>/dewy/p9"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_hidden_costs_allocation.dewy:5:5: error: effect contract violation in 'grow': allocation exceeds the contract (its row excludes it); grow; witness at <root>/tests/cases/directives/no_hidden_costs_allocation.dewy:5:5; `$no_hidden_costs` gives functions without a row of their own this one (opt a function out with `$no_hidden_costs=false` at the top of its body)\n        xs.push(n)\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_hidden_costs_copy.dewy",
+    "-o",
+    "<tmp>/dewy/p10"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_hidden_costs_copy.dewy:8:16: error: implicit costly copy of array<int64>: runtime-sized mutable array storage may need duplication or detachment; use `.copy`, a view (`const view = @source`), or restructure to transfer the value at its last use\n            let ys=xs\n                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_hidden_costs_float_to_int.dewy",
+    "-o",
+    "<tmp>/dewy/p11"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_hidden_costs_float_to_int.dewy:4:31: error: cannot prove `a` is a number within the int64 range for the conversion to int64\n    toint = (a:float64):>int64 => int64(a)\n                                  ^\n    help: NaN, an infinity or a value out of range fails the conversion: guard it (`if float64(int64.min) <=? a and a <? float64(int64.max)`, a comparison that holds only for numbers), or check it at run time with `$runtime_checks`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_hidden_costs_floats.dewy",
+    "-o",
+    "<tmp>/dewy/p12"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_hidden_costs_floats.dewy:5:7: warning: 'mix' hides the library's method `float64.mix`: this function takes over every `x.mix` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p12": {
+     "run": {
+      "status": 0,
+      "stdout": "1.5 10.0 0.25\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_hidden_costs_index.dewy",
+    "-o",
+    "<tmp>/dewy/p13"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_hidden_costs_index.dewy:9:16: error: cannot prove index is in bounds: missing upper bound\n            printl(xs[i+1])\n                   ^\n    note: i + 1 is between 1 and 3\n    note: xs.length is 3\n    note: missing upper bound: nothing establishes `i + 1 <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i + 1 = 3, xs.length = 3\n    help: establish `i + 1 <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_inf_caller.dewy",
+    "-o",
+    "<tmp>/dewy/p14"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_inf_caller.dewy:10:17: error: cannot prove `x` is finite: `half` takes it under `$no_inf`\n        printl(half(x))\n                    ^\n    help: a value entering `$no_inf` may be infinite: bound it with a guard, or check it at run time with `$runtime_checks`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_inf_divisor.dewy",
+    "-o",
+    "<tmp>/dewy/p15"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_inf_divisor.dewy:6:12: error: cannot prove the divisor is nonzero under `$no_inf`\n        return x/by\n               ^\n    help: bound the operands with a guard (`if b not=? 0.0`, `if float64.min <=? x <=? float64.max` for a finite x, narrower where a result must stay finite too), or opt this scope out with `$no_inf=false`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_inf_field.dewy",
+    "-o",
+    "<tmp>/dewy/p16"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_inf_field.dewy:7:5: error: cannot prove `.value` is finite under `$no_inf`\n        r.value*2.0\n        ^\n    help: a value entering `$no_inf` may be infinite: bound it with a guard, or check it at run time with `$runtime_checks`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_inf_incoming_runtime.dewy",
+    "-o",
+    "<tmp>/dewy/p17"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p17": {
+     "run": {
+      "status": 101,
+      "stdout": "2.0\n2.0\n",
+      "stderr": "panic: no_inf_incoming_runtime.dewy:19: an infinity entered `$no_inf`\n    in main (no_inf_incoming_runtime.dewy:19)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_inf_runtime.dewy",
+    "-o",
+    "<tmp>/dewy/p18"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_inf_runtime.dewy:9:9: warning: `to_float64` is not compiled under `$no_inf`. This call uses the library's numerics.\n",
+   "files": {
+    "p18": {
+     "run": {
+      "status": 101,
+      "stdout": "3.0\n",
+      "stderr": "panic: no_inf_runtime.dewy:9: produced an infinity under `$no_inf`\n    in total (no_inf_runtime.dewy:9)\n    called from main (no_inf_runtime.dewy:19)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_nan_entering.dewy",
+    "-o",
+    "<tmp>/dewy/p19"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p19": {
+     "run": {
+      "status": 101,
+      "stdout": "1.5\n0.0\n3.0\n",
+      "stderr": "panic: no_nan_entering.dewy:24: a NaN entered `$no_nan`\n    in main (no_nan_entering.dewy:24)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_nan_entering_static.dewy",
+    "-o",
+    "<tmp>/dewy/p20"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_nan_entering_static.dewy:8:5: error: cannot prove `.value` is not NaN under `$no_nan`\n        r.value*2.0\n        ^\n    help: a value entering `$no_nan` (a parameter of a function used as a value, a field, an element, a call's result) may be NaN: test it first (`if x =? x`, `if 0.0 <=? x`), or check it at run time with `$runtime_checks`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_nan_parsed_argument.dewy",
+    "-o",
+    "<tmp>/dewy/p21"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_nan_parsed_argument.dewy:11:17: error: cannot prove `x` is not NaN: `half` takes it under `$no_nan`\n        printl(half(x))\n                    ^\n    help: a value entering `$no_nan` (a parameter of a function used as a value, a field, an element, a call's result) may be NaN: test it first (`if x =? x`, `if 0.0 <=? x`), or check it at run time with `$runtime_checks`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_nan_parsed_guarded.dewy",
+    "-o",
+    "<tmp>/dewy/p22"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p22": {
+     "run": {
+      "status": 0,
+      "stdout": "1.5\nnot a number\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_nan_parsed_key.dewy",
+    "-o",
+    "<tmp>/dewy/p23"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_nan_parsed_key.dewy:8:12: error: cannot prove the dictionary key is not NaN\n        let d=[k->1]\n               ^\n    help: NaN equals nothing, so its entry could never be found again: compute it under `$no_nan`, or check it at run time under `$runtime_checks`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_nan_proven.dewy",
+    "-o",
+    "<tmp>/dewy/p24"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_nan_proven.dewy:15:9: warning: `to_float64` is not compiled under `$no_nan`. This call uses the library's numerics.\n",
+   "files": {
+    "p24": {
+     "run": {
+      "status": 0,
+      "stdout": "2.5 0.25 3.0 3.5\nfalse\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_nan_static.dewy",
+    "-o",
+    "<tmp>/dewy/p25"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_nan_static.dewy:7:12: error: cannot prove `-` produces no NaN under `$no_nan`\n        return a-b\n               ^\n    help: bound the operands with a guard (`if b not=? 0.0`, `if float64.min <=? x <=? float64.max` for a finite x, narrower where a result must stay finite too), or opt this scope out with `$no_nan=false`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/prototype_narrowing.dewy",
+    "-o",
+    "<tmp>/dewy/p26"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/prototype_narrowing.dewy:7:16: warning: prototype: cannot prove `x <=? 127` for the conversion to int8: missing upper bound; it is checked at run time\n<root>/tests/cases/directives/prototype_narrowing.dewy:7:16: warning: prototype: cannot prove `x >=? -128` for the conversion to int8: missing lower bound; it is checked at run time\n",
+   "files": {
+    "p26": {
+     "run": {
+      "status": 101,
+      "stdout": "100\n",
+      "stderr": "panic: prototype_narrowing.dewy:7: integer overflow: value does not fit int8 (observed: x was 300)\n    in main (prototype_narrowing.dewy:12)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/realtime_reserved.dewy",
+    "-o",
+    "<tmp>/dewy/p27"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/realtime_reserved.dewy:1:1: error: `$realtime` is reserved for a future bundle stronger than `$no_hidden_costs` (no blocking, a bounded stack); use `$no_hidden_costs`\n    $realtime\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/runtime_index_values.dewy",
+    "-o",
+    "<tmp>/dewy/p28"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p28": {
+     "run": {
+      "status": 101,
+      "stdout": "2\n",
+      "stderr": "panic: runtime_index_values.dewy:6: index 5 out of bounds (length 3)\n    in main (runtime_index_values.dewy:9)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/runtime_refinement_values.dewy",
+    "-o",
+    "<tmp>/dewy/p29"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p29": {
+     "run": {
+      "status": 101,
+      "stdout": "5\n",
+      "stderr": "panic: runtime_refinement_values.dewy:10: refinement failed: `d not=? 0` (observed: d was 0)\n    in main (runtime_refinement_values.dewy:10)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/scope_block_rejected.dewy",
+    "-o",
+    "<tmp>/dewy/p30"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/scope_block_rejected.dewy:9:16: error: cannot prove index is in bounds: missing upper bound\n            printl(xs[i+1])\n                   ^\n    note: i + 1 is between 1 and 3\n    note: xs.length is 3\n    note: missing upper bound: nothing establishes `i + 1 <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i + 1 = 3, xs.length = 3\n    help: establish `i + 1 <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/scope_function.dewy",
+    "-o",
+    "<tmp>/dewy/p31"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p31": {
+     "run": {
+      "status": 0,
+      "stdout": "20 -1 30\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/scope_function_rejected.dewy",
+    "-o",
+    "<tmp>/dewy/p32"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/scope_function_rejected.dewy:6:12: error: cannot prove index is in bounds: missing lower and upper bounds\n        return xs[i]\n               ^\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n    note: xs.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, xs.length = 0\n    help: establish `0 <=? i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or state it where the parameter is declared, `i:int64<(>=? 0)>`: each caller then proves it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/scope_module.dewy",
+    "-o",
+    "<tmp>/dewy/p33"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/scope_module.dewy:4:38: error: cannot prove index is in bounds: missing lower and upper bounds\n    at=(xs:array<int64> i:int64):>int64=>xs[i]\n                                         ^\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n    note: xs.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, xs.length = 0\n    help: establish `0 <=? i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or state it where the parameter is declared, `i:int64<(>=? 0)>`: each caller then proves it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/set_twice.dewy",
+    "-o",
+    "<tmp>/dewy/p34"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/set_twice.dewy:2:1: error: `$runtime_checks` may be set only once per module\n    $runtime_checks=false\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/array_index_unproved.dewy",
+    "-o",
+    "<tmp>/dewy/p35"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/array_index_unproved.dewy:2:46: error: effect contract violation in 'third': possible failure exceeds the closed row (no_effects permits none); third; witness at <root>/tests/cases/effects/array_index_unproved.dewy:2:46\n    third=(xs:array<int64>):>int64 & no_effects=>xs[2]\n                                                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/blocks_granted.dewy",
+    "-o",
+    "<tmp>/dewy/p36"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/blocks_granted.dewy:1:17: error: `blocks` is inferred, never granted: a row can only exclude it, `& no blocks`\n    wait=():>void & blocks=>{}\n                    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/counted_loop_exits.dewy",
+    "-o",
+    "<tmp>/dewy/p37"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p37": {
+     "run": {
+      "status": 0,
+      "stdout": "3 -1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/declared_row_fits.dewy",
+    "-o",
+    "<tmp>/dewy/p38"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p38": {
+     "run": {
+      "status": 0,
+      "stdout": "5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/declared_row_place.dewy",
+    "-o",
+    "<tmp>/dewy/p39"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/declared_row_place.dewy:3:39: error: effect contract violation in 'caller': mutation of 'y' exceeds the closed row (the contract does not permit it); caller -> touch; witness at <root>/tests/cases/effects/declared_row_place.dewy:2:7\n    caller=(@y:int64):>void & reads<y> => touch(@y)\n                                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/declared_row_resource.dewy",
+    "-o",
+    "<tmp>/dewy/p40"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/declared_row_resource.dewy:3:43: error: effect contract violation in 'pure': mutation of 'Filesystem' exceeds the contract (its row excludes it); pure -> save; witness at <root>/tests/cases/effects/declared_row_resource.dewy:2:6\n    pure=():>void & no mutates<Filesystem> => save()\n                                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/dotted_lengths_error.dewy",
+    "-o",
+    "<tmp>/dewy/p41"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/dotted_lengths_error.dewy:5:12: error: cannot prove the operands of this elementwise operation have matching lengths: missing scalar bound\n        printl(xs .+ [4 5])\n               ^\n    note: `xs.length` is 3\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/dotted_lengths_no_traps.dewy",
+    "-o",
+    "<tmp>/dewy/p42"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p42": {
+     "run": {
+      "status": 0,
+      "stdout": "[5 7 9]\n[12 14 16]\n[5 4 3]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/fixed_array_kernels.dewy",
+    "-o",
+    "<tmp>/dewy/p43"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p43": {
+     "run": {
+      "status": 0,
+      "stdout": "140000 4\n4352 9232 4\n2055\n7 0\ntrue false\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/fixed_comprehension.dewy",
+    "-o",
+    "<tmp>/dewy/p44"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p44": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 4 6 8] 9 56\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/fixed_comprehension_count.dewy",
+    "-o",
+    "<tmp>/dewy/p45"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/fixed_comprehension_count.dewy:3:35: error: effect contract violation in 'firsts': possible failure exceeds the closed row (no_effects permits none); firsts; witness at <root>/tests/cases/effects/fixed_comprehension_count.dewy:3:35\n        let xs:array<int64 length=4>=[loop i in [0..n) i]\n                                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/fixed_comprehension_short.dewy",
+    "-o",
+    "<tmp>/dewy/p46"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p46": {
+     "run": {
+      "status": 101,
+      "stdout": "13\n",
+      "stderr": "panic: fixed-size array needs 4 elements\n    in firsts (fixed_comprehension_short.dewy:6)\n    called from main (fixed_comprehension_short.dewy:11)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/fixed_index_unproved.dewy",
+    "-o",
+    "<tmp>/dewy/p47"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/fixed_index_unproved.dewy:3:45: error: effect contract violation in 'pick': possible failure exceeds the closed row (no_effects permits none); pick; witness at <root>/tests/cases/effects/fixed_index_unproved.dewy:3:45\n    pick=(a:Field i:int64):>int64 & no_effects=>a[i]\n                                                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/fixed_store_unproved.dewy",
+    "-o",
+    "<tmp>/dewy/p48"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/fixed_store_unproved.dewy:5:5: error: effect contract violation in 'put': possible failure exceeds the closed row (the contract does not permit it); put; witness at <root>/tests/cases/effects/fixed_store_unproved.dewy:5:5\n        a[i]=1\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/format_known_specs_no_traps.dewy",
+    "-o",
+    "<tmp>/dewy/p49"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p49": {
+     "run": {
+      "status": 0,
+      "stdout": "       5\n1.25e+04\n1.12\n0xff\n    42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/format_runtime_spec_error.dewy",
+    "-o",
+    "<tmp>/dewy/p50"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p50": {
+     "run": {
+      "status": 0,
+      "stdout": "   5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/guarded_failures_no_effects.dewy",
+    "-o",
+    "<tmp>/dewy/p51"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p51": {
+     "run": {
+      "status": 0,
+      "stdout": "7 -1 6 7 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/input_int_no_traps.dewy",
+    "-o",
+    "<tmp>/dewy/p52"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p52": {
+     "run": {
+      "status": 0,
+      "stdout": "number? \nEndOfInput[exit_code=1]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/library_calls_no_traps.dewy",
+    "-o",
+    "<tmp>/dewy/p53"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p53": {
+     "run": {
+      "status": 0,
+      "stdout": "0.3\n0.22\n25/12\n1/3\n1.5 0.375 3 0.25 0.25 1/36\n[1 2; 3 4]\n[1.0  1.0\n 1.0  1.0]\n[2 3]\n[1.0  0.0\n 0.0  1.0]\n[0 1 4 9 16]\n650777868590383874\n1717920867\n88\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/literal_union_strict.dewy",
+    "-o",
+    "<tmp>/dewy/p54"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p54": {
+     "run": {
+      "status": 0,
+      "stdout": "ready ready blocked idle\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/mixed_width_counter.dewy",
+    "-o",
+    "<tmp>/dewy/p55"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p55": {
+     "run": {
+      "status": 0,
+      "stdout": "6 3 -1 -1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/mutable_array_read.dewy",
+    "-o",
+    "<tmp>/dewy/p56"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/mutable_array_read.dewy:3:50: error: effect contract violation in 'first': read of 'xs' exceeds the closed row (no_effects permits none); first; witness at <root>/tests/cases/effects/mutable_array_read.dewy:3:50\n    first=(@xs:array<int64>):>int64 & no_effects=>if xs.length >? 0 xs[0] else 0\n                                                     ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/mutable_array_read_row.dewy",
+    "-o",
+    "<tmp>/dewy/p57"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p57": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/no_blocks_io.dewy",
+    "-o",
+    "<tmp>/dewy/p58"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/no_blocks_io.dewy:1:8: error: effect contract violation in 'report': blocking operation exceeds the contract (its row excludes it); report; witness at <root>/tests/cases/effects/no_blocks_io.dewy:1:8\n    report=():>void & no blocks=>{\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/no_blocks_row.dewy",
+    "-o",
+    "<tmp>/dewy/p59"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p59": {
+     "run": {
+      "status": 0,
+      "stdout": "1059165278 2052263231\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/power_exponent_error.dewy",
+    "-o",
+    "<tmp>/dewy/p60"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/power_exponent_error.dewy:3:27: error: cannot prove the exponent is >= 0: missing lower bound\n    power=(x:int n:int):>int=>x^n\n                              ^\n    note: missing lower bound: nothing establishes `n >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): n = -1\n    help: establish `n >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/power_exponent_no_traps.dewy",
+    "-o",
+    "<tmp>/dewy/p61"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p61": {
+     "run": {
+      "status": 0,
+      "stdout": "1024\n[512]\n8/27\n343\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/rational_divisor_error.dewy",
+    "-o",
+    "<tmp>/dewy/p62"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/rational_divisor_error.dewy:3:42: error: cannot prove divisor is nonzero: missing bound\n    ratio=(a:rational b:rational):>rational=>a/b\n                                             ^\n    note: missing bound: nothing establishes `b not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): b = 0\n    help: establish `b not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/rational_divisor_guard_no_traps.dewy",
+    "-o",
+    "<tmp>/dewy/p63"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p63": {
+     "run": {
+      "status": 0,
+      "stdout": "3/2\n0\n3/2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/refined_param_proven.dewy",
+    "-o",
+    "<tmp>/dewy/p64"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p64": {
+     "run": {
+      "status": 0,
+      "stdout": "11\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/refined_param_unproved.dewy",
+    "-o",
+    "<tmp>/dewy/p65"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/refined_param_unproved.dewy:5:44: error: effect contract violation in 'scale': possible failure exceeds the closed row (no_effects permits none); scale; witness at <root>/tests/cases/effects/refined_param_unproved.dewy:5:44\n    scale=(x:int64):>int64 & no_effects=>mix(3 x)\n                                               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/reshape_count_error.dewy",
+    "-o",
+    "<tmp>/dewy/p66"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/reshape_count_error.dewy:4:12: error: cannot prove array shape/index contract `reshape's dimensions multiply to its element count`: nothing establishes `reshape's dimensions multiply to its element count` here\n        printl(reshape([1 2 3 4 5] 2 3))\n               ^\n    help: establish `reshape's dimensions multiply to its element count` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/reshape_no_traps.dewy",
+    "-o",
+    "<tmp>/dewy/p67"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p67": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2 3; 4 5 6]\n[2 2 2]\n[3 4]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/set_pop_member_error.dewy",
+    "-o",
+    "<tmp>/dewy/p68"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/set_pop_member_error.dewy:5:12: error: cannot prove the value is in the set\n        printl(s.pop(20))\n               ^\n    help: establish `20 in? s` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take a missing member as a value: `s.pop(20 default=none)` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/set_pop_member_no_traps.dewy",
+    "-o",
+    "<tmp>/dewy/p69"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p69": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n20\nnone\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/slice_assign_fixed_no_traps.dewy",
+    "-o",
+    "<tmp>/dewy/p70"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p70": {
+     "run": {
+      "status": 0,
+      "stdout": "[3 1 2 40 42 42]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/slice_assign_length_error.dewy",
+    "-o",
+    "<tmp>/dewy/p71"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/slice_assign_length_error.dewy:5:5: error: cannot prove the assigned array has the slice's length: missing scalar bound\n        xs[0..2)=[7 8 9]\n        ^\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/slice_assign_no_traps.dewy",
+    "-o",
+    "<tmp>/dewy/p72"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p72": {
+     "run": {
+      "status": 0,
+      "stdout": "[7 8 0 9 9]\n[7 8 6 6 6]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/summary_budget_widening.dewy",
+    "-o",
+    "<tmp>/dewy/p73"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p73": {
+     "run": {
+      "status": 0,
+      "stdout": "1 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/word_division_no_effects.dewy",
+    "-o",
+    "<tmp>/dewy/p74"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p74": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/word_division_strict.dewy",
+    "-o",
+    "<tmp>/dewy/p75"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p75": {
+     "run": {
+      "status": 0,
+      "stdout": "5 11 3 -1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/word_division_unguarded.dewy",
+    "-o",
+    "<tmp>/dewy/p76"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/word_division_unguarded.dewy:5:12: error: effect contract violation in 'share': possible failure exceeds the closed row (no_effects permits none); share; witness at <root>/tests/cases/effects/word_division_unguarded.dewy:5:12\n        return total//parts\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/clamp.dewy",
+    "-o",
+    "<tmp>/dewy/p77"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p77": {
+     "run": {
+      "status": 0,
+      "stdout": "10\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/clamp_open_end_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p78"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/clamp_open_end_reject.dewy:2:37: error: cannot prove refinement `max(n min(9223372036854775807 0)) <=? 9223372036854775807`: missing upper bound\n    f = (n:int):>int<r => r <=? MAX> => max(n min(MAX 0))\n                                        ^\n    note: max(n min(9223372036854775807 0)) is at least 0\n    note: missing upper bound: nothing establishes `max(n min(9223372036854775807 0)) <=? 9223372036854775807` here\n<root>/tests/cases/notraps11/clamp_open_end_reject.dewy:2:18: note: the contract is declared here\n    f = (n:int):>int<r => r <=? MAX> => max(n min(MAX 0))\n                     ^\n    help: establish `max(n min(9223372036854775807 0)) <=? 9223372036854775807` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/clamp_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p79"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/clamp_reject.dewy:1:63: error: cannot prove refinement: missing scalar bound\n    f = (v:int lo:int hi:int):>int<r => lo <=? r and r <=? hi> => max(lo min(hi v))\n                                                                  ^\n<root>/tests/cases/notraps11/clamp_reject.dewy:1:32: note: the contract is declared here\n    f = (v:int lo:int hi:int):>int<r => lo <=? r and r <=? hi> => max(lo min(hi v))\n                                   ^\n    help: establish the declared contract with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/constant_fields.dewy",
+    "-o",
+    "<tmp>/dewy/p80"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p80": {
+     "run": {
+      "status": 0,
+      "stdout": "6\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/constant_fields_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p81"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/constant_fields_reject.dewy:4:25: error: cannot prove divisor is nonzero: missing bound\n        loop s in SS out += 1 / s.step\n                            ^\n    note: s.step is between 0 and 1\n    note: missing bound: nothing establishes `s.step not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): s.step = 0\n    help: establish `s.step not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/constant_fields_write_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p82"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/constant_fields_write_reject.dewy:6:25: error: cannot prove divisor is nonzero: missing bound\n        loop s in xs out += 1 / s.step\n                            ^\n    note: s.step is between 0 and 1\n    note: missing bound: nothing establishes `s.step not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): s.step = 0\n    help: establish `s.step not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/constant_key.dewy",
+    "-o",
+    "<tmp>/dewy/p83"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p83": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/constant_key_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p84"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/constant_key_reject.dewy:2:16: error: cannot prove the key is in the dictionary\n    f = ():>int => D[\"c\"]\n                   ^\n    help: establish `\"c\" in? D` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `D.get(\"c\")` gives none for it\n    help: or key the constant by its keys, `const D:totaldict<'a' | 'b' int> = [...]`: a totaldict has every key, so its reads need no guard\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/constant_key_remove_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p85"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/constant_key_remove_reject.dewy:5:5: error: cannot prove the key is in the dictionary\n        d[\"a\"]\n        ^\n<root>/tests/cases/notraps11/constant_key_remove_reject.dewy:4:5: note: this call to remove may write a mutable or exposed root\n        d.remove(\"a\");\n        ^\n    help: establish `\"a\" in? d` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `d.get(\"a\")` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/constant_lines.dewy",
+    "-o",
+    "<tmp>/dewy/p86"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p86": {
+     "run": {
+      "status": 0,
+      "stdout": "a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/constant_lines_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p87"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/constant_lines_reject.dewy:3:19: error: index is not in bounds\n    f = ():>string => L[0]\n                      ^\n    note: L.length is 0\n    help: establish `0 <? L.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/constant_runtime.dewy",
+    "-o",
+    "<tmp>/dewy/p88"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p88": {
+     "run": {
+      "status": 0,
+      "stdout": "once\n2\n2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/count_length.dewy",
+    "-o",
+    "<tmp>/dewy/p89"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p89": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/count_length_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p90"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/count_length_reject.dewy:8:13: error: assertion refuted: this condition is always false\n        $assert xs.length >? 0\n                ^\n    note: xs.length is 0\n    help: establish `xs.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/count_narrow_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p91"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/count_narrow_reject.dewy:1:38: error: cannot prove `n <=? 9223372036854775807` for the conversion to int64: missing upper bound\n    make = (n:int):>array<int> => fill(1 n)\n                                         ^\n    note: missing upper bound: nothing establishes `n <=? 9223372036854775807` here\n    help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`\n    help: establish `-9223372036854775808 <=? n and n <=? 9223372036854775807` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or declare the parameter `n:int64`: an `int` parameter holds any integer, and one with a width moves the proof to each caller\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/integer_float.dewy",
+    "-o",
+    "<tmp>/dewy/p92"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p92": {
+     "run": {
+      "status": 0,
+      "stdout": "3.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/integer_float_bounds.dewy",
+    "-o",
+    "<tmp>/dewy/p93"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p93": {
+     "run": {
+      "status": 0,
+      "stdout": "2.25\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/integer_float_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p94"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/integer_float_reject.dewy:5:5: error: cannot prove the `int` fits a float under `$no_inf`\n        float64(n)\n        ^\n    help: bound the operands with a guard (`if b not=? 0.0`, `if float64.min <=? x <=? float64.max` for a finite x, narrower where a result must stay finite too), or opt this scope out with `$no_inf=false`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/integer_float_write_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p95"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/integer_float_write_reject.dewy:6:5: error: cannot prove the `int` fits a float under `$no_inf`\n        float64(n)\n        ^\n    help: bound the operands with a guard (`if b not=? 0.0`, `if float64.min <=? x <=? float64.max` for a finite x, narrower where a result must stay finite too), or opt this scope out with `$no_inf=false`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/lines_contract.dewy",
+    "-o",
+    "<tmp>/dewy/p96"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p96": {
+     "run": {
+      "status": 0,
+      "stdout": "empty\n\nabc\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/offset.dewy",
+    "-o",
+    "<tmp>/dewy/p97"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p97": {
+     "run": {
+      "status": 0,
+      "stdout": "4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/offset_changed_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p98"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/offset_changed_reject.dewy:2:63: error: index is not in bounds\n        if 0 <=? i and i + 1 <? xs.length { i = xs.length; return xs[i + 1] }\n                                                                  ^\n    note: i + 1 is between 3 and 281474976710656\n    note: xs.length is between 2 and 281474976710655\n    help: establish `i + 1 <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/offset_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p99"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/offset_reject.dewy:2:47: error: cannot prove index is in bounds: missing upper bound\n        if 0 <=? i and i + 1 <=? xs.length return xs[i + 1]\n                                                  ^\n    note: i + 1 is between 1 and 281474976710655\n    note: xs.length is between 1 and 281474976710655\n    note: missing upper bound: nothing establishes `i + 1 <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i + 1 = 1, xs.length = 1\n    help: establish `i + 1 <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/saved_bool.dewy",
+    "-o",
+    "<tmp>/dewy/p100"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p100": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/saved_bool_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p101"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/saved_bool_reject.dewy:4:18: error: cannot prove index is in bounds: missing upper bound\n        if ok return xs[i]\n                     ^\n    note: i is between 0 and 281474976710654\n    note: xs.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, xs.length = 0\n    help: establish `i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/saved_negation.dewy",
+    "-o",
+    "<tmp>/dewy/p102"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p102": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/saved_or_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p103"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/saved_or_reject.dewy:3:18: error: cannot prove index is in bounds: missing upper bound\n        if ok return xs[i]\n                     ^\n    note: i is at least 0\n    note: xs.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, xs.length = 0\n<root>/tests/cases/notraps11/saved_or_reject.dewy:2:14: note: a path into this branch lacks the evidence\n        let ok = i <? xs.length or other\n                 ^\n    help: establish `i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/snapshot_field.dewy",
+    "-o",
+    "<tmp>/dewy/p104"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p104": {
+     "run": {
+      "status": 0,
+      "stdout": "helper\n2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/snapshot_field_reject.dewy",
+    "-o",
+    "<tmp>/dewy/p105"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/snapshot_field_reject.dewy:6:16: error: cannot prove divisor is nonzero: missing bound\n            out += 1 / s.step\n                   ^\n    note: missing bound: nothing establishes `s.step not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): s.step = 0\n    help: establish `s.step not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/snapshot_source_write.dewy",
+    "-o",
+    "<tmp>/dewy/p106"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p106": {
+     "run": {
+      "status": 0,
+      "stdout": "6\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/mixed.dewy",
+    "-o",
+    "<tmp>/dewy/p107"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/mixed.dewy:7:17: error: in call to pick(xs:array<int64> i:int64): argument 'xs' expects array<int64>, found array<int> (integer literals are `int` unless a type is written where they are made, and an array keeps its element type: write it where 'xs' is made, as `let xs:array<int64> = [...]`)\n        printl(pick(xs 1))\n                    ^\n",
+   "files": {}
+  }
+ ]
+}

@@ -31,7 +31,7 @@ def compare_builds(compiler, tmp_path, monkeypatch, leaves, paths, flags=((),)):
     with each of flags; the twin build's results (path, flags, exit code, stdout, stderr, files)."""
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     paths = [p if (tmp_path / p).exists() else ROOT / p for p in paths]
-    dewy, jo = leaf_compilers(compiler, tmp_path, leaves)
+    dewy, jo = leaf_compilers(compiler, tmp_path, leaves, recorded=False)
     got = build_all(dewy, tmp_path, 'dewy', paths, flags)
     expected = got if jo is None else build_all(jo, tmp_path, 'jo', paths, flags)
     for a, b in zip(got, expected):

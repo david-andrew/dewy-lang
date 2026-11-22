@@ -23,8 +23,8 @@ def test_driver_options_timing_twins(compiler, tmp_path, monkeypatch, release):
     monkeypatch.setattr(selfhost_lsp_double, 'cached_driver',
                         lambda compiler, path, _, modules: original_driver(compiler, path, release, modules))
 
-    def paired(compiler, path, _leaves):
-        return leaf_compilers(compiler, path, LEAVES)
+    def paired(compiler, path, _leaves, **options):
+        return leaf_compilers(compiler, path, LEAVES, **options)
 
     monkeypatch.setattr(cli_cases, 'leaf_compilers', paired)
     monkeypatch.setattr(selfhost_build_double, 'leaf_compilers', paired)

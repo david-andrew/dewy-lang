@@ -22,6 +22,18 @@ def pytest_runtest_setup(item):
     leaf_oracle.current = (item.path.stem, item.name)
 
 
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item):
+    """After a passing test, the leaf-compiler invocations it made meet their records."""
+    try:
+        result = yield
+    except BaseException:
+        leaf_oracle.drop_logs()
+        raise
+    leaf_oracle.check_logs()
+    return result
+
+
 def pytest_configure(config):
     headless.activate()
     leaf_oracle.configure(config)
