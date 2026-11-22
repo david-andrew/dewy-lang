@@ -268,6 +268,9 @@ fact_progress_bound = (n0: int) -> int:
     if a > 9223372036854775807 - b: return -1
     a + b
 fact_progress_note = (assignment: int):
+    if nodes[assignment].kind == .call:
+        fact_progress_note_entry(assignment)
+        return
     target = int(nodes[assignment].a)
     store = int(nodes[assignment].b)
     if nodes[store].kind == .ident and nodes[store].aux == i32(int(SK.local)) and fact_progress_stable(target):
@@ -324,6 +327,54 @@ fact_progress_note = (assignment: int):
         exact_unmark(source)
         # The emitter may use a word, but facts still evaluate its exact
         # interval before intersecting the axiom's storage boundary.
+        exact_marks[source] |= 32
+    if exact_measure_on:
+        site = exact_measure_sites[store]
+        site.category = "progress-axiom"
+        exact_measure_sites[store] = site
+
+# A prelude function called directly by name with count arguments (`[]=`, `get`).
+fact_progress_prelude_call = (n0: int, name: str, count: int) -> bool:
+    n = fact_progress_strip(n0)
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nkids(n) != count or nodes[n].sym <= 0: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    d != 0 and modules[int(nodes[d].mod)].is_prelude and name_of(int(nodes[d].name)) == name
+# `m.get(k) ?? c` reading back the entry `m[k] = ...` stores, with a bounded default c.
+fact_progress_entry_read = (n0: int, store_call: int) -> bool:
+    n = fact_progress_strip(n0)
+    if nodes[n].kind != .coalesce: return false
+    get = fact_progress_strip(int(nodes[n].a))
+    if not fact_progress_prelude_call(get, "get", 2) or fact_progress_bound(int(nodes[n].b)) < 0: return false
+    fact_progress_same(kid(get, 0), kid(store_call, 0)) and fact_progress_same(kid(get, 1), kid(store_call, 1))
+# `m[k] = (m.get(k) ?? c) + d`, the Python-idiom counter: the stored entry is a 64-bit
+# counter read back from the same key, so the axiom covers it as it covers `m[k] += d`.
+# An absent entry starts at the bounded default c; d must be bounded too (`1`, `i%7+1`).
+# O(increment + key) per candidate store.
+fact_progress_note_entry = (call: int):
+    if not fact_progress_prelude_call(call, "[]=", 3): return
+    store = kid(call, 2)
+    if not exact_has_store(store): return
+    t = exact_representation(ntype(store))
+    if not is_int(t) or t == T_MATH_INT or types[t].bits != 64 or not types[t].sign or int_policy(t) != 0: return
+    if dir_scopes.len() > 0 and dir_value(dir_name_assumed_bounds, nodes[store].pos) == 1: return
+    source = int(nodes[store].a)
+    operation = fact_progress_strip(source)
+    if nodes[operation].kind != .binary or nodes[operation].aux != 0: return
+    if nodes[operation].op as Tok != .plus: return
+    exact_dependency_epoch += 1
+    exact_dependency_budget = 64
+    increment = int(nodes[operation].b)
+    if not fact_progress_entry_read(int(nodes[operation].a), call):
+        if not fact_progress_entry_read(increment, call): return
+        increment = int(nodes[operation].a)
+    if fact_progress_bound(increment) < 0: return
+    it = exact_representation(ntype(increment))
+    if not is_int(it) or it == T_MATH_INT or types[it].bits > 64: return
+    exact_increment = exact_has_node(increment)
+    exact_decide(store, true)
+    exact_marks[store] |= 32
+    if source == operation and not exact_increment:
+        exact_unmark(source)
         exact_marks[source] |= 32
     if exact_measure_on:
         site = exact_measure_sites[store]

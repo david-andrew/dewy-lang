@@ -1,0 +1,15 @@
+# `m[k] = (m.get(k) ?? c) + d` is a 64-bit counter read back from the same key: it proves
+# by the counter-progress axiom when the default and the increment are bounded.
+main = () => {
+    let counts:dict<string int64> = []
+    loop w in "a b a c a".split {
+        counts[w] = (counts.get(w) ?? 0) + 1
+    }
+    let weighted:dict<string int64> = []
+    loop w in "x y x".split and i in 0.. {
+        weighted[w] = 2 + (weighted.get(w) ?? 1)
+        weighted[w] = (weighted.get(w) ?? 0) + i % 7
+    }
+    printl(counts)
+    printl(weighted)
+}

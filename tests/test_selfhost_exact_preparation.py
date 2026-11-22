@@ -5,7 +5,7 @@ from tests.support import ROOT, compiler  # noqa: F401
 
 
 def test_exact_preparation_twins(compiler, tmp_path, monkeypatch):  # noqa: F811
-    cases = [p.relative_to(ROOT) for group in ('exact_int', 'exact_loops', 'fixed', 'gpu_integer_ops')
+    cases = [p.relative_to(ROOT) for group in ('exact_int', 'exact_loops', 'fixed', 'gpu_integer_ops', 'progress_entries')
              for p in sorted((ROOT / 'tests/cases' / group).glob('*.dewy'))
              if p.with_suffix('.out').exists() or p.with_suffix('.err').exists()]
     programs = [*cases, 'tests/ladder/100_rtos_kernel/design.dewy', 'compiler/main.jo']

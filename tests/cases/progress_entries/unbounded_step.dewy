@@ -1,0 +1,9 @@
+# An increment with no bound (any int64) is not bounded progress.
+tally = (words:array<string> step:int64):>dict<string int64> => {
+    let counts:dict<string int64> = []
+    loop w in words {
+        counts[w] = (counts.get(w) ?? 0) + step
+    }
+    counts
+}
+main = () => printl(tally("a b a".split 3))

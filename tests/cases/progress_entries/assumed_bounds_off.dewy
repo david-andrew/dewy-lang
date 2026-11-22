@@ -1,0 +1,9 @@
+# `$no_assumed_bounds` turns the axiom off: the counter needs a real proof.
+main = () => {
+    $no_assumed_bounds
+    let counts:dict<string int64> = []
+    loop w in "a b a".split {
+        counts[w] = (counts.get(w) ?? 0) + 1
+    }
+    printl(counts)
+}

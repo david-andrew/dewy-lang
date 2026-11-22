@@ -1,0 +1,9 @@
+# Reading another dictionary is not progress of this one.
+main = () => {
+    let counts:dict<string int64> = []
+    let seen:dict<string int64> = ["a"->1]
+    loop w in "a b a".split {
+        counts[w] = (seen.get(w) ?? 0) + 1
+    }
+    printl(counts)
+}

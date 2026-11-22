@@ -1,0 +1,13 @@
+# An element in place beside a counter: `loop i in 0.. and @x in xs`, in either order,
+# with conditions, changes xs itself; a saved copy keeps its values.
+Job:type = [id:int64 name:string]
+main = () => {
+    let jobs = [Job[0 "a"] Job[0 "b"] Job[0 "c"]]
+    let saved = jobs
+    loop i in 0.. and @job in jobs { job.id = i * 10 }
+    printl(jobs)
+    printl(saved)
+    let xs:array<int64> = [5 6 7 8]
+    loop @x in xs and i in 0.. and i <? 3 { x = i * 2 }
+    printl(xs)
+}

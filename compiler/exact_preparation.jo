@@ -320,6 +320,8 @@ exact_prepare_node = (n: int, owner: int, store: bool):
         exact_initializers[l] = int(nodes[n].b)
     if k == .call and nodes[n].aux == 0 and nodes[n].sym > 0:
         called = int(nodes[n].sym)
+        # (`m[k] = (m.get(k) ?? 0) + 1`: a counter stored through the entry setter)
+        if nkids(n) == 3: exact_progress_assignments.push(n)
         loop i in [0..min(nkids(n), fns[called].params.len())):
             if int(locals[fns[called].params[i]].flags) & LF_MUTPARAM == 0: continue
             root = fact_progress_root(kid(n, i))

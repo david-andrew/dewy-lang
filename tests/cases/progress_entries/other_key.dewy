@@ -1,0 +1,8 @@
+# Reading another key is not progress of this entry.
+main = () => {
+    let counts:dict<string int64> = ["a"->1]
+    loop [w v] in [["a" "b"] ["b" "a"]] {
+        counts[w] = (counts.get(v) ?? 0) + 1
+    }
+    printl(counts)
+}

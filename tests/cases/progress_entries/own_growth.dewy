@@ -1,0 +1,8 @@
+# Adding the entry to itself doubles it: geometric growth, not progress.
+main = () => {
+    let counts:dict<string int64> = ["a"->1]
+    loop _ in [0..3) {
+        counts["a"] = (counts.get("a") ?? 0) + (counts.get("a") ?? 0)
+    }
+    printl(counts)
+}

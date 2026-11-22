@@ -158,7 +158,7 @@ desugar_loopx=(lx:LoopWord):>int64=>$unsafe {
         loop t in terms {
             if nodes.ptr[t].op =? 1 {
                 if terms.length >? 1 and has_flag(LoopWord(nodes.ptr[t].a) NF_STEP) {fatal(nodes.ptr[t].pos "stepped ranges are only supported in single loops for now")}
-                if nkids(t) not=? 1 or has_flag(t NF_MUT) {ok=false}
+                if nkids(t) not=? 1 or has_flag(t NF_MUT) and is_open_range(t) {ok=false}
                 else if not is_open_range(t) {
                     seq=t
                     nseq += 1
@@ -223,9 +223,17 @@ desugar_loopx=(lx:LoopWord):>int64=>$unsafe {
             set_list(f [iv kid(seq 0)])
             nodes.ptr[f].ival=1         # (index, element): not unpacking
             nodes.ptr[f].a=nodes.ptr[seq].a
+            # (`@x in xs`: the element in place, checked as a single `loop @x in xs` is)
+            if has_flag(seq NF_MUT) {add_flag(f NF_MUT)}
             loop i in [0..nkids(body)) {pre.push(kid(body i))}
             nodes.ptr[f].b=int32<overflow='wrap'>(lx_block(pre pos))
             return f
+        }
+        # (Dewy: an element in place only through the indexed form above)
+        if files[pos_file(pos)].is_dewy {
+            loop t in terms {
+                if nodes.ptr[t].op =? 1 and has_flag(t NF_MUT) {fatal(nodes.ptr[t].pos "a mutable element (`@x in xs`) combines with counters from 0 and conditions over one array (`loop i in 0.. and @x in xs`); write other combinations as separate loops")}
+            }
         }
     }
     # general form: snapshots and counters, advanced at the top of each iteration
@@ -309,8 +317,8 @@ lx_binder=(t:LoopWord tag:string @setup:array<int64> @head:array<int64> @tail:ar
     let has=intern("__has{id}")
     if has_flag(t NF_MUT) {
         # (`mut x in xs`: x stands for xs[k], in xs itself, each time round)
-        if optional {fatal(nodes.ptr[t].pos "`mut` elements go with `and` in a combined loop, not `or`")}
-        if nodes.ptr[it].kind =? 'range' {fatal(nodes.ptr[t].pos "`mut` goes with an array: a range's numbers are not stored anywhere")}
+        if optional {fatal(nodes.ptr[t].pos "a mutable element goes with `and` in a combined loop, not `or`")}
+        if nodes.ptr[it].kind =? 'range' {fatal(nodes.ptr[t].pos "a mutable element needs an array: a range's numbers are not stored anywhere")}
         let k="__k{id}"
         setup.push(lx_let(intern(k) lx_int((-1) pos) pos))
         head.push(lx_assign(lx_ident(k pos) 'pluseq' lx_int(1 pos) pos))

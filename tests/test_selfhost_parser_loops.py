@@ -37,13 +37,15 @@ main = ():
         "f = ():\n    loop i in [0..n) and j in [0..m] and x in xs: g(i)\n    loop i in 0.. and j in 5..: g(i)\n",
         "f = ():\n    loop i in 0.. or j in [1..4]: g(i)\n    loop mut x in xs and i in 0..: g(x)\n",
         "f = ():\n    loop i in 0.. and p, q in pairs: g(p)\n    loop a < 1 or b < 2: g()\n",
+        "f = ():\n    loop i in 0.. and mut x in xs and x > 0: g(i)\n    loop mut x in xs and y in ys: g(y)\n",
     ]:
         files = [SrcFile(path="loops.jo", src=text)]
         nodes = [Node()]; lists = []
         decls = parse_file(0)
         dump(text)
     # a Dewy loop with an else arm (c), lowered with its entry flag, in a .dewy file
-    loop text in ["loop x in xs and i in 0..:", "loop x in xs or y in ys:", "loop i in [0..3) and j in 2..:"]:
+    loop text in ["loop x in xs and i in 0..:", "loop x in xs or y in ys:", "loop i in [0..3) and j in 2..:",
+                  "loop i in 0.. and mut x in xs:"]:
         files = [SrcFile(path="loops.dewy", src=text, is_dewy=true)]
         tokens = lex(0, text)
         p_toks = data(tokens); p_ntoks = tokens.len(); ti = 0
@@ -71,4 +73,4 @@ def test_parser_loops_match_twin(compiler, tmp_path, monkeypatch):
     assert all(result.returncode == 0 for result in outputs), [
         (result.returncode, result.stderr) for result in outputs]
     assert (outputs[0].stdout, outputs[0].stderr) == (outputs[1].stdout, outputs[1].stderr)
-    assert outputs[0].stdout.count(b'case:') == 13
+    assert outputs[0].stdout.count(b'case:') == 15

@@ -1,7 +1,7 @@
 $runtime_checks
 
 from p"ast.jo" import (NF_GENERIC has_flag kid nkids nodes)
-from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_PARAM LF_RESIZED LF_SHARED LF_SOAELEM fns globals locals)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_PARAM LF_RESIZED LF_SHARED LF_SOAELEM fns globals locals modules)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"directives.jo" import (dir_name_assumed_bounds dir_scopes dir_value)
 from p"exact.jo" import (exact_control_parents exact_control_values exact_dependency_budget exact_dependency_epoch exact_dependency_seen exact_initializers exact_iteration_sources exact_marks exact_measure_on exact_measure_sites exact_progress_math exact_progress_opaque exact_write_controls exact_write_heads exact_write_next exact_write_seen exact_write_targets exact_write_values)
@@ -15,6 +15,7 @@ from p"facts_index_proofs.dewy" import (stable_loop_index)
 from p"isolation_ops.dewy" import (isolation_children)
 from p"types.jo" import (T_MATH_INT is_int types)
 from p"type_ops.dewy" import (int_policy)
+from p"util.jo" import (name_of)
 
 ProgressWord:type=int64<overflow='wrap'>
 # The default progress axiom covers additive updates of 64-bit storage by a
@@ -265,6 +266,10 @@ fact_progress_bound=(n0:ProgressWord):>ProgressWord=>$unsafe {
     return a+b
 }
 fact_progress_note=(assignment:ProgressWord):>void=>$unsafe {
+    if nodes.ptr[assignment].kind =? 'call' {
+        fact_progress_note_entry(assignment)
+        return
+    }
     let target=ProgressWord(nodes.ptr[assignment].a)
     let store=ProgressWord(nodes.ptr[assignment].b)
     if nodes.ptr[store].kind =? 'ident' and nodes.ptr[store].aux =? int32(1) and fact_progress_stable(target) {
@@ -327,6 +332,59 @@ fact_progress_note=(assignment:ProgressWord):>void=>$unsafe {
         exact_unmark(source)
         # The emitter may use a word, but facts still evaluate its exact
         # interval before intersecting the axiom's storage boundary.
+        exact_marks[source] |= 32
+    }
+    if exact_measure_on {
+        let site=exact_measure_sites[store]
+        site.category="progress-axiom"
+        exact_measure_sites[store]=site
+    }
+}
+# A prelude function called directly by name with count arguments (`[]=`, `get`).
+fact_progress_prelude_call=(n0:ProgressWord name:string count:ProgressWord):>bool=>$unsafe {
+    let n=fact_progress_strip(n0)
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nkids(n) not=? count or nodes.ptr[n].sym <=? 0 {return false}
+    let d=ProgressWord(fns.ptr[ProgressWord(nodes.ptr[n].sym)].decl)
+    d not=? 0 and modules.ptr[ProgressWord(nodes.ptr[d].mod)].is_prelude and name_of(ProgressWord(nodes.ptr[d].name)) =? name
+}
+# `m.get(k) ?? c` reading back the entry `m[k] = ...` stores, with a bounded default c.
+fact_progress_entry_read=(n0:ProgressWord store_call:ProgressWord):>bool=>$unsafe {
+    let n=fact_progress_strip(n0)
+    if nodes.ptr[n].kind not=? 'coalesce' {return false}
+    let get=fact_progress_strip(ProgressWord(nodes.ptr[n].a))
+    if not fact_progress_prelude_call(get "get" 2) or fact_progress_bound(ProgressWord(nodes.ptr[n].b)) <? 0 {return false}
+    fact_progress_same(kid(get 0) kid(store_call 0)) and fact_progress_same(kid(get 1) kid(store_call 1))
+}
+# `m[k] = (m.get(k) ?? c) + d`, the Python-idiom counter: the stored entry is a 64-bit
+# counter read back from the same key, so the axiom covers it as it covers `m[k] += d`.
+# An absent entry starts at the bounded default c; d must be bounded too (`1`, `i%7+1`).
+# O(increment + key) per candidate store.
+fact_progress_note_entry=(call:ProgressWord):>void=>$unsafe {
+    if not fact_progress_prelude_call(call "[]=" 3) {return}
+    let store=kid(call 2)
+    if not exact_has_store(store) {return}
+    let t=exact_representation(ntype(store))
+    if not is_int(t) or t =? T_MATH_INT or types.ptr[t].bits not=? 64 or not types.ptr[t].sign or int_policy(t) not=? 0 {return}
+    if dir_scopes.length >? 0 and dir_value(dir_name_assumed_bounds nodes.ptr[store].pos) =? 1 {return}
+    let source=ProgressWord(nodes.ptr[store].a)
+    let operation=fact_progress_strip(source)
+    if nodes.ptr[operation].kind not=? 'binary' or nodes.ptr[operation].aux not=? 0 {return}
+    if cx_token_values.ptr[ProgressWord(nodes.ptr[operation].op)] not=? 'plus' {return}
+    exact_dependency_epoch += 1
+    exact_dependency_budget=64
+    let increment=ProgressWord(nodes.ptr[operation].b)
+    if not fact_progress_entry_read(ProgressWord(nodes.ptr[operation].a) call) {
+        if not fact_progress_entry_read(increment call) {return}
+        increment=ProgressWord(nodes.ptr[operation].a)
+    }
+    if fact_progress_bound(increment) <? 0 {return}
+    let it=exact_representation(ntype(increment))
+    if not is_int(it) or it =? T_MATH_INT or types.ptr[it].bits >? 64 {return}
+    let exact_increment=exact_has_node(increment)
+    exact_decide(store true)
+    exact_marks[store] |= 32
+    if source =? operation and not exact_increment {
+        exact_unmark(source)
         exact_marks[source] |= 32
     }
     if exact_measure_on {

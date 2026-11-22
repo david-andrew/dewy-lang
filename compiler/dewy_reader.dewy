@@ -5807,7 +5807,7 @@ rd_dc_head_combined=(@reader_ctx:ParserContext @reader_nodes:array<Node> head:in
     if (reader_nodes[head].op not=? 1) {
         return true
     }
-    if (rd_has_flag(@reader_nodes head NF_MUT) or reader_ctx.stores.host[0].g_dewy_live_sources_has(int64<overflow='wrap'>(reader_nodes[head].a))) {
+    if reader_ctx.stores.host[0].g_dewy_live_sources_has(int64<overflow='wrap'>(reader_nodes[head].a)) {
         return rd_dc_combined_mistake(@reader_ctx @reader_nodes head)
     }
     let it:int64=int64<overflow='wrap'>(reader_nodes[head].a)

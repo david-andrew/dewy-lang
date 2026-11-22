@@ -391,6 +391,8 @@ exact_prepare_body=(n:PrepareWord owner:PrepareWord store:bool):>void=>$unsafe {
     }
     if k =? 'call' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 {
         let called=PrepareWord(nodes.ptr[n].sym)
+        # (`m[k] = (m.get(k) ?? 0) + 1`: a counter stored through the entry setter)
+        if nkids(n) =? 3 {exact_progress_assignments.push(n)}
         loop i in [0..min(nkids(n) fns.ptr[called].params.length)) {
             if PrepareWord(locals.ptr[fns.ptr[called].params[i]].flags) & LF_MUTPARAM =? 0 {continue}
             let root=fact_progress_root(kid(n i))

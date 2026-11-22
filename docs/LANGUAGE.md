@@ -986,6 +986,9 @@ allocation rather than introducing a fit obligation at the arithmetic.
 By default, the counter-progress axiom assumes additive updates of 64-bit
 counters and accumulators by a bounded machine-word amount cannot overflow.
 A bounded mathematical increment, such as `value and 65535`, `i%7+1` or `xs.length-1` (also through immutable locals), also qualifies.
+An entry read back from its own key counts too: `counts[w] = (counts.get(w) ?? 0) + 1`, when the
+default and the increment are both bounded (another key, another dictionary or an unbounded
+increment still needs proof).
 `Atomic<int64>.add` also uses this axiom for literal or bounded increments and
 immutable scalar parameters. Loading the counter as its own increment still
 needs proof; `$no_assumed_bounds` keeps the atomic overflow obligation.
@@ -3003,7 +3006,9 @@ An in-place update such as `values[key] += 1`, `values[key].x = 5` or
 `values[key].push(v)` changes an existing entry; a missing key fails as
 `values[key]` does, and nothing is inserted. Each key and index of the target
 is evaluated once, from left to right: `d[next()]["x"] += 1` calls `next` once. Count with
-`if key in? counts counts[key] += 1 else counts[key] = 1`.
+`counts[key] = (counts.get(key) ?? 0) + 1` or
+`if key in? counts counts[key] += 1 else counts[key] = 1`; the counter-progress axiom
+proves either for 64-bit counts.
 If the right-hand side changes the dictionary, the store finds the captured key
 in the current dictionary again; if that key is gone, the update fails.
 Compound updates keep the old entry value read before the right-hand side:
@@ -5077,8 +5082,10 @@ Ordinary function parameters still hold independent values: a mutable loop over
 a value parameter changes that function's copy; an `@` parameter reaches the caller.
 
 This form accepts dynamic or fixed arrays named by a binding or field path
-(`items`, `game.rocks`). Indexed sources, slices, temporary expressions, custom
-sequences, mutable destructuring and combined headers are not supported yet.
+(`items`, `game.rocks`). In a combined header it joins counters from 0 and
+conditions over that one array: `loop i in 0.. and @job in jobs { job.id = i }`.
+Indexed sources, slices, temporary expressions, custom sequences, mutable
+destructuring and other combined headers are not supported yet.
 Nested mutable loops work, as do comprehensions, labels, early exits and fallback
 arms. A fallback runs only when the body never ran, as for ordinary loops.
 Keep the source array's length and storage intact during iteration: collect

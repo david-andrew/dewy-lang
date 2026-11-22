@@ -4344,7 +4344,7 @@ rt_dc_head_join = (op: int, a: int, b: int) -> int:
 
 rt_dc_head_combined = (head: int) -> bool:
     if nodes[head].op != 1: return true
-    if has_flag(head, NF_MUT) or dewy_live_sources.has(int(nodes[head].a)): return rt_dc_combined_mistake(head)
+    if dewy_live_sources.has(int(nodes[head].a)): return rt_dc_combined_mistake(head)
     it = int(nodes[head].a)
     if nodes[it].kind == .range and has_flag(it, NF_STEP):
         if nodes[it].b == 0: it = bc_call("__dewy_open_range_iter", [int(nodes[it].a), int(nodes[it].c)], nodes[it].pos)
