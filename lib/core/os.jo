@@ -655,9 +655,14 @@ __wasm_has = (path: str) -> bool:
     else:
         return false
 
-# names of the entries in a directory (excluding . and ..); [] for a file or a path that is not
-# there too (is_dir tells them apart)
+# names of the entries in a directory (excluding . and ..), sorted, so a program sees the same
+# order on every file system; [] for a file or a path that is not there too (is_dir tells them apart)
 list_dir = (path: str) -> str[]:
+    out = __list_dir_unsorted(path)
+    out.sort()
+    out
+
+__list_dir_unsorted = (path: str) -> str[]:
     out: str[]
     when TARGET == "wasm":
         b = __wasm_bytes((p: *u8, cap: int): __wasm_list_dir(data(path), len(path), p, cap))

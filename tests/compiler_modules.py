@@ -26,8 +26,9 @@ def module_text(path):
 
 
 def source_modules(directory):
+    # (sorted: the order a file system lists a directory in must not reach the driver's module order)
     return tuple((p.name, module_text(p))
-                 for p in Path(directory).iterdir() if p.suffix in ('.jo', '.dewy'))
+                 for p in sorted(Path(directory).iterdir()) if p.suffix in ('.jo', '.dewy'))
 
 
 def compiler_modules(leaf, directory=ROOT / 'compiler'):
