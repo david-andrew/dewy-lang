@@ -69,6 +69,8 @@ exact_potential = (n: int) -> bool:
     if k == .binary and ex_nodes[0][n].aux == 0 and op == 62: return exact_potential(int(ex_nodes[0][n].b))
     # (a right shift keeps an exact operand's excess: `(x * x) >> 33` with x:uint32)
     if k == .binary and ex_nodes[0][n].aux == 0 and op == 68: return exact_potential(int(ex_nodes[0][n].a))
+    # (a negation keeps its exact operand's excess: `-(x << 49)` with x:int64)
+    if k == .unary and op == 59: return exact_potential(int(ex_nodes[0][n].a))
     if k == .conv and (ex_nodes[0][n].aux == 1 or ex_nodes[0][n].aux == 0): return exact_potential(int(ex_nodes[0][n].a))
     if k == .if_ or k == .iflet: return exact_potential(int(ex_nodes[0][n].b)) or exact_potential(int(ex_nodes[0][n].c))
     if k == .coalesce: return exact_potential(int(ex_nodes[0][n].b))

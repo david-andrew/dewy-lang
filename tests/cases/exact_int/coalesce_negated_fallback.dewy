@@ -1,0 +1,19 @@
+$runtime_checks
+$no_assumed_bounds
+
+wide8=(o:int8? x:int8):>int=>o ?? (-(x << 60))
+wide32=(o:uint32? x:uint32):>int=>o ?? (-(x * x * x))
+
+main = ():>void => {
+    let n:int64 = 1099511627776
+    let missing:int64? = none
+    let present:int64? = 7
+    printl(missing ?? (-(n << 49)))
+    printl(missing ?? (-(n * n)))
+    printl(missing ?? (-(-(n << 49))))
+    printl(present ?? (-(n << 49)))
+    printl(wide8(none (-100)))
+    printl(wide8(none 100))
+    printl(wide32(none 4294967295))
+    printl(wide32(5 4294967295))
+}
