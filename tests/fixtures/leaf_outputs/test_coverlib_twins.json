@@ -1,0 +1,342 @@
+{
+ "test_coverlib_checks_hints_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlib/json_dynamic_logs.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "Ada:42\nfalse\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverlib/json_dynamic_logs.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-1": {
+     "run": {
+      "status": 0,
+      "stdout": "Ada:42\nfalse\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/wrong_optional_receiver.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/wrong_optional_receiver.dewy:2:28: error: int has no field 'label'\n    main=()=>{let n=42; printl(n.label)}\n                               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<tmp>/wrong_optional_receiver.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/wrong_optional_receiver.dewy:2:28: error: int has no field 'label'\n    main=()=>{let n=42; printl(n.label)}\n                               ^\n",
+   "files": {}
+  }
+ ],
+ "test_coverlib_facts_changes_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlib/array_rotate_window.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[20 30 10]\n[30 10 20]\n[10 20 30]\n[10 20 30 20 30]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverlib/array_rotate_window.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-1": {
+     "run": {
+      "status": 0,
+      "stdout": "[20 30 10]\n[30 10 20]\n[10 20 30]\n[10 20 30 20 30]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlib_proofs/rotate_invalid_index.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverlib_proofs/rotate_invalid_index.dewy:3:32: error: index is not in bounds\n     loop i in [0..2) {values.push(values.pop(3))}\n                                   ^\n    note: values.length is 3\n    help: establish `3 <? values.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverlib_proofs/rotate_invalid_index.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverlib_proofs/rotate_invalid_index.dewy:3:32: error: index is not in bounds\n     loop i in [0..2) {values.push(values.pop(3))}\n                                   ^\n    note: values.length is 3\n    help: establish `3 <? values.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlib_proofs/rotate_index_effect.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverlib_proofs/rotate_index_effect.dewy:4:32: error: cannot prove index is in bounds: missing lower and upper bounds\n     loop i in [0..2) {values.push(values.pop(index()))}\n                                   ^\n<root>/tests/cases/coverlib_proofs/rotate_index_effect.dewy:4:43: note: values.length may have changed at this call\n     loop i in [0..2) {values.push(values.pop(index()))}\n                                              ^\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverlib_proofs/rotate_index_effect.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverlib_proofs/rotate_index_effect.dewy:4:32: error: cannot prove index is in bounds: missing lower and upper bounds\n     loop i in [0..2) {values.push(values.pop(index()))}\n                                   ^\n<root>/tests/cases/coverlib_proofs/rotate_index_effect.dewy:4:43: note: values.length may have changed at this call\n     loop i in [0..2) {values.push(values.pop(index()))}\n                                              ^\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ],
+ "test_coverlib_facts_forks_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlib/array_rank_lookup.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"fast\" \"medium\" \"slow\"]\n[1 2]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverlib/array_rank_lookup.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-1": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"fast\" \"medium\" \"slow\"]\n[1 2]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlib_proofs/map_foreign_positions.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverlib_proofs/map_foreign_positions.dewy:4:28: error: cannot prove index is in bounds: missing upper bound\n     printl(positions.map((i)=>names[i]))\n                               ^\n    note: i is between 0 and 9\n    note: names.length is 2\n    note: missing upper bound: nothing establishes `i <? names.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 9, names.length = 2\n    help: establish `i <? names.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverlib_proofs/map_foreign_positions.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverlib_proofs/map_foreign_positions.dewy:4:28: error: cannot prove index is in bounds: missing upper bound\n     printl(positions.map((i)=>names[i]))\n                               ^\n    note: i is between 0 and 9\n    note: names.length is 2\n    note: missing upper bound: nothing establishes `i <? names.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 9, names.length = 2\n    help: establish `i <? names.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlib_proofs/map_changed_capture.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverlib_proofs/map_changed_capture.dewy:4:59: error: index is not in bounds\n     printl(positions.map((i:int $capture @names)=>{names=[]; names[i]}))\n                                                              ^\n    note: i is between 0 and 1\n<root>/tests/cases/coverlib_proofs/map_changed_capture.dewy:4:49: note: names.length is 0 after this assignment\n     printl(positions.map((i:int $capture @names)=>{names=[]; names[i]}))\n                                                    ^\n    help: establish `i <? names.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverlib_proofs/map_changed_capture.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverlib_proofs/map_changed_capture.dewy:4:59: error: index is not in bounds\n     printl(positions.map((i:int $capture @names)=>{names=[]; names[i]}))\n                                                              ^\n    note: i is between 0 and 1\n<root>/tests/cases/coverlib_proofs/map_changed_capture.dewy:4:49: note: names.length is 0 after this assignment\n     printl(positions.map((i:int $capture @names)=>{names=[]; names[i]}))\n                                                    ^\n    help: establish `i <? names.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ],
+ "test_coverlib_facts_maps_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlib/set_pending_queue.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "build\ntest\nship\ntrue\ndone\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverlib/set_pending_queue.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-1": {
+     "run": {
+      "status": 0,
+      "stdout": "build\ntest\nship\ntrue\ndone\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlib/dict_tombstone_report.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "11\n[70 71 72 73 74 75 76 77 78 79 5]\nrow70\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverlib/dict_tombstone_report.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-1": {
+     "run": {
+      "status": 0,
+      "stdout": "11\n[70 71 72 73 74 75 76 77 78 79 5]\nrow70\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlib_proofs/store_removed_empty.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverlib_proofs/store_removed_empty.dewy:5:9: error: cannot prove refinement `values(rows).length >? 0`: missing lower bound\n     printl(rows.values.first)\n            ^\n    note: values(rows).length is between 0 and 281474976710655\n    note: missing lower bound: nothing establishes `values(rows).length >? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): values(rows).length = 0\n<root>/lib/prelude/arrays.dewy:5:17: note: the contract is declared here\n    first = (<T>(xs:array<T length >? 0>):>T=>xs[0])\n                    ^\n    help: establish `values(rows).length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverlib_proofs/store_removed_empty.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverlib_proofs/store_removed_empty.dewy:5:9: error: cannot prove refinement `values(rows).length >? 0`: missing lower bound\n     printl(rows.values.first)\n            ^\n    note: values(rows).length is between 0 and 281474976710655\n    note: missing lower bound: nothing establishes `values(rows).length >? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): values(rows).length = 0\n<root>/lib/prelude/arrays.dewy:5:17: note: the contract is declared here\n    first = (<T>(xs:array<T length >? 0>):>T=>xs[0])\n                    ^\n    help: establish `values(rows).length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlib_proofs/set_missing_member.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverlib_proofs/set_missing_member.dewy:3:9: error: cannot prove the value is in the set\n     printl(tasks.pop(\"ship\"))\n            ^\n    help: establish `\"ship\" in? tasks` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take a missing member as a value: `tasks.pop(\"ship\" default=none)` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverlib_proofs/set_missing_member.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverlib_proofs/set_missing_member.dewy:3:9: error: cannot prove the value is in the set\n     printl(tasks.pop(\"ship\"))\n            ^\n    help: establish `\"ship\" in? tasks` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take a missing member as a value: `tasks.pop(\"ship\" default=none)` gives none for it\n",
+   "files": {}
+  }
+ ]
+}

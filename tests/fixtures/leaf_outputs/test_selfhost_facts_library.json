@@ -1,0 +1,196 @@
+{
+ "test_facts_library_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/global_discard.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/collections/library_length.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\na\nb\n1 42\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/sequence/minmax_by_no_tail_allocation.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/array/fill_flat.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[0 0 0 0 7] [false false false] [9 9] 5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/misc/zero_divisor_remainder_uint64.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: zero_divisor_remainder_uint64.dewy:4: division by zero\n    in run (zero_divisor_remainder_uint64.dewy:4)\n    called from main (zero_divisor_remainder_uint64.dewy:5)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/generic/array_literal_user_sum.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/generic/array_literal_user_sum.dewy:2:9: warning: 'values' is given a value here but never used (a parameter kept for the function's type can be named `_values`)\n<root>/tests/cases/generic/array_literal_user_sum.dewy:2:5: warning: 'sum' hides the library's method `array<T>.sum`: this function takes over every `x.sum` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/sum_exact_bounds.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "6\n10\n9223372036854775807\n-9223372036854775808\n18446744073709551615\n307\n2\n5000\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_method_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_method_ok.dewy:1:48: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_method_ok.dewy:2:9: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_method_ok.dewy:2:3: warning: 'f' is never called: nothing runs it (call it, as `f(...)` where it should run)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/repeated_array_endpoints.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "6 0 0 4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood27_proofs/sum_lengths_hint.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood27_proofs/sum_lengths_hint.dewy:3:38: error: cannot prove the exact sum of the array fits `int64`: missing bounds on its elements and length that keep every running sum in range\n    total = (line:array<string>):>int => sum([loop w in line w.length])\n                                         ^\n    help: add into an `int` instead, which never overflows: `let total = 0` then `loop x in xs total += x`\n<root>/tests/cases/dogfood27_proofs/sum_lengths_hint.dewy:3:43: note: this loop may change the value\n    total = (line:array<string>):>int => sum([loop w in line w.length])\n                                              ^\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ]
+}

@@ -1,0 +1,712 @@
+{
+ "test_checker_ffi_layout_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/deref_needs_unsafe.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/deref_needs_unsafe.dewy:11:9: error: dereferencing a raw ptr<uint8> needs an unsafe boundary (the compiler cannot check that it points to live memory of that type): write `$unsafe` before the expression, on its line or the line above, or `$unsafe { ... }` around several\n            p[0]=1\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/export_callback.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[-3 0 1 5 9]\n[9 5 1 0 -3]\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/export_not_marked.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/export_not_marked.dewy:4:7: warning: 'a' is given a value here but never used (a parameter kept for the function's type can be named `_a`)\n<root>/tests/cases/ffi/export_not_marked.dewy:4:20: warning: 'b' is given a value here but never used (a parameter kept for the function's type can be named `_b`)\n<root>/tests/cases/ffi/export_not_marked.dewy:7:25: error: 'same' must be marked `$export` to be used as a C function pointer\n        qsort(data(xs) 2 4 @same)\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/export_same_line.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[-3 0 1 5 9]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/export_without_function.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/export_without_function.dewy:1:1: error: `$export` marks a module-level function with a body: put it before one, on its line or the line above\n    $export\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/extern_array.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/extern_array.dewy:3:9: error: array<uint8> cannot cross the C boundary: a `$extern` function takes and returns fixed-width numbers, bools, `ptr<T>`, `ptr<T>?`, strings (a `char *`), function types (C function pointers) and records with C's layout (C structs)\n    strlen=(s:array<uint8>):>uint64\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/extern_local.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/extern_local.dewy:2:5: error: `$extern` declares a module-level function: prefix its declaration with `$extern`, then `name = (...):>Result`\n        $extern\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/extern_math_int.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/extern_math_int.dewy:3:7: error: `int` cannot cross the C boundary (its size is not fixed): a `$extern` function uses int32, int64, uint8, … instead\n    labs=(x:int):>int\n          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/extern_needs_result.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/extern_needs_result.dewy:2:8: error: a `$extern` function states its result type, `:>int32` or `:>void`: there is no body to infer it from\n    getpid=()\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/extern_needs_unsafe.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/extern_needs_unsafe.dewy:4:23: error: using the foreign function 'getpid' needs an unsafe boundary (the compiler cannot check what it does): write `$unsafe` before the expression, on its line or the line above, or `$unsafe { ... }` around several\n    main=():>void=>printl(getpid())\n                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/extern_reference_needs_unsafe.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/extern_reference_needs_unsafe.dewy:5:15: error: using the foreign function 'qsort' needs an unsafe boundary (the compiler cannot check what it does): write `$unsafe` before the expression, on its line or the line above, or `$unsafe { ... }` around several\n        let sort=@qsort\n                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/extern_trusted_row.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/extern_trusted_row.dewy:13:11: error: effect contract violation in 'noisy': opaque operation or unproved implementation cost exceeds the closed row (no_effects permits none); noisy -> getpid; witness at <root>/tests/cases/ffi/extern_trusted_row.dewy:6:8\n        int64(getpid())\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/intrinsic.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p12-0": {
+     "run": {
+      "status": 0,
+      "stdout": "4.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/intrinsic_unknown.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/intrinsic_unknown.dewy:2:11: error: 'cube_root' is not a function the compiler provides, so it cannot be `$intrinsic`: give it a body, or `$extern` for a C function\n    cube_root=(x:float64):>float64\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/libc_calls.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p14-0": {
+     "run": {
+      "status": 0,
+      "stdout": "3\ntrue\n5 7\n1235\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/pointer_detach.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/pointer_detach.dewy:17:11: warning: `a.ptr` of plain parameter 'a' may be written through or escape; the caller cannot see writes to its private copy: take `@a` and pass `@a`, or copy into a local first\n<root>/tests/cases/ffi/pointer_detach.dewy:22:10: warning: `a.ptr` of plain parameter 'a' may be written through or escape; the caller cannot see writes to its private copy: take `@a` and pass `@a`, or copy into a local first\n",
+   "files": {
+    "p15-0": {
+     "run": {
+      "status": 0,
+      "stdout": "99 [1 2 3 4] 20 [1 2 3 4] 526\n[1 2 3 4] [1 2 3 4] [42 2 3 4]\n[1 2 3 4] [7 7 3 4]\n[1 2 3 4] [1 2 11 4]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/ptr_empty_to_c.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p16-0": {
+     "run": {
+      "status": 0,
+      "stdout": "false\n0 false\nfalse\nfalse\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/ptr_nonempty_to_c.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p17-0": {
+     "run": {
+      "status": 0,
+      "stdout": "3 105\n[104 120 120 0] 3\n[0 2 3] 3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/ptr_round_trip.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p18-0": {
+     "run": {
+      "status": 0,
+      "stdout": "5\n99 3\n4 1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/ptr_string_bytes_to_c.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p19-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0\n0\n4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/record_layout.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p20-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0\ntrue\n7 513\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/record_layout_managed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/record_layout_managed.dewy:4:7: error: Named has no C layout (its field 'name': string is managed by Dewy): a pointer for C points to fixed-width numbers, bools, pointers, or records of them\n    take=(p:ptr<Named>):>void\n          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/unreserved_names.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p22-0": {
+     "run": {
+      "status": 0,
+      "stdout": "42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/unsafe_declaration.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p23-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/unsafe_next_expression.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p24-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/unsafe_not_bundled.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/unsafe_not_bundled.dewy:2:5: error: `$unsafe` cannot be bundled: write it where the unsafe code is, so each boundary is visible\n        $unsafe\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/unsafe_scope.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/unsafe_scope.dewy:8:12: error: using the foreign function 'getpid' needs an unsafe boundary (the compiler cannot check what it does): write `$unsafe` before the expression, on its line or the line above, or `$unsafe { ... }` around several\n        printl(getpid())\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi_structs/callback_struct.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi_structs/callback_struct.dewy:4:10: error: Pair cannot cross the C boundary: a C function pointer takes and returns fixed-width numbers, bools, `ptr<T>`, `ptr<T>?`, strings (a `char *`) and function types (C function pointers)\n    visit = (f:((p:Pair):>int32)):>int32\n             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi_structs/export_struct.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi_structs/export_struct.dewy:4:10: error: Pair cannot cross the C boundary: a `$export` function takes and returns fixed-width numbers, bools, `ptr<T>`\n    total = (p:Pair):>int32 => p.a + p.b\n             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi_structs/libc_div.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p29-0": {
+     "run": {
+      "status": 0,
+      "stdout": "9 2\n-10000000000 -7\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi_structs/managed_field.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi_structs/managed_field.dewy:4:9: error: Named has no C layout (its field 'name': string is managed by Dewy): a C struct passed by value holds fixed-width numbers, bools, pointers, or records of them\n    show = (n:Named):>int32\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi_structs/web_struct.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p31-0": {
+     "binary": "elf"
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/array_empty.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p32-0": {
+     "run": {
+      "status": 0,
+      "stdout": "false 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/array_fill.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p33-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[42 42 42 42]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/array_offset.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p34-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[0 7 7 0]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/callback_qsort.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p35-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2 5 9]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/callback_qsort_empty.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p36-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/div_negative.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p37-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-9 -2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/ldiv_large.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p38-0": {
+     "run": {
+      "status": 0,
+      "stdout": "92233720368547758 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/nullable_missing.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p39-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/pointer_null.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p40-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/string_ascii.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p41-0": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/string_embedded_nul.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p42-0": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/string_empty.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p43-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/strtol_end.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p44-0": {
+     "run": {
+      "status": 0,
+      "stdout": "123 120\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/strtol_no_digits.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p45-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0 120\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/union_field.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverlayout_ffi/union_field.dewy:4:7: error: Payload has no C layout (its field 'value': int32 | float32 is managed by Dewy): a C struct passed by value holds fixed-width numbers, bools, pointers, or records of them\n    send=(value:Payload):>void\n          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/recursive.jo"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/recursive.jo:3:8: error: recursive value field 'next' in Node uses managed storage and cannot cross the C ABI; use an explicit pointer-based C representation\n    extern use_node = (n: *Node)\n           ^\n",
+   "files": {}
+  }
+ ]
+}

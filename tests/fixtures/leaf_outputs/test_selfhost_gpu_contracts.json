@@ -1,0 +1,134 @@
+{
+ "test_gpu_nonempty_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/minimal_integer_min.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/guarded.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1.0\n0.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/zero_axis_bad.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_nonempty/zero_axis_bad.dewy:1:18: error: `cpu(gpu(zeros(2 0))).data` is empty\n    main=()=>{printl(min(gpu(zeros(2 0))))}\n                     ^\n    help: establish `cpu(gpu(zeros(2 0))).data.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/unknown_bad.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_nonempty/unknown_bad.dewy:1:29: error: cannot prove `cpu(gpu(a)).data` is nonempty: nothing establishes `cpu(gpu(a)).data.length >? 0` here\n    minimum=(a:array<float32>)=>min(gpu(a))\n                                ^\n    help: establish `cpu(gpu(a)).data.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ],
+ "test_gpu_sum_panic_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_float_sum/minimal_float_sum.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "6.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_float_sum/boundaries.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "0.0\n0.0\n1.0\n1.0\n63.0\n1.0\n64.0\n1.0\n65.0\n1.0\n255.0\n1.0\n256.0\n1.0\n257.0\n1.0\n4097.0\n1.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_float_sum/buffer_index_bad.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_float_sum/buffer_index_bad.dewy:1:47: error: cannot prove index is in bounds: missing upper bound\n    main=()=>{let b=gpu_buffer<float32>(0) printl(b[0])}\n                                                  ^\n    note: b.length is between 0 and 2147483647\n    note: missing upper bound: nothing establishes `0 <? b.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): b.length = 0\n    help: establish `0 <? b.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_float_sum/user_sum_bad.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_float_sum/user_sum_bad.dewy:1:38: error: cannot prove index is in bounds: missing upper bound\n    sum=(x:GpuBuffer<float32>):>float32=>x[0]\n                                         ^\n    note: x.length is between 0 and 2147483647\n    note: missing upper bound: nothing establishes `0 <? x.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x.length = 0\n    help: establish `0 <? x.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ]
+}

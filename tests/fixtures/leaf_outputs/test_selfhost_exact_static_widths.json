@@ -1,0 +1,4261 @@
+{
+ "test_exact_static_widths_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/broadcast.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/broadcast.dewy:4:7: warning: 'a' is given a value here but never used (a parameter kept for the function's type can be named `_a`)\n<root>/tests/cases/exact_int/broadcast.dewy:5:7: warning: 'a' is given a value here but never used (a parameter kept for the function's type can be named `_a`)\n",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "int int64\n[2 3 4] [2 3 4] [2 3 4]\n[2 3 4]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/broadcast.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/broadcast.dewy:4:7: warning: 'a' is given a value here but never used (a parameter kept for the function's type can be named `_a`)\n<root>/tests/cases/exact_int/broadcast.dewy:5:7: warning: 'a' is given a value here but never used (a parameter kept for the function's type can be named `_a`)\n",
+   "files": {
+    "p0-1": {
+     "run": {
+      "status": 0,
+      "stdout": "int int64\n[2 3 4] [2 3 4] [2 3 4]\n[2 3 4]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/captures.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-9223372036854775808 -9223372036854775808 -9223372036854775808\n-9223372036854775807 -9223372036854775806 -9223372036854775807\n0 0 0\n1 2 1\n9223372036854775807 9223372036854775807 9223372036854775807\n9223372036854775808 9223372036854775809 9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/captures.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-1": {
+     "run": {
+      "status": 0,
+      "stdout": "-9223372036854775808 -9223372036854775808 -9223372036854775808\n-9223372036854775807 -9223372036854775806 -9223372036854775807\n0 0 0\n1 2 1\n9223372036854775807 9223372036854775807 9223372036854775807\n9223372036854775808 9223372036854775809 9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/chain_exact_operands.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\nfalse\nfalse\nfalse\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/chain_exact_operands.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-1": {
+     "run": {
+      "status": 0,
+      "stdout": "true\nfalse\nfalse\nfalse\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/coalesce_negated_fallback.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-618970019642690137449562112\n-1208925819614629174706176\n618970019642690137449562112\n7\n115292150460684697600\n-115292150460684697600\n-79228162458924105385300197375\n5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/coalesce_negated_fallback.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-1": {
+     "run": {
+      "status": 0,
+      "stdout": "-618970019642690137449562112\n-1208925819614629174706176\n618970019642690137449562112\n7\n115292150460684697600\n-115292150460684697600\n-79228162458924105385300197375\n5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/coalesce_wide_shift.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p4-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-36893488147419103232\n-36893488147419103232\n-36893488147419103232\n11\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/coalesce_wide_shift.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p4-1": {
+     "run": {
+      "status": 0,
+      "stdout": "-36893488147419103232\n-36893488147419103232\n-36893488147419103232\n11\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p5-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-9223372036854775808 9223372036854775807 4831838209 -9223372036854775808\n100 -65 -65 1 -1\n9223372036854775807 9223372036854775807 0 7\n18446744073709551615 1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/constant_width.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p5-1": {
+     "run": {
+      "status": 0,
+      "stdout": "-9223372036854775808 9223372036854775807 4831838209 -9223372036854775808\n100 -65 -65 1 -1\n9223372036854775807 9223372036854775807 0 7\n18446744073709551615 1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width_checked.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p6-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: integer overflow: value does not fit the requested fixed width\n    in main\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/constant_width_checked.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p6-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: integer overflow: value does not fit the requested fixed width\n    in main\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width_checked_named.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p7-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: integer overflow: value does not fit the requested fixed width\n    in main (constant_width_checked_named.dewy:8)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/constant_width_checked_named.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p7-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: integer overflow: value does not fit the requested fixed width\n    in main (constant_width_checked_named.dewy:8)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width_imported.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p8-0": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775808 9223372036854775807\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/constant_width_imported.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p8-1": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775808 9223372036854775807\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width_imported_values.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p9-0": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/constant_width_imported_values.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p9-1": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width_initialization.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p10-0": {
+     "run": {
+      "status": 0,
+      "stdout": "30 31\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/constant_width_initialization.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p10-1": {
+     "run": {
+      "status": 0,
+      "stdout": "30 31\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width_policy.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p11-0": {
+     "run": {
+      "status": 0,
+      "stdout": "211 127\n-9223372036854775599\n-9223372036854775799\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/constant_width_policy.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p11-1": {
+     "run": {
+      "status": 0,
+      "stdout": "211 127\n-9223372036854775599\n-9223372036854775799\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width_reject_divide.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/constant_width_reject_divide.dewy:2:15: error: cannot prove exact integer result fits int64\n    let x:int64 = (-9223372036854775807 - 1) // -1\n                  ^\n    note: nothing bounds `(-9223372036854775807 - 1) // -1` within int64 here\n    help: establish `int64.min <=? ((-9223372036854775807 - 1) // -1) and ((-9223372036854775807 - 1) // -1) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/constant_width_reject_divide.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/constant_width_reject_divide.dewy:2:15: error: cannot prove exact integer result fits int64\n    let x:int64 = (-9223372036854775807 - 1) // -1\n                  ^\n    note: nothing bounds `(-9223372036854775807 - 1) // -1` within int64 here\n    help: establish `int64.min <=? ((-9223372036854775807 - 1) // -1) and ((-9223372036854775807 - 1) // -1) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width_reject_high.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/constant_width_reject_high.dewy:2:15: error: cannot prove exact integer result fits int64\n    let x:int64 = 4611686018427387904 * 2\n                  ^\n    note: nothing bounds `4611686018427387904*2` within int64 here\n    help: establish `int64.min <=? (4611686018427387904*2) and (4611686018427387904*2) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/constant_width_reject_high.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/constant_width_reject_high.dewy:2:15: error: cannot prove exact integer result fits int64\n    let x:int64 = 4611686018427387904 * 2\n                  ^\n    note: nothing bounds `4611686018427387904*2` within int64 here\n    help: establish `int64.min <=? (4611686018427387904*2) and (4611686018427387904*2) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width_reject_low.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/constant_width_reject_low.dewy:2:24: error: cannot prove exact integer result fits int64\n    Range:type=[lo:int64 = -9223372036854775807 - 2]\n                           ^\n    note: nothing bounds `-9223372036854775807 - 2` within int64 here\n    help: establish `int64.min <=? (-9223372036854775807 - 2) and (-9223372036854775807 - 2) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/constant_width_reject_low.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/constant_width_reject_low.dewy:2:24: error: cannot prove exact integer result fits int64\n    Range:type=[lo:int64 = -9223372036854775807 - 2]\n                           ^\n    note: nothing bounds `-9223372036854775807 - 2` within int64 here\n    help: establish `int64.min <=? (-9223372036854775807 - 2) and (-9223372036854775807 - 2) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width_reject_product.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/constant_width_reject_product.dewy:2:15: error: cannot prove exact integer result fits int64\n    let x:int64 = 9223372036854775807 * 4\n                  ^\n    note: nothing bounds `9223372036854775807*4` within int64 here\n    help: establish `int64.min <=? (9223372036854775807*4) and (9223372036854775807*4) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/constant_width_reject_product.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/constant_width_reject_product.dewy:2:15: error: cannot prove exact integer result fits int64\n    let x:int64 = 9223372036854775807 * 4\n                  ^\n    note: nothing bounds `9223372036854775807*4` within int64 here\n    help: establish `int64.min <=? (9223372036854775807*4) and (9223372036854775807*4) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width_reject_unsigned.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/constant_width_reject_unsigned.dewy:2:16: error: cannot prove exact integer result fits uint64\n    let x:uint64 = uint64(9223372036854775808) * uint64(2)\n                   ^\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `uint64<overflow='wrap'>`. For saturation use `uint64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/constant_width_reject_unsigned.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/constant_width_reject_unsigned.dewy:2:16: error: cannot prove exact integer result fits uint64\n    let x:uint64 = uint64(9223372036854775808) * uint64(2)\n                   ^\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `uint64<overflow='wrap'>`. For saturation use `uint64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/control_representation.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p17-0": {
+     "run": {
+      "status": 0,
+      "stdout": "10 10 10.0 10\n12 12 12.0 12\n2 3\n3 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/control_representation.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p17-1": {
+     "run": {
+      "status": 0,
+      "stdout": "10 10 10.0 10\n12 12 12.0 12\n2 3\n3 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/dynamic.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p18-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1267650600228229401496703205376 1267650600228229401496703205376\n0 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/dynamic.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p18-1": {
+     "run": {
+      "status": 0,
+      "stdout": "1267650600228229401496703205376 1267650600228229401496703205376\n0 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/fix_overflow.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p19-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-2 9223372036854775807\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/fix_overflow.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p19-1": {
+     "run": {
+      "status": 0,
+      "stdout": "-2 9223372036854775807\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/fix_refinement.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p20-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-1000\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/fix_refinement.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p20-1": {
+     "run": {
+      "status": 0,
+      "stdout": "-1000\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/fix_widen.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p21-0": {
+     "run": {
+      "status": 0,
+      "stdout": "18446744073709551614\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/fix_widen.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p21-1": {
+     "run": {
+      "status": 0,
+      "stdout": "18446744073709551614\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/float_destination.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p22-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[0.5 1 1.5]\n[1.5 2.0 2.5]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/float_destination.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p22-1": {
+     "run": {
+      "status": 0,
+      "stdout": "[0.5 1 1.5]\n[1.5 2.0 2.5]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/floor_intermediates.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p23-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-127\n1\n85\n1\n1431568385\n1\n6148914688373205675\n0\n-2\n1\n96845406386975145984\n4\n677917844708826021888\n0\n-2\n-1\n0\n21\n-128\n1\n-1\n16377\n-701737643\n1\n1537228672809129301\n1\n5\n-2147483648\n-13835058055282163712\n1\n-1\n-9223372036854775802\ntrue\n-2\n-1\n32281802128991715328\n-2\n3\n-1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/floor_intermediates.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p23-1": {
+     "run": {
+      "status": 0,
+      "stdout": "-127\n1\n85\n1\n1431568385\n1\n6148914688373205675\n0\n-2\n1\n96845406386975145984\n4\n677917844708826021888\n0\n-2\n-1\n0\n21\n-128\n1\n-1\n16377\n-701737643\n1\n1537228672809129301\n1\n5\n-2147483648\n-13835058055282163712\n1\n-1\n-9223372036854775802\ntrue\n-2\n-1\n32281802128991715328\n-2\n3\n-1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/floor_narrow_remainder.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p24-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: integer overflow: value does not fit the requested fixed width\n    in main (floor_narrow_remainder.dewy:7)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/floor_narrow_remainder.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p24-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: integer overflow: value does not fit the requested fixed width\n    in main (floor_narrow_remainder.dewy:7)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/floor_narrow_signed.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p25-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: integer overflow: value does not fit the requested fixed width\n    in main (floor_narrow_signed.dewy:6)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/floor_narrow_signed.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p25-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: integer overflow: value does not fit the requested fixed width\n    in main (floor_narrow_signed.dewy:6)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/floor_narrow_unsigned.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p26-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: integer overflow: value does not fit the requested fixed width\n    in main (floor_narrow_unsigned.dewy:5)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/floor_narrow_unsigned.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p26-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: integer overflow: value does not fit the requested fixed width\n    in main (floor_narrow_unsigned.dewy:5)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/floor_proven_fit.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p27-0": {
+     "run": {
+      "status": 0,
+      "stdout": "18446744073709551615\n255\n114944269\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/floor_proven_fit.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p27-1": {
+     "run": {
+      "status": 0,
+      "stdout": "18446744073709551615\n255\n114944269\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/floor_unproven.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/floor_unproven.dewy:2:30: error: cannot prove exact integer result fits uint64\n    quotient=(x:uint64):>uint64=>(x - 4) // 2\n                                 ^\n    note: nothing bounds `(x - 4) // 2` within uint64 here\n    help: establish `uint64.min <=? ((x - 4) // 2) and ((x - 4) // 2) <=? uint64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `uint64<overflow='wrap'>`. For saturation use `uint64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/floor_unproven.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/floor_unproven.dewy:2:30: error: cannot prove exact integer result fits uint64\n    quotient=(x:uint64):>uint64=>(x - 4) // 2\n                                 ^\n    note: nothing bounds `(x - 4) // 2` within uint64 here\n    help: establish `uint64.min <=? ((x - 4) // 2) and ((x - 4) // 2) <=? uint64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `uint64<overflow='wrap'>`. For saturation use `uint64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/guard_mutation.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p29-0": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775808\n18446744073709551615\n9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/guard_mutation.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p29-1": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775808\n18446744073709551615\n9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/identity.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/identity.dewy:2:7: warning: 'n' is given a value here but never used (a parameter kept for the function's type can be named `_n`)\n<root>/tests/cases/exact_int/identity.dewy:3:7: warning: 'n' is given a value here but never used (a parameter kept for the function's type can be named `_n`)\n",
+   "files": {
+    "p30-0": {
+     "run": {
+      "status": 0,
+      "stdout": "int int int int int\nint int int int int\n-9223372036854775809 9223372036854775808 9223372036854775808 9223372036854775808 9223372036854775808 0\n-9223372036854775808 -9223372036854775808\n-9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/identity.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/identity.dewy:2:7: warning: 'n' is given a value here but never used (a parameter kept for the function's type can be named `_n`)\n<root>/tests/cases/exact_int/identity.dewy:3:7: warning: 'n' is given a value here but never used (a parameter kept for the function's type can be named `_n`)\n",
+   "files": {
+    "p30-1": {
+     "run": {
+      "status": 0,
+      "stdout": "int int int int int\nint int int int int\n-9223372036854775809 9223372036854775808 9223372036854775808 9223372036854775808 9223372036854775808 0\n-9223372036854775808 -9223372036854775808\n-9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/index_borrow.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p31-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/index_borrow.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p31-1": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/large_literal.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p32-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0\n1\n-85070591730234615856620279821087277056\n1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/large_literal.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p32-1": {
+     "run": {
+      "status": 0,
+      "stdout": "0\n1\n-85070591730234615856620279821087277056\n1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/midpoint.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p33-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-1 -1\n-9223372036854775808 9223372036854775807\n-3 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/midpoint.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p33-1": {
+     "run": {
+      "status": 0,
+      "stdout": "-1 -1\n-9223372036854775808 9223372036854775807\n-3 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/narrow_signed_observation.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p34-0": {
+     "run": {
+      "status": 0,
+      "stdout": "227\n227\n5\n226\nv=16129\n127\n127\n-701737643\n1\n1031887129\n1537228672809129301\n-4294967295\n-1073741824\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/narrow_signed_observation.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p34-1": {
+     "run": {
+      "status": 0,
+      "stdout": "227\n227\n5\n226\nv=16129\n127\n127\n-701737643\n1\n1031887129\n1537228672809129301\n-4294967295\n-1073741824\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/oversized_word_shift.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p35-0": {
+     "run": {
+      "status": 0,
+      "stdout": "<0>\n<-1>\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/oversized_word_shift.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p35-1": {
+     "run": {
+      "status": 0,
+      "stdout": "<0>\n<-1>\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/packing.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p36-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-9223372036854775807 -9223372036854775808 1 -18446744073709551615\n-9223372036854775805 -27670116110564327424 18446744073709551619 -36893488147419103229\n-4611686018427387903 -4611686018427387904 1 -9223372036854775807\n-4611686018427387901 -13835058055282163712 9223372036854775811 -18446744073709551613\n0 -1 1 -1\n2 -3 5 -1\n1 0 1 1\n3 0 3 3\n2 1 1 3\n4 3 1 7\n4611686018427387905 4611686018427387904 1 9223372036854775809\n4611686018427387907 13835058055282163712 -9223372036854775805 18446744073709551619\n9223372036854775808 9223372036854775807 1 18446744073709551615\n9223372036854775810 27670116110564327421 -18446744073709551611 36893488147419103231\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/packing.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p36-1": {
+     "run": {
+      "status": 0,
+      "stdout": "-9223372036854775807 -9223372036854775808 1 -18446744073709551615\n-9223372036854775805 -27670116110564327424 18446744073709551619 -36893488147419103229\n-4611686018427387903 -4611686018427387904 1 -9223372036854775807\n-4611686018427387901 -13835058055282163712 9223372036854775811 -18446744073709551613\n0 -1 1 -1\n2 -3 5 -1\n1 0 1 1\n3 0 3 3\n2 1 1 3\n4 3 1 7\n4611686018427387905 4611686018427387904 1 9223372036854775809\n4611686018427387907 13835058055282163712 -9223372036854775805 18446744073709551619\n9223372036854775808 9223372036854775807 1 18446744073709551615\n9223372036854775810 27670116110564327421 -18446744073709551611 36893488147419103231\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/parallel_result.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p37-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[9223372036854775808 9223372036854775809]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/parallel_result.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p37-1": {
+     "run": {
+      "status": 0,
+      "stdout": "[9223372036854775808 9223372036854775809]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/proved.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p38-0": {
+     "run": {
+      "status": 0,
+      "stdout": "82 10 [17]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/proved.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p38-1": {
+     "run": {
+      "status": 0,
+      "stdout": "82 10 [17]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/proved_cost.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p39-0": {
+     "run": {
+      "status": 0,
+      "stdout": "101 -140737488355328\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/proved_cost.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p39-1": {
+     "run": {
+      "status": 0,
+      "stdout": "101 -140737488355328\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/record_field_exact.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p40-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[left=-31.0 right=-14987979559889010688]\n-14987979559889010688\n-104\n18446744073709551616\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/record_field_exact.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p40-1": {
+     "run": {
+      "status": 0,
+      "stdout": "[left=-31.0 right=-14987979559889010688]\n-14987979559889010688\n-104\n18446744073709551616\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/record_field_narrow.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p41-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: integer overflow: value does not fit the requested fixed width\n    in main (record_field_narrow.dewy:7)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/record_field_narrow.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p41-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: integer overflow: value does not fit the requested fixed width\n    in main (record_field_narrow.dewy:7)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/recurrence.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p42-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0 -3 13322648497679120612\n14 182 13322648497679120797\n14 182 13322648497679120797\n15 90 13322648497679120705\n15 89 13322648497679120704\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/recurrence.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p42-1": {
+     "run": {
+      "status": 0,
+      "stdout": "0 -3 13322648497679120612\n14 182 13322648497679120797\n14 182 13322648497679120797\n15 90 13322648497679120705\n15 89 13322648497679120704\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/refined_counts.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p43-0": {
+     "run": {
+      "status": 0,
+      "stdout": "4611686018427387904 4611686018427387904\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/refined_counts.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p43-1": {
+     "run": {
+      "status": 0,
+      "stdout": "4611686018427387904 4611686018427387904\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/refined_unsigned_count.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p44-0": {
+     "run": {
+      "status": 0,
+      "stdout": "32 512\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/refined_unsigned_count.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p44-1": {
+     "run": {
+      "status": 0,
+      "stdout": "32 512\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/reject_control.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_control.dewy:1:43: error: cannot prove exact integer result fits int64\n    f=(a:int64 choose:bool):>int64=>if choose a*2 else 7\n                                              ^\n    note: nothing bounds `a*2` within int64 here\n    note: nothing bounds `a` here, so this has no known range: guard it first, or state it where the parameter is declared, `a:int64<(>=? 0)>`\n    help: establish `int64.min <=? (a*2) and (a*2) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/reject_control.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_control.dewy:1:43: error: cannot prove exact integer result fits int64\n    f=(a:int64 choose:bool):>int64=>if choose a*2 else 7\n                                              ^\n    note: nothing bounds `a*2` within int64 here\n    note: nothing bounds `a` here, so this has no known range: guard it first, or state it where the parameter is declared, `a:int64<(>=? 0)>`\n    help: establish `int64.min <=? (a*2) and (a*2) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/reject_cost.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_cost.dewy:3:27: error: effect contract violation in 'f': allocation exceeds the contract (its row excludes it); f; witness at <root>/tests/cases/exact_int/reject_cost.dewy:3:27; `$no_hidden_costs` gives functions without a row of their own this one (opt a function out with `$no_hidden_costs=false` at the top of its body)\n    f=(a:int64 b:int64):>int=>a*b\n                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/reject_cost.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_cost.dewy:3:27: error: effect contract violation in 'f': allocation exceeds the contract (its row excludes it); f; witness at <root>/tests/cases/exact_int/reject_cost.dewy:3:27; `$no_hidden_costs` gives functions without a row of their own this one (opt a function out with `$no_hidden_costs=false` at the top of its body)\n    f=(a:int64 b:int64):>int=>a*b\n                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/reject_element.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_element.dewy:1:48: error: cannot prove exact integer result fits int64\n    f=(a:int64 b:int64)=>{let result:array<int64>=[a*b]; printl(result)}\n                                                   ^\n    note: nothing bounds `a*b` within int64 here\n    note: nothing bounds `a` here, so this has no known range: guard it first, or state it where the parameter is declared, `a:int64<(>=? 0)>`\n    help: establish `int64.min <=? (a*b) and (a*b) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/reject_element.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_element.dewy:1:48: error: cannot prove exact integer result fits int64\n    f=(a:int64 b:int64)=>{let result:array<int64>=[a*b]; printl(result)}\n                                                   ^\n    note: nothing bounds `a*b` within int64 here\n    note: nothing bounds `a` here, so this has no known range: guard it first, or state it where the parameter is declared, `a:int64<(>=? 0)>`\n    help: establish `int64.min <=? (a*b) and (a*b) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/reject_field.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_field.dewy:2:45: error: cannot prove exact integer result fits int64\n    f=(a:int64 b:int64)=>{let result=Slot[value=a*b]; printl(result)}\n                                                ^\n    note: nothing bounds `a*b` within int64 here\n    note: nothing bounds `a` here, so this has no known range: guard it first, or state it where the parameter is declared, `a:int64<(>=? 0)>`\n    help: establish `int64.min <=? (a*b) and (a*b) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/reject_field.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_field.dewy:2:45: error: cannot prove exact integer result fits int64\n    f=(a:int64 b:int64)=>{let result=Slot[value=a*b]; printl(result)}\n                                                ^\n    note: nothing bounds `a*b` within int64 here\n    note: nothing bounds `a` here, so this has no known range: guard it first, or state it where the parameter is declared, `a:int64<(>=? 0)>`\n    help: establish `int64.min <=? (a*b) and (a*b) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/reject_local.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_local.dewy:1:40: error: cannot prove exact integer result fits int64\n    f=(a:int64 b:int64)=>{let result:int64=a*b; printl(result)}\n                                           ^\n    note: nothing bounds `a*b` within int64 here\n    note: nothing bounds `a` here, so this has no known range: guard it first, or state it where the parameter is declared, `a:int64<(>=? 0)>`\n    help: establish `int64.min <=? (a*b) and (a*b) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/reject_local.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_local.dewy:1:40: error: cannot prove exact integer result fits int64\n    f=(a:int64 b:int64)=>{let result:int64=a*b; printl(result)}\n                                           ^\n    note: nothing bounds `a*b` within int64 here\n    note: nothing bounds `a` here, so this has no known range: guard it first, or state it where the parameter is declared, `a:int64<(>=? 0)>`\n    help: establish `int64.min <=? (a*b) and (a*b) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/reject_mixed_policies.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_mixed_policies.dewy:6:14: error: cannot mix int64<overflow='wrap'> and int64<overflow='saturate'>; convert one explicitly\n        printl(\"{a + b}\")\n                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/reject_mixed_policies.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_mixed_policies.dewy:6:14: error: cannot mix int64<overflow='wrap'> and int64<overflow='saturate'>; convert one explicitly\n        printl(\"{a + b}\")\n                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/reject_parameter.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_parameter.dewy:2:30: error: cannot prove exact integer result fits int64\n    f=(a:int64 b:int64)=>consume(a*b)\n                                 ^\n    note: nothing bounds `a*b` within int64 here\n    note: nothing bounds `a` here, so this has no known range: guard it first, or state it where the parameter is declared, `a:int64<(>=? 0)>`\n    help: establish `int64.min <=? (a*b) and (a*b) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/reject_parameter.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_parameter.dewy:2:30: error: cannot prove exact integer result fits int64\n    f=(a:int64 b:int64)=>consume(a*b)\n                                 ^\n    note: nothing bounds `a*b` within int64 here\n    note: nothing bounds `a` here, so this has no known range: guard it first, or state it where the parameter is declared, `a:int64<(>=? 0)>`\n    help: establish `int64.min <=? (a*b) and (a*b) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/reject_return.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_return.dewy:1:29: error: cannot prove exact integer result fits int64\n    f=(a:int64 b:int64):>int64=>a*b\n                                ^\n    note: nothing bounds `a*b` within int64 here\n    note: nothing bounds `a` here, so this has no known range: guard it first, or state it where the parameter is declared, `a:int64<(>=? 0)>`\n    help: establish `int64.min <=? (a*b) and (a*b) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/reject_return.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_return.dewy:1:29: error: cannot prove exact integer result fits int64\n    f=(a:int64 b:int64):>int64=>a*b\n                                ^\n    note: nothing bounds `a*b` within int64 here\n    note: nothing bounds `a` here, so this has no known range: guard it first, or state it where the parameter is declared, `a:int64<(>=? 0)>`\n    help: establish `int64.min <=? (a*b) and (a*b) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/reject_stored.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_stored.dewy:1:52: error: cannot prove `value <=? 9223372036854775807` for the conversion to int64: missing upper bound\n    f=(a:int64 b:int64):>int64=>{let value=a*b; return value}\n                                                       ^\n    note: missing upper bound: nothing establishes `value <=? 9223372036854775807` here\n    help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`\n    help: establish `-9223372036854775808 <=? value and value <=? 9223372036854775807` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/reject_stored.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/reject_stored.dewy:1:52: error: cannot prove `value <=? 9223372036854775807` for the conversion to int64: missing upper bound\n    f=(a:int64 b:int64):>int64=>{let value=a*b; return value}\n                                                       ^\n    note: missing upper bound: nothing establishes `value <=? 9223372036854775807` here\n    help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`\n    help: establish `-9223372036854775808 <=? value and value <=? 9223372036854775807` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/reset.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p54-0": {
+     "run": {
+      "status": 0,
+      "stdout": "7 0 9\n-18446744073709551616\n7\n7 8 9\n9223372036854775808\n7\n7 8 9\n-9223372036854775809\n7\n11 8 30\n11\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/reset.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p54-1": {
+     "run": {
+      "status": 0,
+      "stdout": "7 0 9\n-18446744073709551616\n7\n7 8 9\n9223372036854775808\n7\n7 8 9\n-9223372036854775809\n7\n11 8 30\n11\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/right_shift_observation.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p55-0": {
+     "run": {
+      "status": 0,
+      "stdout": "<1722698134849239038>\n-4398046511104\n18446744073709551614\n9223372036854775803\n3453394\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/right_shift_observation.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p55-1": {
+     "run": {
+      "status": 0,
+      "stdout": "<1722698134849239038>\n-4398046511104\n18446744073709551614\n9223372036854775803\n3453394\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/shaped_broadcast.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p56-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[2  3\n 4  5]\n[5 2 7]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/shaped_broadcast.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p56-1": {
+     "run": {
+      "status": 0,
+      "stdout": "[2  3\n 4  5]\n[5 2 7]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/unsigned_source.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p57-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-1\n18446744073709551616\n36893488147419103230\n-19\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/unsigned_source.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p57-1": {
+     "run": {
+      "status": 0,
+      "stdout": "-1\n18446744073709551616\n36893488147419103230\n-19\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/wide_modulo.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p58-0": {
+     "run": {
+      "status": 0,
+      "stdout": "14083957944848890878 -1\n4860585907994115071 -9223372036854775808\n1 -14083957944848890878\n9223372036854775807 -4860585907994115072\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/wide_modulo.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p58-1": {
+     "run": {
+      "status": 0,
+      "stdout": "14083957944848890878 -1\n4860585907994115071 -9223372036854775808\n1 -14083957944848890878\n9223372036854775807 -4860585907994115072\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/wide_product_tagged.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p59-0": {
+     "run": {
+      "status": 0,
+      "stdout": "37132809814171479110612735544\n8929843277514253782\n410772790765655672316\n-8929843277514253710\n9223372030412324829\n-239807672790720446490\n-9223372030412324901\n4611686018427387940\n-4611686016279904292\n166020696663385964544\n4611686014132420573\n4611686014132420645\n166020696586076553216\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/wide_product_tagged.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p59-1": {
+     "run": {
+      "status": 0,
+      "stdout": "37132809814171479110612735544\n8929843277514253782\n410772790765655672316\n-8929843277514253710\n9223372030412324829\n-239807672790720446490\n-9223372030412324901\n4611686018427387940\n-4611686016279904292\n166020696663385964544\n4611686014132420573\n4611686014132420645\n166020696586076553216\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/wide_unsigned_divisor.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p60-0": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n3\n2\n0\n3\n0\n25\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/wide_unsigned_divisor.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p60-1": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n3\n2\n0\n3\n0\n25\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/wide_unsigned_divisor_zero.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/wide_unsigned_divisor_zero.dewy:2:33: error: cannot prove divisor is nonzero: missing bound\n    bad=(x:uint64 m:uint64):>int => 7 % (x + m)\n                                    ^\n    note: missing bound: nothing establishes `x + m not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x + m = 0\n<root>/tests/cases/exact_int/wide_unsigned_divisor_zero.dewy:2:38: note: this operation is outside the fact language\n    bad=(x:uint64 m:uint64):>int => 7 % (x + m)\n                                         ^\n    help: establish `x + m not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/wide_unsigned_divisor_zero.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/wide_unsigned_divisor_zero.dewy:2:33: error: cannot prove divisor is nonzero: missing bound\n    bad=(x:uint64 m:uint64):>int => 7 % (x + m)\n                                    ^\n    note: missing bound: nothing establishes `x + m not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x + m = 0\n<root>/tests/cases/exact_int/wide_unsigned_divisor_zero.dewy:2:38: note: this operation is outside the fact language\n    bad=(x:uint64 m:uint64):>int => 7 % (x + m)\n                                         ^\n    help: establish `x + m not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/wrap_either_side.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p62-0": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775809\n-9223372036854775807 -9223372036854775807\n-2 -2\n-9223372036854775805 -9223372036854775805\n9223372036854775809 9223372036854775809\n9223372036854775807 9223372036854775807\n-9223372036854775808 -9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_int/wrap_either_side.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p62-1": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775809\n-9223372036854775807 -9223372036854775807\n-2 -2\n-9223372036854775805 -9223372036854775805\n9223372036854775809 9223372036854775809\n9223372036854775807 9223372036854775807\n-9223372036854775808 -9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_loops/cold_accumulator.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p63-0": {
+     "run": {
+      "status": 0,
+      "stdout": "21\n-21\n1267650600228229401496703205397\n-1267650600228229401496703205397\n1267650600228229401496703205376\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_loops/cold_accumulator.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p63-1": {
+     "run": {
+      "status": 0,
+      "stdout": "21\n-21\n1267650600228229401496703205397\n-1267650600228229401496703205397\n1267650600228229401496703205376\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_loops/sum_other_numeric_modes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_loops/sum_other_numeric_modes.dewy:2:8: warning: drop the `()`: `.sum` gives a value\n<root>/tests/cases/exact_loops/sum_other_numeric_modes.dewy:3:8: warning: drop the `()`: `.sum` gives a value\n<root>/tests/cases/exact_loops/sum_other_numeric_modes.dewy:4:8: warning: drop the `()`: `.sum` gives a value\n",
+   "files": {
+    "p64-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-9223372036854775808\n4\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/exact_loops/sum_other_numeric_modes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_loops/sum_other_numeric_modes.dewy:2:8: warning: drop the `()`: `.sum` gives a value\n<root>/tests/cases/exact_loops/sum_other_numeric_modes.dewy:3:8: warning: drop the `()`: `.sum` gives a value\n<root>/tests/cases/exact_loops/sum_other_numeric_modes.dewy:4:8: warning: drop the `()`: `.sum` gives a value\n",
+   "files": {
+    "p64-1": {
+     "run": {
+      "status": 0,
+      "stdout": "-9223372036854775808\n4\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_cleanup.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p65-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_cleanup.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p65-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_compound_slice.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_compound_slice.dewy:2:48: error: compound assignment to picked elements (write an explicit loop)\n    main=()=>{let xs:array<int64 length=2>=[20 22] xs[..]+=1 return 42}\n                                                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_compound_slice.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_compound_slice.dewy:2:48: error: compound assignment to picked elements (write an explicit loop)\n    main=()=>{let xs:array<int64 length=2>=[20 22] xs[..]+=1 return 42}\n                                                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_dictionary.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p67-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_dictionary.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p67-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_dynamic_conversion.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p68-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_dynamic_conversion.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p68-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_dynamic_return.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p69-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_dynamic_return.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p69-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_empty_selector.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p70-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_empty_selector.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p70-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p71-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: range indexes are out of bounds for 2 elements\n    in main (array_error_1.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p71-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: range indexes are out of bounds for 2 elements\n    in main (array_error_1.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_10.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p72-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: index 2 out of bounds (length 2: the last is index 1, as indexes count from 0)\n    in main (array_error_10.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_10.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p72-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: index 2 out of bounds (length 2: the last is index 1, as indexes count from 0)\n    in main (array_error_10.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_11.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p73-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: fixed-size array needs 2 elements\n    in main (array_error_11.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_11.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p73-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: fixed-size array needs 2 elements\n    in main (array_error_11.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_12.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p74-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: fixed-size array needs 2 elements\n    in main (array_error_12.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_12.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p74-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: fixed-size array needs 2 elements\n    in main (array_error_12.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_13.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p75-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: fixed-size array needs 2 elements\n    in main (array_error_13.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_13.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p75-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: fixed-size array needs 2 elements\n    in main (array_error_13.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_14.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p76-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: array_error_14.dewy:4: index 1 out of bounds (length 0: it is empty)\n    in main (array_error_14.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_14.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p76-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: array_error_14.dewy:4: index 1 out of bounds (length 0: it is empty)\n    in main (array_error_14.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_15.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p77-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: slice [0..3] out of bounds (length 2: the last index is 1)\n    in main (array_error_15.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_15.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p77-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: slice [0..3] out of bounds (length 2: the last index is 1)\n    in main (array_error_15.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_16.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p78-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: slice [2..0] out of bounds: it starts after it ends\n    in main (array_error_16.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_16.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p78-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: slice [2..0] out of bounds: it starts after it ends\n    in main (array_error_16.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_17.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p79-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: slice [-2..0] out of bounds: indexes count from 0\n    in main (array_error_17.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_17.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p79-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: slice [-2..0] out of bounds: indexes count from 0\n    in main (array_error_17.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_18.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p80-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: fixed-size array needs 3 elements\n    in main (array_error_18.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_18.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p80-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: fixed-size array needs 3 elements\n    in main (array_error_18.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_2.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p81-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: range index -1 is out of bounds for 2 elements\n    in main (array_error_2.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_2.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p81-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: range index -1 is out of bounds for 2 elements\n    in main (array_error_2.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_3.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p82-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: 1 values for 2 range indexes\n    in main (array_error_3.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_3.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p82-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: 1 values for 2 range indexes\n    in main (array_error_3.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_4.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p83-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: range step must be nonzero\n    in main (array_error_4.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_4.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p83-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: range step must be nonzero\n    in main (array_error_4.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_5.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p84-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: index 2 out of bounds (length 2: the last is index 1, as indexes count from 0)\n    in main (array_error_5.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_5.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p84-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: index 2 out of bounds (length 2: the last is index 1, as indexes count from 0)\n    in main (array_error_5.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_6.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p85-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: a mask of 1 for 2 elements\n    in main (array_error_6.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_6.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p85-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: a mask of 1 for 2 elements\n    in main (array_error_6.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_7.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p86-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: 2 values for the 1 elements in the mask\n    in main (array_error_7.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_7.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p86-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: 2 values for the 1 elements in the mask\n    in main (array_error_7.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_8.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p87-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: 1 values for 2 indexes\n    in main (array_error_8.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_8.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p87-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: 1 values for 2 indexes\n    in main (array_error_8.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_error_9.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p88-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: a mask of 1 for 2 elements\n    in main (array_error_9.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_error_9.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p88-1": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: a mask of 1 for 2 elements\n    in main (array_error_9.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_extend_slice_snapshot.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p89-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_extend_slice_snapshot.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p89-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_generic_context.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p90-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_generic_context.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p90-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_grow.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_grow.dewy:2:52: error: `.push` needs a growable array (`array<T>`); array<int64 length=2> has a fixed length\n    main=()=>{let values:array<int64 length=2>=[20 22] values.push(0) return 42}\n                                                       ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_grow.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_grow.dewy:2:52: error: `.push` needs a growable array (`array<T>`); array<int64 length=2> has a fixed length\n    main=()=>{let values:array<int64 length=2>=[20 22] values.push(0) return 42}\n                                                       ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_length_effects.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p92-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_length_effects.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p92-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_loops.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p93-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_loops.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p93-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_managed_copies.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p94-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_managed_copies.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p94-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_mask_managed.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p95-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_mask_managed.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p95-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_mutable_conversion.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_mutable_conversion.dewy:3:26: error: in call to change(@xs:array<int64 length=2>): argument 1 must have type array<int64 length=2> (`@` parameters need an exact match)\n    main=()=>{let xs=[20 22] change(@xs) return 42}\n                             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_mutable_conversion.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_mutable_conversion.dewy:3:26: error: in call to change(@xs:array<int64 length=2>): argument 1 must have type array<int64 length=2> (`@` parameters need an exact match)\n    main=()=>{let xs=[20 22] change(@xs) return 42}\n                             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_selection_snapshots.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p97-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_selection_snapshots.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p97-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_selection_update.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p98-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_selection_update.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p98-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_selections.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p99-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_selections.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p99-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_selector_snapshots.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p100-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_selector_snapshots.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p100-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_selectors.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p101-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_selectors.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p101-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_slice_allocation.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p102-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_slice_allocation.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p102-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_slice_loops.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p103-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_slice_loops.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p103-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_slice_snapshots.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p104-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_slice_snapshots.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p104-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_slice_update.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p105-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_slice_update.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p105-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_slices.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p106-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_slices.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p106-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_spread_context.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_spread_context.dewy:2:5: warning: 'sum' hides the library's method `array<uint8 length=2>.sum`: this function takes over every `x.sum` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p107-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_spread_context.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_spread_context.dewy:2:5: warning: 'sum' hides the library's method `array<uint8 length=2>.sum`: this function takes over every `x.sum` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p107-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_unknown_constraint.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_unknown_constraint.dewy:2:34: error: Dewy does not yet support array type constraints; use length=N or a length comparison\n    main=()=>{let values:array<int64 capacity=2>=[20 22] return 42}\n                                     ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_unknown_constraint.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_unknown_constraint.dewy:2:34: error: Dewy does not yet support array type constraints; use length=N or a length comparison\n    main=()=>{let values:array<int64 capacity=2>=[20 22] return 42}\n                                     ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_unpack.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p109-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_unpack.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p109-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_unpack_length.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_unpack_length.dewy:2:56: error: unpacking requires exactly 3 elements, found array<int64 length=2>\n    main=()=>{let values:array<int64 length=2>=[20 22] let [a b c]=values return 42}\n                                                           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_unpack_length.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_unpack_length.dewy:2:56: error: unpacking requires exactly 3 elements, found array<int64 length=2>\n    main=()=>{let values:array<int64 length=2>=[20 22] let [a b c]=values return 42}\n                                                           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_update_context.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p111-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_update_context.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p111-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_update_managed.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p112-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_update_managed.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p112-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_update_managed_broadcast.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p113-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_update_managed_broadcast.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p113-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_update_order.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p114-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_update_order.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p114-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_update_overlap.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p115-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_update_overlap.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p115-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_update_parameters.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p116-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_update_parameters.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p116-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_update_places.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p117-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_update_places.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p117-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_values.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p118-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_values.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p118-1": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_wrong_length.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_wrong_length.dewy:2:44: error: type mismatch: expected array<int64 length=2>, found array<int> (a fixed-size array is made from a literal with 2 elements)\n    main=()=>{let values:array<int64 length=2>=[1 2 3] return 42}\n                                               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_wrong_length.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_wrong_length.dewy:2:44: error: type mismatch: expected array<int64 length=2>, found array<int> (a fixed-size array is made from a literal with 2 elements)\n    main=()=>{let values:array<int64 length=2>=[1 2 3] return 42}\n                                               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_zero_length.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_zero_length.dewy:2:41: error: the size of a fixed-size array must be at least 1 (found 0)\n    main=()=>{let values:array<int64 length=0>=[] return 42}\n                                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/fixed/array_zero_length.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_zero_length.dewy:2:41: error: the size of a fixed-size array must be at least 1 (found 0)\n    main=()=>{let values:array<int64 length=0>=[] return 42}\n                                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/ladder/96_ct_crypto/design.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/ladder/96_ct_crypto/sha2.dewy:137:10: warning: 'sha256' hides the library's method `array<uint8>.sha256`: this function takes over every `x.sha256` on one in this module; rename it to keep the library's\n<root>/tests/ladder/96_ct_crypto/curve.dewy:50:8: warning: 'swap' hides the library's method `array<int64<refinement> length=16>.swap`: this function takes over every `x.swap` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p121-0": {
+     "run": {
+      "status": 0,
+      "stdout": "sha256-abc ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\nsha256-empty e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nsha256-448 248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1\nsha256-896 cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1\nsha256-million-a cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0\nhmac-4231-1 b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7\nhmac-4231-2 5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843\nhmac-4231-6 60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54\nhkdf-5869-1 3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865\nhkdf-5869-3 8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8\nhkdf-limit true\nchacha20-block-0 76b8e0ada0f13d90405d6ae55386bd28bdd219b8a08ded1aa836efcc8b770dc7da41597c5157488d7724e03fb8d84a376a43b8f41518a11cc387b669b2ee6586\nchacha20-block-1 9f07e7be5551387a98ba977c732d080dcb0f29a048e3656912c6533e32ee7aed29b721769ce64e43d57133b074d839d531ed1f28510afb45ace10a1f4b794d6f\nchacha20-block-8439 10f1e7e4d13b5915500fdd1fa32071c4c7d1f4c733c068030422aa9ac3d46c4ed2826446079faa0914c2d705d98b02a2b5129cd1de164eb9cbd083e8a2503c4e\nchacha20-8439-2.4.2 6e2e359a2568f98041ba0728dd0d6981e97e7aec1d4360c20a27afccfd9fae0bf91b65c5524733ab8f593dabcd62b3571639d624e65152ab8f530c359f0861d807ca0dbf500d6a6156a38e088a22b65e52bc514d16ccf806818ce91ab77937365af90bbf74a35be6b40b8eedf2785e42874d\nchacha20-roundtrip true\npoly1305-8439-2.5.2 a8061dc1305136c6c22b8baf0c0127a9\npoly1305-wrap ffffffffffffffffffffffffffffffff\npoly1305-reduce 01000000000000000000000000000000\npoly1305-carry 05000000000000000000000000000000\npoly1305-pad 03000000000000000000000000000000\npoly1305-keygen-8439-2.6.2 8ad5a08b905f81cc815040274ab29471a833b637e3fd0da508dbb8e2fdd1a646\naead-8439-2.8.2-ciphertext d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b6116\naead-8439-2.8.2-tag 1ae10b594f09e26a7e902ecbd0600691\naead-open true\naead-forgeries 158/158\nct-equal true false false\nx25519-7748-1 c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552\nx25519-7748-2 95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957\nx25519-alice-public 8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a\nx25519-bob-public de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f\nx25519-shared 4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742\nx25519-agree true\nx25519-iterate-1 422c8e7a6227d7bca1350b3e2bb7279f7897b87bb6854b783c60e80311ae3079\nx25519-iterate-1000 684cf59ba83309552800ef566f2f4d3c1c3887c49360e3875f2eb94d99532c51\nhchacha20-xchacha-2.2.1 82413b4227b27bfed30e42508a877d73a0f9e4d58a74a853c12ec41326d3ecdc\nxchacha20poly1305-ciphertext bd6d179d3e83d43b9576579493c0e939572a1700252bfaccbed2902c21396cbb731c7f1b0b4aa6440bf3a82f4eda7e39ae64c6708c54c216cb96b72e1213b4522f8c9ba40db5d945b11b69b982c1bb9e3f3fac2bc369488f76b2383565d3fff921f9664c97637da9768812f615c68b13b52e\nxchacha20poly1305-tag c0875924c1c7987947deafd8780acf49\nxchacha20poly1305-open true\nxchacha20poly1305-wrong-nonce true\nchannel accepted=120 replayed=7 forged=5 stale=2\nchannel-transcript db94d66d0d455beff0907935fad177fed3c5300522b712a6a3a4ea6afd477481\nchannel reply hello alice\nworkload messages 192 bytes 65428\nworkload-transcript 7e8a28180f9125f88c182f7a2d48ec047f73b346bfe91d39f561605d2603804f\nbulk-ciphertext-sha256 0e763e48784755bec10212ac81b957e5acdf3fcf8c2ef1edc78a048b0d1e1eeb\nbulk-tag 55851e427f09c62216bf4f8d04dd1f9b\nbulk-open true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/ladder/96_ct_crypto/design.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/ladder/96_ct_crypto/sha2.dewy:137:10: warning: 'sha256' hides the library's method `array<uint8>.sha256`: this function takes over every `x.sha256` on one in this module; rename it to keep the library's\n<root>/tests/ladder/96_ct_crypto/curve.dewy:50:8: warning: 'swap' hides the library's method `array<int64<refinement> length=16>.swap`: this function takes over every `x.swap` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p121-1": {
+     "run": {
+      "status": 0,
+      "stdout": "sha256-abc ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\nsha256-empty e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nsha256-448 248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1\nsha256-896 cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1\nsha256-million-a cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0\nhmac-4231-1 b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7\nhmac-4231-2 5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843\nhmac-4231-6 60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54\nhkdf-5869-1 3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865\nhkdf-5869-3 8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8\nhkdf-limit true\nchacha20-block-0 76b8e0ada0f13d90405d6ae55386bd28bdd219b8a08ded1aa836efcc8b770dc7da41597c5157488d7724e03fb8d84a376a43b8f41518a11cc387b669b2ee6586\nchacha20-block-1 9f07e7be5551387a98ba977c732d080dcb0f29a048e3656912c6533e32ee7aed29b721769ce64e43d57133b074d839d531ed1f28510afb45ace10a1f4b794d6f\nchacha20-block-8439 10f1e7e4d13b5915500fdd1fa32071c4c7d1f4c733c068030422aa9ac3d46c4ed2826446079faa0914c2d705d98b02a2b5129cd1de164eb9cbd083e8a2503c4e\nchacha20-8439-2.4.2 6e2e359a2568f98041ba0728dd0d6981e97e7aec1d4360c20a27afccfd9fae0bf91b65c5524733ab8f593dabcd62b3571639d624e65152ab8f530c359f0861d807ca0dbf500d6a6156a38e088a22b65e52bc514d16ccf806818ce91ab77937365af90bbf74a35be6b40b8eedf2785e42874d\nchacha20-roundtrip true\npoly1305-8439-2.5.2 a8061dc1305136c6c22b8baf0c0127a9\npoly1305-wrap ffffffffffffffffffffffffffffffff\npoly1305-reduce 01000000000000000000000000000000\npoly1305-carry 05000000000000000000000000000000\npoly1305-pad 03000000000000000000000000000000\npoly1305-keygen-8439-2.6.2 8ad5a08b905f81cc815040274ab29471a833b637e3fd0da508dbb8e2fdd1a646\naead-8439-2.8.2-ciphertext d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b6116\naead-8439-2.8.2-tag 1ae10b594f09e26a7e902ecbd0600691\naead-open true\naead-forgeries 158/158\nct-equal true false false\nx25519-7748-1 c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552\nx25519-7748-2 95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957\nx25519-alice-public 8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a\nx25519-bob-public de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f\nx25519-shared 4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742\nx25519-agree true\nx25519-iterate-1 422c8e7a6227d7bca1350b3e2bb7279f7897b87bb6854b783c60e80311ae3079\nx25519-iterate-1000 684cf59ba83309552800ef566f2f4d3c1c3887c49360e3875f2eb94d99532c51\nhchacha20-xchacha-2.2.1 82413b4227b27bfed30e42508a877d73a0f9e4d58a74a853c12ec41326d3ecdc\nxchacha20poly1305-ciphertext bd6d179d3e83d43b9576579493c0e939572a1700252bfaccbed2902c21396cbb731c7f1b0b4aa6440bf3a82f4eda7e39ae64c6708c54c216cb96b72e1213b4522f8c9ba40db5d945b11b69b982c1bb9e3f3fac2bc369488f76b2383565d3fff921f9664c97637da9768812f615c68b13b52e\nxchacha20poly1305-tag c0875924c1c7987947deafd8780acf49\nxchacha20poly1305-open true\nxchacha20poly1305-wrong-nonce true\nchannel accepted=120 replayed=7 forged=5 stale=2\nchannel-transcript db94d66d0d455beff0907935fad177fed3c5300522b712a6a3a4ea6afd477481\nchannel reply hello alice\nworkload messages 192 bytes 65428\nworkload-transcript 7e8a28180f9125f88c182f7a2d48ec047f73b346bfe91d39f561605d2603804f\nbulk-ciphertext-sha256 0e763e48784755bec10212ac81b957e5acdf3fcf8c2ef1edc78a048b0d1e1eeb\nbulk-tag 55851e427f09c62216bf4f8d04dd1f9b\nbulk-open true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/ladder/100_rtos_kernel/design.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/ladder/100_rtos_kernel/script.dewy:16:9: warning: 'words' hides the library's method `string.words`: this function takes over every `x.words` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p122-0": {
+     "run": {
+      "status": 0,
+      "stdout": "boot: 0 tasks, 0 program words, run 0 ticks\nsummary at tick 0\n  task     state     prio eff  ran\nswitches 0, idle 0, interrupts 0, overruns 0, boosts 0, faults 0\npool 8/8 free, arena peak 0/64, mailbox peaks 0 0 0 0, trace dropped 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/ladder/100_rtos_kernel/design.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/ladder/100_rtos_kernel/script.dewy:16:9: warning: 'words' hides the library's method `string.words`: this function takes over every `x.words` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p122-1": {
+     "run": {
+      "status": 0,
+      "stdout": "boot: 0 tasks, 0 program words, run 0 ticks\nsummary at tick 0\n  task     state     prio eff  ran\nswitches 0, idle 0, interrupts 0, overruns 0, boosts 0, faults 0\npool 8/8 free, arena peak 0/64, mailbox peaks 0 0 0 0, trace dropped 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/ladder/101_ml_training/core.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/ladder/101_ml_training/mlp.dewy:85:10: warning: 'argmax' hides the library's method `array<float64>.argmax`: this function takes over every `x.argmax` on one in this module; rename it to keep the library's\n<root>/tests/ladder/101_ml_training/mlp.dewy:113:9: warning: 'outer' hides the library's method `array<float64>.outer`: this function takes over every `x.outer` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p123-0": {
+     "run": {
+      "status": 0,
+      "stdout": "train 120 samples, test 60, batch 20, 30 epochs\nepoch 01 loss 0.553092 train 29/120\nepoch 02 loss 0.315024 train 62/120\nepoch 03 loss 0.256374 train 85/120\nepoch 04 loss 0.214315 train 91/120\nepoch 05 loss 0.180957 train 98/120\nepoch 06 loss 0.157274 train 105/120\nepoch 07 loss 0.141012 train 105/120\nepoch 08 loss 0.133432 train 104/120\nepoch 09 loss 0.122532 train 106/120\nepoch 10 loss 0.114437 train 108/120\nepoch 11 loss 0.108842 train 109/120\nepoch 12 loss 0.104032 train 111/120\nepoch 13 loss 0.102018 train 111/120\nepoch 14 loss 0.105019 train 109/120\nepoch 15 loss 0.100405 train 111/120\nepoch 16 loss 0.098204 train 110/120\nepoch 17 loss 0.095191 train 111/120\nepoch 18 loss 0.095441 train 109/120\nepoch 19 loss 0.094659 train 110/120\nepoch 20 loss 0.091965 train 113/120\nepoch 21 loss 0.092642 train 111/120\nepoch 22 loss 0.091520 train 112/120\nepoch 23 loss 0.091924 train 111/120\nepoch 24 loss 0.090266 train 112/120\nepoch 25 loss 0.090359 train 112/120\nepoch 26 loss 0.089481 train 112/120\nepoch 27 loss 0.090124 train 112/120\nepoch 28 loss 0.089489 train 112/120\nepoch 29 loss 0.088546 train 111/120\nepoch 30 loss 0.087940 train 112/120\ntest 51/60\n  class 0: 16 0 4\n  class 1: 0 18 2\n  class 2: 0 3 17\nprobe (-1.0, -1.0) -> 0.773 -0.094 0.346 class 0\nprobe (1.0, -1.0) -> -0.041 0.775 0.216 class 1\nprobe (0.0, 0.0) -> -0.138 -0.113 1.203 class 2\nprobe (0.5, 0.5) -> 0.097 -0.103 0.956 class 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/ladder/101_ml_training/core.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/ladder/101_ml_training/mlp.dewy:85:10: warning: 'argmax' hides the library's method `array<float64>.argmax`: this function takes over every `x.argmax` on one in this module; rename it to keep the library's\n<root>/tests/ladder/101_ml_training/mlp.dewy:113:9: warning: 'outer' hides the library's method `array<float64>.outer`: this function takes over every `x.outer` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p123-1": {
+     "run": {
+      "status": 0,
+      "stdout": "train 120 samples, test 60, batch 20, 30 epochs\nepoch 01 loss 0.553092 train 29/120\nepoch 02 loss 0.315024 train 62/120\nepoch 03 loss 0.256374 train 85/120\nepoch 04 loss 0.214315 train 91/120\nepoch 05 loss 0.180957 train 98/120\nepoch 06 loss 0.157274 train 105/120\nepoch 07 loss 0.141012 train 105/120\nepoch 08 loss 0.133432 train 104/120\nepoch 09 loss 0.122532 train 106/120\nepoch 10 loss 0.114437 train 108/120\nepoch 11 loss 0.108842 train 109/120\nepoch 12 loss 0.104032 train 111/120\nepoch 13 loss 0.102018 train 111/120\nepoch 14 loss 0.105019 train 109/120\nepoch 15 loss 0.100405 train 111/120\nepoch 16 loss 0.098204 train 110/120\nepoch 17 loss 0.095191 train 111/120\nepoch 18 loss 0.095441 train 109/120\nepoch 19 loss 0.094659 train 110/120\nepoch 20 loss 0.091965 train 113/120\nepoch 21 loss 0.092642 train 111/120\nepoch 22 loss 0.091520 train 112/120\nepoch 23 loss 0.091924 train 111/120\nepoch 24 loss 0.090266 train 112/120\nepoch 25 loss 0.090359 train 112/120\nepoch 26 loss 0.089481 train 112/120\nepoch 27 loss 0.090124 train 112/120\nepoch 28 loss 0.089489 train 112/120\nepoch 29 loss 0.088546 train 111/120\nepoch 30 loss 0.087940 train 112/120\ntest 51/60\n  class 0: 16 0 4\n  class 1: 0 18 2\n  class 2: 0 3 17\nprobe (-1.0, -1.0) -> 0.773 -0.094 0.346 class 0\nprobe (1.0, -1.0) -> -0.041 0.775 0.216 class 1\nprobe (0.0, 0.0) -> -0.138 -0.113 1.203 class 2\nprobe (0.5, 0.5) -> 0.097 -0.103 0.956 class 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/compiler/main.jo"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/compiler/checks_thin.dewy:334:34: warning: 's' is given a value here but never used (a parameter kept for the function's type can be named `_s`)\n<root>/compiler/program_settings.dewy:34:13: warning: 'legacy' is given a value here but never used\n<root>/compiler/copy_ops.dewy:511:25: warning: 't' is given a value here but never used (a parameter kept for the function's type can be named `_t`)\n<root>/compiler/constant_checks.dewy:88:25: warning: 'f' is given a value here but never used (a parameter kept for the function's type can be named `_f`)\n<root>/compiler/decimal_ops.dewy:478:40: warning: 'name' is given a value here but never used (a parameter kept for the function's type can be named `_name`)\n<root>/compiler/dewy_method_ops.dewy:267:54: warning: 'receiver' is given a value here but never used (a parameter kept for the function's type can be named `_receiver`)\n<root>/compiler/facts_lifecycle.dewy:158:9: warning: 'owner' is given a value here but never used\n<root>/compiler/error_ops.dewy:391:54: warning: 'expected' is given a value here but never used (a parameter kept for the function's type can be named `_expected`)\n<root>/compiler/concurrency_tasks.dewy:150:13: warning: 'f' is given a value here but never used\n<root>/compiler/node_store.dewy:82:18: warning: 'node' is given a value here but never used (a parameter kept for the function's type can be named `_node`)\n<root>/compiler/dwarf_format.dewy:499:9: warning: 'which' is given a value here but never used (a parameter kept for the function's type can be named `_which`)\n<root>/compiler/x64_emit.dewy:1800:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:1807:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:1823:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:1894:22: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2038:21: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2089:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2097:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2187:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2190:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2193:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2242:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2260:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2286:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2315:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2389:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2392:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2395:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2398:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2401:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2404:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2407:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2410:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2430:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2468:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2514:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2528:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2553:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2587:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2592:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2600:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2611:9: warning: 'op' is given a value here but never used\n<root>/compiler/x64_emit.dewy:2664:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2700:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2708:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2718:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2754:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2760:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2794:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2822:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2846:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2866:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2976:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3029:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3029:23: warning: 'ins' is given a value here but never used (a parameter kept for the function's type can be named `_ins`)\n<root>/compiler/x64_emit.dewy:3032:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3054:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3064:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3074:19: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3096:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3173:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3219:17: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3229:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3256:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3256:25: warning: 'ins' is given a value here but never used (a parameter kept for the function's type can be named `_ins`)\n<root>/compiler/x64_emit.dewy:3259:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3260:9: warning: 'a' is given a value here but never used\n<root>/compiler/x64_emit.dewy:3309:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3309:25: warning: 'ins' is given a value here but never used (a parameter kept for the function's type can be named `_ins`)\n<root>/compiler/x64_emit.dewy:3315:23: warning: 'ins' is given a value here but never used (a parameter kept for the function's type can be named `_ins`)\n<root>/compiler/x64_emit.dewy:3320:12: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3323:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3348:17: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3365:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3374:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3374:24: warning: 'ins' is given a value here but never used (a parameter kept for the function's type can be named `_ins`)\n<root>/compiler/x64_emit.dewy:3449:19: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/unit_ops.dewy:777:41: warning: 'point' is given a value here but never used (a parameter kept for the function's type can be named `_point`)\n<root>/compiler/unit_ops.dewy:797:66: warning: 'expected' is given a value here but never used (a parameter kept for the function's type can be named `_expected`)\n<root>/compiler/string_membership.dewy:143:28: warning: 'expected' is given a value here but never used (a parameter kept for the function's type can be named `_expected`)\n<root>/compiler/checker_call_services.dewy:223:46: warning: 'recv' is given a value here but never used (a parameter kept for the function's type can be named `_recv`)\n<root>/compiler/checker_conditionals.dewy:145:10: warning: 'n' is given a value here but never used (a parameter kept for the function's type can be named `_n`)\n<root>/compiler/checker_collections.dewy:140:20: warning: 'expected' is given a value here but never used (a parameter kept for the function's type can be named `_expected`)\n<root>/compiler/checker_numeric.dewy:175:8: warning: `v` is float64 because of the float written to it at line 170, so this exact comparison tests float64 values, not the exact decimal its literal gave (`0.1+0.2 =? 0.3` is true exactly, false in float64); annotate `float64` (or another explicit representation) to state it\n<root>/compiler/checker_numeric.dewy:175:16: warning: `v` is float64 because of the float written to it at line 170, so this exact comparison tests float64 values, not the exact decimal its literal gave (`0.1+0.2 =? 0.3` is true exactly, false in float64); annotate `float64` (or another explicit representation) to state it\n<root>/compiler/dewy_direct_ops.dewy:123:9: warning: 'list_start' is given a value here but never used\n<root>/compiler/dewy_directive_ops.dewy:26:15: warning: 'file' is given a value here but never used (did you mean the visible variable 'files'?)\n<root>/compiler/dewy_reader.dewy:7104:9: warning: 'start' is given a value here but never used\n<root>/compiler/dewy_reader.dewy:7679:87: warning: 'n' is given a value here but never used (a parameter kept for the function's type can be named `_n`)\n<root>/compiler/dewy_builders.dewy:35:49: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/dewy_lex.dewy:144:9: warning: 'parens' is given a value here, and changed, but never read\n<root>/compiler/checks_stmt_hooks.dewy:568:19: warning: 'f' is given a value here but never used (a parameter kept for the function's type can be named `_f`)\n<root>/compiler/refine_siblings.dewy:278:35: warning: 'r' is given a value here but never used (a parameter kept for the function's type can be named `_r`)\n<root>/compiler/checker_fields.dewy:55:44: warning: 'own' is given a value here but never used (a parameter kept for the function's type can be named `_own`)\n<root>/compiler/call_argument_checks.dewy:128:27: warning: 'p' is given a value here but never used (a parameter kept for the function's type can be named `_p`)\n<root>/compiler/place_method_ops.dewy:309:68: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/checks_type_hooks.dewy:172:41: warning: 'b' is given a value here but never used (a parameter kept for the function's type can be named `_b`)\n<root>/compiler/scope_joins.dewy:234:31: warning: 'name' is given a value here but never used (a parameter kept for the function's type can be named `_name`)\n<root>/compiler/checks_call_errors.dewy:402:97: warning: 'expected' is given a value here but never used (a parameter kept for the function's type can be named `_expected`)\n<root>/compiler/checks_call_errors.dewy:402:120: warning: 'rt' is given a value here but never used (a parameter kept for the function's type can be named `_rt`)\n<root>/compiler/select_checks.dewy:467:9: warning: 'pos' is given a value here but never used\n<root>/compiler/select_checks.dewy:724:35: warning: 'm' is given a value here but never used (a parameter kept for the function's type can be named `_m`)\n<root>/compiler/lower_functions.dewy:414:22: warning: 'lf' is given a value here but never used (a parameter kept for the function's type can be named `_lf`)\n<root>/compiler/lower_functions.dewy:414:33: warning: 'th' is given a value here but never used (a parameter kept for the function's type can be named `_th`)\n<root>/compiler/lower_functions.dewy:417:13: warning: 't0' is given a value here but never used (a parameter kept for the function's type can be named `_t0`)\n<root>/compiler/lower_functions.dewy:417:24: warning: 'addr' is given a value here but never used (a parameter kept for the function's type can be named `_addr`)\n<root>/compiler/lower_functions.dewy:417:37: warning: 'f' is given a value here but never used (a parameter kept for the function's type can be named `_f`)\n<root>/compiler/checks_index_hooks.dewy:104:25: warning: 'bt' is given a value here but never used (a parameter kept for the function's type can be named `_bt`)\n<root>/compiler/checks_index_hooks.dewy:104:34: warning: 'code' is given a value here but never used (a parameter kept for the function's type can be named `_code`)\n<root>/compiler/witness_ops.dewy:474:12: warning: 's' is given a value here but never used (a parameter kept for the function's type can be named `_s`)\n<root>/compiler/lower_group.dewy:1807:29: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:1817:26: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:1821:27: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:1829:28: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:1889:25: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2034:20: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2060:23: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2098:22: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2130:23: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2220:24: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2375:22: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2383:23: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2393:23: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2436:25: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2459:23: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2465:21: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:4245:9: warning: 'less' is given a value here but never used\n<root>/compiler/lower_intrinsics.dewy:38:32: warning: 'arg_start' is given a value here but never used (a parameter kept for the function's type can be named `_arg_start`)\n<root>/compiler/lower_intrinsics.dewy:45:37: warning: 'arg_start' is given a value here but never used (a parameter kept for the function's type can be named `_arg_start`)\n<root>/compiler/lower_intrinsics.dewy:49:31: warning: 'arg_start' is given a value here but never used (a parameter kept for the function's type can be named `_arg_start`)\n<root>/compiler/lower_intrinsics.dewy:53:21: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_intrinsics.dewy:53:30: warning: 'arg_start' is given a value here but never used (a parameter kept for the function's type can be named `_arg_start`)\n<root>/compiler/lower_intrinsics.dewy:58:27: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_intrinsics.dewy:70:30: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_intrinsics.dewy:77:33: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/facts_changes.dewy:320:21: warning: 'n' is given a value here but never used (a parameter kept for the function's type can be named `_n`)\n<root>/compiler/facts_collect.dewy:118:9: warning: 'kept' is given a value here, and changed, but never read\n<root>/compiler/facts_numeric.dewy:226:42: warning: 'a' is given a value here but never used (a parameter kept for the function's type can be named `_a`)\n<root>/compiler/facts_numeric.dewy:226:70: warning: 'modulo' is given a value here but never used (a parameter kept for the function's type can be named `_modulo`)\n<root>/compiler/effect_graph.dewy:235:20: warning: 'f' is given a value here but never used (a parameter kept for the function's type can be named `_f`)\n<root>/compiler/scan_index.dewy:124:14: warning: 'src' is given a value here but never used (a parameter kept for the function's type can be named `_src`)\n<root>/compiler/lower_ffi.dewy:64:16: warning: 'f' is given a value here but never used (a parameter kept for the function's type can be named `_f`)\n<root>/compiler/pkg_ops.dewy:166:16: warning: 'name' is given a value here but never used (a parameter kept for the function's type can be named `_name`)\n<root>/compiler/glsl_stmts.dewy:661:28: warning: 'ustruct' is given a value here but never used (a parameter kept for the function's type can be named `_ustruct`)\n<root>/compiler/spirv_stmts.dewy:602:56: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/deadlock_locations.dewy:33:13: warning: 'd' is given a value here but never used\n<root>/compiler/deadlock_certificates.dewy:376:31: warning: 'g' is given a value here but never used (a parameter kept for the function's type can be named `_g`)\n<root>/compiler/checker_for_loops.dewy:152:21: warning: 'it' is given a value here but never used (a parameter kept for the function's type can be named `_it`)\n<root>/compiler/wasm_output.dewy:35:50: warning: 'frame_lf' is given a value here but never used (a parameter kept for the function's type can be named `_frame_lf`)\n<root>/compiler/driver_cli.dewy:368:13: warning: 'filed' is given a value here but never used (did you mean the visible variable 'files'?)\n<root>/compiler/par_drive.dewy:112:63: warning: 'r0' is given a value here but never used (a parameter kept for the function's type can be named `_r0`)\n<root>/compiler/zip.dewy:96:17: warning: `path` may escape its base (built from unproven text on line 327 of driver_cli.dewy): validate it, `root.confine(path) or_throw`, or test it first, `if root.contains(path) {...}`\n<root>/compiler/repl_session.dewy:52:38: warning: data() of plain parameter 'bytes' may be written through or escape; the caller cannot see writes to its private copy: take `@bytes` and pass `@bytes`, or copy into a local first\n",
+   "files": {
+    "p124-0": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/compiler/main.jo"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/compiler/checks_thin.dewy:334:34: warning: 's' is given a value here but never used (a parameter kept for the function's type can be named `_s`)\n<root>/compiler/program_settings.dewy:34:13: warning: 'legacy' is given a value here but never used\n<root>/compiler/copy_ops.dewy:511:25: warning: 't' is given a value here but never used (a parameter kept for the function's type can be named `_t`)\n<root>/compiler/constant_checks.dewy:88:25: warning: 'f' is given a value here but never used (a parameter kept for the function's type can be named `_f`)\n<root>/compiler/decimal_ops.dewy:478:40: warning: 'name' is given a value here but never used (a parameter kept for the function's type can be named `_name`)\n<root>/compiler/dewy_method_ops.dewy:267:54: warning: 'receiver' is given a value here but never used (a parameter kept for the function's type can be named `_receiver`)\n<root>/compiler/facts_lifecycle.dewy:158:9: warning: 'owner' is given a value here but never used\n<root>/compiler/error_ops.dewy:391:54: warning: 'expected' is given a value here but never used (a parameter kept for the function's type can be named `_expected`)\n<root>/compiler/concurrency_tasks.dewy:150:13: warning: 'f' is given a value here but never used\n<root>/compiler/node_store.dewy:82:18: warning: 'node' is given a value here but never used (a parameter kept for the function's type can be named `_node`)\n<root>/compiler/dwarf_format.dewy:499:9: warning: 'which' is given a value here but never used (a parameter kept for the function's type can be named `_which`)\n<root>/compiler/x64_emit.dewy:1800:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:1807:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:1823:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:1894:22: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2038:21: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2089:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2097:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2187:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2190:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2193:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2242:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2260:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2286:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2315:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2389:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2392:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2395:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2398:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2401:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2404:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2407:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2410:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2430:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2468:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2514:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2528:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2553:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2587:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2592:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2600:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2611:9: warning: 'op' is given a value here but never used\n<root>/compiler/x64_emit.dewy:2664:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2700:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2708:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2718:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2754:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2760:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2794:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2822:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2846:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2866:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:2976:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3029:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3029:23: warning: 'ins' is given a value here but never used (a parameter kept for the function's type can be named `_ins`)\n<root>/compiler/x64_emit.dewy:3032:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3054:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3064:16: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3074:19: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3096:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3173:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3219:17: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3229:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3256:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3256:25: warning: 'ins' is given a value here but never used (a parameter kept for the function's type can be named `_ins`)\n<root>/compiler/x64_emit.dewy:3259:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3260:9: warning: 'a' is given a value here but never used\n<root>/compiler/x64_emit.dewy:3309:15: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3309:25: warning: 'ins' is given a value here but never used (a parameter kept for the function's type can be named `_ins`)\n<root>/compiler/x64_emit.dewy:3315:23: warning: 'ins' is given a value here but never used (a parameter kept for the function's type can be named `_ins`)\n<root>/compiler/x64_emit.dewy:3320:12: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3323:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3348:17: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3365:13: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3374:14: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/x64_emit.dewy:3374:24: warning: 'ins' is given a value here but never used (a parameter kept for the function's type can be named `_ins`)\n<root>/compiler/x64_emit.dewy:3449:19: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/unit_ops.dewy:777:41: warning: 'point' is given a value here but never used (a parameter kept for the function's type can be named `_point`)\n<root>/compiler/unit_ops.dewy:797:66: warning: 'expected' is given a value here but never used (a parameter kept for the function's type can be named `_expected`)\n<root>/compiler/string_membership.dewy:143:28: warning: 'expected' is given a value here but never used (a parameter kept for the function's type can be named `_expected`)\n<root>/compiler/checker_call_services.dewy:223:46: warning: 'recv' is given a value here but never used (a parameter kept for the function's type can be named `_recv`)\n<root>/compiler/checker_conditionals.dewy:145:10: warning: 'n' is given a value here but never used (a parameter kept for the function's type can be named `_n`)\n<root>/compiler/checker_collections.dewy:140:20: warning: 'expected' is given a value here but never used (a parameter kept for the function's type can be named `_expected`)\n<root>/compiler/checker_numeric.dewy:175:8: warning: `v` is float64 because of the float written to it at line 170, so this exact comparison tests float64 values, not the exact decimal its literal gave (`0.1+0.2 =? 0.3` is true exactly, false in float64); annotate `float64` (or another explicit representation) to state it\n<root>/compiler/checker_numeric.dewy:175:16: warning: `v` is float64 because of the float written to it at line 170, so this exact comparison tests float64 values, not the exact decimal its literal gave (`0.1+0.2 =? 0.3` is true exactly, false in float64); annotate `float64` (or another explicit representation) to state it\n<root>/compiler/dewy_direct_ops.dewy:123:9: warning: 'list_start' is given a value here but never used\n<root>/compiler/dewy_directive_ops.dewy:26:15: warning: 'file' is given a value here but never used (did you mean the visible variable 'files'?)\n<root>/compiler/dewy_reader.dewy:7104:9: warning: 'start' is given a value here but never used\n<root>/compiler/dewy_reader.dewy:7679:87: warning: 'n' is given a value here but never used (a parameter kept for the function's type can be named `_n`)\n<root>/compiler/dewy_builders.dewy:35:49: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/dewy_lex.dewy:144:9: warning: 'parens' is given a value here, and changed, but never read\n<root>/compiler/checks_stmt_hooks.dewy:568:19: warning: 'f' is given a value here but never used (a parameter kept for the function's type can be named `_f`)\n<root>/compiler/refine_siblings.dewy:278:35: warning: 'r' is given a value here but never used (a parameter kept for the function's type can be named `_r`)\n<root>/compiler/checker_fields.dewy:55:44: warning: 'own' is given a value here but never used (a parameter kept for the function's type can be named `_own`)\n<root>/compiler/call_argument_checks.dewy:128:27: warning: 'p' is given a value here but never used (a parameter kept for the function's type can be named `_p`)\n<root>/compiler/place_method_ops.dewy:309:68: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/checks_type_hooks.dewy:172:41: warning: 'b' is given a value here but never used (a parameter kept for the function's type can be named `_b`)\n<root>/compiler/scope_joins.dewy:234:31: warning: 'name' is given a value here but never used (a parameter kept for the function's type can be named `_name`)\n<root>/compiler/checks_call_errors.dewy:402:97: warning: 'expected' is given a value here but never used (a parameter kept for the function's type can be named `_expected`)\n<root>/compiler/checks_call_errors.dewy:402:120: warning: 'rt' is given a value here but never used (a parameter kept for the function's type can be named `_rt`)\n<root>/compiler/select_checks.dewy:467:9: warning: 'pos' is given a value here but never used\n<root>/compiler/select_checks.dewy:724:35: warning: 'm' is given a value here but never used (a parameter kept for the function's type can be named `_m`)\n<root>/compiler/lower_functions.dewy:414:22: warning: 'lf' is given a value here but never used (a parameter kept for the function's type can be named `_lf`)\n<root>/compiler/lower_functions.dewy:414:33: warning: 'th' is given a value here but never used (a parameter kept for the function's type can be named `_th`)\n<root>/compiler/lower_functions.dewy:417:13: warning: 't0' is given a value here but never used (a parameter kept for the function's type can be named `_t0`)\n<root>/compiler/lower_functions.dewy:417:24: warning: 'addr' is given a value here but never used (a parameter kept for the function's type can be named `_addr`)\n<root>/compiler/lower_functions.dewy:417:37: warning: 'f' is given a value here but never used (a parameter kept for the function's type can be named `_f`)\n<root>/compiler/checks_index_hooks.dewy:104:25: warning: 'bt' is given a value here but never used (a parameter kept for the function's type can be named `_bt`)\n<root>/compiler/checks_index_hooks.dewy:104:34: warning: 'code' is given a value here but never used (a parameter kept for the function's type can be named `_code`)\n<root>/compiler/witness_ops.dewy:474:12: warning: 's' is given a value here but never used (a parameter kept for the function's type can be named `_s`)\n<root>/compiler/lower_group.dewy:1807:29: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:1817:26: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:1821:27: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:1829:28: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:1889:25: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2034:20: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2060:23: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2098:22: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2130:23: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2220:24: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2375:22: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2383:23: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2393:23: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2436:25: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2459:23: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:2465:21: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_group.dewy:4245:9: warning: 'less' is given a value here but never used\n<root>/compiler/lower_intrinsics.dewy:38:32: warning: 'arg_start' is given a value here but never used (a parameter kept for the function's type can be named `_arg_start`)\n<root>/compiler/lower_intrinsics.dewy:45:37: warning: 'arg_start' is given a value here but never used (a parameter kept for the function's type can be named `_arg_start`)\n<root>/compiler/lower_intrinsics.dewy:49:31: warning: 'arg_start' is given a value here but never used (a parameter kept for the function's type can be named `_arg_start`)\n<root>/compiler/lower_intrinsics.dewy:53:21: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_intrinsics.dewy:53:30: warning: 'arg_start' is given a value here but never used (a parameter kept for the function's type can be named `_arg_start`)\n<root>/compiler/lower_intrinsics.dewy:58:27: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_intrinsics.dewy:70:30: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/lower_intrinsics.dewy:77:33: warning: 'e' is given a value here but never used (a parameter kept for the function's type can be named `_e`)\n<root>/compiler/facts_changes.dewy:320:21: warning: 'n' is given a value here but never used (a parameter kept for the function's type can be named `_n`)\n<root>/compiler/facts_collect.dewy:118:9: warning: 'kept' is given a value here, and changed, but never read\n<root>/compiler/facts_numeric.dewy:226:42: warning: 'a' is given a value here but never used (a parameter kept for the function's type can be named `_a`)\n<root>/compiler/facts_numeric.dewy:226:70: warning: 'modulo' is given a value here but never used (a parameter kept for the function's type can be named `_modulo`)\n<root>/compiler/effect_graph.dewy:235:20: warning: 'f' is given a value here but never used (a parameter kept for the function's type can be named `_f`)\n<root>/compiler/scan_index.dewy:124:14: warning: 'src' is given a value here but never used (a parameter kept for the function's type can be named `_src`)\n<root>/compiler/lower_ffi.dewy:64:16: warning: 'f' is given a value here but never used (a parameter kept for the function's type can be named `_f`)\n<root>/compiler/pkg_ops.dewy:166:16: warning: 'name' is given a value here but never used (a parameter kept for the function's type can be named `_name`)\n<root>/compiler/glsl_stmts.dewy:661:28: warning: 'ustruct' is given a value here but never used (a parameter kept for the function's type can be named `_ustruct`)\n<root>/compiler/spirv_stmts.dewy:602:56: warning: 'pos' is given a value here but never used (a parameter kept for the function's type can be named `_pos`)\n<root>/compiler/deadlock_locations.dewy:33:13: warning: 'd' is given a value here but never used\n<root>/compiler/deadlock_certificates.dewy:376:31: warning: 'g' is given a value here but never used (a parameter kept for the function's type can be named `_g`)\n<root>/compiler/checker_for_loops.dewy:152:21: warning: 'it' is given a value here but never used (a parameter kept for the function's type can be named `_it`)\n<root>/compiler/wasm_output.dewy:35:50: warning: 'frame_lf' is given a value here but never used (a parameter kept for the function's type can be named `_frame_lf`)\n<root>/compiler/driver_cli.dewy:368:13: warning: 'filed' is given a value here but never used (did you mean the visible variable 'files'?)\n<root>/compiler/par_drive.dewy:112:63: warning: 'r0' is given a value here but never used (a parameter kept for the function's type can be named `_r0`)\n<root>/compiler/zip.dewy:96:17: warning: `path` may escape its base (built from unproven text on line 327 of driver_cli.dewy): validate it, `root.confine(path) or_throw`, or test it first, `if root.contains(path) {...}`\n<root>/compiler/repl_session.dewy:52:38: warning: data() of plain parameter 'bytes' may be written through or escape; the caller cannot see writes to its private copy: take `@bytes` and pass `@bytes`, or copy into a local first\n",
+   "files": {
+    "p124-1": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

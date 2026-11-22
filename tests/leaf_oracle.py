@@ -23,6 +23,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests' / 'fixtures' / 'leaf_outputs'
 TEXT_LIMIT = 1 << 15
+
+
+def text_or_digest(data):
+    """Text up to TEXT_LIMIT bytes, else the bytes' digest and size."""
+    try:
+        if len(data) <= TEXT_LIMIT:
+            return data.decode()
+    except UnicodeDecodeError:
+        pass
+    return {'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data)}
 MODES = ('both', 'expected', 'twin', 'capture')
 
 mode = 'both'
@@ -73,7 +83,8 @@ def record(arguments, status, output):
 def without(directory, output):
     """The output with the test's own directory and the checkout (both differ between runs and machines)
     named <tmp> and <root>: as text, as a flattened file name and as a list of byte values."""
-    for path, name in ((os.fsencode(directory), b'<tmp>'), (os.fsencode(ROOT), b'<root>')):
+    named = ((directory, b'<tmp>'), (ROOT, b'<root>')) if directory is not None else ((ROOT, b'<root>'),)
+    for path, name in ((os.fsencode(place), name) for place, name in named):
         for form in (path, path.replace(b'/', b'_'), ', '.join(map(str, path)).encode()):
             output = output.replace(form, name)
     return output
@@ -88,20 +99,31 @@ def _expected(module):
 
 def check(arguments, status, output):
     """Hold this probe run to its recorded output (or record it, when capturing)."""
+    check_entry(lambda: record(arguments, status, output))
+
+
+def check_entry(make):
+    """Hold this run's entry (make() builds it) to its record, or record it when capturing."""
     module, test, ordinal = _current()
     if mode == 'twin':
         return
-    got = record(arguments, status, output)
+    got = make()
     if mode == 'capture':
         line = json.dumps({'module': module, 'test': test, 'ordinal': ordinal, 'entry': got})
         target = Path(capture_dir) / f'{os.environ.get("PYTEST_XDIST_WORKER", "main")}-{os.getpid()}.jsonl'
         with target.open('a') as stream:
             stream.write(line + '\n')
         return
-    runs = _expected(module).get(test, [])
-    assert ordinal < len(runs), (f'{module}::{test} run {ordinal}: no recorded output in '
-                                 f'tests/fixtures/leaf_outputs/{module}.json')
-    want = runs[ordinal]
+    # (a run is found by its arguments, in order among runs with the same arguments, so a test whose
+    # inputs come from a directory keeps its records when a case is added beside them)
+    key = json.dumps(got['args'])
+    same = _ordinals[(module, test, key)]
+    _ordinals[(module, test, key)] += 1
+    runs = [run for run in _expected(module).get(test, []) if json.dumps(run['args']) == key]
+    assert same < len(runs), (f'{module}::{test} run {ordinal} ({got["args"]}): no recorded output in '
+                              f'tests/fixtures/leaf_outputs/{module}.json; record it with '
+                              f'--leaf-oracle=capture --leaf-capture DIR, then python3 -m tests.leaf_oracle DIR')
+    want = runs[same]
     assert got == want, f'{module}::{test} run {ordinal} differs from its recorded output:\n got {got}\nwant {want}'
 
 

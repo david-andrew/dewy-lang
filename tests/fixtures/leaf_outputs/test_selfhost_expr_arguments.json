@@ -1,0 +1,556 @@
+{
+ "test_character_literals_twins": [
+  {
+   "args": [
+    "build",
+    "<tmp>/characters.jo"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "65 233 29483 129418\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/multiple.jo"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/multiple.jo:2:14: error: type mismatch: expected int, found str\n        x: int = \"ab\"\n                 ^\n",
+   "files": {}
+  }
+ ],
+ "test_expr_argument_twins[call_style_lookup-cases6]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/style/zero_argument_calls.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "tick\n5 10 7 2 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record/function_field_shadowed.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "20 42 20 3 5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/partial/method_handle.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "3 3 4 3\n9\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/overload/user_shadows_prelude.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/overload/user_shadows_prelude.dewy:4:7: warning: 'abs' hides the library's method `int64.abs`: this function takes over every `x.abs` on one in this module; rename it to keep the library's\n<root>/tests/cases/overload/user_shadows_prelude.dewy:5:7: warning: 'max' hides the library's method `int64.max`: this function takes over every `x.max` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 0,
+      "stdout": "98\n102\n8\n2.5\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expr_argument_twins[default_arguments-cases3]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/default/reference_named.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/default/reference_nested.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/default/reference_chain.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/default/reference_closure.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/default/reference_loop_shadow.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p4-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/default/reference_mutable.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/default/reference_mutable.dewy:3:33: error: defaults referring to earlier parameters cannot yet be combined with mutable arguments; supply those defaults explicitly\n    main=()=>{let a:int64=42 return f(@a)}\n                                    ^\n",
+   "files": {}
+  }
+ ],
+ "test_expr_argument_twins[index_operand_checks-cases0]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/addr_length/negative_index.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/addr_length/negative_index.dewy:3:30: error: cannot prove refinement `i >=? 0`: missing lower bound\n        if i <? xs.length return i\n                                 ^\n    note: i is at most 281474976710654\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n<root>/tests/cases/addr_length/negative_index.dewy:2:40: note: the contract is declared here\n    pick = (xs:array<int64> i:int64):>addr<(<? xs.length)> => {\n                                           ^\n    help: establish `i >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/end/index_slices.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/array/get_int_index.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "none none none none\n10 30 20 30\n- - a\n30\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expr_argument_twins[literal_number_forms-cases2]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/rational/word.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "100 true true 4\n7/2 3 3\ntrue true false\ntrue false true\ntrue true false true\n1/9 1/2 2/3 1/9\n0.3333333333333333\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/rational/word_narrowing.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "4/3\ntrue\n-3/2\ntrue\n5\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/rational/division_float.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/rational/decimal_text_exact.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/rational/comprehension_decimal_array.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p4-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[0.5 0.5]\n[1.5 1.5]\n[123456789012345678901234567890.125 123456789012345678901234567890.125]\n[0.5 0.5]\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expr_argument_twins[mutable_argument_routes-cases1]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/argument/mutable_disjoint.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[11 22]\n73\n25\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/argument/mutable_callable_overlap.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/argument/mutable_callable_overlap.dewy:2:44: error: mutable arguments 1 and 2 overlap; pass disjoint places\n    main=()=>{let a:int64=1; let f=@pair; f(b=@a a=@a)}\n                                               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/argument/mutable_borrowed_global.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/argument/mutable_borrowed_global.dewy:4:5: error: cannot prove index is in bounds: missing upper bound\n        a[0]=1\n        ^\n    note: a.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `0 <? a.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): a.length = 0\n    help: establish `0 <? a.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n\n<root>/tests/cases/argument/mutable_borrowed_global.dewy:7:39: error: mutable arguments 1 and 2 overlap; pass disjoint places\n    via=(@x:array<int64>):>void=>both(@x @g)\n                                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/argument/mutable_borrowed_params.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[10]\n[3 2] [13 4]\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expr_argument_twins[overload_diagnostics-cases5]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/partial/ambiguous_overload.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/partial/ambiguous_overload.dewy:1:32: error: cannot prove exact integer result fits int64\n    add=((a:int64 b:int64):>int64=>a+b) & ((a:int64 b:string):>string=>\"{a}{b}\")\n                                   ^\n    note: nothing bounds `a + b` within int64 here\n    note: nothing bounds `a` here, so this has no known range: guard it first, or state it where the parameter is declared, `a:int64<(>=? 0)>`\n    help: establish `int64.min <=? (a + b) and (a + b) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n\n<root>/tests/cases/partial/ambiguous_overload.dewy:3:12: error: ambiguous partial application of 'add': more than one overload takes these arguments (candidates at <root>/tests/cases/partial/ambiguous_overload.dewy:1:6 and <root>/tests/cases/partial/ambiguous_overload.dewy:1:40); annotate the binding with the callable type it should have, as in `let f:(b:string:>string) = @add(...)`\n        let f=@add(1)\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/partial/ambiguous_overload_annotated.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1x\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/overload/group_unsigned_literal.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/overload/group_unsigned_literal.dewy:2:10: warning: 'value' is given a value here but never used (a parameter kept for the function's type can be named `_value`)\n<root>/tests/cases/overload/group_unsigned_literal.dewy:2:29: warning: 'value' is given a value here but never used (a parameter kept for the function's type can be named `_value`)\n",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/overload/group_types.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expr_argument_twins[type_expression_forms-cases4]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/json/typed_map.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record/bare_defaults.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "12\n12 ship\n12 ship\n3\ntrue\n7\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record/bare_required.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/record/bare_required.dewy:3:9: error: 'n' cannot hold a type or module (a value of a type is made by calling it: `T()`)\n        let n=Need\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/callable/return_handle.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/style/zero_argument_calls.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p4-0": {
+     "run": {
+      "status": 0,
+      "stdout": "tick\n5 10 7 2 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

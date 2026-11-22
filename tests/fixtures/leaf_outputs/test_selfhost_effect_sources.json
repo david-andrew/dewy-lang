@@ -1,0 +1,165 @@
+{
+ "test_effect_sources_execution[default]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/unused.dewy",
+    "-o",
+    "<tmp>/unused"
+   ],
+   "status": 0,
+   "stdout": "sources ok\n",
+   "stderr": "",
+   "files": {}
+  }
+ ],
+ "test_effect_sources_execution[release]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/unused.dewy",
+    "-o",
+    "<tmp>/unused"
+   ],
+   "status": 0,
+   "stdout": "sources ok\n",
+   "stderr": "",
+   "files": {}
+  }
+ ],
+ "test_effect_sources_programs[callable_field-default]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/input.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 2,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_effect_sources_programs[callable_field-release]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/input.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 2,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_effect_sources_programs[callable_recover-default]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/input.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<tmp>/input.dewy:4:9: warning: 'g' is given a value here but never used\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_effect_sources_programs[callable_recover-release]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/input.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<tmp>/input.dewy:4:9: warning: 'g' is given a value here but never used\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_effect_sources_programs[callable_return-default]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/input.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "42\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_effect_sources_programs[callable_return-release]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/input.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "42\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

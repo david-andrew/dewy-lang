@@ -1,0 +1,244 @@
+{
+ "test_deadlock_certificates_twins": [
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/foreign_block.dewy"
+   ],
+   "status": 41,
+   "stdout": "this calls the foreign function 'usleep', which may block, and no certificate covers it (`$no_deadlocks`): wrap it in an audited adapter, a function whose body says `$audited_wait` (a person has checked that it waits only on the outside world), or declare it with a row that excludes `blocks` if it never waits\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/function_value.dewy"
+   ],
+   "status": 41,
+   "stdout": "this calls a function value the compiler cannot follow, so what it waits for is unknown, and no certificate covers it (`$no_deadlocks`): call a function literal or a named function (or a local holding one), or give the value a callable type whose row says `no blocks`\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/serve_withdrawn.dewy"
+   ],
+   "status": 41,
+   "stdout": "this serves requests with `serve`, whose protocol has no proof yet (its certificate waits for a library gate), and no certificate covers it (`$no_deadlocks`): structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/join_held.dewy"
+   ],
+   "status": 41,
+   "stdout": "this joins its tasks while holding 'm' (since line 9), and no certificate covers it (`$no_deadlocks`): a lock is held only across other locks taken in the checked order; let the place end before this wait\n",
+   "stderr": "<root>/tests/cases/no_deadlocks/join_held.dewy:11:13: warning: 'a' is given a value here but never used\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/poll.dewy"
+   ],
+   "status": 41,
+   "stdout": "this loop waits for another task to set 'ready', by polling it, and no certificate covers it (`$no_deadlocks`): an atomic set elsewhere is an event no certificate covers; wait for a join instead\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/raw_channel.dewy"
+   ],
+   "status": 41,
+   "stdout": "this waits to send into the channel 'c', and no certificate covers it (`$no_deadlocks`): structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/request_withdrawn.dewy"
+   ],
+   "status": 41,
+   "stdout": "this asks a service of `serve`, whose protocol has no proof yet (its certificate waits for a library gate), and no certificate covers it (`$no_deadlocks`): structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/uncertified_callee.dewy"
+   ],
+   "status": 41,
+   "stdout": "this calls `relay`, which waits to send into the channel 'c' (line 9), and no certificate covers that wait (`$no_deadlocks`): give it one, or opt its scope in to see what it lacks\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/pipeline_withdrawn.dewy"
+   ],
+   "status": 41,
+   "stdout": "this runs a pipeline with `pipeline`, whose protocol has no proof yet (its certificate waits for a library gate), and no certificate covers it (`$no_deadlocks`): structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/deadlock/recursive_service_held.dewy"
+   ],
+   "status": 41,
+   "stdout": "this waits for 'm', which this task already holds since line 3 (serve at line 5, takes it at line 3): it would wait forever. Use the place already held, or let it end before taking the lock again\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/select.dewy"
+   ],
+   "status": 41,
+   "stdout": "this waits on a choice among alternatives with `select`, and no certificate covers it (`$no_deadlocks`): a choice among waits has no certificate; structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/race_spread.dewy"
+   ],
+   "status": 41,
+   "stdout": "this waits on a choice among alternatives with `race`, and no certificate covers it (`$no_deadlocks`): a choice among waits has no certificate; structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/first_ok.dewy"
+   ],
+   "status": 41,
+   "stdout": "this waits on a choice among alternatives with `first_ok`, and no certificate covers it (`$no_deadlocks`): a choice among waits has no certificate; structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/merged_inbox.dewy"
+   ],
+   "status": 41,
+   "stdout": "this waits on a choice among alternatives with a merged inbox's `next`, and no certificate covers it (`$no_deadlocks`): a choice among waits has no certificate; structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`\n",
+   "stderr": "<root>/tests/cases/no_deadlocks/merged_inbox.dewy:6:8: warning: 'make' is never called: nothing runs it (call it, as `make()` where it should run)\n<root>/tests/cases/no_deadlocks/merged_inbox.dewy:11:9: warning: 'drain' is never called: nothing runs it (call it, as `drain(...)` where it should run)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/within.dewy"
+   ],
+   "status": 41,
+   "stdout": "this waits on a choice among alternatives with `within`, and no certificate covers it (`$no_deadlocks`): a choice among waits has no certificate; structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/audited_adapter.dewy"
+   ],
+   "status": 0,
+   "stdout": "checked\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/certified_locks.dewy"
+   ],
+   "status": 0,
+   "stdout": "checked\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/no_deadlocks/protocol_opted_out.dewy"
+   ],
+   "status": 0,
+   "stdout": "checked\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/protocols/request_reply.dewy"
+   ],
+   "status": 0,
+   "stdout": "checked\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/protocols/pipeline_feedback.dewy"
+   ],
+   "status": 0,
+   "stdout": "checked\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/protocols/pipeline_optional.dewy"
+   ],
+   "status": 0,
+   "stdout": "checked\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/protocols/protocol_outer_client.dewy"
+   ],
+   "status": 0,
+   "stdout": "checked\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/protocols/protocol_cancel.dewy"
+   ],
+   "status": 0,
+   "stdout": "checked\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "check",
+    "<root>/tests/cases/deadlock/recursive_service.dewy"
+   ],
+   "status": 0,
+   "stdout": "checked\n",
+   "stderr": "",
+   "files": {}
+  }
+ ]
+}

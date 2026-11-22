@@ -1,0 +1,36 @@
+{
+ "test_facts_values_literal_graphemes": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_proofs/unicode_literal_end.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "é\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_proofs/unicode_literal_index_rejected.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/census_proofs/unicode_literal_index_rejected.dewy:2:8: error: cannot prove index is in bounds: missing upper bound\n    printl(text[1])\n           ^\n    note: text.length is between 1 and 281474976710655\n    note: missing upper bound: nothing establishes `1 <? text.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): text.length = 1\n    help: establish `1 <? text.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ]
+}

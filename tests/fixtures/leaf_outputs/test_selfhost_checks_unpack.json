@@ -1,0 +1,132 @@
+{
+ "test_checks_unpack_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/nested_scalar.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/unpack/nested_scalar.dewy:2:16: error: unpacking needs an array, tuple, dictionary or record, found int\n    main=()=>{let [[x]]=[42] return x}\n                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/rest.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1 [2 3 4] 5\n9\n[9 8] 7\n7\n1 2 []\n1 [2 3] 4\n5\n[2 3]\n1 [[3 4] [5 6]]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/values_count.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/unpack/values_count.dewy:2:9: error: this gives 3 values, and the pattern takes 2\n        let (a b)=(1 2 3)\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/missing_field.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/unpack/missing_field.dewy:2:16: error: [x:int] has no field 'missing': a record unpacks by field name, not by position, as in `[x] = ...`; `as` gives a field another name, `[x as missing]`\n    main=()=>{let [missing]=[x=42] return missing}\n                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/search/regex_too_big.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/search/regex_too_big.dewy:5:17: error: not a valid pattern: the pattern is too big: its repeats written out are over 50000 steps (at character 16)\n        let r=regex(r\"(a{1000}){1000}\")\n                    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/leaf_discard_incompatible.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/unpack/leaf_discard_incompatible.dewy:2:16: error: type mismatch: expected string, found int\n    main=()=>{let [_:string]=[42] return 42}\n                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood16_proofs/record_unpack_position.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood16_proofs/record_unpack_position.dewy:3:10: error: [quotient:int remainder:int] has no field 'q': a record unpacks by field name, not by position, as in `[quotient remainder] = ...`; `as` gives a field another name, `[quotient as q]`\n        let (q r) = 17.divmod(5)\n             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/index_optional_member.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/index_optional_member.dewy:3:11: error: cannot index a value of type Missing | array<string>: it may be Missing (a member read through it forwards Missing too). Check the value first, `if x isnt? Missing { ... }`, which narrows x inside\n        let g=m.groups[0]\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood25_proofs/conditional_literal_length_mismatch.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood25_proofs/conditional_literal_length_mismatch.dewy:3:9: error: cannot prove the length (unpacking requires exactly 2 elements): a predecessor lacks the required evidence\n        let [a b] = if c [\"x\" \"y\"] else [\"z\"]\n            ^\n<root>/tests/cases/dogfood25_proofs/conditional_literal_length_mismatch.dewy:3:17: note: a path into this branch lacks the evidence\n        let [a b] = if c [\"x\" \"y\"] else [\"z\"]\n                    ^\n    help: give the values a fixed shape, such as a tuple type (`array<[int64 int64]>` for pairs) or a record, or test the length first (`if xs.length =? 2`)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/positional/siblings_branch_push.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/positional/siblings_branch_push.dewy:8:12: error: Square has no field 'r'\n        printl(xs[2].r)\n               ^\n",
+   "files": {}
+  }
+ ]
+}

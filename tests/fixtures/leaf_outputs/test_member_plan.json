@@ -1,0 +1,88 @@
+{
+ "test_member_plan_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/member_template/comptime_members.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"a\" \"bb\" \"z\"]\n[\"a\" \"bb\" \"z\"]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/member_template/ordered_columns.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"a\" -> \"a\" \"é\" -> \"é\" \"💧\" -> \"💧\"]\n[\"a\" -> \"a\" \"é\" -> \"é\" \"💧\" -> \"💧\"]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/member_template/partial_conversion.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/member_template/partial_conversion.dewy:3:51: error: no version of '[]=' takes (dict<string 'alpha' | 'beta'> string string): argument 'v' expects 'alpha' | 'beta', found string\n        loop word in members('alpha'|'beta'|'gamma') {entries[word]=word}\n                                                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/member_template/partial_byte_proof.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/member_template/partial_byte_proof.dewy:5:23: error: index is not in bounds\n            entries[word]=raw[1]\n                          ^\n    note: raw.length is 1\n    help: establish `1 <? raw.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/ladder/99_dewy_frontend/design.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/ladder/99_dewy_frontend/lexer.dewy:16:12: warning: 'is_digit' hides the library's method `uint8.is_digit`: this function takes over every `x.is_digit` on one in this module; rename it to keep the library's\n<root>/tests/ladder/99_dewy_frontend/lexer.dewy:17:12: warning: 'is_alpha' hides the library's method `uint8.is_alpha`: this function takes over every `x.is_alpha` on one in this module; rename it to keep the library's\n<root>/tests/ladder/99_dewy_frontend/lexer.dewy:22:12: warning: 'is_space' hides the library's method `uint8.is_space`: this function takes over every `x.is_space` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "### arithmetic precedence\n  tokens int:1 _+ _int:2 _* _int:3 _- _int:4 _/ _int:5 _// _int:6 _% _int:7\n  tree (- (+ 1 (* 2 3)) (% (// (/ 4 5) 6) 7))\n### power is right-associative and binds above unary minus\n  tokens - int:2 ^ int:3 ^ int:2\n  tree (- (^ 2 (^ 3 2)))\n### literal coefficients\n  tokens int:2 id:x ^ int:2 _+ _int:3 ( id:x _+ _int:1 ) _- _real:0.5 id:y\n  tree (- (+ (mul 2 (^ x 2)) (mul 3 (() (+ x 1)))) (mul 0.5 y))\n### comparison chain and booleans\n  tokens int:0 _<=? _id:i _<? _id:n _kw:and _kw:not _id:done _kw:or _id:x _=? _id:y\n  tree (or (and (<? (<=? 0 i) n) (not done)) (=? x y))\n### spaced not inverts a comparison\n  tokens id:a _kw:not _=? _id:b _kw:and _id:c _kw:not _in? _id:items _kw:and _id:d _kw:not _in? _id:rest\n  tree (and (and (not=? a b) (not in? c items)) (not in? d rest))\n### word operators\n  tokens id:a _kw:nand _id:b _kw:xor _id:c _kw:nor _id:d _kw:xnor _id:e\n  tree (not (or (xor (not (and a b)) c) (not (xor d e))))\n### calls, members, indexing and adjacency\n  tokens id:f ( id:x _id:y ) . id:g [ id:i ] . id:h _( id:z )\n  tree (. (index (. (call f (() x y)) g) ([] i)) h)\n  tree (() z)\n### element lists keep unary minus\n  tokens [ int:1 _- int:2 _- _int:3 _id:x _- id:y ]\n  tree ([] 1 (- (- 2) 3) x (- y))\n### ranges and stepped ranges\n  tokens id:xs [ int:1 .. int:3 ) _+ _[ int:0 , int:2 .. int:10 ] _+ _[ .. id:n ] _+ _( int:0 .. int:3 ]\n  tree (+ (+ (+ (index xs ([) (.. 1 3))) ([] (.. (, 0 2) 10))) ([] (.. _ n))) ((] (.. 0 3)))\n### open range in an index\n  tokens id:xs [ id:end - int:2 .. ]\n  tree (index xs ([] (.. (- end 2) _)))\n### coalescing chains to the right\n  tokens id:a _?? _id:b _?? _id:c _+ _int:1\n  tree (?? a (?? b (+ c 1)))\n### pipes\n  tokens int:3 _|> _@ id:square _|> _@ id:inc\n  tree (|> (|> 3 (@ square)) (@ inc))\n### right pipe of a lambda\n  tokens @ id:inc _<| _@ id:square _<| _int:3\n  tree (<| (@ inc) (<| (@ square) 3))\n### lambdas and returns\n  tokens id:add _= _( id:a : id:int64 _id:b : id:int64 = int:2 ) :> id:int64 _=> _id:a _+ _id:b\n  tree (= add (=> (:> (() (: a int64) (= (: b int64) 2)) int64) (+ a b)))\n### one bare parameter\n  tokens id:apply ( id:x _=> _id:x _* _int:2 _int:21 )\n  tree (call apply (() (=> x (* x 2)) 21))\n### partial operators\n  tokens id:xs . id:sorted ( id:key = ( . id:score ) ) _+ _id:map ( ( * _int:2 ) _id:ys ) _+ _id:filter ( ( <? _id:limit ) _id:zs )\n  tree (+ (+ (call (. xs sorted) (() (= key (partial (. _ score))))) (call map (() (partial (* _ 2)) ys))) (call filter (() (partial (<? _ limit)) zs)))\n### inverted partial operator\n  tokens id:keep ( ( kw:not _=? _int:0 ) _id:values )\n  tree (call keep (() (partial (not=? _ 0)) values))\n### records and spreads\n  tokens kw:let _id:tuned : id:Settings _= _[ id:defaults ... _id:speed = int:12 _id:name = str:\"fast\" ]\n  tree (let (= (: tuned Settings) ([] (... defaults) (= speed 12) (= name \"fast\"))))\n### type application\n  tokens id:first < id:string > ( id:words ) _+ _id:Box < id:array < id:int64 >> [ [ ] ]\n  tree (+ (call (tapp first (<> string)) (() words)) (index (tapp Box (<> (tapp array (<> int64)))) ([] ([]))))\n### optional and union types\n  tokens kw:let _id:x : id:int64 | id:string ? _= _id:none\n  tree (let (= (: x (| int64 (? string))) none))\n### type of\n  tokens id:Token : id:type _= _id:type _kw:of _id:any _& _[ id:line : id:int64 ]\n  tree (= (: Token type) (& (type of any) ([] (: line int64))))\n### as and or_throw\n  tokens kw:let _id:n _= _id:parse ( id:text ) _kw:or_throw _* _int:2\n  tree (let (= n (* (or_throw (call parse (() text))) 2)))\n### as binds below the union\n  tokens kw:let _id:s _= _id:data _kw:as _id:string _| _id:none\n  tree (let (= s (as data (| string none))))\n### if expression chains\n  tokens kw:let _id:sign _= _kw:if _id:x _>? _int:0 _int:1 _kw:else _kw:if _id:x _<? _int:0 _- int:1 _kw:else _int:0\n  tree (let (= sign (flow (if (>? x 0) 1) (if (<? x 0) (- 1)) 0)))\n### loop with a body block\n  tokens kw:loop _id:i _kw:in _[ int:0 .. int:10 ) _{ _id:total _+= _id:i * id:i ; _}\n  tree (flow (loop (in i ([) (.. 0 10))) ({} (; (+= total (* i i)) _))))\n### match arms\n  tokens kw:let _id:size _= _kw:match _id:found _{ _id:n : id:int64 _=> _id:n _< id:none > _=> _int:0 _}\n  tree (let (= size (flow (match found ({} (=> (: n int64) n) (=> (<> none) 0))))))\n### assignments\n  tokens id:total _+= _int:1 ^id:count _//= _int:2 ^id:flags _and= _id:ready\n  tree (+= total 1)\n  tree (//= count 2)\n  tree (and= flags ready)\n### directives\n  tokens meta:$runtime_assert _id:n _>? _int:0 , _str:\"n must be positive\" ^meta:$assert ( id:a _<=? _id:b , _str:\"ordered\" )\n  tree ($runtime_assert (>? n 0) \"n must be positive\")\n  tree ($assert (<=? a b) \"ordered\")\n### labels and break\n  tokens meta:$rows ^kw:loop _id:row _kw:in _id:rows _{ _kw:break _meta:$rows _}\n  tree $rows\n  tree (flow (loop (in row rows) ({} (break $rows))))\n### strings and escapes\n  tokens str:\"tab\\there\" _+ _str:'quote \\\"q\\\"' _+ _str:\"\\u00E9\\u{1F642}\"\n  tree (+ (+ \"tab\\there\" \"quote \\\"q\\\"\") \"é🙂\")\n### interpolation with nested strings\n  tokens str:\"total: {format(sum \".2f\")} of {count} {if count >? 1 \"items\" else \"item\"}\"\n  tree (interp \"total: \" (call format (() sum \".2f\")) \" of \" count \" \" (flow (if (>? count 1) \"items\") \"item\"))\n### a conditional written the Python way inside an interpolation\n  tokens str:\"{\"items\" if many else \"item\"}\"\n  parse error 1:11: expected one interpolation expression, inside a string interpolation\n  | \"{\"items\" if many else \"item\"}\"\n  |           ^\n### raw and triple-quoted strings\n  tokens raw:r\"C:\\{path}\" _+ _str:\"\"\"He said \"go\".\"\"\" _+ _raw:r'''\\w+'''\n  tree (+ (+ \"C:\\\\{path}\" \"He said \\\"go\\\".\") \"\\\\w+\")\n### based numbers and based strings\n  tokens radix:0xFF _+ _radix:0b1010 _+ _radix:0o17 _+ _int:0d99 _+ _int:1_000_000 _+ _based:0x\"ff00\" _+ _real:6.02e23 _+ _real:1e-3\n  tree (+ (+ (+ (+ (+ (+ (+ 0xFF 0b1010) 0o17) 0d99) 1_000_000) 0x\"ff00\") 6.02e23) 1e-3)\n### paths and calls with string arguments\n  tokens id:p str:\"assets/{name}.png\" _+ _id:printl str:\"done\"\n  tree (+ (call p (interp \"assets/\" name \".png\")) (call printl \"done\"))\n### comments are whitespace\n  tokens id:a _+ _id:b\n  tree (+ a b)\n### a multi-line comment separates like a line break\n  tokens id:a ^id:b\n  tree a\n  tree b\n### identifiers with Unicode\n  tokens id:café _+ _id:π * id:r ^ int:2 _+ _id:x₁\n  tree (+ (+ café (* π (^ r 2))) x₁)\n### dot operators\n  tokens id:a _.+ _id:b _.* _id:c _.=? _id:d\n  tree (.=? (.+ a (.* b c)) d)\n### references\n  tokens id:bump ( @ id:point . id:x ) _+ _@ id:items [ id:i ] . id:count\n  tree (+ (call bump (() (@ (. point x)))) (@ (. (index items ([] i)) count)))\n### functions as values\n  tokens kw:let _id:g _= _@ id:double\n  tree (let (= g (@ double)))\n### semicolon discards\n  tokens id:f ( ) ;\n  tree (; (call f (())) _)\n### comparison habit\n  tokens kw:if _id:x _> _int:3 _{ _id:y _}\n  parse error 1:6: expected a body after 'if' (comparisons end with `?`: `x >? y`, `x <=? y`)\n  | if x > 3 { y }\n  |      ^\n### bang habit\n  tokens ! id:ready\n  parse error 1:1: expected an expression, found '!' (`not x` negates, and `x not=? y` asks whether two values differ)\n  | !ready\n  | ^\n### unterminated string\n  lex error 1:1: unterminated string\n  | \"never closed\n  | ^\n### unterminated interpolation\n  lex error 1:15: unterminated string\n  | \"value: {x + 1\"\n  |               ^\n### bad escape\n  tokens str:\"bad \\q escape\"\n  parse error 1:7: unsupported string escape\n  | \"bad \\q escape\"\n  |       ^\n### unterminated block comment\n  lex error 1:1: unterminated block comment: `#{` needs a matching `}#` (block comments nest)\n  | #{ open\n  | ^\n### unexpected character\n  lex error 1:3: unexpected character in Dewy source\n  | a ` b\n  |   ^\n### missing body\n  tokens kw:if _id:ready\n  parse error 1:9: expected a body after 'if'\n  | if ready\n  |         ^\n### missing closer\n  tokens [ int:1 _int:2 _int:3\n  parse error 1:1: expected ']' before end of file\n  | [1 2 3\n  | ^\n### base prefix without digits\n  lex error 1:1: expected digits after the base prefix\n  | 0x\n  | ^\n### directive needs a condition\n  tokens meta:$assert\n  parse error 1:1: `$assert` needs a condition: `$assert condition` or `$assert condition, \"message\"`\n  | $assert\n  | ^\nentries 53, tokens 460, nodes 448, errors 12\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

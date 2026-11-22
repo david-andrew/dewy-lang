@@ -1,0 +1,60 @@
+{
+ "test_checks_hints_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood31_proofs/string_brace_misspelling.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood31_proofs/string_brace_misspelling.dewy:5:13: error: unknown name 'totla': `{totla}` in a string puts in the value of totla; for the braces in the text (a tag), write `\\{totla\\}`, or make it a raw string, r\"...\" (did you mean 'total'?)\n        printl\"{totla}\"\n                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/overload/unknown_named_argument.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/overload/unknown_named_argument.dewy:5:21: error: no version of 'scale' takes (int int): no parameter named 'facter' (did you mean 'factor'?)\n    main = () => printl(scale(value=2 facter=3))\n                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/empty_literal/no_context_let_rejected.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/empty_literal/no_context_let_rejected.dewy:2:9: error: cannot infer the type of 'x'; add a type annotation (`let x:array<int64> = []` for an array of integers, `let x:dict<string int64> = []` for a dictionary)\n        let x = []\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/statements_statement_record_sibling_scope_3.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

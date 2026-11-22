@@ -1,0 +1,216 @@
+{
+ "test_ownership_hooks_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ownership/inherited_hooks.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "ok\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ownership/inherited_hooks.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "ok\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ownership/growable_dictionary_keys.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "ok\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ownership/growable_dictionary_keys.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "ok\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ownership/composed_hooks.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "ok\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ownership/composed_hooks.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "ok\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ownership/spawn_owner_capture.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "in task 3\ndrop\nafter 4\ndrop\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ownership/spawn_owner_capture.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "in task 3\ndrop\nafter 4\ndrop\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ownership/scalar_hook_duplicate.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 41,
+   "stdout": "duplicate $__drop__ hook\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ownership/copy_hook_failure.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 41,
+   "stdout": "copy hook requires a proven no-failure summary: __copy__ (operation may fail)\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ownership/copy_hook_write.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 41,
+   "stdout": "a copy hook requires a readonly receiver\n",
+   "stderr": "",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ownership/scalar_return_hook.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 41,
+   "stdout": "a $__drop__ hook must return void: `$__drop__ = ():>void => ...`\n",
+   "stderr": "<root>/tests/cases/ownership/scalar_return_hook.dewy:4:15: warning: 'a' is given a value here but never used\n",
+   "files": {}
+  }
+ ]
+}

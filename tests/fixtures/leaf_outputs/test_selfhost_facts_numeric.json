@@ -1,0 +1,212 @@
+{
+ "test_facts_numeric_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "-9223372036854775808 9223372036854775807 4831838209 -9223372036854775808\n100 -65 -65 1 -1\n9223372036854775807 9223372036854775807 0 7\n18446744073709551615 1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps17_word/halves.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775807\n-9223372036854775808\n-2 -2\n9223372036854775807\n-9223372036854775808\n9223372036854775807\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/operators/prefix_tilde.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "-13\nfalse\n1\n-13\n-1180591620717411303425\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/channels/cancel_blocked.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/channels/cancel_blocked.dewy:32:5: warning: bounded channel cycle: the program's thread waits for the tasks it spawned (line 32) before it receives from 'full' (line 43); the task spawned at line 34 may wait to send into 'full' (line 14), and the join of its group at line 32 waits for it. Each waits for the next, so they may wait forever (the compiler cannot tell whether every wait does: a count or capacity that is not literal, a group that a failure or a cancel may end, or a channel or task it cannot follow)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "receive canceled: true\nsend canceled: true, value given back: 2\nkept: 0 1\nin the canceled group: true\nafter it: 7\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/shaped_broadcast.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[2  3\n 4  5]\n[5 2 7]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood31_proofs/inline_index_after_guards.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n1\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps24/either_power.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "8 0 4 0 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width_reject_divide.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/constant_width_reject_divide.dewy:2:15: error: cannot prove exact integer result fits int64\n    let x:int64 = (-9223372036854775807 - 1) // -1\n                  ^\n    note: nothing bounds `(-9223372036854775807 - 1) // -1` within int64 here\n    help: establish `int64.min <=? ((-9223372036854775807 - 1) // -1) and ((-9223372036854775807 - 1) // -1) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps17_word/small_destination.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps17_word/small_destination.dewy:1:3: warning: 'f' is never called: nothing runs it (call it, as `f(...)` where it should run)\n<root>/tests/cases/notraps17_word/small_destination.dewy:1:57: error: cannot prove `result <=? 127` for the conversion to int8: missing upper bound\n    f=(a:int64 b:int64):>int8=>{let result=(a+b)>>1; return result}\n                                                            ^\n    note: missing upper bound: nothing establishes `result <=? 127` here\n    note: possible witness (consistent with the known bounds, not an observed execution): result = 9223372036854775807\n    help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`\n    help: establish `-128 <=? result and result <=? 127` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/object/static_reads.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/object/static_reads.dewy:4:25: error: cannot prove `width(...)*2 <=? 9223372036854775807` for the conversion to int64: missing upper bound\n        wide = ():>int64 => width * 2\n                            ^\n    note: missing upper bound: nothing establishes `width(...)*2 <=? 9223372036854775807` here\n    help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`\n    help: establish `-9223372036854775808 <=? width(...)*2 and width(...)*2 <=? 9223372036854775807` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n\n<root>/tests/cases/object/static_reads.dewy:6:21: error: 'wide' reaches the members of a Span, so it is called on a value of it, not on the type\n    main = () => printl(Span.wide)\n                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/wide_unsigned_divisor.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n3\n2\n0\n3\n0\n25\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/wide_unsigned_divisor_zero.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/wide_unsigned_divisor_zero.dewy:2:33: error: cannot prove divisor is nonzero: missing bound\n    bad=(x:uint64 m:uint64):>int => 7 % (x + m)\n                                    ^\n    note: missing bound: nothing establishes `x + m not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x + m = 0\n<root>/tests/cases/exact_int/wide_unsigned_divisor_zero.dewy:2:38: note: this operation is outside the fact language\n    bad=(x:uint64 m:uint64):>int => 7 % (x + m)\n                                         ^\n    help: establish `x + m not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ]
+}

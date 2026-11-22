@@ -1,0 +1,60 @@
+{
+ "test_checker_constant_queries_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_integer_arguments/named.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "ok 6\n42 -14\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_integer_arguments/qualified.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "6\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_integer_arguments/wide_name.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_integer_arguments/wide_name.dewy:3:22: error: an integer type argument must fit int64\n    main=()=>printl(Ring<CAP>[0].value)\n                         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_integer_arguments/runtime_name.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_integer_arguments/runtime_name.dewy:2:36: error: 'CAP' is not a type\n    main=()=>{let CAP=4; let ring=Ring<CAP>[0]; printl(ring.value)}\n                                       ^\n",
+   "files": {}
+  }
+ ]
+}

@@ -1,0 +1,94 @@
+{
+ "test_concurrency_waits_diagnostics[channels/parallel_wait]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/channels/parallel_wait.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 41,
+   "stdout": "parallel body may block; use `concurrent` for waiting work (the two-lane rule)\n",
+   "stderr": "",
+   "files": {}
+  }
+ ],
+ "test_concurrency_waits_diagnostics[parallel_callbacks/blocking_callback]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/parallel_callbacks/blocking_callback.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 41,
+   "stdout": "parallel body may block; use `concurrent` for waiting work (the two-lane rule)\n",
+   "stderr": "",
+   "files": {}
+  }
+ ],
+ "test_concurrency_waits_diagnostics[parallel_callbacks/local_literal_blocks]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/parallel_callbacks/local_literal_blocks.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 41,
+   "stdout": "parallel body may block; use `concurrent` for waiting work (the two-lane rule)\n",
+   "stderr": "",
+   "files": {}
+  }
+ ],
+ "test_concurrency_waits_execution[default]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/unused.dewy",
+    "-o",
+    "<tmp>/unused"
+   ],
+   "status": 0,
+   "stdout": "waiting ok\n",
+   "stderr": "",
+   "files": {}
+  }
+ ],
+ "test_concurrency_waits_execution[release]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/unused.dewy",
+    "-o",
+    "<tmp>/unused"
+   ],
+   "status": 0,
+   "stdout": "waiting ok\n",
+   "stderr": "",
+   "files": {}
+  }
+ ],
+ "test_concurrency_waits_local_literal": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/parallel_callbacks/local_literal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "lowered\n",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "4.0 0.0\n[4.0 8.0 12.0]\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

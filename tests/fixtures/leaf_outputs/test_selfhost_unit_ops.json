@@ -1,0 +1,300 @@
+{
+ "test_unit_ops_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/functions.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/functions.dewy:8:10: warning: 'x' is given a value here but never used (a parameter kept for the function's type can be named `_x`)\n<root>/tests/cases/units/functions.dewy:8:45: warning: 'x' is given a value here but never used (a parameter kept for the function's type can be named `_x`)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "6.0m 2.0km\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/sleep.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/time_clock/waits_entry.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/time_clock/ticker_entry.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/format_shown_unit.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "error: cannot read '<root>/tests/cases/units/format_shown_unit.dewy'\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/conversions.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/conversions.dewy:6:9: warning: 'value' is given a value here but never used (a parameter kept for the function's type can be named `_value`)\n<root>/tests/cases/units/conversions.dewy:6:62: warning: 'value' is given a value here but never used (a parameter kept for the function's type can be named `_value`)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3.0m 3.0m 126m\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/no_deadlocks/certified_locks.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "10000 2000\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/temperature_point_scaled.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/temperature_point_scaled.dewy:4:9: error: cannot scale a temperature point: `start` is a reading on the °C scale, and scaling one depends on where the scale's zero sits (2 × 20°C is 40°C, but 2 × 68°F, the same temperature, is 136°F). Scale a difference instead (`(start - ref)*2`); for an average write `mean[t1 t2]`; `start/K` is its reading in kelvins\n    printl\"{start*2}\"\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/mismatch_assign.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/mismatch_assign.dewy:2:26: error: dimension mismatch: Time and Length (int64 * Time and int64 * Length)\n    let value:int64 * Length=1s\n                             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/temperature_computed_added.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/temperature_computed_added.dewy:6:9: error: cannot add two temperatures: both are points on the °C scale, and their sum depends on where its zero sits (20°C + 20°C is not 40°C). For an average write `mean[t1 t2]`; to add a difference, subtract two points (`t1 + (t2 - ref)`) or use kelvin (`5K`)\n    printl\"{t1+t2}\"\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/temperature_computed_compared.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/temperature_computed_compared.dewy:6:9: error: cannot compare a point with a difference: one side is a temperature point (a reading on the °C scale) and the other a difference between two. Write the difference as a subtraction of two points (`let rise = 25°C - 5°C`) or in kelvin (`5K`); a literal added to or taken from a point is read as a difference (`t + 5°C`)\n    printl\"{t >? rise}\"\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/rvalue_point_in_unit.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/rvalue_point_in_unit.dewy:2:13: error: a temperature point cannot be a factor of a compound quantity: this temperature is a reading on the °F scale, and the result would depend on where the scale's zero sits. Use a difference: subtract two points (`(70°F - 30°F)`) or use kelvin (`5K`); for one degree in a compound unit, write the unit alone (`J/(g*°F)`)\n    const Bad = ft^2*(1°F)*hour/BTU\n                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/rvalue_point_factor.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/rvalue_point_factor.dewy:4:9: error: a temperature point cannot be a factor of a compound quantity: `inside` is a reading on the °F scale, and the result would depend on where the scale's zero sits. Use a difference: subtract two points (`(70°F - 30°F)`) or use kelvin (`5K`); for one degree in a compound unit, write the unit alone (`J/(g*°F)`)\n    printl\"{(100ft^2)*inside/(30R)}\"\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/default_proofs/unit_decimal_float_named.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2.5m\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/trigonometry_dimension.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/trigonometry_dimension.dewy:4:16: error: cos takes an angle, such as `cos(45°)` (found int * Length)\n        printl(cos(2m))\n                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/as_unit_dimension.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/as_unit_dimension.dewy:2:11: error: cannot convert a Length to °C, a unit of Temperature\n    let value=3m as °C\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/dimensioned_power.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/dimensioned_power.dewy:2:15: error: a physical quantity exponent must be a dimensionless constant integer\n    let value=1m^(2s)\n                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/mismatch_add.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/mismatch_add.dewy:2:11: error: dimension mismatch: Length and Time (int * Length and int * Time)\n    let value=1m+1s\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/nonnumeric.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/nonnumeric.dewy:1:11: error: physical quantities need a numeric representation, found string\n    let value:string * Length=\"bad\"\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/runtime_power.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/runtime_power.dewy:3:14: error: a physical quantity exponent must be a constant integer\n    let value=1m^power\n                 ^\n",
+   "files": {}
+  }
+ ]
+}

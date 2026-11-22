@@ -1,0 +1,3676 @@
+{
+ "test_refine_resolution_program_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/alias.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/alias.dewy:2:27: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    make=(file:Path):>Files=>[file]\n                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/callback.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/a\n/srv/b\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/callback_cast.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/callback_cast.dewy:3:23: error: cannot cast (file:Path:>Path) to (Path:>SafePath)\n    main=():>void=>{let f=(@identity) as F; printl(f(p\"/srv/a\"))}\n                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/callback_parameter.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/callback_parameter.dewy:2:37: error: type mismatch: expected (Path:>void), found (SafePath:>void) (parameter 1 is SafePath, where Path is wanted)\n    main=():>void=>{let f:(Path:>void)=@accept; f(p\"/srv/a\")}\n                                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/callback_result.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/callback_result.dewy:3:26: error: type mismatch: expected (Path:>SafePath), found (Path:>Path)\n    main=():>void=>{let f:F=@identity; printl(f(p\"/srv/a\"))}\n                             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/cast_array.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/cast_array.dewy:1:47: error: cannot cast array<Path> to array<SafePath>\n    convert=(paths:array<Path>):>array<SafePath>=>paths as array<SafePath>\n                                                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/cast_record.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/cast_record.dewy:3:31: error: cannot cast Plain to Config\n    change=(plain:Plain):>Config=>plain as Config\n                                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/cast_unproven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/cast_unproven.dewy:1:29: error: `file` is not proven to stay inside its base, but make returns a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    make=(file:Path):>SafePath=>file as SafePath\n                                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/choice.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/closure.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/closure.dewy:6:42: warning: write `show()`: it is called for its side effect\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/constructor.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/constructor.dewy:1:38: error: `file` is not proven to stay inside its base, but make returns a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    make=(file:Path):>SafePath=>SafePath(file)\n                                         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/copy_hook.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/copy_hook.dewy:2:57: error: this path is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(...) or_throw`, or test it first, `if root.contains(...) {...}`\n    Config:type=[file:SafePath $__copy__=():>Config=>Config[source(\"/elsewhere\")]]\n                                                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/default.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/default\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/default_resize.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/default_resize.dewy:3:46: error: refined elements cannot be created by unchecked zero initialization\n    main=():>void=>{let configs:array<Config>=[];configs.resize(1);loop config in configs {printl(config.file)}}\n                                                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/default_unproven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/default_unproven.dewy:2:29: error: this path is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(...) or_throw`, or test it first, `if root.contains(...) {...}`\n    Config:type=[value:SafePath=source(\"/elsewhere\")]\n                                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/dictionary.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/b\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/dictionary_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/dictionary_store.dewy:1:68: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    add=(@paths:dict<string SafePath> file:Path):>void=>{paths['next']=file}\n                                                                       ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/element_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/element_store.dewy:1:61: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    replace=(@paths:array<SafePath> file:Path):>void=>{paths[0]=file}\n                                                                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/elements.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/first\n/srv/new\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/extend_unproven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/extend_unproven.dewy:1:61: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    add=(@paths:array<SafePath> file:Path):>void=>paths.extend([file])\n                                                                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/field_alias.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/field_alias.dewy:3:54: error: mutable refinement access requires an equivalent storage contract\n    main=():>void=>{let config=Config[p\"/srv/a\"]; erase(@config.file p\"/srv/b\")}\n                                                         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/field_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/field_store.dewy:2:56: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    replace=(@config:Config file:Path):>void=>{config.file=file}\n                                                           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/fixed_tuple.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/c\n/srv/a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/generic.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/record\n/srv/record\n/srv/record\n/srv/record\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/generic_return.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/generic_return.dewy:1:25: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    make=<T>(file:Path):>T=>file\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/generic_unproven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/generic_unproven.dewy:2:48: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    make=(file:Path):>Box<SafePath>=>Box<SafePath>[file]\n                                                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/global.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/global.dewy:4:37: warning: write `replace()`: it is called for its side effect\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/a\n/srv/b\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/global_mutation.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/global_mutation.dewy:4:52: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    main=():>void=>{change(\"/elsewhere\");printl(Config[file])}\n                                                       ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/global_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/global_store.dewy:3:41: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    replace=(file:Path):>void=>{config.file=file}\n                                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/guard_mutable_call.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/guard_mutable_call.dewy:8:12: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n        Config[file]\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/guard_mutation.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/guard_mutation.dewy:7:12: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n        Config[file]\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/json_read.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/json_read.dewy:2:17: error: in this call to from_json: type mismatch: expected Path, found int64 (lib/std/text.jo:43:5)\n    main=()=>printl(from_json<Config>(r'{\"file\":{\"path\":\"../outside\"}}'))\n                    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/json_write.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "{\"file\":{\"path\":\"/srv/a\"}}\n[{\"path\":\"/srv/a\"}]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/literal_element.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/literal_element.dewy:1:37: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    make=(file:Path):>array<SafePath>=>[file]\n                                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/match_base.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/match_base.dewy:6:9: warning: 'absent' is given a value here but never used\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/a\n/srv/b\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/mutable_parameter.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/mutable_parameter.dewy:2:56: error: in call to erase(@paths:array<Path> file:Path): argument 1 must have type array<Path> (`@` parameters need an exact match)\n    main=():>void=>{let paths:array<SafePath>=[p\"/srv/a\"]; erase(@paths p\"/srv/b\")}\n                                                           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/nested.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/b\n/srv/a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/optional.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/a\n/srv/b\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/optional_parameter.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "none\n/srv/a\nnone\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/optional_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/optional_store.dewy:2:56: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    replace=(@config:Config file:Path):>void=>{config.file=file}\n                                                           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/optional_unproven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/optional_unproven.dewy:2:34: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    make=(file:Path):>Config=>Config[file]\n                                     ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/parameters.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/a\n/srv/b\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/plain_mutable_call.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/plain_mutable_call.dewy:6:12: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n        Config[file]\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/plain_mutation.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/plain_mutation.dewy:5:12: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n        Config[file]\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/push_unproven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/push_unproven.dewy:1:58: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    add=(@paths:array<SafePath> file:Path):>void=>paths.push(file)\n                                                             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/record.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/report\n/srv/next\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/record_unproven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/record_unproven.dewy:2:34: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    make=(file:Path):>Config=>Config[file]\n                                     ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/representation_alias.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/representation_alias.dewy:2:54: error: a SafePath's representation cannot be exposed for mutation; replace the whole SafePath with a proven path\n    main=():>void=>{let file:SafePath=p\"/srv/a\"; change(@file.path \"/elsewhere\")}\n                                                         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/representation_element.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/representation_element.dewy:1:53: error: a SafePath's representation cannot be mutated; replace the whole SafePath with a proven path\n    change=(@paths:array<SafePath> text:string):>void=>{paths[0].path=text}\n                                                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/representation_field.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/representation_field.dewy:2:45: error: a SafePath's representation cannot be mutated; replace the whole SafePath with a proven path\n    change=(@config:Config text:string):>void=>{config.file.path=text}\n                                                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/representation_place_alias.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/representation_place_alias.dewy:1:68: error: a SafePath's representation cannot be mutated; replace the whole SafePath with a proven path\n    main=():>void=>{let file:SafePath=p\"/srv/a\"; let alias=@file.path; alias=\"/elsewhere\"}\n                                                                       ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/set.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/a\n/srv/b\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/set_unproven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/set_unproven.dewy:1:56: error: `file` is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    add=(@paths:set<SafePath> file:Path):>void=>paths.push(file)\n                                                           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/shadow_forgery.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/shadow_forgery.dewy:3:37: error: `file` is not proven to stay inside its base, but forge returns a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    forge=(file:SafePath):>fs.SafePath=>file\n                                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/shadow_name.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/spread.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/a\n/srv/b\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/spread_unproven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/spread_unproven.dewy:1:45: error: type mismatch: expected array<SafePath>, found array<Path> (an array's elements are not converted one by one: give it its type where it is made, `let files:array<SafePath> = ...`, so its elements are SafePath from the start)\n    make=(files:array<Path>):>array<SafePath>=>[files...]\n                                                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/union.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/a\n/srv/b\n/srv/a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/union_brand.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/union_subset.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/union_subset.dewy:8:9: warning: 'absent' is given a value here but never used\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "selected\n/srv/a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/union_unproven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_path_contracts/union_unproven.dewy:1:37: error: `file` is not proven to stay inside its base, but make returns a SafePath: validate it, `root.confine(file) or_throw`, or test it first, `if root.contains(file) {...}`\n    make=(file:Path):>SafePath|Missing=>file\n                                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/validated.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/a\n/srv/a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/view.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_path_contracts/whole_mutable.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/new\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_alias.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_alias.dewy:4:14: error: refinement refuted: -5 violates the declared contract\n        n[\"a\"] = -5\n                 ^\n<root>/tests/cases/dict_refine/no_negative_alias.dewy:2:29: note: the contract is declared here\n        let m:dict<string int64<(>=? 0)>> = [\"a\"->1]\n                                ^\n    help: establish `-5 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_compound.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_compound.dewy:2:1: error: refinement refuted: the value violates the declared contract\n    m[\"a\"] -= 5\n    ^\n    note: the value is -4\n<root>/tests/cases/dict_refine/no_negative_compound.dewy:1:25: note: the contract is declared here\n    let m:dict<string int64<(>=? 0)>> = [\"a\"->1]\n                            ^\n    help: establish `the value >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_comprehension.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_comprehension.dewy:2:59: error: refinement refuted: v violates the declared contract\n    let m:dict<string int64<(>=? 0)>> = [loop [k v] in o k -> v]\n                                                              ^\n    note: v is -2\n<root>/tests/cases/dict_refine/no_negative_comprehension.dewy:2:25: note: the contract is declared here\n    let m:dict<string int64<(>=? 0)>> = [loop [k v] in o k -> v]\n                            ^\n    help: establish `v >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_generic.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_generic.dewy:3:12: error: refinement refuted: -5 violates the declared contract\n    put(@m \"a\" -5)\n               ^\n<root>/tests/cases/dict_refine/no_negative_generic.dewy:2:25: note: the contract is declared here\n    let m:dict<string int64<(>=? 0)>> = [\"a\"->1]\n                            ^\n    help: establish `-5 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_insert.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_insert.dewy:3:24: error: refinement refuted: -4 violates the declared contract\n    m.insert_if_absent(\"b\" -4);\n                           ^\n<root>/tests/cases/dict_refine/no_negative_insert.dewy:2:25: note: the contract is declared here\n    let m:dict<string int64<(>=? 0)>> = [\"a\"->1]\n                            ^\n    help: establish `-4 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_key.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_key.dewy:2:3: error: refinement refuted: -3 violates the declared contract\n    m[-3] = \"y\"\n      ^\n<root>/tests/cases/dict_refine/no_negative_key.dewy:1:18: note: the contract is declared here\n    let m:dict<int64<(>=? 0)> string> = [1->\"x\"]\n                     ^\n    help: establish `-3 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_merge.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_merge.dewy:3:26: error: refinement refuted: v violates the declared contract\n    loop [k v] in o { m[k] = v }\n                             ^\n    note: v is -2\n<root>/tests/cases/dict_refine/no_negative_merge.dewy:2:25: note: the contract is declared here\n    let m:dict<string int64<(>=? 0)>> = [\"a\"->1]\n                            ^\n    help: establish `v >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_set.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_set.dewy:2:8: error: refinement refuted: -3 violates the declared contract\n    s.push(-3)\n           ^\n<root>/tests/cases/dict_refine/no_negative_set.dewy:1:17: note: the contract is declared here\n    let s:set<int64<(>=? 0)>> = set[1 2]\n                    ^\n    help: establish `-3 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_store.dewy:2:10: error: refinement refuted: -5 violates the declared contract\n    m[\"a\"] = -5\n             ^\n<root>/tests/cases/dict_refine/no_negative_store.dewy:1:25: note: the contract is declared here\n    let m:dict<string int64<(>=? 0)>> = [\"a\"->1]\n                            ^\n    help: establish `-5 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_unrefined_param.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_unrefined_param.dewy:3:1: error: in call to f(@m:dict<string int64>): argument 1 must have type dict<string int64> (`@` parameters need an exact match)\n    f(@m)\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/runtime_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: runtime_store.dewy:6: refinement failed: `v >=? 0` (observed: v was -4)\n    in the top level of runtime_store (runtime_store.dewy:6)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/totaldict.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "8\n16\n2\n4\n[-1 -> \"neg\" 0 -> \"zero\" 1 -> \"plus\"]\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/totaldict_infinite.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/totaldict_infinite.dewy:1:7: error: totaldict needs a finite key type (a union of literals), found string\n    let t:totaldict<string int64> = [\"a\" -> 1]\n          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/totaldict_missing.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/totaldict_missing.dewy:2:43: error: this totaldict has no entry for '0x'\n    const RADIX:totaldict<BasePrefix int64> = ['0b' -> 2 '0o' -> 8]\n                                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/totaldict_partial.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/totaldict_partial.dewy:4:15: error: a dict<'0b' | '0o' | '0x' int64> may be missing keys, so it is not a totaldict<'0b' | '0o' | '0x' int64> (a totaldict is made from a literal with every key)\n    printl(lookup(d '0b'))\n                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/totaldict_pop.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/totaldict_pop.dewy:3:1: error: a totaldict keeps an entry for every key: it has no pop\n    r.pop('0b')\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/totaldict_wide_range.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/totaldict_wide_range.dewy:2:11: error: totaldict needs a finite key type (a union of literals), found int64<refinement>\n    let table:totaldict<Key string> = [0 -> \"zero\"]\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_bounds/store_alias_array_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_bounds/store_alias_array_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_alias_bounds/store_alias_array_reject.dewy:1:57: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let xs:array<int<(>=? 0)>>=[2] let a=@xs[0] a=-1 printl(a)}\n                                                            ^\n<root>/tests/cases/refine_alias_bounds/store_alias_array_reject.dewy:1:28: note: the contract is declared here\n    main=()=>{let xs:array<int<(>=? 0)>>=[2] let a=@xs[0] a=-1 printl(a)}\n                               ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_bounds/store_alias_dict_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_bounds/store_alias_dict_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_alias_bounds/store_alias_dict_reject.dewy:1:68: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let d:dict<string int<(>=? 0)>>=[\"k\"->2] let a=@d[\"k\"] a=-1 printl(a)}\n                                                                       ^\n<root>/tests/cases/refine_alias_bounds/store_alias_dict_reject.dewy:1:33: note: the contract is declared here\n    main=()=>{let d:dict<string int<(>=? 0)>>=[\"k\"->2] let a=@d[\"k\"] a=-1 printl(a)}\n                                    ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_bounds/store_alias_field_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_bounds/store_alias_field_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_alias_bounds/store_alias_field_reject.dewy:1:51: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let r:[x:int<(>=? 0)>]=[2] let a=@r.x a=-1 printl(a)}\n                                                      ^\n<root>/tests/cases/refine_alias_bounds/store_alias_field_reject.dewy:1:24: note: the contract is declared here\n    main=()=>{let r:[x:int<(>=? 0)>]=[2] let a=@r.x a=-1 printl(a)}\n                           ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_bounds/store_alias_local_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_bounds/store_alias_local_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_alias_bounds/store_alias_local_reject.dewy:1:43: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let x:int<(>=? 0)>=2 let a=@x a=-1 printl(a)}\n                                              ^\n<root>/tests/cases/refine_alias_bounds/store_alias_local_reject.dewy:1:21: note: the contract is declared here\n    main=()=>{let x:int<(>=? 0)>=2 let a=@x a=-1 printl(a)}\n                        ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/alias_chain.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/alias_guard_root_write.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/alias_shadow.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\na\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/element_alias_field_write.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/element_nested_field.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_alias_tags/element_nested_field.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/field_alias.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "none\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/same_member.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/sibling_branch.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "a\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/tag_alias_optional_control_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "none\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/tag_alias_optional_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "none\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/tag_alias_optional_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_alias_tags/tag_alias_optional_reject.dewy:1:85: error: type mismatch: expected int, found int<refinement>? (this value may be none; check it with `is?none` before using its value)\n    main=()=>{let x:int<(>=? 0)>?=2 let a=@x if x isnt? none {a=none let y:int<(>=? 0)>=x printl(y)}}\n                                                                                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/tag_alias_union_exit_scope_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/tag_alias_union_guard_control_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/tag_alias_union_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/tag_alias_union_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_alias_tags/tag_alias_union_reject.dewy:1:92: error: type mismatch: expected int, found string | int<refinement>\n    main=()=>{let x:int<(>=? 0)>|string=2 let a=@x if x isnt? string {a=\"a\" let y:int<(>=? 0)>=x printl(y)}}\n                                                                                               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/tag_direct_union_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/tag_parent_alias_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "a\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_alias_observe_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_alias_observe_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_alias_observe_reject.dewy:2:37: error: refinement refuted: r.high violates the declared contract\n    main=()=>{let r=R[1 3] let p=@r.low p=4 printl(r.low) printl(r.high)}\n                                        ^\n    note: r.high is 3\n<root>/tests/cases/refine_dependent_alias/sibling_alias_observe_reject.dewy:1:26: note: the contract is declared here\n    R:type=[low:int high:int<(>=? low)>]\n                             ^\n    help: establish `r.high >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_alias_rejected_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_alias_rejected_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_alias_rejected_reject.dewy:2:37: error: refinement refuted: r.high violates the declared contract\n    main=()=>{let r=R[1 3] let p=@r.low p=4 printl(r.low)}\n                                        ^\n    note: r.high is 3\n<root>/tests/cases/refine_dependent_alias/sibling_alias_rejected_reject.dewy:1:26: note: the contract is declared here\n    R:type=[low:int high:int<(>=? low)>]\n                             ^\n    help: establish `r.high >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_capture_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_capture_ok.dewy:1:48: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_capture_ok.dewy:2:9: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_capture_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_capture_reject.dewy:1:48: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_capture_reject.dewy:2:9: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_capture_reject.dewy:1:79: error: cannot prove refinement `the value >=? 4`: missing lower bound\n    R:type=[low:int=1 high:int<(>=? low)>=3 raise=(v:int)=>{if high <? 2 {return} low=4}]\n                                                                                  ^\n    note: the value is at least 2\n    note: missing lower bound: nothing establishes `the value >=? 4` here\n    note: possible witness (consistent with the known bounds, not an observed execution): the value = 2\n<root>/tests/cases/refine_dependent_alias/sibling_capture_reject.dewy:1:28: note: the contract is declared here\n    R:type=[low:int=1 high:int<(>=? low)>=3 raise=(v:int)=>{if high <? 2 {return} low=4}]\n                               ^\n    help: establish `the value >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n\n<root>/tests/cases/refine_dependent_alias/sibling_capture_reject.dewy:2:42: error: cannot prove refinement `r.high >=? 4`: missing lower bound\n    f=(@r:R v:int)=>{if r.high <? 2 {return} r.low=4}\n                                             ^\n    note: r.high is at least 2\n    note: missing lower bound: nothing establishes `r.high >=? 4` here\n    note: possible witness (consistent with the known bounds, not an observed execution): r.high = 2\n<root>/tests/cases/refine_dependent_alias/sibling_capture_reject.dewy:1:28: note: the contract is declared here\n    R:type=[low:int=1 high:int<(>=? low)>=3 raise=(v:int)=>{if high <? 2 {return} low=4}]\n                               ^\n    help: establish `r.high >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n\n<root>/tests/cases/refine_dependent_alias/sibling_capture_reject.dewy:3:43: error: cannot prove refinement `r.high >=? 4`: missing lower bound\n    main=()=>{let r=R[] let f=($capture @r)=>{r.low=4} f() printl(r.low) printl(r.high)}\n                                              ^\n    note: missing lower bound: nothing establishes `r.high >=? 4` here\n    note: possible witness (consistent with the known bounds, not an observed execution): r.high = 0\n<root>/tests/cases/refine_dependent_alias/sibling_capture_reject.dewy:1:28: note: the contract is declared here\n    R:type=[low:int=1 high:int<(>=? low)>=3 raise=(v:int)=>{if high <? 2 {return} low=4}]\n                               ^\n    help: establish `r.high >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_chain_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_chain_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_chain_reject.dewy:2:46: error: refinement refuted: r.high violates the declared contract\n    main=()=>{let r=R[1 3] let p=@r.low let q=@p q=4 printl(r.high)}\n                                                 ^\n    note: r.high is 3\n<root>/tests/cases/refine_dependent_alias/sibling_chain_reject.dewy:1:26: note: the contract is declared here\n    R:type=[low:int high:int<(>=? low)>]\n                             ^\n    help: establish `r.high >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_direct_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_direct_ok.dewy:1:48: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_direct_ok.dewy:2:9: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_direct_ok.dewy:2:3: warning: 'f' is never called: nothing runs it (call it, as `f(...)` where it should run)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_direct_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_direct_reject.dewy:1:48: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_direct_reject.dewy:2:9: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_direct_reject.dewy:2:3: warning: 'f' is never called: nothing runs it (call it, as `f(...)` where it should run)\n<root>/tests/cases/refine_dependent_alias/sibling_direct_reject.dewy:1:79: error: cannot prove refinement `the value >=? 4`: missing lower bound\n    R:type=[low:int=1 high:int<(>=? low)>=3 raise=(v:int)=>{if high <? 2 {return} low=4}]\n                                                                                  ^\n    note: the value is at least 2\n    note: missing lower bound: nothing establishes `the value >=? 4` here\n    note: possible witness (consistent with the known bounds, not an observed execution): the value = 2\n<root>/tests/cases/refine_dependent_alias/sibling_direct_reject.dewy:1:28: note: the contract is declared here\n    R:type=[low:int=1 high:int<(>=? low)>=3 raise=(v:int)=>{if high <? 2 {return} low=4}]\n                               ^\n    help: establish `the value >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n\n<root>/tests/cases/refine_dependent_alias/sibling_direct_reject.dewy:2:42: error: cannot prove refinement `r.high >=? 4`: missing lower bound\n    f=(@r:R v:int)=>{if r.high <? 2 {return} r.low=4}\n                                             ^\n    note: r.high is at least 2\n    note: missing lower bound: nothing establishes `r.high >=? 4` here\n    note: possible witness (consistent with the known bounds, not an observed execution): r.high = 2\n<root>/tests/cases/refine_dependent_alias/sibling_direct_reject.dewy:1:28: note: the contract is declared here\n    R:type=[low:int=1 high:int<(>=? low)>=3 raise=(v:int)=>{if high <? 2 {return} low=4}]\n                               ^\n    help: establish `r.high >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n\n<root>/tests/cases/refine_dependent_alias/sibling_direct_reject.dewy:3:21: error: refinement refuted: r.high violates the declared contract\n    main=()=>{let r=R[] r.low=4 printl(r.low) printl(r.high)}\n                        ^\n    note: r.high is 3\n<root>/tests/cases/refine_dependent_alias/sibling_direct_reject.dewy:1:28: note: the contract is declared here\n    R:type=[low:int=1 high:int<(>=? low)>=3 raise=(v:int)=>{if high <? 2 {return} low=4}]\n                               ^\n    help: establish `r.high >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_loop_alias_guarded.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_loop_alias_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_loop_alias_reject.dewy:2:64: error: cannot prove refinement `r.high >=? 4`: missing lower bound\n    main=()=>{let rs:array<R>=[R[1 3]] loop @r in rs {let p=@r.low p=4} printl(rs[0].low) printl(rs[0].high)}\n                                                                   ^\n    note: missing lower bound: nothing establishes `r.high >=? 4` here\n    note: possible witness (consistent with the known bounds, not an observed execution): r.high = 0\n<root>/tests/cases/refine_dependent_alias/sibling_loop_alias_reject.dewy:1:26: note: the contract is declared here\n    R:type=[low:int high:int<(>=? low)>]\n                             ^\n    help: establish `r.high >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_loop_alias_unproven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_loop_alias_unproven.dewy:2:64: error: cannot prove refinement `r.high >=? 2`: missing lower bound\n    main=()=>{let rs:array<R>=[R[1 3]] loop @r in rs {let p=@r.low p=2} printl(rs[0].low) printl(rs[0].high)}\n                                                                   ^\n    note: missing lower bound: nothing establishes `r.high >=? 2` here\n    note: possible witness (consistent with the known bounds, not an observed execution): r.high = 0\n<root>/tests/cases/refine_dependent_alias/sibling_loop_alias_unproven.dewy:1:26: note: the contract is declared here\n    R:type=[low:int high:int<(>=? low)>]\n                             ^\n    help: establish `r.high >=? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_method_lent_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_method_lent_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_method_lent_reject.dewy:2:42: error: refinement refuted: the value violates the declared contract\n    main=()=>{let r=R[1 3] let p=@(r.lend()) p=4 printl(r.low) printl(r.high)}\n                                             ^\n    note: the value is 3\n<root>/tests/cases/refine_dependent_alias/sibling_method_lent_reject.dewy:1:26: note: the contract is declared here\n    R:type=[low:int high:int<(>=? low)> lend=():>@int=>{return @low}]\n                             ^\n    help: establish `the value >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_method_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_method_ok.dewy:1:48: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_method_ok.dewy:2:9: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_method_ok.dewy:2:3: warning: 'f' is never called: nothing runs it (call it, as `f(...)` where it should run)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_method_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_method_reject.dewy:1:48: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_method_reject.dewy:2:9: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_method_reject.dewy:2:3: warning: 'f' is never called: nothing runs it (call it, as `f(...)` where it should run)\n<root>/tests/cases/refine_dependent_alias/sibling_method_reject.dewy:1:79: error: cannot prove refinement `the value >=? 4`: missing lower bound\n    R:type=[low:int=1 high:int<(>=? low)>=3 raise=(v:int)=>{if high <? 2 {return} low=4}]\n                                                                                  ^\n    note: the value is at least 2\n    note: missing lower bound: nothing establishes `the value >=? 4` here\n    note: possible witness (consistent with the known bounds, not an observed execution): the value = 2\n<root>/tests/cases/refine_dependent_alias/sibling_method_reject.dewy:1:28: note: the contract is declared here\n    R:type=[low:int=1 high:int<(>=? low)>=3 raise=(v:int)=>{if high <? 2 {return} low=4}]\n                               ^\n    help: establish `the value >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n\n<root>/tests/cases/refine_dependent_alias/sibling_method_reject.dewy:2:42: error: cannot prove refinement `r.high >=? 4`: missing lower bound\n    f=(@r:R v:int)=>{if r.high <? 2 {return} r.low=4}\n                                             ^\n    note: r.high is at least 2\n    note: missing lower bound: nothing establishes `r.high >=? 4` here\n    note: possible witness (consistent with the known bounds, not an observed execution): r.high = 2\n<root>/tests/cases/refine_dependent_alias/sibling_method_reject.dewy:1:28: note: the contract is declared here\n    R:type=[low:int=1 high:int<(>=? low)>=3 raise=(v:int)=>{if high <? 2 {return} low=4}]\n                               ^\n    help: establish `r.high >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_parent_alias_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_parent_alias_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_parent_alias_reject.dewy:2:33: error: refinement refuted: p.high violates the declared contract\n    main=()=>{let r=R[1 3] let p=@r p.low=4 printl(r.low) printl(r.high)}\n                                    ^\n    note: p.high is 3\n<root>/tests/cases/refine_dependent_alias/sibling_parent_alias_reject.dewy:1:26: note: the contract is declared here\n    R:type=[low:int high:int<(>=? low)>]\n                             ^\n    help: establish `p.high >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_whole_call_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_whole_call_ok.dewy:2:9: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_whole_call_ok.dewy:1:48: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_whole_call_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_whole_call_reject.dewy:2:9: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_whole_call_reject.dewy:1:48: warning: 'v' is given a value here but never used (a parameter kept for the function's type can be named `_v`)\n<root>/tests/cases/refine_dependent_alias/sibling_whole_call_reject.dewy:1:79: error: cannot prove refinement `the value >=? 4`: missing lower bound\n    R:type=[low:int=1 high:int<(>=? low)>=3 raise=(v:int)=>{if high <? 2 {return} low=4}]\n                                                                                  ^\n    note: the value is at least 2\n    note: missing lower bound: nothing establishes `the value >=? 4` here\n    note: possible witness (consistent with the known bounds, not an observed execution): the value = 2\n<root>/tests/cases/refine_dependent_alias/sibling_whole_call_reject.dewy:1:28: note: the contract is declared here\n    R:type=[low:int=1 high:int<(>=? low)>=3 raise=(v:int)=>{if high <? 2 {return} low=4}]\n                               ^\n    help: establish `the value >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n\n<root>/tests/cases/refine_dependent_alias/sibling_whole_call_reject.dewy:2:42: error: cannot prove refinement `r.high >=? 4`: missing lower bound\n    f=(@r:R v:int)=>{if r.high <? 2 {return} r.low=4}\n                                             ^\n    note: r.high is at least 2\n    note: missing lower bound: nothing establishes `r.high >=? 4` here\n    note: possible witness (consistent with the known bounds, not an observed execution): r.high = 2\n<root>/tests/cases/refine_dependent_alias/sibling_whole_call_reject.dewy:1:28: note: the contract is declared here\n    R:type=[low:int=1 high:int<(>=? low)>=3 raise=(v:int)=>{if high <? 2 {return} low=4}]\n                               ^\n    help: establish `r.high >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_whole_replace_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_dependent_alias/sibling_whole_replace_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_dependent_alias/sibling_whole_replace_reject.dewy:2:30: error: refinement refuted: 3 violates the declared contract\n    main=()=>{let r=R[1 3] r=R[4 3] printl(r.low)}\n                                 ^\n<root>/tests/cases/refine_dependent_alias/sibling_whole_replace_reject.dewy:1:26: note: the contract is declared here\n    R:type=[low:int high:int<(>=? low)>]\n                             ^\n    help: establish `3 >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_literals/dict_length_array_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_literals/dict_length_array_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_generic_literals/dict_length_array_reject.dewy:1:71: error: refinement refuted: the value violates the declared contract\n    main=()=>{let d:dict<string array<int length >? 0>>=[\"k\"->[1]] d[\"k\"]=[] printl(d[\"k\"].length)}\n                                                                          ^\n    note: the value.length is 0\n<root>/tests/cases/refine_generic_literals/dict_length_array_reject.dewy:1:29: note: the contract is declared here\n    main=()=>{let d:dict<string array<int length >? 0>>=[\"k\"->[1]] d[\"k\"]=[] printl(d[\"k\"].length)}\n                                ^\n    help: establish `the value.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_literals/dict_length_generic_arg_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_literals/dict_length_string_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_literals/dict_length_string_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_generic_literals/dict_length_string_reject.dewy:1:68: error: refinement refuted: \"\" violates the declared contract\n    main=()=>{let d:dict<string string<length >? 0>>=[\"k\"->\"a\"] d[\"k\"]=\"\" printl(d[\"k\"].length)}\n                                                                       ^\n    note: \"\".length is 0\n<root>/tests/cases/refine_generic_literals/dict_length_string_reject.dewy:1:36: note: the contract is declared here\n    main=()=>{let d:dict<string string<length >? 0>>=[\"k\"->\"a\"] d[\"k\"]=\"\" printl(d[\"k\"].length)}\n                                       ^\n    help: establish `\"\".length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_literals/dict_length_typed_control_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_literals/family_length_dict_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[2]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_literals/family_length_dict_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_generic_literals/family_length_dict_reject.dewy:1:71: error: refinement refuted: the value violates the declared contract\n    main=()=>{let d:dict<string array<int length >? 0>>=[\"k\"->[1]] d[\"k\"]=[] printl(d[\"k\"])}\n                                                                          ^\n    note: the value.length is 0\n<root>/tests/cases/refine_generic_literals/family_length_dict_reject.dewy:1:29: note: the contract is declared here\n    main=()=>{let d:dict<string array<int length >? 0>>=[\"k\"->[1]] d[\"k\"]=[] printl(d[\"k\"])}\n                                ^\n    help: establish `the value.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_mutable/explicit_weaker_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_generic_mutable/explicit_weaker_reject.dewy:2:42: error: mutable refinement access requires an equivalent storage contract\n    main=()=>{let x:int<(>=? 0)>=2 set<int>(@x 3)}\n                                             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_mutable/generic_explicit_forward_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_mutable/generic_field_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_mutable/generic_field_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_generic_mutable/generic_field_reject.dewy:2:60: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let b:Box<int<(>=? 0)>>=Box<int<(>=? 0)>>[2] b.x=-1 printl(b.x)}\n                                                               ^\n<root>/tests/cases/refine_generic_mutable/generic_field_reject.dewy:2:25: note: the contract is declared here\n    main=()=>{let b:Box<int<(>=? 0)>>=Box<int<(>=? 0)>>[2] b.x=-1 printl(b.x)}\n                            ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_mutable/generic_inferred_mutable_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_mutable/generic_optional_field_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_mutable/generic_optional_field_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_generic_mutable/generic_optional_field_reject.dewy:2:42: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let b=Box<int<(>=? 0)>>[2] b.x=-1 printl(b.x ?? 0)}\n                                             ^\n<root>/tests/cases/refine_generic_mutable/generic_optional_field_reject.dewy:2:25: note: the contract is declared here\n    main=()=>{let b=Box<int<(>=? 0)>>[2] b.x=-1 printl(b.x ?? 0)}\n                            ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_mutable/generic_result_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_mutable/generic_result_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_generic_mutable/generic_result_reject.dewy:2:46: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let x:int<(>=? 0)>=f<int<(>=? 0)>>(-1) printl(x)}\n                                                 ^\n<root>/tests/cases/refine_generic_mutable/generic_result_reject.dewy:2:21: note: the contract is declared here\n    main=()=>{let x:int<(>=? 0)>=f<int<(>=? 0)>>(-1) printl(x)}\n                        ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_mutable/mutable_generic_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_mutable/mutable_generic_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_generic_mutable/mutable_generic_reject.dewy:3:51: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let x:int<(>=? 0)>=2 f<int<(>=? 0)>>(@x -1) printl(x)}\n                                                      ^\n<root>/tests/cases/refine_generic_mutable/mutable_generic_reject.dewy:3:21: note: the contract is declared here\n    main=()=>{let x:int<(>=? 0)>=2 f<int<(>=? 0)>>(@x -1) printl(x)}\n                        ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_mutable/reordered_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_generic_mutable/reordered_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_generic_mutable/reordered_reject.dewy:2:45: error: refinement refuted: y violates the declared contract\n    main=()=>{let x:int<(>=? 0)>=2 let y=-1 set(y @x) printl(x)}\n                                                ^\n    note: y is -1\n<root>/tests/cases/refine_generic_mutable/reordered_reject.dewy:2:21: note: the contract is declared here\n    main=()=>{let x:int<(>=? 0)>=2 let y=-1 set(y @x) printl(x)}\n                        ^\n    help: establish `y >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinement_unknown_name/type_alias.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinement_unknown_name/type_alias.dewy:3:30: error: 'h' names nothing here: a refinement names its value with a lambda, `int64<h => 0 <=? h and h <=? 9>`, by its parameter's, field's or binding's own name, or tests it with a partial operator, `int64<(>=? 0)>`\n    HeaderWords:type=int64<5 <=? h and h <=? 15>\n                                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinement_unknown_name/type_alias_lambda.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "24\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/alias_conversion.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[5 0 -7] 4 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/alias_conversion_refuted.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/alias_conversion_refuted.dewy:2:27: error: refinement refuted: 20 violates the declared contract\n    main = () => printl(Small(20))\n                              ^\n<root>/tests/cases/refinements/alias_conversion_refuted.dewy:1:20: note: the contract is declared here\n    Small:type = int64<(<? 10)>\n                       ^\n    help: establish `20 <? 10` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/callable.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/callable.dewy:2:6: warning: 'good' is never called: nothing runs it (call it, as `good(...)` where it should run)\n<root>/tests/cases/refinements/callable.dewy:4:39: error: type mismatch: expected (x:int64:>int64<refinement>), found (x:int64:>int64)\n    main=()=>{ let f:(x:int64:>positive)=@bad; printl(f(2)) }\n                                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/callable_variance.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/cast.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/container_removal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n1 3\n3 4 0\n2 false true\n1 1\n0\none\n1 three\n1 4 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/container_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: container_store.dewy:8: refinement failed: `the value >=? 0` (observed: the value was -4)\n    in main (container_store.dewy:8)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/container_values.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2]\n[]\n[4]\n[\"b\" -> [3 7]]\n[\"a\" -> 2 \"b\" -> 2 \"c\" -> 3]\n1\ntrue\n2\n[\"b\" -> 0]\n4\ntrue\n[[1 9] [2 3] [5]]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/cycle.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/cycle.dewy:1:3: error: cyclic dependent scalar refinements\n    f=(x:int64<(<? y)> y:int64<(>? x)>):>int64=>x\n      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/default.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/default.dewy:1:4: warning: 'x' is given a value here but never used (a parameter kept for the function's type can be named `_x`)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/dependent_argument_name.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/dependent_argument_name.dewy:3:59: error: cannot prove refinement `row.length >=? low`: missing lower bound\n    pick = (row:array<int> x:int low:int):>int => clamp(x low row.length)\n                                                              ^\n    note: row.length is between 0 and 281474976710655\n    note: missing lower bound: nothing establishes `row.length >=? low` here\n    note: possible witness (consistent with the known bounds, not an observed execution): row.length = 0, low = 1\n<root>/tests/cases/refinements/dependent_argument_name.dewy:2:30: note: the contract is declared here\n    clamp = (v:int lo:int hi:int<(>=? lo)>):>int => if v <? lo lo else if v >? hi hi else v\n                                 ^\n    help: establish `row.length >=? low` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/dependent_argument_named.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/dependent_argument_named.dewy:3:49: error: cannot prove refinement `row.length - 1 >=? 0`: missing lower bound\n    pick = (row:array<int> x:int):>int => clamp(x 0 row.length - 1)\n                                                    ^\n    note: row.length - 1 is between -1 and 281474976710654\n    note: missing lower bound: nothing establishes `row.length - 1 >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): row.length - 1 = -1\n<root>/tests/cases/refinements/dependent_argument_named.dewy:2:30: note: the contract is declared here\n    clamp = (v:int lo:int hi:int<(>=? lo)>):>int => if v <? lo lo else if v >? hi hi else v\n                                 ^\n    help: establish `row.length - 1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/dependent_argument_proven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/dependent_array_result.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/dependent_array_result.dewy:1:6: error: a result's element contract cannot depend on parameters\n    make=(x:int64):>array<int64<(>=? x)>>=>[x x+1]\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/dependent_optional.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "seven\n0\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/distinct_binders.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/distinct_binders.dewy:1:4: warning: 'x' is given a value here but never used (a parameter kept for the function's type can be named `_x`)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/field_own_name.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n2\n5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/field_own_name_refuted.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/field_own_name_refuted.dewy:2:17: error: refinement refuted: 0 violates the declared contract\n    let r = Ratio(1 0)\n                    ^\n<root>/tests/cases/refinements/field_own_name_refuted.dewy:1:42: note: the contract is declared here\n    let Ratio:type = [top:int64 bottom:int64<bottom >? 0>]\n                                             ^\n    help: establish `0 >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/forms.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "9\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/generic.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/generic_limits.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "127\n18446744073709551615\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/independent_array_result.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2] [1 1]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/lambda.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/later_dependent.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/later_dependent.dewy:2:12: warning: 'y' is given a value here but never used (a parameter kept for the function's type can be named `_y`)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/length_uint64_max.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/local.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/loop_keeps_contract.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "-3 7\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/loop_write_checked.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/loop_write_checked.dewy:9:15: error: cannot prove refinement `low - 1 >=? -100`: missing lower bound\n            low = low - 1\n                  ^\n    note: low - 1 is between -101 and -1\n    note: missing lower bound: nothing establishes `low - 1 >=? -100` here\n    note: possible witness (consistent with the known bounds, not an observed execution): low - 1 = -101\n<root>/tests/cases/refinements/loop_write_checked.dewy:4:22: note: the contract is declared here\n    Reading:type = int32<r => -100 <=? r and r <=? 100>\n                         ^\n    help: establish `low - 1 >=? -100` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/mutate.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/mutate.dewy:2:20: warning: 'ignored' is given a value here but never used (a parameter kept for the function's type can be named `_ignored`)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/nested_argument.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/nested_argument.dewy:5:17: error: refinement refuted: z violates the declared contract\n        printl(take(z))\n                    ^\n    note: z is 0\n<root>/tests/cases/refinements/nested_argument.dewy:1:21: note: the contract is declared here\n    Positive:type=int64<(>? 0)>\n                        ^\n    help: establish `z >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/nonzero.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "-2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/pilot.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "4\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/print_nested.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[[1 2] [3]]\nin text: [[1 2] [3]]\n[[1] none]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/range_endpoints.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "6\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/recursive.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/refuted.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/refuted.dewy:2:32: error: refinement refuted: 0 violates the declared contract\n    main=()=>{ let x:int64<(>? 0)>=0; printl(x) }\n                                   ^\n<root>/tests/cases/refinements/refuted.dewy:2:24: note: the contract is declared here\n    main=()=>{ let x:int64<(>? 0)>=0; printl(x) }\n                           ^\n    help: establish `0 >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/snapshot.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/spread_argument_named.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/spread_argument_named.dewy:3:49: error: cannot prove refinement `[ys... zs...].length >? 0`: missing lower bound\n    f = (ys:array<int> zs:array<int>):>int => first([ys... zs...])\n                                                    ^\n    note: [ys... zs...].length is between 0 and 281474976710655\n    note: missing lower bound: nothing establishes `[ys... zs...].length >? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): [ys... zs...].length = 0\n<root>/tests/cases/refinements/spread_argument_named.dewy:2:24: note: the contract is declared here\n    first = (xs:array<int><length >? 0>):>int => xs[0]\n                           ^\n    help: establish `[ys... zs...].length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/string_alias_conversion.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "R R red red red true green\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/string_alias_conversion_checked.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "red\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/string_alias_conversion_refuted.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/string_alias_conversion_refuted.dewy:2:21: error: 'blue' is not one of 'red' | 'green'\n    main = () => printl('blue' as Color)\n                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/string_length.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "h\nhé\né\nwörld\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/string_length_empty.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/string_length_empty.dewy:3:27: error: refinement refuted: \"\" violates the declared contract\n    main = () => printl(first(\"\"))\n                              ^\n    note: \"\".length is 0\n<root>/tests/cases/refinements/string_length_empty.dewy:1:19: note: the contract is declared here\n    nonempty = string<length >? 0>\n                      ^\n    help: establish `\"\".length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/string_length_refuted.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/string_length_refuted.dewy:1:61: error: cannot prove slice is in bounds: missing upper bound\n    take = (text:string n:uint64<(<=? text.length)>):>string => text[0..n)\n                                                                ^\n    note: n is between 0 and 281474976710655\n    note: text.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `n <=? text.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): n = 1, text.length = 0\n    help: establish `n <=? text.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or truncate it to `text` as Python's slices do: `text[$clamp 0..n)`\n\n<root>/tests/cases/refinements/string_length_refuted.dewy:2:34: error: refinement refuted: 6 violates the declared contract\n    main = () => printl(take(\"hello\" 6))\n                                     ^\n<root>/tests/cases/refinements/string_length_refuted.dewy:1:30: note: the contract is declared here\n    take = (text:string n:uint64<(<=? text.length)>):>string => text[0..n)\n                                 ^\n    help: establish `n <=? text.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/string_length_runtime.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "héllo\n",
+      "stderr": "panic: string_length_runtime.dewy:5: refinement failed: `k <=? the bound` (observed: k was 6 and the bound was 5)\n    in use (string_length_runtime.dewy:5)\n    called from main (string_length_runtime.dewy:8)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/uint.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "18446744073709551615\n9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/uint_length_bound.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/uint_length_bound.dewy:3:5: warning: 'get' hides the library's method `array<int64>.get`: this function takes over every `x.get` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "30\n20\n10\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/uint_length_bound_refuted.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/uint_length_bound_refuted.dewy:1:5: warning: 'get' hides the library's method `array<int64>.get`: this function takes over every `x.get` on one in this module; rename it to keep the library's\n<root>/tests/cases/refinements/uint_length_bound_refuted.dewy:1:54: error: cannot prove index is in bounds: missing upper bound\n    get=(b:array<int64> i:uint64<(<? b.length)>):>int64=>b[i]\n                                                         ^\n    note: i is between 0 and 281474976710654\n    note: b.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? b.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, b.length = 0\n    help: establish `i <? b.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n\n<root>/tests/cases/refinements/uint_length_bound_refuted.dewy:2:120: error: refinement refuted: k violates the declared contract\n    main=()=>{ let xs:array<int64> = [10 20 30]; xs.push(40); let k:uint64 = 3; printl(get(xs k)); xs.pop(); printl(get(xs k)) }\n                                                                                                                           ^\n    note: k is 3\n<root>/tests/cases/refinements/uint_length_bound_refuted.dewy:1:30: note: the contract is declared here\n    get=(b:array<int64> i:uint64<(<? b.length)>):>int64=>b[i]\n                                 ^\n    help: establish `i <? b.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/uint_length_bound_runtime.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/uint_length_bound_runtime.dewy:4:5: warning: 'get' hides the library's method `array<int64>.get`: this function takes over every `x.get` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "30\n",
+      "stderr": "panic: uint_length_bound_runtime.dewy:5: refinement failed: `k <? the bound` (observed: k was -1 and the bound was 3)\n    in use (uint_length_bound_runtime.dewy:5)\n    called from main (uint_length_bound_runtime.dewy:9)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/uint_refuted_value.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/uint_refuted_value.dewy:2:40: error: refinement refuted: k violates the declared contract\n    main=()=>{ let k:uint64 = 12; printl(f(k)) }\n                                           ^\n    note: k is 12\n<root>/tests/cases/refinements/uint_refuted_value.dewy:1:13: note: the contract is declared here\n    f=(n:uint64<n <? 10>):>uint64=>n\n                ^\n    help: establish `k <? 10` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/uint_zero.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/uint_zero.dewy:2:19: error: refinement refuted: 0 violates the declared contract\n    main=()=>printl(f(0))\n                      ^\n<root>/tests/cases/refinements/uint_zero.dewy:1:13: note: the contract is declared here\n    f=(x:uint64<(not=? 0)>):>uint64=>x\n                ^\n    help: establish `0 not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_alias.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_alias.dewy:1:18: error: 'g' is the binding being declared: its length can bound the direct element of its array, as in `array<int64<(<? g.length)>>`, and nothing else\n    I:type=int64<(<? g.length)>\n                     ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_callable_formal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_callable_formal.dewy:1:11: error: dependent element contracts require instantiated storage authority\n    apply=(g:<(@x:array<int64<(<? x.length)>>):>void>):>void=>{}\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_equal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_equal.dewy:1:19: error: a self-length refinement is an upper bound, `<? name.length` or `<=? name.length`, so that growing the array keeps it\n    let g:array<int64<(=? g.length)>> = []\n                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_fixed.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_fixed.dewy:1:23: error: 'g' is the binding being declared: its length can bound the direct element of its array, as in `array<int64<(<? g.length)>>`, and nothing else\n    let g:array<int64<(<? g.length)> length=3> = [0 1 2]\n                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_generic.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_generic.dewy:1:17: error: the elements of a self-length array are int64 or addr, found T\n    f=<T>(g:array<T<(<? g.length)>>):>void=>{printl(g)}\n                    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_inline_record.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_inline_record.dewy:1:7: error: 'p' is the field being declared: its length can bound the direct element of its array, as in `array<int64<(<? p.length)>>`, and nothing else\n    let r:[p:array<int64<(<? p.length)>>] = [p=[0]]\n          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_int32.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_int32.dewy:1:19: error: the elements of a self-length array are int64 or addr, found int32\n    let g:array<int32<(<? g.length)>> = [0]\n                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_lambda_parameter.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_lambda_parameter.dewy:2:11: error: dependent element contracts require instantiated storage authority\n        let f=(x:array<int64<(<? x.length)>>):>void=>{ printl(x) }\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_length_contract.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_length_contract.dewy:1:7: error: a self-length array cannot have a length contract as well\n    let g:array<int64<(<? g.length)> length >=? 1> = [0]\n          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_lower_bound.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_lower_bound.dewy:1:19: error: a self-length refinement is an upper bound, `<? name.length` or `<=? name.length`, so that growing the array keeps it\n    let g:array<int64<(>? g.length)>> = []\n                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_nested_array.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_nested_array.dewy:1:29: error: 'g' is the binding being declared: its length can bound the direct element of its array, as in `array<int64<(<? g.length)>>`, and nothing else\n    let g:array<array<int64<(<? g.length)>>> = []\n                                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_nested_field.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_nested_field.dewy:1:1: error: 'g' is the field being declared: its length can bound the direct element of its array, as in `array<int64<(<? g.length)>>`, and nothing else\n    R:type=[g:array<array<int64<(<? g.length)>>>]\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_not_equal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_not_equal.dewy:1:19: error: a self-length refinement is an upper bound, `<? name.length` or `<=? name.length`, so that growing the array keeps it\n    let g:array<int64<(not=? g.length)>> = []\n                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_optional.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_optional.dewy:1:23: error: 'g' is the binding being declared: its length can bound the direct element of its array, as in `array<int64<(<? g.length)>>`, and nothing else\n    let g:array<int64<(<? g.length)>>? = [0]\n                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_optional_element.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_optional_element.dewy:1:23: error: 'g' is the binding being declared: its length can bound the direct element of its array, as in `array<int64<(<? g.length)>>`, and nothing else\n    let g:array<int64<(<? g.length)>?> = [0]\n                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_other_binding.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_other_binding.dewy:2:23: error: unsupported refinement term 'q'\n    let g:array<int64<(<? q.length)>> = [0]\n                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_other_field_of_name.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_other_field_of_name.dewy:1:23: error: 'g' is the binding being declared: its length can bound the direct element of its array, as in `array<int64<(<? g.length)>>`, and nothing else\n    let g:array<int64<(<? g.size)>> = [0]\n                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_other_parameter.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_other_parameter.dewy:1:3: error: dependent element contracts require instantiated storage authority\n    f=(n:array<int64> g:array<int64<(<? n.length)>>):>void=>{printl(g)}\n      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_result.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_result.dewy:1:24: error: unsupported refinement term 'r'\n    mk=():>array<int64<(<? r.length)>>=>{ [] }\n                           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/self_length/decl_uint64.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/self_length/decl_uint64.dewy:1:20: error: the elements of a self-length array are int64 or addr, found uint64\n    let g:array<uint64<(<? g.length)>> = [0]\n                       ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/uint64_ceiling/beyond_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/uint64_ceiling/beyond_reject.dewy:2:54: error: cannot prove `v <=? 18446744073709551615` for the conversion to uint64: missing upper bound\n        if v >=? 0 and v <=? 18446744073709551616 return uint64(v)\n                                                         ^\n    note: v is at least 0\n    note: missing upper bound: nothing establishes `v <=? 18446744073709551615` here\n    help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`\n    help: establish `v <=? 18446744073709551615` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or declare the parameter `v:uint64`: an `int` parameter holds any integer, and one with a width moves the proof to each caller\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/uint64_ceiling/early_return.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "18446744073709551615\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/uint64_ceiling/guard.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "5\n9223372036854775808\n18446744073709551615\n0\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/uint64_ceiling/int64_end.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775807\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/uint64_ceiling/lower_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/uint64_ceiling/lower_reject.dewy:2:42: error: cannot prove `v >=? 0` for the conversion to uint64: missing lower bound\n        if v <=? 18446744073709551615 return uint64(v)\n                                             ^\n    note: missing lower bound: nothing establishes `v >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): v = -1\n    help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`\n    help: establish `v >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or declare the parameter `v:uint64`: an `int` parameter holds any integer, and one with a width moves the proof to each caller\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/uint64_ceiling/offset_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/uint64_ceiling/offset_reject.dewy:2:54: error: cannot prove `v + 1 <=? 18446744073709551615` for the conversion to uint64: missing upper bound\n        if v >=? 0 and v <=? 18446744073709551615 return uint64(v + 1)\n                                                         ^\n    note: v + 1 is at least 1\n    note: missing upper bound: nothing establishes `v + 1 <=? 18446744073709551615` here\n    help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`\n    help: establish `v + 1 <=? 18446744073709551615` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/uint64_ceiling/open_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/uint64_ceiling/open_reject.dewy:2:23: error: cannot prove `v <=? 18446744073709551615` for the conversion to uint64: missing upper bound\n        if v >=? 0 return uint64(v)\n                          ^\n    note: v is at least 0\n    note: missing upper bound: nothing establishes `v <=? 18446744073709551615` here\n    help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`\n    help: establish `v <=? 18446744073709551615` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or declare the parameter `v:uint64`: an `int` parameter holds any integer, and one with a width moves the proof to each caller\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/uint64_ceiling/result_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/uint64_ceiling/result_reject.dewy:2:75: error: cannot prove exact integer result fits uint64\n        if v >=? 0 and v <=? 18446744073709551615 { let w = uint64(v); return w + 1 }\n                                                                              ^\n    note: nothing bounds `w + 1` within uint64 here\n    note: nothing bounds `w` here, so this has no known range: guard it first\n    help: establish `uint64.min <=? (w + 1) and (w + 1) <=? uint64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `uint64<overflow='wrap'>`. For saturation use `uint64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/uint64_ceiling/result_small.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "6\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/uint64_ceiling/rewritten_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/uint64_ceiling/rewritten_reject.dewy:2:67: error: cannot prove `v <=? 18446744073709551615` for the conversion to uint64: missing upper bound\n        if v >=? 0 and v <=? 18446744073709551615 { v = v + 1; return uint64(v) }\n                                                                      ^\n<root>/tests/cases/uint64_ceiling/rewritten_reject.dewy:2:49: note: v may have changed at this assignment\n        if v >=? 0 and v <=? 18446744073709551615 { v = v + 1; return uint64(v) }\n                                                    ^\n    note: missing upper bound: nothing establishes `v <=? 18446744073709551615` here\n    help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`\n    help: establish `v <=? 18446744073709551615` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or declare the parameter `v:uint64`: an `int` parameter holds any integer, and one with a width moves the proof to each caller\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/uint64_ceiling/saved_guard.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "5\n18446744073709551615\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

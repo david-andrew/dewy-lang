@@ -1,0 +1,70 @@
+{
+ "test_checker_assignment_decls_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/implicit.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/global_discard.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/leaf_reassignment.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/unpack/leaf_reassignment.dewy:2:21: error: type annotations declare bindings; use let or const for typed unpacking\n    main=()=>{let x=20 [x:int64]=[42] return x}\n                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/leaf_constant_write.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/unpack/leaf_constant_write.dewy:2:32: error: cannot modify const 'x'; copy it with `let x = x`\n    main=()=>{const [x:int64]=[20] x=42 return x}\n                                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/constant/shadowable_function_assign.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/constant/shadowable_function_assign.dewy:1:30: error: cannot prove exact integer result fits int64\n    helper = (x:int64):>int64 => x + 1\n                                 ^\n    note: nothing bounds `x + 1` within int64 here\n    note: nothing bounds `x` here, so this has no known range: guard it first, or state it where the parameter is declared, `x:int64<(>=? 0)>`\n    help: establish `int64.min <=? (x + 1) and (x + 1) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n\n<root>/tests/cases/constant/shadowable_function_assign.dewy:3:5: error: 'helper' is a function (<root>/tests/cases/constant/shadowable_function_assign.dewy:1:10): it cannot be shadowed by assignment; use let to declare a new binding\n        helper = 3\n        ^\n",
+   "files": {}
+  }
+ ]
+}

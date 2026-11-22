@@ -1,0 +1,152 @@
+{
+ "test_directive_ops_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/statements_direct_statements_1.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 47,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps16_fixed/comprehension.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[0 1]\n[0 0]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/void_union_trailing_family.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "cannot remove no-such-file-for-this-case\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/no_deadlocks/audited_adapter.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_cancel_wait/channel_cancel_diag_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/queue_cancel_wait/channel_cancel_diag_ok.dewy:2:59: warning: the task spawned at line 2 waits to receive from 'q' (line 2), and nothing sends into it or closes it (group cancellation may end the wait): it may wait forever\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/template_proofs/input_unregistered.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/template_proofs/input_unregistered.dewy:1:8: error: calling `action_pressed` may panic (action_pressed: panic at lib/game/controls.jo:58:20), and this scope has no runtime checks (no traps): prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n    printl(action_pressed(\"never registered\"))\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/forbid_copies_off.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/forbid_copies_off.dewy:4:5: error: `$explicit_copies=false` is not allowed inside `$no_hidden_costs`, which sets `$explicit_copies`; opt this scope out first with `$no_hidden_costs=false`\n        $explicit_copies=false\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/no_blocks_io.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/no_blocks_io.dewy:1:8: error: effect contract violation in 'report': blocking operation exceeds the contract (its row excludes it); report; witness at <root>/tests/cases/effects/no_blocks_io.dewy:1:8\n    report=():>void & no blocks=>{\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/batch4_parallel_safe_removed.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/batch4_parallel_safe_removed.dewy:1:1: error: unknown directive `$parallel_safe` (a loop label goes on its own line just before its loop)\n    $parallel_safe\n    ^\n",
+   "files": {}
+  }
+ ]
+}

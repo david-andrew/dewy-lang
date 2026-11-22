@@ -1,0 +1,68 @@
+{
+ "test_checker_loop_bindings_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/loop_nested_array.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/loop_nested_map.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/leaf_types_loop_dictionary.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/sequence/mutable_pattern.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/sequence/mutable_pattern.dewy:2:30: error: Dewy does not yet support unpacking a mutable loop binding; use a named @item and its fields\n    main=()=>{let xs=[[1]] loop @[x] in xs x+=1}\n                                 ^\n",
+   "files": {}
+  }
+ ]
+}

@@ -1,0 +1,1192 @@
+{
+ "test_expression_query_twins[aggregate_sources-cases26]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/type_members/records.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "png\n9\n2 4 2 true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/type_members/named_twice.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/type_members/named_twice.dewy:2:17: error: field Png is listed twice\n    r = [$named[Png Png]...]\n                    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/object/missing_field_positional.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/object/missing_field_positional.dewy:3:19: error: Point needs its field 'y', which has no default\n        let p:Point = [3]\n                      ^\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[argument_order-cases23]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/rest.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1 [2 3 4] 5\n9\n[9 8] 7\n7\n1 2 []\n1 [2 3] 4\n5\n[2 3]\n1 [[3 4] [5 6]]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverweek2/call_named_order.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n2 1\n1\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[arithmetic_calls-cases2]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/rational/powers.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/constant_width_reject_divide.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/exact_int/constant_width_reject_divide.dewy:2:15: error: cannot prove exact integer result fits int64\n    let x:int64 = (-9223372036854775807 - 1) // -1\n                  ^\n    note: nothing bounds `(-9223372036854775807 - 1) // -1` within int64 here\n    help: establish `int64.min <=? ((-9223372036854775807 - 1) // -1) and ((-9223372036854775807 - 1) // -1) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/rational/mixed.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[binary_operator_checks-cases7]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/wide_modulo.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "14083957944848890878 -1\n4860585907994115071 -9223372036854775808\n1 -14083957944848890878\n9223372036854775807 -4860585907994115072\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/membership/return_type.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/membership/return_type.dewy:3:11: warning: 'box' is given a value here but never used (a parameter kept for the function's type can be named `_box`)\n<root>/tests/cases/membership/return_type.dewy:3:19: warning: 'value' is given a value here but never used (a parameter kept for the function's type can be named `_value`)\n<root>/tests/cases/membership/return_type.dewy:3:10: warning: 'contains' is never called: nothing runs it (call it, as `contains(...)` where it should run)\n<root>/tests/cases/membership/return_type.dewy:4:10: error: membership's contains function must return bool\n    main=()=>1 in? Box[1]\n             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/compare_union_number.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/compare_union_number.dewy:4:12: error: cannot compare int64 | Bad with float64 (find out which it holds first: `x is? int64 and x =? value`)\n        printl(parse(\"1\") =? 1.5)\n               ^\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[call_argument_checks-cases25]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/default_proofs/lambda_needs_at.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/default_proofs/lambda_needs_at.dewy:4:7: error: a mutable argument needs `@` at the call site\n        f(ys)\n          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverweek2/call_missing_argument.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverweek2/call_missing_argument.dewy:2:10: error: in call to f(value:int): missing argument 'value'\n    main=()=>f(let q=3)\n             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/named/position_only_named.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/named/position_only_named.dewy:2:8: error: in call to increment(value:int64): parameter 'value' is position-only: pass it without its name\n    printl(increment(value=41))\n           ^\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[call_lookup_context-cases19]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/overload/user_shadows_prelude.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/overload/user_shadows_prelude.dewy:4:7: warning: 'abs' hides the library's method `int64.abs`: this function takes over every `x.abs` on one in this module; rename it to keep the library's\n<root>/tests/cases/overload/user_shadows_prelude.dewy:5:7: warning: 'max' hides the library's method `int64.max`: this function takes over every `x.max` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "98\n102\n8\n2.5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/len_own.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[call_shape_queries-cases24]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/constant/map_write.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/constant/map_write.dewy:2:30: error: cannot modify const 'xs'; copy it with `let xs = xs`\n    main=()=>{const xs=[\"a\"->20] xs[\"b\"]=22 return 42}\n                                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/wrap_either_side.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775809\n-9223372036854775807 -9223372036854775807\n-2 -2\n-9223372036854775805 -9223372036854775805\n9223372036854775809 9223372036854775809\n9223372036854775807 9223372036854775807\n-9223372036854775808 -9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[coerce_expression-cases6]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/conversion/int_float.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/conversion/refuted_narrowing.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/conversion/refuted_narrowing.dewy:3:12: error: high does not fit int64\n        printl(high as int64)\n               ^\n    help: establish `high <=? 9223372036854775807` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/literal_union_proof/cast.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/literal_union_proof/cast.dewy:2:26: error: cannot prove this value is 'jump' | 'left' | 'right'; test it with `is?`, or read it with the literal-union type constructor\n    read=(s:string):>Action=>s as Action\n                             ^\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[coercion_queries-cases10]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/rational/float_array_argument_hint.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/rational/float_array_argument_hint.dewy:2:24: error: cannot prove index is in bounds: missing upper bound\n    f=(xs:array<float64>)=>xs[0]\n                           ^\n    note: xs.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `0 <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): xs.length = 0\n    help: establish `0 <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n\n<root>/tests/cases/rational/float_array_argument_hint.dewy:5:14: error: in call to f(xs:array<float64>): argument 'xs' expects array<float64>, found array<rational> (a decimal literal such as `0.5` is an exact rational: write the floating type where the value is made, as `let x:float64 = 0.5` or `let xs:array<float64> = [1.5 2.5]`)\n        printl(f(a))\n                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/literal_union_proof/assignment.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/literal_union_proof/assignment.dewy:2:40: error: cannot prove this value is 'jump' | 'left' | 'right'; test it with `is?`, or read it with the literal-union type constructor\n    read=(s:string):>Action=>{let a:Action=s; a}\n                                           ^\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[explicit_conversions-cases1]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/conversion/float_int.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/conversion/string_to_int_hint.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/conversion/string_to_int_hint.dewy:2:21: error: cannot convert string to int (`to_int(s)` reads a number from text: it gives an int, or `NotAnInteger` when the text is not one; `to_int(s) ?? 0` falls back)\n    main = () => printl(int(\"42\"))\n                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/conversion/transmute_record.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/conversion/transmute_record.dewy:2:35: error: transmute needs integer or float values of equal width (found [value:int] to int64)\n    main=()=>{let x=[value=42] return x transmute int64}\n                                      ^\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[format_word_observations-cases28]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/word_format_local/finite.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "exact -9223372036854775808 -9223372036854775808\nexact 9223372036854775807 9223372036854775807\narm\nexact -17 -17\nexact 0 0\n42\n-9\nremainder 96\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/word_format_local/fallback.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "wide 18446744073709551616\nassigned 9223372036854775808\nloop 3\nloop 9223372036854775808\nbefore capture 3\nafter capture 3\nbefore call 3\nafter call 9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/word_format_local/custom.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "custom Y\ncustom N\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[function_value_checks-cases4]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/overload/group_value.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/overload/group_value.dewy:2:17: error: Dewy does not yet support an overload group member other than a function literal\n    choose=(()=>42)&42\n                    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/overload/group_generic.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/type_members/handles.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "line hi\ns two\nagain\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[index_operand_checks-cases30]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/indexed_members.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "6 10 7 7 7 5 17\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/index_optional_member.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/index_optional_member.dewy:3:11: error: cannot index a value of type Missing | array<string>: it may be Missing (a member read through it forwards Missing too). Check the value first, `if x isnt? Missing { ... }`, which narrows x inside\n        let g=m.groups[0]\n              ^\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[integer_conversions-cases9]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/misc/narrow_integers.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/wrap_either_side.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775809\n-9223372036854775807 -9223372036854775807\n-2 -2\n-9223372036854775805 -9223372036854775805\n9223372036854775809 9223372036854775809\n9223372036854775807 9223372036854775807\n-9223372036854775808 -9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[intrinsic_expressions-cases8]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/intrinsic.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "4.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/intrinsic_unknown.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/intrinsic_unknown.dewy:2:11: error: 'cube_root' is not a function the compiler provides, so it cannot be `$intrinsic`: give it a body, or `$extern` for a C function\n    cube_root=(x:float64):>float64\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/word_format_local/finite.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "exact -9223372036854775808 -9223372036854775808\nexact 9223372036854775807 9223372036854775807\narm\nexact -17 -17\nexact 0 0\n42\n-9\nremainder 96\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[literal_context-cases14]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/default/reference_float.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/chain_exact_operands.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\nfalse\nfalse\nfalse\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[map_entry_places-cases16]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood24_proofs/dict_entries_then_insert.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "ana 1\nbo 0\ncy 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/unpack/dictionary_entries.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[match_pattern_sets-cases13]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/literal_union_proof/sparse_guard.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "a7\na7\na0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/literal_union_proof/changed_guard.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/literal_union_proof/changed_guard.dewy:2:61: error: cannot prove this value is 'jump' | 'left' | 'right'; test it with `is?`, or read it with the literal-union type constructor\n    read=(s:string):>Action=>{if s is? Action {s=\"jmup\"; return s}; 'jump'}\n                                                                ^\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[member_handles-cases27]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/race_spread/no_calls.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/race_spread/no_calls.dewy:4:13: error: race needs a call to run: give it calls, or spread an array of them\n        printl\"{race()}\"\n                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/race_spread/proven.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "race true\nfirst_ok 7\ntested true true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/type_members/handles.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "line hi\ns two\nagain\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[member_receivers-cases21]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/len_member.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/len_member.dewy:3:12: error: Dewy's length is `.length`: write `xs.length`\n        printl(xs.len())\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/type_members/handles.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "line hi\ns two\nagain\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[missing_member_checks-cases5]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/missing_member.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/missing_member.dewy:3:5: error: int64 has no member 'push'\n        x.push(1)\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/index_optional_member.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/index_optional_member.dewy:3:11: error: cannot index a value of type Missing | array<string>: it may be Missing (a member read through it forwards Missing too). Check the value first, `if x isnt? Missing { ... }`, which narrows x inside\n        let g=m.groups[0]\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/type_members/missing_member.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/type_members/missing_member.dewy:3:11: error: 'r' has no member 'n' that is a type\n    show = (x:r.n) => printl\"x\"\n              ^\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[moved_argument_data-cases17]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/closure/default_callback_moved.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "772\n144\n[1 3 3 5 5 7 7 -1 -1]\n2\n7\n15\n[[0] [0 1] [0 2 4]]\n20\n9223372036854775807\n9223372036854775807\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/drop_footprints/move_hook_global.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/drop_footprints/move_hook_global.dewy:13:15: error: cannot prove index is in bounds: missing upper bound\n            let v=data[i]\n                  ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/drop_footprints/move_hook_global.dewy:12:15: note: data.length may have changed at this statement\n            let b=a\n                  ^\n<root>/tests/cases/drop_footprints/move_hook_global.dewy:11:20: note: the earlier `i <? data.length` fact described the value before the statement\n        if 0 <=? i and i <? data.length {\n                       ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[numeric_library_types-cases22]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/rational/matrix_of_fractions_prints.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[0.5 1; 2 -3/4]\n[1/3 0.25]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/rational/mixed.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[overload_type_lookup-cases12]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/overload/group_types.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/word_format_local/custom.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "custom Y\ncustom N\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[path_narrowing-cases18]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_proofs/narrowing_field_proven.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/witness/narrowed_place_contract.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/witness/narrowed_place_contract.dewy:4:5: error: cannot prove index is in bounds: missing upper bound\n        box.items[0]\n        ^\n    note: box.items.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `0 <? box.items.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): box.items.length = 0\n    help: establish `0 <? box.items.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[set_type_queries-cases20]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/set/custom_hash.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/set/copy_and_removal.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[storage_place_checks-cases11]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/grouped_place/routes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "10 0\n10 0\n110 0\n[x=8 y=2] 7\n42 [x=8 y=9] 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/grouped_place/misuse_operand.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/grouped_place/misuse_operand.dewy:4:15: error: `@(...)` takes the place a method returns as `let name = @(x.lock())` or `match @(x.lock()) {...}`\n        printl\"{@(acct.lock)}\"\n                  ^\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[string_membership-cases29]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/singleton/membership_text_needle.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "push: true true false false\nload: false true true true\npusj: false false true false\n: false false true false\nfalse\ntrue\n[\"needle\" \"container\"]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/membership/dictionary.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/membership/return_type.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/membership/return_type.dewy:3:11: warning: 'box' is given a value here but never used (a parameter kept for the function's type can be named `_box`)\n<root>/tests/cases/membership/return_type.dewy:3:19: warning: 'value' is given a value here but never used (a parameter kept for the function's type can be named `_value`)\n<root>/tests/cases/membership/return_type.dewy:3:10: warning: 'contains' is never called: nothing runs it (call it, as `contains(...)` where it should run)\n<root>/tests/cases/membership/return_type.dewy:4:10: error: membership's contains function must return bool\n    main=()=>1 in? Box[1]\n             ^\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[struct_construction-cases0]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/object/zero_defaults.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 4,
+      "stdout": "[data=[0 0 0 0] next=none] [data=[0 0 0 0] next=[data=[1 2 3 4] next=none]]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/object/positional_literal_extra.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/object/positional_literal_extra.dewy:3:19: error: in Point(...): too many arguments (expected 2)\n        let p:Point = [1 2 3]\n                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/generic/type_defaults.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_expression_query_twins[surface_names-cases31]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/habit_open.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/habit_open.dewy:3:14: error: unknown function 'open' (use `read_text(path)` (or `p\"file\".read_text`) gives the text or a file error; `write_text(path text)` and `append_file(path text)` write)\n        let text=open(\"notes.txt\")\n                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/len_call.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/len_call.dewy:3:12: error: Dewy's length is `.length`: write `d.length`\n        printl(len(d))\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/python_string_methods.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/python_string_methods.dewy:4:12: error: no field or function 'removesuffix' for type string (use `s.remove_suffix(p)`)\n        printl(s.removesuffix(\"ms\"))\n               ^\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[union_conversion_nodes-cases15]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/default_proofs/refuted_literal_union.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/default_proofs/refuted_literal_union.dewy:3:21: error: in call to at(x:1 | 2 | 3): argument 'x' expects 1 | 2 | 3, found int\n    main=()=>{printl(at(9))}\n                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/union_operand_failure.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/union_operand_failure.dewy:4:12: error: operator + is not defined for int | NotAnInteger | TooManyDigits and int (it may hold a failure instead of the int: fall back with `x ?? 0`, pass the failure on with `or_throw`, or test it first, `if x is? int { ... }`)\n        printl(n + 1)\n               ^\n",
+   "files": {}
+  }
+ ],
+ "test_expression_query_twins[unresolved_call_names-cases3]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ffi/intrinsic_unknown.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/ffi/intrinsic_unknown.dewy:2:11: error: 'cube_root' is not a function the compiler provides, so it cannot be `$intrinsic`: give it a body, or `$extern` for a C function\n    cube_root=(x:float64):>float64\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/missing_member.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/missing_member.dewy:3:5: error: int64 has no member 'push'\n        x.push(1)\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/overload/unknown_named_argument.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/overload/unknown_named_argument.dewy:5:21: error: no version of 'scale' takes (int int): no parameter named 'facter' (did you mean 'factor'?)\n    main = () => printl(scale(value=2 facter=3))\n                        ^\n",
+   "files": {}
+  }
+ ]
+}

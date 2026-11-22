@@ -1,0 +1,154 @@
+{
+ "test_literal_key_bounds_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_key_nonempty/literal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "a 8 4 b\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_key_nonempty/duplicates.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7 2 11\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_key_nonempty/empty_rejected.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_key_nonempty/empty_rejected.dewy:6:8: error: cannot prove refinement `results.length >? 0`: missing lower bound\n    printl(results.min_by((x)=>x))\n           ^\n    note: results.length is between 0 and 281474976710655\n    note: missing lower bound: nothing establishes `results.length >? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): results.length = 0\n<root>/tests/cases/dict_key_nonempty/empty_rejected.dewy:5:1: note: this loop may change the value\n    loop seed in [7 11] {loop k in d.keys {results.push(seed)}}\n    ^\n<root>/lib/prelude/arrays.dewy:16:17: note: the contract is declared here\n    min_by=<T K>(xs:array<T length >? 0> key:<(value:T):>K>):>T=>{\n                    ^\n    help: establish `results.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_key_nonempty/empty_spread_rejected.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_key_nonempty/empty_spread_rejected.dewy:7:8: error: cannot prove refinement `results.length >? 0`: missing lower bound\n    printl(results.min_by((x)=>x))\n           ^\n    note: results.length is between 0 and 281474976710655\n    note: missing lower bound: nothing establishes `results.length >? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): results.length = 0\n<root>/tests/cases/dict_key_nonempty/empty_spread_rejected.dewy:6:1: note: this loop may change the value\n    loop seed in [7 11] {loop k in d.keys {results.push(seed)}}\n    ^\n<root>/lib/prelude/arrays.dewy:16:17: note: the contract is declared here\n    min_by=<T K>(xs:array<T length >? 0> key:<(value:T):>K>):>T=>{\n                    ^\n    help: establish `results.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ],
+ "test_nested_push_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_key_nonempty/built.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "a 7 4 b\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_key_nonempty/built_int.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7 4 7\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_key_nonempty/changed_rejected.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_key_nonempty/changed_rejected.dewy:5:8: error: cannot prove refinement `results.length >? 0`: missing lower bound\n    printl(results.min_by((x)=>x))\n           ^\n    note: results.length is between 0 and 281474976710655\n    note: missing lower bound: nothing establishes `results.length >? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): results.length = 0\n<root>/tests/cases/dict_key_nonempty/changed_rejected.dewy:4:1: note: this loop may change the value\n    loop seed in [7 11] {d.clear();loop k in d.keys {results.push(seed)}}\n    ^\n<root>/lib/prelude/arrays.dewy:16:17: note: the contract is declared here\n    min_by=<T K>(xs:array<T length >? 0> key:<(value:T):>K>):>T=>{\n                    ^\n    help: establish `results.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_key_nonempty/lower_bound_is_not_exact_rejected.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_key_nonempty/lower_bound_is_not_exact_rejected.dewy:7:6: error: cannot prove refinement `results.length <=? 2`: missing upper bound\n    take(results)\n         ^\n    note: results.length is between 2 and 281474976710655\n    note: missing upper bound: nothing establishes `results.length <=? 2` here\n    note: possible witness (consistent with the known bounds, not an observed execution): results.length = 281474976710655\n<root>/tests/cases/dict_key_nonempty/lower_bound_is_not_exact_rejected.dewy:6:1: note: this loop may change the value\n    loop seed in [7 11] {loop k in d.keys {results.push(seed)}}\n    ^\n<root>/tests/cases/dict_key_nonempty/lower_bound_is_not_exact_rejected.dewy:1:10: note: the contract is declared here\n    take=(xs:array<int64 length <=? 2>):>void=>printl(xs.length)\n             ^\n    help: establish `results.length <=? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_key_nonempty/unsupported_source_keeps_facts.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3 3\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

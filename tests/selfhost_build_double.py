@@ -1,7 +1,9 @@
 """Build programs with a compiler made with Dewy leaves and with one made with their frozen twins:
 the same exit codes, messages and output bytes."""
 import subprocess
+from functools import partial
 
+from tests import leaf_oracle, whole_oracle
 from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT
 from tools.cases import parse
@@ -30,12 +32,17 @@ def compare_builds(compiler, tmp_path, monkeypatch, leaves, paths, flags=((),)):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     paths = [p if (tmp_path / p).exists() else ROOT / p for p in paths]
     dewy, jo = leaf_compilers(compiler, tmp_path, leaves)
-    expected = build_all(jo, tmp_path, 'jo', paths, flags)
     got = build_all(dewy, tmp_path, 'dewy', paths, flags)
+    expected = got if jo is None else build_all(jo, tmp_path, 'jo', paths, flags)
     for a, b in zip(got, expected):
         # (the first program that differs: its text, and which output files differ)
         assert a[:5] == b[:5] and a[5].keys() == b[5].keys(), (a[:5], b[:5])
         assert a[5] == b[5], (a[0], a[1], [name for name in a[5] if a[5][name] != b[5][name]])
+    # (recorded outcomes stand in for the twin's builds when it is not built: tests/whole_oracle.py)
+    for path, extra, status, stdout, stderr, made in got:
+        leaf_oracle.check_entry(partial(
+            whole_oracle.build, ('build', *extra, path), status, stdout.encode(errors='surrogateescape'),
+            stderr.encode(errors='surrogateescape'), [tmp_path / 'dewy' / name for name in made], tmp_path))
     return expected
 
 

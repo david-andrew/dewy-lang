@@ -1,0 +1,136 @@
+{
+ "test_facts_elements_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps16_endpoints/literal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "-9223372036854775808\n-9223372036854775808\n0\n0\n9223372036854775807\n9223372036854775807\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/fixed_comprehension_short.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "13\n",
+      "stderr": "panic: fixed-size array needs 4 elements\n    in firsts (fixed_comprehension_short.dewy:6)\n    called from main (fixed_comprehension_short.dewy:11)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/range/stepped_error_10.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "-127\n-128\n",
+      "stderr": "panic: range exhausted its integer type\n    in main (stepped_error_10.dewy:5)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/spread/call_context.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood24_proofs/field_keys_counted.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "ana 3\nbo 0\ncy 2\n3 a\n1 b\n2 c\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood29_proofs/optional_best_helper.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps16_fixed/branch.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps16_fixed/branch.dewy:4:12: error: cannot prove fixed-size array conversion needs 2 elements: a predecessor lacks the required evidence\n        return xs\n               ^\n<root>/tests/cases/notraps16_fixed/branch.dewy:3:5: note: a path into this branch lacks the evidence\n        if choose {xs=[3]}\n        ^\n    help: establish `xs.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ]
+}

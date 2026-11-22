@@ -1,0 +1,78 @@
+{
+ "test_lower_group_indexed_bases_twins": [
+  {
+   "args": [
+    "build",
+    "<tmp>/stable.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0\n140\n[2 3 4]\n[1 2 3]\n[3 4 5 9 9 9]\n[]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<tmp>/stable.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-1": {
+     "run": {
+      "status": 0,
+      "stdout": "0\n140\n[2 3 4]\n[1 2 3]\n[3 4 5 9 9 9]\n[]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/resize.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 101,
+      "stdout": "1\n",
+      "stderr": "panic: resize.dewy:6: index 1 out of bounds (length 1: the last is index 0, as indexes count from 0)\n    in main (resize.dewy:6)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<tmp>/resize.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-1": {
+     "run": {
+      "status": 101,
+      "stdout": "1\n",
+      "stderr": "panic: resize.dewy:6: index 1 out of bounds (length 1: the last is index 0, as indexes count from 0)\n    in main (resize.dewy:6)\n"
+     }
+    }
+   }
+  }
+ ]
+}

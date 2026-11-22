@@ -1,0 +1,328 @@
+{
+ "test_float_ops_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/float_guards/field_guard.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n-1\n200\n7\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/float_key_proven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[0.5 -> 0 1.0 -> 1 2.5 -> 1 2.0 -> 2]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/semantics.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "semantics agree\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/conversion/float_limits.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/float_guards/library_tests.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1.5 2.5 3.5 0.0 0.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/float_key_nan_literal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: float_key_nan_literal.dewy:6: dictionary key is NaN, which equals nothing: its entry could never be found\n    in main (float_key_nan_literal.dewy:6)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_inf_incoming_runtime.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "2.0\n2.0\n",
+      "stderr": "panic: no_inf_incoming_runtime.dewy:19: an infinity entered `$no_inf`\n    in main (no_inf_incoming_runtime.dewy:19)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_nan_proven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_nan_proven.dewy:15:9: warning: `to_float64` is not compiled under `$no_nan`. This call uses the library's numerics.\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2.5 0.25 3.0 3.5\nfalse\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_inf_runtime.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_inf_runtime.dewy:9:9: warning: `to_float64` is not compiled under `$no_inf`. This call uses the library's numerics.\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "3.0\n",
+      "stderr": "panic: no_inf_runtime.dewy:9: produced an infinity under `$no_inf`\n    in total (no_inf_runtime.dewy:9)\n    called from main (no_inf_runtime.dewy:19)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/integer_float.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/integer_float_bounds.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2.25\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/integer_float_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/integer_float_reject.dewy:5:5: error: cannot prove the `int` fits a float under `$no_inf`\n        float64(n)\n        ^\n    help: bound the operands with a guard (`if b not=? 0.0`, `if float64.min <=? x <=? float64.max` for a finite x, narrower where a result must stay finite too), or opt this scope out with `$no_inf=false`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps11/integer_float_write_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps11/integer_float_write_reject.dewy:6:5: error: cannot prove the `int` fits a float under `$no_inf`\n        float64(n)\n        ^\n    help: bound the operands with a guard (`if b not=? 0.0`, `if float64.min <=? x <=? float64.max` for a finite x, narrower where a result must stay finite too), or opt this scope out with `$no_inf=false`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/float_guards/field_reassigned.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/float_guards/field_reassigned.dewy:7:16: error: cannot prove `.x` is a number within the int64 range for the conversion to int64\n            return q.x as int64\n                   ^\n    help: NaN, an infinity or a value out of range fails the conversion: guard it (`if float64(int64.min) <=? x and x <? float64(int64.max)`, a comparison that holds only for numbers), or check it at run time with `$runtime_checks`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_inf_divisor.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_inf_divisor.dewy:6:12: error: cannot prove the divisor is nonzero under `$no_inf`\n        return x/by\n               ^\n    help: bound the operands with a guard (`if b not=? 0.0`, `if float64.min <=? x <=? float64.max` for a finite x, narrower where a result must stay finite too), or opt this scope out with `$no_inf=false`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_nan_parsed_key.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_nan_parsed_key.dewy:8:12: error: cannot prove the dictionary key is not NaN\n        let d=[k->1]\n               ^\n    help: NaN equals nothing, so its entry could never be found again: compute it under `$no_nan`, or check it at run time under `$runtime_checks`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_nan_entering.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "1.5\n0.0\n3.0\n",
+      "stderr": "panic: no_nan_entering.dewy:24: a NaN entered `$no_nan`\n    in main (no_nan_entering.dewy:24)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/directives/no_inf_caller.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/directives/no_inf_caller.dewy:10:17: error: cannot prove `x` is finite: `half` takes it under `$no_inf`\n        printl(half(x))\n                    ^\n    help: a value entering `$no_inf` may be infinite: bound it with a guard, or check it at run time with `$runtime_checks`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/float_constants/reject_inf_in_scope.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/float_constants/reject_inf_in_scope.dewy:5:12: error: cannot prove `x` is finite under `$no_inf`\n        printl(x + 1.0)\n               ^\n    help: a value entering `$no_inf` may be infinite: bound it with a guard, or check it at run time with `$runtime_checks`\n",
+   "files": {}
+  }
+ ]
+}

@@ -1,0 +1,25 @@
+{
+ "test_ide_output_error_replay_twins": [
+  {
+   "args": [
+    "build",
+    "errors.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "errors.dewy:1:11: error: unknown function 'missing_one' (did you mean 'Missing'?)\n    first=()=>missing_one()\n              ^\n\nerrors.dewy:2:12: error: unknown function 'missing_two' (did you mean 'Missing'?)\n    second=()=>missing_two()\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "errors.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "errors.dewy:1:11: error: unknown function 'missing_one' (did you mean 'Missing'?)\n    first=()=>missing_one()\n              ^\n\nerrors.dewy:2:12: error: unknown function 'missing_two' (did you mean 'Missing'?)\n    second=()=>missing_two()\n               ^\n",
+   "files": {}
+  }
+ ]
+}

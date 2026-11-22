@@ -1,0 +1,74 @@
+{
+ "test_nested_ffi_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/fixtures/ffi_callback_signature/callback_signature_int_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/fixtures/ffi_callback_signature/callback_signature_int_reject.dewy:2:6: error: `int` cannot cross the C boundary (its size is not fixed): a C function pointer uses int32, int64, uint8, … instead\n    bad=(f:(x:int:>int)):>int32\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/fixtures/ffi_callback_signature/callback_return_string_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/fixtures/ffi_callback_signature/callback_return_string_reject.dewy:2:6: error: a C function cannot return a string: declare its result as `ptr<uint8>` and copy the bytes it points to\n    bad=(f:(():>string)):>int32\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/fixtures/ffi_callback_signature/callback_return_ptr_int_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/fixtures/ffi_callback_signature/callback_return_ptr_int_reject.dewy:2:6: error: int has no C layout (`int` has no fixed size): a pointer for C points to fixed-width numbers, bools, pointers, or records of them\n    bad=(f:(():>ptr<int>)):>int32\n         ^\n",
+   "files": {}
+  }
+ ],
+ "test_tuple_slot_write_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tuple_slot_write/index_once.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[0 7]\n2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tuple_slot_write/reachable_position_rejected.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tuple_slot_write/reachable_position_rejected.dewy:4:8: warning: 'pick' is never called: nothing runs it (call it, as `pick(...)` where it should run)\n<root>/tests/cases/tuple_slot_write/reachable_position_rejected.dewy:8:5: error: `+=` does not add text: `t[2] = \"{t[2]}...\"` appends in place, and many pieces collect in an array and `join`\n        t[i] += 1\n        ^\n<root>/tests/cases/tuple_slot_write/reachable_position_rejected.dewy:8:5: note: this writes position 2 of this [int64 int64 string], which holds a string\n        t[i] += 1\n        ^\n",
+   "files": {}
+  }
+ ]
+}

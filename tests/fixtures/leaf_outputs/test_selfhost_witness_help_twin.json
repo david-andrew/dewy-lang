@@ -1,0 +1,40 @@
+{
+ "test_witness_help_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood38_proofs/dict_pop_missing_names_default.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood38_proofs/dict_pop_missing_names_default.dewy:4:5: error: cannot prove the key is in the dictionary\n        tasks.pop(id);\n        ^\n    help: establish `id in? tasks` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `tasks.pop(id default=none)` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood38_proofs/record_field_refinement_named.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood38_proofs/record_field_refinement_named.dewy:3:88: error: cannot prove refinement `head <? items.length`: nothing establishes `head <? items.length` here\n    ring_new = <T>(capacity:int fill:T):>Ring<T> => Ring<T>[[loop i in [0..capacity) fill] 0]\n                                                                                           ^\n<root>/tests/cases/dogfood38_proofs/record_field_refinement_named.dewy:2:43: note: the contract is declared here\n    Ring:type = <T>[items:array<T> head:int64<v => 0 <=? v and v <? items.length>]\n                                              ^\n<root>/tests/cases/dogfood38_proofs/record_field_refinement_named.dewy:4:21: note: in ring_new with <string>, instantiated here\n    main = () => printl(ring_new(3 \"x\").head)\n                        ^\n    help: establish `head <? items.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record_field_shape/sibling_written.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/record_field_shape/sibling_written.dewy:3:23: error: cannot prove refinement `g.a.length[0] <=? 9`: missing upper bound\n    f = (@g:G):>void => { g.r = 9 }\n                          ^\n    note: g.a.length[0] is at least 0\n    note: missing upper bound: nothing establishes `g.a.length[0] <=? 9` here\n    note: possible witness (consistent with the known bounds, not an observed execution): g.a.length[0] = 9223372036854775807\n<root>/tests/cases/record_field_shape/sibling_written.dewy:2:29: note: the contract is declared here\n    G:type = [r:int64 c:int64 a:array<float64 length=[r c]>]\n                                ^\n    help: establish `g.a.length[0] <=? 9` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ]
+}

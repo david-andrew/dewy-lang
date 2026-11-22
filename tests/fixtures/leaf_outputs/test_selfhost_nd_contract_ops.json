@@ -1,0 +1,3780 @@
+{
+ "test_nd_contract_ops_match_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/argument_write.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/nd_contracts/argument_write.dewy:2:36: warning: 'ignored' is given a value here but never used (a parameter kept for the function's type can be named `_ignored`)\n<root>/tests/cases/nd_contracts/argument_write.dewy:5:11: error: cannot prove refinement `m.data.length matches its shape`: call invalidated a mutable or exposed root\n        take(@m replace(@m))\n              ^\n<root>/tests/cases/nd_contracts/argument_write.dewy:5:13: note: this call to replace may write a mutable or exposed root\n        take(@m replace(@m))\n                ^\n<root>/tests/cases/nd_contracts/argument_write.dewy:2:7: note: the contract is declared here\n    take=(@m:array<int64 length=[2 3]> ignored:int64):>void=>{m[1 2]=1}\n          ^\n    help: establish `m.data.length matches its shape` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/dimension_int.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/entry_checks.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/entry_storage.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: entry_storage.dewy:8: refinement failed: `m (data matches shape) >=? 1` (observed: m (data matches shape) was 0)\n    in main (entry_storage.dewy:8)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/float_grid.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p4-0": {
+     "run": {
+      "status": 0,
+      "stdout": "3.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/guards.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p5-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0\n0\n0\n-1\n-1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/index_argument_write.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/nd_contracts/index_argument_write.dewy:4:5: error: cannot prove array shape/index contract `m.length.length =? 2`: nothing establishes `m.length.length =? 2` here\n        m[1 2]=replace(@m)\n        ^\n    help: establish `m.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/literal_storage.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/nd_contracts/literal_storage.dewy:3:12: error: cannot prove array shape/index contract `m.data.length matches its shape`: nothing establishes `m.data.length matches its shape` here\n        printl(m[1 2])\n               ^\n    help: establish `m.data.length matches its shape` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/loops.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p8-0": {
+     "run": {
+      "status": 0,
+      "stdout": "36\n12\n6\n9\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/mutable_entry.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p9-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[1  1  1\n 1  1  1]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/mutable_entry_wrong.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/nd_contracts/mutable_entry_wrong.dewy:4:10: error: refinement refuted: m violates the declared contract\n        set(@m)\n             ^\n    note: m.length[0] is 3\n<root>/tests/cases/nd_contracts/mutable_entry_wrong.dewy:1:6: note: the contract is declared here\n    set=(@m:array<int64 length=[2 3]>):>void=>{m[1 2]=1}\n         ^\n    help: establish `m.length[0] <=? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/mutable_handle.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/nd_contracts/mutable_handle.dewy:3:9: error: cannot prove array shape/index contract `function handle checks its mutable shaped parameters on entry`: nothing establishes `function handle checks its mutable shaped parameters on entry` here\n     let f=@set\n            ^\n    help: establish `function handle checks its mutable shaped parameters on entry` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/nested_optin.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/nd_contracts/nested_optin.dewy:1:9: error: cannot prove the length (unpacking requires exactly 2 elements): nothing establishes the length here\n    unpack=([a b]:array<int64>):>int64=>{\n            ^\n    help: give the values a fixed shape, such as a tuple type (`array<[int64 int64]>` for pairs) or a record, or test the length first (`if xs.length =? 2`)\n\n<root>/tests/cases/nd_contracts/nested_optin.dewy:8:5: error: cannot prove exact integer result fits int64\n        a+b\n        ^\n    note: nothing bounds `a + b` within int64 here\n    note: nothing bounds `a` here, so this has no known range: guard it first, or state it where the parameter is declared, `a:int64<(>=? 0)>`\n    help: establish `int64.min <=? (a + b) and (a + b) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/past_extent.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/nd_contracts/past_extent.dewy:3:12: error: cannot prove array shape/index contract `3 <? m.length[1]`: nothing establishes `3 <? m.length[1]` here\n        printl(m[1 3])\n               ^\n    help: establish `3 <? m.length[1]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/pixel_grid.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p14-0": {
+     "run": {
+      "status": 0,
+      "stdout": "42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/reshape_constructor.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p15-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/returned_shape.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/nd_contracts/returned_shape.dewy:4:7: warning: 'ignored' is given a value here but never used (a parameter kept for the function's type can be named `_ignored`)\n",
+   "files": {
+    "p16-0": {
+     "run": {
+      "status": 0,
+      "stdout": "5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/shapes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p17-0": {
+     "run": {
+      "status": 0,
+      "stdout": "5\n0\n6\n6\n8\n0\n9\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/stale_shape.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/nd_contracts/stale_shape.dewy:5:33: error: cannot prove array shape/index contract `i <? m.length[0]`: nothing establishes `i <? m.length[0]` here\n        loop i in [0..count) printl(m[i 0])\n                                    ^\n    help: establish `i <? m.length[0]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/storage_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/nd_contracts/storage_changed.dewy:4:12: error: cannot prove array shape/index contract `m.data.length matches its shape`: nothing establishes `m.data.length matches its shape` here\n        printl(m[1 2])\n               ^\n    help: establish `m.data.length matches its shape` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/text_grid.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p20-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/value_handle.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p21-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/wrong_rank.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/nd_contracts/wrong_rank.dewy:1:44: error: cannot prove exact integer result fits int64\n    take=(m:array<int64 length=[r c]>):>int64=>r+c\n                                               ^\n    note: nothing bounds `r + c` within int64 here\n    note: nothing bounds `r` here, so this has no known range: guard it first\n    help: establish `int64.min <=? (r + c) and (r + c) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n\n<root>/tests/cases/nd_contracts/wrong_rank.dewy:2:13: error: refinement refuted: zeros(2 3 4) violates the declared contract\n    printl(take(zeros<int64>(2 3 4)))\n                ^\n    note: zeros(2 3 4).length.length is 3\n<root>/tests/cases/nd_contracts/wrong_rank.dewy:1:7: note: the contract is declared here\n    take=(m:array<int64 length=[r c]>):>int64=>r+c\n          ^\n    help: establish `zeros(2 3 4).length.length <=? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/wrong_shape.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/nd_contracts/wrong_shape.dewy:2:13: error: refinement refuted: zeros(3 2) violates the declared contract\n    printl(take(zeros<int64>(3 2)))\n                ^\n    note: zeros(3 2).length[0] is 3\n<root>/tests/cases/nd_contracts/wrong_shape.dewy:1:7: note: the contract is declared here\n    take=(m:array<int64 length=[2 3]>):>int64=>m[1 2]\n          ^\n    help: establish `zeros(3 2).length[0] <=? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/nd_contracts/zero_shape.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p24-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[0 9223372036854775807 9223372036854775807]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/guarded.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p25-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1.0\n0.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/minimal_float_max.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p26-0": {
+     "run": {
+      "status": 0,
+      "stdout": "3.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/minimal_float_min.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p27-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/minimal_float_min_empty_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_nonempty/minimal_float_min_empty_bad.dewy:4:8: error: `cpu(gpu(a)).data` is empty\n    printl(min(gpu(a)))\n           ^\n    help: establish `cpu(gpu(a)).data.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/minimal_integer_max.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p29-0": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/minimal_integer_min.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p30-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/minimal_integer_min_empty_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_nonempty/minimal_integer_min_empty_bad.dewy:4:8: error: `cpu(gpu(a)).data` is empty\n    printl(min(gpu(a)))\n           ^\n    help: establish `cpu(gpu(a)).data.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/negative_inf.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p32-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/reduce_f_257.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p33-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/reduce_f_4097.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p34-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/reduce_i_257.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p35-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/reduce_inf_max.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p36-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/reduce_inf_min.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p37-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/reduce_nan_max.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p38-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/reduce_nan_min.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p39-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/signed_zero.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p40-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/stale_guard_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_nonempty/stale_guard_bad.dewy:3:77: error: `cpu(g).data` is empty\n    if cpu(g).data.length >? 0 {let empty:array<float64>=[] g=gpu(empty) printl(min(g))}\n                                                                                ^\n    help: establish `cpu(g).data.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/unknown_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_nonempty/unknown_bad.dewy:1:29: error: cannot prove `cpu(gpu(a)).data` is nonempty: nothing establishes `cpu(gpu(a)).data.length >? 0` here\n    minimum=(a:array<float32>)=>min(gpu(a))\n                                ^\n    help: establish `cpu(gpu(a)).data.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_nonempty/zero_axis_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_nonempty/zero_axis_bad.dewy:1:18: error: `cpu(gpu(zeros(2 0))).data` is empty\n    main=()=>{printl(min(gpu(zeros(2 0))))}\n                     ^\n    help: establish `cpu(gpu(zeros(2 0))).data.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/exact_large.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p44-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 -1 0]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/kernel_unsigned_results.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p45-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0\n[0 127 255]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_float32_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p46-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_int16_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p47-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_int32_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p48-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_int8_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p49-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_int8_r2.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p50-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 2]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_int8_r5_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_integer_upload/upload_int8_r5_bad.dewy:4:12: error: cannot prove array shape/index contract `reshape(a ...).length.length <=? 4`: nothing establishes `reshape(a ...).length.length <=? 4` here\n    printl(cpu(gpu(reshape(a [1 1 1 1 4]))).data)\n               ^\n    help: establish `reshape(a ...).length.length <=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_int_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p52-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_uint16_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p53-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_uint32_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p54-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_uint32_r3.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p55-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 1 2]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_uint64_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p56-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_uint64_r4.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p57-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2 1 2]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_uint8_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p58-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_wrap_int.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p59-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_wrap_uint64.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p60-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_wrap_widths.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p61-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[0 1 -1]\n[-1 2]\n[255 7]\n[-300 300]\n[-1 2]\n[-128 127]\n[65535 1]\n[3 1]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record_field_shape/accepted.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p62-0": {
+     "run": {
+      "status": 0,
+      "stdout": "5.0\n1.0\n-1.0\n7.0\n1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record_field_shape/construct_unknown.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/record_field_shape/construct_unknown.dewy:3:36: error: cannot prove array shape/index contract `reshape's dimensions multiply to its element count`: nothing establishes `reshape's dimensions multiply to its element count` here\n    f = (m:array<float64>):>G => G[2 2 reshape(m 2 2)]\n                                       ^\n    help: establish `reshape's dimensions multiply to its element count` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record_field_shape/construct_wrong.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/record_field_shape/construct_wrong.dewy:4:19: error: refinement refuted: zeros(1 1) violates the declared contract\n        let g = G[2 2 zeros(1 1)]\n                      ^\n    note: zeros(1 1).length[0] is 1\n<root>/tests/cases/record_field_shape/construct_wrong.dewy:2:29: note: the contract is declared here\n    G:type = [r:int64 c:int64 a:array<float64 length=[r c]>]\n                                ^\n    help: establish `zeros(1 1).length[0] >=? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record_field_shape/data_replaced.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/record_field_shape/data_replaced.dewy:3:23: error: cannot prove refinement `the value.data.length matches its shape`: nothing establishes `the value.data.length matches its shape` here\n    f = (@g:G):>void => { g.a.data = [] }\n                          ^\n<root>/tests/cases/record_field_shape/data_replaced.dewy:2:29: note: the contract is declared here\n    G:type = [r:int64 c:int64 a:array<float64 length=[r c]>]\n                                ^\n    help: establish `the value.data.length matches its shape` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record_field_shape/data_resized.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/record_field_shape/data_resized.dewy:3:23: error: cannot prove refinement `the value.data.length matches its shape`: nothing establishes `the value.data.length matches its shape` here\n    f = (@g:G):>void => { g.a.data.push(1.0) }\n                          ^\n<root>/tests/cases/record_field_shape/data_resized.dewy:2:29: note: the contract is declared here\n    G:type = [r:int64 c:int64 a:array<float64 length=[r c]>]\n                                ^\n    help: establish `the value.data.length matches its shape` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record_field_shape/free_dimension.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p67-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4 2]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record_field_shape/lent_to_helper.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/record_field_shape/lent_to_helper.dewy:4:26: error: mutable refinement access needs the full record invariant authority; pass the whole record with `@`\n    f = (@g:G):>void => { h(@g.a) }\n                             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record_field_shape/replace_wrong.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/record_field_shape/replace_wrong.dewy:3:29: error: cannot prove refinement `zeros(9 9).length[1] <=? g.c`: missing lower bound\n    f = (@g:G):>void => { g.a = zeros(9 9) }\n                                ^\n    note: zeros(9 9).length[1] is 9\n    note: missing lower bound: nothing establishes `zeros(9 9).length[1] <=? g.c` here\n    note: possible witness (consistent with the known bounds, not an observed execution): zeros(9 9).length[1] = 9, g.c = 0\n<root>/tests/cases/record_field_shape/replace_wrong.dewy:2:29: note: the contract is declared here\n    G:type = [r:int64 c:int64 a:array<float64 length=[r c]>]\n                                ^\n    help: establish `zeros(9 9).length[1] <=? g.c` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record_field_shape/selector_in_index.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/record_field_shape/selector_in_index.dewy:9:13: error: mutable refinement access needs the full record invariant authority; pass the whole record with `@`\n        g.a[[h(@t.a)..1) [0..1)] = 1.0\n                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record_field_shape/sibling_written.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/record_field_shape/sibling_written.dewy:3:23: error: cannot prove refinement `g.a.length[0] <=? 9`: missing upper bound\n    f = (@g:G):>void => { g.r = 9 }\n                          ^\n    note: g.a.length[0] is at least 0\n    note: missing upper bound: nothing establishes `g.a.length[0] <=? 9` here\n    note: possible witness (consistent with the known bounds, not an observed execution): g.a.length[0] = 9223372036854775807\n<root>/tests/cases/record_field_shape/sibling_written.dewy:2:29: note: the contract is declared here\n    G:type = [r:int64 c:int64 a:array<float64 length=[r c]>]\n                                ^\n    help: establish `g.a.length[0] <=? 9` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record_field_shape/unguarded_index.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/record_field_shape/unguarded_index.dewy:3:23: error: cannot prove array shape/index contract `1 <? g.a.length[0]`: nothing establishes `1 <? g.a.length[0]` here\n    f = (g:G):>float64 => g.a[1 1]\n                          ^\n    help: establish `1 <? g.a.length[0]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record_field_shape/unknown_dimension.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/record_field_shape/unknown_dimension.dewy:3:31: error: refinement refuted: zeros(3 3) violates the declared contract\n    main = ():>void => { printl(G[zeros(3 3)].a.length) }\n                                  ^\n    note: zeros(3 3).length[1] is 3\n<root>/tests/cases/record_field_shape/unknown_dimension.dewy:2:13: note: the contract is declared here\n    G:type = [a:array<float64 length=[n 2]>]\n                ^\n    help: establish `zeros(3 3).length[1] <=? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/record_field_shape/wider_slice.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/record_field_shape/wider_slice.dewy:3:29: error: cannot prove array shape/index contract `slice axis 0 start is at most its end`: nothing establishes `slice axis 0 start is at most its end` here\n    f = (g:G):>void => { printl(g.a[[0..g.r] [0..1)].length) }\n                                ^\n    help: establish `slice axis 0 start is at most its end` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/bigint_divmod_divisor.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p75-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-12499999887 8950617269660493837\n-17636684144620811271604938270\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/bigint_divmod_divisor_unproven.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/bigint_divmod_divisor_unproven.dewy:4:21: error: cannot prove refinement `b not=? 0`: missing bound\n        return a.divmod(b).remainder\n                        ^\n    note: b is at least 0\n    note: missing bound: nothing establishes `b not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): b = 0\n<root>/lib/prelude/integers.dewy:5:23: note: the contract is declared here\n    divmod = (a:int b:int<(not=? 0)>):>[quotient:int remainder:int] => [quotient=a//b remainder=a%b]\n                          ^\n    help: establish `b not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/divmod_divisor.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p77-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-6 1/15\n5/3\n10\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/divmod_divisor_unproven.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/divmod_divisor_unproven.dewy:1:32: error: cannot prove divisor is nonzero: missing bound\n    split=(a:rational b:rational)=>a.divmod(b).quotient\n                                   ^\n    note: missing bound: nothing establishes `b not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): b = 0\n    help: establish `b not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/dot_literal_lengths.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/dot_literal_lengths.dewy:1:17: error: cannot prove array shape/index contract `the array.length =? the right array.length`: nothing establishes `the array.length =? the right array.length` here\n    main=()=>printl(dot([3.0 4.0] [1.0]))\n                    ^\n    help: establish `the array.length =? the right array.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/gcm_nonce_lengths.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p80-0": {
+     "run": {
+      "status": 0,
+      "stdout": "5bc94fbc3221a5db94fae95ae7121a47\ntrue\n3612d2e79e3b0785561be14aaca2fccb\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/gpu_upload_rank.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/gpu_upload_rank.dewy:1:21: error: cannot prove array shape/index contract `reshape(... ...).length.length <=? 4`: nothing establishes `reshape(... ...).length.length <=? 4` here\n    main=()=>printl(cpu(gpu(reshape(float32.([1.0 2.0]) [1 1 1 1 2]))).length)\n                        ^\n    help: establish `reshape(... ...).length.length <=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/gpu_upload_shape.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p82-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 3]\n[0.0 1.0 2.0 3.0 4.0 5.0]\n15.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/gpu_upload_unshaped.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/gpu_upload_unshaped.dewy:1:30: error: cannot prove array shape/index contract `m.length.length <=? 4`: nothing establishes `m.length.length <=? 4` here\n    upload=(m:NDArray<float32>)=>gpu(m)\n                                 ^\n    help: establish `m.length.length <=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/matrix_row_col.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p84-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4 5 6] [3 6]\n[1 2 3]\n[4 5 6]\n[1 4]\n[2 5]\n[3 6]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/matrix_row_outside.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/matrix_row_outside.dewy:1:17: error: cannot prove array shape/index contract `2 <? reshape(... 2 3).length[0]`: nothing establishes `2 <? reshape(... 2 3).length[0]` here\n    main=()=>printl(row(reshape([1 2 3 4 5 6] 2 3) 2))\n                    ^\n    help: establish `2 <? reshape(... 2 3).length[0]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/nd_max_nonempty.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p86-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1.0 9.0\n0.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/nd_max_unproven.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/nd_max_unproven.dewy:1:38: error: cannot prove `m.data` is nonempty: nothing establishes `m.data.length >? 0` here\n    top=(m:array<float64 length=[r c]>)=>max(m)\n                                         ^\n    help: establish `m.data.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/nd_min_empty.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/nd_min_empty.dewy:1:17: error: `zeros(0 3).data` is empty\n    main=()=>printl(min(zeros(0 3)))\n                    ^\n    help: establish `zeros(0 3).data.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/norm_dot_lengths.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/norm_dot_lengths.dewy:1:44: error: cannot prove array shape/index contract `a.length =? b.length`: nothing establishes `a.length =? b.length` here\n    total=(a:array<float64> b:array<float64>)=>dot(a b)\n                                               ^\n    help: establish `a.length =? b.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/norm_same_array.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p90-0": {
+     "run": {
+      "status": 0,
+      "stdout": "5.0\n0.0\n11.0\n4.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/physics_box_any_size.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p91-0": {
+     "run": {
+      "status": 0,
+      "stdout": "4 bodies\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/physics_box_no_area.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p92-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/physics_polygon_points.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/physics_polygon_points.dewy:4:1: error: calling `add_polygon` may panic (add_polygon: panic \"a polygon needs 3 points not all in a line\" at lib/physics.jo:229:27), and this scope has no runtime checks (no traps): prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n    world.add_polygon(vec2(0 0) [vec2(0 0) vec2(1 1) vec2(2 2)]);\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/sum_exact_bounds.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p94-0": {
+     "run": {
+      "status": 0,
+      "stdout": "6\n10\n9223372036854775807\n-9223372036854775808\n18446744073709551615\n307\n2\n5000\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/sum_exact_cancelling.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/sum_exact_cancelling.dewy:4:12: error: cannot prove the exact sum of `xs` fits `int64`: missing bounds on its elements and length that keep every running sum in range\n        printl(sum(xs))\n               ^\n    help: add into an `int` instead, which never overflows: `let total = 0` then `loop x in xs total += x`\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/sum_exact_cancelling_runtime.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p96-0": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775807\n-9223372036854775808\n5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/sum_exact_final_overflow_runtime.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p97-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: exact sum does not fit int64\n    in sum (array.jo:111)\n    called from main (sum_exact_final_overflow_runtime.dewy:7)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/sum_exact_negative.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/sum_exact_negative.dewy:3:12: error: cannot prove the exact sum of `xs` fits `int64`: missing bounds on its elements and length that keep every running sum in range\n        printl(sum(xs))\n               ^\n    help: add into an `int` instead, which never overflows: `let total = 0` then `loop x in xs total += x`\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/sum_exact_overflow.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/sum_exact_overflow.dewy:3:12: error: cannot prove the exact sum of `xs` fits `int64`: missing bounds on its elements and length that keep every running sum in range\n        printl(sum(xs))\n               ^\n    help: add into an `int` instead, which never overflows: `let total = 0` then `loop x in xs total += x`\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/sum_exact_pushed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/sum_exact_pushed.dewy:5:12: error: cannot prove the exact sum of `xs` fits `int64`: missing bounds on its elements and length that keep every running sum in range\n        printl(sum(xs))\n               ^\n    help: add into an `int` instead, which never overflows: `let total = 0` then `loop x in xs total += x`\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/sum_exact_uint64.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/sum_exact_uint64.dewy:1:17: error: cannot prove the exact sum of the array fits `uint64`: missing bounds on its elements and length that keep every running sum in range\n    main=()=>printl(sum<uint64>([18446744073709551615 1]))\n                    ^\n    help: add into an `int` instead, which never overflows: `let total = 0` then `loop x in xs total += x`\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/sum_exact_unproven.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/sum_exact_unproven.dewy:1:33: error: cannot prove the exact sum of `xs` fits `int64`: missing bounds on its elements and length that keep every running sum in range\n    total=(xs:array<int64>):>int64=>sum(xs)\n                                    ^\n    help: add into an `int` instead, which never overflows: `let total = 0` then `loop x in xs total += x`\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_contracts/sum_exact_written.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_contracts/sum_exact_written.dewy:5:12: error: cannot prove the exact sum of `xs` fits `int64`: missing bounds on its elements and length that keep every running sum in range\n        printl(sum(xs))\n               ^\n    help: add into an `int` instead, which never overflows: `let total = 0` then `loop x in xs total += x`\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps16_shapes/branch.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p104-0": {
+     "run": {
+      "status": 0,
+      "stdout": "9\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps16_shapes/callback.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps16_shapes/callback.dewy:5:12: error: cannot prove array shape/index contract `grid.length.length =? 2`: nothing establishes `grid.length.length =? 2` here\n        printl(grid[1 2])\n               ^\n    help: establish `grid.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps16_shapes/conditional.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps16_shapes/conditional.dewy:5:12: error: cannot prove array shape/index contract `grid.length.length =? 2`: nothing establishes `grid.length.length =? 2` here\n        printl(grid[1 2])\n               ^\n    help: establish `grid.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps16_shapes/nested.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p107-0": {
+     "run": {
+      "status": 0,
+      "stdout": "5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps16_shapes/read.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p108-0": {
+     "run": {
+      "status": 0,
+      "stdout": "4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps16_shapes/read_mutates.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps16_shapes/read_mutates.dewy:7:43: error: cannot prove array shape/index contract `g.length.length =? 2`: nothing establishes `g.length.length =? 2` here\n        loop row in [0..r) loop col in [0..c) g[row col]=n\n                                              ^\n    help: establish `g.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps16_shapes/repeated.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p110-0": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps16_shapes/replaced.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps16_shapes/replaced.dewy:5:12: error: cannot prove array shape/index contract `grid.length.length =? 2`: nothing establishes `grid.length.length =? 2` here\n        printl(grid[1 2])\n               ^\n    help: establish `grid.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps16_shapes/resized.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps16_shapes/resized.dewy:5:12: error: cannot prove array shape/index contract `grid.data.length matches its shape`: nothing establishes `grid.data.length matches its shape` here\n        printl(grid[1 2])\n               ^\n    help: establish `grid.data.length matches its shape` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps16_shapes/shape_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps16_shapes/shape_changed.dewy:5:12: error: cannot prove array shape/index contract `grid.length.length =? 2`: nothing establishes `grid.length.length =? 2` here\n        printl(grid[1 2])\n               ^\n    help: establish `grid.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/float_hypot_special.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p114-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/gpu_literal_pair.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p115-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[3.0]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/gpu_literal_pair_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_upload_shape/gpu_literal_pair_bad.dewy:3:12: error: cannot prove array shape/index contract `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)`: nothing establishes `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)` here\n    printl(cpu(gpu([1.0 2.0]) .+ gpu([3.0 4.0 5.0])).data)\n               ^\n    help: establish `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/gpu_snapshot.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p117-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/mask_eq.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p118-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/mask_lt.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p119-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/shape_entry_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p120-0": {
+     "run": {
+      "status": 0,
+      "stdout": "4.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/shape_guard_replaced_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_upload_shape/shape_guard_replaced_bad.dewy:5:34: error: cannot prove array shape/index contract `d.length.length =? 2`: nothing establishes `d.length.length =? 2` here\n    if d.length =? [2 3] {d=e;printl(d[1 2])}\n                                     ^\n    help: establish `d.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/shape_unproven.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_upload_shape/shape_unproven.dewy:1:31: error: cannot prove array shape/index contract `a.length.length <=? 4`: nothing establishes `a.length.length <=? 4` here\n    run=(a:NDArray<float32>)=>cpu(gpu(a) .+ 1.0)\n                                  ^\n    help: establish `a.length.length <=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/checked_at_run_time.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p123-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: shapes 1x2 and 1x3 do not match for an elementwise operation\n    in main (checked_at_run_time.dewy:8)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/guard_after_write.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_broadcast/guard_after_write.dewy:7:16: error: cannot prove array shape/index contract `d.length.length =? 2`: nothing establishes `d.length.length =? 2` here\n            printl(d[1 2])\n                   ^\n    help: establish `d.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/guard_elements.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p125-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1.0\n2.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/guard_elements_near_miss.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_broadcast/guard_elements_near_miss.dewy:4:38: error: cannot prove array shape/index contract `d.length.length =? 2`: nothing establishes `d.length.length =? 2` here\n        if d.length not=? [2 3] { printl(d[1 2]) }\n                                         ^\n    help: establish `d.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/guard_one_axis_short.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_broadcast/guard_one_axis_short.dewy:4:35: error: cannot prove array shape/index contract `2 <? d.length[0]`: nothing establishes `2 <? d.length[0]` here\n        if d.length =? [2 3] { printl(d[2 2]) }\n                                      ^\n    help: establish `2 <? d.length[0]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/known_shapes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p128-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0.0\n0.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/mismatched_shapes.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_broadcast/mismatched_shapes.dewy:5:16: error: cannot prove array shape/index contract `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)`: nothing establishes `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)` here\n        printl(cpu(a .+ b).length)\n                   ^\n    help: establish `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/unknown_shape.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_broadcast/unknown_shape.dewy:4:21: error: cannot prove array shape/index contract `m.length.length <=? 4`: nothing establishes `m.length.length <=? 4` here\n        printl(cpu(a .+ gpu(m)).length)\n                        ^\n    help: establish `m.length.length <=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_selection_output/empty.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p131-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_selection_output/positive_no_zero.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p132-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[3 5]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_selection_output/public_resize.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_selection_output/public_resize.dewy:1:43: error: refined elements cannot be created by unchecked zero initialization\n    main=()=>{let xs:array<int<(>? 0)>>=[2 4] xs.resize(3) printl(xs)}\n                                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_selection_output/slice_compound_ok.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p134-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[3 5]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_selection_output/slice_compound_reject.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_selection_output/slice_compound_reject.dewy:1:44: error: cannot prove refinement `__b1e0 + -5 >=? 0`: missing lower bound\n    main=()=>{let xs:array<int<(>=? 0)>>=[2 4] xs[..] .+= -5 printl(xs)}\n                                               ^\n    note: __b1e0 + -5 is at least -5\n    note: missing lower bound: nothing establishes `__b1e0 + -5 >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): __b1e0 + -5 = -1\n<root>/tests/cases/refine_selection_output/slice_compound_reject.dewy:1:28: note: the contract is declared here\n    main=()=>{let xs:array<int<(>=? 0)>>=[2 4] xs[..] .+= -5 printl(xs)}\n                               ^\n    help: establish `__b1e0 + -5 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_selection_output/unknown_length.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p136-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[3 5]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_selection_output/unknown_length_reject.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_selection_output/unknown_length_reject.dewy:1:33: error: cannot prove refinement `__b1e0 + -1 >=? 0`: missing lower bound\n    inc=(@xs:array<int<(>=? 0)>>)=>{xs[..] .+= -1}\n                                    ^\n    note: __b1e0 + -1 is at least -1\n    note: missing lower bound: nothing establishes `__b1e0 + -1 >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): __b1e0 + -1 = -1\n<root>/tests/cases/refine_selection_output/unknown_length_reject.dewy:2:28: note: the contract is declared here\n    main=()=>{let xs:array<int<(>=? 0)>>=[0 4] inc(@xs) printl(xs)}\n                               ^\n    help: establish `__b1e0 + -1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor_shape_flow/incompatible_broadcast_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor_shape_flow/incompatible_broadcast_bad.dewy:4:16: error: cannot prove array shape/index contract `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)`: nothing establishes `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)` here\n        printl(sum(a .+ b))\n                   ^\n    help: establish `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor_shape_flow/new_axis_misplaced_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor_shape_flow/new_axis_misplaced_bad.dewy:1:109: error: cannot prove array shape/index contract `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)`: nothing establishes `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)` here\n    spread = (matrix:array<float64 length=[m n]> row:array<float64 length=[n]>):>array<float64 length=[m n]> => matrix .+ row[.. new]\n                                                                                                                ^\n    help: establish `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor_shape_flow/reshape_count_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor_shape_flow/reshape_count_bad.dewy:3:16: error: cannot prove array shape/index contract `reshape's dimensions multiply to its element count`: nothing establishes `reshape's dimensions multiply to its element count` here\n        printl(sum(reshape(values 2 2)))\n                   ^\n    help: establish `reshape's dimensions multiply to its element count` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor_shape_flow/result_shape_mismatch_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor_shape_flow/result_shape_mismatch_bad.dewy:1:72: error: cannot prove array shape/index contract `a.length[0] matches its declared extent`: nothing establishes `a.length[0] matches its declared extent` here\n    flip = (a:array<float64 length=[m n]>):>array<float64 length=[n m]> => a\n                                                                           ^\n    help: establish `a.length[0] matches its declared extent` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor_shape_flow/shapes_flow.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p142-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[11.0  12.0  13.0\n 21.0  22.0  23.0]\n[0 3]\n[32.0 34.0 36.0]\n[1.0 2.0 3.0]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/broadcast.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p143-0": {
+     "run": {
+      "status": 0,
+      "stdout": "111.0\n236.0\n[2 3]\n18.0\n0.0\n[3 3]\n6.0\n2.0\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/let_shape_mismatch.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p144-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: expected an array of shape 2x3, found one of shape 3x2\n    in the top level of let_shape_mismatch (let_shape_mismatch.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/literal_leading_semicolon.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor/literal_leading_semicolon.dewy:1:8: error: an array literal cannot start with `;`\n    printl([; 1 2])\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/literal_ragged.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor/literal_ragged.dewy:1:15: error: the rows of an array literal must have the same size: this one has 1 elements, the first has 2\n    printl([1 2 ; 3])\n                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/literal_rows.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p147-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2; 3 4]\n[2 2]\n[2 3]\n3\n[2 2 2]\n6\n[2 3]\n1.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/literal_shape_mismatch.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor/literal_shape_mismatch.dewy:1:35: error: this literal has shape [2 2], but its type says [3 2]\n    let a:array<float64 length=[3 2]>=[0.5 1.5 ; 2.5 3.0]\n                                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/literal_shape_proven.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p149-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[1.0  2.0\n 3.0  4.0\n 5.0  6.0]\n[7 8 9]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/shaped_mismatch.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p150-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: shaped_mismatch.dewy:6: refinement failed: `ones(2 3).length[0] >=? the bound` (observed: ones(2 3).length[0] was 2 and the bound was 3)\n    in main (shaped_mismatch.dewy:6)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/shaped_parameters.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p151-0": {
+     "run": {
+      "status": 0,
+      "stdout": "2x3 times 3x4\n[2 4]\n6\n5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/shaped_rank.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor/shaped_rank.dewy:6:18: error: refinement refuted: zeros(2 2 2) violates the declared contract\n        printl(first(zeros<int64>(2 2 2)))\n                     ^\n    note: zeros(2 2 2).length.length is 3\n<root>/tests/cases/tensor/shaped_rank.dewy:4:8: note: the contract is declared here\n    first=(m:array<int64 length=[r c]>)=>m[0 0]\n           ^\n    help: establish `zeros(2 2 2).length.length <=? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/shaped_result.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p153-0": {
+     "run": {
+      "status": 101,
+      "stdout": "[2 2]\n",
+      "stderr": "panic: expected an array of shape 3x2, found one of shape 2x3\n    in flip (shaped_result.dewy:4)\n    called from main (shaped_result.dewy:7)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/broadcast_facts/common_length.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p154-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0.0\n0.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/broadcast_facts/gpu_reference.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p155-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[6.0 -1.0 12.0]\n-5.0\n3.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/broadcast_facts/mismatched_lengths_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/broadcast_facts/mismatched_lengths_bad.dewy:5:12: error: cannot prove the operands of this elementwise operation have matching lengths: nothing establishes `xs.length =? ys.length` here\n        printl(xs .+ ys)\n               ^\n    note: `xs.length` is 3\n    note: `ys.length` is 2\n    help: establish `xs.length =? ys.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/broadcast_facts/unknown_length_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/broadcast_facts/unknown_length_bad.dewy:2:61: error: cannot prove the operands of this elementwise operation have matching lengths: nothing establishes `xs.length =? ys.length` here\n    largest=(xs:array<float32> ys:array<float32>):>float32=>max(xs .+ ys)\n                                                                ^\n    help: establish `xs.length =? ys.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/broadcast_facts/unrelated_lengths.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p158-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[6 8]\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps24/shape_loop_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps24/shape_loop_changed.dewy:7:22: error: cannot prove refinement `plate.length[1] <=? 4`: missing upper bound\n            plate = step(plate)\n                         ^\n    note: plate.length[1] is at least 0\n    note: missing upper bound: nothing establishes `plate.length[1] <=? 4` here\n    note: possible witness (consistent with the known bounds, not an observed execution): plate.length[1] = 9223372036854775807\n<root>/tests/cases/notraps24/shape_loop_changed.dewy:6:5: note: this loop may change the value\n        loop i <? 3 {\n        ^\n<root>/tests/cases/notraps24/shape_loop_changed.dewy:2:9: note: the contract is declared here\n    step = (p:array<float64 length=[4 4]>):>array<float64 length=[4 4]> => p\n            ^\n    help: establish `plate.length[1] <=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps24/shape_loop_jacobi.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p160-0": {
+     "run": {
+      "status": 0,
+      "stdout": "12 44.3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps24/shape_loop_reassign.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p161-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps24/shape_loop_sometimes.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps24/shape_loop_sometimes.dewy:7:22: error: cannot prove refinement `plate.data.length matches its shape`: loop may change the tested value\n            plate = step(plate)\n                         ^\n<root>/tests/cases/notraps24/shape_loop_sometimes.dewy:6:5: note: this loop may change the value\n        loop i <? 3 {\n        ^\n<root>/tests/cases/notraps24/shape_loop_sometimes.dewy:2:9: note: the contract is declared here\n    step = (p:array<float64 length=[4 4]>):>array<float64 length=[4 4]> => p\n            ^\n    help: establish `plate.data.length matches its shape` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps24/shape_loop_symbolic.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p163-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/array_count_bounds.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p164-0": {
+     "run": {
+      "status": 0,
+      "stdout": "2 0 0 4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/array_count_bounds_end.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/array_count_bounds_end.dewy:3:5: error: cannot prove index is in bounds: missing upper bound\n        xs[n]\n        ^\n    note: n is between 0 and 281474976710655\n    note: xs.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `n <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): n = 0, xs.length = 0\n    help: establish `n <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/bounded_sum_indices.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p166-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[3 10 8]\n[]\n[1 -2 -2]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/bounded_sum_indices_short.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/bounded_sum_indices_short.dewy:5:34: error: cannot prove index is in bounds: missing upper bound\n            loop j in 0.. and y in b out[i+j]+=x*y\n                                     ^\n    note: i + j is between 0 and 562949953421308\n    note: out.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i + j <? out.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i + j = 0, out.length = 0\n    help: establish `i + j <? out.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/empty_extend_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/empty_extend_changed.dewy:6:30: error: cannot prove the key is in the dictionary\n        loop key in keys {total+=d[key]}\n                                 ^\n<root>/tests/cases/facts/empty_extend_changed.dewy:6:5: note: this loop may change the value\n        loop key in keys {total+=d[key]}\n        ^\n    help: establish `key in? d` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `d.get(key)` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/empty_extend_effectful_source.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/empty_extend_effectful_source.dewy:6:11: error: cannot prove `out[0] <=? 255` for the conversion to uint8: missing upper bound\n        uint8(out[0])\n              ^\n    note: missing upper bound: nothing establishes `out[0] <=? 255` here\n    note: possible witness (consistent with the known bounds, not an observed execution): out[0] = 9223372036854775807\n    help: establish `out[0] <=? 255` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/empty_extend_foreign.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/empty_extend_foreign.dewy:5:30: error: cannot prove the key is in the dictionary\n        loop key in keys {total+=d[key]}\n                                 ^\n<root>/tests/cases/facts/empty_extend_foreign.dewy:5:5: note: this loop may change the value\n        loop key in keys {total+=d[key]}\n        ^\n    help: establish `key in? d` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `d.get(key)` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/empty_extend_inventory.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/empty_extend_inventory.dewy:9:6: warning: 'keys' hides the library's method `dict<string int>.keys`: this function takes over every `x.keys` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p171-0": {
+     "run": {
+      "status": 0,
+      "stdout": "9 30 8\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/endpoint_disequality.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/endpoint_disequality.dewy:5:6: warning: 'find' hides the library's method `array<int64 length=4>.find`: this function takes over every `x.find` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p172-0": {
+     "run": {
+      "status": 0,
+      "stdout": "4 9223372036854775807 70 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/endpoint_disequality_inside.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/endpoint_disequality_inside.dewy:4:28: error: cannot prove assertion: missing upper bound\n        if i not=? 2 { $assert i <? 4 }\n                               ^\n    note: i is between 0 and 4\n    note: missing upper bound: nothing establishes `i <? 4` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 4\n    help: establish `i <? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/enum_member_store_index.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p174-0": {
+     "run": {
+      "status": 0,
+      "stdout": "ready 1 free\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/find_found_slice_after.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/find_found_slice_after.dewy:3:9: warning: 'split' hides the library's method `string.split`: this function takes over every `x.split` on one in this module; rename it to keep the library's\n<root>/tests/cases/facts/find_found_slice_after.dewy:6:5: error: cannot prove slice is in bounds: missing ordered bounds\n        word[at + 1..]\n        ^\n    note: at + 1 is between 1 and 281474976710656\n    note: word.length is between 0 and 281474976710655\n    note: missing ordered bounds: nothing establishes `at + 1 <=? word.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): at + 1 = 1, word.length = 0\n    help: establish `at + 1 <=? word.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or truncate it to `word` as Python's slices do: `word[$clamp at + 1..]`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/find_found_slice_guarded.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/find_found_slice_guarded.dewy:5:9: warning: 'split' hides the library's method `string.split`: this function takes over every `x.split` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p176-0": {
+     "run": {
+      "status": 0,
+      "stdout": "--name|value|7\n--flag\né|end\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/handle_argument_call_forgets.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/handle_argument_call_forgets.dewy:7:20: error: cannot prove index is in bounds: missing upper bound\n        apply(@drop) + items[i]\n                       ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/facts/handle_argument_call_forgets.dewy:7:5: note: items.length may have changed at this call to apply\n        apply(@drop) + items[i]\n        ^\n<root>/tests/cases/facts/handle_argument_call_forgets.dewy:6:18: note: the earlier `i <? items.length` fact described the value before the call to apply\n        if i <? 0 or i >=? items.length return 0\n                     ^\n    note: missing upper bound: nothing establishes `i <? items.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, items.length = 0\n    help: establish `i <? items.length` after `apply(...)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/handle_call_forgets.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/handle_call_forgets.dewy:7:14: error: cannot prove index is in bounds: missing upper bound\n        g(1 2) + items[i]\n                 ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/facts/handle_call_forgets.dewy:7:5: note: items.length may have changed at this call\n        g(1 2) + items[i]\n        ^\n<root>/tests/cases/facts/handle_call_forgets.dewy:5:18: note: the earlier `i <? items.length` fact described the value before the call\n        if i <? 0 or i >=? items.length return 0\n                     ^\n    note: missing upper bound: nothing establishes `i <? items.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, items.length = 0\n    help: establish `i <? items.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/handle_closure_call_forgets.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/handle_closure_call_forgets.dewy:7:12: error: cannot prove index is in bounds: missing upper bound\n        g(2) + ys[i]\n               ^\n    note: i is between 0 and 2\n<root>/tests/cases/facts/handle_closure_call_forgets.dewy:7:5: note: ys.length may have changed at this call\n        g(2) + ys[i]\n        ^\n<root>/tests/cases/facts/handle_closure_call_forgets.dewy:5:18: note: the earlier `i <? ys.length` fact described the value before the call\n        if i <? 0 or i >=? ys.length return 0\n                     ^\n    note: missing upper bound: nothing establishes `i <? ys.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, ys.length = 0\n    help: establish `i <? ys.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/handle_element_call_forgets.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/handle_element_call_forgets.dewy:7:18: error: cannot prove index is in bounds: missing upper bound\n        hs[0](1 2) + items[i]\n                     ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/facts/handle_element_call_forgets.dewy:7:5: note: items.length may have changed at this call\n        hs[0](1 2) + items[i]\n        ^\n<root>/tests/cases/facts/handle_element_call_forgets.dewy:5:18: note: the earlier `i <? items.length` fact described the value before the call\n        if i <? 0 or i >=? items.length return 0\n                     ^\n    note: missing upper bound: nothing establishes `i <? items.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, items.length = 0\n    help: establish `i <? items.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/handle_field_call_forgets.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/handle_field_call_forgets.dewy:8:16: error: cannot prove index is in bounds: missing upper bound\n        b.h(1 2) + items[i]\n                   ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/facts/handle_field_call_forgets.dewy:8:5: note: items.length may have changed at this call\n        b.h(1 2) + items[i]\n        ^\n<root>/tests/cases/facts/handle_field_call_forgets.dewy:6:18: note: the earlier `i <? items.length` fact described the value before the call\n        if i <? 0 or i >=? items.length return 0\n                     ^\n    note: missing upper bound: nothing establishes `i <? items.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, items.length = 0\n    help: establish `i <? items.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/handle_keeps_facts.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p182-0": {
+     "run": {
+      "status": 0,
+      "stdout": "5 18\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/handle_loop_call_forgets.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/handle_loop_call_forgets.dewy:10:5: error: cannot prove index is in bounds: missing upper bound\n        items[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/facts/handle_loop_call_forgets.dewy:6:5: note: items.length may have changed at this loop\n        loop k in [0..3) {\n        ^\n<root>/tests/cases/facts/handle_loop_call_forgets.dewy:5:18: note: the earlier `i <? items.length` fact described the value before the loop\n        if i <? 0 or i >=? items.length return 0\n                     ^\n    note: missing upper bound: nothing establishes `i <? items.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, items.length = 0\n    help: establish `i <? items.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/index_contract_negative.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/index_contract_negative.dewy:1:42: error: index is not in bounds\n    at=(xs:array<int> i:int64<(<? 0)>):>int=>xs[i]\n                                             ^\n    note: i is at most -1\n    help: establish `i >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/index_contract_product.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/index_contract_product.dewy:1:41: error: cannot prove index is in bounds: missing lower and upper bounds\n    at=(xs:array<int> i:int step:int):>int=>xs[i*step]\n                                            ^\n    note: missing lower bound: nothing establishes `i*step >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i*step = -1\n    note: xs.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i*step <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i*step = 0, xs.length = 0\n    help: establish `0 <=? i*step <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/index_contract_product_guarded.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p186-0": {
+     "run": {
+      "status": 0,
+      "stdout": "8 -1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/indexed_join_snapshots.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p187-0": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/inventory_relations_open_endpoint.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/inventory_relations_open_endpoint.dewy:2:9: warning: 'xs' is given a value here but never used (a parameter kept for the function's type can be named `_xs`)\n<root>/tests/cases/facts/inventory_relations_open_endpoint.dewy:5:5: error: cannot prove `choices[pick] <=? 18446744073709551615` for the conversion to uint64: missing upper bound\n        uint64(choices[pick])\n        ^\n    note: choices[pick] is at least 0\n    note: missing upper bound: nothing establishes `choices[pick] <=? 18446744073709551615` here\n    help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`\n    help: establish `choices[pick] <=? 18446744073709551615` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/later_operand.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/later_operand.dewy:3:40: error: cannot prove assertion: call invalidated a mutable or exposed root\n        if x >? 0 and mutate(@x) { $assert x >? 0 }\n                                           ^\n<root>/tests/cases/facts/later_operand.dewy:3:19: note: x may have changed at this call to mutate\n        if x >? 0 and mutate(@x) { $assert x >? 0 }\n                      ^\n<root>/tests/cases/facts/later_operand.dewy:3:8: note: the earlier `x >? 0` fact described the value before the call to mutate\n        if x >? 0 and mutate(@x) { $assert x >? 0 }\n           ^\n    note: missing lower bound: nothing establishes `x >? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x = 0\n    help: establish `x >? 0` after `mutate(@x)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/narrowed_join_bound.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p190-0": {
+     "run": {
+      "status": 0,
+      "stdout": "bcxdef\nbc|bc\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_broadcast_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_broadcast_changed.dewy:4:9: error: cannot prove array shape/index contract `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)`: nothing establishes `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)` here\n    printl((a .+ b).data)\n            ^\n    help: establish `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_broadcast_contracts.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p192-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[11 22 33 14 25 36]\n[11 12 13 24 25 26]\n[3 4 5 6 7 8]\n[]\n[2 4 6 8 10 12]\n[2 1 3]\n36\n66\n2.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_broadcast_element_overflow.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_broadcast_element_overflow.dewy:2:31: error: cannot prove exact integer result fits int64\n        let result:NDArray<int64>=a .+ b\n                                  ^\n    note: nothing bounds `__b1e0 + __b1e1` within int64 here\n    note: nothing bounds `__b1e0` here, so this has no known range: guard it first\n    help: establish `int64.min <=? (__b1e0 + __b1e1) and (__b1e0 + __b1e1) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_broadcast_empty_mismatch.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_broadcast_empty_mismatch.dewy:2:9: error: cannot prove array shape/index contract `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)`: nothing establishes `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)` here\n    printl((a .+ zeros(2 3)).data)\n            ^\n    help: establish `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_broadcast_foreign.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_broadcast_foreign.dewy:1:16: warning: 'shapes' is given a value here but never used (a parameter kept for the function's type can be named `_shapes`)\n<root>/tests/cases/facts/nd_broadcast_foreign.dewy:3:8: error: cannot prove array shape/index contract `m.data.length matches its shape`: nothing establishes `m.data.length matches its shape` here\n    printl(m[8 8])\n           ^\n    help: establish `m.data.length matches its shape` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_broadcast_mismatch.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_broadcast_mismatch.dewy:2:9: error: cannot prove array shape/index contract `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)`: nothing establishes `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)` here\n    printl((a .+ [1.0 2.0]).data)\n            ^\n    help: establish `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_broadcast_negative_zero.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_broadcast_negative_zero.dewy:4:9: error: cannot prove array shape/index contract `m.data.length matches its nonnegative shape`: nothing establishes `m.data.length matches its nonnegative shape` here\n    printl((m .+ 1).data)\n            ^\n    help: establish `m.data.length matches its nonnegative shape` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_broadcast_private_coordinates.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_broadcast_private_coordinates.dewy:1:16: warning: 'row' is given a value here but never used (a parameter kept for the function's type can be named `_row`)\n<root>/tests/cases/facts/nd_broadcast_private_coordinates.dewy:1:26: warning: 'width' is given a value here but never used (a parameter kept for the function's type can be named `_width`)\n<root>/tests/cases/facts/nd_broadcast_private_coordinates.dewy:1:38: warning: 'offset' is given a value here but never used (a parameter kept for the function's type can be named `_offset`)\n",
+   "files": {
+    "p198-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[11 22 33 14 25 36]\n99\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_broadcast_result_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_broadcast_result_changed.dewy:3:8: error: cannot prove array shape/index contract `sum.data.length matches its shape`: nothing establishes `sum.data.length matches its shape` here\n    printl(sum[0 0])\n           ^\n    help: establish `sum.data.length matches its shape` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_broadcast_storage.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_broadcast_storage.dewy:3:9: error: cannot prove array shape/index contract `a.data.length matches its nonnegative shape`: nothing establishes `a.data.length matches its nonnegative shape` here\n    printl((a .+ 1.0).data)\n            ^\n    help: establish `a.data.length matches its nonnegative shape` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_broadcast_unknown.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_broadcast_unknown.dewy:1:58: error: cannot prove array shape/index contract `broadcast operand shapes have compatible trailing dimensions (equal or one)`: nothing establishes `broadcast operand shapes have compatible trailing dimensions (equal or one)` here\n    f=(a:NDArray<float64> b:NDArray<float64>):>void=>printl((a .+ b).data)\n                                                             ^\n    help: establish `broadcast operand shapes have compatible trailing dimensions (equal or one)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_global_formatter_mutation.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_global_formatter_mutation.dewy:2:31: warning: 'value' is given a value here but never used (a parameter kept for the function's type can be named `_value`)\n<root>/tests/cases/facts/nd_global_formatter_mutation.dewy:4:8: error: cannot prove array shape/index contract `m.length.length =? 2`: nothing establishes `m.length.length =? 2` here\n    printl(m[1 1])\n           ^\n    help: establish `m.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_global_print.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p203-0": {
+     "run": {
+      "status": 0,
+      "stdout": "4\n5\nnext 2\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_global_print_argument.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_global_print_argument.dewy:4:8: error: cannot prove array shape/index contract `m.length.length =? 2`: nothing establishes `m.length.length =? 2` here\n    printl(m[1 1])\n           ^\n    help: establish `m.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_global_print_mutation.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_global_print_mutation.dewy:4:8: error: cannot prove array shape/index contract `m.length.length =? 2`: nothing establishes `m.length.length =? 2` here\n    printl(m[1 1])\n           ^\n    help: establish `m.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_global_print_snapshot.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p206-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_global_user_sink.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_global_user_sink.dewy:2:8: warning: 'text' is given a value here but never used (a parameter kept for the function's type can be named `_text`)\n<root>/tests/cases/facts/nd_global_user_sink.dewy:2:7: warning: 'write' hides the library's method `string.write`: this function takes over every `x.write` on one in this module; rename it to keep the library's\n<root>/tests/cases/facts/nd_global_user_sink.dewy:4:8: error: cannot prove array shape/index contract `m.length.length =? 2`: nothing establishes `m.length.length =? 2` here\n    printl(m[1 1])\n           ^\n    help: establish `m.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_pick_assignment_count.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_pick_assignment_count.dewy:3:1: error: cannot prove array shape/index contract `assigned data length equals the slice's selected element count`: nothing establishes `assigned data length equals the slice's selected element count` here\n    m[[..] picks]=[1.0 2.0 3.0]\n    ^\n    help: establish `assigned data length equals the slice's selected element count` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_pick_axis_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_pick_axis_changed.dewy:4:8: error: cannot prove array shape/index contract `slice axis 1 selects only positions in m.length[1]`: nothing establishes `slice axis 1 selects only positions in m.length[1]` here\n    printl(__nd_slice(m [__nd_axis(0) axis]).data)\n           ^\n    help: establish `slice axis 1 selects only positions in m.length[1]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_pick_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_pick_changed.dewy:4:8: error: cannot prove array shape/index contract `slice axis 1 index is below m.length[1]`: nothing establishes `slice axis 1 index is below m.length[1]` here\n    printl(m[[..] picks].data)\n           ^\n    help: establish `slice axis 1 index is below m.length[1]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_pick_contracts.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p211-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[7 8 9 1 2 3 7 8 9]\n9\n[4 6 1 3 7 9]\n[]\n[20 2 3 10 5 6 30 8 9]\n[10 5 6 20 2 3 30 8 9]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_pick_high.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_pick_high.dewy:3:8: error: cannot prove array shape/index contract `slice axis 1 index is below m.length[1]`: nothing establishes `slice axis 1 index is below m.length[1]` here\n    printl(m[[..] picks].data)\n           ^\n    help: establish `slice axis 1 index is below m.length[1]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_pick_low.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_pick_low.dewy:3:8: error: cannot prove array shape/index contract `slice axis 1 index is nonnegative`: nothing establishes `slice axis 1 index is nonnegative` here\n    printl(m[[..] picks].data)\n           ^\n    help: establish `slice axis 1 index is nonnegative` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_pick_rhs_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_pick_rhs_changed.dewy:4:2: error: cannot prove array shape/index contract `slice axis 0 index is below m.length[0]`: nothing establishes `slice axis 0 index is below m.length[0]` here\n     m[picks [..]] .+= {m=zeros<int>(1 1); 1}\n     ^\n    help: establish `slice axis 0 index is below m.length[0]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_pick_rhs_snapshot.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p215-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 3 3 4]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_semantic_all_picks.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p216-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[6 5 2 1]\n[5 6 1 2]\n[40 30 3 4 20 10]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_semantic_all_picks_high.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_semantic_all_picks_high.dewy:4:8: error: cannot prove array shape/index contract `slice axis 1 index is below m.length[1]`: nothing establishes `slice axis 1 index is below m.length[1]` here\n    printl(m[picks columns].data)\n           ^\n    help: establish `slice axis 1 index is below m.length[1]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_semantic_index_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_semantic_index_changed.dewy:4:8: error: cannot prove array shape/index contract `slice axis 0 index is below m.length[0]`: nothing establishes `slice axis 0 index is below m.length[0]` here\n    printl(m[picks [..]])\n           ^\n    help: establish `slice axis 0 index is below m.length[0]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_semantic_index_high.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_semantic_index_high.dewy:3:8: error: cannot prove array shape/index contract `slice axis 0 index is below m.length[0]`: nothing establishes `slice axis 0 index is below m.length[0]` here\n    printl(m[picks [..]])\n           ^\n    help: establish `slice axis 0 index is below m.length[0]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_semantic_index_huge.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_semantic_index_huge.dewy:3:8: error: cannot prove array shape/index contract `selected index fits int64's upper bound`: nothing establishes `selected index fits int64's upper bound` here\n    printl(m[picks [..]])\n           ^\n    help: establish `selected index fits int64's upper bound` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_semantic_index_huge_checked.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p221-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: matrix index does not fit int64\n    in the top level of nd_semantic_index_huge_checked (nd_semantic_index_huge_checked.dewy:6)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_semantic_index_huge_negative.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_semantic_index_huge_negative.dewy:3:8: error: cannot prove array shape/index contract `selected index fits int64's lower bound`: nothing establishes `selected index fits int64's lower bound` here\n    printl(m[picks [..]])\n           ^\n    help: establish `selected index fits int64's lower bound` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_semantic_index_low.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_semantic_index_low.dewy:3:8: error: cannot prove array shape/index contract `slice axis 0 index is nonnegative`: nothing establishes `slice axis 0 index is nonnegative` here\n    printl(m[picks [..]])\n           ^\n    help: establish `slice axis 0 index is nonnegative` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_semantic_indexes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p224-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[5 6 1 2 5 6]\n[30 40 3 4 50 60]\n60\n[]\n[30 40 3 4 50 60]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_semantic_snapshot.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p225-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 3 3 4]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_slice_assignment_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_slice_assignment_changed.dewy:3:5: error: cannot prove array shape/index contract `slice axis 0 end is at most m.length[0]`: nothing establishes `slice axis 0 end is at most m.length[0]` here\n        m[[..] [..]] .+= {m=zeros(1 1); 1.0}\n        ^\n    help: establish `slice axis 0 end is at most m.length[0]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_slice_assignment_length.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_slice_assignment_length.dewy:2:1: error: cannot prove array shape/index contract `assigned data length equals the slice's selected element count`: nothing establishes `assigned data length equals the slice's selected element count` here\n    m[[..] [..]]=[1.0 2.0]\n    ^\n    help: establish `assigned data length equals the slice's selected element count` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_slice_contracts.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p228-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 5]\n[4 5 6]\n6\n[]\n[]\n[1 4]\n[1 8 9 4 5 6]\n[1 8 9 7 7 7]\n[2 9 10 8 8 8]\n2\n8\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_slice_deferred_storage.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_slice_deferred_storage.dewy:9:12: error: cannot prove refinement `part.data.length matches its shape`: nothing establishes `part.data.length matches its shape` here\n        accept(part)\n               ^\n<root>/tests/cases/facts/nd_slice_deferred_storage.dewy:1:9: note: the contract is declared here\n    accept=(m:array<int length=[r c]>):>void=>{}\n            ^\n    help: establish `part.data.length matches its shape` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_slice_large_empty.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p230-0": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775807 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_slice_large_empty_assert.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_slice_large_empty_assert.dewy:3:9: error: assertion refuted: this condition is always false\n    $assert(part.length[0] =? 0)\n            ^\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_slice_lower.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_slice_lower.dewy:2:8: error: cannot prove array shape/index contract `slice axis 0 start is nonnegative`: nothing establishes `slice axis 0 start is nonnegative` here\n    printl(m[[-1..1) [..]].data)\n           ^\n    help: establish `slice axis 0 start is nonnegative` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_slice_rank.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_slice_rank.dewy:2:8: error: cannot prove array shape/index contract `slice selectors fit m's rank and axis bounds`: nothing establishes `slice selectors fit m's rank and axis bounds` here\n    printl(m[[..] [..] [..]].data)\n           ^\n    help: establish `slice selectors fit m's rank and axis bounds` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_slice_result_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_slice_result_changed.dewy:4:8: error: cannot prove array shape/index contract `part.data.length matches its shape`: nothing establishes `part.data.length matches its shape` here\n    printl(part[0 0])\n           ^\n    help: establish `part.data.length matches its shape` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_slice_scalar.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_slice_scalar.dewy:2:8: error: cannot prove array shape/index contract `slice axis 1 index is below m.length[1]`: nothing establishes `slice axis 1 index is below m.length[1]` here\n    printl(m[[..] 3].data)\n           ^\n    help: establish `slice axis 1 index is below m.length[1]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_slice_selector_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_slice_selector_changed.dewy:4:8: error: cannot prove array shape/index contract `slice axis 0 selects only positions in m.length[0]`: nothing establishes `slice axis 0 selects only positions in m.length[0]` here\n    printl(__nd_slice(m [selector]).data)\n           ^\n    help: establish `slice axis 0 selects only positions in m.length[0]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_slice_storage.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_slice_storage.dewy:3:8: error: cannot prove array shape/index contract `m.data.length matches its shape`: nothing establishes `m.data.length matches its shape` here\n    printl(m[[..] [..]].data)\n           ^\n    help: establish `m.data.length matches its shape` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_slice_upper.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_slice_upper.dewy:2:8: error: cannot prove array shape/index contract `slice axis 0 end is at most m.length[0]`: nothing establishes `slice axis 0 end is at most m.length[0]` here\n    printl(m[[0..3) [..]].data)\n           ^\n    help: establish `slice axis 0 end is at most m.length[0]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_step_symbolic.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p239-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2 5 6]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_stepped_assignment_count.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_stepped_assignment_count.dewy:2:1: error: cannot prove array shape/index contract `assigned data length equals the slice's selected element count`: nothing establishes `assigned data length equals the slice's selected element count` here\n    m[[..] [0,2..4)]=[1.0 2.0 3.0]\n    ^\n    help: establish `assigned data length equals the slice's selected element count` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_stepped_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_stepped_changed.dewy:4:8: error: cannot prove array shape/index contract `1 <? part.length[0]`: nothing establishes `1 <? part.length[0]` here\n    printl(part[1 1])\n           ^\n    help: establish `1 <? part.length[0]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_stepped_contracts.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p242-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4 2 12 10]\n[4 2 12 10]\n[9 10 11 12]\n[]\n[]\n12\n[4 2]\n[1 20 3 40 5 6 7 8 9 100 11 120]\n[1 21 3 41 5 6 7 8 9 101 11 121]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_stepped_high.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_stepped_high.dewy:2:8: error: cannot prove array shape/index contract `slice axis 1 last selected index is below m.length[1]`: nothing establishes `slice axis 1 last selected index is below m.length[1]` here\n    printl(m[[..] [0,3..6]].data)\n           ^\n    help: establish `slice axis 1 last selected index is below m.length[1]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_stepped_low.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_stepped_low.dewy:2:8: error: cannot prove array shape/index contract `slice axis 1 start is nonnegative`: nothing establishes `slice axis 1 start is nonnegative` here\n    printl(m[[..] [3,1..-1]].data)\n           ^\n    help: establish `slice axis 1 start is nonnegative` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_stepped_zero.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_stepped_zero.dewy:2:8: error: the range step is zero\n    printl(m[[..] [1,1..3]].data)\n           ^\n    help: establish `1 not=? 1` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/plain_binding_guards.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p246-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n[[\"a\" \"b\"] [\"c\" \"~\"]]\n[\"a\" -> 2 \"b\" -> 1]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/pool_removed_handle.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/pool_removed_handle.dewy:9:12: error: the handle is no longer in the pool\n        printl(items[h].name)\n               ^\n    help: establish `items.has(h)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/repeated_array_endpoints.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p248-0": {
+     "run": {
+      "status": 0,
+      "stdout": "6 0 0 4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/repeated_array_endpoints_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/repeated_array_endpoints_changed.dewy:4:5: error: divisor refuted: zero\n        1/xs.last\n        ^\n    note: last(xs) is 0\n    help: establish `last(xs) not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/returned_tuple_bounds.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p250-0": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n20\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/runtime_boundary.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p251-0": {
+     "run": {
+      "status": 0,
+      "stdout": "42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/runtime_later_operand.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/runtime_later_operand.dewy:4:13: error: cannot prove assertion: call invalidated a mutable or exposed root\n        $assert x >? 0\n                ^\n<root>/tests/cases/facts/runtime_later_operand.dewy:3:32: note: x may have changed at this call to mutate\n        $runtime_assert x >? 0 and mutate(@x)\n                                   ^\n<root>/tests/cases/facts/runtime_later_operand.dewy:3:21: note: the earlier `x >? 0` fact described the value before the call to mutate\n        $runtime_assert x >? 0 and mutate(@x)\n                        ^\n    note: missing lower bound: nothing establishes `x >? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x = 0\n    help: establish `x >? 0` after `mutate(@x)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/selection_index_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/selection_index_changed.dewy:4:8: error: cannot prove array shape/index contract `selected index is below array length`: nothing establishes `selected index is below array length` here\n    printl(xs[ids])\n           ^\n    help: establish `selected index is below array length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/selection_index_high.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/selection_index_high.dewy:3:8: error: cannot prove array shape/index contract `selected index is below array length`: nothing establishes `selected index is below array length` here\n    printl(xs[ids])\n           ^\n    help: establish `selected index is below array length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/selection_index_hull_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/selection_index_hull_changed.dewy:4:8: error: cannot prove array shape/index contract `index array contains only positions in the array`: nothing establishes `index array contains only positions in the array` here\n    printl(xs[picks])\n           ^\n    help: establish `index array contains only positions in the array` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/selection_index_hull_high.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/selection_index_hull_high.dewy:2:8: error: cannot prove array shape/index contract `selected index is below array length`: loop may change the tested value\n    printl(xs[loop i in [0 2] i+1])\n           ^\n<root>/tests/cases/facts/selection_index_hull_high.dewy:2:11: note: this loop may change the value\n    printl(xs[loop i in [0 2] i+1])\n              ^\n    help: establish `selected index is below array length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/selection_index_hulls.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p257-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[10 30]\n[20 20 20 20]\n[1 2 3 4]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/selection_index_length.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/selection_index_length.dewy:3:1: error: cannot prove array shape/index contract `replacement length equals selected element count`: nothing establishes `replacement length equals selected element count` here\n    xs[ids]=[8]\n    ^\n    help: establish `replacement length equals selected element count` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/selection_index_low.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/selection_index_low.dewy:3:1: error: cannot prove array shape/index contract `selected index is nonnegative`: nothing establishes `selected index is nonnegative` here\n    xs[ids]=9\n    ^\n    help: establish `selected index is nonnegative` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/selection_index_rhs_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/selection_index_rhs_changed.dewy:4:1: error: cannot prove array shape/index contract `selected index is below array length`: nothing establishes `selected index is below array length` here\n    xs[ids]=change()\n    ^\n    help: establish `selected index is below array length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/selection_indexes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p261-0": {
+     "run": {
+      "status": 0,
+      "stdout": "50\n[50 10 50]\n[7 20 30 40 8]\n[9 20 30 40 9]\n[]\n[3 1]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/shape_guard_rebound.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/shape_guard_rebound.dewy:3:22: error: cannot prove index is in bounds: missing upper bound\n        if n >? 0 return b[0]\n                         ^\n    note: b.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `0 <? b.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): b.length = 0\n    help: establish `0 <? b.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/snapshot_condition.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p263-0": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/unsigned_remainder.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p264-0": {
+     "run": {
+      "status": 0,
+      "stdout": "50 2 0 4 5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/unsigned_remainder_divisor.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/unsigned_remainder_divisor.dewy:5:13: error: cannot prove assertion: unsupported symbolic operation\n        $assert r <? n\n                ^\n<root>/tests/cases/facts/unsigned_remainder_divisor.dewy:4:11: note: this operation is outside the fact language\n        let r=hash%n\n              ^\n    help: establish `r <? n` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/widen_dependent_counters.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p266-0": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/dogfood13_mapped_reshape.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p267-0": {
+     "run": {
+      "status": 0,
+      "stdout": "4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/literal_shape_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/literal_shape_changed.dewy:5:5: error: cannot prove the length (unpacking requires exactly 3 elements): nothing establishes the length here\n        loop [x y z] in a printl(x + y + z)\n        ^\n    help: give the values a fixed shape, such as a tuple type (`array<[int64 int64]>` for pairs) or a record, or test the length first (`if xs.length =? 3`)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/literal_shapes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p269-0": {
+     "run": {
+      "status": 0,
+      "stdout": "6\n15\n2\n9\n2\n6\n7\n6\n4\n8\n2\n3\n6\n9\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/matrix_transpose_shapes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p270-0": {
+     "run": {
+      "status": 0,
+      "stdout": "3 2 6.0\n3 3 17.0\n5.0\n3 0\n0.0\n1.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/shape_guard_changed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/shape_guard_changed.dewy:4:5: error: index is not in bounds\n        b[0]\n        ^\n<root>/tests/cases/facts/shape_guard_changed.dewy:3:5: note: b.length is 0 after this assignment\n        b=[]\n        ^\n    note: the earlier `0 <? b.length` fact described the value before the assignment\n    help: establish `0 <? b.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/shape_guard_join.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/shape_guard_join.dewy:3:5: error: cannot prove `b` is nonempty: nothing establishes `b.length >? 0` here\n        min(b)\n        ^\n    help: establish `b.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/shape_guard_missing_axis.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/shape_guard_missing_axis.dewy:3:5: error: cannot prove array shape/index contract `0 <? b.length[1]`: nothing establishes `0 <? b.length[1]` here\n        b[0 0]\n        ^\n    help: establish `0 <? b.length[1]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/shape_guard_relations.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p274-0": {
+     "run": {
+      "status": 0,
+      "stdout": "16\n0\n5\n3\n9\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/shape_guard_unrelated.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/shape_guard_unrelated.dewy:3:5: error: cannot prove index is in bounds: missing upper bound\n        b[0]\n        ^\n    note: b.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `0 <? b.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): b.length = 0\n    help: establish `0 <? b.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ]
+}

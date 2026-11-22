@@ -1,0 +1,184 @@
+{
+ "test_dewy_node_ops_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/default_proofs/refuted_literal_union.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/default_proofs/refuted_literal_union.dewy:3:21: error: in call to at(x:1 | 2 | 3): argument 'x' expects 1 | 2 | 3, found int\n    main=()=>{printl(at(9))}\n                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/loop/else_iterators.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood/18_roman_tests.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "MMXXVI\n2026\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/m_directives_direct_directives_identity_1.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "known 128 2 [7 3 4 5] 42 false a [-1 -1 -1] 3\n1 9 [0,2..10] 5 true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/constant/shadowable_import.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "6\n3\n2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/end/reserved_assignment.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/end/reserved_assignment.dewy:1:1: error: 'void' is reserved, not a name: it is the type of no value (use `void_`)\n    void = 1\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/declarations_declaration_fallback_1.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/declarations_declaration_fallback_1.dewy:2:17: error: Dewy does not yet support a const declaration without an initializer\n    main=()=>{const value\n                    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/misc/proof_directive.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/misc/proof_directive.dewy:3:7: error: $proof cannot return a value\n    value=():>int64=>42\n          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/oom/fixed_arena.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "10\nrefused\nno such arena\n1000\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverlayout_ffi/callback_qsort.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2 5 9]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/m_directives_migrated_directives_diagnostics_5.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/m_directives_migrated_directives_diagnostics_5.dewy:3:23: error: `$target` is a full target name, never \"x86_64\" alone (which asks for the current machine): test the processor with `$target.arch =? \"x86_64\"`, or name the system too, as \"x86_64-linux\"\n    $supported_targets = [\"x86_64\"]\n                          ^\n",
+   "files": {}
+  }
+ ]
+}

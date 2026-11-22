@@ -2,6 +2,7 @@
 import json
 import os
 
+from tests import leaf_oracle
 from tests.selfhost_lower_double import cached_driver, modules_for
 from tests.test_core_editor import Client
 
@@ -14,9 +15,10 @@ _default_modules_for = modules_for
 
 
 def leaf_compilers(compiler, tmp_path, leaves):
-    """The compiler built with the leaves, then with their twins."""
+    """The compiler built with the leaves, then with their twins (None when recorded outcomes stand in
+    for the twins, tests/leaf_oracle.py)."""
     built = []
-    for extension in ('dewy', 'jo'):
+    for extension in ('dewy', 'jo') if leaf_oracle.builds_twin() else ('dewy',):
         # Custom probes keep their exact graph. Ordinary live CLI builds share one
         # graph: its reachable modules never import a leaf's frozen .jo body.
         live = extension == 'dewy' and DRIVER == CLI_DRIVER and modules_for is _default_modules_for
@@ -32,7 +34,7 @@ def leaf_compilers(compiler, tmp_path, leaves):
                                 .replace(f'"{leaf}.dewy"', f'"{leaf}.jo"'))
                 modules[name] = text
         built.append(cached_driver(compiler, tmp_path, False, modules))
-    return built
+    return built if len(built) == 2 else [built[0], None]
 
 
 class Recorder(Client):

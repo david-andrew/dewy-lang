@@ -1,0 +1,42 @@
+{
+ "test_checker_loop_routes_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/loop/value_resize.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/loop/value_resize.dewy:5:24: error: `push` changes the length of `queue`, which `loop item in queue` iterates by its value at loop entry, so the loop would not see the change: write `loop item in @queue` to iterate the live array, or bind a snapshot first (`let snapshot = queue` then `loop item in snapshot`)\n            if item <? 4 { queue.push(item + 1) }\n                           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/loop/value_resize_field.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/loop/value_resize_field.dewy:5:29: error: `pop` changes the length of `game.rocks`, which `loop rock in game.rocks` iterates by its value at loop entry, so the loop would not see the change: write `loop rock in @game.rocks` to iterate the live array, or bind a snapshot first (`let snapshot = game.rocks` then `loop rock in snapshot`)\n            loop other in [1] { game.rocks.pop() }\n                                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/loop_copy/record_copy.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[hp=9 name=\"a\"]\n[hp=19 name=\"b\"]\n[[hp=10 name=\"a\"] [hp=20 name=\"b\"]]\n[[hp=9 name=\"a\"] [hp=19 name=\"b\"]]\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

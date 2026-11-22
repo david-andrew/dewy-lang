@@ -1,0 +1,140 @@
+{
+ "test_facts_collect_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/later_dependent.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/later_dependent.dewy:2:12: warning: 'y' is given a value here but never used (a parameter kept for the function's type can be named `_y`)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/slice_assign_fixed_no_traps.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[3 1 2 40 42 42]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/numeric/bounded_remainder_overflow.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/matrix_product_contracts.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1.0 4.0\n5.0 11.0\n3.0\n2 3 0.0\n2 1 0.0\n1.0\n1.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood36_proofs/remainder_decides_bounds.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2.0\n2.5\nnone\n2.0\n2.5\n2\n2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/singleton/integer_union_refuted.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/singleton/integer_union_refuted.dewy:1:14: error: refinement refuted: 0 violates the declared contract\n    let s:-1|1 = 0\n                 ^\n<root>/tests/cases/singleton/integer_union_refuted.dewy:1:7: note: the contract is declared here\n    let s:-1|1 = 0\n          ^\n    help: establish `0 not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nonlinear.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nonlinear.dewy:1:38: error: cannot prove assertion: missing lower bound\n    checked=(x:int64 y:int64)=>{ $assert x*y >=? 0 }\n                                         ^\n    note: missing lower bound: nothing establishes `x*y >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x*y = -1\n    help: establish `x*y >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_stepped_assignment_count.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_stepped_assignment_count.dewy:2:1: error: cannot prove array shape/index contract `assigned data length equals the slice's selected element count`: nothing establishes `assigned data length equals the slice's selected element count` here\n    m[[..] [0,2..4)]=[1.0 2.0 3.0]\n    ^\n    help: establish `assigned data length equals the slice's selected element count` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ]
+}

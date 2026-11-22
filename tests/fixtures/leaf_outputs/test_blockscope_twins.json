@@ -1,0 +1,548 @@
+{
+ "test_blockscope_leaves": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/block_scope/brace_call.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "3\ntrue\n[1 5]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/block_scope/brace_call.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-1": {
+     "run": {
+      "status": 0,
+      "stdout": "3\ntrue\n[1 5]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/block_scope/brace_keeps_names.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/block_scope/brace_keeps_names.dewy:7:12: error: unknown name 'inner' (the 'inner' made on line 4 is inside a block that has ended; give it a value before that block to use it here)\n        printl(inner)\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/block_scope/brace_keeps_names.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/block_scope/brace_keeps_names.dewy:7:12: error: unknown name 'inner' (the 'inner' made on line 4 is inside a block that has ended; give it a value before that block to use it here)\n        printl(inner)\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/block_scope/facts.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "c\nb\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/block_scope/facts.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-1": {
+     "run": {
+      "status": 0,
+      "stdout": "c\nb\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/block_scope/nested.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 0,
+      "stdout": "deep 1 mid 2\nheld 3\nhidden 4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/block_scope/nested.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-1": {
+     "run": {
+      "status": 0,
+      "stdout": "deep 1 mid 2\nheld 3\nhidden 4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/block_scope/nested_brace_ends.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/block_scope/nested_brace_ends.dewy:9:12: error: unknown name 'held' (the 'held' made on line 5 is inside a block that has ended; give it a value before that block to use it here)\n        printl(held)\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/block_scope/nested_brace_ends.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/block_scope/nested_brace_ends.dewy:9:12: error: unknown name 'held' (the 'held' made on line 5 is inside a block that has ended; give it a value before that block to use it here)\n        printl(held)\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/block_scope/ownership.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p5-0": {
+     "run": {
+      "status": 0,
+      "stdout": "after parens: 1, drops 0\ninside braces: 2\nafter braces: drops 1\nmoved 1\nv 4 third 3 drops 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/block_scope/ownership.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p5-1": {
+     "run": {
+      "status": 0,
+      "stdout": "after parens: 1, drops 0\ninside braces: 2\nafter braces: drops 1\nmoved 1\nv 4 third 3 drops 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/block_scope/paren_escapes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p6-0": {
+     "run": {
+      "status": 0,
+      "stdout": "area 12\ntotal 13 base 10\n12\nk 5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/block_scope/paren_escapes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p6-1": {
+     "run": {
+      "status": 0,
+      "stdout": "area 12\ntotal 13 base 10\n12\nk 5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/block_scope/shadowing.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p7-0": {
+     "run": {
+      "status": 0,
+      "stdout": "inner 2\nouter 1\nafter parens 15\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/block_scope/shadowing.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p7-1": {
+     "run": {
+      "status": 0,
+      "stdout": "inner 2\nouter 1\nafter parens 15\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/parallel_blocks/braced_names_stay.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/parallel_blocks/braced_names_stay.dewy:7:12: error: unknown name 'config' (the 'config' made on line 4 is inside `parallel { ... }`, whose names stay inside; write `parallel ( ... )` to use it after the block)\n        printl(config)\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/parallel_blocks/braced_names_stay.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/parallel_blocks/braced_names_stay.dewy:7:12: error: unknown name 'config' (the 'config' made on line 4 is inside `parallel { ... }`, whose names stay inside; write `parallel ( ... )` to use it after the block)\n        printl(config)\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/parallel_blocks/channel_items.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p9-0": {
+     "run": {
+      "status": 0,
+      "stdout": "total 3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/parallel_blocks/channel_items.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p9-1": {
+     "run": {
+      "status": 0,
+      "stdout": "total 3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/parallel_blocks/listener.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p10-0": {
+     "run": {
+      "status": 0,
+      "stdout": "step 1\nstep 2\nstep 3\njoined\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/parallel_blocks/listener.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p10-1": {
+     "run": {
+      "status": 0,
+      "stdout": "step 1\nstep 2\nstep 3\njoined\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/parallel_blocks/nested.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p11-0": {
+     "run": {
+      "status": 0,
+      "stdout": "2 10 12\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/parallel_blocks/nested.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p11-1": {
+     "run": {
+      "status": 0,
+      "stdout": "2 10 12\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/parallel_blocks/ordered_writes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p12-0": {
+     "run": {
+      "status": 0,
+      "stdout": "20\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/parallel_blocks/ordered_writes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p12-1": {
+     "run": {
+      "status": 0,
+      "stdout": "20\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/parallel_blocks/ownership.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p13-0": {
+     "run": {
+      "status": 0,
+      "stdout": "after block: 1 2, drops 0\nmoved 1\nafter scope: drops 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/parallel_blocks/ownership.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p13-1": {
+     "run": {
+      "status": 0,
+      "stdout": "after block: 1 2, drops 0\nmoved 1\nafter scope: drops 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/parallel_blocks/paren_bindings.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p14-0": {
+     "run": {
+      "status": 0,
+      "stdout": "loading\nconfig:game 42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/parallel_blocks/paren_bindings.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p14-1": {
+     "run": {
+      "status": 0,
+      "stdout": "loading\nconfig:game 42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/parallel_blocks/shadowing.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p15-0": {
+     "run": {
+      "status": 0,
+      "stdout": "inside 9\noutside 1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/parallel_blocks/shadowing.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p15-1": {
+     "run": {
+      "status": 0,
+      "stdout": "inside 9\noutside 1\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

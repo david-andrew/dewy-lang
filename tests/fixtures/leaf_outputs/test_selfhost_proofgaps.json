@@ -1,0 +1,220 @@
+{
+ "test_proofgaps_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/proofgaps/callee_loop_push.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "4\n4\n4\n4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/proofgaps/callee_loop_shrink.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/proofgaps/callee_loop_shrink.dewy:8:16: error: cannot prove index is in bounds: missing upper bound\n            printl(g.nodes[i])\n                   ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/proofgaps/callee_loop_shrink.dewy:7:9: note: g.nodes.length may have changed at this call to bump\n            bump(@g)\n            ^\n    note: g.nodes.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? g.nodes.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, g.nodes.length = 0\n    help: establish `i <? g.nodes.length` after `bump(@g)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/proofgaps/callee_push.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "4\n4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/proofgaps/callee_shrink.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/proofgaps/callee_shrink.dewy:7:5: error: cannot prove index is in bounds: missing upper bound\n        g.nodes[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/proofgaps/callee_shrink.dewy:6:5: note: g.nodes.length may have changed at this call to bump\n        bump(@g)\n        ^\n    note: g.nodes.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? g.nodes.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, g.nodes.length = 0\n    help: establish `i <? g.nodes.length` after `bump(@g)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/proofgaps/callee_branch_shrink.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/proofgaps/callee_branch_shrink.dewy:7:5: error: cannot prove index is in bounds: missing upper bound\n        g.nodes[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/proofgaps/callee_branch_shrink.dewy:6:5: note: g.nodes.length may have changed at this call to bump\n        bump(@g)\n        ^\n    note: g.nodes.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? g.nodes.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, g.nodes.length = 0\n    help: establish `i <? g.nodes.length` after `bump(@g)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/proofgaps/callee_push_not_equal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/proofgaps/callee_push_not_equal.dewy:7:14: error: cannot prove assertion: missing bound\n        $assert (g.nodes.length =? n)\n                 ^\n<root>/tests/cases/proofgaps/callee_push_not_equal.dewy:6:5: note: g.nodes.length may have changed at this call to bump\n        bump(@g)\n        ^\n    note: g.nodes.length is between 1 and 281474976710655\n    note: n is 1\n    note: missing bound: nothing establishes `g.nodes.length =? n` here\n    note: possible witness (consistent with the known bounds, not an observed execution): g.nodes.length = 2, n = 1\n    help: establish `g.nodes.length =? n` after `bump(@g)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/proofgaps/field_dictionary.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "10\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/proofgaps/dictionary_duplicates.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "12\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/proofgaps/dictionary_not_distinct.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/proofgaps/dictionary_not_distinct.dewy:5:13: error: cannot prove assertion: missing bound\n        $assert count =? 2\n                ^\n    note: count is between 1 and 2\n    note: missing bound: nothing establishes `count =? 2` here\n    note: possible witness (consistent with the known bounds, not an observed execution): count = 1\n    help: establish `count =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/proofgaps/dictionary_empty.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/proofgaps/dictionary_empty.dewy:2:17: warning: 'name' is given a value here but never used (a parameter kept for the function's type can be named `_name`)\n<root>/tests/cases/proofgaps/dictionary_empty.dewy:4:12: error: cannot prove divisor is nonzero: missing bound\n        printl(10 // c.names.length)\n               ^\n    note: len(c.names) is between 0 and 281474976710655\n    note: missing bound: nothing establishes `len(c.names) not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): len(c.names) = 0\n    help: establish `len(c.names) not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/proofgaps/sort_callback.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/proofgaps/counted_callback.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/proofgaps/counted_filtered.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/proofgaps/counted_filtered.dewy:7:22: error: cannot prove index is in bounds: missing upper bound\n        if n >? 0 printl(xs[n-1])\n                         ^\n    note: n - 1 is between 0 and 281474976710654\n<root>/tests/cases/proofgaps/counted_filtered.dewy:6:5: note: xs.length may have changed at this call to filtered\n        filtered(@xs @key)\n        ^\n    note: the earlier `n - 1 <? xs.length` fact described the value before the call to filtered\n    note: missing upper bound: nothing establishes `n - 1 <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): n - 1 = 0, xs.length = 0\n    help: establish `n - 1 <? xs.length` after `filtered(@xs ...)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/proofgaps/counted_shortened.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/proofgaps/counted_shortened.dewy:3:5: warning: 'key' is never called: nothing runs it (call it, as `key(...)` where it should run)\n<root>/tests/cases/proofgaps/counted_shortened.dewy:7:22: error: cannot prove index is in bounds: missing upper bound\n        if n >? 0 printl(xs[n-1])\n                         ^\n    note: n - 1 is between 0 and 281474976710654\n<root>/tests/cases/proofgaps/counted_shortened.dewy:6:5: note: xs.length may have changed at this call to shortened\n        shortened(@xs)\n        ^\n    note: the earlier `n - 1 <? xs.length` fact described the value before the call to shortened\n    note: missing upper bound: nothing establishes `n - 1 <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): n - 1 = 0, xs.length = 0\n    help: establish `n - 1 <? xs.length` after `shortened(@xs)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ]
+}

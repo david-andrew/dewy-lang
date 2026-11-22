@@ -1,0 +1,380 @@
+{
+ "test_checks_thin_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/declarations_declaration_fallback_7.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/declarations_declaration_fallback_7.dewy:2:15: warning: 'value' is given a value here but never used\n<root>/tests/cases/frontend/declarations_declaration_fallback_7.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{let value:<(a:int64):>int64>=(a:int64)=>a\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/numbers/int_accumulator_decimal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/numbers/int_accumulator_decimal.dewy:3:23: error: 'total' holds whole numbers (made on line 2), and this is a number with a fraction: write its first value with a decimal point (`total = 0.0`), so it holds fractions too, or make this a whole number with int(...)\n    loop x in [0.5 1.5] { total += x }\n                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/constant/shadowable_import_const.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/constant/shadowable_import_const.dewy:1:51: error: cannot import 'offset': this module declares its own 'offset' (at <root>/tests/cases/constant/shadowable_import_const.dewy:2:10), and the imported one is not `$shadowable`; import it with another name: offset as ...\n    from p\"../../fixtures/shadowable/lib.dewy\" import offset\n                                                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/main/explicit_call_rejected.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/main/explicit_call_rejected.dewy:2:1: error: main runs by itself, once, after the file's top-level statements: remove this call (a file without main runs top to bottom as a script)\n    main()\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood18_proofs/alias_refinement_self.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood18_proofs/alias_refinement_self.dewy:3:1: error: the refinement of field 'month' names 'month', the field itself, through a type alias: name the value with a binder in the alias (`int64<v => 0 <=? v and v <? 10>`), or write the refinement on the field, where its own name is its value\n    Date:type = [year:int month:Month day:int]\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/flows_flow_fallback_diagnostics_4.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/flows_flow_fallback_diagnostics_4.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{let value=0\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_spread_context.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_spread_context.dewy:2:5: warning: 'sum' hides the library's method `array<uint8 length=2>.sum`: this function takes over every `x.sum` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/multi/pack_one_value.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/multi/pack_one_value.dewy:2:3: error: 'pair' gives 2 values, and only one is taken here: collect them, `[pair(...)]`, or unpack them, `(a b) = pair(...)`\n    x=pair() + 1\n      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/tag_alias_optional_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_alias_tags/tag_alias_optional_reject.dewy:1:85: error: type mismatch: expected int, found int<refinement>? (this value may be none; check it with `is?none` before using its value)\n    main=()=>{let x:int<(>=? 0)>?=2 let a=@x if x isnt? none {a=none let y:int<(>=? 0)>=x printl(y)}}\n                                                                                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/method/indirect_mutating_loop.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/method/indirect_mutating_loop.dewy:5:35: error: `loop @item` changes the elements of values in place, so its body cannot add, remove or replace elements of values (here all of values is given to a function that may change it, with its values: set a flag in the loop and call it after): do that after the loop (values.retain((x) => keep) keeps some; push new ones to another array first), or loop over its indexes\n    loop @item in values {item+=grow(@values)}}\n                                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinement_aggregates/sibling_rejected.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinement_aggregates/sibling_rejected.dewy:2:24: warning: 'r' is changed here but never read: it holds a copy (structs and arrays are values), so what it was copied from stays as it was; change that instead (`xs[i].hp -= 5`, `loop @e in xs`)\n<root>/tests/cases/refinement_aggregates/sibling_rejected.dewy:2:24: error: refinement refuted: r.high violates the declared contract\n    main=()=>{let r=R[1 3];r.low=4}\n                           ^\n    note: r.high is 3\n<root>/tests/cases/refinement_aggregates/sibling_rejected.dewy:1:30: note: the contract is declared here\n    R:type=[low:int64 high:int64<(>=? low)>]\n                                 ^\n    help: establish `r.high >=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/family_parent_arm.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/match/family_parent_arm.dewy:4:27: error: this match has no arm for Shape (add one, or a `_ => ...` arm for the rest)\n    area=(sh:Shape):>float64=>match sh {\n                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/constant/literal_assign.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/constant/literal_assign.dewy:2:22: error: cannot modify const 'x'; use let to declare a new binding\n    main=()=>{const x=40 x=42 return x}\n                         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/multi/values_block_branch.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/multi/values_block_branch.dewy:3:18: error: this value is in a loop or a branch, or comes from a call that may give any number, so the block does not give a fixed number of values, and a binding holds a fixed number: collect them into an array, `[ ... ]`, or attach `;` to discard it, as in `f();`\n        x={ 1 if c { 2 } }\n                     ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/object/recursive_literal_return.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/object/recursive_literal_return.dewy:4:36: error: recursive method 'f' needs an explicit return type (add `:>Type`)\n            f = (k:int64) => if k >? 0 f(k - 1) else n\n                                       ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/multi/void_body_value.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/multi/void_body_value.dewy:3:5: error: this expresses an int, and 'g' is written `:>void`, so its body gives nothing: attach `;` to discard the value, as in `f();`, or change the result type\n        5\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/place_method/misuse_operand.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/place_method/misuse_operand.dewy:4:15: error: `@(...)` takes the place a method returns as `let name = @(x.lock())` or `match @(x.lock()) {...}`\n        printl\"{@(acct.lock())}\"\n                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/spread/record_arguments.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/spread/record_arguments.dewy:5:14: error: spreading a record's fields into named arguments is not implemented yet: pass them by name, `f(x=r.x)`\n        printl(f(o...))\n                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/multi/one_value_block.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/multi/one_value_block.dewy:2:5: error: this gives a value, and here the block gives one, its last expression: attach `;` to discard this value, as in `f();`\n        x+1\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/witness/pool_update_callee.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/juxtaposition/spaced_unit.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/juxtaposition/spaced_unit.dewy:3:18: error: `9.81 m` is two expressions, a number and then the unit `m`: a unit is written against its number, `9.81m`\n        let d = 9.81 m/s^2\n                     ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/declarations_declaration_fallback_6.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/declarations_declaration_fallback_6.dewy:2:15: warning: 'value' is given a value here but never used\n<root>/tests/cases/frontend/declarations_declaration_fallback_6.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{let value:array<int64>=[1 2]\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/host_effect.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/lib/core/rt.jo:703:12: error: compile-time evaluation: mutable global '__omode' is not a compile-time constant; host effects are not allowed\n  compile-time call to outer at <root>/tests/cases/comptime/host_effect.dewy:3:9\n  compile-time call to inner at <root>/tests/cases/comptime/host_effect.dewy:2:17\n  compile-time call to __print_str at <root>/tests/cases/comptime/host_effect.dewy:1:20\n  compile-time call to __out at <root>/lib/core/rt.jo:842:10\n            if __omode == 0:\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/element_nested_field.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_alias_tags/element_nested_field.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/main/expressed_mixed_values.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/main/expressed_mixed_values.dewy:5:5: error: this expresses a value before main's end, and main gives back nothing (or the errors that reach it): attach `;` to discard it, as in `f();`\n        flag()\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/rational/library_word_name.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/rational/library_word_name.dewy:3:14: error: the exact fraction type is the builtin `rational<int64>`: write `rational<int64>`\n        let half:exact.RationalWord=1/2\n                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/program.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/program.dewy:4:15: error: only one array of unknown length can be spread into a call: its length is what the other arguments leave\n    printl(f(a... b...))\n                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/program.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/program.dewy:2:10: error: `...` spreads a container into arguments: an array, a fixed array or a `[int64 string]` (found int)\n    printl(f(3...))\n             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/program.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/program.dewy:3:5: error: this expresses a string, and the values expressed before it are int: the values one block expresses have one type; attach `;` to discard this one, as in `f();`, or convert it\n        \"a\"\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/program.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/program.dewy:2:5: error: this expresses a value before the function's end, and the function also gives one back with `return`; a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`\n        1\n        ^\n",
+   "files": {}
+  }
+ ]
+}

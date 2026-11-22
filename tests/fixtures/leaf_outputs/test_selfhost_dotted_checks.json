@@ -1,0 +1,2236 @@
+{
+ "test_dotted_checks_match_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/broadcast_facts/common_length.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0.0\n0.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/broadcast_facts/gpu_reference.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[6.0 -1.0 12.0]\n-5.0\n3.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/broadcast_facts/mismatched_lengths_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/broadcast_facts/mismatched_lengths_bad.dewy:5:12: error: cannot prove the operands of this elementwise operation have matching lengths: nothing establishes `xs.length =? ys.length` here\n        printl(xs .+ ys)\n               ^\n    note: `xs.length` is 3\n    note: `ys.length` is 2\n    help: establish `xs.length =? ys.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/broadcast_facts/unknown_length_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/broadcast_facts/unknown_length_bad.dewy:2:61: error: cannot prove the operands of this elementwise operation have matching lengths: nothing establishes `xs.length =? ys.length` here\n    largest=(xs:array<float32> ys:array<float32>):>float32=>max(xs .+ ys)\n                                                                ^\n    help: establish `xs.length =? ys.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/broadcast_facts/unrelated_lengths.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p4-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[6 8]\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/broadcast_places/keeps_mutable_record.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p5-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/broadcast_places/not_past_a_real_write.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/broadcast_places/not_past_a_real_write.dewy:10:12: error: cannot prove index is in bounds: missing upper bound\n        return xs[1]+n+twice[0]\n               ^\n<root>/tests/cases/broadcast_places/not_past_a_real_write.dewy:9:13: note: xs.length may have changed at this call to take\n        let n = take(@xs)\n                ^\n    note: the earlier `1 <? xs.length` fact described the value before the call to take\n    note: missing upper bound: nothing establishes `1 <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): xs.length = 0\n    help: establish `1 <? xs.length` after `take(@xs)` with a current guard, or check it at run time with `$runtime_assert`\n\n<root>/tests/cases/broadcast_places/not_past_a_real_write.dewy:14:12: error: in call to f(@xs:array<float64>): argument 1 must have type array<float64> (`@` parameters need an exact match)\n        printl(f(@a))\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/new_axis/ndarray.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p7-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2 3]\n[2 1 3]\n[2 3 1]\n[1 2 1 3]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/new_axis/nested.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p8-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[[1 2 3]]\n[[1 2 3]]\n[[1] [2] [3]]\n[[[1 2] [3 4] [5 6]]]\n[[[1 2]] [[3 4]] [[5 6]]]\n[[[1] [2]] [[3] [4]] [[5] [6]]]\n[[[[1 2]] [[3 4]] [[5 6]]]]\n[[[1 2]] [[3 4]] [[5 6]]]\n[[[[1 2] [3 4] [5 6]]]]\n[]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/new_axis/outside.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/new_axis/outside.dewy:1:8: error: `new` inserts an axis as an entry inside brackets, as in `xs[new]` or `xs[.. new]`\n    printl(new)\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/new_axis/range_endpoint.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/new_axis/range_endpoint.dewy:2:11: error: `new` is an index entry, not a range endpoint: write `xs[new ..]` or `xs[.. new]`, and bracket a range next to it, as in `xs[new [1..end]]`\n    printl(xs[new..1])\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/new_axis/scalar.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/new_axis/scalar.dewy:2:8: error: `new` inserts an axis into an array or a string, not int\n    printl(x[new])\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/new_axis/selections.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p12-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[[1 2]]\n[[5 6]]\n[[[3 4]] [[5 6]]]\n[[2] [4] [6]]\n[[[1]] [[3]] [[5]]]\n[[2] [4] [6]]\n1\n[\"héllo\"]\n[[\"h\"] [\"é\"] [\"l\"] [\"l\"] [\"o\"]]\n[[\"é\"] [\"l\"] [\"l\"] [\"o\"]]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/new_axis/too_many_axes.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/new_axis/too_many_axes.dewy:2:8: error: 2 axes selected next to `new`, but array<int> has 1\n    printl(xs[new new [..] [..]])\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/checked_at_run_time.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p14-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: shapes 1x2 and 1x3 do not match for an elementwise operation\n    in main (checked_at_run_time.dewy:8)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/guard_after_write.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_broadcast/guard_after_write.dewy:7:16: error: cannot prove array shape/index contract `d.length.length =? 2`: nothing establishes `d.length.length =? 2` here\n            printl(d[1 2])\n                   ^\n    help: establish `d.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/guard_elements.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p16-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1.0\n2.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/guard_elements_near_miss.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_broadcast/guard_elements_near_miss.dewy:4:38: error: cannot prove array shape/index contract `d.length.length =? 2`: nothing establishes `d.length.length =? 2` here\n        if d.length not=? [2 3] { printl(d[1 2]) }\n                                         ^\n    help: establish `d.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/guard_one_axis_short.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_broadcast/guard_one_axis_short.dewy:4:35: error: cannot prove array shape/index contract `2 <? d.length[0]`: nothing establishes `2 <? d.length[0]` here\n        if d.length =? [2 3] { printl(d[2 2]) }\n                                      ^\n    help: establish `2 <? d.length[0]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/known_shapes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p19-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0.0\n0.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/mismatched_shapes.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_broadcast/mismatched_shapes.dewy:5:16: error: cannot prove array shape/index contract `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)`: nothing establishes `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)` here\n        printl(cpu(a .+ b).length)\n                   ^\n    help: establish `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_broadcast/unknown_shape.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_broadcast/unknown_shape.dewy:4:21: error: cannot prove array shape/index contract `m.length.length <=? 4`: nothing establishes `m.length.length <=? 4` here\n        printl(cpu(a .+ gpu(m)).length)\n                        ^\n    help: establish `m.length.length <=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_ops/divisor_unproven_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_integer_ops/divisor_unproven_bad.dewy:6:18: error: cannot prove divisor is nonzero: missing bound\n    dv=(x:W y:W):>W=>x // y\n                     ^\n    note: y is between -2147483648 and 2147483647\n    note: missing bound: nothing establishes `y not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): y = 0\n    help: establish `y not=? 0` with a current guard or a stronger checked contract\n    note: this is GPU code: a shader cannot run a check, so neither `$runtime_checks` nor `$runtime_assert` applies here: prove it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_ops/exact_store_guarded.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p23-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[-2999997 -5 -3 1 3 7 2999997]\n[-2999997 -5 -3 1 3 7 2999997]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_ops/exact_store_runtime_checks.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p24-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[-9 -9 5 -7]\n[-8 6 1000]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_ops/exact_store_unproven_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_integer_ops/exact_store_unproven_bad.dewy:4:23: error: cannot prove exact integer result fits int32\n    inc=(x:int32):>int32=>x+1\n                          ^\n    note: this is GPU code: a shader cannot run a check, so neither `$runtime_checks` nor `$runtime_assert` applies here: prove it\n    note: nothing bounds `x + 1` within int32 here\n    note: nothing bounds `x` here, so this has no known range: guard it first, or state it where the parameter is declared, `x:int32<(>=? 0)>`\n    help: establish `int32.min <=? (x + 1) and (x + 1) <=? int32.max` with a current guard or a stronger checked contract\n    help: state the domain as a refinement or prove it with a guard before the operation, or choose `overflow='wrap'` (GPU code cannot check it)\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_ops/exact_store_wide_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_integer_ops/exact_store_wide_bad.dewy:3:42: error: in shader code: this integer expression needs intermediates wider than a shader's 32-bit words: store each step that divides or shifts right in its own variable, or use a wrapping type\n        if x <? 1000 and x >? -1000 { return (x*3-7) // 4 }\n                                             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_ops/explicit_narrowing.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p27-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[5 4 7 6 1 0]\n[-7 29999 0]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_ops/floor_division.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p28-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[-1749 -29 -14 -11 -8 0 -2 1 6 9 12 1747]\n[-1749 -29 -14 -11 -8 0 -2 1 6 9 12 1747]\n[-502 -300 -202 -101 0 -2 98 200]\n[-502 -300 -202 -101 0 -2 98 200]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/exact_large.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p29-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 -1 0]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/kernel_unsigned_results.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p30-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0\n[0 127 255]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_float32_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p31-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_int16_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p32-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_int32_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p33-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_int8_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p34-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_int8_r2.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p35-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 2]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_int8_r5_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_integer_upload/upload_int8_r5_bad.dewy:4:12: error: cannot prove array shape/index contract `reshape(a ...).length.length <=? 4`: nothing establishes `reshape(a ...).length.length <=? 4` here\n    printl(cpu(gpu(reshape(a [1 1 1 1 4]))).data)\n               ^\n    help: establish `reshape(a ...).length.length <=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_int_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p37-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_uint16_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p38-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_uint32_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p39-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_uint32_r3.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p40-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 1 2]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_uint64_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p41-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_uint64_r4.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p42-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2 1 2]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_uint8_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p43-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_wrap_int.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p44-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_wrap_uint64.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p45-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_integer_upload/upload_wrap_widths.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p46-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[0 1 -1]\n[-1 2]\n[255 7]\n[-300 300]\n[-1 2]\n[-128 127]\n[65535 1]\n[3 1]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/float_hypot_special.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p47-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/gpu_literal_pair.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p48-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[3.0]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/gpu_literal_pair_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_upload_shape/gpu_literal_pair_bad.dewy:3:12: error: cannot prove array shape/index contract `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)`: nothing establishes `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)` here\n    printl(cpu(gpu([1.0 2.0]) .+ gpu([3.0 4.0 5.0])).data)\n               ^\n    help: establish `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/gpu_snapshot.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p50-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/mask_eq.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p51-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/mask_lt.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p52-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/shape_entry_r1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p53-0": {
+     "run": {
+      "status": 0,
+      "stdout": "4.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/shape_guard_replaced_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_upload_shape/shape_guard_replaced_bad.dewy:5:34: error: cannot prove array shape/index contract `d.length.length =? 2`: nothing establishes `d.length.length =? 2` here\n    if d.length =? [2 3] {d=e;printl(d[1 2])}\n                                     ^\n    help: establish `d.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_upload_shape/shape_unproven.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_upload_shape/shape_unproven.dewy:1:31: error: cannot prove array shape/index contract `a.length.length <=? 4`: nothing establishes `a.length.length <=? 4` here\n    run=(a:NDArray<float32>)=>cpu(gpu(a) .+ 1.0)\n                                  ^\n    help: establish `a.length.length <=? 4` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_ieee/finite_variadic.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p56-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[-6.0 2.0 6.0]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_ieee/kernel_max_nan.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p57-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_ieee/kernel_max_zero.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p58-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_ieee/kernel_min_nan.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p59-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_ieee/kernel_min_zero.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p60-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_ieee/minimal_gpu_max_nan.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p61-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_ieee/minimal_gpu_min_nan.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p62-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_ieee/vector_nan.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p63-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu/array_capture.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu/array_capture.dewy:4:78: error: in shader code: a function that captures variables cannot run on the GPU\n    main=()=>{let offset=float32(1.0) let shift=(x:float32)=>x+offset printl(cpu(shift.(gpu([1.0 2.0]))))}\n                                                                                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu/array_cpu_input.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu/array_cpu_input.dewy:2:40: error: this array is in CPU memory: upload it with gpu(xs) to use it with GPU arrays\n    main=()=>{printl(cpu(gpu([1.0 2.0]) .+ [3.0 4.0]))}\n                                           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu/array_exact_division.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu/array_exact_division.dewy:2:22: error: GPU array expressions must return a fixed-width integer, float or bool, found rational; use CPU arrays for exact rationals and managed values\n    main=()=>{printl(cpu(gpu([1 2]) ./ 2))}\n                         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu/array_exact_loop.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p67-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[4.0 8.0]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu/array_managed_result.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu/array_managed_result.dewy:2:7: warning: 'x' is given a value here but never used (a parameter kept for the function's type can be named `_x`)\n<root>/tests/cases/gpu/array_managed_result.dewy:3:22: error: GPU array expressions must return a fixed-width integer, float or bool, found string; use CPU arrays for exact rationals and managed values\n    main=()=>{printl(cpu(word.(gpu([1.0]))))}\n                         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu/array_print.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu/array_print.dewy:2:31: error: in shader code: text cannot be used in shaders: a GPU function computes numbers, so print or format its results on the CPU, after `cpu(...)`\n    noisy=(x:float32):>float32=>{ printl(x) return x }\n                                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_float_sum/boundaries.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p70-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0.0\n0.0\n1.0\n1.0\n63.0\n1.0\n64.0\n1.0\n65.0\n1.0\n255.0\n1.0\n256.0\n1.0\n257.0\n1.0\n4097.0\n1.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_float_sum/buffer_index_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_float_sum/buffer_index_bad.dewy:1:47: error: cannot prove index is in bounds: missing upper bound\n    main=()=>{let b=gpu_buffer<float32>(0) printl(b[0])}\n                                                  ^\n    note: b.length is between 0 and 2147483647\n    note: missing upper bound: nothing establishes `0 <? b.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): b.length = 0\n    help: establish `0 <? b.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_float_sum/minimal_float_mean.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p72-0": {
+     "run": {
+      "status": 0,
+      "stdout": "2.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_float_sum/minimal_float_sum.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p73-0": {
+     "run": {
+      "status": 0,
+      "stdout": "6.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_float_sum/minimal_integer_mean.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p74-0": {
+     "run": {
+      "status": 0,
+      "stdout": "2.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_float_sum/minimal_integer_sum.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p75-0": {
+     "run": {
+      "status": 0,
+      "stdout": "6\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_float_sum/user_sum_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_float_sum/user_sum_bad.dewy:1:38: error: cannot prove index is in bounds: missing upper bound\n    sum=(x:GpuBuffer<float32>):>float32=>x[0]\n                                         ^\n    note: x.length is between 0 and 2147483647\n    note: missing upper bound: nothing establishes `0 <? x.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x.length = 0\n    help: establish `0 <? x.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/broadcast.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p77-0": {
+     "run": {
+      "status": 0,
+      "stdout": "111.0\n236.0\n[2 3]\n18.0\n0.0\n[3 3]\n6.0\n2.0\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/let_shape_mismatch.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p78-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: expected an array of shape 2x3, found one of shape 3x2\n    in the top level of let_shape_mismatch (let_shape_mismatch.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/literal_leading_semicolon.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor/literal_leading_semicolon.dewy:1:8: error: an array literal cannot start with `;`\n    printl([; 1 2])\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/literal_ragged.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor/literal_ragged.dewy:1:15: error: the rows of an array literal must have the same size: this one has 1 elements, the first has 2\n    printl([1 2 ; 3])\n                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/literal_rows.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p81-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2; 3 4]\n[2 2]\n[2 3]\n3\n[2 2 2]\n6\n[2 3]\n1.0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/literal_shape_mismatch.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor/literal_shape_mismatch.dewy:1:35: error: this literal has shape [2 2], but its type says [3 2]\n    let a:array<float64 length=[3 2]>=[0.5 1.5 ; 2.5 3.0]\n                                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/literal_shape_proven.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p83-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[1.0  2.0\n 3.0  4.0\n 5.0  6.0]\n[7 8 9]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/shaped_mismatch.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p84-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: shaped_mismatch.dewy:6: refinement failed: `ones(2 3).length[0] >=? the bound` (observed: ones(2 3).length[0] was 2 and the bound was 3)\n    in main (shaped_mismatch.dewy:6)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/shaped_parameters.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p85-0": {
+     "run": {
+      "status": 0,
+      "stdout": "2x3 times 3x4\n[2 4]\n6\n5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/shaped_rank.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor/shaped_rank.dewy:6:18: error: refinement refuted: zeros(2 2 2) violates the declared contract\n        printl(first(zeros<int64>(2 2 2)))\n                     ^\n    note: zeros(2 2 2).length.length is 3\n<root>/tests/cases/tensor/shaped_rank.dewy:4:8: note: the contract is declared here\n    first=(m:array<int64 length=[r c]>)=>m[0 0]\n           ^\n    help: establish `zeros(2 2 2).length.length <=? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor/shaped_result.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p87-0": {
+     "run": {
+      "status": 101,
+      "stdout": "[2 2]\n",
+      "stderr": "panic: expected an array of shape 3x2, found one of shape 2x3\n    in flip (shaped_result.dewy:4)\n    called from main (shaped_result.dewy:7)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor_shape_flow/incompatible_broadcast_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor_shape_flow/incompatible_broadcast_bad.dewy:4:16: error: cannot prove array shape/index contract `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)`: nothing establishes `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)` here\n        printl(sum(a .+ b))\n                   ^\n    help: establish `broadcast operand 2 axis 1 is compatible with the aligned extent (equal or either is one)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor_shape_flow/new_axis_misplaced_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor_shape_flow/new_axis_misplaced_bad.dewy:1:109: error: cannot prove array shape/index contract `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)`: nothing establishes `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)` here\n    spread = (matrix:array<float64 length=[m n]> row:array<float64 length=[n]>):>array<float64 length=[m n]> => matrix .+ row[.. new]\n                                                                                                                ^\n    help: establish `broadcast operand 2 axis 0 is compatible with the aligned extent (equal or either is one)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor_shape_flow/reshape_count_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor_shape_flow/reshape_count_bad.dewy:3:16: error: cannot prove array shape/index contract `reshape's dimensions multiply to its element count`: nothing establishes `reshape's dimensions multiply to its element count` here\n        printl(sum(reshape(values 2 2)))\n                   ^\n    help: establish `reshape's dimensions multiply to its element count` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor_shape_flow/result_shape_mismatch_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/tensor_shape_flow/result_shape_mismatch_bad.dewy:1:72: error: cannot prove array shape/index contract `a.length[0] matches its declared extent`: nothing establishes `a.length[0] matches its declared extent` here\n    flip = (a:array<float64 length=[m n]>):>array<float64 length=[n m]> => a\n                                                                           ^\n    help: establish `a.length[0] matches its declared extent` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/tensor_shape_flow/shapes_flow.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p92-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[11.0  12.0  13.0\n 21.0  22.0  23.0]\n[0 3]\n[32.0 34.0 36.0]\n[1.0 2.0 3.0]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_selection_output/empty.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p93-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_selection_output/positive_no_zero.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p94-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[3 5]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_selection_output/public_resize.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_selection_output/public_resize.dewy:1:43: error: refined elements cannot be created by unchecked zero initialization\n    main=()=>{let xs:array<int<(>? 0)>>=[2 4] xs.resize(3) printl(xs)}\n                                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_selection_output/slice_compound_ok.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p96-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[3 5]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_selection_output/slice_compound_reject.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_selection_output/slice_compound_reject.dewy:1:44: error: cannot prove refinement `__b1e0 + -5 >=? 0`: missing lower bound\n    main=()=>{let xs:array<int<(>=? 0)>>=[2 4] xs[..] .+= -5 printl(xs)}\n                                               ^\n    note: __b1e0 + -5 is at least -5\n    note: missing lower bound: nothing establishes `__b1e0 + -5 >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): __b1e0 + -5 = -1\n<root>/tests/cases/refine_selection_output/slice_compound_reject.dewy:1:28: note: the contract is declared here\n    main=()=>{let xs:array<int<(>=? 0)>>=[2 4] xs[..] .+= -5 printl(xs)}\n                               ^\n    help: establish `__b1e0 + -5 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_selection_output/unknown_length.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p98-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[3 5]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_selection_output/unknown_length_reject.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_selection_output/unknown_length_reject.dewy:1:33: error: cannot prove refinement `__b1e0 + -1 >=? 0`: missing lower bound\n    inc=(@xs:array<int<(>=? 0)>>)=>{xs[..] .+= -1}\n                                    ^\n    note: __b1e0 + -1 is at least -1\n    note: missing lower bound: nothing establishes `__b1e0 + -1 >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): __b1e0 + -1 = -1\n<root>/tests/cases/refine_selection_output/unknown_length_reject.dewy:2:28: note: the contract is declared here\n    main=()=>{let xs:array<int<(>=? 0)>>=[0 4] inc(@xs) printl(xs)}\n                               ^\n    help: establish `__b1e0 + -1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/array_place.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p100-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/bitwise_word_assign.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p101-0": {
+     "run": {
+      "status": 0,
+      "stdout": "6\n14\n8\n11\n10\nfalse\ntrue\n[7 6]\nset[2 3]\nset[2 3 9]\n1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/custom_index.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p102-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/custom_width.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/compound/custom_width.dewy:3:20: warning: 'i' is given a value here but never used (a parameter kept for the function's type can be named `_i`)\n<root>/tests/cases/compound/custom_width.dewy:4:24: warning: 'i' is given a value here but never used (a parameter kept for the function's type can be named `_i`)\n",
+   "files": {
+    "p103-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/error_1.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/compound/error_1.dewy:4:21: warning: 'value' is given a value here, and changed, but never read\n",
+   "files": {
+    "p104-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: big integer division by zero\n    in divmod (bigint.dewy:615)\n    called from main (error_1.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/error_2.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/compound/error_2.dewy:4:21: warning: 'value' is given a value here, and changed, but never read\n",
+   "files": {
+    "p105-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: big integer division by zero\n    in divmod (bigint.dewy:615)\n    called from main (error_2.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/error_3.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/compound/error_3.dewy:4:21: warning: 'value' is given a value here, and changed, but never read\n",
+   "files": {
+    "p106-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: rational division by zero\n    in reciprocal (rational.dewy:151)\n    called from _div (rational.dewy:159)\n    called from main (error_3.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/error_4.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/compound/error_4.dewy:4:21: warning: 'value' is given a value here, and changed, but never read\n",
+   "files": {
+    "p107-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: negative integer exponent: use a rational or floating base\n    in main (error_4.dewy:4)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/exact.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p108-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/floor_signs.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p109-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/generic.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p110-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/index_variable.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p111-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/integer_exact_division.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/compound/integer_exact_division.dewy:2:20: error: type mismatch: expected int, found rational (`/` gives an exact fraction: `//` divides whole numbers, and `q.floor()` or `q.round()` gives a whole number)\n    main=()=>{let x=42 x/=2 return x}\n                       ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/logical_short_circuit.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p113-0": {
+     "run": {
+      "status": 0,
+      "stdout": "false true 0\ntrue true 2\n[false true] 3\n9\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/managed_lifetime.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p114-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/map.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p115-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/nested_place.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p116-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/order.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p117-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/pool.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p118-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/protocols.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p119-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/resize_record_storage.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p120-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/resize_storage.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p121-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/selectors_once.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p122-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1 [\"a\" -> [\"x\" -> 2]]\n[[\"x\" -> 1] [\"x\" -> 20]] [\"row\" \"col\"]\n[\"a\" -> [1 2 2]] [\"k\" \"i\"]\n[\"p\" -> [\"q\" -> [\"r\" -> 2]]] [\"1\" \"2\" \"3\"]\n[[values=[1 2] count=1] [values=[103 4] count=0]] [\"r\" \"v\" \"r\"]\n[10 4] [\"b\" \"e\"]\n[\"on\" -> [false false]] [\"f\" \"n\"]\n[10 20 31] [\"x\" \"y\"]\n[[1 2] [13 14]] [\"g\"]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/update_index_named.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/compound/update_index_named.dewy:4:22: error: cannot prove index is in bounds: unsupported symbolic operation\n        loop v in pixels counts[v * bins // 256] += 1\n                         ^\n<root>/tests/cases/compound/update_index_named.dewy:4:29: note: this operation is outside the fact language\n        loop v in pixels counts[v * bins // 256] += 1\n                                ^\n    help: establish `0 <=? v*bins // 256 <? counts.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/value_parameter.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p124-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/widths.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p125-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fan_out/comprehension.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p126-0": {
+     "run": {
+      "status": 0,
+      "stdout": "2 from a from b b x2 a x4\nrace true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fan_out/partials.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p127-0": {
+     "run": {
+      "status": 0,
+      "stdout": "3 partials\nfrom a\nfrom b\nfrom c\nb x2\nc x5\n[\"from a\" \"from b\" \"from c\"]\nrace true\nfastest true none\nfirst_ok 6\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/branch_argument_context.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p128-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-9223372036854775791\n-9223372036854775791\n-9223372036854775791\n9223372036854775808\n17\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/branch_argument_overload.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/inference/branch_argument_overload.dewy:15:9: warning: 'n' is given a value here but never used\n<root>/tests/cases/inference/branch_argument_overload.dewy:4:9: warning: 'x' is given a value here but never used (a parameter kept for the function's type can be named `_x`)\n",
+   "files": {
+    "p129-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-128\n42\n42\n42\n42\n42\n42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/call_into_array.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p130-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1 settings Play 0 1\nresume quit\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/empty_interpolated.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/inference/empty_interpolated.dewy:2:9: error: cannot tell what kind of value this is yet (an empty `[]` says nothing of what it will hold): write its type where it is made, `let xs:array<int64> = []` or `let d:dict<string int64> = []`, or put something in it first\n    printl\"{a}\"\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/equality_literal_context.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p132-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/expected_literal.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p133-0": {
+     "run": {
+      "status": 0,
+      "stdout": "resume 3.0 3 settings quit 2.0 resume 3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/if_branch_literal.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p134-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[] [7 8] 5 [\"b\" -> 2] [2 3]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/mutual_recursion.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p135-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true true 7 8 4 2 go\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/mutual_recursion_no_base.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/inference/mutual_recursion_no_base.dewy:1:20: error: cannot prove exact integer result fits int64\n    f = (n:int64) => g(n + 1)\n                       ^\n    note: nothing bounds `n + 1` within int64 here\n    note: nothing bounds `n` here, so this has no known range: guard it first, or state it where the parameter is declared, `n:int64<(>=? 0)>`\n    help: establish `int64.min <=? (n + 1) and (n + 1) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n\n<root>/tests/cases/inference/mutual_recursion_no_base.dewy:4:9: error: cannot assign a value with no type (void) to 'x' ('f' calls itself, directly or through another function, with no branch that gives its result's type: write it, `f = (...):>int64 => ...`)\n        let x = f(1)\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/recursive_value.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p137-0": {
+     "run": {
+      "status": 0,
+      "stdout": "120 55 55 6 0.625 123\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/reject_expected_literal.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/inference/reject_expected_literal.dewy:5:29: error: 'nope' is not one of 'resume' | 'settings' | 'quit'\n        let x:Box<Choice> = box('nope')\n                                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/reject_literal_element.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/inference/reject_literal_element.dewy:6:36: error: 'nope' is not one of 'resume' | 'quit'\n        let c = column<Choice>([button('nope')])\n                                       ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/reject_no_context_array.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/inference/reject_no_context_array.dewy:5:21: error: cannot infer type parameter 'A' of 'text_' from the arguments\n        let c = column([text_(\"y\")])\n                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/reject_text_variable.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/inference/reject_text_variable.dewy:7:25: error: type mismatch: expected Box<'resume' | 'quit'>, found Box<string>\n        let x:Box<Choice> = box(t)\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/then_branch_literal.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p142-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[42]\n[1 2]\n[\"z\" -> 26]\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/union_literal_member.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p143-0": {
+     "run": {
+      "status": 0,
+      "stdout": "point 1 0\nnamed n\noops bad\n[3 4]\n[\"a\" -> 1]\n[]\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

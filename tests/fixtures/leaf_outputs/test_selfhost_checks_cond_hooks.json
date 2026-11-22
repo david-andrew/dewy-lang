@@ -1,0 +1,128 @@
+{
+ "test_checks_cond_hooks_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/element_nested_field.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_alias_tags/element_nested_field.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/index_optional_member.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/index_optional_member.dewy:3:11: error: cannot index a value of type Missing | array<string>: it may be Missing (a member read through it forwards Missing too). Check the value first, `if x isnt? Missing { ... }`, which narrows x inside\n        let g=m.groups[0]\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/sibling_branch.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "a\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/target/runtime_test_checks_both_arms.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/target/runtime_test_checks_both_arms.dewy:5:60: error: unknown function 'missing_name' (did you mean 'Missing'?)\n        if $target.arch =? \"x86_64\" and wide {printl(1)} else {missing_name()}\n                                                               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/optional/is_chain_partial.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/optional/is_chain_partial.dewy:3:10: error: this `if` must give a string, but it has no `else`: when `v` is not a string, it gives nothing (add `else` with a value, or a test for each remaining type)\n        else if v is? string { return \"str\" }\n             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/then_branch_literal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[42]\n[1 2]\n[\"z\" -> 26]\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/condition_carried_exceptions.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/condition_carried_exceptions.dewy:5:8: error: type mismatch: expected bool, found bool | Canceled | FileError (it may be Canceled | FileError, carried along from where the value was made: handle that there, with `if x is? exception ...`, `or_throw` or `?? fallback`)\n        if words.is_empty return\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/object/recursive_literal_return.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/object/recursive_literal_return.dewy:4:36: error: recursive method 'f' needs an explicit return type (add `:>Type`)\n            f = (k:int64) => if k >? 0 f(k - 1) else n\n                                       ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/search/regex_too_big.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/search/regex_too_big.dewy:5:17: error: not a valid pattern: the pattern is too big: its repeats written out are over 50000 steps (at character 16)\n        let r=regex(r\"(a{1000}){1000}\")\n                    ^\n",
+   "files": {}
+  }
+ ]
+}

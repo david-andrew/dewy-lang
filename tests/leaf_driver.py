@@ -1,10 +1,12 @@
 """Build a leaf's differential drivers once; execute every input in fresh processes."""
+import os
 import re
 import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 
-from tests import leaf_oracle
+from tests import leaf_oracle, whole_oracle
 from tests.compiler_modules import module_text
 from tests.driver_cache import build_driver
 from tests.module_redirects import module_rewriter
@@ -24,11 +26,30 @@ class DriverPair:
             ran = subprocess.run([binary, *arguments], capture_output=True, timeout=60, check=False)
             assert ran.returncode == status, ran.stdout[-6000:] + ran.stderr
             outputs.append(ran.stdout + ran.stderr if with_stderr else ran.stdout)
+            if not self.probe and len(outputs) == 1:
+                # (before the twin's run replaces the program: tests/whole_oracle.py)
+                outcome = self.whole_outcome(arguments, ran)
         if len(outputs) == 2:
             assert outputs[0] == outputs[1]
         if self.probe:
             leaf_oracle.check(arguments, status, outputs[0])
+        else:
+            leaf_oracle.check_entry(lambda: outcome)
         return outputs[0]
+
+    @staticmethod
+    def whole_outcome(arguments, ran):
+        """A whole compiler run as `build SOURCE -o TARGET ...` prints its output, then the program image."""
+        if len(arguments) < 4 or arguments[0] != 'build' or arguments[2] != '-o':
+            # (another command: the directory of the first file it names outside the checkout is the test's)
+            named = [Path(a) for a in arguments if os.path.isabs(a) and not Path(a).is_relative_to(ROOT)]
+            return whole_oracle.build(arguments, ran.returncode, ran.stdout, ran.stderr, (),
+                                      named[0].parent if named else None)
+        target = Path(arguments[3])
+        files = whole_oracle.outputs(target)
+        image = target.read_bytes() if target in files else b''
+        stdout = ran.stdout.removesuffix(image + b'\n') if image else ran.stdout
+        return whole_oracle.build(arguments, ran.returncode, stdout, ran.stderr, files, target.parent)
 
 
 def build_pair(compiler, release, driver, extra_stems=(), doubles=None, jo_doubles=None, *, services):
@@ -80,9 +101,9 @@ def build_pair(compiler, release, driver, extra_stems=(), doubles=None, jo_doubl
             'parameterized_array_type = (node: int, element: int) -> int: 0\n'
             'integer_parameter_literal = (node: int) -> int: 0\n'
             'integer_parameter_type = (node: int) -> int: 0\n')
-    # (the second graph links the frozen twins; for a probe, a recorded output can stand in for it)
+    # (the second graph links the frozen twins; a recorded outcome can stand in for it)
     probe = 'main.jo' not in jo_doubles
-    extensions = ('dewy', 'jo') if leaf_oracle.builds_twin() or not probe else ('dewy',)
+    extensions = ('dewy', 'jo') if leaf_oracle.builds_twin() else ('dewy',)
     sources = tuple((f'{stem}.{extension}', module_text(ROOT / f'compiler/{stem}.{extension}'))
                     for stem in stems if stem not in doubles for extension in extensions)
     variants = tuple((stem, (texts['dewy'], texts.get('jo'))) for stem, texts in doubles.items())

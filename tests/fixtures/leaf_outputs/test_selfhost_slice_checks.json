@@ -1,0 +1,42 @@
+{
+ "test_slice_checks_match_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/rational/slice_update.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2.5 3.5]\n[2 2.5 7]\n[2 7]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_length_helpers/slice_length_only_reject.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_length_helpers/slice_length_only_reject.dewy:1:47: error: cannot prove the assigned array has the slice's length: missing scalar bound\n    main=()=>{let xs:array<int length >? 0>=[2 4] xs[..]=[3] printl(xs)}\n                                                  ^\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/strings_string_diagnostics_4.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/strings_string_diagnostics_4.dewy:3:15: warning: 'text' is given a value here but never used\n<root>/tests/cases/frontend/strings_string_diagnostics_4.dewy:3:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{let text=\"{[1 2][end]}\"\n         ^\n",
+   "files": {}
+  }
+ ]
+}

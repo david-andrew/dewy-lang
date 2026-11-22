@@ -1,0 +1,204 @@
+{
+ "test_merged_nullable_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverconc_merged_nullable/callback.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverconc_merged_nullable/callback.dewy:4:25: error: `merged` cannot drain a nullable payload: `none` marks the end of the inbox; wrap the payload in a record\n        let inbox = merged(@read)\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverconc_merged_nullable/callback.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverconc_merged_nullable/callback.dewy:4:25: error: `merged` cannot drain a nullable payload: `none` marks the end of the inbox; wrap the payload in a record\n        let inbox = merged(@read)\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverconc_merged_nullable/channel.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverconc_merged_nullable/channel.dewy:7:25: error: `merged` cannot drain a nullable payload: `none` marks the end of the inbox; wrap the payload in a record\n        let inbox = merged(@c.receive)\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverconc_merged_nullable/channel.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverconc_merged_nullable/channel.dewy:7:25: error: `merged` cannot drain a nullable payload: `none` marks the end of the inbox; wrap the payload in a record\n        let inbox = merged(@c.receive)\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverconc_merged_nullable/mpmc.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverconc_merged_nullable/mpmc.dewy:4:25: error: `merged` cannot drain a nullable payload: `none` marks the end of the inbox; wrap the payload in a record\n        let inbox = merged(@c.receive)\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverconc_merged_nullable/mpmc.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverconc_merged_nullable/mpmc.dewy:4:25: error: `merged` cannot drain a nullable payload: `none` marks the end of the inbox; wrap the payload in a record\n        let inbox = merged(@c.receive)\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverconc_merged_nullable/named.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverconc_merged_nullable/named.dewy:5:25: error: `merged` cannot drain a nullable payload: `none` marks the end of the inbox; wrap the payload in a record\n        let inbox = merged(@ready)\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverconc_merged_nullable/named.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverconc_merged_nullable/named.dewy:5:25: error: `merged` cannot drain a nullable payload: `none` marks the end of the inbox; wrap the payload in a record\n        let inbox = merged(@ready)\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverconc_merged_nullable/shadow.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p4-0": {
+     "run": {
+      "status": 0,
+      "stdout": "9\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverconc_merged_nullable/shadow.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p4-1": {
+     "run": {
+      "status": 0,
+      "stdout": "9\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverconc_merged_nullable/spread.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverconc_merged_nullable/spread.dewy:5:24: error: `merged` cannot drain a nullable payload: `none` marks the end of the inbox; wrap the payload in a record\n        let inbox = merged(waits... stop_when_idle=0s)\n                           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverconc_merged_nullable/spread.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverconc_merged_nullable/spread.dewy:5:24: error: `merged` cannot drain a nullable payload: `none` marks the end of the inbox; wrap the payload in a record\n        let inbox = merged(waits... stop_when_idle=0s)\n                           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverconc_merged_nullable/spsc.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverconc_merged_nullable/spsc.dewy:4:25: error: `merged` cannot drain a nullable payload: `none` marks the end of the inbox; wrap the payload in a record\n        let inbox = merged(@rx.receive)\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverconc_merged_nullable/spsc.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverconc_merged_nullable/spsc.dewy:4:25: error: `merged` cannot drain a nullable payload: `none` marks the end of the inbox; wrap the payload in a record\n        let inbox = merged(@rx.receive)\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverconc_merged_nullable/wrapped.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p7-0": {
+     "run": {
+      "status": 0,
+      "stdout": "items 2 empty 1 total 7\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/coverconc_merged_nullable/wrapped.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p7-1": {
+     "run": {
+      "status": 0,
+      "stdout": "items 2 empty 1 total 7\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

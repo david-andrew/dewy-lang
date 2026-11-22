@@ -1,0 +1,1164 @@
+{
+ "test_facts_projection_queries_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/call_sibling_fields.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "4 [-1] -1 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/call_sibling_fields_changed.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/call_sibling_fields_changed.dewy:6:5: error: cannot prove index is in bounds: missing upper bound\n        c.keys[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/facts/call_sibling_fields_changed.dewy:5:5: note: c.keys.length may have changed at this call to unlink\n        unlink(@c)\n        ^\n    note: c.keys.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? c.keys.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, c.keys.length = 0\n    help: establish `i <? c.keys.length` after `unlink(@c)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/field_key_changed.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/field_key_changed.dewy:8:5: error: cannot prove the key is in the dictionary\n        counts[t.region] += 1\n        ^\n<root>/tests/cases/facts/field_key_changed.dewy:6:5: note: a path into this branch lacks the evidence\n        if t.region not in? counts counts[t.region] = 0\n        ^\n    help: establish `t.region in? counts` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `counts.get(t.region)` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/field_key_guard.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"n\" -> [1 3] \"s\" -> [2]]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/handle_field_call_forgets.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/handle_field_call_forgets.dewy:8:16: error: cannot prove index is in bounds: missing upper bound\n        b.h(1 2) + items[i]\n                   ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/facts/handle_field_call_forgets.dewy:8:5: note: items.length may have changed at this call\n        b.h(1 2) + items[i]\n        ^\n<root>/tests/cases/facts/handle_field_call_forgets.dewy:6:18: note: the earlier `i <? items.length` fact described the value before the call\n        if i <? 0 or i >=? items.length return 0\n                     ^\n    note: missing upper bound: nothing establishes `i <? items.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, items.length = 0\n    help: establish `i <? items.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/comprehension_pair_lengths.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/comprehension_pair_lengths_mixed.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/comprehension_pair_lengths_mixed.dewy:4:29: error: cannot prove the length (unpacking requires exactly 2 elements): missing bound\n        loop pair in pairs {let [i len]=pair; total+=i+len}\n                                ^\n    note: pair.length is between 1 and 2\n    note: missing bound: nothing establishes `pair.length =? 2` here\n    note: possible witness (consistent with the known bounds, not an observed execution): pair.length = 1\n<root>/tests/cases/facts/comprehension_pair_lengths_mixed.dewy:2:16: note: this loop may change the value\n        let pairs=[loop i in 0.. and x in xs if i =? 0 [i] else [i x.length]]\n                   ^\n    help: establish `pair.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/comprehension_scaled_length.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[1.0 1.0 2.0 3.0 4.0 9.0]\n[1 -1 2 -2]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/copy_length.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7 4 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/keys_alias_length.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "b x\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/keys_alias_length_other.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/keys_alias_length_other.dewy:6:5: error: cannot prove index is in bounds: missing upper bound\n        names[i]\n        ^\n    note: i is between 0 and 281474976710654\n    note: names.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? names.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, names.length = 0\n    help: establish `i <? names.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/keys_alias_length_stale.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/keys_alias_length_stale.dewy:7:5: error: cannot prove index is in bounds: missing upper bound\n        names[i]\n        ^\n    note: i is between 0 and 281474976710654\n    note: names.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? names.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, names.length = 0\n    help: establish `i <? names.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/keys_values_length.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "frank 7996 bob\ngreen red\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/keys_values_length_other.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/keys_values_length_other.dewy:5:5: error: cannot prove index is in bounds: missing upper bound\n        names[0]\n        ^\n    note: names.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `0 <? names.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): names.length = 0\n    help: establish `0 <? names.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/keys_values_length_stale.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/keys_values_length_stale.dewy:5:34: error: cannot prove index is in bounds: missing upper bound\n        if totals.length >? 0 return names[0]\n                                     ^\n    note: names.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `0 <? names.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): names.length = 0\n    help: establish `0 <? names.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/keys_values_length_unguarded.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/keys_values_length_unguarded.dewy:4:5: error: cannot prove index is in bounds: missing upper bound\n        names[0]\n        ^\n    note: names.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `0 <? names.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): names.length = 0\n    help: establish `0 <? names.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/length_axiom.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "9 3 -1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/nd_slice_assignment_length.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/nd_slice_assignment_length.dewy:2:1: error: cannot prove array shape/index contract `assigned data length equals the slice's selected element count`: nothing establishes `assigned data length equals the slice's selected element count` here\n    m[[..] [..]]=[1.0 2.0]\n    ^\n    help: establish `assigned data length equals the slice's selected element count` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/regex_capture_lengths.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "id=42 missing [][b]\n[(][] a:b ab\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/selection_index_length.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/selection_index_length.dewy:3:1: error: cannot prove array shape/index contract `replacement length equals selected element count`: nothing establishes `replacement length equals selected element count` here\n    xs[ids]=[8]\n    ^\n    help: establish `replacement length equals selected element count` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/selection_loop_lengths.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "9\n9\n9\n5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/selection_mask_length.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/selection_mask_length.dewy:2:1: error: cannot prove array shape/index contract `replacement length equals selected element count`: nothing establishes `replacement length equals selected element count` here\n    xs[[true false true]]=[8]\n    ^\n    help: establish `replacement length equals selected element count` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/selection_range_length.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/selection_range_length.dewy:2:1: error: cannot prove array shape/index contract `replacement length equals selected element count`: nothing establishes `replacement length equals selected element count` here\n    xs[0,2..2]=[1 2 3]\n    ^\n    help: establish `replacement length equals selected element count` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/self_call_length.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[0]\n[]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/self_call_length_shrinks.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/self_call_length_shrinks.dewy:5:5: error: cannot prove index is in bounds: missing upper bound\n        xs[0]=0\n        ^\n<root>/tests/cases/facts/self_call_length_shrinks.dewy:4:5: note: xs.length may have changed at this call to solve\n        solve(@xs n-1)\n        ^\n    note: the earlier `0 <? xs.length` fact described the value before the call to solve\n    note: missing upper bound: nothing establishes `0 <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): xs.length = 0\n    help: establish `0 <? xs.length` after `solve(@xs n - 1)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/unsupported_length.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/unsupported_length.dewy:1:38: error: cannot prove assertion: missing lower bound\n    main=(args:array<string>)=>{ $assert args.length >? 0 }\n                                         ^\n    note: args.length is between 0 and 281474976710655\n    note: missing lower bound: nothing establishes `args.length >? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): args.length = 0\n    help: establish `args.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_proven_rows/many_reads.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1 1 4 4\n1 2 3 4\n1 2 3 4\n15\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_length_helpers/length_slice_swap_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[5 3]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_length_helpers/slice_array_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[3 5]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_length_helpers/slice_array_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_length_helpers/slice_array_reject.dewy:1:54: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let xs:array<int<(>=? 0)>>=[2 4] xs[..]=[3 -1] printl(xs)}\n                                                         ^\n<root>/tests/cases/refine_length_helpers/slice_array_reject.dewy:1:28: note: the contract is declared here\n    main=()=>{let xs:array<int<(>=? 0)>>=[2 4] xs[..]=[3 -1] printl(xs)}\n                               ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_length_helpers/slice_elements_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[3 3]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_length_helpers/slice_elements_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_length_helpers/slice_elements_reject.dewy:1:51: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let xs:array<int<(>=? 0)>>=[2 4] xs[..]=-1 printl(xs)}\n                                                      ^\n<root>/tests/cases/refine_length_helpers/slice_elements_reject.dewy:1:28: note: the contract is declared here\n    main=()=>{let xs:array<int<(>=? 0)>>=[2 4] xs[..]=-1 printl(xs)}\n                               ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_length_helpers/slice_length_only_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[3 5]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_length_helpers/slice_length_only_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_length_helpers/slice_length_only_reject.dewy:1:47: error: cannot prove the assigned array has the slice's length: missing scalar bound\n    main=()=>{let xs:array<int length >? 0>=[2 4] xs[..]=[3] printl(xs)}\n                                                  ^\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_length_helpers/swap_length_only_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[4 2]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_length_helpers/swap_length_only_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_length_helpers/swap_length_only_reject.dewy:1:47: error: index is not in bounds\n    main=()=>{let xs:array<int length >? 0>=[2 4] xs.swap(0 2) printl(xs)}\n                                                  ^\n    note: xs.length is 2\n    help: establish `2 <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_length_helpers/swap_refined_elements_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[4 2]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_length_helpers/swap_refined_elements_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_length_helpers/swap_refined_elements_reject.dewy:1:44: error: index is not in bounds\n    main=()=>{let xs:array<int<(>=? 0)>>=[2 4] xs.swap(0 2) printl(xs)}\n                                               ^\n    note: xs.length is 2\n    help: establish `2 <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_alias.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_alias.dewy:4:14: error: refinement refuted: -5 violates the declared contract\n        n[\"a\"] = -5\n                 ^\n<root>/tests/cases/dict_refine/no_negative_alias.dewy:2:29: note: the contract is declared here\n        let m:dict<string int64<(>=? 0)>> = [\"a\"->1]\n                                ^\n    help: establish `-5 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_compound.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_compound.dewy:2:1: error: refinement refuted: the value violates the declared contract\n    m[\"a\"] -= 5\n    ^\n    note: the value is -4\n<root>/tests/cases/dict_refine/no_negative_compound.dewy:1:25: note: the contract is declared here\n    let m:dict<string int64<(>=? 0)>> = [\"a\"->1]\n                            ^\n    help: establish `the value >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_comprehension.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_comprehension.dewy:2:59: error: refinement refuted: v violates the declared contract\n    let m:dict<string int64<(>=? 0)>> = [loop [k v] in o k -> v]\n                                                              ^\n    note: v is -2\n<root>/tests/cases/dict_refine/no_negative_comprehension.dewy:2:25: note: the contract is declared here\n    let m:dict<string int64<(>=? 0)>> = [loop [k v] in o k -> v]\n                            ^\n    help: establish `v >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_generic.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_generic.dewy:3:12: error: refinement refuted: -5 violates the declared contract\n    put(@m \"a\" -5)\n               ^\n<root>/tests/cases/dict_refine/no_negative_generic.dewy:2:25: note: the contract is declared here\n    let m:dict<string int64<(>=? 0)>> = [\"a\"->1]\n                            ^\n    help: establish `-5 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_insert.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_insert.dewy:3:24: error: refinement refuted: -4 violates the declared contract\n    m.insert_if_absent(\"b\" -4);\n                           ^\n<root>/tests/cases/dict_refine/no_negative_insert.dewy:2:25: note: the contract is declared here\n    let m:dict<string int64<(>=? 0)>> = [\"a\"->1]\n                            ^\n    help: establish `-4 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_key.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_key.dewy:2:3: error: refinement refuted: -3 violates the declared contract\n    m[-3] = \"y\"\n      ^\n<root>/tests/cases/dict_refine/no_negative_key.dewy:1:18: note: the contract is declared here\n    let m:dict<int64<(>=? 0)> string> = [1->\"x\"]\n                     ^\n    help: establish `-3 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_merge.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_merge.dewy:3:26: error: refinement refuted: v violates the declared contract\n    loop [k v] in o { m[k] = v }\n                             ^\n    note: v is -2\n<root>/tests/cases/dict_refine/no_negative_merge.dewy:2:25: note: the contract is declared here\n    let m:dict<string int64<(>=? 0)>> = [\"a\"->1]\n                            ^\n    help: establish `v >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_set.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_set.dewy:2:8: error: refinement refuted: -3 violates the declared contract\n    s.push(-3)\n           ^\n<root>/tests/cases/dict_refine/no_negative_set.dewy:1:17: note: the contract is declared here\n    let s:set<int64<(>=? 0)>> = set[1 2]\n                    ^\n    help: establish `-3 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_negative_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_negative_store.dewy:2:10: error: refinement refuted: -5 violates the declared contract\n    m[\"a\"] = -5\n             ^\n<root>/tests/cases/dict_refine/no_negative_store.dewy:1:25: note: the contract is declared here\n    let m:dict<string int64<(>=? 0)>> = [\"a\"->1]\n                            ^\n    help: establish `-5 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/no_unrefined_param.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_refine/no_unrefined_param.dewy:3:1: error: in call to f(@m:dict<string int64>): argument 1 must have type dict<string int64> (`@` parameters need an exact match)\n    f(@m)\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_refine/runtime_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: runtime_store.dewy:6: refinement failed: `v >=? 0` (observed: v was -4)\n    in the top level of runtime_store (runtime_store.dewy:6)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/channel_dependent_refine_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/channel_more_rational_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2/3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/channel_refine_constructor.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/channel_refined_loan_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/queue_refined_slots/channel_refined_loan_reject.dewy:2:201: error: mutable refinement access requires an equivalent storage contract\n    main=()=>{let tx=channel<int<(>=? 0)>>(2) let rx=tx tx.send(2) or_throw let received=rx.receive if received is? Closed or received is? Canceled {printl(\"bad\") return} let x:int<(>=? 0)>=received bad(@x) printl(x)}\n                                                                                                                                                                                                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/channel_refined_mutation_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/queue_refined_slots/channel_refined_mutation_reject.dewy:1:198: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let tx=channel<int<(>=? 0)>>(2) let rx=tx tx.send(3) or_throw let received=rx.receive if received is? Closed or received is? Canceled {printl(\"bad\") return} let x:int<(>=? 0)>=received x=-1 printl(x)}\n                                                                                                                                                                                                         ^\n<root>/tests/cases/queue_refined_slots/channel_refined_mutation_reject.dewy:1:30: note: the contract is declared here\n    main=()=>{let tx=channel<int<(>=? 0)>>(2) let rx=tx tx.send(3) or_throw let received=rx.receive if received is? Closed or received is? Canceled {printl(\"bad\") return} let x:int<(>=? 0)>=received x=-1 printl(x)}\n                                 ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/channel_refined_receive_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/channel_refined_send_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/queue_refined_slots/channel_refined_send_reject.dewy:1:47: warning: 'rx' is given a value here but never used\n<root>/tests/cases/queue_refined_slots/channel_refined_send_reject.dewy:1:61: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let tx=channel<int<(>=? 0)>>(2) let rx=tx tx.send(-1);}\n                                                                ^\n<root>/tests/cases/queue_refined_slots/channel_refined_send_reject.dewy:1:30: note: the contract is declared here\n    main=()=>{let tx=channel<int<(>=? 0)>>(2) let rx=tx tx.send(-1);}\n                                 ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/mpmc_dependent_refine_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/mpmc_refine_constructor.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/mpmc_refined_receive_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/mpmc_refined_send_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/queue_refined_slots/mpmc_refined_send_reject.dewy:1:44: warning: 'rx' is given a value here but never used\n<root>/tests/cases/queue_refined_slots/mpmc_refined_send_reject.dewy:1:58: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let tx=mpmc<int<(>=? 0)>>(2) let rx=tx tx.send(-1);}\n                                                             ^\n<root>/tests/cases/queue_refined_slots/mpmc_refined_send_reject.dewy:1:27: note: the contract is declared here\n    main=()=>{let tx=mpmc<int<(>=? 0)>>(2) let rx=tx tx.send(-1);}\n                              ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/spsc_dependent_refine_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/spsc_refine_constructor.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/spsc_refined_receive_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queue_refined_slots/spsc_refined_send_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/queue_refined_slots/spsc_refined_send_reject.dewy:1:60: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let [tx rx]=spsc<int<(>=? 0)> 2>().split tx.send(-1);}\n                                                               ^\n<root>/tests/cases/queue_refined_slots/spsc_refined_send_reject.dewy:1:32: note: the contract is declared here\n    main=()=>{let [tx rx]=spsc<int<(>=? 0)> 2>().split tx.send(-1);}\n                                   ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/heap_count/cleared.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/heap_count/cleared.dewy:7:12: error: cannot prove `h` is nonempty: nothing establishes `h.length >? 0` here\n        printl(h.pop)\n               ^\n    help: establish `h.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/heap_count/empty.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/heap_count/empty.dewy:5:12: error: `h` is empty\n        printl(h.pop)\n               ^\n    help: establish `h.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/heap_count/one_guard.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/heap_count/one_guard.dewy:7:16: error: cannot prove `copy` is nonempty: nothing establishes `copy.length >? 0` here\n            printl(copy.pop)\n                   ^\n    help: establish `copy.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/heap_count/popped_empty.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/heap_count/popped_empty.dewy:6:9: warning: 'a' is given a value here but never used\n<root>/tests/cases/heap_count/popped_empty.dewy:7:12: error: `h` is empty\n        printl(h.pop)\n               ^\n    help: establish `h.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/heap_count/pops.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n8\n5\n1\n7\n0\n1\n3\n4\n3\n4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/heap_count/too_many.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/heap_count/too_many.dewy:9:12: error: `h` is empty\n        printl(h.pop)\n               ^\n    help: establish `h.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/records4.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1 12\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/records31.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "25 12\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/records40.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "31 12\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/records64.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "55 12\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

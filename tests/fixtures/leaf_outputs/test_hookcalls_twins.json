@@ -1,0 +1,605 @@
+{
+ "test_hookcalls_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/abandoned_local_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/abandoned_local_rejected.dewy:11:9: warning: 'h' is given a value here but never used\n<root>/tests/cases/hookcalls/abandoned_local_rejected.dewy:13:9: warning: 'other' is given a value here but never used\n<root>/tests/cases/hookcalls/abandoned_local_rejected.dewy:9:26: warning: 'spare' is given a value here but never used\n<root>/tests/cases/hookcalls/abandoned_local_rejected.dewy:14:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/abandoned_local_rejected.dewy:13:15: note: data.length may have changed at this call to acquire\n        let other=acquire\n                  ^\n<root>/tests/cases/hookcalls/abandoned_local_rejected.dewy:12:18: note: the earlier `i <? data.length` fact described the value before the call to acquire\n        if i <? 0 or i >=? data.length {return 0}\n                     ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` after `acquire()` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/abandoned_local_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/abandoned_local_rejected.dewy:11:9: warning: 'h' is given a value here but never used\n<root>/tests/cases/hookcalls/abandoned_local_rejected.dewy:13:9: warning: 'other' is given a value here but never used\n<root>/tests/cases/hookcalls/abandoned_local_rejected.dewy:9:26: warning: 'spare' is given a value here but never used\n<root>/tests/cases/hookcalls/abandoned_local_rejected.dewy:14:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/abandoned_local_rejected.dewy:13:15: note: data.length may have changed at this call to acquire\n        let other=acquire\n                  ^\n<root>/tests/cases/hookcalls/abandoned_local_rejected.dewy:12:18: note: the earlier `i <? data.length` fact described the value before the call to acquire\n        if i <? 0 or i >=? data.length {return 0}\n                     ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` after `acquire()` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/branch_return.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "37\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/branch_return.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-1": {
+     "run": {
+      "status": 0,
+      "stdout": "37\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/consume_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/consume_rejected.dewy:13:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/consume_rejected.dewy:12:5: note: data.length may have changed at this call to finish\n        h.finish()\n        ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` after `finish(h)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/consume_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/consume_rejected.dewy:13:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/consume_rejected.dewy:12:5: note: data.length may have changed at this call to finish\n        h.finish()\n        ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` after `finish(h)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/file_predicate.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 0,
+      "stdout": "67\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/file_predicate.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-1": {
+     "run": {
+      "status": 0,
+      "stdout": "67\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/file_reader.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p4-0": {
+     "run": {
+      "status": 0,
+      "stdout": "22\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/file_reader.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p4-1": {
+     "run": {
+      "status": 0,
+      "stdout": "22\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/lock_predicate.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p5-0": {
+     "run": {
+      "status": 0,
+      "stdout": "73\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/lock_predicate.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p5-1": {
+     "run": {
+      "status": 0,
+      "stdout": "73\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/lock_reader.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p6-0": {
+     "run": {
+      "status": 0,
+      "stdout": "43\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/lock_reader.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p6-1": {
+     "run": {
+      "status": 0,
+      "stdout": "43\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/method_write_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/method_write_rejected.dewy:13:9: warning: 'ready' is given a value here but never used\n<root>/tests/cases/hookcalls/method_write_rejected.dewy:14:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/method_write_rejected.dewy:13:15: note: data.length may have changed at this call to advance\n        let ready=h.advance\n                  ^\n<root>/tests/cases/hookcalls/method_write_rejected.dewy:12:18: note: the earlier `i <? data.length` fact described the value before the call to advance\n        if i <? 0 or i >=? data.length {return 0}\n                     ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` after `advance(h)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/method_write_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/method_write_rejected.dewy:13:9: warning: 'ready' is given a value here but never used\n<root>/tests/cases/hookcalls/method_write_rejected.dewy:14:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/method_write_rejected.dewy:13:15: note: data.length may have changed at this call to advance\n        let ready=h.advance\n                  ^\n<root>/tests/cases/hookcalls/method_write_rejected.dewy:12:18: note: the earlier `i <? data.length` fact described the value before the call to advance\n        if i <? 0 or i >=? data.length {return 0}\n                     ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` after `advance(h)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/move_hook_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/move_hook_rejected.dewy:14:9: warning: 'other' is given a value here but never used\n<root>/tests/cases/hookcalls/move_hook_rejected.dewy:15:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n    note: data.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/move_hook_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/move_hook_rejected.dewy:14:9: warning: 'other' is given a value here but never used\n<root>/tests/cases/hookcalls/move_hook_rejected.dewy:15:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n    note: data.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/move_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/move_rejected.dewy:9:9: warning: 'h' is given a value here but never used (a parameter kept for the function's type can be named `_h`)\n<root>/tests/cases/hookcalls/move_rejected.dewy:14:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/move_rejected.dewy:13:5: note: data.length may have changed at this call to retire\n        retire(h)\n        ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` after `retire(h)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/move_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/move_rejected.dewy:9:9: warning: 'h' is given a value here but never used (a parameter kept for the function's type can be named `_h`)\n<root>/tests/cases/hookcalls/move_rejected.dewy:14:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/move_rejected.dewy:13:5: note: data.length may have changed at this call to retire\n        retire(h)\n        ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` after `retire(h)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/named_return.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p10-0": {
+     "run": {
+      "status": 0,
+      "stdout": "37\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/named_return.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p10-1": {
+     "run": {
+      "status": 0,
+      "stdout": "37\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/pool_factory.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p11-0": {
+     "run": {
+      "status": 0,
+      "stdout": "59\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/pool_factory.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p11-1": {
+     "run": {
+      "status": 0,
+      "stdout": "59\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/pool_predicate.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p12-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[0 83]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/pool_predicate.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p12-1": {
+     "run": {
+      "status": 0,
+      "stdout": "[0 83]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/predicate_cleanup_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/predicate_cleanup_rejected.dewy:9:8: warning: 'h' is given a value here but never used (a parameter kept for the function's type can be named `_h`)\n<root>/tests/cases/hookcalls/predicate_cleanup_rejected.dewy:14:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/predicate_cleanup_rejected.dewy:13:5: note: data.length may have changed at this branch\n        if not valid(h i data) {return 0}\n        ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/predicate_cleanup_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/predicate_cleanup_rejected.dewy:9:8: warning: 'h' is given a value here but never used (a parameter kept for the function's type can be named `_h`)\n<root>/tests/cases/hookcalls/predicate_cleanup_rejected.dewy:14:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/predicate_cleanup_rejected.dewy:13:5: note: data.length may have changed at this branch\n        if not valid(h i data) {return 0}\n        ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/predicate_consume_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/predicate_consume_rejected.dewy:15:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/predicate_consume_rejected.dewy:14:5: note: data.length may have changed at this branch\n        if not h.valid(i data) {return 0}\n        ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/predicate_consume_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/predicate_consume_rejected.dewy:15:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/predicate_consume_rejected.dewy:14:5: note: data.length may have changed at this branch\n        if not h.valid(i data) {return 0}\n        ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/replace_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/replace_rejected.dewy:11:9: warning: 'h' is given a value here, and changed, but never read\n<root>/tests/cases/hookcalls/replace_rejected.dewy:14:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/replace_rejected.dewy:13:5: note: data.length may have changed at this assignment\n        h=renew(7)\n        ^\n<root>/tests/cases/hookcalls/replace_rejected.dewy:12:18: note: the earlier `i <? data.length` fact described the value before the assignment\n        if i <? 0 or i >=? data.length {return 0}\n                     ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/replace_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/replace_rejected.dewy:11:9: warning: 'h' is given a value here, and changed, but never read\n<root>/tests/cases/hookcalls/replace_rejected.dewy:14:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/replace_rejected.dewy:13:5: note: data.length may have changed at this assignment\n        h=renew(7)\n        ^\n<root>/tests/cases/hookcalls/replace_rejected.dewy:12:18: note: the earlier `i <? data.length` fact described the value before the assignment\n        if i <? 0 or i >=? data.length {return 0}\n                     ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/returned_replacement_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/returned_replacement_rejected.dewy:11:9: warning: 'h' is given a value here but never used\n<root>/tests/cases/hookcalls/returned_replacement_rejected.dewy:13:9: warning: 'other' is given a value here but never used\n<root>/tests/cases/hookcalls/returned_replacement_rejected.dewy:14:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/returned_replacement_rejected.dewy:13:15: note: data.length may have changed at this call to acquire\n        let other=acquire\n                  ^\n<root>/tests/cases/hookcalls/returned_replacement_rejected.dewy:12:18: note: the earlier `i <? data.length` fact described the value before the call to acquire\n        if i <? 0 or i >=? data.length {return 0}\n                     ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` after `acquire()` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/returned_replacement_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/returned_replacement_rejected.dewy:11:9: warning: 'h' is given a value here but never used\n<root>/tests/cases/hookcalls/returned_replacement_rejected.dewy:13:9: warning: 'other' is given a value here but never used\n<root>/tests/cases/hookcalls/returned_replacement_rejected.dewy:14:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/returned_replacement_rejected.dewy:13:15: note: data.length may have changed at this call to acquire\n        let other=acquire\n                  ^\n<root>/tests/cases/hookcalls/returned_replacement_rejected.dewy:12:18: note: the earlier `i <? data.length` fact described the value before the call to acquire\n        if i <? 0 or i >=? data.length {return 0}\n                     ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` after `acquire()` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/socket_factory.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p17-0": {
+     "run": {
+      "status": 0,
+      "stdout": "37\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/socket_factory.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p17-1": {
+     "run": {
+      "status": 0,
+      "stdout": "37\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/socket_predicate.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/socket_predicate.dewy:10:9: warning: 'socket' is given a value here but never used\n",
+   "files": {
+    "p18-0": {
+     "run": {
+      "status": 0,
+      "stdout": "71\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/socket_predicate.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/socket_predicate.dewy:10:9: warning: 'socket' is given a value here but never used\n",
+   "files": {
+    "p18-1": {
+     "run": {
+      "status": 0,
+      "stdout": "71\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/store_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/store_rejected.dewy:15:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/store_rejected.dewy:14:5: note: data.length may have changed at this call to store\n        store(@pool h)\n        ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` after `store(@pool h)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/store_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/store_rejected.dewy:15:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/store_rejected.dewy:14:5: note: data.length may have changed at this call to store\n        store(@pool h)\n        ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` after `store(@pool h)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/hookcalls/temporary_block_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/temporary_block_rejected.dewy:11:9: warning: 'h' is given a value here but never used\n<root>/tests/cases/hookcalls/temporary_block_rejected.dewy:13:9: warning: 'ready' is given a value here but never used\n<root>/tests/cases/hookcalls/temporary_block_rejected.dewy:14:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/temporary_block_rejected.dewy:13:15: note: data.length may have changed at this call to probe\n        let ready=probe(3)\n                  ^\n<root>/tests/cases/hookcalls/temporary_block_rejected.dewy:12:18: note: the earlier `i <? data.length` fact described the value before the call to probe\n        if i <? 0 or i >=? data.length {return 0}\n                     ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` after `probe(3)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/hookcalls/temporary_block_rejected.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/hookcalls/temporary_block_rejected.dewy:11:9: warning: 'h' is given a value here but never used\n<root>/tests/cases/hookcalls/temporary_block_rejected.dewy:13:9: warning: 'ready' is given a value here but never used\n<root>/tests/cases/hookcalls/temporary_block_rejected.dewy:14:5: error: cannot prove index is in bounds: missing upper bound\n        data[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/hookcalls/temporary_block_rejected.dewy:13:15: note: data.length may have changed at this call to probe\n        let ready=probe(3)\n                  ^\n<root>/tests/cases/hookcalls/temporary_block_rejected.dewy:12:18: note: the earlier `i <? data.length` fact described the value before the call to probe\n        if i <? 0 or i >=? data.length {return 0}\n                     ^\n    note: missing upper bound: nothing establishes `i <? data.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, data.length = 0\n    help: establish `i <? data.length` after `probe(3)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ]
+}

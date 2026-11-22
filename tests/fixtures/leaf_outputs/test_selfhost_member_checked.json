@@ -1,0 +1,120 @@
+{
+ "test_member_checked_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/member_template/comptime_members.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"a\" \"bb\" \"z\"]\n[\"a\" \"bb\" \"z\"]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/member_template/comptime_members.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-1": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"a\" \"bb\" \"z\"]\n[\"a\" \"bb\" \"z\"]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/type_members/records.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "png\n9\n2 4 2 true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/type_members/records.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-1": {
+     "run": {
+      "status": 0,
+      "stdout": "png\n9\n2 4 2 true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/type_members/runtime_use.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/type_members/runtime_use.dewy:5:9: error: 't' cannot hold a type or module (a value of a type is made by calling it: `T()`)\n        let t = r.Png\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/type_members/runtime_use.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/type_members/runtime_use.dewy:5:9: error: 't' cannot hold a type or module (a value of a type is made by calling it: `T()`)\n        let t = r.Png\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/type_members/named_twice.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/type_members/named_twice.dewy:2:17: error: field Png is listed twice\n    r = [$named[Png Png]...]\n                    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<root>/tests/cases/type_members/named_twice.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/type_members/named_twice.dewy:2:17: error: field Png is listed twice\n    r = [$named[Png Png]...]\n                    ^\n",
+   "files": {}
+  }
+ ]
+}

@@ -1,0 +1,2180 @@
+{
+ "test_facts_map_queries_program_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/accepted.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "added\ntrue\nfalse\n[\"b\" -> 2 \"c\" -> 3]\n2\n5 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/bounded_removals.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\nfalse\ntrue\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_alias_shrink.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_alias_shrink.dewy:5:5: error: cannot prove every value of t.edges is a valid index of `terminal`\n        ts.pop();\n        ^\n    help: every value must be below the length of `terminal`: a literal or values known to be below it prove it; to make `terminal` shorter, put `$runtime_checks` on this statement to check every value when it runs\n<root>/tests/cases/dict_sibling/no_alias_shrink.dewy:1:59: note: the contract is declared here\n    Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]\n                                                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_alias_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_alias_store.dewy:5:15: error: refinement refuted: 5 violates the declared contract\n        es[\"a\"] = 5\n                  ^\n    note: 5 is 5\n    note: t.terminal.length is 1\n    help: establish `5 <? t.terminal.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_compound_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_compound_store.dewy:4:5: error: a value of this dictionary is bounded by a sibling's length, so it cannot be changed in place\n        t.edges[\"a\"] += 1\n        ^\n    help: store the new value whole, `d[k] = d[k] + 1`: a stored value is checked against the sibling's length\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_construct_out_of_range.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_construct_out_of_range.dewy:3:48: error: refinement refuted: a value of this dictionary is not a valid index of its sibling\n        let t:Trie = [terminal=[false false] edges=[\"a\"->2]]\n                                                   ^\n    help: every value must be below the length of its sibling: a literal or values known to be below it prove it; to make its sibling shorter, put `$runtime_checks` on this statement to check every value when it runs\n<root>/tests/cases/dict_sibling/no_construct_out_of_range.dewy:1:59: note: the contract is declared here\n    Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]\n                                                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_get_default_past_end.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_get_default_past_end.dewy:5:12: error: cannot prove index is in bounds: missing upper bound\n        printl(t.terminal[x])\n               ^\n    note: x is at least 0\n    note: t.terminal.length is 2\n    note: missing upper bound: nothing establishes `x <? t.terminal.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x = 9223372036854775807, t.terminal.length = 2\n    help: establish `x <? t.terminal.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_get_default_unbounded.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_get_default_unbounded.dewy:4:12: error: cannot prove index is in bounds: missing upper bound\n        printl(t.terminal[x])\n               ^\n    note: x is at least 0\n    note: t.terminal.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `x <? t.terminal.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x = 0, t.terminal.length = 0\n    help: establish `x <? t.terminal.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_insert_past_end.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_insert_past_end.dewy:4:34: error: refinement refuted: 1 violates the declared contract\n        t.edges.insert_if_absent(\"a\" 1);\n                                     ^\n    note: 1 is 1\n    note: t.terminal.length is 1\n    help: establish `1 <? t.terminal.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_negative.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_negative.dewy:4:20: error: refinement refuted: -1 violates the declared contract\n        t.edges[\"a\"] = -1\n                       ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_pop_default_optional_unbounded.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_pop_default_optional_unbounded.dewy:4:30: error: cannot prove index is in bounds: missing upper bound\n        if x isnt? none { printl(t.terminal[x]) }\n                                 ^\n    note: x is at least 0\n    note: t.terminal.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `x <? t.terminal.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x = 0, t.terminal.length = 0\n    help: establish `x <? t.terminal.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_pop_default_unbounded.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_pop_default_unbounded.dewy:4:12: error: cannot prove index is in bounds: missing upper bound\n        printl(t.terminal[x])\n               ^\n    note: x is at least 0\n    note: t.terminal.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `x <? t.terminal.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x = 0, t.terminal.length = 0\n    help: establish `x <? t.terminal.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_pop_other_dict.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_pop_other_dict.dewy:6:12: error: cannot prove index is in bounds: missing lower and upper bounds\n        printl(t.terminal[x])\n               ^\n    note: missing lower bound: nothing establishes `x >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x = -1\n    note: t.terminal.length is 2\n    note: missing upper bound: nothing establishes `x <? t.terminal.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x = 9223372036854775807, t.terminal.length = 2\n    help: establish `0 <=? x <? t.terminal.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_shrink.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_shrink.dewy:4:5: error: cannot prove every value of t.edges is a valid index of `terminal`\n        t.terminal.pop();\n        ^\n    help: every value must be below the length of `terminal`: a literal or values known to be below it prove it; to make `terminal` shorter, put `$runtime_checks` on this statement to check every value when it runs\n<root>/tests/cases/dict_sibling/no_shrink.dewy:1:59: note: the contract is declared here\n    Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]\n                                                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_shrink_after_clear_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_shrink_after_clear_store.dewy:6:5: error: cannot prove every value of t.edges is a valid index of `terminal`\n        t.terminal.pop();\n        ^\n    help: every value must be below the length of `terminal`: a literal or values known to be below it prove it; to make `terminal` shorter, put `$runtime_checks` on this statement to check every value when it runs\n<root>/tests/cases/dict_sibling/no_shrink_after_clear_store.dewy:1:59: note: the contract is declared here\n    Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]\n                                                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_shrink_after_conditional_clear.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_shrink_after_conditional_clear.dewy:4:33: error: cannot prove every value of t.edges is a valid index of `terminal`\n        if t.terminal.length >? 0 { t.terminal.pop(); }\n                                    ^\n    help: every value must be below the length of `terminal`: a literal or values known to be below it prove it; to make `terminal` shorter, put `$runtime_checks` on this statement to check every value when it runs\n<root>/tests/cases/dict_sibling/no_shrink_after_conditional_clear.dewy:1:59: note: the contract is declared here\n    Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]\n                                                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_shrink_after_empty_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_shrink_after_empty_store.dewy:6:5: error: cannot prove every value of t.edges is a valid index of `terminal`\n        t.terminal.pop();\n        ^\n    help: every value must be below the length of `terminal`: a literal or values known to be below it prove it; to make `terminal` shorter, put `$runtime_checks` on this statement to check every value when it runs\n<root>/tests/cases/dict_sibling/no_shrink_after_empty_store.dewy:1:59: note: the contract is declared here\n    Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]\n                                                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_shrink_in_callee.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_shrink_in_callee.dewy:5:13: error: mutable refinement access needs the full record invariant authority; pass the whole record with `@`\n        shrink(@t.terminal)\n                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_store_past_end.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_store_past_end.dewy:4:20: error: refinement refuted: t.terminal.length violates the declared contract\n        t.edges[\"a\"] = t.terminal.length\n                       ^\n    note: t.terminal.length is 1\n    help: establish `t.terminal.length <? t.terminal.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/no_unchecked_value.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dict_sibling/no_unchecked_value.dewy:3:34: error: cannot prove refinement `at <? t.terminal.length`: missing upper bound\n        if at >=? 0 { t.edges[key] = at }\n                                     ^\n    note: at is at least 0\n    note: t.terminal.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `at <? t.terminal.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): at = 0, t.terminal.length = 0\n    help: establish `at <? t.terminal.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/runtime_shrink_fails.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: runtime_shrink_fails.dewy:6: refinement failed: a value is not a valid index of its sibling array (observed: the position of the element was 0 and the bound was 0)\n    in main (runtime_shrink_fails.dewy:6)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/runtime_shrink_ok.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"a\" -> 0]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/runtime_store.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "[\"a\" -> 1]\n",
+      "stderr": "panic: runtime_store.dewy:5: refinement failed: `at <? t.terminal.length` (observed: at was 2 and t.terminal.length was 2)\n    in put (runtime_store.dewy:5)\n    called from main (runtime_store.dewy:11)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dict_sibling/shrink_after_clear.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2 0\n2 [\"d\" -> 1]\n0 0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/constant_keys_totaldict.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "48\ncup: 48\ntbsp: 3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/constant_keys_totaldict_hint.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/constant_keys_totaldict_hint.dewy:3:33: error: cannot prove the key is in the dictionary\n    lookup = (key:string) => printl(TSP_PER[key])\n                                    ^\n    help: establish `key in? TSP_PER` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `TSP_PER.get(key)` gives none for it\n    help: or key the constant by its keys, `const TSP_PER:totaldict<'tsp' | 'tbsp' | 'cup' int> = [...]`: a totaldict has every key, so its reads need no guard\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/counted_keys.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/counted_sparse.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/custom_hash.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/custom_nested_hash.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/empty_hash.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/equality_callback_borrow.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/float_key_nan_checked.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: float_key_nan_checked.dewy:8: dictionary key is NaN, which equals nothing: its entry could never be found\n    in main (float_key_nan_checked.dewy:8)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/float_key_nan_comprehension.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: float_key_nan_comprehension.dewy:6: dictionary key is NaN, which equals nothing: its entry could never be found\n    in main (float_key_nan_comprehension.dewy:6)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/float_key_nan_literal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: float_key_nan_literal.dewy:6: dictionary key is NaN, which equals nothing: its entry could never be found\n    in main (float_key_nan_literal.dewy:6)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/float_key_proven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[0.5 -> 0 1.0 -> 1 2.5 -> 1 2.0 -> 2]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/float_key_unproven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/float_key_unproven.dewy:5:21: error: cannot prove the dictionary key is not NaN\n        loop x in xs {d[x] = 1}\n                        ^\n    help: NaN equals nothing, so its entry could never be found again: compute it under `$no_nan`, or check it at run time under `$runtime_checks`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/full_hash_collisions.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/full_hash_collisions.dewy:5:7: warning: 'key' is given a value here but never used (a parameter kept for the function's type can be named `_key`)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/hash_callback_borrow.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/insert_absent.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/insert_arguments.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/insert_copy.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/insert_growth.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/iteration.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/iteration_after_growth.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/iterator_allocation_budget.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/iterator_counted_order.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/iterator_exit_cleanup.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/iterator_sparse_snapshot.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/iterator_zip_exhaustion.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/key_word_boundaries.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/keys_set.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "set[\"b\" \"c\" \"d\"]\ntrue\n3\nset[\"b\" \"c\" \"d\"]\n[\"b\" \"c\" \"d\"]\nbcd\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/keys_set_index.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/keys_set_index.dewy:3:12: error: a set has no positions to index (`d.keys` is a set): `[d.keys...]` collects its members into an array, and `in?` tests membership\n        printl(d.keys[0])\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/length.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/merge_and_set_values.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"x\" -> 1 \"y\" -> 20 \"z\" -> 30]\n[\"x\" -> 1 \"y\" -> 20 \"z\" -> 30]\n[\"x\" -> 1 \"y\" -> 2]\n[3 1 2]\n6\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/optional_managed_payload.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/optional_payload.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/pop_default_value.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "20\n0\n0\none\nnone\nnone\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/presence_argument_order.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/presence_callback_snapshot.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/presence_callback_snapshot.dewy:5:7: warning: 'key' is given a value here but never used (a parameter kept for the function's type can be named `_key`)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/presence_custom_methods.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/presence_custom_methods.dewy:3:14: warning: 'key' is given a value here but never used (a parameter kept for the function's type can be named `_key`)\n<root>/tests/cases/dictionary/presence_custom_methods.dewy:4:6: warning: 'box' is given a value here but never used (a parameter kept for the function's type can be named `_box`)\n<root>/tests/cases/dictionary/presence_custom_methods.dewy:4:14: warning: 'key' is given a value here but never used (a parameter kept for the function's type can be named `_key`)\n<root>/tests/cases/dictionary/presence_custom_methods.dewy:5:6: warning: 'values' is given a value here but never used (a parameter kept for the function's type can be named `_values`)\n<root>/tests/cases/dictionary/presence_custom_methods.dewy:5:31: warning: 'key' is given a value here but never used (a parameter kept for the function's type can be named `_key`)\n<root>/tests/cases/dictionary/presence_custom_methods.dewy:5:5: warning: 'has' hides the library's method `dict<int64 int64>.has`: this function takes over every `x.has` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/presence_default_values.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/presence_forms.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/projection_managed_snapshots.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/projection_release.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/projection_sparse.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/projection_zero_values.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/record_key_nan.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: record_key_nan.dewy:9: dictionary key holds a NaN, which equals nothing: its entry could never be found\n    in main (record_key_nan.dewy:9)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/record_key_unproven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/record_key_unproven.dewy:6:21: error: cannot prove the dictionary key holds no NaN\n        loop q in qs {d[q] = 1}\n                        ^\n    help: NaN equals nothing, so its entry could never be found again: compute it under `$no_nan`, or check it at run time under `$runtime_checks`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/reference_index_once.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_bare_call_captured_removed.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: the dictionary has no entry for this key to change: d[k] += 1 changes an entry that is there; to count, write `if k in? d {d[k] += 1} else {d[k] = 1}`\n    in a function literal (rhs_bare_call_captured_removed.dewy:8)\n    called from main (rhs_bare_call_captured_removed.dewy:10)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_bare_call_captured_removed_proof.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/rhs_bare_call_captured_removed_proof.dewy:5:23: error: cannot prove the key is in the dictionary\n            if \"a\" in? d {d[\"a\"]+=replace}\n                          ^\n<root>/tests/cases/dictionary/rhs_bare_call_captured_removed_proof.dewy:5:31: note: this call may write a mutable or exposed root\n            if \"a\" in? d {d[\"a\"]+=replace}\n                                  ^\n    help: establish `\"a\" in? d` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `d.get(\"a\")` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_bare_call_parameter_removed.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: the dictionary has no entry for this key to change: d[k] += 1 changes an entry that is there; to count, write `if k in? d {d[k] += 1} else {d[k] = 1}`\n    in apply (rhs_bare_call_parameter_removed.dewy:6)\n    called from main (rhs_bare_call_parameter_removed.dewy:7)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_bare_call_parameter_removed_proof.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/rhs_bare_call_parameter_removed_proof.dewy:3:45: error: cannot prove the key is in the dictionary\n    apply=(@x:dict<string int>)=>{if \"a\" in? x {x[\"a\"]+=replace}}\n                                                ^\n<root>/tests/cases/dictionary/rhs_bare_call_parameter_removed_proof.dewy:3:53: note: this call to replace may write a mutable or exposed root\n    apply=(@x:dict<string int>)=>{if \"a\" in? x {x[\"a\"]+=replace}}\n                                                        ^\n    help: establish `\"a\" in? x` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `x.get(\"a\")` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_bare_call_readonly_proven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"a\" -> 17]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_bare_call_removed.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: the dictionary has no entry for this key to change: d[k] += 1 changes an entry that is there; to count, write `if k in? d {d[k] += 1} else {d[k] = 1}`\n    in apply (rhs_bare_call_removed.dewy:7)\n    called from main (rhs_bare_call_removed.dewy:8)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_bare_call_removed_proof.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/rhs_bare_call_removed_proof.dewy:4:26: error: cannot prove the key is in the dictionary\n    apply=()=>{if \"a\" in? d {d[\"a\"]+=replace}}\n                             ^\n<root>/tests/cases/dictionary/rhs_bare_call_removed_proof.dewy:4:34: note: this call to replace may write a mutable or exposed root\n    apply=()=>{if \"a\" in? d {d[\"a\"]+=replace}}\n                                     ^\n    help: establish `\"a\" in? d` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `d.get(\"a\")` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_bare_call_reorder.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"b\" -> 200 \"a\" -> 17]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_clear_array.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: the dictionary has no entry for this key to change: d[k] += 1 changes an entry that is there; to count, write `if k in? d {d[k] += 1} else {d[k] = 1}`\n    in main (rhs_clear_array.dewy:7)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_clear_array_proof.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/rhs_clear_array_proof.dewy:4:50: error: cannot prove the key is in the dictionary\n    main=()=>{ if \"a\" in? d and 0 <? d[\"a\"].length { d[\"a\"][0] = wipe() } }\n                                                     ^\n<root>/tests/cases/dictionary/rhs_clear_array_proof.dewy:4:62: note: this call to wipe may write a mutable or exposed root\n    main=()=>{ if \"a\" in? d and 0 <? d[\"a\"].length { d[\"a\"][0] = wipe() } }\n                                                                 ^\n    help: establish `\"a\" in? d` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `d.get(\"a\")` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_clear_count.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: the dictionary has no entry for this key to change: d[k] += 1 changes an entry that is there; to count, write `if k in? d {d[k] += 1} else {d[k] = 1}`\n    in main (rhs_clear_count.dewy:7)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_clear_count_proof.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/rhs_clear_count_proof.dewy:4:27: error: cannot prove the key is in the dictionary\n    main=()=>{ if \"a\" in? d { d[\"a\"] += wipe() } }\n                              ^\n<root>/tests/cases/dictionary/rhs_clear_count_proof.dewy:4:37: note: this call to wipe may write a mutable or exposed root\n    main=()=>{ if \"a\" in? d { d[\"a\"] += wipe() } }\n                                        ^\n    help: establish `\"a\" in? d` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `d.get(\"a\")` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_clear_nested.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: the dictionary has no entry for this key to change: d[k] += 1 changes an entry that is there; to count, write `if k in? d {d[k] += 1} else {d[k] = 1}`\n    in main (rhs_clear_nested.dewy:7)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_clear_nested_proof.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/rhs_clear_nested_proof.dewy:4:46: error: cannot prove the key is in the dictionary\n    main=()=>{ if \"a\" in? d and \"x\" in? d[\"a\"] { d[\"a\"][\"x\"] += wipe() } }\n                                                 ^\n<root>/tests/cases/dictionary/rhs_clear_nested_proof.dewy:4:61: note: this call to wipe may write a mutable or exposed root\n    main=()=>{ if \"a\" in? d and \"x\" in? d[\"a\"] { d[\"a\"][\"x\"] += wipe() } }\n                                                                ^\n    help: establish `\"a\" in? d` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `d.get(\"a\")` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_clear_record.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: the dictionary has no entry for this key to change: d[k] += 1 changes an entry that is there; to count, write `if k in? d {d[k] += 1} else {d[k] = 1}`\n    in main (rhs_clear_record.dewy:8)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_clear_record_proof.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/rhs_clear_record_proof.dewy:5:27: error: cannot prove the key is in the dictionary\n    main=()=>{ if \"a\" in? d { d[\"a\"].n = wipe() } }\n                              ^\n<root>/tests/cases/dictionary/rhs_clear_record_proof.dewy:5:38: note: this call to wipe may write a mutable or exposed root\n    main=()=>{ if \"a\" in? d { d[\"a\"].n = wipe() } }\n                                         ^\n    help: establish `\"a\" in? d` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `d.get(\"a\")` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_inner_removed.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: the dictionary has no entry for this key to change: d[k] += 1 changes an entry that is there; to count, write `if k in? d {d[k] += 1} else {d[k] = 1}`\n    in main (rhs_inner_removed.dewy:6)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_inner_replaced.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"a\" -> [\"y\" -> 200 \"x\" -> 17]]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_key_value_once.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"b\" -> 200 \"a\" -> 17]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_plain_proven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"a\" -> 2 \"b\" -> 1] [\"a\" -> [\"x\" -> 13]] [\"a\" -> [n=3]] [\"a\" -> [3 2]]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_pool_moved.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "17\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_pool_removed.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: this handle's thing is gone from the pool (removed, or never there): check `pool.has(h)` first\n    in []= (indexing) (pool.jo:59)\n    called from main (rhs_pool_removed.dewy:8)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_readonly_proven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"a\" -> 31]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_receiver_index_once.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[[\"a\" -> 17 \"b\" -> 20] [\"b\" -> 30 \"a\" -> 40]]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_replace_array.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"b\" -> [200 201] \"a\" -> [7 101]] kir\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_replace_count.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"b\" -> 200 \"a\" -> 17] 1 b\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_replace_nested.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"b\" -> [\"x\" -> 300] \"a\" -> [\"y\" -> 200 \"x\" -> 17]] abr\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/rhs_replace_record.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"b\" -> [n=200 other=201] \"a\" -> [n=7 other=101]]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/spread_into_array.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/spread_into_array.dewy:4:17: error: a dictionary cannot be spread into an array or added to one: take its keys (`[d.keys...]`), its values (`d.values`), or its entries as records (`[loop [key value] in d [key=key value=value]]`)\n        let rows = [counts...]\n                    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/string_key_lengths.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "40 3150 3 3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/totaldict.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "8\n16\n2\n4\n[-1 -> \"neg\" 0 -> \"zero\" 1 -> \"plus\"]\n3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/totaldict_infinite.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/totaldict_infinite.dewy:1:7: error: totaldict needs a finite key type (a union of literals), found string\n    let t:totaldict<string int64> = [\"a\" -> 1]\n          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/totaldict_missing.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/totaldict_missing.dewy:2:43: error: this totaldict has no entry for '0x'\n    const RADIX:totaldict<BasePrefix int64> = ['0b' -> 2 '0o' -> 8]\n                                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/totaldict_partial.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/totaldict_partial.dewy:4:15: error: a dict<'0b' | '0o' | '0x' int64> may be missing keys, so it is not a totaldict<'0b' | '0o' | '0x' int64> (a totaldict is made from a literal with every key)\n    printl(lookup(d '0b'))\n                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/totaldict_pop.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/totaldict_pop.dewy:3:1: error: a totaldict keeps an entry for every key: it has no pop\n    r.pop('0b')\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/totaldict_wide_range.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/totaldict_wide_range.dewy:2:11: error: totaldict needs a finite key type (a union of literals), found int64<refinement>\n    let table:totaldict<Key string> = [0 -> \"zero\"]\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/update_missing_count.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "[\"a\" -> 2 \"b\" -> 1]\n",
+      "stderr": "panic: the dictionary has no entry for this key to change: d[k] += 1 changes an entry that is there; to count, write `if k in? d {d[k] += 1} else {d[k] = 1}`\n    in run (update_missing_count.dewy:11)\n    called from main (update_missing_count.dewy:14)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/update_missing_record.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 101,
+      "stdout": "[\"a\" -> [x=2 y=2]]\n",
+      "stderr": "panic: the dictionary has no entry for this key to change: d[k] += 1 changes an entry that is there; to count, write `if k in? d {d[k] += 1} else {d[k] = 1}`\n    in run (update_missing_record.dewy:11)\n    called from main (update_missing_record.dewy:15)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/value_equality.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/zip_copy.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/zip_empty.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/zip_keys.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/zip_or.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/zip_pairs.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/zip_removed.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/zip_source_order.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/zip_wide_record.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood38_followups/sorted_key_record_keys.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2 y 5\n1 x 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood38_proofs/record_keys_crossed_equality.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood38_proofs/record_keys_crossed_equality.dewy:6:36: error: cannot prove the key is in the dictionary\n        loop p in d.keys.values printl(d[p])\n                                       ^\n<root>/tests/cases/dogfood38_proofs/record_keys_crossed_equality.dewy:5:5: note: this call to []= may write a mutable or exposed root\n        d[Pair[1 2]] = 1\n        ^\n    help: establish `p in? d` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `d.get(p)` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood38_proofs/record_keys_fieldwise_equality.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2,1 b\n1,5 a\nx 10\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood38_proofs/record_keys_float_field.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood38_proofs/record_keys_float_field.dewy:5:44: error: cannot prove the dictionary key holds no NaN\n        loop p in seen.keys.values printl(seen[p])\n                                               ^\n    help: NaN equals nothing, so its entry could never be found again: compute it under `$no_nan`, or check it at run time under `$runtime_checks`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood38_proofs/record_keys_own_hash.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood38_proofs/record_keys_own_hash.dewy:6:36: error: cannot prove the key is in the dictionary\n        loop p in d.keys.values printl(d[p])\n                                       ^\n<root>/tests/cases/dogfood38_proofs/record_keys_own_hash.dewy:5:5: note: this call to []= may write a mutable or exposed root\n        d[Id[1]] = 1\n        ^\n    help: establish `p in? d` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `d.get(p)` gives none for it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood38_proofs/record_keys_unequal_equality.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood38_proofs/record_keys_unequal_equality.dewy:6:36: error: cannot prove the key is in the dictionary\n        loop p in d.keys.values printl(d[p])\n                                       ^\n<root>/tests/cases/dogfood38_proofs/record_keys_unequal_equality.dewy:5:5: note: this call to []= may write a mutable or exposed root\n        d[Id[1]] = 1\n        ^\n    help: establish `p in? d` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `d.get(p)` gives none for it\n",
+   "files": {}
+  }
+ ],
+ "test_facts_map_queries_twins[False]": [
+  {
+   "args": [
+    "build",
+    "<root>/compiler/main.jo",
+    "-o",
+    "<tmp>/unused"
+   ],
+   "status": 0,
+   "stdout": "bounded rejected-route values: 1\nclear rejected-route values: 0\nreflexive map facts ok\n",
+   "stderr": "",
+   "files": {}
+  }
+ ],
+ "test_facts_map_queries_twins[True]": [
+  {
+   "args": [
+    "build",
+    "<root>/compiler/main.jo",
+    "-o",
+    "<tmp>/unused"
+   ],
+   "status": 0,
+   "stdout": "bounded rejected-route values: 1\nclear rejected-route values: 0\nreflexive map facts ok\n",
+   "stderr": "",
+   "files": {}
+  }
+ ]
+}

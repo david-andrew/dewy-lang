@@ -1,0 +1,228 @@
+{
+ "test_facts_pushes_keeps_entry_bound": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_bounds/counted_pushes.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "40\n42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_bounds/conditional_pushes.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "40\n42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_bounds/push_in_selector.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/census_bounds/push_in_selector.dewy:4:5: error: cannot prove index is in bounds: missing upper bound\n        xs[2]\n        ^\n    note: xs.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `2 <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): xs.length = 0\n    help: establish `2 <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_bounds/push_replaced_in_rhs.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/census_bounds/push_replaced_in_rhs.dewy:4:40: error: cannot prove index is in bounds: missing upper bound\n        loop k in [0..rounds) { xs.push(8) xs[0] = replace(@xs) }\n                                           ^\n<root>/tests/cases/census_bounds/push_replaced_in_rhs.dewy:4:48: note: xs.length may have changed at this call to replace\n        loop k in [0..rounds) { xs.push(8) xs[0] = replace(@xs) }\n                                                   ^\n    note: the earlier `0 <? xs.length` fact described the value before the call to replace\n    note: missing upper bound: nothing establishes `0 <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): xs.length = 0\n    help: establish `0 <? xs.length` after `replace(@xs)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_bounds/conditional_push_replaces_element.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/census_bounds/conditional_push_replaces_element.dewy:6:5: error: cannot prove index is in bounds: missing upper bound\n        rows[0][0]\n        ^\n    note: rows[0].length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `0 <? rows[0].length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): rows[0].length = 0\n    help: establish `0 <? rows[0].length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ],
+ "test_global_write_summaries": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_bounds/global_helpers.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_bounds/global_optional_shrink.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/census_bounds/global_optional_shrink.dewy:9:9: warning: 'result' is given a value here but never used\n<root>/tests/cases/census_bounds/global_optional_shrink.dewy:10:5: error: cannot prove index is in bounds: missing upper bound\n        xs[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/census_bounds/global_optional_shrink.dewy:9:18: note: xs.length may have changed at this call to edit\n        let result = edit(shrink)\n                     ^\n<root>/tests/cases/census_bounds/global_optional_shrink.dewy:8:18: note: the earlier `i <? xs.length` fact described the value before the call to edit\n        if i <? 0 or i >=? xs.length { return 0 }\n                     ^\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, xs.length = 0\n    help: establish `i <? xs.length` after `edit(shrink)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_bounds/global_grow_is_not_exact.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/census_bounds/global_grow_is_not_exact.dewy:6:5: error: cannot prove index is in bounds: missing lower and upper bounds\n        other[xs.length - 1]\n        ^\n    note: xs.length - 1 is between -1 and 281474976710654\n    note: missing lower bound: nothing establishes `xs.length - 1 >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): xs.length - 1 = -1\n    note: other.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `xs.length - 1 <? other.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): xs.length - 1 = 0, other.length = 0\n    help: establish `0 <=? xs.length - 1 <? other.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ],
+ "test_loop_call_lengths": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_bounds/loop_calls.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "40\n42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_bounds/loop_call_may_shrink.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/census_bounds/loop_call_may_shrink.dewy:7:5: error: cannot prove index is in bounds: missing upper bound\n        xs[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/census_bounds/loop_call_may_shrink.dewy:6:29: note: xs.length may have changed at this call to edit\n        loop k in [0..rounds) { edit(@xs k =? 1) }\n                                ^\n<root>/tests/cases/census_bounds/loop_call_may_shrink.dewy:5:18: note: the earlier `i <? xs.length` fact described the value before the call to edit\n        if i <? 0 or i >=? xs.length { return 0 }\n                     ^\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, xs.length = 0\n    help: establish `i <? xs.length` after `edit(@xs ...)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ],
+ "test_loop_sort_lengths": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_bounds/loop_sort.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_bounds/loop_sort_callback_shrinks.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/census_bounds/loop_sort_callback_shrinks.dewy:6:5: error: cannot prove index is in bounds: missing upper bound\n        other[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/census_bounds/loop_sort_callback_shrinks.dewy:5:29: note: other.length may have changed at this call to sort_with\n        loop k in [0..rounds) { xs.sort_with(@less) }\n                                ^\n<root>/tests/cases/census_bounds/loop_sort_callback_shrinks.dewy:4:18: note: the earlier `i <? other.length` fact described the value before the call to sort_with\n        if i <? 0 or i >=? other.length { return 0 }\n                     ^\n    note: missing upper bound: nothing establishes `i <? other.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, other.length = 0\n    help: establish `i <? other.length` after `sort_with(@xs ...)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ],
+ "test_optional_place_summaries": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_bounds/optional_helper_grows.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "9\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_bounds/optional_helper_shrinks.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/census_bounds/optional_helper_shrinks.dewy:9:5: error: cannot prove index is in bounds: missing upper bound\n        xs[i]\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/census_bounds/optional_helper_shrinks.dewy:8:23: note: xs.length may have changed at this call to edit\n        loop k in [0..n) {edit(@xs k =? 1);}\n                          ^\n<root>/tests/cases/census_bounds/optional_helper_shrinks.dewy:7:18: note: the earlier `i <? xs.length` fact described the value before the call to edit\n        if i <? 0 or i >=? xs.length {return 0}\n                     ^\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, xs.length = 0\n    help: establish `i <? xs.length` after `edit(@xs ...)` with a current guard, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ]
+}

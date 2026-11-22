@@ -1,0 +1,116 @@
+{
+ "test_checker_type_names_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/type_members/records.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "png\n9\n2 4 2 true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/type_members/named.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "2 3 1 4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/secret/operations.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true false\n17\n42 -42\ntrue <redacted>\ntrue\ntrue\ntrue false\n2\n7\nabc\n84\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_integer_arguments/qualified.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 0,
+      "stdout": "6\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/type_members/missing_member.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/type_members/missing_member.dewy:3:11: error: 'r' has no member 'n' that is a type\n    show = (x:r.n) => printl\"x\"\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/jo_type_annotation.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/jo_type_annotation.dewy:3:11: error: `str` is not a Dewy type name: write `string`\n     let name:str=\"dewy\"\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/jo_type_conversion.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/jo_type_conversion.dewy:2:8: error: `f64` is not a Dewy type name: write `float64`\n     let x=f64(3)\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/jo_type_member.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/jo_type_member.dewy:1:19: error: `u8` is not a Dewy type name: write `uint8`\n    main=()=>{ printl(u8.max) }\n                      ^\n",
+   "files": {}
+  }
+ ]
+}

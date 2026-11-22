@@ -1,0 +1,68 @@
+{
+ "test_checker_compound_values_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/logical_short_circuit.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "false true 0\ntrue true 2\n[false true] 3\n9\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/bitwise_word_assign.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "6\n14\n8\n11\n10\nfalse\ntrue\n[7 6]\nset[2 3]\nset[2 3 9]\n1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/floor_signs.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/compound/integer_exact_division.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/compound/integer_exact_division.dewy:2:20: error: type mismatch: expected int, found rational (`/` gives an exact fraction: `//` divides whole numbers, and `q.floor()` or `q.round()` gives a whole number)\n    main=()=>{let x=42 x/=2 return x}\n                       ^\n",
+   "files": {}
+  }
+ ]
+}

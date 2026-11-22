@@ -1,0 +1,36 @@
+{
+ "test_decimal_unit_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood37_proofs/decimal_unit_turns_float.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "0.4kWh\n2.5\n1.8(3)m\n1.25kWh\n365.0m\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood37_proofs/decimal_unit_stays_float_rejected.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood37_proofs/decimal_unit_stays_float_rejected.dewy:7:29: error: type mismatch: expected rational, found float64 (a decimal literal such as `0.5` is an exact rational: write the floating type where the value is made, as `let x:float64 = 0.5` or `let xs:array<float64> = [1.5 2.5]`)\n        let e:rational*Length = t\n                                ^\n",
+   "files": {}
+  }
+ ]
+}

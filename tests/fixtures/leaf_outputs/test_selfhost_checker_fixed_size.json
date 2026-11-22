@@ -1,0 +1,52 @@
+{
+ "test_checker_fixed_size_twins": [
+  {
+   "args": [
+    "build",
+    "<tmp>/named.jo"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/zero.jo"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/zero.jo:3:13: error: the size of a fixed-size array must be at least 1 (found 0)\n        xs: int[0]\n                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/large.jo"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/large.jo:3:13: error: fixed-size array too large (268435457 elements; use T[] for big arrays)\n        xs: int[268435457]\n                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_zero_length.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fixed/array_zero_length.dewy:2:41: error: the size of a fixed-size array must be at least 1 (found 0)\n    main=()=>{let values:array<int64 length=0>=[] return 42}\n                                            ^\n",
+   "files": {}
+  }
+ ]
+}

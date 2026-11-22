@@ -1,0 +1,528 @@
+{
+ "test_checker_narrow_rollback_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/optional/union_else_narrowing_path.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "maybe 7 | just 7 | maybe 7 | maybe 7 | int\nmaybe true | no | maybe true | maybe true | Oops[message=\"replaced\"]\nbad | no | bad | bad | Oops[message=\"replaced\"]\nmaybe none | just none | maybe none | maybe none | Oops[message=\"replaced\"]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/optional/union_else_narrowing_path_write.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/optional/union_else_narrowing_path_write.dewy:8:22: error: this (bool | int64 | Oops)? may be none (nothing) rather than a bool | int64 | Oops: before calling 'maybe', say what to use then (`x ?? default`), or check it first: `if x isnt? none { ... }`\n            return maybe(b.v)\n                         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/semicolon_narrow/discard_value.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/semicolon_narrow/discard_value.dewy:1:26: warning: this value is not used: it changes nothing\n<root>/tests/cases/semicolon_narrow/discard_value.dewy:1:35: warning: this value is not used: it changes nothing\n",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/semicolon_narrow/else.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 0,
+      "stdout": "value\n42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/semicolon_narrow/newline.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p4-0": {
+     "run": {
+      "status": 0,
+      "stdout": "42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/semicolon_narrow/newline_fallthrough.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/semicolon_narrow/newline_fallthrough.dewy:3:6: error: this int64? may be none (nothing) rather than a int64: before calling 'use', say what to use then (`x ?? default`), or check it first: `if x isnt? none { ... }`\n     use(r)}\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/semicolon_narrow/semicolon.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p6-0": {
+     "run": {
+      "status": 0,
+      "stdout": "42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/semicolon_narrow/semicolon_fallthrough.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/semicolon_narrow/semicolon_fallthrough.dewy:2:69: error: this int64? may be none (nothing) rather than a int64: before calling 'use', say what to use then (`x ?? default`), or check it first: `if x isnt? none { ... }`\n    probe=(r:int64|none):>void=>{if r is? none {printl(\"missing\")}; use(r)}\n                                                                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p8-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_bool_exhaustive.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p9-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_bool_incomplete.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/match/union_bool_incomplete.dewy:2:23: error: this match has no arm for bool (add one, or a `_ => ...` arm for the rest)\n    pick=(v:bool|string)=>match v {<true>=>42 <string>=>0}\n                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_guard_coverage.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/match/union_guard_coverage.dewy:3:5: warning: 'neg' is given a value here but never used\n",
+   "files": {
+    "p11-0": {
+     "run": {
+      "status": 0,
+      "stdout": "neg\nnonneg 3\ns\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_guard_facts.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p12-0": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n700\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_guard_gap.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/match/union_guard_gap.dewy:2:32: error: this match has no arm for int64 0 (add one, or a `_ => ...` arm for the rest)\n    part=(v:int64|string):>string=>match v {\n                                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_guards.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/match/union_guards.dewy:4:5: warning: 'answer' is given a value here but never used\n<root>/tests/cases/match/union_guards.dewy:6:5: warning: 'n' is given a value here but never used\n",
+   "files": {
+    "p14-0": {
+     "run": {
+      "status": 0,
+      "stdout": "a flag\nthe answer\nsmall 7\nlarge\nhi\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_literal_incomplete.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/match/union_literal_incomplete.dewy:2:24: error: this match has no arm for int64 (add one, or a `_ => ...` arm for the rest)\n    pick=(v:int64|string)=>match v {<0>=>42 <string>=>0}\n                           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_literal_member.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p16-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_literal_overflow.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/match/union_literal_overflow.dewy:2:34: error: value 256 does not fit in uint8\n    pick=(v:uint8|string)=>match v {<256>=>0 _=>42}\n                                     ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_literal_path.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p18-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_literal_snapshot.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p19-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_literal_widths.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p20-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_literal_wrong_type.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/match/union_literal_wrong_type.dewy:2:31: error: literal pattern is not a member of bool | int64\n    pick=(v:int64|bool)=>match v {<\"no\">=>0 _=>42}\n                                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_literals.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p22-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_narrow.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p23-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_partial_fallback.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p24-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_partial_not_narrowed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/match/union_partial_not_narrowed.dewy:2:43: error: int64 has no field 'length'\n    pick=(v:int64|string)=>match v {<0>=>0 _=>v.length}\n                                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_subset_binding.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p26-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_subset_copy.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p27-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_subset_generic.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p28-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_subset_incomplete.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/match/union_subset_incomplete.dewy:2:29: error: this match has no arm for bool (add one, or a `_ => ...` arm for the rest)\n    pick=(v:int64|string|bool)=>match v {<int64|string>=>42}\n                                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_subset_narrow.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p30-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_subset_overlap.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p31-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_subset_path.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p32-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_subset_wrong_type.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/match/union_subset_wrong_type.dewy:2:38: error: type pattern int64 | float64 is not a member of bool | int64 | string\n    pick=(v:int64|string|bool)=>match v {<int64|float64>=>0 _=>42}\n                                         ^\n",
+   "files": {}
+  }
+ ]
+}

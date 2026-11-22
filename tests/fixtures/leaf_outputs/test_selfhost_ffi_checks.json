@@ -1,0 +1,148 @@
+{
+ "test_ffi_checks_diagnostics[extern_array-cannot cross the C boundary]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/input.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 41,
+   "stdout": "array<uint8> cannot cross the C boundary: a `$extern` function takes and returns fixed-width numbers, bools, `ptr<T>`, `ptr<T>?`, strings (a `char *`), function types (C function pointers) and records with C's layout (C structs)\n",
+   "stderr": "",
+   "files": {}
+  }
+ ],
+ "test_ffi_checks_diagnostics[extern_math_int-cannot cross the C boundary]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/input.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 41,
+   "stdout": "`int` cannot cross the C boundary (its size is not fixed): a `$extern` function uses int32, int64, uint8, … instead\n",
+   "stderr": "",
+   "files": {}
+  }
+ ],
+ "test_ffi_checks_diagnostics[extern_needs_unsafe-unsafe boundary]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/input.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 41,
+   "stdout": "using the foreign function 'getpid' needs an unsafe boundary (the compiler cannot check what it does): write `$unsafe` before the expression, on its line or the line above, or `$unsafe { ... }` around several\n",
+   "stderr": "",
+   "files": {}
+  }
+ ],
+ "test_ffi_checks_diagnostics[record_layout_managed-has no C layout]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/input.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 41,
+   "stdout": "Named has no C layout (its field 'name': string is managed by Dewy): a pointer for C points to fixed-width numbers, bools, pointers, or records of them\n",
+   "stderr": "",
+   "files": {}
+  }
+ ],
+ "test_ffi_checks_programs[ptr_round_trip-default]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/input.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "5\n99 3\n4 1\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_ffi_checks_programs[ptr_round_trip-release]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/input.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "5\n99 3\n4 1\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_ffi_checks_programs[record_layout-default]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/input.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "0\ntrue\n7 513\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_ffi_checks_programs[record_layout-release]": [
+  {
+   "args": [
+    "build",
+    "<tmp>/input.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "0\ntrue\n7 513\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

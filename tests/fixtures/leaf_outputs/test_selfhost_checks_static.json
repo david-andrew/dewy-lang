@@ -1,0 +1,104 @@
+{
+ "test_checks_static_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/main/explicit_call_rejected.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/main/explicit_call_rejected.dewy:2:1: error: main runs by itself, once, after the file's top-level statements: remove this call (a file without main runs top to bottom as a script)\n    main()\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/migrated_direct_migrated_identity_1.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "member 97 3\n4 5 22\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/reject_library_text.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/comptime/reject_library_text.dewy:1:9: error: assertion refuted: this condition is always false\n    $assert \"a,b\".split(\",\").length =? 3\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/testing/expect_returns.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "checked 7\nmain continued\n",
+      "stderr": "<root>/tests/cases/testing/expect_returns.dewy:4:5: expectation failed: nonempty input\n        $expect xs.length >? 0, \"nonempty input\"\n                ^~~~~~~~~~~~~~\nnote: xs.length is 0\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/misc/proof_directive.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/misc/proof_directive.dewy:3:7: error: $proof cannot return a value\n    value=():>int64=>42\n          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/join_one_sided.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/join_one_sided.dewy:3:13: error: cannot prove assertion: a predecessor lacks the required evidence\n        $assert x >? 0\n                ^\n    note: missing lower bound: nothing establishes `x >? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x = 0\n<root>/tests/cases/facts/join_one_sided.dewy:2:5: note: a path into this branch lacks the evidence\n        if flag { $runtime_assert x >? 0 }\n        ^\n    help: establish `x >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/write_after_guard.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/facts/write_after_guard.dewy:2:30: error: assertion refuted: this condition is always false\n        if x >? 0 { x=0; $assert x >? 0 }\n                                 ^\n<root>/tests/cases/facts/write_after_guard.dewy:2:17: note: x is 0 after this assignment\n        if x >? 0 { x=0; $assert x >? 0 }\n                    ^\n<root>/tests/cases/facts/write_after_guard.dewy:2:8: note: the earlier `x >? 0` fact described the value before the assignment\n        if x >? 0 { x=0; $assert x >? 0 }\n           ^\n    help: establish `x >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ]
+}

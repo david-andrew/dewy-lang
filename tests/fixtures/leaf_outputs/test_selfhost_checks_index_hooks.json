@@ -1,0 +1,132 @@
+{
+ "test_checks_index_hooks_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/element_nested_field.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_alias_tags/element_nested_field.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/strings_string_diagnostics_4.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/strings_string_diagnostics_4.dewy:3:15: warning: 'text' is given a value here but never used\n<root>/tests/cases/frontend/strings_string_diagnostics_4.dewy:3:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{let text=\"{[1 2][end]}\"\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/reject_string_index.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/lib/std/graphemes.jo:251:10: error: compile-time evaluation: string index out of bounds\n  compile-time call to __dewy_string_index at <root>/tests/cases/comptime/reject_string_index.dewy:1:9\n        panic(\"string index out of bounds\")\n             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fixed/array_selections.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood33_proofs/dict_fallback_rejected.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood33_proofs/dict_fallback_rejected.dewy:1:56: error: '??' needs an optional on the left, found int; dictionary indexing gives the value itself; use `mapping.get(key) ?? fallback`\n    main = () => { let d = [\"a\" -> 1]; let k = \"b\"; printl(d[k] ?? 0) }\n                                                           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/direct_direct_expression_diagnostics_4.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/direct_direct_expression_diagnostics_4.dewy:2:18: error: cannot index a value of type int\n    main=()=>{return 1[none]}\n                     ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/keys_set_index.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/keys_set_index.dewy:3:12: error: a set has no positions to index (`d.keys` is a set): `[d.keys...]` collects its members into an array, and `in?` tests membership\n        printl(d.keys[0])\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/witness/pool_entry_copy.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/witness/pool_entry_copy.dewy:6:5: error: `players[p]` is a copy of the entry, so changing it changes nothing: copy it out, change the copy and store it back (`let e = players[p]` ... `players[p] = e`)\n        players[p].items.push(1)\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/numeric/broadcast_selection_constant.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/numeric/broadcast_selection_constant.dewy:2:26: error: cannot modify const 'xs'; copy it with `let xs = xs`\n    main=()=>{const xs=[1 2] xs[..] .+= 1 return 0}\n                             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/range/index_stepped_string.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/range/index_stepped_string.dewy:2:10: error: stepped slicing requires an array\n    main=()=>\"abc\"[0,2..2].length\n             ^\n",
+   "files": {}
+  }
+ ]
+}

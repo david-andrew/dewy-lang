@@ -1,0 +1,98 @@
+{
+ "test_checker_module_dependency_order": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/modules/cycle_diamond.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "84\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/import_cycles/three_modules.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "2 21 41 63\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/import_cycles/value_cycle.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/import_cycles/../../fixtures/import_cycles/value_cycle_peer.dewy:2:7: error: a value cycle across modules: 'a' (<root>/tests/cases/import_cycles/value_cycle.dewy:5) needs 'b' (<root>/tests/cases/import_cycles/../../fixtures/import_cycles/value_cycle_peer.dewy:2), which needs 'a': give one of them a value that does not need the others\n    let b=top.a + 1\n          ^\n",
+   "files": {}
+  }
+ ],
+ "test_checker_module_edges_twins": [
+  {
+   "args": [
+    "build",
+    "<tmp>/entry.jo"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "10\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/modules/splat_shadows_prelude.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/modules/splat_shadows_prelude.dewy:4:1: warning: `max` from the splat import of ../../fixtures/splat/tuned.dewy shadows the prelude's `max` (lib/math_int.jo): select it, `from p\"../../fixtures/splat/tuned.dewy\" import max`, or import the module under a name, `import p\"../../fixtures/splat/tuned.dewy\" as tuned`\n<root>/tests/cases/modules/../../fixtures/splat/tuned.dewy:3:7: warning: 'max' hides the library's method `int64.max`: this function takes over every `x.max` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "6 10\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/modules/splat_selective_collision.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/modules/splat_selective_collision.dewy:3:48: error: 'double' is imported from both shapes.dewy and other.dewy; import it with another name: double as ...\n    from p\"../../fixtures/splat/other.dewy\" import double\n                                                   ^\n",
+   "files": {}
+  }
+ ]
+}

@@ -1,0 +1,42 @@
+{
+ "test_gpu_type_checks_match_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_word_memory/exact_loops.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[39.0 39.0]\n[6.0 12.0]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_buffer_bounds/unguarded_read_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_buffer_bounds/unguarded_read_bad.dewy:6:74: error: cannot prove index is in bounds: missing upper bound\n    k=(id:int64 u:P):>void=>{ if id >=? 0 and id <? u.dst.length { u.dst[id]=u.src[id] } }\n                                                                             ^\n    note: id is between 0 and 2147483646\n    note: u.src.length is between 0 and 2147483647\n    note: missing upper bound: nothing establishes `id <? u.src.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): id = 0, u.src.length = 0\n    help: establish `id <? u.src.length` with a current guard or a stronger checked contract\n    note: this is GPU code: a shader cannot run a check, so neither `$runtime_checks` nor `$runtime_assert` applies here: prove it\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/gpu_word_memory/exact_overflow_bad.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/gpu_word_memory/exact_overflow_bad.dewy:5:37: error: in shader code: this exact `int` is not proven to fit in 32 bits, all a shader holds: give it a width, `int32(...)`, or bound it (a counting loop over literals is)\n        loop i in [0..4) { s += float32(i*big*big) }\n                                        ^\n",
+   "files": {}
+  }
+ ]
+}

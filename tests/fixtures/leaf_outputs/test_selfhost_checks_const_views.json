@@ -1,0 +1,28 @@
+{
+ "test_checks_const_views_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/constant/view_write_loop.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/constant/view_write_loop.dewy:6:9: error: this write conflicts with const view 'v', which is still in use\n            xs.push(i)\n            ^\n    note: the loop repeats a use of 'v' after the write\n<root>/tests/cases/constant/view_write_loop.dewy:3:11: note: the view is declared here\n        const v = @xs\n              ^\n    help: write after the view's last use, or take an independent snapshot with `.copy`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/constant/view_write_conflict.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/constant/view_write_conflict.dewy:5:5: error: this write conflicts with const view 'box', which is still in use\n        boxes[0] = Box(5)\n        ^\n<root>/tests/cases/constant/view_write_conflict.dewy:6:12: note: 'box' is used here, after the write\n        printl(box.value)\n               ^\n<root>/tests/cases/constant/view_write_conflict.dewy:4:11: note: the view is declared here\n        const box = @boxes[0]\n              ^\n    help: write after the view's last use, or take an independent snapshot with `.copy`\n",
+   "files": {}
+  }
+ ]
+}

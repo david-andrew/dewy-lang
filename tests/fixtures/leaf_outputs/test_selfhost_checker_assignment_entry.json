@@ -1,0 +1,50 @@
+{
+ "test_checker_assignment_entry_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/end/index_update.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/pool_fixed_update/direct_update_snapshot.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[0 7 0 0] [5 5 5 9] 0\n[0 0 0 0] [5 5 5 5] 1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/late.jo"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/late.jo:2:5: error: 'score' is the global variable declared below this function (at <tmp>/late.jo:3:1), so this would change it: for a variable of the function's own, write `let score = ...` (or use another name); to mean the global, declare it above the function\n        score = 2\n        ^\n",
+   "files": {}
+  }
+ ]
+}

@@ -1,0 +1,116 @@
+{
+ "test_checks_istype_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/element_nested_field.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_alias_tags/element_nested_field.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/optional/union_else_narrowing_path_write.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/optional/union_else_narrowing_path_write.dewy:8:22: error: this (bool | int64 | Oops)? may be none (nothing) rather than a bool | int64 | Oops: before calling 'maybe', say what to use then (`x ?? default`), or check it first: `if x isnt? none { ... }`\n            return maybe(b.v)\n                         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/union_guard_facts.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7\n700\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood30_proofs/search_missing_hint.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood30_proofs/search_missing_hint.dewy:4:15: error: none is not one of the types of int64 | Missing: it holds Missing when there is no value, so test `is? Missing`, or give a fallback with `??`\n        if at is? none return\n                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/string_literal_match_hint.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/string_literal_match_hint.dewy:4:5: error: match is not exhaustive: this is a string, which may hold other text than 'go', 'stop' (add a `_ => ...` arm, or match the literal union instead: `match x as U {...}` after `x is? U` holds)\n        match word {\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/void_union_trailing_family.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "cannot remove no-such-file-for-this-case\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood36_proofs/optional_union_foreign_member_rejected.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood36_proofs/optional_union_foreign_member_rejected.dewy:3:5: error: a (int8 | string)? is either a int8 | string or none, never a int64<refinement>\n        a:int64<a <? 0> => \"neg {a}\"\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood30_proofs/search_int_hint.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood30_proofs/search_int_hint.dewy:4:15: error: int is not one of the types of int64 | Missing: its number is an int64, so test `is? int64`\n        if at is? int printl(at)\n                  ^\n",
+   "files": {}
+  }
+ ]
+}

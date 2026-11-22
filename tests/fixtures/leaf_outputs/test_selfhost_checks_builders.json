@@ -1,0 +1,152 @@
+{
+ "test_checks_builders_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/m_tasks_migrated_tasks_diagnostics_7.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/m_tasks_migrated_tasks_diagnostics_7.dewy:7:27: error: `return` inside an `$allocator` expression would leave it before its value is copied out of the arena: make the value the expression's result, and return after it\n    let n = $allocator(@xs) { return }\n                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/misc/main_float_result.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/misc/main_float_result.dewy:2:6: error: main returns void or the errors that reach it, found rational: rational is not an error. A last line giving a value gives it back: declare `main = ():>void => ...` to drop it, print it, or end with `exit(n)` for a code\n    main=()=>42.5\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/flows_flow_fallback_diagnostics_3.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/flows_flow_fallback_diagnostics_3.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{let value=0\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/precision_inference/key_outside.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/precision_inference/key_outside.dewy:5:18: error: cannot prove this value is 'fast' | 'slow'; test it with `is?`, or read it with the literal-union type constructor\n        let a=values[mode]\n                     ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/numeric/broadcast_matrix_selection_constant.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/numeric/broadcast_matrix_selection_constant.dewy:2:30: error: cannot modify const 'm'; copy it with `let m = m`\n    main=()=>{const m=zeros(2 3) m[[..] 1] .+= 1.0 return 0}\n                                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ownership/growable_dictionary_move_only.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "ok\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/set/spread_wrong_type.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/set/spread_wrong_type.dewy:2:40: error: type mismatch: expected uint8, found string (an array holds one kind of value, here uint8; for values of several kinds, use a record type or a union such as `array<int64|string>`)\n    main=()=>{let values:array<uint8>=[set[\"wrong\"]...] return 42}\n                                           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/counted_keys.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/arena/reject_return.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/arena/reject_return.dewy:5:26: error: `return` inside an `$allocator` expression would leave it before its value is copied out of the arena: make the value the expression's result, and return after it\n            if t.length >? 5 return t\n                             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/strings_string_diagnostics_4.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/strings_string_diagnostics_4.dewy:3:15: warning: 'text' is given a value here but never used\n<root>/tests/cases/frontend/strings_string_diagnostics_4.dewy:3:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{let text=\"{[1 2][end]}\"\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/numeric/broadcast_selection_mask_constant.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/numeric/broadcast_selection_mask_constant.dewy:2:26: error: cannot modify const 'xs'; copy it with `let xs = xs`\n    main=()=>{const xs=[1 2] xs[[true false]] .+= 1 return 0}\n                             ^\n",
+   "files": {}
+  }
+ ]
+}

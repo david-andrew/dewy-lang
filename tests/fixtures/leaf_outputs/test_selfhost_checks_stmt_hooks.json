@@ -1,0 +1,332 @@
+{
+ "test_checks_stmt_hooks_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/flows_flow_fallback_diagnostics_4.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/flows_flow_fallback_diagnostics_4.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{let value=0\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refine_alias_tags/element_nested_field.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refine_alias_tags/element_nested_field.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/flows_flow_fallback_diagnostics_2.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/flows_flow_fallback_diagnostics_2.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{let value=0\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/recursive_alias_record.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/recursive_alias_record.dewy:3:1: error: type 'Table' is defined in terms of itself: a type contains itself only through a record's field, as `Node:type = [value:int next:Node?]` does; make 'Table' a record holding the rest (`Table:type = [entries:...]`)\n    Table:type = dict<string Value>\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/mutable_global.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/comptime/mutable_global.dewy:2:17: error: compile-time evaluation: mutable global 'state' is not a compile-time constant; host effects are not allowed\n  compile-time call to read at <root>/tests/cases/comptime/mutable_global.dewy:3:9\n    read=():>int64=>state+1\n                    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/mixed_pair_tuple_hint.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/mixed_pair_tuple_hint.dewy:3:42: error: type mismatch: expected string, found int (an array holds one kind of value, here string; a few values of their own kinds are a tuple, a type per position: `let pair:[string int] = ...`; for many, a record type or a union such as `array<int64|string>`)\n        let pairs = [loop [k v] in counts [k v]]\n                                             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/multi/pack_one_value.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/multi/pack_one_value.dewy:2:3: error: 'pair' gives 2 values, and only one is taken here: collect them, `[pair(...)]`, or unpack them, `(a b) = pair(...)`\n    x=pair() + 1\n      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/numbers/int_accumulator_decimal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/numbers/int_accumulator_decimal.dewy:3:23: error: 'total' holds whole numbers (made on line 2), and this is a number with a fraction: write its first value with a decimal point (`total = 0.0`), so it holds fractions too, or make this a whole number with int(...)\n    loop x in [0.5 1.5] { total += x }\n                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/queues/spsc_capacity.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/queues/spsc_capacity.dewy:3:19: error: in this call to spsc: in call to __spsc_capacity(capacity:int64<refinement>): argument 'capacity' is 0, which breaks its contract `capacity >? 0` (lib/prelude/spsc.dewy:90:70)\n        let [tx rx] = spsc<int64 0>().split\n                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/mutual_recursion_no_base.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/inference/mutual_recursion_no_base.dewy:1:20: error: cannot prove exact integer result fits int64\n    f = (n:int64) => g(n + 1)\n                       ^\n    note: nothing bounds `n + 1` within int64 here\n    note: nothing bounds `n` here, so this has no known range: guard it first, or state it where the parameter is declared, `n:int64<(>=? 0)>`\n    help: establish `int64.min <=? (n + 1) and (n + 1) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n\n<root>/tests/cases/inference/mutual_recursion_no_base.dewy:4:9: error: cannot assign a value with no type (void) to 'x' ('f' calls itself, directly or through another function, with no branch that gives its result's type: write it, `f = (...):>int64 => ...`)\n        let x = f(1)\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/loop/label_duplicate.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/loop/label_duplicate.dewy:2:36: error: duplicate active loop label '$again'\n    main=()=>{$again loop true {$again loop true {break $again}}}\n                                       ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/definite/container.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/definite/container.dewy:3:5: error: 'items' is read before it is given a value on every path: give it one where it is declared (`let items:array<int64> = ...`), or assign it on each path before this read\n        items.push(1)\n        ^\n<root>/tests/cases/definite/container.dewy:2:9: note: 'items' is declared here without a value\n        let items:array<int64>\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/loop/else_argument_exit.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/loop/else_argument_exit.dewy:2:6: error: function must return a value of type int on all paths\n    main=()=>{loop true {return {break; 42}} else {return 42}}\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comprehension/collects_nothing.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/comprehension/collects_nothing.dewy:2:16: error: this loop collects nothing: its body must end with the value to collect, as `[loop i in xs { i * 2 }]`\n        let bad = [loop i in [0..3) { let x = i }]\n                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/m_statements_migrated_statements_diagnostics_1.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/m_statements_migrated_statements_diagnostics_1.dewy:9:5: warning: 'xs' is given a value here but never used\n<root>/tests/cases/frontend/m_statements_migrated_statements_diagnostics_1.dewy:3:5: warning: 'g' is never called: nothing runs it (call it, as `g(...)` where it should run)\n<root>/tests/cases/frontend/m_statements_migrated_statements_diagnostics_1.dewy:7:5: warning: 'f' is never called: nothing runs it (call it, as `f()` where it should run)\n<root>/tests/cases/frontend/m_statements_migrated_statements_diagnostics_1.dewy:4:8: error: missing return value (function returns int64)\n    <0> => return\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/juxtaposition/whitespace_product.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/juxtaposition/whitespace_product.dewy:4:11: warning: this value is not used (whitespace separates expressions: to multiply, write `*`)\n<root>/tests/cases/juxtaposition/whitespace_product.dewy:5:21: error: unknown name 'missing_name' (did you mean 'Missing'?)\n    main = () => printl(missing_name)\n                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/place_method/escape_local.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/place_method/escape_local.dewy:9:17: error: a function gives back a value, not a place: drop the `@` (a place goes to an `@` parameter or `let name = @place`)\n            return @x\n                    ^\n\n<root>/tests/cases/place_method/escape_local.dewy:14:15: error: 'leak' gives a value, not a place: drop the `@(...)`\n        let p = @(b.leak())\n                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/effects/declared_row_resource.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/effects/declared_row_resource.dewy:3:43: error: effect contract violation in 'pure': mutation of 'Filesystem' exceeds the contract (its row excludes it); pure -> save; witness at <root>/tests/cases/effects/declared_row_resource.dewy:2:6\n    pure=():>void & no mutates<Filesystem> => save()\n                                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/misc/nested_combined.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/exact_update_float.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2.5J\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/flows_flow_fallback_diagnostics_5.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/flows_flow_fallback_diagnostics_5.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{let value=0\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/declarations_declaration_fallback_7.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/declarations_declaration_fallback_7.dewy:2:15: warning: 'value' is given a value here but never used\n<root>/tests/cases/frontend/declarations_declaration_fallback_7.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{let value:<(a:int64):>int64>=(a:int64)=>a\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/flows_flow_fallback_diagnostics_3.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/flows_flow_fallback_diagnostics_3.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{let value=0\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/empty_literal/no_context_let_rejected.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/empty_literal/no_context_let_rejected.dewy:2:9: error: cannot infer the type of 'x'; add a type annotation (`let x:array<int64> = []` for an array of integers, `let x:dict<string int64> = []` for a dictionary)\n        let x = []\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/flows_flow_fallback_diagnostics_9.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/flows_flow_fallback_diagnostics_9.dewy:3:12: error: unknown loop label '$missing'\n    loop true {break $missing}\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/statements_statement_diagnostics_3.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/statements_statement_diagnostics_3.dewy:3:1: error: 'break' outside of a loop\n    break $missing}\n    ^\n",
+   "files": {}
+  }
+ ]
+}

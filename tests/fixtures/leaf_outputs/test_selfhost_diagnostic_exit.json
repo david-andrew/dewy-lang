@@ -1,0 +1,392 @@
+{
+ "test_diagnostic_exit_matches_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/condition_carried_exceptions.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/condition_carried_exceptions.dewy:5:8: error: type mismatch: expected bool, found bool | Canceled | FileError (it may be Canceled | FileError, carried along from where the value was made: handle that there, with `if x is? exception ...`, `or_throw` or `?? fallback`)\n        if words.is_empty return\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/effect_library_witness.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/effect_library_witness.dewy:1:33: error: effect contract violation in 'g': read exceeds the closed row (no_effects permits none); g -> the library\n    g = ():>int64 & no_effects => { printl(\"x\"); 1 }\n                                    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/effect_row_wording.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/effect_row_wording.dewy:1:39: error: effect contract violation in 'g': mutation of 'x' exceeds the closed row (the contract does not permit it); g; witness at <root>/tests/cases/errors/effect_row_wording.dewy:1:39\n    g = (@x:int64):>int64 & reads<x> => { x = 2; 1 }\n                                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/end_type_parameter.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/end_type_parameter.dewy:2:8: error: 'end' is reserved, not a name: inside brackets it is the last index, as in `xs[end]` (use `end_`)\n    first=<end>(xs:array<end>):>end=>xs[0]\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/family_narrowing.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p4-0": {
+     "run": {
+      "status": 0,
+      "stdout": "oops a\nOops\nother error\nBad\n42\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/family_pattern_join.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p5-0": {
+     "run": {
+      "status": 0,
+      "stdout": "failed: Bad[message=\"empty\"]\nbad blank\nfailed: Worse\nother Worse\nn 1\nq 3\nn 2\nq 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/family_union_display.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/family_union_display.dewy:5:17: error: type mismatch: expected int64, found int64 | error\n        let x:int64=r\n                    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/fieldless_error_brackets.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p7-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/forward_method_call.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p8-0": {
+     "run": {
+      "status": 0,
+      "stdout": "4 E\n5 E 2\nABC none\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/inferred_result_error_cascade.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/inferred_result_error_cascade.dewy:16:9: warning: 'later' is never called: nothing runs it (call it, as `later()` where it should run)\n<root>/tests/cases/errors/inferred_result_error_cascade.dewy:5:35: error: cannot prove exact integer result fits int64\n    add = (x:int64 y:int64):>int64 => x + y\n                                      ^\n    note: nothing bounds `x + y` within int64 here\n    note: nothing bounds `x` here, so this has no known range: guard it first, or state it where the parameter is declared, `x:int64<(>=? 0)>`\n    help: establish `int64.min <=? (x + y) and (x + y) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n\n<root>/tests/cases/errors/inferred_result_error_cascade.dewy:7:5: error: no field or function 'foo' for type int64\n        n.foo()\n        ^\n\n<root>/tests/cases/errors/inferred_result_error_cascade.dewy:17:19: error: type mismatch: expected int64, found string\n        let w:int64 = \"text\"\n                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/inferred_result_error_cascade_operators.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/inferred_result_error_cascade_operators.dewy:15:9: warning: 'later' is never called: nothing runs it (call it, as `later()` where it should run)\n<root>/tests/cases/errors/inferred_result_error_cascade_operators.dewy:5:5: error: no field or function 'foo' for type int64\n        n.foo()\n        ^\n\n<root>/tests/cases/errors/inferred_result_error_cascade_operators.dewy:16:19: error: type mismatch: expected int64, found string\n        let w:int64 = \"text\"\n                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/isdigit_habit_hint.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/isdigit_habit_hint.dewy:3:12: error: string has no field 'isdigit' (use a regular expression, `s.matches(regex(r\"\\d+\"))`, or `to_int(s) is? int`)\n        printl(s.isdigit)\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/library_division_location.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p12-0": {
+     "run": {
+      "status": 101,
+      "stdout": "3\n",
+      "stderr": "panic: library_division_location.dewy:4: division by zero\n    in f (library_division_location.dewy:4)\n    called from main (library_division_location.dewy:7)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/mixed_pair_tuple_hint.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/mixed_pair_tuple_hint.dewy:3:42: error: type mismatch: expected string, found int (an array holds one kind of value, here string; a few values of their own kinds are a tuple, a type per position: `let pair:[string int] = ...`; for many, a record type or a union such as `array<int64|string>`)\n        let pairs = [loop [k v] in counts [k v]]\n                                             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/mutable_loop_over_dict_values.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/mutable_loop_over_dict_values.dewy:4:5: error: `loop @item in items` changes the elements where they are stored, and a dictionary's `values` is a new array: change each entry through its key, `loop key in d.keys { d[key]... }`\n        loop @acct in accounts.values { acct.balance += 1 }\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/ndarray_rational_hint.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/ndarray_rational_hint.dewy:3:14: error: type mismatch: expected NDArray<float64>, found NDArray<rational> (a decimal literal such as `0.5` is an exact rational: write the floating type where the value is made, as `let x:float64 = 0.5` or `let xs:array<float64> = [1.5 2.5]`)\n    let p = Pair(reshape(a 2 2) 1)\n                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/optional_union_cast_hint.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/optional_union_cast_hint.dewy:4:12: error: cannot cast (int64 | string)? to int64 (an optional is not cast: inside `if x is? int64 { }` (or after `x is? int64 and`), x is one; `match x` takes each member, `x ?? fallback` gives a default)\n        printl(ins.arg as int64)\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/or_throw_optional_error.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/or_throw_optional_error.dewy:5:75: error: cannot prove exact integer result fits int64\n    lookup=(x:int64):>int64?|Oops=>if x <? 0 Oops[x] else if x =? 0 none else x*10\n                                                                              ^\n    note: nothing bounds `x*10` within int64 here\n    note: nothing bounds `x` here, so this has no known range: guard it first, or state it where the parameter is declared, `x:int64<(>=? 0)>`\n    help: establish `int64.min <=? (x*10) and (x*10) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n\n<root>/tests/cases/errors/or_throw_optional_error.dewy:7:15: error: or_throw cannot propagate none: it forwards every exception alternative, and `none` is one (`T?` is `T | none`), but the declared return type is int64 | Oops; to forward only the errors and keep the optional, write `value or_throw<Oops>`\n        let found=lookup(x) or_throw\n                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/or_throw_optional_match.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p18-0": {
+     "run": {
+      "status": 0,
+      "stdout": "31\n0\nOops[code=-1]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/proofs_after_unrelated_error.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/proofs_after_unrelated_error.dewy:20:9: warning: 'later' is never called: nothing runs it (call it, as `later()` where it should run)\n<root>/tests/cases/errors/proofs_after_unrelated_error.dewy:21:19: error: type mismatch: expected int64, found string\n        let w:int64 = \"text\"\n                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/runtime_assert_narrows.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p20-0": {
+     "run": {
+      "status": 0,
+      "stdout": "12\n6\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/runtime_assert_narrows_failure.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p21-0": {
+     "run": {
+      "status": 101,
+      "stdout": "",
+      "stderr": "panic: runtime_assert_narrows_failure.dewy:8: assertion failed: r isnt? Oops\n    in the top level of runtime_assert_narrows_failure (runtime_assert_narrows_failure.dewy:8)\n"
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/set_call_non_member.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/set_call_non_member.dewy:2:29: error: 'pop' is not one of 'push' | 'load'\n    let s:set<Op> = set(['push' 'pop'])\n                                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/string_literal_match_hint.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/string_literal_match_hint.dewy:4:5: error: match is not exhaustive: this is a string, which may hold other text than 'go', 'stop' (add a `_ => ...` arm, or match the literal union instead: `match x as U {...}` after `x is? U` holds)\n        match word {\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/type_of_plain_record.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/type_of_plain_record.dewy:2:1: error: `type of Animal` needs a minted parent: start the family with `Animal:type=type of any & [...]` (its fields and methods are inherited), or use `type of error` for errors\n    Dog:type=type of Animal & [breed:string]\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/union_result_effects_grouping.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/union_result_effects_grouping.dewy:2:22: error: effects describe the whole result: parenthesize the alternatives before them, `:>(A | B) & no_effects`\n    f = (x:int64):>int64|Oops & no_effects => {\n                         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/union_result_no_effects.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p26-0": {
+     "run": {
+      "status": 0,
+      "stdout": "3\nOops\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/unit_import_hint.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/unit_import_hint.dewy:2:20: error: unknown name 'rad' (a unit of the library: `from units import rad` at the top of the file)\n        printl(cos(2.0*rad))\n                       ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/void_result_arm.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p28-0": {
+     "run": {
+      "status": 0,
+      "stdout": "ok\nchecked 1\nchecked 2\nboth fine\nok\nchecked 3\noops -4\nok\noops -10\nok\noops 2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/void_union_print.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p29-0": {
+     "run": {
+      "status": 0,
+      "stdout": "void\nOops[code=-3]\ngot void as void\n[void Oops[code=-1]]\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

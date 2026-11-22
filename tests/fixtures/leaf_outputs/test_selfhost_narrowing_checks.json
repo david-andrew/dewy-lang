@@ -1,0 +1,76 @@
+{
+ "test_narrowing_checks_match_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/race_sources/inbox.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "a 1 b 20\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/singleton/string_unions.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0x\nnone\n-1\nhorizontal w\ne 1 horizontal e\n1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/optional/union_member_narrowing.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "-1\nstopped\n3\nstopped\n4\nstopped\n[none 3 4]\nnone\n4\n5\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/optional/union_else_narrowing_path.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 0,
+      "stdout": "maybe 7 | just 7 | maybe 7 | maybe 7 | int\nmaybe true | no | maybe true | maybe true | Oops[message=\"replaced\"]\nbad | no | bad | bad | Oops[message=\"replaced\"]\nmaybe none | just none | maybe none | maybe none | Oops[message=\"replaced\"]\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

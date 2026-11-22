@@ -1,0 +1,184 @@
+{
+ "test_facts_text_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/spread/call_context.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps18_bytes/slice.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[195 169]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/facts/narrowed_join_bound.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "bcxdef\nbc|bc\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood34_proofs/optional_text.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "h\n?\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood22_proofs/text_helper_keeps_roots.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/ownership/growable_move_only.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "ok\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_preconditions/find_start_unproven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_preconditions/find_start_unproven.dewy:1:35: error: cannot prove find's start `start` is within the text: missing lower and upper bounds\n    search=(text:string start:int64)=>text.find(\"b\" start)\n                                      ^\n    help: establish `0 <=? start <=? text.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/byte_slice/unproven_boundary.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/byte_slice/unproven_boundary.dewy:5:43: error: cannot prove byte_slice's stop `i` is a char boundary: nothing establishes `(s as array<uint8>)[i] <? 0x80` here\n        if i >=? 0 and i <=? b.length {return s.byte_slice(0 i)}\n                                              ^\n    help: establish `(s as array<uint8>)[i] <? 0x80` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood18_proofs/conditional_push_or_pop.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dogfood18_proofs/conditional_push_or_pop.dewy:4:59: error: cannot prove pop() has an element to remove: missing lower bound\n        loop v in [1 5 2] { if v >? 2 { kept.push(v) } else { kept.pop(); } }\n                                                              ^\n    note: kept.length is between 0 and 281474976710655\n    note: missing lower bound: nothing establishes `kept.length >? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): kept.length = 0\n    help: establish `kept.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/library_preconditions/find_start_refuted.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/library_preconditions/find_start_refuted.dewy:3:12: error: find's start is outside the text\n        printl(s.find(\"c\" 7))\n               ^\n    help: establish `7 <=? s.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/notraps12/pop_empty_reject.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/notraps12/pop_empty_reject.dewy:2:8: error: pop() of an empty array\n    printl(xs.pop()[0])\n           ^\n    note: xs.length is 0\n    help: establish `xs.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  }
+ ]
+}

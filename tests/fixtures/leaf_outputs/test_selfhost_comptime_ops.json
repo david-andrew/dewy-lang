@@ -1,0 +1,426 @@
+{
+ "test_comptime_ops_match_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/arrays.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "arrays agree\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/bounds.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/comptime/bounds.dewy:1:53: error: compile-time evaluation: index out of bounds\n  compile-time call to outer at <root>/tests/cases/comptime/bounds.dewy:3:9\n  compile-time call to read at <root>/tests/cases/comptime/bounds.dewy:2:17\n    read=(n:int64):>int64=> { let values=[10 20] return values[n] }\n                                                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/control.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "control agrees\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/divide_zero.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/comptime/divide_zero.dewy:1:25: error: compile-time evaluation: division by zero\n  compile-time call to outer at <root>/tests/cases/comptime/divide_zero.dewy:3:9\n  compile-time call to inner at <root>/tests/cases/comptime/divide_zero.dewy:2:17\n    inner=(n:int64):>int64=>10//n\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/exact_word_edges.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p4-0": {
+     "run": {
+      "status": 0,
+      "stdout": "3204 0\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/functions.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p5-0": {
+     "run": {
+      "status": 0,
+      "stdout": "functions agree\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/host_effect.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/lib/core/rt.jo:703:12: error: compile-time evaluation: mutable global '__omode' is not a compile-time constant; host effects are not allowed\n  compile-time call to outer at <root>/tests/cases/comptime/host_effect.dewy:3:9\n  compile-time call to inner at <root>/tests/cases/comptime/host_effect.dewy:2:17\n  compile-time call to __print_str at <root>/tests/cases/comptime/host_effect.dewy:1:20\n  compile-time call to __out at <root>/lib/core/rt.jo:842:10\n            if __omode == 0:\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/interpolation.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p7-0": {
+     "run": {
+      "status": 0,
+      "stdout": "0x 1y lamp#3:true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/library_text.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p8-0": {
+     "run": {
+      "status": 0,
+      "stdout": "ok\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/mutable_global.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/comptime/mutable_global.dewy:2:17: error: compile-time evaluation: mutable global 'state' is not a compile-time constant; host effects are not allowed\n  compile-time call to read at <root>/tests/cases/comptime/mutable_global.dewy:3:9\n    read=():>int64=>state+1\n                    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/overflow.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p10-0": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/propagation.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p11-0": {
+     "run": {
+      "status": 0,
+      "stdout": "propagation agrees\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/reflection.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/comptime/reflection.dewy:13:11: warning: 'value' is given a value here but never used (a parameter kept for the function's type can be named `_value`)\n",
+   "files": {
+    "p12-0": {
+     "run": {
+      "status": 0,
+      "stdout": "reflection agrees\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/reject_library_text.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/comptime/reject_library_text.dewy:1:9: error: assertion refuted: this condition is always false\n    $assert \"a,b\".split(\",\").length =? 3\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/reject_string_index.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/lib/std/graphemes.jo:251:10: error: compile-time evaluation: string index out of bounds\n  compile-time call to __dewy_string_index at <root>/tests/cases/comptime/reject_string_index.dewy:1:9\n        panic(\"string index out of bounds\")\n             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/runtime_field.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/comptime/runtime_field.dewy:3:25: error: compile-time evaluation: 'name' is not a compile-time constant\n        return value.$field(name)\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/selfhost_growth.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p16-0": {
+     "run": {
+      "status": 0,
+      "stdout": "evaluator growth agrees\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/semantics.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p17-0": {
+     "run": {
+      "status": 0,
+      "stdout": "semantics agree\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/shared_writes.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p18-0": {
+     "run": {
+      "status": 0,
+      "stdout": "shared writes agree\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/storage.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p19-0": {
+     "run": {
+      "status": 0,
+      "stdout": "storage agrees\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/string_index_clusters.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p20-0": {
+     "run": {
+      "status": 0,
+      "stdout": "b 3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/constant/typed_integer_context.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/constant/typed_integer_context.dewy:6:7: warning: 'value' is given a value here but never used (a parameter kept for the function's type can be named `_value`)\n<root>/tests/cases/constant/typed_integer_context.dewy:7:7: warning: 'value' is given a value here but never used (a parameter kept for the function's type can be named `_value`)\n<root>/tests/cases/constant/typed_integer_context.dewy:5:7: warning: 'value' is given a value here but never used (a parameter kept for the function's type can be named `_value`)\n",
+   "files": {
+    "p21-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/members_nonliteral/binary.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/members_nonliteral/binary.dewy:1:32: error: expected a type\n    main=():>void=>{printl(members(1+2))}\n                                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/literal_subset_bindings/subsets.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p23-0": {
+     "run": {
+      "status": 0,
+      "stdout": "match on 4\nmatch what 4\nmatch amount 4\nmatch category 4\nother\nrow 7\nguard on 4\nguard amount 4\nother\nfield category 4\ncapture what 4\nguard what 4\nglobal amount 4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood/122_roman_numerals.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p24-0": {
+     "run": {
+      "status": 0,
+      "stdout": "encode:\n     1 -> I\n     4 -> IV\n     9 -> IX\n    14 -> XIV\n    40 -> XL\n    90 -> XC\n   400 -> CD\n  1994 -> MCMXCIV\n  2024 -> MMXXIV\n  3999 -> MMMCMXCIX\ndecode:\n  XLII     = 42\n  mmxxiv   = 2024\n  MCMXCIV  = 1994\n  IIII     rejected: not canonical; 4 is IV\n  VX       rejected: not canonical; 5 is V\n  IC       rejected: not canonical; 99 is XCIX\n  MCMC     rejected: not canonical; 2000 is MM\n  ABC      rejected: `A` is not a Roman letter\n           rejected: empty\n  MMMM     rejected: out of range (4000)\nledger:\n  +       XII (12)\n  +       XXX (30)\n  +        IV (4)\n  +   MDCLXVI (1666)\n  ! `0`: 0 has no Roman form\n  ! `XIIX`: not canonical; 20 is XX\n  +       CCL (250)\n  +       CCL (250)\ntotal 2212 = MMCCXII, 2 rejected\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood/141_cidr_firewall.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p25-0": {
+     "run": {
+      "status": 0,
+      "stdout": "bad rule: allow tcp 10.0.0.1/8 22\nbad rule: permit tcp 10.0.0.0/8 22\nbad rule: allow tcp 300.0.0.0/8 22\nbad rule: allow tcp 10.0.0.0/33 22\nbad rule: allow tcp 10.0.0.0/8 90-80\nbad packet: 7 icmp 8.8.8.8:0\nbad packet: 8 tcp 8.8.8:80\n0: tcp 10.1.2.3:80 -> deny (rule 1)\n1: tcp 10.1.3.3:80 -> allow (rule 2)\n2: udp 192.168.7.9:53 -> allow (rule 3)\n3: udp 192.168.7.9:54 -> deny (rule 4)\n4: tcp 8.8.8.8:8080 -> allow (rule 5)\n5: udp 8.8.8.8:443 -> deny (rule 4)\n6: tcp 8.8.8.8:2000 -> deny (rule 0)\n9: tcp 255.255.255.255:65535 -> deny (rule 0)\n3 of 8 allowed\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/time/core_arithmetic.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p26-0": {
+     "run": {
+      "status": 0,
+      "stdout": "2026-10-24T13:30:00Z\n2026-10-24T12:00:00.1Z\n90min\n2016-12-31T23:59:60Z 1s\n2s\n-220924791999918000\n-235107732425406200\n95040019000000000\n725803167816000000\n90min 5400300ms 3h 30min 5400 -90min 5400300ms\nfalse true true -5395s 771428571428ns\n5400.0\ntrue\n2026-10-24T12:00:00.000000001Z\n-15842393-09-30T23:07:12.184 TT\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

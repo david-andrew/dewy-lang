@@ -1,0 +1,50 @@
+{
+ "test_numeric_constants_match_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/rational_float_bounds/non_nan.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/rational_float_bounds/non_nan.dewy:3:42: warning: `to_float64` is not compiled under `$no_nan`. This call uses the library's numerics.\n",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "1.25\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/optimizer/return_facts_float.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/float_constants/reject_inf_in_scope.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/float_constants/reject_inf_in_scope.dewy:5:12: error: cannot prove `x` is finite under `$no_inf`\n        printl(x + 1.0)\n               ^\n    help: a value entering `$no_inf` may be infinite: bound it with a guard, or check it at run time with `$runtime_checks`\n",
+   "files": {}
+  }
+ ]
+}

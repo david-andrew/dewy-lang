@@ -46,6 +46,10 @@ def _template(leaves, sources):
     # A family of leaves may be compared together (one tuple of stems, one compiler pair).
     family = '|'.join(re.escape(stem) for stem in leaves)
     modules = dict(sources)
+    # (a leaf without its twin: the same import shim a twin of a service becomes below)
+    for name in list(modules):
+        if name.endswith('.dewy') and name[:-5] + '.jo' not in modules:
+            modules[name[:-5] + '.jo'] = f'use "{name}"\n'
     for name in list(modules):
         if name.endswith('.jo') and name[:-3] not in leaves:
             service_leaf = name[:-3] + '.dewy'

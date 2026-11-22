@@ -1,0 +1,704 @@
+{
+ "test_safe_path_walk_match_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/contained/branded.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "/etc/hosts\n/srv/cache\n/srv/cache/thumbs/false/42.png\n/srv/cache/site/index.html\n/srv/cache/2026/report-2026.txt\n/srv/cache/new\n/srv/cache/a.txt\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/contained/fallback_exits.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "notes.txt: true\na/b.txt: true\n2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/contained/fallback_unproven.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/contained/fallback_unproven.dewy:3:69: error: this path is not proven to stay inside its base, but this storage requires a SafePath: validate it, `root.confine(...) or_throw`, or test it first, `if root.contains(...) {...}`\n    pick = (name:string):>SafePath => root.confine(p\"{root}/{name}\") ?? p\"{root}/{name}\"\n                                                                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/contained/handler.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p3-0": {
+     "run": {
+      "status": 0,
+      "stdout": "served /srv/site/static/css/site.css\nserved /srv/site/static/css/site.css\nserved /srv/site/static/index.html\nserved /srv/site/static/index.html\nfalse false\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/contained/sibling_component.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/contained/sibling_component.dewy:7:10: error: this path is not proven to stay inside its base, but show's `f` is a SafePath: validate it, `root.confine(...) or_throw`, or test it first, `if root.contains(...) {...}`\n        show(p\"{root}{n}\")\n             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/contained/unproven_argument.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/contained/unproven_argument.dewy:5:16: error: `f` is not proven to stay inside its base, but serve_file's `f` is a SafePath: validate it, `root.confine(f) or_throw`, or test it first, `if root.contains(f) {...}`\n        serve_file(f)\n                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/contained/unproven_let.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/contained/unproven_let.dewy:3:20: error: this path is not proven to stay inside its base, but `f` is declared a SafePath: validate it, `root.confine(...) or_throw`, or test it first, `if root.contains(...) {...}`\n        let f:SafePath=p(argv[0])\n                       ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/contained/unproven_result.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/contained/unproven_result.dewy:2:35: error: this path is not proven to stay inside its base, but open_for returns a SafePath: validate it, `root.confine(...) or_throw`, or test it first, `if root.contains(...) {...}`\n    open_for=(user:string):>SafePath=>p\"{root}/{user}\"\n                                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/contained/validators.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p8-0": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/site/static: contains=true confine=/srv/site/static\n/srv/site/static/: contains=true confine=/srv/site/static/\n/srv/site/static/index.html: contains=true confine=/srv/site/static/index.html\n/srv/site/static//css/./site.css: contains=true confine=/srv/site/static//css/./site.css\n/srv/site/static/../secret: contains=false confine=PathEscape\n/srv/site/static/a/../b: contains=false confine=PathEscape\n/srv/site/static2/x: contains=false confine=PathEscape\n/srv/site: contains=false confine=PathEscape\nsrv/site/static/x: contains=false confine=PathEscape\n/srv/site/static/.../x: contains=true confine=/srv/site/static/.../x\ntrue\ntrue\nfalse\ntrue\nfalse\nfalse\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/path/append_file.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p9-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n4\n4\n0\n[\"one\" \"two\" \"\"]\ntrue\nfalse\ntrue\n[\"one\" \"two\" \"three\" \"\"]\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/path/file_errors.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p10-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\nFileExists\nIsDirectory\nIsDirectory\nIsDirectory\nIsDirectory\nok\nInvalidUtf8\nok\nFileError\nFileError\nFileError\ntrue\ntrue\nno such file: missing.txt\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/path/file_helpers.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p11-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\n5\n5\n5\ntrue\nhello\nfalse\n[case_path_helpers/a/notes.txt case_path_helpers/moved.txt]\n[case_path_helpers/a/notes.txt case_path_helpers/moved.txt]\n[case_path_helpers/moved.txt]\ntrue\ntrue\nFileNotFound\nFileNotFound\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/path/file_methods.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p12-0": {
+     "run": {
+      "status": 0,
+      "stdout": "false\ntrue\ntrue true false\n13\ntrue true false\nhéllo\n4\n[0 1 254 255]\n[\"data.bin\" \"notes.txt\"]\ntrue\ntrue\nfalse\n0\ntrue\nfalse\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/path/file_permissions.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p13-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\ntrue\nhidden\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/path/import_source.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p14-0": {
+     "run": {
+      "status": 0,
+      "stdout": "hello paths\n42\npath_module.dewy .dewy programs\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/path/interpolation.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p15-0": {
+     "run": {
+      "status": 0,
+      "stdout": "/srv/data/report.csv\n/srv/data/report.csv\n/srv/data/report.csv\n20\n/srv/data/archive/report.csv\ntrue\ntrue\nfalse\none\ntwo\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/path/lexical.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p16-0": {
+     "run": {
+      "status": 0,
+      "stdout": "src/main.dewy: name=main.dewy stem=main suffix=.dewy parent=src parts=[\"src\" \"main.dewy\"] absolute=false\n/usr/lib/archive.tar.gz: name=archive.tar.gz stem=archive.tar suffix=.gz parent=/usr/lib parts=[\"/\" \"usr\" \"lib\" \"archive.tar.gz\"] absolute=true\nnotes: name=notes stem=notes suffix= parent=. parts=[\"notes\"] absolute=false\n.bashrc: name=.bashrc stem=.bashrc suffix= parent=. parts=[\".bashrc\"] absolute=false\ntrailing.: name=trailing. stem=trailing. suffix= parent=. parts=[\"trailing.\"] absolute=false\ndir/sub/: name=sub stem=sub suffix= parent=dir parts=[\"dir\" \"sub\"] absolute=false\na//b/./c.txt: name=c.txt stem=c suffix=.txt parent=a/b parts=[\"a\" \"b\" \"c.txt\"] absolute=false\n/: name= stem= suffix= parent=/ parts=[\"/\"] absolute=true\n: name= stem= suffix= parent=. parts=[] absolute=false\nsrc\nproject\nproject/src/lib.dewy\nproject/src/entry.dewy\nproject/src/main.udewy\nproject/src/main\n/other\nbare.md\nbackup.gz\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/path/literal_beside_p_binding.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p17-0": {
+     "run": {
+      "status": 0,
+      "stdout": "c.txt\nx/3.txt 4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/path/text_functions.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p18-0": {
+     "run": {
+      "status": 0,
+      "stdout": "false\ntrue\ntrue false\n2\ntrue true false\n42\n3\n[52 50 10]\n42\ntrue\n[\"value.txt\"]\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/path/unknown_read_file.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/path/unknown_read_file.dewy:2:14: error: unknown function 'read_file' (did you mean 'read_line'?)\n        let text=read_file(\"notes.txt\") ?? \"\"\n                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/path/unknown_run_program.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/path/unknown_run_program.dewy:2:16: error: unknown function 'run_program' (did you mean 'run'?)\n        let result=run_program(\"ls\" [])\n                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/path/walk_nested_dirs.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p21-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n[case_walk_nested/a/b/two.txt case_walk_nested/a/one.txt case_walk_nested/top.txt]\n[case_walk_nested/a/b/two.txt case_walk_nested/a/one.txt case_walk_nested/top.txt]\n[case_walk_nested/top.txt]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/library_text.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p22-0": {
+     "run": {
+      "status": 0,
+      "stdout": "ok\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/copies/explicit_array_assignment_2.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p23-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood/01_wordfreq.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p24-0": {
+     "run": {
+      "status": 0,
+      "stdout": "total words: 34\nunique words: 20\ntop 5:\n1. the        9\n2. fox        4\n3. dog        3\n4. quick      2\n5. brown      1\nlongest word: inquisition\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood/04_todo.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p25-0": {
+     "run": {
+      "status": 0,
+      "stdout": "$ todo clear\ncleared\n$ todo add buy milk\nadded #1: buy milk\n$ todo add write dogfood report\nadded #2: write dogfood report\n$ todo add water the plants\nadded #3: water the plants\n$ todo done 2\n[x]   2  write dogfood report\n$ todo list\n[ ]   1  buy milk\n[ ]   3  water the plants\n2 shown, 2 open, 3 total\n$ todo list --all\n[ ]   1  buy milk\n[x]   2  write dogfood report\n[ ]   3  water the plants\n3 shown, 2 open, 3 total\n$ todo rm 1\nremoved #1\n$ todo undo 2\n[ ]   2  write dogfood report\n$ todo done 9\ndone: no task #9\n(exit 1)\n$ todo done x\ndone: not a number: x\n(exit 2)\n$ todo list --all\n[ ]   2  write dogfood report\n[ ]   3  water the plants\n2 shown, 2 open, 2 total\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood/09_logs.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p26-0": {
+     "run": {
+      "status": 0,
+      "stdout": "parsed 11 entries, 1 malformed\nby level:\n  INFO   7\n  WARN   2\n  ERROR  2\nby service:\n  auth  4 entries over 2h45m\n  db    3 entries over 7s\n  web   4 entries over 1h59m\nslow requests:\n  08:01:10 GET /slow 200 1530ms\n  10:00:00 GET /slow 200 2210ms\nsessions:\n  alice: 1h29m\n  bob: 1h14m\nlog covers 2h45m\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood/12_adventure.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p27-0": {
+     "run": {
+      "status": 0,
+      "stdout": "> look\n== Great Hall ==\nA drafty hall with a long table.\nYou see: candle\nExits: east north\n> take candle\nTaken: candle.\n> go west\nYou can't go west from here.\n> go north\n== Library ==\nDusty shelves, a ladder, and a locked door to the east.\nYou see: key\nExits: east south\n> take book\nThere is no book here.\n> take key\nTaken: key.\n> inventory\nYou carry: candle, key\n> go east\n== Vault ==\nGold glitters everywhere. You win!\nExits: west\nGame over after 8 moves.\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood/14_containers.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p28-0": {
+     "run": {
+      "status": 0,
+      "stdout": "stack size 5, top 25\nsum of squares: 55\ndequeued alpha\n  next: beta\n  next: gamma\n  next: delta\nempty queue gives none\na -> [x=1 y=2]\nb -> none\na -> [x=1 y=2]\nc -> [x=5 y=6]\norder [\"a\" \"c\"]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood/16_binary_format.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p29-0": {
+     "run": {
+      "status": 0,
+      "stdout": "encoded 50 bytes, crc 540ab974\n  1: ada scored 1500\n  70000: grace scored -42\n  3: linus scored 0\ncorrupted: checksum mismatch: stored 540ab974, computed 1a83b2dd\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood/44_archive_files.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p30-0": {
+     "run": {
+      "status": 0,
+      "stdout": "docs: 39 B\nimages: 10 B\ndata: 32 B\nother: 2.9 KiB\nskipped todo.txt (same as copy of todo.txt)\narchived dogfood_archive/archive/data/sales.csv\narchived dogfood_archive/archive/docs/README.md\narchived dogfood_archive/archive/docs/copy of todo.txt\narchived dogfood_archive/archive/images/photo.jpg\narchived dogfood_archive/archive/other/song.mp3\ndocs/todo.txt: not archived\nrefused ../../etc/passwd\nimages/photo.jpg: 10 B\nclean: true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood/64_log_analyzer.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p31-0": {
+     "run": {
+      "status": 0,
+      "stdout": "wrote 980 bytes to dogfood_access.log\n13 requests, 2 malformed\n  line 9: expected 7 fields\n  line 13: bad duration 'n/a'\n\nrequests per hour:\n  08:00  4 ########\n  09:00  5 ##########\n  10:00  2 ####\n  11:00  2 ####\n\nstatus classes:\n  2xx: 6\n  4xx: 5\n  5xx: 1\n  3xx: 1\n\nslowest endpoints (mean ms):\n  /api/items          103.0\n  /index.html          13.5\n  /about.html           8.0\n\n4 visitors, 2 with a browser\n  without a browser: 192.0.2.44 198.51.100.7\n  suspicious: 192.0.2.44 (4 failed logins)\n\nby user agent:\n  Mozilla          DELETE,GET\n  curl             GET\n  python-requests  POST\n\nremoved: true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood/84_glob_match.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p32-0": {
+     "run": {
+      "status": 0,
+      "stdout": "*.dewy       -> main.dewy util.dewy test_main.dewy test_util.dewy\ntest_*       -> test_main.dewy test_util.dewy\ndata?.csv    -> data1.csv data2.csv\ndata*.csv    -> data1.csv data2.csv data10.csv\n[A-Z]*       -> README.md Makefile\n*.[!d]*      -> README.md notes.txt data1.csv data2.csv data10.csv image.png a.out café.txt\n?????.txt    -> notes.txt\n[mu]*.dewy   -> main.dewy util.dewy\n*            -> main.dewy util.dewy README.md notes.txt data1.csv data2.csv data10.csv image.png Makefile test_main.dewy test_util.dewy a.out café.txt run\n[abc         -> (none)\nmost matches: *.[!d]* (8) after '*'\nonly '*' matches: [\"run\"]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dogfood/93_kv_protocol.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/lib/net.dewy:103:39: warning: `data.ptr` of plain parameter 'data' may be written through or escape; the caller cannot see writes to its private copy: take `@data` and pass `@data`, or copy into a local first\n",
+   "files": {
+    "p33-0": {
+     "run": {
+      "status": 0,
+      "stdout": "SET greeting hello there   -> OK\nGET greeting               -> VALUE hello there\nget missing                -> NIL\nINCR visits                -> VALUE 1\nINCR visits                -> VALUE 2\nSET name dewy              -> OK\nINCR name                  -> ERR not a number\nDEL greeting               -> OK\nDEL greeting               -> NIL\nKEYS                       -> KEYS name visits\nFLY away                   -> ERR unknown command FLY\nSET lonely                 -> ERR SET needs a key and a value\nSTATS                      -> STATS keys=2 hits=1 misses=1\n13 replies, 3 errors\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/generic/local_replaced.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p34-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/generic/value_mut.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p35-0": {
+     "run": {
+      "status": 42,
+      "stdout": "",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/loop/iterator_tree_walk.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p36-0": {
+     "run": {
+      "status": 0,
+      "stdout": "[\"home\" \"drafts\" \"old.txt\" \"older.txt\" \"notes\" \"todo.txt\"]\nhome\ndrafts\nnotes\ntodo.txt\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/object_patterns.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p37-0": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n-1\n12\n12\nthin 9\nrect\nround\nfive\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/void_union_trailing_family.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p38-0": {
+     "run": {
+      "status": 0,
+      "stdout": "cannot remove no-such-file-for-this-case\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/net/errors.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/lib/net.dewy:103:39: warning: `data.ptr` of plain parameter 'data' may be written through or escape; the caller cannot see writes to its private copy: take `@data` and pass `@data`, or copy into a local first\n",
+   "files": {
+    "p39-0": {
+     "run": {
+      "status": 0,
+      "stdout": "cannot connect to 127.0.0.1:PORT: connection refused\nNetError[message=\"invalid address '300.1.2.3'\"]\nNetError[message=\"invalid address 'not an address'\"]\nNetError[message=\"invalid port 70000\"]\nNetError[message=\"invalid port -1\"]\ncannot listen on 127.0.0.1:PORT: address already in use\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/object/shadowing.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p40-0": {
+     "run": {
+      "status": 0,
+      "stdout": "42 101 47 26 5 20 5 1000\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/time/machine_zone.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p41-0": {
+     "run": {
+      "status": 0,
+      "stdout": "true true\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

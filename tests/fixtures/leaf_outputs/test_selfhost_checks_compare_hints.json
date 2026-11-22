@@ -1,0 +1,124 @@
+{
+ "test_checks_compare_hints_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/parameter_mismatch.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/parameter_mismatch.dewy:3:18: error: in call to length(x:int64 * Length): argument 'x' expects int64 * Length, found int * Time\n    let value=length(1s)\n                     ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coalesce/array_binding_nested.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coalesce/array_binding_nested.dewy:2:29: error: type mismatch: expected array<array<int64>>, found array<array<int>> (integer literals are `int` unless a type is written where they are made, and an array keeps its element type: write it where 'b' is made, as `const b:array<array<int64>> = [...]`)\n    let c:array<array<int64>> = b\n                                ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/array/comparison_different_arrays.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/array/comparison_different_arrays.dewy:2:60: error: cannot compare array<uint8> with array<int> (integer literals are `int` unless a type is written where they are made, and an array keeps its element type: write it where 'other' is made, as `let other:array<uint8> = [...]`)\n    main=()=>{let values:array<uint8>=[1] let other=[1] return values =? other}\n                                                               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/bare_none_type.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/bare_none_type.dewy:3:12: error: operator + is not defined for none and int\n        printl(x + 1)\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/union_operand_failure.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/union_operand_failure.dewy:4:12: error: operator + is not defined for int | NotAnInteger | TooManyDigits and int (it may hold a failure instead of the int: fall back with `x ?? 0`, pass the failure on with `or_throw`, or test it first, `if x is? int { ... }`)\n        printl(n + 1)\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/float_constants/reject_old_inf.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/float_constants/reject_old_inf.dewy:1:21: error: unknown name `INF`; infinity is `float64.inf`\n    main = () => printl(INF)\n                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/units/generic_mismatch.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/units/generic_mismatch.dewy:3:19: error: in call to same(a:T b:T): argument 'b' expects int * Length, found int * Time\n    let value=same(1m 2s)\n                      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coalesce/array_binding_fallback.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coalesce/array_binding_fallback.dewy:6:27: error: type mismatch: expected array<int64>, found array<int> (integer literals are `int` unless a type is written where they are made, and an array keeps its element type: write it where 'b' is made, as `let b:array<int64> = [...]`)\n    loop x in (pick(false) ?? b) {\n                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/compare_union_number.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/compare_union_number.dewy:4:12: error: cannot compare int64 | Bad with float64 (find out which it holds first: `x is? int64 and x =? value`)\n        printl(parse(\"1\") =? 1.5)\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/program.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/program.dewy:2:4: error: 'x' may be none (it is an int?), so it cannot be compared with <?, >?: say what to use then where line 1 makes it (`... ?? 0`), or `if x isnt? none { ... }`\n    if x <? 3 {printl(1)}\n       ^\n",
+   "files": {}
+  }
+ ]
+}

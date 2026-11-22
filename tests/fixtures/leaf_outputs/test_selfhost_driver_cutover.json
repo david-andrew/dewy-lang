@@ -1,0 +1,125 @@
+{
+ "test_driver_compile_twins": [
+  {
+   "args": [
+    "build",
+    "<tmp>/entry.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "hello\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--release",
+    "<tmp>/entry.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-1": {
+     "run": {
+      "status": 0,
+      "stdout": "hello\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--target",
+    "wasm32",
+    "<tmp>/entry.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-2.html": {
+     "text": {
+      "sha256": "6b81cfce590a3e9daf9bf7c24012fe33e8c7c39f27bb4ad77db720af167720fe",
+      "bytes": 69439
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--target",
+    "aarch64-linux",
+    "<tmp>/entry.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-3": {
+     "binary": "elf"
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--target",
+    "x86_64-windows",
+    "<tmp>/entry.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-4.exe": {
+     "binary": "pe"
+    },
+    "p0-4.pdb": {
+     "binary": "data"
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--target",
+    "aarch64-mac",
+    "<tmp>/entry.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "p0-5": {
+     "binary": "macho"
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "--host-ir",
+    "<tmp>/entry.dewy"
+   ],
+   "status": 0,
+   "stdout": {
+    "sha256": "8a1d26b899a7d24d7acc0d433bcc965d52e979d292844c08dadc3c07dee7d415",
+    "bytes": 239669
+   },
+   "stderr": "",
+   "files": {}
+  }
+ ]
+}

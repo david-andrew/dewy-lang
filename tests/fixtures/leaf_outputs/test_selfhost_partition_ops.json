@@ -1,0 +1,132 @@
+{
+ "test_partition_ops_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/argument/mutable_param_entry_global_write.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/argument/mutable_param_entry_global_write.dewy:11:38: error: 'touch' changes globals, and 'h' (an `@` parameter) may be one of them, so h.peers[...] cannot be passed to it as an `@` argument (pass the index instead)\n    poll=(@h:Host k:int64):>void=>touch(@h.peers[k])\n                                         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/argument/mutable_borrowed_params.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[10]\n[3 2] [13 4]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/exact_int/parallel_result.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[9223372036854775808 9223372036854775809]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/method/hidden_global_loop.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/method/hidden_global_loop.dewy:6:39: error: `loop @item` changes the elements of values in place, and read (called here) may add, remove or replace elements of values, which the loop cannot have: set a flag in the loop and call it after, push new ones to another array first, or loop over its indexes\n    main=()=>{loop @item in values {item+=values.read}}\n                                          ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/parallel/param_reassigned.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/parallel/param_reassigned.dewy:4:22: error: parallel_map runs this function on many threads at once, so the compiler checks it for data races, which it can only do for a function it can see: pass a function by name or a lambda\n        parallel_map(xs @f)\n                         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/bench/parallel/mergesort.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/bench/parallel/mergesort.dewy:16:6: warning: 'sort' hides the library's method `array<int64>.sort`: this function takes over every `x.sort` on one in this module; rename it to keep the library's\n",
+   "files": {
+    "program": {
+     "run": "varies"
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/bench/parallel/jacobi.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": "varies"
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/ladder/82_overlap_race/core.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "26\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

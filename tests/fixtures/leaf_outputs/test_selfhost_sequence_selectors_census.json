@@ -1,0 +1,36 @@
+{
+ "test_sequence_selectors_mask_guard": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_proofs/mask_guard_named.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/census_proofs/mask_guard_named.dewy:1:69: error: cannot prove array shape/index contract `enabled.length =? readings.length`: nothing establishes `enabled.length =? readings.length` here\n    pick = (readings:array<int64> enabled:array<bool>):>array<int64> => readings[enabled]\n                                                                        ^\n    help: establish `enabled.length =? readings.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/census_proofs/mask_guard_proven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[20]\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

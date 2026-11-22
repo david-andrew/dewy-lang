@@ -1,0 +1,68 @@
+{
+ "test_callable_policies_twins": [
+  {
+   "args": [
+    "build",
+    "<tmp>/named.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<tmp>/named.dewy:3:6: warning: 'show' is never called: nothing runs it (call it, as `show(...)` where it should run)\n",
+   "files": {
+    "p0-0": {
+     "run": {
+      "status": 0,
+      "stdout": "UTC\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/lambda.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<tmp>/lambda.dewy:3:6: warning: 'show' is never called: nothing runs it (call it, as `show(...)` where it should run)\n",
+   "files": {
+    "p1-0": {
+     "run": {
+      "status": 0,
+      "stdout": "UTC\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/partial.dewy"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<tmp>/partial.dewy:2:7: warning: 'shown' is never called: nothing runs it (call it, as `shown()` where it should run)\n",
+   "files": {
+    "p2-0": {
+     "run": {
+      "status": 0,
+      "stdout": "42\nUTC\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/computed.dewy"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/computed.dewy:9:8: warning: write `make()`: it is called for its side effect\n<tmp>/computed.dewy:5:3: error: capturing time policies in a function value with computed or setting-dependent defaults is not yet supported; use a lambda such as `()=>today` so its defaults run under the captured policy\n     @report_zone\n      ^\n",
+   "files": {}
+  }
+ ]
+}

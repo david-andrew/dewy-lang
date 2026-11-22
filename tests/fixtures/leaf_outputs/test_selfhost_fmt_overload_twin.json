@@ -1,0 +1,80 @@
+{
+ "test_fmt_overload_twin": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fmt/patterns.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[3.14]\n[2]\n[-003.142]\n[+2.2]\n[1.235e+04]\n[1.200000E-04]\n[1.235e+06]\n[0.0001]\n[25.6%]\n[1,234,567]\n[1_234_567]\n[1,234,567.89]\n[ 98,765.43]\n[ff]\n[FF]\n[0x00ff]\n[0b101]\n[10]\n[0o10]\n[-42]\n[+42]\n[-0042]\n[***42****]\n[      42]\n[7     ]\n[ ab  ]\n[   θ]\n[hi------]\n[5.00]\n[50%]\n[00007]\n[12]\n[    2.5]\n1.00 2.00 0xbeef\n0xc8 -7 1,180,591,620,717,411,303,424\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fmt/integer_takes_no_float.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fmt/integer_takes_no_float.dewy:3:12: error: type mismatch: expected int64 | int | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64, found float64\n    printl(hex(1.5))\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/fmt/number_takes_no_text.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/fmt/number_takes_no_text.dewy:2:8: error: cannot format this value: the pattern '.2f' formats numbers, not text\n    printl(fmt'.2f'(\"hi\"))\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/expected_literal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "resume 3.0 3 settings quit 2.0 resume 3\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/inference/reject_expected_literal.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/inference/reject_expected_literal.dewy:5:29: error: 'nope' is not one of 'resume' | 'settings' | 'quit'\n        let x:Box<Choice> = box('nope')\n                                ^\n",
+   "files": {}
+  }
+ ]
+}

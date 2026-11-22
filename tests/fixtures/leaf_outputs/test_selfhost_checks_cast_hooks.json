@@ -1,0 +1,256 @@
+{
+ "test_checks_cast_hooks_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/totaldict_pop.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/totaldict_pop.dewy:3:1: error: a totaldict keeps an entry for every key: it has no pop\n    r.pop('0b')\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/secret/leak_cast.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/secret/leak_cast.dewy:2:12: error: a secret<string> converts to no other type: its value is hidden (`key.reveal` gives its value, where using it is intended)\n    let text = key as string\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/frontend/strings_string_diagnostics_4.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/frontend/strings_string_diagnostics_4.dewy:3:15: warning: 'text' is given a value here but never used\n<root>/tests/cases/frontend/strings_string_diagnostics_4.dewy:3:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{let text=\"{[1 2][end]}\"\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/generic/value_conflicting_type.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/generic/value_conflicting_type.dewy:3:37: error: no version of 'identity' matches these type arguments and callable type\n    main=()=>{let f:(x:string:>string)=@identity<int64> return 42}\n                                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/object/print_record_order.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[name=\"q\" x=1 y=2] [a=[c=3 d=2] b=1]\n[alpha=\"s\" zeta=9]\n[name=\"q\" x=1 y=2]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/surface/dictionary_name_key.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/surface/dictionary_name_key.dewy:2:14: error: unknown name 'x' (a dictionary's keys are values: `[\"x\" -> ...]`; for named fields, a record: `[x=...]`)\n        let d = [x -> 1]\n                 ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coalesce/nonoptional.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coalesce/nonoptional.dewy:3:10: error: '??' needs an optional on the left, found int\n    main=()=>42??0\n             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/melody_check/reject_bad_letter_loop.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/melody_check/reject_bad_letter_loop.dewy:2:25: error: not a melody: 'H4' is not a note: it starts with a letter from A to G\n        let a = melody_loop(\"H4\")\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/string_alias_conversion_refuted.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/string_alias_conversion_refuted.dewy:2:21: error: 'blue' is not one of 'red' | 'green'\n    main = () => printl('blue' as Color)\n                        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/byte_slice/unproven_boundary.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/byte_slice/unproven_boundary.dewy:5:43: error: cannot prove byte_slice's stop `i` is a char boundary: nothing establishes `(s as array<uint8>)[i] <? 0x80` here\n        if i >=? 0 and i <=? b.length {return s.byte_slice(0 i)}\n                                              ^\n    help: establish `(s as array<uint8>)[i] <? 0x80` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/match/refined_offset_gap.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/match/refined_offset_gap.dewy:3:26: error: this match has no arm for 6 through 10 (add one, or a `_ => ...` arm for the rest)\n    f = (x:above):>string => match x {\n                             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/format/type_spelling.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "int64\nstring\nPoint\n'0b' | '0t'\na Point b\nint64\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/float_key_proven.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[0.5 -> 0 1.0 -> 1 2.5 -> 1 2.0 -> 2]\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/dictionary/totaldict_partial.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/dictionary/totaldict_partial.dewy:4:15: error: a dict<'0b' | '0o' | '0x' int64> may be missing keys, so it is not a totaldict<'0b' | '0o' | '0x' int64> (a totaldict is made from a literal with every key)\n    printl(lookup(d '0b'))\n                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/refinements/alias_conversion_refuted.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/refinements/alias_conversion_refuted.dewy:2:27: error: refinement refuted: 20 violates the declared contract\n    main = () => printl(Small(20))\n                              ^\n<root>/tests/cases/refinements/alias_conversion_refuted.dewy:1:20: note: the contract is declared here\n    Small:type = int64<(<? 10)>\n                       ^\n    help: establish `20 <? 10` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/generic/value_wrong_type_count.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/generic/value_wrong_type_count.dewy:3:18: error: no version of 'identity' matches these type arguments and callable type\n    main=()=>{let f=@identity<int64 string> return 42}\n                     ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/default/field_later.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/default/field_later.dewy:1:27: error: unknown name 'high'\n    Range:type = [low:int64 = high high:int64]\n                              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/errors/optional_union_cast_hint.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/errors/optional_union_cast_hint.dewy:4:12: error: cannot cast (int64 | string)? to int64 (an optional is not cast: inside `if x is? int64 { }` (or after `x is? int64 and`), x is one; `match x` takes each member, `x ?? fallback` gives a default)\n        printl(ins.arg as int64)\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/handle/closure_needs_arguments.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/handle/closure_needs_arguments.dewy:2:31: error: 'a' needs arguments: call it, `a(...)`, or write `@a` for the function itself\n    main=()=>{let a=make(1) let b=a return 0}\n                                  ^\n",
+   "files": {}
+  }
+ ]
+}
