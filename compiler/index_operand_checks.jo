@@ -1,3 +1,10 @@
+use 'checker_call_queries.dewy'
+use 'refine_metadata.dewy'
+use 'checker_type_entries.dewy'
+use 'check.jo'
+use 'collection_checks.dewy'
+use 'checker_source_positions.dewy'
+use 'call_shape_queries.dewy'
 use 'numeric_library_types.dewy'
 use 'member_receivers.dewy'
 use 'ast.jo'
@@ -42,3 +49,54 @@ neg_index_check = (b: int):
     e = "end"
     if k > 1: e = "end - {k - 1}"
     fatal(nodes[b].pos, "an index counts from 0; from the end it is `{e}` (`xs[end]` is the last, `xs[end - 2..]` the last three)")
+
+# `mean[t1 t2]`: a function named before an array literal is called with it, as with a
+# string literal (`printl"hi"`). A function that takes nothing is called first instead
+# (f[0] indexes f()).
+dewy_bracket_call = (n: int) -> bool:
+    base = int(nodes[n].a)
+    if nodes[base].kind != .ident or nodes[n].sval != 0 or nkids(n) == 0 or not dewy_at(nodes[n].pos): return false
+    nm = int(nodes[base].name)
+    s = lookup(nm)
+    if s == 0 or syms[s].kind != .fns or bare_fns_call(nm, -1) != 0: return false
+    loop x in kids(n):
+        k = nodes[x].kind
+        if k == .range or k == .namedarg or (k == .ident and name_of(int(nodes[x].name)) == "$new"): return false
+    items = if nkids(n) == 1 and dewy_whole_collection(kid(n, 0)): kid(n, 0) else: mk(.array, nodes[n].pos)
+    if items != kid(n, 0): set_list(items, kids(n))
+    nodes[n].kind = .call
+    nodes[n].b = 0
+    set_list(n, [items])
+    true
+
+# A matrix part can use literal ranges, stored IntRange values or index arrays.
+is_part_index = (n: int, receiver: int = 0) -> bool:
+    ixs = kids(n)
+    if nodes[n].b != 0: ixs = [int(nodes[n].b)]
+    loop x in ixs:
+        if nodes[x].kind == .range: return true
+    if is_nd(receiver):
+        loop x in ixs:
+            t = representation_type(check_expr(clone(x), 0))
+            if is_dewy_range_type(t, "IntRange"): return true
+            if (tkind(t) == .array or tkind(t) == .fixed) and is_int(telem(t)): return true
+    false
+
+# ---------------- unions: `is` and narrowing ----------------
+# x is T: aux = the member's index for a union; -1 (is none) or -2 (has a value) for an optional
+# When only Map.get's outer optional tag is observed, use its presence query.
+# Keep the checked expression intact for types and conservative effect analysis;
+# lowering uses the original arguments and their written evaluation order.
+map_presence_fn = (call: int) -> int:
+    if nodes[call].kind != .call or nodes[call].aux != 0 or nkids(call) != 2: return 0
+    f = int(nodes[call].sym)
+    d = int(fns[f].decl)
+    if d == 0 or nodes[d].name != intern("get"): return 0
+    path = lib_dir + "/core/map.jo"
+    if files[pos_file(nodes[d].pos)].path != path: return 0
+    decls: int[]
+    collect_module(int(nodes[d].mod), intern("has"), &decls)
+    loop candidate in decls:
+        if files[pos_file(nodes[candidate].pos)].path == path:
+            return get_fn_inst(candidate, fns[f].targs, nodes[call].pos)
+    0

@@ -1,16 +1,26 @@
 $runtime_checks
+from p"call_argument_checks.dewy" import (match_type)
+from p"checker_method_receiver.dewy" import (method_modules)
+from p"lexer_helpers.dewy" import (is_ident_char)
+from p"set_type_queries.dewy" import (is_dewy_set_type)
+from p"checker_signature.dewy" import (fn_sig)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"checks_thin_expr.dewy" import (dewy_set_literal is_map_type)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"checker_call_queries.dewy" import (ctx_dependent)
+from p"call_shape_queries.dewy" import (copy_member)
 from p"type_ops.dewy" import (simple_enum)
-from p"types.jo" import (prune structs tkind types)
+from p"types.jo" import (T_BOOL T_NEVER prune structs telem tkind type_eq types)
 from p"poly_closure.jo" import (poly_families)
 from p"check.jo" import (lib_dir)
 from p"dewy_method_ops.dewy" import (dewy_is_method)
 from p"checker_module_lookup.dewy" import (module_lookup)
-from p"ast.jo" import (mk nodes)
+from p"ast.jo" import (NF_CHECKED dewy_len_members has_flag kid mk nkids nodes)
 from p"checker_expr.dewy" import (check_expr)
-from p"expr.jo" import (last_checked receiver_literal_hint type_receiver_at)
+from p"expr.jo" import (call_collect_fns call_collect_module last_checked type_receiver_at)
 from p"ffi_checks.dewy" import (ffi_deref)
 from p"node_store.dewy" import (Node)
-from p"util.jo" import (files intern name_of pos_file)
+from p"util.jo" import (files intern name_of pos_file pos_off)
 
 MemberReceiverWord:type=int64<overflow='wrap'>
 
@@ -68,4 +78,104 @@ is_struct_like=(t0:int64):>bool=>$unsafe {
 receiver_text=(n:int64):>string=>$unsafe {
     if nodes.ptr[n].kind =? 'ident' {return name_of(MemberReceiverWord(nodes.ptr[n].name))}
     "x"
+}
+
+synthetic_copy=(t:int64 name:int64 pos:int64):>bool=>$unsafe {
+    if name_of(name) not=? "copy" or not files.ptr[pos_file(pos)].is_dewy {return false}
+    let k=tkind(t)
+    if k =? 'module' or k =? 'typeval' or k =? 'void_' or t =? T_NEVER {return false}
+    if copy_member(t name) {return false}
+    # Uniform-call methods are user declarations too.
+    let decls:array<int64>=[]
+    call_collect_fns(name @decls)
+    loop m in method_modules(t) {call_collect_module(m name @decls)}
+    loop d in decls {
+        if nkids(d) =? 0 {continue}
+        let sig=fn_sig(d)
+        let binds:array<int64>=fill(0 MemberReceiverWord(sig.ntp))
+        if match_type(sig.params[0] t @binds 0) >=? 0 {return false}
+    }
+    true
+}
+
+# (`let xs:array<Op> = ['push'].copy`: a collection literal (or a call, `set(['push']).copy`)
+# whose method gives a value of its own type, as copy, sorted and reversed do, takes the type
+# expected of the result, as the literal written there would; Dewy only, and only when every function of the name
+# that could take the arguments gives its first parameter's type)
+receiver_literal_hint=(recv:int64 name:int64 nargs:int64 expected:int64 pos:int64):>int64=>$unsafe {
+    if expected =? 0 or not dewy_at(pos) {return 0}
+    let k=nodes.ptr[recv].kind
+    let literal=(k =? 'array' or k =? 'map_lit' or dewy_set_literal(recv)) and ctx_dependent(recv)
+    if not literal and not (k =? 'call' and nodes.ptr[recv].type =? 0 and not has_flag(recv NF_CHECKED)) {return 0}
+    let want=prune(expected)
+    if tkind(want) =? 'opt' {want=prune(telem(want))}
+    let wk=tkind(want)
+    if wk not=? 'array' and not is_map_type(want) and not is_dewy_set_type(want) {return 0}
+    let decls:array<int64>=[]
+    call_collect_fns(name @decls)
+    if decls.length =? 0 {return if name_of(name) =? "copy" {want} else {0}}
+    let some=false
+    loop d in decls {
+        let np=nkids(d)
+        if np <? nargs + 1 {continue}
+        let takes=true
+        loop j in [nargs + 1..np) {
+            if nodes.ptr[kid(d j)].b =? 0 {takes=false}
+        }
+        if not takes {continue}
+        let sig=fn_sig(d)
+        let binds:array<int64>=fill(0 MemberReceiverWord(sig.ntp))
+        if match_type(sig.params[0] want @binds 0) <? 0 {continue}
+        if sig.ret =? 0 or not type_eq(MemberReceiverWord(sig.ret) sig.params[0]) {return 0}
+        some=true
+    }
+    if some {want} else {0}
+}
+
+# The library's names for Dewy's members: `xs.pop(i)` removes by position,
+# `xs.insert(value i)` names the value first, `text.startswith(p)`. The
+# library's own spellings are not Dewy's.
+# (Dewy's length is `.length`: the Sloppy library's `len` of an array, string, dictionary or set,
+# written in a Dewy program, is told so)
+dewy_len_check=(n:int64 member:bool t0:int64 object:int64):>void=>$unsafe {
+    if not dewy_at(nodes.ptr[n].pos) {return}
+    let t=prune(t0)
+    let k=tkind(t)
+    if member and k not=? 'array' and k not=? 'fixed' and k not=? 'str_' and not is_map_type(t) and not is_dewy_set_type(t) {return}
+    if member {
+        if (dewy_len_members.get(n) ?? -1) not=? nodes.ptr[n].pos {return}
+        fatal(nodes.ptr[n].pos "Dewy's length is `.length`: write `{receiver_text(object)}.length`")
+    }
+    let f=pos_file(nodes.ptr[n].pos)
+    let o=pos_off(nodes.ptr[n].pos)
+    let src=files.ptr[f].src as array<uint8>
+    if o + 3 >? src.length or not (src[o] =? 108 and src[o + 1] =? 101 and src[o + 2] =? 110) or (o + 3 <? src.length and is_ident_char(src[o + 3])) or (o >? 0 and is_ident_char(src[o - 1])) {return}
+    fatal(nodes.ptr[n].pos "Dewy's length is `.length`: write `{receiver_text(object)}.length`")
+}
+
+dewy_member_name=(callee:int64 rt:int64 fname:int64 args:array<int64>):>int64=>$unsafe {
+    let name=name_of(fname)
+    let k=types.ptr[rt].kind
+    let pos=nodes.ptr[callee].pos
+    if name =? "add" and is_dewy_set_type(rt) {fatal(pos "sets insert with push: replace `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.add(value)` with `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.push(value)`")}
+    if k =? 'array' {
+        if name =? "pop" and args.length =? 1 {return intern("remove")}
+        if name =? "insert" {return intern("__dewy_insert")}
+        if name =? "remove" {fatal(pos "an array removes by position with pop: `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.pop(i)`")}
+        if name =? "index_of" and args.length =? 1 {return intern("__dewy_index_of")}
+        if (name =? "any" or name =? "all") and args.length =? 0 and prune(MemberReceiverWord(types.ptr[rt].elem)) not=? T_BOOL {
+            fatal(pos "{name} without a predicate is for an array of bools, `{name}(flags)`: give it one, `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.{name}(x => x >? 0)`")
+        }
+    }
+    if name =? "keys" and args.length =? 0 and is_map_type(rt) {return intern("__dewy_keys")}
+    if k =? 'str_' {
+        if name =? "chars" and args.length =? 0 {return intern("graphemes")}
+        if name =? "find" {return intern("__dewy_find")}
+        if name =? "rfind" {return intern("__dewy_rfind")}
+        if name =? "byte_slice" and args.length =? 2 {return intern("__dewy_byte_slice")}
+        if name =? "startswith" {return intern("starts_with")}
+        if name =? "endswith" {return intern("ends_with")}
+        if name =? "starts_with" or name =? "ends_with" {fatal(pos "write `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.{replace(name "_" "")}(...)`")}
+    }
+    fname
 }

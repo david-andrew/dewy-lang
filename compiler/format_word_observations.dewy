@@ -1,0 +1,207 @@
+$runtime_checks
+from p"source_warnings.dewy" import (warn)
+from p"checks_compare_hints.dewy" import (void_rec_hint)
+from p"checker_runtime_functions.dewy" import (runtime_fn)
+from p"unit_ops.dewy" import (quantity_display quantity_number quantity_shown_number)
+from p"error_ops.dewy" import (oom_unhandled)
+from p"expression_types.dewy" import (ntype)
+from p"units.jo" import (is_quantity quantity_base)
+from p"checker_type_entries.dewy" import (get_fn_inst)
+from p"checker_signature.dewy" import (fn_sig)
+from p"util.jo" import (files intern name_of pos_file)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"checker_exact.dewy" import (exact_potential)
+from p"exact_check_hooks.dewy" import (exact_format_remainder exact_int_result exact_type)
+from p"type_ops.dewy" import (dt mk_array type_str)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_assign_hooks.dewy" import (block_value)
+from p"checks_builders.dewy" import (bc_str)
+from p"types.jo" import (T_MATH_INT T_NEVER T_STR T_U8 is_int prune types)
+from p"ast.jo" import (NF_U64 has_flag kid nkids nodes)
+from p"check.jo" import (FK_NORMAL LF_ASSIGNED LF_CAPTURE LF_CAPTURED LF_SHARED LF_ADDR LF_EXPOSED LF_ALIAS LF_BYREF ctxs cx fns lib_dir locals)
+from p"expr.jo" import (CV WordFormatRequest by_types_binds coerce format_word_defs format_word_heads format_word_inst format_word_requests resolve_by_types)
+
+FormatWordObservationsWord:type=int64<overflow='wrap'>
+
+FORMAT_WORD_UNSTABLE:int64=LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_EXPOSED | LF_ALIAS | LF_BYREF
+
+format_word_reset=():>void=>$unsafe {
+    let format_word_inst_slot=@format_word_inst
+    let format_word_requests_slot=@format_word_requests
+    format_word_defs.clear()
+    format_word_heads.clear()
+    format_word_requests_slot=[]
+    format_word_inst_slot=0
+}
+
+# Only checked, initialized lexical declarations enter the index. Their
+# binding IDs are in scope only after the initializer has been checked.
+format_word_define=(s:int64 l:int64):>void=>$unsafe {
+    let k=nodes.ptr[FormatWordObservationsWord(nodes.ptr[s].b)].kind
+    if k =? 'match_' or k =? 'if_' or k =? 'iflet' {format_word_defs[l] = s}
+}
+
+# Inspect the value-producing arms only. A terminating arm yields no value.
+# Result blocks may have effects, which still run at the original definition.
+format_word_range=(n:int64):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let t=prune(ntype(n))
+    if t =? T_NEVER {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'block' and nodes.ptr[n].aux not=? 0 {return format_word_range(block_value(n))}
+    if k =? 'match_' {
+        loop i in [0..nkids(n)) {
+            if not format_word_range(FormatWordObservationsWord(nodes.ptr[kid(n i)].b)) {return false}
+        }
+        return true
+    }
+    if k =? 'if_' or k =? 'iflet' {
+        return format_word_range(FormatWordObservationsWord(nodes.ptr[n].b)) and format_word_range(FormatWordObservationsWord(nodes.ptr[n].c))
+    }
+    if k =? 'conv' and t =? T_MATH_INT {
+        let a=FormatWordObservationsWord(nodes.ptr[n].a)
+        if nodes.ptr[n].aux =? int32<overflow='wrap'>(int64(CV.none_)) {
+            let at=prune(ntype(a))
+            if at =? T_NEVER or at =? T_MATH_INT {return format_word_range(a)}
+        }
+        if exact_format_remainder(n) {return true}
+        if nodes.ptr[n].aux =? int32<overflow='wrap'>(int64(CV.int_)) and nodes.ptr[a].kind =? 'int_lit' {return format_word_range(a)}
+    }
+    k =? 'int_lit' and is_int(t) and (nodes.ptr[n].ival >=? 0 or types.ptr[t].sign and not has_flag(n NF_U64))
+}
+
+format_word_select=(part:int64):>void=>$unsafe {
+    let format_word_inst_slot=@format_word_inst
+    if format_word_inst_slot =? 0 {format_word_inst_slot=runtime_fn("__fmt_word")}
+    nodes[part].sym = int32<overflow='wrap'>(format_word_inst_slot)
+}
+
+# Resolve the normal overload at the observation. Delay its instantiation
+# until all writes, captures and address-taking in this body are known.
+format_word_try=(part:int64 writer:string buffer:int64 pos:int64):>bool=>$unsafe {
+    let value=FormatWordObservationsWord(nodes.ptr[part].a)
+    let remainder=exact_format_remainder(value)
+    let l:FormatWordObservationsWord=0
+    let owner:FormatWordObservationsWord=0
+    if not remainder {
+        if nodes.ptr[value].kind not=? 'ident' or nodes.ptr[value].aux not=? 1 or cx <? 0 {return false}
+        l=FormatWordObservationsWord(nodes.ptr[value].sym)
+        if not format_word_defs.has(l) or FormatWordObservationsWord(locals.ptr[l].flags) & FORMAT_WORD_UNSTABLE not=? 0 {return false}
+        owner=FormatWordObservationsWord(ctxs.ptr[cx].inst)
+        if owner =? 0 or FormatWordObservationsWord(locals.ptr[l].owner) not=? owner or fns.ptr[owner].kind not=? FK_NORMAL {return false}
+    }
+    let decl=resolve_by_types(intern(writer) [buffer T_MATH_INT] pos true true)
+    let binds=by_types_binds
+    let inner=decl
+    if writer =? "__dewy_fmt" {
+        if files.ptr[pos_file(nodes.ptr[decl].pos)].path =? "{lib_dir}/core/fmt.jo" and fn_sig(decl).generic {
+            inner=resolve_by_types(intern("__fmt") [buffer T_MATH_INT] pos true true)
+        }
+        else {inner=0}
+    }
+    if inner =? 0 or files.ptr[pos_file(nodes.ptr[inner].pos)].path not=? "{lib_dir}/math_int.jo" {
+        nodes[part].sym = int32<overflow='wrap'>(get_fn_inst(decl binds pos))
+    }
+    else if remainder {format_word_select(part)}
+    else {
+        let next=format_word_heads.get(owner) ?? 0
+        format_word_requests.push(WordFormatRequest(part l decl binds next))
+        format_word_heads[owner] = format_word_requests.length
+    }
+    true
+}
+
+# No body walk: settle only requested observations, with one range query per
+# defining write. A later write can precede a read on a loop back edge or in
+# deferred code, so reject any write other than the initializer.
+format_word_finish=(owner:int64):>void=>$unsafe {
+    if format_word_heads.length =? 0 {return}
+    let head=format_word_heads.get(owner) ?? 0
+    if head =? 0 {return}
+    format_word_heads.remove(owner);
+    let bounds:dict<int64 bool>=[]
+    loop head not=? 0 {
+        let r=format_word_requests[head - 1]
+        head=r.next
+        let s=format_word_defs[r.binding]
+        if FormatWordObservationsWord(locals.ptr[r.binding].flags) & FORMAT_WORD_UNSTABLE =? 0 and nodes.ptr[s].kind =? 'vardecl' and FormatWordObservationsWord(nodes.ptr[s].sym) =? r.binding {
+            if not bounds.has(s) {bounds[s] = format_word_range(FormatWordObservationsWord(nodes.ptr[s].b))}
+            if bounds[s] {
+                format_word_select(r.part)
+                continue
+            }
+        }
+        nodes[r.part].sym = int32<overflow='wrap'>(get_fn_inst(r.decl r.binds nodes.ptr[r.part].pos))
+    }
+}
+
+fmt_part=(part:int64 pos:int64):>void=>$unsafe {
+    # Formatting observes the exact result; it is not a fixed-width store.
+    # Reveal a fixed-width arithmetic node to mathematical int before overload selection.
+    let observed=FormatWordObservationsWord(nodes.ptr[part].a)
+    if dewy_at(pos) and exact_type(ntype(observed) pos) and exact_potential(observed) {exact_int_result(observed true);}
+    let t=prune(ntype(FormatWordObservationsWord(nodes.ptr[part].a)))
+    oom_unhandled(t pos "showing it")
+    let shown=if is_quantity(t) and nodes.ptr[part].sval <? 0 and dewy_at(pos) {quantity_display(FormatWordObservationsWord(nodes.ptr[part].a))} else {0}
+    if shown not=? 0 {
+        nodes[part].a = int32<overflow='wrap'>(shown)
+        t=T_STR
+    }
+    else if is_quantity(t) {
+        let reading=if dewy_at(pos) {quantity_shown_number(FormatWordObservationsWord(nodes.ptr[part].a))} else {0}
+        if reading not=? 0 {
+            nodes[part].a = int32<overflow='wrap'>(reading)
+            t=prune(ntype(reading))
+        }
+        else {
+            nodes[part].a = int32<overflow='wrap'>(quantity_number(FormatWordObservationsWord(nodes.ptr[part].a)))
+            t=quantity_base(t)
+        }
+    }
+    if types.ptr[t].kind =? 'fixed' {
+        # (shown like an array: [1, 2, 3])
+        t=mk_array(FormatWordObservationsWord(types.ptr[t].elem))
+        coerce(FormatWordObservationsWord(nodes.ptr[part].a) t);
+    }
+    # (never: what does not come back, as panic(...), or a function skipped after its error)
+    if t =? T_NEVER {
+        coerce(FormatWordObservationsWord(nodes.ptr[part].a) T_STR);
+        t=T_STR
+    }
+    if types.ptr[t].kind =? 'void_' {
+        let why=void_rec_hint(FormatWordObservationsWord(nodes.ptr[part].a))
+        # (print(xs.reverse()): Python's in-place methods give None)
+        if why =? "" and dewy_at(nodes.ptr[part].pos) and nodes.ptr[FormatWordObservationsWord(nodes.ptr[part].a)].kind not=? 'ident' {why=" (this gives nothing: a method that changes its object, as `xs.sort()` or `xs.reverse()`, gives no value; show the object afterwards, or make a new one with `xs.sorted()` or `xs.reversed()`)"}
+        fatal(nodes.ptr[FormatWordObservationsWord(nodes.ptr[part].a)].pos "cannot format a value of type void{why}")
+    }
+    # (a type shown is its spelling: `"{int64}"`, `printl(Point)`)
+    if types.ptr[t].kind =? 'typeval' and dewy_at(nodes.ptr[part].pos) {
+        let e=FormatWordObservationsWord(nodes.ptr[part].a)
+        nodes[e] = nodes.ptr[bc_str(type_str(FormatWordObservationsWord(types.ptr[t].elem) true) nodes.ptr[e].pos)]
+        check_expr(e T_STR);
+        t=T_STR
+    }
+    if types.ptr[t].kind =? 'typeval' or types.ptr[t].kind =? 'module' {fatal(nodes.ptr[FormatWordObservationsWord(nodes.ptr[part].a)].pos "this is a type or module, not a value (a value of a type is made by calling it: `T()`)")}
+    if types.ptr[t].kind =? 'ptr' or types.ptr[t].kind =? 'cfn' {fatal(nodes.ptr[FormatWordObservationsWord(nodes.ptr[part].a)].pos "a {dt(t)} is not printed: its address is `int(p as *u8)` (in hex, \"\{int(p as *u8):#x}\")")}
+    let bt=mk_array(T_U8)
+    if nodes.ptr[part].sval >=? 0 {
+        # ({hits / shots:.1%} with whole numbers: the fraction is gone before it is shown)
+        let e=FormatWordObservationsWord(nodes.ptr[part].a)
+        let spec=name_of(FormatWordObservationsWord(nodes.ptr[part].sval))
+        let spec_bytes=spec as array<uint8>
+        if is_int(t) and nodes.ptr[e].kind =? 'binary' and nodes.ptr[e].op =? 61 and spec_bytes.length >? 0 and (spec_bytes[spec_bytes.length - 1] =? b'%' or spec_bytes[spec_bytes.length - 1] =? b'f' or find_byte(spec b'.') >=? 0) {
+            warn(nodes.ptr[e].pos "this divides whole numbers, dropping the fraction before it is formatted: `f64(a) / b` keeps it")
+        }
+        nodes[part].sym = int32<overflow='wrap'>(resolve_by_types(intern("__fmt_spec") [bt t T_STR] pos true))
+    }
+    else {
+        let writer="__fmt"
+        if dewy_at(pos) {writer="__dewy_fmt"}
+        # Select the representation before instantiating the generic formatter.
+        # The semantic overload is still chosen first; only the bundled default
+        # may use a proved word, with no new fixed-width storage obligation.
+        if t =? T_MATH_INT and format_word_try(part writer bt pos) {return}
+        nodes[part].sym = int32<overflow='wrap'>(resolve_by_types(intern(writer) [bt t] pos true))
+    }
+}

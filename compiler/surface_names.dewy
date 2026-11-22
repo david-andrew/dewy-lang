@@ -1,7 +1,8 @@
 $runtime_checks
-from p"expr.jo" import (dewy_surface_hints surface_hidden task_surface_names)
+from p"type_ops.dewy" import (get_struct_inst)
+from p"expr.jo" import (console_type_id dewy_surface_hints quantity_call_names surface_hidden task_surface_names)
 from p"checker_expr.dewy" import (lookup)
-from p"check.jo" import (lib_dir syms)
+from p"check.jo" import (lib_dir prelude syms)
 from p"ast.jo" import (kid nkids nodes)
 from p"util.jo" import (files intern name_of pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
@@ -51,4 +52,33 @@ dewy_surface_check=(n:int64 name:int64):>void=>$unsafe {
     if own not=? 0 and syms.ptr[own].kind =? 'fns' and surface_sees(own true) {return}
     let hint=dewy_surface_table().get(name) ?? ""
     if hint not=? "" {fatal(nodes.ptr[n].pos "'{name_of(name)}' is not Dewy's: {hint}")}
+}
+
+# the member a Dewy program wrote, for a library function standing for it
+shown_fn_name=(name:string):>string=>$unsafe {
+    if name =? "__dewy_find" {return "find"}
+    if name =? "__dewy_rfind" {return "rfind"}
+    if name =? "__dewy_index_of" {return "index_of"}
+    if name =? "__dewy_insert" {return "insert"}
+    if name =? "__dewy_byte_slice" {return "byte_slice"}
+    if name =? "__dewy_read_u64" {return "read<uint64>"}
+    if name =? "__dewy_read_u32" {return "read<uint32>"}
+    if name =? "__dewy_read_u16" {return "read<uint16>"}
+    if name =? "__dewy_keys" {return "keys"}
+    name
+}
+
+console_type=():>int64=>$unsafe {
+    let console_type_id_slot=@console_type_id
+    if console_type_id_slot >=? 0 {return console_type_id_slot}
+    let s=prelude.get(intern("Console")) ?? 0
+    if s =? 0 or syms.ptr[s].kind not=? 'struct_' {return 0}
+    console_type_id_slot=get_struct_inst(SurfaceNamesWord(syms.ptr[s].decl) [])
+    console_type_id_slot
+}
+
+dewy_quantity_name=(name:int64):>bool=>$unsafe {
+    let quantity_call_names_slot=@quantity_call_names
+    if quantity_call_names_slot.length =? 0 {quantity_call_names_slot=[intern("sleep") intern("sin") intern("cos") intern("tan")]}
+    name =? quantity_call_names_slot[0] or name =? quantity_call_names_slot[1] or name =? quantity_call_names_slot[2] or name =? quantity_call_names_slot[3]
 }

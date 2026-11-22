@@ -1,3 +1,4 @@
+use 'type_ops.dewy'
 use 'expr.jo'
 use 'checker_expr.dewy'
 use 'check.jo'
@@ -42,3 +43,27 @@ dewy_surface_check = (n: int, name: int):
     if own != 0 and syms[own].kind == .fns and surface_sees(own, true): return
     hint = dewy_surface_table().get(name) ?? ""
     if hint != "": fatal(nodes[n].pos, "'{name_of(name)}' is not Dewy's: {hint}")
+
+# the member a Dewy program wrote, for a library function standing for it
+shown_fn_name = (name: str) -> str:
+    if name == "__dewy_find": return "find"
+    if name == "__dewy_rfind": return "rfind"
+    if name == "__dewy_index_of": return "index_of"
+    if name == "__dewy_insert": return "insert"
+    if name == "__dewy_byte_slice": return "byte_slice"
+    if name == "__dewy_read_u64": return "read<uint64>"
+    if name == "__dewy_read_u32": return "read<uint32>"
+    if name == "__dewy_read_u16": return "read<uint16>"
+    if name == "__dewy_keys": return "keys"
+    name
+
+console_type = () -> int:
+    if console_type_id >= 0: return console_type_id
+    s = prelude.get(intern("Console")) ?? 0
+    if s == 0 or syms[s].kind != .struct_: return 0
+    console_type_id = get_struct_inst(int(syms[s].decl), [])
+    console_type_id
+
+dewy_quantity_name = (name: int) -> bool:
+    if quantity_call_names.len() == 0: quantity_call_names = [intern("sleep"), intern("sin"), intern("cos"), intern("tan")]
+    name == quantity_call_names[0] or name == quantity_call_names[1] or name == quantity_call_names[2] or name == quantity_call_names[3]

@@ -1,3 +1,22 @@
+use 'argument_order.dewy'
+use 'source_warnings.dewy'
+use 'type_match.dewy'
+use 'checker_type_entries.dewy'
+use 'refine.jo'
+use 'checks_thin_expr.dewy'
+use 'refine_metadata.dewy'
+use 'checks_call_errors.dewy'
+use 'place_method_ops.dewy'
+use 'util.jo'
+use 'member_admit.dewy'
+use 'member_replay.jo'
+use 'literal_context.dewy'
+use 'checks_call_hints.dewy'
+use 'checker_call_queries.dewy'
+use 'call_lookup_context.dewy'
+use 'game_call_checks.dewy'
+use 'checker_call_cost.dewy'
+use 'place_methods.jo'
 use 'warn_if_ops.dewy'
 use 'warn_if.jo'
 use 'proofs.jo'
@@ -76,3 +95,117 @@ call_note_contracts = (n: int, f: int, decl: int, partial: bool, closure: int):
         proof_calls.push(FactRequest(n, int(ctxs[cx].inst)))
     if wi_any and nodes[decl].c != 0 and not partial and closure == 0 and not cc_decls.has(decl): wi_call(n, f, decl)
     if dir_floats_any and not partial and closure == 0: ff_note_call(f, decl)
+
+match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int: tm_match(pat0, a0, binds, depth)
+
+# Branch bodies must be checked in their own scopes, with the selected parameter
+# type. Only score literal results here; bindings and statements wait until then.
+call_string_cost = (a: int, p: int, sp: int, binds: mut int[]) -> int:
+    let p = p
+    if str_sets.len() > 1 and nodes[a].type != 0 and types[sp].kind == .str_ and str_set_of(ntype(a)) != 0: return 1
+    if str_sets.len() > 1 and types[sp].kind == .opt and str_set_of(int(types[sp].elem)) != 0 and (nodes[a].kind == .str_lit or nodes[a].type != 0 and str_text_or_set(ntype(a))):
+        # (a string for an optional string set: as for the set, then wrapped)
+        r = arg_cost(a, int(types[sp].elem), binds)
+        return if r < 0: -1 else: r + 2
+    if str_sets.len() > 1 and str_set_of(sp) != 0 and (nodes[a].type != 0 or nodes[a].kind == .str_lit):
+        # (a member literal fits a string set; another string carries a proof obligation)
+        p = sp
+        ps = str_set_of(p)
+        if nodes[a].kind == .str_lit and nodes[a].aux != 1:
+            if member_record >= 0: member_string_decision(a, ps)
+            return if str_sets[ps].contains(name_of(int(nodes[a].sval))): 0 else: -1
+        at = prune(ntype(a))
+        if at == p: return 0
+        if str_set_of(at) != 0: return if str_set_within(str_set_of(at), ps): 1 else if dewy_at(nodes[a].pos): 2 else: -1
+        if at != T_STR: return -1
+        e = kid_lit(a)
+        if nodes[e].kind == .str_lit and nodes[e].aux != 1:
+            if member_record >= 0: member_string_decision(e, ps)
+            return if str_sets[ps].contains(name_of(int(nodes[e].sval))): 0 else: -1
+        return 2
+    -2
+
+call_decl_checks = (n: int, name: int, decl: int, args: int[], cd: Cand, np: int, ufcs: bool):
+    # (draw() inside draw: as a way to draw it again, it calls itself without end)
+    if (name == id_draw or name == id_update) and modules[int(nodes[decl].mod)].is_main and cx >= 0:
+        ci = int(ctxs[cx].inst)
+        if ci > 0 and int(fns[ci].decl) == decl:
+            fatal(nodes[n].pos, "{name_of(name)} calls itself here, which repeats without end: the game calls {name_of(name)} by itself, each frame")
+    if cx >= 0 and caller_dewy() and self_call_is_body(n, decl, args): self_call_error(n, name, ufcs, args)
+    if nodes[n].aux2 == i32(AUX2_PLACE) or nodes[n].aux2 == i32(AUX2_PLACE_TAKEN) or place_methods.has(decl): place_call_seen(n, decl)
+    if (name == id_rgb or name == id_rgba) and np >= 3 and decl_in_prelude(decl): rgb_check(n, cd.args)
+    if name == id_hsv and np >= 3 and decl_in_prelude(decl): hsv_check(n, cd.args)
+    if not decl_in_prelude(decl) and cx >= 0:
+        # (make_world never called: a function of the program's, used from somewhere else)
+        ci0 = int(ctxs[cx].inst)
+        if ci0 <= 0 or int(fns[ci0].decl) != decl: fn_used[decl] = true
+    if decl_in_prelude(decl) and not pos_in_lib(nodes[n].pos):
+        frame_call_check(n, decl)
+        shader_draw_check(decl, cd.args)
+        angle_check(decl, cd.args)
+        qn = name_of(int(nodes[decl].name))
+        if (starts_with(qn, "quat_") and qn != "quat_rotate" and qn != "quat_to_mat4") or qn == "slerp":
+            quat_nodes[n] = true
+            statement_watch.quaternions = quat_nodes.len()
+        # (random_int(1, 6) for a die: its upper end is left out, as in [1..6))
+        rhi = -1
+        if name_of(int(nodes[decl].name)) == "random_int" and cd.args.len() == 2 and written_int(cd.args[0]) == 1: rhi = written_int(cd.args[1])
+        if rhi == 6 or rhi == 10 or rhi == 12 or rhi == 20 or rhi == 100:
+            # (a die's, or a percent's, upper end, as people write it: random_int(1, 7) is quiet,
+            # and random_int(1, 5 + 1) says 1 to 5 is meant)
+            warn(nodes[n].pos, "random_int(1, {rhi}) gives 1 to {rhi - 1}: its upper end is left out, as in [1..{rhi}); random_int(1, {rhi + 1}) gives 1 to {rhi} (and random_int(1, {rhi - 1} + 1) says 1 to {rhi - 1} is meant)")
+        # (random(1, 6) for a die, as Python's randint: a number with a fraction)
+        if name_of(int(nodes[decl].name)) == "random" and cd.args.len() == 2 and written_int(cd.args[0]) == 1:
+            hi = written_int(cd.args[1])
+            if hi == 6 or hi == 10 or hi == 12 or hi == 20 or hi == 100: warn(nodes[n].pos, "random(1, {hi}) gives a number with a fraction (such as 3.7); a whole number from 1 to {hi} is random_int(1, {hi + 1})")
+        # (read_bytes("assets/hero.png") in a web page: it has no disk to read the file from)
+        if target_wasm and cd.args.len() > 0 and cd.args[0] != 0 and nodes[cd.args[0]].kind == .str_lit and nodes[cd.args[0]].aux == 0:
+            fnm = name_of(int(nodes[decl].name))
+            if fnm == "read_file" or fnm == "read_bytes":
+                f = name_of(int(nodes[cd.args[0]].sval))
+                warn(nodes[n].pos, "a web page has no files from the disk: {fnm}(\"{f}\") finds only what the page wrote itself; `embed(\"{f}\")` builds the file into the program")
+
+call_map_candidate = (d: int, args: int[], cd: mut Cand, kinds: int[], ufcs: bool, recv_fits: mut bool, failure: mut CallFailure) -> bool:
+    np = nkids(d)
+    cd.missing = true
+    pnames: int[]
+    hasdef: bool[]
+    loop i in [0..np):
+        pnames.push(int(nodes[kid(d, i)].name))
+        hasdef.push(nodes[kid(d, i)].b != 0)
+    if len(map_args(pnames, hasdef, args, cd.args, kinds, false, d)) > 0:
+        if failure.last_err_arg == 0:
+            failure.last_err = ""
+            failure.last_err_map = d
+        if ufcs and not recv_fits and np > 0 and nodes[unnamed(args[0])].type != 0:
+            rb = fill(0, int(cd.sig.ntp))
+            if match_type(cd.sig.params[0], ntype(unnamed(args[0])), rb, 0) >= 0: recv_fits = true
+        return false
+    true
+
+call_reject_candidate = (cd: Cand, failed: int, failure: mut CallFailure):
+    let cd = cd
+    d = cd.decl
+    i = abs(failed) - 1
+    if i + 1 < failure.last_err_arg: return
+    if failed < 0:
+        if failure.last_err_arg < i + 1: failure.rejected.clear()
+        failure.last_err_arg = i + 1
+        failure.rejected.push(Rejection(-cd.decl, i, 0, subst(cd.sig.params[i], cd.binds), cd))
+        return
+    # Of the candidates, blame the one that got furthest; among its literals,
+    # a failure before this argument is the first mistake.
+    fi = i
+    if not cd.sig.generic:
+        loop j in [0..i):
+            aj = cd.args[j]
+            if aj == 0 or not is_lit(aj) or ctx_dependent(aj): continue
+            if arg_cost(aj, cd.sig.params[j], cd.binds) < 0:
+                fi = j
+                break
+    a = cd.args[fi]
+    if failure.last_err_arg < i + 1: failure.rejected.clear()
+    failure.last_err_arg = i + 1
+    failure.rejected.push(Rejection(d, fi, a, subst(cd.sig.params[fi], cd.binds), cd))
+    failure.last_err_pos = nodes[a].pos
+    return

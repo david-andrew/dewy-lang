@@ -1,0 +1,167 @@
+use 'call_argument_checks.dewy'
+use 'refine.jo'
+use 'refine_rare.dewy'
+use 'checks_shaped.dewy'
+use 'checker_call_queries.dewy'
+use 'call_lookup_context.dewy'
+use 'checks_thin_expr.dewy'
+use 'set_type_queries.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'expr_routes.dewy'
+use 'decimal_ops.dewy'
+use 'expr.jo'
+use 'checker_expr.dewy'
+use 'checked_expression_nodes.dewy'
+use 'checks_read_code.dewy'
+use 'checks_builders.dewy'
+use 'types.jo'
+use 'node_store.dewy'
+use 'ast.jo'
+
+# `word in? members(Op)` with a plain string: a text that is no member is simply not in the
+# container, so it is tested first, `word is? Op and ...`, rather than converted (which fails).
+# The needle and then the container are evaluated once each, in that order. 0: not this case.
+membership_str_set = (n: int) -> int:
+    needle = int(nodes[n].a)
+    container = int(nodes[n].b)
+    pos = nodes[n].pos
+    tc = prune(check_expr(container, 0))
+    container = last_checked
+    nodes[n].b = i32(container)
+    add_flag(container, NF_CHECKED)
+    u = membership_str_set_of(tc)
+    if u == 0: return 0
+    tn = prune(check_expr(needle, 0))
+    needle = last_checked
+    nodes[n].a = i32(needle)
+    add_flag(needle, NF_CHECKED)
+    if tn != T_STR: return 0
+    statements: int[]
+    held = int(nodes[capture_value(needle, T_STR, statements)].sym)
+    source = int(nodes[capture_value(container, tc, statements)].sym)
+    call = mk(.call, pos)
+    callee = mk(.field, pos)
+    nodes[callee].a = i32(mk_ident_local(source, pos))
+    nodes[callee].name = i32(intern("contains"))
+    nodes[call].a = i32(callee)
+    key = mk_ident_local(held, pos)
+    add_flag(key, NF_CHECKED)
+    str_set_coerce(key, u, true)  # the generated membership guard dominates this use
+    set_list(call, [key])
+    guarded = bc_logic(.and_, shape_is(mk_ident_local(held, pos), u, pos), call, pos)
+    if prune(check_expr(guarded, T_BOOL)) != T_BOOL: fatal(pos, "membership's contains function must return bool")
+    result = mk(.exprstmt, pos)
+    nodes[result].a = i32(last_checked)
+    statements.push(result)
+    nodes[n] = Node(kind = .block, pos = pos, type = i32(T_BOOL))
+    nodes[n].aux = 1
+    set_list(n, statements)
+    add_flag(n, NF_CHECKED)
+    last_checked = n
+    T_BOOL
+
+# `d.get(word)` with d:dict<Op V> (or a set or array of Op) and a plain string: as for `in?`, a
+# text that is no member is no key, so it is tested first and the method's result for an
+# absent key given: none, the default, false, 0 or Missing. The receiver, the key and the rest
+# are evaluated once each, in that order. 0: not this case (the key converts as before).
+method_str_set_key = (n: int, recv: int, rt: int, fname: int, args: mut int[], expected: int) -> int:
+    u = membership_str_set_of(rt)
+    if u == 0 or args.len() == 0 or args.len() > 2 or nodes[args[0]].kind == .namedarg or nodes[args[0]].kind == .str_lit: return 0
+    name = name_of(fname)
+    one = args.len() == 1
+    keyed = is_map_type(rt) or is_dewy_set_type(rt)
+    k = types[prune(rt)].kind
+    listed = k == .array or k == .fixed
+    # (what an absent key gives: 1 none, 2 the default, 3 false, 4 zero, 5 Missing)
+    miss = 0
+    if is_map_type(rt) and name == "get": miss = if one: 1 else: 2
+    else if keyed and name == "pop" and not one: miss = 2
+    else if keyed and one and (name == "contains" or name == "has" or name == "remove"): miss = 3
+    else if listed and one and name == "contains": miss = 3
+    else if listed and one and name == "count": miss = 4
+    else if listed and one and name == "index_of": miss = 5
+    if miss == 0 or program_fn_named(fname): return 0
+    changes = name == "pop" or name == "remove"
+    if changes and not dewy_plain_route(recv): return 0
+    pos = nodes[n].pos
+    tk = prune(check_expr(args[0], 0))
+    args[0] = last_checked
+    add_flag(args[0], NF_CHECKED)
+    if tk != T_STR: return 0
+    statements: int[]
+    # (a receiver changed in place is a variable or field, read where it is used)
+    target = recv
+    if not changes: target = capture_value(recv, rt, statements)
+    held = int(nodes[capture_value(args[0], T_STR, statements)].sym)
+    # (in the test's true branch the text is a member: converted, it is no string)
+    key = mk_ident_local(held, pos)
+    add_flag(key, NF_CHECKED)
+    str_set_coerce(key, u, true)  # checked by the generated shape_is guard below
+    rest: int[] = [key]
+    absent = 0
+    if not one:
+        rest.push(args[1])
+        absent = clone(unnamed(args[1]))
+    if miss == 1: absent = mk(.none_lit, pos)
+    else if miss == 3: absent = bc_bool(false, pos)
+    else if miss == 4: absent = bc_int(0, pos)
+    else if miss == 5: absent = bc_call("Missing", [], pos)
+    call = mk(.call, pos)
+    callee = mk(.field, pos)
+    nodes[callee].a = i32(target)
+    nodes[callee].name = i32(fname)
+    nodes[call].a = i32(callee)
+    set_list(call, rest)
+    rt_call = check_expr(call, expected)
+    call = last_checked
+    check_expr(absent, rt_call)
+    absent = last_checked
+    coerce(absent, rt_call)
+    choice = str_set_choice(shape_is(mk_ident_local(held, pos), u, pos), call, absent, pos)
+    check_expr(choice, rt_call)
+    result = mk(.exprstmt, pos)
+    nodes[result].a = i32(last_checked)
+    statements.push(result)
+    nodes[n] = Node(kind = .block, pos = pos, type = i32(rt_call))
+    nodes[n].aux = 1
+    set_list(n, statements)
+    add_flag(n, NF_CHECKED)
+    last_checked = n
+    rt_call
+
+# `needle in container`, other than a range: the container's contains function.
+binary_membership = (n: int, expected: int) -> int:
+    needle = int(nodes[n].a)
+    container = int(nodes[n].b)
+    dewy = files[pos_file(nodes[n].pos)].is_dewy
+    if dewy and str_sets.len() > 1 and nodes[needle].kind != .str_lit:
+        members = membership_str_set(n)
+        if members != 0: return members
+        needle = int(nodes[n].a)
+        container = int(nodes[n].b)
+    call = mk(.call, nodes[n].pos)
+    callee = mk(.field, nodes[n].pos)
+    nodes[callee].a = nodes[n].b
+    nodes[callee].name = i32(intern("contains"))
+    nodes[call].a = i32(callee)
+    set_list(call, [int(nodes[n].a)])
+    nodes[n] = nodes[call]
+    t = check_expr(n, 0)
+    if dewy:
+        # Method syntax puts the receiver first. Membership reads the
+        # needle first, preserving snapshots and side effects in that order.
+        if nodes[n].kind == .call and nodes[n].aux == 0:
+            save_call_order(n, [needle, container], kids(n))
+        else if nodes[n].kind == .block and nkids(n) >= 3 and nodes[kid(n, 0)].kind == .vardecl and nodes[kid(n, 1)].kind == .vardecl and nodes[kid(n, 0)].b == i32(container) and nodes[kid(n, 1)].b == i32(needle):
+            # Dependent defaults already captured the two explicit values.
+            statements = kids(n)
+            first = statements[0]
+            statements[0] = statements[1]
+            statements[1] = first
+            set_list(n, statements)
+        else: fatal(nodes[n].pos, "membership needs a contains function, not a callable field")
+        if t != T_BOOL: fatal(nodes[n].pos, "membership's contains function must return bool")
+    return t
+
+binary_decimal = (e: int): decimal_compared(e)

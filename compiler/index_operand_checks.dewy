@@ -1,14 +1,21 @@
 $runtime_checks
+from p"refine_metadata.dewy" import (representation_type)
+from p"checker_type_entries.dewy" import (get_fn_inst)
+from p"check.jo" import (fns lib_dir syms)
+from p"collection_checks.dewy" import (dewy_whole_collection)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"expr.jo" import (call_collect_module)
+from p"call_shape_queries.dewy" import (bare_fns_call)
 from p"numeric_library_types.dewy" import (is_nd)
 from p"member_receivers.dewy" import (is_dewy_range_type)
-from p"ast.jo" import (kid nkids nodes set_kid)
-from p"checker_expr.dewy" import (check_expr)
+from p"ast.jo" import (clone kid kids mk nkids nodes set_kid set_list)
+from p"checker_expr.dewy" import (check_expr lookup)
 from p"checks_thin.dewy" import (jd)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"range_checks.dewy" import (dewy_range_value)
 from p"type_ops.dewy" import (dt mk_array)
-from p"types.jo" import (T_INT T_MATH_INT prune types)
-from p"util.jo" import (files pos_file)
+from p"types.jo" import (T_INT T_MATH_INT is_int prune telem tkind types)
+from p"util.jo" import (files intern name_of pos_file)
 
 IndexOperandWord:type=int64<overflow='wrap'>
 
@@ -47,4 +54,64 @@ neg_index_check=(b:IndexOperandWord):>void=>$unsafe {
     let k= -IndexOperandWord(nodes.ptr[b].ival)
     let e=if k >? 1 {"end - {k - 1}"} else {"end"}
     fatal(nodes.ptr[b].pos "an index counts from 0; from the end it is `{e}` (`xs[end]` is the last, `xs[end - 2..]` the last three)")
+}
+
+# `mean[t1 t2]`: a function named before an array literal is called with it, as with a
+# string literal (`printl"hi"`). A function that takes nothing is called first instead
+# (f[0] indexes f()).
+dewy_bracket_call=(n:int64):>bool=>$unsafe {
+    let base=IndexOperandWord(nodes.ptr[n].a)
+    if nodes.ptr[base].kind not=? 'ident' or nodes.ptr[n].sval not=? 0 or nkids(n) =? 0 or not dewy_at(nodes.ptr[n].pos) {return false}
+    let nm=IndexOperandWord(nodes.ptr[base].name)
+    let s=lookup(nm)
+    if s =? 0 or syms.ptr[s].kind not=? 'fns' or bare_fns_call(nm (-1)) not=? 0 {return false}
+    loop x in kids(n) {
+        let k=nodes.ptr[x].kind
+        if k =? 'range' or k =? 'namedarg' or (k =? 'ident' and name_of(IndexOperandWord(nodes.ptr[x].name)) =? "$new") {return false}
+    }
+    let items=if nkids(n) =? 1 and dewy_whole_collection(kid(n 0)) {kid(n 0)} else {mk('array' nodes.ptr[n].pos)}
+    if items not=? kid(n 0) {set_list(items kids(n))}
+    nodes[n].kind = 'call'
+    nodes[n].b = 0
+    set_list(n [items])
+    true
+}
+
+# A matrix part can use literal ranges, stored IntRange values or index arrays.
+is_part_index=(n:int64 receiver:int64=0):>bool=>$unsafe {
+    let ixs=kids(n)
+    if nodes.ptr[n].b not=? 0 {ixs=[IndexOperandWord(nodes.ptr[n].b)]}
+    loop x in ixs {
+        if nodes.ptr[x].kind =? 'range' {return true}
+    }
+    if is_nd(receiver) {
+        loop x in ixs {
+            let t=representation_type(check_expr(clone(x) 0))
+            if is_dewy_range_type(t "IntRange") {return true}
+            if (tkind(t) =? 'array' or tkind(t) =? 'fixed') and is_int(telem(t)) {return true}
+        }
+    }
+    false
+}
+
+# ---------------- unions: `is` and narrowing ----------------
+# x is T: aux = the member's index for a union; -1 (is none) or -2 (has a value) for an optional
+# When only Map.get's outer optional tag is observed, use its presence query.
+# Keep the checked expression intact for types and conservative effect analysis;
+# lowering uses the original arguments and their written evaluation order.
+map_presence_fn=(call:int64):>int64=>$unsafe {
+    if nodes.ptr[call].kind not=? 'call' or nodes.ptr[call].aux not=? 0 or nkids(call) not=? 2 {return 0}
+    let f=IndexOperandWord(nodes.ptr[call].sym)
+    let d=IndexOperandWord(fns.ptr[f].decl)
+    if d =? 0 or nodes.ptr[d].name not=? intern("get") {return 0}
+    let path="{lib_dir}/core/map.jo"
+    if files.ptr[pos_file(nodes.ptr[d].pos)].path not=? path {return 0}
+    let decls:array<int64>=[]
+    call_collect_module(IndexOperandWord(nodes.ptr[d].mod) intern("has") @decls)
+    loop candidate in decls {
+        if files.ptr[pos_file(nodes.ptr[candidate].pos)].path =? path {
+            return get_fn_inst(candidate fns.ptr[f].targs nodes.ptr[call].pos)
+        }
+    }
+    0
 }

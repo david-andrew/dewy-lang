@@ -1,3 +1,6 @@
+use 'checks_hints.dewy'
+use 'partial_checks.dewy'
+use 'call_lookup_context.dewy'
 use 'type_ops.dewy'
 use 'checker_type_entries.dewy'
 use 'expression_types.dewy'
@@ -80,3 +83,61 @@ rest_inst_binds = (decl: int, args: int[], params: int[], binds: int[]) -> int[]
         if k <= 0: return binds + [t]
         return binds + [mk_fixed(telem(t), k)]
     binds
+
+# map call args to parameter slots; returns error message ("" on success)
+# kinds: per parameter, 1 keyword-only (after `...`), 2 position-only (`<v:T>`), 3 rest
+# (`...rest:T`: the positional arguments left, and spreads, gathered into an array literal made
+# here, rest_bundle)
+# explain: false gives "?" for any error, its message left unbuilt (overload resolution tries
+# many and reports few: map_args_text builds the one reported)
+map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[], kinds: int[] = [], explain: bool = true, decl: int = 0) -> str:
+    np = pnames.len()
+    out.clear()
+    out.resize(np)
+    rest = -1
+    loop i in [0..kinds.len()):
+        if kinds[i] == 3 and i < np: rest = i
+    gathered: int[]
+    pos = 0
+    loop a in args:
+        if nodes[a].kind == .namedarg:
+            k = -1
+            loop j in [0..np):
+                if pnames[j] == int(nodes[a].name): k = j
+            if k >= 0 and k < kinds.len() and kinds[k] == 2:
+                if not explain: return "?"
+                return "parameter '{name_of(pnames[k])}' is position-only: pass it without its name"
+            if k >= 0 and k == rest:
+                if not explain: return "?"
+                return "parameter '{name_of(pnames[k])}' collects the positional arguments left: pass them without its name, or spread an array into it (`xs...`)"
+            if k < 0:
+                if not explain: return "?"
+                an = name_of(int(nodes[a].name))
+                if (an == "key" or an == "reverse") and not caller_dewy(): return "no parameter named '{an}' (by a key: `max_by(xs, (x): len(x))`, `min_by`, `sorted_by(xs, (x): x.age)`, `sort_by`; `descending = true` sorts largest first)"
+                return "no parameter named '{an}'{suggestion(an, pnames)}"
+            if out[k] != 0:
+                if not explain: return "?"
+                return "parameter '{name_of(int(nodes[a].name))}' given twice"
+            out[k] = int(nodes[a].a)
+        else:
+            loop pos < np and out[pos] != 0: pos += 1
+            if rest >= 0 and pos >= rest:
+                gathered.push(a)
+                continue
+            if pos < np and pos < kinds.len() and kinds[pos] == 1:
+                if not explain: return "?"
+                return "too many positional arguments: '{name_of(pnames[pos])}' takes its name (`{name_of(pnames[pos])}=...`)"
+            if pos >= np:
+                if not explain: return "?"
+                return "too many arguments (expected {np})"
+            if has_flag(a, NF_SPREAD):
+                if not explain: return "?"
+                return "an array of unknown length spreads only into a rest parameter"
+            out[pos] = a
+            pos += 1
+    if rest >= 0: out[rest] = rest_bundle(gathered, decl, rest)
+    loop i in [0..np):
+        if out[i] == 0 and not has_default[i]:
+            if not explain: return "?"
+            return "missing argument '{name_of(pnames[i])}'"
+    ""

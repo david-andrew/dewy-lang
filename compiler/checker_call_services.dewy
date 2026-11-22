@@ -1,8 +1,9 @@
 $runtime_checks
-from p"surface_names.dewy" import (dewy_surface_check)
+from p"string_membership.dewy" import (method_str_set_key)
+from p"surface_names.dewy" import (console_type dewy_quantity_name dewy_surface_check)
 from p"member_handles.dewy" import (race_spread select_id)
 from p"aggregate_sources.dewy" import (type_sequence_call)
-from p"member_receivers.dewy" import (dewy_method_field)
+from p"member_receivers.dewy" import (dewy_len_check dewy_member_name dewy_method_field synthetic_copy)
 from p"checker_global_initialization.dewy" import (ensure_global)
 from p"checker_runtime_functions.dewy" import (runtime_fn)
 from p"checker_source_positions.dewy" import (dewy_at)
@@ -14,7 +15,7 @@ from p"expression_types.dewy" import (ntype)
 
 from p"checker_call_values.dewy" import value_call
 from p"call_forward.dewy" import (fmt_literal_call value_binding_forward value_call_forward)
-from p"expr.jo" import (IN call_collect_fns call_collect_module call_collect_named call_targs callee_at can_coerce coerce console_type conversion dewy_arithmetic_call dewy_len_check dewy_member_name dewy_quantity_name id_breakpoint id_len intrinsics last_checked method_str_set_key release_name relocate_name struct_ctor surface_hidden synthetic_copy take_name)
+from p"expr.jo" import (IN call_collect_fns call_collect_module call_collect_named call_targs callee_at can_coerce coerce conversion dewy_arithmetic_call id_breakpoint id_len intrinsics last_checked release_name relocate_name struct_ctor surface_hidden take_name)
 from p"call_argument_checks.dewy" import (nargs_check)
 from p"call_lookup_context.dewy" import (check_expr_in_module ci decl_in_prelude program_fn_named)
 from p"literal_context.dewy" import (is_lit)

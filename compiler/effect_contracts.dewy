@@ -1,4 +1,5 @@
 $runtime_checks
+from p"call_argument_checks.dewy" import (match_type)
 from p"checker_global_initialization.dewy" import (ensure_global)
 from p"checker_type_entries.dewy" import (check_struct_fields subst)
 from p"checker_module_lookup.dewy" import (module_lookup)
@@ -15,7 +16,6 @@ from p"diagnostic_exit.dewy" import (fatal)
 from p"types.jo" import (fields mk_type prune structs targ telem tkind types variants)
 from p"type_ops.dewy" import (zonk)
 from p"checker_expr.dewy" import (lookup)
-from p"expr.jo" import (match_type)
 from p"place_routes.dewy" import (place_project)
 from p"refine_metadata.dewy" import (representation_type)
 # Effect row resolution and matching; shared state has one owner in effects.jo.

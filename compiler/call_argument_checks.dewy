@@ -1,10 +1,29 @@
 $runtime_checks
+from p"source_warnings.dewy" import (warn)
+from p"type_match.dewy" import (tm_match)
+from p"checker_type_entries.dewy" import (subst)
+from p"refine.jo" import (str_sets)
+from p"checks_thin_expr.dewy" import (str_set_within str_text_or_set)
+from p"refine_metadata.dewy" import (str_set_of)
+from p"@lib/core/str.jo" import (starts_with)
+from p"checks_call_errors.dewy" import (self_call_error)
+from p"place_method_ops.dewy" import (place_call_seen)
+from p"util.jo" import (name_of pos_in_lib)
+from p"member_admit.dewy" import (member_string_decision)
+from p"member_replay.jo" import (member_record)
+from p"literal_context.dewy" import (is_lit kid_lit)
+from p"checks_call_hints.dewy" import (hsv_check rgb_check)
+from p"checker_call_queries.dewy" import (ctx_dependent)
+from p"call_lookup_context.dewy" import (caller_dewy decl_in_prelude)
+from p"game_call_checks.dewy" import (angle_check frame_call_check shader_draw_check written_int)
+from p"checker_call_cost.dewy" import (Cand arg_cost)
+from p"place_methods.jo" import (AUX2_PLACE_TAKEN place_methods)
 from p"warn_if_ops.dewy" import (wi_call)
 from p"warn_if.jo" import (wi_any)
 from p"proofs.jo" import (proof_active proof_calls proof_decls)
 from p"float_ops.dewy" import (ff_note_call)
 from p"directives.jo" import (dir_floats_any)
-from p"check.jo" import (ctxs cx fns)
+from p"check.jo" import (ctxs cx fns modules statement_watch target_wasm)
 from p"check_constant.jo" import (cc_decls)
 from p"refinement_types.dewy" import (FactRequest)
 from p"checker_source_positions.dewy" import (dewy_at)
@@ -13,8 +32,9 @@ from p"ast.jo" import (NF_CHECKED NF_COMPREHENSION add_flag has_flag kid nkids n
 from p"checker_expr.dewy" import (check_expr)
 from p"collection_checks.dewy" import (comprehension_self_typed)
 from p"diagnostic_exit.dewy" import (fatal)
-from p"expr.jo" import (coerce)
-from p"types.jo" import (prune)
+from p"expr.jo" import (AUX2_PLACE CallFailure Rejection coerce fn_used id_draw id_hsv id_rgb id_rgba id_update quat_nodes)
+from p"argument_order.dewy" import (map_args)
+from p"types.jo" import (T_STR prune types)
 
 CallArgWord:type=int64<overflow='wrap'>
 
@@ -92,4 +112,153 @@ call_note_contracts=(n:int64 f:int64 decl:int64 partial:bool closure:int64):>voi
     }
     if wi_any and nodes.ptr[decl].c not=? 0 and not partial and closure =? 0 and not cc_decls.has(decl) {wi_call(n f decl)}
     if dir_floats_any and not partial and closure =? 0 {ff_note_call(f decl)}
+}
+
+match_type=(pat0:int64 a0:int64 @binds:array<int64> depth:int64):>int64=>$unsafe {
+    if pat0 =? a0 {
+        let k=types.ptr[pat0].kind
+        if k =? 'int_' or k =? 'float_' or k =? 'bool_' or k =? 'str_' {return 0}
+    }
+    tm_match(pat0 a0 @binds depth)
+}
+
+# Branch bodies must be checked in their own scopes, with the selected parameter
+# type. Only score literal results here; bindings and statements wait until then.
+call_string_cost=(a:int64 p:int64 sp:int64 @binds:array<int64>):>int64=>$unsafe {
+    if str_sets.length <=? 1 {return -2}
+    if nodes.ptr[a].type not=? 0 and types.ptr[sp].kind =? 'str_' and str_set_of(ntype(a)) not=? 0 {return 1}
+    if types.ptr[sp].kind =? 'opt' and str_set_of(CallArgWord(types.ptr[sp].elem)) not=? 0 and (nodes.ptr[a].kind =? 'str_lit' or nodes.ptr[a].type not=? 0 and str_text_or_set(ntype(a))) {
+        # (a string for an optional string set: as for the set, then wrapped)
+        let r=arg_cost(a CallArgWord(types.ptr[sp].elem) @binds)
+        return if r <? 0 {-1} else {r + 2}
+    }
+    if str_set_of(sp) not=? 0 and (nodes.ptr[a].type not=? 0 or nodes.ptr[a].kind =? 'str_lit') {
+        # (a member literal fits a string set; another string carries a proof obligation)
+        let ps=str_set_of(sp)
+        if nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux not=? 1 {
+            if member_record >=? 0 {member_string_decision(a ps)}
+            return if str_sets[ps].contains(name_of(CallArgWord(nodes.ptr[a].sval))) {0} else {-1}
+        }
+        let at=prune(ntype(a))
+        if at =? sp {return 0}
+        if str_set_of(at) not=? 0 {return if str_set_within(str_set_of(at) ps) {1} else if dewy_at(nodes.ptr[a].pos) {2} else {-1}}
+        if at not=? T_STR {return -1}
+        let e=kid_lit(a)
+        if nodes.ptr[e].kind =? 'str_lit' and nodes.ptr[e].aux not=? 1 {
+            if member_record >=? 0 {member_string_decision(e ps)}
+            return if str_sets[ps].contains(name_of(CallArgWord(nodes.ptr[e].sval))) {0} else {-1}
+        }
+        return 2
+    }
+    -2
+}
+
+call_decl_checks=(n:int64 name:int64 decl:int64 args:array<int64> cd:Cand np:int64 ufcs:bool):>void=>$unsafe {
+    # (draw() inside draw: as a way to draw it again, it calls itself without end)
+    if (name =? id_draw or name =? id_update) and modules.ptr[CallArgWord(nodes.ptr[decl].mod)].is_main and cx >=? 0 {
+        let ci=CallArgWord(ctxs.ptr[cx].inst)
+        if ci >? 0 and CallArgWord(fns.ptr[ci].decl) =? decl {
+            fatal(nodes.ptr[n].pos "{name_of(name)} calls itself here, which repeats without end: the game calls {name_of(name)} by itself, each frame")
+        }
+    }
+    if cx >=? 0 and self_call_is_body(n decl args) and caller_dewy() {self_call_error(n name ufcs args)}
+    if nodes.ptr[n].aux2 =? int32<overflow='wrap'>(AUX2_PLACE) or nodes.ptr[n].aux2 =? int32<overflow='wrap'>(AUX2_PLACE_TAKEN) or place_methods.has(decl) {place_call_seen(n decl)}
+    let bundled=decl_in_prelude(decl)
+    if (name =? id_rgb or name =? id_rgba) and np >=? 3 and bundled {rgb_check(n cd.args)}
+    if name =? id_hsv and np >=? 3 and bundled {hsv_check(n cd.args)}
+    if not bundled and cx >=? 0 {
+        # (make_world never called: a function of the program's, used from somewhere else)
+        let ci0=CallArgWord(ctxs.ptr[cx].inst)
+        if ci0 <=? 0 or CallArgWord(fns.ptr[ci0].decl) not=? decl {fn_used[decl] = true}
+    }
+    if bundled and not pos_in_lib(nodes.ptr[n].pos) {
+        frame_call_check(n decl)
+        shader_draw_check(decl cd.args)
+        angle_check(decl cd.args)
+        let qn=name_of(CallArgWord(nodes.ptr[decl].name))
+        if (starts_with(qn "quat_") and qn not=? "quat_rotate" and qn not=? "quat_to_mat4") or qn =? "slerp" {
+            quat_nodes[n] = true
+            statement_watch.quaternions = quat_nodes.length
+        }
+        # (random_int(1, 6) for a die: its upper end is left out, as in [1..6))
+        let rhi:CallArgWord=-1
+        if qn =? "random_int" and cd.args.length =? 2 and written_int(cd.args[0]) =? 1 {rhi=written_int(cd.args[1])}
+        if rhi =? 6 or rhi =? 10 or rhi =? 12 or rhi =? 20 or rhi =? 100 {
+            # (a die's, or a percent's, upper end, as people write it: random_int(1, 7) is quiet,
+            # and random_int(1, 5 + 1) says 1 to 5 is meant)
+            warn(nodes.ptr[n].pos "random_int(1, {rhi}) gives 1 to {rhi - 1}: its upper end is left out, as in [1..{rhi}); random_int(1, {rhi + 1}) gives 1 to {rhi} (and random_int(1, {rhi - 1} + 1) says 1 to {rhi - 1} is meant)")
+        }
+        # (random(1, 6) for a die, as Python's randint: a number with a fraction)
+        if qn =? "random" and cd.args.length =? 2 and written_int(cd.args[0]) =? 1 {
+            let hi=written_int(cd.args[1])
+            if hi =? 6 or hi =? 10 or hi =? 12 or hi =? 20 or hi =? 100 {warn(nodes.ptr[n].pos "random(1, {hi}) gives a number with a fraction (such as 3.7); a whole number from 1 to {hi} is random_int(1, {hi + 1})")}
+        }
+        # (read_bytes("assets/hero.png") in a web page: it has no disk to read the file from)
+        if target_wasm and cd.args.length >? 0 and cd.args[0] not=? 0 and nodes.ptr[cd.args[0]].kind =? 'str_lit' and nodes.ptr[cd.args[0]].aux =? 0 {
+            let fnm=qn
+            if fnm =? "read_file" or fnm =? "read_bytes" {
+                let f=name_of(CallArgWord(nodes.ptr[cd.args[0]].sval))
+                warn(nodes.ptr[n].pos "a web page has no files from the disk: {fnm}(\"{f}\") finds only what the page wrote itself; `embed(\"{f}\")` builds the file into the program")
+            }
+        }
+    }
+}
+
+call_map_candidate=(d:int64 args:array<int64> @cd:Cand kinds:array<int64> ufcs:bool @recv_fits:bool @failure:CallFailure):>bool=>$unsafe {
+    let np=nkids(d)
+    cd.missing = true
+    let pnames:array<int64>=fill(0 np)
+    let hasdef:array<bool>=fill(false np)
+    loop i in [0..np) {
+        let param=kid(d i)
+        pnames.ptr[i]=CallArgWord(nodes.ptr[param].name)
+        hasdef.ptr[i]=nodes.ptr[param].b not=? 0
+    }
+    if (map_args(pnames hasdef args @cd.args kinds false d) as array<uint8>).length >? 0 {
+        if failure.last_err_arg =? 0 {
+            failure.last_err = ""
+            failure.last_err_map = d
+        }
+        if ufcs and not recv_fits and np >? 0 and nodes.ptr[unnamed(args[0])].type not=? 0 {
+            let rb:array<int64>=fill(0 CallArgWord(cd.sig.ntp))
+            if match_type(cd.sig.params[0] ntype(unnamed(args[0])) @rb 0) >=? 0 {recv_fits=true}
+        }
+        return false
+    }
+    true
+}
+
+call_reject_candidate=(cd:Cand failed:int64 @failure:CallFailure):>void=>$unsafe {
+    let d=cd.decl
+    let distance=CallArgWord(failed)
+    let i=(if distance <? 0 {-distance} else {distance}) - 1
+    if i + 1 <? failure.last_err_arg {return}
+    if failed <? 0 {
+        if failure.last_err_arg <? i + 1 {failure.rejected.clear()}
+        failure.last_err_arg = i + 1
+        failure.rejected.push(Rejection(-cd.decl i 0 subst(cd.sig.params[i] cd.binds) cd))
+        return
+    }
+    # Of the candidates, blame the one that got furthest; among its literals,
+    # a failure before this argument is the first mistake.
+    let binds=cd.binds
+    let fi=i
+    if not cd.sig.generic {
+        loop j in [0..i) {
+            let aj=cd.args[j]
+            if aj =? 0 or not is_lit(aj) or ctx_dependent(aj) {continue}
+            if arg_cost(aj cd.sig.params.ptr[j] @binds) <? 0 {
+                fi=j
+                break
+            }
+        }
+    }
+    let a=cd.args[fi]
+    if failure.last_err_arg <? i + 1 {failure.rejected.clear()}
+    failure.last_err_arg = i + 1
+    let rejected=Rejection(d fi a subst(cd.sig.params.ptr[fi] binds) cd)
+    rejected.cd.binds=binds
+    failure.rejected.push(rejected)
+    failure.last_err_pos = nodes.ptr[a].pos
+    return
 }

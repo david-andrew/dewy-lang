@@ -1,14 +1,17 @@
 $runtime_checks
+from p"checks_hints.dewy" import (suggestion)
+from p"partial_checks.dewy" import (rest_bundle)
+from p"call_lookup_context.dewy" import (caller_dewy)
 from p"type_ops.dewy" import (mk_fixed)
 from p"checker_type_entries.dewy" import (subst)
 from p"expression_types.dewy" import (ntype)
-from p"ast.jo" import (NF_CHECKED NF_SPREAD add_flag dewy_param_kinds kid mk nodes rest_bundles set_list)
+from p"ast.jo" import (NF_CHECKED NF_SPREAD add_flag dewy_param_kinds has_flag kid mk nodes rest_bundles set_list)
 from p"checker_call_cost.dewy" import (Cand)
 from p"call_argument_checks.dewy" import (unnamed)
 from p"literal_context.dewy" import (is_lit)
 from p"select_checks.dewy" import (select_call select_written_priority)
 from p"types.jo" import (T_INT prune telem tkind type_eq)
-from p"util.jo" import (files pos_file)
+from p"util.jo" import (files name_of pos_file)
 
 ArgOrderWord:type=int64<overflow='wrap'>
 
@@ -81,4 +84,78 @@ rest_inst_binds=(decl:int64 args:array<int64> params:array<int64> binds:array<in
         return [binds... mk_fixed(telem(t) k)]
     }
     binds
+}
+
+# map call args to parameter slots; returns error message ("" on success)
+# kinds: per parameter, 1 keyword-only (after `...`), 2 position-only (`<v:T>`), 3 rest
+# (`...rest:T`: the positional arguments left, and spreads, gathered into an array literal made
+# here, rest_bundle)
+# explain: false gives "?" for any error, its message left unbuilt (overload resolution tries
+# many and reports few: map_args_text builds the one reported)
+map_args=(pnames:array<int64> has_default:array<bool> args:array<int64> @out:array<int64> kinds:array<int64>=[] explain:bool=true decl:int64=0):>string=>$unsafe {
+    let np=pnames.length
+    out.clear()
+    out.resize(np)
+    let rest:ArgOrderWord=-1
+    loop i in 0.. and kind in kinds {
+        if kind =? 3 and i <? np {rest=i}
+    }
+    let gathered:array<int64>=[]
+    let pos:ArgOrderWord=0
+    loop a in args {
+        if nodes.ptr[a].kind =? 'namedarg' {
+            let k:ArgOrderWord=-1
+            loop j in [0..np) {
+                if pnames[j] =? ArgOrderWord(nodes.ptr[a].name) {k=j}
+            }
+            if k >=? 0 and k <? kinds.length and kinds[k] =? 2 {
+                if not explain {return "?"}
+                return "parameter '{name_of(pnames[k])}' is position-only: pass it without its name"
+            }
+            if k >=? 0 and k =? rest {
+                if not explain {return "?"}
+                return "parameter '{name_of(pnames[k])}' collects the positional arguments left: pass them without its name, or spread an array into it (`xs...`)"
+            }
+            if k <? 0 {
+                if not explain {return "?"}
+                let an=name_of(ArgOrderWord(nodes.ptr[a].name))
+                if (an =? "key" or an =? "reverse") and not caller_dewy() {return "no parameter named '{an}' (by a key: `max_by(xs, (x): len(x))`, `min_by`, `sorted_by(xs, (x): x.age)`, `sort_by`; `descending = true` sorts largest first)"}
+                return "no parameter named '{an}'{suggestion(an pnames)}"
+            }
+            if out[k] not=? 0 {
+                if not explain {return "?"}
+                return "parameter '{name_of(ArgOrderWord(nodes[a].name))}' given twice"
+            }
+            out[k] = ArgOrderWord(nodes.ptr[a].a)
+        }
+        else {
+            loop pos <? np and out[pos] not=? 0 {pos += 1}
+            if rest >=? 0 and pos >=? rest {
+                gathered.push(a)
+                continue
+            }
+            if pos <? np and pos <? kinds.length and kinds[pos] =? 1 {
+                if not explain {return "?"}
+                return "too many positional arguments: '{name_of(pnames[pos])}' takes its name (`{name_of(pnames[pos])}=...`)"
+            }
+            if pos >=? np {
+                if not explain {return "?"}
+                return "too many arguments (expected {np})"
+            }
+            if has_flag(a NF_SPREAD) {
+                if not explain {return "?"}
+                return "an array of unknown length spreads only into a rest parameter"
+            }
+            out[pos] = a
+            pos += 1
+        }
+    }
+    if rest >=? 0 {out[rest] = rest_bundle(gathered decl rest)}
+    loop i in [0..np) {
+        if out[i] =? 0 and not has_default[i] {
+            if not explain {return "?"}
+            return "missing argument '{name_of(pnames[i])}'"
+        }
+    }
+    ""
 }

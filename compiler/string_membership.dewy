@@ -1,0 +1,182 @@
+$runtime_checks
+from p"call_argument_checks.dewy" import (unnamed)
+from p"refine.jo" import (str_sets)
+from p"refine_rare.dewy" import (str_set_choice str_set_coerce)
+from p"checks_shaped.dewy" import (shape_is)
+from p"checker_call_queries.dewy" import (save_call_order)
+from p"call_lookup_context.dewy" import (program_fn_named)
+from p"checks_thin_expr.dewy" import (is_map_type)
+from p"set_type_queries.dewy" import (is_dewy_set_type membership_str_set_of)
+from p"util.jo" import (files intern name_of pos_file)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr_routes.dewy" import (dewy_plain_route)
+from p"decimal_ops.dewy" import (decimal_compared)
+from p"expr.jo" import (coerce last_checked)
+from p"checker_expr.dewy" import (check_expr)
+from p"checked_expression_nodes.dewy" import (capture_value mk_ident_local)
+from p"checks_read_code.dewy" import (bc_logic)
+from p"checks_builders.dewy" import (bc_bool bc_call bc_int)
+from p"types.jo" import (T_BOOL T_STR prune types)
+from p"node_store.dewy" import (Node)
+from p"ast.jo" import (NF_CHECKED add_flag clone kid kids mk nkids nodes set_list)
+
+StringMembershipWord:type=int64<overflow='wrap'>
+
+# `word in? members(Op)` with a plain string: a text that is no member is simply not in the
+# container, so it is tested first, `word is? Op and ...`, rather than converted (which fails).
+# The needle and then the container are evaluated once each, in that order. 0: not this case.
+membership_str_set=(n:int64):>int64=>$unsafe {
+    let last_checked_slot=@last_checked
+    let needle=StringMembershipWord(nodes.ptr[n].a)
+    let container=StringMembershipWord(nodes.ptr[n].b)
+    let pos=nodes.ptr[n].pos
+    let tc=prune(check_expr(container 0))
+    container=last_checked_slot
+    nodes[n].b = int32<overflow='wrap'>(container)
+    add_flag(container NF_CHECKED)
+    let u=membership_str_set_of(tc)
+    if u =? 0 {return 0}
+    let tn=prune(check_expr(needle 0))
+    needle=last_checked_slot
+    nodes[n].a = int32<overflow='wrap'>(needle)
+    add_flag(needle NF_CHECKED)
+    if tn not=? T_STR {return 0}
+    let statements:array<int64>=[]
+    let held=StringMembershipWord(nodes.ptr[capture_value(needle T_STR @statements)].sym)
+    let source=StringMembershipWord(nodes.ptr[capture_value(container tc @statements)].sym)
+    let call=mk('call' pos)
+    let callee=mk('field' pos)
+    nodes[callee].a = int32<overflow='wrap'>(mk_ident_local(source pos))
+    nodes[callee].name = int32<overflow='wrap'>(intern("contains"))
+    nodes[call].a = int32<overflow='wrap'>(callee)
+    let key=mk_ident_local(held pos)
+    add_flag(key NF_CHECKED)
+    str_set_coerce(key u true); # the generated membership guard dominates this use
+    set_list(call [key])
+    let guarded=bc_logic('and_' shape_is(mk_ident_local(held pos) u pos) call pos)
+    if prune(check_expr(guarded T_BOOL)) not=? T_BOOL {fatal(pos "membership's contains function must return bool")}
+    let result=mk('exprstmt' pos)
+    nodes[result].a = int32<overflow='wrap'>(last_checked_slot)
+    statements.push(result)
+    nodes[n] = Node(kind = 'block' pos = pos type = int32<overflow='wrap'>(T_BOOL))
+    nodes[n].aux = 1
+    set_list(n statements)
+    add_flag(n NF_CHECKED)
+    last_checked_slot=n
+    T_BOOL
+}
+
+# `d.get(word)` with d:dict<Op V> (or a set or array of Op) and a plain string: as for `in?`, a
+# text that is no member is no key, so it is tested first and the method's result for an
+# absent key given: none, the default, false, 0 or Missing. The receiver, the key and the rest
+# are evaluated once each, in that order. 0: not this case (the key converts as before).
+method_str_set_key=(n:int64 recv:int64 rt:int64 fname:int64 @args:array<int64> expected:int64):>int64=>$unsafe {
+    let last_checked_slot=@last_checked
+    let u=membership_str_set_of(rt)
+    if u =? 0 or args.length =? 0 or args.length >? 2 or nodes.ptr[args[0]].kind =? 'namedarg' or nodes.ptr[args[0]].kind =? 'str_lit' {return 0}
+    let name=name_of(fname)
+    let one=args.length =? 1
+    let keyed=is_map_type(rt) or is_dewy_set_type(rt)
+    let k=types.ptr[prune(rt)].kind
+    let listed=k =? 'array' or k =? 'fixed'
+    # (what an absent key gives: 1 none, 2 the default, 3 false, 4 zero, 5 Missing)
+    let miss:StringMembershipWord=0
+    if is_map_type(rt) and name =? "get" {miss=if one {1} else {2}}
+    else if keyed and name =? "pop" and not one {miss=2}
+    else if keyed and one and (name =? "contains" or name =? "has" or name =? "remove") {miss=3}
+    else if listed and one and name =? "contains" {miss=3}
+    else if listed and one and name =? "count" {miss=4}
+    else if listed and one and name =? "index_of" {miss=5}
+    if miss =? 0 or program_fn_named(fname) {return 0}
+    let changes=name =? "pop" or name =? "remove"
+    if changes and not dewy_plain_route(recv) {return 0}
+    let pos=nodes.ptr[n].pos
+    let tk=prune(check_expr(args[0] 0))
+    args[0] = last_checked_slot
+    add_flag(args[0] NF_CHECKED)
+    if tk not=? T_STR {return 0}
+    let statements:array<int64>=[]
+    # (a receiver changed in place is a variable or field, read where it is used)
+    let target=recv
+    if not changes {target=capture_value(recv rt @statements)}
+    let held=StringMembershipWord(nodes.ptr[capture_value(args[0] T_STR @statements)].sym)
+    # (in the test's true branch the text is a member: converted, it is no string)
+    let key=mk_ident_local(held pos)
+    add_flag(key NF_CHECKED)
+    str_set_coerce(key u true); # checked by the generated shape_is guard below
+    let rest:array<int64>=[key]
+    let absent:StringMembershipWord=0
+    if not one {
+        rest.push(args[1])
+        absent=clone(unnamed(args[1]))
+    }
+    if miss =? 1 {absent=mk('none_lit' pos)}
+    else if miss =? 3 {absent=bc_bool(false pos)}
+    else if miss =? 4 {absent=bc_int(0 pos)}
+    else if miss =? 5 {absent=bc_call("Missing" [] pos)}
+    let call=mk('call' pos)
+    let callee=mk('field' pos)
+    nodes[callee].a = int32<overflow='wrap'>(target)
+    nodes[callee].name = int32<overflow='wrap'>(fname)
+    nodes[call].a = int32<overflow='wrap'>(callee)
+    set_list(call rest)
+    let rt_call=check_expr(call expected)
+    call=last_checked_slot
+    check_expr(absent rt_call);
+    absent=last_checked_slot
+    coerce(absent rt_call);
+    let choice=str_set_choice(shape_is(mk_ident_local(held pos) u pos) call absent pos)
+    check_expr(choice rt_call);
+    let result=mk('exprstmt' pos)
+    nodes[result].a = int32<overflow='wrap'>(last_checked_slot)
+    statements.push(result)
+    nodes[n] = Node(kind = 'block' pos = pos type = int32<overflow='wrap'>(rt_call))
+    nodes[n].aux = 1
+    set_list(n statements)
+    add_flag(n NF_CHECKED)
+    last_checked_slot=n
+    rt_call
+}
+
+# `needle in container`, other than a range: the container's contains function.
+binary_membership=(n:int64 expected:int64):>int64=>$unsafe {
+    let needle=StringMembershipWord(nodes.ptr[n].a)
+    let container=StringMembershipWord(nodes.ptr[n].b)
+    let dewy=files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy
+    if dewy and str_sets.length >? 1 and nodes.ptr[needle].kind not=? 'str_lit' {
+        let members=membership_str_set(n)
+        if members not=? 0 {return members}
+        needle=StringMembershipWord(nodes.ptr[n].a)
+        container=StringMembershipWord(nodes.ptr[n].b)
+    }
+    let call=mk('call' nodes.ptr[n].pos)
+    let callee=mk('field' nodes.ptr[n].pos)
+    nodes[callee].a = nodes.ptr[n].b
+    nodes[callee].name = int32<overflow='wrap'>(intern("contains"))
+    nodes[call].a = int32<overflow='wrap'>(callee)
+    set_list(call [StringMembershipWord(nodes.ptr[n].a)])
+    nodes[n] = nodes.ptr[call]
+    let t=check_expr(n 0)
+    if dewy {
+        # Method syntax puts the receiver first. Membership reads the
+        # needle first, preserving snapshots and side effects in that order.
+        if nodes.ptr[n].kind =? 'call' and nodes.ptr[n].aux =? 0 {
+            save_call_order(n [needle container] kids(n))
+        }
+        else if nodes.ptr[n].kind =? 'block' and nkids(n) >=? 3 and nodes.ptr[kid(n 0)].kind =? 'vardecl' and nodes.ptr[kid(n 1)].kind =? 'vardecl' and nodes.ptr[kid(n 0)].b =? int32<overflow='wrap'>(container) and nodes.ptr[kid(n 1)].b =? int32<overflow='wrap'>(needle) {
+            # Dependent defaults already captured the two explicit values.
+            let statements=kids(n)
+            let first=statements[0]
+            statements[0] = statements[1]
+            statements[1] = first
+            set_list(n statements)
+        }
+        else {fatal(nodes.ptr[n].pos "membership needs a contains function, not a callable field")}
+        if t not=? T_BOOL {fatal(nodes.ptr[n].pos "membership's contains function must return bool")}
+    }
+    return t
+}
+
+binary_decimal=(e:int64):>void=>$unsafe {
+    decimal_compared(e)
+}
