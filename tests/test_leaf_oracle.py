@@ -37,7 +37,6 @@ def test_capture_then_check(oracle, monkeypatch):
 @pytest.mark.parametrize('runs', [
     [(0, b'a\n'), (46, b'call-error:3\n')],      # a changed answer
     [(0, b'a\n'), (0, b'call-error:2\n')],       # a changed status
-    [(0, b'a\n'), (46, b'call-error:2\n'), (0, b'more\n')],  # a run nobody recorded
 ])
 def test_check_rejects_a_difference(oracle, monkeypatch, runs):
     run(monkeypatch, 'capture', 't', [(0, b'a\n'), (46, b'call-error:2\n')])
@@ -45,6 +44,16 @@ def test_check_rejects_a_difference(oracle, monkeypatch, runs):
     leaf_oracle._ordinals.clear()
     with pytest.raises(AssertionError):
         run(monkeypatch, 'both', 't', runs)
+
+
+def test_unrecorded_run_needs_a_record_only_without_twins(oracle, monkeypatch):
+    run(monkeypatch, 'capture', 't', [(0, b'a\n')])
+    leaf_oracle.merge(oracle / 'capture')
+    leaf_oracle._ordinals.clear()
+    run(monkeypatch, 'both', 't', [(0, b'a\n'), (0, b'more\n')])  # (the twin checked the new run)
+    leaf_oracle._ordinals.clear()
+    with pytest.raises(AssertionError):
+        run(monkeypatch, 'expected', 't', [(0, b'a\n'), (0, b'more\n')])
 
 
 def test_merge_rejects_unstable_output(oracle, monkeypatch):
