@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_twins import dewy_enumerations
+from tests.enumerations import dewy_enumerations
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 KINDS = dewy_enumerations((ROOT / 'compiler/checker_types.dewy').read_text())['TK']
@@ -120,7 +121,7 @@ def test_refine_intervals_twins_and_oracle(compiler, tmp_path, release):  # noqa
     steps, expected = corpus()
     (tmp_path / 'steps').write_text(steps)
     driver = (ROOT / 'tests/fixtures/selfhost/refine_intervals_jo.jo').read_text()
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         for name in ('checker_tokens', 'checker_types', 'refinement_types', 'refine_predicates', 'refine_queries', 'intervals', 'refine_intervals'):
             text = (ROOT / 'compiler' / f'{name}.{extension}').read_text()
             if extension == 'jo':

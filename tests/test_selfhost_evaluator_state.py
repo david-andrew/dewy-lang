@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = '''main = ():
@@ -46,7 +47,7 @@ EXPECTED = (
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_evaluator_state_twins(compiler, tmp_path, release):  # noqa: F811
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         module = f'evaluator_state.{extension}'
         (tmp_path / module).write_text((ROOT / 'compiler' / module).read_text())
         source, binary = tmp_path / 'driver.jo', tmp_path / 'driver'

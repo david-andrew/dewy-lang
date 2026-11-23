@@ -6,13 +6,14 @@ import subprocess
 import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
+from tests import parser_oracle
 from tools.compiler import parser_diff
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_quoted_callable_twins(compiler, tmp_path, monkeypatch, release):
     try:
-        pair = parser_diff.build_pair(compiler, tmp_path, release)
+        pair = parser_oracle.build_pair(compiler, tmp_path, release)
     except RuntimeError as error:
         logs = '\n'.join(f'{p.name}:\n{p.read_text()}'
                          for p in sorted(tmp_path.glob('build-*.log')))
@@ -36,7 +37,7 @@ def test_quoted_callable_twins(compiler, tmp_path, monkeypatch, release):
                               env=parser_diff.environment(library), capture_output=True,
                               text=True, timeout=30)
     assert accepted.returncode == 0, accepted.stdout + accepted.stderr
-    failures = parser_diff.compare(pair, sources, tmp_path, release, workers=1)
+    failures = parser_oracle.compare(pair, sources, tmp_path, release, workers=1)
     details = '\n'.join(f'{p}: {p.read_text()}'
                         for p in sorted(tmp_path.glob('difference-*/*.stderr')))
     assert not failures, '\n'.join(f'{path}: {reason}' for path, reason in failures) + details

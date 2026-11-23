@@ -5,6 +5,7 @@ import subprocess
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle, parser_oracle
 from tools.compiler import parser_diff
 
 
@@ -15,7 +16,7 @@ def build_pair(seed, work, release):
     main = tree / 'compiler/main.jo'
     main.write_text(main.read_text().replace('build:\n    opt = release\n', ''))
     binaries = []
-    for side in ('dewy', 'twin'):
+    for side in leaf_oracle.pair('dewy', 'twin'):
         if side == 'twin':
             for path in (tree / 'compiler').glob('*.jo'):
                 path.write_text(path.read_text().replace("use 'dewy_file.dewy'", "use 'dewy_file.jo'"))
@@ -39,7 +40,7 @@ def test_file_driver_matches_frozen(compiler, tmp_path, release):
     sources = sorted(p for directory in directories
                      for p in (cases / directory).glob('*.dewy'))
     sources += parser_diff.generated(tmp_path / 'generated', 4)
-    failures = parser_diff.compare(pair, sources, tmp_path, release, workers=1)
+    failures = parser_oracle.compare(pair, sources, tmp_path, release, workers=1)
     assert not failures, '\n'.join(f'{path}: {reason}' for path, reason in failures)
     shared = tmp_path / 'shared-panics'
     assert not shared.exists(), shared.read_text()

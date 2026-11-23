@@ -5,6 +5,7 @@ import subprocess
 import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
+from tests import leaf_oracle
 
 DRIVER = r'''
 nodes: Node[] = [Node()]
@@ -94,7 +95,7 @@ def corpus():
 def test_checker_result_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []
     stems = ('node_store', 'source_types', 'checker_results')
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         directory = tmp_path / extension
         directory.mkdir()
         for stem in stems:
@@ -112,4 +113,4 @@ def test_checker_result_twins(compiler, tmp_path, release):  # noqa: F811
         assert ran.returncode == 0, ran.stdout[-3000:] + ran.stderr
         assert ran.stdout.endswith(b'ok\n')
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)

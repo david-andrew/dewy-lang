@@ -5,6 +5,7 @@ first or last. A compiler built with checker_call_services' frozen twin (the boo
 stages) reads them alike (LANGUAGE.md, "Modules and games")."""
 import subprocess
 
+from tests import leaf_oracle
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
 
@@ -111,6 +112,6 @@ def test_import_over_builtin_twins(compiler, tmp_path, monkeypatch):  # noqa: F8
     results = compare_builds(compiler, tmp_path, monkeypatch, ('checker_call_services',), entries)
     for i, (entry, result) in enumerate(zip(entries, results)):
         assert result[2] == 0, (entry, result[4])
-        r = subprocess.run([tmp_path / 'jo' / f'p{i}-0'], cwd=tmp_path, capture_output=True,
+        r = subprocess.run([tmp_path / ('jo' if leaf_oracle.builds_twin() else 'dewy') / f'p{i}-0'], cwd=tmp_path, capture_output=True,
                            text=True, timeout=60, check=False)
         assert (r.returncode, r.stdout) == (0, EXPECTED[entry]), (entry, r.stderr)

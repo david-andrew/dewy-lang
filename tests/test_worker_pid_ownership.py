@@ -1,4 +1,5 @@
 """Exercise the actual cancellation code with recycled PIDs, without OS signals."""
+import json
 import re
 import platform
 import subprocess
@@ -10,23 +11,20 @@ import pytest
 from tests.support import ROOT, compiler
 
 
-def function(path, name):
-    text = (ROOT / path).read_text()
-    return re.search(rf'(?m)^{name} = .*?(?=^\w|\Z)', text, re.S).group()
+# (the Jo cancellation code of the frozen twins compiler/pcheck_drive.jo and fused_drive.jo, as they stood
+# when the twins were retired: tests/fixtures/selfhost/worker_cancel_sources.json)
+SOURCES = json.loads((ROOT / 'tests/fixtures/selfhost/worker_cancel_sources.json').read_text())
 
 
 @pytest.mark.parametrize('emitted', [False, True])
 @pytest.mark.skipif(not sys.platform.startswith('linux') or platform.machine().lower() not in ('x86_64', 'amd64'),
                     reason='partitioned checking only runs on x86-64 Linux')
 def test_worker_cancel_retires_children(compiler, tmp_path, emitted):
-    source = function('compiler/pcheck_drive.jo', 'pc_cancel')
+    source = SOURCES['pc_cancel']
     if 'pc_reap(' in source:
-        source += function('compiler/pcheck_drive.jo', 'pc_reap')
-    fused = (ROOT / 'compiler/fused_drive.jo').read_text()
-    start = fused.index('            syscall(3, fds[w])\n')
-    end = fused.index('            if st[0] & 0xFFFF', start)
+        source += SOURCES['pc_reap']
     source += 'reap_emission = (w: int):\n' + textwrap.indent(
-        textwrap.dedent(fused[start:end]), '    ')
+        textwrap.dedent(SOURCES['fused_reap']), '    ')
     # All process operations are simulated, including an immediate PID reuse
     # after wait. A second cancel must neither signal nor close retired handles.
     source = source.replace('syscall(', 'fake_syscall(').replace('data(st)', '0')

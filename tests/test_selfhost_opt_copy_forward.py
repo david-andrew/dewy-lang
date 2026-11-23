@@ -6,6 +6,7 @@ import pytest
 
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+from tests import leaf_oracle
 
 
 DRIVER = r'''
@@ -36,7 +37,7 @@ print("ok")
 
 def compare_copy_forward(compiler, tmp_path, release):
     outputs = []
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         directory = tmp_path / extension
         source_dir = directory / 'compiler'
         shutil.copytree(ROOT / 'compiler', source_dir)
@@ -53,7 +54,7 @@ def compare_copy_forward(compiler, tmp_path, release):
         ran = subprocess.run([binary], capture_output=True, text=True, timeout=15)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     assert outputs[0].endswith('ok\n')
 
 

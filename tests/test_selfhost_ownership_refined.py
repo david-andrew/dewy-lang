@@ -2,6 +2,7 @@
 import pytest
 from tests.support import compiler
 from tests import test_selfhost_ownership_types as original
+from tests import leaf_oracle
 
 PROBE = '''
     ref_res = kind(.refined, res)
@@ -16,7 +17,7 @@ def compare_refined(compiler, tmp_path, release, monkeypatch):
     driver = original.DRIVER.replace('    print("ok")', PROBE + '    print("ok")')
     monkeypatch.setattr(original, 'DRIVER', driver)
     original.test_ownership_types_twins(compiler, tmp_path, release)
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         import subprocess
         ran = subprocess.run([tmp_path / extension / 'driver'], capture_output=True, timeout=30)
         assert b'refined true true true false false true true true\n' in ran.stdout, ran.stdout[-800:]

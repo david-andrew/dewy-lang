@@ -1,0 +1,135 @@
+{
+ "test_ownership_checks_errors[arrdata]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:20:raw resource array access requires a live-slot protocol\n"
+  }
+ ],
+ "test_ownership_checks_errors[borrowed]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:10:cannot replace a borrowed owner\n"
+  }
+ ],
+ "test_ownership_checks_errors[closed]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:10:owning parameters require a closed direct call\n"
+  }
+ ],
+ "test_ownership_checks_errors[copy]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:10:cannot copy a move-only owner: no $__copy__ hook\n"
+  }
+ ],
+ "test_ownership_checks_errors[defer]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:10:an owner with defer requires a unified defer unwind plan; transfer is not proven safe\n"
+  }
+ ],
+ "test_ownership_checks_errors[fixed]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:10:owning array elements require completed construction\n"
+  }
+ ],
+ "test_ownership_checks_errors[fnref]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:20:owners require direct calls; callable ownership is not supported yet\n"
+  }
+ ],
+ "test_ownership_checks_errors[foreign]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:2:foreign entry points with owners require per-foreign-thread cleanup storage\n"
+  }
+ ],
+ "test_ownership_checks_errors[global]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:10:global owners require a program-lifetime cleanup plan\n"
+  }
+ ],
+ "test_ownership_checks_errors[hook]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:20:lifecycle hooks are compiler-only operations\n"
+  }
+ ],
+ "test_ownership_checks_errors[partial]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:20:partial application of owners requires a consuming callback plan; use a function literal\n"
+  }
+ ],
+ "test_ownership_checks_errors[record]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:10:an owning field requires completed construction\n"
+  }
+ ],
+ "test_ownership_checks_errors[repeat]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:20:cannot repeat a move-only owner\n"
+  }
+ ],
+ "test_ownership_checks_errors[replace]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:10:owner replacement requires a whole local or growable array element\n"
+  }
+ ],
+ "test_ownership_checks_errors[setlen]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:20:owning array elements require completed construction; use push\n"
+  }
+ ],
+ "test_ownership_checks_errors[shared]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:100:captured owners require closure ownership support\n"
+  }
+ ],
+ "test_ownership_checks_errors[vardecl]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "[]\nerror:10:an owner requires completed construction before registration\n"
+  }
+ ],
+ "test_ownership_checks_twins[default]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "{2: true, 4: true, 5: true}\n{6: true, 1: true}\n{3: true}\n1077\n1078\n1079\n80\n[\"escapes:34:6\", \"escapes:36:7\", \"escapes:36:7\", \"contract:77\", \"callable:77:5:1\", \"contract:78\", \"callable:78:5:2\", \"contract:79\", \"callable:79:5:3\"]\n{1: false, 30: true, 31: true, 29: true, 28: true, 3: false}\n81\nok\n"
+  }
+ ],
+ "test_ownership_checks_twins[release]": [
+  {
+   "args": [],
+   "status": 0,
+   "stdout": "{2: true, 4: true, 5: true}\n{6: true, 1: true}\n{3: true}\n1077\n1078\n1079\n80\n[\"escapes:34:6\", \"escapes:36:7\", \"escapes:36:7\", \"contract:77\", \"callable:77:5:1\", \"contract:78\", \"callable:78:5:2\", \"contract:79\", \"callable:79:5:3\"]\n{1: false, 30: true, 31: true, 29: true, 28: true, 3: false}\n81\nok\n"
+  }
+ ]
+}

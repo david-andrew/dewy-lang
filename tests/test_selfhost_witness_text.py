@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 MIN, MAX = -(1 << 63), (1 << 63) - 1
@@ -78,7 +79,7 @@ def test_witness_text_twin_and_oracle(compiler, tmp_path, release):  # noqa: F81
     (tmp_path / 'blob').write_bytes(blob)
     (tmp_path / 'steps').write_text(steps)
     driver = (ROOT / 'tests/fixtures/selfhost/witness_text_jo.jo').read_text()
-    for module in ('witness_text.dewy', 'witness_text.jo'):
+    for module in leaf_oracle.extensions(('witness_text.dewy', 'witness_text.jo')):
         source, binary = tmp_path / f'{module}.jo', tmp_path / f'{module}.bin'
         source.write_text(driver.replace('../../../compiler/witness_text.jo', str(ROOT / 'compiler' / module)))
         built = subprocess.run([compiler, 'build', source, '-o', binary, *(['--release'] if release else [])],

@@ -16,6 +16,7 @@ from tests.corpus_cache import SHARDS, built_once, cached, digest, shard_of
 from tests import layout_corpus
 from tests.layout_corpus import layout_texts
 from tests.support import compiler  # noqa: F401 (fixture)
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
@@ -568,7 +569,7 @@ def results(output):
 def layout_binaries(compiler, release):
     def make(directory):
         return (build(compiler, FIXTURES / 'dewy_layout_dewy.dewy', directory / 'layout-dewy', release),
-                build(compiler, FIXTURES / 'dewy_layout_jo.jo', directory / 'layout-jo', release))
+                build(compiler, FIXTURES / 'dewy_layout_jo.jo', directory / 'layout-jo', release) if leaf_oracle.builds_twin() else None)
     return built_once(('layout', str(compiler), release), make)
 
 
@@ -583,11 +584,11 @@ def test_selfhost_dewy_layout_match_jo(compiler, tmp_path, release, shard):
     cases.mkdir()
     listed = write_cases(cases, texts)
     outputs = []
-    for binary in (dewy, jo):
+    for binary in leaf_oracle.pair(dewy, jo):
         ran = subprocess.run([binary, listed], capture_output=True, timeout=300)
         assert ran.returncode == 0, ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs, directory=tmp_path)
     got = results(outputs[0])
     assert len(got) == len(texts)
     for k, (a, b) in enumerate(zip(got, expected)):

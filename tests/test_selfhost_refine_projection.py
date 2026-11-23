@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = [
@@ -41,7 +42,7 @@ def test_projection_twins_and_trace(compiler, tmp_path, release):  # noqa: F811
     driver = (ROOT / 'tests/fixtures/selfhost/refine_projection_jo.jo').read_text()
     modules = ('checker_services', 'checker_types', 'refine_queries', 'refinement_types',
                'refine_predicates', 'checker_tokens', 'refine_projection')
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         for name in modules:
             text = (ROOT / 'compiler' / f'{name}.{extension}').read_text()
             if extension == 'jo':

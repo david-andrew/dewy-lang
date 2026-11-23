@@ -5,6 +5,7 @@ import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_dwarf_format import SETUP
+from tests import leaf_oracle
 
 DRIVER = SETUP + r'''
 main = ():
@@ -53,7 +54,7 @@ main = ():
 def test_pdb_format_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []
     stems = ('checker_types', 'checker_state', 'source_types', 'elf_format', 'leb128', 'module_paths', 'json_doc', 'dwarf_format', 'pdb_format')
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         directory = tmp_path / extension
         directory.mkdir()
         for stem in stems:
@@ -70,5 +71,5 @@ def test_pdb_format_twins(compiler, tmp_path, release):  # noqa: F811
         ran = subprocess.run([binary], capture_output=True, timeout=60)
         assert ran.returncode == 0, ran.stdout[-3000:] + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     assert outputs[0].endswith(b'ok\n')

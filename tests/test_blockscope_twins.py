@@ -4,6 +4,7 @@ import pytest
 
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+from tests import parser_oracle
 from tools.compiler import parser_diff
 
 CASES = sorted(str(p.relative_to(parser_diff.ROOT)) for folder in ('block_scope', 'parallel_blocks')
@@ -12,8 +13,8 @@ CASES = sorted(str(p.relative_to(parser_diff.ROOT)) for folder in ('block_scope'
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_blockscope_dewy_reader(compiler, tmp_path, release):
-    pair = parser_diff.build_pair(compiler, tmp_path, release)
-    failures = parser_diff.compare(pair, [parser_diff.ROOT / p for p in CASES], tmp_path, release, workers=1)
+    pair = parser_oracle.build_pair(compiler, tmp_path, release)
+    failures = parser_oracle.compare(pair, [parser_diff.ROOT / p for p in CASES], tmp_path, release, workers=1)
     assert not failures, '\n'.join(f'{path}: {reason}' for path, reason in failures)
 
 

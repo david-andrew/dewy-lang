@@ -4,6 +4,7 @@ import subprocess
 import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
+from tests import leaf_oracle
 
 DRIVER = r'''
 ir = IrFn()
@@ -213,7 +214,7 @@ main = ():
 def test_driver_pipeline_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []
     stems = ('ir_types', 'opt_returns', 'driver_pipeline')
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         directory = tmp_path / extension
         directory.mkdir()
         for stem in stems:
@@ -230,5 +231,5 @@ def test_driver_pipeline_twins(compiler, tmp_path, release):  # noqa: F811
         ran = subprocess.run([binary], capture_output=True, timeout=30)
         assert ran.returncode == 0, ran.stdout[-2000:] + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     assert outputs[0].endswith(b'ok\n')

@@ -1,0 +1,15 @@
+use 'opt.jo'
+use 'opt_rewrite.dewy'
+use 'opt_cleanup.dewy'
+use 'opt_workspace.dewy'
+use 'ir_types.dewy'
+use 'ir.jo'
+use 'types.jo'
+use 'util.jo'
+use 'ir_builders.dewy'
+
+o_boolean_op = (op: Op) -> bool:
+    match op:
+        eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
+        _: false
+

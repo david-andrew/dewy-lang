@@ -40,7 +40,7 @@ main=()=>{let f=make;invoke(@f)}
 
 
 def test_settingsplace_reader_twins(compiler, tmp_path):
-    from tools.compiler.parser_diff import build_pair, compare
+    from tests.parser_oracle import build_pair, compare
     # dewy_file and dewy_reader use the complete frozen seed as one unit.
     pair = build_pair(compiler, tmp_path, release=False)
     path = tmp_path / 'scope.dewy'

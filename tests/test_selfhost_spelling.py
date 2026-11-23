@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
+from tests import leaf_oracle
 
 FIXTURES = Path(__file__).resolve().parent / 'fixtures/selfhost'
 
@@ -63,14 +64,14 @@ def distance(a: bytes, b: bytes, limit: int) -> int:
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_selfhost_spelling_matches_jo(compiler, tmp_path, release):
     dewy = build(compiler, FIXTURES / 'spelling_dewy.dewy', tmp_path / 'spelling-dewy', release)
-    jo = build(compiler, FIXTURES / 'spelling_jo.jo', tmp_path / 'spelling-jo', release)
+    jo = build(compiler, FIXTURES / 'spelling_jo.jo', tmp_path / 'spelling-jo', release) if leaf_oracle.builds_twin() else None
     names = words()
     outputs = []
-    for binary in (dewy, jo):
+    for binary in leaf_oracle.pair(dewy, jo):
         ran = subprocess.run([binary, *names], capture_output=True, timeout=60)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     lines = outputs[0].decode().splitlines()
     encoded = [n.encode() for n in names]
     pairs = [(limit, a, b) for limit in range(4) for a in encoded for b in encoded]

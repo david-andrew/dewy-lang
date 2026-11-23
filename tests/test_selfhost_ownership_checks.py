@@ -8,6 +8,7 @@ from tests.test_selfhost_type_properties import LAYOUT_JO
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_ownership_types import DRIVER as TYPES, STEMS as TYPE_STEMS
 from tests.selfhost_effect_double import type_helpers_home
+from tests import leaf_oracle
 
 STEMS = ('node_store', 'source_types') + TYPE_STEMS + ('ownership_checks',)
 
@@ -147,7 +148,7 @@ main = ():
 
 def run(compiler, tmp_path, release, driver, status=0):
     outputs = []
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         directory = tmp_path / extension
         directory.mkdir()
         for stem in STEMS:
@@ -166,7 +167,7 @@ def run(compiler, tmp_path, release, driver, status=0):
         ran = subprocess.run([binary], capture_output=True, timeout=60)
         assert ran.returncode == status, ran.stdout[-3000:] + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     return outputs[0]
 
 

@@ -8,6 +8,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
 from tests.test_selfhost_utf8_text import FIXTURES, build, run
+from tests import leaf_oracle
 
 TABLE_VERSION = '17.0.0'  # (the Unicode version the committed tables were generated from)
 
@@ -83,9 +84,8 @@ def test_selfhost_utf8_width_matches_unicodedata(compiler, tmp_path, release):
     # (the whole range is compared only where Python's Unicode version is the tables')
     words = texts(unicodedata.unidata_version == TABLE_VERSION)
     dewy = build(compiler, FIXTURES / 'utf8_width_dewy.dewy', tmp_path / 'width-dewy', release)
-    jo = build(compiler, FIXTURES / 'utf8_width_jo.jo', tmp_path / 'width-jo', release)
-    got = run(dewy, words)
-    assert got == run(jo, words)
+    jo = build(compiler, FIXTURES / 'utf8_width_jo.jo', tmp_path / 'width-jo', release) if leaf_oracle.builds_twin() else None
+    got = leaf_oracle.same(run(dewy, words), lambda: run(jo, words))
     assert got.decode().split('\n')[:-1] == [expected(w) for w in words]
 
 

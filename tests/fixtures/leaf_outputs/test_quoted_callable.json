@@ -1,0 +1,172 @@
+{
+ "test_quoted_callable_twins[default]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/quoted_callable/custom_interpolation.dewy",
+    "-o",
+    "<tmp>/outputs/0/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/quoted_callable/custom_interpolation.dewy:3:9: error: a quoted callable followed by a name or number needs parentheses: write `g'.2f'(x)`\n    printl\"{g'.2f'x}\"\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/quoted_callable/number.dewy",
+    "-o",
+    "<tmp>/outputs/1/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/quoted_callable/number.dewy:2:8: error: a quoted callable followed by a name or number needs parentheses: write `g'.2f'(7)`\n    printl(g'.2f'7)\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/quoted_callable/outside_fmt.dewy",
+    "-o",
+    "<tmp>/outputs/2/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/quoted_callable/outside_fmt.dewy:2:8: error: a quoted callable followed by a name or number needs parentheses: write `fmt'.2f'(x)`\n    printl(fmt'.2f'x)\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/quoted_callable/raw.dewy",
+    "-o",
+    "<tmp>/outputs/3/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/quoted_callable/raw.dewy:3:8: error: a quoted callable followed by a name or number needs parentheses: write `(g)r'.2f'(x)`\n    printl((g)r'.2f'x)\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/quoted_callable/reject.dewy",
+    "-o",
+    "<tmp>/outputs/4/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/quoted_callable/reject.dewy:3:8: error: a quoted callable followed by a name or number needs parentheses: write `g'.2f'(x)`\n    printl(g'.2f'x)\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/interpolation.dewy",
+    "-o",
+    "<tmp>/outputs/5/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7.00\n7.00\n.2f 7\nnested 7.00\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_quoted_callable_twins[release]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/quoted_callable/custom_interpolation.dewy",
+    "-o",
+    "<tmp>/outputs/0/program",
+    "--release"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/quoted_callable/custom_interpolation.dewy:3:9: error: a quoted callable followed by a name or number needs parentheses: write `g'.2f'(x)`\n    printl\"{g'.2f'x}\"\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/quoted_callable/number.dewy",
+    "-o",
+    "<tmp>/outputs/1/program",
+    "--release"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/quoted_callable/number.dewy:2:8: error: a quoted callable followed by a name or number needs parentheses: write `g'.2f'(7)`\n    printl(g'.2f'7)\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/quoted_callable/outside_fmt.dewy",
+    "-o",
+    "<tmp>/outputs/2/program",
+    "--release"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/quoted_callable/outside_fmt.dewy:2:8: error: a quoted callable followed by a name or number needs parentheses: write `fmt'.2f'(x)`\n    printl(fmt'.2f'x)\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/quoted_callable/raw.dewy",
+    "-o",
+    "<tmp>/outputs/3/program",
+    "--release"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/quoted_callable/raw.dewy:3:8: error: a quoted callable followed by a name or number needs parentheses: write `(g)r'.2f'(x)`\n    printl((g)r'.2f'x)\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/quoted_callable/reject.dewy",
+    "-o",
+    "<tmp>/outputs/4/program",
+    "--release"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/quoted_callable/reject.dewy:3:8: error: a quoted callable followed by a name or number needs parentheses: write `g'.2f'(x)`\n    printl(g'.2f'x)\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/interpolation.dewy",
+    "-o",
+    "<tmp>/outputs/5/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "7.00\n7.00\n.2f 7\nnested 7.00\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

@@ -14,6 +14,7 @@ import pytest
 
 from tests.corpus_cache import SHARDS, built_once, cached, digest, shard_of
 from tests.support import compiler  # noqa: F401 (fixture)
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
@@ -333,7 +334,7 @@ def test_selfhost_dewy_lex_match_jo(compiler, tmp_path, release, full, shard):
 
     def make(directory):
         return (build(compiler, FIXTURES / 'dewy_lex_dewy.dewy', directory / 'lex-dewy', release),
-                build(compiler, FIXTURES / 'dewy_lex_jo.jo', directory / 'lex-jo', release))
+                build(compiler, FIXTURES / 'dewy_lex_jo.jo', directory / 'lex-jo', release) if leaf_oracle.builds_twin() else None)
     dewy, jo = built_once(('lex', str(compiler), release), make)
     all_texts = lex_inputs(full)
     texts, expected = shard_oracle(all_texts, shard, full)
@@ -347,11 +348,11 @@ def test_selfhost_dewy_lex_match_jo(compiler, tmp_path, release, full, shard):
     listed = tmp_path / 'list'
     listed.write_text('\n'.join(paths) + '\n')
     outputs = []
-    for binary in (dewy, jo):
+    for binary in leaf_oracle.pair(dewy, jo):
         ran = subprocess.run([binary, listed], capture_output=True, timeout=600)
         assert ran.returncode == 0, ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs, directory=tmp_path)
     got = (outputs[0].decode()).splitlines()
     want = [line for lines in expected for line in lines]
     assert len(got) == len(want)

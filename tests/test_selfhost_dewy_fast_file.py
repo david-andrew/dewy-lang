@@ -5,6 +5,7 @@ import subprocess
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle, parser_oracle
 from tools.compiler import parser_diff
 
 
@@ -15,7 +16,7 @@ def build_pair(seed, work, release):
     main = tree / 'compiler/main.jo'
     main.write_text(main.read_text().replace('build:\n    opt = release\n', ''))
     binaries = []
-    for side in ('dewy', 'twin'):
+    for side in leaf_oracle.pair('dewy', 'twin'):
         if side == 'twin':
             for path in (tree / 'compiler').iterdir():
                 if path.suffix not in ('.jo', '.dewy') or path.name == 'dewy_fast_file.jo':
@@ -49,7 +50,7 @@ def test_fast_file_matches_twin(compiler, tmp_path, release):
     cases = parser_diff.ROOT / 'tests/cases'
     sources = [cases / f'{name}.dewy' for name in names]
     assert all(path.is_file() for path in sources)
-    failures = parser_diff.compare(pair, sources, tmp_path, release, workers=1)
+    failures = parser_oracle.compare(pair, sources, tmp_path, release, workers=1)
     assert not failures, '\n'.join(f'{path}: {reason}' for path, reason in failures)
 
 

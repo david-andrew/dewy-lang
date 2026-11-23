@@ -4,6 +4,7 @@ import subprocess
 import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
+from tests import leaf_oracle
 
 DRIVER = r'''
 main = ():
@@ -53,10 +54,10 @@ def test_ir_operand_twins(compiler, tmp_path, release):  # noqa: F811
     # Keep the existing walker independent: it does not read the layout table.
     ir = (ROOT / 'compiler/ir.jo').read_text()
     walker = ir[ir.index('ir_use_count = 0'):ir.index('ir_operand_layout: int[]')]
-    builders = (ROOT / 'compiler/ir_builders.jo').read_text()
+    builders = (ROOT / 'tests/fixtures/selfhost/frozen/ir_builders.jo').read_text()
     walker += builders[builders.index('ir_use = '):]
     outputs = []
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         for stem in ('ir_types', 'ir_operands'):
             name = f'{stem}.{extension}'
             text = (ROOT / 'compiler' / name).read_text()
@@ -73,6 +74,6 @@ def test_ir_operand_twins(compiler, tmp_path, release):  # noqa: F811
         ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     assert outputs[0].splitlines()[0] == '8 16 32 64 128 256 512 1024 2048'
     assert outputs[0].endswith('ok\n')

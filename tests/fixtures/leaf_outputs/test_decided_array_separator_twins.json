@@ -1,4 +1,789 @@
 {
+ "test_decided_array_dewy_reader[default]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/comments.dewy",
+    "-o",
+    "<tmp>/outputs/0/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 2]\n[1 2 3]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/contextual_arrays.dewy",
+    "-o",
+    "<tmp>/outputs/1/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n2\n2\n[7]\n7\n8\n8\n[9]\n9\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/contextual_values.dewy",
+    "-o",
+    "<tmp>/outputs/2/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\n2\n2\n3: number\n2\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/continuations.dewy",
+    "-o",
+    "<tmp>/outputs/3/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2 3 4 5 6]\n[2 2]\n[3 4; 5 6]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/crlf.dewy",
+    "-o",
+    "<tmp>/outputs/4/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 2]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/discards.dewy",
+    "-o",
+    "<tmp>/outputs/5/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 3 4]\n[2 2]\n[1 2; 3 4]\n[5 6]\n2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/empty_contributions.dewy",
+    "-o",
+    "<tmp>/outputs/6/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2]\n2\n[3 4]\n0\n4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/evaluation_order.dewy",
+    "-o",
+    "<tmp>/outputs/7/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 2]\nabxcd\n[a=1 c=1]\nabc\n[1 -> 1]\nabcd\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/index_is_not_array.dewy",
+    "-o",
+    "<tmp>/outputs/8/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_array_separators/index_is_not_array.dewy:2:12: error: expected an expression, found ';'\n    printl(xs[0;1])\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/leading.dewy",
+    "-o",
+    "<tmp>/outputs/9/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_array_separators/leading.dewy:1:9: error: an array literal cannot start with `;`\n    let bad=[; 1 2]\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/levels.dewy",
+    "-o",
+    "<tmp>/outputs/10/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2 3]\n[2 2 2]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/nested_stack_obligation.dewy",
+    "-o",
+    "<tmp>/outputs/11/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_array_separators/nested_stack_obligation.dewy:1:48: error: calling `__array2_rows` may panic (__array2_rows: panic at lib/std/nd.jo:386:31), and this scope has no runtime checks (no traps): prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n    main=()=>{let xs=[1 2 3];let ys=[4 5 6];printl([xs ; ys].length)}\n                                                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/nested_unchanged.dewy",
+    "-o",
+    "<tmp>/outputs/12/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/newlines.dewy",
+    "-o",
+    "<tmp>/outputs/13/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2 3]\n[2 2]\n[2 2 2]\n6\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/non_array_contexts.dewy",
+    "-o",
+    "<tmp>/outputs/14/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[b=2]\n[\"b\" -> 2]\n42\n43\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/ragged.dewy",
+    "-o",
+    "<tmp>/outputs/15/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_array_separators/ragged.dewy:2:1: error: the rows of an array literal must have the same size: this one has 1 elements, the first has 2\n    3]\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/receiving_types.dewy",
+    "-o",
+    "<tmp>/outputs/16/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "0\n2\n0\n2\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/record_spreads.dewy",
+    "-o",
+    "<tmp>/outputs/17/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[x=1 y=2 z=4]\n[z=4]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/skipped.dewy",
+    "-o",
+    "<tmp>/outputs/18/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_array_separators/skipped.dewy:1:9: error: skipped separator level in this array literal\n    let bad=[1 2;; 3 4]\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/spacing.dewy",
+    "-o",
+    "<tmp>/outputs/19/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 2]\ntrue\n[1 2; 3 4]\n[1 2 3]\n[1 2 3]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/trailing.dewy",
+    "-o",
+    "<tmp>/outputs/20/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n[1 2 3]\n[1]\n2\n2\n2\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_decided_array_dewy_reader[release]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/comments.dewy",
+    "-o",
+    "<tmp>/outputs/0/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 2]\n[1 2 3]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/contextual_arrays.dewy",
+    "-o",
+    "<tmp>/outputs/1/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "true\n2\n2\n[7]\n7\n8\n8\n[9]\n9\n0\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/contextual_values.dewy",
+    "-o",
+    "<tmp>/outputs/2/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "true\ntrue\n2\n2\n3: number\n2\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/continuations.dewy",
+    "-o",
+    "<tmp>/outputs/3/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2 3 4 5 6]\n[2 2]\n[3 4; 5 6]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/crlf.dewy",
+    "-o",
+    "<tmp>/outputs/4/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 2]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/discards.dewy",
+    "-o",
+    "<tmp>/outputs/5/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 3 4]\n[2 2]\n[1 2; 3 4]\n[5 6]\n2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/empty_contributions.dewy",
+    "-o",
+    "<tmp>/outputs/6/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2]\n2\n[3 4]\n0\n4\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/evaluation_order.dewy",
+    "-o",
+    "<tmp>/outputs/7/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 2]\nabxcd\n[a=1 c=1]\nabc\n[1 -> 1]\nabcd\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/index_is_not_array.dewy",
+    "-o",
+    "<tmp>/outputs/8/program",
+    "--release"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_array_separators/index_is_not_array.dewy:2:12: error: expected an expression, found ';'\n    printl(xs[0;1])\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/leading.dewy",
+    "-o",
+    "<tmp>/outputs/9/program",
+    "--release"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_array_separators/leading.dewy:1:9: error: an array literal cannot start with `;`\n    let bad=[; 1 2]\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/levels.dewy",
+    "-o",
+    "<tmp>/outputs/10/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2 3]\n[2 2 2]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/nested_stack_obligation.dewy",
+    "-o",
+    "<tmp>/outputs/11/program",
+    "--release"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_array_separators/nested_stack_obligation.dewy:1:48: error: calling `__array2_rows` may panic (__array2_rows: panic at lib/std/nd.jo:386:31), and this scope has no runtime checks (no traps): prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n    main=()=>{let xs=[1 2 3];let ys=[4 5 6];printl([xs ; ys].length)}\n                                                   ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/nested_unchanged.dewy",
+    "-o",
+    "<tmp>/outputs/12/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "2\n2\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/newlines.dewy",
+    "-o",
+    "<tmp>/outputs/13/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[1 2 3]\n[2 2]\n[2 2 2]\n6\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/non_array_contexts.dewy",
+    "-o",
+    "<tmp>/outputs/14/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[b=2]\n[\"b\" -> 2]\n42\n43\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/ragged.dewy",
+    "-o",
+    "<tmp>/outputs/15/program",
+    "--release"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_array_separators/ragged.dewy:2:1: error: the rows of an array literal must have the same size: this one has 1 elements, the first has 2\n    3]\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/receiving_types.dewy",
+    "-o",
+    "<tmp>/outputs/16/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "0\n2\n0\n2\ntrue\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/record_spreads.dewy",
+    "-o",
+    "<tmp>/outputs/17/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[x=1 y=2 z=4]\n[z=4]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/skipped.dewy",
+    "-o",
+    "<tmp>/outputs/18/program",
+    "--release"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/decided_array_separators/skipped.dewy:1:9: error: skipped separator level in this array literal\n    let bad=[1 2;; 3 4]\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/spacing.dewy",
+    "-o",
+    "<tmp>/outputs/19/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "[2 2]\ntrue\n[1 2; 3 4]\n[1 2 3]\n[1 2 3]\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/decided_array_separators/trailing.dewy",
+    "-o",
+    "<tmp>/outputs/20/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "3\n[1 2 3]\n[1]\n2\n2\n2\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
  "test_decided_array_leaves": [
   {
    "args": [

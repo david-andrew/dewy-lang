@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/dewy_builders_jo.jo'
@@ -13,7 +14,7 @@ DRIVER = ROOT / 'tests/fixtures/selfhost/dewy_builders_jo.jo'
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_selfhost_dewy_builders_match_jo(compiler, tmp_path, release):
     outputs = []
-    for module in ('dewy_builders.dewy', 'dewy_builders.jo'):
+    for module in leaf_oracle.extensions(('dewy_builders.dewy', 'dewy_builders.jo')):
         source = tmp_path / f'{module.replace(".", "-")}.jo'
         source.write_text(DRIVER.read_text().replace("use '../../../compiler/dewy_builders.jo'",
                                                    f"use '{ROOT / 'compiler' / module}'").replace("use '../../../", f"use '{ROOT}/"))
@@ -24,7 +25,7 @@ def test_selfhost_dewy_builders_match_jo(compiler, tmp_path, release):
         run = subprocess.run([binary], capture_output=True, text=True, timeout=60)
         assert run.returncode == 0, run.stdout + run.stderr
         outputs.append(run.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     lines = outputs[0].splitlines()
     assert 'map 1 2' in lines and 'map 2 3' in lines
     assert 'type bigint __dewy_int' in lines and 'type addr addr' in lines

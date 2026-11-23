@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
+from tests import leaf_oracle
 
 FIXTURES = Path(__file__).resolve().parent / 'fixtures/selfhost'
 
@@ -60,7 +61,7 @@ def oracle(texts):
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_selfhost_line_table_matches_jo(compiler, tmp_path, release):
     dewy = build(compiler, FIXTURES / 'line_table_dewy.dewy', tmp_path / 'lines-dewy', release)
-    jo = build(compiler, FIXTURES / 'line_table_jo.jo', tmp_path / 'lines-jo', release)
+    jo = build(compiler, FIXTURES / 'line_table_jo.jo', tmp_path / 'lines-jo', release) if leaf_oracle.builds_twin() else None
     texts = inputs()
     paths = []
     for k, text in enumerate(texts):
@@ -68,11 +69,11 @@ def test_selfhost_line_table_matches_jo(compiler, tmp_path, release):
         path.write_bytes(text.encode())
         paths.append(path)
     outputs = []
-    for binary in (dewy, jo):
+    for binary in leaf_oracle.pair(dewy, jo):
         ran = subprocess.run([binary, *paths], capture_output=True, timeout=60)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     assert outputs[0].decode() == oracle(texts)
 
 

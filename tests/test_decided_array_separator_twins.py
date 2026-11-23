@@ -8,15 +8,15 @@ import pytest
 
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
-from tools.compiler import parser_diff
+from tests import parser_oracle
 
 CASES = sorted((ROOT / 'tests/cases/decided_array_separators').glob('*.dewy'))
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_decided_array_dewy_reader(compiler, tmp_path, release):
-    pair = parser_diff.build_pair(compiler, tmp_path, release)
-    failures = parser_diff.compare(pair, CASES, tmp_path, release, workers=1)
+    pair = parser_oracle.build_pair(compiler, tmp_path, release)
+    failures = parser_oracle.compare(pair, CASES, tmp_path, release, workers=1)
     assert not failures, '\n'.join(f'{path}: {reason}' for path, reason in failures)
 
 

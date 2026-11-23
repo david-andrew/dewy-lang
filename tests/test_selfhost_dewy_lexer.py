@@ -6,6 +6,7 @@ inputs also exercise non-interning layout, lazy bodies, malformed bytes, token
 array growth and nonzero source spans. Both compiler build modes are checked.
 """
 import random
+from pathlib import Path
 import shutil
 import subprocess
 
@@ -13,6 +14,7 @@ import pytest
 
 from tests.corpus_cache import SHARDS, built_once, shard_of
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle, parser_oracle
 from tools.compiler import parser_diff
 
 
@@ -41,7 +43,7 @@ def build_pair(seed, work, release):
     main.write_text("use 'dewy_fast.jo'\nuse 'dewy_frontend.dewy'\nuse 'dewy_fast_lex.dewy'\nuse 'dewy_context.jo'\n" +
                     text.replace('    a = args()\n', '    a = args()\n' + PROBE, 1))
     binaries = []
-    for side in ('dewy', 'twin'):
+    for side in leaf_oracle.pair('dewy', 'twin'):
         if side == 'twin':
             for path in (tree / 'compiler').glob('*.jo'):
                 path.write_text(path.read_text().replace("use 'dewy_lexer.dewy'", "use 'dewy_lexer.jo'"))
@@ -62,10 +64,12 @@ def compare(pair, source, mode, begin=None, stop=None):
     results = [subprocess.run([binary, *arguments], capture_output=True, timeout=15,
                              env=parser_diff.environment(parser_diff.ROOT / 'lib'))
                for binary in pair]
-    a, b = results
+    a, b = results if len(results) == 2 else (results[0], results[0])
     assert (a.returncode, a.stdout, a.stderr) == (b.returncode, b.stdout, b.stderr), (
         source, mode, begin, stop, a.stdout[:1000], b.stdout[:1000], a.stderr, b.stderr)
     assert b'panic:' not in a.stderr, (source, a.stderr)
+    own = None if Path(source).is_relative_to(parser_diff.ROOT) else Path(source).parent
+    leaf_oracle.check(arguments, a.returncode, leaf_oracle.without(own, a.stdout + b'\0' + a.stderr), digest=True)
 
 
 def shared_pair(compiler, release):

@@ -7,6 +7,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_node_store import KINDS
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/dewy_walk_jo.jo'
@@ -86,7 +87,7 @@ def test_selfhost_dewy_walk_match_jo(compiler, tmp_path, release):
     steps = tmp_path / 'steps'
     steps.write_text(corpus())
     outputs = []
-    for module in ('dewy_walk.dewy', 'dewy_walk.jo'):
+    for module in leaf_oracle.extensions(('dewy_walk.dewy', 'dewy_walk.jo')):
         source = tmp_path / f'{module.replace(".", "-")}.jo'
         source.write_text(DRIVER.read_text().replace("use '../../../compiler/dewy_walk.jo'",
                          f"use '{ROOT / 'compiler' / module}'").replace("use '../../../", f"use '{ROOT}/"))
@@ -97,7 +98,7 @@ def test_selfhost_dewy_walk_match_jo(compiler, tmp_path, release):
         run = subprocess.run([binary, steps], capture_output=True, text=True, timeout=60)
         assert run.returncode == 0, run.stdout + run.stderr
         outputs.append(run.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     lines = outputs[0].splitlines()
     assert lines.count('copy true') == 700
     assert lines.count('copy false') == 800

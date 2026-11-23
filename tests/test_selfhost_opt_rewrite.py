@@ -6,6 +6,7 @@ import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_opt_cleanup import decode_source, function
+from tests import leaf_oracle
 
 
 MODULES = ('ir_types', 'ir_operands', 'opt_workspace', 'opt_cleanup', 'opt_rewrite')
@@ -125,15 +126,15 @@ main = ():
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_opt_rewrite_twins(compiler, tmp_path, release):  # noqa: F811
     decode = decode_source('o_resize')
-    decode += function((ROOT / 'compiler/optimizer_queries.jo').read_text(), 'o_boolean_op')
+    decode += function((ROOT / 'tests/fixtures/selfhost/frozen/optimizer_queries.jo').read_text(), 'o_boolean_op')
     ir = (ROOT / 'compiler/ir.jo').read_text()
     walker = ir[ir.index('ir_use_count = 0'):ir.index('ir_operand_layout: int[]')]
-    builders = (ROOT / 'compiler/ir_builders.jo').read_text()
+    builders = (ROOT / 'tests/fixtures/selfhost/frozen/ir_builders.jo').read_text()
     walker += builders[builders.index('ir_use = '):]
     # The extracted table initializer calls classifiers that read this flag.
     driver = '\nchecked_flags = true\nir_operand_layout = ir_operand_layouts()\n' + decode + walker + DRIVER
-    outputs = [build_run(compiler, tmp_path, ext, driver, release) for ext in ('dewy', 'jo')]
-    assert outputs[0] == outputs[1]
+    outputs = [build_run(compiler, tmp_path, ext, driver, release) for ext in leaf_oracle.extensions()]
+    leaf_oracle.agree(outputs)
     assert outputs[0].endswith('ok\n')
 
 
@@ -201,7 +202,7 @@ def test_opt_word_oracle(compiler, tmp_path, release):  # noqa: F811
                 if op.startswith('sext') and value & (1 << (bits - 1)):
                     value -= 1 << bits
             expected.append((1, wrap(value)))
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         output = build_run(compiler, tmp_path, extension, driver, release)
         actual = [tuple(map(int, row.split())) for row in output.splitlines()]
         assert actual == expected

@@ -8,6 +8,7 @@ import shutil
 from tools.compiler.speed_equivalent import freeze
 
 from tests.support import compiler
+from tests import leaf_oracle
 
 
 def compare_operands(compiler, tmp_path, extension):
@@ -86,6 +87,6 @@ print("shared index ok")
     assert ran.stdout == 'shared index ok\n', ran.stdout
 
 
-@pytest.mark.parametrize("extension", ("dewy", "jo"))
+@pytest.mark.parametrize("extension", leaf_oracle.extensions())
 def test_opt_registers_shared_index_twins(compiler, tmp_path, extension):
     compare_operands(compiler, tmp_path, extension)

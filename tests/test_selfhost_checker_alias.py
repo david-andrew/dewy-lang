@@ -4,6 +4,7 @@ import subprocess
 import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
+from tests import leaf_oracle
 
 DRIVER = r'''
 nodes: Node[] = [Node()]
@@ -91,7 +92,7 @@ main = ():
 
 def compare(compiler, tmp_path, release, driver, status=0):
     outputs = []
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         directory = tmp_path / extension
         directory.mkdir()
         for stem in ('node_store', 'checker_alias'):
@@ -107,7 +108,7 @@ def compare(compiler, tmp_path, release, driver, status=0):
         ran = subprocess.run([binary], capture_output=True, timeout=60)
         assert ran.returncode == status, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     return outputs[0]
 
 

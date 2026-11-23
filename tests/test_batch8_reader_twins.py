@@ -1,7 +1,8 @@
 """Construct prefixes and scope settings agree with the seed reader twin."""
 import subprocess
 
-from tools.compiler.parser_diff import build_pair, compare, environment
+from tests.parser_oracle import build_pair, compare
+from tools.compiler.parser_diff import environment
 from tests.support import ROOT, compiler  # noqa: F401
 
 

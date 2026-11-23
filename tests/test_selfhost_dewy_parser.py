@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/dewy_parser_jo.jo'
@@ -54,7 +55,7 @@ def test_selfhost_dewy_parser_match_jo(compiler, tmp_path, release):
     data.write_bytes(blob)
     steps.write_text(script)
     results = []
-    for module in ('dewy_parser.dewy', 'dewy_parser.jo'):
+    for module in leaf_oracle.extensions(('dewy_parser.dewy', 'dewy_parser.jo')):
         source = tmp_path / f'{module.replace(".", "-")}.jo'
         driver = DRIVER.read_text().replace("use '../../../compiler/dewy_parser.jo'", f"use '{ROOT / 'compiler' / module}'")
         source.write_text(driver.replace("use '../../../", f"use '{ROOT}/"))
@@ -66,7 +67,7 @@ def test_selfhost_dewy_parser_match_jo(compiler, tmp_path, release):
         assert run.returncode == 0, run.stdout + run.stderr
         assert run.stdout.splitlines() == expected
         results.append(run.stdout)
-    assert results[0] == results[1]
+    assert len(set(results)) == 1
 
 
 def test_selfhost_dewy_parser_ships_dewy(compiler, tmp_path):

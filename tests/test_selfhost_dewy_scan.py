@@ -10,8 +10,9 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_twins import dewy_enumerations
+from tests.enumerations import dewy_enumerations
 from tests.test_selfhost_dewy_grammar import ranked
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/dewy_scan_jo.jo'
@@ -138,7 +139,7 @@ def test_selfhost_dewy_scan_match_jo(compiler, tmp_path, release):
     data = tmp_path / 'questions'
     data.write_text(questions)
     outputs = []
-    for module in ('dewy_scan.dewy', 'dewy_scan.jo'):
+    for module in leaf_oracle.extensions(('dewy_scan.dewy', 'dewy_scan.jo')):
         driver = DRIVER.read_text().replace("use '../../../compiler/dewy_scan.jo'", f"use '{ROOT / 'compiler' / module}'")
         source = tmp_path / f'{module.replace(".", "-")}.jo'
         source.write_text(driver.replace("use '../../../", f"use '{ROOT}/"))
@@ -150,7 +151,7 @@ def test_selfhost_dewy_scan_match_jo(compiler, tmp_path, release):
         assert run.returncode == 0 and not run.stderr, run.stdout + run.stderr
         outputs.append(run.stdout)
         assert list(map(int, run.stdout.splitlines())) == expected
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
 
 
 def test_selfhost_dewy_scan_ships_dewy(compiler, tmp_path):

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.enumerations import dewy_enumerations, jo_enums
 from tools.compiler.build import FROZEN_TWINS
 
 COMPILER = Path(__file__).resolve().parents[1] / 'compiler'
@@ -43,22 +44,6 @@ def test_twins_define_only_the_dewy_names():
         dewy = top_level((COMPILER / module).read_text(), r'^(?:let\s+|const\s+)?([A-Za-z_]\w*)\s*[:=]')
         jo = top_level((COMPILER / twin).read_text(), r'^([A-Za-z_]\w*)\s*[:=]')
         assert jo <= dewy, f'{twin} defines {sorted(jo - dewy)}, which {module} does not'
-
-
-def dewy_enumerations(text):
-    """`Name:type = 'a' | 'b'`: each union of string literals, its members as written."""
-    out = {}
-    for m in re.finditer(r"^(?:let\s+)?([A-Za-z_]\w*)\s*:\s*type\s*=\s*('[^'\n]*'(?:\s*\|\s*'[^'\n]*')*)\s*$", text, re.M):
-        out[m.group(1)] = re.findall(r"'([^']*)'", m.group(2))
-    return out
-
-
-def jo_enums(text):
-    """`enum Name:` and its indented members, in order."""
-    out = {}
-    for m in re.finditer(r'^enum\s+([A-Za-z_]\w*)\s*:[ \t]*\n((?:[ \t]+\S.*\n?)+)', text, re.M):
-        out[m.group(1)] = re.findall(r'[A-Za-z_]\w*', re.sub(r'#.*', '', m.group(2)))
-    return out
 
 
 def test_twins_number_enumerations_alike():

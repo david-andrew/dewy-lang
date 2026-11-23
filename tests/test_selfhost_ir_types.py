@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 OPCODES = """nop iconst fconst mov add sub mul divs divu rems remu and_ or_ xor shl shrs shru neg not_ eq ne lts les gts ges ltu leu gtu geu fadd fsub fmul fdiv fneg fsqrt fmin fmax ffloor fceil fabs ftrunc feq fne flt fle fgt fge sext8 sext16 sext32 zext8 zext16 zext32 i2f u2f f2i f2f bits2f f2bits load store slot gaddr daddr faddr copy zero memcpy memset zeroslots vop call calli callc syscall intr block loop if_ else_ end br brif ret trap select assume brtable vld vst vbin vsplat vzu mulhs mulhu memeq checked_add checked_sub checked_mul overflow_add overflow_sub overflow_mul rot32 streq findbyte scanbytes findb""".split()
@@ -71,7 +72,7 @@ EXPECTED = (
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_ir_types_twins(compiler, tmp_path, release):  # noqa: F811
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         module = f'ir_types.{extension}'
         (tmp_path / module).write_text((ROOT / 'compiler' / module).read_text())
         source, binary = tmp_path / 'driver.jo', tmp_path / 'driver'

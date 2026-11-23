@@ -1,4 +1,50 @@
 {
+ "test_settingsplace_reader_twins": [
+  {
+   "args": [
+    "build",
+    "<tmp>/scope.dewy",
+    "-o",
+    "<tmp>/outputs/0/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "1\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/memory.dewy",
+    "-o",
+    "<tmp>/outputs/1/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/memory.dewy:2:1: error: `$memory_left` is not yet supported: memory caps need reserved-block accounting and budget ownership\n    $memory_left\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<tmp>/memory_header.dewy",
+    "-o",
+    "<tmp>/outputs/2/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<tmp>/memory_header.dewy:1:1: error: `$memory_left` is not yet supported: memory caps need reserved-block accounting and budget ownership\n    $memory_left\n    ^\n",
+   "files": {}
+  }
+ ],
  "test_settingsplace_twins": [
   {
    "args": [

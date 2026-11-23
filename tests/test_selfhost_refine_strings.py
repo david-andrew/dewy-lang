@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -120,7 +121,7 @@ def test_refine_strings_twins_and_oracle(compiler, tmp_path, release):  # noqa: 
     (tmp_path / 'blob').write_bytes(blob)
     (tmp_path / 'steps').write_text(steps)
     driver = (ROOT / 'tests/fixtures/selfhost/refine_strings_jo.jo').read_text()
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         for name in ('checker_services', 'checker_types', 'node_store', 'refine_strings'):
             text = (ROOT / 'compiler' / f'{name}.{extension}').read_text()
             if extension == 'jo':

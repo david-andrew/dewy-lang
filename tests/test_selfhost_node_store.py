@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
-from tests.test_selfhost_twins import dewy_enumerations
+from tests.enumerations import dewy_enumerations
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/node_store_jo.jo'
@@ -182,14 +183,14 @@ def test_selfhost_node_store_match_jo(compiler, tmp_path, release):  # noqa: F81
     steps = tmp_path / 'steps'
     steps.write_text(text)
     outputs = []
-    for module in ('node_store.dewy', 'node_store.jo'):
+    for module in leaf_oracle.extensions(('node_store.dewy', 'node_store.jo')):
         source = tmp_path / f'driver-{module.replace(".", "-")}.jo'
         source.write_text(driver.replace(twin, f"use '{ROOT / 'compiler' / module}'"))
         binary = build(compiler, source, tmp_path / source.stem, release)
         ran = subprocess.run([binary, steps], capture_output=True, text=True, timeout=60)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     for got, expected in zip(outputs[0].split('\n'), want.split('\n')):
         assert got == expected
     assert outputs[0] == want

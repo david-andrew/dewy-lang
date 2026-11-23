@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/int_domains_jo.jo'
@@ -179,7 +180,7 @@ def test_selfhost_int_domains_matches_twin_and_oracle(compiler, tmp_path, releas
     driver = DRIVER.read_text()
     twin = "use '../../../compiler/int_domains.jo'"
     outputs = []
-    for module in ('int_domains.dewy', 'int_domains.jo'):
+    for module in leaf_oracle.extensions(('int_domains.dewy', 'int_domains.jo')):
         source = tmp_path / f'{module}.jo'
         source.write_text(driver.replace(twin, f"use '{ROOT / 'compiler' / module}'"))
         binary = tmp_path / f'{module}.bin'
@@ -189,7 +190,7 @@ def test_selfhost_int_domains_matches_twin_and_oracle(compiler, tmp_path, releas
         ran = subprocess.run([binary, commands], capture_output=True, text=True, timeout=30)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     for row, (got, want) in enumerate(zip(outputs[0].splitlines(), expected.splitlines())):
         assert got == want, f'output row {row}'
     assert outputs[0] == expected

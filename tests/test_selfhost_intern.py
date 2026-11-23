@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/intern_jo.jo'
@@ -202,7 +203,7 @@ def test_selfhost_intern_matches_jo(compiler, tmp_path, release):  # noqa: F811
     (tmp_path / 'blob').write_bytes(blob)
     (tmp_path / 'steps').write_text(steps)
     outputs = []
-    for module in ('intern.dewy', 'intern.jo'):
+    for module in leaf_oracle.extensions(('intern.dewy', 'intern.jo')):
         source = tmp_path / f'driver-{module.replace(".", "-")}.jo'
         source.write_text(driver.replace(twin, f"use '{ROOT / 'compiler' / module}'"))
         binary = build(compiler, source, tmp_path / source.stem, release)
@@ -210,7 +211,7 @@ def test_selfhost_intern_matches_jo(compiler, tmp_path, release):  # noqa: F811
                              timeout=120)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     for got, expected in zip(outputs[0].split('\n'), want.split('\n')):
         assert got == expected
     assert outputs[0] == want

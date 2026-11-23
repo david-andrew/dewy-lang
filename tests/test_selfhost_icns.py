@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
+from tests import leaf_oracle
 
 FIXTURES = Path(__file__).resolve().parent / 'fixtures/selfhost'
 
@@ -47,9 +48,9 @@ def inputs():
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_selfhost_icns_matches_jo(compiler, tmp_path, release):
     dewy = build(compiler, FIXTURES / 'icns_dewy.dewy', tmp_path / 'icns-dewy', release)
-    jo = build(compiler, FIXTURES / 'icns_jo.jo', tmp_path / 'icns-jo', release)
+    jo = build(compiler, FIXTURES / 'icns_jo.jo', tmp_path / 'icns-jo', release) if leaf_oracle.builds_twin() else None
     data = inputs()
-    for binary in (dewy, jo):
+    for binary in leaf_oracle.pair(dewy, jo):
         paths = []
         for k, blob in enumerate(data):
             path = tmp_path / f'{binary.name}-{k}.png'

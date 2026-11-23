@@ -133,6 +133,68 @@
    "files": {}
   }
  ],
+ "test_coverweek_dewy_reader_twins": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverweek/settings_parallel_lets.dewy",
+    "-o",
+    "<tmp>/outputs/0/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/coverweek/settings_parallel_lets.dewy:9:9: warning: drop the `()`: `read` gives a value\n<root>/tests/cases/coverweek/settings_parallel_lets.dewy:10:9: warning: drop the `()`: `other` gives a value\n<root>/tests/cases/coverweek/settings_parallel_lets.dewy:16:13: warning: drop the `()`: `read` gives a value\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "Asia/Tokyo Europe/London\nAsia/Tokyo\nUTC\nAsia/Tokyo\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverweek/settings_parenthesized_extent.dewy",
+    "-o",
+    "<tmp>/outputs/1/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "Asia/Tokyo\nUTC\n9\nEurope/London\nUTC\n42 41 9\nreleased\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/coverweek/settings_task_snapshot.dewy",
+    "-o",
+    "<tmp>/outputs/2/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "Asia/Tokyo\nUTC\nEurope/London\nUTC\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
  "test_coverweek_ownership_checks_types_twins": [
   {
    "args": [

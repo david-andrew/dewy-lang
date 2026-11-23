@@ -4,6 +4,7 @@ import subprocess
 import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
+from tests import leaf_oracle
 
 DRIVER = r'''
 read32 = (bytes: u8[], at: int) -> int:
@@ -47,7 +48,7 @@ main = ():
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_elf_format_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         source = tmp_path / f'driver-{extension}.jo'
         binary = tmp_path / f'driver-{extension}'
         source.write_text(f"use '{ROOT}/compiler/elf_format.{extension}'\n" + DRIVER)
@@ -58,5 +59,5 @@ def test_elf_format_twins(compiler, tmp_path, release):  # noqa: F811
         ran = subprocess.run([binary], capture_output=True, timeout=60)
         assert ran.returncode == 0, ran.stdout[-3000:] + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     assert outputs[0].endswith(b'ok\n')

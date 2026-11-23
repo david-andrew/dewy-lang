@@ -8,6 +8,7 @@ from tests.test_selfhost_type_properties import LAYOUT_JO
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_type_properties import DRIVER as PROPERTIES
 from tests.selfhost_effect_double import type_helpers_home
+from tests import leaf_oracle
 
 STEMS = ('checker_types', 'checker_tokens', 'checker_state', 'refinement_types', 'refine_predicates',
          'refine_queries', 'type_queries', 'type_intern', 'type_inference', 'type_format', 'type_layout',
@@ -108,7 +109,7 @@ main = ():
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_ownership_types_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         directory = tmp_path / extension
         directory.mkdir()
         for stem in STEMS:
@@ -127,7 +128,7 @@ def test_ownership_types_twins(compiler, tmp_path, release):  # noqa: F811
         ran = subprocess.run([binary], capture_output=True, timeout=60)
         assert ran.returncode == 0, ran.stdout[-3000:] + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     assert outputs[0].endswith(b'ok\n')
     # A drop hook makes a move-only nominal owner; a copy hook makes it copyable.
     assert b'\nres=28:true:true:true:false:' in outputs[0]

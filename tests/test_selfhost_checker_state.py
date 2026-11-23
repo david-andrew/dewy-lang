@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 # Independent field widths: do not derive the expected ABI from either twin.
@@ -59,7 +60,7 @@ def driver():
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_state_twins(compiler, tmp_path, release):  # noqa: F811
     body, expected = driver()
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         (tmp_path / f'checker_state.{extension}').write_text((ROOT / 'compiler' / f'checker_state.{extension}').read_text())
         source, binary = tmp_path / 'driver.jo', tmp_path / 'driver'
         source.write_text(f"use 'checker_state.{extension}'\n" + body)

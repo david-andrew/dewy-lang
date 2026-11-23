@@ -5,6 +5,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_int_domains import DRIVER, ROOT, MIN, MAX
+from tests import leaf_oracle
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
@@ -26,7 +27,7 @@ def test_capture_endpoint(compiler, tmp_path, release):  # noqa: F811
                     expected += [f'[{lo}, {hi}] {label}']
     steps = tmp_path / 'steps'
     steps.write_text('\n'.join(commands) + '\n')
-    for module in ('int_domains.dewy', 'int_domains.jo'):
+    for module in leaf_oracle.extensions(('int_domains.dewy', 'int_domains.jo')):
         source, binary = tmp_path / f'{module}.jo', tmp_path / f'{module}.bin'
         source.write_text(DRIVER.read_text().replace("use '../../../compiler/int_domains.jo'",
                           f"use '{ROOT / 'compiler' / module}'"))

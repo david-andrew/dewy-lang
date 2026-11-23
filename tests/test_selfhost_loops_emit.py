@@ -8,6 +8,7 @@ import pytest
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
 from tools.compiler.speed_equivalent import freeze
+from tests import leaf_oracle
 
 
 DRIVER = r'''
@@ -39,7 +40,7 @@ print("{made} {total} {lo} {hi} {out.len()} {copied[1].imm} ok")
 def test_loops_emit_direct_twins(compiler, tmp_path, monkeypatch, release):  # noqa: F811
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     outputs = []
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         directory = tmp_path / extension
         source_dir = directory / 'compiler'
         shutil.copytree(ROOT / 'compiler', source_dir)
@@ -58,7 +59,7 @@ def test_loops_emit_direct_twins(compiler, tmp_path, monkeypatch, release):  # n
         ran = subprocess.run([binary], capture_output=True, text=True, timeout=20)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     assert outputs[0].endswith('ok\n')
 
 

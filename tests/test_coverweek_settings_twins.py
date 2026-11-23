@@ -32,11 +32,11 @@ main=()=>{
 
 
 def test_coverweek_dewy_reader_twins(compiler, tmp_path):
-    from tools.compiler import parser_diff
+    from tests import parser_oracle
     paths = [ROOT / 'tests/cases/coverweek' / (name + '.dewy') for name in
              ('settings_parallel_lets', 'settings_parenthesized_extent', 'settings_task_snapshot')]
-    pair = parser_diff.build_pair(compiler, tmp_path, release=False)
-    failures = parser_diff.compare(pair, paths, tmp_path, release=False, workers=1)
+    pair = parser_oracle.build_pair(compiler, tmp_path, release=False)
+    failures = parser_oracle.compare(pair, paths, tmp_path, release=False, workers=1)
     assert not failures, failures
 
 

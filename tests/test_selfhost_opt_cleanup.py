@@ -5,6 +5,7 @@ import subprocess
 import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
+from tests import leaf_oracle
 
 
 DRIVER = r'''
@@ -137,7 +138,7 @@ def function(text, name):
 
 def decode_source(*extra):
     """The frozen opcode tables (opt_core.jo) and opt.jo's ordinal-indexed queries, as Jo text."""
-    core = (ROOT / 'compiler/opt_core.jo').read_text()
+    core = (ROOT / 'tests/fixtures/selfhost/frozen/opt_core.jo').read_text()
     original = (ROOT / 'compiler/opt.jo').read_text()
     text = '\n'.join(function(core, name) for name in (
         'o_rewrite_mask', 'o_simplify_kind', 'o_control_kind', 'o_make_decode'))
@@ -145,22 +146,22 @@ def decode_source(*extra):
     text += '\n'.join(function(core, name) for name in (
         'o_pure_classify', 'cse_arity_classify', 'o_defines_classify',
         'kills_memory_classify', 'o_retargetable_classify'))
-    return text + '\n'.join(function((ROOT / 'compiler/opt_registers.jo').read_text(), name) for name in extra)
+    return text + '\n'.join(function((ROOT / 'tests/fixtures/selfhost/frozen/opt_registers.jo').read_text(), name) for name in extra)
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_opt_cleanup_twins(compiler, tmp_path, release):  # noqa: F811
     decode = decode_source()
-    rewrite = (ROOT / 'compiler/opt_rewrite.jo').read_text()
+    rewrite = (ROOT / 'tests/fixtures/selfhost/frozen/opt_rewrite.jo').read_text()
     flow = '\n'.join(function(rewrite, name) for name in (
         'ow_flow_begin', 'ow_flow_exit', 'ow_flow_end_dead', 'ow_flow_emit',
         'ow_flow_pop', 'ow_grow_output', 'ow_append_plain', 'ow_append'))
     ir = (ROOT / 'compiler/ir.jo').read_text()
     walker = ir[ir.index('ir_use_count = 0'):ir.index('ir_operand_layout: int[]')]
-    builders = (ROOT / 'compiler/ir_builders.jo').read_text()
+    builders = (ROOT / 'tests/fixtures/selfhost/frozen/ir_builders.jo').read_text()
     walker += builders[builders.index('ir_use = '):]
     outputs = []
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         for stem in ('ir_types', 'ir_operands', 'opt_workspace', 'opt_cleanup'):
             text = (ROOT / f'compiler/{stem}.{extension}').read_text()
             if extension == 'jo':
@@ -179,5 +180,5 @@ def test_opt_cleanup_twins(compiler, tmp_path, release):  # noqa: F811
         ran = subprocess.run([binary], capture_output=True, text=True, timeout=15)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     assert outputs[0].endswith('ok\n')

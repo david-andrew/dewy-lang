@@ -4,6 +4,7 @@ import pytest
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_opt_cleanup import decode_source
 from tests.test_selfhost_opt_rewrite import build_run
+from tests import leaf_oracle
 
 
 DRIVER = r'''
@@ -54,5 +55,5 @@ def test_opt_borrowed_views(compiler, tmp_path, release):  # noqa: F811
     decode = decode_source('o_resize')
     # Initialize classifier inputs before building the extracted decode table.
     driver = '\nchecked_flags = true\nir_operand_layout = ir_operand_layouts()\n' + decode + DRIVER
-    outputs = [build_run(compiler, tmp_path, ext, driver, release) for ext in ('dewy', 'jo')]
-    assert outputs == ['ok\n', 'ok\n']
+    outputs = [build_run(compiler, tmp_path, ext, driver, release) for ext in leaf_oracle.extensions()]
+    assert outputs == ['ok\n'] * len(outputs)

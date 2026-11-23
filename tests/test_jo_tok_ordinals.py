@@ -6,7 +6,8 @@ from tests.support import ROOT, compiler  # noqa: F401
 
 
 def frozen_tok():
-    text = (ROOT / 'compiler/checker_tokens.jo').read_text()
+    # (the frozen twin's enum, as compiler/checker_tokens.jo stood when the twins were retired)
+    text = (ROOT / 'tests/fixtures/selfhost/frozen/checker_tokens.jo').read_text()
     body = re.sub(r'#.*', '', text.split('enum Tok:')[1].split('\n\n')[0])
     names = [name.strip() for name in body.replace('\n', ',').split(',') if name.strip()]
     return {name: i for i, name in enumerate(names)}

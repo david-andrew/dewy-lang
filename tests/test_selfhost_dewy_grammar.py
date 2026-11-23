@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
-from tests.test_selfhost_twins import dewy_enumerations
+from tests.enumerations import dewy_enumerations
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/dewy_grammar_jo.jo'
@@ -344,14 +345,14 @@ def test_selfhost_dewy_grammar_match_jo(compiler, tmp_path, release):
     questions = tmp_path / 'questions'
     questions.write_text(text)
     outputs = []
-    for module in ('dewy_grammar.dewy', 'dewy_grammar.jo'):
+    for module in leaf_oracle.extensions(('dewy_grammar.dewy', 'dewy_grammar.jo')):
         source = tmp_path / f'driver-{module.replace(".", "-")}.jo'
         source.write_text(driver.replace(twin, f"use '{ROOT / 'compiler' / module}'").replace("use '../../../", f"use '{ROOT}/"))
         binary = build(compiler, source, tmp_path / source.stem, release)
         ran = subprocess.run([binary, questions], capture_output=True, text=True, timeout=60)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     got = outputs[0].split('\n')
     check_operators(got[:len(TOKENS)])
     for line, (answer, expected) in enumerate(zip(got[len(TOKENS):], want)):

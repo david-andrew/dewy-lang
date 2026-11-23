@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 MIN, MAX = -(1 << 63), (1 << 63) - 1
@@ -105,7 +106,7 @@ def test_intervals_twin_and_oracle(compiler, tmp_path, release):  # noqa: F811
     steps, expected = corpus()
     (tmp_path / 'steps').write_text(steps)
     driver = (ROOT / 'tests/fixtures/selfhost/intervals_jo.jo').read_text()
-    for module in ('intervals.dewy', 'intervals.jo'):
+    for module in leaf_oracle.extensions(('intervals.dewy', 'intervals.jo')):
         source, binary = tmp_path / f'{module}.jo', tmp_path / f'{module}.bin'
         source.write_text(driver.replace('../../../compiler/intervals.jo', str(ROOT / 'compiler' / module)))
         built = subprocess.run([compiler, 'build', source, '-o', binary, *(['--release'] if release else [])],

@@ -4,6 +4,7 @@ import subprocess
 import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
+from tests import leaf_oracle
 
 
 DRIVER = r'''
@@ -75,7 +76,7 @@ main = ():
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_opt_return_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         for stem in ('ir_types', 'opt_returns'):
             text = (ROOT / f'compiler/{stem}.{extension}').read_text()
             if extension == 'jo':
@@ -90,5 +91,5 @@ def test_opt_return_twins(compiler, tmp_path, release):  # noqa: F811
         ran = subprocess.run([binary], capture_output=True, text=True, timeout=30)
         assert ran.returncode == 0, ran.stdout[-2000:] + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     assert outputs[0].endswith('ok\n')

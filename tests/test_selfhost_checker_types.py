@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle
+from tests.enumerations import dewy_enumerations, jo_enums
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('checker_tokens', 'checker_types', 'refinement_types')
@@ -56,7 +58,7 @@ def layout_driver():
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_layout_twins(compiler, tmp_path, release):  # noqa: F811
     body, expected = layout_driver()
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         # Copy the tiny dependency closure so the twin never indirectly loads a Dewy definition.
         for module in MODULES:
             text = (ROOT / 'compiler' / f'{module}.{extension}').read_text()
@@ -76,7 +78,8 @@ def test_checker_layout_twins(compiler, tmp_path, release):  # noqa: F811
 
 
 def test_shared_enum_ordinals():
-    from tests.test_selfhost_twins import dewy_enumerations, jo_enums
     for module in MODULES:
         enums = dewy_enumerations((ROOT / 'compiler' / f'{module}.dewy').read_text())
-        assert enums == jo_enums((ROOT / 'compiler' / f'{module}.jo').read_text())
+        if leaf_oracle.builds_twin():
+            assert enums == jo_enums((ROOT / 'compiler' / f'{module}.jo').read_text())
+        leaf_oracle.check((module,), 0, repr(enums).encode())

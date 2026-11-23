@@ -1,0 +1,466 @@
+{
+ "test_checked_eval_twins[default]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/arrays.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "arrays agree\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/functions.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "functions agree\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/control.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "control agrees\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/storage.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "storage agrees\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/semantics.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "semantics agree\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/interpolation.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "0x 1y lamp#3:true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/reflection.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/comptime/reflection.dewy:13:11: warning: 'value' is given a value here but never used (a parameter kept for the function's type can be named `_value`)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "reflection agrees\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/divide_zero.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/comptime/divide_zero.dewy:1:25: error: compile-time evaluation: division by zero\n  compile-time call to outer at <root>/tests/cases/comptime/divide_zero.dewy:3:9\n  compile-time call to inner at <root>/tests/cases/comptime/divide_zero.dewy:2:17\n    inner=(n:int64):>int64=>10//n\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/host_effect.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/lib/core/rt.jo:703:12: error: compile-time evaluation: mutable global '__omode' is not a compile-time constant; host effects are not allowed\n  compile-time call to outer at <root>/tests/cases/comptime/host_effect.dewy:3:9\n  compile-time call to inner at <root>/tests/cases/comptime/host_effect.dewy:2:17\n  compile-time call to __print_str at <root>/tests/cases/comptime/host_effect.dewy:1:20\n  compile-time call to __out at <root>/lib/core/rt.jo:842:10\n            if __omode == 0:\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/overflow.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/selfhost_growth.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "evaluator growth agrees\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/shared_writes.dewy",
+    "-o",
+    "<tmp>/program"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "shared writes agree\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ],
+ "test_checked_eval_twins[release]": [
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/arrays.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "arrays agree\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/functions.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "functions agree\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/control.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "control agrees\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/storage.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "storage agrees\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/semantics.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "semantics agree\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/interpolation.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "0x 1y lamp#3:true\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/reflection.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/comptime/reflection.dewy:13:11: warning: 'value' is given a value here but never used (a parameter kept for the function's type can be named `_value`)\n",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "reflection agrees\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/divide_zero.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/tests/cases/comptime/divide_zero.dewy:1:25: error: compile-time evaluation: division by zero\n  compile-time call to outer at <root>/tests/cases/comptime/divide_zero.dewy:3:9\n  compile-time call to inner at <root>/tests/cases/comptime/divide_zero.dewy:2:17\n    inner=(n:int64):>int64=>10//n\n                            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/host_effect.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "<root>/lib/core/rt.jo:703:12: error: compile-time evaluation: mutable global '__omode' is not a compile-time constant; host effects are not allowed\n  compile-time call to outer at <root>/tests/cases/comptime/host_effect.dewy:3:9\n  compile-time call to inner at <root>/tests/cases/comptime/host_effect.dewy:2:17\n  compile-time call to __print_str at <root>/tests/cases/comptime/host_effect.dewy:1:20\n  compile-time call to __out at <root>/lib/core/rt.jo:842:10\n            if __omode == 0:\n               ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/overflow.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "9223372036854775808\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/selfhost_growth.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "evaluator growth agrees\n",
+      "stderr": ""
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "build",
+    "<root>/tests/cases/comptime/shared_writes.dewy",
+    "-o",
+    "<tmp>/program",
+    "--release"
+   ],
+   "status": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "program": {
+     "run": {
+      "status": 0,
+      "stdout": "shared writes agree\n",
+      "stderr": ""
+     }
+    }
+   }
+  }
+ ]
+}

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
@@ -73,9 +74,8 @@ def run(binary, texts):
 def test_selfhost_utf8_text_matches_jo(compiler, tmp_path, release):
     texts = [s for s in samples() if s]  # (an empty argument is not one a shell can pass on every host)
     dewy = build(compiler, FIXTURES / 'utf8_text_dewy.dewy', tmp_path / 'utf8-dewy', release)
-    jo = build(compiler, FIXTURES / 'utf8_text_jo.jo', tmp_path / 'utf8-jo', release)
-    got = run(dewy, texts)
-    assert got == run(jo, texts)
+    jo = build(compiler, FIXTURES / 'utf8_text_jo.jo', tmp_path / 'utf8-jo', release) if leaf_oracle.builds_twin() else None
+    got = leaf_oracle.same(run(dewy, texts), lambda: run(jo, texts))
     want = [line for text in texts for line in expected(text)]
     assert got.decode().split('\n')[:-1] == want
 

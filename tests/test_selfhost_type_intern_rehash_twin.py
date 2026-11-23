@@ -4,11 +4,12 @@ import subprocess
 
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_type_intern_rehash import DRIVER
+from tests import leaf_oracle
 
 
 def test_rehash_twin(compiler, tmp_path):
     outputs = []
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         directory = tmp_path / extension
         directory.mkdir()
         for stem in ('checker_types', 'type_intern'):
@@ -23,4 +24,4 @@ def test_rehash_twin(compiler, tmp_path):
         ran = subprocess.run([binary], capture_output=True, timeout=60)
         assert ran.returncode == 0, ran.stdout[-2000:] + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs == [b'ok\n', b'ok\n']
+    assert outputs == [b'ok\n'] * len(outputs)

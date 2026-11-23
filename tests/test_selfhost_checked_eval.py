@@ -6,7 +6,10 @@ import shutil
 import subprocess
 
 import pytest
+
+from tests import whole_oracle
 from tests.support import ROOT, compiler  # noqa: F401
+from tests import leaf_oracle
 
 
 def enum_members(text, name):
@@ -22,7 +25,7 @@ def test_checked_eval_instruction_ordinals():
         ('CV', 'CXCV', 'conversion', 'expr'),
         ('Tok', 'Tok', 'token', 'checker_tokens'),
     ]:
-        expected = enum_members((ROOT / f'compiler/{source}.jo').read_text(), original)
+        expected = enum_members((ROOT / (f'tests/fixtures/selfhost/frozen/{source}.jo' if source == 'checker_tokens' else f'compiler/{source}.jo')).read_text(), original)
         entries = re.search(r'^let cx_'+table+r'_values:[^=]*=\[([^\n]*)\]', owner, re.M)
         assert entries
         assert re.findall(private+r'\.(\w+)', entries[1]) == expected
@@ -30,6 +33,8 @@ def test_checked_eval_instruction_ordinals():
 
 @pytest.fixture(scope='module')
 def frozen_evaluator(compiler, tmp_path_factory):  # noqa: F811
+    if not leaf_oracle.builds_twin():
+        return None  # (recorded outcomes stand in for it: tests/whole_oracle.py)
     directory = tmp_path_factory.mktemp('checked-eval-frozen')
     sources = directory / 'compiler'
     shutil.copytree(ROOT / 'compiler', sources)
@@ -54,14 +59,17 @@ def test_checked_eval_twins(compiler, frozen_evaluator, tmp_path, release):  # n
     env = {**os.environ, 'DEWY_CORE_LIB': str(ROOT / 'lib'), 'DEWY_EMIT_WORKERS': '1'}
     for source in sources:
         results = []
-        for binary in (compiler, frozen_evaluator):
+        for binary in leaf_oracle.pair(compiler, frozen_evaluator):
             output = tmp_path / 'program'
-            built = subprocess.run([binary, 'build', source, '-o', output,
-                                    *(['--release'] if release else [])],
-                                   env=env, capture_output=True, timeout=90)
+            arguments = ['build', source, '-o', output, *(['--release'] if release else [])]
+            built = subprocess.run([binary, *arguments], env=env, capture_output=True, timeout=90)
             results.append((built.returncode, built.stdout, built.stderr,
                             output.read_bytes() if built.returncode == 0 else b''))
-        assert results[0] == results[1], (source.name, release, results[0][:3], results[1][:3])
+            if len(results) == 1:  # (before the twin's build replaces the program)
+                outcome = whole_oracle.build(arguments, built.returncode, built.stdout, built.stderr,
+                                             [output] if built.returncode == 0 else [], tmp_path)
+        assert len(results) == 1 or results[0] == results[1], (source.name, release, results[0][:3], results[1][:3])
+        leaf_oracle.check_entry(lambda: outcome)
         if source.with_suffix('.err').exists():
             assert results[0][0] != 0
         else:

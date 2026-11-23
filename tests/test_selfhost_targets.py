@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
@@ -70,13 +71,13 @@ def test_selfhost_targets_matches_jo(compiler, tmp_path, release):
     words = sorted(names) + list(OLD) + ['', '-', 'a-', '-b', 'x-y-z', 'x86_64-linux-gnu', 'X86_64-LINUX',
                                          'x-é', 'é-x', 'café', 'c89-', 'wasm32-wasi']
     dewy = build(compiler, FIXTURES / 'targets_dewy.dewy', tmp_path / 'targets-dewy', release)
-    jo = build(compiler, FIXTURES / 'targets_jo.jo', tmp_path / 'targets-jo', release)
+    jo = build(compiler, FIXTURES / 'targets_jo.jo', tmp_path / 'targets-jo', release) if leaf_oracle.builds_twin() else None
     outputs = []
-    for binary in (dewy, jo):
+    for binary in leaf_oracle.pair(dewy, jo):
         ran = subprocess.run([binary, *words], capture_output=True, timeout=60)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     lines = outputs[0].decode().splitlines()
     tables = [line.split(' ') for line in lines[:4]]
     assert set(tables[0]) == names and len(tables[0]) == len(names)

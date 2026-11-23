@@ -5,6 +5,7 @@ from tests.selfhost_expr_double import jo_doubles
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_effect_double import effect_services
 from tests.test_selfhost_type_constructors import DRIVER as CONSTRUCTOR_DRIVER
+from tests import leaf_oracle
 
 DRIVER = CONSTRUCTOR_DRIVER.split('main = ():')[0] + r'''
 active = false
@@ -133,7 +134,7 @@ MATCH_JO = {
 def test_type_match_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []
     stems = ('checker_types', 'checker_tokens', 'refinement_types', 'refine_predicates', 'refine_queries', 'type_queries', 'type_intern', 'type_inference', 'type_constructors', 'type_match')
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         directory = tmp_path / extension
         directory.mkdir()
         for stem in stems:
@@ -152,5 +153,5 @@ def test_type_match_twins(compiler, tmp_path, release):  # noqa: F811
         ran = subprocess.run([binary], capture_output=True, timeout=60)
         assert ran.returncode == 0, ran.stdout[-3000:] + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     assert outputs[0].endswith(b'ok\n')

@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/module_paths_jo.jo'
@@ -136,7 +137,7 @@ def paths():
            b'file:/x', b'%41%zz%', b'%4', b'%e9x', b'pkg/file.jo', b'/pkg/file.jo', b'pkg/', b'\xc3\xa9/\xc3\xbc.jo',
            b'a/\x80b/\xffc.jo', b'\x80.\xff', b'a b~c-d_e', b'back\\slash.jo', b'C:\\x\\y.jo', b'Z:', b'a:\\', b'\\\\unc\\share', *[k.encode() for k in HINTS],
            b'Re', b'os.path']
-    out += [str(p.relative_to(ROOT)).encode() for p in sorted((ROOT / 'compiler').glob('*'))[:40]]
+    out += [str(p.relative_to(ROOT)).encode() for p in sorted((ROOT / 'compiler').glob('*.dewy'))[:40]]
     rng = random.Random(12)
     pieces = [b'a', b'bc', b'.', b'..', b'/', b'//', b'@lib/', b'c:', b'C:', b'%41', b'%2F', b'%3a', b'%zz', b'%',
               b'file://', b'\xc3\xa9', b'\x80', b'\xff', b'-', b'~', b' ', b'\\', b'.jo', b'.dewy', b'x_y', b'_']
@@ -158,7 +159,7 @@ def test_selfhost_module_paths_match_jo(compiler, tmp_path, release):
     twin = "use '../../../compiler/module_paths.jo'"
     assert twin in driver
     outputs = []
-    for module in ('module_paths.dewy', 'module_paths.jo'):
+    for module in leaf_oracle.extensions(('module_paths.dewy', 'module_paths.jo')):
         source = tmp_path / f'driver-{module.replace(".", "-")}.jo'
         source.write_text(driver.replace(twin, f"use '{ROOT / 'compiler' / module}'"))
         binary = build(compiler, source, tmp_path / source.stem, release)
@@ -167,7 +168,7 @@ def test_selfhost_module_paths_match_jo(compiler, tmp_path, release):
         ran = subprocess.run([binary, corpus], capture_output=True, timeout=60)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     want = b''.join(expected(p) for p in paths())
     got = outputs[0].split(b'\n=== ')
     for g, w in zip(got, want.split(b'\n=== ')):

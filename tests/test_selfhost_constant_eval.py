@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('constant_eval', 'constant_host', 'evaluator_state', 'node_store', 'source_types', 'checker_tokens')
@@ -22,7 +23,7 @@ EXPECTED = ''.join(f'true 0 {v}\n' if isinstance(v, str) else f'false {v} \n' fo
 def test_constant_eval_twins(compiler, tmp_path, release):  # noqa: F811
     driver = (ROOT / 'tests/fixtures/selfhost/constant_eval_jo.jo').read_text()
     outputs = []
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         for module in MODULES:
             text = (ROOT / 'compiler' / f'{module}.{extension}').read_text()
             if extension == 'jo':
@@ -40,7 +41,7 @@ def test_constant_eval_twins(compiler, tmp_path, release):  # noqa: F811
             assert ran.returncode == (7 if mode else 0), ran.stdout + ran.stderr
             assert ran.stdout == (f'E 700 {ERRORS[mode]}\n' if mode else EXPECTED)
         outputs.append(runs)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
 
 
 def test_constant_eval_ships_dewy(compiler):  # noqa: F811

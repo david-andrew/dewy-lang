@@ -14,6 +14,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
 from tests.test_selfhost_literals import BAD, GOOD, Problem, escape
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/string_text_jo.jo'
@@ -105,7 +106,7 @@ def test_selfhost_string_text_match_jo(compiler, tmp_path, release):
     want = b''.join(oracle(s, i, stop) + b'\n' for s, i, stop in rows)
     driver = DRIVER.read_text()
     assert TWIN in driver
-    for module in ('literals.jo', 'literals.dewy'):
+    for module in leaf_oracle.extensions(('literals.dewy', 'literals.jo')):
         source = tmp_path / f'string_text_{module.replace(".", "_")}.jo'
         source.write_text(driver.replace(TWIN, f"use '{ROOT / 'compiler' / module}'"))
         binary = tmp_path / source.stem

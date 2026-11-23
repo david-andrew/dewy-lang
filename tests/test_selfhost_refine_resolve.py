@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from tests.support import compiler  # noqa: F401
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('refine_resolve', 'refine_resolve_host', 'checker_state', 'checker_types',
@@ -61,7 +62,7 @@ def success():
 def test_refine_resolve_twins(compiler, tmp_path, release):  # noqa: F811
     driver = (ROOT / 'tests/fixtures/selfhost/refine_resolve_jo.jo').read_text()
     runs = []
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         for module in MODULES:
             text = (ROOT / 'compiler' / f'{module}.{extension}').read_text()
             if extension == 'jo':
@@ -82,7 +83,7 @@ def test_refine_resolve_twins(compiler, tmp_path, release):  # noqa: F811
             else:
                 assert ran.stdout == success()
         runs.append(results)
-    assert runs[0] == runs[1]
+    leaf_oracle.agree(runs)
 
 
 def test_resolver_ships_dewy(compiler):  # noqa: F811

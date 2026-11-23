@@ -33,8 +33,8 @@ def test_coverweek2_checker_expr_value_calls_twins(compiler, tmp_path, monkeypat
 
 @pytest.mark.parametrize("release", [False, True], ids=["default", "release"])
 def test_coverweek2_dewy_reader_twins(compiler, tmp_path, release):
-    from tools.compiler import parser_diff
-    pair = parser_diff.build_pair(compiler, tmp_path, release=release)
-    failures = parser_diff.compare(pair, [ROOT / p for p in cases(('call_', 'if_', 'match_', 'loop_'))],
+    from tests import parser_oracle
+    pair = parser_oracle.build_pair(compiler, tmp_path, release=release)
+    failures = parser_oracle.compare(pair, [ROOT / p for p in cases(('call_', 'if_', 'match_', 'loop_'))],
                                    tmp_path, release=release, workers=1)
     assert not failures, failures

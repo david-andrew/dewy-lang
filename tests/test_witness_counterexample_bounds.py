@@ -7,6 +7,7 @@ import pytest
 
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler
+from tests import leaf_oracle
 
 
 def test_witness_counterexample_twins(compiler, tmp_path, monkeypatch):
@@ -15,7 +16,7 @@ def test_witness_counterexample_twins(compiler, tmp_path, monkeypatch):
                          leaves=('witness_ops',)) == 1
 
 
-@pytest.mark.parametrize('extension', ['dewy', 'jo'])
+@pytest.mark.parametrize('extension', list(leaf_oracle.extensions()))
 def test_witness_difference_oracle(compiler, tmp_path, extension):
     minimum, maximum = -(1 << 63), (1 << 63) - 1
     ends = [minimum, minimum + 1, -1, 0, 1, maximum - 1, maximum]

@@ -12,6 +12,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
 from tests.test_selfhost_spelling import distance
+from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
@@ -101,15 +102,15 @@ def build(compiler, source, binary, release):
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_selfhost_habits_match_jo(compiler, tmp_path, release):
     dewy = build(compiler, FIXTURES / 'habits_dewy.dewy', tmp_path / 'habits-dewy', release)
-    jo = build(compiler, FIXTURES / 'habits_jo.jo', tmp_path / 'habits-jo', release)
+    jo = build(compiler, FIXTURES / 'habits_jo.jo', tmp_path / 'habits-jo', release) if leaf_oracle.builds_twin() else None
     table = tables()
     names = words(table)
     outputs = []
-    for binary in (dewy, jo):
+    for binary in leaf_oracle.pair(dewy, jo):
         ran = subprocess.run([binary, *names], capture_output=True, timeout=60)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     lines = outputs[0].decode().split('\n')
     expected = []
     for w in names:

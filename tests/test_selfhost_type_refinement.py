@@ -5,6 +5,7 @@ import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_type_constructors import DRIVER as CONSTRUCTOR_DRIVER
+from tests import leaf_oracle
 
 DRIVER = CONSTRUCTOR_DRIVER.split('main = ():')[0] + r'''
 predicates: RefAtom[][] = [[]]
@@ -79,7 +80,7 @@ main = ():
 def compare_twins(compiler, tmp_path, release, driver, status=0):
     outputs = []
     stems = ('checker_types', 'checker_tokens', 'refinement_types', 'refine_predicates', 'refine_queries', 'type_queries', 'type_intern', 'type_inference', 'type_constructors', 'intervals', 'refine_intervals', 'type_refinement')
-    for extension in ('dewy', 'jo'):
+    for extension in leaf_oracle.extensions():
         directory = tmp_path / extension
         directory.mkdir()
         for stem in stems:
@@ -96,7 +97,7 @@ def compare_twins(compiler, tmp_path, release, driver, status=0):
         ran = subprocess.run([binary], capture_output=True, timeout=60)
         assert ran.returncode == status, ran.stdout[-3000:] + ran.stderr
         outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
+    leaf_oracle.agree(outputs)
     return outputs[0]
 
 
