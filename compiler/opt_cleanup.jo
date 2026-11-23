@@ -212,9 +212,17 @@ oc_extreme_select = (out: *Ins, start: int, n: int) -> int:
 
 opt_cleanup = (code: *Ins, count: int) -> Ins[]:
     storage: Ins[]
-    # At most one instruction and one explicit trap per input operation. The
-    # buffer never grows while raw views are live; publication trims its length.
-    storage.resize(count * 2)
+    storage.resize(count)
+    opt_cleanup_buf(storage, code, count)
+    storage
+
+opt_cleanup_ir = (code: *Ins, count: int):
+    if opt_ir.code.len() < count: opt_ir.code.resize(count)
+    opt_cleanup_buf(opt_ir.code, code, count)
+
+opt_cleanup_buf = (storage: mut Ins[], code: *Ins, count: int):
+    if storage.len() < count: storage.resize(count)
+    cap = storage.len()
     out = data(storage)
     used = 0
     dead_range = 0
@@ -242,12 +250,12 @@ opt_cleanup = (code: *Ins, count: int) -> Ins[]:
         top = -1
         if op == .end: top = int(o_flow_at[index])
         if op == .end and used > 0:
-            if o_flow[top].kind == .block:
+            if (opt_allow_cse or opt_has_loops) and o_flow[top].kind == .block:
                 selected = oc_if_select(out, o_flow[top].start, used)
                 if selected >= 0:
                     used = selected
                     continue
-            if out[used - 1].op == .mov and (o_flow[top].kind == .block or o_flow[top].kind == .if_):
+            if (opt_allow_cse or opt_has_loops) and out[used - 1].op == .mov and (o_flow[top].kind == .block or o_flow[top].kind == .if_):
                 copied = oc_extreme_select(out, o_flow[top].start, used)
                 if copied >= 0:
                     used = copied
@@ -329,15 +337,22 @@ opt_cleanup = (code: *Ins, count: int) -> Ins[]:
                 last.a = ins.a
                 out[used - 1] = last
                 continue
+        if used >= cap:
+            cap = used + 16
+            storage.resize(cap)
+            out = data(storage)
         out[used] = ins[0]
         used += 1
         if op == .block or op == .loop or op == .if_:
             o_flow[int(o_flow_at[index])].start = used - 1
         else if op == .end and o_flow[top].terminated:
+            if used >= cap:
+                cap = used + 16
+                storage.resize(cap)
+                out = data(storage)
             out[used] = Ins(.trap, 0, 0, 0, 0, 0, 0)
             used += 1
     storage.resize(used)
-    storage
 
 # Is t the address of a frame slot no other instruction takes the address of? (Asked rarely:
 # a vector operation into a temporary that is then copied.)

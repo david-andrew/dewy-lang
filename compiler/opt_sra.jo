@@ -17,12 +17,13 @@ use 'opt.jo'
 # One function-local indexed workspace, shared by discovery, escape validation
 # and rewriting. Its storage is reused, but no pointer escapes an optimization.
 struct SraValue:
-    slot: int = -1
-    offset: int
+    slot: i32 = -1
+    offset: i32
 
 struct SraSlot:
     width: int = 8
     ok: bool
+    in_loop: bool
 
 struct SraLane:
     kind: int              # 0 untyped bits, 1 float, 2 integer
@@ -35,36 +36,36 @@ sra_values: *SraValue
 sra_slots: *SraSlot
 sra_lanes: *SraLane
 sra_nv = 0
+sra_ok_count = 0
 
 sra_workspace = (nv: int, ns: int):
-    if sra_value_storage.len() < nv: sra_value_storage.resize(nv)
-    if sra_slot_storage.len() < ns: sra_slot_storage.resize(ns)
-    if sra_lane_storage.len() < ns * 4: sra_lane_storage.resize(ns * 4)
-    sra_values = data(sra_value_storage)
-    sra_slots = data(sra_slot_storage)
-    sra_lanes = data(sra_lane_storage)
-    # Other fields belong to a definition, a resolved address, or a lane.
-    # Initialize them when publishing that state, not for every unused vreg.
-    loop v in [0..nv):
-        sra_values[v].slot = -1
+    lanes = ns * 4
+    if sra_value_storage.len() < nv: sra_value_storage.resize(nv); sra_values = data(sra_value_storage)
+    if sra_slot_storage.len() < ns: sra_slot_storage.resize(ns); sra_slots = data(sra_slot_storage)
+    if sra_lane_storage.len() < lanes: sra_lane_storage.resize(lanes); sra_lanes = data(sra_lane_storage)
+    if nv > 0: mem_set(sra_values as *u8, 255, nv * size_of(SraValue))
+    sizes = data(ir.slot_size)
     loop slot in [0..ns):
-        size = int(ir.slot_size[slot])
+        size = int(sizes[slot])
         width = 8
         if size == 1 or size == 2: width = size
-        else if size % 8 != 0: width = 4
-        sra_slots[slot] = SraSlot(width, false)
+        else if size & 7 != 0: width = 4
+        sra_slots[slot] = SraSlot(width, false, false)
 
 sra_shift = (width: int) -> int: if width == 8: 3 else: width >> 1
 
 # May this byte range be used as lanes of kind k (0: just bits, copied)?
 sra_lane_use = (s: int, off: int, bytes: int, k: int) -> bool:
     width = sra_slots[s].width
-    if int(ir.slot_size[s]) >> sra_shift(width) > 4: return false
+    shift = sra_shift(width) & 63
+    size = int(ir.slot_size[s])
+    if size >> shift > 4: return false
     if k == 1 and width < 4: return false
-    if off < 0 or off & (width - 1) != 0 or bytes & (width - 1) != 0 or off + bytes > int(ir.slot_size[s]): return false
-    loop i in [0..(bytes >> sra_shift(width))):
-        j = s * 4 + (off >> sra_shift(width)) + i
+    if off < 0 or off & (width - 1) != 0 or bytes & (width - 1) != 0 or off + bytes > size: return false
+    first = s * 4 + (off >> shift)
+    loop i in [0..(bytes >> shift)):
         if k != 0:
+            j = first + i
             if sra_lanes[j].kind != 0 and sra_lanes[j].kind != k: return false
             sra_lanes[j].kind = k
     true
@@ -75,15 +76,17 @@ sra_lane_use = (s: int, off: int, bytes: int, k: int) -> bool:
 # joins to memory keeps its slots in memory (each slot leaving makes its other classes reach
 # memory too), where the copy stays a copy. O(P + L log L) for P pending operations and L lanes;
 # nothing is allocated for a function whose slots meet no copy.
-sra_find = (parent: mut int[], j: int) -> int:
-    let j = j
+sra_find = (parent: mut int[], j0: int) -> int:
+    j = j0
     loop parent[j] != j:
         parent[j] = parent[parent[j]]
         j = parent[j]
     j
 
-sra_lane_first = (v: int) -> int: sra_values[v].slot * 4 + (sra_values[v].offset >> sra_shift(sra_slots[sra_values[v].slot].width))
-sra_lane_count = (s: int) -> int: int(ir.slot_size[s]) >> sra_shift(sra_slots[s].width)
+sra_lane_first = (v: int) -> int:
+    slot = int(sra_values[v].slot)
+    slot * 4 + (int(sra_values[v].offset) >> (sra_shift(sra_slots[slot].width) & 63))
+sra_lane_count = (s: int) -> int: int(ir.slot_size[s]) >> (sra_shift(sra_slots[s].width) & 63)
 
 sra_copy_kinds = (code: *Ins, pending: int[], ns: int):
     copies: int[]
@@ -95,13 +98,13 @@ sra_copy_kinds = (code: *Ins, pending: int[], ns: int):
     loop j in [0..n): parent[j] = j
     flags = fill(0, n)             # at a class root: 1 float, 2 integer, 4 reaches memory
     loop pos in copies:
-        ins = code[pos]
+        ins = code + pos
         a = int(ins.a)
         b = int(ins.b)
         pa = sra_is_p(a)
         pb = sra_is_p(b)
         if not pa and not pb: continue
-        m = int(ins.imm) >> sra_shift(sra_slots[sra_values[if pa: a else: b].slot].width)
+        m = int(ins.imm) >> (sra_shift(sra_slots[int(sra_values[if pa: a else: b].slot)].width) & 63)
         loop i in [0..m):
             if pa and pb:
                 ra = sra_find(parent, sra_lane_first(a) + i)
@@ -110,8 +113,7 @@ sra_copy_kinds = (code: *Ins, pending: int[], ns: int):
                     parent[ra] = rb
                     flags[rb] = flags[rb] | flags[ra]
             else:
-                x = if pa: a else: b
-                r = sra_find(parent, sra_lane_first(x) + i)
+                r = sra_find(parent, sra_lane_first(if pa: a else: b) + i)
                 flags[r] = flags[r] | 4
     head = fill(-1, n)             # at a class root: its first lane; then each lane's next
     next = fill(-1, n)
@@ -149,11 +151,14 @@ sra_copy_kinds = (code: *Ins, pending: int[], ns: int):
     loop s in [0..ns):
         if not sra_slots[s].ok: continue
         loop i in [0..sra_lane_count(s)):
-            f = flags[sra_find(parent, s * 4 + i)] & 3
-            if sra_lanes[s * 4 + i].kind == 0 and (f == 1 or f == 2): sra_lanes[s * 4 + i].kind = f
+            lane = s * 4 + i
+            f = flags[sra_find(parent, lane)] & 3
+            if sra_lanes[lane].kind == 0 and (f == 1 or f == 2): sra_lanes[lane].kind = f
 
-sra_is_p = (v: int) -> bool: v >= 0 and v < sra_nv and sra_values[v].slot >= 0 and sra_slots[sra_values[v].slot].ok
-sra_lane_of = (v: int, i: int) -> int: sra_lanes[sra_values[v].slot * 4 + (sra_values[v].offset >> sra_shift(sra_slots[sra_values[v].slot].width)) + i].reg
+sra_is_p = (v: int) -> bool: v >= 0 and v < sra_nv and int(sra_values[v].slot) >= 0 and sra_slots[int(sra_values[v].slot)].ok
+sra_lane_of = (v: int, i: int) -> int:
+    slot = int(sra_values[v].slot)
+    sra_lanes[slot * 4 + (int(sra_values[v].offset) >> (sra_shift(sra_slots[slot].width) & 63)) + i].reg
 
 # Definition updates are O(removed + emitted operations), with no rebuild.
 # SRA preserves control structure. Uses/CFG are indexed once after its rewrite;
@@ -162,6 +167,9 @@ sra_index_nv = 0
 sra_emit = (out: mut Ins[], ins: Ins):
     loop sra_index_nv < ir.vtypes.len():
         ow_resize_one(sra_index_nv)
+        if not opt_allow_cse:
+            o_regs[sra_index_nv].first = 0
+            o_regs[sra_index_nv].dop = 0
         sra_index_nv += 1
     if ins.dst >= 0 and o_defines(ins.op):
         o_regs[int(ins.dst)].ndef += 1
@@ -181,309 +189,451 @@ sra_as_ty = (out: mut Ins[], x: int, ty: int) -> int:
 sra_chain: int[]
 sra_resolve_address = (value: int) -> int:
     sra_chain.clear()
+    code = data(ir.code)
     v = value
-    loop sra_values[v].slot == -2:
-        pos = o_regs[v].defpos
+    loop int(sra_values[v].slot) == -2:
+        pos = int(o_regs[v].defpos)
         if o_regs[v].ndef != 1:
             sra_values[v].slot = -1
             break
-        ins = ir.code[pos]
+        ins = code + pos
         a = int(ins.a)
-        if sra_values[a].slot == -1 or o_regs[a].defpos >= pos:
+        if int(sra_values[a].slot) == -1 or int(o_regs[a].defpos) >= pos:
             sra_values[v].slot = -1
             break
         if ins.op == .add:
             b = int(ins.b)
-            if not is_kv(b) and not (o_regs[b].ndef == 1 and ir.code[o_regs[b].defpos].op == .iconst and o_regs[b].defpos < pos):
+            if not is_kv(b) and not (o_regs[b].ndef == 1 and code[int(o_regs[b].defpos)].op == .iconst and int(o_regs[b].defpos) < pos):
                 sra_values[v].slot = -1
                 break
         sra_chain.push(v)
         v = a
     loop sra_chain.len() > 0:
         d = sra_chain.pop()
-        ins = ir.code[o_regs[d].defpos]
+        ins = code + int(o_regs[d].defpos)
         a = int(ins.a)
         sra_values[d].slot = sra_values[a].slot
-        if sra_values[a].slot >= 0:
-            offset = sra_values[a].offset
+        if int(sra_values[a].slot) >= 0:
+            offset = int(sra_values[a].offset)
             if ins.op == .add:
                 b = int(ins.b)
-                offset += if is_kv(b): kv_of(b) else: ir.code[o_regs[b].defpos].imm
-            sra_values[d].offset = offset
-    sra_values[value].slot
+                offset += if is_kv(b): kv_of(b) else: code[int(o_regs[b].defpos)].imm
+            if offset < -2147483648 or offset > 2147483647: sra_values[d].slot = -1
+            else: sra_values[d].offset = i32(offset)
+    int(sra_values[value].slot)
 
 # Keep the overwhelmingly common cached query separate from chain resolution.
 sra_address = (value: int) -> int:
     if value < 0: return -1
-    slot = sra_values[value].slot
+    slot = int(sra_values[value].slot)
     if slot == -2: return sra_resolve_address(value)
     slot
 
 sra_escape = (value: int):
-    slot = sra_address(value)
-    if slot >= 0: sra_slots[slot].ok = false
+    if value < 0: return
+    slot = int(sra_values[value].slot)
+    if slot == -1: return
+    if slot == -2: slot = sra_resolve_address(value)
+    if slot >= 0 and sra_slots[slot].ok:
+        sra_slots[slot].ok = false
+        sra_ok_count -= 1
 
-# O(N + U + A + M + output): one definition index, one use walk, and a
-# worklist containing only M slot-memory operations. Address resolution visits
-# each of A demanded definitions once. The final rewrite runs only on success.
+sra_narrow = (slot: int, a: int, pos: int, mode: int):
+    if int(o_regs[a].defpos) < pos and sra_slots[slot].width == 8 and mode & 15 != 8: sra_slots[slot].width = 4
+
+sra_narrow_copy = (slot: int, a: int, pos: int, bytes: int):
+    if slot >= 0 and int(o_regs[a].defpos) < pos and sra_slots[slot].width == 8 and (int(sra_values[a].offset) & 7 != 0 or bytes & 7 != 0): sra_slots[slot].width = 4
+
+sra_use_lanes = (v: int, off: int, bytes: int, k: int):
+    if v >= 0 and int(sra_values[v].slot) >= 0 and not sra_lane_use(int(sra_values[v].slot), int(sra_values[v].offset) + off, bytes, k): sra_slots[int(sra_values[v].slot)].ok = false
+
+sra_keep = (v: int):
+    if v >= 0 and int(sra_values[v].slot) >= 0: sra_slots[int(sra_values[v].slot)].ok = false
+
+sra_zero_lane = (out: mut Ins[], t: int):
+    if vtype(t) != VI: sra_emit(out, Ins(.fconst, i32(vtype(t)), i32(t), 0, 0, 0, 0))
+    else: sra_emit(out, Ins(.mov, i32(VI), i32(t), i32(k_vreg(0)), 0, 0, 0))
+
 sra_nested = false
+sra_roots: int[]
+sra_pending: int[]
+sra_roots_p: *int
+sra_pending_p: *int
+sra_roots_cap = 0
+sra_pending_cap = 0
+
+sra_push_root = (n: int, pos: int) -> int:
+    if n >= sra_roots_cap:
+        nc = if sra_roots_cap < 64: 64 else: sra_roots_cap * 2
+        sra_roots.resize(nc)
+        sra_roots_p = data(sra_roots)
+        sra_roots_cap = nc
+    sra_roots_p[n] = pos
+    n + 1
+
+sra_push_pending = (n: int, pos: int) -> int:
+    if n >= sra_pending_cap:
+        nc = if sra_pending_cap < 128: 128 else: sra_pending_cap * 2
+        sra_pending.resize(nc)
+        sra_pending_p = data(sra_pending)
+        sra_pending_cap = nc
+    sra_pending_p[n] = pos
+    n + 1
+
+sra_rewrite = (code: *Ins, count: int, nv: int, ns: int, pending_n: int):
+    sizes = data(ir.slot_size)
+    any = false
+    loop s in [0..ns):
+        size = int(sizes[s])
+        width = sra_slots[s].width
+        if size & (width - 1) != 0 or size >> (sra_shift(width) & 63) > 4: sra_slots[s].ok = false
+        if sra_slots[s].ok: any = true
+    if not any: return
+    loop lane in [0..ns * 4): sra_lanes[lane].kind = 0
+    pp = sra_pending_p
+    loop pi in [0..pending_n):
+        pos = pp[pi]
+        ins = code + pos
+        match ins.op:
+            load:
+                a = int(ins.a)
+                c = int(ins.c)
+                if a >= 0 and int(sra_values[a].slot) >= 0 and c & M_INDEX == 0:
+                    slot = int(sra_values[a].slot)
+                    kind = if c & M_FLOAT != 0: 1 else: 2
+                    if c & 15 != sra_slots[slot].width or not sra_lane_use(slot, int(sra_values[a].offset) + ins.imm, c & 15, kind): sra_slots[slot].ok = false
+                else:
+                    ir_operands(ins[0])
+                    loop operand_index in [0..ir_use_count): sra_keep(ir_use(operand_index))
+            store:
+                a = int(ins.a)
+                c = int(ins.c)
+                sra_keep(int(ins.b))
+                if c & M_INDEX != 0: sra_keep(int(ins.dst))
+                if a >= 0 and int(sra_values[a].slot) >= 0:
+                    slot = int(sra_values[a].slot)
+                    kind = if c & M_FLOAT != 0: 1 else: 2
+                    if c & M_INDEX != 0 or c & 15 != sra_slots[slot].width or not sra_lane_use(slot, int(sra_values[a].offset) + ins.imm, c & 15, kind): sra_slots[slot].ok = false
+            vop:
+                imm = ins.imm
+                bytes = ((imm >> 4) & 7) * 4
+                sra_use_lanes(int(ins.a), 0, bytes, 1)
+                if imm & VOP_SPLAT_B != 0: sra_keep(int(ins.b))
+                else: sra_use_lanes(int(ins.b), 0, bytes, 1)
+                if imm & VOP_SPLAT_C != 0: sra_keep(int(ins.c))
+                else: sra_use_lanes(int(ins.c), 0, bytes, 1)
+            copy:
+                a = int(ins.a)
+                b = int(ins.b)
+                if a >= 0 and b >= 0 and int(sra_values[a].slot) >= 0 and int(sra_values[b].slot) >= 0 and sra_slots[int(sra_values[a].slot)].width != sra_slots[int(sra_values[b].slot)].width:
+                    if sra_slots[int(sra_values[a].slot)].width > sra_slots[int(sra_values[b].slot)].width: sra_slots[int(sra_values[a].slot)].ok = false
+                    else: sra_slots[int(sra_values[b].slot)].ok = false
+                sra_use_lanes(a, 0, ins.imm, 0)
+                sra_use_lanes(b, 0, ins.imm, 0)
+            zero: sra_use_lanes(int(ins.a), 0, ins.imm, 0)
+            _:
+                ir_operands(ins[0])
+                loop operand_index in [0..ir_use_count): sra_keep(ir_use(operand_index))
+    __set_len(sra_pending, pending_n)
+    sra_copy_kinds(code, sra_pending, ns)
+    __set_len(sra_pending, sra_pending_cap)
+    any = false
+    loop s in [0..ns):
+        if not sra_slots[s].ok: continue
+        width = sra_slots[s].width
+        loop i in [0..(int(sizes[s]) >> (sra_shift(width) & 63))):
+            lane = s * 4 + i
+            ty = if sra_lanes[lane].kind == 1: (if width == 8: VF else: VS) else: VI
+            sra_lanes[lane].reg = vreg(ty)
+            any = true
+    if not any: return
+    sra_index_nv = nv
+    out: Ins[]
+    out.reserve(count + (count >> 2))
+    loop input_pos in [0..count):
+        ins = code + input_pos
+        match ins.op:
+            slot, add, mov:
+                d = int(ins.dst)
+                if sra_is_p(d): o_regs[d].ndef -= 1
+                else: out.push(ins[0])
+            load:
+                a = int(ins.a)
+                if sra_is_p(a):
+                    d = int(ins.dst)
+                    c = int(ins.c)
+                    o_regs[d].ndef -= 1
+                    width = sra_slots[int(sra_values[a].slot)].width
+                    ty = if width == 8: VF else: VS
+                    x = sra_lane_of(a, ins.imm >> (sra_shift(width) & 63))
+                    if c & M_FLOAT != 0: sra_emit(out, Ins(.mov, i32(ty), i32(d), i32(sra_as_ty(out, x, ty)), 0, 0, 0))
+                    else if width == 8: sra_emit(out, Ins(.mov, i32(VI), i32(d), i32(sra_as_ty(out, x, VI)), 0, 0, 0))
+                    else:
+                        conv = if width == 1: Op.zext8 else if width == 2: Op.zext16 else: Op.zext32
+                        if c & M_SIGNED != 0: conv = if width == 1: Op.sext8 else if width == 2: Op.sext16 else: Op.sext32
+                        sra_emit(out, Ins(conv, i32(VI), i32(d), i32(sra_as_ty(out, x, VI)), 0, 0, 0))
+                else: out.push(ins[0])
+            store:
+                a = int(ins.a)
+                if sra_is_p(a):
+                    b = int(ins.b)
+                    if sra_address(b) >= 0: sra_nested = true
+                    x = sra_lane_of(a, ins.imm >> (sra_shift(sra_slots[int(sra_values[a].slot)].width) & 63))
+                    sra_emit(out, Ins(.mov, i32(vtype(x)), i32(x), i32(sra_as_ty(out, b, vtype(x))), 0, 0, 0))
+                else: out.push(ins[0])
+            vop:
+                a = int(ins.a)
+                b = int(ins.b)
+                c = int(ins.c)
+                imm = ins.imm
+                if sra_is_p(a) or (imm & VOP_SPLAT_B == 0 and sra_is_p(b)) or (imm & VOP_SPLAT_C == 0 and sra_is_p(c)):
+                    which = imm & 3
+                    fop = if which == 0: Op.fadd else if which == 1: Op.fsub else if which == 2: Op.fmul else: Op.fdiv
+                    loop i in [0..((imm >> 4) & 7)):
+                        x = b
+                        if imm & VOP_SPLAT_B == 0:
+                            if sra_is_p(b): x = sra_as_ty(out, sra_lane_of(b, i), VS)
+                            else:
+                                x = vreg(VS)
+                                sra_emit(out, Ins(.load, i32(VS), i32(x), i32(b), 0, i32(4 | M_FLOAT), i * 4))
+                        y = c
+                        if imm & VOP_SPLAT_C == 0:
+                            if sra_is_p(c): y = sra_as_ty(out, sra_lane_of(c, i), VS)
+                            else:
+                                y = vreg(VS)
+                                sra_emit(out, Ins(.load, i32(VS), i32(y), i32(c), 0, i32(4 | M_FLOAT), i * 4))
+                        r = vreg(VS)
+                        sra_emit(out, Ins(fop, i32(VS), i32(r), i32(x), i32(y), 0, 0))
+                        if sra_is_p(a):
+                            t = sra_lane_of(a, i)
+                            sra_emit(out, Ins(.mov, i32(vtype(t)), i32(t), i32(sra_as_ty(out, r, vtype(t))), 0, 0, 0))
+                        else: sra_emit(out, Ins(.store, i32(VS), 0, i32(a), i32(r), i32(4 | M_FLOAT), i * 4))
+                else: out.push(ins[0])
+            copy:
+                a = int(ins.a)
+                b = int(ins.b)
+                pa = sra_is_p(a)
+                pb = sra_is_p(b)
+                if pa or pb:
+                    width = sra_slots[int(sra_values[if pa: a else: b].slot)].width
+                    n = ins.imm >> (sra_shift(width) & 63)
+                    xs: int[]
+                    loop i in [0..n):
+                        if pb: xs.push(sra_lane_of(b, i))
+                        else:
+                            ty = if pa: vtype(sra_lane_of(a, i)) else: VI
+                            x = vreg(ty)
+                            m = width
+                            if ty != VI: m = width | M_FLOAT
+                            sra_emit(out, Ins(.load, i32(ty), i32(x), i32(b), 0, i32(m), width * i))
+                            xs.push(x)
+                    loop i in [0..n):
+                        if pa:
+                            t = sra_lane_of(a, i)
+                            sra_emit(out, Ins(.mov, i32(vtype(t)), i32(t), i32(sra_as_ty(out, xs[i], vtype(t))), 0, 0, 0))
+                        else:
+                            m = width
+                            if vtype(xs[i]) != VI: m = width | M_FLOAT
+                            sra_emit(out, Ins(.store, i32(vtype(xs[i])), 0, i32(a), i32(xs[i]), i32(m), width * i))
+                else: out.push(ins[0])
+            zero:
+                a = int(ins.a)
+                if sra_is_p(a):
+                    loop i in [0..(ins.imm >> (sra_shift(sra_slots[int(sra_values[a].slot)].width) & 63))): sra_zero_lane(out, sra_lane_of(a, i))
+                else: out.push(ins[0])
+            zeroslots:
+                out.push(ins[0])
+                args = data(ir.args)
+                a = int(ins.a)
+                loop k in [0..int(ins.b)):
+                    item = int(args[a + k])
+                    if item & 1 == 0 and sra_slots[item >> 1].ok:
+                        s = item >> 1
+                        loop i in [0..(int(sizes[s]) >> (sra_shift(sra_slots[s].width) & 63))): sra_zero_lane(out, sra_lanes[s * 4 + i].reg)
+            _: out.push(ins[0])
+    ir.code = out
+
+sra_esc_v = (u: int) -> bool:
+    if u >= 0 and int(sra_values[u].slot) != -1:
+        sra_escape(u)
+        return sra_ok_count == 0
+    false
+
 o_sra = ():
     sra_nested = false
-    o_resize(ir.vtypes.len())
+    opt_sra_counted = false
+    if opt_allow_cse: o_resize(ir.vtypes.len())
+    else: o_resize_fast(ir.vtypes.len())
     ns = ir.slot_size.len()
     if ns == 0: return
+    sizes = data(ir.slot_size)
+    has_small = false
+    loop slot in [0..ns):
+        if int(sizes[slot]) <= 32: has_small = true; break
+    if not has_small: return
+    opt_sra_counted = true
     code = data(ir.code)
     count = ir.code.len()
     nv = ir.vtypes.len()
     sra_nv = nv
     sra_workspace(nv, ns)
-    roots: int[]
+    roots_n = 0
+    dec = o_decode
+    args0 = data(ir.args)
+    regs = o_regs
+    sv = sra_values
+    slots = sra_slots
     loop pos in [0..count):
-        ins = &code[pos]
-        d = int(ins.dst)
+        ins = code + pos
         op = ins.op
-        if d < 0 or not o_defines(op): continue
-        o_regs[d].ndef += 1
-        o_regs[d].defpos = i32(pos)
-        if op == .slot: roots.push(pos)
-        else if op == .mov or op == .add: sra_values[d].slot = -2
-    any = false
-    loop pos in roots:
-        ins = &code[pos]
+        dw = dec[int((ins as *u32)[0])]
+        if (dw & 1) == 0:
+            if op == .zeroslots:
+                a0 = int(ins.a)
+                loop k in [a0..a0 + int(ins.b)):
+                    item = int(args0[k])
+                    if (item & 1) == 1: regs[item >> 1].ndef += 2
+            continue
         d = int(ins.dst)
-        slot = int(ins.a)
-        if o_regs[d].ndef == 1 and int(ir.slot_size[slot]) <= 32:
-            sra_values[d].slot = slot
-            sra_values[d].offset = 0
-            sra_slots[slot].ok = true
-            any = true
-        else: sra_values[d].slot = -1
-    if not any: return
-    pending: int[]
+        if d >= 0:
+            rd = regs + d
+            rd.ndef += 1
+            rd.defpos = i32(pos)
+            if op == .slot:
+                s = int(ins.a)
+                if int(sizes[s]) <= 32:
+                    roots_n = sra_push_root(roots_n, pos)
+                    if rd.ndef == 1: sv[d].slot = i32(s); sv[d].offset = 0
+                    else: sv[d].slot = -1
+            else if roots_n > 0 and (op == .mov or op == .add):
+                a = int(ins.a)
+                if a >= 0 and int(sv[a].slot) != -1: sv[d].slot = -2
+        if (dw & 4096) != 0 and roots_n > 0:
+            a0 = int(ins.a)
+            loop k in [a0..a0 + int(ins.b)):
+                u = int(args0[k])
+                if u >= 0:
+                    su = int(sv[u].slot)
+                    if su >= 0: slots[su].width = -1
+    if roots_n == 0: return
+    sra_ok_count = 0
+    rp = sra_roots_p
+    loop ri in [0..roots_n):
+        rins = code + rp[ri]
+        d = int(rins.dst)
+        slot = int(rins.a)
+        if regs[d].ndef == 1 and slots[slot].width > 0:
+            sv[d].slot = i32(slot)
+            sv[d].offset = 0
+            if not slots[slot].ok:
+                slots[slot].ok = true
+                sra_ok_count += 1
+        else: sv[d].slot = -1
+    if sra_ok_count == 0: return
+    pending_n = 0
     loop pos in [0..count):
-        ins = &code[pos]
-        op = ins.op
-        a = int(ins.a)
-        b = int(ins.b)
-        c = int(ins.c)
-        match op:
-            slot, zeroslots: continue
-            mov, add:
-                if sra_address(int(ins.dst)) >= 0: continue
-                sra_escape(a)
-                if op == .add: sra_escape(b)
-                continue
+        ins = code + pos
+        match ins.op:
+            slot, zeroslots, nop, iconst, fconst, gaddr, daddr, faddr, block, loop, else_, end, br, trap, vzu: pass
+            mov:
+                d = int(ins.dst)
+                a = int(ins.a)
+                sd = int(sv[d].slot)
+                if sd != -1 or (a >= 0 and int(sv[a].slot) != -1):
+                    if sd == -2:
+                        if regs[d].ndef != 1 or a < 0 or int(sv[a].slot) == -1:
+                            sv[d].slot = -1; sd = -1
+                        else: sd = sra_resolve_address(d)
+                    if sd < 0 and a >= 0 and int(sv[a].slot) != -1:
+                        sra_escape(a)
+                        if sra_ok_count == 0: return
+            add:
+                d = int(ins.dst)
+                a = int(ins.a)
+                sd = int(sv[d].slot)
+                if sd != -1 or (a >= 0 and int(sv[a].slot) != -1):
+                    if sd == -2:
+                        if regs[d].ndef != 1 or a < 0 or int(sv[a].slot) == -1:
+                            sv[d].slot = -1; sd = -1
+                        else: sd = sra_resolve_address(d)
+                    if sd < 0:
+                        if a >= 0 and int(sv[a].slot) != -1: sra_escape(a)
+                        b = int(ins.b)
+                        if b >= 0 and int(sv[b].slot) != -1: sra_escape(b)
+                        if sra_ok_count == 0: return
+                else:
+                    b = int(ins.b)
+                    if b >= 0 and int(sv[b].slot) != -1:
+                        sra_escape(b)
+                        if sra_ok_count == 0: return
             load:
-                sa = sra_address(a)
+                a = int(ins.a)
+                c = int(ins.c)
+                sa = if a >= 0: (if int(sv[a].slot) == -2: sra_resolve_address(a) else: int(sv[a].slot)) else: -1
                 if sa >= 0:
-                    if o_regs[a].defpos < pos and sra_slots[sa].width == 8 and c & 15 != 8: sra_slots[sa].width = 4
-                    if c & M_INDEX == 0:
-                        pending.push(pos)
-                        continue
-                sra_escape(a)
-                if c & M_INDEX != 0: sra_escape(b)
-                continue
+                    sra_narrow(sa, a, pos, c)
+                    if c & M_INDEX == 0: pending_n = sra_push_pending(pending_n, pos)
+                    else:
+                        if slots[sa].ok: slots[sa].ok = false; sra_ok_count -= 1
+                        b = int(ins.b)
+                        if b >= 0 and int(sv[b].slot) != -1: sra_escape(b)
+                        if sra_ok_count == 0: return
+                else if c & M_INDEX != 0:
+                    b = int(ins.b)
+                    if b >= 0 and int(sv[b].slot) != -1:
+                        sra_escape(b)
+                        if sra_ok_count == 0: return
             store:
-                sa = sra_address(a)
-                sb = sra_address(b)
-                if sb >= 0: sra_slots[sb].ok = false
-                if c & M_INDEX != 0:
-                    sd = sra_address(int(ins.dst))
-                    if sd >= 0: sra_slots[sd].ok = false
+                a = int(ins.a)
+                sa = if a >= 0: (if int(sv[a].slot) == -2: sra_resolve_address(a) else: int(sv[a].slot)) else: -1
+                b = int(ins.b)
+                if b >= 0 and int(sv[b].slot) != -1:
+                    sra_escape(b)
+                    if sra_ok_count == 0: return
+                if int(ins.c) & M_INDEX != 0:
+                    sd = int(ins.dst)
+                    if sd >= 0 and int(sv[sd].slot) != -1:
+                        sra_escape(sd)
+                        if sra_ok_count == 0: return
                 if sa >= 0:
-                    if o_regs[a].defpos < pos and sra_slots[sa].width == 8 and c & 15 != 8: sra_slots[sa].width = 4
-                    pending.push(pos)
-                continue
+                    sra_narrow(sa, a, pos, int(ins.c))
+                    pending_n = sra_push_pending(pending_n, pos)
             vop:
+                a = int(ins.a)
+                b = int(ins.b)
+                c = int(ins.c)
                 sa = sra_address(a)
                 sb = sra_address(b)
                 sc = sra_address(c)
-                if sa >= 0 and o_regs[a].defpos < pos: sra_slots[sa].width = 4
-                if sb >= 0 and o_regs[b].defpos < pos: sra_slots[sb].width = 4
-                if sc >= 0 and o_regs[c].defpos < pos: sra_slots[sc].width = 4
-                if sa >= 0 or sb >= 0 or sc >= 0: pending.push(pos)
-                continue
-            copy, zero:
+                if sa >= 0 and int(regs[a].defpos) < pos: slots[sa].width = 4
+                if sb >= 0 and int(regs[b].defpos) < pos: slots[sb].width = 4
+                if sc >= 0 and int(regs[c].defpos) < pos: slots[sc].width = 4
+                if sa >= 0 or sb >= 0 or sc >= 0: pending_n = sra_push_pending(pending_n, pos)
+            copy:
+                a = int(ins.a)
+                b = int(ins.b)
                 sa = sra_address(a)
-                sb = if op == .copy: sra_address(b) else: -1
-                if sa >= 0 and o_regs[a].defpos < pos and sra_slots[sa].width == 8 and (sra_values[a].offset % 8 != 0 or ins.imm % 8 != 0): sra_slots[sa].width = 4
-                if sb >= 0 and o_regs[b].defpos < pos and sra_slots[sb].width == 8 and (sra_values[b].offset % 8 != 0 or ins.imm % 8 != 0): sra_slots[sb].width = 4
-                if sa >= 0 or sb >= 0: pending.push(pos)
-                continue
-            nop, iconst, fconst, gaddr, daddr, faddr, block, loop, end, else_, br, trap, vzu: pass
+                sb = sra_address(b)
+                sra_narrow_copy(sa, a, pos, ins.imm)
+                sra_narrow_copy(sb, b, pos, ins.imm)
+                if sa >= 0 or sb >= 0: pending_n = sra_push_pending(pending_n, pos)
+            zero:
+                a = int(ins.a)
+                sa = sra_address(a)
+                sra_narrow_copy(sa, a, pos, ins.imm)
+                if sa >= 0: pending_n = sra_push_pending(pending_n, pos)
             intr, call, syscall, calli, callc:
-                loop k in [a..a + b): sra_escape(int(ir.args[k]))
-                if op == .calli or op == .callc: sra_escape(c)
-            ret:
-                if a >= 0: sra_escape(a)
-            if_, brif, brtable, assume, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits, vsplat:
-                sra_escape(a)
+                a = int(ins.a)
+                loop k in [a..a + int(ins.b)):
+                    if sra_esc_v(int(args0[k])): return
+                if (ins.op == .calli or ins.op == .callc) and sra_esc_v(int(ins.c)): return
+            ret, if_, brif, brtable, assume, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits, vsplat:
+                if sra_esc_v(int(ins.a)): return
             memcpy, memset, select, memeq, findbyte, scanbytes, findb:
-                sra_escape(a)
-                sra_escape(b)
-                sra_escape(c)
+                if sra_esc_v(int(ins.a)) or sra_esc_v(int(ins.b)) or sra_esc_v(int(ins.c)): return
             vst:
-                sra_escape(a)
-                sra_escape(b)
-                sra_escape(int(ins.dst))
+                if sra_esc_v(int(ins.a)) or sra_esc_v(int(ins.b)) or sra_esc_v(int(ins.dst)): return
             _:
-                sra_escape(a)
-                sra_escape(b)
-    # Lanes keep their observed numeric kind; copy-only lanes contain integer bits.
-    any = false
-    loop s in [0..ns):
-        if int(ir.slot_size[s]) & (sra_slots[s].width - 1) != 0 or int(ir.slot_size[s]) >> sra_shift(sra_slots[s].width) > 4: sra_slots[s].ok = false
-        if sra_slots[s].ok: any = true
-    if not any: return
-    loop lane in [0..ns * 4): sra_lanes[lane].kind = 0
-    loop pos in pending:
-        ins = &code[pos]
-        op = ins.op
-        a = int(ins.a)
-        b = int(ins.b)
-        c = int(ins.c)
-        # every use of a slot address must be one of these
-        if op == .load and a >= 0 and sra_values[a].slot >= 0 and c & M_INDEX == 0:
-            if c & 15 != sra_slots[sra_values[a].slot].width or not sra_lane_use(sra_values[a].slot, sra_values[a].offset + ins.imm, c & 15, if c & M_FLOAT != 0: 1 else: 2): sra_slots[sra_values[a].slot].ok = false
-            continue
-        if op == .store:
-            if b >= 0 and sra_values[b].slot >= 0: sra_slots[sra_values[b].slot].ok = false
-            if c & M_INDEX != 0 and int(ins.dst) >= 0 and sra_values[int(ins.dst)].slot >= 0: sra_slots[sra_values[int(ins.dst)].slot].ok = false
-            if a >= 0 and sra_values[a].slot >= 0:
-                if c & M_INDEX != 0 or c & 15 != sra_slots[sra_values[a].slot].width or not sra_lane_use(sra_values[a].slot, sra_values[a].offset + ins.imm, c & 15, if c & M_FLOAT != 0: 1 else: 2): sra_slots[sra_values[a].slot].ok = false
-            continue
-        if op == .vop:
-            n = (ins.imm >> 4) & 7
-            if a >= 0 and sra_values[a].slot >= 0 and not sra_lane_use(sra_values[a].slot, sra_values[a].offset, 4 * n, 1): sra_slots[sra_values[a].slot].ok = false
-            if ins.imm & VOP_SPLAT_B != 0:
-                if b >= 0 and sra_values[b].slot >= 0: sra_slots[sra_values[b].slot].ok = false
-            else if b >= 0 and sra_values[b].slot >= 0 and not sra_lane_use(sra_values[b].slot, sra_values[b].offset, 4 * n, 1): sra_slots[sra_values[b].slot].ok = false
-            if ins.imm & VOP_SPLAT_C != 0:
-                if c >= 0 and sra_values[c].slot >= 0: sra_slots[sra_values[c].slot].ok = false
-            else if c >= 0 and sra_values[c].slot >= 0 and not sra_lane_use(sra_values[c].slot, sra_values[c].offset, 4 * n, 1): sra_slots[sra_values[c].slot].ok = false
-            continue
-        if op == .copy:
-            # Keep one side in memory when copy endpoints use different lane widths.
-            if a >= 0 and b >= 0 and sra_values[a].slot >= 0 and sra_values[b].slot >= 0 and sra_slots[sra_values[a].slot].width != sra_slots[sra_values[b].slot].width:
-                if sra_slots[sra_values[a].slot].width > sra_slots[sra_values[b].slot].width: sra_slots[sra_values[a].slot].ok = false
-                else: sra_slots[sra_values[b].slot].ok = false
-            if a >= 0 and sra_values[a].slot >= 0 and not sra_lane_use(sra_values[a].slot, sra_values[a].offset, int(ins.imm), 0): sra_slots[sra_values[a].slot].ok = false
-            if b >= 0 and sra_values[b].slot >= 0 and not sra_lane_use(sra_values[b].slot, sra_values[b].offset, int(ins.imm), 0): sra_slots[sra_values[b].slot].ok = false
-            continue
-        if op == .zero:
-            if a >= 0 and sra_values[a].slot >= 0 and not sra_lane_use(sra_values[a].slot, sra_values[a].offset, int(ins.imm), 0): sra_slots[sra_values[a].slot].ok = false
-            continue
-        if (op == .add or op == .mov) and int(ins.dst) >= 0 and sra_values[int(ins.dst)].slot >= 0: continue
-        if op == .slot: continue
-        if op == .zeroslots: continue
-        ir_operands(ins[0])
-        loop operand_index in [0..ir_use_count):
-            let u = ir_use(operand_index)
-            if sra_values[u].slot >= 0: sra_slots[sra_values[u].slot].ok = false
-    sra_copy_kinds(code, pending, ns)
-    # a register per lane
-    any = false
-    loop s in [0..ns):
-        if not sra_slots[s].ok: continue
-        loop i in [0..(int(ir.slot_size[s]) >> sra_shift(sra_slots[s].width))):
-            ty = if sra_lanes[s * 4 + i].kind == 1: (if sra_slots[s].width == 8: VF else: VS) else: VI
-            sra_lanes[s * 4 + i].reg = vreg(ty)
-            any = true
-    if not any: return
-    # Rewrite, updating the shared definition index at each mutation.
-    sra_index_nv = nv
-    out: Ins[]
-    out.reserve(count + count / 4)
-    loop input_pos in [0..count):
-        ins = &code[input_pos]
-        op = ins.op
-        a = int(ins.a)
-        b = int(ins.b)
-        c = int(ins.c)
-        d = int(ins.dst)
-        if (op == .slot or op == .add or op == .mov) and sra_is_p(d):
-            o_regs[d].ndef -= 1
-            continue
-        if op == .load and sra_is_p(a):
-            o_regs[d].ndef -= 1
-            width = sra_slots[sra_values[a].slot].width
-            ty = if width == 8: VF else: VS
-            x = sra_lane_of(a, int((ins.imm >> sra_shift(width))))
-            if c & M_FLOAT != 0: sra_emit(out, Ins(.mov, i32(ty), i32(d), i32(sra_as_ty(out, x, ty)), 0, 0, 0))
-            else if width == 8: sra_emit(out, Ins(.mov, VI, i32(d), i32(sra_as_ty(out, x, VI)), 0, 0, 0))
-            else:
-                conv = if width == 1: Op.zext8 else if width == 2: Op.zext16 else: Op.zext32
-                if c & M_SIGNED != 0: conv = if width == 1: Op.sext8 else if width == 2: Op.sext16 else: Op.sext32
-                sra_emit(out, Ins(conv, VI, i32(d), i32(sra_as_ty(out, x, VI)), 0, 0, 0))
-            continue
-        if op == .store and sra_is_p(a):
-            if sra_address(b) >= 0: sra_nested = true
-            x = sra_lane_of(a, int((ins.imm >> sra_shift(sra_slots[sra_values[a].slot].width))))
-            sra_emit(out, Ins(.mov, i32(vtype(x)), i32(x), i32(sra_as_ty(out, b, vtype(x))), 0, 0, 0))
-            continue
-        if op == .vop and (sra_is_p(a) or (ins.imm & VOP_SPLAT_B == 0 and sra_is_p(b)) or (ins.imm & VOP_SPLAT_C == 0 and sra_is_p(c))):
-            n = (ins.imm >> 4) & 7
-            fop = [Op.fadd, Op.fsub, Op.fmul, Op.fdiv][ins.imm & 3]
-            loop i in [0..n):
-                x = b
-                if ins.imm & VOP_SPLAT_B == 0:
-                    if sra_is_p(b): x = sra_as_ty(out, sra_lane_of(b, i), VS)
-                    else:
-                        x = vreg(VS)
-                        sra_emit(out, Ins(.load, VS, i32(x), i32(b), 0, i32(4 | M_FLOAT), 4 * i))
-                y = c
-                if ins.imm & VOP_SPLAT_C == 0:
-                    if sra_is_p(c): y = sra_as_ty(out, sra_lane_of(c, i), VS)
-                    else:
-                        y = vreg(VS)
-                        sra_emit(out, Ins(.load, VS, i32(y), i32(c), 0, i32(4 | M_FLOAT), 4 * i))
-                r = vreg(VS)
-                sra_emit(out, Ins(fop, VS, i32(r), i32(x), i32(y), 0, 0))
-                # (lane i of the result needs only lane i of the operands: written at once, so
-                # it is computed right into its lane, even when the destination is a source)
-                if sra_is_p(a):
-                    t = sra_lane_of(a, i)
-                    sra_emit(out, Ins(.mov, i32(vtype(t)), i32(t), i32(sra_as_ty(out, r, vtype(t))), 0, 0, 0))
-                else: sra_emit(out, Ins(.store, VS, 0, i32(a), i32(r), i32(4 | M_FLOAT), 4 * i))
-            continue
-        if op == .copy and (sra_is_p(a) or sra_is_p(b)):
-            width = sra_slots[sra_values[if sra_is_p(a): a else: b].slot].width
-            n = int((ins.imm >> sra_shift(width)))
-            xs: int[]
-            loop i in [0..n):
-                if sra_is_p(b): xs.push(sra_lane_of(b, i))
-                else:
-                    ty = if sra_is_p(a): vtype(sra_lane_of(a, i)) else: VI
-                    x = vreg(ty)
-                    m = width
-                    if ty != VI: m = width | M_FLOAT
-                    sra_emit(out, Ins(.load, i32(ty), i32(x), i32(b), 0, i32(m), width * i))
-                    xs.push(x)
-            loop i in [0..n):
-                if sra_is_p(a):
-                    t = sra_lane_of(a, i)
-                    sra_emit(out, Ins(.mov, i32(vtype(t)), i32(t), i32(sra_as_ty(out, xs[i], vtype(t))), 0, 0, 0))
-                else:
-                    m = width
-                    if vtype(xs[i]) != VI: m = width | M_FLOAT
-                    sra_emit(out, Ins(.store, i32(vtype(xs[i])), 0, i32(a), i32(xs[i]), i32(m), width * i))
-            continue
-        if op == .zero and sra_is_p(a):
-            loop i in [0..int((ins.imm >> sra_shift(sra_slots[sra_values[a].slot].width)))):
-                t = sra_lane_of(a, i)
-                if vtype(t) != VI:
-                    sra_emit(out, Ins(.fconst, i32(vtype(t)), i32(t), 0, 0, 0, 0))
-                else: sra_emit(out, Ins(.mov, VI, i32(t), i32(k_vreg(0)), 0, 0, 0))
-            continue
-        out.push(ins[0])
-        if op == .zeroslots:
-            # (lanes of slots cleared here start at zero)
-            loop k in [0..b):
-                item = int(ir.args[a + k])
-                if item & 1 == 0 and sra_slots[item >> 1].ok:
-                    s = item >> 1
-                    loop i in [0..(int(ir.slot_size[s]) >> sra_shift(sra_slots[s].width))):
-                        t = sra_lanes[s * 4 + i].reg
-                        if vtype(t) != VI: sra_emit(out, Ins(.fconst, i32(vtype(t)), i32(t), 0, 0, 0, 0))
-                        else: sra_emit(out, Ins(.mov, VI, i32(t), i32(k_vreg(0)), 0, 0, 0))
-    ir.code = out
+                if sra_esc_v(int(ins.a)) or sra_esc_v(int(ins.b)): return
+    if sra_ok_count == 0: return
+    sra_rewrite(code, count, nv, ns, pending_n)

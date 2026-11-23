@@ -45,7 +45,9 @@ from p"rational_types.dewy" import (bundled_word_rational_type)
 from p"unit_ops.dewy" import (dewy_quantity_call)
 from p"checker_expr.dewy" import (call_by_name check_expr check_intrinsic finish_arg lookup)
 from p"check.jo" import (globals locals modules prelude syms universe)
+from p"checker_startup.dewy" import (load_std_file)
 from p"checker_type_names.dewy" import (jo_type_spelling)
+from p"prelude.jo" import (prelude_std_pending)
 from p"checks_thin.dewy" import (resolve_alias resolve_type)
 from p"dewy_method_ops.dewy" import (dewy_type_method)
 from p"exact_check_hooks.dewy" import (exact_int_result exact_type)
@@ -515,6 +517,7 @@ call_name_collect=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expec
         return -1
     }
     surface_hidden.clear()
+    if prelude_std_pending and args.length =? 1 and (name =? ci(61 "sum") or name =? ci(44 "min") or name =? ci(45 "max")) {load_std_file("nd.jo");}
     if ufcs {
         if mod_scope >=? 0 {collect_module(mod_scope name @decls)}
         else {collect_fns(name @decls)}

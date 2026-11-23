@@ -12,7 +12,7 @@ from p"ir_builders.dewy" import (vtype)
 from p"lower_storage.dewy" import (vc)
 from p"main.jo" import (repl_image)
 from p"x64_emit.dewy" import (nchk_fn nchk_rows dbg_epis dbg_pos pad_moves ra_save_cost ra_save_x ra_stat rsp_row uw_at uw_fo x64_emit x_int_fail x_loop_line xe_emit_error)
-from p"x64_encode.dewy" import (XMM b frame_size rsp_frame x_padding_cmov x_padding_floor)
+from p"x64_encode.dewy" import (XMM b frame_size rsp_frame x_bytes_grow x_padding_cmov x_padding_floor)
 from p"native_debug.dewy" import (dbg_cfi native_debug_function sym_name)
 from p"elf_format.dewy" import (elf_syms)
 from p"ir.jo" import (dbg_on ir ir_operand_layout main_code)
@@ -126,7 +126,11 @@ x64_function=():>void=>$unsafe {
     let align=X64OpsWord(x64_code_align())
     x_loop_line=if align =? 64 64 else 32
     # (align is 16 or 64 and the length is not negative: the remainder is a mask)
-    loop X64OpsWord(code.length) & (align - 1) not=? 0 {b(0xCC)}
+    let rem=X64OpsWord(code.length) & (align - 1)
+    if rem not=? 0 {
+        let pad=align - rem
+        mem_set(x_bytes_grow(pad) 0xCC pad)
+    }
     fn_addr[ir.fn_index]=code.length
     let fn_start=X64OpsWord(code.length)
     x_padding_floor=fn_start

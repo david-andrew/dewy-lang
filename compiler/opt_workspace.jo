@@ -1,13 +1,12 @@
 use 'ir_types.dewy'
 
 struct OptReg:
-    ndef: i32                   # static definitions (params count as one)
-    stable: bool                # single definition preceding every use
-    defpos: i32 = -1             # last definition position
-    first: i32 = 2147483647      # first use position
-    nuse: i32
-    constant: bool              # single-def integer constant
     cval: int
+    fact_epoch: int
+    ndef: i32                   # static definitions (params count as one)
+    defpos: i32 = -1            # last definition position
+    first: i32 = 2147483647     # first use position
+    nuse: i32
     repl: i32                   # copy propagation's replacement vreg
     ver: i32                    # definitions emitted (CSE validity)
     dop: i32 = -1               # defining op of a stable value
@@ -15,7 +14,8 @@ struct OptReg:
     db: i32
     dva: i32                    # operand versions at that definition
     dvb: i32
-    fact_epoch: int
+    stable: bool                # single definition preceding every use
+    constant: bool              # single-def integer constant
 
 struct OptFlow:
     kind: Op
@@ -48,6 +48,19 @@ struct OptControl:
     branches: int
     deferred: int = -1
 
+struct FastLoad:
+    sid: int
+    gen: int
+    imm: int
+    key: int
+    a: i32
+    b: i32
+    dst: i32
+    depth: i32
+    va: i32
+    vb: i32
+    dver: i32
+
 # One non-reentrant optimizer workspace, with independent globals so a scalar
 # update does not invalidate unrelated arena views in the compiler's alias model.
 # Raw views start empty and are bound before use; growth refreshes them. Never
@@ -77,6 +90,12 @@ o_dead_start: int = 0
 o_dead_first: int[]
 o_dead_limit: int[]
 o_kmap: {int: int} = {}
+o_kval: int[]
+o_kreg: i32[]
+o_kepoch: int[]
+o_kfn: int = 0
+o_kmask: int = 0
+o_ctl: OptControl[]
 o_lastuse: i32[]
 o_depth: i32[]
 ht_storage: AvailableValue[]
@@ -90,6 +109,7 @@ o_scope_storage: OptScope[]
 o_scope_info: *OptScope
 o_scopes: int[]
 o_cse: bool = false
+opt_sra_counted: bool = false
 o_nbr: int = 0
 o_join_regs: int[]
 o_join_next: int[]
@@ -126,3 +146,17 @@ opt_vtypes: *i8
 opt_input_count: int = 0
 opt_nparams: int = 0
 opt_raw_mem: bool = false
+opt_allow_cse: bool = true
+opt_has_loops: bool = false
+opt_has_big_loop_const: bool = false
+opt_has_vec_cand: bool = false
+opt_has_float_op: bool = false
+opt_has_loops_ready: bool = false
+opt_has_loops_val: bool = false
+opt_fast_nv: int = 0
+fl_has_const_div: bool = false
+fl_cache: FastLoad[]
+fl_sid: int[]
+fl_next_sid: int = 1
+fl_blk_start: int[]
+fl_blk_kind: Op[]

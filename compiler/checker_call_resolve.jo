@@ -5,6 +5,7 @@ use 'expression_types.dewy'
 use 'checked_expression_nodes.dewy'
 use 'checker_decl_slots.dewy'
 # Frozen call resolution: selection, generic bindings, defaults and finishing.
+use 'checker_state.dewy'
 use 'ast.jo'
 use 'expr.jo'
 # call_decl_checks, call_map_candidate, call_note_contracts, call_reject_candidate, comprehension_settle, match_type, unnamed
@@ -21,6 +22,7 @@ use 'checks_call_errors.dewy'
 use 'member_replay.jo'
 use 'member_admit.dewy'
 use 'checker_call_cost.dewy'
+use 'checker_call_convert.dewy'
 use 'checker_call_queries.dewy'
 use 'checker_expr.dewy'
 use 'check.jo'
@@ -55,12 +57,69 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
     # (this call's own type arguments: a call among its arguments has none, from_text[S](f(x)))
     targs_here = call_targs
     call_targs = []
-    check_args_untyped(args)
+    if args.len() > 0: check_args_untyped(args)
     positional = true
-    loop arg in args:
-        if arg == 0 or nodes[arg].kind == .namedarg:
+    n_args = args.len()
+    ap = data(args)
+    np0 = data(nodes)
+    loop i in [0..n_args):
+        arg = ap[i]
+        if arg == 0 or np0[arg].kind == .namedarg:
             positional = false
             break
+    if decls.len() == 1 and positional and targs_here.len() == 0 and closure == 0 and nodes[n].aux2 != i32(AUX2_PARTIAL):
+        decl = decls[0]
+        di = decl_info(decl)
+        if not decl_infos[di].sig.done: fn_sig(decl)
+        np = nkids(decl)
+        mutmask = int(decl_infos[di].sig.mutmask)
+        if not decl_infos[di].sig.generic and decl_infos[di].sig.ntp == 0 and n_args == np and np <= 31 and not (refine_active and mutmask == 1) and (dewy_param_kinds.len() == 0 or not dewy_param_kinds.has(decl)):
+            ok = true
+            empty_binds: int[]
+            recv_fits0 = false
+            rat_on = rational_module_found >= 0
+            loop i in [0..np):
+                a = ap[i]
+                if ctx_dependent(a): ok = false; break
+                pt = decl_infos[di].sig.params[i]
+                if mutmask & (1 << i) != 0:
+                    if call_mutable_cost(a, pt, empty_binds, recv_fits0, i == 0) < 0: ok = false; break
+                else:
+                    nd = data(nodes) + a
+                    nt = int(nd.type)
+                    exact = false
+                    if nt == pt and nt != 0 and (int(nd.flags) & 256) == 0 and nd.kind != .str_lit and nd.kind != .float_lit:
+                        tp = data(types) + pt
+                        if (int(tp.flags) & 1) == 0:
+                            tk = tp.kind
+                            if tk != .opt and tk != .refined and tk != .callable and tk != .polyfn and (tk != .struct_ or not rat_on or not bundled_word_rational_type(pt)): exact = true
+                    if not exact and arg_cost(a, pt, empty_binds) < 0: ok = false; break
+            if ok:
+                call_decl_checks(n, name, decl, args, args, np, ufcs)
+                f = get_fn_inst(decl, empty_binds, nodes[n].pos)
+                if ide_on: call_ide_ref(n, name, args, decl, f)
+                loop i in [0..np):
+                    a = ap[i]
+                    is_mut = mutmask & (1 << i) != 0
+                    if i == 0 and is_mut and dewy_is_method(decl) and place_method == 0:
+                        place_method = if nodes[decl].kind == .fn_: int(nodes[decl].name) else: dewy_literal_method_name
+                        finish_arg(a, fns[f].ptypes[i], is_mut)
+                        place_method = 0
+                    else: finish_arg(a, fns[f].ptypes[i], is_mut)
+                if mutmask != 0 and (mutmask & (mutmask - 1)) != 0: check_mutable_arguments(args, mutmask, nodes[n].pos)
+                set_list(n, args)
+                nodes[n].sym = i32(f)
+                nodes[n].aux = 0
+                nodes[n].kind = .call
+                nodes[n].a = 0
+                if proof_active or wi_any or dir_floats_any: call_note_contracts(n, f, decl, false, 0)
+                result_type = refine_read_type(int(fns[f].ret))
+                nodes[n].type = i32(result_type)
+                if cc_any and nodes[decl].c != 0:
+                    narrowed = cc_call(n, f, decl)
+                    if narrowed != 0: return narrowed
+                if wi_any and cc_any: call_warn_unsettled(n, f, decl)
+                return result_type
     cands: Cand[]             # (those that fit, when more than one does)
     first = Cand()
     nfit = 0
@@ -161,11 +220,13 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                 else if bc.sig.generic == cd.sig.generic and decl_in_prelude(bc.decl) and not decl_in_prelude(cd.decl): best = ci
                 else if bc.sig.generic == cd.sig.generic and decl_in_prelude(bc.decl) and decl_in_prelude(cd.decl) and exact_args(cd) > exact_args(bc): best = ci
     if nfit > 1 and not decl_in_prelude(cands[best].decl): call_tie_error(n, name, args, cands, best)
-    if best < 0: return call_no_candidate(n, name, decls, args, expected, ufcs, recv_fits, failure)
+    if best < 0:
+        call_targs = targs_here
+        return call_no_candidate(n, name, decls, args, expected, ufcs, recv_fits, failure)
     cd = if nfit == 1: first else: cands[best]
     decl = cd.decl
     np = nkids(decl)
-    call_decl_checks(n, name, decl, args, cd, np, ufcs)
+    call_decl_checks(n, name, decl, args, cd.args, np, ufcs)
     # (a hole is an argument whose type comes from the parameter's: none in a plain call)
     partial = (not cd.plain and has_hole(args)) or nodes[n].aux2 == i32(AUX2_PARTIAL)
     if partial and expected != 0 and tkind(expected) == .fn_:
@@ -308,7 +369,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             place_method = 0
         else: finish_arg(a, fns[f].ptypes[i], is_mut)
         fin.push(a)
-    check_mutable_arguments(fin, int(cd.sig.mutmask), nodes[n].pos)
+    if int(cd.sig.mutmask) != 0 and (int(cd.sig.mutmask) & (int(cd.sig.mutmask) - 1)) != 0: check_mutable_arguments(fin, int(cd.sig.mutmask), nodes[n].pos)
     set_list(n, fin)
     nodes[n].sym = i32(f)
     nodes[n].aux = 0
@@ -318,16 +379,20 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         nodes[n].a = i32(poly_fnref(closure, f))
         nodes[n].sym = 0
         nodes[n].aux = 1
+    if fin.len() == 3 and closure == 0:
+        nm = fns[f].sym
+        if len(nm) >= 7 and nm[0] == 'f' and nm[1] == '_' and nm[2] == 's' and nm[3] == 'w' and nm[4] == 'a' and nm[5] == 'p' and nm[6] == '_': live_body_indexes += 1
     if proof_active or wi_any or dir_floats_any: call_note_contracts(n, f, decl, partial, closure)
     if partial:
         nodes[n].aux2 = 0
         return finish_partial(n, fns[f].ptypes, int(cd.sig.mutmask), int(fns[f].ret))
-    if not capture_defaults: save_call_order(n, args, fin)
-    nodes[n].type = i32(refine_read_type(int(fns[f].ret)))
+    if not capture_defaults and not (positional and not cd.missing): save_call_order(n, args, fin)
+    result_type = refine_read_type(int(fns[f].ret))
+    nodes[n].type = i32(result_type)
     if refined_array.candidate != 0: return ref_array_call_finish(n, refined_array)
     if cc_any and nodes[decl].c != 0 and closure == 0 and not capture_defaults:
         narrowed = cc_call(n, f, decl)
         if narrowed != 0: return narrowed
     if wi_any and cc_any and closure == 0: call_warn_unsettled(n, f, decl)
     if capture_defaults: call_capture_block(n, f, statements)
-    refine_read_type(int(fns[f].ret))
+    result_type

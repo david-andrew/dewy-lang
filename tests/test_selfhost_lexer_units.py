@@ -23,7 +23,7 @@ main = ():
     loop token in tokens:
         if token.kind == .float_lit:
             n += 1
-            print("literal:{token.fval}:{int(token.flags) & INTF_UNIT != 0}")
+            print("literal:{f64_from_bits(u64(token.ival))}:{int(token.flags) & INTF_UNIT != 0}")
     print("literals:{n}")
 '''
 

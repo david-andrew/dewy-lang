@@ -844,7 +844,7 @@ ut_visit = (n: int):
         # (a fallback that leaves, as `?? return none` or `?? continue`, stores nothing)
         if ut_first and not pos_in_lib(nodes[n].pos) and not ut_safe(value) and not ut_exits(ut_strip(value)): ut_contract_failures.push(value)
         return
-    if k == .lambda or k == .fn_ or k == .struct_ or k == .enum_ or k == .typealias or k == .tname or k == .fnref: return
+    if k == .ident or k == .int_lit or k == .bool_lit or k == .float_lit or k == .none_lit or k == .null_lit or k == .dotname or k == .hole or k == .break_ or k == .continue_ or k == .lambda or k == .fn_ or k == .struct_ or k == .enum_ or k == .typealias or k == .tname or k == .fnref: return
     if k == .block:
         ut_visit_list(n)
         return

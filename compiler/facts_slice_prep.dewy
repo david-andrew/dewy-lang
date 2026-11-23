@@ -1,21 +1,59 @@
 $runtime_checks
 
-from p"ast.jo" import (kid nkids nodes)
+from p"ast.jo" import (NF_COMPREHENSION NF_GLOBAL NF_INBOUNDS has_flag kid lists nkids nodes)
 
-from p"isolation_ops.dewy" import (isolation_children)
+from p"isolation_ops.dewy" import (iso_child_p isolation_children isolation_node_children)
 
-from p"check.jo" import (LF_ALIAS locals)
-from p"checker_state.dewy" import (SK)
+from p"check.jo" import (LF_ALIAS LF_MUTPARAM fns locals)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"checks_thin.dewy" import (library_exit_call)
+from p"directives.jo" import (dir_assumed_bounds_any dir_floats_any)
+from p"effect_lattice.dewy" import (place_base)
 from p"effect_types.dewy" import (PlaceIdentity)
-from p"facts.jo" import (FactSliceEdges fact_slice fact_mark_gen fact_mark_stamp fact_mark_flags fact_mark_head fact_mark_touched)
-from p"facts_slice_builder.dewy" import (fact_root_key)
-from p"facts_index_writes.dewy" import (fact_index_put)
+from p"facts.jo" import (FACT_ACTIVE FACT_CONTRACT FACT_MEMBER FACT_VALUE FactSlice FactSliceEdges fact_constructor_calls fact_divisors fact_fork_nodes fact_mark_flags fact_mark_gen fact_mark_head fact_mark_stamp fact_mark_touched fact_member_admitted fact_member_owner fact_member_shared fact_owner fact_panic_sites fact_plan_serial fact_policy fact_probe_on fact_query fact_slice fact_slice_cache)
+from p"facts_plan_cache.dewy" import (fact_plan_version)
+from p"facts_slice_builder.dewy" import (fact_mark_begin fact_root_key)
+from p"facts_index_writes.dewy" import (fact_index_put fact_index_sized)
+from p"effects.jo" import (effect_summaries)
+from p"exact.jo" import (exact_marks exact_owners exact_rep_demands exact_rep_owners)
+from p"expr.jo" import (CV IN)
+from p"numeric_library_types.dewy" import (is_nd)
+from p"checked_expression_nodes.dewy" import (mk_ident_local)
+from p"expression_types.dewy" import (ntype)
+from p"member_plan.dewy" import (member_expand_owner)
+from p"member_replay.jo" import (member_compact_owners)
+from p"facts_arrays.dewy" import (fact_array_call)
+from p"facts_changes.dewy" import (fact_enum_cast fact_handle_opaque fact_partial_opaque fact_pure_binary fact_pure_conversion fact_pure_intrinsic)
+from p"facts_forgets.dewy" import (fact_exposed fact_fn_in_lib fact_own_local fact_pointer_cast fact_written_root)
+from p"facts_forks.dewy" import (fact_key_callback fact_parallel_array)
 from p"facts_joins.dewy" import (fact_payload_node)
-from p"facts_value_queries.dewy" import (fact_index_get)
+from p"facts_library.dewy" import (fact_chosen_call fact_copy_length_call fact_empty_array_call fact_endpoint_call fact_entry_count_call fact_exact_sum_call fact_gpu_index_call fact_heap_call fact_integer_gcd_call fact_library_call fact_nonempty_call fact_same_length_call)
+from p"facts_lifecycle.dewy" import (fact_bounded_index fact_exact_demand fact_parallel_range_call)
+from p"facts_loops.dewy" import (fact_loop_index_local fact_loop_step fact_loop_unbounded_field)
+from p"facts_maps.dewy" import (fact_map_bounded_call fact_map_call fact_map_clear_call fact_map_insert_call fact_map_snapshot_call)
+from p"facts_members.dewy" import (fact_member_admit)
+from p"facts_numeric.dewy" import (fact_extremum_call fact_mod_call fact_power_call fact_rational_constructor fact_rational_divmod fact_rational_promotion fact_rational_zero_test fact_shift_obliged)
+from p"facts_plans.dewy" import (fact_int_components fact_plan_current)
+from p"facts_pools.dewy" import (fact_pool_call)
+from p"facts_pushes.dewy" import (fact_carried_type fact_push_receiver fact_row_array)
+from p"facts_ranges.dewy" import (fact_floor_call fact_open_range fact_range_call fact_range_first fact_stepped_loop)
+from p"facts_summaries.dewy" import (fact_constructor_body fact_constructor_type fact_record_arrays fact_summary_payload)
+from p"facts_text.dewy" import (fact_affix_call fact_lines_call fact_regex_call fact_search_call fact_split_call fact_string_call fact_words_call)
+from p"facts_value_queries.dewy" import (fact_index_get fact_index_get_raw)
+from p"float_ops.dewy" import (ff_integer_demand)
+from p"floats.jo" import (ff_conversions)
+from p"nd_contracts.jo" import (fact_nd_call nd_mutable_call nd_mutable_handle nd_mutable_signatures)
+from p"ownership.jo" import (ownership_decls)
+from p"ownership_types.dewy" import (ownership_fact_type)
 from p"places.jo" import (place_locked)
-from p"refine.jo" import (ref_predicates)
+from p"predicate_summaries.dewy" import (fact_predicate_summary)
+from p"proof_ops.dewy" import (ref_refined_result)
+from p"proofs.jo" import (proof_active result_active)
+from p"refine.jo" import (ref_predicates ref_self_active)
 from p"lower_analysis.dewy" import (checked_call_mutmask)
-from p"types.jo" import (prune types)
+from p"types.jo" import (T_BOOL T_MATH_INT T_NEVER T_U64 is_int prune tkind types)
+from p"util.jo" import (intern)
+from p"warn_if.jo" import (wi_fact_calls)
 
 SlicePrepWord:type=int64<overflow='wrap'>
 
@@ -23,41 +61,92 @@ SlicePrepWord:type=int64<overflow='wrap'>
 # each raw read is reacquired and no arena view survives an append or call.
 fact_slice_children=(n:SlicePrepWord):>array<int64>=>$unsafe {
     let out:array<int64>=[]
-    let mask:SlicePrepWord=isolation_children(nodes.ptr[n].kind)
+    let np=nodes.ptr + n
+    let mask:SlicePrepWord=int64(iso_child_p[int64((np as ptr<uint32>)[0])])
     if mask <? 0 {return out}
-    if mask & 1 not=? 0 {out.push(int64(nodes.ptr[n].a))}
-    if mask & 2 not=? 0 {out.push(int64(nodes.ptr[n].b))}
-    if mask & 4 not=? 0 {out.push(int64(nodes.ptr[n].c))}
+    if mask & 1 not=? 0 {out.push(int64(np[0].a))}
+    if mask & 2 not=? 0 {out.push(int64(np[0].b))}
+    if mask & 4 not=? 0 {out.push(int64(np[0].c))}
     if mask & 16 not=? 0 {
         loop i in [0..nkids(n)) {out.push(kid(n i))}
     }
     out
 }
 fact_slice_push_children=(@out:array<int64> n:SlicePrepWord):>void=>$unsafe {
-    let mask:SlicePrepWord=isolation_children(nodes.ptr[n].kind)
+    let np=nodes.ptr + n
+    let mask:SlicePrepWord=int64(iso_child_p[int64((np as ptr<uint32>)[0])])
     if mask <? 0 {return}
-    if mask & 1 not=? 0 {out.push(int64(nodes.ptr[n].a))}
-    if mask & 2 not=? 0 {out.push(int64(nodes.ptr[n].b))}
-    if mask & 4 not=? 0 {out.push(int64(nodes.ptr[n].c))}
+    if mask & 1 not=? 0 {out.push(int64(np[0].a))}
+    if mask & 2 not=? 0 {out.push(int64(np[0].b))}
+    if mask & 4 not=? 0 {out.push(int64(np[0].c))}
     if mask & 16 not=? 0 {
-        loop i in [0..nkids(n)) {out.push(kid(n i))}
+        let l0:SlicePrepWord=SlicePrepWord(np[0].list)
+        let nk:SlicePrepWord=SlicePrepWord(np[0].nlist)
+        let lp=lists.ptr + l0
+        loop i in [SlicePrepWord(0)..nk) {out.push(SlicePrepWord(lp[i]))}
     }
 }
 
-fact_slice_flags=(n:SlicePrepWord):>int64=>{
-    if fact_slice.base <? 0 {return max(0 fact_index_get(fact_slice.flags n))}
+fact_slice_flags=(n:SlicePrepWord):>int64=>$unsafe {
+    if fact_slice.base <? 0 {return max(0 fact_index_get_raw(fact_slice.flags.ptr fact_slice.flags.length n))}
     let i:SlicePrepWord=n - SlicePrepWord(fact_slice.base)
     if i <? 0 or i >=? fact_slice.flags.length {return 0}
-    fact_slice.flags[i]
+    fact_slice.flags.ptr[i]
 }
-fact_slice_edge=(@edges:FactSliceEdges key:SlicePrepWord node:SlicePrepWord):>void=>{
+let fsp_wr_gen:array<int32>=[]
+let fsp_wr_head:array<int32>=[]
+let fsp_rt_gen:array<int32>=[]
+let fsp_acc_gen:array<int32>=[]
+let fsp_dep_gen:array<int32>=[]
+let fsp_pw_gen:array<int32>=[]
+let fsp_sw_gen:array<int32>=[]
+let fsp_wr_g:int32=0
+let fsp_in_prepare:bool=false
+
+fsp_zero_i32=(@a:array<int32>):>void=>$unsafe {
+    if a.length >? 0 {mem_set(a.ptr as ptr<uint8> 0 a.length * 4)}
+}
+fsp_wr_reset=():>void=>$unsafe {
+    fsp_wr_g=int32<overflow='wrap'>(int64(fsp_wr_g) + 1)
+    if fsp_wr_g =? 0 {
+        fsp_zero_i32(@fsp_wr_gen); fsp_zero_i32(@fsp_rt_gen); fsp_zero_i32(@fsp_acc_gen)
+        fsp_zero_i32(@fsp_dep_gen); fsp_zero_i32(@fsp_pw_gen); fsp_zero_i32(@fsp_sw_gen)
+        fsp_wr_g=1
+    }
+}
+fsp_set_mark=(@arr:array<int32> idx:SlicePrepWord):>void=>$unsafe {
+    if idx <? 0 {return}
+    if idx >=? arr.length {arr.resize(max(idx + 64 arr.length * 2 + 256))}
+    arr.ptr[idx]=fsp_wr_g
+}
+fsp_has_mark=(@arr:array<int32> idx:SlicePrepWord):>bool=>$unsafe {
+    idx >=? 0 and idx <? arr.length and arr.ptr[idx] =? fsp_wr_g
+}
+fsp_wr_get=(key:SlicePrepWord):>int64=>$unsafe {
+    if key >=? 0 and key <? fsp_wr_gen.length and fsp_wr_gen.ptr[key] =? fsp_wr_g {return SlicePrepWord(fsp_wr_head.ptr[key])}
+    -1
+}
+fact_slice_edge=(@edges:FactSliceEdges key:SlicePrepWord node:SlicePrepWord):>void=>$unsafe {
     edges.next.push(fact_index_get(edges.heads key))
     fact_index_put(@edges.heads key edges.nodes.length)
     edges.nodes.push(node)
 }
-fact_slice_writer=(@writers:FactSliceEdges p:PlaceIdentity n:SlicePrepWord):>void=>{
+fact_slice_writer=(@writers:FactSliceEdges p:PlaceIdentity n:SlicePrepWord):>void=>$unsafe {
     if p.declaration =? 0 {return}
     let key=fact_root_key(p)
+    if fsp_in_prepare and key >=? 0 and key <? 262144 {
+        if key >=? fsp_wr_gen.length {
+            let need=max(key + 64 fsp_wr_gen.length * 2 + 256)
+            fsp_wr_gen.resize(need)
+            fsp_wr_head.resize(need)
+        }
+        let prev:SlicePrepWord=if fsp_wr_gen.ptr[key] =? fsp_wr_g {SlicePrepWord(fsp_wr_head.ptr[key])} else {-1}
+        writers.next.push(prev)
+        fsp_wr_gen.ptr[key]=fsp_wr_g
+        fsp_wr_head.ptr[key]=int32<overflow='wrap'>(writers.nodes.length)
+        writers.nodes.push(n)
+        return
+    }
     fact_slice_edge(@writers key n)
 }
 fact_slice_target=(@writers:FactSliceEdges n:SlicePrepWord at:SlicePrepWord):>void=>$unsafe {
@@ -112,6 +201,10 @@ let slice_mark_stamp:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
 let slice_mark_flags:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
 let slice_mark_head:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
 let slice_mark_touched:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let mark_stamp_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let mark_flags_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let mark_head_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let mark_gen:SlicePrepWord=0
 facts_slice_marks_bind=(stamp:ptr<array<int64>> flags:ptr<array<int64>> head:ptr<array<int64>> touched:ptr<array<int64>>):>int64=>{
     slice_mark_stamp=stamp
     slice_mark_flags=flags
@@ -119,40 +212,777 @@ facts_slice_marks_bind=(stamp:ptr<array<int64>> flags:ptr<array<int64>> head:ptr
     slice_mark_touched=touched
     0
 }
+facts_slice_marks_begin=(gen:SlicePrepWord):>void=>$unsafe {
+    mark_stamp_p=slice_mark_stamp[0].ptr
+    mark_flags_p=slice_mark_flags[0].ptr
+    mark_head_p=slice_mark_head[0].ptr
+    mark_gen=gen
+}
 
 # Begin sizes all three node-indexed arrays beyond every checked node ID.
 # No view survives a call or append; writes retain the existing array COW.
 # Queries/touches are O(1); growth is O(nodes), parent appends amortized O(1).
 # Jo retains the scratch headers and the ordered touched-node publication.
 fact_mark_of=(n:SlicePrepWord):>int64=>$unsafe {
-    if fact_mark_stamp.ptr[n] not=? fact_mark_gen {return 0}
-    fact_mark_flags.ptr[n]
+    if mark_stamp_p[n] not=? mark_gen {return 0}
+    mark_flags_p[n]
 }
 fact_mark_touch=(n:SlicePrepWord):>void=>$unsafe {
-    if fact_mark_stamp.ptr[n] =? fact_mark_gen {return}
-    slice_mark_stamp[0].ptr[n]=fact_mark_gen
-    slice_mark_flags[0].ptr[n]=0
-    slice_mark_head[0].ptr[n]=-1
+    if mark_stamp_p[n] =? mark_gen {return}
+    slice_mark_stamp[0][n]=mark_gen
+    slice_mark_flags[0][n]=0
+    slice_mark_head[0][n]=-1
+    mark_stamp_p=slice_mark_stamp[0].ptr
+    mark_flags_p=slice_mark_flags[0].ptr
+    mark_head_p=slice_mark_head[0].ptr
     slice_mark_touched[0].push(n)
 }
 fact_mark_set=(n:SlicePrepWord flags:SlicePrepWord):>void=>$unsafe {
-    fact_mark_touch(n)
-    slice_mark_flags[0].ptr[n]=flags
+    if mark_stamp_p[n] not=? mark_gen {
+        slice_mark_stamp[0][n]=mark_gen
+        slice_mark_head[0][n]=-1
+        mark_stamp_p=slice_mark_stamp[0].ptr
+        mark_head_p=slice_mark_head[0].ptr
+        slice_mark_touched[0].push(n)
+    }
+    slice_mark_flags[0][n]=flags
+    mark_flags_p=slice_mark_flags[0].ptr
 }
 fact_mark_parent=(n:SlicePrepWord):>int64=>$unsafe {
-    if fact_mark_stamp.ptr[n] not=? fact_mark_gen {return -1}
-    fact_mark_head.ptr[n]
+    if mark_stamp_p[n] not=? mark_gen {return -1}
+    mark_head_p[n]
 }
-fact_slice_member=(@parents:FactSliceEdges @work:array<int64> c:SlicePrepWord n:SlicePrepWord):>void=>{
+fact_slice_member=(@parents:FactSliceEdges @work:array<int64> c:SlicePrepWord n:SlicePrepWord):>void=>$unsafe {
     if c =? 0 {return}
-    fact_slice_parent(@parents c n)
+    let prev:SlicePrepWord=-1
+    if fsp_in_prepare {
+        if mark_stamp_p[c] not=? mark_gen {
+            mark_stamp_p[c]=mark_gen
+            mark_flags_p[c]=0
+            let tp=slice_mark_touched[0].ptr
+            let th=tp - 3
+            if tp not=? (uint64(0) as ptr<int64>) and th[0] =? 1 and th[1] <? th[2] {
+                let tlen=th[1]; tp[tlen]=c; th[1]=tlen + 1
+            } else {slice_mark_touched[0].push(c)}
+        } else {
+            prev=mark_head_p[c]
+        }
+        let xp=parents.next.ptr
+        let xh=xp - 3
+        if xp not=? (uint64(0) as ptr<int64>) and xh[0] =? 1 and xh[1] <? xh[2] {
+            let xlen=xh[1]; xp[xlen]=prev; xh[1]=xlen + 1
+        } else {parents.next.push(prev)}
+        let np=parents.nodes.ptr
+        let nh=np - 3
+        if np not=? (uint64(0) as ptr<int64>) and nh[0] =? 1 and nh[1] <? nh[2] {
+            let nlen=nh[1]; mark_head_p[c]=nlen; np[nlen]=n; nh[1]=nlen + 1
+        } else {
+            mark_head_p[c]=parents.nodes.length
+            parents.nodes.push(n)
+        }
+        let wp=work.ptr
+        let wh=wp - 3
+        if wp not=? (uint64(0) as ptr<int64>) and wh[0] =? 1 and wh[1] <? wh[2] {
+            let wlen=wh[1]; wp[wlen]=c; wh[1]=wlen + 1
+        } else {work.push(c)}
+        return
+    }
+    if mark_stamp_p[c] not=? mark_gen {
+        slice_mark_stamp[0][c]=mark_gen
+        slice_mark_flags[0][c]=0
+        mark_stamp_p=slice_mark_stamp[0].ptr
+        mark_flags_p=slice_mark_flags[0].ptr
+        slice_mark_touched[0].push(c)
+    } else {
+        prev=mark_head_p[c]
+    }
+    parents.next.push(prev)
+    slice_mark_head[0][c]=parents.nodes.length
+    mark_head_p=slice_mark_head[0].ptr
+    parents.nodes.push(n)
     work.push(c)
 }
 fact_slice_parent=(@parents:FactSliceEdges child:SlicePrepWord node:SlicePrepWord):>void=>$unsafe {
-    fact_mark_touch(child)
-    parents.next.push(fact_mark_head.ptr[child])
-    slice_mark_head[0].ptr[child]=parents.nodes.length
+    let prev:SlicePrepWord=-1
+    if mark_stamp_p[child] not=? mark_gen {
+        slice_mark_stamp[0][child]=mark_gen
+        slice_mark_flags[0][child]=0
+        mark_stamp_p=slice_mark_stamp[0].ptr
+        mark_flags_p=slice_mark_flags[0].ptr
+        slice_mark_touched[0].push(child)
+    } else {
+        prev=mark_head_p[child]
+    }
+    parents.next.push(prev)
+    slice_mark_head[0][child]=parents.nodes.length
+    mark_head_p=slice_mark_head[0].ptr
     parents.nodes.push(node)
 }
 
-from p"facts_values.dewy" import (fact_place)
+let fsp_work:array<int64>=[]
+let fsp_values:array<int64>=[]
+let fsp_active:array<int64>=[]
+let fsp_exposed:array<int64>=[]
+let fsp_opaque:array<int64>=[]
+let fsp_forks:array<int64>=[]
+let fsp_pnodes:array<int64>=[]
+let fsp_pnext:array<int64>=[]
+let fsp_wnodes:array<int64>=[]
+let fsp_wnext:array<int64>=[]
+let fsp_lib_kind:array<int8>=[]
+let fsp_special_names:dict<int64 bool>=dict<int64 bool>()
+
+fsp_lib_classify=(n:SlicePrepWord callee:SlicePrepWord):>bool=>$unsafe {
+    if fsp_special_names.length =? 0 {
+        let names=["exit" "parallel_range" "parallel_map" "__dewy_parallel_collect" "__dewy_parallel_each" "sorted" "sorted_by" "sort" "sort_by" "sort_with" "min_by" "max_by" "group_by" "map" "filter" "sorted_with" "graphemes" "rational" "divmod" "__eq__" "__lt__" "__dewy_power" "pow" "__pow__" "__dewy_range" "__nd_axis_slice" "__dewy_slice_range" "__dewy_open_range_iter" "__floor_div" "__floor_mod" "__floor_div_pow2" "__floor_mod_pow2" "mod" "min" "max" "gcd" "sum" "swap" "__dewy_insert" "reshape" "__dewy_put_slice" "__bcast" "__dewy_read_u64" "__dewy_read_u32" "__dewy_read_u16" "reverse" "contains" "has" "[]" "__map_entry_present" "pop" "__map_entry" "[]=" "get" "insert_if_absent" "clear" "peek" "peek_priority" "push" "__pool_index" "add" "remove" "atomic_add" "atomic_sub" "atomic_and" "atomic_or" "atomic_xor" "atomic_exchange" "atomic_min" "atomic_max" "atomic_compare_exchange" "__map_entries" "__map_of" "first" "last" "keys" "values" "__dewy_keys" "__dewy_set_values" "is_empty" "len" "count" "__dewy_string_length" "__dewy_string_index" "__dewy_string_slice" "__dewy_byte_slice" "regex" "__dewy_find" "__dewy_rfind" "__dewy_index_of" "split" "words" "lines" "starts_with" "ends_with"]
+        loop nm in names {fsp_special_names[intern(nm)]=true}
+    }
+    if callee >=? fsp_lib_kind.length {fsp_lib_kind.resize(max(callee + 64 fns.length + 64))}
+    let d=SlicePrepWord(fns.ptr[callee].decl)
+    if d =? 0 {
+        fsp_lib_kind.ptr[callee]=int8(1)
+        return false
+    }
+    if fsp_special_names.has(SlicePrepWord(nodes.ptr[d].name)) or fact_nd_call(n) not=? 0 {
+        fsp_lib_kind.ptr[callee]=int8(2)
+        return true
+    }
+    fsp_lib_kind.ptr[callee]=int8(1)
+    false
+}
+fsp_is_lib_sp=(n:SlicePrepWord callee:SlicePrepWord):>bool=>$unsafe {
+    if callee <? fsp_lib_kind.length {
+        let tag=fsp_lib_kind.ptr[callee]
+        if tag not=? int8(0) {return tag =? int8(2)}
+    }
+    fsp_lib_classify(n callee)
+}
+fsp_lib_loop1=(n:SlicePrepWord nk:SlicePrepWord l0:SlicePrepWord flags:SlicePrepWord @active:array<int64> @values:array<int64> @forks:array<int64>):>bool=>$unsafe {
+    let nodes_p=nodes.ptr
+    let lists_p=lists.ptr
+    let demand_static=(flags & 1) not=? 0
+    let summary=(flags & 2) not=? 0
+    let share=(flags & 4) not=? 0
+    let has_nd_mut=(flags & 8) not=? 0
+    let probe_only=false
+    if library_exit_call(n) {active.push(n)}
+    if demand_static and (fact_library_call(n "parallel_range") or fact_library_call(n "parallel_map") or fact_parallel_array(n)) {
+        loop j in [SlicePrepWord(0)..nk) {
+            let arg=SlicePrepWord(lists_p[l0 + j])
+            if nodes_p[arg].kind =? 'lambda' and nodes_p[arg].sym >? 0 {
+                fact_fork_nodes[arg]=true
+                forks.push(arg)
+            }
+        }
+        if fact_parallel_array(n) {
+            values.push(n)
+            values.push(SlicePrepWord(lists_p[l0]))
+        }
+    }
+    if not summary and dir_assumed_bounds_any and fact_parallel_range_call(n) {
+        active.push(n)
+        values.push(n)
+        let a0=SlicePrepWord(lists_p[l0])
+        if fact_library_call(a0 "__dewy_range") {
+            let al0=SlicePrepWord(nodes_p[a0].list)
+            values.push(SlicePrepWord(lists_p[al0]))
+            values.push(SlicePrepWord(lists_p[al0 + 2]))
+        }
+    }
+    if demand_static {
+        let kcb=fact_key_callback(n)
+        if kcb >? 0 {
+            fact_fork_nodes[kcb]=true
+            forks.push(kcb)
+            values.push(n)
+            values.push(SlicePrepWord(lists_p[l0]))
+        }
+    }
+    if result_active or proof_active or fact_divisors.length >? 0 and fact_divisors.has(n) or fact_rational_constructor(n) or fact_rational_promotion(n) or fact_rational_divmod(n) {values.push(n)}
+    else if demand_static and fact_string_call(n) >=? 2 {values.push(n)}
+    else if demand_static and fact_rational_zero_test(n) >=? 0 {
+        values.push(n)
+        values.push(SlicePrepWord(lists_p[l0 + fact_rational_zero_test(n)]))
+    }
+    else if demand_static and fact_power_call(n) {
+        values.push(n)
+        values.push(SlicePrepWord(lists_p[l0 + 1]))
+        values.push(SlicePrepWord(lists_p[l0]))
+    }
+    else if demand_static and fact_range_call(n) {
+        let first=fact_range_first(n true)
+        values.push(n)
+        values.push(SlicePrepWord(lists_p[l0 + first]))
+        values.push(SlicePrepWord(lists_p[l0 + first + 1]))
+    }
+    else if demand_static and (has_nd_mut and nd_mutable_call(n) or fact_array_call(n) not=? 0 or fact_map_call(n) not=? 0 or fact_map_insert_call(n) or ref_self_active and (fact_map_clear_call(n) or fact_map_bounded_call(n) not=? 0) or fact_nonempty_call(n) or fact_heap_call(n) not=? 0 or fact_exact_sum_call(n) or fact_pool_call(n) not=? 0 or fact_gpu_index_call(n)) {
+        active.push(n)
+        values.push(n)
+        loop j in [SlicePrepWord(0)..nk) {values.push(SlicePrepWord(lists_p[l0 + j]))}
+    }
+    else if (fact_probe_on or share) and fact_floor_call(n) not=? 0 {
+        if fact_probe_on {values.push(n)}
+        probe_only=true
+    }
+    probe_only
+}
+
+fact_slice_prepare_fast=(f:SlicePrepWord summary:bool=false):>void=>$unsafe {
+    if member_compact_owners.length not=? 0 and (not fact_member_shared or summary or fact_probe_on or fact_query or f not=? fact_member_owner) {
+        member_expand_owner(f)
+    }
+    let key:SlicePrepWord=(f << 4) | int64(summary) | (int64(fact_probe_on) << 1) | (int64(fact_policy =? 'RequireStatic') << 2) | (int64(result_active or proof_active) << 3)
+    let cached0=fact_slice_cache.get(key)
+    if cached0 not=? none {fact_slice=cached0; return}
+    let share=not summary and fact_policy =? 'RequireStatic'
+    let peer:SlicePrepWord=key xor 2
+    if share {
+        let cached1=fact_slice_cache.get(peer)
+        if cached1 not=? none {
+            if not cached1.probe_only and fact_plan_current(cached1) {
+                fact_slice=cached1
+                fact_slice_cache[key]=cached1
+                return
+            }
+        }
+    }
+    fact_mark_begin()
+    fsp_wr_reset()
+    fsp_in_prepare=true
+    let pnodes=fsp_pnodes; fsp_pnodes=[]; pnodes.clear()
+    let pnext=fsp_pnext; fsp_pnext=[]; pnext.clear()
+    let wnodes=fsp_wnodes; fsp_wnodes=[]; wnodes.clear()
+    let wnext=fsp_wnext; fsp_wnext=[]; wnext.clear()
+    let parents=FactSliceEdges([] pnodes pnext)
+    let writers=FactSliceEdges([] wnodes wnext)
+    let roots:array<int64>=[]
+    let exposed_writes=fsp_exposed; fsp_exposed=[]; exposed_writes.clear()
+    let opaque_writes=fsp_opaque; fsp_opaque=[]; opaque_writes.clear()
+    let work=fsp_work; fsp_work=[]; work.clear()
+    let body=SlicePrepWord(fns.ptr[f].body)
+    work.push(body)
+    let values=fsp_values; fsp_values=[]; values.clear()
+    let active=fsp_active; fsp_active=[]; active.clear()
+    let forks=fsp_forks; fsp_forks=[]; forks.clear()
+    let callees:array<int64>=[]
+    let versions:array<int64>=[]
+    let exact_demands:array<int64>=[]
+    let index_demands:array<int64>=[]
+    let loop_indexes:array<int64>=[]
+    let carried=false
+    let rows=false
+    let probe_only=false
+    let members=fact_member_shared and f =? fact_member_owner and not summary
+    let exact=not summary and exact_marks.length >? 0 and exact_owners.has(f)
+    let representation=exact and f <? exact_rep_owners.length and exact_rep_owners.ptr[f]
+    let demand_static=not summary and (fact_probe_on or fact_policy =? 'RequireStatic')
+    let has_own=ownership_decls.length not=? 0
+    let has_nd_mut=nd_mutable_signatures.length not=? 0
+    if summary or result_active {values.push(body)}
+    if summary {
+        loop l in fns.ptr[f].params {
+            let lt=SlicePrepWord(locals.ptr[l].type)
+            if SlicePrepWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 and (tkind(fact_type(lt)) =? 'array' or is_nd(fact_type(lt)) or fact_record_arrays(fact_type(lt))) {
+                values.push(mk_ident_local(l locals.ptr[l].pos))
+            }
+        }
+    }
+    let collect_panic=not summary and not members and not fact_panic_sites.has(f)
+    let psites:array<int64>=[]
+    let nodes_p=nodes.ptr
+    let lists_p=lists.ptr
+    let locals_p=locals.ptr
+    let fns_p=fns.ptr
+    let types_p=types.ptr
+    let mstamp=mark_stamp_p
+    let mflags=mark_flags_p
+    let mhead=mark_head_p
+    let mgen=mark_gen
+    let cursor:SlicePrepWord=0
+    loop cursor <? work.length {
+        let n:SlicePrepWord=work.ptr[cursor]; cursor += 1
+        if n =? 0 {continue}
+        if mstamp[n] =? mgen {
+            if SlicePrepWord(mflags[n]) & FACT_MEMBER not=? 0 {continue}
+            mflags[n]=FACT_MEMBER
+        } else {
+            mstamp[n]=mgen
+            mhead[n]=-1
+            slice_mark_touched[0].push(n)
+            mflags[n]=FACT_MEMBER
+        }
+        let np=nodes_p + n
+        let k=np[0].kind
+        if exact {
+            if fact_exact_demand(n) {
+                values.push(n)
+                if share {exact_demands.push(n)}
+            } else if representation and n <? exact_rep_demands.length and exact_rep_demands.ptr[n] {values.push(n)}
+        }
+        let mask:SlicePrepWord=int64(iso_child_p[int64((np as ptr<uint32>)[0])])
+        if k =? 'parallel_region' {
+            collect_panic=false
+            if dir_assumed_bounds_any {
+                let ca=SlicePrepWord(np[0].a)
+                if ca not=? 0 {fact_slice_member(@parents @work ca n)}
+            }
+        }
+        if mask >? 0 {
+            if mask & 1 not=? 0 {let ca=SlicePrepWord(np[0].a); if ca not=? 0 {fact_slice_member(@parents @work ca n)}}
+            if mask & 2 not=? 0 {let cb=SlicePrepWord(np[0].b); if cb not=? 0 {fact_slice_member(@parents @work cb n)}}
+            if mask & 4 not=? 0 {let cc=SlicePrepWord(np[0].c); if cc not=? 0 {fact_slice_member(@parents @work cc n)}}
+            if mask & 16 not=? 0 {
+                let walk:SlicePrepWord=SlicePrepWord(np[0].nlist)
+                if members and k =? 'block' and walk >? 1 and fact_member_admit(n) {walk=1}
+                let l0:SlicePrepWord=SlicePrepWord(np[0].list)
+                let lp=lists_p + l0
+                loop i in [SlicePrepWord(0)..walk) {
+                    let ci=SlicePrepWord(lp[i])
+                    if ci not=? 0 {fact_slice_member(@parents @work ci n)}
+                }
+            }
+        }
+        match k {
+            <'block'> => {
+                if has_flag(n NF_COMPREHENSION) and np[0].nlist >? 0 {
+                    let c0=SlicePrepWord(lists_p[SlicePrepWord(np[0].list)])
+                    if nodes_p[c0].kind =? 'vardecl' {fsp_set_mark(@fsp_acc_gen SlicePrepWord(nodes_p[c0].sym))}
+                }
+            }
+            <'vardecl'> => {
+                if has_own and np[0].b not=? 0 and ownership_fact_type(ntype(SlicePrepWord(np[0].b))) {active.push(n)}
+                let l=SlicePrepWord(np[0].sym)
+                if l not=? 0 {
+                    let p=if has_flag(n NF_GLOBAL) {PlaceIdentity('global' 0 l)} else {PlaceIdentity('local' SlicePrepWord(locals_p[l].owner) l)}
+                    fact_slice_writer(@writers p n)
+                }
+                let nk=SlicePrepWord(np[0].nlist)
+                let l0=SlicePrepWord(np[0].list)
+                loop j in [SlicePrepWord(0)..nk) {
+                    let c=SlicePrepWord(lists_p[l0 + j])
+                    let cl=SlicePrepWord(nodes_p[c].sym)
+                    if cl >? 0 and not has_flag(c NF_GLOBAL) {fact_slice_writer(@writers PlaceIdentity('local' SlicePrepWord(locals_p[cl].owner) cl) n)}
+                }
+            }
+            <'assign'> => {
+                let target=SlicePrepWord(np[0].a)
+                if nodes_p[target].kind =? 'ident' and nodes_p[target].aux =? int32(1) {
+                    let tl=SlicePrepWord(nodes_p[target].sym)
+                    if fact_carried_type(SlicePrepWord(locals_p[tl].type) f) {carried=true}
+                    if fact_loop_step(SlicePrepWord(np[0].b) tl) or fact_loop_unbounded_field(SlicePrepWord(np[0].b)) {fsp_set_mark(@fsp_sw_gen tl)}
+                    else {fsp_set_mark(@fsp_pw_gen tl)}
+                }
+                fact_slice_target(@writers target n)
+                if demand_static and fact_shift_obliged(n) {values.push(n)}
+                let root=target
+                let raw=false
+                loop nodes_p[root].kind =? 'field' or nodes_p[root].kind =? 'index' {
+                    if nodes_p[root].kind =? 'index' and tkind(fact_type(ntype(SlicePrepWord(nodes_p[root].a)))) =? 'ptr' {raw=true}
+                    root=SlicePrepWord(nodes_p[root].a)
+                }
+                let p=fact_place(root)
+                if raw or p.declaration not=? 0 and fact_exposed(p) and not fact_own_local(p) {exposed_writes.push(n)}
+                else if p.declaration =? 0 {opaque_writes.push(n)}
+            }
+            <'for_'> => {
+                let l=SlicePrepWord(np[0].sym)
+                if l >? 0 {fact_slice_writer(@writers PlaceIdentity('local' SlicePrepWord(locals_p[l].owner) l) n)}
+                if np[0].aux =? int32(3) and np[0].aux2 >? 0 {
+                    let vl=SlicePrepWord(np[0].aux2)
+                    fact_slice_writer(@writers PlaceIdentity('local' SlicePrepWord(locals_p[vl].owner) vl) n)
+                }
+                if demand_static and (fact_stepped_loop(n) or fact_open_range(n)) {values.push(n)}
+            }
+            <'iflet'|'match_'> => {
+                let l=SlicePrepWord(np[0].sym)
+                if l >? 0 {fact_slice_writer(@writers PlaceIdentity('local' SlicePrepWord(locals_p[l].owner) l) n)}
+            }
+            <'while_'> => {active.push(n)}
+            <'if_'|'and_'|'or_'|'coalesce'> => {}
+            <'return_'> => {
+                active.push(n)
+                if summary or result_active {values.push(SlicePrepWord(np[0].a))}
+            }
+            <'break_'|'continue_'|'defer_'> => {active.push(n)}
+            <'call'> => {
+                if collect_panic {psites.push(n)}
+                let callee=SlicePrepWord(np[0].sym)
+                let direct=np[0].aux =? 0 and callee >? 0
+                let in_lib=direct and fact_fn_in_lib(callee)
+                let nk=SlicePrepWord(np[0].nlist)
+                let l0=SlicePrepWord(np[0].list)
+                if ntype(n) =? T_NEVER {active.push(n)}
+                let lib_sp=in_lib and fsp_is_lib_sp(n callee)
+                if lib_sp {
+                    let lflags:SlicePrepWord=int64(demand_static) | (int64(summary) << 1) | (int64(share) << 2) | (int64(has_nd_mut) << 3)
+                    if fsp_lib_loop1(n nk l0 lflags @active @values @forks) {probe_only=true}
+                } else if result_active or proof_active or fact_divisors.length >? 0 and fact_divisors.has(n) {values.push(n)}
+                else if demand_static and has_nd_mut and nd_mutable_call(n) {
+                    active.push(n)
+                    values.push(n)
+                    loop j in [SlicePrepWord(0)..nk) {values.push(SlicePrepWord(lists_p[l0 + j]))}
+                }
+                loop j in [SlicePrepWord(0)..nk) {
+                    let arg=SlicePrepWord(lists_p[l0 + j])
+                    if has_own and ownership_fact_type(ntype(arg)) {active.push(n)}
+                    if nodes_p[arg].kind =? 'conv' and nodes_p[arg].aux =? int32(int64(CV.refinement)) {
+                        if direct {
+                            mflags[n]=SlicePrepWord(mflags[n]) | FACT_CONTRACT
+                            fact_slice_contract_actuals(n arg @values)
+                        } else {values.push(n)}
+                    }
+                }
+                if wi_fact_calls.length >? 0 and wi_fact_calls.has(n) {
+                    values.push(n)
+                    loop j in [SlicePrepWord(0)..nk) {values.push(SlicePrepWord(lists_p[l0 + j]))}
+                }
+                if share and direct and not fsp_has_mark(@fsp_dep_gen callee) {
+                    fsp_set_mark(@fsp_dep_gen callee)
+                    callees.push(callee)
+                    versions.push(fact_plan_version(callee))
+                }
+                if direct and ref_refined_result(SlicePrepWord(fns_p[callee].ret)) {values.push(n)}
+                if direct and callee <? effect_summaries.length and effect_summaries.ptr[callee].done {
+                    let opaque=false
+                    loop event in effect_summaries.ptr[callee].events {
+                        let ak=event.atom.kind
+                        if ak =? 'opaque' or ak =? 'escape' or ak =? 'io' and fact_fn_in_lib(f) {
+                            exposed_writes.push(n)
+                            opaque=true
+                        }
+                        if ak not=? 'write' {continue}
+                        let p=place_base(event.atom.place)
+                        if p.root =? 'formal' {
+                            let fi=p.declaration - 1
+                            p=if fi >=? 0 and fi <? nk {fact_written_root(SlicePrepWord(lists_p[l0 + fi]))} else {PlaceIdentity('local' 0 0)}
+                        }
+                        if p.declaration =? 0 {exposed_writes.push(n)}
+                        else {
+                            fact_slice_writer(@writers p n)
+                            if fact_exposed(p) and not fact_own_local(p) {exposed_writes.push(n)}
+                        }
+                    }
+                    if opaque {fact_slice_place_arguments(@writers n)}
+                } else if np[0].aux not=? int32(2) and np[0].aux not=? int32(3) {
+                    exposed_writes.push(n)
+                    fact_slice_place_arguments(@writers n)
+                }
+            }
+            <'intrinsic'> => {
+                if collect_panic {psites.push(n)}
+                let id=np[0].aux as IN
+                if not rows and id =? IN.push and np[0].nlist =? int32(2) {
+                    let a0=SlicePrepWord(lists_p[SlicePrepWord(np[0].list)])
+                    if fact_push_receiver(a0) >? 0 and fact_row_array(ntype(a0)) {rows=true}
+                }
+                if id =? IN.push or id =? IN.pop or id =? IN.clear or id =? IN.reserve or id =? IN.insert or id =? IN.remove or id =? IN.extend or id =? IN.truncate or id =? IN.resize {
+                    let a0=SlicePrepWord(lists_p[SlicePrepWord(np[0].list)])
+                    fact_slice_target(@writers a0 n)
+                    let p=fact_slice_root(a0)
+                    if p.declaration =? 0 {opaque_writes.push(n)}
+                    else if fact_exposed(p) and not fact_own_local(p) {exposed_writes.push(n)}
+                    if not summary and fact_policy =? 'RequireStatic' and (id =? IN.pop or id =? IN.remove or id =? IN.truncate) {
+                        active.push(n)
+                        values.push(n)
+                    }
+                } else if id =? IN.static_assert or id =? IN.runtime_assert or id =? IN.assert or id =? IN.panic or id =? IN.unreachable or id =? IN.lend or id =? IN.loan_length or id =? IN.loan_store {values.push(n)}
+                else if id not=? IN.len and not fact_pure_intrinsic(id) {opaque_writes.push(n)}
+            }
+            <'index'> => {
+                if demand_static and not has_flag(n NF_INBOUNDS) and fact_bounded_index(n) {
+                    if share {index_demands.push(n)}
+                    if fact_loop_index_local(n) >? 0 {loop_indexes.push(n)}
+                    active.push(n)
+                    values.push(SlicePrepWord(np[0].b))
+                    let a=SlicePrepWord(np[0].a)
+                    if types_p[fact_type(ntype(a))].kind not=? 'fixed' {values.push(a)}
+                }
+            }
+            <'conv'> => {
+                if ff_integer_demand(n) {values.push(n)}
+                let aux=np[0].aux
+                if aux =? int32(int64(CV.refinement)) or aux =? int32(int64(CV.arr2fixed)) {values.push(n)}
+                else if demand_static and aux =? int32(int64(CV.int_)) and prune(ntype(SlicePrepWord(np[0].a))) =? T_MATH_INT and prune(ntype(n)) not=? T_MATH_INT {values.push(n)}
+                else if has_own and aux =? int32(int64(CV.explicit_copy)) and ownership_fact_type(ntype(n)) {opaque_writes.push(n)}
+                else if aux not=? int32(int64(CV.int_)) and aux not=? int32(int64(CV.none_)) and aux not=? int32(int64(CV.fixed2arr)) and not fact_pure_conversion(n) {exposed_writes.push(n)}
+            }
+            <'binary'> => {
+                if np[0].aux not=? 0 {
+                    if collect_panic and np[0].aux =? 1 {psites.push(n)}
+                    if not fact_pure_binary(n) {exposed_writes.push(n)}
+                }
+                else if demand_static {
+                    let tok=cx_token_values.ptr[SlicePrepWord(np[0].op)]
+                    if tok =? 'slash' or tok =? 'percent' or fact_shift_obliged(n) {values.push(n)}
+                }
+            }
+            <'lambda'> => {
+                if collect_panic {psites.push(n)}
+                if has_own {opaque_writes.push(n)}
+            }
+            <'partial'> => {
+                if collect_panic {psites.push(n)}
+                if fact_partial_opaque(n) {opaque_writes.push(n)}
+            }
+            <'fnref'> => {
+                if collect_panic {psites.push(n)}
+                if fact_handle_opaque(n) {opaque_writes.push(n)}
+            }
+            <'pair'> => {
+                if collect_panic {psites.push(n)}
+            }
+            <'map_lit'> => {opaque_writes.push(n)}
+            <'cast'> => {
+                if not fact_enum_cast(n) and not fact_pointer_cast(n) {opaque_writes.push(n)}
+            }
+            <'str_lit'> => {
+                if np[0].aux not=? 0 {exposed_writes.push(n)}
+            }
+            _ => {
+                if mask <? 0 {opaque_writes.push(n)}
+            }
+        }
+        if not summary and has_nd_mut and nd_mutable_handle(n) {values.push(n)}
+    }
+    if collect_panic {fact_panic_sites[f]=psites}
+    loop lam in forks {
+        values.push(lam)
+        loop cap_ in fns_p[SlicePrepWord(nodes_p[lam].sym)].caps {
+            let o=SlicePrepWord(cap_.outer)
+            if o <=? 0 {continue}
+            let rkey=fact_root_key(PlaceIdentity('local' SlicePrepWord(locals_p[o].owner) o))
+            let edge=if rkey >=? 0 and rkey <? 262144 {fsp_wr_get(rkey)} else {fact_index_get_raw(writers.heads.ptr writers.heads.length rkey)}
+            loop edge >=? 0 {
+                let definition=writers.nodes.ptr[edge]
+                edge=writers.next.ptr[edge]
+                if nodes_p[definition].kind =? 'call' {active.push(definition)}
+                else {values.push(definition)}
+            }
+        }
+    }
+    cursor=0
+    let acursor:SlicePrepWord=0
+    let any_root=false
+    let any_exposed=false
+    let pnodes_p=parents.nodes.ptr
+    let pnext_p=parents.next.ptr
+    let wnodes_p=writers.nodes.ptr
+    let wnext_p=writers.next.ptr
+    loop cursor <? values.length or acursor <? active.length {
+        if acursor <? active.length {
+            let n:SlicePrepWord=active.ptr[acursor]; acursor += 1
+            if n =? 0 {continue}
+            let mark:SlicePrepWord=if mstamp[n] =? mgen {SlicePrepWord(mflags[n])} else {0}
+            if mark & FACT_ACTIVE not=? 0 {continue}
+            if mstamp[n] not=? mgen {
+                mstamp[n]=mgen
+                mhead[n]=-1
+                slice_mark_touched[0].push(n)
+            }
+            mflags[n]=mark | FACT_ACTIVE
+            let edge:SlicePrepWord=mhead[n]
+            loop edge >=? 0 {
+                active.push(pnodes_p[edge])
+                edge=pnext_p[edge]
+            }
+            let np=nodes_p + n
+            let k=np[0].kind
+            if k =? 'assign' {
+                let target=SlicePrepWord(np[0].a)
+                if nodes_p[target].kind =? 'ident' and nodes_p[target].aux =? int32(1) {
+                    let l=SlicePrepWord(nodes_p[target].sym)
+                    if SlicePrepWord(locals_p[l].flags) & LF_ALIAS not=? 0 {values.push(target)}
+                }
+            }
+            if k =? 'if_' or k =? 'while_' or k =? 'for_' or k =? 'iflet' or k =? 'match_' or k =? 'and_' or k =? 'or_' or k =? 'coalesce' {
+                values.push(SlicePrepWord(np[0].a))
+                if k =? 'match_' {
+                    let nk=SlicePrepWord(np[0].nlist)
+                    let l0=SlicePrepWord(np[0].list)
+                    loop j in [SlicePrepWord(0)..nk) {
+                        let arm=SlicePrepWord(lists_p[l0 + j])
+                        let ank=SlicePrepWord(nodes_p[arm].nlist)
+                        let al0=SlicePrepWord(nodes_p[arm].list)
+                        loop ki in [SlicePrepWord(0)..ank) {values.push(SlicePrepWord(lists_p[al0 + ki]))}
+                    }
+                }
+            }
+            continue
+        }
+        let n:SlicePrepWord=values.ptr[cursor]; cursor += 1
+        if n =? 0 {continue}
+        let mark:SlicePrepWord=if mstamp[n] =? mgen {SlicePrepWord(mflags[n])} else {0}
+        if mark & FACT_VALUE not=? 0 {continue}
+        if mstamp[n] not=? mgen {
+            mstamp[n]=mgen
+            mhead[n]=-1
+            slice_mark_touched[0].push(n)
+        }
+        mflags[n]=mark | FACT_VALUE
+        active.push(n)
+        let np=nodes_p + n
+        let k=np[0].kind
+        match k {
+            <'ident'> => {
+                let p=fact_place(n)
+                let root=fact_root_key(p)
+                let seen_root=false
+                if root >=? 0 and root <? 262144 {
+                    if root >=? fsp_rt_gen.length {fsp_rt_gen.resize(max(root + 64 fsp_rt_gen.length * 2 + 256))}
+                    if fsp_rt_gen.ptr[root] =? fsp_wr_g {seen_root=true}
+                    else {fsp_rt_gen.ptr[root]=fsp_wr_g}
+                } else {
+                    if fact_index_get_raw(roots.ptr roots.length root) >=? 0 {seen_root=true}
+                    else {fact_index_put(@roots root 0)}
+                }
+                if not seen_root {
+                    let edge=if root >=? 0 and root <? 262144 {fsp_wr_get(root)} else {fact_index_get_raw(writers.heads.ptr writers.heads.length root)}
+                    loop edge >=? 0 {
+                        let definition=wnodes_p[edge]
+                        edge=wnext_p[edge]
+                        if nodes_p[definition].kind =? 'call' {active.push(definition)}
+                        else {values.push(definition)}
+                    }
+                }
+                if not any_root {
+                    any_root=true
+                    loop wi in [0..opaque_writes.length) {values.push(opaque_writes.ptr[wi])}
+                }
+                if not any_exposed and p.declaration not=? 0 and fact_exposed(p) {
+                    any_exposed=true
+                    loop wi in [0..exposed_writes.length) {
+                        let write=exposed_writes.ptr[wi]
+                        if nodes_p[write].kind =? 'call' {active.push(write)}
+                        else {values.push(write)}
+                    }
+                }
+                if np[0].aux =? int32(1) {
+                    let l=SlicePrepWord(np[0].sym)
+                    if SlicePrepWord(locals_p[l].flags) & LF_ALIAS not=? 0 and locals_p[l].alias not=? 0 {values.push(SlicePrepWord(locals_p[l].alias))}
+                }
+            }
+            <'block'> => {
+                let nk=SlicePrepWord(np[0].nlist)
+                if nk >? 0 {values.push(SlicePrepWord(lists_p[SlicePrepWord(np[0].list) + nk - 1]))}
+            }
+            <'for_'|'while_'> => {values.push(SlicePrepWord(np[0].a))}
+            <'conv'> => {
+                if np[0].b not=? 0 and np[0].aux =? int32(int64(CV.refinement)) {
+                    values.push(SlicePrepWord(np[0].a))
+                    values.push(SlicePrepWord(np[0].b))
+                } else {fact_slice_push_children(@values n)}
+            }
+            <'lambda'> => {}
+            <'call'> => {
+                let nk=SlicePrepWord(np[0].nlist)
+                let l0=SlicePrepWord(np[0].list)
+                let callee=SlicePrepWord(np[0].sym)
+                let direct=np[0].aux =? 0 and callee >? 0
+                let lib_sp=direct and fact_fn_in_lib(callee) and fsp_is_lib_sp(n callee)
+                let push_summary_args=false
+                if direct and not lib_sp {
+                    if nk =? 1 and fact_nd_call(n) not=? 0 or ntype(n) =? T_BOOL and fact_predicate_summary(callee) not=? 0 {
+                        loop j in [SlicePrepWord(0)..nk) {values.push(SlicePrepWord(lists_p[l0 + j]))}
+                    } else if not result_active and not proof_active and (fact_divisors.length =? 0 or not fact_divisors.has(n)) and not ref_refined_result(SlicePrepWord(fns_p[callee].ret)) {
+                        push_summary_args=true
+                    } else {fact_slice_push_children(@values n)}
+                } else if fact_nd_call(n) not=? 0 or ntype(n) =? T_BOOL and direct and fact_predicate_summary(callee) not=? 0 or fact_regex_call(n) or fact_integer_gcd_call(n) {
+                    loop j in [SlicePrepWord(0)..nk) {values.push(SlicePrepWord(lists_p[l0 + j]))}
+                } else if fact_map_snapshot_call(n) or fact_copy_length_call(n) or fact_endpoint_call(n) not=? 0 or fact_same_length_call(n) or fact_chosen_call(n) {
+                    values.push(SlicePrepWord(lists_p[l0]))
+                } else if direct and not result_active and not proof_active and (fact_divisors.length =? 0 or not fact_divisors.has(n)) and (not fact_fn_in_lib(callee) or (not fact_rational_constructor(n) and not fact_rational_promotion(n) and not fact_rational_divmod(n) and fact_floor_call(n) =? 0 and fact_string_call(n) =? 0 and not fact_extremum_call(n) and not fact_mod_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n))) and not ref_refined_result(SlicePrepWord(fns_p[callee].ret)) {
+                    push_summary_args=true
+                } else {fact_slice_push_children(@values n)}
+                if push_summary_args {
+                    let ret=fact_type(SlicePrepWord(fns_p[callee].ret))
+                    let constructor=(types_p[ret].kind =? 'struct_' or types_p[ret].kind =? 'tuple') and fact_constructor_type(ret) and fact_constructor_body(callee)
+                    if constructor {fact_constructor_calls[n]=true}
+                    let array_result=tkind(ret) =? 'array' or constructor
+                    if array_result or fact_scalar(ret) and is_int(ret) and ret not=? T_U64 or fact_summary_payload(ret) not=? 0 {
+                        loop j in [SlicePrepWord(0)..nk) {
+                            let arg=SlicePrepWord(lists_p[l0 + j])
+                            let at=fact_type(ntype(arg))
+                            let atk=tkind(at)
+                            if atk =? 'array' or atk =? 'fixed' or array_result and fact_scalar(at) and is_int(at) and at not=? T_U64 {values.push(arg)}
+                            else if not array_result and fact_record_arrays(at) {values.push(arg)}
+                        }
+                    }
+                }
+            }
+            <'intrinsic'> => {
+                let aux=np[0].aux
+                let l0=SlicePrepWord(np[0].list)
+                if aux =? int32(int64(IN.remove)) or aux =? int32(int64(IN.extend)) or aux =? int32(int64(IN.truncate)) or aux =? int32(int64(IN.resize)) or aux =? int32(int64(IN.setlen)) {
+                    values.push(SlicePrepWord(lists_p[l0]))
+                    values.push(SlicePrepWord(lists_p[l0 + 1]))
+                } else if aux =? int32(int64(IN.push)) or aux =? int32(int64(IN.pop)) or aux =? int32(int64(IN.clear)) or aux =? int32(int64(IN.reserve)) or aux =? int32(int64(IN.insert)) {
+                    let a0=SlicePrepWord(lists_p[l0])
+                    values.push(a0)
+                    if aux =? int32(int64(IN.push)) and np[0].nlist =? int32(2) {
+                        let a1=SlicePrepWord(lists_p[l0 + 1])
+                        let t1=ntype(a1)
+                        if tkind(fact_type(t1)) =? 'array' {values.push(a1)}
+                        if fsp_has_mark(@fsp_acc_gen fact_push_receiver(a0)) and (fact_scalar(t1) and is_int(t1) or fact_int_components(fact_type(t1)) >? 0) {values.push(a1)}
+                    }
+                } else {fact_slice_push_children(@values n)}
+            }
+            _ => {fact_slice_push_children(@values n)}
+        }
+    }
+    let lo:SlicePrepWord=nodes.length
+    let hi:SlicePrepWord=-1
+    let count:SlicePrepWord=0
+    let touched_p=fact_mark_touched.ptr
+    let touched_n=fact_mark_touched.length
+    loop ti in [0..touched_n) {
+        let tn=touched_p[ti]
+        if mflags[tn] not=? 0 {
+            if tn <? lo {lo=tn}
+            if tn >? hi {hi=tn}
+            count += 1
+        }
+    }
+    if hi >=? lo and hi - lo <? 4 * count + 64 {
+        let flags=fill(int64(0) hi - lo + 1)
+        let fp=flags.ptr
+        loop ti in [0..touched_n) {
+            let tn=touched_p[ti]
+            let fv=mflags[tn]
+            if fv not=? 0 {fp[tn - lo]=fv}
+        }
+        fact_slice=FactSlice(flags probe_only lo carried rows)
+    } else {
+        let flags=fact_index_sized(count)
+        loop ti in [0..touched_n) {
+            let tn=touched_p[ti]
+            let fv=mflags[tn]
+            if fv not=? 0 {fact_index_put(@flags tn fv)}
+        }
+        fact_slice=FactSlice(flags probe_only (-1) carried rows)
+    }
+    fact_plan_serial += 1
+    fact_slice.plan=fact_plan_serial
+    fact_slice.callees=callees
+    fact_slice.versions=versions
+    fact_slice.exact_demands=exact_demands
+    fact_slice.index_demands=index_demands
+    loop m in loop_indexes {
+        let x=fact_loop_index_local(m)
+        if fsp_has_mark(@fsp_pw_gen x) and not fsp_has_mark(@fsp_sw_gen x) {fact_slice.loop_indexes.push(m)}
+    }
+    if share {fact_slice.float_context=dir_floats_any or ff_conversions.has(fact_owner)}
+    if not members or fact_member_admitted.length =? 0 {fact_slice_cache[key]=fact_slice}
+    fsp_work=work
+    fsp_values=values
+    fsp_active=active
+    fsp_exposed=exposed_writes
+    fsp_opaque=opaque_writes
+    fsp_forks=forks
+    fsp_pnodes=parents.nodes
+    fsp_pnext=parents.next
+    fsp_wnodes=writers.nodes
+    fsp_wnext=writers.next
+    fsp_in_prepare=false
+}
+
+from p"facts_values.dewy" import (fact_place fact_scalar fact_type)

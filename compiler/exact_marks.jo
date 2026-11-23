@@ -3,28 +3,28 @@ use 'ast.jo'
 use 'exact_cold_walk.dewy'
 use 'exact_loop.jo'
 
-exact_has_node = (n: int) -> bool: not exact_loop_fast and n >= 0 and n < exact_marks.len() and exact_marks[n] & 1 != 0
+exact_has_node = (n: int) -> bool: not exact_loop_fast and n >= 0 and n < exact_marks.len() and data(exact_marks)[n] & 1 != 0
 
-exact_has_store = (n: int) -> bool: n >= 0 and n < exact_marks.len() and exact_marks[n] & 2 != 0
+exact_has_store = (n: int) -> bool: n >= 0 and n < exact_marks.len() and data(exact_marks)[n] & 2 != 0
 
-exact_decided = (n: int) -> bool: exact_marks[n] & 8 != 0
+exact_decided = (n: int) -> bool: data(exact_marks)[n] & 8 != 0
 
-exact_proved = (n: int) -> bool: exact_marks[n] & 16 != 0
+exact_proved = (n: int) -> bool: data(exact_marks)[n] & 16 != 0
 
 exact_decide = (n: int, proven: bool):
-    exact_marks[n] = (exact_marks[n] & 239) | 8 | (if proven: 16 else: 0)
+    data(exact_marks)[n] = (data(exact_marks)[n] & 239) | 8 | (if proven: 16 else: 0)
 
 exact_mark = (n: int):
     if n >= exact_marks.len(): exact_reserve(n)
-    if exact_marks[n] & 1 == 0: exact_nodes.push(n)
-    exact_marks[n] |= 1
+    if data(exact_marks)[n] & 1 == 0: exact_nodes.push(n)
+    data(exact_marks)[n] |= 1
 
 exact_unmark = (n: int):
-    exact_marks[n] &= 254
+    data(exact_marks)[n] &= 254
 
 exact_range_flags = (n: int) -> int:
     if n < 0 or n >= exact_range_meta.len(): return 0
-    int(exact_range_meta[n])
+    int(data(exact_range_meta)[n])
 
 exact_match_literals = (n: int) -> bool:
     loop arm in kids(n):

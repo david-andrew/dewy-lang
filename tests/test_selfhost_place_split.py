@@ -23,6 +23,7 @@ names: str[] = [""]
 dewy_param_kinds: {int: int[]} = {}
 place_methods: {int: PlaceMethod}
 place_written: {int: int}
+kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])
 kids = (n: int) -> int[]: node_kids(nodes, lists, n)
 nkids = (n: int) -> int: int(nodes[n].nlist)
 kid_c = (n: int) -> int: if nodes[n].kind == .for_: 0 else: int(nodes[n].c)

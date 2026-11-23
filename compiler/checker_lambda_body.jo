@@ -25,6 +25,12 @@ use 'types.jo'
 use 'checker_body_end.dewy'
 
 check_lambda_body = (f: int, lam: int, ret_hint: int):
+    saved_zi = live_body_indexes
+    saved_zg = live_body_user_globals
+    saved_zm = live_body_global_mod
+    live_body_indexes = 0
+    live_body_user_globals = 0
+    live_body_global_mod = -1
     fns[f].state = 1
     parent = cx
     ctxs.push(FnCtx(i32(f), i32(parent), 0, false, 0, ctxs[parent].mod, ctxs[parent].floor))
@@ -135,3 +141,6 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
     scope_reset(mark)
     ctxs.pop()
     cx = parent
+    live_body_indexes = saved_zi
+    live_body_user_globals = saved_zg
+    live_body_global_mod = saved_zm

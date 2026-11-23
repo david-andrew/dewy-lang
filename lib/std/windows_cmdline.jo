@@ -1,0 +1,79 @@
+# CreateProcessW runs a .bat or .cmd file through cmd.exe, which parses the whole command line
+# again by its own rules (& | < > ^ % and quotes): no quoting of the arguments keeps them from
+# being read as commands (CVE-2024-24576). A batch file is refused, with a message: running
+# cmd.exe /c explicitly makes that parsing visible. Windows ignores trailing dots and spaces
+# and an alternate data stream (x.bat::$DATA) in a file name.
+__w32_batch_program = (path: str) -> bool:
+    b = bytes(path)
+    start = 0
+    loop i in [0..b.len()):
+        if b[i] == '/' or b[i] == '\\': start = i + 1
+    # (C:x.bat: a drive's own directory)
+    if start == 0 and b.len() >= 2 and b[1] == ':': start = 2
+    stop = b.len()
+    loop i in [start..b.len()):
+        if b[i] == ':':
+            stop = i
+            break
+    loop stop > start and (b[stop - 1] == '.' or b[stop - 1] == ' '): stop -= 1
+    if stop - start < 4 or b[stop - 4] != '.': return false
+    ext: u8[]
+    loop i in [stop - 3..stop):
+        c = b[i]
+        if c >= 'A' and c <= 'Z': c = c + 32
+        ext.push(c)
+    e = str_from_bytes(ext)
+    e == "bat" or e == "cmd"
+
+__w32_batch_refused = (path: str) -> bool:
+    if not __w32_batch_program(path): return false
+    eprint("run: '{path}' is a batch file, which cmd.exe would run, reading its arguments as commands; run cmd.exe with /c and the arguments quoted for cmd instead: run(\"C:\\Windows\\System32\\cmd.exe\" [\"/c\" ...])")
+    true
+
+# A command line for CreateProcessW: the arguments, each read back unchanged by
+# CommandLineToArgvW (and the C runtime's argv). Outside the Windows block so every
+# platform's tests check it.
+__w32_cmdline = (argv: str[]) -> str:
+    out: u8[]
+    loop i in 0.. and a in argv:
+        if i > 0: out.push(' ')
+        if i == 0: __w32_quote_program(out, a)
+        else: __w32_quote_arg(out, a)
+    str_from_bytes(out)
+
+# (the program's name, the first argument, is read up to the next quote with backslashes as
+# they are; a Windows file name has no quote in it)
+__w32_quote_program = (out: mut u8[], a: str):
+    if len(a) > 0 and not __w32_needs_quotes(a):
+        loop c in bytes(a): out.push(c)
+        return
+    out.push('"')
+    loop c in bytes(a):
+        if c != '"': out.push(c)
+    out.push('"')
+
+__w32_needs_quotes = (a: str) -> bool:
+    loop c in bytes(a):
+        if c == ' ' or c == '\t' or c == '\n' or c == u8(11) or c == '"': return true
+    false
+
+# (an argument: quoted when it is empty or has a space, tab or quote; backslashes before a
+# quote, and before the closing quote, doubled; a quote in it escaped)
+__w32_quote_arg = (out: mut u8[], a: str):
+    if len(a) > 0 and not __w32_needs_quotes(a):
+        loop c in bytes(a): out.push(c)
+        return
+    out.push('"')
+    slashes = 0
+    loop c in bytes(a):
+        if c == '\\':
+            slashes += 1
+            continue
+        if c == '"':
+            loop _ in [0..slashes * 2 + 1): out.push('\\')
+        else:
+            loop _ in [0..slashes): out.push('\\')
+        out.push(c)
+        slashes = 0
+    loop _ in [0..slashes * 2): out.push('\\')
+    out.push('"')

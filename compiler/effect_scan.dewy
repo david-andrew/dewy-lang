@@ -441,7 +441,7 @@ effect_indirect=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         let ft0=callable_base(ntype(callee))
         loop i in [0..nkids(n)) {
             let a=kid(n i)
-            if EffectScanWord(types.ptr[ft0].mutmask) & (1 << i) =? 0 {effect_scan_node(f a);}
+            if EffectScanWord(types.ptr[ft0].mutmask) & (EffectScanWord(1) << EffectScanWord(i)) =? 0 {effect_scan_node(f a);}
             else {effect_opaque(f a);}
         }
         effect_callback(f n own);
@@ -453,7 +453,7 @@ effect_indirect=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     let ft=callable_base(ntype(callee))
     loop i in [0..nkids(n)) {
         let a=kid(n i)
-        if EffectScanWord(types.ptr[ft].mutmask) & (1 << i) =? 0 {effect_scan_node(f a);}
+        if EffectScanWord(types.ptr[ft].mutmask) & (EffectScanWord(1) << EffectScanWord(i)) =? 0 {effect_scan_node(f a);}
         else if not effect_place_inventory(a) {effect_opaque(f a);}
     }
     if contract =? 0 {
@@ -533,30 +533,75 @@ effect_body_moves_out=(body:EffectScanWord depth:EffectScanWord=0 result:bool=tr
     effect_moved_out[value]=true
     effect_moves_out(source depth + 1)
 }
+let es_seen_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let es_ro_owner:EffectScanWord=-1
+let es_has_ro:bool=false
+effect_scan_begin=(f:EffectScanWord):>void=>$unsafe {
+    es_seen_p=effect_seen.ptr
+    if es_ro_owner =? f {es_ro_owner=-1}
+}
 effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     if n =? 0 or effect_footprints_only and effect_summaries.ptr[f].footprint_opaque {return}
-    if effect_seen.ptr[n] =? f {return}
-    effect_seen.ptr[n] = f;
-    let k=nodes.ptr[n].kind
+    if es_seen_p =? (uint64(0) as ptr<int64>) {es_seen_p=effect_seen.ptr}
+    if es_seen_p[n] =? f {return}
+    es_seen_p[n]=f
+    let np=nodes.ptr + n
+    let k=np[0].kind
     let exact_rep=effect_exact_rep
-    if exact_rep and (k =? 'vardecl' or k =? 'assign' or k =? 'binary' or k =? 'conv') {exact_effect_representation(n);}
+    if not exact_rep and ownership_decls.length =? 0 {
+        if k =? 'block' {
+            loop j in [0..nkids(n)) {
+                let ch=kid(n j)
+                if ch not=? 0 {effect_scan_node(f ch)}
+            }
+            return
+        }
+        if k =? 'exprstmt' or k =? 'not_' or k =? 'defer_' {
+            let a=EffectScanWord(np[0].a)
+            if a not=? 0 {effect_scan_node(f a)}
+            return
+        }
+        if k =? 'and_' or k =? 'or_' or k =? 'while_' {
+            let a=EffectScanWord(np[0].a)
+            if a not=? 0 {effect_scan_node(f a)}
+            let b=EffectScanWord(np[0].b)
+            if b not=? 0 {effect_scan_node(f b)}
+            return
+        }
+        if k =? 'if_' {
+            let a=EffectScanWord(np[0].a)
+            if a not=? 0 {effect_scan_node(f a)}
+            let b=EffectScanWord(np[0].b)
+            if b not=? 0 {effect_scan_node(f b)}
+            let c=EffectScanWord(np[0].c)
+            if c not=? 0 {effect_scan_node(f c)}
+            return
+        }
+        if k =? 'break_' or k =? 'continue_' {return}
+    }
+    if exact_rep and (k =? 'vardecl' or k =? 'assign' or k =? 'binary' or k =? 'conv') {
+        exact_effect_representation(n)
+        es_seen_p=effect_seen.ptr
+    }
     if k =? 'for_' {
-        let marks=effect_for_marks.get(EffectScanWord(nodes.ptr[n].sym)) ?? []
+        let marks=effect_for_marks.get(EffectScanWord(np[0].sym)) ?? []
         if not marks.contains(n) {
             marks.push(n);
-            effect_for_marks[EffectScanWord(nodes.ptr[n].sym)] = marks;
+            effect_for_marks[EffectScanWord(np[0].sym)] = marks;
     # These shortened place walks omit evaluated-root visits. Keep the legacy
     # adapter conservative rather than accidentally proving a global/alias pure.
         }
     }
     if k =? 'field' or k =? 'assign' {effect_isolation_block(f IsolationReason.node n);}
     let hidden:array<int64>=[]
-    let reason=isolation_effect(n @hidden)
-    if reason not=? IsolationReason.none_ {effect_isolation_block(f reason n);}
+    if k =? 'call' or k =? 'binary' or k =? 'intrinsic' or k =? 'index' or k =? 'field' or k =? 'cast' or k =? 'conv' or k =? 'addr' or k =? 'lambda' or k =? 'partial' or k =? 'fnref' or k =? 'pair' or k =? 'map_lit' or k =? 'istype' {
+        let reason=isolation_effect(n @hidden)
+        if reason not=? IsolationReason.none_ {effect_isolation_block(f reason n);}
+    }
     if k =? 'ident' {
-        if nodes.ptr[n].aux =? int32<overflow='wrap'>(2) {effect_isolation_block(f IsolationReason.global_ n);}
-        else if nodes.ptr[n].aux not=? int32<overflow='wrap'>(1) {effect_isolation_block(f IsolationReason.node n);}
-        else if EffectScanWord(locals.ptr[EffectScanWord(nodes.ptr[n].sym)].flags) & (LF_CAPTURE | LF_ADDR) not=? 0 {effect_isolation_block(f IsolationReason.capture n);}
+        if np[0].aux =? int32<overflow='wrap'>(2) {effect_isolation_block(f IsolationReason.global_ n);}
+        else if np[0].aux not=? int32<overflow='wrap'>(1) {effect_isolation_block(f IsolationReason.node n);}
+        else if EffectScanWord(locals.ptr[EffectScanWord(np[0].sym)].flags) & (LF_CAPTURE | LF_ADDR) not=? 0 {effect_isolation_block(f IsolationReason.capture n);}
     }
     if ownership_decls.length not=? 0 {
         if k =? 'block' {effect_body_moves_out(n 0 false)}
@@ -748,9 +793,22 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
             }
         }
         let fb:EffectScanWord=EffectScanWord(fns.ptr[f].body)
-        loop qi in [0..nkids(fb)) {
-            let st=kid(fb qi)
-            if nodes.ptr[st].kind =? 'vardecl' and not has_flag(st NF_GLOBAL) and nodes.ptr[st].sym =? int32<overflow='wrap'>(l) and effect_readonly_binding(st) {return}
+        if es_ro_owner not=? f {
+            es_ro_owner=f
+            es_has_ro=false
+            loop qi in [0..nkids(fb)) {
+                let st=kid(fb qi)
+                if nodes.ptr[st].kind =? 'vardecl' and not has_flag(st NF_GLOBAL) and effect_readonly_binding(st) {
+                    es_has_ro=true
+                    break
+                }
+            }
+        }
+        if es_has_ro {
+            loop qi in [0..nkids(fb)) {
+                let st=kid(fb qi)
+                if nodes.ptr[st].kind =? 'vardecl' and not has_flag(st NF_GLOBAL) and nodes.ptr[st].sym =? int32<overflow='wrap'>(l) and effect_readonly_binding(st) {return}
+            }
         }
     }
     if k =? 'field' and effect_temporary_field(n) {
@@ -998,9 +1056,18 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     }
     let mask=isolation_children(k)
     if mask <? 0 {return}
-    if mask & 1 not=? 0 {effect_scan_node(f EffectScanWord(nodes.ptr[n].a));}
-    if mask & 2 not=? 0 {effect_scan_node(f EffectScanWord(nodes.ptr[n].b));}
-    if mask & 4 not=? 0 {effect_scan_node(f EffectScanWord(nodes.ptr[n].c));}
+    if mask & 1 not=? 0 {
+        let a=EffectScanWord(nodes.ptr[n].a)
+        if a not=? 0 {effect_scan_node(f a);}
+    }
+    if mask & 2 not=? 0 {
+        let b=EffectScanWord(nodes.ptr[n].b)
+        if b not=? 0 {effect_scan_node(f b);}
+    }
+    if mask & 4 not=? 0 {
+        let c=EffectScanWord(nodes.ptr[n].c)
+        if c not=? 0 {effect_scan_node(f c);}
+    }
     if mask & 16 not=? 0 {
         loop j in [0..nkids(n)) {effect_scan_node(f kid(n j));}
     }

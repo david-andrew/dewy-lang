@@ -32,7 +32,8 @@ COUNTS = {'callbacks_literal': 1000000, 'callbacks': 1000000, 'game': 5000000, '
           'byte_find': 20000, 'byte_scan': 20000, 'text': 10000000, 'graph': 1000000, 'dict_words': 2000000, 'string_equal': 10000000, 'string_search': 1000000, 'match_dispatch': 10000000,
           'branch_dispatch': 10000000, 'managed_params': 10000000, 'method_params': 10000000,
           'shifted_arrays': 100000, 'case_conversion': 20000, 'array_swap': 10000000,
-          'integer_parse': 2000000, 'recursive_list': 20000, 'recursive_tree': 2000000, 'broadcast': 1000, 'arena': 10000, 'name_table': 1000000, 'push': 5000000}
+          'integer_parse': 2000000, 'recursive_list': 20000, 'recursive_tree': 2000000, 'broadcast': 1000, 'arena': 10000, 'name_table': 1000000, 'push': 5000000,
+          'sorting': 500000, 'priority_queue': 500000, 'matrix_mul': 64000, 'lz_compress': 1000000}
 MODES = ('default', 'release')
 # Kernels without their own C file share another's algorithm and checksum.
 C_SOURCE = {'records_nested': 'records'}
@@ -42,7 +43,8 @@ CHECKSUMS_1000 = {'callbacks_literal': 311536, 'callbacks': 155768, 'game': 2096
                   'branch_dispatch': 517766884, 'managed_params': 250508, 'method_params': 250508,
                   'shifted_arrays': 2100736000, 'case_conversion': 17080000, 'array_swap': 888753138,
                   'integer_parse': 33285884, 'broadcast': 2478937617244, 'arena': 156973339,
-                  'name_table': 370379272, 'push': 763792886}
+                  'name_table': 370379272, 'push': 763792886,
+                  'sorting': 462440680, 'priority_queue': 10010858, 'matrix_mul': 213476228, 'lz_compress': 947115653}
 
 
 def prepare_source(name: str, directory: Path) -> Path:

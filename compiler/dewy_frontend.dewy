@@ -30,6 +30,7 @@ frontend_bind=(texts:ptr<int64> hashes:ptr<int64> names_:ptr<int64> host:ptr<int
     frontend_host=host as ptr<DewyLexHost>
     0
 }
+let dn_tok_pool:array<DewyLexeme>=[]
 dn_lex=(file:int64 begin:int64 stop:int64 intern_names:bool=true):>array<DewyLexeme>=>$unsafe {
     if intern_names and dn_word_tokens.length =? 0 {dn_init_words()}
     let source=files[file].src
@@ -38,9 +39,11 @@ dn_lex=(file:int64 begin:int64 stop:int64 intern_names:bool=true):>array<DewyLex
     if dn_symbols.length =? 0 {dn_init_symbols()}
     let classes=dn_classes.ptr
     let symbols=dn_symbols.ptr
-    let out:array<DewyLexeme>=[]
+    let out:array<DewyLexeme>=dn_tok_pool
+    dn_tok_pool=[]
     let capacity:FrontendWord=((FrontendWord(stop) - FrontendWord(begin)) >> 1) + 2 + DN_EOF_SPARE
-    out.resize(capacity)
+    if cap(out) <? capacity {out.reserve(capacity)}
+    __set_len(out capacity)
     dn_block_comments=[]
     let state=DewyLexState[dn_skip_bodies false dn_metatags false false dc_parser.reader.dn_true_id dc_parser.reader.dn_false_id dc_parser.reader.dn_is_id dc_parser.reader.dn_isnt_id dc_parser.reader.dn_in_id dn_word_tokens.length frontend_texts frontend_hashes frontend_names]
     let count:FrontendWord=dx_lex(@state frontend_host @dn_lexer @dn_block_comments source begin stop intern_names classes symbols dn_word_tokens.ptr @out capacity)
@@ -52,7 +55,8 @@ dn_lex=(file:int64 begin:int64 stop:int64 intern_names:bool=true):>array<DewyLex
     let slots=out.ptr
     if count + 1 + DN_EOF_SPARE >? capacity {
         capacity=count + 1 + DN_EOF_SPARE
-        out.resize(capacity)
+        out.reserve(capacity)
+        __set_len(out capacity)
         slots=out.ptr
     }
     loop k in [count..count + DN_EOF_SPARE] {slots[k]=DewyLexeme['eof' 0 stop stop spaced newline]}
@@ -74,5 +78,10 @@ dewy_fast_file=(file:int64):>array<int64>=>$unsafe {
     dc_parser.tokens=dn_lex(file 0 (files[file].src as array<uint8>).length)
     dn_skip_bodies=false
     dw_dir_lexed(file)
-    df_file(@dc_parser @nodes dc_file_host saved_edits_on lib_lazy dc_lazy_allowed(file))
+    let out=df_file(@dc_parser @nodes dc_file_host saved_edits_on lib_lazy dc_lazy_allowed(file))
+    if not lib_lazy and not dc_lazy_allowed(file) and cap(dc_parser.tokens) >? cap(dn_tok_pool) {
+        dn_tok_pool=dc_parser.tokens
+    }
+    dc_parser.tokens=[]
+    out
 }

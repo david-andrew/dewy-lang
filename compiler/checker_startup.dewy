@@ -5,14 +5,17 @@ from p"intrinsic_registration.dewy" import (register_intrinsics)
 from p"@lib/core/os.jo" import (file_exists list_dir)
 from p"@lib/core/str.jo" import (ends_with)
 from p"ast.jo" import (mk NF_EXTERN decl_has_rest has_flag kid nkids nodes)
-from p"check.jo" import (fns lib_dir modules runtime_ffi_done runtime_ffi_scan syms target_macos target_wasm target_windows)
+from p"check.jo" import (fns init_fns lib_dir module_by_path module_ctx modules registered runtime_ffi_done runtime_ffi_scan syms target_macos target_wasm target_windows)
+from p"checker_contexts.dewy" import (setup_module_contexts)
 from p"checker_load_module.dewy" import (load_module)
+from p"checker_registration.dewy" import (register_module)
 from p"checker_signature.dewy" import (fn_sig)
 from p"checker_tree_queries.dewy" import (pushes_into)
-from p"checks_thin.dewy" import (check_fn_body runtime_demand)
+from p"checks_thin.dewy" import (check_fn_body module_path_key runtime_demand)
 from p"concurrency.jo" import (concurrency_first_ok_module concurrency_protocol_module concurrency_task_core_module concurrency_task_module concurrency_thread_module)
 from p"dewy_method_ops.dewy" import (dewy_is_method)
 from p"lazy_force.dewy" import (dc_force_all dc_force_module)
+from p"prelude.jo" import (pn_seen prelude_game_hint prelude_game_pending prelude_lazy prelude_std_pending std_optional_file)
 from p"prelude_ops.dewy" import (defer_prelude prelude_known_names prelude_lazy_setup)
 from p"util.jo" import (files intern name_of)
 
@@ -86,6 +89,7 @@ runtime_ffi_demand=():>bool=>$unsafe {
         scan = StartupWord(scan) + 1
         if d not=? 0 and has_flag(d NF_EXTERN) {
             done = true
+            if prelude_game_pending {load_game_file("dl.jo");}
             loop nm in ["__c_str" "__ffi_resolve" "__ffi_missing"] {runtime_demand(nm)}
             return true
         }
@@ -191,10 +195,117 @@ target_const=():>string=>{
     if target_macos {tgt="macos"}
     tgt
 }
+load_std_file=(n:string):>bool=>{
+    if n =? "tasks.jo" {
+        load_std_file("task_core.jo");
+        load_std_file("thread.jo");
+    }
+    else if n =? "task_input.jo" {
+        load_std_file("task_core.jo");
+        load_std_file("files.jo");
+    }
+    else if n =? "thread.jo" {
+        load_std_file("task_core.jo");
+        load_std_file("fork_join.jo");
+    }
+    let path="{lib_dir}/std/{n}"
+    if module_by_path.get(module_path_key(path)) not=? none {return false}
+    let first=modules.length
+    let m:StartupWord=-1
+    if defer_prelude(path "std") {m=StartupWord(modules.length) - 1}
+    else {m=load_module(path true (-1))}
+    let thread_mod=@concurrency_thread_module
+    let task_mod=@concurrency_task_module
+    let task_core_mod=@concurrency_task_core_module
+    if n =? "thread.jo" {thread_mod = m}
+    if n =? "tasks.jo" {task_mod = m}
+    if n =? "task_core.jo" {task_core_mod = m}
+    if registered.length >? 0 {
+        loop mi in [first..modules.length) {register_module(mi)}
+    }
+    if module_ctx.length >? 0 {setup_module_contexts(init_fns[0])}
+    loop i in [0..demanded.length) {demanded[i] = false}
+    loop i in [0..pn_seen.length) {pn_seen[i] = false}
+    ml_bump()
+    true
+}
+
+load_std_prelude=():>void=>{
+    let pending=@prelude_std_pending
+    if not pending {return}
+    pending=false
+    let first=modules.length
+    let names_=list_dir("{lib_dir}/std")
+    names_.sort()
+    let thread_mod=@concurrency_thread_module
+    let task_mod=@concurrency_task_module
+    let task_core_mod=@concurrency_task_core_module
+    loop n in names_ {
+        if not ends_with(n ".jo") or not std_optional_file(n) {continue}
+        let path="{lib_dir}/std/{n}"
+        if module_by_path.get(module_path_key(path)) not=? none {continue}
+        let m:StartupWord=-1
+        if defer_prelude(path "std") {m=StartupWord(modules.length) - 1}
+        else {m=load_module(path true (-1))}
+        if n =? "thread.jo" {thread_mod = m}
+        if n =? "tasks.jo" {task_mod = m}
+        if n =? "task_core.jo" {task_core_mod = m}
+    }
+    if registered.length >? 0 {
+        loop m in [first..modules.length) {register_module(m)}
+    }
+    if module_ctx.length >? 0 {setup_module_contexts(init_fns[0])}
+    loop i in [0..demanded.length) {demanded[i] = false}
+    loop i in [0..pn_seen.length) {pn_seen[i] = false}
+    ml_bump()
+}
+
+load_game_file=(n:string):>bool=>{
+    let path="{lib_dir}/game/{n}"
+    if module_by_path.get(module_path_key(path)) not=? none {return false}
+    let first=modules.length
+    if not defer_prelude(path "game") {load_module(path true (-1));}
+    if registered.length >? 0 {
+        loop m in [first..modules.length) {register_module(m)}
+    }
+    if module_ctx.length >? 0 {setup_module_contexts(init_fns[0])}
+    loop i in [0..demanded.length) {demanded[i] = false}
+    loop i in [0..pn_seen.length) {pn_seen[i] = false}
+    ml_bump()
+    true
+}
+
+load_game_prelude=():>void=>{
+    let pending=@prelude_game_pending
+    if not pending {return}
+    pending=false
+    if prelude_std_pending {load_std_prelude()}
+    let first=modules.length
+    let names_=list_dir("{lib_dir}/game")
+    names_.sort()
+    loop n in names_ {
+        if not ends_with(n ".jo") {continue}
+        let path="{lib_dir}/game/{n}"
+        if module_by_path.get(module_path_key(path)) not=? none {continue}
+        if not defer_prelude(path "game") {load_module(path true (-1));}
+    }
+    if registered.length >? 0 {
+        loop m in [first..modules.length) {register_module(m)}
+    }
+    if module_ctx.length >? 0 {setup_module_contexts(init_fns[0])}
+    loop i in [0..demanded.length) {demanded[i] = false}
+    loop i in [0..pn_seen.length) {pn_seen[i] = false}
+    ml_bump()
+}
+
 load_prelude=():>void=>{
     # all .jo files in lib/core, lib/std and lib/game are loaded into the shared prelude scope
     # (lib/core must stay compilable by the C bootstrap compiler; lib/std need not)
     prelude_lazy_setup()
+    let game_pending=@prelude_game_pending
+    let std_pending=@prelude_std_pending
+    game_pending=prelude_lazy and not prelude_game_hint
+    std_pending=prelude_lazy and not prelude_game_hint
     let thread_mod = @concurrency_thread_module
     thread_mod = -1
     let task_mod = @concurrency_task_module
@@ -205,11 +316,15 @@ load_prelude=():>void=>{
     protocol_mod = -1
     let first_ok_mod = @concurrency_first_ok_module
     first_ok_mod = -1
-    loop sub in ["core" "std" "game"] {
+    let subs=if prelude_game_pending {["core" "std"]} else {["core" "std" "game"]}
+    loop sub in subs {
         let names_=list_dir("{lib_dir}/{sub}")
         names_.sort()
         loop n in names_ {
             if not ends_with(n ".jo") {continue}
+            if sub =? "core" and n =? "macos.jo" and not target_macos {continue}
+            if sub =? "core" and n =? "windows.jo" and not target_windows {continue}
+            if sub =? "std" and prelude_std_pending and std_optional_file(n) {continue}
             let path="{lib_dir}/{sub}/{n}"
             let m:StartupWord=-1
             if defer_prelude(path sub) {m=StartupWord(modules.length) - 1} else {m=load_module(path true (-1))}

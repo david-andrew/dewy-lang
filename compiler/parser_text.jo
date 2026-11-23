@@ -207,6 +207,7 @@ parse_string_token = (t: int) -> int:
             if nodes[e].kind == .str_lit and nodes[e].nlist == 0 and colon >= 0 and colon + 1 < j and s[colon + 1] == ' ' and not (colon + 2 < j and (s[colon + 2] == '<' or s[colon + 2] == '>' or s[colon + 2] == '^')):
                 # ('{"a": 1}' is the text "a", formatted " 1")
                 fatal(pos, "`{{{trim(s[i + 1..j))}}}` in a string puts in the value of what is inside the braces; for braces in the text, write {{{{ and }}}}, or make it a raw string, r'...' (JSON: r'{{\"a\": 1}}', or to_json(value))")
+            p_clear_unit()
             toks = saved_toks
             p_toks = saved_p_toks
             p_ntoks = saved_p_ntoks
@@ -319,6 +320,7 @@ parse_span = (file: int, start: int, end: int) -> int[]:
         d = parse_toplevel()
         if d != 0: decls.push(d)
         skip_newlines()
+    p_clear_unit()
     toks = saved_toks
     p_toks = saved_p_toks
     p_ntoks = saved_p_ntoks
@@ -369,6 +371,7 @@ ensure_body = (d: int):
     p_top_decl = false
     body = parse_indented_block(mk(.block, cur_pos()))
     nodes[d].b = i32(body)
+    p_clear_unit()
     toks = saved_toks
     p_toks = saved_p_toks
     p_ntoks = saved_p_ntoks

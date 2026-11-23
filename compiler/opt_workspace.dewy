@@ -1,13 +1,12 @@
 from p"ir_types.dewy" import (Op Ins IrFn)
 
 OptReg:type=[
+    cval:int64
+    fact_epoch:int64
     ndef:int32
-    stable:bool
     defpos:int32=-1
     first:int32=2147483647
     nuse:int32
-    constant:bool
-    cval:int64
     repl:int32
     ver:int32
     dop:int32=-1
@@ -15,7 +14,8 @@ OptReg:type=[
     db:int32
     dva:int32
     dvb:int32
-    fact_epoch:int64
+    stable:bool
+    constant:bool
 ]
 
 OptFlow:type=[
@@ -53,6 +53,20 @@ OptControl:type=[
     deferred:int64=-1
 ]
 
+FastLoad:type=[
+    sid:int64
+    gen:int64
+    imm:int64
+    key:int64
+    a:int32
+    b:int32
+    dst:int32
+    depth:int32
+    va:int32
+    vb:int32
+    dver:int32
+]
+
 # One non-reentrant optimizer workspace, with independent globals so a scalar
 # update does not invalidate unrelated arena views in the compiler's alias model.
 # Raw views start empty and are bound before use; growth refreshes them. Never
@@ -82,6 +96,12 @@ let o_dead_start:int64=0
 let o_dead_first:array<int64>=[]
 let o_dead_limit:array<int64>=[]
 let o_kmap:dict<int64 int64>=[]
+let o_kval:array<int64>=[]
+let o_kreg:array<int32>=[]
+let o_kepoch:array<int64>=[]
+let o_kfn:int64=0
+let o_kmask:int64=0
+let o_ctl:array<OptControl>=[]
 let o_lastuse:array<int32>=[]
 let o_depth:array<int32>=[]
 let ht_storage:array<AvailableValue>=[]
@@ -95,6 +115,7 @@ let o_scope_storage:array<OptScope>=[]
 let o_scope_info:ptr<OptScope>=$unsafe (uint64(0) as ptr<OptScope>)
 let o_scopes:array<int64>=[]
 let o_cse:bool=false
+let opt_sra_counted:bool=false
 let o_nbr:int64=0
 let o_join_regs:array<int64>=[]
 let o_join_next:array<int64>=[]
@@ -132,3 +153,17 @@ let opt_vtypes:ptr<int8>=$unsafe (uint64(0) as ptr<int8>)
 let opt_input_count:int64=0
 let opt_nparams:int64=0
 let opt_raw_mem:bool=false
+let opt_allow_cse:bool=true
+let opt_has_loops:bool=false
+let opt_has_big_loop_const:bool=false
+let opt_has_vec_cand:bool=false
+let opt_has_float_op:bool=false
+let opt_has_loops_ready:bool=false
+let opt_has_loops_val:bool=false
+let opt_fast_nv:int64=0
+let fl_has_const_div:bool=false
+let fl_cache:array<FastLoad>=[]
+let fl_sid:array<int64>=[]
+let fl_next_sid:int64=1
+let fl_blk_start:array<int64>=[]
+let fl_blk_kind:array<Op>=[]

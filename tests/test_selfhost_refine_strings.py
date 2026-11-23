@@ -115,6 +115,10 @@ def corpus():
     return bytes(blob), '\n'.join(steps) + '\n', '\n'.join(expected) + '\n'
 
 
+def same_output(dewy_out, jo_out):
+    assert dewy_out == jo_out
+
+
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_refine_strings_twins_and_oracle(compiler, tmp_path, release):  # noqa: F811
     blob, steps, expected = corpus()

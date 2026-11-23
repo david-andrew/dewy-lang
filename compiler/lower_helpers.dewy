@@ -1,15 +1,15 @@
 $runtime_checks
 from p"expression_types.dewy" import (ntype)
 
-from p"lower_primitives.dewy" import (e_faddr e_gaddr global_addr_off inst_mutmask lf_helper lf_of_inst rt tuple_off)
+from p"lower_primitives.dewy" import (e_faddr e_gaddr global_addr_off inst_mutmask lf_helper lf_of_inst rt rt_global tuple_off)
 from p"lower_functions.dewy" import (begin_fn)
 from p"lower_closures.dewy" import (env_layout partial_layout spawn_body spawn_owned_capture)
 from p"lower_scalars.dewy" import (vec_comps)
-from p"lower_storage.dewy" import (V release_expanded arr_len blk box_val br_to brif_to copy_at drop_at endc env_guard env_guarded field_store_type hdr_load hdr_store iff is_shared load_val lop new_temp opt_has opt_value own release ret_vt retain retain_elems store_type store_val vc vt_of)
+from p"lower_storage.dewy" import (V rc_assume_st release_expanded arr_len blk box_val br_to brif_to copy_at drop_at els endc env_guard env_guarded field_store_type hdr_load hdr_store iff is_shared load_val lop new_temp opt_has opt_value own release ret_vt retain retain_elems store_type store_val vc vt_of)
 from p"lower_analysis.dewy" import (fn_writes)
-from p"lower.jo" import (BOX_HDR VC_AGG VC_FLT VC_INT Val ctl hk_key lfuncs value_member_cache)
+from p"lower.jo" import (BOX_HDR VC_AGG VC_FLT VC_INT Val ctl hk_key lfuncs opt_release value_member_cache)
 from p"check.jo" import (FK_PARTIAL LF_ASSIGNED LF_EXPOSED LF_VALUECAP fns locals prelude syms value_equal_fns value_hash_fns)
-from p"ir.jo" import (M_FLOAT VI VS ir mulh_ok)
+from p"ir.jo" import (M_FLOAT VI VS ir ir_cold mulh_ok)
 from p"types.jo" import (T_MATH_INT T_STR fields prune secrets_seen ptr_size structs targ telem tkind tsize types variants)
 from p"type_ops.dewy" import (fixed_len is_managed layout math_optional type_has_fn)
 from p"checker_state.dewy" import (SK)
@@ -138,11 +138,39 @@ helper_drop=(t:LHWord copy:bool):>void=>$unsafe {
     }
     else {
         let fs=field_list(t)
+        let nman:LHWord=0
         loop i in [0..fs.length) {
-            let fo=fs.ptr[if copy {i} else {fs.length - 1 - i}]
-            if not is_managed(fo[0]) {continue}
-            if copy {copy_at(e_addi(a fo[1]) fo[0]);}
-            else {drop_embedded(e_addi(a fo[1]) fo[0]);}
+            if is_managed(fs.ptr[i][0]) {nman += 1}
+        }
+        if opt_release and not ownership_type(t) and nman >=? 2 {
+            iff(rt_global("__mt_active"));
+            let was_cold=ir_cold
+            ir_cold=true
+            loop i in [0..fs.length) {
+                let fo=fs.ptr[if copy {i} else {fs.length - 1 - i}]
+                if not is_managed(fo[0]) {continue}
+                if copy {copy_at(e_addi(a fo[1]) fo[0]);}
+                else {drop_embedded(e_addi(a fo[1]) fo[0]);}
+            }
+            ir_cold=was_cold
+            els();
+            let was_st=rc_assume_st
+            rc_assume_st=true
+            loop i in [0..fs.length) {
+                let fo=fs.ptr[if copy {i} else {fs.length - 1 - i}]
+                if not is_managed(fo[0]) {continue}
+                if copy {copy_at(e_addi(a fo[1]) fo[0]);}
+                else {drop_embedded(e_addi(a fo[1]) fo[0]);}
+            }
+            rc_assume_st=was_st
+            endc();
+        } else {
+            loop i in [0..fs.length) {
+                let fo=fs.ptr[if copy {i} else {fs.length - 1 - i}]
+                if not is_managed(fo[0]) {continue}
+                if copy {copy_at(e_addi(a fo[1]) fo[0]);}
+                else {drop_embedded(e_addi(a fo[1]) fo[0]);}
+            }
         }
     }
     e_ret(-1);
@@ -186,18 +214,54 @@ helper_arrrel=(t:LHWord):>void=>$unsafe {
         endc(); endc();
         iff(math_tag(tags));
     }
-    let i=vreg(VI)
-    e_mov(i e_iconst(0));
-    blk();
-    lop();
-    brif_to(e_bin('ges' VI i n) ctl - 1);
-    release_expanded=true
-    owner_element_drop(e_bin('add' VI e_addi(p 24) e_bin('mul' VI (if ownership_type(et) {e_bin('sub' VI e_addi(n -1) i)} else {i}) e_iconst(owner_stride(et)))) et);
-    release_expanded=false
-    e_mov(i e_addi(i 1));
-    br_to(ctl);
-    endc();
-    endc();
+    if opt_release and not ownership_type(et) {
+        iff(rt_global("__mt_active"));
+        let was_cold=ir_cold
+        ir_cold=true
+        let i0=vreg(VI)
+        e_mov(i0 e_iconst(0));
+        blk();
+        lop();
+        brif_to(e_bin('ges' VI i0 n) ctl - 1);
+        release_expanded=true
+        owner_element_drop(e_bin('add' VI e_addi(p 24) e_bin('mul' VI i0 e_iconst(owner_stride(et)))) et);
+        release_expanded=false
+        e_mov(i0 e_addi(i0 1));
+        br_to(ctl);
+        endc();
+        endc();
+        ir_cold=was_cold
+        els();
+        let was_st=rc_assume_st
+        rc_assume_st=true
+        let i=vreg(VI)
+        e_mov(i e_iconst(0));
+        blk();
+        lop();
+        brif_to(e_bin('ges' VI i n) ctl - 1);
+        release_expanded=true
+        owner_element_drop(e_bin('add' VI e_addi(p 24) e_bin('mul' VI i e_iconst(owner_stride(et)))) et);
+        release_expanded=false
+        e_mov(i e_addi(i 1));
+        br_to(ctl);
+        endc();
+        endc();
+        rc_assume_st=was_st
+        endc();
+    } else {
+        let i=vreg(VI)
+        e_mov(i e_iconst(0));
+        blk();
+        lop();
+        brif_to(e_bin('ges' VI i n) ctl - 1);
+        release_expanded=true
+        owner_element_drop(e_bin('add' VI e_addi(p 24) e_bin('mul' VI (if ownership_type(et) {e_bin('sub' VI e_addi(n -1) i)} else {i}) e_iconst(owner_stride(et)))) et);
+        release_expanded=false
+        e_mov(i e_addi(i 1));
+        br_to(ctl);
+        endc();
+        endc();
+    }
     if quantity_base(et) =? T_MATH_INT {endc();}
     e_call1(rt("__free_obj") p -1);
     endc();
@@ -828,7 +892,7 @@ helper_thunk=(f:LHWord):>void=>$unsafe {
     let mm=inst_mutmask(f)
     loop i in [0..n) {
         let t=fns.ptr[f].ptypes.ptr[i]
-        if mm & (1 << i) not=? 0 or vc(t) =? VC_AGG {argv.push(vreg(VI));}
+        if mm & (LHWord(1) << LHWord(i)) not=? 0 or vc(t) =? VC_AGG {argv.push(vreg(VI));}
         else {argv.push(vreg(vt_of(t)));}
     }
     ir.nparams = ir.vtypes.length;
@@ -849,7 +913,7 @@ helper_partial=(th:LHWord):>void=>$unsafe {
     let hole_vs:array<int64>=[]
     let hmm:LHWord=LHWord(types.ptr[prune(ntype(e))].mutmask)
     loop i in [0..fns.ptr[th].ptypes.length) and t in fns.ptr[th].ptypes {
-        if hmm & (1 << i) not=? 0 or vc(t) =? VC_AGG {hole_vs.push(vreg(VI));}
+        if hmm & (LHWord(1) << LHWord(i)) not=? 0 or vc(t) =? VC_AGG {hole_vs.push(vreg(VI));}
         else {hole_vs.push(vreg(vt_of(t)));}
     }
     ir.nparams = ir.vtypes.length;

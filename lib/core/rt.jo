@@ -296,7 +296,8 @@ __environment_failure = (msg: str):
 
 # smallest c with 32 << c >= n (the exponent of float(n - 1) is floor(log2(n - 1)))
 __size_class = (n: int) -> int:
-    if n <= 32: return 0
+    if n <= 64: return int(n > 32)
+    if n <= 256: return 2 + int(n > 128)
     int((f64(n - 1) as u64) >> 52) - 1027
 
 # Allocate `size` zeroed bytes (16-byte aligned).
@@ -310,22 +311,40 @@ __alloc_raw = (size: int) -> *u8: __alloc_z(size, false)
 # freed before; the rest out of line)
 __alloc_z = (size: int, zero: bool) -> *u8:
     n = size + 16
-    t = __ts()
+    tm = __ts_main
+    if tm <= 1: return __alloc_z_mt(size, zero)
+    t = tm as *int
     # (only programs that use `$allocator` ask which allocator is the context's)
     when __ARENAS:
         if t[__TS_ARENA] != 0: return __arena_alloc(t[__TS_ARENA] as *int, size, zero)
+    if n > 262144: return __alloc_slow(size, zero)
+    c = __size_class(n)
+    lists = (t + 3) as **u8
+    head = lists[c]
+    if head == null: return __alloc_slow(size, zero)
+    t[2] += 1
+    lists[c] = (head as **u8)[0]
+    (head as *int)[0] = c
+    if zero: mem_set(head + 16, 0, size)
+    head + 16
+
+@noinline
+__alloc_z_mt = (size: int, zero: bool) -> *u8:
+    n = size + 16
+    t = __ts()
+    when __ARENAS:
+        if t[__TS_ARENA] != 0: return __arena_alloc(t[__TS_ARENA] as *int, size, zero)
     if t == __ts_foreign: return __alloc_foreign(size, zero)
-    if n <= 262144:
-        c = __size_class(n)
-        lists = (t + 3) as **u8
-        head = lists[c]
-        if head != null:
-            t[2] += 1
-            lists[c] = (head as **u8)[0]
-            if zero: mem_set(head + 16, 0, size)
-            (head as *int)[0] = c
-            return head + 16
-    __alloc_slow(size, zero)
+    if n > 262144: return __alloc_slow(size, zero)
+    c = __size_class(n)
+    lists = (t + 3) as **u8
+    head = lists[c]
+    if head == null: return __alloc_slow(size, zero)
+    t[2] += 1
+    lists[c] = (head as **u8)[0]
+    (head as *int)[0] = c
+    if zero: mem_set(head + 16, 0, size)
+    head + 16
 
 # (a thread C made: the shared state, one thread at a time)
 @noinline
@@ -377,16 +396,29 @@ __alloc_slow = (size: int, zero: bool) -> *u8:
 __free = (p: *u8):
     if p == null: return
     h = (p - 16) as *int
-    when __ARENAS:
-        # Arena frees are logical only; no thread state or free list is touched.
-        if h[1] != 0 and h[1] != -1: return
+    if h[1] != 0:
+        when __ARENAS:
+            # Arena frees are logical only; no thread state or free list is touched.
+            if h[1] != -1: return
+        # (a large block; an arena's gives nothing back)
+        if h[1] == -1: __free_big(h)
+        return
+    tm = __ts_main
+    if tm <= 1:
+        __free_mt(h)
+        return
+    t = tm as *int
+    t[2] -= 1
+    c = h[0]
+    lists = (t + 3) as **u8
+    (h as **u8)[0] = lists[c]
+    lists[c] = h as *u8
+
+@noinline
+__free_mt = (h: *int):
     t = __ts()
     if t == __ts_foreign:
         __free_foreign(h)
-        return
-    if h[1] != 0:
-        # (a large block; an arena's gives nothing back)
-        if h[1] == -1: __free_big(h)
         return
     t[2] -= 1
     c = h[0]
@@ -902,8 +934,16 @@ __arr_clone = (p: *u8, es: int) -> *u8:
     if n * es >= 65536 and __copies_min != 0:
         when not BOOTSTRAP:
             __copy_report(n, es)
-    q = __arr_new_raw(n, es)
+    cap = if n < 16: n + 4 else if n < 1073741824: n + (n >> 2) else: n
+    q = __arr_new_raw(cap, es)
+    if es > 0:
+        avail = __alloc_size(q) - 24
+        if es == 8: cap = avail >> 3
+        else if es == 4: cap = avail >> 2
+        else if es == 1: cap = avail
+        else: cap = avail / es
     (q as *int)[1] = n
+    (q as *int)[2] = cap
     mem_copy(q + 24, p + 24, n * es)
     if h[0] > 0:
         if __mt_active: __atomic_add(h, -1)
@@ -927,36 +967,45 @@ __arr_make_unique = (slot: **u8, es: int):
     p = slot[0]
     if p != null and (p as *int)[0] != 1: slot[0] = __arr_clone(p, es)
 
-# grow a unique array so it can hold `need` elements
-__arr_grow = (slot: **u8, es: int, need: int):
-    p = slot[0]
-    if p == null:
-        cap = need
-        if cap < 4: cap = 4
-        when __ARENAS:
-            c = __ts()[__TS_ARENA] as *int
-            if c != null:
-                # Growable arenas amortize the first few pushes; bounded
-                # arenas retain their existing capacity requirements.
-                if c[5] < 0 and cap < 8: cap = 8
-                size = __arr_bytes(cap, es)
-                q = __arena_alloc(c, size, false)
-                h = q as *int
-                h[0] = 1
-                h[1] = 0
-                h[2] = cap
-                slot[0] = q
-                return
-        slot[0] = __arr_new_raw(cap, es)
-        return
+@noinline
+__arr_grow_more = (slot: **u8, p: *u8, es: int, need: int):
     h = p as *int
     if h[2] >= need: return
     cap = h[2] * 2
     if cap < need: cap = need
     q = __grow_alloc(p, 24 + h[1] * es, __arr_bytes(cap, es))
-    if es > 0: cap = (__alloc_size(q) - 24) / es
+    if es > 0:
+        avail = __alloc_size(q) - 24
+        if es == 8: cap = avail >> 3
+        else if es == 4: cap = avail >> 2
+        else if es == 1: cap = avail
+        else: cap = avail / es
     (q as *int)[2] = cap
     slot[0] = q
+
+# grow a unique array so it can hold `need` elements
+__arr_grow = (slot: **u8, es: int, need: int):
+    p = slot[0]
+    if p != null:
+        __arr_grow_more(slot, p, es, need)
+        return
+    cap = need
+    if cap < 4: cap = 4
+    when __ARENAS:
+        c = __ts()[__TS_ARENA] as *int
+        if c != null:
+            # Growable arenas amortize the first few pushes; bounded
+            # arenas retain their existing capacity requirements.
+            if c[5] < 0 and cap < 8: cap = 8
+            size = __arr_bytes(cap, es)
+            q = __arena_alloc(c, size, false)
+            h = q as *int
+            h[0] = 1
+            h[1] = 0
+            h[2] = cap
+            slot[0] = q
+            return
+    slot[0] = __arr_new_raw(cap, es)
 
 __arr_push_slot = (slot: **u8, es: int) -> *u8:
     p = slot[0]

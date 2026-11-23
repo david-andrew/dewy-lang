@@ -97,41 +97,46 @@ ctx_array_waits=(a:CGWord):>bool=>$unsafe {
     call_waits_hook(a);
     true
 }
+ctx_dependent_call=(a:CGWord):>bool=>$unsafe {
+    let node=cg_nodes[0].ptr + a
+    if node[0].aux2 =? -1 {return true}
+    if node[0].type =? 0 {
+        let callee=cg_nodes[0].ptr + CGWord(node[0].a)
+        let ck=callee[0].kind
+        if node[0].nlist =? 1 and ck =? 'ident' and CGWord(callee[0].name) =? cg_set_name[0] {return true}
+        if ck =? 'dotname' {return true}
+        if ck =? 'ident' {return ctx_call_waits(a CGWord(callee[0].name))}
+    }
+    false
+}
+ctx_dependent_array=(a:CGWord):>bool=>$unsafe {
+    let node=cg_nodes[0].ptr + a
+    let count=CGWord(node[0].nlist)
+    if count =? 0 {return node[0].b =? 0}
+    if node[0].type =? 0 and (CGWord(node[0].flags) & 128) =? 0 and cg_dewy(node[0].pos) {return ctx_array_waits(a)}
+    let base=CGWord(node[0].list)
+    let lp=cg_lists[0].ptr
+    let i:CGWord=0
+    loop i <? count {
+        if ctx_dependent(CGWord(lp[base + i])) {return true}
+        i=i + 1
+    }
+    false
+}
 ctx_dependent=(a:CGWord):>bool=>$unsafe {
     let node=cg_nodes[0].ptr + a
-    let k=node[0].kind
-    let flags=CGWord(node[0].flags)
-    if k =? 'unary' {return node[0].op =? 59 and cg_oversized(CGWord(node[0].a))}
-    if k =? 'call' {
-        if node[0].aux2 =? -1 {return true}
-        if node[0].type =? 0 {
-            let callee=cg_nodes[0].ptr + CGWord(node[0].a)
-            let ck=callee[0].kind
-            if node[0].nlist =? 1 and ck =? 'ident' and CGWord(callee[0].name) =? cg_set_name[0] {return true}
-            if ck =? 'dotname' {return true}
-            if ck =? 'ident' {return ctx_call_waits(a CGWord(callee[0].name))}
-        }
-        return false
+    match node[0].kind {
+        <'ident'|'field'|'typeapply'> => (CGWord(node[0].flags) & 4096) not=? 0
+        <'call'> => ctx_dependent_call(a)
+        <'unary'> => node[0].op =? 59 and cg_oversized(CGWord(node[0].a))
+        <'dotname'> => node[0].type =? 0
+        <'lambda'|'none_lit'|'hole'|'record_lit'> => true
+        <'if_'|'match_'> => (CGWord(node[0].flags) & 128) =? 0 and cg_dewy(node[0].pos)
+        <'block'> => (CGWord(node[0].flags) & 67108864) not=? 0 and (CGWord(node[0].flags) & 128) =? 0
+        <'array'> => ctx_dependent_array(a)
+        <'map_lit'> => node[0].nlist =? 0 or (node[0].type =? 0 and (CGWord(node[0].flags) & 128) =? 0 and cg_dewy(node[0].pos))
+        _ => false
     }
-    if k =? 'ident' or k =? 'field' or k =? 'typeapply' {return (flags & 4096) not=? 0}
-    if k =? 'dotname' {return node[0].type =? 0}
-    if k =? 'lambda' or k =? 'none_lit' or k =? 'hole' or k =? 'record_lit' {return true}
-    if k =? 'if_' or k =? 'match_' {return (flags & 128) =? 0 and cg_dewy(node[0].pos)}
-    if k =? 'block' {return (flags & 67108864) not=? 0 and (flags & 128) =? 0}
-    if k =? 'array' {
-        let count=CGWord(node[0].nlist)
-        if count =? 0 {return node[0].b =? 0}
-        if node[0].type =? 0 and (flags & 128) =? 0 and cg_dewy(node[0].pos) {return ctx_array_waits(a)}
-        let base=CGWord(node[0].list)
-        let i:CGWord=0
-        loop i <? count {
-            if ctx_dependent(CGWord(cg_lists[0].ptr[base + i])) {return true}
-            i=i + 1
-        }
-        return false
-    }
-    if k =? 'map_lit' {return node[0].nlist =? 0 or (node[0].type =? 0 and (flags & 128) =? 0 and cg_dewy(node[0].pos))}
-    false
 }
 cg_unnamed=(a:CGWord):>CGWord=>$unsafe {
     if cg_nodes[0].ptr[a].kind =? 'namedarg' {return CGWord(cg_nodes[0].ptr[a].a)}

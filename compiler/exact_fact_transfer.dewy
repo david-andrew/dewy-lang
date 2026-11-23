@@ -168,8 +168,9 @@ exact_rep_value=(n:TransferWord owner:TransferWord):>bool=>$unsafe {
 exact_value_fact=(n:TransferWord value:TransferWord s:FactState):>void=>$unsafe {
     if not s.live {return}
     if n >=? exact_ranges.length {
-        exact_ranges.resize(max(n + 1 nodes.length))
-        exact_range_meta.resize(exact_ranges.length)
+        let need=max(max(n + 1 nodes.length) exact_ranges.length * 2)
+        exact_ranges.resize(need)
+        exact_range_meta.resize(need)
     }
     let t=if value =? 0 {T_U64} else {exact_representation(ntype(n))}
     if t =? T_U64 {

@@ -117,11 +117,35 @@ helper_drop = (t: int, copy: bool):
             fixed_loop_end(i)
     else:
         fs = field_list(t)
+        nman = 0
         loop i in [0..fs.len()):
-            fo = fs[if copy: i else: fs.len() - 1 - i]
-            if not is_managed(fo.0): continue
-            if copy: copy_at(e_addi(a, fo.1), fo.0)
-            else: drop_embedded(e_addi(a, fo.1), fo.0)
+            if is_managed(fs[i].0): nman += 1
+        if opt_release and not ownership_type(t) and nman >= 2:
+            iff(rt_global("__mt_active"))
+            was_cold = ir_cold
+            ir_cold = true
+            loop i in [0..fs.len()):
+                fo = fs[if copy: i else: fs.len() - 1 - i]
+                if not is_managed(fo.0): continue
+                if copy: copy_at(e_addi(a, fo.1), fo.0)
+                else: drop_embedded(e_addi(a, fo.1), fo.0)
+            ir_cold = was_cold
+            els()
+            was_st = rc_assume_st
+            rc_assume_st = true
+            loop i in [0..fs.len()):
+                fo = fs[if copy: i else: fs.len() - 1 - i]
+                if not is_managed(fo.0): continue
+                if copy: copy_at(e_addi(a, fo.1), fo.0)
+                else: drop_embedded(e_addi(a, fo.1), fo.0)
+            rc_assume_st = was_st
+            endc()
+        else:
+            loop i in [0..fs.len()):
+                fo = fs[if copy: i else: fs.len() - 1 - i]
+                if not is_managed(fo.0): continue
+                if copy: copy_at(e_addi(a, fo.1), fo.0)
+                else: drop_embedded(e_addi(a, fo.1), fo.0)
     e_ret(-1)
 
 fixed_loop_begin = (t: int) -> int:
@@ -161,20 +185,57 @@ helper_arrrel = (t: int):
         brif_to(e_bin(.lts, VI, j, n), ctl)
         endc(); endc()
         iff(math_tag(tags))
-    i = vreg(VI)
-    e_mov(i, e_iconst(0))
-    blk()
-    lop()
-    brif_to(e_bin(.ges, VI, i, n), ctl - 1)
-    base = e_addi(p, 24)
-    index = if ownership_type(et): e_bin(.sub, VI, e_addi(n, -1), i) else: i
-    release_expanded = true
-    owner_element_drop(e_bin(.add, VI, base, e_bin(.mul, VI, index, e_iconst(owner_stride(et)))), et)
-    release_expanded = false
-    e_mov(i, e_addi(i, 1))
-    br_to(ctl)
-    endc()
-    endc()
+    if opt_release and not ownership_type(et):
+        iff(rt_global("__mt_active"))
+        was_cold = ir_cold
+        ir_cold = true
+        i0 = vreg(VI)
+        e_mov(i0, e_iconst(0))
+        blk()
+        lop()
+        brif_to(e_bin(.ges, VI, i0, n), ctl - 1)
+        base0 = e_addi(p, 24)
+        release_expanded = true
+        owner_element_drop(e_bin(.add, VI, base0, e_bin(.mul, VI, i0, e_iconst(owner_stride(et)))), et)
+        release_expanded = false
+        e_mov(i0, e_addi(i0, 1))
+        br_to(ctl)
+        endc()
+        endc()
+        ir_cold = was_cold
+        els()
+        was_st = rc_assume_st
+        rc_assume_st = true
+        i = vreg(VI)
+        e_mov(i, e_iconst(0))
+        blk()
+        lop()
+        brif_to(e_bin(.ges, VI, i, n), ctl - 1)
+        base = e_addi(p, 24)
+        release_expanded = true
+        owner_element_drop(e_bin(.add, VI, base, e_bin(.mul, VI, i, e_iconst(owner_stride(et)))), et)
+        release_expanded = false
+        e_mov(i, e_addi(i, 1))
+        br_to(ctl)
+        endc()
+        endc()
+        rc_assume_st = was_st
+        endc()
+    else:
+        i = vreg(VI)
+        e_mov(i, e_iconst(0))
+        blk()
+        lop()
+        brif_to(e_bin(.ges, VI, i, n), ctl - 1)
+        base = e_addi(p, 24)
+        index = if ownership_type(et): e_bin(.sub, VI, e_addi(n, -1), i) else: i
+        release_expanded = true
+        owner_element_drop(e_bin(.add, VI, base, e_bin(.mul, VI, index, e_iconst(owner_stride(et)))), et)
+        release_expanded = false
+        e_mov(i, e_addi(i, 1))
+        br_to(ctl)
+        endc()
+        endc()
     if quantity_base(et) == T_MATH_INT: endc()
     e_call1(rt("__free_obj"), p, -1)
     endc()

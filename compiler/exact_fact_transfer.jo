@@ -153,8 +153,9 @@ exact_rep_value = (n: int, owner: int) -> bool:
 exact_value_fact = (n: int, value: int, s: FactState):
     if not s.live: return
     if n >= exact_ranges.len():
-        exact_ranges.resize(max(n + 1, nodes.len()))
-        exact_range_meta.resize(exact_ranges.len())
+        need = max(max(n + 1, nodes.len()), exact_ranges.len() * 2)
+        exact_ranges.resize(need)
+        exact_range_meta.resize(need)
     if value == 0 or exact_representation(ntype(n)) == T_U64:
         exact_ranges[n] = -1
         exact_range_meta[n] = 4

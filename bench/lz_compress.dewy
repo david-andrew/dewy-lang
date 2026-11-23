@@ -1,0 +1,128 @@
+# LZ77-style hash-table compression and lossless decompression roundtrip.
+$runtime_checks
+
+from p"harness.dewy" import size_argument, clock, mix
+
+const HASH_SIZE:int64=4096
+const HASH_MASK:int64=4095
+
+# Generate structured log-like byte stream with repeated phrases and varying numbers.
+generate = (count:int64):>array<uint8> => {
+    let out:array<uint8>=[]
+    out.reserve(count)
+    let seed:int64=777
+    loop out.length <? count {
+        seed=(seed*1103515245+12345)%2147483648
+        let kind=seed%4
+        if kind =? 0 {
+            let phrase="event=tick level=info " as array<uint8>
+            loop b in phrase {if out.length <? count {out.push(b)}}
+        } else if kind =? 1 {
+            let phrase="event=sync level=warn " as array<uint8>
+            loop b in phrase {if out.length <? count {out.push(b)}}
+        } else if kind =? 2 {
+            let phrase="status=ok code=200\n" as array<uint8>
+            loop b in phrase {if out.length <? count {out.push(b)}}
+        } else {
+            loop k in [0..6) {
+                seed=(seed*1103515245+12345)%2147483648
+                if out.length <? count {out.push((48+seed%10) as uint8)}
+            }
+            if out.length <? count {out.push(32 as uint8)}
+        }
+    }
+    return out
+}
+
+compress = (src:array<uint8>):>array<uint8> => {
+    let n:int64=src.length
+    let out:array<uint8>=[]
+    out.reserve(n+64)
+    let table:array<int64>=fill(int64(-1) HASH_SIZE)
+    let i:int64=0
+    loop i <? n {
+        let best_len:int64=0
+        let best_dist:int64=0
+        if i+3 <=? n {
+            let h:int64=(((src[i] as int64)*131+(src[i+1] as int64))*131+(src[i+2] as int64)) & HASH_MASK
+            let cand:int64=table[h]
+            table[h]=i
+            if cand >=? 0 and i-cand <=? 255 and i-cand >? 0 {
+                let mlen:int64=0
+                let limit:int64=if n-i <? 127 {n-i} else {127}
+                loop mlen <? limit and src[cand+mlen] =? src[i+mlen] {mlen+=1}
+                if mlen >=? 4 {
+                    best_len=mlen
+                    best_dist=i-cand
+                }
+            }
+        }
+        if best_len >=? 4 {
+            out.push((128+best_len) as uint8)
+            out.push(best_dist as uint8)
+            i+=best_len
+        } else {
+            let lit_start:int64=i
+            let lit_len:int64=0
+            loop i <? n and lit_len <? 127 {
+                if i+3 <=? n {
+                    let h:int64=(((src[i] as int64)*131+(src[i+1] as int64))*131+(src[i+2] as int64)) & HASH_MASK
+                    let cand:int64=table[h]
+                    if cand >=? 0 and i-cand <=? 255 and i-cand >? 0 and src[cand] =? src[i] and src[cand+1] =? src[i+1] and src[cand+2] =? src[i+2] and i+3 <? n and src[cand+3] =? src[i+3] {break}
+                    table[h]=i
+                }
+                i+=1
+                lit_len+=1
+            }
+            out.push(lit_len as uint8)
+            loop k in [0..lit_len) {out.push(src[lit_start+k])}
+        }
+    }
+    return out
+}
+
+decompress = (packed:array<uint8> orig_len:int64):>array<uint8> => {
+    let out:array<uint8>=[]
+    out.reserve(orig_len)
+    let n:int64=packed.length
+    let i:int64=0
+    loop i <? n {
+        let tag:int64=packed[i] as int64
+        i+=1
+        if tag >=? 128 {
+            let mlen:int64=tag-128
+            let dist:int64=packed[i] as int64
+            i+=1
+            let start:int64=out.length-dist
+            loop k in [0..mlen) {out.push(out[start+k])}
+        } else {
+            loop k in [0..tag) {
+                out.push(packed[i])
+                i+=1
+            }
+        }
+    }
+    return out
+}
+
+kernel = (src:array<uint8>):>int64 => {
+    let packed=compress(src)
+    let unpacked=decompress(packed src.length)
+    let hash=mix(7 packed.length)
+    let ok:int64=if unpacked.length =? src.length {1} else {0}
+    let n=src.length
+    loop i in [0..n) {
+        if ok =? 1 and unpacked[i] not=? src[i] {ok=0}
+        if i%32 =? 0 {hash=mix(hash unpacked[i] as int64)}
+    }
+    return mix(hash ok)
+}
+
+main = (args:array<string>):>void => {
+    let count=size_argument(args 1000000)
+    let src=generate(count)
+    let started=clock
+    let result=kernel(src)
+    let finished=clock
+    printl"{result} {finished-started}"
+}

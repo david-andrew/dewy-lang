@@ -117,7 +117,7 @@ exact_raw_tree = (n: int):
     if prune(ntype(n)) == T_MATH_INT:
         width = exact_plan_bits(n)
         if width <= 0 or width > 256: return
-    if n >= exact_raw_values.len(): exact_raw_values.resize(nodes.len())
+    if n >= exact_raw_values.len(): exact_raw_values.resize(max(max(n + 1, nodes.len()), exact_raw_values.len() * 2))
     exact_raw_values[n] |= 1
     k = nodes[n].kind
     if k == .binary:
@@ -128,7 +128,7 @@ exact_raw_tree = (n: int):
         exact_raw_tree(int(nodes[n].b)); exact_raw_tree(int(nodes[n].c))
 exact_effect_representation = (n: int):
     if n < exact_raw_values.len() and exact_raw_values[n] & 2 != 0: return
-    if n >= exact_raw_values.len(): exact_raw_values.resize(nodes.len())
+    if n >= exact_raw_values.len(): exact_raw_values.resize(max(max(n + 1, nodes.len()), exact_raw_values.len() * 2))
     exact_raw_values[n] |= 2
     k = nodes[n].kind
     if k == .vardecl and nodes[n].sym > 0 and not has_flag(n, NF_GLOBAL):

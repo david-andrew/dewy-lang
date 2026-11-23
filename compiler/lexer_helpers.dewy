@@ -184,7 +184,7 @@ lx_line_start=():>void=>$unsafe {
         let c=p[q]
         if q >=? lx_n {lx_i=q; return}
         if c =? 10 or c =? 35 {
-            loop q <? lx_n and p[q] not=? 10 {q += 1}
+            if c =? 35 {q=__find_newline(p q lx_n)}
             if q <? lx_n {q += 1}
             lx_i=q
             continue

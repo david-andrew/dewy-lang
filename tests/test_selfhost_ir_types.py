@@ -55,13 +55,13 @@ DRIVER = r'''main = ():
     print("{plans[0].first} {plans[0].last} {plans[0].ndef} {plans[0].nuse} {plans[0].weight} {plans[0].next_start} {plan.last}")
 '''
 EXPECTED = (
-    "40 120 48\n"
+    "40 120 32\n"
     "0 4 8 12 16 20 24 32\n"
     "0 8 16 24 32 40 48 56 64 65 72 80 88 96 104 112\n"
-    "0 8 16 24 32 40\n"
+    "0 4 8 12 24 16\n"
     "nop 0 0 0 0 0 0 0\n"
     "|0 0 [] [] [] 0 [] false false||0 false [] 0 []\n"
-    "1152921504606846976 -1 0 0 0 -1\n"
+    "0 -1 0 0 0 -1\n"
     + "".join(f"{i} {name}\n" for i, name in enumerate(OPCODES))
     + "store -9223372036854775808 [7] [3] [16] [8] [2147483647] [19]\n"
     "201 checked_add 9223372036854775807 [-1] [5] [32] [16] [-2147483648] [23]\n"

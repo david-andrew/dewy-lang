@@ -24,10 +24,13 @@ Cand:type=[
 # A settled argument of exactly its parameter's type needs no conversion. Literal,
 # optional, refinement, callable and word-fraction cases retain the full service.
 arg_cost=(a:CCWord pat:CCWord @binds:array<int64>):>CCWord=>$unsafe {
-    if nodes.ptr[a].type not=? 0 and (CCWord(nodes.ptr[a].flags) & 256) =? 0 and nodes.ptr[a].kind not=? 'str_lit' and nodes.ptr[a].kind not=? 'float_lit' {
-        let t=tu_prune(pat)
-        if tu_prune(CCWord(nodes.ptr[a].type)) =? t and (CCWord(types.ptr[t].flags) & 1) =? 0 {
-            let tk=types.ptr[t].kind
+    let nd=nodes.ptr + a
+    let nt=CCWord(nd[0].type)
+    if nt not=? 0 and (CCWord(nd[0].flags) & 256) =? 0 and nd[0].kind not=? 'str_lit' and nd[0].kind not=? 'float_lit' {
+        let tp=types.ptr
+        let t=if nt =? pat and (CCWord(tp[pat].flags) & 1) =? 0 {pat} else {tu_prune(pat)}
+        if (nt =? t or tu_prune(nt) =? t) and (CCWord(tp[t].flags) & 1) =? 0 {
+            let tk=tp[t].kind
             if tk not=? 'opt' and tk not=? 'refined' and tk not=? 'callable' and tk not=? 'polyfn' and not (tk =? 'struct_' and bundled_word_rational_type(t)) and not ctx_dependent(a) {return 0}
         }
     }
@@ -37,24 +40,31 @@ arg_cost=(a:CCWord pat:CCWord @binds:array<int64>):>CCWord=>$unsafe {
 # The caller builds diagnostics only for rejected candidates, in its cold frame.
 call_candidate_cost=(@cd:Cand @recv_fits:bool):>CCWord=>$unsafe {
     let np=CCWord(cd.args.length)
+    let args_p=cd.args.ptr
+    let ns=nodes.ptr
     let later:CCWord=0
-    loop a in cd.args {
-        if a =? 0 {continue}
-        if ctx_dependent(a) {later|=2}
-        else if (CCWord(nodes.ptr[a].flags) & 256) not=? 0 {later|=1}
-    }
-    cd.plain=later =? 0
+    let lit_mask:CCWord=0
+    let ctx_mask:CCWord=0
     let arg_cls:array<int64>=[]
-    if later not=? 0 {
-        loop a in cd.args {
+    if np <=? 64 {
+        loop i in [0..np) {
+            let a=CCWord(args_p[i])
+            if a =? 0 {continue}
+            if ctx_dependent(a) {later|=2; ctx_mask|=(CCWord(1) << i)}
+            else if (CCWord(ns[a].flags) & 256) not=? 0 {later|=1; lit_mask|=(CCWord(1) << i)}
+        }
+    } else {
+        loop i in [0..np) {
+            let a=CCWord(args_p[i])
             let cls:CCWord=0
             if a not=? 0 {
-                if ctx_dependent(a) {cls=2}
-                else if (CCWord(nodes.ptr[a].flags) & 256) not=? 0 {cls=1}
+                if ctx_dependent(a) {later|=2; cls=2}
+                else if (CCWord(ns[a].flags) & 256) not=? 0 {later|=1; cls=1}
             }
             arg_cls.push(cls)
         }
     }
+    cd.plain=later =? 0
     # A place fixes T's storage authority before by-value arguments constrain
     # T. Only refined generic mutable candidates need an ordering vector;
     # construction and scoring remain O(arguments).
@@ -62,23 +72,32 @@ call_candidate_cost=(@cd:Cand @recv_fits:bool):>CCWord=>$unsafe {
     if refine_active and cd.binds.length >? 0 and cd.sig.mutmask not=? 0 {
         loop mutable_pass in [0..2) {
             loop i in [0..np) {
-                let mutable_arg=(CCWord(cd.sig.mutmask) & (1 << i)) not=? 0
+                let mutable_arg=(CCWord(cd.sig.mutmask) & (CCWord(1) << CCWord(i))) not=? 0
                 if mutable_arg =? (mutable_pass =? 0) {order.push(i)}
             }
         }
     }
     let cost:CCWord=0
+    let params_p=cd.sig.params.ptr
+    let mutmask=CCWord(cd.sig.mutmask)
     loop phase0 in [0..3) {
         let phase=CCWord(phase0)
         if phase >? 0 and (later & phase) =? 0 {continue}
         loop i0 in [0..np) {
             let i=if order.length >? 0 {CCWord(order.ptr[i0])} else {CCWord(i0)}
-            let a=CCWord(cd.args.ptr[i])
+            let a=CCWord(args_p[i])
             if a =? 0 {continue}
-            let cls:CCWord=if later =? 0 {0} else {arg_cls.ptr[i]}
+            let cls:CCWord=0
+            if later not=? 0 {
+                if np <=? 64 {
+                    let bit=CCWord(1) << i
+                    if (ctx_mask & bit) not=? 0 {cls=2}
+                    else if (lit_mask & bit) not=? 0 {cls=1}
+                } else {cls=arg_cls.ptr[i]}
+            }
             if cls not=? phase {continue}
-            let pt=CCWord(cd.sig.params.ptr[i])
-            if (CCWord(cd.sig.mutmask) & (1 << i)) not=? 0 and cls not=? 2 {
+            let pt=CCWord(params_p[i])
+            if (mutmask & (CCWord(1) << i)) not=? 0 and cls not=? 2 {
                 let r=call_mutable_cost(a pt @cd.binds @recv_fits i =? 0)
                 if r <? 0 {return -(i + 1)}
                 cost+=r

@@ -27,6 +27,36 @@ isolation_reset = ():
     isolation_limit = fns.len()
     isolation_node_limit = nodes.len()
 
+iso_set_child = (tab: mut i8[], ks: NK[], v: i8):
+    loop k in ks: tab[int(k)] = v
+iso_build_child_tab = () -> i8[]:
+    tab = fill(i8(-1), 128)
+    iso_set_child(tab, [NK.int_lit, NK.float_lit, NK.bool_lit, NK.none_lit, NK.null_lit, NK.ident, NK.dotname, NK.hole, NK.break_, NK.continue_, NK.pwild, NK.lambda], i8(0))
+    iso_set_child(tab, [NK.str_lit, NK.block, NK.tuple, NK.map_lit, NK.matrix, NK.pvariant], i8(16))
+    iso_set_child(tab, [NK.field, NK.unary, NK.not_, NK.unwrap, NK.narrow, NK.cast, NK.conv, NK.addr, NK.exprstmt, NK.return_, NK.defer_, NK.istype, NK.plit, NK.fnref], i8(1))
+    iso_set_child(tab, [NK.binary, NK.and_, NK.or_, NK.coalesce, NK.assign, NK.while_, NK.for_, NK.prange], i8(3))
+    iso_set_child(tab, [NK.if_, NK.iflet, NK.range], i8(7))
+    iso_set_child(tab, [NK.vardecl], i8(2))
+    iso_set_child(tab, [NK.array], i8(18))
+    iso_set_child(tab, [NK.call, NK.partial, NK.intrinsic, NK.match_], i8(17))
+    iso_set_child(tab, [NK.index, NK.pair], i8(19))
+    iso_set_child(tab, [NK.arm], i8(23))
+    tab
+iso_child_tab = iso_build_child_tab()
+iso_child_p = data(iso_child_tab)
+iso_build_plain_tab = () -> u8[]:
+    tab = fill(u8(0), 128)
+    ks: NK[] = [NK.int_lit, NK.float_lit, NK.bool_lit, NK.none_lit, NK.null_lit, NK.ident, NK.dotname, NK.hole, NK.break_, NK.continue_, NK.pwild, NK.str_lit, NK.block, NK.tuple, NK.matrix, NK.unary, NK.not_, NK.unwrap, NK.narrow, NK.exprstmt, NK.return_, NK.defer_, NK.plit, NK.and_, NK.or_, NK.coalesce, NK.assign, NK.while_, NK.for_, NK.prange, NK.if_, NK.iflet, NK.range, NK.vardecl, NK.array, NK.match_, NK.arm, NK.pvariant]
+    loop k in ks: tab[int(k)] = u8(1)
+    tab
+iso_plain_tab = iso_build_plain_tab()
+iso_plain_p = data(iso_plain_tab)
+iso_todo_pool: int[]
+isolation_node_children = (n: int) -> int:
+    tag = int(data(nodes)[n].kind)
+    if tag < 0 or tag >= 128: return -1
+    int(iso_child_p[tag])
+
 
 # Runtime child fields only: a=1, b=2, c=4, kids=16, kids2=32.
 # There is deliberately no generic a/b/c/d fallback. In particular for_.c/d
@@ -64,34 +94,50 @@ isolation_intrinsic = (id: IN) -> bool:
 # Hidden dependencies of one operation, not its evaluated children. Defaults
 # are already checked actuals; defers remain body children, so all exits count.
 isolation_effect = (n: int, edges: mut int[]) -> IsolationReason:
-    k = nodes[n].kind
-    if isolation_children(k) < 0: return .node
-    if k == .lambda or k == .partial: return .indirect
-    if k == .addr: return .raw
-    if k == .cast or k == .conv:
-        if raw_view(n): return .raw
-        if k == .conv and (nodes[n].aux == i32(int(CV.ptr)) or nodes[n].aux == i32(int(CV.bits))): return .raw
-    if k == .index or k == .field:
-        t = prune(ntype(int(nodes[n].a)))
-        if tkind(t) == .ptr: return .raw
-    if k == .call:
-        aux = int(nodes[n].aux)
-        if aux == 0: edges.push(int(nodes[n].sym))
-        else if aux != 2 and aux != 3: return .indirect
-    if k == .fnref:
-        if nodes[n].aux != 0: return .indirect
-        edges.push(int(nodes[n].sym))
-    if k == .pair and nodes[n].sym > 0: edges.push(int(nodes[n].sym))
-    # Map literals invoke the resolved insertion operation. Presence tests may
-    # replace a value-producing lookup with a different checked helper.
-    if k == .map_lit and nkids(n) > 0: edges.push(int(nodes[n].sym))
-    if (k == .binary and nodes[n].aux == 6 or k == .istype) and nodes[n].aux2 != 0:
-        edges.push(int(nodes[n].aux2))
-    if k == .binary and (nodes[n].aux == 4 or nodes[n].aux == 5): return .raw
-    if k == .intrinsic and not isolation_intrinsic(nodes[n].aux as IN): return .intrinsic
-    if k == .binary or k == .intrinsic:
-        loop f in value_helper_calls(n): edges.push(f)
-    .none_
+    nd = data(nodes) + n
+    k = nd[0].kind
+    ktag = int(k)
+    if ktag < 0 or ktag >= 128: return .node
+    if iso_plain_p[ktag] != u8(0): return .none_
+    match k:
+        lambda, partial: return .indirect
+        addr: return .raw
+        cast, conv:
+            if raw_view(n): return .raw
+            if k == .conv and (nodes[n].aux == i32(int(CV.ptr)) or nodes[n].aux == i32(int(CV.bits))): return .raw
+            return .none_
+        index, field:
+            t = prune(ntype(int(nodes[n].a)))
+            if tkind(t) == .ptr: return .raw
+            return .none_
+        call:
+            aux = int(nodes[n].aux)
+            if aux == 0: edges.push(int(nodes[n].sym))
+            else if aux != 2 and aux != 3: return .indirect
+            return .none_
+        fnref:
+            if nodes[n].aux != 0: return .indirect
+            edges.push(int(nodes[n].sym))
+            return .none_
+        pair:
+            if nodes[n].sym > 0: edges.push(int(nodes[n].sym))
+            return .none_
+        map_lit:
+            if nkids(n) > 0: edges.push(int(nodes[n].sym))
+            return .none_
+        istype:
+            if nodes[n].aux2 != 0: edges.push(int(nodes[n].aux2))
+            return .none_
+        binary:
+            if nodes[n].aux == 6 and nodes[n].aux2 != 0: edges.push(int(nodes[n].aux2))
+            if nodes[n].aux == 4 or nodes[n].aux == 5: return .raw
+            loop f in value_helper_calls(n): edges.push(f)
+            return .none_
+        intrinsic:
+            if not isolation_intrinsic(nodes[n].aux as IN): return .intrinsic
+            loop f in value_helper_calls(n): edges.push(f)
+            return .none_
+        else: return .node
 
 
 isolation_block = (f: int, reason: IsolationReason, witness: int):
@@ -135,7 +181,16 @@ isolation_scan = (f: int) -> int[]:
         if row.isolation != .none_: isolation_block(f, row.isolation, row.isolation_witness)
         loop edge in row.edges: edges.push(edge.callee)
         return edges
-    todo = [int(fns[f].body)]
+    todo = iso_todo_pool; iso_todo_pool = []; todo.clear()
+    todo.push(int(fns[f].body))
+    nodes_p = data(nodes)
+    lists_p = data(lists)
+    seen_p = data(isolation_seen)
+    locals_p = data(locals)
+    nlocals = locals.len()
+    has_own = ownership_decls.len() != 0
+    child_p = iso_child_p
+    plain_p = iso_plain_p
     loop todo.len() > 0:
         n = todo.pop()
         if n == 0: continue
@@ -143,42 +198,62 @@ isolation_scan = (f: int) -> int[]:
         if n < 0 or n >= isolation_node_limit:
             isolation_block(f, .node, n)
             break
-        if isolation_seen[n] == f: continue
-        isolation_seen[n] = f
-        k = nodes[n].kind
+        if seen_p[n] == f: continue
+        seen_p[n] = f
+        nd = nodes_p + n
+        k = nd[0].kind
+        ktag = int(k)
+        if ktag < 0 or ktag >= 128:
+            isolation_block(f, .node, n)
+            break
         if k == .ident:
-            if nodes[n].aux == i32(int(SK.global)):
+            if nd[0].aux == i32(2):
                 isolation_block(f, .global_, n)
                 break
-            if nodes[n].aux != i32(int(SK.local)):
+            if nd[0].aux != i32(1):
                 isolation_block(f, .node, n)
                 break
-            l = int(nodes[n].sym)
-            if l < 0 or l >= locals.len():
+            l = int(nd[0].sym)
+            if l < 0 or l >= nlocals:
                 isolation_block(f, .node, n)
                 break
-            if int(locals[l].flags) & (LF_CAPTURE | LF_ADDR) != 0:
+            if int(locals_p[l].flags) & (LF_CAPTURE | LF_ADDR) != 0:
                 isolation_block(f, .capture, n)
                 break
-        reason = isolation_effect(n, edges)
-        if reason != .none_:
-            isolation_block(f, reason, n)
-            break
-        # (a value with lifecycle hooks may run them as it is copied, moved or
-        # dropped; a declared local is dropped at its scope's end)
-        if ownership_decls.len() != 0:
-            held = if k == .vardecl and nodes[n].sym > 0 and not has_flag(n, NF_GLOBAL): int(locals[int(nodes[n].sym)].type) else: ntype(n)
+        if plain_p[ktag] == u8(0):
+            reason = isolation_effect(n, edges)
+            if reason != .none_:
+                isolation_block(f, reason, n)
+                break
+        if has_own:
+            held = if k == .vardecl and nd[0].sym > 0 and not has_flag(n, NF_GLOBAL): int(locals_p[int(nd[0].sym)].type) else: ntype(n)
             if not isolation_hooks(held, edges) or not isolation_hooks(ntype(n), edges):
                 isolation_block(f, .node, n)
                 break
-        mask = isolation_children(k)
-        if mask & 1 != 0: todo.push(int(nodes[n].a))
-        if mask & 2 != 0: todo.push(int(nodes[n].b))
-        if mask & 4 != 0: todo.push(int(nodes[n].c))
-        if mask & 16 != 0:
-            loop i in [0..nkids(n)): todo.push(kid(n, i))
-        if mask & 32 != 0:
-            loop i in [0..nkids2(n)): todo.push(kid2(n, i))
+        mask = int(child_p[ktag])
+        if mask > 0:
+            if mask & 1 != 0:
+                ca = int(nd[0].a)
+                if ca != 0: todo.push(ca)
+            if mask & 2 != 0:
+                cb = int(nd[0].b)
+                if cb != 0: todo.push(cb)
+            if mask & 4 != 0:
+                cc = int(nd[0].c)
+                if cc != 0: todo.push(cc)
+            if mask & 16 != 0:
+                l0 = int(nd[0].list)
+                nk = int(nd[0].nlist)
+                loop i in [0..nk):
+                    x = int(lists_p[l0 + i])
+                    if x != 0: todo.push(x)
+            if mask & 32 != 0:
+                l2 = int(nd[0].list2)
+                nk2 = int(nd[0].nlist2)
+                loop i in [0..nk2):
+                    x = int(lists_p[l2 + i])
+                    if x != 0: todo.push(x)
+    iso_todo_pool = todo
     edges
 
 
@@ -241,6 +316,18 @@ isolation_operation = (n: int) -> bool:
     # expressions. Classify those operations normally, but calls still demand
     # instances from the frozen checking generation (never late helpers).
     if n <= 0 or n >= nodes.len(): return false
+    nd = data(nodes) + n
+    k = nd[0].kind
+    ktag = int(k)
+    if ktag < 0 or ktag >= 128: return false
+    if iso_plain_p[ktag] != u8(0): return true
+    if k == .call:
+        aux = nd[0].aux
+        if aux == i32(0): return instance_isolated(int(nd[0].sym))
+        return aux == i32(2) or aux == i32(3)
+    if k == .index or k == .field:
+        return tkind(prune(ntype(int(nd[0].a)))) != .ptr
+    if k == .addr or k == .lambda or k == .partial: return false
     edges: int[]
     if isolation_effect(n, edges) != .none_: return false
     loop f in edges:

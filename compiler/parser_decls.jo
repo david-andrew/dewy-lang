@@ -162,17 +162,29 @@ parse_type_postfix = (t0: int) -> int:
     t
 
 parse_type = () -> int:
-    # (Array<int>, Map<str, int>, List<T>: angle brackets from TypeScript, Java, C#)
-    if pk() == .ident and pkn(1) == .lt and not space_before(ti + 1):
-        w = tok_src(ti)
-        hint = "a type's arguments go in brackets: `{w}[T]`"
-        if word_in(w, ["Array", "List", "Vec", "Vector", "ReadonlyArray", "ArrayList"]): hint = "an array type is `T[]` (`int[]`)"
-        else if word_in(w, ["Map", "Record", "Dictionary", "HashMap", "Dict"]): hint = "a map type is `\{K: V}` (`\{str: int}`)"
-        else if word_in(w, ["Set", "HashSet"]): hint = "a set is a map to bool: `\{str: bool}`"
-        else if word_in(w, ["Promise", "Optional", "Option", "Maybe"]): hint = "a value that may be missing is `T?`"
-        fatal(p_toks[ti + 1].pos, hint)
+    tp = p_toks
+    t0 = ti
+    k0 = tp[t0].kind
+    if k0 == .ident:
+        k1 = tp[t0 + 1].kind
+        if k1 != .dot and k1 != .lbrack and k1 != .question and k1 != .pipe and k1 != .lt:
+            iv = tp[t0].ival
+            if iv != id_cfn and iv != id_soa:
+                ti = t0 + 1
+                n = mk(.tname, tp[t0].pos)
+                nodes[n].name = i32(iv)
+                return n
+        # (Array<int>, Map<str, int>, List<T>: angle brackets from TypeScript, Java, C#)
+        if k1 == .lt and not space_before(t0 + 1):
+            w = tok_src(t0)
+            hint = "a type's arguments go in brackets: `{w}[T]`"
+            if word_in(w, ["Array", "List", "Vec", "Vector", "ReadonlyArray", "ArrayList"]): hint = "an array type is `T[]` (`int[]`)"
+            else if word_in(w, ["Map", "Record", "Dictionary", "HashMap", "Dict"]): hint = "a map type is `\{K: V}` (`\{str: int}`)"
+            else if word_in(w, ["Set", "HashSet"]): hint = "a set is a map to bool: `\{str: bool}`"
+            else if word_in(w, ["Promise", "Optional", "Option", "Maybe"]): hint = "a value that may be missing is `T?`"
+            fatal(tp[t0 + 1].pos, hint)
     t = parse_type_postfix(parse_type_primary())
-    if pk() != .pipe: return t
+    if tp[ti].kind != .pipe: return t
     u = mk(.tunion, nodes[t].pos)
     alts = [t]
     loop accept(.pipe): alts.push(parse_type_postfix(parse_type_primary()))

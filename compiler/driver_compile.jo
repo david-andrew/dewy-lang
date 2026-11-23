@@ -36,6 +36,7 @@ use 'isolation_ops.dewy'
 use 'lazy_force.dewy'
 use 'loops.jo'
 use 'lower.jo'
+use 'opt_workspace.dewy'
 use 'lower_determinism.dewy'
 use 'lower_entries.dewy'
 use 'lower_ffi.dewy'
@@ -146,6 +147,8 @@ compile = (path: str, out0: str) -> str:
     if not dbg_on and not watch_build and not repl_image and not lower_only: callback_prepare()
     t1 = time()
     ic_switch(IC_LOWER, IC_SHARED)
+    lower_epoch += 1
+    opt_allow_cse = opt_release or target_wasm
     roots: int[]
     loop f in init_fns: roots.push(lf_of_inst(f))
     # Source promises apply to checked bodies even when no caller reaches

@@ -146,6 +146,7 @@ hv_spoil = (p: int):
 hv_scan = (n: int):
     if n <= 0: return
     k = nodes[n].kind
+    if k == .ident or k == .int_lit or k == .bool_lit or k == .float_lit or k == .none_lit or k == .null_lit or k == .dotname or k == .hole or k == .break_ or k == .continue_: return
     if k == .lambda:
         hv_lambda = true
         return
@@ -170,14 +171,23 @@ hv_scan = (n: int):
         if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .setlen or id == .extend or id == .arrdata: hv_spoil(kid(n, 0))
     else if k == .addr or (k == .cast or k == .conv) and raw_view(n): hv_spoil(int(nodes[n].a))
     else if k == .for_ and has_flag(n, NF_MUT): hv_spoil(int(nodes[n].a))
-    fs = [int(nodes[n].a), int(nodes[n].b)]
-    if k != .for_: fs = [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), if k == .partial: 0 else: int(nodes[n].d)]
-    loop c in fs: hv_scan(c)
+    ca = int(nodes[n].a)
+    cb = int(nodes[n].b)
+    if ca > 0: hv_scan(ca)
+    if cb > 0: hv_scan(cb)
+    if k != .for_:
+        cc = int(nodes[n].c)
+        if cc > 0: hv_scan(cc)
+        if k != .partial:
+            cd = int(nodes[n].d)
+            if cd > 0: hv_scan(cd)
     loop i in [0..nkids(n)):
         c = kid(n, i)
         if has_flag(c, NF_MUT): hv_spoil(c)
-        hv_scan(c)
-    loop i in [0..nkids2(n)): hv_scan(kid2(n, i))
+        if c > 0: hv_scan(c)
+    loop i in [0..nkids2(n)):
+        c = kid2(n, i)
+        if c > 0: hv_scan(c)
 
 hv_part = (p: int) -> bool:
     k = nodes[p].kind
@@ -338,60 +348,129 @@ ug_fresh = (n: int, t: int) -> bool:
     if nodes[n].kind != .array: return false
     nodes[n].b != 0 or nkids(n) == 0 or not all_const(n, int(types[prune(t)].elem))
 
-ug_scan = (n: int, ctx: int):
+ug_rem = -1
+ug_stack: int[]
+ug_scan = (root: int, root_ctx: int):
     # 0: value can escape, 1: only its storage is inspected/changed,
     # -1: an address or mutable argument can expose the containing storage.
-    if n == 0: return
-    k = nodes[n].kind
-    if k == .lambda: return  # checked bodies are scanned through fns
-    if k == .ident:
-        if nodes[n].aux == i32(int(SK.global)):
-            g = int(nodes[n].sym)
-            if ctx != 1 and g < uniq_globals.len(): uniq_globals[g] = false
-        else if nodes[n].aux == i32(int(SK.local)):
-            g = alias_global(int(nodes[n].sym))
-            if g >= 0 and g < uniq_globals.len(): uniq_globals[g] = false
-        return
-    if k == .index:
-        base = int(nodes[n].a)
-        context = if ctx == -1: -1 else: if nodes[n].aux == 1: 0 else: 1
-        ug_scan(base, context)
-        ug_scan(int(nodes[n].b), 0)
-        return
-    if k == .addr:
-        ug_scan(int(nodes[n].a), -1)
-        return
-    if k == .assign:
-        a = int(nodes[n].a)
-        b = int(nodes[n].b)
-        if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.global)) and tkind(ntype(a)) == .array and ug_fresh(b, ntype(a)):
-            ug_scan(a, 1)
-        else: ug_scan(a, 0)
-        ug_scan(b, 0)
-        return
-    if k == .vardecl and has_flag(n, NF_ALIASDECL):
-        ug_scan(int(nodes[n].b), -1)
-        return
-    if k == .intrinsic:
-        id = nodes[n].aux as IN
-        if nkids(n) > 0 and (id == .len or id == .arrcap or id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend):
-            arg = kid(n, 0)
-            context = if ctx == -1: -1 else: 1
-            ug_scan(arg, context)
-            loop i in [1..nkids(n)): ug_scan(kid(n, i), 0)
-            return
-    context = if ctx == -1: -1 else: 0
-    ug_scan(int(nodes[n].a), context)
-    ug_scan(int(nodes[n].b), context)
-    if k != .for_:
-        ug_scan(int(nodes[n].c), context)
-        if k != .partial: ug_scan(int(nodes[n].d), context)
-    mm = if k == .call or k == .pair: checked_call_mutmask(n) else: 0
-    loop i in [0..nkids(n)):
-        arg = kid(n, i)
-        arg_context = if ctx == -1 or mm & (1 << i) != 0: -1 else: 0
-        ug_scan(arg, arg_context)
-    loop i in [0..nkids2(n)): ug_scan(kid2(n, i), 0)
+    if root == 0 or ug_rem == 0: return
+    if ug_stack.len() < 256: ug_stack.resize(256)
+    st = data(ug_stack)
+    scap = ug_stack.len()
+    ns = data(nodes)
+    lp = data(lists)
+    locp = data(locals)
+    ugp = data(uniq_globals)
+    uglen = uniq_globals.len()
+    sp = 1
+    st[0] = (root << 2) | (root_ctx + 1)
+    loop sp > 0 and ug_rem != 0:
+        sp -= 1
+        item = st[sp]
+        n = item >> 2
+        ctx = (item & 3) - 1
+        np = ns + n
+        k = np.kind
+        match k:
+            lambda, int_lit, float_lit, bool_lit, none_lit, null_lit, break_, continue_, dotname: continue
+            str_lit:
+                if np.aux == 0: continue
+            ident:
+                if np.aux == i32(int(SK.global)):
+                    g = int(np.sym)
+                    if ctx != 1 and g < uglen and ugp[g]:
+                        ugp[g] = false
+                        if ug_rem > 0: ug_rem -= 1
+                else if np.aux == i32(int(SK.local)):
+                    sym = int(np.sym)
+                    if (int(locp[sym].flags) & LF_ALIAS) != 0:
+                        g = alias_global(sym)
+                        if g >= 0 and g < uglen and ugp[g]:
+                            ugp[g] = false
+                            if ug_rem > 0: ug_rem -= 1
+                continue
+            index:
+                if sp + 2 > scap: scap = (sp + 2) * 2; ug_stack.resize(scap); st = data(ug_stack)
+                b = int(np.b)
+                if b != 0: st[sp] = (b << 2) | 1; sp += 1
+                a = int(np.a)
+                if a != 0:
+                    ac = if ctx == -1: 0 else if np.aux == 1: 1 else: 2
+                    st[sp] = (a << 2) | ac; sp += 1
+                continue
+            addr:
+                a = int(np.a)
+                if a != 0:
+                    if sp + 1 > scap: scap = (sp + 1) * 2; ug_stack.resize(scap); st = data(ug_stack)
+                    st[sp] = a << 2; sp += 1
+                continue
+            assign:
+                if sp + 2 > scap: scap = (sp + 2) * 2; ug_stack.resize(scap); st = data(ug_stack)
+                a = int(np.a)
+                b = int(np.b)
+                if b != 0: st[sp] = (b << 2) | 1; sp += 1
+                if a != 0:
+                    ac = if ns[a].kind == .ident and ns[a].aux == i32(int(SK.global)) and tkind(ntype(a)) == .array and ug_fresh(b, ntype(a)): 2 else: 1
+                    st[sp] = (a << 2) | ac; sp += 1
+                continue
+            vardecl:
+                if (int(np.flags) & NF_ALIASDECL) != 0:
+                    b = int(np.b)
+                    if b != 0:
+                        if sp + 1 > scap: scap = (sp + 1) * 2; ug_stack.resize(scap); st = data(ug_stack)
+                        st[sp] = b << 2; sp += 1
+                    continue
+            intrinsic:
+                id = np.aux as IN
+                nk = int(np.nlist)
+                if nk > 0 and (id == .len or id == .arrcap or id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend):
+                    if sp + nk > scap: scap = (sp + nk) * 2; ug_stack.resize(scap); st = data(ug_stack)
+                    base = int(np.list)
+                    i = nk - 1
+                    loop i >= 1:
+                        arg = int(lp[base + i])
+                        if arg != 0: st[sp] = (arg << 2) | 1; sp += 1
+                        i -= 1
+                    arg0 = int(lp[base])
+                    if arg0 != 0:
+                        c0 = if ctx == -1: 0 else: 2
+                        st[sp] = (arg0 << 2) | c0; sp += 1
+                    continue
+            _: pass
+        sub_tag = if ctx == -1: 0 else: 1
+        nk = int(np.nlist)
+        nk2 = int(np.nlist2)
+        if sp + nk + nk2 + 4 > scap:
+            scap = (sp + nk + nk2 + 4) * 2
+            ug_stack.resize(scap)
+            st = data(ug_stack)
+        if nk2 > 0:
+            base2 = int(np.list2)
+            i = nk2 - 1
+            loop i >= 0:
+                arg = int(lp[base2 + i])
+                if arg != 0: st[sp] = (arg << 2) | 1; sp += 1
+                i -= 1
+        if nk > 0:
+            mm = if k == .call or k == .pair: checked_call_mutmask(n) else: 0
+            base = int(np.list)
+            i = nk - 1
+            loop i >= 0:
+                arg = int(lp[base + i])
+                if arg != 0:
+                    tag = if ctx == -1 or (mm & (1 << i)) != 0: 0 else: 1
+                    st[sp] = (arg << 2) | tag; sp += 1
+                i -= 1
+        if k != .for_:
+            if k != .partial:
+                d = int(np.d)
+                if d != 0: st[sp] = (d << 2) | sub_tag; sp += 1
+            c = int(np.c)
+            if c != 0: st[sp] = (c << 2) | sub_tag; sp += 1
+        b = int(np.b)
+        if b != 0: st[sp] = (b << 2) | sub_tag; sp += 1
+        a = int(np.a)
+        if a != 0: st[sp] = (a << 2) | sub_tag; sp += 1
 
 find_unique_globals = (closed: bool):
     uniq_globals.clear()
@@ -399,7 +478,7 @@ find_unique_globals = (closed: bool):
     # reference prelude globals, so those are excluded from this closed world.
     if not closed: return
     uniq_globals.resize(globals.len())
-    any = false
+    ug_rem = 0
     loop g in global_ids:
         if globals[g].state != 2 or globals[g].is_const or modules[int(globals[g].mod)].is_prelude: continue
         t = prune(int(globals[g].type))
@@ -407,17 +486,18 @@ find_unique_globals = (closed: bool):
         if types[t].kind != .array or nkids(d) != 0: continue
         if ug_fresh(int(nodes[d].b), t):
             uniq_globals[g] = true
-            any = true
-    if not any: return
+            ug_rem += 1
+    if ug_rem <= 0: ug_rem = -1; return
     # Initializers commonly expose every candidate (for example by passing a
     # global array to a function). Disprove those before walking other bodies.
-    loop fi in init_fns: ug_scan(int(fns[fi].body), 0)
-    any = false
-    loop g in global_ids:
-        if uniq_globals[g]: any = true
-    if not any: return
+    loop fi in init_fns:
+        if ug_rem <= 0: ug_rem = -1; return
+        ug_scan(int(fns[fi].body), 0)
+    if ug_rem <= 0: ug_rem = -1; return
     loop f in fns:
+        if ug_rem <= 0: ug_rem = -1; return
         if f.state == 2 and not f.no_user_globals: ug_scan(int(f.body), 0)
+    ug_rem = -1
 
 is_uniq_array = (e: int) -> bool:
     if nodes[e].kind != .ident: return false

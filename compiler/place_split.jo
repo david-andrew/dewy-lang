@@ -31,15 +31,22 @@ place_given = (v: int, receiver: int) -> bool:
 place_returns_in = (n: int, receiver: int, places: mut int[], values: mut int[]):
     if n == 0: return
     k = nodes[n].kind
-    if k == .lambda or k == .fn_: return
-    if k == .return_:
-        if place_given(int(nodes[n].a), receiver): places.push(n)
-        else: values.push(n)
-    place_returns_in(int(nodes[n].a), receiver, places, values)
-    place_returns_in(int(nodes[n].b), receiver, places, values)
-    place_returns_in(kid_c(n), receiver, places, values)
-    place_returns_in(kid_d(n), receiver, places, values)
-    loop child in kids(n): place_returns_in(child, receiver, places, values)
+    match k:
+        lambda, fn_, int_lit, float_lit, str_lit, bool_lit, none_lit, null_lit, ident, dotname, hole, break_, continue_: return
+        return_:
+            if place_given(int(nodes[n].a), receiver): places.push(n)
+            else: values.push(n)
+        _: pass
+    ca = int(nodes[n].a)
+    if ca != 0: place_returns_in(ca, receiver, places, values)
+    cb = int(nodes[n].b)
+    if cb != 0: place_returns_in(cb, receiver, places, values)
+    cc = kid_c(n)
+    if cc != 0: place_returns_in(cc, receiver, places, values)
+    cd = kid_d(n)
+    if cd != 0: place_returns_in(cd, receiver, places, values)
+    nk = nkids(n)
+    loop ci in [0..nk): place_returns_in(kid(n, ci), receiver, places, values)
 
 # Splits a method that lends a place (see the top); the functions it adds, to declare as rows.
 place_method_split = (fn_: int, receiver: int, name: str) -> int[]:

@@ -3,13 +3,13 @@ from p"expression_types.dewy" import (ntype)
 
 from p"ast.jo" import (nodes)
 from p"checker_tokens.dewy" import (Tok)
-from p"facts.jo" import (FACT_CAP FACT_MAP_GROWN FACT_MAP_POSITIONS FactBinding FactProjection FactState fact_grown_roots fact_implications fact_terms)
+from p"facts.jo" import (FACT_CAP FACT_MAP_GROWN FACT_MAP_POSITIONS FactBinding FactIndexes FactProjection FactState fact_grown_roots fact_implications fact_terms)
 from p"facts_values.dewy" import (fact_type fact_pair_key)
 from p"facts_compare.dewy" import (fact_distance)
 from p"facts_lengths.dewy" import (fact_difference)
 from p"facts_index_writes.dewy" import (fact_bind fact_constant fact_new fact_rebind)
 from p"facts_index_writes.dewy" import (fact_add_difference fact_add_projection fact_add_value fact_index_put fact_index_sized)
-from p"facts_value_queries.dewy" import (fact_binding fact_bound fact_index_get fact_slot)
+from p"facts_value_queries.dewy" import (fact_binding fact_bound fact_index_get fact_slot fact_slot_ref fact_slot_slow_raw)
 from p"facts_projection_queries.dewy" import (fact_projection_after fact_projection_find fact_projection_first)
 from p"facts_row_queries.dewy" import (fact_difference_head fact_difference_next)
 from p"facts_ranges.dewy" import (fact_host_endpoint fact_host_value)
@@ -21,6 +21,78 @@ from p"refinement_types.dewy" import (FactBound FactReason FactTerm)
 from p"types.jo" import (T_INT T_MATH_INT T_U64 tkind)
 
 JoinWord:type=int64<overflow='wrap'>
+let fj_same_gen:array<int32>=[]
+let fj_same_idx:array<int32>=[]
+let fj_same_g:int32=0
+let fj_ren_g:int32=0
+let fj_lm_gen:array<int32>=[]
+let fj_lm_val:array<int32>=[]
+let fj_rm_gen:array<int32>=[]
+let fj_rm_val:array<int32>=[]
+let fj_lr_gen:array<int32>=[]
+let fj_lr_val:array<int32>=[]
+let fj_rl_gen:array<int32>=[]
+let fj_rl_val:array<int32>=[]
+let fj_left_pool:array<int64>=[]
+let fj_right_pool:array<int64>=[]
+let fj_merged_pool:array<int64>=[]
+let fj_chg_l_pool:array<int64>=[]
+let fj_chg_r_pool:array<int64>=[]
+let fj_chg_idx_pool:array<int64>=[]
+let fj_pairs_pool:array<int64>=[]
+let fj_elem_keys=dict<[int64 int64] int64>()
+
+fj_ensure_same=(need:JoinWord):>int32=>$unsafe {
+    if fj_same_gen.length <? need {
+        let sz=need + 256
+        fj_same_gen.resize(sz)
+        fj_same_idx.resize(sz)
+    }
+    fj_same_g=int32<overflow='wrap'>(int64(fj_same_g) + 1)
+    if fj_same_g =? int32(0) {
+        mem_set(fj_same_gen.ptr as ptr<uint8> 0 fj_same_gen.length * 4)
+        fj_same_g=int32(1)
+    }
+    fj_same_g
+}
+
+fj_ensure_ren=(need:JoinWord):>int32=>$unsafe {
+    if fj_lm_gen.length <? need {
+        let sz=need + 256
+        fj_lm_gen.resize(sz); fj_lm_val.resize(sz)
+        fj_rm_gen.resize(sz); fj_rm_val.resize(sz)
+        fj_lr_gen.resize(sz); fj_lr_val.resize(sz)
+        fj_rl_gen.resize(sz); fj_rl_val.resize(sz)
+    }
+    fj_ren_g=int32<overflow='wrap'>(int64(fj_ren_g) + 1)
+    if fj_ren_g =? int32(0) {
+        let n=fj_lm_gen.length * 4
+        mem_set(fj_lm_gen.ptr as ptr<uint8> 0 n)
+        mem_set(fj_rm_gen.ptr as ptr<uint8> 0 n)
+        mem_set(fj_lr_gen.ptr as ptr<uint8> 0 n)
+        mem_set(fj_rl_gen.ptr as ptr<uint8> 0 n)
+        fj_ren_g=int32(1)
+    }
+    fj_ren_g
+}
+
+fj_ren_lookup=(v:JoinWord gen_p:ptr<int32> val_p:ptr<int32> rg:int32 cap:JoinWord @shared:FactState):>JoinWord=>$unsafe {
+    if v >=? 0 and v <? cap and gen_p[v] =? rg {return JoinWord(val_p[v])}
+    if fact_slot_ref(@shared v) >=? 0 {return v}
+    0
+}
+
+fj_ren_lookup_raw=(v:JoinWord gen_p:ptr<int32> val_p:ptr<int32> rg:int32 cap:JoinWord ids:ptr<int64> n_ids:JoinWord slots_p:ptr<int64> slots_n:JoinWord gterms:ptr<FactTerm> ngterms:JoinWord):>JoinWord=>$unsafe {
+    if v >=? 0 and v <? cap and gen_p[v] =? rg {return JoinWord(val_p[v])}
+    if n_ids =? 0 {return 0}
+    if v >? 0 and v <? ngterms {
+        let hint:JoinWord=gterms[v].slot
+        if hint >=? 0 and hint <? n_ids and ids[hint] =? v {return v}
+    }
+    if fact_slot_slow_raw(slots_p slots_n v n_ids ids) >=? 0 {return v}
+    0
+}
+
 fact_hull=(a:FactBound b:FactBound at:JoinWord):>FactBound=>{
     FactBound(min(a.lo b.lo) max(a.hi b.hi) (a.nz or a.lo >? 0 or a.hi <? 0) and (b.nz or b.lo >? 0 or b.hi <? 0) fact_hull_reason(at) at a.wide or b.wide)
 }
@@ -28,13 +100,25 @@ fact_hull_reason=(at:JoinWord):>FactReason=>$unsafe {
     if at not=? 0 and (nodes.ptr[at].kind =? 'while_' or nodes.ptr[at].kind =? 'for_') {FactReason.loop_} else {FactReason.join}
 }
 # Every value's interval hulled at once: the reason is the join point's.
-fact_hull_all=(@s:FactState a:FactState b:FactState count:JoinWord at:JoinWord):>void=>{
+fact_hull_all=(@s:FactState a:FactState b:FactState count:JoinWord at:JoinWord):>void=>$unsafe {
+    let ap=a.bounds.ptr
+    let bp=b.bounds.ptr
+    if ap =? bp {return}
     let reason=fact_hull_reason(at)
+    let unique=false
+    let sp:ptr<FactBound>=uint64(0) as ptr<FactBound>
     loop i in [0..count) {
-        let x=a.bounds[i]
-        let y=b.bounds[i]
-        if x =? y {continue}
-        s.bounds[i]=FactBound(min(x.lo y.lo) max(x.hi y.hi) (x.nz or x.lo >? 0 or x.hi <? 0) and (y.nz or y.lo >? 0 or y.hi <? 0) reason at x.wide or y.wide)
+        let xp=ap + i
+        let yp=bp + i
+        if xp[0].lo =? yp[0].lo and xp[0].hi =? yp[0].hi and xp[0].nz =? yp[0].nz and xp[0].wide =? yp[0].wide and xp[0].reason =? yp[0].reason and xp[0].witness =? yp[0].witness {continue}
+        let h=FactBound(min(xp[0].lo yp[0].lo) max(xp[0].hi yp[0].hi) (xp[0].nz or xp[0].lo >? 0 or xp[0].hi <? 0) and (yp[0].nz or yp[0].lo >? 0 or yp[0].hi <? 0) reason at xp[0].wide or yp[0].wide)
+        if not unique {
+            s.bounds[i]=h
+            sp=s.bounds.ptr
+            unique=true
+        } else {
+            sp[i]=h
+        }
     }
 }
 # A phi keeps a shared representation, including a fixed word's finite
@@ -107,20 +191,36 @@ fact_host_finite=(s:FactState v:JoinWord):>bool=>{
     if v =? 0 or fact_type(fact_terms[v].type) =? T_U64 {return false}
     fact_host_value(s v) or fact_host_endpoint(s v false) and fact_host_endpoint(s v true)
 }
-fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>{
+fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
     if not a.live {return b}
     if not b.live {return a}
     # Identical frames need only an interval hull. In particular, branching
     # on a captured guard need not rebuild every immutable projection index.
-    if a.ids =? b.ids and a.bindings =? b.bindings and a.projections =? b.projections and a.differences =? b.differences and a.conditional =? b.conditional {
-        let s=a
-        s.full=false
-        fact_hull_all(@s a b s.bounds.length at)
-        return s
+    let same_ids=a.ids.length =? b.ids.length and (a.ids.ptr =? b.ids.ptr or a.ids =? b.ids)
+    let same_cond=a.conditional.length =? b.conditional.length and (a.conditional.ptr =? b.conditional.ptr or a.conditional =? b.conditional)
+    let same_bind=false
+    let bind_checked=false
+    let same_proj=false
+    let proj_checked=false
+    if same_ids and same_cond {
+        same_bind=a.bindings.length =? b.bindings.length and (a.bindings.ptr =? b.bindings.ptr or a.bindings =? b.bindings)
+        bind_checked=true
+        if same_bind {
+            same_proj=a.projections.length =? b.projections.length and (a.projections.ptr =? b.projections.ptr or a.projections =? b.projections)
+            proj_checked=true
+            if same_proj and a.differences.length =? b.differences.length and (a.differences.ptr =? b.differences.ptr or a.differences =? b.differences) {
+                let s=a
+                s.cmp_mask=JoinWord(a.cmp_mask) | JoinWord(b.cmp_mask)
+                s.full=false
+                fact_hull_all(@s a b s.bounds.length at)
+                return s
+            }
+        }
     }
-    let s=FactState()
+    let s=FactState(index=[FactIndexes()])
+    s.cmp_mask=JoinWord(a.cmp_mask) | JoinWord(b.cmp_mask)
     # (both paths usually inherit one list: keep it without hashing)
-    if a.conditional =? b.conditional {s.conditional=a.conditional}
+    if same_cond {s.conditional=a.conditional}
     else if a.conditional.length >? 0 and b.conditional.length >? 0 {
         let evidence_index=dict<ResultEvidence bool>()
         loop evidence in b.conditional {evidence_index[evidence]=true}
@@ -130,7 +230,9 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>{
     }
     # Keep immutable evaluations shared by both paths, including snapshots.
     let shared=true
-    if a.ids =? b.ids {
+    let ids_match_a=same_ids
+    let ids_match_b=same_ids
+    if same_ids {
         s.ids=a.ids
         s.index[0].slots=a.index[0].slots
         s.bounds=a.bounds
@@ -140,127 +242,228 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>{
         # Both paths usually extend one entry frame with their own values: the
         # shared values are then a's prefix, kept with a's index. O(V).
         let k:JoinWord=0
-        let common=min(a.ids.length b.ids.length)
-        loop k <? common and a.ids[k] =? b.ids[k] {k += 1}
+        let alen:JoinWord=a.ids.length
+        let blen:JoinWord=b.ids.length
+        let common=min(alen blen)
+        let aids=a.ids.ptr
+        let bids=b.ids.ptr
+        loop k <? common and aids[k] =? bids[k] {k += 1}
         let prefix=true
-        loop i in [k..a.ids.length) {
-            if fact_slot(b a.ids[i]) >=? 0 {prefix=false; break}
+        if k <? alen {
+            let sorted=a.index[0].slots.length =? 0 and b.index[0].slots.length =? 0
+            let disjoint=sorted and (k =? blen or aids[alen - 1] <? bids[k] or aids[k] >? bids[blen - 1])
+            if not disjoint {
+                loop i in [k..alen) {
+                    if fact_slot(b aids[i]) >=? 0 {prefix=false; break}
+                }
+            }
         }
         if prefix {
-            s.ids=a.ids
-            s.ids.truncate(k)
-            s.bounds=a.bounds
-            s.bounds.truncate(k)
+            if k <? alen {
+                s.ids=a.ids[0..k)
+                s.bounds=a.bounds[0..k)
+            }
+            else {
+                s.ids=a.ids
+                s.bounds=a.bounds
+                ids_match_a=true
+            }
+            if k =? blen {ids_match_b=true}
             s.index[0].slots=a.index[0].slots
             fact_hull_all(@s a b k at)
         }
         else {
             shared=false
-            loop i in [0..a.ids.length) {
-                let j=fact_slot(b a.ids[i])
-                if j >=? 0 {fact_add_value(@s a.ids[i] fact_hull(a.bounds[i] b.bounds[j] at))}
+            let abp=a.bounds.ptr
+            let bbp=b.bounds.ptr
+            loop i in [0..alen) {
+                let j=fact_slot(b aids[i])
+                if j >=? 0 {fact_add_value(@s aids[i] fact_hull(abp[i] bbp[j] at))}
             }
         }
     }
     # When one path's projections are the other's first ones (the other path
     # only added projections), the shared projections are exactly the shorter
     # list: keep it with its index. O(P) comparisons, no hashing.
-    let kp:JoinWord=0
-    let common_projections=min(a.projections.length b.projections.length)
-    loop kp <? common_projections and a.projections[kp] =? b.projections[kp] {kp += 1}
     let from_:JoinWord=-1
-    if shared and (kp =? a.projections.length or kp =? b.projections.length) {
-        from_=if kp =? b.projections.length {1} else {0}
-        let shorter=if from_ =? 1 {b.projections} else {a.projections}
-        loop p in shorter {
-            if fact_slot(s p.base) <? 0 or fact_slot(s p.value) <? 0 {from_=-1; break}
+    if shared and not proj_checked {
+        same_proj=a.projections.length =? b.projections.length and (a.projections.ptr =? b.projections.ptr or a.projections =? b.projections)
+    }
+    if same_proj and shared {
+        from_=0
+        if not ids_match_a {
+            let ap=a.projections.ptr
+            loop i in [0..a.projections.length) {
+                if fact_slot_ref(@s ap[i].base) <? 0 or fact_slot_ref(@s ap[i].value) <? 0 {from_=-1; break}
+            }
+        }
+    }
+    else {
+        let kp:JoinWord=0
+        let ap=a.projections.ptr
+        let bp=b.projections.ptr
+        let common_projections=min(a.projections.length b.projections.length)
+        loop kp <? common_projections and ap[kp] =? bp[kp] {kp += 1}
+        if shared and (kp =? a.projections.length or kp =? b.projections.length) {
+            from_=if kp =? b.projections.length {1} else {0}
+            let skip_check=if from_ =? 1 {ids_match_b} else {ids_match_a}
+            if not skip_check {
+                if from_ =? 1 {
+                    loop i in [0..b.projections.length) {
+                        if fact_slot_ref(@s bp[i].base) <? 0 or fact_slot_ref(@s bp[i].value) <? 0 {from_=-1; break}
+                    }
+                } else {
+                    loop i in [0..a.projections.length) {
+                        if fact_slot_ref(@s ap[i].base) <? 0 or fact_slot_ref(@s ap[i].value) <? 0 {from_=-1; break}
+                    }
+                }
+            }
         }
     }
     if from_ >=? 0 {
-        let source=if from_ =? 1 {b} else {a}
-        s.projections=source.projections
-        s.index[0].projection_index=source.index[0].projection_index
-        s.index[0].projection_head=source.index[0].projection_head
-        s.index[0].projection_tail=source.index[0].projection_tail
-        s.index[0].projection_next=source.index[0].projection_next
-        s.index[0].projection_value=source.index[0].projection_value
+        let src=if from_ =? 1 {b} else {a}
+        s.projections=src.projections
+        s.proj_base_mask=src.proj_base_mask
+        s.index[0].projection_index=src.index[0].projection_index
+        s.index[0].projection_head=src.index[0].projection_head
+        s.index[0].projection_tail=src.index[0].projection_tail
+        s.index[0].projection_next=src.index[0].projection_next
+        s.index[0].projection_value=src.index[0].projection_value
     }
-    else {
+    else if b.projections.length >? 0 {
         # (b holds p when p is on b's chain for p.base: every projection is chained)
-        loop p in a.projections {
-            if fact_slot(s p.base) <? 0 or fact_slot(s p.value) <? 0 {continue}
+        let ap=a.projections.ptr
+        let bp=b.projections.ptr
+        let b_pmask0:JoinWord=b.proj_base_mask
+        loop i in [0..a.projections.length) {
+            let p=ap[i]
+            if (b_pmask0 & (JoinWord(1) << (JoinWord(p.base) & 63))) =? 0 {continue}
+            if fact_slot_ref(@s p.base) <? 0 or fact_slot_ref(@s p.value) <? 0 {continue}
             let qi=fact_projection_first(b p.base)
             loop qi >=? 0 {
-                if b.projections[qi] =? p {break}
+                if bp[qi] =? p {break}
                 qi=fact_projection_after(b qi)
             }
             if qi >=? 0 {fact_add_projection(@s p)}
         }
     }
-    if a.bindings =? b.bindings and a.projections =? b.projections {
+    if same_proj and (same_bind or (not bind_checked and a.bindings.length =? b.bindings.length and (a.bindings.ptr =? b.bindings.ptr or a.bindings =? b.bindings))) {
         s.bindings=a.bindings
         s.index[0].roots=a.index[0].roots
         fact_join_shared_rows(@s a b)
         return s
     }
     let renamed=false
-    let left:array<int64>=[]
-    let right:array<int64>=[]
-    let merged:array<int64>=[]
-    # (merged value pairs: a scan while few, then an open-address index;
-    # values are below 2^31)
-    let pairs:array<int64>=[]
+    let left=fj_left_pool; fj_left_pool=[]; left.clear()
+    let right=fj_right_pool; fj_right_pool=[]; right.clear()
+    let merged=fj_merged_pool; fj_merged_pool=[]; merged.clear()
+    let chg_l=fj_chg_l_pool; fj_chg_l_pool=[]; chg_l.clear()
+    let chg_r=fj_chg_r_pool; fj_chg_r_pool=[]; chg_r.clear()
+    let chg_idx=fj_chg_idx_pool; fj_chg_idx_pool=[]; chg_idx.clear()
+    # (merged value pairs: identity pairs (v, v) use O(1) generation stamp;
+    # changed pairs scan a tiny list, then an open-address index)
+    let pairs=fj_pairs_pool; fj_pairs_pool=[]; pairs.clear()
+    let term_cap:JoinWord=fact_terms.length + 1
+    let sg=fj_ensure_same(term_cap)
+    let same_gen_p=fj_same_gen.ptr
+    let same_idx_p=fj_same_idx.ptr
     # Both paths keep their common ancestor's bindings in its order (a place
     # is appended when first bound): the aligned positions merge in place,
     # keeping a's positions and so a's root index. O(1) each, no hashing
     # unless the values differ.
     let aligned:JoinWord=0
+    let abp=a.bindings.ptr
+    let bbp=b.bindings.ptr
     let common=min(a.bindings.length b.bindings.length)
-    loop aligned <? common and a.bindings[aligned].place =? b.bindings[aligned].place {aligned += 1}
-    s.bindings=a.bindings
-    s.bindings.truncate(aligned)
+    loop aligned <? common {
+        let ap=abp + aligned
+        let bp=bbp + aligned
+        if ap[0].place.declaration not=? bp[0].place.declaration or ap[0].place.root not=? bp[0].place.root or ap[0].place.owner not=? bp[0].place.owner or ap[0].place.parent not=? bp[0].place.parent or ap[0].place.projection not=? bp[0].place.projection or ap[0].place.selector not=? bp[0].place.selector {break}
+        aligned += 1
+    }
+    if aligned <? a.bindings.length {s.bindings=a.bindings[0..aligned)} else {s.bindings=a.bindings}
     s.index[0].roots=a.index[0].roots
     loop i in [0..aligned) {
-        let binding=a.bindings[i]
-        let other=b.bindings[i].value
-        let v=binding.value
-        if v not=? other {renamed=true}
-        let pair=fact_pair_key(v other)
-        let prior=fact_pair_find(left right pairs v other)
-        if prior >=? 0 {v=merged[prior]}
-        else if v not=? other {
+        let ap=abp + i
+        let bp=bbp + i
+        let bval=ap[0].value
+        let other=bp[0].value
+        if bval =? other {
+            if ap[0].event not=? 0 and bp[0].event not=? ap[0].event {
+                s.bindings[i]=FactBinding(ap[0].place bval)
+            }
+            if bval >=? 0 and bval <? term_cap {
+                if same_gen_p[bval] not=? sg {
+                    same_gen_p[bval]=sg
+                    same_idx_p[bval]=int32<overflow='wrap'>(left.length)
+                    left.push(bval)
+                    right.push(bval)
+                    merged.push(bval)
+                }
+            } else {
+                let prior=fact_pair_find(chg_l chg_r pairs bval bval)
+                if prior <? 0 {
+                    let pair=fact_pair_key(bval bval)
+                    fact_pair_add(chg_l chg_r @pairs pair)
+                    chg_l.push(bval); chg_r.push(bval); chg_idx.push(left.length)
+                    left.push(bval); right.push(bval); merged.push(bval)
+                }
+            }
+            continue
+        }
+        renamed=true
+        let v=bval
+        let prior=fact_pair_find(chg_l chg_r pairs bval other)
+        if prior >=? 0 {v=merged.ptr[chg_idx.ptr[prior]]}
+        else {
             v=fact_new(@s fact_hull(fact_bound(a v) fact_bound(b other) at) fact_join_term(a v b other))
-            fact_join_grown(@s a binding.value b other v)
+            fact_join_grown(@s a bval b other v)
         }
         # (the tombstone survives when both paths share it)
-        let r=if v =? binding.value and b.bindings[i].event =? binding.event and binding.event not=? 0 {binding} else {FactBinding(binding.place v)}
-        if r not=? binding {s.bindings[i]=r}
+        if v not=? bval or (ap[0].event not=? 0 and bp[0].event not=? ap[0].event) {
+            s.bindings[i]=FactBinding(ap[0].place v)
+        }
         if prior <? 0 {
-            fact_pair_add(left right @pairs pair)
-            left.push(binding.value)
+            let pair=fact_pair_key(bval other)
+            fact_pair_add(chg_l chg_r @pairs pair)
+            chg_l.push(bval); chg_r.push(other); chg_idx.push(left.length)
+            left.push(bval)
             right.push(other)
             merged.push(v)
         }
     }
     loop ai in [aligned..a.bindings.length) {
-        let binding=a.bindings[ai]
+        let binding=abp[ai]
         let j=fact_binding(b binding.place)
         if j <? 0 {continue}
-        let other=b.bindings[j].value
-        let v=binding.value
-        if v not=? other {renamed=true}
-        let pair=fact_pair_key(v other)
-        let prior=fact_pair_find(left right pairs v other)
-        if prior >=? 0 {v=merged[prior]}
+        let other=bbp[j].value
+        let bval=binding.value
+        let v=bval
+        let prior:JoinWord=-1
+        if bval =? other and bval >=? 0 and bval <? term_cap {
+            if same_gen_p[bval] =? sg {prior=JoinWord(same_idx_p[bval])}
+        } else {
+            if bval not=? other {renamed=true}
+            let cp=fact_pair_find(chg_l chg_r pairs bval other)
+            if cp >=? 0 {prior=chg_idx.ptr[cp]}
+        }
+        if prior >=? 0 {v=merged.ptr[prior]}
         else if v not=? other {
             v=fact_new(@s fact_hull(fact_bound(a v) fact_bound(b other) at) fact_join_term(a v b other))
-            fact_join_grown(@s a binding.value b other v)
+            fact_join_grown(@s a bval b other v)
         }
         fact_bind(@s binding.place v)
-        if v =? binding.value and b.bindings[j].event =? binding.event {fact_rebind(@s binding.place v binding.event binding.prior)}
+        if v =? bval and bbp[j].event =? binding.event {fact_rebind(@s binding.place v binding.event binding.prior)}
         if prior <? 0 {
-            fact_pair_add(left right @pairs pair)
-            left.push(binding.value)
+            if bval =? other and bval >=? 0 and bval <? term_cap {
+                same_gen_p[bval]=sg
+                same_idx_p[bval]=int32<overflow='wrap'>(left.length)
+            } else {
+                let pair=fact_pair_key(bval other)
+                fact_pair_add(chg_l chg_r @pairs pair)
+                chg_l.push(bval); chg_r.push(other); chg_idx.push(left.length)
+            }
+            left.push(bval)
             right.push(other)
             merged.push(v)
         }
@@ -269,89 +472,156 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>{
     # Match projections of merged aggregate values, including current lengths.
     # (each side's non-element projections chained by base value, in order:
     # the same matches as scanning both lists for every merged value)
-    let cursor:JoinWord=0
-    let element_keys=dict<[int64 int64] int64>()
-    let element_keys_ready=false
-    loop cursor <? merged.length and merged.length <? FACT_CAP {
-        let pi=fact_projection_first(a left[cursor])
-        loop pi >=? 0 {
-            let p=a.projections[pi]
-            pi=fact_projection_after(a pi)
-            let selector=p.selector
-            let qi=fact_projection_find(b right[cursor] selector p.element)
-            if p.element {
-                let key=fact_bound(a selector)
-                if key.lo =? key.hi and not key.wide {
-                    # Constants created separately in the arms have different
-                    # value IDs. Index the peer's constant selectors once, O(P).
-                    if not element_keys_ready {
-                        loop j in [0..b.projections.length) {
-                            let candidate=b.projections[j]
-                            if not candidate.element {continue}
-                            let cb=fact_bound(b candidate.selector)
-                            if cb.lo =? cb.hi and not cb.wide {element_keys[[candidate.base cb.lo]]=j}
+    if a.projections.length >? 0 and b.projections.length >? 0 {
+        let cursor:JoinWord=0
+        let element_keys_ready=false
+        let ap_p=a.projections.ptr
+        let bp_p=b.projections.ptr
+        let a_pmask:JoinWord=a.proj_base_mask
+        let b_pmask:JoinWord=b.proj_base_mask
+        loop cursor <? merged.length and merged.length <? FACT_CAP {
+            let lv=left.ptr[cursor]
+            let rv=right.ptr[cursor]
+            if (same_proj and lv =? rv) or (a_pmask & (JoinWord(1) << (lv & 63))) =? 0 or (b_pmask & (JoinWord(1) << (rv & 63))) =? 0 {
+                cursor += 1
+                continue
+            }
+            let pi=fact_projection_first(a lv)
+            loop pi >=? 0 {
+                let p=ap_p[pi]
+                pi=fact_projection_after(a pi)
+                let selector=p.selector
+                let qi=fact_projection_find(b rv selector p.element)
+                if p.element {
+                    let key=fact_bound(a selector)
+                    if key.lo =? key.hi and not key.wide {
+                        # Constants created separately in the arms have different
+                        # value IDs. Index the peer's constant selectors once, O(P).
+                        if not element_keys_ready {
+                            fj_elem_keys.clear()
+                            loop j in [0..b.projections.length) {
+                                let candidate=bp_p[j]
+                                if not candidate.element {continue}
+                                let cb=fact_bound(b candidate.selector)
+                                if cb.lo =? cb.hi and not cb.wide {fj_elem_keys[[candidate.base cb.lo]]=j}
+                            }
+                            element_keys_ready=true
                         }
-                        element_keys_ready=true
+                        qi=fj_elem_keys.get([rv key.lo]) ?? -1
+                        if qi >=? 0 and fact_slot_ref(@s selector) <? 0 {selector=fact_constant(@s key.lo)}
                     }
-                    qi=element_keys.get([right[cursor] key.lo]) ?? -1
-                    if qi >=? 0 and fact_slot(s selector) <? 0 {selector=fact_constant(@s key.lo)}
+                    else if fact_slot_ref(@s selector) <? 0 {continue}
                 }
-                else if fact_slot(s selector) <? 0 {continue}
+                if qi <? 0 {continue}
+                let q=bp_p[qi]
+                if merged.length >=? FACT_CAP {break}
+                let pv=p.value
+                let qv=q.value
+                let v=pv
+                let prior:JoinWord=-1
+                if pv =? qv and pv >=? 0 and pv <? term_cap {
+                    if same_gen_p[pv] =? sg {prior=JoinWord(same_idx_p[pv])}
+                } else {
+                    if pv not=? qv {renamed=true}
+                    let cp=fact_pair_find(chg_l chg_r pairs pv qv)
+                    if cp >=? 0 {prior=chg_idx.ptr[cp]}
+                }
+                if prior >=? 0 {v=merged.ptr[prior]}
+                else if v not=? qv {v=fact_new(@s fact_hull(fact_bound(a v) fact_bound(b qv) at) fact_join_term(a v b qv))}
+                if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(merged.ptr[cursor] selector p.element v))}
+                if prior <? 0 {
+                    if pv =? qv and pv >=? 0 and pv <? term_cap {
+                        same_gen_p[pv]=sg
+                        same_idx_p[pv]=int32<overflow='wrap'>(left.length)
+                    } else {
+                        let pair=fact_pair_key(pv qv)
+                        fact_pair_add(chg_l chg_r @pairs pair)
+                        chg_l.push(pv); chg_r.push(qv); chg_idx.push(left.length)
+                    }
+                    left.push(pv)
+                    right.push(qv)
+                    merged.push(v)
+                }
             }
-            if qi <? 0 {continue}
-            let q=b.projections[qi]
-            if merged.length >=? FACT_CAP {break}
-            let v=p.value
-            if v not=? q.value {renamed=true}
-            let pair=fact_pair_key(v q.value)
-            let prior=fact_pair_find(left right pairs v q.value)
-            if prior >=? 0 {v=merged[prior]}
-            else if v not=? q.value {v=fact_new(@s fact_hull(fact_bound(a v) fact_bound(b q.value) at) fact_join_term(a v b q.value))}
-            if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(merged[cursor] selector p.element v))}
-            if prior <? 0 {
-                fact_pair_add(left right @pairs pair)
-                left.push(p.value)
-                right.push(q.value)
-                merged.push(v)
-            }
+            cursor += 1
         }
-        cursor += 1
     }
-    loop i in [0..binding_pairs) {
-        if left[i] not=? right[i] {fact_join_payload(@s a left[i] b right[i] merged[i] left right merged FactBound() false)}
+    if renamed {
+        loop i in [0..binding_pairs) {
+            if left.ptr[i] not=? right.ptr[i] {fact_join_payload(@s a left.ptr[i] b right.ptr[i] merged.ptr[i] left right merged FactBound() false)}
+        }
     }
-    if a.differences.length =? 0 and b.differences.length =? 0 {return s}
-    # (renamings: the last pair naming a value wins)
-    let left_merge:array<int64>=[]
-    let right_merge:array<int64>=[]
-    let left_right:array<int64>=[]
-    let right_left:array<int64>=[]
-    if renamed and merged.length >? 32 {
-        loop i in [0..merged.length) {
-            fact_index_put(@left_merge left[i] merged[i])
-            fact_index_put(@right_merge right[i] merged[i])
-            fact_index_put(@left_right left[i] right[i])
-            fact_index_put(@right_left right[i] left[i])
+    if a.differences.length =? 0 and b.differences.length =? 0 {
+        fj_left_pool=left; fj_right_pool=right; fj_merged_pool=merged
+        fj_chg_l_pool=chg_l; fj_chg_r_pool=chg_r; fj_chg_idx_pool=chg_idx; fj_pairs_pool=pairs
+        return s
+    }
+    # (renamings: the last pair naming a value wins, indexed in flat stamp arrays)
+    let rcap:JoinWord=0
+    let rg:int32=0
+    let lm_gen_p:ptr<int32>=uint64(0) as ptr<int32>
+    let lm_val_p:ptr<int32>=uint64(0) as ptr<int32>
+    let rm_gen_p:ptr<int32>=uint64(0) as ptr<int32>
+    let rm_val_p:ptr<int32>=uint64(0) as ptr<int32>
+    let lr_gen_p:ptr<int32>=uint64(0) as ptr<int32>
+    let lr_val_p:ptr<int32>=uint64(0) as ptr<int32>
+    let rl_gen_p:ptr<int32>=uint64(0) as ptr<int32>
+    let rl_val_p:ptr<int32>=uint64(0) as ptr<int32>
+    if renamed {
+        rcap=fact_terms.length + 1
+        rg=fj_ensure_ren(rcap)
+        lm_gen_p=fj_lm_gen.ptr; lm_val_p=fj_lm_val.ptr
+        rm_gen_p=fj_rm_gen.ptr; rm_val_p=fj_rm_val.ptr
+        lr_gen_p=fj_lr_gen.ptr; lr_val_p=fj_lr_val.ptr
+        rl_gen_p=fj_rl_gen.ptr; rl_val_p=fj_rl_val.ptr
+        let ml=merged.length
+        let lp=left.ptr
+        let rp=right.ptr
+        let mp=merged.ptr
+        loop i in [0..ml) {
+            let lv=lp[i]
+            let rv=rp[i]
+            let mv=mp[i]
+            lm_gen_p[lv]=rg; lm_val_p[lv]=int32<overflow='wrap'>(mv)
+            rm_gen_p[rv]=rg; rm_val_p[rv]=int32<overflow='wrap'>(mv)
+            lr_gen_p[lv]=rg; lr_val_p[lv]=int32<overflow='wrap'>(rv)
+            rl_gen_p[rv]=rg; rl_val_p[rv]=int32<overflow='wrap'>(lv)
         }
     }
     # A shared prefix consists of facts already present in both predecessors.
     # Keep its rows without proving each one again or recounting incidents.
     # Endpoints must survive in the common frame; renamed rows still follow.
     let common_rows:JoinWord=0
-    loop common_rows <? min(a.differences.length b.differences.length) {
-        let row=a.differences[common_rows]
-        if row not=? b.differences[common_rows] or fact_slot(s row.a) <? 0 or fact_slot(s row.b) <? 0 {break}
-        common_rows += 1
+    let adp=a.differences.ptr
+    let bdp=b.differences.ptr
+    let mindiff=min(a.differences.length b.differences.length)
+    let skip_slot_a=ids_match_a or ids_match_b
+    if adp =? bdp and a.differences.length =? b.differences.length and ids_match_a {
+        common_rows=mindiff
+    } else if skip_slot_a {
+        loop common_rows <? mindiff {
+            if adp[common_rows] not=? bdp[common_rows] {break}
+            common_rows += 1
+        }
+    } else {
+        loop common_rows <? mindiff {
+            let row=adp[common_rows]
+            if row not=? bdp[common_rows] or fact_slot_ref(@s row.a) <? 0 or fact_slot_ref(@s row.b) <? 0 {break}
+            common_rows += 1
+        }
     }
-    if common_rows =? a.differences.length {
-        s.differences=a.differences
-        s.index[0].difference_index=a.index[0].difference_index
-        s.index[0].difference_value=a.index[0].difference_value
-        s.index[0].difference_record=a.index[0].difference_record
-        s.index[0].difference_next=a.index[0].difference_next
+    if common_rows =? a.differences.length or common_rows =? b.differences.length {
+        let src=if common_rows =? a.differences.length {a} else {b}
+        s.differences=src.differences
+        s.diff_a_mask=src.diff_a_mask
+        s.diff_b_mask=src.diff_b_mask
+        s.index[0].difference_index=src.index[0].difference_index
+        s.index[0].difference_value=src.index[0].difference_value
+        s.index[0].difference_record=src.index[0].difference_record
+        s.index[0].difference_next=src.index[0].difference_next
     }
     else {
-        loop i in [0..common_rows) {fact_add_difference(@s a.differences[i])}
+        loop i in [0..common_rows) {fact_add_difference(@s adp[i])}
     }
     # Select rows from either predecessor, rename into the merge frame, and
     # require a proof from the other. Branch-local evaluations never escape.
@@ -359,58 +629,81 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>{
     # that offer held, the renamed one is the same call again, skipped. A
     # renamed endpoint equal to the original renames to it on the other side
     # too, or to nothing)
-    loop ri in [0..a.differences.length) {
-        let row=a.differences[ri]
-        let kept=ri <? common_rows or fact_slot(s row.a) >=? 0 and fact_slot(s row.b) >=? 0 and fact_distance(b row.a row.b row.limit)
-        if kept and ri >=? common_rows {fact_difference(@s row.a row.b row.limit row.at)}
-        if not renamed {continue}
-        let aa=fact_rename(row.a left merged left_merge s)
-        let bb=fact_rename(row.b left merged left_merge s)
-        if kept and aa =? row.a and bb =? row.b {continue}
-        let ra=fact_rename(row.a left right left_right b)
-        let rb=fact_rename(row.b left right left_right b)
-        if aa not=? 0 and bb not=? 0 and fact_distance(b ra rb row.limit) {fact_difference(@s aa bb row.limit row.at)}
-        # (the other path holds the two ends equal, as a counter one path stepped
-        # down and the other left, `if c i -= 1`: the merge stays at most the old value)
-        else if aa not=? 0 and bb not=? 0 and aa not=? row.a and bb =? row.b and ra =? rb and ra not=? 0 and row.limit <? 0 {fact_difference(@s aa bb 0 row.at)}
+    if not renamed {
+        loop ri in [common_rows..a.differences.length) {
+            let row=adp[ri]
+            if (ids_match_a or (fact_slot_ref(@s row.a) >=? 0 and fact_slot_ref(@s row.b) >=? 0)) and fact_distance(b row.a row.b row.limit) {fact_difference(@s row.a row.b row.limit row.at)}
+        }
+        loop ri in [common_rows..b.differences.length) {
+            let row=bdp[ri]
+            if (ids_match_b or (fact_slot_ref(@s row.a) >=? 0 and fact_slot_ref(@s row.b) >=? 0)) and fact_distance(a row.a row.b row.limit) {fact_difference(@s row.a row.b row.limit row.at)}
+        }
+        fj_left_pool=left; fj_right_pool=right; fj_merged_pool=merged
+        fj_chg_l_pool=chg_l; fj_chg_r_pool=chg_r; fj_chg_idx_pool=chg_idx; fj_pairs_pool=pairs
+        return s
     }
-    # (a tighter row on one side can replace the row the other side shares)
-    loop ri in [0..b.differences.length) {
-        let row=b.differences[ri]
-        let kept=ri <? common_rows or fact_slot(s row.a) >=? 0 and fact_slot(s row.b) >=? 0 and fact_distance(a row.a row.b row.limit)
-        if kept and ri >=? common_rows {fact_difference(@s row.a row.b row.limit row.at)}
-        if not renamed {continue}
-        let aa=fact_rename(row.a right merged right_merge s)
-        let bb=fact_rename(row.b right merged right_merge s)
-        if kept and aa =? row.a and bb =? row.b {continue}
-        let ra=fact_rename(row.a right left right_left a)
-        let rb=fact_rename(row.b right left right_left a)
-        if aa not=? 0 and bb not=? 0 and fact_distance(a ra rb row.limit) {fact_difference(@s aa bb row.limit row.at)}
-        else if aa not=? 0 and bb not=? 0 and aa not=? row.a and bb =? row.b and ra =? rb and ra not=? 0 and row.limit <? 0 {fact_difference(@s aa bb 0 row.at)}
-    }
+    let aids_p=a.ids.ptr; let an_ids:JoinWord=a.ids.length
+    let aslots_p=a.index.ptr[0].slots.ptr; let aslots_n:JoinWord=a.index.ptr[0].slots.length
+    let bids_p=b.ids.ptr; let bn_ids:JoinWord=b.ids.length
+    let bslots_p=b.index.ptr[0].slots.ptr; let bslots_n:JoinWord=b.index.ptr[0].slots.length
+    let gterms=fact_terms.ptr; let ngterms:JoinWord=fact_terms.length
+    fj_join_diff_side(@s a b common_rows lm_gen_p lm_val_p lr_gen_p lr_val_p rg rcap bids_p bn_ids bslots_p bslots_n gterms ngterms)
+    fj_join_diff_side(@s b a common_rows rm_gen_p rm_val_p rl_gen_p rl_val_p rg rcap aids_p an_ids aslots_p aslots_n gterms ngterms)
     # (a value two places held, one replaced on one path only, `let hi = o`
     # then `if hi <? lo hi = lo`: the renaming above follows its last pair;
     # each earlier pair's rows follow here. O(shadowed pairs x their rows))
-    if not renamed {return s}
+    let lp2=left.ptr
+    let rp2=right.ptr
+    let mp2=merged.ptr
     loop i in [0..merged.length) {
-        if left[i] =? right[i] {continue}
-        if fact_rename(right[i] right merged right_merge s) not=? merged[i] {fact_join_pair_rows(@s b a right[i] left[i] merged[i] right left right_left merged right_merge)}
-        if fact_rename(left[i] left merged left_merge s) not=? merged[i] {fact_join_pair_rows(@s a b left[i] right[i] merged[i] left right left_right merged left_merge)}
+        if lp2[i] =? rp2[i] {continue}
+        if fj_ren_lookup(rp2[i] rm_gen_p rm_val_p rg rcap @s) not=? mp2[i] {fj_join_pair_rows_fast(@s b a rp2[i] lp2[i] mp2[i] rl_gen_p rl_val_p rm_gen_p rm_val_p rg rcap aids_p an_ids aslots_p aslots_n gterms ngterms)}
+        if fj_ren_lookup(lp2[i] lm_gen_p lm_val_p rg rcap @s) not=? mp2[i] {fj_join_pair_rows_fast(@s a b lp2[i] rp2[i] mp2[i] lr_gen_p lr_val_p lm_gen_p lm_val_p rg rcap bids_p bn_ids bslots_p bslots_n gterms ngterms)}
     }
+    fj_left_pool=left; fj_right_pool=right; fj_merged_pool=merged
+    fj_chg_l_pool=chg_l; fj_chg_r_pool=chg_r; fj_chg_idx_pool=chg_idx; fj_pairs_pool=pairs
     s
 }
-# Rows of `from` touching v, renamed to m where the peer, with v as w, holds them.
-fact_join_pair_rows=(@s:FactState from_:FactState peer:FactState v:JoinWord w:JoinWord m:JoinWord mine:array<int64> theirs:array<int64> to_theirs:array<int64> merged:array<int64> to_merged:array<int64>):>void=>{
+fj_join_diff_side=(@s:FactState src:FactState peer:FactState common_rows:JoinWord m_gen_p:ptr<int32> m_val_p:ptr<int32> r_gen_p:ptr<int32> r_val_p:ptr<int32> rg:int32 rcap:JoinWord pids:ptr<int64> pn_ids:JoinWord pslots:ptr<int64> pslots_n:JoinWord gterms:ptr<FactTerm> ngterms:JoinWord):>void=>$unsafe {
+    let dp=src.differences.ptr
+    loop ri in [0..src.differences.length) {
+        let row=dp[ri]
+        if ri <? common_rows {
+            if (row.a <? 0 or row.a >=? rcap or m_gen_p[row.a] not=? rg) and (row.b <? 0 or row.b >=? rcap or m_gen_p[row.b] not=? rg) {continue}
+            let aa=fj_ren_lookup(row.a m_gen_p m_val_p rg rcap @s)
+            let bb=fj_ren_lookup(row.b m_gen_p m_val_p rg rcap @s)
+            if aa =? 0 or bb =? 0 or (aa =? row.a and bb =? row.b) {continue}
+            let ra=fj_ren_lookup_raw(row.a r_gen_p r_val_p rg rcap pids pn_ids pslots pslots_n gterms ngterms)
+            let rb=fj_ren_lookup_raw(row.b r_gen_p r_val_p rg rcap pids pn_ids pslots pslots_n gterms ngterms)
+            if ra not=? 0 and rb not=? 0 and fact_distance(peer ra rb row.limit) {fact_difference(@s aa bb row.limit row.at)}
+            else if aa not=? row.a and bb =? row.b and ra =? rb and ra not=? 0 and row.limit <? 0 {fact_difference(@s aa bb 0 row.at)}
+            continue
+        }
+        let in_s=fact_slot_ref(@s row.a) >=? 0 and fact_slot_ref(@s row.b) >=? 0
+        let kept=in_s and fact_distance(peer row.a row.b row.limit)
+        if kept {fact_difference(@s row.a row.b row.limit row.at)}
+        let aa=fj_ren_lookup(row.a m_gen_p m_val_p rg rcap @s)
+        let bb=fj_ren_lookup(row.b m_gen_p m_val_p rg rcap @s)
+        if aa =? 0 or bb =? 0 or (kept and aa =? row.a and bb =? row.b) {continue}
+        let ra=fj_ren_lookup_raw(row.a r_gen_p r_val_p rg rcap pids pn_ids pslots pslots_n gterms ngterms)
+        let rb=fj_ren_lookup_raw(row.b r_gen_p r_val_p rg rcap pids pn_ids pslots pslots_n gterms ngterms)
+        let same_dist=not kept and in_s and ra =? row.a and rb =? row.b
+        if not same_dist and ra not=? 0 and rb not=? 0 and fact_distance(peer ra rb row.limit) {fact_difference(@s aa bb row.limit row.at)}
+        else if aa not=? row.a and bb =? row.b and ra =? rb and ra not=? 0 and row.limit <? 0 {fact_difference(@s aa bb 0 row.at)}
+    }
+}
+fj_join_pair_rows_fast=(@s:FactState from_:FactState peer:FactState v:JoinWord w:JoinWord m:JoinWord to_theirs_g:ptr<int32> to_theirs_v:ptr<int32> to_merged_g:ptr<int32> to_merged_v:ptr<int32> rg:int32 rcap:JoinWord pids:ptr<int64> pn_ids:JoinWord pslots:ptr<int64> pslots_n:JoinWord gterms:ptr<FactTerm> ngterms:JoinWord):>void=>$unsafe {
     loop direction in [0..2) {
         let ri=fact_difference_head(from_ v direction)
         loop ri >=? 0 {
-            let row=from_.differences[ri]
+            let row=from_.differences.ptr[ri]
             ri=fact_difference_next(from_ ri direction)
             let other=if direction =? 0 {row.a} else {row.b}
             if other =? v {continue}
-            let o=fact_rename(other mine merged to_merged s)
-            let po=fact_rename(other mine theirs to_theirs peer)
-            if o =? 0 or po =? 0 {continue}
+            let o=fj_ren_lookup(other to_merged_g to_merged_v rg rcap @s)
+            if o =? 0 {continue}
+            let po=fj_ren_lookup_raw(other to_theirs_g to_theirs_v rg rcap pids pn_ids pslots pslots_n gterms ngterms)
+            if po =? 0 {continue}
             if direction =? 0 and fact_distance(peer po w row.limit) {fact_difference(@s o m row.limit row.at)}
             if direction =? 1 and fact_distance(peer w po row.limit) {fact_difference(@s m o row.limit row.at)}
         }
@@ -622,29 +915,57 @@ fact_field_node=(e:JoinWord):>bool=>$unsafe {
 }
 # Branches often change only intervals and guard rows. Their storage identities
 # need no phi pairs or projection matching, only the common relation facts.
-fact_join_shared_rows=(@s:FactState a:FactState b:FactState):>void=>{
+fact_join_shared_rows=(@s:FactState a:FactState b:FactState):>void=>$unsafe {
     let common:JoinWord=0
-    loop common <? min(a.differences.length b.differences.length) {
-        let row=a.differences[common]
-        if row not=? b.differences[common] or fact_slot(s row.a) <? 0 or fact_slot(s row.b) <? 0 {break}
+    let adp=a.differences.ptr
+    let bdp=b.differences.ptr
+    let alen:JoinWord=a.differences.length
+    let blen:JoinWord=b.differences.length
+    let same_a=s.ids.length =? a.ids.length and s.ids.ptr =? a.ids.ptr
+    let same_b=s.ids.length =? b.ids.length and s.ids.ptr =? b.ids.ptr
+    if same_a and alen =? blen and adp =? bdp {
+        s.differences=a.differences
+        s.diff_a_mask=a.diff_a_mask
+        s.diff_b_mask=a.diff_b_mask
+        s.index[0].difference_index=a.index[0].difference_index
+        s.index[0].difference_value=a.index[0].difference_value
+        s.index[0].difference_record=a.index[0].difference_record
+        s.index[0].difference_next=a.index[0].difference_next
+        return
+    }
+    let mindiff=min(alen blen)
+    loop common <? mindiff {
+        let row=adp[common]
+        if row not=? bdp[common] or (not same_a and (fact_slot_ref(@s row.a) <? 0 or fact_slot_ref(@s row.b) <? 0)) {break}
         common += 1
     }
-    if common =? a.differences.length {
+    if common =? alen {
         s.differences=a.differences
+        s.diff_a_mask=a.diff_a_mask
+        s.diff_b_mask=a.diff_b_mask
         s.index[0].difference_index=a.index[0].difference_index
         s.index[0].difference_value=a.index[0].difference_value
         s.index[0].difference_record=a.index[0].difference_record
         s.index[0].difference_next=a.index[0].difference_next
     }
+    else if common =? blen {
+        s.differences=b.differences
+        s.diff_a_mask=b.diff_a_mask
+        s.diff_b_mask=b.diff_b_mask
+        s.index[0].difference_index=b.index[0].difference_index
+        s.index[0].difference_value=b.index[0].difference_value
+        s.index[0].difference_record=b.index[0].difference_record
+        s.index[0].difference_next=b.index[0].difference_next
+    }
     else {
-        loop i in [0..common) {fact_add_difference(@s a.differences[i])}
+        loop i in [0..common) {fact_add_difference(@s adp[i])}
     }
-    loop i in [common..a.differences.length) {
-        let row=a.differences[i]
-        if fact_slot(s row.a) >=? 0 and fact_slot(s row.b) >=? 0 and fact_distance(b row.a row.b row.limit) {fact_difference(@s row.a row.b row.limit row.at)}
+    loop i in [common..alen) {
+        let row=adp[i]
+        if (same_a or (fact_slot_ref(@s row.a) >=? 0 and fact_slot_ref(@s row.b) >=? 0)) and fact_distance(b row.a row.b row.limit) {fact_difference(@s row.a row.b row.limit row.at)}
     }
-    loop i in [common..b.differences.length) {
-        let row=b.differences[i]
-        if fact_slot(s row.a) >=? 0 and fact_slot(s row.b) >=? 0 and fact_distance(a row.a row.b row.limit) {fact_difference(@s row.a row.b row.limit row.at)}
+    loop i in [common..blen) {
+        let row=bdp[i]
+        if (same_b or (fact_slot_ref(@s row.a) >=? 0 and fact_slot_ref(@s row.b) >=? 0)) and fact_distance(a row.a row.b row.limit) {fact_difference(@s row.a row.b row.limit row.at)}
     }
 }

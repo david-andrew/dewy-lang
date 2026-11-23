@@ -274,6 +274,10 @@ LAYOUT_JO = {
     },
 }
 
+def same_output(dewy_out, jo_out):
+    assert dewy_out == jo_out
+
+
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_type_property_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []

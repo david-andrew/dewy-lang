@@ -127,7 +127,9 @@ effect_storage_type = (t: int) -> int:
 
 
 effect_infer_callable = (n: int, expected: int) -> int:
-    t = ntype(n)
+    t = int(nodes[n].type)
+    tk = types[t].kind
+    if tk != .fn_ and tk != .cfn and tk != .polyfn and tk != .var: return t
     if callable_contract(expected) == 0 or callable_contract(t) != 0 or not is_fn_type(t): return t
     # Freeze the expression before its checked conversion changes its type.
     source = nodes.len()

@@ -13,8 +13,8 @@ struct Token:
     start: i32
     len: i32
     ival: int
-    fval: f64
 toks: Token[]
+lx_tok_pool: Token[]
 p_toks: *Token
 p_ntoks = 0
 lifetime_bound = parser_lifetime_bind(&toks as *int)

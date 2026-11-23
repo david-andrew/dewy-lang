@@ -31,6 +31,7 @@ DwarfInput:type=[
     files:ptr<array<SrcFile>>
     global_ids:ptr<array<int64>>
     ir_positions:ptr<array<int64>>
+    ir_lines:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
     dbg_raw:ptr<array<int64>>
     dbg_cfi:ptr<array<int64>>
     line_rows:ptr<array<int64>>
@@ -108,7 +109,7 @@ dwarf_image=(text_addr:DWord text_len:DWord main_path:string version:string dir:
         "{dir}/{p}"
     }
     # Files are numbered from one, preserving their first-use order.
-    let fidx=fill(0  sources_count)
+    let fidx:array<int64>=fill(DWord(0)  sources_count)
     # This private index has its final size before either line-table walk.
     let file_index=fidx.ptr
     let fnames:array<string>=[]
@@ -143,20 +144,32 @@ dwarf_image=(text_addr:DWord text_len:DWord main_path:string version:string dir:
     }
     hdr.push(0)
     let prog:array<uint8>=[]
-    prog.reserve(rows_count * 3 + 64)
-    prog.push(0) # DW_LNE_set_address
-    uleb(@prog  9)
-    prog.push(2)
-    put64(@prog  text_addr)
+    let pcap:DWord=rows_count * 6 + 128
+    prog.reserve(pcap)
+    __set_len(prog pcap)
+    let pp=prog.ptr
+    let pu:DWord=0
+    pp[pu]=0; pu += 1 # DW_LNE_set_address
+    pp[pu]=9; pu += 1
+    pp[pu]=2; pu += 1
+    let tp=(pp + pu) as ptr<int64>
+    tp[0]=text_addr; pu += 8
+    let has_ir_lines=dw_inputs[0].ir_lines not=? (uint64(0) as ptr<array<int64>>)
+    if has_ir_lines {dw_inputs[0].host[0].ir_line(0);}
+    let ir_lines_p=if has_ir_lines {dw_inputs[0].ir_lines[0].ptr} else {uint64(0) as ptr<int64>}
+    let ir_lines_n:DWord=if has_ir_lines {DWord(dw_inputs[0].ir_lines[0].length)} else {0}
     let addr:DWord=0
     let line:DWord=1
     let file:DWord=1
+    let last_pos_id:DWord=-1
+    let last_line:DWord=0
     k=0
     loop k <? rows_count {
-        let p=positions[rows[k + 1]]
+        let pos_id=rows[k + 1]
         let f=file
         let l:DWord=0 # (0: code with no source line)
-        if rows[k + 1] not=? 0 {
+        if pos_id not=? 0 {
+            let p=positions[pos_id]
             let pf=dw_pos_file(p)
             f=0
             if pf >=? 0 and pf <? sources_count {f=file_index[pf]}
@@ -164,37 +177,92 @@ dwarf_image=(text_addr:DWord text_len:DWord main_path:string version:string dir:
                 k += 2
                 continue
             }
-            l=dw_inputs[0].host[0].ir_line(rows[k + 1])
+            if pos_id =? last_pos_id {l=last_line}
+            else {
+                l=if not has_ir_lines {dw_inputs[0].host[0].ir_line(pos_id)} else if pos_id >? 0 and pos_id <? ir_lines_n {ir_lines_p[pos_id]} else {0}
+                last_pos_id=pos_id
+                last_line=l
+            }
         }
-        if f =? file and l =? line and rows[k + 1] not=? 0 and k >? 0 {
+        if f =? file and l =? line and pos_id not=? 0 and k >? 0 {
             k += 2
             continue
         }
+        if pu + 40 >? pcap {
+            pcap=pcap * 2 + 128
+            prog.reserve(pcap)
+            __set_len(prog pcap)
+            pp=prog.ptr
+        }
         if f not=? file {
-            prog.push(4) # DW_LNS_set_file
-            uleb(@prog  f)
+            pp[pu]=4; pu += 1 # DW_LNS_set_file
+            let v:DWord=f
+            if v <? 128 {pp[pu]=uint8(v); pu += 1}
+            else {
+                loop true {
+                    let b:DWord=v & 127
+                    v = v >> 7
+                    if v not=? 0 {pp[pu]=uint8(b | 128); pu += 1}
+                    else {pp[pu]=uint8(b); pu += 1; break}
+                }
+            }
             file=f
         }
         if l not=? line {
-            prog.push(3) # DW_LNS_advance_line
-            sleb(@prog  l - line)
+            pp[pu]=3; pu += 1 # DW_LNS_advance_line
+            let d:DWord=l - line
+            if d >=? -64 and d <? 64 {pp[pu]=uint8(d & 127); pu += 1}
+            else {
+                loop true {
+                    let b:DWord=d & 127
+                    d = d >> 7
+                    if (d =? 0 and (b & 64) =? 0) or (d =? -1 and (b & 64) not=? 0) {pp[pu]=uint8(b); pu += 1; break}
+                    pp[pu]=uint8(b | 128); pu += 1
+                }
+            }
             line=l
         }
-        if rows[k] not=? addr {
-            prog.push(2) # DW_LNS_advance_pc
-            uleb(@prog  rows[k] - addr)
-            addr=rows[k]
+        let rk=rows[k]
+        if rk not=? addr {
+            pp[pu]=2; pu += 1 # DW_LNS_advance_pc
+            let v:DWord=rk - addr
+            if v <? 128 {pp[pu]=uint8(v); pu += 1}
+            else {
+                loop true {
+                    let b:DWord=v & 127
+                    v = v >> 7
+                    if v not=? 0 {pp[pu]=uint8(b | 128); pu += 1}
+                    else {pp[pu]=uint8(b); pu += 1; break}
+                }
+            }
+            addr=rk
         }
-        prog.push(1) # DW_LNS_copy
+        pp[pu]=1; pu += 1 # DW_LNS_copy
         k += 2
     }
-    if text_len >? addr {
-        prog.push(2)
-        uleb(@prog  text_len - addr)
+    if pu + 20 >? pcap {
+        pcap=pu + 32
+        prog.reserve(pcap)
+        __set_len(prog pcap)
+        pp=prog.ptr
     }
-    prog.push(0) # DW_LNE_end_sequence
-    uleb(@prog  1)
-    prog.push(1)
+    if text_len >? addr {
+        pp[pu]=2; pu += 1
+        let v:DWord=text_len - addr
+        if v <? 128 {pp[pu]=uint8(v); pu += 1}
+        else {
+            loop true {
+                let b:DWord=v & 127
+                v = v >> 7
+                if v not=? 0 {pp[pu]=uint8(b | 128); pu += 1}
+                else {pp[pu]=uint8(b); pu += 1; break}
+            }
+        }
+    }
+    pp[pu]=0; pu += 1 # DW_LNE_end_sequence
+    pp[pu]=1; pu += 1
+    pp[pu]=1; pu += 1
+    __set_len(prog pu)
     let line_sec:array<uint8>=[]
     put32(@line_sec  2 + 4 + DWord(hdr.length) + DWord(prog.length))
     put16(@line_sec  4)

@@ -34,10 +34,20 @@ fact_scalar = (t0: int) -> bool:
     t = fact_type(t0)
     types[t].kind == .bool_ or types[t].kind == .int_
 
-fact_type = (t0: int) -> int:
+fact_type_slow = (t0: int) -> int:
     t = exact_representation(t0)
-    if is_int(t) and types[t].bits == 64 and not types[t].sign: return T_U64
+    tp = data(types) + t
+    if tp.kind == .int_ and tp.bits == 64 and not tp.sign: return T_U64
     t
+
+fact_type = (t0: int) -> int:
+    tp = data(types) + t0
+    k = tp.kind
+    if k == .int_:
+        if tp.bits == 64 and not tp.sign: return T_U64
+        return t0
+    if k != .refined and k != .var and (not secrets_seen or k != .secret): return t0
+    fact_type_slow(t0)
 
 fact_domain = (t0: int, reason: FactReason = .missing, at: int = 0) -> FactBound:
     t = fact_type(t0)

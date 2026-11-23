@@ -106,14 +106,17 @@ pr_use=(n:PRWord c:PRWord call_index:PRWord):>void=>$unsafe {
         pr_union(-PRWord(nodes.ptr[n].sym) pr_origin(c));
         return
     }
-    if k =? 'assign' and nodes.ptr[n].aux =? 0 and PRWord(nodes.ptr[n].b) =? c {
-        let t:PRWord=PRWord(nodes.ptr[n].a)
-        if nodes.ptr[t].kind =? 'ident' and nodes.ptr[t].aux =? 1 {
-            pr_union(-PRWord(nodes.ptr[t].sym) pr_origin(c));
-            return
+    if k =? 'assign' {
+        if PRWord(nodes.ptr[n].a) =? c and nodes.ptr[c].kind =? 'ident' and nodes.ptr[c].aux =? 1 and PRWord(locals.ptr[PRWord(nodes.ptr[c].sym)].flags) & LF_ALIAS =? 0 {return}
+        if nodes.ptr[n].aux =? 0 and PRWord(nodes.ptr[n].b) =? c {
+            let t:PRWord=PRWord(nodes.ptr[n].a)
+            if nodes.ptr[t].kind =? 'ident' and nodes.ptr[t].aux =? 1 {
+                pr_union(-PRWord(nodes.ptr[t].sym) pr_origin(c));
+                return
+            }
         }
     }
-    if k =? 'call' and call_index >=? 0 and nodes.ptr[n].aux =? 0 and checked_call_mutmask(n) & (1 << call_index) =? 0 and not has_flag(c NF_MUT) and not has_flag(c NF_AT) and ptr_param_read(PRWord(nodes.ptr[n].sym) call_index nkids(n)) {return}
+    if k =? 'call' and call_index >=? 0 and nodes.ptr[n].aux =? 0 and checked_call_mutmask(n) & (PRWord(1) << PRWord(call_index)) =? 0 and not has_flag(c NF_MUT) and not has_flag(c NF_AT) and ptr_param_read(PRWord(nodes.ptr[n].sym) call_index nkids(n)) {return}
     pr_write(pr_origin(c))
 }
 pr_walk=(n:PRWord):>void=>$unsafe {
@@ -135,12 +138,12 @@ pr_walk=(n:PRWord):>void=>$unsafe {
     else if k =? 'call' {
         let mm=checked_call_mutmask(n)
         loop i in [0..nkids(n)) {
-            if mm & (1 << i) not=? 0 or has_flag(kid(n i) NF_MUT) or has_flag(kid(n i) NF_AT) {pr_target(kid(n i))}
+            if mm & (PRWord(1) << PRWord(i)) not=? 0 or has_flag(kid(n i) NF_MUT) or has_flag(kid(n i) NF_AT) {pr_target(kid(n i))}
         }
     }
     else if k =? 'intrinsic' and nkids(n) >? 0 {
         let id=nodes.ptr[n].aux as IN
-        if id =? IN.arrdata or id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.setlen or id =? IN.extend {pr_target(kid(n 0))}
+        if id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.setlen or id =? IN.extend {pr_target(kid(n 0))}
     }
     pr_child(n PRWord(nodes.ptr[n].a) -1)
     pr_child(n PRWord(nodes.ptr[n].b) -1)
@@ -174,6 +177,13 @@ ptr_reads=(f:PRWord):>void=>$unsafe {
     pr_busy[f] = true
     pr_walk(body)
     pr_busy.remove(f);
+    loop true {
+        let before=pr_written.length
+        loop site in pr_sites {
+            if pr_written.has(pr_find(site)) {pr_target(kid(site 0))}
+        }
+        if pr_written.length =? before {break}
+    }
     loop site in pr_sites {
         if pr_written.has(pr_find(site)) {pr_expose(kid(site 0))}
     }

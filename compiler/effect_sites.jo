@@ -1,6 +1,7 @@
 use 'checker_state.dewy'
 # Frozen effect site indexing from effects.jo.
 use 'ast.jo'
+use 'node_store.dewy'
 use 'effects.jo'
 use 'check.jo'
 use 'checks_thin.dewy'
@@ -12,17 +13,21 @@ use 'isolation_ops.dewy'
 # Collect result expressions without interpreting loop locals as syntax nodes.
 effect_returns = (n: int, out: mut int[]):
     if n == 0: return
-    k = nodes[n].kind
+    np = data(nodes) + n
+    k = np[0].kind
     if k == .return_:
-        value_leaves(int(nodes[n].a), out)
+        value_leaves(int(np[0].a), out)
         return
-    mask = isolation_children(k)
-    if mask < 0: return
-    if mask & 1 != 0: effect_returns(int(nodes[n].a), out)
-    if mask & 2 != 0: effect_returns(int(nodes[n].b), out)
-    if mask & 4 != 0: effect_returns(int(nodes[n].c), out)
+    mask = isolation_node_children(n)
+    if mask <= 0: return
+    if mask & 1 != 0: effect_returns(int(np[0].a), out)
+    if mask & 2 != 0: effect_returns(int(np[0].b), out)
+    if mask & 4 != 0: effect_returns(int(np[0].c), out)
     if mask & 16 != 0:
-        loop i in [0..nkids(n)): effect_returns(kid(n, i), out)
+        nk = int(np[0].nlist)
+        l0 = int(np[0].list)
+        lp = data(lists)
+        loop i in [0..nk): effect_returns(int(lp[l0 + i]), out)
 
 
 # The local an assignment target writes through field/index selectors, or 0.
@@ -45,6 +50,16 @@ effect_site_key = (kind: int, q: int) -> int:
     p.declaration
 
 
+es_build_kind_tab = () -> u8[]:
+    tab = fill(u8(0), 128)
+    tab[int(NK.vardecl)] = u8(1)
+    tab[int(NK.assign)] = u8(1)
+    tab[int(NK.call)] = u8(2)
+    tab[int(NK.fnref)] = u8(2)
+    tab
+es_kind_tab = es_build_kind_tab()
+es_kind_p = data(es_kind_tab)
+
 effect_index_build = (kind: int):
     # Classify appended nodes once, but construct only the requested chain.
     # Other kinds replay these sparse candidates, never the whole syntax tree.
@@ -56,11 +71,45 @@ effect_index_build = (kind: int):
         effect_ix_writes = []
         effect_ix_uses = []
         effect_ix_built = [0, 0, 0]
-    loop q in [max(1, effect_ix_nodes)..nodes.len()):
-        k = nodes[q].kind
-        if k == .vardecl or k == .assign: effect_ix_writes.push(q)
-        else if k == .call or k == .fnref: effect_ix_uses.push(q)
-    effect_ix_nodes = nodes.len()
+    nlen = nodes.len()
+    start_q = if effect_ix_nodes > 1: effect_ix_nodes else: 1
+    if start_q < nlen:
+        if effect_ix_writes.len() == 0: effect_ix_writes.reserve((nlen >> 3) + 64)
+        if effect_ix_uses.len() == 0: effect_ix_uses.reserve((nlen >> 3) + 64)
+        ktab = es_kind_p
+        np0 = data(nodes)
+        wlen = effect_ix_writes.len()
+        wcap = effect_ix_writes.cap()
+        wp = data(effect_ix_writes)
+        ulen = effect_ix_uses.len()
+        ucap = effect_ix_uses.cap()
+        up = data(effect_ix_uses)
+        loop q in [start_q..nlen):
+            cls = ktab[int(np0[q].kind)]
+            if cls != u8(0):
+                if cls == u8(1):
+                    if wlen >= wcap:
+                        __set_len(effect_ix_writes, wlen)
+                        effect_ix_writes.push(q)
+                        wlen = effect_ix_writes.len()
+                        wcap = effect_ix_writes.cap()
+                        wp = data(effect_ix_writes)
+                    else:
+                        wp[wlen] = q
+                        wlen += 1
+                else:
+                    if ulen >= ucap:
+                        __set_len(effect_ix_uses, ulen)
+                        effect_ix_uses.push(q)
+                        ulen = effect_ix_uses.len()
+                        ucap = effect_ix_uses.cap()
+                        up = data(effect_ix_uses)
+                    else:
+                        up[ulen] = q
+                        ulen += 1
+        __set_len(effect_ix_writes, wlen)
+        __set_len(effect_ix_uses, ulen)
+    effect_ix_nodes = nlen
     effect_ix_locals = locals.len()
     candidates = if kind == 2: effect_ix_uses else: effect_ix_writes
     if effect_ix_built[kind] == candidates.len(): return
@@ -68,11 +117,43 @@ effect_index_build = (kind: int):
     if effect_ix_heads[kind].len() < limit:
         effect_ix_heads[kind].resize(limit)
         effect_ix_tails[kind].resize(limit)
-    effect_ix_next[kind].resize(nodes.len())
-    loop i in [effect_ix_built[kind]..candidates.len()):
-        q = candidates[i]
-        effect_index_link(kind, effect_site_key(kind, q), q)
-    effect_ix_built[kind] = candidates.len()
+    effect_ix_next[kind].resize(nlen)
+    hp = data(effect_ix_heads[kind])
+    tp = data(effect_ix_tails[kind])
+    nxtp = data(effect_ix_next[kind])
+    hlen = effect_ix_heads[kind].len()
+    cp = data(candidates)
+    clen = candidates.len()
+    np = data(nodes)
+    loop i in [effect_ix_built[kind]..clen):
+        q = cp[i]
+        key = 0
+        qp = np + q
+        k = qp[0].kind
+        if kind == 2:
+            if (k == .call and qp[0].aux == 0 or k == .fnref) and qp[0].sym > 0: key = int(qp[0].sym)
+        else if k == .vardecl:
+            if (int(qp[0].flags) & NF_GLOBAL) == 0 and qp[0].sym > 0: key = int(qp[0].sym)
+        else if k == .assign:
+            if kind == 0:
+                target = int(qp[0].a)
+                loop np[target].kind == .field or np[target].kind == .index: target = int(np[target].a)
+                if np[target].kind == .ident and np[target].aux == i32(1): key = int(np[target].sym)
+            else:
+                p = place_scalar_root(int(qp[0].a))
+                if p.root == .local: key = p.declaration
+        if key <= 0: continue
+        if key >= hlen:
+            effect_ix_heads[kind].resize(key + 1)
+            effect_ix_tails[kind].resize(key + 1)
+            hp = data(effect_ix_heads[kind])
+            tp = data(effect_ix_tails[kind])
+            hlen = effect_ix_heads[kind].len()
+        tail = tp[key]
+        if tail == 0: hp[key] = q
+        else: nxtp[tail] = q
+        tp[key] = q
+    effect_ix_built[kind] = clen
 
 
 effect_index_link = (kind: int, key: int, q: int):

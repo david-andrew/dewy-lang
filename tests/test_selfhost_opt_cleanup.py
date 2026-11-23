@@ -149,6 +149,10 @@ def decode_source(*extra):
     return text + '\n'.join(function((ROOT / 'tests/fixtures/selfhost/frozen/opt_registers.jo').read_text(), name) for name in extra)
 
 
+def same_output(dewy_out, jo_out):
+    assert dewy_out == jo_out
+
+
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_opt_cleanup_twins(compiler, tmp_path, release):  # noqa: F811
     decode = decode_source()

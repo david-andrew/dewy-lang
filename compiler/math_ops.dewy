@@ -37,6 +37,8 @@ from p"util.jo" import (files name_of pos_file)
 from p"lower_group.dewy" import (gen_borrowed gen_expr gen_for gen_loop_body gen_owned gen_stmt local_place scope_pop)
 from p"lower_helpers.dewy" import (helper_params)
 from p"lower_scalars.dewy" import (int_op math_int_guard wide_shift)
+from p"expr.jo" import (IN)
+from p"lower_analysis.dewy" import (lpath_key)
 from p"math_lower.jo" import (math_decl_depth math_has_mutable math_loop_parent math_loop_sites math_static_regs math_static_widths math_versioning math_word_captures math_word_limits math_word_regs math_word_updates math_write_loop math_writes math_writes_ready)
 from p"lower_views.dewy" import (plain_read)
 from p"refine_metadata.dewy" import (representation_type)
@@ -716,6 +718,13 @@ math_word_helper=(e:MathWord):>int64=>$unsafe {
 }
 math_low_word=(e:MathWord):>int64=>$unsafe {
     if math_proven_word(e) {return math_word_expr(e)}
+    if prune(ntype(e)) =? T_MATH_INT and nodes.ptr[e].kind =? 'binary' and nodes.ptr[e].aux =? 0 {
+        let op=cx_token_values.ptr[MathWord(nodes.ptr[e].op)]
+        if op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'amp' or op =? 'pipe' or op =? 'caret' {
+            let a=freeze_scalar(math_low_word(MathWord(nodes.ptr[e].a)) T_INT)
+            return e_bin(int_op(op true) VI a math_low_word(MathWord(nodes.ptr[e].b)))
+        }
+    }
     let value=gen_borrowed(e).v
     let result=vreg(VI)
     e_mov(result math_untag(value));
@@ -1021,6 +1030,92 @@ math_recurrence_limit=(s:MathWord writes:array<[int64 int64]>):>int64=>$unsafe {
     }
     return initial.hi
 }
+math_pure_expr=(n:MathWord depth:MathWord=0):>bool=>$unsafe {
+    if n =? 0 or depth >? 32 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' or k =? 'ident' {return true}
+    if k =? 'field' or k =? 'unary' {return math_pure_expr(MathWord(nodes.ptr[n].a) depth + 1)}
+    if k =? 'conv' and (nodes.ptr[n].aux =? 0 or nodes.ptr[n].aux =? int32<overflow='wrap'>(1) or nodes.ptr[n].aux =? int32<overflow='wrap'>(21)) {return math_pure_expr(MathWord(nodes.ptr[n].a) depth + 1)}
+    if k =? 'binary' and nodes.ptr[n].aux =? 0 {
+        return math_pure_expr(MathWord(nodes.ptr[n].a) depth + 1) and math_pure_expr(MathWord(nodes.ptr[n].b) depth + 1)
+    }
+    if k =? 'intrinsic' and (nodes.ptr[n].aux as IN) =? IN.len and nkids(n) =? 1 {return math_pure_expr(kid(n 0) depth + 1)}
+    return false
+}
+math_cond_indexes_path=(n:MathWord key:MathWord depth:MathWord=0):>bool=>$unsafe {
+    if n =? 0 or depth >? 32 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'index' and nodes.ptr[n].aux =? 0 {
+        if lpath_key(MathWord(nodes.ptr[n].a)) =? key {return true}
+        return math_cond_indexes_path(MathWord(nodes.ptr[n].a) key depth + 1) or math_cond_indexes_path(MathWord(nodes.ptr[n].b) key depth + 1)
+    }
+    if k =? 'binary' {
+        return math_cond_indexes_path(MathWord(nodes.ptr[n].a) key depth + 1) or math_cond_indexes_path(MathWord(nodes.ptr[n].b) key depth + 1)
+    }
+    if k =? 'and_' or k =? 'or_' or k =? 'not_' or k =? 'unary' or k =? 'conv' {
+        return math_cond_indexes_path(MathWord(nodes.ptr[n].a) key depth + 1)
+    }
+    return false
+}
+math_nonneg_mask_in_loop=(n0:MathWord loop_:MathWord):>bool=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'conv' and (nodes.ptr[n].aux =? 0 or nodes.ptr[n].aux =? int32<overflow='wrap'>(1) or nodes.ptr[n].aux =? int32<overflow='wrap'>(21)) {n=MathWord(nodes.ptr[n].a)}
+    let bound=exact_count_bound(n)
+    if not bound.wide and bound.lo >=? 0 {return true}
+    if positive_bound(n true) >=? 0 {return true}
+    if loop_ <=? 0 or nodes.ptr[loop_].kind not=? 'while_' or nodes.ptr[loop_].aux =? 1 or cur_block =? 0 {return false}
+    if nodes.ptr[n].kind not=? 'ident' or nodes.ptr[n].aux not=? int32<overflow='wrap'>(1) {return false}
+    let m:MathWord=MathWord(nodes.ptr[n].sym)
+    let fl:MathWord=MathWord(locals.ptr[m].flags)
+    if fl & (LF_ASSIGNED | LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED | LF_QUIET | LF_SOAELEM | LF_ELEMALIAS) not=? 0 {return false}
+    let mi:MathWord=-1
+    let i:MathWord=cur_block_i - 1
+    loop i >=? 0 {
+        let st=kid(cur_block i)
+        if nodes.ptr[st].kind =? 'vardecl' and nkids(st) =? 0 and MathWord(nodes.ptr[st].sym) =? m {
+            mi=i
+            break
+        }
+        i -= 1
+    }
+    if mi <? 0 {return false}
+    let li:MathWord=-1
+    let nstmts=nkids(cur_block)
+    i=cur_block_i + 1
+    loop i <? nstmts {
+        let st=kid(cur_block i)
+        if st =? loop_ or (nodes.ptr[st].kind =? 'exprstmt' and MathWord(nodes.ptr[st].a) =? loop_) {
+            li=i
+            break
+        }
+        i += 1
+    }
+    if li <? 0 {return false}
+    let init_m:MathWord=MathWord(nodes.ptr[kid(cur_block mi)].b)
+    loop nodes.ptr[init_m].kind =? 'conv' and (nodes.ptr[init_m].aux =? 0 or nodes.ptr[init_m].aux =? int32<overflow='wrap'>(1) or nodes.ptr[init_m].aux =? int32<overflow='wrap'>(21)) {init_m=MathWord(nodes.ptr[init_m].a)}
+    if nodes.ptr[init_m].kind not=? 'binary' or nodes.ptr[init_m].aux not=? 0 or nodes.ptr[init_m].op not=? int32<overflow='wrap'>(59) {return false}
+    let rhs:MathWord=MathWord(nodes.ptr[init_m].b)
+    loop nodes.ptr[rhs].kind =? 'conv' and (nodes.ptr[rhs].aux =? 0 or nodes.ptr[rhs].aux =? int32<overflow='wrap'>(1) or nodes.ptr[rhs].aux =? int32<overflow='wrap'>(21)) {rhs=MathWord(nodes.ptr[rhs].a)}
+    if nodes.ptr[rhs].kind not=? 'int_lit' or has_flag(rhs NF_U64) or nodes.ptr[rhs].ival not=? 1 {return false}
+    let lhs:MathWord=MathWord(nodes.ptr[init_m].a)
+    loop nodes.ptr[lhs].kind =? 'conv' and (nodes.ptr[lhs].aux =? 0 or nodes.ptr[lhs].aux =? int32<overflow='wrap'>(1) or nodes.ptr[lhs].aux =? int32<overflow='wrap'>(21)) {lhs=MathWord(nodes.ptr[lhs].a)}
+    if nodes.ptr[lhs].kind not=? 'intrinsic' or (nodes.ptr[lhs].aux as IN) not=? IN.len or nkids(lhs) not=? 1 {return false}
+    let key=lpath_key(kid(lhs 0))
+    if key =? 0 {return false}
+    i=mi + 1
+    loop i <? li {
+        let st=kid(cur_block i)
+        if nodes.ptr[st].kind not=? 'vardecl' or nkids(st) not=? 0 or not math_pure_expr(MathWord(nodes.ptr[st].b)) {return false}
+        i += 1
+    }
+    return math_cond_indexes_path(MathWord(nodes.ptr[loop_].a) key)
+}
+math_masked_word=(n0:MathWord loop_:MathWord):>bool=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'conv' and (nodes.ptr[n].aux =? 0 or nodes.ptr[n].aux =? int32<overflow='wrap'>(1) or nodes.ptr[n].aux =? int32<overflow='wrap'>(21)) {n=MathWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind not=? 'binary' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].op not=? int32<overflow='wrap'>(63) or prune(ntype(n)) not=? T_MATH_INT {return false}
+    return math_nonneg_mask_in_loop(MathWord(nodes.ptr[n].b) loop_) or math_nonneg_mask_in_loop(MathWord(nodes.ptr[n].a) loop_)
+}
 math_word_local_decl=(s:MathWord):>bool=>$unsafe {
     let l:MathWord=MathWord(nodes.ptr[s].sym)
     if prune(MathWord(locals.ptr[l].type)) not=? T_MATH_INT or dbg_on {return false}
@@ -1043,8 +1138,10 @@ math_word_local_decl=(s:MathWord):>bool=>$unsafe {
         if limit <? 0 {limit=math_recurrence_limit(s writes)}
         if limit <? 0 and not math_decrement_counter(s writes) {
             loop pair in writes {
-                if nodes.ptr[pair[0]].op not=? int32<overflow='wrap'>(47) or nodes.ptr[pair[0]].aux not=? 0 {return false}
-                if not math_guarded_word(MathWord(nodes.ptr[pair[0]].b) l) {return false}
+                let w=pair[0]
+                if nodes.ptr[w].op not=? int32<overflow='wrap'>(47) or nodes.ptr[w].aux not=? 0 {return false}
+                let rhs=MathWord(nodes.ptr[w].b)
+                if not math_guarded_word(rhs l) and not math_masked_word(rhs math_write_loop.get(w) ?? 0) {return false}
             }
         }
     }

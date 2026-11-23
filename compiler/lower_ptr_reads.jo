@@ -103,11 +103,13 @@ pr_use = (n: int, c: int, call_index: int):
     if k == .vardecl and nkids(n) == 0 and not has_flag(n, NF_GLOBAL):
         pr_union(-int(nodes[n].sym), pr_origin(c))
         return
-    if k == .assign and nodes[n].aux == 0 and int(nodes[n].b) == c:
-        t = int(nodes[n].a)
-        if nodes[t].kind == .ident and nodes[t].aux == i32(int(SK.local)):
-            pr_union(-int(nodes[t].sym), pr_origin(c))
-            return
+    if k == .assign:
+        if int(nodes[n].a) == c and nodes[c].kind == .ident and nodes[c].aux == i32(int(SK.local)) and int(locals[int(nodes[c].sym)].flags) & LF_ALIAS == 0: return
+        if nodes[n].aux == 0 and int(nodes[n].b) == c:
+            t = int(nodes[n].a)
+            if nodes[t].kind == .ident and nodes[t].aux == i32(int(SK.local)):
+                pr_union(-int(nodes[t].sym), pr_origin(c))
+                return
     if k == .call and call_index >= 0 and nodes[n].aux == 0 and checked_call_mutmask(n) & (1 << call_index) == 0 and not has_flag(c, NF_MUT) and not has_flag(c, NF_AT) and ptr_param_read(int(nodes[n].sym), call_index, nkids(n)): return
     pr_write(pr_origin(c))
 
@@ -130,7 +132,7 @@ pr_walk = (n: int):
             if mm & (1 << i) != 0 or has_flag(kid(n, i), NF_MUT) or has_flag(kid(n, i), NF_AT): pr_target(kid(n, i))
     else if k == .intrinsic and nkids(n) > 0:
         id = nodes[n].aux as IN
-        if id == .arrdata or id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .setlen or id == .extend: pr_target(kid(n, 0))
+        if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .setlen or id == .extend: pr_target(kid(n, 0))
     pr_child(n, int(nodes[n].a), -1)
     pr_child(n, int(nodes[n].b), -1)
     if k != .for_:
@@ -162,6 +164,11 @@ ptr_reads = (f: int):
     pr_busy[f] = true
     pr_walk(body)
     pr_busy.remove(f)
+    loop true:
+        before = pr_written.len()
+        loop site in pr_sites:
+            if pr_written.has(pr_find(site)): pr_target(kid(site, 0))
+        if pr_written.len() == before: break
     loop site in pr_sites:
         if pr_written.has(pr_find(site)): pr_expose(kid(site, 0))
     pr_sites = saved

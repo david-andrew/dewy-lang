@@ -16,12 +16,14 @@ struct TypeLayoutInput:
     variants: *(Variant[])
     ptr_size: *(int)
 tl_inputs: *TypeLayoutInput
+tl_types: *(TypeInfo[])
 tl_holds_seen: i32[]
 tl_holds_gen = 0
 tl_box_dflt: {int: int} = {}
 tl_box_dflt_busy: int[]
 type_layout_bind = (input: *TypeLayoutInput) -> int:
     tl_inputs = input
+    tl_types = input[0].types
     tl_holds_seen = []
     tl_holds_gen = 0
     tl_box_dflt = {}
@@ -29,26 +31,36 @@ type_layout_bind = (input: *TypeLayoutInput) -> int:
     0
 tl_prune = (t0: int) -> int:
     t = t0
-    loop t != 0 and tl_inputs[0].types[0][t].kind == .var and tl_inputs[0].types[0][t].ref != 0: t = int(tl_inputs[0].types[0][t].ref)
+    tp = data(tl_types[0])
+    loop t != 0 and tp[t].kind == .var and tp[t].ref != 0: t = int(tp[t].ref)
     t
-tl_targ = (t: int, i: int) -> int: int(tl_inputs[0].args[0][int(tl_inputs[0].types[0][t].args) + i])
+tl_targ = (t: int, i: int) -> int: int(tl_inputs[0].args[0][int(tl_types[0][t].args) + i])
 tl_align_up = (x: int, a: int) -> int: (x + a - 1) & ~(a - 1)
 tl_size = (t: int) -> int:
+    tp = data(tl_types[0])
+    if t != 0 and int(tp[t].flags) & TF_LAID_OUT != 0 and tp[t].kind != .var: return int(tp[t].size)
     tl_layout(t)
-    int(tl_inputs[0].types[0][tl_prune(t)].size)
+    int(tl_types[0][tl_prune(t)].size)
 tl_align = (t: int) -> int:
+    tp = data(tl_types[0])
+    if t != 0 and int(tp[t].flags) & TF_LAID_OUT != 0 and tp[t].kind != .var:
+        a = int(tp[t].align)
+        return if a == 0: 1 else: a
     tl_layout(t)
-    a = int(tl_inputs[0].types[0][tl_prune(t)].align)
+    a = int(tl_types[0][tl_prune(t)].align)
     if a == 0: return 1
     a
 tl_managed = (t0: int) -> bool:
     t = quantity_base(t0)
-    if tl_inputs[0].types[0][t].rep == .tagged_int: return true
-    k = tl_inputs[0].types[0][t].kind
+    tp = data(tl_types[0])
+    if tp[t].rep == .tagged_int: return true
+    k = tp[t].kind
     if k == .str_ or k == .array or k == .fn_ or k == .polyfn or k == .callable or k == .box: return true
     if k == .struct_ or k == .enum_ or k == .tuple or k == .opt or k == .fixed:
+        f = int(tp[t].flags)
+        if f & TF_LAID_OUT != 0: return f & TF_MANAGED != 0
         tl_layout(t)
-        return int(tl_inputs[0].types[0][t].flags) & TF_MANAGED != 0
+        return int(tl_types[0][t].flags) & TF_MANAGED != 0
     false
 
 tl_type_holds = (t: int, target: int) -> bool:
@@ -158,9 +170,15 @@ tl_endless_field = (si: int, f: int, vi: int):
     layout_endless_error(si, f, vi)
 
 tl_layout = (t0: int):
-    t = tl_prune(t0)
-    if int(tl_inputs[0].types[0][t].flags) & TF_LAID_OUT != 0: return
-    k = tl_inputs[0].types[0][t].kind
+    tp = data(tl_types[0])
+    if t0 != 0 and int(tp[t0].flags) & TF_LAID_OUT != 0 and tp[t0].kind != .var: return
+    tl_layout_body(t0)
+tl_layout_body = (t0: int):
+    tp = data(tl_types[0])
+    t = t0
+    loop t != 0 and tp[t].kind == .var and tp[t].ref != 0: t = int(tp[t].ref)
+    if int(tp[t].flags) & TF_LAID_OUT != 0: return
+    k = tp[t].kind
     size = 0
     al = 1
     m = false

@@ -31,7 +31,7 @@ struct DewyLexHost:
 dx_base_prefix = (bytes: *u8, i: int, stop: int, classes: *u8) -> bool:
     c = bytes[i + 1]
     if c == 'x' or c == 'z': return true
-    if find_byte("btqsodug", c) < 0: return false
+    if not (c == 'b' or c == 't' or c == 'q' or c == 's' or c == 'o' or c == 'd' or c == 'u' or c == 'g'): return false
     if i + 2 >= stop: return false
     d = bytes[i + 2]
     classes[d] & 4 != 0 or d == '"' or d == '\''
@@ -49,194 +49,411 @@ dx_word_assign = (word: DewyToken, bytes: *u8, at: int, stop: int) -> DewyToken:
     if word == .kw_xor: return .xor_assign
     .none
 
-dx_lex = (state: mut DewyLexState, host: *DewyLexHost, lx: mut DewyLexer, comments: mut int[], source: str, begin: int, stop: int, intern_names: bool, classes: *u8, symbols: *DewyToken, words: *DewyToken, out: mut DewyLexeme[], capacity0: int) -> int:
-    capacity = capacity0
+dx_grow_out = (out: mut DewyLexeme[], cap0: int) -> int:
+    nc = cap0 * 2
+    out.reserve(nc)
+    __set_len(out, nc)
+    nc
+
+dx_lex_number = (lx: mut DewyLexer, host: *DewyLexHost, bytes: *u8, start: int, stopw: int, classes: *u8, sl: *DewyLexeme) -> int:
+    i = start
+    c = bytes[i]
+    decimal = true
+    digits = start
+    kind = DewyKind.source_integer
+    if c == '0' and i + 1 < stopw and dx_base_prefix(bytes, i, stopw, classes):
+        decimal = bytes[i + 1] == 'd'
+        i += 2
+        digits = i
+    if i < stopw and (bytes[i] == '"' or bytes[i] == '\''):
+        i = dx_lex_quote(lx, host, bytes, i, stopw, false)
+        kind = .based_string
+    else:
+        mask: u8 = if decimal: 4 else: 8
+        loop i < stopw and classes[bytes[i]] & mask != 0: i += 1
+        if i == digits: host[0].error(start, "expected digits after the base prefix")
+        kind = if decimal: DewyKind.source_integer else: DewyKind.integer
+        if decimal and i + 1 < stopw and bytes[i] == '.' and bytes[i + 1] >= '0' and bytes[i + 1] <= '9':
+            i += 1
+            loop i < stopw and classes[bytes[i]] & 4 != 0: i += 1
+            kind = .source_real
+        if decimal and i + 1 < stopw and (bytes[i] == 'e' or bytes[i] == 'E') and ((bytes[i + 1] >= '0' and bytes[i + 1] <= '9') or bytes[i + 1] == '+' or bytes[i + 1] == '-'):
+            i += 1
+            if i < stopw and (bytes[i] == '+' or bytes[i] == '-'): i += 1
+            first = i
+            loop i < stopw and classes[bytes[i]] & 4 != 0: i += 1
+            if i == first: host[0].error(start, "expected exponent digits")
+            kind = .source_real
+    sl.kind = kind
+    sl.name = 0
+    sl.start = start
+    sl.stop = i
+    sl.symbol = .none
+    i
+
+dx_lex_unicode = (state: mut DewyLexState, host: *DewyLexHost, source: str, bytes: *u8, start0: int, stopw: int, classes: *u8, words: *DewyToken, slots: *DewyLexeme, count: mut int, flags: mut int) -> int:
+    start = start0
+    i = start0
+    if count > 0 and slots[count - 1].stop == start and slots[count - 1].kind == .identifier:
+        count -= 1
+        start = slots[count].start
+        flags = (if slots[count].space: 1 else: 0) | (if slots[count].newline: 2 else: 0)
+        i = start
+    loop i < stopw and classes[bytes[i]] & 34 != 0: i += 1
+    id = host[0].canonical(source, start, i)
+    kind = DewyKind.identifier
+    symbol = DewyToken.none
+    if id < state.word_count:
+        symbol = words[id]
+        if symbol != .none and i < stopw and bytes[i] == '=':
+            combined = dx_word_assign(symbol, bytes, i, stopw)
+            if combined != .none: symbol = combined; kind = .op; i += 1
+        if id == state.true_id or id == state.false_id: kind = .boolean
+        else if i < stopw and bytes[i] == '?':
+            if id == state.is_id: symbol = .is_type; kind = .op; i += 1
+            else if id == state.isnt_id: symbol = .isnt_type; kind = .op; i += 1
+            else if id == state.in_id: symbol = .contains; kind = .op; i += 1
+    sl = slots + count
+    sl.kind = kind
+    sl.name = i32(id)
+    sl.start = start
+    sl.stop = i
+    sl.space = flags & 1 != 0
+    sl.newline = flags & 2 != 0
+    sl.symbol = symbol
+    count += 1
+    flags = 0
+    i
+
+dx_lex_no_intern = (state: mut DewyLexState, host: *DewyLexHost, lx: mut DewyLexer, comments: mut int[], source: str, begin: int, stop: int, classes: *u8, symbols: *DewyToken, words: *DewyToken, out: mut DewyLexeme[], capacity0: int) -> int:
     bytes = data(source)
     slots = data(out)
     count = 0
     i = begin
+    cap = capacity0
+    stopw = stop
     spaced = false
     newline = false
     skip = state.skip
     nesting = 0
-    loop i < stop:
+    loop i < stopw:
         c = bytes[i]
         if classes[c] & 16 != 0:
             spaced = true
             if c == '\n': newline = true
             i += 1
-            loop i < stop:
-                c = bytes[i]
-                if c == '\n': newline = true
-                else if classes[c] & 16 == 0: break
+            loop i < stopw and classes[bytes[i]] & 16 != 0:
+                if bytes[i] == '\n': newline = true
                 i += 1
-            continue
-        # (a `\` ending a line cancels that line break: the next line continues this one)
-        if c == '\\':
-            e = i + 1
-            loop e < stop and (bytes[e] == ' ' or bytes[e] == '\t' or bytes[e] == '\r'): e += 1
-            if e < stop and bytes[e] == '\n':
-                spaced = true
-                i = e + 1
-                continue
-        if c == '#' and i + 1 < stop and bytes[i + 1] == '{':
-            e = dx_block_comment_end(bytes, i, stop)
-            if e < 0:
-                dx_block_comment_error(lx, i)
-                host[0].problem()
-            comments.push(i)
-            comments.push(e)
-            # (a comment over several lines separates like a line break)
-            if host[0].has_newline(source, i, e): newline = true
-            spaced = true
-            i = e
-            continue
-        if c == '#':
-            loop i < stop and bytes[i] != '\n': i += 1
-            spaced = true
             continue
         start = i
         kind = DewyKind.op
         symbol = DewyToken.none
-        name: i32 = 0
-        if c == 'r' and i + 1 < stop and (bytes[i + 1] == '"' or bytes[i + 1] == '\''):
-            i = dx_lex_quote(lx, host, bytes, i + 1, stop, true)
-            kind = .rawquoted
-        else if classes[c] & 1 != 0:
-            if c >= 0x80:
-                # (`x₁₂`: the ASCII scan stopped at `₁`; the name is the token before and this)
-                if count > 0 and slots[count - 1].stop == start and slots[count - 1].kind == .identifier:
-                    count -= 1
-                    start = slots[count].start
-                    spaced = slots[count].space
-                    newline = slots[count].newline
-                    i = start
-                loop i < stop and classes[bytes[i]] & 34 != 0: i += 1
+        if classes[c] & 1 != 0:
+            if c == 'r' and i + 1 < stopw and (bytes[i + 1] == '"' or bytes[i + 1] == '\''):
+                i = dx_lex_quote(lx, host, bytes, i + 1, stopw, true)
+                kind = .rawquoted
             else:
-                i += 1
-                loop i < stop and classes[bytes[i]] & 2 != 0: i += 1
-            kind = .identifier
-            if intern_names:
-                id = 0
-                if c >= 0x80: id = host[0].canonical(source, start, i)
-                else:
-                    n = i - start
-                    p = bytes + start
-                    h = hash_bytes(p, n)
-                    id = name_find(state.texts[0], state.hashes[0], state.names[0], p, n, h)
-                    if id < 0: id = host[0].new_name(source, start, n, h)
-                name = i32(id)
-                if id < state.word_count: symbol = words[id]
-                if id == state.true_id or id == state.false_id: kind = .boolean
-                combined = dx_word_assign(symbol, bytes, i, stop)
-                if combined != .none:
-                    symbol = combined
-                    kind = .op
-                    i += 1
-                if i < stop and bytes[i] == '?':
-                    query = DewyToken.none
-                    if id == state.is_id: query = .is_type
-                    else if id == state.isnt_id: query = .isnt_type
-                    else if id == state.in_id: query = .contains
-                    if query != .none:
-                        symbol = query
-                        kind = .op
-                        i += 1
-            else:
+                if c >= 0x80 and count > 0 and slots[count - 1].stop == start and slots[count - 1].kind == .identifier:
+                    count -= 1; start = slots[count].start; spaced = slots[count].space; newline = slots[count].newline; i = start
+                m: u8 = if c < 0x80: 2 else: 34
+                if c < 0x80: i += 1
+                loop i < stopw and classes[bytes[i]] & m != 0: i += 1
+                kind = .identifier
                 value = host[0].slice(source, start, i)
                 if value == "true" or value == "false": kind = .boolean
-                if (value == "is" or value == "isnt" or value == "in") and i < stop and bytes[i] == '?':
-                    value += "?"
-                    i += 1
-                    kind = .op
+                if (value == "is" or value == "isnt" or value == "in") and i < stopw and bytes[i] == '?':
+                    value += "?"; i += 1; kind = .op
                 if kind != .boolean: symbol = dn_token_kind(value)
-                combined = dx_word_assign(symbol, bytes, i, stop)
-                if combined != .none:
-                    symbol = combined
-                    kind = .op
-                    i += 1
+                if symbol != .none and i < stopw and bytes[i] == '=':
+                    combined = dx_word_assign(symbol, bytes, i, stopw)
+                    if combined != .none: symbol = combined; kind = .op; i += 1
+        else if c == '#':
+            if i + 1 < stopw and bytes[i + 1] == '{':
+                e = dx_block_comment_end(bytes, i, stopw)
+                if e < 0: dx_block_comment_error(lx, i); host[0].problem()
+                comments.push(i); comments.push(e)
+                if host[0].has_newline(source, i, e): newline = true
+                spaced = true; i = e; continue
+            i = __find_newline(bytes, i, stopw); spaced = true; continue
+        else if c == '\\':
+            e = i + 1
+            loop e < stopw and (bytes[e] == ' ' or bytes[e] == '\t' or bytes[e] == '\r'): e += 1
+            if e < stopw and bytes[e] == '\n': spaced = true; i = e + 1; continue
+            symbol = dx_symbol(bytes, start, stopw)
+            if symbol == .none: host[0].error(start, "unexpected character in Dewy source")
+            i += dx_token_width(symbol)
         else if c == '$':
-            state.metatags += 1
-            i += 1
-            loop i < stop and classes[bytes[i]] & 2 != 0: i += 1
+            state.metatags += 1; i += 1
+            loop i < stopw and classes[bytes[i]] & 2 != 0: i += 1
             if i == start + 1: host[0].error(start, "expected a name after $")
             kind = .metatag
-        else if is_digit(c):
-            decimal = true
-            digits = start
-            if c == '0' and i + 1 < stop and dx_base_prefix(bytes, i, stop, classes):
-                decimal = bytes[i + 1] == 'd'
-                i += 2
-                digits = i
-            if i < stop and (bytes[i] == '"' or bytes[i] == '\''):
-                i = dx_lex_quote(lx, host, bytes, i, stop, false)
-                kind = .based_string
-            else:
-                mask: u8 = if decimal: 4 else: 8
-                loop i < stop and classes[bytes[i]] & mask != 0: i += 1
-                if i == digits: host[0].error(start, "expected digits after the base prefix")
-                kind = if decimal: DewyKind.source_integer else: DewyKind.integer
-                if decimal and i + 1 < stop and bytes[i] == '.' and is_digit(bytes[i + 1]):
-                    i += 1
-                    loop i < stop and classes[bytes[i]] & 4 != 0: i += 1
-                    kind = .source_real
-                if decimal and i + 1 < stop and (bytes[i] == 'e' or bytes[i] == 'E') and (is_digit(bytes[i + 1]) or bytes[i + 1] == '+' or bytes[i + 1] == '-'):
-                    i += 1
-                    if i < stop and (bytes[i] == '+' or bytes[i] == '-'): i += 1
-                    first = i
-                    loop i < stop and classes[bytes[i]] & 4 != 0: i += 1
-                    if i == first: host[0].error(start, "expected exponent digits")
-                    kind = .source_real
+        else if c >= '0' and c <= '9':
+            if count == cap: cap = dx_grow_out(out, cap); slots = data(out)
+            sl = slots + count
+            i = dx_lex_number(lx, host, bytes, start, stopw, classes, sl)
+            sl.space = spaced; sl.newline = newline
+            count += 1; spaced = false; newline = false; continue
         else if c == '"' or c == '\'':
-            i = dx_lex_quote(lx, host, bytes, i, stop, false)
-            kind = .quoted
+            i = dx_lex_quote(lx, host, bytes, i, stopw, false); kind = .quoted
         else:
-            next: u8 = 0
-            if start + 1 < stop: next = bytes[start + 1]
-            if c < 128 and next < 128: symbol = symbols[int(c) * 128 + int(next)]
-            if symbol == .none:
-                symbol = dx_symbol(bytes, start, stop)
+            next: u8 = if start + 1 < stopw: bytes[start + 1] else: 0
+            if c < 128 and next < 128:
+                idx = (int(c) << 7) | int(next)
+                symbol = symbols[idx]
+                stag = int(symbol)
+                if stag >= 1 and stag <= 25: i += 1
+                else if stag >= 37 and stag <= 56: i += 2
+                else if stag >= 31 and stag <= 36: i += 3
+                else if stag != 0: i += dx_token_width(symbol)
+                else:
+                    symbol = dx_symbol(bytes, start, stopw)
+                    if symbol == .none: host[0].error(start, "unexpected character in Dewy source")
+                    i += dx_token_width(symbol)
+            else:
+                symbol = dx_symbol(bytes, start, stopw)
                 if symbol == .none: host[0].error(start, "unexpected character in Dewy source")
-            i += dx_token_width(symbol)
-        if count == capacity:
-            capacity *= 2
-            out.resize(capacity)
-            slots = data(out)
-        slots[count].kind = kind
-        slots[count].name = name
-        slots[count].start = start
-        slots[count].stop = i
-        slots[count].space = spaced
-        slots[count].newline = newline
-        slots[count].symbol = symbol
-        count += 1
-        spaced = false
-        newline = false
+                i += dx_token_width(symbol)
+        if count == cap: cap = dx_grow_out(out, cap); slots = data(out)
+        sl = slots + count
+        sl.kind = kind; sl.name = 0; sl.start = start; sl.stop = i
+        sl.space = spaced; sl.newline = newline; sl.symbol = symbol
+        count += 1; spaced = false; newline = false
         if skip and symbol != .none:
             if symbol == .lparen or symbol == .lbrack or symbol == .lbrace: nesting += 1
             else if symbol == .rparen or symbol == .rbrack or symbol == .rbrace: nesting -= 1
             else if symbol == .function and nesting == 0:
                 j = i
-                loop j < stop and (bytes[j] == ' ' or bytes[j] == '\t'): j += 1
-                if j < stop and bytes[j] == '{':
-                    e = dx_lazy_end(bytes, j, stop)
+                loop j < stopw and (bytes[j] == ' ' or bytes[j] == '\t'): j += 1
+                if j < stopw and bytes[j] == '{':
+                    e = dx_lazy_end(bytes, j, stopw)
                     if e > 0:
-                        if count == capacity:
-                            capacity *= 2
-                            out.resize(capacity)
-                            slots = data(out)
-                        slots[count].kind = .lazy_body
-                        slots[count].name = 0
-                        slots[count].start = j
-                        slots[count].stop = e
-                        slots[count].space = j > i
-                        slots[count].newline = false
-                        slots[count].symbol = .none
-                        count += 1
-                        state.lazy = true
-                        i = e
-    state.space = spaced
-    state.newline = newline
+                        if count == cap: cap = dx_grow_out(out, cap); slots = data(out)
+                        lz = slots + count
+                        lz.kind = .lazy_body; lz.name = 0; lz.start = j; lz.stop = e
+                        lz.space = j > i; lz.newline = false; lz.symbol = .none
+                        count += 1; state.lazy = true; i = e
+    state.space = spaced; state.newline = newline
+    count
+
+dx_nsp: *i32 = null
+dx_nhp: *int = null
+dx_ntp: **u8 = null
+dx_nmask = -1
+dx_cur_cls: *u8 = null
+
+dx_intern_slow = (state: mut DewyLexState, host: *DewyLexHost, source: str, p: *u8, start: int, n: int) -> int:
+    h = hash_bytes(p, n)
+    if dx_nmask >= 0:
+        id = name_find_raw(dx_nsp, dx_nhp, dx_ntp, dx_nmask, p, n, h)
+        if id >= 0: return id
+    id = host[0].new_name(source, start, n, h)
+    dx_nsp = data(state.names[0])
+    dx_nhp = data(state.hashes[0])
+    dx_ntp = data(state.texts[0]) as **u8
+    dx_nmask = state.names[0].len() - 1
+    id
+
+dx_lex = (state: mut DewyLexState, host: *DewyLexHost, lx: mut DewyLexer, comments: mut int[], source: str, begin: int, stop: int, intern_names: bool, classes: *u8, symbols: *DewyToken, words: *DewyToken, out: mut DewyLexeme[], capacity0: int) -> int:
+    if not intern_names:
+        return dx_lex_no_intern(state, host, lx, comments, source, begin, stop, classes, symbols, words, out, capacity0)
+    bytes = data(source)
+    slots = data(out)
+    count = 0
+    i = begin
+    cap = capacity0
+    stopw = stop
+    flags = 0
+    skip = state.skip
+    nesting = 0
+    dx_cur_cls = classes
+    nsp: *i32 = null
+    nhp: *int = null
+    ntp: **u8 = null
+    nmask = -1
+    slen0 = state.names[0].len()
+    if slen0 > 0:
+        nsp = data(state.names[0])
+        nhp = data(state.hashes[0])
+        ntp = data(state.texts[0]) as **u8
+        nmask = slen0 - 1
+    dx_nsp = nsp; dx_nhp = nhp; dx_ntp = ntp; dx_nmask = nmask
+    loop i < stopw:
+        c = bytes[i]
+        if c == ' ':
+            flags |= 1
+            i += 1
+            loop i < stopw and bytes[i] == ' ': i += 1
+            if i >= stopw: break
+            c = bytes[i]
+        if classes[c] & 16 != 0:
+            flags |= 1
+            if c == '\n': flags |= 2
+            i += 1
+            loop i < stopw:
+                c = bytes[i]
+                if c == '\n': flags |= 2
+                else if classes[c] & 16 == 0: break
+                i += 1
+            continue
+        if classes[c] & 1 != 0:
+            if c < 0x80 and not (c == 'r' and i + 1 < stopw and (bytes[i + 1] == '"' or bytes[i + 1] == '\'')):
+                start = i
+                i += 1
+                loop i < stopw and classes[bytes[i]] & 2 != 0: i += 1
+                n = i - start
+                p = bytes + start
+                id = -1
+                if n <= 16 and nmask >= 0:
+                    hu = u64(n) * 0x9E3779B97F4A7C15
+                    if n > 8:
+                        hu = (hu xor (p as *u64)[0]) * 0xBF58476D1CE4E5B9
+                        hu = (hu xor (hu >> 31)) xor ((p + (n - 8)) as *u64)[0]
+                    else if n >= 4:
+                        hu = hu xor u64((p as *u32)[0]) xor (u64(((p + (n - 4)) as *u32)[0]) << 32)
+                    else:
+                        hu = hu xor u64(p[0]) xor (u64(p[n >> 1]) << 8) xor (u64(p[n - 1]) << 16)
+                    hu = hu * 0xBF58476D1CE4E5B9
+                    h = int(hu xor (hu >> 32))
+                    e0 = int(nsp[h & nmask])
+                    if e0 != 0:
+                        id0 = e0 - 1
+                        if nhp[id0] == h:
+                            hdr = ntp[id0]
+                            if hdr != null and (hdr as *int)[1] == n:
+                                hdr = hdr + 24
+                                if n > 8:
+                                    if (hdr as *u64)[0] == (p as *u64)[0] and ((hdr + (n - 8)) as *u64)[0] == ((p + (n - 8)) as *u64)[0]: id = id0
+                                else if n >= 4:
+                                    if (hdr as *u32)[0] == (p as *u32)[0] and ((hdr + (n - 4)) as *u32)[0] == ((p + (n - 4)) as *u32)[0]: id = id0
+                                else if n >= 2:
+                                    if (hdr as *u16)[0] == (p as *u16)[0] and ((hdr + (n - 2)) as *u16)[0] == ((p + (n - 2)) as *u16)[0]: id = id0
+                                else if hdr[0] == p[0]: id = id0
+                if id < 0:
+                    id = dx_intern_slow(state, host, source, p, start, n)
+                    nsp = dx_nsp; nhp = dx_nhp; ntp = dx_ntp; nmask = dx_nmask
+                kind = DewyKind.identifier
+                symbol = DewyToken.none
+                if id < state.word_count:
+                    symbol = words[id]
+                    if symbol != .none and i < stopw and bytes[i] == '=':
+                        combined = dx_word_assign(symbol, bytes, i, stopw)
+                        if combined != .none: symbol = combined; kind = .op; i += 1
+                    if id == state.true_id or id == state.false_id: kind = .boolean
+                    else if i < stopw and bytes[i] == '?':
+                        if id == state.is_id: symbol = .is_type; kind = .op; i += 1
+                        else if id == state.isnt_id: symbol = .isnt_type; kind = .op; i += 1
+                        else if id == state.in_id: symbol = .contains; kind = .op; i += 1
+                if count == cap: cap = dx_grow_out(out, cap); slots = data(out)
+                sl = slots + count
+                sl.kind = kind
+                sl.name = i32(id)
+                sl.start = start
+                sl.stop = i
+                sl.space = flags & 1 != 0
+                sl.newline = flags & 2 != 0
+                sl.symbol = symbol
+                count += 1
+                flags = 0
+                continue
+            if c == 'r' and i + 1 < stopw and (bytes[i + 1] == '"' or bytes[i + 1] == '\''):
+                start = i
+                i = dx_lex_quote(lx, host, bytes, i + 1, stopw, true)
+                if count == cap: cap = dx_grow_out(out, cap); slots = data(out)
+                sl = slots + count
+                sl.kind = .rawquoted; sl.name = 0; sl.start = start; sl.stop = i
+                sl.space = flags & 1 != 0; sl.newline = flags & 2 != 0; sl.symbol = .none
+                count += 1; flags = 0; continue
+            if count == cap: cap = dx_grow_out(out, cap); slots = data(out)
+            i = dx_lex_unicode(state, host, source, bytes, i, stopw, classes, words, slots, count, flags)
+            continue
+        if c == '#':
+            if i + 1 < stopw and bytes[i + 1] == '{':
+                e = dx_block_comment_end(bytes, i, stopw)
+                if e < 0: dx_block_comment_error(lx, i); host[0].problem()
+                comments.push(i); comments.push(e)
+                if host[0].has_newline(source, i, e): flags |= 2
+                flags |= 1; i = e; continue
+            i = __find_newline(bytes, i, stopw)
+            flags |= 1
+            continue
+        if c >= '0' and c <= '9':
+            if count == cap: cap = dx_grow_out(out, cap); slots = data(out)
+            sl = slots + count
+            start = i
+            if not (c == '0' and i + 1 < stopw and classes[bytes[i + 1]] & 1 != 0):
+                i += 1
+                loop i < stopw and bytes[i] >= '0' and bytes[i] <= '9': i += 1
+                if i >= stopw or (bytes[i] != '_' and bytes[i] != '.' and bytes[i] != 'e' and bytes[i] != 'E' and bytes[i] != '"' and bytes[i] != '\''):
+                    sl.kind = .source_integer; sl.name = 0; sl.start = start; sl.stop = i
+                    sl.space = flags & 1 != 0; sl.newline = flags & 2 != 0; sl.symbol = .none
+                    count += 1; flags = 0; continue
+            i = dx_lex_number(lx, host, bytes, start, stopw, classes, sl)
+            sl.space = flags & 1 != 0; sl.newline = flags & 2 != 0
+            count += 1; flags = 0; continue
+        if c == '"' or c == '\'':
+            start = i
+            i = dx_lex_quote(lx, host, bytes, i, stopw, false)
+            if count == cap: cap = dx_grow_out(out, cap); slots = data(out)
+            sl = slots + count
+            sl.kind = .quoted; sl.name = 0; sl.start = start; sl.stop = i
+            sl.space = flags & 1 != 0; sl.newline = flags & 2 != 0; sl.symbol = .none
+            count += 1; flags = 0; continue
+        if c == '$':
+            start = i
+            state.metatags += 1
+            i += 1
+            loop i < stopw and classes[bytes[i]] & 2 != 0: i += 1
+            if i == start + 1: host[0].error(start, "expected a name after $")
+            if count == cap: cap = dx_grow_out(out, cap); slots = data(out)
+            sl = slots + count
+            sl.kind = .metatag; sl.name = 0; sl.start = start; sl.stop = i
+            sl.space = flags & 1 != 0; sl.newline = flags & 2 != 0; sl.symbol = .none
+            count += 1; flags = 0; continue
+        if c == '\\':
+            e = i + 1
+            loop e < stopw and (bytes[e] == ' ' or bytes[e] == '\t' or bytes[e] == '\r'): e += 1
+            if e < stopw and bytes[e] == '\n': flags |= 1; i = e + 1; continue
+        start = i
+        symbol = DewyToken.none
+        next: u8 = if start + 1 < stopw: bytes[start + 1] else: 0
+        if c < 128 and next < 128:
+            idx = (int(c) << 7) | int(next)
+            symbol = symbols[idx]
+            stag = int(symbol)
+            if stag >= 1 and stag <= 25: i += 1
+            else if stag >= 37 and stag <= 56: i += 2
+            else if stag >= 31 and stag <= 36: i += 3
+            else if stag != 0: i += dx_token_width(symbol)
+            else:
+                symbol = dx_symbol(bytes, start, stopw)
+                if symbol == .none: host[0].error(start, "unexpected character in Dewy source")
+                i += dx_token_width(symbol)
+        else:
+            symbol = dx_symbol(bytes, start, stopw)
+            if symbol == .none: host[0].error(start, "unexpected character in Dewy source")
+            i += dx_token_width(symbol)
+        if count == cap: cap = dx_grow_out(out, cap); slots = data(out)
+        sl = slots + count
+        sl.kind = .op; sl.name = 0; sl.start = start; sl.stop = i
+        sl.space = flags & 1 != 0; sl.newline = flags & 2 != 0; sl.symbol = symbol
+        count += 1; flags = 0
+        if skip:
+            if symbol == .lparen or symbol == .lbrack or symbol == .lbrace: nesting += 1
+            else if symbol == .rparen or symbol == .rbrack or symbol == .rbrace: nesting -= 1
+            else if symbol == .function and nesting == 0:
+                j = i
+                loop j < stopw and (bytes[j] == ' ' or bytes[j] == '\t'): j += 1
+                if j < stopw and bytes[j] == '{':
+                    e = dx_lazy_end(bytes, j, stopw)
+                    if e > 0:
+                        if count == cap: cap = dx_grow_out(out, cap); slots = data(out)
+                        lz = slots + count
+                        lz.kind = .lazy_body; lz.name = 0; lz.start = j; lz.stop = e
+                        lz.space = j > i; lz.newline = false; lz.symbol = .none
+                        count += 1; state.lazy = true; i = e
+    state.space = flags & 1 != 0
+    state.newline = flags & 2 != 0
     count
 
 dx_token_width = (symbol: DewyToken) -> int:
@@ -375,84 +592,77 @@ dx_matches = (source: *u8, at: int, stop: int, value: str) -> bool:
 # Dispatch punctuation by its leading byte, trying only relevant longer
 # spellings. Canonical token text avoids allocating a string per punctuation.
 dx_symbol = (source: *u8, at: int, stop: int) -> DewyToken:
-    match source[at]:
-        '%':
-            if dx_matches(source, at, stop, "%="): return .percent_assign
-        '*':
-            if dx_matches(source, at, stop, "*="): return .star_assign
-        '+':
-            if dx_matches(source, at, stop, "+="): return .plus_assign
-        '-':
-            if dx_matches(source, at, stop, "->"): return .arrow
-            if dx_matches(source, at, stop, "-="): return .minus_assign
-        '.':
-            if at + 1 < stop:
-                match source[at + 1]:
-                    '%':
-                        if dx_matches(source, at, stop, ".%="): return .dot_percent_assign
-                        if dx_matches(source, at, stop, ".%"): return .dot_percent
-                    '*':
-                        if dx_matches(source, at, stop, ".*="): return .dot_star_assign
-                        if dx_matches(source, at, stop, ".*"): return .dot_star
-                    '+':
-                        if dx_matches(source, at, stop, ".+="): return .dot_plus_assign
-                        if dx_matches(source, at, stop, ".+"): return .dot_plus
-                    '-':
-                        if dx_matches(source, at, stop, ".-="): return .dot_minus_assign
-                        if dx_matches(source, at, stop, ".-"): return .dot_minus
-                    '.':
-                        if dx_matches(source, at, stop, "..."): return .ellipsis
-                        if dx_matches(source, at, stop, ".."): return .range
+    rem = stop - at
+    c0 = source[at]
+    if rem >= 2:
+        c1 = source[at + 1]
+        match c0:
+            '%':
+                if c1 == '=': return .percent_assign
+            '*':
+                if c1 == '=': return .star_assign
+            '+':
+                if c1 == '=': return .plus_assign
+            '-':
+                if c1 == '>': return .arrow
+                if c1 == '=': return .minus_assign
+            '.':
+                c2: u8 = if rem >= 3: source[at + 2] else: 0
+                match c1:
+                    '%': return if c2 == '=': DewyToken.dot_percent_assign else: DewyToken.dot_percent
+                    '*': return if c2 == '=': DewyToken.dot_star_assign else: DewyToken.dot_star
+                    '+': return if c2 == '=': DewyToken.dot_plus_assign else: DewyToken.dot_plus
+                    '-': return if c2 == '=': DewyToken.dot_minus_assign else: DewyToken.dot_minus
+                    '.': return if c2 == '.': DewyToken.ellipsis else: DewyToken.range
                     '/':
-                        if dx_matches(source, at, stop, ".//="): return .dot_floor_assign
-                        if dx_matches(source, at, stop, "./="): return .dot_slash_assign
-                        if dx_matches(source, at, stop, ".//"): return .dot_floor
-                        if dx_matches(source, at, stop, "./"): return .dot_slash
+                        if c2 == '/': return if rem >= 4 and source[at + 3] == '=': DewyToken.dot_floor_assign else: DewyToken.dot_floor
+                        return if c2 == '=': DewyToken.dot_slash_assign else: DewyToken.dot_slash
                     '<':
-                        if dx_matches(source, at, stop, ".<=?"): return .dot_le
-                        if dx_matches(source, at, stop, ".<?"): return .dot_lt
+                        if c2 == '=' and rem >= 4 and source[at + 3] == '?': return .dot_le
+                        if c2 == '?': return .dot_lt
                     '=':
-                        if dx_matches(source, at, stop, ".=?"): return .dot_eq
+                        if c2 == '?': return .dot_eq
                     '>':
-                        if dx_matches(source, at, stop, ".>=?"): return .dot_ge
-                        if dx_matches(source, at, stop, ".>?"): return .dot_gt
-                    '^':
-                        if dx_matches(source, at, stop, ".^="): return .dot_power_assign
-                        if dx_matches(source, at, stop, ".^"): return .dot_caret
+                        if c2 == '=' and rem >= 4 and source[at + 3] == '?': return .dot_ge
+                        if c2 == '?': return .dot_gt
+                    '^': return if c2 == '=': DewyToken.dot_power_assign else: DewyToken.dot_caret
                     'n':
-                        if dx_matches(source, at, stop, ".not>=?"): return .dot_not_ge
-                        if dx_matches(source, at, stop, ".not<=?"): return .dot_not_le
-                        if dx_matches(source, at, stop, ".not=?"): return .dot_not_eq
-                        if dx_matches(source, at, stop, ".not>?"): return .dot_not_gt
-                        if dx_matches(source, at, stop, ".not<?"): return .dot_not_lt
-        '/':
-            if dx_matches(source, at, stop, "//="): return .floor_assign
-            if dx_matches(source, at, stop, "/="): return .slash_assign
-            if dx_matches(source, at, stop, "//"): return .floor
-        ':':
-            if dx_matches(source, at, stop, ":>"): return .returns
-        '<':
-            if dx_matches(source, at, stop, "<=?"): return .le
-            if dx_matches(source, at, stop, "<<="): return .shl_assign
-            if dx_matches(source, at, stop, "<?"): return .lt
-            if dx_matches(source, at, stop, "<<"): return .shl
-            if dx_matches(source, at, stop, "<|"): return .pipe_left
-        '=':
-            if dx_matches(source, at, stop, "=>"): return .function
-            if dx_matches(source, at, stop, "=?"): return .eq
-        '>':
-            if dx_matches(source, at, stop, ">=?"): return .ge
-            # Nested generic closers before => are >> then =>, not >>= then >.
-            if dx_matches(source, at, stop, ">>=") and not dx_matches(source, at, stop, ">>=>"): return .shr_assign
-            if dx_matches(source, at, stop, ">?"): return .gt
-            if dx_matches(source, at, stop, ">>"): return .shr
-        '?':
-            if dx_matches(source, at, stop, "??"): return .coalesce
-        '^':
-            if dx_matches(source, at, stop, "^="): return .power_assign
-        '|':
-            if dx_matches(source, at, stop, "|>"): return .pipe_right
-            if dx_matches(source, at, stop, "|="): return .pipe_assign
-        '&':
-            if dx_matches(source, at, stop, "&="): return .amp_assign
-    dn_single_token(source[at])
+                        if rem >= 6 and c2 == 'o' and source[at + 3] == 't':
+                            c4 = source[at + 4]
+                            c5 = source[at + 5]
+                            if c4 == '>':
+                                if c5 == '=' and rem >= 7 and source[at + 6] == '?': return .dot_not_ge
+                                if c5 == '?': return .dot_not_gt
+                            else if c4 == '<':
+                                if c5 == '=' and rem >= 7 and source[at + 6] == '?': return .dot_not_le
+                                if c5 == '?': return .dot_not_lt
+                            else if c4 == '=' and c5 == '?': return .dot_not_eq
+            '/':
+                if c1 == '/': return if rem >= 3 and source[at + 2] == '=': DewyToken.floor_assign else: DewyToken.floor
+                if c1 == '=': return .slash_assign
+            ':':
+                if c1 == '>': return .returns
+            '<':
+                if c1 == '=' and rem >= 3 and source[at + 2] == '?': return .le
+                if c1 == '<': return if rem >= 3 and source[at + 2] == '=': DewyToken.shl_assign else: DewyToken.shl
+                if c1 == '?': return .lt
+                if c1 == '|': return .pipe_left
+            '=':
+                if c1 == '>': return .function
+                if c1 == '?': return .eq
+            '>':
+                if c1 == '=' and rem >= 3 and source[at + 2] == '?': return .ge
+                if c1 == '>':
+                    if rem >= 3 and source[at + 2] == '=' and not (rem >= 4 and source[at + 3] == '>'): return .shr_assign
+                    return .shr
+                if c1 == '?': return .gt
+            '?':
+                if c1 == '?': return .coalesce
+            '^':
+                if c1 == '=': return .power_assign
+            '|':
+                if c1 == '>': return .pipe_right
+                if c1 == '=': return .pipe_assign
+            '&':
+                if c1 == '=': return .amp_assign
+    dn_single_token(c0)

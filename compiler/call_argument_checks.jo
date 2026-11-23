@@ -126,45 +126,45 @@ call_string_cost = (a: int, p: int, sp: int, binds: mut int[]) -> int:
         return 2
     -2
 
-call_decl_checks = (n: int, name: int, decl: int, args: int[], cd: Cand, np: int, ufcs: bool):
+call_decl_checks = (n: int, name: int, decl: int, args: int[], cd_args: int[], np: int, ufcs: bool):
     # (draw() inside draw: as a way to draw it again, it calls itself without end)
     if (name == id_draw or name == id_update) and modules[int(nodes[decl].mod)].is_main and cx >= 0:
         ci = int(ctxs[cx].inst)
         if ci > 0 and int(fns[ci].decl) == decl:
             fatal(nodes[n].pos, "{name_of(name)} calls itself here, which repeats without end: the game calls {name_of(name)} by itself, each frame")
     if cx >= 0 and caller_dewy() and self_call_is_body(n, decl, args): self_call_error(n, name, ufcs, args)
-    if nodes[n].aux2 == i32(AUX2_PLACE) or nodes[n].aux2 == i32(AUX2_PLACE_TAKEN) or place_methods.has(decl): place_call_seen(n, decl)
-    if (name == id_rgb or name == id_rgba) and np >= 3 and decl_in_prelude(decl): rgb_check(n, cd.args)
-    if name == id_hsv and np >= 3 and decl_in_prelude(decl): hsv_check(n, cd.args)
-    if not decl_in_prelude(decl) and cx >= 0:
+    if nodes[n].aux2 == i32(AUX2_PLACE) or nodes[n].aux2 == i32(AUX2_PLACE_TAKEN) or (place_methods.len() > 0 and place_methods.has(decl)): place_call_seen(n, decl)
+    in_pre = decl_in_prelude(decl)
+    if (name == id_rgb or name == id_rgba) and np >= 3 and in_pre: rgb_check(n, cd_args)
+    if name == id_hsv and np >= 3 and in_pre: hsv_check(n, cd_args)
+    if not in_pre and cx >= 0:
         # (make_world never called: a function of the program's, used from somewhere else)
         ci0 = int(ctxs[cx].inst)
         if ci0 <= 0 or int(fns[ci0].decl) != decl: fn_used[decl] = true
-    if decl_in_prelude(decl) and not pos_in_lib(nodes[n].pos):
+    if in_pre and not pos_in_lib(nodes[n].pos):
         frame_call_check(n, decl)
-        shader_draw_check(decl, cd.args)
-        angle_check(decl, cd.args)
+        shader_draw_check(decl, cd_args)
+        angle_check(decl, cd_args)
         qn = name_of(int(nodes[decl].name))
         if (starts_with(qn, "quat_") and qn != "quat_rotate" and qn != "quat_to_mat4") or qn == "slerp":
             quat_nodes[n] = true
             statement_watch.quaternions = quat_nodes.len()
         # (random_int(1, 6) for a die: its upper end is left out, as in [1..6))
         rhi = -1
-        if name_of(int(nodes[decl].name)) == "random_int" and cd.args.len() == 2 and written_int(cd.args[0]) == 1: rhi = written_int(cd.args[1])
+        if qn == "random_int" and cd_args.len() == 2 and written_int(cd_args[0]) == 1: rhi = written_int(cd_args[1])
         if rhi == 6 or rhi == 10 or rhi == 12 or rhi == 20 or rhi == 100:
             # (a die's, or a percent's, upper end, as people write it: random_int(1, 7) is quiet,
             # and random_int(1, 5 + 1) says 1 to 5 is meant)
             warn(nodes[n].pos, "random_int(1, {rhi}) gives 1 to {rhi - 1}: its upper end is left out, as in [1..{rhi}); random_int(1, {rhi + 1}) gives 1 to {rhi} (and random_int(1, {rhi - 1} + 1) says 1 to {rhi - 1} is meant)")
         # (random(1, 6) for a die, as Python's randint: a number with a fraction)
-        if name_of(int(nodes[decl].name)) == "random" and cd.args.len() == 2 and written_int(cd.args[0]) == 1:
-            hi = written_int(cd.args[1])
+        if qn == "random" and cd_args.len() == 2 and written_int(cd_args[0]) == 1:
+            hi = written_int(cd_args[1])
             if hi == 6 or hi == 10 or hi == 12 or hi == 20 or hi == 100: warn(nodes[n].pos, "random(1, {hi}) gives a number with a fraction (such as 3.7); a whole number from 1 to {hi} is random_int(1, {hi + 1})")
         # (read_bytes("assets/hero.png") in a web page: it has no disk to read the file from)
-        if target_wasm and cd.args.len() > 0 and cd.args[0] != 0 and nodes[cd.args[0]].kind == .str_lit and nodes[cd.args[0]].aux == 0:
-            fnm = name_of(int(nodes[decl].name))
-            if fnm == "read_file" or fnm == "read_bytes":
-                f = name_of(int(nodes[cd.args[0]].sval))
-                warn(nodes[n].pos, "a web page has no files from the disk: {fnm}(\"{f}\") finds only what the page wrote itself; `embed(\"{f}\")` builds the file into the program")
+        if target_wasm and cd_args.len() > 0 and cd_args[0] != 0 and nodes[cd_args[0]].kind == .str_lit and nodes[cd_args[0]].aux == 0:
+            if qn == "read_file" or qn == "read_bytes":
+                f = name_of(int(nodes[cd_args[0]].sval))
+                warn(nodes[n].pos, "a web page has no files from the disk: {qn}(\"{f}\") finds only what the page wrote itself; `embed(\"{f}\")` builds the file into the program")
 
 call_map_candidate = (d: int, args: int[], cd: mut Cand, kinds: int[], ufcs: bool, recv_fits: mut bool, failure: mut CallFailure) -> bool:
     np = nkids(d)

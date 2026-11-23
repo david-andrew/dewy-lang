@@ -38,7 +38,7 @@ main = ():
     again = lex(0, "replacement(7)\n")
     print("again:{again.len()}")
     loop t in saved:
-        print("{int(t.kind)}:{t.flags}:{t.pos}:{t.start}:{t.len}:{t.ival}:{t.fval}")
+        print("{int(t.kind)}:{t.flags}:{t.pos}:{t.start}:{t.len}:{t.ival}")
     print("spare:{cap(saved) - saved.len() >= LX_SPARE}:{lx_slots == null}")
     p = data(saved)
     loop i in [0..LX_SPARE): assert(p[saved.len() + i].kind == Tok.eof)

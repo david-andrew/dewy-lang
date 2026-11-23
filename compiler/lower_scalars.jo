@@ -33,7 +33,14 @@ use 'math_ops.dewy'
 use 'member_ops.dewy'
 
 push_i64 = (b: mut u8[], v: int):
-    loop i in [0..8): b.push(u8((v >> (8 * i)) & 255))
+    old = b.len()
+    need = old + 8
+    p = data(b)
+    if p == null or ((p as *int) - 3)[0] != 1 or ((p as *int) - 3)[2] < need:
+        b.reserve(max(need, b.cap() * 2))
+        p = data(b)
+    ((p as *int) - 3)[1] = need
+    ((p + old) as *int)[0] = v
 
 positive_modulus = (n: int) -> int:
     if nodes[n].kind == .binary and nodes[n].aux == 0 and nodes[n].op == i32(int(Tok.percent)) and nodes[n].aux2 == -1:

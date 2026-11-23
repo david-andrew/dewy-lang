@@ -1,6 +1,6 @@
 use 'expression_types.dewy'
 use 'checker_call_convert.dewy'
-# Frozen argument costs and candidate scoring from expr.jo.
+# Frozen argument costs and candidate scoring from expr.jo (word shifts are native int in Jo).
 use 'checker_state.dewy'
 use 'ast.jo'
 use 'types.jo'
@@ -21,43 +21,58 @@ struct Cand:
     missing: bool     # (some parameter left to its default)
 
 arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
-    # (a value whose settled type is the parameter's, half of all arguments: the cases below
-    # that could cost it anything are of literals, of values whose type comes from where they
-    # go, of optionals (string sets), refinements, callables and word fractions)
-    if nodes[a].type != 0 and not is_lit(a) and nodes[a].kind != .str_lit and nodes[a].kind != .float_lit:
-        t = tu_prune(pat)
-        if tu_prune(ntype(a)) == t and not has_var(t):
-            tk = types[t].kind
+    nd = data(nodes) + a
+    nt = int(nd.type)
+    if nt != 0 and (int(nd.flags) & 256) == 0 and nd.kind != .str_lit and nd.kind != .float_lit:
+        tp = data(types)
+        t = if nt == pat and (int(tp[pat].flags) & 1) == 0: pat else: tu_prune(pat)
+        if (nt == t or tu_prune(nt) == t) and (int(tp[t].flags) & 1) == 0:
+            tk = tp[t].kind
             if tk != .opt and tk != .refined and tk != .callable and tk != .polyfn and not (tk == .struct_ and bundled_word_rational_type(t)) and not ctx_dependent(a): return 0
     arg_cost_rest(a, pat, binds)
 
 # Zero means success; +/- (index + 1) identifies a value/mutable rejection.
 call_candidate_cost = (cd: mut Cand, recv_fits: mut bool) -> int:
     np = cd.args.len()
+    args_p = data(cd.args)
+    ns = data(nodes)
     later = 0
-    loop a in cd.args:
-        if a == 0: continue
-        if ctx_dependent(a): later |= 2
-        else if is_lit(a): later |= 1
-    cd.plain = later == 0
+    lit_mask = 0
+    ctx_mask = 0
     arg_cls: int[]
-    if later != 0:
-        loop a in cd.args:
+    if np <= 64:
+        loop i in [0..np):
+            a = args_p[i]
+            if a == 0: continue
+            if ctx_dependent(a): later |= 2; ctx_mask |= (1 << i)
+            else if (int(ns[a].flags) & 256) != 0: later |= 1; lit_mask |= (1 << i)
+    else:
+        loop i in [0..np):
+            a = args_p[i]
             cls = 0
             if a != 0:
-                if ctx_dependent(a): cls = 2
-                else if is_lit(a): cls = 1
+                if ctx_dependent(a): later |= 2; cls = 2
+                else if (int(ns[a].flags) & 256) != 0: later |= 1; cls = 1
             arg_cls.push(cls)
+    cd.plain = later == 0
     cost = 0
+    params_p = data(cd.sig.params)
+    mutmask = int(cd.sig.mutmask)
     loop phase in [0..3):
         if phase > 0 and later & phase == 0: continue
         loop i in [0..np):
-            a = cd.args[i]
+            a = args_p[i]
             if a == 0: continue
-            cls = if later == 0: 0 else: arg_cls[i]
+            cls = 0
+            if later != 0:
+                if np <= 64:
+                    bit = 1 << i
+                    if (ctx_mask & bit) != 0: cls = 2
+                    else if (lit_mask & bit) != 0: cls = 1
+                else: cls = arg_cls[i]
             if cls != phase: continue
-            pt = cd.sig.params[i]
-            if int(cd.sig.mutmask) & (1 << i) != 0 and cls != 2:
+            pt = params_p[i]
+            if (mutmask & (1 << i)) != 0 and cls != 2:
                 r = call_mutable_cost(a, pt, cd.binds, recv_fits, i == 0)
                 if r < 0: return -(i + 1)
                 cost += r

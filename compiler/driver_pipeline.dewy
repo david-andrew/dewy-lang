@@ -204,9 +204,11 @@ emit_queued=():>void=>$unsafe {
         return
     }
     let t0=driver_host[0].clock()
-    loop k in 0.. and f in q {
-        driver_state[0].ir[0] = f
-        let icb=driver_host[0].ic_lf(7  f.fn_index)
+    loop k in [0..q.length) {
+        let fi=q.ptr[k].fn_index
+        driver_state[0].ir[0] = q[k]
+        q[k] = IrFn()
+        let icb=driver_host[0].ic_lf(7  fi)
         emit_now(fin[k])
         driver_host[0].ic_restore(icb)
     }

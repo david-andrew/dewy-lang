@@ -12,6 +12,8 @@ use 'util.jo'
 use 'call_style_lookup.dewy'
 use 'expr_node_queries.dewy'
 use 'check.jo'
+use 'prelude.jo'
+use 'checker_startup.dewy'
 use 'checks_thin_expr.dewy'
 use 'numeric_library_types.dewy'
 use 'call_lookup_context.dewy'
@@ -109,6 +111,14 @@ member_missing = (n: int, bt: int, expected: int, bypass: mut bool) -> int:
                 if len(et) == 0: et = "Thing"
                 fatal(nodes[n].pos, "the type of what '{gn}' holds is not known here (it starts empty): write it where '{gn}' is made, as {jd(nodes[n].pos, "`{gn}: {et}[] = []`", "`let {gn}:array<{et}> = []`")}")
         never_cascade(nodes[n].pos, bt)
+        if prelude_std_pending:
+            load_std_prelude()
+            bypass = true
+            return check_expr(n, expected)
+        if prelude_game_pending:
+            load_game_prelude()
+            bypass = true
+            return check_expr(n, expected)
         cands = fn_names_for(bt)
         if types[bt].kind == .struct_:
             si = int(types[bt].st)

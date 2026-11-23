@@ -74,7 +74,7 @@ exact_bits=(n:FinalWidth):>FinalWidth=>$unsafe {
         width=min(width syntax_bits)
     }
     if n <? exact_ranges.length and exact_ranges.ptr[n] >? 0 {width=min(width exact_ranges.ptr[n])}
-    if n >=? exact_widths.length {exact_widths.resize(max(n + 1 nodes.length))}
+    if n >=? exact_widths.length {exact_widths.resize(max(max(n + 1 nodes.length) exact_widths.length * 2))}
     exact_widths[n]=width
     width
 }

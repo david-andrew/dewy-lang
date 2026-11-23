@@ -3,7 +3,7 @@ from p"expression_types.dewy" import (ntype)
 
 from p"directives.jo" import (DIR_IMPLICIT)
 from p"directive_queries.dewy" import (dir_policy)
-from p"util.jo" import (pos_in_lib)
+from p"util.jo" import (file_in_lib pos_in_lib)
 from p"facts.jo" import (FactSummary)
 from p"facts_capture.dewy" import (fact_capture)
 from p"facts_index_writes.dewy" import (fact_new)
@@ -27,7 +27,8 @@ from p"exact_marks.dewy" import (exact_decided exact_has_store)
 from p"exact_preparation.dewy" import (exact_shader_demand)
 from p"exact_fact_transfer.dewy" import (exact_fact_store)
 from p"expr.jo" import (CV IN)
-from p"facts.jo" import (FactPlanDependency FACT_LENT FactBinding FactSlice FactState fact_call_field_types fact_carried_cache fact_comprehension_sources fact_comprehensions fact_constant_globals fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_calls fact_constructor_types fact_dead_refinements fact_decided fact_deferred fact_deferred_checks fact_deferred_proving fact_divisors fact_fixed_requests fact_fork_entries fact_fork_nodes fact_grown_roots fact_has_deferred fact_internal_policy fact_key_params fact_owner fact_panic_collect fact_panic_pending fact_panic_sites fact_parallel_bounds fact_plan_dependencies fact_plan_serial fact_policy fact_policy_default fact_probe_on fact_probe_runs fact_pushed_rows_cache fact_query fact_regex_counts fact_requests fact_retry_owner fact_return_escapes_cache fact_returns_cache fact_cursor_shapes fact_saving fact_search_predicate fact_selector_sources fact_shape_summaries fact_shared_literals fact_slice fact_slice_cache fact_speculating fact_sum_operand fact_summaries fact_summary_assumed fact_summary_field fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_text_sinks fact_validated)
+from p"expression_types.dewy" import (ntype)
+from p"facts.jo" import (FACT_LENT FactBinding FactPlanDependency FactSlice FactState fact_call_field_types fact_carried_cache fact_comprehension_sources fact_comprehensions fact_constant_globals fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_calls fact_constructor_types fact_cursor_shapes fact_dead_refinements fact_decided fact_deferred fact_deferred_checks fact_deferred_proving fact_divisors fact_fixed_requests fact_fork_entries fact_fork_nodes fact_grown_roots fact_has_deferred fact_internal_policy fact_key_params fact_owner fact_panic_collect fact_panic_pending fact_panic_sites fact_parallel_bounds fact_plan_dependencies fact_plan_serial fact_policy fact_policy_default fact_probe_on fact_probe_runs fact_pushed_rows_cache fact_query fact_regex_counts fact_requests fact_retry_owner fact_return_escapes_cache fact_returns_cache fact_saving fact_search_predicate fact_selector_sources fact_shape_summaries fact_shared_literals fact_slice fact_slice_cache fact_speculating fact_sum_operand fact_summaries fact_summary_assumed fact_summary_field fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_text_sinks fact_validated)
 from p"facts_slice_builder.dewy" import (fact_root_key fact_slice_prepare)
 from p"facts_plan_cache.dewy" import (fact_plan_forget)
 from p"facts_slice_prep.dewy" import (fact_slice_push_children)
@@ -43,6 +44,7 @@ from p"icount.jo" import (IC_FACTS)
 from p"icount_ops.dewy" import (ic_fn ic_restore)
 from p"ide.jo" import (ide_on)
 from p"isolation.jo" import (isolation_limit)
+from p"member_replay.jo" import (member_uniform_owners)
 from p"ownership.jo" import (ownership_decls ownership_fact_cleanup)
 from p"ownership_types.dewy" import (ownership_fact_type)
 from p"predicate_facts.jo" import (FactPredicate fact_predicate_nodes fact_predicates)
@@ -92,8 +94,7 @@ LifeWord:type=int64<overflow='wrap'>
 fn_in_lib=(f:LifeWord):>bool=>$unsafe {
     let m:LifeWord=fns.ptr[f].mod
     if m >=? 0 and m <? modules.length {
-        let file:LifeWord=modules[m].file
-        return (lib_root as array<uint8>).length >? 0 and file >=? 0 and file <? files.length and starts_with(files[file].path lib_root)
+        return file_in_lib(LifeWord(modules.ptr[m].file))
     }
     pos_in_lib(nodes.ptr[LifeWord(fns.ptr[f].body)].pos)
 }
@@ -273,6 +274,7 @@ facts_finalize=():>void=>$unsafe {
             if not uniform_defer and fact_panic_collect {fact_panic_sites[f]=fact_panic_pending}
             fact_panic_collect=false
             if uniform_defer or fact_has_deferred {fact_deferred[f]=true}
+            member_uniform_owners[f]=true
             fact_policy=previous_policy
             ic_restore(icb)
             continue
@@ -481,6 +483,20 @@ fact_complete_deferred=(f:LifeWord):>void=>$unsafe {
         }
     }
     let icb=ic_fn(IC_FACTS f)
+    if pending.length =? 0 {
+        fact_has_deferred=false
+        fact_panic_collect=true
+        fact_panic_pending=[]
+        let obliged=fact_obliged(LifeWord(fns.ptr[f].body))
+        if not obliged and not fact_has_deferred {
+            if fact_panic_collect {fact_panic_sites[f]=fact_panic_pending}
+            fact_panic_collect=false
+            fact_deferred_proving=previous_proving
+            ic_restore(icb)
+            return
+        }
+        fact_panic_collect=false
+    }
     fact_owner=f
     fact_terms=[FactTerm()]
     fact_constructor_actuals=dict<int64 array<int64>>()
@@ -551,6 +567,7 @@ fact_obliged=(n:LifeWord):>bool=>$unsafe {
     # A finite lowering width is required even when runtime checks are allowed.
     if n <? exact_marks.length and exact_marks[n] & 128 not=? 0 {return true}
     if fact_obligation_node(n) {
+        if fact_deferred_proving {return true}
         let policy=dir_policy(nodes.ptr[n].pos)
         if policy =? DIR_STATIC or policy =? DIR_PROTOTYPE or dir_obligations or ide_on or dir_forced {return true}
         discovery_deferred[0]=true
@@ -589,28 +606,32 @@ fact_obligation_node=(n:LifeWord):>bool=>$unsafe {
         return nodes.ptr[n].aux =? int32(int64(CV.int_)) and prune(ntype(LifeWord(nodes.ptr[n].a))) =? T_MATH_INT and prune(ntype(n)) not=? T_MATH_INT
     }
     if k =? 'call' {
-        if wi_fact_calls.has(n) or fact_divisors.has(n) or fact_range_call(n) or nd_mutable_call(n) or fact_rational_constructor(n) and not fact_literal_nonzero(kid(n 1)) or fact_rational_divmod(n) {return true}
-        if (fact_floor_call(n) not=? 0 and not fact_literal_nonzero(kid(n 1))) or fact_string_call(n) >=? 2 or fact_array_call(n) not=? 0 or fact_power_call(n) {return true}
-        let map=fact_map_call(n)
-        if map >=? 2 and map <=? 4 or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_gpu_index_call(n) {return true}
-        let pool=fact_pool_call(n)
-        if pool >=? 2 and pool <=? 4 {return true}
-        # A fork closure's obligations start from its creator's facts.
-        if dir_assumed_bounds_any and fact_parallel_range_call(n) {return true}
-        if fact_library_call(n "parallel_range") or fact_library_call(n "parallel_map") or fact_parallel_array(n) {
-            loop i in [0..nkids(n)) {
-                let arg=kid(n i)
-                if nodes.ptr[arg].kind =? 'lambda' {
-                    discovery_collect[0]=false
-                    if fact_obliged(LifeWord(nodes.ptr[arg].b)) {return true}
+        if wi_fact_calls.has(n) or fact_divisors.has(n) or nd_mutable_call(n) {return true}
+        let callee=LifeWord(nodes.ptr[n].sym)
+        if callee >? 0 and fn_in_lib(callee) {
+            if fact_range_call(n) or fact_rational_constructor(n) and not fact_literal_nonzero(kid(n 1)) or fact_rational_divmod(n) {return true}
+            if (fact_floor_call(n) not=? 0 and not fact_literal_nonzero(kid(n 1))) or fact_string_call(n) >=? 2 or fact_array_call(n) not=? 0 or fact_power_call(n) {return true}
+            let map=fact_map_call(n)
+            if map >=? 2 and map <=? 4 or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_gpu_index_call(n) {return true}
+            let pool=fact_pool_call(n)
+            if pool >=? 2 and pool <=? 4 {return true}
+            # A fork closure's obligations start from its creator's facts.
+            if dir_assumed_bounds_any and fact_parallel_range_call(n) {return true}
+            if fact_library_call(n "parallel_range") or fact_library_call(n "parallel_map") or fact_parallel_array(n) {
+                loop i in [0..nkids(n)) {
+                    let arg=kid(n i)
+                    if nodes.ptr[arg].kind =? 'lambda' {
+                        discovery_collect[0]=false
+                        if fact_obliged(LifeWord(nodes.ptr[arg].b)) {return true}
+                    }
                 }
             }
-        }
-        # (and so do a key callback's: fact_key_callback)
-        let key=fact_key_callback(n)
-        if key >? 0 {
-            discovery_collect[0]=false
-            if fact_obliged(LifeWord(nodes.ptr[key].b)) {return true}
+            # (and so do a key callback's: fact_key_callback)
+            let key=fact_key_callback(n)
+            if key >? 0 {
+                discovery_collect[0]=false
+                if fact_obliged(LifeWord(nodes.ptr[key].b)) {return true}
+            }
         }
         return false
     }

@@ -5,9 +5,11 @@ use 'ast.jo'
 use 'checker_call_queries.dewy'
 use 'checker_expr.dewy'
 use 'checker_signature.dewy'
+use 'checker_startup.dewy'
 use 'checker_types.dewy'
 use 'checks_thin.dewy'
 use 'expr.jo'
+use 'prelude.jo'
 use 'source_warnings.dewy'
 use 'spelling.dewy'
 use 'type_ops.dewy'
@@ -86,6 +88,11 @@ hidden_method_warnings = (m: int):
             if at == .array or at == .str_:
                 warn(nodes[d].pos, hidden_method_message(dn, own.params[0]))
                 continue
+        if prelude_std_pending:
+            sf = std_file_for(dn)
+            if sf.len() > 0:
+                load_std_file(sf)
+                cl_demand(name)
         found: int[]
         dm = cl_prelude_module(name)
         if dm >= 0: collect_in(dm, name, 0, found)

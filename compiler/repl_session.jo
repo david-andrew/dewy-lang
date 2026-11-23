@@ -118,9 +118,9 @@ repl_try = (text: str, keep: bool) -> ReplTry:
         s = __snap_take(lo, lo + n)
         box = __os_raw_pages(4096) as *int          # (what it found: kept when memory is put back)
         if __setjmp(repl_jbuf) == 0:
-            __repl_jmp = repl_jbuf
+            repl_set_jmp(repl_jbuf)
             o = repl_compile(text, repl_inputs)
-            __repl_jmp = null
+            repl_set_jmp(null)
             if keep:
                 __snap_drop(s)
                 __os_raw_free(box as *u8, 4096)
@@ -128,7 +128,7 @@ repl_try = (text: str, keep: bool) -> ReplTry:
             box[0] = 1
             if o.show: box[1] = 1
             box[2] = __snap_keep(o.type) as int
-        __repl_jmp = null
+        repl_set_jmp(null)
         __snap_restore(s)
         __snap_drop(s)
         if box[0] == 1:
@@ -257,9 +257,9 @@ rs_complete = (probe: str) -> str:
         ide_out = ""
         ide_sentinel = intern("__dewy_complete__")
         if __setjmp(repl_jbuf) == 0:
-            __repl_jmp = repl_jbuf
+            repl_set_jmp(repl_jbuf)
             repl_compile(probe, repl_inputs)
-        __repl_jmp = null
+        repl_set_jmp(null)
         k = __snap_keep(ide_out)
         __snap_restore(s)
         __snap_drop(s)

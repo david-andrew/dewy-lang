@@ -3,11 +3,10 @@ $runtime_checks
 from p"@lib/core/os.jo" import (delete_file)
 from p"@lib/core/str.jo" import (chr)
 from p"@lib/core/rt.jo" import (__os_raw_free __os_raw_pages __read_fd __write_fd)
-from p"@lib/std/repl.jo" import (__repl_jmp)
 from p"@lib/std/snapshot.jo" import (__image_data __snap_drop __snap_keep __snap_restore __snap_take __snap_unkeep)
 from p"ide.jo" import (ide_fd ide_on ide_out ide_sentinel)
 from p"macho_format.dewy" import (MACHO_BASE)
-from p"repl.jo" import (REPL_REGION ReplTry repl_termios_saved repl_exe repl_from repl_inputs repl_jbuf repl_mode_saved repl_pending repl_pid repl_to repl_tty)
+from p"repl.jo" import (REPL_REGION ReplTry repl_termios_saved repl_exe repl_from repl_inputs repl_jbuf repl_mode_saved repl_pending repl_pid repl_set_jmp repl_to repl_tty)
 from p"repl_drive.dewy" import (repl_run_input)
 from p"repl_ops.dewy" import (repl_compile repl_started)
 from p"util.jo" import (intern)
@@ -105,9 +104,9 @@ repl_try=(text:string keep:bool):>ReplTry=>$unsafe {
     # (what it found: kept when memory is put back)
     let box=__os_raw_pages(4096) as ptr<int64>
     if __setjmp(repl_jbuf) =? 0 {
-        __repl_jmp=repl_jbuf
+        repl_set_jmp(repl_jbuf)
         let o=repl_compile(text repl_inputs)
-        __repl_jmp=uint64(0) as ptr<uint8>
+        repl_set_jmp(uint64(0) as ptr<uint8>)
         if keep {
             __snap_drop(s)
             __os_raw_free(box as ptr<uint8> 4096)
@@ -122,7 +121,7 @@ repl_try=(text:string keep:bool):>ReplTry=>$unsafe {
         if o.show {box[1]=1}
         box[2]=__snap_keep(o.type) as int64
     }
-    __repl_jmp=uint64(0) as ptr<uint8>
+    repl_set_jmp(uint64(0) as ptr<uint8>)
     __snap_restore(s)
     __snap_drop(s)
     if box[0] =? 1 {
@@ -267,10 +266,10 @@ rs_complete=(probe:string):>string=>$unsafe {
     ide_out=""
     ide_sentinel=intern("__dewy_complete__")
     if __setjmp(repl_jbuf) =? 0 {
-        __repl_jmp=repl_jbuf
+        repl_set_jmp(repl_jbuf)
         repl_compile(probe repl_inputs);
     }
-    __repl_jmp=uint64(0) as ptr<uint8>
+    repl_set_jmp(uint64(0) as ptr<uint8>)
     let k=__snap_keep(ide_out)
     __snap_restore(s)
     __snap_drop(s)

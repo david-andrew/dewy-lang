@@ -74,18 +74,92 @@ use 'facts_value_queries.dewy'
 use 'facts_index_writes.dewy'
 use 'facts_lengths.dewy'
 
+fj_same_gen: i32[]
+fj_same_idx: i32[]
+fj_same_g: i32 = 0
+fj_ren_g: i32 = 0
+fj_lm_gen: i32[]
+fj_lm_val: i32[]
+fj_rm_gen: i32[]
+fj_rm_val: i32[]
+fj_lr_gen: i32[]
+fj_lr_val: i32[]
+fj_rl_gen: i32[]
+fj_rl_val: i32[]
+fj_left_pool: int[]
+fj_right_pool: int[]
+fj_merged_pool: int[]
+fj_chg_l_pool: int[]
+fj_chg_r_pool: int[]
+fj_chg_idx_pool: int[]
+fj_pairs_pool: int[]
+fj_elem_keys: {(int, int): int} = {}
+
+fj_ensure_same = (need: int) -> i32:
+    if fj_same_gen.len() < need:
+        sz = need + 256
+        fj_same_gen.resize(sz)
+        fj_same_idx.resize(sz)
+    fj_same_g = i32(int(fj_same_g) + 1)
+    if fj_same_g == 0:
+        mem_set(data(fj_same_gen) as *u8, 0, fj_same_gen.len() * 4)
+        fj_same_g = 1
+    fj_same_g
+
+fj_ensure_ren = (need: int) -> i32:
+    if fj_lm_gen.len() < need:
+        sz = need + 256
+        fj_lm_gen.resize(sz); fj_lm_val.resize(sz)
+        fj_rm_gen.resize(sz); fj_rm_val.resize(sz)
+        fj_lr_gen.resize(sz); fj_lr_val.resize(sz)
+        fj_rl_gen.resize(sz); fj_rl_val.resize(sz)
+    fj_ren_g = i32(int(fj_ren_g) + 1)
+    if fj_ren_g == 0:
+        n = fj_lm_gen.len() * 4
+        mem_set(data(fj_lm_gen) as *u8, 0, n)
+        mem_set(data(fj_rm_gen) as *u8, 0, n)
+        mem_set(data(fj_lr_gen) as *u8, 0, n)
+        mem_set(data(fj_rl_gen) as *u8, 0, n)
+        fj_ren_g = 1
+    fj_ren_g
+
+fj_ren_lookup = (v: int, gen_p: *i32, val_p: *i32, rg: i32, cap: int, shared: mut FactState) -> int:
+    if v >= 0 and v < cap and gen_p[v] == rg: return int(val_p[v])
+    if fact_slot_ref(shared, v) >= 0: return v
+    0
+
+fj_ren_lookup_raw = (v: int, gen_p: *i32, val_p: *i32, rg: i32, cap: int, ids: *int, n_ids: int, slots_p: *int, slots_n: int, gterms: *FactTerm, ngterms: int) -> int:
+    if v >= 0 and v < cap and gen_p[v] == rg: return int(val_p[v])
+    if n_ids == 0: return 0
+    if v > 0 and v < ngterms:
+        hint = gterms[v].slot
+        if hint >= 0 and hint < n_ids and ids[hint] == v: return v
+    if fact_slot_slow_raw(slots_p, slots_n, v, n_ids, ids) >= 0: return v
+    0
+
 fact_hull = (a: FactBound, b: FactBound, at: int) -> FactBound:
     FactBound(min(a.lo, b.lo), max(a.hi, b.hi), (a.nz or a.lo > 0 or a.hi < 0) and (b.nz or b.lo > 0 or b.hi < 0), fact_hull_reason(at), at, a.wide or b.wide)
 fact_hull_reason = (at: int) -> FactReason:
     if at != 0 and (nodes[at].kind == .while_ or nodes[at].kind == .for_): FactReason.loop_ else: FactReason.join
 # Every value's interval hulled at once: the reason is the join point's.
 fact_hull_all = (s: mut FactState, a: FactState, b: FactState, count: int, at: int):
+    ap = data(a.bounds)
+    bp = data(b.bounds)
+    if ap == bp: return
     reason = fact_hull_reason(at)
+    unique = false
+    sp: *FactBound = null
     loop i in [0..count):
-        x = a.bounds[i]
-        y = b.bounds[i]
-        if x == y: continue
-        s.bounds[i] = FactBound(min(x.lo, y.lo), max(x.hi, y.hi), (x.nz or x.lo > 0 or x.hi < 0) and (y.nz or y.lo > 0 or y.hi < 0), reason, at, x.wide or y.wide)
+        xp = ap + i
+        yp = bp + i
+        if xp.lo == yp.lo and xp.hi == yp.hi and xp.nz == yp.nz and xp.wide == yp.wide and xp.reason == yp.reason and xp.witness == yp.witness: continue
+        h = FactBound(min(xp.lo, yp.lo), max(xp.hi, yp.hi), (xp.nz or xp.lo > 0 or xp.hi < 0) and (yp.nz or yp.lo > 0 or yp.hi < 0), reason, at, xp.wide or yp.wide)
+        if not unique:
+            s.bounds[i] = h
+            sp = data(s.bounds)
+            unique = true
+        else:
+            sp[i] = h
 # A phi keeps a shared representation, including a fixed word's finite
 # endpoints and uint64's biased encoding. Bounds still join independently.
 # O(1); never recover a fixed type from only one predecessor.
@@ -153,14 +227,28 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
     if not b.live: return a
     # Identical frames need only an interval hull. In particular, branching
     # on a captured guard need not rebuild every immutable projection index.
-    if a.ids == b.ids and a.bindings == b.bindings and a.projections == b.projections and a.differences == b.differences and a.conditional == b.conditional:
-        s = a
-        s.full = false
-        fact_hull_all(s, a, b, s.bounds.len(), at)
-        return s
-    s = FactState()
+    same_ids = a.ids.len() == b.ids.len() and (data(a.ids) == data(b.ids) or a.ids == b.ids)
+    same_cond = a.conditional.len() == b.conditional.len() and (data(a.conditional) == data(b.conditional) or a.conditional == b.conditional)
+    same_bind = false
+    bind_checked = false
+    same_proj = false
+    proj_checked = false
+    if same_ids and same_cond:
+        same_bind = a.bindings.len() == b.bindings.len() and (data(a.bindings) == data(b.bindings) or a.bindings == b.bindings)
+        bind_checked = true
+        if same_bind:
+            same_proj = a.projections.len() == b.projections.len() and (data(a.projections) == data(b.projections) or a.projections == b.projections)
+            proj_checked = true
+            if same_proj and a.differences.len() == b.differences.len() and (data(a.differences) == data(b.differences) or a.differences == b.differences):
+                s = a
+                s.cmp_mask = a.cmp_mask | b.cmp_mask
+                s.full = false
+                fact_hull_all(s, a, b, s.bounds.len(), at)
+                return s
+    s = FactState(index = [FactIndexes()])
+    s.cmp_mask = a.cmp_mask | b.cmp_mask
     # (both paths usually inherit one list: keep it without hashing)
-    if a.conditional == b.conditional: s.conditional = a.conditional
+    if same_cond: s.conditional = a.conditional
     else if a.conditional.len() > 0 and b.conditional.len() > 0:
         evidence_index: {ResultEvidence: bool} = {}
         loop evidence in b.conditional: evidence_index[evidence] = true
@@ -168,7 +256,9 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
             if evidence_index.has(evidence): s.conditional.push(evidence)
     # Keep immutable evaluations shared by both paths, including snapshots.
     shared = true
-    if a.ids == b.ids:
+    ids_match_a = same_ids
+    ids_match_b = same_ids
+    if same_ids:
         s.ids = a.ids
         s.index[0].slots = a.index[0].slots
         s.bounds = a.bounds
@@ -177,232 +267,393 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         # Both paths usually extend one entry frame with their own values: the
         # shared values are then a's prefix, kept with a's index. O(V).
         k = 0
-        common = min(a.ids.len(), b.ids.len())
-        loop k < common and a.ids[k] == b.ids[k]: k += 1
+        alen = a.ids.len()
+        blen = b.ids.len()
+        common = min(alen, blen)
+        aids = data(a.ids)
+        bids = data(b.ids)
+        loop k < common and aids[k] == bids[k]: k += 1
         prefix = true
-        loop i in [k..a.ids.len()):
-            if fact_slot(b, a.ids[i]) >= 0: prefix = false; break
+        if k < alen:
+            sorted = a.index[0].slots.len() == 0 and b.index[0].slots.len() == 0
+            disjoint = sorted and (k == blen or aids[alen - 1] < bids[k] or aids[k] > bids[blen - 1])
+            if not disjoint:
+                loop i in [k..alen):
+                    if fact_slot(b, aids[i]) >= 0: prefix = false; break
         if prefix:
-            s.ids = a.ids
-            s.ids.truncate(k)
-            s.bounds = a.bounds
-            s.bounds.truncate(k)
+            if k < alen:
+                s.ids = a.ids[0..k)
+                s.bounds = a.bounds[0..k)
+            else:
+                s.ids = a.ids
+                s.bounds = a.bounds
+                ids_match_a = true
+            if k == blen: ids_match_b = true
             s.index[0].slots = a.index[0].slots
             fact_hull_all(s, a, b, k, at)
         else:
             shared = false
-            loop i in [0..a.ids.len()):
-                j = fact_slot(b, a.ids[i])
-                if j >= 0: fact_add_value(s, a.ids[i], fact_hull(a.bounds[i], b.bounds[j], at))
+            loop i in [0..alen):
+                j = fact_slot(b, aids[i])
+                if j >= 0: fact_add_value(s, aids[i], fact_hull(a.bounds[i], b.bounds[j], at))
     # When one path's projections are the other's first ones (the other path
     # only added projections), the shared projections are exactly the shorter
     # list: keep it with its index. O(P) comparisons, no hashing.
-    kp = 0
-    common_projections = min(a.projections.len(), b.projections.len())
-    loop kp < common_projections and a.projections[kp] == b.projections[kp]: kp += 1
     from = -1
-    if shared and (kp == a.projections.len() or kp == b.projections.len()):
-        from = if kp == b.projections.len(): 1 else: 0
-        shorter = if from == 1: b.projections else: a.projections
-        loop p in shorter:
-            if fact_slot(s, p.base) < 0 or fact_slot(s, p.value) < 0: from = -1; break
-    if from >= 0:
-        source = if from == 1: b else: a
-        s.projections = source.projections
-        s.index[0].projection_index = source.index[0].projection_index
-        s.index[0].projection_head = source.index[0].projection_head
-        s.index[0].projection_tail = source.index[0].projection_tail
-        s.index[0].projection_next = source.index[0].projection_next
-        s.index[0].projection_value = source.index[0].projection_value
+    if shared and not proj_checked:
+        same_proj = a.projections.len() == b.projections.len() and (data(a.projections) == data(b.projections) or a.projections == b.projections)
+    if same_proj and shared:
+        from = 0
+        if not ids_match_a:
+            ap = data(a.projections)
+            loop i in [0..a.projections.len()):
+                if fact_slot_ref(s, ap[i].base) < 0 or fact_slot_ref(s, ap[i].value) < 0: from = -1; break
     else:
+        kp = 0
+        common_projections = min(a.projections.len(), b.projections.len())
+        ap = data(a.projections)
+        bp = data(b.projections)
+        loop kp < common_projections and ap[kp] == bp[kp]: kp += 1
+        if shared and (kp == a.projections.len() or kp == b.projections.len()):
+            from = if kp == b.projections.len(): 1 else: 0
+            skip_check = if from == 1: ids_match_b else: ids_match_a
+            if not skip_check:
+                if from == 1:
+                    loop i in [0..b.projections.len()):
+                        if fact_slot_ref(s, bp[i].base) < 0 or fact_slot_ref(s, bp[i].value) < 0: from = -1; break
+                else:
+                    loop i in [0..a.projections.len()):
+                        if fact_slot_ref(s, ap[i].base) < 0 or fact_slot_ref(s, ap[i].value) < 0: from = -1; break
+    if from >= 0:
+        src = if from == 1: b else: a
+        s.projections = src.projections
+        s.proj_base_mask = src.proj_base_mask
+        s.index[0].projection_index = src.index[0].projection_index
+        s.index[0].projection_head = src.index[0].projection_head
+        s.index[0].projection_tail = src.index[0].projection_tail
+        s.index[0].projection_next = src.index[0].projection_next
+        s.index[0].projection_value = src.index[0].projection_value
+    else if b.projections.len() > 0:
         # (b holds p when p is on b's chain for p.base: every projection is chained)
-        loop p in a.projections:
-            if fact_slot(s, p.base) < 0 or fact_slot(s, p.value) < 0: continue
+        ap = data(a.projections)
+        bp = data(b.projections)
+        b_pmask0 = b.proj_base_mask
+        loop i in [0..a.projections.len()):
+            p = ap[i]
+            if (b_pmask0 & (1 << (p.base & 63))) == 0: continue
+            if fact_slot_ref(s, p.base) < 0 or fact_slot_ref(s, p.value) < 0: continue
             qi = fact_projection_first(b, p.base)
             loop qi >= 0:
-                if b.projections[qi] == p: break
+                if bp[qi] == p: break
                 qi = fact_projection_after(b, qi)
             if qi >= 0: fact_add_projection(s, p)
-    if a.bindings == b.bindings and a.projections == b.projections:
+    if same_proj and (same_bind or (not bind_checked and a.bindings.len() == b.bindings.len() and (data(a.bindings) == data(b.bindings) or a.bindings == b.bindings))):
         s.bindings = a.bindings
         s.index[0].roots = a.index[0].roots
         fact_join_shared_rows(s, a, b)
         return s
     renamed = false
-    left: int[]
-    right: int[]
-    merged: int[]
-    # (merged value pairs: a scan while few, then an open-address index;
-    # values are below 2^31)
-    pairs: int[]
+    left = fj_left_pool; fj_left_pool = []; left.clear()
+    right = fj_right_pool; fj_right_pool = []; right.clear()
+    merged = fj_merged_pool; fj_merged_pool = []; merged.clear()
+    chg_l = fj_chg_l_pool; fj_chg_l_pool = []; chg_l.clear()
+    chg_r = fj_chg_r_pool; fj_chg_r_pool = []; chg_r.clear()
+    chg_idx = fj_chg_idx_pool; fj_chg_idx_pool = []; chg_idx.clear()
+    # (merged value pairs: identity pairs (v, v) use O(1) generation stamp;
+    # changed pairs scan a tiny list, then an open-address index)
+    pairs = fj_pairs_pool; fj_pairs_pool = []; pairs.clear()
+    term_cap = fact_terms.len() + 1
+    sg = fj_ensure_same(term_cap)
+    same_gen_p = data(fj_same_gen)
+    same_idx_p = data(fj_same_idx)
     # Both paths keep their common ancestor's bindings in its order (a place
     # is appended when first bound): the aligned positions merge in place,
     # keeping a's positions and so a's root index. O(1) each, no hashing
     # unless the values differ.
     aligned = 0
+    abp = data(a.bindings)
+    bbp = data(b.bindings)
     common = min(a.bindings.len(), b.bindings.len())
-    loop aligned < common and a.bindings[aligned].place == b.bindings[aligned].place: aligned += 1
-    s.bindings = a.bindings
-    s.bindings.truncate(aligned)
+    loop aligned < common:
+        ap = abp + aligned
+        bp = bbp + aligned
+        if ap.place.declaration != bp.place.declaration or ap.place.root != bp.place.root or ap.place.owner != bp.place.owner or ap.place.parent != bp.place.parent or ap.place.projection != bp.place.projection or ap.place.selector != bp.place.selector: break
+        aligned += 1
+    if aligned < a.bindings.len(): s.bindings = a.bindings[0..aligned)
+    else: s.bindings = a.bindings
     s.index[0].roots = a.index[0].roots
     loop i in [0..aligned):
-        binding = a.bindings[i]
-        other = b.bindings[i].value
-        v = binding.value
-        if v != other: renamed = true
-        pair = fact_pair_key(v, other)
-        prior = fact_pair_find(left, right, pairs, v, other)
-        if prior >= 0: v = merged[prior]
-        else if v != other:
+        ap = abp + i
+        bp = bbp + i
+        bval = ap.value
+        other = bp.value
+        if bval == other:
+            if ap.event != 0 and bp.event != ap.event:
+                s.bindings[i] = FactBinding(ap.place, bval)
+            if bval >= 0 and bval < term_cap:
+                if same_gen_p[bval] != sg:
+                    same_gen_p[bval] = sg
+                    same_idx_p[bval] = i32(left.len())
+                    left.push(bval)
+                    right.push(bval)
+                    merged.push(bval)
+            else:
+                prior = fact_pair_find(chg_l, chg_r, pairs, bval, bval)
+                if prior < 0:
+                    pair = fact_pair_key(bval, bval)
+                    fact_pair_add(chg_l, chg_r, pairs, pair)
+                    chg_l.push(bval); chg_r.push(bval); chg_idx.push(left.len())
+                    left.push(bval); right.push(bval); merged.push(bval)
+            continue
+        renamed = true
+        v = bval
+        prior = fact_pair_find(chg_l, chg_r, pairs, bval, other)
+        if prior >= 0: v = data(merged)[data(chg_idx)[prior]]
+        else:
             v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at), fact_join_term(a, v, b, other))
-            fact_join_grown(s, a, binding.value, b, other, v)
+            fact_join_grown(s, a, bval, b, other, v)
         # (the tombstone survives when both paths share it)
-        r = if v == binding.value and b.bindings[i].event == binding.event and binding.event != 0: binding else: FactBinding(binding.place, v)
-        if r != binding: s.bindings[i] = r
+        if v != bval or (ap.event != 0 and bp.event != ap.event):
+            s.bindings[i] = FactBinding(ap.place, v)
         if prior < 0:
-            fact_pair_add(left, right, pairs, pair)
-            left.push(binding.value); right.push(other); merged.push(v)
+            pair = fact_pair_key(bval, other)
+            fact_pair_add(chg_l, chg_r, pairs, pair)
+            chg_l.push(bval); chg_r.push(other); chg_idx.push(left.len())
+            left.push(bval); right.push(other); merged.push(v)
     loop ai in [aligned..a.bindings.len()):
-        binding = a.bindings[ai]
+        binding = abp[ai]
         j = fact_binding(b, binding.place)
         if j < 0: continue
-        other = b.bindings[j].value
-        v = binding.value
-        if v != other: renamed = true
-        pair = fact_pair_key(v, other)
-        prior = fact_pair_find(left, right, pairs, v, other)
-        if prior >= 0: v = merged[prior]
+        other = bbp[j].value
+        bval = binding.value
+        v = bval
+        prior = -1
+        if bval == other and bval >= 0 and bval < term_cap:
+            if same_gen_p[bval] == sg: prior = int(same_idx_p[bval])
+        else:
+            if bval != other: renamed = true
+            cp = fact_pair_find(chg_l, chg_r, pairs, bval, other)
+            if cp >= 0: prior = data(chg_idx)[cp]
+        if prior >= 0: v = data(merged)[prior]
         else if v != other:
             v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at), fact_join_term(a, v, b, other))
-            fact_join_grown(s, a, binding.value, b, other, v)
+            fact_join_grown(s, a, bval, b, other, v)
         fact_bind(s, binding.place, v)
-        if v == binding.value and b.bindings[j].event == binding.event: fact_rebind(s, binding.place, v, binding.event, binding.prior)
+        if v == bval and bbp[j].event == binding.event: fact_rebind(s, binding.place, v, binding.event, binding.prior)
         if prior < 0:
-            fact_pair_add(left, right, pairs, pair)
-            left.push(binding.value); right.push(other); merged.push(v)
+            if bval == other and bval >= 0 and bval < term_cap:
+                same_gen_p[bval] = sg
+                same_idx_p[bval] = i32(left.len())
+            else:
+                pair = fact_pair_key(bval, other)
+                fact_pair_add(chg_l, chg_r, pairs, pair)
+                chg_l.push(bval); chg_r.push(other); chg_idx.push(left.len())
+            left.push(bval); right.push(other); merged.push(v)
     binding_pairs = merged.len()
     # Match projections of merged aggregate values, including current lengths.
     # (each side's non-element projections chained by base value, in order:
     # the same matches as scanning both lists for every merged value)
-    cursor = 0
-    element_keys: {(int, int): int} = {}
-    element_keys_ready = false
-    loop cursor < merged.len() and merged.len() < FACT_CAP:
-        pi = fact_projection_first(a, left[cursor])
-        loop pi >= 0:
-            p = a.projections[pi]
-            pi = fact_projection_after(a, pi)
-            selector = p.selector
-            qi = fact_projection_find(b, right[cursor], selector, p.element)
-            if p.element:
-                key = fact_bound(a, selector)
-                if key.lo == key.hi and not key.wide:
-                    # Constants created separately in the arms have different
-                    # value IDs. Index the peer's constant selectors once, O(P).
-                    if not element_keys_ready:
-                        loop j in [0..b.projections.len()):
-                            candidate = b.projections[j]
-                            if not candidate.element: continue
-                            cb = fact_bound(b, candidate.selector)
-                            if cb.lo == cb.hi and not cb.wide: element_keys[(candidate.base, cb.lo)] = j
-                        element_keys_ready = true
-                    qi = element_keys.get((right[cursor], key.lo)) ?? -1
-                    if qi >= 0 and fact_slot(s, selector) < 0: selector = fact_constant(s, key.lo)
-                else if fact_slot(s, selector) < 0: continue
-            if qi < 0: continue
-            q = b.projections[qi]
-            if merged.len() >= FACT_CAP: break
-            v = p.value
-            if v != q.value: renamed = true
-            pair = fact_pair_key(v, q.value)
-            prior = fact_pair_find(left, right, pairs, v, q.value)
-            if prior >= 0: v = merged[prior]
-            else if v != q.value: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, q.value), at), fact_join_term(a, v, b, q.value))
-            if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(merged[cursor], selector, p.element, v))
-            if prior < 0:
-                fact_pair_add(left, right, pairs, pair)
-                left.push(p.value); right.push(q.value); merged.push(v)
-        cursor += 1
-    loop i in [0..binding_pairs):
-        if left[i] != right[i]: fact_join_payload(s, a, left[i], b, right[i], merged[i], left, right, merged, FactBound(), false)
-    if a.differences.len() == 0 and b.differences.len() == 0: return s
-    # (renamings: the last pair naming a value wins)
-    left_merge: int[]; right_merge: int[]
-    left_right: int[]; right_left: int[]
-    if renamed and merged.len() > 32:
-        loop i in [0..merged.len()):
-            fact_index_put(left_merge, left[i], merged[i]); fact_index_put(right_merge, right[i], merged[i])
-            fact_index_put(left_right, left[i], right[i]); fact_index_put(right_left, right[i], left[i])
+    if a.projections.len() > 0 and b.projections.len() > 0:
+        cursor = 0
+        element_keys_ready = false
+        ap_p = data(a.projections)
+        bp_p = data(b.projections)
+        a_pmask = a.proj_base_mask
+        b_pmask = b.proj_base_mask
+        loop cursor < merged.len() and merged.len() < FACT_CAP:
+            lv = data(left)[cursor]
+            rv = data(right)[cursor]
+            if (same_proj and lv == rv) or (a_pmask & (1 << (lv & 63))) == 0 or (b_pmask & (1 << (rv & 63))) == 0:
+                cursor += 1
+                continue
+            pi = fact_projection_first(a, lv)
+            loop pi >= 0:
+                p = ap_p[pi]
+                pi = fact_projection_after(a, pi)
+                selector = p.selector
+                qi = fact_projection_find(b, rv, selector, p.element)
+                if p.element:
+                    key = fact_bound(a, selector)
+                    if key.lo == key.hi and not key.wide:
+                        # Constants created separately in the arms have different
+                        # value IDs. Index the peer's constant selectors once, O(P).
+                        if not element_keys_ready:
+                            fj_elem_keys.clear()
+                            loop j in [0..b.projections.len()):
+                                candidate = bp_p[j]
+                                if not candidate.element: continue
+                                cb = fact_bound(b, candidate.selector)
+                                if cb.lo == cb.hi and not cb.wide: fj_elem_keys[(candidate.base, cb.lo)] = j
+                            element_keys_ready = true
+                        qi = fj_elem_keys.get((rv, key.lo)) ?? -1
+                        if qi >= 0 and fact_slot_ref(s, selector) < 0: selector = fact_constant(s, key.lo)
+                    else if fact_slot_ref(s, selector) < 0: continue
+                if qi < 0: continue
+                q = bp_p[qi]
+                if merged.len() >= FACT_CAP: break
+                pv = p.value
+                qv = q.value
+                v = pv
+                prior = -1
+                if pv == qv and pv >= 0 and pv < term_cap:
+                    if same_gen_p[pv] == sg: prior = int(same_idx_p[pv])
+                else:
+                    if pv != qv: renamed = true
+                    cp = fact_pair_find(chg_l, chg_r, pairs, pv, qv)
+                    if cp >= 0: prior = data(chg_idx)[cp]
+                if prior >= 0: v = data(merged)[prior]
+                else if v != qv: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, qv), at), fact_join_term(a, v, b, qv))
+                if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(data(merged)[cursor], selector, p.element, v))
+                if prior < 0:
+                    if pv == qv and pv >= 0 and pv < term_cap:
+                        same_gen_p[pv] = sg
+                        same_idx_p[pv] = i32(left.len())
+                    else:
+                        pair = fact_pair_key(pv, qv)
+                        fact_pair_add(chg_l, chg_r, pairs, pair)
+                        chg_l.push(pv); chg_r.push(qv); chg_idx.push(left.len())
+                    left.push(pv); right.push(qv); merged.push(v)
+            cursor += 1
+    if renamed:
+        loop i in [0..binding_pairs):
+            if data(left)[i] != data(right)[i]: fact_join_payload(s, a, data(left)[i], b, data(right)[i], data(merged)[i], left, right, merged, FactBound(), false)
+    if a.differences.len() == 0 and b.differences.len() == 0:
+        fj_left_pool = left; fj_right_pool = right; fj_merged_pool = merged
+        fj_chg_l_pool = chg_l; fj_chg_r_pool = chg_r; fj_chg_idx_pool = chg_idx; fj_pairs_pool = pairs
+        return s
+    # (renamings: the last pair naming a value wins, indexed in flat stamp arrays)
+    rcap = 0
+    rg: i32 = 0
+    lm_gen_p: *i32 = null
+    lm_val_p: *i32 = null
+    rm_gen_p: *i32 = null
+    rm_val_p: *i32 = null
+    lr_gen_p: *i32 = null
+    lr_val_p: *i32 = null
+    rl_gen_p: *i32 = null
+    rl_val_p: *i32 = null
+    if renamed:
+        rcap = fact_terms.len() + 1
+        rg = fj_ensure_ren(rcap)
+        lm_gen_p = data(fj_lm_gen); lm_val_p = data(fj_lm_val)
+        rm_gen_p = data(fj_rm_gen); rm_val_p = data(fj_rm_val)
+        lr_gen_p = data(fj_lr_gen); lr_val_p = data(fj_lr_val)
+        rl_gen_p = data(fj_rl_gen); rl_val_p = data(fj_rl_val)
+        ml = merged.len()
+        lp = data(left)
+        rp = data(right)
+        mp = data(merged)
+        loop i in [0..ml):
+            lv = lp[i]
+            rv = rp[i]
+            mv = mp[i]
+            lm_gen_p[lv] = rg; lm_val_p[lv] = i32(mv)
+            rm_gen_p[rv] = rg; rm_val_p[rv] = i32(mv)
+            lr_gen_p[lv] = rg; lr_val_p[lv] = i32(rv)
+            rl_gen_p[rv] = rg; rl_val_p[rv] = i32(lv)
     # A shared prefix consists of facts already present in both predecessors.
     # Keep its rows without proving each one again or recounting incidents.
     # Endpoints must survive in the common frame; renamed rows still follow.
     common_rows = 0
-    loop common_rows < min(a.differences.len(), b.differences.len()):
-        row = a.differences[common_rows]
-        if row != b.differences[common_rows] or fact_slot(s, row.a) < 0 or fact_slot(s, row.b) < 0: break
-        common_rows += 1
-    if common_rows == a.differences.len():
-        s.differences = a.differences
-        s.index[0].difference_index = a.index[0].difference_index
-        s.index[0].difference_value = a.index[0].difference_value
-        s.index[0].difference_record = a.index[0].difference_record
-        s.index[0].difference_next = a.index[0].difference_next
+    adp = data(a.differences)
+    bdp = data(b.differences)
+    mindiff = min(a.differences.len(), b.differences.len())
+    skip_slot_a = ids_match_a or ids_match_b
+    if adp == bdp and a.differences.len() == b.differences.len() and ids_match_a:
+        common_rows = mindiff
+    else if skip_slot_a:
+        loop common_rows < mindiff:
+            if adp[common_rows] != bdp[common_rows]: break
+            common_rows += 1
     else:
-        loop i in [0..common_rows): fact_add_difference(s, a.differences[i])
+        loop common_rows < mindiff:
+            row = adp[common_rows]
+            if row != bdp[common_rows] or fact_slot_ref(s, row.a) < 0 or fact_slot_ref(s, row.b) < 0: break
+            common_rows += 1
+    if common_rows == a.differences.len() or common_rows == b.differences.len():
+        src = if common_rows == a.differences.len(): a else: b
+        s.differences = src.differences
+        s.diff_a_mask = src.diff_a_mask
+        s.diff_b_mask = src.diff_b_mask
+        s.index[0].difference_index = src.index[0].difference_index
+        s.index[0].difference_value = src.index[0].difference_value
+        s.index[0].difference_record = src.index[0].difference_record
+        s.index[0].difference_next = src.index[0].difference_next
+    else:
+        loop i in [0..common_rows): fact_add_difference(s, adp[i])
     # Select rows from either predecessor, rename into the merge frame, and
     # require a proof from the other. Branch-local evaluations never escape.
     # (a row its renaming leaves as it is was just offered as it is: when
     # that offer held, the renamed one is the same call again, skipped. A
     # renamed endpoint equal to the original renames to it on the other side
     # too, or to nothing)
-    loop ri in [0..a.differences.len()):
-        row = a.differences[ri]
-        kept = ri < common_rows or fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(b, row.a, row.b, row.limit)
-        if kept and ri >= common_rows: fact_difference(s, row.a, row.b, row.limit, row.at)
-        if not renamed: continue
-        aa = fact_rename(row.a, left, merged, left_merge, s)
-        bb = fact_rename(row.b, left, merged, left_merge, s)
-        if kept and aa == row.a and bb == row.b: continue
-        ra = fact_rename(row.a, left, right, left_right, b)
-        rb = fact_rename(row.b, left, right, left_right, b)
-        if aa != 0 and bb != 0 and fact_distance(b, ra, rb, row.limit): fact_difference(s, aa, bb, row.limit, row.at)
-        # (the other path holds the two ends equal, as a counter one path stepped
-        # down and the other left, `if c i -= 1`: the merge stays at most the old value)
-        else if aa != 0 and bb != 0 and aa != row.a and bb == row.b and ra == rb and ra != 0 and row.limit < 0: fact_difference(s, aa, bb, 0, row.at)
-    # (a tighter row on one side can replace the row the other side shares)
-    loop ri in [0..b.differences.len()):
-        row = b.differences[ri]
-        kept = ri < common_rows or fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(a, row.a, row.b, row.limit)
-        if kept and ri >= common_rows: fact_difference(s, row.a, row.b, row.limit, row.at)
-        if not renamed: continue
-        aa = fact_rename(row.a, right, merged, right_merge, s)
-        bb = fact_rename(row.b, right, merged, right_merge, s)
-        if kept and aa == row.a and bb == row.b: continue
-        ra = fact_rename(row.a, right, left, right_left, a)
-        rb = fact_rename(row.b, right, left, right_left, a)
-        if aa != 0 and bb != 0 and fact_distance(a, ra, rb, row.limit): fact_difference(s, aa, bb, row.limit, row.at)
-        else if aa != 0 and bb != 0 and aa != row.a and bb == row.b and ra == rb and ra != 0 and row.limit < 0: fact_difference(s, aa, bb, 0, row.at)
+    if not renamed:
+        loop ri in [common_rows..a.differences.len()):
+            row = adp[ri]
+            if (ids_match_a or (fact_slot_ref(s, row.a) >= 0 and fact_slot_ref(s, row.b) >= 0)) and fact_distance(b, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
+        loop ri in [common_rows..b.differences.len()):
+            row = bdp[ri]
+            if (ids_match_b or (fact_slot_ref(s, row.a) >= 0 and fact_slot_ref(s, row.b) >= 0)) and fact_distance(a, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
+        fj_left_pool = left; fj_right_pool = right; fj_merged_pool = merged
+        fj_chg_l_pool = chg_l; fj_chg_r_pool = chg_r; fj_chg_idx_pool = chg_idx; fj_pairs_pool = pairs
+        return s
+    aids_p = data(a.ids); an_ids = a.ids.len()
+    aslots_p = data(data(a.index)[0].slots); aslots_n = data(a.index)[0].slots.len()
+    bids_p = data(b.ids); bn_ids = b.ids.len()
+    bslots_p = data(data(b.index)[0].slots); bslots_n = data(b.index)[0].slots.len()
+    gterms = data(fact_terms); ngterms = fact_terms.len()
+    fj_join_diff_side(s, a, b, common_rows, lm_gen_p, lm_val_p, lr_gen_p, lr_val_p, rg, rcap, bids_p, bn_ids, bslots_p, bslots_n, gterms, ngterms)
+    fj_join_diff_side(s, b, a, common_rows, rm_gen_p, rm_val_p, rl_gen_p, rl_val_p, rg, rcap, aids_p, an_ids, aslots_p, aslots_n, gterms, ngterms)
     # (a value two places held, one replaced on one path only, `let hi = o`
     # then `if hi <? lo hi = lo`: the renaming above follows its last pair;
     # each earlier pair's rows follow here. O(shadowed pairs x their rows))
-    if not renamed: return s
+    lp2 = data(left)
+    rp2 = data(right)
+    mp2 = data(merged)
     loop i in [0..merged.len()):
-        if left[i] == right[i]: continue
-        if fact_rename(right[i], right, merged, right_merge, s) != merged[i]: fact_join_pair_rows(s, b, a, right[i], left[i], merged[i], right, left, right_left, merged, right_merge)
-        if fact_rename(left[i], left, merged, left_merge, s) != merged[i]: fact_join_pair_rows(s, a, b, left[i], right[i], merged[i], left, right, left_right, merged, left_merge)
+        if lp2[i] == rp2[i]: continue
+        if fj_ren_lookup(rp2[i], rm_gen_p, rm_val_p, rg, rcap, s) != mp2[i]: fj_join_pair_rows_fast(s, b, a, rp2[i], lp2[i], mp2[i], rl_gen_p, rl_val_p, rm_gen_p, rm_val_p, rg, rcap, aids_p, an_ids, aslots_p, aslots_n, gterms, ngterms)
+        if fj_ren_lookup(lp2[i], lm_gen_p, lm_val_p, rg, rcap, s) != mp2[i]: fj_join_pair_rows_fast(s, a, b, lp2[i], rp2[i], mp2[i], lr_gen_p, lr_val_p, lm_gen_p, lm_val_p, rg, rcap, bids_p, bn_ids, bslots_p, bslots_n, gterms, ngterms)
+    fj_left_pool = left; fj_right_pool = right; fj_merged_pool = merged
+    fj_chg_l_pool = chg_l; fj_chg_r_pool = chg_r; fj_chg_idx_pool = chg_idx; fj_pairs_pool = pairs
     s
-# Rows of `from` touching v, renamed to m where the peer, with v as w, holds them.
-fact_join_pair_rows = (s: mut FactState, from: FactState, peer: FactState, v: int, w: int, m: int, mine: int[], theirs: int[], to_theirs: int[], merged: int[], to_merged: int[]):
+fj_join_diff_side = (s: mut FactState, src: FactState, peer: FactState, common_rows: int, m_gen_p: *i32, m_val_p: *i32, r_gen_p: *i32, r_val_p: *i32, rg: i32, rcap: int, pids: *int, pn_ids: int, pslots: *int, pslots_n: int, gterms: *FactTerm, ngterms: int):
+    dp = data(src.differences)
+    loop ri in [0..src.differences.len()):
+        row = dp[ri]
+        if ri < common_rows:
+            if (row.a < 0 or row.a >= rcap or m_gen_p[row.a] != rg) and (row.b < 0 or row.b >= rcap or m_gen_p[row.b] != rg): continue
+            aa = fj_ren_lookup(row.a, m_gen_p, m_val_p, rg, rcap, s)
+            bb = fj_ren_lookup(row.b, m_gen_p, m_val_p, rg, rcap, s)
+            if aa == 0 or bb == 0 or (aa == row.a and bb == row.b): continue
+            ra = fj_ren_lookup_raw(row.a, r_gen_p, r_val_p, rg, rcap, pids, pn_ids, pslots, pslots_n, gterms, ngterms)
+            rb = fj_ren_lookup_raw(row.b, r_gen_p, r_val_p, rg, rcap, pids, pn_ids, pslots, pslots_n, gterms, ngterms)
+            if ra != 0 and rb != 0 and fact_distance(peer, ra, rb, row.limit): fact_difference(s, aa, bb, row.limit, row.at)
+            else if aa != row.a and bb == row.b and ra == rb and ra != 0 and row.limit < 0: fact_difference(s, aa, bb, 0, row.at)
+            continue
+        in_s = fact_slot_ref(s, row.a) >= 0 and fact_slot_ref(s, row.b) >= 0
+        kept = in_s and fact_distance(peer, row.a, row.b, row.limit)
+        if kept: fact_difference(s, row.a, row.b, row.limit, row.at)
+        aa = fj_ren_lookup(row.a, m_gen_p, m_val_p, rg, rcap, s)
+        bb = fj_ren_lookup(row.b, m_gen_p, m_val_p, rg, rcap, s)
+        if aa == 0 or bb == 0 or (kept and aa == row.a and bb == row.b): continue
+        ra = fj_ren_lookup_raw(row.a, r_gen_p, r_val_p, rg, rcap, pids, pn_ids, pslots, pslots_n, gterms, ngterms)
+        rb = fj_ren_lookup_raw(row.b, r_gen_p, r_val_p, rg, rcap, pids, pn_ids, pslots, pslots_n, gterms, ngterms)
+        same_dist = not kept and in_s and ra == row.a and rb == row.b
+        if not same_dist and ra != 0 and rb != 0 and fact_distance(peer, ra, rb, row.limit): fact_difference(s, aa, bb, row.limit, row.at)
+        else if aa != row.a and bb == row.b and ra == rb and ra != 0 and row.limit < 0: fact_difference(s, aa, bb, 0, row.at)
+fj_join_pair_rows_fast = (s: mut FactState, from: FactState, peer: FactState, v: int, w: int, m: int, to_theirs_g: *i32, to_theirs_v: *i32, to_merged_g: *i32, to_merged_v: *i32, rg: i32, rcap: int, pids: *int, pn_ids: int, pslots: *int, pslots_n: int, gterms: *FactTerm, ngterms: int):
     loop direction in [0..2):
         ri = fact_difference_head(from, v, direction)
         loop ri >= 0:
-            row = from.differences[ri]
+            row = data(from.differences)[ri]
             ri = fact_difference_next(from, ri, direction)
             other = if direction == 0: row.a else: row.b
             if other == v: continue
-            o = fact_rename(other, mine, merged, to_merged, s)
-            po = fact_rename(other, mine, theirs, to_theirs, peer)
-            if o == 0 or po == 0: continue
+            o = fj_ren_lookup(other, to_merged_g, to_merged_v, rg, rcap, s)
+            if o == 0: continue
+            po = fj_ren_lookup_raw(other, to_theirs_g, to_theirs_v, rg, rcap, pids, pn_ids, pslots, pslots_n, gterms, ngterms)
+            if po == 0: continue
             if direction == 0 and fact_distance(peer, po, w, row.limit): fact_difference(s, o, m, row.limit, row.at)
             if direction == 1 and fact_distance(peer, w, po, row.limit): fact_difference(s, m, o, row.limit, row.at)
 # An optional's tag known to be `none` (0) in s. O(1).
@@ -575,23 +826,49 @@ fact_field_node = (e: int) -> bool:
 # need no phi pairs or projection matching, only the common relation facts.
 fact_join_shared_rows = (s: mut FactState, a: FactState, b: FactState):
     common = 0
-    loop common < min(a.differences.len(), b.differences.len()):
-        row = a.differences[common]
-        if row != b.differences[common] or fact_slot(s, row.a) < 0 or fact_slot(s, row.b) < 0: break
-        common += 1
-    if common == a.differences.len():
+    adp = data(a.differences)
+    bdp = data(b.differences)
+    alen = a.differences.len()
+    blen = b.differences.len()
+    same_a = s.ids.len() == a.ids.len() and data(s.ids) == data(a.ids)
+    same_b = s.ids.len() == b.ids.len() and data(s.ids) == data(b.ids)
+    if same_a and alen == blen and adp == bdp:
         s.differences = a.differences
+        s.diff_a_mask = a.diff_a_mask
+        s.diff_b_mask = a.diff_b_mask
         s.index[0].difference_index = a.index[0].difference_index
         s.index[0].difference_value = a.index[0].difference_value
         s.index[0].difference_record = a.index[0].difference_record
         s.index[0].difference_next = a.index[0].difference_next
+        return
+    mindiff = min(alen, blen)
+    loop common < mindiff:
+        row = adp[common]
+        if row != bdp[common] or (not same_a and (fact_slot_ref(s, row.a) < 0 or fact_slot_ref(s, row.b) < 0)): break
+        common += 1
+    if common == alen:
+        s.differences = a.differences
+        s.diff_a_mask = a.diff_a_mask
+        s.diff_b_mask = a.diff_b_mask
+        s.index[0].difference_index = a.index[0].difference_index
+        s.index[0].difference_value = a.index[0].difference_value
+        s.index[0].difference_record = a.index[0].difference_record
+        s.index[0].difference_next = a.index[0].difference_next
+    else if common == blen:
+        s.differences = b.differences
+        s.diff_a_mask = b.diff_a_mask
+        s.diff_b_mask = b.diff_b_mask
+        s.index[0].difference_index = b.index[0].difference_index
+        s.index[0].difference_value = b.index[0].difference_value
+        s.index[0].difference_record = b.index[0].difference_record
+        s.index[0].difference_next = b.index[0].difference_next
     else:
-        loop i in [0..common): fact_add_difference(s, a.differences[i])
-    loop i in [common..a.differences.len()):
-        row = a.differences[i]
-        if fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(b, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
-    loop i in [common..b.differences.len()):
-        row = b.differences[i]
-        if fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(a, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
+        loop i in [0..common): fact_add_difference(s, adp[i])
+    loop i in [common..alen):
+        row = adp[i]
+        if (same_a or (fact_slot_ref(s, row.a) >= 0 and fact_slot_ref(s, row.b) >= 0)) and fact_distance(b, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
+    loop i in [common..blen):
+        row = bdp[i]
+        if (same_b or (fact_slot_ref(s, row.a) >= 0 and fact_slot_ref(s, row.b) >= 0)) and fact_distance(a, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
 
 # Projection identity/construction services share the existing facts_values import.

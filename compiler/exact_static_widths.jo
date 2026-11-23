@@ -149,8 +149,10 @@ exact_type_width = (n: int, constant_only: bool = false) -> int:
         if cached < -1: return -cached
         return if constant_only: -1 else: cached
     if n >= exact_type_widths.len():
-        exact_type_widths.resize(max(n + 1, nodes.len()))
-        exact_type_values.resize(exact_type_widths.len())
+        need = max(max(n + 1, nodes.len()), exact_type_widths.len() * 2)
+        exact_type_widths.resize(need)
+        if exact_type_values.cap() < need: exact_type_values.reserve(need)
+        __set_len(exact_type_values, need)
     k = nodes[n].kind
     if k == .int_lit:
         value = nodes[n].ival
@@ -219,7 +221,7 @@ exact_type_width = (n: int, constant_only: bool = false) -> int:
     # Initializers can belong to an owner not prepared yet. Only an actual
     # constant is usable there; a source storage type is not an exact bound.
     if constant_only: return -1
-    if exact_word_reads.has(n):
+    if exact_word_reads.len() > 0 and exact_word_reads.has(n):
         bound = exact_count_bound(int(nodes[n].a))
         magnitude = max((if bound.lo < 0: -(bound.lo + 1) else: bound.lo), (if bound.hi < 0: -(bound.hi + 1) else: bound.hi))
         bits = 1
@@ -281,7 +283,8 @@ exact_type_width = (n: int, constant_only: bool = false) -> int:
         if known and count >= 0 and count < 64:
             a = exact_type_width(int(nodes[n].a))
             if a > 0: result = max(1, a / 2 - count) * 2 + (a & 1)
-    midpoint = exact_midpoint(n)
-    if midpoint.0 != 0: result = 128
+    if k == .binary and nodes[n].aux == 0:
+        midpoint = exact_midpoint(n)
+        if midpoint.0 != 0: result = 128
     exact_type_widths[n] = result
     result

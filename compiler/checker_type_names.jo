@@ -26,6 +26,8 @@ use 'type_value_arguments.dewy'
 use 'types.jo'
 use 'util.jo'
 
+rational_name = 0
+
 resolve_type_name = (tn: int) -> CheckerTypeName:
     if nodes[tn].aux == -8: fatal(nodes[tn].pos, "Effect row is not a value type")
     nm = int(nodes[tn].name)
@@ -59,7 +61,8 @@ resolve_type_name = (tn: int) -> CheckerTypeName:
         jo_type_spelling(nm, s, nodes[tn].pos)
         if nm == ut_safe_name: ut_note_type_name(nm, nodes[tn].pos)
         # `rational`: the builtin exact type (the bundled library's), unless a type shadows it.
-        if name_of(nm) == "rational" and (s == 0 or syms[s].kind == .fns) and files[pos_file(nodes[tn].pos)].is_dewy:
+        if rational_name == 0: rational_name = intern("rational")
+        if nm == rational_name and (s == 0 or syms[s].kind == .fns) and files[pos_file(nodes[tn].pos)].is_dewy:
             return CheckerTypeName(5, 0)
     # `secret<T>`: the builtin wrapper (types.jo's mk_secret), unless a type shadows it
     if nm == secret_name and nodes[tn].sval == 0 and (s == 0 or not secret_type_sym(syms[s].kind)):

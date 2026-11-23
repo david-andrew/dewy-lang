@@ -59,79 +59,145 @@ checker_zonk_bind = (input: *CheckerZonkInput) -> int:
 xz_user_global = (aux: i32, sym: i32) -> bool:
     if aux == 2: return not zonk_prelude(int(xz_globals[0][int(sym)].mod))
     aux == 1 and int(xz_locals[0][int(sym)].flags) & 8 != 0
+xz_swap_call = (aux: i32, nlist: i32, sym: i32) -> bool:
+    if aux != 0 or nlist != 3 or sym <= 0 or int(sym) >= xz_fns[0].len(): return false
+    nm = xz_fns[0][int(sym)].sym
+    len(nm) >= 7 and nm[0] == 'f' and nm[1] == '_' and nm[2] == 's' and nm[3] == 'w' and nm[4] == 'a' and nm[5] == 'p' and nm[6] == '_'
+xz_is_leaf = (k: NK) -> bool:
+    match k:
+        int_lit, bool_lit, float_lit, none_lit, null_lit, dotname, lambda: true
+        _: false
 xz_summary = (root: int):
     if root == 0: return
     if xz_summary_stack.len() < 256: xz_summary_stack.resize(256)
-    xz_summary_stack[0] = root
+    st = data(xz_summary_stack)
+    cap = xz_summary_stack.len()
+    lists = data(xz_lists[0])
+    nodes_p = data(xz_nodes[0])
+    st[0] = root
     sp = 1
     index = false
     global = false
     loop sp > 0:
         sp = sp - 1
-        n = xz_summary_stack[sp]
-        k = xz_nodes[0][n].kind
-        if k == .index and not index:
+        n = st[sp]
+        node = nodes_p + n
+        k = node[0].kind
+        if k == .ident:
+            if not global and xz_user_global(node[0].aux, node[0].sym):
+                global = true
+                xz_user_globals[0] = xz_user_globals[0] + 1
+                if index: break
+            continue
+        if xz_is_leaf(k): continue
+        if not index and (k == .index or (k == .call and node[0].aux == 0 and node[0].nlist == 3 and xz_swap_call(node[0].aux, node[0].nlist, node[0].sym))):
             xz_indexes[0] = xz_indexes[0] + 1
             index = true
             if global: break
-        if k == .ident and not global and xz_user_global(xz_nodes[0][n].aux, xz_nodes[0][n].sym):
-            global = true
-            xz_user_globals[0] = xz_user_globals[0] + 1
-            if index: break
-        if k == .lambda: continue
-        n1 = int(xz_nodes[0][n].nlist)
-        n2 = int(xz_nodes[0][n].nlist2)
-        if sp + n1 + n2 + 4 > xz_summary_stack.len(): xz_summary_stack.resize((sp + n1 + n2 + 4) * 2)
-        l2 = int(xz_nodes[0][n].list2)
-        i = n2 - 1
-        loop i >= 0:
-            x = int(xz_lists[0][l2 + i])
-            if x != 0:
-                xz_summary_stack[sp] = x
-                sp = sp + 1
-            i = i - 1
-        l1 = int(xz_nodes[0][n].list)
-        i = n1 - 1
-        loop i >= 0:
-            x = int(xz_lists[0][l1 + i])
-            if x != 0:
-                xz_summary_stack[sp] = x
-                sp = sp + 1
-            i = i - 1
+        n1 = int(node[0].nlist)
+        n2 = int(node[0].nlist2)
+        if sp + n1 + n2 + 4 > cap:
+            cap = (sp + n1 + n2 + 4) * 2
+            xz_summary_stack.resize(cap)
+            st = data(xz_summary_stack)
+        if n2 > 0:
+            l2 = int(node[0].list2)
+            i = n2 - 1
+            loop i >= 0:
+                x = lists[l2 + i]
+                if x != 0:
+                    st[sp] = int(x)
+                    sp = sp + 1
+                i = i - 1
+        if n1 > 0:
+            l1 = int(node[0].list)
+            i = n1 - 1
+            loop i >= 0:
+                x = lists[l1 + i]
+                if x != 0:
+                    st[sp] = int(x)
+                    sp = sp + 1
+                i = i - 1
         if k != .for_:
-            if k != .partial and xz_nodes[0][n].d != 0:
-                xz_summary_stack[sp] = int(xz_nodes[0][n].d)
+            if k != .partial and node[0].d != 0:
+                st[sp] = int(node[0].d)
                 sp = sp + 1
-            if xz_nodes[0][n].c != 0:
-                xz_summary_stack[sp] = int(xz_nodes[0][n].c)
+            if node[0].c != 0:
+                st[sp] = int(node[0].c)
                 sp = sp + 1
-        if xz_nodes[0][n].b != 0:
-            xz_summary_stack[sp] = int(xz_nodes[0][n].b)
+        if node[0].b != 0:
+            st[sp] = int(node[0].b)
             sp = sp + 1
-        if xz_nodes[0][n].a != 0:
-            xz_summary_stack[sp] = int(xz_nodes[0][n].a)
+        if node[0].a != 0:
+            st[sp] = int(node[0].a)
             sp = sp + 1
+xz_kflags_arr: u8[]
+xz_kflags_p: *u8
+xz_init_kflags = ():
+    xz_kflags_arr = fill(u8(0), 128)
+    p = data(xz_kflags_arr)
+    p[int(NK.int_lit)] = u8(1)
+    p[int(NK.bool_lit)] = u8(1)
+    p[int(NK.float_lit)] = u8(1)
+    p[int(NK.none_lit)] = u8(1)
+    p[int(NK.null_lit)] = u8(1)
+    p[int(NK.dotname)] = u8(1)
+    p[int(NK.vardecl)] = u8(2)
+    p[int(NK.assign)] = u8(2)
+    p[int(NK.return_)] = u8(2)
+    p[int(NK.break_)] = u8(2)
+    p[int(NK.continue_)] = u8(2)
+    p[int(NK.ident)] = u8(4)
+    p[int(NK.index)] = u8(4)
+    p[int(NK.call)] = u8(4)
+    p[int(NK.fn_)] = u8(4)
+    p[int(NK.lambda)] = u8(6)
+    p[int(NK.for_)] = u8(6)
+    p[int(NK.while_)] = u8(6)
+    xz_kflags_p = p
 xz_walk = (root: int, proofs: bool):
     if root == 0: return
+    if xz_kflags_arr.len() == 0: xz_init_kflags()
     if xz_stack.len() < 256: xz_stack.resize(256)
-    xz_stack[0] = root
+    kf_p = xz_kflags_p
+    st = data(xz_stack)
+    cap = xz_stack.len()
+    lists = data(xz_lists[0])
+    nodes_p = data(xz_nodes[0])
+    types_p = data(xz_types[0])
+    collect = xz_collect[0]
+    st[0] = root
     sp = 1
     loop sp > 0:
         sp = sp - 1
-        n = xz_stack[sp]
+        n = st[sp]
         if proofs and n >= FI_OPEN:
             fi_event(n)
             continue
         if n < 0:
-            if xz_collect[0]: xz_sites[0].push(n)
+            if collect: xz_sites[0].push(n)
             continue
-        t = int(xz_nodes[0][n].type)
-        if t != 0 and int(xz_types[0][t].flags) & 1 != 0: xz_nodes[0][n].type = i32(int(tu_zonk(t)))
-        k = xz_nodes[0][n].kind
-        if k == .index: xz_indexes[0] = xz_indexes[0] + 1
-        if k == .ident and xz_user_global(xz_nodes[0][n].aux, xz_nodes[0][n].sym): xz_user_globals[0] = xz_user_globals[0] + 1
-        if k == .fn_: xz_collect[0] = false
-        if xz_collect[0] and (k == .vardecl or k == .assign or k == .for_ or k == .while_ or k == .lambda or k == .return_ or k == .break_ or k == .continue_): xz_sites[0].push(n)
+        node = nodes_p + n
+        t = int(node[0].type)
+        if t != 0 and int(types_p[t].flags) & 1 != 0:
+            zonked = int(tu_zonk(t))
+            types_p = data(xz_types[0])
+            nodes_p = data(xz_nodes[0])
+            node = nodes_p + n
+            node[0].type = i32(zonked)
+        k = node[0].kind
+        kf = kf_p[int(k)]
+        if kf == u8(1): continue
+        if kf != u8(0):
+            if kf & u8(4) != u8(0):
+                if k == .ident:
+                    if xz_user_global(node[0].aux, node[0].sym): xz_user_globals[0] = xz_user_globals[0] + 1
+                    continue
+                if k == .index or (k == .call and node[0].aux == 0 and node[0].nlist == 3 and xz_swap_call(node[0].aux, node[0].nlist, node[0].sym)): xz_indexes[0] = xz_indexes[0] + 1
+                if k == .fn_:
+                    collect = false
+                    xz_collect[0] = false
+            if collect and kf & u8(2) != u8(0): xz_sites[0].push(n)
         if proofs:
             if k == .fn_: fi_template()
             if k == .index: fi_index(n)
@@ -140,49 +206,61 @@ xz_walk = (root: int, proofs: bool):
                 next = fi_children(n, mut xz_stack, sp)
                 if next >= 0:
                     sp = next
+                    st = data(xz_stack)
+                    cap = xz_stack.len()
                     continue
-        if k == .lambda: continue
-        if k == .for_ or k == .while_:
-            if sp + 1 > xz_stack.len(): xz_stack.resize((sp + 1) * 2)
-            xz_stack[sp] = 0 - n
-            sp = sp + 1
-        n1 = int(xz_nodes[0][n].nlist)
-        n2 = int(xz_nodes[0][n].nlist2)
-        if sp + n1 + n2 + (if proofs: 7 else: 4) > xz_stack.len(): xz_stack.resize((sp + n1 + n2 + (if proofs: 7 else: 4)) * 2)
-        l2 = int(xz_nodes[0][n].list2)
-        i = n2 - 1
-        loop i >= 0:
-            x = int(xz_lists[0][l2 + i])
-            if x != 0:
-                xz_stack[sp] = x
+        if kf & u8(4) != u8(0):
+            if k == .lambda: continue
+            if k == .for_ or k == .while_:
+                if sp + 1 > cap:
+                    cap = (sp + 1) * 2
+                    xz_stack.resize(cap)
+                    st = data(xz_stack)
+                st[sp] = 0 - n
                 sp = sp + 1
-            i = i - 1
-        l1 = int(xz_nodes[0][n].list)
-        i = n1 - 1
-        loop i >= 0:
-            x = int(xz_lists[0][l1 + i])
-            if x != 0:
-                xz_stack[sp] = x
-                sp = sp + 1
-            i = i - 1
+        n1 = int(node[0].nlist)
+        n2 = int(node[0].nlist2)
+        slots = if proofs: 7 else: 4
+        if sp + n1 + n2 + slots > cap:
+            cap = (sp + n1 + n2 + slots) * 2
+            xz_stack.resize(cap)
+            st = data(xz_stack)
+        if n2 > 0:
+            l2 = int(node[0].list2)
+            i = n2 - 1
+            loop i >= 0:
+                x = lists[l2 + i]
+                if x != 0:
+                    st[sp] = int(x)
+                    sp = sp + 1
+                i = i - 1
+        if n1 > 0:
+            l1 = int(node[0].list)
+            i = n1 - 1
+            loop i >= 0:
+                x = lists[l1 + i]
+                if x != 0:
+                    st[sp] = int(x)
+                    sp = sp + 1
+                i = i - 1
         if k != .for_:
-            if k != .partial and xz_nodes[0][n].d != 0:
-                xz_stack[sp] = int(xz_nodes[0][n].d)
+            if k != .partial and node[0].d != 0:
+                st[sp] = int(node[0].d)
                 sp = sp + 1
-            if xz_nodes[0][n].c != 0:
-                xz_stack[sp] = int(xz_nodes[0][n].c)
+            if node[0].c != 0:
+                st[sp] = int(node[0].c)
                 sp = sp + 1
-        if proofs and k == .for_ and xz_nodes[0][n].b != 0:
-            xz_stack[sp] = FI_CLOSE
-            xz_stack[sp+1] = int(xz_nodes[0][n].b)
-            xz_stack[sp+2] = FI_RANGE + n
-            xz_stack[sp+3] = FI_OPEN
+        if proofs and k == .for_ and node[0].b != 0:
+            st[sp] = FI_CLOSE
+            st[sp+1] = int(node[0].b)
+            st[sp+2] = FI_RANGE + n
+            st[sp+3] = FI_OPEN
             sp += 4
-        else if xz_nodes[0][n].b != 0:
-            xz_stack[sp] = int(xz_nodes[0][n].b)
+        else if node[0].b != 0:
+            st[sp] = int(node[0].b)
             sp = sp + 1
-        if xz_nodes[0][n].a != 0:
-            xz_stack[sp] = int(xz_nodes[0][n].a)
+        if node[0].a != 0:
+            st[sp] = int(node[0].a)
             sp = sp + 1
 xz_tree = (root: int): xz_walk(root, false)
 xz_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int):
@@ -195,26 +273,44 @@ xz_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int):
     xz_collect[0] = false
     normal = xz_fns[0][f].kind == 0
     if normal:
-        loop l in xz_fns[0][f].locals:
-            if int(tu_prune(int(xz_locals[0][l].type))) == xz_math_int[0] and int(xz_locals[0][l].flags) & 16 != 0: xz_collect[0] = true
+        count0 = xz_fns[0][f].locals.len()
+        lp = data(xz_fns[0][f].locals)
+        locs = data(xz_locals[0])
+        mi = xz_math_int[0]
+        loop i in [0..count0):
+            l = lp[i]
+            if int(locs[l].flags) & 16 != 0 and int(tu_prune(int(locs[l].type))) == mi:
+                xz_collect[0] = true
+                break
     quiet = normal and not xz_collect[0] and xz_var_counter[0] == vars0 and xz_type_binds[0] == binds0 and xz_type_exposures[0] == exposed0
+    no_idx = false
+    no_ug = false
     if normal and fi_begin(f):
         fi_event(FI_OPEN)
         xz_walk(body, true)
         fi_finish()
-    else if quiet: xz_summary(body)
-    else: xz_tree(body)
+        no_idx = xz_indexes[0] == index_mark
+        no_ug = xz_user_globals[0] == global_mark
+    else if quiet:
+        no_idx = live_body_indexes == 0
+        no_ug = live_body_user_globals == 0 and (live_body_global_mod < 0 or zonk_prelude(live_body_global_mod))
+    else:
+        xz_tree(body)
+        no_idx = normal and xz_indexes[0] == index_mark
+        no_ug = normal and xz_user_globals[0] == global_mark
     xz_fns[0][f].write_sites = xz_sites[0]
     xz_fns[0][f].writes_ready = xz_collect[0]
     xz_sites[0] = saved_sites
     xz_collect[0] = saved_collect
-    xz_fns[0][f].no_indexes = normal and xz_indexes[0] == index_mark
-    xz_fns[0][f].no_user_globals = normal and xz_user_globals[0] == global_mark
+    xz_fns[0][f].no_indexes = no_idx
+    xz_fns[0][f].no_user_globals = no_ug
     count = xz_fns[0][f].locals.len()
     loop i in [0..count):
         l = xz_fns[0][f].locals[i]
-        zonked = int(tu_zonk(int(xz_locals[0][l].type)))
-        xz_locals[0][l].type = i32(zonked)
-        if int(xz_types[0][int(tu_prune(zonked))].flags) & 1 != 0: zonk_local_error(l)
+        lt = int(xz_locals[0][l].type)
+        if lt != 0 and int(xz_types[0][lt].flags) & 1 != 0:
+            zonked = int(tu_zonk(lt))
+            xz_locals[0][l].type = i32(zonked)
+            if int(xz_types[0][int(tu_prune(zonked))].flags) & 1 != 0: zonk_local_error(l)
     zonk_copy_warnings(f)
     if xz_da_decls[0].len() > da_mark: zonk_definite(body, da_mark)

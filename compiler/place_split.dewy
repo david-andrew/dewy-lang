@@ -3,7 +3,7 @@ $runtime_checks
 # The definition side of place-returning methods (place_methods.jo): splitting a method that
 # lends a place, as dewy_direct.jo declares a type's methods. Apart from place_methods.jo, which
 # the checker uses, so the bootstrap's seed frontend never reads the Dewy frontend.
-from p"ast.jo" import (NF_AT NF_GENERIC NF_INDEX_CAPTURED NF_VOID NF_WRITTEN_VOID add_flag clone dewy_param_kinds has_flag kid_c kid_d kids mk nkids nodes set_list set_list2)
+from p"ast.jo" import (NF_AT NF_GENERIC NF_INDEX_CAPTURED NF_VOID NF_WRITTEN_VOID add_flag clone dewy_param_kinds has_flag kid kid_c kid_d kids mk nkids nodes set_list set_list2)
 from p"checks_builders.dewy" import (bc_block bc_bool)
 from p"util.jo" import (intern name_of)
 from p"diagnostic_exit.dewy" import (fatal)
@@ -33,16 +33,24 @@ place_given=(v:SplitWord receiver:SplitWord):>bool=>$unsafe {
 place_returns_in=(n:SplitWord receiver:SplitWord @places:array<int64> @values:array<int64>):>void=>$unsafe {
     if n =? 0 {return}
     let k=nodes.ptr[n].kind
-    if k =? 'lambda' or k =? 'fn_' {return}
-    if k =? 'return_' {
-        if place_given(SplitWord(nodes.ptr[n].a) receiver) {places.push(n)}
-        else {values.push(n)}
+    match k {
+        <'lambda'|'fn_'|'int_lit'|'float_lit'|'str_lit'|'bool_lit'|'none_lit'|'null_lit'|'ident'|'dotname'|'hole'|'break_'|'continue_'> => {return}
+        <'return_'> => {
+            if place_given(SplitWord(nodes.ptr[n].a) receiver) {places.push(n)}
+            else {values.push(n)}
+        }
+        _ => {}
     }
-    place_returns_in(SplitWord(nodes.ptr[n].a) receiver @places @values)
-    place_returns_in(SplitWord(nodes.ptr[n].b) receiver @places @values)
-    place_returns_in(kid_c(n) receiver @places @values)
-    place_returns_in(kid_d(n) receiver @places @values)
-    loop child in kids(n) {place_returns_in(child receiver @places @values)}
+    let ca=SplitWord(nodes.ptr[n].a)
+    if ca not=? 0 {place_returns_in(ca receiver @places @values)}
+    let cb=SplitWord(nodes.ptr[n].b)
+    if cb not=? 0 {place_returns_in(cb receiver @places @values)}
+    let cc=kid_c(n)
+    if cc not=? 0 {place_returns_in(cc receiver @places @values)}
+    let cd=kid_d(n)
+    if cd not=? 0 {place_returns_in(cd receiver @places @values)}
+    let nk=nkids(n)
+    loop ci in [0..nk) {place_returns_in(kid(n ci) receiver @places @values)}
 }
 # Splits a method that lends a place (see the top); the functions it adds, to declare as rows.
 place_method_split=(fn_:SplitWord receiver:SplitWord name:string):>array<int64>=>$unsafe {

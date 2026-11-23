@@ -16,52 +16,129 @@ ValueWord:type=int64<overflow='wrap'>
 fact_index_hash=(key:ValueWord mask:ValueWord):>int64=>((key xor (key >> 32)) * 0x9e3779b1) & mask
 # The slot count is a power of two and 1 + 2 * slot + 1 < length for every
 # slot <= mask, so the probe reads stay inside the index it was given.
-fact_index_get=(index:array<int64> key:ValueWord):>int64=>$unsafe {
-    if index.length =? 0 {return -1}
-    let mask:ValueWord=((ValueWord(index.length) - 1) >> 1) - 1
-    let slot:ValueWord=fact_index_hash(key mask)
+fact_index_get_raw=(p:ptr<int64> n:ValueWord key:ValueWord):>int64=>$unsafe {
+    if n =? 0 {return -1}
+    let mask:ValueWord=((n - 1) >> 1) - 1
+    let slot:ValueWord=((key xor (key >> 32)) * 0x9e3779b1) & mask
     loop true {
-        let i:ValueWord=1 + slot * 2
-        if index.ptr[i + 1] =? 0 {return -1}
-        if index.ptr[i] =? key {return ValueWord(index.ptr[i + 1]) - 1}
+        let i:ValueWord=1 + (slot << 1)
+        let v:ValueWord=p[i + 1]
+        if v =? 0 {return -1}
+        if p[i] =? key {return v - 1}
         slot=(slot + 1) & mask
     }
     -1
 }
-fact_slot=(s:FactState v:ValueWord):>int64=>{
+fact_index_get=(index:array<int64> key:ValueWord):>int64=>$unsafe {
+    fact_index_get_raw(index.ptr index.length key)
+}
+fact_slot_slow_raw=(ix_p:ptr<int64> ix_n:ValueWord v:ValueWord n:ValueWord ids:ptr<int64>):>int64=>$unsafe {
+    if ix_n not=? 0 {
+        let i:ValueWord=fact_index_get_raw(ix_p ix_n v)
+        if i >=? 0 and i <? n and ids[i] =? v {return i}
+        return -1
+    }
+    if v <? ids[0] or v >? ids[n - 1] {return -1}
+    let lo:ValueWord=0
+    let hi:ValueWord=n
+    loop lo <? hi {
+        let mid=(lo + hi) >> 1
+        if ids[mid] <? v {lo=mid + 1} else {hi=mid}
+    }
+    if lo <? n and ids[lo] =? v {return lo}
+    -1
+}
+fact_slot_slow=(s:FactState v:ValueWord n:ValueWord ids:ptr<int64>):>int64=>$unsafe {
+    let idx=s.index.ptr
+    fact_slot_slow_raw(idx[0].slots.ptr idx[0].slots.length v n ids)
+}
+fact_slot_slow_ref=(@s:FactState v:ValueWord n:ValueWord ids:ptr<int64>):>int64=>$unsafe {
+    let idx=s.index.ptr
+    fact_slot_slow_raw(idx[0].slots.ptr idx[0].slots.length v n ids)
+}
+fact_slot_ref=(@s:FactState v:ValueWord):>int64=>$unsafe {
+    let n:ValueWord=s.ids.length
+    if n =? 0 {return -1}
+    let ids=s.ids.ptr
+    if v >? 0 and v <? fact_terms.length {
+        let hint:ValueWord=fact_terms.ptr[v].slot
+        if hint >=? 0 and hint <? n and ids[hint] =? v {return hint}
+    }
+    fact_slot_slow_ref(@s v n ids)
+}
+fact_slot=(s:FactState v:ValueWord):>int64=>$unsafe {
+    let n:ValueWord=s.ids.length
+    if n =? 0 {return -1}
+    let ids=s.ids.ptr
     # A value's latest insertion is a hint, never cross-branch evidence.
     # Validate against this frame before falling back to its own index.
     if v >? 0 and v <? fact_terms.length {
-        let hint:ValueWord=fact_terms[v].slot
-        if hint >=? 0 and hint <? s.ids.length and s.ids[hint] =? v {return hint}
+        let hint:ValueWord=fact_terms.ptr[v].slot
+        if hint >=? 0 and hint <? n and ids[hint] =? v {return hint}
     }
-    # (a hashed index may be shared with a longer ancestor: an entry counts
-    # only when it still names v's position)
-    if s.index[0].slots.length not=? 0 {
-        let i:ValueWord=fact_index_get(s.index[0].slots v)
-        if i >=? 0 and i <? s.ids.length and s.ids[i] =? v {return i}
-        return -1
-    }
-    if s.ids.length =? 0 or v <? s.ids[0] or v >? s.ids[s.ids.length - 1] {return -1}
-    let lo:ValueWord=0
-    let hi:ValueWord=s.ids.length
-    loop lo <? hi {
-        let mid=(lo + hi) >> 1
-        if s.ids[mid] <? v {lo=mid + 1} else {hi=mid}
-    }
-    if lo <? s.ids.length and s.ids[lo] =? v {return lo}
-    -1
+    fact_slot_slow(s v n ids)
 }
-fact_bound=(s:FactState v:ValueWord):>FactBound=>{
-    let i=fact_slot(s v)
+fact_bound_slow=(s:FactState v:ValueWord):>FactBound=>$unsafe {
+    let n:ValueWord=s.ids.length
+    if n =? 0 {return FactBound(reason='budget' wide=true)}
+    let ids=s.ids.ptr
+    let idx=s.index.ptr
+    let i:ValueWord=fact_slot_slow_raw(idx[0].slots.ptr idx[0].slots.length v n ids)
     if i <? 0 {return FactBound(reason='budget' wide=true)}
-    s.bounds[i]
+    s.bounds.ptr[i]
+}
+fact_bound=(s:FactState v:ValueWord):>FactBound=>$unsafe {
+    let n:ValueWord=s.ids.length
+    if v >? 0 and v <? fact_terms.length {
+        let hint:ValueWord=fact_terms.ptr[v].slot
+        if hint >=? 0 and hint <? n and s.ids.ptr[hint] =? v {return s.bounds.ptr[hint]}
+    }
+    fact_bound_slow(s v)
 }
 # (a join's root index may be shared with a predecessor holding more
 # bindings: an entry counts only when it still names p's position)
-fact_binding=(s:FactState p:PlaceIdentity):>int64=>{
-    let i:ValueWord=fact_index_get(s.index[0].roots fact_root_key(p))
-    if i >=? 0 and i <? s.bindings.length and s.bindings[i].place =? p {return i}
+fact_binding_ref=(@s:FactState p:PlaceIdentity):>int64=>$unsafe {
+    let idx=s.index.ptr
+    let rn:ValueWord=idx[0].roots.length
+    if rn =? 0 {return -1}
+    let rp=idx[0].roots.ptr
+    let key:ValueWord=fact_root_key(p)
+    let mask:ValueWord=((rn - 1) >> 1) - 1
+    let slot:ValueWord=((key xor (key >> 32)) * 0x9e3779b1) & mask
+    let i:ValueWord=-1
+    loop true {
+        let j:ValueWord=1 + (slot << 1)
+        let v:ValueWord=rp[j + 1]
+        if v =? 0 {return -1}
+        if rp[j] =? key {i=v - 1; break}
+        slot=(slot + 1) & mask
+    }
+    if i >=? 0 and i <? s.bindings.length {
+        let bp=s.bindings.ptr + i
+        if bp[0].place.declaration =? p.declaration and bp[0].place.root =? p.root and bp[0].place.owner =? p.owner and bp[0].place.parent =? p.parent and bp[0].place.projection =? p.projection and bp[0].place.selector =? p.selector {return i}
+    }
+    -1
+}
+fact_binding=(s:FactState p:PlaceIdentity):>int64=>$unsafe {
+    let idx=s.index.ptr
+    let rn:ValueWord=idx[0].roots.length
+    if rn =? 0 {return -1}
+    let rp=idx[0].roots.ptr
+    let key:ValueWord=fact_root_key(p)
+    let mask:ValueWord=((rn - 1) >> 1) - 1
+    let slot:ValueWord=((key xor (key >> 32)) * 0x9e3779b1) & mask
+    let i:ValueWord=-1
+    loop true {
+        let j:ValueWord=1 + (slot << 1)
+        let v:ValueWord=rp[j + 1]
+        if v =? 0 {return -1}
+        if rp[j] =? key {i=v - 1; break}
+        slot=(slot + 1) & mask
+    }
+    if i >=? 0 and i <? s.bindings.length {
+        let bp=s.bindings.ptr + i
+        if bp[0].place.declaration =? p.declaration and bp[0].place.root =? p.root and bp[0].place.owner =? p.owner and bp[0].place.parent =? p.parent and bp[0].place.projection =? p.projection and bp[0].place.selector =? p.selector {return i}
+    }
     -1
 }
 fact_truth=(s:FactState v:ValueWord):>int64=>{

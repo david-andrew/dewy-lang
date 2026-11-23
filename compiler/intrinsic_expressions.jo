@@ -22,6 +22,7 @@ use 'call_lookup_context.dewy'
 use 'concurrency_tasks.dewy'
 use 'concurrency_types.dewy'
 use 'check.jo'
+use 'checker_state.dewy'
 use 'data_access.dewy'
 use 'checker_module_lookup.dewy'
 use 'checker_source_positions.dewy'
@@ -213,6 +214,7 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
             nodes[n] = nodes[bc_call("__map_pair_at", args, pos)]
         else:
             ix = mk(.index, pos)
+            live_body_indexes += 1
             nodes[ix].a = i32(if is_map_type(t) or is_map_entries_type(t): bc_map_keys(args[0], pos) else: args[0])
             nodes[ix].b = i32(args[1])
             nodes[n] = nodes[ix]

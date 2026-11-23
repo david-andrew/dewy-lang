@@ -2,7 +2,7 @@ $runtime_checks
 from p"checker_binding_inputs.dewy" import (binding_leaves)
 
 from p"@lib/core/str.jo" import (starts_with)
-from p"ast.jo" import (NF_MUT add_flag has_flag kid kid_c kid_d kids kids2 mk nkids nodes)
+from p"ast.jo" import (NF_MUT add_flag has_flag kid kid2 kid_c kid_d kids kids2 mk nkids nkids2 nodes)
 from p"check.jo" import (FK_INIT check_scopes ctxs cx modules)
 from p"checks_thin.dewy" import (new_inst resolve_type)
 from p"checker_call_queries.dewy" import (intrinsic_of)
@@ -357,6 +357,16 @@ dewy_route_member=(n:MethodWord receiver:MethodWord):>MethodWord=>$unsafe {
 dewy_changes=(n:MethodWord receiver:MethodWord i:MethodWord nested:bool):>bool=>$unsafe {
     if n =? 0 {return false}
     let k=nodes.ptr[n].kind
+    match k {
+        <'int_lit'|'float_lit'|'str_lit'|'bool_lit'|'none_lit'|'null_lit'|'dotname'|'hole'|'break_'|'continue_'> => {return false}
+        <'ident'> => {
+            if has_flag(n NF_MUT) and dewy_reaches(n receiver) {
+                return dewy_change_found(n nested dewy_route_member(n receiver))
+            }
+            return false
+        }
+        _ => {}
+    }
     let found=false
     let inner=nested or k =? 'lambda'
     if k =? 'lambda' {
@@ -368,9 +378,13 @@ dewy_changes=(n:MethodWord receiver:MethodWord i:MethodWord nested:bool):>bool=>
     }
     if k =? 'assign' {
         let target=MethodWord(nodes.ptr[n].a)
-        let targets=if nodes.ptr[target].kind =? 'tuple' {binding_leaves(kids(target))} else {[target]}
-        loop t in targets {
-            if dewy_reaches(t receiver) {found=dewy_change_found(n nested dewy_route_member(t receiver))}
+        if nodes.ptr[target].kind not=? 'tuple' {
+            if dewy_reaches(target receiver) {found=dewy_change_found(n nested dewy_route_member(target receiver))}
+        } else {
+            let targets=binding_leaves(kids(target))
+            loop t in targets {
+                if dewy_reaches(t receiver) {found=dewy_change_found(n nested dewy_route_member(t receiver))}
+            }
         }
     }
     if (k =? 'for_' or k =? 'lhead') and has_flag(n NF_MUT) and dewy_reaches(MethodWord(nodes.ptr[n].a) receiver) {
@@ -384,15 +398,16 @@ dewy_changes=(n:MethodWord receiver:MethodWord i:MethodWord nested:bool):>bool=>
         }
         # The receiver of a member call is marked as a possible place; judged above.
         if dewy_changes_within(base receiver i inner) {found=true}
-        loop arg in kids(n) {
-            if dewy_changes(arg receiver i inner) {found=true}
+        let nk=nkids(n)
+        loop ai in [0..nk) {
+            if dewy_changes(kid(n ai) receiver i inner) {found=true}
         }
         return found
     }
     if k =? 'field' and nodes.ptr[n].name not=? 0 and dewy_reaches(MethodWord(nodes.ptr[n].a) receiver) {
         if dewy_member_changes(MethodWord(nodes.ptr[n].a) MethodWord(nodes.ptr[n].name) receiver i) {found=dewy_change_found(n nested dewy_route_member(MethodWord(nodes.ptr[n].a) receiver))}
     }
-    if has_flag(n NF_MUT) and (k =? 'ident' or k =? 'field' or k =? 'index') and dewy_reaches(n receiver) {
+    if has_flag(n NF_MUT) and (k =? 'field' or k =? 'index') and dewy_reaches(n receiver) {
         found=dewy_change_found(n nested dewy_route_member(n receiver))
     }
     if dewy_changes_within(n receiver i inner) {found=true}
@@ -401,17 +416,23 @@ dewy_changes=(n:MethodWord receiver:MethodWord i:MethodWord nested:bool):>bool=>
 dewy_changes_within=(n:MethodWord receiver:MethodWord i:MethodWord nested:bool):>bool=>$unsafe {
     let found=false
     let k=nodes.ptr[n].kind
-    if dewy_changes(MethodWord(nodes.ptr[n].a) receiver i nested) {found=true}
+    let ca=MethodWord(nodes.ptr[n].a)
+    if ca not=? 0 and dewy_changes(ca receiver i nested) {found=true}
     if k =? 'field' {return found}
-    if dewy_changes(MethodWord(nodes.ptr[n].b) receiver i nested) {found=true}
-    if dewy_changes(kid_c(n) receiver i nested) {found=true}
-    if dewy_changes(kid_d(n) receiver i nested) {found=true}
-    loop child in kids(n) {
-        if dewy_changes(child receiver i nested) {found=true}
+    let cb=MethodWord(nodes.ptr[n].b)
+    if cb not=? 0 and dewy_changes(cb receiver i nested) {found=true}
+    let cc=kid_c(n)
+    if cc not=? 0 and dewy_changes(cc receiver i nested) {found=true}
+    let cd=kid_d(n)
+    if cd not=? 0 and dewy_changes(cd receiver i nested) {found=true}
+    let nk=nkids(n)
+    loop ci in [0..nk) {
+        if dewy_changes(kid(n ci) receiver i nested) {found=true}
     }
     if k not=? 'lambda' and k not=? 'fn_' {
-        loop child in kids2(n) {
-            if dewy_changes(child receiver i nested) {found=true}
+        let nk2=nkids2(n)
+        loop ci in [0..nk2) {
+            if dewy_changes(kid2(n ci) receiver i nested) {found=true}
         }
     }
     found

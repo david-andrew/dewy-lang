@@ -26,37 +26,75 @@ struct CheckerInstanceInput:
     context: *(int)
     void_type: *(int)
 ci_input: *CheckerInstanceInput
+ci_nodes: *(Node[])
+ci_fns: *(FnInst[])
+ci_decls: *(DeclInfo[])
+ci_index: *({FnInstanceKey: int})
 checker_instances_bind = (input: *CheckerInstanceInput) -> int:
     ci_input = input
+    ci_nodes = input[0].nodes
+    ci_fns = input[0].functions
+    ci_decls = input[0].declarations
+    ci_index = input[0].index
     0
 ci_get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
-    if dir_code_any and dir_code_masks.len() > ci_input[0].nodes[0][decl].pos >> 40 and dir_code_masks[ci_input[0].nodes[0][decl].pos >> 40] != 0: return ci_get_policy_inst(decl, targs, use_pos)
-    if ci_input[0].nodes[0][decl].kind == .lambda: return poly_inst(decl, targs, use_pos)
+    nd = data(ci_nodes[0]) + decl
+    if dir_code_any:
+        file = nd[0].pos >> 40
+        if file >= 0 and file < dir_code_masks.len() and dir_code_masks[file] != 0: return ci_get_policy_inst(decl, targs, use_pos)
+    if nd[0].kind == .lambda: return poly_inst(decl, targs, use_pos)
     # (the host's preflight acts only on extern or attributed declarations)
-    if int(ci_input[0].nodes[0][decl].flags) & 4 != 0 or ci_input[0].nodes[0][decl].c != 0: instance_preflight(decl, use_pos)
-    di = cs_decl_info(decl)
-    sig = fn_sig(decl)
+    if int(nd[0].flags) & 4 != 0 or nd[0].c != 0: instance_preflight(decl, use_pos)
+    di = int(ci_nodes[0][decl].sym)
+    if di == 0: di = cs_decl_info(decl)
+    if not ci_decls[0][di].sig.done: fn_sig(decl)
     if dir_code_any and (dir_code_by_inst.len() != 0 or dir_code_mask(use_pos >> 40) != 0):
-        if sig.generic and dir_code_generic(decl, use_pos): return ci_get_policy_inst(decl, targs, use_pos)
-        if not sig.generic: dir_code_foreign_warn(decl, use_pos)
-    concrete = targs.len() > 0
-    loop t in targs:
-        if tu_has_var(t): concrete = false
-    if concrete:
-        if let f = ci_input[0].index[0].get(FnInstanceKey(decl, targs)):
-            if ci_input[0].functions[0][f].ret == 0: ensure_ret(f, use_pos)
-            return f
+        is_gen = ci_decls[0][di].sig.generic
+        if is_gen and dir_code_generic(decl, use_pos): return ci_get_policy_inst(decl, targs, use_pos)
+        if not is_gen: dir_code_foreign_warn(decl, use_pos)
+    tlen = targs.len()
+    if tlen == 0:
+        ilen = ci_decls[0][di].insts.len()
+        if ilen > 0:
+            ip = data(ci_decls[0][di].insts)
+            f0 = ip[0]
+            fp = data(ci_fns[0])
+            if fp[f0].targs.len() == 0:
+                if fp[f0].ret == 0: ensure_ret(f0, use_pos)
+                return f0
+            loop ii in [1..ilen):
+                f = ip[ii]
+                if fp[f].targs.len() == 0:
+                    if fp[f].ret == 0: ensure_ret(f, use_pos)
+                    return f
     else:
-        loop f in ci_input[0].declarations[0][di].insts:
-            same = ci_input[0].functions[0][f].targs.len() == targs.len()
-            loop k in [0..targs.len()):
-                if not same: break
-                if not tu_equal(ci_input[0].functions[0][f].targs[k], targs[k]):
-                    same = false
-                    break
-            if same:
-                if ci_input[0].functions[0][f].ret == 0: ensure_ret(f, use_pos)
+        concrete = true
+        tp = data(targs)
+        loop k in [0..tlen):
+            if tu_has_var(tp[k]):
+                concrete = false
+                break
+        if concrete:
+            if let f = ci_index[0].get(FnInstanceKey(decl, targs)):
+                if ci_fns[0][f].ret == 0: ensure_ret(f, use_pos)
                 return f
+        else:
+            ilen = ci_decls[0][di].insts.len()
+            ip = data(ci_decls[0][di].insts)
+            fp_arr = data(ci_fns[0])
+            loop ii in [0..ilen):
+                f = ip[ii]
+                if fp_arr[f].targs.len() == tlen:
+                    same = true
+                    fp = data(fp_arr[f].targs)
+                    loop k in [0..tlen):
+                        if not tu_equal(fp[k], tp[k]):
+                            same = false
+                            break
+                    if same:
+                        if fp_arr[f].ret == 0: ensure_ret(f, use_pos)
+                        return f
+    sig = ci_input[0].declarations[0][di].sig
     f = instance_create(decl, use_pos)
     zt: int[]
     loop t in targs:

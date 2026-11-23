@@ -37,10 +37,11 @@ IrFn:type=[
 # operands in IrFn.args; no duplicated operand arrays or stale optimizer cache.
 # All native backend consumers share the counts, intervals and allocation chain.
 IrUsePlan:type=[
-    first:int64=1 << 60
-    last:int64=-1
-    ndef:int64=0
-    nuse:int64=0
+    first:int32=0
+    last:int32=-1
+    ndef:int32=0
+    nuse:int32=0
+    next_start:int32=-1
+    _pad:int32=0
     weight:int64=0
-    next_start:int64=-1
 ]

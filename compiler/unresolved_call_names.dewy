@@ -25,7 +25,9 @@ from p"checker_source_positions.dewy" import (dewy_at)
 from p"checker_contexts.dewy" import (cur_mod)
 from p"expr.jo" import (IN intrinsics)
 from p"explicit_conversions.dewy" import (conversion)
-from p"checker_expr.dewy" import (check_expr check_intrinsic lookup)
+from p"checker_expr.dewy" import (call_by_name check_expr check_intrinsic lookup)
+from p"checker_startup.dewy" import (load_game_file load_game_prelude load_std_file load_std_prelude)
+from p"prelude.jo" import (game_file_for prelude_game_pending prelude_std_pending std_file_for)
 from p"call_lookup_context.dewy" import (caller_dewy)
 from p"node_store.dewy" import (Node)
 from p"ast.jo" import (NF_CHECKED add_flag mk nkids2 nodes)
@@ -52,8 +54,24 @@ call_name_unknown=(n:int64 name:int64 mod_scope:int64 args:array<int64> expected
     if ii >=? 0 and intrinsics[ii].arr and args.length >? 0 {fatal(nodes.ptr[n].pos "'{name_of(name)}' expects an array or string, found {dt(ntype(args[0]))}")}
     if ufcs {
         let t0=prune(ntype(args[0]))
+        if prelude_std_pending {
+            let sf=std_file_for(name_of(name))
+            if (sf as array<uint8>).length >? 0 and load_std_file(sf) {
+                return call_by_name(n name mod_scope args expected ufcs)
+            }
+            load_std_prelude()
+            return call_by_name(n name mod_scope args expected ufcs)
+        }
         # (`lookup(id).scaled(2)`, where only the value's own module has `scaled`)
         if caller_dewy() and forwards_exceptions(t0) {return forward_call(n name args expected)}
+        if prelude_game_pending {
+            let gf=game_file_for(name_of(name))
+            if (gf as array<uint8>).length >? 0 and load_game_file(gf) {
+                return call_by_name(n name mod_scope args expected ufcs)
+            }
+            load_game_prelude()
+            return call_by_name(n name mod_scope args expected ufcs)
+        }
         # (step.1() for a tuple whose element 1 is a function: that element, called)
         let nm0=name_of(name)
         if types.ptr[t0].kind =? 'tuple' and (nm0 as array<uint8>).length >? 0 and is_digit((nm0 as array<uint8>).ptr[0]) {

@@ -13,6 +13,7 @@ use 'dewy_file.dewy'
 use 'lexer_helpers.dewy'
 use 'lazy_force.dewy'
 use 'frontend_symbols.dewy'
+dn_tok_pool: DewyLexeme[]
 dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLexeme[]:
     if intern_names and dn_word_tokens.len() == 0: dn_init_words()
     source = files[file].src
@@ -23,9 +24,11 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
     if dn_symbols.len() == 0: dn_init_symbols()
     classes = data(dn_classes)
     symbols = data(dn_symbols)
-    out: DewyLexeme[]
-    capacity = (stop - begin) / 2 + 2 + DN_EOF_SPARE
-    out.resize(capacity)
+    out = dn_tok_pool
+    dn_tok_pool = []
+    capacity = ((stop - begin) >> 1) + 2 + DN_EOF_SPARE
+    if out.cap() < capacity: out.reserve(capacity)
+    __set_len(out, capacity)
     dn_block_comments = []
     state = DewyLexState(dn_skip_bodies, false, dn_metatags, false, false, dc_parser.reader.dn_true_id, dc_parser.reader.dn_false_id, dc_parser.reader.dn_is_id, dc_parser.reader.dn_isnt_id, dc_parser.reader.dn_in_id, dn_word_tokens.len(), &names, &name_hash, &name_tab)
     count = dx_lex(state, &dn_lex_host, dn_lexer, dn_block_comments, source, begin, stop, intern_names, classes, symbols, data(dn_word_tokens), out, capacity)
@@ -37,7 +40,8 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
     slots = data(out)
     if count + 1 + DN_EOF_SPARE > capacity:
         capacity = count + 1 + DN_EOF_SPARE
-        out.resize(capacity)
+        out.reserve(capacity)
+        __set_len(out, capacity)
         slots = data(out)
     loop k in [count..count + DN_EOF_SPARE]: slots[k] = DewyLexeme(.eof, 0, stop, stop, spaced, newline)
     out.truncate(count + 1 + DN_EOF_SPARE)
@@ -59,6 +63,10 @@ dewy_fast_file = (file: int) -> int[]:
     dc_parser.tokens = dn_lex(file, 0, len(files[file].src))
     dn_skip_bodies = false
     dw_dir_lexed(file)
-    df_file(dc_parser, nodes, dc_file_host, saved_edits_on, lib_lazy, dc_lazy_allowed(file))
+    out = df_file(dc_parser, nodes, dc_file_host, saved_edits_on, lib_lazy, dc_lazy_allowed(file))
+    if not lib_lazy and not dc_lazy_allowed(file) and dc_parser.tokens.cap() > dn_tok_pool.cap():
+        dn_tok_pool = dc_parser.tokens
+    dc_parser.tokens = []
+    out
 
 frontend_bind = (texts: *int, hashes: *int, names_: *int, host: *int) -> int: 0

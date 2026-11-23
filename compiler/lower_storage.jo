@@ -32,10 +32,10 @@ hdr_load = (p: int, off: int) -> int: e_load(VI, p, off, 8 | M_HDR)
 
 hdr_store = (p: int, off: int, v: int): e_store(p, off, v, 8 | M_HDR)
 
-lower_type_plan = (t0: int) -> *LowerTypePlan:
+@noinline
+lower_type_plan_fill = (t0: int) -> *LowerTypePlan:
     if t0 >= lower_types.len(): lower_types.resize(max(t0 + 1, lower_types.len() * 2))
     plan = &lower_types[t0]
-    if plan.epoch == lower_epoch: return plan
     t = quantity_base(t0)
     k = types[t].kind
     c = VC_INT
@@ -50,8 +50,14 @@ lower_type_plan = (t0: int) -> *LowerTypePlan:
     plan.epoch = lower_epoch
     plan
 
-vc = (t0: int) -> int:
-    if lower_planning: return lower_type_plan(t0).value_class
+lower_type_plan = (t0: int) -> *LowerTypePlan:
+    if t0 < lower_types.len():
+        plan = &lower_types[t0]
+        if plan.epoch == lower_epoch: return plan
+    lower_type_plan_fill(t0)
+
+vc_slow = (t0: int) -> int:
+    if lower_planning: return lower_type_plan_fill(t0).value_class
     t = quantity_base(t0)
     k = types[t].kind
     if k == .void_ or k == .typeval or k == .module: return VC_VOID
@@ -59,8 +65,18 @@ vc = (t0: int) -> int:
     if is_aggregate(t): return VC_AGG
     VC_INT
 
+vc = (t0: int) -> int:
+    if lower_planning and t0 < lower_types.len():
+        plan = &lower_types[t0]
+        if plan.epoch == lower_epoch: return plan.value_class
+    vc_slow(t0)
+
 vt_of = (t0: int) -> int:
-    if lower_planning: return lower_type_plan(t0).vtype
+    if lower_planning:
+        if t0 < lower_types.len():
+            plan = &lower_types[t0]
+            if plan.epoch == lower_epoch: return plan.vtype
+        return lower_type_plan_fill(t0).vtype
     t = quantity_base(t0)
     if types[t].kind == .float_:
         if int(types[t].bits) == 32: return VS
@@ -145,24 +161,33 @@ retain = (v: int, t0: int):
         note_mt_active()
         return
     # during a parallel job refcounts must be updated atomically (out of line)
-    blk()
-    done = ctl
-    iff(rt_global("__mt_active"))
-    was = ir_cold
-    ir_cold = true
-    e_call1(rt("__rc_inc"), v, -1)
-    ir_cold = was
-    br_to(done)
-    endc()
+    if not rc_assume_st:
+        blk()
+        done = ctl
+        iff(rt_global("__mt_active"))
+        was = ir_cold
+        ir_cold = true
+        e_call1(rt("__rc_inc"), v, -1)
+        ir_cold = was
+        br_to(done)
+        endc()
+        iff(e_bin(.ne, VI, v, e_iconst(0)))
+        rc = hdr_load(v, 0)
+        iff(e_bin(.gts, VI, rc, e_iconst(0)))
+        hdr_store(v, 0, e_addi(rc, 1))
+        endc()
+        endc()
+        endc()
+        return
     iff(e_bin(.ne, VI, v, e_iconst(0)))
     rc = hdr_load(v, 0)
     iff(e_bin(.gts, VI, rc, e_iconst(0)))
     hdr_store(v, 0, e_addi(rc, 1))
     endc()
     endc()
-    endc()
 
 release_expanded = false
+rc_assume_st = false
 release_last = (v: int, t: int):
     if (types[t].kind == .array and is_managed(int(types[t].elem))) or types[t].kind == .box: release_call(v, t)
     else: e_call1(rt("__free"), v, -1)
@@ -171,15 +196,22 @@ release_element = (v: int, t: int):
     iff(e_bin(.ne, VI, v, e_iconst(0)))
     rc = hdr_load(v, 0)
     iff(e_bin(.gts, VI, rc, e_iconst(0)))
-    iff(rt_global("__mt_active"))
-    release_call(v, t)
-    els()
-    iff(e_bin(.gts, VI, rc, e_iconst(1)))
-    hdr_store(v, 0, e_addi(rc, -1))
-    els()
-    release_last(v, t)
-    endc()
-    endc()
+    if not rc_assume_st:
+        iff(rt_global("__mt_active"))
+        release_call(v, t)
+        els()
+        iff(e_bin(.gts, VI, rc, e_iconst(1)))
+        hdr_store(v, 0, e_addi(rc, -1))
+        els()
+        release_last(v, t)
+        endc()
+        endc()
+    else:
+        iff(e_bin(.gts, VI, rc, e_iconst(1)))
+        hdr_store(v, 0, e_addi(rc, -1))
+        els()
+        release_last(v, t)
+        endc()
     endc()
     endc()
 
@@ -204,24 +236,36 @@ release = (v: int, t0: int):
         ir.code[ir.code.len() - 1].c = CALL_RC_DEC
         note_mt_active()
         return
-    blk()
-    done = ctl
-    iff(rt_global("__mt_active"))
-    was = ir_cold
-    ir_cold = true
-    release_call(v, t)
-    ir_cold = was
-    br_to(done)
-    endc()
+    if not rc_assume_st:
+        blk()
+        done = ctl
+        iff(rt_global("__mt_active"))
+        was = ir_cold
+        ir_cold = true
+        release_call(v, t)
+        ir_cold = was
+        br_to(done)
+        endc()
+        iff(e_bin(.ne, VI, v, e_iconst(0)))
+        rc = hdr_load(v, 0)
+        iff(e_bin(.gts, VI, rc, e_iconst(1)))
+        hdr_store(v, 0, e_addi(rc, -1))
+        els()
+        # last reference: the out-of-line path frees (and releases elements)
+        iff(e_bin(.eq, VI, rc, e_iconst(1)))
+        release_last(v, t)
+        endc()
+        endc()
+        endc()
+        endc()
+        return
     iff(e_bin(.ne, VI, v, e_iconst(0)))
     rc = hdr_load(v, 0)
     iff(e_bin(.gts, VI, rc, e_iconst(1)))
     hdr_store(v, 0, e_addi(rc, -1))
     els()
-    # last reference: the out-of-line path frees (and releases elements)
     iff(e_bin(.eq, VI, rc, e_iconst(1)))
     release_last(v, t)
-    endc()
     endc()
     endc()
     endc()
@@ -350,6 +394,7 @@ stmt_end = ():
     end = tl_values.len()
     nop = tl_nop.pop()
     tl_cond.pop()
+    if start == end: return
     # Append the demanded zero inventory directly into the IR argument arena.
     args_start = ir.args.len()
     loop i in [start..end):
@@ -570,11 +615,10 @@ box_unique = (slot: int, t: int) -> int:
     r = vreg(VI)
     e_mov(r, p)
     iff(e_bin(.ne, VI, hdr_load(p, 0), e_iconst(1)))
-    was2 = ir_cold
-    ir_cold = true
-    e_mov(r, e_call1(lf_helper(.boxuniq, bt, 0), p, VI))
+    q = e_call1(lf_helper(.boxuniq, bt, 0), p, VI)
+    ir.code[ir.code.len() - 1].c = CALL_IF_SHARED
+    e_mov(r, q)
     e_store(slot, 0, r, ptr_size)
-    ir_cold = was2
     endc()
     e_addi(r, BOX_HDR)
 
@@ -614,13 +658,16 @@ share_root = (l: int) -> int:
     loop int(locals[r].flags) & LF_CAPTURE != 0 and int(locals[r].flags) & LF_VALUECAP == 0: r = int(locals[r].outer)
     r
 
-is_shared = (l: int) -> bool: int(locals[share_root(l)].flags) & LF_SHARED != 0
+is_shared = (l: int) -> bool:
+    fl = int(locals[l].flags)
+    if fl & LF_CAPTURE == 0 or fl & LF_VALUECAP != 0: return fl & LF_SHARED != 0
+    int(locals[share_root(l)].flags) & LF_SHARED != 0
 
 store_type = (l: int) -> int:
     t = int(locals[l].type)
     if int(locals[l].flags) & (LF_OWNERBORROW | LF_PARTBORROW) != 0: return mk_ptr(t)
     if is_shared(l): return mk_array(t)
-    if math_word_captures.has(l): return T_INT
+    if math_word_captures.len() > 0 and math_word_captures.has(l): return T_INT
     t
 
 cell_place = (l: int) -> Place:
@@ -662,10 +709,8 @@ arr_unique = (slot_addr_or_place: Place, at: int):
         return
     iff(e_bin(.ne, VI, p, e_iconst(0)))
     iff(e_bin(.ne, VI, hdr_load(p, 0), e_iconst(1)))
-    was = ir_cold
-    ir_cold = true
     np = e_call1(lf_helper(.arruniq, at, 0), p, VI)
-    ir_cold = was
+    ir.code[ir.code.len() - 1].c = CALL_IF_SHARED
     write_place(slot_addr_or_place, at, np)
     endc()
     endc()
@@ -706,7 +751,6 @@ finish_call = (ret: int, rv: int, rslot: int) -> Val:
     c = vc(ret)
     if c == VC_AGG: return Val(e_slot(rslot), true, rslot)
     if c == VC_VOID: return V(-1, false)
-    if c == VC_INT: return V(norm(rv, ret), true)
     V(rv, true)
 
 result_from_slot = (rs: int, t: int) -> Val:

@@ -12,7 +12,7 @@ from p"fused_drive.dewy" import (fused_start fz_place)
 from p"inline_ops.dewy" import (fast_inline_kind fast_inline_prepare)
 from p"ir.jo" import (ir ir_positions)
 from p"ir_types.dewy" import (Ins IrFn Op)
-from p"lower.jo" import (LK_INST box_dflt_data global_off helper_lf inst_lf lfuncs rodata str_off)
+from p"lower.jo" import (LK_INST box_dflt_data global_off helper_lf helper_slots inst_lf inst_lf_fast lfuncs rodata str_off)
 from p"lower_functions.dewy" import (lower_function)
 from p"par.jo" import (ParIn pr)
 from p"par_ops.dewy" import (pr_ints pw pw_ints)
@@ -57,7 +57,22 @@ fz_cand=(f:FusedWord pinit:FusedWord):>bool=>$unsafe {
 # (a lowered function that is its instance's own, not a version made for known callbacks:
 # callback_specialize.jo; versions are lowered and emitted here, and what calls one too)
 fz_canon=(lf:FusedWord):>bool=>$unsafe {
-    lfuncs.ptr[lf].kind not=? LK_INST or (inst_lf.get(lfuncs.ptr[lf].inst) ?? -1) =? lf
+    if lfuncs.ptr[lf].kind not=? LK_INST {return true}
+    let fi=lfuncs.ptr[lf].inst
+    fi >=? 0 and fi <? inst_lf_fast.length and FusedWord(inst_lf_fast.ptr[fi]) - 1 =? lf
+}
+fz_find_helper=(hk:FusedWord t:FusedWord p:FusedWord):>int64=>$unsafe {
+    let n=helper_slots.length
+    if n =? 0 {return -1}
+    let mask=FusedWord(n) - 1
+    let i=((hk * 73856093) xor (t * 19349663) xor (p * 83492791)) & mask
+    loop helper_slots.ptr[i] not=? 0 {
+        let idx=FusedWord(helper_slots.ptr[i]) - 1
+        let h=lfuncs.ptr + idx
+        if FusedWord(int64(h[0].hkind)) =? hk and h[0].htype =? t and h[0].inst =? p {return idx}
+        i=(i + 1) & mask
+    }
+    -1
 }
 fz_extern=(f:FusedWord):>bool=>$unsafe {
     let d=FusedWord(fns.ptr[f].decl)
@@ -271,14 +286,16 @@ fz_map_rest=():>void=>{
             let a=x.ents[e + 2]
             if kind =? 0 {
                 if fz_mlf[x.w].get(local) =? none {
-                    let v=inst_lf.get(a)
-                    if v not=? none {fz_mlf[x.w][local]=v}
+                    if a >=? 0 and a <? inst_lf_fast.length {
+                        let v=FusedWord(inst_lf_fast[a]) - 1
+                        if v >=? 0 {fz_mlf[x.w][local]=v}
+                    }
                 }
             }
             else if kind =? 1 {
                 if fz_mlf[x.w].get(local) =? none {
-                    let v=helper_lf.get("{a}:{x.ents[e + 3]}:{x.ents[e + 4]}")
-                    if v not=? none {fz_mlf[x.w][local]=v}
+                    let v=fz_find_helper(a x.ents[e + 3] x.ents[e + 4])
+                    if v >=? 0 {fz_mlf[x.w][local]=v}
                 }
             }
             else if kind =? 2 {

@@ -32,7 +32,7 @@ from p"facts.jo" import (fact_storage_cache lower_length_guards positive_epoch)
 from p"facts_index_proofs.dewy" import (lower_length_guard)
 from p"util.jo" import (files intern pos_file pos_in_lib)
 from p"lower_views.dewy" import (find_views param_view_decl)
-from p"lower_group.dewy" import (gen_block_stmts gen_return gen_stmt scope_pop)
+from p"lower_group.dewy" import (cur_fn_has_array_local gen_block_stmts gen_return gen_stmt scope_pop)
 from p"lower_helpers.dewy" import (lower_helper)
 from p"math_lower.jo" import (math_decl_depth math_loop_parent math_loop_sites math_static_regs math_static_widths math_word_limits math_word_regs math_word_updates math_write_loop math_writes)
 from p"ownership.jo" import (ownership_consumers ownership_decls)
@@ -107,6 +107,14 @@ lower_inst=(lf:LFnWord f:LFnWord):>void=>$unsafe {
         ir.decl_pos = ir_pos;
     }
     cur_fn=f
+    let has_arr_loc=false
+    let flocs=fns.ptr[f].locals.ptr
+    let nflocs=fns.ptr[f].locals.length
+    loop li in [0..nflocs) {
+        let lt=prune(LFnWord(locals.ptr[flocs[li]].type))
+        if types.ptr[lt].kind =? 'array' {has_arr_loc=true; break}
+    }
+    cur_fn_has_array_local=has_arr_loc
     exact_lower_active=exact_owners.has(f)
     eg_active=f <? eg_demanded.length and eg_demanded.ptr[f]
     cur_ret=LFnWord(fns.ptr[f].ret)
@@ -293,7 +301,7 @@ lower_inst=(lf:LFnWord f:LFnWord):>void=>$unsafe {
 }
 # Entry zeroing that a declaration may make dead (see zero_wait in lower.jo).
 zero_defer=(l:LFnWord t:LFnWord fl:LFnWord at:LFnWord):>void=>$unsafe {
-    if dbg_on or fl & LF_ADDR not=? 0 or ownership_type(t) or is_shared(l) {return}
+    if dbg_on or ownership_type(t) or is_shared(l) {return}
     if tkind(t) =? 'fn_' or tkind(t) =? 'polyfn' {return}
     loop zero_wait.length <=? l {
         zero_wait.push(-1);
@@ -350,15 +358,15 @@ lower_inst_body=(f:LFnWord body:LFnWord):>void=>$unsafe {
 }
 lower_function=(lf:LFnWord):>void=>$unsafe {
     if dir_code_any {dir_code_owner=int64(lfuncs.ptr[lf].inst)}
-    lower_epoch += 1;
+    if lower_epoch =? 0 {lower_epoch = 1;}
     lower_planning=true
     exr_fast=lfuncs.ptr[lf].kind =? LK_HELPER and lfuncs.ptr[lf].hkind =? HK.reset_words
     parallel_serial=lfuncs.ptr[lf].kind =? LK_HELPER and (lfuncs.ptr[lf].hkind =? HK.parallel_serial or lfuncs.ptr[lf].hkind =? HK.partition and lfuncs.ptr[lf].htype =? 1)
     partition_mode=lfuncs.ptr[lf].kind =? LK_HELPER and lfuncs.ptr[lf].hkind =? HK.partition
     if lfuncs.ptr[lf].kind =? LK_INST or parallel_serial or partition_mode or exr_fast {pc_restore(lfuncs.ptr[lf].inst);}
     exr_locals=if exr_fast {exr_plan(lfuncs.ptr[lf].inst)} else {[]}
-    fact_storage_cache.clear();
-    lpath_ids.clear();
+    if fact_storage_cache.length >? 0 {fact_storage_cache.clear();}
+    if lpath_ids.length >? 0 {lpath_ids.clear();}
     lpath_parents.truncate(1);
     let f=lfuncs.ptr[lf]
     lop_watch=false
@@ -388,27 +396,41 @@ lower_finish=():>void=>$unsafe {
     if lower_zeros.length =? 0 {
         if not lower_has_nops {return}
         let k:LFnWord=0
-        loop ins in ir.code {
-            if ins.op not=? 'nop' {
-                ir.code.ptr[k] = ins;
-                k += 1;
+        let n=ir.code.length
+        let p=ir.code.ptr
+        loop i in [0..n) {
+            if p[i].op not=? 'nop' {
+                if k not=? i {p[k] = p[i]}
+                k += 1
             }
         }
         ir.code.truncate(k);
         return
     }
-    lower_zeros.sort(key=(z:LowerZero):>int64=>z.mark);
+    if lower_zeros.length >? 1 {lower_zeros.sort(key=(z:LowerZero):>int64=>z.mark);}
+    let n=ir.code.length
+    let nz=lower_zeros.length
     let out:array<Ins>=[]
-    out.reserve(ir.code.length + lower_zeros.length);
+    out.reserve(n + nz);
+    __set_len(out n + nz);
+    let op=out.ptr
+    let ip=ir.code.ptr
+    let zp=lower_zeros.ptr
+    let w:LFnWord=0
     let next:LFnWord=0
-    loop i in [0..ir.code.length + 1) {
-        loop next <? lower_zeros.length and lower_zeros.ptr[next].mark >> 32 =? i {
-            let z=lower_zeros.ptr[next]
-            out.push(Ins['zeroslots' 0 0 int32<overflow='wrap'>(z.start) int32<overflow='wrap'>(z.count) 0 0]);
-            next += 1;
+    loop i in [0..n + 1) {
+        loop next <? nz and zp[next].mark >> 32 =? i {
+            let z=zp[next]
+            op[w]=Ins['zeroslots' 0 0 int32<overflow='wrap'>(z.start) int32<overflow='wrap'>(z.count) 0 0]
+            w += 1
+            next += 1
         }
-        if i <? ir.code.length and ir.code.ptr[i].op not=? 'nop' {out.push(ir.code.ptr[i]);}
+        if i <? n and ip[i].op not=? 'nop' {
+            op[w]=ip[i]
+            w += 1
+        }
     }
+    __set_len(out w);
     ir.code = out;
 }
 lower_partial_thunk=(lf:LFnWord th:LFnWord):>void=>$unsafe {

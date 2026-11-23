@@ -246,6 +246,7 @@ parse_string_token=(t:TextWord):>int64=>$unsafe {
                 # ('{"a": 1}' is the text "a", formatted " 1")
                 fatal(pos "`\{{trim(__str_slice(s i + 1 j))}\}` in a string puts in the value of what is inside the braces; for braces in the text, write \{\{ and \}\}, or make it a raw string, r'...' (JSON: r'\{\"a\": 1\}', or to_json(value))")
             }
+            p_clear_unit()
             toks=saved_toks
             p_toks=saved_p_toks
             p_ntoks=saved_p_ntoks
@@ -364,6 +365,7 @@ parse_span=(file:TextWord start:TextWord stop:TextWord):>array<int64>=>{
         if d not=? 0 {decls.push(d)}
         skip_newlines()
     }
+    p_clear_unit()
     toks=saved_toks
     p_toks=saved_p_toks
     p_ntoks=saved_p_ntoks
@@ -414,6 +416,7 @@ ensure_body=(d:TextWord):>void=>$unsafe {
     p_top_decl=false
     let body=parse_indented_block(mk('block' cur_pos()))
     nodes.ptr[d].b=int32<overflow='wrap'>(body)
+    p_clear_unit()
     toks=saved_toks
     p_toks=saved_p_toks
     p_ntoks=saved_p_ntoks

@@ -1,11 +1,41 @@
 $runtime_checks
-from p"checker_module_lookup.dewy" import (demand_name)
+from p"checker_module_lookup.dewy" import (demand_name game_lookup_skip)
+from p"checker_startup.dewy" import (load_game_file load_game_prelude load_std_file load_std_prelude)
 from p"checks_thin.dewy" import (is_private lib_private)
 from p"prelude_ops.dewy" import (dewy_prelude_lookup)
-from p"util.jo" import (files)
-from p"check.jo" import (home_first home_mod home_next homes_built modules prelude prelude_used universe)
+from p"prelude.jo" import (game_file_for prelude_game_pending prelude_std_pending std_file_for)
+from p"types.jo" import (T_MAT4 types)
+from p"util.jo" import (files names)
+from p"check.jo" import (game_lookup_ok home_first home_mod home_next homes_built modules name_first name_mod name_next name_sym prelude prelude_syms prelude_used syms universe)
 
 HomeIndexWord:type=int64<overflow='wrap'>
+let universe_syms:array<int64>=[]
+let universe_syms_len:HomeIndexWord=0
+
+universe_sym_lookup=(name:HomeIndexWord):>HomeIndexWord=>$unsafe {
+    if universe.length not=? universe_syms_len {
+        universe_syms_len=universe.length
+        loop [k v] in universe {
+            if universe_syms.length <=? k {universe_syms.resize(HomeIndexWord(k) * 2 + 64)}
+            universe_syms[k]=v
+        }
+    }
+    if name <? universe_syms.length {universe_syms.ptr[name]} else {0}
+}
+
+mod_name_sym=(m:HomeIndexWord name:HomeIndexWord):>HomeIndexWord=>$unsafe {
+    if name >=? name_first.length {return 0}
+    let e=HomeIndexWord(name_first.ptr[name])
+    let nm=name_mod.ptr
+    let ns=name_sym.ptr
+    let nx=name_next.ptr
+    loop e not=? 0 {
+        if nm[e - 1] =? m {return ns[e - 1]}
+        e=nx[e - 1]
+    }
+    0
+}
+
 home_add=(m:HomeIndexWord name:HomeIndexWord):>void=>{
     if home_first.length <=? name {home_first.resize(name * 2 + 64)}
     let h=HomeIndexWord(home_first[name])
@@ -50,40 +80,79 @@ use_home=(m:int64 name:int64):>int64=>{
 }
 
 # Defer imported and prelude lookups until a module misses its own table.
-module_lookup_now=(m:HomeIndexWord name:HomeIndexWord):>HomeIndexWord=>{
+module_lookup_now=(m:HomeIndexWord name:HomeIndexWord):>HomeIndexWord=>$unsafe {
     demand_name(name)
-    if m >=? 0 and not modules[m].is_prelude {
-        let own=modules[m].names.get(name)
-        if own not=? none {return own ?? 0}
-        return lookup_imported_name(m name)
-    }
-    let built_in=prelude.get(name)
-    if built_in not=? none {return built_in ?? 0}
-    universe.get(name) ?? 0
-}
-
-lookup_imported_name=(m:HomeIndexWord name:HomeIndexWord):>HomeIndexWord=>{
-    let h=use_home(m name)
-    if h >=? 0 and not is_private(name) {
-        let sym=modules[h].names.get(name)
-        if sym not=? none {return sym ?? 0}
-    }
-    if h =? -2 {
-        loop u in modules[m].uses {
-            if modules[u].is_prelude {
-                let sym=prelude.get(name)
-                if sym not=? none and not lib_private(name) {return sym ?? 0}
-            } else if bound_in(u name) {
-                let sym=modules[u].names.get(name)
-                if sym not=? none and not is_private(name) {return sym ?? 0}
+    let user=m >=? 0 and not modules[m].is_prelude
+    if m >=? 0 {
+        if modules[m].is_prelude {
+            if name <? prelude_syms.length {
+                let s=prelude_syms.ptr[name]
+                if s not=? 0 {return s}
+            }
+        } else {
+            let s0=mod_name_sym(m name)
+            if s0 not=? 0 {return s0}
+            let h=use_home(m name)
+            if h >=? 0 and not is_private(name) {
+                let sh=mod_name_sym(h name)
+                if sh not=? 0 {return sh}
+            }
+            if h =? -2 {
+                loop u in modules[m].uses {
+                    if modules[u].is_prelude {
+                        if name <? prelude_syms.length {
+                            let s=prelude_syms.ptr[name]
+                            if s not=? 0 and not lib_private(name) {return s}
+                        }
+                    } else if bound_in(u name) {
+                        let su=mod_name_sym(u name)
+                        if su not=? 0 and not is_private(name) {return su}
+                    }
+                }
+            }
+            if files[HomeIndexWord(modules[m].file)].is_dewy and not is_private(name) {
+                let s=dewy_prelude_lookup(name)
+                if s not=? 0 {return s}
             }
         }
     }
-    if files[HomeIndexWord(modules[m].file)].is_dewy and not is_private(name) {
-        let s=dewy_prelude_lookup(name)
-        if s not=? 0 {return s}
+    if name <? prelude_syms.length {
+        let s=prelude_syms.ptr[name]
+        if s not=? 0 and (not user or not lib_private(name)) {return s}
     }
-    let built_in=prelude.get(name)
-    if built_in not=? none and not lib_private(name) {return built_in ?? 0}
-    universe.get(name) ?? 0
+    let us=universe_sym_lookup(name)
+    if us not=? 0 {
+        if prelude_game_pending and game_lookup_ok and (m <? 0 or not modules[m].is_prelude) and syms.ptr[us].kind =? 'type_' {
+            let tr=HomeIndexWord(syms.ptr[us].ref)
+            if types.ptr[tr].kind =? 'vec' or tr =? T_MAT4 {load_game_file("vmath.jo");}
+        }
+        return us
+    }
+    if prelude_std_pending or prelude_game_pending {
+        let nm_s=names.ptr[name]
+        let nb=nm_s as array<uint8>
+        let dunder=nb.length >=? 2 and nb[0] =? b'_' and nb[1] =? b'_'
+        if not game_lookup_ok and not dunder {return 0}
+        if not game_lookup_skip(name) {
+            if prelude_std_pending {
+                let sf=std_file_for(nm_s)
+                if (sf as array<uint8>).length >? 0 and load_std_file(sf) {return module_lookup_now(m name)}
+                if game_lookup_ok and (m <? 0 or not modules[m].is_prelude) {
+                    load_std_prelude()
+                    return module_lookup_now(m name)
+                }
+            }
+            if prelude_game_pending {
+                if (m <? 0 or not modules[m].is_prelude) or dunder {
+                    let gf=game_file_for(nm_s)
+                    if (gf as array<uint8>).length >? 0 and load_game_file(gf) {return module_lookup_now(m name)}
+                    if game_lookup_ok and (m <? 0 or not modules[m].is_prelude) {
+                        load_game_prelude()
+                        return module_lookup_now(m name)
+                    }
+                }
+            }
+        }
+    }
+    0
 }

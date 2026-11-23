@@ -99,51 +99,116 @@ use 'facts_probes.dewy'
 use 'facts_row_queries.dewy'
 use 'facts_projection_queries.dewy'
 
+@noinline
+fact_slot_slow_raw = (ix_p: *int, ix_n: int, v: int, n: int, ids: *int) -> int:
+    if ix_n != 0:
+        i = fact_index_get_raw(ix_p, ix_n, v)
+        if i >= 0 and i < n and ids[i] == v: return i
+        return -1
+    if v < ids[0] or v > ids[n - 1]: return -1
+    lo = 0; hi = n
+    loop lo < hi:
+        mid = (lo + hi) >> 1
+        if ids[mid] < v: lo = mid + 1
+        else: hi = mid
+    if lo < n and ids[lo] == v: return lo
+    -1
+fact_slot_slow = (s: FactState, v: int, n: int, ids: *int) -> int:
+    idx = data(s.index)
+    fact_slot_slow_raw(data(idx[0].slots), idx[0].slots.len(), v, n, ids)
+fact_slot_slow_ref = (s: mut FactState, v: int, n: int, ids: *int) -> int:
+    idx = data(s.index)
+    fact_slot_slow_raw(data(idx[0].slots), idx[0].slots.len(), v, n, ids)
+fact_slot_ref = (s: mut FactState, v: int) -> int:
+    n = s.ids.len()
+    if n == 0: return -1
+    ids = data(s.ids)
+    if v > 0 and v < fact_terms.len():
+        hint = fact_terms[v].slot
+        if hint >= 0 and hint < n and ids[hint] == v: return hint
+    fact_slot_slow_ref(s, v, n, ids)
 fact_slot = (s: FactState, v: int) -> int:
+    n = s.ids.len()
+    if n == 0: return -1
+    ids = data(s.ids)
     # A value's latest insertion is a hint, never cross-branch evidence.
     # Validate against this frame before falling back to its own index.
     if v > 0 and v < fact_terms.len():
         hint = fact_terms[v].slot
-        if hint >= 0 and hint < s.ids.len() and s.ids[hint] == v: return hint
-    # (a hashed index may be shared with a longer ancestor: an entry counts
-    # only when it still names v's position)
-    if s.index[0].slots.len() != 0:
-        i = fact_index_get(s.index[0].slots, v)
-        if i >= 0 and i < s.ids.len() and s.ids[i] == v: return i
-        return -1
-    if s.ids.len() == 0 or v < s.ids[0] or v > s.ids[s.ids.len() - 1]: return -1
-    lo = 0; hi = s.ids.len()
-    loop lo < hi:
-        mid = (lo + hi) / 2
-        if s.ids[mid] < v: lo = mid + 1
-        else: hi = mid
-    if lo < s.ids.len() and s.ids[lo] == v: return lo
-    -1
-fact_bound = (s: FactState, v: int) -> FactBound:
-    i = fact_slot(s, v)
+        if hint >= 0 and hint < n and ids[hint] == v: return hint
+    fact_slot_slow(s, v, n, ids)
+fact_bound_slow = (s: FactState, v: int) -> FactBound:
+    n = s.ids.len()
+    if n == 0: return FactBound(reason = .budget, wide = true)
+    ids = data(s.ids)
+    idx = data(s.index)
+    i = fact_slot_slow_raw(data(idx[0].slots), idx[0].slots.len(), v, n, ids)
     if i < 0: return FactBound(reason = .budget, wide = true)
-    s.bounds[i]
+    data(s.bounds)[i]
+fact_bound = (s: FactState, v: int) -> FactBound:
+    n = s.ids.len()
+    if v > 0 and v < fact_terms.len():
+        hint = fact_terms[v].slot
+        if hint >= 0 and hint < n and data(s.ids)[hint] == v: return data(s.bounds)[hint]
+    fact_bound_slow(s, v)
 # A compact open-address index: (key, record+1) pairs after an entry count.
 # Empty slots have record=0, so all signed keys are usable. Doubling at half
 # occupancy gives amortized O(1) insertion and expected O(1) lookup. These
 # arrays copy with the fact state; there is no mutable cross-branch cache.
 fact_index_hash = (key: int, mask: int) -> int:
     ((key xor (key >> 32)) * 0x9e3779b1) & mask
-fact_index_get = (index: int[], key: int) -> int:
-    if index.len() == 0: return -1
-    mask = (index.len() - 1) / 2 - 1
-    slot = fact_index_hash(key, mask)
+fact_index_get_raw = (p: *int, n: int, key: int) -> int:
+    if n == 0: return -1
+    mask = ((n - 1) >> 1) - 1
+    slot = ((key xor (key >> 32)) * 0x9e3779b1) & mask
     loop true:
-        i = 1 + slot * 2
-        if index[i + 1] == 0: return -1
-        if index[i] == key: return index[i + 1] - 1
+        i = 1 + (slot << 1)
+        v = p[i + 1]
+        if v == 0: return -1
+        if p[i] == key: return v - 1
         slot = (slot + 1) & mask
     -1
+fact_index_get = (index: int[], key: int) -> int:
+    fact_index_get_raw(data(index), index.len(), key)
 # (a join's root index may be shared with a predecessor holding more
 # bindings: an entry counts only when it still names p's position)
+fact_binding_ref = (s: mut FactState, p: PlaceIdentity) -> int:
+    idx = data(s.index)
+    rn = idx[0].roots.len()
+    if rn == 0: return -1
+    rp = data(idx[0].roots)
+    key = fact_root_key(p)
+    mask = ((rn - 1) >> 1) - 1
+    slot = ((key xor (key >> 32)) * 0x9e3779b1) & mask
+    i = -1
+    loop true:
+        j = 1 + (slot << 1)
+        v = rp[j + 1]
+        if v == 0: return -1
+        if rp[j] == key: i = v - 1; break
+        slot = (slot + 1) & mask
+    if i >= 0 and i < s.bindings.len():
+        bp = data(s.bindings) + i
+        if bp.place.declaration == p.declaration and bp.place.root == p.root and bp.place.owner == p.owner and bp.place.parent == p.parent and bp.place.projection == p.projection and bp.place.selector == p.selector: return i
+    -1
 fact_binding = (s: FactState, p: PlaceIdentity) -> int:
-    i = fact_index_get(s.index[0].roots, fact_root_key(p))
-    if i >= 0 and i < s.bindings.len() and s.bindings[i].place == p: return i
+    idx = data(s.index)
+    rn = idx[0].roots.len()
+    if rn == 0: return -1
+    rp = data(idx[0].roots)
+    key = fact_root_key(p)
+    mask = ((rn - 1) >> 1) - 1
+    slot = ((key xor (key >> 32)) * 0x9e3779b1) & mask
+    i = -1
+    loop true:
+        j = 1 + (slot << 1)
+        v = rp[j + 1]
+        if v == 0: return -1
+        if rp[j] == key: i = v - 1; break
+        slot = (slot + 1) & mask
+    if i >= 0 and i < s.bindings.len():
+        bp = data(s.bindings) + i
+        if bp.place.declaration == p.declaration and bp.place.root == p.root and bp.place.owner == p.owner and bp.place.parent == p.parent and bp.place.projection == p.projection and bp.place.selector == p.selector: return i
     -1
 fact_truth = (s: FactState, v: int) -> int:
     b = fact_bound(s, v)

@@ -5,7 +5,8 @@ from p"exact_check_hooks.dewy" import (exact_type exact_int_result)
 from p"types.jo" import (T_MATH_INT)
 from p"checker_module_lookup.dewy" import (module_lookup)
 from p"ast.jo" import (kids nodes)
-from p"check.jo" import (cx globals own_consts syms)
+from p"check.jo" import (cx game_lookup_ok globals own_consts syms)
+from p"prelude.jo" import (prelude_game_pending prelude_std_pending)
 from p"checker_binding_inputs.dewy" import (flatten_binding_leaves)
 from p"checker_expr.dewy" import (lookup)
 from p"checks_thin.dewy" import (decl_shadowable is_private)
@@ -40,14 +41,28 @@ assign_declares=(s:AssignmentDeclWord m:AssignmentDeclWord):>bool=>{
 # (and in the library, whose modules share their names, it is an error to have two)
 name_assignable=(nm:AssignmentDeclWord m:AssignmentDeclWord):>bool=>{
     if m <? 0 {return var_visible(nm)}
+    let gok=@game_lookup_ok
+    let prev=gok
+    if prelude_game_pending or prelude_std_pending {
+        let w=name_of(nm)
+        gok=w =? "ui_style" or w =? "hud_style"
+    }
     let s=module_lookup(m nm)
+    gok=prev
     if s =? 0 or syms[s].kind not=? 'global' {return false}
     not is_private(nm) or globals[AssignmentDeclWord(syms[s].ref)].mod =? m
 }
 
 # is there a variable of this name in scope (assigning to it changes it)?
 var_visible=(nm:AssignmentDeclWord):>bool=>{
+    let gok=@game_lookup_ok
+    let prev=gok
+    if prelude_game_pending or prelude_std_pending {
+        let w=name_of(nm)
+        gok=w =? "ui_style" or w =? "hud_style"
+    }
     let s=lookup(nm)
+    gok=prev
     if s =? 0 {return false}
     let kind=syms[s].kind
     kind =? 'local' or kind =? 'global'
@@ -55,20 +70,26 @@ var_visible=(nm:AssignmentDeclWord):>bool=>{
 
 assign_to_decl=(s:AssignmentDeclWord):>void=>{
     let lhs=AssignmentDeclWord(nodes[s].a)
+    let gok=@game_lookup_ok
+    let prev_game_ok=gok
+    gok=false
     if nodes[lhs].kind =? 'ident' and files[pos_file(nodes[s].pos)].is_dewy {
         let cs=lookup(AssignmentDeclWord(nodes[lhs].name))
         if cs not=? 0 and syms[cs].kind =? 'const_' and not decl_shadowable(AssignmentDeclWord(syms[cs].decl)) {
+            gok=prev_game_ok
             fatal(nodes[lhs].pos "cannot modify const '{name_of(AssignmentDeclWord(nodes[lhs].name))}'; use let to declare a new binding")
         }
         # Module functions are const bindings too. Plain assignment can shadow a
         # function only when its declaration allows it.
         if cs not=? 0 and syms[cs].kind =? 'fns' and syms[cs].decl not=? 0 and not decl_shadowable(AssignmentDeclWord(syms[cs].decl)) and cx >=? 0 {
+            gok=prev_game_ok
             fatal(nodes[lhs].pos "'{name_of(AssignmentDeclWord(nodes[lhs].name))}' is a function ({pos_str(nodes[AssignmentDeclWord(syms[cs].decl)].pos)}): it cannot be shadowed by assignment; use let to declare a new binding")
         }
     }
     if nodes[lhs].kind =? 'ident' and cx >=? 0 and AssignmentDeclWord(nodes[lhs].name) <? own_consts.length and own_consts[AssignmentDeclWord(nodes[lhs].name)] {
         let cs=lookup(AssignmentDeclWord(nodes[lhs].name))
         if cs not=? 0 and syms[cs].kind =? 'const_' and syms[cs].decl not=? 0 and not decl_shadowable(AssignmentDeclWord(syms[cs].decl)) {
+            gok=prev_game_ok
             let name=name_of(AssignmentDeclWord(nodes[lhs].name))
             let cp=nodes[AssignmentDeclWord(syms[cs].decl)].pos
             if pos_in_lib(cp) {fatal(nodes[lhs].pos "'{name}' is a constant of the library: it cannot change (`let {name} = ...` makes a variable of that name)")}
@@ -76,6 +97,7 @@ assign_to_decl=(s:AssignmentDeclWord):>void=>{
             fatal(nodes[lhs].pos "'{name}' is a constant (`const` on line {line}): it cannot change; to change it as the game runs, make it a variable there, without `const`")
         }
     }
+    gok=prev_game_ok
     nodes[s].kind='vardecl'
     nodes[s].a=0
     if nodes[lhs].kind =? 'ident' {

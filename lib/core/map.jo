@@ -215,10 +215,11 @@ __map_probe[K, V] = (m: Map[K, V], k: K, h: u64) -> int:
     tag = __map_tag(k, h)
     loop true:
         s = __at(m.slots, i)
-        if s.entry == 0: return -2 - i
-        if s.entry > 0 and s.tag == tag:
-            e = s.entry - 1
-            if __map_slot_equal(m.__keys, e, k): return e
+        if s.entry > 0:
+            if s.tag == tag:
+                e = s.entry - 1
+                if __map_slot_equal(m.__keys, e, k): return e
+        else if s.entry == 0: return -2 - i
         i = (i + 1) & mask
 
 __map_find[K, V] = (m: Map[K, V], k: K, h: u64) -> int:
@@ -229,22 +230,24 @@ __map_find[K, V] = (m: Map[K, V], k: K, h: u64) -> int:
     tag = __map_tag(k, h)
     loop true:
         s = __at(m.slots, i)
-        if s.entry == 0: return -1
-        if s.entry > 0 and s.tag == tag:
-            e = s.entry - 1
-            if __map_slot_equal(m.__keys, e, k): return e
+        if s.entry > 0:
+            if s.tag == tag:
+                e = s.entry - 1
+                if __map_slot_equal(m.__keys, e, k): return e
+        else if s.entry == 0: return -1
         i = (i + 1) & mask
 
 __map_rehash[K, V] = (m: mut Map[K, V], ns: int):
     m.slots.clear()
     m.slots.resize(ns)
+    slots = data(m.slots)
     mask = ns - 1
     ng = m.gone.len()
     loop e in 0.. and h in m.hashes:
         if e < ng and __at(m.gone, e): continue
         i = int(h) & mask
-        loop m.slots[i].entry != 0: i = (i + 1) & mask
-        m.slots[i] = __MapSlot(__map_tag(__at(m.__keys, e), h), e + 1)
+        loop slots[i].entry != 0: i = (i + 1) & mask
+        slots[i] = __MapSlot(__map_tag(__at(m.__keys, e), h), e + 1)
 
 # A key's own `hash` (found in the key's defining module, as equality finds its operator
 # there) reaches __map_hash through the compiler's keyed value hash.
@@ -319,28 +322,30 @@ __map_add[K, V] = (m: mut Map[K, V], k: K, v: V, h0: u64, slot0: int = -1):
         when not __SECRETS: h = __map_hash(k)
         slot = -1
     tag = __map_tag(k, h)
-    if (n + 1) * 4 > m.slots.len() * 3 and m.ngone > 0:
-        # (what is gone taken out first: there may be room then)
-        __map_compact(m)
-        n = m.__keys.len()
-        slot = -1
     if (n + 1) * 4 > m.slots.len() * 3:
-        ns = m.slots.len() * 2
-        if ns < 8: ns = 8
-        m.__keys.push(k)
-        m.vals.push(v)
-        m.hashes.push(h)
-        __map_rehash(m, ns)
-        return
+        if m.ngone > 0:
+            # (what is gone taken out first: there may be room then)
+            __map_compact(m)
+            n = m.__keys.len()
+            slot = -1
+        if (n + 1) * 4 > m.slots.len() * 3:
+            ns = m.slots.len() * 2
+            if ns < 8: ns = 8
+            m.__keys.push(k)
+            m.vals.push(v)
+            m.hashes.push(h)
+            __map_rehash(m, ns)
+            return
     m.__keys.push(k)
     m.vals.push(v)
     m.hashes.push(h)
+    slots = data(m.slots)
     i = slot
     if i < 0:
         mask = m.slots.len() - 1
         i = int(h) & mask
-        loop m.slots[i].entry != 0: i = (i + 1) & mask
-    m.slots[i] = __MapSlot(tag, n + 1)
+        loop slots[i].entry != 0: i = (i + 1) & mask
+    slots[i] = __MapSlot(tag, n + 1)
 
 ([])[K, V] = (m: Map[K, V], k: K) -> V:
     when __SECRETS: h = __map_hash(__secret_value(k))

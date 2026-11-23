@@ -39,8 +39,8 @@ native_debug_function = (input: *IrFn, code_end: int, start: int, body: int, dwr
             if v >= 0 and v < input[0].vtypes.len():
                 # (the vreg holds the variable's address: by reference, a mut parameter, a struct parameter)
                 at = fl & LF_BYREF != 0 or fl & LF_PARAM != 0 and (fl & LF_MUTPARAM != 0 or aggregate(int(dw_inputs[0].locals[0][l].type)))
-                s0 = if v < input[0].nparams: -1 else: v_live[v].first
-                e = v_live[v].last
+                s0 = if v < input[0].nparams: -1 else: int(v_live[v].first)
+                e = int(v_live[v].last)
                 if s0 >= 0 and s0 < n: lo = dbg_pos[s0]
                 if e >= 0 and e + 1 <= n: hi = dbg_pos[e + 1]
                 loc = vloc[v]
@@ -101,42 +101,71 @@ x64_frame_table = () -> u8[]:
 # then u32 count and for each call site in address order: varints of the return address's
 # offset in .text since the previous one, the file and the line
 x64_line_table = () -> u8[]:
-    if call_sites.len() == 0: return []
+    nc = call_sites.len()
+    calls = data(call_sites)
+    files = data(dw_inputs[0].files[0])
+    nf = dw_inputs[0].files[0].len()
+    positions = data(dw_inputs[0].ir_positions[0])
+    if nc == 0: return []
     out: u8[] = ['S', 'L', 'N', '1']
-    fidx = fill(-1, dw_inputs[0].files[0].len())
+    fidx = fill(-1, nf)
+    file_index = data(fidx)
     fnames: str[]
-    ents: int[]
-    ents.reserve(call_sites.len() * 3 / 2)
+    ents = fill(0, nc * 3 / 2)
+    entries = data(ents)
+    ne = 0
     k = 0
-    loop k < call_sites.len():
-        f = dw_pos_file(dw_inputs[0].ir_positions[0][call_sites[k + 1]])
-        if f < 0 or f >= dw_inputs[0].files[0].len():
+    loop k < nc:
+        f = dw_pos_file(positions[calls[k + 1]])
+        if f < 0 or f >= nf:
             k += 2
             continue
-        if fidx[f] < 0:
-            fidx[f] = fnames.len()
-            path = dw_inputs[0].files[0][f].path
+        if file_index[f] < 0:
+            file_index[f] = fnames.len()
+            path = files[f].path
             s = rfind(path, "/")
             if s >= 0: path = path[s + 1..]
             fnames.push(path)
-        ents.push(call_sites[k])
-        ents.push(fidx[f])
-        ents.push(dw_inputs[0].host[0].ir_line(call_sites[k + 1]))
+        entries[ne] = calls[k]
+        entries[ne + 1] = file_index[f]
+        entries[ne + 2] = dw_inputs[0].host[0].ir_line(calls[k + 1])
+        ne += 3
         k += 2
     put32(out, fnames.len())
     loop nm in fnames:
         put32(out, len(nm))
         loop ch in nm: out.push(ch)
-    put32(out, ents.len() / 3)
-    out.reserve(out.len() + ents.len() * 2)
+    put32(out, ne / 3)
+    base_len = out.len()
+    max_bytes = base_len + ne * 10 + 16
+    if out.cap() < max_bytes: out.reserve(max_bytes)
+    __set_len(out, max_bytes)
+    wp = data(out)
+    wu = base_len
     last = 0
     k = 0
-    loop k < ents.len():
-        put_varint(out, ents[k] - last)
-        last = ents[k]
-        put_varint(out, ents[k + 1])
-        put_varint(out, ents[k + 2])
+    loop k < ne:
+        v0 = entries[k] - last
+        last = entries[k]
+        if v0 >= 0 and v0 < 128: wp[wu] = u8(v0); wu += 1
+        else:
+            v = v0
+            loop v >= 128: wp[wu] = u8((v & 127) | 128); wu += 1; v = v >> 7
+            wp[wu] = u8(v); wu += 1
+        v1 = entries[k + 1]
+        if v1 >= 0 and v1 < 128: wp[wu] = u8(v1); wu += 1
+        else:
+            v = v1
+            loop v >= 128: wp[wu] = u8((v & 127) | 128); wu += 1; v = v >> 7
+            wp[wu] = u8(v); wu += 1
+        v2 = entries[k + 2]
+        if v2 >= 0 and v2 < 128: wp[wu] = u8(v2); wu += 1
+        else:
+            v = v2
+            loop v >= 128: wp[wu] = u8((v & 127) | 128); wu += 1; v = v >> 7
+            wp[wu] = u8(v); wu += 1
         k += 3
+    __set_len(out, wu)
     out
 
 # (Windows programs: their .dewy section, compiler/pe_format.dewy) "SLS1", the number of functions,

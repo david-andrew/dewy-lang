@@ -2,6 +2,7 @@ use 'expr.jo'
 use 'surface_names.dewy'
 use 'call_lookup_context.dewy'
 use 'checker_source_positions.dewy'
+use 'checker_startup.dewy'
 use 'expression_types.dewy'
 use 'call_argument_checks.dewy'
 use 'array_element_conversion.dewy'
@@ -254,6 +255,18 @@ union_hash = (n: int, a: int, t: int, expected: int) -> int:
     nodes[n] = nodes[bc_block([bc_let(held, a, pos), bc_stmt(chain, pos)], pos)]
     check_expr(n, expected)
 call_no_candidate = (n: int, name: int, decls: int[], args: int[], expected: int, ufcs: bool, recv_fits: bool, failure: mut CallFailure) -> int:
+    if (prelude_std_pending or prelude_game_pending) and (ufcs or nodes[int(nodes[n].a)].kind == .ident) and (decls.len() == 0 or nodes[decls[0]].kind == .fn_):
+        if prelude_std_pending:
+            sf = std_file_for(name_of(name))
+            if len(sf) > 0 and load_std_file(sf): return call_by_name(n, name, -1, args, expected, ufcs)
+            load_std_prelude()
+            return call_by_name(n, name, -1, args, expected, ufcs)
+        if prelude_game_pending:
+            gf = game_file_for(name_of(name))
+            if len(gf) > 0 and load_game_file(gf): return call_by_name(n, name, -1, args, expected, ufcs)
+            load_game_prelude()
+            return call_by_name(n, name, -1, args, expected, ufcs)
+    call_targs = []
     # (f(e) with e a union and an overload of f for each of its members: chosen by what e holds)
     ud = union_dispatch(n, name, decls, args, expected)
     if ud >= 0: return ud

@@ -18,29 +18,141 @@ from p"facts_joins.dewy" import (fact_join fact_projection_value)
 from p"facts_summaries.dewy" import (fact_summary_payload)
 from p"proofs.jo" import (ResultEvidence)
 from p"proof_ops.dewy" import (result_activate)
-from p"refinement_types.dewy" import (FactTerm)
+from p"refinement_types.dewy" import (FactBound FactTerm)
 from p"types.jo" import (T_BOOL T_INT T_U64 is_union types)
 
 ConditionWord:type=int64<overflow='wrap'>
-# Split during evaluation: RHS effects see the appropriate LHS edge, and
-# success can only narrow the old captured value, not its replacement.
-fact_condition=(n:ConditionWord entry:FactState):>FactPaths=>$unsafe {
+FactCondMeta:type=[reason:FactBound value:int64=0]
+# In-place condition evaluation: @state holds the entry state and receives the
+# `sense` branch; @other receives the `not sense` branch when `need_other`.
+# Avoids FactPaths triple-FactState copies and drops on the hot non-query path.
+fact_cond_out=(n:ConditionWord @state:FactState @other:FactState need_state:bool need_other:bool sense:bool):>FactCondMeta=>$unsafe {
     let k=nodes.ptr[n].kind
     let membership=string_set_owners.length >? 0 and string_set_owners.has(fact_owner) and string_set_tests.has(n)
     if not membership and k =? 'not_' {
-        let p=fact_condition(ConditionWord(nodes.ptr[n].a) entry)
+        return fact_cond_out(ConditionWord(nodes.ptr[n].a) @state @other need_state need_other (not sense))
+    }
+    if not membership and (k =? 'and_' or k =? 'or_') {
+        let same_side=(k =? 'and_') =? sense
+        if same_side {
+            let ma=fact_cond_out(ConditionWord(nodes.ptr[n].a) @state @other true need_other sense)
+            let a_cont_live=state.live
+            let a_sc_live=if need_other {other.live} else {false}
+            if not need_other {
+                let mb=fact_cond_out(ConditionWord(nodes.ptr[n].b) @state @other need_state false sense)
+                return FactCondMeta(mb.reason 0)
+            }
+            let other_b=FactState(live=false)
+            let mb=fact_cond_out(ConditionWord(nodes.ptr[n].b) @state @other_b need_state true sense)
+            let reason=if a_cont_live and a_sc_live {ma.reason} else {mb.reason}
+            let joined=fact_join(other other_b n)
+            let want_bit:ConditionWord=if sense {2} else {1}
+            if fact_either_wanted & want_bit not=? 0 and a_sc_live and other_b.live and ma.value not=? 0 and mb.value not=? 0 {
+                fact_either(@joined ma.value @other (not sense) mb.value @other_b (not sense))
+            }
+            other=joined
+            return FactCondMeta(reason 0)
+        }
+        let sc_a=FactState(live=false)
+        let ma=fact_cond_out(ConditionWord(nodes.ptr[n].a) @state @sc_a true need_state (not sense))
+        let a_cont_live=state.live
+        let a_sc_live=if need_state {sc_a.live} else {false}
+        if not need_state {
+            let mb=fact_cond_out(ConditionWord(nodes.ptr[n].b) @state @sc_a need_other false (not sense))
+            if need_other {other=state; state=FactState(live=false)}
+            return FactCondMeta(mb.reason 0)
+        }
+        let sc_b=FactState(live=false)
+        let mb=fact_cond_out(ConditionWord(nodes.ptr[n].b) @state @sc_b need_other true (not sense))
+        let reason=if a_sc_live and a_cont_live {ma.reason} else {mb.reason}
+        if need_other {other=state}
+        let joined=fact_join(sc_a sc_b n)
+        let want_bit:ConditionWord=if sense {1} else {2}
+        if fact_either_wanted & want_bit not=? 0 and a_sc_live and sc_b.live and ma.value not=? 0 and mb.value not=? 0 {
+            fact_either(@joined ma.value @sc_a sense mb.value @sc_b sense)
+        }
+        state=joined
+        return FactCondMeta(reason 0)
+    }
+    if fact_condition_block(n) {
+        let first=state.bindings.length
+        loop i in [0..nkids(n) - 1) {fact_capture(kid(n i) @state);}
+        let last=kid(n nkids(n) - 1)
+        let m=fact_cond_out((if nodes.ptr[last].kind =? 'exprstmt' {ConditionWord(nodes.ptr[last].a)} else {last}) @state @other need_state need_other sense)
+        if need_state and state.live and state.bindings.length >? first {fact_scope_exit(@state n first)}
+        if need_other and other.live and other.bindings.length >? first {fact_scope_exit(@other n first)}
+        return m
+    }
+    let v=if membership {fact_string_set(n @state)} else {fact_capture(n @state)}
+    let reason=fact_bound(state v)
+    if not need_other {
+        fact_assume(@state v sense)
+        if ownership_fact_cleanup {
+            let drops=fact_drop_statement(n)
+            fact_drop_forget(@state n drops)
+        }
+        if state.conditional.length >? 0 {result_activate(@state v)}
+        return FactCondMeta(reason v)
+    }
+    if not need_state {
+        fact_assume(@state v (not sense))
+        if ownership_fact_cleanup {
+            let drops=fact_drop_statement(n)
+            fact_drop_forget(@state n drops)
+        }
+        if state.conditional.length >? 0 {result_activate(@state v)}
+        other=state
+        state=FactState(live=false)
+        return FactCondMeta(reason v)
+    }
+    other=state
+    fact_assume(@state v sense)
+    fact_assume(@other v (not sense))
+    if ownership_fact_cleanup {
+        let drops=fact_drop_statement(n)
+        fact_drop_forget(@state n drops)
+        fact_drop_forget(@other n drops)
+    }
+    if state.conditional.length >? 0 {
+        result_activate(@state v)
+        result_activate(@other v)
+    }
+    FactCondMeta(reason v)
+}
+# Split during evaluation: RHS effects see the appropriate LHS edge, and
+# success can only narrow the old captured value, not its replacement.
+fact_condition=(n:ConditionWord entry:FactState need_yes:bool=true need_no:bool=true):>FactPaths=>$unsafe {
+    let base=entry
+    fact_condition_in(n @base need_yes need_no)
+}
+fact_condition_in=(n:ConditionWord @base:FactState need_yes:bool=true need_no:bool=true):>FactPaths=>$unsafe {
+    let k=nodes.ptr[n].kind
+    let membership=string_set_owners.length >? 0 and string_set_owners.has(fact_owner) and string_set_tests.has(n)
+    if not membership and k =? 'not_' {
+        let p=fact_condition_in(ConditionWord(nodes.ptr[n].a) @base need_no need_yes)
         return FactPaths(p.no p.yes p.reason)
     }
     if not membership and (k =? 'and_' or k =? 'or_') {
-        let a=fact_condition(ConditionWord(nodes.ptr[n].a) entry)
-        let b=fact_condition(ConditionWord(nodes.ptr[n].b) if k =? 'and_' {a.yes} else {a.no})
-        let reason=if a.yes.live and a.no.live {a.reason} else {b.reason}
         if k =? 'and_' {
+            let a=fact_condition_in(ConditionWord(nodes.ptr[n].a) @base true need_no)
+            let a_yes_live=a.yes.live
+            let ay=a.yes
+            a.yes=FactState(live=false)
+            let b=fact_condition_in(ConditionWord(nodes.ptr[n].b) @ay need_yes need_no)
+            let reason=if a_yes_live and a.no.live {a.reason} else {b.reason}
+            if not need_no {return FactPaths(b.yes FactState(live=false) reason)}
             let no=fact_join(a.no b.no n)
             # (`not (a and b)`: each side's refutation implies the other's)
             if fact_either_wanted & 2 not=? 0 and a.no.live and b.no.live and a.value not=? 0 and b.value not=? 0 {fact_either(@no a.value @a.no false b.value @b.no false)}
             return FactPaths(b.yes no reason)
         }
+        let a=fact_condition_in(ConditionWord(nodes.ptr[n].a) @base need_yes true)
+        let a_no_live=a.no.live
+        let an=a.no
+        a.no=FactState(live=false)
+        let b=fact_condition_in(ConditionWord(nodes.ptr[n].b) @an need_yes need_no)
+        let reason=if a.yes.live and a_no_live {a.reason} else {b.reason}
+        if not need_yes {return FactPaths(FactState(live=false) b.no reason)}
         let yes=fact_join(a.yes b.yes n)
         if fact_either_wanted & 1 not=? 0 and a.yes.live and b.yes.live and a.value not=? 0 and b.value not=? 0 {fact_either(@yes a.value @a.yes true b.value @b.yes true)}
         return FactPaths(yes b.no reason)
@@ -50,33 +162,49 @@ fact_condition=(n:ConditionWord entry:FactState):>FactPaths=>$unsafe {
     # its last expression does; the temporaries leave scope on both paths.
     # O(block statements))
     if fact_condition_block(n) {
-        let s=entry
-        let first=s.bindings.length
-        loop i in [0..nkids(n) - 1) {fact_capture(kid(n i) @s);}
+        let first=base.bindings.length
+        loop i in [0..nkids(n) - 1) {fact_capture(kid(n i) @base);}
         let last=kid(n nkids(n) - 1)
-        let p=fact_condition((if nodes.ptr[last].kind =? 'exprstmt' {ConditionWord(nodes.ptr[last].a)} else {last}) s)
-        if p.yes.live and p.yes.bindings.length >? first {fact_scope_exit(@p.yes n first)}
-        if p.no.live and p.no.bindings.length >? first {fact_scope_exit(@p.no n first)}
+        let p=fact_condition_in((if nodes.ptr[last].kind =? 'exprstmt' {ConditionWord(nodes.ptr[last].a)} else {last}) @base need_yes need_no)
+        if need_yes and p.yes.live and p.yes.bindings.length >? first {fact_scope_exit(@p.yes n first)}
+        if need_no and p.no.live and p.no.bindings.length >? first {fact_scope_exit(@p.no n first)}
         return p
     }
-    let yes=entry
-    let v=if membership {fact_string_set(n @yes)} else {fact_capture(n @yes)}
-    let no=yes
-    let reason=fact_bound(yes v)
-    let entry_state=if fact_query {yes} else {FactState(live=false)}
-    fact_assume(@yes v true)
+    let v=if membership {fact_string_set(n @base)} else {fact_capture(n @base)}
+    let reason=fact_bound(base v)
+    let entry_state=if fact_query {base} else {FactState(live=false)}
+    if not need_no {
+        fact_assume(@base v true)
+        if ownership_fact_cleanup {
+            let drops=fact_drop_statement(n)
+            fact_drop_forget(@base n drops)
+        }
+        if base.conditional.length >? 0 {result_activate(@base v)}
+        return FactPaths(base FactState(live=false) reason v entry_state)
+    }
+    if not need_yes {
+        fact_assume(@base v false)
+        if ownership_fact_cleanup {
+            let drops=fact_drop_statement(n)
+            fact_drop_forget(@base n drops)
+        }
+        if base.conditional.length >? 0 {result_activate(@base v)}
+        return FactPaths(FactState(live=false) base reason v entry_state)
+    }
+    let no=base
+    fact_assume(@base v true)
     fact_assume(@no v false)
     # (a leaf is its own statement: its temporaries drop before branching)
     if ownership_fact_cleanup {
         let drops=fact_drop_statement(n)
-        fact_drop_forget(@yes n drops)
+        fact_drop_forget(@base n drops)
         fact_drop_forget(@no n drops)
     }
-    if yes.conditional.length >? 0 {
-        result_activate(@yes v)
+    if base.conditional.length >? 0 {
+        result_activate(@base v)
         result_activate(@no v)
     }
-    FactPaths(yes no reason v entry_state)
+    FactPaths(base no reason v entry_state)
 }
 # A block of local declarations ending in its value: a condition's temporaries.
 fact_condition_block=(n:ConditionWord):>bool=>$unsafe {

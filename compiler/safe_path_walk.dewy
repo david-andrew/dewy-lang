@@ -997,117 +997,163 @@ ut_visit_list=(b:PathWalkWord):>void=>$unsafe {
 }
 ut_visit=(n:PathWalkWord):>void=>$unsafe {
     if n =? 0 {return}
-    let k=nodes.ptr[n].kind
-    if k =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.refinement)) and ut_safe_contract(PathWalkWord(nodes.ptr[n].aux2)) {
-        let value=PathWalkWord(nodes.ptr[n].a)
-        ut_visit(value)
-        # (a fallback that leaves, as `?? return none` or `?? continue`, stores nothing)
-        if ut_first and not pos_in_lib(nodes.ptr[n].pos) and not ut_safe(value) and not ut_exits(ut_strip(value)) {ut_contract_failures.push(value)}
-        return
-    }
-    if k =? 'lambda' or k =? 'fn_' or k =? 'struct_' or k =? 'enum_' or k =? 'typealias' or k =? 'tname' or k =? 'fnref' {return}
-    if k =? 'block' {
-        ut_visit_list(n)
-        return
-    }
-    if k =? 'vardecl' {
-        let v=PathWalkWord(nodes.ptr[n].b)
-        ut_visit(v)
-        let id=PathWalkWord(nodes.ptr[n].sym)
-        if v =? 0 or id <=? 0 {return}
-        let global=ut_global_decl(n id)
-        let o=ut_val(v)
-        let m=ut_m
-        if global {
-            ut_mark_global(id o m)
-            if ut_first and ut_global_single(id) {
-                if ut_is_path(PathWalkWord(globals.ptr[id].type)) and ut_safe(v) {ut_safe_globals[id]=true} else if prune(PathWalkWord(globals.ptr[id].type)) =? T_STR {
+    let np=nodes.ptr + n
+    let k=np[0].kind
+    match k {
+        <'ident'|'int_lit'|'bool_lit'|'float_lit'|'none_lit'|'null_lit'|'dotname'|'hole'|'break_'|'continue_'|'lambda'|'fn_'|'struct_'|'enum_'|'typealias'|'tname'|'fnref'> => {return}
+        <'block'> => {
+            ut_visit_list(n)
+            return
+        }
+        <'conv'> => {
+            let value=PathWalkWord(np[0].a)
+            if np[0].aux =? int32(int64(CV.refinement)) and ut_safe_contract(PathWalkWord(np[0].aux2)) {
+                if value not=? 0 {ut_visit(value)}
+                # (a fallback that leaves, as `?? return none` or `?? continue`, stores nothing)
+                if ut_first and not pos_in_lib(nodes.ptr[n].pos) and not ut_safe(value) and not ut_exits(ut_strip(value)) {ut_contract_failures.push(value)}
+                return
+            }
+            if value not=? 0 {ut_visit(value)}
+            return
+        }
+        <'vardecl'> => {
+            let v=PathWalkWord(np[0].b)
+            if v not=? 0 {ut_visit(v)}
+            let id=PathWalkWord(nodes.ptr[n].sym)
+            if v =? 0 or id <=? 0 {return}
+            let global=ut_global_decl(n id)
+            let o=ut_val(v)
+            let m=ut_m
+            if global {
+                ut_mark_global(id o m)
+                if ut_first and ut_global_single(id) {
+                    if ut_is_path(PathWalkWord(globals.ptr[id].type)) and ut_safe(v) {ut_safe_globals[id]=true} else if prune(PathWalkWord(globals.ptr[id].type)) =? T_STR {
+                        let c=ut_text_class(v)
+                        if c not=? 0 {ut_text_globals[id]=c}
+                    }
+                }
+                return
+            }
+            if o not=? 0 or m not=? 0 {ut_flow(id v)}
+            if not ut_first {return}
+            if ut_names_safe(PathWalkWord(nodes.ptr[n].a)) and nodes.ptr[n].aux2 not=? 1 and ut_safe_contract(PathWalkWord(locals.ptr[id].type)) {
+                ut_ls[id] |= UT_L_DECLARED
+                if not ut_safe(v) {ut_unproven(v "`{name_of(PathWalkWord(nodes.ptr[n].name))}` is declared a SafePath")}
+            }
+            if ut_single(id) {
+                ut_linit[id]=v
+                if ut_safe(v) {ut_ls[id] |= UT_L_SAFE}
+                let lt=PathWalkWord(locals.ptr[id].type)
+                if prune(lt) =? T_STR {
                     let c=ut_text_class(v)
-                    if c not=? 0 {ut_text_globals[id]=c}
+                    ut_ls[id] |= c << 2
                 }
             }
             return
         }
-        if o not=? 0 or m not=? 0 {ut_flow(id v)}
-        if not ut_first {return}
-        if ut_names_safe(PathWalkWord(nodes.ptr[n].a)) and nodes.ptr[n].aux2 not=? 1 and ut_safe_contract(PathWalkWord(locals.ptr[id].type)) {
-            ut_ls[id] |= UT_L_DECLARED
-            if not ut_safe(v) {ut_unproven(v "`{name_of(PathWalkWord(nodes.ptr[n].name))}` is declared a SafePath")}
-        }
-        if ut_single(id) {
-            ut_linit[id]=v
-            if ut_safe(v) {ut_ls[id] |= UT_L_SAFE}
-            let lt=PathWalkWord(locals.ptr[id].type)
-            if prune(lt) =? T_STR {
-                let c=ut_text_class(v)
-                ut_ls[id] |= c << 2
+        <'assign'> => {
+            let a=PathWalkWord(np[0].a)
+            let b=PathWalkWord(np[0].b)
+            if a not=? 0 {ut_visit(a)}
+            if b not=? 0 {ut_visit(b)}
+            let target=a
+            let field:PathWalkWord=0
+            loop target not=? 0 and (nodes.ptr[target].kind =? 'field' or nodes.ptr[target].kind =? 'index') {
+                field=if nodes.ptr[target].kind =? 'field' {PathWalkWord(nodes.ptr[target].name)} else {0}
+                target=PathWalkWord(nodes.ptr[target].a)
             }
-        }
-        return
-    }
-    if k =? 'assign' {
-        ut_visit(PathWalkWord(nodes.ptr[n].a))
-        ut_visit(PathWalkWord(nodes.ptr[n].b))
-        let target=PathWalkWord(nodes.ptr[n].a)
-        let field:PathWalkWord=0
-        loop target not=? 0 and (nodes.ptr[target].kind =? 'field' or nodes.ptr[target].kind =? 'index') {
-            field=if nodes.ptr[target].kind =? 'field' {PathWalkWord(nodes.ptr[target].name)} else {0}
-            target=PathWalkWord(nodes.ptr[target].a)
-        }
-        if target =? 0 or nodes.ptr[target].kind not=? 'ident' {return}
-        let o=ut_val(PathWalkWord(nodes.ptr[n].b))
-        let m=ut_m
-        if nodes.ptr[target].aux =? int32(1) and nodes.ptr[target].sym >? 0 {
-            let l=PathWalkWord(nodes.ptr[target].sym)
-            if o not=? 0 or m not=? 0 {
-                # (`x.f = v`: that field; `x = v`: all of it; an element: all of it)
-                if field not=? 0 {ut_mark_field(l field o m)} else if target =? PathWalkWord(nodes.ptr[n].a) {ut_flow(l PathWalkWord(nodes.ptr[n].b))}
-                else {ut_mark_local(l o m)}
+            if target =? 0 or nodes.ptr[target].kind not=? 'ident' {return}
+            let o=ut_val(b)
+            let m=ut_m
+            if nodes.ptr[target].aux =? int32(1) and nodes.ptr[target].sym >? 0 {
+                let l=PathWalkWord(nodes.ptr[target].sym)
+                if o not=? 0 or m not=? 0 {
+                    # (`x.f = v`: that field; `x = v`: all of it; an element: all of it)
+                    if field not=? 0 {ut_mark_field(l field o m)} else if target =? a {ut_flow(l b)}
+                    else {ut_mark_local(l o m)}
+                }
+                if ut_first and target =? a and (ut_ls[l] | ut_ls[ut_root(l)]) & UT_L_DECLARED not=? 0 and not ut_safe(b) {
+                    ut_unproven(b "`{name_of(PathWalkWord(nodes.ptr[target].name))}` is declared a SafePath")
+                }
             }
-            if ut_first and target =? PathWalkWord(nodes.ptr[n].a) and (ut_ls[l] | ut_ls[ut_root(l)]) & UT_L_DECLARED not=? 0 and not ut_safe(PathWalkWord(nodes.ptr[n].b)) {
-                ut_unproven(PathWalkWord(nodes.ptr[n].b) "`{name_of(PathWalkWord(nodes.ptr[target].name))}` is declared a SafePath")
+            else if nodes.ptr[target].aux =? int32(2) {
+                ut_mark_global(PathWalkWord(nodes.ptr[target].sym) o m)
             }
+            return
         }
-        else if nodes.ptr[target].aux =? int32(2) {
-            ut_mark_global(PathWalkWord(nodes.ptr[target].sym) o m)
+        <'return_'> => {
+            let a=PathWalkWord(np[0].a)
+            if a not=? 0 {
+                ut_visit(a)
+                ut_returned(a)
+            }
+            return
         }
-        return
-    }
-    if k =? 'return_' {
-        ut_visit(PathWalkWord(nodes.ptr[n].a))
-        if nodes.ptr[n].a not=? 0 {ut_returned(PathWalkWord(nodes.ptr[n].a))}
-        return
-    }
-    if k =? 'if_' {
-        ut_visit(PathWalkWord(nodes.ptr[n].a))
-        let mark=ut_narrowed.length
-        ut_guarded(PathWalkWord(nodes.ptr[n].a) @ut_narrowed)
-        ut_visit(PathWalkWord(nodes.ptr[n].b))
-        ut_narrowed.truncate(mark)
-        ut_visit(PathWalkWord(nodes.ptr[n].c))
-        return
-    }
-    if k =? 'call' {
-        ut_visit(PathWalkWord(nodes.ptr[n].a))
-        loop i in [0..nkids(n)) {ut_visit(kid(n i))}
-        ut_call(n)
-        return
+        <'if_'> => {
+            let a=PathWalkWord(np[0].a)
+            let b=PathWalkWord(np[0].b)
+            let c=PathWalkWord(np[0].c)
+            if a not=? 0 {ut_visit(a)}
+            let mark=ut_narrowed.length
+            ut_guarded(a @ut_narrowed)
+            if b not=? 0 {ut_visit(b)}
+            ut_narrowed.truncate(mark)
+            if c not=? 0 {ut_visit(c)}
+            return
+        }
+        <'call'> => {
+            let a=PathWalkWord(np[0].a)
+            if a not=? 0 {ut_visit(a)}
+            loop i in [0..nkids(n)) {
+                let x=kid(n i)
+                if x not=? 0 {ut_visit(x)}
+            }
+            ut_call(n)
+            return
+        }
+        <'binary'|'and_'|'or_'|'coalesce'|'index'|'range'|'pair'> => {
+            let a=PathWalkWord(np[0].a)
+            let b=PathWalkWord(np[0].b)
+            if a not=? 0 {ut_visit(a)}
+            if b not=? 0 {ut_visit(b)}
+            let c=PathWalkWord(nodes.ptr[n].c)
+            if c not=? 0 {ut_visit(c)}
+            return
+        }
+        <'field'|'unary'|'not_'|'exprstmt'|'addr'|'cast'|'narrow'|'unwrap'|'istype'|'defer_'|'parallel_region'> => {
+            let a=PathWalkWord(np[0].a)
+            if a not=? 0 {ut_visit(a)}
+            return
+        }
+        _ => {}
     }
     if (k =? 'for_' or k =? 'match_') and nodes.ptr[n].sym >? 0 {
         # (the loop's variable holds the elements; the arms' bindings hold what is matched)
         let o=ut_val(PathWalkWord(nodes.ptr[n].a))
         ut_mark_local(PathWalkWord(nodes.ptr[n].sym) o ut_m)
     }
-    ut_visit(PathWalkWord(nodes.ptr[n].a))
-    ut_visit(PathWalkWord(nodes.ptr[n].b))
+    let a=PathWalkWord(nodes.ptr[n].a)
+    if a not=? 0 {ut_visit(a)}
+    let b=PathWalkWord(nodes.ptr[n].b)
+    if b not=? 0 {ut_visit(b)}
     # (a checked loop's c and d are locals, a partial's d a function instance: not nodes)
     if k not=? 'for_' {
-        ut_visit(PathWalkWord(nodes.ptr[n].c))
-        if k not=? 'partial' {ut_visit(PathWalkWord(nodes.ptr[n].d))}
+        let c=PathWalkWord(nodes.ptr[n].c)
+        if c not=? 0 {ut_visit(c)}
+        if k not=? 'partial' {
+            let d=PathWalkWord(nodes.ptr[n].d)
+            if d not=? 0 {ut_visit(d)}
+        }
     }
-    loop i in [0..nkids(n)) {ut_visit(kid(n i))}
+    loop i in [0..nkids(n)) {
+        let x=kid(n i)
+        if x not=? 0 {ut_visit(x)}
+    }
     if k not=? 'match_' and k not=? 'fn_' {
-        loop i in [0..nkids2(n)) {ut_visit(kid2(n i))}
+        loop i in [0..nkids2(n)) {
+            let x=kid2(n i)
+            if x not=? 0 {ut_visit(x)}
+        }
     }
 }
 ut_call=(n:PathWalkWord):>void=>$unsafe {

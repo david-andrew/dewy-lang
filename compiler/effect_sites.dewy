@@ -1,28 +1,33 @@
 $runtime_checks
 
-from p"ast.jo" import (NF_GLOBAL has_flag kid nkids nodes)
+from p"ast.jo" import (NF_GLOBAL has_flag kid lists nkids nodes)
+from p"node_store.dewy" import (NK Node)
 from p"effects.jo" import (effect_final effect_ix_built effect_ix_heads effect_ix_locals effect_ix_next effect_ix_nodes effect_ix_tails effect_ix_uses effect_ix_writes)
 from p"check.jo" import (fns locals)
 from p"checks_thin.dewy" import (value_leaves)
 from p"place_routes.dewy" import (place_scalar_root)
-from p"isolation_ops.dewy" import (isolation_children)
+from p"isolation_ops.dewy" import (isolation_node_children)
 # Demanded effect site indexing; shared state has one owner in effects.jo.
 SiteWord:type=int64<overflow='wrap'>
 # Collect result expressions without interpreting loop locals as syntax nodes.
 effect_returns=(n:SiteWord @out:array<int64>):>void=>$unsafe {
     if n =? 0 {return}
-    let k=nodes.ptr[n].kind
+    let np=nodes.ptr + n
+    let k=np[0].kind
     if k =? 'return_' {
-        value_leaves(SiteWord(nodes.ptr[n].a) @out);
+        value_leaves(SiteWord(np[0].a) @out);
         return
     }
-    let mask=isolation_children(k)
-    if mask <? 0 {return}
-    if mask & 1 not=? 0 {effect_returns(SiteWord(nodes.ptr[n].a) @out);}
-    if mask & 2 not=? 0 {effect_returns(SiteWord(nodes.ptr[n].b) @out);}
-    if mask & 4 not=? 0 {effect_returns(SiteWord(nodes.ptr[n].c) @out);}
+    let mask=isolation_node_children(n)
+    if mask <=? 0 {return}
+    if mask & 1 not=? 0 {effect_returns(SiteWord(np[0].a) @out);}
+    if mask & 2 not=? 0 {effect_returns(SiteWord(np[0].b) @out);}
+    if mask & 4 not=? 0 {effect_returns(SiteWord(np[0].c) @out);}
     if mask & 16 not=? 0 {
-        loop i in [0..nkids(n)) {effect_returns(kid(n i) @out);}
+        let nk=SiteWord(np[0].nlist)
+        let l0=SiteWord(np[0].list)
+        let lp=lists.ptr
+        loop i in [0..nk) {effect_returns(SiteWord(lp[l0 + i]) @out);}
     }
 }
 # The local an assignment target writes through field/index selectors, or 0.
@@ -43,6 +48,19 @@ effect_site_key=(kind:SiteWord q:SiteWord):>int64=>$unsafe {
     if p.root not=? 'local' {return 0}
     return p.declaration
 }
+es_build_kind_tab=():>array<uint8>=>$unsafe {
+    let tab=fill(uint8(0) 128)
+    let tmp=[Node[kind='nil']]
+    let tagp=tmp.ptr as ptr<uint32>
+    tmp.ptr[0].kind='vardecl'; tab.ptr[int64(tagp[0])]=uint8(1)
+    tmp.ptr[0].kind='assign'; tab.ptr[int64(tagp[0])]=uint8(1)
+    tmp.ptr[0].kind='call'; tab.ptr[int64(tagp[0])]=uint8(2)
+    tmp.ptr[0].kind='fnref'; tab.ptr[int64(tagp[0])]=uint8(2)
+    tab
+}
+let es_kind_tab:array<uint8>=es_build_kind_tab()
+let es_kind_p:ptr<uint8>=$unsafe es_kind_tab.ptr
+
 effect_index_build=(kind:SiteWord):>void=>$unsafe {
     # Classify appended nodes once, but construct only the requested chain.
     # Other kinds replay these sparse candidates, never the whole syntax tree.
@@ -55,12 +73,55 @@ effect_index_build=(kind:SiteWord):>void=>$unsafe {
         effect_ix_uses=[]
         effect_ix_built=[0 0 0]
     }
-    loop q in [max(1 effect_ix_nodes)..nodes.length) {
-        let k=nodes.ptr[q].kind
-        if k =? 'vardecl' or k =? 'assign' {effect_ix_writes.push(q);}
-        else if k =? 'call' or k =? 'fnref' {effect_ix_uses.push(q);}
+    let nlen:SiteWord=nodes.length
+    let start_q:SiteWord=if effect_ix_nodes >? 1 {effect_ix_nodes} else {1}
+    if start_q <? nlen {
+        if effect_ix_writes.length =? 0 {effect_ix_writes.reserve((nlen >> 3) + 64)}
+        if effect_ix_uses.length =? 0 {effect_ix_uses.reserve((nlen >> 3) + 64)}
+        let ktab=es_kind_p
+        let qp=nodes.ptr + start_q
+        let qend=nodes.ptr + nlen
+        let q:SiteWord=start_q
+        let wlen:SiteWord=effect_ix_writes.length
+        let wcap:SiteWord=cap(effect_ix_writes)
+        let wp=effect_ix_writes.ptr
+        let ulen:SiteWord=effect_ix_uses.length
+        let ucap:SiteWord=cap(effect_ix_uses)
+        let up=effect_ix_uses.ptr
+        loop qp <? qend {
+            let cls=ktab[int64((qp as ptr<uint32>)[0])]
+            if cls not=? uint8(0) {
+                if cls =? uint8(1) {
+                    if wlen >=? wcap {
+                        __set_len(effect_ix_writes wlen)
+                        effect_ix_writes.push(q)
+                        wlen=effect_ix_writes.length
+                        wcap=cap(effect_ix_writes)
+                        wp=effect_ix_writes.ptr
+                    } else {
+                        wp[wlen]=q
+                        wlen+=1
+                    }
+                } else {
+                    if ulen >=? ucap {
+                        __set_len(effect_ix_uses ulen)
+                        effect_ix_uses.push(q)
+                        ulen=effect_ix_uses.length
+                        ucap=cap(effect_ix_uses)
+                        up=effect_ix_uses.ptr
+                    } else {
+                        up[ulen]=q
+                        ulen+=1
+                    }
+                }
+            }
+            qp+=1
+            q+=1
+        }
+        __set_len(effect_ix_writes wlen)
+        __set_len(effect_ix_uses ulen)
     }
-    effect_ix_nodes=nodes.length
+    effect_ix_nodes=nlen
     effect_ix_locals=locals.length
     let candidates=if kind =? 2 {effect_ix_uses} else {effect_ix_writes}
     if effect_ix_built.ptr[kind] =? candidates.length {return}
@@ -69,12 +130,47 @@ effect_index_build=(kind:SiteWord):>void=>$unsafe {
         effect_ix_heads.ptr[kind].resize(limit);
         effect_ix_tails.ptr[kind].resize(limit);
     }
-    effect_ix_next.ptr[kind].resize(nodes.length);
-    loop i in [effect_ix_built.ptr[kind]..candidates.length) {
-        let q=candidates.ptr[i]
-        effect_index_link(kind effect_site_key(kind q) q);
+    effect_ix_next.ptr[kind].resize(nlen);
+    let hp=effect_ix_heads.ptr[kind].ptr
+    let tp=effect_ix_tails.ptr[kind].ptr
+    let nxtp=effect_ix_next.ptr[kind].ptr
+    let hlen:SiteWord=effect_ix_heads.ptr[kind].length
+    let cp=candidates.ptr
+    let clen:SiteWord=candidates.length
+    let np=nodes.ptr
+    loop i in [effect_ix_built.ptr[kind]..clen) {
+        let q=cp[i]
+        let key:SiteWord=0
+        let qp=np + q
+        let k=qp[0].kind
+        if kind =? 2 {
+            if (k =? 'call' and qp[0].aux =? 0 or k =? 'fnref') and qp[0].sym >? 0 {key=SiteWord(qp[0].sym)}
+        } else if k =? 'vardecl' {
+            if (SiteWord(qp[0].flags) & NF_GLOBAL) =? 0 and qp[0].sym >? 0 {key=SiteWord(qp[0].sym)}
+        } else if k =? 'assign' {
+            if kind =? 0 {
+                let target:SiteWord=SiteWord(qp[0].a)
+                loop np[target].kind =? 'field' or np[target].kind =? 'index' {target=SiteWord(np[target].a)}
+                if np[target].kind =? 'ident' and np[target].aux =? int32(1) {key=SiteWord(np[target].sym)}
+            } else {
+                let p=place_scalar_root(SiteWord(qp[0].a))
+                if p.root =? 'local' {key=p.declaration}
+            }
+        }
+        if key <=? 0 {continue}
+        if key >=? hlen {
+            effect_ix_heads.ptr[kind].resize(key + 1);
+            effect_ix_tails.ptr[kind].resize(key + 1);
+            hp=effect_ix_heads.ptr[kind].ptr
+            tp=effect_ix_tails.ptr[kind].ptr
+            hlen=effect_ix_heads.ptr[kind].length
+        }
+        let tail=tp[key]
+        if tail =? 0 {hp[key] = q}
+        else {nxtp[tail] = q}
+        tp[key] = q
     }
-    effect_ix_built.ptr[kind] = candidates.length;
+    effect_ix_built.ptr[kind] = clen;
 }
 effect_index_link=(kind:SiteWord key:SiteWord q:SiteWord):>void=>$unsafe {
     if key <=? 0 {return}

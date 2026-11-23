@@ -9,16 +9,19 @@ let xr_types:ptr<int8>=$unsafe (uint64(0) as ptr<int8>)
 let xr_code:ptr<Ins>=$unsafe (uint64(0) as ptr<Ins>)
 let xr_kval:ptr<XWord>=$unsafe (uint64(0) as ptr<XWord>)
 from p"x64_encode.dewy" import (XWord XMM RBX RSI RDI R8 R9 R10 R11 frame_size is_vreg_vec)
-from p"backend_analysis.dewy" import (LOC_SPILL LOC_CONST LOC_SLOT LOC_GLOBAL LOC_FCONST vloc vsave dbg_keep v_live v_start call_pos call_w)
+from p"backend_analysis.dewy" import (LOC_SPILL LOC_CONST LOC_SLOT LOC_NONE LOC_GLOBAL LOC_FCONST vloc vsave dbg_keep v_live v_start call_pos call_w x_has_slot)
 const INF_POS = 1 << 60
 let vspill:array<int64>=[]
 let slot_off:array<int64>=[]
-let callee_off:array<int64>=[]
+let callee_off:array<int64>=fill(0 16)
+let ra_cross_storage:array<int64>=[]
+let ra_placed_storage:array<bool>=[]
 let ra_on = true
 let ra_prio = true
 let callee_pool:array<int64>= [RBX  12  13  14  15]
 let is_callee = [false  false  false  true  false  false  false  false  false  false  false  false  true  true  true  true]
-let caller_pool:array<int64>= [RSI  RDI  R8  R9  R10  R11]
+let caller_pool:array<int64>= [R10  R11  R8  R9  RSI  RDI]
+let param_pref_pool:array<int64>= [RDI  RSI  R10  R11  R8  R9]
 let save_list:array<int64>=[]
 let ra_expire_visits:XWord=0
 let ra_spill_visits:XWord=0
@@ -26,6 +29,7 @@ let ra_peak_gpr:XWord=0
 let ra_peak_xmm:XWord=0
 let ra_active_storage:array<int64>=fill(0 24)
 let ra_byreg_storage:array<int64>=fill(-1 32)
+let ra_ctz_tab:array<int64>=[0 1 28 2 29 14 24 3 30 22 20 15 25 17 4 8 31 27 13 23 21 19 16 7 26 12 18 6 11 5 10 9]
 const VI = 0
 let xr_ir:ptr<IrFn>=$unsafe (uint64(0) as ptr<IrFn>)
 let xr_debug = false
@@ -46,7 +50,47 @@ xr_kv_of=(v:XWord):>XWord=>$unsafe {
 xr_align=(n:XWord a:XWord):>XWord=>$unsafe {
     (n + a - 1) & ((a - 1) xor -1)
 }
+let hint_op_tab:array<bool>=[]
+let comm_op_tab:array<bool>=[]
+let ra_saved_flags_p:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let ra_ctz_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let ra_htab_p:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let ra_ctab_p:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let ra_active_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let ra_byreg_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let ra_callee_off_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+hint_op_init=():>void=>$unsafe {
+    if hint_op_tab.length >? 0 {return}
+    loop op in [ \
+        Op.nop Op.iconst Op.fconst Op.mov Op.add Op.sub Op.mul Op.divs \
+        Op.divu Op.rems Op.remu Op.and_ Op.or_ Op.xor Op.shl Op.shrs \
+        Op.shru Op.neg Op.not_ Op.eq Op.ne Op.lts Op.les Op.gts \
+        Op.ges Op.ltu Op.leu Op.gtu Op.geu Op.fadd Op.fsub Op.fmul \
+        Op.fdiv Op.fneg Op.fsqrt Op.fmin Op.fmax Op.ffloor Op.fceil Op.fabs \
+        Op.ftrunc Op.feq Op.fne Op.flt Op.fle Op.fgt Op.fge Op.sext8 \
+        Op.sext16 Op.sext32 Op.zext8 Op.zext16 Op.zext32 Op.i2f Op.u2f Op.f2i \
+        Op.f2f Op.bits2f Op.f2bits Op.load Op.store Op.slot Op.gaddr Op.daddr \
+        Op.faddr Op.copy Op.zero Op.memcpy Op.memset Op.zeroslots Op.vop Op.call \
+        Op.calli Op.callc Op.syscall Op.intr Op.block Op.loop Op.if_ Op.else_ \
+        Op.end Op.br Op.brif Op.ret Op.trap Op.select Op.assume Op.brtable \
+        Op.vld Op.vst Op.vbin Op.vsplat Op.vzu Op.mulhs Op.mulhu Op.memeq \
+        Op.checked_add Op.checked_sub Op.checked_mul Op.overflow_add Op.overflow_sub Op.overflow_mul Op.rot32 Op.streq \
+        Op.findbyte Op.scanbytes Op.findb \
+    ] {
+        hint_op_tab.push(hint_op(op))
+        comm_op_tab.push(op =? 'add' or op =? 'mul' or op =? 'and_' or op =? 'or_' or op =? 'xor' or op =? 'fadd' or op =? 'fmul' or op =? 'fmin' or op =? 'fmax')
+    }
+    if callee_off.length <? 16 {callee_off.resize(16)}
+    ra_saved_flags_p=is_callee.ptr
+    ra_ctz_p=ra_ctz_tab.ptr
+    ra_htab_p=hint_op_tab.ptr
+    ra_ctab_p=comm_op_tab.ptr
+    ra_active_p=ra_active_storage.ptr
+    ra_byreg_p=ra_byreg_storage.ptr
+    ra_callee_off_p=callee_off.ptr
+}
 x64_allocate=(input:ptr<IrFn> priority:bool debug:bool stats:bool):>void=>$unsafe {
+    if hint_op_tab.length =? 0 {hint_op_init()}
     xr_ir = input
     xr_types=input[0].vtypes.ptr
     xr_code=input[0].code.ptr
@@ -63,7 +107,7 @@ x64_allocate=(input:ptr<IrFn> priority:bool debug:bool stats:bool):>void=>$unsaf
 }
 hint_op=(op:Op):>bool=>$unsafe {
     match op {
-        <'mov' | 'add' | 'sub' | 'mul' | 'checked_add' | 'checked_sub' | 'checked_mul' | 'and_' | 'or_' | 'xor' | 'shl' | 'shrs' | 'shru' | 'rot32' | 'neg' | 'not_' | 'load'> => {
+        <'mov' | 'add' | 'sub' | 'mul' | 'checked_add' | 'checked_sub' | 'checked_mul' | 'and_' | 'or_' | 'xor' | 'shl' | 'shrs' | 'shru' | 'rot32' | 'neg' | 'not_' | 'load' | 'select'> => {
             true
         }
         <'fadd' | 'fsub' | 'fmul' | 'fdiv' | 'fmin' | 'fmax' | 'fneg' | 'fabs'> => {
@@ -82,26 +126,34 @@ hint_operand=(v:XWord pos:XWord):>XWord=>$unsafe {
         return -1
     }
     let ins=xr_code + pos
-    if XWord(ins[0].dst) not=? v or not hint_op(ins[0].op) {
+    let tag=int64((ins as ptr<uint32>)[0])
+    if XWord(ins[0].dst) not=? v or not hint_op_tab.ptr[tag] {
         return -1
     }
+    let vec=xr_vtype(v) not=? VI
     let a:XWord=XWord(ins[0].a)
+    if ins[0].op =? 'select' {
+        a = XWord(ins[0].c)
+    }
     if ins[0].op =? 'checked_sub' and xr_is_kv(a) and xr_kv_of(a) =? 0 {
         a = XWord(ins[0].b)
     }
-    if a <? 0 or a =? v or vloc[a] <? 0 or v_live[a].last not=? pos {
-        return -1
+    if a >=? 0 and a not=? v and vloc[a] >=? 0 and XWord(v_live[a].last) =? pos and (vloc[a] >=? XMM) =? vec {
+        return a
     }
-    if (vloc[a] >=? XMM) not=? (xr_vtype(v) not=? VI) {
-        return -1
+    if ra_ctab_p[tag] {
+        let b:XWord=XWord(ins[0].b)
+        if b >=? 0 and b not=? v and vloc[b] >=? 0 and XWord(v_live[b].last) =? pos and (vloc[b] >=? XMM) =? vec {
+            return b
+        }
     }
-    a
+    -1
 }
 live_start=(v:XWord):>XWord=>$unsafe {
     if v <? xr_ir[0].nparams {
         return -1
     }
-    v_live[v].first
+    XWord(v_live[v].first)
 }
 crosses_call=(s:XWord e:XWord):>bool=>$unsafe {
     let lo:XWord=0
@@ -135,182 +187,241 @@ ra_remove=(active:ptr<int64> byreg:ptr<int64> n:XWord reg:XWord):>XWord=>$unsafe
     }
     n - 1
 }
+ra_spill_pick=(v:XWord vector:bool crosses:bool active:ptr<int64> @nactive:XWord byreg:ptr<int64> loc_arr:ptr<int64> save_arr:ptr<bool> saved_flags:ptr<bool> keep:ptr<bool> dbg:bool stats:bool):>XWord=>$unsafe {
+    let best:XWord=-1
+    if stats {ra_spill_visits += nactive}
+    loop k in [0..nactive) {
+        let a:XWord=active[k]
+        let ra:XWord=loc_arr[a]
+        if (ra >=? XMM) not=? vector {continue}
+        if crosses and dbg and keep[v] and (ra >=? XMM or not saved_flags[ra]) {continue}
+        if not spills_before(a v) {continue}
+        if best <? 0 or spills_before(a best) {best = a}
+    }
+    if best <? 0 {return -1}
+    let reg:XWord=loc_arr[best]
+    loc_arr[best] = LOC_SPILL
+    save_arr[v] = crosses and (reg >=? XMM or not saved_flags[reg])
+    let rk=byreg[reg]
+    byreg[reg] = -1
+    nactive -= 1
+    if rk <? nactive {
+        let moved:XWord=active[nactive]
+        active[rk] = moved
+        byreg[loc_arr[moved]] = rk
+    }
+    reg
+}
+
 allocate=():>void=>$unsafe {
-    # These arrays stay fixed for this allocation. Borrow once, preserving COW
-    # on the saved-register writes; the scan introduces no additional pass.
-    let saved_flags=is_callee.ptr
-    let keep=dbg_keep.ptr
-    let calls=call_pos.ptr
+    let saved_flags=ra_saved_flags_p
+    let dbg=xr_debug
+    let keep=if dbg {dbg_keep.ptr} else {uint64(0) as ptr<bool>}
     let ncalls:XWord=call_pos.length
-    let caller_regs=caller_pool.ptr
-    let callee_regs=callee_pool.ptr
-    let ncaller:XWord=caller_pool.length
-    let ncallee:XWord=callee_pool.length
+    let calls=if ncalls >? 0 {call_pos.ptr} else {uint64(0) as ptr<int64>}
+    let ctz=ra_ctz_p
+    let vl=v_live
+    let loc_arr=vloc
+    let save_arr=vsave
+    let start_arr=v_start
     let np:XWord=xr_ir[0].nparams
     let nv:XWord=XWord(xr_ir[0].vtypes.length)
-    callee_off = fill(0  16)
-    let saved=callee_off.ptr
+    let saved=ra_callee_off_p
+    mem_set(saved as ptr<uint8> 0 128)
     if not ra_on {
         loop v in [0..nv) {
-            if vloc[v] not=? LOC_CONST and vloc[v] not=? LOC_FCONST and vloc[v] not=? LOC_SLOT and vloc[v] not=? LOC_GLOBAL {
-                vloc[v] = LOC_SPILL
+            if loc_arr[v] not=? LOC_CONST and loc_arr[v] not=? LOC_FCONST and loc_arr[v] not=? LOC_SLOT and loc_arr[v] not=? LOC_GLOBAL {
+                loc_arr[v] = LOC_SPILL
             }
         }
         return
     }
-    let n:XWord=XWord(xr_ir[0].code.length) + 1
+    let nc:XWord=XWord(xr_ir[0].code.length)
+    let n:XWord=nc + 1
+    let code=xr_code
+    let types=xr_types
+    let kval=xr_kval
+    let stats=xr_stats
+    let htab=ra_htab_p
     let free:XWord=0x7FFCFFC8
-    let active=ra_active_storage.ptr
-    let byreg=ra_byreg_storage.ptr
-    loop r in [0..32) {
-        byreg[r] = -1
-    }
+    let active=ra_active_p
+    let byreg=ra_byreg_p
+    mem_set(byreg as ptr<uint8> 255 256)
     let nactive:XWord=0
     let min_end:XWord=INF_POS
     let call_next:XWord=0
+    let param_call:XWord=if ncalls >? 0 {calls[0]} else {INF_POS}
+    let cur_call:XWord=param_call
     loop pos in [0..n) {
-        loop call_next <? ncalls and calls[call_next] <=? pos {
-            call_next += 1
+        let v:XWord=start_arr[pos]
+        if v <? 0 {continue}
+        if cur_call <=? pos {
+            loop call_next <? ncalls and calls[call_next] <=? pos {
+                call_next += 1
+            }
+            cur_call = if call_next <? ncalls {calls[call_next]} else {INF_POS}
         }
-        let v:XWord=v_start[pos]
-        if v >=? 0 and min_end <? pos {
+        if min_end <? pos {
             min_end = INF_POS
             let k:XWord=0
-            if xr_stats {
+            if stats {
                 ra_expire_visits += nactive
             }
             loop k <? nactive {
                 let a:XWord=active[k]
-                if v_live[a].last <? pos {
-                    let r:XWord=vloc[a]
+                let alast:XWord=XWord(vl[a].last)
+                if alast <? pos {
+                    let r:XWord=loc_arr[a]
                     free |= 1 << r
                     byreg[r] = -1
                     nactive -= 1
                     if k <? nactive {
-                        active[k] = active[nactive]
-                        byreg[vloc[active[k]]] = k
+                        let moved:XWord=active[nactive]
+                        active[k] = moved
+                        byreg[loc_arr[moved]] = k
                     }
                 }
                 else {
-                    if v_live[a].last <? min_end {
-                        min_end = v_live[a].last
+                    if alast <? min_end {
+                        min_end = alast
                     }
                     k += 1
                 }
             }
         }
         loop v >=? 0 {
-            let vector=xr_vtype(v) not=? VI
-            let next_call:XWord=call_next
-            if v <? np {
-                next_call = 0
+            let h:XWord=-1
+            let vt=XWord(types[v])
+            let vector=vt not=? 0 and vt not=? 3
+            if v >=? np and pos <? nc {
+                let ins=code + pos
+                if XWord(ins[0].dst) =? v {
+                    let tag=int64((ins as ptr<uint32>)[0])
+                    if not dbg and pos + 1 <? nc and tag >=? 19 and tag <=? 28 and vl[v].ndef =? 1 and vl[v].nuse =? 1 {
+                        let nop=(ins + 1)[0].op
+                        if (nop =? 'if_' or nop =? 'brif') and XWord((ins + 1)[0].a) =? v {
+                            loc_arr[v] = LOC_NONE
+                            v = XWord(vl[v].next_start)
+                            continue
+                        }
+                    }
+                    if htab[tag] {
+                        let a:XWord=XWord(ins[0].a)
+                        if ins[0].op =? 'select' {a = XWord(ins[0].c)}
+                        else if ins[0].op =? 'checked_sub' and XWord(types[a]) =? 3 and kval[a] =? 0 {a = XWord(ins[0].b)}
+                        if a >=? 0 and a not=? v {
+                            let al=loc_arr[a]
+                            if al >=? 0 and XWord(vl[a].last) =? pos and (al >=? XMM) =? vector {h = a}
+                        }
+                        if h <? 0 and ra_ctab_p[tag] {
+                            let b:XWord=XWord(ins[0].b)
+                            if b >=? 0 and b not=? v {
+                                let bl=loc_arr[b]
+                                if bl >=? 0 and XWord(vl[b].last) =? pos and (bl >=? XMM) =? vector {h = b}
+                            }
+                        }
+                    }
+                }
             }
-            let crosses=next_call <? ncalls and calls[next_call] <? v_live[v].last
+            let vlast:XWord=XWord(vl[v].last)
+            let crosses=(if v <? np {param_call} else {cur_call}) <? vlast
             let reg:XWord=-1
-            let h:XWord=hint_operand(v  pos)
-            if h >=? 0 and crosses and vloc[h] <? XMM and not saved_flags[vloc[h]] {
-                h = -1
-            }
-            if h >=? 0 and crosses and xr_debug and keep[v] and vloc[h] >=? XMM {
-                h = -1
-            }
-            if h >=? 0 and byreg[vloc[h]] >=? 0 and active[byreg[vloc[h]]] =? h {
-                reg = vloc[h]
-                nactive = ra_remove(active  byreg  nactive  reg)
-                vsave[v] = crosses and (reg >=? XMM or not saved_flags[reg])
-                if reg <? XMM and saved_flags[reg] {
-                    saved[reg] = 1
+            if h >=? 0 {
+                let hl:XWord=loc_arr[h]
+                if crosses and hl <? XMM and not saved_flags[hl] {
+                    h = -1
                 }
-            }
-            else if vector {
-                if not (crosses and xr_debug and keep[v]) {
-                    loop x in [2..15) {
-                        if free & (1 << (XMM + x)) not=? 0 {
-                            reg = XMM + x
-                            vsave[v] = crosses
-                            break
+                else if crosses and dbg and keep[v] and hl >=? XMM {
+                    h = -1
+                }
+                else {
+                    let rk=byreg[hl]
+                    if rk >=? 0 and active[rk] =? h {
+                        reg = hl
+                        byreg[hl] = -1
+                        nactive -= 1
+                        if rk <? nactive {
+                            let moved:XWord=active[nactive]
+                            active[rk] = moved
+                            byreg[loc_arr[moved]] = rk
                         }
-                    }
-                }
-            }
-            else {
-                if not crosses {
-                    loop ri in [0..ncaller) {
-                        let r:XWord=caller_regs[ri]
-                        if free & (1 << r) not=? 0 {
-                            reg = r
-                            break
-                        }
-                    }
-                }
-                if reg <? 0 {
-                    loop ri in [0..ncallee) {
-                        let r:XWord=callee_regs[ri]
-                        if free & (1 << r) not=? 0 {
-                            reg = r
-                            break
-                        }
-                    }
-                }
-                if reg <? 0 and crosses and not (xr_debug and keep[v]) {
-                    loop ri in [0..ncaller) {
-                        let r:XWord=caller_regs[ri]
-                        if free & (1 << r) not=? 0 {
-                            reg = r
-                            vsave[v] = true
-                            break
+                        save_arr[v] = crosses and (reg >=? XMM or not saved_flags[reg])
+                        if reg <? XMM and saved_flags[reg] {
+                            saved[reg] = 1
                         }
                     }
                 }
             }
             if reg <? 0 {
-                let best:XWord=-1
-                if xr_stats {
-                    ra_spill_visits += nactive
+                if not vector {
+                    if not crosses {
+                        if v <? np {
+                            let ip:XWord=0
+                            loop k in [0..v) {
+                                let kt=XWord(types[k])
+                                if kt =? 0 or kt =? 3 {ip += 1}
+                            }
+                            if ip <? 6 {
+                                let pr=param_pref_pool.ptr[ip]
+                                if free & (1 << pr) not=? 0 {reg = pr}
+                            }
+                        }
+                        if reg <? 0 {
+                            let avail=free & 0x0FC0
+                            if avail not=? 0 {
+                                let bit=avail & (0 - avail)
+                                reg = ctz[(((bit * 0x077CB531) & 0xFFFFFFFF) >> 27)]
+                            }
+                        }
+                    }
+                    if reg <? 0 {
+                        let avail=free & 0xF008
+                        if avail not=? 0 {
+                            let bit=avail & (0 - avail)
+                            reg = ctz[(((bit * 0x077CB531) & 0xFFFFFFFF) >> 27)]
+                        }
+                    }
+                    if reg <? 0 and crosses and not (dbg and keep[v]) {
+                        let avail=free & 0x0FC0
+                        if avail not=? 0 {
+                            let bit=avail & (0 - avail)
+                            reg = ctz[(((bit * 0x077CB531) & 0xFFFFFFFF) >> 27)]
+                            save_arr[v] = true
+                        }
+                    }
                 }
-                loop k in [0..nactive) {
-                    let a:XWord=active[k]
-                    let ra:XWord=vloc[a]
-                    if (ra >=? XMM) not=? (vector) {
-                        continue
+                else {
+                    let avail=free & 0x7FFC0000
+                    if avail not=? 0 and not (crosses and dbg and keep[v]) {
+                        let bit=avail & (0 - avail)
+                        reg = ctz[(((bit * 0x077CB531) & 0xFFFFFFFF) >> 27)]
+                        save_arr[v] = crosses
                     }
-                    if crosses and xr_debug and keep[v] and (ra >=? XMM or not saved_flags[ra]) {
-                        continue
-                    }
-                    if not spills_before(a  v) {
-                        continue
-                    }
-                    if best <? 0 or spills_before(a  best) {
-                        best = a
-                    }
-                }
-                if best >=? 0 {
-                    reg = vloc[best]
-                    vloc[best] = LOC_SPILL
-                    vsave[v] = crosses and (reg >=? XMM or not saved_flags[reg])
-                    nactive = ra_remove(active  byreg  nactive  reg)
                 }
             }
+            if reg <? 0 {
+                reg = ra_spill_pick(v vector crosses active @nactive byreg loc_arr save_arr saved_flags keep dbg stats)
+            }
             if reg >=? 0 {
-                vloc[v] = reg
+                loc_arr[v] = reg
                 free &= ((1 << reg) xor -1)
                 byreg[reg] = nactive
                 active[nactive] = v
                 nactive += 1
-                if xr_stats {
+                if stats {
                     ra_pressure(active  nactive  -1)
                 }
-                if v_live[v].last <? min_end {
-                    min_end = v_live[v].last
+                if vlast <? min_end {
+                    min_end = vlast
                 }
                 if reg <? XMM and saved_flags[reg] {
                     saved[reg] = 1
                 }
             }
             else {
-                vloc[v] = LOC_SPILL
+                loc_arr[v] = LOC_SPILL
             }
-            v = v_live[v].next_start
+            v = XWord(vl[v].next_start)
         }
     }
 }
@@ -394,11 +505,14 @@ allocate_release=():>void=>$unsafe {
     let xr_caller_pool=caller_pool.ptr as ptr<XWord>
     let saved_flags=is_callee.ptr
     let nv:XWord=XWord(xr_ir[0].vtypes.length)
-    callee_off = fill(0  16)
+    if callee_off.length <? 16 {callee_off.resize(16)}
+    loop r in [0..16) {callee_off.ptr[r] = 0}
     let n:XWord=XWord(xr_ir[0].code.length) + 1
-    ra_cw = fill(0  call_pos.length + 1)
+    let ncw:XWord=call_pos.length + 1
+    if ra_cw.length <? ncw {ra_cw.resize(ncw)}
+    ra_cw.ptr[0] = 0
     loop k in [0..call_pos.length) {
-        ra_cw[k + 1] = ra_cw[k] + call_w[k]
+        ra_cw.ptr[k + 1] = ra_cw.ptr[k] + call_w.ptr[k]
     }
     if call_pos.length >? 0 {
         if ra_call_cut_storage.length <? n {
@@ -414,23 +528,42 @@ allocate_release=():>void=>$unsafe {
             ra_call_cut[pos] = int32(next)
         }
     }
-    let cross_storage:array<int64>=fill(0 nv)
-    let cross=cross_storage.ptr as ptr<XWord>
+    if ra_cross_storage.length <? nv {ra_cross_storage.resize(nv)}
+    let cross=ra_cross_storage.ptr as ptr<XWord>
+    let nc_rel:XWord=XWord(xr_ir[0].code.length)
+    let np_rel:XWord=xr_ir[0].nparams
     loop v in [0..nv) {
         if vloc[v] not=? LOC_SPILL {
+            cross[v] = 0
             continue
         }
-        cross[v] = ra_cross_w(live_start(v)  v_live[v].last)
+        if not xr_debug and v >=? np_rel and v_live[v].ndef =? 1 and v_live[v].nuse =? 1 {
+            let p0=XWord(v_live[v].first)
+            if p0 + 1 <? nc_rel {
+                let ins0=xr_code + p0
+                let tag0=int64((ins0 as ptr<uint32>)[0])
+                if tag0 >=? 19 and tag0 <=? 28 and XWord(ins0[0].dst) =? v {
+                    let nop0=(ins0 + 1)[0].op
+                    if (nop0 =? 'if_' or nop0 =? 'brif') and XWord((ins0 + 1)[0].a) =? v {
+                        vloc[v] = LOC_NONE
+                        cross[v] = 0
+                        continue
+                    }
+                }
+            }
+        }
+        cross[v] = ra_cross_w(live_start(v)  XWord(v_live[v].last))
     }
     ra_words = (n + 1) // 64 + 1
-    ra_occ = fill(0  32 * ra_words)
-    let placed_storage:array<bool>=fill(false nv)
-    let placed=placed_storage.ptr
+    let nocc:XWord=32 * ra_words
+    if ra_occ.length <? nocc {ra_occ.resize(nocc)}
+    mem_set(ra_occ.ptr as ptr<uint8> 0 nocc * 8)
+    if ra_placed_storage.length <? nv {ra_placed_storage.resize(nv)}
+    let placed=ra_placed_storage.ptr
+    if nv >? 0 {mem_set(placed as ptr<uint8> 0 nv)}
     let active=ra_active_storage.ptr
     let byreg=ra_byreg_storage.ptr
-    loop r in [0..32) {
-        byreg[r] = -1
-    }
+    mem_set(byreg as ptr<uint8> 255 256)
     let nactive:XWord=0
     let free:XWord=0xF008
     loop pos in [0..n) {
@@ -444,7 +577,7 @@ allocate_release=():>void=>$unsafe {
         }
         loop k <? nactive {
             let a:XWord=active[k]
-            if v_live[a].last <? pos {
+            if XWord(v_live[a].last) <? pos {
                 let r:XWord=vloc[a]
                 free |= 1 << r
                 byreg[r] = -1
@@ -459,7 +592,7 @@ allocate_release=():>void=>$unsafe {
             }
         }
         loop v >=? 0 {
-            if (cross[v] >? 1 or cross[v] =? -1 and v <? xr_ir[0].nparams and v_live[v].weight >? 8 * v_live[v].nuse) and xr_vtype(v) =? VI {
+            if (cross[v] >? 1 or cross[v] =? -1 and v <? xr_ir[0].nparams and v_live[v].weight >? 8 * int64(v_live[v].nuse)) and xr_vtype(v) =? VI {
                 let reg:XWord=-1
                 loop ri in [XWord(0)..XWord(5)) {
                     let r:XWord=xr_callee_pool[ri]
@@ -498,12 +631,12 @@ allocate_release=():>void=>$unsafe {
                     }
                 }
             }
-            v = v_live[v].next_start
+            v = XWord(v_live[v].next_start)
         }
     }
     loop v in [0..nv) {
         if placed[v] {
-            ra_take(vloc[v]  live_start(v) + 1  v_live[v].last + 1)
+            ra_take(vloc[v]  live_start(v) + 1  XWord(v_live[v].last) + 1)
             callee_off[vloc[v]] = 1
         }
     }
@@ -523,7 +656,7 @@ allocate_release=():>void=>$unsafe {
             }
             loop k <? nactive {
                 let a:XWord=active[k]
-                if v_live[a].last <? pos {
+                if XWord(v_live[a].last) <? pos {
                     let r:XWord=vloc[a]
                     free |= 1 << r
                     byreg[r] = -1
@@ -534,22 +667,22 @@ allocate_release=():>void=>$unsafe {
                     }
                 }
                 else {
-                    if v_live[a].last <? min_end {
-                        min_end = v_live[a].last
+                    if XWord(v_live[a].last) <? min_end {
+                        min_end = XWord(v_live[a].last)
                     }
                     k += 1
                 }
             }
         }
         loop v >=? 0 {
-            if placed[v] {
-                v = v_live[v].next_start
+            if placed[v] or vloc[v] =? LOC_NONE {
+                v = XWord(v_live[v].next_start)
                 continue
             }
             let s:XWord=live_start(v) + 1
-            let e:XWord=v_live[v].last + 1
+            let e:XWord=XWord(v_live[v].last) + 1
             let c:XWord=abs(cross[v])
-            let caller_ok=c =? 0 or 4 * c <? 2 * v_live[v].weight
+            let caller_ok=c =? 0 or c <? v_live[v].weight
             let reg:XWord=-1
             let h:XWord=hint_operand(v  pos)
             if h >=? 0 and byreg[vloc[h]] >=? 0 and active[byreg[vloc[h]]] =? h {
@@ -588,11 +721,23 @@ allocate_release=():>void=>$unsafe {
                         }
                     }
                     if reg <? 0 and caller_ok {
-                        loop ri in [XWord(0)..XWord(6)) {
-                    let r:XWord=xr_caller_pool[ri]
-                            if free & (1 << r) not=? 0 and ra_free(r  s  e) {
-                                reg = r
-                                break
+                        if v <? np_rel {
+                            let ip:XWord=0
+                            loop k in [0..v) {
+                                if xr_vtype(k) =? VI {ip += 1}
+                            }
+                            if ip <? 6 {
+                                let pr=param_pref_pool.ptr[ip]
+                                if free & (1 << pr) not=? 0 and ra_free(pr s e) {reg = pr}
+                            }
+                        }
+                        if reg <? 0 {
+                            loop ri in [XWord(0)..XWord(6)) {
+                        let r:XWord=xr_caller_pool[ri]
+                                if free & (1 << r) not=? 0 and ra_free(r  s  e) {
+                                    reg = r
+                                    break
+                                }
                             }
                         }
                     }
@@ -648,8 +793,8 @@ allocate_release=():>void=>$unsafe {
                 if xr_stats {
                     ra_pressure(active  nactive  pos)
                 }
-                if v_live[v].last <? min_end {
-                    min_end = v_live[v].last
+                if XWord(v_live[v].last) <? min_end {
+                    min_end = XWord(v_live[v].last)
                 }
                 if reg <? XMM and saved_flags[reg] {
                     callee_off[reg] = 1
@@ -658,7 +803,7 @@ allocate_release=():>void=>$unsafe {
             else {
                 vloc[v] = LOC_SPILL
             }
-            v = v_live[v].next_start
+            v = XWord(v_live[v].next_start)
         }
     }
     if ra_dump not=? "" and xr_ir[0].name =? ra_dump {
@@ -684,32 +829,38 @@ layout_frame=():>void=>$unsafe {
         }
     }
     let nv:XWord=XWord(xr_ir[0].vtypes.length)
-    vspill = fill(0 nv)
+    if vspill.length <? nv {vspill.resize(nv)}
+    else if vspill.length >? nv {vspill.truncate(nv)}
     let spill=vspill.ptr as ptr<XWord>
-    save_list = []
+    let loc_arr=vloc
+    let save_arr=vsave
+    let types=xr_types
+    save_list.clear()
     loop v in [0..nv) {
-        if vloc[v] =? LOC_SPILL or (vsave[v] and vloc[v] >=? 0) {
+        let lv=loc_arr[v]
+        if lv =? LOC_SPILL or (lv >=? 0 and save_arr[v]) {
             off += 8
-            if is_vreg_vec(xr_vtype(v)) {
-                off += 24
-            }
+            let vt=XWord(types[v])
+            if vt =? 4 or vt =? 5 {off += 24}
             spill[v] = -off
-            if vloc[v] >=? 0 {
-                save_list.push(v)
-            }
+            if lv >=? 0 {save_list.push(v)}
+        } else {spill[v] = 0}
+    }
+    let ns:XWord=if x_has_slot {XWord(xr_ir[0].slot_size.length)} else {0}
+    if ns >? 0 {
+        if slot_off.length <? ns {slot_off.resize(ns)}
+        else if slot_off.length >? ns {slot_off.truncate(ns)}
+        let slots=slot_off.ptr as ptr<XWord>
+        let sizes=xr_ir[0].slot_size.ptr
+        let aligns=xr_ir[0].slot_align.ptr
+        loop s in [0..ns) {
+            let sz:XWord=XWord(sizes[s])
+            let al:XWord=XWord(aligns[s])
+            off = (off + sz + al - 1) & ((al - 1) xor -1)
+            slots[s] = -off
         }
-    }
-    slot_off = fill(0 xr_ir[0].slot_size.length)
-    let slots=slot_off.ptr as ptr<XWord>
-    let sizes=xr_ir[0].slot_size.ptr
-    let aligns=xr_ir[0].slot_align.ptr
-    loop s in [0..xr_ir[0].slot_size.length) {
-        let sz:XWord=XWord(sizes[s])
-        let al:XWord=XWord(aligns[s])
-        off = xr_align(off + sz  al)
-        slots[s] = -off
-    }
-    frame_size = xr_align(off  16)
+    } else if slot_off.length >? 0 {slot_off.clear()}
+    frame_size = (off + 15) & -16
 }
 ra_pressure=(active:ptr<int64> n:XWord pos:XWord):>void=>$unsafe {
     let xr_callee_pool=callee_pool.ptr as ptr<XWord>

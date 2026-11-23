@@ -510,28 +510,64 @@ effect_body_moves_out = (body: int, depth: int = 0, result: bool = true):
     effect_moved_out[binding] = true
     effect_moved_out[value] = true
     effect_moves_out(source, depth + 1)
+es_seen_p: *int = null
+es_ro_owner = -1
+es_has_ro = false
+effect_scan_begin = (f: int):
+    es_seen_p = data(effect_seen)
+    if es_ro_owner == f: es_ro_owner = -1
 effect_scan_node = (f: int, n: int):
     if n == 0 or effect_footprints_only and effect_summaries[f].footprint_opaque: return
-    if effect_seen[n] == f: return
-    effect_seen[n] = f
-    k = nodes[n].kind
+    if es_seen_p == null: es_seen_p = data(effect_seen)
+    if es_seen_p[n] == f: return
+    es_seen_p[n] = f
+    np = data(nodes) + n
+    k = np[0].kind
     exact_rep = effect_exact_rep
-    if exact_rep and (k == .vardecl or k == .assign or k == .binary or k == .conv): exact_effect_representation(n)
+    if not exact_rep and ownership_decls.len() == 0:
+        if k == .block:
+            loop j in [0..nkids(n)):
+                ch = kid(n, j)
+                if ch != 0: effect_scan_node(f, ch)
+            return
+        if k == .exprstmt or k == .not_ or k == .defer_:
+            a = int(np[0].a)
+            if a != 0: effect_scan_node(f, a)
+            return
+        if k == .and_ or k == .or_ or k == .while_:
+            a = int(np[0].a)
+            if a != 0: effect_scan_node(f, a)
+            b = int(np[0].b)
+            if b != 0: effect_scan_node(f, b)
+            return
+        if k == .if_:
+            a = int(np[0].a)
+            if a != 0: effect_scan_node(f, a)
+            b = int(np[0].b)
+            if b != 0: effect_scan_node(f, b)
+            c = int(np[0].c)
+            if c != 0: effect_scan_node(f, c)
+            return
+        if k == .break_ or k == .continue_: return
+    if exact_rep and (k == .vardecl or k == .assign or k == .binary or k == .conv):
+        exact_effect_representation(n)
+        es_seen_p = data(effect_seen)
     if k == .for_:
-        marks = effect_for_marks.get(int(nodes[n].sym)) ?? []
+        marks = effect_for_marks.get(int(np[0].sym)) ?? []
         if not marks.contains(n):
             marks.push(n)
-            effect_for_marks[int(nodes[n].sym)] = marks
+            effect_for_marks[int(np[0].sym)] = marks
     # These shortened place walks omit evaluated-root visits. Keep the legacy
     # adapter conservative rather than accidentally proving a global/alias pure.
     if k == .field or k == .assign: effect_isolation_block(f, .node, n)
     hidden: int[]
-    reason = isolation_effect(n, hidden)
-    if reason != .none_: effect_isolation_block(f, reason, n)
+    if k == .call or k == .binary or k == .intrinsic or k == .index or k == .field or k == .cast or k == .conv or k == .addr or k == .lambda or k == .partial or k == .fnref or k == .pair or k == .map_lit or k == .istype:
+        reason = isolation_effect(n, hidden)
+        if reason != .none_: effect_isolation_block(f, reason, n)
     if k == .ident:
-        if nodes[n].aux == i32(int(SK.global)): effect_isolation_block(f, .global_, n)
-        else if nodes[n].aux != i32(int(SK.local)): effect_isolation_block(f, .node, n)
-        else if int(locals[int(nodes[n].sym)].flags) & (LF_CAPTURE | LF_ADDR) != 0: effect_isolation_block(f, .capture, n)
+        if np[0].aux == i32(int(SK.global)): effect_isolation_block(f, .global_, n)
+        else if np[0].aux != i32(int(SK.local)): effect_isolation_block(f, .node, n)
+        else if int(locals[int(np[0].sym)].flags) & (LF_CAPTURE | LF_ADDR) != 0: effect_isolation_block(f, .capture, n)
     if ownership_decls.len() != 0:
         if k == .block: effect_body_moves_out(n, 0, false)
         source = 0
@@ -691,9 +727,18 @@ effect_scan_node = (f: int, n: int):
             loop q in effect_for_marks.get(l) ?? []:
                 if effect_seen[q] == f and nodes[q].kind == .for_ and nodes[q].sym == i32(l) and not has_flag(q, NF_MUT) and tkind(ntype(int(nodes[q].a))) == .array: return
         fb = int(fns[f].body)
-        loop qi in [0..nkids(fb)):
-            st = kid(fb, qi)
-            if nodes[st].kind == .vardecl and not has_flag(st, NF_GLOBAL) and nodes[st].sym == i32(l) and effect_readonly_binding(st): return
+        if es_ro_owner != f:
+            es_ro_owner = f
+            es_has_ro = false
+            loop qi in [0..nkids(fb)):
+                st = kid(fb, qi)
+                if nodes[st].kind == .vardecl and not has_flag(st, NF_GLOBAL) and effect_readonly_binding(st):
+                    es_has_ro = true
+                    break
+        if es_has_ro:
+            loop qi in [0..nkids(fb)):
+                st = kid(fb, qi)
+                if nodes[st].kind == .vardecl and not has_flag(st, NF_GLOBAL) and nodes[st].sym == i32(l) and effect_readonly_binding(st): return
     if k == .field and effect_temporary_field(n):
         effect_scan_node(f, effect_field_root(n))
         return
@@ -905,9 +950,15 @@ effect_scan_node = (f: int, n: int):
             effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
     mask = isolation_children(k)
     if mask < 0: return
-    if mask & 1 != 0: effect_scan_node(f, int(nodes[n].a))
-    if mask & 2 != 0: effect_scan_node(f, int(nodes[n].b))
-    if mask & 4 != 0: effect_scan_node(f, int(nodes[n].c))
+    if mask & 1 != 0:
+        a = int(nodes[n].a)
+        if a != 0: effect_scan_node(f, a)
+    if mask & 2 != 0:
+        b = int(nodes[n].b)
+        if b != 0: effect_scan_node(f, b)
+    if mask & 4 != 0:
+        c = int(nodes[n].c)
+        if c != 0: effect_scan_node(f, c)
     if mask & 16 != 0:
         loop j in [0..nkids(n)): effect_scan_node(f, kid(n, j))
     if mask & 32 != 0:

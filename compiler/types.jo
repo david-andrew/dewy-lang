@@ -80,10 +80,16 @@ T_IVEC2 = 0
 T_IVEC3 = 0
 T_IVEC4 = 0
 
-targ = (t: int, i: int) -> int: type_access_targ(t, i)
-tkind = (t: int) -> TK: type_access_tkind(t)
-telem = (t: int) -> int: type_access_telem(t)
-has_var = (t: int) -> bool: type_access_has_var(t)
+targ = (t: int, i: int) -> int: int(data(type_args)[int(data(types)[t].args) + i])
+tkind = (t: int) -> TK:
+    tp = data(types) + t
+    if t != 0 and tp[0].kind == .var and tp[0].ref != 0: return data(types)[prune_var(int(tp[0].ref))].kind
+    tp[0].kind
+telem = (t: int) -> int:
+    tp = data(types) + t
+    if t != 0 and tp[0].kind == .var and tp[0].ref != 0: return int(data(types)[prune_var(int(tp[0].ref))].elem)
+    int(tp[0].elem)
+has_var = (t: int) -> bool: int(data(types)[t].flags) & TF_HAS_VAR != 0
 
 mk_type = (t: TypeInfo, args: int[]) -> int: type_access_mk_type(t, args)
 
@@ -101,20 +107,63 @@ var_counter = 0
 # has no type a zonk would change)
 type_binds = 0
 
-prune = (t0: int) -> int: type_access_prune(t0)
+@noinline
+prune_var = (t0: int) -> int:
+    tp = data(types)
+    t = t0
+    loop t != 0 and tp[t].kind == .var and tp[t].ref != 0: t = int(tp[t].ref)
+    t
+prune = (t: int) -> int:
+    if t != 0:
+        tp = data(types) + t
+        if tp[0].kind == .var and tp[0].ref != 0: return prune_var(int(tp[0].ref))
+    t
 
-is_int = (t: int) -> bool: type_access_is_int(t)
-is_float = (t: int) -> bool: type_access_is_float(t)
-is_numeric = (t: int) -> bool: type_access_is_numeric(t)
-is_vec = (t: int) -> bool: type_access_is_vec(t)
+is_int = (t: int) -> bool:
+    tp = data(types) + t
+    if t != 0 and tp[0].kind == .var and tp[0].ref != 0: return data(types)[prune_var(int(tp[0].ref))].kind == .int_
+    tp[0].kind == .int_
+is_float = (t: int) -> bool:
+    tp = data(types) + t
+    if t != 0 and tp[0].kind == .var and tp[0].ref != 0: return data(types)[prune_var(int(tp[0].ref))].kind == .float_
+    tp[0].kind == .float_
+is_numeric = (t: int) -> bool:
+    tp = data(types) + t
+    k = if t != 0 and tp[0].kind == .var and tp[0].ref != 0: data(types)[prune_var(int(tp[0].ref))].kind else: tp[0].kind
+    k == .int_ or k == .float_
+is_vec = (t: int) -> bool:
+    tp = data(types) + t
+    if t != 0 and tp[0].kind == .var and tp[0].ref != 0: return data(types)[prune_var(int(tp[0].ref))].kind == .vec
+    tp[0].kind == .vec
 
-struct_targ = (si: int, i: int) -> int: type_access_struct_targ(si, i)
+struct_targ = (si: int, i: int) -> int: int(data(type_args)[int(data(structs)[si].targs) + i])
 
-type_eq = (a0: int, b0: int) -> bool: type_access_type_eq(a0, b0)
+type_eq = (a0: int, b0: int) -> bool:
+    if a0 == b0: return true
+    if a0 == 0 or b0 == 0: return false
+    if not has_var(a0) and not has_var(b0): return false
+    a = prune(a0)
+    b = prune(b0)
+    if a == b: return true
+    if a == 0 or b == 0: return false
+    if not has_var(a) and not has_var(b): return false
+    type_query_equal_shape(types, structs, type_args, a, b)
 
-align_up = (x: int, a: int) -> int: type_access_align_up(x, a)
-tsize = (t: int) -> int: type_access_tsize(t)
-talign = (t: int) -> int: type_access_talign(t)
+align_up = (x: int, a: int) -> int: (x + a - 1) & ~(a - 1)
+tsize = (t: int) -> int:
+    tp = data(types) + t
+    if t != 0 and int(tp[0].flags) & TF_LAID_OUT != 0 and tp[0].kind != .var: return int(tp[0].size)
+    layout(t)
+    int(data(types)[prune(t)].size)
+talign = (t: int) -> int:
+    tp = data(types) + t
+    if t != 0 and int(tp[0].flags) & TF_LAID_OUT != 0 and tp[0].kind != .var:
+        a = int(tp[0].align)
+        return if a == 0: 1 else: a
+    layout(t)
+    a = int(data(types)[prune(t)].align)
+    if a == 0: return 1
+    a
 
 # (a type's text is cut short past 150 of its parts: types built from aliases of aliases,
 # (F, F) -> int with F = (G, G) -> int..., would spell out exponentially)
@@ -132,9 +181,23 @@ ts_params: int[]
 # ---------- unions ----------
 # A | B | C is a tagged value laid out like an enum: variant i holds member i. Members are flat,
 # distinct and sorted by type id, so A | B is B | A; T | none is T?, and a single member is itself.
-is_union = (t0: int) -> bool: type_access_is_union(t0)
+is_union = (t0: int) -> bool:
+    tp = data(types) + t0
+    if t0 != 0 and tp[0].kind == .var and tp[0].ref != 0: tp = data(types) + prune_var(int(tp[0].ref))
+    tp[0].kind == .enum_ and data(structs)[int(tp[0].st)].union_
 
-union_members = (t0: int) -> int[]: type_access_union_members(t0)
+union_members_cache: int[][]
+union_members = (t0: int) -> int[]:
+    si = int(types[prune(t0)].st)
+    if si < union_members_cache.len() and union_members_cache[si].len() > 0:
+        return union_members_cache[si]
+    out: int[]
+    n = int(structs[si].ntargs)
+    if n > 0: out.reserve(n)
+    loop i in [0..n): out.push(struct_targ(si, i))
+    if union_members_cache.len() <= si: union_members_cache.resize(si + 32)
+    union_members_cache[si] = out
+    out
 
 # mk_union supplies flat, sorted member IDs. Concrete unions are canonical;
 # unresolved members still need structural matching until inference finishes.

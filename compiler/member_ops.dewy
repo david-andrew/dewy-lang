@@ -12,21 +12,28 @@ from p"fused_ops.dewy" import (fz_note_raw)
 from p"lower_group.dewy" import (gen_stmt)
 from p"ast.jo" import (kid kids nkids nodes)
 from p"check.jo" import (locals target_macos target_windows)
-from p"member_replay.jo" import (member_scope_locals member_scopes member_templates member_trace)
-from p"util.jo" import (name_of)
+from p"expression_types.dewy" import (ntype)
+from p"facts.jo" import (fact_decided)
+from p"member_replay.jo" import (member_scope_locals member_scopes member_templates member_trace member_uniform_blocks member_uniform_owners member_words)
+from p"ownership.jo" import (ownership_decls)
+from p"refine_metadata.dewy" import (str_set_of)
+from p"util.jo" import (intern name_of)
 from p"source_queries.dewy" import (pos_str)
 from p"lower_scalars.dewy" import (push_i64)
 # Direct recursive lowering; shared state has one owner in member_lowering.jo.
 MoveWord:type=int64<overflow='wrap'>
+let member_lower_sets:array<int64>=[]
 member_lower_text=(e:MoveWord reg:MoveWord):>void=>$unsafe {
     if not member_templates.ptr[member_lower_active].positions.has(nodes.ptr[e].pos) {return}
     member_lower_literals.push(MemberLiteral[reg nodes.ptr[e].pos 1 MoveWord(nodes.ptr[e].sval)]);
+    member_lower_sets.push(0);
 }
 member_lower_word=(e:MoveWord value:MoveWord):>int64=>$unsafe {
     # A private constant distinguishes this use from unrelated equal constants.
     # It remains constant during lowering, so all ordinary decisions still apply.
     let reg=k_vreg_new(value)
     member_lower_literals.push(MemberLiteral[reg nodes.ptr[e].pos 0 value]);
+    member_lower_sets.push(str_set_of(ntype(e)));
     return reg
 }
 member_match_reg=(@m:MemberMatch a:MoveWord b:MoveWord):>bool=>$unsafe {
@@ -34,17 +41,23 @@ member_match_reg=(@m:MemberMatch a:MoveWord b:MoveWord):>bool=>$unsafe {
     let la=m.literal.ptr[a]
     let lb=m.next_literal.ptr[b]
     if la >=? 0 or lb >=? 0 {return la =? lb}
-    if is_kv(a) or is_kv(b) {return is_kv(a) and is_kv(b) and kv_of(a) =? kv_of(b)}
+    let vt=ir.vtypes.ptr
+    let ta=MoveWord(vt[a])
+    let tb=MoveWord(vt[b])
+    if ta =? 3 or tb =? 3 {return ta =? 3 and tb =? 3 and ir.kval.ptr[a] =? ir.kval.ptr[b]}
     if a <? m.first.regs or a >=? m.first.reg_end {
         let mapped=m.regs.ptr[a]
         if mapped >=? 0 {return mapped =? b}
         return a =? b
     }
-    if b <? m.next.regs or b >=? m.next.reg_end or ir.vtypes.ptr[a] not=? ir.vtypes.ptr[b] {return false}
-    if m.regs.ptr[a] >=? 0 {return m.regs.ptr[a] =? b}
-    if m.reverse.ptr[b] >=? 0 {return false}
-    m.regs.ptr[a] = b;
-    m.reverse.ptr[b] = a;
+    if b <? m.next.regs or b >=? m.next.reg_end or ta not=? tb {return false}
+    let rp=m.regs.ptr
+    let mapped=rp[a]
+    if mapped >=? 0 {return mapped =? b}
+    let revp=m.reverse.ptr
+    if revp[b] >=? 0 {return false}
+    rp[a] = b;
+    revp[b] = a;
     return true
 }
 member_match_slot=(@m:MemberMatch a:MoveWord b:MoveWord):>bool=>$unsafe {
@@ -61,93 +74,157 @@ member_match_slot=(@m:MemberMatch a:MoveWord b:MoveWord):>bool=>$unsafe {
     return true
 }
 member_match_body=(@m:MemberMatch):>bool=>$unsafe {
-    let a=m.first
-    let b=m.next
-    if a.end - a.start not=? b.end - b.start or a.zero_end - a.zeros not=? b.zero_end - b.zeros or a.literals.length not=? b.literals.length {return false}
-    loop i in [0..a.literals.length) {
-        let x=a.literals.ptr[i]
-        let y=b.literals.ptr[i]
-        if x.kind not=? y.kind or x.pos not=? y.pos {return false}
-        m.literal.ptr[x.reg] = i;
-        m.next_literal.ptr[y.reg] = i;
+    let a_start=m.first.start
+    let a_end=m.first.end
+    let b_start=m.next.start
+    let b_end=m.next.end
+    let a_zeros=m.first.zeros
+    let a_zero_end=m.first.zero_end
+    let b_zeros=m.next.zeros
+    let b_zero_end=m.next.zero_end
+    let nlit=m.first.literals.length
+    if a_end - a_start not=? b_end - b_start or a_zero_end - a_zeros not=? b_zero_end - b_zeros or nlit not=? m.next.literals.length {return false}
+    let alitp=m.first.literals.ptr
+    let blitp=m.next.literals.ptr
+    let litp=m.literal.ptr
+    let nlitp=m.next_literal.ptr
+    loop i in [0..nlit) {
+        let x=alitp + i
+        let y=blitp + i
+        if x[0].kind not=? y[0].kind or x[0].pos not=? y[0].pos {return false}
+        litp[x[0].reg] = i;
+        nlitp[y[0].reg] = i;
     }
-    let aa=member_scope_locals[a.scope]
-    let bb=member_scope_locals[b.scope]
+    let aa=member_scope_locals[m.first.scope]
+    let bb=member_scope_locals[m.next.scope]
     if aa.length not=? bb.length {return false}
+    let rp=m.regs.ptr
+    let sp=m.slots.ptr
+    let aap=aa.ptr
+    let bbp=bb.ptr
+    let locp=locals.ptr
     loop i in [0..aa.length) {
-        let x=locals.ptr[aa[i]]
-        let y=locals.ptr[bb[i]]
-        if x.type not=? y.type or x.flags not=? y.flags or (x.offset >=? 0) not=? (y.offset >=? 0) {return false}
-        if x.offset >=? 0 {
-            m.slots.ptr[MoveWord(x.offset)] = MoveWord(y.offset);
+        let x=locp + aap[i]
+        let y=locp + bbp[i]
+        if x[0].type not=? y[0].type or x[0].flags not=? y[0].flags or (x[0].offset >=? 0) not=? (y[0].offset >=? 0) {return false}
+        if x[0].offset >=? 0 {
+            sp[MoveWord(x[0].offset)] = MoveWord(y[0].offset);
         }
         else {
-            m.regs.ptr[MoveWord(x.vreg)] = MoveWord(y.vreg);
+            rp[MoveWord(x[0].vreg)] = MoveWord(y[0].vreg);
         }
     }
     let depth:MoveWord=0
-    loop i in [0..a.end - a.start) {
-        let x=ir.code.ptr[a.start + i]
-        let y=ir.code.ptr[b.start + i]
-        let op=x.op
-        if op not=? y.op or x.ty not=? y.ty or ir_positions.ptr[MoveWord(x.pos)] not=? ir_positions.ptr[MoveWord(y.pos)] {return false}
-        if op =? 'nop' {continue}
-        if op =? 'ret' or op =? 'brtable' or op =? 'zeroslots' {return false}
-        if (op =? 'load' or op =? 'store') and MoveWord(x.c) & M_INDEX not=? 0 {return false}
-        if op =? 'br' or op =? 'brif' {
-            if x.imm >=? depth {return false}
+    let codep=ir.code.ptr
+    let xp=codep + a_start
+    let xend=codep + a_end
+    let yp=codep + b_start
+    let posp=ir_positions.ptr
+    let layoutp=ir_operand_layout.ptr
+    let argsp=ir.args.ptr
+    let revp=m.reverse.ptr
+    let vtp=ir.vtypes.ptr
+    let fregs=m.first.regs
+    let freg_end=m.first.reg_end
+    let nregs=m.next.regs
+    let nreg_end=m.next.reg_end
+    loop xp <? xend {
+        let cur_x=xp
+        let cur_y=yp
+        xp+=1; yp+=1
+        let op=cur_x[0].op
+        if op not=? cur_y[0].op or cur_x[0].ty not=? cur_y[0].ty or (cur_x[0].pos not=? cur_y[0].pos and posp[MoveWord(cur_x[0].pos)] not=? posp[MoveWord(cur_y[0].pos)]) {return false}
+        match op {
+            <'nop'> => {continue}
+            <'ret'|'brtable'|'zeroslots'> => {return false}
+            <'load'|'store'> => {if MoveWord(cur_x[0].c) & M_INDEX not=? 0 {return false}}
+            <'br'|'brif'> => {if cur_x[0].imm >=? depth {return false}}
+            <'block'|'loop'|'if_'> => {depth += 1}
+            <'end'> => {
+                depth -= 1
+                if depth <? 0 {return false}
+            }
+            _ => {}
         }
-        if op =? 'block' or op =? 'loop' or op =? 'if_' {depth += 1;}
-        if op =? 'end' {
-            depth -= 1;
-            if depth <? 0 {return false}
-        }
-        let mode=ir_operand_layout.ptr[MoveWord(((ir.code.ptr + a.start + i) as ptr<int32>)[0])]
+        let mode=layoutp[MoveWord((cur_x as ptr<int32>)[0])]
         if mode & IR_DEF not=? 0 {
-            if not member_match_reg(@m MoveWord(x.dst) MoveWord(y.dst)) {return false}
+            let d1=MoveWord(cur_x[0].dst)
+            let d2=MoveWord(cur_y[0].dst)
+            if d1 >=? fregs and d1 <? freg_end and d2 >=? nregs and d2 <? nreg_end {
+                if rp[d1] =? d2 {}
+                else if rp[d1] <? 0 and revp[d2] <? 0 and litp[d1] <? 0 and nlitp[d2] <? 0 and MoveWord(vtp[d1]) not=? 3 and vtp[d1] =? vtp[d2] {
+                    rp[d1]=d2
+                    revp[d2]=d1
+                }
+                else if not member_match_reg(@m d1 d2) {return false}
+            }
+            else if not member_match_reg(@m d1 d2) {return false}
         }
-        else if x.dst not=? y.dst {return false}
+        else if cur_x[0].dst not=? cur_y[0].dst {return false}
         if op =? 'slot' {
-            if x.b not=? y.b or x.c not=? y.c {return false}
-            if not member_match_slot(@m MoveWord(x.a) MoveWord(y.a)) {return false}
+            if cur_x[0].b not=? cur_y[0].b or cur_x[0].c not=? cur_y[0].c {return false}
+            if not member_match_slot(@m MoveWord(cur_x[0].a) MoveWord(cur_y[0].a)) {return false}
         }
         else if mode & IR_ARGS not=? 0 {
-            if x.b not=? y.b {return false}
-            loop j in [0..MoveWord(x.b)) {
-                if not member_match_reg(@m MoveWord(ir.args.ptr[MoveWord(x.a) + j]) MoveWord(ir.args.ptr[MoveWord(y.a) + j])) {return false}
+            if cur_x[0].b not=? cur_y[0].b {return false}
+            let xa0=MoveWord(cur_x[0].a)
+            let ya0=MoveWord(cur_y[0].a)
+            loop j in [0..MoveWord(cur_x[0].b)) {
+                let r1=MoveWord(argsp[xa0 + j])
+                let r2=MoveWord(argsp[ya0 + j])
+                if not (r2 >=? 0 and ((r1 >=? fregs and r1 <? freg_end and rp[r1] =? r2) or (r1 =? r2 and r1 >=? 0 and r1 <? fregs and rp[r1] <? 0 and litp[r1] <? 0 and nlitp[r2] <? 0))) {
+                    if not member_match_reg(@m r1 r2) {return false}
+                }
             }
             if mode & IR_INDIRECT not=? 0 {
-                if not member_match_reg(@m MoveWord(x.c) MoveWord(y.c)) {return false}
+                let r1=MoveWord(cur_x[0].c)
+                let r2=MoveWord(cur_y[0].c)
+                if not (r2 >=? 0 and ((r1 >=? fregs and r1 <? freg_end and rp[r1] =? r2) or (r1 =? r2 and r1 >=? 0 and r1 <? fregs and rp[r1] <? 0 and litp[r1] <? 0 and nlitp[r2] <? 0))) {
+                    if not member_match_reg(@m r1 r2) {return false}
+                }
             }
-            else if x.c not=? y.c {return false}
+            else if cur_x[0].c not=? cur_y[0].c {return false}
         }
         else {
             let count=mode & 7
             if count >? 0 {
-                if not member_match_reg(@m MoveWord(x.a) MoveWord(y.a)) {return false}
+                let r1=MoveWord(cur_x[0].a)
+                let r2=MoveWord(cur_y[0].a)
+                if not (r2 >=? 0 and ((r1 >=? fregs and r1 <? freg_end and rp[r1] =? r2) or (r1 =? r2 and r1 >=? 0 and r1 <? fregs and rp[r1] <? 0 and litp[r1] <? 0 and nlitp[r2] <? 0))) {
+                    if not member_match_reg(@m r1 r2) {return false}
+                }
             }
-            else if x.a not=? y.a {return false}
+            else if cur_x[0].a not=? cur_y[0].a {return false}
             if count >? 1 {
-                if not member_match_reg(@m MoveWord(x.b) MoveWord(y.b)) {return false}
+                let r1=MoveWord(cur_x[0].b)
+                let r2=MoveWord(cur_y[0].b)
+                if not (r2 >=? 0 and ((r1 >=? fregs and r1 <? freg_end and rp[r1] =? r2) or (r1 =? r2 and r1 >=? 0 and r1 <? fregs and rp[r1] <? 0 and litp[r1] <? 0 and nlitp[r2] <? 0))) {
+                    if not member_match_reg(@m r1 r2) {return false}
+                }
             }
-            else if x.b not=? y.b {return false}
+            else if cur_x[0].b not=? cur_y[0].b {return false}
             if count >? 2 {
-                if not member_match_reg(@m MoveWord(x.c) MoveWord(y.c)) {return false}
+                let r1=MoveWord(cur_x[0].c)
+                let r2=MoveWord(cur_y[0].c)
+                if not (r2 >=? 0 and ((r1 >=? fregs and r1 <? freg_end and rp[r1] =? r2) or (r1 =? r2 and r1 >=? 0 and r1 <? fregs and rp[r1] <? 0 and litp[r1] <? 0 and nlitp[r2] <? 0))) {
+                    if not member_match_reg(@m r1 r2) {return false}
+                }
             }
-            else if x.c not=? y.c {return false}
+            else if cur_x[0].c not=? cur_y[0].c {return false}
         }
-        if op =? 'daddr' and m.literal.ptr[MoveWord(x.dst)] >=? 0 {continue}
-        if x.imm not=? y.imm {return false}
+        if op =? 'daddr' and litp[MoveWord(cur_x[0].dst)] >=? 0 {continue}
+        if cur_x[0].imm not=? cur_y[0].imm {return false}
     }
     if depth not=? 0 {return false}
-    loop i in [0..a.zero_end - a.zeros) {
-        let x=lower_zeros.ptr[a.zeros + i]
-        let y=lower_zeros.ptr[b.zeros + i]
-        if x.mark >> 32 <? a.start or y.mark >> 32 <? b.start {return false}
-        if (x.mark >> 32) - a.start not=? (y.mark >> 32) - b.start or x.count not=? y.count {return false}
-        loop j in [0..x.count) {
-            let xx:MoveWord=MoveWord(ir.args.ptr[x.start + j])
-            let yy:MoveWord=MoveWord(ir.args.ptr[y.start + j])
+    let lzp=lower_zeros.ptr
+    loop i in [0..a_zero_end - a_zeros) {
+        let x=lzp + (a_zeros + i)
+        let y=lzp + (b_zeros + i)
+        if x[0].mark >> 32 <? a_start or y[0].mark >> 32 <? b_start {return false}
+        if (x[0].mark >> 32) - a_start not=? (y[0].mark >> 32) - b_start or x[0].count not=? y[0].count {return false}
+        loop j in [0..x[0].count) {
+            let xx:MoveWord=MoveWord(argsp[x[0].start + j])
+            let yy:MoveWord=MoveWord(argsp[y[0].start + j])
             if xx & 1 not=? yy & 1 {return false}
             if xx & 1 not=? 0 {
                 if not member_match_reg(@m xx // 2 yy // 2) {return false}
@@ -263,6 +340,23 @@ member_lower_emit=(parts:array<MemberLowered> index:MoveWord=-1):>int64=>$unsafe
     e_brif(e_bin('ltu' VI row limit) 0);
     return e_end()
 }
+let member_env_checked:bool=false
+let member_env_skip:bool=false
+let member_regs_buf:array<int64>=[]
+let member_rev_buf:array<int64>=[]
+let member_slots_buf:array<int64>=[]
+let member_srev_buf:array<int64>=[]
+let member_lit_buf:array<int64>=[]
+let member_nlit_buf:array<int64>=[]
+
+member_grow_neg=(@buf:array<int64> need:MoveWord):>void=>$unsafe {
+    let old=buf.length
+    if old >=? need {return}
+    buf.resize(need)
+    let p=buf.ptr
+    loop i in [old..need) {p[i] = -1}
+}
+
 member_lower_block=(b:MoveWord):>bool=>$unsafe {
     # Foreign OS formats keep byte identity until their runtime is exercised.
     if target_windows or target_macos {return false}
@@ -270,19 +364,31 @@ member_lower_block=(b:MoveWord):>bool=>$unsafe {
     let index=member_scopes.get(kid(b 0)) ?? (-1)
     if index <? 0 or not member_templates.ptr[index].okay or nkids(b) not=? member_templates.ptr[index].texts.length {return false}
     # A checking-only mode is also a byte-identity oracle for fallback lowering.
-    if (env("DEWY_MEMBERS") ?? "") =? "checked" {return false}
+    if not member_env_checked {
+        member_env_checked=true
+        member_env_skip=(env("DEWY_MEMBERS") ?? "") =? "checked"
+    }
+    if member_env_skip {return false}
+    let nk=nkids(b)
     let compact=member_templates.ptr[index].compact and member_templates.ptr[index].block =? b
     if not compact {
-        loop scope in kids(b) {
+        loop i in [0..nk) {
+            let scope=kid(b i)
             if (member_scopes.get(scope) ?? (-1)) not=? index or not member_scope_locals.has(scope) {return false}
         }
     }
+    let t=member_templates.ptr[index]
+    let uniform=not compact and nk >=? 3 and ownership_decls.length =? 0 and t.requests.length =? 0 and t.refinements.length =? 0 and (not fact_decided.has(t.owner) or member_uniform_owners.has(t.owner) or member_uniform_blocks.has(b))
     let parts:array<MemberLowered>=[]
-    loop i in [0..nkids(b)) {
+    let first_sets:array<int64>=[]
+    let second_sets:array<int64>=[]
+    let limit=if uniform {2} else {nk}
+    loop i in [0..limit) {
         let scope=kid(b i)
         let part=MemberLowered[start = ir.code.length regs = ir.vtypes.length slots = ir.slot_size.length zeros = lower_zeros.length scope = scope]
         member_lower_active=index
         member_lower_literals=[]
+        member_lower_sets=[]
         cur_block=b
         cur_block_i=i
         gen_stmt(if compact {member_templates.ptr[index].body} else {scope});
@@ -292,6 +398,8 @@ member_lower_block=(b:MoveWord):>bool=>$unsafe {
         part.slot_end = ir.slot_size.length;
         part.zero_end = lower_zeros.length;
         part.literals = member_lower_literals;
+        if i =? 0 {first_sets=member_lower_sets}
+        else if i =? 1 {second_sets=member_lower_sets}
         parts.push(part);
         if compact {break}
     }
@@ -302,15 +410,146 @@ member_lower_block=(b:MoveWord):>bool=>$unsafe {
         return true
     }
     let okay=first.literals.length >? 0
-    let m=MemberMatch[first = first regs = fill(-1 ir.vtypes.length) reverse = fill(-1 ir.vtypes.length) slots = fill(-1 ir.slot_size.length) slot_reverse = fill(-1 ir.slot_size.length) literal = fill(-1 ir.vtypes.length) next_literal = fill(-1 ir.vtypes.length)]
-    loop i in [1..parts.length) {
-        if not okay {break}
-        m.next = parts.ptr[i];
-        okay=member_match_body(@m)
-        # Only template keys are reused. Candidate ranges never overlap, so
-        # reverse maps and literal indices need no clearing between members.
-        loop v in [first.regs..first.reg_end) {m.regs.ptr[v] = -1;}
-        loop s in [first.slots..first.slot_end) {m.slots.ptr[s] = -1;}
+    if okay {
+        let nv=ir.vtypes.length
+        let ns=ir.slot_size.length
+        member_grow_neg(@member_regs_buf nv)
+        member_grow_neg(@member_rev_buf nv)
+        member_grow_neg(@member_slots_buf ns)
+        member_grow_neg(@member_srev_buf ns)
+        member_grow_neg(@member_lit_buf nv)
+        member_grow_neg(@member_nlit_buf nv)
+        let m=MemberMatch[first = first regs = member_regs_buf reverse = member_rev_buf slots = member_slots_buf slot_reverse = member_srev_buf literal = member_lit_buf next_literal = member_nlit_buf]
+        member_regs_buf=[]
+        member_rev_buf=[]
+        member_slots_buf=[]
+        member_srev_buf=[]
+        member_lit_buf=[]
+        member_nlit_buf=[]
+        loop i in [1..parts.length) {
+            if not okay {break}
+            m.next = parts.ptr[i];
+            okay=member_match_body(@m)
+            loop v in [first.regs..first.reg_end) {m.regs.ptr[v] = -1;}
+            loop s in [first.slots..first.slot_end) {m.slots.ptr[s] = -1;}
+            loop l in first.literals {m.literal.ptr[l.reg] = -1;}
+            loop l in m.next.literals {m.next_literal.ptr[l.reg] = -1;}
+            loop v in [m.next.regs..m.next.reg_end) {m.reverse.ptr[v] = -1;}
+            loop s in [m.next.slots..m.next.slot_end) {m.slot_reverse.ptr[s] = -1;}
+            loop loc in member_scope_locals[first.scope] {
+                let x=locals.ptr[loc]
+                if x.offset >=? 0 {m.slots.ptr[MoveWord(x.offset)] = -1;}
+                else {m.regs.ptr[MoveWord(x.vreg)] = -1;}
+            }
+        }
+        member_regs_buf=m.regs
+        member_rev_buf=m.reverse
+        member_slots_buf=m.slots
+        member_srev_buf=m.slot_reverse
+        member_lit_buf=m.literal
+        member_nlit_buf=m.next_literal
+    }
+    if uniform {
+        let fast_ok=okay
+        if fast_ok {
+            let nl=first.literals.length
+            let text1=t.texts.ptr[1]
+            let sval1=MoveWord(intern(text1))
+            let s1l=parts.ptr[1].literals.ptr
+            let f0l=first.literals.ptr
+            loop j in [0..nl) {
+                if first_sets.ptr[j] not=? second_sets.ptr[j] {fast_ok=false; break}
+                if f0l[j].kind =? 1 {
+                    if s1l[j].value not=? sval1 {fast_ok=false; break}
+                } else {
+                    let st=first_sets.ptr[j]
+                    if st =? 0 or not member_words.has(st) or s1l[j].value not=? member_words[st][text1] {fast_ok=false; break}
+                }
+            }
+        }
+        if fast_ok {
+            let nl=first.literals.length
+            let f0l=first.literals.ptr
+            let fsp=first_sets.ptr
+            let txtp=t.texts.ptr
+            let has_text=false
+            loop j in [0..nl) {if f0l[j].kind =? 1 {has_text=true; break}}
+            parts.reserve(nk)
+            loop i in [2..nk) {
+                let scope=kid(b i)
+                let text=txtp[i]
+                if has_text {str_data(text);}
+                let sval=MoveWord(intern(text))
+                let lits:array<MemberLiteral>=[]
+                lits.reserve(nl)
+                loop j in [0..nl) {
+                    let fl=f0l[j]
+                    let val=if fl.kind =? 1 {sval} else {member_words[fsp[j]][text]}
+                    lits.push(MemberLiteral[fl.reg fl.pos fl.kind val])
+                }
+                parts.push(MemberLowered[scope = scope literals = lits])
+            }
+            member_lower_layout(first nk - 1)
+        } else {
+            # Fallback: lower remaining scopes ordinarily and match if still okay.
+            let prev_parts=parts.length
+            loop i in [prev_parts..nk) {
+                let scope=kid(b i)
+                let part=MemberLowered[start = ir.code.length regs = ir.vtypes.length slots = ir.slot_size.length zeros = lower_zeros.length scope = scope]
+                member_lower_active=index
+                member_lower_literals=[]
+                member_lower_sets=[]
+                cur_block=b
+                cur_block_i=i
+                gen_stmt(scope);
+                member_lower_active=-1
+                part.end = ir.code.length;
+                part.reg_end = ir.vtypes.length;
+                part.slot_end = ir.slot_size.length;
+                part.zero_end = lower_zeros.length;
+                part.literals = member_lower_literals;
+                parts.push(part);
+            }
+            if okay {
+                let nv=ir.vtypes.length
+                let ns=ir.slot_size.length
+                member_grow_neg(@member_regs_buf nv)
+                member_grow_neg(@member_rev_buf nv)
+                member_grow_neg(@member_slots_buf ns)
+                member_grow_neg(@member_srev_buf ns)
+                member_grow_neg(@member_lit_buf nv)
+                member_grow_neg(@member_nlit_buf nv)
+                let m=MemberMatch[first = first regs = member_regs_buf reverse = member_rev_buf slots = member_slots_buf slot_reverse = member_srev_buf literal = member_lit_buf next_literal = member_nlit_buf]
+                member_regs_buf=[]
+                member_rev_buf=[]
+                member_slots_buf=[]
+                member_srev_buf=[]
+                member_lit_buf=[]
+                member_nlit_buf=[]
+                loop i in [prev_parts..parts.length) {
+                    if not okay {break}
+                    m.next = parts.ptr[i];
+                    okay=member_match_body(@m)
+                    loop v in [first.regs..first.reg_end) {m.regs.ptr[v] = -1;}
+                    loop s in [first.slots..first.slot_end) {m.slots.ptr[s] = -1;}
+                    loop l in first.literals {m.literal.ptr[l.reg] = -1;}
+                    loop l in m.next.literals {m.next_literal.ptr[l.reg] = -1;}
+                    loop v in [m.next.regs..m.next.reg_end) {m.reverse.ptr[v] = -1;}
+                    loop s in [m.next.slots..m.next.slot_end) {m.slot_reverse.ptr[s] = -1;}
+                    loop loc in member_scope_locals[first.scope] {
+                        let x=locals.ptr[loc]
+                        if x.offset >=? 0 {m.slots.ptr[MoveWord(x.offset)] = -1;}
+                        else {m.regs.ptr[MoveWord(x.vreg)] = -1;}
+                    }
+                }
+                member_regs_buf=m.regs
+                member_rev_buf=m.reverse
+                member_slots_buf=m.slots
+                member_srev_buf=m.slot_reverse
+                member_lit_buf=m.literal
+                member_nlit_buf=m.next_literal
+            }
+        }
     }
     if member_trace {print("member lowering {pos_str(nodes.ptr[b].pos)}: {okay}, {parts.length} members, {first.end - first.start} instructions\n" file=stderr);}
     if okay {member_lower_emit(parts);}

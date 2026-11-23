@@ -12,7 +12,7 @@ $runtime_checks
 # The output is presized and filled through its pointer, without a temporary record per token.
 from p"dewy_tokens.dewy" import (DewyLexeme DewyKind DewyToken dn_token_kind dn_single_token)
 from p"dewy_lex.dewy" import (DewyLexer dx_quote_end dx_block_comment_end dx_block_comment_error dx_lazy_end)
-from p"intern.dewy" import (hash_bytes name_find)
+from p"intern.dewy" import (hash_bytes name_find_raw same_bytes)
 DewyLexState:type=[
     skip:bool lazy:bool metatags:int64 space:bool newline:bool
     true_id:int64 false_id:int64 is_id:int64 isnt_id:int64 in_id:int64
@@ -53,284 +53,489 @@ dx_word_assign=(word:DewyToken bytes:ptr<uint8> at:int64 stop:int64):>DewyToken=
 }
 # classes has 256 entries, symbols 128*128, words word_count; the adapter holds them
 # immutable. out has capacity slots and is unique; resizing refreshes slots immediately.
-dx_lex=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<int64> source:string begin:int64 stop:int64 intern_names:bool classes:ptr<uint8> symbols:ptr<DewyToken> words:ptr<DewyToken> @out:array<DewyLexeme> capacity:int64):>int64=>$unsafe {
+DxWord:type=int64<overflow='wrap'>
+DxUWord:type=uint64<overflow='wrap'>
+dx_grow_out=(@out:array<DewyLexeme> cap0:DxWord):>DxWord=>$unsafe {
+    let nc:DxWord=cap0 * 2
+    out.reserve(nc)
+    __set_len(out nc)
+    nc
+}
+
+dx_lex_number=(@lx:DewyLexer host:ptr<DewyLexHost> bytes:ptr<uint8> start:DxWord stopw:DxWord classes:ptr<uint8> sl:ptr<DewyLexeme>):>DxWord=>$unsafe {
+    let i:DxWord=start
+    let c=bytes[i]
+    let decimal=true
+    let digits:DxWord=start
+    let kind:DewyKind='source_integer'
+    if (((c =? b'0') and (i + 1 <? stopw)) and dx_base_prefix(bytes i stopw classes)) {
+        decimal=(bytes[i + 1] =? b'd')
+        i+=2
+        digits=i
+    }
+    if ((i <? stopw) and ((bytes[i] =? b'"') or (bytes[i] =? b'\''))) {
+        i=dx_lex_quote(@lx host bytes i stopw false)
+        kind='based_string'
+    }
+    else {
+        let mask:uint8=(if decimal 4 else 8)
+        loop ((i <? stopw) and ((classes[bytes[i]] & mask) not=? 0)) {
+            i+=1
+        }
+        if (i =? digits) {
+            host[0].error(start "expected digits after the base prefix");
+        }
+        kind=(if decimal 'source_integer' else 'integer')
+        if (((decimal and (i + 1 <? stopw)) and (bytes[i] =? b'.')) and (b'0' <=? bytes[i + 1] and bytes[i + 1] <=? b'9')) {
+            i+=1
+            loop ((i <? stopw) and ((classes[bytes[i]] & 4) not=? 0)) {
+                i+=1
+            }
+            kind='source_real'
+        }
+        if (((decimal and (i + 1 <? stopw)) and ((bytes[i] =? b'e') or (bytes[i] =? b'E'))) and (((b'0' <=? bytes[i + 1] and bytes[i + 1] <=? b'9') or (bytes[i + 1] =? b'+')) or (bytes[i + 1] =? b'-'))) {
+            i+=1
+            if ((i <? stopw) and ((bytes[i] =? b'+') or (bytes[i] =? b'-'))) {
+                i+=1
+            }
+            let first:DxWord=i
+            loop ((i <? stopw) and ((classes[bytes[i]] & 4) not=? 0)) {
+                i+=1
+            }
+            if (i =? first) {
+                host[0].error(start "expected exponent digits");
+            }
+            kind='source_real'
+        }
+    }
+    sl[0].kind=kind
+    sl[0].name=0
+    sl[0].start=start
+    sl[0].stop=i
+    sl[0].symbol='none'
+    i
+}
+
+dx_lex_unicode=(@state:DewyLexState host:ptr<DewyLexHost> source:string bytes:ptr<uint8> start0:DxWord stopw:DxWord classes:ptr<uint8> words:ptr<DewyToken> slots:ptr<DewyLexeme> @count:DxWord @flags:DxWord):>DxWord=>$unsafe {
+    let start:DxWord=start0
+    let i:DxWord=start0
+    if count >? 0 and slots[count - 1].stop =? start and slots[count - 1].kind =? 'identifier' {
+        count-=1
+        start=slots[count].start
+        flags=(if slots[count].space {1} else {0}) | (if slots[count].newline {2} else {0})
+        i=start
+    }
+    loop i <? stopw and (classes[bytes[i]] & 34) not=? 0 {i+=1}
+    let id=host[0].canonical(source start i)
+    let kind:DewyKind='identifier'
+    let symbol:DewyToken='none'
+    if id <? state.word_count {
+        symbol=words[id]
+        if symbol not=? 'none' and i <? stopw and bytes[i] =? b'=' {
+            let combined:DewyToken=dx_word_assign(symbol bytes i stopw)
+            if combined not=? 'none' {symbol=combined; kind='op'; i+=1}
+        }
+        if id =? state.true_id or id =? state.false_id {kind='boolean'}
+        else if i <? stopw and bytes[i] =? b'?' {
+            if id =? state.is_id {symbol='is_type'; kind='op'; i+=1}
+            else if id =? state.isnt_id {symbol='isnt_type'; kind='op'; i+=1}
+            else if id =? state.in_id {symbol='contains'; kind='op'; i+=1}
+        }
+    }
+    let sl=slots + count
+    sl[0].kind=kind
+    sl[0].name=int32<overflow='wrap'>(id)
+    sl[0].start=start
+    sl[0].stop=i
+    sl[0].space=(flags & 1) not=? 0
+    sl[0].newline=(flags & 2) not=? 0
+    sl[0].symbol=symbol
+    count+=1
+    flags=0
+    i
+}
+
+dx_lex_no_intern=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<int64> source:string begin:int64 stop:int64 classes:ptr<uint8> symbols:ptr<DewyToken> words:ptr<DewyToken> @out:array<DewyLexeme> capacity:int64):>int64=>$unsafe {
     let bytes=(source as array<uint8>).ptr
     let slots=out.ptr
-    let count:int64=0
-    let i:int64=begin
+    let count:DxWord=0
+    let i:DxWord=begin
+    let cap:DxWord=capacity
+    let stopw:DxWord=stop
     let spaced=false
     let newline=false
     let skip=state.skip
-    let nesting:int64=0
-    loop (i <? stop) {
+    let nesting:DxWord=0
+    let sym_tags=symbols as ptr<uint32>
+    loop i <? stopw {
         let c=bytes[i]
-        if ((classes[c] & 16) not=? 0) {
+        if (classes[c] & 16) not=? 0 {
             spaced=true
-            if (c =? b'\n') {
-                newline=true
-            }
+            if c =? b'\n' {newline=true}
             i+=1
-            loop (i <? stop) {
-                c=bytes[i]
-                if (c =? b'\n') {
-                    newline=true
-                }
-                else if ((classes[c] & 16) =? 0) {
-                    break
-                }
+            loop i <? stopw and (classes[bytes[i]] & 16) not=? 0 {
+                if bytes[i] =? b'\n' {newline=true}
                 i+=1
             }
             continue
         }
-        if (c =? b'\\') {
-            let e:int64=(int64<overflow='wrap'>(i) + 1)
-            loop ((e <? stop) and (((bytes[e] =? b' ') or (bytes[e] =? b'\t')) or (bytes[e] =? b'\r'))) {
-                e+=1
-            }
-            if ((e <? stop) and (bytes[e] =? b'\n')) {
-                spaced=true
-                i=(int64<overflow='wrap'>(e) + 1)
-                continue
-            }
-        }
-        if (((c =? b'#') and ((int64<overflow='wrap'>(i) + 1) <? stop)) and (bytes[(int64<overflow='wrap'>(i) + 1)] =? b'\{')) {
-            let e:int64=dx_block_comment_end(bytes i stop)
-            if (e <? 0) {
-                dx_block_comment_error(@lx i);
-                host[0].problem();
-            }
-            comments.push(i);
-            comments.push(e);
-            if host[0].has_newline(source i e) {
-                newline=true
-            }
-            spaced=true
-            i=e
-            continue
-        }
-        if (c =? b'#') {
-            loop ((i <? stop) and (bytes[i] not=? b'\n')) {
-                i+=1
-            }
-            spaced=true
-            continue
-        }
-        let start:int64=i
+        let start:DxWord=i
         let kind:DewyKind='op'
         let symbol:DewyToken='none'
-        let name:int32=0
-        if (((c =? b'r') and ((int64<overflow='wrap'>(i) + 1) <? stop)) and ((bytes[(int64<overflow='wrap'>(i) + 1)] =? b'"') or (bytes[(int64<overflow='wrap'>(i) + 1)] =? b'\''))) {
-            i=dx_lex_quote(@lx host bytes (int64<overflow='wrap'>(i) + 1) stop true)
-            kind='rawquoted'
-        }
-        else if ((classes[c] & 1) not=? 0) {
-            if (c >=? 0x80) {
-                if (((count >? 0) and (slots[(int64<overflow='wrap'>(count) - 1)].stop =? start)) and (slots[(int64<overflow='wrap'>(count) - 1)].kind =? 'identifier')) {
-                    count-=1
-                    start=slots[count].start
-                    spaced=slots[count].space
-                    newline=slots[count].newline
-                    i=start
+        if (classes[c] & 1) not=? 0 {
+            if c =? b'r' and i + 1 <? stopw and (bytes[i + 1] =? b'"' or bytes[i + 1] =? b'\'') {
+                i=dx_lex_quote(@lx host bytes (i + 1) stopw true)
+                kind='rawquoted'
+            } else {
+                if c >=? 0x80 and count >? 0 and slots[count - 1].stop =? start and slots[count - 1].kind =? 'identifier' {
+                    count-=1; start=slots[count].start; spaced=slots[count].space; newline=slots[count].newline; i=start
                 }
-                loop ((i <? stop) and ((classes[bytes[i]] & 34) not=? 0)) {
-                    i+=1
-                }
-            }
-            else {
-                i+=1
-                loop ((i <? stop) and ((classes[bytes[i]] & 2) not=? 0)) {
-                    i+=1
-                }
-            }
-            kind='identifier'
-            if intern_names {
-                let id:int64=0
-                if c >=? 0x80 {id=host[0].canonical(source start i)} else {
-                    let n:int64=int64<overflow='wrap'>(i) - int64<overflow='wrap'>(start)
-                    let p=bytes + start
-                    let h=hash_bytes(p n)
-                    id=name_find(@state.texts[0] @state.hashes[0] @state.names[0] p n h)
-                    if id <? 0 {id=host[0].new_name(source start n h)}
-                }
-                name=int32<overflow='wrap'>(id)
-                if (id <? state.word_count) {
-                    symbol=words[id]
-                }
-                if ((id =? state.true_id) or (id =? state.false_id)) {
-                    kind='boolean'
-                }
-                let combined:DewyToken=dx_word_assign(symbol bytes i stop)
-                if (combined not=? 'none') {
-                    symbol=combined
-                    kind='op'
-                    i+=1
-                }
-                if ((i <? stop) and (bytes[i] =? b'?')) {
-                    let query:DewyToken='none'
-                    if (id =? state.is_id) {
-                        query='is_type'
-                    }
-                    else if (id =? state.isnt_id) {
-                        query='isnt_type'
-                    }
-                    else if (id =? state.in_id) {
-                        query='contains'
-                    }
-                    if (query not=? 'none') {
-                        symbol=query
-                        kind='op'
-                        i+=1
-                    }
-                }
-            }
-            else {
+                let m:uint8=if c <? 0x80 {2} else {34}
+                if c <? 0x80 {i+=1}
+                loop i <? stopw and (classes[bytes[i]] & m) not=? 0 {i+=1}
+                kind='identifier'
                 let value:string=host[0].slice(source start i)
-                if ((value =? "true") or (value =? "false")) {
-                    kind='boolean'
+                if value =? "true" or value =? "false" {kind='boolean'}
+                if (value =? "is" or value =? "isnt" or value =? "in") and i <? stopw and bytes[i] =? b'?' {
+                    value="{value}?"; i+=1; kind='op'
                 }
-                if (((((value =? "is") or (value =? "isnt")) or (value =? "in")) and (i <? stop)) and (bytes[i] =? b'?')) {
-                    value="{value}?"
-                    i+=1
-                    kind='op'
-                }
-                if (kind not=? 'boolean') {
-                    symbol=dn_token_kind(value)
-                }
-                let combined:DewyToken=dx_word_assign(symbol bytes i stop)
-                if (combined not=? 'none') {
-                    symbol=combined
-                    kind='op'
-                    i+=1
+                if kind not=? 'boolean' {symbol=dn_token_kind(value)}
+                if symbol not=? 'none' and i <? stopw and bytes[i] =? b'=' {
+                    let combined:DewyToken=dx_word_assign(symbol bytes i stopw)
+                    if combined not=? 'none' {symbol=combined; kind='op'; i+=1}
                 }
             }
-        }
-        else if (c =? b'$') {
-            state.metatags+=1
-            i+=1
-            loop ((i <? stop) and ((classes[bytes[i]] & 2) not=? 0)) {
-                i+=1
+        } else if c =? b'#' {
+            if i + 1 <? stopw and bytes[i + 1] =? b'\{' {
+                let e:DxWord=dx_block_comment_end(bytes i stopw)
+                if e <? 0 {dx_block_comment_error(@lx i); host[0].problem();}
+                comments.push(i); comments.push(e)
+                if host[0].has_newline(source i e) {newline=true}
+                spaced=true; i=e; continue
             }
-            if (i =? (int64<overflow='wrap'>(start) + 1)) {
-                host[0].error(start "expected a name after $");
-            }
-            kind='metatag'
-        }
-        else if (b'0' <=? c and c <=? b'9') {
-            let decimal=true
-            let digits:int64=start
-            if (((c =? b'0') and ((int64<overflow='wrap'>(i) + 1) <? stop)) and dx_base_prefix(bytes i stop classes)) {
-                decimal=(bytes[(int64<overflow='wrap'>(i) + 1)] =? b'd')
-                i+=2
-                digits=i
-            }
-            if ((i <? stop) and ((bytes[i] =? b'"') or (bytes[i] =? b'\''))) {
-                i=dx_lex_quote(@lx host bytes i stop false)
-                kind='based_string'
-            }
-            else {
-                let mask:uint8=(if decimal 4 else 8)
-                loop ((i <? stop) and ((classes[bytes[i]] & mask) not=? 0)) {
-                    i+=1
-                }
-                if (i =? digits) {
-                    host[0].error(start "expected digits after the base prefix");
-                }
-                kind=(if decimal 'source_integer' else 'integer')
-                if (((decimal and ((int64<overflow='wrap'>(i) + 1) <? stop)) and (bytes[i] =? b'.')) and (b'0' <=? bytes[(int64<overflow='wrap'>(i) + 1)] and bytes[(int64<overflow='wrap'>(i) + 1)] <=? b'9')) {
-                    i+=1
-                    loop ((i <? stop) and ((classes[bytes[i]] & 4) not=? 0)) {
-                        i+=1
-                    }
-                    kind='source_real'
-                }
-                if (((decimal and ((int64<overflow='wrap'>(i) + 1) <? stop)) and ((bytes[i] =? b'e') or (bytes[i] =? b'E'))) and (((b'0' <=? bytes[(int64<overflow='wrap'>(i) + 1)] and bytes[(int64<overflow='wrap'>(i) + 1)] <=? b'9') or (bytes[(int64<overflow='wrap'>(i) + 1)] =? b'+')) or (bytes[(int64<overflow='wrap'>(i) + 1)] =? b'-'))) {
-                    i+=1
-                    if ((i <? stop) and ((bytes[i] =? b'+') or (bytes[i] =? b'-'))) {
-                        i+=1
-                    }
-                    let first:int64=i
-                    loop ((i <? stop) and ((classes[bytes[i]] & 4) not=? 0)) {
-                        i+=1
-                    }
-                    if (i =? first) {
-                        host[0].error(start "expected exponent digits");
-                    }
-                    kind='source_real'
-                }
-            }
-        }
-        else if ((c =? b'"') or (c =? b'\'')) {
-            i=dx_lex_quote(@lx host bytes i stop false)
-            kind='quoted'
-        }
-        else {
-            let next:uint8=0
-            if ((int64<overflow='wrap'>(start) + 1) <? stop) {
-                next=bytes[(int64<overflow='wrap'>(start) + 1)]
-            }
-            if ((c <? 128) and (next <? 128)) {
-                symbol=symbols[(int64<overflow='wrap'>(int64(c)) * 128 + int64<overflow='wrap'>(int64(next)))]
-            }
-            if (symbol =? 'none') {
-                symbol=dx_symbol(bytes start stop)
-                if (symbol =? 'none') {
-                    host[0].error(start "unexpected character in Dewy source");
-                }
-            }
+            i=__find_newline(bytes i stopw); spaced=true; continue
+        } else if c =? b'\\' {
+            let e:DxWord=i + 1
+            loop e <? stopw and (bytes[e] =? b' ' or bytes[e] =? b'\t' or bytes[e] =? b'\r') {e+=1}
+            if e <? stopw and bytes[e] =? b'\n' {spaced=true; i=e + 1; continue}
+            symbol=dx_symbol(bytes start stopw)
+            if symbol =? 'none' {host[0].error(start "unexpected character in Dewy source");}
             i+=dx_token_width(symbol)
-        }
-        if (count =? capacity) {
-            capacity*=2
-            out.resize(capacity);
-            slots=out.ptr
-        }
-        slots[count].kind=kind
-        slots[count].name=name
-        slots[count].start=start
-        slots[count].stop=i
-        slots[count].space=spaced
-        slots[count].newline=newline
-        slots[count].symbol=symbol
-        count+=1
-        spaced=false
-        newline=false
-        if (skip and (symbol not=? 'none')) {
-            if (((symbol =? 'lparen') or (symbol =? 'lbrack')) or (symbol =? 'lbrace')) {
-                nesting+=1
-            }
-            else if (((symbol =? 'rparen') or (symbol =? 'rbrack')) or (symbol =? 'rbrace')) {
-                nesting-=1
-            }
-            else if ((symbol =? 'function') and (nesting =? 0)) {
-                let j:int64=i
-                loop ((j <? stop) and ((bytes[j] =? b' ') or (bytes[j] =? b'\t'))) {
-                    j+=1
+        } else if c =? b'$' {
+            state.metatags+=1; i+=1
+            loop i <? stopw and (classes[bytes[i]] & 2) not=? 0 {i+=1}
+            if i =? start + 1 {host[0].error(start "expected a name after $");}
+            kind='metatag'
+        } else if b'0' <=? c and c <=? b'9' {
+            if count =? cap {cap=dx_grow_out(@out cap); slots=out.ptr}
+            let sl=slots + count
+            i=dx_lex_number(@lx host bytes start stopw classes sl)
+            sl[0].space=spaced; sl[0].newline=newline
+            count+=1; spaced=false; newline=false; continue
+        } else if c =? b'"' or c =? b'\'' {
+            i=dx_lex_quote(@lx host bytes i stopw false); kind='quoted'
+        } else {
+            let next:uint8=if start + 1 <? stopw {bytes[start + 1]} else {0}
+            if c <? 128 and next <? 128 {
+                let idx=(DxWord(c) << 7) | DxWord(next)
+                symbol=symbols[idx]
+                let stag=DxWord(sym_tags[idx])
+                if stag >=? 1 and stag <=? 25 {i+=1}
+                else if stag >=? 37 and stag <=? 56 {i+=2}
+                else if stag >=? 31 and stag <=? 36 {i+=3}
+                else if stag not=? 0 {i+=dx_token_width(symbol)}
+                else {
+                    symbol=dx_symbol(bytes start stopw)
+                    if symbol =? 'none' {host[0].error(start "unexpected character in Dewy source");}
+                    i+=dx_token_width(symbol)
                 }
-                if ((j <? stop) and (bytes[j] =? b'\{')) {
-                    let e:int64=dx_lazy_end(bytes j stop)
-                    if (e >? 0) {
-                        if (count =? capacity) {
-                            capacity*=2
-                            out.resize(capacity);
-                            slots=out.ptr
-                        }
-                        slots[count].kind='lazy_body'
-                        slots[count].name=0
-                        slots[count].start=j
-                        slots[count].stop=e
-                        slots[count].space=(j >? i)
-                        slots[count].newline=false
-                        slots[count].symbol='none'
-                        count+=1
-                        state.lazy=true
-                        i=e
+            } else {
+                symbol=dx_symbol(bytes start stopw)
+                if symbol =? 'none' {host[0].error(start "unexpected character in Dewy source");}
+                i+=dx_token_width(symbol)
+            }
+        }
+        if count =? cap {cap=dx_grow_out(@out cap); slots=out.ptr}
+        let sl=slots + count
+        sl[0].kind=kind; sl[0].name=0; sl[0].start=start; sl[0].stop=i
+        sl[0].space=spaced; sl[0].newline=newline; sl[0].symbol=symbol
+        count+=1; spaced=false; newline=false
+        if skip and symbol not=? 'none' {
+            if symbol =? 'lparen' or symbol =? 'lbrack' or symbol =? 'lbrace' {nesting+=1}
+            else if symbol =? 'rparen' or symbol =? 'rbrack' or symbol =? 'rbrace' {nesting-=1}
+            else if symbol =? 'function' and nesting =? 0 {
+                let j:DxWord=i
+                loop j <? stopw and (bytes[j] =? b' ' or bytes[j] =? b'\t') {j+=1}
+                if j <? stopw and bytes[j] =? b'\{' {
+                    let e:DxWord=dx_lazy_end(bytes j stopw)
+                    if e >? 0 {
+                        if count =? cap {cap=dx_grow_out(@out cap); slots=out.ptr}
+                        let lz=slots + count
+                        lz[0].kind='lazy_body'; lz[0].name=0; lz[0].start=j; lz[0].stop=e
+                        lz[0].space=(j >? i); lz[0].newline=false; lz[0].symbol='none'
+                        count+=1; state.lazy=true; i=e
                     }
                 }
             }
         }
     }
-    state.space=spaced
-    state.newline=newline
+    state.space=spaced; state.newline=newline
+    count
+}
+
+let dx_nsp:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
+let dx_nhp:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let dx_ntp:ptr<ptr<uint8>>=$unsafe (uint64(0) as ptr<ptr<uint8>>)
+let dx_nmask:DxWord=-1
+let dx_cur_cls:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
+
+dx_intern_slow=(@state:DewyLexState host:ptr<DewyLexHost> source:string p:ptr<uint8> start:DxWord n:DxWord):>DxWord=>$unsafe {
+    let h:DxWord=hash_bytes(p n)
+    if dx_nmask >=? 0 {
+        let id:DxWord=name_find_raw(dx_nsp dx_nhp dx_ntp dx_nmask p n h)
+        if id >=? 0 {return id}
+    }
+    let id:DxWord=host[0].new_name(source start n h)
+    dx_nsp=state.names[0].ptr
+    dx_nhp=state.hashes[0].ptr
+    dx_ntp=state.texts[0].ptr as ptr<ptr<uint8>>
+    dx_nmask=DxWord(state.names[0].length) - 1
+    id
+}
+
+dx_lex=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<int64> source:string begin:int64 stop:int64 intern_names:bool classes:ptr<uint8> symbols:ptr<DewyToken> words:ptr<DewyToken> @out:array<DewyLexeme> capacity:int64):>int64=>$unsafe {
+    if not intern_names {
+        return dx_lex_no_intern(@state host @lx @comments source begin stop classes symbols words @out capacity)
+    }
+    let bytes=(source as array<uint8>).ptr
+    let slots=out.ptr
+    let count:DxWord=0
+    let i:DxWord=begin
+    let cap:DxWord=capacity
+    let stopw:DxWord=stop
+    let flags:DxWord=0
+    let skip=state.skip
+    let nesting:DxWord=0
+    let sym_tags=symbols as ptr<uint32>
+    dx_cur_cls=classes
+    let nsp:ptr<int32>=uint64(0) as ptr<int32>
+    let nhp:ptr<int64>=uint64(0) as ptr<int64>
+    let ntp:ptr<ptr<uint8>>=uint64(0) as ptr<ptr<uint8>>
+    let nmask:DxWord=-1
+    let slen0=DxWord(state.names[0].length)
+    if slen0 >? 0 {
+        nsp=state.names[0].ptr
+        nhp=state.hashes[0].ptr
+        ntp=state.texts[0].ptr as ptr<ptr<uint8>>
+        nmask=slen0 - 1
+    }
+    dx_nsp=nsp; dx_nhp=nhp; dx_ntp=ntp; dx_nmask=nmask
+    loop i <? stopw {
+        let c=bytes[i]
+        if c =? b' ' {
+            flags |= 1
+            i+=1
+            loop i <? stopw and bytes[i] =? b' ' {i+=1}
+            if i >=? stopw {break}
+            c=bytes[i]
+        }
+        if (classes[c] & 16) not=? 0 {
+            flags |= 1
+            if c =? b'\n' {flags |= 2}
+            i+=1
+            loop i <? stopw {
+                c=bytes[i]
+                if c =? b'\n' {flags |= 2}
+                else if (classes[c] & 16) =? 0 {break}
+                i+=1
+            }
+            continue
+        }
+        if (classes[c] & 1) not=? 0 {
+            if c <? 0x80 and not (c =? b'r' and i + 1 <? stopw and (bytes[i + 1] =? b'"' or bytes[i + 1] =? b'\'')) {
+                let start:DxWord=i
+                i+=1
+                loop i <? stopw and (classes[bytes[i]] & 2) not=? 0 {i+=1}
+                let n:DxWord=i - start
+                let p=bytes + start
+                let id:DxWord=-1
+                if n <=? 16 and nmask >=? 0 {
+                    let hu:DxUWord=DxUWord(n) * 0x9E3779B97F4A7C15
+                    if n >? 8 {
+                        hu=(hu xor DxUWord((p as ptr<uint64>)[0])) * 0xBF58476D1CE4E5B9
+                        hu=(hu xor (hu >> 31)) xor DxUWord(((p + (n - 8)) as ptr<uint64>)[0])
+                    } else if n >=? 4 {
+                        hu=hu xor DxUWord((p as ptr<uint32>)[0]) xor (DxUWord(((p + (n - 4)) as ptr<uint32>)[0]) << 32)
+                    } else {
+                        hu=hu xor DxUWord(p[0]) xor (DxUWord(p[n >> 1]) << 8) xor (DxUWord(p[n - 1]) << 16)
+                    }
+                    hu=hu * 0xBF58476D1CE4E5B9
+                    let h:DxWord=(hu xor (hu >> 32)) transmute int64
+                    let e0=DxWord(nsp[h & nmask])
+                    if e0 not=? 0 {
+                        let id0=e0 - 1
+                        if nhp[id0] =? h {
+                            let hdr=ntp[id0]
+                            if hdr not=? (uint64(0) as ptr<uint8>) and (hdr as ptr<int64>)[1] =? n {
+                                hdr=hdr + 24
+                                if n >? 8 {
+                                    if (hdr as ptr<uint64>)[0] =? (p as ptr<uint64>)[0] and ((hdr + (n - 8)) as ptr<uint64>)[0] =? ((p + (n - 8)) as ptr<uint64>)[0] {id=id0}
+                                } else if n >=? 4 {
+                                    if (hdr as ptr<uint32>)[0] =? (p as ptr<uint32>)[0] and ((hdr + (n - 4)) as ptr<uint32>)[0] =? ((p + (n - 4)) as ptr<uint32>)[0] {id=id0}
+                                } else if n >=? 2 {
+                                    if (hdr as ptr<uint16>)[0] =? (p as ptr<uint16>)[0] and ((hdr + (n - 2)) as ptr<uint16>)[0] =? ((p + (n - 2)) as ptr<uint16>)[0] {id=id0}
+                                } else if hdr[0] =? p[0] {id=id0}
+                            }
+                        }
+                    }
+                }
+                if id <? 0 {
+                    id=dx_intern_slow(@state host source p start n)
+                    nsp=dx_nsp; nhp=dx_nhp; ntp=dx_ntp; nmask=dx_nmask
+                }
+                let kind:DewyKind='identifier'
+                let symbol:DewyToken='none'
+                if id <? state.word_count {
+                    symbol=words[id]
+                    if symbol not=? 'none' and i <? stopw and bytes[i] =? b'=' {
+                        let combined:DewyToken=dx_word_assign(symbol bytes i stopw)
+                        if combined not=? 'none' {symbol=combined; kind='op'; i+=1}
+                    }
+                    if id =? state.true_id or id =? state.false_id {kind='boolean'}
+                    else if i <? stopw and bytes[i] =? b'?' {
+                        if id =? state.is_id {symbol='is_type'; kind='op'; i+=1}
+                        else if id =? state.isnt_id {symbol='isnt_type'; kind='op'; i+=1}
+                        else if id =? state.in_id {symbol='contains'; kind='op'; i+=1}
+                    }
+                }
+                if count =? cap {cap=dx_grow_out(@out cap); slots=out.ptr}
+                let sl=slots + count
+                sl[0].kind=kind
+                sl[0].name=int32<overflow='wrap'>(id)
+                sl[0].start=start
+                sl[0].stop=i
+                sl[0].space=(flags & 1) not=? 0
+                sl[0].newline=(flags & 2) not=? 0
+                sl[0].symbol=symbol
+                count+=1
+                flags=0
+                continue
+            }
+            if c =? b'r' and i + 1 <? stopw and (bytes[i + 1] =? b'"' or bytes[i + 1] =? b'\'') {
+                let start:DxWord=i
+                i=dx_lex_quote(@lx host bytes (i + 1) stopw true)
+                if count =? cap {cap=dx_grow_out(@out cap); slots=out.ptr}
+                let sl=slots + count
+                sl[0].kind='rawquoted'; sl[0].name=0; sl[0].start=start; sl[0].stop=i
+                sl[0].space=(flags & 1) not=? 0; sl[0].newline=(flags & 2) not=? 0; sl[0].symbol='none'
+                count+=1; flags=0; continue
+            }
+            if count =? cap {cap=dx_grow_out(@out cap); slots=out.ptr}
+            i=dx_lex_unicode(@state host source bytes i stopw classes words slots @count @flags)
+            continue
+        }
+        if c =? b'#' {
+            if i + 1 <? stopw and bytes[i + 1] =? b'\{' {
+                let e:DxWord=dx_block_comment_end(bytes i stopw)
+                if e <? 0 {dx_block_comment_error(@lx i); host[0].problem();}
+                comments.push(i); comments.push(e)
+                if host[0].has_newline(source i e) {flags |= 2}
+                flags |= 1; i=e; continue
+            }
+            i=__find_newline(bytes i stopw)
+            flags |= 1
+            continue
+        }
+        if b'0' <=? c and c <=? b'9' {
+            if count =? cap {cap=dx_grow_out(@out cap); slots=out.ptr}
+            let sl=slots + count
+            let start:DxWord=i
+            if not (c =? b'0' and i + 1 <? stopw and (classes[bytes[i + 1]] & 1) not=? 0) {
+                i+=1
+                loop i <? stopw and b'0' <=? bytes[i] and bytes[i] <=? b'9' {i+=1}
+                if i >=? stopw or (bytes[i] not=? b'_' and bytes[i] not=? b'.' and bytes[i] not=? b'e' and bytes[i] not=? b'E' and bytes[i] not=? b'"' and bytes[i] not=? b'\'') {
+                    sl[0].kind='source_integer'; sl[0].name=0; sl[0].start=start; sl[0].stop=i
+                    sl[0].space=(flags & 1) not=? 0; sl[0].newline=(flags & 2) not=? 0; sl[0].symbol='none'
+                    count+=1; flags=0; continue
+                }
+            }
+            i=dx_lex_number(@lx host bytes start stopw classes sl)
+            sl[0].space=(flags & 1) not=? 0; sl[0].newline=(flags & 2) not=? 0
+            count+=1; flags=0; continue
+        }
+        if c =? b'"' or c =? b'\'' {
+            let start:DxWord=i
+            i=dx_lex_quote(@lx host bytes i stopw false)
+            if count =? cap {cap=dx_grow_out(@out cap); slots=out.ptr}
+            let sl=slots + count
+            sl[0].kind='quoted'; sl[0].name=0; sl[0].start=start; sl[0].stop=i
+            sl[0].space=(flags & 1) not=? 0; sl[0].newline=(flags & 2) not=? 0; sl[0].symbol='none'
+            count+=1; flags=0; continue
+        }
+        if c =? b'$' {
+            let start:DxWord=i
+            state.metatags+=1
+            i+=1
+            loop i <? stopw and (classes[bytes[i]] & 2) not=? 0 {i+=1}
+            if i =? start + 1 {host[0].error(start "expected a name after $");}
+            if count =? cap {cap=dx_grow_out(@out cap); slots=out.ptr}
+            let sl=slots + count
+            sl[0].kind='metatag'; sl[0].name=0; sl[0].start=start; sl[0].stop=i
+            sl[0].space=(flags & 1) not=? 0; sl[0].newline=(flags & 2) not=? 0; sl[0].symbol='none'
+            count+=1; flags=0; continue
+        }
+        if c =? b'\\' {
+            let e:DxWord=i + 1
+            loop e <? stopw and (bytes[e] =? b' ' or bytes[e] =? b'\t' or bytes[e] =? b'\r') {e+=1}
+            if e <? stopw and bytes[e] =? b'\n' {flags |= 1; i=e + 1; continue}
+        }
+        let start:DxWord=i
+        let symbol:DewyToken='none'
+        let next:uint8=if start + 1 <? stopw {bytes[start + 1]} else {0}
+        if c <? 128 and next <? 128 {
+            let idx=(DxWord(c) << 7) | DxWord(next)
+            symbol=symbols[idx]
+            let stag=DxWord(sym_tags[idx])
+            if stag >=? 1 and stag <=? 25 {i+=1}
+            else if stag >=? 37 and stag <=? 56 {i+=2}
+            else if stag >=? 31 and stag <=? 36 {i+=3}
+            else if stag not=? 0 {i+=dx_token_width(symbol)}
+            else {
+                symbol=dx_symbol(bytes start stopw)
+                if symbol =? 'none' {host[0].error(start "unexpected character in Dewy source");}
+                i+=dx_token_width(symbol)
+            }
+        } else {
+            symbol=dx_symbol(bytes start stopw)
+            if symbol =? 'none' {host[0].error(start "unexpected character in Dewy source");}
+            i+=dx_token_width(symbol)
+        }
+        if count =? cap {cap=dx_grow_out(@out cap); slots=out.ptr}
+        let sl=slots + count
+        sl[0].kind='op'; sl[0].name=0; sl[0].start=start; sl[0].stop=i
+        sl[0].space=(flags & 1) not=? 0; sl[0].newline=(flags & 2) not=? 0; sl[0].symbol=symbol
+        count+=1; flags=0
+        if skip {
+            if symbol =? 'lparen' or symbol =? 'lbrack' or symbol =? 'lbrace' {nesting+=1}
+            else if symbol =? 'rparen' or symbol =? 'rbrack' or symbol =? 'rbrace' {nesting-=1}
+            else if symbol =? 'function' and nesting =? 0 {
+                let j:DxWord=i
+                loop j <? stopw and (bytes[j] =? b' ' or bytes[j] =? b'\t') {j+=1}
+                if j <? stopw and bytes[j] =? b'\{' {
+                    let e:DxWord=dx_lazy_end(bytes j stopw)
+                    if e >? 0 {
+                        if count =? cap {cap=dx_grow_out(@out cap); slots=out.ptr}
+                        let lz=slots + count
+                        lz[0].kind='lazy_body'; lz[0].name=0; lz[0].start=j; lz[0].stop=e
+                        lz[0].space=(j >? i); lz[0].newline=false; lz[0].symbol='none'
+                        count+=1; state.lazy=true; i=e
+                    }
+                }
+            }
+        }
+    }
+    state.space=(flags & 1) not=? 0
+    state.newline=(flags & 2) not=? 0
     count
 }
 
@@ -474,216 +679,88 @@ dx_matches=(source:ptr<uint8> at:int64 stop:int64 value:string):>bool=>$unsafe {
 }
 
 dx_symbol=(source:ptr<uint8> at:int64 stop:int64):>DewyToken=>$unsafe {
-    match source[at] {
-        <b'%'> => {
-            if dx_matches(source at stop "%=") {
-                return 'percent_assign'
+    let rem:DxWord=DxWord(stop) - DxWord(at)
+    let c0=source[at]
+    if rem >=? 2 {
+        let c1=source[DxWord(at) + 1]
+        match c0 {
+            <b'%'> => {if c1 =? b'=' {return 'percent_assign'}}
+            <b'*'> => {if c1 =? b'=' {return 'star_assign'}}
+            <b'+'> => {if c1 =? b'=' {return 'plus_assign'}}
+            <b'-'> => {
+                if c1 =? b'>' {return 'arrow'}
+                if c1 =? b'=' {return 'minus_assign'}
             }
-        }
-        <b'*'> => {
-            if dx_matches(source at stop "*=") {
-                return 'star_assign'
-            }
-        }
-        <b'+'> => {
-            if dx_matches(source at stop "+=") {
-                return 'plus_assign'
-            }
-        }
-        <b'-'> => {
-            if dx_matches(source at stop "->") {
-                return 'arrow'
-            }
-            if dx_matches(source at stop "-=") {
-                return 'minus_assign'
-            }
-        }
-        <b'.'> => {
-            if ((int64<overflow='wrap'>(at) + 1) <? stop) {
-                match source[int64<overflow='wrap'>(at) + 1] {
-                    <b'%'> => {
-                        if dx_matches(source at stop ".%=") {
-                            return 'dot_percent_assign'
-                        }
-                        if dx_matches(source at stop ".%") {
-                            return 'dot_percent'
-                        }
-                    }
-                    <b'*'> => {
-                        if dx_matches(source at stop ".*=") {
-                            return 'dot_star_assign'
-                        }
-                        if dx_matches(source at stop ".*") {
-                            return 'dot_star'
-                        }
-                    }
-                    <b'+'> => {
-                        if dx_matches(source at stop ".+=") {
-                            return 'dot_plus_assign'
-                        }
-                        if dx_matches(source at stop ".+") {
-                            return 'dot_plus'
-                        }
-                    }
-                    <b'-'> => {
-                        if dx_matches(source at stop ".-=") {
-                            return 'dot_minus_assign'
-                        }
-                        if dx_matches(source at stop ".-") {
-                            return 'dot_minus'
-                        }
-                    }
-                    <b'.'> => {
-                        if dx_matches(source at stop "...") {
-                            return 'ellipsis'
-                        }
-                        if dx_matches(source at stop "..") {
-                            return 'range'
-                        }
-                    }
+            <b'.'> => {
+                let c2:uint8=if rem >=? 3 {source[DxWord(at) + 2]} else {0}
+                match c1 {
+                    <b'%'> => {return if c2 =? b'=' {'dot_percent_assign'} else {'dot_percent'}}
+                    <b'*'> => {return if c2 =? b'=' {'dot_star_assign'} else {'dot_star'}}
+                    <b'+'> => {return if c2 =? b'=' {'dot_plus_assign'} else {'dot_plus'}}
+                    <b'-'> => {return if c2 =? b'=' {'dot_minus_assign'} else {'dot_minus'}}
+                    <b'.'> => {return if c2 =? b'.' {'ellipsis'} else {'range'}}
                     <b'/'> => {
-                        if dx_matches(source at stop ".//=") {
-                            return 'dot_floor_assign'
-                        }
-                        if dx_matches(source at stop "./=") {
-                            return 'dot_slash_assign'
-                        }
-                        if dx_matches(source at stop ".//") {
-                            return 'dot_floor'
-                        }
-                        if dx_matches(source at stop "./") {
-                            return 'dot_slash'
-                        }
+                        if c2 =? b'/' {return if rem >=? 4 and source[DxWord(at) + 3] =? b'=' {'dot_floor_assign'} else {'dot_floor'}}
+                        return if c2 =? b'=' {'dot_slash_assign'} else {'dot_slash'}
                     }
                     <b'<'> => {
-                        if dx_matches(source at stop ".<=?") {
-                            return 'dot_le'
-                        }
-                        if dx_matches(source at stop ".<?") {
-                            return 'dot_lt'
-                        }
+                        if c2 =? b'=' and rem >=? 4 and source[DxWord(at) + 3] =? b'?' {return 'dot_le'}
+                        if c2 =? b'?' {return 'dot_lt'}
                     }
-                    <b'='> => {
-                        if dx_matches(source at stop ".=?") {
-                            return 'dot_eq'
-                        }
-                    }
+                    <b'='> => {if c2 =? b'?' {return 'dot_eq'}}
                     <b'>'> => {
-                        if dx_matches(source at stop ".>=?") {
-                            return 'dot_ge'
-                        }
-                        if dx_matches(source at stop ".>?") {
-                            return 'dot_gt'
-                        }
+                        if c2 =? b'=' and rem >=? 4 and source[DxWord(at) + 3] =? b'?' {return 'dot_ge'}
+                        if c2 =? b'?' {return 'dot_gt'}
                     }
-                    <b'^'> => {
-                        if dx_matches(source at stop ".^=") {
-                            return 'dot_power_assign'
-                        }
-                        if dx_matches(source at stop ".^") {
-                            return 'dot_caret'
-                        }
-                    }
+                    <b'^'> => {return if c2 =? b'=' {'dot_power_assign'} else {'dot_caret'}}
                     <b'n'> => {
-                        if dx_matches(source at stop ".not>=?") {
-                            return 'dot_not_ge'
-                        }
-                        if dx_matches(source at stop ".not<=?") {
-                            return 'dot_not_le'
-                        }
-                        if dx_matches(source at stop ".not=?") {
-                            return 'dot_not_eq'
-                        }
-                        if dx_matches(source at stop ".not>?") {
-                            return 'dot_not_gt'
-                        }
-                        if dx_matches(source at stop ".not<?") {
-                            return 'dot_not_lt'
+                        if rem >=? 6 and c2 =? b'o' and source[DxWord(at) + 3] =? b't' {
+                            let c4=source[DxWord(at) + 4]
+                            let c5=source[DxWord(at) + 5]
+                            if c4 =? b'>' {
+                                if c5 =? b'=' and rem >=? 7 and source[DxWord(at) + 6] =? b'?' {return 'dot_not_ge'}
+                                if c5 =? b'?' {return 'dot_not_gt'}
+                            } else if c4 =? b'<' {
+                                if c5 =? b'=' and rem >=? 7 and source[DxWord(at) + 6] =? b'?' {return 'dot_not_le'}
+                                if c5 =? b'?' {return 'dot_not_lt'}
+                            } else if c4 =? b'=' and c5 =? b'?' {return 'dot_not_eq'}
                         }
                     }
                     _ => {}
                 }
             }
+            <b'/'> => {
+                if c1 =? b'/' {return if rem >=? 3 and source[DxWord(at) + 2] =? b'=' {'floor_assign'} else {'floor'}}
+                if c1 =? b'=' {return 'slash_assign'}
+            }
+            <b':'> => {if c1 =? b'>' {return 'returns'}}
+            <b'<'> => {
+                if c1 =? b'=' and rem >=? 3 and source[DxWord(at) + 2] =? b'?' {return 'le'}
+                if c1 =? b'<' {return if rem >=? 3 and source[DxWord(at) + 2] =? b'=' {'shl_assign'} else {'shl'}}
+                if c1 =? b'?' {return 'lt'}
+                if c1 =? b'|' {return 'pipe_left'}
+            }
+            <b'='> => {
+                if c1 =? b'>' {return 'function'}
+                if c1 =? b'?' {return 'eq'}
+            }
+            <b'>'> => {
+                if c1 =? b'=' and rem >=? 3 and source[DxWord(at) + 2] =? b'?' {return 'ge'}
+                if c1 =? b'>' {
+                    if rem >=? 3 and source[DxWord(at) + 2] =? b'=' and not (rem >=? 4 and source[DxWord(at) + 3] =? b'>') {return 'shr_assign'}
+                    return 'shr'
+                }
+                if c1 =? b'?' {return 'gt'}
+            }
+            <b'?'> => {if c1 =? b'?' {return 'coalesce'}}
+            <b'^'> => {if c1 =? b'=' {return 'power_assign'}}
+            <b'|'> => {
+                if c1 =? b'>' {return 'pipe_right'}
+                if c1 =? b'=' {return 'pipe_assign'}
+            }
+            <b'&'> => {if c1 =? b'=' {return 'amp_assign'}}
+            _ => {}
         }
-        <b'/'> => {
-            if dx_matches(source at stop "//=") {
-                return 'floor_assign'
-            }
-            if dx_matches(source at stop "/=") {
-                return 'slash_assign'
-            }
-            if dx_matches(source at stop "//") {
-                return 'floor'
-            }
-        }
-        <b':'> => {
-            if dx_matches(source at stop ":>") {
-                return 'returns'
-            }
-        }
-        <b'<'> => {
-            if dx_matches(source at stop "<=?") {
-                return 'le'
-            }
-            if dx_matches(source at stop "<<=") {
-                return 'shl_assign'
-            }
-            if dx_matches(source at stop "<?") {
-                return 'lt'
-            }
-            if dx_matches(source at stop "<<") {
-                return 'shl'
-            }
-            if dx_matches(source at stop "<|") {
-                return 'pipe_left'
-            }
-        }
-        <b'='> => {
-            if dx_matches(source at stop "=>") {
-                return 'function'
-            }
-            if dx_matches(source at stop "=?") {
-                return 'eq'
-            }
-        }
-        <b'>'> => {
-            if dx_matches(source at stop ">=?") {
-                return 'ge'
-            }
-            if (dx_matches(source at stop ">>=") and (not dx_matches(source at stop ">>=>"))) {
-                return 'shr_assign'
-            }
-            if dx_matches(source at stop ">?") {
-                return 'gt'
-            }
-            if dx_matches(source at stop ">>") {
-                return 'shr'
-            }
-        }
-        <b'?'> => {
-            if dx_matches(source at stop "??") {
-                return 'coalesce'
-            }
-        }
-        <b'^'> => {
-            if dx_matches(source at stop "^=") {
-                return 'power_assign'
-            }
-        }
-        <b'|'> => {
-            if dx_matches(source at stop "|>") {
-                return 'pipe_right'
-            }
-            if dx_matches(source at stop "|=") {
-                return 'pipe_assign'
-            }
-        }
-        <b'&'> => {
-            if dx_matches(source at stop "&=") {
-                return 'amp_assign'
-            }
-        }
-        _ => {}
     }
-    dn_single_token(source[at])
+    dn_single_token(c0)
 }

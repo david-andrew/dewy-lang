@@ -43,21 +43,57 @@ callback_value = (n0: int, known: {int: int}) -> int:
 # consume the completed bindings, never the partially discovered table. This
 # replaces a second body walk with O(call sites + arguments) work and keeps only
 # node IDs, so nested specialization cannot invalidate a borrowed arena view.
-callback_bindings = (n: int, known: mut {int: int}, calls: mut int[]):
-    if n == 0 or nodes[n].kind == .lambda: return
-    if nodes[n].kind == .call and nodes[n].aux == 0: calls.push(n)
-    if nodes[n].kind == .vardecl and nkids(n) == 0 and not has_flag(n, NF_GLOBAL):
-        l = int(nodes[n].sym)
-        if l >= 0 and int(locals[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_BYREF | LF_MUTPARAM) == 0:
-            v = callback_value(int(nodes[n].b), known)
-            if v >= 0: known[l] = v
-    callback_bindings(int(nodes[n].a), known, calls)
-    callback_bindings(int(nodes[n].b), known, calls)
-    if nodes[n].kind != .for_:
-        callback_bindings(int(nodes[n].c), known, calls)
-        if nodes[n].kind != .partial: callback_bindings(int(nodes[n].d), known, calls)
-    loop i in [0..nkids(n)): callback_bindings(kid(n, i), known, calls)
-    loop i in [0..nkids2(n)): callback_bindings(kid2(n, i), known, calls)
+cb_stack: int[]
+callback_bindings = (root: int, known: mut {int: int}, calls: mut int[]):
+    if root == 0: return
+    if cb_stack.len() < 256: cb_stack.resize(256)
+    st = data(cb_stack)
+    scap = cb_stack.len()
+    ns = data(nodes)
+    lp = data(lists)
+    locp = data(locals)
+    sp = 1
+    st[0] = root
+    loop sp > 0:
+        sp -= 1
+        n = st[sp]
+        np = ns + n
+        kind = np[0].kind
+        match kind:
+            ident, int_lit, bool_lit, float_lit, dotname, none_lit, null_lit, lambda, hole, break_, continue_, pwild: continue
+            call:
+                if np[0].aux == 0: calls.push(n)
+            vardecl:
+                if np[0].nlist == 0 and (int(np[0].flags) & NF_GLOBAL) == 0:
+                    l = int(np[0].sym)
+                    if l >= 0 and int(locp[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_BYREF | LF_MUTPARAM) == 0:
+                        v = callback_value(int(np[0].b), known)
+                        if v >= 0: known[l] = v
+            _: pass
+        k1 = int(np[0].nlist)
+        k2 = int(np[0].nlist2)
+        if sp + k1 + k2 + 4 > scap:
+            scap = (sp + k1 + k2 + 4) * 2
+            cb_stack.resize(scap)
+            st = data(cb_stack)
+        if k2 > 0:
+            i = k2 - 1
+            loop i >= 0:
+                c = kid2(n, i)
+                if c != 0: st[sp] = c; sp += 1
+                i -= 1
+        if k1 > 0:
+            l1 = int(np[0].list)
+            i = k1 - 1
+            loop i >= 0:
+                c = int(lp[l1 + i])
+                if c != 0: st[sp] = c; sp += 1
+                i -= 1
+        if kind != .for_:
+            if kind != .partial and np[0].d != 0: st[sp] = int(np[0].d); sp += 1
+            if np[0].c != 0: st[sp] = int(np[0].c); sp += 1
+        if np[0].b != 0: st[sp] = int(np[0].b); sp += 1
+        if np[0].a != 0: st[sp] = int(np[0].a); sp += 1
 callback_request = (f: int, targets: int[], depth: int) -> int:
     if depth >= 4 or callback_versions.len() >= 128: return -1
     if fns[f].cabi or fns[f].has_env or fns[f].noinline or len(fns[f].export_name) > 0 or fns[f].body == 0: return -1
@@ -98,17 +134,24 @@ callback_prepare = ():
     callback_versions.clear()
     callback_counts.clear()
     stack_closure_params.clear()
+    lambda_files = fill(false, files.len())
     has_lambda = false
     loop f in fns:
-        if f.kind == FK_LAMBDA and f.decl != 0 and files[pos_file(nodes[int(f.decl)].pos)].is_dewy:
-            has_lambda = true
-            break
+        if f.kind == FK_LAMBDA and f.decl != 0:
+            fi = pos_file(nodes[int(f.decl)].pos)
+            if files[fi].is_dewy:
+                lambda_files[fi] = true
+                has_lambda = true
     if not has_lambda: return
+    known: {int: int}
+    calls: int[]
     loop f in [1..fns.len()):
         d = int(fns[f].decl)
-        if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy: continue
-        known: {int: int}
-        calls: int[]
+        if d == 0: continue
+        fi = pos_file(nodes[d].pos)
+        if not lambda_files[fi]: continue
+        if known.len() > 0: known.clear()
+        if calls.len() > 0: calls.clear()
         callback_bindings(int(fns[f].body), known, calls)
         # Ordinary callers need the same immutable bindings as versions: their
         # invocation-only arguments can borrow the already saved environment.

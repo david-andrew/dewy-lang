@@ -5,15 +5,22 @@ use 'x64_encode.dewy'
 # Shared location classifications and use summaries live in backend_analysis.
 const INF_POS = 1 << 60
 
+xr_types: *i8
+xr_code: *Ins
+xr_kval: *int
+
 vspill: int[]
 slot_off: int[]
-callee_off: int[]          # save offset per register (0 = not used)
+callee_off: int[] = fill(0, 16)          # save offset per register (0 = not used)
+ra_cross_storage: int[]
+ra_placed_storage: bool[]
 
 ra_on = true              # false: spill everything (fast debug codegen)
 ra_prio = true            # (release builds: allocate_release; DEWY_RA_LINEAR=1: allocate)
 callee_pool = [RBX, 12, 13, 14, 15]
 is_callee = [false, false, false, true, false, false, false, false, false, false, false, false, true, true, true, true]
-caller_pool = [RSI, RDI, R8, R9, R10, R11]
+caller_pool = [R10, R11, R8, R9, RSI, RDI]
+param_pref_pool = [RDI, RSI, R10, R11, R8, R9]
 
 save_list: int[]
 ra_expire_visits = 0
@@ -25,21 +32,51 @@ ra_peak_xmm = 0
 # Entries in active are written before their count is published.
 ra_active_storage: int[] = fill(0, 24)
 ra_byreg_storage: int[] = fill(-1, 32)
-
+ra_ctz_tab = [0, 1, 28, 2, 29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4, 8, 31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6, 11, 5, 10, 9]
 
 const VI = 0
 xr_ir: *IrFn
 xr_debug = false
 xr_stats = false
 xr_vtype = (v: int) -> int:
-    t = int(xr_ir[0].vtypes[v])
+    t = int(xr_types[v])
     if t == 3: return VI
     t
-xr_is_kv = (v: int) -> bool: int(xr_ir[0].vtypes[v]) == 3
-xr_kv_of = (v: int) -> int: xr_ir[0].kval[v]
+xr_is_kv = (v: int) -> bool: int(xr_types[v]) == 3
+xr_kv_of = (v: int) -> int: xr_kval[v]
 xr_align = (n: int, a: int) -> int: (n + a - 1) & ~(a - 1)
+
+hint_op_tab: bool[]
+comm_op_tab: bool[]
+ra_saved_flags_p: *bool
+ra_ctz_p: *int
+ra_htab_p: *bool
+ra_ctab_p: *bool
+ra_active_p: *int
+ra_byreg_p: *int
+ra_callee_off_p: *int
+
+hint_op_init = ():
+    if hint_op_tab.len() > 0: return
+    loop i in [0..int(Op.findb) + 1):
+        op = i as Op
+        hint_op_tab.push(hint_op(op))
+        comm_op_tab.push(op == .add or op == .mul or op == .and_ or op == .or_ or op == .xor or op == .fadd or op == .fmul or op == .fmin or op == .fmax)
+    if callee_off.len() < 16: callee_off.resize(16)
+    ra_saved_flags_p = data(is_callee)
+    ra_ctz_p = data(ra_ctz_tab)
+    ra_htab_p = data(hint_op_tab)
+    ra_ctab_p = data(comm_op_tab)
+    ra_active_p = data(ra_active_storage)
+    ra_byreg_p = data(ra_byreg_storage)
+    ra_callee_off_p = data(callee_off)
+
 x64_allocate = (input: *IrFn, priority: bool, debug: bool, stats: bool):
+    if hint_op_tab.len() == 0: hint_op_init()
     xr_ir = input
+    xr_types = data(input[0].vtypes)
+    xr_code = data(input[0].code)
+    xr_kval = data(input[0].kval)
     xr_debug = debug
     xr_stats = stats
     if priority: allocate_release()
@@ -48,7 +85,7 @@ x64_allocate = (input: *IrFn, priority: bool, debug: bool, stats: bool):
 
 hint_op = (op: Op) -> bool:
     match op:
-        mov, add, sub, mul, checked_add, checked_sub, checked_mul, and_, or_, xor, shl, shrs, shru, rot32, neg, not_, load: true
+        mov, add, sub, mul, checked_add, checked_sub, checked_mul, and_, or_, xor, shl, shrs, shru, rot32, neg, not_, load, select: true
         fadd, fsub, fmul, fdiv, fmin, fmax, fneg, fabs: true
         sext8, sext16, sext32, zext8, zext16, zext32: true
         _: false
@@ -56,18 +93,25 @@ hint_op = (op: Op) -> bool:
 # operand whose register the value defined at pos can reuse (-1: none)
 hint_operand = (v: int, pos: int) -> int:
     if v < xr_ir[0].nparams or pos >= xr_ir[0].code.len(): return -1
-    ins = xr_ir[0].code[pos]
-    if int(ins.dst) != v or not hint_op(ins.op): return -1
+    ins = xr_code + pos
+    tag = int((ins as *u32)[0])
+    if int(ins.dst) != v or not ra_htab_p[tag]: return -1
+    vec = xr_vtype(v) != VI
     a = int(ins.a)
+    if ins.op == .select: a = int(ins.c)
     if ins.op == .checked_sub and xr_is_kv(a) and xr_kv_of(a) == 0: a = int(ins.b)
-    if a < 0 or a == v or vloc[a] < 0 or v_live[a].last != pos: return -1
-    if (vloc[a] >= XMM) != (xr_vtype(v) != VI): return -1
-    a
+    if a >= 0 and a != v and vloc[a] >= 0 and int(v_live[a].last) == pos and (vloc[a] >= XMM) == vec:
+        return a
+    if ra_ctab_p[tag]:
+        b = int(ins.b)
+        if b >= 0 and b != v and vloc[b] >= 0 and int(v_live[b].last) == pos and (vloc[b] >= XMM) == vec:
+            return b
+    -1
 
 # params are live on entry, before the first instruction
 live_start = (v: int) -> int:
     if v < xr_ir[0].nparams: return -1
-    v_live[v].first
+    int(v_live[v].first)
 
 crosses_call = (s: int, e: int) -> bool:
     lo = 0
@@ -80,16 +124,12 @@ crosses_call = (s: int, e: int) -> bool:
 
 # is a cheaper to spill than b: fewer weighted uses per instruction it lives (ties: lives longer)
 spills_before = (a: int, b: int) -> bool:
-    la = v_live[a].last - live_start(a) + 1
-    lb = v_live[b].last - live_start(b) + 1
+    la = int(v_live[a].last) - live_start(a) + 1
+    lb = int(v_live[b].last) - live_start(b) + 1
     x = v_live[a].weight * lb
     y = v_live[b].weight * la
     x < y or (x == y and v_live[a].last > v_live[b].last)
 
-# Remove an active interval while preserving the allocator's tie order. The
-# list is bounded by the 24 allocatable registers, so spill/coalescing work is
-# O(registers), independent of the function's vreg count. No array growth or
-# temporary-list removal participates in the sweep.
 ra_remove = (active: *int, byreg: *int, n: int, reg: int) -> int:
     k = byreg[reg]
     byreg[reg] = -1
@@ -100,141 +140,196 @@ ra_remove = (active: *int, byreg: *int, n: int, reg: int) -> int:
         k += 1
     n - 1
 
+ra_spill_pick = (v: int, vector: bool, crosses: bool, active: *int, nactive: mut int, byreg: *int, loc_arr: *int, save_arr: *bool, saved_flags: *bool, keep: *bool, dbg: bool, stats: bool) -> int:
+    best = -1
+    if stats: ra_spill_visits += nactive
+    loop k in [0..nactive):
+        a = active[k]
+        ra = loc_arr[a]
+        if (ra >= XMM) != vector: continue
+        if crosses and dbg and keep[v] and (ra >= XMM or not saved_flags[ra]): continue
+        if not spills_before(a, v): continue
+        if best < 0 or spills_before(a, best): best = a
+    if best < 0: return -1
+    reg = loc_arr[best]
+    loc_arr[best] = LOC_SPILL
+    save_arr[v] = crosses and (reg >= XMM or not saved_flags[reg])
+    rk = byreg[reg]
+    byreg[reg] = -1
+    nactive -= 1
+    if rk < nactive:
+        moved = active[nactive]
+        active[rk] = moved
+        byreg[loc_arr[moved]] = rk
+    reg
+
 allocate = ():
+    saved_flags = ra_saved_flags_p
+    dbg = xr_debug
+    keep: *bool = if dbg: data(dbg_keep) else: null
+    ncalls = call_pos.len()
+    calls: *int = if ncalls > 0: data(call_pos) else: null
+    ctz = ra_ctz_p
+    vl = v_live
+    loc_arr = vloc
+    save_arr = vsave
+    start_arr = v_start
+    np = xr_ir[0].nparams
     nv = xr_ir[0].vtypes.len()
-    callee_off = fill(0, 16)
+    saved = ra_callee_off_p
+    mem_set(saved as *u8, 0, 128)
     if not ra_on:
         loop v in [0..nv):
-            if vloc[v] != LOC_CONST and vloc[v] != LOC_FCONST and vloc[v] != LOC_SLOT and vloc[v] != LOC_GLOBAL: vloc[v] = LOC_SPILL
+            if loc_arr[v] != LOC_CONST and loc_arr[v] != LOC_FCONST and loc_arr[v] != LOC_SLOT and loc_arr[v] != LOC_GLOBAL: loc_arr[v] = LOC_SPILL
         return
-    n = xr_ir[0].code.len() + 1
-    # At most eleven GPRs and thirteen vector registers can be occupied.
-    # Membership is indexed by physical register, never by the vreg population.
+    nc = xr_ir[0].code.len()
+    n = nc + 1
+    code = xr_code
+    types = xr_types
+    kval = xr_kval
+    stats = xr_stats
+    htab = ra_htab_p
     free = 0x7FFCFFC8
-    active = data(ra_active_storage)
-    byreg = data(ra_byreg_storage)
-    loop r in [0..32): byreg[r] = -1
+    active = ra_active_p
+    byreg = ra_byreg_p
+    mem_set(byreg as *u8, 255, 256)
     nactive = 0
-    min_end = INF_POS      # earliest end among active intervals
+    min_end = INF_POS
     call_next = 0
+    param_call = if ncalls > 0: calls[0] else: INF_POS
+    cur_call = param_call
     loop pos in [0..n):
-        loop call_next < call_pos.len() and call_pos[call_next] <= pos: call_next += 1
-        v = v_start[pos]
-        if v >= 0 and min_end < pos:
-            # expire old intervals
+        v = start_arr[pos]
+        if v < 0: continue
+        if cur_call <= pos:
+            loop call_next < ncalls and calls[call_next] <= pos: call_next += 1
+            cur_call = if call_next < ncalls: calls[call_next] else: INF_POS
+        if min_end < pos:
             min_end = INF_POS
             k = 0
-            if xr_stats: ra_expire_visits += nactive
+            if stats: ra_expire_visits += nactive
             loop k < nactive:
                 a = active[k]
-                if v_live[a].last < pos:
-                    r = vloc[a]
+                alast = int(vl[a].last)
+                if alast < pos:
+                    r = loc_arr[a]
                     free |= 1 << r
                     byreg[r] = -1
                     nactive -= 1
                     if k < nactive:
-                        active[k] = active[nactive]
-                        byreg[vloc[active[k]]] = k
+                        moved = active[nactive]
+                        active[k] = moved
+                        byreg[loc_arr[moved]] = k
                 else:
-                    if v_live[a].last < min_end: min_end = v_live[a].last
+                    if alast < min_end: min_end = alast
                     k += 1
         loop v >= 0:
-            next_call = call_next
-            if v < xr_ir[0].nparams: next_call = 0
-            crosses = next_call < call_pos.len() and call_pos[next_call] < v_live[v].last
+            h = -1
+            vt = int(types[v])
+            vector = vt != 0 and vt != 3
+            if v >= np and pos < nc:
+                ins = code + pos
+                if int(ins.dst) == v:
+                    tag = int((ins as *u32)[0])
+                    if not dbg and pos + 1 < nc and tag >= 19 and tag <= 28 and vl[v].ndef == 1 and vl[v].nuse == 1:
+                        nop = (ins + 1).op
+                        if (nop == .if_ or nop == .brif) and int((ins + 1).a) == v:
+                            loc_arr[v] = LOC_NONE
+                            v = int(vl[v].next_start)
+                            continue
+                    if htab[tag]:
+                        a = int(ins.a)
+                        if ins.op == .select: a = int(ins.c)
+                        else if ins.op == .checked_sub and int(types[a]) == 3 and kval[a] == 0: a = int(ins.b)
+                        if a >= 0 and a != v:
+                            al = loc_arr[a]
+                            if al >= 0 and int(vl[a].last) == pos and (al >= XMM) == vector: h = a
+                        if h < 0 and ra_ctab_p[tag]:
+                            b = int(ins.b)
+                            if b >= 0 and b != v:
+                                bl = loc_arr[b]
+                                if bl >= 0 and int(vl[b].last) == pos and (bl >= XMM) == vector: h = b
+            vlast = int(vl[v].last)
+            crosses = (if v < np: param_call else: cur_call) < vlast
             reg = -1
-            # two-operand forms: take over the register of a first operand that dies here
-            h = hint_operand(v, pos)
-            # (not a caller-saved register for a value living across calls: a callee-saved one
-            # costs a move here, not a save and a reload at every call)
-            if h >= 0 and crosses and vloc[h] < XMM and not is_callee[vloc[h]]: h = -1
-            if h >= 0 and crosses and xr_debug and dbg_keep[v] and vloc[h] >= XMM: h = -1
-            if h >= 0 and byreg[vloc[h]] >= 0 and active[byreg[vloc[h]]] == h:
-                reg = vloc[h]
-                nactive = ra_remove(active, byreg, nactive, reg)
-                vsave[v] = crosses and (reg >= XMM or not is_callee[reg])
-                if reg < XMM and is_callee[reg]: callee_off[reg] = 1
-            else if xr_vtype(v) != VI:
-                # all xmm registers are caller-saved: values living across calls are saved around them
-                # (not a variable of -g: in the frame then)
-                if not (crosses and xr_debug and dbg_keep[v]):
-                    loop x in [2..15):
-                        if free & (1 << (XMM + x)) != 0:
-                            reg = XMM + x
-                            vsave[v] = crosses
-                            break
-            else:
-                if not crosses:
-                    loop r in caller_pool:
-                        if free & (1 << r) != 0:
-                            reg = r
-                            break
-                if reg < 0:
-                    loop r in callee_pool:
-                        if free & (1 << r) != 0:
-                            reg = r
-                            break
-                if reg < 0 and crosses and not (xr_debug and dbg_keep[v]):
-                    loop r in caller_pool:
-                        if free & (1 << r) != 0:
-                            reg = r
-                            vsave[v] = true
-                            break
+            if h >= 0:
+                hl = loc_arr[h]
+                if crosses and hl < XMM and not saved_flags[hl]: h = -1
+                else if crosses and dbg and keep[v] and hl >= XMM: h = -1
+                else:
+                    rk = byreg[hl]
+                    if rk >= 0 and active[rk] == h:
+                        reg = hl
+                        byreg[hl] = -1
+                        nactive -= 1
+                        if rk < nactive:
+                            moved = active[nactive]
+                            active[rk] = moved
+                            byreg[loc_arr[moved]] = rk
+                        save_arr[v] = crosses and (reg >= XMM or not saved_flags[reg])
+                        if reg < XMM and saved_flags[reg]: saved[reg] = 1
             if reg < 0:
-                # steal from the active value that is cheapest to spill for the span it holds
-                # a register (used least, outside loops), if that is cheaper than this one
-                # (a value living across calls may take a caller-saved register: it is then
-                # saved and restored around the calls, which beats reading it from memory at
-                # every use when the calls are rarer than the uses)
-                best = -1
-                if xr_stats: ra_spill_visits += nactive
-                loop k in [0..nactive):
-                    a = active[k]
-                    ra = vloc[a]
-                    if (ra >= XMM) != (xr_vtype(v) != VI): continue
-                    if crosses and xr_debug and dbg_keep[v] and (ra >= XMM or not is_callee[ra]): continue
-                    if not spills_before(a, v): continue
-                    if best < 0 or spills_before(a, best): best = a
-                if best >= 0:
-                    reg = vloc[best]
-                    vloc[best] = LOC_SPILL
-                    vsave[v] = crosses and (reg >= XMM or not is_callee[reg])
-                    nactive = ra_remove(active, byreg, nactive, reg)
+                if not vector:
+                    if not crosses:
+                        if v < np:
+                            ip = 0
+                            loop k in [0..v):
+                                kt = int(types[k])
+                                if kt == 0 or kt == 3: ip += 1
+                            if ip < 6:
+                                pr = param_pref_pool[ip]
+                                if free & (1 << pr) != 0: reg = pr
+                        if reg < 0:
+                            avail = free & 0x0FC0
+                            if avail != 0:
+                                bit = avail & (0 - avail)
+                                reg = ctz[((bit * 0x077CB531) & 0xFFFFFFFF) >> 27]
+                    if reg < 0:
+                        avail = free & 0xF008
+                        if avail != 0:
+                            bit = avail & (0 - avail)
+                            reg = ctz[((bit * 0x077CB531) & 0xFFFFFFFF) >> 27]
+                    if reg < 0 and crosses and not (dbg and keep[v]):
+                        avail = free & 0x0FC0
+                        if avail != 0:
+                            bit = avail & (0 - avail)
+                            reg = ctz[((bit * 0x077CB531) & 0xFFFFFFFF) >> 27]
+                            save_arr[v] = true
+                else:
+                    avail = free & 0x7FFC0000
+                    if avail != 0 and not (crosses and dbg and keep[v]):
+                        bit = avail & (0 - avail)
+                        reg = ctz[((bit * 0x077CB531) & 0xFFFFFFFF) >> 27]
+                        save_arr[v] = crosses
+            if reg < 0:
+                reg = ra_spill_pick(v, vector, crosses, active, nactive, byreg, loc_arr, save_arr, saved_flags, keep, dbg, stats)
             if reg >= 0:
-                vloc[v] = reg
+                loc_arr[v] = reg
                 free &= ~(1 << reg)
                 byreg[reg] = nactive
                 active[nactive] = v
                 nactive += 1
-                if xr_stats: ra_pressure(active, nactive, -1)
-                if v_live[v].last < min_end: min_end = v_live[v].last
-                if reg < XMM and is_callee[reg]: callee_off[reg] = 1
-            else: vloc[v] = LOC_SPILL
-            v = v_live[v].next_start
+                if stats: ra_pressure(active, nactive, -1)
+                if vlast < min_end: min_end = vlast
+                if reg < XMM and saved_flags[reg]: saved[reg] = 1
+            else: loc_arr[v] = LOC_SPILL
+            v = int(vl[v].next_start)
 
-# release builds: two passes of linear scan. First the integer values living across calls
-# in loops or several of them (not counting those on rarely taken paths) get the callee-saved
-# registers (where more want one than
-# there are, those used most); then the rest are allocated as by allocate, around them, with a
-# value living across calls given a caller-saved register (saved and reloaded around each call)
-# only when that costs less than spilling it. A bitmap per register marks the instructions pass
-# 1 holds it at.
 ra_occ: int[]
 ra_words = 0
-ra_cw: int[]                # prefix sums of call weights
-ra_call_cut_storage: i32[]  # release-only instruction boundary -> call ordinal
+ra_cw: int[]
+ra_call_cut_storage: i32[]
 ra_call_cut: *i32
-ra_dump = ""                # (DEWY_RADUMP=f_name: print the allocation of that function)
-ra_only = ""                # (DEWY_RA_ONLY=f_name: allocate only that function this way)
+ra_dump = ""
+ra_only = ""
 
-# mask of bits lo..hi (0..63) of a word
 ra_mask = (lo: int, hi: int) -> int:
     m = -1 << lo
     if hi < 63: m = m & ((1 << (hi + 1)) - 1)
     m
 
-# is register r free at instructions s..e (shifted by 1: parameters start at -1)?
 ra_free = (r: int, s: int, e: int) -> bool:
+    occupied = data(ra_occ)
     if s > e: return true
     base = r * ra_words
     ws = s >> 6
@@ -245,11 +340,12 @@ ra_free = (r: int, s: int, e: int) -> bool:
         hi = 63
         if w == ws: lo = s & 63
         if w == we: hi = e & 63
-        if ra_occ[base + w] & ra_mask(lo, hi) != 0: return false
+        if occupied[base + w] & ra_mask(lo, hi) != 0: return false
         w += 1
     true
 
 ra_take = (r: int, s: int, e: int):
+    occupied = data(ra_occ)
     base = r * ra_words
     ws = s >> 6
     we = e >> 6
@@ -259,29 +355,31 @@ ra_take = (r: int, s: int, e: int):
         hi = 63
         if w == ws: lo = s & 63
         if w == we: hi = e & 63
-        ra_occ[base + w] = ra_occ[base + w] | ra_mask(lo, hi)
+        occupied[base + w] = occupied[base + w] | ra_mask(lo, hi)
         w += 1
 
-# Weight of calls strictly inside s..e; -1 means exactly one explicit cold call.
 ra_cross_w = (s: int, e: int) -> int:
     if call_pos.len() == 0: return 0
     a = int(ra_call_cut[s + 1])
     lo = int(ra_call_cut[e])
     if lo <= a: return 0
     if lo == a + 1:
-        call = xr_ir[0].code[call_pos[a]]
+        call = xr_code[call_pos[a]]
         if call.op == .call and call.c == 2: return -1
     ra_cw[lo] - ra_cw[a]
 
 allocate_release = ():
+    xr_callee_pool = data(callee_pool)
+    xr_caller_pool = data(caller_pool)
+    saved_flags = data(is_callee)
     nv = xr_ir[0].vtypes.len()
-    callee_off = fill(0, 16)
+    if callee_off.len() < 16: callee_off.resize(16)
+    loop r in [0..16): callee_off[r] = 0
     n = xr_ir[0].code.len() + 1
-    ra_cw = fill(0, call_pos.len() + 1)
+    ncw = call_pos.len() + 1
+    if ra_cw.len() < ncw: ra_cw.resize(ncw)
+    ra_cw[0] = 0
     loop k in [0..call_pos.len()): ra_cw[k + 1] = ra_cw[k] + call_w[k]
-    # Only release allocation asks weighted crossing queries. Build their
-    # boundary index in O(instructions + calls), then answer each in O(1).
-    # Private scratch is reused; no pointer survives a subsequent resize.
     if call_pos.len() > 0:
         if ra_call_cut_storage.len() < n: ra_call_cut_storage.resize(n)
         ra_call_cut = data(ra_call_cut_storage)
@@ -290,20 +388,38 @@ allocate_release = ():
         loop pos in [0..n):
             loop next < call_pos.len() and calls[next] < pos: next += 1
             ra_call_cut[pos] = i32(next)
-    cross = fill(0, nv)
+    if ra_cross_storage.len() < nv: ra_cross_storage.resize(nv)
+    cross = data(ra_cross_storage)
+    nc_rel = xr_ir[0].code.len()
+    np_rel = xr_ir[0].nparams
     loop v in [0..nv):
-        if vloc[v] != LOC_SPILL: continue
-        cross[v] = ra_cross_w(live_start(v), v_live[v].last)
+        if vloc[v] != LOC_SPILL:
+            cross[v] = 0
+            continue
+        if not xr_debug and v >= np_rel and v_live[v].ndef == 1 and v_live[v].nuse == 1:
+            p0 = int(v_live[v].first)
+            if p0 + 1 < nc_rel:
+                ins0 = xr_code + p0
+                tag0 = int((ins0 as *u32)[0])
+                if tag0 >= 19 and tag0 <= 28 and int(ins0.dst) == v:
+                    nop0 = (ins0 + 1).op
+                    if (nop0 == .if_ or nop0 == .brif) and int((ins0 + 1).a) == v:
+                        vloc[v] = LOC_NONE
+                        cross[v] = 0
+                        continue
+        cross[v] = ra_cross_w(live_start(v), int(v_live[v].last))
     ra_words = (n + 1) / 64 + 1
-    ra_occ = fill(0, 32 * ra_words)
-    # pass 1: integer values living across calls, into callee-saved registers (in order of
-    # start; when there are too many, those used most keep them)
-    placed = fill(false, nv)
+    nocc = 32 * ra_words
+    if ra_occ.len() < nocc: ra_occ.resize(nocc)
+    mem_set(data(ra_occ) as *u8, 0, nocc * 8)
+    if ra_placed_storage.len() < nv: ra_placed_storage.resize(nv)
+    placed = data(ra_placed_storage)
+    if nv > 0: mem_set(placed as *u8, 0, nv)
     active = data(ra_active_storage)
     byreg = data(ra_byreg_storage)
-    loop r in [0..32): byreg[r] = -1
+    mem_set(byreg as *u8, 255, 256)
     nactive = 0
-    free = 0xF008                 # callee-saved GPRs
+    free = 0xF008
     loop pos in [0..n):
         v = v_start[pos]
         if v < 0: continue
@@ -311,7 +427,7 @@ allocate_release = ():
         if xr_stats: ra_expire_visits += nactive
         loop k < nactive:
             a = active[k]
-            if v_live[a].last < pos:
+            if int(v_live[a].last) < pos:
                 r = vloc[a]
                 free |= 1 << r
                 byreg[r] = -1
@@ -321,14 +437,10 @@ allocate_release = ():
                     byreg[vloc[active[k]]] = k
             else: k += 1
         loop v >= 0:
-            # (a value crossing just one call outside loops: a caller-saved register saved
-            # around it costs the same when the call is made, and nothing on paths without it,
-            # where a callee-saved one is saved and restored on every path).
-            # A hot parameter crossing one explicit cold call is the exception:
-            # reserving a saved register avoids spilling it throughout nested loops.
-            if (cross[v] > 1 or cross[v] == -1 and v < xr_ir[0].nparams and v_live[v].weight > 8 * v_live[v].nuse) and xr_vtype(v) == VI:
+            if (cross[v] > 1 or cross[v] == -1 and v < xr_ir[0].nparams and v_live[v].weight > 8 * int(v_live[v].nuse)) and xr_vtype(v) == VI:
                 reg = -1
-                loop r in callee_pool:
+                loop ri in [0..5):
+                    r = xr_callee_pool[ri]
                     if free & (1 << r) != 0:
                         reg = r
                         break
@@ -351,12 +463,11 @@ allocate_release = ():
                     active[nactive] = v
                     nactive += 1
                     if xr_stats: ra_peak_gpr = max(ra_peak_gpr, nactive)
-            v = v_live[v].next_start
+            v = int(v_live[v].next_start)
     loop v in [0..nv):
         if placed[v]:
-            ra_take(vloc[v], live_start(v) + 1, v_live[v].last + 1)
+            ra_take(vloc[v], live_start(v) + 1, int(v_live[v].last) + 1)
             callee_off[vloc[v]] = 1
-    # pass 2: the rest by linear scan, around what pass 1 placed
     free = 0x7FFCFFC8
     loop r in [0..32): byreg[r] = -1
     nactive = 0
@@ -369,7 +480,7 @@ allocate_release = ():
             if xr_stats: ra_expire_visits += nactive
             loop k < nactive:
                 a = active[k]
-                if v_live[a].last < pos:
+                if int(v_live[a].last) < pos:
                     r = vloc[a]
                     free |= 1 << r
                     byreg[r] = -1
@@ -378,24 +489,22 @@ allocate_release = ():
                         active[k] = active[nactive]
                         byreg[vloc[active[k]]] = k
                 else:
-                    if v_live[a].last < min_end: min_end = v_live[a].last
+                    if int(v_live[a].last) < min_end: min_end = int(v_live[a].last)
                     k += 1
         loop v >= 0:
-            if placed[v]:
-                v = v_live[v].next_start
+            if placed[v] or vloc[v] == LOC_NONE:
+                v = int(v_live[v].next_start)
                 continue
             s = live_start(v) + 1
-            e = v_live[v].last + 1
+            e = int(v_live[v].last) + 1
             c = abs(cross[v])
-            # a caller-saved register for a value living across calls: only if saving and
-            # reloading it around them costs less than spilling it
-            caller_ok = c == 0 or 4 * c < 2 * v_live[v].weight
+            caller_ok = c == 0 or c < v_live[v].weight
             reg = -1
             h = hint_operand(v, pos)
             if h >= 0 and byreg[vloc[h]] >= 0 and active[byreg[vloc[h]]] == h:
                 r = vloc[h]
                 ok = ra_free(r, s + 1, e)
-                if r < XMM and not is_callee[r] and not caller_ok: ok = false
+                if r < XMM and not saved_flags[r] and not caller_ok: ok = false
                 if r >= XMM and not caller_ok: ok = false
                 if ok:
                     reg = r
@@ -408,27 +517,33 @@ allocate_release = ():
                                 reg = XMM + x
                                 break
                 else:
-                    # (across calls: a callee-saved register; across just one outside loops,
-                    # one the prologue saves already, else a caller-saved one first)
                     if c > 0:
-                        loop r in callee_pool:
+                        loop ri in [0..5):
+                            r = xr_callee_pool[ri]
                             if free & (1 << r) != 0 and (c > 1 or callee_off[r] != 0) and ra_free(r, s, e):
                                 reg = r
                                 break
                     if reg < 0 and caller_ok:
-                        loop r in caller_pool:
-                            if free & (1 << r) != 0 and ra_free(r, s, e):
-                                reg = r
-                                break
+                        if v < np_rel:
+                            ip = 0
+                            loop k in [0..v):
+                                if xr_vtype(k) == VI: ip += 1
+                            if ip < 6:
+                                pr = param_pref_pool[ip]
+                                if free & (1 << pr) != 0 and ra_free(pr, s, e): reg = pr
+                        if reg < 0:
+                            loop ri in [0..6):
+                                r = xr_caller_pool[ri]
+                                if free & (1 << r) != 0 and ra_free(r, s, e):
+                                    reg = r
+                                    break
                     if reg < 0 and c <= 1:
-                        loop r in callee_pool:
+                        loop ri in [0..5):
+                            r = xr_callee_pool[ri]
                             if free & (1 << r) != 0 and ra_free(r, s, e):
                                 reg = r
                                 break
             if reg < 0 and (c == 0 or caller_ok or xr_vtype(v) == VI):
-                # steal from the active value cheapest to spill for the span it holds a
-                # register, if that is cheaper than this one and the register is free (of
-                # pass 1's values) for all of this one
                 best = -1
                 if xr_stats: ra_spill_visits += nactive
                 loop k in [0..nactive):
@@ -436,7 +551,7 @@ allocate_release = ():
                     ra = vloc[a]
                     if (ra >= XMM) != (xr_vtype(v) != VI): continue
                     if not spills_before(a, v): continue
-                    if (ra >= XMM or not is_callee[ra]) and not caller_ok: continue
+                    if (ra >= XMM or not saved_flags[ra]) and not caller_ok: continue
                     if not ra_free(ra, s, e): continue
                     if best < 0 or spills_before(a, best): best = a
                 if best >= 0:
@@ -446,16 +561,16 @@ allocate_release = ():
                     nactive = ra_remove(active, byreg, nactive, reg)
             if reg >= 0:
                 vloc[v] = reg
-                vsave[v] = c > 0 and (reg >= XMM or not is_callee[reg])
+                vsave[v] = c > 0 and (reg >= XMM or not saved_flags[reg])
                 free &= ~(1 << reg)
                 byreg[reg] = nactive
                 active[nactive] = v
                 nactive += 1
                 if xr_stats: ra_pressure(active, nactive, pos)
-                if v_live[v].last < min_end: min_end = v_live[v].last
-                if reg < XMM and is_callee[reg]: callee_off[reg] = 1
+                if int(v_live[v].last) < min_end: min_end = int(v_live[v].last)
+                if reg < XMM and saved_flags[reg]: callee_off[reg] = 1
             else: vloc[v] = LOC_SPILL
-            v = v_live[v].next_start
+            v = int(v_live[v].next_start)
     if len(ra_dump) > 0 and xr_ir[0].name == ra_dump:
         loop v in [0..nv):
             if v_live[v].last < 0: continue
@@ -465,34 +580,52 @@ allocate_release = ():
 
 layout_frame = ():
     off = 0
+    saved = data(callee_off)
     loop r in [0..16):
-        if callee_off[r] != 0:
+        if saved[r] != 0:
             off += 8
-            callee_off[r] = -off
+            saved[r] = -off
     nv = xr_ir[0].vtypes.len()
-    vspill = fill(0, nv)
-    save_list = []
+    if vspill.len() < nv: vspill.resize(nv)
+    else if vspill.len() > nv: vspill.truncate(nv)
+    spill = data(vspill)
+    loc_arr = vloc
+    save_arr = vsave
+    types = xr_types
+    save_list.clear()
     loop v in [0..nv):
-        if vloc[v] == LOC_SPILL or (vsave[v] and vloc[v] >= 0):
+        lv = loc_arr[v]
+        if lv == LOC_SPILL or (lv >= 0 and save_arr[v]):
             off += 8
-            if is_vreg_vec(xr_vtype(v)): off += 24      # (vectors take 32 bytes)
-            vspill[v] = -off
-            if vloc[v] >= 0: save_list.push(v)
-    slot_off = fill(0, xr_ir[0].slot_size.len())
-    loop s in [0..xr_ir[0].slot_size.len()):
-        sz = int(xr_ir[0].slot_size[s])
-        al = int(xr_ir[0].slot_align[s])
-        off = xr_align(off + sz, al)
-        slot_off[s] = -off
-    frame_size = xr_align(off, 16)
+            vt = int(types[v])
+            if vt == 4 or vt == 5: off += 24      # (vectors take 32 bytes)
+            spill[v] = -off
+            if lv >= 0: save_list.push(v)
+        else: spill[v] = 0
+    ns = if x_has_slot: xr_ir[0].slot_size.len() else: 0
+    if ns > 0:
+        if slot_off.len() < ns: slot_off.resize(ns)
+        else if slot_off.len() > ns: slot_off.truncate(ns)
+        slots = data(slot_off)
+        sizes = data(xr_ir[0].slot_size)
+        aligns = data(xr_ir[0].slot_align)
+        loop s in [0..ns):
+            sz = int(sizes[s])
+            al = int(aligns[s])
+            off = (off + sz + al - 1) & ~(al - 1)
+            slots[s] = -off
+    else if slot_off.len() > 0: slot_off.clear()
+    frame_size = (off + 15) & -16
 
 # Diagnostics only: the bounded active state includes both register classes.
 ra_pressure = (active: *int, n: int, pos: int):
+    xr_callee_pool = data(callee_pool)
     gpr = 0
     loop k in [0..n):
         if vloc[active[k]] < XMM: gpr += 1
     ra_peak_xmm = max(ra_peak_xmm, n - gpr)
     if pos >= 0:
-        loop r in callee_pool:
+        loop ri in [0..5):
+            r = xr_callee_pool[ri]
             if ra_occ[r * ra_words + ((pos + 1) >> 6)] & (1 << ((pos + 1) & 63)) != 0: gpr += 1
     ra_peak_gpr = max(ra_peak_gpr, gpr)

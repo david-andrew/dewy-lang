@@ -92,8 +92,8 @@ df_file=(@p:ParserContext @nodes:array<Node> host:ParserFileHost saved_edits:boo
     if p.reader.dc_lib_lazy {
         p.reader.dc_lazy_tokens[file]=p.tokens
         p.reader.dc_lib_lazy=false
+        p.tokens=[]
     }
-    p.tokens=[]
     p.reader.module_nodes=[]
     p.reader.module_lists=[]
     p.reader.dn_edits_on=saved_edits

@@ -4,7 +4,7 @@ from p"checker_runtime_functions.dewy" import (runtime_fn)
 from p"expression_types.dewy" import (ntype)
 
 from p"ast.jo" import (NF_MUT has_flag kid kids nkids nodes)
-from p"check.jo" import (syms)
+from p"check.jo" import (game_lookup_ok syms)
 from p"checker_expr.dewy" import (lookup)
 from p"checker_tokens.dewy" import (Tok)
 from p"checks_builders.dewy" import (bc_int)
@@ -108,10 +108,17 @@ nd_signature=(decl:NdWord @params:array<int64> result:NdWord=0):>int64=>$unsafe 
                 let name=NdWord(nodes.ptr[dim].name)
                 if bound.has(name) {term=bound[name]} else {
                     let ordinal=refine_bindings.formals.index_of(name) ?? (-1)
-                    if ordinal >=? 0 {term=RefTerm(2 ordinal)} else if lookup(name) not=? 0 and (syms.ptr[lookup(name)].kind =? 'local' or syms.ptr[lookup(name)].kind =? 'global' or syms.ptr[lookup(name)].kind =? 'const_' or syms.ptr[lookup(name)].kind =? 'type_') {term=ref_resolve_value(dim)}
+                    if ordinal >=? 0 {term=RefTerm(2 ordinal)}
                     else {
-                        bound[name]=RefTerm(2 i path=path)
-                        continue
+                        let prev_game_ok=game_lookup_ok
+                        game_lookup_ok=false
+                        let sym=lookup(name)
+                        game_lookup_ok=prev_game_ok
+                        if sym not=? 0 and (syms.ptr[sym].kind =? 'local' or syms.ptr[sym].kind =? 'global' or syms.ptr[sym].kind =? 'const_' or syms.ptr[sym].kind =? 'type_') {term=ref_resolve_value(dim)}
+                        else {
+                            bound[name]=RefTerm(2 i path=path)
+                            continue
+                        }
                     }
                 }
             }
@@ -180,9 +187,16 @@ nd_field_shape=(tn:NdWord t:NdWord siblings:array<int64>):>int64=>$unsafe {
         let term=RefTerm()
         if nodes.ptr[dim].kind =? 'ident' {
             let name=NdWord(nodes.ptr[dim].name)
-            if bound.has(name) {term=bound[name]} else if lookup(name) not=? 0 and (syms.ptr[lookup(name)].kind =? 'global' or syms.ptr[lookup(name)].kind =? 'const_' or syms.ptr[lookup(name)].kind =? 'type_') {term=ref_resolve_value(dim)}
-            # (another word stands for an extent the record does not store: only the rank is held)
-            else {continue}
+            if bound.has(name) {term=bound[name]}
+            else {
+                let prev_game_ok=game_lookup_ok
+                game_lookup_ok=false
+                let sym=lookup(name)
+                game_lookup_ok=prev_game_ok
+                if sym not=? 0 and (syms.ptr[sym].kind =? 'global' or syms.ptr[sym].kind =? 'const_' or syms.ptr[sym].kind =? 'type_') {term=ref_resolve_value(dim)}
+                # (another word stands for an extent the record does not store: only the rank is held)
+                else {continue}
+            }
         }
         else {term=nd_shape_term(dim bound)}
         ref_add('eq' RefTerm(path=(if nd {[int64(-3 - axis)]} else {[-1]})) term @atoms)

@@ -1,6 +1,7 @@
 use 'lex.jo'
 use 'checker_tokens.dewy'
 use 'util.jo'
+use 'intern.dewy'
 use 'lexer_errors.dewy'
 use 'lexer_units.dewy'
 use 'lexer_line_closes.dewy'
@@ -61,7 +62,7 @@ lx_number = ():
             fv = lx_float(s, i)
             if fv - fv != 0.0: lx_err(s, "number too large: the largest a float holds is about 1.8e308 (INF is infinity; for bigger numbers, `use big`: `big(1, 400)`)")
             lx_emit(.float_lit, s, i - s)
-            lx_slots[lx_count - 1].fval = fv
+            lx_slots[lx_count - 1].ival = int(f64_bits(fv))
             return
     if lx_cls[p[lx_i]] & 1 != 0:
         lx_unit(s, f64(v))
@@ -136,8 +137,159 @@ lx_string = (raw: bool):
     t[k].pos = mkpos(lx_file, lx_base + s)
     t[k].start = i32(start)
     t[k].len = i32(i - start)
+    t[k].ival = 0
     if triple: lx_i = i + 3
     else: lx_i = i + 1
+
+lx_tok1_arr: Tok[]
+lx_tok_eq_arr: Tok[]
+lx_op_mode_arr: u8[]
+lx_tok1: *Tok = null
+lx_tok_eq: *Tok = null
+lx_op_mode: *u8 = null
+
+lx_init_op_tables = ():
+    lx_tok1_arr = fill(Tok.eof, 256)
+    lx_tok_eq_arr = fill(Tok.eof, 256)
+    lx_op_mode_arr = fill(u8(0), 256)
+    lx_tok1 = data(lx_tok1_arr)
+    lx_tok_eq = data(lx_tok_eq_arr)
+    lx_op_mode = data(lx_op_mode_arr)
+    # mode 1: 1-char act=0 (; ~ @)
+    lx_tok1[59] = .semi; lx_op_mode[59] = 1
+    lx_tok1[126] = .tilde; lx_op_mode[126] = 1
+    lx_tok1[64] = .at; lx_op_mode[64] = 1
+    # mode 2: open bracket (( [ {)
+    lx_tok1[40] = .lparen; lx_op_mode[40] = 2
+    lx_tok1[91] = .lbrack; lx_op_mode[91] = 2
+    lx_tok1[123] = .lbrace; lx_op_mode[123] = 2
+    # mode 3: close bracket () ] })
+    lx_tok1[41] = .rparen; lx_op_mode[41] = 3
+    lx_tok1[93] = .rbrack; lx_op_mode[93] = 3
+    lx_tok1[125] = .rbrace; lx_op_mode[125] = 3
+    # mode 4: comma (,)
+    lx_tok1[44] = .comma; lx_op_mode[44] = 4
+    # mode 5: colon (:)
+    lx_tok1[58] = .colon; lx_op_mode[58] = 5
+    # mode 6: op or op= (+ / % & | ^ = !)
+    lx_tok1[43] = .plus; lx_tok_eq[43] = .pluseq; lx_op_mode[43] = 6
+    lx_tok1[47] = .slash; lx_tok_eq[47] = .slasheq; lx_op_mode[47] = 6
+    lx_tok1[37] = .percent; lx_tok_eq[37] = .percenteq; lx_op_mode[37] = 6
+    lx_tok1[38] = .amp; lx_tok_eq[38] = .ampeq; lx_op_mode[38] = 6
+    lx_tok1[124] = .pipe; lx_tok_eq[124] = .pipeeq; lx_op_mode[124] = 6
+    lx_tok1[94] = .caret; lx_tok_eq[94] = .careteq; lx_op_mode[94] = 6
+    lx_tok1[61] = .assign; lx_tok_eq[61] = .eq; lx_op_mode[61] = 6
+    lx_tok1[33] = .bang; lx_tok_eq[33] = .ne; lx_op_mode[33] = 6
+    # mode 7..12: multi-form (? - * < > .)
+    lx_tok1[63] = .question; lx_op_mode[63] = 7
+    lx_tok1[45] = .minus; lx_op_mode[45] = 8
+    lx_tok1[42] = .star; lx_op_mode[42] = 9
+    lx_tok1[60] = .lt; lx_op_mode[60] = 10
+    lx_tok1[62] = .gt; lx_op_mode[62] = 11
+    lx_tok1[46] = .dot; lx_op_mode[46] = 12
+
+lx_hash_check = (p: *u8, i: int, lim: int, cnt: int):
+    if i + 1 < lim:
+        nc = p[i + 1]
+        if (nc >= 97 and nc <= 122) or (nc >= 65 and nc <= 90):
+            lx_count = cnt
+            lk = lx_last_kind()
+            if lk == .lparen or lk == .lbrack or lk == .comma or lk == .assign or lk == .plus or lk == .minus or lk == .star or lk == .lt or lk == .gt or lk == .eq:
+                lx_err(i, "`#` starts a comment; a length is `xs.len()` (or `len(s)`)")
+
+lx_op_multi = (p: *u8, i: int, om: u8, c: u8, at: int) -> int:
+    c1 = p[i + 1]
+    k = lx_tok1[c]
+    n = 1
+    iv = 0
+    if om == 12:
+        if c1 == 46:
+            k = .dotdot; n = 2
+            if p[i + 2] == 46: k = .ellipsis; n = 3
+        else if c1 == 43 or c1 == 45 or c1 == 42 or c1 == 47 or c1 == 37 or c1 == 94 or c1 == 60 or c1 == 62 or (c1 == 61 and p[i + 2] == 61) or (c1 == 33 and p[i + 2] == 61):
+            k = .dotop; n = 2; iv = int(c1)
+            if p[i + 2] == 61 and c1 != 43 and c1 != 45 and c1 != 42 and c1 != 47 and c1 != 37 and c1 != 94: n = 3
+    else if om == 8:
+        if c1 == 62: k = .arrow; n = 2
+        else if c1 == 61: k = .minuseq; n = 2
+    else if om == 9:
+        if c1 == 61: k = .stareq; n = 2
+        else if c1 == 42: k = .starstar; n = 2
+    else if om == 10:
+        if c1 == 60:
+            k = .shl; n = 2
+            if p[i + 2] == 61: k = .shleq; n = 3
+        else if c1 == 61: k = .le; n = 2
+    else if om == 11:
+        if c1 == 62:
+            k = .shr; n = 2
+            if p[i + 2] == 61: k = .shreq; n = 3
+        else if c1 == 61: k = .ge; n = 2
+    else if c1 == 63: k = .qq; n = 2
+    if lx_count == lx_cap: lx_grow()
+    sl = lx_slots + lx_count
+    lx_count += 1
+    sl.kind = k
+    sl.flags = 0
+    sl.pos = at + i
+    sl.start = i32(i)
+    sl.len = i32(n)
+    sl.ival = iv
+    i + n
+
+lx_newline_slow = (i: int, cnt: int, ctx_n: int):
+    __set_len(lx_ctx, ctx_n)
+    lx_i = i
+    lx_count = cnt
+    if lx_lazy and ctx_n == 1 and lx_decl_context() and lx_last_kind() == .colon and lx_decl_line():
+        end_ = lx_body_end(lx_i + 1, lx_line_indent)
+        if end_ > 0:
+            lx_emit_newline()
+            lx_emit(.lazy, lx_i + 1, end_ - (lx_i + 1))
+            lx_i = end_
+            lx_line_start()
+            return
+    lx_i = lx_i + 1
+    if lx_top_block(): lx_emit_newline()
+    lx_line_start()
+
+lx_bad_char = (p: *u8, i: int, c: u8):
+    lx_i = i
+    if c == 96: lx_err(i, "strings are in double quotes and put values in by themselves: \"score {{n}}\" (no backticks)")
+    if c == 0: lx_err(i, "this is not a source file: it holds binary data (a program built from one?)")
+    if c == 36 and i + 1 < len(lx_src) and p[i + 1] == 34: lx_err(i, "every string can hold values: drop the `$` (`\"Score: \{s}\"`)")
+    lx_err(i, "unexpected character '{byte_str(int(c))}'")
+
+lx_nsp: *i32 = null
+lx_nhp: *int = null
+lx_ntp: **u8 = null
+lx_nmask = -1
+
+lx_intern_slow = (ps: *u8, s: int, ln: int) -> int:
+    h = hash_bytes(ps, ln)
+    if lx_nmask >= 0:
+        id = name_find_raw(lx_nsp, lx_nhp, lx_ntp, lx_nmask, ps, ln, h)
+        if id >= 0: return id
+    id = intern_new(lx_src, s, ln, h)
+    lx_nsp = data(name_tab)
+    lx_nhp = data(name_hash)
+    lx_ntp = data(names) as **u8
+    lx_nmask = name_tab.len() - 1
+    id
+
+lx_tail_char = (p: *u8, i: int, lim: int, cnt: int, c: u8) -> int:
+    if c == 34 or c == 39:
+        lx_i = i
+        lx_count = cnt
+        lx_string(false)
+        return lx_i
+    if c == 35:
+        lx_hash_check(p, i, lim, cnt)
+        return __find_newline(p, i, lim)
+    if c == 9 or c == 13: return i + 1
+    if c == 92 and p[i + 1] == 10: return i + 2
+    lx_bad_char(p, i, c)
+    i + 1
 
 # (from, to: a part of src alone, as a lazy function body: tokens keep their places in src)
 lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
@@ -150,243 +302,334 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
     if to >= 0: lx_n = to
     lx_i = from
     # (about a token per five bytes of source; in a library file the bodies are mostly skipped)
-    cap = (lx_n - lx_i) / 5 + 16
-    if lx_lazy and cap > 512: cap = 512
-    lx_toks = []
-    lx_toks.resize(cap)
+    ncap = (lx_n - lx_i) / 5 + 16
+    if lx_lazy and ncap > 512: ncap = 512
+    lx_toks = lx_tok_pool
+    lx_tok_pool = []
+    if lx_toks.cap() < ncap: lx_toks.reserve(ncap)
+    __set_len(lx_toks, ncap)
     lx_slots = data(lx_toks)
     lx_count = 0
-    lx_cap = cap
-    lx_indents = [0]
-    lx_decl_lines = []
+    lx_cap = ncap
+    lx_indents.clear()
+    lx_indents.push(0)
+    lx_decl_lines.clear()
     lx_line_tok0 = 0
     lx_tab_indent = false
     lx_space_indent = false
-    lx_ctx = [(1 << 1) | 1]
-    if kw_tok.len() == 0: init_keywords()
-    if lx_cls == null: lx_init_classes()
+    lx_ctx.clear()
+    if lx_ctx.cap() < 64: lx_ctx.reserve(64)
+    lx_ctx.push((1 << 1) | 1)
+    if lx_op_mode == null:
+        if kw_tok.len() == 0: init_keywords()
+        if lx_cls == null: lx_init_classes()
+        lx_init_op_tables()
     lx_line_start()
+    top_indent = lx_indents[lx_indents.len() - 1]
     p = lx_p
     cls = lx_cls
+    op_mode = lx_op_mode
+    tok1 = lx_tok1
+    tok_eq = lx_tok_eq
     kws = data(kw_tok)
     nkw = kw_tok.len()
     at = (lx_file << 40) | lx_base
+    nsp = data(name_tab)
+    nhp = data(name_hash)
+    ntp = data(names) as **u8
+    nmask = name_tab.len() - 1
+    lx_nsp = nsp
+    lx_nhp = nhp
+    lx_ntp = ntp
+    lx_nmask = nmask
     # (the scan position is local here; the helpers read and move lx_i)
+    lim = lx_n
     i = lx_i
-    loop i < lx_n:
+    cnt = lx_count
+    lcap = lx_cap
+    slots = lx_slots
+    ctx_p = data(lx_ctx)
+    ctx_n = lx_ctx.len()
+    ctx_cap = lx_ctx.cap()
+    loop i < lim:
         c = p[i]
-        if c == 32 or c == 9 or c == 13:
+        if c == 32:
             i += 1
-            loop i < lx_n and p[i] == 32: i += 1
-            continue
+            loop p[i] == 32: i += 1
+            if i >= lim: break
+            c = p[i]
         if cls[c] & 1 != 0:
             if c == 114 and (p[i + 1] == 34 or p[i + 1] == 39):
                 lx_i = i + 1
+                lx_count = cnt
                 lx_string(true)
                 i = lx_i
+                cnt = lx_count
+                lcap = lx_cap
+                slots = lx_slots
                 continue
             s = i
             i += 1
             loop cls[p[i]] & 2 != 0: i += 1
-            id = intern_sub(src, s, i - s)
+            ln = i - s
+            ps = p + s
+            id = -1
+            if ln <= 16:
+                hu = u64(ln) * 0x9E3779B97F4A7C15
+                if ln > 8:
+                    hu = (hu xor (ps as *u64)[0]) * 0xBF58476D1CE4E5B9
+                    hu = (hu xor (hu >> 31)) xor ((ps + (ln - 8)) as *u64)[0]
+                else if ln >= 4:
+                    hu = hu xor u64((ps as *u32)[0]) xor (u64(((ps + (ln - 4)) as *u32)[0]) << 32)
+                else:
+                    hu = hu xor u64(ps[0]) xor (u64(ps[ln >> 1]) << 8) xor (u64(ps[ln - 1]) << 16)
+                hu = hu * 0xBF58476D1CE4E5B9
+                h = int(hu xor (hu >> 32))
+                e0 = int(nsp[h & nmask])
+                if e0 != 0:
+                    id0 = e0 - 1
+                    if nhp[id0] == h:
+                        hdr = ntp[id0]
+                        if (hdr as *int)[1] == ln:
+                            hdr = hdr + 24
+                            if ln > 8:
+                                if (hdr as *u64)[0] == (ps as *u64)[0] and ((hdr + (ln - 8)) as *u64)[0] == ((ps + (ln - 8)) as *u64)[0]: id = id0
+                            else if ln >= 4:
+                                if (hdr as *u32)[0] == (ps as *u32)[0] and ((hdr + (ln - 4)) as *u32)[0] == ((ps + (ln - 4)) as *u32)[0]: id = id0
+                            else if ln >= 2:
+                                if (hdr as *u16)[0] == (ps as *u16)[0] and ((hdr + (ln - 2)) as *u16)[0] == ((ps + (ln - 2)) as *u16)[0]: id = id0
+                            else if hdr[0] == ps[0]: id = id0
+            if id < 0:
+                id = lx_intern_slow(ps, s, ln)
+                nsp = lx_nsp; nhp = lx_nhp; ntp = lx_ntp; nmask = lx_nmask
             kind = Tok.ident
             if id < nkw: kind = kws[id]
-            if lx_count == lx_cap: lx_grow()
-            t = lx_slots
-            k = lx_count
-            lx_count = k + 1
-            t[k].kind = kind
-            t[k].pos = at + s
-            t[k].start = i32(s)
-            t[k].len = i32(i - s)
-            t[k].ival = id
+            if cnt == lcap:
+                lx_count = cnt
+                lx_grow()
+                lcap = lx_cap
+                slots = lx_slots
+            sl = slots + cnt
+            sl.kind = kind
+            sl.flags = 0
+            sl.pos = at + s
+            sl.start = i32(s)
+            sl.len = i32(ln)
+            sl.ival = id
+            cnt += 1
             continue
-        if c == 92 and p[i + 1] == 10:
-            i += 2
-            continue
-        if c == 35:
-            # (#xs, Lua's length: right after an opening bracket, a comma or an operator)
-            if i + 1 < lx_n and is_alpha(p[i + 1]):
-                lk = lx_last_kind()
-                if lk == .lparen or lk == .lbrack or lk == .comma or lk == .assign or lk == .plus or lk == .minus or lk == .star or lk == .lt or lk == .gt or lk == .eq:
-                    lx_err(i, "`#` starts a comment; a length is `xs.len()` (or `len(s)`)")
-            i = __find_newline(p, i, lx_n)
-            continue
-        lx_i = i
-        if c == 10:
-            if lx_lazy and lx_ctx.len() == 1 and lx_decl_context() and lx_last_kind() == .colon and lx_decl_line():
-                end = lx_body_end(lx_i + 1, lx_line_indent)
-                if end > 0:
-                    lx_emit_newline()
-                    lx_emit(.lazy, lx_i + 1, end - (lx_i + 1))
-                    lx_i = end
-                    lx_line_start()
-                    i = lx_i
+        om = op_mode[c]
+        if om != 0:
+            match om:
+                6:
+                    k = tok1[c]
+                    n = 1
+                    if p[i + 1] == 61: k = tok_eq[c]; n = 2
+                    if cnt == lcap:
+                        lx_count = cnt; lx_grow(); lcap = lx_cap; slots = lx_slots
+                    sl = slots + cnt
+                    cnt += 1
+                    sl.kind = k
+                    sl.flags = 0
+                    sl.pos = at + i
+                    sl.start = i32(i)
+                    sl.len = i32(n)
+                    sl.ival = 0
+                    i += n
                     continue
-            lx_i += 1
-            if lx_top_block(): lx_emit_newline()
-            lx_line_start()
+                2:
+                    if cnt == lcap:
+                        lx_count = cnt; lx_grow(); lcap = lx_cap; slots = lx_slots
+                    tk = cnt
+                    sl = slots + tk
+                    cnt += 1
+                    sl.kind = tok1[c]
+                    sl.flags = 0
+                    sl.pos = at + i
+                    sl.start = i32(i)
+                    sl.len = 1
+                    sl.ival = 0
+                    opening = if tk < 0x7FFFFE: tk + 1 else: 0
+                    entry = (i << 24) | (opening << 1)
+                    if ctx_n == ctx_cap:
+                        __set_len(lx_ctx, ctx_n)
+                        lx_ctx.push(entry)
+                        ctx_p = data(lx_ctx); ctx_cap = lx_ctx.cap(); ctx_n = lx_ctx.len()
+                    else:
+                        ctx_p[ctx_n] = entry
+                        ctx_n += 1
+                    i += 1
+                    continue
+                3:
+                    if ctx_n > 1 and ctx_p[ctx_n - 1] & 1 != 0:
+                        __set_len(lx_ctx, ctx_n)
+                        lx_i = i; lx_count = cnt
+                        lx_close_block_ctx(i)
+                        cnt = lx_count; lcap = lx_cap; slots = lx_slots
+                        ctx_p = data(lx_ctx); ctx_cap = lx_ctx.cap(); ctx_n = lx_ctx.len()
+                        top_indent = lx_indents[lx_indents.len() - 1]
+                    if ctx_n <= 1:
+                        __set_len(lx_ctx, ctx_n); lx_i = i; lx_count = cnt; lx_err(i, "unmatched '{byte_str(int(c))}'")
+                    opening = (ctx_p[ctx_n - 1] >> 1) & 0x7FFFFF
+                    if opening > 0: slots[opening - 1].ival = cnt
+                    ctx_n -= 1
+                    if cnt == lcap:
+                        lx_count = cnt; lx_grow(); lcap = lx_cap; slots = lx_slots
+                    sl = slots + cnt
+                    cnt += 1
+                    sl.kind = tok1[c]
+                    sl.flags = 0
+                    sl.pos = at + i
+                    sl.start = i32(i)
+                    sl.len = 1
+                    sl.ival = 0
+                    i += 1
+                    continue
+                4:
+                    if ctx_n > 1 and ctx_p[ctx_n - 1] & 1 != 0:
+                        __set_len(lx_ctx, ctx_n)
+                        if lx_line_closes(i + 1):
+                            lx_i = i; lx_count = cnt
+                            lx_close_block_ctx(i)
+                            cnt = lx_count; lcap = lx_cap; slots = lx_slots
+                            ctx_p = data(lx_ctx); ctx_cap = lx_ctx.cap(); ctx_n = lx_ctx.len()
+                            top_indent = lx_indents[lx_indents.len() - 1]
+                    if cnt == lcap:
+                        lx_count = cnt; lx_grow(); lcap = lx_cap; slots = lx_slots
+                    sl = slots + cnt
+                    cnt += 1
+                    sl.kind = .comma
+                    sl.flags = 0
+                    sl.pos = at + i
+                    sl.start = i32(i)
+                    sl.len = 1
+                    sl.ival = 0
+                    i += 1
+                    continue
+                5:
+                    if cnt == lcap:
+                        lx_count = cnt; lx_grow(); lcap = lx_cap; slots = lx_slots
+                    sl = slots + cnt
+                    cnt += 1
+                    sl.kind = .colon
+                    sl.flags = 0
+                    sl.pos = at + i
+                    sl.start = i32(i)
+                    sl.len = 1
+                    sl.ival = 0
+                    i += 1
+                    if ctx_p[ctx_n - 1] & 1 == 0:
+                        q = i
+                        loop p[q] == 32 or p[q] == 9 or p[q] == 13: q += 1
+                        if p[q] == 35:
+                            loop q < lim and p[q] != 10: q += 1
+                        if p[q] == 10:
+                            lx_indents.push(lx_line_indent)
+                            top_indent = lx_line_indent
+                            entry = (i << 24) | (lx_indents.len() << 1) | 1
+                            if ctx_n == ctx_cap:
+                                __set_len(lx_ctx, ctx_n)
+                                lx_ctx.push(entry)
+                                ctx_p = data(lx_ctx); ctx_cap = lx_ctx.cap(); ctx_n = lx_ctx.len()
+                            else:
+                                ctx_p[ctx_n] = entry
+                                ctx_n += 1
+                    continue
+                1:
+                    if cnt == lcap:
+                        lx_count = cnt; lx_grow(); lcap = lx_cap; slots = lx_slots
+                    sl = slots + cnt
+                    cnt += 1
+                    sl.kind = tok1[c]
+                    sl.flags = 0
+                    sl.pos = at + i
+                    sl.start = i32(i)
+                    sl.len = 1
+                    sl.ival = 0
+                    i += 1
+                    continue
+                _:
+                    lx_count = cnt
+                    i = lx_op_multi(p, i, om, c, at)
+                    cnt = lx_count
+                    lcap = lx_cap
+                    slots = lx_slots
+                    continue
+        if c == 10:
+            if ctx_n == 1 and (not lx_lazy or cnt == 0 or slots[cnt - 1].kind != .colon):
+                q = i + 1
+                loop p[q] == 32: q += 1
+                nc = p[q]
+                if q < lim and nc != 10 and nc != 35 and nc != 9 and nc != 13:
+                    ind = q - (i + 1)
+                    if ind == top_indent:
+                        if cnt > 0:
+                            lk = slots[cnt - 1].kind
+                            if lk != .newline and lk != .indent and lk != .dedent:
+                                if cnt == lcap:
+                                    lx_count = cnt; lx_grow(); lcap = lx_cap; slots = lx_slots
+                                sl = slots + cnt
+                                cnt += 1
+                                sl.kind = .newline
+                                sl.flags = 0
+                                sl.pos = at + (i + 1)
+                                sl.start = i32(i + 1)
+                                sl.len = 0
+                                sl.ival = 0
+                        lx_line_indent = ind
+                        if ind > 0: lx_space_indent = true
+                        lx_line_tok0 = cnt
+                        i = q
+                        continue
+            lx_newline_slow(i, cnt, ctx_n)
             i = lx_i
+            cnt = lx_count
+            lcap = lx_cap
+            slots = lx_slots
+            ctx_p = data(lx_ctx); ctx_cap = lx_ctx.cap(); ctx_n = lx_ctx.len()
+            top_indent = lx_indents[lx_indents.len() - 1]
             continue
         if c >= 48 and c <= 57:
+            s = i
+            d1 = p[i + 1]
+            if not (c == 48 and (d1 == 120 or d1 == 88 or d1 == 98 or d1 == 66 or d1 == 111 or d1 == 79)):
+                v = u64(c - 48)
+                q = i + 1
+                loop true:
+                    dc = p[q]
+                    if dc >= 48 and dc <= 57:
+                        v = v * 10 + u64(dc - 48)
+                        q += 1
+                    else: break
+                ec = p[q]
+                if q - s <= 18 and cls[ec] == 0 and ec != 46 and ec != 95:
+                    if cnt == lcap:
+                        lx_count = cnt; lx_grow(); lcap = lx_cap; slots = lx_slots
+                    sl = slots + cnt
+                    cnt += 1
+                    sl.kind = .int_lit
+                    sl.flags = 0
+                    sl.pos = at + s
+                    sl.start = i32(s)
+                    sl.len = i32(q - s)
+                    sl.ival = int(v)
+                    i = q
+                    continue
+            lx_i = i
+            lx_count = cnt
             lx_number()
             i = lx_i
+            cnt = lx_count
+            lcap = lx_cap
+            slots = lx_slots
             continue
-        if c == 34 or c == 39:
-            lx_string(false)
-            i = lx_i
-            continue
-        # (src's bytes end with a 0, at len(src): the byte after next, p[i + 2], is read only once
-        # c1 is one of an operator's, so not that 0)
-        c1 = p[i + 1]
-        k = Tok.eof
-        n = 1
-        match c:
-            40: k = .lparen
-            41: k = .rparen
-            91: k = .lbrack
-            93: k = .rbrack
-            123: k = .lbrace
-            125: k = .rbrace
-            44: k = .comma
-            59: k = .semi
-            126: k = .tilde
-            64: k = .at
-            58: k = .colon
-            46:
-                k = .dot
-                if c1 == 46:
-                    k = .dotdot
-                    n = 2
-                    if p[i + 2] == 46:
-                        k = .ellipsis
-                        n = 3
-                else if c1 == 43 or c1 == 45 or c1 == 42 or c1 == 47 or c1 == 37 or c1 == 94 or c1 == 60 or c1 == 62 or (c1 == 61 and p[i + 2] == 61) or (c1 == 33 and p[i + 2] == 61):
-                    # dotted (broadcasting) operator: .+ .* .== .<= ...
-                    k = .dotop
-                    n = 2
-                    if p[i + 2] == 61 and c1 != 43 and c1 != 45 and c1 != 42 and c1 != 47 and c1 != 37 and c1 != 94: n = 3
-            45:
-                k = .minus
-                if c1 == 62:
-                    k = .arrow
-                    n = 2
-                else if c1 == 61:
-                    k = .minuseq
-                    n = 2
-            43:
-                k = .plus
-                if c1 == 61:
-                    k = .pluseq
-                    n = 2
-            42:
-                k = .star
-                if c1 == 61:
-                    k = .stareq
-                    n = 2
-                else if c1 == 42:
-                    k = .starstar
-                    n = 2
-            47:
-                k = .slash
-                if c1 == 61:
-                    k = .slasheq
-                    n = 2
-            37:
-                k = .percent
-                if c1 == 61:
-                    k = .percenteq
-                    n = 2
-            38:
-                k = .amp
-                if c1 == 61:
-                    k = .ampeq
-                    n = 2
-            124:
-                k = .pipe
-                if c1 == 61:
-                    k = .pipeeq
-                    n = 2
-            94:
-                k = .caret
-                if c1 == 61:
-                    k = .careteq
-                    n = 2
-            61:
-                k = .assign
-                if c1 == 61:
-                    k = .eq
-                    n = 2
-            33:
-                k = .bang
-                if c1 == 61:
-                    k = .ne
-                    n = 2
-            63:
-                k = .question
-                if c1 == 63:
-                    k = .qq
-                    n = 2
-            60:
-                k = .lt
-                if c1 == 60:
-                    k = .shl
-                    n = 2
-                    if p[i + 2] == 61:
-                        k = .shleq
-                        n = 3
-                else if c1 == 61:
-                    k = .le
-                    n = 2
-            62:
-                k = .gt
-                if c1 == 62:
-                    k = .shr
-                    n = 2
-                    if p[i + 2] == 61:
-                        k = .shreq
-                        n = 3
-                else if c1 == 61:
-                    k = .ge
-                    n = 2
-            _:
-                if c == 96: lx_err(lx_i, "strings are in double quotes and put values in by themselves: \"score {{n}}\" (no backticks)")
-                if c == 0: lx_err(lx_i, "this is not a source file: it holds binary data (a program built from one?)")
-                # ($"Score: {s}": C#'s interpolated text)
-                if c == 36 and lx_i + 1 < len(lx_src) and lx_src[lx_i + 1] == 34: lx_err(lx_i, "every string can hold values: drop the `$` (`\"Score: \{s}\"`)")
-                lx_err(lx_i, "unexpected character '{byte_str(int(c))}'")
-        # (a lambda's indented body inside brackets ends at a comma whose line goes on to close the
-        # bracket: f(():\n    a(), 5) gives f a lambda and 5; a, b = b, a alone on a line is a tuple)
-        if k == .comma:
-            if lx_ctx.len() > 1 and lx_top_block() and lx_line_closes(lx_i + 1): lx_close_block_ctx(lx_i)
-        else if k == .rparen or k == .rbrack or k == .rbrace:
-            lx_close_block_ctx(lx_i)
-            if lx_ctx.len() <= 1: lx_err(lx_i, "unmatched '{byte_str(int(c))}'")
-            opening = (lx_ctx[lx_ctx.len() - 1] >> 1) & 0x7FFFFF
-            if opening > 0: lx_slots[opening - 1].ival = lx_count
-            lx_ctx.pop()
-        if lx_count == lx_cap: lx_grow()
-        t = lx_slots
-        tk = lx_count
-        lx_count = tk + 1
-        t[tk].kind = k
-        t[tk].pos = at + i
-        t[tk].start = i32(i)
-        t[tk].len = i32(n)
-        if k == .dotop: t[tk].ival = int(c1)
-        lx_i = i + n
-        if k == .lparen or k == .lbrack or k == .lbrace:
-            opening = if tk < 0x7FFFFE: tk + 1 else: 0
-            lx_ctx.push((i << 24) | (opening << 1))
-        else if k == .colon and not lx_top_block():
-            q = lx_i
-            loop p[q] == 32 or p[q] == 9 or p[q] == 13: q += 1
-            if p[q] == 35:
-                loop q < lx_n and p[q] != 10: q += 1
-            if p[q] == 10:
-                lx_indents.push(lx_line_indent)
-                lx_ctx.push((lx_i << 24) | (lx_indents.len() << 1) | 1)
-        i = lx_i
+        lx_count = cnt
+        i = lx_tail_char(p, i, lim, cnt, c)
+        cnt = lx_count
+        lcap = lx_cap
+        slots = lx_slots
+    __set_len(lx_ctx, ctx_n)
+    lx_count = cnt
     lx_i = i
     lx_close_block_ctx(lx_i)
     if lx_ctx.len() > 1:
@@ -400,7 +643,10 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
     # the eof read as more eofs, also when the tokens fill the array exactly)
     if lx_cap - lx_count < LX_SPARE:
         lx_cap = lx_count + LX_SPARE
-        lx_toks.resize(lx_cap)
+        if lx_toks.cap() < lx_cap: lx_toks.reserve(lx_cap)
+        __set_len(lx_toks, lx_cap)
+        lx_slots = data(lx_toks)
+    mem_set((lx_slots + lx_count) as *u8, 0, LX_SPARE * size_of(Token))
     lx_toks.truncate(lx_count)
     lx_slots = null
     out = lx_toks

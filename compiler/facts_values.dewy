@@ -14,7 +14,7 @@ from p"refine_transfers.dewy" import (ref_assume)
 from p"refine_metadata.dewy" import (ref_encoded ref_has_fields)
 from p"refinement_types.dewy" import (FACT_MAX FactBound FactReason FactTerm)
 from p"string_domains.jo" import (string_set_tests)
-from p"types.jo" import (T_MATH_INT T_U64 is_int types T_INT T_STR tkind telem)
+from p"types.jo" import (T_MATH_INT T_U64 is_int secrets_seen types T_INT T_STR tkind telem)
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"place_routes.dewy" import (place_scalar_root)
 from p"facts_compare.dewy" import (fact_compare)
@@ -56,10 +56,21 @@ fact_scalar=(t0:ValueBuildWord):>bool=>$unsafe {
     let t=fact_type(t0)
     types.ptr[t].kind =? 'bool_' or types.ptr[t].kind =? 'int_'
 }
-fact_type=(t0:ValueBuildWord):>int64=>$unsafe {
+fact_type_slow=(t0:ValueBuildWord):>int64=>$unsafe {
     let t=exact_representation(t0)
-    if is_int(t) and types.ptr[t].bits =? 64 and not types.ptr[t].sign {return T_U64}
+    let tp=types.ptr + t
+    if tp[0].kind =? 'int_' and tp[0].bits =? 64 and not tp[0].sign {return T_U64}
     t
+}
+fact_type=(t0:ValueBuildWord):>int64=>$unsafe {
+    let tp=types.ptr + t0
+    let k=tp[0].kind
+    if k =? 'int_' {
+        if tp[0].bits =? 64 and not tp[0].sign {return T_U64}
+        return t0
+    }
+    if k not=? 'refined' and k not=? 'var' and (not secrets_seen or k not=? 'secret') {return t0}
+    fact_type_slow(t0)
 }
 fact_domain=(t0:int64 reason:FactReason='missing' at:int64=0):>FactBound=>$unsafe {
     let t=fact_type(t0)

@@ -174,8 +174,10 @@ exact_type_width=(n:WidthWord constant_only:bool=false):>int64=>$unsafe {
         return if constant_only {-1} else {cached}
     }
     if n >=? exact_type_widths.length {
-        exact_type_widths.resize(max(int64(n + 1) nodes.length))
-        exact_type_values.resize(exact_type_widths.length)
+        let need=max(max(int64(n + 1) nodes.length) exact_type_widths.length * 2)
+        exact_type_widths.resize(need)
+        if cap(exact_type_values) <? need {exact_type_values.reserve(need)}
+        __set_len(exact_type_values need)
     }
     let k=nodes.ptr[n].kind
     if k =? 'int_lit' {
@@ -256,7 +258,7 @@ exact_type_width=(n:WidthWord constant_only:bool=false):>int64=>$unsafe {
     # Initializers can belong to an owner not prepared yet. Only an actual
     # constant is usable there; a source storage type is not an exact bound.
     if constant_only {return -1}
-    if exact_word_reads.has(n) {
+    if exact_word_reads.length >? 0 and exact_word_reads.has(n) {
         let bound=exact_count_bound(WidthWord(nodes.ptr[n].a))
         let lo=WidthWord(bound.lo)
         let hi=WidthWord(bound.hi)
@@ -331,8 +333,10 @@ exact_type_width=(n:WidthWord constant_only:bool=false):>int64=>$unsafe {
             if a >? 0 {result=max(1 (a >> 1) - count) * 2 + (a & 1)}
         }
     }
-    let [mid_lo mid_hi]=exact_midpoint(n)
-    if mid_lo not=? 0 {result=128}
+    if k =? 'binary' and nodes.ptr[n].aux =? 0 {
+        let [mid_lo mid_hi]=exact_midpoint(n)
+        if mid_lo not=? 0 {result=128}
+    }
     exact_type_widths[n]=int64(result)
     result
 }

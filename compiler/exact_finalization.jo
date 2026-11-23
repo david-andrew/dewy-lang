@@ -61,7 +61,7 @@ exact_bits = (n: int) -> int:
     syntax = exact_type_width(n)
     if syntax > 0: width = min(width, syntax / 2)
     if n < exact_ranges.len() and exact_ranges[n] > 0: width = min(width, exact_ranges[n])
-    if n >= exact_widths.len(): exact_widths.resize(max(n + 1, nodes.len()))
+    if n >= exact_widths.len(): exact_widths.resize(max(max(n + 1, nodes.len()), exact_widths.len() * 2))
     exact_widths[n] = width
     width
 exact_finish = ():

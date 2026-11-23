@@ -12,18 +12,26 @@ CopyWord:type=int64<overflow='wrap'>
 # snapshotting optimizer state or adding a control-flow pass.
 o_copy_forward=():>void=>$unsafe {
     if ir.raw_mem or ir.slot_size.length =? 0 {return}
-    let code=ir.code
-    let previous:CopyWord=-1
+    let code=ir.code.ptr
+    let n=ir.code.length
+    let has_prev=false
+    let prev_a:int32<overflow='wrap'>=0
+    let prev_imm:int64=0
     let found=false
-    loop i in [0..code.length) {
-        let ins=code[i]
-        if ins.op =? 'copy' {
-            if previous >=? 0 and ins.b =? code[previous].a and ins.imm =? code[previous].imm {
+    let p=code
+    let end_=code + n
+    loop p <? end_ {
+        let op=p[0].op
+        if op =? 'copy' {
+            if has_prev and p[0].b =? prev_a and p[0].imm =? prev_imm {
                 found=true
                 break
             }
-            previous=i
-        } else if not o_defines(ins.op) or kills_memory(ins.op) {previous=-1}
+            has_prev=true
+            prev_a=p[0].a
+            prev_imm=p[0].imm
+        } else if has_prev and (not o_defines(op) or kills_memory(op)) {has_prev=false}
+        p+=1
     }
     if not found {return}
     let nv=ir.vtypes.length
@@ -32,43 +40,52 @@ o_copy_forward=():>void=>$unsafe {
     let nuse:array<CopyWord>=fill(CopyWord(0) nv)
     let slot:array<CopyWord>=fill(CopyWord(-1) nv)
     let addresses:array<CopyWord>=fill(CopyWord(0) ns)
-    loop ins in code {
-        let d=ir_operands(ins)
+    let args=ir.args.ptr
+    p=code
+    loop p <? end_ {
+        let d=ir_operands(p[0])
         if d >=? 0 {ndef[d]+=1}
         loop k in [0..ir_use_count) {nuse[ir_use(k)]+=1}
-        if ins.op =? 'slot' {
-            slot[int64(ins.dst)]=int64(ins.a)
-            addresses[int64(ins.a)]+=1
-        } else if ins.op =? 'zeroslots' {
-            loop k in [0..int64(ins.b)) {
-                let item=int64(ir.args[int64(ins.a) + k])
+        let op=p[0].op
+        if op =? 'slot' {
+            slot[int64(p[0].dst)]=int64(p[0].a)
+            addresses[int64(p[0].a)]+=1
+        } else if op =? 'zeroslots' {
+            let a0=int64(p[0].a)
+            loop k in [0..int64(p[0].b)) {
+                let item=int64(args[a0 + k])
                 if item & 1 =? 1 {ndef[item >> 1]+=1}
             }
         }
+        p+=1
     }
-    previous=-1
-    loop i in [0..code.length) {
-        let ins=code[i]
-        if ins.op not=? 'copy' {
-            if not o_defines(ins.op) or kills_memory(ins.op) {previous=-1}
+    let previous:CopyWord=-1
+    let sizes=ir.slot_size.ptr
+    p=code
+    let i:CopyWord=0
+    loop p <? end_ {
+        let op=p[0].op
+        if op not=? 'copy' {
+            if previous >=? 0 and (not o_defines(op) or kills_memory(op)) {previous=-1}
+            p+=1; i+=1
             continue
         }
         let first_pos=previous
         previous=i
-        if first_pos <? 0 {continue}
-        let first=code[first_pos]
-        let tmp=int64(ins.b)
-        let src=int64(first.b)
-        let dst=int64(ins.a)
-        if tmp not=? int64(first.a) or ins.imm not=? first.imm or tmp <? 0 or src <? 0 or dst <? 0 {continue}
+        if first_pos <? 0 {p+=1; i+=1; continue}
+        let first=code + first_pos
+        let tmp=int64(p[0].b)
+        let src=int64(first[0].b)
+        let dst=int64(p[0].a)
+        if tmp not=? int64(first[0].a) or p[0].imm not=? first[0].imm or tmp <? 0 or src <? 0 or dst <? 0 {p+=1; i+=1; continue}
         let t=slot[tmp]
         let s=slot[src]
         let d=slot[dst]
-        if t <? 0 or s <? 0 or d <? 0 or t =? s or t =? d or s =? d {continue}
-        if ndef[tmp] not=? 1 or ndef[src] not=? 1 or ndef[dst] not=? 1 or nuse[tmp] not=? 2 or addresses[t] not=? 1 {continue}
-        if ins.imm not=? int64(ir.slot_size[t]) or ins.imm not=? int64(ir.slot_size[s]) or ins.imm not=? int64(ir.slot_size[d]) {continue}
-        code[first_pos].op='nop'
-        code[i].b=first.b
+        if t <? 0 or s <? 0 or d <? 0 or t =? s or t =? d or s =? d {p+=1; i+=1; continue}
+        if ndef[tmp] not=? 1 or ndef[src] not=? 1 or ndef[dst] not=? 1 or nuse[tmp] not=? 2 or addresses[t] not=? 1 {p+=1; i+=1; continue}
+        if p[0].imm not=? int64(sizes[t]) or p[0].imm not=? int64(sizes[s]) or p[0].imm not=? int64(sizes[d]) {p+=1; i+=1; continue}
+        first[0].op='nop'
+        p[0].b=first[0].b
+        p+=1; i+=1
     }
-    ir.code=code
 }

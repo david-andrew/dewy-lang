@@ -213,48 +213,55 @@ bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
     # the loop's own would, to the enclosing collector or body, as a single-header loop's do)
     # Mark synthetic sequencing unscoped only after parsing: parser-level lifting
     # would detach the receiving context. Ownership/lowering still see the scope.
-    if bk_nodes[0].ptr[b].aux2 =? -17 or bk_nodes[0].ptr[b].aux2 =? -20 or bk_nodes[0].ptr[b].aux2 =? -21 {
-        bk_nodes[0][b].flags=int32<overflow='wrap'>(BWord(bk_nodes[0].ptr[b].flags) | 4)
+    let bnd=bk_nodes[0].ptr + b
+    if bnd[0].aux2 =? -17 or bnd[0].aux2 =? -20 or bnd[0].aux2 =? -21 {
+        bnd[0].flags=int32<overflow='wrap'>(BWord(bnd[0].flags) | 4)
     }
-    if want_value and bk_nodes[0].ptr[b].aux2 =? -17 {literal_snapshot_context(b expected)}
-    if want_value and bk_nodes[0].ptr[b].aux2 =? -21 {literal_sequence_context(b expected)}
+    if want_value and bnd[0].aux2 =? -17 {literal_snapshot_context(b expected)}
+    if want_value and bnd[0].aux2 =? -21 {literal_sequence_context(b expected)}
     let pos=BWord(bk_nodes[0].ptr[b].pos)
-    if want_value and bk_flag(b 131072) and bk_files[0][pos >> 40].is_dewy {
+    if want_value and bk_flag(b 131072) and bk_files[0].ptr[pos >> 40].is_dewy {
         bk_block(b 0 false);
         let result=if bk_flag(b 1073741824) {bk_never_type[0]} else {bk_void_type[0]}
-        bk_nodes[0][b].type=int32<overflow='wrap'>(result)
+        bk_nodes[0].ptr[b].type=int32<overflow='wrap'>(result)
         return result
     }
     let mode:BWord=-1
     let was_discarding=bk_discarding[0]
-    if want_value or bk_body_mode[0] >=? 0 or BWord(bk_nodes[0].ptr[b].flags) & 8 not=? 0 {mode=bk_open(b want_value)}
+    let bflags=BWord(bk_nodes[0].ptr[b].flags)
+    if want_value or bk_body_mode[0] >=? 0 or (bflags & 8) not=? 0 {mode=bk_open(b want_value)}
     else {
         bk_arm_next[0]=0
         bk_bind_next[0]=0
     }
     let counted=mode =? 2 or mode =? 6
-    let transparent=bk_nodes[0].ptr[b].aux =? 5 and not want_value
+    let bnd2=bk_nodes[0].ptr + b
+    let transparent=bnd2[0].aux =? 5 and not want_value
     # (`( ... )`, NF_UNSCOPED 4: its names stay visible after it, value or not)
-    let unscoped=bk_flag(b 4)
-    let n0=BWord(bk_nodes[0].ptr[b].nlist)
-    let i:BWord=0
-    loop i <? n0 {
-        if bk_nodes[0].ptr[BWord(bk_lists[0][BWord(bk_nodes[0].ptr[b].list) + i])].kind =? 'when_' {
-            block_expand(b)
-            break
+    let unscoped=(BWord(bnd2[0].flags) & 4) not=? 0
+    let n0=BWord(bnd2[0].nlist)
+    if n0 >? 0 {
+        let nds=bk_nodes[0].ptr
+        let lbase=bk_lists[0].ptr + BWord(bnd2[0].list)
+        let i:BWord=0
+        loop i <? n0 {
+            if nds[BWord(lbase[i])].kind =? 'when_' {
+                block_expand(b)
+                break
+            }
+            i=i + 1
         }
-        i=i + 1
     }
     let mark=bk_scopes[0].names.length
     let result=bk_void_type[0]
-    bk_nodes[0][b].aux=0
+    bk_nodes[0].ptr[b].aux=0
     let n=BWord(bk_nodes[0].ptr[b].nlist)
     let saved_block=bk_sibling_block[0]
     let saved_index=bk_sibling_index[0]
     bk_sibling_block[0]=b
-    i=0
+    let i:BWord=0
     loop i <? n {
-        let s=BWord(bk_lists[0][BWord(bk_nodes[0].ptr[b].list) + i])
+        let s=BWord(bk_lists[0].ptr[BWord(bk_nodes[0].ptr[b].list) + i])
         bk_sibling_index[0]=i
         if counted {block_direct(s)}
         let value:BWord=-1

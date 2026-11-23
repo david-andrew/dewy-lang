@@ -29,7 +29,7 @@ shares_mut_root=(a:LAWord args:array<int64> mutmask:LAWord callee:LAWord=-2):>bo
     let ra=place_var(a)
     if ra =? 0 {return false}
     loop j in [0..args.length) and b in args {
-        if mutmask & (1 << j) =? 0 {continue}
+        if mutmask & (LAWord(1) << LAWord(j)) =? 0 {continue}
         let rb=place_var(b)
         if rb =? 0 or not same_var(ra rb) {continue}
         if callee >? -2 and (disjoint_fields(a b) or mut_arg_spares(a b j callee)) {continue}
@@ -164,7 +164,7 @@ mut_may_reach=(a:LAWord args:array<int64> mutmask:LAWord):>bool=>$unsafe {
     }
     else if nodes.ptr[ra].aux not=? int32(2) {return true}
     loop j in [0..args.length) and b in args {
-        if mutmask & (1 << j) =? 0 {continue}
+        if mutmask & (LAWord(1) << LAWord(j)) =? 0 {continue}
         let rb=place_var(b)
         if rb =? 0 {return true}
         if nodes.ptr[rb].aux =? int32(2) and nodes.ptr[ra].aux =? int32(2) {continue}
@@ -179,7 +179,7 @@ mut_plain_root=(r:LAWord):>bool=>$unsafe {
 }
 mut_alias_check=(args:array<int64> mutmask:LAWord callee:LAWord):>void=>$unsafe {
     loop i in [0..args.length) and a in args {
-        if mutmask & (1 << i) =? 0 {continue}
+        if mutmask & (LAWord(1) << LAWord(i)) =? 0 {continue}
         let r=elem_root(a)
         if r =? 0 {continue}
         # (a place only in a box, not an array: the box is kept while the call runs, call_args)
@@ -190,7 +190,7 @@ mut_alias_check=(args:array<int64> mutmask:LAWord callee:LAWord):>void=>$unsafe 
         let nm=name_of(LAWord(nodes.ptr[r].name))
         loop j in [0..args.length) and b in args {
             if j =? i {continue}
-            let bmut=mutmask & (1 << j) not=? 0
+            let bmut=mutmask & (LAWord(1) << LAWord(j)) not=? 0
             let w=place_var(b)
             # (another place that holds this one or is inside it: xs and xs[0], xs[0] and
             # xs[0][0]; other elements and fields are fine, as in swap(xs[i], xs[j]), and so is
@@ -488,7 +488,7 @@ may_write_root=(n:LAWord rn:LAWord place:LAWord=0):>bool=>$unsafe {
     if k =? 'call' or (k =? 'pair' and nodes.ptr[n].sym >? 0) {
         let mm=checked_call_mutmask(n)
         loop i in [0..nkids(n)) {
-            if mm & (1 << i) not=? 0 {
+            if mm & (LAWord(1) << LAWord(i)) not=? 0 {
                 if write_overlaps(kid(n i) rn place) {return true}
             }
         }
@@ -652,36 +652,49 @@ fw_global=(n:LAWord @w:FnWrites):>void=>$unsafe {
 }
 fw_scan=(n:LAWord @w:FnWrites):>void=>$unsafe {
     if n <=? 0 {return}
-    let k=nodes.ptr[n].kind
+    let nd=nodes.ptr + n
+    let k=nd[0].kind
     if k =? 'lambda' {return}
-    loop f in value_helper_calls(n) {
-        if not w.calls.contains(f) {w.calls.push(f);}
+    if (k =? 'binary' and nd[0].aux =? int32(1)) or (k =? 'intrinsic' and nd[0].aux =? int32(24)) {
+        loop f in value_helper_calls(n) {
+            if not w.calls.contains(f) {w.calls.push(f);}
+        }
     }
-    if k =? 'ident' and nodes.ptr[n].aux =? int32(2) and not w.mentions.contains(LAWord(nodes.ptr[n].sym)) {w.mentions.push(LAWord(nodes.ptr[n].sym));}
-    if k =? 'assign' {fw_global(LAWord(nodes.ptr[n].a) @w);}
-    if k =? 'intrinsic' and nkids(n) >? 0 {
-        let id=nodes.ptr[n].aux as IN
-        # Field formatting invokes type-specific formatters selected by the
-        # checker. Treat it conservatively, including nested user formatters.
+    if k =? 'ident' {
+        if nd[0].aux =? int32(2) and not w.mentions.contains(LAWord(nd[0].sym)) {w.mentions.push(LAWord(nd[0].sym));}
+        return
+    }
+    if k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'none_lit' or k =? 'null_lit' or k =? 'dotname' or k =? 'break_' or k =? 'continue_' {return}
+    if k =? 'assign' {fw_global(LAWord(nd[0].a) @w);}
+    else if k =? 'intrinsic' and nd[0].nlist >? 0 {
+        let id=nd[0].aux as IN
         if id =? IN.fmt_struct or id =? IN.json_fields {w.all = true;}
         if id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend {fw_global(kid(n 0) @w);}
     }
-    if k =? 'for_' and has_flag(n NF_MUT) {fw_global(LAWord(nodes.ptr[n].a) @w);}
-    if k =? 'call' or (k =? 'pair' and nodes.ptr[n].sym >? 0) {
+    else if k =? 'for_' and has_flag(n NF_MUT) {fw_global(LAWord(nd[0].a) @w);}
+    else if k =? 'call' or (k =? 'pair' and nd[0].sym >? 0) {
         let mm=checked_call_mutmask(n)
-        loop i in [0..nkids(n)) {
-            if mm & (1 << i) not=? 0 {fw_global(kid(n i) @w);}
+        if mm not=? 0 {
+            loop i in [0..LAWord(nd[0].nlist)) {
+                if mm & (LAWord(1) << LAWord(i)) not=? 0 {fw_global(kid(n i) @w);}
+            }
         }
-        let aux=if k =? 'pair' {0} else {LAWord(nodes.ptr[n].aux)}
+        let aux=if k =? 'pair' {0} else {LAWord(nd[0].aux)}
         if aux =? 1 or aux =? 4 {w.all = true;}
-        else if aux =? 0 and not w.calls.contains(LAWord(nodes.ptr[n].sym)) {w.calls.push(LAWord(nodes.ptr[n].sym));}
+        else if aux =? 0 and not w.calls.contains(LAWord(nd[0].sym)) {w.calls.push(LAWord(nd[0].sym));}
     }
-    fw_scan(LAWord(nodes.ptr[n].a) @w);
-    fw_scan(LAWord(nodes.ptr[n].b) @w);
-    fw_scan(kid_c(n) @w);
-    fw_scan(kid_d(n) @w);
-    loop i in [0..nkids(n)) {fw_scan(kid(n i) @w);}
-    loop i in [0..nkids2(n)) {fw_scan(kid2(n i) @w);}
+    let a=LAWord(nd[0].a)
+    let b=LAWord(nd[0].b)
+    let c=kid_c(n)
+    let d=kid_d(n)
+    let n1=LAWord(nd[0].nlist)
+    let n2=LAWord(nd[0].nlist2)
+    if a >? 0 {fw_scan(a @w);}
+    if b >? 0 {fw_scan(b @w);}
+    if c >? 0 {fw_scan(c @w);}
+    if d >? 0 {fw_scan(d @w);}
+    if n1 >? 0 {loop i in [0..n1) {fw_scan(kid(n i) @w);}}
+    if n2 >? 0 {loop i in [0..n2) {fw_scan(kid2(n i) @w);}}
 }
 fn_resizes=(f:LAWord):>array<int64>=>$unsafe {
     let cached_r=fr_total.get(f)
@@ -735,7 +748,7 @@ fr_scan=(n:LAWord @out:array<int64>):>void=>$unsafe {
     if k =? 'call' {
         let mm=checked_call_mutmask(n)
         loop i in [0..nkids(n)) {
-            if mm & (1 << i) not=? 0 {fr_root(kid(n i) @out);}
+            if mm & (LAWord(1) << LAWord(i)) not=? 0 {fr_root(kid(n i) @out);}
         }
     }
     fr_scan(LAWord(nodes.ptr[n].a) @out);
@@ -765,7 +778,32 @@ lm_resizing_call=(n:LAWord g:LAWord):>LAWord=>$unsafe {
     }
     return r
 }
+let lpath_root_gen:array<int32>=[]
+let lpath_root_val:array<int32>=[]
+let lpath_gen:int32=0
 lpath_intern=(parent:LAWord part:LAWord):>LAWord=>$unsafe {
+    if lpath_parents.length =? 1 {
+        lpath_gen=int32<overflow='wrap'>(int64(lpath_gen) + 1)
+        if lpath_gen =? 0 {
+            if lpath_root_gen.length >? 0 {mem_set(lpath_root_gen.ptr as ptr<uint8> 0 lpath_root_gen.length * 4)}
+            lpath_gen=1
+        }
+    }
+    if parent =? 0 and part >=? 0 {
+        if part <? lpath_root_gen.length and lpath_root_gen.ptr[part] =? lpath_gen {
+            return LAWord(lpath_root_val.ptr[part])
+        }
+        let id=lpath_parents.length
+        lpath_parents.push(0);
+        if part >=? lpath_root_gen.length {
+            let need=max(part + 1 lpath_root_gen.length * 2 + 64)
+            lpath_root_gen.resize(need)
+            lpath_root_val.resize(need)
+        }
+        lpath_root_gen.ptr[part]=lpath_gen
+        lpath_root_val.ptr[part]=int32<overflow='wrap'>(id)
+        return id
+    }
     let edge=(parent << 32) | part
     let cached_id=lpath_ids.get(edge)
     if cached_id not=? none {return cached_id}
@@ -820,7 +858,7 @@ lm_change_at=(n:LAWord key:LAWord):>LAWord=>$unsafe {
     if k =? 'call' {
         let mm=checked_call_mutmask(n)
         loop i in [0..nkids(n)) {
-            if mm & (1 << i) not=? 0 {
+            if mm & (LAWord(1) << LAWord(i)) not=? 0 {
                 let tk=lpath_key(kid(n i))
                 if tk not=? 0 and path_within(key tk) {return nodes.ptr[kid(n i)].pos}
             }

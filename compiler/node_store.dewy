@@ -86,67 +86,194 @@ call_waits_bind=(f:<(node:int64):>int64>):>int64=>{
     0
 }
 node_mk=(@store:array<Node> kind:NK pos:int64):>int64=>{
+    let idx=store.length
     store.push(Node[kind=kind pos=pos])
-    store.length - 1
+    idx
 }
 
 # xs as a new run of lists; its start
-node_run=(@lists:array<int32> xs:array<int64>):>int64=>{
+node_run=(@lists:array<int32> xs:array<int64>):>int64=>$unsafe {
     let start=lists.length
-    loop x in xs {lists.push(int32(x))}
+    let count=xs.length
+    if count >? 0 {
+        let need=start + count
+        if cap(lists) <? need {lists.reserve(need)}
+        __set_len(lists need)
+        let dst=lists.ptr + start
+        let src=xs.ptr
+        loop i in [0..count) {dst[i]=int32<overflow='wrap'>(src[i])}
+    }
     start
 }
 
 # n's children (list) and its second list (list2) are xs, as a new run of lists
-node_set_list=(@store:array<Node> @lists:array<int32> n:int64 xs:array<int64>)=>{
+node_set_list=(@store:array<Node> @lists:array<int32> n:int64 xs:array<int64>)=>$unsafe {
     let start=lists.length
-    loop x in xs {lists.push(int32(x))}
-    store[n].list=int32(start)
-    store[n].nlist=int32(xs.length)
+    let count=xs.length
+    if count >? 0 {
+        let need=start + count
+        if cap(lists) <? need {lists.reserve(need)}
+        __set_len(lists need)
+        let dst=lists.ptr + start
+        let src=xs.ptr
+        loop i in [0..count) {dst[i]=int32<overflow='wrap'>(src[i])}
+    }
+    let np=store.ptr + n
+    np[0].list=int32<overflow='wrap'>(start)
+    np[0].nlist=int32<overflow='wrap'>(count)
 }
 
-node_set_list2=(@store:array<Node> @lists:array<int32> n:int64 xs:array<int64>)=>{
+node_set_list2=(@store:array<Node> @lists:array<int32> n:int64 xs:array<int64>)=>$unsafe {
     let start=lists.length
-    loop x in xs {lists.push(int32(x))}
-    store[n].list2=int32(start)
-    store[n].nlist2=int32(xs.length)
+    let count=xs.length
+    if count >? 0 {
+        let need=start + count
+        if cap(lists) <? need {lists.reserve(need)}
+        __set_len(lists need)
+        let dst=lists.ptr + start
+        let src=xs.ptr
+        loop i in [0..count) {dst[i]=int32<overflow='wrap'>(src[i])}
+    }
+    let np=store.ptr + n
+    np[0].list2=int32<overflow='wrap'>(start)
+    np[0].nlist2=int32<overflow='wrap'>(count)
+}
+
+node_append_raw=(@lists:array<int32> src:ptr<int64> count:int64):>int64=>$unsafe {
+    let start=lists.length
+    if count >? 0 {
+        let need=start + count
+        if cap(lists) <? need {lists.reserve(need)}
+        __set_len(lists need)
+        let dst=lists.ptr + start
+        loop i in [0..count) {dst[i]=int32<overflow='wrap'>(src[i])}
+    }
+    start
+}
+
+node_set_list_span=(@store:array<Node> @lists:array<int32> n:int64 @buf:array<int64> base:int64)=>$unsafe {
+    let count=buf.length - base
+    let start=node_append_raw(@lists buf.ptr + base count)
+    if count >? 0 {__set_len(buf base)}
+    let np=store.ptr + n
+    np[0].list=int32<overflow='wrap'>(start)
+    np[0].nlist=int32<overflow='wrap'>(count)
 }
 
 # a run of lists as an array
-node_run_of=(@lists:array<int32> start:int64 count:int64):>array<int64>=>{
+node_run_of=(@lists:array<int32> start:int64 count:int64):>array<int64>=>$unsafe {
     let out:array<int64>=[]
-    out.reserve(count)
-    loop i in [start..start + count) {out.push(lists[i])}
+    if count >? 0 {
+        out.reserve(count)
+        __set_len(out count)
+        let dst=out.ptr
+        let src=lists.ptr + start
+        loop i in [0..count) {dst[i]=int64(src[i])}
+    }
     out
 }
 
-node_kids=(@store:array<Node> @lists:array<int32> n:int64):>array<int64>=>node_run_of(@lists store[n].list store[n].nlist)
-node_kids2=(@store:array<Node> @lists:array<int32> n:int64):>array<int64>=>node_run_of(@lists store[n].list2 store[n].nlist2)
+node_kids=(@store:array<Node> @lists:array<int32> n:int64):>array<int64>=>$unsafe {node_run_of(@lists int64(store.ptr[n].list) int64(store.ptr[n].nlist))}
+node_kids2=(@store:array<Node> @lists:array<int32> n:int64):>array<int64>=>$unsafe {node_run_of(@lists int64(store.ptr[n].list2) int64(store.ptr[n].nlist2))}
 
 # A deep copy of a subtree (generic functions are instantiated so): the copy's own fields
 # first, unchecked, then its children's copies, in order
-node_clone=(@store:array<Node> @lists:array<int32> n:int64):>int64=>{
+let node_clone_buf:array<int64>=[]
+node_clone=(@store:array<Node> @lists:array<int32> n:int64):>int64=>$unsafe {
     if n =? 0 {return 0}
-    let nd=store[n]
-    let k=nd.kind
-    if k not=? 'fn_' and k not=? 'struct_' and k not=? 'enum_' {nd.sym=0}
-    if k not=? 'conv' {nd.type=0}
-    nd.flags=int32<overflow='wrap'>(nd.flags and not NODE_CHECKED)
-    let c=store.length
-    store.push(nd)
-    if nd.a not=? 0 {store[c].a=int32(node_clone(@store @lists nd.a))}
-    if nd.b not=? 0 {store[c].b=int32(node_clone(@store @lists nd.b))}
-    if nd.c not=? 0 {store[c].c=int32(node_clone(@store @lists nd.c))}
-    if nd.d not=? 0 {store[c].d=int32(node_clone(@store @lists nd.d))}
-    if nd.nlist >? 0 {
-        let xs:array<int64>=[]
-        loop i in [0..nd.nlist) {xs.push(node_clone(@store @lists lists[nd.list + i]))}
-        node_set_list(@store @lists c xs)
+    let sp=store.ptr
+    let sh=(sp as ptr<int64>) - 3
+    if sp =? (uint64(0) as ptr<Node>) or sh[0] not=? 1 or sh[1] >=? sh[2] {
+        let oc=store.length
+        store.reserve(max(oc + 1 oc * 2))
+        sp=store.ptr
+        sh=(sp as ptr<int64>) - 3
     }
-    if nd.nlist2 >? 0 {
-        let xs:array<int64>=[]
-        loop i in [0..nd.nlist2) {xs.push(node_clone(@store @lists lists[nd.list2 + i]))}
-        node_set_list2(@store @lists c xs)
+    let c=sh[1]
+    sh[1]=c + 1
+    let dst=sp + c
+    mem_copy(dst sp + n size_of<Node>)
+    let k=dst[0].kind
+    if k not=? 'fn_' and k not=? 'struct_' and k not=? 'enum_' {dst[0].sym=0}
+    if k not=? 'conv' {dst[0].type=0}
+    dst[0].flags=int32<overflow='wrap'>(dst[0].flags and not NODE_CHECKED)
+    let na=int64(dst[0].a)
+    let nb=int64(dst[0].b)
+    let nc=int64(dst[0].c)
+    let nd_=int64(dst[0].d)
+    let nl1=int64(dst[0].nlist)
+    let nl2=int64(dst[0].nlist2)
+    if (na | nb | nc | nd_ | nl1 | nl2) =? 0 {return c}
+    let l1=int64(dst[0].list)
+    let l2=int64(dst[0].list2)
+    if na not=? 0 {let ra=int32<overflow='wrap'>(node_clone(@store @lists na)); store.ptr[c].a=ra}
+    if nb not=? 0 {let rb=int32<overflow='wrap'>(node_clone(@store @lists nb)); store.ptr[c].b=rb}
+    if nc not=? 0 {let rc=int32<overflow='wrap'>(node_clone(@store @lists nc)); store.ptr[c].c=rc}
+    if nd_ not=? 0 {let rd=int32<overflow='wrap'>(node_clone(@store @lists nd_)); store.ptr[c].d=rd}
+    if nl1 >? 0 {
+        if nl1 =? 1 {
+            let c0=int32<overflow='wrap'>(node_clone(@store @lists int64(lists.ptr[l1])))
+            let lp=lists.ptr
+            let lh=(lp as ptr<int64>) - 3
+            if lp =? (uint64(0) as ptr<int32>) or lh[0] not=? 1 or lh[1] >=? lh[2] {
+                let os=lists.length
+                lists.reserve(max(os + 1 os * 2))
+                lp=lists.ptr
+                lh=(lp as ptr<int64>) - 3
+            }
+            let start=lh[1]
+            lh[1]=start + 1
+            lp[start]=c0
+            let np=store.ptr + c
+            np[0].list=int32<overflow='wrap'>(start)
+            np[0].nlist=int32(1)
+        } else if nl1 =? 2 {
+            let k0=int64(lists.ptr[l1])
+            let k1=int64(lists.ptr[l1 + 1])
+            let c0=int32<overflow='wrap'>(node_clone(@store @lists k0))
+            let c1=int32<overflow='wrap'>(node_clone(@store @lists k1))
+            let lp=lists.ptr
+            let lh=(lp as ptr<int64>) - 3
+            if lp =? (uint64(0) as ptr<int32>) or lh[0] not=? 1 or lh[1] + 2 >? lh[2] {
+                let os=lists.length
+                lists.reserve(max(os + 2 os * 2))
+                lp=lists.ptr
+                lh=(lp as ptr<int64>) - 3
+            }
+            let start=lh[1]
+            lh[1]=start + 2
+            let lp1=lp + start
+            lp1[0]=c0
+            lp1[1]=c1
+            let np=store.ptr + c
+            np[0].list=int32<overflow='wrap'>(start)
+            np[0].nlist=int32(2)
+        } else {
+            let base=node_clone_buf.length
+            loop i in [0..nl1) {
+                let child=node_clone(@store @lists int64(lists.ptr[l1 + i]))
+                node_clone_buf.push(child)
+            }
+            let count=node_clone_buf.length - base
+            let start=node_append_raw(@lists node_clone_buf.ptr + base count)
+            __set_len(node_clone_buf base)
+            let np=store.ptr + c
+            np[0].list=int32<overflow='wrap'>(start)
+            np[0].nlist=int32<overflow='wrap'>(count)
+        }
+    }
+    if nl2 >? 0 {
+        let base=node_clone_buf.length
+        loop i in [0..nl2) {
+            let child=node_clone(@store @lists int64(lists.ptr[l2 + i]))
+            node_clone_buf.push(child)
+        }
+        let count=node_clone_buf.length - base
+        let start=node_append_raw(@lists node_clone_buf.ptr + base count)
+        __set_len(node_clone_buf base)
+        let np=store.ptr + c
+        np[0].list2=int32<overflow='wrap'>(start)
+        np[0].nlist2=int32<overflow='wrap'>(count)
     }
     c
 }

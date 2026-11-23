@@ -3,10 +3,10 @@ $runtime_checks
 from p"ir_types.dewy" import (Ins Op)
 from p"ir.jo" import (M_FLOAT M_INDEX M_SIGNED VF VI VOP_SPLAT_B VOP_SPLAT_C VS ir ir_use_count)
 from p"ir_builders.dewy" import (ir_operands ir_use is_kv k_vreg kv_of vreg vtype)
-from p"opt_workspace.dewy" import (o_regs)
-from p"opt.jo" import (o_defines)
-from p"opt_registers.dewy" import o_resize
-from p"opt_rewrite.dewy" import ow_resize_one
+from p"opt_workspace.dewy" import (o_regs opt_allow_cse opt_sra_counted)
+from p"opt.jo" import (o_decode o_defines o_resize_fast)
+from p"opt_registers.dewy" import (o_resize)
+from p"opt_rewrite.dewy" import (ow_resize_one)
 
 # Vregs, slots, lanes and offsets wrap as Jo words did; lengths stay plain bounds.
 # Shift counts are masked as the machine masked them in Jo.
@@ -22,13 +22,14 @@ SraI32:type=int32<overflow='wrap'>
 # register pressure. One function-local indexed workspace, shared by discovery, escape
 # validation and rewriting. Its storage is reused, but no pointer escapes an optimization.
 SraValue:type=[
-    slot:SraWord=-1
-    offset:SraWord
+    slot:SraI32=-1
+    offset:SraI32
 ]
 
 SraSlot:type=[
     width:SraWord=8
     ok:bool
+    in_loop:bool
 ]
 
 SraLane:type=[
@@ -43,25 +44,23 @@ let sra_values:ptr<SraValue>=$unsafe (uint64(0) as ptr<SraValue>)
 let sra_slots:ptr<SraSlot>=$unsafe (uint64(0) as ptr<SraSlot>)
 let sra_lanes:ptr<SraLane>=$unsafe (uint64(0) as ptr<SraLane>)
 let sra_nv:int64=0
+let sra_ok_count:SraWord=0
 
 sra_workspace=(nv:int64 ns:int64):>void=>$unsafe {
     let lanes=int64(SraWord(ns) * 4)
-    if sra_value_storage.length <? nv {sra_value_storage.resize(nv)}
-    if sra_slot_storage.length <? ns {sra_slot_storage.resize(ns)}
-    if sra_lane_storage.length <? lanes {sra_lane_storage.resize(lanes)}
-    sra_values=sra_value_storage.ptr
-    sra_slots=sra_slot_storage.ptr
-    sra_lanes=sra_lane_storage.ptr
+    if sra_value_storage.length <? nv {sra_value_storage.resize(nv); sra_values=sra_value_storage.ptr}
+    if sra_slot_storage.length <? ns {sra_slot_storage.resize(ns); sra_slots=sra_slot_storage.ptr}
+    if sra_lane_storage.length <? lanes {sra_lane_storage.resize(lanes); sra_lanes=sra_lane_storage.ptr}
     # Other fields belong to a definition, a resolved address, or a lane.
     # Initialize them when publishing that state, not for every unused vreg.
-    loop v in [0..nv) {sra_values[v].slot=-1}
+    if nv >? 0 {mem_set(sra_values as ptr<uint8> 255 nv * size_of<SraValue>)}
     let sizes=ir.slot_size.ptr
     loop slot in [0..ns) {
         let size=SraWord(sizes[slot])
         let width:SraWord=8
         if size =? 1 or size =? 2 {width=size}
         else if size & 7 not=? 0 {width=4}
-        sra_slots[slot]=SraSlot(width false)
+        sra_slots[slot]=SraSlot(width false false)
     }
 }
 
@@ -102,8 +101,8 @@ sra_find=(@parent:array<SraWord> j0:SraWord):>SraWord=>$unsafe {
 }
 
 sra_lane_first=(v:SraWord):>SraWord=>$unsafe {
-    let slot=sra_values[v].slot
-    slot * 4 + (sra_values[v].offset >> (sra_shift(sra_slots[slot].width) & 63))
+    let slot=SraWord(sra_values[v].slot)
+    slot * 4 + (SraWord(sra_values[v].offset) >> (sra_shift(sra_slots[slot].width) & 63))
 }
 sra_lane_count=(s:SraWord):>SraWord=>$unsafe {SraWord(ir.slot_size.ptr[s]) >> (sra_shift(sra_slots[s].width) & 63)}
 
@@ -124,7 +123,7 @@ sra_copy_kinds=(code:ptr<Ins> pending:array<int64> ns:SraWord):>void=>$unsafe {
         let pa=sra_is_p(a)
         let pb=sra_is_p(b)
         if not pa and not pb {continue}
-        let m=SraWord(ins[0].imm) >> (sra_shift(sra_slots[sra_values[if pa {a} else {b}].slot].width) & 63)
+        let m=SraWord(ins[0].imm) >> (sra_shift(sra_slots[SraWord(sra_values[if pa {a} else {b}].slot)].width) & 63)
         loop i in [0..m) {
             if pa and pb {
                 let ra=sra_find(@parent sra_lane_first(a) + i)
@@ -190,10 +189,10 @@ sra_copy_kinds=(code:ptr<Ins> pending:array<int64> ns:SraWord):>void=>$unsafe {
     }
 }
 
-sra_is_p=(v:SraWord):>bool=>$unsafe {v >=? 0 and v <? sra_nv and sra_values[v].slot >=? 0 and sra_slots[sra_values[v].slot].ok}
+sra_is_p=(v:SraWord):>bool=>$unsafe {v >=? 0 and v <? sra_nv and sra_values[v].slot >=? 0 and sra_slots[SraWord(sra_values[v].slot)].ok}
 sra_lane_of=(v:SraWord i:SraWord):>SraWord=>$unsafe {
-    let slot=sra_values[v].slot
-    sra_lanes[slot * 4 + (sra_values[v].offset >> (sra_shift(sra_slots[slot].width) & 63)) + i].reg
+    let slot=SraWord(sra_values[v].slot)
+    sra_lanes[slot * 4 + (SraWord(sra_values[v].offset) >> (sra_shift(sra_slots[slot].width) & 63)) + i].reg
 }
 
 # Definition updates are O(removed + emitted operations), with no rebuild.
@@ -203,6 +202,7 @@ let sra_index_nv:int64=0
 sra_emit=(@out:array<Ins> ins:Ins):>void=>$unsafe {
     loop sra_index_nv <? ir.vtypes.length {
         ow_resize_one(sra_index_nv)
+        if not opt_allow_cse {o_regs[sra_index_nv].first=0; o_regs[sra_index_nv].dop=0}
         sra_index_nv=int64(SraWord(sra_index_nv) + 1)
     }
     if ins.dst >=? 0 and o_defines(ins.op) {o_regs[int64(ins.dst)].ndef+=1}
@@ -254,28 +254,35 @@ sra_resolve_address=(value:SraWord):>SraWord=>$unsafe {
         let a=SraWord(ins[0].a)
         sra_values[d].slot=sra_values[a].slot
         if sra_values[a].slot >=? 0 {
-            let offset=sra_values[a].offset
+            let offset=SraWord(sra_values[a].offset)
             if ins[0].op =? 'add' {
                 let b=SraWord(ins[0].b)
                 offset+=if is_kv(b) {SraWord(kv_of(b))} else {SraWord(code[o_regs[b].defpos].imm)}
             }
-            sra_values[d].offset=offset
+            if offset <? -2147483648 or offset >? 2147483647 {sra_values[d].slot=-1}
+            else {sra_values[d].offset=SraI32(offset)}
         }
     }
-    sra_values[value].slot
+    SraWord(sra_values[value].slot)
 }
 
 # Keep the overwhelmingly common cached query separate from chain resolution.
 sra_address=(value:SraWord):>SraWord=>$unsafe {
     if value <? 0 {return -1}
-    let slot=sra_values[value].slot
+    let slot=SraWord(sra_values[value].slot)
     if slot =? -2 {return sra_resolve_address(value)}
     slot
 }
 
 sra_escape=(value:SraWord):>void=>$unsafe {
-    let slot=sra_address(value)
-    if slot >=? 0 {sra_slots[slot].ok=false}
+    if value <? 0 {return}
+    let slot=SraWord(sra_values[value].slot)
+    if slot =? -1 {return}
+    if slot =? -2 {slot=sra_resolve_address(value)}
+    if slot >=? 0 and sra_slots[slot].ok {
+        sra_slots[slot].ok=false
+        sra_ok_count-=1
+    }
 }
 
 # A slot address of 8-byte lanes defined earlier, accessed with another width.
@@ -285,17 +292,17 @@ sra_narrow=(slot:SraWord a:SraWord pos:int64 mode:SraWord):>void=>$unsafe {
 
 # A copy or zero of 8-byte lanes at an unaligned offset or length.
 sra_narrow_copy=(slot:SraWord a:SraWord pos:int64 bytes:SraWord):>void=>$unsafe {
-    if slot >=? 0 and o_regs[a].defpos <? pos and sra_slots[slot].width =? 8 and (sra_values[a].offset & 7 not=? 0 or bytes & 7 not=? 0) {sra_slots[slot].width=4}
+    if slot >=? 0 and o_regs[a].defpos <? pos and sra_slots[slot].width =? 8 and (SraWord(sra_values[a].offset) & 7 not=? 0 or bytes & 7 not=? 0) {sra_slots[slot].width=4}
 }
 
 # Every use of a slot address in a memory operation must take whole lanes.
 sra_use_lanes=(v:SraWord off:SraWord bytes:SraWord k:SraWord):>void=>$unsafe {
-    if v >=? 0 and sra_values[v].slot >=? 0 and not sra_lane_use(sra_values[v].slot sra_values[v].offset + off bytes k) {sra_slots[sra_values[v].slot].ok=false}
+    if v >=? 0 and sra_values[v].slot >=? 0 and not sra_lane_use(SraWord(sra_values[v].slot) SraWord(sra_values[v].offset) + off bytes k) {sra_slots[SraWord(sra_values[v].slot)].ok=false}
 }
 
 # A use that keeps the slot it addresses in memory.
 sra_keep=(v:SraWord):>void=>$unsafe {
-    if v >=? 0 and sra_values[v].slot >=? 0 {sra_slots[sra_values[v].slot].ok=false}
+    if v >=? 0 and sra_values[v].slot >=? 0 {sra_slots[SraWord(sra_values[v].slot)].ok=false}
 }
 
 # Zero lanes as their vreg types.
@@ -309,145 +316,38 @@ sra_zero_lane=(@out:array<Ins> t:SraWord):>void=>$unsafe {
 # each of A demanded definitions once. The final rewrite runs only on success.
 # Operand fields are read where an operation needs them.
 let sra_nested:bool=false
-o_sra=():>void=>$unsafe {
-    sra_nested=false
-    o_resize(ir.vtypes.length)
-    let ns=ir.slot_size.length
-    if ns =? 0 {return}
-    let code=ir.code.ptr
-    let count=ir.code.length
-    let nv=ir.vtypes.length
-    sra_nv=nv
-    sra_workspace(nv ns)
+let sra_roots:array<int64>=[]
+let sra_pending:array<int64>=[]
+let sra_roots_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let sra_pending_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let sra_roots_cap:int64=0
+let sra_pending_cap:int64=0
+
+sra_push_root=(n:int64 pos:int64):>int64=>$unsafe {
+    if n >=? sra_roots_cap {
+        let nc=if sra_roots_cap <? 64 {64} else {sra_roots_cap * 2}
+        sra_roots.resize(nc)
+        sra_roots_p=sra_roots.ptr
+        sra_roots_cap=nc
+    }
+    sra_roots_p[n]=pos
+    int64(SraWord(n) + 1)
+}
+
+sra_push_pending=(n:int64 pos:int64):>int64=>$unsafe {
+    if n >=? sra_pending_cap {
+        let nc=if sra_pending_cap <? 128 {128} else {sra_pending_cap * 2}
+        sra_pending.resize(nc)
+        sra_pending_p=sra_pending.ptr
+        sra_pending_cap=nc
+    }
+    sra_pending_p[n]=pos
+    int64(SraWord(n) + 1)
+}
+
+sra_rewrite=(code:ptr<Ins> count:int64 nv:int64 ns:int64 pending_n:int64):>void=>$unsafe {
     let sizes=ir.slot_size.ptr
-    let roots:array<int64>=[]
-    loop pos in [0..count) {
-        let ins=code + pos
-        let d=SraWord(ins[0].dst)
-        let op=ins[0].op
-        if d <? 0 or not o_defines(op) {continue}
-        o_regs[d].ndef+=1
-        o_regs[d].defpos=SraI32(pos)
-        if op =? 'slot' {roots.push(pos)}
-        else if op =? 'mov' or op =? 'add' {sra_values[d].slot=-2}
-    }
     let any=false
-    loop pos in roots {
-        let ins=code + pos
-        let d=SraWord(ins[0].dst)
-        let slot=SraWord(ins[0].a)
-        if o_regs[d].ndef =? 1 and sizes[slot] <=? 32 {
-            sra_values[d].slot=slot
-            sra_values[d].offset=0
-            sra_slots[slot].ok=true
-            any=true
-        } else {sra_values[d].slot=-1}
-    }
-    if not any {return}
-    let pending:array<int64>=[]
-    loop pos in [0..count) {
-        let ins=code + pos
-        match ins[0].op {
-            <'slot'|'zeroslots'|'nop'|'iconst'|'fconst'|'gaddr'|'daddr'|'faddr'|'block'|'loop'|'end'|'else_'|'br'|'trap'|'vzu'> => {}
-            <'mov'> => {
-                if sra_address(SraWord(ins[0].dst)) <? 0 {sra_escape(SraWord(ins[0].a))}
-            }
-            <'add'> => {
-                if sra_address(SraWord(ins[0].dst)) <? 0 {
-                    sra_escape(SraWord(ins[0].a))
-                    sra_escape(SraWord(ins[0].b))
-                }
-            }
-            <'load'> => {
-                let a=SraWord(ins[0].a)
-                let c=SraWord(ins[0].c)
-                let sa=sra_address(a)
-                if sa >=? 0 {
-                    sra_narrow(sa a pos c)
-                    if c & M_INDEX =? 0 {pending.push(pos)}
-                    else {
-                        sra_escape(a)
-                        sra_escape(SraWord(ins[0].b))
-                    }
-                } else if c & M_INDEX not=? 0 {sra_escape(SraWord(ins[0].b))}
-            }
-            <'store'> => {
-                let a=SraWord(ins[0].a)
-                let sa=sra_address(a)
-                let sb=sra_address(SraWord(ins[0].b))
-                if sb >=? 0 {sra_slots[sb].ok=false}
-                if SraWord(ins[0].c) & M_INDEX not=? 0 {
-                    let sd=sra_address(SraWord(ins[0].dst))
-                    if sd >=? 0 {sra_slots[sd].ok=false}
-                }
-                if sa >=? 0 {
-                    sra_narrow(sa a pos SraWord(ins[0].c))
-                    pending.push(pos)
-                }
-            }
-            <'vop'> => {
-                let a=SraWord(ins[0].a)
-                let b=SraWord(ins[0].b)
-                let c=SraWord(ins[0].c)
-                let sa=sra_address(a)
-                let sb=sra_address(b)
-                let sc=sra_address(c)
-                if sa >=? 0 and o_regs[a].defpos <? pos {sra_slots[sa].width=4}
-                if sb >=? 0 and o_regs[b].defpos <? pos {sra_slots[sb].width=4}
-                if sc >=? 0 and o_regs[c].defpos <? pos {sra_slots[sc].width=4}
-                if sa >=? 0 or sb >=? 0 or sc >=? 0 {pending.push(pos)}
-            }
-            <'copy'> => {
-                let a=SraWord(ins[0].a)
-                let b=SraWord(ins[0].b)
-                let sa=sra_address(a)
-                let sb=sra_address(b)
-                sra_narrow_copy(sa a pos SraWord(ins[0].imm))
-                sra_narrow_copy(sb b pos SraWord(ins[0].imm))
-                if sa >=? 0 or sb >=? 0 {pending.push(pos)}
-            }
-            <'zero'> => {
-                let a=SraWord(ins[0].a)
-                let sa=sra_address(a)
-                sra_narrow_copy(sa a pos SraWord(ins[0].imm))
-                if sa >=? 0 {pending.push(pos)}
-            }
-            <'intr'|'call'|'syscall'> => {
-                let args=ir.args.ptr
-                let a=SraWord(ins[0].a)
-                loop k in [0..SraWord(ins[0].b)) {sra_escape(SraWord(args[a + k]))}
-            }
-            <'calli'|'callc'> => {
-                let args=ir.args.ptr
-                let a=SraWord(ins[0].a)
-                loop k in [0..SraWord(ins[0].b)) {sra_escape(SraWord(args[a + k]))}
-                sra_escape(SraWord(ins[0].c))
-            }
-            <'ret'> => {
-                let a=SraWord(ins[0].a)
-                if a >=? 0 {sra_escape(a)}
-            }
-            <'if_'|'brif'|'brtable'|'assume'|'neg'|'not_'|'fneg'|'fsqrt'|'fabs'|'ffloor'|'fceil'|'ftrunc'|'sext8'|'sext16'|'sext32'|'zext8'|'zext16'|'zext32'|'i2f'|'u2f'|'f2i'|'f2f'|'bits2f'|'f2bits'|'vsplat'> => {
-                sra_escape(SraWord(ins[0].a))
-            }
-            <'memcpy'|'memset'|'select'|'memeq'|'findbyte'|'scanbytes'|'findb'> => {
-                sra_escape(SraWord(ins[0].a))
-                sra_escape(SraWord(ins[0].b))
-                sra_escape(SraWord(ins[0].c))
-            }
-            <'vst'> => {
-                sra_escape(SraWord(ins[0].a))
-                sra_escape(SraWord(ins[0].b))
-                sra_escape(SraWord(ins[0].dst))
-            }
-            _ => {
-                sra_escape(SraWord(ins[0].a))
-                sra_escape(SraWord(ins[0].b))
-            }
-        }
-    }
-    # Lanes keep their observed numeric kind; copy-only lanes contain integer bits.
-    any=false
     loop s in [0..ns) {
         let size=SraWord(sizes[s])
         let width=sra_slots[s].width
@@ -456,16 +356,18 @@ o_sra=():>void=>$unsafe {
     }
     if not any {return}
     loop lane in [0..SraWord(ns) * 4) {sra_lanes[lane].kind=0}
-    loop pos in pending {
+    let pp=sra_pending_p
+    loop pi in [0..pending_n) {
+        let pos=pp[pi]
         let ins=code + pos
         match ins[0].op {
             <'load'> => {
                 let a=SraWord(ins[0].a)
                 let c=SraWord(ins[0].c)
                 if a >=? 0 and sra_values[a].slot >=? 0 and c & M_INDEX =? 0 {
-                    let slot=sra_values[a].slot
+                    let slot=SraWord(sra_values[a].slot)
                     let kind:SraWord=if c & M_FLOAT not=? 0 {1} else {2}
-                    if c & 15 not=? sra_slots[slot].width or not sra_lane_use(slot sra_values[a].offset + SraWord(ins[0].imm) c & 15 kind) {sra_slots[slot].ok=false}
+                    if c & 15 not=? sra_slots[slot].width or not sra_lane_use(slot SraWord(sra_values[a].offset) + SraWord(ins[0].imm) c & 15 kind) {sra_slots[slot].ok=false}
                 } else {
                     ir_operands(ins[0]);
                     loop operand_index in [0..ir_use_count) {sra_keep(SraWord(ir_use(operand_index)))}
@@ -477,9 +379,9 @@ o_sra=():>void=>$unsafe {
                 sra_keep(SraWord(ins[0].b))
                 if c & M_INDEX not=? 0 {sra_keep(SraWord(ins[0].dst))}
                 if a >=? 0 and sra_values[a].slot >=? 0 {
-                    let slot=sra_values[a].slot
+                    let slot=SraWord(sra_values[a].slot)
                     let kind:SraWord=if c & M_FLOAT not=? 0 {1} else {2}
-                    if c & M_INDEX not=? 0 or c & 15 not=? sra_slots[slot].width or not sra_lane_use(slot sra_values[a].offset + SraWord(ins[0].imm) c & 15 kind) {sra_slots[slot].ok=false}
+                    if c & M_INDEX not=? 0 or c & 15 not=? sra_slots[slot].width or not sra_lane_use(slot SraWord(sra_values[a].offset) + SraWord(ins[0].imm) c & 15 kind) {sra_slots[slot].ok=false}
                 }
             }
             <'vop'> => {
@@ -494,10 +396,9 @@ o_sra=():>void=>$unsafe {
             <'copy'> => {
                 let a=SraWord(ins[0].a)
                 let b=SraWord(ins[0].b)
-                # Keep one side in memory when copy endpoints use different lane widths.
-                if a >=? 0 and b >=? 0 and sra_values[a].slot >=? 0 and sra_values[b].slot >=? 0 and sra_slots[sra_values[a].slot].width not=? sra_slots[sra_values[b].slot].width {
-                    if sra_slots[sra_values[a].slot].width >? sra_slots[sra_values[b].slot].width {sra_slots[sra_values[a].slot].ok=false}
-                    else {sra_slots[sra_values[b].slot].ok=false}
+                if a >=? 0 and b >=? 0 and sra_values[a].slot >=? 0 and sra_values[b].slot >=? 0 and sra_slots[SraWord(sra_values[a].slot)].width not=? sra_slots[SraWord(sra_values[b].slot)].width {
+                    if sra_slots[SraWord(sra_values[a].slot)].width >? sra_slots[SraWord(sra_values[b].slot)].width {sra_slots[SraWord(sra_values[a].slot)].ok=false}
+                    else {sra_slots[SraWord(sra_values[b].slot)].ok=false}
                 }
                 sra_use_lanes(a 0 SraWord(ins[0].imm) 0)
                 sra_use_lanes(b 0 SraWord(ins[0].imm) 0)
@@ -509,8 +410,9 @@ o_sra=():>void=>$unsafe {
             }
         }
     }
-    sra_copy_kinds(code pending SraWord(ns))
-    # a register per lane
+    __set_len(sra_pending pending_n)
+    sra_copy_kinds(code sra_pending SraWord(ns))
+    __set_len(sra_pending sra_pending_cap)
     any=false
     loop s in [0..ns) {
         if not sra_slots[s].ok {continue}
@@ -523,12 +425,12 @@ o_sra=():>void=>$unsafe {
         }
     }
     if not any {return}
-    # Rewrite, updating the shared definition index at each mutation.
     sra_index_nv=nv
     let out:array<Ins>=[]
     out.reserve(count + (count >> 2))
-    loop input_pos in [0..count) {
-        let ins=code + input_pos
+    let ins=code
+    let end_=code + count
+    loop ins <? end_ {
         match ins[0].op {
             <'slot'|'add'|'mov'> => {
                 let d=SraWord(ins[0].dst)
@@ -541,7 +443,7 @@ o_sra=():>void=>$unsafe {
                     let d=SraWord(ins[0].dst)
                     let c=SraWord(ins[0].c)
                     o_regs[d].ndef-=1
-                    let width=sra_slots[sra_values[a].slot].width
+                    let width=sra_slots[SraWord(sra_values[a].slot)].width
                     let ty=if width =? 8 {VF} else {VS}
                     let x=sra_lane_of(a SraWord(ins[0].imm) >> (sra_shift(width) & 63))
                     if c & M_FLOAT not=? 0 {sra_emit(@out Ins('mov' SraI32(ty) SraI32(d) SraI32(sra_as_ty(@out x ty)) 0 0 0))}
@@ -558,7 +460,7 @@ o_sra=():>void=>$unsafe {
                 if sra_is_p(a) {
                     let b=SraWord(ins[0].b)
                     if sra_address(b) >=? 0 {sra_nested=true}
-                    let x=sra_lane_of(a SraWord(ins[0].imm) >> (sra_shift(sra_slots[sra_values[a].slot].width) & 63))
+                    let x=sra_lane_of(a SraWord(ins[0].imm) >> (sra_shift(sra_slots[SraWord(sra_values[a].slot)].width) & 63))
                     sra_emit(@out Ins('mov' SraI32(vtype(x)) SraI32(x) SraI32(sra_as_ty(@out b SraWord(vtype(x)))) 0 0 0))
                 } else {out.push(ins[0])}
             }
@@ -589,8 +491,6 @@ o_sra=():>void=>$unsafe {
                         }
                         let r=SraWord(vreg(VS))
                         sra_emit(@out Ins(fop SraI32(VS) SraI32(r) SraI32(x) SraI32(y) 0 0))
-                        # (lane i of the result needs only lane i of the operands: written at once, so
-                        # it is computed right into its lane, even when the destination is a source)
                         if sra_is_p(a) {
                             let t=sra_lane_of(a i)
                             sra_emit(@out Ins('mov' SraI32(vtype(t)) SraI32(t) SraI32(sra_as_ty(@out r SraWord(vtype(t)))) 0 0 0))
@@ -604,7 +504,7 @@ o_sra=():>void=>$unsafe {
                 let pa=sra_is_p(a)
                 let pb=sra_is_p(b)
                 if pa or pb {
-                    let width=sra_slots[sra_values[if pa {a} else {b}].slot].width
+                    let width=sra_slots[SraWord(sra_values[if pa {a} else {b}].slot)].width
                     let n=SraWord(ins[0].imm) >> (sra_shift(width) & 63)
                     let xs:array<SraWord>=[]
                     loop i in [0..n) {
@@ -633,12 +533,11 @@ o_sra=():>void=>$unsafe {
             <'zero'> => {
                 let a=SraWord(ins[0].a)
                 if sra_is_p(a) {
-                    loop i in [0..(SraWord(ins[0].imm) >> (sra_shift(sra_slots[sra_values[a].slot].width) & 63))) {sra_zero_lane(@out sra_lane_of(a i))}
+                    loop i in [0..(SraWord(ins[0].imm) >> (sra_shift(sra_slots[SraWord(sra_values[a].slot)].width) & 63))) {sra_zero_lane(@out sra_lane_of(a i))}
                 } else {out.push(ins[0])}
             }
             <'zeroslots'> => {
                 out.push(ins[0])
-                # (lanes of slots cleared here start at zero)
                 let args=ir.args.ptr
                 let a=SraWord(ins[0].a)
                 loop k in [0..SraWord(ins[0].b)) {
@@ -651,6 +550,229 @@ o_sra=():>void=>$unsafe {
             }
             _ => {out.push(ins[0])}
         }
+        ins+=1
     }
     ir.code=out
+}
+
+sra_esc_v=(u:SraWord):>bool=>$unsafe {
+    if u >=? 0 and sra_values[u].slot not=? -1 {sra_escape(u); return sra_ok_count =? 0}
+    false
+}
+
+o_sra=():>void=>$unsafe {
+    sra_nested=false
+    opt_sra_counted=false
+    if opt_allow_cse {o_resize(ir.vtypes.length)} else {o_resize_fast(ir.vtypes.length)}
+    let ns=ir.slot_size.length
+    if ns =? 0 {return}
+    let sizes=ir.slot_size.ptr
+    let has_small=false
+    loop slot in [0..ns) {
+        if sizes[slot] <=? 32 {has_small=true; break}
+    }
+    if not has_small {return}
+    opt_sra_counted=true
+    let code=ir.code.ptr
+    let count=ir.code.length
+    let nv=ir.vtypes.length
+    sra_nv=nv
+    sra_workspace(nv ns)
+    let roots_n:int64=0
+    let dec=o_decode
+    let args0=ir.args.ptr
+    let regs=o_regs
+    let sv=sra_values
+    let slots=sra_slots
+    let end_=code + count
+    let ins=code
+    let pos:int64=0
+    loop ins <? end_ {
+        let op=ins[0].op
+        let dw=dec[int64((ins as ptr<uint32>)[0])]
+        if (dw & 1) =? 0 {
+            if op =? 'zeroslots' {
+                let a0=SraWord(ins[0].a)
+                loop k in [a0..a0 + SraWord(ins[0].b)) {
+                    let item=SraWord(args0[k])
+                    if (item & 1) =? 1 {regs[item >> 1].ndef+=2}
+                }
+            }
+            ins+=1; pos+=1
+            continue
+        }
+        let d=SraWord(ins[0].dst)
+        if d >=? 0 {
+            let rd=regs + d
+            rd[0].ndef+=1
+            rd[0].defpos=SraI32(pos)
+            if op =? 'slot' {
+                let s=SraWord(ins[0].a)
+                if sizes[s] <=? 32 {
+                    roots_n=sra_push_root(roots_n pos)
+                    if rd[0].ndef =? 1 {sv[d].slot=SraI32(s); sv[d].offset=0}
+                    else {sv[d].slot=-1}
+                }
+            }
+            else if roots_n >? 0 and (op =? 'mov' or op =? 'add') {
+                let a=SraWord(ins[0].a)
+                if a >=? 0 and sv[a].slot not=? -1 {sv[d].slot=-2}
+            }
+        }
+        if (dw & 4096) not=? 0 and roots_n >? 0 {
+            let a0=SraWord(ins[0].a)
+            loop k in [a0..a0 + SraWord(ins[0].b)) {
+                let u=SraWord(args0[k])
+                if u >=? 0 {
+                    let su=SraWord(sv[u].slot)
+                    if su >=? 0 {slots[su].width=-1}
+                }
+            }
+        }
+        ins+=1; pos+=1
+    }
+    if roots_n =? 0 {return}
+    sra_ok_count=0
+    let rp=sra_roots_p
+    loop ri in [0..roots_n) {
+        let rins=code + rp[ri]
+        let d=SraWord(rins[0].dst)
+        let slot=SraWord(rins[0].a)
+        if regs[d].ndef =? 1 and slots[slot].width >? 0 {
+            sv[d].slot=SraI32(slot)
+            sv[d].offset=0
+            if not slots[slot].ok {
+                slots[slot].ok=true
+                sra_ok_count+=1
+            }
+        } else {sv[d].slot=-1}
+    }
+    if sra_ok_count =? 0 {return}
+    let pending_n:int64=0
+    ins=code
+    pos=0
+    loop ins <? end_ {
+        match ins[0].op {
+            <'slot'|'zeroslots'|'nop'|'iconst'|'fconst'|'gaddr'|'daddr'|'faddr'|'block'|'loop'|'else_'|'end'|'br'|'trap'|'vzu'> => {}
+            <'mov'> => {
+                let d=SraWord(ins[0].dst)
+                let a=SraWord(ins[0].a)
+                let sd=SraWord(sv[d].slot)
+                if sd not=? -1 or (a >=? 0 and sv[a].slot not=? -1) {
+                    if sd =? -2 {
+                        if regs[d].ndef not=? 1 or a <? 0 or sv[a].slot =? -1 {
+                            sv[d].slot=-1; sd=-1
+                        } else {
+                            sd=sra_resolve_address(d)
+                        }
+                    }
+                    if sd <? 0 and a >=? 0 and sv[a].slot not=? -1 {sra_escape(a); if sra_ok_count =? 0 {return}}
+                }
+            }
+            <'add'> => {
+                let d=SraWord(ins[0].dst)
+                let a=SraWord(ins[0].a)
+                let sd=SraWord(sv[d].slot)
+                if sd not=? -1 or (a >=? 0 and sv[a].slot not=? -1) {
+                    if sd =? -2 {
+                        if regs[d].ndef not=? 1 or a <? 0 or sv[a].slot =? -1 {
+                            sv[d].slot=-1; sd=-1
+                        } else {
+                            sd=sra_resolve_address(d)
+                        }
+                    }
+                    if sd <? 0 {
+                        if a >=? 0 and sv[a].slot not=? -1 {sra_escape(a)}
+                        let b=SraWord(ins[0].b)
+                        if b >=? 0 and sv[b].slot not=? -1 {sra_escape(b)}
+                        if sra_ok_count =? 0 {return}
+                    }
+                } else {
+                    let b=SraWord(ins[0].b)
+                    if b >=? 0 and sv[b].slot not=? -1 {sra_escape(b); if sra_ok_count =? 0 {return}}
+                }
+            }
+            <'load'> => {
+                let a=SraWord(ins[0].a)
+                let c=SraWord(ins[0].c)
+                let sa=if a >=? 0 {let s0=SraWord(sv[a].slot); if s0 =? -2 {sra_resolve_address(a)} else {s0}} else {-1}
+                if sa >=? 0 {
+                    sra_narrow(sa a pos c)
+                    if c & M_INDEX =? 0 {pending_n=sra_push_pending(pending_n pos)}
+                    else {
+                        if slots[sa].ok {slots[sa].ok=false; sra_ok_count-=1}
+                        let b=SraWord(ins[0].b)
+                        if b >=? 0 and sv[b].slot not=? -1 {sra_escape(b)}
+                        if sra_ok_count =? 0 {return}
+                    }
+                } else if c & M_INDEX not=? 0 {
+                    let b=SraWord(ins[0].b)
+                    if b >=? 0 and sv[b].slot not=? -1 {sra_escape(b); if sra_ok_count =? 0 {return}}
+                }
+            }
+            <'store'> => {
+                let a=SraWord(ins[0].a)
+                let sa=if a >=? 0 {let s0=SraWord(sv[a].slot); if s0 =? -2 {sra_resolve_address(a)} else {s0}} else {-1}
+                let b=SraWord(ins[0].b)
+                if b >=? 0 and sv[b].slot not=? -1 {sra_escape(b); if sra_ok_count =? 0 {return}}
+                if SraWord(ins[0].c) & M_INDEX not=? 0 {
+                    let sd=SraWord(ins[0].dst)
+                    if sd >=? 0 and sv[sd].slot not=? -1 {sra_escape(sd); if sra_ok_count =? 0 {return}}
+                }
+                if sa >=? 0 {
+                    sra_narrow(sa a pos SraWord(ins[0].c))
+                    pending_n=sra_push_pending(pending_n pos)
+                }
+            }
+            <'vop'> => {
+                let a=SraWord(ins[0].a)
+                let b=SraWord(ins[0].b)
+                let c=SraWord(ins[0].c)
+                let sa=sra_address(a)
+                let sb=sra_address(b)
+                let sc=sra_address(c)
+                if sa >=? 0 and regs[a].defpos <? pos {slots[sa].width=4}
+                if sb >=? 0 and regs[b].defpos <? pos {slots[sb].width=4}
+                if sc >=? 0 and regs[c].defpos <? pos {slots[sc].width=4}
+                if sa >=? 0 or sb >=? 0 or sc >=? 0 {pending_n=sra_push_pending(pending_n pos)}
+            }
+            <'copy'> => {
+                let a=SraWord(ins[0].a)
+                let b=SraWord(ins[0].b)
+                let sa=sra_address(a)
+                let sb=sra_address(b)
+                sra_narrow_copy(sa a pos SraWord(ins[0].imm))
+                sra_narrow_copy(sb b pos SraWord(ins[0].imm))
+                if sa >=? 0 or sb >=? 0 {pending_n=sra_push_pending(pending_n pos)}
+            }
+            <'zero'> => {
+                let a=SraWord(ins[0].a)
+                let sa=sra_address(a)
+                sra_narrow_copy(sa a pos SraWord(ins[0].imm))
+                if sa >=? 0 {pending_n=sra_push_pending(pending_n pos)}
+            }
+            <'intr'|'call'|'syscall'|'calli'|'callc'> => {
+                let a=SraWord(ins[0].a)
+                loop k in [a..a + SraWord(ins[0].b)) {
+                    if sra_esc_v(SraWord(args0[k])) {return}
+                }
+                if (ins[0].op =? 'calli' or ins[0].op =? 'callc') and sra_esc_v(SraWord(ins[0].c)) {return}
+            }
+            <'ret'|'if_'|'brif'|'brtable'|'assume'|'neg'|'not_'|'fneg'|'fsqrt'|'fabs'|'ffloor'|'fceil'|'ftrunc'|'sext8'|'sext16'|'sext32'|'zext8'|'zext16'|'zext32'|'i2f'|'u2f'|'f2i'|'f2f'|'bits2f'|'f2bits'|'vsplat'> => {
+                if sra_esc_v(SraWord(ins[0].a)) {return}
+            }
+            <'memcpy'|'memset'|'select'|'memeq'|'findbyte'|'scanbytes'|'findb'> => {
+                if sra_esc_v(SraWord(ins[0].a)) or sra_esc_v(SraWord(ins[0].b)) or sra_esc_v(SraWord(ins[0].c)) {return}
+            }
+            <'vst'> => {
+                if sra_esc_v(SraWord(ins[0].a)) or sra_esc_v(SraWord(ins[0].b)) or sra_esc_v(SraWord(ins[0].dst)) {return}
+            }
+            _ => {
+                if sra_esc_v(SraWord(ins[0].a)) or sra_esc_v(SraWord(ins[0].b)) {return}
+            }
+        }
+        ins+=1; pos+=1
+    }
+    if sra_ok_count =? 0 {return}
+    sra_rewrite(code count nv ns pending_n)
 }

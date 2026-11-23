@@ -5,6 +5,8 @@ use 'ir.jo'
 use 'util.jo'
 use 'diagnostic_exit.dewy'
 
+ir_fn_has_loop: bool[]
+
 mem_index = (ins: Ins) -> int:
     if int(ins.c) & M_INDEX == 0: return -1
     if ins.op == .store: return int(ins.dst)
@@ -15,13 +17,37 @@ mem_scale = (ins: Ins) -> int: (int(ins.c) >> 8) & 3
 
 
 ir_begin = (name: str, fn_index: int):
-    ir = IrFn(name = name, ret = -1, fn_index = fn_index)
+    ir.name = name
+    ir.nparams = 0
+    ir.ret = -1
+    ir.vtypes.clear()
+    ir.slot_size.clear()
+    ir.slot_align.clear()
+    ir.code.clear()
+    ir.args.clear()
+    ir.cabi = false
+    ir.noinline = false
+    ir.export_name = ""
+    ir.fn_index = fn_index
+    if fn_index >= 0:
+        if fn_index >= ir_fn_has_loop.len():
+            ir_fn_has_loop.resize(fn_index + 64)
+        ir_fn_has_loop[fn_index] = false
+    ir.raw_mem = false
+    ir.kval.clear()
+    ir.decl_pos = 0
+    ir.dbg_locals.clear()
+    if ir.code.cap() < 48: ir.code.reserve(48)
+    if ir.vtypes.cap() < 48: ir.vtypes.reserve(48)
+    if ir.args.cap() < 16: ir.args.reserve(16)
+    if ir.kval.cap() < 48: ir.kval.reserve(48)
     kc_fn += 1
 
 
 vreg = (ty: int) -> int:
+    idx = ir.vtypes.len()
     ir.vtypes.push(i8(ty))
-    ir.vtypes.len() - 1
+    idx
 
 
 vtype = (v: int) -> int:
@@ -48,8 +74,18 @@ k_vreg = (v: int) -> int:
 k_vreg_new = (v: int) -> int:
     d = ir.vtypes.len()
     ir.vtypes.push(i8(VK))
-    loop ir.kval.len() < d: ir.kval.push(0)
-    ir.kval.push(v)
+    old = ir.kval.len()
+    if old <= d:
+        need = d + 1
+        kp = data(ir.kval)
+        if kp == null or (kp - 3)[0] != 1 or (kp - 3)[2] < need:
+            ir.kval.reserve(max(need, ir.kval.cap() * 2))
+            kp = data(ir.kval)
+        if d > old: mem_set((kp + old) as *u8, 0, (d - old) * 8)
+        (kp - 3)[1] = need
+        kp[d] = v
+        return d
+    ir.kval[d] = v
     d
 
 
@@ -64,26 +100,48 @@ new_slot = (size: int, align: int) -> int:
     ir.slot_size.len() - 1
 
 
+ir_line_fill = ():
+    npos = ir_positions.len()
+    old_n = ir_lines.len()
+    if old_n > npos:
+        ir_lines.clear()
+        old_n = 0
+    if old_n >= npos: return
+    ir_lines.resize(npos)
+    lf = -1
+    li = 0
+    ls_p: *int = null
+    ls_n = 0
+    pos_p = data(ir_positions)
+    line_p = data(ir_lines)
+    nfiles = files.len()
+    start_k = if old_n > 1: old_n else: 1
+    loop k in [start_k..npos):
+        p = pos_p[k]
+        f = pos_file(p)
+        if f < 0 or f >= nfiles: continue
+        off = pos_off(p)
+        if f != lf:
+            line_col(p)
+            ls_p = data(src_lines.starts[f])
+            ls_n = src_lines.starts[f].len()
+            lf = f
+            li = 0
+        if off < ls_p[li] or (li + 4 < ls_n and off >= ls_p[li + 4]):
+            lo = 0
+            hi = ls_n
+            loop lo + 1 < hi:
+                mid = (lo + hi) >> 1
+                if ls_p[mid] <= off: lo = mid
+                else: hi = mid
+            li = lo
+        else:
+            loop li + 1 < ls_n and ls_p[li + 1] <= off: li += 1
+        line_p[k] = li + 1
+
+
 ir_line = (i: int) -> int:
-    if ir_lines.len() != ir_positions.len():
-        ir_lines = fill(0, ir_positions.len())
-        lf = -1
-        li = 0
-        ls: int[]
-        loop k in [1..ir_positions.len()):
-            p = ir_positions[k]
-            f = pos_file(p)
-            if f < 0 or f >= files.len(): continue
-            off = pos_off(p)
-            if f != lf:
-                line_col(p)                    # (makes the file's line starts)
-                ls = src_lines.starts[f]
-                lf = f
-                li = 0
-            if off < ls[li] or li + 4 < ls.len() and off >= ls[li + 4]: li = line_col(p).0 - 1
-            else:
-                loop li + 1 < ls.len() and ls[li + 1] <= off: li += 1
-            ir_lines[k] = li + 1
+    if ir_lines.len() != ir_positions.len(): ir_line_fill()
     if i <= 0 or i >= ir_lines.len(): return 0
     ir_lines[i]
 
@@ -98,72 +156,108 @@ ir_set_pos = (p: int):
 emit = (op: Op, ty: int, dst: int, a: int, b: int, c0: int, imm: int) -> int:
     c = c0
     if ir_cold and op == .call and c == 0: c = 2
+    idx = ir.code.len()
     ir.code.push(Ins(op, i32(ty), i32(dst), i32(a), i32(b), i32(c), imm, i32(ir_pos)))
-    ir.code.len() - 1
+    idx
+
+
+e_iconst_wide = (v: int) -> int:
+    d = ir.vtypes.len()
+    ir.vtypes.push(i8(VI))
+    ir.code.push(Ins(.iconst, i32(VI), i32(d), 0, 0, 0, v, i32(ir_pos)))
+    d
 
 
 e_iconst = (v: int) -> int:
     if ir_fits32(v): return k_vreg(v)
-    d = vreg(VI)
-    emit(.iconst, VI, d, 0, 0, 0, v)
-    d
+    e_iconst_wide(v)
 
 
 e_fconst = (f: f64, ty: int) -> int:
-    d = vreg(ty)
+    d = ir.vtypes.len()
+    ir.vtypes.push(i8(ty))
     bits = int(f64_bits(f))
     if ty == VS: bits = int(f32_bits(f32(f)))
-    emit(.fconst, ty, d, 0, 0, 0, bits)
+    ir.code.push(Ins(.fconst, i32(ty), i32(d), 0, 0, 0, bits, i32(ir_pos)))
     d
 
 
+e_bin_ret_type = (op: Op, ty: int) -> int:
+    match op:
+        feq, fne, flt, fle, fgt, fge, eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: VI
+        _: ty
+
+
 e_bin = (op: Op, ty: int, a: int, b: int) -> int:
-    rt = ty
-    if op == .eq or op == .ne or op == .lts or op == .les or op == .gts or op == .ges or op == .ltu or op == .leu or op == .gtu or op == .geu or op == .feq or op == .fne or op == .flt or op == .fle or op == .fgt or op == .fge: rt = VI
-    d = vreg(rt)
-    emit(op, ty, d, a, b, 0, 0)
+    rt = if ty == VI: VI else: e_bin_ret_type(op, ty)
+    d = ir.vtypes.len()
+    ir.vtypes.push(i8(rt))
+    ir.code.push(Ins(op, i32(ty), i32(d), i32(a), i32(b), 0, 0, i32(ir_pos)))
     d
 
 
 e_un = (op: Op, ty: int, a: int) -> int:
-    rt = ty
-    if op == .i2f or op == .u2f: rt = ty
-    d = vreg(rt)
-    emit(op, ty, d, a, 0, 0, 0)
+    d = ir.vtypes.len()
+    ir.vtypes.push(i8(ty))
+    ir.code.push(Ins(op, i32(ty), i32(d), i32(a), 0, 0, 0, i32(ir_pos)))
     d
 
 
-e_mov = (dst: int, src: int):
-    if is_kv(dst): ice("assignment to a constant vreg")
-    emit(.mov, vtype(dst), dst, src, 0, 0, 0)
+e_mov = (dst: int, src: int) -> int:
+    t = int(ir.vtypes[dst])
+    if t == VK: ice("assignment to a constant vreg")
+    idx = ir.code.len()
+    ir.code.push(Ins(.mov, i32(t), i32(dst), i32(src), 0, 0, 0, i32(ir_pos)))
+    idx
 
 
 e_addi = (a: int, k: int) -> int:
     if k == 0: return a
-    e_bin(.add, VI, a, e_iconst(k))
+    kv = e_iconst(k)
+    d = ir.vtypes.len()
+    ir.vtypes.push(i8(VI))
+    ir.code.push(Ins(.add, i32(VI), i32(d), i32(a), i32(kv), 0, 0, i32(ir_pos)))
+    d
 
 
 e_load = (ty: int, addr: int, off: int, mode: int) -> int:
-    d = vreg(ty)
-    emit(.load, ty, d, addr, 0, mode, off)
+    d = ir.vtypes.len()
+    ir.vtypes.push(i8(ty))
+    ir.code.push(Ins(.load, i32(ty), i32(d), i32(addr), 0, i32(mode), off, i32(ir_pos)))
     d
 
 
-e_store = (addr: int, off: int, val: int, mode: int): emit(.store, vtype(val), 0, addr, val, mode, off)
+e_store = (addr: int, off: int, val: int, mode: int) -> int:
+    t = int(ir.vtypes[val])
+    if t == VK: t = VI
+    idx = ir.code.len()
+    ir.code.push(Ins(.store, i32(t), 0, i32(addr), i32(val), i32(mode), off, i32(ir_pos)))
+    idx
 
 
 e_slot = (s: int) -> int:
-    d = vreg(VI)
-    emit(.slot, VI, d, s, 0, 0, 0)
+    d = ir.vtypes.len()
+    ir.vtypes.push(i8(VI))
+    ir.code.push(Ins(.slot, i32(VI), i32(d), i32(s), 0, 0, 0, i32(ir_pos)))
     d
 
 
-e_copy = (dst: int, src: int, size: int): emit(.copy, VI, 0, dst, src, 0, size)
+e_copy = (dst: int, src: int, size: int) -> int:
+    idx = ir.code.len()
+    ir.code.push(Ins(.copy, i32(VI), 0, i32(dst), i32(src), 0, size, i32(ir_pos)))
+    idx
 
 
-e_vop = (dst: int, bsrc: int, csrc: int, kind: int, n: int, flags: int): emit(.vop, VI, 0, dst, bsrc, csrc, kind | (n << 4) | flags)
+e_vop = (dst: int, bsrc: int, csrc: int, kind: int, n: int, flags: int) -> int:
+    idx = ir.code.len()
+    ir.code.push(Ins(.vop, i32(VI), 0, i32(dst), i32(bsrc), i32(csrc), kind | (n << 4) | flags, i32(ir_pos)))
+    idx
 
-e_zero = (dst: int, size: int): emit(.zero, VI, 0, dst, 0, 0, size)
+
+e_zero = (dst: int, size: int) -> int:
+    idx = ir.code.len()
+    ir.code.push(Ins(.zero, i32(VI), 0, i32(dst), 0, 0, size, i32(ir_pos)))
+    idx
 
 
 e_call0 = (f: int, rtype: int) -> int:
@@ -203,8 +297,11 @@ e_call4 = (f: int, a0: int, a1: int, a2: int, a3: int, rtype: int) -> int:
 
 e_call_span = (f: int, start: int, n: int, rtype: int) -> int:
     d = -1
-    if rtype >= 0: d = vreg(rtype)
-    emit(.call, rtype, d, start, n, 0, f)
+    if rtype >= 0:
+        d = ir.vtypes.len()
+        ir.vtypes.push(i8(rtype))
+    c = if ir_cold: 2 else: 0
+    ir.code.push(Ins(.call, i32(rtype), i32(d), i32(start), i32(n), i32(c), f, i32(ir_pos)))
     d
 
 
@@ -212,8 +309,11 @@ e_call = (f: int, args: int[], rt: int) -> int:
     start = ir.args.len()
     loop a in args: ir.args.push(i32(a))
     d = -1
-    if rt >= 0: d = vreg(rt)
-    emit(.call, rt, d, i32(start), i32(args.len()), 0, f)
+    if rt >= 0:
+        d = ir.vtypes.len()
+        ir.vtypes.push(i8(rt))
+    c = if ir_cold: 2 else: 0
+    ir.code.push(Ins(.call, i32(rt), i32(d), i32(start), i32(args.len()), i32(c), f, i32(ir_pos)))
     d
 
 
@@ -221,35 +321,77 @@ e_calli = (fp: int, args: int[], rt: int, cabi: bool) -> int:
     start = ir.args.len()
     loop a in args: ir.args.push(i32(a))
     d = -1
-    if rt >= 0: d = vreg(rt)
+    if rt >= 0:
+        d = ir.vtypes.len()
+        ir.vtypes.push(i8(rt))
     op = Op.calli
     if cabi: op = .callc
-    emit(op, rt, d, i32(start), i32(args.len()), i32(fp), 0)
+    ir.code.push(Ins(op, i32(rt), i32(d), i32(start), i32(args.len()), i32(fp), 0, i32(ir_pos)))
     d
 
 
-e_block = (): emit(.block, 0, 0, 0, 0, 0, 0)
+e_block = () -> int:
+    idx = ir.code.len()
+    ir.code.push(Ins(.block, 0, 0, 0, 0, 0, 0, i32(ir_pos)))
+    idx
 
-e_loop = (): emit(.loop, 0, 0, 0, 0, 0, int(ir_cold))
 
-e_if = (c: int): emit(.if_, 0, 0, c, 0, 0, 0)
+e_loop = () -> int:
+    fi = ir.fn_index
+    if fi >= 0 and fi < ir_fn_has_loop.len(): ir_fn_has_loop[fi] = true
+    idx = ir.code.len()
+    ir.code.push(Ins(.loop, 0, 0, 0, 0, 0, int(ir_cold), i32(ir_pos)))
+    idx
 
-e_else = (): emit(.else_, 0, 0, 0, 0, 0, 0)
 
-e_end = (): emit(.end, 0, 0, 0, 0, 0, 0)
+e_if = (c: int) -> int:
+    idx = ir.code.len()
+    ir.code.push(Ins(.if_, 0, 0, i32(c), 0, 0, 0, i32(ir_pos)))
+    idx
 
-e_br = (depth: int): emit(.br, 0, 0, 0, 0, 0, depth)
 
-e_brif = (c: int, depth: int): emit(.brif, 0, 0, c, 0, 0, depth)
+e_else = () -> int:
+    idx = ir.code.len()
+    ir.code.push(Ins(.else_, 0, 0, 0, 0, 0, 0, i32(ir_pos)))
+    idx
 
-e_brtable = (idx: int, depths: int[], default_depth: int):
+
+e_end = () -> int:
+    idx = ir.code.len()
+    ir.code.push(Ins(.end, 0, 0, 0, 0, 0, 0, i32(ir_pos)))
+    idx
+
+
+e_br = (depth: int) -> int:
+    idx = ir.code.len()
+    ir.code.push(Ins(.br, 0, 0, 0, 0, 0, depth, i32(ir_pos)))
+    idx
+
+
+e_brif = (c: int, depth: int) -> int:
+    idx = ir.code.len()
+    ir.code.push(Ins(.brif, 0, 0, i32(c), 0, 0, depth, i32(ir_pos)))
+    idx
+
+
+e_brtable = (idx: int, depths: int[], default_depth: int) -> int:
     start = ir.args.len()
     loop d in depths: ir.args.push(i32(d))
-    emit(.brtable, 0, 0, idx, depths.len(), start, default_depth)
+    pos = ir.code.len()
+    ir.code.push(Ins(.brtable, 0, 0, i32(idx), i32(depths.len()), i32(start), default_depth, i32(ir_pos)))
+    pos
 
-e_ret = (v: int): emit(.ret, 0, 0, v, 0, 0, 0)
 
-e_trap = (): emit(.trap, 0, 0, 0, 0, 0, 0)
+e_ret = (v: int) -> int:
+    idx = ir.code.len()
+    ir.code.push(Ins(.ret, 0, 0, i32(v), 0, 0, 0, i32(ir_pos)))
+    idx
+
+
+e_trap = () -> int:
+    idx = ir.code.len()
+    ir.code.push(Ins(.trap, 0, 0, 0, 0, 0, 0, i32(ir_pos)))
+    idx
 
 
 op_name = (op: Op) -> str: "{op}"

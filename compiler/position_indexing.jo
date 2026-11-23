@@ -1,6 +1,7 @@
 use 'checker_constant_queries.dewy'
 use 'ast.jo'
 use 'check.jo'
+use 'checker_state.dewy'
 use 'checker_expr.dewy'
 use 'checks_builders.dewy'
 use 'diagnostic_exit.dewy'
@@ -53,6 +54,7 @@ dewy_position_index = (n: int, bt: int, expected: int) -> int:
     declared = bc_let(elements, values, pos)
     nodes[declared].a = i32(shape)
     read = mk(.index, pos)
+    live_body_indexes += 1
     nodes[read].a = i32(bc_ident(elements, pos))
     nodes[read].b = i32(b)
     set_list(read, [b])

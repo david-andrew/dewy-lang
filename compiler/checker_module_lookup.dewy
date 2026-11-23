@@ -1,10 +1,21 @@
 $runtime_checks
+from p"checker_call_queries.dewy" import (intrinsic_of)
 from p"checker_home_index.dewy" import (module_lookup_now)
 from p"prelude_ops.dewy" import (demand_prelude_name)
 from p"ide.jo" import (ide_on)
-from p"check.jo" import (ml_tick ml_name_tick ml_struct demanded ml_at ml_mod ml_sym)
+from p"check.jo" import (game_lookup_ok ml_tick ml_name_tick ml_struct modules demanded ml_at ml_mod ml_sym)
+from p"prelude.jo" import (prelude_game_pending prelude_std_pending)
+from p"secrets.jo" import (secret_name)
+from p"util.jo" import (name_of)
 
 CheckerModuleLookupWord:type=int64<overflow='wrap'>
+
+game_lookup_skip=(name:CheckerModuleLookupWord):>bool=>$unsafe {
+    if intrinsic_of(name) >=? 0 or name =? secret_name {return true}
+    let w=name_of(name)
+    let wb=w as array<uint8>
+    w =? "none" or w =? "rational" or w =? "members" or w =? "__dewy_divide" or w =? "__dewy_power" or w =? "__floor_div" or w =? "__floor_mod" or (wb.length >? 0 and wb[0] =? b'$')
+}
 
 ml_bump_name=(name:CheckerModuleLookupWord):>void=>{
     let tick=@ml_tick
@@ -28,7 +39,7 @@ demand_name=(name:int64):>void=>$unsafe {
 module_lookup=(m:CheckerModuleLookupWord name:CheckerModuleLookupWord):>CheckerModuleLookupWord=>$unsafe {
     if name <? ml_at.length and ml_at.ptr[name] =? ml_stamp(name) and ml_mod.ptr[name] =? m {return ml_sym.ptr[name]}
     let s=module_lookup_now(m name)
-    if not ide_on {
+    if not ide_on and (s not=? 0 or (not prelude_std_pending and not prelude_game_pending) or (game_lookup_ok and (m <? 0 or not modules[m].is_prelude) and not game_lookup_skip(name))) {
         if ml_at.length <=? name {
             let grown=name * 2 + 64
             ml_at.resize(grown)

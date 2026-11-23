@@ -32,7 +32,17 @@ from p"refine_metadata.dewy" import (ref_storage_contract)
 LCWord:type=int64<overflow='wrap'>
 LCUWord:type=uint64<overflow='wrap'>
 push_i64=(@b:array<uint8> v:LCWord):>void=>$unsafe {
-    loop i in [0..8) {b.push(uint8<overflow='wrap'>((v >> (8 * i)) & 255));}
+    let old=b.length
+    let need=old + 8
+    let p=b.ptr
+    if p =? (uint64(0) as ptr<uint8>) or ((p as ptr<int64>) - 3)[0] not=? 1 or ((p as ptr<int64>) - 3)[2] <? need {
+        b.reserve(max(need cap(b) * 2))
+        p=b.ptr
+    }
+    let h=(p as ptr<int64>) - 3
+    h[1]=need
+    let q=(p + old) as ptr<int64>
+    q[0]=v
 }
 positive_modulus=(n:LCWord):>int64=>$unsafe {
     if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].op =? int32<overflow='wrap'>(62) and nodes.ptr[n].aux2 =? -1 {

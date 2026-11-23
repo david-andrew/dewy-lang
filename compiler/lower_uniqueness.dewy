@@ -3,7 +3,7 @@ $runtime_checks
 from p"ast.jo" import (nodes nkids nkids2 kid kid2)
 from p"check.jo" import (locals LF_ELEMALIAS)
 from p"expr.jo" import (IN)
-from p"isolation_ops.dewy" import (isolation_children isolation_intrinsic ambient_sharing_stable)
+from p"isolation_ops.dewy" import (isolation_children isolation_node_children isolation_intrinsic ambient_sharing_stable)
 # Node.aux retains its existing symbol-kind encoding (local 1, global 2).
 UQWord:type=int64<overflow='wrap'>
 let uq_written:array<int64>=[]
@@ -16,7 +16,7 @@ uq_scan=(n:UQWord ctx:UQWord):>void=>$unsafe {
     let k=nodes.ptr[n].kind
     # An unclassified operation may also affect its local actuals. Merely
     # marking ambient calls would still allow caching a private local array.
-    let mask=isolation_children(k)
+    let mask=isolation_node_children(n)
     if mask <? 0 or k =? 'intrinsic' and not isolation_intrinsic(nodes.ptr[n].aux as IN) {
         uq_lambda=true
         return
@@ -25,17 +25,17 @@ uq_scan=(n:UQWord ctx:UQWord):>void=>$unsafe {
         uq_lambda=true
         return
     }
-    if not ambient_sharing_stable(n) {uq_calls=true}
-    if k =? 'ident' and nodes.ptr[n].aux =? 1 and UQWord(locals.ptr[UQWord(nodes.ptr[n].sym)].flags) & LF_ELEMALIAS not=? 0 {
-        # (as fp_scan: its array is written where the body does not show; left as it is)
-        let b:UQWord=UQWord(nodes.ptr[UQWord(locals.ptr[UQWord(nodes.ptr[n].sym)].alias)].a)
-        if nodes.ptr[b].kind =? 'ident' and nodes.ptr[b].aux =? 1 {uq_escaped.push(UQWord(nodes.ptr[b].sym))}
-        return
-    }
+    if not uq_calls and not ambient_sharing_stable(n) {uq_calls=true}
     if k =? 'ident' {
         if nodes.ptr[n].aux =? 1 {
-            if ctx =? 2 {uq_written.push(UQWord(nodes.ptr[n].sym))}
-            else if ctx =? 0 {uq_escaped.push(UQWord(nodes.ptr[n].sym))}
+            let l=UQWord(nodes.ptr[n].sym)
+            if UQWord(locals.ptr[l].flags) & LF_ELEMALIAS not=? 0 {
+                let b:UQWord=UQWord(nodes.ptr[UQWord(locals.ptr[l].alias)].a)
+                if nodes.ptr[b].kind =? 'ident' and nodes.ptr[b].aux =? 1 {uq_escaped.push(UQWord(nodes.ptr[b].sym))}
+                return
+            }
+            if ctx =? 2 {uq_written.push(l)}
+            else if ctx =? 0 {uq_escaped.push(l)}
         }
         return
     }
@@ -55,8 +55,13 @@ uq_scan=(n:UQWord ctx:UQWord):>void=>$unsafe {
     }
     if k =? 'intrinsic' {
         let id=nodes.ptr[n].aux as IN
-        if nkids(n) >? 0 and (id =? IN.len or id =? IN.arrcap or id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend) {
+        if nkids(n) >? 0 and (id =? IN.len or id =? IN.arrcap) {
             uq_scan(kid(n 0) 1)
+            loop i in [1..nkids(n)) {uq_scan(kid(n i) 0)}
+            return
+        }
+        if nkids(n) >? 0 and (id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend) {
+            uq_scan(kid(n 0) 2)
             loop i in [1..nkids(n)) {uq_scan(kid(n i) 0)}
             return
         }
@@ -73,7 +78,7 @@ uq_scan=(n:UQWord ctx:UQWord):>void=>$unsafe {
 }
 # assignment target: elements of an indexed array (possibly a field of one) are writes
 uq_target=(t:UQWord):>void=>$unsafe {
-    if not ambient_sharing_stable(t) {uq_calls=true}
+    if not uq_calls and not ambient_sharing_stable(t) {uq_calls=true}
     let k=nodes.ptr[t].kind
     if k =? 'index' {
         uq_scan(UQWord(nodes.ptr[t].a) 2)

@@ -493,7 +493,10 @@ local_place_decl = (s: int) -> bool:
     true
 shape_dim_decl = (s: int):
     nodes[s].aux2 = 0
+    prev_game = game_lookup_ok
+    game_lookup_ok = false
     sym = lookup(int(nodes[s].name))
+    game_lookup_ok = prev_game
     if sym == 0: return
     sk = syms[sym].kind
     dim = int(nodes[s].b)

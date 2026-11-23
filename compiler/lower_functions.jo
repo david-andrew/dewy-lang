@@ -101,6 +101,11 @@ lower_inst = (lf: int, f: int):
         ir_set_pos(nodes[int(fns[f].decl)].pos)
         ir.decl_pos = ir_pos
     cur_fn = f
+    has_arr_loc = false
+    loop l in fns[f].locals:
+        lt = prune(int(locals[l].type))
+        if types[lt].kind == .array: has_arr_loc = true; break
+    cur_fn_has_array_local = has_arr_loc
     exact_lower_active = exact_owners.has(f)
     eg_active = f < eg_demanded.len() and eg_demanded[f]
     cur_ret = int(fns[f].ret)
@@ -261,7 +266,7 @@ lower_inst = (lf: int, f: int):
 
 # Entry zeroing that a declaration may make dead (see zero_wait in lower.jo).
 zero_defer = (l: int, t: int, fl: int, at: int):
-    if dbg_on or fl & LF_ADDR != 0 or ownership_type(t) or is_shared(l): return
+    if dbg_on or ownership_type(t) or is_shared(l): return
     if tkind(t) == .fn_ or tkind(t) == .polyfn: return
     loop zero_wait.len() <= l:
         zero_wait.push(-1)
@@ -310,15 +315,15 @@ lower_inst_body = (f: int, body: int) -> void:
 
 lower_function = (lf: int):
     if dir_code_any: dir_code_owner = int(lfuncs[lf].inst)
-    lower_epoch += 1
+    if lower_epoch == 0: lower_epoch = 1
     lower_planning = true
     exr_fast = lfuncs[lf].kind == LK_HELPER and lfuncs[lf].hkind == HK.reset_words
     parallel_serial = lfuncs[lf].kind == LK_HELPER and (lfuncs[lf].hkind == HK.parallel_serial or lfuncs[lf].hkind == HK.partition and lfuncs[lf].htype == 1)
     partition_mode = lfuncs[lf].kind == LK_HELPER and lfuncs[lf].hkind == HK.partition
     if lfuncs[lf].kind == LK_INST or parallel_serial or partition_mode or exr_fast: pc_restore(lfuncs[lf].inst)
     exr_locals = if exr_fast: exr_plan(lfuncs[lf].inst) else: []
-    fact_storage_cache.clear()
-    lpath_ids.clear()
+    if fact_storage_cache.len() > 0: fact_storage_cache.clear()
+    if lpath_ids.len() > 0: lpath_ids.clear()
     lpath_parents.truncate(1)
     f = lfuncs[lf]
     lop_watch = false
@@ -346,13 +351,14 @@ lower_finish = ():
     if lower_zeros.len() == 0:
         if not lower_has_nops: return
         k = 0
-        loop ins in ir.code:
-            if ins.op != .nop:
-                ir.code[k] = ins
+        n = ir.code.len()
+        loop i in [0..n):
+            if ir.code[i].op != .nop:
+                if k != i: ir.code[k] = ir.code[i]
                 k += 1
         ir.code.truncate(k)
         return
-    lower_zeros.sort_by((z: LowerZero) -> int: z.mark)
+    if lower_zeros.len() > 1: lower_zeros.sort_by((z: LowerZero) -> int: z.mark)
     out: Ins[]
     out.reserve(ir.code.len() + lower_zeros.len())
     next = 0

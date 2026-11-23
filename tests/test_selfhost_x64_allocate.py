@@ -29,7 +29,7 @@ run = (nv: int, np: int, priority: bool, debug: bool, enabled: bool):
         first = random(50)
         if v < np: first = 0
         last = first + random(50)
-        v_live[v] = IrUsePlan(first=first, last=last, nuse=1 + random(4), ndef=1, weight=1 + random(100))
+        v_live[v] = IrUsePlan(first=i32(first), last=i32(last), nuse=i32(1 + random(4)), ndef=i32(1), weight=1 + random(100))
         vloc[v] = LOC_SPILL
         vsave[v] = false
         dbg_keep[v] = debug and v % 3 == 0
@@ -41,8 +41,8 @@ run = (nv: int, np: int, priority: bool, debug: bool, enabled: bool):
     loop v > 0:
         v -= 1
         if vloc[v] != LOC_SPILL: continue
-        pos = v_live[v].first
-        v_live[v].next_start = v_start[pos]
+        pos = int(v_live[v].first)
+        v_live[v].next_start = i32(v_start[pos])
         v_start[pos] = v
     before = ir
     previous_spill = vspill
@@ -100,6 +100,10 @@ main = ():
                     assert(ra_free(4, s, e), "other physical register")
     print("ok")
 '''
+
+
+def same_output(dewy_out, jo_out):
+    assert dewy_out == jo_out
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])

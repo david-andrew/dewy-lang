@@ -16,23 +16,23 @@ uq_scan = (n: int, ctx: int):
     k = nodes[n].kind
     # An unclassified operation may also affect its local actuals. Merely
     # marking ambient calls would still allow caching a private local array.
-    mask = isolation_children(k)
+    mask = isolation_node_children(n)
     if mask < 0 or k == .intrinsic and not isolation_intrinsic(nodes[n].aux as IN):
         uq_lambda = true
         return
     if k == .lambda:
         uq_lambda = true
         return
-    if not ambient_sharing_stable(n): uq_calls = true
-    if k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ELEMALIAS != 0:
-        # (as fp_scan: its array is written where the body does not show; left as it is)
-        b = int(nodes[int(locals[int(nodes[n].sym)].alias)].a)
-        if nodes[b].kind == .ident and nodes[b].aux == i32(int(SK.local)): uq_escaped.push(int(nodes[b].sym))
-        return
+    if not uq_calls and not ambient_sharing_stable(n): uq_calls = true
     if k == .ident:
         if nodes[n].aux == i32(int(SK.local)):
-            if ctx == 2: uq_written.push(int(nodes[n].sym))
-            else if ctx == 0: uq_escaped.push(int(nodes[n].sym))
+            l = int(nodes[n].sym)
+            if int(locals[l].flags) & LF_ELEMALIAS != 0:
+                b = int(nodes[int(locals[l].alias)].a)
+                if nodes[b].kind == .ident and nodes[b].aux == i32(int(SK.local)): uq_escaped.push(int(nodes[b].sym))
+                return
+            if ctx == 2: uq_written.push(l)
+            else if ctx == 0: uq_escaped.push(l)
         return
     if k == .index:
         context = if nodes[n].aux == 1: 0 else: 1
@@ -48,8 +48,12 @@ uq_scan = (n: int, ctx: int):
         return
     if k == .intrinsic:
         id = nodes[n].aux as IN
-        if nkids(n) > 0 and (id == .len or id == .arrcap or id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend):
+        if nkids(n) > 0 and (id == .len or id == .arrcap):
             uq_scan(kid(n, 0), 1)
+            loop i in [1..nkids(n)): uq_scan(kid(n, i), 0)
+            return
+        if nkids(n) > 0 and (id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend):
+            uq_scan(kid(n, 0), 2)
             loop i in [1..nkids(n)): uq_scan(kid(n, i), 0)
             return
     if mask & 1 != 0: uq_scan(int(nodes[n].a), 0)
@@ -61,7 +65,7 @@ uq_scan = (n: int, ctx: int):
         loop i in [0..nkids2(n)): uq_scan(kid2(n, i), 0)
 
 uq_target = (t: int):
-    if not ambient_sharing_stable(t): uq_calls = true
+    if not uq_calls and not ambient_sharing_stable(t): uq_calls = true
     k = nodes[t].kind
     if k == .index:
         uq_scan(int(nodes[t].a), 2)

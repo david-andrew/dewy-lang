@@ -171,42 +171,47 @@ bk_finish = (b: int, result0: int, mode: int, n: int, want_value: bool) -> int:
     if mode >= 0: result = sink_close(b, result)
     result
 bk_block = (b: int, expected: int, want_value: bool) -> int:
-    if bk_nodes[0][b].aux2 == -17 or bk_nodes[0][b].aux2 == -20 or bk_nodes[0][b].aux2 == -21: bk_nodes[0][b].flags = i32(int(bk_nodes[0][b].flags) | 4)
-    if want_value and bk_nodes[0][b].aux2 == -17: literal_snapshot_context(b, expected)
-    if want_value and bk_nodes[0][b].aux2 == -21: literal_sequence_context(b, expected)
-    pos = bk_nodes[0][b].pos
-    if want_value and bk_flag(b, 131072) and bk_files[0][pos >> 40].is_dewy:
+    bnd = data(bk_nodes[0]) + b
+    if bnd.aux2 == -17 or bnd.aux2 == -20 or bnd.aux2 == -21: bnd.flags = i32(int(bnd.flags) | 4)
+    if want_value and bnd.aux2 == -17: literal_snapshot_context(b, expected)
+    if want_value and bnd.aux2 == -21: literal_sequence_context(b, expected)
+    pos = data(bk_nodes[0])[b].pos
+    if want_value and bk_flag(b, 131072) and data(bk_files[0])[pos >> 40].is_dewy:
         bk_block(b, 0, false)
         result = if bk_flag(b, 1073741824): bk_never_type[0] else: bk_void_type[0]
-        bk_nodes[0][b].type = i32(result)
+        data(bk_nodes[0])[b].type = i32(result)
         return result
     mode = -1
     was_discarding = bk_discarding[0]
-    if want_value or bk_body_mode[0] >= 0 or bk_flag(b, 8): mode = bk_open(b, want_value)
+    if want_value or bk_body_mode[0] >= 0 or (int(data(bk_nodes[0])[b].flags) & 8) != 0: mode = bk_open(b, want_value)
     else:
         bk_arm_next[0] = 0
         bk_bind_next[0] = 0
     counted = mode == 2 or mode == 6
-    transparent = bk_nodes[0][b].aux == 5 and not want_value
+    bnd2 = data(bk_nodes[0]) + b
+    transparent = bnd2.aux == 5 and not want_value
     # (`( ... )`, NF_UNSCOPED 4: its names stay visible after it, value or not)
-    unscoped = bk_flag(b, 4)
-    n0 = int(bk_nodes[0][b].nlist)
-    i = 0
-    loop i < n0:
-        if bk_nodes[0][int(bk_lists[0][int(bk_nodes[0][b].list) + i])].kind == .when_:
-            block_expand(b)
-            break
-        i = i + 1
+    unscoped = (int(bnd2.flags) & 4) != 0
+    n0 = int(bnd2.nlist)
+    if n0 > 0:
+        nds = data(bk_nodes[0])
+        lbase = data(bk_lists[0]) + int(bnd2.list)
+        i = 0
+        loop i < n0:
+            if nds[int(lbase[i])].kind == .when_:
+                block_expand(b)
+                break
+            i = i + 1
     mark = bk_scopes[0].names.len()
     result = bk_void_type[0]
-    bk_nodes[0][b].aux = 0
-    n = int(bk_nodes[0][b].nlist)
+    data(bk_nodes[0])[b].aux = 0
+    n = int(data(bk_nodes[0])[b].nlist)
     saved_block = bk_sibling_block[0]
     saved_index = bk_sibling_index[0]
     bk_sibling_block[0] = b
     i = 0
     loop i < n:
-        s = int(bk_lists[0][int(bk_nodes[0][b].list) + i])
+        s = int(data(bk_lists[0])[int(data(bk_nodes[0])[b].list) + i])
         bk_sibling_index[0] = i
         if counted: block_direct(s)
         value = -1

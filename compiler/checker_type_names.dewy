@@ -27,6 +27,7 @@ from p"types.jo" import (T_NONE fields is_int tkind)
 from p"util.jo" import (files intern name_of pos_file pos_off)
 
 TypeNameWord:type=int64<overflow='wrap'>
+let rational_name:TypeNameWord=0
 
 resolve_type_name=(tn:TypeNameWord):>CheckerTypeName=>{
     if nodes[tn].aux =? -8 {fatal(nodes[tn].pos "Effect row is not a value type")}
@@ -64,7 +65,8 @@ resolve_type_name=(tn:TypeNameWord):>CheckerTypeName=>{
         s=lookup(nm)
         jo_type_spelling(nm s nodes[tn].pos)
         if nm =? ut_safe_name {ut_note_type_name(nm nodes[tn].pos)}
-        if name_of(nm) =? "rational" and (s =? 0 or syms[s].kind =? 'fns') and files[pos_file(nodes[tn].pos)].is_dewy {return CheckerTypeName[5 0]}
+        if rational_name =? 0 {rational_name=intern("rational")}
+        if nm =? rational_name and (s =? 0 or syms[s].kind =? 'fns') and files[pos_file(nodes[tn].pos)].is_dewy {return CheckerTypeName[5 0]}
     }
     if nm =? secret_name and nodes[tn].sval =? 0 and (s =? 0 or not secret_type_sym(syms[s].kind)) {
         if nkids(tn) not=? 1 {fatal(nodes[tn].pos jd(nodes[tn].pos "`secret` takes one type argument: `secret[str]`" "`secret` takes one type argument: `secret<string>`"))}

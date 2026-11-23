@@ -28,12 +28,16 @@ const HOOK_TOK_AMP:int32=63
 const HOOK_TOK_PIPE:int32=64
 const HOOK_TOK_CARET:int32=65
 
-exact_representation=(t0:ExactCheckWord):>int64=>$unsafe {
-    # A concrete integer has no type variable, refinement or secret wrapper.
-    if types.ptr[t0].kind =? 'int_' {return t0}
+exact_repr_slow=(t0:ExactCheckWord):>int64=>$unsafe {
     let t=representation_type(t0)
     loop types.ptr[t].kind =? 'secret' {t=representation_type(ExactCheckWord(types.ptr[t].elem))}
     t
+}
+
+exact_representation=(t0:ExactCheckWord):>int64=>$unsafe {
+    let k=types.ptr[t0].kind
+    if k not=? 'refined' and k not=? 'var' and k not=? 'secret' {return t0}
+    exact_repr_slow(t0)
 }
 
 exact_type=(t0:int64 pos:int64):>bool=>$unsafe {
@@ -101,10 +105,18 @@ exact_operation=(n:ExactCheckWord):>bool=>$unsafe {
 
 exact_note=(n:ExactCheckWord):>void=>$unsafe {
     if cx <? 0 {return}
-    let k=nodes.ptr[n].kind
-    let control=k =? 'if_' or k =? 'iflet' or k =? 'coalesce' or k =? 'match_'
-    let bitwise=k =? 'binary' and (nodes.ptr[n].op =? HOOK_TOK_AMP or nodes.ptr[n].op =? HOOK_TOK_PIPE or nodes.ptr[n].op =? HOOK_TOK_CARET)
-    if not exact_operation(n) and not ((control or bitwise) and exact_potential(n)) and not (k =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.int2float)) and exact_potential(ExactCheckWord(nodes.ptr[n].a))) and not (exact_measure_on and exact_measure_candidate(n)) {return}
+    let nd=nodes.ptr + n
+    let k=nd[0].kind
+    let ok=false
+    if k =? 'binary' {
+        let op=nd[0].op
+        if op =? HOOK_TOK_AMP or op =? HOOK_TOK_PIPE or op =? HOOK_TOK_CARET {ok=exact_potential(n)}
+        else {ok=exact_operation(n)}
+    }
+    else if k =? 'unary' or k =? 'intrinsic' {ok=exact_operation(n)}
+    else if k =? 'if_' or k =? 'iflet' or k =? 'coalesce' or k =? 'match_' {ok=exact_potential(n)}
+    else if k =? 'conv' {ok=nd[0].aux =? int32(int64(CV.int2float)) and exact_potential(ExactCheckWord(nd[0].a))}
+    if not ok and not (exact_measure_on and exact_measure_candidate(n)) {return}
     let f=ExactCheckWord(ctxs.ptr[cx].inst)
     if f >? 0 {
         exact_owners[f] = true

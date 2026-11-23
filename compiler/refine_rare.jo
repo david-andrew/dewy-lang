@@ -171,6 +171,8 @@ ref_projected_name = (p: int, n: int) -> bool:
     o = pos_off(p) + n
     o < len(src) and src[o] == '.'
 ref_resolve_limit = (n: int) -> RefResolveLimit:
+    member = name_of(int(nodes[n].name))
+    if member != "min" and member != "max": return RefResolveLimit()
     base = int(nodes[n].a)
     spelling = name_of(int(nodes[base].name))
     ty = T_VOID
@@ -185,9 +187,8 @@ ref_resolve_limit = (n: int) -> RefResolveLimit:
     if ty == T_VOID:
         symbol = lookup(int(nodes[base].name))
         if symbol != 0 and syms[symbol].kind == .type_: ty = int(syms[symbol].ref)
-    member = name_of(int(nodes[n].name))
-    if ty != T_VOID and has_var(ty) and (member == "min" or member == "max"): return RefResolveLimit(true, RefTerm(4, ty, member == "max"))
-    if ty != T_VOID and (member == "min" or member == "max"):
+    if ty != T_VOID and has_var(ty): return RefResolveLimit(true, RefTerm(4, ty, member == "max"))
+    if ty != T_VOID:
         if ty == T_U64: return RefResolveLimit(true, RefTerm(1, (if member == "max": -1 else: 0), member == "max"))
         if ty == ref_addr_type: return RefResolveLimit(true, RefTerm(1, if member == "max": ref_addr_max() else: 0))
         bound = fact_domain(ty)

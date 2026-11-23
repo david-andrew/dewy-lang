@@ -173,6 +173,8 @@ ref_projected_name=(p:int64 n:int64):>bool=>$unsafe {
     o <? src.length and src[o] =? b'.'
 }
 ref_resolve_limit=(n:int64):>RefResolveLimit=>$unsafe {
+    let member=name_of(RefineRareWord(nodes.ptr[n].name))
+    if member not=? "min" and member not=? "max" {return RefResolveLimit()}
     let base=RefineRareWord(nodes.ptr[n].a)
     let spelling=name_of(RefineRareWord(nodes.ptr[base].name))
     let ty=T_VOID
@@ -184,9 +186,8 @@ ref_resolve_limit=(n:int64):>RefResolveLimit=>$unsafe {
         let symbol=lookup(RefineRareWord(nodes.ptr[base].name))
         if symbol not=? 0 and syms.ptr[symbol].kind =? 'type_' {ty=RefineRareWord(syms.ptr[symbol].ref)}
     }
-    let member=name_of(RefineRareWord(nodes.ptr[n].name))
-    if ty not=? T_VOID and has_var(ty) and (member =? "min" or member =? "max") {return RefResolveLimit(true RefTerm(4 ty member =? "max"))}
-    if ty not=? T_VOID and (member =? "min" or member =? "max") {
+    if ty not=? T_VOID and has_var(ty) {return RefResolveLimit(true RefTerm(4 ty member =? "max"))}
+    if ty not=? T_VOID {
         if ty =? T_U64 {
             let top:RefineRareWord=if member =? "max" {-1} else {0}
             return RefResolveLimit(true RefTerm(1 top member =? "max"))

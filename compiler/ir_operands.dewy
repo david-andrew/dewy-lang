@@ -16,6 +16,9 @@ const IR_RETURN = 256
 const IR_CALL = 512
 const IR_NARROW32 = 1024
 const IR_OVERFLOW = 2048
+const IR_LOC_DEF = 4096
+const IR_BA_CTRL = 8192
+const IR_CHECKED = 16384
 # Literal unions expose text, not integer ordinals, to Dewy. Keep this ABI-order
 # list aligned with Op; exhaustive twin/walker tests check every table slot.
 ir_operand_layouts=():>array<int64>=>{
@@ -56,6 +59,9 @@ ir_operand_layouts=():>array<int64>=>{
         if op =? 'intr' or op =? 'call' or op =? 'calli' or op =? 'callc' or op =? 'syscall' or op =? 'memcpy' or op =? 'memset' or op =? 'scanbytes' or op =? 'findb' or op =? 'copy' or op =? 'zero' {mode = mode or IR_CALL}
         if op =? 'zext32' {mode = mode or IR_NARROW32}
         if op =? 'overflow_add' or op =? 'overflow_sub' or op =? 'overflow_mul' {mode = mode or IR_OVERFLOW}
+        if op =? 'iconst' or op =? 'fconst' or op =? 'slot' or op =? 'gaddr' or op =? 'daddr' or op =? 'add' {mode = mode or IR_LOC_DEF}
+        if op =? 'block' or op =? 'loop' or op =? 'if_' or op =? 'end' or op =? 'brif' or op =? 'brtable' or op =? 'zeroslots' or op =? 'callc' {mode = mode or IR_BA_CTRL}
+        if op =? 'checked_add' or op =? 'checked_sub' or op =? 'checked_mul' {mode = mode or IR_CHECKED}
         modes.push(mode)
     }
     return modes

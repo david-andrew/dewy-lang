@@ -104,13 +104,16 @@ dx_bytes=(source:string start:int64 stop:int64):>ptr<uint8>=>{
 
 dx_ident_part=(c:uint8):>bool=>DX_CLASSES[c] & 3 not=? 0
 
+DxScanWord:type=int64<overflow='wrap'>
+
 # Dewy's nestable block comment #{ ... }# starting at i0: the offset after its last }#, or -1
 # when it does not end before stop. Its text is not code: strings and line comments inside
 # it are not.
 dx_block_comment_end=(p:ptr<uint8> i0:int64 stop:int64):>int64=>$unsafe {
-    let i:int64=i0 + 2
-    let depth:int64=1
-    loop i + 1 <? stop {
+    let i:DxScanWord=DxScanWord(i0) + 2
+    let st:DxScanWord=DxScanWord(stop)
+    let depth:DxScanWord=1
+    loop i + 1 <? st {
         if p[i] =? b'#' and p[i + 1] =? b'\{' {
             depth+=1
             i+=2
@@ -248,26 +251,33 @@ dn_quote_end=(@lx:DewyLexer source:string start:int64 stop:int64 nesting:int64 r
 # Past the `}` closing the body whose `{` is at i0; -1: lex it (it does not close, or it holds
 # a metatag, a function, an import, `??`, a based or long literal, or a string with a brace)
 dx_lazy_end=(p:ptr<uint8> i0:int64 stop:int64):>int64=>$unsafe {
-    let i:int64=i0 + 1
-    let depth:int64=1
+    let i:DxScanWord=DxScanWord(i0) + 1
+    let st:DxScanWord=DxScanWord(stop)
+    let depth:DxScanWord=1
     loop true {
-        loop i <? stop and DX_LAZY[p[i]] =? 0 {i+=1}
-        if i >=? stop {return -1}
-        let c=p[i]
-        let k=DX_LAZY[c]
+        let c:uint8=0
+        let k:uint8=0
+        loop i <? st {
+            c=p[i]
+            k=DX_LAZY[c]
+            if k not=? 0 {break}
+            i+=1
+        }
+        if i >=? st {return -1}
         if k =? 1 {
-            let j:int64=i + 1
-            loop j <? stop and DX_CLASSES[p[j]] & 34 not=? 0 {j+=1}
-            if j - i =? 6 and c =? b'i' and p[i + 1] =? b'm' and p[i + 2] =? b'p' and p[i + 3] =? b'o' and p[i + 4] =? b'r' and p[i + 5] =? b't' {return -1}
-            if j - i =? 4 and c =? b'f' and p[i + 1] =? b'r' and p[i + 2] =? b'o' and p[i + 3] =? b'm' {return -1}
+            let j:DxScanWord=i + 1
+            loop j <? st and DX_CLASSES[p[j]] & 34 not=? 0 {j+=1}
+            let ln:DxScanWord=j - i
+            if ln =? 6 and c =? b'i' and p[i + 1] =? b'm' and p[i + 2] =? b'p' and p[i + 3] =? b'o' and p[i + 4] =? b'r' and p[i + 5] =? b't' {return -1}
+            if ln =? 4 and c =? b'f' and p[i + 1] =? b'r' and p[i + 2] =? b'o' and p[i + 3] =? b'm' {return -1}
             i=j
         } else if k =? 2 {
-            if c =? b'0' and i + 1 <? stop and dx_base_letter(p[i + 1]) {return -1}
-            let j=i
-            loop j <? stop and DX_CLASSES[p[j]] & 4 not=? 0 {j+=1}
+            if c =? b'0' and i + 1 <? st and dx_base_letter(p[i + 1]) {return -1}
+            let j:DxScanWord=i
+            loop j <? st and DX_CLASSES[p[j]] & 4 not=? 0 {j+=1}
             if j - i >? 18 {return -1}
             # (and what follows a number in it: `1.5`, `2e10`)
-            loop j <? stop and DX_CLASSES[p[j]] & 34 not=? 0 {j+=1}
+            loop j <? st and DX_CLASSES[p[j]] & 34 not=? 0 {j+=1}
             i=j
         } else if k =? 3 {
             depth+=1
@@ -277,26 +287,26 @@ dx_lazy_end=(p:ptr<uint8> i0:int64 stop:int64):>int64=>$unsafe {
             i+=1
             if depth =? 0 {return i}
         } else if k =? 5 {
-            if i + 1 <? stop and p[i + 1] =? b'\{' {
-                let e=dx_block_comment_end(p i stop)
+            if i + 1 <? st and p[i + 1] =? b'\{' {
+                let e:DxScanWord=DxScanWord(dx_block_comment_end(p i st))
                 if e <? 0 {return -1}
                 i=e
             } else {
-                loop i <? stop and p[i] not=? b'\n' {i+=1}
+                loop i <? st and p[i] not=? b'\n' {i+=1}
             }
         } else if k =? 6 {
-            let raw=i >? 0 and p[i - 1] =? b'r' and (i <? 2 or not dx_ident_part(p[i - 2]))
-            let width=dx_quote_width(p i stop)
+            let raw=i >? 0 and p[i - 1] =? b'r' and (i <? 2 or (DX_CLASSES[p[i - 2]] & 3) =? 0)
+            let width:DxScanWord=DxScanWord(dx_quote_width(p i st))
             i+=width
             loop true {
-                if i >=? stop {return -1}
+                if i >=? st {return -1}
                 let d=p[i]
                 if d =? b'\{' or d =? b'\}' {return -1}
                 if d =? b'\\' and not raw {
                     i+=2
                     continue
                 }
-                if d =? c and (width =? 1 or i + 2 <? stop and p[i + 1] =? c and p[i + 2] =? c) {
+                if d =? c and (width =? 1 or i + 2 <? st and p[i + 1] =? c and p[i + 2] =? c) {
                     i+=width
                     break
                 }
@@ -304,10 +314,10 @@ dx_lazy_end=(p:ptr<uint8> i0:int64 stop:int64):>int64=>$unsafe {
             }
         } else if k =? 7 {return -1}
         else if k =? 8 {
-            if i + 1 <? stop and p[i + 1] =? b'>' {return -1}
+            if i + 1 <? st and p[i + 1] =? b'>' {return -1}
             i+=1
         } else {
-            if i + 1 <? stop and p[i + 1] =? b'?' {return -1}
+            if i + 1 <? st and p[i + 1] =? b'?' {return -1}
             i+=1
         }
     }

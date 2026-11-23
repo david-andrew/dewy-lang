@@ -4,8 +4,8 @@ from p"expression_types.dewy" import (ntype)
 from p"check.jo" import (FK_INIT LF_ADDR LF_CAPTURE fns locals)
 from p"expr.jo" import (IN)
 from p"isolation.jo" import (IsolationReason IsolationRow isolation_limit isolation_node_limit isolation_replayed isolation_rows isolation_seen isolation_serial isolation_stack)
-from p"ast.jo" import (NF_EXTERN NF_GLOBAL has_flag kid kid2 nkids nkids2 nodes)
-from p"node_store.dewy" import (NK)
+from p"ast.jo" import (NF_EXTERN NF_GLOBAL has_flag kid kid2 lists nkids nkids2 nodes)
+from p"node_store.dewy" import (NK Node)
 from p"effect_classifiers.dewy" import (effect_library_class)
 from p"effects.jo" import (effect_summaries)
 from p"effect_library.jo" import EffectClass
@@ -28,6 +28,49 @@ isolation_reset=():>void=>$unsafe {
     isolation_serial=0
     isolation_limit=fns.length
     isolation_node_limit=nodes.length
+}
+iso_set_child=(@tab:array<int8> @tmp:array<Node> ks:array<NK> v:int8):>void=>$unsafe {
+    let tagp=tmp.ptr as ptr<uint32>
+    loop k in ks {
+        tmp.ptr[0].kind=k
+        tab.ptr[int64(tagp[0])]=v
+    }
+}
+iso_build_child_tab=():>array<int8>=>$unsafe {
+    let tab=fill(int8(-1) 128)
+    let tmp=[Node[kind='nil']]
+    iso_set_child(@tab @tmp ['int_lit' 'float_lit' 'bool_lit' 'none_lit' 'null_lit' 'ident' 'dotname' 'hole' 'break_' 'continue_' 'pwild' 'lambda'] int8(0))
+    iso_set_child(@tab @tmp ['str_lit' 'block' 'tuple' 'map_lit' 'matrix' 'pvariant'] int8(16))
+    iso_set_child(@tab @tmp ['field' 'unary' 'not_' 'unwrap' 'narrow' 'cast' 'conv' 'addr' 'exprstmt' 'return_' 'defer_' 'istype' 'plit' 'fnref'] int8(1))
+    iso_set_child(@tab @tmp ['binary' 'and_' 'or_' 'coalesce' 'assign' 'while_' 'for_' 'prange'] int8(3))
+    iso_set_child(@tab @tmp ['if_' 'iflet' 'range'] int8(7))
+    iso_set_child(@tab @tmp ['vardecl'] int8(2))
+    iso_set_child(@tab @tmp ['array'] int8(18))
+    iso_set_child(@tab @tmp ['call' 'partial' 'intrinsic' 'match_'] int8(17))
+    iso_set_child(@tab @tmp ['index' 'pair'] int8(19))
+    iso_set_child(@tab @tmp ['arm'] int8(23))
+    tab
+}
+let iso_child_tab:array<int8>=iso_build_child_tab()
+let iso_child_p:ptr<int8>=$unsafe iso_child_tab.ptr
+iso_build_plain_tab=():>array<uint8>=>$unsafe {
+    let tab=fill(uint8(0) 128)
+    let tmp=[Node[kind='nil']]
+    let tagp=tmp.ptr as ptr<uint32>
+    let ks:array<NK>=['int_lit' 'float_lit' 'bool_lit' 'none_lit' 'null_lit' 'ident' 'dotname' 'hole' 'break_' 'continue_' 'pwild' 'str_lit' 'block' 'tuple' 'matrix' 'unary' 'not_' 'unwrap' 'narrow' 'exprstmt' 'return_' 'defer_' 'plit' 'and_' 'or_' 'coalesce' 'assign' 'while_' 'for_' 'prange' 'if_' 'iflet' 'range' 'vardecl' 'array' 'match_' 'arm' 'pvariant']
+    loop k in ks {
+        tmp.ptr[0].kind=k
+        tab.ptr[int64(tagp[0])]=uint8(1)
+    }
+    tab
+}
+let iso_plain_tab:array<uint8>=iso_build_plain_tab()
+let iso_plain_p:ptr<uint8>=$unsafe iso_plain_tab.ptr
+let iso_todo_pool:array<int64>=[]
+isolation_node_children=(n:IsolationWord):>int64=>$unsafe {
+    let tag=int64(((nodes.ptr + n) as ptr<uint32>)[0])
+    if tag <? 0 or tag >=? 128 {return -1}
+    int64(iso_child_p[tag])
 }
 # Runtime child fields only: a=1, b=2, c=4, kids=16, kids2=32.
 # There is deliberately no generic a/b/c/d fallback. In particular for_.c/d
@@ -64,40 +107,61 @@ isolation_intrinsic=(id:IN):>bool=>$unsafe {
 # Hidden dependencies of one operation, not its evaluated children. Defaults
 # are already checked actuals; defers remain body children, so all exits count.
 isolation_effect=(n:IsolationWord @edges:array<int64>):>IsolationReason=>$unsafe {
-    let k=nodes.ptr[n].kind
-    if isolation_children(k) <? 0 {return IsolationReason.node}
-    if k =? 'lambda' or k =? 'partial' {return IsolationReason.indirect}
-    if k =? 'addr' {return IsolationReason.raw}
-    if k =? 'cast' or k =? 'conv' {
-        if raw_view(n) {return IsolationReason.raw}
-        if k =? 'conv' and (nodes.ptr[n].aux =? int32(6) or nodes.ptr[n].aux =? int32(7)) {return IsolationReason.raw}
+    let nd=nodes.ptr + n
+    let ktag=int64((nd as ptr<uint32>)[0])
+    if ktag <? 0 or ktag >=? 128 {return IsolationReason.node}
+    if iso_plain_p[ktag] not=? uint8(0) {return IsolationReason.none_}
+    let k=nd[0].kind
+    match k {
+        <'lambda' | 'partial'> => {return IsolationReason.indirect}
+        <'addr'> => {return IsolationReason.raw}
+        <'cast' | 'conv'> => {
+            if raw_view(n) {return IsolationReason.raw}
+            if k =? 'conv' and (nd[0].aux =? int32(6) or nd[0].aux =? int32(7)) {return IsolationReason.raw}
+            return IsolationReason.none_
+        }
+        <'index' | 'field'> => {
+            let t=prune(ntype(IsolationWord(nd[0].a)))
+            if tkind(t) =? 'ptr' {return IsolationReason.raw}
+            return IsolationReason.none_
+        }
+        <'call'> => {
+            let aux:IsolationWord=IsolationWord(nd[0].aux)
+            if aux =? 0 {edges.push(IsolationWord(nd[0].sym));}
+            else if aux not=? 2 and aux not=? 3 {return IsolationReason.indirect}
+            return IsolationReason.none_
+        }
+        <'fnref'> => {
+            if nd[0].aux not=? 0 {return IsolationReason.indirect}
+            edges.push(IsolationWord(nd[0].sym));
+            return IsolationReason.none_
+        }
+        <'pair'> => {
+            if nd[0].sym >? 0 {edges.push(IsolationWord(nd[0].sym));}
+            return IsolationReason.none_
+        }
+        <'map_lit'> => {
+            if nkids(n) >? 0 {edges.push(IsolationWord(nd[0].sym));}
+            return IsolationReason.none_
+        }
+        <'istype'> => {
+            if nd[0].aux2 not=? 0 {edges.push(IsolationWord(nd[0].aux2));}
+            return IsolationReason.none_
+        }
+        <'binary'> => {
+            let aux=nd[0].aux
+            if aux =? int32(6) and nd[0].aux2 not=? 0 {edges.push(IsolationWord(nd[0].aux2));}
+            if aux =? int32(4) or aux =? int32(5) {return IsolationReason.raw}
+            loop f in value_helper_calls(n) {edges.push(f);}
+            return IsolationReason.none_
+        }
+        <'intrinsic'> => {
+            if not isolation_intrinsic(nd[0].aux as IN) {return IsolationReason.intrinsic}
+            loop f in value_helper_calls(n) {edges.push(f);}
+            return IsolationReason.none_
+        }
+        _ => {return IsolationReason.node}
     }
-    if k =? 'index' or k =? 'field' {
-        let t=prune(ntype(IsolationWord(nodes.ptr[n].a)))
-        if tkind(t) =? 'ptr' {return IsolationReason.raw}
-    }
-    if k =? 'call' {
-        let aux:IsolationWord=IsolationWord(nodes.ptr[n].aux)
-        if aux =? 0 {edges.push(IsolationWord(nodes.ptr[n].sym));}
-        else if aux not=? 2 and aux not=? 3 {return IsolationReason.indirect}
-    }
-    if k =? 'fnref' {
-        if nodes.ptr[n].aux not=? 0 {return IsolationReason.indirect}
-        edges.push(IsolationWord(nodes.ptr[n].sym));
-    }
-    if k =? 'pair' and nodes.ptr[n].sym >? 0 {edges.push(IsolationWord(nodes.ptr[n].sym));}
-    # Map literals invoke the resolved insertion operation. Presence tests may
-    # replace a value-producing lookup with a different checked helper.
-    if k =? 'map_lit' and nkids(n) >? 0 {edges.push(IsolationWord(nodes.ptr[n].sym));}
-    if (k =? 'binary' and nodes.ptr[n].aux =? 6 or k =? 'istype') and nodes.ptr[n].aux2 not=? 0 {
-        edges.push(IsolationWord(nodes.ptr[n].aux2));
-    }
-    if k =? 'binary' and (nodes.ptr[n].aux =? 4 or nodes.ptr[n].aux =? 5) {return IsolationReason.raw}
-    if k =? 'intrinsic' and not isolation_intrinsic(nodes.ptr[n].aux as IN) {return IsolationReason.intrinsic}
-    if k =? 'binary' or k =? 'intrinsic' {
-        loop f in value_helper_calls(n) {edges.push(f);}
-    }
-    return IsolationReason.none_
 }
 isolation_block=(f:IsolationWord reason:IsolationReason witness:IsolationWord):>void=>$unsafe {
     if isolation_rows.ptr[f].reason =? IsolationReason.none_ {
@@ -144,7 +208,16 @@ isolation_scan=(f:IsolationWord):>array<int64>=>$unsafe {
         loop edge in row.edges {edges.push(edge.callee);}
         return edges
     }
-    let todo=[IsolationWord(fns.ptr[f].body)]
+    let todo=iso_todo_pool; iso_todo_pool=[]; todo.clear()
+    todo.push(IsolationWord(fns.ptr[f].body))
+    let nodes_p=nodes.ptr
+    let lists_p=lists.ptr
+    let seen_p=isolation_seen.ptr
+    let locals_p=locals.ptr
+    let nlocals:IsolationWord=locals.length
+    let has_own=ownership_decls.length not=? 0
+    let child_p=iso_child_p
+    let plain_p=iso_plain_p
     loop todo.length >? 0 {
         let n=todo.pop()
         if n =? 0 {continue}
@@ -153,53 +226,66 @@ isolation_scan=(f:IsolationWord):>array<int64>=>$unsafe {
             isolation_block(f IsolationReason.node n);
             break
         }
-        if isolation_seen.ptr[n] =? f {continue}
-        isolation_seen.ptr[n] = f;
-        let k=nodes.ptr[n].kind
+        if seen_p[n] =? f {continue}
+        seen_p[n] = f;
+        let nd=nodes_p + n
+        let ktag=int64((nd as ptr<uint32>)[0])
+        if ktag <? 0 or ktag >=? 128 {
+            isolation_block(f IsolationReason.node n);
+            break
+        }
+        let k=nd[0].kind
         if k =? 'ident' {
-            if nodes.ptr[n].aux =? int32(2) {
+            if nd[0].aux =? int32(2) {
                 isolation_block(f IsolationReason.global_ n);
                 break
             }
-            if nodes.ptr[n].aux not=? int32(1) {
+            if nd[0].aux not=? int32(1) {
                 isolation_block(f IsolationReason.node n);
                 break
             }
-            let l:IsolationWord=IsolationWord(nodes.ptr[n].sym)
-            if l <? 0 or l >=? locals.length {
+            let l:IsolationWord=IsolationWord(nd[0].sym)
+            if l <? 0 or l >=? nlocals {
                 isolation_block(f IsolationReason.node n);
                 break
             }
-            if IsolationWord(locals.ptr[l].flags) & (LF_CAPTURE | LF_ADDR) not=? 0 {
+            if IsolationWord(locals_p[l].flags) & (LF_CAPTURE | LF_ADDR) not=? 0 {
                 isolation_block(f IsolationReason.capture n);
                 break
             }
         }
-        let reason=isolation_effect(n @edges)
-        if reason not=? IsolationReason.none_ {
-            isolation_block(f reason n);
-            break
-        # (a value with lifecycle hooks may run them as it is copied, moved or
-        # dropped; a declared local is dropped at its scope's end)
+        if plain_p[ktag] =? uint8(0) {
+            let reason=isolation_effect(n @edges)
+            if reason not=? IsolationReason.none_ {
+                isolation_block(f reason n);
+                break
+            }
         }
-        if ownership_decls.length not=? 0 {
-            let held=if k =? 'vardecl' and nodes.ptr[n].sym >? 0 and not has_flag(n NF_GLOBAL) {IsolationWord(locals.ptr[IsolationWord(nodes.ptr[n].sym)].type)} else {ntype(n)}
+        if has_own {
+            let held=if k =? 'vardecl' and nd[0].sym >? 0 and not has_flag(n NF_GLOBAL) {IsolationWord(locals_p[IsolationWord(nd[0].sym)].type)} else {ntype(n)}
             if not isolation_hooks(held @edges) or not isolation_hooks(ntype(n) @edges) {
                 isolation_block(f IsolationReason.node n);
                 break
             }
         }
-        let mask=isolation_children(k)
-        if mask & 1 not=? 0 {todo.push(IsolationWord(nodes.ptr[n].a));}
-        if mask & 2 not=? 0 {todo.push(IsolationWord(nodes.ptr[n].b));}
-        if mask & 4 not=? 0 {todo.push(IsolationWord(nodes.ptr[n].c));}
-        if mask & 16 not=? 0 {
-            loop i in [0..nkids(n)) {todo.push(kid(n i));}
-        }
-        if mask & 32 not=? 0 {
-            loop i in [0..nkids2(n)) {todo.push(kid2(n i));}
+        let mask=int64(child_p[ktag])
+        if mask >? 0 {
+            if mask & 1 not=? 0 {let ca=IsolationWord(nd[0].a); if ca not=? 0 {todo.push(ca)}}
+            if mask & 2 not=? 0 {let cb=IsolationWord(nd[0].b); if cb not=? 0 {todo.push(cb)}}
+            if mask & 4 not=? 0 {let cc=IsolationWord(nd[0].c); if cc not=? 0 {todo.push(cc)}}
+            if mask & 16 not=? 0 {
+                let l0=IsolationWord(nd[0].list)
+                let nk=IsolationWord(nd[0].nlist)
+                loop i in [0..nk) {let x=IsolationWord(lists_p[l0 + i]); if x not=? 0 {todo.push(x)}}
+            }
+            if mask & 32 not=? 0 {
+                let l2=IsolationWord(nd[0].list2)
+                let nk2=IsolationWord(nd[0].nlist2)
+                loop i in [0..nk2) {let x=IsolationWord(lists_p[l2 + i]); if x not=? 0 {todo.push(x)}}
+            }
         }
     }
+    iso_todo_pool=todo
     return edges
 }
 isolation_visit=(f:IsolationWord):>void=>$unsafe {
@@ -271,6 +357,20 @@ isolation_operation=(n:IsolationWord):>bool=>$unsafe {
     # expressions. Classify those operations normally, but calls still demand
     # instances from the frozen checking generation (never late helpers).
     if n <=? 0 or n >=? nodes.length {return false}
+    let nd=nodes.ptr + n
+    let ktag=int64((nd as ptr<uint32>)[0])
+    if ktag <? 0 or ktag >=? 128 {return false}
+    if iso_plain_p[ktag] not=? uint8(0) {return true}
+    let k=nd[0].kind
+    if k =? 'call' {
+        let aux=nd[0].aux
+        if aux =? int32(0) {return instance_isolated(IsolationWord(nd[0].sym))}
+        return aux =? int32(2) or aux =? int32(3)
+    }
+    if k =? 'index' or k =? 'field' {
+        return tkind(prune(ntype(IsolationWord(nd[0].a)))) not=? 'ptr'
+    }
+    if k =? 'addr' or k =? 'lambda' or k =? 'partial' {return false}
     let edges:array<int64>=[]
     if isolation_effect(n @edges) not=? IsolationReason.none_ {return false}
     loop f in edges {

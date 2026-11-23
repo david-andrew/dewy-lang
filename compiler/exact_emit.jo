@@ -85,6 +85,12 @@ exact_word_remainder = (n: int) -> int[]:
 exact_low_word = (n: int) -> int:
     if exact_chain_active:
         if let saved = exact_chain_saved.get(n): return saved
+    midpoint = exact_midpoint(n)
+    if midpoint.0 != 0:
+        lo = gen_expr(midpoint.0).v
+        hi = gen_expr(midpoint.1).v
+        half = e_bin(.shrs, VI, e_bin(.xor, VI, lo, hi), e_iconst(1))
+        return e_bin(.add, VI, e_bin(.and_, VI, lo, hi), half)
     if nodes[n].kind != .block and not exact_has_node(n):
         return freeze_scalar(gen_expr(n).v, exact_representation(ntype(n)))
     if exact_has_node(n):
@@ -287,6 +293,8 @@ exact_gen_store = (n: int) -> Val:
         proven = bound >= 0 and sa_fits(bound, t)
     if not proven and t == T_INT and eg_fits(source): proven = true
     if proven and types[t].bits <= 64: return V(exact_low_word(source), false)
+    loop exact_has_node(source) and (nodes[source].kind == .exprstmt or nodes[source].kind == .conv and (nodes[source].aux == i32(int(CV.int_)) or nodes[source].aux == i32(int(CV.none_)))):
+        source = int(nodes[source].a)
     if not proven and not target_wasm and not target_arm64 and types[t].bits == 32 and nodes[source].kind == .binary:
         op = nodes[source].op as Tok
         a = int(nodes[source].a); b = int(nodes[source].b)

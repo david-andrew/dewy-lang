@@ -81,7 +81,7 @@ exact_count_bound = (n: int) -> FactBound:
     if n == 0: return FactBound(wide = true)
     if n < exact_count_index.len() and exact_count_index[n] != 0: return exact_count_bounds[exact_count_index[n] - 1]
     out = FactBound(wide = true)
-    if n >= exact_count_index.len(): exact_count_index.resize(nodes.len())
+    if n >= exact_count_index.len(): exact_count_index.resize(max(max(n + 1, nodes.len()), exact_count_index.len() * 2))
     slot = exact_count_bounds.len()
     exact_count_bounds.push(out)
     exact_count_index[n] = slot + 1

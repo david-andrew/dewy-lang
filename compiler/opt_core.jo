@@ -3,8 +3,10 @@ use 'ir.jo'
 use 'ir_builders.dewy'
 use 'opt_workspace.dewy'
 use 'opt_rewrite.dewy'
+use 'opt_licm.dewy'
 use 'opt_sra.dewy'
 use 'opt.jo'
+use 'opt_registers.dewy'
 
 # Frozen optimizer opcode tables, register reset and entry from opt.jo.
 
@@ -103,8 +105,6 @@ kills_memory_classify = (op: Op) -> bool:
 
 sra_retry = false
 optimize = ():
-    o_sra()
-    nested = sra_nested
     opt_decode = o_decode
     opt_operands = data(ir_operand_layout)
     opt_checked_flags = checked_flags
@@ -115,11 +115,56 @@ optimize = ():
     opt_kc_epoch = data(kc_epoch)
     opt_kc_fn = kc_fn
     opt_bind_addresses()
+    if not opt_allow_cse:
+        has_loop = false
+        if opt_has_loops_ready:
+            has_loop = opt_has_loops_val
+            opt_has_loops_ready = false
+        else:
+            code0 = data(opt_ir.code)
+            n0 = opt_ir.code.len()
+            loop pos in [0..n0):
+                if code0[pos].op == .loop: has_loop = true; break
+        if not has_loop:
+            opt_has_loops = false
+            nv0 = opt_ir.vtypes.len()
+            if o_reg_count < nv0: o_resize_fast(nv0)
+            opt_sra_counted = false
+            opt_fast_straight()
+            return
+        ns = opt_ir.slot_size.len()
+        has_small = false
+        if ns > 0:
+            sz = data(opt_ir.slot_size)
+            loop s in [0..ns):
+                if sz[s] <= 32: has_small = true; break
+        nested = false
+        if has_small:
+            o_sra()
+            nested = sra_nested
+        else:
+            o_resize_fast(opt_ir.vtypes.len())
+            opt_sra_counted = false
+        opt_has_loops = true
+        opt_fast_loop()
+        if nested and not sra_retry:
+            sra_retry = true
+            optimize()
+            sra_retry = false
+            return
+        if opt_has_big_loop_const:
+            opt_ir.code = o_licm(opt_ir.code)
+        return
+    o_sra()
+    nested = sra_nested
     opt_rewrite()
     if nested and not sra_retry:
         sra_retry = true
         optimize()
         sra_retry = false
+        return
+    if not opt_allow_cse and opt_has_loops:
+        opt_ir.code = o_licm(opt_ir.code)
 
 o_retargetable_classify = (op: Op) -> bool:
     match op:

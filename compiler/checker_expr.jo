@@ -261,15 +261,23 @@ xe_fn_kind = (t: int) -> bool:
     k == .fn_ or k == .cfn or k == .polyfn or k == .callable
 xe_untyped = (a0: int):
     a = a0
-    if xe_nodes[0][a].kind == .namedarg: a = int(xe_nodes[0][a].a)
-    if xe_nodes[0][a].kind == .call:
+    node = data(xe_nodes[0]) + a
+    k = node.kind
+    if k == .namedarg:
+        a = int(node.a)
+        node = data(xe_nodes[0]) + a
+        k = node.kind
+    if (int(node.flags) & 128) != 0 and k != .call and k != .array and k != .record_lit and k != .map_lit: return
+    if k == .call:
         m = xe_members_name[0]
-        if m == 0 or int(xe_nodes[0][int(xe_nodes[0][a].a)].name) == m: xe_call_host[0].members(a)
+        if m == 0 or int(xe_nodes[0][int(node.a)].name) == m: xe_call_host[0].members(a)
         if xe_nodes[0][a].kind == .call and xe_set_call(a):
             xe_untyped_kids(a)
             return
-    if xe_nodes[0][a].kind == .array: xe_spread(a)
-    k = xe_nodes[0][a].kind
+        k = xe_nodes[0][a].kind
+    if k == .array:
+        xe_spread(a)
+        k = xe_nodes[0][a].kind
     if k == .record_lit:
         xe_untyped_kids(a)
         return
@@ -279,12 +287,12 @@ xe_untyped = (a0: int):
     if k == .array and xe_files[0][int(xe_nodes[0][a].pos) >> 40].is_dewy and ctx_dependent(a):
         xe_untyped_kids(a)
         return
+    if (int(xe_nodes[0][a].flags) & 128) != 0: return
     base = a
     if k == .typeapply: base = int(xe_nodes[0][a].a)
-    if not xe_flag(a, 128):
-        bk = xe_nodes[0][base].kind
-        if bk == .ident: xe_fnref(a, base)
-        if bk == .field and xe_nodes[0][int(xe_nodes[0][base].a)].kind == .ident: xe_module_fn(a, base)
+    bk = xe_nodes[0][base].kind
+    if bk == .ident: xe_fnref(a, base)
+    else if bk == .field and xe_nodes[0][int(xe_nodes[0][base].a)].kind == .ident: xe_module_fn(a, base)
     if ctx_dependent(a) or xe_flag(a, 128): return
     check_expr(a, 0)
     xe_add_flag(a, 128)
@@ -308,21 +316,39 @@ xe_read = (n: int, t: int) -> int:
     if xe_values[0]: expr_values_use(n, it)
     it
 xe_ident = (n: int, expected: int) -> int:
-    nm = int(xe_nodes[0][n].name)
+    nm = int(data(xe_nodes[0])[n].name)
     if xe_sentinel[0] != 0 and nm == xe_sentinel[0]: xe_complete()
     c = xe_context[0]
     floor = 0
-    if c >= 0: floor = int(xe_contexts[0][c].floor)
+    if c >= 0: floor = int(data(xe_contexts[0])[c].floor)
     i = -1
-    if nm < xe_scopes[0].top.len(): i = xe_scopes[0].top[nm]
+    if nm < xe_scopes[0].top.len(): i = data(xe_scopes[0].top)[nm]
     s = 0
-    if i >= floor: s = xe_scopes[0].syms[i]
+    if i >= floor: s = data(xe_scopes[0].syms)[i]
     else: s = xe_module(nm)
     if s == 0: xe_unknown(n, expected, nm)
+    sym = data(xe_syms[0]) + s
+    sk = sym.kind
+    ref = int(sym.ref)
+    if sk == .local and c >= 0 and not xj_ide[0] and xe_watch[0].const_views <= 0:
+        lp = data(xe_locals[0]) + ref
+        fl = int(lp.flags)
+        if (fl & 2056) == 0 and int(lp.owner) == int(data(xe_contexts[0])[c].inst):
+            t = int(lp.type)
+            if xj_tk_special_p[int(data(xe_types[0])[t].kind)] == u8(0) and not xl_exact_measure[0] and (expected == 0 or not xl_effects[0]):
+                node = data(xe_nodes[0]) + n
+                node.aux = i32(1)
+                node.sym = i32(ref)
+                if n != xj_assign_root[0]: lp.flags = i32(fl | 32768)
+                node.type = i32(t)
+                node.flags = i32(int(node.flags) | 128)
+                xl_last[0] = n
+                if xe_temperature[0] or xe_values[0]: return xe_read(n, t)
+                return t
     flags = 0
     if xe_watch[0].const_views > 0: flags = 1
     if xe_watch[0].decimal_globals > 0: flags = flags | 2
-    t = xj_ident(n, expected, xe_kind(xe_syms[0][s].kind), int(xe_syms[0][s].ref), s, flags).type
+    t = xj_ident_slow(n, expected, xe_kind(sk), ref, s, flags).type
     if xe_temperature[0] or xe_values[0]: return xe_read(n, t)
     t
 xe_other = (n: int, expected: int) -> int:
@@ -420,11 +446,16 @@ xe_first = (b: int) -> int:
     xe_add_flag(b, 128)
     t
 xe_binary = (n: int, expected: int) -> int:
-    op = int(xe_nodes[0][n].op)
+    nd = data(xe_nodes[0]) + n
+    op = int(nd.op)
     if op == 85: return check_dotted(n, expected)
-    if op == 60 and xe_flag(n, 536870912): binary_juxt(n)
+    if op == 60 and (int(nd.flags) & 536870912) != 0:
+        binary_juxt(n)
+        nd = data(xe_nodes[0]) + n
     if op == 82: return xe_xor(n, expected)
-    if op != 58 and op != 60 and xe_nodes[0][int(xe_nodes[0][n].a)].kind == .str_lit: xe_char(n)
+    a = int(nd.a)
+    b = int(nd.b)
+    if op != 58 and op != 60 and xe_nodes[0][a].kind == .str_lit: xe_char(n)
     if op == 12: return xe_in(n, expected)
     is_cmp = op >= 69 and op <= 74
     is_shift = op == 67 or op == 68
@@ -433,31 +464,31 @@ xe_binary = (n: int, expected: int) -> int:
         ek = xe_kind_of(expected)
         if ek == .int_ or ek == .float_ or ek == .vec: hint = expected
         else if ek == .quantity: hint = binary_quantity_hint(expected)
-    a = int(xe_nodes[0][n].a)
-    b = int(xe_nodes[0][n].b)
     if (op == 69 or op == 70) and xe_watch[0].decimal_adapted > 0: xe_decimals(a, b)
     flags = 0
+    ak0 = xe_nodes[0][a].kind
+    bk0 = xe_nodes[0][b].kind
     if op == 58 or op == 59:
-        if xe_quantity_literal(a): flags = 1
-        if xe_quantity_literal(b) or (b == xe_quantity_right[0] and b != 0): flags = flags | 2
+        if (ak0 == .binary or ak0 == .unary) and xe_quantity_literal(a): flags = 1
+        if ((bk0 == .binary or bk0 == .unary) and xe_quantity_literal(b)) or (b == xe_quantity_right[0] and b != 0): flags = flags | 2
     else if op == 60:
-        if xe_quantity_name(a): flags = 1
-        if xe_quantity_name(b): flags = flags | 2
-        ca = xe_charlike(a)
-        cb = xe_charlike(b)
+        if (ak0 == .ident or ak0 == .field) and xe_quantity_name(a): flags = 1
+        if (bk0 == .ident or bk0 == .field) and xe_quantity_name(b): flags = flags | 2
+        ca = ak0 == .str_lit and xe_flag(a, 512)
+        cb = bk0 == .str_lit and xe_flag(b, 512)
         if ca and not cb: xe_nodes[0][a].flags = i32(int(xe_nodes[0][a].flags) & ~512)
         if cb and not ca: xe_nodes[0][b].flags = i32(int(xe_nodes[0][b].flags) & ~512)
     if op == 58:
-        ca = xe_charlike(a)
-        cb = xe_charlike(b)
+        ca = ak0 == .str_lit and xe_flag(a, 512)
+        cb = bk0 == .str_lit and xe_flag(b, 512)
         if ca: flags = flags | 4
         if cb: flags = flags | 8
         if ca and not cb and hint == 0 and xe_flag(a, 8):
             tb0 = xe_first(b)
             if xe_types[0][tb0].kind == .int_: hint = tb0
     literal_op = (op == 69 or op == 70 or op == 63 or op == 64 or op == 65 or op == 59) and xe_files[0][xe_nodes[0][n].pos >> 40].is_dewy
-    a_literal = literal_op and xe_literal_operand(a)
-    b_literal = literal_op and xe_literal_operand(b)
+    a_literal = literal_op and (ak0 == .array or ak0 == .record_lit or ak0 == .map_lit or ak0 == .call) and xe_literal_operand(a)
+    b_literal = literal_op and (bk0 == .array or bk0 == .record_lit or bk0 == .map_lit or bk0 == .call) and xe_literal_operand(b)
     if a_literal and not b_literal: hint = xe_literal_hint(a, xe_first(b), op, hint)
     ta = int(tu_prune(check_expr(a, hint)))
     tb = 0
@@ -509,10 +540,12 @@ check_call_expr = (n: int, expected: int) -> int:
     callee = int(xe_nodes[0][n].a)
     if ex != 0 and xe_nodes[0][callee].kind == .ident:
         count = int(xe_nodes[0][n].nlist)
-        if count == 2 and (xe_types[0][ex].kind == .array or is_nd(ex)) and xe_names[0][int(xe_nodes[0][callee].name)] == "__shape_value":
-            check_expr(xe_kid(n, 0), ex)
-            xe_set_kid(n, 0, xe_last[0])
-        if count == 1 and xe_names[0][int(xe_nodes[0][callee].name)] == "__map_of": call_map_rows(n, ex)
+        if count == 1 or count == 2:
+            cname = xe_names[0][int(xe_nodes[0][callee].name)]
+            if count == 2 and len(cname) == 13 and cname[0] == '_' and (xe_types[0][ex].kind == .array or is_nd(ex)) and cname == "__shape_value":
+                check_expr(xe_kid(n, 0), ex)
+                xe_set_kid(n, 0, xe_last[0])
+            else if count == 1 and len(cname) == 8 and cname[0] == '_' and cname == "__map_of": call_map_rows(n, ex)
     if is_unchecked_at(n):
         xs = xe_kid(n, 0)
         i = xe_kid(n, 1)
@@ -634,23 +667,28 @@ xe_numeric_head = (n: int) -> bool:
 xe_fn_pack = (t: int) -> bool: xe_types[0][t].kind == .fn_ and xe_types[0][t].sign
 check_expr = (n: int, expected: int) -> int:
     xe_last[0] = n
-    if int(xe_nodes[0][n].flags) & 8192 != 0:
-        contribution = collection_check(n, expected)
-        if contribution >= 0: return contribution
-    if xe_nodes[0][n].type != 0 and int(xe_nodes[0][n].flags) & 128 != 0: return int(xe_nodes[0][n].type)
-    k = xe_nodes[0][n].kind
-    if k == .ident: return xe_ident(n, expected)
-    if k == .int_lit: return xl_check_int(n, expected)
-    if k == .binary: return xl_finish(n, xe_binary(n, expected), expected)
-    if k == .call: return check_call_expr(n, expected)
-    if k == .field: return xs_field(n, expected)
-    if k == .if_: return xl_finish(n, xf_if(n, xl_expected(expected)), expected)
-    if k == .index:
-        it = xs_index(n, expected)
-        if xe_watch[0].sibling_known != 0: return expr_sibling(n, it)
-        return it
-    if k == .str_lit: return xl_check_str(n, expected)
-    xe_other(n, expected)
+    node = data(xe_nodes[0]) + n
+    fl = int(node.flags)
+    if (fl & 8320) != 0:
+        if (fl & 8192) != 0:
+            contribution = collection_check(n, expected)
+            if contribution >= 0: return contribution
+            node = data(xe_nodes[0]) + n
+        if node.type != 0 and (int(node.flags) & 128) != 0: return int(node.type)
+    match node.kind:
+        ident: xe_ident(n, expected)
+        int_lit: xl_check_int(n, expected)
+        binary: xl_finish(n, xe_binary(n, expected), expected)
+        call: check_call_expr(n, expected)
+        field: xs_field(n, expected)
+        if_: xl_finish(n, xf_if(n, xl_expected(expected)), expected)
+        index:
+            live_body_indexes += 1
+            it = xs_index(n, expected)
+            if xe_watch[0].sibling_known != 0: return expr_sibling(n, it)
+            it
+        str_lit: xl_check_str(n, expected)
+        _: xe_other(n, expected)
 struct CheckerIntrinsicHost:
     rest: (int, int, int[], int) -> int
     nargs: (int, int, int, int, str) -> void

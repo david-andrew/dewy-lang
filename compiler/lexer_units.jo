@@ -16,7 +16,7 @@ lx_unit = (s: int, v: f64):
     if f == 0.0: lx_err(us, "unknown unit '{name}' (a number cannot be followed directly by a name)")
     lx_i = i
     lx_emit(.float_lit, s, i - s)
-    lx_slots[lx_count - 1].fval = v * f
+    lx_slots[lx_count - 1].ival = int(f64_bits(v * f))
     lx_slots[lx_count - 1].flags = i32(int(lx_slots[lx_count - 1].flags) | INTF_UNIT)
 # how many base units (s, m, kg, rad, N) one of these is; 0 for unknown names
 unit_scale = (u: str) -> f64:

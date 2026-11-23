@@ -55,7 +55,8 @@ def lexer_span_helpers(compiler, out):
     lexical_entry = ''
     if entry.exists():
         text = entry.read_text()
-        lexical_entry = text[text.index('dn_lex ='):text.index('dewy_fast_file =')]
+        start = text.index('dn_tok_pool:') if 'dn_tok_pool:' in text else text.index('dn_lex =')
+        lexical_entry = text[start:text.index('dewy_fast_file =')]
 
     return '\n'.join([
         "use 'dewy_tokens.dewy'\nuse 'dewy_lex.dewy'\nuse 'dewy_lexer.dewy'\nuse 'intern.dewy'\nuse 'dewy_parser.dewy'",

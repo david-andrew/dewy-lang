@@ -36,8 +36,45 @@ util_mkpos=(file:UtilWord off:UtilWord):>int64=>(file << 40) | off
 util_pos_file=(p:UtilWord):>int64=>p >> 40
 util_pos_off=(p:UtilWord):>int64=>p & 0xFFFFFFFFFF
 
+let file_in_lib_cache:array<int8>=[]
+let file_in_lib_p:ptr<int8>=$unsafe (uint64(0) as ptr<int8>)
+let file_in_lib_n:UtilWord=0
+let file_in_lib_root:string=""
+let file_in_lib_root_p:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
+
+util_file_in_lib_slow=(f:UtilWord):>bool=>$unsafe {
+    let lr=lib_root as array<uint8>
+    if lr.length =? 0 or f <? 0 or f >=? files.length {return false}
+    let cur_p=(file_in_lib_root as array<uint8>).ptr
+    if cur_p not=? lr.ptr and file_in_lib_root not=? lib_root {
+        file_in_lib_root=lib_root
+        file_in_lib_cache=[]
+        file_in_lib_p=(uint64(0) as ptr<int8>)
+        file_in_lib_n=0
+    }
+    file_in_lib_root_p=lr.ptr
+    if f <? file_in_lib_cache.length {
+        let c=file_in_lib_cache.ptr[f]
+        if c not=? 0 {return c =? 2}
+    } else {
+        file_in_lib_cache.resize(f + 64)
+        file_in_lib_p=file_in_lib_cache.ptr
+        file_in_lib_n=file_in_lib_cache.length
+    }
+    let in_lib=starts_with(files.ptr[f].path lib_root)
+    file_in_lib_p[f]=if in_lib {int8(2)} else {int8(1)}
+    in_lib
+}
+
+util_file_in_lib=(f:int64):>bool=>$unsafe {
+    if f >=? 0 and f <? file_in_lib_n and (lib_root as array<uint8>).ptr =? file_in_lib_root_p {
+        let c=file_in_lib_p[f]
+        if c not=? 0 {return c =? 2}
+    }
+    util_file_in_lib_slow(f)
+}
+
 util_pos_in_lib=(p:int64):>bool=>{
-    if p <=? 0 or (lib_root as array<uint8>).length =? 0 {return false}
-    let f=util_pos_file(p)
-    f <? files.length and starts_with(files[f].path lib_root)
+    if p <=? 0 {return false}
+    util_file_in_lib(util_pos_file(p))
 }

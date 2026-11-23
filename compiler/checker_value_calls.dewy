@@ -248,7 +248,7 @@ fns_param_hint=(decls:array<int64> i:int64 nargs:int64):>int64=>$unsafe {
         }
         if not takes {continue}
         let sig=fn_sig(d)
-        if VCWord(sig.mutmask) & (1 << i) not=? 0 {return 0}
+        if VCWord(sig.mutmask) & (VCWord(1) << VCWord(i)) not=? 0 {return 0}
         let pt:VCWord=prune(sig.params.ptr[i])
         if pt =? 0 or has_var(pt) or hint not=? 0 and not type_eq(hint pt) {return 0}
         hint=pt
@@ -299,7 +299,7 @@ fns_argument_hints=(decls:array<int64> args:array<int64> receiver:int64=0 explic
             let i=if positional and kinds.length =? 0 {j} else {indices.get(a) ?? (-1)}
             if i <? 0 or hints.ptr[i] <? 0 {continue}
             let pt:VCWord=prune(subst(sig.params.ptr[j] binds))
-            if VCWord(sig.mutmask) & (1 << j) not=? 0 or pt =? 0 or has_var(pt) or hints.ptr[i] not=? 0 and not type_eq(hints.ptr[i] pt) {hints.ptr[i] = -1}
+            if VCWord(sig.mutmask) & (VCWord(1) << VCWord(j)) not=? 0 or pt =? 0 or has_var(pt) or hints.ptr[i] not=? 0 and not type_eq(hints.ptr[i] pt) {hints.ptr[i] = -1}
             else {hints.ptr[i] = pt}
         }
     }
@@ -405,7 +405,7 @@ values_argument_hints=(n:int64 expected:int64):>array<int64>=>$unsafe {
     else if ft not=? 0 and (tkind(ft) =? 'fn_' or tkind(ft) =? 'cfn') {
         loop i in [0..args.length) {
             if nodes.ptr[args.ptr[i]].kind =? 'namedarg' or i >=? VCWord(types.ptr[ft].nargs) {return []}
-            let hint=if VCWord(types.ptr[ft].mutmask) & (1 << i) =? 0 {targ(ft i)} else {0}
+            let hint=if VCWord(types.ptr[ft].mutmask) & (VCWord(1) << VCWord(i)) =? 0 {targ(ft i)} else {0}
             hints.push(hint)
         }
     }

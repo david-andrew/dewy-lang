@@ -3,11 +3,13 @@ $runtime_checks
 from p"ir_types.dewy" import (Op)
 from p"ir.jo" import (M_INDEX checked_flags ir_operand_layout kc_epoch kc_fn kc_reg kc_val mulh_ok rotate32_ok)
 from p"opt_workspace.dewy" import (
-    opt_checked_flags opt_decode opt_kc_epoch opt_kc_fn opt_kc_reg opt_kc_val opt_mulh_ok opt_operands
-    opt_rotate32_ok
+    o_reg_count opt_allow_cse opt_args opt_checked_flags opt_decode opt_has_big_loop_const opt_has_loops opt_has_loops_ready opt_has_loops_val opt_input_count opt_ir opt_kc_epoch opt_kc_fn opt_kc_reg opt_kc_val opt_mulh_ok opt_nparams opt_operands
+    opt_raw_mem opt_rotate32_ok opt_sra_counted opt_vtypes
 )
-from p"opt.jo" import (o_decode opt_bind_addresses)
-from p"opt_rewrite.dewy" import (opt_rewrite)
+from p"opt.jo" import (o_decode o_resize_fast opt_bind_addresses)
+from p"opt_registers.dewy" import (o_resize)
+from p"opt_rewrite.dewy" import (opt_fast_loop opt_fast_straight opt_rewrite)
+from p"opt_licm.dewy" import (o_licm)
 from p"opt_sra.dewy" import (o_sra sra_nested)
 
 # Decode words are wrapping machine words, as in Jo.
@@ -130,8 +132,6 @@ kills_memory_classify=(op:Op):>bool=>match op {
 # policies and constant-cache views. A nested slot store retries once.
 let sra_retry:bool=false
 optimize=():>void=>$unsafe {
-    o_sra()
-    let nested=sra_nested
     opt_decode=o_decode
     opt_operands=ir_operand_layout.ptr
     opt_checked_flags=checked_flags
@@ -142,11 +142,64 @@ optimize=():>void=>$unsafe {
     opt_kc_epoch=kc_epoch.ptr
     opt_kc_fn=kc_fn
     opt_bind_addresses()
+    if not opt_allow_cse {
+        let has_loop=false
+        if opt_has_loops_ready {
+            has_loop=opt_has_loops_val
+            opt_has_loops_ready=false
+        } else {
+            let code0=opt_ir[0].code.ptr
+            let n0=opt_ir[0].code.length
+            loop pos in [0..n0) {
+                if code0[pos].op =? 'loop' {has_loop=true; break}
+            }
+        }
+        if not has_loop {
+            opt_has_loops=false
+            let nv0=opt_ir[0].vtypes.length
+            if o_reg_count <? nv0 {o_resize_fast(nv0)}
+            opt_sra_counted=false
+            opt_fast_straight()
+            return
+        }
+        let ns=opt_ir[0].slot_size.length
+        let has_small=false
+        if ns >? 0 {
+            let sz=opt_ir[0].slot_size.ptr
+            loop s in [0..ns) {if sz[s] <=? 32 {has_small=true; break}}
+        }
+        let nested=false
+        if has_small {
+            o_sra()
+            nested=sra_nested
+        } else {
+            o_resize_fast(opt_ir[0].vtypes.length)
+            opt_sra_counted=false
+        }
+        opt_has_loops=true
+        opt_fast_loop()
+        if nested and not sra_retry {
+            sra_retry=true
+            optimize()
+            sra_retry=false
+            return
+        }
+        if opt_has_big_loop_const {
+            opt_ir[0].code=o_licm(opt_ir[0].code)
+        }
+        return
+    }
+    o_sra()
+    let nested=sra_nested
     opt_rewrite()
     if nested and not sra_retry {
         sra_retry=true
         optimize()
         sra_retry=false
+        return
+    }
+    if not opt_allow_cse and opt_has_loops {
+        opt_ir[0].code=o_licm(opt_ir[0].code)
     }
 }
 

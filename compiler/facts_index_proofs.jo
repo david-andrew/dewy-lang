@@ -22,6 +22,7 @@ use 'lower_group.dewy'
 use 'lower_storage.dewy'
 use 'lower_views.dewy'
 use 'types.jo'
+use 'util.jo'
 
 # A loop's control counter stays in range, but its user-visible variable can
 # be reassigned, passed by reference, or changed by a closure in the body.
@@ -166,8 +167,14 @@ other_index_of = (n: int, a: int, ok: int[], seen: mut bool[]) -> bool:
         if int(nodes[n].aux) == 0 and stable_loop_index(int(nodes[n].sym)) and range_bounds_arrays(it).contains(a): inner.push(int(nodes[n].sym))
         return other_index_of(it, a, ok, seen) or other_index_of(int(nodes[n].b), a, inner, seen)
     # (a checked `for` returned above; a partial's d is a function instance)
-    loop c in [int(nodes[n].a), int(nodes[n].b), kid_c(n), kid_d(n)]:
-        if other_index_of(c, a, ok, seen): return true
+    ca = int(nodes[n].a)
+    if ca > 0 and other_index_of(ca, a, ok, seen): return true
+    cb = int(nodes[n].b)
+    if cb > 0 and other_index_of(cb, a, ok, seen): return true
+    cc = kid_c(n)
+    if cc > 0 and other_index_of(cc, a, ok, seen): return true
+    cd = kid_d(n)
+    if cd > 0 and other_index_of(cd, a, ok, seen): return true
     loop i in [0..nkids(n)):
         if other_index_of(kid(n, i), a, ok, seen): return true
     loop i in [0..nkids2(n)):
@@ -246,8 +253,9 @@ facts_positive_bind = (positive_cache: *(int[]), positive_stamp: *(int[]), posit
 positive_bound = (n: int, use_locals: bool) -> int:
     if not use_locals: return positive_bound_value(n, false)
     if n >= positive_cache.len():
-        positive_place_cache[0].resize(max(n + 1, nodes.len()))
-        positive_place_stamp[0].resize(positive_cache.len())
+        need = max(n + 1, nodes.len())
+        positive_place_cache[0].resize(need)
+        positive_place_stamp[0].resize(need)
     if positive_stamp[n] == positive_epoch: return positive_cache[n]
     value = positive_bound_value(n, true)
     positive_place_cache[0][n] = value
@@ -272,13 +280,14 @@ positive_bound_value = (n: int, use_locals: bool) -> int:
         return nodes[n].ival
     # Literal regions own their callback. Its immutable formal is bounded
     # even while collecting the writes of the source-level parameter binding.
-    if not target_wasm and not target_arm64 and k == .ident and nodes[n].aux == i32(int(SK.local)):
+    if not target_wasm and not target_arm64 and fact_parallel_bounds.len() > 0 and k == .ident and nodes[n].aux == i32(int(SK.local)):
         l = int(nodes[n].sym)
         if int(locals[l].flags) & (LF_ASSIGNED | LF_MUTPARAM | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_EXPOSED | LF_SHARED) == 0 and cur_fn > 0 and fns[cur_fn].kind == FK_LAMBDA and fns[cur_fn].params.len() == 1 and fns[cur_fn].params[0] == l:
             if let bound = fact_parallel_bounds.get(cur_fn):
                 if not bound.wide and bound.lo >= 0: return bound.hi
     if k == .ident and nodes[n].aux == i32(int(SK.local)) and use_locals:
-        if let limit = math_word_limits.get(int(nodes[n].sym)): return limit
+        if math_word_limits.len() > 0:
+            if let limit = math_word_limits.get(int(nodes[n].sym)): return limit
         loop i in [0..nonneg_locals.len()):
             if nonneg_locals[i] == int(nodes[n].sym): return nonneg_limits[i]
         l = int(nodes[n].sym)
@@ -342,7 +351,35 @@ positive_write = (n: int):
             loop i in [0..nkids(n)): positive_local_write(int(nodes[kid(n, i)].sym), -1)
     if k == .assign:
         bound = -1
-        if nodes[n].op == i32(int(Tok.assign)) and nodes[n].aux == 0: bound = positive_bound(int(nodes[n].b), false)
+        if nodes[n].op == i32(int(Tok.assign)) and nodes[n].aux == 0:
+            rhs = int(nodes[n].b)
+            bound = positive_bound(rhs, false)
+            pf = pos_file(nodes[n].pos)
+            if bound < 0 and pf >= 0 and pf < files.len() and files[pf].is_dewy:
+                lhs = int(nodes[n].a)
+                if nodes[lhs].kind == .ident and nodes[lhs].aux == i32(int(SK.local)):
+                    l0 = int(nodes[lhs].sym)
+                    lt0 = if l0 > 0: prune(int(locals[l0].type)) else: 0
+                    if lt0 == T_INT:
+                        rb = rhs
+                        if rb > 0 and nodes[rb].kind == .conv and nodes[rb].aux == i32(int(CV.fixed_store)): rb = int(nodes[rb].a)
+                        rb = word_integer_value(rb)
+                        if rb > 0 and nodes[rb].kind == .binary and nodes[rb].aux == 0 and nodes[rb].op == i32(int(Tok.plus)):
+                            ra = word_integer_value(int(nodes[rb].a))
+                            rc = word_integer_value(int(nodes[rb].b))
+                            if ra > 0 and nodes[ra].kind == .ident and nodes[ra].aux == i32(int(SK.local)) and int(nodes[ra].sym) == l0 and positive_bound(rc, false) >= 0:
+                                bound = 9223372036854775807
+                            else if rc > 0 and nodes[rc].kind == .ident and nodes[rc].aux == i32(int(SK.local)) and int(nodes[rc].sym) == l0 and positive_bound(ra, false) >= 0:
+                                bound = 9223372036854775807
+        else if nodes[n].op == i32(int(Tok.pluseq)) and nodes[n].aux == 0:
+            pf = pos_file(nodes[n].pos)
+            if pf >= 0 and pf < files.len() and files[pf].is_dewy:
+                lhs = int(nodes[n].a)
+                if nodes[lhs].kind == .ident and nodes[lhs].aux == i32(int(SK.local)):
+                    l0 = int(nodes[lhs].sym)
+                    lt0 = if l0 > 0: prune(int(locals[l0].type)) else: 0
+                    if lt0 == T_INT and positive_bound(int(nodes[n].b), false) >= 0:
+                        bound = 9223372036854775807
         positive_target_write(int(nodes[n].a), bound)
 
 storage_cache: *({int: FactStorage})
@@ -376,97 +413,198 @@ fact_storage_loop = (n: int) -> FactStorage:
     storage_calls[0] = saved.calls; storage_opaque[0] = saved.opaque
     result
 
+fact_swap_array_path = ""
+fact_swap_lib_dir = ""
+fact_is_array_swap = (n: int) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nkids(n) != 3: return false
+    f = int(nodes[n].sym)
+    if f <= 0: return false
+    d = int(fns[f].decl)
+    if d == 0: return false
+    if fact_swap_lib_dir != lib_dir:
+        fact_swap_lib_dir = lib_dir
+        fact_swap_array_path = lib_dir + "/core/array.jo"
+    name_of(int(nodes[d].name)) == "swap" and files[pos_file(nodes[d].pos)].path == fact_swap_array_path
+
 # ctx: 0 the value is used (copied, passed), 1 it is only indexed or measured
 fact_storage_scan = (n: int, ctx: int):
     if n == 0: return
-    k = nodes[n].kind
-    if k == .for_ or k == .while_:
-        summary = fact_storage_loop(n)
-        loop v in summary.bases: storage_bases[0].push(v)
-        loop v in summary.kill: storage_kill[0].push(v)
-        loop v in summary.escape: storage_escape[0].push(v)
-        loop v in summary.written: storage_written[0].push(v)
-        storage_calls[0] = fp_calls or summary.calls or not ambient_storage_stable(n)
-        storage_opaque[0] = fp_lambda or summary.opaque
-        if k == .for_:
-            if has_flag(n, NF_MUT):
-                key = lpath_key(int(nodes[n].a))
+    np = data(nodes) + n
+    k = np.kind
+    match k:
+        int_lit, float_lit, bool_lit, none_lit, null_lit, dotname, hole, break_, continue_, pwild: return
+        ident:
+            if np.aux == i32(int(SK.local)) and int(locals[int(np.sym)].flags) & LF_ELEMALIAS != 0:
+                key = lpath_key(int(nodes[int(locals[int(np.sym)].alias)].a))
                 if key != 0: storage_kill[0].push(key)
-            fact_storage_scan(int(nodes[n].a), 0)
-        return
-    # An unclassified operation may also affect its local actuals. Merely
-    # marking ambient calls would still allow caching a private local array.
-    mask = isolation_children(k)
-    if mask < 0 or k == .intrinsic and not isolation_intrinsic(nodes[n].aux as IN):
-        storage_opaque[0] = true
-        return
-    if not ambient_storage_stable(n): storage_calls[0] = true
-    if k == .lambda:
-        storage_opaque[0] = true
-        return
-    if k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ELEMALIAS != 0:
-        # (x of `mut x in xs` in a combined loop: writing x writes xs, which the body does not show)
-        key = lpath_key(int(nodes[int(locals[int(nodes[n].sym)].alias)].a))
-        if key != 0: storage_kill[0].push(key)
-        return
-    if k == .ident or k == .field:
-        key = lpath_key(n)
-        if key != 0:
-            if ctx == 0: storage_escape[0].push(key)
-            if k == .field: fact_storage_scan(int(nodes[n].a), 1)
+                return
+            key = lpath_key(n)
+            if key != 0 and ctx == 0: storage_escape[0].push(key)
             return
-        if k == .field: fact_storage_scan(int(nodes[n].a), 0)
-        return
-    if k == .index:
-        base = int(nodes[n].a)
-        if lpath_key(base) != 0 and tkind(ntype(base)) == .array: storage_bases[0].push(base)
-        # A slice retains its source while its bounds run; writes in those
-        # bounds must still detach, including when the slice is inside a loop.
-        fact_storage_scan(base, if nodes[n].aux == 1: 0 else: 1)
-        fact_storage_scan(int(nodes[n].b), 0)
-        loop i in [0..nkids(n)): fact_storage_scan(kid(n, i), 0)
-        return
-    if k == .assign:
-        fact_storage_target(int(nodes[n].a))
-        fact_storage_scan(int(nodes[n].b), 0)
-        return
-    # (a pointer to a variable, or to an array's elements, may write it: data() also makes the
-    # array one of its own first, which may move it)
-    if k == .addr or (k == .cast or k == .conv) and raw_view(n):
-        key = lpath_key(int(nodes[n].a))
-        if key != 0: storage_kill[0].push(key)
-        fact_storage_scan(int(nodes[n].a), 1)
-        return
-    if k == .intrinsic and nkids(n) > 0:
-        id = nodes[n].aux as IN
-        if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend or id == .arrdata:
-            key = lpath_key(kid(n, 0))
+        field:
+            if not storage_calls[0] and not ambient_storage_stable(n): storage_calls[0] = true
+            key = lpath_key(n)
+            if key != 0:
+                if ctx == 0: storage_escape[0].push(key)
+                fact_storage_scan(int(np.a), 1)
+                return
+            fact_storage_scan(int(np.a), 0)
+            return
+        index:
+            if not storage_calls[0] and not ambient_storage_stable(n): storage_calls[0] = true
+            base = int(np.a)
+            if lpath_key(base) != 0 and tkind(ntype(base)) == .array: storage_bases[0].push(base)
+            fact_storage_scan(base, if np.aux == 1: 0 else: 1)
+            fact_storage_scan(int(np.b), 0)
+            nk = int(np.nlist)
+            if nk > 0:
+                l0 = int(np.list)
+                loop i in [0..nk): fact_storage_scan(int(data(lists)[l0 + i]), 0)
+            return
+        assign:
+            fact_storage_target(int(np.a))
+            fact_storage_scan(int(np.b), 0)
+            return
+        for_, while_:
+            summary = fact_storage_loop(n)
+            loop v in summary.bases: storage_bases[0].push(v)
+            loop v in summary.kill: storage_kill[0].push(v)
+            loop v in summary.escape: storage_escape[0].push(v)
+            loop v in summary.written: storage_written[0].push(v)
+            storage_calls[0] = fp_calls or summary.calls or not ambient_storage_stable(n)
+            storage_opaque[0] = fp_lambda or summary.opaque
+            if k == .for_:
+                ca = int(nodes[n].a)
+                if has_flag(n, NF_MUT):
+                    key = lpath_key(ca)
+                    if key != 0: storage_kill[0].push(key)
+                fact_storage_scan(ca, 0)
+            return
+        lambda:
+            if not storage_calls[0] and not ambient_storage_stable(n): storage_calls[0] = true
+            storage_opaque[0] = true
+            return
+        addr:
+            if not storage_calls[0] and not ambient_storage_stable(n): storage_calls[0] = true
+            ca = int(np.a)
+            key = lpath_key(ca)
             if key != 0: storage_kill[0].push(key)
-            fact_storage_scan(kid(n, 0), 1)
-            loop i in [1..nkids(n)): fact_storage_scan(kid(n, i), 0)
+            fact_storage_scan(ca, 1)
             return
-        if id == .len or id == .arrcap:
-            fact_storage_scan(kid(n, 0), 1)
-            return
-    if k == .call:
-        mm = checked_call_mutmask(n)
-        loop i in [0..nkids(n)):
-            if mm & (1 << i) != 0:
-                key = lpath_key(kid(n, i))
+        cast, conv:
+            if not storage_calls[0] and not ambient_storage_stable(n): storage_calls[0] = true
+            ca = int(np.a)
+            if raw_view(n):
+                key = lpath_key(ca)
                 if key != 0: storage_kill[0].push(key)
-                # (`@xs[i]` writes an element, like an assignment to it: xs must be made unique)
-                else: fact_storage_target(kid(n, i))
-    if k == .for_ and has_flag(n, NF_MUT):
-        # (loop mut x in p may make p a copy of its own)
-        key = lpath_key(int(nodes[n].a))
-        if key != 0: storage_kill[0].push(key)
-    if mask & 1 != 0: fact_storage_scan(int(nodes[n].a), 0)
-    if mask & 2 != 0: fact_storage_scan(int(nodes[n].b), 0)
-    if mask & 4 != 0: fact_storage_scan(int(nodes[n].c), 0)
-    if mask & 16 != 0:
-        loop i in [0..nkids(n)): fact_storage_scan(kid(n, i), 0)
-    if mask & 32 != 0:
-        loop i in [0..nkids2(n)): fact_storage_scan(kid2(n, i), 0)
+                fact_storage_scan(ca, 1)
+                return
+            if ca != 0: fact_storage_scan(ca, 0)
+            return
+        intrinsic:
+            id = np.aux as IN
+            if not isolation_intrinsic(id):
+                storage_opaque[0] = true
+                return
+            if not storage_calls[0] and not ambient_storage_stable(n): storage_calls[0] = true
+            nk = int(np.nlist)
+            if nk > 0:
+                l0 = int(np.list)
+                if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend or id == .arrdata:
+                    a0 = int(data(lists)[l0])
+                    key = lpath_key(a0)
+                    if key != 0: storage_kill[0].push(key)
+                    fact_storage_scan(a0, 1)
+                    loop i in [1..nk): fact_storage_scan(int(data(lists)[l0 + i]), 0)
+                    return
+                if id == .len or id == .arrcap:
+                    fact_storage_scan(int(data(lists)[l0]), 1)
+                    return
+                ca = int(np.a)
+                if ca != 0: fact_storage_scan(ca, 0)
+                loop i in [0..nk): fact_storage_scan(int(data(lists)[l0 + i]), 0)
+                return
+            ca = int(np.a)
+            if ca != 0: fact_storage_scan(ca, 0)
+            return
+        call:
+            if fact_is_array_swap(n):
+                l0 = int(np.list)
+                base = int(data(lists)[l0])
+                key = lpath_key(base)
+                if key != 0 and tkind(ntype(base)) == .array:
+                    storage_bases[0].push(base)
+                    storage_written[0].push(key)
+                    fact_storage_scan(base, 1)
+                    fact_storage_scan(int(data(lists)[l0 + 1]), 0)
+                    fact_storage_scan(int(data(lists)[l0 + 2]), 0)
+                    return
+            if not storage_calls[0] and not ambient_storage_stable(n): storage_calls[0] = true
+            mm = checked_call_mutmask(n)
+            nk = int(np.nlist)
+            l0 = int(np.list)
+            if mm != 0:
+                loop i in [0..nk):
+                    if mm & (1 << i) != 0:
+                        ai = int(data(lists)[l0 + i])
+                        key = lpath_key(ai)
+                        if key != 0: storage_kill[0].push(key)
+                        else: fact_storage_target(ai)
+            ca = int(np.a)
+            if ca != 0: fact_storage_scan(ca, 0)
+            loop i in [0..nk): fact_storage_scan(int(data(lists)[l0 + i]), 0)
+            return
+        binary, and_, or_, coalesce, prange:
+            if k == .binary and not storage_calls[0] and not ambient_storage_stable(n): storage_calls[0] = true
+            ca = int(np.a)
+            cb = int(np.b)
+            if ca != 0: fact_storage_scan(ca, 0)
+            if cb != 0: fact_storage_scan(cb, 0)
+            return
+        vardecl:
+            cb = int(np.b)
+            if cb != 0: fact_storage_scan(cb, 0)
+            return
+        block, str_lit, tuple, matrix, pvariant:
+            nk = int(np.nlist)
+            l0 = int(np.list)
+            loop i in [0..nk): fact_storage_scan(int(data(lists)[l0 + i]), 0)
+            return
+        if_, iflet, range:
+            ca = int(np.a)
+            cb = int(np.b)
+            cc = int(np.c)
+            if ca != 0: fact_storage_scan(ca, 0)
+            if cb != 0: fact_storage_scan(cb, 0)
+            if cc != 0: fact_storage_scan(cc, 0)
+            return
+        unary, not_, unwrap, narrow, exprstmt, return_, defer_, plit:
+            ca = int(np.a)
+            if ca != 0: fact_storage_scan(ca, 0)
+            return
+        else:
+            mask = isolation_children(k)
+            if mask < 0:
+                storage_opaque[0] = true
+                return
+            if not storage_calls[0] and (k == .partial or k == .fnref or k == .pair or k == .map_lit or k == .istype) and not ambient_storage_stable(n): storage_calls[0] = true
+            if mask & 1 != 0:
+                a = int(np.a)
+                if a != 0: fact_storage_scan(a, 0)
+            if mask & 2 != 0:
+                b = int(np.b)
+                if b != 0: fact_storage_scan(b, 0)
+            if mask & 4 != 0:
+                c = int(np.c)
+                if c != 0: fact_storage_scan(c, 0)
+            if mask & 16 != 0:
+                nk = int(np.nlist)
+                l0 = int(np.list)
+                loop i in [0..nk): fact_storage_scan(int(data(lists)[l0 + i]), 0)
+            if mask & 32 != 0:
+                nk2 = int(np.nlist2)
+                l2 = int(np.list2)
+                loop i in [0..nk2): fact_storage_scan(int(data(lists)[l2 + i]), 0)
 
 # an assignment target: the arrays along it have elements written; a path itself is replaced
 fact_storage_target = (t: int):

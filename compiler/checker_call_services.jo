@@ -46,6 +46,8 @@ use 'rational_types.dewy'
 use 'unit_ops.dewy'
 use 'checker_expr.dewy'
 use 'check.jo'
+use 'checker_startup.dewy'
+use 'prelude.jo'
 use 'checks_thin.dewy'
 use 'dewy_methods.jo'
 use 'dewy_method_ops.dewy'
@@ -446,6 +448,7 @@ call_name_collect = (n: int, name: int, mod_scope: int, args: int[], expected: i
             symbol = int(syms[symbol].next)
         return -1
     surface_hidden.clear()
+    if prelude_std_pending and args.len() == 1 and (name == ci(61, "sum") or name == ci(44, "min") or name == ci(45, "max")): load_std_file("nd.jo")
     if ufcs:
         if mod_scope >= 0: collect_module(mod_scope, name, decls)
         else: collect_fns(name, decls)

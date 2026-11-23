@@ -45,6 +45,8 @@ check_scopes = CheckerScope()
 const_views: int[]
 copy_writes: {int: int} = {}
 exact_stores: {int: int} = {}
+exact_candidate_nodes: int[]
+exact_measure_on = false
 ref_narrowing: {int: int} = {}
 fact_divisors: {int: int} = {}
 fact_requests: FactRequest[]
@@ -98,7 +100,7 @@ struct_targ = (si: int, i: int) -> int: if i == 0: T_STR else: T_INT
 str_set_of = (t: int) -> int: if t == T_SET: 1 else if t >= 100: t - 100 else: 0
 ntype = (n: int) -> int: int(nodes[n].type)
 decl_in_prelude = (d: int) -> bool: prelude_decls.has(d)
-exact_note = (n: int): print("exact_note {n}")
+exact_note = (n: int): exact_candidate_nodes.push(n); print("exact_note {n}")
 isolation_children = (k: NK) -> int:
     if k == .int_lit or k == .ident or k == .dotname or k == .bool_lit: return 0
     if k == .str_lit or k == .block or k == .tuple: return 16
@@ -110,6 +112,12 @@ isolation_children = (k: NK) -> int:
     if k == .call or k == .intrinsic: return 17
     if k == .index: return 19
     -1
+isolation_node_children = (n: int) -> int: isolation_children(nodes[n].kind)
+iso_child_tab = fill(i8(-1), 128)
+iso_child_p = (():
+    loop i in [0..int(NK.new_axis) + 1): iso_child_tab[i] = i8(isolation_children(NK(i)))
+    data(iso_child_tab)
+)()
 '''
 
 DRIVER = r'''

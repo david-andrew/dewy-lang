@@ -106,24 +106,49 @@ fact_index_sized = (n: int) -> int[]:
     slots = 8
     loop slots < n * 2 + 2: slots *= 2
     fill(0, slots * 2 + 1)
+fact_index_grow = (index: mut int[]):
+    if index.len() == 0:
+        index = fill(0, 17)
+        return
+    old = index
+    slots = (old.len() - 1) >> 1
+    nslots = slots * 2
+    index = fill(0, nslots * 2 + 1)
+    nmask = nslots - 1
+    np = data(index)
+    oldp = data(old)
+    count = 0
+    loop i in [0..slots):
+        at = 2 + (i << 1)
+        rv = oldp[at]
+        if rv != 0:
+            rk = oldp[at - 1]
+            s = ((rk xor (rk >> 32)) * 0x9e3779b1) & nmask
+            loop np[2 + (s << 1)] != 0: s = (s + 1) & nmask
+            np[1 + (s << 1)] = rk
+            np[2 + (s << 1)] = rv
+            count += 1
+    np[0] = count
 fact_index_put = (index: mut int[], key: int, value: int):
-    if index.len() == 0: index = fill(0, 17)
-    if (index[0] + 1) * 4 >= index.len():
-        old = index
-        index = fill(0, (old.len() - 1) * 2 + 1)
-        loop i in [0..(old.len() - 1) / 2):
-            if old[2 + i * 2] != 0: fact_index_put(index, old[1 + i * 2], old[2 + i * 2] - 1)
-    mask = (index.len() - 1) / 2 - 1
-    slot = fact_index_hash(key, mask)
+    n = index.len()
+    if n == 0 or (data(index)[0] + 1) * 4 >= n:
+        fact_index_grow(index)
+        n = index.len()
+    mask = ((n - 1) >> 1) - 1
+    slot = ((key xor (key >> 32)) * 0x9e3779b1) & mask
+    rp = data(index)
+    want = value + 1
     loop true:
-        i = 1 + slot * 2
-        if index[i + 1] == 0:
-            index[0] += 1
-            index[i] = key
-            index[i + 1] = value + 1
+        i = 1 + (slot << 1)
+        cur = rp[i + 1]
+        if cur == 0:
+            index[0] = rp[0] + 1
+            rp = data(index)
+            rp[i] = key
+            rp[i + 1] = want
             return
-        if index[i] == key:
-            index[i + 1] = value + 1
+        if rp[i] == key:
+            if cur != want: index[i + 1] = want
             return
         slot = (slot + 1) & mask
 # Ordered records retain deterministic witnesses and budgets; hash indexes only
@@ -132,30 +157,42 @@ fact_index_put = (index: mut int[], key: int, value: int):
 # header mixing frames needs a hash index. Other lookups are expected O(1);
 # state occupies O(V+P+D), including the copy-on-write index box.
 fact_add_value = (s: mut FactState, v: int, b: FactBound):
-    if v > 0 and v < fact_terms.len(): fact_terms[v].slot = s.ids.len()
-    if s.index[0].slots.len() == 0 and s.ids.len() > 0 and v < s.ids[s.ids.len() - 1]:
-        s.index[0].slots = fact_index_sized(s.ids.len() * 2)
-        loop i in [0..s.ids.len()): fact_index_put(s.index[0].slots, s.ids[i], i)
-    if s.index[0].slots.len() != 0: fact_index_put(s.index[0].slots, v, s.ids.len())
+    n = s.ids.len()
+    if v > 0 and v < fact_terms.len(): fact_terms[v].slot = n
+    if data(s.index)[0].slots.len() == 0:
+        if n > 0 and v < data(s.ids)[n - 1]:
+            sl = fact_index_sized(n * 2)
+            idsp = data(s.ids)
+            loop i in [0..n): fact_index_put(sl, idsp[i], i)
+            fact_index_put(sl, v, n)
+            s.index[0].slots = sl
+    else:
+        fact_index_put(s.index[0].slots, v, n)
     s.ids.push(v)
     s.bounds.push(b)
 fact_add_projection = (s: mut FactState, p: FactProjection):
     existing = fact_projection_find(s, p.base, p.selector, p.element)
     if existing >= 0 and s.projections[existing].value == p.value: return
+    s.proj_base_mask = s.proj_base_mask | (1 << (p.base & 63))
     if not fact_projections_indexed(s):
         if s.projections.len() + 1 < FACT_PROJECTION_SCAN:
             s.projections.push(p)
             return
         projections = s.projections
         s.projections = []
+        sz = projections.len() * 2
+        s.index[0].projection_index = fact_index_sized(sz)
+        s.index[0].projection_value = fact_index_sized(sz)
+        s.index[0].projection_head = fact_index_sized(projections.len())
+        s.index[0].projection_tail = fact_index_sized(projections.len())
         loop projection in projections: fact_index_projection(s, projection)
     fact_index_projection(s, p)
 fact_index_projection = (s: mut FactState, p: FactProjection):
     i = s.projections.len()
     key = fact_projection_key(p.base, p.selector, p.element)
-    if fact_index_get(s.index[0].projection_index, key) < 0: fact_index_put(s.index[0].projection_index, key, i)
-    if not p.element and fact_index_get(s.index[0].projection_value, p.value) < 0: fact_index_put(s.index[0].projection_value, p.value, i)
-    tail = fact_index_get(s.index[0].projection_tail, p.base)
+    if fact_index_get_raw(data(s.index[0].projection_index), s.index[0].projection_index.len(), key) < 0: fact_index_put(s.index[0].projection_index, key, i)
+    if not p.element and fact_index_get_raw(data(s.index[0].projection_value), s.index[0].projection_value.len(), p.value) < 0: fact_index_put(s.index[0].projection_value, p.value, i)
+    tail = fact_index_get_raw(data(s.index[0].projection_tail), s.index[0].projection_tail.len(), p.base)
     if tail >= 0: s.index[0].projection_next[tail] = i
     else: fact_index_put(s.index[0].projection_head, p.base, i)
     fact_index_put(s.index[0].projection_tail, p.base, i)
@@ -163,7 +200,7 @@ fact_index_projection = (s: mut FactState, p: FactProjection):
     s.projections.push(p)
 # (v's row record, made on its first row; counts the row)
 fact_difference_touch = (s: mut FactState, v: int) -> int:
-    r = fact_index_get(s.index[0].difference_value, v)
+    r = fact_index_get_raw(data(s.index[0].difference_value), s.index[0].difference_value.len(), v)
     if r < 0:
         r = s.index[0].difference_record.len() / FACT_RECORD
         fact_index_put(s.index[0].difference_value, v, r)
@@ -173,6 +210,8 @@ fact_difference_touch = (s: mut FactState, v: int) -> int:
     s.index[0].difference_record[r * FACT_RECORD] += 1
     r
 fact_add_difference = (s: mut FactState, row: FactDifference):
+    s.diff_a_mask = s.diff_a_mask | (1 << (row.a & 63))
+    s.diff_b_mask = s.diff_b_mask | (1 << (row.b & 63))
     if not fact_rows_indexed(s):
         if s.differences.len() + 1 < FACT_ROW_SCAN:
             s.differences.push(row)
@@ -180,6 +219,8 @@ fact_add_difference = (s: mut FactState, row: FactDifference):
         # (outgrown: index every row so far, then this one)
         rows = s.differences
         s.differences = []
+        s.index[0].difference_index = fact_index_sized(rows.len() * 2)
+        s.index[0].difference_value = fact_index_sized(rows.len())
         loop r in rows: fact_index_difference(s, r)
     fact_index_difference(s, row)
 fact_index_difference = (s: mut FactState, row: FactDifference):
@@ -201,6 +242,8 @@ fact_new = (s: mut FactState, b: FactBound, term: FactTerm = FactTerm()) -> int:
     if s.ids.len() >= FACT_CAP: return 0
     v = fact_terms.len()
     if v >= 0x80000000: return 0
+    if term.a != 0 and term.b != 0 and fact_comparison(term.op):
+        s.cmp_mask = s.cmp_mask | (1 << (term.a & 63)) | (1 << (term.b & 63))
     fact_terms.push(term)
     fact_add_value(s, v, b)
     v
@@ -210,29 +253,41 @@ fact_reindex = (s: mut FactState):
     if hashed:
         loop i in [0..s.ids.len()): fact_index_put(s.index[0].slots, s.ids[i], i)
     projections = s.projections
-    s.projections = []; s.index[0].projection_index = []; s.index[0].projection_head = []; s.index[0].projection_tail = []; s.index[0].projection_next = []; s.index[0].projection_value = []
+    s.projections = []
+    s.proj_base_mask = 0
+    s.index[0].projection_index = []; s.index[0].projection_head = []; s.index[0].projection_tail = []; s.index[0].projection_next = []; s.index[0].projection_value = []
     loop p in projections: fact_add_projection(s, p)
     differences = s.differences
-    s.differences = []; s.index[0].difference_index = []; s.index[0].difference_value = []; s.index[0].difference_record = []; s.index[0].difference_next = []
+    s.differences = []
+    s.diff_a_mask = 0
+    s.diff_b_mask = 0
+    s.index[0].difference_index = []; s.index[0].difference_value = []; s.index[0].difference_record = []; s.index[0].difference_next = []
     loop row in differences: fact_add_difference(s, row)
 fact_constant = (s: mut FactState, x: int, at: int = 0) -> int:
     fact_new(s, FactBound(x, x, x != 0), FactTerm(origin = at))
 fact_bind = (s: mut FactState, p: PlaceIdentity, v: int):
     if p.declaration == 0: return
-    i = fact_binding(s, p)
+    i = fact_binding_ref(s, p)
     if i >= 0: s.bindings[i].value = v
     else if s.bindings.len() < FACT_CAP:
         fact_index_put(s.index[0].roots, fact_root_key(p), s.bindings.len())
         s.bindings.push(FactBinding(p, v))
 # A replacement keeps the replaced value as the route's single tombstone.
 fact_rebind = (s: mut FactState, p: PlaceIdentity, v: int, at: int, prior: int):
-    fact_bind(s, p, v)
-    i = fact_binding(s, p)
-    if i >= 0 and at != 0:
-        s.bindings[i].event = at
-        s.bindings[i].prior = prior
+    if p.declaration == 0: return
+    i = fact_binding_ref(s, p)
+    if i >= 0:
+        s.bindings[i].value = v
+        if at != 0:
+            s.bindings[i].event = at
+            s.bindings[i].prior = prior
+    else if s.bindings.len() < FACT_CAP:
+        idx = s.bindings.len()
+        fact_index_put(s.index[0].roots, fact_root_key(p), idx)
+        if at != 0: s.bindings.push(FactBinding(p, v, at, prior))
+        else: s.bindings.push(FactBinding(p, v))
 fact_set_bound = (s: mut FactState, v: int, b0: FactBound, exact: bool = false):
-    i = fact_slot(s, v)
+    i = fact_slot_ref(s, v)
     if i < 0: return
     b = b0
     if b.lo > b.hi or b.nz and b.lo == 0 and b.hi == 0: s.live = false
@@ -245,4 +300,5 @@ fact_set_bound = (s: mut FactState, v: int, b0: FactBound, exact: bool = false):
     if s.live and not exact and not b.wide and b.lo == b.hi and (b.hi == FACT_MAX or b.lo == FACT_MIN) and fact_open_endpoint(s, v, b.hi == FACT_MAX):
         b.wide = true
         b.nz = true
+    if s.bounds[i] == b: return
     s.bounds[i] = b

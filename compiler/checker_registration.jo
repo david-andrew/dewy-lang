@@ -22,3 +22,5 @@ register_module = (m: int):
     if registered[m]: return
     registered[m] = true
     register_decls(m, modules[m].decls)
+    if not modules[m].is_prelude and modules[m].init_fn > 0 and modules[m].inits.len() > 0:
+        set_list(int(fns[int(modules[m].init_fn)].body), modules[m].inits)

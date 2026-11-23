@@ -131,29 +131,45 @@ habit = (i: int, want: Tok):
     if want == .rparen and value_start and (p == .ident or p == .int_lit or p == .float_lit or p == .str_lit or p == .rparen or p == .rbrack):
         fatal(p_toks[i].pos, "a ',' is missing before this")
 
-expect = (k: Tok, what: str) -> int:
-    if p_toks[ti].kind != k:
-        habit(ti, k)
-        w = what
-        if len(w) == 0: w = tok_name(k)
-        tk = p_toks[ti].kind
-        if tk == .newline or tk == .indent or tk == .dedent or tk == .eof: fatal(prev_end(), "expected {w} at the end of this line")
-        if tk == .ident or tk == .int_lit: fatal(cur_pos(), "expected {w}, found '{tok_src(ti)}'")
-        fatal(cur_pos(), "expected {w}, found {tok_name(tk)}")
-    advance()
+expect_fail = (k: Tok, what: str):
+    habit(ti, k)
+    w = what
+    if len(w) == 0: w = tok_name(k)
+    tk = p_toks[ti].kind
+    if tk == .newline or tk == .indent or tk == .dedent or tk == .eof: fatal(prev_end(), "expected {w} at the end of this line")
+    if tk == .ident or tk == .int_lit: fatal(cur_pos(), "expected {w}, found '{tok_src(ti)}'")
+    fatal(cur_pos(), "expected {w}, found {tok_name(tk)}")
 
-# identifier tokens carry their interned name in ival
-expect_ident = (what: str) -> int:
-    if p_toks[ti].kind != .ident and is_keyword_tok(p_toks[ti].kind) and p_toks[ti].kind != .kw_mut: keyword_name_error(ti)
+expect = (k: Tok, what: str) -> int:
+    i = ti
+    if p_toks[i].kind != k: expect_fail(k, what)
+    if i < p_ntoks - 1: ti = i + 1
+    i
+
+expect_ident_fail = (what: str) -> int:
+    if is_keyword_tok(p_toks[ti].kind) and p_toks[ti].kind != .kw_mut: keyword_name_error(ti)
     # (let [a, b] = pair, const {kind, x} = g: JavaScript's destructuring)
     if p_toks[ti].kind == .lbrack and (what == "variable name" or what == "constant name"): fatal(p_toks[ti].pos, "an array is unpacked without brackets: `a, b = xs` (it must have exactly that many elements); a tuple the same way")
     if p_toks[ti].kind == .lbrace and (what == "variable name" or what == "constant name"): fatal(p_toks[ti].pos, "a struct's fields are read one by one: `kind, x = g.kind, g.x`, or used as they are, `g.kind`")
-    int(p_toks[expect(.ident, what)].ival)
+    expect_fail(.ident, what)
+    0
+
+# identifier tokens carry their interned name in ival
+expect_ident = (what: str) -> int:
+    i = ti
+    if p_toks[i].kind == .ident:
+        if i < p_ntoks - 1: ti = i + 1
+        return int(p_toks[i].ival)
+    expect_ident_fail(what)
 
 # (also `none`, after a dot or as an enum variant: E.none, .none)
 expect_name = (what: str) -> int:
-    if is_soft_kw(pk()) or pk() == .kw_none: return intern(tok_src(advance()))
-    expect_ident(what)
+    i = ti
+    if p_toks[i].kind == .ident:
+        if i < p_ntoks - 1: ti = i + 1
+        return int(p_toks[i].ival)
+    if is_soft_kw(p_toks[i].kind) or p_toks[i].kind == .kw_none: return intern(tok_src(advance()))
+    expect_ident_fail(what)
 
 comp_ident = (name: int, pos: int) -> int:
     n = mk(.ident, pos)

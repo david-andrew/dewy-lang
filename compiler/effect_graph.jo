@@ -387,6 +387,7 @@ effect_visit = (f: int):
             previous_exact = effect_exact_rep
             effect_exact_rep = f < exact_effect_owners.len() and exact_effect_owners[f]
             effect_body_moves_out(int(fns[f].body))
+            effect_scan_begin(f)
             effect_scan_node(f, int(fns[f].body))
             effect_exact_rep = previous_exact
         if effect_body_cache:

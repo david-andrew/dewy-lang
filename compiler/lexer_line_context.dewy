@@ -9,7 +9,8 @@ LexLineWord:type=int64<overflow='wrap'>
 # the borrowed pointer before the next write; no token slot escapes this group.
 lx_grow=():>void=>$unsafe {
     lx_cap=LexLineWord(lx_cap) * 2 + 16
-    lx_toks.resize(lx_cap)
+    if cap(lx_toks) <? lx_cap {lx_toks.reserve(lx_cap)}
+    __set_len(lx_toks lx_cap)
     lx_slots=data(lx_toks)
 }
 lx_next=():>int64=>{
@@ -21,9 +22,11 @@ lx_emit=(kind:Tok start:LexLineWord n:LexLineWord):>void=>$unsafe {
     let k=lx_next()
     let t=lx_slots
     t[k].kind=kind
+    t[k].flags=0
     t[k].pos=(LexLineWord(lx_file) << 40) | (LexLineWord(lx_base) + start)
     t[k].start=int32<overflow='wrap'>(start)
     t[k].len=int32<overflow='wrap'>(n)
+    t[k].ival=0
 }
 lx_last_kind=():>Tok=>$unsafe {
     if lx_count =? 0 {return 'newline'}

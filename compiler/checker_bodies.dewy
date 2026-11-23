@@ -4,7 +4,7 @@ from p"checker_scope_symbols.dewy" import (new_local scope_reset)
 
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import TypeInfo
-from p"checker_state.dewy" import (FnInst FnCtx Local CheckerScope)
+from p"checker_state.dewy" import (FnInst FnCtx Local CheckerScope live_body_indexes live_body_user_globals live_body_global_mod)
 from p"type_inference.dewy" import (tu_prune tu_has_var tu_unify)
 from p"type_constructors.dewy" import tb_mk_var
 from p"checker_results.dewy" import (cr_recursive_base_type cr_has_value_return)
@@ -151,8 +151,17 @@ cb_check_body_now=(f:CBWord):>void=>$unsafe {
         cb_input[0].contexts[0][cb_input[0].context[0]].infer_ret=true
         body_infer(f decl)
     }
+    let saved_lbi=live_body_indexes
+    let saved_lbg=live_body_user_globals
+    let saved_lbm=live_body_global_mod
+    live_body_indexes=0
+    live_body_user_globals=0
+    live_body_global_mod=-1
     body_expression(f decl)
     body_finalize(f vars0 binds0 exposed0 da_mark)
+    live_body_indexes=saved_lbi
+    live_body_user_globals=saved_lbg
+    live_body_global_mod=saved_lbm
     cb_input[0].functions[0][f].state=2
     scope_reset(mark)
     cb_input[0].contexts[0].pop();

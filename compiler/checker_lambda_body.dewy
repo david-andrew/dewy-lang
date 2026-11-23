@@ -12,7 +12,7 @@ from p"checker_place_escapes.dewy" import (returned_place)
 from p"checker_body_end.dewy" import (void_arm_end)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checker_sinks.dewy" import (pack_written sink_body_kind sink_pack_body sink_written)
-from p"checker_state.dewy" import (FnCtx)
+from p"checker_state.dewy" import (FnCtx live_body_global_mod live_body_indexes live_body_user_globals)
 from p"checks_assign_hooks.dewy" import (block_value)
 from p"checks_stmt_hooks.dewy" import (body_result_throws)
 from p"checks_thin.dewy" import (push_type_params resolve_result_type set_block_value)
@@ -27,6 +27,15 @@ from p"types.jo" import (T_NEVER T_VOID has_var prune targ tkind types)
 
 LambdaBodyWord:type=int64<overflow='wrap'>
 check_lambda_body=(f:LambdaBodyWord lam:LambdaBodyWord ret_hint:LambdaBodyWord):>void=>{
+    let zi_slot=@live_body_indexes
+    let zg_slot=@live_body_user_globals
+    let zm_slot=@live_body_global_mod
+    let saved_zi=zi_slot
+    let saved_zg=zg_slot
+    let saved_zm=zm_slot
+    zi_slot=0
+    zg_slot=0
+    zm_slot=-1
     fns[f].state=1
     let context = @cx
     let parent=context
@@ -149,4 +158,7 @@ check_lambda_body=(f:LambdaBodyWord lam:LambdaBodyWord ret_hint:LambdaBodyWord):
     scope_reset(mark)
     ctxs.pop();
     context=parent
+    zi_slot=saved_zi
+    zg_slot=saved_zg
+    zm_slot=saved_zm
 }

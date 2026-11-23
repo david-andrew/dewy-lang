@@ -1,9 +1,9 @@
 $runtime_checks
 
-from p"ast.jo" import (NF_STMT NF_TERMINATED add_flag clone has_flag mk nkids nodes set_list)
+from p"ast.jo" import (NF_STMT NF_TERMINATED add_flag clone has_flag mk nkids nodes set_list set_list_span)
 from p"checker_tokens.dewy" import (Tok)
 from p"diagnostic_exit.dewy" import (fatal)
-from p"parse.jo" import (comp_count p_header p_matrix p_no_tuple p_ntoks p_src p_toks struct_body ti)
+from p"parse.jo" import (comp_count p_header p_list_buf p_matrix p_no_tuple p_ntoks p_src p_toks struct_body ti)
 from p"parser_ops.dewy" import (is_keyword_tok)
 from p"parser_shared.dewy" import (comp_ident expect expect_ident expect_name habit)
 from p"parser_text.dewy" import (tok_src word_in)
@@ -19,40 +19,46 @@ StmtWord:type=int64<overflow='wrap'>
 # Blocks and statements read the Jo parser's EOF-terminated token stream and
 # node arena directly. Reacquire node slots after builders or recursive calls,
 # which may grow the arena. Numeric operators are frozen Jo Tok ordinals.
-parse_block=():>int64=>{
-    let b=mk('block' cur_pos())
-    let stmts:array<int64>=[]
-    if pk() =? 'newline' {
-        advance();
+parse_block=():>int64=>$unsafe {
+    let tp=p_toks
+    let t=StmtWord(ti)
+    let b=mk('block' tp[t].pos)
+    let k=tp[t].kind
+    if k =? 'newline' {
+        ti=t + 1
         return parse_indented_block(b)
     }
+    let base=p_list_buf.length
     # (`loop x in xs: if x > 0: n += 1`: an if after the colon is the statement, which needs no else)
-    if pk() =? 'kw_if' {
-        stmts.push(parse_if())
-        set_list(b stmts)
+    if k =? 'kw_if' {
+        p_list_buf.push(parse_if())
+        set_list_span(b @p_list_buf base)
         return b
     }
-    stmts.push(parse_simple_stmt())
-    loop pk() =? 'semi' and pkn(1) not=? 'newline' {
-        advance();
-        stmts.push(parse_simple_stmt())
+    p_list_buf.push(parse_simple_stmt())
+    loop tp[ti].kind =? 'semi' and tp[StmtWord(ti) + 1].kind not=? 'newline' {
+        ti=StmtWord(ti) + 1
+        p_list_buf.push(parse_simple_stmt())
     }
-    set_list(b stmts)
+    set_list_span(b @p_list_buf base)
     b
 }
 
 # The statements of an indented block, from its indent token on, into block b.
-parse_indented_block=(b:StmtWord):>int64=>{
-    if pk() not=? 'indent' {parse_empty_block()}
-    advance();
-    let stmts:array<int64>=[]
-    loop pk() not=? 'dedent' and pk() not=? 'eof' {
+parse_indented_block=(b:StmtWord):>int64=>$unsafe {
+    let tp=p_toks
+    if tp[ti].kind not=? 'indent' {parse_empty_block()}
+    ti=StmtWord(ti) + 1
+    let base=p_list_buf.length
+    loop true {
+        let k=tp[ti].kind
+        if k =? 'dedent' or k =? 'eof' {break}
         let s=parse_stmt()
-        if s not=? 0 {stmts.push(s)}
+        if s not=? 0 {p_list_buf.push(s)}
     }
-    expect('dedent' "end of block");
-    add_flag(b NF_TERMINATED)
-    set_list(b stmts)
+    if tp[ti].kind =? 'dedent' {ti=StmtWord(ti) + 1} else {expect('dedent' "end of block");}
+    nodes.ptr[b].flags |= int32<overflow='wrap'>(NF_TERMINATED)
+    set_list_span(b @p_list_buf base)
     b
 }
 
@@ -316,108 +322,132 @@ tuple_from=(first:StmtWord):>int64=>$unsafe {
 }
 
 parse_simple_stmt=():>int64=>$unsafe {
-    let pos=cur_pos()
-    let k=pk()
+    let tp=p_toks
+    let t=StmtWord(ti)
+    let pos=tp[t].pos
+    let k=tp[t].kind
     # (a struct's field named by a keyword: `build: Rect`, `when: f64`)
-    if struct_body not=? "" and is_keyword_tok(k) and k not=? 'kw_pass' and (pkn(1) =? 'colon' or pkn(1) =? 'assign') {keyword_name_error(ti)}
-    if k =? 'kw_return' {
-        advance();
-        let r=mk('return_' pos)
-        let nk=pk()
-        if nk not=? 'newline' and nk not=? 'semi' and nk not=? 'dedent' and nk not=? 'eof' and nk not=? 'kw_else' and nk not=? 'rparen' and nk not=? 'comma' {
-            let e=parse_expr()
-            if pk() =? 'comma' and not p_no_tuple {e=tuple_from(e)}
-            nodes.ptr[r].a=int32<overflow='wrap'>(e)
-        }
-        return r
-    }
-    if k =? 'kw_break' {
-        advance();
-        if pk() =? 'ident' {fatal(cur_pos() "loops have no labels: `break` leaves the innermost loop; to leave two at once, put them in a function and `return` from it, or set a flag the outer loop checks")}
-        return mk('break_' pos)
-    }
-    if k =? 'kw_continue' {advance(); return mk('continue_' pos)}
-    if k =? 'kw_pass' {advance(); return mk('block' pos)}
-    if k =? 'kw_defer' {
-        advance();
-        let d=mk('defer_' pos)
-        if pk() =? 'colon' {
-            advance();
-            nodes.ptr[d].a=int32<overflow='wrap'>(parse_block())
-        }
-        else {nodes.ptr[d].a=int32<overflow='wrap'>(parse_simple_stmt())}
-        return d
-    }
-    if k =? 'kw_let' {
-        # always a new variable (shadows one of the same name)
-        advance();
-        let d=mk('vardecl' pos)
-        if pk() =? 'ident' and pkn(1) =? 'comma' {
-            let names:array<int64>=[]
-            loop true {
-                let v=mk('ident' cur_pos())
-                if pk() =? 'ident' and p_toks[ti].len =? 1 and (p_src as array<uint8>)[p_toks[ti].start] =? 95 {
-                    advance();
-                    nodes.ptr[v].kind='hole'
-                }
-                else {nodes.ptr[v].name=int32<overflow='wrap'>(expect_ident("variable name"))}
-                names.push(v)
-                if not accept('comma') {break}
+    if struct_body not=? "" and k not=? 'ident' and is_keyword_tok(k) and k not=? 'kw_pass' and (pkn(1) =? 'colon' or pkn(1) =? 'assign') {keyword_name_error(ti)}
+    if k not=? 'ident' {
+        if k =? 'kw_return' {
+            ti=t + 1
+            let r=mk('return_' pos)
+            let nk=tp[t + 1].kind
+            if nk not=? 'newline' and nk not=? 'semi' and nk not=? 'dedent' and nk not=? 'eof' and nk not=? 'kw_else' and nk not=? 'rparen' and nk not=? 'comma' {
+                let e=parse_expr()
+                if tp[ti].kind =? 'comma' and not p_no_tuple {e=tuple_from(e)}
+                nodes.ptr[r].a=int32<overflow='wrap'>(e)
             }
-            set_list(d names)
+            return r
         }
-        else {
-            nodes.ptr[d].name=int32<overflow='wrap'>(expect_ident("variable name"))
-            if accept('colon') {nodes.ptr[d].a=int32<overflow='wrap'>(parse_type())}
+        if k =? 'kw_break' {
+            ti=t + 1
+            if tp[t + 1].kind =? 'ident' {fatal(tp[t + 1].pos "loops have no labels: `break` leaves the innermost loop; to leave two at once, put them in a function and `return` from it, or set a flag the outer loop checks")}
+            return mk('break_' pos)
         }
-        if accept('assign') {
-            let v=parse_expr()
-            if pk() =? 'comma' {v=tuple_from(v)}
-            nodes.ptr[d].b=int32<overflow='wrap'>(v)
+        if k =? 'kw_continue' {ti=t + 1; return mk('continue_' pos)}
+        if k =? 'kw_pass' {ti=t + 1; return mk('block' pos)}
+        if k =? 'kw_defer' {
+            ti=t + 1
+            let d=mk('defer_' pos)
+            if tp[t + 1].kind =? 'colon' {
+                ti=t + 2
+                nodes.ptr[d].a=int32<overflow='wrap'>(parse_block())
+            }
+            else {nodes.ptr[d].a=int32<overflow='wrap'>(parse_simple_stmt())}
+            return d
         }
-        return d
+        if k =? 'kw_let' {
+            # always a new variable (shadows one of the same name)
+            ti=t + 1
+            let d=mk('vardecl' pos)
+            if tp[t + 1].kind =? 'ident' and tp[t + 2].kind =? 'comma' {
+                let names:array<int64>=[]
+                loop true {
+                    let v=mk('ident' tp[ti].pos)
+                    if tp[ti].kind =? 'ident' and tp[ti].len =? 1 and (p_src as array<uint8>)[tp[ti].start] =? 95 {
+                        ti=StmtWord(ti) + 1
+                        nodes.ptr[v].kind='hole'
+                    }
+                    else {nodes.ptr[v].name=int32<overflow='wrap'>(expect_ident("variable name"))}
+                    names.push(v)
+                    if not accept('comma') {break}
+                }
+                set_list(d names)
+            }
+            else {
+                nodes.ptr[d].name=int32<overflow='wrap'>(expect_ident("variable name"))
+                if tp[ti].kind =? 'colon' {ti=StmtWord(ti) + 1; nodes.ptr[d].a=int32<overflow='wrap'>(parse_type())}
+            }
+            if tp[ti].kind =? 'assign' {
+                ti=StmtWord(ti) + 1
+                let v=parse_expr()
+                if tp[ti].kind =? 'comma' {v=tuple_from(v)}
+                nodes.ptr[d].b=int32<overflow='wrap'>(v)
+            }
+            return d
+        }
     }
     # typed declaration: name: Type [= expr]
-    if k =? 'ident' and pkn(1) =? 'colon' {
-        let w=tok_src(ti)
-        if pkn(2) =? 'newline' and word_in(w ["try" "except" "catch" "finally"]) {
+    if k =? 'ident' and tp[t + 1].kind =? 'colon' {
+        if tp[t + 2].kind =? 'newline' and word_in(tok_src(t) ["try" "except" "catch" "finally"]) {
             fatal(pos "there are no exceptions: errors are values (a function gives `T | Error`, and `match` or `is` sees which came back; `panic` stops the program)")
         }
         let d=mk('vardecl' pos)
-        nodes.ptr[d].name=int32<overflow='wrap'>(expect_ident(""))
-        advance();
+        nodes.ptr[d].name=int32<overflow='wrap'>(tp[t].ival)
+        ti=t + 2
         nodes.ptr[d].a=int32<overflow='wrap'>(parse_type())
-        if accept('assign') {nodes.ptr[d].b=int32<overflow='wrap'>(parse_expr())}
+        if tp[ti].kind =? 'assign' {ti=StmtWord(ti) + 1; nodes.ptr[d].b=int32<overflow='wrap'>(parse_expr())}
         return d
     }
     let e=parse_expr()
+    let t2=StmtWord(ti)
+    let k2=tp[t2].kind
+    if k2 =? 'newline' or ((k2 =? 'dedent' or k2 =? 'semi' or k2 =? 'eof') and nodes.ptr[e].kind not=? 'tuple') {
+        let s=mk('exprstmt' pos)
+        nodes.ptr[s].a=int32<overflow='wrap'>(e)
+        if has_flag(e NF_TERMINATED) {nodes.ptr[s].flags |= int32<overflow='wrap'>(NF_TERMINATED)}
+        return s
+    }
+    if k2 =? 'assign' {
+        let a=mk('assign' tp[t2].pos)
+        ti=t2 + 1
+        nodes.ptr[a].op=47 # Frozen Tok.assign ordinal.
+        nodes.ptr[a].a=int32<overflow='wrap'>(e)
+        let v=parse_expr()
+        if tp[ti].kind =? 'comma' and not p_no_tuple {v=tuple_from(v)}
+        nodes.ptr[a].b=int32<overflow='wrap'>(v)
+        return a
+    }
     # (in a one-line lambda body a ',' ends the statement)
-    if p_no_tuple and not is_assign_op(pk()) {
+    if p_no_tuple and not is_assign_op(k2) {
         let s=mk('exprstmt' pos)
         nodes.ptr[s].a=int32<overflow='wrap'>(e)
         return s
     }
-    if pk() =? 'comma' and not p_no_tuple {e=tuple_from(e)}
-    if pk() =? 'dotop' and pkn(1) =? 'assign' and not space_before(StmtWord(ti) + 1) {
+    if k2 =? 'comma' and not p_no_tuple {
+        e=tuple_from(e)
+        t2=StmtWord(ti)
+        k2=tp[t2].kind
+    }
+    if k2 =? 'dotop' and tp[t2 + 1].kind =? 'assign' and not space_before(t2 + 1) {
         # xs .+= ys: xs = xs .+ ys
-        let a=mk('assign' cur_pos())
+        let a=mk('assign' tp[t2].pos)
         nodes.ptr[a].op=47 # Frozen Tok.assign ordinal.
         nodes.ptr[a].a=int32<overflow='wrap'>(e)
-        let b=mk('binary' cur_pos())
-        let op=advance()
-        advance();
+        let b=mk('binary' tp[t2].pos)
+        ti=t2 + 2
         nodes.ptr[b].op=85 # Frozen Tok.dotop ordinal.
-        nodes.ptr[b].aux=int32<overflow='wrap'>(p_toks[op].ival)
+        nodes.ptr[b].aux=int32<overflow='wrap'>(tp[t2].ival)
         nodes.ptr[b].a=int32<overflow='wrap'>(clone(e))
         nodes.ptr[b].b=int32<overflow='wrap'>(parse_expr())
         nodes.ptr[a].b=int32<overflow='wrap'>(b)
         return a
     }
-    if is_assign_op(pk()) {
-        let a=mk('assign' cur_pos())
-        let at=advance()
-        let opk=p_toks[at].kind
-        if opk =? 'careteq' {
+    if is_assign_op(k2) {
+        let a=mk('assign' tp[t2].pos)
+        ti=t2 + 1
+        if k2 =? 'careteq' {
             # x ^= y: x = x ^ y (power)
             nodes.ptr[a].op=47 # Frozen Tok.assign ordinal.
             nodes.ptr[a].a=int32<overflow='wrap'>(e)
@@ -430,66 +460,80 @@ parse_simple_stmt=():>int64=>$unsafe {
             return a
         }
         # Tok is the first 32-bit field of the bounded token slot: its frozen Jo ordinal.
-        let op:int32=((p_toks + at) as ptr<int32>)[0]
-        if opk =? 'kw_and' or opk =? 'kw_or' or opk =? 'kw_xor' {
+        let op:int32=((tp + t2) as ptr<int32>)[0]
+        if k2 =? 'kw_and' or k2 =? 'kw_or' or k2 =? 'kw_xor' {
             # and= or= xor= (bitwise on integers, logical on bools)
-            advance();
-            if opk =? 'kw_and' {op=53} # Frozen Tok.ampeq ordinal.
-            else if opk =? 'kw_or' {op=54} # Frozen Tok.pipeeq ordinal.
+            ti=t2 + 2
+            if k2 =? 'kw_and' {op=53} # Frozen Tok.ampeq ordinal.
+            else if k2 =? 'kw_or' {op=54} # Frozen Tok.pipeeq ordinal.
             else {op=55} # Frozen Tok.careteq ordinal.
         }
         nodes.ptr[a].op=op
         nodes.ptr[a].a=int32<overflow='wrap'>(e)
         let v=parse_expr()
-        if pk() =? 'comma' and not p_no_tuple {v=tuple_from(v)}
+        if tp[ti].kind =? 'comma' and not p_no_tuple {v=tuple_from(v)}
         nodes.ptr[a].b=int32<overflow='wrap'>(v)
         return a
     }
-    if nodes.ptr[e].kind =? 'tuple' and nkids(e) >? 1 and pk() not=? 'newline' {fatal(nodes.ptr[e].pos "unexpected ','")}
+    if nodes.ptr[e].kind =? 'tuple' and nkids(e) >? 1 and k2 not=? 'newline' {fatal(nodes.ptr[e].pos "unexpected ','")}
     let s=mk('exprstmt' pos)
     nodes.ptr[s].a=int32<overflow='wrap'>(e)
-    if has_flag(e NF_TERMINATED) {add_flag(s NF_TERMINATED)}
+    if has_flag(e NF_TERMINATED) {nodes.ptr[s].flags |= int32<overflow='wrap'>(NF_TERMINATED)}
     s
 }
 
 end_stmt=(s:StmtWord):>void=>$unsafe {
+    let tp=p_toks
+    let t=StmtWord(ti)
+    let k=tp[t].kind
+    if k =? 'newline' {ti=t + 1; return}
+    if k =? 'dedent' or k =? 'eof' {return}
     # (foreach (x in xs):, switch (a):, while (x < 3) { ...: other languages' statements, which
     # parse as a call up to there)
-    if pk() =? 'colon' or pk() =? 'lbrace' {
-        let j:StmtWord=ti
-        loop j >? 0 and p_toks[j - 1].kind not=? 'newline' and p_toks[j - 1].kind not=? 'indent' and p_toks[j - 1].kind not=? 'dedent' {j -= 1}
-        if p_toks[j].kind =? 'ident' and j + 1 <? p_ntoks {habit(j + 1 'newline')}
+    if k =? 'colon' or k =? 'lbrace' {
+        let j:StmtWord=t
+        loop j >? 0 and tp[j - 1].kind not=? 'newline' and tp[j - 1].kind not=? 'indent' and tp[j - 1].kind not=? 'dedent' {j -= 1}
+        if tp[j].kind =? 'ident' and j + 1 <? p_ntoks {habit(j + 1 'newline')}
     }
     if s not=? 0 and has_flag(s NF_TERMINATED) {
-        accept('newline');
+        if tp[ti].kind =? 'newline' {ti=StmtWord(ti) + 1}
         return
     }
-    if pk() =? 'semi' {
-        advance();
-        accept('newline');
+    if k =? 'semi' {
+        ti=t + 1
+        if tp[t + 1].kind =? 'newline' {ti=t + 2}
         return
     }
-    if pk() =? 'dedent' or pk() =? 'eof' {return}
-    if ti >? 0 and p_toks[StmtWord(ti) - 1].kind =? 'dedent' {return}
+    if t >? 0 and tp[t - 1].kind =? 'dedent' {return}
     expect('newline' "end of statement");
 }
 
 parse_stmt=():>int64=>$unsafe {
-    let pos=cur_pos()
-    let k=pk()
-    let s:int64=0
+    let tp=p_toks
+    let t=StmtWord(ti)
+    let k=tp[t].kind
     if k =? 'newline' {
-        advance();
+        ti=t + 1
         return 0
     }
+    let pos=tp[t].pos
+    let s:int64=0
+    if k =? 'ident' {
+        s=parse_simple_stmt()
+        let sk=nodes.ptr[s].kind
+        if (sk =? 'vardecl' or sk =? 'assign') and nodes.ptr[s].b not=? 0 and has_flag(StmtWord(nodes.ptr[s].b) NF_TERMINATED) {nodes.ptr[s].flags |= int32<overflow='wrap'>(NF_TERMINATED)}
+        else if sk =? 'return_' and nodes.ptr[s].a not=? 0 and has_flag(StmtWord(nodes.ptr[s].a) NF_TERMINATED) {nodes.ptr[s].flags |= int32<overflow='wrap'>(NF_TERMINATED)}
+        end_stmt(s)
+        return s
+    }
     # ([a, b] = xs, {x, y} = p: destructuring from JavaScript)
-    if (k =? 'lbrack' or k =? 'lbrace') and partner(ti) >? ti and partner(ti) + 1 <? p_ntoks and p_toks[StmtWord(partner(ti)) + 1].kind =? 'assign' {
+    if (k =? 'lbrack' or k =? 'lbrace') and partner(t) >? t and partner(t) + 1 <? p_ntoks and tp[StmtWord(partner(t)) + 1].kind =? 'assign' {
         if k =? 'lbrack' {fatal(pos "an array is unpacked without brackets: `a, b = xs` (it must have exactly that many elements)")}
         fatal(pos "a struct's fields are read one by one: `x, y = p.x, p.y`")
     }
     # (a keyword declared as a variable, function or field: build = ..., when: str)
     if is_keyword_tok(k) and k not=? 'kw_else' and k not=? 'kw_loop' and k not=? 'kw_not' and k not=? 'kw_true' and k not=? 'kw_false' and k not=? 'kw_none' and k not=? 'kw_null' {
-        if pkn(1) =? 'assign' or (pkn(1) =? 'colon' and pkn(2) not=? 'newline' and pkn(2) not=? 'indent' and k not=? 'kw_build') {keyword_name_error(ti)}
+        if pkn(1) =? 'assign' or (pkn(1) =? 'colon' and pkn(2) not=? 'newline' and pkn(2) not=? 'indent' and k not=? 'kw_build') {keyword_name_error(t)}
     }
     if k =? 'kw_if' {
         s=parse_if()
@@ -516,7 +560,7 @@ parse_stmt=():>int64=>$unsafe {
         add_flag(s NF_TERMINATED)
     }
     else if k =? 'kw_const' {
-        advance();
+        ti=t + 1
         s=mk('const_' pos)
         nodes.ptr[s].name=int32<overflow='wrap'>(expect_ident("constant name"))
         if accept('colon') {nodes.ptr[s].a=int32<overflow='wrap'>(parse_type())}

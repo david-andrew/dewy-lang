@@ -35,3 +35,31 @@ cse_arity = (op: Op, mode: int) -> int:
 const MIN_INT = -9223372036854775807 - 1
 
 o_operand_mask = (op: Op) -> int: o_decode[int(op)] >> 8
+
+o_resize_fast = (n: int):
+    if o_reg_count < n:
+        o_reg_storage.resize(n)
+        o_regs = data(o_reg_storage)
+        o_reg_count = n
+    if n > 0:
+        mem_set(o_regs as *u8, 0, n * size_of(OptReg))
+        regs = o_regs
+        loop v in [0..n): regs[v].repl = i32(v)
+
+o_resize_one = (d: int):
+    if o_reg_count <= d:
+        o_reg_storage.resize(d + 1)
+        o_regs = data(o_reg_storage)
+        o_reg_count = d + 1
+        o_fact_scope.resize((d + 1) * 2)
+        o_fact_nbr.resize((d + 1) * 2)
+    reg = &o_regs[d]
+    reg.ndef = 0
+    reg.stable = false
+    reg.defpos = -1
+    reg.first = 2147483647
+    reg.nuse = 0
+    reg.constant = false
+    reg.repl = i32(d)
+    reg.ver = 0
+    reg.dop = -1

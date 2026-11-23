@@ -12,7 +12,10 @@ use 'dewy_method_ops.dewy'
 use 'error_ops.dewy'
 use 'expr.jo'
 use 'lazy_force.dewy'
+use 'prelude.jo'
 use 'prelude_ops.dewy'
+use 'checker_contexts.dewy'
+use 'checker_registration.dewy'
 use 'refine.jo'
 use 'refine_metadata.dewy'
 use 'refine_ops.dewy'
@@ -68,6 +71,7 @@ runtime_ffi_demand = () -> bool:
         runtime_ffi_scan += 1
         if d != 0 and has_flag(d, NF_EXTERN):
             runtime_ffi_done = true
+            if prelude_game_pending: load_game_file("dl.jo")
             loop nm in ["__c_str", "__ffi_resolve", "__ffi_missing"]: runtime_demand(nm)
             return true
     false
@@ -131,20 +135,108 @@ target_const = () -> str:
     if target_windows: tgt = "windows"
     if target_macos: tgt = "macos"
     tgt
+load_std_file = (n: str) -> bool:
+    if n == "tasks.jo":
+        load_std_file("task_core.jo")
+        load_std_file("thread.jo")
+    else if n == "task_input.jo":
+        load_std_file("task_core.jo")
+        load_std_file("files.jo")
+    else if n == "thread.jo":
+        load_std_file("task_core.jo")
+        load_std_file("fork_join.jo")
+    path = "{lib_dir}/std/{n}"
+    if module_by_path.get(module_path_key(path)) != none: return false
+    first = modules.len()
+    m = -1
+    if defer_prelude(path, "std"): m = modules.len() - 1
+    else: m = load_module(path, true, -1)
+    if n == "thread.jo": concurrency_thread_module = m
+    if n == "tasks.jo": concurrency_task_module = m
+    if n == "task_core.jo": concurrency_task_core_module = m
+    if registered.len() > 0:
+        loop mi in [first..modules.len()): register_module(mi)
+    if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
+    loop i in [0..demanded.len()): demanded[i] = false
+    loop i in [0..pn_seen.len()): pn_seen[i] = false
+    ml_bump()
+    true
+
+load_std_prelude = ():
+    if not prelude_std_pending: return
+    prelude_std_pending = false
+    first = modules.len()
+    names_ = list_dir("{lib_dir}/std")
+    names_.sort()
+    loop n in names_:
+        if not ends_with(n, ".jo") or not std_optional_file(n): continue
+        path = "{lib_dir}/std/{n}"
+        if module_by_path.get(module_path_key(path)) != none: continue
+        m = -1
+        if defer_prelude(path, "std"): m = modules.len() - 1
+        else: m = load_module(path, true, -1)
+        if n == "thread.jo": concurrency_thread_module = m
+        if n == "tasks.jo": concurrency_task_module = m
+        if n == "task_core.jo": concurrency_task_core_module = m
+    if registered.len() > 0:
+        loop m in [first..modules.len()): register_module(m)
+    if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
+    loop i in [0..demanded.len()): demanded[i] = false
+    loop i in [0..pn_seen.len()): pn_seen[i] = false
+    ml_bump()
+
+load_game_file = (n: str) -> bool:
+    path = "{lib_dir}/game/{n}"
+    if module_by_path.get(module_path_key(path)) != none: return false
+    first = modules.len()
+    if not defer_prelude(path, "game"): load_module(path, true, -1)
+    if registered.len() > 0:
+        loop m in [first..modules.len()): register_module(m)
+    if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
+    loop i in [0..demanded.len()): demanded[i] = false
+    loop i in [0..pn_seen.len()): pn_seen[i] = false
+    ml_bump()
+    true
+
+load_game_prelude = ():
+    if not prelude_game_pending: return
+    prelude_game_pending = false
+    if prelude_std_pending: load_std_prelude()
+    first = modules.len()
+    names_ = list_dir("{lib_dir}/game")
+    names_.sort()
+    loop n in names_:
+        if not ends_with(n, ".jo"): continue
+        path = "{lib_dir}/game/{n}"
+        if module_by_path.get(module_path_key(path)) != none: continue
+        if not defer_prelude(path, "game"): load_module(path, true, -1)
+    if registered.len() > 0:
+        loop m in [first..modules.len()): register_module(m)
+    if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
+    loop i in [0..demanded.len()): demanded[i] = false
+    loop i in [0..pn_seen.len()): pn_seen[i] = false
+    ml_bump()
+
 load_prelude = ():
     # all .jo files in lib/core, lib/std and lib/game are loaded into the shared prelude scope
     # (lib/core must stay compilable by the C bootstrap compiler; lib/std need not)
     prelude_lazy_setup()
+    prelude_game_pending = prelude_lazy and not prelude_game_hint
+    prelude_std_pending = prelude_lazy and not prelude_game_hint
     concurrency_thread_module = -1
     concurrency_task_module = -1
     concurrency_task_core_module = -1
     concurrency_protocol_module = -1
     concurrency_first_ok_module = -1
-    loop sub in ["core", "std", "game"]:
+    subs = if prelude_game_pending: ["core", "std"] else: ["core", "std", "game"]
+    loop sub in subs:
         names_ = list_dir("{lib_dir}/{sub}")
         names_.sort()
         loop n in names_:
             if not ends_with(n, ".jo"): continue
+            if sub == "core" and n == "macos.jo" and not target_macos: continue
+            if sub == "core" and n == "windows.jo" and not target_windows: continue
+            if sub == "std" and prelude_std_pending and std_optional_file(n): continue
             path = "{lib_dir}/{sub}/{n}"
             m = -1
             if defer_prelude(path, sub): m = modules.len() - 1

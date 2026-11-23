@@ -357,16 +357,9 @@ lx_appears = (code: Ins[], v: int, lo: int, hi: int) -> int:
 # the vector of u: its own if made in the loop, else u in every lane (made once, in front)
 # the vectorized part of L, in front of what finishes it one element at a time
 fast_vectorize = ():
-    if not lx_vec_on: return
+    if not lx_vec_on or not opt_has_loops or not opt_has_vec_cand: return
     large = ir.code.len() > 400 and (ir.fn_index < 0 or ir.fn_index >= exact_map_functions.len() or not exact_map_functions[ir.fn_index])
-    candidate = false
-    has_loop = false
-    floating = false
-    loop ins in ir.code:
-        if ins.op == .fadd or ins.op == .fsub or ins.op == .fmul or ins.op == .fdiv or ins.op == .fneg: candidate = true; floating = true
-        if ins.op == .load and int(ins.c) & M_INDEX != 0: candidate = true
-        if ins.op == .loop: has_loop = true
-    if candidate and has_loop and (not large or floating): loop_versioning(true)
+    if not large or opt_has_float_op: loop_versioning(true)
 
 # Reject loop shapes that cannot form a vector plan before decomposing any
 # indexes or allocating vreg spans. This bounded O(body instructions) sieve

@@ -18,9 +18,9 @@ from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
 from p"type_constructors.dewy" import tb_mk_array
-from p"checker_state.dewy" import (FnInst FnCtx CheckerScope Sym SK StatementWatch Local ValueLoop)
-from p"checker_literals.dewy" import (xl_expected xl_finish xl_check_int xl_check_str xl_check_scalar)
-from p"checker_idents.dewy" import xj_ident
+from p"checker_state.dewy" import (FnInst FnCtx CheckerScope Sym SK StatementWatch Local ValueLoop live_body_indexes)
+from p"checker_literals.dewy" import (xl_expected xl_finish xl_check_int xl_check_str xl_check_scalar xl_exact_measure xl_effects xl_last)
+from p"checker_idents.dewy" import (xj_ident xj_ident_slow xj_ide xj_tk_special_p xj_assign_root)
 from p"checker_conditionals.dewy" import (xf_if xf_iflet)
 from p"checker_receivers.dewy" import (xs_field xs_index)
 from p"checker_variants.dewy" import xv_check
@@ -331,17 +331,24 @@ xe_fn_kind=(t:XEWord):>bool=>$unsafe {
 }
 xe_untyped=(a0:XEWord):>void=>$unsafe {
     let a=a0
-    if xe_nodes[0].ptr[a].kind =? 'namedarg' {a=XEWord(xe_nodes[0].ptr[a].a)}
-    if xe_nodes[0].ptr[a].kind =? 'call' {
+    let node=xe_nodes[0].ptr + a
+    let k=node[0].kind
+    if k =? 'namedarg' {
+        a=XEWord(node[0].a)
+        node=xe_nodes[0].ptr + a
+        k=node[0].kind
+    }
+    if (XEWord(node[0].flags) & 128) not=? 0 and k not=? 'call' and k not=? 'array' and k not=? 'record_lit' and k not=? 'map_lit' {return}
+    if k =? 'call' {
         let m=xe_members_name[0]
-        if m =? 0 or XEWord(xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[a].a)].name) =? m {xe_members(a)}
+        if m =? 0 or XEWord(xe_nodes[0].ptr[XEWord(node[0].a)].name) =? m {xe_members(a)}
         if xe_nodes[0].ptr[a].kind =? 'call' and xe_set_call(a) {
             xe_untyped_kids(a)
             return
         }
+        k=xe_nodes[0].ptr[a].kind
     }
-    if xe_nodes[0].ptr[a].kind =? 'array' {xe_spread(a)}
-    let k=xe_nodes[0].ptr[a].kind
+    if k =? 'array' {xe_spread(a); k=xe_nodes[0].ptr[a].kind}
     if k =? 'record_lit' {
         xe_untyped_kids(a)
         return
@@ -350,17 +357,16 @@ xe_untyped=(a0:XEWord):>void=>$unsafe {
         xe_untyped_pairs(a)
         return
     }
-    if k =? 'array' and xe_files[0][xe_nodes[0].ptr[a].pos >> 40].is_dewy and ctx_dependent(a) {
+    if k =? 'array' and xe_files[0].ptr[xe_nodes[0].ptr[a].pos >> 40].is_dewy and ctx_dependent(a) {
         xe_untyped_kids(a)
         return
     }
+    if (XEWord(xe_nodes[0].ptr[a].flags) & 128) not=? 0 {return}
     let base=a
     if k =? 'typeapply' {base=XEWord(xe_nodes[0].ptr[a].a)}
-    if not xe_flag(a 128) {
-        let bk=xe_nodes[0].ptr[base].kind
-        if bk =? 'ident' {xe_fnref(a base)}
-        else if bk =? 'field' and xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[base].a)].kind =? 'ident' {xe_module_fn(a base)}
-    }
+    let bk=xe_nodes[0].ptr[base].kind
+    if bk =? 'ident' {xe_fnref(a base)}
+    else if bk =? 'field' and xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[base].a)].kind =? 'ident' {xe_module_fn(a base)}
     if ctx_dependent(a) or xe_flag(a 128) {return}
     check_expr(a 0);
     xe_add_flag(a 128)
@@ -416,12 +422,31 @@ xe_ident=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     let i:XEWord=if nm <? xe_scopes[0].top.length {xe_scopes[0].top.ptr[nm]} else {-1}
     if i >=? floor {s=xe_scopes[0].syms.ptr[i]} else {s=xe_module(nm)}
     if s =? 0 {xe_unknown(n expected nm)}
-    let flags:XEWord=if xe_watch[0].const_views >? 0 {1} else {0}
-    if xe_watch[0].decimal_globals >? 0 {flags=flags | 2}
     let sym=xe_syms[0].ptr + s
     let sk=sym[0].kind
+    let ref=XEWord(sym[0].ref)
+    if sk =? 'local' and c >=? 0 and not xj_ide[0] and xe_watch[0].const_views <=? 0 {
+        let lp=xe_locals[0].ptr + ref
+        let fl=XEWord(lp[0].flags)
+        if (fl & 2056) =? 0 and XEWord(lp[0].owner) =? XEWord(xe_contexts[0].ptr[c].inst) {
+            let t=XEWord(lp[0].type)
+            if xj_tk_special_p[int64(((xe_types[0].ptr + t) as ptr<uint32>)[0])] =? uint8(0) and not xl_exact_measure[0] and (expected =? 0 or not xl_effects[0]) {
+                let node=xe_nodes[0].ptr + n
+                node[0].aux=int32<overflow='wrap'>(1)
+                node[0].sym=int32<overflow='wrap'>(ref)
+                if n not=? xj_assign_root[0] {lp[0].flags=int32<overflow='wrap'>(fl | 32768)}
+                node[0].type=int32<overflow='wrap'>(t)
+                node[0].flags |= 128
+                xl_last[0]=n
+                if xe_temperature[0] or xe_values[0] {return xe_read(n t)}
+                return t
+            }
+        }
+    }
+    let flags:XEWord=if xe_watch[0].const_views >? 0 {1} else {0}
+    if xe_watch[0].decimal_globals >? 0 {flags=flags | 2}
     let kind:XEWord=if sk =? 'local' {1} else {xe_kind(sk)}
-    let t=xj_ident(n expected kind XEWord(sym[0].ref) s flags).type
+    let t=xj_ident_slow(n expected kind ref s flags).type
     if xe_temperature[0] or xe_values[0] {return xe_read(n t)}
     t
 }
@@ -472,7 +497,7 @@ xe_other=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
 # pipe 64, caret 65, shl 67, shr 68, eq 69, ne 70, lt 71 ... ge 74, kw_xor 82, dotop 85).
 xe_kind_of=(t:XEWord):>TK=>$unsafe {xe_types[0].ptr[tu_prune(t)].kind}
 xe_flag=(n:XEWord f:XEWord):>bool=>$unsafe {XEWord(xe_nodes[0].ptr[n].flags) & f not=? 0}
-xe_add_flag=(n:XEWord f:XEWord):>void=>$unsafe {xe_nodes[0][n].flags=int32<overflow='wrap'>(XEWord(xe_nodes[0].ptr[n].flags) | f)}
+xe_add_flag=(n:XEWord f:XEWord):>void=>$unsafe {xe_nodes[0].ptr[n].flags=int32<overflow='wrap'>(XEWord(xe_nodes[0].ptr[n].flags) | f)}
 xe_dewy_at=(pos:int64):>bool=>$unsafe {
     let f=pos >> 40
     pos >? 0 and f <? xe_files[0].length and xe_files[0].ptr[f].is_dewy
@@ -549,11 +574,14 @@ xe_first=(b:XEWord):>XEWord=>$unsafe {
 # then the second operand in the first's type. Two plain numbers go to the numeric leaf;
 # a secret, a quantity, text, an optional, a struct and every other pair to the host.
 xe_binary=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
-    let op=XEWord(xe_nodes[0].ptr[n].op)
+    let nd=xe_nodes[0].ptr + n
+    let op=XEWord(nd[0].op)
     if op =? 85 {return check_dotted(n expected)}
-    if op =? 60 and xe_flag(n 536870912) {binary_juxt(n)}
+    if op =? 60 and (XEWord(nd[0].flags) & 536870912) not=? 0 {binary_juxt(n); nd=xe_nodes[0].ptr + n}
     if op =? 82 {return xe_xor(n expected)}
-    if op not=? 58 and op not=? 60 and xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[n].a)].kind =? 'str_lit' {xe_char(n)}
+    let a=XEWord(nd[0].a)
+    let b=XEWord(nd[0].b)
+    if op not=? 58 and op not=? 60 and xe_nodes[0].ptr[a].kind =? 'str_lit' {xe_char(n)}
     if op =? 12 {return xe_in(n expected)}
     let is_cmp=op >=? 69 and op <=? 74
     let is_shift=op =? 67 or op =? 68
@@ -563,25 +591,25 @@ xe_binary=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
         if ek =? 'int_' or ek =? 'float_' or ek =? 'vec' {hint=expected}
         else if ek =? 'quantity' {hint=binary_quantity_hint(expected)}
     }
-    let a=XEWord(xe_nodes[0].ptr[n].a)
-    let b=XEWord(xe_nodes[0].ptr[n].b)
     if (op =? 69 or op =? 70) and xe_watch[0].decimal_adapted >? 0 {xe_decimals(a b)}
     let flags:XEWord=0
+    let ak0=xe_nodes[0].ptr[a].kind
+    let bk0=xe_nodes[0].ptr[b].kind
     if op =? 58 or op =? 59 {
-        if xe_quantity_literal(a) {flags=1}
-        if xe_quantity_literal(b) or (b =? xe_quantity_right[0] and b not=? 0) {flags=flags | 2}
+        if (ak0 =? 'binary' or ak0 =? 'unary') and xe_quantity_literal(a) {flags=1}
+        if ((bk0 =? 'binary' or bk0 =? 'unary') and xe_quantity_literal(b)) or (b =? xe_quantity_right[0] and b not=? 0) {flags=flags | 2}
     } else if op =? 60 {
-        if xe_quantity_name(a) {flags=1}
-        if xe_quantity_name(b) {flags=flags | 2}
+        if (ak0 =? 'ident' or ak0 =? 'field') and xe_quantity_name(a) {flags=1}
+        if (bk0 =? 'ident' or bk0 =? 'field') and xe_quantity_name(b) {flags=flags | 2}
         # ("-" * 40 is forty dashes: a character's code multiplied means nothing)
-        let ca=xe_charlike(a)
-        let cb=xe_charlike(b)
-        if ca and not cb {xe_nodes[0][a].flags=xe_nodes[0].ptr[a].flags & ~512}
-        if cb and not ca {xe_nodes[0][b].flags=xe_nodes[0].ptr[b].flags & ~512}
+        let ca=ak0 =? 'str_lit' and xe_flag(a 512)
+        let cb=bk0 =? 'str_lit' and xe_flag(b 512)
+        if ca and not cb {xe_nodes[0].ptr[a].flags=xe_nodes[0].ptr[a].flags & ~512}
+        if cb and not ca {xe_nodes[0].ptr[b].flags=xe_nodes[0].ptr[b].flags & ~512}
     }
     if op =? 58 {
-        let ca=xe_charlike(a)
-        let cb=xe_charlike(b)
+        let ca=ak0 =? 'str_lit' and xe_flag(a 512)
+        let cb=bk0 =? 'str_lit' and xe_flag(b 512)
         if ca {flags=flags | 4}
         if cb {flags=flags | 8}
         # ('a' + i: a character's code and a number, as i + 'a' is; the number decides)
@@ -590,9 +618,9 @@ xe_binary=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
             if xe_types[0].ptr[tb0].kind =? 'int_' {hint=tb0}
         }
     }
-    let literal_op=(op =? 69 or op =? 70 or op =? 63 or op =? 64 or op =? 65 or op =? 59) and xe_files[0][xe_nodes[0].ptr[n].pos >> 40].is_dewy
-    let a_literal=literal_op and xe_literal_operand(a)
-    let b_literal=literal_op and xe_literal_operand(b)
+    let literal_op=(op =? 69 or op =? 70 or op =? 63 or op =? 64 or op =? 65 or op =? 59) and xe_files[0].ptr[xe_nodes[0].ptr[n].pos >> 40].is_dewy
+    let a_literal=literal_op and (ak0 =? 'array' or ak0 =? 'record_lit' or ak0 =? 'map_lit' or ak0 =? 'call') and xe_literal_operand(a)
+    let b_literal=literal_op and (bk0 =? 'array' or bk0 =? 'record_lit' or bk0 =? 'map_lit' or bk0 =? 'call') and xe_literal_operand(b)
     # Type-checking the typed operand first supplies context without moving either
     # operand in the runtime expression or checking it twice.
     if a_literal and not b_literal {hint=xe_literal_hint(a xe_first(b) op hint)}
@@ -626,8 +654,8 @@ xe_binary=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
         if ua not=? mi and ub not=? mi and xe_word(ua) and xe_word(ub) and (is_shift or num_join(ua ub) =? xe_int_type[0]) {
             a=wa
             b=wb
-            xe_nodes[0][n].a=int32<overflow='wrap'>(a)
-            xe_nodes[0][n].b=int32<overflow='wrap'>(b)
+            xe_nodes[0].ptr[n].a=int32<overflow='wrap'>(a)
+            xe_nodes[0].ptr[n].b=int32<overflow='wrap'>(b)
             ta=tu_prune(ua)
             tb=tu_prune(ub)
         }
@@ -665,11 +693,14 @@ check_call_expr=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     let callee=XEWord(xe_nodes[0].ptr[n].a)
     if ex not=? 0 and xe_nodes[0].ptr[callee].kind =? 'ident' {
         let count=XEWord(xe_nodes[0].ptr[n].nlist)
-        if count =? 2 and (xe_types[0].ptr[ex].kind =? 'array' or is_nd(ex)) and xe_names[0].ptr[XEWord(xe_nodes[0].ptr[callee].name)] =? "__shape_value" {
-            check_expr(xe_kid(n 0) ex);
-            xe_set_kid(n 0 xe_last[0])
+        if count =? 1 or count =? 2 {
+            let cname=xe_names[0].ptr[XEWord(xe_nodes[0].ptr[callee].name)]
+            let cb=cname as array<uint8>
+            if count =? 2 and cb.length =? 13 and cb.ptr[0] =? uint8(95) and (xe_types[0].ptr[ex].kind =? 'array' or is_nd(ex)) and cname =? "__shape_value" {
+                check_expr(xe_kid(n 0) ex);
+                xe_set_kid(n 0 xe_last[0])
+            } else if count =? 1 and cb.length =? 8 and cb.ptr[0] =? uint8(95) and cname =? "__map_of" {call_map_rows(n ex)}
         }
-        if count =? 1 and xe_names[0].ptr[XEWord(xe_nodes[0].ptr[callee].name)] =? "__map_of" {call_map_rows(n ex)}
     }
     if is_unchecked_at(n) {
         let xs=xe_kid(n 0)
@@ -837,26 +868,32 @@ check_expr=(n0:int64 expected0:int64):>int64=>$unsafe {
     let expected=XEWord(expected0)
     xe_last[0]=n
     let node=xe_nodes[0].ptr + n
-    if XEWord(node[0].flags) & 8192 not=? 0 {
-        let contribution=collection_check(n expected)
-        if contribution >=? 0 {return contribution}
+    let fl=XEWord(node[0].flags)
+    if (fl & 8320) not=? 0 {
+        if (fl & 8192) not=? 0 {
+            let contribution=collection_check(n expected)
+            if contribution >=? 0 {return contribution}
+            node=xe_nodes[0].ptr + n
+        }
+        # NF_CHECKED 128: a node checked before keeps its type.
+        if node[0].type not=? 0 and (XEWord(node[0].flags) & 128) not=? 0 {return XEWord(node[0].type)}
     }
-    # NF_CHECKED 128: a node checked before keeps its type.
-    if node[0].type not=? 0 and XEWord(node[0].flags) & 128 not=? 0 {return XEWord(node[0].type)}
-    let k=node[0].kind
-    if k =? 'ident' {return xe_ident(n expected)}
-    if k =? 'int_lit' {return xl_check_int(n expected)}
-    if k =? 'binary' {return xl_finish(n xe_binary(n expected) expected)}
-    if k =? 'call' {return check_call_expr(n expected)}
-    if k =? 'field' {return xs_field(n expected)}
-    if k =? 'if_' {return xl_finish(n xf_if(n xl_expected(expected)) expected)}
-    if k =? 'index' {
-        let it=xs_index(n expected)
-        if xe_watch[0].sibling_known not=? 0 {return expr_sibling(n it)}
-        return it
+    match node[0].kind {
+        <'ident'> => xe_ident(n expected)
+        <'int_lit'> => xl_check_int(n expected)
+        <'binary'> => xl_finish(n xe_binary(n expected) expected)
+        <'call'> => check_call_expr(n expected)
+        <'field'> => xs_field(n expected)
+        <'if_'> => xl_finish(n xf_if(n xl_expected(expected)) expected)
+        <'index'> => {
+            live_body_indexes += 1
+            let it=xs_index(n expected)
+            if xe_watch[0].sibling_known not=? 0 {return expr_sibling(n it)}
+            it
+        }
+        <'str_lit'> => xl_check_str(n expected)
+        _ => xe_other(n expected)
     }
-    if k =? 'str_lit' {return xl_check_str(n expected)}
-    xe_other(n expected)
 }
 # Intrinsic calls: the node made an intrinsic, its arguments checked, its type. The
 # common array intrinsics (len, cap, push, pop, clear), syscall, mem_copy, mem_set,

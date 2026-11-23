@@ -41,7 +41,8 @@ from p"ir.jo" import (checked_flags dbg_on ir_pos main_code main_exit_lf mulh_ok
 from p"isolation_ops.dewy" import (isolation_reset)
 from p"lazy_force.dewy" import (dc_flush_warnings)
 from p"loops.jo" import (lx_vec_on)
-from p"lower.jo" import (LK_INST data_size global_off late_binding lfuncs mt_active_off opt_release rodata)
+from p"lower.jo" import (LK_INST data_size global_off late_binding lfuncs lower_epoch mt_active_off opt_release rodata)
+from p"opt_workspace.dewy" import (opt_allow_cse)
 from p"lower_determinism.dewy" import (det_check_program)
 from p"lower_entries.dewy" import (once_prepare)
 from p"lower_ffi.dewy" import (lower_extern_thunk)
@@ -188,6 +189,9 @@ compile=(path:string out0:string):>string=>$unsafe {
     if not dbg_on_slot and not watch_build and not repl_image and not lower_only {callback_prepare()}
     let t1=time()
     ic_switch(IC_LOWER IC_SHARED);
+    let lower_epoch_slot=@lower_epoch
+    lower_epoch_slot=DriverWord(lower_epoch_slot) + 1
+    opt_allow_cse=opt_release_slot or target_wasm
     let roots:array<int64>=[]
     loop f in init_fns {roots.push(lf_of_inst(f))}
     # Source promises apply to checked bodies even when no caller reaches

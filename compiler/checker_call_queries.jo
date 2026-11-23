@@ -65,33 +65,38 @@ cg_oversized = (a: int) -> bool:
     if cg_nodes[0][a].kind == .unary and cg_nodes[0][a].op == 59: return cg_oversized(int(cg_nodes[0][a].a))
     cg_nodes[0][a].kind == .call and cg_nodes[0][a].aux2 == -1
 cg_dewy = (pos: int) -> bool: cg_files[0][pos >> 40].is_dewy
-ctx_dependent = (a: int) -> bool:
-    k = cg_nodes[0][a].kind
-    flags = int(cg_nodes[0][a].flags)
-    if k == .unary: return cg_nodes[0][a].op == 59 and cg_oversized(int(cg_nodes[0][a].a))
-    if k == .call:
-        if cg_nodes[0][a].aux2 == -1: return true
-        if cg_nodes[0][a].type == 0:
-            callee = int(cg_nodes[0][a].a)
-            ck = cg_nodes[0][callee].kind
-            if cg_nodes[0][a].nlist == 1 and ck == .ident and int(cg_nodes[0][callee].name) == cg_set_name[0]: return true
-            if ck == .dotname: return true
-        return false
-    if k == .ident or k == .field or k == .typeapply: return flags & 4096 != 0
-    if k == .dotname: return cg_nodes[0][a].type == 0
-    if k == .lambda or k == .none_lit or k == .hole or k == .record_lit: return true
-    if k == .if_ or k == .match_: return flags & 128 == 0 and cg_dewy(cg_nodes[0][a].pos)
-    if k == .block: return flags & 67108864 != 0 and flags & 128 == 0
-    if k == .array:
-        count = int(cg_nodes[0][a].nlist)
-        if count == 0: return cg_nodes[0][a].b == 0
-        if cg_nodes[0][a].type == 0 and flags & 128 == 0 and cg_dewy(cg_nodes[0][a].pos): return true
-        base = int(cg_nodes[0][a].list)
-        loop i in [0..count):
-            if ctx_dependent(int(cg_lists[0][base + i])): return true
-        return false
-    if k == .map_lit: return cg_nodes[0][a].nlist == 0 or (cg_nodes[0][a].type == 0 and flags & 128 == 0 and cg_dewy(cg_nodes[0][a].pos))
+ctx_dependent_call = (a: int) -> bool:
+    node = data(cg_nodes[0]) + a
+    if node.aux2 == -1: return true
+    if node.type == 0:
+        callee = data(cg_nodes[0]) + int(node.a)
+        ck = callee.kind
+        if node.nlist == 1 and ck == .ident and int(callee.name) == cg_set_name[0]: return true
+        if ck == .dotname: return true
     false
+ctx_dependent_array = (a: int) -> bool:
+    node = data(cg_nodes[0]) + a
+    count = int(node.nlist)
+    if count == 0: return node.b == 0
+    if node.type == 0 and int(node.flags) & 128 == 0 and cg_dewy(node.pos): return true
+    base = int(node.list)
+    lp = data(cg_lists[0])
+    loop i in [0..count):
+        if ctx_dependent(int(lp[base + i])): return true
+    false
+ctx_dependent = (a: int) -> bool:
+    node = data(cg_nodes[0]) + a
+    match node.kind:
+        ident, field, typeapply: int(node.flags) & 4096 != 0
+        call: ctx_dependent_call(a)
+        unary: node.op == 59 and cg_oversized(int(node.a))
+        dotname: node.type == 0
+        lambda, none_lit, hole, record_lit: true
+        if_, match_: int(node.flags) & 128 == 0 and cg_dewy(node.pos)
+        block: int(node.flags) & 67108864 != 0 and int(node.flags) & 128 == 0
+        array: ctx_dependent_array(a)
+        map_lit: node.nlist == 0 or (node.type == 0 and int(node.flags) & 128 == 0 and cg_dewy(node.pos))
+        _: false
 cg_unnamed = (a: int) -> int:
     if cg_nodes[0][a].kind == .namedarg: return int(cg_nodes[0][a].a)
     a

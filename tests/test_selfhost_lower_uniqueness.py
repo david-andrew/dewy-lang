@@ -7,6 +7,7 @@ from tests.test_selfhost_lower_ptr_reads import DRIVER as BASE, JO as BASE_JO
 JO = dict(BASE_JO)
 JO.update(jo_doubles({'isolation.jo': {
     'isolation_children': 'isolation_children = (k: NK) -> int:\n    if fail_children: print("children-error"); exit(43)\n    if k == .hole: return -1\n    55',
+    'isolation_node_children': 'isolation_node_children = (n: int) -> int: isolation_children(nodes[n].kind)',
     'isolation_intrinsic': 'isolation_intrinsic = (id: IN) -> bool: id != .syscall',
     'ambient_sharing_stable': 'ambient_sharing_stable = (n: int) -> bool: nodes[n].ival != 99',
 }}))
@@ -34,10 +35,13 @@ MAIN = r'''main = ():
     # Loop-element aliases expose the original array instead of the alias.
     alias = lp_local(LF_ELEMALIAS, lp_node(.index, av)); ali = lp_ident(alias, T_INT)
     uq_reset(); uq_scan(ali, 2); assert(uq_escaped == [a] and uq_written.len() == 0)
-    # Known length/capacity/in-place operations only read their receiver.
-    loop id in [IN.len, IN.arrcap, IN.push, IN.pop, IN.insert, IN.remove, IN.clear, IN.reserve, IN.resize, IN.truncate, IN.extend]:
+    # Known length/capacity operations only read their receiver; in-place mutating ones write it.
+    loop id in [IN.len, IN.arrcap]:
         uq_reset(); uq_scan(uq_intrinsic(id, [av, bv]), 0)
         assert(uq_escaped == [b] and uq_written.len() == 0)
+    loop id in [IN.push, IN.pop, IN.insert, IN.remove, IN.clear, IN.reserve, IN.resize, IN.truncate, IN.extend]:
+        uq_reset(); uq_scan(uq_intrinsic(id, [av, bv]), 0)
+        assert(uq_escaped == [b] and uq_written == [a])
     uq_reset(); uq_scan(uq_intrinsic(IN.hash, [av, bv]), 0); assert(uq_escaped == [a, b])
     # Unknown operations and lambdas prohibit hoisting, independently of calls.
     loop n in [lp_node(.hole), lp_node(.lambda), uq_intrinsic(IN.syscall, [av])]:

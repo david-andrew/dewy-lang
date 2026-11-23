@@ -4,7 +4,9 @@ from p"expression_types.dewy" import (ntype)
 from p"member_plan.dewy" import (member_fact_ready member_fact_view)
 
 from p"@lib/core/os.jo" import (eprint)
-from p"ast.jo" import (kid nkids nodes)
+from p"ast.jo" import (kid lists nkids nodes)
+from p"node_store.dewy" import (Node)
+from p"checker_state.dewy" import (Local)
 from p"check.jo" import (fns locals)
 from p"directives.jo" import (dir_proven)
 from p"directive_queries.dewy" import (dir_index)
@@ -17,8 +19,8 @@ from p"facts_forks.dewy" import (fact_fork_seed)
 from p"facts_changes.dewy" import (fact_changes)
 from p"float_ops.dewy" import (ff_integer_demand)
 from p"ide.jo" import (ide_on)
-from p"isolation_ops.dewy" import (isolation_children)
-from p"member_replay.jo" import (member_scope_locals member_scopes member_templates member_trace)
+from p"isolation_ops.dewy" import (iso_child_p isolation_children isolation_node_children)
+from p"member_replay.jo" import (member_scope_locals member_scopes member_templates member_trace member_uniform_blocks)
 from p"ownership.jo" import (ownership_decls)
 from p"proofs.jo" import (proof_active result_active)
 from p"refine.jo" import (refine_active refine_requests)
@@ -44,36 +46,139 @@ fact_member_candidate=(f:MemberWord):>bool=>{
 # x and y are the same checked syntax but for member literals and local
 # copies. Pairs of the nodes a decision can mark (dir_index, fact_validated)
 # go onto pairs. O(nodes), field reads only.
+let fms_index:MemberWord=0
+let fms_pairs:array<int64>=[]
+let fms_has_exact:bool=false
+let fms_has_rat:bool=false
+let fms_has_pos:bool=false
+let fms_nodes:ptr<Node>=$unsafe (uint64(0) as ptr<Node>)
+let fms_lists:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
+let fms_locals:ptr<Local>=$unsafe (uint64(0) as ptr<Local>)
+let fms_exact:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
+let fms_nexact:MemberWord=0
+
 fact_member_same=(x:MemberWord y:MemberWord index:MemberWord @pairs:array<int64>):>bool=>$unsafe {
-    if x =? 0 or y =? 0 {return x =? y}
-    let k=nodes.ptr[x].kind
-    if k not=? nodes.ptr[y].kind or nodes.ptr[x].pos not=? nodes.ptr[y].pos or nodes.ptr[x].type not=? nodes.ptr[y].type or nodes.ptr[x].flags not=? nodes.ptr[y].flags or nodes.ptr[x].op not=? nodes.ptr[y].op {return false}
-    if nodes.ptr[x].ival not=? nodes.ptr[y].ival or nodes.ptr[x].name not=? nodes.ptr[y].name or nodes.ptr[x].aux2 not=? nodes.ptr[y].aux2 or nodes.ptr[x].d not=? nodes.ptr[y].d or nodes.ptr[x].nlist not=? nodes.ptr[y].nlist or nodes.ptr[x].nlist2 not=? 0 or nodes.ptr[y].nlist2 not=? 0 {return false}
-    if x <? exact_marks.length and exact_marks[x] not=? 0 or y <? exact_marks.length and exact_marks[y] not=? 0 {return false}
-    if rational_constants.length not=? 0 and (rational_constants.has(x) or rational_constants.has(y)) {return false}
-    if (k =? 'str_lit' or k =? 'dotname') and member_templates[index].positions.has(nodes.ptr[x].pos) {
-        if k =? 'dotname' and tkind(ntype(x)) =? 'enum_' or k =? 'str_lit' and (nodes.ptr[x].aux not=? 0 or nodes.ptr[x].nlist not=? 0) {return false}
+    fms_index=index
+    fms_pairs=pairs
+    pairs=[]
+    fms_has_exact=exact_marks.length >? 0
+    fms_has_rat=rational_constants.length not=? 0
+    fms_has_pos=member_templates.ptr[index].positions.length >? 0
+    fms_nodes=nodes.ptr
+    fms_lists=lists.ptr
+    fms_locals=locals.ptr
+    fms_nexact=exact_marks.length
+    if fms_has_exact {fms_exact=exact_marks.ptr}
+    let ok=fact_member_same_fast(x y)
+    pairs=fms_pairs
+    fms_pairs=[]
+    ok
+}
+let fms_sx:array<int64>=[]
+let fms_sy:array<int64>=[]
+
+fact_member_same_fast=(x0:MemberWord y0:MemberWord):>bool=>$unsafe {
+    if fms_sx.length <? 256 {
+        fms_sx.resize(256)
+        fms_sy.resize(256)
     }
-    else if nodes.ptr[x].sval not=? nodes.ptr[y].sval or nodes.ptr[x].aux not=? nodes.ptr[y].aux {return false}
-    if nodes.ptr[x].sym not=? nodes.ptr[y].sym {
-        if not (k =? 'vardecl' or k =? 'ident' and nodes.ptr[x].aux =? int32(1)) or nodes.ptr[x].sym <=? 0 or nodes.ptr[y].sym <=? 0 {return false}
-        let lx=MemberWord(nodes.ptr[x].sym)
-        let ly=MemberWord(nodes.ptr[y].sym)
-        if locals.ptr[lx].type not=? locals.ptr[ly].type or locals.ptr[lx].flags not=? locals.ptr[ly].flags {return false}
-    }
-    if k =? 'index' or k =? 'intrinsic' or k =? 'conv' {
-        if k =? 'conv' and ff_integer_demand(x) {return false}
-        pairs.push(x)
-        pairs.push(y)
-    }
-    let mask=isolation_children(k)
-    if mask <? 0 {return false}
-    if mask & 1 not=? 0 and not fact_member_same(MemberWord(nodes.ptr[x].a) MemberWord(nodes.ptr[y].a) index @pairs) {return false}
-    if mask & 2 not=? 0 and not fact_member_same(MemberWord(nodes.ptr[x].b) MemberWord(nodes.ptr[y].b) index @pairs) {return false}
-    if mask & 4 not=? 0 and not fact_member_same(MemberWord(nodes.ptr[x].c) MemberWord(nodes.ptr[y].c) index @pairs) {return false}
-    if mask & 16 not=? 0 {
-        loop i in [0..nkids(x)) {
-            if not fact_member_same(kid(x i) kid(y i) index @pairs) {return false}
+    let sx=fms_sx.ptr
+    let sy=fms_sy.ptr
+    let scap:MemberWord=fms_sx.length
+    let sp:MemberWord=1
+    sx[0]=x0
+    sy[0]=y0
+    let np=fms_nodes
+    let lp=fms_lists
+    let lp0=fms_locals
+    let icp=iso_child_p
+    let has_exact=fms_has_exact
+    let nexact=fms_nexact
+    let exactp=fms_exact
+    let has_rat=fms_has_rat
+    let has_pos=fms_has_pos
+    loop sp >? 0 {
+        sp -= 1
+        let x:MemberWord=sx[sp]
+        let y:MemberWord=sy[sp]
+        if x =? 0 or y =? 0 {
+            if x not=? y {return false}
+            continue
+        }
+        let nx=np + x
+        let ny=np + y
+        let k=nx[0].kind
+        if k not=? ny[0].kind or nx[0].pos not=? ny[0].pos or nx[0].type not=? ny[0].type or nx[0].flags not=? ny[0].flags {return false}
+        if has_exact and ((x <? nexact and exactp[x] not=? uint8(0)) or (y <? nexact and exactp[y] not=? uint8(0))) {return false}
+        if has_rat and (rational_constants.has(x) or rational_constants.has(y)) {return false}
+        if k =? 'ident' {
+            if nx[0].name not=? ny[0].name or nx[0].aux not=? ny[0].aux or nx[0].aux2 not=? ny[0].aux2 or nx[0].op not=? ny[0].op or nx[0].ival not=? ny[0].ival or nx[0].sval not=? ny[0].sval or nx[0].d not=? ny[0].d or nx[0].nlist not=? ny[0].nlist or nx[0].nlist2 not=? 0 or ny[0].nlist2 not=? 0 {return false}
+            if nx[0].sym not=? ny[0].sym {
+                if nx[0].aux not=? int32(1) or nx[0].sym <=? 0 or ny[0].sym <=? 0 {return false}
+                let lx=MemberWord(nx[0].sym)
+                let ly=MemberWord(ny[0].sym)
+                if lp0[lx].type not=? lp0[ly].type or lp0[lx].flags not=? lp0[ly].flags {return false}
+            }
+            continue
+        }
+        if k =? 'int_lit' {
+            if nx[0].ival not=? ny[0].ival or nx[0].aux not=? ny[0].aux or nx[0].aux2 not=? ny[0].aux2 or nx[0].sym not=? ny[0].sym or nx[0].op not=? ny[0].op or nx[0].name not=? ny[0].name or nx[0].sval not=? ny[0].sval or nx[0].d not=? ny[0].d or nx[0].nlist not=? ny[0].nlist or nx[0].nlist2 not=? 0 or ny[0].nlist2 not=? 0 {return false}
+            continue
+        }
+        if nx[0].op not=? ny[0].op or nx[0].ival not=? ny[0].ival or nx[0].name not=? ny[0].name or nx[0].aux2 not=? ny[0].aux2 or nx[0].d not=? ny[0].d or nx[0].nlist not=? ny[0].nlist or nx[0].nlist2 not=? 0 or ny[0].nlist2 not=? 0 {return false}
+        if has_pos and (k =? 'str_lit' or k =? 'dotname') and member_templates.ptr[fms_index].positions.has(nx[0].pos) {
+            if k =? 'dotname' and tkind(ntype(x)) =? 'enum_' or k =? 'str_lit' and (nx[0].aux not=? 0 or nx[0].nlist not=? 0) {return false}
+        }
+        else if nx[0].sval not=? ny[0].sval or nx[0].aux not=? ny[0].aux {return false}
+        if nx[0].sym not=? ny[0].sym {
+            if k not=? 'vardecl' or nx[0].sym <=? 0 or ny[0].sym <=? 0 {return false}
+            let lx=MemberWord(nx[0].sym)
+            let ly=MemberWord(ny[0].sym)
+            if lp0[lx].type not=? lp0[ly].type or lp0[lx].flags not=? lp0[ly].flags {return false}
+        }
+        match k {
+            <'float_lit'|'bool_lit'|'none_lit'|'null_lit'|'dotname'|'hole'|'break_'|'continue_'|'pwild'|'lambda'> => {continue}
+            _ => {}
+        }
+        if k =? 'index' or k =? 'intrinsic' or k =? 'conv' {
+            if k =? 'conv' and ff_integer_demand(x) {return false}
+            fms_pairs.push(x)
+            fms_pairs.push(y)
+        }
+        let mask=MemberWord(icp[int64((nx as ptr<uint32>)[0])])
+        if mask <? 0 {return false}
+        let nlist:MemberWord=if mask & 16 not=? 0 {MemberWord(nx[0].nlist)} else {0}
+        if sp + nlist + 3 >? scap {
+            scap=(sp + nlist + 3) * 2
+            fms_sx.resize(scap)
+            fms_sy.resize(scap)
+            sx=fms_sx.ptr
+            sy=fms_sy.ptr
+        }
+        if nlist >? 0 {
+            let lx=MemberWord(nx[0].list)
+            let ly=MemberWord(ny[0].list)
+            let i:MemberWord=nlist - 1
+            loop i >=? 0 {
+                let cx=MemberWord(lp[lx + i])
+                let cy=MemberWord(lp[ly + i])
+                if (cx | cy) not=? 0 {
+                    sx[sp]=cx; sy[sp]=cy; sp += 1
+                }
+                i -= 1
+            }
+        }
+        if mask & 4 not=? 0 {
+            let cx=MemberWord(nx[0].c); let cy=MemberWord(ny[0].c)
+            if (cx | cy) not=? 0 {sx[sp]=cx; sy[sp]=cy; sp += 1}
+        }
+        if mask & 2 not=? 0 {
+            let bx=MemberWord(nx[0].b); let by=MemberWord(ny[0].b)
+            if (bx | by) not=? 0 {sx[sp]=bx; sy[sp]=by; sp += 1}
+        }
+        if mask & 1 not=? 0 {
+            let ax=MemberWord(nx[0].a); let ay=MemberWord(ny[0].a)
+            if (ax | ay) not=? 0 {sx[sp]=ax; sy[sp]=ay; sp += 1}
         }
     }
     true
@@ -146,8 +251,12 @@ fact_member_decide=(f:MemberWord):>bool=>$unsafe {
     fact_member_shared=false
     fact_member_owner=0
     member_fact_view(f false not failed)
+    if not failed {
+        loop b in fact_member_admitted.keys() {member_uniform_blocks[b]=true}
+        fact_member_admitted=dict<int64 array<int64>>()
+        return true
+    }
     fact_member_admitted=dict<int64 array<int64>>()
-    if not failed {return true}
     dir_proven=proven
     fact_validated=validated
     err_notes=notes

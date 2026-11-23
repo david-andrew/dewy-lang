@@ -46,6 +46,8 @@ prelude_demand_units = (name: int):
     if e >= 0: prelude_demand_entry(e)
 # Every unit still unparsed (a diagnostic listing every name, an explicit import of a whole module)
 prelude_demand_all = ():
+    load_std_prelude()
+    load_game_prelude()
     loop e in [0..pn_entries.len()): prelude_demand_entry(e)
 prelude_known_names = ():
     loop nm in prelude_known: demand_prelude_name(intern(nm))
@@ -102,11 +104,11 @@ defer_prelude = (path: str, sub: str) -> bool:
     sc_target = ""
     eager: int[]
     # (a unit's module and parsed mark; then its names posted to the index)
-    first = pu_mod.len()
-    pu_mod.resize(first + r.1 - r.0)
-    pu_done.resize(first + r.1 - r.0)
+    if pu_mod.len() < r.1:
+        pu_mod.resize(r.1)
+        pu_done.resize(r.1)
     mods = data(pu_mod)
-    loop k in [first..pu_mod.len()): mods[k] = mi
+    loop k in [r.0..r.1): mods[k] = mi
     p = data(src!)
     flags = data(su_flags)
     name0 = data(su_name0)
@@ -164,6 +166,9 @@ pn_post = (e: int, u: int):
     if last < 0: entries[e].post = i32(k)
     else: pn_posts[last].next = i32(k)
     entries[e].last = i32(k)
+    if entries[e].done:
+        entries[e].done = false
+        pn_pending += 1
 # The entry of an interned name, or -1 (looked for once per name)
 pn_find = (name: int) -> int:
     if pn_pending == 0: return -1
@@ -173,7 +178,7 @@ pn_find = (name: int) -> int:
     if pn_slots.len() == 0: return -1
     s = names[name]
     n = len(s)
-    h = hash_bytes(data(s), n)
+    h = name_hash[name]
     mask = pn_slots.len() - 1
     i = h & mask
     loop true:
@@ -409,4 +414,7 @@ prelude_source = (name: int) -> str:
                 mi = pu_mod[int(pn_posts[post].unit)]
                 return prelude_shown_path(files[int(modules[mi].file)].path)
             i = (i + 1) & mask
+    if prelude_std_pending:
+        load_std_prelude()
+        return prelude_source(name)
     ""

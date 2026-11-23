@@ -416,39 +416,6 @@ when TARGET == "macos":
     @symbol("dlerror")
     extern __mac_dlerror = () -> *u8
 
-# the program's end: what print collected written out, then what C's stdio holds (printf's
-# output, which C writes out only at its own exit, which a Sloppy program does not go through)
-@noinline
-__end_flush = ():
-    __run_end_fns()
-    __out_flush()
-    when TARGET == "macos":
-        __mac_fflush(null)
-    else when TARGET != "windows" and TARGET != "wasm":
-        if __c_fflush != null: __c_fflush(null)
-    when TARGET != "wasm":
-        if __stdout_failed:
-            __stdout_failed = false
-            __write_err("error: could not write standard output\n")
-            __exit_raw(1)
-
-when TARGET == "macos":
-    @lib("/usr/lib/libSystem.B.dylib")
-    @symbol("fflush")
-    extern __mac_fflush = (f: *u8) -> i32
-
-__c_fflush: cfn(*u8) -> i32 = null
-
-# (what parts of the library do as the program ends, once: net tells its peers it is going, so
-# they know at once, not after some seconds of silence)
-__end_fns: (() -> void)[]
-__end_ran = false
-__at_end = (f: () -> void): __end_fns.push(f)
-__run_end_fns = ():
-    if __end_ran: return
-    __end_ran = true
-    loop f in __end_fns: f()
-
 # resolve a C function for `@lib(...) extern fn` declarations (called on first use)
 # (Windows programs: lib/core/windows.jo)
 when TARGET != "windows":

@@ -1,5 +1,7 @@
 $runtime_checks
-from p"check.jo" import (Module module_by_path modules)
+from p"check.jo" import (Module lib_dir module_by_path modules)
+from p"checker_startup.dewy" import (load_game_prelude load_std_prelude)
+from p"prelude.jo" import (prelude_game_pending prelude_std_pending)
 from p"checks_thin.dewy" import (module_path_key)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"icount.jo" import (IC_LOAD)
@@ -12,7 +14,7 @@ from p"prelude_ops.dewy" import (prelude_jo_module)
 from p"source_frontend.dewy" import (source_declarations)
 from p"source_types.dewy" import (SrcFile)
 from p"util.jo" import (files intern pl_files pl_on)
-from p"@lib/core/str.jo" import (ends_with)
+from p"@lib/core/str.jo" import (ends_with starts_with)
 from p"checker_module_edges.dewy" import (module_added)
 
 ModuleLoadWord:type=int64<overflow='wrap'>
@@ -20,6 +22,8 @@ ModuleLoadI32:type=int32<overflow='wrap'>
 
 load_module=(path:string is_prelude:bool origin:ModuleLoadWord):>ModuleLoadWord=>{
     let key=module_path_key(path)
+    if not is_prelude and prelude_std_pending and starts_with(key "{module_path_key(lib_dir)}/std/") {load_std_prelude()}
+    if not is_prelude and prelude_game_pending and starts_with(key "{module_path_key(lib_dir)}/game/") {load_game_prelude()}
     let previous=module_by_path.get(key) ?? -1
     if previous >=? 0 {return previous}
     let src=read_source(path)

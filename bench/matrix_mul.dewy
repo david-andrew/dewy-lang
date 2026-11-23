@@ -1,0 +1,62 @@
+# Dense float64 matrix multiplication (64x64 blocks on flat arrays).
+$runtime_checks
+
+from p"harness.dewy" import size_argument, clock, mix
+
+const DIM:int64=64
+const CELLS:int64=4096
+
+fill_matrix = (seed0:int64):>array<float64> => {
+    let m:array<float64>=fill(0.0 CELLS)
+    let seed=seed0
+    loop i in [0..CELLS) {
+        seed=(seed*1103515245+12345)%2147483648
+        # Exact dyadic values in [-2.0, 2.0] so IEEE 754 results match C bit-for-bit.
+        m[i]=float64((seed%17)-8)*0.25
+    }
+    return m
+}
+
+matmul_block = (a:array<float64> b:array<float64> @c:array<float64>):>void => {
+    loop i in [0..DIM) {
+        let row=i*DIM
+        loop j in [0..DIM) {c[row+j]=0.0}
+        loop k in [0..DIM) {
+            let aik=a[row+k]
+            let brow=k*DIM
+            loop j in [0..DIM) {
+                c[row+j]=c[row+j]+aik*b[brow+j]
+            }
+        }
+    }
+}
+
+kernel = (a0:array<float64> b0:array<float64> count:int64):>int64 => {
+    let a=a0
+    let b=b0
+    let c:array<float64>=fill(0.0 CELLS)
+    let rounds:int64=if count <? 64 {1} else {count//64}
+    let hash:int64=17
+    loop r in [0..rounds) {
+        matmul_block(a b @c)
+        let diag=c[(r%DIM)*DIM+(r%DIM)]
+        let scaled:int64=int64(diag*16.0)
+        let v:int64=if scaled <? 0 {-scaled} else {scaled}
+        hash=mix(hash v%1000003)
+        # Perturb one entry slightly with an exact dyadic step to vary every round.
+        let idx:int64=r%CELLS
+        let cur=a[idx]
+        a[idx]=if cur >=? 2.0 {-2.0} else {cur+0.25}
+    }
+    return hash
+}
+
+main = (args:array<string>):>void => {
+    let count=size_argument(args 64000)
+    let a=fill_matrix(1234)
+    let b=fill_matrix(5678)
+    let started=clock
+    let result=kernel(a b count)
+    let finished=clock
+    printl"{result} {finished-started}"
+}

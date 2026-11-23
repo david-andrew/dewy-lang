@@ -63,56 +63,181 @@ struct Node:
 const NODE_CHECKED = 128
 
 node_mk = (store: mut Node[], kind: NK, pos: int) -> int:
+    idx = store.len()
     store.push(Node(kind = kind, pos = pos))
-    store.len() - 1
+    idx
 
 node_run = (runs: mut i32[], xs: int[]) -> int:
     start = runs.len()
-    loop x in xs: runs.push(i32(x))
+    count = xs.len()
+    if count > 0:
+        need = start + count
+        if runs.cap() < need: runs.reserve(need)
+        __set_len(runs, need)
+        dst = data(runs) + start
+        src = data(xs)
+        loop i in [0..count): dst[i] = i32(src[i])
     start
 
 node_set_list = (store: mut Node[], runs: mut i32[], n: int, xs: int[]):
     start = runs.len()
-    loop x in xs: runs.push(i32(x))
+    count = xs.len()
+    if count > 0:
+        need = start + count
+        if runs.cap() < need: runs.reserve(need)
+        __set_len(runs, need)
+        dst = data(runs) + start
+        src = data(xs)
+        loop i in [0..count): dst[i] = i32(src[i])
     store[n].list = i32(start)
-    store[n].nlist = i32(xs.len())
+    store[n].nlist = i32(count)
 
 node_set_list2 = (store: mut Node[], runs: mut i32[], n: int, xs: int[]):
     start = runs.len()
-    loop x in xs: runs.push(i32(x))
+    count = xs.len()
+    if count > 0:
+        need = start + count
+        if runs.cap() < need: runs.reserve(need)
+        __set_len(runs, need)
+        dst = data(runs) + start
+        src = data(xs)
+        loop i in [0..count): dst[i] = i32(src[i])
     store[n].list2 = i32(start)
-    store[n].nlist2 = i32(xs.len())
+    store[n].nlist2 = i32(count)
+
+node_append_raw = (runs: mut i32[], src: *int, count: int) -> int:
+    start = runs.len()
+    if count > 0:
+        need = start + count
+        if runs.cap() < need: runs.reserve(need)
+        __set_len(runs, need)
+        dst = data(runs) + start
+        loop i in [0..count): dst[i] = i32(src[i])
+    start
+
+node_set_list_span = (store: mut Node[], runs: mut i32[], n: int, buf: mut int[], base: int):
+    count = buf.len() - base
+    start = node_append_raw(runs, data(buf) + base, count)
+    if count > 0: __set_len(buf, base)
+    store[n].list = i32(start)
+    store[n].nlist = i32(count)
 
 node_run_of = (runs: mut i32[], start: int, count: int) -> int[]:
     out: int[]
-    out.reserve(count)
-    loop i in [start..start + count): out.push(int(runs[i]))
+    if count > 0:
+        out.reserve(count)
+        __set_len(out, count)
+        dst = data(out)
+        src = data(runs) + start
+        loop i in [0..count): dst[i] = int(src[i])
     out
 
 node_kids = (store: mut Node[], runs: mut i32[], n: int) -> int[]: node_run_of(runs, int(store[n].list), int(store[n].nlist))
 node_kids2 = (store: mut Node[], runs: mut i32[], n: int) -> int[]: node_run_of(runs, int(store[n].list2), int(store[n].nlist2))
 
+node_clone_buf: int[]
 node_clone = (store: mut Node[], runs: mut i32[], n: int) -> int:
     if n == 0: return 0
-    nd = store[n]
-    k = nd.kind
-    if k != .fn_ and k != .struct_ and k != .enum_: nd.sym = 0
-    if k != .conv: nd.type = 0
-    nd.flags = i32(int(nd.flags) & ~NODE_CHECKED)
-    c = store.len()
-    store.push(nd)
-    if nd.a != 0: store[c].a = i32(node_clone(store, runs, int(nd.a)))
-    if nd.b != 0: store[c].b = i32(node_clone(store, runs, int(nd.b)))
-    if nd.c != 0: store[c].c = i32(node_clone(store, runs, int(nd.c)))
-    if nd.d != 0: store[c].d = i32(node_clone(store, runs, int(nd.d)))
-    if nd.nlist > 0:
-        xs: int[]
-        loop i in [0..int(nd.nlist)): xs.push(node_clone(store, runs, int(runs[int(nd.list) + i])))
-        node_set_list(store, runs, c, xs)
-    if nd.nlist2 > 0:
-        xs: int[]
-        loop i in [0..int(nd.nlist2)): xs.push(node_clone(store, runs, int(runs[int(nd.list2) + i])))
-        node_set_list2(store, runs, c, xs)
+    sp = data(store)
+    sh = (sp as *int) - 3
+    if sp == null or sh[0] != 1 or sh[1] >= sh[2]:
+        oc = store.len()
+        ncap = oc * 2
+        if oc + 1 > ncap: ncap = oc + 1
+        store.reserve(ncap)
+        sp = data(store)
+        sh = (sp as *int) - 3
+    c = sh[1]
+    sh[1] = c + 1
+    dst = sp + c
+    mem_copy(dst as *u8, (sp + n) as *u8, size_of(Node))
+    k = dst[0].kind
+    if k != .fn_ and k != .struct_ and k != .enum_: dst[0].sym = 0
+    if k != .conv: dst[0].type = 0
+    dst[0].flags = i32(int(dst[0].flags) & ~NODE_CHECKED)
+    na = int(dst[0].a)
+    nb = int(dst[0].b)
+    nc = int(dst[0].c)
+    nd_ = int(dst[0].d)
+    nl1 = int(dst[0].nlist)
+    nl2 = int(dst[0].nlist2)
+    if (na | nb | nc | nd_ | nl1 | nl2) == 0: return c
+    l1 = int(dst[0].list)
+    l2 = int(dst[0].list2)
+    if na != 0:
+        ra = i32(node_clone(store, runs, na))
+        data(store)[c].a = ra
+    if nb != 0:
+        rb = i32(node_clone(store, runs, nb))
+        data(store)[c].b = rb
+    if nc != 0:
+        rc = i32(node_clone(store, runs, nc))
+        data(store)[c].c = rc
+    if nd_ != 0:
+        rd = i32(node_clone(store, runs, nd_))
+        data(store)[c].d = rd
+    if nl1 > 0:
+        if nl1 == 1:
+            c0 = i32(node_clone(store, runs, int(runs[l1])))
+            lp = data(runs)
+            lh = (lp as *int) - 3
+            if lp == null or lh[0] != 1 or lh[1] >= lh[2]:
+                os = runs.len()
+                ncap = os * 2
+                if os + 1 > ncap: ncap = os + 1
+                runs.reserve(ncap)
+                lp = data(runs)
+                lh = (lp as *int) - 3
+            start = lh[1]
+            lh[1] = start + 1
+            lp[start] = c0
+            np = data(store) + c
+            np[0].list = i32(start)
+            np[0].nlist = i32(1)
+        else if nl1 == 2:
+            k0 = int(runs[l1])
+            k1 = int(runs[l1 + 1])
+            c0 = i32(node_clone(store, runs, k0))
+            c1 = i32(node_clone(store, runs, k1))
+            lp = data(runs)
+            lh = (lp as *int) - 3
+            if lp == null or lh[0] != 1 or lh[1] + 2 > lh[2]:
+                os = runs.len()
+                ncap = os * 2
+                if os + 2 > ncap: ncap = os + 2
+                runs.reserve(ncap)
+                lp = data(runs)
+                lh = (lp as *int) - 3
+            start = lh[1]
+            lh[1] = start + 2
+            lp1 = lp + start
+            lp1[0] = c0
+            lp1[1] = c1
+            np = data(store) + c
+            np[0].list = i32(start)
+            np[0].nlist = i32(2)
+        else:
+            base = node_clone_buf.len()
+            loop i in [0..nl1):
+                child = node_clone(store, runs, int(runs[l1 + i]))
+                node_clone_buf.push(child)
+            count = node_clone_buf.len() - base
+            start = node_append_raw(runs, data(node_clone_buf) + base, count)
+            __set_len(node_clone_buf, base)
+            np = data(store) + c
+            np[0].list = i32(start)
+            np[0].nlist = i32(count)
+    if nl2 > 0:
+        base = node_clone_buf.len()
+        loop i in [0..nl2):
+            child = node_clone(store, runs, int(runs[l2 + i]))
+            node_clone_buf.push(child)
+        count = node_clone_buf.len() - base
+        start = node_append_raw(runs, data(node_clone_buf) + base, count)
+        __set_len(node_clone_buf, base)
+        np = data(store) + c
+        np[0].list2 = i32(start)
+        np[0].nlist2 = i32(count)
     c
 
 call_waits_never: bool[]

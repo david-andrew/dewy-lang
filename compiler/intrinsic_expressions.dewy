@@ -46,6 +46,7 @@ from p"checker_source_positions.dewy" import (dewy_at)
 from p"checker_module_lookup.dewy" import (demand_name module_lookup)
 from p"data_access.dewy" import (data_access_note)
 from p"check.jo" import (ctxs cx fns locals prelude syms throwing_iters value_loops)
+from p"checker_state.dewy" import (live_body_indexes)
 from p"concurrency_types.dewy" import (concurrency_require_zero)
 from p"concurrency_tasks.dewy" import (concurrency_report)
 from p"call_lookup_context.dewy" import (ci program_str_fn)
@@ -250,6 +251,8 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
         }
         else {
             let ix=mk('index' pos)
+            let lbi=@live_body_indexes
+            lbi = IntrinsicExpressionsWord(lbi) + 1
             nodes[ix].a = int32<overflow='wrap'>(if is_map_type(t) or is_map_entries_type(t) {bc_map_keys(args[0] pos)} else {args[0]})
             nodes[ix].b = int32<overflow='wrap'>(args[1])
             nodes[n] = nodes.ptr[ix]

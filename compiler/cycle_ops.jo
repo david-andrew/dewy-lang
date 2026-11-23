@@ -135,55 +135,76 @@ cyc_take = (g: int, pos: int, via: int):
     cr_ev.push(via)
 # In function f's body (f > 0), ev gets its accesses and calls; in a statement of
 # the program (f == 0), ev gets the statement's accesses.
+cyc_wstack: int[]
+cyc_wsp = 0
 cyc_walk = (root: int):
-    # Checking is finished: this read-only walk and its call-graph visits do
-    # not grow or rewrite nodes. Keep that stable view across recursive calls.
+    if root <= 0: return
+    if cyc_wstack.len() < 256: cyc_wstack.resize(256)
+    base = cyc_wsp
+    if base >= cyc_wstack.len(): cyc_wstack.resize((base + 64) * 2)
+    st = data(cyc_wstack)
+    scap = cyc_wstack.len()
+    st[base] = root
+    sp = base + 1
     ns = data(nodes)
-    n = root
-    loop n > 0:
-        k = ns[n].kind
+    lp = data(lists)
+    icp = iso_child_p
+    gl = data(globals)
+    crm = data(cr_member)
+    loop sp > base:
+        sp -= 1
+        n = st[sp]
+        if n <= 0: continue
+        np = ns + n
+        k = np[0].kind
         if k == .ident:
-            if ns[n].aux == i32(int(SK.global)):
-                g = int(ns[n].sym)
-                if cr_member[int(globals[g].mod)]:
+            if np[0].aux == i32(int(SK.global)):
+                g = int(np[0].sym)
+                if crm[int(gl[g].mod)]:
                     if cr_owner > 0: cr_ev.push(g)
-                    else: cyc_take(g, ns[n].pos, 0)
-            return
-        if k == .int_lit or k == .float_lit or k == .bool_lit or k == .none_lit: return
-        # Only executed calls demand a summary. Creating a callable does not.
+                    else: cyc_take(g, np[0].pos, 0)
+            continue
+        if k == .int_lit or k == .float_lit or k == .bool_lit or k == .none_lit or k == .dotname or k == .null_lit or k == .hole or k == .break_ or k == .continue_: continue
         h = 0
         if k == .call:
-            if ns[n].aux == 0: h = int(ns[n].sym)
-            else if ns[n].aux == 1 or ns[n].aux == 4: h = cyc_callable(int(ns[n].a))
-        if h > 0: cyc_call(h, n)
+            if np[0].aux == 0: h = int(np[0].sym)
+            else if np[0].aux == 1 or np[0].aux == 4: h = cyc_callable(int(np[0].a))
+        if h > 0:
+            cyc_wsp = sp
+            cyc_call(h, n)
+            st = data(cyc_wstack)
+            scap = cyc_wstack.len()
         if cr_helpers and (k == .binary or k == .intrinsic):
+            cyc_wsp = sp
             loop helper in value_helper_calls(n): cyc_call(helper, n)
-        # Assignment destinations need their declaration too: a later initializer
-        # must not overwrite a module-level write. The normal child walk includes
-        # plain, destructured and field/index destinations in the same summary.
-        mask = isolation_children(k)
-        if mask == 0: return
-        # Tail-walk chains of field accesses and coercions without a stack
-        # frame per node. Other children retain their normal first-use order.
-        if mask == 1:
-            n = int(ns[n].a)
-            continue
-        if mask == 2:
-            n = int(ns[n].b)
-            continue
-        if mask == 3:
-            cyc_walk(int(ns[n].a))
-            n = int(ns[n].b)
-            continue
+            st = data(cyc_wstack)
+            scap = cyc_wstack.len()
+        mask = int(icp[int(k)])
+        if mask == 0: continue
         if mask < 0: mask = 1 | 2 | 16
-        if mask & 1 != 0: cyc_walk(int(ns[n].a))
-        if mask & 2 != 0: cyc_walk(int(ns[n].b))
-        if mask & 4 != 0: cyc_walk(int(ns[n].c))
-        if mask & 16 != 0:
-            loop i in [0..nkids(n)): cyc_walk(kid(n, i))
-        if mask & 32 != 0:
-            loop i in [0..nkids2(n)): cyc_walk(kid2(n, i))
-        return
+        k1 = if mask & 16 != 0: int(np[0].nlist) else: 0
+        k2 = if mask & 32 != 0: int(np[0].nlist2) else: 0
+        if sp + k1 + k2 + 3 > scap:
+            scap = (sp + k1 + k2 + 3) * 2
+            cyc_wstack.resize(scap)
+            st = data(cyc_wstack)
+        if k2 > 0:
+            i = k2 - 1
+            loop i >= 0:
+                c = kid2(n, i)
+                if c > 0: st[sp] = c; sp += 1
+                i -= 1
+        if k1 > 0:
+            l1 = int(np[0].list)
+            i = k1 - 1
+            loop i >= 0:
+                c = int(lp[l1 + i])
+                if c > 0: st[sp] = c; sp += 1
+                i -= 1
+        if mask & 4 != 0 and np[0].c > 0: st[sp] = int(np[0].c); sp += 1
+        if mask & 2 != 0 and np[0].b > 0: st[sp] = int(np[0].b); sp += 1
+        if mask & 1 != 0 and np[0].a > 0: st[sp] = int(np[0].a); sp += 1
+    cyc_wsp = base
 # Resolve literal function values at a call site. Handles returned by calls,
 # passed as parameters or stored in mutable places remain opaque; guessing
 # their targets would reject callbacks that are only stored and called later.

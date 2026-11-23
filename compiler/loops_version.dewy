@@ -3,9 +3,9 @@ $runtime_checks
 from p"ir_types.dewy" import (Ins Op)
 from p"ir.jo" import (M_FLOAT M_INDEX M_NULLF VI ir ir_use_count)
 from p"ir_builders.dewy" import (ir_has_use ir_operands ir_use is_kv k_vreg kv_of mem_index vreg vtype)
-from p"opt_workspace.dewy" import (o_regs)
+from p"opt_workspace.dewy" import (o_regs opt_has_float_op opt_has_loops opt_has_vec_cand)
 from p"opt.jo" import (o_defines o_pure)
-from p"opt_rewrite.dewy" import ow_resize_one
+from p"opt_rewrite.dewy" import (ow_resize_one)
 from p"exact_loop.jo" import (exact_map_functions)
 from p"loops.jo" import (CLoop LCheck VPlan lx_vec_on)
 from p"loops_emit.dewy" import (lx_copy lx_endpoint lx_sum)
@@ -430,21 +430,9 @@ lx_appears=(code:array<Ins> v:int64 lo:int64 hi:int64):>int64=>$unsafe {
 
 # the vectorized part of L, in front of what finishes it one element at a time
 fast_vectorize=():>void=>$unsafe {
-    if not lx_vec_on {return}
+    if not lx_vec_on or not opt_has_loops or not opt_has_vec_cand {return}
     let large=ir.code.length >? 400 and (ir.fn_index <? 0 or ir.fn_index >=? exact_map_functions.length or not exact_map_functions[ir.fn_index])
-    let candidate=false
-    let has_loop=false
-    let floating=false
-    loop ins in ir.code {
-        let op=ins.op
-        if op =? 'fadd' or op =? 'fsub' or op =? 'fmul' or op =? 'fdiv' or op =? 'fneg' {
-            candidate=true
-            floating=true
-        }
-        if op =? 'load' and int64(ins.c) & M_INDEX not=? 0 {candidate=true}
-        if op =? 'loop' {has_loop=true}
-    }
-    if candidate and has_loop and (not large or floating) {loop_versioning(true)}
+    if not large or opt_has_float_op {loop_versioning(true)}
 }
 
 # Reject loop shapes that cannot form a vector plan before decomposing any

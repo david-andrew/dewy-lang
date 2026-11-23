@@ -117,12 +117,15 @@ ownership_nominal=(t0:OWord):>bool=>$unsafe {
     let t=ow_representation(t0)
     ow_types[0].ptr[t].kind =? 'struct_' and (ow_structs[0].ptr[ow_st(t)].drop_fn not=? 0 or ow_copies[0].has(t) or ow_moves[0].has(t))
 }
-ownership_type=(t0:OWord):>bool=>$unsafe {
-    if ow_decls[0].length =? 0 {return false}
+ownership_type_slow=(t0:OWord):>bool=>$unsafe {
     let t=ow_representation(t0)
     if ownership_callable_cap(t) not=? 0 {return true}
     let k=ow_types[0].ptr[t].kind
     (k =? 'struct_' or k =? 'tuple' or k =? 'fixed' or k =? 'array' or k =? 'opt' or k =? 'box' or k =? 'enum_') and ownership_contains(t)
+}
+ownership_type=(t0:OWord):>bool=>$unsafe {
+    if ow_decls[0].length =? 0 {return false}
+    ownership_type_slow(t0)
 }
 # The contained cache's keys: t, the settled answer, whether t holds an owner; -1 - t,
 # present while t is being visited (the recursion guard); OW_UNSETTLED, present while some

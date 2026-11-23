@@ -1374,45 +1374,59 @@ rt_dc_short_real = (token: DewyLexeme) -> f64?:
 rt_dc_expr = (minimum: int) -> int:
     dc_parser.depth += 1
     if dc_parser.depth + dc_parser.reader.dn_depth > 256: return rt_dc_too_deep()
-    opening = dc_parser.tokens[dc_parser.at]
-    pos = mkpos(dc_parser.file, opening.start)
+    toks_p = data(dc_parser.tokens)
+    opening_p = toks_p + dc_parser.at
+    open_start = opening_p[0].start
+    open_kind = opening_p[0].kind
+    open_sym = opening_p[0].symbol
+    open_name = opening_p[0].name
+    pos = mkpos(dc_parser.file, open_start)
     first_at = dc_parser.at
     left = 0
     # `(params) => body`, `x => body`: a lambda, where `=>` may apply (dw_function)
     # (`x => body` is found at its `=>`, below)
-    lambda = minimum <= 30 and (opening.symbol == .lparen and rt_dc_lambda_next() or opening.symbol == .langle and rt_dc_generic_lambda_next())
+    lambda = minimum <= 30 and (open_sym == .lparen and rt_dc_lambda_next() or open_sym == .langle and rt_dc_generic_lambda_next())
     if lambda:
         type_params: int[]
-        if opening.symbol == .langle:
+        if open_sym == .langle:
             # `<T>(x:T) => x`: a generic lambda
             type_params = rt_dc_type_params()
             if type_params.len() == 0: return 0
         else: dc_parser.at += 1
         dc_parser.depth += 3
-        left = rt_dc_function_literal(i32(rt_dc_empty_name()), opening, type_params, true)
-    else: left = rt_dc_atom()
+        left = rt_dc_function_literal(i32(rt_dc_empty_name()), opening_p[0], type_params, true)
+    else:
+        if open_kind == .identifier and (open_sym == .none or open_sym == .kw_test) and int(open_name) != dc_parser.reader.dn_end_id and int(open_name) != dc_parser.reader.dn_new_id and int(open_name) != dc_parser.reader.dn_type_id and int(open_name) != dc_parser.reader.dn_none_id:
+            dc_parser.at += 1
+            left = mk(.ident, pos)
+            nodes[left].name = dw_value_name(open_name, pos)
+        else: left = rt_dc_atom()
     if left == 0: return 0
     # (a name, a field route or a parenthesized group: `head(...)` may be a coefficient)
-    juxt_head = not lambda and (opening.symbol == .lparen or opening.kind == .identifier and nodes[left].kind == .ident)
+    juxt_head = not lambda and (open_sym == .lparen or open_kind == .identifier and nodes[left].kind == .ident)
     # (a parenthesized group, while nothing has applied to it: `(5)x`, `(x)2` multiply)
-    group = if not lambda and opening.symbol == .lparen and dc_parser.tokens[dc_parser.at - 1].symbol == .rparen: left else: -1
+    group = if not lambda and open_sym == .lparen and data(dc_parser.tokens)[dc_parser.at - 1].symbol == .rparen: left else: -1
     last_call = 0     # (the call this loop made last: a member or index right after it is marked)
     compared = false    # (left is a comparison this loop made)
     compared_op = DewyToken.none     # (its operator, and where its right operand starts)
     compared_at = 0
     chain = -1          # (the chain being read: its first entry in dc_chain_ops, dc_chain_build)
     loop true:
-        token = dc_parser.tokens[dc_parser.at]
-        op = token.symbol
-        if chain >= 0 and not rt_dc_chain_goes_on(token, minimum):
+        tok_p = data(dc_parser.tokens) + dc_parser.at
+        tok_sym = tok_p[0].symbol
+        op = tok_sym
+        if chain >= 0 and not rt_dc_chain_goes_on(tok_p[0], minimum):
             left = rt_dc_chain_build(chain, pos)
             chain = -1
             if left == 0: return 0
-        if token.kind == .eof: break
-        if token.newline and dn_power(op) == 0 and op != .kw_not: break
-        if dc_parser.reader.dn_angles > 0 and (op == .shr or op == .shr_assign or op == .angle_assign or (op == .gt and not token.space)): break
-        if not token.space and (token.kind == .identifier or op == .lparen or token.kind == .source_integer or token.kind == .source_real or token.kind == .integer):
-            pk = dc_parser.tokens[dc_parser.at - 1].kind
+        tok_space = tok_p[0].space
+        if op == .rparen or op == .rbrack or op == .rbrace or op == .semi or (op == .none and tok_space): break
+        tok_kind = tok_p[0].kind
+        if tok_kind == .eof: break
+        if tok_p[0].newline and dn_power(op) == 0 and op != .kw_not: break
+        if dc_parser.reader.dn_angles > 0 and (op == .shr or op == .shr_assign or op == .angle_assign or (op == .gt and not tok_space)): break
+        if not tok_space and (tok_kind == .identifier or op == .lparen or tok_kind == .source_integer or tok_kind == .source_real or tok_kind == .integer):
+            pk = data(dc_parser.tokens)[dc_parser.at - 1].kind
             if (left == group or pk == .source_integer or pk == .source_real or pk == .integer) and dn_juxtaposed(dc_parser.tokens, dc_parser.at, left == group):
                 if minimum > 135: break
                 right = rt_dc_expr(136)
@@ -1424,7 +1438,7 @@ rt_dc_expr = (minimum: int) -> int:
             if left == last_call and nodes[left].kind == .call and (pk == .quoted or pk == .rawquoted) and op != .lparen:
                 callee = int(nodes[left].a)
                 # The decided formatting shorthand is local to interpolation.
-                if dc_parser.reader.dn_in_interpolation > 0 and token.kind == .identifier and op == .none and nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "fmt":
+                if dc_parser.reader.dn_in_interpolation > 0 and tok_kind == .identifier and op == .none and nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "fmt":
                     arg = rt_dc_atom()
                     if arg == 0: return 0
                     n = mk(.call, pos)
@@ -1434,33 +1448,33 @@ rt_dc_expr = (minimum: int) -> int:
                     last_call = n
                     juxt_head = false
                     continue
-                head = dc_parser.source[opening.start..token.start)
-                argument = dc_parser.source[token.start..token.stop)
+                head = dc_parser.source[open_start..tok_p[0].start)
+                argument = dc_parser.source[tok_p[0].start..tok_p[0].stop)
                 rt_dc_report(pos, "a quoted callable followed by a name or number needs parentheses: write `{head}({argument})`")
                 return 0
             if op != .lparen and dn_juxt_excluded(dc_parser.tokens, dc_parser.at): return rt_dc_juxt_mistake()
         if op == .dot and minimum <= 170:
             dc_parser.at += 1
-            member = dc_parser.tokens[dc_parser.at]
+            member_p = data(dc_parser.tokens) + dc_parser.at
             # `f.(xs)`: the call broadcast over its arguments; `value.$field(name)`: a member named
             # by a compile-time string
-            if member.symbol == .lparen and not member.space or member.kind == .metatag:
+            if member_p[0].symbol == .lparen and not member_p[0].space or member_p[0].kind == .metatag:
                 left = rt_dc_dot_form(left, left == last_call, pos)
                 if left == 0: return 0
                 if nodes[left].kind == .call: juxt_head = false
                 continue
-            if member.kind != .identifier: return rt_dc_member_mistake(member)
+            if member_p[0].kind != .identifier: return rt_dc_member_mistake(member_p[0])
             dc_parser.at += 1
             # `$target.arch`, `$target.os`: that part of the name (dw_target_field)
-            if dc_parser.reader.dc_targets_made > 0 and left == nodes.len() - 1 and rt_dc_target_of(left) == 0 and rt_dc_target_member(left, member): continue
+            if dc_parser.reader.dc_targets_made > 0 and left == nodes.len() - 1 and rt_dc_target_of(left) == 0 and rt_dc_target_member(left, member_p[0]): continue
             n = mk(.field, pos)
             nodes[n].a = i32(left)
-            nodes[n].name = member.name
+            nodes[n].name = member_p[0].name
             if left == last_call: add_flag(n, NF_JUXT)
-            dewy_note_member(n)
+            if int(member_p[0].name) == dc_parser.reader.dn_len_id: dewy_note_member(n)
             left = n
             continue
-        if not token.space and op == .lparen and minimum <= 170:
+        if not tok_space and op == .lparen and minimum <= 170:
             dc_parser.at += 1
             n = mk(.call, pos)
             nodes[n].a = i32(left)
@@ -1475,15 +1489,15 @@ rt_dc_expr = (minimum: int) -> int:
                 continue
             if not rt_dc_arguments(n, .rparen): return 0
             if nkids(n) == 0:
-                after = dc_parser.tokens[dc_parser.at]
-                joined = after.symbol == .lbrack or after.symbol == .lparen or after.kind == .quoted or after.kind == .rawquoted or after.symbol == .lbrace and not after.space
+                after_p = data(dc_parser.tokens) + dc_parser.at
+                joined = after_p[0].symbol == .lbrack or after_p[0].symbol == .lparen or after_p[0].kind == .quoted or after_p[0].kind == .rawquoted or after_p[0].symbol == .lbrace and not after_p[0].space
                 if not joined: nodes[n].aux2 = i32(AUX2_EMPTY_PARENS)
             left = n
             last_call = n
             juxt_head = false
             continue
         # `my_fn{a b}`: the call `my_fn(a b)`, unidiomatic (decisions.md, batch 9)
-        if not token.space and op == .lbrace and minimum <= 170 and left != group and (nodes[left].kind == .ident or nodes[left].kind == .field):
+        if not tok_space and op == .lbrace and minimum <= 170 and left != group and (nodes[left].kind == .ident or nodes[left].kind == .field):
             dc_parser.at += 1
             n = mk(.call, pos)
             nodes[n].a = i32(left)
@@ -1495,7 +1509,7 @@ rt_dc_expr = (minimum: int) -> int:
             continue
         # `xs[i]`, `Point[x y]`, `Point[x=1 y=2]`; ranges, `end`, `new` and
         # `set[...]` are left unread (dc_unread).
-        if not token.space and op == .lbrack and minimum <= 170:
+        if not tok_space and op == .lbrack and minimum <= 170:
             # `set[a b]`: a set of the literal's elements (dw_expr's `__dewy_set`)
             if nodes[left].kind == .ident and rt_dc_word(int(nodes[left].name)) == DC_SET and left == nodes.len() - 1:
                 elements = rt_dc_atom()
@@ -1518,17 +1532,17 @@ rt_dc_expr = (minimum: int) -> int:
             juxt_head = false
             continue
         # `f<T>(x)`: the application as a type, and its arguments again as types
-        if not token.space and op == .langle and minimum <= 160:
+        if not tok_space and op == .langle and minimum <= 160:
             # (`b.read<uint64>(2)`: a module's name, dw_type's `.`)
-            name_token = dc_parser.tokens[dc_parser.at - 1]
+            name_tok_p = data(dc_parser.tokens) + (dc_parser.at - 1)
             first = dc_parser.at - 1
             if not rt_dc_named_base(left):
                 left = rt_dc_type_applied(left, pos)
                 if left == 0: return 0
                 juxt_head = false
                 continue
-            if nodes[left].kind == .field and dc_parser.at >= 3 and dc_parser.tokens[dc_parser.at - 2].symbol == .dot and dc_parser.tokens[dc_parser.at - 3].kind == .identifier and nodes[int(nodes[left].a)].kind == .ident and nodes[int(nodes[left].a)].pos == mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at - 3].start): first = dc_parser.at - 3
-            else if nodes[left].kind != .ident or name_token.kind != .identifier or nodes[left].pos != mkpos(dc_parser.file, name_token.start): return 0
+            if nodes[left].kind == .field and dc_parser.at >= 3 and data(dc_parser.tokens)[dc_parser.at - 2].symbol == .dot and data(dc_parser.tokens)[dc_parser.at - 3].kind == .identifier and nodes[int(nodes[left].a)].kind == .ident and nodes[int(nodes[left].a)].pos == mkpos(dc_parser.file, data(dc_parser.tokens)[dc_parser.at - 3].start): first = dc_parser.at - 3
+            else if nodes[left].kind != .ident or name_tok_p[0].kind != .identifier or nodes[left].pos != mkpos(dc_parser.file, name_tok_p[0].start): return 0
             at = dc_parser.at
             dc_parser.at = first
             edits = dc_parser.reader.dn_edit_at.len()
@@ -1559,12 +1573,12 @@ rt_dc_expr = (minimum: int) -> int:
             if left == 0: return 0
             juxt_head = false
             continue
-        if not token.space and (token.kind == .quoted or token.kind == .rawquoted) and minimum <= 170:
+        if not tok_space and (tok_kind == .quoted or tok_kind == .rawquoted) and minimum <= 170:
             # `b'a'`, `b"abc"`: a byte, or an array of bytes (dw_byte_literal)
             if nodes[left].kind == .ident and rt_dc_word(int(nodes[left].name)) == DC_B:
-                written = dc_parser.tokens[dc_parser.at - 1]
-                if written.kind != .identifier or nodes[left].pos != mkpos(dc_parser.file, written.start): return 0
-                literal = rt_dc_byte_literal(token)
+                written_p = data(dc_parser.tokens) + (dc_parser.at - 1)
+                if written_p[0].kind != .identifier or nodes[left].pos != mkpos(dc_parser.file, written_p[0].start): return 0
+                literal = rt_dc_byte_literal(tok_p[0])
                 if literal == 0: return 0
                 dc_parser.at += 1
                 left = literal
@@ -1572,7 +1586,7 @@ rt_dc_expr = (minimum: int) -> int:
                 juxt_head = false
                 continue
             dc_parser.at += 1
-            arg = rt_dn_string(token)
+            arg = rt_dn_string(tok_p[0])
             if arg == 0: return 0
             n = mk(.call, pos)
             nodes[n].a = i32(left)
@@ -1583,15 +1597,15 @@ rt_dc_expr = (minimum: int) -> int:
             juxt_head = false
             continue
         if op == .kw_not and dc_parser.at + 1 < dc_parser.tokens.len():
-            inverted = dn_token_invert(dc_parser.tokens[dc_parser.at + 1].symbol)
+            inverted = dn_token_invert(data(dc_parser.tokens)[dc_parser.at + 1].symbol)
             if inverted != .none: op = inverted
         if op == .comma and dc_parser.flags.comma_stop: break
         # `x => body`: the name just read is a lambda's one parameter
-        if op == .function and minimum <= 30 and left == nodes.len() - 1 and nodes[left].kind == .ident and opening.kind == .identifier and dc_parser.tokens[dc_parser.at - 1].start == opening.start and rt_dc_lambda_next_at(dc_parser.at - 1):
+        if op == .function and minimum <= 30 and left == nodes.len() - 1 and nodes[left].kind == .ident and open_kind == .identifier and data(dc_parser.tokens)[dc_parser.at - 1].start == open_start and rt_dc_lambda_next_at(dc_parser.at - 1):
             nodes.truncate(left)
             dc_parser.at -= 1
             dc_parser.depth += 3
-            left = rt_dc_function_literal(i32(rt_dc_empty_name()), opening, [], true, true)
+            left = rt_dc_function_literal(i32(rt_dc_empty_name()), opening_p[0], [], true, true)
             if left == 0: return 0
             juxt_head = false
             group = -1
@@ -1609,7 +1623,7 @@ rt_dc_expr = (minimum: int) -> int:
             if step == 0 or rt_dn_peek() != .range:
                 # (`[1, 2, 3]`: commas after the first element, not a stepped range's starts;
                 # dw_comma_fail's mistake, should nothing else read it)
-                if step != 0 and first_at > 0 and dc_parser.tokens[first_at - 1].symbol == .lbrack and not rt_dc_range_follows(dc_parser.at): rt_dc_hint(pos, rt_dc_comma_text())
+                if step != 0 and first_at > 0 and data(dc_parser.tokens)[first_at - 1].symbol == .lbrack and not rt_dc_range_follows(dc_parser.at): rt_dc_hint(pos, rt_dc_comma_text())
                 return 0
             op = DewyToken.range
             power = dn_power(op)
@@ -1638,9 +1652,9 @@ rt_dc_expr = (minimum: int) -> int:
                 left = dw_range_value(n)
             juxt_head = false
             continue
-        if (op == .plus or op == .minus) and token.space and not dc_parser.tokens[dc_parser.at + 1].space: break
+        if (op == .plus or op == .minus) and tok_space and not data(dc_parser.tokens)[dc_parser.at + 1].space: break
         # `x is? T`, `x isnt? T`, `x as T`, `x transmute T`: a type on the right
-        if token.symbol == op and (op == .is_type or op == .isnt_type or op == .kw_as or op == .kw_transmute):
+        if tok_sym == op and (op == .is_type or op == .isnt_type or op == .kw_as or op == .kw_transmute):
             if compared and (op == .is_type or op == .isnt_type): return 0
             dc_parser.at += 1
             t = rt_dc_cast_type(op == .kw_as, power)
@@ -1660,7 +1674,7 @@ rt_dc_expr = (minimum: int) -> int:
         # `a ?? b`: an arithmetic fallback (`a ?? 1 + n`) has a warning of its own
         if op == .coalesce:
             # `x ??<A | B> fallback`: the fallback only for the kinds listed, one type (c)
-            if dc_parser.at + 1 < dc_parser.tokens.len() and not dc_parser.tokens[dc_parser.at + 1].space and (dc_parser.tokens[dc_parser.at + 1].symbol == .langle or dc_parser.tokens[dc_parser.at + 1].symbol == .lt):
+            if dc_parser.at + 1 < dc_parser.tokens.len() and not data(dc_parser.tokens)[dc_parser.at + 1].space and (data(dc_parser.tokens)[dc_parser.at + 1].symbol == .langle or data(dc_parser.tokens)[dc_parser.at + 1].symbol == .lt):
                 left = rt_dc_listed_coalesce(left, power, pos)
                 if left == 0: return 0
                 compared = false
@@ -1709,7 +1723,7 @@ rt_dc_expr = (minimum: int) -> int:
                 continue
             # `xs .+ ys`, `a .* 2`: elementwise (dw_broadcast)
             scalar = dn_token_undot(op)
-            if scalar == .none or token.symbol != op: return rt_dc_operator_mistake()
+            if scalar == .none or tok_sym != op: return rt_dc_operator_mistake()
             dc_parser.at += 1
             right = rt_dc_expr(if dn_right_associative(op): power else: power + 1)
             if right == 0: return 0
@@ -1722,7 +1736,7 @@ rt_dc_expr = (minimum: int) -> int:
         # `not` is left unread (dc_unread)
         chained = dw_chain_way(scalar_op) != 2 or scalar_op == .not_eq
         if chained and compared:
-            if token.symbol != op or scalar_op != op: return rt_dc_not_chain(pos)
+            if tok_sym != op or scalar_op != op: return rt_dc_not_chain(pos)
             if chain < 0:
                 if nodes[left].kind != .binary or dn_token_uninvert(compared_op) != compared_op: return rt_dc_not_chain(pos)
                 chain = dc_parser.reader.dc_chain_ops.len()
@@ -1735,7 +1749,7 @@ rt_dc_expr = (minimum: int) -> int:
             rt_dc_chain_push(op, right, at)
             continue
         dc_parser.at += 1
-        if token.symbol == .kw_not: dc_parser.at += 1
+        if tok_sym == .kw_not: dc_parser.at += 1
         membership = op == .contains or op == .not_contains
         if membership: dc_parser.reader.dc_range_call = 0
         compared_op = op
@@ -1762,17 +1776,19 @@ rt_dc_expr = (minimum: int) -> int:
         left = rt_dc_chain_build(chain, pos)
         if left == 0: return 0
     # These suffixes belong to this expression, but have not migrated yet.
-    token = dc_parser.tokens[dc_parser.at]
-    if not token.space and (token.symbol == .lbrack or token.symbol == .langle or token.kind == .quoted or token.kind == .rawquoted): return 0
-    if token.symbol == .question or token.symbol == .ellipsis:
+    end_p = data(dc_parser.tokens) + dc_parser.at
+    end_sym = end_p[0].symbol
+    if not end_p[0].space and (end_sym == .lbrack or end_sym == .langle or end_p[0].kind == .quoted or end_p[0].kind == .rawquoted): return 0
+    if end_sym == .question or end_sym == .ellipsis:
         # (`xs...` as a whole array element: dc_spread_depth; anywhere else unread)
-        if token.symbol == .question or minimum > 170: return 0
+        if end_sym == .question or minimum > 170: return 0
         if dc_parser.depth != dc_parser.reader.dc_spread_depth:
             if not dc_parser.flags.report_now or rt_dc_spread_outside(pos) == 0: return 0
             dc_parser.depth -= 1
             return left
-        after = dc_parser.tokens[dc_parser.at + 1]
-        if not (after.space or after.newline or after.symbol == .rbrack or after.symbol == .rparen or after.symbol == .semi) or dn_power(after.symbol) > 0 or after.symbol == .dot or after.symbol == .question or after.symbol == .ellipsis: return 0
+        after_p = data(dc_parser.tokens) + (dc_parser.at + 1)
+        asym = after_p[0].symbol
+        if not (after_p[0].space or after_p[0].newline or asym == .rbrack or asym == .rparen or asym == .semi) or dn_power(asym) > 0 or asym == .dot or asym == .question or asym == .ellipsis: return 0
         dc_parser.at += 1
         add_flag(left, NF_SPREAD)
     dc_parser.depth -= 1
@@ -8153,7 +8169,7 @@ rt_dn_payload = (token: DewyLexeme) -> str:
     if (token.kind == .source_integer or token.kind == .source_real) and first + 1 < token.stop and source[first] == '0' and source[first + 1] == 'd': first += 2
     source[first..token.stop)
 
-rt_dn_peek = () -> DewyToken: dc_parser.tokens[dc_parser.at].symbol
+rt_dn_peek = () -> DewyToken: data(dc_parser.tokens)[dc_parser.at].symbol
 
 rt_dn_take = () -> DewyLexeme:
     value = dc_parser.tokens[dc_parser.at]
@@ -8161,7 +8177,7 @@ rt_dn_take = () -> DewyLexeme:
     value
 
 rt_dn_accept = (symbol: DewyToken) -> bool:
-    if rt_dn_peek() != symbol: return false
+    if data(dc_parser.tokens)[dc_parser.at].symbol != symbol: return false
     dc_parser.at += 1
     true
 
@@ -8169,7 +8185,7 @@ rt_dn_accept = (symbol: DewyToken) -> bool:
 # on its own line) ends a row of an array literal, `[1 2 ; 3 4]`
 
 rt_dn_accept_semi = () -> bool:
-    if rt_dn_peek() != .semi: return false
+    if data(dc_parser.tokens)[dc_parser.at].symbol != .semi: return false
     dc_parser.at += 1
     true
 

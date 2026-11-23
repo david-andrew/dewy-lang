@@ -19,31 +19,51 @@ struct TypeInferenceInput:
     binds: *int
     host: *TypeInferenceHost
 tu_inputs: *TypeInferenceInput
+tu_types: *(TypeInfo[])
+tu_structs: *(StructInfo[])
+tu_args: *(i32[])
 type_inference_bind = (input: *TypeInferenceInput) -> int:
     tu_inputs = input
+    tu_types = input[0].types
+    tu_structs = input[0].structs
+    tu_args = input[0].args
     0
-tu_prune = (t0: int) -> int:
+tu_prune_var = (tp: *TypeInfo, t0: int) -> int:
     t = t0
-    loop t != 0 and tu_inputs[0].types[0][t].kind == .var and tu_inputs[0].types[0][t].ref != 0: t = int(tu_inputs[0].types[0][t].ref)
+    loop tp[t].kind == .var and tp[t].ref != 0: t = int(tp[t].ref)
     t
-tu_has_var = (t: int) -> bool: int(tu_inputs[0].types[0][t].flags) & 1 != 0
-tu_targ = (t: int, i: int) -> int: int(tu_inputs[0].args[0][int(tu_inputs[0].types[0][t].args) + i])
-tu_struct_targ = (si: int, i: int) -> int: int(tu_inputs[0].args[0][int(tu_inputs[0].structs[0][si].targs) + i])
+tu_prune = (t0: int) -> int:
+    tp = data(tu_types[0]) + t0
+    if tp[0].kind == .var and tp[0].ref != 0: return tu_prune_var(data(tu_types[0]), int(tp[0].ref))
+    t0
+tu_has_var = (t: int) -> bool: int(tu_types[0][t].flags) & 1 != 0
+tu_targ = (t: int, i: int) -> int: int(tu_args[0][int(tu_types[0][t].args) + i])
+tu_struct_targ = (si: int, i: int) -> int: int(tu_args[0][int(tu_structs[0][si].targs) + i])
 tu_occurs = (v: int, t0: int) -> bool:
     t = tu_prune(t0)
     if t == v: return true
     if not tu_has_var(t): return false
-    type_query_occurs_children(tu_inputs[0].types[0], tu_inputs[0].structs[0], tu_inputs[0].args[0], v, t)
-tu_equal = (a0: int, b0: int) -> bool:
-    a = tu_prune(a0)
-    b = tu_prune(b0)
+    type_query_occurs_children(tu_types[0], tu_structs[0], tu_args[0], v, t)
+tu_equal_slow = (a0: int, b0: int) -> bool:
+    types = data(tu_types[0])
+    a = a0
+    b = b0
+    loop a != 0 and types[a].kind == .var and types[a].ref != 0: a = int(types[a].ref)
+    loop b != 0 and types[b].kind == .var and types[b].ref != 0: b = int(types[b].ref)
     if a == b: return true
     if a == 0 or b == 0: return false
-    if not tu_has_var(a) and not tu_has_var(b): return false
-    type_query_equal_shape(tu_inputs[0].types[0], tu_inputs[0].structs[0], tu_inputs[0].args[0], a, b)
+    if int(types[a].flags) & 1 == 0 and int(types[b].flags) & 1 == 0: return false
+    type_query_equal_shape(tu_types[0], tu_structs[0], tu_args[0], a, b)
+tu_equal = (a0: int, b0: int) -> bool:
+    if a0 == b0: return true
+    if a0 == 0 or b0 == 0: return false
+    tp = data(tu_types[0])
+    if int(tp[a0].flags) & 1 == 0 and tp[a0].kind != .var and int(tp[b0].flags) & 1 == 0 and tp[b0].kind != .var: return false
+    tu_equal_slow(a0, b0)
 tu_is_union = (t0: int) -> bool:
     t = tu_prune(t0)
-    tu_inputs[0].types[0][t].kind == .enum_ and tu_inputs[0].structs[0][int(tu_inputs[0].types[0][t].st)].union_
+    tp = data(tu_types[0])
+    tp[t].kind == .enum_ and tu_structs[0][int(tp[t].st)].union_
 
 tu_union_members = (t0: int) -> int[]:
     si = int(tu_inputs[0].types[0][tu_prune(t0)].st)
@@ -51,9 +71,18 @@ tu_union_members = (t0: int) -> int[]:
     loop i in [0..int(tu_inputs[0].structs[0][si].ntargs)): out.push(tu_struct_targ(si, i))
     out
 
+tu_zonk_slow = (t0: int) -> int:
+    types = data(tu_types[0])
+    t = t0
+    loop t != 0 and types[t].kind == .var and types[t].ref != 0: t = int(types[t].ref)
+    if t == 0 or int(types[t].flags) & 1 == 0 or types[t].kind == .var or types[t].kind == .param: return t
+    tu_zonk_children(t)
 tu_zonk = (t0: int) -> int:
-    t = tu_prune(t0)
-    if t == 0 or not tu_has_var(t) or tu_inputs[0].types[0][t].kind == .var or tu_inputs[0].types[0][t].kind == .param: return t
+    if t0 == 0: return 0
+    tp = data(tu_types[0])
+    if int(tp[t0].flags) & 1 == 0 and tp[t0].kind != .var: return t0
+    tu_zonk_slow(t0)
+tu_zonk_children = (t: int) -> int:
     k = tu_inputs[0].types[0][t].kind
     if k == .callable: return tu_inputs[0].host[0].mk_callable_contract(tu_zonk(int(tu_inputs[0].types[0][t].elem)), tu_inputs[0].host[0].effect_subst(int(tu_inputs[0].types[0][t].st), [], true), int(tu_inputs[0].types[0][t].bits))
     if k == .effect: return tu_inputs[0].host[0].effect_type(tu_inputs[0].host[0].effect_subst(int(tu_inputs[0].types[0][t].st), [], true))
@@ -72,10 +101,18 @@ tu_zonk = (t0: int) -> int:
     loop i in [0..int(tu_inputs[0].types[0][t].nargs)): args.push(tu_zonk(tu_targ(t, i)))
     tu_inputs[0].host[0].mk_type(c, args)
 
-tu_unify = (a0: int, b0: int) -> bool:
-    a = tu_prune(a0)
-    b = tu_prune(b0)
+tu_unify_slow = (a0: int, b0: int) -> bool:
+    types = data(tu_types[0])
+    a = a0
+    b = b0
+    loop a != 0 and types[a].kind == .var and types[a].ref != 0: a = int(types[a].ref)
+    loop b != 0 and types[b].kind == .var and types[b].ref != 0: b = int(types[b].ref)
     if a == b: return true
+    tu_unify_pair(a, b)
+tu_unify = (a0: int, b0: int) -> bool:
+    if a0 == b0: return true
+    tu_unify_slow(a0, b0)
+tu_unify_pair = (a: int, b: int) -> bool:
     if tu_inputs[0].types[0][a].kind == .var:
         if tu_occurs(a, b): return false
         tu_inputs[0].types[0][a].ref = i32(b)

@@ -2,6 +2,7 @@ $runtime_checks
 from p"checker_constant_queries.dewy" import (binding_const_init)
 from p"ast.jo" import (NF_U64 has_flag kid mk nkids nodes set_list)
 from p"check.jo" import (syms)
+from p"checker_state.dewy" import (live_body_indexes)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checks_builders.dewy" import (bc_block bc_ident bc_let bc_stmt)
 from p"diagnostic_exit.dewy" import (fatal)
@@ -63,6 +64,7 @@ dewy_position_index=(n:PositionIndexWord bt:PositionIndexWord expected:PositionI
     let declared=bc_let(elements values pos)
     nodes.ptr[declared].a=int32(shape)
     let read=mk('index' pos)
+    live_body_indexes += 1
     nodes.ptr[read].a=int32(bc_ident(elements pos))
     nodes.ptr[read].b=int32(b)
     set_list(read [b])

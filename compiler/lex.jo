@@ -23,8 +23,7 @@ struct Token:
     pos: int        # encoded position (file + offset)
     start: i32      # byte offset of token text
     len: i32
-    ival: int
-    fval: f64
+    ival: int       # int value, interned name id, partner index, or f64_bits for float_lit
 
 hash_key_pinned = __hash_key_pin(0x6A09E667F3BCC909)
 
@@ -46,6 +45,7 @@ lx_p: *u8 = null
 lx_n = 0
 lx_i = 0
 lx_toks: Token[]
+lx_tok_pool: Token[]
 lx_indents: int[]
 lx_tab_indent = false           # (some line is indented with a tab, and some with spaces: said in errors)
 lx_space_indent = false

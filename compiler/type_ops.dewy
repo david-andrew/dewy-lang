@@ -108,16 +108,28 @@ policy_int=(base:int64 policy:int64 pos:int64):>int64=>$unsafe {
     ti.st=int32(policy)
     mk_type(ti [])
 }
-zonk=(t:TypeOpWord):>int64=>{
+zonk=(t:TypeOpWord):>int64=>$unsafe {
+    if t =? 0 {return 0}
+    let tp=types.ptr + t
+    if (TypeOpWord(tp[0].flags) & 1) =? 0 and tp[0].kind not=? 'var' {return t}
     tu_zonk(t)
 }
 unify=(a:TypeOpWord b:TypeOpWord):>bool=>{
     tu_unify(a b)
 }
-simple_enum=(t:int64):>bool=>{
+simple_enum=(t:int64):>bool=>$unsafe {
+    let tp=types.ptr
+    if t not=? 0 and TypeOpWord(tp[t].flags) & 2 not=? 0 and tp[t].kind not=? 'var' {
+        return structs.ptr[TypeOpWord(tp[t].st)].simple_enum
+    }
     tp_simple_enum(t)
 }
-is_managed=(t:TypeOpWord):>bool=>{
+is_managed=(t:TypeOpWord):>bool=>$unsafe {
+    let tp=types.ptr + t
+    let k=tp[0].kind
+    if k =? 'int_' or k =? 'bool_' or k =? 'float_' or k =? 'void_' or k =? 'ptr' or k =? 'null_' {return tp[0].rep =? 'tagged_int'}
+    if k =? 'str_' or k =? 'array' or k =? 'fn_' {return true}
+    if (TypeOpWord(tp[0].flags) & 2) not=? 0 and (k =? 'struct_' or k =? 'enum_' or k =? 'tuple' or k =? 'opt' or k =? 'fixed') {return (TypeOpWord(tp[0].flags) & 4) not=? 0}
     tp_is_managed(t)
 }
 plain_problem=(t:TypeOpWord):>string=>{
@@ -148,7 +160,8 @@ decide_boxes=(si:TypeOpWord):>void=>{
 box_default=(t:TypeOpWord):>int64=>{
     tl_box_default(t)
 }
-layout=(t:int64):>void=>{
+layout=(t:int64):>void=>$unsafe {
+    if t not=? 0 and TypeOpWord(types.ptr[t].flags) & 2 not=? 0 and types.ptr[t].kind not=? 'var' {return}
     tl_layout(t)
 }
 layout_endless_error=(si:TypeOpWord f:TypeOpWord vi:TypeOpWord):>void=>$unsafe {

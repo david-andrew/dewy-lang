@@ -4,17 +4,18 @@ from p"checker_block_entries.dewy" import (check_block)
 from p"expression_types.dewy" import (ntype)
 
 from p"@lib/core/os.jo" import (env eprint)
-from p"ast.jo" import (NF_AT NF_RDONLY clone has_flag kid kid_c kid_d kids nkids nkids2 nodes set_list)
+from p"ast.jo" import (NF_AT NF_RDONLY clone has_flag kid kid_c kid_d kids lists nkids nkids2 nodes set_list)
+from p"node_store.dewy" import (Node)
 from p"check.jo" import (LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST check_scopes const_views copy_writes ctxs cx fns globals locals syms)
-from p"exact.jo" import (exact_stores)
+from p"exact.jo" import (exact_candidate_nodes exact_measure_on exact_stores)
 from p"exact_check_hooks.dewy" import (exact_note)
 from p"expr.jo" import (CV IN)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"facts.jo" import (fact_divisors fact_requests)
 from p"ide.jo" import (ide_on)
-from p"isolation_ops.dewy" import (isolation_children)
+from p"isolation_ops.dewy" import (iso_child_p isolation_children isolation_node_children)
 from p"main.jo" import (debug_vars)
-from p"member_replay.jo" import (MemberTemplate member_compact_enabled member_compact_owners member_enabled member_kind_ordinal member_plain_types member_record member_scope_locals member_scopes member_templates member_trace member_words)
+from p"member_replay.jo" import (MemberTemplate member_compact_enabled member_compact_owners member_enabled member_kind_ordinal member_plain_types member_record member_scope_locals member_scopes member_templates member_trace member_uniform_blocks member_uniform_owners member_words)
 from p"refine.jo" import (ref_narrowing refine_requests str_sets)
 from p"refine_metadata.dewy" import (str_set_of)
 from p"refinement_types.dewy" import (FactRequest)
@@ -25,13 +26,17 @@ from p"source_queries.dewy" import (pos_str)
 from p"warn_if.jo" import (wi_fact_calls)
 
 MemberWord:type=int64<overflow='wrap'>
+let member_has_exact:array<bool>=[]
 member_reset=():>void=>{
     member_compact_owners=dict<int64 array<int64>>()
     member_templates=[]
+    member_has_exact=[]
     member_scopes=dict<int64 int64>()
     member_scope_locals=dict<int64 array<int64>>()
     member_words=dict<int64 dict<string int64>>()
     member_plain_types=dict<int64 bool>()
+    member_uniform_blocks=dict<int64 bool>()
+    member_uniform_owners=dict<int64 bool>()
     member_record=-1
     let mode=env("DEWY_MEMBERS") ?? ""
     # Debug variables include generated names derived from node IDs. Keep
@@ -186,10 +191,15 @@ member_plain=(input:MemberWord):>bool=>$unsafe {
     okay
 }
 member_checked=(n:MemberWord t:MemberTemplate @seen:dict<int64 bool>):>bool=>$unsafe {
+    let mut_t=t
+    member_checked_fast(n @mut_t @seen)
+}
+member_checked_fast=(n:MemberWord @t:MemberTemplate @seen:dict<int64 bool>):>bool=>$unsafe {
     if n =? 0 or seen.has(n) {return true}
     seen[n]=true
-    let k=nodes.ptr[n].kind
-    if t.positions.has(nodes.ptr[n].pos) and (k =? 'str_lit' or k =? 'dotname') {
+    let nd=nodes.ptr + n
+    let k=nd[0].kind
+    if (k =? 'str_lit' or k =? 'dotname') and t.positions.has(nd[0].pos) {
         if k =? 'dotname' {
             let set=str_set_of(ntype(n))
             if set =? 0 {return false}
@@ -198,40 +208,45 @@ member_checked=(n:MemberWord t:MemberTemplate @seen:dict<int64 bool>):>bool=>$un
         else if ntype(n) not=? T_STR {return false}
     }
     if k =? 'ident' {
-        if nodes.ptr[n].aux =? int32(2) {return false}
-        if nodes.ptr[n].aux =? int32(1) {
-            let l=MemberWord(nodes.ptr[n].sym)
+        if nd[0].aux =? int32(2) {return false}
+        if nd[0].aux =? int32(1) {
+            let l=MemberWord(nd[0].sym)
             # A checked path may have become an existing narrowed alias.
             # Text/integer inference also has use-site records outside this tree.
             if MemberWord(locals.ptr[l].flags) & (LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_BYREF) not=? 0 or MemberWord(locals.ptr[l].type) =? T_STR or MemberWord(locals.ptr[l].type) =? T_MATH_INT or not member_plain(MemberWord(locals.ptr[l].type)) {return false}
         }
     }
     if k =? 'lambda' or k =? 'fnref' or k =? 'partial' or k =? 'narrow' or k =? 'istype' or k =? 'iflet' or k =? 'match_' or k =? 'for_' or k =? 'while_' or k =? 'return_' {return false}
-    if k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.refinement)) or nodes.ptr[n].aux =? int32(int64(CV.set_text))) {return false}
-    if exact_stores.has(n) or ref_narrowing.has(n) or wi_fact_calls.has(n) {return false}
-    if nodes.ptr[n].type not=? 0 and has_var(prune(ntype(n))) {return false}
+    if k =? 'conv' and (nd[0].aux =? int32(int64(CV.refinement)) or nd[0].aux =? int32(int64(CV.set_text))) {return false}
+    if (exact_stores.length >? 0 and exact_stores.has(n)) or (ref_narrowing.length >? 0 and ref_narrowing.has(n)) or (wi_fact_calls.length >? 0 and wi_fact_calls.has(n)) {return false}
+    if nd[0].type not=? 0 and has_var(prune(ntype(n))) {return false}
     if k =? 'intrinsic' {
-        let id=nodes.ptr[n].aux as IN
+        let id=nd[0].aux as IN
         if id not=? IN.to_bytes and id not=? IN.runtime_assert and id not=? IN.static_assert and id not=? IN.len and id not=? IN.push {return false}
     }
     if k =? 'call' {
-        if nodes.ptr[n].aux not=? 0 {return false}
-        let decl=MemberWord(fns.ptr[MemberWord(nodes.ptr[n].sym)].decl)
+        if nd[0].aux not=? 0 {return false}
+        let decl=MemberWord(fns.ptr[MemberWord(nd[0].sym)].decl)
         if not decl_in_prelude(decl) or nodes.ptr[decl].c not=? 0 {return false}
     }
-    let mask=isolation_children(k)
+    let mask=isolation_node_children(n)
     if mask <? 0 {return false}
-    if mask & 1 not=? 0 and not member_checked(MemberWord(nodes.ptr[n].a) t @seen) {return false}
-    if mask & 2 not=? 0 and not member_checked(MemberWord(nodes.ptr[n].b) t @seen) {return false}
-    if mask & 4 not=? 0 and not member_checked(MemberWord(nodes.ptr[n].c) t @seen) {return false}
+    if mask & 1 not=? 0 and not member_checked_fast(MemberWord(nd[0].a) @t @seen) {return false}
+    if mask & 2 not=? 0 and not member_checked_fast(MemberWord(nd[0].b) @t @seen) {return false}
+    if mask & 4 not=? 0 and not member_checked_fast(MemberWord(nd[0].c) @t @seen) {return false}
     if mask & 16 not=? 0 {
         loop child in kids(n) {
-            if not member_checked(child t @seen) {return false}
+            if not member_checked_fast(child @t @seen) {return false}
         }
     }
     true
 }
 member_copy=(n:MemberWord t:MemberTemplate text:string lm:dict<int64 int64> @nm:dict<int64 int64>):>MemberWord=>$unsafe {
+    let mut_t=t
+    let mut_lm=lm
+    member_copy_fast(n @mut_t text int32(intern(text)) @mut_lm @nm)
+}
+member_copy_fast=(n:MemberWord @t:MemberTemplate text:string text_id:int32 @lm:dict<int64 int64> @nm:dict<int64 int64>):>MemberWord=>$unsafe {
     if n =? 0 {return 0}
     let known=nm.get(n)
     if known not=? none {return known}
@@ -240,29 +255,185 @@ member_copy=(n:MemberWord t:MemberTemplate text:string lm:dict<int64 int64> @nm:
     let c=nodes.length
     nodes.push(nd)
     nm[n]=c
-    if t.positions.has(nd.pos) {
-        if k =? 'str_lit' {nodes.ptr[c].sval=int32(intern(text))}
-        else if k =? 'dotname' {
+    if (k =? 'str_lit' or k =? 'dotname') and t.positions.has(nd.pos) {
+        if k =? 'str_lit' {nodes.ptr[c].sval=text_id}
+        else {
             nodes.ptr[c].aux=int32(member_words[str_set_of(ntype(n))][text])
-            nodes.ptr[c].name=int32(intern(text))
+            nodes.ptr[c].name=text_id
         }
     }
-    if k =? 'vardecl' or k =? 'ident' and nd.aux =? int32(1) {
+    if (k =? 'vardecl' or (k =? 'ident' and nd.aux =? int32(1))) and lm.length >? 0 {
         let local=lm.get(int64(nd.sym))
         if local not=? none {nodes.ptr[c].sym=int32(local)}
     }
-    let mask=isolation_children(k)
-    if mask & 1 not=? 0 {nodes.ptr[c].a=int32(member_copy(int64(nd.a) t text lm @nm))}
-    if mask & 2 not=? 0 {nodes.ptr[c].b=int32(member_copy(int64(nd.b) t text lm @nm))}
-    if mask & 4 not=? 0 {nodes.ptr[c].c=int32(member_copy(int64(nd.c) t text lm @nm))}
+    let mask=isolation_node_children(n)
+    if mask & 1 not=? 0 {nodes.ptr[c].a=int32(member_copy_fast(int64(nd.a) @t text text_id @lm @nm))}
+    if mask & 2 not=? 0 {nodes.ptr[c].b=int32(member_copy_fast(int64(nd.b) @t text text_id @lm @nm))}
+    if mask & 4 not=? 0 {nodes.ptr[c].c=int32(member_copy_fast(int64(nd.c) @t text text_id @lm @nm))}
     if mask & 16 not=? 0 {
         let children:array<int64>=[]
-        loop i in [0..nkids(n)) {children.push(member_copy(kid(n i) t text lm @nm))}
+        loop i in [0..nkids(n)) {children.push(member_copy_fast(kid(n i) @t text text_id @lm @nm))}
         set_list(c children)
     }
-    let divisor=fact_divisors.get(n)
-    if divisor not=? none {fact_divisors[c]=divisor}
+    if fact_divisors.length >? 0 {
+        let divisor=fact_divisors.get(n)
+        if divisor not=? none {fact_divisors[c]=divisor}
+    }
     exact_note(c)
+    c
+}
+let member_nm_stamp:array<int32>=[]
+let member_nm_val:array<int32>=[]
+let member_nm_gen:int32=0
+let member_kid_buf:array<int32>=[]
+MemberI32:type=int32<overflow='wrap'>
+
+let mcf_t:ptr<MemberTemplate>=$unsafe (uint64(0) as ptr<MemberTemplate>)
+let mcf_text:string=""
+let mcf_text_id:int32=0
+let mcf_old_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let mcf_n_old:MemberWord=0
+let mcf_new_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let mcf_gen:int32=0
+let mcf_has_div:bool=false
+let mcf_has_pos:bool=false
+let mcf_has_exact:bool=false
+let mcf_stamp_p:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
+let mcf_val_p:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
+
+mcf_alloc_lists=(nk:MemberWord):>MemberWord=>$unsafe {
+    let lp=lists.ptr
+    let lh=(lp as ptr<int64>) - 3
+    if lp =? (uint64(0) as ptr<int32>) or lh[0] not=? 1 or lh[1] + nk >? lh[2] {
+        let os=lists.length
+        lists.reserve(max(os + nk os * 2))
+        lp=lists.ptr
+        lh=(lp as ptr<int64>) - 3
+    }
+    let start=lh[1]
+    lh[1]=start + nk
+    start
+}
+member_copy_flat=(n:MemberWord):>MemberWord=>$unsafe {
+    if n =? 0 {return 0}
+    if mcf_stamp_p[n] =? mcf_gen {return int64(mcf_val_p[n])}
+    let nptr=nodes.ptr
+    let nh=(nptr as ptr<int64>) - 3
+    if nptr =? (uint64(0) as ptr<Node>) or nh[0] not=? 1 or nh[1] >=? nh[2] {
+        let oc=nodes.length
+        nodes.reserve(max(oc + 1 oc * 2))
+        nptr=nodes.ptr
+        nh=(nptr as ptr<int64>) - 3
+    }
+    let c:MemberWord=nh[1]
+    nh[1]=c + 1
+    let k=nptr[n].kind
+    let np0=nptr + c
+    mem_copy(np0 nptr + n size_of<Node>)
+    mcf_stamp_p[n]=mcf_gen
+    mcf_val_p[n]=MemberI32(c)
+    match k {
+        <'int_lit'|'float_lit'|'bool_lit'|'none_lit'|'null_lit'> => {
+            if exact_measure_on {exact_note(c)}
+            return c
+        }
+        _ => {}
+    }
+    if k =? 'ident' {
+        if np0[0].aux =? int32(1) and mcf_n_old >? 0 {
+            let sym=int64(np0[0].sym)
+            let op=mcf_old_p
+            let no=mcf_n_old
+            loop i in [0..no) {
+                if op[i] =? sym {
+                    np0[0].sym=MemberI32(mcf_new_p[i])
+                    break
+                }
+            }
+        }
+        if exact_measure_on {exact_note(c)}
+        return c
+    }
+    if mcf_has_pos and (k =? 'str_lit' or k =? 'dotname') and mcf_t[0].positions.has(np0[0].pos) {
+        if k =? 'str_lit' {np0[0].sval=mcf_text_id}
+        else {
+            np0[0].aux=MemberI32(member_words[str_set_of(ntype(n))][mcf_text])
+            np0[0].name=mcf_text_id
+        }
+    }
+    if k =? 'dotname' {
+        if exact_measure_on {exact_note(c)}
+        return c
+    }
+    if k =? 'vardecl' and mcf_n_old >? 0 {
+        let sym=int64(np0[0].sym)
+        let op=mcf_old_p
+        let no=mcf_n_old
+        loop i in [0..no) {
+            if op[i] =? sym {
+                np0[0].sym=MemberI32(mcf_new_p[i])
+                break
+            }
+        }
+    }
+    let mask=int64(iso_child_p[int64((np0 as ptr<uint32>)[0])])
+    let na=int64(np0[0].a)
+    let nb=int64(np0[0].b)
+    let nc=int64(np0[0].c)
+    let nk=int64(np0[0].nlist)
+    let lbase=int64(np0[0].list)
+    let r_a:MemberWord=if mask & 1 not=? 0 and na not=? 0 {member_copy_flat(na)} else {0}
+    let r_b:MemberWord=if mask & 2 not=? 0 and nb not=? 0 {member_copy_flat(nb)} else {0}
+    let r_c:MemberWord=if mask & 4 not=? 0 and nc not=? 0 {member_copy_flat(nc)} else {0}
+    let r_list:MemberWord=-1
+    if mask & 16 not=? 0 and nk >? 0 {
+        if nk =? 1 {
+            let c0=MemberI32(member_copy_flat(int64(lists.ptr[lbase])))
+            r_list=mcf_alloc_lists(1)
+            lists.ptr[r_list]=c0
+        } else if nk =? 2 {
+            let lp0=lists.ptr
+            let k0=int64(lp0[lbase])
+            let k1=int64(lp0[lbase + 1])
+            let c0=MemberI32(member_copy_flat(k0))
+            let c1=MemberI32(member_copy_flat(k1))
+            r_list=mcf_alloc_lists(2)
+            let lp1=lists.ptr + r_list
+            lp1[0]=c0
+            lp1[1]=c1
+        } else {
+            let bp=member_kid_buf.ptr
+            let bh=(bp as ptr<int64>) - 3
+            if bp =? (uint64(0) as ptr<int32>) or bh[0] not=? 1 or bh[1] + nk >? bh[2] {
+                let ob=member_kid_buf.length
+                member_kid_buf.reserve(max(ob + nk ob * 2))
+                bp=member_kid_buf.ptr
+                bh=(bp as ptr<int64>) - 3
+            }
+            let base=bh[1]
+            bh[1]=base + nk
+            loop i in [0..nk) {member_kid_buf.ptr[base + i]=MemberI32(member_copy_flat(int64(lists.ptr[lbase + i])))}
+            r_list=mcf_alloc_lists(nk)
+            mem_copy(lists.ptr + r_list member_kid_buf.ptr + base nk * 4)
+            let bh2=(member_kid_buf.ptr as ptr<int64>) - 3
+            bh2[1]=base
+        }
+    }
+    if r_a not=? 0 or r_b not=? 0 or r_c not=? 0 or r_list >=? 0 {
+        let np2=nodes.ptr + c
+        if r_a not=? 0 {np2[0].a=MemberI32(r_a)}
+        if r_b not=? 0 {np2[0].b=MemberI32(r_b)}
+        if r_c not=? 0 {np2[0].c=MemberI32(r_c)}
+        if r_list >=? 0 {
+            np2[0].list=MemberI32(r_list)
+            np2[0].nlist=MemberI32(nk)
+        }
+    }
+    if mcf_has_div {
+        let divisor=fact_divisors.get(n)
+        if divisor not=? none {fact_divisors[c]=divisor}
+    }
+    if mcf_has_exact and (exact_measure_on or k =? 'binary' or k =? 'unary' or k =? 'intrinsic' or k =? 'if_' or k =? 'iflet' or k =? 'coalesce' or k =? 'match_' or k =? 'conv') {exact_note(c)}
     c
 }
 member_scope=(scope:MemberWord):>bool=>$unsafe {
@@ -277,10 +448,13 @@ member_scope=(scope:MemberWord):>bool=>$unsafe {
         let first_local=fns.ptr[owner].locals.length
         let first_request=fact_requests.length
         let first_refine=refine_requests.length
+        let first_exact=exact_candidate_nodes.length
         let before_warnings=shown_warnings.length
         let previous=member_record
         member_record=index
         check_block(MemberWord(nodes.ptr[scope].b) 0 false);
+        if member_has_exact.length <=? index {member_has_exact.resize(index + 1)}
+        member_has_exact.ptr[index]=exact_candidate_nodes.length >? first_exact
         let t=member_templates[index]
         t.body=MemberWord(nodes.ptr[scope].b)
         loop i in [first_local..fns.ptr[owner].locals.length) {
@@ -290,7 +464,7 @@ member_scope=(scope:MemberWord):>bool=>$unsafe {
             if MemberWord(locals.ptr[l].flags) & (LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_CONST) not=? 0 or has_var(prune(MemberWord(locals.ptr[l].type))) or MemberWord(locals.ptr[l].type) =? T_STR or MemberWord(locals.ptr[l].type) =? T_MATH_INT or locals.ptr[l].const_init not=? 0 {t.okay=false}
         }
         let seen=dict<int64 bool>()
-        if not member_checked(t.body t @seen) or before_warnings not=? shown_warnings.length {t.okay=false}
+        if not member_checked_fast(t.body @t @seen) or before_warnings not=? shown_warnings.length {t.okay=false}
         loop i in [first_request..fact_requests.length) {
             if fact_requests[i].owner =? owner {
                 let request=fact_requests[i].node
@@ -325,25 +499,64 @@ member_scope=(scope:MemberWord):>bool=>$unsafe {
 }
 member_replay_scope=(index:MemberWord scope:MemberWord text:string @nm:dict<int64 int64>):>MemberWord=>$unsafe {
     let t=member_templates[index]
-    let lm=dict<int64 int64>()
     let copied_locals:array<int64>=[]
+    let has_cw=copy_writes.length >? 0
     loop old in t.locals {
         let l=locals.length
         locals.push(locals.ptr[old])
         fns.ptr[t.owner].locals.push(l)
-        lm[old]=l
         copied_locals.push(l)
-        let write=copy_writes.get(old)
-        if write not=? none {copy_writes[l]=write}
+        if has_cw {
+            let write=copy_writes.get(old)
+            if write not=? none {copy_writes[l]=write}
+        }
     }
-    let body=member_copy(t.body t text lm @nm)
-    loop request in t.requests {
-        let copy=nm.get(request)
-        if copy not=? none {fact_requests.push(FactRequest(copy t.owner))}
-    }
-    loop request in t.refinements {
-        let copy=nm.get(request)
-        if copy not=? none {refine_requests.push(FactRequest(copy t.owner))}
+    let body:MemberWord=0
+    if t.shared_proofs {
+        let lm=dict<int64 int64>()
+        loop i in [0..t.locals.length) {lm[t.locals.ptr[i]]=copied_locals.ptr[i]}
+        body=member_copy(t.body t text lm @nm)
+        loop request in t.requests {
+            let copy=nm.get(request)
+            if copy not=? none {fact_requests.push(FactRequest(copy t.owner))}
+        }
+        loop request in t.refinements {
+            let copy=nm.get(request)
+            if copy not=? none {refine_requests.push(FactRequest(copy t.owner))}
+        }
+    } else {
+        let limit=nodes.length
+        if member_nm_stamp.length <? limit {
+            member_nm_stamp.resize(limit + 256)
+            member_nm_val.resize(limit + 256)
+        }
+        member_nm_gen=int32<overflow='wrap'>(int64(member_nm_gen) + 1)
+        if member_nm_gen =? int32(0) {
+            let sp=member_nm_stamp.ptr
+            loop i in [0..member_nm_stamp.length) {sp[i]=int32(0)}
+            member_nm_gen=int32(1)
+        }
+        let gen=member_nm_gen
+        let text_id=int32(intern(text))
+        mcf_t=member_templates.ptr + index
+        mcf_text=text
+        mcf_text_id=text_id
+        mcf_old_p=t.locals.ptr
+        mcf_n_old=t.locals.length
+        mcf_new_p=copied_locals.ptr
+        mcf_gen=gen
+        mcf_has_div=fact_divisors.length >? 0
+        mcf_has_pos=t.positions.length >? 0
+        mcf_has_exact=exact_measure_on or (index <? member_has_exact.length and member_has_exact.ptr[index])
+        mcf_stamp_p=member_nm_stamp.ptr
+        mcf_val_p=member_nm_val.ptr
+        body=member_copy_flat(t.body)
+        loop request in t.requests {
+            if request <? limit and member_nm_stamp.ptr[request] =? gen {fact_requests.push(FactRequest(int64(member_nm_val.ptr[request]) t.owner))}
+        }
+        loop request in t.refinements {
+            if request <? limit and member_nm_stamp.ptr[request] =? gen {refine_requests.push(FactRequest(int64(member_nm_val.ptr[request]) t.owner))}
+        }
     }
     member_scope_locals[scope]=copied_locals
     body

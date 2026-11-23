@@ -73,10 +73,24 @@ policy_int = (base: int, policy: int, pos: int) -> int:
     ti = types[t]
     ti.st = i32(policy)
     mk_type(ti, [])
-zonk = (t: int) -> int: tu_zonk(t)
+zonk = (t: int) -> int:
+    if t == 0: return 0
+    tp = data(types) + t
+    if (int(tp[0].flags) & 1) == 0 and tp[0].kind != .var: return t
+    tu_zonk(t)
 unify = (a: int, b: int) -> bool: tu_unify(a, b)
-simple_enum = (t: int) -> bool: tp_simple_enum(t)
-is_managed = (t: int) -> bool: tp_is_managed(t)
+simple_enum = (t: int) -> bool:
+    tp = data(types)
+    if t != 0 and int(tp[t].flags) & 2 != 0 and tp[t].kind != .var:
+        return data(structs)[int(tp[t].st)].simple_enum
+    tp_simple_enum(t)
+is_managed = (t: int) -> bool:
+    tp = data(types) + t
+    k = tp[0].kind
+    if k == .int_ or k == .bool_ or k == .float_ or k == .void_ or k == .ptr or k == .null_: return tp[0].rep == .tagged_int
+    if k == .str_ or k == .array or k == .fn_: return true
+    if (int(tp[0].flags) & 2) != 0 and (k == .struct_ or k == .enum_ or k == .tuple or k == .opt or k == .fixed): return (int(tp[0].flags) & 4) != 0
+    tp_is_managed(t)
 plain_problem = (t: int) -> str: tp_plain_problem(t)
 is_lib_texture = (si: int) -> bool:
     if structs[si].name != "Texture" or structs[si].decl == 0: return false
@@ -90,7 +104,9 @@ ptr_optional = (t: int) -> bool: tp_ptr_optional(t)
 is_aggregate = (t: int) -> bool: tp_is_aggregate(t)
 decide_boxes = (si: int): tl_decide_boxes(si)
 box_default = (t: int) -> int: tl_box_default(t)
-layout = (t: int): tl_layout(t)
+layout = (t: int):
+    if t != 0 and int(data(types)[t].flags) & 2 != 0 and data(types)[t].kind != .var: return
+    tl_layout(t)
 layout_endless_error = (si: int, f: int, vi: int):
     ft = int(fields[f].type)
     nm = structs[si].name

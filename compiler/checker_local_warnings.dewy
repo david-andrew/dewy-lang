@@ -15,6 +15,7 @@ LocalWarningWord:type=int64<overflow='wrap'>
 # a function's variables whose fields or elements it changes but whose value it never reads: a
 # copy changed for nothing (`if let e = enemies.find(...): e.hp -= 5` leaves the enemy as it was)
 copy_write_warnings=(f:LocalWarningWord):>void=>{
+    if fns[f].decl not=? 0 and pos_in_lib(nodes[LocalWarningWord(fns[f].decl)].pos) {return}
     if poly_families.length >? 1 and (poly_pending_warnings.get(f) ?? false) {return}
     unused_local_warnings(f)
     if copy_writes.length =? 0 {return}
@@ -54,7 +55,7 @@ unused_local_warnings=(f:LocalWarningWord):>void=>{
     let skip=LF_READ | LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_ELEMALIAS | LF_SOAELEM | LF_SHARED | LF_QUIET
     loop l in fns[f].locals {
         let flags=LocalWarningWord(locals[l].flags)
-        if flags & LF_DECL =? 0 or flags & skip not=? 0 or copy_writes.has(l) {continue}
+        if flags & LF_DECL =? 0 or flags & skip not=? 0 or (copy_writes.length >? 0 and copy_writes.has(l)) {continue}
         let nm=name_of(LocalWarningWord(locals[l].name))
         # Reserved names from desugaring are outside the user's source.
         if nm =? "" or starts_with(nm "_") or starts_with(nm "#") or starts_with(nm "$") or pos_in_lib(locals[l].pos) {continue}

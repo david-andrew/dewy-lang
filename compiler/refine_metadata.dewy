@@ -22,10 +22,17 @@ from p"refine_rare.dewy" import (ref_self_misplaced ref_sib_fields ref_projectio
 from p"type_refinement.dewy" import (tr_make)
 
 RefineWord:type=int64<overflow='wrap'>
-representation_type=(t0:int64):>int64=>$unsafe {
+representation_type_slow=(t0:int64):>int64=>$unsafe {
     let t=prune(t0)
-    if types.ptr[t].kind =? 'refined' {return prune(RefineWord(types.ptr[t].elem))}
+    let tp=types.ptr
+    if tp[t].kind =? 'refined' {return prune(RefineWord(tp[t].elem))}
     t
+}
+representation_type=(t0:int64):>int64=>$unsafe {
+    let tp=types.ptr
+    let k=tp[t0].kind
+    if k =? 'refined' or (k =? 'var' and t0 not=? 0 and tp[t0].ref not=? 0) {return representation_type_slow(t0)}
+    t0
 }
 # Reads retain opaque storage brands, while numeric refinements keep their
 # existing value representation. This is metadata only, with the same layout.

@@ -1,5 +1,7 @@
 use 'facts_values.dewy'
+use 'checker_tokens.dewy'
 use 'types.jo'
+use 'util.jo'
 use 'lower_analysis.dewy'
 use 'refine.jo'
 use 'places.jo'
@@ -7,8 +9,45 @@ use 'facts_value_queries.dewy'
 use 'facts_joins.dewy'
 use 'facts_index_writes.dewy'
 use 'facts.jo'
+use 'facts_plan_cache.dewy'
 use 'facts_slice_builder.dewy'
+use 'numeric_library_types.dewy'
+use 'checked_expression_nodes.dewy'
+use 'expression_types.dewy'
+use 'member_plan.dewy'
+use 'member_replay.jo'
+use 'facts_arrays.dewy'
+use 'facts_changes.dewy'
+use 'facts_forgets.dewy'
+use 'facts_forks.dewy'
+use 'facts_library.dewy'
+use 'facts_lifecycle.dewy'
+use 'facts_loops.dewy'
+use 'facts_maps.dewy'
+use 'facts_members.dewy'
+use 'facts_numeric.dewy'
+use 'facts_plans.dewy'
+use 'facts_pools.dewy'
+use 'facts_pushes.dewy'
+use 'facts_ranges.dewy'
+use 'facts_summaries.dewy'
+use 'facts_text.dewy'
+use 'effect_lattice.dewy'
 use 'effect_types.dewy'
+use 'effects.jo'
+use 'exact.jo'
+use 'expr.jo'
+use 'directives.jo'
+use 'checks_thin.dewy'
+use 'float_ops.dewy'
+use 'floats.jo'
+use 'nd_contracts.jo'
+use 'ownership.jo'
+use 'ownership_types.dewy'
+use 'predicate_summaries.dewy'
+use 'proof_ops.dewy'
+use 'proofs.jo'
+use 'warn_if.jo'
 use 'checker_state.dewy'
 use 'check.jo'
 use 'ast.jo'
@@ -16,29 +55,65 @@ use 'isolation_ops.dewy'
 
 fact_slice_children = (n: int) -> int[]:
     out: int[]
-    mask = isolation_children(nodes[n].kind)
+    np = data(nodes) + n
+    mask = isolation_children(np.kind)
     if mask < 0: return out
-    if mask & 1 != 0: out.push(int(nodes[n].a))
-    if mask & 2 != 0: out.push(int(nodes[n].b))
-    if mask & 4 != 0: out.push(int(nodes[n].c))
+    if mask & 1 != 0: out.push(int(np.a))
+    if mask & 2 != 0: out.push(int(np.b))
+    if mask & 4 != 0: out.push(int(np.c))
     if mask & 16 != 0:
         loop i in [0..nkids(n)): out.push(kid(n, i))
     out
 
 fact_slice_push_children = (out: mut int[], n: int):
-    mask = isolation_children(nodes[n].kind)
+    np = data(nodes) + n
+    mask = isolation_children(np.kind)
     if mask < 0: return
-    if mask & 1 != 0: out.push(int(nodes[n].a))
-    if mask & 2 != 0: out.push(int(nodes[n].b))
-    if mask & 4 != 0: out.push(int(nodes[n].c))
+    if mask & 1 != 0: out.push(int(np.a))
+    if mask & 2 != 0: out.push(int(np.b))
+    if mask & 4 != 0: out.push(int(np.c))
     if mask & 16 != 0:
-        loop i in [0..nkids(n)): out.push(kid(n, i))
+        l0 = int(np.list)
+        nk = int(np.nlist)
+        lp = data(lists) + l0
+        loop i in [0..nk): out.push(int(lp[i]))
 
 fact_slice_flags = (n: int) -> int:
-    if fact_slice.base < 0: return max(0, fact_index_get(fact_slice.flags, n))
+    if fact_slice.base < 0: return max(0, fact_index_get_raw(data(fact_slice.flags), fact_slice.flags.len(), n))
     i = n - fact_slice.base
     if i < 0 or i >= fact_slice.flags.len(): return 0
-    fact_slice.flags[i]
+    data(fact_slice.flags)[i]
+
+fsp_wr_gen: i32[]
+fsp_wr_head: i32[]
+fsp_rt_gen: i32[]
+fsp_acc_gen: i32[]
+fsp_dep_gen: i32[]
+fsp_pw_gen: i32[]
+fsp_sw_gen: i32[]
+fsp_wr_g: i32 = 0
+fsp_in_prepare = false
+
+fsp_zero_i32 = (a: mut i32[]):
+    if a.len() > 0: mem_set(data(a) as *u8, 0, a.len() * 4)
+fsp_wr_reset = ():
+    fsp_wr_g = i32(int(fsp_wr_g) + 1)
+    if fsp_wr_g == 0:
+        fsp_zero_i32(fsp_wr_gen); fsp_zero_i32(fsp_rt_gen); fsp_zero_i32(fsp_acc_gen)
+        fsp_zero_i32(fsp_dep_gen); fsp_zero_i32(fsp_pw_gen); fsp_zero_i32(fsp_sw_gen)
+        fsp_wr_g = 1
+
+fsp_set_mark = (arr: mut i32[], idx: int):
+    if idx < 0: return
+    if idx >= arr.len(): arr.resize(max(idx + 64, arr.len() * 2 + 256))
+    data(arr)[idx] = fsp_wr_g
+
+fsp_has_mark = (arr: mut i32[], idx: int) -> bool:
+    idx >= 0 and idx < arr.len() and data(arr)[idx] == fsp_wr_g
+
+fsp_wr_get = (key: int) -> int:
+    if key >= 0 and key < fsp_wr_gen.len() and data(fsp_wr_gen)[key] == fsp_wr_g: return int(data(fsp_wr_head)[key])
+    -1
 
 fact_slice_edge = (edges: mut FactSliceEdges, key: int, node: int):
     edges.next.push(fact_index_get(edges.heads, key))
@@ -48,6 +123,17 @@ fact_slice_edge = (edges: mut FactSliceEdges, key: int, node: int):
 fact_slice_writer = (writers: mut FactSliceEdges, p: PlaceIdentity, n: int):
     if p.declaration == 0: return
     key = fact_root_key(p)
+    if fsp_in_prepare and key >= 0 and key < 262144:
+        if key >= fsp_wr_gen.len():
+            need = max(key + 64, fsp_wr_gen.len() * 2 + 256)
+            fsp_wr_gen.resize(need)
+            fsp_wr_head.resize(need)
+        prev = if data(fsp_wr_gen)[key] == fsp_wr_g: int(data(fsp_wr_head)[key]) else: -1
+        writers.next.push(prev)
+        data(fsp_wr_gen)[key] = fsp_wr_g
+        data(fsp_wr_head)[key] = i32(writers.nodes.len())
+        writers.nodes.push(n)
+        return
     fact_slice_edge(writers, key, n)
 
 fact_slice_target = (writers: mut FactSliceEdges, n: int, at: int):
@@ -93,39 +179,668 @@ slice_mark_stamp: *(int[])
 slice_mark_flags: *(int[])
 slice_mark_head: *(int[])
 slice_mark_touched: *(int[])
+mark_stamp_p: *int = null
+mark_flags_p: *int = null
+mark_head_p: *int = null
+mark_gen = 0
 facts_slice_marks_bind = (stamp: *(int[]), flags: *(int[]), head: *(int[]), touched: *(int[])) -> int:
     slice_mark_stamp = stamp
     slice_mark_flags = flags
     slice_mark_head = head
     slice_mark_touched = touched
     0
-
-fact_slice_member = (parents: mut FactSliceEdges, work: mut int[], c: int, n: int):
-    if c == 0: return
-    fact_slice_parent(parents, c, n)
-    work.push(c)
+facts_slice_marks_begin = (gen: int):
+    mark_stamp_p = data(slice_mark_stamp[0])
+    mark_flags_p = data(slice_mark_flags[0])
+    mark_head_p = data(slice_mark_head[0])
+    mark_gen = gen
 
 fact_mark_of = (n: int) -> int:
-    if fact_mark_stamp[n] != fact_mark_gen: return 0
-    fact_mark_flags[n]
+    if mark_stamp_p[n] != mark_gen: return 0
+    mark_flags_p[n]
 
 fact_mark_touch = (n: int):
-    if fact_mark_stamp[n] == fact_mark_gen: return
-    slice_mark_stamp[0][n] = fact_mark_gen
+    if mark_stamp_p[n] == mark_gen: return
+    slice_mark_stamp[0][n] = mark_gen
     slice_mark_flags[0][n] = 0
     slice_mark_head[0][n] = -1
+    mark_stamp_p = data(slice_mark_stamp[0])
+    mark_flags_p = data(slice_mark_flags[0])
+    mark_head_p = data(slice_mark_head[0])
     slice_mark_touched[0].push(n)
 
 fact_mark_set = (n: int, flags: int):
-    fact_mark_touch(n)
+    if mark_stamp_p[n] != mark_gen:
+        slice_mark_stamp[0][n] = mark_gen
+        slice_mark_head[0][n] = -1
+        mark_stamp_p = data(slice_mark_stamp[0])
+        mark_head_p = data(slice_mark_head[0])
+        slice_mark_touched[0].push(n)
     slice_mark_flags[0][n] = flags
+    mark_flags_p = data(slice_mark_flags[0])
 
 fact_mark_parent = (n: int) -> int:
-    if fact_mark_stamp[n] != fact_mark_gen: return -1
-    fact_mark_head[n]
+    if mark_stamp_p[n] != mark_gen: return -1
+    mark_head_p[n]
+
+fact_slice_member = (parents: mut FactSliceEdges, work: mut int[], c: int, n: int):
+    if c == 0: return
+    prev = -1
+    if fsp_in_prepare:
+        if mark_stamp_p[c] != mark_gen:
+            mark_stamp_p[c] = mark_gen
+            mark_flags_p[c] = 0
+            tp = data(slice_mark_touched[0])
+            th = tp - 3
+            if tp != null and th[0] == 1 and th[1] < th[2]:
+                tlen = th[1]; tp[tlen] = c; th[1] = tlen + 1
+            else: slice_mark_touched[0].push(c)
+        else:
+            prev = mark_head_p[c]
+        xp = data(parents.next)
+        xh = xp - 3
+        if xp != null and xh[0] == 1 and xh[1] < xh[2]:
+            xlen = xh[1]; xp[xlen] = prev; xh[1] = xlen + 1
+        else: parents.next.push(prev)
+        np = data(parents.nodes)
+        nh = np - 3
+        if np != null and nh[0] == 1 and nh[1] < nh[2]:
+            nlen = nh[1]; mark_head_p[c] = nlen; np[nlen] = n; nh[1] = nlen + 1
+        else:
+            mark_head_p[c] = parents.nodes.len()
+            parents.nodes.push(n)
+        wp = data(work)
+        wh = wp - 3
+        if wp != null and wh[0] == 1 and wh[1] < wh[2]:
+            wlen = wh[1]; wp[wlen] = c; wh[1] = wlen + 1
+        else: work.push(c)
+        return
+    if mark_stamp_p[c] != mark_gen:
+        slice_mark_stamp[0][c] = mark_gen
+        slice_mark_flags[0][c] = 0
+        mark_stamp_p = data(slice_mark_stamp[0])
+        mark_flags_p = data(slice_mark_flags[0])
+        slice_mark_touched[0].push(c)
+    else:
+        prev = mark_head_p[c]
+    parents.next.push(prev)
+    slice_mark_head[0][c] = parents.nodes.len()
+    mark_head_p = data(slice_mark_head[0])
+    parents.nodes.push(n)
+    work.push(c)
 
 fact_slice_parent = (parents: mut FactSliceEdges, child: int, node: int):
-    fact_mark_touch(child)
-    parents.next.push(fact_mark_head[child])
+    prev = -1
+    if mark_stamp_p[child] != mark_gen:
+        slice_mark_stamp[0][child] = mark_gen
+        slice_mark_flags[0][child] = 0
+        mark_stamp_p = data(slice_mark_stamp[0])
+        mark_flags_p = data(slice_mark_flags[0])
+        slice_mark_touched[0].push(child)
+    else:
+        prev = mark_head_p[child]
+    parents.next.push(prev)
     slice_mark_head[0][child] = parents.nodes.len()
+    mark_head_p = data(slice_mark_head[0])
     parents.nodes.push(node)
+
+fsp_work: int[]
+fsp_values: int[]
+fsp_active: int[]
+fsp_exposed: int[]
+fsp_opaque: int[]
+fsp_forks: int[]
+fsp_pnodes: int[]
+fsp_pnext: int[]
+fsp_wnodes: int[]
+fsp_wnext: int[]
+fsp_lib_kind: i8[]
+fsp_special_names: {int: bool} = {}
+
+fsp_lib_classify = (n: int, callee: int) -> bool:
+    if fsp_special_names.len() == 0:
+        sp_names = ["exit", "parallel_range", "parallel_map", "__dewy_parallel_collect", "__dewy_parallel_each", "sorted", "sorted_by", "sort", "sort_by", "sort_with", "min_by", "max_by", "group_by", "map", "filter", "sorted_with", "graphemes", "rational", "divmod", "__eq__", "__lt__", "__dewy_power", "pow", "__pow__", "__dewy_range", "__nd_axis_slice", "__dewy_slice_range", "__dewy_open_range_iter", "__floor_div", "__floor_mod", "__floor_div_pow2", "__floor_mod_pow2", "mod", "min", "max", "gcd", "sum", "swap", "__dewy_insert", "reshape", "__dewy_put_slice", "__bcast", "__dewy_read_u64", "__dewy_read_u32", "__dewy_read_u16", "reverse", "contains", "has", "[]", "__map_entry_present", "pop", "__map_entry", "[]=", "get", "insert_if_absent", "clear", "peek", "peek_priority", "push", "__pool_index", "add", "remove", "atomic_add", "atomic_sub", "atomic_and", "atomic_or", "atomic_xor", "atomic_exchange", "atomic_min", "atomic_max", "atomic_compare_exchange", "__map_entries", "__map_of", "first", "last", "keys", "values", "__dewy_keys", "__dewy_set_values", "is_empty", "len", "count", "__dewy_string_length", "__dewy_string_index", "__dewy_string_slice", "__dewy_byte_slice", "regex", "__dewy_find", "__dewy_rfind", "__dewy_index_of", "split", "words", "lines", "starts_with", "ends_with"]
+        loop nm in sp_names: fsp_special_names[intern(nm)] = true
+    if callee >= fsp_lib_kind.len(): fsp_lib_kind.resize(max(callee + 64, fns.len() + 64))
+    d = int(fns[callee].decl)
+    if d == 0:
+        data(fsp_lib_kind)[callee] = i8(1)
+        return false
+    if fsp_special_names.has(int(nodes[d].name)) or fact_nd_call(n) != 0:
+        data(fsp_lib_kind)[callee] = i8(2)
+        return true
+    data(fsp_lib_kind)[callee] = i8(1)
+    false
+
+fsp_is_lib_sp = (n: int, callee: int) -> bool:
+    if callee < fsp_lib_kind.len():
+        tag = data(fsp_lib_kind)[callee]
+        if tag != i8(0): return tag == i8(2)
+    fsp_lib_classify(n, callee)
+fsp_lib_loop1 = (n: int, nk: int, l0: int, flags: int, active: mut int[], values: mut int[], forks: mut int[]) -> bool:
+    nodes_p = data(nodes)
+    lists_p = data(lists)
+    demand_static = (flags & 1) != 0
+    summary = (flags & 2) != 0
+    share = (flags & 4) != 0
+    has_nd_mut = (flags & 8) != 0
+    probe_only = false
+    if library_exit_call(n): active.push(n)
+    if demand_static and (fact_library_call(n, "parallel_range") or fact_library_call(n, "parallel_map") or fact_parallel_array(n)):
+        loop j in [0..nk):
+            arg = int(lists_p[l0 + j])
+            if nodes_p[arg].kind == .lambda and nodes_p[arg].sym > 0:
+                fact_fork_nodes[arg] = true
+                forks.push(arg)
+        if fact_parallel_array(n):
+            values.push(n)
+            values.push(int(lists_p[l0]))
+    if not summary and dir_assumed_bounds_any and fact_parallel_range_call(n):
+        active.push(n)
+        values.push(n)
+        a0 = int(lists_p[l0])
+        if fact_library_call(a0, "__dewy_range"):
+            al0 = int(nodes_p[a0].list)
+            values.push(int(lists_p[al0]))
+            values.push(int(lists_p[al0 + 2]))
+    if demand_static:
+        kcb = fact_key_callback(n)
+        if kcb > 0:
+            fact_fork_nodes[kcb] = true
+            forks.push(kcb)
+            values.push(n)
+            values.push(int(lists_p[l0]))
+    if result_active or proof_active or fact_divisors.len() > 0 and fact_divisors.has(n) or fact_rational_constructor(n) or fact_rational_promotion(n) or fact_rational_divmod(n): values.push(n)
+    else if demand_static and fact_string_call(n) >= 2: values.push(n)
+    else if demand_static and fact_rational_zero_test(n) >= 0:
+        values.push(n)
+        values.push(int(lists_p[l0 + fact_rational_zero_test(n)]))
+    else if demand_static and fact_power_call(n):
+        values.push(n)
+        values.push(int(lists_p[l0 + 1]))
+        values.push(int(lists_p[l0]))
+    else if demand_static and fact_range_call(n):
+        first = fact_range_first(n, true)
+        values.push(n)
+        values.push(int(lists_p[l0 + first]))
+        values.push(int(lists_p[l0 + first + 1]))
+    else if demand_static and (has_nd_mut and nd_mutable_call(n) or fact_array_call(n) != 0 or fact_map_call(n) != 0 or fact_map_insert_call(n) or ref_self_active and (fact_map_clear_call(n) or fact_map_bounded_call(n) != 0) or fact_nonempty_call(n) or fact_heap_call(n) != 0 or fact_exact_sum_call(n) or fact_pool_call(n) != 0 or fact_gpu_index_call(n)):
+        active.push(n)
+        values.push(n)
+        loop j in [0..nk): values.push(int(lists_p[l0 + j]))
+    else if (fact_probe_on or share) and fact_floor_call(n) != 0:
+        if fact_probe_on: values.push(n)
+        probe_only = true
+    probe_only
+
+fact_slice_prepare_fast = (f: int, summary: bool = false):
+    if member_compact_owners.len() != 0 and (not fact_member_shared or summary or fact_probe_on or fact_query or f != fact_member_owner):
+        member_expand_owner(f)
+    key = (f << 4) | int(summary) | (int(fact_probe_on) << 1) | (int(fact_policy == .RequireStatic) << 2) | (int(result_active or proof_active) << 3)
+    if let cached0 = fact_slice_cache.get(key):
+        fact_slice = cached0
+        return
+    share = not summary and fact_policy == .RequireStatic
+    peer = key xor 2
+    if share:
+        if let cached1 = fact_slice_cache.get(peer):
+            if not cached1.probe_only and fact_plan_current(cached1):
+                fact_slice = cached1
+                fact_slice_cache[key] = cached1
+                return
+    fact_mark_begin()
+    fsp_wr_reset()
+    fsp_in_prepare = true
+    pnodes = fsp_pnodes; fsp_pnodes = []; pnodes.clear()
+    pnext = fsp_pnext; fsp_pnext = []; pnext.clear()
+    wnodes = fsp_wnodes; fsp_wnodes = []; wnodes.clear()
+    wnext = fsp_wnext; fsp_wnext = []; wnext.clear()
+    parents = FactSliceEdges([], pnodes, pnext)
+    writers = FactSliceEdges([], wnodes, wnext)
+    roots: int[]
+    exposed_writes = fsp_exposed; fsp_exposed = []; exposed_writes.clear()
+    opaque_writes = fsp_opaque; fsp_opaque = []; opaque_writes.clear()
+    work = fsp_work; fsp_work = []; work.clear()
+    body = int(fns[f].body)
+    work.push(body)
+    values = fsp_values; fsp_values = []; values.clear()
+    active = fsp_active; fsp_active = []; active.clear()
+    forks = fsp_forks; fsp_forks = []; forks.clear()
+    callees: int[]
+    versions: int[]
+    exact_demands: int[]
+    index_demands: int[]
+    loop_indexes: int[]
+    carried = false
+    rows = false
+    probe_only = false
+    members = fact_member_shared and f == fact_member_owner and not summary
+    exact = not summary and exact_marks.len() > 0 and exact_owners.has(f)
+    representation = exact and f < exact_rep_owners.len() and data(exact_rep_owners)[f]
+    demand_static = not summary and (fact_probe_on or fact_policy == .RequireStatic)
+    has_own = ownership_decls.len() != 0
+    has_nd_mut = nd_mutable_signatures.len() != 0
+    if summary or result_active: values.push(body)
+    if summary:
+        loop l in fns[f].params:
+            lt = int(locals[l].type)
+            if int(locals[l].flags) & LF_MUTPARAM != 0 and (tkind(fact_type(lt)) == .array or is_nd(fact_type(lt)) or fact_record_arrays(fact_type(lt))):
+                values.push(mk_ident_local(l, locals[l].pos))
+    collect_panic = not summary and not members and not fact_panic_sites.has(f)
+    psites: int[]
+    nodes_p = data(nodes)
+    lists_p = data(lists)
+    locals_p = data(locals)
+    fns_p = data(fns)
+    types_p = data(types)
+    mstamp = mark_stamp_p
+    mflags = mark_flags_p
+    mhead = mark_head_p
+    mgen = mark_gen
+    cursor = 0
+    loop cursor < work.len():
+        n = data(work)[cursor]; cursor += 1
+        if n == 0: continue
+        if mstamp[n] == mgen:
+            if mflags[n] & FACT_MEMBER != 0: continue
+            mflags[n] = FACT_MEMBER
+        else:
+            mstamp[n] = mgen
+            mhead[n] = -1
+            slice_mark_touched[0].push(n)
+            mflags[n] = FACT_MEMBER
+        np = nodes_p + n
+        k = np.kind
+        if exact:
+            if fact_exact_demand(n):
+                values.push(n)
+                if share: exact_demands.push(n)
+            else if representation and n < exact_rep_demands.len() and data(exact_rep_demands)[n]: values.push(n)
+        mask = isolation_children(k)
+        if k == .parallel_region:
+            collect_panic = false
+            if dir_assumed_bounds_any:
+                ca = int(np.a)
+                if ca != 0: fact_slice_member(parents, work, ca, n)
+        if mask > 0:
+            if mask & 1 != 0:
+                ca = int(np.a)
+                if ca != 0: fact_slice_member(parents, work, ca, n)
+            if mask & 2 != 0:
+                cb = int(np.b)
+                if cb != 0: fact_slice_member(parents, work, cb, n)
+            if mask & 4 != 0:
+                cc = int(np.c)
+                if cc != 0: fact_slice_member(parents, work, cc, n)
+            if mask & 16 != 0:
+                walk = int(np.nlist)
+                if members and k == .block and walk > 1 and fact_member_admit(n): walk = 1
+                l0 = int(np.list)
+                lp = lists_p + l0
+                loop i in [0..walk):
+                    ci = int(lp[i])
+                    if ci != 0: fact_slice_member(parents, work, ci, n)
+        match k:
+            block:
+                if has_flag(n, NF_COMPREHENSION) and np.nlist > 0:
+                    c0 = int(lists_p[int(np.list)])
+                    if nodes_p[c0].kind == .vardecl: fsp_set_mark(fsp_acc_gen, int(nodes_p[c0].sym))
+            vardecl:
+                if has_own and np.b != 0 and ownership_fact_type(ntype(int(np.b))): active.push(n)
+                l = int(np.sym)
+                if l != 0:
+                    p = if has_flag(n, NF_GLOBAL): PlaceIdentity(.global, 0, l) else: PlaceIdentity(.local, int(locals_p[l].owner), l)
+                    fact_slice_writer(writers, p, n)
+                nk = int(np.nlist)
+                l0 = int(np.list)
+                loop j in [0..nk):
+                    c = int(lists_p[l0 + j])
+                    cl = int(nodes_p[c].sym)
+                    if cl > 0 and not has_flag(c, NF_GLOBAL): fact_slice_writer(writers, PlaceIdentity(.local, int(locals_p[cl].owner), cl), n)
+            assign:
+                target = int(np.a)
+                if nodes_p[target].kind == .ident and nodes_p[target].aux == i32(int(SK.local)):
+                    tl = int(nodes_p[target].sym)
+                    if fact_carried_type(int(locals_p[tl].type), f): carried = true
+                    if fact_loop_step(int(np.b), tl) or fact_loop_unbounded_field(int(np.b)): fsp_set_mark(fsp_sw_gen, tl)
+                    else: fsp_set_mark(fsp_pw_gen, tl)
+                fact_slice_target(writers, target, n)
+                if demand_static and fact_shift_obliged(n): values.push(n)
+                root = target
+                raw = false
+                loop nodes_p[root].kind == .field or nodes_p[root].kind == .index:
+                    if nodes_p[root].kind == .index and tkind(fact_type(ntype(int(nodes_p[root].a)))) == .ptr: raw = true
+                    root = int(nodes_p[root].a)
+                p = fact_place(root)
+                if raw or p.declaration != 0 and fact_exposed(p) and not fact_own_local(p): exposed_writes.push(n)
+                else if p.declaration == 0: opaque_writes.push(n)
+            for_:
+                l = int(np.sym)
+                if l > 0: fact_slice_writer(writers, PlaceIdentity(.local, int(locals_p[l].owner), l), n)
+                if np.aux == 3 and np.aux2 > 0:
+                    vl = int(np.aux2)
+                    fact_slice_writer(writers, PlaceIdentity(.local, int(locals_p[vl].owner), vl), n)
+                if demand_static and (fact_stepped_loop(n) or fact_open_range(n)): values.push(n)
+            iflet, match_:
+                l = int(np.sym)
+                if l > 0: fact_slice_writer(writers, PlaceIdentity(.local, int(locals_p[l].owner), l), n)
+            while_: active.push(n)
+            if_, and_, or_, coalesce: pass
+            return_:
+                active.push(n)
+                if summary or result_active: values.push(int(np.a))
+            break_, continue_, defer_: active.push(n)
+            call:
+                if collect_panic: psites.push(n)
+                callee = int(np.sym)
+                direct = np.aux == 0 and callee > 0
+                in_lib = direct and fact_fn_in_lib(callee)
+                nk = int(np.nlist)
+                l0 = int(np.list)
+                if ntype(n) == T_NEVER: active.push(n)
+                lib_sp = in_lib and fsp_is_lib_sp(n, callee)
+                if lib_sp:
+                    lflags = int(demand_static) | (int(summary) << 1) | (int(share) << 2) | (int(has_nd_mut) << 3)
+                    if fsp_lib_loop1(n, nk, l0, lflags, active, values, forks): probe_only = true
+                else if result_active or proof_active or fact_divisors.len() > 0 and fact_divisors.has(n): values.push(n)
+                else if demand_static and has_nd_mut and nd_mutable_call(n):
+                    active.push(n)
+                    values.push(n)
+                    loop j in [0..nk): values.push(int(lists_p[l0 + j]))
+                loop j in [0..nk):
+                    arg = int(lists_p[l0 + j])
+                    if has_own and ownership_fact_type(ntype(arg)): active.push(n)
+                    if nodes_p[arg].kind == .conv and nodes_p[arg].aux == i32(int(CV.refinement)):
+                        if direct:
+                            mflags[n] = mflags[n] | FACT_CONTRACT
+                            fact_slice_contract_actuals(n, arg, values)
+                        else: values.push(n)
+                if wi_fact_calls.len() > 0 and wi_fact_calls.has(n):
+                    values.push(n)
+                    loop j in [0..nk): values.push(int(lists_p[l0 + j]))
+                if share and direct and not fsp_has_mark(fsp_dep_gen, callee):
+                    fsp_set_mark(fsp_dep_gen, callee)
+                    callees.push(callee)
+                    versions.push(fact_plan_version(callee))
+                if direct and ref_refined_result(int(fns_p[callee].ret)): values.push(n)
+                if direct and callee < effect_summaries.len() and data(effect_summaries)[callee].done:
+                    opaque = false
+                    loop event in data(effect_summaries)[callee].events:
+                        ak = event.atom.kind
+                        if ak == .opaque or ak == .escape or ak == .io and fact_fn_in_lib(f):
+                            exposed_writes.push(n)
+                            opaque = true
+                        if ak != .write: continue
+                        p = place_base(event.atom.place)
+                        if p.root == .formal:
+                            fi = p.declaration - 1
+                            p = if fi >= 0 and fi < nk: fact_written_root(int(lists_p[l0 + fi])) else: PlaceIdentity(.local, 0, 0)
+                        if p.declaration == 0: exposed_writes.push(n)
+                        else:
+                            fact_slice_writer(writers, p, n)
+                            if fact_exposed(p) and not fact_own_local(p): exposed_writes.push(n)
+                    if opaque: fact_slice_place_arguments(writers, n)
+                else if np.aux != 2 and np.aux != 3:
+                    exposed_writes.push(n)
+                    fact_slice_place_arguments(writers, n)
+            intrinsic:
+                if collect_panic: psites.push(n)
+                id = np.aux as IN
+                if not rows and id == .push and np.nlist == 2:
+                    a0 = int(lists_p[int(np.list)])
+                    if fact_push_receiver(a0) > 0 and fact_row_array(ntype(a0)): rows = true
+                if id == .push or id == .pop or id == .clear or id == .reserve or id == .insert or id == .remove or id == .extend or id == .truncate or id == .resize:
+                    a0 = int(lists_p[int(np.list)])
+                    fact_slice_target(writers, a0, n)
+                    p = fact_slice_root(a0)
+                    if p.declaration == 0: opaque_writes.push(n)
+                    else if fact_exposed(p) and not fact_own_local(p): exposed_writes.push(n)
+                    if not summary and fact_policy == .RequireStatic and (id == .pop or id == .remove or id == .truncate):
+                        active.push(n)
+                        values.push(n)
+                else if id == .static_assert or id == .runtime_assert or id == .assert or id == .panic or id == .unreachable or id == .lend or id == .loan_length or id == .loan_store: values.push(n)
+                else if id != .len and not fact_pure_intrinsic(id): opaque_writes.push(n)
+            index:
+                if demand_static and not has_flag(n, NF_INBOUNDS) and fact_bounded_index(n):
+                    if share: index_demands.push(n)
+                    if fact_loop_index_local(n) > 0: loop_indexes.push(n)
+                    active.push(n)
+                    values.push(int(np.b))
+                    a = int(np.a)
+                    if types_p[fact_type(ntype(a))].kind != .fixed: values.push(a)
+            conv:
+                if ff_integer_demand(n): values.push(n)
+                aux = np.aux
+                if aux == i32(int(CV.refinement)) or aux == i32(int(CV.arr2fixed)): values.push(n)
+                else if demand_static and aux == i32(int(CV.int_)) and prune(ntype(int(np.a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT: values.push(n)
+                else if has_own and aux == i32(int(CV.explicit_copy)) and ownership_fact_type(ntype(n)): opaque_writes.push(n)
+                else if aux != i32(int(CV.int_)) and aux != i32(int(CV.none_)) and aux != i32(int(CV.fixed2arr)) and not fact_pure_conversion(n): exposed_writes.push(n)
+            binary:
+                if np.aux != 0:
+                    if collect_panic and np.aux == 1: psites.push(n)
+                    if not fact_pure_binary(n): exposed_writes.push(n)
+                else if demand_static:
+                    tok = np.op as Tok
+                    if tok == .slash or tok == .percent or fact_shift_obliged(n): values.push(n)
+            lambda:
+                if collect_panic: psites.push(n)
+                if has_own: opaque_writes.push(n)
+            partial:
+                if collect_panic: psites.push(n)
+                if fact_partial_opaque(n): opaque_writes.push(n)
+            fnref:
+                if collect_panic: psites.push(n)
+                if fact_handle_opaque(n): opaque_writes.push(n)
+            pair:
+                if collect_panic: psites.push(n)
+            map_lit: opaque_writes.push(n)
+            cast:
+                if not fact_enum_cast(n) and not fact_pointer_cast(n): opaque_writes.push(n)
+            str_lit:
+                if np.aux != 0: exposed_writes.push(n)
+            else:
+                if mask < 0: opaque_writes.push(n)
+        if not summary and has_nd_mut and nd_mutable_handle(n): values.push(n)
+    if collect_panic: fact_panic_sites[f] = psites
+    loop lam in forks:
+        values.push(lam)
+        loop cap_ in fns_p[int(nodes_p[lam].sym)].caps:
+            o = int(cap_.outer)
+            if o <= 0: continue
+            rkey = fact_root_key(PlaceIdentity(.local, int(locals_p[o].owner), o))
+            edge = if rkey >= 0 and rkey < 262144: fsp_wr_get(rkey) else: fact_index_get_raw(data(writers.heads), writers.heads.len(), rkey)
+            loop edge >= 0:
+                definition = data(writers.nodes)[edge]
+                edge = data(writers.next)[edge]
+                if nodes_p[definition].kind == .call: active.push(definition)
+                else: values.push(definition)
+    cursor = 0
+    acursor = 0
+    any_root = false
+    any_exposed = false
+    pnodes_p = data(parents.nodes)
+    pnext_p = data(parents.next)
+    wnodes_p = data(writers.nodes)
+    wnext_p = data(writers.next)
+    loop cursor < values.len() or acursor < active.len():
+        if acursor < active.len():
+            n = data(active)[acursor]; acursor += 1
+            if n == 0: continue
+            mark = if mstamp[n] == mgen: mflags[n] else: 0
+            if mark & FACT_ACTIVE != 0: continue
+            if mstamp[n] != mgen:
+                mstamp[n] = mgen
+                mhead[n] = -1
+                slice_mark_touched[0].push(n)
+            mflags[n] = mark | FACT_ACTIVE
+            edge = mhead[n]
+            loop edge >= 0:
+                active.push(pnodes_p[edge])
+                edge = pnext_p[edge]
+            np = nodes_p + n
+            k = np.kind
+            if k == .assign:
+                target = int(np.a)
+                if nodes_p[target].kind == .ident and nodes_p[target].aux == i32(int(SK.local)):
+                    l = int(nodes_p[target].sym)
+                    if int(locals_p[l].flags) & LF_ALIAS != 0: values.push(target)
+            if k == .if_ or k == .while_ or k == .for_ or k == .iflet or k == .match_ or k == .and_ or k == .or_ or k == .coalesce:
+                values.push(int(np.a))
+                if k == .match_:
+                    nk = int(np.nlist)
+                    l0 = int(np.list)
+                    loop j in [0..nk):
+                        arm = int(lists_p[l0 + j])
+                        ank = int(nodes_p[arm].nlist)
+                        al0 = int(nodes_p[arm].list)
+                        loop ki in [0..ank): values.push(int(lists_p[al0 + ki]))
+            continue
+        n = data(values)[cursor]; cursor += 1
+        if n == 0: continue
+        mark = if mstamp[n] == mgen: mflags[n] else: 0
+        if mark & FACT_VALUE != 0: continue
+        if mstamp[n] != mgen:
+            mstamp[n] = mgen
+            mhead[n] = -1
+            slice_mark_touched[0].push(n)
+        mflags[n] = mark | FACT_VALUE
+        active.push(n)
+        np = nodes_p + n
+        k = np.kind
+        match k:
+            ident:
+                p = fact_place(n)
+                root = fact_root_key(p)
+                seen_root = false
+                if root >= 0 and root < 262144:
+                    if root >= fsp_rt_gen.len(): fsp_rt_gen.resize(max(root + 64, fsp_rt_gen.len() * 2 + 256))
+                    if data(fsp_rt_gen)[root] == fsp_wr_g: seen_root = true
+                    else: data(fsp_rt_gen)[root] = fsp_wr_g
+                else:
+                    if fact_index_get_raw(data(roots), roots.len(), root) >= 0: seen_root = true
+                    else: fact_index_put(roots, root, 0)
+                if not seen_root:
+                    edge = if root >= 0 and root < 262144: fsp_wr_get(root) else: fact_index_get_raw(data(writers.heads), writers.heads.len(), root)
+                    loop edge >= 0:
+                        definition = wnodes_p[edge]
+                        edge = wnext_p[edge]
+                        if nodes_p[definition].kind == .call: active.push(definition)
+                        else: values.push(definition)
+                if not any_root:
+                    any_root = true
+                    loop wi in [0..opaque_writes.len()): values.push(data(opaque_writes)[wi])
+                if not any_exposed and p.declaration != 0 and fact_exposed(p):
+                    any_exposed = true
+                    loop wi in [0..exposed_writes.len()):
+                        write = data(exposed_writes)[wi]
+                        if nodes_p[write].kind == .call: active.push(write)
+                        else: values.push(write)
+                if np.aux == i32(int(SK.local)):
+                    l = int(np.sym)
+                    if int(locals_p[l].flags) & LF_ALIAS != 0 and locals_p[l].alias != 0: values.push(int(locals_p[l].alias))
+            block:
+                nk = int(np.nlist)
+                if nk > 0: values.push(int(lists_p[int(np.list) + nk - 1]))
+            for_, while_: values.push(int(np.a))
+            conv:
+                if np.b != 0 and np.aux == i32(int(CV.refinement)):
+                    values.push(int(np.a))
+                    values.push(int(np.b))
+                else: fact_slice_push_children(values, n)
+            lambda: pass
+            call:
+                nk = int(np.nlist)
+                l0 = int(np.list)
+                callee = int(np.sym)
+                direct = np.aux == 0 and callee > 0
+                lib_sp = direct and fact_fn_in_lib(callee) and fsp_is_lib_sp(n, callee)
+                push_summary_args = false
+                if direct and not lib_sp:
+                    if nk == 1 and fact_nd_call(n) != 0 or ntype(n) == T_BOOL and fact_predicate_summary(callee) != 0:
+                        loop j in [0..nk): values.push(int(lists_p[l0 + j]))
+                    else if not result_active and not proof_active and (fact_divisors.len() == 0 or not fact_divisors.has(n)) and not ref_refined_result(int(fns_p[callee].ret)):
+                        push_summary_args = true
+                    else: fact_slice_push_children(values, n)
+                else if fact_nd_call(n) != 0 or ntype(n) == T_BOOL and direct and fact_predicate_summary(callee) != 0 or fact_regex_call(n) or fact_integer_gcd_call(n):
+                    loop j in [0..nk): values.push(int(lists_p[l0 + j]))
+                else if fact_map_snapshot_call(n) or fact_copy_length_call(n) or fact_endpoint_call(n) != 0 or fact_same_length_call(n) or fact_chosen_call(n):
+                    values.push(int(lists_p[l0]))
+                else if direct and not result_active and not proof_active and (fact_divisors.len() == 0 or not fact_divisors.has(n)) and (not fact_fn_in_lib(callee) or (not fact_rational_constructor(n) and not fact_rational_promotion(n) and not fact_rational_divmod(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_mod_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n))) and not ref_refined_result(int(fns_p[callee].ret)):
+                    push_summary_args = true
+                else: fact_slice_push_children(values, n)
+                if push_summary_args:
+                    ret = fact_type(int(fns_p[callee].ret))
+                    constructor = (types_p[ret].kind == .struct_ or types_p[ret].kind == .tuple) and fact_constructor_type(ret) and fact_constructor_body(callee)
+                    if constructor: fact_constructor_calls[n] = true
+                    array_result = tkind(ret) == .array or constructor
+                    if array_result or fact_scalar(ret) and is_int(ret) and ret != T_U64 or fact_summary_payload(ret) != 0:
+                        loop j in [0..nk):
+                            arg = int(lists_p[l0 + j])
+                            at = fact_type(ntype(arg))
+                            atk = tkind(at)
+                            if atk == .array or atk == .fixed or array_result and fact_scalar(at) and is_int(at) and at != T_U64: values.push(arg)
+                            else if not array_result and fact_record_arrays(at): values.push(arg)
+            intrinsic:
+                aux = np.aux
+                l0 = int(np.list)
+                if aux == i32(int(IN.remove)) or aux == i32(int(IN.extend)) or aux == i32(int(IN.truncate)) or aux == i32(int(IN.resize)) or aux == i32(int(IN.setlen)):
+                    values.push(int(lists_p[l0]))
+                    values.push(int(lists_p[l0 + 1]))
+                else if aux == i32(int(IN.push)) or aux == i32(int(IN.pop)) or aux == i32(int(IN.clear)) or aux == i32(int(IN.reserve)) or aux == i32(int(IN.insert)):
+                    a0 = int(lists_p[l0])
+                    values.push(a0)
+                    if aux == i32(int(IN.push)) and np.nlist == 2:
+                        a1 = int(lists_p[l0 + 1])
+                        t1 = ntype(a1)
+                        if tkind(fact_type(t1)) == .array: values.push(a1)
+                        if fsp_has_mark(fsp_acc_gen, fact_push_receiver(a0)) and (fact_scalar(t1) and is_int(t1) or fact_int_components(fact_type(t1)) > 0): values.push(a1)
+                else: fact_slice_push_children(values, n)
+            else: fact_slice_push_children(values, n)
+    lo = nodes.len()
+    hi = -1
+    count = 0
+    touched_p = data(fact_mark_touched)
+    touched_n = fact_mark_touched.len()
+    loop ti in [0..touched_n):
+        tn = touched_p[ti]
+        if mflags[tn] != 0:
+            if tn < lo: lo = tn
+            if tn > hi: hi = tn
+            count += 1
+    if hi >= lo and hi - lo < 4 * count + 64:
+        flags = fill(0, hi - lo + 1)
+        fp = data(flags)
+        loop ti in [0..touched_n):
+            tn = touched_p[ti]
+            fv = mflags[tn]
+            if fv != 0: fp[tn - lo] = fv
+        fact_slice = FactSlice(flags, probe_only, lo, carried, rows)
+    else:
+        flags = fact_index_sized(count)
+        loop ti in [0..touched_n):
+            tn = touched_p[ti]
+            fv = mflags[tn]
+            if fv != 0: fact_index_put(flags, tn, fv)
+        fact_slice = FactSlice(flags, probe_only, -1, carried, rows)
+    fact_plan_serial += 1
+    fact_slice.plan = fact_plan_serial
+    fact_slice.callees = callees
+    fact_slice.versions = versions
+    fact_slice.exact_demands = exact_demands
+    fact_slice.index_demands = index_demands
+    loop m in loop_indexes:
+        x = fact_loop_index_local(m)
+        if fsp_has_mark(fsp_pw_gen, x) and not fsp_has_mark(fsp_sw_gen, x): fact_slice.loop_indexes.push(m)
+    if share: fact_slice.float_context = dir_floats_any or ff_conversions.has(fact_owner)
+    if not members or fact_member_admitted.len() == 0: fact_slice_cache[key] = fact_slice
+    fsp_work = work
+    fsp_values = values
+    fsp_active = active
+    fsp_exposed = exposed_writes
+    fsp_opaque = opaque_writes
+    fsp_forks = forks
+    fsp_pnodes = parents.nodes
+    fsp_pnext = parents.next
+    fsp_wnodes = writers.nodes
+    fsp_wnext = writers.next
+    fsp_in_prepare = false

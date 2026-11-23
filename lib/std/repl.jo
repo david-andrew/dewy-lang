@@ -255,18 +255,6 @@ when TARGET == "windows":
         ((ctx + 0xF8) as *int)[0] = f as int
         true
 
-# Where a panic goes instead of ending the process, while it is set: back to the prompt (in
-# the compiler: an error in an input; in the session on Windows: an input that panicked), which
-# puts memory back as it was (lib/std/snapshot.jo)
-__repl_jmp: *u8 = null
-
-__repl_unwind = ():
-    when TARGET != "wasm":
-        if __repl_jmp == null or __tid() != 0: return
-        j = __repl_jmp
-        __repl_jmp = null
-        __longjmp(j, 1)
-
 # what the prompt shows for an expression's value
 __repl_show = (x): print(x)
 __repl_show = (x: str): print("\"{x}\"")

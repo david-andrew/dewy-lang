@@ -1,6 +1,7 @@
 use 'checker_types.dewy'
 use 'type_layout.dewy'
 use 'type_format.dewy'
+const TF_LAID_OUT = 2
 const TF_MANAGED = 4
 struct TypePropertyHost:
     is_lib_texture: (int) -> bool
@@ -15,38 +16,67 @@ struct TypePropertyInput:
     math_int: *(int)
     host: *TypePropertyHost
 tp_inputs: *TypePropertyInput
-tp_has_fn_memo: {int: int} = {}
+tp_types: *(TypeInfo[])
+tp_refine: *(bool)
+tp_has_fn_memo: u8[]
 type_property_bind = (input: *TypePropertyInput) -> int:
     tp_inputs = input
-    tp_has_fn_memo = {}
+    tp_types = input[0].types
+    tp_refine = input[0].refine_active
+    tp_has_fn_memo = []
     0
 tp_type_string = (t: int) -> str: tf_string(t, false)
-tp_prune = (t0: int) -> int:
+tp_follow_var = (types: *TypeInfo, t0: int) -> int:
     t = t0
-    loop t != 0 and tp_inputs[0].types[0][t].kind == .var and tp_inputs[0].types[0][t].ref != 0: t = int(tp_inputs[0].types[0][t].ref)
+    loop t != 0 and types[t].kind == .var and types[t].ref != 0: t = int(types[t].ref)
+    t
+tp_follow = (types: *TypeInfo, t: int) -> int:
+    if t != 0 and types[t].kind == .var and types[t].ref != 0: return tp_follow_var(types, t)
+    t
+tp_prune = (t: int) -> int: tp_follow(data(tp_types[0]), t)
+tp_base_slow = (types: *TypeInfo, t0: int) -> int:
+    t = tp_follow(types, t0)
+    if types[t].kind == .secret: t = tp_follow(types, int(types[t].elem))
+    if types[t].kind == .callable: t = tp_follow(types, int(types[t].elem))
+    if tp_refine[0] and types[t].kind == .refined: t = tp_follow(types, int(types[t].elem))
+    if types[t].kind == .quantity: return tp_follow(types, int(types[t].elem))
     t
 tp_base = (t0: int) -> int:
-    t = tp_prune(t0)
-    if tp_inputs[0].types[0][t].kind == .secret: t = tp_prune(int(tp_inputs[0].types[0][t].elem))
-    if tp_inputs[0].types[0][t].kind == .callable: t = tp_prune(int(tp_inputs[0].types[0][t].elem))
-    if tp_inputs[0].refine_active[0] and tp_inputs[0].types[0][t].kind == .refined: t = tp_prune(int(tp_inputs[0].types[0][t].elem))
-    if tp_inputs[0].types[0][t].kind == .quantity: return tp_prune(int(tp_inputs[0].types[0][t].elem))
-    t
+    types = data(tp_types[0])
+    k = types[t0].kind
+    if k != .var and k != .secret and k != .callable and k != .quantity and k != .refined: return t0
+    tp_base_slow(types, t0)
 tp_targ = (t: int, i: int) -> int: int(tp_inputs[0].args[0][int(tp_inputs[0].types[0][t].args) + i])
 tp_struct_targ = (si: int, i: int) -> int: int(tp_inputs[0].args[0][int(tp_inputs[0].structs[0][si].targs) + i])
 tp_simple_enum = (t: int) -> bool:
+    tp = data(tp_types[0])
+    if t != 0 and int(tp[t].flags) & TF_LAID_OUT != 0 and tp[t].kind != .var:
+        return tp_inputs[0].structs[0][int(tp[t].st)].simple_enum
     tl_layout(t)
-    tp_inputs[0].structs[0][int(tp_inputs[0].types[0][tp_prune(t)].st)].simple_enum
+    tp_inputs[0].structs[0][int(data(tp_types[0])[tp_prune(t)].st)].simple_enum
+
+tp_is_managed_agg = (t: int) -> bool:
+    tp = data(tp_types[0])
+    if int(tp[t].flags) & TF_LAID_OUT == 0:
+        tl_layout(t)
+        tp = data(tp_types[0])
+    int(tp[t].flags) & TF_MANAGED != 0
 
 tp_is_managed = (t0: int) -> bool:
-    t = tp_base(t0)
-    if tp_inputs[0].types[0][t].rep == .tagged_int: return true
-    k = tp_inputs[0].types[0][t].kind
-    if k == .str_ or k == .array or k == .fn_ or k == .polyfn or k == .callable or k == .box: return true
-    if k == .struct_ or k == .enum_ or k == .tuple or k == .opt or k == .fixed:
-        tl_layout(t)
-        return int(tp_inputs[0].types[0][t].flags) & TF_MANAGED != 0
-    false
+    tp = data(tp_types[0])
+    t = t0
+    k = tp[t].kind
+    if k == .var or k == .secret or k == .callable or k == .quantity or k == .refined:
+        t = tp_base_slow(tp, t0)
+        k = tp[t].kind
+    if tp[t].rep == .tagged_int: return true
+    match k:
+        str_, array, fn_, polyfn, callable, box: true
+        struct_, enum_, tuple, opt, fixed:
+            f = int(tp[t].flags)
+            if f & TF_LAID_OUT != 0: return f & TF_MANAGED != 0
+            tp_is_managed_agg(t)
+        _: false
 
 # what in a value of this type is not plain data (numbers, bools, vectors, and structs, tuples,
 # enums and fixed arrays of them): a string, array, function, pointer...; "" when nothing is
@@ -87,7 +117,14 @@ tp_plain_problem = (t0: int) -> str:
 # Search the complete reachable type graph; memoize only the completed root.
 tp_type_has_fn = (t0: int) -> bool:
     root = tp_prune(t0)
-    if let cached = tp_has_fn_memo.get(root): return cached == 2
+    if root < tp_has_fn_memo.len():
+        c = tp_has_fn_memo[root]
+        if c != 0: return c == 2
+    rk = tp_types[0][root].kind
+    match rk:
+        fn_, polyfn, callable: return true
+        array, opt, fixed, box, tuple, struct_, enum_: pass
+        _: return false
     pending = [root]
     seen: {int: bool} = {}
     found = false
@@ -95,20 +132,22 @@ tp_type_has_fn = (t0: int) -> bool:
         t = tp_prune(pending.pop())
         if seen.has(t): continue
         seen[t] = true
-        k = tp_inputs[0].types[0][t].kind
+        k = tp_types[0][t].kind
         if k == .fn_ or k == .polyfn or k == .callable:
             found = true
             break
-        if let cached = tp_has_fn_memo.get(t):
-            if cached == 2:
-                found = true
-                break
-            continue
-        if k == .array or k == .opt or k == .fixed or k == .box: pending.push(int(tp_inputs[0].types[0][t].elem))
+        if t < tp_has_fn_memo.len():
+            cached = tp_has_fn_memo[t]
+            if cached != 0:
+                if cached == 2:
+                    found = true
+                    break
+                continue
+        if k == .array or k == .opt or k == .fixed or k == .box: pending.push(int(tp_types[0][t].elem))
         else if k == .tuple:
-            loop i in [0..int(tp_inputs[0].types[0][t].nargs)): pending.push(tp_targ(t, i))
+            loop i in [0..int(tp_types[0][t].nargs)): pending.push(tp_targ(t, i))
         else if k == .struct_ or k == .enum_:
-            si = int(tp_inputs[0].types[0][t].st)
+            si = int(tp_types[0][t].st)
             tp_inputs[0].host[0].check_struct_fields(si)
             if tp_inputs[0].structs[0][si].union_:
                 loop i in [0..int(tp_inputs[0].structs[0][si].ntargs)): pending.push(tp_struct_targ(si, i))
@@ -118,7 +157,11 @@ tp_type_has_fn = (t0: int) -> bool:
                 loop i in [0..int(tp_inputs[0].variants[0][vi].nfields)): pending.push(int(tp_inputs[0].fields[0][int(tp_inputs[0].variants[0][vi].fields) + i].type))
     # A back edge alone does not prove a subtree has no functions. Cache the
     # completed root result, never a provisional answer inside a recursive type.
-    tp_has_fn_memo[root] = if found: 2 else: 3
+    if root >= tp_has_fn_memo.len():
+        nlen = tp_has_fn_memo.len() * 2
+        if root + 1 > nlen: nlen = root + 1
+        tp_has_fn_memo.resize(nlen)
+    tp_has_fn_memo[root] = if found: u8(2) else: u8(3)
     found
 
 # Optional mathematical integers invert the low bit: zero is none, odd is

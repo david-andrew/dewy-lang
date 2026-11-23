@@ -110,6 +110,13 @@ exact_word_remainder=(n:ExactEmitWord):>array<int64>=>$unsafe {
 # their full exact operands, including division, comparisons and right shifts.
 exact_low_word=(n:ExactEmitWord):>int64=>$unsafe {
     if exact_chain_active and exact_chain_saved.has(n) {return exact_chain_saved[n]}
+    let [mid_lo mid_hi]=exact_midpoint(n)
+    if mid_lo not=? 0 {
+        let lo=gen_expr(mid_lo).v
+        let hi=gen_expr(mid_hi).v
+        let half=e_bin('shrs' VI e_bin('xor' VI lo hi) e_iconst(1))
+        return e_bin('add' VI e_bin('and_' VI lo hi) half)
+    }
     let k=nodes.ptr[n].kind
     if k not=? 'block' and not exact_has_node(n) {return freeze_scalar(gen_expr(n).v exact_representation(ntype(n)))}
     if exact_has_node(n) {
@@ -359,8 +366,11 @@ exact_gen_store=(n:ExactEmitWord):>Val=>$unsafe {
     if not proven and t =? T_INT and eg_fits(source) {proven=true}
     let bits=types.ptr[t].bits
     let signed=types.ptr[t].sign
-    let binary=nodes.ptr[source].kind =? 'binary'
     if proven and bits <=? 64 {return V(exact_low_word(source) false)}
+    loop exact_has_node(source) and (nodes.ptr[source].kind =? 'exprstmt' or nodes.ptr[source].kind =? 'conv' and (nodes.ptr[source].aux =? int32(int64(CV.int_)) or nodes.ptr[source].aux =? int32(int64(CV.none_)))) {
+        source=ExactEmitWord(nodes.ptr[source].a)
+    }
+    let binary=nodes.ptr[source].kind =? 'binary'
     if not proven and not target_wasm and not target_arm64 and bits =? 32 and binary {
         let op=exact_emit_op(source)
         let a=ExactEmitWord(nodes.ptr[source].a)

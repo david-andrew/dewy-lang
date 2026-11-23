@@ -106,7 +106,7 @@ call_tie_error = (n: int, name: int, xs: int[], cands: Cand[], best: int): event
 call_no_candidate = (n: int, name: int, ds: int[], xs: int[], expected: int, ufcs: bool, recv: bool, failure: mut CallFailure) -> int:
     print(events); print("no-candidate:{failure.last_err_arg}:{recv}"); exit(31)
     0
-call_decl_checks = (n: int, name: int, d: int, xs: int[], cd: Cand, np: int, ufcs: bool): events.push("picked:{d}")
+call_decl_checks = (n: int, name: int, d: int, xs: int[], cd_args: int[], np: int, ufcs: bool): events.push("picked:{d}")
 expected_binds = (cd: mut Cand, expected: int, given: int[]): events.push("expected:{expected}:{given}")
 rest_inst_binds = (d: int, xs: int[], ps: int[], bs: int[]) -> int[]: bs
 lit_default = (a: int) -> int: T_INT

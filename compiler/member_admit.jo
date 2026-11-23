@@ -28,13 +28,17 @@ use 'sibling_types.jo'
 use 'isolation.jo'
 use 'isolation_ops.dewy'
 
+member_has_exact: bool[]
 member_reset = ():
     member_compact_owners = {}
     member_templates = []
+    member_has_exact = []
     member_scopes = {}
     member_scope_locals = {}
     member_words = {}
     member_plain_types = {}
+    member_uniform_blocks = {}
+    member_uniform_owners = {}
     member_record = -1
     mode = env("DEWY_MEMBERS") ?? ""
     # Debug variables include generated names derived from node IDs. Keep
@@ -156,43 +160,51 @@ member_plain = (input: int) -> bool:
     member_plain_types[t] = okay
     okay
 member_checked = (n: int, t: MemberTemplate, seen: mut {int: bool}) -> bool:
+    mut_t = t
+    member_checked_fast(n, mut_t, seen)
+member_checked_fast = (n: int, t: mut MemberTemplate, seen: mut {int: bool}) -> bool:
     if n == 0 or seen.has(n): return true
     seen[n] = true
-    k = nodes[n].kind
-    if t.positions.has(nodes[n].pos) and (k == .str_lit or k == .dotname):
+    nd = data(nodes) + n
+    k = nd[0].kind
+    if (k == .str_lit or k == .dotname) and t.positions.has(nd[0].pos):
         if k == .dotname:
             set = str_set_of(ntype(n))
             if set == 0: return false
             if member_domain_count(set) != t.texts.len(): return false
         else if ntype(n) != T_STR: return false
     if k == .ident:
-        if nodes[n].aux == i32(int(SK.global)): return false
-        if nodes[n].aux == i32(int(SK.local)):
-            l = int(nodes[n].sym)
+        if nd[0].aux == i32(int(SK.global)): return false
+        if nd[0].aux == i32(int(SK.local)):
+            l = int(nd[0].sym)
             # A checked path may have become an existing narrowed alias.
             # Text/integer inference also has use-site records outside this tree.
             if int(locals[l].flags) & (LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_BYREF) != 0 or int(locals[l].type) == T_STR or int(locals[l].type) == T_MATH_INT or not member_plain(int(locals[l].type)): return false
     if k == .lambda or k == .fnref or k == .partial or k == .narrow or k == .istype or k == .iflet or k == .match_ or k == .for_ or k == .while_ or k == .return_: return false
-    if k == .conv and (nodes[n].aux == i32(int(CV.refinement)) or nodes[n].aux == i32(int(CV.set_text))): return false
-    if exact_stores.has(n) or ref_narrowing.has(n) or wi_fact_calls.has(n): return false
-    if nodes[n].type != 0 and has_var(prune(ntype(n))): return false
+    if k == .conv and (nd[0].aux == i32(int(CV.refinement)) or nd[0].aux == i32(int(CV.set_text))): return false
+    if (exact_stores.len() > 0 and exact_stores.has(n)) or (ref_narrowing.len() > 0 and ref_narrowing.has(n)) or (wi_fact_calls.len() > 0 and wi_fact_calls.has(n)): return false
+    if nd[0].type != 0 and has_var(prune(ntype(n))): return false
     if k == .intrinsic:
-        id = nodes[n].aux as IN
+        id = nd[0].aux as IN
         if id != .to_bytes and id != .runtime_assert and id != .static_assert and id != .len and id != .push: return false
     if k == .call:
-        if nodes[n].aux != 0: return false
-        decl = int(fns[int(nodes[n].sym)].decl)
+        if nd[0].aux != 0: return false
+        decl = int(fns[int(nd[0].sym)].decl)
         if not decl_in_prelude(decl) or nodes[decl].c != 0: return false
-    mask = isolation_children(k)
+    mask = isolation_node_children(n)
     if mask < 0: return false
-    if mask & 1 != 0 and not member_checked(int(nodes[n].a), t, seen): return false
-    if mask & 2 != 0 and not member_checked(int(nodes[n].b), t, seen): return false
-    if mask & 4 != 0 and not member_checked(int(nodes[n].c), t, seen): return false
+    if mask & 1 != 0 and not member_checked_fast(int(nd[0].a), t, seen): return false
+    if mask & 2 != 0 and not member_checked_fast(int(nd[0].b), t, seen): return false
+    if mask & 4 != 0 and not member_checked_fast(int(nd[0].c), t, seen): return false
     if mask & 16 != 0:
         loop child in kids(n):
-            if not member_checked(child, t, seen): return false
+            if not member_checked_fast(child, t, seen): return false
     true
 member_copy = (n: int, t: MemberTemplate, text: str, lm: {int: int}, nm: mut {int: int}) -> int:
+    mut_t = t
+    mut_lm = lm
+    member_copy_fast(n, mut_t, text, i32(intern(text)), mut_lm, nm)
+member_copy_fast = (n: int, t: mut MemberTemplate, text: str, text_id: i32, lm: mut {int: int}, nm: mut {int: int}) -> int:
     if n == 0: return 0
     if let known = nm.get(n): return known
     nd = nodes[n]
@@ -200,23 +212,155 @@ member_copy = (n: int, t: MemberTemplate, text: str, lm: {int: int}, nm: mut {in
     c = nodes.len()
     nodes.push(nd)
     nm[n] = c
-    if t.positions.has(nd.pos):
-        if k == .str_lit: nodes[c].sval = i32(intern(text))
-        else if k == .dotname:
+    if (k == .str_lit or k == .dotname) and t.positions.has(nd.pos):
+        if k == .str_lit: nodes[c].sval = text_id
+        else:
             nodes[c].aux = i32(member_words[str_set_of(ntype(n))][text])
-            nodes[c].name = i32(intern(text))
-    if k == .vardecl or k == .ident and nd.aux == i32(int(SK.local)):
+            nodes[c].name = text_id
+    if (k == .vardecl or k == .ident and nd.aux == i32(int(SK.local))) and lm.len() > 0:
         if let local = lm.get(int(nd.sym)): nodes[c].sym = i32(local)
-    mask = isolation_children(k)
-    if mask & 1 != 0: nodes[c].a = i32(member_copy(int(nd.a), t, text, lm, nm))
-    if mask & 2 != 0: nodes[c].b = i32(member_copy(int(nd.b), t, text, lm, nm))
-    if mask & 4 != 0: nodes[c].c = i32(member_copy(int(nd.c), t, text, lm, nm))
+    mask = isolation_node_children(n)
+    if mask & 1 != 0: nodes[c].a = i32(member_copy_fast(int(nd.a), t, text, text_id, lm, nm))
+    if mask & 2 != 0: nodes[c].b = i32(member_copy_fast(int(nd.b), t, text, text_id, lm, nm))
+    if mask & 4 != 0: nodes[c].c = i32(member_copy_fast(int(nd.c), t, text, text_id, lm, nm))
     if mask & 16 != 0:
         children: int[]
-        loop i in [0..nkids(n)): children.push(member_copy(kid(n, i), t, text, lm, nm))
+        loop i in [0..nkids(n)): children.push(member_copy_fast(kid(n, i), t, text, text_id, lm, nm))
         set_list(c, children)
-    if let divisor = fact_divisors.get(n): fact_divisors[c] = divisor
+    if fact_divisors.len() > 0:
+        if let divisor = fact_divisors.get(n): fact_divisors[c] = divisor
     exact_note(c)
+    c
+member_nm_stamp: i32[]
+member_nm_val: i32[]
+member_nm_gen: i32 = 0
+member_kid_buf: i32[]
+
+mcf_t: *MemberTemplate = null
+mcf_text = ""
+mcf_text_id: i32 = 0
+mcf_old_p: *int = null
+mcf_n_old = 0
+mcf_new_p: *int = null
+mcf_gen: i32 = 0
+mcf_has_div = false
+mcf_has_pos = false
+mcf_has_exact = false
+mcf_stamp_p: *i32 = null
+mcf_val_p: *i32 = null
+
+mcf_alloc_lists = (nk: int) -> int:
+    lp = data(lists)
+    lh = (lp as *int) - 3
+    if lp == null or lh[0] != 1 or lh[1] + nk > lh[2]:
+        os = lists.len()
+        lists.reserve(max(os + nk, os * 2))
+        lp = data(lists)
+        lh = (lp as *int) - 3
+    start = lh[1]
+    lh[1] = start + nk
+    start
+member_copy_flat = (n: int) -> int:
+    if n == 0: return 0
+    if mcf_stamp_p[n] == mcf_gen: return int(mcf_val_p[n])
+    nptr = data(nodes)
+    nh = (nptr as *int) - 3
+    if nptr == null or nh[0] != 1 or nh[1] >= nh[2]:
+        oc = nodes.len()
+        nodes.reserve(max(oc + 1, oc * 2))
+        nptr = data(nodes)
+        nh = (nptr as *int) - 3
+    c = nh[1]
+    nh[1] = c + 1
+    k = nptr[n].kind
+    np0 = nptr + c
+    mem_copy(np0 as *u8, (nptr + n) as *u8, size_of(Node))
+    mcf_stamp_p[n] = mcf_gen
+    mcf_val_p[n] = i32(c)
+    match k:
+        int_lit, float_lit, bool_lit, none_lit, null_lit:
+            if exact_measure_on: exact_note(c)
+            return c
+        _: pass
+    if k == .ident:
+        if np0[0].aux == i32(1) and mcf_n_old > 0:
+            sym = int(np0[0].sym)
+            op = mcf_old_p
+            no = mcf_n_old
+            loop i in [0..no):
+                if op[i] == sym:
+                    np0[0].sym = i32(mcf_new_p[i])
+                    break
+        if exact_measure_on: exact_note(c)
+        return c
+    if mcf_has_pos and (k == .str_lit or k == .dotname) and mcf_t[0].positions.has(np0[0].pos):
+        if k == .str_lit: np0[0].sval = mcf_text_id
+        else:
+            np0[0].aux = i32(member_words[str_set_of(ntype(n))][mcf_text])
+            np0[0].name = mcf_text_id
+    if k == .dotname:
+        if exact_measure_on: exact_note(c)
+        return c
+    if k == .vardecl and mcf_n_old > 0:
+        sym = int(np0[0].sym)
+        op = mcf_old_p
+        no = mcf_n_old
+        loop i in [0..no):
+            if op[i] == sym:
+                np0[0].sym = i32(mcf_new_p[i])
+                break
+    mask = int(iso_child_p[int(k)])
+    na = int(np0[0].a)
+    nb = int(np0[0].b)
+    nc = int(np0[0].c)
+    nk = int(np0[0].nlist)
+    lbase = int(np0[0].list)
+    r_a = if mask & 1 != 0 and na != 0: member_copy_flat(na) else: 0
+    r_b = if mask & 2 != 0 and nb != 0: member_copy_flat(nb) else: 0
+    r_c = if mask & 4 != 0 and nc != 0: member_copy_flat(nc) else: 0
+    r_list = -1
+    if mask & 16 != 0 and nk > 0:
+        if nk == 1:
+            c0 = i32(member_copy_flat(int(lists[lbase])))
+            r_list = mcf_alloc_lists(1)
+            data(lists)[r_list] = c0
+        else if nk == 2:
+            lp0 = data(lists)
+            k0 = int(lp0[lbase])
+            k1 = int(lp0[lbase + 1])
+            c0 = i32(member_copy_flat(k0))
+            c1 = i32(member_copy_flat(k1))
+            r_list = mcf_alloc_lists(2)
+            lp1 = data(lists) + r_list
+            lp1[0] = c0
+            lp1[1] = c1
+        else:
+            bp = data(member_kid_buf)
+            bh = (bp as *int) - 3
+            if bp == null or bh[0] != 1 or bh[1] + nk > bh[2]:
+                ob = member_kid_buf.len()
+                member_kid_buf.reserve(max(ob + nk, ob * 2))
+                bp = data(member_kid_buf)
+                bh = (bp as *int) - 3
+            base = bh[1]
+            bh[1] = base + nk
+            loop i in [0..nk):
+                data(member_kid_buf)[base + i] = i32(member_copy_flat(int(lists[lbase + i])))
+            r_list = mcf_alloc_lists(nk)
+            mem_copy((data(lists) + r_list) as *u8, (data(member_kid_buf) + base) as *u8, nk * 4)
+            bh2 = (data(member_kid_buf) as *int) - 3
+            bh2[1] = base
+    if r_a != 0 or r_b != 0 or r_c != 0 or r_list >= 0:
+        np2 = data(nodes) + c
+        if r_a != 0: np2[0].a = i32(r_a)
+        if r_b != 0: np2[0].b = i32(r_b)
+        if r_c != 0: np2[0].c = i32(r_c)
+        if r_list >= 0:
+            np2[0].list = i32(r_list)
+            np2[0].nlist = i32(nk)
+    if mcf_has_div:
+        if let divisor = fact_divisors.get(n): fact_divisors[c] = divisor
+    if mcf_has_exact and (exact_measure_on or k == .binary or k == .unary or k == .intrinsic or k == .if_ or k == .iflet or k == .coalesce or k == .match_ or k == .conv): exact_note(c)
     c
 member_scope = (scope: int) -> bool:
     index = member_scopes.get(scope) ?? -1
@@ -229,10 +373,13 @@ member_scope = (scope: int) -> bool:
         first_local = fns[owner].locals.len()
         first_request = fact_requests.len()
         first_refine = refine_requests.len()
+        first_exact = exact_candidate_nodes.len()
         before_warnings = shown_warnings.len()
         previous = member_record
         member_record = index
         check_block(int(nodes[scope].b), 0, false)
+        if member_has_exact.len() <= index: member_has_exact.resize(index + 1)
+        data(member_has_exact)[index] = exact_candidate_nodes.len() > first_exact
         t = member_templates[index]
         t.body = int(nodes[scope].b)
         loop i in [first_local..fns[owner].locals.len()):
@@ -241,7 +388,7 @@ member_scope = (scope: int) -> bool:
             if not t.bindings.has(int(locals[l].name)): t.okay = false
             if int(locals[l].flags) & (LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_CONST) != 0 or has_var(prune(int(locals[l].type))) or int(locals[l].type) == T_STR or int(locals[l].type) == T_MATH_INT or locals[l].const_init != 0: t.okay = false
         seen: {int: bool} = {}
-        if not member_checked(t.body, t, seen) or before_warnings != shown_warnings.len(): t.okay = false
+        if not member_checked_fast(t.body, t, seen) or before_warnings != shown_warnings.len(): t.okay = false
         loop i in [first_request..fact_requests.len()):
             if fact_requests[i].owner == owner:
                 request = fact_requests[i].node
@@ -270,20 +417,52 @@ member_scope = (scope: int) -> bool:
 
 member_replay_scope = (index: int, scope: int, text: str, nm: mut {int: int}) -> int:
     t = member_templates[index]
-    lm: {int: int} = {}
     copied_locals: int[]
+    has_cw = copy_writes.len() > 0
     loop old in t.locals:
         l = locals.len()
         locals.push(locals[old])
         fns[t.owner].locals.push(l)
-        lm[old] = l
         copied_locals.push(l)
-        if let write = copy_writes.get(old): copy_writes[l] = write
-    body = member_copy(t.body, t, text, lm, nm)
-    loop request in t.requests:
-        if let copy = nm.get(request): fact_requests.push(FactRequest(copy, t.owner))
-    loop request in t.refinements:
-        if let copy = nm.get(request): refine_requests.push(FactRequest(copy, t.owner))
+        if has_cw:
+            if let write = copy_writes.get(old): copy_writes[l] = write
+    body = 0
+    if t.shared_proofs:
+        lm: {int: int} = {}
+        loop i in [0..t.locals.len()): lm[t.locals[i]] = copied_locals[i]
+        body = member_copy(t.body, t, text, lm, nm)
+        loop request in t.requests:
+            if let copy = nm.get(request): fact_requests.push(FactRequest(copy, t.owner))
+        loop request in t.refinements:
+            if let copy = nm.get(request): refine_requests.push(FactRequest(copy, t.owner))
+    else:
+        limit = nodes.len()
+        if member_nm_stamp.len() < limit:
+            member_nm_stamp.resize(limit + 256)
+            member_nm_val.resize(limit + 256)
+        member_nm_gen = i32(int(member_nm_gen) + 1)
+        if member_nm_gen == i32(0):
+            loop i in [0..member_nm_stamp.len()): member_nm_stamp[i] = i32(0)
+            member_nm_gen = i32(1)
+        gen = member_nm_gen
+        text_id = i32(intern(text))
+        mcf_t = data(member_templates) + index
+        mcf_text = text
+        mcf_text_id = text_id
+        mcf_old_p = data(t.locals)
+        mcf_n_old = t.locals.len()
+        mcf_new_p = data(copied_locals)
+        mcf_gen = gen
+        mcf_has_div = fact_divisors.len() > 0
+        mcf_has_pos = t.positions.len() > 0
+        mcf_has_exact = exact_measure_on or (index < member_has_exact.len() and data(member_has_exact)[index])
+        mcf_stamp_p = data(member_nm_stamp)
+        mcf_val_p = data(member_nm_val)
+        body = member_copy_flat(t.body)
+        loop request in t.requests:
+            if request < limit and member_nm_stamp[request] == gen: fact_requests.push(FactRequest(int(member_nm_val[request]), t.owner))
+        loop request in t.refinements:
+            if request < limit and member_nm_stamp[request] == gen: refine_requests.push(FactRequest(int(member_nm_val[request]), t.owner))
     member_scope_locals[scope] = copied_locals
     body
 # A destination domain intersects the source in this many members; compute it

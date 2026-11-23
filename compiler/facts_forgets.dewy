@@ -934,9 +934,9 @@ fact_exposed=(p:PlaceIdentity):>bool=>$unsafe {
     }
     if p.root not=? 'local' {return true}
     # Lock places cannot escape their guards; mutable actuals still invalidate.
-    if place_locked.has(p.declaration) {return false}
+    if place_locked.length >? 0 and place_locked.has(p.declaration) {return false}
     let flags:ForgetWord=ForgetWord(locals.ptr[p.declaration].flags)
-    if flags & LF_BYREF not=? 0 and (flags & LF_VALUEITER not=? 0 or map_loop_values.has(p.declaration)) {flags &= ~LF_BYREF}
+    if flags & LF_BYREF not=? 0 and (flags & LF_VALUEITER not=? 0 or (map_loop_values.length >? 0 and map_loop_values.has(p.declaration))) {flags &= ~LF_BYREF}
     # A Dewy map/pool's address is lent only for the named mutable call.
     if flags & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_BYREF | LF_EXPOSED) =? 0 and flags & LF_ADDR not=? 0 and (is_map_type(ForgetWord(locals.ptr[p.declaration].type)) or fact_pool_type(ForgetWord(locals.ptr[p.declaration].type))) and fact_dewy_local(p.declaration) {return false}
     if flags & FACT_LENT =? LF_ADDR and fact_dewy_local(p.declaration) {return false}

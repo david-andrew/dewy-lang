@@ -98,29 +98,49 @@ use 'facts_probes.dewy'
 use 'facts_row_queries.dewy'
 use 'facts_value_queries.dewy'
 
-fact_projections_indexed = (s: FactState) -> bool: s.index[0].projection_next.len() != 0
+fact_projections_indexed = (s: FactState) -> bool: data(s.index)[0].projection_next.len() != 0
 fact_projection_find = (s: FactState, base: int, selector: int, element: bool) -> int:
-    if fact_projections_indexed(s): return fact_index_get(s.index[0].projection_index, fact_projection_key(base, selector, element))
-    loop i in [0..s.projections.len()):
-        if s.projections[i].base == base and s.projections[i].selector == selector and s.projections[i].element == element: return i
+    if (s.proj_base_mask & (1 << (base & 63))) == 0: return -1
+    idx = data(s.index)
+    if idx[0].projection_next.len() != 0: return fact_index_get_raw(data(idx[0].projection_index), idx[0].projection_index.len(), fact_projection_key(base, selector, element))
+    ps = data(s.projections)
+    n = s.projections.len()
+    loop i in [0..n):
+        if ps[i].base == base and ps[i].selector == selector and ps[i].element == element: return i
     -1
 fact_projection_first = (s: FactState, base: int) -> int:
-    if fact_projections_indexed(s): return fact_index_get(s.index[0].projection_head, base)
-    loop i in [0..s.projections.len()):
-        if s.projections[i].base == base: return i
+    if (s.proj_base_mask & (1 << (base & 63))) == 0: return -1
+    idx = data(s.index)
+    if idx[0].projection_next.len() != 0: return fact_index_get_raw(data(idx[0].projection_head), idx[0].projection_head.len(), base)
+    ps = data(s.projections)
+    n = s.projections.len()
+    loop i in [0..n):
+        if ps[i].base == base: return i
     -1
 fact_projection_after = (s: FactState, i: int) -> int:
-    fact_projection_next_in(s.projections, s.index[0].projection_next, i)
+    idx = data(s.index)
+    if idx[0].projection_next.len() != 0: return data(idx[0].projection_next)[i]
+    ps = data(s.projections)
+    base = ps[i].base
+    n = s.projections.len()
+    loop j in [i + 1..n):
+        if ps[j].base == base: return j
+    -1
 # A write may append projections or compact its state while traversing the
 # old projections. Keep the records and links from the same snapshot.
 fact_projection_next_in = (projections: FactProjection[], links: int[], i: int) -> int:
-    if links.len() != 0: return links[i]
-    base = projections[i].base
-    loop j in [i + 1..projections.len()):
-        if projections[j].base == base: return j
+    if links.len() != 0: return data(links)[i]
+    ps = data(projections)
+    base = ps[i].base
+    n = projections.len()
+    loop j in [i + 1..n):
+        if ps[j].base == base: return j
     -1
 fact_projection_origin = (s: FactState, value: int) -> int:
-    if fact_projections_indexed(s): return fact_index_get(s.index[0].projection_value, value)
-    loop i in [0..s.projections.len()):
-        if not s.projections[i].element and s.projections[i].value == value: return i
+    idx = data(s.index)
+    if idx[0].projection_next.len() != 0: return fact_index_get_raw(data(idx[0].projection_value), idx[0].projection_value.len(), value)
+    ps = data(s.projections)
+    n = s.projections.len()
+    loop i in [0..n):
+        if not ps[i].element and ps[i].value == value: return i
     -1

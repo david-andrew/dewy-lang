@@ -1,7 +1,7 @@
 $runtime_checks
 
 from p"ast.jo" import nkids2
-from p"ast.jo" import (NF_GENERIC NF_GLOBAL has_flag kid kid2 nkids nodes)
+from p"ast.jo" import (NF_GENERIC NF_GLOBAL has_flag kid kid2 lists nkids nodes)
 from p"callback_specialize.jo" import (callback_calls callback_counts callback_targets callback_versions)
 from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_SHARED fns locals)
 from p"expr.jo" import (CV)
@@ -50,24 +50,67 @@ callback_value=(n0:CallbackWord known:dict<int64 int64>):>CallbackWord=>$unsafe 
 # consume the completed bindings, never the partially discovered table. This
 # replaces a second body walk with O(call sites + arguments) work and keeps only
 # node IDs, so nested specialization cannot invalidate a borrowed arena view.
-callback_bindings=(n:CallbackWord @known:dict<int64 int64> @calls:array<int64>):>void=>$unsafe {
-    if n =? 0 or nodes.ptr[n].kind =? 'lambda' {return}
-    if nodes.ptr[n].kind =? 'call' and nodes.ptr[n].aux =? 0 {calls.push(n)}
-    if nodes.ptr[n].kind =? 'vardecl' and nkids(n) =? 0 and not has_flag(n NF_GLOBAL) {
-        let l=CallbackWord(nodes.ptr[n].sym)
-        if l >=? 0 and CallbackWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_BYREF | LF_MUTPARAM) =? 0 {
-            let v=callback_value(CallbackWord(nodes.ptr[n].b) known)
-            if v >=? 0 {known[l]=v}
+let cb_stack:array<int64>=[]
+callback_bindings=(root:CallbackWord @known:dict<int64 int64> @calls:array<int64>):>void=>$unsafe {
+    if root =? 0 {return}
+    if cb_stack.length <? 256 {cb_stack.resize(256)}
+    let st=cb_stack.ptr
+    let scap=cb_stack.length
+    let ns=nodes.ptr
+    let lp=lists.ptr
+    let locp=locals.ptr
+    let sp:CallbackWord=1
+    st[0]=root
+    loop sp >? 0 {
+        sp -= 1
+        let n=st[sp]
+        let np=ns + n
+        let kind=np[0].kind
+        match kind {
+            <'ident'|'int_lit'|'bool_lit'|'float_lit'|'dotname'|'none_lit'|'null_lit'|'lambda'|'hole'|'break_'|'continue_'|'pwild'> => {continue}
+            <'call'> => {if np[0].aux =? 0 {calls.push(n)}}
+            <'vardecl'> => {
+                if np[0].nlist =? 0 and (CallbackWord(np[0].flags) & NF_GLOBAL) =? 0 {
+                    let l=CallbackWord(np[0].sym)
+                    if l >=? 0 and CallbackWord(locp[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_BYREF | LF_MUTPARAM) =? 0 {
+                        let v=callback_value(CallbackWord(np[0].b) known)
+                        if v >=? 0 {known[l]=v}
+                    }
+                }
+            }
+            _ => {}
         }
+        let k1=CallbackWord(np[0].nlist)
+        let k2=CallbackWord(np[0].nlist2)
+        if sp + k1 + k2 + 4 >? scap {
+            scap=(sp + k1 + k2 + 4) * 2
+            cb_stack.resize(scap)
+            st=cb_stack.ptr
+        }
+        if k2 >? 0 {
+            let i=k2 - 1
+            loop i >=? 0 {
+                let c=kid2(n i)
+                if c not=? 0 {st[sp]=c; sp += 1}
+                i -= 1
+            }
+        }
+        if k1 >? 0 {
+            let l1=CallbackWord(np[0].list)
+            let i=k1 - 1
+            loop i >=? 0 {
+                let c=CallbackWord(lp[l1 + i])
+                if c not=? 0 {st[sp]=c; sp += 1}
+                i -= 1
+            }
+        }
+        if kind not=? 'for_' {
+            if kind not=? 'partial' and np[0].d not=? 0 {st[sp]=CallbackWord(np[0].d); sp += 1}
+            if np[0].c not=? 0 {st[sp]=CallbackWord(np[0].c); sp += 1}
+        }
+        if np[0].b not=? 0 {st[sp]=CallbackWord(np[0].b); sp += 1}
+        if np[0].a not=? 0 {st[sp]=CallbackWord(np[0].a); sp += 1}
     }
-    callback_bindings(CallbackWord(nodes.ptr[n].a) @known @calls)
-    callback_bindings(CallbackWord(nodes.ptr[n].b) @known @calls)
-    if nodes.ptr[n].kind not=? 'for_' {
-        callback_bindings(CallbackWord(nodes.ptr[n].c) @known @calls)
-        if nodes.ptr[n].kind not=? 'partial' {callback_bindings(CallbackWord(nodes.ptr[n].d) @known @calls)}
-    }
-    loop i in [0..nkids(n)) {callback_bindings(kid(n i) @known @calls)}
-    loop i in [0..nkids2(n)) {callback_bindings(kid2(n i) @known @calls)}
 }
 callback_request=(f:CallbackWord targets:array<int64> depth:CallbackWord):>CallbackWord=>$unsafe {
     if depth >=? 4 or callback_versions.length >=? 128 {return -1}
@@ -116,19 +159,27 @@ callback_prepare=():>void=>$unsafe {
     callback_versions.clear()
     callback_counts.clear()
     stack_closure_params.clear()
+    let lambda_files:array<bool>=fill(false files.length)
     let has_lambda=false
     loop f in [0..fns.length) {
-        if fns.ptr[f].kind =? FK_LAMBDA and fns.ptr[f].decl not=? 0 and files[pos_file(nodes.ptr[CallbackWord(fns.ptr[f].decl)].pos)].is_dewy {
-            has_lambda=true
-            break
+        if fns.ptr[f].kind =? FK_LAMBDA and fns.ptr[f].decl not=? 0 {
+            let fi=pos_file(nodes.ptr[CallbackWord(fns.ptr[f].decl)].pos)
+            if files[fi].is_dewy {
+                lambda_files[fi]=true
+                has_lambda=true
+            }
         }
     }
     if not has_lambda {return}
+    let known=dict<int64 int64>()
+    let calls:array<int64>=[]
     loop f in [1..fns.length) {
         let d=CallbackWord(fns.ptr[f].decl)
-        if d =? 0 or not files[pos_file(nodes.ptr[d].pos)].is_dewy {continue}
-        let known=dict<int64 int64>()
-        let calls:array<int64>=[]
+        if d =? 0 {continue}
+        let fi=pos_file(nodes.ptr[d].pos)
+        if not lambda_files[fi] {continue}
+        if known.length >? 0 {known.clear()}
+        if calls.length >? 0 {calls.clear()}
         callback_bindings(CallbackWord(fns.ptr[f].body) @known @calls)
         # Ordinary callers need the same immutable bindings as versions: their
         # invocation-only arguments can borrow the already saved environment.

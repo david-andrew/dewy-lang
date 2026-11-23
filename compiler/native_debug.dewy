@@ -57,8 +57,8 @@ native_debug_function=(input:ptr<IrFn> code_end:NWord start:NWord body:NWord dwr
             if v >=? 0 and v <? nt {
                 # (the vreg holds the variable's address: by reference, a mut parameter, a struct parameter)
                 let at=fl & LF_BYREF not=? 0 or fl & LF_PARAM not=? 0 and(fl & LF_MUTPARAM not=? 0 or aggregate(NWord(locals[l].type)))
-                let s0=if v <? np {-1} else {v_live[v].first}
-                let e=v_live[v].last
+                let s0=if v <? np {-1} else {NWord(v_live[v].first)}
+                let e=NWord(v_live[v].last)
                 if s0 >=? 0 and s0 <? n {lo=positions[s0]}
                 if e >=? 0 and e + 1 <=? n {hi=positions[e + 1]}
                 let loc=vloc[v]
@@ -138,12 +138,12 @@ x64_line_table=():>array<uint8>=>$unsafe {
     let positions=dw_inputs[0].ir_positions[0].ptr
     if nc =? 0 {return []}
     let out:array<uint8>=[83  76  78  49]
-    let fidx:array<int64>=fill(-1  nf)
+    let fidx:array<int64>=fill(NWord(-1)  nf)
     let file_index=fidx.ptr
     let fnames:array<string>=[]
     # Every call contributes at most three words. Fill one private buffer and
     # borrow it for this walk; source filtering only shortens the final prefix.
-    let ents:array<int64>=fill(0 nc * 3 // 2)
+    let ents:array<int64>=fill(NWord(0) nc * 3 // 2)
     let entries=ents.ptr
     let ne:NWord=0
     let k:NWord=0
@@ -172,16 +172,39 @@ x64_line_table=():>array<uint8>=>$unsafe {
         loop ch in (nm as array<uint8>) {out.push(ch)}
     }
     put32(@out  ne // 3)
-    out.reserve(NWord(out.length) + ne * 2)
+    let base_len:NWord=out.length
+    let max_bytes:NWord=base_len + ne * 10 + 16
+    if cap(out) <? max_bytes {out.reserve(max_bytes)}
+    __set_len(out max_bytes)
+    let wp=out.ptr + base_len
     let last:NWord=0
     k=0
     loop k <? ne {
-        put_varint(@out  entries[k] - last)
+        let v0:NWord=entries[k] - last
         last=entries[k]
-        put_varint(@out  entries[k + 1])
-        put_varint(@out  entries[k + 2])
+        if v0 >=? 0 and v0 <? 128 {wp[0]=uint8<overflow='wrap'>(v0); wp+=1}
+        else {
+            let v=v0
+            loop v >=? 128 {wp[0]=uint8<overflow='wrap'>((v & 127) | 128); wp+=1; v=v >> 7}
+            wp[0]=uint8<overflow='wrap'>(v); wp+=1
+        }
+        let v1:NWord=entries[k + 1]
+        if v1 >=? 0 and v1 <? 128 {wp[0]=uint8<overflow='wrap'>(v1); wp+=1}
+        else {
+            let v=v1
+            loop v >=? 128 {wp[0]=uint8<overflow='wrap'>((v & 127) | 128); wp+=1; v=v >> 7}
+            wp[0]=uint8<overflow='wrap'>(v); wp+=1
+        }
+        let v2:NWord=entries[k + 2]
+        if v2 >=? 0 and v2 <? 128 {wp[0]=uint8<overflow='wrap'>(v2); wp+=1}
+        else {
+            let v=v2
+            loop v >=? 128 {wp[0]=uint8<overflow='wrap'>((v & 127) | 128); wp+=1; v=v >> 7}
+            wp[0]=uint8<overflow='wrap'>(v); wp+=1
+        }
         k += 3
     }
+    __set_len(out (wp - out.ptr))
     out
 }
 

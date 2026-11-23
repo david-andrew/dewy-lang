@@ -31,6 +31,8 @@ use 'refine.jo'
 use 'prelude_ops.dewy'
 
 prelude_game_hint = false
+prelude_game_pending = false
+prelude_std_pending = false
 prelude_lazy = false
 pu_mod: int[]                   # unit -> its module
 pu_done: bool[]                 # unit -> parsed
@@ -86,3 +88,47 @@ dp_names: {str: int}
 # The Dewy prelude module declaring name (loaded on first use), or -1
 # (dp_names' answer by interned name, + 2: 0 not asked yet, 1 none)
 dp_by_name: int[]
+
+std_optional_file = (n: str) -> bool:
+    n in ["arena.jo", "base64.jo", "bytes.jo", "cli.jo", "csv.jo", "date.jo", "fork_join.jo", "graphemes.jo", "hash.jo", "heap.jo", "nd.jo", "oom.jo", "path.jo", "pool.jo", "regex.jo", "repl.jo", "save.jo", "settings.jo", "signal_core.jo", "snapshot.jo", "story.jo", "task_core.jo", "tasks.jo", "thread.jo", "watch.jo", "windows_cmdline.jo"]
+
+std_file_map: {str: str}
+std_file_ready = false
+const STD_FILE_SPEC = "graphemes.jo:graphemes,grapheme_boundaries,__dewy_string_length,__dewy_find,__dewy_rfind,__dewy_string_index,__dewy_string_slice,__dewy_decode_utf8,__dewy_grapheme_iter,__dewy_grapheme_done,__dewy_grapheme_value,__GraphemeCursor,__DewyGraphemeIter|nd.jo:Array,NDArray,zeros,ones,reshape,transpose,linspace,eye,arange,diag,vstack,hstack,outer,argmax,argmin,matmul,to,mean,median,std_dev,variance,percentile,quantile,argsort,cumsum,diff,prod,histogram,covariance,correlation,dot,norm,rand,randn,solve,det,inverse,trace,__pairwise_sum,__bcast,__rank_panic,__index_panic,__fmt_nd|task_core.jo:TaskGroup,Canceled,InputFailure,__TaskContext,__TaskJob,__TaskScope,__state,signals_closed,__task_contexts,__task_frontier_lock,__task_signal_frontier,__task_signal_noop,__task_signal_release_hook,__task_root_interrupted,__task_context,__task_scope_canceled,__task_slot,__task_canceled,__task_shield_enter,__task_shield_leave,__task_file_code,__task_file_begin,__task_lock,__task_unlock,__task_os_wait,__task_os_wake,__task_pause,__task_inherit_signal_owner|thread.jo:Thread,Mutex,Atomic,CachePadded,atomic,Cond,RwLock,sleep_ms,cpu_count,parallel_map,parallel_range,__par_serial,__Ticker,__ticker_new,__ticker_wait,__select_leave,__select_missed,__select_try_on,__select_try_won,__select_took,__select_trying,__mac_sysconf|tasks.jo:Task,Channel,channel,cancel,select,within,BackgroundTasks,__c_madvise,__mac_pthread_join|fork_join.jo:__worker_main,__futex_wait,__futex_wake,__linux_worker,__mac_worker,__mac_pthread_create,__mac_thread_start,__mac_ulock_wait,__mac_ulock_wake,CreateThread,WaitOnAddress,WakeByAddressAll|path.jo:join_path,file_name,dir_name,extension,without_extension,abs_path|hash.jo:sha256,sha512,md5,crc32,fnv1a|base64.jo:base64_encode,base64_decode|bytes.jo:append_be,append_le,byte_swap,bytes_from,get_be,get_be_signed,get_le,get_le_signed,leading_zeros,popcount,put_be,put_le,rotate_left,rotate_right,str_from_c,trailing_zeros|regex.jo:Regex,Match,regex,regex_error,find_all,matches|arena.jo:Arena,arena,__heap_alloc_raw|pool.jo:Handle,Pool,pool|heap.jo:Heap,heap|date.jo:Date,DateTime,Duration,date,date_text,month_name,now,parse_date,unix_time,utc_offset,weekday_name,__wall_ns,__wall_error_ns,__wasm_clock,__wasm_tz|csv.jo:Csv,csv_rows,parse_csv,to_csv|save.jo:save_data,load_data,delete_data,save_dir,__save_name_ok,__wasm_save_get,__wasm_save_set|settings.jo:available_cores,__settings_fast_math|story.jo:Story,StoryKind,StorySave,StoryStep,choose,jump,story|cli.jo:__ArgField,__arg_fields,__arg_value|repl.jo:__dewy_repl_show,SetConsoleCtrlHandler|snapshot.jo:__image_data|windows_cmdline.jo:__w32_batch_program,__w32_batch_refused,__w32_cmdline,__w32_quote_program,__w32_needs_quotes,__w32_quote_arg"
+const STD_PREFIX_SPEC = "__grapheme_:graphemes.jo|__nd_:nd.jo|__bcast_:nd.jo|__shape_:nd.jo|__offset:nd.jo|__wait_:task_core.jo|__thr_:thread.jo|__dewy_parallel_:thread.jo|__parallel_:thread.jo|__q_:thread.jo|__chan_:thread.jo|__lock_:thread.jo|__merge_:thread.jo|__task_:tasks.jo|__select_:tasks.jo|__program_:tasks.jo|__fj_:fork_join.jo|__futex_:fork_join.jo|__oom_:oom.jo|__arena_:arena.jo|__pool_:pool.jo|__snap_:snapshot.jo|__watch_:watch.jo|__repl_:repl.jo|__sig_:signal_core.jo|__signal_:signal_core.jo|__re_:regex.jo|__story_:story.jo|__tz_:date.jo|__time_:date.jo|__bytes_:bytes.jo|__csv_:csv.jo|__arg_:cli.jo|__w32_:windows_cmdline.jo"
+std_pfx_k: str[]
+std_pfx_v: str[]
+
+std_file_init = ():
+    std_file_ready = true
+    loop grp in split(STD_FILE_SPEC, "|"):
+        parts = split(grp, ":")
+        f = parts[0]
+        loop k in split(parts[1], ","): std_file_map[k] = f
+    loop grp in split(STD_PREFIX_SPEC, "|"):
+        parts = split(grp, ":")
+        std_pfx_k.push(parts[0])
+        std_pfx_v.push(parts[1])
+
+std_file_for = (nm: str) -> str:
+    if nm.len() == 0: return ""
+    if not std_file_ready: std_file_init()
+    if let f = std_file_map.get(nm): return f
+    c = nm[0]
+    if c == '_' and nm.len() > 2 and nm[1] == '_':
+        loop i in [0..std_pfx_k.len()):
+            if starts_with(nm, std_pfx_k[i]): return std_pfx_v[i]
+        return ""
+    if c == 's' and starts_with(nm, "signal_"): return "task_core.jo"
+    if c == 't' and starts_with(nm, "thread_"): return "thread.jo"
+    if c == 'b' and (starts_with(nm, "base64_") or starts_with(nm, "b64_")): return "base64.jo"
+    if c == 'h' and starts_with(nm, "hmac_"): return "hash.jo"
+    if c == 'r' and starts_with(nm, "re_"): return "regex.jo"
+    ""
+
+game_file_for = (nm: str) -> str:
+    if nm in ["GpuArray", "GpuBuffer", "gpu_available"] or starts_with(nm, "gpu_") or starts_with(nm, "__gpu_"): return "gpuarray.jo"
+    if nm == "__w32_gl_proc": return "window.jo"
+    if starts_with(nm, "__vk_") or starts_with(nm, "__VK_"): return "vk.jo"
+    if starts_with(nm, "__ffi_") or starts_with(nm, "__dl_"): return "dl.jo"
+    ""

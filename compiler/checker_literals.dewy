@@ -2,7 +2,7 @@ $runtime_checks
 from p"coerce_expression.dewy" import (coerce)
 from p"format_word_observations.dewy" import (fmt_part)
 
-from p"node_store.dewy" import Node
+from p"node_store.dewy" import (Node NK)
 from p"checker_types.dewy" import (TypeInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
@@ -49,6 +49,14 @@ let xl_bool_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xl_null_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xl_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xl_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xl_exact_nk:array<uint8>=[]
+let xl_exact_nk_p:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
+xl_set_ek=(k:NK):>void=>$unsafe {
+    let d=[Node()]
+    d.ptr[0].kind=k
+    let ord=int64((d.ptr as ptr<uint32>)[0])
+    if ord >=? 0 and ord <? xl_exact_nk.length {xl_exact_nk.ptr[ord]=uint8(1)}
+}
 checker_literals_bind=(input:ptr<CheckerLiteralInput>):>XLWord=>$unsafe {
     xl_nodes=input[0].nodes
     xl_lists=input[0].lists
@@ -64,6 +72,12 @@ checker_literals_bind=(input:ptr<CheckerLiteralInput>):>XLWord=>$unsafe {
     xl_null_type=input[0].null_type
     xl_int_type=input[0].int_type
     xl_math_int=input[0].math_int
+    if xl_exact_nk.length =? 0 {
+        xl_exact_nk.reserve(128);
+        loop xl_exact_nk.length <? 128 {xl_exact_nk.push(uint8(0))}
+        xl_set_ek('binary'); xl_set_ek('unary'); xl_set_ek('intrinsic'); xl_set_ek('conv')
+        xl_exact_nk_p=xl_exact_nk.ptr
+    }
     0
 }
 xl_representation=(t0:XLWord):>XLWord=>$unsafe {
@@ -86,51 +100,71 @@ xl_publish=(@node:Node t:XLWord):>void=>{
     node.type=int32<overflow='wrap'>(t)
     node.flags |= 128
 }
-xl_finish=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
+xl_finish_slow=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
     let t=t0
-    if xl_refine[0] and xl_types[0].ptr[t].kind =? 'refined' and xl_types[0].ptr[t].bits not=? -2 {t=XLWord(xl_types[0].ptr[t].elem)}
+    let tp=xl_types[0].ptr
+    if xl_refine[0] and tp[t].kind =? 'refined' and tp[t].bits not=? -2 {t=XLWord(tp[t].elem)}
     # Without an expected type the host's callable inference returns the type as published.
     if xl_effects[0] and expected not=? 0 {
-        xl_nodes[0][n].type=int32<overflow='wrap'>(t)
+        xl_nodes[0].ptr[n].type=int32<overflow='wrap'>(t)
         t=effect_infer_callable(n expected)
     }
-    xl_publish(@xl_nodes[0][n] t)
-    # No host call until the predicate finishes: one borrowed element view.
     let node=xl_nodes[0].ptr + n
+    node[0].type=int32<overflow='wrap'>(t)
+    node[0].flags |= 128
     let k=node[0].kind
     if xl_exact_measure[0] or ((k =? 'binary' or k =? 'unary' or k =? 'intrinsic' or (k =? 'conv' and node[0].aux =? 2)) and exact_candidate(n)) {exact_note(n)}
     xl_last[0]=n
     t
 }
+xl_finish=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
+    let node=xl_nodes[0].ptr + n
+    if (xl_effects[0] and expected not=? 0) or xl_exact_measure[0] or xl_exact_nk_p[int64((node as ptr<uint32>)[0])] not=? uint8(0) or (xl_refine[0] and xl_types[0].ptr[t0].kind =? 'refined' and xl_types[0].ptr[t0].bits not=? -2) {
+        return xl_finish_slow(n t0 expected)
+    }
+    node[0].type=int32<overflow='wrap'>(t0)
+    node[0].flags |= 128
+    xl_last[0]=n
+    t0
+}
 # An integer literal's default type: the semantic integer in Dewy source.
 xl_int_default=(n:XLWord):>XLWord=>$unsafe {
-    if xl_files[0][xl_nodes[0].ptr[n].pos >> 40].is_dewy {return xl_math_int[0]}
+    if xl_files[0].ptr[xl_nodes[0].ptr[n].pos >> 40].is_dewy {return xl_math_int[0]}
     xl_int_type[0]
 }
 # Does fixed-width integer type t hold int literal n of a Jo file? (else the host's coerce
 # decides, and reports what does not fit)
 xl_word_fits=(n:XLWord t:XLWord):>bool=>$unsafe {
-    if xl_nodes[0].ptr[n].kind not=? 'int_lit' {return false}
-    let bits=XLWord(xl_types[0].ptr[t].bits)
-    let sign=xl_types[0].ptr[t].sign
-    if (XLWord(xl_nodes[0].ptr[n].flags) & 2097152) not=? 0 {return bits >=? 64}
-    let v=xl_nodes[0].ptr[n].ival
+    let node=xl_nodes[0].ptr + n
+    if node[0].kind not=? 'int_lit' {return false}
+    let ty=xl_types[0].ptr + t
+    let bits=XLWord(ty[0].bits)
+    let sign=ty[0].sign
+    if (XLWord(node[0].flags) & 2097152) not=? 0 {return bits >=? 64}
+    let v=node[0].ival
     if bits >=? 64 {return sign or v >=? 0}
     if sign {return v >=? -(XLWord(1) << (bits - 1)) and v <? (XLWord(1) << (bits - 1))}
     v >=? 0 and v <? (XLWord(1) << bits)
 }
 xl_check_int=(n:XLWord expected:XLWord):>XLWord=>$unsafe {
+    let node=xl_nodes[0].ptr + n
+    node[0].flags=node[0].flags | 256
+    let initial=if xl_files[0].ptr[node[0].pos >> 40].is_dewy {xl_math_int[0]} else {xl_int_type[0]}
+    node[0].type=int32<overflow='wrap'>(initial)
+    if expected =? 0 {
+        node[0].flags |= 128
+        if xl_exact_measure[0] {exact_note(n)}
+        xl_last[0]=n
+        return initial
+    }
     let ex=xl_expected(expected)
     let exk:TK='void_'
     if ex not=? 0 {exk=xl_types[0].ptr[ex].kind}
     let t:XLWord=0
-    xl_nodes[0][n].flags=xl_nodes[0].ptr[n].flags | 256
-    let initial=xl_int_default(n)
-    xl_nodes[0][n].type=int32<overflow='wrap'>(initial)
     if exk =? 'int_' and initial not=? xl_math_int[0] and ex not=? xl_math_int[0] and xl_word_fits(n ex) {
         # (coerce's fixed-width literal case: retyped, no longer a literal)
-        xl_nodes[0][n].type=int32<overflow='wrap'>(ex)
-        xl_nodes[0][n].flags=xl_nodes[0].ptr[n].flags & ~256
+        node[0].type=int32<overflow='wrap'>(ex)
+        node[0].flags=node[0].flags & ~256
         t=ex
     } else if ex not=? 0 and (exk =? 'int_' or exk =? 'float_') {
         coerce(n ex);
@@ -165,18 +199,19 @@ xl_check_scalar=(n:XLWord expected:XLWord):>XLWord=>$unsafe {
     let ex=xl_expected(expected)
     let exk:TK='void_'
     if ex not=? 0 {exk=xl_types[0].ptr[ex].kind}
-    let k=xl_nodes[0].ptr[n].kind
+    let node=xl_nodes[0].ptr + n
+    let k=node[0].kind
     let t:XLWord=0
     if k =? 'float_lit' {
         if ex not=? 0 and exk =? 'float_' {
-            if xl_nodes[0].ptr[n].sval not=? 0 and xl_nodes[0].ptr[n].fval - xl_nodes[0].ptr[n].fval not=? 0.0 {literal_float_error(n)}
-            xl_nodes[0][n].flags=xl_nodes[0].ptr[n].flags & ~256
+            if node[0].sval not=? 0 and node[0].fval - node[0].fval not=? 0.0 {literal_float_error(n)}
+            node[0].flags=node[0].flags & ~256
             t=ex
         } else if ex not=? 0 and exk =? 'opt' and xl_types[0].ptr[tu_prune(XLWord(xl_types[0].ptr[ex].elem))].kind =? 'float_' {
-            xl_nodes[0][n].flags=xl_nodes[0].ptr[n].flags & ~256
+            node[0].flags=node[0].flags & ~256
             t=tu_prune(XLWord(xl_types[0].ptr[ex].elem))
         } else {
-            xl_nodes[0][n].flags=xl_nodes[0].ptr[n].flags | 256
+            node[0].flags=node[0].flags | 256
             t=xl_float_type[0]
         }
     } else if k =? 'bool_lit' {t=xl_bool_type[0]}

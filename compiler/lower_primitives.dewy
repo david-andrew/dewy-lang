@@ -5,7 +5,7 @@ from p"expression_types.dewy" import (ntype)
 from p"@lib/core/rt.jo" import (__str_slice)
 from p"checker_state.dewy" import (SK)
 from p"check.jo" import (FK_PARTIAL LF_ALIAS LF_BYREF LF_CAPTURE LF_MUTPARAM LF_PARAM LF_VALUECAP decl_infos fns globals locals modules nchk_wanted prelude syms target_arm64 target_wasm)
-from p"lower.jo" import (HK LFunc LK_HELPER LK_INST data_size global_off helper_count helper_lf helper_slots inst_lf lfuncs loc_last_file loc_last_line loc_last_off opt_release panic_bounds_lf ro_starts rodata set_text_tables str_off)
+from p"lower.jo" import (HK LFunc LK_HELPER LK_INST data_size global_off helper_count helper_lf helper_slots inst_lf inst_lf_fast lfuncs loc_last_file loc_last_line loc_last_off opt_release panic_bounds_lf ro_starts rodata set_text_tables str_off)
 from p"ast.jo" import (NF_MUT has_flag kid kids nkids nodes)
 from p"ir.jo" import (M_HDR M_NULLF VI ir)
 from p"types.jo" import (align_up prune secrets_seen talign targ tsize types)
@@ -40,14 +40,18 @@ lf_of_inst=(f:LPWord):>int64=>$unsafe {
     if parallel_serial and not modules.ptr[LPWord(fns.ptr[f].mod)].is_prelude and fns.ptr[f].kind not=? FK_PARTIAL and fns.ptr[f].body not=? 0 {
         return lf_helper(HK.parallel_serial 0 f)
     }
-    let x=inst_lf.get(f)
-    if x not=? none {
-        if fused_on and x >=? fz_lf0 {fz_note(0 x f 0 0);}
-        return x
+    if lfuncs.length =? 0 and inst_lf_fast.length >? 0 {inst_lf_fast.clear()}
+    if f <? inst_lf_fast.length {
+        let cached=LPWord(inst_lf_fast.ptr[f]) - 1
+        if cached >=? 0 {
+            if fused_on and cached >=? fz_lf0 {fz_note(0 cached f 0 0);}
+            return cached
+        }
     }
     lfuncs.push(LFunc[LK_INST f HK.drop 0 fns.ptr[f].sym]);
     let x=lfuncs.length - 1
-    inst_lf[f] = x;
+    if f >=? inst_lf_fast.length {inst_lf_fast.resize(max(f + 1 inst_lf_fast.length * 2))}
+    inst_lf_fast.ptr[f]=int32<overflow='wrap'>(x + 1)
     if fused_on {fz_note(0 x f 0 0);}
     return x
 }
@@ -64,7 +68,6 @@ lf_helper=(hk:HK t0:LPWord p:LPWord):>int64=>$unsafe {
     lfuncs.push(LFunc[LK_HELPER p hk t "__h_{hk}_{lfuncs.length}"]);
     let x=lfuncs.length - 1
     helper_slots.ptr[slot] = int32<overflow='wrap'>(x + 1);
-    helper_lf["{LPWord(int64(hk))}:{t}:{p}"] = x;
     helper_count += 1;
     if helper_count * 2 >? helper_slots.length {
         let old=helper_slots
@@ -78,8 +81,45 @@ lf_helper=(hk:HK t0:LPWord p:LPWord):>int64=>$unsafe {
     if fused_on {fz_note(1 x LPWord(int64(hk)) t p);}
     return x
 }
+let rt_cache_gen:int32=0
+let rt_cache_slot_gen:array<int32>=[]
+let rt_cache_names:array<string>=[]
+let rt_cache_inst:array<int32>=[]
+let rt_cache_lf:array<int32>=[]
 rt=(name:string):>int64=>$unsafe {
-    return lf_of_inst(runtime_fn(name))
+    if lfuncs.length =? 0 {
+        if inst_lf_fast.length >? 0 {inst_lf_fast.clear()}
+        if rt_cache_slot_gen.length >? 0 {
+            rt_cache_gen=int32<overflow='wrap'>(int64(rt_cache_gen) + 1)
+            if rt_cache_gen =? 0 {
+                mem_set(rt_cache_slot_gen.ptr as ptr<uint8> 0 rt_cache_slot_gen.length * 4)
+                rt_cache_gen=1
+            }
+        }
+    }
+    if rt_cache_slot_gen.length =? 0 {
+        rt_cache_slot_gen=fill(int32(0) 64)
+        rt_cache_names=fill("" 64)
+        rt_cache_inst=fill(int32(0) 64)
+        rt_cache_lf=fill(int32(0) 64)
+        rt_cache_gen=1
+    }
+    let np=(name as array<uint8>).ptr
+    let h=LPWord(np as uint64)
+    let slot=((h >> 4) xor (h >> 10)) & 63
+    if rt_cache_slot_gen.ptr[slot] =? rt_cache_gen and (rt_cache_names.ptr[slot] as array<uint8>).ptr =? np {
+        if not fused_on and not parallel_serial {return LPWord(rt_cache_lf.ptr[slot])}
+        return lf_of_inst(LPWord(rt_cache_inst.ptr[slot]))
+    }
+    let inst=runtime_fn(name)
+    let lf=lf_of_inst(inst)
+    if not parallel_serial {
+        rt_cache_slot_gen.ptr[slot]=rt_cache_gen
+        rt_cache_names[slot]=name
+        rt_cache_inst.ptr[slot]=int32<overflow='wrap'>(inst)
+        rt_cache_lf.ptr[slot]=int32<overflow='wrap'>(lf)
+    }
+    return lf
 }
 rt_global=(name:string):>int64=>$unsafe {
     let s=prelude.get(intern(name)) ?? 0
@@ -138,9 +178,17 @@ e_call_nr=(f:LPWord args:array<int64> rtype:LPWord):>int64=>$unsafe {
     emit('call' rtype -1 int32<overflow='wrap'>(start) int32<overflow='wrap'>(args.length) 1 f);
     return -1
 }
+let empty_str_off:LPWord=-1
 str_data=(s:string):>int64=>$unsafe {
+    if str_off.length =? 0 {empty_str_off=-1}
+    let slen=(s as array<uint8>).length
+    if slen =? 0 and empty_str_off >=? 0 {
+        if fused_on and empty_str_off >=? fz_r0 {fz_note_text(2 empty_str_off s);}
+        return empty_str_off
+    }
     let o=str_off.get(s)
     if o not=? none {
+        if slen =? 0 {empty_str_off=o}
         if fused_on and o >=? fz_r0 {fz_note_text(2 o s);}
         return o
     }
@@ -148,13 +196,14 @@ str_data=(s:string):>int64=>$unsafe {
     let o=rodata.length
     ro_starts.push(o);
     push_i64(@rodata -1);
-    push_i64(@rodata (s as array<uint8>).length);
-    push_i64(@rodata (s as array<uint8>).length + 1);
+    push_i64(@rodata slen);
+    push_i64(@rodata slen + 1);
     let n=rodata.length
-    rodata.resize(n + (s as array<uint8>).length);
-    if (s as array<uint8>).length >? 0 {mem_copy((rodata).ptr + n (s as array<uint8>).ptr (s as array<uint8>).length);}
+    rodata.resize(n + slen);
+    if slen >? 0 {mem_copy((rodata).ptr + n (s as array<uint8>).ptr slen);}
     rodata.push(0);
     str_off[s] = o;
+    if slen =? 0 {empty_str_off=o}
     if fused_on {fz_note_text(2 o s);}
     return o
 }
@@ -186,9 +235,20 @@ set_text_table=(id:LPWord):>int64=>$unsafe {
     set_text_tables[id] = o;
     return o
 }
+let global_off_fast:array<int32>=[]
 global_addr_off=(g:LPWord):>int64=>$unsafe {
+    if global_off.length =? 0 and global_off_fast.length >? 0 {global_off_fast.clear()}
+    if g <? global_off_fast.length {
+        let cached=LPWord(global_off_fast.ptr[g]) - 1
+        if cached >=? 0 {
+            if fused_on and cached >=? fz_d0 {fz_note(3 cached g 0 0);}
+            return cached
+        }
+    }
     let o=global_off.get(g)
     if o not=? none {
+        if g >=? global_off_fast.length {global_off_fast.resize(max(g + 1 global_off_fast.length * 2))}
+        global_off_fast.ptr[g]=int32<overflow='wrap'>(o + 1)
         if fused_on and o >=? fz_d0 {fz_note(3 o g 0 0);}
         return o
     }
@@ -201,6 +261,8 @@ global_addr_off=(g:LPWord):>int64=>$unsafe {
     if sz <? 8 {sz=8}
     data_size += sz;
     global_off[g] = o;
+    if g >=? global_off_fast.length {global_off_fast.resize(max(g + 1 global_off_fast.length * 2))}
+    global_off_fast.ptr[g]=int32<overflow='wrap'>(o + 1)
     if fused_on {fz_note(3 o g 0 0);}
     return o
 }
@@ -247,6 +309,7 @@ null_check=(arr:LPWord idx:LPWord pos:LPWord):>void=>$unsafe {
     endc();
 }
 loc_data=(pos:LPWord):>int64=>$unsafe {
+    if pos_in_lib(pos) {return str_data("")}
     let f=pos_file(pos)
     let [l c]=line_col(pos)
     if f =? loc_last_file and l =? loc_last_line and not fused_on {return loc_last_off}

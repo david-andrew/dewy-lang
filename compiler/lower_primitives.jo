@@ -38,12 +38,16 @@ helper_slot = (hk: HK, t: int, p: int) -> int:
 lf_of_inst = (f: int) -> int:
     if parallel_serial and not modules[int(fns[f].mod)].is_prelude and fns[f].kind != FK_PARTIAL and fns[f].body != 0:
         return lf_helper(.parallel_serial, 0, f)
-    if let x = inst_lf.get(f):
-        if fused_on and x >= fz_lf0: fz_note(0, x, f, 0, 0)
-        return x
+    if lfuncs.len() == 0 and inst_lf_fast.len() > 0: inst_lf_fast.clear()
+    if f < inst_lf_fast.len():
+        cached = int(inst_lf_fast[f]) - 1
+        if cached >= 0:
+            if fused_on and cached >= fz_lf0: fz_note(0, cached, f, 0, 0)
+            return cached
     lfuncs.push(LFunc(LK_INST, f, .drop, 0, fns[f].sym))
     x = lfuncs.len() - 1
-    inst_lf[f] = x
+    if f >= inst_lf_fast.len(): inst_lf_fast.resize(max(f + 1, inst_lf_fast.len() * 2))
+    inst_lf_fast[f] = i32(x + 1)
     if fused_on: fz_note(0, x, f, 0, 0)
     x
 
@@ -60,7 +64,6 @@ lf_helper = (hk: HK, t0: int, p: int) -> int:
     lfuncs.push(LFunc(LK_HELPER, p, hk, t, "__h_{hk}_{lfuncs.len()}"))
     x = lfuncs.len() - 1
     helper_slots[slot] = i32(x + 1)
-    helper_lf["{int(hk)}:{t}:{p}"] = x
     helper_count += 1
     if helper_count * 2 > helper_slots.len():
         old = helper_slots
@@ -73,7 +76,39 @@ lf_helper = (hk: HK, t0: int, p: int) -> int:
     x
 
 
-rt = (name: str) -> int: lf_of_inst(runtime_fn(name))
+rt_cache_gen: i32 = 0
+rt_cache_slot_gen: i32[]
+rt_cache_names: str[]
+rt_cache_inst: i32[]
+rt_cache_lf: i32[]
+rt = (name: str) -> int:
+    if lfuncs.len() == 0:
+        if inst_lf_fast.len() > 0: inst_lf_fast.clear()
+        if rt_cache_slot_gen.len() > 0:
+            rt_cache_gen = i32(int(rt_cache_gen) + 1)
+            if rt_cache_gen == 0:
+                mem_set(data(rt_cache_slot_gen) as *u8, 0, rt_cache_slot_gen.len() * 4)
+                rt_cache_gen = 1
+    if rt_cache_slot_gen.len() == 0:
+        rt_cache_slot_gen = fill(i32(0), 64)
+        rt_cache_names = fill("", 64)
+        rt_cache_inst = fill(i32(0), 64)
+        rt_cache_lf = fill(i32(0), 64)
+        rt_cache_gen = 1
+    np = data(name)
+    h = np as int
+    slot = ((h >> 4) xor (h >> 10)) & 63
+    if rt_cache_slot_gen[slot] == rt_cache_gen and data(rt_cache_names[slot]) == np:
+        if not fused_on and not parallel_serial: return int(rt_cache_lf[slot])
+        return lf_of_inst(int(rt_cache_inst[slot]))
+    inst = runtime_fn(name)
+    lf = lf_of_inst(inst)
+    if not parallel_serial:
+        rt_cache_slot_gen[slot] = rt_cache_gen
+        rt_cache_names[slot] = name
+        rt_cache_inst[slot] = i32(inst)
+        rt_cache_lf[slot] = i32(lf)
+    lf
 
 
 rt_global = (name: str) -> int:
@@ -139,21 +174,29 @@ e_call_nr = (f: int, args: int[], rtype: int) -> int:
     -1
 
 
+empty_str_off = -1
 str_data = (s: str) -> int:
+    if str_off.len() == 0: empty_str_off = -1
+    slen = len(s)
+    if slen == 0 and empty_str_off >= 0:
+        if fused_on and empty_str_off >= fz_r0: fz_note_text(2, empty_str_off, s)
+        return empty_str_off
     if let o = str_off.get(s):
+        if slen == 0: empty_str_off = o
         if fused_on and o >= fz_r0: fz_note_text(2, o, s)
         return o
     loop rodata.len() % 8 != 0: rodata.push(0)
     o = rodata.len()
     ro_starts.push(o)
     push_i64(rodata, -1)
-    push_i64(rodata, len(s))
-    push_i64(rodata, len(s) + 1)
+    push_i64(rodata, slen)
+    push_i64(rodata, slen + 1)
     n = rodata.len()
-    rodata.resize(n + len(s))
-    if len(s) > 0: mem_copy(data(rodata) + n, data(s), len(s))
+    rodata.resize(n + slen)
+    if slen > 0: mem_copy(data(rodata) + n, data(s), slen)
     rodata.push(0)
     str_off[s] = o
+    if slen == 0: empty_str_off = o
     if fused_on: fz_note_text(2, o, s)
     o
 
@@ -183,8 +226,17 @@ set_text_table = (id: int) -> int:
     o
 
 
+global_off_fast: i32[]
 global_addr_off = (g: int) -> int:
+    if global_off.len() == 0 and global_off_fast.len() > 0: global_off_fast.clear()
+    if g < global_off_fast.len():
+        cached = int(global_off_fast[g]) - 1
+        if cached >= 0:
+            if fused_on and cached >= fz_d0: fz_note(3, cached, g, 0, 0)
+            return cached
     if let o = global_off.get(g):
+        if g >= global_off_fast.len(): global_off_fast.resize(max(g + 1, global_off_fast.len() * 2))
+        global_off_fast[g] = i32(o + 1)
         if fused_on and o >= fz_d0: fz_note(3, o, g, 0, 0)
         return o
     t = int(globals[g].type)
@@ -196,6 +248,8 @@ global_addr_off = (g: int) -> int:
     if sz < 8: sz = 8
     data_size += sz
     global_off[g] = o
+    if g >= global_off_fast.len(): global_off_fast.resize(max(g + 1, global_off_fast.len() * 2))
+    global_off_fast[g] = i32(o + 1)
     if fused_on: fz_note(3, o, g, 0, 0)
     o
 
@@ -241,6 +295,7 @@ null_check = (arr: int, idx: int, pos: int):
 
 
 loc_data = (pos: int) -> int:
+    if pos_in_lib(pos): return str_data("")
     f = pos_file(pos)
     l, c = line_col(pos)
     if f == loc_last_file and l == loc_last_line and not fused_on: return loc_last_off

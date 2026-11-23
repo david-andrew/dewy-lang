@@ -1,6 +1,6 @@
 $runtime_checks
-from p"ast.jo" import (kids nodes)
-from p"check.jo" import (check_scopes ctxs cx modules registered)
+from p"ast.jo" import (kids nodes set_list)
+from p"check.jo" import (check_scopes ctxs cx fns modules registered)
 from p"checker_module_decls.dewy" import (register_decls)
 from p"checker_state.dewy" import (FnCtx)
 from p"checks_thin.dewy" import (const_eval_bool)
@@ -25,4 +25,7 @@ register_module=(m:RegistrationWord):>void=>{
     if registered[m] {return}
     registered[m]=true
     register_decls(m modules[m].decls)
+    if not modules[m].is_prelude and modules[m].init_fn >? 0 and modules[m].inits.length >? 0 {
+        set_list(RegistrationWord(fns[RegistrationWord(modules[m].init_fn)].body) modules[m].inits)
+    }
 }

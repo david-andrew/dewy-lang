@@ -5,7 +5,8 @@ use 'util.jo'
 
 lx_grow = ():
     lx_cap = lx_cap * 2 + 16
-    lx_toks.resize(lx_cap)
+    if lx_toks.cap() < lx_cap: lx_toks.reserve(lx_cap)
+    __set_len(lx_toks, lx_cap)
     lx_slots = data(lx_toks)
 
 lx_next = () -> int:
@@ -17,9 +18,11 @@ lx_emit = (kind: Tok, start: int, n: int):
     k = lx_next()
     t = lx_slots
     t[k].kind = kind
+    t[k].flags = 0
     t[k].pos = (lx_file << 40) | (lx_base + start)
     t[k].start = i32(start)
     t[k].len = i32(n)
+    t[k].ival = 0
 
 lx_last_kind = () -> Tok:
     if lx_count == 0: return Tok.newline

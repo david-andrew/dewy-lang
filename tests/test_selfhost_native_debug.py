@@ -24,7 +24,7 @@ main = ():
                 loop ty in [2, 12]:
                     locals = [Local(), Local(name=6, type=i32(ty), flags=i32(flags), offset=-1, vreg=1), Local(name=7, type=2, offset=1), Local(name=0, type=2, offset=-1, vreg=0)]
                     v_live[1].first = 1
-                    v_live[1].last = last
+                    v_live[1].last = i32(last)
                     vloc[1] = loc
                     vslot[1] = 0
                     vsoff[1] = 8

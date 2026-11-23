@@ -1,11 +1,79 @@
 $runtime_checks
 
 from p"ir_types.dewy" import (Ins Op)
-from p"ir.jo" import (ir ir_use_count)
+from p"ir.jo" import (M_INDEX ir ir_use_count)
 from p"ir_builders.dewy" import (ir_operands ir_use)
 from p"opt.jo" import (o_defines)
+from p"opt_workspace.dewy" import (o_regs opt_allow_cse opt_decode opt_fast_nv)
 
 LicmWord:type=int64<overflow='wrap'>
+LicmU64:type=uint64<overflow='wrap'>
+
+let licm_dst:array<int64>=[]
+let licm_src:array<int64>=[]
+let licm_mark:array<uint8>=[]
+let licm_drop:array<int64>=[]
+let licm_rfrom:array<int64>=[]
+let licm_rto:array<int64>=[]
+
+o_licm_rewrite=(@code:array<Ins> rfrom:array<int64> rto:array<int64>):>void=>$unsafe {
+    let nr=rfrom.length
+    if nr =? 0 {return}
+    let nv=ir.vtypes.length
+    let rmap:array<int32>=fill(int32(-1) nv)
+    let mp=rmap.ptr
+    let fp=rfrom.ptr
+    let tp=rto.ptr
+    loop i in [0..nr) {mp[fp[i]]=int32<overflow='wrap'>(tp[i])}
+    let dec=opt_decode
+    let args=ir.args.ptr
+    let cp=code.ptr
+    let endp=cp + code.length
+    loop cp <? endp {
+        let mask=dec[int64((cp as ptr<uint32>)[0])] >> 8
+        if (mask & 16) not=? 0 {
+            let a0=int64(cp[0].a)
+            let b0=int64(cp[0].b)
+            loop k in [a0..a0 + b0) {
+                let u=int64(args[k])
+                if u >=? 0 and u <? nv {
+                    let r=mp[u]
+                    if r >=? 0 {args[k]=r}
+                }
+            }
+        } else {
+            if (mask & 1) not=? 0 or ((mask & 32) not=? 0 and cp[0].a >=? 0) {
+                let u=int64(cp[0].a)
+                if u >=? 0 and u <? nv {
+                    let r=mp[u]
+                    if r >=? 0 {cp[0].a=r}
+                }
+            }
+            if (mask & 2) not=? 0 or ((mask & 64) not=? 0 and (int64(cp[0].c) & M_INDEX) not=? 0) {
+                let u=int64(cp[0].b)
+                if u >=? 0 and u <? nv {
+                    let r=mp[u]
+                    if r >=? 0 {cp[0].b=r}
+                }
+            }
+            if (mask & 8) not=? 0 or ((mask & 128) not=? 0 and (int64(cp[0].c) & M_INDEX) not=? 0) {
+                let u=int64(cp[0].dst)
+                if u >=? 0 and u <? nv {
+                    let r=mp[u]
+                    if r >=? 0 {cp[0].dst=r}
+                }
+            }
+        }
+        if (mask & 4) not=? 0 {
+            let u=int64(cp[0].c)
+            if u >=? 0 and u <? nv {
+                let r=mp[u]
+                if r >=? 0 {cp[0].c=r}
+            }
+        }
+        cp += 1
+    }
+}
 
 licm_op=(op:Op):>bool=>match op {
     <'mul'|'i2f'|'u2f'|'f2f'> => true
@@ -13,7 +81,40 @@ licm_op=(op:Op):>bool=>match op {
     _ => false
 }
 
-o_licm=(code:array<Ins>):>array<Ins>=>$unsafe {
+licm_cand=(ins:Ins):>bool=>licm_op(ins.op) or (ins.op =? 'iconst' and (ins.imm <? -2147483648 or ins.imm >? 2147483647))
+
+o_licm_apply=(code:array<Ins> n:int64 nm:LicmWord drop:array<int64> rfrom:array<int64> rto:array<int64>):>array<Ins>=>$unsafe {
+    if licm_mark.length <? n {licm_mark.resize(n)}
+    let cp=code.ptr
+    let mp=licm_mark.ptr
+    let sp=licm_src.ptr
+    let dp=licm_dst.ptr
+    let drp=drop.ptr
+    let nd=drop.length
+    loop j in [0..nm) {mp[sp[j]]=1}
+    loop j in [0..nd) {mp[drp[j]]=1}
+    let out:array<Ins>=[]
+    out.reserve(n)
+    __set_len(out n)
+    let op_out=out.ptr
+    let w:LicmWord=0
+    let k:LicmWord=0
+    loop i in [0..n) {
+        if mp[i] not=? 0 {mp[i]=0; continue}
+        loop k <? nm and dp[k] =? i {
+            op_out[w]=cp[sp[k]]
+            w += 1
+            k += 1
+        }
+        op_out[w]=cp[i]
+        w += 1
+    }
+    __set_len(out w)
+    if rfrom.length >? 0 {o_licm_rewrite(@out rfrom rto)}
+    out
+}
+
+o_licm_release=(code:array<Ins>):>array<Ins>=>$unsafe {
     let n=code.length
     let nv=ir.vtypes.length
     let kinds:array<Op>=[]
@@ -26,7 +127,7 @@ o_licm=(code:array<Ins>):>array<Ins>=>$unsafe {
             if op =? 'loop' {depth+=1}
         } else if op =? 'end' {
             if kinds.pop() =? 'loop' {depth-=1}
-        } else if depth >? 0 and licm_op(op) {cands+=1}
+        } else if depth >? 0 and licm_cand(ins) {cands+=1}
     }
     if cands =? 0 {return code}
     let lp_end:array<LicmWord>=fill(LicmWord(-1) n)
@@ -75,13 +176,18 @@ o_licm=(code:array<Ins>):>array<Ins>=>$unsafe {
     loop v in [0..nv) {first[v+1]=at[v]}
     let moved:array<bool>=fill(false n)
     let moves:array<[int64 int64]>=[]
+    let hl:array<int64>=[]
+    let hi:array<int64>=[]
+    let hr:array<int64>=[]
+    let rfrom:array<int64>=[]
+    let rto:array<int64>=[]
     let loops_open:array<LicmWord>=[]
     loop i in [0..n) {
         let ins=code[i]
         let op=ins.op
         if op =? 'loop' {loops_open.push(i)}
         else if op =? 'end' and loops_open.length >? 0 and lp_end[loops_open[loops_open.length-1]] =? i {loops_open.pop();}
-        if loops_open.length =? 0 or not licm_op(op) {continue}
+        if loops_open.length =? 0 or not licm_cand(ins) {continue}
         let d=int64(ins.dst)
         if d <? 0 or first[d+1]-first[d] not=? 1 {continue}
         ir_operands(ins);
@@ -98,6 +204,26 @@ o_licm=(code:array<Ins>):>array<Ins>=>$unsafe {
             if ok {target=L break}
         }
         if target <? 0 {continue}
+        if op =? 'iconst' and ins.ty =? 0 {
+            let dup:LicmWord=-1
+            let nh=hl.length
+            let hlp=hl.ptr
+            let hip=hi.ptr
+            let hrp=hr.ptr
+            loop j in [0..nh) {
+                if hlp[j] =? target and hip[j] =? ins.imm {dup=hrp[j]; break}
+            }
+            if dup >=? 0 {
+                moved[i]=true
+                rfrom.push(d)
+                rto.push(dup)
+                dpos[first[d]]=2*target-1
+                continue
+            }
+            hl.push(target)
+            hi.push(ins.imm)
+            hr.push(d)
+        }
         moved[i]=true
         moves.push([target i])
         dpos[first[d]]=2*target-1
@@ -115,7 +241,69 @@ o_licm=(code:array<Ins>):>array<Ins>=>$unsafe {
         }
         out.push(code[i])
     }
+    if rfrom.length >? 0 {o_licm_rewrite(@out rfrom rto)}
     out
+}
+
+o_licm=(code:array<Ins>):>array<Ins>=>$unsafe {
+    let n=code.length
+    if n =? 0 {return code}
+    if opt_allow_cse {return o_licm_release(code)}
+    let cp=code.ptr
+    let depth:LicmWord=0
+    let loop_mask:LicmU64=0
+    let outer_loop:LicmWord=-1
+    let nm:LicmWord=0
+    let regs=o_regs
+    let fnv=opt_fast_nv
+    if licm_dst.length >? 0 {__set_len(licm_dst 0)}
+    if licm_src.length >? 0 {__set_len(licm_src 0)}
+    if licm_drop.length >? 0 {__set_len(licm_drop 0)}
+    if licm_rfrom.length >? 0 {__set_len(licm_rfrom 0)}
+    if licm_rto.length >? 0 {__set_len(licm_rto 0)}
+    loop i in [0..n) {
+        let ins=cp + i
+        let op=ins[0].op
+        if op =? 'block' or op =? 'if_' or op =? 'loop' {
+            if depth >=? 64 {return o_licm_release(code)}
+            if op =? 'loop' {
+                if loop_mask =? 0 {outer_loop=i}
+                loop_mask |= LicmU64(1) << LicmU64(depth)
+            }
+            depth += 1
+        } else if op =? 'end' {
+            depth -= 1
+            loop_mask &= (LicmU64(1) << LicmU64(depth)) xor LicmU64(0xFFFFFFFFFFFFFFFF)
+            if loop_mask =? 0 {outer_loop=-1}
+        } else if outer_loop >=? 0 and op =? 'iconst' and (ins[0].imm <? -2147483648 or ins[0].imm >? 2147483647) {
+            let d=int64(ins[0].dst)
+            if d >=? 0 and (d >=? fnv or regs[d].stable) {
+                let dup:LicmWord=-1
+                if nm >? 0 and ins[0].ty =? 0 {
+                    let dp=licm_dst.ptr
+                    let sp=licm_src.ptr
+                    let kv=ins[0].imm
+                    loop j in [0..nm) {
+                        if dp[j] =? outer_loop {
+                            let prev=cp + sp[j]
+                            if prev[0].ty =? 0 and prev[0].imm =? kv {dup=int64(prev[0].dst); break}
+                        }
+                    }
+                }
+                if dup >=? 0 {
+                    licm_drop.push(i)
+                    licm_rfrom.push(d)
+                    licm_rto.push(dup)
+                } else {
+                    licm_dst.push(outer_loop)
+                    licm_src.push(i)
+                    nm += 1
+                }
+            }
+        }
+    }
+    if nm =? 0 {return code}
+    o_licm_apply(code n nm licm_drop licm_rfrom licm_rto)
 }
 
 o_def_within=(dpos:array<LicmWord> lo:int64 hi:int64 s:int64 e:int64):>bool=>$unsafe {

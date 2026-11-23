@@ -4,133 +4,308 @@ from p"callback_specialize.jo" import (callback_calls)
 from p"check.jo" import (target_wasm)
 from p"inline.jo" import (FAST_CALLBACK_MAX INLINE_LOOPY_CALLER_MAX INLINE_LOOP_MAX INLINE_MAX INLINE_SPECIALIZE_CALLER_MAX INLINE_SPECIALIZE_GROWTH INLINE_SPECIALIZE_MAX INLINE_WRAPPER_MAX fast_by_index fast_callback_depth fast_callback_sites fast_fns fast_inline_loop_only fast_loop_only fast_moves inl_calls inl_const_growth inl_const_target inline_body_cache inline_branch_body inline_branch_cache inline_live_cache inline_nv_cache rel_by_index rel_fns)
 from p"ir.jo" import (M_INDEX VI VK dbg_on ir kc_fn)
-from p"ir_builders.dewy" import (is_kv k_vreg new_slot vreg vtype)
+from p"ir_builders.dewy" import (ir_fn_has_loop is_kv k_vreg new_slot vreg vtype)
 from p"ir_types.dewy" import (Ins IrFn Op)
 from p"opt.jo" import (kills_memory)
 from p"opt_core.dewy" import (o_simplify_kind)
+from p"opt_workspace.dewy" import (opt_has_loops_ready opt_has_loops_val)
 from p"opt_copy_forward.dewy" import (o_copy_forward)
 from p"partition.jo" import (partition_active)
 from p"partition_ops.dewy" import (partition_inline_body)
 
 InlineWord:type=int64<overflow='wrap'>
+let fast_has_copy:array<bool>=[]
+let fast_has_loop:array<bool>=[]
+let fast_cands:array<IrFn>=[]
+let fast_cand_by_index:array<int64>=[]
+let fast_cand_state:array<int64>=[]
+let fast_cand_is_leaf:array<bool>=[]
+let fast_last_has_copy:bool=false
+let fast_last_has_loop:bool=false
+let fast_expanding_wrapper:bool=false
+let inl_vm_pool:array<int64>=[]
+let inl_sm_pool:array<int64>=[]
 # Its body takes the place of its only call, in a loop: the environment stays in the
 # caller's registers. Not its loop into a one-shot web frame, as release; O(body).
-fast_callback_movable=(f:IrFn):>bool=>{
+fast_callback_movable_ptr=(f:ptr<IrFn>):>bool=>$unsafe {
+    if fast_callback_sites.length =? 0 or f[0].cabi or f[0].noinline or (f[0].export_name as array<uint8>).length >? 0 or target_wasm or f[0].code.length >? FAST_CALLBACK_MAX or (fast_callback_sites.get(f[0].fn_index) ?? 0) not=? 1 {return false}
+    let fn_idx=f[0].fn_index
+    let p=f[0].code.ptr
+    let end_=p + f[0].code.length
+    loop p <? end_ {
+        let op=p[0].op
+        if op =? 'intr' and p[0].imm >=? 2 {return false}
+        if op =? 'call' and p[0].imm =? fn_idx {return false}
+        p+=1
+    }
+    true
+}
+fast_callback_movable=(f:IrFn):>bool=>$unsafe {
     if fast_callback_sites.length =? 0 or f.cabi or f.noinline or (f.export_name as array<uint8>).length >? 0 or target_wasm or f.code.length >? FAST_CALLBACK_MAX or (fast_callback_sites.get(f.fn_index) ?? 0) not=? 1 {return false}
-    loop ins in f.code {
-        if ins.op =? 'intr' and ins.imm >=? 2 {return false}
-        if ins.op =? 'call' and ins.imm =? f.fn_index {return false}
+    let fn_idx=f.fn_index
+    let p=f.code.ptr
+    let end_=p + f.code.length
+    loop p <? end_ {
+        let op=p[0].op
+        if op =? 'intr' and p[0].imm >=? 2 {return false}
+        if op =? 'call' and p[0].imm =? fn_idx {return false}
+        p+=1
     }
     true
 }
 # (what this path already takes keeps its own rules; a wrapper around a version moves with it)
+fast_moves_alone_ptr=(f:ptr<IrFn> kind:InlineWord):>bool=>$unsafe {
+    (kind =? 0 or kind =? 2 or kind =? 3) and fast_callback_movable_ptr(f)
+}
 fast_moves_alone=(f:IrFn kind:InlineWord):>bool=>{
-    (kind =? 0 or kind =? 2) and fast_callback_movable(f)
+    (kind =? 0 or kind =? 2 or kind =? 3) and fast_callback_movable(f)
 }
 fast_inline_kind=(f:IrFn):>InlineWord=>{
     let kind=fast_plain_kind(f)
     if fast_moves_alone(f kind) {return 3}
     kind
 }
-fast_plain_kind=(f:IrFn):>InlineWord=>{
-    if f.cabi or f.noinline or (f.export_name as array<uint8>).length >? 0 {return 0}
+fast_plain_kind=(f:IrFn):>InlineWord=>$unsafe {
+    let arr=[f]
+    fast_plain_kind_ptr(arr.ptr)
+}
+inline_kills_mem=(op:Op):>bool=>match op {
+    <'store'|'copy'|'zero'|'memcpy'|'memset'|'zeroslots'|'call'|'calli'|'callc'|'syscall'|'intr'|'vop'|'vst'> => true
+    _ => false
+}
+fast_plain_kind_ptr=(f:ptr<IrFn>):>InlineWord=>$unsafe {
+    if f[0].cabi or f[0].noinline or (f[0].export_name as array<uint8>).length >? 0 {return 0}
+    let ncode=f[0].code.length
+    let code_p=f[0].code.ptr
     # The native string helper is a bounded comparison plus return. Expand
     # only in loops: its machine body is larger than its two IR instructions.
     # Debug builds retain the scalar runtime body instead of this intrinsic.
-    if f.code.length =? 2 and f.code[0].op =? 'streq' and f.code[1].op =? 'ret' {return 3}
+    if ncode =? 2 and code_p[0].op =? 'streq' and code_p[1].op =? 'ret' {fast_last_has_copy=false; fast_last_has_loop=false; return 3}
     # Small record leaves need expansion before SRA can keep caller state in
     # registers. Bound their raw size and expand only at loop call sites.
-    let record=f.slot_size.length >? 0
-    let most:InlineWord=64
-    if record {most=96}
-    if f.code.length >? most {return 0}
-    let checked_leaf=not record and f.code.length >? 24
+    let nslots=f[0].slot_size.length
+    let record=nslots >? 0
+    if ncode >? 256 {return 0}
+    let checked_leaf=not record and ncode >? 24
     let overflow_ops:InlineWord=0
+    let big_slot=false
     if record {
-        loop size in f.slot_size {
-            if size >? 32 {return 0}
+        let sp=f[0].slot_size.ptr
+        loop si in [0..nslots) {
+            if sp[si] >? 32 {big_slot=true; break}
         }
     }
     let calls:InlineWord=0
-    # A nonreturning failure path does not add a call to successful execution.
-    # Retain it when expanding bounds-checked helpers, just as release does.
-    loop ins in f.code {
-        if ins.op =? 'overflow_add' or ins.op =? 'overflow_sub' or ins.op =? 'overflow_mul' {overflow_ops += 1}
-        if ins.op =? 'call' and ins.c not=? 1 {
-            if ins.c not=? 0 or calls not=? 0 {return 0}
-            calls += 1
+    let rt_calls:InlineWord=0
+    let rc_calls:InlineWord=0
+    let loops:InlineWord=0
+    let has_copy=false
+    let has_noret=false
+    let has_checked=false
+    let has_brtable=false
+    let kills_mem=false
+    let non_slot_write=false
+    let fn_idx=f[0].fn_index
+    # Nonreturning, cold, and COW-uniquify (c == 3) calls do not break leaf
+    # eligibility in loops, letting swap and small checked helpers inline.
+    # Refcount calls (c >= 4) stay out-of-line unless paired with a cold panic
+    # path (e.g. bounds message cleanup in swap), avoiding default build bloat.
+    let p=code_p
+    let end_=code_p + ncode
+    loop p <? end_ {
+        let op=p[0].op
+        let km=inline_kills_mem(op) and not (op =? 'call' and p[0].c =? 1)
+        if km {
+            kills_mem=true
+            if op =? 'copy' {has_copy=true}
+            if not non_slot_write and op not=? 'store' and op not=? 'zero' and op not=? 'zeroslots' {non_slot_write=true}
         }
-        if ins.op =? 'calli' or ins.op =? 'callc' or ins.op =? 'syscall' or ins.op =? 'intr' or ins.op =? 'loop' or ins.op =? 'streq' {return 0}
+        match op {
+            <'call'> => {
+                if p[0].imm =? fn_idx {return 0}
+                let cc=p[0].c
+                if cc =? 1 {has_noret=true}
+                else if cc =? 2 or cc =? 3 {rt_calls += 1}
+                else if cc >=? 4 {rc_calls += 1}
+                else {
+                    if calls not=? 0 {return 0}
+                    calls += 1
+                }
+            }
+            <'calli'|'callc'|'syscall'|'intr'|'streq'> => {return 0}
+            <'loop'> => {
+                loops += 1
+                if loops >? 1 {return 0}
+            }
+            <'overflow_add'|'overflow_sub'|'overflow_mul'> => {overflow_ops += 1}
+            <'checked_add'|'checked_sub'|'checked_mul'> => {has_checked=true}
+            <'brtable'> => {has_brtable=true}
+            _ => {}
+        }
+        p+=1
+    }
+    fast_last_has_copy=has_copy
+    fast_last_has_loop=loops >? 0
+    if ncode >? 96 {
+        if not has_brtable or loops >? 0 or f[0].raw_mem or big_slot or calls not=? 0 or rt_calls not=? 0 or rc_calls not=? 0 or non_slot_write {return 0}
+        return 3
+    }
+    if record and big_slot {return 0}
+    if loops >? 0 {
+        if target_wasm or record or f[0].raw_mem or kills_mem or calls not=? 0 or rt_calls not=? 0 or rc_calls not=? 0 or ncode >? 48 or ((has_noret or has_checked) and f[0].nparams >? 2) {return 0}
+        return 3
+    }
+    if rc_calls >? 0 {
+        if not has_noret or rc_calls >? 2 or rt_calls =? 0 {return 0}
     }
     if record {
         if calls not=? 0 {return 0}
         return 3
     }
-    # Exact arithmetic adds a cold fallback to a small scalar expression.
-    # Retain bounded leaf expansion in loops despite that fallback's size.
+    # Exact arithmetic and tiny checked/COW helpers add cold or runtime-guarded
+    # paths to small operations. Retain bounded leaf expansion in loops.
     if checked_leaf {
-        if calls not=? 0 or overflow_ops =? 0 {return 0}
+        if calls not=? 0 {return 0}
+        if rt_calls not=? 0 {return 3}
+        if overflow_ops =? 0 or ncode >? 64 {return 0}
+        return 3
+    }
+    if rt_calls not=? 0 {
+        if calls not=? 0 {return 0}
         return 3
     }
     1 + calls
 }
-fast_inline_prepare=(fs:array<IrFn>):>void=>{
+fast_inline_prepare=(fs:array<IrFn>):>void=>$unsafe {
     inline_cache_clear()
-    fast_callback_sites=dict<int64 int64>()
-    if callback_calls.length >? 0 {
-        loop [_ lf] in callback_calls {fast_callback_sites[lf]=(fast_callback_sites.get(lf) ?? 0) + 1}
+    if fast_callback_sites.length >? 0 or callback_calls.length >? 0 {
+        fast_callback_sites=dict<int64 int64>()
+        if callback_calls.length >? 0 {
+            loop [_ lf] in callback_calls {fast_callback_sites[lf]=(fast_callback_sites.get(lf) ?? 0) + 1}
+        }
     }
     fast_fns=[]
     fast_by_index=[]
     fast_loop_only=[]
     fast_moves=[]
-    let wrappers:array<int64>=[]
-    loop k in 0.. and f in fs {
-        let plain=fast_plain_kind(f)
-        let moves=fast_moves_alone(f plain)
-        let kind=if moves {3} else {plain}
-        if kind =? 0 {continue}
-        if kind =? 2 {
-            wrappers.push(k)
-            continue
+    fast_has_copy=[]
+    fast_has_loop=[]
+    fast_cands=[]
+    fast_cand_state=[]
+    fast_cand_is_leaf=[]
+    let fsp=fs.ptr
+    let nfs=fs.length
+    let max_fi:InlineWord=-1
+    loop k in [0..nfs) {
+        let fp=fsp + k
+        if fp[0].cabi or fp[0].noinline or (fp[0].export_name as array<uint8>).length >? 0 or fp[0].code.length >? 256 {continue}
+        if fp[0].fn_index >? max_fi {max_fi=fp[0].fn_index}
+    }
+    if max_fi >=? 0 {
+        let need=int64(max_fi + 1)
+        if fast_cand_by_index.length <? need {
+            if cap(fast_cand_by_index) <? need {fast_cand_by_index.reserve(need)}
+            __set_len(fast_cand_by_index need)
+        } else {
+            __set_len(fast_cand_by_index need)
         }
-        loop fast_by_index.length <=? f.fn_index {fast_by_index.push(-1)}
-        fast_by_index[f.fn_index]=fast_fns.length
-        fast_fns.push(f)
+        mem_set(fast_cand_by_index.ptr as ptr<uint8> 255 need * 8)
+        let cbi=fast_cand_by_index.ptr
+        loop k in [0..nfs) {
+            let fp=fsp + k
+            if fp[0].cabi or fp[0].noinline or (fp[0].export_name as array<uint8>).length >? 0 or fp[0].code.length >? 256 {continue}
+            let fi=fp[0].fn_index
+            cbi[fi]=fast_cands.length
+            fast_cands.push(fp[0])
+            fast_cand_state.push(-1)
+        }
+    } else {
+        if fast_cand_by_index.length >? 0 {fast_cand_by_index.clear()}
+    }
+    opt_has_loops_ready=false
+}
+fast_resolve=(fi:InlineWord allow_wrapper:bool):>InlineWord=>$unsafe {
+    if fi <? 0 or fi >=? fast_cand_by_index.length {return -1}
+    let ci=fast_cand_by_index.ptr[fi]
+    if ci <? 0 {return -1}
+    let st=fast_cand_state.ptr[ci]
+    if st >=? 0 {
+        if st =? 0 {return -1}
+        let j=InlineWord(st) - 1
+        if not allow_wrapper and not fast_cand_is_leaf.ptr[j] {return -1}
+        return j
+    }
+    fast_cand_state.ptr[ci]=0
+    let fp=fast_cands.ptr + ci
+    let plain=fast_plain_kind_ptr(fp)
+    let moves=fast_moves_alone_ptr(fp plain)
+    let kind=if moves {3} else {plain}
+    if kind =? 0 {return -1}
+    if kind not=? 2 {
+        let j=fast_fns.length
+        fast_fns.push(fp[0])
         fast_loop_only.push(kind =? 3)
         fast_moves.push(moves)
+        fast_has_copy.push(fast_last_has_copy)
+        fast_has_loop.push(fast_last_has_loop)
+        fast_cand_is_leaf.push(true)
+        fast_cand_state.ptr[ci]=j + 1
+        return j
     }
-    let leaves=fast_fns.length
-    let saved=ir
-    loop k in wrappers {
-        let f=fs[k]
-        let leaf:InlineWord=-1
-        let equality=false
-        loop ins in f.code {
-            if ins.op not=? 'call' or ins.c not=? 0 {continue}
-            if ins.imm >=? fast_by_index.length {break}
-            let j=fast_by_index[int64(ins.imm)]
-            if j <? 0 or j >=? leaves or int64(ins.b) not=? fast_fns[j].nparams {continue}
-            if not fast_loop_only[j] {leaf=j}
-            # (around the string comparison, which goes only into loops: so does this)
-            else if fast_fns[j].code[0].op =? 'streq' {equality=true}
+    if not allow_wrapper {
+        fast_cand_state.ptr[ci]=-1
+        return -1
+    }
+    let f=fp[0]
+    let leaf:InlineWord=-1
+    let equality=false
+    let cp=f.code.ptr
+    let ce=cp + f.code.length
+    loop cp <? ce {
+        if cp[0].op =? 'call' and cp[0].c =? 0 {
+            let sub_fi=InlineWord(cp[0].imm)
+            if sub_fi not=? f.fn_index {
+                let sub_j=fast_resolve(sub_fi false)
+                if sub_j >=? 0 and int64(cp[0].b) =? fast_fns.ptr[sub_j].nparams {
+                    if not fast_loop_only.ptr[sub_j] {leaf=sub_j}
+                    else if fast_fns.ptr[sub_j].code.ptr[0].op =? 'streq' or (not fast_moves.ptr[sub_j] and f.code.length <=? 32 and fast_fns.ptr[sub_j].code.length <=? 48) {equality=true}
+                }
+            }
         }
-        if leaf <? 0 and not equality {continue}
-        ir=f
-        # k_vreg's register cache belongs to one function, including this
-        # preparation step before ordinary emission starts.
-        kc_fn += 1
-        fast_inline_loop_only=leaf <? 0
-        fast_inline_into()
-        fast_inline_loop_only=false
-        if ir.code.length >? 48 {continue}
-        loop fast_by_index.length <=? f.fn_index {fast_by_index.push(-1)}
-        fast_by_index[f.fn_index]=fast_fns.length
-        fast_fns.push(ir)
-        fast_loop_only.push(leaf <? 0)
-        fast_moves.push(false)
+        cp+=1
     }
+    if leaf <? 0 and not equality {return -1}
+    let saved=ir
+    ir=f
+    kc_fn += 1
+    fast_inline_loop_only=leaf <? 0
+    fast_expanding_wrapper=true
+    fast_inline_into()
+    fast_expanding_wrapper=false
+    fast_inline_loop_only=false
+    let expanded=ir
     ir=saved
+    kc_fn += 1
+    if expanded.code.length >? 64 {return -1}
+    let j=fast_fns.length
+    fast_fns.push(expanded)
+    fast_loop_only.push(leaf <? 0)
+    fast_moves.push(false)
+    let hc=false
+    let hl=false
+    let ep=expanded.code.ptr
+    let ee=ep + expanded.code.length
+    loop ep <? ee {
+        let op=ep[0].op
+        if op =? 'copy' {hc=true}
+        else if op =? 'loop' {hl=true}
+        ep+=1
+    }
+    fast_has_copy.push(hc)
+    fast_has_loop.push(hl)
+    fast_cand_is_leaf.push(false)
+    fast_cand_state.ptr[ci]=j + 1
+    j
 }
 rel_collect=():>void=>{
     if rel_fns.length =? 0 {inline_cache_clear()}
@@ -145,18 +320,31 @@ rel_collect=():>void=>{
 inlinable=(f:IrFn):>int64=>{
     let borrowed_body=partition_active and partition_inline_body(f.fn_index)
     let limit=if borrowed_body {192} else {INLINE_SPECIALIZE_MAX}
-    if f.cabi or f.noinline or (f.export_name as array<uint8>).length >? 0 or f.code.length >? limit {return 0}
+    if f.cabi or f.noinline or (f.export_name as array<uint8>).length >? 0 or f.code.length >? 400 {return 0}
     let leaf=true
+    let cold_leaf=true
     let has_loop=false
+    let has_load=false
+    let has_brtable=false
+    let uses_slot=false
+    let writes_mem=false
     let size=f.code.length
     let loops:InlineWord=0
     let tiny_read_loop=size <=? 32 and f.nparams <=? 2 and f.ret =? VI and f.slot_size.length =? 0 and not f.raw_mem
     loop ins in f.code {
+        if ins.op =? 'brtable' {has_brtable=true}
+        if ins.op =? 'load' {has_load=true}
+        if ins.op =? 'divs' or ins.op =? 'divu' or ins.op =? 'rems' or ins.op =? 'remu' {tiny_read_loop=false}
+        if ins.op =? 'slot' or ins.op =? 'zeroslots' {uses_slot=true}
         if ins.op =? 'loop' {
             has_loop=true
             loops += 1
         }
-        if tiny_read_loop and ((kills_memory(ins.op) and not (ins.op =? 'call' and ins.c =? 1)) or ins.op =? 'vst') {tiny_read_loop=false}
+        let is_checked=ins.op =? 'checked_add' or ins.op =? 'checked_sub' or ins.op =? 'checked_mul'
+        if (kills_memory(ins.op) and not (ins.op =? 'call' and ins.c =? 1)) or ins.op =? 'vst' {
+            if not is_checked and ins.op not=? 'trap' {writes_mem=true}
+            tiny_read_loop=false
+        }
         if ins.op =? 'streq' {
             # Match the existing string helper plus its bounded comparison.
             size += 81
@@ -177,21 +365,37 @@ inlinable=(f:IrFn):>int64=>{
         if ins.op =? 'intr' and ins.imm >=? 2 {return 0}
         # (calls on rarely taken paths, like the out-of-line refcounting during a parallel job,
         # do not count)
-        if (ins.op =? 'call' and ins.c =? 0) or ins.op =? 'calli' or ins.op =? 'callc' or ins.op =? 'syscall' {leaf=false}
+        if (ins.op =? 'call' and ins.c =? 0) or ins.op =? 'calli' or ins.op =? 'callc' or ins.op =? 'syscall' {
+            leaf=false
+            if ins.op not=? 'call' or ins.imm <? 0 or ins.imm >=? rel_by_index.length or rel_by_index[int64(ins.imm)] <? 0 {
+                cold_leaf=false
+            } else {
+                let cf=rel_fns[rel_by_index[int64(ins.imm)]]
+                if cf.code.length <=? INLINE_MAX {
+                    let cf_loop=false
+                    loop cins in cf.code {
+                        if cins.op =? 'loop' {cf_loop=true; break}
+                    }
+                    if not cf_loop {cold_leaf=false}
+                }
+            }
+        }
     }
     # Keep a web loop kernel independently callable. Repeated calls let the
     # runtime tier it up; embedding it in a one-shot outer loop can keep the
     # entire workload in baseline machine code for that invocation.
     if target_wasm and has_loop {return 0}
+    if leaf and not has_loop and has_brtable and not writes_mem and not uses_slot and size <=? 400 {return 2}
     if size >? limit {return 0}
     # A checked fork adapter only selects a branch and constructs borrowed
     # descriptors. Inlining its literal-index call removes the unused arm and
     # stack environment; the recursive activation itself stays noinline.
     if borrowed_body and not has_loop {return 1}
-    if size <=? INLINE_MAX {return 1}
+    if not has_loop and (size <=? 24 or (cold_leaf and size <=? INLINE_MAX)) {return 1}
     # A single tiny read-only search has bounded register needs even in a large
-    # caller. Keep larger/allocating loops under the existing caller-size cap.
-    if leaf and has_loop and loops =? 1 and tiny_read_loop {return 1}
+    # caller. Keep larger/allocating loops under the existing caller-size cap,
+    # and never absorb it into a loop-free small/cold leaf at depth 0.
+    if leaf and has_loop and loops =? 1 and tiny_read_loop and has_load {return 5}
     if leaf and has_loop and (borrowed_body or size <=? INLINE_LOOP_MAX) {return 3}
     if leaf and not has_loop and size <=? INLINE_LOOP_MAX {return 2}
     if not has_loop and f.nparams <=? 8 {return 4}
@@ -249,11 +453,11 @@ inline_target=(ins:Ins depth:InlineWord self_pos:InlineWord snap:array<IrFn> can
     inl_const_target=false
     let j=inline_callee(ins self_pos snap)
     if j <? 0 {return -1}
-    if can[j] =? 1 or (can[j] =? 2 and depth >? 0) {return j}
+    if can[j] =? 1 or (can[j] =? 5 and (depth >? 0 or can[self_pos] not=? 1)) or (can[j] =? 2 and depth >? 0) {return j}
     if can[j] =? 3 and depth >? 0 and ir.code.length <=? INLINE_LOOPY_CALLER_MAX {return j}
     # a leaf into a caller that is little more than the call (a wrapper, like a map's get around
     # its lookup): the caller becomes a leaf itself, which loops can then take in
-    if (can[j] =? 2 or can[j] =? 3) and ir.code.length <=? INLINE_WRAPPER_MAX and inl_calls =? 1 {return j}
+    if (can[j] =? 2 or can[j] =? 3) and (can[self_pos] not=? 1 or ir.code.length <=? 24) and ir.code.length <=? INLINE_WRAPPER_MAX and inl_calls =? 1 {return j}
     # New non-leaf expansion outside loops only: loop pressure and padding must
     # continue to use the established leaf policy.
     if not dbg_on and depth =? 0 and (can[j] =? 2 or can[j] =? 4) and int64(ins.b) <=? 8 and ir.code.length <=? INLINE_SPECIALIZE_CALLER_MAX and inl_const_growth + snap[j].code.length <=? INLINE_SPECIALIZE_GROWTH {
@@ -270,50 +474,147 @@ inline_target=(ins:Ins depth:InlineWord self_pos:InlineWord snap:array<IrFn> can
 }
 # the function a direct call (that returns) calls, if it was collected (-1: none)
 inline_callee=(ins:Ins self_pos:InlineWord snap:array<IrFn>):>InlineWord=>{
-    if ins.op not=? 'call' or ins.c =? 1 or ins.imm >=? rel_by_index.length {return -1}
+    if ins.op not=? 'call' or (ins.c not=? 0 and ins.c not=? 2) or ins.imm >=? rel_by_index.length {return -1}
     let j=rel_by_index[int64(ins.imm)]
     if j <? 0 or j =? self_pos or int64(ins.b) not=? snap[j].nparams {return -1}
     j
 }
 
 fast_inline_target=(ins:Ins in_loop:bool):>InlineWord=>$unsafe {
-    if ins.op not=? 'call' or ins.c not=? 0 or ins.imm >=? fast_by_index.length {return -1}
-    let j=fast_by_index[int64(ins.imm)]
+    if ins.op not=? 'call' or ins.c not=? 0 {return -1}
+    let fi=InlineWord(ins.imm)
+    if not in_loop and not fast_expanding_wrapper and ir.code.length >? 48 {
+        if fi <? 0 or fi >=? fast_cand_by_index.length {return -1}
+        let ci=fast_cand_by_index.ptr[fi]
+        if ci <? 0 or fast_cands.ptr[ci].code.length >? 12 {return -1}
+    }
+    let j=fast_resolve(fi not fast_expanding_wrapper)
     if j <? 0 or fast_fns.ptr[j].fn_index =? ir.fn_index or int64(ins.b) not=? fast_fns.ptr[j].nparams {return -1}
-    if fast_loop_only.ptr[j] and not in_loop and not fast_inline_loop_only {return -1}
+    if fast_loop_only.ptr[j] and not in_loop and not fast_inline_loop_only and not (not fast_moves.ptr[j] and ir.code.length <=? 32 and fast_fns.ptr[j].code.length <=? 48) {return -1}
     j
 }
 
 fast_keeps_call=(j:InlineWord):>bool=>$unsafe {
-    fast_moves.ptr[j] and fast_fns.ptr[j].code.length >? 64 and ir.code.length >? INLINE_LOOPY_CALLER_MAX
+    (fast_moves.ptr[j] and fast_fns.ptr[j].code.length >? 64 and ir.code.length >? INLINE_LOOPY_CALLER_MAX) or (fast_loop_only.ptr[j] and not fast_moves.ptr[j] and fast_fns.ptr[j].code.length >? 64 and ir.code.length >? 256)
 }
 
+let fast_scan_tab:array<uint8>=[]
+let fast_scan_p:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
+fast_scan_init=():>void=>$unsafe {
+    fast_scan_tab=fill(uint8(0) 256)
+    let p=fast_scan_tab.ptr
+    let pr=[Ins('call')]
+    let tp=pr.ptr as ptr<uint32>
+    p[int64(tp[0])]=1
+    pr.ptr[0].op='block'; p[int64(tp[0])]=2
+    pr.ptr[0].op='if_'; p[int64(tp[0])]=2
+    pr.ptr[0].op='loop'; p[int64(tp[0])]=3
+    pr.ptr[0].op='end'; p[int64(tp[0])]=4
+    pr.ptr[0].op='copy'; p[int64(tp[0])]=5
+    fast_scan_p=p
+}
 fast_inline_into=():>void=>$unsafe {
-    if fast_fns.length =? 0 {return}
-    let found=false
-    loop ins in ir.code {
-        let j=fast_inline_target(ins true)
-        if j >=? 0 and not fast_keeps_call(j) {found=true break}
+    opt_has_loops_ready=false
+    let ncode=ir.code.length
+    let small_caller=ncode <=? 48
+    let tiny_caller=ncode <=? 32
+    if not fast_expanding_wrapper and not small_caller {
+        let fi=ir.fn_index
+        if fi >=? 0 and fi <? ir_fn_has_loop.length and not ir_fn_has_loop.ptr[fi] {
+            opt_has_loops_ready=true
+            opt_has_loops_val=false
+            return
+        }
     }
-    if not found {return}
+    if fast_cands.length =? 0 {return}
+    if fast_scan_tab.length =? 0 {fast_scan_init()}
+    let sktab=fast_scan_p
+    let found=false
+    let has_loop=false
+    let codep=ir.code.ptr
+    let p=codep
+    let endp=codep + ncode
+    let sdepth:InlineWord=0
+    let sloop:InlineWord=0
+    let exp_wrap=fast_expanding_wrapper
+    loop p <? endp {
+        let sk=sktab[int64((p as ptr<uint32>)[0])]
+        if sk =? 0 {p+=1; continue}
+        if sk =? 1 {
+            if p[0].c not=? 0 {p+=1; continue}
+            let cfi=InlineWord(p[0].imm)
+            if not exp_wrap and not small_caller and sloop =? 0 {
+                if cfi <? 0 or cfi >=? fast_cand_by_index.length {p+=1; continue}
+                let ci=fast_cand_by_index.ptr[cfi]
+                if ci <? 0 or fast_cands.ptr[ci].code.length >? 12 {p+=1; continue}
+            }
+            let j=fast_resolve(cfi not exp_wrap)
+            if j <? 0 or fast_fns.ptr[j].fn_index =? ir.fn_index or int64(p[0].b) not=? fast_fns.ptr[j].nparams {p+=1; continue}
+            if fast_loop_only.ptr[j] and sloop =? 0 and not fast_inline_loop_only and not (not fast_moves.ptr[j] and tiny_caller and fast_fns.ptr[j].code.length <=? 48) {p+=1; continue}
+            if not fast_keeps_call(j) {found=true; break}
+        } else if sk =? 4 {
+            if sdepth =? sloop {sloop=0}
+            sdepth-=1
+        } else if sk <=? 3 {
+            sdepth+=1
+            if sk =? 3 {
+                has_loop=true
+                if sloop =? 0 {sloop=sdepth}
+            }
+        }
+        p+=1
+    }
+    if not found {
+        opt_has_loops_ready=true
+        opt_has_loops_val=has_loop
+        return
+    }
     let out:array<Ins>=[]
-    out.reserve(ir.code.length * 2)
+    out.reserve(ncode * 2)
     let old=ir.code
+    let oldp=old.ptr
     let depth:InlineWord=0
     let loop_depth:InlineWord=0
     let moved=false
-    loop ins in old {
-        if ins.op =? 'block' or ins.op =? 'loop' or ins.op =? 'if_' {depth+=1}
-        if ins.op =? 'loop' and loop_depth =? 0 {loop_depth=depth}
-        if ins.op =? 'end' {
-            if depth =? loop_depth {loop_depth=0}
-            depth-=1
+    let has_copy=false
+    let out_has_loop=false
+    p=oldp
+    endp=oldp + ncode
+    loop p <? endp {
+        let sk=sktab[int64((p as ptr<uint32>)[0])]
+        if sk not=? 0 {
+            if sk =? 1 {
+                let j=fast_inline_target(p[0] loop_depth >? 0)
+                if j >=? 0 and not fast_keeps_call(j) {
+                    inline_call(p[0] fast_fns.ptr[j] @out)
+                    if fast_has_copy.ptr[j] {has_copy=true}
+                    if fast_has_loop.ptr[j] {out_has_loop=true}
+                    if fast_moves.ptr[j] {moved=true}
+                    p+=1; continue
+                }
+            } else if sk =? 4 {
+                if depth =? loop_depth {loop_depth=0}
+                depth-=1
+            } else if sk =? 5 {
+                has_copy=true
+            } else {
+                depth+=1
+                if sk =? 3 {
+                    out_has_loop=true
+                    if loop_depth =? 0 {loop_depth=depth}
+                }
+            }
         }
-        let j=fast_inline_target(ins loop_depth >? 0)
-        if j >=? 0 and not fast_keeps_call(j) {
-            inline_call(ins fast_fns.ptr[j] @out)
-            if fast_moves.ptr[j] {moved=true}
-        } else {out.push(ins)}
+        let op0=out.ptr
+        let oh=(op0 as ptr<int64>) - 3
+        if op0 not=? (uint64(0) as ptr<Ins>) and oh[0] =? 1 and oh[1] <? oh[2] {
+            let olen=oh[1]
+            op0[olen]=p[0]
+            oh[1]=olen + 1
+        } else {
+            out.push(p[0])
+        }
+        p+=1
     }
     ir.code=out
     if moved and fast_callback_depth <? 4 {
@@ -322,7 +623,9 @@ fast_inline_into=():>void=>$unsafe {
         fast_callback_depth-=1
         return
     }
-    o_copy_forward()
+    if has_copy {o_copy_forward()}
+    opt_has_loops_ready=true
+    opt_has_loops_val=out_has_loop
 }
 
 defines_value=(op:Op):>bool=>match op {
@@ -430,15 +733,23 @@ inline_live_regs=(callee:IrFn):>array<int64>=>$unsafe {
 }
 
 inline_call=(call:Ins callee:IrFn @out:array<Ins>):>void=>$unsafe {
-    let vm:array<int64>=fill(InlineWord(0) callee.vtypes.length)
-    let mapped=vm.ptr
+    let nvt=callee.vtypes.length
+    if inl_vm_pool.length <? nvt {
+        if cap(inl_vm_pool) <? nvt {inl_vm_pool.reserve(nvt)}
+        __set_len(inl_vm_pool nvt)
+    }
+    let mapped=inl_vm_pool.ptr
     loop v in inline_live_regs(callee) {
         if InlineWord(callee.vtypes.ptr[v]) =? VK {mapped[v]=k_vreg(callee.kval.ptr[v])}
         else {mapped[v]=vreg(InlineWord(callee.vtypes.ptr[v]))}
     }
-    let sm:array<int64>=fill(InlineWord(0) callee.slot_size.length)
-    let slots=sm.ptr
-    loop s in [0..callee.slot_size.length) {slots[s]=new_slot(InlineWord(callee.slot_size.ptr[s]) InlineWord(callee.slot_align.ptr[s]))}
+    let nsl=callee.slot_size.length
+    if nsl >? 0 and inl_sm_pool.length <? nsl {
+        if cap(inl_sm_pool) <? nsl {inl_sm_pool.reserve(nsl)}
+        __set_len(inl_sm_pool nsl)
+    }
+    let slots=inl_sm_pool.ptr
+    loop s in [0..nsl) {slots[s]=new_slot(InlineWord(callee.slot_size.ptr[s]) InlineWord(callee.slot_align.ptr[s]))}
     loop k in [0..InlineWord(call.b)) {
         let p=mapped[k]
         out.push(Ins['mov' int32<overflow='wrap'>(vtype(p)) int32<overflow='wrap'>(p) ir.args.ptr[InlineWord(call.a)+k] 0 0 0 0])
@@ -475,7 +786,7 @@ inline_into=(self_pos:int64 snap:array<IrFn> can:array<int64>):>bool=>$unsafe {
         if ins[0].op =? 'calli' or ins[0].op =? 'callc' {inl_calls+=1}
         else if ins[0].op =? 'call' and ins[0].c =? 0 {
             let j=inline_callee(ins[0] self_pos snap)
-            if j <? 0 or can.ptr[j] not=? 1 {inl_calls+=1}
+            if j <? 0 or (can.ptr[j] not=? 1 and can.ptr[j] not=? 5) {inl_calls+=1}
         }
     }
     let depth:InlineWord=0

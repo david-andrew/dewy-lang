@@ -31,7 +31,15 @@ from p"util.jo" import (files intern name_of pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
 
 ErrWord:type=int64<overflow='wrap'>
+let nominal_has_parent:array<bool>=[]
+nominal_set_parent=(t:ErrWord p:ErrWord):>void=>$unsafe {
+    if nominal_parent.length =? 0 and nominal_has_parent.length >? 0 {nominal_has_parent.clear()}
+    nominal_parent[t]=p
+    if t >=? nominal_has_parent.length {nominal_has_parent.resize(t + 64)}
+    nominal_has_parent.ptr[t]=true
+}
 exception_builtins=():>void=>$unsafe {
+    if nominal_parent.length =? 0 and nominal_has_parent.length >? 0 {nominal_has_parent.clear()}
     loop name in ["exception" "error" "Canceled" "Timeout" "OutOfMemory"] {
         let d=mk('struct_' 0)
         nodes.ptr[d].name=int32(intern(name))
@@ -43,9 +51,9 @@ exception_builtins=():>void=>$unsafe {
         if name =? "exception" {exception_type=t}
         else if name =? "error" {
             error_type=t
-            nominal_parent[t]=exception_type
+            nominal_set_parent(t exception_type)
         }
-        else {nominal_parent[t]=exception_type}
+        else {nominal_set_parent(t exception_type)}
     }
 }
 nominal_descends=(t:ErrWord parent:ErrWord):>bool=>{
@@ -65,9 +73,9 @@ value_members=(t:int64):>array<int64>=>{
     if is_union(t) {return union_members(t)}
     [t]
 }
-nominal_family=(t:ErrWord):>ErrWord=>{
-    if not nominal_ready or (t not=? exception_type and t not=? error_type and not nominal_parent.has(t)) {return t}
-    if ownership_nominals.has(t) or nominal_generic_instance(t) {return t}
+nominal_family=(t:ErrWord):>ErrWord=>$unsafe {
+    if not nominal_ready or (t not=? exception_type and t not=? error_type and (nominal_parent.length =? 0 or t >=? nominal_has_parent.length or not nominal_has_parent.ptr[t])) {return t}
+    if (ownership_nominals.length >? 0 and ownership_nominals.has(t)) or nominal_generic_instance(t) {return t}
     let found=nominal_families.get(t)
     if found not=? none {return found}
     let members:array<int64>=[]
@@ -136,7 +144,7 @@ nominal_resolve=(t:ErrWord):>void=>$unsafe {
     let d=ErrWord(structs.ptr[ErrWord(types.ptr[t].st)].decl)
     # (type of any: the root of a family of its own, minted under nothing)
     if mint_of_any(d) {
-        nominal_parent[t]=0
+        nominal_set_parent(t 0)
         nominal_resolving[t]=false
         return
     }
@@ -161,7 +169,7 @@ nominal_resolve=(t:ErrWord):>void=>$unsafe {
         nominal_resolve(parent)
         if ownership_nominals.has(parent) {ownership_nominals[t]=true}
     }
-    nominal_parent[t]=parent
+    nominal_set_parent(t parent)
     nominal_resolving[t]=false
 }
 mint_of_any=(d:ErrWord):>bool=>$unsafe {
@@ -196,7 +204,7 @@ nominal_instance=(decl:ErrWord t:ErrWord):>void=>{
     if nominal_parent.has(t) {return}
     let parent=nominal_generic.get(decl) ?? 0
     if parent =? 0 {return}
-    nominal_parent[t]=parent
+    nominal_set_parent(t parent)
 }
 # Whether family (a family's union, written as a pattern) holds m, a generic instance
 # descending from its parent: the union itself never lists one

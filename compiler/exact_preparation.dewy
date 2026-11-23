@@ -3,7 +3,7 @@ from p"integer_conversions.dewy" import (integer_constant wrap_conv)
 from p"checker_source_positions.dewy" import (dewy_at)
 from p"expression_types.dewy" import (ntype)
 
-from p"ast.jo" import (NF_BROADCAST NF_CHECKED NF_EXPLICIT_INTEGER NF_RECORD NF_GLOBAL NF_MUT nodes add_flag has_flag kid kids mk nkids)
+from p"ast.jo" import (NF_BROADCAST NF_CHECKED NF_EXPLICIT_INTEGER NF_RECORD NF_GLOBAL NF_MUT lists nodes add_flag has_flag kid kids mk nkids)
 from p"check.jo" import (LF_CONST LF_MUTPARAM fns globals locals)
 from p"checker_compound_values.dewy" import (compound_op)
 from p"checker_exact.dewy" import (exact_math_operand)
@@ -24,8 +24,8 @@ from p"facts_plan_cache.dewy" import (fact_plan_forget)
 from p"facts_lifecycle.dewy" import (fn_in_lib)
 from p"facts_progress.dewy" import (fact_progress_note fact_progress_root)
 from p"facts_ranges.dewy" import (fact_floor_call)
-from p"isolation_ops.dewy" import (isolation_children)
-from p"node_store.dewy" import (Node)
+from p"isolation_ops.dewy" import (iso_child_p isolation_children)
+from p"node_store.dewy" import (NK Node)
 from p"pcheck_drive.dewy" import (pc_restore)
 from p"types.jo" import (T_BOOL T_INT T_MATH_INT is_int prune telem tkind types)
 
@@ -216,224 +216,367 @@ exact_prepare_math=(n:PrepareWord):>bool=>$unsafe {
     true
 }
 
-exact_prepare_node=(n:PrepareWord owner:PrepareWord store:bool):>void=>$unsafe {
-    if n <=? 0 {return}
-    # Scalar leaves carry no arithmetic or writes. Strings may contain
-    # interpolation expressions, so retain their ordinary child traversal.
-    # Node starts with NK's int32 ordinal. Integer through identifier is 1..7,
-    # with the interpolated string at 3. Check this before entering the body walk.
-    let ordinal=((nodes.ptr + n) as ptr<int32>)[0]
-    if ordinal >=? 1 and ordinal <=? 7 and ordinal not=? 3 {return}
-    exact_prepare_body(n owner store)
+exact_set_kflags=(@tab:array<uint8> @tmp:array<Node> ks:array<NK> v:uint8):>void=>$unsafe {
+    let tagp=tmp.ptr as ptr<uint32>
+    loop k in ks {
+        tmp.ptr[0].kind=k
+        tab.ptr[int64(tagp[0])]=v
+    }
 }
 
-exact_prepare_body=(n:PrepareWord owner:PrepareWord store:bool):>void=>$unsafe {
-    if n >=? exact_marks.length {exact_reserve(n)}
-    let mark=exact_marks.ptr[n]
-    if mark & 4 not=? 0 {
-        if store and mark & 3 =? 1 {exact_store(n owner)}
-        return
-    }
-    exact_marks[n] |= 4
-    # Reveal/wrap nodes around scalar arithmetic are representation identities.
-    # Keep the checked visibility type, but do not make them storage boundaries.
-    # Refinement conversions retain their own nodes and redacted diagnostics.
-    loop nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.none_)) {
-        let child=PrepareWord(nodes.ptr[n].a)
+exact_build_kflags=():>array<uint8>=>$unsafe {
+    let tab=fill(uint8(0) 128)
+    let tmp=[Node[kind='nil']]
+    exact_set_kflags(@tab @tmp ['int_lit' 'float_lit' 'bool_lit' 'none_lit' 'null_lit' 'ident'] uint8(16))
+    exact_set_kflags(@tab @tmp ['vardecl'] uint8(1 | 4))
+    exact_set_kflags(@tab @tmp ['assign' 'for_'] uint8(1 | 2 | 4))
+    exact_set_kflags(@tab @tmp ['while_' 'lambda' 'fn_'] uint8(1 | 2))
+    exact_set_kflags(@tab @tmp ['return_' 'break_' 'continue_'] uint8(1))
+    exact_set_kflags(@tab @tmp ['conv' 'binary' 'unary' 'intrinsic'] uint8(2 | 4))
+    exact_set_kflags(@tab @tmp ['array'] uint8(2))
+    exact_set_kflags(@tab @tmp ['if_' 'iflet' 'block' 'exprstmt' 'match_' 'coalesce'] uint8(2 | 4 | 8))
+    exact_set_kflags(@tab @tmp ['arm'] uint8(2 | 8))
+    exact_set_kflags(@tab @tmp ['call'] uint8(4))
+    tab
+}
+
+let exact_kflags_tab:array<uint8>=exact_build_kflags()
+let exact_kflags_p:ptr<uint8>=$unsafe exact_kflags_tab.ptr
+
+exact_prep_pre_conv=(n:PrepareWord):>void=>$unsafe {
+    let nd=nodes.ptr + n
+    loop nd[0].kind =? 'conv' and nd[0].aux =? int32(int64(CV.none_)) {
+        let child=PrepareWord(nd[0].a)
         let t=ntype(n)
         let ct=ntype(child)
         if not is_int(exact_representation(t)) or exact_representation(t) not=? exact_representation(ct) {break}
         let kind=nodes.ptr[child].kind
         if kind not=? 'binary' and kind not=? 'unary' and kind not=? 'ident' and kind not=? 'int_lit' and not (kind =? 'conv' and nodes.ptr[child].aux =? int32(int64(CV.none_))) {break}
-        nodes.ptr[n] = nodes.ptr[child]
-        nodes.ptr[n].type = int32(t)
+        nd[0] = nodes.ptr[child]
+        nd[0].type = int32(t)
     }
-    # Local compound arithmetic has the same left-before-right evaluation as
-    # a simple binary assignment. Expose it before write/representation proofs.
-    if nodes.ptr[n].kind =? 'assign' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].op not=? PREP_TOK_ASSIGN {
-        let target=PrepareWord(nodes.ptr[n].a)
-        if nodes.ptr[target].kind =? 'ident' and nodes.ptr[target].aux =? PREP_SK_LOCAL and prune(ntype(target)) =? T_MATH_INT {
-            let op=compound_op(PrepareWord(nodes.ptr[n].op))
-            if op =? PREP_TOK_PLUS or op =? PREP_TOK_MINUS or op =? PREP_TOK_STAR or op =? PREP_TOK_AMP or op =? PREP_TOK_PIPE or op =? PREP_TOK_CARET {
-                let left=nodes.length
-                nodes.push(nodes.ptr[target])
-                let value=mk('binary' nodes.ptr[n].pos)
-                nodes.ptr[value] = Node[kind = 'binary' pos = nodes.ptr[n].pos a = int32(left) b = nodes.ptr[n].b op = int32(PrepareWord(op)) type = int32(T_MATH_INT) flags = int32(NF_CHECKED)]
-                nodes.ptr[n].b = int32(value)
-                nodes.ptr[n].op = PREP_TOK_ASSIGN
-            }
+}
+
+exact_prep_pre_assign=(n:PrepareWord):>void=>$unsafe {
+    let nd=nodes.ptr + n
+    let target=PrepareWord(nd[0].a)
+    if nodes.ptr[target].kind =? 'ident' and nodes.ptr[target].aux =? PREP_SK_LOCAL and prune(ntype(target)) =? T_MATH_INT {
+        let op=compound_op(PrepareWord(nd[0].op))
+        if op =? PREP_TOK_PLUS or op =? PREP_TOK_MINUS or op =? PREP_TOK_STAR or op =? PREP_TOK_AMP or op =? PREP_TOK_PIPE or op =? PREP_TOK_CARET {
+            let left=nodes.length
+            nodes.push(nodes.ptr[target])
+            let value=mk('binary' nodes.ptr[n].pos)
+            nodes.ptr[value] = Node[kind = 'binary' pos = nodes.ptr[n].pos a = int32(left) b = nodes.ptr[n].b op = int32(PrepareWord(op)) type = int32(T_MATH_INT) flags = int32(NF_CHECKED)]
+            nodes.ptr[n].b = int32(value)
+            nodes.ptr[n].op = PREP_TOK_ASSIGN
         }
     }
-    let k=nodes.ptr[n].kind
-    if k =? 'array' and has_flag(n NF_BROADCAST) and tkind(ntype(n)) =? 'array' and exact_representation(telem(ntype(n))) =? T_MATH_INT {exact_demands[owner] = true}
-    if exact_collect_writes and (k =? 'vardecl' or k =? 'assign' or k =? 'for_' or k =? 'while_' or k =? 'lambda' or k =? 'fn_' or k =? 'return_' or k =? 'break_' or k =? 'continue_') {exact_lower_sites.push(n)}
-    if k =? 'lambda' or k =? 'fn_' {return}
-    if exact_measure_on {
-        if store {exact_measure_boundary(n owner)}
-        else {exact_measure_visit(n owner false)}
+}
+
+exact_prep_shift=(n:PrepareWord owner:PrepareWord):>void=>$unsafe {
+    let nd=nodes.ptr + n
+    let [known count]=integer_constant(PrepareWord(nd[0].b))
+    if count <? 0 and not types.ptr[exact_representation(ntype(PrepareWord(nd[0].b)))].sign {known=false}
+    if known and count <? 1048576 {exact_shifts[n] = max(0 count)}
+    else {
+        exact_demands[owner] = true
+        exact_count_nodes.push([n owner])
+        exact_marks.ptr[n] |= 128
     }
-    # Classify only the relevant kind. This demanded walk already has k;
-    # unrelated nodes need neither arithmetic/type queries nor policy tests.
-    let math=false
-    let operator=false
-    let cmp=false
-    let conversion=false
-    let policy=false
-    let control=false
-    if k =? 'binary' {
-        math=exact_operation(n)
-        operator=nodes.ptr[n].aux =? 0 and exact_type(ntype(n) nodes.ptr[n].pos)
-        cmp=nodes.ptr[n].aux =? 0 and ntype(n) =? T_BOOL
-    }
-    else if k =? 'unary' or k =? 'intrinsic' {math=exact_operation(n)}
-    else if k =? 'conv' {
-        conversion=(nodes.ptr[n].aux =? int32(int64(CV.int_)) or nodes.ptr[n].aux =? int32(int64(CV.none_))) and exact_type(ntype(n) nodes.ptr[n].pos)
-        policy=nodes.ptr[n].aux =? int32(int64(CV.wrap_int)) or nodes.ptr[n].aux =? int32(int64(CV.saturate_int)) or nodes.ptr[n].aux =? int32(int64(CV.int2float)) or ntype(n) =? T_MATH_INT
-    }
-    else if k =? 'if_' or k =? 'iflet' or k =? 'block' or k =? 'exprstmt' or k =? 'match_' or k =? 'arm' or k =? 'coalesce' {control=true}
-    if math and nodes.ptr[n].kind =? 'binary' and (nodes.ptr[n].op =? PREP_TOK_SHL or nodes.ptr[n].op =? PREP_TOK_STARSTAR) {
-        let [known count]=integer_constant(PrepareWord(nodes.ptr[n].b))
-        if count <? 0 and not types.ptr[exact_representation(ntype(PrepareWord(nodes.ptr[n].b)))].sign {known=false}
-        if known and count <? 1048576 {exact_shifts[n] = max(0 count)}
-        else {
-            exact_demands[owner] = true
-            exact_count_nodes.push([n owner])
-            exact_marks[n] |= 128
+}
+
+exact_prep_post_conv=(n:PrepareWord owner:PrepareWord):>void=>$unsafe {
+    let nd=nodes.ptr + n
+    let source=PrepareWord(nd[0].a)
+    let has_wr=exact_word_reads.length >? 0 and exact_word_reads.has(n)
+    if exact_named_constant(source) and not has_wr {
+        let word=exact_prepare_operand(source)
+        if word not=? source {
+            nodes.ptr[n].a = int32(word)
+            exact_mark(n)
         }
     }
-    let previous_control:PrepareWord=0
-    if k =? 'while_' or k =? 'for_' {
-        previous_control=exact_control_head
-        exact_control_values.push(PrepareWord(nodes.ptr[n].a))
-        exact_control_parents.push(previous_control)
-        prepare_control_head[0]=exact_control_values.length
+    nd=nodes.ptr + n
+    if nd[0].a =? int32(source) {
+        if nodes.ptr[source].kind =? 'conv' and nodes.ptr[source].aux =? int32(int64(CV.int_)) and exact_type(ntype(PrepareWord(nodes.ptr[source].a)) nd[0].pos) {nd[0].a = nodes.ptr[source].a}
+        else if not has_wr {exact_demands[owner] = true}
     }
-    if policy and k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.wrap_int)) or nodes.ptr[n].aux =? int32(int64(CV.saturate_int))) and exact_named_constant(PrepareWord(nodes.ptr[n].a)) {
-        let word=exact_prepare_operand(PrepareWord(nodes.ptr[n].a))
-        nodes.ptr[n].a = int32(word)
+}
+
+exact_prep_post_shl_rep=(n:PrepareWord owner:PrepareWord):>void=>$unsafe {
+    if owner >=? exact_rep_owners.length {exact_rep_owners.resize(max(owner + 1 fns.length))}
+    exact_rep_owners.ptr[owner] = true
+    if n >=? exact_rep_demands.length {exact_rep_demands.resize(nodes.length)}
+    exact_rep_demands.ptr[n] = true
+    exact_proof_demands[owner] = true
+}
+
+exact_prep_post_for=(n:PrepareWord owner:PrepareWord):>void=>$unsafe {
+    let nd=nodes.ptr + n
+    if nd[0].aux =? 0 {
+        let it=PrepareWord(nd[0].a)
+        let ep0=PrepareWord(nodes.ptr[it].a)
+        let ep1=PrepareWord(nodes.ptr[it].b)
+        let ep2=PrepareWord(nodes.ptr[it].c)
+        if ep0 not=? 0 and prune(ntype(ep0)) =? T_MATH_INT and exact_count_bound(ep0).wide {exact_prep_post_shl_rep(ep0 owner)}
+        if ep1 not=? 0 and prune(ntype(ep1)) =? T_MATH_INT and exact_count_bound(ep1).wide {exact_prep_post_shl_rep(ep1 owner)}
+        if ep2 not=? 0 and prune(ntype(ep2)) =? T_MATH_INT and exact_count_bound(ep2).wide {exact_prep_post_shl_rep(ep2 owner)}
     }
-    let mask=isolation_children(k)
-    if mask >? 0 {
-        if mask & 1 not=? 0 {exact_prepare_node(PrepareWord(nodes.ptr[n].a) owner not (math or operator or cmp or conversion or policy or k =? 'exprstmt' or k =? 'match_' and exact_match_literals(n)))}
-        if mask & 2 not=? 0 {exact_prepare_node(PrepareWord(nodes.ptr[n].b) owner not (math or operator or cmp or control))}
-        if mask & 4 not=? 0 {exact_prepare_node(PrepareWord(nodes.ptr[n].c) owner not control)}
-        if mask & 16 not=? 0 {
-            loop i in [0..nkids(n)) {exact_prepare_node(kid(n i) owner not math and k not=? 'block' and k not=? 'match_')}
-        }
-    }
-    if (k =? 'call' or k =? 'binary' or k =? 'unary') and prune(ntype(n)) =? T_MATH_INT and exact_prepare_math(n) {
-        exact_marks[n] &= 251
-        exact_prepare_node(n owner store)
-        return
-    }
-    if conversion and prune(ntype(PrepareWord(nodes.ptr[n].a))) =? T_MATH_INT {
-        let source=PrepareWord(nodes.ptr[n].a)
-        if exact_named_constant(source) and not exact_word_reads.has(n) {
-            let word=exact_prepare_operand(source)
-            if word not=? source {
-                nodes.ptr[n].a = int32(word)
-                exact_mark(n) # narrower destinations still need their own fit proof
-            }
-        }
-        if nodes.ptr[n].a =? int32(source) {
-            if nodes.ptr[source].kind =? 'conv' and nodes.ptr[source].aux =? int32(int64(CV.int_)) and exact_type(ntype(PrepareWord(nodes.ptr[source].a)) nodes.ptr[n].pos) {nodes.ptr[n].a = nodes.ptr[source].a}
-            else if not exact_word_reads.has(n) {exact_demands[owner] = true}
-        }
-    }
-    # Arm coercion rewrites the tail after check_block cached its type.
-    # Keep both directions synchronized: a word arm widened to int must not
-    # be read as an untagged word, and a narrowed arm must expose its fit check.
-    if k =? 'block' and nodes.ptr[n].aux not=? 0 {
-        let tail=block_value(n)
-        if prune(ntype(n)) =? T_MATH_INT or prune(ntype(tail)) =? T_MATH_INT {nodes.ptr[n].type = nodes.ptr[tail].type}
-    }
-    let expanded=math or operator and (exact_has_node(PrepareWord(nodes.ptr[n].a)) or exact_has_node(PrepareWord(nodes.ptr[n].b)))
-    if conversion or k =? 'exprstmt' {expanded=exact_has_node(PrepareWord(nodes.ptr[n].a))}
-    if k =? 'if_' or k =? 'iflet' {expanded=exact_has_node(PrepareWord(nodes.ptr[n].b)) or exact_has_node(PrepareWord(nodes.ptr[n].c))}
-    if k =? 'block' and nodes.ptr[n].aux not=? 0 {expanded=exact_has_node(block_value(n))}
-    if k =? 'match_' {
-        loop arm in kids(n) {
-            if exact_has_node(PrepareWord(nodes.ptr[arm].b)) {expanded=true}
-        }
-    }
-    if expanded and nodes.ptr[n].type not=? 0 and exact_type(ntype(n) nodes.ptr[n].pos) {exact_mark(n)}
-    if cmp and (exact_has_node(PrepareWord(nodes.ptr[n].a)) or exact_has_node(PrepareWord(nodes.ptr[n].b))) {exact_mark(n)}
-    if k =? 'coalesce' and exact_has_node(PrepareWord(nodes.ptr[n].b)) and exact_type(ntype(n) nodes.ptr[n].pos) {exact_mark(n)}
-    if exact_marks.ptr[n] & 3 =? 1 and (store or k =? 'conv' and has_flag(n NF_EXPLICIT_INTEGER)) {exact_store(n owner)}
-    # A dynamic mathematical shift may still have a word-sized value at this
-    # use. Ask the existing flow proof before choosing the tagged shift helper.
-    # This is representation demand, never an added source fit obligation.
-    if k =? 'binary' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].op =? PREP_TOK_SHL and prune(ntype(n)) =? T_MATH_INT {
-        if owner >=? exact_rep_owners.length {exact_rep_owners.resize(max(owner + 1 fns.length))}
-        exact_rep_owners[owner] = true
-        if n >=? exact_rep_demands.length {exact_rep_demands.resize(nodes.length)}
-        exact_rep_demands[n] = true
-        exact_proof_demands[owner] = true
-    }
-    if k =? 'for_' and nodes.ptr[n].aux =? 0 {
-        let it=PrepareWord(nodes.ptr[n].a)
-        loop endpoint in [PrepareWord(nodes.ptr[it].a) PrepareWord(nodes.ptr[it].b) PrepareWord(nodes.ptr[it].c)] {
-            if endpoint not=? 0 and prune(ntype(endpoint)) =? T_MATH_INT and exact_count_bound(endpoint).wide {
-                if owner >=? exact_rep_owners.length {exact_rep_owners.resize(max(owner + 1 fns.length))}
-                exact_rep_owners[owner] = true
-                if endpoint >=? exact_rep_demands.length {exact_rep_demands.resize(nodes.length)}
-                exact_rep_demands[endpoint] = true
-                exact_proof_demands[owner] = true
-            }
-        }
-    }
-    if k =? 'for_' and (nodes.ptr[n].aux =? 0 or nodes.ptr[n].aux =? 1) and nodes.ptr[n].sym >? 0 and not has_flag(n NF_MUT) {
-        let l=PrepareWord(nodes.ptr[n].sym)
+    nd=nodes.ptr + n
+    if (nd[0].aux =? 0 or nd[0].aux =? 1) and nd[0].sym >? 0 and not has_flag(n NF_MUT) {
+        let l=PrepareWord(nd[0].sym)
         if l >=? exact_iteration_sources.length {exact_iteration_sources.resize(locals.length)}
-        exact_iteration_sources[l] = PrepareWord(nodes.ptr[n].a)
+        exact_iteration_sources.ptr[l] = PrepareWord(nd[0].a)
     }
-    if k =? 'vardecl' and nodes.ptr[n].sym >? 0 and not has_flag(n NF_GLOBAL) {
-        let l=PrepareWord(nodes.ptr[n].sym)
+}
+
+exact_prep_post_vardecl=(n:PrepareWord):>void=>$unsafe {
+    let nd=nodes.ptr + n
+    if nd[0].sym >? 0 and not has_flag(n NF_GLOBAL) {
+        let l=PrepareWord(nd[0].sym)
         if l >=? exact_initializers.length {exact_initializers.resize(max(l + 1 locals.length))}
-        exact_initializers[l] = PrepareWord(nodes.ptr[n].b)
+        exact_initializers.ptr[l] = PrepareWord(nd[0].b)
     }
-    if k =? 'call' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 {
-        let called=PrepareWord(nodes.ptr[n].sym)
+}
+
+exact_prep_post_call=(n:PrepareWord):>void=>$unsafe {
+    let nd=nodes.ptr + n
+    if nd[0].aux =? 0 and nd[0].sym >? 0 {
+        let called=PrepareWord(nd[0].sym)
         # (`m[k] = (m.get(k) ?? 0) + 1`: a counter stored through the entry setter)
-        if nkids(n) =? 3 {exact_progress_assignments.push(n)}
-        loop i in [0..min(nkids(n) fns.ptr[called].params.length)) {
-            if PrepareWord(locals.ptr[fns.ptr[called].params[i]].flags) & LF_MUTPARAM =? 0 {continue}
-            let root=fact_progress_root(kid(n i))
-            if nodes.ptr[root].kind =? 'ident' and nodes.ptr[root].aux =? PREP_SK_LOCAL {
-                let l=PrepareWord(nodes.ptr[root].sym)
-                if l >=? exact_progress_opaque.length {exact_progress_opaque.resize(locals.length)}
-                exact_progress_opaque[l] = true
+        if nd[0].nlist =? 3 {exact_progress_assignments.push(n)}
+        let np=min(PrepareWord(nd[0].nlist) fns.ptr[called].params.length)
+        if np >? 0 {
+            let lbase=PrepareWord(nd[0].list)
+            let pp=fns.ptr[called].params.ptr
+            let lp=lists.ptr
+            let np0=nodes.ptr
+            let locp=locals.ptr
+            loop i in [0..np) {
+                if PrepareWord(locp[pp[i]].flags) & LF_MUTPARAM =? 0 {continue}
+                let root=fact_progress_root(PrepareWord(lp[lbase + i]))
+                if np0[root].kind =? 'ident' and np0[root].aux =? PREP_SK_LOCAL {
+                    let l=PrepareWord(np0[root].sym)
+                    if l >=? exact_progress_opaque.length {exact_progress_opaque.resize(locals.length)}
+                    exact_progress_opaque.ptr[l] = true
+                }
             }
         }
     }
-    if k =? 'intrinsic' and nkids(n) >? 0 {
-        let id=nodes.ptr[n].aux as IN
+}
+
+exact_prep_post_intrinsic=(n:PrepareWord):>void=>$unsafe {
+    let nd=nodes.ptr + n
+    if nd[0].nlist >? 0 {
+        let id=nd[0].aux as IN
         if id =? IN.push or id =? IN.insert or id =? IN.extend or id =? IN.fill or id =? IN.resize or id =? IN.truncate or id =? IN.reserve {
             let root=fact_progress_root(kid(n 0))
             if nodes.ptr[root].kind =? 'ident' and nodes.ptr[root].aux =? PREP_SK_LOCAL {
                 let l=PrepareWord(nodes.ptr[root].sym)
                 if l >=? exact_progress_opaque.length {exact_progress_opaque.resize(locals.length)}
-                exact_progress_opaque[l] = true
+                exact_progress_opaque.ptr[l] = true
             }
         }
     }
-    if k =? 'assign' {
-        exact_progress_assignments.push(n)
-        let target=PrepareWord(nodes.ptr[n].a)
-        let root=fact_progress_root(target)
-        if nodes.ptr[root].kind =? 'ident' and nodes.ptr[root].aux =? PREP_SK_LOCAL {
-            let l=PrepareWord(nodes.ptr[root].sym)
-            if l >=? exact_write_heads.length {exact_write_heads.resize(max(l + 1 locals.length))}
-            exact_write_values.push(PrepareWord(nodes.ptr[n].b))
-            exact_write_plain.push(nodes.ptr[n].op =? PREP_TOK_ASSIGN and nodes.ptr[n].aux =? 0)
-            exact_write_targets.push(target)
-            exact_write_seen.push(0)
-            exact_write_controls.push(exact_control_head)
-            exact_write_next.push(exact_write_heads[l])
-            exact_write_heads[l] = exact_write_values.length
+}
+
+exact_prep_post_assign=(n:PrepareWord):>void=>$unsafe {
+    exact_progress_assignments.push(n)
+    let nd=nodes.ptr + n
+    let target=PrepareWord(nd[0].a)
+    let root=fact_progress_root(target)
+    if nodes.ptr[root].kind =? 'ident' and nodes.ptr[root].aux =? PREP_SK_LOCAL {
+        let l=PrepareWord(nodes.ptr[root].sym)
+        if l >=? exact_write_heads.length {exact_write_heads.resize(max(l + 1 locals.length))}
+        exact_write_values.push(PrepareWord(nd[0].b))
+        exact_write_plain.push(nd[0].op =? PREP_TOK_ASSIGN and nd[0].aux =? 0)
+        exact_write_targets.push(target)
+        exact_write_seen.push(0)
+        exact_write_controls.push(exact_control_head)
+        exact_write_next.push(exact_write_heads.ptr[l])
+        exact_write_heads.ptr[l] = exact_write_values.length
+    }
+}
+
+exact_prepare_node=(n:PrepareWord owner:PrepareWord store:bool):>void=>$unsafe {
+    if n <=? 0 {return}
+    let np=nodes.ptr
+    let nd=np + n
+    let k0=nd[0].kind
+    let kfp=exact_kflags_p
+    let kf=PrepareWord(kfp[int64((nd as ptr<uint32>)[0])])
+    if (kf & 16) not=? 0 or (k0 =? 'str_lit' and nd[0].nlist =? 0) {return}
+    if n >=? exact_marks.length {exact_reserve(n)}
+    let em=exact_marks.ptr
+    if em[n] & 4 not=? 0 {
+        if store and em[n] & 3 =? 1 {exact_store(n owner)}
+        return
+    }
+    em[n] |= 4
+    if k0 =? 'conv' and nd[0].aux =? int32(int64(CV.none_)) {
+        exact_prep_pre_conv(n)
+        np=nodes.ptr
+        nd=np + n
+        k0=nd[0].kind
+        kf=PrepareWord(kfp[int64((nd as ptr<uint32>)[0])])
+    }
+    else if k0 =? 'assign' and nd[0].aux =? 0 and nd[0].op not=? PREP_TOK_ASSIGN {
+        exact_prep_pre_assign(n)
+        np=nodes.ptr
+        nd=np + n
+    }
+    let k=k0
+    if exact_collect_writes and (kf & 1) not=? 0 {exact_lower_sites.push(n)}
+    if k =? 'lambda' or k =? 'fn_' {return}
+    if exact_measure_on {
+        if store {exact_measure_boundary(n owner)}
+        else {exact_measure_visit(n owner false)}
+    }
+    # eflags: 1=math, 2=operator, 4=cmp, 8=conversion, 16=policy, 32=control
+    let eflags:PrepareWord=if (kf & 8) not=? 0 {32} else {0}
+    let previous_control:PrepareWord=-1
+    if (kf & 2) not=? 0 {
+        if k =? 'binary' {
+            if exact_operation(n) {
+                eflags |= 1
+                if nd[0].op =? PREP_TOK_SHL or nd[0].op =? PREP_TOK_STARSTAR {exact_prep_shift(n owner)}
+            }
+            if nd[0].aux =? 0 {
+                if exact_type(ntype(n) nd[0].pos) {eflags |= 2}
+                if ntype(n) =? T_BOOL {eflags |= 4}
+            }
+        }
+        else if k =? 'unary' or k =? 'intrinsic' {
+            if exact_operation(n) {eflags |= 1}
+        }
+        else if k =? 'conv' {
+            let aux=nd[0].aux
+            if (aux =? int32(int64(CV.int_)) or aux =? int32(int64(CV.none_))) and exact_type(ntype(n) nd[0].pos) {eflags |= 8}
+            if aux =? int32(int64(CV.wrap_int)) or aux =? int32(int64(CV.saturate_int)) {
+                eflags |= 16
+                if exact_named_constant(PrepareWord(nd[0].a)) {
+                    let word=exact_prepare_operand(PrepareWord(nd[0].a))
+                    nodes.ptr[n].a = int32(word)
+                    np=nodes.ptr
+                    nd=np + n
+                }
+            }
+            else if aux =? int32(int64(CV.int2float)) or ntype(n) =? T_MATH_INT {eflags |= 16}
+        }
+        else if k =? 'array' {
+            if has_flag(n NF_BROADCAST) and tkind(ntype(n)) =? 'array' and exact_representation(telem(ntype(n))) =? T_MATH_INT {exact_demands[owner] = true}
+        }
+        else if k =? 'while_' or k =? 'for_' {
+            previous_control=exact_control_head
+            exact_control_values.push(PrepareWord(nd[0].a))
+            exact_control_parents.push(previous_control)
+            prepare_control_head[0]=exact_control_values.length
         }
     }
-    if k =? 'while_' or k =? 'for_' {
+    let mask=PrepareWord(iso_child_p[int64((nd as ptr<uint32>)[0])])
+    if mask >? 0 {
+        let ca=PrepareWord(nd[0].a)
+        let cb=PrepareWord(nd[0].b)
+        let cc=PrepareWord(nd[0].c)
+        let nk=PrepareWord(nd[0].nlist)
+        let lbase=PrepareWord(nd[0].list)
+        let nn=nodes.length
+        if mask & 1 not=? 0 and ca >? 0 {
+            let cnd=np + ca
+            let cka=cnd[0].kind
+            if (PrepareWord(kfp[int64((cnd as ptr<uint32>)[0])]) & 16) =? 0 and (cka not=? 'str_lit' or cnd[0].nlist not=? 0) {
+                exact_prepare_node(ca owner not ((eflags & 31) not=? 0 or k =? 'exprstmt' or (k =? 'match_' and exact_match_literals(n))))
+                if nodes.length not=? nn {np=nodes.ptr; nn=nodes.length}
+            }
+        }
+        if mask & 2 not=? 0 and cb >? 0 {
+            let cnd=np + cb
+            let ckb=cnd[0].kind
+            if (PrepareWord(kfp[int64((cnd as ptr<uint32>)[0])]) & 16) =? 0 and (ckb not=? 'str_lit' or cnd[0].nlist not=? 0) {
+                exact_prepare_node(cb owner (eflags & 39) =? 0)
+                if nodes.length not=? nn {np=nodes.ptr; nn=nodes.length}
+            }
+        }
+        if mask & 4 not=? 0 and cc >? 0 {
+            let cnd=np + cc
+            let ckc=cnd[0].kind
+            if (PrepareWord(kfp[int64((cnd as ptr<uint32>)[0])]) & 16) =? 0 and (ckc not=? 'str_lit' or cnd[0].nlist not=? 0) {
+                exact_prepare_node(cc owner (eflags & 32) =? 0)
+                if nodes.length not=? nn {np=nodes.ptr; nn=nodes.length}
+            }
+        }
+        if mask & 16 not=? 0 and nk >? 0 {
+            let child_store=(eflags & 1) =? 0 and k not=? 'block' and k not=? 'match_'
+            let lp=lists.ptr
+            let nl=lists.length
+            loop i in [0..nk) {
+                let ci=PrepareWord(lp[lbase + i])
+                if ci >? 0 {
+                    let cnd=np + ci
+                    let cki=cnd[0].kind
+                    if (PrepareWord(kfp[int64((cnd as ptr<uint32>)[0])]) & 16) =? 0 and (cki not=? 'str_lit' or cnd[0].nlist not=? 0) {
+                        exact_prepare_node(ci owner child_store)
+                        if nodes.length not=? nn {np=nodes.ptr; nn=nodes.length}
+                        if lists.length not=? nl {lp=lists.ptr; nl=lists.length}
+                    }
+                }
+            }
+        }
+    }
+    if (kf & 4) not=? 0 {
+        nd=nodes.ptr + n
+        if (k =? 'call' or k =? 'binary' or k =? 'unary') and nd[0].aux =? 0 {
+            let nt=PrepareWord(nd[0].type)
+            if nt =? T_MATH_INT or (nt not=? 0 and types.ptr[nt].kind =? 'var' and prune(nt) =? T_MATH_INT) {
+                let rewrote=exact_prepare_math(n)
+                nd=nodes.ptr + n
+                if rewrote {
+                    exact_marks.ptr[n] &= 251
+                    exact_prepare_node(n owner store)
+                    return
+                }
+            }
+        }
+        if (eflags & 8) not=? 0 and prune(ntype(PrepareWord(nd[0].a))) =? T_MATH_INT {
+            exact_prep_post_conv(n owner)
+            nd=nodes.ptr + n
+        }
+        let expanded=(eflags & 1) not=? 0 or ((eflags & 2) not=? 0 and (exact_has_node(PrepareWord(nd[0].a)) or exact_has_node(PrepareWord(nd[0].b))))
+        if (eflags & 8) not=? 0 {expanded=exact_has_node(PrepareWord(nd[0].a))}
+        if (eflags & 32) not=? 0 {
+            if k =? 'block' {
+                if nd[0].aux not=? 0 {
+                    let tail=block_value(n)
+                    if prune(ntype(n)) =? T_MATH_INT or prune(ntype(tail)) =? T_MATH_INT {nd[0].type = nodes.ptr[tail].type}
+                    expanded=exact_has_node(tail)
+                }
+            }
+            else if k =? 'exprstmt' {expanded=exact_has_node(PrepareWord(nd[0].a))}
+            else if k =? 'if_' or k =? 'iflet' {expanded=exact_has_node(PrepareWord(nd[0].b)) or exact_has_node(PrepareWord(nd[0].c))}
+            else if k =? 'match_' {
+                let lbase=PrepareWord(nd[0].list)
+                loop i in [0..PrepareWord(nd[0].nlist)) {
+                    let arm=PrepareWord(lists.ptr[lbase + i])
+                    if exact_has_node(PrepareWord(nodes.ptr[arm].b)) {expanded=true}
+                }
+            }
+            else if k =? 'coalesce' {
+                if exact_has_node(PrepareWord(nd[0].b)) and exact_type(ntype(n) nd[0].pos) {exact_mark(n)}
+            }
+        }
+        if expanded and nd[0].type not=? 0 and exact_type(ntype(n) nd[0].pos) {exact_mark(n)}
+        if (eflags & 4) not=? 0 and (exact_has_node(PrepareWord(nd[0].a)) or exact_has_node(PrepareWord(nd[0].b))) {exact_mark(n)}
+        if k =? 'binary' {
+            if nd[0].aux =? 0 and nd[0].op =? PREP_TOK_SHL and prune(ntype(n)) =? T_MATH_INT {exact_prep_post_shl_rep(n owner)}
+        }
+        else if k =? 'for_' {exact_prep_post_for(n owner)}
+        else if k =? 'vardecl' {exact_prep_post_vardecl(n)}
+        else if k =? 'call' {exact_prep_post_call(n)}
+        else if k =? 'intrinsic' {exact_prep_post_intrinsic(n)}
+        else if k =? 'assign' {exact_prep_post_assign(n)}
+    }
+    if (store or (k =? 'conv' and has_flag(n NF_EXPLICIT_INTEGER))) and n <? exact_marks.length and exact_marks.ptr[n] & 3 =? 1 {exact_store(n owner)}
+    if previous_control >=? 0 {
         if exact_collect_writes {exact_lower_sites.push(-1)}
         prepare_control_head[0]=previous_control
     }

@@ -52,7 +52,7 @@ exact_count_bound=(n:CountWord):>FactBound=>$unsafe {
     if n =? 0 {return FactBound(wide=true)}
     if n <? exact_count_index.length and exact_count_index[n] not=? 0 {return exact_count_bounds[exact_count_index[n] - 1]}
     let out=FactBound(wide=true)
-    if n >=? exact_count_index.length {exact_count_index.resize(nodes.length)}
+    if n >=? exact_count_index.length {exact_count_index.resize(max(max(int64(n + 1) nodes.length) exact_count_index.length * 2))}
     let slot=exact_count_bounds.length
     exact_count_bounds.push(out)
     exact_count_index[n]=slot + 1

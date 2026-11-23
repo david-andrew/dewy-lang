@@ -57,6 +57,7 @@ exact_chain_plan=(n:ChainWord @plan:array<int64>):>bool=>$unsafe {
 # calculation keep the general exact path. Quotients and remainders truncate.
 exact_affine_store=(n:ChainWord):>int64=>$unsafe {
     let source=ChainWord(nodes.ptr[n].a)
+    loop exact_has_node(source) and (nodes.ptr[source].kind =? 'exprstmt' or nodes.ptr[source].kind =? 'conv' and (nodes.ptr[source].aux =? int32(int64(CV.int_)) or nodes.ptr[source].aux =? int32(int64(CV.none_)))) {source=ChainWord(nodes.ptr[source].a)}
     if nodes.ptr[source].kind not=? 'binary' or nodes.ptr[source].aux not=? 0 {return -1}
     let op=cx_token_values.ptr[ChainWord(nodes.ptr[source].op)]
     if op not=? 'plus' and op not=? 'minus' {return -1}
@@ -98,6 +99,7 @@ exact_affine_store=(n:ChainWord):>int64=>$unsafe {
 # Demand-only, constant-size shape check; bounds reuse the indexed range cache.
 exact_offset_store=(n:ChainWord):>int64=>$unsafe {
     let source=ChainWord(nodes.ptr[n].a)
+    loop exact_has_node(source) and (nodes.ptr[source].kind =? 'exprstmt' or nodes.ptr[source].kind =? 'conv' and (nodes.ptr[source].aux =? int32(int64(CV.int_)) or nodes.ptr[source].aux =? int32(int64(CV.none_)))) {source=ChainWord(nodes.ptr[source].a)}
     if nodes.ptr[source].kind not=? 'binary' or nodes.ptr[source].aux not=? 0 {return -1}
     let op=cx_token_values.ptr[ChainWord(nodes.ptr[source].op)]
     if op not=? 'plus' and op not=? 'minus' {return -1}

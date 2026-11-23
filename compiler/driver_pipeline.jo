@@ -162,9 +162,11 @@ emit_queued = ():
     if not driver_state[0].opt_release[0] and not driver_state[0].dbg_on[0]: driver_host[0].fast_inline_prepare(q)
     if not driver_state[0].host_ir[0] and driver_host[0].emit_parallel(q, fin): return
     t0 = driver_host[0].clock()
-    loop k in 0.. and f in q:
-        driver_state[0].ir[0] = f
-        icb = driver_host[0].ic_lf(7, f.fn_index)
+    loop k in [0..q.len()):
+        fi = q[k].fn_index
+        driver_state[0].ir[0] = q[k]
+        q[k] = IrFn()
+        icb = driver_host[0].ic_lf(7, fi)
         emit_now(fin[k])
         driver_host[0].ic_restore(icb)
     driver_host[0].emit_timing(t0)

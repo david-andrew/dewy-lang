@@ -66,9 +66,10 @@ struct IrFn:
 # operands in IrFn.args; no duplicated operand arrays or stale optimizer cache.
 # All native backend consumers share the counts, intervals and allocation chain.
 struct IrUsePlan:
-    first: int = 1 << 60
-    last: int = -1
-    ndef: int = 0
-    nuse: int = 0
+    first: i32 = 0
+    last: i32 = -1
+    ndef: i32 = 0
+    nuse: i32 = 0
+    next_start: i32 = -1
+    _pad: i32 = 0
     weight: int = 0
-    next_start: int = -1

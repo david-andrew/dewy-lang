@@ -20,18 +20,25 @@ hash_bytes = (p: *u8, n: int) -> int:
 # a[0..n) and b[0..n) hold the same bytes
 same_bytes = (a: *u8, b: *u8, n: int) -> bool: __mem_eq(a, b, n)
 
-# the id of the name at p[0..n), whose hash_bytes is h, or -1 when the table does not have it
-name_find = (texts: mut str[], hashes: mut int[], slots: mut i32[], p: *u8, n: int, h: int) -> int:
-    if slots.len() == 0: return -1
-    mask = slots.len() - 1
+name_find_raw = (sp: *i32, hp: *int, tp: **u8, mask: int, p: *u8, n: int, h: int) -> int:
     i = h & mask
     loop true:
-        e = int(slots[i])
+        e = int(sp[i])
         if e == 0: return -1
         id = e - 1
-        if hashes[id] == h and len(texts[id]) == n and __mem_eq(data(texts[id]), p, n): return id
+        if hp[id] == h:
+            hdr = tp[id]
+            if hdr == null:
+                if n == 0: return id
+            else if (hdr as *int)[1] == n and __mem_eq(hdr + 24, p, n): return id
         i = (i + 1) & mask
     -1
+
+# the id of the name at p[0..n), whose hash_bytes is h, or -1 when the table does not have it
+name_find = (texts: mut str[], hashes: mut int[], slots: mut i32[], p: *u8, n: int, h: int) -> int:
+    size = slots.len()
+    if size == 0: return -1
+    name_find_raw(data(slots), data(hashes), data(texts) as **u8, size - 1, p, n, h)
 
 # a new id for name, which the table does not have; h is its hash_bytes
 name_add = (texts: mut str[], hashes: mut int[], slots: mut i32[], name: str, h: int) -> int:

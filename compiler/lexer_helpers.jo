@@ -181,7 +181,7 @@ lx_line_start = ():
             lx_i = q
             return
         if c == 10 or c == 35:
-            loop q < lx_n and p[q] != 10: q += 1
+            if c == 35: q = __find_newline(p, q, lx_n)
             if q < lx_n: q += 1
             lx_i = q
             continue

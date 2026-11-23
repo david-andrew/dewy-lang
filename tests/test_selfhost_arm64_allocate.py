@@ -28,7 +28,7 @@ run = (nv: int, np: int, mac: bool):
         first = random(50)
         if v < np: first = 0
         last = first + random(50)
-        v_live[v] = IrUsePlan(first=first, last=last, nuse=random(4), ndef=1, weight=random(100))
+        v_live[v] = IrUsePlan(first=i32(first), last=i32(last), nuse=i32(random(4)), ndef=i32(1), weight=random(100))
         vloc[v] = LOC_SPILL
         if v >= np and v % 17 == 0: vloc[v] = LOC_CONST
         if v >= np and v % 19 == 0: vloc[v] = LOC_FCONST

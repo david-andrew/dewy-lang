@@ -16,10 +16,16 @@ use 'type_ops.dewy'
 use 'types.jo'
 
 # Secret wrapping changes visibility, never an integer's arithmetic domain.
-exact_representation = (t0: int) -> int:
+@noinline
+exact_repr_slow = (t0: int) -> int:
     t = representation_type(t0)
-    loop types[t].kind == .secret: t = representation_type(int(types[t].elem))
+    loop data(types)[t].kind == .secret: t = representation_type(int(data(types)[t].elem))
     t
+
+exact_representation = (t0: int) -> int:
+    k = data(types)[t0].kind
+    if k != .refined and k != .var and k != .secret: return t0
+    exact_repr_slow(t0)
 
 exact_type = (t0: int, pos: int) -> bool:
     # The common implementation words have no wrappers or overflow policy.
@@ -29,7 +35,7 @@ exact_type = (t0: int, pos: int) -> bool:
     if not is_int(t) or t == T_MATH_INT or int_policy(t) != 0: return false
     # Jo's implementation word remains a machine word. Narrow Jo integers
     # and every Dewy fixed-width integer have storage-only widths.
-    dewy_at(pos) or types[t].bits < 64
+    dewy_at(pos) or data(types)[t].bits < 64
 
 # Distribute a demanded scalar conversion into selected value arms. This
 # preserves evaluation order and puts the fit check on the executed arm only.
@@ -63,22 +69,30 @@ exact_int_result = (n: int, observe_unsigned: bool = false) -> int:
     T_MATH_INT
 
 exact_operation = (n: int) -> bool:
-    k = nodes[n].kind
-    if k == .intrinsic: return nodes[n].aux == i32(int(IN.fixed_abs))
+    k = data(nodes)[n].kind
+    if k == .intrinsic: return data(nodes)[n].aux == i32(int(IN.fixed_abs))
     if k == .unary:
-        if nodes[n].op != i32(int(Tok.minus)): return false
-    else if k == .binary and nodes[n].aux == 0:
-        op = nodes[n].op as Tok
+        if data(nodes)[n].op != i32(int(Tok.minus)): return false
+    else if k == .binary and data(nodes)[n].aux == 0:
+        op = data(nodes)[n].op as Tok
         if op != .plus and op != .minus and op != .star and op != .starstar and op != .slash and op != .shl: return false
     else: return false
-    if nodes[n].type == 0 or not exact_type(ntype(n), nodes[n].pos): return false
-    k != .binary or nodes[n].op != i32(int(Tok.slash)) or types[exact_representation(ntype(n))].sign
+    if data(nodes)[n].type == 0 or not exact_type(ntype(n), data(nodes)[n].pos): return false
+    k != .binary or data(nodes)[n].op != i32(int(Tok.slash)) or data(types)[exact_representation(ntype(n))].sign
 
 exact_note = (n: int):
     if cx < 0: return
-    control = nodes[n].kind == .if_ or nodes[n].kind == .iflet or nodes[n].kind == .coalesce or nodes[n].kind == .match_
-    bitwise = nodes[n].kind == .binary and (nodes[n].op == i32(int(Tok.amp)) or nodes[n].op == i32(int(Tok.pipe)) or nodes[n].op == i32(int(Tok.caret)))
-    if not exact_operation(n) and not ((control or bitwise) and exact_potential(n)) and not (nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int2float)) and exact_potential(int(nodes[n].a))) and not (exact_measure_on and exact_measure_candidate(n)): return
+    nd = data(nodes) + n
+    k = nd.kind
+    ok = false
+    if k == .binary:
+        op = nd.op as Tok
+        if op == .amp or op == .pipe or op == .caret: ok = exact_potential(n)
+        else: ok = exact_operation(n)
+    else if k == .unary or k == .intrinsic: ok = exact_operation(n)
+    else if k == .if_ or k == .iflet or k == .coalesce or k == .match_: ok = exact_potential(n)
+    else if k == .conv: ok = nd.aux == i32(int(CV.int2float)) and exact_potential(int(nd.a))
+    if not ok and not (exact_measure_on and exact_measure_candidate(n)): return
     f = int(ctxs[cx].inst)
     if f > 0:
         exact_owners[f] = true

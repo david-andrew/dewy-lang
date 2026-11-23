@@ -86,6 +86,8 @@ exact_chain_plan = (n: int, plan: mut int[]) -> bool:
 # calculation keep the general exact path.
 exact_affine_store = (n: int) -> int:
     source = int(nodes[n].a)
+    loop exact_has_node(source) and (nodes[source].kind == .exprstmt or nodes[source].kind == .conv and (nodes[source].aux == i32(int(CV.int_)) or nodes[source].aux == i32(int(CV.none_)))):
+        source = int(nodes[source].a)
     if nodes[source].kind != .binary or nodes[source].aux != 0: return -1
     op = nodes[source].op as Tok
     if op != .plus and op != .minus: return -1
@@ -121,6 +123,8 @@ exact_affine_store = (n: int) -> int:
 # Demand-only, constant-size shape check; bounds reuse the indexed range cache.
 exact_offset_store = (n: int) -> int:
     source = int(nodes[n].a)
+    loop exact_has_node(source) and (nodes[source].kind == .exprstmt or nodes[source].kind == .conv and (nodes[source].aux == i32(int(CV.int_)) or nodes[source].aux == i32(int(CV.none_)))):
+        source = int(nodes[source].a)
     if nodes[source].kind != .binary or nodes[source].aux != 0: return -1
     op = nodes[source].op as Tok
     if op != .plus and op != .minus: return -1

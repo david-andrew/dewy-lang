@@ -3,9 +3,9 @@ from p"checker_narrow_writes.dewy" import (narrowed_var)
 
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo TK)
-from p"checker_state.dewy" import (Local Global FnInst FnCtx)
+from p"checker_state.dewy" import (Local Global FnInst FnCtx live_body_user_globals live_body_global_mod)
 from p"type_inference.dewy" import tu_prune
-from p"checker_literals.dewy" import (xl_expected xl_finish)
+from p"checker_literals.dewy" import (xl_expected xl_finish xl_effects xl_exact_measure xl_last)
 from p"checks_ident_hooks.dewy" import (ident_ide_ref ident_capture ident_const_view ident_ensure_global ident_quantity ident_early_use ident_decimal_use ident_path_alias ident_constant ident_function ident_type_value ident_bare_value ident_type_use ident_error)
 # A name read as a value, once its binding is found: a local (narrowed, captured and
 # marked read), a global (initialized on demand, its first-use order and narrowed
@@ -44,6 +44,14 @@ let xj_global_read:ptr<array<bool>>=$unsafe (uint64(0) as ptr<array<bool>>)
 let xj_path_narrows:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xj_no_narrow_at:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xj_test_mode:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xj_tk_special:array<uint8>=[]
+let xj_tk_special_p:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
+xj_set_tk=(k:TK):>void=>$unsafe {
+    let d=[TypeInfo()]
+    d.ptr[0].kind=k
+    let ord=int64((d.ptr as ptr<uint32>)[0])
+    if ord >=? 0 and ord <? xj_tk_special.length {xj_tk_special.ptr[ord]=uint8(1)}
+}
 checker_idents_bind=(input:ptr<CheckerIdentInput>):>XJWord=>$unsafe {
     xj_nodes=input[0].nodes
     xj_types=input[0].types
@@ -59,17 +67,24 @@ checker_idents_bind=(input:ptr<CheckerIdentInput>):>XJWord=>$unsafe {
     xj_path_narrows=input[0].path_narrows
     xj_no_narrow_at=input[0].no_narrow_at
     xj_test_mode=input[0].test_mode
+    if xj_tk_special.length =? 0 {
+        xj_tk_special.reserve(64);
+        loop xj_tk_special.length <? 64 {xj_tk_special.push(uint8(0))}
+        xj_set_tk('var'); xj_set_tk('fn_'); xj_set_tk('cfn'); xj_set_tk('polyfn')
+        xj_set_tk('callable'); xj_set_tk('typeval'); xj_set_tk('refined')
+        xj_tk_special_p=xj_tk_special.ptr
+    }
     0
 }
 xj_fn_type=(t:XJWord):>bool=>$unsafe {
     let k=xj_types[0].ptr[tu_prune(t)].kind
     k =? 'fn_' or k =? 'cfn' or k =? 'polyfn' or k =? 'callable'
 }
-xj_read=(l:XJWord):>void=>$unsafe {xj_locals[0][l].flags=xj_locals[0].ptr[l].flags | 32768}
+xj_read=(l:XJWord):>void=>$unsafe {xj_locals[0].ptr[l].flags=xj_locals[0].ptr[l].flags | 32768}
 # A local read: the variable itself when assigned another type after narrowing, the
 # enclosing function's when captured, and marked read (LF_UNNARROWED 2048, LF_ALIAS 8,
 # LF_READ 32768).
-xj_local=(n:XJWord l00:XJWord views:bool):>XJWord=>$unsafe {
+xj_local_slow=(n:XJWord l00:XJWord views:bool):>XJWord=>$unsafe {
     let l0=l00
     loop XJWord(xj_locals[0].ptr[l0].flags) & 2048 not=? 0 {l0=narrowed_var(l0)}
     let c=xj_context[0]
@@ -80,17 +95,33 @@ xj_local=(n:XJWord l00:XJWord views:bool):>XJWord=>$unsafe {
         else if xj_contexts[0].ptr[c].parent >=? 0 {l=ident_capture(l0 false xj_nodes[0].ptr[n].pos)}
     }
     if n not=? xj_assign_root[0] {
-        xj_read(l)
-        xj_read(l0)
+        let locs=xj_locals[0].ptr
+        locs[l].flags=locs[l].flags | 32768
+        if l not=? l0 {locs[l0].flags=locs[l0].flags | 32768}
         # A narrowed name read: its variable is.
-        if XJWord(xj_locals[0].ptr[l0].flags) & 8 not=? 0 {
+        if XJWord(locs[l0].flags) & 8 not=? 0 {
             let u=narrowed_var(l0)
-            if u not=? 0 {xj_read(u)}
+            if u not=? 0 {xj_locals[0].ptr[u].flags=xj_locals[0].ptr[u].flags | 32768}
         }
         if views {ident_const_view(l0 xj_nodes[0].ptr[n].pos)}
     }
-    xj_nodes[0][n].sym=int32<overflow='wrap'>(l)
-    XJWord(xj_locals[0].ptr[l].type)
+    xj_nodes[0].ptr[n].sym=int32<overflow='wrap'>(l)
+    let lp=xj_locals[0].ptr + l
+    if XJWord(lp[0].flags) & 8 not=? 0 {live_body_user_globals += 1}
+    XJWord(lp[0].type)
+}
+xj_local=(n:XJWord l00:XJWord views:bool):>XJWord=>$unsafe {
+    let lp=xj_locals[0].ptr + l00
+    let fl=XJWord(lp[0].flags)
+    if (fl & 2056) =? 0 and not views {
+        let c=xj_context[0]
+        if XJWord(lp[0].owner) =? XJWord(xj_contexts[0].ptr[c].inst) {
+            if n not=? xj_assign_root[0] {lp[0].flags=int32<overflow='wrap'>(fl | 32768)}
+            xj_nodes[0].ptr[n].sym=int32<overflow='wrap'>(l00)
+            return XJWord(lp[0].type)
+        }
+    }
+    xj_local_slow(n l00 views)
 }
 # A bypass returns directly: an owner already published the result.
 CheckerIdentResult:type=[type:int64 bypass:bool]
@@ -114,6 +145,11 @@ xj_global=(n:XJWord g:XJWord expected:XJWord decimals:bool @bypass:bool):>XJWord
         ident_early_use(n g)
     }
     xj_nodes[0][n].sym=int32<overflow='wrap'>(g)
+    if live_body_user_globals =? 0 {
+        let gm=XJWord(xj_globals[0].ptr[g].mod)
+        if live_body_global_mod <? 0 {live_body_global_mod=gm}
+        else if live_body_global_mod not=? gm {live_body_user_globals=1}
+    }
     let t=XJWord(xj_globals[0].ptr[g].type)
     if decimals {ident_decimal_use(g)}
     if xj_path_narrows[0] >? 0 and n not=? xj_no_narrow_at[0] {t=ident_path_alias(n t)}
@@ -122,10 +158,10 @@ xj_global=(n:XJWord g:XJWord expected:XJWord decimals:bool @bypass:bool):>XJWord
 # Frozen SK ordinals: local 1, global 2, functions 3, struct 4, enum 5, const 6, module 7,
 # type 8, builtin 9, alias 10, reflected 11. `flags`: 1 constant views exist, 2 decimal
 # globals exist (the host's own tables).
-xj_ident=(n:XJWord expected:XJWord kind:XJWord ref:XJWord s:XJWord flags:XJWord):>CheckerIdentResult=>$unsafe {
+xj_ident_slow=(n:XJWord expected:XJWord kind:XJWord ref:XJWord s:XJWord flags:XJWord):>CheckerIdentResult=>$unsafe {
     let is_callee=n =? xj_callee[0]
     if xj_ide[0] and kind not=? 3 {ident_ide_ref(n s)}
-    xj_nodes[0][n].aux=int32<overflow='wrap'>(kind)
+    xj_nodes[0].ptr[n].aux=int32<overflow='wrap'>(kind)
     let t:XJWord=0
     if kind =? 1 {t=xj_local(n ref flags & 1 not=? 0)}
     else if kind =? 2 {
@@ -136,13 +172,35 @@ xj_ident=(n:XJWord expected:XJWord kind:XJWord ref:XJWord s:XJWord flags:XJWord)
     else if kind =? 3 {return [type=ident_function(n expected is_callee) bypass=true]}
     else if kind =? 4 or kind =? 5 or kind =? 10 or kind =? 8 or kind =? 7 {t=ident_type_value(n kind s)}
     else {ident_error(n kind)}
-    if (kind =? 1 or kind =? 2) and xj_fn_type(t) {
-        let bare=ident_bare_value(n t kind =? 1 is_callee expected)
-        if bare >=? 0 {return [type=bare bypass=true]}
-    }
-    if xj_types[0].ptr[tu_prune(t)].kind =? 'typeval' {
-        let used=ident_type_use(n t is_callee expected)
-        if used >=? 0 {return [type=used bypass=true]}
+    if xj_tk_special_p[int64(((xj_types[0].ptr + t) as ptr<uint32>)[0])] not=? uint8(0) {
+        if (kind =? 1 or kind =? 2) and xj_fn_type(t) {
+            let bare=ident_bare_value(n t kind =? 1 is_callee expected)
+            if bare >=? 0 {return [type=bare bypass=true]}
+        }
+        if xj_types[0].ptr[tu_prune(t)].kind =? 'typeval' {
+            let used=ident_type_use(n t is_callee expected)
+            if used >=? 0 {return [type=used bypass=true]}
+        }
     }
     [type=xl_finish(n t expected) bypass=false]
+}
+xj_ident=(n:XJWord expected:XJWord kind:XJWord ref:XJWord s:XJWord flags:XJWord):>CheckerIdentResult=>$unsafe {
+    if kind =? 1 and not xj_ide[0] and (flags & 1) =? 0 {
+        let lp=xj_locals[0].ptr + ref
+        let fl=XJWord(lp[0].flags)
+        if (fl & 2056) =? 0 and XJWord(lp[0].owner) =? XJWord(xj_contexts[0].ptr[xj_context[0]].inst) {
+            let t=XJWord(lp[0].type)
+            if xj_tk_special_p[int64(((xj_types[0].ptr + t) as ptr<uint32>)[0])] =? uint8(0) and not xl_exact_measure[0] and (expected =? 0 or not xl_effects[0]) {
+                let node=xj_nodes[0].ptr + n
+                node[0].aux=int32<overflow='wrap'>(1)
+                node[0].sym=int32<overflow='wrap'>(ref)
+                if n not=? xj_assign_root[0] {lp[0].flags=int32<overflow='wrap'>(fl | 32768)}
+                node[0].type=int32<overflow='wrap'>(t)
+                node[0].flags |= 128
+                xl_last[0]=n
+                return [type=t bypass=false]
+            }
+        }
+    }
+    xj_ident_slow(n expected kind ref s flags)
 }

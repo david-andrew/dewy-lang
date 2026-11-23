@@ -33,6 +33,7 @@ mk_ident_local = (l: int, pos: int) -> int:
     nodes[n].type = locals[l].type
     nodes[n].aux = i32(int(SK.local))
     add_flag(n, NF_CHECKED)
+    if int(locals[l].flags) & LF_ALIAS != 0: live_body_user_globals += 1
     n
 
 capture_value = (a: int, pt: int, statements: mut int[]) -> int:

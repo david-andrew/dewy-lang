@@ -11,6 +11,7 @@ use 'util.jo'
 # a function's variables whose fields or elements it changes but whose value it never reads: a
 # copy changed for nothing (`if let e = enemies.find(...): e.hp -= 5` leaves the enemy as it was)
 copy_write_warnings = (f: int):
+    if fns[f].decl != 0 and pos_in_lib(nodes[int(fns[f].decl)].pos): return
     if poly_families.len() > 1 and poly_pending_warnings.get(f) == true: return
     unused_local_warnings(f)
     if copy_writes.len() == 0: return
@@ -26,7 +27,7 @@ unused_local_warnings = (f: int):
     skip = LF_READ | LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_ELEMALIAS | LF_SOAELEM | LF_SHARED | LF_QUIET
     loop l in fns[f].locals:
         fl = int(locals[l].flags)
-        if fl & LF_DECL == 0 or fl & skip != 0 or copy_writes.has(l): continue
+        if fl & LF_DECL == 0 or fl & skip != 0 or (copy_writes.len() > 0 and copy_writes.has(l)): continue
         nm = name_of(int(locals[l].name))
         # Dewy desugaring uses reserved $ names for evaluation-order captures.
         # Their values may be overridden; they are not bindings the user can fix.

@@ -1,4 +1,5 @@
 use 'check.jo'
+use 'checker_startup.dewy'
 use 'coercion_queries.dewy'
 use 'format_word_observations.dewy'
 use 'call_lookup_context.dewy'
@@ -174,7 +175,11 @@ never_skip_result = (decl: int) -> bool:
     nm == "main" or nm == "update" or nm == "draw"
 # Normalize graph identity without changing source paths: library checks also
 # accept a relative lib_dir and compare it with the original source spelling.
-module_path_key = (path: str) -> str: module_key(path, cwd())
+cached_cwd = ""
+module_path_key = (path: str) -> str:
+    if len(path) >= 1 and path[0] == '/': return module_key(path, "")
+    if len(cached_cwd) == 0: cached_cwd = cwd()
+    module_key(path, cached_cwd)
 find_module = (path: str) -> int: module_by_path.get(module_path_key(path)) ?? -1
 resolve_type = (tn: int) -> int: ct_resolve_type(tn)
 readonly_global = (g: int) -> bool:
@@ -186,6 +191,10 @@ mk_fixed_checked = (e: int, n: int, pos: int) -> int:
 # T[,], T[,,] ...: n-dimensional arrays (lib/std/nd.jo)
 nd_of = (t: int, pos: int) -> int:
     s = prelude.get(intern("NDArray")) ?? 0
+    if s == 0:
+        if prelude_std_pending: load_std_file("nd.jo")
+        demand_name(intern("NDArray"))
+        s = prelude.get(intern("NDArray")) ?? 0
     if s == 0: fatal(pos, "n-dimensional arrays are not available (lib/std/nd.jo is missing)")
     get_struct_inst(int(syms[s].ref), [t])
 # type Name[T] = ...: the type it stands for, given its type arguments

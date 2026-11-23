@@ -2,7 +2,8 @@ $runtime_checks
 from p"checker_scope_symbols.dewy" import (new_local)
 from p"expr.jo" import (capture_sources)
 from p"checker_tokens.dewy" import (Tok)
-from p"check.jo" import (LF_DECL LF_QUIET LF_READ locals)
+from p"check.jo" import (LF_ALIAS LF_DECL LF_QUIET LF_READ locals)
+from p"checker_state.dewy" import (live_body_user_globals)
 from p"node_store.dewy" import (Node)
 from p"ast.jo" import (NF_CHECKED add_flag mk nodes)
 # Load the checker state before the parser so the lexer pins the dictionary key first.
@@ -24,6 +25,7 @@ mk_ident_local=(l:int64 pos:int64):>int64=>{
     # aux is the frozen SK.local ordinal.
     nodes.push(Node[kind='ident' pos=pos name=locals[l].name sym=int32(l)
                     type=locals[l].type aux=1 flags=int32(NF_CHECKED)])
+    if (int64(locals[l].flags) & LF_ALIAS) not=? 0 {live_body_user_globals += 1}
     n
 }
 

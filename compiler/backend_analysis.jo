@@ -32,11 +32,19 @@ call_pos: int[]
 call_w: int[]              # per call: its weight by loop depth
 loop_s: int[]
 loop_e: int[]
+ba_kinds: bool[]
+ba_starts: int[]
+ba_bk_p: *bool
+ba_bs_p: *int
+ba_bcap = 0
 ra_loop_visits = 0
 const INLINE_COPY = 256
 x_has_foreign_call = false
 x_has_narrow32 = false
 x_has_overflow_pair = false
+x_has_slot = false
+x_has_any_call = false
+ba_tail_dsts: int[]
 
 backend_call_like = (ins: *Ins, dbg_on: bool, target_wasm: bool) -> bool:
     op = ins.op
@@ -50,204 +58,446 @@ backend_call_like = (ins: *Ins, dbg_on: bool, target_wasm: bool) -> bool:
 # A returned scalar consumed only by the following nonreturning call needs no
 # earlier registers preserved. Linear live intervals otherwise extend values
 # from the successful path across this terminal failure path.
-backend_call_ends_here = (ir: mut IrFn, pos: int, ins: *Ins, dbg_on: bool) -> bool:
-    if dbg_on or ins.dst < 0 or pos + 1 >= ir.code.len(): return false
+backend_call_ends_here_views = (instructions: *Ins, arguments: *i32, types: *i8, nc: int, pos: int, ins: *Ins, dbg_on: bool) -> bool:
+    if dbg_on or ins.dst < 0 or pos + 1 >= nc: return false
     if ins.op != .call and ins.op != .calli and ins.op != .callc: return false
-    next = ir.code[pos + 1]
+    next = ins + 1
     if next.op != .call or next.c != 1: return false
-    loop k in [0..int(next.b)):
-        v = int(ir.args[int(next.a) + k])
-        if v != int(ins.dst) and int(ir.vtypes[v]) != 3: return false
+    a = int(next.a)
+    nb = int(next.b)
+    dst = int(ins.dst)
+    loop k in [0..nb):
+        v = int(arguments[a + k])
+        if v != dst and int(types[v]) != 3: return false
     true
+
+backend_call_ends_here = (ir: mut IrFn, pos: int, ins: *Ins, dbg_on: bool) -> bool:
+    backend_call_ends_here_views(data(ir.code), data(ir.args), data(ir.vtypes), ir.code.len(), pos, ins, dbg_on)
+
+ba_grow_i64 = (a: mut int[], nv: int) -> *int:
+    if a.len() < nv:
+        if a.cap() < nv: a.reserve(nv)
+        __set_len(a, nv)
+    data(a)
+
+@noinline
+ba_grow = (nv: int):
+    if v_live_storage.len() < nv:
+        if v_live_storage.cap() < nv: v_live_storage.reserve(nv)
+        __set_len(v_live_storage, nv)
+    if vsave_storage.len() < nv:
+        if vsave_storage.cap() < nv: vsave_storage.reserve(nv)
+        __set_len(vsave_storage, nv)
+    v_live = data(v_live_storage)
+    vloc = ba_grow_i64(vloc_storage, nv)
+    vcval = ba_grow_i64(vcval_storage, nv)
+    vslot = ba_grow_i64(vslot_storage, nv)
+    vsoff = ba_grow_i64(vsoff_storage, nv)
+    vgkind = ba_grow_i64(vgkind_storage, nv)
+    vgoff = ba_grow_i64(vgoff_storage, nv)
+    vsave = data(vsave_storage)
 
 backend_analyze = (ir: mut IrFn, ir_operand_layout: mut int[], dbg_on: bool, target_wasm: bool, ra_stat: bool, plan_starts: bool = false):
     x_has_foreign_call = false
     x_has_narrow32 = false
     x_has_overflow_pair = false
+    x_has_slot = false
+    x_has_any_call = false
+    if ba_tail_dsts.len() > 0: ba_tail_dsts.clear()
     nv = ir.vtypes.len()
-    # Private backend scratch, borrowed until the next analyze. Grow only at a
-    # new high-water mark; no pointer escapes into an IR or output fragment.
-    # O(vregs) initialization, with address/constant payloads written on demand.
-    if v_live_storage.len() < nv: v_live_storage.resize(nv)
-    if vloc_storage.len() < nv: vloc_storage.resize(nv)
-    if vcval_storage.len() < nv: vcval_storage.resize(nv)
-    if vslot_storage.len() < nv: vslot_storage.resize(nv)
-    if vsoff_storage.len() < nv: vsoff_storage.resize(nv)
-    if vgkind_storage.len() < nv: vgkind_storage.resize(nv)
-    if vgoff_storage.len() < nv: vgoff_storage.resize(nv)
-    if vsave_storage.len() < nv: vsave_storage.resize(nv)
-    v_live = data(v_live_storage)
-    vloc = data(vloc_storage)
-    vcval = data(vcval_storage)
-    vslot = data(vslot_storage)
-    vsoff = data(vsoff_storage)
-    vgkind = data(vgkind_storage)
-    vgoff = data(vgoff_storage)
-    vsave = data(vsave_storage)
-    loop v in [0..nv):
-        v_live[v] = IrUsePlan()
-        vloc[v] = LOC_SPILL
-        vsave[v] = false
-    call_pos.clear()
-    call_w.clear()
-    loop_s.clear()
-    loop_e.clear()
-    kinds: int[]
-    starts: int[]
-    loop p in [0..ir.nparams):
-        v_live[p].first = 0
-        v_live[p].last = 0
-        v_live[p].ndef = 1
-    loop v in [0..ir.kval.len()):
-        if int(ir.vtypes[v]) == 3:
-            v_live[v].ndef = 1
-            vloc[v] = LOC_CONST
-            vcval[v] = ir.kval[v]
+    nc = ir.code.len()
+    np = ir.nparams
+    nk = ir.kval.len()
+    types = data(ir.vtypes)
+    constants = data(ir.kval)
+    if v_live_storage.len() < nv: ba_grow(nv)
+    vl = v_live
+    loc_arr = vloc
+    cval_arr = vcval
+    slot_arr = vslot
+    soff_arr = vsoff
+    gkind_arr = vgkind
+    goff_arr = vgoff
+    save_arr = vsave
+    if nv > 0:
+        mem_set(vl as *u8, 0, nv * size_of(IrUsePlan))
+        mem_set(loc_arr as *u8, 255, nv * 8)
+        mem_set(save_arr as *u8, 0, nv)
+    if call_pos.len() > 0: call_pos.clear()
+    if call_w.len() > 0: call_w.clear()
+    if loop_s.len() > 0: loop_s.clear()
+    if loop_e.len() > 0: loop_e.clear()
+    if ba_bcap < 64:
+        ba_kinds.resize(64)
+        ba_starts.resize(64)
+        ba_bk_p = data(ba_kinds)
+        ba_bs_p = data(ba_starts)
+        ba_bcap = ba_kinds.len()
+    bk = ba_bk_p
+    bs = ba_bs_p
+    bcap = ba_bcap
+    bsp = 0
+    loop p in [0..np):
+        vl[p].first = 0
+        vl[p].last = 0
+        vl[p].ndef = 1
+    loop v in [0..nk):
+        if int(types[v]) == 3:
+            vl[v].ndef = 1
+            vl[v].last = -1
+            loc_arr[v] = LOC_CONST
+            cval_arr[v] = constants[v]
     depth = 0
     cold_depth = 0
+    cond_depth = 0
     w = 1
     instructions = data(ir.code)
     arguments = data(ir.args)
     layouts = data(ir_operand_layout)
     features = 0
-    # One indexed scan of the final instructions and their argument spans:
-    # O(instructions + operands). No shared decoder state or per-op arrays.
-    loop pos in [0..ir.code.len()):
-        ins = &instructions[pos]
-        if ins.op == .callc: x_has_foreign_call = true
-        mode = layouts[int(ins.op)]
+    has_slots = ir.slot_size.len() > 0
+    ins = instructions
+    loop pos in [0..nc):
+        pos32 = i32(pos)
+        mode = layouts[int((ins as *u32)[0])]
         features |= mode
-        uses = &ins.a
+        uses = (ins as *i32) + 3
         nuses = mode & 3
-        extra = -1
-        if mode & IR_ARGS != 0:
-            uses = arguments + int(ins.a)
-            nuses = int(ins.b)
-            if mode & IR_INDIRECT != 0: extra = int(ins.c)
-        else if mode & IR_STORE != 0:
-            if mode & IR_INDEX == 0 or int(ins.c) & 128 != 0: extra = int(ins.dst)
-        else if mode & IR_INDEX != 0:
-            if int(ins.c) & 128 != 0: nuses = 2
-        else if mode & IR_RETURN != 0 and ins.a < 0: nuses = 0
-        loop operand_index in [0..nuses):
-            live = &v_live[int(uses[operand_index])]
-            if pos < live.first: live.first = pos
-            live.last = pos
+        if mode & (IR_ARGS | IR_STORE | IR_INDEX | IR_RETURN) != 0:
+            extra = -1
+            if mode & IR_ARGS != 0:
+                uses = arguments + int(ins.a)
+                nuses = int(ins.b)
+                if mode & IR_INDIRECT != 0: extra = int(ins.c)
+            else if mode & IR_STORE != 0:
+                if mode & IR_INDEX == 0 or int(ins.c) & 128 != 0: extra = int(ins.dst)
+            else if mode & IR_INDEX != 0:
+                if int(ins.c) & 128 != 0: nuses = 2
+            else if ins.a < 0: nuses = 0
+            if extra >= 0:
+                live = vl + extra
+                if (live as *int)[1] == 0: live.first = pos32
+                live.last = pos32
+                live.nuse += 1
+                live.weight += w
+        if nuses == 1:
+            live = vl + int(uses[0])
+            if (live as *int)[1] == 0: live.first = pos32
+            live.last = pos32
             live.nuse += 1
             live.weight += w
-        if extra >= 0:
-            live = &v_live[extra]
-            if pos < live.first: live.first = pos
-            live.last = pos
-            live.nuse += 1
-            live.weight += w
-        d = -1
-        if mode & IR_DEF != 0: d = int(ins.dst)
-        if d >= 0:
-            live = &v_live[d]
-            if pos < live.first: live.first = pos
-            live.last = pos
-            live.ndef += 1
-            live.weight += w
-            if live.ndef == 1:
+        else if nuses == 2:
+            l0 = vl + int(uses[0])
+            if (l0 as *int)[1] == 0: l0.first = pos32
+            l0.last = pos32
+            l0.nuse += 1
+            l0.weight += w
+            l1 = vl + int(uses[1])
+            if (l1 as *int)[1] == 0: l1.first = pos32
+            l1.last = pos32
+            l1.nuse += 1
+            l1.weight += w
+        else if nuses > 2:
+            loop operand_index in [0..nuses):
+                live = vl + int(uses[operand_index])
+                if (live as *int)[1] == 0: live.first = pos32
+                live.last = pos32
+                live.nuse += 1
+                live.weight += w
+        if mode & IR_DEF != 0:
+            d = int(ins.dst)
+            if d >= 0:
+                live = vl + d
+                if (live as *int)[1] == 0: live.first = pos32
+                live.last = pos32
+                nd = live.ndef + 1
+                live.ndef = nd
+                live.weight += w
+                if nd == 1 and mode & IR_LOC_DEF != 0:
+                    op = ins.op
+                    if op == .add:
+                        if x_has_slot:
+                            a = int(ins.a)
+                            if loc_arr[a] == LOC_SLOT:
+                                b = int(ins.b)
+                                if loc_arr[b] == LOC_CONST and vl[a].ndef == 1 and vl[b].ndef == 1:
+                                    loc_arr[d] = LOC_SLOT
+                                    slot_arr[d] = slot_arr[a]
+                                    soff_arr[d] = soff_arr[a] + cval_arr[b]
+                    else if op == .slot:
+                        x_has_slot = true
+                        loc_arr[d] = LOC_SLOT
+                        slot_arr[d] = int(ins.a)
+                        soff_arr[d] = 0
+                    else if op == .gaddr or op == .daddr:
+                        loc_arr[d] = LOC_GLOBAL
+                        goff_arr[d] = ins.imm
+                        gkind_arr[d] = if op == .gaddr: 1 else: 0
+                    else if op == .iconst:
+                        if ins.imm >= -2147483648 and ins.imm <= 2147483647:
+                            loc_arr[d] = LOC_CONST
+                            cval_arr[d] = ins.imm
+                    else if op == .fconst:
+                        loc_arr[d] = LOC_FCONST
+                        cval_arr[d] = ins.imm
+        if mode & (IR_CALL | IR_BA_CTRL) != 0:
+            if mode & IR_CALL != 0:
                 op = ins.op
-                if op == .iconst and (ins.imm >= -2147483648 and ins.imm <= 2147483647):
-                    vloc[d] = LOC_CONST
-                    vcval[d] = ins.imm
-                else if op == .fconst:
-                    vloc[d] = LOC_FCONST
-                    vcval[d] = ins.imm
-                else if op == .slot:
-                    vloc[d] = LOC_SLOT
-                    vslot[d] = int(ins.a)
-                    vsoff[d] = 0
-                else if op == .gaddr or op == .daddr:
-                    vloc[d] = LOC_GLOBAL
-                    vgoff[d] = int(ins.imm)
-                    vgkind[d] = if op == .gaddr: 1 else: 0
-                else if op == .add and vloc[int(ins.a)] == LOC_SLOT and vloc[int(ins.b)] == LOC_CONST and v_live[int(ins.a)].ndef == 1 and v_live[int(ins.b)].ndef == 1:
-                    vloc[d] = LOC_SLOT
-                    vslot[d] = vslot[int(ins.a)]
-                    vsoff[d] = vsoff[int(ins.a)] + vcval[int(ins.b)]
-        if ins.op == .zeroslots:
-            loop k in [0..int(ins.b)):
-                item = int(ir.args[int(ins.a) + k])
-                if item & 1 == 1:
-                    v = item >> 1
-                    live = &v_live[v]
-                    if pos < live.first: live.first = pos
-                    live.last = pos
-                    live.ndef += 2
-        if mode & IR_CALL != 0 and backend_call_like(ins, dbg_on, target_wasm) and not backend_call_ends_here(ir, pos, ins, dbg_on):
-            call_pos.push(pos)
-            # (a call on a rarely taken path counts as if outside any loop)
-            if ins.op == .call and ins.c == 2: call_w.push(1)
-            else: call_w.push(w)
-        if ins.op == .block or ins.op == .loop or ins.op == .if_:
-            kinds.push(int(ins.op))
-            if ins.op == .loop:
-                starts.push(loop_s.len())
-                loop_s.push(pos)
-                loop_e.push(0)
-                depth += 1
-                if ins.imm != 0: cold_depth += 1
-                w = if cold_depth > 0: 1 else: 1 << (3 * min(depth, 6))
-            else: starts.push(-1)
-        else if ins.op == .end:
-            k = kinds.pop()
-            s = starts.pop()
-            if k == int(Op.loop):
-                depth -= 1
-                if instructions[loop_s[s]].imm != 0: cold_depth -= 1
-                w = if cold_depth > 0: 1 else: 1 << (3 * min(depth, 6))
-                loop_e[s] = pos
+                is_call = false
+                real_call = false
+                if op == .call:
+                    cc = ins.c
+                    is_call = not (cc == 1 and not dbg_on) and not (cc >= 3 and cc <= 5 and not target_wasm)
+                    real_call = true
+                    if not is_call: x_has_any_call = true
+                else if op == .copy or op == .zero:
+                    is_call = ins.imm > INLINE_COPY
+                else if op == .intr:
+                    is_call = ins.imm >= 2
+                    real_call = is_call
+                else:
+                    is_call = true
+                    real_call = op == .calli or op == .callc or op == .syscall
+                    if op == .callc: x_has_foreign_call = true
+                if is_call:
+                    ends = false
+                    if not dbg_on and pos + 1 < nc and (op == .call or op == .calli or (op == .callc and ins.imm >= 0)):
+                        nxt = ins + 1
+                        ep = pos + 1
+                        loop ep < nc and (instructions[ep].op == .end or instructions[ep].op == .nop): ep += 1
+                        if plan_starts and ep < nc and instructions[ep].op == .ret:
+                            ra = int(instructions[ep].a)
+                            if ra < 0 or (ins.dst >= 0 and ra == int(ins.dst)) or int(types[ra]) == 3:
+                                ends = true
+                        else if plan_starts and ep < nc and instructions[ep].op == .trap:
+                            ends = true
+                        else if ins.dst >= 0 and nxt.op == .call and nxt.c == 1:
+                            ends = true
+                            na = int(nxt.a)
+                            nb = int(nxt.b)
+                            dst0 = int(ins.dst)
+                            loop k in [0..nb):
+                                v = int(arguments[na + k])
+                                if v != dst0 and int(types[v]) != 3: ends = false; break
+                    if real_call: x_has_any_call = true
+                    if not ends:
+                        call_pos.push(pos)
+                        if op == .call and ins.c == 2: call_w.push(1)
+                        else: call_w.push(w)
+            if mode & IR_BA_CTRL != 0:
+                op = ins.op
+                if op == .block or op == .loop or op == .if_:
+                    if bsp >= bcap:
+                        bcap = bcap * 2
+                        ba_kinds.resize(bcap)
+                        ba_starts.resize(bcap)
+                        ba_bk_p = data(ba_kinds)
+                        ba_bs_p = data(ba_starts)
+                        ba_bcap = bcap
+                        bk = ba_bk_p
+                        bs = ba_bs_p
+                    is_lp = op == .loop
+                    bk[bsp] = is_lp
+                    if is_lp:
+                        bs[bsp] = loop_s.len()
+                        loop_s.push(pos)
+                        loop_e.push(0)
+                        depth += 1
+                        if ins.imm != 0: cold_depth += 1
+                        base_w = if cold_depth > 0: 1 else: 1 << (3 * min(depth, 6))
+                        sh = min(cond_depth, 2)
+                        w = if base_w >> sh > 1: base_w >> sh else: 1
+                    else if op == .if_ and depth > 0:
+                        bs[bsp] = -2
+                        cond_depth += 1
+                        base_w = if cold_depth > 0: 1 else: 1 << (3 * min(depth, 6))
+                        sh = min(cond_depth, 2)
+                        w = if base_w >> sh > 1: base_w >> sh else: 1
+                    else: bs[bsp] = -1
+                    bsp += 1
+                else if op == .end:
+                    bsp -= 1
+                    if bk[bsp]:
+                        s = bs[bsp]
+                        depth -= 1
+                        if instructions[loop_s[s]].imm != 0: cold_depth -= 1
+                        base_w = if cold_depth > 0: 1 else: 1 << (3 * min(depth, 6))
+                        sh = min(cond_depth, 2)
+                        w = if base_w >> sh > 1: base_w >> sh else: 1
+                        loop_e[s] = pos
+                    else if bs[bsp] == -2:
+                        cond_depth -= 1
+                        base_w = if cold_depth > 0: 1 else: 1 << (3 * min(depth, 6))
+                        sh = min(cond_depth, 2)
+                        w = if base_w >> sh > 1: base_w >> sh else: 1
+                else if (op == .brif and ins.imm == 0) or op == .brtable:
+                    if depth > 0 and bsp > 0 and bs[bsp - 1] == -1:
+                        bs[bsp - 1] = -2
+                        cond_depth += 1
+                        base_w = if cold_depth > 0: 1 else: 1 << (3 * min(depth, 6))
+                        sh = min(cond_depth, 2)
+                        w = if base_w >> sh > 1: base_w >> sh else: 1
+                else if op == .callc:
+                    x_has_foreign_call = true
+                else if op == .zeroslots:
+                    x_has_slot = true
+                    loop k in [0..int(ins.b)):
+                        item = int(arguments[int(ins.a) + k])
+                        if item & 1 == 1:
+                            v = item >> 1
+                            live = vl + v
+                            if (live as *int)[1] == 0: live.first = pos32
+                            live.last = pos32
+                            live.ndef += 2
+        ins = ins + 1
     x_has_narrow32 = features & IR_NARROW32 != 0
     x_has_overflow_pair = features & IR_OVERFLOW != 0
-    # (dewy build -g: each variable lives on to the end of the function, where debuggers can
-    # read it, and not in a register a call changes: dbg_keep)
+    if features & IR_CHECKED != 0: x_has_any_call = true
+    else if not x_has_any_call and ba_tail_dsts.len() > 0:
+        loop di in [0..ba_tail_dsts.len()):
+            if vl[ba_tail_dsts[di]].nuse != 1: x_has_any_call = true; break
     if dbg_on:
         dbg_keep = fill(false, nv)
         loop v in backend_debug_vregs:
-            if v < 0 or v >= nv or v_live[v].last < 0: continue
+            if v < 0 or v >= nv or (int(vl[v].nuse) | int(vl[v].ndef)) == 0 or vl[v].last < 0: continue
             dbg_keep[v] = true
-            v_live[v].last = ir.code.len()
-            v_live[v].nuse += 1
-    # Publish the demanded allocation index while finalizing use summaries,
-    # preserving the old vreg order. ARM64/no-allocation callers need no index.
+            vl[v].last = i32(nc)
+            vl[v].nuse += 1
+    starts = v_start
     if plan_starts:
-        n = ir.code.len() + 1
-        if v_start_storage.len() < n: v_start_storage.resize(n)
-        v_start = data(v_start_storage)
-        loop pos in [0..n): v_start[pos] = -1
-    # Loop summaries are already in start order. Complexity is
-    # O(vregs * log(loops) + visited loop summaries); count actual revisits.
+        n = nc + 1
+        if v_start_storage.len() < n:
+            if v_start_storage.cap() < n: v_start_storage.reserve(n)
+            __set_len(v_start_storage, n)
+        starts = data(v_start_storage)
+        v_start = starts
+        mem_set(starts as *u8, 255, n * 8)
     nl = loop_s.len()
-    loop v in [0..nv):
-        live = &v_live[v]
-        loc = vloc[v]
-        # A vreg defined more than once cannot stay a constant/address.
-        if live.ndef != 1:
-            loc = LOC_SPILL
-            vloc[v] = loc
-        if plan_starts and loc == LOC_SPILL:
-            if live.last < 0 or (live.nuse == 0 and v >= ir.nparams): vloc[v] = LOC_NONE
+    if nl == 0:
+        if plan_starts:
+            loop v in [np..nv):
+                live = vl + v
+                if (live as *int)[1] == 0:
+                    live.last = -1
+                    loc_arr[v] = LOC_NONE
+                    continue
+                loc = loc_arr[v]
+                if live.ndef != 1:
+                    loc = LOC_SPILL
+                    loc_arr[v] = loc
+                if loc == LOC_SPILL:
+                    if live.last < 0 or live.nuse == 0: loc_arr[v] = LOC_NONE
+                    else:
+                        f = int(live.first)
+                        live.next_start = i32(starts[f])
+                        starts[f] = v
+            pk = np - 1
+            loop pk >= 0:
+                live = vl + pk
+                if (live as *int)[1] == 0:
+                    live.last = -1
+                    loc_arr[pk] = LOC_NONE
+                else:
+                    loc = loc_arr[pk]
+                    if live.ndef != 1:
+                        loc = LOC_SPILL
+                        loc_arr[pk] = loc
+                    if loc == LOC_SPILL:
+                        if live.last < 0: loc_arr[pk] = LOC_NONE
+                        else:
+                            live.next_start = i32(starts[0])
+                            starts[0] = pk
+                pk -= 1
+        else:
+            loop v in [0..nv):
+                if ((vl + v) as *int)[1] == 0: vl[v].last = -1
+                if vl[v].ndef != 1: loc_arr[v] = LOC_SPILL
+        return
+    loop_starts = data(loop_s)
+    loop_ends = data(loop_e)
+    lfirst = loop_starts[0]
+    llast = loop_starts[nl - 1]
+    if plan_starts:
+        loop v in [np..nv):
+            live = vl + v
+            if (live as *int)[1] == 0:
+                live.last = -1
+                loc_arr[v] = LOC_NONE
+                continue
+            loc = loc_arr[v]
+            if live.ndef != 1:
+                loc = LOC_SPILL
+                loc_arr[v] = loc
+            if loc != LOC_SPILL: continue
+            vlast = int(live.last)
+            if vlast < 0 or live.nuse == 0:
+                loc_arr[v] = LOC_NONE
+                continue
+            vf = int(live.first)
+            live.next_start = i32(starts[vf])
+            starts[vf] = v
+            if vlast >= lfirst:
+                if vf < llast:
+                    lo = 0
+                    if nl > 1:
+                        hi = nl
+                        loop lo < hi:
+                            mid = (lo + hi) >> 1
+                            if loop_starts[mid] <= vf: lo = mid + 1
+                            else: hi = mid
+                    i = lo
+                    loop i < nl and loop_starts[i] <= vlast:
+                        if ra_stat: ra_loop_visits += 1
+                        if loop_ends[i] > vlast: vlast = loop_ends[i]
+                        i += 1
+                    live.last = i32(vlast)
+        pk = np - 1
+        loop pk >= 0:
+            live = vl + pk
+            if (live as *int)[1] == 0:
+                live.last = -1
+                loc_arr[pk] = LOC_NONE
             else:
-                live.next_start = v_start[live.first]
-                v_start[live.first] = v
-    if nl == 0: return
+                loc = loc_arr[pk]
+                if live.ndef != 1:
+                    loc = LOC_SPILL
+                    loc_arr[pk] = loc
+                if loc == LOC_SPILL:
+                    vlast = int(live.last)
+                    if vlast < 0: loc_arr[pk] = LOC_NONE
+                    else:
+                        live.next_start = i32(starts[0])
+                        starts[0] = pk
+                        if vlast >= lfirst:
+                            i = 0
+                            loop i < nl and loop_starts[i] <= vlast:
+                                if ra_stat: ra_loop_visits += 1
+                                if loop_ends[i] > vlast: vlast = loop_ends[i]
+                                i += 1
+                            live.last = i32(vlast)
+            pk -= 1
+        return
     loop v in [0..nv):
-        if v_live[v].last < 0: continue
-        f = if v < ir.nparams: -1 else: v_live[v].first
-        # first loop starting after f
-        lo = 0
-        hi = nl
-        loop lo < hi:
-            mid = (lo + hi) / 2
-            if loop_s[mid] <= f: lo = mid + 1
-            else: hi = mid
-        i = lo
-        loop i < nl and loop_s[i] <= v_live[v].last:
-            if ra_stat: ra_loop_visits += 1
-            if loop_e[i] > v_live[v].last: v_live[v].last = loop_e[i]
-            i += 1
-
+        live = vl + v
+        if (live as *int)[1] == 0:
+            live.last = -1
+            loc_arr[v] = LOC_SPILL
+            continue
+        if live.ndef != 1: loc_arr[v] = LOC_SPILL
+        vlast = int(live.last)
+        if vlast >= lfirst:
+            f = if v < np: -1 else: int(live.first)
+            if f < llast:
+                lo = 0
+                if nl > 1:
+                    hi = nl
+                    loop lo < hi:
+                        mid = (lo + hi) >> 1
+                        if loop_starts[mid] <= f: lo = mid + 1
+                        else: hi = mid
+                i = lo
+                loop i < nl and loop_starts[i] <= vlast:
+                    if ra_stat: ra_loop_visits += 1
+                    if loop_ends[i] > vlast: vlast = loop_ends[i]
+                    i += 1
+                live.last = i32(vlast)

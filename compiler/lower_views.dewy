@@ -7,7 +7,7 @@ from p"lower_scalars.dewy" import (all_const)
 from p"lower.jo" import (BOX_HDR LF_ELEMENTVIEW LF_HELDVIEW VC_AGG VC_INT comprehension_push_index cur_fn fixed_paths held_views hv_bad hv_cand hv_given hv_lambda opt_release scope_locals uniq_globals uniq_locals)
 from p"expr.jo" import (IN)
 from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_PARAM LF_SHARED fns global_ids globals init_fns locals modules)
-from p"ast.jo" import (nkids2 NF_ALIASDECL NF_COMPREHENSION NF_GLOBAL NF_INBOUNDS NF_INCLUSIVE NF_MUT NF_STEP add_flag clear_flag has_flag kid kid2 kids mk nkids nodes set_list)
+from p"ast.jo" import (NF_ALIASDECL NF_COMPREHENSION NF_GLOBAL NF_INBOUNDS NF_INCLUSIVE NF_MUT NF_STEP add_flag clear_flag has_flag kid kid2 kids lists mk nkids nkids2 nodes set_list)
 from p"types.jo" import (TF_BOXED)
 from p"types.jo" import (T_INT T_MATH_INT is_int prune telem tkind type_eq types)
 from p"type_ops.dewy" import (is_managed type_has_fn)
@@ -158,47 +158,67 @@ hv_spoil=(p:LVWord):>void=>$unsafe {
 }
 hv_scan=(n:LVWord):>void=>$unsafe {
     if n <=? 0 {return}
-    let k=nodes.ptr[n].kind
+    let np=nodes.ptr + n
+    let k=np[0].kind
+    if k =? 'ident' or k =? 'int_lit' or k =? 'bool_lit' or k =? 'float_lit' or k =? 'none_lit' or k =? 'null_lit' or k =? 'dotname' or k =? 'hole' or k =? 'break_' or k =? 'continue_' {return}
     if k =? 'lambda' {
         hv_lambda=true
         return
     }
     if k =? 'vardecl' {
-        if nodes.ptr[n].nlist >? 0 {
+        if np[0].nlist >? 0 {
             loop i in [0..nkids(n)) {hv_spoil(kid(n i));}
         }
         else if not has_flag(n NF_GLOBAL) {
-            let l:LVWord=LVWord(nodes.ptr[n].sym)
+            let l:LVWord=LVWord(np[0].sym)
             # param_view_decl already proved this synthetic Dewy binding is
             # the borrowed parameter itself. It is a root, not a candidate
             # local whose LF_PARAM flag would disqualify every walk from it.
-            if nodes.ptr[n].aux2 not=? 1 or LVWord(locals.ptr[l].flags) & LF_PARAM =? 0 {hv_give(l LVWord(nodes.ptr[n].b));}
+            if np[0].aux2 not=? 1 or LVWord(locals.ptr[l].flags) & LF_PARAM =? 0 {hv_give(l LVWord(np[0].b));}
         }
     }
-    else if k =? 'iflet' or k =? 'match_' or (k =? 'while_' and nodes.ptr[n].aux =? 1) {hv_give(LVWord(nodes.ptr[n].sym) LVWord(nodes.ptr[n].a));}
+    else if k =? 'iflet' or k =? 'match_' or (k =? 'while_' and np[0].aux =? 1) {hv_give(LVWord(np[0].sym) LVWord(np[0].a));}
     else if k =? 'assign' {
-        let a:LVWord=LVWord(nodes.ptr[n].a)
-        if nodes.ptr[n].aux =? 1 {
+        let a:LVWord=LVWord(np[0].a)
+        if np[0].aux =? 1 {
             loop i in [0..nkids(a)) {hv_spoil(kid(a i));}
         }
-        else if nodes.ptr[n].aux =? 0 and nodes.ptr[n].op =? int32<overflow='wrap'>(47) and nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32<overflow='wrap'>(1) and LVWord(locals.ptr[LVWord(nodes.ptr[a].sym)].flags) & LF_ALIAS =? 0 {hv_give(LVWord(nodes.ptr[a].sym) LVWord(nodes.ptr[n].b));}
+        else if np[0].aux =? 0 and np[0].op =? int32<overflow='wrap'>(47) and nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32<overflow='wrap'>(1) and LVWord(locals.ptr[LVWord(nodes.ptr[a].sym)].flags) & LF_ALIAS =? 0 {hv_give(LVWord(nodes.ptr[a].sym) LVWord(np[0].b));}
         else {hv_spoil(a);}
     }
     else if k =? 'intrinsic' and nkids(n) >? 0 {
-        let id=nodes.ptr[n].aux as IN
+        let id=np[0].aux as IN
         if id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.setlen or id =? IN.extend or id =? IN.arrdata {hv_spoil(kid(n 0));}
     }
-    else if k =? 'addr' or (k =? 'cast' or k =? 'conv') and raw_view(n) {hv_spoil(LVWord(nodes.ptr[n].a));}
-    else if k =? 'for_' and has_flag(n NF_MUT) {hv_spoil(LVWord(nodes.ptr[n].a));}
-    let fs=[LVWord(nodes.ptr[n].a) LVWord(nodes.ptr[n].b)]
-    if k not=? 'for_' {fs=[LVWord(nodes.ptr[n].a) LVWord(nodes.ptr[n].b) LVWord(nodes.ptr[n].c) if k =? 'partial' {0} else {LVWord(nodes.ptr[n].d)}]}
-    loop c in fs {hv_scan(c);}
-    loop i in [0..nkids(n)) {
-        let c=kid(n i)
-        if has_flag(c NF_MUT) {hv_spoil(c);}
-        hv_scan(c);
+    else if k =? 'addr' or (k =? 'cast' or k =? 'conv') and raw_view(n) {hv_spoil(LVWord(np[0].a));}
+    else if k =? 'for_' and has_flag(n NF_MUT) {hv_spoil(LVWord(np[0].a));}
+    let ca:LVWord=LVWord(nodes.ptr[n].a)
+    let cb:LVWord=LVWord(nodes.ptr[n].b)
+    if ca >? 0 {hv_scan(ca);}
+    if cb >? 0 {hv_scan(cb);}
+    if k not=? 'for_' {
+        let cc:LVWord=LVWord(nodes.ptr[n].c)
+        if cc >? 0 {hv_scan(cc);}
+        if k not=? 'partial' {
+            let cd:LVWord=LVWord(nodes.ptr[n].d)
+            if cd >? 0 {hv_scan(cd);}
+        }
     }
-    loop i in [0..nkids2(n)) {hv_scan(kid2(n i));}
+    let n1=nkids(n)
+    if n1 >? 0 {
+        loop i in [0..n1) {
+            let c=kid(n i)
+            if has_flag(c NF_MUT) {hv_spoil(c);}
+            if c >? 0 {hv_scan(c);}
+        }
+    }
+    let n2=nkids2(n)
+    if n2 >? 0 {
+        loop i in [0..n2) {
+            let c=kid2(n i)
+            if c >? 0 {hv_scan(c);}
+        }
+    }
 }
 hv_part=(p:LVWord):>bool=>$unsafe {
     let k=nodes.ptr[p].kind
@@ -371,66 +391,157 @@ ug_fresh=(n:LVWord t:LVWord):>bool=>$unsafe {
     if nodes.ptr[n].kind not=? 'array' {return false}
     return nodes.ptr[n].b not=? 0 or nkids(n) =? 0 or not all_const(n LVWord(types.ptr[prune(t)].elem))
 }
-ug_scan=(n:LVWord ctx:LVWord):>void=>$unsafe {
+let ug_rem:LVWord=-1
+let ug_stack:array<int64>=[]
+ug_scan=(root:LVWord root_ctx:LVWord):>void=>$unsafe {
     # 0: value can escape, 1: only its storage is inspected/changed,
     # -1: an address or mutable argument can expose the containing storage.
-    if n =? 0 {return}
-    let k=nodes.ptr[n].kind
-    if k =? 'lambda' {return}
-    if k =? 'ident' {
-        if nodes.ptr[n].aux =? int32<overflow='wrap'>(2) {
-            let g:LVWord=LVWord(nodes.ptr[n].sym)
-            if ctx not=? 1 and g <? uniq_globals.length {uniq_globals.ptr[g] = false;}
+    if root =? 0 or ug_rem =? 0 {return}
+    if ug_stack.length <? 256 {ug_stack.resize(256)}
+    let st=ug_stack.ptr
+    let scap=ug_stack.length
+    let ns=nodes.ptr
+    let lp=lists.ptr
+    let locp=locals.ptr
+    let ugp=uniq_globals.ptr
+    let uglen:LVWord=uniq_globals.length
+    let sp:LVWord=1
+    st[0]=int64((root << 2) | (root_ctx + 1))
+    loop sp >? 0 and ug_rem not=? 0 {
+        sp -= 1
+        let item:LVWord=st[sp]
+        let n:LVWord=item >> 2
+        let ctx:LVWord=(item & 3) - 1
+        let np=ns + n
+        let k=np[0].kind
+        match k {
+            <'lambda'|'int_lit'|'float_lit'|'bool_lit'|'none_lit'|'null_lit'|'break_'|'continue_'|'dotname'> => {continue}
+            <'str_lit'> => {if np[0].aux =? 0 {continue}}
+            <'ident'> => {
+                if np[0].aux =? int32<overflow='wrap'>(2) {
+                    let g:LVWord=LVWord(np[0].sym)
+                    if ctx not=? 1 and g <? uglen and ugp[g] {
+                        ugp[g] = false
+                        if ug_rem >? 0 {ug_rem -= 1}
+                    }
+                }
+                else if np[0].aux =? int32<overflow='wrap'>(1) {
+                    let sym:LVWord=LVWord(np[0].sym)
+                    if (LVWord(locp[sym].flags) & LF_ALIAS) not=? 0 {
+                        let g=alias_global(sym)
+                        if g >=? 0 and g <? uglen and ugp[g] {
+                            ugp[g] = false
+                            if ug_rem >? 0 {ug_rem -= 1}
+                        }
+                    }
+                }
+                continue
+            }
+            <'index'> => {
+                if sp + 2 >? scap {scap=(sp + 2) * 2; ug_stack.resize(scap); st=ug_stack.ptr}
+                let b:LVWord=LVWord(np[0].b)
+                if b not=? 0 {st[sp]=int64((b << 2) | 1); sp += 1}
+                let a:LVWord=LVWord(np[0].a)
+                if a not=? 0 {
+                    let ac:LVWord=if ctx =? -1 {0} else if np[0].aux =? 1 {1} else {2}
+                    st[sp]=int64((a << 2) | ac); sp += 1
+                }
+                continue
+            }
+            <'addr'> => {
+                let a:LVWord=LVWord(np[0].a)
+                if a not=? 0 {
+                    if sp + 1 >? scap {scap=(sp + 1) * 2; ug_stack.resize(scap); st=ug_stack.ptr}
+                    st[sp]=int64(a << 2); sp += 1
+                }
+                continue
+            }
+            <'assign'> => {
+                if sp + 2 >? scap {scap=(sp + 2) * 2; ug_stack.resize(scap); st=ug_stack.ptr}
+                let a:LVWord=LVWord(np[0].a)
+                let b:LVWord=LVWord(np[0].b)
+                if b not=? 0 {st[sp]=int64((b << 2) | 1); sp += 1}
+                if a not=? 0 {
+                    let ac:LVWord=if ns[a].kind =? 'ident' and ns[a].aux =? int32<overflow='wrap'>(2) and tkind(ntype(a)) =? 'array' and ug_fresh(b ntype(a)) {2} else {1}
+                    st[sp]=int64((a << 2) | ac); sp += 1
+                }
+                continue
+            }
+            <'vardecl'> => {
+                if (LVWord(np[0].flags) & NF_ALIASDECL) not=? 0 {
+                    let b:LVWord=LVWord(np[0].b)
+                    if b not=? 0 {
+                        if sp + 1 >? scap {scap=(sp + 1) * 2; ug_stack.resize(scap); st=ug_stack.ptr}
+                        st[sp]=int64(b << 2); sp += 1
+                    }
+                    continue
+                }
+            }
+            <'intrinsic'> => {
+                let id=np[0].aux as IN
+                let nk:LVWord=LVWord(np[0].nlist)
+                if nk >? 0 and (id =? IN.len or id =? IN.arrcap or id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend) {
+                    if sp + nk >? scap {scap=(sp + nk) * 2; ug_stack.resize(scap); st=ug_stack.ptr}
+                    let base:LVWord=LVWord(np[0].list)
+                    let i:LVWord=nk - 1
+                    loop i >=? 1 {
+                        let arg:LVWord=LVWord(lp[base + i])
+                        if arg not=? 0 {st[sp]=int64((arg << 2) | 1); sp += 1}
+                        i -= 1
+                    }
+                    let arg0:LVWord=LVWord(lp[base])
+                    if arg0 not=? 0 {
+                        let c0:LVWord=if ctx =? -1 {0} else {2}
+                        st[sp]=int64((arg0 << 2) | c0); sp += 1
+                    }
+                    continue
+                }
+            }
+            _ => {}
         }
-        else if nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {
-            let g=alias_global(LVWord(nodes.ptr[n].sym))
-            if g >=? 0 and g <? uniq_globals.length {uniq_globals.ptr[g] = false;}
+        let sub_tag:LVWord=if ctx =? -1 {0} else {1}
+        let nk:LVWord=LVWord(np[0].nlist)
+        let nk2:LVWord=LVWord(np[0].nlist2)
+        if sp + nk + nk2 + 4 >? scap {
+            scap=(sp + nk + nk2 + 4) * 2
+            ug_stack.resize(scap)
+            st=ug_stack.ptr
         }
-        return
-    }
-    if k =? 'index' {
-        ug_scan(LVWord(nodes.ptr[n].a) (if ctx =? -1 {-1} else {if nodes.ptr[n].aux =? 1 {0} else {1}}));
-        ug_scan(LVWord(nodes.ptr[n].b) 0);
-        return
-    }
-    if k =? 'addr' {
-        ug_scan(LVWord(nodes.ptr[n].a) -1);
-        return
-    }
-    if k =? 'assign' {
-        let a:LVWord=LVWord(nodes.ptr[n].a)
-        let b:LVWord=LVWord(nodes.ptr[n].b)
-        if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32<overflow='wrap'>(2) and tkind(ntype(a)) =? 'array' and ug_fresh(b ntype(a)) {
-            ug_scan(a 1);
+        if nk2 >? 0 {
+            let base2:LVWord=LVWord(np[0].list2)
+            let i:LVWord=nk2 - 1
+            loop i >=? 0 {
+                let arg:LVWord=LVWord(lp[base2 + i])
+                if arg not=? 0 {st[sp]=int64((arg << 2) | 1); sp += 1}
+                i -= 1
+            }
         }
-        else {ug_scan(a 0);}
-        ug_scan(b 0);
-        return
-    }
-    if k =? 'vardecl' and has_flag(n NF_ALIASDECL) {
-        ug_scan(LVWord(nodes.ptr[n].b) -1);
-        return
-    }
-    if k =? 'intrinsic' {
-        let id=nodes.ptr[n].aux as IN
-        if nkids(n) >? 0 and (id =? IN.len or id =? IN.arrcap or id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend) {
-            ug_scan(kid(n 0) if ctx =? -1 {-1} else {1});
-            loop i in [1..nkids(n)) {ug_scan(kid(n i) 0);}
-            return
+        if nk >? 0 {
+            let mm=if k =? 'call' or k =? 'pair' {checked_call_mutmask(n)} else {0}
+            let base:LVWord=LVWord(np[0].list)
+            let i:LVWord=nk - 1
+            loop i >=? 0 {
+                let arg:LVWord=LVWord(lp[base + i])
+                if arg not=? 0 {
+                    let tag:LVWord=if ctx =? -1 or (mm & (LVWord(1) << i)) not=? 0 {0} else {1}
+                    st[sp]=int64((arg << 2) | tag); sp += 1
+                }
+                i -= 1
+            }
         }
+        if k not=? 'for_' {
+            if k not=? 'partial' {
+                let d:LVWord=LVWord(np[0].d)
+                if d not=? 0 {st[sp]=int64((d << 2) | sub_tag); sp += 1}
+            }
+            let c:LVWord=LVWord(np[0].c)
+            if c not=? 0 {st[sp]=int64((c << 2) | sub_tag); sp += 1}
+        }
+        let b:LVWord=LVWord(np[0].b)
+        if b not=? 0 {st[sp]=int64((b << 2) | sub_tag); sp += 1}
+        let a:LVWord=LVWord(np[0].a)
+        if a not=? 0 {st[sp]=int64((a << 2) | sub_tag); sp += 1}
     }
-    ug_scan(LVWord(nodes.ptr[n].a) if ctx =? -1 {-1} else {0});
-    ug_scan(LVWord(nodes.ptr[n].b) if ctx =? -1 {-1} else {0});
-    if k not=? 'for_' {
-        ug_scan(LVWord(nodes.ptr[n].c) if ctx =? -1 {-1} else {0});
-        if k not=? 'partial' {ug_scan(LVWord(nodes.ptr[n].d) if ctx =? -1 {-1} else {0});}
-    }
-    let mm=if k =? 'call' or k =? 'pair' {checked_call_mutmask(n)} else {0}
-    loop i in [0..nkids(n)) {
-        let arg=kid(n i)
-        ug_scan(arg if ctx =? -1 or mm & (1 << i) not=? 0 {-1} else {0});
-    }
-    loop i in [0..nkids2(n)) {ug_scan(kid2(n i) 0);}
 }
 find_unique_globals=(closed:bool):>void=>$unsafe {
     uniq_globals.clear();
@@ -438,7 +549,7 @@ find_unique_globals=(closed:bool):>void=>$unsafe {
     # reference prelude globals, so those are excluded from this closed world.
     if not closed {return}
     uniq_globals.resize(globals.length);
-    let any=false
+    ug_rem=0
     loop g in global_ids {
         if globals.ptr[g].state not=? 2 or globals.ptr[g].is_const or modules.ptr[LVWord(globals.ptr[g].mod)].is_prelude {continue}
         let t=prune(LVWord(globals.ptr[g].type))
@@ -446,21 +557,22 @@ find_unique_globals=(closed:bool):>void=>$unsafe {
         if types.ptr[t].kind not=? 'array' or nkids(d) not=? 0 {continue}
         if ug_fresh(LVWord(nodes.ptr[d].b) t) {
             uniq_globals.ptr[g] = true;
-            any=true
+            ug_rem += 1
         }
     }
-    if not any {return}
+    if ug_rem <=? 0 {ug_rem=-1; return}
     # Initializers commonly expose every candidate (for example by passing a
     # global array to a function). Disprove those before walking other bodies.
-    loop fi in init_fns {ug_scan(LVWord(fns.ptr[fi].body) 0);}
-    any=false
-    loop g in global_ids {
-        if uniq_globals.ptr[g] {any=true}
+    loop fi in init_fns {
+        if ug_rem <=? 0 {ug_rem=-1; return}
+        ug_scan(LVWord(fns.ptr[fi].body) 0);
     }
-    if not any {return}
+    if ug_rem <=? 0 {ug_rem=-1; return}
     loop f in fns {
+        if ug_rem <=? 0 {ug_rem=-1; return}
         if f.state =? 2 and not f.no_user_globals {ug_scan(LVWord(f.body) 0);}
     }
+    ug_rem=-1
 }
 is_uniq_array=(e:LVWord):>bool=>$unsafe {
     if nodes.ptr[e].kind not=? 'ident' {return false}

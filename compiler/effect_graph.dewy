@@ -21,7 +21,7 @@ from p"effect_contracts.dewy" import (effect_subst)
 from p"effect_control.dewy" import (effect_prepare)
 from p"facts_forgets.dewy" import (fact_text_sink)
 from p"effect_costs.dewy" import (effect_borrowed_receiver effect_caller_obligation effect_library_summary effect_map_write effect_signature_opaque)
-from p"effect_scan.dewy" import (effect_body_moves_out effect_copy_captures effect_isolation_block effect_own_callback effect_scan_node)
+from p"effect_scan.dewy" import (effect_body_moves_out effect_copy_captures effect_isolation_block effect_own_callback effect_scan_begin effect_scan_node)
 from p"concurrency_waits.dewy" import (concurrency_fn_blocks)
 # Demanded effect graph execution; shared state has one owner in effects.jo.
 GraphWord:type=int64<overflow='wrap'>
@@ -421,6 +421,7 @@ effect_visit=(f:GraphWord):>void=>$unsafe {
             let previous_exact=effect_exact_rep
             effect_exact_rep=f <? exact_effect_owners.length and exact_effect_owners.ptr[f]
             effect_body_moves_out(GraphWord(fns.ptr[f].body));
+            effect_scan_begin(f);
             effect_scan_node(f GraphWord(fns.ptr[f].body));
             effect_exact_rep=previous_exact
         }

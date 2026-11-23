@@ -85,7 +85,7 @@ exact_raw_tree=(n:RawWord):>void=>$unsafe {
         let width=exact_plan_bits(n)
         if width <=? 0 or width >? 256 {return}
     }
-    if n >=? exact_raw_values.length {exact_raw_values.resize(nodes.length)}
+    if n >=? exact_raw_values.length {exact_raw_values.resize(max(max(int64(n + 1) nodes.length) exact_raw_values.length * 2))}
     exact_raw_values[n]|=1
     let k=nodes.ptr[n].kind
     if k =? 'binary' {
@@ -99,7 +99,7 @@ exact_raw_tree=(n:RawWord):>void=>$unsafe {
 }
 exact_effect_representation=(n:RawWord):>void=>$unsafe {
     if n <? exact_raw_values.length and exact_raw_values[n] & 2 not=? 0 {return}
-    if n >=? exact_raw_values.length {exact_raw_values.resize(nodes.length)}
+    if n >=? exact_raw_values.length {exact_raw_values.resize(max(max(int64(n + 1) nodes.length) exact_raw_values.length * 2))}
     exact_raw_values[n]|=2
     let k=nodes.ptr[n].kind
     if k =? 'vardecl' and nodes.ptr[n].sym >? 0 and not has_flag(n NF_GLOBAL) {

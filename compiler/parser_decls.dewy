@@ -177,17 +177,32 @@ parse_type_postfix=(t0:DeclWord):>int64=>$unsafe {
 }
 
 parse_type=():>int64=>$unsafe {
-    if pk() =? 'ident' and pkn(1) =? 'lt' and not space_before(DeclWord(ti) + 1) {
-        let w=tok_src(ti)
-        let hint="a type's arguments go in brackets: `{w}[T]`"
-        if word_in(w ["Array" "List" "Vec" "Vector" "ReadonlyArray" "ArrayList"]) {hint="an array type is `T[]` (`int[]`)"}
-        else if word_in(w ["Map" "Record" "Dictionary" "HashMap" "Dict"]) {hint="a map type is `\{K: V}` (`\{str: int}`)"}
-        else if word_in(w ["Set" "HashSet"]) {hint="a set is a map to bool: `\{str: bool}`"}
-        else if word_in(w ["Promise" "Optional" "Option" "Maybe"]) {hint="a value that may be missing is `T?`"}
-        fatal(p_toks[DeclWord(ti) + 1].pos hint)
+    let tp=p_toks
+    let t0=DeclWord(ti)
+    let k0=tp[t0].kind
+    if k0 =? 'ident' {
+        let k1=tp[t0 + 1].kind
+        if k1 not=? 'dot' and k1 not=? 'lbrack' and k1 not=? 'question' and k1 not=? 'pipe' and k1 not=? 'lt' {
+            let iv=tp[t0].ival
+            if iv not=? id_cfn and iv not=? id_soa {
+                ti=t0 + 1
+                let n=mk('tname' tp[t0].pos)
+                nodes.ptr[n].name=int32<overflow='wrap'>(iv)
+                return n
+            }
+        }
+        if k1 =? 'lt' and not space_before(t0 + 1) {
+            let w=tok_src(t0)
+            let hint="a type's arguments go in brackets: `{w}[T]`"
+            if word_in(w ["Array" "List" "Vec" "Vector" "ReadonlyArray" "ArrayList"]) {hint="an array type is `T[]` (`int[]`)"}
+            else if word_in(w ["Map" "Record" "Dictionary" "HashMap" "Dict"]) {hint="a map type is `\{K: V}` (`\{str: int}`)"}
+            else if word_in(w ["Set" "HashSet"]) {hint="a set is a map to bool: `\{str: bool}`"}
+            else if word_in(w ["Promise" "Optional" "Option" "Maybe"]) {hint="a value that may be missing is `T?`"}
+            fatal(tp[t0 + 1].pos hint)
+        }
     }
     let t=parse_type_postfix(parse_type_primary())
-    if pk() not=? 'pipe' {return t}
+    if tp[ti].kind not=? 'pipe' {return t}
     let u=mk('tunion' nodes.ptr[t].pos)
     let alts:array<int64>=[t]
     loop accept('pipe') {alts.push(parse_type_postfix(parse_type_primary()))}

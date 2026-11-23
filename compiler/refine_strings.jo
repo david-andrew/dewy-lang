@@ -3,17 +3,53 @@ use 'checker_types.dewy'
 use 'checker_services.dewy'
 use 'node_store.dewy'
 
+ref_set_hashes: int[]
+
+ref_str_hash = (s: str) -> int:
+    n = len(s)
+    p = data(s)
+    h = 0x811c9dc5 xor n
+    loop i in [0..n):
+        h = (h xor int(p[i])) * 0x01000193
+    h
+
+ref_set_sig = (values: str[]) -> int:
+    vn = values.len()
+    vp = data(values)
+    x = 0
+    sum = 0
+    loop i in [0..vn):
+        h = ref_str_hash(vp[i])
+        x = x xor h
+        sum = sum + h
+    (x xor (sum * 0x9e3779b1)) xor (vn << 48)
+
 ref_string_set_type = (sets: mut str[][], set_types: mut int[], types: mut TypeInfo[], structs: mut StructInfo[], variants: mut Variant[], host: mut CheckerInternHost, field_count: int, values: str[]) -> int:
     id = 0
+    vn = values.len()
+    vp = data(values)
+    vh = ref_set_sig(values)
+    if ref_set_hashes.len() != sets.len():
+        ref_set_hashes.clear()
+        loop i in [0..sets.len()): ref_set_hashes.push(ref_set_sig(sets[i]))
+    hp = data(ref_set_hashes)
     loop i in [1..sets.len()):
-        if id == 0 and sets[i].len() == values.len():
+        if hp[i] != vh: continue
+        si = sets[i]
+        if si.len() == vn:
+            sp = data(si)
             same = true
-            loop value in values:
-                if not sets[i].contains(value): same = false
-            if same: id = i
+            loop j in [0..vn):
+                if sp[j] != vp[j]: same = false; break
+            if not same:
+                same = true
+                loop j in [0..vn):
+                    if not si.contains(vp[j]): same = false; break
+            if same: id = i; break
     if id == 0:
         sets.push(values)
         set_types.push(0)
+        ref_set_hashes.push(vh)
         id = sets.len() - 1
     if set_types[id] != 0: return set_types[id]
     text = ""

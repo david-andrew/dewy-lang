@@ -1,4 +1,5 @@
 use 'watch_drive.dewy'
+use 'ast.jo'
 use 'settings.jo'
 use 'check.jo'
 use 'checker_program.dewy'
@@ -22,6 +23,8 @@ use 'util.jo'
 
 driver_main = ():
     __copies_min = 0       # (DEWY_COPIES is for the program it runs, not the compiler's own copies)
+    nodes.reserve(4096)
+    lists.reserve(4096)
     a = args()
     if a.len() > 2 and a[1] == "--eager-bodies":
         dc_eager = true

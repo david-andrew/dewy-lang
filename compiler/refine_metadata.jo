@@ -70,10 +70,16 @@ use 'facts_value_queries.dewy'
 use 'facts_index_writes.dewy'
 use 'facts_lengths.dewy'
 
-representation_type = (t0: int) -> int:
+representation_type_slow = (t0: int) -> int:
     t = prune(t0)
-    if types[t].kind == .refined: return prune(int(types[t].elem))
+    tp = data(types)
+    if tp[t].kind == .refined: return prune(int(tp[t].elem))
     t
+representation_type = (t0: int) -> int:
+    tp = data(types)
+    k = tp[t0].kind
+    if k == .refined or (k == .var and t0 != 0 and tp[t0].ref != 0): return representation_type_slow(t0)
+    t0
 # Reads retain opaque storage brands, while numeric refinements keep their
 # existing value representation. This is metadata only, with the same layout.
 refine_read_type = (t0: int) -> int:

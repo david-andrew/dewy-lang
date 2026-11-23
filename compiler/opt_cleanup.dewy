@@ -1,7 +1,7 @@
 $runtime_checks
 
 from p"opt_workspace.dewy" import (
-    opt_args opt_vtypes opt_ir o_dead_first o_dead_limit o_fact_nbr o_fact_scope o_flow o_flow_at o_reg_count
+    opt_allow_cse opt_args opt_has_loops opt_vtypes opt_ir o_dead_first o_dead_limit o_fact_nbr o_fact_scope o_flow o_flow_at o_reg_count
     o_reg_storage o_regs opt_checked_flags opt_decode opt_operands
 )
 from p"ir_types.dewy" import (Op Ins IrFn)
@@ -341,9 +341,21 @@ oc_extreme_select=(out:ptr<Ins> start:int64 n:int64):>int64=>$unsafe {
 # cannot fall through. Branches to loop headers do not reach the loop's end.
 opt_cleanup=(code:ptr<Ins> count:int64):>array<Ins>=>$unsafe {
     let storage:array<Ins>=[]
-    # At most one instruction and one explicit trap per input operation. The
-    # buffer never grows while raw views are live; publication trims its length.
-    storage.resize((OptWord(count) * OptWord(int64(2))))
+    storage.resize(count)
+    opt_cleanup_buf(@storage code count)
+    storage
+}
+
+opt_cleanup_ir=(code:ptr<Ins> count:int64):>void=>$unsafe {
+    if opt_ir[0].code.length <? count {
+        opt_ir[0].code.resize(count)
+    }
+    opt_cleanup_buf(@opt_ir[0].code code count)
+}
+
+opt_cleanup_buf=(@storage:array<Ins> code:ptr<Ins> count:int64):>void=>$unsafe {
+    if storage.length <? count {storage.resize(count)}
+    let cap:OptWord=storage.length
     let out=storage.ptr
     let used:OptWord=0
     let dead_range:OptWord=0
@@ -351,6 +363,8 @@ opt_cleanup=(code:ptr<Ins> count:int64):>array<Ins>=>$unsafe {
     let dead_first=o_dead_first.ptr
     let dead_limit=o_dead_limit.ptr
     let next_dead=(if (dead_count >? 0) {dead_first[0]} else {count})
+    let allow_select=opt_allow_cse or opt_has_loops
+    let dec=opt_decode
     let input_pos:OptWord=0
     loop (input_pos <? count) {
         if (input_pos =? next_dead) {
@@ -362,8 +376,7 @@ opt_cleanup=(code:ptr<Ins> count:int64):>array<Ins>=>$unsafe {
         let index=input_pos
         let ins=(code + index)
         input_pos+=1
-        let op=ins[0].op
-        let control=(((opt_decode[oc_tag(ins)] >> 20)) & 15)
+        let control=(((dec[oc_tag(ins)] >> 20)) & 15)
         if (((control =? 0) or (control =? 15)) or (((control =? 12) and (ins[0].c not=? 1)))) {
             out[used]=ins[0]
             used+=1
@@ -372,19 +385,20 @@ opt_cleanup=(code:ptr<Ins> count:int64):>array<Ins>=>$unsafe {
         if (control =? 1) {
             continue
         }
+        let op=ins[0].op
         let top:OptWord=(- 1)
         if (op =? 'end') {
             top=int64(o_flow_at[index])
         }
         if ((op =? 'end') and (used >? 0)) {
-            if (o_flow[top].kind =? 'block') {
+            if allow_select and (o_flow[top].kind =? 'block') {
                 let selected=oc_if_select(out o_flow[top].start used)
                 if (selected >=? 0) {
                     used=selected
                     continue
                 }
             }
-            if out[used - 1].op =? 'mov' and ((o_flow[top].kind =? 'block') or (o_flow[top].kind =? 'if_')) {
+            if allow_select and out[used - 1].op =? 'mov' and ((o_flow[top].kind =? 'block') or (o_flow[top].kind =? 'if_')) {
                 let copied=oc_extreme_select(out o_flow[top].start used)
                 if (copied >=? 0) {
                     used=copied
@@ -497,18 +511,27 @@ opt_cleanup=(code:ptr<Ins> count:int64):>array<Ins>=>$unsafe {
                 continue
             }
         }
+        if used >=? cap {
+            cap=(OptWord(used) + OptWord(int64(16)))
+            storage.resize(cap)
+            out=storage.ptr
+        }
         out[used]=ins[0]
         used+=1
         if (((op =? 'block') or (op =? 'loop')) or (op =? 'if_')) {
             o_flow[int64(o_flow_at[index])].start=(OptWord(used) - OptWord(int64(1)))
         }
         else if ((op =? 'end') and o_flow[top].terminated) {
+            if used >=? cap {
+                cap=(OptWord(used) + OptWord(int64(16)))
+                storage.resize(cap)
+                out=storage.ptr
+            }
             out[used]=Ins('trap' 0 0 0 0 0 0)
             used+=1
         }
     }
     storage.resize(used)
-    storage
 }
 
 # Is t the address of a frame slot no other instruction takes the address of? (Asked rarely:

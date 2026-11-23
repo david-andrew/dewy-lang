@@ -1,0 +1,82 @@
+# In-place quicksort with median-of-three pivot and insertion-sort cutoff.
+$runtime_checks
+
+from p"harness.dewy" import size_argument, clock, mix
+
+generate = (count:int64):>array<int64> => {
+    let data:array<int64>=[]
+    data.reserve(count)
+    let seed:int64=1337
+    loop i in [0..count) {
+        seed=(seed*1103515245+12345)%2147483648
+        data.push(seed xor (i*2654435761 % 2147483648))
+    }
+    return data
+}
+
+insertion_sort = (@a:array<int64> lo:int64 hi:int64):>void => {
+    let i:int64=lo+1
+    loop i <=? hi {
+        let key:int64=a[i]
+        let j:int64=i-1
+        loop j >=? lo and a[j] >? key {
+            a[j+1]=a[j]
+            j-=1
+        }
+        a[j+1]=key
+        i+=1
+    }
+}
+
+qsort_range = (@a:array<int64> lo0:int64 hi0:int64):>void => {
+    let lo:int64=lo0
+    let hi:int64=hi0
+    loop hi-lo >? 16 {
+        let mid:int64=lo+((hi-lo)>>1)
+        if a[mid] <? a[lo] {let t=a[lo]; a[lo]=a[mid]; a[mid]=t}
+        if a[hi] <? a[lo] {let t=a[lo]; a[lo]=a[hi]; a[hi]=t}
+        if a[hi] <? a[mid] {let t=a[mid]; a[mid]=a[hi]; a[hi]=t}
+        let pivot:int64=a[mid]
+        let i:int64=lo
+        let j:int64=hi
+        loop true {
+            loop a[i] <? pivot {i+=1}
+            loop a[j] >? pivot {j-=1}
+            if i >=? j {break}
+            let t=a[i]
+            a[i]=a[j]
+            a[j]=t
+            i+=1
+            j-=1
+        }
+        if j-lo <? hi-j {
+            qsort_range(@a lo j)
+            lo=j+1
+        } else {
+            qsort_range(@a j+1 hi)
+            hi=j
+        }
+    }
+    if hi >? lo {insertion_sort(@a lo hi)}
+}
+
+kernel = (@data:array<int64>):>int64 => {
+    let n=data.length
+    if n >? 1 {qsort_range(@data 0 n-1)}
+    let hash:int64=7
+    let ordered:int64=1
+    loop i in [0..n) {
+        if i >? 0 and data[i-1] >? data[i] {ordered=0}
+        if i%16 =? 0 {hash=mix(hash data[i]%1000003)}
+    }
+    return mix(hash ordered)
+}
+
+main = (args:array<string>):>void => {
+    let count=size_argument(args 500000)
+    let data=generate(count)
+    let started=clock
+    let result=kernel(@data)
+    let finished=clock
+    printl"{result} {finished-started}"
+}

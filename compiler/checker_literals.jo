@@ -45,6 +45,8 @@ xl_bool_type: *(int)
 xl_null_type: *(int)
 xl_int_type: *(int)
 xl_math_int: *(int)
+xl_exact_nk: u8[]
+xl_exact_nk_p: *u8
 checker_literals_bind = (input: *CheckerLiteralInput) -> int:
     xl_nodes = input[0].nodes
     xl_lists = input[0].lists
@@ -60,6 +62,14 @@ checker_literals_bind = (input: *CheckerLiteralInput) -> int:
     xl_null_type = input[0].null_type
     xl_int_type = input[0].int_type
     xl_math_int = input[0].math_int
+    if xl_exact_nk.len() == 0:
+        xl_exact_nk.reserve(128)
+        loop xl_exact_nk.len() < 128: xl_exact_nk.push(u8(0))
+        xl_exact_nk[int(NK.binary)] = u8(1)
+        xl_exact_nk[int(NK.unary)] = u8(1)
+        xl_exact_nk[int(NK.intrinsic)] = u8(1)
+        xl_exact_nk[int(NK.conv)] = u8(1)
+        xl_exact_nk_p = data(xl_exact_nk)
     0
 xl_representation = (t0: int) -> int:
     t = tu_prune(t0)
@@ -78,16 +88,29 @@ xl_expected = (expected: int) -> int:
 xl_publish = (node: mut Node, t: int):
     node.type = i32(t)
     node.flags |= 128
-xl_finish = (n: int, t0: int, expected: int) -> int:
+xl_finish_slow = (n: int, t0: int, expected: int) -> int:
     t = t0
-    if xl_refine[0] and xl_types[0][t].kind == .refined and xl_types[0][t].bits != -2: t = int(xl_types[0][t].elem)
-    xl_nodes[0][n].type = i32(t)
+    tp = data(xl_types[0])
+    if xl_refine[0] and tp[t].kind == .refined and tp[t].bits != -2: t = int(tp[t].elem)
     # (without an expected type, callable inference returns the type as published)
-    if xl_effects[0] and expected != 0: t = effect_infer_callable(n, expected); xl_nodes[0][n].type = i32(t)
-    xl_nodes[0][n].flags |= 128
-    if xl_exact_measure[0] or ((xl_nodes[0][n].kind == .binary or xl_nodes[0][n].kind == .unary or xl_nodes[0][n].kind == .intrinsic or xl_nodes[0][n].kind == .conv and xl_nodes[0][n].aux == 2) and exact_candidate(n)): exact_note(n)
+    if xl_effects[0] and expected != 0:
+        xl_nodes[0][n].type = i32(t)
+        t = effect_infer_callable(n, expected)
+    node = data(xl_nodes[0]) + n
+    node[0].type = i32(t)
+    node[0].flags |= i32(128)
+    k = node[0].kind
+    if xl_exact_measure[0] or ((k == .binary or k == .unary or k == .intrinsic or (k == .conv and node[0].aux == 2)) and exact_candidate(n)): exact_note(n)
     xl_last[0] = n
     t
+xl_finish = (n: int, t0: int, expected: int) -> int:
+    node = data(xl_nodes[0]) + n
+    if (xl_effects[0] and expected != 0) or xl_exact_measure[0] or xl_exact_nk_p[int(node[0].kind)] != u8(0) or (xl_refine[0] and xl_types[0][t0].kind == .refined and xl_types[0][t0].bits != -2):
+        return xl_finish_slow(n, t0, expected)
+    node[0].type = i32(t0)
+    node[0].flags |= i32(128)
+    xl_last[0] = n
+    t0
 
 # (an integer literal's default type: the semantic integer in Dewy source)
 xl_int_default = (n: int) -> int:
@@ -95,26 +118,34 @@ xl_int_default = (n: int) -> int:
     xl_int_type[0]
 
 xl_word_fits = (n: int, t: int) -> bool:
-    if xl_nodes[0][n].kind != .int_lit: return false
-    bits = int(xl_types[0][t].bits)
-    sign = xl_types[0][t].sign
-    if int(xl_nodes[0][n].flags) & 2097152 != 0: return bits >= 64
-    v = xl_nodes[0][n].ival
+    node = data(xl_nodes[0]) + n
+    if node[0].kind != .int_lit: return false
+    ty = data(xl_types[0]) + t
+    bits = int(ty[0].bits)
+    sign = ty[0].sign
+    if int(node[0].flags) & 2097152 != 0: return bits >= 64
+    v = node[0].ival
     if bits >= 64: return sign or v >= 0
     if sign: return v >= -(1 << (bits - 1)) and v < (1 << (bits - 1))
     v >= 0 and v < (1 << bits)
 
 xl_check_int = (n: int, expected: int) -> int:
+    node = data(xl_nodes[0]) + n
+    node[0].flags |= i32(256)
+    initial = if xl_files[0][int(node[0].pos) >> 40].is_dewy: xl_math_int[0] else: xl_int_type[0]
+    node[0].type = i32(initial)
+    if expected == 0:
+        node[0].flags |= i32(128)
+        if xl_exact_measure[0]: exact_note(n)
+        xl_last[0] = n
+        return initial
     ex = xl_expected(expected)
     exk = TK.void_
     if ex != 0: exk = xl_types[0][ex].kind
     t = 0
-    xl_nodes[0][n].flags |= 256
-    initial = xl_int_default(n)
-    xl_nodes[0][n].type = i32(initial)
     if exk == .int_ and initial != xl_math_int[0] and ex != xl_math_int[0] and xl_word_fits(n, ex):
-        xl_nodes[0][n].type = i32(ex)
-        xl_nodes[0][n].flags &= ~256
+        node[0].type = i32(ex)
+        node[0].flags &= ~256
         t = ex
     else if ex != 0 and exk == .int_:
         coerce(n, ex)
@@ -152,18 +183,19 @@ xl_check_scalar = (n: int, expected: int) -> int:
     ex = xl_expected(expected)
     exk = TK.void_
     if ex != 0: exk = xl_types[0][ex].kind
-    k = xl_nodes[0][n].kind
+    node = data(xl_nodes[0]) + n
+    k = node[0].kind
     t = 0
     if k == .float_lit:
         if ex != 0 and exk == .float_:
-            if xl_nodes[0][n].sval != 0 and xl_nodes[0][n].fval - xl_nodes[0][n].fval != 0.0: literal_float_error(n)
-            xl_nodes[0][n].flags &= ~256
+            if node[0].sval != 0 and node[0].fval - node[0].fval != 0.0: literal_float_error(n)
+            node[0].flags &= ~256
             t = ex
         else if ex != 0 and exk == .opt and xl_types[0][tu_prune(int(xl_types[0][ex].elem))].kind == .float_:
-            xl_nodes[0][n].flags &= ~256
+            node[0].flags &= ~256
             t = tu_prune(int(xl_types[0][ex].elem))
         else:
-            xl_nodes[0][n].flags |= 256
+            node[0].flags |= 256
             t = xl_float_type[0]
     else if k == .bool_lit: t = xl_bool_type[0]
     else if k == .none_lit:

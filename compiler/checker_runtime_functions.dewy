@@ -6,6 +6,8 @@ from p"util.jo" import (intern)
 from p"ast.jo" import (nodes)
 from p"check.jo" import (prelude runtime_insts syms)
 from p"checker_module_lookup.dewy" import (demand_name)
+from p"checker_startup.dewy" import (load_game_file load_game_prelude load_std_file load_std_prelude)
+from p"prelude.jo" import (game_file_for prelude_game_pending prelude_std_pending std_file_for)
 from p"checker_type_entries.dewy" import (get_fn_inst)
 
 runtime_fn=(name:string):>int64=>$unsafe {
@@ -14,6 +16,30 @@ runtime_fn=(name:string):>int64=>$unsafe {
     let id=intern(name)
     demand_name(id)
     let s=prelude.get(id) ?? 0
+    if s =? 0 and prelude_std_pending {
+        let sf=std_file_for(name)
+        if (sf as array<uint8>).length >? 0 and load_std_file(sf) {
+            demand_name(id)
+            s=prelude.get(id) ?? 0
+        }
+        if s =? 0 {
+            load_std_prelude()
+            demand_name(id)
+            s=prelude.get(id) ?? 0
+        }
+    }
+    if s =? 0 and prelude_game_pending {
+        let gf=game_file_for(name)
+        if (gf as array<uint8>).length >? 0 and load_game_file(gf) {
+            demand_name(id)
+            s=prelude.get(id) ?? 0
+        }
+        if s =? 0 {
+            load_game_prelude()
+            demand_name(id)
+            s=prelude.get(id) ?? 0
+        }
+    }
     if s =? 0 or syms.ptr[s].kind not=? 'fns' {ice("missing runtime function {name}")}
     let d=int64(syms.ptr[s].decl)
     let f=get_fn_inst(d [] nodes.ptr[d].pos)

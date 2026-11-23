@@ -23,34 +23,41 @@ use 'parser_forms.dewy'
 use 'parser_decls.dewy'
 
 parse_block = () -> int:
-    b = mk(.block, cur_pos())
-    stmts: int[]
-    if pk() == .newline:
-        advance()
+    tp = p_toks
+    t = ti
+    b = mk(.block, tp[t].pos)
+    k = tp[t].kind
+    if k == .newline:
+        ti = t + 1
         return parse_indented_block(b)
+    base = p_list_buf.len()
     # (`loop x in xs: if x > 0: n += 1`: an if after the colon is the statement, which needs no else)
-    if pk() == .kw_if:
-        stmts.push(parse_if())
-        set_list(b, stmts)
+    if k == .kw_if:
+        p_list_buf.push(parse_if())
+        set_list_span(b, p_list_buf, base)
         return b
-    stmts.push(parse_simple_stmt())
-    loop pk() == .semi and pkn(1) != .newline:
-        advance()
-        stmts.push(parse_simple_stmt())
-    set_list(b, stmts)
+    p_list_buf.push(parse_simple_stmt())
+    loop tp[ti].kind == .semi and tp[ti + 1].kind != .newline:
+        ti = ti + 1
+        p_list_buf.push(parse_simple_stmt())
+    set_list_span(b, p_list_buf, base)
     b
 
 # the statements of an indented block, from its indent token on, into block b
 parse_indented_block = (b: int) -> int:
-    if pk() != .indent: parse_empty_block()
-    advance()
-    stmts: int[]
-    loop pk() != .dedent and pk() != .eof:
+    tp = p_toks
+    if tp[ti].kind != .indent: parse_empty_block()
+    ti = ti + 1
+    base = p_list_buf.len()
+    loop true:
+        k = tp[ti].kind
+        if k == .dedent or k == .eof: break
         s = parse_stmt()
-        if s != 0: stmts.push(s)
-    expect(.dedent, "end of block")
+        if s != 0: p_list_buf.push(s)
+    if tp[ti].kind == .dedent: ti = ti + 1
+    else: expect(.dedent, "end of block")
     add_flag(b, NF_TERMINATED)
-    set_list(b, stmts)
+    set_list_span(b, p_list_buf, base)
     b
 
 # ({loop ...: key: value} is __map_of([loop ...: (key, value)]))
@@ -331,40 +338,61 @@ parse_simple_stmt = () -> int:
             nodes[d].b = i32(v)
         return d
     # typed declaration: name: Type [= expr]
-    if k == .ident and pkn(1) == .colon:
-        w = tok_src(ti)
-        if pkn(2) == .newline and word_in(w, ["try", "except", "catch", "finally"]):
+    if k == .ident and p_toks[ti + 1].kind == .colon:
+        if p_toks[ti + 2].kind == .newline and word_in(tok_src(ti), ["try", "except", "catch", "finally"]):
             fatal(pos, "there are no exceptions: errors are values (a function gives `T | Error`, and `match` or `is` sees which came back; `panic` stops the program)")
         d = mk(.vardecl, pos)
-        nodes[d].name = i32(expect_ident(""))
-        advance()
+        nodes[d].name = i32(p_toks[ti].ival)
+        ti = ti + 2
         nodes[d].a = i32(parse_type())
-        if accept(.assign): nodes[d].b = i32(parse_expr())
+        if p_toks[ti].kind == .assign:
+            ti = ti + 1
+            nodes[d].b = i32(parse_expr())
         return d
     e = parse_expr()
+    tp = p_toks
+    t2 = ti
+    k2 = tp[t2].kind
+    if k2 == .newline or ((k2 == .dedent or k2 == .semi or k2 == .eof) and nodes[e].kind != .tuple):
+        s = mk(.exprstmt, pos)
+        nodes[s].a = i32(e)
+        if has_flag(e, NF_TERMINATED): add_flag(s, NF_TERMINATED)
+        return s
+    if k2 == .assign:
+        a = mk(.assign, tp[t2].pos)
+        ti = t2 + 1
+        nodes[a].op = i32(int(Tok.assign))
+        nodes[a].a = i32(e)
+        v = parse_expr()
+        if tp[ti].kind == .comma and not p_no_tuple: v = tuple_from(v)
+        nodes[a].b = i32(v)
+        return a
     # (in a one-line lambda body a ',' ends the statement)
-    if p_no_tuple and not is_assign_op(pk()):
+    if p_no_tuple and not is_assign_op(k2):
         s = mk(.exprstmt, pos)
         nodes[s].a = i32(e)
         return s
-    if pk() == .comma and not p_no_tuple: e = tuple_from(e)
-    if pk() == .dotop and pkn(1) == .assign and not space_before(ti + 1):
+    if k2 == .comma and not p_no_tuple:
+        e = tuple_from(e)
+        t2 = ti
+        k2 = tp[t2].kind
+    if k2 == .dotop and tp[t2 + 1].kind == .assign and not space_before(t2 + 1):
         # xs .+= ys: xs = xs .+ ys
-        a = mk(.assign, cur_pos())
+        a = mk(.assign, tp[t2].pos)
         nodes[a].op = i32(int(Tok.assign))
         nodes[a].a = i32(e)
-        b = mk(.binary, cur_pos())
-        op = advance()
-        advance()
+        b = mk(.binary, tp[t2].pos)
+        ti = t2 + 2
         nodes[b].op = i32(int(Tok.dotop))
-        nodes[b].aux = i32(p_toks[op].ival)
+        nodes[b].aux = i32(tp[t2].ival)
         nodes[b].a = i32(clone(e))
         nodes[b].b = i32(parse_expr())
         nodes[a].b = i32(b)
         return a
-    if is_assign_op(pk()):
-        a = mk(.assign, cur_pos())
-        opk = p_toks[advance()].kind
+    if is_assign_op(k2):
+        a = mk(.assign, tp[t2].pos)
+        ti = t2 + 1
+        opk = k2
         if opk == .careteq:
             # x ^= y: x = x ^ y (power)
             nodes[a].op = i32(int(Tok.assign))
@@ -378,47 +406,62 @@ parse_simple_stmt = () -> int:
             return a
         if opk == .kw_and or opk == .kw_or or opk == .kw_xor:
             # and= or= xor= (bitwise on integers, logical on bools)
-            advance()
+            ti = t2 + 2
             if opk == .kw_and: opk = .ampeq
             else if opk == .kw_or: opk = .pipeeq
             else: opk = .careteq
         nodes[a].op = i32(int(opk))
         nodes[a].a = i32(e)
         v = parse_expr()
-        if pk() == .comma and not p_no_tuple: v = tuple_from(v)
+        if tp[ti].kind == .comma and not p_no_tuple: v = tuple_from(v)
         nodes[a].b = i32(v)
         return a
-    if nodes[e].kind == .tuple and nkids(e) > 1 and pk() != .newline: fatal(nodes[e].pos, "unexpected ','")
+    if nodes[e].kind == .tuple and nkids(e) > 1 and k2 != .newline: fatal(nodes[e].pos, "unexpected ','")
     s = mk(.exprstmt, pos)
     nodes[s].a = i32(e)
     if has_flag(e, NF_TERMINATED): add_flag(s, NF_TERMINATED)
     s
 
 end_stmt = (s: int):
+    tp = p_toks
+    t = ti
+    k = tp[t].kind
+    if k == .newline:
+        ti = t + 1
+        return
+    if k == .dedent or k == .eof: return
     # (foreach (x in xs):, switch (a):, while (x < 3) { ...: other languages' statements, which
     # parse as a call up to there)
-    if pk() == .colon or pk() == .lbrace:
-        j = ti
-        loop j > 0 and p_toks[j - 1].kind != .newline and p_toks[j - 1].kind != .indent and p_toks[j - 1].kind != .dedent: j -= 1
-        if p_toks[j].kind == .ident and j + 1 < p_ntoks: habit(j + 1, .newline)
+    if k == .colon or k == .lbrace:
+        j = t
+        loop j > 0 and tp[j - 1].kind != .newline and tp[j - 1].kind != .indent and tp[j - 1].kind != .dedent: j -= 1
+        if tp[j].kind == .ident and j + 1 < p_ntoks: habit(j + 1, .newline)
     if s != 0 and has_flag(s, NF_TERMINATED):
-        accept(.newline)
+        if tp[ti].kind == .newline: ti = ti + 1
         return
-    if pk() == .semi:
-        advance()
-        accept(.newline)
+    if k == .semi:
+        ti = t + 1
+        if tp[t + 1].kind == .newline: ti = t + 2
         return
-    if pk() == .dedent or pk() == .eof: return
-    if ti > 0 and p_toks[ti - 1].kind == .dedent: return
+    if t > 0 and tp[t - 1].kind == .dedent: return
     expect(.newline, "end of statement")
 
 parse_stmt = () -> int:
-    pos = cur_pos()
-    k = pk()
-    s = 0
+    tp = p_toks
+    t = ti
+    k = tp[t].kind
     if k == .newline:
-        advance()
+        ti = t + 1
         return 0
+    pos = tp[t].pos
+    s = 0
+    if k == .ident:
+        s = parse_simple_stmt()
+        sk = nodes[s].kind
+        if (sk == .vardecl or sk == .assign) and nodes[s].b != 0 and has_flag(int(nodes[s].b), NF_TERMINATED): add_flag(s, NF_TERMINATED)
+        else if sk == .return_ and nodes[s].a != 0 and has_flag(int(nodes[s].a), NF_TERMINATED): add_flag(s, NF_TERMINATED)
+        end_stmt(s)
+        return s
     # ([a, b] = xs, {x, y} = p: destructuring from JavaScript)
     if (k == .lbrack or k == .lbrace) and partner(ti) > ti and partner(ti) + 1 < p_ntoks and p_toks[partner(ti) + 1].kind == .assign:
         if k == .lbrack: fatal(pos, "an array is unpacked without brackets: `a, b = xs` (it must have exactly that many elements)")

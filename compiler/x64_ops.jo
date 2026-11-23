@@ -105,7 +105,10 @@ x64_function = ():
     loop fn_len.len() <= ir.fn_index: fn_len.push(0)
     align = x64_code_align()
     x_loop_line = if align == 64: 64 else: 32
-    loop code.len() % align != 0: b(0xCC)
+    rem = code.len() & (align - 1)
+    if rem != 0:
+        pad = align - rem
+        mem_set(x_bytes_grow(pad), 0xCC, pad)
     fn_addr[ir.fn_index] = code.len()
     fn_start = code.len()
     x_padding_floor = fn_start

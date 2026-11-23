@@ -125,10 +125,13 @@ path_rooted = (n0: int) -> bool:
 
 # the alias local a field path (or global) is narrowed to here, or -1
 path_alias = (n: int) -> int:
-    if not path_rooted(n): return -1
+    if path_narrows == 0 or not path_rooted(n): return -1
     key = path_key(n)
     if len(key) == 0: return -1
+    prev = game_lookup_ok
+    game_lookup_ok = false
     s = lookup(intern(key))
+    game_lookup_ok = prev
     if s == 0 or syms[s].kind != .local: return -1
     al = int(syms[s].ref)
     if int(locals[al].owner) != int(ctxs[cx].inst) or int(locals[al].flags) & LF_UNNARROWED != 0: return -1
@@ -317,7 +320,7 @@ narrow_opt_rest_by = (c: int):
 
 # where condition c is `holds` (true or false), variables it tests with `is` stand for the member
 narrow_by = (c: int, holds: bool):
-    if holds and string_set_tests.has(c): narrow_string_set(c)
+    if holds and string_set_tests.len() > 0 and string_set_tests.has(c): narrow_string_set(c)
     k = nodes[c].kind
     if k == .istype: narrow_var(c, holds)
     else if k == .binary and (nodes[c].op == i32(int(Tok.ne)) or nodes[c].op == i32(int(Tok.eq))) and nodes[int(nodes[c].b)].kind == .none_lit:

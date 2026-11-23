@@ -37,6 +37,8 @@ xj_global_read: *(bool[])
 xj_path_narrows: *int
 xj_no_narrow_at: *int
 xj_test_mode: *bool
+xj_tk_special: u8[]
+xj_tk_special_p: *u8
 checker_idents_bind = (input: *CheckerIdentInput) -> int:
     xj_nodes = input[0].nodes
     xj_types = input[0].types
@@ -52,12 +54,23 @@ checker_idents_bind = (input: *CheckerIdentInput) -> int:
     xj_path_narrows = input[0].path_narrows
     xj_no_narrow_at = input[0].no_narrow_at
     xj_test_mode = input[0].test_mode
+    if xj_tk_special.len() == 0:
+        xj_tk_special.reserve(64)
+        loop xj_tk_special.len() < 64: xj_tk_special.push(u8(0))
+        xj_tk_special[int(TK.var)] = u8(1)
+        xj_tk_special[int(TK.fn_)] = u8(1)
+        xj_tk_special[int(TK.cfn)] = u8(1)
+        xj_tk_special[int(TK.polyfn)] = u8(1)
+        xj_tk_special[int(TK.callable)] = u8(1)
+        xj_tk_special[int(TK.typeval)] = u8(1)
+        xj_tk_special[int(TK.refined)] = u8(1)
+        xj_tk_special_p = data(xj_tk_special)
     0
 xj_fn_type = (t: int) -> bool:
     k = xj_types[0][tu_prune(t)].kind
     k == .fn_ or k == .cfn or k == .polyfn or k == .callable
 xj_read = (l: int): xj_locals[0][l].flags = xj_locals[0][l].flags | i32(32768)
-xj_local = (n: int, l00: int, views: bool) -> int:
+xj_local_slow = (n: int, l00: int, views: bool) -> int:
     l0 = l00
     loop int(xj_locals[0][l0].flags) & 2048 != 0: l0 = narrowed_var(l0)
     c = xj_context[0]
@@ -67,14 +80,27 @@ xj_local = (n: int, l00: int, views: bool) -> int:
         if narrowed_var(l0) != 0: l = ident_capture(l0, true, xj_nodes[0][n].pos)
         else if xj_contexts[0][c].parent >= 0: l = ident_capture(l0, false, xj_nodes[0][n].pos)
     if n != xj_assign_root[0]:
-        xj_read(l)
-        xj_read(l0)
-        if int(xj_locals[0][l0].flags) & 8 != 0:
+        locs = data(xj_locals[0])
+        locs[l].flags = locs[l].flags | i32(32768)
+        if l != l0: locs[l0].flags = locs[l0].flags | i32(32768)
+        if int(locs[l0].flags) & 8 != 0:
             u = narrowed_var(l0)
-            if u != 0: xj_read(u)
+            if u != 0: xj_locals[0][u].flags = xj_locals[0][u].flags | i32(32768)
         if views: ident_const_view(l0, xj_nodes[0][n].pos)
     xj_nodes[0][n].sym = i32(l)
-    int(xj_locals[0][l].type)
+    lp = data(xj_locals[0]) + l
+    if int(lp[0].flags) & 8 != 0: live_body_user_globals += 1
+    int(lp[0].type)
+xj_local = (n: int, l00: int, views: bool) -> int:
+    lp = data(xj_locals[0]) + l00
+    fl = int(lp[0].flags)
+    if fl & 2056 == 0 and not views:
+        c = xj_context[0]
+        if int(lp[0].owner) == int(xj_contexts[0][c].inst):
+            if n != xj_assign_root[0]: lp[0].flags = i32(fl | 32768)
+            xj_nodes[0][n].sym = i32(l00)
+            return int(lp[0].type)
+    xj_local_slow(n, l00, views)
 struct CheckerIdentResult:
     type: int
     bypass: bool
@@ -92,11 +118,15 @@ xj_global = (n: int, g: int, expected: int, decimals: bool, bypass: mut bool) ->
     d = int(xj_globals[0][g].decl)
     if d != 0 and xj_nodes[0][d].pos > pos and xj_contexts[0][c].parent < 0 and xj_fns[0][int(xj_contexts[0][c].inst)].kind == 4 and not xj_test_mode[0]: ident_early_use(n, g)
     xj_nodes[0][n].sym = i32(g)
+    if live_body_user_globals == 0:
+        gm = int(xj_globals[0][g].mod)
+        if live_body_global_mod < 0: live_body_global_mod = gm
+        else if live_body_global_mod != gm: live_body_user_globals = 1
     t = int(xj_globals[0][g].type)
     if decimals: ident_decimal_use(g)
     if xj_path_narrows[0] > 0 and n != xj_no_narrow_at[0]: t = ident_path_alias(n, t)
     t
-xj_ident = (n: int, expected: int, kind: int, ref: int, s: int, flags: int) -> CheckerIdentResult:
+xj_ident_slow = (n: int, expected: int, kind: int, ref: int, s: int, flags: int) -> CheckerIdentResult:
     is_callee = n == xj_callee[0]
     if xj_ide[0] and kind != 3: ident_ide_ref(n, s)
     xj_nodes[0][n].aux = i32(kind)
@@ -110,10 +140,27 @@ xj_ident = (n: int, expected: int, kind: int, ref: int, s: int, flags: int) -> C
     else if kind == 3: return CheckerIdentResult(ident_function(n, expected, is_callee), true)
     else if kind == 4 or kind == 5 or kind == 10 or kind == 8 or kind == 7: t = ident_type_value(n, kind, s)
     else: ident_error(n, kind)
-    if (kind == 1 or kind == 2) and xj_fn_type(t):
-        bare = ident_bare_value(n, t, kind == 1, is_callee, expected)
-        if bare >= 0: return CheckerIdentResult(bare, true)
-    if xj_types[0][int(tu_prune(t))].kind == .typeval:
-        used = ident_type_use(n, t, is_callee, expected)
-        if used >= 0: return CheckerIdentResult(used, true)
+    if xj_tk_special_p[int(xj_types[0][t].kind)] != u8(0):
+        if (kind == 1 or kind == 2) and xj_fn_type(t):
+            bare = ident_bare_value(n, t, kind == 1, is_callee, expected)
+            if bare >= 0: return CheckerIdentResult(bare, true)
+        if xj_types[0][int(tu_prune(t))].kind == .typeval:
+            used = ident_type_use(n, t, is_callee, expected)
+            if used >= 0: return CheckerIdentResult(used, true)
     CheckerIdentResult(int(xl_finish(n, t, expected)), false)
+xj_ident = (n: int, expected: int, kind: int, ref: int, s: int, flags: int) -> CheckerIdentResult:
+    if kind == 1 and not xj_ide[0] and flags & 1 == 0:
+        lp = data(xj_locals[0]) + ref
+        fl = int(lp[0].flags)
+        if fl & 2056 == 0 and int(lp[0].owner) == int(xj_contexts[0][xj_context[0]].inst):
+            t = int(lp[0].type)
+            if xj_tk_special_p[int(xj_types[0][t].kind)] == u8(0) and not xl_exact_measure[0] and (expected == 0 or not xl_effects[0]):
+                node = data(xj_nodes[0]) + n
+                node[0].aux = i32(1)
+                node[0].sym = i32(ref)
+                if n != xj_assign_root[0]: lp[0].flags = i32(fl | 32768)
+                node[0].type = i32(t)
+                node[0].flags |= i32(128)
+                xl_last[0] = n
+                return CheckerIdentResult(t, false)
+    xj_ident_slow(n, expected, kind, ref, s, flags)

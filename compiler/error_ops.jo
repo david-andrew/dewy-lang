@@ -27,7 +27,14 @@ use 'oom.jo'
 use 'ownership_types.dewy'
 use 'checker_body_end.dewy'
 
+nominal_has_parent: bool[]
+nominal_set_parent = (t: int, p: int):
+    if nominal_parent.len() == 0 and nominal_has_parent.len() > 0: nominal_has_parent.clear()
+    nominal_parent[t] = p
+    if t >= nominal_has_parent.len(): nominal_has_parent.resize(t + 64)
+    nominal_has_parent[t] = true
 exception_builtins = ():
+    if nominal_parent.len() == 0 and nominal_has_parent.len() > 0: nominal_has_parent.clear()
     loop name in ["exception", "error", "Canceled", "Timeout", "OutOfMemory"]:
         d = mk(.struct_, 0)
         nodes[d].name = i32(intern(name))
@@ -39,8 +46,8 @@ exception_builtins = ():
         if name == "exception": exception_type = t
         else if name == "error":
             error_type = t
-            nominal_parent[t] = exception_type
-        else: nominal_parent[t] = exception_type
+            nominal_set_parent(t, exception_type)
+        else: nominal_set_parent(t, exception_type)
 nominal_descends = (t: int, parent: int) -> bool:
     current = t
     loop current != 0:
@@ -55,8 +62,8 @@ value_members = (t: int) -> int[]:
     if is_union(t): return union_members(t)
     [t]
 nominal_family = (t: int) -> int:
-    if not nominal_ready or (t != exception_type and t != error_type and not nominal_parent.has(t)): return t
-    if ownership_nominals.has(t) or nominal_generic_instance(t): return t
+    if not nominal_ready or (t != exception_type and t != error_type and (nominal_parent.len() == 0 or t >= nominal_has_parent.len() or not nominal_has_parent[t])): return t
+    if (ownership_nominals.len() > 0 and ownership_nominals.has(t)) or nominal_generic_instance(t): return t
     if let found = nominal_families.get(t): return found
     members: int[]
     loop child in nominal_types:
@@ -112,7 +119,7 @@ nominal_resolve = (t: int):
     d = int(structs[int(types[t].st)].decl)
     # (type of any: the root of a family of its own, minted under nothing)
     if mint_of_any(d):
-        nominal_parent[t] = 0
+        nominal_set_parent(t, 0)
         nominal_resolving[t] = false
         return
     saved = cx
@@ -132,7 +139,7 @@ nominal_resolve = (t: int):
     else:
         nominal_resolve(parent)
         if ownership_nominals.has(parent): ownership_nominals[t] = true
-    nominal_parent[t] = parent
+    nominal_set_parent(t, parent)
     nominal_resolving[t] = false
 mint_of_any = (d: int) -> bool:
     p = int(nodes[d].a)
@@ -161,7 +168,7 @@ nominal_instance = (decl: int, t: int):
     if nominal_parent.has(t): return
     parent = nominal_generic.get(decl) ?? 0
     if parent == 0: return
-    nominal_parent[t] = parent
+    nominal_set_parent(t, parent)
 # Whether family (a family's union, written as a pattern) holds m, a generic instance
 # descending from its parent: the union itself never lists one
 family_holds_generic = (family: int, m: int) -> bool:

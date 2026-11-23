@@ -1,5 +1,6 @@
 $runtime_checks
 from p"watch_drive.dewy" import (watch_build_child)
+from p"ast.jo" import (lists nodes)
 from p"settings.jo" import (build_target cli_mode cli_target)
 from p"check.jo" import (lib_dir test_mode)
 from p"@lib/core/rt.jo" import (__copies_min __str_slice)
@@ -39,6 +40,8 @@ driver_main=():>void=>{
     let pkg_fetch_slot=@pkg_fetch
     let lower_only_slot=@lower_only
     copies_min=0
+    nodes.reserve(4096)
+    lists.reserve(4096)
     let a=args()
     if a.length >? 2 and a[1] =? "--eager-bodies" {
         dc_eager_slot=true

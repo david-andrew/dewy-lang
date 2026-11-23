@@ -8,11 +8,10 @@ from p"expression_types.dewy" import (ntype)
 from p"checked_expression_nodes.dewy" import (bc_bin)
 
 from p"checks_text.dewy" import (sym_kind_of)
-from p"expr.jo" import (CV)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (NF_BROADCAST NF_CHECKED NF_U64 add_flag has_flag kid mk nkids nodes set_list)
-from p"check.jo" import (syms lib_dir target_wasm universe)
+from p"check.jo" import (game_lookup_ok lib_dir syms target_wasm universe)
 from p"check_metadata.dewy" import (no_web_check op_text)
 from p"checks_thin.dewy" import (resolve_type)
 from p"checker_expr.dewy" import (check_expr lookup)
@@ -915,7 +914,10 @@ quantity_unit_text=(e:UnitWord):>string=>$unsafe {
 quantity_unit_syntax=(e:UnitWord):>bool=>$unsafe {
     let k=nodes.ptr[e].kind
     if k =? 'tname' {
+        let prev_game_ok=game_lookup_ok
+        game_lookup_ok=false
         let s=lookup(UnitWord(nodes.ptr[e].name))
+        game_lookup_ok=prev_game_ok
         if s <? 0 {return false}
         let sk=syms.ptr[s].kind
         return sk =? 'global' or sk =? 'const_' or sk =? 'local'

@@ -1,6 +1,7 @@
 $runtime_checks
 from p"call_lookup_context.dewy" import (decl_in_prelude)
 from p"check.jo" import (fns lib_dir)
+from p"checker_state.dewy" import (live_body_indexes)
 from p"checker_type_entries.dewy" import (check_struct_fields)
 from p"expression_types.dewy" import (ntype)
 from p"ast.jo" import (NF_CHECKED NF_INBOUNDS NF_MUT add_flag has_flag kid kids mk nkids nodes set_list)
@@ -54,6 +55,7 @@ map_elem_place=(n:MapEntryWord):>void=>{
     f=last_checked
     let rt=if refine_active {representation_type(vt)} else {vt}
     nodes[n]=Node(kind='index' pos=pos a=int32(f) b=int32(call) type=int32(rt) flags=int32(NF_CHECKED | NF_INBOUNDS))
+    live_body_indexes += 1
 }
 
 # m[k] for a map m (a call of its `[]`)

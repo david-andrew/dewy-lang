@@ -8,6 +8,7 @@ use 'lower_views.dewy'
 use 'lower_storage.dewy'
 use 'lower_helpers.dewy'
 use 'lower_group.dewy'
+use 'lower_analysis.dewy'
 use 'exact_reset_loop.jo'
 use 'ir_types.dewy'
 use 'isolation.jo'
@@ -681,6 +682,11 @@ math_word_helper = (e: int) -> int:
 
 math_low_word = (e: int) -> int:
     if math_proven_word(e): return math_word_expr(e)
+    if prune(ntype(e)) == T_MATH_INT and nodes[e].kind == .binary and nodes[e].aux == 0:
+        op = nodes[e].op as Tok
+        if op == .plus or op == .minus or op == .star or op == .amp or op == .pipe or op == .caret:
+            a = freeze_scalar(math_low_word(int(nodes[e].a)), T_INT)
+            return e_bin(int_op(op, true), VI, a, math_low_word(int(nodes[e].b)))
     value = gen_borrowed(e).v
     result = vreg(VI)
     e_mov(result, math_untag(value))
@@ -970,6 +976,87 @@ math_recurrence_limit = (s: int, writes: (int, int)[]) -> int:
     initial.hi
 
 
+math_pure_expr = (n: int, depth: int = 0) -> bool:
+    if n == 0 or depth > 32: return false
+    k = nodes[n].kind
+    if k == .int_lit or k == .ident: return true
+    if k == .field or k == .unary: return math_pure_expr(int(nodes[n].a), depth + 1)
+    if k == .conv and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.fixed_store))): return math_pure_expr(int(nodes[n].a), depth + 1)
+    if k == .binary and nodes[n].aux == 0:
+        return math_pure_expr(int(nodes[n].a), depth + 1) and math_pure_expr(int(nodes[n].b), depth + 1)
+    if k == .intrinsic and (nodes[n].aux as IN) == .len and nkids(n) == 1: return math_pure_expr(kid(n, 0), depth + 1)
+    false
+
+
+math_cond_indexes_path = (n: int, key: int, depth: int = 0) -> bool:
+    if n == 0 or depth > 32: return false
+    k = nodes[n].kind
+    if k == .index and nodes[n].aux == 0:
+        if lpath_key(int(nodes[n].a)) == key: return true
+        return math_cond_indexes_path(int(nodes[n].a), key, depth + 1) or math_cond_indexes_path(int(nodes[n].b), key, depth + 1)
+    if k == .binary:
+        return math_cond_indexes_path(int(nodes[n].a), key, depth + 1) or math_cond_indexes_path(int(nodes[n].b), key, depth + 1)
+    if k == .and_ or k == .or_ or k == .not_ or k == .unary or k == .conv:
+        return math_cond_indexes_path(int(nodes[n].a), key, depth + 1)
+    false
+
+
+math_nonneg_mask_in_loop = (n0: int, loop_: int) -> bool:
+    n = n0
+    loop nodes[n].kind == .conv and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.fixed_store))): n = int(nodes[n].a)
+    bound = exact_count_bound(n)
+    if not bound.wide and bound.lo >= 0: return true
+    if positive_bound(n, true) >= 0: return true
+    if loop_ <= 0 or nodes[loop_].kind != .while_ or nodes[loop_].aux == 1 or cur_block == 0: return false
+    if nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)): return false
+    m = int(nodes[n].sym)
+    fl = int(locals[m].flags)
+    if fl & (LF_ASSIGNED | LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED | LF_QUIET | LF_SOAELEM | LF_ELEMALIAS) != 0: return false
+    mi = -1
+    i = cur_block_i - 1
+    loop i >= 0:
+        st = kid(cur_block, i)
+        if nodes[st].kind == .vardecl and nkids(st) == 0 and int(nodes[st].sym) == m:
+            mi = i
+            break
+        i -= 1
+    if mi < 0: return false
+    li = -1
+    nstmts = nkids(cur_block)
+    i = cur_block_i + 1
+    loop i < nstmts:
+        st = kid(cur_block, i)
+        if st == loop_ or (nodes[st].kind == .exprstmt and int(nodes[st].a) == loop_):
+            li = i
+            break
+        i += 1
+    if li < 0: return false
+    init_m = int(nodes[kid(cur_block, mi)].b)
+    loop nodes[init_m].kind == .conv and (nodes[init_m].aux == i32(int(CV.none_)) or nodes[init_m].aux == i32(int(CV.int_)) or nodes[init_m].aux == i32(int(CV.fixed_store))): init_m = int(nodes[init_m].a)
+    if nodes[init_m].kind != .binary or nodes[init_m].aux != 0 or nodes[init_m].op != i32(int(Tok.minus)): return false
+    rhs = int(nodes[init_m].b)
+    loop nodes[rhs].kind == .conv and (nodes[rhs].aux == i32(int(CV.none_)) or nodes[rhs].aux == i32(int(CV.int_)) or nodes[rhs].aux == i32(int(CV.fixed_store))): rhs = int(nodes[rhs].a)
+    if nodes[rhs].kind != .int_lit or has_flag(rhs, NF_U64) or nodes[rhs].ival != 1: return false
+    lhs = int(nodes[init_m].a)
+    loop nodes[lhs].kind == .conv and (nodes[lhs].aux == i32(int(CV.none_)) or nodes[lhs].aux == i32(int(CV.int_)) or nodes[lhs].aux == i32(int(CV.fixed_store))): lhs = int(nodes[lhs].a)
+    if nodes[lhs].kind != .intrinsic or (nodes[lhs].aux as IN) != .len or nkids(lhs) != 1: return false
+    key = lpath_key(kid(lhs, 0))
+    if key == 0: return false
+    i = mi + 1
+    loop i < li:
+        st = kid(cur_block, i)
+        if nodes[st].kind != .vardecl or nkids(st) != 0 or not math_pure_expr(int(nodes[st].b)): return false
+        i += 1
+    math_cond_indexes_path(int(nodes[loop_].a), key)
+
+
+math_masked_word = (n0: int, loop_: int) -> bool:
+    n = n0
+    loop nodes[n].kind == .conv and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.fixed_store))): n = int(nodes[n].a)
+    if nodes[n].kind != .binary or nodes[n].aux != 0 or nodes[n].op != i32(int(Tok.amp)) or prune(ntype(n)) != T_MATH_INT: return false
+    math_nonneg_mask_in_loop(int(nodes[n].b), loop_) or math_nonneg_mask_in_loop(int(nodes[n].a), loop_)
+
+
 math_word_local_decl = (s: int) -> bool:
     l = int(nodes[s].sym)
     if prune(int(locals[l].type)) != T_MATH_INT or dbg_on: return false
@@ -992,8 +1079,10 @@ math_word_local_decl = (s: int) -> bool:
         if limit < 0: limit = math_recurrence_limit(s, writes)
         if limit < 0 and not math_decrement_counter(s, writes):
             loop pair in writes:
-                if nodes[pair.0].op != i32(int(Tok.assign)) or nodes[pair.0].aux != 0: return false
-                if not math_guarded_word(int(nodes[pair.0].b), l): return false
+                w = pair.0
+                if nodes[w].op != i32(int(Tok.assign)) or nodes[w].aux != 0: return false
+                rhs = int(nodes[w].b)
+                if not math_guarded_word(rhs, l) and not math_masked_word(rhs, math_write_loop.get(w) ?? 0): return false
     word = vreg(VI)
     e_mov(word, math_word_expr(init))
     math_word_regs[l] = word

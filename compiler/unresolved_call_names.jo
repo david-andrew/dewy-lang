@@ -2,6 +2,8 @@ use 'ast.jo'
 use 'node_store.dewy'
 use 'call_lookup_context.dewy'
 use 'checker_expr.dewy'
+use 'checker_startup.dewy'
+use 'prelude.jo'
 use 'explicit_conversions.dewy'
 use 'expr.jo'
 use 'checker_contexts.dewy'
@@ -47,8 +49,20 @@ call_name_unknown = (n: int, name: int, mod_scope: int, args: int[], expected: i
     if ii >= 0 and intrinsics[ii].arr and args.len() > 0: fatal(nodes[n].pos, "'{name_of(name)}' expects an array or string, found {dt(ntype(args[0]))}")
     if ufcs:
         t0 = prune(ntype(args[0]))
+        if prelude_std_pending:
+            sf = std_file_for(name_of(name))
+            if len(sf) > 0 and load_std_file(sf):
+                return call_by_name(n, name, mod_scope, args, expected, ufcs)
+            load_std_prelude()
+            return call_by_name(n, name, mod_scope, args, expected, ufcs)
         # (`lookup(id).scaled(2)`, where only the value's own module has `scaled`)
         if caller_dewy() and forwards_exceptions(t0): return forward_call(n, name, args, expected)
+        if prelude_game_pending:
+            gf = game_file_for(name_of(name))
+            if len(gf) > 0 and load_game_file(gf):
+                return call_by_name(n, name, mod_scope, args, expected, ufcs)
+            load_game_prelude()
+            return call_by_name(n, name, mod_scope, args, expected, ufcs)
         # (step.1() for a tuple whose element 1 is a function: that element, called)
         nm0 = name_of(name)
         if types[t0].kind == .tuple and len(nm0) > 0 and is_digit(nm0[0]):

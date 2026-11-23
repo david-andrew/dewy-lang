@@ -16,6 +16,9 @@ const IR_RETURN = 256
 const IR_CALL = 512
 const IR_NARROW32 = 1024
 const IR_OVERFLOW = 2048
+const IR_LOC_DEF = 4096
+const IR_BA_CTRL = 8192
+const IR_CHECKED = 16384
 ir_operand_layouts = () -> int[]:
     modes = fill(IR_DEF | 2, int(Op.findb) + 1)
     loop op in [Op.nop, Op.block, Op.loop, Op.end, Op.else_, Op.br, Op.trap, Op.zeroslots, Op.vzu]: modes[int(op)] = 0
@@ -34,5 +37,8 @@ ir_operand_layouts = () -> int[]:
     loop op in [Op.intr, Op.call, Op.calli, Op.callc, Op.syscall, Op.memcpy, Op.memset, Op.scanbytes, Op.findb, Op.copy, Op.zero]: modes[int(op)] |= IR_CALL
     modes[int(Op.zext32)] |= IR_NARROW32
     loop op in [Op.overflow_add, Op.overflow_sub, Op.overflow_mul]: modes[int(op)] |= IR_OVERFLOW
+    loop op in [Op.iconst, Op.fconst, Op.slot, Op.gaddr, Op.daddr, Op.add]: modes[int(op)] |= IR_LOC_DEF
+    loop op in [Op.block, Op.loop, Op.if_, Op.end, Op.brif, Op.brtable, Op.zeroslots, Op.callc]: modes[int(op)] |= IR_BA_CTRL
+    loop op in [Op.checked_add, Op.checked_sub, Op.checked_mul]: modes[int(op)] |= IR_CHECKED
     modes
 

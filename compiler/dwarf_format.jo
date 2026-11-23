@@ -23,6 +23,7 @@ struct DwarfInput:
     files: *(SrcFile[])
     global_ids: *(int[])
     ir_positions: *(int[])
+    ir_lines: *(int[]) = null
     dbg_raw: *(int[])
     dbg_cfi: *(int[])
     line_rows: *(int[])
@@ -90,23 +91,29 @@ dw_dewy = false
 dw_name = (t: int) -> str: dw_inputs[0].host[0].type_str(t, dw_dewy)
 
 dwarf_image = (text_addr: int, text_len: int, main_path: str, version: str, dir: str) -> (str, u8[])[]:
-    if dw_inputs[0].line_rows[0].len() == 0: return []
+    rows_count = dw_inputs[0].line_rows[0].len()
+    rows = data(dw_inputs[0].line_rows[0])
+    positions = data(dw_inputs[0].ir_positions[0])
+    sources_count = dw_inputs[0].files[0].len()
+    sources = data(dw_inputs[0].files[0])
+    if rows_count == 0: return []
     dw_dewy = ends_with(main_path, ".dewy")
     abs = (p: str) -> str:
         if is_abs_path(p): return p
         "{dir}/{p}"
     # files, numbered from 1
-    fidx = fill(0, dw_inputs[0].files[0].len())
+    fidx = fill(0, sources_count)
+    file_index = data(fidx)
     fnames: str[]
     k = 0
-    loop k < dw_inputs[0].line_rows[0].len():
-        if dw_inputs[0].line_rows[0][k + 1] == 0:
+    loop k < rows_count:
+        if rows[k + 1] == 0:
             k += 2
             continue
-        f = dw_pos_file(dw_inputs[0].ir_positions[0][dw_inputs[0].line_rows[0][k + 1]])
-        if f >= 0 and f < dw_inputs[0].files[0].len() and fidx[f] == 0:
-            fnames.push(abs(dw_inputs[0].files[0][f].path))
-            fidx[f] = fnames.len()
+        f = dw_pos_file(positions[rows[k + 1]])
+        if f >= 0 and f < sources_count and file_index[f] == 0:
+            fnames.push(abs(sources[f].path))
+            file_index[f] = fnames.len()
         k += 2
     # .debug_line: header, then the program (one sequence over all of .text)
     hdr: u8[]
@@ -125,50 +132,105 @@ dwarf_image = (text_addr: int, text_len: int, main_path: str, version: str, dir:
         hdr.push(0)
     hdr.push(0)
     prog: u8[]
-    prog.reserve(dw_inputs[0].line_rows[0].len() * 3 + 64)
-    prog.push(0)                # DW_LNE_set_address
-    uleb(prog, 9)
-    prog.push(2)
-    put64(prog, text_addr)
+    pcap = rows_count * 6 + 128
+    prog.reserve(pcap)
+    __set_len(prog, pcap)
+    pp = data(prog)
+    pu = 0
+    pp[pu] = 0; pu += 1         # DW_LNE_set_address
+    pp[pu] = 9; pu += 1
+    pp[pu] = 2; pu += 1
+    ((pp + pu) as *int)[0] = text_addr; pu += 8
+    has_ir_lines = dw_inputs[0].ir_lines != null
+    if has_ir_lines: dw_inputs[0].host[0].ir_line(0)
+    ir_lines_p: *int = if has_ir_lines: data(dw_inputs[0].ir_lines[0]) else: null
+    ir_lines_n = if has_ir_lines: dw_inputs[0].ir_lines[0].len() else: 0
     addr = 0
     line = 1
     file = 1
+    last_pos_id = -1
+    last_line = 0
     k = 0
-    loop k < dw_inputs[0].line_rows[0].len():
-        p = dw_inputs[0].ir_positions[0][dw_inputs[0].line_rows[0][k + 1]]
+    loop k < rows_count:
+        pos_id = rows[k + 1]
         f = file
         l = 0                       # (0: code with no source line)
-        if dw_inputs[0].line_rows[0][k + 1] != 0:
+        if pos_id != 0:
+            p = positions[pos_id]
             pf = dw_pos_file(p)
             f = 0
-            if pf >= 0 and pf < dw_inputs[0].files[0].len(): f = fidx[pf]
+            if pf >= 0 and pf < sources_count: f = file_index[pf]
             if f == 0:
                 k += 2
                 continue
-            l = dw_inputs[0].host[0].ir_line(dw_inputs[0].line_rows[0][k + 1])
-        if f == file and l == line and dw_inputs[0].line_rows[0][k + 1] != 0 and k > 0:
+            if pos_id == last_pos_id: l = last_line
+            else:
+                l = if not has_ir_lines: dw_inputs[0].host[0].ir_line(pos_id) else if pos_id > 0 and pos_id < ir_lines_n: ir_lines_p[pos_id] else: 0
+                last_pos_id = pos_id
+                last_line = l
+        if f == file and l == line and pos_id != 0 and k > 0:
             k += 2
             continue
+        if pu + 40 > pcap:
+            pcap = pcap * 2 + 128
+            prog.reserve(pcap)
+            __set_len(prog, pcap)
+            pp = data(prog)
         if f != file:
-            prog.push(4)            # DW_LNS_set_file
-            uleb(prog, f)
+            pp[pu] = 4; pu += 1     # DW_LNS_set_file
+            v = f
+            if v < 128: pp[pu] = u8(v); pu += 1
+            else:
+                loop true:
+                    b = v & 127
+                    v = v >> 7
+                    if v != 0: pp[pu] = u8(b | 128); pu += 1
+                    else: pp[pu] = u8(b); pu += 1; break
             file = f
         if l != line:
-            prog.push(3)            # DW_LNS_advance_line
-            sleb(prog, l - line)
+            pp[pu] = 3; pu += 1     # DW_LNS_advance_line
+            d = l - line
+            if d >= -64 and d < 64: pp[pu] = u8(d & 127); pu += 1
+            else:
+                loop true:
+                    b = d & 127
+                    d = d >> 7
+                    if (d == 0 and (b & 64) == 0) or (d == -1 and (b & 64) != 0): pp[pu] = u8(b); pu += 1; break
+                    pp[pu] = u8(b | 128); pu += 1
             line = l
-        if dw_inputs[0].line_rows[0][k] != addr:
-            prog.push(2)            # DW_LNS_advance_pc
-            uleb(prog, dw_inputs[0].line_rows[0][k] - addr)
-            addr = dw_inputs[0].line_rows[0][k]
-        prog.push(1)                # DW_LNS_copy
+        rk = rows[k]
+        if rk != addr:
+            pp[pu] = 2; pu += 1     # DW_LNS_advance_pc
+            v = rk - addr
+            if v < 128: pp[pu] = u8(v); pu += 1
+            else:
+                loop true:
+                    b = v & 127
+                    v = v >> 7
+                    if v != 0: pp[pu] = u8(b | 128); pu += 1
+                    else: pp[pu] = u8(b); pu += 1; break
+            addr = rk
+        pp[pu] = 1; pu += 1         # DW_LNS_copy
         k += 2
+    if pu + 20 > pcap:
+        pcap = pu + 32
+        prog.reserve(pcap)
+        __set_len(prog, pcap)
+        pp = data(prog)
     if text_len > addr:
-        prog.push(2)
-        uleb(prog, text_len - addr)
-    prog.push(0)                    # DW_LNE_end_sequence
-    uleb(prog, 1)
-    prog.push(1)
+        pp[pu] = 2; pu += 1
+        v = text_len - addr
+        if v < 128: pp[pu] = u8(v); pu += 1
+        else:
+            loop true:
+                b = v & 127
+                v = v >> 7
+                if v != 0: pp[pu] = u8(b | 128); pu += 1
+                else: pp[pu] = u8(b); pu += 1; break
+    pp[pu] = 0; pu += 1             # DW_LNE_end_sequence
+    pp[pu] = 1; pu += 1
+    pp[pu] = 1; pu += 1
+    __set_len(prog, pu)
     line_sec: u8[]
     put32(line_sec, 2 + 4 + hdr.len() + prog.len())
     put16(line_sec, 4)

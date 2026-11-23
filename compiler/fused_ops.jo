@@ -60,7 +60,21 @@ fz_cand = (f: int, pinit: int) -> bool:
     true
 # (a lowered function that is its instance's own, not a version made for known callbacks:
 # callback_specialize.jo; versions are lowered and emitted here, and what calls one too)
-fz_canon = (lf: int) -> bool: lfuncs[lf].kind != LK_INST or (inst_lf.get(lfuncs[lf].inst) ?? -1) == lf
+fz_canon = (lf: int) -> bool:
+    if lfuncs[lf].kind != LK_INST: return true
+    fi = lfuncs[lf].inst
+    fi >= 0 and fi < inst_lf_fast.len() and int(inst_lf_fast[fi]) - 1 == lf
+fz_find_helper = (hk: int, t: int, p: int) -> int:
+    n = helper_slots.len()
+    if n == 0: return -1
+    mask = n - 1
+    i = ((hk * 73856093) xor (t * 19349663) xor (p * 83492791)) & mask
+    loop int(helper_slots[i]) != 0:
+        idx = int(helper_slots[i]) - 1
+        h = data(lfuncs) + idx
+        if int(h[0].hkind) == hk and h[0].htype == t and h[0].inst == p: return idx
+        i = (i + 1) & mask
+    -1
 fz_extern = (f: int) -> bool:
     d = int(fns[f].decl)
     d != 0 and has_flag(d, NF_EXTERN)
@@ -237,10 +251,13 @@ fz_map_rest = ():
             a = x.ents[e + 2]
             if kind == 0:
                 if fz_mlf[x.w].get(local) == none:
-                    if let v = inst_lf.get(a): fz_mlf[x.w][local] = v
+                    if a >= 0 and a < inst_lf_fast.len():
+                        v = int(inst_lf_fast[a]) - 1
+                        if v >= 0: fz_mlf[x.w][local] = v
             else if kind == 1:
                 if fz_mlf[x.w].get(local) == none:
-                    if let v = helper_lf.get("{a}:{x.ents[e + 3]}:{x.ents[e + 4]}"): fz_mlf[x.w][local] = v
+                    v = fz_find_helper(a, x.ents[e + 3], x.ents[e + 4])
+                    if v >= 0: fz_mlf[x.w][local] = v
             else if kind == 2:
                 if fz_mro[x.w].get(local) == none:
                     if let v = str_off.get(x.texts[t]): fz_mro[x.w][local] = v

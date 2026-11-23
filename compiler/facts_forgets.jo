@@ -804,9 +804,9 @@ fact_exposed = (p: PlaceIdentity) -> bool:
     # mutable argument, for that call: its summary names what it writes)
     # A lock place cannot escape its guard. Mutable actuals still invalidate
     # it at their calls; unrelated calls cannot reach it through the mutex.
-    if place_locked.has(p.declaration): return false
+    if place_locked.len() > 0 and place_locked.has(p.declaration): return false
     flags = int(locals[p.declaration].flags)
-    if flags & LF_BYREF != 0 and (flags & LF_VALUEITER != 0 or map_loop_values.has(p.declaration)): flags &= ~LF_BYREF
+    if flags & LF_BYREF != 0 and (flags & LF_VALUEITER != 0 or (map_loop_values.len() > 0 and map_loop_values.has(p.declaration))): flags &= ~LF_BYREF
     if flags & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_BYREF | LF_EXPOSED) == 0 and flags & LF_ADDR != 0 and (is_map_type(int(locals[p.declaration].type)) or fact_pool_type(int(locals[p.declaration].type))) and fact_dewy_local(p.declaration): return false
     # (and so is any Dewy local's that nothing captures, aliases or exposes:
     # `@xs` lends it to that call alone, which fact_forget_mutable_args havocs)

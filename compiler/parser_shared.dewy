@@ -138,31 +138,50 @@ habit=(i:SharedWord want:Tok):>void=>$unsafe {
     }
 }
 
+expect_fail=(k:Tok what:string):>void=>$unsafe {
+    habit(ti k)
+    let w=if what =? "" {tok_name(k)} else {what}
+    let tk=p_toks[ti].kind
+    if tk =? 'newline' or tk =? 'indent' or tk =? 'dedent' or tk =? 'eof' {fatal(prev_end() "expected {w} at the end of this line")}
+    if tk =? 'ident' or tk =? 'int_lit' {fatal(cur_pos() "expected {w}, found '{tok_src(ti)}'")}
+    fatal(cur_pos() "expected {w}, found {tok_name(tk)}")
+}
+
 expect=(k:Tok what:string):>int64=>$unsafe {
-    if p_toks[ti].kind not=? k {
-        habit(ti k)
-        let w=if what =? "" {tok_name(k)} else {what}
-        let tk=p_toks[ti].kind
-        if tk =? 'newline' or tk =? 'indent' or tk =? 'dedent' or tk =? 'eof' {fatal(prev_end() "expected {w} at the end of this line")}
-        if tk =? 'ident' or tk =? 'int_lit' {fatal(cur_pos() "expected {w}, found '{tok_src(ti)}'")}
-        fatal(cur_pos() "expected {w}, found {tok_name(tk)}")
-    }
-    advance()
+    let i=ti
+    if p_toks[i].kind not=? k {expect_fail(k what)}
+    if i <? p_ntoks - 1 {ti = i + 1}
+    i
+}
+
+expect_ident_fail=(what:string):>int64=>$unsafe {
+    if is_keyword_tok(p_toks[ti].kind) and p_toks[ti].kind not=? 'kw_mut' {keyword_name_error(ti)}
+    # (let [a, b] = pair, const {kind, x} = g: JavaScript's destructuring)
+    if p_toks[ti].kind =? 'lbrack' and (what =? "variable name" or what =? "constant name") {fatal(p_toks[ti].pos "an array is unpacked without brackets: `a, b = xs` (it must have exactly that many elements); a tuple the same way")}
+    if p_toks[ti].kind =? 'lbrace' and (what =? "variable name" or what =? "constant name") {fatal(p_toks[ti].pos "a struct's fields are read one by one: `kind, x = g.kind, g.x`, or used as they are, `g.kind`")}
+    expect_fail('ident' what)
+    0
 }
 
 # identifier tokens carry their interned name in ival
 expect_ident=(what:string):>int64=>$unsafe {
-    if p_toks[ti].kind not=? 'ident' and is_keyword_tok(p_toks[ti].kind) and p_toks[ti].kind not=? 'kw_mut' {keyword_name_error(ti)}
-    # (let [a, b] = pair, const {kind, x} = g: JavaScript's destructuring)
-    if p_toks[ti].kind =? 'lbrack' and (what =? "variable name" or what =? "constant name") {fatal(p_toks[ti].pos "an array is unpacked without brackets: `a, b = xs` (it must have exactly that many elements); a tuple the same way")}
-    if p_toks[ti].kind =? 'lbrace' and (what =? "variable name" or what =? "constant name") {fatal(p_toks[ti].pos "a struct's fields are read one by one: `kind, x = g.kind, g.x`, or used as they are, `g.kind`")}
-    p_toks[expect('ident' what)].ival
+    let i=ti
+    if p_toks[i].kind =? 'ident' {
+        if i <? p_ntoks - 1 {ti = i + 1}
+        return p_toks[i].ival
+    }
+    expect_ident_fail(what)
 }
 
 # (also `none`, after a dot or as an enum variant: E.none, .none)
-expect_name=(what:string):>int64=>{
-    if is_soft_kw(pk()) or pk() =? 'kw_none' {return intern(tok_src(advance()))}
-    expect_ident(what)
+expect_name=(what:string):>int64=>$unsafe {
+    let i=ti
+    if p_toks[i].kind =? 'ident' {
+        if i <? p_ntoks - 1 {ti = i + 1}
+        return p_toks[i].ival
+    }
+    if is_soft_kw(p_toks[i].kind) or p_toks[i].kind =? 'kw_none' {return intern(tok_src(advance()))}
+    expect_ident_fail(what)
 }
 
 comp_ident=(name:SharedWord pos:SharedWord):>int64=>$unsafe {

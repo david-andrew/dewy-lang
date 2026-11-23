@@ -21,42 +21,54 @@ TypeLayoutInput:type=[
     ptr_size:ptr<int64>
 ]
 let tl_inputs:ptr<TypeLayoutInput>=$unsafe (uint64(0) as ptr<TypeLayoutInput>)
+let tl_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
 let tl_holds_seen:array<int32>=[]
 let tl_holds_gen:LWord=0
 let tl_box_dflt:dict<int64 int64>=[]
 let tl_box_dflt_busy:array<int64>=[]
-type_layout_bind=(input:ptr<TypeLayoutInput>):>LWord=>{
-    tl_inputs=input; tl_holds_seen=[]; tl_holds_gen=0; tl_box_dflt=[]; tl_box_dflt_busy=[]; 0
+type_layout_bind=(input:ptr<TypeLayoutInput>):>LWord=>$unsafe {
+    tl_inputs=input; tl_types=input[0].types; tl_holds_seen=[]; tl_holds_gen=0; tl_box_dflt=[]; tl_box_dflt_busy=[]; 0
 }
 tl_prune=(t0:LWord):>LWord=>$unsafe {
     let t=t0
-    loop t not=? 0 and tl_inputs[0].types[0].ptr[t].kind =? 'var' and tl_inputs[0].types[0].ptr[t].ref not=? 0 {t=LWord(tl_inputs[0].types[0].ptr[t].ref)}
+    let tp=tl_types[0].ptr
+    loop t not=? 0 and tp[t].kind =? 'var' and tp[t].ref not=? 0 {t=LWord(tp[t].ref)}
     t
 }
 tl_targ=(t:LWord i:LWord):>LWord=>$unsafe {
-    LWord(tl_inputs[0].args[0].ptr[LWord(tl_inputs[0].types[0].ptr[t].args) + i])
+    LWord(tl_inputs[0].args[0].ptr[LWord(tl_types[0].ptr[t].args) + i])
 }
 tl_align_up=(x:LWord a:LWord):>LWord=>$unsafe {
     (x + a - 1) & ((a - 1) xor -1)
 }
 tl_size=(t:LWord):>LWord=>$unsafe {
+    let tp=tl_types[0].ptr
+    if t not=? 0 and LWord(tp[t].flags) & TF_LAID_OUT not=? 0 and tp[t].kind not=? 'var' {return LWord(tp[t].size)}
     tl_layout(t)
-    LWord(tl_inputs[0].types[0].ptr[tl_prune(t)].size)
+    LWord(tl_types[0].ptr[tl_prune(t)].size)
 }
 tl_align=(t:LWord):>LWord=>$unsafe {
+    let tp=tl_types[0].ptr
+    if t not=? 0 and LWord(tp[t].flags) & TF_LAID_OUT not=? 0 and tp[t].kind not=? 'var' {
+        let a=LWord(tp[t].align)
+        return if a =? 0 {1} else {a}
+    }
     tl_layout(t)
-    let a=LWord(tl_inputs[0].types[0].ptr[tl_prune(t)].align)
+    let a=LWord(tl_types[0].ptr[tl_prune(t)].align)
     if a =? 0 {return 1}
     a
 }
 tl_managed=(t0:LWord):>bool=>$unsafe {
     let t=quantity_base(t0)
-    if tl_inputs[0].types[0].ptr[t].rep =? 'tagged_int' {return true}
-    let k=tl_inputs[0].types[0].ptr[t].kind
+    let tp=tl_types[0].ptr
+    if tp[t].rep =? 'tagged_int' {return true}
+    let k=tp[t].kind
     if k =? 'str_' or k =? 'array' or k =? 'fn_' or k =? 'polyfn' or k =? 'callable' or k =? 'box' {return true}
     if k =? 'struct_' or k =? 'enum_' or k =? 'tuple' or k =? 'opt' or k =? 'fixed' {
+        let f=LWord(tp[t].flags)
+        if f & TF_LAID_OUT not=? 0 {return f & TF_MANAGED not=? 0}
         tl_layout(t)
-        return LWord(tl_inputs[0].types[0].ptr[t].flags) & TF_MANAGED not=? 0
+        return LWord(tl_types[0].ptr[t].flags) & TF_MANAGED not=? 0
     }
     false
 }
@@ -189,14 +201,16 @@ tl_endless_field=(si:LWord f:LWord vi:LWord):>void=>$unsafe {
 # Keep the already-laid-out path outside the recursive worker's spill frame.
 # This view ends before the worker can call lazy resolution or grow an arena.
 tl_layout=(t0:LWord):>void=>$unsafe {
-    let types=tl_inputs[0].types[0].ptr
-    let t=t0
-    loop t not=? 0 and types[t].kind =? 'var' and types[t].ref not=? 0 {t=LWord(types[t].ref)}
-    if LWord(types[t].flags) & TF_LAID_OUT not=? 0 {return}
-    tl_layout_body(t)
+    let tp=tl_types[0].ptr
+    if t0 not=? 0 and LWord(tp[t0].flags) & TF_LAID_OUT not=? 0 and tp[t0].kind not=? 'var' {return}
+    tl_layout_body(t0)
 }
-tl_layout_body=(t:LWord):>void=>$unsafe {
-    let k=tl_inputs[0].types[0].ptr[t].kind
+tl_layout_body=(t0:LWord):>void=>$unsafe {
+    let tp=tl_types[0].ptr
+    let t=t0
+    loop t not=? 0 and tp[t].kind =? 'var' and tp[t].ref not=? 0 {t=LWord(tp[t].ref)}
+    if LWord(tp[t].flags) & TF_LAID_OUT not=? 0 {return}
+    let k=tp[t].kind
     let size:LWord=0
     let al:LWord=1
     let m=false

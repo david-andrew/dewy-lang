@@ -32,47 +32,88 @@ CheckerInstanceInput:type=[
     void_type:ptr<int64>
 ]
 let ci_input:ptr<CheckerInstanceInput>=$unsafe (uint64(0) as ptr<CheckerInstanceInput>)
-checker_instances_bind=(input:ptr<CheckerInstanceInput>):>CIWord=>{ci_input=input;0}
+let ci_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let ci_fns:ptr<array<FnInst>>=$unsafe (uint64(0) as ptr<array<FnInst>>)
+let ci_decls:ptr<array<DeclInfo>>=$unsafe (uint64(0) as ptr<array<DeclInfo>>)
+let ci_index:ptr<dict<FnInstanceKey int64>>=$unsafe (uint64(0) as ptr<dict<FnInstanceKey int64>>)
+checker_instances_bind=(input:ptr<CheckerInstanceInput>):>CIWord=>$unsafe {
+    ci_input=input
+    ci_nodes=input[0].nodes
+    ci_fns=input[0].functions
+    ci_decls=input[0].declarations
+    ci_index=input[0].index
+    0
+}
 ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe {
+    let nd=ci_nodes[0].ptr + decl
     if dir_code_any {
-        let file=ci_input[0].nodes[0].ptr[decl].pos >> 40
+        let file=nd[0].pos >> 40
         if file >=? 0 and file <? dir_code_masks.length and dir_code_masks[file] not=? 0 {return ci_get_policy_inst(decl targs use_pos)}
     }
-    if ci_input[0].nodes[0].ptr[decl].kind =? 'lambda' {return poly_inst(decl targs use_pos)}
+    if nd[0].kind =? 'lambda' {return poly_inst(decl targs use_pos)}
     # The host's preflight only acts on extern or attributed declarations.
-    if (CIWord(ci_input[0].nodes[0].ptr[decl].flags) & 4) not=? 0 or ci_input[0].nodes[0].ptr[decl].c not=? 0 {instance_preflight(decl use_pos)}
+    if (CIWord(nd[0].flags) & 4) not=? 0 or nd[0].c not=? 0 {instance_preflight(decl use_pos)}
     # Preserve the original hot cached-signature guard without entering the
     # recursive signature constructor (which saves a full working frame).
-    let di=CIWord(ci_input[0].nodes[0].ptr[decl].sym)
+    let di=CIWord(ci_nodes[0].ptr[decl].sym)
     if di =? 0 {di=cs_decl_info(decl)}
-    let sig=ci_input[0].declarations[0].ptr[di].sig
-    if not sig.done {sig=fn_sig(decl)}
+    if not ci_decls[0].ptr[di].sig.done {fn_sig(decl);}
     if dir_code_any and (dir_code_by_inst.length not=? 0 or dir_code_mask(use_pos >> 40) not=? 0) {
-        if sig.generic and dir_code_generic(decl use_pos) {return ci_get_policy_inst(decl targs use_pos)}
-        if not sig.generic {dir_code_foreign_warn(decl use_pos)}
+        let is_gen=ci_decls[0].ptr[di].sig.generic
+        if is_gen and dir_code_generic(decl use_pos) {return ci_get_policy_inst(decl targs use_pos)}
+        if not is_gen {dir_code_foreign_warn(decl use_pos)}
     }
-    let concrete=targs.length >? 0
-    loop t in targs {if tu_has_var(t) {concrete=false}}
-    if concrete {
-        let found=ci_input[0].index[0].get(FnInstanceKey[decl targs])
-        if found not=? none {
-            let f=found ?? 0
-            if ci_input[0].functions[0].ptr[f].ret =? 0 {ensure_ret(f use_pos)}
-            return f
+    let tlen=targs.length
+    if tlen =? 0 {
+        let ilen=ci_decls[0].ptr[di].insts.length
+        if ilen >? 0 {
+            let ip=ci_decls[0].ptr[di].insts.ptr
+            let f0=ip[0]
+            let fp=ci_fns[0].ptr
+            if fp[f0].targs.length =? 0 {
+                if fp[f0].ret =? 0 {ensure_ret(f0 use_pos)}
+                return f0
+            }
+            loop ii in [1..ilen) {
+                let f=ip[ii]
+                if fp[f].targs.length =? 0 {
+                    if fp[f].ret =? 0 {ensure_ret(f use_pos)}
+                    return f
+                }
+            }
         }
     } else {
-        loop f in ci_input[0].declarations[0].ptr[di].insts {
-            let same=ci_input[0].functions[0].ptr[f].targs.length =? targs.length
-            loop k in [0..targs.length) {
-                if not same {break}
-                if not tu_equal(ci_input[0].functions[0].ptr[f].targs[k] targs[k]) {same=false;break}
-            }
-            if same {
-                if ci_input[0].functions[0].ptr[f].ret =? 0 {ensure_ret(f use_pos)}
+        let concrete=true
+        let tp=targs.ptr
+        loop k in [0..tlen) {if tu_has_var(tp[k]) {concrete=false; break}}
+        if concrete {
+            let found=ci_index[0].get(FnInstanceKey[decl targs])
+            if found not=? none {
+                let f=found ?? 0
+                if ci_fns[0].ptr[f].ret =? 0 {ensure_ret(f use_pos)}
                 return f
+            }
+        } else {
+            let ilen=ci_decls[0].ptr[di].insts.length
+            let ip=ci_decls[0].ptr[di].insts.ptr
+            let fp_arr=ci_fns[0].ptr
+            loop ii in [0..ilen) {
+                let f=ip[ii]
+                if fp_arr[f].targs.length =? tlen {
+                    let same=true
+                    let fp=fp_arr[f].targs.ptr
+                    loop k in [0..tlen) {
+                        if not tu_equal(fp[k] tp[k]) {same=false;break}
+                    }
+                    if same {
+                        if fp_arr[f].ret =? 0 {ensure_ret(f use_pos)}
+                        return f
+                    }
+                }
             }
         }
     }
+    let sig=ci_input[0].declarations[0].ptr[di].sig
     let f=instance_create(decl use_pos)
     let zt:array<int64>=[]
     loop t in targs {

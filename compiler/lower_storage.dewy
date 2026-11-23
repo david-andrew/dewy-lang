@@ -35,10 +35,9 @@ hdr_load=(p:LSWord off:LSWord):>int64=>$unsafe {
 hdr_store=(p:LSWord off:LSWord v:LSWord):>void=>$unsafe {
     e_store(p off v 8 | M_HDR);
 }
-lower_type_plan=(t0:LSWord):>ptr<LowerTypePlan>=>$unsafe {
+lower_type_plan_fill=(t0:LSWord):>ptr<LowerTypePlan>=>$unsafe {
     if t0 >=? lower_types.length {lower_types.resize(max(t0 + 1 lower_types.length * 2));}
     let plan=lower_types.ptr + t0
-    if plan[0].epoch =? lower_epoch {return plan}
     let t=quantity_base(t0)
     let k=types.ptr[t].kind
     let c=VC_INT
@@ -54,8 +53,15 @@ lower_type_plan=(t0:LSWord):>ptr<LowerTypePlan>=>$unsafe {
     plan[0].epoch = lower_epoch;
     return plan
 }
-vc=(t0:LSWord):>int64=>$unsafe {
-    if lower_planning {return lower_type_plan(t0)[0].value_class}
+lower_type_plan=(t0:LSWord):>ptr<LowerTypePlan>=>$unsafe {
+    if t0 <? lower_types.length {
+        let plan=lower_types.ptr + t0
+        if plan[0].epoch =? lower_epoch {return plan}
+    }
+    return lower_type_plan_fill(t0)
+}
+vc_slow=(t0:LSWord):>int64=>$unsafe {
+    if lower_planning {return lower_type_plan_fill(t0)[0].value_class}
     let t=quantity_base(t0)
     let k=types.ptr[t].kind
     if k =? 'void_' or k =? 'typeval' or k =? 'module' {return VC_VOID}
@@ -63,8 +69,21 @@ vc=(t0:LSWord):>int64=>$unsafe {
     if is_aggregate(t) {return VC_AGG}
     return VC_INT
 }
+vc=(t0:LSWord):>int64=>$unsafe {
+    if lower_planning and t0 <? lower_types.length {
+        let plan=lower_types.ptr + t0
+        if plan[0].epoch =? lower_epoch {return plan[0].value_class}
+    }
+    vc_slow(t0)
+}
 vt_of=(t0:LSWord):>int64=>$unsafe {
-    if lower_planning {return lower_type_plan(t0)[0].vtype}
+    if lower_planning {
+        if t0 <? lower_types.length {
+            let plan=lower_types.ptr + t0
+            if plan[0].epoch =? lower_epoch {return plan[0].vtype}
+        }
+        return lower_type_plan_fill(t0)[0].vtype
+    }
     let t=quantity_base(t0)
     if types.ptr[t].kind =? 'float_' {
         if LSWord(types.ptr[t].bits) =? 32 {return VS}
@@ -158,26 +177,36 @@ retain=(v:LSWord t0:LSWord):>void=>$unsafe {
         return
     # during a parallel job refcounts must be updated atomically (out of line)
     }
-    blk();
-    let done=ctl
-    iff(rt_global("__mt_active"));
-    let was=ir_cold
-    ir_cold=true
-    e_call1(rt("__rc_inc") v -1);
-    ir_cold=was
-    br_to(done);
-    endc();
+    if not rc_assume_st {
+        blk();
+        let done=ctl
+        iff(rt_global("__mt_active"));
+        let was=ir_cold
+        ir_cold=true
+        e_call1(rt("__rc_inc") v -1);
+        ir_cold=was
+        br_to(done);
+        endc();
+        iff(e_bin('ne' VI v e_iconst(0)));
+        let rc=hdr_load(v 0)
+        iff(e_bin('gts' VI rc e_iconst(0)));
+        hdr_store(v 0 e_addi(rc 1));
+        endc();
+        endc();
+        endc();
+        return
+    }
     iff(e_bin('ne' VI v e_iconst(0)));
     let rc=hdr_load(v 0)
     iff(e_bin('gts' VI rc e_iconst(0)));
     hdr_store(v 0 e_addi(rc 1));
     endc();
     endc();
-    endc();
 }
 # A helper's loop over owning elements: every element takes the same path, so spell
 # it out instead of the compact register-preserving call of ordinary release sites.
 let release_expanded=false
+let rc_assume_st=false
 # Last reference: the out-of-line path frees (and releases elements). Nothing else
 # can see a plain object now, so the count needs no final write.
 release_last=(v:LSWord t:LSWord):>void=>$unsafe {
@@ -189,15 +218,23 @@ release_element=(v:LSWord t:LSWord):>void=>$unsafe {
     iff(e_bin('ne' VI v e_iconst(0)));
     let rc=hdr_load(v 0)
     iff(e_bin('gts' VI rc e_iconst(0)));
-    iff(rt_global("__mt_active"));
-    release_call(v t);
-    els();
-    iff(e_bin('gts' VI rc e_iconst(1)));
-    hdr_store(v 0 e_addi(rc -1));
-    els();
-    release_last(v t);
-    endc();
-    endc();
+    if not rc_assume_st {
+        iff(rt_global("__mt_active"));
+        release_call(v t);
+        els();
+        iff(e_bin('gts' VI rc e_iconst(1)));
+        hdr_store(v 0 e_addi(rc -1));
+        els();
+        release_last(v t);
+        endc();
+        endc();
+    } else {
+        iff(e_bin('gts' VI rc e_iconst(1)));
+        hdr_store(v 0 e_addi(rc -1));
+        els();
+        release_last(v t);
+        endc();
+    }
     endc();
     endc();
 }
@@ -226,15 +263,29 @@ release=(v:LSWord t0:LSWord):>void=>$unsafe {
         note_mt_active();
         return
     }
-    blk();
-    let done=ctl
-    iff(rt_global("__mt_active"));
-    let was=ir_cold
-    ir_cold=true
-    release_call(v t);
-    ir_cold=was
-    br_to(done);
-    endc();
+    if not rc_assume_st {
+        blk();
+        let done=ctl
+        iff(rt_global("__mt_active"));
+        let was=ir_cold
+        ir_cold=true
+        release_call(v t);
+        ir_cold=was
+        br_to(done);
+        endc();
+        iff(e_bin('ne' VI v e_iconst(0)));
+        let rc=hdr_load(v 0)
+        iff(e_bin('gts' VI rc e_iconst(1)));
+        hdr_store(v 0 e_addi(rc -1));
+        els();
+        iff(e_bin('eq' VI rc e_iconst(1)));
+        release_last(v t);
+        endc();
+        endc();
+        endc();
+        endc();
+        return
+    }
     iff(e_bin('ne' VI v e_iconst(0)));
     let rc=hdr_load(v 0)
     iff(e_bin('gts' VI rc e_iconst(1)));
@@ -242,7 +293,6 @@ release=(v:LSWord t0:LSWord):>void=>$unsafe {
     els();
     iff(e_bin('eq' VI rc e_iconst(1)));
     release_last(v t);
-    endc();
     endc();
     endc();
     endc();
@@ -386,6 +436,7 @@ stmt_end=():>void=>$unsafe {
     let end_=tl_values.length
     let nop=tl_nop.pop()
     tl_cond.pop();
+    if start =? end_ {return}
     # Append the demanded zero inventory directly into the IR argument arena.
     let args_start=ir.args.length
     loop i in [start..end_) {
@@ -631,11 +682,10 @@ box_unique=(slot:LSWord t:LSWord):>int64=>$unsafe {
     let r=vreg(VI)
     e_mov(r p);
     iff(e_bin('ne' VI hdr_load(p 0) e_iconst(1)));
-    let was2=ir_cold
-    ir_cold=true
-    e_mov(r e_call1(lf_helper(HK.boxuniq bt 0) p VI));
+    let q=e_call1(lf_helper(HK.boxuniq bt 0) p VI)
+    ir.code.ptr[ir.code.length - 1].c = CALL_IF_SHARED;
+    e_mov(r q);
     e_store(slot 0 r ptr_size);
-    ir_cold=was2
     endc();
     return e_addi(r BOX_HDR)
 }
@@ -678,13 +728,15 @@ share_root=(l:LSWord):>int64=>$unsafe {
     return r
 }
 is_shared=(l:LSWord):>bool=>$unsafe {
-    return LSWord(locals.ptr[share_root(l)].flags) & LF_SHARED not=? 0
+    let fl=LSWord(locals.ptr[l].flags)
+    if fl & LF_CAPTURE =? 0 or fl & LF_VALUECAP not=? 0 {return fl & LF_SHARED not=? 0}
+    LSWord(locals.ptr[share_root(l)].flags) & LF_SHARED not=? 0
 }
 store_type=(l:int64):>int64=>$unsafe {
     let t:LSWord=LSWord(locals.ptr[l].type)
     if LSWord(locals.ptr[l].flags) & (LF_OWNERBORROW | LF_PARTBORROW) not=? 0 {return mk_ptr(t)}
     if is_shared(l) {return mk_array(t)}
-    if math_word_captures.has(l) {return T_INT}
+    if math_word_captures.length >? 0 and math_word_captures.has(l) {return T_INT}
     return t
 }
 cell_place=(l:LSWord):>Place=>$unsafe {
@@ -728,10 +780,8 @@ arr_unique=(slot_addr_or_place:Place at:LSWord):>void=>$unsafe {
     }
     iff(e_bin('ne' VI p e_iconst(0)));
     iff(e_bin('ne' VI hdr_load(p 0) e_iconst(1)));
-    let was=ir_cold
-    ir_cold=true
     let np=e_call1(lf_helper(HK.arruniq at 0) p VI)
-    ir_cold=was
+    ir.code.ptr[ir.code.length - 1].c = CALL_IF_SHARED;
     write_place(slot_addr_or_place at np);
     endc();
     endc();
@@ -776,7 +826,6 @@ finish_call=(ret:LSWord rv:LSWord rslot:LSWord):>Val=>$unsafe {
     let c=vc(ret)
     if c =? VC_AGG {return Val[e_slot(rslot) true rslot]}
     if c =? VC_VOID {return V(-1 false)}
-    if c =? VC_INT {return V(norm(rv ret) true)}
     return V(rv true)
 }
 result_from_slot=(rs:LSWord t:LSWord):>Val=>$unsafe {

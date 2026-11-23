@@ -110,6 +110,7 @@ demand_name = (name: int): return
 dewy_at = (pos: int) -> bool: false
 ensure_global = (g: int, use_pos: int, in_flow: bool = false): return
 jo_type_spelling = (nm: int, s: int, pos: int): return
+load_std_file = (n: str) -> bool: false
 method_modules = (t0: int) -> int[]: []
 module_lookup = (m: int, name: int) -> int: 0
 struct Module:
@@ -167,6 +168,9 @@ juxt_value_head = (n: int, head_kind: NK, head_text: str, t: int) -> bool: false
 ''',
     'string_domains.jo': r'''
 string_domain_members = (n: int) -> bool: false
+''',
+    'prelude.jo': r'''
+prelude_std_pending = false
 ''',
 }
 for _file, _definitions in EXTRA.items():

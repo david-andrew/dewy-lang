@@ -788,7 +788,10 @@ quantity_unit_text = (e: int) -> str:
 quantity_unit_syntax = (e: int) -> bool:
     k = nodes[e].kind
     if k == .tname:
+        prev_game_ok = game_lookup_ok
+        game_lookup_ok = false
         s = lookup(int(nodes[e].name))
+        game_lookup_ok = prev_game_ok
         if s < 0: return false
         sk = syms[s].kind
         return sk == .global or sk == .const_ or sk == .local

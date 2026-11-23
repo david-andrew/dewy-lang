@@ -1,4 +1,6 @@
 use 'check.jo'
+use 'checker_startup.dewy'
+use 'prelude.jo'
 use 'checks_thin.dewy'
 use 'diagnostic_exit.dewy'
 use 'icount.jo'
@@ -15,6 +17,10 @@ use 'checker_module_edges.dewy'
 
 load_module = (path: str, is_prelude: bool, from: int) -> int:
     key = module_path_key(path)
+    if not is_prelude and prelude_std_pending and starts_with(key, "{module_path_key(lib_dir)}/std/"):
+        load_std_prelude()
+    if not is_prelude and prelude_game_pending and starts_with(key, "{module_path_key(lib_dir)}/game/"):
+        load_game_prelude()
     ex = module_by_path.get(key) ?? -1
     if ex >= 0: return ex
     src = read_source(path)

@@ -60,9 +60,11 @@ id_from = 0
 # parser modes
 p_matrix = 0          # > 0 inside array brackets: a space separates elements
 p_index: int[]         # the arrays being indexed (for `end`)
+p_list_buf: int[]      # reusable stack buffer for child lists (args, blocks, brackets)
 
 p_id_async = 0
 p_id_await = 0
+p_id_underscore = 0
 
 
 # The frozen twin's operator precedence table, indexed by the token enum and built

@@ -281,6 +281,13 @@ dewy_route_member = (n: int, receiver: int) -> int:
 dewy_changes = (n: int, receiver: int, i: int, nested: bool) -> bool:
     if n == 0: return false
     k = nodes[n].kind
+    match k:
+        int_lit, float_lit, str_lit, bool_lit, none_lit, null_lit, dotname, hole, break_, continue_: return false
+        ident:
+            if has_flag(n, NF_MUT) and dewy_reaches(n, receiver):
+                return dewy_change_found(n, nested, dewy_route_member(n, receiver))
+            return false
+        _: pass
     found = false
     inner = nested or k == .lambda
     if k == .lambda:
@@ -291,9 +298,12 @@ dewy_changes = (n: int, receiver: int, i: int, nested: bool) -> bool:
         return found
     if k == .assign:
         target = int(nodes[n].a)
-        targets = if nodes[target].kind == .tuple: binding_leaves(kids(target)) else: [target]
-        loop t in targets:
-            if dewy_reaches(t, receiver): found = dewy_change_found(n, nested, dewy_route_member(t, receiver))
+        if nodes[target].kind != .tuple:
+            if dewy_reaches(target, receiver): found = dewy_change_found(n, nested, dewy_route_member(target, receiver))
+        else:
+            targets = binding_leaves(kids(target))
+            loop t in targets:
+                if dewy_reaches(t, receiver): found = dewy_change_found(n, nested, dewy_route_member(t, receiver))
     if (k == .for_ or k == .lhead) and has_flag(n, NF_MUT) and dewy_reaches(int(nodes[n].a), receiver):
         found = dewy_change_found(n, nested, dewy_route_member(int(nodes[n].a), receiver))
     if k == .call and nodes[int(nodes[n].a)].kind == .field:
@@ -303,26 +313,33 @@ dewy_changes = (n: int, receiver: int, i: int, nested: bool) -> bool:
             found = dewy_change_found(n, nested, dewy_route_member(base, receiver))
         # The receiver of a member call is marked as a possible place; judged above.
         if dewy_changes_within(base, receiver, i, inner): found = true
-        loop arg in kids(n):
-            if dewy_changes(arg, receiver, i, inner): found = true
+        nk = nkids(n)
+        loop ai in [0..nk):
+            if dewy_changes(kid(n, ai), receiver, i, inner): found = true
         return found
     if k == .field and nodes[n].name != 0 and dewy_reaches(int(nodes[n].a), receiver):
         if dewy_member_changes(int(nodes[n].a), int(nodes[n].name), receiver, i): found = dewy_change_found(n, nested, dewy_route_member(int(nodes[n].a), receiver))
-    if has_flag(n, NF_MUT) and (k == .ident or k == .field or k == .index) and dewy_reaches(n, receiver):
+    if has_flag(n, NF_MUT) and (k == .field or k == .index) and dewy_reaches(n, receiver):
         found = dewy_change_found(n, nested, dewy_route_member(n, receiver))
     if dewy_changes_within(n, receiver, i, inner): found = true
     found
 dewy_changes_within = (n: int, receiver: int, i: int, nested: bool) -> bool:
     found = false
     k = nodes[n].kind
-    if dewy_changes(int(nodes[n].a), receiver, i, nested): found = true
+    ca = int(nodes[n].a)
+    if ca != 0 and dewy_changes(ca, receiver, i, nested): found = true
     if k == .field: return found
-    if dewy_changes(int(nodes[n].b), receiver, i, nested): found = true
-    if dewy_changes(kid_c(n), receiver, i, nested): found = true
-    if dewy_changes(kid_d(n), receiver, i, nested): found = true
-    loop child in kids(n):
-        if dewy_changes(child, receiver, i, nested): found = true
+    cb = int(nodes[n].b)
+    if cb != 0 and dewy_changes(cb, receiver, i, nested): found = true
+    cc = kid_c(n)
+    if cc != 0 and dewy_changes(cc, receiver, i, nested): found = true
+    cd = kid_d(n)
+    if cd != 0 and dewy_changes(cd, receiver, i, nested): found = true
+    nk = nkids(n)
+    loop ci in [0..nk):
+        if dewy_changes(kid(n, ci), receiver, i, nested): found = true
     if k != .lambda and k != .fn_:
-        loop child in kids2(n):
-            if dewy_changes(child, receiver, i, nested): found = true
+        nk2 = nkids2(n)
+        loop ci in [0..nk2):
+            if dewy_changes(kid2(n, ci), receiver, i, nested): found = true
     found

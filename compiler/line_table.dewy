@@ -25,17 +25,31 @@ LineWord:type=int64<overflow='wrap'>
 # where each line of src starts: 0, then the offset after each newline. Newlines are
 # found by the bounded library search, shared with the lexer; O(bytes + lines).
 line_starts=(src:string):>array<int64>=>$unsafe {
-    let ls:array<int64>=[0]
-    # (the pointer of a view, not of a variable: a variable's would be its own copy)
     let n=LineWord((src as array<uint8>).length)
+    let ls:array<int64>=[]
+    let lcap=LineWord((n >> 5) + 16)
+    ls.reserve(int64(lcap))
+    __set_len(ls int64(lcap))
+    let lp=ls.ptr
+    lp[0]=0
+    let lcnt:LineWord=1
+    # (the pointer of a view, not of a variable: a variable's would be its own copy)
     let sp=(src as array<uint8>).ptr
     let i:LineWord=0
     loop i <? n {
         i=__find_newline(sp i n)
         if i >=? n {break}
         i+=1
-        ls.push(int64(i))
+        if lcnt =? lcap {
+            lcap=lcap * 2
+            ls.reserve(int64(lcap))
+            __set_len(ls int64(lcap))
+            lp=ls.ptr
+        }
+        lp[lcnt]=int64(i)
+        lcnt+=1
     }
+    __set_len(ls int64(lcnt))
     ls
 }
 

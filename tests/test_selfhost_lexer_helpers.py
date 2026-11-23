@@ -28,7 +28,7 @@ main = ():
         toks = lex(0, src)
         print("count:{toks.len()}")
         loop t in toks:
-            print("{int(t.kind)}:{t.pos}:{t.start}:{t.len}:{t.flags}:{t.ival}:{t.fval}")
+            print("{int(t.kind)}:{t.pos}:{t.start}:{t.len}:{t.flags}:{t.ival}")
     lx_src = "\"abc\"\n"
     lx_p = data(lx_src); lx_n = len(lx_src)
     print("skip:{lx_skip_str(0, false)}:{lx_body_end(0, 0)}")
