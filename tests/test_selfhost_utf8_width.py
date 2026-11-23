@@ -81,12 +81,18 @@ def expected(data):
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_selfhost_utf8_width_matches_unicodedata(compiler, tmp_path, release):
-    # (the whole range is compared only where Python's Unicode version is the tables')
-    words = texts(unicodedata.unidata_version == TABLE_VERSION)
     dewy = build(compiler, FIXTURES / 'utf8_width_dewy.dewy', tmp_path / 'width-dewy', release)
     jo = build(compiler, FIXTURES / 'utf8_width_jo.jo', tmp_path / 'width-jo', release) if leaf_oracle.builds_twin() else None
+    # (the recorded run uses only characters whose class is the same in every Unicode version)
+    words = texts(False)
     got = leaf_oracle.same(run(dewy, words), lambda: run(jo, words))
     assert got.decode().split('\n')[:-1] == [expected(w) for w in words]
+    # (the whole range is compared with unicodedata only where Python's Unicode version is the tables')
+    if unicodedata.unidata_version == TABLE_VERSION:
+        words = texts(True)
+        got = run(dewy, words)
+        if jo is not None: assert got == run(jo, words)
+        assert got.decode().split('\n')[:-1] == [expected(w) for w in words]
 
 
 def test_selfhost_utf8_width_known_widths(compiler, tmp_path):
