@@ -31,7 +31,7 @@ GLOBAL = ('lib/', 'stage0/', 'bootstrap/', 'tools/compiler/build.py', 'tools/cor
 # Directories whose mention by name is not a dependency on their contents (the repository root, the
 # output cache, and trees whose members a test names one by one), and the harness every test imports.
 NOT_WHOLE = ('', '.', 'tests', 'tests/cases', 'tests/fixtures', 'tests/fixtures/selfhost', 'bench', '__dewycache__')
-HARNESS = ('tests/support.py', 'tests/conftest.py')
+HARNESS = ('tests/support.py', 'tests/conftest.py', 'tests/leaf_oracle.py')
 IMPORT = re.compile(r'''(?m)^\s*(?:use|import)\s+['"]([\w./-]+\.(?:jo|dewy))['"]|\bp"([\w./-]+\.(?:jo|dewy))"''')
 PATHLIKE = re.compile(r'[\w./-]+')
 FILE_NAME = re.compile(r'([A-Za-z0-9_]+)\.(?:jo|dewy)\b')

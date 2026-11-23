@@ -38,12 +38,17 @@ def compare_builds(compiler, tmp_path, monkeypatch, leaves, paths, flags=((),)):
         # (the first program that differs: its text, and which output files differ)
         assert a[:5] == b[:5] and a[5].keys() == b[5].keys(), (a[:5], b[:5])
         assert a[5] == b[5], (a[0], a[1], [name for name in a[5] if a[5][name] != b[5][name]])
-    # (recorded outcomes stand in for the twin's builds when it is not built: tests/whole_oracle.py)
+    record_builds(got, tmp_path, 'dewy')
+    return expected
+
+
+def record_builds(got, tmp_path, label):
+    """Hold build_all's results (made under tmp_path/label) to their records: recorded outcomes stand in
+    for the twin's builds when it is not built (tests/whole_oracle.py)."""
     for path, extra, status, stdout, stderr, made in got:
         leaf_oracle.check_entry(partial(
             whole_oracle.build, ('build', *extra, path), status, stdout.encode(errors='surrogateescape'),
-            stderr.encode(errors='surrogateescape'), [tmp_path / 'dewy' / name for name in made], tmp_path))
-    return expected
+            stderr.encode(errors='surrogateescape'), [tmp_path / label / name for name in made], tmp_path))
 
 
 def compare_golden_cases(compiler, tmp_path, monkeypatch, leaf, cases, flags=((),)):

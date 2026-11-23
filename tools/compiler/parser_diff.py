@@ -28,7 +28,7 @@ def environment(lib: Path) -> dict[str, str]:
     return {**env, 'DEWY_CORE_LIB': str(lib), 'DEWY_EMIT_WORKERS': '1'}
 
 
-def build_pair(seed: Path, work: Path, release: bool) -> tuple[Path, Path]:
+def build_pair(seed: Path, work: Path, release: bool, twin: bool = True) -> tuple[Path, ...]:
     """Use the frozen driver to reach the frozen reader; other leaves stay Dewy.
 
     The production Dewy driver imports its reader directly, so swapping Jo
@@ -44,7 +44,7 @@ def build_pair(seed: Path, work: Path, release: bool) -> tuple[Path, Path]:
     main.write_text(main.read_text().replace('build:\n    opt = release\n', ''))
     mode = 'release' if release else 'default'
     binaries = []
-    for side in ('dewy', 'twin'):
+    for side in ('dewy', 'twin') if twin else ('dewy',):
         if side == 'twin':
             for path in (tree / 'compiler').glob('*.jo'):
                 text = path.read_text()
@@ -115,9 +115,11 @@ def reader_panic(text: bytes) -> bytes:
     return re.sub(rb'\b(?:rd_|rt_)(dc_|dn_)', rb'\1', text)
 
 
-def compare(pair: tuple[Path, Path], sources: list[Path], work: Path,
-            release: bool, workers: int) -> list[tuple[Path, str]]:
-    """Keep binary, library, input and output paths identical across the two sides."""
+def compare(pair: tuple[Path, ...], sources: list[Path], work: Path,
+            release: bool, workers: int, observe=None) -> list[tuple[Path, str]]:
+    """Keep binary, library, input and output paths identical across the two sides.
+    observe(source, directory, run), when given, sees each build of the first side before its outputs go;
+    a one-sided pair has nothing to differ from."""
     active = work / 'active'
     active.mkdir(exist_ok=True)
     binary = active / 'dewy-core'
@@ -131,6 +133,8 @@ def compare(pair: tuple[Path, Path], sources: list[Path], work: Path,
         run = subprocess.run([binary, 'build', source, '-o', directory / 'program',
                               *(['--release'] if release else [])], cwd=ROOT, env=env,
                              capture_output=True, timeout=180)
+        if observe and side is pair[0]:
+            observe(source, directory, run)
         files = tuple((str(p.relative_to(directory)), hashlib.sha256(p.read_bytes()).digest())
                       for p in sorted(directory.rglob('*')) if p.is_file())
         shutil.rmtree(directory)
@@ -144,7 +148,7 @@ def compare(pair: tuple[Path, Path], sources: list[Path], work: Path,
         with ThreadPoolExecutor(workers) as pool:
             results.append(list(pool.map(one, enumerate(sources))))
     failures, shared_panics = [], []
-    for source, left, right in zip(sources, *results):
+    for source, left, right in zip(sources, *results) if len(pair) == 2 else ():
         if left[2].startswith(b'panic:') and right[2].startswith(b'panic:'):
             if left[:2] + (reader_panic(left[2]),) + left[3:] == right[:2] + (reader_panic(right[2]),) + right[3:]:
                 shared_panics.append(source)

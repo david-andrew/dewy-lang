@@ -53,6 +53,34 @@ def builds_twin():
     return mode != 'expected'
 
 
+def extensions(pair=('dewy', 'jo')):
+    """The language extensions an inline differential builds: the leaf's, then its twin's (when built)."""
+    return pair if builds_twin() else pair[:1]
+
+
+def pair(*items):
+    """The things an inline differential compares, the leaf's first, the twin's after (when built)."""
+    return items if builds_twin() else items[:1]
+
+
+def same(output, twin_output, arguments=(), status=0, directory=None):
+    """agree() for a leaf's output and a twin's output made on demand: twin_output() runs only when
+    the twin is built."""
+    agree([output, twin_output()] if builds_twin() else [output], arguments, status, directory)
+    return output
+
+
+def agree(outputs, arguments=(), status=0, directory=None):
+    """An inline differential's verdict: the twin's output (outputs[1], when built) equals the leaf's
+    (outputs[0]), and the leaf's meets its record. directory: the test's own directory, named <tmp>."""
+    if len(outputs) == 2:
+        assert outputs[0] == outputs[1]
+    output = outputs[0]
+    # (structured output is recorded as its repr)
+    data = output if isinstance(output, bytes) else (output if isinstance(output, str) else repr(output)).encode()
+    check(arguments, status, data if directory is None else without(directory, data))
+
+
 current = None  # (module stem, test name), set by tests/conftest.py for each test
 
 
@@ -64,7 +92,7 @@ def _current():
     return (*current, ordinal)
 
 
-def record(arguments, status, output):
+def record(arguments, status, output, digest=False):
     # (a test's own directory differs from run to run: an absolute path keeps its name only)
     names = (os.fsdecode(a) for a in arguments)
     entry = {'args': ['<tmp>/' + Path(a).name if os.path.isabs(a) else a for a in names], 'status': status}
@@ -72,7 +100,7 @@ def record(arguments, status, output):
         text = output.decode()
     except UnicodeDecodeError:
         text = None
-    if text is not None and len(output) <= TEXT_LIMIT:
+    if text is not None and len(output) <= TEXT_LIMIT and not digest:
         entry['stdout'] = text
     else:
         entry['sha256'] = hashlib.sha256(output).hexdigest()
@@ -132,9 +160,10 @@ def check_logs():
             check_entry(lambda line=line: json.loads(line))
 
 
-def check(arguments, status, output):
-    """Hold this probe run to its recorded output (or record it, when capturing)."""
-    check_entry(lambda: record(arguments, status, output))
+def check(arguments, status, output, digest=False):
+    """Hold this probe run to its recorded output (or record it, when capturing). digest: record the
+    output's hash alone (a test with thousands of runs keeps its records small)."""
+    check_entry(lambda: record(arguments, status, output, digest))
 
 
 def check_entry(make):
