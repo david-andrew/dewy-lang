@@ -1,0 +1,47 @@
+# Options A and B with a reusable owner in place of the local defer.
+# ReplySlot is the application's bounded reservation. stage is atomic on failure.
+# publish is nonblocking, allocation-free and infallible, and retains the record.
+# app.tokens supplies owned strings and releases its session on traversal exit.
+ReplyTicket:type = type of [slot:ReplySlot delivered:int64 complete:bool
+    $__drop__ = ():>void => { slot.publish(delivered complete) }
+]
+
+reserve_reply = (journal request) => {
+    let slot = journal.reserve(request.id request.max_bytes) or_throw
+    ReplyTicket[slot 0 false]
+}
+
+stage_next = (@ticket:ReplyTicket token:string) => {
+    ticket.slot.stage(ticket.delivered token) or_throw
+    ticket.delivered += 1
+}
+
+reply = (app request journal) => lazy {
+    let ticket = reserve_reply(journal request) or_throw
+    loop token in app.tokens(request) or_throw {
+        stage_next(@ticket token) or_throw
+        token
+    }
+    ticket.complete = true
+}
+
+preview_reply = (app request journal screen limit:int64) => {
+    if limit <=? 0 { return }
+    let shown:int64 = 0
+    loop token in reply(app request journal) or_throw {
+        screen.append(token) or_throw
+        shown += 1
+        if shown =? limit { break }
+    }
+    screen.finish_preview()
+}
+
+save_reply = (app request journal sink) => {
+    loop token in reply(app request journal) or_throw {
+        sink.write(token) or_throw
+    }
+    sink.finish() or_throw
+}
+
+# The owner wraps staged state. Multiple producers can reuse its finalization.
+# Moving reservation to the factory would cover a cursor dropped before demand.

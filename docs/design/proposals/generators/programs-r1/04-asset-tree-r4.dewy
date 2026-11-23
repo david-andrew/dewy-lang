@@ -1,0 +1,39 @@
+# Option A
+# Search a workspace asset index, visiting eligible directories in tree order.
+# The manifest is a validated, acyclic snapshot with in-range child indices.
+# Child lists are sorted, and hidden nodes fence off their descendants.
+Asset:type = type of [path:string bytes:int64]
+AssetNode:type = type of [path:string bytes:int64 directory:bool hidden:bool
+    children:array<int64>]
+
+assets = (manifest:array<AssetNode> id:int64):>generator<Asset> => lazy {
+    let node = manifest[id]
+    if not node.hidden {
+        if node.directory {
+            loop i in [0..node.children.length) {
+                let child_id = node.children[i]
+                assets(manifest child_id)...
+            }
+        } else {
+            Asset[node.path node.bytes]
+        }
+    }
+}
+
+largest_preview = (manifest:array<AssetNode> root:int64 floor:int64 ui max_rows:int64) => {
+    if max_rows <=? 0 { return }
+    let shown:int64 = 0
+    loop asset in assets(manifest root) {
+        if asset.bytes <? floor { continue }
+        ui.add_asset(asset.path asset.bytes)
+        shown += 1
+        if shown =? max_rows { break }
+    } else {
+        ui.show_no_visible_assets()
+        return
+    }
+    if shown =? 0 { ui.show_no_large_assets() }
+}
+
+# A match inside a directory suspends the parent at that child and leaves
+# later siblings unvisited when the preview reaches its limit.

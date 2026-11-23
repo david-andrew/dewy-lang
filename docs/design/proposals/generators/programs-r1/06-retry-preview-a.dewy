@@ -1,0 +1,41 @@
+# Option A
+# Preview cumulative retry delays for an operator's retry policy.
+# base_ms and cap_ms are checked positive exact integers, base_ms <= cap_ms.
+# The plan has no attempt limit. A preview shows only the requested budget.
+
+retry_delays = (base_ms:int cap_ms:int) => lazy {
+    let delay = base_ms
+    loop true {
+        delay
+        if delay <? cap_ms {
+            delay *= 2
+            if delay >? cap_ms { delay = cap_ms }
+        }
+    }
+}
+
+take = (source count:int64) =>
+    $taken
+    lazy {
+        if count <=? 0 { break $taken }
+        let left = count
+        loop item in source {
+            left -= 1
+            item
+            if left =? 0 { break $taken }
+        }
+    }
+
+preview_retries = (policy screen) => {
+    let elapsed:int = 0
+    let attempt:int64 = 0
+    loop delay in take(retry_delays(policy.base_ms policy.cap_ms) policy.preview_count) {
+        elapsed += delay
+        attempt += 1
+        screen.add_retry(attempt elapsed)
+    }
+    screen.show_delay_cap(policy.cap_ms)
+}
+
+# Base 250, cap 1000, take 4: cumulative times 250, 750, 1750, 2750.
+# Asking take for EOF after four outputs never asks the source for a fifth.

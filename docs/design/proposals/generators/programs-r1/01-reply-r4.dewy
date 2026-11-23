@@ -1,0 +1,44 @@
+# ReplySlot is a move-only reservation. Its publish operation cannot fail or block.
+ReplyTicket:type = type of [slot:ReplySlot delivered:int64 complete:bool
+    $__drop__ = ():>void => { slot.publish(delivered complete) }
+]
+
+reserve_reply = (journal request) => {
+    let slot = journal.reserve(request.id request.max_bytes) or_throw
+    ReplyTicket[slot 0 false]
+}
+
+stage_next = (@ticket:ReplyTicket token:string) => {
+    ticket.slot.stage(ticket.delivered token) or_throw
+    ticket.delivered += 1
+}
+
+# app.tokens returns an infallibly disposable cursor. Reading it can fail.
+# Every successful reservation owes a journal entry, even with zero demand.
+# Publish is infallible. stage is atomic on failure and proves count headroom.
+reply = (app request journal) => {
+    let reserved = reserve_reply(journal request) or_throw
+    lazy {
+        let ticket = reserved
+        loop token in app.tokens(request) or_throw {
+            stage_next(@ticket token) or_throw
+            token
+        }
+        ticket.complete = true
+    }
+}
+
+# The bounded loop owns the stream even when its left side ends immediately.
+preview_reply = (app request journal screen limit:int64) => {
+    let stream = reply(app request journal) or_throw
+    loop _ in [0..limit) and token in stream or_throw {
+        screen.append(token) or_throw
+    }
+    screen.finish_preview()
+}
+
+save_reply = (app request journal sink) => {
+    let stream = reply(app request journal) or_throw
+    loop token in stream or_throw { sink.write(token) or_throw }
+    sink.finish() or_throw
+}

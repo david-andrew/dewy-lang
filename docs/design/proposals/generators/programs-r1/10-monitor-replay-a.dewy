@@ -1,0 +1,37 @@
+# Option A
+# Replay a monitor log containing counter deltas and status records.
+# An offline record clears the current measurement. It emits a none payload.
+# read_entry returns an owned record with a literal-union kind and fields, or EOF.
+replay_items = (reader) => lazy {
+    loop true {
+        let entry = reader.read_entry() or_throw<error | Canceled>
+        if entry is? none { break }
+        match entry.kind {
+            <"counter"> => entry.delta
+            <"offline"> => none
+            <"notice"> => entry.text
+        }
+    }
+}
+
+# Keep the cursor with the UI session and borrow it on each resume.
+replay_chunk = (@events dashboard max_entries:int64) => {
+    loop _ in [0..max_entries) {
+        let step = events.next or_throw<error | Canceled>
+        if step is? none {
+            dashboard.finish_replay()
+            return true
+        }
+        let [item] = step
+        match item {
+            delta:int64 => dashboard.add_delta(delta)
+            note:string => dashboard.add_notice(note)
+            <none> => dashboard.clear_measurement()
+        }
+    }
+    dashboard.pause_replay()
+    false
+}
+
+# An offline record can be followed by a valid delta; the replay keeps reading.
+# At an exact budget boundary, pause because EOF has not been requested.

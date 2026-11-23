@@ -1,0 +1,33 @@
+# Option A
+# Preview advertised inventory entries from a cancellable pull socket.
+# open_listing returns a move-only owner with checked, potentially failing
+# disposal under the proposed D40 rules. Any open failure leaves no owner.
+# read_item gives an owned snapshot, none at EOF, or a failure. A discarded
+# cursor releases the connection without draining the remote response.
+
+listing_rows = (service depot) => lazy {
+    let socket = service.open_listing(depot) or_throw
+    loop true {
+        let item = socket.read_item() or_throw<error | Canceled>
+        if item is? none { break }
+        if item.available >? 0 { item }
+    }
+}
+
+show_inventory = (service depot ui limit:int64) => {
+    if limit <=? 0 { return }
+    let shown:int64 = 0
+    {
+        let rows = listing_rows(service depot)
+        loop item in @rows or_throw {
+            ui.add_item(item.sku item.available) or_throw
+            shown += 1
+            if shown =? limit { break }
+        }
+    } or_throw
+    ui.finish(shown)
+}
+
+# A successful break closes before ui.finish. A close failure reaches caller.
+# If the consumer or read fails as well, the boundary must report both failures.
+# Borrowing rows leaves it suspended at break; the following scope exit owns it.

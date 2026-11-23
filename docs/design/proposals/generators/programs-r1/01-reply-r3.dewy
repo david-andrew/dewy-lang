@@ -1,0 +1,35 @@
+# A reserved journal slot has bounded capacity. stage is atomic on failure and
+# proves room for the next count. Publication is infallible and does not block.
+# The live upstream session has infallible disposal. Its reads can fail.
+reply = (app request journal) => lazy {
+    let ticket = journal.reserve(request.id request.max_bytes) or_throw
+    let delivered:int64 = 0
+    let complete = false
+    defer ticket.publish(delivered complete)
+    loop token in app.tokens(request) or_throw {
+        # stage checks the byte budget and token-count bound before copying.
+        ticket.stage(delivered token) or_throw
+        delivered += 1
+        token
+    }
+    complete = true
+}
+
+preview_reply = (app request journal screen limit:int64) => {
+    if limit <=? 0 { return }
+    let stream = reply(app request journal)
+    let left = limit
+    loop token in stream or_throw {
+        screen.append(token) or_throw
+        left -= 1
+        if left =? 0 { break }
+    }
+    screen.finish_preview()
+}
+
+save_reply = (app request journal sink) => {
+    loop token in reply(app request journal) or_throw {
+        sink.write(token) or_throw
+    }
+    sink.finish() or_throw
+}

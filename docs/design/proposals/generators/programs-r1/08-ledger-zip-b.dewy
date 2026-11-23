@@ -1,0 +1,35 @@
+# Option B
+# Reconcile two ordered snapshots of the same posting batch.
+# Both inputs are finite, immutable and have no observable advance effects.
+# Stored cents are nonnegative magnitudes. The preflight length check makes an unmatched posting a hard failure.
+Statement:type = type of [memo:string cents:int64 reversed:bool]
+CountMismatch = type of error
+
+statement_amounts = (entries:array<Statement>) => lazy loop entry in entries {
+    if entry.reversed { -entry.cents } else { entry.cents }
+}
+expected_amounts = (expected:array<int64>) => lazy loop cents in expected cents
+
+compare_amounts = (left right) => lazy {
+    loop observed in left and expected in right ((observed expected))
+}
+
+write_reconciliation = (entries:array<Statement> expected:array<int64> report limit:int64) => {
+    if entries.length not=? expected.length { return CountMismatch }
+    if limit <=? 0 { return }
+    let compared:int64 = 0
+    let mismatches:int64 = 0
+    let pairs = compare_amounts(statement_amounts(entries) expected_amounts(expected))
+    loop row in pairs {
+        if report.different(row) {
+            report.add_mismatch(compared row)
+            mismatches += 1
+        }
+        compared += 1
+        if mismatches =? limit { break }
+    }
+    report.summary(compared entries.length)
+}
+
+# Report the compared count so a mismatch limit cannot masquerade as a full check.
+# An unpaired advance is harmless for the pure snapshots used here.

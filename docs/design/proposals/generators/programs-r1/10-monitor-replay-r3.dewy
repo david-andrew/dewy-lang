@@ -1,0 +1,35 @@
+# Replay records are counter updates, text notices or an offline marker.
+# The recording reader returns none at EOF. The generator can deliver none as data.
+replay_items = (reader) => lazy {
+    loop true {
+        let entry = reader.read_entry() or_throw<error | Canceled>
+        if entry is? none { break }
+        match entry.kind {
+            <"counter"> => entry.delta
+            <"offline"> => none
+            <"notice"> => entry.text
+        }
+    }
+}
+
+replay_chunk = (@events dashboard max_entries:int64) => {
+    if max_entries <=? 0 {
+        dashboard.pause_replay()
+        return false
+    }
+    let left = max_entries
+    loop item in @events or_throw {
+        match item {
+            delta:int64 => dashboard.add_delta(delta)
+            note:string => dashboard.add_notice(note)
+            <none> => dashboard.clear_measurement()
+        }
+        left -= 1
+        if left =? 0 {
+            dashboard.pause_replay()
+            return false
+        }
+    }
+    dashboard.finish_replay()
+    return true
+}

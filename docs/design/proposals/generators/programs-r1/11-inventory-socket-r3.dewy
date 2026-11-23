@@ -1,0 +1,28 @@
+# The socket is a move-only owner. Its close may fail.
+# Its reads return one owned inventory item, none for EOF, or a read/cancellation failure.
+listing_rows = (service depot) => lazy (
+    let socket = service.open_listing(depot) or_throw
+    loop true {
+        let item = socket.read_item() or_throw<error | Canceled>
+        if item is? none { break }
+        if item.available >? 0 { item }
+    }
+)
+
+# rows is this function's owner. Return the count only after disposing rows.
+display_prefix = (rows ui limit:int64) => {
+    let shown:int64 = 0
+    if limit <=? 0 { return shown }
+    loop item in @rows or_throw {
+        ui.add_item(item.sku item.available) or_throw
+        shown += 1
+        if shown =? limit { return shown }
+    }
+    return shown
+}
+
+show_inventory = (service depot ui limit:int64) => {
+    if limit <=? 0 { return }
+    let shown = display_prefix(listing_rows(service depot) ui limit) or_throw
+    ui.finish(shown)
+}

@@ -1,0 +1,37 @@
+# Option A
+# Build a bounded index of active catalog items across cursor-paginated results.
+# client.page(query cursor) returns owned items and an optional next cursor.
+# One request owns its response transport through decoding and closes it
+# before returning. Empty pages can still supply a continuation.
+PageBudgetExceeded = type of error
+
+catalog_entries = (client query page_budget:int64) =>
+    $finished
+    lazy {
+        let cursor:string | none = none
+        loop _ in [0..page_budget) {
+            let page = client.page(query cursor) or_throw
+            loop item in page.items {
+                if item.active { item }
+            }
+            if page.next is? none { break $finished }
+            cursor = page.next
+        }
+        PageBudgetExceeded or_throw
+    }
+
+seed_search_index = (client query index limit:int64 page_budget:int64) => {
+    if limit <=? 0 { return 0 }
+    let indexed:int64 = 0
+    loop item in catalog_entries(client query page_budget) or_throw {
+        # Upsert is idempotent. A later failed page leaves preceding updates.
+        if index.upsert_new(item.id item.label) or_throw {
+            indexed += 1
+            if indexed =? limit { break }
+        }
+    }
+    indexed
+}
+
+# Empty page -> next page; repeated empty continuations -> explicit budget error.
+# Stopping within a page does not call client.page again.

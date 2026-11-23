@@ -1,0 +1,67 @@
+# Option B
+# Parse a firewall configuration field such as "80, 443, 8000-8080".
+# bytes are an owned snapshot. No character or slice is lent across a step.
+PortNumber:type = type of [value:int64 offset:int64]
+Dash:type = type of [offset:int64]
+Comma:type = type of [offset:int64]
+BadPortSyntax:type = type of error & [offset:int64]
+
+port_tokens = (bytes:array<uint8>) => lazy {
+    let offset:int64 = 0
+    loop offset <? bytes.length {
+        let start = offset
+        let byte = bytes[offset]
+        offset += 1
+        if byte =? 32 or byte =? 9 { continue }
+        if byte =? 45 { Dash[start] }
+        else if byte =? 44 { Comma[start] }
+        else if byte >=? 48 and byte <=? 57 {
+            let n:int64 = (byte as int64)-48
+            loop offset <? bytes.length {
+                let digit = bytes[offset]
+                if digit <? 48 or digit >? 57 { break }
+                n = n*10+(digit as int64)-48
+                if n >? 65535 { BadPortSyntax[start] or_throw }
+                offset += 1
+            }
+            PortNumber[n start]
+        } else {
+            BadPortSyntax[start] or_throw
+        }
+    }
+}
+
+next_token = (@tokens) => {
+    let step = tokens.next or_throw<error | Canceled>
+    if step is? none { return none }
+    let [token] = step
+    token
+}
+
+parse_port_rules = (bytes:array<uint8> config) => {
+    let tokens = port_tokens(bytes)
+    let rules = config.new_port_rules()
+    loop true {
+        let first = next_token(@tokens) or_throw<error | Canceled>
+        if first is? none { return BadPortSyntax[bytes.length] }
+        if first isnt? PortNumber { return BadPortSyntax[first.offset] }
+        let upper = first.value
+        let following = next_token(@tokens) or_throw<error | Canceled>
+        if following is? Dash {
+            let last = next_token(@tokens) or_throw<error | Canceled>
+            if last is? none { return BadPortSyntax[bytes.length] }
+            if last isnt? PortNumber { return BadPortSyntax[last.offset] }
+            if last.value <? first.value { return BadPortSyntax[last.offset] }
+            upper = last.value
+            following = next_token(@tokens) or_throw<error | Canceled>
+        }
+        if first.value =? 0 { return BadPortSyntax[first.offset] }
+        rules.add_interval(first.value upper) or_throw
+        if following is? none { break }
+        if following isnt? Comma { return BadPortSyntax[following.offset] }
+    }
+    config.replace_ports(rules) or_throw
+}
+
+# Invalid suffixes leave the previous configuration untouched.
+# The lexer never computes the token after the parser rejects a range.

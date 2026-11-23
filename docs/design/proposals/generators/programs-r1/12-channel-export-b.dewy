@@ -1,0 +1,36 @@
+# Option B
+# Export measured channels from a bank of independent sampling cards.
+# A card's ordered samples are already owned by its row. Different hardware
+# supplies different counts, including zero. An empty card still needs its id.
+# writer.write_row accepts an id plus the sample array, serializing it as a unit.
+Channel:type = type of [id:int64 online:bool samples:array<int64>]
+OversizedChannel:type = type of error & [id:int64 samples:int64]
+
+# A fixed id followed by any number of integers fits this one signature.
+write_fields = (writer id:int64 ...samples:int64) =>
+    writer.write_row(id samples)
+
+export_rows = (channels:array<Channel> max_samples:int64) => lazy {
+    loop row in channels {
+        if not row.online { continue }
+        if row.samples.length >? max_samples {
+            OversizedChannel[row.id row.samples.length] or_throw
+        }
+        let fields = (row.id loop sample in row.samples sample)
+        fields
+    }
+}
+
+export = (writer channels:array<Channel> max_samples:int64 row_limit:int64) => {
+    if row_limit <=? 0 { return }
+    let written:int64 = 0
+    loop row in export_rows(channels max_samples) or_throw {
+        write_fields(writer row) or_throw
+        written += 1
+        if written =? row_limit { break }
+    }
+    writer.finish(written) or_throw
+}
+
+# A row is one transaction of the writer. Prior writes survive a later failure.
+# A zero-sample online channel sends its id and no samples.

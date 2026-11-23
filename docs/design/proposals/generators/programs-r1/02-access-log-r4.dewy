@@ -1,0 +1,41 @@
+# Option A
+# Incident triage across rotated logs ordered newest shard first.
+# open_access returns a move-only reader with an infallible release hook.
+# read_line returns an owned line, none at EOF, or an error/cancellation.
+# decode_access returns an entry or an ordinary parse error (bad input is skipped).
+
+server_errors = (logs paths cutoff) => lazy {
+    $scan
+    loop path in paths or_throw {
+        let reader = logs.open_access(path) or_throw
+        let line_number:int = 0
+        loop true {
+            let raw = reader.read_line() or_throw<error | Canceled>
+            if raw is? none { break }
+            line_number += 1
+            let entry = logs.decode_access(raw)
+            if entry is? error {
+                logs.bad_line(path line_number)
+                continue
+            }
+            # Rotations and rows are timestamp-ordered within this snapshot.
+            if entry.time <? cutoff { break $scan }
+            if entry.status <? 500 { continue }
+            entry
+        }
+    }
+}
+
+recent_failures = (logs paths cutoff ui limit:int64) => {
+    if limit <=? 0 { return }
+    let shown:int64 = 0
+    loop entry in server_errors(logs paths cutoff) or_throw {
+        ui.add_failure(entry.time entry.route entry.status)
+        shown += 1
+        if shown =? limit { break }
+    } else {
+        ui.show_empty()
+    }
+}
+
+# When the second shard supplies the final match, its reader closes on break.

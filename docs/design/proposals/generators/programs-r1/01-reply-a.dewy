@@ -1,0 +1,41 @@
+# Option A
+# Preview a model reply and journal the exact prefix handed to the display.
+# app.tokens is a pull stream of owned strings. Its session has an owning close.
+# journal.reserve allocates bounded space. stage is atomic on failure.
+# publish is a nonblocking, allocation-free, infallible in-memory commit.
+
+reply = (app request journal) => lazy {
+    let ticket = journal.reserve(request.id request.max_bytes) or_throw
+    let delivered:int64 = 0
+    let complete = false
+    defer ticket.publish(delivered complete)
+    loop token in app.tokens(request) or_throw {
+        # stage checks the byte budget and token-count bound before copying.
+        ticket.stage(delivered token) or_throw
+        delivered += 1
+        token
+    }
+    complete = true
+}
+
+preview_reply = (app request journal screen limit:int64) => {
+    if limit <=? 0 { return }
+    let shown:int64 = 0
+    loop token in reply(app request journal) or_throw {
+        screen.append(token) or_throw
+        shown += 1
+        if shown =? limit { break }
+    }
+    screen.finish_preview()
+}
+
+save_reply = (app request journal sink) => {
+    loop token in reply(app request journal) or_throw {
+        sink.write(token) or_throw
+    }
+    sink.finish() or_throw
+}
+
+# Witness: [a b c] with preview limit 2 publishes [a b], partial.
+# Draining the same response publishes [a b c], complete after EOF.
+# The count is handoffs to the immediate consumer, including a failed append.

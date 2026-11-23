@@ -1,0 +1,43 @@
+# Option B
+# Dispatch bounded input work before each simulation tick.
+# poll removes at most one owned event and returns none when the queue is empty.
+# Excess queued input stays with the platform for the next frame.
+Pointer:type = type of [device:int64 dx:int64 dy:int64]
+Button:type = type of [code:int64 down:bool]
+Quit:type = type of [reason:string]
+
+input_for_frame = (platform budget:int64) => lazy {
+    loop _ in [0..budget) {
+        let raw = platform.poll()
+        if raw is? none { break }
+        if raw is? Pointer and raw.dx =? 0 and raw.dy =? 0 { continue }
+        let fields = match raw {
+            p:Pointer => (p.device p.dx p.dy)
+            b:Button => (b.code b.down)
+            q:Quit => q.reason
+        }
+        fields
+    }
+}
+
+frame = (platform world budget:int64) => {
+    let quit = false
+    loop event in input_for_frame(platform budget) {
+        match event {
+            (device:int64 dx:int64 dy:int64) => world.pointer_delta(device dx dy)
+            (code:int64 down:bool) => world.button(code down)
+            reason:string => {
+                world.note_exit(reason)
+                quit = true
+            }
+        }
+        if quit { break }
+    }
+    if quit { return false }
+    world.step_fixed()
+    world.draw()
+    true
+}
+
+# A quit event stops dispatch immediately. The frame never polls a later event.
+# An empty poll still permits one simulation step.

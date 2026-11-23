@@ -1,0 +1,67 @@
+# Port intervals are staged in a private configuration and installed only at valid EOF.
+# This byte lexer can terminate with BadPortSyntax. Its three token kinds are ordinary values.
+PortNumber:type = type of [value:int64 offset:int64]
+Dash:type = type of [offset:int64]
+Comma:type = type of [offset:int64]
+BadPortSyntax:type = type of error & [offset:int64]
+
+port_tokens = (bytes:array<uint8>) => lazy {
+    let offset:int64 = 0
+    loop offset <? bytes.length {
+        let start = offset
+        let byte = bytes[offset]
+        offset += 1
+        if byte =? 32 or byte =? 9 { continue }
+        if byte =? 45 { Dash[start] }
+        else if byte =? 44 { Comma[start] }
+        else if byte >=? 48 and byte <=? 57 {
+            let n:int64 = (byte as int64)-48
+            loop offset <? bytes.length {
+                let digit = bytes[offset]
+                if digit <? 48 or digit >? 57 { break }
+                n = n*10+(digit as int64)-48
+                if n >? 65535 { BadPortSyntax[start] or_throw }
+                offset += 1
+            }
+            PortNumber[n start]
+        } else {
+            BadPortSyntax[start] or_throw
+        }
+    }
+}
+
+# An end position belongs to this grammar. It carries the error location for
+# a missing number and is a legal terminator after a complete interval.
+RuleEnd:type = type of [offset:int64]
+
+read_token = (@tokens end_offset:int64) => {
+    loop token in @tokens or_throw { return token }
+    return RuleEnd[end_offset]
+}
+
+required_port = (@tokens end_offset:int64) => {
+    let token = read_token(@tokens end_offset) or_throw
+    if token isnt? PortNumber { return BadPortSyntax[token.offset] }
+    return token
+}
+
+parse_port_rules = (bytes:array<uint8> config) => {
+    let tokens = port_tokens(bytes)
+    let rules = config.new_port_rules()
+    loop true {
+        let first = required_port(@tokens bytes.length) or_throw
+        let upper = first.value
+        let following = read_token(@tokens bytes.length) or_throw
+        if following is? Dash {
+            let last = required_port(@tokens bytes.length) or_throw
+            if last.value <? first.value { return BadPortSyntax[last.offset] }
+            upper = last.value
+            following = read_token(@tokens bytes.length) or_throw
+        }
+        if first.value =? 0 { return BadPortSyntax[first.offset] }
+        rules.add_interval(first.value upper) or_throw
+        if following is? RuleEnd { break }
+        if following isnt? Comma { return BadPortSyntax[following.offset] }
+    }
+    config.replace_ports(rules) or_throw
+}

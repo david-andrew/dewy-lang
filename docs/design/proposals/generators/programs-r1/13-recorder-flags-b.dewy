@@ -1,0 +1,35 @@
+# Option B
+# Find the first flagged reading in a range of packed recorder frames.
+# A storage format puts two independent sensor samples in every wire frame.
+# The reader checks the checksum before calling the existing two-result decoder.
+# Frame bytes and recorder metadata are immutable snapshots.
+SampleKey:type = type of [sensor:int64 sequence:int64 flagged:bool]
+DamagedFrame = type of error
+
+decode_pair = (frame):>(SampleKey SampleKey) => {
+    (SampleKey[frame.left_sensor frame.left_sequence frame.left_flagged]
+     SampleKey[frame.right_sensor frame.right_sequence frame.right_flagged])
+}
+
+sample_keys = (frames) => lazy {
+    loop frame in frames {
+        if not frame.checksum_valid { DamagedFrame or_throw }
+        let (left right) = decode_pair(frame)
+        left
+        right
+    }
+}
+
+first_flag = (frames screen) => {
+    loop sample in sample_keys(frames) or_throw {
+        if sample.flagged {
+            screen.select_sample(sample.sensor sample.sequence)
+            return
+        }
+    }
+    screen.show_clean()
+}
+
+# If the first frame has two flags, report the left flag and stop there.
+# A damaged frame before the first flag remains a terminal failure.
+# A clean frame produces two consumer opportunities after its checksum check.

@@ -1,0 +1,25 @@
+# Positive exact delays satisfy base_ms <= cap_ms. The source is infallible.
+retry_delays = (base_ms:int cap_ms:int) => lazy {
+    let delay = base_ms
+    loop true {
+        delay
+        if delay <? cap_ms {
+            delay *= 2
+            if delay >? cap_ms { delay = cap_ms }
+        }
+    }
+}
+
+# Check the finite budget before requesting each source item.
+take = (source count:int64) => lazy loop _ in [0..count) and item in source or_throw { item }
+
+preview_retries = (policy screen) => {
+    let elapsed:int = 0
+    let attempt:int64 = 0
+    loop delay in take(retry_delays(policy.base_ms policy.cap_ms) policy.preview_count) {
+        elapsed += delay
+        attempt += 1
+        screen.add_retry(attempt elapsed)
+    }
+    screen.show_delay_cap(policy.cap_ms)
+}

@@ -1,0 +1,47 @@
+# Option A
+# Normalize meter samples across the current and archived shards.
+# Physical readings fit int64 with headroom. Each shard is chronological.
+# The existing screening, calibration and sink calls are positional.
+Meter:type = type of [minute:int64 raw:int64 state:string]
+qualified = (minute:int64 raw:int64) => minute >=? 0 and raw >=? 0 and raw <=? 4095
+calibrate = (minute:int64 raw:int64):>(int64 int64) => (minute raw*25)
+
+candidates = (samples:array<Meter>) => lazy loop sample in samples {
+    if sample.state =? "ready" {
+        let row:[int64 int64] = [sample.minute sample.raw]
+        row
+    }
+}
+
+filter = (source keep) => lazy {
+    loop row in source or_throw {
+        if keep(row...) { row }
+    }
+}
+
+map = (source transform) => lazy {
+    loop row in source or_throw {
+        let calibrated:[int64 int64] = [transform(row...)]
+        calibrated
+    }
+}
+
+chain = (first second) => lazy {
+    first...
+    second...
+}
+
+refresh_chart = (archive latest chart window_start:int64) => {
+    let all = chain(candidates(archive) candidates(latest))
+    let ready = map(filter(all @qualified) @calibrate)
+    loop row in ready or_throw {
+        let [minute millivolts] = row
+        if minute >=? window_start {
+            chart.add_point(minute millivolts)
+        }
+    }
+    chart.complete()
+}
+
+# One point reaches the chart per kept row. A broken sensor emits no point.
+# The archive drains before the current shard; no intermediate list is needed.
