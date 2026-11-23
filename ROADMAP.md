@@ -46,7 +46,9 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
    11-22: Dewy runs the driver and every subsystem walk; Jo keeps shared state, opcode
    tables and storage bridges. Next: milestone 3 per
    [milestone3-round1](docs/design/proposals/self-hosting/milestone3-round1.md), a
-   pinned 2.77 MB source archive as the C bootstrap root, then delete the live twins.
+   pinned source archive (1.8 MB, landed) as the C bootstrap root; stages 1–3 done
+   11-23 (twin tests now use recorded outputs). Stage 4 (delete live twins) waits for
+   the speed merge.
 4. **Runtime speed vs C:** full landings now gate kernel instructions
    (`bench --baseline`; waive with `bench: accept <reason>`). The push family is
    reopened: arena reached 1.42×; the last large saving needs an arena-residency
