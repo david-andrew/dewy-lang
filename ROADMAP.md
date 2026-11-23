@@ -24,6 +24,9 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
 
 ## Next
 
+**Paused (11-23, David): no work that changes compiler/ or lib/ until the
+`perf/speed-breakthrough` merge lands (that thread leads it). Docs and design work only.**
+
 1. **No traps: ordinary code proves** (top capability). Most remaining census
    sites truly lack program evidence, so diagnostics must name what to write.
    Dogfood rounds alternate discovery and fix. Coverage rounds on value layouts,
