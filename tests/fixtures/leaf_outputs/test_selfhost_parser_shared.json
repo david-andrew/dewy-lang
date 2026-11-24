@@ -7,5 +7,214 @@
    "stderr": "",
    "files": {}
   }
+ ],
+ "test_parser_shared_mistakes_match_twin": [
+  {
+   "args": [
+    "0"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:1:1: error: a function is written `add = (a: int, b: int) -> int: ...` (there is no `def`)\n    def add(a, b):\n    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "1"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:5: error: structs have no methods (and there is no `def`): write the function at the top level, not inside the struct, taking what it works on first, as `m = (p: mut P): p.x += 1`; `p.m()` calls it\n        def m(self):\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "2"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:1:3: error: `x = 5` declares x (there is no `:=`)\n    x := 5\n      ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "3"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:9: error: there is no `new`: a map is `m: {str: int}` (empty), or `{\"a\": 1}`\n        y = new HashMap()\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "4"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:9: error: there is no `new`: `vec3(...)`\n        y = new Vector3(1, 2, 3)\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "5"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:10: error: compare with `==` (`=` assigns)\n        if a = b: c\n             ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "6"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:6: error: use `x += 1`\n        x++\n         ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "7"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:5: error: print is a function: `print(...)`\n        print \"hi\"\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "8"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:11: error: `/` on whole numbers already drops the fraction (7 / 2 is 3; `floor(x / y)` for floats); comments start with `#`\n        a = 7 // 2\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "9"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:15: error: expected ')', found ';'\n        for (i = 0; i < n; i++): g()\n                  ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "10"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:9: error: strings put values in by themselves: \"n is {n}\" (no f before the quote)\n        a = f\"x{y}\"\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "11"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:5: error: a variable is written `x = ...`, or with its type after the name: `x: int = ...`\n        int x = 5\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "12"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:9: error: two names in a row: text goes in quotes (`\"a b\"`), and values are separated with `,`\n        g(a b)\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "13"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:20: error: the `\"` before this ends the text: to put a `\"` inside text, write `\\\"`\n        a = \"she said \"hi\"\"\n                       ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "14"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:1:5: error: this bracket is never closed\n    f = (:\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "15"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:9: error: this bracket is never closed\n        x = (1, 2\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "16"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:1:5: error: an array is unpacked without brackets: `a, b = xs` (it must have exactly that many elements); a tuple the same way\n    let [a, b] = xs\n        ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "17"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:17: error: use `:` (as in `if x > 0: ...`)\n        loop x <= 3 then: g()\n                    ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "18"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:11: error: a choice between two values is `if c: a else: b`\n        x = a ? b : c\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "19"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:1:8: error: an enum is written with a colon: `enum E: title, play, won`\n    enum E = a, b\n           ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "20"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:2:11: error: expected end of statement, found '2'\n        x = 1 2\n              ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "21"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:1:9: error: a variable is written `b = ...`, or with its type after the name: `b: int = ...`\n    f = (a: int b: int): a\n            ^\n",
+   "files": {}
+  },
+  {
+   "args": [
+    "22"
+   ],
+   "status": 1,
+   "stdout": "",
+   "stderr": "mistake.jo:1:5: error: this bracket is never closed\n    x = (1,\n        ^\n",
+   "files": {}
+  }
  ]
 }

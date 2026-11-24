@@ -40,13 +40,18 @@ def build_pair(seed, work, release):
         shutil.copytree(parser_diff.ROOT / name, tree / name)
     main = tree / 'compiler/main.jo'
     text = "use 'source_types.dewy'\n" + main.read_text().replace('build:\n    opt = release\n', '')
+    entry = 'main = ():\n'
+    assert text.count(entry) == 1
     main.write_text("use 'dewy_fast.jo'\nuse 'dewy_frontend.dewy'\nuse 'dewy_fast_lex.dewy'\nuse 'dewy_context.jo'\n" +
-                    text.replace('    a = args()\n', '    a = args()\n' + PROBE, 1))
+                    text.replace(entry, entry + '    a = args()\n' + PROBE))
     binaries = []
     for side in leaf_oracle.pair('dewy', 'twin'):
         if side == 'twin':
-            for path in (tree / 'compiler').glob('*.jo'):
-                path.write_text(path.read_text().replace("use 'dewy_lexer.dewy'", "use 'dewy_lexer.jo'"))
+            for path in (tree / 'compiler').iterdir():
+                if path.suffix in ('.jo', '.dewy'):
+                    source = path.read_text()
+                    path.write_text(source.replace("use 'dewy_lexer.dewy'", "use 'dewy_lexer.jo'")
+                                    .replace('p"dewy_lexer.dewy"', 'p"dewy_lexer.jo"'))
         binary = work / side
         run = subprocess.run([seed, 'build', main, '-o', binary,
                               *(['--release'] if release else [])],
@@ -67,6 +72,10 @@ def compare(pair, source, mode, begin=None, stop=None):
     a, b = results if len(results) == 2 else (results[0], results[0])
     assert (a.returncode, a.stdout, a.stderr) == (b.returncode, b.stdout, b.stderr), (
         source, mode, begin, stop, a.stdout[:1000], b.stdout[:1000], a.stderr, b.stderr)
+    if a.returncode == 0:
+        assert b'meta ' in a.stdout, 'lexer probe did not report its state'
+    else:
+        assert b'error:' in a.stderr, a.stderr
     assert b'panic:' not in a.stderr, (source, a.stderr)
     own = None if Path(source).is_relative_to(parser_diff.ROOT) else Path(source).parent
     leaf_oracle.check(arguments, a.returncode, leaf_oracle.without(own, a.stdout + b'\0' + a.stderr), digest=True)

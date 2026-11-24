@@ -100,9 +100,8 @@ main = ():
 '''.replace('[MISTAKES]', '[' + ', '.join(jo_text(m) for m in MISTAKES) + ']')
 
 
-@pytest.fixture(scope='module')
-def binaries(compiler, tmp_path_factory):
-    tmp_path = tmp_path_factory.mktemp('shared')
+@pytest.fixture
+def binaries(compiler, tmp_path):
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
         monkeypatch.setattr(selfhost_lsp_double, 'DRIVER', DRIVER)
