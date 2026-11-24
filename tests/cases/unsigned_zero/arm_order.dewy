@@ -1,0 +1,14 @@
+$runtime_checks
+check=(flag:bool):>void=>{
+    let zero:uint64=0
+    if flag {
+        $runtime_assert (if flag zero else (27 + zero)) =? 0
+    } else {
+        $runtime_assert (if flag (27 + zero) else zero) =? 0
+    }
+    let selected=if flag zero else (27 + zero)
+    printl(selected)
+    $assert zero =? 0
+}
+check(true)
+check(false)

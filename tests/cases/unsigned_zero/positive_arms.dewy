@@ -1,0 +1,7 @@
+$runtime_checks
+check=(flag:bool):>void=>{
+    let zero:uint64=0
+    $runtime_assert (if flag (2 + zero) else (27 + zero)) =? 0
+    $assert zero =? 0
+}
+check(false)

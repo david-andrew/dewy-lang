@@ -250,5 +250,7 @@ exact_fact_signed=(@s:FactState value:TransferWord):>int64=>{
     if b.wide or b.hi >=? 0 {return fact_new(@s FactBound(wide=true) FactTerm(type=T_INT))}
     b.lo=b.lo xor FACT_MIN
     b.hi=b.hi xor FACT_MIN
+    # The encoded nonzero flag excludes 2^63. Recompute it for signed zero.
+    b.nz=b.lo >? 0
     fact_new(@s b FactTerm(type=T_INT))
 }

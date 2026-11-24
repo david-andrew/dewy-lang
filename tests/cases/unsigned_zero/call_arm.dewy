@@ -1,0 +1,14 @@
+$runtime_checks
+$no_assumed_bounds
+outlined3=(n1arg:int64):>bool=>{
+    let result:bool=(11 not=? n1arg)
+    return result
+}
+main=():>void=>{
+    let n1:int64=(-19)
+    let u4:uint64=0
+    $runtime_assert (if outlined3(n1) u4 else (27 + u4)) =? 0
+    # Unpacking requests the facts pass, as in differential seed 3403162.
+    let [result]=[n1]
+    printl(result)
+}
