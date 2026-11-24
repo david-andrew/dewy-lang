@@ -328,8 +328,7 @@ def run(binary, args):
 def test_selfhost_literals_match_jo(compiler, tmp_path, release):
     args = words()
     dewy = build(compiler, FIXTURES / 'literals_dewy.dewy', tmp_path / 'literals-dewy', release)
-    jo = build(compiler, FIXTURES / 'literals_jo.jo', tmp_path / 'literals-jo', release) if leaf_oracle.builds_twin() else None
-    got = leaf_oracle.same(run(dewy, args), lambda: run(jo, args))
+    got = leaf_oracle.check_value(run(dewy, args))
     assert got == expected(args)
 
 

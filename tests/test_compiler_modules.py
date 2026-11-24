@@ -10,19 +10,18 @@ def test_module_templates_follow_source_content(tmp_path):
     (tmp_path / 'main.jo').write_text('main = ():\n    pass\n')
     leaf = tmp_path / 'leaf.dewy'
     leaf.write_text('value=1\n')
-    (tmp_path / 'leaf.jo').write_text('value = 1\n')
-    first = compiler_modules(('leaf',), tmp_path)
+    first = compiler_modules(tmp_path)
     first['leaf.dewy'] = 'changed by caller'
-    assert compiler_modules(('leaf',), tmp_path)['leaf.dewy'] == 'value=1\n'
+    assert compiler_modules(tmp_path)['leaf.dewy'] == 'value=1\n'
     stamp = leaf.stat()
     leaf.write_text('value=2\n')
     os.utime(leaf, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
-    assert compiler_modules(('leaf',), tmp_path)['leaf.dewy'] == 'value=2\n'
+    assert compiler_modules(tmp_path)['leaf.dewy'] == 'value=2\n'
     extra = tmp_path / 'extra.dewy'
     extra.write_text('value=3\n')
-    assert 'extra.dewy' in compiler_modules(('leaf',), tmp_path)
+    assert 'extra.dewy' in compiler_modules(tmp_path)
     extra.unlink()
-    assert 'extra.dewy' not in compiler_modules(('leaf',), tmp_path)
+    assert 'extra.dewy' not in compiler_modules(tmp_path)
 
 
 def test_redirect_plans_preserve_order_and_graph_policy():

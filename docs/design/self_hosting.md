@@ -7,8 +7,7 @@ remaining cutovers. [GOALS.md](../GOALS.md) is the contract;
 
 **Milestone 1 is closed.** Dewy runs the compiler driver and every subsystem walk.
 The remaining live Jo functions provide access to shared storage and opcode tables,
-platform operations and entry adapters. The C bootstrap uses the frozen Jo twins
-until milestone 3. [Live Jo bridge inventory](../../tests/test_selfhost_live_jo.py)
+platform operations and entry adapters. The C bootstrap builds its first Dewy-capable compiler from the pinned source capsule. [Live Jo bridge inventory](../../tests/test_selfhost_live_jo.py)
 
 ## Mixed-language and bootstrap contract
 
@@ -22,39 +21,23 @@ until milestone 3. [Live Jo bridge inventory](../../tests/test_selfhost_live_jo.
 | Record construction | Fields with defaults permit Jo's `T()`; otherwise supply every field. Zero-byte defaults rely on the slot's zero fill. |
 | Native boundary | `$extern` in either language; raw pointer operations require `$unsafe`. |
 
-The C seed builds generation 1 (`core-bootstrap`) with bootstrap frontends and
-no Dewy reader. Generation 1 builds generation 2 (`dewy-core-bootstrap`) with the
-full frontend. Both source builds use frozen Jo twins selected by
-`tools/compiler/build.py:FROZEN_TWINS`. Generation 2 then builds generation 3
-from the Dewy modules; generation 3's self-build must be byte-identical.
-Restore bootstrap stubs (frontend, formatter, parser context) with the correct
-twins before building generation 2. The reader's twin uses `dewy_reader_seed.jo`.
+The archive in `bootstrap-seed/` supplies the historical C seed, Jo sources,
+library and five frontend overlays. Its recipe builds the first Dewy-capable
+generation (G2). The builder verifies G2's digest, switches to live
+`compiler/` and `lib/`, and compares adjacent self-builds at identical paths.
+A pin that needs a third live build may converge on that generation.
 
-Every compiler `.dewy` has a frozen twin and is explicitly imported by its Jo
-callers. It imports the library, other Dewy leaves, or compiler Jo modules: an
-import cycle (decision #140) makes a call into Jo a plain call, where a host record
-costs an indirect one. Such a leaf joins the compiler's cycle, whose top-level code
-then runs as one file; a record of functions reads what those functions read, so
-the cycle's host records and bindings live in `host_binds.jo`, after every value.
-Its differential driver supplies doubles of the Jo modules it imports. Change API/layouts in both
-twins; never evolve a second parser. `tests/test_selfhost_twins.py` enforces the
-inventory, import direction, names and enum ordinals. Differential drivers cover
-both build modes; bootstrap, fixed point and `same_output` guard whole-compiler
-behavior. A seed cannot consume error unions: host-facing routines return status
-records until that boundary moves. It also needs numeric `123` instead of `'{'`.
-
-The landing twin guard checks each changed compiler leaf for a changed `.jo`
-twin and a named differential test. Its bootstrap-stub exemption list is:
-
-| Leaf | Reason |
-|---|---|
-| `call_forward.dewy` | The bootstrap frontend has no Dewy call-forwarding forms; `call_forward.jo` deliberately returns `-1` for both probes. |
+Dewy modules import the library, each other and Jo bridges. Decision #140's
+import cycle lets Dewy call Jo directly. The host records and bindings in
+`host_binds.jo` initialize after the storage they reference. Leaf probes
+exercise these interfaces against recorded outcomes in both build modes.
+The landing guard checks live-only sources, named behavior tests for changed
+leaves and a fixed point built from the pinned seed.
 
 ## Leaves shipped (B3)
 
-All leaf names below are `compiler/*.dewy`; twins are `compiler/*.jo`. “Dewy”
-means the normal compiler uses the leaf and bootstrap generations 1–2 use its
-twin. Costs are instruction counts from the original cutover, not additive or a
+The inventory below describes the historical cutover. The Jo filenames identify
+the original comparison implementations. Costs are instruction counts from the original cutover, not additive or a
 current benchmark; an absent phase measurement is not a claim of zero cost.
 `G` means billion instructions; paired counts are Dewy / Jo. Layout-only modules
 are grouped. See the ownership sections for the live service contracts.

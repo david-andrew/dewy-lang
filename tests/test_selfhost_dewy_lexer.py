@@ -1,4 +1,4 @@
-"""The tokenizing loop and frozen twin agree on every tracked Dewy source.
+"""Record tokenization of the fixed source corpus and generated inputs.
 
 The probe enters the real Jo adapter, comparing every token field, spare EOFs,
 block-comment spans, metatag/lazy state and first lexical diagnostics. Generated
@@ -12,9 +12,9 @@ import subprocess
 
 import pytest
 
-from tests.corpus_cache import SHARDS, built_once, shard_of
+from tests.corpus_cache import corpus_paths, SHARDS, built_once, shard_of
 from tests.support import compiler  # noqa: F401
-from tests import leaf_oracle, parser_oracle
+from tests import leaf_oracle
 from tools.compiler import parser_diff
 
 
@@ -44,34 +44,19 @@ def build_pair(seed, work, release):
     assert text.count(entry) == 1
     main.write_text("use 'dewy_fast.jo'\nuse 'dewy_frontend.dewy'\nuse 'dewy_fast_lex.dewy'\nuse 'dewy_context.jo'\n" +
                     text.replace(entry, entry + '    a = args()\n' + PROBE))
-    binaries = []
-    for side in leaf_oracle.pair('dewy', 'twin'):
-        if side == 'twin':
-            for path in (tree / 'compiler').iterdir():
-                if path.suffix in ('.jo', '.dewy'):
-                    source = path.read_text()
-                    path.write_text(source.replace("use 'dewy_lexer.dewy'", "use 'dewy_lexer.jo'")
-                                    .replace('p"dewy_lexer.dewy"', 'p"dewy_lexer.jo"'))
-        binary = work / side
-        run = subprocess.run([seed, 'build', main, '-o', binary,
-                              *(['--release'] if release else [])],
-                             env=parser_diff.environment(tree / 'lib'),
-                             capture_output=True, timeout=300)
-        assert run.returncode == 0, (run.stdout + run.stderr).decode(errors='replace')
-        binaries.append(binary)
-    return binaries
+    binary = work / 'dewy'
+    run = subprocess.run([seed, 'build', main, '-o', binary, *(['--release'] if release else [])],
+                         env=parser_diff.environment(tree / 'lib'), capture_output=True, timeout=300)
+    assert run.returncode == 0, (run.stdout + run.stderr).decode(errors='replace')
+    return binary
 
 
 def compare(pair, source, mode, begin=None, stop=None):
     arguments = ['--lexer-probe', str(source), mode]
     if begin is not None:
         arguments += [str(begin), str(stop)]
-    results = [subprocess.run([binary, *arguments], capture_output=True, timeout=15,
-                             env=parser_diff.environment(parser_diff.ROOT / 'lib'))
-               for binary in pair]
-    a, b = results if len(results) == 2 else (results[0], results[0])
-    assert (a.returncode, a.stdout, a.stderr) == (b.returncode, b.stdout, b.stderr), (
-        source, mode, begin, stop, a.stdout[:1000], b.stdout[:1000], a.stderr, b.stderr)
+    a = subprocess.run([pair, *arguments], capture_output=True, timeout=15,
+                       env=parser_diff.environment(parser_diff.ROOT / 'lib'))
     if a.returncode == 0:
         assert b'meta ' in a.stdout, 'lexer probe did not report its state'
     else:
@@ -91,7 +76,7 @@ def shared_pair(compiler, release):
 def test_lexer_matches_frozen_corpus(compiler, release, shard):
     # (interleaved shards of the tracked sources, one xdist group each)
     pair = shared_pair(compiler, release)
-    sources = parser_diff.corpus()
+    sources = corpus_paths()
     assert sources
     for source in shard_of(sources, shard):
         compare(pair, source, 'intern')

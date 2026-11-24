@@ -9,11 +9,23 @@ import hashlib
 import os
 import pickle
 import shutil
-import subprocess
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 
 SHARDS = 4
+
+
+@lru_cache(maxsize=1)
+def corpus_paths():
+    root = Path(__file__).resolve().parents[1]
+    manifest = root / 'tests/fixtures/leaf_corpus.txt'
+    return tuple(root / name for name in manifest.read_text().splitlines())
+
+
+def corpus_under(directory, *, recursive=True):
+    return sorted(p for p in corpus_paths() if
+                  (p.is_relative_to(directory) if recursive else p.parent == directory))
 
 
 def digest(*parts):

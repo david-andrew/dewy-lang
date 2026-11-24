@@ -1,43 +1,15 @@
 """The Dewy frontend file services and their frozen Jo twin emit the same bytes."""
-import shutil
-import subprocess
 
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests import leaf_oracle, parser_oracle
+from tests import parser_oracle
 from tools.compiler import parser_diff
-
-
-def build_pair(seed, work, release):
-    tree = work / 'source'
-    shutil.copytree(parser_diff.ROOT / 'compiler', tree / 'compiler')
-    shutil.copytree(parser_diff.ROOT / 'lib', tree / 'lib')
-    main = tree / 'compiler/main.jo'
-    main.write_text(main.read_text().replace('build:\n    opt = release\n', ''))
-    binaries = []
-    for side in leaf_oracle.pair('dewy', 'twin'):
-        if side == 'twin':
-            for path in (tree / 'compiler').iterdir():
-                if path.suffix not in ('.jo', '.dewy') or path.name == 'dewy_fast_file.jo':
-                    continue
-                text = path.read_text()
-                text = text.replace("'dewy_fast_file.dewy'", "'dewy_fast_file.jo'")
-                text = text.replace('p"dewy_fast_file.dewy"', 'p"dewy_fast_file.jo"')
-                path.write_text(text)
-        binary = work / side
-        run = subprocess.run([seed, 'build', main, '-o', binary,
-                              *(['--release'] if release else [])],
-                             env=parser_diff.environment(tree / 'lib'),
-                             capture_output=True, timeout=300)
-        assert run.returncode == 0, (run.stdout + run.stderr).decode(errors="replace")
-        binaries.append(binary)
-    return tuple(binaries)
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_fast_file_matches_twin(compiler, tmp_path, release):
-    pair = build_pair(compiler, tmp_path, release)
+    pair = parser_oracle.build_pair(compiler, tmp_path, release)
     names = (
         'constant/shadowable_let',
         'constant/shadowable_function_assign',

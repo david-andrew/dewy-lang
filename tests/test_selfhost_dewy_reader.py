@@ -3,6 +3,7 @@ import subprocess
 
 import pytest
 
+from tests.corpus_cache import corpus_under
 from tests.support import compiler  # noqa: F401
 from tests import parser_oracle
 from tools.compiler import parser_diff
@@ -25,8 +26,8 @@ def test_recursive_reader_ships_dewy(compiler, tmp_path):
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_recursive_reader_matches_frozen(compiler, tmp_path, release):
     pair = parser_oracle.build_pair(compiler, tmp_path, release)
-    sources = sorted((parser_diff.ROOT / 'tests/cases/frontend').glob('*.dewy'))
-    sources += sorted((parser_diff.ROOT / 'tests/cases/truncated').glob('*.dewy'))
+    sources = corpus_under(parser_diff.ROOT / 'tests/cases/frontend', recursive=False)
+    sources += corpus_under(parser_diff.ROOT / 'tests/cases/truncated', recursive=False)
     sources += parser_diff.generated(tmp_path / 'generated', 4)
     failures = parser_oracle.compare(pair, sources, tmp_path, release, workers=1)
     assert not failures, '\n'.join(f'{path}: {reason}' for path, reason in failures)

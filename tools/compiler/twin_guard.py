@@ -1,26 +1,18 @@
-"""Check changed compiler leaves against their frozen twins and differential tests.
+"""Guard a landing's live inputs, leaf coverage and compatibility with the pinned seed.
 
-Usage: python3 -m tools.compiler.twin_guard BASE HEAD
-The range is the complete landing batch, not each intermediate commit. This lets
-one commit repair a twin changed by another commit in the same batch.
+The landing script invokes this module by its historical name.
 """
-
 from __future__ import annotations
 
 import argparse
 import re
 import subprocess
-from collections.abc import Callable
 from pathlib import Path
 
 
-# These twins intentionally do not implement their Dewy leaves in bootstrap
-# generations without the Dewy frontend. Add a name only with its reason.
-BOOTSTRAP_STUBS = {
-    "call_forward": "The bootstrap frontend has no Dewy call-forwarding forms; its twin returns -1 for both probes.",
-}
-
-DIFFERENTIAL_CALL = re.compile(r"\b(?:compare(?:_\w+)?|leaf_compilers|same_output)\s*\(")
+BEHAVIOR = re.compile(r"\b(?:assert\s|(?:compare(?:_\w+)?|leaf_compilers|same_output)\s*\()")
+BUILD_INPUTS = ("compiler", "lib", "bootstrap-seed", "tools/core.py", "tools/compiler/build.py",
+                "tools/compiler/seed_archive.py", "LICENSE")
 
 
 def git(repo: Path, *args: str) -> str:
@@ -28,29 +20,17 @@ def git(repo: Path, *args: str) -> str:
 
 
 def names_leaf(path: str, source: str, stem: str) -> bool:
-    return (stem in Path(path).stem or stem in source) and bool(DIFFERENTIAL_CALL.search(source))
-
-
-def changed_leaf_errors(changed: set[str], has_test: Callable[[str], bool]) -> list[str]:
-    """Check paths in one landing range; has_test(stem) searches the target tree."""
-    errors = []
-    for leaf in sorted(path for path in changed if re.fullmatch(r"compiler/[^/]+\.dewy", path)):
-        stem = Path(leaf).stem
-        if stem in BOOTSTRAP_STUBS:
-            continue
-        twin = str(Path(leaf).with_suffix(".jo"))
-        # (dewy_reader.jo only forwards to its implementation, dewy_reader_seed.jo)
-        seed = str(Path(leaf).with_name(f"{stem}_seed.jo"))
-        if twin not in changed and seed not in changed:
-            errors.append(f"{leaf}: frozen twin {twin} did not change")
-        if not has_test(stem):
-            errors.append(f"{leaf}: no named differential test in tests/test_*.py")
-    return errors
+    return (stem in Path(path).stem or stem in source) and bool(BEHAVIOR.search(source))
 
 
 def check_range(repo: Path, base: str, head: str) -> list[str]:
     """Read both revisions from Git so this works for historical ranges too."""
-    changed = set(git(repo, "diff", "--name-only", base, head, "--", "compiler").splitlines())
+    paths = set(git(repo, "ls-tree", "-r", "--name-only", head, "compiler", "bootstrap").splitlines())
+    leaves = {path for path in paths if path.endswith(".dewy")}
+    retired = ({str(Path(leaf).with_suffix(".jo")) for leaf in leaves} | {"compiler/dewy_reader_seed.jo"}) & paths
+    retired.update(path for path in paths if path.startswith("bootstrap/") and path.endswith(".jo"))
+    errors = [f"{path}: historical bootstrap source in the live tree" for path in sorted(retired)]
+    changed = leaves.intersection(git(repo, "diff", "--name-only", base, head, "--", "compiler").splitlines())
     test_paths = [path for path in git(repo, "ls-tree", "-r", "--name-only", head, "tests").splitlines()
                   if Path(path).name.startswith("test_") and path.endswith(".py")]
     available = set(test_paths)
@@ -79,7 +59,8 @@ def check_range(repo: Path, base: str, head: str) -> list[str]:
                 return True
         return False
 
-    return changed_leaf_errors(changed, has_test)
+    errors.extend(f"{leaf}: no named behavior test" for leaf in sorted(changed) if not has_test(Path(leaf).stem))
+    return errors
 
 
 def main() -> int:
@@ -93,7 +74,15 @@ def main() -> int:
         for error in errors:
             print(error)
         return 1
-    print(f"twin guard: {args.base}..{args.head} passed")
+    if git(repo, "diff", "--name-only", args.base, args.head, "--", *BUILD_INPUTS):
+        # The landing runs on the target checkout. Bind the compatibility result
+        # to that revision, including newly added or untracked compiler inputs.
+        if (git(repo, "rev-parse", args.head) != git(repo, "rev-parse", "HEAD")
+                or git(repo, "status", "--porcelain", "--", *BUILD_INPUTS)):
+            parser.error("seed compatibility requires a clean checkout of the landing head")
+        from tools.core import toolchain
+        toolchain(bootstrap=True)
+    print(f"seed compatibility guard: {args.base}..{args.head} passed")
     return 0
 
 

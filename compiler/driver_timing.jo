@@ -1,7 +1,0 @@
-use 'main.jo'
-
-driver_release_timing = (rt0: f64, rt1: f64, rt2: f64):
-    if env("DEWY_PAR_TIME") != none: eprint("release: optimize {(rt1 - rt0) * 1000.0:.1} ms, inline {(rt2 - rt1) * 1000.0:.1} ms, versioning and licm {(time() - rt2) * 1000.0:.1} ms")
-
-driver_emit_timing = (t0: f64):
-    if env("DEWY_PAR_TIME") != none: eprint("emit: here, {(time() - t0) * 1000.0:.1} ms")

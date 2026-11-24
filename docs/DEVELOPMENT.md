@@ -24,8 +24,7 @@ tools/dewy                                       # interactive Dewy session (std
 python3 -m tools.core check examples/tour.dewy
 python3 -m tools.core build examples/tour.dewy --release -o /tmp/tour
 python3 -m tools.core path                       # immutable executable for scripts/benchmarks
-python3 -m tools.core --bootstrap test           # also verify the independent C bootstrap
-python3 -m tools.core --bootstrap-archive test   # build through the pinned G2 and run the same gate
+python3 -m tools.core --bootstrap test           # build from the pinned G2 and verify convergence
 ```
 
 The first command builds from C. Later commands reuse the compiler when its
@@ -33,7 +32,8 @@ sources, libraries and build inputs are unchanged, or rebuild with the previous
 compiler. Failed builds stop the command and leave the previous toolchain
 intact; tests never silently fall back to it. Concurrent invocations share a
 build lock and use separate immutable snapshots. Unchanged launches compare file
-metadata rather than hashing every source. `--bootstrap` forces a fresh C build.
+metadata rather than hashing every source. `--bootstrap` forces a live rebuild
+from the verified G2. Pass an empty directory to `--seed-cache` to rebuild G2 from C.
 The cache and build logs live in `__dewycache__/compact-core/`; removing that
 directory resets it.
 
@@ -77,7 +77,7 @@ python3 -m tools.core ladder [--update-ratchet]     # acceptance-ladder scoreboa
 - `test` runs the cases first (`--quick`: those marked `# quick`), then, for
   the full gate, the ladder's core versions and its ratchet, then pytest. `-k`
   and `-n` apply to all of them.
-- Tests marked `nightly` (the release-mode run of each `test_selfhost_*` twin
+- Tests marked `nightly` (the release-mode run of each `test_selfhost_*` leaf
   differential test, added by `tests/conftest.py`) are skipped by `test` and
   CI; the scheduled `fuzz-nightly.yml` runs them (`pytest -m nightly`).
 - The [ladder](../tests/ladder/README.md) builds each program's `design.dewy`
@@ -153,7 +153,7 @@ python3 -m tools.compiler.build --bootstrap --output /tmp/dewy-core
 /tmp/dewy-core/bin/dewy-core build examples/paddle.dewy --target wasm32 -o /tmp/paddle
 ```
 
-The output directory must be new. It contains a standalone `bin/` and `lib/`,
+Use a new output directory or replace a previous builder output. It contains a standalone `bin/` and `lib/`,
 source snapshots, build logs and a hash manifest (`build.json`). The independent
 bootstrap requires Linux x86-64. Rebuild from an existing compiler without C:
 
@@ -161,12 +161,12 @@ bootstrap requires Linux x86-64. Rebuild from an existing compiler without C:
 python3 -m tools.compiler.build --seed /tmp/dewy-core/bin/dewy-core --output /tmp/dewy-core-next
 ```
 
-On Linux x86-64, `--bootstrap-archive` builds the historical G2 from the
+On Linux x86-64, `--bootstrap` (also spelled `--bootstrap-archive`) builds the historical G2 from the
 checked-in source capsule. It also accepts a digest-verified G2 from the seed
 cache. Use an empty cache directory for a cold, offline build.
 
 ```sh
-python3 tools/compiler/build.py --bootstrap-archive --seed-cache ./seed-cache --output ./live
+python3 tools/compiler/build.py --bootstrap --seed-cache ./seed-cache --output ./live
 ```
 
 The builder compiles the checkout's compiler and library with G2, then compares
@@ -178,8 +178,8 @@ hashes and build steps are recorded in `build.json`.
 `bootstrap-seed/pin.json` identifies the historical commit, build recipe, host
 toolchain, flags and reference digests. From a clone containing that commit,
 `python3 tools/compiler/seed_archive.py generate REV DEST` recreates the archive
-and member inventory. The offline comparison test mounts each builder's output
-at `/dewy/live` so both compilers embed identical paths.
+and member inventory. The cold-clone test builds offline with an empty cache, then reproduces the
+executable at the same path using the verified cached G2.
 
 For a quick compiler edit, reuse an existing toolchain's libraries:
 
@@ -275,24 +275,12 @@ generated programs.
 ## Source layout and bootstrap
 
 - `compiler/frontend.jo` dispatches Dewy and implementation-language source.
-- `compiler/dewy_fast.jo` lexes and parses Dewy inside the compiler process;
-  `compiler/dewy_parse.jo` projects the syntax tree into the compact AST.
-- `compiler/` contains checking, lowering, code generation and tools, written in
-  the inherited implementation language (`.jo`), except the modules written in
-  Dewy (`compiler/*.dewy`: `zip.dewy`, `targets.dewy` and others). A Dewy module
-  is a leaf: it uses the library but no compiler module, and each `.jo` module
-  calling it uses it.
+- The live compiler uses Dewy for the frontend, checker, optimizer and code generation.
+  Jo modules provide shared storage, opcode tables and platform bridges.
 - `lib/` contains containers, platform support, graphics, input, audio and other
   libraries. Dewy programs can import `.jo` library modules directly.
-- `stage0/` is the small independent C bootstrap. It implements a smaller
-  language; `bootstrap/frontend.jo` and `bootstrap/dewy_fmt.jo` stand in for the
-  Dewy frontend while it builds the first compiler generation. That compiler
-  builds the complete compiler, which builds itself again. The two builds
-  without a Dewy frontend compile each Dewy module's frozen `.jo` twin instead
-  (`zip.jo` for `zip.dewy`; `FROZEN_TWINS` in `tools/compiler/build.py`). A
-  differential test keeps each pair giving the same results.
-
-Build hashes identify provenance; byte-identical executables are not required.
+- `bootstrap-seed/` contains the pinned C and Jo bootstrap sources and build recipe.
+  The resulting G2 compiles the live sources to a byte-identical fixed point.
 
 ## Releases and installers
 

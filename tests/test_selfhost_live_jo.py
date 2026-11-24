@@ -1,9 +1,9 @@
 """New executable compiler Jo needs an explicit bridge contract through the execution cutover."""
+import pytest
 from collections import Counter
 from pathlib import Path
 import re
 
-from tools.compiler.build import FROZEN_TWINS
 
 COMPILER = Path(__file__).resolve().parents[1] / "compiler"
 # Keep overloads separately. A new body in an existing bridge file needs review too.
@@ -47,12 +47,22 @@ HEADER = re.compile(r"^(\w+)[ \t]*=[ \t]*\((?:[^\n]|\n[ \t]+)*?\s*\)[ \t]*(?:->[
 
 
 def test_live_jo_bodies_have_a_bridge_contract():
-    frozen = set(FROZEN_TWINS.values()) | {"dewy_reader_seed.jo"}
     actual = {}
     for path in COMPILER.glob("*.jo"):
-        if path.name in frozen:
-            continue
         functions = Counter(HEADER.findall(path.read_text()))
         if functions:
             actual[path.stem] = functions
     assert actual == {stem: Counter(names.split()) for stem, (_, names) in BRIDGES.items()}
+
+
+@pytest.mark.core_quick
+def test_bootstrap_sources_stay_in_archive():
+    assert not [p for p in COMPILER.glob("*.dewy") if p.with_suffix(".jo").exists()]
+    assert not (COMPILER / "dewy_reader_seed.jo").exists()
+
+
+def test_dewy_compiler_modules_are_reachable_from_the_entry():
+    from tools.twin_scope import closure, import_graph
+
+    graph = import_graph()
+    assert {name for name in graph if name.endswith('.dewy')} <= closure(graph, ['main.jo'])

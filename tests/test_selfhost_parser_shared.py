@@ -1,9 +1,9 @@
-"""Expectations, habits and the shared node builders agree with the frozen Jo parser."""
+"""Record the shared parser's diagnostics and node-builder output."""
 import subprocess
 
 import pytest
 
-from tests import selfhost_lsp_double
+from tests import leaf_oracle, selfhost_lsp_double, whole_oracle
 from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT, compiler  # noqa: F401
 
@@ -100,25 +100,30 @@ main = ():
 '''.replace('[MISTAKES]', '[' + ', '.join(jo_text(m) for m in MISTAKES) + ']')
 
 
-@pytest.fixture
-def binaries(compiler, tmp_path):
+@pytest.fixture(scope='module')
+def parser_probe(compiler, tmp_path_factory):
+    directory = tmp_path_factory.mktemp('shared')
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
         monkeypatch.setattr(selfhost_lsp_double, 'DRIVER', DRIVER)
-        return leaf_compilers(compiler, tmp_path, ('parser_shared',))
+        binary, _ = leaf_compilers(compiler, directory, ('parser_shared',), recorded=False)
+    return binary
 
 
-def test_parser_shared_match_twin(binaries):
-    outputs = [subprocess.run([binary], capture_output=True, timeout=60) for binary in binaries]
-    assert all(result.returncode == 0 for result in outputs), [
-        (result.returncode, result.stderr) for result in outputs]
-    assert (outputs[0].stdout, outputs[0].stderr) == (outputs[1].stdout, outputs[1].stderr)
-    assert outputs[0].stdout.count(b'case:') == 2
+def probe(binary, *arguments):
+    ran = subprocess.run([binary, *arguments], capture_output=True, timeout=60)
+    leaf_oracle.check_entry(lambda: whole_oracle.build(
+        arguments, ran.returncode, ran.stdout, ran.stderr, [], binary.parent))
+    return ran
 
 
-def test_parser_shared_mistakes_match_twin(binaries):
+def test_parser_shared_match_twin(parser_probe):
+    ran = probe(parser_probe)
+    assert ran.returncode == 0, ran.stderr
+    assert ran.stdout.count(b'case:') == 2
+
+
+def test_parser_shared_mistakes_match_twin(parser_probe):
     for i in range(len(MISTAKES)):
-        outputs = [subprocess.run([binary, str(i)], capture_output=True, timeout=60) for binary in binaries]
-        assert outputs[0].returncode != 0, (i, outputs[0].stdout)
-        assert ((outputs[0].returncode, outputs[0].stdout, outputs[0].stderr)
-                == (outputs[1].returncode, outputs[1].stdout, outputs[1].stderr)), i
+        ran = probe(parser_probe, str(i))
+        assert ran.returncode > 0 and b'error:' in ran.stderr, (i, ran.stdout, ran.stderr)

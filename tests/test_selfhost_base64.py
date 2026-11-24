@@ -35,20 +35,16 @@ def inputs():
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_selfhost_base64_matches_jo(compiler, tmp_path, release):
     dewy = build(compiler, FIXTURES / 'base64_dewy.dewy', tmp_path / 'base64-dewy', release)
-    jo = build(compiler, FIXTURES / 'base64_jo.jo', tmp_path / 'base64-jo', release) if leaf_oracle.builds_twin() else None
     data = inputs()
     paths = []
     for k, blob in enumerate(data):
         path = tmp_path / f'in{k}.bin'
         path.write_bytes(blob)
         paths.append(path)
-    outputs = []
-    for binary in leaf_oracle.pair(dewy, jo):
-        ran = subprocess.run([binary, *paths], capture_output=True, timeout=60)
-        assert ran.returncode == 0, ran.stdout + ran.stderr
-        outputs.append(ran.stdout)
-    leaf_oracle.agree(outputs)
-    assert outputs[0].decode().split('\n')[:-1] == [base64.b64encode(blob).decode() for blob in data]
+    ran = subprocess.run([dewy, *paths], capture_output=True, timeout=60)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    leaf_oracle.check_value(ran.stdout)
+    assert ran.stdout.decode().split('\n')[:-1] == [base64.b64encode(blob).decode() for blob in data]
 
 
 def test_selfhost_base64_ships_dewy(compiler):

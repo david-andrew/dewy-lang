@@ -1,4 +1,4 @@
-"""compiler/utf8_text.dewy's terminal column widths, and its frozen twin utf8_text.jo, against a wcwidth-style
+"""Check compiler/utf8_text.dewy's terminal column widths against a wcwidth-style
 rule computed from Python's unicodedata: marks, format characters and combining characters take no column, East
 Asian Wide and Fullwidth characters two, the rest one, and an invalid byte one."""
 import random
@@ -82,16 +82,14 @@ def expected(data):
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_selfhost_utf8_width_matches_unicodedata(compiler, tmp_path, release):
     dewy = build(compiler, FIXTURES / 'utf8_width_dewy.dewy', tmp_path / 'width-dewy', release)
-    jo = build(compiler, FIXTURES / 'utf8_width_jo.jo', tmp_path / 'width-jo', release) if leaf_oracle.builds_twin() else None
     # (the recorded run uses only characters whose class is the same in every Unicode version)
     words = texts(False)
-    got = leaf_oracle.same(run(dewy, words), lambda: run(jo, words))
+    got = leaf_oracle.check_value(run(dewy, words))
     assert got.decode().split('\n')[:-1] == [expected(w) for w in words]
     # (the whole range is compared with unicodedata only where Python's Unicode version is the tables')
     if unicodedata.unidata_version == TABLE_VERSION:
         words = texts(True)
         got = run(dewy, words)
-        if jo is not None: assert got == run(jo, words)
         assert got.decode().split('\n')[:-1] == [expected(w) for w in words]
 
 

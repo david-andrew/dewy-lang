@@ -16,7 +16,7 @@ def test_nothing_changed_scopes_every_twin_out():
 
 
 def test_toolchain_inputs_scope_nothing_out():
-    for name in ('lib/core/rt.jo', 'stage0/sloppy0.c', 'tools/compiler/build.py', 'tests/conftest.py', 'tests/driver_cache.py'):
+    for name in ('lib/core/rt.jo', 'bootstrap-seed/source.tar.xz', 'tools/compiler/build.py', 'tests/conftest.py', 'tests/leaf_record.py', 'tests/whole_oracle.py', 'tests/driver_cache.py'):
         assert twin_scope.scoped_out({name}) == [], name
 
 
@@ -37,6 +37,11 @@ def test_a_test_file_or_a_case_it_names_reaches_only_its_twin():
 def test_a_shared_double_reaches_the_group_it_feeds():
     changed = scoped('tests/selfhost_facts_double.py')
     assert 'float_ops' not in changed and 'sha' in changed
+
+
+def test_corpus_members_select_the_lexer_probe():
+    assert 'dewy_lexer' not in scoped('bench/arena.dewy')
+    assert 'dewy_lexer' in scoped('bench/new-unrecorded-input.dewy')
 
 
 def test_base_option_is_taken_out_of_the_pytest_arguments():

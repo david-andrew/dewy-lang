@@ -52,7 +52,7 @@ main = ():
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_opt_borrowed_views(compiler, tmp_path, release):  # noqa: F811
-    decode = decode_source('o_resize')
+    decode = decode_source(resize=True)
     # Initialize classifier inputs before building the extracted decode table.
     driver = '\nchecked_flags = true\nir_operand_layout = ir_operand_layouts()\n' + decode + DRIVER
     outputs = [build_run(compiler, tmp_path, ext, driver, release) for ext in leaf_oracle.extensions()]

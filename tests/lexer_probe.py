@@ -1,70 +1,21 @@
-"""Build a bounded lexer probe from the lexer and its current Dewy leaf dependencies."""
-import re
-import shutil
+"""Link bounded-span probes with the live lexer and its initialized host services."""
 from pathlib import Path
+import shutil
 
 
 def lexer_span_helpers(compiler, out):
     directory = compiler.parent.parent / 'compiler'
-    if not directory.exists():
+    if not directory.is_dir():
         directory = Path(__file__).resolve().parents[1] / 'compiler'
-    copied = set()
-
-    def copy_leaf(module):
-        if module in copied:
-            return
-        copied.add(module)
-        source = directory / module
-        shutil.copy2(source, out / module)
-        for dependency in re.findall(r'^from p"([^"]+\.dewy)"', source.read_text(), re.M):
-            if not dependency.startswith('@lib/'):
-                copy_leaf(dependency)
-
-    for module in ('dewy_tokens.dewy', 'dewy_lex.dewy', 'dewy_lexer.dewy', 'intern.dewy', 'dewy_parser.dewy', 'node_store.dewy'):
-        copy_leaf(module)
-    fast = (directory / 'dewy_fast.jo').read_text()
-    util = (directory / 'util.jo').read_text()
-    source_types = directory / 'source_types.dewy'
-    if source_types.exists():
-        copy_leaf('source_types.dewy')
-        source_layout = "use 'source_types.dewy'\n"
-        source_start = util.index('files: SrcFile[]')
-    else:
-        source_layout = ''
-        source_start = util.index('struct SrcFile:')
-    if (directory / 'util_ops.dewy').exists():
-        copy_leaf('util_ops.dewy')
-        (out / 'util.jo').write_text(
-            "use 'util_ops.dewy'\n" + source_layout
-            + util[source_start:util.index("# each file's lines")]
-            + 'lib_root = ""\n'
-        )
-        utility = source_layout + "use 'util.jo'"
-    else:
-        utility = (source_layout + util[source_start:util.index('# position encoding')]
-                   + 'mkpos = (file: int, off: int) -> int: (file << 40) | off\n')
-    lex = (directory / 'lex.jo').read_text()
-    helpers = (directory / 'lexer_helpers.jo').read_text()
-    twin = (directory / 'dewy_fast_lex.jo').read_text()
-    state_end = fast.index('const DN_EDIT_BIGINT')
-    symbols = (directory / 'frontend_symbols.jo').read_text()
-    symbols = symbols[symbols.index('dn_init_symbols ='):symbols.index('frontend_symbols_bind =')]
-    entry = directory / 'dewy_frontend.jo'
-    # The standalone probe still uses the frozen entry and the live scanner.
-    # The shared owner's state no longer contains the lexing entry itself.
-    lexical_entry = ''
-    if entry.exists():
-        text = entry.read_text()
-        start = text.index('dn_tok_pool:') if 'dn_tok_pool:' in text else text.index('dn_lex =')
-        lexical_entry = text[start:text.index('dewy_fast_file =')]
-
-    return '\n'.join([
-        "use 'dewy_tokens.dewy'\nuse 'dewy_lex.dewy'\nuse 'dewy_lexer.dewy'\nuse 'intern.dewy'\nuse 'dewy_parser.dewy'",
-        lex[lex.index('lx_cls:'):lex.index('\n', lex.index('lx_cls:')) + 1]
-        + helpers[helpers.index('lx_init_classes ='):helpers.index('is_ident_start =')],
-        utility,
-        'fatal = (pos: int, message: str): panic(message)\n'
-        'err_notes: (int, str)[]',
-        'dc_parser: ParserContext',
-        fast[fast.index('dn_word_tokens:'):state_end] + symbols + lexical_entry + twin[twin.index('dn_init_words ='):],
-    ])
+    copied = out / 'compiler'
+    shutil.copytree(directory, copied)
+    # All cyclic imports still resolve to one main module. The probe supplies
+    # the entry point and selects its own optimization level.
+    main = copied / 'main.jo'
+    prefix, entry, _ = main.read_text().partition('main = ():\n')
+    assert entry
+    main.write_text(prefix.replace('build:\n    opt = release\n', ''))
+    return ''.join(f"use '{(copied / name).as_posix()}'\n" for name in (
+        'main.jo', 'dewy_fast.jo', 'dewy_context.jo', 'dewy_frontend.dewy',
+        'dewy_fast_lex.dewy', 'dewy_lexer.dewy', 'dewy_lex.dewy', 'dewy_parser.dewy',
+        'source_types.dewy', 'dewy_tokens.dewy', 'util.jo'))

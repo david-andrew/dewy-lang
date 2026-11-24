@@ -102,16 +102,12 @@ def build(compiler, source, binary, release):
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_selfhost_habits_match_jo(compiler, tmp_path, release):
     dewy = build(compiler, FIXTURES / 'habits_dewy.dewy', tmp_path / 'habits-dewy', release)
-    jo = build(compiler, FIXTURES / 'habits_jo.jo', tmp_path / 'habits-jo', release) if leaf_oracle.builds_twin() else None
     table = tables()
     names = words(table)
-    outputs = []
-    for binary in leaf_oracle.pair(dewy, jo):
-        ran = subprocess.run([binary, *names], capture_output=True, timeout=60)
-        assert ran.returncode == 0, ran.stdout + ran.stderr
-        outputs.append(ran.stdout)
-    leaf_oracle.agree(outputs)
-    lines = outputs[0].decode().split('\n')
+    ran = subprocess.run([dewy, *names], capture_output=True, timeout=60)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    leaf_oracle.check_value(ran.stdout)
+    lines = ran.stdout.decode().split('\n')
     expected = []
     for w in names:
         hints = [dict(table[t]).get(w, '') for t in TABLES]

@@ -1,11 +1,7 @@
-"""Expected outcomes for whole-compiler differentials (tests/leaf_oracle.py stores and checks them).
+"""Record a compiler invocation's status, diagnostics and program behavior.
 
-A whole-compiler differential builds programs with a compiler that links one Dewy leaf and with one
-that links its frozen twin. A program image changes with every backend edit, so it cannot be an
-expected value. What is recorded instead, while leaf and twin agree: the build's status, its output
-and diagnostics, and for each file it made either its text (an IR or obligation dump, normalised)
-or, for a host executable, what running it prints and returns. A cross-target image is recorded by
-kind only; the host matrix runs those.
+Record text outputs directly and run host executables. Store the format of
+cross-target images, whose execution is covered by the host matrix.
 """
 import os
 import platform

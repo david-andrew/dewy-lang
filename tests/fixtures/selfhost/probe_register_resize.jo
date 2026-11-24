@@ -1,0 +1,18 @@
+o_resize = (n: int):
+    if o_reg_count < n:
+        o_reg_storage.resize(n)
+        o_regs = data(o_reg_storage)
+        o_reg_count = n
+        o_fact_scope.resize(n * 2)
+        o_fact_nbr.resize(n * 2)
+    loop v in [0..n):
+        reg = &o_regs[v]
+        reg.ndef = 0
+        reg.stable = false
+        reg.defpos = -1
+        reg.first = 2147483647
+        reg.nuse = 0
+        reg.constant = false
+        reg.repl = i32(v)
+        reg.ver = 0
+        reg.dop = -1

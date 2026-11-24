@@ -1,4 +1,4 @@
-"""Run one language-server session against a compiler built with a Dewy leaf and with its frozen twin."""
+"""Build live compiler probes and record language-server sessions."""
 import json
 import os
 
@@ -15,29 +15,15 @@ _default_modules_for = modules_for
 
 
 def leaf_compilers(compiler, tmp_path, leaves, recorded=True):
-    """The compiler built with the leaves, then with their twins. Recorded outcomes stand in for the
-    twins (tests/leaf_oracle.py): the first compiler records each invocation, checked when the test
-    ends, and without twins the second is the first again (or None when not recorded)."""
-    built = []
-    for extension in ('dewy', 'jo') if leaf_oracle.builds_twin() else ('dewy',):
-        # Custom probes keep their exact graph. Ordinary live CLI builds share one
-        # graph: its reachable modules never import a leaf's frozen .jo body.
-        live = extension == 'dewy' and DRIVER == CLI_DRIVER and modules_for is _default_modules_for
-        modules = dict(modules_for(tmp_path / 'unused.dewy', tmp_path / 'unused', () if live else leaves))
-        # Redirect a custom probe's explicit imports along with its services.
-        modules['driver.jo'] = DRIVER
-        if extension == 'jo':
-            # (every edge to a leaf, from Jo and from Dewy, leads to its twin)
-            for name, text in modules.items():
-                for leaf in leaves:
-                    if name != f'{leaf}.jo':
-                        text = (text.replace(f"'{leaf}.dewy'", f"'{leaf}.jo'")
-                                .replace(f'"{leaf}.dewy"', f'"{leaf}.jo"'))
-                modules[name] = text
-        built.append(cached_driver(compiler, tmp_path, False, modules))
-    if not recorded:
-        return built if len(built) == 2 else [built[0], None]
-    return [leaf_oracle.recording(built[0], tmp_path, DRIVER == CLI_DRIVER), built[1] if len(built) == 2 else built[0]]
+    """Build the live probe. Existing two-session callers receive the same compiler twice,
+    with one session recording the expected outcomes."""
+    live_cli = DRIVER == CLI_DRIVER and modules_for is _default_modules_for
+    modules = dict(modules_for(tmp_path / 'unused.dewy', tmp_path / 'unused', () if live_cli else leaves))
+    modules['driver.jo'] = DRIVER
+    binary = cached_driver(compiler, tmp_path, False, modules)
+    if recorded:
+        return leaf_oracle.recording(binary, tmp_path, DRIVER == CLI_DRIVER), binary
+    return binary, None
 
 
 class Recorder(Client):

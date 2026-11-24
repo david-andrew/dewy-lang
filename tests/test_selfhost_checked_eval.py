@@ -1,8 +1,6 @@
 """Checked evaluator: frozen whole-compiler outputs and private instruction ordinals."""
-from pathlib import Path
 import os
 import re
-import shutil
 import subprocess
 
 import pytest
@@ -23,57 +21,33 @@ def test_checked_eval_instruction_ordinals():
     for original, private, table, source in [
         ('IN', 'CXIN', 'intrinsic_kind', 'expr'),
         ('CV', 'CXCV', 'conversion', 'expr'),
-        ('Tok', 'Tok', 'token', 'checker_tokens'),
+        ('Tok', 'Tok', 'token', None),
     ]:
-        expected = enum_members((ROOT / (f'tests/fixtures/selfhost/frozen/{source}.jo' if source == 'checker_tokens' else f'compiler/{source}.jo')).read_text(), original)
+        if source is None:
+            expected = (ROOT / 'tests/fixtures/selfhost/token_ordinals.txt').read_text().split()
+        else:
+            expected = enum_members((ROOT / f'compiler/{source}.jo').read_text(), original)
         entries = re.search(r'^let cx_'+table+r'_values:[^=]*=\[([^\n]*)\]', owner, re.M)
         assert entries
         assert re.findall(private+r'\.(\w+)', entries[1]) == expected
 
 
-@pytest.fixture(scope='module')
-def frozen_evaluator(compiler, tmp_path_factory):  # noqa: F811
-    if not leaf_oracle.builds_twin():
-        return None  # (recorded outcomes stand in for it: tests/whole_oracle.py)
-    directory = tmp_path_factory.mktemp('checked-eval-frozen')
-    sources = directory / 'compiler'
-    shutil.copytree(ROOT / 'compiler', sources)
-    path = sources / 'comptime.jo'
-    path.write_text(path.read_text().replace("use 'checked_eval.dewy'", "use 'checked_eval.jo'"))
-    # (the host adapters' leaf runs the same evaluator)
-    path = sources / 'comptime_ops.dewy'
-    path.write_text(path.read_text().replace('from p"checked_eval.dewy"', 'from p"checked_eval.jo"'))
-    binary = directory / 'dewy-core'
-    built = subprocess.run([compiler, 'build', sources / 'main.jo', '-o', binary],
-                           env={**os.environ, 'DEWY_CORE_LIB': str(ROOT / 'lib'), 'DEWY_EMIT_WORKERS': '1'},
-                           capture_output=True, text=True, timeout=180)
-    assert built.returncode == 0, built.stdout + built.stderr
-    return binary
-
-
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
-def test_checked_eval_twins(compiler, frozen_evaluator, tmp_path, release):  # noqa: F811
+def test_checked_eval_twins(compiler, tmp_path, release):  # noqa: F811
     sources = [ROOT / f'tests/cases/comptime/{name}.dewy' for name in
                ('arrays', 'functions', 'control', 'storage', 'semantics', 'interpolation',
                 'reflection', 'divide_zero', 'host_effect', 'overflow', 'selfhost_growth', 'shared_writes')]
     env = {**os.environ, 'DEWY_CORE_LIB': str(ROOT / 'lib'), 'DEWY_EMIT_WORKERS': '1'}
     for source in sources:
-        results = []
-        for binary in leaf_oracle.pair(compiler, frozen_evaluator):
-            output = tmp_path / 'program'
-            arguments = ['build', source, '-o', output, *(['--release'] if release else [])]
-            built = subprocess.run([binary, *arguments], env=env, capture_output=True, timeout=90)
-            results.append((built.returncode, built.stdout, built.stderr,
-                            output.read_bytes() if built.returncode == 0 else b''))
-            if len(results) == 1:  # (before the twin's build replaces the program)
-                outcome = whole_oracle.build(arguments, built.returncode, built.stdout, built.stderr,
-                                             [output] if built.returncode == 0 else [], tmp_path)
-        assert len(results) == 1 or results[0] == results[1], (source.name, release, results[0][:3], results[1][:3])
-        leaf_oracle.check_entry(lambda: outcome)
+        output = tmp_path / 'program'
+        arguments = ['build', source, '-o', output, *(['--release'] if release else [])]
+        built = subprocess.run([compiler, *arguments], env=env, capture_output=True, timeout=90)
+        leaf_oracle.check_entry(lambda: whole_oracle.build(
+            arguments, built.returncode, built.stdout, built.stderr, [output] if built.returncode == 0 else [], tmp_path))
         if source.with_suffix('.err').exists():
-            assert results[0][0] != 0
+            assert built.returncode != 0
         else:
-            assert results[0][0] == 0, results[0][2]
+            assert built.returncode == 0, built.stderr
 
 
 def test_checked_evaluator_owns_execution(compiler):  # noqa: F811

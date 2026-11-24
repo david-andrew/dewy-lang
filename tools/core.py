@@ -6,7 +6,6 @@
     python3 -m tools.core build example.dewy --release -o /tmp/example
     python3 -m tools.core fmt example.dewy
     python3 -m tools.core --bootstrap test
-    python3 -m tools.core --bootstrap-archive test
     python3 -m tools.core path
     python3 -m tools.core cases [-k expression] [--update]
     python3 -m tools.core ladder [--update-ratchet]
@@ -52,7 +51,7 @@ def source_paths(root: Path) -> list[Path]:
         path = root / 'bootstrap-seed' / name
         if path.is_file():
             paths.append(path)
-    for directory in ('compiler', 'lib', 'stage0', 'bootstrap'):
+    for directory in ('compiler', 'lib'):
         paths.extend(path for path in (root / directory).rglob('*')
                      if path.is_file() and path.name != 'sloppy0' and '__pycache__' not in path.parts)
     return sorted(paths)
@@ -122,7 +121,7 @@ def test_runner_options(python: Path, arguments: list[str]) -> list[str]:
     return options
 
 
-def toolchain(*, bootstrap: bool = False, bootstrap_archive: bool = False, seed_cache: Path | None = None,
+def toolchain(*, bootstrap: bool = False, seed_cache: Path | None = None,
               cache: Path = CACHE, root: Path = ROOT) -> Path:
     cache.mkdir(parents=True, exist_ok=True)
     # Serialize cache publication/builds. Running commands retain an immutable
@@ -131,25 +130,20 @@ def toolchain(*, bootstrap: bool = False, bootstrap_archive: bool = False, seed_
         lock_exclusive(lock)
         stamp = source_stamp(root)
         state, seed = cached_state(cache)
-        forced = bootstrap or bootstrap_archive
-        if (not forced and seed is not None and state.get('source_stamp') == stamp
+        if (not bootstrap and seed is not None and state.get('source_stamp') == stamp
                 and state.get('binary_stamp') == file_stamp(seed)):
             return seed
         identity = source_identity(root)
-        if not forced and seed is not None and state.get('source_identity') == identity:
+        if not bootstrap and seed is not None and state.get('source_identity') == identity:
             state['source_stamp'] = stamp
             state['binary_stamp'] = file_stamp(seed)
             publish_state(cache, state)
             return seed
         output = cache / f'build-{time.time_ns()}'
-        if bootstrap_archive:
-            print('Building the compact core from the pinned source bootstrap…', file=sys.stderr, flush=True)
-            binary = build(output, bootstrap_archive=True, seed_cache=seed_cache)
-        else:
-            from_c = bootstrap or seed is None
-            print('Building the compact core' + (' from C…' if from_c else ' from the previous core…'),
-                  file=sys.stderr, flush=True)
-            binary = build(output, bootstrap=from_c, seed=None if from_c else seed)
+        from_c = bootstrap or seed is None
+        print('Building the compact core' + (' from the pinned source bootstrap…' if from_c else ' from the previous core…'),
+              file=sys.stderr, flush=True)
+        binary = build(output, bootstrap=from_c, seed=None if from_c else seed, seed_cache=seed_cache)
         # A source edit during compilation must not publish a misleading cache
         # hit. The built snapshot remains available for diagnosis/reuse manually.
         if source_identity(root) != identity or source_stamp(root) != stamp:
@@ -251,7 +245,7 @@ def take_base(arguments: list[str]) -> tuple[list[str], str | None]:
 
 
 def twin_scope_env(base: str | None, directory: str) -> dict[str, str]:
-    """With --base REV, the twin test files none of whose inputs changed since the merge base of REV
+    """With --base REV, the self-hosting test files none of whose inputs changed since the merge base of REV
     and HEAD (tools/twin_scope.py) join the nightly tier; this environment tells tests/conftest.py."""
     report = {'DEWY_TWIN_SCOPE_REPORT': str(Path(directory) / 'twin-scope-report.json')}
     if base is None:
@@ -270,10 +264,10 @@ def twin_scope_summary(env: dict[str, str]):
     except (OSError, ValueError):
         return
     if 'DEWY_TWIN_SCOPED_OUT' not in env:
-        print('Twin tests scoped out: 0 (no --base: every twin test runs)', file=sys.stderr)
+        print('Leaf tests scoped out: 0 (no --base: every leaf test runs)', file=sys.stderr)
         return
     listed = json.loads(Path(env['DEWY_TWIN_SCOPED_OUT']).read_text())
-    print(f"Twin tests scoped out to the nightly tier: {done['tests']} tests in {done['files']} of {done['twin_files']} twin files "
+    print(f"Leaf tests scoped out to the nightly tier: {done['tests']} tests in {done['files']} of {done['twin_files']} leaf files "
           f"({listed['changed']} files changed since merge base {listed['merge_base'][:9]} with {listed['base']}); "
           f"run them with: python3 -m tools.core test tests --base {listed['base']} -m nightly", file=sys.stderr)
 
@@ -343,17 +337,15 @@ HARNESSES = ('test', 'cases', 'ladder', 'speed', 'bench', 'fuzz')
 
 def main(argv: list[str] | None = None) -> int:
     cli = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    routes = cli.add_mutually_exclusive_group()
-    routes.add_argument('--bootstrap', action='store_true', help='force an independent build from C')
-    routes.add_argument('--bootstrap-archive', action='store_true', help='build from the pinned G2 and verify convergence')
-    cli.add_argument('--seed-cache', type=Path, help='G2 cache directory for --bootstrap-archive')
+    cli.add_argument('--bootstrap', '--bootstrap-archive', action='store_true', help='build with the pinned G2 and verify convergence')
+    cli.add_argument('--seed-cache', type=Path, help='G2 cache directory for --bootstrap')
     cli.add_argument('command', choices=('path', 'test', 'cases', 'ladder', 'build', 'check', 'run', 'watch', 'new', 'lsp',
                                         'fmt', 'speed', 'bench', 'fuzz'))
     cli.add_argument('arguments', nargs=argparse.REMAINDER,
                      help='arguments for pytest, speed, bench or the compiler; test --quick selects the smoke suite')
     args = cli.parse_args(argv)
-    if args.seed_cache is not None and not args.bootstrap_archive:
-        cli.error('--seed-cache requires --bootstrap-archive')
+    if args.seed_cache is not None and not args.bootstrap:
+        cli.error('--seed-cache requires --bootstrap')
     if args.command in HARNESSES:
         headless.activate()
     if args.command == 'path' and args.arguments:
@@ -363,13 +355,13 @@ def main(argv: list[str] | None = None) -> int:
               'Golden cases, then the acceptance ladder and site examples (full suite only), then pytest.\n'
               '--quick runs the smoke suite; -k selects cases, ladder programs and tests by keyword;\n'
               '--maxfail=0 reports every failure; other options go to pytest.\n\n'
-              '--base REV scopes the self-hosting twin tests (tests/test_selfhost_*.py) to a landing: a twin\n'
+              '--base REV scopes the self-hosting leaf tests (tests/test_selfhost_*.py) to a landing: a leaf\n'
               'file runs only when a file it reads changed since the merge base of REV and HEAD (work tree\n'
               'changes and untracked files count); the others join the nightly tier, which\n'
-              '`test tests --base REV -m nightly` runs. A twin file reads itself, the helpers it imports,\n'
-              'the files its strings name, lib/, stage0/, bootstrap/, the build tools and the compiler files\n'
+              '`test tests --base REV -m nightly` runs. A leaf test file reads itself, the helpers it imports,\n'
+              'the files its strings name, lib/, bootstrap-seed/, the build tools and the compiler files\n'
               'in the import closure of each compiler module it names (all of compiler/ when it links the\n'
-              'whole compiler). Without --base every twin test runs. The summary line counts the tests scoped out.')
+              'whole compiler). Without --base every leaf test runs. The summary line counts the tests scoped out.')
         return 0
     base = None
     if args.command == 'test':
@@ -386,10 +378,7 @@ def main(argv: list[str] | None = None) -> int:
         from importlib import import_module
         return import_module(f'tools.{args.command}').main(args.arguments)
     try:
-        if args.bootstrap_archive:
-            binary = toolchain(bootstrap_archive=True, seed_cache=args.seed_cache)
-        else:
-            binary = toolchain(bootstrap=args.bootstrap)
+        binary = toolchain(bootstrap=args.bootstrap, seed_cache=args.seed_cache)
     except (OSError, RuntimeError) as error:
         print(f'dewy development: {error}', file=sys.stderr)
         return 1

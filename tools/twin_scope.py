@@ -1,19 +1,10 @@
-"""Which self-hosting twin tests a change can affect: `tools.core test --base REV`.
+"""Scope self-hosting tests to changes since a landing base.
 
-A twin test (tests/test_selfhost_*.py) compares a Dewy leaf with its frozen Jo twin. It can only
-change its answer when something it reads changed, so a landing runs the twin files whose inputs
-changed since the merge base with REV; the others join the nightly tier. Inputs of a twin file:
-
-* the file itself, the test helpers and tools modules it imports (transitively, by `import`);
-* every compiler file in the import closure (use / import / from p"...") of each compiler module it
-  names: a string that is a module's stem, or a file name `stem.jo` / `stem.dewy`. A helper that
-  reads the compiler directory (it links the whole compiler into a driver) depends on all of
-  compiler/. The compiler's imports form one strongly connected graph, so such a closure is
-  nearly the whole directory: only twins of self-contained leaves scope out for a compiler edit;
-* every repository file or directory a string constant names (a case, a fixture, a directory);
-* the build inputs of the compiler under test (lib/, stage0/, bootstrap/ and the build tools).
-
-Anything the analysis cannot place is an input of every twin file: the rule errs towards running."""
+Each test depends on its recorded outputs, imported Python helpers, referenced
+fixtures, and the compiler import closure of the modules it names. A driver
+that loads the whole compiler depends on the entire compiler directory.
+Toolchain and shared test-runner changes select all self-hosting tests.
+"""
 from __future__ import annotations
 
 import ast
@@ -24,10 +15,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TWIN_PREFIX = 'test_selfhost_'
-# Inputs of every twin test: the toolchain build and the test harness.
-GLOBAL = ('lib/', 'stage0/', 'bootstrap/', 'tools/compiler/build.py', 'tools/core.py', 'tools/headless.py',
+# Inputs of every self-hosting test: the toolchain build and the test harness.
+GLOBAL = ('lib/', 'bootstrap-seed/', 'tools/compiler/seed_archive.py', 'tools/compiler/build.py', 'tools/core.py', 'tools/headless.py',
           'tools/scratch.py', 'tools/filelock.py', 'tests/conftest.py', 'tests/support.py',
-          'tests/driver_cache.py', 'tests/leaf_oracle.py', 'VERSION', 'LICENSE', 'pyproject.toml')
+          'tests/driver_cache.py', 'tests/leaf_oracle.py', 'tests/leaf_record.py', 'tests/whole_oracle.py',
+          'tools/compiler/pytest_parallel.py', 'VERSION', 'LICENSE', 'pyproject.toml')
 # Directories whose mention by name is not a dependency on their contents (the repository root, the
 # output cache, and trees whose members a test names one by one), and the harness every test imports.
 NOT_WHOLE = ('', '.', 'tests', 'tests/cases', 'tests/fixtures', 'tests/fixtures/selfhost', 'bench', '__dewycache__')
@@ -123,7 +115,7 @@ def facts(path: Path, root: Path, stems: frozenset, graph: dict, memo: dict) -> 
 
 
 def inputs(test: Path, graph: dict[str, set[str]], root: Path = ROOT, memo: dict | None = None) -> set[str]:
-    """The repository-relative files and directories (directories end in '/') a twin file reads."""
+    """The repository-relative files and directories (directories end in '/') a self-hosting test reads."""
     memo = {} if memo is None else memo
     stems = memo.setdefault('stems', frozenset(p.stem for p in (root / 'compiler').iterdir()))
     reach = memo.setdefault('closures', {})
@@ -157,7 +149,11 @@ def twin_files(root: Path = ROOT) -> list[Path]:
 
 
 def scoped_out(changed: set[str], root: Path = ROOT) -> list[str]:
-    """The twin test files (repository-relative) none of whose inputs changed."""
+    """The self-hosting tests whose inputs are unchanged since the landing base."""
+    corpus = 'tests/fixtures/leaf_corpus.txt'
+    if any(path.endswith('.dewy') for path in changed):
+        if not changed.isdisjoint((root / corpus).read_text().splitlines()):
+            changed = changed | {corpus}
     if root not in _inputs:
         graph, memo = import_graph(root), {}
         _inputs[root] = {p: inputs(p, graph, root, memo) | set(GLOBAL) for p in twin_files(root)}

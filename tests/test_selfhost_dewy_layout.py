@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.corpus_cache import SHARDS, built_once, cached, digest, shard_of
+from tests.corpus_cache import corpus_under, SHARDS, built_once, cached, digest, shard_of
 from tests import layout_corpus
 from tests.layout_corpus import layout_texts
 from tests.support import compiler  # noqa: F401 (fixture)
@@ -502,9 +502,9 @@ def disturbed(src, rng):
 
 def corpus_inputs():
     rng = random.Random(10)
-    files = sorted(p for p in (ROOT / 'tests').rglob('*.dewy') if '__dewycache__' not in p.parts)
-    files = [*sorted((ROOT / 'compiler').glob('*.dewy')), *sorted((ROOT / 'lib').rglob('*.dewy')),
-             *sorted((ROOT / 'examples').glob('*.dewy')), *rng.sample(files, 500)]
+    files = corpus_under(ROOT / 'tests')
+    files = [*corpus_under(ROOT / 'compiler'), *corpus_under(ROOT / 'lib'),
+             *corpus_under(ROOT / 'examples', recursive=False), *rng.sample(files, 500)]
     return tuple(path.read_bytes() for path in files), rng.getstate()
 
 
@@ -568,8 +568,7 @@ def results(output):
 
 def layout_binaries(compiler, release):
     def make(directory):
-        return (build(compiler, FIXTURES / 'dewy_layout_dewy.dewy', directory / 'layout-dewy', release),
-                build(compiler, FIXTURES / 'dewy_layout_jo.jo', directory / 'layout-jo', release) if leaf_oracle.builds_twin() else None)
+        return build(compiler, FIXTURES / 'dewy_layout_dewy.dewy', directory / 'layout-dewy', release)
     return built_once(('layout', str(compiler), release), make)
 
 
@@ -578,18 +577,15 @@ def layout_binaries(compiler, release):
                                    for k in range(SHARDS)])
 def test_selfhost_dewy_layout_match_jo(compiler, tmp_path, release, shard):
     # (the corpus is split into interleaved shards, one xdist group each, so workers share it)
-    dewy, jo = layout_binaries(compiler, release)
+    dewy = layout_binaries(compiler, release)
     texts, expected = shard_oracle(shard)
     cases = tmp_path / 'cases'
     cases.mkdir()
     listed = write_cases(cases, texts)
-    outputs = []
-    for binary in leaf_oracle.pair(dewy, jo):
-        ran = subprocess.run([binary, listed], capture_output=True, timeout=300)
-        assert ran.returncode == 0, ran.stderr
-        outputs.append(ran.stdout)
-    leaf_oracle.agree(outputs, directory=tmp_path)
-    got = results(outputs[0])
+    ran = subprocess.run([dewy, listed], capture_output=True, timeout=300)
+    assert ran.returncode == 0, ran.stderr
+    leaf_oracle.check_value(ran.stdout, directory=tmp_path)
+    got = results(ran.stdout)
     assert len(got) == len(texts)
     for k, (a, b) in enumerate(zip(got, expected)):
         assert a == b, (k, texts[k][:400])

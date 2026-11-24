@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.corpus_cache import SHARDS, built_once, cached, digest, shard_of
+from tests.corpus_cache import corpus_under, SHARDS, built_once, cached, digest, shard_of
 from tests.support import compiler  # noqa: F401 (fixture)
 from tests import leaf_oracle
 
@@ -308,8 +308,8 @@ def lex_inputs(full):
 
 
 def corpus_paths():
-    return [*sorted((ROOT / 'compiler').glob('*.dewy')), *sorted((ROOT / 'lib').rglob('*.dewy')),
-            *sorted((ROOT / 'tests/ladder').rglob('*.dewy'))]
+    return [*corpus_under(ROOT / 'compiler'), *corpus_under(ROOT / 'lib'),
+            *corpus_under(ROOT / 'tests/ladder')]
 
 
 def shard_oracle(texts, index, full):
@@ -333,9 +333,8 @@ def test_selfhost_dewy_lex_match_jo(compiler, tmp_path, release, full, shard):
     sys.setrecursionlimit(20000)
 
     def make(directory):
-        return (build(compiler, FIXTURES / 'dewy_lex_dewy.dewy', directory / 'lex-dewy', release),
-                build(compiler, FIXTURES / 'dewy_lex_jo.jo', directory / 'lex-jo', release) if leaf_oracle.builds_twin() else None)
-    dewy, jo = built_once(('lex', str(compiler), release), make)
+        return build(compiler, FIXTURES / 'dewy_lex_dewy.dewy', directory / 'lex-dewy', release)
+    dewy = built_once(('lex', str(compiler), release), make)
     all_texts = lex_inputs(full)
     texts, expected = shard_oracle(all_texts, shard, full)
     cases = tmp_path / 'cases'
@@ -347,13 +346,10 @@ def test_selfhost_dewy_lex_match_jo(compiler, tmp_path, release, full, shard):
         paths.append(str(path))
     listed = tmp_path / 'list'
     listed.write_text('\n'.join(paths) + '\n')
-    outputs = []
-    for binary in leaf_oracle.pair(dewy, jo):
-        ran = subprocess.run([binary, listed], capture_output=True, timeout=600)
-        assert ran.returncode == 0, ran.stderr
-        outputs.append(ran.stdout)
-    leaf_oracle.agree(outputs, directory=tmp_path)
-    got = (outputs[0].decode()).splitlines()
+    ran = subprocess.run([dewy, listed], capture_output=True, timeout=600)
+    assert ran.returncode == 0, ran.stderr
+    leaf_oracle.check_value(ran.stdout, directory=tmp_path)
+    got = (ran.stdout.decode()).splitlines()
     want = [line for lines in expected for line in lines]
     assert len(got) == len(want)
     for k, (a, b) in enumerate(zip(got, want)):

@@ -6,7 +6,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 from tests import leaf_oracle
-from tests.enumerations import dewy_enumerations, jo_enums
+from tests.enumerations import dewy_enumerations
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('checker_tokens', 'checker_types', 'refinement_types')
@@ -80,6 +80,4 @@ def test_checker_layout_twins(compiler, tmp_path, release):  # noqa: F811
 def test_shared_enum_ordinals():
     for module in MODULES:
         enums = dewy_enumerations((ROOT / 'compiler' / f'{module}.dewy').read_text())
-        if leaf_oracle.builds_twin():
-            assert enums == jo_enums((ROOT / 'compiler' / f'{module}.jo').read_text())
         leaf_oracle.check((module,), 0, repr(enums).encode())

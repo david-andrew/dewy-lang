@@ -5,9 +5,8 @@ import subprocess
 import pytest
 import shutil
 
-from tools.compiler.speed_equivalent import freeze
 
-from tests.support import compiler
+from tests.support import compiler  # noqa: F401 (fixture)
 from tests import leaf_oracle
 
 
@@ -15,8 +14,6 @@ def compare_operands(compiler, tmp_path, extension):
     root = Path(__file__).resolve().parents[1]
     directory = tmp_path / 'compiler'
     shutil.copytree(root / 'compiler', directory)
-    if extension == 'jo':
-        freeze(directory, ('opt_registers',))
     source = tmp_path / 'shared-index.jo'
     source.write_text(f"use '{directory}/ir_types.dewy'\nuse '{directory}/ir.jo'\nuse '{directory}/ir_builders.dewy'\nuse '{directory}/opt_registers.{extension}'\nuse '{directory}/opt.jo'\nuse '{directory}/opt_core.dewy'\nuse '{directory}/opt_sra.dewy'\nuse '{directory}/opt_workspace.dewy'\n" + '''
 # Reset an odd prefix of an existing bank. Fields outside the reset contract stay intact.

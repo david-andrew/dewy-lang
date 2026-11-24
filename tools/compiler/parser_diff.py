@@ -1,11 +1,6 @@
-"""Compare the complete Dewy reader with its frozen Jo twin.
+"""Compare reader behavior across two compiler revisions on tracked and generated sources.
 
-Both compilers build the same sources at the same paths. Compare exit status,
-stdout, stderr and every emitted byte, including diagnostics for rejected input.
-The corpus is every tracked .dewy file plus deterministic generated programs and
-damaged variants. Each reader is built in default and release mode.
-
-    python3 -m tools.compiler.parser_diff --workers 2 --generated 128
+    python3 -m tools.compiler.parser_diff --reference /path/to/previous/dewy-core
 """
 from __future__ import annotations
 
@@ -15,7 +10,6 @@ import hashlib
 import os
 from pathlib import Path
 import random
-import re
 import shutil
 import subprocess
 
@@ -28,12 +22,7 @@ def environment(lib: Path) -> dict[str, str]:
     return {**env, 'DEWY_CORE_LIB': str(lib), 'DEWY_EMIT_WORKERS': '1'}
 
 
-def build_pair(seed: Path, work: Path, release: bool, twin: bool = True) -> tuple[Path, ...]:
-    """Use the frozen driver to reach the frozen reader; other leaves stay Dewy.
-
-    The production Dewy driver imports its reader directly, so swapping Jo
-    imports alone would leave module statements on the production reader.
-    """
+def build_reader(seed: Path, work: Path, release: bool) -> Path:
     tree = work / 'source'
     shutil.rmtree(tree, ignore_errors=True)
     shutil.copytree(ROOT / 'compiler', tree / 'compiler')
@@ -43,24 +32,14 @@ def build_pair(seed: Path, work: Path, release: bool, twin: bool = True) -> tupl
     main = tree / 'compiler/main.jo'
     main.write_text(main.read_text().replace('build:\n    opt = release\n', ''))
     mode = 'release' if release else 'default'
-    binaries = []
-    for side in ('dewy', 'twin') if twin else ('dewy',):
-        if side == 'twin':
-            for path in (tree / 'compiler').glob('*.jo'):
-                text = path.read_text()
-                for module in ('dewy_file', 'dewy_reader'):
-                    text = text.replace(f"use '{module}.dewy'", f"use '{module}.jo'")
-                path.write_text(text)
-        binary = work / f'{side}-{mode}'
-        run = subprocess.run([seed, 'build', tree / 'compiler/main.jo', '-o', binary,
-                              *(['--release'] if release else [])], cwd=ROOT,
-                             env=environment(tree / 'lib'), capture_output=True, timeout=300)
-        log = work / f'build-{side}-{mode}.log'
-        log.write_bytes(run.stdout + run.stderr)
-        if run.returncode:
-            raise RuntimeError(f'{side} reader did not build; see {log}')
-        binaries.append(binary)
-    return tuple(binaries)
+    binary = work / f'dewy-{mode}'
+    run = subprocess.run([seed, 'build', main, '-o', binary, *(['--release'] if release else [])],
+                         cwd=ROOT, env=environment(tree / 'lib'), capture_output=True, timeout=300)
+    log = work / f'build-dewy-{mode}.log'
+    log.write_bytes(run.stdout + run.stderr)
+    if run.returncode:
+        raise RuntimeError(f'reader did not build; see {log}')
+    return binary
 
 
 def generated(directory: Path, count: int, seed: int = 417) -> list[Path]:
@@ -100,21 +79,6 @@ def corpus() -> list[Path]:
     return [ROOT / name for name in names.splitlines()]
 
 
-def reader_panic(text: bytes) -> bytes:
-    """A shared legacy panic keeps its message/stack, apart from the moved source.
-
-    Ordinary source diagnostics are always compared byte for byte. A new panic
-    is a difference; this only lets the two frozen implementations identify the
-    same pre-existing rejection bug without requiring identical source filenames.
-    """
-    if not text.startswith(b'panic:'):
-        return text
-    # Default builds retain the frozen API's forwarding frame; release inlines it.
-    text = re.sub(rb'(?m)^    called from rd_(?:dc_body|dc_flush_report|dc_report|dc_unread|dn_edits_clear|dn_statement) \(dewy_reader\.jo:[0-9]+\)\n', b'', text)
-    text = re.sub(rb'dewy_reader(?:_seed)?\.(?:dewy|jo):[0-9]+', b'reader:<line>', text)
-    return re.sub(rb'\b(?:rd_|rt_)(dc_|dn_)', rb'\1', text)
-
-
 def compare(pair: tuple[Path, ...], sources: list[Path], work: Path,
             release: bool, workers: int, observe=None) -> list[tuple[Path, str]]:
     """Keep binary, library, input and output paths identical across the two sides.
@@ -147,12 +111,8 @@ def compare(pair: tuple[Path, ...], sources: list[Path], work: Path,
         outputs.mkdir()
         with ThreadPoolExecutor(workers) as pool:
             results.append(list(pool.map(one, enumerate(sources))))
-    failures, shared_panics = [], []
+    failures = []
     for source, left, right in zip(sources, *results) if len(pair) == 2 else ():
-        if left[2].startswith(b'panic:') and right[2].startswith(b'panic:'):
-            if left[:2] + (reader_panic(left[2]),) + left[3:] == right[:2] + (reader_panic(right[2]),) + right[3:]:
-                shared_panics.append(source)
-                continue
         if left == right:
             continue
         reason = ', '.join(name for name, a, b in zip(
@@ -161,18 +121,16 @@ def compare(pair: tuple[Path, ...], sources: list[Path], work: Path,
         directory = work / f'difference-{len(failures)}'
         directory.mkdir(exist_ok=True)
         (directory / 'source').write_text(str(source))
-        for label, result in zip(('dewy', 'twin'), (left, right)):
+        for label, result in zip(('candidate', 'reference'), (left, right)):
             (directory / f'{label}.stdout').write_bytes(result[1])
             (directory / f'{label}.stderr').write_bytes(result[2])
-    if shared_panics:
-        (work / 'shared-panics').write_text('\n'.join(str(p) for p in shared_panics) + '\n')
-        print(f'{len(shared_panics)} shared legacy parser panics; see {work / "shared-panics"}', flush=True)
     return failures
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler', type=Path)
+    parser.add_argument('--reference', required=True, type=Path, help='compiler to compare against')
     parser.add_argument('--work', type=Path, default=WORK)
     parser.add_argument('--generated', type=int, default=128)
     parser.add_argument('--workers', type=int, choices=range(1, 5), default=2)
@@ -188,7 +146,7 @@ def main(argv=None) -> int:
         mode = 'release' if release else 'default'
         work = args.work / mode
         work.mkdir(exist_ok=True)
-        pair = build_pair(seed, work, release)
+        pair = (seed, args.reference)
         failures = compare(pair, sources, work, release, args.workers)
         for source, reason in failures:
             print(f'{mode}: {source}: {reason}', flush=True)

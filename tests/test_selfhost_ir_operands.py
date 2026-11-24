@@ -54,8 +54,7 @@ def test_ir_operand_twins(compiler, tmp_path, release):  # noqa: F811
     # Keep the existing walker independent: it does not read the layout table.
     ir = (ROOT / 'compiler/ir.jo').read_text()
     walker = ir[ir.index('ir_use_count = 0'):ir.index('ir_operand_layout: int[]')]
-    builders = (ROOT / 'tests/fixtures/selfhost/frozen/ir_builders.jo').read_text()
-    walker += builders[builders.index('ir_use = '):]
+    walker += (ROOT / 'tests/fixtures/selfhost/operand_walker.jo').read_text()
     outputs = []
     for extension in leaf_oracle.extensions():
         for stem in ('ir_types', 'ir_operands'):

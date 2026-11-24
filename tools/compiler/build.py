@@ -20,52 +20,8 @@ else:  # python3 tools/compiler/build.py
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 
-# The bootstrap chain, and the compiler modules written in Dewy:
-#   1. stage0/ (C) builds core-bootstrap from compiler/, with bootstrap/'s
-#      frontends in place of compiler/'s: it has no Dewy frontend.
-#   2. core-bootstrap builds dewy-core-bootstrap from compiler/: the first
-#      compiler with the Dewy frontend.
-#   3. dewy-core-bootstrap builds dewy-core from compiler/. A --seed build is
-#      this step alone.
-#   4. With --fixed-point, dewy-core builds itself again at the same path, and
-#      the two executables must be byte-identical (check_fixed_point). That holds
-#      when the seed runs the logic of these sources (a bootstrap, or a seed built
-#      from them); a seed of older logic needs one more generation first.
-# Steps 1 and 2 cannot read Dewy, so there every `use 'X.dewy'` in compiler/
-# names X.dewy's frozen implementation-language twin instead. Steps 3 on
-# compile the Dewy modules, so the compiler that ships runs them.
-# Each compiler/X.dewy has the twin compiler/X.jo (derived, not listed: a new
-# Dewy module needs only its twin).
-def frozen_twins(compiler: Path) -> dict[str, str]:
-    """Every compiler/X.dewy mapped to its twin X.jo, in sorted order."""
-    twins = {path.name: path.with_suffix('.jo').name for path in sorted(compiler.glob('*.dewy'))}
-    missing = [twin for twin in twins.values() if not (compiler / twin).is_file()]
-    if missing:
-        raise RuntimeError(f'compiler/ has no frozen twin {", ".join(missing)}')
-    return twins
-
-
-FROZEN_TWINS = frozen_twins(ROOT / 'compiler')
-
-
 def identity(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def use_frozen_twins(compiler: Path, stubbed: bool = False) -> dict[Path, str]:
-    """Point compiler/'s imports of its Dewy modules at their twins; return the originals.
-    stubbed: bootstrap/'s modules stand in for some, so a Dewy module only they use is unused."""
-    originals = {}
-    for module, twin in FROZEN_TWINS.items():
-        line = f"use '{module}'\n"
-        importers = [path for path in sorted(compiler.glob('*.jo')) if line in path.read_text()]
-        if not importers and not stubbed:
-            raise RuntimeError(f'no compiler module uses {module}; import it or delete it')
-        for path in importers:
-            text = path.read_text()
-            originals.setdefault(path, text)
-            path.write_text(text.replace(line, f"use '{twin}'\n"))
-    return originals
 
 
 def first_difference(left: Path, right: Path, chunk: int = 1 << 20) -> int | None:
@@ -133,16 +89,16 @@ def claim_output(output: Path) -> Path | None:
 
 
 def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False, fixed_point: bool = False,
-          bootstrap_archive: bool = False, seed_cache: Path | None = None) -> Path:
+          seed_cache: Path | None = None) -> Path:
     """Build into `output`, replacing an earlier build's output there. A failed build keeps both
     its own files (logs, a non-fixed-point pair of executables) and the earlier output, at
     `<output>.previous`."""
-    if bootstrap_archive and (bootstrap or seed is not None):
-        raise ValueError('--bootstrap-archive selects its own pinned seed')
-    if seed_cache is not None and not bootstrap_archive:
-        raise ValueError('--seed-cache requires --bootstrap-archive')
+    if bootstrap and seed is not None:
+        raise ValueError('--bootstrap selects its own pinned seed')
+    if seed_cache is not None and not bootstrap:
+        raise ValueError('--seed-cache requires --bootstrap')
     output = output.resolve()
-    if bootstrap_archive:
+    if bootstrap:
         if seed_cache is None:
             seed_cache = ROOT / '__dewycache__' / 'bootstrap-seed'
         seed_cache = seed_cache.resolve()
@@ -151,7 +107,7 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False, fi
     previous = claim_output(output)
     try:
         binary = build_into(output, seed=seed, bootstrap=bootstrap, fixed_point=fixed_point,
-                            bootstrap_archive=bootstrap_archive, seed_cache=seed_cache)
+                            seed_cache=seed_cache)
     except BaseException:
         if previous is not None:
             print(f'build failed; the earlier output is kept at {previous}', file=sys.stderr)
@@ -162,9 +118,8 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False, fi
 
 
 def build_into(output: Path, *, seed: Path | None, bootstrap: bool, fixed_point: bool,
-               bootstrap_archive: bool = False, seed_cache: Path | None = None) -> Path:
-    directories = ('compiler', 'lib') if bootstrap_archive else ('compiler', 'lib', 'stage0', 'bootstrap')
-    for name in directories:
+               seed_cache: Path | None = None) -> Path:
+    for name in ('compiler', 'lib'):
         shutil.copytree(ROOT / name, output / name, ignore=shutil.ignore_patterns('sloppy0', '__pycache__'))
     shutil.copy2(ROOT / 'LICENSE', output / 'LICENSE')
     sources = {str(p.relative_to(output)): identity(p) for p in sorted(output.rglob('*')) if p.is_file() and p != output / OUTPUT_MARKER}
@@ -187,67 +142,20 @@ def build_into(output: Path, *, seed: Path | None, bootstrap: bool, fixed_point:
 
     bootstrap_hashes = []
     provenance = {}
-    if bootstrap_archive:
+    if bootstrap:
         assert seed_cache is not None  # resolved before claiming output
         seed, pin = seed_archive.obtain(seed_cache, log=output / 'archive-bootstrap.log')
         provenance['seed_archive'] = pin
         if not pin['cache_hit']:
             steps.append(pin.pop('build_step'))
             bootstrap_hashes = list(pin['built_sha256'].values())
-    if bootstrap:
-        # Build the implementation-language frontend first. This permits the
-        # main compiler to use features outside the intentionally small C seed.
-        bootstrap_modules = ('frontend.jo', 'source_frontend.jo', 'dewy_fmt.jo', 'formatter_frontend.jo', 'dewy_context.jo')
-        for name in bootstrap_modules:
-            shutil.copy2(ROOT / 'bootstrap' / name, output / 'compiler' / name)
-        stage0 = output / 'stage0/sloppy0'
-        seed = binary_dir / 'core-bootstrap'
-        first_core = binary_dir / 'dewy-core-bootstrap'
-        originals = use_frozen_twins(output / 'compiler', stubbed=True)
-        try:
-            run(['make', '-s', '-C', str(output / 'stage0')], 'bootstrap-c.log')
-            run([stage0, output / 'compiler/main.jo', '-o', seed], 'bootstrap-core.log')
-        finally:
-            # (back to the compiler's own modules, still naming the twins: step 2 reads no Dewy)
-            for name in bootstrap_modules:
-                path = output / 'compiler' / name
-                text = (ROOT / 'compiler' / name).read_text()
-                for module, twin in FROZEN_TWINS.items():
-                    text = text.replace(f"use '{module}'\n", f"use '{twin}'\n")
-                path.write_text(text)
-        try:
-            run([seed, 'build', output / 'compiler/main.jo', '-o', first_core], 'core-build.log')
-        finally:
-            for path, text in originals.items():
-                path.write_text(text)
-            for name in bootstrap_modules:
-                shutil.copy2(ROOT / 'compiler' / name, output / 'compiler' / name)
-        bootstrap_hashes = [identity(p) for p in (stage0, seed, first_core)]
-        seed = first_core
     if seed is None:
         raise ValueError('provide --seed or --bootstrap')
     seed = seed.resolve(strict=True)
     binary = binary_dir / 'dewy-core'
-    try:
-        run([seed, 'build', output / 'compiler/main.jo', '-o', binary],
-            'self-build.log' if bootstrap or bootstrap_archive else 'core-build.log')
-    except RuntimeError as direct:
-        if bootstrap or bootstrap_archive:
-            raise
-        # An older seed may not read the Dewy modules (or the library they
-        # reach) as the sources now write them: build through their twins,
-        # then let that compiler build the sources as they are.
-        interim = binary_dir / 'dewy-core-interim'
-        originals = use_frozen_twins(output / 'compiler')
-        try:
-            run([seed, 'build', output / 'compiler/main.jo', '-o', interim], 'interim-build.log')
-        except RuntimeError:
-            raise direct from None
-        finally:
-            for path, text in originals.items():
-                path.write_text(text)
-        run([interim, 'build', output / 'compiler/main.jo', '-o', binary], 'core-build.log')
-    if fixed_point or bootstrap_archive:
+    run([seed, 'build', output / 'compiler/main.jo', '-o', binary],
+        'self-build.log' if bootstrap else 'core-build.log')
+    if fixed_point or bootstrap:
         generations = [identity(binary)]
 
         def rebuild(compiler: Path, target: Path) -> None:
@@ -255,7 +163,7 @@ def build_into(output: Path, *, seed: Path | None, bootstrap: bool, fixed_point:
             run([compiler, 'build', output / 'compiler/main.jo', '-o', target], log)
             generations.append(identity(target))
 
-        check_fixed_point(binary, rebuild, older_seed=bootstrap_archive)
+        check_fixed_point(binary, rebuild, older_seed=bootstrap)
         provenance['live_generations_sha256'] = generations
     (output / 'build.json').write_text(json.dumps({
         'seed_sha256': identity(seed),
@@ -272,17 +180,16 @@ if __name__ == '__main__':
     cli = argparse.ArgumentParser(description=__doc__)
     seeds = cli.add_mutually_exclusive_group(required=True)
     seeds.add_argument('--seed', type=Path, help='existing native Dewy core compiler')
-    seeds.add_argument('--bootstrap', action='store_true', help='build from the independent C bootstrap')
-    seeds.add_argument('--bootstrap-archive', action='store_true', help='build with the pinned G2 and verify live convergence')
-    cli.add_argument('--seed-cache', type=Path, help='G2 cache for --bootstrap-archive (default: __dewycache__/bootstrap-seed)')
+    seeds.add_argument('--bootstrap', '--bootstrap-archive', action='store_true', help='build with the pinned G2 and verify live convergence')
+    cli.add_argument('--seed-cache', type=Path, help='G2 cache for --bootstrap (default: __dewycache__/bootstrap-seed)')
     cli.add_argument('--output', type=Path, required=True, help='directory for the standalone toolchain (an earlier build'"'"'s output there is replaced)')
     cli.add_argument('--fixed-point', action='store_true',
                      help='rebuild the compiler with itself and fail unless the bytes are identical')
     args = cli.parse_args()
-    if args.seed_cache is not None and not args.bootstrap_archive:
-        cli.error('--seed-cache requires --bootstrap-archive')
+    if args.seed_cache is not None and not args.bootstrap:
+        cli.error('--seed-cache requires --bootstrap')
     try:
         print(build(args.output, seed=args.seed, bootstrap=args.bootstrap, fixed_point=args.fixed_point,
-                    bootstrap_archive=args.bootstrap_archive, seed_cache=args.seed_cache))
+                    seed_cache=args.seed_cache))
     except OutputDirectoryError as error:
         raise SystemExit(f'build.py: {error}') from None

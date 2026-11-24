@@ -1,5 +1,4 @@
 """The final cleanup unit: frozen twin, independent operands and flow producer."""
-import re
 import subprocess
 
 import pytest
@@ -132,38 +131,23 @@ main = ():
 '''
 
 
-def function(text, name):
-    return re.search(rf'^{name} =.*?(?=^\w|\Z)', text, re.M | re.S)[0]
-
-
-def decode_source(*extra):
-    """The frozen opcode tables (opt_core.jo) and opt.jo's ordinal-indexed queries, as Jo text."""
-    core = (ROOT / 'tests/fixtures/selfhost/frozen/opt_core.jo').read_text()
+def decode_source(*, resize=False):
+    """Independent opcode classifications with the live Jo table storage and queries."""
     original = (ROOT / 'compiler/opt.jo').read_text()
-    text = '\n'.join(function(core, name) for name in (
-        'o_rewrite_mask', 'o_simplify_kind', 'o_control_kind', 'o_make_decode'))
+    text = (ROOT / 'tests/fixtures/selfhost/opcode_classifier.jo').read_text()
     text += original[original.index('o_decode_storage ='):original.index('const MIN_INT')]
-    text += '\n'.join(function(core, name) for name in (
-        'o_pure_classify', 'cse_arity_classify', 'o_defines_classify',
-        'kills_memory_classify', 'o_retargetable_classify'))
-    return text + '\n'.join(function((ROOT / 'tests/fixtures/selfhost/frozen/opt_registers.jo').read_text(), name) for name in extra)
-
-
-def same_output(dewy_out, jo_out):
-    assert dewy_out == jo_out
+    if resize:
+        text += (ROOT / 'tests/fixtures/selfhost/probe_register_resize.jo').read_text()
+    return text
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_opt_cleanup_twins(compiler, tmp_path, release):  # noqa: F811
     decode = decode_source()
-    rewrite = (ROOT / 'tests/fixtures/selfhost/frozen/opt_rewrite.jo').read_text()
-    flow = '\n'.join(function(rewrite, name) for name in (
-        'ow_flow_begin', 'ow_flow_exit', 'ow_flow_end_dead', 'ow_flow_emit',
-        'ow_flow_pop', 'ow_grow_output', 'ow_append_plain', 'ow_append'))
+    flow = (ROOT / 'tests/fixtures/selfhost/flow_producer.jo').read_text()
     ir = (ROOT / 'compiler/ir.jo').read_text()
     walker = ir[ir.index('ir_use_count = 0'):ir.index('ir_operand_layout: int[]')]
-    builders = (ROOT / 'tests/fixtures/selfhost/frozen/ir_builders.jo').read_text()
-    walker += builders[builders.index('ir_use = '):]
+    walker += (ROOT / 'tests/fixtures/selfhost/operand_walker.jo').read_text()
     outputs = []
     for extension in leaf_oracle.extensions():
         for stem in ('ir_types', 'ir_operands', 'opt_workspace', 'opt_cleanup'):

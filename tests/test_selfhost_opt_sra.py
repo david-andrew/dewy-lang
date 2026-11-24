@@ -7,7 +7,6 @@ import pytest
 
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
-from tools.compiler.speed_equivalent import freeze
 from tests import leaf_oracle
 
 
@@ -128,8 +127,6 @@ def compare_sra(compiler, tmp_path, release):
         directory = tmp_path / extension
         source_dir = directory / 'compiler'
         shutil.copytree(ROOT / 'compiler', source_dir)
-        if extension == 'jo':
-            freeze(source_dir, ('opt_sra',))
         imports = ''.join(f"use '{source_dir / name}'\n" for name in
                           ('ir_types.dewy', 'ir.jo', 'ir_builders.dewy', 'opt_workspace.dewy',
                            'opt.jo', f'opt_sra.{extension}'))

@@ -38,7 +38,7 @@ def test_soa_helpers_match_twin(compiler, tmp_path, monkeypatch):
     results = compare_builds(compiler, tmp_path, monkeypatch, ('soa_helpers',), paths)
     assert results[0][2] == 0, results[0][:5]
     assert all(r[2] == 1 for r in results[1:]), [r[:5] for r in results[1:]]
-    for label in ('dewy', 'jo') if leaf_oracle.builds_twin() else ('dewy',):
+    for label in leaf_oracle.extensions():
         result = subprocess.run([tmp_path / label / 'p0-0'], capture_output=True, timeout=30)
         assert result.returncode == 0 and result.stderr == b''
         assert result.stdout == b'2\n3\n[7, 3, 5]\n6\n0\n'

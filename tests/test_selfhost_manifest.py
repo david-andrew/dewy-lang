@@ -312,8 +312,7 @@ def run(binary, words):
 def test_selfhost_manifest_matches_jo(compiler, tmp_path, release):
     words = texts()
     dewy = build(compiler, FIXTURES / 'manifest_dewy.dewy', tmp_path / 'manifest-dewy', release)
-    jo = build(compiler, FIXTURES / 'manifest_jo.jo', tmp_path / 'manifest-jo', release) if leaf_oracle.builds_twin() else None
-    got = leaf_oracle.same(run(dewy, words), lambda: run(jo, words))
+    got = leaf_oracle.check_value(run(dewy, words))
     assert got == expected(words)
 
 

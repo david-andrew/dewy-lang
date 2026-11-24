@@ -1,13 +1,11 @@
 """Versioned loop guards and copies agree with the frozen Jo implementation."""
 
-import shutil
 import subprocess
 
 import pytest
 
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
-from tools.compiler.speed_equivalent import freeze
 from tests import leaf_oracle
 
 
@@ -39,28 +37,19 @@ print("{made} {total} {lo} {hi} {out.len()} {copied[1].imm} ok")
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_loops_emit_direct_twins(compiler, tmp_path, monkeypatch, release):  # noqa: F811
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
-    outputs = []
-    for extension in leaf_oracle.extensions():
-        directory = tmp_path / extension
-        source_dir = directory / 'compiler'
-        shutil.copytree(ROOT / 'compiler', source_dir)
-        if extension == 'jo':
-            # (every import of the leaf, from Jo and Dewy modules, leads to its twin)
-            freeze(source_dir, ('loops_emit',))
-        source = directory / 'driver.jo'
-        binary = directory / 'driver'
-        imports = ''.join(f"use '{source_dir / name}'\n" for name in
-                          ('ir_types.dewy', 'ir.jo', 'loops.jo', f'loops_emit.{extension}'))
-        source.write_text(imports + DRIVER)
-        built = subprocess.run([compiler, 'build', source, '-o', binary,
-                                *(['--release'] if release else [])],
-                               capture_output=True, text=True, timeout=120)
-        assert built.returncode == 0, built.stdout + built.stderr
-        ran = subprocess.run([binary], capture_output=True, text=True, timeout=20)
-        assert ran.returncode == 0, ran.stdout + ran.stderr
-        outputs.append(ran.stdout)
-    leaf_oracle.agree(outputs)
-    assert outputs[0].endswith('ok\n')
+    source_dir = ROOT / 'compiler'
+    source = tmp_path / 'driver.jo'
+    binary = tmp_path / 'driver'
+    imports = ''.join(f"use '{source_dir / name}'\n" for name in
+                      ('ir_types.dewy', 'ir.jo', 'loops.jo', 'loops_emit.dewy'))
+    source.write_text(imports + DRIVER)
+    built = subprocess.run([compiler, 'build', source, '-o', binary,
+                            *(['--release'] if release else [])],
+                           capture_output=True, text=True, timeout=120)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=20)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert leaf_oracle.check_value(ran.stdout).endswith('ok\n')
 
 
 def test_loops_emit_compiler_twins(compiler, tmp_path, monkeypatch):  # noqa: F811

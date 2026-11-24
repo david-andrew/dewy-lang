@@ -14,7 +14,6 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
-from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
@@ -150,8 +149,6 @@ def run(binary, args):
 def test_selfhost_dewy_tokens_match_jo(compiler, tmp_path, release):
     args = words()
     want = expected(args)
-    if leaf_oracle.builds_twin():
-        assert run(build(compiler, FIXTURES / 'dewy_tokens_jo.jo', tmp_path / 'tokens-jo', release), args) == want
     # (Sloppy code over the Dewy module: the same tokens, numbered alike)
     over = tmp_path / 'dewy_tokens_over.jo'
     text = (FIXTURES / 'dewy_tokens_jo.jo').read_text()

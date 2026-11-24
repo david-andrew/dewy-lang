@@ -25,7 +25,6 @@ def test_archive_generations_and_provenance(tmp_path, monkeypatch, contents):
     pin = {'cache_hit': True, 'g2_sha256': builder.identity(archive_seed)}
     monkeypatch.setattr(builder, 'ROOT', source)
     monkeypatch.setattr(builder.seed_archive, 'obtain', lambda cache, **kwargs: (archive_seed, pin))
-    monkeypatch.setattr(builder, 'use_frozen_twins', lambda *args: pytest.fail('touched live twins'))
     output = tmp_path / 'live'
     binary = output / 'bin/dewy-core'
     calls = []
@@ -43,11 +42,11 @@ def test_archive_generations_and_provenance(tmp_path, monkeypatch, contents):
     monkeypatch.setattr(builder.subprocess, 'run', compile)
     if contents[-2] != contents[-1]:
         with pytest.raises(RuntimeError, match=r'not a fixed point: .*byte offset 7'):
-            builder.build(output, bootstrap_archive=True)
+            builder.build(output, bootstrap=True)
         assert binary.with_suffix('.generation-n').read_bytes() == contents[-2]
         assert not (output / 'build.json').exists()
     else:
-        assert builder.build(output, bootstrap_archive=True) == binary
+        assert builder.build(output, bootstrap=True) == binary
         info = json.loads((output / 'build.json').read_bytes())
         assert info['seed_archive'] == pin and info['seed_sha256'] == pin['g2_sha256']
         assert info['live_generations_sha256'] == [builder.seed_archive.sha(data) for data in contents]
@@ -70,8 +69,8 @@ def test_core_forces_archive_route_and_tracks_its_inputs(tmp_path, monkeypatch):
     assert core.source_paths(source) == sorted(source / name for name in files)
     outputs = []
 
-    def build(output, *, bootstrap_archive, seed_cache):
-        assert bootstrap_archive and seed_cache == tmp_path / 'pins'
+    def build(output, *, bootstrap, seed, seed_cache):
+        assert bootstrap and seed_cache == tmp_path / 'pins'
         binary = output / 'bin/dewy-core'
         binary.parent.mkdir(parents=True)
         binary.write_text('verified')
@@ -81,7 +80,7 @@ def test_core_forces_archive_route_and_tracks_its_inputs(tmp_path, monkeypatch):
     monkeypatch.setattr(core, 'build', build)
     options = {'root': source, 'cache': tmp_path / 'live-cache'}
     for _ in range(2):
-        core.toolchain(bootstrap_archive=True, seed_cache=seed_cache, **options)
+        core.toolchain(bootstrap=True, seed_cache=seed_cache, **options)
     assert len(set(outputs)) == 2
     assert core.toolchain(**options) == outputs[-1]
     state = json.loads((options['cache'] / 'current.json').read_bytes())

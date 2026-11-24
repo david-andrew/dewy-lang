@@ -38,7 +38,7 @@ def test_fuzz_no_results_cannot_pass():
 @pytest.fixture
 def checkout(tmp_path, monkeypatch):
     root = tmp_path / 'source'
-    for name in ('compiler/main.jo', 'lib/core/rt.jo', 'stage0/main.c', 'bootstrap/frontend.jo', 'LICENSE'):
+    for name in ('compiler/main.jo', 'lib/core/rt.jo', 'bootstrap-seed/source.tar.xz', 'bootstrap-seed/build-g2.sh', 'LICENSE'):
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(name)
@@ -59,12 +59,12 @@ def checkout(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize('changed', ['compiler/main.jo', 'lib/core/rt.jo',
-                                   'stage0/main.c', 'bootstrap/frontend.jo',
+                                   'bootstrap-seed/source.tar.xz', 'bootstrap-seed/build-g2.sh',
                                    'tools/compiler/build.py'])
 def test_core_driver_rebuilds_changed_inputs(checkout, changed):
     root, cache, calls = checkout
     first = core.toolchain(root=root, cache=cache)
-    assert calls == [{'bootstrap': True, 'seed': None}]
+    assert calls == [{'seed_cache': None, 'bootstrap': True, 'seed': None}]
     assert core.toolchain(root=root, cache=cache) == first
     assert len(calls) == 1
     (root / 'README.md').write_text('Documentation does not change the toolchain.')
@@ -72,7 +72,7 @@ def test_core_driver_rebuilds_changed_inputs(checkout, changed):
     (root / changed).write_text('changed input')
     second = core.toolchain(root=root, cache=cache)
     assert second != first and first.exists()
-    assert calls[-1] == {'bootstrap': False, 'seed': first}
+    assert calls[-1] == {'seed_cache': None, 'bootstrap': False, 'seed': first}
     assert core.toolchain(root=root, cache=cache) == second
     assert len(calls) == 2
 
@@ -86,7 +86,7 @@ def test_core_driver_rejects_damaged_seed(checkout, damage):
     else:
         first.write_text('not the compiler we built')
     assert core.toolchain(root=root, cache=cache) != first
-    assert calls[-1] == {'bootstrap': True, 'seed': None}
+    assert calls[-1] == {'seed_cache': None, 'bootstrap': True, 'seed': None}
 
 
 def test_core_driver_unchanged_launch_does_not_hash(checkout, monkeypatch):
@@ -106,7 +106,7 @@ def test_core_driver_detects_same_size_edit_with_restored_mtime(checkout, target
     path.write_bytes(b'!' * before.st_size)
     os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
     assert core.toolchain(root=root, cache=cache) != first
-    assert calls[-1] == {'bootstrap': target == 'binary',
+    assert calls[-1] == {'seed_cache': None, 'bootstrap': target == 'binary',
                          'seed': first if target == 'source' else None}
 
 
@@ -152,7 +152,7 @@ def test_core_driver_forced_bootstrap(checkout):
     root, cache, calls = checkout
     first = core.toolchain(root=root, cache=cache)
     assert core.toolchain(root=root, cache=cache, bootstrap=True) != first
-    assert calls[-1] == {'bootstrap': True, 'seed': None}
+    assert calls[-1] == {'seed_cache': None, 'bootstrap': True, 'seed': None}
 
 
 def test_core_driver_keeps_previous_state_after_failure(checkout, monkeypatch):
@@ -171,7 +171,7 @@ def test_core_driver_keeps_previous_state_after_failure(checkout, monkeypatch):
     assert (cache / 'current.json').read_bytes() == state
     monkeypatch.setattr(core, 'build', builder)
     assert core.toolchain(root=root, cache=cache) != first
-    assert calls[-1] == {'bootstrap': False, 'seed': first}
+    assert calls[-1] == {'seed_cache': None, 'bootstrap': False, 'seed': first}
 
 
 def test_core_driver_rejects_source_edit_during_build(checkout, monkeypatch):

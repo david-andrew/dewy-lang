@@ -5,8 +5,7 @@ what the compiler writes, such as moving a compiler module to Dewy.
 
 Each compiler is its commit's fixed point with its own library (tools/compiler/speed.py), and
 each is copied to one fixed path in turn, and builds into one fixed directory, so the paths the
-outputs hold match. Inputs are this checkout's. A program neither compiler builds in a mode is
-skipped; one only one of them builds is a difference.
+outputs hold match. Inputs are this checkout's. For a rejected build, the exit status and diagnostics must match.
 
     python3 -m tools.compiler.same_output [--base master] [--jobs 4] [-k WORD]
 """
@@ -34,7 +33,7 @@ def programs() -> list[Path]:
 
 
 def build_all(binary: Path, lib: Path, jobs: list[tuple[Path, str]], out: Path, workers: int) -> dict:
-    """Stage the toolchain at the fixed path and build every job into out: (program, mode) -> built."""
+    """Stage the toolchain at the fixed path and build every job into out: (program, mode) -> rejection details or None for success."""
     active = WORK / 'active'
     shutil.rmtree(active, ignore_errors=True)
     (active / 'bin').mkdir(parents=True)
@@ -49,7 +48,7 @@ def build_all(binary: Path, lib: Path, jobs: list[tuple[Path, str]], out: Path, 
         target.mkdir(parents=True)
         run = subprocess.run([active / 'bin/dewy-core', 'build', source, '-o', target / 'program', *MODES[mode]],
                              cwd=ROOT, env=env, capture_output=True, timeout=600)
-        return job, run.returncode == 0
+        return job, (run.returncode, run.stdout, run.stderr) if run.returncode else None
 
     with ThreadPoolExecutor(workers) as pool:
         return dict(pool.map(one, jobs))
@@ -82,10 +81,17 @@ def main(argv: list[str] | None = None) -> int:
     differ, same, neither, count = [], 0, 0, 0
     for source, mode in jobs:
         name = f'{source.relative_to(ROOT)} {mode}'
-        if built[source, mode] != now[source, mode]:
-            differ.append(f'{name}: built by {"the base" if built[source, mode] else "this checkout"} only')
-        elif not built[source, mode]:
-            neither += 1
+        previous, current = built[source, mode], now[source, mode]
+        if previous != current:
+            if previous is None or current is None:
+                differ.append(f'{name}: built by {"the base" if previous is None else "this checkout"} only')
+            else:
+                differ.append(f'{name}: rejection status or diagnostics differ (base {previous[0]}, current {current[0]})')
+        elif previous is not None:
+            if previous[0] < 0:
+                differ.append(f'{name}: both compilers terminated by signal {-previous[0]}')
+            else:
+                neither += 1
         else:
             rel = source.relative_to(ROOT).with_suffix('') / mode
             old = files(base_out / rel)
@@ -96,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
                 differ.append(f'{name}: the outputs differ')
     for line in differ:
         print(line)
-    print(f'{same} builds identical ({count} files), {len(differ)} different, {neither} built by neither')
+    print(f'{same} builds identical ({count} files), {len(differ)} different, {neither} matching rejections')
     if not differ:
         shutil.rmtree(WORK, ignore_errors=True)
     return 1 if differ else 0

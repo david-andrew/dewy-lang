@@ -1,18 +1,4 @@
-"""Expected outputs for leaf probe drivers: the oracle that replaces their frozen twins.
-
-A probe driver (tests/leaf_driver.py) runs one Dewy leaf and prints what it computed. Each run's
-status and output are recorded in tests/fixtures/leaf_outputs/<test module>.json, keyed by the test
-id and the run's position in that test. The records were captured while the leaf and its frozen
-twin agreed, so they hold the twin's answers once the twin is gone.
-
---leaf-oracle selects the oracle:
-  both     (default) the twin comparison, then the recorded output;
-  expected the recorded output alone; no twin is built;
-  twin     the twin comparison alone (the path the recorded outputs replace);
-  capture  the twin comparison; each agreed output is written to --leaf-capture DIR
-           (merge with python3 -m tests.leaf_oracle DIR).
-A changed record is a changed expectation: review its diff like a test edit.
-"""
+"""Check live compiler probes against recorded outputs, or capture replacements for review."""
 import hashlib
 import json
 import os
@@ -23,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests' / 'fixtures' / 'leaf_outputs'
 TEXT_LIMIT = 1 << 15
+MODES = ('expected', 'capture')
 
 
 def text_or_digest(data):
@@ -33,9 +20,8 @@ def text_or_digest(data):
     except UnicodeDecodeError:
         pass
     return {'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data)}
-MODES = ('both', 'expected', 'twin', 'capture')
 
-mode = 'both'
+mode = 'expected'
 capture_dir = None
 _ordinals = defaultdict(int)
 _loaded = {}
@@ -45,40 +31,28 @@ def configure(config):
     global mode, capture_dir
     mode = config.getoption('leaf_oracle')
     capture_dir = config.getoption('leaf_capture')
-    if mode == 'capture' and not capture_dir:
-        raise ValueError('--leaf-oracle=capture needs --leaf-capture DIR')
+    if mode == 'capture':
+        if not capture_dir:
+            raise ValueError('--leaf-oracle=capture needs --leaf-capture DIR')
+        Path(capture_dir).mkdir(parents=True, exist_ok=True)
 
 
-def builds_twin():
-    return mode != 'expected'
-
-
-def extensions(pair=('dewy', 'jo')):
-    """The language extensions an inline differential builds: the leaf's, then its twin's (when built)."""
-    return pair if builds_twin() else pair[:1]
-
-
-def pair(*items):
-    """The things an inline differential compares, the leaf's first, the twin's after (when built)."""
-    return items if builds_twin() else items[:1]
-
-
-def same(output, twin_output, arguments=(), status=0, directory=None):
-    """agree() for a leaf's output and a twin's output made on demand: twin_output() runs only when
-    the twin is built."""
-    agree([output, twin_output()] if builds_twin() else [output], arguments, status, directory)
-    return output
+def extensions(pair=('dewy',)):
+    """Select the live module from a probe's list of source variants."""
+    return pair[:1]
 
 
 def agree(outputs, arguments=(), status=0, directory=None):
-    """An inline differential's verdict: the twin's output (outputs[1], when built) equals the leaf's
-    (outputs[0]), and the leaf's meets its record. directory: the test's own directory, named <tmp>."""
-    if len(outputs) == 2:
-        assert outputs[0] == outputs[1]
-    output = outputs[0]
+    """Check the output of an inline probe against its record."""
+    output, = outputs
+    return check_value(output, arguments, status, directory)
+
+
+def check_value(output, arguments=(), status=0, directory=None):
     # (structured output is recorded as its repr)
     data = output if isinstance(output, bytes) else (output if isinstance(output, str) else repr(output)).encode()
     check(arguments, status, data if directory is None else without(directory, data))
+    return output
 
 
 current = None  # (module stem, test name), set by tests/conftest.py for each test
@@ -121,7 +95,12 @@ def without(directory, output):
 def _expected(module):
     if module not in _loaded:
         path = FIXTURES / f'{module}.json'
-        _loaded[module] = json.loads(path.read_text()) if path.exists() else {}
+        tests = json.loads(path.read_text()) if path.exists() else {}
+        indexed = defaultdict(list)
+        for test, runs in tests.items():
+            for run in runs:
+                indexed[test, tuple(run['args'])].append(run)
+        _loaded[module] = indexed
     return _loaded[module]
 
 
@@ -169,8 +148,6 @@ def check(arguments, status, output, digest=False):
 def check_entry(make):
     """Hold this run's entry (make() builds it) to its record, or record it when capturing."""
     module, test, ordinal = _current()
-    if mode == 'twin':
-        return
     got = make()
     if mode == 'capture':
         line = json.dumps({'module': module, 'test': test, 'ordinal': ordinal, 'entry': got})
@@ -180,12 +157,10 @@ def check_entry(make):
         return
     # (a run is found by its arguments, in order among runs with the same arguments, so a test whose
     # inputs come from a directory keeps its records when a case is added beside them)
-    key = json.dumps(got['args'])
+    key = tuple(got['args'])
     same = _ordinals[(module, test, key)]
     _ordinals[(module, test, key)] += 1
-    runs = [run for run in _expected(module).get(test, []) if json.dumps(run['args']) == key]
-    if mode == 'both' and (same >= len(runs) or got != runs[same]):
-        return  # (the twin just agreed: it is the check while twins exist; records are authoritative in 'expected')
+    runs = _expected(module).get((test, key), ())
     assert same < len(runs), (f'{module}::{test} run {ordinal} ({got["args"]}): no recorded output in '
                               f'tests/fixtures/leaf_outputs/{module}.json; record it with '
                               f'--leaf-oracle=capture --leaf-capture DIR, then python3 -m tests.leaf_oracle DIR')

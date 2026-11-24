@@ -30,4 +30,4 @@ def cached_driver(compiler, tmp_path, release, modules):
 
 
 def modules_for(source, output, leaf="lower_group", flags=()):
-    return CompilerModules(compiler_modules(leaf), source, output, flags)
+    return CompilerModules(compiler_modules(), source, output, flags)

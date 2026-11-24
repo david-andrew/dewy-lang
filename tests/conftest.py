@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def pytest_addoption(parser):
-    parser.addoption('--leaf-oracle', choices=leaf_oracle.MODES, default='both',
+    parser.addoption('--leaf-oracle', choices=leaf_oracle.MODES, default='expected',
                      help='leaf probe oracle (tests/leaf_oracle.py)')
     parser.addoption('--leaf-capture', default=None, help='directory for --leaf-oracle=capture records')
 
@@ -40,7 +40,7 @@ def pytest_configure(config):
 
 
 def scope_twins(items):
-    """`tools.core test --base REV` names the twin test files none of whose inputs changed (see
+    """`tools.core test --base REV` names the self-hosting test files none of whose inputs changed (see
     tools/twin_scope.py); they join the nightly tier. The counts go back to its summary line."""
     listed, report = os.environ.get('DEWY_TWIN_SCOPED_OUT'), os.environ.get('DEWY_TWIN_SCOPE_REPORT')
     if not report:
@@ -56,7 +56,7 @@ def scope_twins(items):
 
 
 def pytest_collection_modifyitems(items):
-    """A twin differential test's release-mode run repeats its default-mode run over the same
+    """A self-hosting test's release-mode run repeats its default-mode run over the same
     leaf; it joins the nightly tier (tools.core test and CI skip it) unless it is core_quick."""
     for item in items:
         params = item.callspec.params if hasattr(item, 'callspec') else {}

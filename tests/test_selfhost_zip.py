@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
-from tests import leaf_oracle
 
 FIXTURES = Path(__file__).resolve().parent / 'fixtures/selfhost'
 
@@ -39,18 +38,13 @@ def inputs(directory):
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_selfhost_zip_matches_jo(compiler, tmp_path, release):
     dewy = build(compiler, FIXTURES / 'zip_dewy.dewy', tmp_path / 'zip-dewy', release)
-    jo = build(compiler, FIXTURES / 'zip_jo.jo', tmp_path / 'zip-jo', release) if leaf_oracle.builds_twin() else None
     files = inputs(tmp_path)
     selections = [['one.txt'], ['empty.bin', 'notes.txt'], list(files)]
     for i, names in enumerate(selections):
-        archives = []
-        for binary in leaf_oracle.pair(dewy, jo):
-            archive = f'{binary.name}-{i}.zip'
-            ran = subprocess.run([binary, archive, *names], cwd=tmp_path,
-                                 capture_output=True, text=True, timeout=60)
-            assert ran.returncode == 0, ran.stdout + ran.stderr
-            archives.append((tmp_path / archive).read_bytes())
-        assert len(set(archives)) == 1, names
+        archive = f'{dewy.name}-{i}.zip'
+        ran = subprocess.run([dewy, archive, *names], cwd=tmp_path,
+                             capture_output=True, text=True, timeout=60)
+        assert ran.returncode == 0, ran.stdout + ran.stderr
         with zipfile.ZipFile(tmp_path / f'{dewy.name}-{i}.zip') as z:
             assert z.testzip() is None
             assert z.namelist() == names

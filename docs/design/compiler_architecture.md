@@ -314,8 +314,7 @@ independent bootstrap and fixed point. Check supported backends, CLI/LSP,
 default/release and 1/2/4-worker determinism; no per-entry instruction regression
 beyond noise. Final acceptance includes quiet pinned/CI throughput and hello latency.
 Failed optional pilots end their idea family; decided capabilities require diagnosed
-redesign, not weaker semantics. B3 uses Dewy import-cycle leaves with seed-compatible
-frozen `.jo` twins and exact/transitive `FROZEN_TWINS`, per [self_hosting](self_hosting.md).
+redesign, not weaker semantics. The pinned bootstrap builds the live Dewy import-cycle leaves, per [self_hosting](self_hosting.md).
 
 ## Audit response
 

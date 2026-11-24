@@ -1,0 +1,94 @@
+ow_flow_begin = ():
+    if o_flow_storage.len() < opt_ir.code.len(): o_flow_storage.resize(opt_ir.code.len())
+    o_flow = data(o_flow_storage)
+    if o_flow_open_storage.len() < opt_ir.code.len(): o_flow_open_storage.resize(opt_ir.code.len())
+    o_flow_open = data(o_flow_open_storage)
+    o_flow_level = -1
+    o_flow_at_storage.resize(o_capacity)
+    o_flow_at = data(o_flow_at_storage)
+    o_flow_count = 0
+    o_flow_top = -1
+    o_flow_dead = false
+    o_flow_depth = 0
+    o_dead_first.clear()
+    o_dead_limit.clear()
+
+ow_flow_exit = (distance: int):
+    level = o_flow_level - distance
+    if level < 0: return
+    target = int(o_flow_open[level])
+    if o_flow[target].kind != .loop: o_flow[target].exit = true
+
+ow_flow_end_dead = ():
+    if o_dead_start < o_count:
+        o_dead_first.push(o_dead_start)
+        o_dead_limit.push(o_count)
+
+ow_flow_emit = (ins: *Ins):
+    if o_count == o_capacity: ow_grow_output()
+    control = (opt_decode[oc_tag(ins)] >> 20) & 15
+    if o_flow_dead:
+        if control >= 2 and control <= 4:
+            o_flow_depth += 1
+            return
+        if control == 5 or control == 6:
+            if o_flow_depth > 0:
+                if control == 6: o_flow_depth -= 1
+                return
+            ow_flow_end_dead()
+        else: return
+    if control >= 2 and control <= 4:
+        index = o_flow_count
+        o_flow_count += 1
+        o_flow[index] = OptFlow(ins.op, o_flow_top, o_count, false, false)
+        o_flow_top = index
+        o_flow_level += 1
+        o_flow_open[o_flow_level] = i32(index)
+        o_flow_at[o_count] = i32(index)
+    else if control == 5:
+        o_flow[o_flow_top].exit = o_flow[o_flow_top].exit or not o_flow_dead
+        o_flow[o_flow_top].kind = .else_
+        o_flow_dead = false
+    else if control == 6:
+        o_flow_dead = o_flow_dead and not o_flow[o_flow_top].exit and o_flow[o_flow_top].kind != .if_
+        o_flow[o_flow_top].terminated = o_flow_dead
+        o_flow_at[o_count] = i32(o_flow_top)
+        o_flow_top = o_flow[o_flow_top].parent
+        o_flow_level -= 1
+        if o_flow_dead: o_dead_start = o_count + 1
+    else:
+        if control == 7 or control == 8 or control == 9:
+            ow_flow_exit(int(ins.imm))
+            if control == 9:
+                loop k in [0..int(ins.b)):
+                    ow_flow_exit(int(opt_args[int(ins.c) + k]))
+        if control == 7 or control == 9 or control == 10 or control == 11 or (control == 12 and ins.c == 1):
+            o_flow_dead = true
+            o_flow_depth = 0
+            o_dead_start = o_count + 1
+
+ow_flow_pop = ():
+    # Only an empty block/if opener can be removed by the forward writer.
+    if o_flow_dead: o_flow_depth -= 1
+    else:
+        o_flow_top = o_flow[o_flow_top].parent
+        o_flow_level -= 1
+        o_flow_count -= 1
+
+ow_grow_output = ():
+    o_capacity = max(32, o_capacity * 2)
+    o_out_storage.resize(o_capacity)
+    o_out = data(o_out_storage)
+    o_flow_at_storage.resize(o_capacity)
+    o_flow_at = data(o_flow_at_storage)
+
+ow_append_plain = (ins: Ins):
+    if o_count == o_capacity: ow_grow_output()
+    o_out[o_count] = ins
+    o_count += 1
+
+ow_append = (ins: Ins):
+    if o_count == o_capacity: ow_grow_output()
+    o_out[o_count] = ins
+    ow_flow_emit(o_out + o_count)
+    o_count += 1

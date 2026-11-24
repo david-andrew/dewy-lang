@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
-from tests.test_selfhost_opt_cleanup import decode_source, function
+from tests.test_selfhost_opt_cleanup import decode_source
 from tests import leaf_oracle
 
 
@@ -125,12 +125,11 @@ main = ():
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_opt_rewrite_twins(compiler, tmp_path, release):  # noqa: F811
-    decode = decode_source('o_resize')
-    decode += function((ROOT / 'tests/fixtures/selfhost/frozen/optimizer_queries.jo').read_text(), 'o_boolean_op')
+    decode = decode_source(resize=True)
+    decode += (ROOT / 'tests/fixtures/selfhost/probe_boolean_op.jo').read_text()
     ir = (ROOT / 'compiler/ir.jo').read_text()
     walker = ir[ir.index('ir_use_count = 0'):ir.index('ir_operand_layout: int[]')]
-    builders = (ROOT / 'tests/fixtures/selfhost/frozen/ir_builders.jo').read_text()
-    walker += builders[builders.index('ir_use = '):]
+    walker += (ROOT / 'tests/fixtures/selfhost/operand_walker.jo').read_text()
     # The extracted table initializer calls classifiers that read this flag.
     driver = '\nchecked_flags = true\nir_operand_layout = ir_operand_layouts()\n' + decode + walker + DRIVER
     outputs = [build_run(compiler, tmp_path, ext, driver, release) for ext in leaf_oracle.extensions()]

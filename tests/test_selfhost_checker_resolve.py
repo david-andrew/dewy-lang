@@ -2,7 +2,7 @@
 
 import pytest
 
-from tests.leaf_driver import build_pair
+from tests.leaf_driver import build_leaf_driver
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_type_constructors import DRIVER as CONSTRUCTORS
 
@@ -180,7 +180,7 @@ main = ():
 
 
 def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubles=None, jo_doubles=None):
-    pair = build_pair(compiler, release, driver, extra_stems, doubles, jo_doubles,
+    pair = build_leaf_driver(compiler, release, driver, extra_stems, doubles, jo_doubles,
                       services=RESOLVE_JO)
     return pair.compare(getattr(jo_doubles, 'arguments', ()), status,
                         with_stderr=getattr(jo_doubles, 'with_stderr', False))
