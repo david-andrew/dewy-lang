@@ -42,8 +42,10 @@ def test_check_rejects_a_difference(oracle, monkeypatch, runs):
     run(monkeypatch, 'capture', 't', [(0, b'a\n'), (46, b'call-error:2\n')])
     leaf_oracle.merge(oracle / 'capture')
     leaf_oracle._ordinals.clear()
+    run(monkeypatch, 'both', 't', runs)  # (with twins, the twin comparison is the check)
+    leaf_oracle._ordinals.clear()
     with pytest.raises(AssertionError):
-        run(monkeypatch, 'both', 't', runs)
+        run(monkeypatch, 'expected', 't', runs)
 
 
 def test_unrecorded_run_needs_a_record_only_without_twins(oracle, monkeypatch):

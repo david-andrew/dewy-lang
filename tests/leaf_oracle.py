@@ -184,8 +184,8 @@ def check_entry(make):
     same = _ordinals[(module, test, key)]
     _ordinals[(module, test, key)] += 1
     runs = [run for run in _expected(module).get(test, []) if json.dumps(run['args']) == key]
-    if mode == 'both' and same >= len(runs):
-        return  # (the twin just agreed; a run with no record yet, e.g. a new corpus file, is checked by it)
+    if mode == 'both' and (same >= len(runs) or got != runs[same]):
+        return  # (the twin just agreed: it is the check while twins exist; records are authoritative in 'expected')
     assert same < len(runs), (f'{module}::{test} run {ordinal} ({got["args"]}): no recorded output in '
                               f'tests/fixtures/leaf_outputs/{module}.json; record it with '
                               f'--leaf-oracle=capture --leaf-capture DIR, then python3 -m tests.leaf_oracle DIR')
