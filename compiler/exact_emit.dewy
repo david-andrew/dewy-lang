@@ -19,7 +19,7 @@ from p"exact_guard_ops.dewy" import (eg_fits)
 from p"exact_loop.jo" import (exact_loop_fast exact_map_active exact_map_stores)
 from p"exact_words.dewy" import (exact_add exact_compare exact_div exact_extend exact_mul exact_neg exact_select exact_shift exact_shift_literal)
 from p"expr.jo" import (CV IN)
-from p"facts_index_proofs.dewy" import (positive_bound)
+from p"facts_index_proofs.dewy" import (is_nonneg positive_bound)
 from p"ir.jo" import (VI checked_flags ir_cold)
 from p"ir_builders.dewy" import (e_addi e_bin e_call e_call1 e_fconst e_iconst e_mov e_slot e_store e_un emit new_slot vreg)
 from p"ir_types.dewy" import (Op)
@@ -145,6 +145,9 @@ exact_fast_compare=(op:Tok ln:ExactEmitWord rn:ExactEmitWord):>int64=>$unsafe {
         xv=exact_value(x)[0]
         yv=exact_value(y)[0]
         cmp=exact_flip_cmp(op)
+    }
+    if is_sub and (is_nonneg(x) or positive_bound(x true) >=? 0) and (is_nonneg(y) or positive_bound(y true) >=? 0) {
+        return e_bin(exact_cmp_ir(cmp) VI e_bin('sub' VI xv yv) zv)
     }
     let sum=e_bin(if is_sub {'sub'} else {'add'} VI xv yv)
     let ovf=e_bin(if is_sub {'overflow_sub'} else {'overflow_add'} VI xv yv)
@@ -379,7 +382,7 @@ exact_value=(n:ExactEmitWord):>array<int64>=>$unsafe {
                 }
                 return exact_extend(exact_shift_literal(a shift max(count ExactEmitWord(a.length)) true) count)
             }
-            if known and divisor >? 0 and (positive_bound(ExactEmitWord(nodes.ptr[n].a) true) >=? 0 or a.length =? 1 and (exact_range_flags(ExactEmitWord(nodes.ptr[n].a)) & 1 not=? 0)) {
+            if known and divisor >? 0 and (positive_bound(ExactEmitWord(nodes.ptr[n].a) true) >=? 0 or a.length =? 1 and ((exact_range_flags(ExactEmitWord(nodes.ptr[n].a)) & 1 not=? 0) or is_nonneg(ExactEmitWord(nodes.ptr[n].a)))) {
                 let divide:Op=if op =? 'percent' {'remu'} else {'divu'}
                 return [e_bin(divide VI a[0] b[0])]
             }
@@ -517,6 +520,25 @@ exact_gen_store=(n:ExactEmitWord):>Val=>$unsafe {
             if proven {return V(e_bin(exact_emit_plain(op) VI av bv) false)}
             let result=vreg(VI)
             emit(exact_emit_checked(op) VI result av bv 0 rt("__int_overflow"));
+            return V(result false)
+        }
+    }
+    if not proven and not target_wasm and not target_arm64 and bits <? 64 and binary {
+        let op=exact_emit_op(source)
+        let a=ExactEmitWord(nodes.ptr[source].a)
+        let b=ExactEmitWord(nodes.ptr[source].b)
+        if (op =? 'plus' or op =? 'minus' or op =? 'star') and exact_bits(a) <=? 64 and exact_bits(b) <=? 64 {
+            let av=exact_low_word(a)
+            let bv=exact_low_word(b)
+            let result=vreg(VI)
+            emit(exact_emit_checked(op) VI result av bv 0 rt("__int_overflow"));
+            if not signed {
+                let hi:ExactEmitWord=(ExactEmitWord(1) << (bits & 63)) - 1
+                math_int_guard(e_bin('gtu' VI result e_iconst(int64(hi))));
+            } else {
+                let normalized=norm(result t)
+                math_int_guard(e_bin('ne' VI normalized result));
+            }
             return V(result false)
         }
     }
