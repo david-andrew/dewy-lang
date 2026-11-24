@@ -1606,7 +1606,7 @@ emit_findbyte=(ins:ptr<Ins>):>void=>$unsafe {
     ld(RDX  n)
     ld(RAX  byte)
     sse_rr(0x66  0x6E  1  RAX) # movd xmm1, eax
-    mov_imm(RAX  0) # offset from the original p
+    mov_rr(RAX  RCX) # original p; offset is computed on exit as rcx - rax
     cmp_branch_pad(10)
     b24(0xFA8348)
     b(8) # cmp rdx, 8
@@ -1615,10 +1615,12 @@ emit_findbyte=(ins:ptr<Ins>):>void=>$unsafe {
     sse_rr(0x66  0x61  1  1)
     sse_rr(0x66  0x70  1  1)
     b(0)
-    # (imm 2, the caller having checked for AVX2: bounded 128-byte blocks first)
+    # (imm 2, the caller having checked for AVX2: aligned 128-byte blocks + 32B tail)
+    let found_first:XWord=-1
     let found_bulk_hit:XWord=-1
     let found_wide:XWord=-1
-    let short_wide:XWord=-1
+    let found_tail_wide:XWord=-1
+    let absent_wide:XWord=-1
     if wide {
         cmp_branch_pad(10)
         b24(0xFA8348)
@@ -1627,13 +1629,21 @@ emit_findbyte=(ins:ptr<Ins>):>void=>$unsafe {
         vex(1  0  1  2  1  0  1)
         b(0x78) # vpbroadcastb ymm1, xmm1
         modrr(1  1)
-        # Demand-driven, constant emission work per wide findbyte. One span
-        # guard covers four 32-byte vectors OR-reduced with scratch ymm15 into
-        # one vpmovmskb and branch per 128 bytes.
+        # Demand-driven, constant emission work per wide findbyte. Check the first
+        # 32 bytes unaligned, align rcx to 32 bytes so every bulk load is cache-line
+        # aligned, and loop against an end pointer (one add + cmp/jbe per 128 bytes).
         cmp_branch_pad(13)
         b24(0xFA8148)
-        b32(128)
+        b32(160)
         let small_bulk=jcc32(CC_L)
+        found_first=findbyte_vector(mask 0)
+        op_rr(0x01  true  RCX  RDX) # rdx = end_ptr
+        rex(true  0  0  RCX  false)
+        b(0x83)
+        modrr(4  RCX)
+        b(-32) # and rcx, -32
+        lea(RCX  RCX  32) # next 32-byte boundary (within [orig_p+1, orig_p+32])
+        lea(RDX  RDX  -128) # limit = end_ptr - 128 (>= rcx since n >= 160)
         nop_pad((32 - XWord(x_code[0].length) % 32) % 32)
         let bulk_top=XWord(x_code[0].length)
         vex(0  1  RCX  1  1  0  1)
@@ -1653,13 +1663,12 @@ emit_findbyte=(ins:ptr<Ins>):>void=>$unsafe {
         cmp_branch_pad(9)
         op_rr(0x85  false  mask  mask)
         found_bulk_hit=jcc32(CC_NE)
-        lea(RAX  RAX  128)
         lea(RCX  RCX  128)
-        lea(RDX  RDX  -128)
-        cmp_branch_pad(13)
-        b24(0xFA8148)
-        b32(128)
-        patch_branch(jcc32(CC_GE) bulk_top)
+        cmp_branch_pad(9)
+        op_rr(0x39  true  RDX  RCX) # cmp rcx, end_ptr - 128
+        patch_branch(jcc32(CC_BE) bulk_top)
+        lea(RDX  RDX  128) # restore end_ptr
+        op_rr(0x29  true  RCX  RDX) # rdx = remaining (< 128)
         cmp_branch_pad(10)
         b24(0xFA8348)
         b(32)
@@ -1668,7 +1677,6 @@ emit_findbyte=(ins:ptr<Ins>):>void=>$unsafe {
         nop_pad((32 - XWord(x_code[0].length) % 32) % 32)
         let wide_top=XWord(x_code[0].length)
         found_wide=findbyte_vector(mask 0)
-        lea(RAX  RAX  32)
         lea(RCX  RCX  32)
         lea(RDX  RDX  -32)
         cmp_branch_pad(10)
@@ -1676,11 +1684,17 @@ emit_findbyte=(ins:ptr<Ins>):>void=>$unsafe {
         b(32)
         patch_branch(jcc32(CC_GE)  wide_top)
         patch_here(bulk_done)
+        # Since n >= 64, any 1..31 remaining bytes are covered by one overlapping
+        # 32-byte vector at [end_ptr - 32]; bytes before rcx already tested absent.
+        cmp_branch_pad(9)
+        op_rr(0x85  true  RDX  RDX) # test rdx, rdx
+        let no_tail_wide=jcc32(CC_E)
+        op_rr(0x01  true  RDX  RCX) # rcx = end_ptr
+        lea(RCX  RCX  -32) # rcx = end_ptr - 32
+        found_tail_wide=findbyte_vector(mask 0)
+        patch_here(no_tail_wide)
         b24(0x77F8C5) # vzeroupper
-        cmp_branch_pad(10)
-        b24(0xFA8348)
-        b(8)
-        short_wide=jcc32(CC_L)
+        absent_wide=jmp32()
         patch_here(narrow)
     }
     cmp_branch_pad(10)
@@ -1701,7 +1715,6 @@ emit_findbyte=(ins:ptr<Ins>):>void=>$unsafe {
     cmp_branch_pad(9)
     op_rr(0x85  false  mask  mask)
     let found=jcc32(CC_NE)
-    lea(RAX  RAX  16)
     lea(RCX  RCX  16)
     lea(RDX  RDX  -16)
     cmp_branch_pad(10)
@@ -1728,25 +1741,25 @@ emit_findbyte=(ins:ptr<Ins>):>void=>$unsafe {
     modrr(4  mask)
     b32(255)
     let found_word=jcc32(CC_NE)
-    lea(RAX  RAX  8)
     lea(RCX  RCX  8)
     lea(RDX  RDX  -8)
     patch_here(short)
     patch_here(tail_short)
-    if short_wide >=? 0 {patch_here(short_wide);}
-    op_rr(0x01  true  RAX  RDX) # end offset = offset + remainder
+    cmp_branch_pad(9)
+    op_rr(0x85  true  RDX  RDX) # test rdx, rdx
+    let absent_empty=jcc32(CC_LE)
+    op_rr(0x01  true  RCX  RDX) # rdx = end_ptr
     sse_rr(0x66  0x7E  1  mask) # movd mask32, xmm1 (the byte)
     cmp_branch_pad(9)
     let tail=XWord(x_code[0].length)
     x_padding_floor=tail
-    op_rr(0x39  true  RDX  RAX)
-    let absent=jcc32(CC_GE)
+    op_rr(0x39  true  RDX  RCX)
+    let absent=jcc32(CC_AE)
     cmp_branch_pad(9)
     rex(false  mask  0  RCX  true)
     b(0x38)
     mem(mask  RCX  0) # cmp byte [rcx], mask8
     let equal=jcc32(if invert {CC_NE} else {CC_E})
-    lea(RAX  RAX  1)
     lea(RCX  RCX  1)
     jmp_back(tail)
     if found_wide >=? 0 {
@@ -1759,28 +1772,38 @@ emit_findbyte=(ins:ptr<Ins>):>void=>$unsafe {
         vex(mask  0  0  1  1  0  1)
         b(0xD7)
         modrr(mask  0)
-        lea(RAX  RAX  96)
+        lea(RCX  RCX  96)
         let bulk_last=jmp32()
         patch_here(bulk_hits[2])
-        lea(RAX  RAX  32)
+        lea(RCX  RCX  32)
         patch_here(bulk_hits[1])
-        lea(RAX  RAX  32)
+        lea(RCX  RCX  32)
         patch_here(bulk_hits[0])
         patch_here(bulk_last)
+        patch_here(found_first)
         patch_here(found_wide)
+        patch_here(found_tail_wide)
         b24(0x77F8C5) # vzeroupper
     }
     patch_here(found)
     patch_here(found_word)
+    op_rr(0x29  true  RAX  RCX) # offset = rcx - orig_p
     rex(false  mask  0  mask  false)
     b16(0xBC0F)
     modrr(mask  mask) # bsf (the mask is nonzero)
+    mov_rr(RAX  RCX)
     op_rr(0x01  true  mask  RAX)
     let done=jmp32()
     patch_here(absent)
+    patch_here(absent_empty)
+    if absent_wide >=? 0 {patch_here(absent_wide);}
     mov_imm(RAX  -1)
+    let done_absent=jmp32()
     patch_here(equal)
+    op_rr(0x29  true  RAX  RCX)
+    mov_rr(RAX  RCX)
     patch_here(done)
+    patch_here(done_absent)
     if saved {
         b16(0x5B41)
         rsp_adjust(-8)
