@@ -87,14 +87,23 @@ exact_finish=():>void=>$unsafe {
             let s=FactState()
             exact_fact_store(n 0 @s);
         }
-        exact_bits(FinalWidth(nodes.ptr[n].a));
-        if not exact_proved(n) and exact_representation(ntype(n)) =? T_INT {
+        let src=FinalWidth(nodes.ptr[n].a)
+        exact_bits(src);
+        let need_eg=not exact_proved(n)
+        if not need_eg and nodes.ptr[src].kind =? 'binary' and exact_bits(FinalWidth(nodes.ptr[src].a)) >? 64 {need_eg=true}
+        if need_eg and exact_representation(ntype(n)) =? T_INT {
             if owner >=? eg_demanded.length {eg_demanded.resize(fns.length)}
             eg_demanded[owner]=true
         }
     }
     loop n in exact_nodes {
         if exact_has_node(n) {exact_bits(n);}
+    }
+    if exact_owners.length >? 0 {
+        if fns.length >? eg_demanded.length {eg_demanded.resize(fns.length)}
+        loop [owner _] in exact_owners {
+            if owner >? 0 and owner <? eg_demanded.length {eg_demanded[owner]=true}
+        }
     }
     retry=0
     if exact_measure_on {exact_measure_report()}

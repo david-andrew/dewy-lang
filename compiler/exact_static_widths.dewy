@@ -349,9 +349,13 @@ exact_midpoint=(n:WidthWord):>[int64 int64]=>$unsafe {
     if nodes.ptr[n].kind not=? 'binary' or nodes.ptr[n].aux not=? 0 or exact_width_op(n) not=? 'plus' or not dewy_at(nodes.ptr[n].pos) {return empty}
     let lo=WidthWord(nodes.ptr[n].a)
     let quotient=WidthWord(nodes.ptr[n].b)
-    if nodes.ptr[quotient].kind not=? 'binary' or nodes.ptr[quotient].aux not=? 0 or nodes.ptr[quotient].aux2 not=? -1 or exact_width_op(quotient) not=? 'slash' {return empty}
+    if nodes.ptr[quotient].kind not=? 'binary' or nodes.ptr[quotient].aux not=? 0 {return empty}
+    let qop=exact_width_op(quotient)
     let divisor=WidthWord(nodes.ptr[quotient].b)
-    if nodes.ptr[divisor].kind not=? 'int_lit' or nodes.ptr[divisor].ival not=? 2 {return empty}
+    if nodes.ptr[divisor].kind not=? 'int_lit' {return empty}
+    let half_div=qop =? 'slash' and nodes.ptr[quotient].aux2 =? -1 and nodes.ptr[divisor].ival =? 2
+    let half_shr=qop =? 'shr' and nodes.ptr[divisor].ival =? 1
+    if not half_div and not half_shr {return empty}
     let difference=WidthWord(nodes.ptr[quotient].a)
     if nodes.ptr[difference].kind not=? 'binary' or nodes.ptr[difference].aux not=? 0 or exact_width_op(difference) not=? 'minus' {return empty}
     let hi=WidthWord(nodes.ptr[difference].a)

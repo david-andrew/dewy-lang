@@ -65,9 +65,112 @@ exact_lower_bits=(n:ExactEmitWord):>int64=>{
     # Consumers select whole machine words. Once one word suffices, no
     # induction/range query can change their representation.
     if width <=? 64 {return width}
+    if eg_fits(n) {return 64}
     let bound=positive_bound(n true)
     if bound <? 0 {return width}
     min(width int64(exact_emit_bits(bound)))
+}
+
+# True when n's exact value fits in one signed 64-bit word (exact_value has length 1).
+exact_signed_word=(n:ExactEmitWord):>bool=>$unsafe {
+    if exact_has_node(n) {return exact_lower_bits(n) <=? 64}
+    let t=exact_representation(ntype(n))
+    if t =? T_MATH_INT {return false}
+    if is_int(t) and not types.ptr[t].sign and types.ptr[t].bits =? 64 {return false}
+    if nodes.ptr[n].kind =? 'int_lit' and has_flag(n NF_U64) and nodes.ptr[n].ival <? 0 {return false}
+    true
+}
+
+exact_cmp_ir=(op:Tok):>Op=>if op =? 'eq' {Op.eq} else if op =? 'ne' {Op.ne} else if op =? 'lt' {Op.lts} else if op =? 'le' {Op.les} else if op =? 'ge' {Op.ges} else {Op.gts}
+
+exact_flip_cmp=(op:Tok):>Tok=>if op =? 'lt' {'gt'} else if op =? 'gt' {'lt'} else if op =? 'le' {'ge'} else if op =? 'ge' {'le'} else {op}
+
+# Exact comparisons of one signed-word addition/subtraction against a signed word
+# need no 128-bit arithmetic: (x - y) cmp 0 is x cmp y, and native OF selects the
+# exact result on overflow while keeping the common path a single add/sub + cmp.
+exact_fast_compare=(op:Tok ln:ExactEmitWord rn:ExactEmitWord):>int64=>$unsafe {
+    let [rk rval]=integer_constant(rn)
+    if rk and not has_flag(rn NF_U64) and rval =? 0 and exact_has_node(ln) and nodes.ptr[ln].kind =? 'binary' and nodes.ptr[ln].aux =? 0 and exact_emit_op(ln) =? 'minus' {
+        let x=ExactEmitWord(nodes.ptr[ln].a)
+        let y=ExactEmitWord(nodes.ptr[ln].b)
+        if exact_signed_word(x) and exact_signed_word(y) {
+            let xv=exact_value(x)[0]
+            let yv=exact_value(y)[0]
+            return e_bin(exact_cmp_ir(op) VI xv yv)
+        }
+    }
+    let [lk lval]=integer_constant(ln)
+    if lk and not has_flag(ln NF_U64) and lval =? 0 and exact_has_node(rn) and nodes.ptr[rn].kind =? 'binary' and nodes.ptr[rn].aux =? 0 and exact_emit_op(rn) =? 'minus' {
+        let x=ExactEmitWord(nodes.ptr[rn].a)
+        let y=ExactEmitWord(nodes.ptr[rn].b)
+        if exact_signed_word(x) and exact_signed_word(y) {
+            let xv=exact_value(x)[0]
+            let yv=exact_value(y)[0]
+            return e_bin(exact_cmp_ir(exact_flip_cmp(op)) VI xv yv)
+        }
+    }
+    if not checked_flags {return -1}
+    let l_word=exact_signed_word(ln)
+    let r_word=exact_signed_word(rn)
+    if l_word and r_word {return -1}
+    let side:ExactEmitWord=0
+    let expr:ExactEmitWord=0
+    let other:ExactEmitWord=0
+    if not l_word and r_word {
+        side=1
+        expr=ln
+        other=rn
+    } else if l_word and not r_word {
+        side=2
+        expr=rn
+        other=ln
+    } else {return -1}
+    if not exact_has_node(expr) or nodes.ptr[expr].kind not=? 'binary' or nodes.ptr[expr].aux not=? 0 {return -1}
+    let aop=exact_emit_op(expr)
+    if aop not=? 'plus' and aop not=? 'minus' {return -1}
+    let x=ExactEmitWord(nodes.ptr[expr].a)
+    let y=ExactEmitWord(nodes.ptr[expr].b)
+    if not exact_signed_word(x) or not exact_signed_word(y) {return -1}
+    let is_sub=aop =? 'minus'
+    let xv:int64=0
+    let yv:int64=0
+    let zv:int64=0
+    let cmp=op
+    if side =? 1 {
+        xv=exact_value(x)[0]
+        yv=exact_value(y)[0]
+        zv=exact_value(other)[0]
+    } else {
+        zv=exact_value(other)[0]
+        xv=exact_value(x)[0]
+        yv=exact_value(y)[0]
+        cmp=exact_flip_cmp(op)
+    }
+    let sum=e_bin(if is_sub {'sub'} else {'add'} VI xv yv)
+    let ovf=e_bin(if is_sub {'overflow_sub'} else {'overflow_add'} VI xv yv)
+    let result=vreg(VI)
+    iff(ovf);
+    let cold=ir_cold
+    ir_cold=true
+    let ovf_val:int64=0
+    if cmp =? 'eq' {ovf_val=e_iconst(0)}
+    else if cmp =? 'ne' {ovf_val=e_iconst(1)}
+    else {
+        let [yk yval]=integer_constant(y)
+        if yk and not has_flag(y NF_U64) and yval not=? 0 {
+            let pos_ovf=(not is_sub and yval >? 0) or (is_sub and yval <? 0)
+            let truth=if cmp =? 'lt' or cmp =? 'le' {not pos_ovf} else {pos_ovf}
+            ovf_val=e_iconst(if truth {1} else {0})
+        } else {
+            ovf_val=e_bin(if cmp =? 'lt' or cmp =? 'le' {'ges'} else {'lts'} VI sum e_iconst(0))
+        }
+    }
+    e_mov(result ovf_val);
+    ir_cold=cold
+    els();
+    e_mov(result e_bin(exact_cmp_ir(cmp) VI sum zv));
+    endc();
+    result
 }
 
 # A positive remainder of one potentially overflowing word operation has a
@@ -194,6 +297,10 @@ exact_value=(n:ExactEmitWord):>array<int64>=>$unsafe {
             }
             let word=exact_word_remainder(n)
             if word.length >? 0 {return word}
+        }
+        if op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' {
+            let fast=exact_fast_compare(op ExactEmitWord(nodes.ptr[n].a) ExactEmitWord(nodes.ptr[n].b))
+            if fast >=? 0 {return [fast]}
         }
         let a=exact_value(ExactEmitWord(nodes.ptr[n].a))
         if op =? 'shl' or op =? 'shr' {
