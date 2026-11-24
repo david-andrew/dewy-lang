@@ -3946,7 +3946,93 @@ x_emit_loop=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
     xctl_n += 1
     x_loop_depth += 1
 }
+let x_cold_ifs:array<int64>=[] # 6 words per deferred noreturn if: fix0, fix1, start, end, reload_pos, reload_at
+let x_skip_end:XWord=-1
+# Defer a short straight-line noreturn `if` (e.g. bounds/overflow/panic trap) to the
+# function tail so the hot path falls through without taken branches or cold code bloat.
+# Bounded O(16) lookahead; skipped in debug builds to keep dbg_pos monotonic.
+x_cold_if_end=(pos:XWord):>XWord=>$unsafe {
+    if x_loop_line not=? 32 or xe_debug or rsp_extra not=? 0 or nchk_open >=? 0 or fold_load >=? 0 or cmp_load >=? 0 or sel_fused >=? 0 or store_val_skip >=? 0 or ret_in_rax >=? 0 {return -1}
+    let limit=min(xe_ncode  pos + 17)
+    let last:XWord=-1
+    let q=pos + 1
+    loop q <? limit {
+        let qins=xe_instructions + q
+        let op=qins[0].op
+        if op =? 'end' {
+            if last <? 0 {return -1}
+            let tail=xe_instructions + last
+            if (tail[0].op =? 'call' and tail[0].c =? 1) or tail[0].op =? 'trap' {
+                if cmp_reload_at >=? 0 and (cmp_reload_at <=? pos or cmp_reload_at >=? q) {return -1}
+                return q
+            }
+            return -1
+        }
+        if op =? 'block' or op =? 'loop' or op =? 'if_' or op =? 'else_' or op =? 'br' or op =? 'brif' or op =? 'brtable' or op =? 'ret' {return -1}
+        if op =? 'calli' or op =? 'callc' or op =? 'syscall' or op =? 'copy' or op =? 'zero' or op =? 'memset' or op =? 'memcpy' or op =? 'intr' {return -1}
+        if op =? 'call' and qins[0].c not=? 1 {return -1}
+        if op =? 'load' and (XWord(qins[0].c) & M_NULLF) not=? 0 {return -1}
+        if op not=? 'nop' and op not=? 'assume' {last=q}
+        q += 1
+    }
+    -1
+}
 x_emit_if_=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
+    let cold_end=x_cold_if_end(pos)
+    if cold_end >=? 0 {
+        let fix0:XWord=-1
+        let fix1:XWord=-1
+        if fused_cc >=? 0 {
+            let cc=fused_cc
+            fused_cc=-1
+            if cc =? 100 {
+                let skip=jcc32(CC_P)
+                fix0=jcc32(CC_E)
+                patch_here(skip)
+            }
+            else if cc =? 101 {
+                fix0=jcc32(CC_P)
+                fix1=jcc32(CC_NE)
+            }
+            else {fix0=jcc32(cc)}
+        }
+        else {
+            let a=XWord(ins[0].a)
+            if vloc[a] =? LOC_SPILL {
+                x_branch_pos=pos
+                if x_loop_depth >? 0 {cmp_branch_pad(14)}
+                x_branch_pos=-1
+                rex(true  0  0  RBP  false)
+                b(0x83)
+                mem(7  RBP  xe_spill[a])
+                b(0)
+            }
+            else {
+                let ra=reg_of(a  RAX)
+                x_branch_pos=pos
+                if x_loop_depth >? 0 {cmp_branch_pad(9)}
+                x_branch_pos=-1
+                rex(true  ra  0  ra  false)
+                b(0x85)
+                modrr(ra  ra)
+            }
+            fix0=jcc32(CC_NE)
+        }
+        let rpos=cmp_reload
+        let rat=cmp_reload_at
+        if rat >=? 0 {
+            cmp_reload=-1
+            cmp_reload_at=-1
+        }
+        x_cold_ifs.push(fix0)
+        x_cold_ifs.push(fix1)
+        x_cold_ifs.push(pos + 1)
+        x_cold_ifs.push(cold_end)
+        x_cold_ifs.push(rpos)
+        x_cold_ifs.push(rat)
+        x_skip_end=cold_end
+        return
+    }
     if xctl_n >=? xctl_cap {xctl_grow()}
     let cp=xctl_p + xctl_n
     cp[0].kind=2
@@ -4619,6 +4705,8 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
     xe_positions=positions
     xe_emit_error=""
     x_int_fail.clear()
+    x_cold_ifs.clear()
+    x_skip_end=-1
     rsp_extra=0
     if rsp_frame {rsp_row(0)}
     xctl_n=0
@@ -4671,6 +4759,11 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
     let has_ovp=x_has_overflow_pair
     let ins=instructions
     loop pos in [0..xe_ncode) {
+        if x_skip_end >=? 0 {
+            if pos =? x_skip_end {x_skip_end=-1}
+            ins=ins + 1
+            continue
+        }
         if pos =? cmp_reload_at {
             let original=cmp_reload
             cmp_reload=-1
@@ -4733,6 +4826,58 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
         }
         if nchk_open >=? 0 and XWord(x_code[0].length) >? nchk_start and fold_load <? 0 and cmp_load <? 0 {nchk_close()}
         ins=ins + 1
+    }
+    if XWord(x_cold_ifs.length) >? 0 {
+        x_padding_floor=XWord(x_code[0].length)
+        let ci_cold:XWord=0
+        let nc_cold=XWord(x_cold_ifs.length)
+        loop ci_cold <? nc_cold {
+            let fix0=x_cold_ifs[ci_cold]
+            let fix1=x_cold_ifs[ci_cold + 1]
+            let cstart=x_cold_ifs[ci_cold + 2]
+            let cend=x_cold_ifs[ci_cold + 3]
+            let rpos=x_cold_ifs[ci_cold + 4]
+            let rat=x_cold_ifs[ci_cold + 5]
+            patch_here(fix0)
+            if fix1 >=? 0 {patch_here(fix1)}
+            fused_cc=-1
+            cmp_load=-1
+            cmp_reload=-1
+            cmp_reload_at=-1
+            fuse_skip=-1
+            fuse_skip2=-1
+            sel_fused=-1
+            store_val_skip=-1
+            ret_in_rax=-1
+            fold_load=-1
+            let cins=instructions + cstart
+            loop cpos in [cstart..cend) {
+                if cpos =? rat {emit_ins(cpos  instructions + rpos)}
+                let cipos=XWord(cins[0].pos)
+                if cipos not=? 0 and (cipos not=? row_pos or fused_flag) {line_row(cipos)}
+                if cpos not=? fuse_skip and cpos not=? fuse_skip2 {
+                    let cofl=XWord(X_OP_FLAGS[int64((cins as ptr<uint32>)[0]) & 127])
+                    if cofl =? 0 {
+                        if not has_n32 or cpos + 1 >=? cend or (cins + 1)[0].op not=? 'zext32' or not x_emit_narrow32(cpos  cins) {
+                            emit_ins(cpos  cins)
+                        }
+                    }
+                    else if (cofl & 1) =? 0 {
+                        if (cofl & 2) not=? 0 and vloc[XWord(cins[0].dst)] <? -1 {
+                        }
+                        else if (not has_n32 or cpos + 1 >=? cend or (cins + 1)[0].op not=? 'zext32' or not x_emit_narrow32(cpos  cins)) and (not has_ovp or (cofl & 4) =? 0 or not x_emit_overflow_pair(cpos  cins)) {
+                            emit_ins(cpos  cins)
+                        }
+                    }
+                }
+                cins=cins + 1
+            }
+            if instructions[cend - 1].op not=? 'trap' {
+                b(0x0F)
+                b(0x0B)
+            }
+            ci_cold += 6
+        }
     }
     if XWord(x_int_fail.length) >? 0 {
         loop fix in x_int_fail {patch32(fix  XWord(x_code[0].length) - fix - 4)}
