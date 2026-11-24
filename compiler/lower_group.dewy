@@ -25,11 +25,11 @@ from p"ir.jo" import (M_FLOAT M_SIGNED VF VI VOP_SPLAT_B VOP_SPLAT_C VS dbg_on i
 from p"ast.jo" import (NF_COMPREHENSION NF_GENERIC NF_GLOBAL NF_INBOUNDS NF_INDEX_CAPTURED NF_INCLUSIVE NF_MUT NF_RELOOKUP NF_STEP NF_STMT NF_U64 NF_UNSCOPED has_flag kid kid2 kids lists mk nkids nkids2 nodes)
 from p"ir_types.dewy" import (Op)
 from p"types.jo" import (T_F32 T_I32 T_INT T_MAT4 T_MATH_INT T_NEVER T_RANGE T_STR T_U64 T_U8 T_VEC4 T_VOID fields is_int is_union is_vec prune ptr_size structs targ telem tkind ts_dewy tsize type_eq types union_members variants)
-from p"type_ops.dewy" import (fixed_len int_policy is_managed layout math_optional mk_array mk_box ptr_optional type_has_fn type_str union_holder union_index)
+from p"type_ops.dewy" import (fixed_len int_policy is_managed layout math_optional mk_array mk_box ptr_optional secret_repr type_has_fn type_str union_holder union_index)
 from p"checker_tokens.dewy" import (Tok)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"facts.jo" import (array_len_expr len_of_local lower_length_guards)
-from p"facts_index_proofs.dewy" import (positive_bound)
+from p"facts_index_proofs.dewy" import (is_nonneg positive_bound)
 from p"facts_index_proofs.dewy" import (fixed_array_len fixed_array_local index_safety lower_length_guard range_facts_begin range_facts_end stable_loop_index)
 from p"facts_elements.dewy" import (fact_fixed_comprehension fact_fixed_comprehension_exact)
 from p"facts_library.dewy" import (fact_library_call)
@@ -256,7 +256,7 @@ ib_len_local=(n0:LGWord):>LGWord=>$unsafe {
 ib_nonneg=(n:LGWord):>bool=>$unsafe {
     let t=prune(ntype(n))
     if types.ptr[t].kind =? 'int_' and not types.ptr[t].sign {return true}
-    positive_bound(n true) >=? 0
+    is_nonneg(n) or positive_bound(n true) >=? 0
 }
 ib_collect=(n:LGWord yes:bool):>void=>$unsafe {
     if n <=? 0 {return}
@@ -1781,7 +1781,7 @@ gen_binary=(e:LGWord):>Val=>$unsafe {
         # Reuse the lowering range already computed for every write. A
         # nonnegative dividend needs neither signed correction nor MIN/-1.
         }
-        if known and divisor >? 0 and positive_bound(a true) >=? 0 {
+        if known and divisor >? 0 and (is_nonneg(a) or positive_bound(a true) >=? 0) {
             return V(e_bin(int_op(op false) VI va vb) false)
         }
         let result=vreg(VI)
@@ -2339,15 +2339,16 @@ gen_intrinsic_pop=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     hdr_store(p 8 nn);
     let sz=owner_stride(et)
     let ea=e_bin('add' VI e_addi(p 24) e_bin('mul' VI nn e_iconst(sz)))
+    let clear=is_managed(et) or ownership_type(et) or secret_repr(et) not=? prune(et)
     if vc(et) =? VC_AGG {
         let s=new_temp(et)
         let d=e_slot(s)
         e_copy(d ea tsize(et));
-        e_zero(ea sz);
+        if clear {e_zero(ea sz);}
         return Val[d true s]
     }
     let v=load_val(et ea 0)
-    e_zero(ea sz);
+    if clear {e_zero(ea sz);}
     return V(v true)
 }
 gen_intrinsic_insert=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
@@ -5209,6 +5210,23 @@ note_uniq_expr=(e:LGWord):>void=>$unsafe {
         note_uniq_id(LGWord(nodes.ptr[e].sym));
     }
 }
+uq_fresh_before_loop=(s:LGWord l:LGWord t:LGWord):>bool=>$unsafe {
+    if cur_block =? 0 or cur_block_i <=? 0 or cur_block_i >=? nkids(cur_block) or kid(cur_block cur_block_i) not=? s {return false}
+    if LGWord(locals.ptr[l].flags) & LF_ADDR not=? 0 {return false}
+    let stop=max(0 cur_block_i - 8)
+    let k=cur_block_i - 1
+    loop k >=? stop {
+        let prev=kid(cur_block k)
+        if nodes.ptr[prev].kind =? 'vardecl' and nodes.ptr[prev].aux2 =? 0 and nodes.ptr[prev].nlist =? 0 and not has_flag(prev NF_GLOBAL) and LGWord(nodes.ptr[prev].sym) =? l {
+            let iv=LGWord(nodes.ptr[prev].b)
+            if iv =? 0 {return true}
+            return nodes.ptr[iv].kind =? 'array' and (nodes.ptr[iv].b not=? 0 or nkids(iv) =? 0 or not all_const(iv LGWord(types.ptr[t].elem)))
+        }
+        if mentions_local(prev l) {return false}
+        k -= 1
+    }
+    false
+}
 uq_begin=(s:LGWord):>LGWord=>$unsafe {
     if not cur_fn_has_array_local {return 0}
     uq_written.clear();
@@ -5233,7 +5251,7 @@ uq_begin=(s:LGWord):>LGWord=>$unsafe {
         # only variables that exist before the loop: one declared inside it gets a new value
         # (maybe a shared or read-only one) on every iteration
         if fl & LF_PARAM =? 0 and not declared_in_scope(l) {continue}
-        arr_unique(local_place(l true) t);
+        if not uq_fresh_before_loop(s l t) {arr_unique(local_place(l true) t);}
         uniq_locals.push(l);
         added += 1;
     }
