@@ -103,3 +103,16 @@ def test_persistent_node_worker_web_and_panic(compiler, tmp_path, monkeypatch): 
     monkeypatch.setenv('TMPDIR', str(tmp_path))
     monkeypatch.setattr(cases.tempfile, 'tempdir', None)
     assert cases.run(compiler, cases.discover(root), workers=1) == 0
+
+
+@pytest.mark.core_quick
+def test_node_subprocess_fallback_when_worker_disabled(compiler, tmp_path, monkeypatch):  # noqa: F811
+    if shutil.which('node') is None:
+        pytest.skip('node is not installed')
+    root = tmp_path / 'cases'
+    write(root, 'web_fallback', '# modes: web\nmain=():>void=>{printl"win-ok"}\n', out='win-ok\n')
+    monkeypatch.setattr(cases, 'USE_NODE_WORKER', False)
+    monkeypatch.setattr(cases.Runner, '_node_worker', lambda self: pytest.fail('persistent Node worker must not start'))
+    monkeypatch.setenv('TMPDIR', str(tmp_path))
+    monkeypatch.setattr(cases.tempfile, 'tempdir', None)
+    assert cases.run(compiler, cases.discover(root), workers=1) == 0

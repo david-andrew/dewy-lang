@@ -47,10 +47,14 @@ CASES = ROOT / 'tests' / 'cases'
 MODES = ('native', 'native-release', 'web', 'web-release')
 HEADER_KEYS = ('exit', 'modes', 'args', 'stdin', 'quick')
 BATCH_SIZE = 96
+# Persistent Node workers use `selectors` on pipe fds, which is POSIX-only
+# (Windows `SelectSelector` only supports sockets). Fall back to one Node
+# process per run on Windows with smaller web panic batches.
+USE_NODE_WORKER = os.name != 'nt'
 # Panicking and direct-exit cases share one build and run once each. Native
-# starts are cheap and web runs reuse one persistent Node worker with a cached
-# WebAssembly.Module.
-PANIC_BATCH_SIZE = {'native': 32, 'web': 32}
+# starts are cheap and POSIX web runs reuse one persistent Node worker with a
+# cached WebAssembly.Module.
+PANIC_BATCH_SIZE = {'native': 32, 'web': 32 if USE_NODE_WORKER else 4}
 MARK = '@@dewy-case@@'
 BUILD_TIMEOUT = 120
 RUN_TIMEOUT = 10
@@ -179,7 +183,7 @@ class _NodeWorker:
     def _start(self):
         self.proc = subprocess.Popen(
             [self.node, '-e', NODE_WORKER_JS],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             env=self.env, bufsize=0,
         )
 
@@ -244,6 +248,9 @@ class _NodeWorker:
                 if nl >= 0:
                     reply = json.loads(buf[:nl].decode('utf-8', 'replace'))
                     return int(reply['code']), reply['stdout'], reply['stderr']
+        except OSError:
+            self.close()
+            return None
         finally:
             selector.close()
 
@@ -459,7 +466,7 @@ class Runner:
                 timeout: float = RUN_TIMEOUT, select: int | None = None) -> tuple[int | str, str, str]:
         self.runs += 1
         env = self.env if select is None else {**self.env, 'DEWY_CASE': str(select)}
-        if self.node and stdin is None and len(command) == 2 and command[0] == self.node:
+        if USE_NODE_WORKER and self.node and stdin is None and len(command) == 2 and command[0] == self.node:
             with scratch_space.run_dir('case', Path(command[-1]).parent) as cwd:
                 result = self._node_worker().run(command[1], tuple(args), str(cwd), env, timeout)
                 if result is not None:
