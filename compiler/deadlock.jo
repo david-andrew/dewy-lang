@@ -79,6 +79,7 @@ struct DlEdge:
     taken_site: int
     via: str
     at: int = 0      # the call (or wait) in the function where it became concrete
+    address: bool = false  # either orientation is possible, chosen by lock_all at run time
 
 struct DlCallback:
     param: int       # the parameter called
@@ -104,6 +105,12 @@ dl_relevant: {int: bool}
 dl_changed = false
 dl_report = false
 dl_global_edges: DlEdge[]
+nd_address: DlEdge[]             # unordered links within an address-ordered group
+nd_fixed: DlEdge[]               # source-order waits, including unresolved handles
+nd_indirect: {int: bool}         # a function value may receive arguments outside direct calls
+nd_group_seen = false            # a multi-lock group requires an order proof
+nd_order_limit = false           # the bounded summary iteration stopped before convergence
+nd_mixed: {int: str}             # waits missing an order certificate, by source position
 dl_global_keys: {str: bool}
 dl_param_index: {int: int}       # parameter local -> its index
 dl_inits: {int: int}             # local -> its declaration (the relevant functions')

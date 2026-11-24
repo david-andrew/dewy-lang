@@ -1,6 +1,5 @@
 # modes: native native-release
-# `$no_deadlocks`: lock waits certified by the checked order (lock_all, and one nesting order on
-# every path) and structured joins of tasks whose waits are certified.
+# Transfers and audits acquire both mutexes by address, in either argument order.
 $no_deadlocks
 $runtime_checks
 
@@ -9,9 +8,8 @@ transfer = (src:Mutex<int64> dst:Mutex<int64> amount:int64):>void | DuplicateLoc
     a -= amount
     b += amount
 }
-audit = (outer:Mutex<int64> inner:Mutex<int64>):>int64 => {
-    let o = @(outer.lock())
-    let i = @(inner.lock())
+audit = (outer:Mutex<int64> inner:Mutex<int64>):>int64 | DuplicateLock | Canceled => {
+    let [o i] = @(lock_all(outer inner)) or_throw
     o + i
 }
 churn = (x:Mutex<int64> y:Mutex<int64> rounds:int64):>int64 | DuplicateLock | Canceled => {
@@ -27,5 +25,5 @@ main = ():>void | DuplicateLock | Canceled | OutOfMemory => {
         spawn audit(x y)
     }
     let both = (a or_throw) + (b or_throw)
-    printl"{both} {audit(x y)}"
+    printl"{both} {audit(x y) or_throw}"
 }

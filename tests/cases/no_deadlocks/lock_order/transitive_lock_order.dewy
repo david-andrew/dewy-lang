@@ -1,0 +1,20 @@
+# modes: native
+$runtime_checks
+pair = (x:Mutex<int64> y:Mutex<int64>):>int64 | DuplicateLock | Canceled => {
+    let [a b] = @(lock_all(x y)) or_throw
+    a + b
+}
+nested = (x:Mutex<int64> z:Mutex<int64>):>int64 => {
+    let a = @(x.lock())
+    let c = @(z.lock())
+    a + c
+}
+main = () => {
+    $no_deadlocks
+    let x = mutex<int64>(1)
+    let y = mutex<int64>(2)
+    let z = mutex<int64>(3)
+    pair(x y) or_throw;
+    pair(y z) or_throw;
+    nested(x z);
+}

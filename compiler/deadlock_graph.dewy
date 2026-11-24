@@ -2,10 +2,10 @@ $runtime_checks
 from p"expression_types.dewy" import (ntype)
 
 from p"deadlock_channels.dewy" import (dc_split dc_on dc_is dc_protocols dc_chan_call dc_wait_set dc_module dc_called pc_module)
-from p"deadlock.jo" import (DlEdge dl_global_edges dl_callers dl_givens dl_inits dl_relevant dl_param_index dl_report dl_changed deadlock_parallel deadlock_atomics deadlock_fns dc_fns dc_mod dc_qmod dc_smod pc_mod DL_PASSES)
-from p"deadlock_certificates.dewy" import nd_check
+from p"deadlock.jo" import (DlEdge dl_global_edges nd_address nd_fixed nd_indirect nd_group_seen nd_order_limit nd_mixed dl_callers dl_givens dl_inits dl_relevant dl_param_index dl_report dl_changed deadlock_parallel deadlock_atomics deadlock_fns dc_fns dc_mod dc_qmod dc_smod pc_mod DL_PASSES)
+from p"deadlock_certificates.dewy" import (nd_check nd_where)
 from p"deadlock_channel_graph.dewy" import dc_analyze
-from p"deadlock_locations.dewy" import (dl_key dl_path dl_name)
+from p"deadlock_locations.dewy" import (dl_key dl_path dl_name dl_named dl_symbolic)
 from p"deadlock_walk.dewy" import (dl_fn_arg dl_walk_fn)
 from p"deadlock_waits.dewy" import (dl_undecided dl_polling)
 from p"ast.jo" import (nodes kids kids2 nkids has_flag NF_GLOBAL)
@@ -23,6 +23,7 @@ GraphWord:type=int64<overflow='wrap'>
 dl_scan_calls=(f:GraphWord n:GraphWord):>void=>$unsafe {
     if n =? 0 {return}
     let k=nodes.ptr[n].kind
+    if dir_deadlocks_any and nodes.ptr[n].sym >? 0 and (k =? 'lambda' or k =? 'fnref' or k =? 'partial') {nd_indirect[GraphWord(nodes.ptr[n].sym)]=true}
     if (k =? 'call' and nodes.ptr[n].aux =? 0 or k =? 'lambda' or k =? 'fnref') and nodes.ptr[n].sym >? 0 {
         let g=GraphWord(nodes.ptr[n].sym)
         if g not=? f and g <? fns.length {
@@ -155,6 +156,66 @@ dl_report_cycle=(e:DlEdge back:array<int64>):>void=>$unsafe {
     loop j in back {err_notes.push([dl_global_edges.ptr[j].taken_site "note: the other path takes {dl_name(dl_global_edges.ptr[j].taken)} here"])}
     fatal(e.taken_site msg)
 }
+# A group can acquire its members in either direction. A chain of undirected links
+# connects all its members in O(arity) space. A strongly connected component
+# containing a fixed order and an address link has no common proof. Address-only
+# components always follow increasing addresses. Search both ways once per
+# component with a fixed source, O(V*(V+E)); only demanded for mixed programs.
+dl_reach=(root:string next:dict<string array<string>>):>dict<string bool>=>$unsafe {
+    let seen:dict<string bool>=[]
+    let work=[root]
+    seen[root]=true
+    loop work.length >? 0 {
+        let v=work.pop()
+        loop w in (next.get(v) ?? []) {
+            if not seen.has(w) {seen[w]=true; work.push(w)}
+        }
+    }
+    seen
+}
+dl_mixed_orders=():>void=>$unsafe {
+    if nd_address.length =? 0 or nd_fixed.length =? 0 {return}
+    let edges=[nd_fixed... nd_address...]
+    let out:dict<string array<string>>=[]
+    let rev:dict<string array<string>>=[]
+    let unknown=false
+    loop e in edges {
+        let a=dl_key(e.held)
+        let b=dl_key(e.taken)
+        if not dl_named(e.held) or not dl_named(e.taken) or dl_symbolic(e.held) or dl_symbolic(e.taken) {unknown=true}
+        if a =? b {continue}
+        loop key in [a b] {
+            if not out.has(key) {out[key]=[]; rev[key]=[]}
+        }
+        out[a].push(b)
+        rev[b].push(a)
+        if e.address {out[b].push(a); rev[a].push(b)}
+    }
+    let done:dict<string bool>=[]
+    loop source in nd_fixed {
+        let root=dl_key(source.held)
+        if done.has(root) {continue}
+        let forward=dl_reach(root out)
+        let backward=dl_reach(root rev)
+        let component:array<DlEdge>=[]
+        let fixed=DlEdge()
+        let group:GraphWord=0
+        loop e in edges {
+            let a=dl_key(e.held)
+            let b=dl_key(e.taken)
+            if not unknown and (not forward.has(a) or not backward.has(a)) {continue}
+            done[a]=true
+            if not unknown and (not forward.has(b) or not backward.has(b)) {continue}
+            component.push(e)
+            if e.address {group=e.taken_site} else {fixed=e}
+        }
+        if group =? 0 or fixed.taken_site =? 0 {continue}
+        loop e in component {
+            let site=e.taken_site
+            nd_mixed[site]="mixes lock orders: one path takes {dl_name(fixed.held)} ({nd_where(fixed.held_site site)}) and then {dl_name(fixed.taken)} ({nd_where(fixed.taken_site site)}), while `lock_all` at {nd_where(group site)} acquires locks by address"
+        }
+    }
+}
 deadlock_finalize=():>void=>$unsafe {
     if deadlock_atomics {
         dl_report=true
@@ -227,10 +288,11 @@ deadlock_finalize=():>void=>$unsafe {
             passes+=1
             loop f in work {dl_walk_fn(f)}
         }
+        nd_order_limit=nd_group_seen and dl_changed
         dl_report=true
         loop f in work {dl_walk_fn(f)}
         dl_cycles()
     }
-    if certify {nd_check()}
+    if certify {dl_mixed_orders(); nd_check()}
     if dc_fns.length >? 0 {dc_analyze()}
 }

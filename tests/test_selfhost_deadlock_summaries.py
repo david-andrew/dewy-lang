@@ -34,6 +34,10 @@ JO.update(jo_doubles({'deadlock.jo': {
     'dl_report': 'dl_report = false',
     'dl_global_keys': 'dl_global_keys: {str: bool}',
     'dl_global_edges': 'dl_global_edges: DlEdge[]',
+    'nd_group_seen': 'nd_group_seen = false',
+    'nd_address': 'nd_address: DlEdge[]',
+    'nd_fixed': 'nd_fixed: DlEdge[]',
+    'nd_indirect': 'nd_indirect: {int: bool}',
     'dl_summaries': 'dl_summaries: {int: DlSummary}',
 }}))
 

@@ -876,16 +876,12 @@ def needs_own_process(case: Case) -> bool:
         or ALLOCATION_COUNTER.search(source) is not None
 
 
-# unbatchable: $no_deadlocks unsound with lock_all address order vs source-order locks; remove when fixed
-ISOLATED_BUG_CASES = frozenset({'no_deadlocks/certified_locks'})
-
-
 def plan(cases: list[Case], node: bool) -> list[tuple[str, str, list[Case]]]:
     units = []
     sources = {c.path: c.path.read_text() for c in cases if c.kind != 'reject'}
     alone = {
         c.path for c in cases
-        if c.args or c.stdin is not None or c.name in ISOLATED_BUG_CASES or (
+        if c.args or c.stdin is not None or (
             c.kind != 'reject' and (
                 DEFINES_MAIN.search(sources[c.path]) is None
                 or MAIN_WITH_PARAMS.search(sources[c.path]) is not None

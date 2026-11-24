@@ -4258,8 +4258,13 @@ certificate is one of:
 
 - the checked lock order, for `lock` and `lock_all`. Locks nested one inside
   another must be named by a local or a parameter holding a handle `mutex(...)`
-  made; take others together with `lock_all`. What the checks above only warn
-  about is an error here, and so is a lock-order cycle in a program without tasks.
+  made. Take other handles together with `lock_all`. It acquires locks in
+  increasing address order regardless of their argument order. A nested wait
+  must be safe for every possible address order. A handle that may alias another
+  lock can prevent that proof. If the orders can conflict, use `lock_all` on
+  all those paths or nest the locks in one consistent order throughout. What
+  the checks above only warn about is an error here, and so is a lock-order
+  cycle in a program without tasks.
 - a structured join: the end of `concurrent`, whose tasks' waits are certified, with
   no lock held across it.
 - an audited adapter, for a foreign function that may block: a function whose

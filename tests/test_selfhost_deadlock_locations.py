@@ -21,7 +21,8 @@ JO = jo_doubles({
     held_site: int
     taken_site: int
     via: str
-    at: int = 0''',
+    at: int = 0
+    address: bool = false''',
         'dl_param_index': 'dl_param_index: {int: int}',
         'dl_inits': 'dl_inits: {int: int}',
         'dc_split': 'dc_split = (n: int) -> bool: n != 0 and n == split_node',

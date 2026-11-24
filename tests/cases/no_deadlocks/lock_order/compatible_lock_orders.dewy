@@ -1,0 +1,18 @@
+# modes: native
+# The outer lock is always acquired before the whole address-ordered group.
+$no_deadlocks
+$runtime_checks
+
+pair = (x:Mutex<int64> y:Mutex<int64>):>int64 | DuplicateLock | Canceled => {
+    let [a b] = @(lock_all(x y)) or_throw
+    a + b
+}
+main = () => {
+    let outer = mutex<int64>(0)
+    let x = mutex<int64>(1)
+    let y = mutex<int64>(2)
+    let total = @(outer.lock())
+    total += pair(x y) or_throw
+    total += pair(y x) or_throw
+    printl"{total}"
+}
