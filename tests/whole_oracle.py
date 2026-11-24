@@ -28,6 +28,9 @@ def native(arguments):
     for argument in arguments:
         source = Path(os.fsdecode(argument))
         if source.suffix in ('.dewy', '.jo') and source.is_file():
+            # (95_kv_store fsyncs 3000 transactions ~22s/run; the ladder suite runs it)
+            if source.parent.name == '95_kv_store':
+                return False
             for line in source.read_text(errors='replace').splitlines():
                 if not line.startswith('#'):
                     break
