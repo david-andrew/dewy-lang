@@ -100,7 +100,9 @@ KEEP_BASES = 16        # cached base compilers kept (most recently used)
 IPS = 6.3e9            # compiler instructions per second on the reference machine (compile_throughput.md)
 CORPUS_WORKERS = (1, 4)
 CORPUS_JOBS = 2        # programs compiled at once; critical-path counts do not depend on load
-SOURCE_LIMIT = 5.0     # percent: the candidate compiling the base's compiler source, then this checkout's
+SOURCE_LIMIT = 1.0     # percent: ordinary source growth vs base (candidate compiling base -> this source)
+SOURCE_FEATURE_LIMIT = 1.5  # percent: allowed for a feature landing that keeps flagships ~0% (<= FLAGSHIP_FLAT_LIMIT)
+FLAGSHIP_FLAT_LIMIT = 0.5   # percent: max flagship instruction growth to qualify for SOURCE_FEATURE_LIMIT
 ACCEPT = re.compile(r'^speed: accept\s+(\S.*)$', re.MULTILINE)
 
 
@@ -528,6 +530,18 @@ def drift_verdict(drifts: list[Drift], limit: float, reasons: dict[str, list[str
     return growth_verdict(drifts, limit, reasons, describe)
 
 
+def source_cost_limit(base_limit: float, counts: dict[str, int], base_counts: dict[str, int]) -> float:
+    """Allowed self-build source-cost increase vs base: SOURCE_LIMIT ordinarily, or SOURCE_FEATURE_LIMIT
+    when every measured flagship and the flagship total stay within FLAGSHIP_FLAT_LIMIT."""
+    flagships = [name for name in counts if name.startswith('flagship ') and name in base_counts and base_counts[name] > 0]
+    if flagships:
+        each_flat = all(delta(base_counts[n], counts[n]) <= FLAGSHIP_FLAT_LIMIT for n in flagships)
+        sum_flat = delta(sum(base_counts[n] for n in flagships), sum(counts[n] for n in flagships)) <= FLAGSHIP_FLAT_LIMIT
+        if each_flat and sum_flat:
+            return max(base_limit, SOURCE_FEATURE_LIMIT)
+    return max(base_limit, SOURCE_LIMIT)
+
+
 def source_row(counter: Counter, candidate: Toolchain, base: Toolchain, counts: dict[str, int], notes: list[str],
                limit: float, failures: list) -> None:
     """The candidate compiler builds the base's compiler source, then this checkout's (the self-build row's
@@ -604,6 +618,8 @@ def time_report(toolchain: Toolchain, source: str) -> str:
 # (NODES_PER_LINE, measured when the metric changed), so ~3.15k instructions a node. A phase's budget per
 # line splits that by phase. (row, build --time phases, budget per processed line)
 GOAL_LINES_PER_SECOND = 250_000
+FLAGSHIP_ITEM_FLOOR = 200_000
+FLAGSHIP_FLOORS_GATED = True  # hard floors: aggregate >= 250k lines/s, each flagship >= 200k lines/s
 NODES_PER_LINE = 8
 PHASE_BUDGETS = [('lex+parse', ('load',), 3000), ('resolve+check', ('check',), 7000),
                  ('facts', ('facts',), None), ('effects', ('effects',), None),
@@ -763,6 +779,9 @@ def yardstick(toolchain: Toolchain, counts: dict[str, int]) -> list[str]:
         row(name.replace('flagship ', ''), lines, inst, phased, 1)
         if name.startswith('flagship '):
             flagships += 1
+            rate = lines['all'] / (inst / IPS)
+            if FLAGSHIP_FLOORS_GATED and rate < FLAGSHIP_ITEM_FLOOR:
+                failures.append(f'{name} throughput is {rate:.0f} lines/s (floor {FLAGSHIP_ITEM_FLOOR:,} lines/s)')
             total['inst'] += inst
             for key in ('all', 'library', 'instance'):
                 total[key] += lines[key]
@@ -772,6 +791,9 @@ def yardstick(toolchain: Toolchain, counts: dict[str, int]) -> list[str]:
     if flagships:
         row('flagships (sum)', {'root': total['user'], 'all': total['all'], 'library': total['library'],
                                 'instance': total['instance']}, total['inst'], by_phase, flagships)
+        agg_rate = total['all'] / (total['inst'] / IPS)
+        if FLAGSHIP_FLOORS_GATED and agg_rate < GOAL_LINES_PER_SECOND:
+            failures.append(f'flagships (sum) throughput is {agg_rate:.0f} lines/s (floor {GOAL_LINES_PER_SECOND:,} lines/s)')
         print(f'    flagship fan-out {(total["library"] + total["instance"]) / total["user"]:.1f} library + instance lines '
               f'per user line; goal {GOAL_LINES_PER_SECOND // 1000}k processed lines/s single-thread')
     return failures
@@ -1228,10 +1250,11 @@ def main(argv: list[str], current: Path) -> int:
                     print(text, flush=True)
             fallbacks += found
             drifts += drifted
-        source_row(counter, candidate, references['base'][2], counts, notes, max(args.limit, SOURCE_LIMIT), failures)
+        src_limit = source_cost_limit(args.limit, counts, base_counts)
+        source_row(counter, candidate, references['base'][2], counts, notes, src_limit, failures)
         for note in dict.fromkeys(notes):
             print(f'  ({note})')
-        hello_failures = yardstick(candidate, counts)
+        floor_failures = yardstick(candidate, counts)
         base_toolchain = references['base'][2]
         mixed = {fb.name for fb in fallbacks if fb.role == 'base'}
         throughput_failures = throughput_gate(candidate, base_toolchain, counts, base_counts, args.limit,
@@ -1252,9 +1275,9 @@ def main(argv: list[str], current: Path) -> int:
         base_failures, throughput_failures = [], []
     remaining = base_failures + other_failures
     for role, name, change in remaining:
-        limit = 0.0 if role == 'equivalent Jo source' else args.limit
+        limit = 0.0 if role == 'equivalent Jo source' else src_limit if name.startswith('self-build source cost') else args.limit
         print(f'speed: {name} needs {change:+.2f}% instructions vs {role} (limit {limit}%)', file=sys.stderr)
-    for message in throughput_failures + hello_failures:
+    for message in throughput_failures + floor_failures:
         print(f'speed: {message}', file=sys.stderr)
     for message in fallback_failures:
         print(f'speed: FALLBACK {message}', file=sys.stderr)
@@ -1271,4 +1294,4 @@ def main(argv: list[str], current: Path) -> int:
     if any(role != 'equivalent Jo source' for role, _, _ in remaining) or throughput_failures:
         print('speed: add a line `speed: accept <reason>` to the commit message when the cost is intended',
               file=sys.stderr)
-    return 1 if remaining or throughput_failures or hello_failures or fallback_failures or drift_failures else 0
+    return 1 if remaining or throughput_failures or floor_failures or fallback_failures or drift_failures else 0
