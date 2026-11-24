@@ -23,14 +23,18 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import difflib
+import json
 import os
 import re
+import selectors
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import weakref
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
@@ -42,13 +46,211 @@ ROOT = Path(__file__).resolve().parents[1]
 CASES = ROOT / 'tests' / 'cases'
 MODES = ('native', 'native-release', 'web', 'web-release')
 HEADER_KEYS = ('exit', 'modes', 'args', 'stdin', 'quick')
-BATCH_SIZE = 64
-# Panicking cases run one process each. Node pays for the whole module at every
-# start, so web builds stay small; native starts are cheap at any size.
-PANIC_BATCH_SIZE = {'native': 32, 'web': 4}
+BATCH_SIZE = 96
+# Panicking and direct-exit cases share one build and run once each. Native
+# starts are cheap and web runs reuse one persistent Node worker with a cached
+# WebAssembly.Module.
+PANIC_BATCH_SIZE = {'native': 32, 'web': 32}
 MARK = '@@dewy-case@@'
 BUILD_TIMEOUT = 120
 RUN_TIMEOUT = 10
+
+# Persistent per-worker Node runner: executes generated `.cjs` web runners in
+# isolated vm contexts while caching the compiled WebAssembly.Module across
+# `DEWY_CASE` runs of the same panic batch.
+NODE_WORKER_JS = r"""
+"use strict";
+const fs = require("fs");
+const vm = require("vm");
+const readline = require("readline");
+const EXIT_SENTINEL = Symbol("exit");
+const startDir = process.cwd();
+const cache = new Map();
+const MAX_CACHE = 4;
+
+function loadEntry(scriptPath) {
+  const st = fs.statSync(scriptPath);
+  const key = scriptPath + ":" + st.mtimeMs + ":" + st.size;
+  let entry = cache.get(key);
+  if (entry) {
+    cache.delete(key);
+    cache.set(key, entry);
+    return entry;
+  }
+  const code = fs.readFileSync(scriptPath, "utf8");
+  entry = { script: new vm.Script(code, { filename: scriptPath }), mod: null };
+  cache.set(key, entry);
+  if (cache.size > MAX_CACHE) cache.delete(cache.keys().next().value);
+  return entry;
+}
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+rl.on("line", (line) => {
+  if (!line) return;
+  const req = JSON.parse(line);
+  const out = [];
+  const err = [];
+  let code = 0;
+  try {
+    process.chdir(req.cwd);
+    const entry = loadEntry(req.script);
+    const shimProcess = {
+      argv: [process.execPath, req.script, ...req.args],
+      env: req.env,
+      exitCode: 0,
+      cwd: () => req.cwd,
+      stdout: { write(chunk) { out.push(typeof chunk === "string" ? chunk : String(chunk)); return true; } },
+      stderr: { write(chunk) { err.push(typeof chunk === "string" ? chunk : String(chunk)); return true; } },
+      exit(c) { shimProcess.exitCode = c === undefined ? 0 : c; throw EXIT_SENTINEL; },
+    };
+    const fmt = (xs) => xs.map((x) => (typeof x === "string" ? x : String(x))).join(" ") + "\n";
+    const shimConsole = {
+      log: (...xs) => out.push(fmt(xs)),
+      error: (...xs) => err.push(fmt(xs)),
+      warn: (...xs) => err.push(fmt(xs)),
+    };
+    function CachedModule(bytes) {
+      if (!entry.mod) entry.mod = new WebAssembly.Module(bytes);
+      return entry.mod;
+    }
+    CachedModule.customSections = WebAssembly.Module.customSections;
+    CachedModule.exports = WebAssembly.Module.exports;
+    CachedModule.imports = WebAssembly.Module.imports;
+    const shimWasm = Object.assign({}, WebAssembly, {
+      Module: CachedModule,
+      Instance: WebAssembly.Instance,
+      Memory: WebAssembly.Memory,
+      Table: WebAssembly.Table,
+      Global: WebAssembly.Global,
+      CompileError: WebAssembly.CompileError,
+      LinkError: WebAssembly.LinkError,
+      RuntimeError: WebAssembly.RuntimeError,
+      instantiate: WebAssembly.instantiate,
+      validate: WebAssembly.validate,
+    });
+    const sandbox = {
+      Buffer,
+      TextDecoder,
+      TextEncoder,
+      URL,
+      URLSearchParams,
+      atob,
+      btoa,
+      crypto,
+      performance,
+      structuredClone,
+      queueMicrotask,
+      console: shimConsole,
+      process: shimProcess,
+      WebAssembly: shimWasm,
+      setTimeout,
+      clearTimeout,
+      setInterval,
+      clearInterval,
+    };
+    try {
+      entry.script.runInNewContext(sandbox);
+    } catch (e) {
+      if (e !== EXIT_SENTINEL) {
+        err.push((e && e.stack ? e.stack : String(e)) + "\n");
+        shimProcess.exitCode = 101;
+      }
+    }
+    code = Number(shimProcess.exitCode || 0);
+  } catch (e) {
+    err.push((e && e.stack ? e.stack : String(e)) + "\n");
+    code = 101;
+  } finally {
+    try { process.chdir(startDir); } catch (_) {}
+  }
+  process.stdout.write(JSON.stringify({ code, stdout: out.join(""), stderr: err.join("") }) + "\n");
+});
+"""
+
+
+class _NodeWorker:
+    """One persistent Node.js subprocess dedicated to a single worker thread."""
+
+    def __init__(self, node: str, env: dict):
+        self.node = node
+        self.env = env
+        self.proc: subprocess.Popen | None = None
+
+    def _start(self):
+        self.proc = subprocess.Popen(
+            [self.node, '-e', NODE_WORKER_JS],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=self.env, bufsize=0,
+        )
+
+    def close(self):
+        proc, self.proc = self.proc, None
+        if proc is None:
+            return
+        try:
+            if proc.stdin:
+                proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            proc.terminate()
+            proc.wait(timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                proc.kill()
+                proc.wait(timeout=2)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        for stream in (proc.stdout, proc.stderr):
+            if stream:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+
+    def run(self, script: str, args: tuple[str, ...], cwd: str, env: dict, timeout: float):
+        if self.proc is None or self.proc.poll() is not None:
+            self.close()
+            self._start()
+        proc = self.proc
+        assert proc is not None and proc.stdin is not None and proc.stdout is not None
+        payload = json.dumps({'script': script, 'args': list(args), 'cwd': cwd, 'env': env}) + '\n'
+        try:
+            proc.stdin.write(payload.encode('utf-8'))
+            proc.stdin.flush()
+        except OSError:
+            self.close()
+            return None
+        fd = proc.stdout.fileno()
+        buf = bytearray()
+        deadline = time.monotonic() + timeout
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(fd, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self.close()
+                    return 'timeout', '', ''
+                if not selector.select(remaining):
+                    self.close()
+                    return 'timeout', '', ''
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    self.close()
+                    return None
+                buf.extend(chunk)
+                nl = buf.find(b'\n')
+                if nl >= 0:
+                    reply = json.loads(buf[:nl].decode('utf-8', 'replace'))
+                    return int(reply['code']), reply['stdout'], reply['stderr']
+        finally:
+            selector.close()
+
+
+def _close_workers(workers: list[_NodeWorker]):
+    for worker in workers:
+        worker.close()
 
 
 class CaseError(ValueError):
@@ -207,6 +409,30 @@ class Runner:
     # Cases a batch build rejected (the compiler reports one error per build, so each
     # costs a failed build to find): later batches and modes run them alone from the start.
     unbatchable: set = field(default_factory=set)
+    # Cases whose main may panic (need `$runtime_checks` on the batch wrapper).
+    needs_checked: set = field(default_factory=set)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _local: threading.local = field(default_factory=threading.local, repr=False)
+    _node_workers: list = field(default_factory=list, repr=False)
+
+    def __post_init__(self):
+        workers = self._node_workers
+        weakref.finalize(self, _close_workers, workers)
+
+    def close(self):
+        with self._lock:
+            workers = list(self._node_workers)
+            self._node_workers.clear()
+        _close_workers(workers)
+
+    def _node_worker(self) -> _NodeWorker:
+        worker = getattr(self._local, 'node_worker', None)
+        if worker is None:
+            worker = _NodeWorker(self.node, self.env)
+            self._local.node_worker = worker
+            with self._lock:
+                self._node_workers.append(worker)
+        return worker
 
     def flags(self, mode: str) -> list[str]:
         flags = ['--release'] if mode.endswith('-release') else []
@@ -233,6 +459,11 @@ class Runner:
                 timeout: float = RUN_TIMEOUT, select: int | None = None) -> tuple[int | str, str, str]:
         self.runs += 1
         env = self.env if select is None else {**self.env, 'DEWY_CASE': str(select)}
+        if self.node and stdin is None and len(command) == 2 and command[0] == self.node:
+            with scratch_space.run_dir('case', Path(command[-1]).parent) as cwd:
+                result = self._node_worker().run(command[1], tuple(args), str(cwd), env, timeout)
+                if result is not None:
+                    return result
         try:
             with scratch_space.run_dir('case', Path(command[-1]).parent) as cwd:
                 ran = subprocess.run([*command, *args], cwd=cwd, env=env,
@@ -304,35 +535,53 @@ class Runner:
         shows the handle's type matched. Settled forms carry over to other
         batches and modes.
         """
-        singles = [case for case in cases if case.path in self.unbatchable]
-        cases = [case for case in cases if case.path not in self.unbatchable]
-        forms = [self.settled.get(case.path) or ('guess' if returns_void(case.path.read_text()) else 'value')
-                 for case in cases]
+        with self._lock:
+            singles = [case for case in cases if case.path in self.unbatchable]
+            cases = [case for case in cases if case.path not in self.unbatchable]
+            sources = [case.path.read_text() for case in cases]
+            forms = [self.settled.get(case.path) or initial_form(src) for case, src in zip(cases, sources)]
+            checked = select or any(
+                case.path in self.needs_checked or needs_runtime_checks(src)
+                for case, src in zip(cases, sources)
+            )
         while cases:
             work = self.directory('select' if select else 'batch')
-            source, lines = batch_source(cases, forms, select)
+            source, lines = batch_source(cases, forms, select, checked=checked)
             (work / 'batch.dewy').write_text(source)
             output = work / 'batch'
             built = self.build(work / 'batch.dewy', output, mode)
             if built.returncode == 0:
-                for case, form in zip(cases, forms):
-                    self.settled[case.path] = 'value' if form == 'value' else 'void'
+                with self._lock:
+                    for case, form in zip(cases, forms):
+                        self.settled[case.path] = 'value' if form == 'value' else 'void'
                 return self.command(output, mode), cases, singles, None
             located = locate_error(built.stderr, work, cases, lines)
             if located is None:
                 return None, cases, singles, f'batch build failed in {work}:\n' + tail(built.stdout + built.stderr)
             index, message, ours = located
-            if ours and forms[index] == 'guess':
+            if ours and not checked and 'may panic' in message:
+                with self._lock:
+                    self.needs_checked.add(cases[index].path)
+                checked = True
+                continue
+            if ours and forms[index] == 'guess' and (
+                'this expresses' in message or 'this gives nothing' in message
+                or 'type mismatch' in message or '`:>void`' in message
+                or 'owners require direct calls' in message
+            ):
                 forms[index] = 'void' if 'owners require direct calls' in message else 'value'
+                with self._lock:
+                    self.settled[cases[index].path] = forms[index]
             elif ours and forms[index] == 'value' and 'no type (void)' in message:
                 forms[index] = 'void'
+                with self._lock:
+                    self.settled[cases[index].path] = 'void'
             else:
-                self.unbatchable.add(cases[index].path)
+                with self._lock:
+                    self.unbatchable.add(cases[index].path)
                 singles.append(cases.pop(index))
                 forms.pop(index)
                 continue
-            if forms[index] == 'void':
-                self.settled[cases[index].path] = 'void'
         return None, cases, singles, None
 
     def value_batch(self, cases: list[Case], mode: str) -> list[Outcome]:
@@ -430,7 +679,7 @@ def returns_void(source: str) -> bool:
 # A case whose result is an exit code runs as `main=()=>exit(run())`; batches
 # call the function itself and keep its result. A pure block wrapper is the
 # same entry: running its exit would invoke process-wide finalizers mid-batch.
-ENTRY = re.compile(r'^main\s*=\s*\(\s*\)\s*=>\s*(?P<brace>\{)?\s*'
+ENTRY = re.compile(r'^main\s*=\s*\(\s*\)\s*(?::>\s*void\s*)?=>\s*(?P<brace>\{)?\s*'
                    r'exit\((?P<entry>\w+)\(\)\)(?(brace)\s*\})\s*$', re.MULTILINE)
 
 
@@ -439,10 +688,91 @@ def entry_name(source: str) -> str:
     return match['entry'] if match else 'main'
 
 
-def batch_source(cases: list[Case], forms: list[str], select: bool) -> tuple[str, dict[int, int]]:
-    lines = [f'from p"{case.path.as_posix()}" import ({entry_name(case.path.read_text())} as case_{i})'
-             for i, case in enumerate(cases)]
-    owners = {i + 1: i for i in range(len(cases))}
+MAIN_HEADER = re.compile(
+    r'^(?:(?:let|const)\s+)?main\s*=\s*(?:<[^>]*>\s*)?\(\s*\)\s*(?::>\s*([^=\n]+?))?\s*=>\s*(\S)',
+    re.MULTILINE,
+)
+CALL_EXPR = re.compile(r'([A-Za-z_]\w*)\s*\(')
+
+
+def _strip_nested_lambdas(body: str) -> str:
+    """Remove `=> { ... }` nested function bodies so their `return` does not fool main's guess."""
+    out = []
+    pos = 0
+    arrow = re.compile(r'=>\s*\{')
+    while (match := arrow.search(body, pos)) is not None:
+        out.append(body[pos:match.start()])
+        depth = 0
+        end = len(body)
+        for i in range(match.end() - 1, len(body)):
+            ch = body[i]
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        pos = end
+    out.append(body[pos:])
+    return ''.join(out)
+
+
+def initial_form(source: str) -> str:
+    """Choose the initial call form for a batched case's entry point.
+
+    An explicit `main=():>void=>` (even with effect clauses like `& no panics`)
+    is already checked by the compiler to have no result, so call it directly.
+    Pure exit wrappers (`main=()=>exit(run())`) call `run()`, which returns an
+    exit code. Fallible bodies (`or_throw`) return a union value.
+    """
+    if entry_name(source) != 'main':
+        return 'value'
+    match = MAIN_HEADER.search(source)
+    if match is None:
+        return 'value'
+    if match[1]:
+        base = match[1].split('&', 1)[0].strip()
+        return 'void' if base == 'void' else 'value'
+    if match[2] != '{':
+        tail_expr = source[match.start(2):]
+        if re.match(r'(printl?\b|panic\b|exit\b|\$?(?:runtime_)?assert\b)', tail_expr):
+            return 'guess'
+        call = CALL_EXPR.match(tail_expr)
+        if call and re.search(rf'^(?:(?:let|const)\s+)?{re.escape(call[1])}\s*=\s*[^\n]*:>\s*void\b', source, re.MULTILINE):
+            return 'guess'
+        return 'value'
+    depth, end = 0, len(source)
+    for position in range(match.start(2), len(source)):
+        depth += {'{': 1, '}': -1}.get(source[position], 0)
+        if depth == 0:
+            end = position
+            break
+    body = _strip_nested_lambdas(source[match.end(2):end])
+    if re.search(r'\bor_throw\b', body) is not None:
+        return 'value'
+    if re.search(r'\breturn[ \t]+[^\s}]', body) is None and re.search(r'(^|\s)-?\d+\s*$', body) is None:
+        return 'guess'
+    return 'value'
+
+
+def batch_source(cases: list[Case], forms: list[str], select: bool, *, checked: bool = False) -> tuple[str, dict[int, int]]:
+    # Directives are module-local: `$runtime_checks` on the wrapper lets it call
+    # cases whose own modules legitimately opt into runtime checks or panics,
+    # without relaxing any imported case module's checking. Strict cases stay in
+    # strict wrappers (`checked=False`).
+    lines = ['$runtime_checks'] if (checked or select) else []
+    owners: dict[int, int] = {}
+    for i, case in enumerate(cases):
+        lines.append(f'from p"{case.path.as_posix()}" import ({entry_name(case.path.read_text())} as case_{i})')
+        owners[len(lines)] = i
+    # A 'guess' case uses a direct-call `:>void` wrapper instead of taking a
+    # `@case_i` handle: the compiler still rejects non-void results (never
+    # silently dropping an exit code), and owned values work on the first try.
+    for i, form in enumerate(forms):
+        if form == 'guess':
+            lines.append(f'v_{i}=():>void=>case_{i}()')
+            owners[len(lines)] = i
     if select:
         # The selector comes from the environment so each case sees its own
         # arguments, exactly as when it runs alone.
@@ -452,7 +782,7 @@ def batch_source(cases: list[Case], forms: list[str], select: bool) -> tuple[str
         lines.append('main=():>void=>{')
     for i, form in enumerate(forms):
         owners[len(lines) + 1] = i
-        void = {'guess': f'let h_{i}:<():>void>=@case_{i} h_{i}()', 'void': f'case_{i}()'}.get(form)
+        void = {'guess': f'v_{i}()', 'void': f'case_{i}()'}.get(form)
         if select:
             call = f'{void} return' if void else f'let r_{i}=case_{i}() exit(r_{i})'
             lines.append(f'if selector =? "{i}" {{printl"{MARK}B{i}" {call}}}')
@@ -517,29 +847,65 @@ def tail(text: str, lines: int = 25) -> str:
 # measurements need their own executable too: another module can enable dynamic
 # policy capture for callbacks, or leave process-wide allocation state behind.
 DEFINES_MAIN = re.compile(r'^(?:(?:let|const)\s+)?main\s*[:=]', re.MULTILINE)
+MAIN_WITH_PARAMS = re.compile(r'^(?:(?:let|const)\s+)?main\s*=\s*(?:<[^>]*>\s*)?\([^)\s]', re.MULTILINE)
 ALLOCATION_COUNTER = re.compile(r'\balloc_count\b')
+RUNTIME_CHECKS_CASE = re.compile(
+    r'\$runtime_checks\b|\$prototype\b|\$allow_panics\b|\$runtime_assert\b|\bpanic\s*\('
+)
+DIRECT_EXIT = re.compile(r'\bexit\s*\(')
+
+
+def needs_runtime_checks(source: str) -> bool:
+    return RUNTIME_CHECKS_CASE.search(source) is not None
+
+
+def exits_process(source: str) -> bool:
+    return entry_name(source) == 'main' and DIRECT_EXIT.search(source) is not None
 
 
 def needs_own_process(case: Case) -> bool:
     source = case.path.read_text()
-    return DEFINES_MAIN.search(source) is None or ALLOCATION_COUNTER.search(source) is not None
+    return DEFINES_MAIN.search(source) is None or MAIN_WITH_PARAMS.search(source) is not None \
+        or ALLOCATION_COUNTER.search(source) is not None
+
+
+# unbatchable: $no_deadlocks unsound with lock_all address order vs source-order locks; remove when fixed
+ISOLATED_BUG_CASES = frozenset({'no_deadlocks/certified_locks'})
 
 
 def plan(cases: list[Case], node: bool) -> list[tuple[str, str, list[Case]]]:
     units = []
-    alone = {c.path for c in cases if c.args or c.stdin is not None or c.kind != 'reject' and needs_own_process(c)}
+    sources = {c.path: c.path.read_text() for c in cases if c.kind != 'reject'}
+    alone = {
+        c.path for c in cases
+        if c.args or c.stdin is not None or c.name in ISOLATED_BUG_CASES or (
+            c.kind != 'reject' and (
+                DEFINES_MAIN.search(sources[c.path]) is None
+                or MAIN_WITH_PARAMS.search(sources[c.path]) is not None
+                or ALLOCATION_COUNTER.search(sources[c.path]) is not None
+            )
+        )
+    }
+    direct_exit = {p for p, src in sources.items() if p not in alone and exits_process(src)}
+    checked_paths = {p for p, src in sources.items() if p not in alone and needs_runtime_checks(src)}
     for mode in MODES:
         if mode.startswith('web') and not node:
             continue
         chosen = [case for case in cases if mode in case.modes]
-        batched = [c for c in chosen if c.kind == 'run' and c.path not in alone]
-        panics = [c for c in chosen if c.kind == 'panic' and c.path not in alone]
-        for start in range(0, len(batched), BATCH_SIZE):
-            units.append(('value', mode, batched[start:start + BATCH_SIZE]))
+        strict_batched = [c for c in chosen if c.kind == 'run' and c.path not in alone
+                          and c.path not in direct_exit and c.path not in checked_paths]
+        checked_batched = [c for c in chosen if c.kind == 'run' and c.path not in alone
+                           and c.path not in direct_exit and c.path in checked_paths]
+        selects = [c for c in chosen if c.path not in alone
+                   and (c.kind == 'panic' or (c.kind == 'run' and c.path in direct_exit))]
+        in_batch = {c.path for c in strict_batched} | {c.path for c in checked_batched} | {c.path for c in selects}
+        for group in (strict_batched, checked_batched):
+            for start in range(0, len(group), BATCH_SIZE):
+                units.append(('value', mode, group[start:start + BATCH_SIZE]))
         size = PANIC_BATCH_SIZE[mode.split('-')[0]]
-        for start in range(0, len(panics), size):
-            units.append(('panic', mode, panics[start:start + size]))
-        units += [('single', mode, [c]) for c in chosen if c not in batched and c not in panics]
+        for start in range(0, len(selects), size):
+            units.append(('panic', mode, selects[start:start + size]))
+        units += [('single', mode, [c]) for c in chosen if c.path not in in_batch]
     return units
 
 
@@ -561,12 +927,22 @@ def run(compiler: Path, cases: list[Case], *, workers: int = 2, update: bool = F
     runner = Runner(compiler, scratch, clean_environment(), node)
     units = plan(cases, node is not None)
     outcomes: list[Outcome] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        method = {'value': runner.value_batch, 'panic': runner.panic_batch,
-                  'single': lambda cases, mode: runner.single(cases[0], mode)}
-        futures = [pool.submit(method[kind], unit, mode) for kind, mode, unit in units]
-        for future in concurrent.futures.as_completed(futures):
-            outcomes.extend(future.result())
+    # Run native batches first so `settled` and `unbatchable` are populated before
+    # native-release, web, and web-release batches build, avoiding duplicate retries.
+    priming = [u for u in units if u[0] in ('value', 'panic') and u[1] == 'native']
+    rest = [u for u in units if not (u[0] in ('value', 'panic') and u[1] == 'native')]
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            method = {'value': runner.value_batch, 'panic': runner.panic_batch,
+                      'single': lambda cases, mode: runner.single(cases[0], mode)}
+            for phase in (priming, rest):
+                if not phase:
+                    continue
+                futures = [pool.submit(method[kind], unit, mode) for kind, mode, unit in phase]
+                for future in concurrent.futures.as_completed(futures):
+                    outcomes.extend(future.result())
+    finally:
+        runner.close()
     by_case: dict[str, list[Outcome]] = {}
     for outcome in outcomes:
         by_case.setdefault(outcome.case.name, []).append(outcome)
