@@ -15,7 +15,7 @@ GROUPS = ['gpu_nonempty', 'gpu_float_sum', 'gpu_upload_shape', 'gpu_integer_uplo
 
 
 @pytest.mark.parametrize('group', GROUPS)
-@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('target', [pytest.param('native', marks=pytest.mark.xdist_group(name='gpu')), 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_gpu_correctness(compiler, tmp_path, group, target, release):
     env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
