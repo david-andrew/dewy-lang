@@ -8,6 +8,7 @@ import sys
 import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
+from tools.compiler import gen_prelude_index
 
 
 def run(command, **kwargs):
@@ -21,6 +22,61 @@ def scan_check(compiler, tmp_path_factory):
     binary = tmp_path_factory.mktemp('scan-check') / 'scan_check'
     run([compiler, 'build', ROOT / 'tools/compiler/scan_check.jo', '-o', binary])
     return binary
+
+
+@pytest.mark.core_quick
+def test_optional_prelude_index_is_current():
+    source = (ROOT / 'compiler/prelude.jo').read_text(encoding='utf-8')
+    gen_prelude_index.check(ROOT, source)
+    # Assignment lookup has to find the texture slot global before bulk loading.
+    for target, backend in [('linux', 'vk.jo'), ('windows', 'vk.jo'), ('macos', 'metal.jo'), ('wasm', None)]:
+        routes = gen_prelude_index.read_index(source, game_target=target)['game']
+        for symbol in ('__vk_slot_next', '__VK_MAX_TEXTURES', '__vk_slot_new'):
+            assert routes.get(symbol, set()) == ({backend} if backend else set()), (target, symbol)
+        # The rasterizer needs GL constants registered by the bulk loader.
+        assert '__sw_init_window' not in routes
+
+
+def test_optional_prelude_index_detects_missing_entry(tmp_path):
+    for folder in ('core', 'runtime', 'std', 'prelude', 'game'):
+        (tmp_path / 'lib' / folder).mkdir(parents=True)
+    (tmp_path / 'lib/std/optional.jo').write_text('''when TARGET == "windows":
+    when not BOOTSTRAP:
+        # A local and a line in a string do not name prelude declarations.
+        run = ():
+            local = 1
+            "{local}"
+        text = """
+fake = 2
+"""
+        let first, _ = 1, 0
+        wake = (): 0
+    else: alternate = (): 1
+else when TARGET == "macos":
+    @lib("test") extern wake = () -> int
+else:
+    wake = (): 2
+''')
+    (tmp_path / 'lib/runtime/caller.jo').write_text('caller = (): "{wake()}"\n')
+    (tmp_path / 'lib/prelude/caller.dewy').write_text('caller = () => p"{wake()}/file"\n')
+    (tmp_path / 'lib/prelude/comment.dewy').write_text('#{\nwake()\n}#\nempty = () => "wake"\n')
+    source = f'''std_optional_file = (n: str) -> bool:
+    n in ["optional.jo"]
+{gen_prelude_index.START}
+{gen_prelude_index.END}
+'''
+    library = gen_prelude_index.read_library(tmp_path, source)
+    names = library.optional['std']['optional.jo']
+    assert names == {'alternate', 'first', 'run', 'text', 'wake'}
+    names.remove('wake')
+    stale = gen_prelude_index.replace_block(source, gen_prelude_index.generated_block(library))
+    with pytest.raises(ValueError) as failure:
+        gen_prelude_index.check(tmp_path, stale)
+    assert 'stale prelude index' in str(failure.value)
+    assert 'optional symbol wake is missing' in str(failure.value)
+    assert 'lib/runtime/caller.jo: cross-file reference to wake in lib/std/optional.jo is missing' in str(failure.value)
+    assert 'lib/prelude/caller.dewy: cross-file reference to wake' in str(failure.value)
+    assert 'lib/prelude/comment.dewy' not in str(failure.value)
 
 
 def test_declaration_index_matches_parser(scan_check):
