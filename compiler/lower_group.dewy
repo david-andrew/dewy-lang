@@ -13,12 +13,12 @@ from p"lower_views.dewy" import (bounded_open_for declared_in_scope fixed_path_o
 from p"lower_storage.dewy" import (V arr_len arr_unique blk borrow box_put box_val boxed_field_of br_to brif_to build_slot cell_place copy_at drop_at drop_held els endc enter_cond field_place field_store_type field_val_addr finish_call freeze_scalar hdr_load hdr_store iff is_shared leave_cond load_val lop new_cell new_temp norm opt_has opt_value own owner_array_from_fixed place_addr read_place reg_temp_slot reg_temp_vreg release release_arg_snapshots result_from_slot ret_vt retain retain_elems scope_add_local scope_push stmt_begin stmt_end store_field store_type store_val vc vt_of write_place zero_declare zero_note zero_val)
 from p"lower_analysis.dewy" import (assign_rhs_effects borrow_may_change copy_through index_stable lm_change_at lm_resizing_call lpath_key lpath_root may_write_root mentions_local mut_alias_check mut_may_reach path_within place_steps place_text place_var same_var shares_mut_root unchanged_by write_root)
 from p"lower_helpers.dewy" import (field_list fixed_elem_addr fixed_loop_begin fixed_loop_end)
-from p"lower.jo" import (once_slots BOX_HDR BuildItem CopyBack FixedPath HK LF_ELEMENTVIEW LF_HELDVIEW LoanCapacity LoopInfo Place VC_AGG VC_FLT VC_INT VC_VOID Val arg_snapshots box_slot building comprehension_push_index copy_backs ctl cur_block cur_block_i cur_fn cur_ret env_v fixed_fill_count fixed_fill_exact fixed_fill_push fixed_fill_slot fixed_fill_type fixed_paths fp_bases fp_calls fp_escape fp_kill fp_lambda fp_written frozen held_views loan_capacities loops lower_entry opt_release pinned_box pinned_type scope_defers scope_locals sret_v stack_closure_passed stack_closure_targets tl_items tl_values uniq_locals zero_ctls)
+from p"lower.jo" import (once_slots BOX_HDR BuildItem CopyBack FixedPath HK LF_ELEMENTVIEW LF_HELDVIEW LoanCapacity LoopInfo Place VC_AGG VC_FLT VC_INT VC_VOID Val arg_snapshots box_slot building comprehension_push_index cond_depth copy_backs ctl cur_block cur_block_i cur_fn cur_ret env_v fixed_fill_count fixed_fill_exact fixed_fill_push fixed_fill_slot fixed_fill_type fixed_paths fp_bases fp_calls fp_escape fp_kill fp_lambda fp_written frozen held_views loan_capacities loops lower_entry opt_release pinned_box pinned_type scope_defers scope_locals sret_v stack_closure_passed stack_closure_targets tl_items tl_values uniq_locals zero_ctls)
 from p"expr.jo" import (CV FMT_DEWY IN format_word_inst)
 from p"integer_conversions.dewy" import (int_widens integer_constant)
 from p"vector_swizzles.dewy" import (swizzle_run)
 from p"checks_thin_expr.dewy" import (fmt_field_order fmt_hidden fmt_minted is_map_type swizzle_index)
-from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_RESIZED LF_SHARED LF_VALUECAP fns globals lib_dir locals target_macos target_wasm target_windows)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_RESIZED LF_SHARED LF_VALUECAP fns globals lib_dir locals target_macos target_wasm target_windows)
 from p"checker_compound_values.dewy" import (compound_op)
 from p"checks_thin.dewy" import (jd mutable_loop_syntax readonly_global)
 from p"ir.jo" import (M_FLOAT M_SIGNED VF VI VOP_SPLAT_B VOP_SPLAT_C VS dbg_on ir ir_cold mulh_ok)
@@ -80,7 +80,7 @@ from p"units.jo" import (quantity_base)
 from p"refine.jo" import (refine_active)
 from p"refine_metadata.dewy" import (ref_pair_erased representation_type)
 from p"refine_ops.dewy" import (ref_gen_check refine_gen refine_gen_args)
-from p"lower_uniqueness.dewy" import (uq_calls uq_escaped uq_lambda uq_scan uq_written)
+from p"lower_uniqueness.dewy" import (fn_uniq_cands uq_calls uq_escaped uq_has_defer uq_lambda uq_returned uq_scan uq_written)
 from p"concurrency.jo" import (concurrency_runtime_needed)
 from p"lower_intrinsics.dewy" import (gen_intrinsic_argv gen_intrinsic_compute_spirv gen_intrinsic_compute_textures gen_intrinsic_embed gen_intrinsic_gpu_kernel gen_intrinsic_shader gen_intrinsic_unreachable gen_intrinsic_zeroed)
 from p"lower_races.dewy" import (in_lib parallel_direct race_check type_as_value)
@@ -525,7 +525,7 @@ gen_place=(e:LGWord write:bool):>Place=>$unsafe {
             let idx:LGWord=0
             if write {
                 let base=gen_place(a true)
-                if not is_uniq_array(a) {arr_unique(base bt);}
+                if not is_uniq_array(a) {arr_unique(base bt); note_uniq_expr(a);}
                 idx=gen_index(LGWord(nodes.ptr[e].b))
                 arr=read_place(base bt)
                 # re-read: evaluating the index cannot change the array place
@@ -2203,7 +2203,10 @@ gen_intrinsic_push=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     let in_place=not ownership_type(et) and is_plain_ctor(arg1)
     let pl=gen_place(arg0 true)
     let val=V(-1 false)
-    if not in_place {val=gen_owned(arg1)}
+    if not in_place {
+        if direct_agg_ok(arg1 et) and plain_unaliased_local(arg1) {val=gen_borrowed(arg1)}
+        else {val=gen_owned(arg1)}
+    }
     let p=read_place(pl at)
     let slotp=vreg(VI)
     let direct=false
@@ -2295,6 +2298,7 @@ gen_intrinsic_push=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     if direct {endc();}
     owner_element_live(slotp et);
     if ownership_type(et) {owner_forget_slot(val.slot);}
+    note_uniq_expr(arg0);
     return V(-1 false)
 }
 # The first push to a null array in a growable context arena on the only thread: inline,
@@ -2325,7 +2329,7 @@ gen_intrinsic_pop=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     let at=prune(ntype(arg0))
     let et:LGWord=LGWord(types.ptr[at].elem)
     let pl=gen_place(arg0 true)
-    if not is_uniq_array(arg0) {arr_unique(pl at);}
+    if not is_uniq_array(arg0) {arr_unique(pl at); note_uniq_expr(arg0);}
     let p=read_place(pl at)
     let n=arr_len(p)
     iff(e_bin('eq' VI n e_iconst(0)));
@@ -2362,6 +2366,7 @@ gen_intrinsic_insert=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     store_val(et slotp 0 val.v);
     owner_element_live(slotp et);
     if ownership_type(et) {owner_forget_slot(val.slot);}
+    note_uniq_expr(arg0);
     return V(-1 false)
 }
 gen_intrinsic_remove=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
@@ -2485,7 +2490,7 @@ gen_intrinsic_extend=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
         if is_slice(arg1) {stmt_end();}
     }
     let pl=gen_place(arg0 true)
-    if not is_uniq_array(arg0) {arr_unique(pl at);}
+    if not is_uniq_array(arg0) {arr_unique(pl at); note_uniq_expr(arg0);}
     let sa=place_addr(pl at)
     let first:LGWord=0
     if sliced {first=e_call4(rt("__arr_extend_raw") sa data cnt e_iconst(esz) VI)}
@@ -4431,7 +4436,12 @@ gen_assign=(s:LGWord):>void=>$unsafe {
                 held.push(ib);
             }
         }
-        let val=gen_owned(rhs)
+        let val=V(-1 false)
+        if direct_agg_ok(rhs t) and not assign_rhs_effects(a) and not assign_rhs_effects(rhs) and boxed_field_of(a) <? 0 and not (nodes.ptr[a].kind =? 'field' and nodes.ptr[a].aux =? -4) and (plain_unaliased_local(rhs) or (nodes.ptr[rhs].kind =? 'index' and nodes.ptr[rhs].aux =? 0 and tkind(ntype(LGWord(nodes.ptr[rhs].a))) =? 'array' and plain_read(rhs) and (plain_unaliased_local(a) or (nodes.ptr[a].kind =? 'index' and (is_uniq_array(LGWord(nodes.ptr[a].a)) or fixed_path_of(LGWord(nodes.ptr[a].a)) >=? 0))))) {
+            val=gen_borrowed(rhs)
+        } else {
+            val=gen_owned(rhs)
+        }
         assign_to(a t val.v);
         loop ib in held {frozen.remove(ib);}
         return
@@ -4570,14 +4580,16 @@ gen_vardecl=(s:LGWord):>void=>$unsafe {
             stack=not has_flag(iv NF_GENERIC) and closure_env_shareable(LGWord(nodes.ptr[iv].sym))
         }
         if stack {stack_closure_targets[l] = if has_flag(iv NF_GENERIC) {poly_families.ptr[LGWord(nodes.ptr[iv].aux)].envfn} else {LGWord(nodes.ptr[iv].sym)};}
-        let val=if stack {gen_lambda(iv true)} else {gen_owned(iv)}
+        let val=if stack {gen_lambda(iv true)} else if direct_agg_ok(iv t) and plain_read(iv) {gen_borrowed(iv)} else {gen_owned(iv)}
         if stack {locals.ptr[l].offset = LGI32(val.slot);}
         else {write_place(pl t val.v);}
         if ownership_type(t) {owner_forget_slot(val.slot);}
+        if nodes.ptr[iv].kind =? 'array' and (nodes.ptr[iv].b not=? 0 or nkids(iv) =? 0 or not all_const(iv LGWord(types.ptr[prune(t)].elem))) {note_uniq_id(l);}
     }
     else {
         if pl.mem {e_zero(pl.v tsize(t));}
         else {e_mov(pl.v zero_val(t));}
+        note_uniq_id(l);
     }
     scope_add_local(l true);
 }
@@ -5148,17 +5160,68 @@ fp_begin=(s:LGWord l:LGWord bound:LGWord place:LGWord):>LGWord=>$unsafe {
     return added
 }
 let cur_fn_has_array_local:bool=true
+plain_unaliased_local=(e:LGWord):>bool=>$unsafe {
+    if e <=? 0 or nodes.ptr[e].kind not=? 'ident' or nodes.ptr[e].aux not=? LGI32(1) {return false}
+    let l=LGWord(nodes.ptr[e].sym)
+    if l <=? 0 or is_shared(l) {return false}
+    LGWord(locals.ptr[l].flags) & (LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_ELEMALIAS) =? 0
+}
+direct_agg_ok=(e:LGWord t:LGWord):>bool=>$unsafe {
+    vc(t) =? VC_AGG and not is_managed(t) and not ownership_type(t) and not (copies_on and copy_strict(e) and costly_copy(t))
+}
+uq_fn_prepare=(body:LGWord):>LGWord=>$unsafe {
+    let mark=uniq_locals.length
+    fn_uniq_cands.clear();
+    if not opt_release or not cur_fn_has_array_local or body =? 0 {return mark}
+    uq_written.clear();
+    uq_escaped.clear();
+    uq_returned.clear();
+    uq_has_defer=false
+    uq_lambda=false
+    uq_calls=false
+    uq_scan(body 1);
+    if uq_lambda or uq_written.length =? 0 {return mark}
+    loop l in uq_written {
+        if fn_uniq_cands.contains(l) {continue}
+        if uq_escaped.contains(l) or (uq_has_defer and uq_returned.contains(l)) {continue}
+        let t=prune(LGWord(locals.ptr[l].type))
+        if types.ptr[t].kind not=? 'array' {continue}
+        let fl:LGWord=LGWord(locals.ptr[l].flags)
+        if partition_mode and fl & LF_MUTPARAM not=? 0 {continue}
+        if fl & (LF_ALIAS | LF_CAPTURE | LF_BYREF | LF_ADDR) not=? 0 or is_shared(l) {continue}
+        if fl & LF_PARAM not=? 0 and fl & LF_MUTPARAM =? 0 {continue}
+        if fl & LF_MUTPARAM not=? 0 and uq_calls {continue}
+        fn_uniq_cands.push(l);
+    }
+    mark
+}
+uq_fn_finish=(mark:LGWord):>void=>$unsafe {
+    fn_uniq_cands.clear();
+    loop uniq_locals.length >? mark {uniq_locals.pop();}
+}
+note_uniq_id=(l:LGWord):>void=>$unsafe {
+    if cond_depth =? 0 and loops.length =? 0 and fn_uniq_cands.length >? 0 and fn_uniq_cands.contains(l) and not uniq_locals.contains(l) {
+        uniq_locals.push(l);
+    }
+}
+note_uniq_expr=(e:LGWord):>void=>$unsafe {
+    if cond_depth =? 0 and loops.length =? 0 and fn_uniq_cands.length >? 0 and e >? 0 and nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? LGI32(1) {
+        note_uniq_id(LGWord(nodes.ptr[e].sym));
+    }
+}
 uq_begin=(s:LGWord):>LGWord=>$unsafe {
     if not cur_fn_has_array_local {return 0}
     uq_written.clear();
     uq_escaped.clear();
+    uq_returned.clear();
+    uq_has_defer=false
     uq_lambda=false
     uq_calls=false
     uq_scan(s 1);
     if uq_lambda {return 0}
     let added:LGWord=0
     loop l in uq_written {
-        if uq_escaped.contains(l) or uniq_locals.contains(l) {continue}
+        if uq_escaped.contains(l) or (uq_has_defer and uq_returned.contains(l)) or uniq_locals.contains(l) {continue}
         let t=prune(LGWord(locals.ptr[l].type))
         if types.ptr[t].kind not=? 'array' {continue}
         let fl:LGWord=LGWord(locals.ptr[l].flags)

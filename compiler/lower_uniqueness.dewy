@@ -8,8 +8,11 @@ from p"isolation_ops.dewy" import (isolation_children isolation_node_children is
 UQWord:type=int64<overflow='wrap'>
 let uq_written:array<int64>=[]
 let uq_escaped:array<int64>=[]
+let uq_returned:array<int64>=[]
+let uq_has_defer=false
 let uq_lambda=false
 let uq_calls=false
+let fn_uniq_cands:array<int64>=[]
 uq_scan=(n:UQWord ctx:UQWord):>void=>$unsafe {
     # ctx: 0 = the value escapes (copied, passed, captured), 1 = indexed read, 2 = indexed write
     if n =? 0 {return}
@@ -24,6 +27,14 @@ uq_scan=(n:UQWord ctx:UQWord):>void=>$unsafe {
     if k =? 'lambda' {
         uq_lambda=true
         return
+    }
+    if k =? 'defer_' {uq_has_defer=true}
+    if k =? 'return_' and nodes.ptr[n].a not=? 0 {
+        let ra=UQWord(nodes.ptr[n].a)
+        if nodes.ptr[ra].kind =? 'ident' and nodes.ptr[ra].aux =? 1 {
+            uq_returned.push(UQWord(nodes.ptr[ra].sym))
+            return
+        }
     }
     if not uq_calls and not ambient_sharing_stable(n) {uq_calls=true}
     if k =? 'ident' {

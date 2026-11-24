@@ -32,7 +32,7 @@ from p"facts.jo" import (fact_storage_cache lower_length_guards positive_epoch)
 from p"facts_index_proofs.dewy" import (lower_length_guard)
 from p"util.jo" import (files intern pos_file pos_in_lib)
 from p"lower_views.dewy" import (find_views param_view_decl)
-from p"lower_group.dewy" import (cur_fn_has_array_local gen_block_stmts gen_return gen_stmt scope_pop)
+from p"lower_group.dewy" import (cur_fn_has_array_local gen_block_stmts gen_return gen_stmt scope_pop uq_fn_finish uq_fn_prepare)
 from p"lower_helpers.dewy" import (lower_helper)
 from p"math_lower.jo" import (math_decl_depth math_loop_parent math_loop_sites math_static_regs math_static_widths math_word_limits math_word_regs math_word_updates math_write_loop math_writes)
 from p"ownership.jo" import (ownership_consumers ownership_decls)
@@ -323,6 +323,7 @@ zero_finish=(f:LFnWord):>void=>$unsafe {
 }
 lower_inst_body=(f:LFnWord body:LFnWord):>void=>$unsafe {
     let guarded=lower_length_guards.length
+    let uq_mark=uq_fn_prepare(body)
     scope_push();
     owner_enter_captures(f);
     if ownership_decls.length not=? 0 and fns.ptr[f].decl not=? 0 and not files.ptr[pos_file(nodes.ptr[LFnWord(fns.ptr[f].decl)].pos)].is_dewy {
@@ -354,6 +355,7 @@ lower_inst_body=(f:LFnWord body:LFnWord):>void=>$unsafe {
         }
     }
     lower_length_guards.truncate(guarded);
+    uq_fn_finish(uq_mark);
     scope_pop();
 }
 lower_function=(lf:LFnWord):>void=>$unsafe {
