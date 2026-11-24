@@ -5114,6 +5114,16 @@ fp_begin=(s:LGWord l:LGWord bound:LGWord place:LGWord):>LGWord=>$unsafe {
             if fl & LF_PARAM not=? 0 and fl & LF_MUTPARAM =? 0 {ok=false}
         }
         if not ok {continue}
+        let existing=fixed_path_of(base)
+        if existing >=? 0 {
+            let fp=fixed_paths.ptr[existing]
+            let lv:LGWord=if key =? bound_key and stable_loop_index(l) {l} else {-1}
+            if (place not=? 0 and key =? lpath_key(place)) or (lv >=? 0 and fp.loopvar not=? lv) {
+                fixed_paths.push(FixedPath[key fp.data fp.len lv]);
+                added += 1;
+            }
+            continue
+        }
         let at=prune(ntype(base))
         let desc=partition_descriptor(base)
         if desc >=? 0 {

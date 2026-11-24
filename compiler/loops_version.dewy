@@ -8,7 +8,7 @@ from p"opt.jo" import (o_defines o_pure)
 from p"opt_rewrite.dewy" import (ow_resize_one)
 from p"exact_loop.jo" import (exact_map_functions)
 from p"loops.jo" import (CLoop LCheck VPlan lx_vec_on)
-from p"loops_emit.dewy" import (lx_copy lx_endpoint lx_sum)
+from p"loops_emit.dewy" import (lx_copy lx_endpoint lx_mat lx_sum)
 from p"loops_vector_emit.dewy" import (lx_vec_emit lx_vec_plan)
 
 # Loop transformations on optimized IR, including bounded default-build kernels.
@@ -271,27 +271,82 @@ lx_sync=():>void=>$unsafe {
 }
 
 # to the checking loop if c (out of the innermost block)
-lx_fail=(@out:array<Ins> c:int64):>void=>{out.push(Ins('brif' 0 0 LoopI32(c) 0 0 0))}
+lx_fail=(@out:array<Ins> c:int64):>void=>{
+    if is_kv(c) {
+        if kv_of(c) not=? 0 {out.push(Ins('br' 0 0 0 0 0 0))}
+        return
+    }
+    out.push(Ins('brif' 0 0 LoopI32(c) 0 0 0))
+}
 
-# does the counter of L start at a constant >= 0 (set just before the loop)?
-lx_starts_nonneg=(code:array<Ins> L:CLoop):>bool=>$unsafe {
+# Initial constant vreg of L's counter when set just before the loop, else L.ctr.
+lx_start_val=(code:array<Ins> L:CLoop):>int64=>$unsafe {
     let p=LoopWord(L.pl) - 1
     let floor=LoopWord(L.pl) - 16
     loop p >=? 0 and p >=? floor {
         let ins=code[p]
         let op=ins.op
-        if op =? 'loop' or op =? 'end' or op =? 'if_' or op =? 'else_' {return false}
+        if op =? 'loop' or op =? 'end' or op =? 'if_' or op =? 'else_' {return L.ctr}
         if o_defines(op) and int64(ins.dst) =? L.ctr {
-            if op =? 'mov' and is_kv(int64(ins.a)) {return kv_of(int64(ins.a)) >=? 0}
-            if op =? 'iconst' {return ins.imm >=? 0}
-            return false
+            if op =? 'mov' and is_kv(int64(ins.a)) {return int64(ins.a)}
+            if op =? 'iconst' {return k_vreg(ins.imm)}
+            return L.ctr
         }
         p-=1
     }
-    false
+    L.ctr
+}
+
+# does the counter of L start at a constant >= 0 (set just before the loop)?
+lx_starts_nonneg=(code:array<Ins> L:CLoop):>bool=>$unsafe {
+    let s=lx_start_val(code L)
+    is_kv(s) and kv_of(s) >=? 0
 }
 
 lx_bin=(@out:array<Ins> op:Op a:int64 b:int64):>int64=>{
+    let ak=is_kv(a)
+    let bk=is_kv(b)
+    if ak and bk {
+        let ka:LoopWord=kv_of(a)
+        let kb:LoopWord=kv_of(b)
+        match op {
+            <'add'> => {return k_vreg(ka + kb)}
+            <'sub'> => {return k_vreg(ka - kb)}
+            <'mul'> => {return k_vreg(ka * kb)}
+            <'shl'> => {return k_vreg(ka << (kb & 63))}
+            <'shrs'> => {return k_vreg(ka >> (kb & 63))}
+            <'and_'> => {return k_vreg(ka & kb)}
+            <'or_'> => {return k_vreg(ka | kb)}
+            <'eq'> => {return k_vreg(if ka =? kb {1} else {0})}
+            <'ne'> => {return k_vreg(if ka not=? kb {1} else {0})}
+            <'lts'> => {return k_vreg(if ka <? kb {1} else {0})}
+            <'les'> => {return k_vreg(if ka <=? kb {1} else {0})}
+            <'gts'> => {return k_vreg(if ka >? kb {1} else {0})}
+            <'ges'> => {return k_vreg(if ka >=? kb {1} else {0})}
+            <'ltu'> => {return k_vreg(if uint64(ka) <? uint64(kb) {1} else {0})}
+            <'leu'> => {return k_vreg(if uint64(ka) <=? uint64(kb) {1} else {0})}
+            <'gtu'> => {return k_vreg(if uint64(ka) >? uint64(kb) {1} else {0})}
+            <'geu'> => {return k_vreg(if uint64(ka) >=? uint64(kb) {1} else {0})}
+            _ => {}
+        }
+    }
+    if op =? 'add' {
+        if ak and kv_of(a) =? 0 {return b}
+        if bk and kv_of(b) =? 0 {return a}
+    } else if op =? 'sub' {
+        if bk and kv_of(b) =? 0 {return a}
+    } else if op =? 'mul' {
+        if (ak and kv_of(a) =? 0) or (bk and kv_of(b) =? 0) {return k_vreg(0)}
+        if ak and kv_of(a) =? 1 {return b}
+        if bk and kv_of(b) =? 1 {return a}
+        if bk and kv_of(b) =? 4 {return lx_bin(@out 'shl' a k_vreg(2))}
+        if bk and kv_of(b) =? 8 {return lx_bin(@out 'shl' a k_vreg(3))}
+    } else if op =? 'and_' {
+        if (ak and kv_of(a) =? 0) or (bk and kv_of(b) =? 0) {return k_vreg(0)}
+    } else if op =? 'or_' {
+        if ak and kv_of(a) =? 0 {return b}
+        if bk and kv_of(b) =? 0 {return a}
+    }
     let d=vreg(VI)
     out.push(Ins(op VI LoopI32(d) LoopI32(a) LoopI32(b) 0 0))
     d
@@ -520,17 +575,18 @@ loop_versioning=(vector_only:bool=false):>void=>$unsafe {
             out.push(Ins('block' 0 0 0 0 0 0))
             wrap=2
         }
+        let init_ctr=lx_start_val(code L)
+        let start_nonneg=is_kv(init_ctr) and kv_of(init_ctr) >=? 0
         # The endpoint proof describes a nonempty increasing interval. Keep
         # the checked loop for a do-first shape whose initial counter is already
         # at/past its end; its first iteration still has to check its indexes.
         loop ch in checks {
             if ch.kind =? 0 or ch.kind =? 3 or ch.kind =? 5 or ch.kind =? 6 {
                 let ge:Op=if L.signed {'ges'} else {'geu'}
-                lx_fail(@out lx_bin(@out ge L.ctr L.endv))
+                lx_fail(@out lx_bin(@out ge init_ctr L.endv))
                 break
             }
         }
-        let start_nonneg=lx_starts_nonneg(code L)
         let done_len:array<int64>=[]
         loop ch in checks {
             let lo:int64=0
@@ -550,7 +606,7 @@ loop_versioning=(vector_only:bool=false):>void=>$unsafe {
                     }
                 }
                 if not (start_nonneg and kmin >=? 0) {
-                    [lo high]=lx_endpoint(code L L.ctr [] kmin @out)
+                    [lo high]=lx_endpoint(code L init_ctr [] kmin @out)
                     lx_fail(@out lx_bin(@out 'ne' high k_vreg(0)))
                 }
                 [hi high]=lx_endpoint(code L L.endv [] kmax @out)
@@ -559,14 +615,22 @@ loop_versioning=(vector_only:bool=false):>void=>$unsafe {
             } else if ch.kind =? 3 {
                 # The entry guard establishes an increasing nonempty interval.
                 # Its exact first and last endpoints bound every index in it.
-                [lo low_high]=lx_endpoint(code L L.ctr ch.terms ch.k @out)
                 let upper=lx_bin(@out 'sub' L.endv k_vreg(1))
-                [hi high]=lx_endpoint(code L upper ch.terms ch.k @out)
-                lx_fail(@out lx_bin(@out 'ne' low_high k_vreg(0)))
-                lx_fail(@out lx_bin(@out 'ne' high k_vreg(0)))
-                lx_fail(@out lx_bin(@out 'geu' hi ch.len))
+                if L.signed and is_kv(init_ctr) and kv_of(init_ctr) =? 0 and ch.k =? 0 and ch.terms.length =? 1 and ch.terms[0] >? 0 {
+                    # With 0 <= upper <= INT64_MAX, v >= 0 and v + upper <= INT64_MAX iff (v | (v + upper)) >= 0.
+                    let base_v=lx_mat(code L ch.terms[0] - 1 @out)
+                    hi=lx_bin(@out 'add' base_v upper)
+                    lx_fail(@out lx_bin(@out 'lts' lx_bin(@out 'or_' base_v hi) k_vreg(0)))
+                    lx_fail(@out lx_bin(@out 'geu' hi ch.len))
+                } else {
+                    [lo low_high]=lx_endpoint(code L init_ctr ch.terms ch.k @out)
+                    [hi high]=lx_endpoint(code L upper ch.terms ch.k @out)
+                    lx_fail(@out lx_bin(@out 'ne' low_high k_vreg(0)))
+                    lx_fail(@out lx_bin(@out 'ne' high k_vreg(0)))
+                    lx_fail(@out lx_bin(@out 'geu' hi ch.len))
+                }
             } else if ch.kind =? 5 or ch.kind =? 6 {
-                [lo low_high]=lx_endpoint(code L L.ctr ch.terms ch.k @out)
+                [lo low_high]=lx_endpoint(code L init_ctr ch.terms ch.k @out)
                 let upper=lx_bin(@out 'sub' L.endv k_vreg(1))
                 [hi high]=lx_endpoint(code L upper ch.terms ch.k @out)
                 lx_fail(@out lx_bin(@out 'ne' low_high lx_bin(@out 'shrs' lo k_vreg(63))))
@@ -591,7 +655,7 @@ loop_versioning=(vector_only:bool=false):>void=>$unsafe {
         loop d in renamed {o_regs[d].repl=LoopI32(ren[d])}
         if plan.ok {
             # vectors first, then the rest one at a time (if any is left)
-            lx_vec_emit(fast_code L vector_checks plan @out)
+            lx_vec_emit(fast_code L vector_checks plan @out init_ctr)
             out.push(Ins('block' 0 0 0 0 0 0))
             let ge:Op=if L.signed {'ges'} else {'geu'}
             lx_fail(@out lx_bin(@out ge L.ctr L.endv))
