@@ -1856,7 +1856,7 @@ fl_width_mask=(v:int64):>int64=>$unsafe {
     }
     if not r[0].stable {return 0}
     let dop=int64(r[0].dop)
-    if ow_boolean_tag(dop) or dop =? 96 or dop =? 103 {return 63}
+    if ow_boolean_tag(dop) or dop =? 95 or dop =? 103 {return 63}
     let has_k=(dop =? 11 or dop =? 15 or dop =? 16) and o_regs[int64(r[0].db)].constant
     let k:int64=if has_k {if dop =? 11 {o_regs[int64(r[0].db)].cval} else {o_regs[int64(r[0].db)].cval & 63}} else {0}
     ow_dop_width_mask(dop int64(r[0].da) has_k k)
