@@ -1,0 +1,10 @@
+import time
+
+main=()=>{
+    let count=0
+    step=($capture @count)=>{count+=1}
+    let outer=monotonic
+    let spent:Duration=time.elapsed(@step)
+    let enclosing=monotonic-outer
+    printl(count spent >=? 0s spent <=? enclosing)
+}

@@ -1780,7 +1780,10 @@ loop now <? deadline { poll }
 let stamp = now.nominal                 # 2026-10-24T12:00:00.25Z
 ```
 
-`monotonic` is the monotonic sample alone. `sleep`, `within` and deadlines count
+`monotonic` is the monotonic sample alone. After `import time`,
+`time.elapsed(@work)` calls a zero-argument procedure once and returns the
+`Duration` between the monotonic samples taken before and after the call.
+`sleep`, `within` and deadlines count
 actual time, including time the machine is suspended.
 Provider checks run at entry only when the program reaches a clock operation:
 `now` checks both providers; `monotonic`, `sleep`, `within`, `select`, ticker

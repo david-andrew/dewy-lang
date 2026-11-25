@@ -1,0 +1,7 @@
+# Specialize at the call so an unused import acquires no clock provider.
+elapsed=(job):>Duration=>{
+    let work:(():>void)=@job
+    let start=monotonic
+    work()
+    monotonic-start
+}
