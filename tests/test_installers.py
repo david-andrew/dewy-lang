@@ -316,7 +316,7 @@ def test_install_update_and_rollback(world):
     launch(world.prefix, 'update', env=world.env)
     assert pointer(world.prefix) == [b, a]
     assert launch(world.prefix, '--version', env=world.env).stdout == f'{b}\n'
-    assert 'up to date' in launch(world.prefix, 'update', env=world.env).stdout
+    assert launch(world.prefix, 'update', env=world.env).stdout == f'Dewy is up to date ({b}).\n'
     assert pointer(world.prefix) == [b, a]
 
     assert f'Rolled back to {a}' in launch(world.prefix, 'rollback', env=world.env).stdout

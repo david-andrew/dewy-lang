@@ -133,8 +133,11 @@ main() {
     staging=$(mktemp -d "$toolchains/.staging.XXXXXX")
     read_pointer
 
-    if [ "$action" = update ] && [ "$tag" = "$current_name" ]; then
+    # (an intact current toolchain is left alone; a damaged one is reinstalled)
+    if [ "$action" = update ] && [ "$tag" = "$current_name" ] &&
+        check_toolchain "$toolchains/$tag" "$short" 2>/dev/null; then
         info "Dewy is up to date ($tag)."
+        exit 0
     fi
 
     # Fresh installs and update fallbacks use the regular installer download.

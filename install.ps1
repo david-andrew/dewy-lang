@@ -494,7 +494,12 @@ function Install-Dewy([object[]]$arguments) {
     $State.Staging = Join-Path $toolchains ('.staging.' + [Guid]::NewGuid().ToString('N').Substring(0, 12))
     New-Item -ItemType Directory -Path $State.Staging | Out-Null
     $pointer = Read-Pointer $toolchains
-    if ($action -eq 'update' -and $tag -ceq $pointer.Current) { Info "Dewy is up to date ($tag)." }
+    # (an intact current toolchain is left alone; a damaged one is reinstalled)
+    if ($action -eq 'update' -and $tag -ceq $pointer.Current -and
+        $null -eq (Test-Toolchain (Join-Path $toolchains $tag) $short)) {
+        Info "Dewy is up to date ($tag)."
+        return
+    }
 
     # Fresh installs and update fallbacks use the regular installer download.
     if (-not $installer) {
