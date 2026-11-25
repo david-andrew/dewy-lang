@@ -1,52 +1,8 @@
 {
  "test_soa_helpers_match_twin": [
-  {
-   "args": [
-    "build",
-    "<tmp>/arrays.jo"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "2\n3\n[7, 3, 5]\n6\n0\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/push.jo"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<tmp>/push.jo:6:12: error: push takes one element\n        ps.push()\n               ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/method.jo"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<tmp>/method.jo:6:15: error: a soa array has len, push, pop, remove, clear, reserve and truncate (and its field arrays: xs.x)\n        ps.missing()\n                  ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/assign.jo"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<tmp>/assign.jo:6:11: error: only `=` assigns a whole element of a soa array\n        ps[0] += Point(1, 2)\n              ^\n",
-   "files": {}
-  }
+  {"args":["build","<tmp>/arrays.jo"],"files":{"p0-0":{"run":{"status":0,"stdout":"2\n3\n[7, 3, 5]\n6\n0\n","stderr":""}}}},
+  {"args":["build","<tmp>/push.jo"],"status":1,"stderr":"<tmp>/push.jo:6:12: error: push takes one element\n        ps.push()\n               ^\n"},
+  {"args":["build","<tmp>/method.jo"],"status":1,"stderr":"<tmp>/method.jo:6:15: error: a soa array has len, push, pop, remove, clear, reserve and truncate (and its field arrays: xs.x)\n        ps.missing()\n                  ^\n"},
+  {"args":["build","<tmp>/assign.jo"],"status":1,"stderr":"<tmp>/assign.jo:6:11: error: only `=` assigns a whole element of a soa array\n        ps[0] += Point(1, 2)\n              ^\n"}
  ]
 }

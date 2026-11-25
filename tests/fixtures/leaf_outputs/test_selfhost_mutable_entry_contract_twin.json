@@ -1,76 +1,8 @@
 {
  "test_mutable_entry_contract_twin": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/mutable_entry_contract/accepted.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "[1 9 7]\n[4 2 3]\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/mutable_entry_contract/after_helper.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/mutable_entry_contract/after_helper.dewy:2:9: warning: 'clear' hides the library's method `array<int64>.clear`: this function takes over every `x.clear` on one in this module; rename it to keep the library's\n<root>/tests/cases/mutable_entry_contract/after_helper.dewy:5:5: error: cannot prove index is in bounds: missing upper bound\n        xs[i] = v\n        ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/mutable_entry_contract/after_helper.dewy:4:5: note: xs.length may have changed at this call to clear\n        clear(@xs)\n        ^\n    note: the earlier `i <? xs.length` fact described the value before the call to clear\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, xs.length = 0\n    help: establish `i <? xs.length` after `clear(@xs)` with a current guard, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/mutable_entry_contract/checked_at_run_time.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 101,
-      "stdout": "3\n",
-      "stderr": "panic: checked_at_run_time.dewy:9: refinement failed: `n <? the bound` (observed: n was 7 and the bound was 3)\n    in main (checked_at_run_time.dewy:9)\n"
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/mutable_entry_contract/handle_at_run_time.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 101,
-      "stdout": "[1 9 3]\n",
-      "stderr": "panic: handle_at_run_time.dewy:10: refinement failed: `the value <? the bound` (observed: the value was 7 and the bound was 3)\n    in main (handle_at_run_time.dewy:10)\n"
-     }
-    }
-   }
-  }
+  9970,
+  9971,
+  9974,
+  9976
  ]
 }

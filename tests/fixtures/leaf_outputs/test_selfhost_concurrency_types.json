@@ -1,148 +1,26 @@
 {
  "test_concurrency_types_diagnostics[claim_bad]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/transfer/claim_bad.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "`$send` claims Send for Raw, which the compiler cannot verify (a field holds raw storage or a callable); claiming it needs an unsafe boundary: write `$unsafe` on a line of its own before the type, or among its rows\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/transfer/claim_bad.dewy","-o","<tmp>/program"],"status":41,"stdout":"`$send` claims Send for Raw, which the compiler cannot verify (a field holds raw storage or a callable); claiming it needs an unsafe boundary: write `$unsafe` on a line of its own before the type, or among its rows\n"}
  ],
  "test_concurrency_types_diagnostics[send_optout]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/transfer/send_optout.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "task capture does not satisfy inferred Send (Counter opts out of Send with `$send=false`)\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/transfer/send_optout.dewy","-o","<tmp>/program"],"status":41,"stdout":"task capture does not satisfy inferred Send (Counter opts out of Send with `$send=false`)\n"}
  ],
  "test_concurrency_types_execution[default]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/unused.dewy",
-    "-o",
-    "<tmp>/unused"
-   ],
-   "status": 0,
-   "stdout": "transfer ok\n",
-   "stderr": "",
-   "files": {}
-  }
+  10940
  ],
  "test_concurrency_types_execution[release]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/unused.dewy",
-    "-o",
-    "<tmp>/unused"
-   ],
-   "status": 0,
-   "stdout": "transfer ok\n",
-   "stderr": "",
-   "files": {}
-  }
+  10940
  ],
  "test_concurrency_types_program[claim_verified-default]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/transfer/claim_verified.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "7\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/transfer/claim_verified.dewy","-o","<tmp>/program"],"files":7917}
  ],
  "test_concurrency_types_program[claim_verified-release]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/transfer/claim_verified.dewy",
-    "-o",
-    "<tmp>/program",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "7\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/transfer/claim_verified.dewy","-o","<tmp>/program","--release"],"files":7917}
  ],
  "test_concurrency_types_program[sync_optout_sends-default]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/transfer/sync_optout_sends.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "42\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/transfer/sync_optout_sends.dewy","-o","<tmp>/program"],"files":7868}
  ],
  "test_concurrency_types_program[sync_optout_sends-release]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/transfer/sync_optout_sends.dewy",
-    "-o",
-    "<tmp>/program",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "42\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/transfer/sync_optout_sends.dewy","-o","<tmp>/program","--release"],"files":7868}
  ]
 }

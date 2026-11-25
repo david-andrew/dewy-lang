@@ -1,134 +1,17 @@
 {
  "test_deadlock_graph_twins": [
-  {
-   "args": [
-    "check",
-    "<tmp>/cycle.dewy"
-   ],
-   "status": 0,
-   "stdout": "lock order cycle: one path takes 'p' (line 2) and then 'q' (line 3) (in forward at line 9); another takes 'q' (line 2) and then 'p' (line 3) (in forward at line 10). Two tasks on these paths can each hold one lock and wait forever for the other. Take the locks together, in one order: `let [a b] = @(lock_all(x y)) or_throw` (no task runs them at once yet)\nchecked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<tmp>/ordered.dewy"
-   ],
-   "status": 0,
-   "stdout": "checked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/order_cycle.dewy"
-   ],
-   "status": 41,
-   "stdout": "lock order cycle: one path takes 'x' (line 3) and then 'y' (line 4) (in transfer at line 12); another takes 'y' (line 3) and then 'x' (line 4) (in transfer at line 13). Two tasks on these paths can each hold one lock and wait forever for the other. Take the locks together, in one order: `let [a b] = @(lock_all(x y)) or_throw`\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/callback_given.dewy"
-   ],
-   "status": 41,
-   "stdout": "this waits for 'm', which this task already holds since line 10 (the function given to each, called back at line 2, takes it at line 7): it would wait forever. Use the place already held, or let it end before taking the lock again\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/parallel_poll.dewy"
-   ],
-   "status": 41,
-   "stdout": "this parallel iteration waits for 'ready', which a sibling iteration sets: iterations may run one after another on one thread, so it may wait forever. Use `concurrent` and `spawn` for work that waits on other work\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/channel_cycle.dewy"
-   ],
-   "status": 41,
-   "stdout": "bounded channel cycle: the task spawned at line 12 sends more values into 'a' than the 4 it holds (line 5) before it receives from 'b' (line 6); the task spawned at line 13 sends more values into 'b' than the 4 it holds (line 5) before it receives from 'a' (line 6). Each waits for the next, so none goes on: the program waits forever. Receive before sending more than a channel holds, give the channel room for what is sent first, or let a lock's place end before a channel wait\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/channel_join.dewy"
-   ],
-   "status": 41,
-   "stdout": "bounded channel cycle: the program's thread waits for the tasks it spawned (line 9) before it receives from 'c' (line 12); the task spawned at line 10 sends more values into 'c' than the 8 it holds (line 5), and the join of its group at line 9 waits for it. Each waits for the next, so none goes on: the program waits forever. Receive before sending more than a channel holds, give the channel room for what is sent first, or let a lock's place end before a channel wait\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/hidden_hash.dewy"
-   ],
-   "status": 41,
-   "stdout": "this waits for 'k.seen', which this task already holds since line 13 ([]= at line 14 -> the library -> hash, takes it at line 6): it would wait forever. Use the place already held, or let it end before taking the lock again\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/no_deadlocks/order_no_tasks.dewy"
-   ],
-   "status": 41,
-   "stdout": "lock order cycle: one path takes 'p' (line 5) and then 'q' (line 6) (in forward at line 13); another takes 'q' (line 5) and then 'p' (line 6) (in forward at line 14). Two tasks on these paths can each hold one lock and wait forever for the other. Take the locks together, in one order: `let [a b] = @(lock_all(x y)) or_throw` (no task runs them at once yet). Under `$no_deadlocks` an undecided wait is an error: no certificate covers it\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/mutex_basics.dewy"
-   ],
-   "status": 0,
-   "stdout": "checked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/channel_turns.dewy"
-   ],
-   "status": 0,
-   "stdout": "checked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/recursive_service.dewy"
-   ],
-   "status": 0,
-   "stdout": "checked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/protocols/request_reply.dewy"
-   ],
-   "status": 0,
-   "stdout": "checked\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":["check","<tmp>/cycle.dewy"],"stdout":"lock order cycle: one path takes 'p' (line 2) and then 'q' (line 3) (in forward at line 9); another takes 'q' (line 2) and then 'p' (line 3) (in forward at line 10). Two tasks on these paths can each hold one lock and wait forever for the other. Take the locks together, in one order: `let [a b] = @(lock_all(x y)) or_throw` (no task runs them at once yet)\nchecked\n"},
+  {"args":["check","<tmp>/ordered.dewy"],"stdout":1921},
+  {"args":["check","<root>/tests/cases/deadlock/order_cycle.dewy"],"status":41,"stdout":2014},
+  {"args":["check","<root>/tests/cases/deadlock/callback_given.dewy"],"status":41,"stdout":2071},
+  {"args":["check","<root>/tests/cases/deadlock/parallel_poll.dewy"],"status":41,"stdout":"this parallel iteration waits for 'ready', which a sibling iteration sets: iterations may run one after another on one thread, so it may wait forever. Use `concurrent` and `spawn` for work that waits on other work\n"},
+  10962,
+  10963,
+  {"args":["check","<root>/tests/cases/deadlock/hidden_hash.dewy"],"status":41,"stdout":2070},
+  {"args":["check","<root>/tests/cases/no_deadlocks/order_no_tasks.dewy"],"status":41,"stdout":"lock order cycle: one path takes 'p' (line 5) and then 'q' (line 6) (in forward at line 13); another takes 'q' (line 5) and then 'p' (line 6) (in forward at line 14). Two tasks on these paths can each hold one lock and wait forever for the other. Take the locks together, in one order: `let [a b] = @(lock_all(x y)) or_throw` (no task runs them at once yet). Under `$no_deadlocks` an undecided wait is an error: no certificate covers it\n"},
+  {"args":["check","<root>/tests/cases/deadlock/mutex_basics.dewy"],"stdout":1921},
+  10966,
+  10968,
+  10970
  ]
 }

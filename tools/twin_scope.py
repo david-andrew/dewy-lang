@@ -150,10 +150,6 @@ def twin_files(root: Path = ROOT) -> list[Path]:
 
 def scoped_out(changed: set[str], root: Path = ROOT) -> list[str]:
     """The self-hosting tests whose inputs are unchanged since the landing base."""
-    corpus = 'tests/fixtures/leaf_corpus.txt'
-    if any(path.endswith('.dewy') for path in changed):
-        if not changed.isdisjoint((root / corpus).read_text().splitlines()):
-            changed = changed | {corpus}
     if root not in _inputs:
         graph, memo = import_graph(root), {}
         _inputs[root] = {p: inputs(p, graph, root, memo) | set(GLOBAL) for p in twin_files(root)}

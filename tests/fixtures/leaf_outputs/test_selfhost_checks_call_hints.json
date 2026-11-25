@@ -1,128 +1,13 @@
 {
  "test_checks_call_hints_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/float_constants/reject_old_inf.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/float_constants/reject_old_inf.dewy:1:21: error: unknown name `INF`; infinity is `float64.inf`\n    main = () => printl(INF)\n                        ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/bigint/error_9.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/bigint/error_9.dewy:1:25: error: cannot convert string to int (`to_int(s)` reads a number from text: it gives an int, or `NotAnInteger` when the text is not one; `to_int(s) ?? 0` falls back)\n    main=():>void=>{printl\"{bigint(\"12x\")}\"}\n                            ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/game/chart_series.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/float_constants/reject_old_nan.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/float_constants/reject_old_nan.dewy:1:21: error: unknown name `NAN`; not a number is `float64.nan`\n    main = () => printl(NAN)\n                        ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/conversion/string_to_int_hint.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/conversion/string_to_int_hint.dewy:2:21: error: cannot convert string to int (`to_int(s)` reads a number from text: it gives an int, or `NotAnInteger` when the text is not one; `to_int(s) ?? 0` falls back)\n    main = () => printl(int(\"42\"))\n                        ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/library_contracts/physics_polygon_points.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/library_contracts/physics_polygon_points.dewy:4:1: error: calling `add_polygon` may panic (add_polygon: panic \"a polygon needs 3 points not all in a line\" at lib/physics.jo:229:27), and this scope has no runtime checks (no traps): prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n    world.add_polygon(vec2(0 0) [vec2(0 0) vec2(1 1) vec2(2 2)]);\n    ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/program.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "<tmp>/program.dewy:1:3: warning: a hue goes from 0 to 1 around the color circle (as 0 to 360 degrees): 200.5 degrees is `200.5 / 360.0`\n",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "vec4(0.18, 0.9, 0.9, 1.0)\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/program.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<tmp>/program.dewy:1:3: warning: the parts of a color go from 0 to 1 (above 1: brighter than white): for 0 to 255, divide by 255 or write hex(0xff8000)\n<tmp>/program.dewy:2:3: error: in call to rgb(r:float32 g:float32 b:float32): too many arguments (expected 3)\n    d=rgb(0.5 0.5 0.5 2.5)\n      ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/program.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<tmp>/program.dewy:1:7: error: unknown name 'hello' (text goes in quotes: `\"hello\"`) (did you mean 'YELLOW'?)\n    print(hello)\n          ^\n",
-   "files": {}
-  }
+  9809,
+  8894,
+  {"args":["build","<root>/tests/cases/game/chart_series.dewy","-o","<tmp>/program"],"files":8248},
+  9810,
+  {"args":["build","<root>/tests/cases/conversion/string_to_int_hint.dewy","-o","<tmp>/program"],"status":1,"stderr":267},
+  {"args":["build","<root>/tests/cases/library_contracts/physics_polygon_points.dewy","-o","<tmp>/program"],"status":1,"stderr":988},
+  {"args":6108,"stderr":"<tmp>/program.dewy:1:3: warning: a hue goes from 0 to 1 around the color circle (as 0 to 360 degrees): 200.5 degrees is `200.5 / 360.0`\n","files":{"program":{"run":{"status":0,"stdout":"vec4(0.18, 0.9, 0.9, 1.0)\n","stderr":""}}}},
+  {"args":6108,"status":1,"stderr":"<tmp>/program.dewy:1:3: warning: the parts of a color go from 0 to 1 (above 1: brighter than white): for 0 to 255, divide by 255 or write hex(0xff8000)\n<tmp>/program.dewy:2:3: error: in call to rgb(r:float32 g:float32 b:float32): too many arguments (expected 3)\n    d=rgb(0.5 0.5 0.5 2.5)\n      ^\n"},
+  {"args":6108,"status":1,"stderr":"<tmp>/program.dewy:1:7: error: unknown name 'hello' (text goes in quotes: `\"hello\"`) (did you mean 'YELLOW'?)\n    print(hello)\n          ^\n"}
  ]
 }

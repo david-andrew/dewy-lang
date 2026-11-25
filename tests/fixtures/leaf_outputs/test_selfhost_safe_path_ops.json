@@ -1,80 +1,9 @@
 {
  "test_safe_path_ops_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/contained/handler.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "served /srv/site/static/css/site.css\nserved /srv/site/static/css/site.css\nserved /srv/site/static/index.html\nserved /srv/site/static/index.html\nfalse false\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/match/void_union_trailing_family.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "cannot remove no-such-file-for-this-case\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/contained/unproven_let.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/contained/unproven_let.dewy:3:20: error: this path is not proven to stay inside its base, but `f` is declared a SafePath: validate it, `root.confine(...) or_throw`, or test it first, `if root.contains(...) {...}`\n        let f:SafePath=p(argv[0])\n                       ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/contained/unproven_argument.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/contained/unproven_argument.dewy:5:16: error: `f` is not proven to stay inside its base, but serve_file's `f` is a SafePath: validate it, `root.confine(f) or_throw`, or test it first, `if root.contains(f) {...}`\n        serve_file(f)\n                   ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/contained/unproven_result.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/contained/unproven_result.dewy:2:35: error: this path is not proven to stay inside its base, but open_for returns a SafePath: validate it, `root.confine(...) or_throw`, or test it first, `if root.contains(...) {...}`\n    open_for=(user:string):>SafePath=>p\"{root}/{user}\"\n                                      ^\n",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/contained/handler.dewy","-o","<tmp>/program"],"files":{"program":{"run":{"status":0,"stdout":"served /srv/site/static/css/site.css\nserved /srv/site/static/css/site.css\nserved /srv/site/static/index.html\nserved /srv/site/static/index.html\nfalse false\n","stderr":""}}}},
+  9950,
+  {"args":["build","<root>/tests/cases/contained/unproven_let.dewy","-o","<tmp>/program"],"status":1,"stderr":263},
+  {"args":["build","<root>/tests/cases/contained/unproven_argument.dewy","-o","<tmp>/program"],"status":1,"stderr":262},
+  {"args":["build","<root>/tests/cases/contained/unproven_result.dewy","-o","<tmp>/program"],"status":1,"stderr":264}
  ]
 }

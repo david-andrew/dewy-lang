@@ -1,12 +1,5 @@
-"""Record tokenization of the fixed source corpus and generated inputs.
-
-The probe enters the real Jo adapter, comparing every token field, spare EOFs,
-block-comment spans, metatag/lazy state and first lexical diagnostics. Generated
-inputs also exercise non-interning layout, lazy bodies, malformed bytes, token
-array growth and nonzero source spans. Both compiler build modes are checked.
-"""
+"""Check tokenization and first diagnostics on pinned and generated inputs."""
 import random
-from pathlib import Path
 import shutil
 import subprocess
 
@@ -26,10 +19,17 @@ PROBE = '''    if a.len() > 3 and a[1] == "--lexer-probe":
         dn_skip_bodies = a[3] == "lazy" or a[3] == "lazy-nointern"
         begin = if a.len() > 4: to_int(a[4]) ?? 0 else: 0
         stop = if a.len() > 5: to_int(a[5]) ?? len(source) else: len(source)
-        tokens = dn_lex(dc_parser.file, begin, stop, a[3] == "lazy" or a[3] == "intern")
-        loop t in tokens: print("{int(t.kind)} {t.name} {t.start} {t.stop} {t.space} {t.newline} {int(t.symbol)}")
+        tokens = dn_lex(dc_parser.file, begin, stop, a[3] == "lazy" or a[3] == "intern" or a[3] == "snapshot")
+        assert(tokens.len() >= DN_EOF_SPARE + 1)
+        loop i in [0..tokens.len()):
+            t = tokens[i]
+            assert(begin <= t.start and t.start <= t.stop and t.stop <= stop)
+            assert((t.kind == .eof) == (i >= tokens.len() - DN_EOF_SPARE - 1))
+            if t.kind == .eof: assert(t.start == stop and t.stop == stop)
+            if a[3] == "snapshot": print("{int(t.kind)} {t.name} {t.start} {t.stop} {t.space} {t.newline} {int(t.symbol)}")
         print("meta {dn_metatags} lazy {dc_parser.reader.dn_lazy_left}")
-        loop c in dn_block_comments: print("comment {c}")
+        if a[3] == "snapshot":
+            loop c in dn_block_comments: print("comment {c}")
         return
 '''
 
@@ -51,19 +51,18 @@ def build_pair(seed, work, release):
     return binary
 
 
-def compare(pair, source, mode, begin=None, stop=None):
+def probe(pair, source, mode, begin=None, stop=None):
     arguments = ['--lexer-probe', str(source), mode]
     if begin is not None:
         arguments += [str(begin), str(stop)]
     a = subprocess.run([pair, *arguments], capture_output=True, timeout=15,
                        env=parser_diff.environment(parser_diff.ROOT / 'lib'))
-    if a.returncode == 0:
-        assert b'meta ' in a.stdout, 'lexer probe did not report its state'
-    else:
-        assert b'error:' in a.stderr, a.stderr
     assert b'panic:' not in a.stderr, (source, a.stderr)
-    own = None if Path(source).is_relative_to(parser_diff.ROOT) else Path(source).parent
-    leaf_oracle.check(arguments, a.returncode, leaf_oracle.without(own, a.stdout + b'\0' + a.stderr), digest=True)
+    assert a.returncode in (0, 1), (source, arguments, a.stderr)
+    assert b'meta ' in a.stdout if a.returncode == 0 else b'error:' in a.stderr, (source, a.stderr)
+    if mode == 'snapshot':
+        leaf_oracle.check(arguments, a.returncode, leaf_oracle.without(None, a.stdout + a.stderr))
+    return a
 
 
 def shared_pair(compiler, release):
@@ -73,17 +72,16 @@ def shared_pair(compiler, release):
 @pytest.mark.parametrize('release, shard', [
     pytest.param(release, k, id=f'{name}-{k}of{SHARDS}', marks=pytest.mark.xdist_group(name=f'lexer-{name}-{k}'))
     for release, name in ((False, 'default'), (True, 'release')) for k in range(SHARDS)])
-def test_lexer_matches_frozen_corpus(compiler, release, shard):
-    # (interleaved shards of the tracked sources, one xdist group each)
+def test_lexer_corpus(compiler, release, shard):
     pair = shared_pair(compiler, release)
     sources = corpus_paths()
     assert sources
     for source in shard_of(sources, shard):
-        compare(pair, source, 'intern')
+        probe(pair, source, 'snapshot')
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
-def test_lexer_matches_frozen_generated(compiler, tmp_path, release):
+def test_lexer_generated_spans(compiler, tmp_path, release):
     pair = shared_pair(compiler, release)
     rng = random.Random(117)
     examples = [b'', b'()[]{}' * 2000, b'#!\n#{outer\n#{inner}#}# x\\ \n+y',
@@ -99,9 +97,13 @@ def test_lexer_matches_frozen_generated(compiler, tmp_path, release):
         source = tmp_path / f'generated-{number}.dewy'
         source.write_bytes(data)
         for mode in ('intern', 'nointern', 'lazy', 'lazy-nointern'):
-            compare(pair, source, mode)
+            whole = probe(pair, source, mode)
+            if number < 2:  # empty input and enough delimiters to grow the token array
+                assert whole.returncode == 0, whole.stderr
+            if 8 <= number <= 10:  # unterminated comment, quote and interpolation
+                assert whole.returncode == 1, whole.stdout
             cut = rng.randrange(len(data) + 1)
-            compare(pair, source, mode, cut, len(data))
+            probe(pair, source, mode, cut, len(data))
 
 
 @pytest.mark.core_quick

@@ -91,5 +91,4 @@ def test_opt_return_twins(compiler, tmp_path, release):  # noqa: F811
         ran = subprocess.run([binary], capture_output=True, text=True, timeout=30)
         assert ran.returncode == 0, ran.stdout[-2000:] + ran.stderr
         outputs.append(ran.stdout)
-    leaf_oracle.agree(outputs)
     assert outputs[0].endswith('ok\n')

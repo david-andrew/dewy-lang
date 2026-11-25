@@ -1,5 +1,4 @@
-"""The watch's link map, patches, global (re)initialization and record migration agree with frozen
-Jo: the same session transcripts, patch sizes, exit codes and files."""
+"""Exercise watch patch delivery, global initialization and record migration."""
 from tests.selfhost_process_double import compare_watch
 from tests.support import compiler  # noqa: F401
 

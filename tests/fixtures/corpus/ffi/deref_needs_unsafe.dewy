@@ -1,0 +1,13 @@
+# modes: native
+$extern
+malloc=(size:uint64):>ptr<uint8>?
+main=():>void=>{
+    let block={
+        $unsafe
+        malloc(8)
+    }
+    if block isnt? none {
+        let p:ptr<uint8>=block
+        p[0]=1
+    }
+}

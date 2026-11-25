@@ -168,7 +168,6 @@ def test_selfhost_module_paths_match_jo(compiler, tmp_path, release):
         ran = subprocess.run([binary, corpus], capture_output=True, timeout=60)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    leaf_oracle.agree(outputs)
     want = b''.join(expected(p) for p in paths())
     got = outputs[0].split(b'\n=== ')
     for g, w in zip(got, want.split(b'\n=== ')):

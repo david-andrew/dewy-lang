@@ -1,6 +1,4 @@
 """The recorded-output oracle for leaf probes: records, merges and checks."""
-import json
-
 import pytest
 
 from tests import leaf_oracle
@@ -27,9 +25,10 @@ def test_capture_then_check(oracle, monkeypatch):
     big = bytes(range(256)) * 200
     run(monkeypatch, 'capture', 't[default]', [(0, b'a\n'), (46, b'call-error:2\n'), (0, big)])
     assert leaf_oracle.merge(oracle / 'capture') == 1
-    runs = json.loads((oracle / 'outputs/test_probe.json').read_text())['t[default]']
-    assert [r['status'] for r in runs] == [0, 46, 0]
-    assert runs[0]['stdout'] == 'a\n' and runs[2]['bytes'] == len(big)
+    runs = leaf_oracle._read('test_probe')['t[default]']
+    assert [r.get('status', 0) for r in runs] == [0, 46, 0]
+    assert runs[0]['stdout'] == 'a\n'
+    assert runs[2]['stdout'].encode(errors='surrogateescape') == big
     leaf_oracle._ordinals.clear()
     run(monkeypatch, 'expected', 't[default]', [(0, b'a\n'), (46, b'call-error:2\n'), (0, big)])
 

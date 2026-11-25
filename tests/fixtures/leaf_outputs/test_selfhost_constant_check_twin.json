@@ -1,36 +1,6 @@
 {
  "test_constant_check_twin": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/melody_check/literal_needs_no_opt_in.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "true true\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/melody_check/computed_text_needs_opt_in.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/melody_check/computed_text_needs_opt_in.dewy:4:12: error: calling `melody` may panic (melody: panic at lib/game/audio.jo:324:31), and this scope has no runtime checks (no traps): prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n        printl(melody(n).samples.length >? 0)\n               ^\n",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/melody_check/literal_needs_no_opt_in.dewy","-o","<tmp>/program"],"files":{"program":{"run":{"status":0,"stdout":"true true\n","stderr":""}}}},
+  {"args":["build","<root>/tests/cases/melody_check/computed_text_needs_opt_in.dewy","-o","<tmp>/program"],"status":1,"stderr":1054}
  ]
 }

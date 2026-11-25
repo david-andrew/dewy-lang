@@ -221,8 +221,7 @@ def run(binary, texts):
 def test_selfhost_json_doc_matches_jo(compiler, tmp_path, release):
     valid, malformed = documents()
     dewy = build(compiler, FIXTURES / 'json_doc_dewy.dewy', tmp_path / 'json-dewy', release)
-    for texts in (valid, malformed):
-        leaf_oracle.check_value(run(dewy, texts))
+    leaf_oracle.check_value(run(dewy, malformed))
     want = [line for text in valid for line in expected(text)]
     assert run(dewy, valid).decode().split('\n')[:-1] == want
 

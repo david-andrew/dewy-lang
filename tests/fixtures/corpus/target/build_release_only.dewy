@@ -1,0 +1,5 @@
+# modes: native-release web-release
+# A folded `$build` test compiles only the live arm.
+main=()=>{
+    if $build.mode =? "debug" { no_such_function() } else { printl($build.mode) }
+}

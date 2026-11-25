@@ -60,6 +60,8 @@ run = (input: IrFn, debug: bool = false, windows: bool = false, fused: bool = fa
     body = x64_emit(&ir, code.len(), debug, windows, fused, 33, -48, &cabi, &positions)
     assert(render(input) == before and render(ir) == before, "read-only IR")
     assert(saved == fill(u8(0xCC), 16) and saved_ro == [u8(1)], "output COW")
+    assert(body >= 16 and body <= code.len(), "body lies within the emitted code")
+    loop fix in call_fix: assert(fix.0 >= 16 and fix.0 + 4 <= code.len(), "call displacement in code")
     print("body {body}; error {xe_emit_error}; lines {line_rows}; sites {call_sites}; row {row_pos}")
     print("call {call_fix}; stub {stub_fix}; cabi {cabi_fix}; data {data_fix}")
     print("frame {frame_size}; spills {vspill}; slots {slot_off}; saves {callee_off}; unwind {uw_data}")
@@ -135,5 +137,4 @@ def test_x64_emitter_twins(compiler, tmp_path, release):  # noqa: F811
         assert ran.returncode == 0, ran.stdout[-3000:] + ran.stderr
         (directory / "output").write_bytes(ran.stdout)
         outputs.append(ran.stdout)
-    leaf_oracle.agree(outputs)
     assert outputs[0].endswith(b'ok\n')

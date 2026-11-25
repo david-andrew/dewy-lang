@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from tests.corpus_cache import corpus_under
+from tests.corpus_cache import CORPUS, built_once
 from tests.support import compiler  # noqa: F401
 from tests import parser_oracle
 from tools.compiler import parser_diff
@@ -24,13 +24,10 @@ def test_recursive_reader_ships_dewy(compiler, tmp_path):
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
-def test_recursive_reader_matches_frozen(compiler, tmp_path, release):
-    pair = parser_oracle.build_pair(compiler, tmp_path, release)
-    sources = corpus_under(parser_diff.ROOT / 'tests/cases/frontend', recursive=False)
-    sources += corpus_under(parser_diff.ROOT / 'tests/cases/truncated', recursive=False)
+def test_recursive_reader_corpus(compiler, tmp_path, release):
+    pair = built_once(('reader', compiler, release), lambda work: parser_oracle.build_pair(compiler, work, release))
+    sources = sorted(p for group in ('frontend', 'truncated') for p in (CORPUS / group).glob('*.dewy'))
+    assert sources
     sources += parser_diff.generated(tmp_path / 'generated', 4)
     failures = parser_oracle.compare(pair, sources, tmp_path, release, workers=1)
     assert not failures, '\n'.join(f'{path}: {reason}' for path, reason in failures)
-    # (a panic both readers share is no difference, but still a mistake)
-    shared = tmp_path / 'shared-panics'
-    assert not shared.exists(), shared.read_text()

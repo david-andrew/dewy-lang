@@ -1,78 +1,8 @@
 {
  "test_prelude_import_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/coverconc_prelude_imports/explicit_first.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:3:5: warning: the program's thread may wait to send into 'c' (line 3) before it closes 'c' (line 8): it may wait for itself forever (the compiler cannot tell whether every wait does: a count or capacity that is not literal, a group that a failure or a cancel may end, or a channel or task it cannot follow)\n<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:3:5: warning: queue wait on 'c' after non-waiting attempts: the compiler cannot prove the queue's occupancy or that an attempt succeeds; it may wait forever\n<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:9:19: warning: queue wait on 'c' after non-waiting attempts: the compiler cannot prove the queue's occupancy or that an attempt succeeds; it may wait forever\n<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:9:47: warning: queue wait on 'c' after non-waiting attempts: the compiler cannot prove the queue's occupancy or that an attempt succeeds; it may wait forever\n",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "own 7\nunsent 2 full true\ndrain 1 closed true\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/coverconc_prelude_imports/explicit_first.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:3:5: warning: the program's thread may wait to send into 'c' (line 3) before it closes 'c' (line 8): it may wait for itself forever (the compiler cannot tell whether every wait does: a count or capacity that is not literal, a group that a failure or a cancel may end, or a channel or task it cannot follow)\n<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:3:5: warning: queue wait on 'c' after non-waiting attempts: the compiler cannot prove the queue's occupancy or that an attempt succeeds; it may wait forever\n<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:9:19: warning: queue wait on 'c' after non-waiting attempts: the compiler cannot prove the queue's occupancy or that an attempt succeeds; it may wait forever\n<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:9:47: warning: queue wait on 'c' after non-waiting attempts: the compiler cannot prove the queue's occupancy or that an attempt succeeds; it may wait forever\n",
-   "files": {
-    "p0-1": {
-     "run": {
-      "status": 0,
-      "stdout": "own 7\nunsent 2 full true\ndrain 1 closed true\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/coverconc_prelude_imports/implicit_first.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:3:5: warning: the program's thread may wait to send into 'c' (line 3) before it closes 'c' (line 8): it may wait for itself forever (the compiler cannot tell whether every wait does: a count or capacity that is not literal, a group that a failure or a cancel may end, or a channel or task it cannot follow)\n<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:3:5: warning: queue wait on 'c' after non-waiting attempts: the compiler cannot prove the queue's occupancy or that an attempt succeeds; it may wait forever\n<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:9:19: warning: queue wait on 'c' after non-waiting attempts: the compiler cannot prove the queue's occupancy or that an attempt succeeds; it may wait forever\n<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:9:47: warning: queue wait on 'c' after non-waiting attempts: the compiler cannot prove the queue's occupancy or that an attempt succeeds; it may wait forever\n",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 0,
-      "stdout": "own 7\nunsent 2 full true\ndrain 1 closed true\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/coverconc_prelude_imports/implicit_first.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:3:5: warning: the program's thread may wait to send into 'c' (line 3) before it closes 'c' (line 8): it may wait for itself forever (the compiler cannot tell whether every wait does: a count or capacity that is not literal, a group that a failure or a cancel may end, or a channel or task it cannot follow)\n<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:3:5: warning: queue wait on 'c' after non-waiting attempts: the compiler cannot prove the queue's occupancy or that an attempt succeeds; it may wait forever\n<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:9:19: warning: queue wait on 'c' after non-waiting attempts: the compiler cannot prove the queue's occupancy or that an attempt succeeds; it may wait forever\n<root>/tests/cases/coverconc_prelude_imports/../../fixtures/coverconc_prelude_imports/sending.dewy:9:47: warning: queue wait on 'c' after non-waiting attempts: the compiler cannot prove the queue's occupancy or that an attempt succeeds; it may wait forever\n",
-   "files": {
-    "p1-1": {
-     "run": {
-      "status": 0,
-      "stdout": "own 7\nunsent 2 full true\ndrain 1 closed true\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/coverconc_prelude_imports/explicit_first.dewy"],"stderr":301,"files":{"p0-0":{"run":{"status":0,"stdout":"own 7\nunsent 2 full true\ndrain 1 closed true\n","stderr":""}}}},
+  {"args":["build","--release","<root>/tests/cases/coverconc_prelude_imports/explicit_first.dewy"],"stderr":301,"files":{"p0-1":{"run":{"status":0,"stdout":"own 7\nunsent 2 full true\ndrain 1 closed true\n","stderr":""}}}},
+  {"args":["build","<root>/tests/cases/coverconc_prelude_imports/implicit_first.dewy"],"stderr":301,"files":{"p1-0":{"run":{"status":0,"stdout":"own 7\nunsent 2 full true\ndrain 1 closed true\n","stderr":""}}}},
+  {"args":["build","--release","<root>/tests/cases/coverconc_prelude_imports/implicit_first.dewy"],"stderr":301,"files":{"p1-1":{"run":{"status":0,"stdout":"own 7\nunsent 2 full true\ndrain 1 closed true\n","stderr":""}}}}
  ]
 }

@@ -1,608 +1,74 @@
 {
  "test_checker_state_query_twins[checker_assignment_decls-cases14]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/exact_int/chain_exact_operands.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "true\nfalse\nfalse\nfalse\ntrue\ntrue\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/block_scope/shadowing.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 0,
-      "stdout": "inner 2\nouter 1\nafter parens 15\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":3910,"files":6306},
+  {"args":3233,"files":6342}
  ],
  "test_checker_state_query_twins[checker_binding_inputs-cases8]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/global/array_destructured_storage.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/refine_destructure_storage/global_contract.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/refine_destructure_storage/global_contract.dewy:2:13: error: refinement refuted: -1 violates the declared contract\n    main=()=>{x=-1 printl(x)}\n                ^\n<root>/tests/cases/refine_destructure_storage/global_contract.dewy:1:12: note: the contract is declared here\n    let [x:int<(>=? 0)>]=[2]\n               ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  }
+  {"args":4506,"files":6311},
+  10373
  ],
  "test_checker_state_query_twins[checker_block_entries-cases6]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/block_scope/ownership.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "after parens: 1, drops 0\ninside braces: 2\nafter braces: drops 1\nmoved 1\nv 4 third 3 drops 2\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/block_scope/brace_keeps_names.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/block_scope/brace_keeps_names.dewy:7:12: error: unknown name 'inner' (the 'inner' made on line 4 is inside a block that has ended; give it a value before that block to use it here)\n        printl(inner)\n               ^\n",
-   "files": {}
-  }
+  {"args":3232,"files":{"p0-0":{"run":{"status":0,"stdout":"after parens: 1, drops 0\ninside braces: 2\nafter braces: drops 1\nmoved 1\nv 4 third 3 drops 2\n","stderr":""}}}},
+  8918
  ],
  "test_checker_state_query_twins[checker_captures-cases11]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/closure/alias_replacement.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/closure/shared_function_cycle.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/closure/shared_function_cycle.dewy:3:15: error: 'f' is changed after a closure captured it, and it can hold functions ((():>int64)): a closure kept in it would keep it alive forever. Make it a global, or pass it to the closure as an `@` parameter\n    main=()=>{let f:Counter=()=>0 let g=($capture @f)=>f() f=@g}\n                  ^\n",
-   "files": {}
-  }
+  8930,
+  8952
  ],
  "test_checker_state_query_twins[checker_constant_queries-cases3]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/exact_int/chain_exact_operands.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "true\nfalse\nfalse\nfalse\ntrue\ntrue\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/default/reference_named.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":3910,"files":6306},
+  {"args":3498,"files":6347}
  ],
  "test_checker_state_query_twins[checker_contexts-cases1]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/path/import_source.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "hello paths\n42\npath_module.dewy .dewy programs\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/overload/user_shadows_prelude.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/overload/user_shadows_prelude.dewy:4:7: warning: 'abs' hides the library's method `int64.abs`: this function takes over every `x.abs` on one in this module; rename it to keep the library's\n<root>/tests/cases/overload/user_shadows_prelude.dewy:5:7: warning: 'max' hides the library's method `int64.max`: this function takes over every `x.max` on one in this module; rename it to keep the library's\n",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 0,
-      "stdout": "98\n102\n8\n2.5\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  10242,
+  10223
  ],
  "test_checker_state_query_twins[checker_global_initialization-cases16]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/initorder/cycle_bad.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/initorder/cycle_bad.dewy:4:7: error: 'b' is used before it has its value: run as one file, the modules' top-level code has no order that gives it first: <root>/tests/cases/initorder/cycle_bad.dewy:4 needs 'b' (<root>/tests/cases/initorder/cycle_bad.dewy:5), which runs after <root>/tests/cases/initorder/cycle_bad.dewy:4; <root>/tests/cases/initorder/cycle_bad.dewy:4 calls 'through' (<root>/tests/cases/initorder/./cycle_bad_peer.dewy:3) -> 'f' (<root>/tests/cases/initorder/cycle_bad.dewy:3) -> accesses 'b'\n    let a=peer.through()\n          ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/global/array_destructured_storage.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/global/unset_read_at_top_level.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/global/unset_read_at_top_level.dewy:2:11: error: 'count' is read before it is given a value: give it one where it is declared, or assign it at the top level or in main before this\n    let twice=count*2\n              ^\n<root>/tests/cases/global/unset_read_at_top_level.dewy:1:5: note: 'count' is declared here without a value\n    let count:int64\n        ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/refine_destructure_storage/global_contract.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/refine_destructure_storage/global_contract.dewy:2:13: error: refinement refuted: -1 violates the declared contract\n    main=()=>{x=-1 printl(x)}\n                ^\n<root>/tests/cases/refine_destructure_storage/global_contract.dewy:1:12: note: the contract is declared here\n    let [x:int<(>=? 0)>]=[2]\n               ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/initorder/cycle_bad.dewy"],"status":1,"stderr":"<root>/tests/cases/initorder/cycle_bad.dewy:4:7: error: 'b' is used before it has its value: run as one file, the modules' top-level code has no order that gives it first: <root>/tests/cases/initorder/cycle_bad.dewy:4 needs 'b' (<root>/tests/cases/initorder/cycle_bad.dewy:5), which runs after <root>/tests/cases/initorder/cycle_bad.dewy:4; <root>/tests/cases/initorder/cycle_bad.dewy:4 calls 'through' (<root>/tests/cases/initorder/./cycle_bad_peer.dewy:3) -> 'f' (<root>/tests/cases/initorder/cycle_bad.dewy:3) -> accesses 'b'\n    let a=peer.through()\n          ^\n"},
+  {"args":4506,"files":6347},
+  {"args":["build","<root>/tests/cases/global/unset_read_at_top_level.dewy"],"status":1,"stderr":"<root>/tests/cases/global/unset_read_at_top_level.dewy:2:11: error: 'count' is read before it is given a value: give it one where it is declared, or assign it at the top level or in main before this\n    let twice=count*2\n              ^\n<root>/tests/cases/global/unset_read_at_top_level.dewy:1:5: note: 'count' is declared here without a value\n    let count:int64\n        ^\n"},
+  10373
  ],
  "test_checker_state_query_twins[checker_import_discovery-cases7]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/path/import_source.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "hello paths\n42\npath_module.dewy .dewy programs\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/rational/library_word_name.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/rational/library_word_name.dewy:3:14: error: the exact fraction type is the builtin `rational<int64>`: write `rational<int64>`\n        let half:exact.RationalWord=1/2\n                 ^\n",
-   "files": {}
-  }
+  10242,
+  10304
  ],
  "test_checker_state_query_twins[checker_loop_routes-cases12]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/method/mutating_loop.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/method/mutating_loop.dewy:4:58: error: `loop @item` changes the elements of values in place, so its body cannot add, remove or replace elements of values: do that after the loop (values.retain((x) => keep) keeps some; push new ones to another array first), or loop over its indexes\n    main=()=>{let values=[2 3 4] loop @item in values {item+=values.grow}}\n                                                             ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/dogfood28_proofs/match_in_loop_resize_rejected.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/dogfood28_proofs/match_in_loop_resize_rejected.dewy:7:13: warning: 'b' is given a value here but never used\n<root>/tests/cases/dogfood28_proofs/match_in_loop_resize_rejected.dewy:10:16: error: cannot prove index is in bounds: missing upper bound\n            sum += xs[i]\n                   ^\n    note: i is between 0 and 281474976710654\n    note: xs.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, xs.length = 0\n    help: establish `i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/method/mutating_loop.dewy"],"status":1,"stderr":"<root>/tests/cases/method/mutating_loop.dewy:4:58: error: `loop @item` changes the elements of values in place, so its body cannot add, remove or replace elements of values: do that after the loop (values.retain((x) => keep) keeps some; push new ones to another array first), or loop over its indexes\n    main=()=>{let values=[2 3 4] loop @item in values {item+=values.grow}}\n                                                             ^\n"},
+  {"args":["build","<root>/tests/cases/dogfood28_proofs/match_in_loop_resize_rejected.dewy"],"status":1,"stderr":"<root>/tests/cases/dogfood28_proofs/match_in_loop_resize_rejected.dewy:7:13: warning: 'b' is given a value here but never used\n<root>/tests/cases/dogfood28_proofs/match_in_loop_resize_rejected.dewy:10:16: error: cannot prove index is in bounds: missing upper bound\n            sum += xs[i]\n                   ^\n    note: i is between 0 and 281474976710654\n    note: xs.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, xs.length = 0\n    help: establish `i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n"}
  ],
  "test_checker_state_query_twins[checker_method_receiver-cases4]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/type_members/handles.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "line hi\ns two\nagain\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/method/named_update_draw.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 0,
-      "stdout": "total 5\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":5961,"files":6303},
+  {"args":4776,"files":{"p1-0":{"run":{"status":0,"stdout":"total 5\n","stderr":""}}}}
  ],
  "test_checker_state_query_twins[checker_module_lookup-cases2]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/import_cycles/interleaved.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "x = 1\ntop starts\nz = 20\ny = 2\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/overload/user_shadows_prelude.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/overload/user_shadows_prelude.dewy:4:7: warning: 'abs' hides the library's method `int64.abs`: this function takes over every `x.abs` on one in this module; rename it to keep the library's\n<root>/tests/cases/overload/user_shadows_prelude.dewy:5:7: warning: 'max' hides the library's method `int64.max`: this function takes over every `x.max` on one in this module; rename it to keep the library's\n",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 0,
-      "stdout": "98\n102\n8\n2.5\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/import_cycles/interleaved.dewy"],"files":{"p0-0":{"run":{"status":0,"stdout":"x = 1\ntop starts\nz = 20\ny = 2\n","stderr":""}}}},
+  10223
  ],
  "test_checker_state_query_twins[checker_narrow_writes-cases10]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/census_proofs/narrowing_field_proven.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "42\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/refine_union_storage/union_store_reject.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/refine_union_storage/union_store_reject.dewy:1:41: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let x:int<(>=? 0)>|string=2 x=-1 printl(x)}\n                                            ^\n<root>/tests/cases/refine_union_storage/union_store_reject.dewy:1:21: note: the contract is declared here\n    main=()=>{let x:int<(>=? 0)>|string=2 x=-1 printl(x)}\n                        ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  }
+  8925,
+  10400
  ],
  "test_checker_state_query_twins[checker_runtime_functions-cases15]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/exact_int/wrap_either_side.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "9223372036854775809\n-9223372036854775807 -9223372036854775807\n-2 -2\n-9223372036854775805 -9223372036854775805\n9223372036854775809 9223372036854775809\n9223372036854775807 9223372036854775807\n-9223372036854775808 -9223372036854775808\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/rational/library_word_name.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/rational/library_word_name.dewy:3:14: error: the exact fraction type is the builtin `rational<int64>`: write `rational<int64>`\n        let half:exact.RationalWord=1/2\n                 ^\n",
-   "files": {}
-  }
+  {"args":4030,"files":{"p0-0":{"run":{"status":0,"stdout":"9223372036854775809\n-9223372036854775807 -9223372036854775807\n-2 -2\n-9223372036854775805 -9223372036854775805\n9223372036854775809 9223372036854775809\n9223372036854775807 9223372036854775807\n-9223372036854775808 -9223372036854775808\n","stderr":""}}}},
+  10304
  ],
  "test_checker_state_query_twins[checker_scope_symbols-cases0]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/block_scope/nested.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "deep 1 mid 2\nheld 3\nhidden 4\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/block_scope/shadowing.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 0,
-      "stdout": "inner 2\nouter 1\nafter parens 15\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/census_proofs/narrowing_field_named.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/census_proofs/narrowing_field_named.dewy:2:38: error: cannot prove `request.count <=? 255` for the conversion to uint8: missing upper bound\n    encode = (request:Request):>uint8 => request.count as uint8\n                                         ^\n    note: missing upper bound: nothing establishes `request.count <=? 255` here\n    note: possible witness (consistent with the known bounds, not an observed execution): request.count = 9223372036854775807\n    help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`\n    help: establish `0 <=? request.count and request.count <=? 255` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or declare the field `count:uint8` in `Request` to check the width on each write\n",
-   "files": {}
-  }
+  {"args":3231,"files":{"p0-0":{"run":{"status":0,"stdout":"deep 1 mid 2\nheld 3\nhidden 4\n","stderr":""}}}},
+  {"args":3233,"files":6342},
+  8924
  ],
  "test_checker_state_query_twins[checker_source_positions-cases9]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/method/hidden_global_loop.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/method/hidden_global_loop.dewy:6:39: error: `loop @item` changes the elements of values in place, and read (called here) may add, remove or replace elements of values, which the loop cannot have: set a flag in the loop and call it after, push new ones to another array first, or loop over its indexes\n    main=()=>{loop @item in values {item+=values.read}}\n                                          ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/generic/type_defaults.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/method/hidden_global_loop.dewy"],"status":1,"stderr":1065},
+  {"args":4504,"files":6347}
  ],
  "test_checker_state_query_twins[checker_type_entries-cases5]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/generic/type_defaults.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/generic/value_wrong_type_count.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/generic/value_wrong_type_count.dewy:3:18: error: no version of 'identity' matches these type arguments and callable type\n    main=()=>{let f=@identity<int64 string> return 42}\n                     ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/type_members/records.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p2-0": {
-     "run": {
-      "status": 0,
-      "stdout": "png\n9\n2 4 2 true\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":4504,"files":6311},
+  {"args":["build","<root>/tests/cases/generic/value_wrong_type_count.dewy"],"status":1,"stderr":894},
+  {"args":5968,"files":{"p2-0":{"run":{"status":0,"stdout":"png\n9\n2 4 2 true\n","stderr":""}}}}
  ],
  "test_checker_state_query_twins[checker_value_protocols-cases13]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/set/custom_hash.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/set/copy_and_removal.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":5828,"files":6311},
+  {"args":5827,"files":6347}
  ]
 }

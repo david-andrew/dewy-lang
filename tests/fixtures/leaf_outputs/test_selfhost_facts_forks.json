@@ -1,80 +1,9 @@
 {
  "test_facts_forks_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/sequence/minmax_by_no_tail_allocation.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/frontend/m_statements_direct_statements_identity_1.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "5\n[2 4 6 8] [2 3 4 5]\n42 2 42\n8 42 6\n1 [2 3] 7\ntrue true true true 7\nopen 6 posix\n[1 2 3 4]\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/refinements/uint_zero.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/refinements/uint_zero.dewy:2:19: error: refinement refuted: 0 violates the declared contract\n    main=()=>printl(f(0))\n                      ^\n<root>/tests/cases/refinements/uint_zero.dewy:1:13: note: the contract is declared here\n    f=(x:uint64<(not=? 0)>):>uint64=>x\n                ^\n    help: establish `0 not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/dogfood20_proofs/chosen_element_wider.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/dogfood20_proofs/chosen_element_wider.dewy:6:12: error: cannot prove index is in bounds: missing upper bound\n        printl(scores[best])\n               ^\n    note: best is between 0 and 4\n    note: scores.length is 4\n    note: missing upper bound: nothing establishes `best <? scores.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): best = 4, scores.length = 4\n    help: establish `best <? scores.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/dogfood19_proofs/key_callback_other.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/dogfood19_proofs/key_callback_other.dewy:3:67: error: cannot prove index is in bounds: missing upper bound\n        let order = [loop i in [0..rank.length) i].sorted(key=(i) => -other[i])\n                                                                      ^\n    note: i is between 0 and 281474976710654\n    note: other.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? other.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, other.length = 0\n    help: establish `i <? other.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  }
+  {"args":5825,"files":8248},
+  {"args":4478,"files":7899},
+  10468,
+  {"args":["build","<root>/tests/cases/dogfood20_proofs/chosen_element_wider.dewy","-o","<tmp>/program"],"status":1,"stderr":"<root>/tests/cases/dogfood20_proofs/chosen_element_wider.dewy:6:12: error: cannot prove index is in bounds: missing upper bound\n        printl(scores[best])\n               ^\n    note: best is between 0 and 4\n    note: scores.length is 4\n    note: missing upper bound: nothing establishes `best <? scores.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): best = 4, scores.length = 4\n    help: establish `best <? scores.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n"},
+  {"args":["build","<root>/tests/cases/dogfood19_proofs/key_callback_other.dewy","-o","<tmp>/program"],"status":1,"stderr":"<root>/tests/cases/dogfood19_proofs/key_callback_other.dewy:3:67: error: cannot prove index is in bounds: missing upper bound\n        let order = [loop i in [0..rank.length) i].sorted(key=(i) => -other[i])\n                                                                      ^\n    note: i is between 0 and 281474976710654\n    note: other.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? other.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, other.length = 0\n    help: establish `i <? other.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n"}
  ]
 }

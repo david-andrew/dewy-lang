@@ -1,0 +1,8 @@
+#
+# `$build` is the compile-time record of how the program is built.
+main=()=>{
+    let mode=$build.mode
+    printl(mode =? "release" or mode =? "debug")
+    if $build.mode =? "release" { printl("optimized") } else { printl("optimized") }
+    if $build.mode =? "debug" or not ($build.mode =? "debug") { printl("folded") }
+}

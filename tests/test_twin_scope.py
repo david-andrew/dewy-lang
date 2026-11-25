@@ -40,8 +40,8 @@ def test_a_shared_double_reaches_the_group_it_feeds():
 
 
 def test_corpus_members_select_the_lexer_probe():
-    assert 'dewy_lexer' not in scoped('bench/arena.dewy')
-    assert 'dewy_lexer' in scoped('bench/new-unrecorded-input.dewy')
+    assert 'dewy_lexer' in scoped('bench/arena.dewy')
+    assert 'dewy_lexer' not in scoped('tests/fixtures/corpus/frontend/collector_grouped_elements.dewy')
 
 
 def test_base_option_is_taken_out_of_the_pytest_arguments():

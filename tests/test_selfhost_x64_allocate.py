@@ -127,5 +127,4 @@ def test_x64_allocate_twins(compiler, tmp_path, release):  # noqa: F811
         ran = subprocess.run([binary], capture_output=True, timeout=45)
         assert ran.returncode == 0, ran.stdout[-2000:] + ran.stderr
         outputs.append((ran.stdout, ran.stderr))
-    leaf_oracle.agree(outputs)
     assert outputs[0][0].endswith(b'ok\n')

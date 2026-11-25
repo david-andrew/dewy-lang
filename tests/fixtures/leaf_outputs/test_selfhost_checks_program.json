@@ -1,76 +1,10 @@
 {
  "test_checks_program_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/main/explicit_call_rejected.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/main/explicit_call_rejected.dewy:2:1: error: main runs by itself, once, after the file's top-level statements: remove this call (a file without main runs top to bottom as a script)\n    main()\n    ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/unpack/nested_scalar.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/unpack/nested_scalar.dewy:2:16: error: unpacking needs an array, tuple, dictionary or record, found int\n    main=()=>{let [[x]]=[42] return x}\n                   ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/draw_context/user_called_draw.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/draw_context/user_called_draw.dewy:2:16: error: cannot prove drawing runs only inside runtime-invoked draw (outside path: user call to draw -> draw -> circle); move the call into draw or a helper called only by draw, or prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n    draw=():>void=>circle(vec2(100 100) 20 RED)\n                   ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/misc/proof_directive.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/misc/proof_directive.dewy:3:7: error: $proof cannot return a value\n    value=():>int64=>42\n          ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/unpack/leaf_discard_incompatible.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/unpack/leaf_discard_incompatible.dewy:2:16: error: type mismatch: expected string, found int\n    main=()=>{let [_:string]=[42] return 42}\n                   ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/draw_context/draw_value.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/draw_context/draw_value.dewy:2:16: error: cannot prove drawing runs only inside runtime-invoked draw (outside path: function value -> draw -> circle); move the call into draw or a helper called only by draw, or prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n    draw=():>void=>circle(vec2(100 100) 20 RED)\n                   ^\n",
-   "files": {}
-  }
+  9926,
+  10888,
+  {"args":["build","<root>/tests/cases/draw_context/user_called_draw.dewy","-o","<tmp>/program"],"status":1,"stderr":572},
+  9963,
+  10886,
+  {"args":["build","<root>/tests/cases/draw_context/draw_value.dewy","-o","<tmp>/program"],"status":1,"stderr":567}
  ]
 }

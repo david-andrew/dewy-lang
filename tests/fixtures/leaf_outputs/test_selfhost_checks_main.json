@@ -1,96 +1,11 @@
 {
  "test_checks_main_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/main/exit_code_member_cap.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/main/exit_code_member_cap.dewy:1:30: error: Broken's exit_code is 101: an exit code for an error is 1 to 100 (0 is success, and 101 a failed runtime check)\n    Broken:type=type of error & [exit_code:int64=101]\n                                 ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/main/exit_codes_over_cap_rejected.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/main/exit_codes_over_cap_rejected.dewy:103:6: error: main's errors need more exit codes than 1 to 100: let some share a parent type, or handle them\n    main=():>void|E1|E2|E3|E4|E5|E6|E7|E8|E9|E10|E11|E12|E13|E14|E15|E16|E17|E18|E19|E20|E21|E22|E23|E24|E25|E26|E27|E28|E29|E30|E31|E32|E33|E34|E35|E36|E37|E38|E39|E40|E41|E42|E43|E44|E45|E46|E47|E48|E49|E50|E51|E52|E53|E54|E55|E56|E57|E58|E59|E60|E61|E62|E63|E64|E65|E66|E67|E68|E69|E70|E71|E72|E73|E74|E75|E76|E77|E78|E79|E80|E81|E82|E83|E84|E85|E86|E87|E88|E89|E90|E91|E92|E93|E94|E95|E96|E97|E98|E99|E100|E101=>{\n         ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/main/exit_code_member.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 69,
-      "stdout": "",
-      "stderr": "error: Offline\n"
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/main/int_result_rejected.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/main/int_result_rejected.dewy:1:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=():>int64=>{\n         ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/main/exit_code_written_zero.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/main/exit_code_written_zero.dewy:4:30: error: refinement refuted: 0 violates the declared contract\n        return Offline[exit_code=0]\n                                 ^\n<root>/tests/cases/main/exit_code_written_zero.dewy:2:31: note: the contract is declared here\n    Offline:type=type of error & [exit_code:int64=69]\n                                  ^\n    help: establish `0 >=? 1` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/queues/spsc_wait_certificate.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/queues/spsc_wait_certificate.dewy:6:5: error: this waits to send into the channel 'tx/rx', and no certificate covers it (`$no_deadlocks`): structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`\n        tx.send(1) or_throw\n        ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/frontend/declarations_declaration_fallback_6.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/frontend/declarations_declaration_fallback_6.dewy:2:15: warning: 'value' is given a value here but never used\n<root>/tests/cases/frontend/declarations_declaration_fallback_6.dewy:2:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=()=>{let value:array<int64>=[1 2]\n         ^\n",
-   "files": {}
-  }
+  9925,
+  {"args":["build","<root>/tests/cases/main/exit_codes_over_cap_rejected.dewy","-o","<tmp>/program"],"status":1,"stderr":"<root>/tests/cases/main/exit_codes_over_cap_rejected.dewy:103:6: error: main's errors need more exit codes than 1 to 100: let some share a parent type, or handle them\n    main=():>void|E1|E2|E3|E4|E5|E6|E7|E8|E9|E10|E11|E12|E13|E14|E15|E16|E17|E18|E19|E20|E21|E22|E23|E24|E25|E26|E27|E28|E29|E30|E31|E32|E33|E34|E35|E36|E37|E38|E39|E40|E41|E42|E43|E44|E45|E46|E47|E48|E49|E50|E51|E52|E53|E54|E55|E56|E57|E58|E59|E60|E61|E62|E63|E64|E65|E66|E67|E68|E69|E70|E71|E72|E73|E74|E75|E76|E77|E78|E79|E80|E81|E82|E83|E84|E85|E86|E87|E88|E89|E90|E91|E92|E93|E94|E95|E96|E97|E98|E99|E100|E101=>{\n         ^\n"},
+  {"args":["build","<root>/tests/cases/main/exit_code_member.dewy","-o","<tmp>/program"],"files":{"program":{"run":{"status":69,"stdout":"","stderr":"error: Offline\n"}}}},
+  {"args":["build","<root>/tests/cases/main/int_result_rejected.dewy","-o","<tmp>/program"],"status":1,"stderr":"<root>/tests/cases/main/int_result_rejected.dewy:1:6: error: main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code\n    main=():>int64=>{\n         ^\n"},
+  {"args":["build","<root>/tests/cases/main/exit_code_written_zero.dewy","-o","<tmp>/program"],"status":1,"stderr":"<root>/tests/cases/main/exit_code_written_zero.dewy:4:30: error: refinement refuted: 0 violates the declared contract\n        return Offline[exit_code=0]\n                                 ^\n<root>/tests/cases/main/exit_code_written_zero.dewy:2:31: note: the contract is declared here\n    Offline:type=type of error & [exit_code:int64=69]\n                                  ^\n    help: establish `0 >=? 1` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n"},
+  10294,
+  9813
  ]
 }

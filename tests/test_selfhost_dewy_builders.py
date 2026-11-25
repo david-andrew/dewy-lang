@@ -25,7 +25,6 @@ def test_selfhost_dewy_builders_match_jo(compiler, tmp_path, release):
         run = subprocess.run([binary], capture_output=True, text=True, timeout=60)
         assert run.returncode == 0, run.stdout + run.stderr
         outputs.append(run.stdout)
-    leaf_oracle.agree(outputs)
     lines = outputs[0].splitlines()
     assert 'map 1 2' in lines and 'map 2 3' in lines
     assert 'type bigint __dewy_int' in lines and 'type addr addr' in lines

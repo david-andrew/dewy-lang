@@ -1,179 +1,29 @@
 {
  "test_draw_ops_diagnostics[function_value-function value]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "cannot prove drawing runs only inside runtime-invoked draw (outside path: function value -> paint -> circle); move the call into draw or a helper called only by draw, or prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6101,"status":41,"stdout":"cannot prove drawing runs only inside runtime-invoked draw (outside path: function value -> paint -> circle); move the call into draw or a helper called only by draw, or prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n"}
  ],
  "test_draw_ops_diagnostics[mixed_callers-cannot prove drawing]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "cannot prove drawing runs only inside runtime-invoked draw (outside path: update -> helper -> paint -> circle); move the call into draw or a helper called only by draw, or prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6101,"status":41,"stdout":"cannot prove drawing runs only inside runtime-invoked draw (outside path: update -> helper -> paint -> circle); move the call into draw or a helper called only by draw, or prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n"}
  ],
  "test_draw_ops_diagnostics[recursion_update-outside path]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "cannot prove drawing runs only inside runtime-invoked draw (outside path: update -> second -> first -> circle); move the call into draw or a helper called only by draw, or prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6101,"status":41,"stdout":"cannot prove drawing runs only inside runtime-invoked draw (outside path: update -> second -> first -> circle); move the call into draw or a helper called only by draw, or prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n"}
  ],
  "test_draw_ops_programs[direct-default]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  10909
  ],
  "test_draw_ops_programs[direct-release]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  10902
  ],
  "test_draw_ops_programs[helpers-default]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  10909
  ],
  "test_draw_ops_programs[helpers-release]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  10902
  ],
  "test_draw_ops_programs[recursion-default]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  10909
  ],
  "test_draw_ops_programs[recursion-release]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  10902
  ]
 }

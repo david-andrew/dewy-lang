@@ -1,239 +1,27 @@
 {
  "test_fixed_index_guards_match_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/fixed_index_guards/back_edge.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/back_edge.dewy:5:15: error: cannot prove index is in bounds: missing lower and upper bounds\n            total=xs[i]\n                  ^\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n    note: xs.length is 4\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 9223372036854775807, xs.length = 4\n    help: establish `0 <=? i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or state it where the parameter is declared, `i:int64<(>=? 0)>`: each caller then proves it\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/fixed_index_guards/back_edge.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/back_edge.dewy:5:15: error: cannot prove index is in bounds: missing lower and upper bounds\n            total=xs[i]\n                  ^\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n    note: xs.length is 4\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 9223372036854775807, xs.length = 4\n    help: establish `0 <=? i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or state it where the parameter is declared, `i:int64<(>=? 0)>`: each caller then proves it\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/fixed_index_guards/by_reference.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/by_reference.dewy:5:12: error: cannot prove index is in bounds: missing lower and upper bounds\n        return xs[i]\n               ^\n<root>/tests/cases/fixed_index_guards/by_reference.dewy:4:5: note: i may have changed at this call to change\n        change(@i)\n        ^\n<root>/tests/cases/fixed_index_guards/by_reference.dewy:3:8: note: the earlier `i >=? 0` fact described the value before the call to change\n        if i <? 0 or i >=? 4 return 0\n           ^\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n<root>/tests/cases/fixed_index_guards/by_reference.dewy:3:18: note: the earlier `i <? xs.length` fact described the value before the call to change\n        if i <? 0 or i >=? 4 return 0\n                     ^\n    note: xs.length is 4\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 9223372036854775807, xs.length = 4\n    help: establish `0 <=? i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or state it where the parameter is declared, `i:int64<(>=? 0)>`: each caller then proves it\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/fixed_index_guards/by_reference.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/by_reference.dewy:5:12: error: cannot prove index is in bounds: missing lower and upper bounds\n        return xs[i]\n               ^\n<root>/tests/cases/fixed_index_guards/by_reference.dewy:4:5: note: i may have changed at this call to change\n        change(@i)\n        ^\n<root>/tests/cases/fixed_index_guards/by_reference.dewy:3:8: note: the earlier `i >=? 0` fact described the value before the call to change\n        if i <? 0 or i >=? 4 return 0\n           ^\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n<root>/tests/cases/fixed_index_guards/by_reference.dewy:3:18: note: the earlier `i <? xs.length` fact described the value before the call to change\n        if i <? 0 or i >=? 4 return 0\n                     ^\n    note: xs.length is 4\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 9223372036854775807, xs.length = 4\n    help: establish `0 <=? i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or state it where the parameter is declared, `i:int64<(>=? 0)>`: each caller then proves it\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/fixed_index_guards/capture.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/capture.dewy:5:12: error: cannot prove index is in bounds: missing lower and upper bounds\n        return xs[i]\n               ^\n<root>/tests/cases/fixed_index_guards/capture.dewy:4:5: note: i may have changed at this call\n        change()\n        ^\n<root>/tests/cases/fixed_index_guards/capture.dewy:2:8: note: the earlier `i >=? 0` fact described the value before the call\n        if i <? 0 or i >=? 4 return 0\n           ^\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n<root>/tests/cases/fixed_index_guards/capture.dewy:2:18: note: the earlier `i <? xs.length` fact described the value before the call\n        if i <? 0 or i >=? 4 return 0\n                     ^\n    note: xs.length is 4\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 9223372036854775807, xs.length = 4\n    help: establish `0 <=? i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or state it where the parameter is declared, `i:int64<(>=? 0)>`: each caller then proves it\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/fixed_index_guards/capture.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/capture.dewy:5:12: error: cannot prove index is in bounds: missing lower and upper bounds\n        return xs[i]\n               ^\n<root>/tests/cases/fixed_index_guards/capture.dewy:4:5: note: i may have changed at this call\n        change()\n        ^\n<root>/tests/cases/fixed_index_guards/capture.dewy:2:8: note: the earlier `i >=? 0` fact described the value before the call\n        if i <? 0 or i >=? 4 return 0\n           ^\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n<root>/tests/cases/fixed_index_guards/capture.dewy:2:18: note: the earlier `i <? xs.length` fact described the value before the call\n        if i <? 0 or i >=? 4 return 0\n                     ^\n    note: xs.length is 4\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 9223372036854775807, xs.length = 4\n    help: establish `0 <=? i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or state it where the parameter is declared, `i:int64<(>=? 0)>`: each caller then proves it\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/fixed_index_guards/constant_end.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/constant_end.dewy:1:44: error: index 4 is out of bounds for array<int64 length=4>\n    read=(xs:array<int64 length=4>):>int64=>xs[4]\n                                               ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/fixed_index_guards/constant_end.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/constant_end.dewy:1:44: error: index 4 is out of bounds for array<int64 length=4>\n    read=(xs:array<int64 length=4>):>int64=>xs[4]\n                                               ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/fixed_index_guards/constant_negative.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/constant_negative.dewy:1:44: error: index -1 is out of bounds for array<int64 length=4>\n    read=(xs:array<int64 length=4>):>int64=>xs[-1]\n                                               ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/fixed_index_guards/constant_negative.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/constant_negative.dewy:1:44: error: index -1 is out of bounds for array<int64 length=4>\n    read=(xs:array<int64 length=4>):>int64=>xs[-1]\n                                               ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/fixed_index_guards/disjunction.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/disjunction.dewy:2:33: error: cannot prove index is in bounds: missing lower and upper bounds\n        if i >=? 0 or i <? 4 return xs[i]\n                                    ^\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n    note: xs.length is 4\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 9223372036854775807, xs.length = 4\n    help: establish `0 <=? i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or state it where the parameter is declared, `i:int64<(>=? 0)>`: each caller then proves it\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/fixed_index_guards/disjunction.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/disjunction.dewy:2:33: error: cannot prove index is in bounds: missing lower and upper bounds\n        if i >=? 0 or i <? 4 return xs[i]\n                                    ^\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n    note: xs.length is 4\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 9223372036854775807, xs.length = 4\n    help: establish `0 <=? i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or state it where the parameter is declared, `i:int64<(>=? 0)>`: each caller then proves it\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/fixed_index_guards/fallthrough.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/fallthrough.dewy:5:12: error: cannot prove index is in bounds: missing lower and upper bounds\n        return xs[i]\n               ^\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n    note: xs.length is 4\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 9223372036854775807, xs.length = 4\n    help: establish `0 <=? i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or state it where the parameter is declared, `i:int64<(>=? 0)>`: each caller then proves it\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/fixed_index_guards/fallthrough.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/fallthrough.dewy:5:12: error: cannot prove index is in bounds: missing lower and upper bounds\n        return xs[i]\n               ^\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n    note: xs.length is 4\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 9223372036854775807, xs.length = 4\n    help: establish `0 <=? i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or state it where the parameter is declared, `i:int64<(>=? 0)>`: each caller then proves it\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/fixed_index_guards/inclusive.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/inclusive.dewy:3:30: error: cannot prove index is in bounds: missing upper bound\n        loop i in [0..4] {result=xs[i]}\n                                 ^\n    note: i is between 0 and 4\n    note: xs.length is 4\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 4, xs.length = 4\n    help: establish `i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/fixed_index_guards/inclusive.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/inclusive.dewy:3:30: error: cannot prove index is in bounds: missing upper bound\n        loop i in [0..4] {result=xs[i]}\n                                 ^\n    note: i is between 0 and 4\n    note: xs.length is 4\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 4, xs.length = 4\n    help: establish `i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/fixed_index_guards/scoped.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p8-0": {
-     "run": {
-      "status": 0,
-      "stdout": "3\n5\n7\n9\n0\n0\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/fixed_index_guards/scoped.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p8-1": {
-     "run": {
-      "status": 0,
-      "stdout": "3\n5\n7\n9\n0\n0\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/fixed_index_guards/shadow.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/shadow.dewy:5:16: error: cannot prove index is in bounds: missing upper bound\n            return xs[i]\n                   ^\n    note: i is at least 0\n    note: xs.length is 4\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 9223372036854775807, xs.length = 4\n    help: establish `i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/fixed_index_guards/shadow.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/fixed_index_guards/shadow.dewy:5:16: error: cannot prove index is in bounds: missing upper bound\n            return xs[i]\n                   ^\n    note: i is at least 0\n    note: xs.length is 4\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 9223372036854775807, xs.length = 4\n    help: establish `i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/fixed_index_guards/back_edge.dewy"],"status":1,"stderr":840},
+  {"args":["build","--release","<root>/tests/cases/fixed_index_guards/back_edge.dewy"],"status":1,"stderr":840},
+  {"args":["build","<root>/tests/cases/fixed_index_guards/by_reference.dewy"],"status":1,"stderr":841},
+  {"args":["build","--release","<root>/tests/cases/fixed_index_guards/by_reference.dewy"],"status":1,"stderr":841},
+  {"args":["build","<root>/tests/cases/fixed_index_guards/capture.dewy"],"status":1,"stderr":842},
+  {"args":["build","--release","<root>/tests/cases/fixed_index_guards/capture.dewy"],"status":1,"stderr":842},
+  {"args":["build","<root>/tests/cases/fixed_index_guards/constant_end.dewy"],"status":1,"stderr":843},
+  {"args":["build","--release","<root>/tests/cases/fixed_index_guards/constant_end.dewy"],"status":1,"stderr":843},
+  {"args":["build","<root>/tests/cases/fixed_index_guards/constant_negative.dewy"],"status":1,"stderr":844},
+  {"args":["build","--release","<root>/tests/cases/fixed_index_guards/constant_negative.dewy"],"status":1,"stderr":844},
+  {"args":["build","<root>/tests/cases/fixed_index_guards/disjunction.dewy"],"status":1,"stderr":845},
+  {"args":["build","--release","<root>/tests/cases/fixed_index_guards/disjunction.dewy"],"status":1,"stderr":845},
+  {"args":["build","<root>/tests/cases/fixed_index_guards/fallthrough.dewy"],"status":1,"stderr":846},
+  {"args":["build","--release","<root>/tests/cases/fixed_index_guards/fallthrough.dewy"],"status":1,"stderr":846},
+  {"args":["build","<root>/tests/cases/fixed_index_guards/inclusive.dewy"],"status":1,"stderr":847},
+  {"args":["build","--release","<root>/tests/cases/fixed_index_guards/inclusive.dewy"],"status":1,"stderr":847},
+  {"args":["build","<root>/tests/cases/fixed_index_guards/scoped.dewy"],"files":{"p8-0":{"run":{"status":0,"stdout":"3\n5\n7\n9\n0\n0\n","stderr":""}}}},
+  {"args":["build","--release","<root>/tests/cases/fixed_index_guards/scoped.dewy"],"files":{"p8-1":{"run":{"status":0,"stdout":"3\n5\n7\n9\n0\n0\n","stderr":""}}}},
+  {"args":["build","<root>/tests/cases/fixed_index_guards/shadow.dewy"],"status":1,"stderr":848},
+  {"args":["build","--release","<root>/tests/cases/fixed_index_guards/shadow.dewy"],"status":1,"stderr":848}
  ],
  "test_shared_fixed_index_requires_every_visit": [
-  {
-   "args": [],
-   "status": 0,
-   "stdout": "shared visits agree\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":[],"stdout":"shared visits agree\n"}
  ]
 }

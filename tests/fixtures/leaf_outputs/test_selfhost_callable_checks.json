@@ -1,96 +1,10 @@
 {
  "test_callable_checks_match_twin": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/handle/values.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "10\n6\n8\n7\n12\n13\n8\n7\n12\n7\n6\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/handle/keeps_defaults.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 0,
-      "stdout": "3\n6\n8\n3\n12\n111\n5\n5\n4\n2\n5\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/layout/size_of_records.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p2-0": {
-     "run": {
-      "status": 0,
-      "stdout": "16 8\n1 4 2 8\n48\n64 8\n16 8\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/callable/handle_variance.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p3-0": {
-     "run": {
-      "status": 0,
-      "stdout": "1\nnone\n1\n42\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/witness/projection_call_divisor.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/witness/projection_call_divisor.dewy:14:12: error: cannot prove divisor is nonzero: call invalidated a mutable or exposed root\n        printl(10/d[\"x\"].count)\n               ^\n<root>/tests/cases/witness/projection_call_divisor.dewy:9:5: note: d[\"x\"].count may have changed at this call to zero\n        zero(@d[\"x\"].count)\n        ^\n    note: missing bound: nothing establishes `d[\"x\"].count not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): d[\"x\"].count = 0\n    help: establish `d[\"x\"].count not=? 0` after `zero(@d[\"x\"].count)` with a current guard, or check it at run time with `$runtime_assert`\n    help: or give the field a contract where `S` declares it, `count:int64<(>? 0)>`: every write to it is checked, so each read is a nonzero divisor\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/dictionary/rhs_bare_call_captured_removed_proof.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/dictionary/rhs_bare_call_captured_removed_proof.dewy:5:23: error: cannot prove the key is in the dictionary\n            if \"a\" in? d {d[\"a\"]+=replace}\n                          ^\n<root>/tests/cases/dictionary/rhs_bare_call_captured_removed_proof.dewy:5:31: note: this call may write a mutable or exposed root\n            if \"a\" in? d {d[\"a\"]+=replace}\n                                  ^\n    help: establish `\"a\" in? d` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `d.get(\"a\")` gives none for it\n",
-   "files": {}
-  }
+  {"args":4613,"files":{"p0-0":{"run":{"status":0,"stdout":"10\n6\n8\n7\n12\n13\n8\n7\n12\n7\n6\n","stderr":""}}}},
+  {"args":4605,"files":{"p1-0":{"run":{"status":0,"stdout":"3\n6\n8\n3\n12\n111\n5\n5\n4\n2\n5\n","stderr":""}}}},
+  {"args":["build","<root>/tests/cases/layout/size_of_records.dewy"],"files":{"p2-0":{"run":{"status":0,"stdout":"16 8\n1 4 2 8\n48\n64 8\n16 8\n","stderr":""}}}},
+  {"args":3246,"files":{"p3-0":{"run":{"status":0,"stdout":"1\nnone\n1\n42\n","stderr":""}}}},
+  10890,
+  {"args":["build","<root>/tests/cases/dictionary/rhs_bare_call_captured_removed_proof.dewy"],"status":1,"stderr":473}
  ]
 }

@@ -125,7 +125,7 @@ def test_scan_index_twins(compiler, tmp_path, release):  # noqa: F811
     # (the largest library files, and every odd shape in one more)
     library = sorted((ROOT / 'lib').rglob('*.jo'), key=lambda p: -p.stat().st_size)[:8]
     output = compare_narrow(compiler, tmp_path, release, ('scan_index',), DRIVER, doubles={'scan.jo': STATE, 'services.jo': ''}, services=('util',),
-                            invocations=[((str(edges), *map(str, library)), 0)])
+                            invocations=[((str(edges), *map(str, library)), 0)], snapshot=False)
     assert output.endswith(b'scan ok\n')
     for name in (b'"shallow2"', b'"Nominal"', b'"inside_c"', b'"nested_else"', b'"InWhen"', b'"Generic"', b'"[]="', b'"exported"'):
         assert name in output, name

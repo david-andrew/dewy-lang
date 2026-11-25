@@ -1,86 +1,9 @@
 {
  "test_expr_cold_queries_match_twin": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/unpack/param_captured_copy.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/type_members/named.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 0,
-      "stdout": "2 3 1 4\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/object/intersections.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p2-0": {
-     "run": {
-      "status": 0,
-      "stdout": "[line=1 column=2 label=\"x\"]\n1:2\nx\n[line=3 column=0 extra=false]\n3:0\n[a=true c=none]\ntrue\n[a=false]\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/json/typed_dynamic_value.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p3-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/closure/private_function_cycle.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/closure/private_function_cycle.dewy:3:15: error: 'f' is changed after a closure captured it, and it can hold functions ((():>int64)): a closure kept in it would keep it alive forever. Make it a global, or pass it to the closure as an `@` parameter\n    main=()=>{let f:Counter=()=>0 let outer=($capture f)=>{let g=($capture @f)=>f() f=@g return f()} exit(outer() & 255)}\n                  ^\n",
-   "files": {}
-  }
+  {"args":6074,"files":6311},
+  {"args":5965,"files":6333},
+  {"args":["build","<root>/tests/cases/object/intersections.dewy"],"files":{"p2-0":{"run":{"status":0,"stdout":"[line=1 column=2 label=\"x\"]\n1:2\nx\n[line=3 column=0 extra=false]\n3:0\n[a=true c=none]\ntrue\n[a=false]\n","stderr":""}}}},
+  {"args":["build","<root>/tests/cases/json/typed_dynamic_value.dewy"],"files":7152},
+  8949
  ]
 }

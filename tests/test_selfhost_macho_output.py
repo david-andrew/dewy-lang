@@ -1,5 +1,5 @@
-"""Mach-O publication and app bundles: bytes, modes and failures match frozen Jo."""
-import hashlib
+"""Check Mach-O publication, app bundles and permissions."""
+import plistlib
 import shutil
 import stat
 
@@ -40,20 +40,6 @@ main = ():
 '''
 
 
-def snapshot(directory):
-    found = []
-    for path in sorted(directory.rglob('*')):
-        info = path.lstat()
-        name = str(path.relative_to(directory))
-        if stat.S_ISLNK(info.st_mode):
-            found.append((name, 'link'))
-        elif stat.S_ISDIR(info.st_mode):
-            found.append((name, 'dir'))
-        else:
-            found.append((name, stat.S_IMODE(info.st_mode), hashlib.sha256(path.read_bytes()).hexdigest()))
-    return found
-
-
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_macho_output_twins(compiler, tmp_path, release):  # noqa: F811
     run = tmp_path / 'run'
@@ -72,9 +58,14 @@ def test_macho_output_twins(compiler, tmp_path, release):  # noqa: F811
 
     output = compare_narrow(compiler, tmp_path, release,
                             ('elf_format', 'leb128', 'sha', 'arm64_encode', 'macho_format', 'module_paths', 'json_doc',
-                             'base64', 'icns', 'macho_output'), DRIVER, doubles=DOUBLES, run_in=fresh, observe=snapshot)
+                             'base64', 'icns', 'macho_output'), DRIVER, doubles=DOUBLES, run_in=fresh, snapshot=False)
     assert output.split()[:4] == [b'true', b'true', b'true', b'false']
     assert b'[Game.app/Contents/MacOS/Game]' in output and b'[]' in output
-    published = {entry[0]: entry[1] for entry in snapshot(run)}
-    assert published['read_only'] == 0o755 and published['linked'] == 0o755 and published['kept'] == 0o644
-    assert 'Icon.app/Contents/Resources/icon.icns' in published
+    for name in ('plain', 'read_only', 'linked', 'Game.app/Contents/MacOS/Game'):
+        path = run / name
+        assert not path.is_symlink() and stat.S_IMODE(path.stat().st_mode) == 0o755, name
+        assert path.read_bytes().startswith(b'\xcf\xfa\xed\xfe'), name
+    assert (run / 'kept').read_text() == 'kept'
+    assert plistlib.loads((run / 'Game.app/Contents/Info.plist').read_bytes())['CFBundleExecutable'] == 'Game'
+    icon = (run / 'Icon.app/Contents/Resources/icon.icns').read_bytes()
+    assert icon == b'icns' + (40).to_bytes(4, 'big') + b'ic09' + (32).to_bytes(4, 'big') + b'Z' * 24

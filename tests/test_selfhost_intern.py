@@ -211,7 +211,6 @@ def test_selfhost_intern_matches_jo(compiler, tmp_path, release):  # noqa: F811
                              timeout=120)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    leaf_oracle.agree(outputs)
     for got, expected in zip(outputs[0].split('\n'), want.split('\n')):
         assert got == expected
     assert outputs[0] == want

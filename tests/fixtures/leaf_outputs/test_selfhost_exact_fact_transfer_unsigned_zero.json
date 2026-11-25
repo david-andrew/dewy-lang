@@ -1,60 +1,8 @@
 {
  "test_exact_fact_transfer_unsigned_zero": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/unsigned_zero/call_arm.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "-19\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/unsigned_zero/arm_order.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 0,
-      "stdout": "0\n27\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/unsigned_zero/positive_arms.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/unsigned_zero/positive_arms.dewy:4:21: error: assertion refuted: this condition is always false\n        $runtime_assert (if flag (2 + zero) else (27 + zero)) =? 0\n                        ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/unsigned_zero/unequal.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/unsigned_zero/unequal.dewy:4:21: error: assertion refuted: this condition is always false\n        $runtime_assert (if flag zero else (0 + zero)) not=? 0\n                        ^\n",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/unsigned_zero/call_arm.dewy"],"files":{"p0-0":{"run":{"status":0,"stdout":"-19\n","stderr":""}}}},
+  {"args":["build","<root>/tests/cases/unsigned_zero/arm_order.dewy"],"files":{"p1-0":{"run":{"status":0,"stdout":"0\n27\n","stderr":""}}}},
+  {"args":["build","<root>/tests/cases/unsigned_zero/positive_arms.dewy"],"status":1,"stderr":"<root>/tests/cases/unsigned_zero/positive_arms.dewy:4:21: error: assertion refuted: this condition is always false\n        $runtime_assert (if flag (2 + zero) else (27 + zero)) =? 0\n                        ^\n"},
+  {"args":["build","<root>/tests/cases/unsigned_zero/unequal.dewy"],"status":1,"stderr":"<root>/tests/cases/unsigned_zero/unequal.dewy:4:21: error: assertion refuted: this condition is always false\n        $runtime_assert (if flag zero else (0 + zero)) not=? 0\n                        ^\n"}
  ]
 }

@@ -1,70 +1,9 @@
 {
  "test_vector_checks_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/optimizer/vector_operand_values.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/optimizer/matrix_operand_values.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/lanes.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<tmp>/lanes.dewy:1:17: error: vec3(...) needs 3 components, got 2\n    main=()=>printl(vec3(1 2))\n                    ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/mixed.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<tmp>/mixed.dewy:1:17: error: cannot apply + to vec2 and vec3 (a 2D vector into 3D, on the ground: `vec3(p.x, 0, p.y)`; or `vec3(p, 0)` for x and y)\n    main=()=>printl(vec2(1) + vec3(2))\n                    ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/mat_add.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<tmp>/mat_add.dewy:1:17: error: matrices only support *\n    main=()=>printl(mat4() + mat4())\n                    ^\n",
-   "files": {}
-  }
+  {"args":5080,"files":6311},
+  {"args":["build","<root>/tests/cases/optimizer/matrix_operand_values.dewy"],"files":6347},
+  {"args":["build","<tmp>/lanes.dewy"],"status":1,"stderr":"<tmp>/lanes.dewy:1:17: error: vec3(...) needs 3 components, got 2\n    main=()=>printl(vec3(1 2))\n                    ^\n"},
+  {"args":["build","<tmp>/mixed.dewy"],"status":1,"stderr":"<tmp>/mixed.dewy:1:17: error: cannot apply + to vec2 and vec3 (a 2D vector into 3D, on the ground: `vec3(p.x, 0, p.y)`; or `vec3(p, 0)` for x and y)\n    main=()=>printl(vec2(1) + vec3(2))\n                    ^\n"},
+  {"args":["build","<tmp>/mat_add.dewy"],"status":1,"stderr":"<tmp>/mat_add.dewy:1:17: error: matrices only support *\n    main=()=>printl(mat4() + mat4())\n                    ^\n"}
  ]
 }

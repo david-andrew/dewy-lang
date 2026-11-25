@@ -1,82 +1,8 @@
 {
  "test_output_cancellation_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/tasks/output_canceled.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "inside canceled group\nchild\ndone\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/tasks/output_canceled.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-1": {
-     "run": {
-      "status": 0,
-      "stdout": "inside canceled group\nchild\ndone\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/tasks/output_canceled.dewy",
-    "-o",
-    "<tmp>/output"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "output": {
-     "run": {
-      "status": 0,
-      "stdout": "inside canceled group\nchild\ndone\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/tasks/output_canceled.dewy",
-    "-o",
-    "<tmp>/output",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "output": {
-     "run": {
-      "status": 0,
-      "stdout": "inside canceled group\nchild\ndone\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":5930,"files":{"p0-0":{"run":{"status":0,"stdout":"inside canceled group\nchild\ndone\n","stderr":""}}}},
+  {"args":["build","--release","<root>/tests/cases/tasks/output_canceled.dewy"],"files":{"p0-1":{"run":{"status":0,"stdout":"inside canceled group\nchild\ndone\n","stderr":""}}}},
+  {"args":["build","<root>/tests/cases/tasks/output_canceled.dewy","-o","<tmp>/output"],"files":6282},
+  {"args":["build","<root>/tests/cases/tasks/output_canceled.dewy","-o","<tmp>/output","--release"],"files":6282}
  ]
 }

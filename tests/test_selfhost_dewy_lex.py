@@ -1,9 +1,4 @@
-"""compiler/dewy_lex.dewy (the Dewy lexer's scanners: a quoted string's end, an interpolation's
-closing brace, a block comment's end, a skipped library body's end, and the state they keep)
-ships, and its frozen implementation-language twin compiler/dewy_lex.jo gives the same answers.
-Two drivers call either module at every quote, brace and `#` of the repository's Dewy files and
-of generated texts (nested and unterminated strings, interpolations, comments, raw and triple
-quotes); a Python oracle written from the lexer's rules gives the expected lines."""
+"""Check Dewy's quote, interpolation, lazy body and comment scanners against a Python oracle."""
 import random
 import re
 import subprocess
@@ -12,9 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.corpus_cache import corpus_under, SHARDS, built_once, cached, digest, shard_of
+from tests.corpus_cache import corpus_paths, SHARDS, built_once, cached, digest, shard_of
 from tests.support import compiler  # noqa: F401 (fixture)
-from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
@@ -283,9 +277,7 @@ def generated(rng, count):
 
 
 def corpus(full=True):
-    """Every Dewy file of the repository and the generated texts; the landing tier takes every
-    second file (the full corpus is the nightly tier's). The oracle's lines hit are the same
-    with the half corpus: the generated texts and the other half cover every scanner branch."""
+    """Pinned sources and generated texts. Default landing tests sample every second source."""
     files = corpus_paths()
     files = files if full else files[::2]
     texts = [p.read_text(encoding='utf-8') for p in files]
@@ -307,12 +299,7 @@ def lex_inputs(full):
                   lambda: corpus(full))
 
 
-def corpus_paths():
-    return [*corpus_under(ROOT / 'compiler'), *corpus_under(ROOT / 'lib'),
-            *corpus_under(ROOT / 'tests/ladder')]
-
-
-def shard_oracle(texts, index, full):
+def shard_oracle(texts, index):
     """The shard's texts and the oracle's lines for each (cached by content)."""
     mine = shard_of(texts, index)
     key = digest(Path(__file__).read_bytes(), *mine)
@@ -328,7 +315,7 @@ def shard_oracle(texts, index, full):
                    marks=[pytest.mark.nightly, pytest.mark.xdist_group(name=f'lex-full-{k}')])
       for k in range(SHARDS)],
 ])
-def test_selfhost_dewy_lex_match_jo(compiler, tmp_path, release, full, shard):
+def test_selfhost_dewy_lex_matches_oracle(compiler, tmp_path, release, full, shard):
     # (interleaved shards, one xdist group each: every shard samples the whole corpus)
     sys.setrecursionlimit(20000)
 
@@ -336,7 +323,7 @@ def test_selfhost_dewy_lex_match_jo(compiler, tmp_path, release, full, shard):
         return build(compiler, FIXTURES / 'dewy_lex_dewy.dewy', directory / 'lex-dewy', release)
     dewy = built_once(('lex', str(compiler), release), make)
     all_texts = lex_inputs(full)
-    texts, expected = shard_oracle(all_texts, shard, full)
+    texts, expected = shard_oracle(all_texts, shard)
     cases = tmp_path / 'cases'
     cases.mkdir()
     paths = []
@@ -348,7 +335,6 @@ def test_selfhost_dewy_lex_match_jo(compiler, tmp_path, release, full, shard):
     listed.write_text('\n'.join(paths) + '\n')
     ran = subprocess.run([dewy, listed], capture_output=True, timeout=600)
     assert ran.returncode == 0, ran.stderr
-    leaf_oracle.check_value(ran.stdout, directory=tmp_path)
     got = (ran.stdout.decode()).splitlines()
     want = [line for lines in expected for line in lines]
     assert len(got) == len(want)

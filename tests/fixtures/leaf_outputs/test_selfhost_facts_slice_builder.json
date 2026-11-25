@@ -1,115 +1,14 @@
 {
  "test_facts_slice_builder_keys_and_marks": [
-  {
-   "args": [],
-   "status": 0,
-   "stdout": "ok\n",
-   "stderr": "",
-   "files": {}
-  }
+  11241
  ],
  "test_facts_slice_builder_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/facts/call_shares_keep_facts.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "12\n[1 6 2 12]\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/facts/call_shares_shrink.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/facts/call_shares_shrink.dewy:3:55: error: cannot prove pop() has an element to remove: missing lower bound\n    drop = (@cells:array<int> n:int):>void => { if n >? 3 cells.pop(); }\n                                                          ^\n    note: cells.length is between 0 and 281474976710655\n    note: missing lower bound: nothing establishes `cells.length >? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): cells.length = 0\n    help: establish `cells.length >? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n\n<root>/tests/cases/facts/call_shares_shrink.dewy:10:9: error: cannot prove index is in bounds: missing upper bound\n            cells[i] = best\n            ^\n    note: i is between 0 and 281474976710654\n<root>/tests/cases/facts/call_shares_shrink.dewy:9:9: note: cells.length may have changed at this call to drop\n            drop(@cells best)\n            ^\n    note: missing upper bound: nothing establishes `i <? cells.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, cells.length = 0\n    help: establish `i <? cells.length` after `drop(@cells best)` with a current guard, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/facts/array_count_bounds.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p2-0": {
-     "run": {
-      "status": 0,
-      "stdout": "2 0 0 4\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/facts/array_count_bounds_end.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/facts/array_count_bounds_end.dewy:3:5: error: cannot prove index is in bounds: missing upper bound\n        xs[n]\n        ^\n    note: n is between 0 and 281474976710655\n    note: xs.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `n <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): n = 0, xs.length = 0\n    help: establish `n <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/facts/enum_member_store_index.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p4-0": {
-     "run": {
-      "status": 0,
-      "stdout": "ready 1 free\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/member_template/ordered_columns.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p5-0": {
-     "run": {
-      "status": 0,
-      "stdout": "[\"a\" -> \"a\" \"é\" -> \"é\" \"💧\" -> \"💧\"]\n[\"a\" -> \"a\" \"é\" -> \"é\" \"💧\" -> \"💧\"]\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/member_template/partial_byte_proof.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/member_template/partial_byte_proof.dewy:5:23: error: index is not in bounds\n            entries[word]=raw[1]\n                          ^\n    note: raw.length is 1\n    help: establish `1 <? raw.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/facts/call_shares_keep_facts.dewy"],"files":{"p0-0":{"run":{"status":0,"stdout":"12\n[1 6 2 12]\n","stderr":""}}}},
+  {"args":["build","<root>/tests/cases/facts/call_shares_shrink.dewy"],"status":1,"stderr":640},
+  {"args":4041,"files":{"p2-0":{"run":{"status":0,"stdout":"2 0 0 4\n","stderr":""}}}},
+  9457,
+  {"args":4083,"files":{"p4-0":{"run":{"status":0,"stdout":"ready 1 free\n","stderr":""}}}},
+  {"args":["build","<root>/tests/cases/member_template/ordered_columns.dewy"],"files":{"p5-0":{"run":{"status":0,"stdout":"[\"a\" -> \"a\" \"é\" -> \"é\" \"💧\" -> \"💧\"]\n[\"a\" -> \"a\" \"é\" -> \"é\" \"💧\" -> \"💧\"]\n","stderr":""}}}},
+  {"args":["build","<root>/tests/cases/member_template/partial_byte_proof.dewy"],"status":1,"stderr":1055}
  ]
 }

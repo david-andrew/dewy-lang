@@ -41,5 +41,6 @@ DRIVER = r'''main = ():
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_frontend_symbols_twins(compiler, tmp_path, release):
     out = compare_narrow(compiler, tmp_path, release, ('dewy_tokens', 'frontend_symbols'), DRIVER,
-                         doubles={'services.jo': SERVICES}, services=('dewy_fast', 'lex', 'dewy_fast_lex', 'util', 'diagnostic_exit'))
+                         doubles={'services.jo': SERVICES}, snapshot=False,
+                         services=('dewy_fast', 'lex', 'dewy_fast_lex', 'util', 'diagnostic_exit'))
     assert out.endswith(b'ok\n') and len(out.splitlines()) == 256 + 16384 + 1

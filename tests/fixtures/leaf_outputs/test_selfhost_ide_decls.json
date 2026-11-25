@@ -1,56 +1,11 @@
 {
  "test_ide_decls_messages": [
-  {
-   "args": [
-    "check",
-    "<tmp>/trail.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "trail.dewy:1:13: error: operator & is not defined for int and string (text is not a number, even when it holds digits: `to_int(s)` or `input_int(...)` makes a number, and `\"{x}\"` puts a number in text)\n    add=(a @b)=>a and \"x\"\n                ^\ntrail.dewy:4:12: note: in add(a:int @b:int), called here\n        printl(add(1 @z))\n               ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<tmp>/skips.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "skips.dewy:5:7: warning: 'other' is never called: nothing runs it (call it, as `other()` where it should run)\nskips.dewy:2:17: error: type mismatch: expected int64, found string\n        let q:int64=\"no\"\n                    ^\n\nskips.dewy:6:18: error: type mismatch: expected string, found int\n        let r:string=5\n                     ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<tmp>/alt.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "alt.dewy:3:5: error: an array removes by position with pop: `xs.pop(i)`\n        xs.remove(0)\n        ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<tmp>/clean.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":["check","<tmp>/trail.dewy"],"status":1,"stderr":"trail.dewy:1:13: error: operator & is not defined for int and string (text is not a number, even when it holds digits: `to_int(s)` or `input_int(...)` makes a number, and `\"{x}\"` puts a number in text)\n    add=(a @b)=>a and \"x\"\n                ^\ntrail.dewy:4:12: note: in add(a:int @b:int), called here\n        printl(add(1 @z))\n               ^\n"},
+  {"args":["check","<tmp>/skips.dewy"],"status":1,"stderr":"skips.dewy:5:7: warning: 'other' is never called: nothing runs it (call it, as `other()` where it should run)\nskips.dewy:2:17: error: type mismatch: expected int64, found string\n        let q:int64=\"no\"\n                    ^\n\nskips.dewy:6:18: error: type mismatch: expected string, found int\n        let r:string=5\n                     ^\n"},
+  {"args":["check","<tmp>/alt.dewy"],"status":1,"stderr":"alt.dewy:3:5: error: an array removes by position with pop: `xs.pop(i)`\n        xs.remove(0)\n        ^\n"},
+  {"args":["check","<tmp>/clean.dewy"]}
  ],
  "test_ide_decls_session": [
-  {
-   "args": [
-    "lsp"
-   ],
-   "status": 0,
-   "stdout": {
-    "sha256": "82bd19d7e2cc2182ce05867abf2d6449ce49621f91100e9246f82f31d7422bca",
-    "bytes": 408635
-   }
-  }
+  11150
  ]
 }

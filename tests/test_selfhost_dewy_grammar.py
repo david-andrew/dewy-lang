@@ -352,7 +352,6 @@ def test_selfhost_dewy_grammar_match_jo(compiler, tmp_path, release):
         ran = subprocess.run([binary, questions], capture_output=True, text=True, timeout=60)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         outputs.append(ran.stdout)
-    leaf_oracle.agree(outputs)
     got = outputs[0].split('\n')
     check_operators(got[:len(TOKENS)])
     for line, (answer, expected) in enumerate(zip(got[len(TOKENS):], want)):

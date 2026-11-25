@@ -1,176 +1,22 @@
 {
  "test_formatter_matches_twin[fmt_ops]": [
-  {
-   "args": [
-    "fmt",
-    "--check",
-    "<tmp>/dewy"
-   ],
-   "status": 1,
-   "stdout": "./crlf.jo\n./layout.jo\n./model.dewy\n./nested.jo\n./real/fmt.jo\n./real/ide.jo\n./real/lex.jo\n./real/watch.jo\n",
-   "stderr": "./bad.jo:3:3: error: this line is indented 2 spaces, which matches no line above it: a line goes at the same place as one of the lines before it, indented 0 or 4\n      y = 2\n      ^\ndewy-core fmt: ./broken.dewy: unbalanced or excessively nested delimiters; left unchanged\n./nolex.jo:2:9: error: this text has no closing quote: it starts here, and a `\"` ends it\n        s = \"unterminated\n            ^\ndewy-core fmt: ./refused.jo: left unchanged because formatting would change its tokens or meaningful spacing\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "fmt",
-    "<tmp>/dewy/layout.jo",
-    "<tmp>/dewy/nested.jo",
-    "<tmp>/dewy/crlf.jo",
-    "<tmp>/dewy/bad.jo",
-    "<tmp>/dewy/refused.jo",
-    "<tmp>/dewy/model.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "bad.jo:3:3: error: this line is indented 2 spaces, which matches no line above it: a line goes at the same place as one of the lines before it, indented 0 or 4\n      y = 2\n      ^\ndewy-core fmt: refused.jo: left unchanged because formatting would change its tokens or meaningful spacing\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "fmt",
-    "<tmp>/dewy/nolex.jo"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "nolex.jo:2:9: error: this text has no closing quote: it starts here, and a `\"` ends it\n        s = \"unterminated\n            ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "fmt",
-    "<tmp>/dewy/broken.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "dewy-core fmt: broken.dewy: unbalanced or excessively nested delimiters; left unchanged\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "fmt",
-    "<tmp>/dewy/real"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "fmt",
-    "-"
-   ],
-   "status": 0,
-   "stdout": "main = () => {\n    let x:int64 = 20\n    if x>?0{\n        return x+22   # keep\n    }\n    return 0\n}\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "fmt"
-   ],
-   "status": 2,
-   "stdout": "",
-   "stderr": "usage: dewy-core fmt [--check] file.dewy or directory...   (fmt -: Dewy on standard input/output)\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "fmt",
-    "missing.jo"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "dewy-core fmt: cannot read missing.jo\n",
-   "files": {}
-  }
+  11038,
+  11041,
+  11042,
+  11040,
+  11131,
+  11036,
+  11133,
+  11132
  ],
  "test_formatter_matches_twin[formatter_lexing]": [
-  {
-   "args": [
-    "fmt",
-    "--check",
-    "<tmp>/dewy"
-   ],
-   "status": 1,
-   "stdout": "./crlf.jo\n./layout.jo\n./model.dewy\n./nested.jo\n./real/fmt.jo\n./real/ide.jo\n./real/lex.jo\n./real/watch.jo\n",
-   "stderr": "./bad.jo:3:3: error: this line is indented 2 spaces, which matches no line above it: a line goes at the same place as one of the lines before it, indented 0 or 4\n      y = 2\n      ^\ndewy-core fmt: ./broken.dewy: unbalanced or excessively nested delimiters; left unchanged\n./nolex.jo:2:9: error: this text has no closing quote: it starts here, and a `\"` ends it\n        s = \"unterminated\n            ^\ndewy-core fmt: ./refused.jo: left unchanged because formatting would change its tokens or meaningful spacing\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "fmt",
-    "<tmp>/dewy/layout.jo",
-    "<tmp>/dewy/nested.jo",
-    "<tmp>/dewy/crlf.jo",
-    "<tmp>/dewy/bad.jo",
-    "<tmp>/dewy/refused.jo",
-    "<tmp>/dewy/model.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "bad.jo:3:3: error: this line is indented 2 spaces, which matches no line above it: a line goes at the same place as one of the lines before it, indented 0 or 4\n      y = 2\n      ^\ndewy-core fmt: refused.jo: left unchanged because formatting would change its tokens or meaningful spacing\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "fmt",
-    "<tmp>/dewy/nolex.jo"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "nolex.jo:2:9: error: this text has no closing quote: it starts here, and a `\"` ends it\n        s = \"unterminated\n            ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "fmt",
-    "<tmp>/dewy/broken.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "dewy-core fmt: broken.dewy: unbalanced or excessively nested delimiters; left unchanged\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "fmt",
-    "<tmp>/dewy/real"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "fmt",
-    "-"
-   ],
-   "status": 0,
-   "stdout": "main = () => {\n    let x:int64 = 20\n    if x>?0{\n        return x+22   # keep\n    }\n    return 0\n}\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "fmt"
-   ],
-   "status": 2,
-   "stdout": "",
-   "stderr": "usage: dewy-core fmt [--check] file.dewy or directory...   (fmt -: Dewy on standard input/output)\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "fmt",
-    "missing.jo"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "dewy-core fmt: cannot read missing.jo\n",
-   "files": {}
-  }
+  11038,
+  11041,
+  11042,
+  11040,
+  11131,
+  11036,
+  11133,
+  11132
  ]
 }

@@ -200,5 +200,5 @@ main = ():
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_predicate_summaries_twins(compiler, tmp_path, release):  # noqa: F811
     output = compare_narrow(compiler, tmp_path, release, STEMS, DRIVER,
-                            doubles={'services.jo': FACT_SERVICES + EXTRA, 'predicate_facts.jo': "use 'checker_tokens.dewy'\n" + STATE}, services=SERVICES)
+                            doubles={'services.jo': FACT_SERVICES + EXTRA, 'predicate_facts.jo': "use 'checker_tokens.dewy'\n" + STATE}, services=SERVICES, snapshot=False)
     assert output.endswith(b'predicates ok\n')

@@ -1,108 +1,12 @@
 {
  "test_checks_read_code_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/secret/leak_argument.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/secret/leak_argument.dewy:3:6: error: in call to send(text:string): argument 'text' expects string, found secret<string> (`key.reveal` gives its value, where using it is intended)\n    send(key)\n         ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/json/typed_defaults.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/numbers/mod_kind_unknown.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/numbers/mod_kind_unknown.dewy:1:17: error: no version of 'mod' takes (int int string): argument 'kind' expects 'floor' | 'trunc' | 'euclid', found string\n    main=()=>printl(mod(-7 3 kind='eucild'))\n                    ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/errors/string_literal_match_hint.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/errors/string_literal_match_hint.dewy:4:5: error: match is not exhaustive: this is a string, which may hold other text than 'go', 'stop' (add a `_ => ...` arm, or match the literal union instead: `match x as U {...}` after `x is? U` holds)\n        match word {\n        ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/units/parameter_mismatch.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/units/parameter_mismatch.dewy:3:18: error: in call to length(x:int64 * Length): argument 'x' expects int64 * Length, found int * Time\n    let value=length(1s)\n                     ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/numeric/negative_dimensions_literal.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/numeric/negative_dimensions_literal.dewy:1:24: error: no version of 'zeros' takes (int int): argument 'b' is -3, which breaks its contract `b >=? 0`\n    main=():>void=>{printl(zeros(2 -3))}\n                           ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/optional/union_else_narrowing_path_write.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/optional/union_else_narrowing_path_write.dewy:8:22: error: this (bool | int64 | Oops)? may be none (nothing) rather than a bool | int64 | Oops: before calling 'maybe', say what to use then (`x ?? default`), or check it first: `if x isnt? none { ... }`\n            return maybe(b.v)\n                         ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/frontend/direct_direct_expression_diagnostics_4.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/frontend/direct_direct_expression_diagnostics_4.dewy:2:18: error: cannot index a value of type int\n    main=()=>{return 1[none]}\n                     ^\n",
-   "files": {}
-  }
+  10489,
+  {"args":["build","<root>/tests/cases/json/typed_defaults.dewy","-o","<tmp>/program"],"files":8248},
+  {"args":["build","<root>/tests/cases/numbers/mod_kind_unknown.dewy","-o","<tmp>/program"],"status":1,"stderr":1161},
+  9267,
+  10858,
+  {"args":["build","<root>/tests/cases/numeric/negative_dimensions_literal.dewy","-o","<tmp>/program"],"status":1,"stderr":1173},
+  10218,
+  9815
  ]
 }

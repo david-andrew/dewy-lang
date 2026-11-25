@@ -1,193 +1,32 @@
 {
  "test_arena_ops_diagnostics[reject_closure_result-cannot be copied yet]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "the value of an `$allocator` expression is copied out of its arena, and a function value ((int) -> str) cannot be copied yet: give plain data (records, arrays, strings, numbers) as its value, and make the closure or owner after the expression\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6101,"status":41,"stdout":"the value of an `$allocator` expression is copied out of its arena, and a function value ((int) -> str) cannot be copied yet: give plain data (records, arrays, strings, numbers) as its value, and make the closure or owner after the expression\n"}
  ],
  "test_arena_ops_diagnostics[reject_explicit_copies-.copy()]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "under `$explicit_copies`, the value of an `$allocator` expression is copied out of its arena: end the expression with `.copy()` to ask for the copy\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6101,"status":41,"stdout":"under `$explicit_copies`, the value of an `$allocator` expression is copied out of its arena: end the expression with `.copy()` to ask for the copy\n"}
  ],
  "test_arena_ops_diagnostics[reject_outer_push-declared outside the expression]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "`$allocator`: this changes `kept`, declared outside the expression, and could leave storage of the arena in it, which its reset would invalidate: make the change after the expression, from its value\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6101,"status":41,"stdout":"`$allocator`: this changes `kept`, declared outside the expression, and could leave storage of the arena in it, which its reset would invalidate: make the change after the expression, from its value\n"}
  ],
  "test_arena_ops_diagnostics[reject_strict_capacity-not proven to fit its arena]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "effect contract violation in 'count': allocation exceeds the contract (its row excludes it); count; witness at <tmp>/input.dewy:8:29; it is inside an `$allocator` expression not proven to fit its arena: it may take 768 bytes of its arena's 200; `$no_hidden_costs` gives functions without a row of their own this one (opt a function out with `$no_hidden_costs=false` at the top of its body)\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6101,"status":41,"stdout":"effect contract violation in 'count': allocation exceeds the contract (its row excludes it); count; witness at <tmp>/input.dewy:8:29; it is inside an `$allocator` expression not proven to fit its arena: it may take 768 bytes of its arena's 200; `$no_hidden_costs` gives functions without a row of their own this one (opt a function out with `$no_hidden_costs=false` at the top of its body)\n"}
  ],
  "test_arena_ops_programs[nested-default]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "9 [0 1 4 9 16 25 0 1 4] [0 1 4 9]\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":6101,"files":7931}
  ],
  "test_arena_ops_programs[nested-release]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "9 [0 1 4 9 16 25 0 1 4] [0 1 4 9]\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":6099,"files":7931}
  ],
  "test_arena_ops_programs[promote_values-default]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "item0 [] 0 []\nitem1 [\"t0-1\"] none [[0 0]]\nitem2 [\"t0-2\" \"t1-2\"] 20 [[0 0] [1 2]]\nitem3 [\"t0-3\" \"t1-3\" \"t2-3\"] none [[0 0] [1 3] [2 6]]\nitem4 [\"t0-4\" \"t1-4\" \"t2-4\" \"t3-4\"] 40 [[0 0] [1 4] [2 8] [3 12]]\n4999950000 3000 w2999 static\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":6101,"files":8143}
  ],
  "test_arena_ops_programs[promote_values-release]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "item0 [] 0 []\nitem1 [\"t0-1\"] none [[0 0]]\nitem2 [\"t0-2\" \"t1-2\"] 20 [[0 0] [1 2]]\nitem3 [\"t0-3\" \"t1-3\" \"t2-3\"] none [[0 0] [1 3] [2 6]]\nitem4 [\"t0-4\" \"t1-4\" \"t2-4\" \"t3-4\"] 40 [[0 0] [1 4] [2 8] [3 12]]\n4999950000 3000 w2999 static\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":6099,"files":8143}
  ],
  "test_arena_ops_programs[strict_capacity-default]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "58\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":6101,"files":7891}
  ],
  "test_arena_ops_programs[strict_capacity-release]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "58\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":6099,"files":7891}
  ]
 }

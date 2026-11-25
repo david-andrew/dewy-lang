@@ -1,224 +1,26 @@
 {
  "test_deadlock_channels_twins": [
-  {
-   "args": [
-    "check",
-    "<tmp>/uncertain.dewy"
-   ],
-   "status": 0,
-   "stdout": "bounded channel cycle: the task spawned at line 11 may wait to send into 'a' (line 4) before it receives from 'b' (line 5); the task spawned at line 12 may wait to send into 'b' (line 4) before it receives from 'a' (line 5). Each waits for the next, so they may wait forever (the compiler cannot tell whether every wait does: a count or capacity that is not literal, a group that a failure or a cancel may end, or a channel or task it cannot follow)\nchecked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<tmp>/pipeline.dewy"
-   ],
-   "status": 0,
-   "stdout": "checked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/channel_cycle.dewy"
-   ],
-   "status": 41,
-   "stdout": "bounded channel cycle: the task spawned at line 12 sends more values into 'a' than the 4 it holds (line 5) before it receives from 'b' (line 6); the task spawned at line 13 sends more values into 'b' than the 4 it holds (line 5) before it receives from 'a' (line 6). Each waits for the next, so none goes on: the program waits forever. Receive before sending more than a channel holds, give the channel room for what is sent first, or let a lock's place end before a channel wait\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/channel_self.dewy"
-   ],
-   "status": 41,
-   "stdout": "the program's thread sends more values into 'c' than the 2 it holds (line 6) before it receives from 'c' (line 7): it waits for itself forever. Receive before sending more than a channel holds, give the channel room for what is sent first, or let a lock's place end before a channel wait\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/channel_join.dewy"
-   ],
-   "status": 41,
-   "stdout": "bounded channel cycle: the program's thread waits for the tasks it spawned (line 9) before it receives from 'c' (line 12); the task spawned at line 10 sends more values into 'c' than the 8 it holds (line 5), and the join of its group at line 9 waits for it. Each waits for the next, so none goes on: the program waits forever. Receive before sending more than a channel holds, give the channel room for what is sent first, or let a lock's place end before a channel wait\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/channel_unfilled.dewy"
-   ],
-   "status": 41,
-   "stdout": "the program's thread waits to receive from 'c' (line 4), and nothing sends into it or closes it: it waits forever\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/channel_lock_held.dewy"
-   ],
-   "status": 41,
-   "stdout": "bounded channel cycle: the task spawned at line 13 waits for the lock 'm' (line 14) before it sends into 'c' (line 16); the task spawned at line 8 waits to receive from 'c' (line 10) while holding 'm' (since line 9). Each waits for the next, so none goes on: the program waits forever. Receive before sending more than a channel holds, give the channel room for what is sent first, or let a lock's place end before a channel wait\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/reserve_held.dewy"
-   ],
-   "status": 41,
-   "stdout": "'held' is given a value here but never used\nthe program's thread sends more values into 'q' than the 1 it holds (line 5) before it receives from 'q' (line 7): it waits for itself forever. Receive before sending more than a channel holds, give the channel room for what is sent first, or let a lock's place end before a channel wait\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/queues/spsc_cycle.dewy"
-   ],
-   "status": 41,
-   "stdout": "bounded channel cycle: the task spawned at line 6 sends more values into 'at/ar' than the 1 it holds (line 7) before it receives from 'bt/br' (line 9); the task spawned at line 11 sends more values into 'bt/br' than the 1 it holds (line 12) before it receives from 'at/ar' (line 14). Each waits for the next, so none goes on: the program waits forever. Receive before sending more than a channel holds, give the channel room for what is sent first, or let a lock's place end before a channel wait\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/queues/spsc_try_cycle.dewy"
-   ],
-   "status": 41,
-   "stdout": "bounded channel cycle: the task spawned at line 6 sends more values into 'at/ar' than the 1 it holds (line 8) before it receives from 'bt/br' (line 9); the task spawned at line 11 sends more values into 'bt/br' than the 1 it holds (line 13) before it receives from 'at/ar' (line 14). Each waits for the next, so none goes on: the program waits forever. Receive before sending more than a channel holds, give the channel room for what is sent first, or let a lock's place end before a channel wait\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/queue_cancel_wait/mpmc_no_cancel.dewy"
-   ],
-   "status": 41,
-   "stdout": "the task spawned at line 2 waits to receive from 'q' (line 2), and nothing sends into it or closes it: it waits forever\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/channel_turns.dewy"
-   ],
-   "status": 0,
-   "stdout": "checked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/deadlock/reserve_dropped.dewy"
-   ],
-   "status": 0,
-   "stdout": "'held' is given a value here but never used\n'held' is given a value here but never used\nchecked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/channels/close.dewy"
-   ],
-   "status": 0,
-   "stdout": "checked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/channels/cancel_blocked.dewy"
-   ],
-   "status": 0,
-   "stdout": "bounded channel cycle: the program's thread waits for the tasks it spawned (line 32) before it receives from 'full' (line 43); the task spawned at line 34 may wait to send into 'full' (line 14), and the join of its group at line 32 waits for it. Each waits for the next, so they may wait forever (the compiler cannot tell whether every wait does: a count or capacity that is not literal, a group that a failure or a cancel may end, or a channel or task it cannot follow)\nchecked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/queues/spsc_turns.dewy"
-   ],
-   "status": 0,
-   "stdout": "checked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/queues/spsc_tasks.dewy"
-   ],
-   "status": 0,
-   "stdout": "checked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/queues/spawn_forward_end.dewy"
-   ],
-   "status": 0,
-   "stdout": "checked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/queue_cancel_wait/channel_cancel_diag_ok.dewy"
-   ],
-   "status": 0,
-   "stdout": "the task spawned at line 2 waits to receive from 'q' (line 2), and nothing sends into it or closes it (group cancellation may end the wait): it may wait forever\nchecked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/queue_cancel_wait/mpmc_failure_diag.dewy"
-   ],
-   "status": 0,
-   "stdout": "the task spawned at line 3 waits to receive from 'q' (line 3), and nothing sends into it or closes it (group cancellation may end the wait): it may wait forever\nchecked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/queue_cancel_wait/cancel_helper.dewy"
-   ],
-   "status": 0,
-   "stdout": "the task spawned at line 3 waits to receive from 'q' (line 3), and nothing sends into it or closes it (group cancellation may end the wait): it may wait forever\nchecked\n",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "check",
-    "<root>/tests/cases/queue_cancel_wait/failure_helper.dewy"
-   ],
-   "status": 0,
-   "stdout": "the task spawned at line 4 waits to receive from 'q' (line 4), and nothing sends into it or closes it (group cancellation may end the wait): it may wait forever\nchecked\n",
-   "stderr": "",
-   "files": {}
-  }
+  11032,
+  11028,
+  10962,
+  10965,
+  10963,
+  10967,
+  10964,
+  10969,
+  10977,
+  10979,
+  10975,
+  10966,
+  {"args":6149,"stdout":3},
+  10961,
+  10960,
+  10980,
+  10978,
+  10976,
+  10972,
+  10974,
+  10971,
+  10973
  ]
 }

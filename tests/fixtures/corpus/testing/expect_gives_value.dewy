@@ -1,0 +1,6 @@
+# Expectations return when they fail, so they live in functions that give no value.
+half = (x:int64):>int64 => {
+    $expect x % 2 =? 0
+    return x / 2
+}
+main = () => half(4)

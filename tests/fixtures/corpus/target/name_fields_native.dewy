@@ -1,0 +1,14 @@
+# modes: native native-release
+# `$target.arch` and `$target.os` are the target's fields; they fold like `$target`.
+if $target.os =? "linux" {
+    system=()=>"linux"
+} else if $target.os in? ["mac" "windows"] {
+    system=()=>$target.os
+} else {
+    system=()=>missing_system
+}
+main=()=>{
+    printl(system() =? $target.os)
+    printl($target =? "{$target.arch}-{$target.os}")
+    printl($target.os not =? "none" and $target.arch not =? "wasm32")
+}

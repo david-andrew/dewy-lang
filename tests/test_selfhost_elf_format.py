@@ -1,4 +1,4 @@
-"""ELF64 images: complete frozen bytes, section layouts and borrowed inputs."""
+"""Check ELF64 headers, segment layouts and borrowed inputs."""
 import subprocess
 
 import pytest
@@ -59,5 +59,4 @@ def test_elf_format_twins(compiler, tmp_path, release):  # noqa: F811
         ran = subprocess.run([binary], capture_output=True, timeout=60)
         assert ran.returncode == 0, ran.stdout[-3000:] + ran.stderr
         outputs.append(ran.stdout)
-    leaf_oracle.agree(outputs)
     assert outputs[0].endswith(b'ok\n')

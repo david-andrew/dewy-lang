@@ -1,134 +1,23 @@
 {
  "test_concurrency_parsafe_diagnostics[value_use]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/parallel_callbacks/value_use.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "apply runs its parameter 'f' on many threads at once, so it can only be called directly (where the compiler checks the function given for 'f'), not used as a value or partially applied\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/parallel_callbacks/value_use.dewy","-o","<tmp>/program"],"status":41,"stdout":"apply runs its parameter 'f' on many threads at once, so it can only be called directly (where the compiler checks the function given for 'f'), not used as a value or partially applied\n"}
  ],
  "test_concurrency_parsafe_execution[default]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/unused.dewy",
-    "-o",
-    "<tmp>/unused"
-   ],
-   "status": 0,
-   "stdout": "parsafe ok\n",
-   "stderr": "",
-   "files": {}
-  }
+  10935
  ],
  "test_concurrency_parsafe_execution[release]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/unused.dewy",
-    "-o",
-    "<tmp>/unused"
-   ],
-   "status": 0,
-   "stdout": "parsafe ok\n",
-   "stderr": "",
-   "files": {}
-  }
+  10935
  ],
  "test_concurrency_parsafe_program[inferred_wrappers-default]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/parallel_callbacks/inferred_wrappers.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "[0 1 4 9]\n[1 4 9]\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/parallel_callbacks/inferred_wrappers.dewy","-o","<tmp>/program"],"files":7965}
  ],
  "test_concurrency_parsafe_program[inferred_wrappers-release]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/parallel_callbacks/inferred_wrappers.dewy",
-    "-o",
-    "<tmp>/program",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "[0 1 4 9]\n[1 4 9]\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/parallel_callbacks/inferred_wrappers.dewy","-o","<tmp>/program","--release"],"files":7965}
  ],
  "test_concurrency_parsafe_program[two_wrappers-default]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/parallel_callbacks/two_wrappers.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "[3 6 9]\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/parallel_callbacks/two_wrappers.dewy","-o","<tmp>/program"],"files":8040}
  ],
  "test_concurrency_parsafe_program[two_wrappers-release]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/parallel_callbacks/two_wrappers.dewy",
-    "-o",
-    "<tmp>/program",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "[3 6 9]\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/parallel_callbacks/two_wrappers.dewy","-o","<tmp>/program","--release"],"files":8040}
  ]
 }

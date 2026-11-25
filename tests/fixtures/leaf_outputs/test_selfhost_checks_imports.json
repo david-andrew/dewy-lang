@@ -1,72 +1,9 @@
 {
  "test_checks_imports_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/modules/splat_selective_collision.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/modules/splat_selective_collision.dewy:3:48: error: 'double' is imported from both shapes.dewy and other.dewy; import it with another name: double as ...\n    from p\"../../fixtures/splat/other.dewy\" import double\n                                                   ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/modules/splat_collision.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/modules/splat_collision.dewy:3:1: error: 'double' is imported from both shapes.dewy and other.dewy; import the module under a name (`import p\"../../fixtures/splat/other.dewy\" as name`) or select the names you need (`from p\"../../fixtures/splat/other.dewy\" import (...)`)\n    import p\"../../fixtures/splat/other.dewy\"\n    ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/modules/splat_own.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/modules/splat_own.dewy:2:1: error: cannot import 'double' from shapes.dewy: this module declares its own 'double' (at <root>/tests/cases/modules/splat_own.dewy:3:10), and the imported one is not `$shadowable`; import the module under a name (`import p\"../../fixtures/splat/shapes.dewy\" as name`) or select the names you need (`from p\"../../fixtures/splat/shapes.dewy\" import (...)`)\n    import p\"../../fixtures/splat/shapes.dewy\"\n    ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/batch4_entry/splat.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "app 7\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/rational/library_name.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/rational/library_name.dewy:1:22: error: the exact fraction type is the builtin `rational`: drop `Rational` from the import and write `rational`\n    from rational import Rational\n                         ^\n",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/modules/splat_selective_collision.dewy","-o","<tmp>/program"],"status":1,"stderr":1071},
+  {"args":["build","<root>/tests/cases/modules/splat_collision.dewy","-o","<tmp>/program"],"status":1,"stderr":"<root>/tests/cases/modules/splat_collision.dewy:3:1: error: 'double' is imported from both shapes.dewy and other.dewy; import the module under a name (`import p\"../../fixtures/splat/other.dewy\" as name`) or select the names you need (`from p\"../../fixtures/splat/other.dewy\" import (...)`)\n    import p\"../../fixtures/splat/other.dewy\"\n    ^\n"},
+  {"args":["build","<root>/tests/cases/modules/splat_own.dewy","-o","<tmp>/program"],"status":1,"stderr":"<root>/tests/cases/modules/splat_own.dewy:2:1: error: cannot import 'double' from shapes.dewy: this module declares its own 'double' (at <root>/tests/cases/modules/splat_own.dewy:3:10), and the imported one is not `$shadowable`; import the module under a name (`import p\"../../fixtures/splat/shapes.dewy\" as name`) or select the names you need (`from p\"../../fixtures/splat/shapes.dewy\" import (...)`)\n    import p\"../../fixtures/splat/shapes.dewy\"\n    ^\n"},
+  {"args":["build","<root>/tests/cases/batch4_entry/splat.dewy","-o","<tmp>/program"],"files":{"program":{"run":{"status":0,"stdout":"app 7\n","stderr":""}}}},
+  10301
  ]
 }

@@ -1,124 +1,14 @@
 {
  "test_checks_shaped_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/match/object_pattern_gap.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/match/object_pattern_gap.dewy:2:26: error: this match has no arm for Num with sign -1 (add one, or a `_ => ...` arm for the rest)\n    size = (n:Num):>int64 => match n {\n                             ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/singleton/mixed_literal_union_gap.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/singleton/mixed_literal_union_gap.dewy:2:31: error: this match has no arm for 'fast', 2 (add one, or a `_ => ...` arm for the rest)\n    describe = (m:Mode):>int64 => match m {\n                                  ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/match/sequence_tuple_positions.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/match/sequence_tuple_positions.dewy:5:9: error: this pattern has 3 positions; [int string] has 2\n            (n t extra) => printl(n)\n            ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/dogfood36_proofs/optional_union_guard_gap_rejected.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/dogfood36_proofs/optional_union_guard_gap_rejected.dewy:2:22: error: this match has no arm for int8 0 through 127 (add one, or a `_ => ...` arm for the rest)\n    f = (x:V):>string => match x {\n                         ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/match/shape_unreachable_member.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/match/shape_unreachable_member.dewy:6:5: error: this arm is unreachable: earlier arms already match every Rect\n        [w h] => w * h\n        ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/dogfood36_proofs/optional_union_uncovered_rejected.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/dogfood36_proofs/optional_union_uncovered_rejected.dewy:2:27: error: this match has no arm for int (add one, or a `_ => ...` arm for the rest)\n    show = (v:Val):>string => match v {\n                              ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/match/union_bool_incomplete.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/match/union_bool_incomplete.dewy:2:23: error: this match has no arm for bool (add one, or a `_ => ...` arm for the rest)\n    pick=(v:bool|string)=>match v {<true>=>42 <string>=>0}\n                          ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/match/sequence_unreachable.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/match/sequence_unreachable.dewy:6:5: error: this arm is unreachable: earlier arms already match every value it does\n        ([radius] n) => \"again\"\n        ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/match/tuple_fields.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/match/tuple_fields.dewy:5:9: error: no [int string] has the fields this pattern names ([int string] is a tuple: take its positions with `(n s) =>`)\n            [n s] => printl(n s)\n            ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/match/unreachable_after_wild.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/match/unreachable_after_wild.dewy:3:5: error: this arm is unreachable: an earlier arm already matches every value\n        answer:42 => \"never\"\n        ^\n",
-   "files": {}
-  }
+  9931,
+  10799,
+  9934,
+  {"args":["build","<root>/tests/cases/dogfood36_proofs/optional_union_guard_gap_rejected.dewy","-o","<tmp>/program"],"status":1,"stderr":"<root>/tests/cases/dogfood36_proofs/optional_union_guard_gap_rejected.dewy:2:22: error: this match has no arm for int8 0 through 127 (add one, or a `_ => ...` arm for the rest)\n    f = (x:V):>string => match x {\n                         ^\n"},
+  9936,
+  9195,
+  9938,
+  9935,
+  9937,
+  9949
  ]
 }

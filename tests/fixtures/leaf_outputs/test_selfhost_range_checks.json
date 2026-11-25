@@ -1,78 +1,9 @@
 {
  "test_range_checks_match_twin": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/tensor_shape_flow/shapes_flow.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "[11.0  12.0  13.0\n 21.0  22.0  23.0]\n[0 3]\n[32.0 34.0 36.0]\n[1.0 2.0 3.0]\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/numeric/range_bracket_constructors.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/membership/range_snapshot.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p2-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/slice_assign_extents/one_wider.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/slice_assign_extents/one_wider.dewy:6:5: error: cannot prove array shape/index contract `assigned data length equals the slice's selected element count`: nothing establishes `assigned data length equals the slice's selected element count` here\n        m[[0..h) [1..w)] = a\n        ^\n    help: establish `assigned data length equals the slice's selected element count` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/membership/float_range.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/membership/float_range.dewy:2:6: error: main returns void or the errors that reach it, found bool: bool is not an error. A last line giving a value gives it back: declare `main = ():>void => ...` to drop it, print it, or end with `exit(n)` for a code\n    main=()=>1.5 in? [0..2]\n         ^\n",
-   "files": {}
-  }
+  {"args":5953,"files":{"p0-0":{"run":{"status":0,"stdout":"[11.0  12.0  13.0\n 21.0  22.0  23.0]\n[0 3]\n[32.0 34.0 36.0]\n[1.0 2.0 3.0]\n","stderr":""}}}},
+  {"args":5065,"files":6347},
+  {"args":["build","<root>/tests/cases/membership/range_snapshot.dewy"],"files":6800},
+  10802,
+  {"args":["build","<root>/tests/cases/membership/float_range.dewy"],"status":1,"stderr":"<root>/tests/cases/membership/float_range.dewy:2:6: error: main returns void or the errors that reach it, found bool: bool is not an error. A last line giving a value gives it back: declare `main = ():>void => ...` to drop it, print it, or end with `exit(n)` for a code\n    main=()=>1.5 in? [0..2]\n         ^\n"}
  ]
 }

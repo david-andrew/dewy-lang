@@ -54,5 +54,4 @@ def test_dwarf_borrowed_file_index(compiler, tmp_path, release):  # noqa: F811
         ran = subprocess.run([binary], capture_output=True, timeout=60)
         assert ran.returncode == 0, ran.stdout[-3000:] + ran.stderr
         outputs.append(ran.stdout)
-    leaf_oracle.agree(outputs)
     assert outputs[0].endswith(b'ok\n')

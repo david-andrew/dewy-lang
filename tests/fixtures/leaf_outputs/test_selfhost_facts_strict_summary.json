@@ -1,68 +1,10 @@
 {
  "test_record_field_length_summary_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/record_length_summary/accepted.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "3\n3\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/record_length_summary/grows.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "3\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/record_length_summary/other_field.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/record_length_summary/other_field.dewy:8:12: error: cannot prove index is in bounds: missing upper bound\n        printl(r.other[1])\n               ^\n<root>/tests/cases/record_length_summary/other_field.dewy:6:5: note: r.other.length may have changed at this call to f\n        f(@r)\n        ^\n    note: r.other.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `1 <? r.other.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): r.other.length = 0\n    help: establish `1 <? r.other.length` after `f(@r)` with a current guard, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  }
+  {"args":5293,"files":7848},
+  10331,
+  10332
  ],
  "test_strict_summary_twins": [
-  {
-   "args": [
-    "build",
-    "<tmp>/strict_summary.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<tmp>/strict_summary.dewy:7:12: error: cannot prove exact integer result fits int64\n        return length(xs)*16\n               ^\n    note: nothing bounds `length(xs)*16` within int64 here\n    help: establish `int64.min <=? (length(xs)*16) and (length(xs)*16) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n",
-   "files": {}
-  }
+  {"args":["build","<tmp>/strict_summary.dewy"],"status":1,"stderr":"<tmp>/strict_summary.dewy:7:12: error: cannot prove exact integer result fits int64\n        return length(xs)*16\n               ^\n    note: nothing bounds `length(xs)*16` within int64 here\n    help: establish `int64.min <=? (length(xs)*16) and (length(xs)*16) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n"}
  ]
 }

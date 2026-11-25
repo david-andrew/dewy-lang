@@ -1,204 +1,23 @@
 {
  "test_checked_expression_twins[checked_expression_nodes-cases0]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/broadcast_places/keeps_mutable_record.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "1\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/default/reference_named.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/singleton/membership_text_needle.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p2-0": {
-     "run": {
-      "status": 0,
-      "stdout": "push: true true false false\nload: false true true true\npusj: false false true false\n: false false true false\nfalse\ntrue\n[\"needle\" \"container\"]\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/select_named/captured.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/select_named/captured.dewy:6:27: error: this closure captures the place of the wait `w` to change it, so select could take from another place than its pattern names: capture a copy, or match the plain type\n        let swap = ($capture @a) => { a = channel<string>(1) }\n                              ^\n",
-   "files": {}
-  }
+  {"args":3244,"files":6290},
+  {"args":3498,"files":6347},
+  {"args":5904,"files":{"p2-0":{"run":{"status":0,"stdout":"push: true true false false\nload: false true true true\npusj: false false true false\n: false false true false\nfalse\ntrue\n[\"needle\" \"container\"]\n","stderr":""}}}},
+  10497
  ],
  "test_checked_expression_twins[intrinsic_registration-cases1]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/set/membership.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/set/custom_hash.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 42,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/conversion/int_boundary_diagnostic.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/conversion/int_boundary_diagnostic.dewy:3:20: error: integer overflow in constant conversion to uint8\n    main=()=>uint8(int(256))\n                       ^\n",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/set/membership.dewy"],"files":6311},
+  {"args":5828,"files":6347},
+  8965
  ],
  "test_checked_expression_twins[path_narrowing-cases2]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/census_proofs/narrowing_field_named.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/census_proofs/narrowing_field_named.dewy:2:38: error: cannot prove `request.count <=? 255` for the conversion to uint8: missing upper bound\n    encode = (request:Request):>uint8 => request.count as uint8\n                                         ^\n    note: missing upper bound: nothing establishes `request.count <=? 255` here\n    note: possible witness (consistent with the known bounds, not an observed execution): request.count = 9223372036854775807\n    help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`\n    help: establish `0 <=? request.count and request.count <=? 255` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or declare the field `count:uint8` in `Request` to check the width on each write\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/census_proofs/narrowing_field_proven.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 0,
-      "stdout": "42\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/refine_union_storage/union_store_reject.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/refine_union_storage/union_store_reject.dewy:1:41: error: refinement refuted: -1 violates the declared contract\n    main=()=>{let x:int<(>=? 0)>|string=2 x=-1 printl(x)}\n                                            ^\n<root>/tests/cases/refine_union_storage/union_store_reject.dewy:1:21: note: the contract is declared here\n    main=()=>{let x:int<(>=? 0)>|string=2 x=-1 printl(x)}\n                        ^\n    help: establish `-1 >=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  }
+  8924,
+  {"args":3249,"files":6336},
+  10400
  ],
  "test_checked_expression_twins[type_expression_forms-cases3]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/type_members/records.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "png\n9\n2 4 2 true\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/type_members/handles.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 0,
-      "stdout": "line hi\ns two\nagain\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/type_members/runtime_use.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/type_members/runtime_use.dewy:5:9: error: 't' cannot hold a type or module (a value of a type is made by calling it: `T()`)\n        let t = r.Png\n            ^\n",
-   "files": {}
-  }
+  10828,
+  {"args":5961,"files":6345},
+  10829
  ]
 }

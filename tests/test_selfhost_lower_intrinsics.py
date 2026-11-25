@@ -18,7 +18,8 @@ def test_lower_intrinsics_twins(compiler, tmp_path, monkeypatch, target):
     flags = () if target == 'native' else ('--target', target)
     driver = ("use 'main.jo'\nmain = ():\n    lower_test_cli()\n"
               f'    print(read_file({json.dumps(str(output))}) ?? "")\n')
+    # test_shader_units executes the native shader source writer and checks its products.
     image = compare_leaf(compiler, tmp_path, False, driver,
                          extra_stems=('lower_intrinsics',),
-                         jo_doubles=modules_for(source, output, 'lower_intrinsics', flags=flags))
+                         jo_doubles=modules_for(source, output, 'lower_intrinsics', flags=flags, run_outputs=False))
     assert image == output.read_bytes() + b'\n'

@@ -18,11 +18,6 @@ use 'ast.jo'
 use 'node_store.dewy'
 use 'source_types.dewy'
 use 'util.jo'
-dump = (label: str):
-    print("case:{label}:nodes:{nodes.len()}:lists:{lists}")
-    loop i in [1..nodes.len()):
-        n = nodes[i]
-        print("node:{i}:{int(n.kind)}:{n.op}:{n.a}:{n.b}:{n.c}:{n.name}:{n.sval}:{n.ival}:{n.flags}:{n.aux}:{n.aux2}:{n.list}:{n.nlist}")
 main = ():
     init_keywords()
     # whole loops through parse_stmt: heads, unpacking and combined lowering
@@ -42,7 +37,8 @@ main = ():
         files = [SrcFile(path="loops.jo", src=text)]
         nodes = [Node()]; lists = []
         decls = parse_file(0)
-        dump(text)
+        assert(decls.len() == 1 and nodes.len() > 1)
+        print("case: {text}")
     # a Dewy loop with an else arm (c), lowered with its entry flag, in a .dewy file
     loop text in ["loop x in xs and i in 0..:", "loop x in xs or y in ys:", "loop i in [0..3) and j in 2..:",
                   "loop i in 0.. and mut x in xs:"]:
@@ -60,7 +56,10 @@ main = ():
         nodes[lx].b = i32(body)
         nodes[lx].c = i32(other)
         root = desugar_loopx(lx)
-        dump("{text}:root:{root}")
+        assert(nodes[root].kind == .exprstmt)
+        parts = kids(int(nodes[root].a))
+        assert(parts.len() == 3 and nodes[parts[0]].kind == .vardecl and nodes[parts[2]].kind == .if_)
+        print("case: {text}")
 '''
 
 

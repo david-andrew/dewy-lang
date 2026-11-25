@@ -1,88 +1,10 @@
 {
  "test_collection_checks_match_twin": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/comprehension/bracket_call.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "12\n5\n14\n3 entries\n15°C\n[1 3]\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/optional/fill_join.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 0,
-      "stdout": "6\nhad 2\n1 3 3 1 2\nfilled 4\n1 3 1 0 4\n2 -1 5 4 int 3 string s\nnone\n8 0 2 -1 1\n3 1\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/errors/forward_method_call.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p2-0": {
-     "run": {
-      "status": 0,
-      "stdout": "4 E\n5 E 2\nABC none\ntrue\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/witness/projection_call_divisor.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/witness/projection_call_divisor.dewy:14:12: error: cannot prove divisor is nonzero: call invalidated a mutable or exposed root\n        printl(10/d[\"x\"].count)\n               ^\n<root>/tests/cases/witness/projection_call_divisor.dewy:9:5: note: d[\"x\"].count may have changed at this call to zero\n        zero(@d[\"x\"].count)\n        ^\n    note: missing bound: nothing establishes `d[\"x\"].count not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): d[\"x\"].count = 0\n    help: establish `d[\"x\"].count not=? 0` after `zero(@d[\"x\"].count)` with a current guard, or check it at run time with `$runtime_assert`\n    help: or give the field a contract where `S` declares it, `count:int64<(>? 0)>`: every write to it is checked, so each read is a nonzero divisor\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/units/parameter_mismatch.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/units/parameter_mismatch.dewy:3:18: error: in call to length(x:int64 * Length): argument 'x' expects int64 * Length, found int * Time\n    let value=length(1s)\n                     ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/dogfood27_proofs/sum_lengths_hint.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/dogfood27_proofs/sum_lengths_hint.dewy:3:38: error: cannot prove the exact sum of the array fits `int64`: missing bounds on its elements and length that keep every running sum in range\n    total = (line:array<string>):>int => sum([loop w in line w.length])\n                                         ^\n    help: add into an `int` instead, which never overflows: `let total = 0` then `loop x in xs total += x`\n<root>/tests/cases/dogfood27_proofs/sum_lengths_hint.dewy:3:43: note: this loop may change the value\n    total = (line:array<string>):>int => sum([loop w in line w.length])\n                                              ^\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/comprehension/bracket_call.dewy"],"files":{"p0-0":{"run":{"status":0,"stdout":"12\n5\n14\n3 entries\n15°C\n[1 3]\n","stderr":""}}}},
+  {"args":5081,"files":{"p1-0":{"run":{"status":0,"stdout":"6\nhad 2\n1 3 3 1 2\nfilled 4\n1 3 1 0 4\n2 -1 5 4 int 3 string s\nnone\n8 0 2 -1 1\n3 1\n","stderr":""}}}},
+  {"args":3882,"files":{"p2-0":{"run":{"status":0,"stdout":"4 E\n5 E 2\nABC none\ntrue\n","stderr":""}}}},
+  10890,
+  10859,
+  {"args":["build","<root>/tests/cases/dogfood27_proofs/sum_lengths_hint.dewy"],"status":1,"stderr":514}
  ]
 }

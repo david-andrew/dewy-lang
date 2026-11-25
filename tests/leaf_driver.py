@@ -19,6 +19,7 @@ class LeafDriver:
     binary: Path
     # (a whole-compiler graph prints program images; its oracle is the program's own behaviour)
     probe: bool = True
+    run_outputs: bool = True
 
     def compare(self, arguments=(), status=0, *, with_stderr=False):
         ran = subprocess.run([self.binary, *arguments], capture_output=True, timeout=60, check=False)
@@ -30,8 +31,7 @@ class LeafDriver:
             leaf_oracle.check_entry(lambda: self.whole_outcome(arguments, ran))
         return output
 
-    @staticmethod
-    def whole_outcome(arguments, ran):
+    def whole_outcome(self, arguments, ran):
         """A whole compiler run as `build SOURCE -o TARGET ...` prints its output, then the program image."""
         if len(arguments) < 4 or arguments[0] != 'build' or arguments[2] != '-o':
             # (another command: the directory of the first file it names outside the checkout is the test's)
@@ -42,7 +42,8 @@ class LeafDriver:
         files = whole_oracle.outputs(target)
         image = target.read_bytes() if target in files else b''
         stdout = ran.stdout.removesuffix(image + b'\n') if image else ran.stdout
-        return whole_oracle.build(arguments, ran.returncode, stdout, ran.stderr, files, target.parent)
+        return whole_oracle.build(arguments, ran.returncode, stdout, ran.stderr, files, target.parent,
+                                  run_outputs=self.run_outputs)
 
 
 def build_leaf_driver(compiler, release, driver, extra_stems=(), doubles=None, jo_doubles=None, *, services):
@@ -50,6 +51,7 @@ def build_leaf_driver(compiler, release, driver, extra_stems=(), doubles=None, j
     # {file: text}, Jo modules a Dewy module imports by file name, in both builds.
     # Supply the resolver's direct services to every derived leaf driver.
     arguments = getattr(jo_doubles, 'arguments', ())
+    run_outputs = getattr(jo_doubles, 'run_outputs', True)
     if arguments:
         driver = jo_doubles.runtime_driver(driver)
     jo_doubles = dict(jo_doubles or {})
@@ -96,7 +98,7 @@ def build_leaf_driver(compiler, release, driver, extra_stems=(), doubles=None, j
     sources = tuple((f'{stem}.dewy', doubles[stem]['dewy'] if stem in doubles else
                      module_text(ROOT / f'compiler/{stem}.dewy')) for stem in stems)
     modules = _graph(stems, sources, tuple(jo_doubles.items()), driver)
-    return LeafDriver(build_driver(compiler, modules, release), 'main.jo' not in jo_doubles)
+    return LeafDriver(build_driver(compiler, modules, release), 'main.jo' not in jo_doubles, run_outputs)
 
 
 @lru_cache(maxsize=64)

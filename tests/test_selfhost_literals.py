@@ -16,7 +16,6 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
-from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
@@ -328,7 +327,7 @@ def run(binary, args):
 def test_selfhost_literals_match_jo(compiler, tmp_path, release):
     args = words()
     dewy = build(compiler, FIXTURES / 'literals_dewy.dewy', tmp_path / 'literals-dewy', release)
-    got = leaf_oracle.check_value(run(dewy, args))
+    got = run(dewy, args)
     assert got == expected(args)
 
 

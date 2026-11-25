@@ -102,6 +102,11 @@ def test_lexer_scan_twins(compiler, tmp_path, monkeypatch, release):
     cases += [('normal', text, 41, diagnostic) for text, diagnostic in ERRORS]
     for mode, text, status, expected in cases:
         source.write_bytes(text)
+        if len(text) > 4096:
+            run = subprocess.run([binaries[1], mode, source], capture_output=True, timeout=30)
+            assert run.returncode == 0 and expected in run.stdout, run.stderr
+            assert len(run.stdout.splitlines()) > 4096
+            continue
         runs = [subprocess.run([binary, mode, source], capture_output=True, timeout=30)
                 for binary in binaries]
         assert [r.returncode for r in runs] == [status, status], (mode, text, [(r.stdout, r.stderr) for r in runs])

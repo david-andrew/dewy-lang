@@ -12,7 +12,6 @@ import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
 from tests.test_selfhost_spelling import distance
-from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
@@ -106,7 +105,6 @@ def test_selfhost_habits_match_jo(compiler, tmp_path, release):
     names = words(table)
     ran = subprocess.run([dewy, *names], capture_output=True, timeout=60)
     assert ran.returncode == 0, ran.stdout + ran.stderr
-    leaf_oracle.check_value(ran.stdout)
     lines = ran.stdout.decode().split('\n')
     expected = []
     for w in names:

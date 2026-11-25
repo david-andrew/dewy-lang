@@ -1,62 +1,8 @@
 {
  "test_nd_contract_query_forwarding_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/census_proofs/nd_forward_shape.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "22.0\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/census_proofs/nd_forward_shape.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-1": {
-     "run": {
-      "status": 0,
-      "stdout": "22.0\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/census_proofs/nd_replaced_shape.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/census_proofs/nd_replaced_shape.dewy:7:8: error: cannot prove array shape/index contract `result.length.length =? 2`: nothing establishes `result.length.length =? 2` here\n    printl(result[0 1])\n           ^\n    help: establish `result.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "--release",
-    "<root>/tests/cases/census_proofs/nd_replaced_shape.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/census_proofs/nd_replaced_shape.dewy:7:8: error: cannot prove array shape/index contract `result.length.length =? 2`: nothing establishes `result.length.length =? 2` here\n    printl(result[0 1])\n           ^\n    help: establish `result.length.length =? 2` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/census_proofs/nd_forward_shape.dewy"],"files":{"p0-0":{"run":{"status":0,"stdout":"22.0\n","stderr":""}}}},
+  {"args":["build","--release","<root>/tests/cases/census_proofs/nd_forward_shape.dewy"],"files":{"p0-1":{"run":{"status":0,"stdout":"22.0\n","stderr":""}}}},
+  {"args":["build","<root>/tests/cases/census_proofs/nd_replaced_shape.dewy"],"status":1,"stderr":204},
+  {"args":["build","--release","<root>/tests/cases/census_proofs/nd_replaced_shape.dewy"],"status":1,"stderr":204}
  ]
 }

@@ -1,100 +1,10 @@
 {
  "test_facts_plans_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/dogfood13_proofs/matching_rows.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "[[true true] [] [true true true]]\n[]\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/effects/refined_param_proven.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "11\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/dogfood23_proofs/pair_tuples_keep_bounds.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "11\n12\n13\n42\nn0 5\nn1 6\nn2 7\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/comptime/divide_zero.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/comptime/divide_zero.dewy:1:25: error: compile-time evaluation: division by zero\n  compile-time call to outer at <root>/tests/cases/comptime/divide_zero.dewy:3:9\n  compile-time call to inner at <root>/tests/cases/comptime/divide_zero.dewy:2:17\n    inner=(n:int64):>int64=>10//n\n                            ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/dogfood13_proofs/short_rows.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/dogfood13_proofs/short_rows.dewy:4:40: error: cannot prove index is in bounds: missing upper bound\n            loop x in [0..image[y].length) seen[y][x] = true\n                                           ^\n    note: x is between 0 and 281474976710654\n    note: seen[y].length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `x <? seen[y].length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x = 0, seen[y].length = 0\n<root>/tests/cases/dogfood13_proofs/short_rows.dewy:2:17: note: this loop may change the value\n        let seen = [loop row in image [loop _ in row if false false]]\n                    ^\n    help: establish `x <? seen[y].length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/dogfood23_proofs/pair_tuples_stored.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/dogfood23_proofs/pair_tuples_stored.dewy:6:34: error: cannot prove index is in bounds: missing lower and upper bounds\n        loop [a b] in pairs { printl(xs[a]) }\n                                     ^\n    note: missing lower bound: nothing establishes `a >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): a = -1\n    note: xs.length is 3\n    note: missing upper bound: nothing establishes `a <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): a = 9223372036854775807, xs.length = 3\n    help: establish `0 <=? a <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  }
+  {"args":3733,"files":8064},
+  9236,
+  {"args":["build","<root>/tests/cases/dogfood23_proofs/pair_tuples_keep_bounds.dewy","-o","<tmp>/program"],"files":{"program":{"run":{"status":0,"stdout":"11\n12\n13\n42\nn0 5\nn1 6\nn2 7\n","stderr":""}}}},
+  8960,
+  {"args":["build","<root>/tests/cases/dogfood13_proofs/short_rows.dewy","-o","<tmp>/program"],"status":1,"stderr":"<root>/tests/cases/dogfood13_proofs/short_rows.dewy:4:40: error: cannot prove index is in bounds: missing upper bound\n            loop x in [0..image[y].length) seen[y][x] = true\n                                           ^\n    note: x is between 0 and 281474976710654\n    note: seen[y].length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `x <? seen[y].length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): x = 0, seen[y].length = 0\n<root>/tests/cases/dogfood13_proofs/short_rows.dewy:2:17: note: this loop may change the value\n        let seen = [loop row in image [loop _ in row if false false]]\n                    ^\n    help: establish `x <? seen[y].length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n"},
+  {"args":["build","<root>/tests/cases/dogfood23_proofs/pair_tuples_stored.dewy","-o","<tmp>/program"],"status":1,"stderr":513}
  ]
 }

@@ -8,9 +8,10 @@ from tests.driver_cache import build_driver
 class CompilerModules(dict):
     """Compiler sources plus the invocation supplied to each fresh driver process."""
 
-    def __init__(self, modules, source, output, flags):
+    def __init__(self, modules, source, output, flags, *, run_outputs=True):
         super().__init__(modules)
         self.arguments = ('build', str(source), '-o', str(output), *flags)
+        self.run_outputs = run_outputs
 
     def runtime_driver(self, driver):
         # Paths are inputs to the compiler being tested, not inputs to its build.
@@ -29,5 +30,5 @@ def cached_driver(compiler, tmp_path, release, modules):
     return build_driver(compiler, modules, release)
 
 
-def modules_for(source, output, leaf="lower_group", flags=()):
-    return CompilerModules(compiler_modules(), source, output, flags)
+def modules_for(source, output, leaf="lower_group", flags=(), *, run_outputs=True):
+    return CompilerModules(compiler_modules(), source, output, flags, run_outputs=run_outputs)

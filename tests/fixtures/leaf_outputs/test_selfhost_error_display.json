@@ -1,133 +1,15 @@
 {
  "test_error_display_matches_twin": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/witness/generic_instance.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/witness/generic_instance.dewy:2:13: error: cannot prove assertion: missing upper bound\n        $assert i <? xs.length\n                ^\n    note: xs.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, xs.length = 0\n<root>/tests/cases/witness/generic_instance.dewy:5:17: note: in first with <int>, instantiated here\n    main=()=>printl(first([1 2 3] 1))\n                    ^\n    help: establish `i <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/dogfood23_proofs/errors_every_function.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/dogfood23_proofs/errors_every_function.dewy:2:37: error: cannot prove index is in bounds: missing lower and upper bounds\n    pick = (a:array<int> i:int):>int => a[i]\n                                        ^\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n    note: a.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? a.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, a.length = 0\n    help: establish `0 <=? i <? a.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or state it where the parameter is declared, `i:int<(>=? 0)>`: each caller then proves it\n\n<root>/tests/cases/dogfood23_proofs/errors_every_function.dewy:3:37: error: cannot prove index is in bounds: missing lower and upper bounds\n    next = (a:array<int> i:int):>int => a[i + 1] + a[i + 2]\n                                        ^\n    note: missing lower bound: nothing establishes `i + 1 >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i + 1 = -1\n    note: a.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i + 1 <? a.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i + 1 = 0, a.length = 0\n    help: establish `0 <=? i + 1 <? a.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n\n<root>/tests/cases/dogfood23_proofs/errors_every_function.dewy:5:38: error: cannot prove index is in bounds: missing lower and upper bounds\n    twice = (a:array<int> k:int):>int => a[k * 2]\n                                         ^\n    note: missing lower bound: nothing establishes `k*2 >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): k*2 = -1\n    note: a.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `k*2 <? a.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): k*2 = 0, a.length = 0\n    help: establish `0 <=? k*2 <? a.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/dogfood24_proofs/errors_after_two_type_errors.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/dogfood24_proofs/errors_after_two_type_errors.dewy:2:25: error: type mismatch: expected int, found string\n    scale = (x:int):>int => x * \"2\"\n                            ^\n\n<root>/tests/cases/dogfood24_proofs/errors_after_two_type_errors.dewy:3:25: error: operator + is not defined for int and bool\n    shift = (x:int):>int => x + true\n                            ^\n\n<root>/tests/cases/dogfood24_proofs/errors_after_two_type_errors.dewy:4:35: error: cannot prove index is in bounds: missing lower and upper bounds\n    at = (a:array<int> i:int):>int => a[i + 1]\n                                      ^\n    note: missing lower bound: nothing establishes `i + 1 >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i + 1 = -1\n    note: a.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i + 1 <? a.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i + 1 = 0, a.length = 0\n    help: establish `0 <=? i + 1 <? a.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/errors/library_division_location.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p3-0": {
-     "run": {
-      "status": 101,
-      "stdout": "3\n",
-      "stderr": "panic: library_division_location.dewy:4: division by zero\n    in f (library_division_location.dewy:4)\n    called from main (library_division_location.dewy:7)\n"
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/errors/inferred_result_error_cascade.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/errors/inferred_result_error_cascade.dewy:16:9: warning: 'later' is never called: nothing runs it (call it, as `later()` where it should run)\n<root>/tests/cases/errors/inferred_result_error_cascade.dewy:5:35: error: cannot prove exact integer result fits int64\n    add = (x:int64 y:int64):>int64 => x + y\n                                      ^\n    note: nothing bounds `x + y` within int64 here\n    note: nothing bounds `x` here, so this has no known range: guard it first, or state it where the parameter is declared, `x:int64<(>=? 0)>`\n    help: establish `int64.min <=? (x + y) and (x + y) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n\n<root>/tests/cases/errors/inferred_result_error_cascade.dewy:7:5: error: no field or function 'foo' for type int64\n        n.foo()\n        ^\n\n<root>/tests/cases/errors/inferred_result_error_cascade.dewy:17:19: error: type mismatch: expected int64, found string\n        let w:int64 = \"text\"\n                      ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/errors/or_throw_optional_error.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/errors/or_throw_optional_error.dewy:5:75: error: cannot prove exact integer result fits int64\n    lookup=(x:int64):>int64?|Oops=>if x <? 0 Oops[x] else if x =? 0 none else x*10\n                                                                              ^\n    note: nothing bounds `x*10` within int64 here\n    note: nothing bounds `x` here, so this has no known range: guard it first, or state it where the parameter is declared, `x:int64<(>=? 0)>`\n    help: establish `int64.min <=? (x*10) and (x*10) <=? int64.max` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: widen the destination to `int` or state the domain as a refinement. For wrapping use `int64<overflow='wrap'>`. For saturation use `int64<overflow='saturate'>`\n    help: prove what it checks before the operation (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` at the top inside this function or block\n\n<root>/tests/cases/errors/or_throw_optional_error.dewy:7:15: error: or_throw cannot propagate none: it forwards every exception alternative, and `none` is one (`T?` is `T | none`), but the declared return type is int64 | Oops; to forward only the errors and keep the optional, write `value or_throw<Oops>`\n        let found=lookup(x) or_throw\n                  ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/errors/unit_import_hint.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/errors/unit_import_hint.dewy:2:20: error: unknown name 'rad' (a unit of the library: `from units import rad` at the top of the file)\n        printl(cos(2.0*rad))\n                       ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "asserts.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p7-0": {
-     "run": {
-      "status": 101,
-      "stdout": "",
-      "stderr": "panic: asserts.dewy:3: assertion failed: words.length =? 3 and (\"(\" =? words[0] or words[1] =? \"]\")\n    in main (asserts.dewy:3)\n"
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "tabbed.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "tabbed.dewy:2:16: error: type mismatch: expected int64, found string\n    \tlet x:int64 = \"text\"\n    \t              ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "generated-14.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": {
-    "sha256": "9d7f5549dfa5ae047222e1e983f7ae830e587ccabaa7a1d133dc6c0ff4f8eac7",
-    "bytes": 78
-   },
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "wide.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "wide.dewy:4:19: error: `+` does not join text: interpolate, `\"µ{1}\"`, or join many pieces, `pieces.join`\n        let x:int64 = \"µ\" + 1\n                      ^\n",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/witness/generic_instance.dewy"],"status":1,"stderr":1651},
+  {"args":["build","<root>/tests/cases/dogfood23_proofs/errors_every_function.dewy"],"status":1,"stderr":"<root>/tests/cases/dogfood23_proofs/errors_every_function.dewy:2:37: error: cannot prove index is in bounds: missing lower and upper bounds\n    pick = (a:array<int> i:int):>int => a[i]\n                                        ^\n    note: missing lower bound: nothing establishes `i >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = -1\n    note: a.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? a.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, a.length = 0\n    help: establish `0 <=? i <? a.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or state it where the parameter is declared, `i:int<(>=? 0)>`: each caller then proves it\n\n<root>/tests/cases/dogfood23_proofs/errors_every_function.dewy:3:37: error: cannot prove index is in bounds: missing lower and upper bounds\n    next = (a:array<int> i:int):>int => a[i + 1] + a[i + 2]\n                                        ^\n    note: missing lower bound: nothing establishes `i + 1 >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i + 1 = -1\n    note: a.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i + 1 <? a.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i + 1 = 0, a.length = 0\n    help: establish `0 <=? i + 1 <? a.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n\n<root>/tests/cases/dogfood23_proofs/errors_every_function.dewy:5:38: error: cannot prove index is in bounds: missing lower and upper bounds\n    twice = (a:array<int> k:int):>int => a[k * 2]\n                                         ^\n    note: missing lower bound: nothing establishes `k*2 >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): k*2 = -1\n    note: a.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `k*2 <? a.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): k*2 = 0, a.length = 0\n    help: establish `0 <=? k*2 <? a.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n"},
+  {"args":["build","<root>/tests/cases/dogfood24_proofs/errors_after_two_type_errors.dewy"],"status":1,"stderr":"<root>/tests/cases/dogfood24_proofs/errors_after_two_type_errors.dewy:2:25: error: type mismatch: expected int, found string\n    scale = (x:int):>int => x * \"2\"\n                            ^\n\n<root>/tests/cases/dogfood24_proofs/errors_after_two_type_errors.dewy:3:25: error: operator + is not defined for int and bool\n    shift = (x:int):>int => x + true\n                            ^\n\n<root>/tests/cases/dogfood24_proofs/errors_after_two_type_errors.dewy:4:35: error: cannot prove index is in bounds: missing lower and upper bounds\n    at = (a:array<int> i:int):>int => a[i + 1]\n                                      ^\n    note: missing lower bound: nothing establishes `i + 1 >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i + 1 = -1\n    note: a.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i + 1 <? a.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i + 1 = 0, a.length = 0\n    help: establish `0 <=? i + 1 <? a.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n"},
+  {"args":3886,"files":{"p3-0":{"run":{"status":101,"stdout":"3\n","stderr":"panic: library_division_location.dewy:4: division by zero\n    in f (library_division_location.dewy:4)\n    called from main (library_division_location.dewy:7)\n"}}}},
+  9257,
+  9264,
+  9271,
+  {"args":["build","asserts.dewy"],"files":{"p7-0":{"run":{"status":101,"stdout":"","stderr":"panic: asserts.dewy:3: assertion failed: words.length =? 3 and (\"(\" =? words[0] or words[1] =? \"]\")\n    in main (asserts.dewy:3)\n"}}}},
+  {"args":["build","tabbed.dewy"],"status":1,"stderr":"tabbed.dewy:2:16: error: type mismatch: expected int64, found string\n    \tlet x:int64 = \"text\"\n    \t              ^\n"},
+  {"args":["build","generated-14.dewy"],"status":1,"stderr":"generated-14.dewy:3:8: error: unterminated string\n    \udc80<><(c<\".<\n           ^\n"},
+  {"args":["build","wide.dewy"],"status":1,"stderr":"wide.dewy:4:19: error: `+` does not join text: interpolate, `\"µ{1}\"`, or join many pieces, `pieces.join`\n        let x:int64 = \"µ\" + 1\n                      ^\n"}
  ]
 }

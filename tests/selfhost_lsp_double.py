@@ -69,7 +69,7 @@ def session(compiler, root, steps):
         # (the language server's messages, its project directory named: tests/leaf_oracle.py. A
         # notification may come before or after a reply, or again, so the record holds each distinct
         # message once, sorted.)
-        messages = json.dumps(sorted({json.dumps(m, sort_keys=True) for m in client.log}))
-        leaf_oracle.check_entry(lambda: {'args': ['lsp'], 'status': 0, 'stdout': leaf_oracle.text_or_digest(
-            leaf_oracle.without(root, messages.encode()))})
+        messages = sorted({json.dumps(m, sort_keys=True) for m in client.log})
+        leaf_oracle.check_entry(lambda: {'args': ['lsp'], 'status': 0,
+                                         'stdout': [json.loads(leaf_oracle.without(root, m.encode())) for m in messages]})
     return transcript

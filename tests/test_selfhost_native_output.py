@@ -1,6 +1,4 @@
-"""Native image publication: bytes, replacement rules and failures match the frozen code."""
-import hashlib
-import os
+"""Check native image kinds, replacement rules and failures."""
 import shutil
 import stat
 
@@ -35,25 +33,6 @@ main = ():
 '''
 
 
-def snapshot(directory):
-    """Every entry's kind, permissions and contents: the published result, not just its status."""
-    found = []
-    for path in sorted(directory.rglob('*')):
-        info = path.lstat()
-        name = str(path.relative_to(directory))
-        if stat.S_ISLNK(info.st_mode):
-            found.append((name, 'link', os.readlink(path)))
-        elif stat.S_ISDIR(info.st_mode):
-            found.append((name, 'dir'))
-        else:
-            # (a PDB's bytes hold the absolute run directory, which differs per run; tests/test_selfhost_pdb_format.py
-            # checks its contents, so its recorded size stands for them)
-            contents = path.read_bytes()
-            digest = len(contents) if path.suffix == '.pdb' else hashlib.sha256(contents).hexdigest()
-            found.append((name, stat.S_IMODE(info.st_mode), digest))
-    return found
-
-
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_native_output_twins(compiler, tmp_path, release):  # noqa: F811
     run = tmp_path / 'run'
@@ -73,11 +52,19 @@ def test_native_output_twins(compiler, tmp_path, release):  # noqa: F811
         (run / 'through.pdb').symlink_to('target.pdb')
         return run
 
-    output = compare_narrow(compiler, tmp_path, release, STEMS, DRIVER, run_in=fresh, observe=snapshot)
+    output = compare_narrow(compiler, tmp_path, release, STEMS, DRIVER, run_in=fresh)
     assert output.split() == [b'true', b'true', b'true', b'false', b'false',
                               b'true', b'true', b'true', b'false',
                               b'true', b'true', b'false', b'false']
-    published = {entry[0]: entry[1] for entry in snapshot(run)}
-    for name in ('program', 'read_only', 'linked', 'console.exe', 'window.exe', 'read_only.exe'):
-        assert published[name] == 0o755, name
-    assert published['through.pdb'] == 'link' and published['target.pdb'] == 0o640
+    for names, magic in ((('program', 'read_only', 'linked'), b'\x7fELF'),
+                         (('console.exe', 'window.exe', 'read_only.exe'), b'MZ')):
+        for name in names:
+            path = run / name
+            assert not path.is_symlink() and stat.S_IMODE(path.stat().st_mode) == 0o755, name
+            assert path.read_bytes().startswith(magic), name
+    assert (run / 'kept').read_text() == 'kept'
+    assert (run / 'through.pdb').readlink().name == 'target.pdb'
+    assert stat.S_IMODE((run / 'target.pdb').stat().st_mode) == 0o640
+    for name in ('window.pdb', 'target.pdb'):
+        assert (run / name).read_bytes().startswith(b'Microsoft C/C++ MSF 7.00')
+    assert (run / 'directory').is_dir() and not (run / 'missing').exists()

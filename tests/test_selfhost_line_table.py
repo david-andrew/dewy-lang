@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
-from tests import leaf_oracle
 
 FIXTURES = Path(__file__).resolve().parent / 'fixtures/selfhost'
 
@@ -69,7 +68,6 @@ def test_selfhost_line_table_matches_jo(compiler, tmp_path, release):
         paths.append(path)
     ran = subprocess.run([dewy, *paths], capture_output=True, timeout=60)
     assert ran.returncode == 0, ran.stdout + ran.stderr
-    leaf_oracle.check_value(ran.stdout)
     assert ran.stdout.decode() == oracle(texts)
 
 

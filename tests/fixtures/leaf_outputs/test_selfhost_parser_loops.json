@@ -1,14 +1,5 @@
 {
  "test_parser_loops_match_twin": [
-  {
-   "args": [],
-   "status": 0,
-   "stdout": {
-    "sha256": "25bfaa638af81f2622a8473d9eb20585398c2fb5589d6ae1a777df20f3a0bc8f",
-    "bytes": 53412
-   },
-   "stderr": "",
-   "files": {}
-  }
+  {"args":[],"stdout":"case: f = ():\n    loop:\n        g()\n    loop let v = next(): g(v)\n    loop x < 3: g(x)\n\ncase: f = ():\n    loop x in xs: g(x)\n    loop mut x in xs: g(x)\n    loop k, v in m: g(k)\n    loop a, b, c in ts: g(a)\n\ncase: f = ():\n    loop k, mut v in m: g(v)\n    loop i in 0,2..10: g(i)\n\ncase: f = ():\n    loop x in xs and x > 0: g(x)\n    loop i in 0.. and x in xs: g(i)\n\ncase: f = ():\n    loop i in 1.. and x in xs: g(i)\n    loop x in xs and y in ys: g(x, y)\n\ncase: f = ():\n    loop c > 0 and x in xs and i in 0..: g(i)\n    loop (x in xs and y in ys) and z < 2: g(z)\n\ncase: f = ():\n    loop x in xs or y in ys: g(x, y)\n    loop i in [0..3) or j in [0..5]: g(i)\n\ncase: f = ():\n    loop i in [0..n) and j in [0..m] and x in xs: g(i)\n    loop i in 0.. and j in 5..: g(i)\n\ncase: f = ():\n    loop i in 0.. or j in [1..4]: g(i)\n    loop mut x in xs and i in 0..: g(x)\n\ncase: f = ():\n    loop i in 0.. and p, q in pairs: g(p)\n    loop a < 1 or b < 2: g()\n\ncase: f = ():\n    loop i in 0.. and mut x in xs and x > 0: g(i)\n    loop mut x in xs and y in ys: g(y)\n\ncase: loop x in xs and i in 0..:\ncase: loop x in xs or y in ys:\ncase: loop i in [0..3) and j in 2..:\ncase: loop i in 0.. and mut x in xs:\n"}
  ]
 }

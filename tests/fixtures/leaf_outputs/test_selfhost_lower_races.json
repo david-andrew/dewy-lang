@@ -1,174 +1,32 @@
 {
  "test_lower_races_callback_forms[default]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "ok\n",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  10916
  ],
  "test_lower_races_callback_forms[release]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "ok\n",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  10916
  ],
  "test_lower_races_diagnostics[capture]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "parallel runs this function on many threads at once, so it must not change 'counter', a variable it captured (a data race): return values instead\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6101,"status":41,"stdout":"parallel runs this function on many threads at once, so it must not change 'counter', a variable it captured (a data race): return values instead\n"}
  ],
  "test_lower_races_diagnostics[global]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "parallel runs this function on many threads at once, so it must not change the global 'counter' (a data race): return values instead\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6101,"status":41,"stdout":"parallel runs this function on many threads at once, so it must not change the global 'counter' (a data race): return values instead\n"}
  ],
  "test_lower_races_entry_errors[parallel_direct(f, -1)-only be called directly]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "'parallel' runs the function it is given on many threads at once, so it can only be called directly (where the compiler checks that function), not used as a value or partially applied\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6101,"status":41,"stdout":"'parallel' runs the function it is given on many threads at once, so it can only be called directly (where the compiler checks that function), not used as a value or partially applied\n"}
  ],
  "test_lower_races_entry_errors[race_arg(la_node(.ident), \"parallel\")-pass a function by name or a lambda]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "parallel runs this function on many threads at once, so the compiler checks it for data races, which it can only do for a function it can see: pass a function by name or a lambda\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6101,"status":41,"stdout":"parallel runs this function on many threads at once, so the compiler checks it for data races, which it can only do for a function it can see: pass a function by name or a lambda\n"}
  ],
  "test_lower_races_entry_errors[type_as_value(la_node(.int_lit, 0, 0, [], T_INT))-this is a type]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "this is a type, not a value (a value of a type is made by calling it: `T()`)\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6101,"status":41,"stdout":"this is a type, not a value (a value of a type is made by calling it: `T()`)\n"}
  ],
  "test_lower_races_local_literals[literal]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/parallel_callbacks/local_literal.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "lowered\n",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "4.0 0.0\n[4.0 8.0 12.0]\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  10233
  ],
  "test_lower_races_local_literals[rebound]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/parallel_callbacks/local_literal_rebound.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "spawn runs this code on many threads at once, so the compiler checks it for data races, which it cannot do through a call of a function value it cannot trace to its caller: call a function by name, or take the function as a parameter, so each call's argument is checked\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/cases/parallel_callbacks/local_literal_rebound.dewy","-o","<tmp>/program"],"status":41,"stdout":"spawn runs this code on many threads at once, so the compiler checks it for data races, which it cannot do through a call of a function value it cannot trace to its caller: call a function by name, or take the function as a parameter, so each call's argument is checked\n"}
  ],
  "test_lower_races_twins": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "ok\n",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  10916
  ]
 }

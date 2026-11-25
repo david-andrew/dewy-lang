@@ -1,162 +1,29 @@
 {
  "test_concurrency_tasks_diagnostics[a.add(1 'consume')-MemoryOrder must be]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/order.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "MemoryOrder must be 'relaxed', 'acquire', 'release', 'acq_rel', or 'seq_cst'\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6105,"status":41,"stdout":"MemoryOrder must be 'relaxed', 'acquire', 'release', 'acq_rel', or 'seq_cst'\n"}
  ],
  "test_concurrency_tasks_diagnostics[a.load'release'-load cannot use]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/order.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "an atomic load cannot use release or acq_rel order\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6105,"status":41,"stdout":"an atomic load cannot use release or acq_rel order\n"}
  ],
  "test_concurrency_tasks_diagnostics[a.store(1 'acquire')-store cannot use]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/order.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "an atomic store cannot use acquire or acq_rel order\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6105,"status":41,"stdout":"an atomic store cannot use acquire or acq_rel order\n"}
  ],
  "test_concurrency_tasks_execution[default]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/unused.dewy",
-    "-o",
-    "<tmp>/unused"
-   ],
-   "status": 0,
-   "stdout": "tasks ok\n",
-   "stderr": "",
-   "files": {}
-  }
+  10939
  ],
  "test_concurrency_tasks_execution[release]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/unused.dewy",
-    "-o",
-    "<tmp>/unused"
-   ],
-   "status": 0,
-   "stdout": "tasks ok\n",
-   "stderr": "",
-   "files": {}
-  }
+  10939
  ],
  "test_concurrency_tasks_program[queues/mpmc_tasks-default]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/queues/mpmc_tasks.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "received 8000 values, sum 31996000\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/queues/mpmc_tasks.dewy","-o","<tmp>/program"],"files":8160}
  ],
  "test_concurrency_tasks_program[queues/mpmc_tasks-release]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/queues/mpmc_tasks.dewy",
-    "-o",
-    "<tmp>/program",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "received 8000 values, sum 31996000\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/queues/mpmc_tasks.dewy","-o","<tmp>/program","--release"],"files":8160}
  ],
  "test_concurrency_tasks_program[tasks/atomic_add_wrapping-default]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/tasks/atomic_add_wrapping.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "3\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/tasks/atomic_add_wrapping.dewy","-o","<tmp>/program"],"files":7842}
  ],
  "test_concurrency_tasks_program[tasks/atomic_add_wrapping-release]": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/tasks/atomic_add_wrapping.dewy",
-    "-o",
-    "<tmp>/program",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "3\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":["build","<root>/tests/cases/tasks/atomic_add_wrapping.dewy","-o","<tmp>/program","--release"],"files":7842}
  ]
 }

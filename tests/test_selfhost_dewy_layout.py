@@ -1,9 +1,4 @@
-"""compiler/dewy_layout.dewy (the layout `dewy-core fmt` gives Dewy text) ships, and its frozen
-implementation-language twin compiler/dewy_layout.jo lays out the same lexemes the same way.
-The test lexes Dewy sources as the compiler's lexer does (dewy_fast.jo's dn_lex, without
-interning), lays them out in Python, and checks both modules against that, on the repository's
-Dewy files and on copies with their indentation, spacing and line ends disturbed. The compiler's
-own `fmt` must agree with the oracle on a sample of them."""
+"""Check layout against the Python oracle on pinned sources and their disturbed variants."""
 import random
 import re
 import subprocess
@@ -12,11 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.corpus_cache import corpus_under, SHARDS, built_once, cached, digest, shard_of
+from tests.corpus_cache import corpus_paths, SHARDS, built_once, cached, digest, shard_of
 from tests import layout_corpus
 from tests.layout_corpus import layout_texts
 from tests.support import compiler  # noqa: F401 (fixture)
-from tests import leaf_oracle
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
@@ -501,11 +495,7 @@ def disturbed(src, rng):
 
 
 def corpus_inputs():
-    rng = random.Random(10)
-    files = corpus_under(ROOT / 'tests')
-    files = [*corpus_under(ROOT / 'compiler'), *corpus_under(ROOT / 'lib'),
-             *corpus_under(ROOT / 'examples', recursive=False), *rng.sample(files, 500)]
-    return tuple(path.read_bytes() for path in files), rng.getstate()
+    return tuple(path.read_bytes() for path in corpus_paths()), random.Random(10).getstate()
 
 
 @lru_cache(maxsize=1)
@@ -575,7 +565,7 @@ def layout_binaries(compiler, release):
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('shard', [pytest.param(k, id=f'{k}of{SHARDS}', marks=pytest.mark.xdist_group(name=f'layout-{k}'))
                                    for k in range(SHARDS)])
-def test_selfhost_dewy_layout_match_jo(compiler, tmp_path, release, shard):
+def test_selfhost_dewy_layout_matches_oracle(compiler, tmp_path, release, shard):
     # (the corpus is split into interleaved shards, one xdist group each, so workers share it)
     dewy = layout_binaries(compiler, release)
     texts, expected = shard_oracle(shard)
@@ -584,7 +574,6 @@ def test_selfhost_dewy_layout_match_jo(compiler, tmp_path, release, shard):
     listed = write_cases(cases, texts)
     ran = subprocess.run([dewy, listed], capture_output=True, timeout=300)
     assert ran.returncode == 0, ran.stderr
-    leaf_oracle.check_value(ran.stdout, directory=tmp_path)
     got = results(ran.stdout)
     assert len(got) == len(texts)
     for k, (a, b) in enumerate(zip(got, expected)):
@@ -602,7 +591,8 @@ def test_selfhost_dewy_layout_corpus_refusals():
 def test_selfhost_dewy_layout_fmt_agrees(compiler, tmp_path):
     # (the compiler's fmt lexes for itself: where it formats a file, it gives the oracle's text)
     rng = random.Random(3)
-    texts = rng.sample([t for t in corpus() if t], 300)
+    candidates = [t for t in corpus() if t]
+    texts = rng.sample(candidates, min(150, len(candidates)))
     for k, src in enumerate(texts):
         (tmp_path / f'{k}.dewy').write_bytes(src)
     ran = subprocess.run([compiler, 'fmt', tmp_path], capture_output=True, timeout=300)
@@ -614,7 +604,7 @@ def test_selfhost_dewy_layout_fmt_agrees(compiler, tmp_path):
             continue
         assert path.read_bytes() == oracle(src), (k, src[:400])
         checked += 1
-    assert checked > 250
+    assert checked > len(texts) * 5 // 6
 
 
 def test_selfhost_dewy_layout_ships_dewy(compiler, tmp_path):

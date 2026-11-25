@@ -1,60 +1,8 @@
 {
  "test_facts_pools_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/collections/library_length.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "2\na\nb\n1 42\n3\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/facts/pool_removed_handle.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/facts/pool_removed_handle.dewy:9:12: error: the handle is no longer in the pool\n        printl(items[h].name)\n               ^\n    help: establish `items.has(h)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/notraps12/pool_callee_reject.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/notraps12/pool_callee_reject.dewy:2:71: error: cannot prove the handle is in the pool\n    f=()=>{let p:Pool<array<int64>>=[] let h=p.add([42]) empty(@p) printl(p[h][0])}\n                                                                          ^\n    help: establish `p.has(h)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take a missing thing as a value: `p.get(h)` gives none for it\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<root>/tests/cases/witness/nested_key_relation.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<root>/tests/cases/witness/nested_key_relation.dewy:7:9: error: cannot prove the key is in the dictionary\n            units[p][m] += 1\n            ^\n<root>/tests/cases/witness/nested_key_relation.dewy:6:9: note: a path into this branch lacks the evidence\n            if p not in? units units[p] = []\n            ^\n    help: establish `m in? units[p]` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take the missing key as a value: `units[p].get(m)` gives none for it\n",
-   "files": {}
-  }
+  {"args":3333,"files":7821},
+  9702,
+  {"args":["build","<root>/tests/cases/notraps12/pool_callee_reject.dewy","-o","<tmp>/program"],"status":1,"stderr":"<root>/tests/cases/notraps12/pool_callee_reject.dewy:2:71: error: cannot prove the handle is in the pool\n    f=()=>{let p:Pool<array<int64>>=[] let h=p.add([42]) empty(@p) printl(p[h][0])}\n                                                                          ^\n    help: establish `p.has(h)` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n    help: or take a missing thing as a value: `p.get(h)` gives none for it\n"},
+  {"args":["build","<root>/tests/cases/witness/nested_key_relation.dewy","-o","<tmp>/program"],"status":1,"stderr":1663}
  ]
 }

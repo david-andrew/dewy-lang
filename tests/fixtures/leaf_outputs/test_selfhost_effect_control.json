@@ -1,148 +1,26 @@
 {
  "test_effect_control_diagnostics[cost]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "effect contract violation in 'bad': allocation exceeds the closed row (no_effects permits none); bad; witness at <tmp>/input.dewy:2:29\n",
-   "stderr": "<tmp>/input.dewy:1:5: warning: 'bad' is never called: nothing runs it (call it, as `bad(...)` where it should run)\n",
-   "files": {}
-  }
+  {"args":6101,"status":41,"stdout":"effect contract violation in 'bad': allocation exceeds the closed row (no_effects permits none); bad; witness at <tmp>/input.dewy:2:29\n","stderr":"<tmp>/input.dewy:1:5: warning: 'bad' is never called: nothing runs it (call it, as `bad(...)` where it should run)\n"}
  ],
  "test_effect_control_diagnostics[recursive]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 41,
-   "stdout": "effect contract violation in 'first': mutation of 'shared' exceeds the closed row (no_effects permits none); first -> second; witness at <tmp>/input.dewy:8:5\n",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":6101,"status":41,"stdout":"effect contract violation in 'first': mutation of 'shared' exceeds the closed row (no_effects permits none); first -> second; witness at <tmp>/input.dewy:8:5\n"}
  ],
  "test_effect_control_execution[default]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/unused.dewy",
-    "-o",
-    "<tmp>/unused"
-   ],
-   "status": 0,
-   "stdout": "control ok\n",
-   "stderr": "",
-   "files": {}
-  }
+  10929
  ],
  "test_effect_control_execution[release]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/unused.dewy",
-    "-o",
-    "<tmp>/unused"
-   ],
-   "status": 0,
-   "stdout": "control ok\n",
-   "stderr": "",
-   "files": {}
-  }
+  10929
  ],
  "test_effect_control_programs[fixed_array_kernels-default]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "140000 4\n4352 9232 4\n2055\n7 0\ntrue false\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":6101,"files":7753}
  ],
  "test_effect_control_programs[fixed_array_kernels-release]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "140000 4\n4352 9232 4\n2055\n7 0\ntrue false\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  {"args":6099,"files":7753}
  ],
  "test_effect_control_programs[library_calls_no_traps-default]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "0.3\n0.22\n25/12\n1/3\n1.5 0.375 3 0.25 0.25 1/36\n[1 2; 3 4]\n[1.0  1.0\n 1.0  1.0]\n[2 3]\n[1.0  0.0\n 0.0  1.0]\n[0 1 4 9 16]\n650777868590383874\n1717920867\n88\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  10910
  ],
  "test_effect_control_programs[library_calls_no_traps-release]": [
-  {
-   "args": [
-    "build",
-    "<tmp>/input.dewy",
-    "-o",
-    "<tmp>/program",
-    "--release"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "program": {
-     "run": {
-      "status": 0,
-      "stdout": "0.3\n0.22\n25/12\n1/3\n1.5 0.375 3 0.25 0.25 1/36\n[1 2; 3 4]\n[1.0  1.0\n 1.0  1.0]\n[2 3]\n[1.0  0.0\n 0.0  1.0]\n[0 1 4 9 16]\n650777868590383874\n1717920867\n88\n",
-      "stderr": ""
-     }
-    }
-   }
-  }
+  10903
  ]
 }

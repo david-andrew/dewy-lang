@@ -9,6 +9,7 @@ def build_pair(seed, work, release):
 
 def compare(pair, sources, work, release, workers):
     def observe(source, directory, run):
+        assert run.returncode in (0, 1) and b'panic:' not in run.stderr, (source, run.stderr)
         arguments = ['build', source, '-o', directory / 'program', *(['--release'] if release else [])]
         files = sorted(p for p in directory.rglob('*') if p.is_file())
         outcome = whole_oracle.build(arguments, run.returncode, run.stdout, run.stderr, files, work)

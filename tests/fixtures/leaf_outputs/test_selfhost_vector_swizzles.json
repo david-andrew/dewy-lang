@@ -1,70 +1,9 @@
 {
  "test_vector_swizzles_twins": [
-  {
-   "args": [
-    "build",
-    "<tmp>/swizzle_0.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "6.0\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/swizzle_1.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 0,
-      "stdout": "3\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/swizzle_2.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<tmp>/swizzle_2.dewy:1:18: error: vec2 has no component 'z'\n    main=()=>{printl(vec2(1).z)}\n                     ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/swizzle_3.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<tmp>/swizzle_3.dewy:1:18: error: a vector's direction is `normalize(v)`\n    main=()=>{printl(vec2(1).normalized)}\n                     ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/swizzle_4.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<tmp>/swizzle_4.dewy:1:18: error: use m[i] to access matrix columns\n    main=()=>{printl(mat4().x)}\n                     ^\n",
-   "files": {}
-  }
+  {"args":["build","<tmp>/swizzle_0.dewy"],"files":{"p0-0":{"run":{"status":0,"stdout":"6.0\n","stderr":""}}}},
+  {"args":["build","<tmp>/swizzle_1.dewy"],"files":6335},
+  {"args":["build","<tmp>/swizzle_2.dewy"],"status":1,"stderr":"<tmp>/swizzle_2.dewy:1:18: error: vec2 has no component 'z'\n    main=()=>{printl(vec2(1).z)}\n                     ^\n"},
+  {"args":["build","<tmp>/swizzle_3.dewy"],"status":1,"stderr":"<tmp>/swizzle_3.dewy:1:18: error: a vector's direction is `normalize(v)`\n    main=()=>{printl(vec2(1).normalized)}\n                     ^\n"},
+  {"args":["build","<tmp>/swizzle_4.dewy"],"status":1,"stderr":"<tmp>/swizzle_4.dewy:1:18: error: use m[i] to access matrix columns\n    main=()=>{printl(mat4().x)}\n                     ^\n"}
  ]
 }

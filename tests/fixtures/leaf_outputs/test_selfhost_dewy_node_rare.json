@@ -1,170 +1,18 @@
 {
  "test_dewy_node_rare_matches_twin": [
-  {
-   "args": [
-    "build",
-    "<tmp>/mode.dewy",
-    "-o",
-    "<tmp>/dewy/mode.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/mode_bad.dewy",
-    "-o",
-    "<tmp>/dewy/mode_bad.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "mode_bad.dewy:1:15: error: unknown build mode \"fast\": `$build.mode` is \"debug\" or \"release\"\n    $build.mode = 'fast'\n                  ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/target.dewy",
-    "-o",
-    "<tmp>/dewy/target.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/target_bad.dewy",
-    "-o",
-    "<tmp>/dewy/target_bad.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "target_bad.dewy:1:11: error: `$target`: unknown target 'z80-cpm' (the supported targets are x86_64-linux, aarch64-linux, aarch64-mac, x86_64-windows, wasm32)\n    $target = 'z80-cpm'\n              ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/twice.dewy",
-    "-o",
-    "<tmp>/dewy/twice.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "twice.dewy:2:1: error: `$build.mode` is set twice\n    $build.mode = 'debug'\n    ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/arena.dewy",
-    "-o",
-    "<tmp>/dewy/arena.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/expect.dewy",
-    "-o",
-    "<tmp>/dewy/expect.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "expect.dewy:2:10: warning: this expectation always fails\nexpect.dewy:4:10: warning: this expectation always fails\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "test",
-    "<tmp>/expect.dewy"
-   ],
-   "status": 2,
-   "stdout": "FF\n--- FAIL sums\nexpect.dewy:2:10: expectation failed: 1 + 1 =? 3\n    sums=()=>$expect 1 + 1 =? 3\n                     ^~~~~~~~~~\nnote: 1 + 1 is 2\n--- FAIL less\nexpect.dewy:4:10: expectation failed: \"a<?b\" not=? \"a<?b\"\n    less=()=>$expect \"a<?b\" not=? \"a<?b\"\n                     ^~~~~~~~~~~~~~~~~~~\n2 failed, 0 passed\n",
-   "stderr": "expect.dewy:2:10: warning: this expectation always fails\nexpect.dewy:4:10: warning: this expectation always fails\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/big.dewy",
-    "-o",
-    "<tmp>/dewy/big.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/compound.dewy",
-    "-o",
-    "<tmp>/dewy/compound.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/reserved.dewy",
-    "-o",
-    "<tmp>/dewy/reserved.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "reserved.dewy:2:9: error: 'end' is reserved, not a name: inside brackets it is the last index, as in `xs[end]` (use `end_`)\n        let end=1\n            ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/reserved_void.dewy",
-    "-o",
-    "<tmp>/dewy/reserved_void.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "reserved_void.dewy:2:9: error: 'void' is reserved, not a name: it is the type of no value (use `void_`)\n        let void=1\n            ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/methods.dewy",
-    "-o",
-    "<tmp>/dewy/methods.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/dropped.dewy",
-    "-o",
-    "<tmp>/dewy/dropped.dewy"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {}
-  }
+  {"args":["build","<tmp>/mode.dewy","-o","<tmp>/dewy/mode.dewy"]},
+  {"args":["build","<tmp>/mode_bad.dewy","-o","<tmp>/dewy/mode_bad.dewy"],"status":1,"stderr":"mode_bad.dewy:1:15: error: unknown build mode \"fast\": `$build.mode` is \"debug\" or \"release\"\n    $build.mode = 'fast'\n                  ^\n"},
+  {"args":["build","<tmp>/target.dewy","-o","<tmp>/dewy/target.dewy"]},
+  {"args":["build","<tmp>/target_bad.dewy","-o","<tmp>/dewy/target_bad.dewy"],"status":1,"stderr":"target_bad.dewy:1:11: error: `$target`: unknown target 'z80-cpm' (the supported targets are x86_64-linux, aarch64-linux, aarch64-mac, x86_64-windows, wasm32)\n    $target = 'z80-cpm'\n              ^\n"},
+  {"args":["build","<tmp>/twice.dewy","-o","<tmp>/dewy/twice.dewy"],"status":1,"stderr":"twice.dewy:2:1: error: `$build.mode` is set twice\n    $build.mode = 'debug'\n    ^\n"},
+  {"args":["build","<tmp>/arena.dewy","-o","<tmp>/dewy/arena.dewy"]},
+  {"args":["build","<tmp>/expect.dewy","-o","<tmp>/dewy/expect.dewy"],"stderr":1955},
+  {"args":["test","<tmp>/expect.dewy"],"status":2,"stdout":"FF\n--- FAIL sums\nexpect.dewy:2:10: expectation failed: 1 + 1 =? 3\n    sums=()=>$expect 1 + 1 =? 3\n                     ^~~~~~~~~~\nnote: 1 + 1 is 2\n--- FAIL less\nexpect.dewy:4:10: expectation failed: \"a<?b\" not=? \"a<?b\"\n    less=()=>$expect \"a<?b\" not=? \"a<?b\"\n                     ^~~~~~~~~~~~~~~~~~~\n2 failed, 0 passed\n","stderr":1955},
+  {"args":["build","<tmp>/big.dewy","-o","<tmp>/dewy/big.dewy"]},
+  {"args":["build","<tmp>/compound.dewy","-o","<tmp>/dewy/compound.dewy"]},
+  {"args":["build","<tmp>/reserved.dewy","-o","<tmp>/dewy/reserved.dewy"],"status":1,"stderr":"reserved.dewy:2:9: error: 'end' is reserved, not a name: inside brackets it is the last index, as in `xs[end]` (use `end_`)\n        let end=1\n            ^\n"},
+  {"args":["build","<tmp>/reserved_void.dewy","-o","<tmp>/dewy/reserved_void.dewy"],"status":1,"stderr":"reserved_void.dewy:2:9: error: 'void' is reserved, not a name: it is the type of no value (use `void_`)\n        let void=1\n            ^\n"},
+  {"args":["build","<tmp>/methods.dewy","-o","<tmp>/dewy/methods.dewy"]},
+  {"args":["build","<tmp>/dropped.dewy","-o","<tmp>/dewy/dropped.dewy"]}
  ]
 }

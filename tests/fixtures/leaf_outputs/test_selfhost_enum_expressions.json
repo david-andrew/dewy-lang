@@ -1,60 +1,8 @@
 {
  "test_enum_expressions_twins": [
-  {
-   "args": [
-    "build",
-    "<root>/tests/fixtures/upstream/enum_union.jo"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p0-0": {
-     "run": {
-      "status": 0,
-      "stdout": "E.b 4 F.q text hi E.a F.p E.b 7\nis E\n4\nq\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/ordinal.jo"
-   ],
-   "status": 0,
-   "stdout": "",
-   "stderr": "",
-   "files": {
-    "p1-0": {
-     "run": {
-      "status": 0,
-      "stdout": "1\n",
-      "stderr": ""
-     }
-    }
-   }
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/sparse.jo"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<tmp>/sparse.jo:2:25: error: Key(n) needs its variants numbered 0, 1, 2... in order (some are given numbers of their own)\n    main = (): print(int(Key(4)))\n                            ^\n",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "<tmp>/order.dewy"
-   ],
-   "status": 1,
-   "stdout": "",
-   "stderr": "<tmp>/order.dewy:2:29: error: 'left' | 'right' has no order: the members of a union of string literals are unordered, so `<?`, `>?`, `min`, `max` and sorting don't apply; order by a key you choose (`const RANK:totaldict<'left' | 'right' int64> = ['left' -> 0 'right' -> 1]`, then `xs.sorted(key=(p:'left' | 'right') => RANK[p])`) or by the text (`\"{p}\"`)\n    before=(a:Key b:Key):>bool=>a <? b\n                                ^\n",
-   "files": {}
-  }
+  {"args":["build","<root>/tests/fixtures/upstream/enum_union.jo"],"files":{"p0-0":{"run":{"status":0,"stdout":"E.b 4 F.q text hi E.a F.p E.b 7\nis E\n4\nq\n","stderr":""}}}},
+  {"args":["build","<tmp>/ordinal.jo"],"files":6331},
+  {"args":["build","<tmp>/sparse.jo"],"status":1,"stderr":"<tmp>/sparse.jo:2:25: error: Key(n) needs its variants numbered 0, 1, 2... in order (some are given numbers of their own)\n    main = (): print(int(Key(4)))\n                            ^\n"},
+  {"args":["build","<tmp>/order.dewy"],"status":1,"stderr":"<tmp>/order.dewy:2:29: error: 'left' | 'right' has no order: the members of a union of string literals are unordered, so `<?`, `>?`, `min`, `max` and sorting don't apply; order by a key you choose (`const RANK:totaldict<'left' | 'right' int64> = ['left' -> 0 'right' -> 1]`, then `xs.sorted(key=(p:'left' | 'right') => RANK[p])`) or by the text (`\"{p}\"`)\n    before=(a:Key b:Key):>bool=>a <? b\n                                ^\n"}
  ]
 }

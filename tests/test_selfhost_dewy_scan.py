@@ -151,7 +151,6 @@ def test_selfhost_dewy_scan_match_jo(compiler, tmp_path, release):
         assert run.returncode == 0 and not run.stderr, run.stdout + run.stderr
         outputs.append(run.stdout)
         assert list(map(int, run.stdout.splitlines())) == expected
-    leaf_oracle.agree(outputs)
 
 
 def test_selfhost_dewy_scan_ships_dewy(compiler, tmp_path):

@@ -165,7 +165,7 @@ main = ():
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_nd_slices_twins(compiler, tmp_path, release):  # noqa: F811
-    output = compare_narrow(compiler, tmp_path, release, STEMS, DRIVER, doubles={'services.jo': FACT_SERVICES}, services=SERVICES)
+    output = compare_narrow(compiler, tmp_path, release, STEMS, DRIVER, doubles={'services.jo': FACT_SERVICES}, services=SERVICES, snapshot=False)
     assert output.endswith(b'slices ok\n')
     for text in (b'slice selectors fit', b'selects only positions', b'index array contains only', b'last selected index is below',
                  b'start is at most its end', b'assigned data length equals', b'fits int64', b'.data.length matches', b'the sliced array'):

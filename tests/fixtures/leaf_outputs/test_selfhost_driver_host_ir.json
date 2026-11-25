@@ -1,32 +1,6 @@
 {
  "test_driver_host_ir_matches_twin": [
-  {
-   "args": [
-    "build",
-    "--host-ir",
-    "host.dewy"
-   ],
-   "status": 0,
-   "stdout": {
-    "sha256": "13c35d53b906443dc04582d4188c59434ab10a011303408eeaabbc642c290aa8",
-    "bytes": 745700
-   },
-   "stderr": "",
-   "files": {}
-  },
-  {
-   "args": [
-    "build",
-    "--host-ir",
-    "<root>/examples/ring.dewy"
-   ],
-   "status": 0,
-   "stdout": {
-    "sha256": "bec81ad5dc61908d0f2a2dab676e48b0a2d1c12dfb63e5eefcc58237d3d6d12c",
-    "bytes": 215319
-   },
-   "stderr": "<root>/examples/ring.dewy:7:12: warning: nothing in this file runs: it only makes functions, and making new_ring does not run it. Lines at the top of the file run when the program starts (`new_ring()` there calls it); a game's `update = (dt:float64):>void => {...}` runs every frame, where `if key_pressed(Key.space) ...` checks a key. (A file that other files import is fine like this.)\n",
-   "files": {}
-  }
+  {"args":["build","--host-ir","host.dewy"]},
+  {"args":["build","--host-ir","<root>/examples/ring.dewy"],"stderr":167}
  ]
 }

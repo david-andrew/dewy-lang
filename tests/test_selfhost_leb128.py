@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
-from tests import leaf_oracle
 
 FIXTURES = Path(__file__).resolve().parent / 'fixtures/selfhost'
 
@@ -57,7 +56,6 @@ def test_selfhost_leb128_matches_jo(compiler, tmp_path, release):
     numbers = values()
     ran = subprocess.run([dewy, *map(str, numbers)], capture_output=True, text=True, timeout=60)
     assert ran.returncode == 0, ran.stdout + ran.stderr
-    leaf_oracle.check_value(ran.stdout)
     expected = [' '.join(map(str, uleb(v))) + ' | ' + ' '.join(map(str, sleb(v))) for v in numbers]
     assert [line.rstrip() for line in ran.stdout.splitlines()] == expected
 

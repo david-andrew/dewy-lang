@@ -8,7 +8,7 @@ from tests.support import ROOT
 
 
 def compare_narrow(compiler, tmp_path, release, stems, driver, doubles=None, run_in=None, observe=None,
-                   invocations=(((), 0),), services=()):
+                   invocations=(((), 0),), services=(), *, snapshot=True):
     """Run each (arguments, status) invocation in run_in()'s working directory.
     Doubles replace named modules. Imports of services are redirected to
     services.jo. The record includes stdout, stderr and observe(directory).
@@ -55,9 +55,10 @@ def compare_narrow(compiler, tmp_path, release, stems, driver, doubles=None, run
         ran = subprocess.run([binary, *arguments], capture_output=True, timeout=60, cwd=where)
         assert ran.returncode == status, (arguments, ran.stdout[-3000:], ran.stderr)
         runs.append((ran.stdout, ran.stderr, observe(where) if observe else None))
-    for (arguments, status), (stdout, stderr, observed) in zip(invocations, runs):
-        payload = stdout + (b'\n--stderr--\n' + stderr if stderr else b'')
-        payload += b'\n--observed--\n' + repr(observed).encode() if observe else b''
-        leaf_oracle.check(arguments, status, leaf_oracle.without(tmp_path, payload))
+    if snapshot:
+        for (arguments, status), (stdout, stderr, observed) in zip(invocations, runs):
+            payload = stdout + (b'\n--stderr--\n' + stderr if stderr else b'')
+            payload += b'\n--observed--\n' + repr(observed).encode() if observe else b''
+            leaf_oracle.check(arguments, status, leaf_oracle.without(tmp_path, payload))
     stdout = [run[0] for run in runs]
     return stdout[0] if len(stdout) == 1 else stdout

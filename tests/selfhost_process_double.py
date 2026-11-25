@@ -107,14 +107,18 @@ class Session:
 
 def normalize(data, binary, directory):
     """A stream's lines without timings, process ids, the session's directory or repeated frames:
-    consecutive equal lines collapse, and of the watch log only the patch sizes stay."""
+    consecutive equal lines collapse and the watch log retains patch delivery."""
     lines = []
     text = data.decode(errors='replace').replace(str(binary), 'dewy-core').replace(str(directory), '<dir>')
     for line in text.splitlines():
         if line.startswith('dewy-core watch log: '):
             if 'sending a patch' not in line:
                 continue
+            line = 'dewy-core watch log: sending a patch'
         line = re.sub(r'\d+ ms\b', 'N ms', line)
+        # A truncated reload list includes library functions selected by the optimizer.
+        line = re.sub(r'^(dewy-core watch: reloaded in N ms: )[^;]* and \d+ more(?=;|$)',
+                      r'\1functions reloaded', line)
         if not lines or lines[-1] != line:
             lines.append(line)
     return lines
@@ -158,8 +162,7 @@ def compare_watch(compiler, tmp_path, monkeypatch, leaves, files, steps, **optio
 def session_outcome(arguments, status, out, err, files=()):
     """Hold a session the recording compiler ran to its record (tests/leaf_oracle.py)."""
     leaf_oracle.check_entry(lambda: {'args': arguments, 'status': status,
-                                     'stdout': leaf_oracle.text_or_digest(out.encode()),
-                                     'stderr': leaf_oracle.text_or_digest(err.encode()), 'files': list(files)})
+                                     'stdout': out, 'stderr': err, 'files': list(files)})
 
 
 def _type_lines(process, master, data, deadline):

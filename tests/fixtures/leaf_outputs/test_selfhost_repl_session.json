@@ -1,108 +1,18 @@
 {
  "test_repl_session_errors_exit_and_crash_match_twin": [
-  {
-   "args": [
-    "repl",
-    "0"
-   ],
-   "status": 3,
-   "stdout": "42\n",
-   "stderr": "",
-   "files": []
-  },
-  {
-   "args": [
-    "repl",
-    "1"
-   ],
-   "status": 0,
-   "stdout": "1\narray<int>\nint\n[1 2]\n",
-   "stderr": "<input>:1:1: error: unknown function 'nope'\n    nope(1)\n    ^\n<input>:1:14: error: type mismatch: expected int, found str\n    let y: int = \"s\"\n                 ^\nlet xs=[1 2]\nxs[0]\n:type xs\n:t 1+2\nnope(1)\nlet y: int = \"s\"\nxs\nquit\n",
-   "files": []
-  },
-  {
-   "args": [
-    "repl",
-    "2"
-   ],
-   "status": 0,
-   "stdout": "[1 2 3]\n",
-   "stderr": "panic: <input>:1: index 7 out of bounds (length 3)\nlet a=[1 2 3]\na[7]\na\nquit\n",
-   "files": []
-  }
+  11075,
+  {"args":6260,"stdout":"1\narray<int>\nint\n[1 2]\n","stderr":"<input>:1:1: error: unknown function 'nope'\n    nope(1)\n    ^\n<input>:1:14: error: type mismatch: expected int, found str\n    let y: int = \"s\"\n                 ^\nlet xs=[1 2]\nxs[0]\n:type xs\n:t 1+2\nnope(1)\nlet y: int = \"s\"\nxs\nquit\n"},
+  {"args":6261,"stdout":"[1 2 3]\n","stderr":"panic: <input>:1: index 7 out of bounds (length 3)\nlet a=[1 2 3]\na[7]\na\nquit\n"}
  ],
  "test_repl_session_matches_twin": [
-  {
-   "args": [
-    "repl",
-    "0"
-   ],
-   "status": 0,
-   "stdout": "3\n42\n62\n5/6\nrational\n",
-   "stderr": "1+2\nlet xs=[20 22]\nlet saved=xs\nxs[0]=99\nsaved[0]+saved[1]\nPoint:type=[x:int64 y:int64]\nlet point=Point[20 22]\npoint.x=40\npoint.x+point.y\n1/2+1/3\n:type 1/2\n:quit\n",
-   "files": []
-  },
-  {
-   "args": [
-    "repl",
-    "1"
-   ],
-   "status": 0,
-   "stdout": "42\n40\n99\n42\nidentity=<T>(value:T):>T\n",
-   "stderr": "let score=20\nread=()=>score\nscore=40\nread()+2\nlet score=99\nread()\nscore\nidentity=<T>(value:T):>T=>value\nidentity(42)\n:type identity\n:quit\n",
-   "files": []
-  },
-  {
-   "args": [
-    "repl",
-    "2"
-   ],
-   "status": 0,
-   "stdout": "42\n42\n[0 2 4]\ntrue\n6\n",
-   "stderr": "{\n# A comment inside the final expression.\nlet x=20\nx+22\n}\nf=(x)=>{\nx+2\n}\nf(40)\n[loop i in [0..3) i*2]\nlet text=\"\"\"first\nan unmatched \" inside triple quotes\nlast\"\"\"\ntext.length >? 10\nlet raw=r\"\\hello\"\nraw.length\n:quit\n",
-   "files": []
-  },
-  {
-   "args": [
-    "repl",
-    "3"
-   ],
-   "status": 0,
-   "stdout": "20\n22\nType Dewy expressions, declarations and statements. Values at the end of an input\nare shown. Braces and brackets may span lines. Names persist between inputs:\n  let score=20       declare or replace a binding\n  score=40           update the existing binding\n  twice=(x)=>2x      define a function\n  twice(score)      evaluate an expression\n  :type expr        show its type without running it\n  :help             show this help\n  tab               complete a name\n  up, down          earlier lines\n  ctrl-c            drop the input, or stop what is running\n  ctrl-d, :quit     leave\nAn input that fails leaves session values and declarations as they were.\nExternal effects, such as printed output or file writes, are not rolled back.\nprintl(value)    writes a value and a line break\n",
-   "stderr": "panic: restore values\n<input>:1:1: error: unknown name 'missing_repl_name' (did you mean 'Missing'?)\n    missing_repl_name\n    ^\n<input>:1:12: error: unknown name 'missing_repl_name' (did you mean 'Missing'?)\n    broken=()=>missing_repl_name\n               ^\n<input>:1:20: warning: drop the `()`: `explode` gives a value\npanic: restore declarations\n<input>:1:1: error: unknown name 'transient_repl'\n    transient_repl\n    ^\nlet xs=[20 22]\n{xs[0]=99 panic(\"restore values\")}\nxs[0]\nmissing_repl_name\nxs[1]\nbroken=()=>missing_repl_name\nexplode=():>int64=>{panic(\"restore declarations\") return 42}\nlet transient_repl=explode()\ntransient_repl\n:help\n:doc printl\n:quit\n",
-   "files": []
-  },
-  {
-   "args": [
-    "repl",
-    "4"
-   ],
-   "status": 0,
-   "stdout": "42\n12\n",
-   "stderr": "let total_score=40\ntotal_score+2\nlet y=12\ny\n:quit\n",
-   "files": []
-  }
+  11076,
+  11077,
+  11078,
+  11079,
+  11080
  ],
  "test_repl_session_raw_keys_match_twin": [
-  {
-   "args": [
-    "repl",
-    "0"
-   ],
-   "status": 0,
-   "stdout": "Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> l\u001b[K\r\u001b[5C\r>>> le\u001b[K\r\u001b[6C\r>>> let\u001b[K\r\u001b[7C\r>>> let \u001b[K\r\u001b[8C\r>>> let t\u001b[K\r\u001b[9C\r>>> let to\u001b[K\r\u001b[10C\r>>> let tot\u001b[K\r\u001b[11C\r>>> let tota\u001b[K\r\u001b[12C\r>>> let total\u001b[K\r\u001b[13C\r>>> let total_\u001b[K\r\u001b[14C\r>>> let total_s\u001b[K\r\u001b[15C\r>>> let total_sc\u001b[K\r\u001b[16C\r>>> let total_sco\u001b[K\r\u001b[17C\r>>> let total_scor\u001b[K\r\u001b[18C\r>>> let total_score\u001b[K\r\u001b[19C\r>>> let total_score=\u001b[K\r\u001b[20C\r>>> let total_score=4\u001b[K\r\u001b[21C\r>>> let total_score=40\u001b[K\r\u001b[22C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> t\u001b[K\r\u001b[5C\r>>> to\u001b[K\r\u001b[6C\r>>> tot\u001b[K\r\u001b[7C\r>>> tota\u001b[K\r\u001b[8C\r>>> total\u001b[K\r\u001b[9C\r>>> total_\u001b[K\r\u001b[10C\r>>> total_s\u001b[K\r\u001b[11C\r>>> total_score\u001b[K\r\u001b[15C\r>>> total_score+\u001b[K\r\u001b[16C\r>>> total_score+2\u001b[K\r\u001b[17C\r\n42\n\r>>> \u001b[K\r\u001b[4C\r>>> l\u001b[K\r\u001b[5C\r>>> le\u001b[K\r\u001b[6C\r>>> let\u001b[K\r\u001b[7C\r>>> let \u001b[K\r\u001b[8C\r>>> let y\u001b[K\r\u001b[9C\r>>> let y=\u001b[K\r\u001b[10C\r>>> let y=1\u001b[K\r\u001b[11C\r>>> let y=13\u001b[K\r\u001b[12C\r>>> let y=1\u001b[K\r\u001b[11C\r>>> let y=12\u001b[K\r\u001b[12C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> y\u001b[K\r\u001b[5C\r\n12\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n",
-   "stderr": "let total_score=40\ntotal_score+2\nlet y=12\ny\n:quit\n",
-   "files": []
-  },
-  {
-   "args": [
-    "repl",
-    "1"
-   ],
-   "status": 0,
-   "stdout": "Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> l\u001b[K\r\u001b[5C\r>>> le\u001b[K\r\u001b[6C\r>>> let\u001b[K\r\u001b[7C\r>>> let \u001b[K\r\u001b[8C\r>>> let c\u001b[K\r\u001b[9C\r>>> let ca\u001b[K\r\u001b[10C\r>>> let caf\u001b[K\r\u001b[11C\r>>> let caf�\u001b[K\r\u001b[12C\r>>> let café\u001b[K\r\u001b[12C\r>>> let café=\u001b[K\r\u001b[13C\r>>> let café=1\u001b[K\r\u001b[14C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> c\u001b[K\r\u001b[5C\r>>> ca\u001b[K\r\u001b[6C\r>>> caf\u001b[K\r\u001b[7C\r>>> caf�\u001b[K\r\u001b[8C\r>>> café\u001b[K\r\u001b[8C\r>>> café+\u001b[K\r\u001b[9C\r>>> café+1\u001b[K\r\u001b[10C\r\n2\n\r>>> \u001b[K\r\u001b[4C^C\r\n\r>>> \u001b[K\r\u001b[4C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n",
-   "stderr": "let café=1\ncafé+1\n:quit\n",
-   "files": []
-  }
+  {"args":6259,"stdout":"Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> l\u001b[K\r\u001b[5C\r>>> le\u001b[K\r\u001b[6C\r>>> let\u001b[K\r\u001b[7C\r>>> let \u001b[K\r\u001b[8C\r>>> let t\u001b[K\r\u001b[9C\r>>> let to\u001b[K\r\u001b[10C\r>>> let tot\u001b[K\r\u001b[11C\r>>> let tota\u001b[K\r\u001b[12C\r>>> let total\u001b[K\r\u001b[13C\r>>> let total_\u001b[K\r\u001b[14C\r>>> let total_s\u001b[K\r\u001b[15C\r>>> let total_sc\u001b[K\r\u001b[16C\r>>> let total_sco\u001b[K\r\u001b[17C\r>>> let total_scor\u001b[K\r\u001b[18C\r>>> let total_score\u001b[K\r\u001b[19C\r>>> let total_score=\u001b[K\r\u001b[20C\r>>> let total_score=4\u001b[K\r\u001b[21C\r>>> let total_score=40\u001b[K\r\u001b[22C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> t\u001b[K\r\u001b[5C\r>>> to\u001b[K\r\u001b[6C\r>>> tot\u001b[K\r\u001b[7C\r>>> tota\u001b[K\r\u001b[8C\r>>> total\u001b[K\r\u001b[9C\r>>> total_\u001b[K\r\u001b[10C\r>>> total_s\u001b[K\r\u001b[11C\r>>> total_score\u001b[K\r\u001b[15C\r>>> total_score+\u001b[K\r\u001b[16C\r>>> total_score+2\u001b[K\r\u001b[17C\r\n42\n\r>>> \u001b[K\r\u001b[4C\r>>> l\u001b[K\r\u001b[5C\r>>> le\u001b[K\r\u001b[6C\r>>> let\u001b[K\r\u001b[7C\r>>> let \u001b[K\r\u001b[8C\r>>> let y\u001b[K\r\u001b[9C\r>>> let y=\u001b[K\r\u001b[10C\r>>> let y=1\u001b[K\r\u001b[11C\r>>> let y=13\u001b[K\r\u001b[12C\r>>> let y=1\u001b[K\r\u001b[11C\r>>> let y=12\u001b[K\r\u001b[12C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> y\u001b[K\r\u001b[5C\r\n12\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n","stderr":2012},
+  {"args":6260,"stdout":"Dewy (:help for help; braces may span lines; ctrl-d quits)\n\r>>> \u001b[K\r\u001b[4C\r>>> l\u001b[K\r\u001b[5C\r>>> le\u001b[K\r\u001b[6C\r>>> let\u001b[K\r\u001b[7C\r>>> let \u001b[K\r\u001b[8C\r>>> let c\u001b[K\r\u001b[9C\r>>> let ca\u001b[K\r\u001b[10C\r>>> let caf\u001b[K\r\u001b[11C\r>>> let caf�\u001b[K\r\u001b[12C\r>>> let café\u001b[K\r\u001b[12C\r>>> let café=\u001b[K\r\u001b[13C\r>>> let café=1\u001b[K\r\u001b[14C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> c\u001b[K\r\u001b[5C\r>>> ca\u001b[K\r\u001b[6C\r>>> caf\u001b[K\r\u001b[7C\r>>> caf�\u001b[K\r\u001b[8C\r>>> café\u001b[K\r\u001b[8C\r>>> café+\u001b[K\r\u001b[9C\r>>> café+1\u001b[K\r\u001b[10C\r\n2\n\r>>> \u001b[K\r\u001b[4C^C\r\n\r>>> \u001b[K\r\u001b[4C\r\n\r>>> \u001b[K\r\u001b[4C\r>>> :\u001b[K\r\u001b[5C\r>>> :q\u001b[K\r\u001b[6C\r>>> :qu\u001b[K\r\u001b[7C\r>>> :qui\u001b[K\r\u001b[8C\r>>> :quit\u001b[K\r\u001b[9C\r\n","stderr":"let café=1\ncafé+1\n:quit\n"}
  ]
 }

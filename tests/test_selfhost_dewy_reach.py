@@ -151,7 +151,6 @@ def test_selfhost_dewy_reach_match_jo(compiler, tmp_path, release):
         run = subprocess.run([binary, steps], capture_output=True, text=True, timeout=60)
         assert run.returncode == 0, run.stdout + run.stderr
         outputs.append(run.stdout)
-    leaf_oracle.agree(outputs)
     lines = outputs[0].splitlines()
     assert lines.count('state 111 222 333') == 240
     assert lines.count('reach true') > 40 and lines.count('reach false') > 20
