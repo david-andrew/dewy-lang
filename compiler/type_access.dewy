@@ -26,9 +26,8 @@ type_access_fn_type_pack=(t:TypeAccessWord):>bool=>$unsafe types.ptr[t].kind =? 
 
 type_access_prune=(t0:TypeAccessWord):>int64=>$unsafe {
     let t=t0
-    let rows=types.ptr
-    loop t not=? 0 and rows[t].kind =? 'var' and rows[t].ref not=? 0 {
-        t=TypeAccessWord(rows[t].ref)
+    loop t not=? 0 and types[t].kind =? 'var' and types[t].ref not=? 0 {
+        t=TypeAccessWord(types[t].ref)
     }
     t
 }

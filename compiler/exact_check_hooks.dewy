@@ -105,17 +105,16 @@ exact_operation=(n:ExactCheckWord):>bool=>$unsafe {
 
 exact_note=(n:ExactCheckWord):>void=>$unsafe {
     if cx <? 0 {return}
-    let nd=nodes.ptr + n
-    let k=nd[0].kind
+    let k=nodes[n].kind
     let ok=false
     if k =? 'binary' {
-        let op=nd[0].op
+        let op=nodes[n].op
         if op =? HOOK_TOK_AMP or op =? HOOK_TOK_PIPE or op =? HOOK_TOK_CARET {ok=exact_potential(n)}
         else {ok=exact_operation(n)}
     }
     else if k =? 'unary' or k =? 'intrinsic' {ok=exact_operation(n)}
     else if k =? 'if_' or k =? 'iflet' or k =? 'coalesce' or k =? 'match_' {ok=exact_potential(n)}
-    else if k =? 'conv' {ok=nd[0].aux =? int32(int64(CV.int2float)) and exact_potential(ExactCheckWord(nd[0].a))}
+    else if k =? 'conv' {ok=nodes[n].aux =? int32(int64(CV.int2float)) and exact_potential(ExactCheckWord(nodes[n].a))}
     if not ok and not (exact_measure_on and exact_measure_candidate(n)) {return}
     let f=ExactCheckWord(ctxs.ptr[cx].inst)
     if f >? 0 {

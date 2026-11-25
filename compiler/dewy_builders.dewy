@@ -158,17 +158,15 @@ db_finish_function=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHo
     let ps=parameters
     let is_main=(name as array<uint8>).length =? 4 and name =? "main"
     let prefix:array<int64>=[]
-    let stp=store.ptr
     let txtp=texts.ptr
     loop param in ps {
-        let pp=stp + param
-        if (int64(pp[0].flags) & DB_MUT) not=? 0 {continue}
-        let pname=txtp[int64(pp[0].name)]
+        if (int64(store[param].flags) & DB_MUT) not=? 0 {continue}
+        let pname=txtp[int64(store[param].name)]
         if (pname as array<uint8>).length =? 1 and (pname as array<uint8>).ptr[0] =? 95 {continue}
-        let ppos=pp[0].pos
-        let pnm=pp[0].name
-        let pnlist=int64(pp[0].nlist)
-        let pa=pp[0].a
+        let ppos=store[param].pos
+        let pnm=store[param].name
+        let pnlist=int64(store[param].nlist)
+        let pa=store[param].a
         let local=node_mk(@store 'vardecl' ppos)
         store.ptr[local].aux2 = 1 # synthesized value-parameter binding
         store.ptr[local].name = pnm
@@ -179,7 +177,8 @@ db_finish_function=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHo
         if is_main {
             if ps.length not=? 1 {return host.unsupported(store.ptr[n].pos "multiple entry-point parameters")}
             # (`main = (app:BackgroundTasks)`: the program's group, D4 Q3)
-            store.ptr[value].name = int32(host.intern_name(if db_background_tasks(@store @texts int64(pa)) {"__program_tasks"} else {"args"}))
+            let value_name=int32(host.intern_name(if db_background_tasks(@store @texts int64(pa)) {"__program_tasks"} else {"args"}))
+            store[value].name=value_name
             let call=node_mk(@store 'call' ppos)
             store.ptr[call].a = int32(value)
             value=call
@@ -187,7 +186,6 @@ db_finish_function=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHo
         }
         store.ptr[local].b = int32(value)
         prefix.push(local)
-        stp=store.ptr
     }
     loop param in ps {
         if db_has_shape(@store int64(store.ptr[param].a)) {db_shape_prologue(@store @lists @host param @prefix)}
@@ -202,8 +200,7 @@ db_finish_function=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHo
     let blist=int64(store.ptr[body].list)
     let bnlist=int64(store.ptr[body].nlist)
     if bnlist >? 0 {
-        let lp=lists.ptr + blist
-        loop i in [0..bnlist) {prefix.push(int64(lp[i]))}
+        loop i in [0..bnlist) {prefix.push(int64(lists[blist + i]))}
     }
     # (a shaped result, `:>array<T length=[m p]>`: the final value is checked as it leaves;
     # a `return` is checked where it is)
@@ -214,7 +211,8 @@ db_finish_function=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHo
         loop dim in node_kids(@store @lists int64(store.ptr[n].a)) {dims.push(node_clone(@store @lists dim))}
         let sizes=node_mk(@store 'array' pos)
         node_set_list(@store @lists sizes dims)
-        store.ptr[last].a = int32(db_call(@store @lists @host "__shape_value" [int64(store.ptr[last].a) sizes] pos))
+        let shaped=int32(db_call(@store @lists @host "__shape_value" [int64(store.ptr[last].a) sizes] pos))
+        store[last].a=shaped
     }
     node_set_list(@store @lists body prefix)
     store.ptr[n].b = int32(body)

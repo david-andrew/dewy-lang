@@ -121,17 +121,16 @@ copy_escapes=(n:CopyWord l:CopyWord owning:bool=false):>bool=>$unsafe {
         return copy_escapes(CopyWord(nodes.ptr[n].a) l) or copy_escapes(CopyWord(nodes.ptr[n].b) l owning) or copy_escapes(CopyWord(nodes.ptr[n].c) l owning)
     }
     let take=owning or k =? 'array' or k =? 'tuple' or k =? 'map_lit'
-    let nd=nodes.ptr + n
-    let mask=CopyWord(iso_child_p[int64((nd as ptr<uint32>)[0])])
+    let mask=CopyWord(iso_child_p[int64(((nodes.ptr + n) as ptr<uint32>)[0])])
     if mask <=? 0 {return false}
-    if mask & 1 not=? 0 and nd[0].a not=? 0 and copy_escapes(CopyWord(nd[0].a) l take) {return true}
-    if mask & 2 not=? 0 and nd[0].b not=? 0 and copy_escapes(CopyWord(nd[0].b) l take) {return true}
-    if mask & 4 not=? 0 and nd[0].c not=? 0 and copy_escapes(CopyWord(nd[0].c) l take) {return true}
+    if mask & 1 not=? 0 and nodes[n].a not=? 0 and copy_escapes(CopyWord(nodes[n].a) l take) {return true}
+    if mask & 2 not=? 0 and nodes[n].b not=? 0 and copy_escapes(CopyWord(nodes[n].b) l take) {return true}
+    if mask & 4 not=? 0 and nodes[n].c not=? 0 and copy_escapes(CopyWord(nodes[n].c) l take) {return true}
     if mask & 16 not=? 0 {
-        let lp=lists.ptr + CopyWord(nd[0].list)
-        let nk=CopyWord(nd[0].nlist)
+        let list_start=CopyWord(nodes[n].list)
+        let nk=CopyWord(nodes[n].nlist)
         loop i in [CopyWord(0)..nk) {
-            if copy_escapes(CopyWord(lp[i]) l take) {return true}
+            if copy_escapes(CopyWord(lists[list_start + i]) l take) {return true}
         }
     }
     false
@@ -254,11 +253,10 @@ let copy_call_gen:int32=0
 
 copy_mentions_call=(n:CopyWord g_seen:int32 g_here:int32 seen_p:ptr<int32> here_p:ptr<int32> @live:dict<int64 bool>):>void=>$unsafe {
     if n =? 0 {return}
-    let nd=nodes.ptr + n
-    let k=nd[0].kind
+    let k=nodes[n].kind
     if k =? 'lambda' {
-        let f=CopyWord(nd[0].sym)
-        if has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nd[0].aux)].envfn}
+        let f=CopyWord(nodes[n].sym)
+        if has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nodes[n].aux)].envfn}
         loop cap in fns.ptr[f].caps {
             let l=int64(cap.outer)
             if here_p[l] not=? g_here {
@@ -268,47 +266,46 @@ copy_mentions_call=(n:CopyWord g_seen:int32 g_here:int32 seen_p:ptr<int32> here_
         }
         return
     }
-    if k =? 'ident' and nd[0].aux =? int32(1) {
-        let l=CopyWord(nd[0].sym)
+    if k =? 'ident' and nodes[n].aux =? int32(1) {
+        let l=CopyWord(nodes[n].sym)
         if here_p[l] not=? g_here {
             here_p[l]=g_here
             if seen_p[l] =? g_seen {live[l]=true} else {seen_p[l]=g_seen}
         }
     }
-    let mask=CopyWord(iso_child_p[int64((nd as ptr<uint32>)[0])])
+    let mask=CopyWord(iso_child_p[int64(((nodes.ptr + n) as ptr<uint32>)[0])])
     if mask <=? 0 {return}
-    if mask & 1 not=? 0 and nd[0].a not=? 0 {copy_mentions_call(CopyWord(nd[0].a) g_seen g_here seen_p here_p @live)}
-    if mask & 2 not=? 0 and nd[0].b not=? 0 {copy_mentions_call(CopyWord(nd[0].b) g_seen g_here seen_p here_p @live)}
-    if mask & 4 not=? 0 and nd[0].c not=? 0 {copy_mentions_call(CopyWord(nd[0].c) g_seen g_here seen_p here_p @live)}
+    if mask & 1 not=? 0 and nodes[n].a not=? 0 {copy_mentions_call(CopyWord(nodes[n].a) g_seen g_here seen_p here_p @live)}
+    if mask & 2 not=? 0 and nodes[n].b not=? 0 {copy_mentions_call(CopyWord(nodes[n].b) g_seen g_here seen_p here_p @live)}
+    if mask & 4 not=? 0 and nodes[n].c not=? 0 {copy_mentions_call(CopyWord(nodes[n].c) g_seen g_here seen_p here_p @live)}
     if mask & 16 not=? 0 {
-        let lp=lists.ptr + CopyWord(nd[0].list)
-        let nk=CopyWord(nd[0].nlist)
-        loop i in [CopyWord(0)..nk) {copy_mentions_call(CopyWord(lp[i]) g_seen g_here seen_p here_p @live)}
+        let list_start=CopyWord(nodes[n].list)
+        let nk=CopyWord(nodes[n].nlist)
+        loop i in [CopyWord(0)..nk) {copy_mentions_call(CopyWord(lists[list_start + i]) g_seen g_here seen_p here_p @live)}
     }
 }
 
 copy_mentions=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
     if n =? 0 {return}
-    let nd=nodes.ptr + n
-    let k=nd[0].kind
+    let k=nodes.ptr[n].kind
     if k =? 'lambda' {
-        let f=CopyWord(nd[0].sym)
-        if has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nd[0].aux)].envfn}
+        let f=CopyWord(nodes.ptr[n].sym)
+        if has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nodes.ptr[n].aux)].envfn}
         loop cap in fns.ptr[f].caps {live[int64(cap.outer)]=true}
         return
     }
-    if k =? 'ident' and nd[0].aux =? int32(1) {
-        live[CopyWord(nd[0].sym)]=true
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(1) {
+        live[CopyWord(nodes.ptr[n].sym)]=true
     }
-    let mask=CopyWord(iso_child_p[int64((nd as ptr<uint32>)[0])])
+    let mask=CopyWord(iso_child_p[int64(((nodes.ptr + n) as ptr<uint32>)[0])])
     if mask <=? 0 {return}
-    if mask & 1 not=? 0 and nd[0].a not=? 0 {copy_mentions(CopyWord(nd[0].a) @live)}
-    if mask & 2 not=? 0 and nd[0].b not=? 0 {copy_mentions(CopyWord(nd[0].b) @live)}
-    if mask & 4 not=? 0 and nd[0].c not=? 0 {copy_mentions(CopyWord(nd[0].c) @live)}
+    if mask & 1 not=? 0 {copy_mentions(CopyWord(nodes.ptr[n].a) @live)}
+    if mask & 2 not=? 0 {copy_mentions(CopyWord(nodes.ptr[n].b) @live)}
+    if mask & 4 not=? 0 {copy_mentions(CopyWord(nodes.ptr[n].c) @live)}
     if mask & 16 not=? 0 {
-        let lp=lists.ptr + CopyWord(nd[0].list)
-        let nk=CopyWord(nd[0].nlist)
-        loop i in [CopyWord(0)..nk) {copy_mentions(CopyWord(lp[i]) @live)}
+        let list_start=CopyWord(nodes.ptr[n].list)
+        let nk=CopyWord(nodes.ptr[n].nlist)
+        loop i in [CopyWord(0)..nk) {copy_mentions(CopyWord(lists.ptr[list_start + i]) @live)}
     }
 }
 # Field paths are per-function and only demanded for resource records.
@@ -436,20 +433,19 @@ copy_live=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
         copy_loop_locals(n @inner)
         if copy_hidden {loop h in copy_owner_hidden {copy_kill_local(h @inner)}}
         copy_loop_back.push(inner)
-        let nd0=nodes.ptr + n
-        let mask0=CopyWord(iso_child_p[int64((nd0 as ptr<uint32>)[0])])
+        let mask0=CopyWord(iso_child_p[int64(((nodes.ptr + n) as ptr<uint32>)[0])])
         if mask0 >? 0 {
             if mask0 & 16 not=? 0 {
-                let lbase=CopyWord(nd0[0].list)
-                let i=CopyWord(nd0[0].nlist) - 1
+                let lbase=CopyWord(nodes[n].list)
+                let i=CopyWord(nodes[n].nlist) - 1
                 loop i >=? 0 {
                     copy_live(CopyWord(lists.ptr[lbase + i]) @inner)
                     i -= 1
                 }
             }
-            if mask0 & 4 not=? 0 and nd0[0].c not=? 0 {copy_live(CopyWord(nd0[0].c) @inner)}
-            if mask0 & 2 not=? 0 and nd0[0].b not=? 0 {copy_live(CopyWord(nd0[0].b) @inner)}
-            if mask0 & 1 not=? 0 and nd0[0].a not=? 0 {copy_live(CopyWord(nd0[0].a) @inner)}
+            if mask0 & 4 not=? 0 and nodes[n].c not=? 0 {copy_live(CopyWord(nodes[n].c) @inner)}
+            if mask0 & 2 not=? 0 and nodes[n].b not=? 0 {copy_live(CopyWord(nodes[n].b) @inner)}
+            if mask0 & 1 not=? 0 and nodes[n].a not=? 0 {copy_live(CopyWord(nodes[n].a) @inner)}
         }
         copy_loop_after.pop();
         copy_loop_back.pop();
@@ -513,20 +509,19 @@ copy_live=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
             return
         }
     }
-    let nd1=nodes.ptr + n
-    let mask1=CopyWord(iso_child_p[int64((nd1 as ptr<uint32>)[0])])
+    let mask1=CopyWord(iso_child_p[int64(((nodes.ptr + n) as ptr<uint32>)[0])])
     if mask1 <=? 0 {return}
     if mask1 & 16 not=? 0 {
-        let lbase=CopyWord(nd1[0].list)
-        let i=CopyWord(nd1[0].nlist) - 1
+        let lbase=CopyWord(nodes[n].list)
+        let i=CopyWord(nodes[n].nlist) - 1
         loop i >=? 0 {
             copy_live(CopyWord(lists.ptr[lbase + i]) @live)
             i -= 1
         }
     }
-    if mask1 & 4 not=? 0 and nd1[0].c not=? 0 {copy_live(CopyWord(nd1[0].c) @live)}
-    if mask1 & 2 not=? 0 and nd1[0].b not=? 0 {copy_live(CopyWord(nd1[0].b) @live)}
-    if mask1 & 1 not=? 0 and nd1[0].a not=? 0 {copy_live(CopyWord(nd1[0].a) @live)}
+    if mask1 & 4 not=? 0 and nodes[n].c not=? 0 {copy_live(CopyWord(nodes[n].c) @live)}
+    if mask1 & 2 not=? 0 and nodes[n].b not=? 0 {copy_live(CopyWord(nodes[n].b) @live)}
+    if mask1 & 1 not=? 0 and nodes[n].a not=? 0 {copy_live(CopyWord(nodes[n].a) @live)}
 }
 copies_prepare=(f:CopyWord):>void=>$unsafe {
     copy_moves.clear()
@@ -583,16 +578,15 @@ copy_deferred=(n:CopyWord):>void=>$unsafe {
             if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32(1) and copy_noenv.has(CopyWord(nodes.ptr[e].sym)) {copy_noenv[l]=true}
         }
     }
-    let nd=nodes.ptr + n
-    let mask=CopyWord(iso_child_p[int64((nd as ptr<uint32>)[0])])
+    let mask=CopyWord(iso_child_p[int64(((nodes.ptr + n) as ptr<uint32>)[0])])
     if mask <=? 0 {return}
-    if mask & 1 not=? 0 and nd[0].a not=? 0 {copy_deferred(CopyWord(nd[0].a))}
-    if mask & 2 not=? 0 and nd[0].b not=? 0 {copy_deferred(CopyWord(nd[0].b))}
-    if mask & 4 not=? 0 and nd[0].c not=? 0 {copy_deferred(CopyWord(nd[0].c))}
+    if mask & 1 not=? 0 {copy_deferred(CopyWord(nodes.ptr[n].a))}
+    if mask & 2 not=? 0 {copy_deferred(CopyWord(nodes.ptr[n].b))}
+    if mask & 4 not=? 0 {copy_deferred(CopyWord(nodes.ptr[n].c))}
     if mask & 16 not=? 0 {
-        let lp=lists.ptr + CopyWord(nd[0].list)
-        let nk=CopyWord(nd[0].nlist)
-        loop i in [CopyWord(0)..nk) {copy_deferred(CopyWord(lp[i]))}
+        let list_start=CopyWord(nodes.ptr[n].list)
+        let nk=CopyWord(nodes.ptr[n].nlist)
+        loop i in [CopyWord(0)..nk) {copy_deferred(CopyWord(lists.ptr[list_start + i]))}
     }
 }
 # Transfer a dead local's ownership, clearing its old slot so ordinary cleanup
@@ -691,26 +685,25 @@ copy_later_use=(n:CopyWord l:CopyWord after:CopyWord):>CopyWord=>$unsafe {
         return 0
     }
     let found:CopyWord=0
-    let nd=nodes.ptr + n
-    let mask=CopyWord(iso_child_p[int64((nd as ptr<uint32>)[0])])
+    let mask=CopyWord(iso_child_p[int64(((nodes.ptr + n) as ptr<uint32>)[0])])
     if mask <=? 0 {return 0}
-    if mask & 1 not=? 0 and nd[0].a not=? 0 {
-        let at=copy_later_use(CopyWord(nd[0].a) l after)
+    if mask & 1 not=? 0 and nodes[n].a not=? 0 {
+        let at=copy_later_use(CopyWord(nodes[n].a) l after)
         if at >? 0 and (found =? 0 or at <? found) {found=at}
     }
-    if mask & 2 not=? 0 and nd[0].b not=? 0 {
-        let at=copy_later_use(CopyWord(nd[0].b) l after)
+    if mask & 2 not=? 0 and nodes[n].b not=? 0 {
+        let at=copy_later_use(CopyWord(nodes[n].b) l after)
         if at >? 0 and (found =? 0 or at <? found) {found=at}
     }
-    if mask & 4 not=? 0 and nd[0].c not=? 0 {
-        let at=copy_later_use(CopyWord(nd[0].c) l after)
+    if mask & 4 not=? 0 and nodes[n].c not=? 0 {
+        let at=copy_later_use(CopyWord(nodes[n].c) l after)
         if at >? 0 and (found =? 0 or at <? found) {found=at}
     }
     if mask & 16 not=? 0 {
-        let lp=lists.ptr + CopyWord(nd[0].list)
-        let nk=CopyWord(nd[0].nlist)
+        let list_start=CopyWord(nodes[n].list)
+        let nk=CopyWord(nodes[n].nlist)
         loop i in [CopyWord(0)..nk) {
-            let at=copy_later_use(CopyWord(lp[i]) l after)
+            let at=copy_later_use(CopyWord(lists[list_start + i]) l after)
             if at >? 0 and (found =? 0 or at <? found) {found=at}
         }
     }
@@ -804,17 +797,16 @@ copy_shared_global=(s:CopyWord g:CopyWord):>bool=>$unsafe {
 copy_loop_locals=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
     if n =? 0 {return}
     # (a match's own variable is declared by the match, fresh each iteration too)
-    let nd=nodes.ptr + n
-    if nd[0].kind =? 'vardecl' {copy_kill_local(CopyWord(nd[0].sym) @live)}
-    let mask=CopyWord(iso_child_p[int64((nd as ptr<uint32>)[0])])
+    if nodes[n].kind =? 'vardecl' {copy_kill_local(CopyWord(nodes[n].sym) @live)}
+    let mask=CopyWord(iso_child_p[int64(((nodes.ptr + n) as ptr<uint32>)[0])])
     if mask <=? 0 {return}
-    if mask & 1 not=? 0 and nd[0].a not=? 0 {copy_loop_locals(CopyWord(nd[0].a) @live)}
-    if mask & 2 not=? 0 and nd[0].b not=? 0 {copy_loop_locals(CopyWord(nd[0].b) @live)}
-    if mask & 4 not=? 0 and nd[0].c not=? 0 {copy_loop_locals(CopyWord(nd[0].c) @live)}
+    if mask & 1 not=? 0 and nodes[n].a not=? 0 {copy_loop_locals(CopyWord(nodes[n].a) @live)}
+    if mask & 2 not=? 0 and nodes[n].b not=? 0 {copy_loop_locals(CopyWord(nodes[n].b) @live)}
+    if mask & 4 not=? 0 and nodes[n].c not=? 0 {copy_loop_locals(CopyWord(nodes[n].c) @live)}
     if mask & 16 not=? 0 {
-        let lp=lists.ptr + CopyWord(nd[0].list)
-        let nk=CopyWord(nd[0].nlist)
-        loop i in [CopyWord(0)..nk) {copy_loop_locals(CopyWord(lp[i]) @live)}
+        let list_start=CopyWord(nodes[n].list)
+        let nk=CopyWord(nodes[n].nlist)
+        loop i in [CopyWord(0)..nk) {copy_loop_locals(CopyWord(lists[list_start + i]) @live)}
     }
 }
 copy_capture_ids=(n:CopyWord):>array<int64>=>$unsafe {

@@ -75,10 +75,9 @@ ct_kind=(t:CTWord):>TK=>$unsafe {
     ct_input[0].types[0].ptr[tu_prune(t)].kind
 }
 ct_resolve_type=(tn:CTWord):>CTWord=>$unsafe {
-    let nd=ct_input[0].nodes[0].ptr + tn
-    let k=nd[0].kind
-    if k =? 'tname' and nd[0].aux =? -9 {return policy_int(ct_resolve_type(CTWord(nd[0].a)) CTWord(ct_input[0].nodes[0].ptr[tn].ival) ct_input[0].nodes[0].ptr[tn].pos)}
-    if k =? 'tname' and nd[0].aux =? -7 {return CTWord(nd[0].ival)}
+    let k=ct_input[0].nodes[0][tn].kind
+    if k =? 'tname' and ct_input[0].nodes[0][tn].aux =? -9 {return policy_int(ct_resolve_type(CTWord(ct_input[0].nodes[0][tn].a)) CTWord(ct_input[0].nodes[0].ptr[tn].ival) ct_input[0].nodes[0].ptr[tn].pos)}
+    if k =? 'tname' and ct_input[0].nodes[0][tn].aux =? -7 {return CTWord(ct_input[0].nodes[0][tn].ival)}
     let values_ok=ct_input[0].values[0]
     ct_input[0].values[0] = false
     if k =? 'trefined' {return resolve_refinement(tn)}

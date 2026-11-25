@@ -383,56 +383,55 @@ panic_node=(f:PanicWord root:PanicWord):>void=>$unsafe {
     if root =? 0 or panic_stop and panic_witness.ptr[f] not=? 0 {return}
     if panic_ktbl_p =? (uint64(0) as ptr<uint8>) {panic_init_ktbl()}
     let ktbl=panic_ktbl_p
-    let nodes_p=nodes.ptr
-    if (ktbl[int64(((nodes_p + root) as ptr<uint32>)[0])] & 64) not=? 0 {return}
+    if (ktbl[int64(((nodes.ptr + root) as ptr<uint32>)[0])] & 64) not=? 0 {return}
     if panic_walk_stack.length <? 256 {panic_walk_stack.resize(256)}
     let st=panic_walk_stack.ptr
     let cap=panic_walk_stack.length
-    let lists_p=lists.ptr
     let sp:PanicWord=0
     let n=root
     loop true {
-        let nd=nodes_p + n
-        let info=int64(ktbl[int64((nd as ptr<uint32>)[0])])
-        if (info & 32 not=? 0) or ((info & 128 not=? 0) and nd[0].aux =? 1) {
+        let nodes_p=nodes.ptr
+        let info=int64(ktbl[int64(((nodes_p + n) as ptr<uint32>)[0])])
+        if (info & 32 not=? 0) or ((info & 128 not=? 0) and nodes_p[n].aux =? 1) {
             panic_site(f n);
+            nodes_p=nodes.ptr
             if panic_stop and panic_witness.ptr[f] not=? 0 {return}
         }
         let mask=info & 31
         if mask =? 1 {
-            let x=PanicWord(nd[0].a)
+            let x=PanicWord(nodes_p[n].a)
             if x not=? 0 and (ktbl[int64(((nodes_p + x) as ptr<uint32>)[0])] & 64) =? 0 {
                 n=x
                 continue
             }
         } else if mask not=? 0 {
-            let nk:PanicWord=if mask & 16 not=? 0 {PanicWord(nd[0].nlist)} else {0}
+            let nk:PanicWord=if mask & 16 not=? 0 {PanicWord(nodes_p[n].nlist)} else {0}
             if sp + nk + 3 >? cap {
                 cap=(sp + nk + 3) * 2
                 panic_walk_stack.resize(cap)
                 st=panic_walk_stack.ptr
             }
             if nk >? 0 {
-                let base=PanicWord(nd[0].list)
+                let base=PanicWord(nodes_p[n].list)
                 let i=nk - 1
                 loop i >=? 0 {
-                    let x=lists_p[base + i]
+                    let x=lists.ptr[base + i]
                     if x not=? 0 and (ktbl[int64(((nodes_p + PanicWord(x)) as ptr<uint32>)[0])] & 64) =? 0 {
                         st[sp]=int64(x); sp=sp + 1
                     }
                     i=i - 1
                 }
             }
-            if mask & 4 not=? 0 and nd[0].c not=? 0 {
-                let x=nd[0].c
+            if mask & 4 not=? 0 and nodes_p[n].c not=? 0 {
+                let x=nodes_p[n].c
                 if (ktbl[int64(((nodes_p + PanicWord(x)) as ptr<uint32>)[0])] & 64) =? 0 {st[sp]=int64(x); sp=sp + 1}
             }
-            if mask & 2 not=? 0 and nd[0].b not=? 0 {
-                let x=nd[0].b
+            if mask & 2 not=? 0 and nodes_p[n].b not=? 0 {
+                let x=nodes_p[n].b
                 if (ktbl[int64(((nodes_p + PanicWord(x)) as ptr<uint32>)[0])] & 64) =? 0 {st[sp]=int64(x); sp=sp + 1}
             }
-            if mask & 1 not=? 0 and nd[0].a not=? 0 {
-                let x=PanicWord(nd[0].a)
+            if mask & 1 not=? 0 and nodes_p[n].a not=? 0 {
+                let x=PanicWord(nodes_p[n].a)
                 if (ktbl[int64(((nodes_p + x) as ptr<uint32>)[0])] & 64) =? 0 {
                     n=x
                     continue

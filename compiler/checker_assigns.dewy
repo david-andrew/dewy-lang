@@ -233,26 +233,25 @@ va_compound=(s:AWord lt:AWord):>AWord=>$unsafe {
     # (Dewy's integers update through their helpers)
     if l =? va_math_int_type[0] {return assign_update(s lt 0 5)}
     # (one view of the statement until a service runs)
-    let node=va_nodes[0].ptr + s
-    let op=AWord(node[0].op)
-    let broadcast=AWord(node[0].flags) & 16384 not=? 0
-    let pos=AWord(node[0].pos)
-    let lhs=AWord(node[0].a)
+    let op=AWord(va_nodes[0][s].op)
+    let broadcast=AWord(va_nodes[0][s].flags) & 16384 not=? 0
+    let pos=AWord(va_nodes[0][s].pos)
+    let lhs=AWord(va_nodes[0][s].a)
     if lk =? 'str_' or lk =? 'array' or lk =? 'fixed' {
         let pluseq=op =? 48 and not broadcast
         if lk =? 'str_' and pluseq {return assign_update(s l 0 7)}
         if pluseq and va_dewy_at(pos) {assign_update(s l 0 3);}
         return assign_update(s lt 0 5)
     }
-    if lk =? 'ptr' and node[0].sval =? 0 and not broadcast {
-        check_expr(AWord(node[0].b) va_int_type[0]);
+    if lk =? 'ptr' and va_nodes[0][s].sval =? 0 and not broadcast {
+        check_expr(AWord(va_nodes[0][s].b) va_int_type[0]);
         va_nodes[0][s].b=int32<overflow='wrap'>(coerce(va_last[0] va_int_type[0]))
         va_nodes[0][s].aux=3
         return s
     }
     let lhk=va_nodes[0].ptr[lhs].kind
-    let helper=node[0].sval not=? 0 or broadcast or (lk not=? 'int_' and lk not=? 'float_' and lk not=? 'bool_') or lhk =? 'index' or lhk =? 'field' or (node[0].aux2 =? 1 and lk =? 'bool_')
-    let rb=AWord(node[0].b)
+    let helper=va_nodes[0][s].sval not=? 0 or broadcast or (lk not=? 'int_' and lk not=? 'float_' and lk not=? 'bool_') or lhk =? 'index' or lhk =? 'field' or (va_nodes[0][s].aux2 =? 1 and lk =? 'bool_')
+    let rb=AWord(va_nodes[0][s].b)
     if not helper and lk =? 'int_' {
         # (the common implementation words are exact in Dewy only)
         if l =? va_int_type[0] or l =? va_u64_type[0] {helper=va_dewy_at(pos)}

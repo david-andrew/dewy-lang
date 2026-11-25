@@ -51,10 +51,9 @@ tp_base_slow=(types:ptr<TypeInfo> t0:PWord):>PWord=>$unsafe {
     t
 }
 tp_base=(t0:PWord):>PWord=>$unsafe {
-    let types=tp_types[0].ptr
-    let k=types[t0].kind
+    let k=tp_types[0][t0].kind
     if k not=? 'var' and k not=? 'secret' and k not=? 'callable' and k not=? 'quantity' and k not=? 'refined' {return t0}
-    tp_base_slow(types t0)
+    tp_base_slow(tp_types[0].ptr t0)
 }
 tp_targ=(t:PWord i:PWord):>PWord=>$unsafe {
     PWord(tp_inputs[0].args[0].ptr[PWord(tp_inputs[0].types[0].ptr[t].args) + i])
@@ -63,34 +62,30 @@ tp_struct_targ=(si:PWord i:PWord):>PWord=>$unsafe {
     PWord(tp_inputs[0].args[0].ptr[PWord(tp_inputs[0].structs[0].ptr[si].targs) + i])
 }
 tp_simple_enum=(t:PWord):>bool=>$unsafe {
-    let tp=tp_types[0].ptr
-    if t not=? 0 and PWord(tp[t].flags) & TF_LAID_OUT not=? 0 and tp[t].kind not=? 'var' {
-        return tp_inputs[0].structs[0].ptr[PWord(tp[t].st)].simple_enum
+    if t not=? 0 and PWord(tp_types[0][t].flags) & TF_LAID_OUT not=? 0 and tp_types[0][t].kind not=? 'var' {
+        return tp_inputs[0].structs[0].ptr[PWord(tp_types[0][t].st)].simple_enum
     }
     tl_layout(t)
     tp_inputs[0].structs[0].ptr[PWord(tp_types[0].ptr[tp_prune(t)].st)].simple_enum
 }
 tp_is_managed_agg=(t:PWord):>bool=>$unsafe {
-    let tp=tp_types[0].ptr
-    if PWord(tp[t].flags) & TF_LAID_OUT =? 0 {
+    if PWord(tp_types[0][t].flags) & TF_LAID_OUT =? 0 {
         tl_layout(t)
-        tp=tp_types[0].ptr
     }
-    PWord(tp[t].flags) & TF_MANAGED not=? 0
+    PWord(tp_types[0][t].flags) & TF_MANAGED not=? 0
 }
 tp_is_managed=(t0:PWord):>bool=>$unsafe {
-    let tp=tp_types[0].ptr
     let t=t0
-    let k=tp[t].kind
+    let k=tp_types[0][t].kind
     if k =? 'var' or k =? 'secret' or k =? 'callable' or k =? 'quantity' or k =? 'refined' {
-        t=tp_base_slow(tp t0)
-        k=tp[t].kind
+        t=tp_base_slow(tp_types[0].ptr t0)
+        k=tp_types[0][t].kind
     }
-    if tp[t].rep =? 'tagged_int' {return true}
+    if tp_types[0][t].rep =? 'tagged_int' {return true}
     match k {
         <'str_'|'array'|'fn_'|'polyfn'|'callable'|'box'> => true
         <'struct_'|'enum_'|'tuple'|'opt'|'fixed'> => {
-            let f=PWord(tp[t].flags)
+            let f=PWord(tp_types[0][t].flags)
             if f & TF_LAID_OUT not=? 0 {return f & TF_MANAGED not=? 0}
             tp_is_managed_agg(t)
         }

@@ -197,9 +197,8 @@ member_checked=(n:MemberWord t:MemberTemplate @seen:dict<int64 bool>):>bool=>$un
 member_checked_fast=(n:MemberWord @t:MemberTemplate @seen:dict<int64 bool>):>bool=>$unsafe {
     if n =? 0 or seen.has(n) {return true}
     seen[n]=true
-    let nd=nodes.ptr + n
-    let k=nd[0].kind
-    if (k =? 'str_lit' or k =? 'dotname') and t.positions.has(nd[0].pos) {
+    let k=nodes[n].kind
+    if (k =? 'str_lit' or k =? 'dotname') and t.positions.has(nodes[n].pos) {
         if k =? 'dotname' {
             let set=str_set_of(ntype(n))
             if set =? 0 {return false}
@@ -208,32 +207,32 @@ member_checked_fast=(n:MemberWord @t:MemberTemplate @seen:dict<int64 bool>):>boo
         else if ntype(n) not=? T_STR {return false}
     }
     if k =? 'ident' {
-        if nd[0].aux =? int32(2) {return false}
-        if nd[0].aux =? int32(1) {
-            let l=MemberWord(nd[0].sym)
+        if nodes[n].aux =? int32(2) {return false}
+        if nodes[n].aux =? int32(1) {
+            let l=MemberWord(nodes[n].sym)
             # A checked path may have become an existing narrowed alias.
             # Text/integer inference also has use-site records outside this tree.
             if MemberWord(locals.ptr[l].flags) & (LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_BYREF) not=? 0 or MemberWord(locals.ptr[l].type) =? T_STR or MemberWord(locals.ptr[l].type) =? T_MATH_INT or not member_plain(MemberWord(locals.ptr[l].type)) {return false}
         }
     }
     if k =? 'lambda' or k =? 'fnref' or k =? 'partial' or k =? 'narrow' or k =? 'istype' or k =? 'iflet' or k =? 'match_' or k =? 'for_' or k =? 'while_' or k =? 'return_' {return false}
-    if k =? 'conv' and (nd[0].aux =? int32(int64(CV.refinement)) or nd[0].aux =? int32(int64(CV.set_text))) {return false}
+    if k =? 'conv' and (nodes[n].aux =? int32(int64(CV.refinement)) or nodes[n].aux =? int32(int64(CV.set_text))) {return false}
     if (exact_stores.length >? 0 and exact_stores.has(n)) or (ref_narrowing.length >? 0 and ref_narrowing.has(n)) or (wi_fact_calls.length >? 0 and wi_fact_calls.has(n)) {return false}
-    if nd[0].type not=? 0 and has_var(prune(ntype(n))) {return false}
+    if nodes[n].type not=? 0 and has_var(prune(ntype(n))) {return false}
     if k =? 'intrinsic' {
-        let id=nd[0].aux as IN
+        let id=nodes[n].aux as IN
         if id not=? IN.to_bytes and id not=? IN.runtime_assert and id not=? IN.static_assert and id not=? IN.len and id not=? IN.push {return false}
     }
     if k =? 'call' {
-        if nd[0].aux not=? 0 {return false}
-        let decl=MemberWord(fns.ptr[MemberWord(nd[0].sym)].decl)
+        if nodes[n].aux not=? 0 {return false}
+        let decl=MemberWord(fns.ptr[MemberWord(nodes[n].sym)].decl)
         if not decl_in_prelude(decl) or nodes.ptr[decl].c not=? 0 {return false}
     }
     let mask=isolation_node_children(n)
     if mask <? 0 {return false}
-    if mask & 1 not=? 0 and not member_checked_fast(MemberWord(nd[0].a) @t @seen) {return false}
-    if mask & 2 not=? 0 and not member_checked_fast(MemberWord(nd[0].b) @t @seen) {return false}
-    if mask & 4 not=? 0 and not member_checked_fast(MemberWord(nd[0].c) @t @seen) {return false}
+    if mask & 1 not=? 0 and not member_checked_fast(MemberWord(nodes[n].a) @t @seen) {return false}
+    if mask & 2 not=? 0 and not member_checked_fast(MemberWord(nodes[n].b) @t @seen) {return false}
+    if mask & 4 not=? 0 and not member_checked_fast(MemberWord(nodes[n].c) @t @seen) {return false}
     if mask & 16 not=? 0 {
         loop child in kids(n) {
             if not member_checked_fast(child @t @seen) {return false}
@@ -302,34 +301,16 @@ let mcf_stamp_p:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
 let mcf_val_p:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
 
 mcf_alloc_lists=(nk:MemberWord):>MemberWord=>$unsafe {
-    let lp=lists.ptr
-    let lh=(lp as ptr<int64>) - 3
-    if lp =? (uint64(0) as ptr<int32>) or lh[0] not=? 1 or lh[1] + nk >? lh[2] {
-        let os=lists.length
-        lists.reserve(max(os + nk os * 2))
-        lp=lists.ptr
-        lh=(lp as ptr<int64>) - 3
-    }
-    let start=lh[1]
-    lh[1]=start + nk
+    let start=lists.length
+    lists.resize(start + nk)
     start
 }
 member_copy_flat=(n:MemberWord):>MemberWord=>$unsafe {
     if n =? 0 {return 0}
     if mcf_stamp_p[n] =? mcf_gen {return int64(mcf_val_p[n])}
-    let nptr=nodes.ptr
-    let nh=(nptr as ptr<int64>) - 3
-    if nptr =? (uint64(0) as ptr<Node>) or nh[0] not=? 1 or nh[1] >=? nh[2] {
-        let oc=nodes.length
-        nodes.reserve(max(oc + 1 oc * 2))
-        nptr=nodes.ptr
-        nh=(nptr as ptr<int64>) - 3
-    }
-    let c:MemberWord=nh[1]
-    nh[1]=c + 1
-    let k=nptr[n].kind
-    let np0=nptr + c
-    mem_copy(np0 nptr + n size_of<Node>)
+    let c:MemberWord=nodes.length
+    let k=nodes[n].kind
+    nodes.push(nodes[n])
     mcf_stamp_p[n]=mcf_gen
     mcf_val_p[n]=MemberI32(c)
     match k {
@@ -340,13 +321,13 @@ member_copy_flat=(n:MemberWord):>MemberWord=>$unsafe {
         _ => {}
     }
     if k =? 'ident' {
-        if np0[0].aux =? int32(1) and mcf_n_old >? 0 {
-            let sym=int64(np0[0].sym)
+        if nodes[c].aux =? int32(1) and mcf_n_old >? 0 {
+            let sym=int64(nodes[c].sym)
             let op=mcf_old_p
             let no=mcf_n_old
             loop i in [0..no) {
                 if op[i] =? sym {
-                    np0[0].sym=MemberI32(mcf_new_p[i])
+                    nodes[c].sym=MemberI32(mcf_new_p[i])
                     break
                 }
             }
@@ -354,11 +335,11 @@ member_copy_flat=(n:MemberWord):>MemberWord=>$unsafe {
         if exact_measure_on {exact_note(c)}
         return c
     }
-    if mcf_has_pos and (k =? 'str_lit' or k =? 'dotname') and mcf_t[0].positions.has(np0[0].pos) {
-        if k =? 'str_lit' {np0[0].sval=mcf_text_id}
+    if mcf_has_pos and (k =? 'str_lit' or k =? 'dotname') and mcf_t[0].positions.has(nodes[c].pos) {
+        if k =? 'str_lit' {nodes[c].sval=mcf_text_id}
         else {
-            np0[0].aux=MemberI32(member_words[str_set_of(ntype(n))][mcf_text])
-            np0[0].name=mcf_text_id
+            nodes[c].aux=MemberI32(member_words[str_set_of(ntype(n))][mcf_text])
+            nodes[c].name=mcf_text_id
         }
     }
     if k =? 'dotname' {
@@ -366,22 +347,22 @@ member_copy_flat=(n:MemberWord):>MemberWord=>$unsafe {
         return c
     }
     if k =? 'vardecl' and mcf_n_old >? 0 {
-        let sym=int64(np0[0].sym)
+        let sym=int64(nodes[c].sym)
         let op=mcf_old_p
         let no=mcf_n_old
         loop i in [0..no) {
             if op[i] =? sym {
-                np0[0].sym=MemberI32(mcf_new_p[i])
+                nodes[c].sym=MemberI32(mcf_new_p[i])
                 break
             }
         }
     }
-    let mask=int64(iso_child_p[int64((np0 as ptr<uint32>)[0])])
-    let na=int64(np0[0].a)
-    let nb=int64(np0[0].b)
-    let nc=int64(np0[0].c)
-    let nk=int64(np0[0].nlist)
-    let lbase=int64(np0[0].list)
+    let mask=int64(iso_child_p[int64(((nodes.ptr + c) as ptr<uint32>)[0])])
+    let na=int64(nodes[c].a)
+    let nb=int64(nodes[c].b)
+    let nc=int64(nodes[c].c)
+    let nk=int64(nodes[c].nlist)
+    let lbase=int64(nodes[c].list)
     let r_a:MemberWord=if mask & 1 not=? 0 and na not=? 0 {member_copy_flat(na)} else {0}
     let r_b:MemberWord=if mask & 2 not=? 0 and nb not=? 0 {member_copy_flat(nb)} else {0}
     let r_c:MemberWord=if mask & 4 not=? 0 and nc not=? 0 {member_copy_flat(nc)} else {0}
@@ -392,15 +373,13 @@ member_copy_flat=(n:MemberWord):>MemberWord=>$unsafe {
             r_list=mcf_alloc_lists(1)
             lists.ptr[r_list]=c0
         } else if nk =? 2 {
-            let lp0=lists.ptr
-            let k0=int64(lp0[lbase])
-            let k1=int64(lp0[lbase + 1])
+            let k0=int64(lists[lbase])
+            let k1=int64(lists[lbase + 1])
             let c0=MemberI32(member_copy_flat(k0))
             let c1=MemberI32(member_copy_flat(k1))
             r_list=mcf_alloc_lists(2)
-            let lp1=lists.ptr + r_list
-            lp1[0]=c0
-            lp1[1]=c1
+            lists[r_list]=c0
+            lists[r_list + 1]=c1
         } else {
             let bp=member_kid_buf.ptr
             let bh=(bp as ptr<int64>) - 3
@@ -420,13 +399,12 @@ member_copy_flat=(n:MemberWord):>MemberWord=>$unsafe {
         }
     }
     if r_a not=? 0 or r_b not=? 0 or r_c not=? 0 or r_list >=? 0 {
-        let np2=nodes.ptr + c
-        if r_a not=? 0 {np2[0].a=MemberI32(r_a)}
-        if r_b not=? 0 {np2[0].b=MemberI32(r_b)}
-        if r_c not=? 0 {np2[0].c=MemberI32(r_c)}
+        if r_a not=? 0 {nodes[c].a=MemberI32(r_a)}
+        if r_b not=? 0 {nodes[c].b=MemberI32(r_b)}
+        if r_c not=? 0 {nodes[c].c=MemberI32(r_c)}
         if r_list >=? 0 {
-            np2[0].list=MemberI32(r_list)
-            np2[0].nlist=MemberI32(nk)
+            nodes[c].list=MemberI32(r_list)
+            nodes[c].nlist=MemberI32(nk)
         }
     }
     if mcf_has_div {

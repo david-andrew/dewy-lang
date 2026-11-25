@@ -61,10 +61,9 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
     let positional=true
     let n_args=args.length
     let ap=args.ptr
-    let np0=nodes.ptr
     loop i in [0..n_args) {
         let arg=ap[i]
-        if arg =? 0 or np0[arg].kind =? 'namedarg' {
+        if arg =? 0 or nodes[arg].kind =? 'namedarg' {
             positional=false
             break
         }
@@ -87,13 +86,11 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
                 if (mutmask & (CRWord(1) << CRWord(i))) not=? 0 {
                     if call_mutable_cost(a pt @empty_binds @recv_fits0 i =? 0) <? 0 {ok=false; break}
                 } else {
-                    let nd=nodes.ptr + a
-                    let nt=CRWord(nd[0].type)
+                    let nt=CRWord(nodes[a].type)
                     let exact=false
-                    if nt =? pt and nt not=? 0 and (CRWord(nd[0].flags) & 256) =? 0 and nd[0].kind not=? 'str_lit' and nd[0].kind not=? 'float_lit' {
-                        let tp=types.ptr + pt
-                        if (CRWord(tp[0].flags) & 1) =? 0 {
-                            let tk=tp[0].kind
+                    if nt =? pt and nt not=? 0 and (CRWord(nodes[a].flags) & 256) =? 0 and nodes[a].kind not=? 'str_lit' and nodes[a].kind not=? 'float_lit' {
+                        if (CRWord(types[pt].flags) & 1) =? 0 {
+                            let tk=types[pt].kind
                             if tk not=? 'opt' and tk not=? 'refined' and tk not=? 'callable' and tk not=? 'polyfn' and (tk not=? 'struct_' or not rat_on or not bundled_word_rational_type(pt)) {exact=true}
                         }
                     }

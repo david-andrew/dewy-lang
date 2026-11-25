@@ -56,32 +56,29 @@ callback_bindings=(root:CallbackWord @known:dict<int64 int64> @calls:array<int64
     if cb_stack.length <? 256 {cb_stack.resize(256)}
     let st=cb_stack.ptr
     let scap=cb_stack.length
-    let ns=nodes.ptr
-    let lp=lists.ptr
     let locp=locals.ptr
     let sp:CallbackWord=1
     st[0]=root
     loop sp >? 0 {
         sp -= 1
         let n=st[sp]
-        let np=ns + n
-        let kind=np[0].kind
+        let kind=nodes.ptr[n].kind
         match kind {
             <'ident'|'int_lit'|'bool_lit'|'float_lit'|'dotname'|'none_lit'|'null_lit'|'lambda'|'hole'|'break_'|'continue_'|'pwild'> => {continue}
-            <'call'> => {if np[0].aux =? 0 {calls.push(n)}}
+            <'call'> => {if nodes.ptr[n].aux =? 0 {calls.push(n)}}
             <'vardecl'> => {
-                if np[0].nlist =? 0 and (CallbackWord(np[0].flags) & NF_GLOBAL) =? 0 {
-                    let l=CallbackWord(np[0].sym)
+                if nodes.ptr[n].nlist =? 0 and (CallbackWord(nodes.ptr[n].flags) & NF_GLOBAL) =? 0 {
+                    let l=CallbackWord(nodes.ptr[n].sym)
                     if l >=? 0 and CallbackWord(locp[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_BYREF | LF_MUTPARAM) =? 0 {
-                        let v=callback_value(CallbackWord(np[0].b) known)
+                        let v=callback_value(CallbackWord(nodes.ptr[n].b) known)
                         if v >=? 0 {known[l]=v}
                     }
                 }
             }
             _ => {}
         }
-        let k1=CallbackWord(np[0].nlist)
-        let k2=CallbackWord(np[0].nlist2)
+        let k1=CallbackWord(nodes.ptr[n].nlist)
+        let k2=CallbackWord(nodes.ptr[n].nlist2)
         if sp + k1 + k2 + 4 >? scap {
             scap=(sp + k1 + k2 + 4) * 2
             cb_stack.resize(scap)
@@ -96,20 +93,20 @@ callback_bindings=(root:CallbackWord @known:dict<int64 int64> @calls:array<int64
             }
         }
         if k1 >? 0 {
-            let l1=CallbackWord(np[0].list)
+            let l1=CallbackWord(nodes.ptr[n].list)
             let i=k1 - 1
             loop i >=? 0 {
-                let c=CallbackWord(lp[l1 + i])
+                let c=CallbackWord(lists.ptr[l1 + i])
                 if c not=? 0 {st[sp]=c; sp += 1}
                 i -= 1
             }
         }
         if kind not=? 'for_' {
-            if kind not=? 'partial' and np[0].d not=? 0 {st[sp]=CallbackWord(np[0].d); sp += 1}
-            if np[0].c not=? 0 {st[sp]=CallbackWord(np[0].c); sp += 1}
+            if kind not=? 'partial' and nodes.ptr[n].d not=? 0 {st[sp]=CallbackWord(nodes.ptr[n].d); sp += 1}
+            if nodes.ptr[n].c not=? 0 {st[sp]=CallbackWord(nodes.ptr[n].c); sp += 1}
         }
-        if np[0].b not=? 0 {st[sp]=CallbackWord(np[0].b); sp += 1}
-        if np[0].a not=? 0 {st[sp]=CallbackWord(np[0].a); sp += 1}
+        if nodes.ptr[n].b not=? 0 {st[sp]=CallbackWord(nodes.ptr[n].b); sp += 1}
+        if nodes.ptr[n].a not=? 0 {st[sp]=CallbackWord(nodes.ptr[n].a); sp += 1}
     }
 }
 callback_request=(f:CallbackWord targets:array<int64> depth:CallbackWord):>CallbackWord=>$unsafe {

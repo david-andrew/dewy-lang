@@ -11,12 +11,11 @@ CQWord:type=int64<overflow='wrap'>
 # a refinement or a callable: coerce's first case), or no type wanted.
 cq_settled=(nodes:ptr<array<Node>> types:ptr<array<TypeInfo>> n:CQWord t:CQWord):>bool=>$unsafe {
     if t =? 0 {return true}
-    let node=nodes[0].ptr + n
-    if node[0].type =? 0 or (CQWord(node[0].flags) & 256) not=? 0 {return false}
-    let k=node[0].kind
+    if nodes[0][n].type =? 0 or (CQWord(nodes[0][n].flags) & 256) not=? 0 {return false}
+    let k=nodes[0][n].kind
     if k =? 'str_lit' or k =? 'float_lit' {return false}
     let to=tu_prune(t)
-    if tu_prune(CQWord(node[0].type)) not=? to {return false}
+    if tu_prune(CQWord(nodes[0][n].type)) not=? to {return false}
     let tk=types[0].ptr[to].kind
     tk not=? 'refined' and tk not=? 'callable'
 }

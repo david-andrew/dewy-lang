@@ -107,56 +107,55 @@ isolation_intrinsic=(id:IN):>bool=>$unsafe {
 # Hidden dependencies of one operation, not its evaluated children. Defaults
 # are already checked actuals; defers remain body children, so all exits count.
 isolation_effect=(n:IsolationWord @edges:array<int64>):>IsolationReason=>$unsafe {
-    let nd=nodes.ptr + n
-    let ktag=int64((nd as ptr<uint32>)[0])
+    let ktag=int64(((nodes.ptr + n) as ptr<uint32>)[0])
     if ktag <? 0 or ktag >=? 128 {return IsolationReason.node}
     if iso_plain_p[ktag] not=? uint8(0) {return IsolationReason.none_}
-    let k=nd[0].kind
+    let k=nodes.ptr[n].kind
     match k {
         <'lambda' | 'partial'> => {return IsolationReason.indirect}
         <'addr'> => {return IsolationReason.raw}
         <'cast' | 'conv'> => {
             if raw_view(n) {return IsolationReason.raw}
-            if k =? 'conv' and (nd[0].aux =? int32(6) or nd[0].aux =? int32(7)) {return IsolationReason.raw}
+            if k =? 'conv' and (nodes.ptr[n].aux =? int32(6) or nodes.ptr[n].aux =? int32(7)) {return IsolationReason.raw}
             return IsolationReason.none_
         }
         <'index' | 'field'> => {
-            let t=prune(ntype(IsolationWord(nd[0].a)))
+            let t=prune(ntype(IsolationWord(nodes.ptr[n].a)))
             if tkind(t) =? 'ptr' {return IsolationReason.raw}
             return IsolationReason.none_
         }
         <'call'> => {
-            let aux:IsolationWord=IsolationWord(nd[0].aux)
-            if aux =? 0 {edges.push(IsolationWord(nd[0].sym));}
+            let aux:IsolationWord=IsolationWord(nodes.ptr[n].aux)
+            if aux =? 0 {edges.push(IsolationWord(nodes.ptr[n].sym));}
             else if aux not=? 2 and aux not=? 3 {return IsolationReason.indirect}
             return IsolationReason.none_
         }
         <'fnref'> => {
-            if nd[0].aux not=? 0 {return IsolationReason.indirect}
-            edges.push(IsolationWord(nd[0].sym));
+            if nodes.ptr[n].aux not=? 0 {return IsolationReason.indirect}
+            edges.push(IsolationWord(nodes.ptr[n].sym));
             return IsolationReason.none_
         }
         <'pair'> => {
-            if nd[0].sym >? 0 {edges.push(IsolationWord(nd[0].sym));}
+            if nodes.ptr[n].sym >? 0 {edges.push(IsolationWord(nodes.ptr[n].sym));}
             return IsolationReason.none_
         }
         <'map_lit'> => {
-            if nkids(n) >? 0 {edges.push(IsolationWord(nd[0].sym));}
+            if nkids(n) >? 0 {edges.push(IsolationWord(nodes.ptr[n].sym));}
             return IsolationReason.none_
         }
         <'istype'> => {
-            if nd[0].aux2 not=? 0 {edges.push(IsolationWord(nd[0].aux2));}
+            if nodes.ptr[n].aux2 not=? 0 {edges.push(IsolationWord(nodes.ptr[n].aux2));}
             return IsolationReason.none_
         }
         <'binary'> => {
-            let aux=nd[0].aux
-            if aux =? int32(6) and nd[0].aux2 not=? 0 {edges.push(IsolationWord(nd[0].aux2));}
+            let aux=nodes.ptr[n].aux
+            if aux =? int32(6) and nodes.ptr[n].aux2 not=? 0 {edges.push(IsolationWord(nodes.ptr[n].aux2));}
             if aux =? int32(4) or aux =? int32(5) {return IsolationReason.raw}
             loop f in value_helper_calls(n) {edges.push(f);}
             return IsolationReason.none_
         }
         <'intrinsic'> => {
-            if not isolation_intrinsic(nd[0].aux as IN) {return IsolationReason.intrinsic}
+            if not isolation_intrinsic(nodes.ptr[n].aux as IN) {return IsolationReason.intrinsic}
             loop f in value_helper_calls(n) {edges.push(f);}
             return IsolationReason.none_
         }
@@ -210,8 +209,6 @@ isolation_scan=(f:IsolationWord):>array<int64>=>$unsafe {
     }
     let todo=iso_todo_pool; iso_todo_pool=[]; todo.clear()
     todo.push(IsolationWord(fns.ptr[f].body))
-    let nodes_p=nodes.ptr
-    let lists_p=lists.ptr
     let seen_p=isolation_seen.ptr
     let locals_p=locals.ptr
     let nlocals:IsolationWord=locals.length
@@ -228,23 +225,22 @@ isolation_scan=(f:IsolationWord):>array<int64>=>$unsafe {
         }
         if seen_p[n] =? f {continue}
         seen_p[n] = f;
-        let nd=nodes_p + n
-        let ktag=int64((nd as ptr<uint32>)[0])
+        let ktag=int64(((nodes.ptr + n) as ptr<uint32>)[0])
         if ktag <? 0 or ktag >=? 128 {
             isolation_block(f IsolationReason.node n);
             break
         }
-        let k=nd[0].kind
+        let k=nodes.ptr[n].kind
         if k =? 'ident' {
-            if nd[0].aux =? int32(2) {
+            if nodes.ptr[n].aux =? int32(2) {
                 isolation_block(f IsolationReason.global_ n);
                 break
             }
-            if nd[0].aux not=? int32(1) {
+            if nodes.ptr[n].aux not=? int32(1) {
                 isolation_block(f IsolationReason.node n);
                 break
             }
-            let l:IsolationWord=IsolationWord(nd[0].sym)
+            let l:IsolationWord=IsolationWord(nodes.ptr[n].sym)
             if l <? 0 or l >=? nlocals {
                 isolation_block(f IsolationReason.node n);
                 break
@@ -262,7 +258,7 @@ isolation_scan=(f:IsolationWord):>array<int64>=>$unsafe {
             }
         }
         if has_own {
-            let held=if k =? 'vardecl' and nd[0].sym >? 0 and not has_flag(n NF_GLOBAL) {IsolationWord(locals_p[IsolationWord(nd[0].sym)].type)} else {ntype(n)}
+            let held=if k =? 'vardecl' and nodes.ptr[n].sym >? 0 and not has_flag(n NF_GLOBAL) {IsolationWord(locals_p[IsolationWord(nodes.ptr[n].sym)].type)} else {ntype(n)}
             if not isolation_hooks(held @edges) or not isolation_hooks(ntype(n) @edges) {
                 isolation_block(f IsolationReason.node n);
                 break
@@ -270,18 +266,18 @@ isolation_scan=(f:IsolationWord):>array<int64>=>$unsafe {
         }
         let mask=int64(child_p[ktag])
         if mask >? 0 {
-            if mask & 1 not=? 0 {let ca=IsolationWord(nd[0].a); if ca not=? 0 {todo.push(ca)}}
-            if mask & 2 not=? 0 {let cb=IsolationWord(nd[0].b); if cb not=? 0 {todo.push(cb)}}
-            if mask & 4 not=? 0 {let cc=IsolationWord(nd[0].c); if cc not=? 0 {todo.push(cc)}}
+            if mask & 1 not=? 0 {let ca=IsolationWord(nodes.ptr[n].a); if ca not=? 0 {todo.push(ca)}}
+            if mask & 2 not=? 0 {let cb=IsolationWord(nodes.ptr[n].b); if cb not=? 0 {todo.push(cb)}}
+            if mask & 4 not=? 0 {let cc=IsolationWord(nodes.ptr[n].c); if cc not=? 0 {todo.push(cc)}}
             if mask & 16 not=? 0 {
-                let l0=IsolationWord(nd[0].list)
-                let nk=IsolationWord(nd[0].nlist)
-                loop i in [0..nk) {let x=IsolationWord(lists_p[l0 + i]); if x not=? 0 {todo.push(x)}}
+                let l0=IsolationWord(nodes.ptr[n].list)
+                let nk=IsolationWord(nodes.ptr[n].nlist)
+                loop i in [0..nk) {let x=IsolationWord(lists.ptr[l0 + i]); if x not=? 0 {todo.push(x)}}
             }
             if mask & 32 not=? 0 {
-                let l2=IsolationWord(nd[0].list2)
-                let nk2=IsolationWord(nd[0].nlist2)
-                loop i in [0..nk2) {let x=IsolationWord(lists_p[l2 + i]); if x not=? 0 {todo.push(x)}}
+                let l2=IsolationWord(nodes.ptr[n].list2)
+                let nk2=IsolationWord(nodes.ptr[n].nlist2)
+                loop i in [0..nk2) {let x=IsolationWord(lists.ptr[l2 + i]); if x not=? 0 {todo.push(x)}}
             }
         }
     }
@@ -357,18 +353,17 @@ isolation_operation=(n:IsolationWord):>bool=>$unsafe {
     # expressions. Classify those operations normally, but calls still demand
     # instances from the frozen checking generation (never late helpers).
     if n <=? 0 or n >=? nodes.length {return false}
-    let nd=nodes.ptr + n
-    let ktag=int64((nd as ptr<uint32>)[0])
+    let ktag=int64(((nodes.ptr + n) as ptr<uint32>)[0])
     if ktag <? 0 or ktag >=? 128 {return false}
     if iso_plain_p[ktag] not=? uint8(0) {return true}
-    let k=nd[0].kind
+    let k=nodes.ptr[n].kind
     if k =? 'call' {
-        let aux=nd[0].aux
-        if aux =? int32(0) {return instance_isolated(IsolationWord(nd[0].sym))}
+        let aux=nodes.ptr[n].aux
+        if aux =? int32(0) {return instance_isolated(IsolationWord(nodes.ptr[n].sym))}
         return aux =? int32(2) or aux =? int32(3)
     }
     if k =? 'index' or k =? 'field' {
-        return tkind(prune(ntype(IsolationWord(nd[0].a)))) not=? 'ptr'
+        return tkind(prune(ntype(IsolationWord(nodes.ptr[n].a)))) not=? 'ptr'
     }
     if k =? 'addr' or k =? 'lambda' or k =? 'partial' {return false}
     let edges:array<int64>=[]

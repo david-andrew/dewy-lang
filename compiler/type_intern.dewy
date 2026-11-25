@@ -41,12 +41,11 @@ type_intern_hash=(input:ptr<TypeInfo> args:array<int64>):>uint64=>$unsafe {
     ti_hash_end(h)
 }
 type_intern_same=(id:IWord input:ptr<TypeInfo> args:array<int64>):>bool=>$unsafe {
-    let x=ti_types[0].ptr + id
     let n=IWord(args.length)
-    if x[0].rep not=? input[0].rep or x[0].kind not=? input[0].kind or x[0].elem not=? input[0].elem or x[0].st not=? input[0].st or IWord(x[0].nargs) not=? n or x[0].bits not=? input[0].bits or x[0].mutmask not=? input[0].mutmask or x[0].sign not=? input[0].sign {return false}
+    if ti_types[0][id].rep not=? input[0].rep or ti_types[0][id].kind not=? input[0].kind or ti_types[0][id].elem not=? input[0].elem or ti_types[0][id].st not=? input[0].st or IWord(ti_types[0][id].nargs) not=? n or ti_types[0][id].bits not=? input[0].bits or ti_types[0][id].mutmask not=? input[0].mutmask or ti_types[0][id].sign not=? input[0].sign {return false}
     let stored=ti_args[0].ptr
     let values=args.ptr
-    let first=IWord(x[0].args)
+    let first=IWord(ti_types[0][id].args)
     loop i in [IWord(0)..n) {if IWord(stored[first + i]) not=? values[i] {return false}}
     true
 }
@@ -57,18 +56,16 @@ type_intern_rehash=():>void=>$unsafe {
     loop n <? count * 2 {n *= 2}
     ti_table[0]=fill(int32(0) n)
     let table=ti_table[0].ptr
-    let types=ti_types[0].ptr
     let args=ti_args[0].ptr
     loop id in [IWord(1)..count) {
-        let t=types + id
-        if (t[0].flags & TI_HAS_VAR) not=? 0 {continue}
-        if t[0].kind =? 'var' or t[0].kind =? 'param' {continue}
+        if (ti_types[0][id].flags & TI_HAS_VAR) not=? 0 {continue}
+        if ti_types[0][id].kind =? 'var' or ti_types[0][id].kind =? 'param' {continue}
         # Type and module values append a record per use and are never looked up:
         # copies of one key would make a run that any lookup landing there walks.
-        if t[0].kind =? 'typeval' or t[0].kind =? 'module' {continue}
-        let h=ti_hash_seed(types + id)
-        let first=IWord(t[0].args)
-        let last=first + IWord(t[0].nargs)
+        if ti_types[0][id].kind =? 'typeval' or ti_types[0][id].kind =? 'module' {continue}
+        let h=ti_hash_seed(ti_types[0].ptr + id)
+        let first=IWord(ti_types[0][id].args)
+        let last=first + IWord(ti_types[0][id].nargs)
         loop i in [first..last) {h=h * 131 + IWord(args[i])}
         h=(ti_hash_end(h) transmute int64) & (n - 1)
         loop table[h] not=? 0 {h=(h + 1) & (n - 1)}
@@ -89,12 +86,11 @@ ti_append=(input:ptr<TypeInfo> args:array<int64> hv:bool):>IWord=>$unsafe {
     IWord(ti_types[0].length) - 1
 }
 type_intern=(input:ptr<TypeInfo> args:array<int64>):>IWord=>$unsafe {
-    let types=ti_types[0].ptr
     let values=args.ptr
     let count=IWord(args.length)
     let hv=false
-    if input[0].elem not=? 0 and (types[IWord(input[0].elem)].flags & TI_HAS_VAR) not=? 0 {hv=true}
-    loop i in [IWord(0)..count) {if (types[values[i]].flags & TI_HAS_VAR) not=? 0 {hv=true}}
+    if input[0].elem not=? 0 and (ti_types[0][IWord(input[0].elem)].flags & TI_HAS_VAR) not=? 0 {hv=true}
+    loop i in [IWord(0)..count) {if (ti_types[0][values[i]].flags & TI_HAS_VAR) not=? 0 {hv=true}}
     if input[0].kind =? 'var' or input[0].kind =? 'param' {hv=true}
     if not hv or input[0].kind =? 'param' {
         if ti_table[0].length =? 0 or IWord(ti_types[0].length) * 2 >=? IWord(ti_table[0].length) {type_intern_rehash()}

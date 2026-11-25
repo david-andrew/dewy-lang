@@ -62,17 +62,16 @@ ex_type=(t0:EXWord pos:int64):>bool=>$unsafe {
 # Frozen Tok ordinals: plus 58, minus 59, star 60, slash 61, percent 62, amp 63, pipe 64, caret 65,
 # shl 67, shr 68, starstar 79; IN.fixed_abs 89.
 ex_operation=(n:EXWord):>bool=>$unsafe {
-    let node=ex_nodes[0].ptr + n
-    let k=node[0].kind
-    let op=node[0].op
-    if k =? 'intrinsic' {return node[0].aux =? 89}
+    let k=ex_nodes[0][n].kind
+    let op=ex_nodes[0][n].op
+    if k =? 'intrinsic' {return ex_nodes[0][n].aux =? 89}
     if k =? 'unary' {
         if op not=? 59 {return false}
-    } else if k =? 'binary' and node[0].aux =? 0 {
+    } else if k =? 'binary' and ex_nodes[0][n].aux =? 0 {
         if op not=? 58 and op not=? 59 and op not=? 60 and op not=? 79 and op not=? 61 and op not=? 67 {return false}
     } else {return false}
-    let t=EXWord(node[0].type)
-    if t =? 0 or not ex_type(t node[0].pos) {return false}
+    let t=EXWord(ex_nodes[0][n].type)
+    if t =? 0 or not ex_type(t ex_nodes[0][n].pos) {return false}
     k not=? 'binary' or op not=? 61 or ex_types[0].ptr[ex_representation(t)].sign
 }
 ex_kid=(n:EXWord i:EXWord):>EXWord=>$unsafe {EXWord(ex_lists[0][EXWord(ex_nodes[0].ptr[n].list) + i])}
@@ -82,28 +81,27 @@ exact_potential=(n0:int64):>bool=>$unsafe {
     let n=EXWord(n0)
     if n <=? 0 {return false}
     if ex_operation(n) {return true}
-    let node=ex_nodes[0].ptr + n
-    let k=node[0].kind
-    if k =? 'binary' and (node[0].op =? 63 or node[0].op =? 64 or node[0].op =? 65) {return exact_potential(int64(node[0].a)) or exact_potential(int64(ex_nodes[0].ptr[n].b))}
+    let k=ex_nodes[0][n].kind
+    if k =? 'binary' and (ex_nodes[0][n].op =? 63 or ex_nodes[0][n].op =? 64 or ex_nodes[0][n].op =? 65) {return exact_potential(int64(ex_nodes[0][n].a)) or exact_potential(int64(ex_nodes[0].ptr[n].b))}
     # An exact dividend or divisor can put a quotient outside its operands'
     # storage; a remainder takes its divisor's sign and stays below it.
-    if k =? 'binary' and node[0].aux =? 0 and node[0].op =? 61 {return exact_potential(int64(node[0].a)) or exact_potential(int64(ex_nodes[0].ptr[n].b))}
-    if k =? 'binary' and node[0].aux =? 0 and node[0].op =? 62 {return exact_potential(int64(ex_nodes[0].ptr[n].b))}
+    if k =? 'binary' and ex_nodes[0][n].aux =? 0 and ex_nodes[0][n].op =? 61 {return exact_potential(int64(ex_nodes[0][n].a)) or exact_potential(int64(ex_nodes[0].ptr[n].b))}
+    if k =? 'binary' and ex_nodes[0][n].aux =? 0 and ex_nodes[0][n].op =? 62 {return exact_potential(int64(ex_nodes[0].ptr[n].b))}
     # (a right shift keeps an exact operand's excess: `(x * x) >> 33` with x:uint32)
-    if k =? 'binary' and node[0].aux =? 0 and node[0].op =? 68 {return exact_potential(int64(node[0].a))}
+    if k =? 'binary' and ex_nodes[0][n].aux =? 0 and ex_nodes[0][n].op =? 68 {return exact_potential(int64(ex_nodes[0][n].a))}
     # (a negation keeps its exact operand's excess: `-(x << 49)` with x:int64)
-    if k =? 'unary' and node[0].op =? 59 {return exact_potential(int64(node[0].a))}
+    if k =? 'unary' and ex_nodes[0][n].op =? 59 {return exact_potential(int64(ex_nodes[0][n].a))}
     # CV.none_ 0, CV.int_ 1
-    if k =? 'conv' and (node[0].aux =? 1 or node[0].aux =? 0) {return exact_potential(int64(node[0].a))}
-    if k =? 'if_' or k =? 'iflet' {return exact_potential(int64(node[0].b)) or exact_potential(int64(ex_nodes[0].ptr[n].c))}
-    if k =? 'coalesce' {return exact_potential(int64(node[0].b))}
+    if k =? 'conv' and (ex_nodes[0][n].aux =? 1 or ex_nodes[0][n].aux =? 0) {return exact_potential(int64(ex_nodes[0][n].a))}
+    if k =? 'if_' or k =? 'iflet' {return exact_potential(int64(ex_nodes[0][n].b)) or exact_potential(int64(ex_nodes[0].ptr[n].c))}
+    if k =? 'coalesce' {return exact_potential(int64(ex_nodes[0][n].b))}
     if k =? 'match_' {
-        loop i in [0..EXWord(node[0].nlist)) {
+        loop i in [0..EXWord(ex_nodes[0][n].nlist)) {
             if exact_potential(int64(ex_nodes[0].ptr[ex_kid(n i)].b)) {return true}
         }
     }
-    if k =? 'block' and node[0].aux not=? 0 {return exact_potential(int64(ex_nodes[0].ptr[ex_kid(n EXWord(node[0].nlist) - 1)].a))}
-    if k =? 'exprstmt' {return exact_potential(int64(node[0].a))}
+    if k =? 'block' and ex_nodes[0][n].aux not=? 0 {return exact_potential(int64(ex_nodes[0].ptr[ex_kid(n EXWord(ex_nodes[0][n].nlist) - 1)].a))}
+    if k =? 'exprstmt' {return exact_potential(int64(ex_nodes[0][n].a))}
     false
 }
 # Semantic int64 arithmetic returns int. A bounded expression can retain its
@@ -120,18 +118,17 @@ exact_math_operand=(n0:int64):>int64=>$unsafe {
         if ex_representation(ex_type_of(child)) not=? ex_math_int[0] {break}
         value=child
     }
-    let node=ex_nodes[0].ptr + value
     # NF_U64 2097152
-    if node[0].kind =? 'int_lit' and (EXWord(node[0].flags) & 2097152 =? 0 or node[0].ival >=? 0) {
+    if ex_nodes[0][value].kind =? 'int_lit' and (EXWord(ex_nodes[0][value].flags) & 2097152 =? 0 or ex_nodes[0][value].ival >=? 0) {
         let word=ex_nodes[0].length
         let copy=ex_nodes[0].ptr[value]
         ex_nodes[0].push(copy)
         ex_nodes[0][word].type=int32<overflow='wrap'>(ex_int_type[0])
         return word
     }
-    if node[0].kind =? 'conv' and node[0].aux =? 1 {
-        let a=EXWord(node[0].a)
-        if ex_type_of(a) =? ex_int_type[0] and ex_dewy(node[0].pos) {return a}
+    if ex_nodes[0][value].kind =? 'conv' and ex_nodes[0][value].aux =? 1 {
+        let a=EXWord(ex_nodes[0][value].a)
+        if ex_type_of(a) =? ex_int_type[0] and ex_dewy(ex_nodes[0][value].pos) {return a}
     }
     n
 }
@@ -139,14 +136,13 @@ exact_math_operand=(n0:int64):>int64=>$unsafe {
 # test without the measuring mode): only these are sent to it.
 exact_candidate=(n0:int64):>bool=>$unsafe {
     let n=EXWord(n0)
-    let node=ex_nodes[0].ptr + n
-    let k=node[0].kind
+    let k=ex_nodes[0][n].kind
     if k =? 'binary' {
-        let op=node[0].op
+        let op=ex_nodes[0][n].op
         return ex_operation(n) or ((op =? 63 or op =? 64 or op =? 65) and exact_potential(n0))
     }
     if k =? 'unary' or k =? 'intrinsic' {return ex_operation(n)}
     # CV.int2float 2
-    if k =? 'conv' and node[0].aux =? 2 {return exact_potential(int64(node[0].a))}
+    if k =? 'conv' and ex_nodes[0][n].aux =? 2 {return exact_potential(int64(ex_nodes[0][n].a))}
     false
 }

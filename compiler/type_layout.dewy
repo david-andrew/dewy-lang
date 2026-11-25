@@ -31,8 +31,7 @@ type_layout_bind=(input:ptr<TypeLayoutInput>):>LWord=>$unsafe {
 }
 tl_prune=(t0:LWord):>LWord=>$unsafe {
     let t=t0
-    let tp=tl_types[0].ptr
-    loop t not=? 0 and tp[t].kind =? 'var' and tp[t].ref not=? 0 {t=LWord(tp[t].ref)}
+    loop t not=? 0 and tl_types[0][t].kind =? 'var' and tl_types[0][t].ref not=? 0 {t=LWord(tl_types[0][t].ref)}
     t
 }
 tl_targ=(t:LWord i:LWord):>LWord=>$unsafe {
@@ -42,15 +41,13 @@ tl_align_up=(x:LWord a:LWord):>LWord=>$unsafe {
     (x + a - 1) & ((a - 1) xor -1)
 }
 tl_size=(t:LWord):>LWord=>$unsafe {
-    let tp=tl_types[0].ptr
-    if t not=? 0 and LWord(tp[t].flags) & TF_LAID_OUT not=? 0 and tp[t].kind not=? 'var' {return LWord(tp[t].size)}
+    if t not=? 0 and LWord(tl_types[0][t].flags) & TF_LAID_OUT not=? 0 and tl_types[0][t].kind not=? 'var' {return LWord(tl_types[0][t].size)}
     tl_layout(t)
     LWord(tl_types[0].ptr[tl_prune(t)].size)
 }
 tl_align=(t:LWord):>LWord=>$unsafe {
-    let tp=tl_types[0].ptr
-    if t not=? 0 and LWord(tp[t].flags) & TF_LAID_OUT not=? 0 and tp[t].kind not=? 'var' {
-        let a=LWord(tp[t].align)
+    if t not=? 0 and LWord(tl_types[0][t].flags) & TF_LAID_OUT not=? 0 and tl_types[0][t].kind not=? 'var' {
+        let a=LWord(tl_types[0][t].align)
         return if a =? 0 {1} else {a}
     }
     tl_layout(t)
@@ -60,12 +57,11 @@ tl_align=(t:LWord):>LWord=>$unsafe {
 }
 tl_managed=(t0:LWord):>bool=>$unsafe {
     let t=quantity_base(t0)
-    let tp=tl_types[0].ptr
-    if tp[t].rep =? 'tagged_int' {return true}
-    let k=tp[t].kind
+    if tl_types[0][t].rep =? 'tagged_int' {return true}
+    let k=tl_types[0][t].kind
     if k =? 'str_' or k =? 'array' or k =? 'fn_' or k =? 'polyfn' or k =? 'callable' or k =? 'box' {return true}
     if k =? 'struct_' or k =? 'enum_' or k =? 'tuple' or k =? 'opt' or k =? 'fixed' {
-        let f=LWord(tp[t].flags)
+        let f=LWord(tl_types[0][t].flags)
         if f & TF_LAID_OUT not=? 0 {return f & TF_MANAGED not=? 0}
         tl_layout(t)
         return LWord(tl_types[0].ptr[t].flags) & TF_MANAGED not=? 0
@@ -201,16 +197,14 @@ tl_endless_field=(si:LWord f:LWord vi:LWord):>void=>$unsafe {
 # Keep the already-laid-out path outside the recursive worker's spill frame.
 # This view ends before the worker can call lazy resolution or grow an arena.
 tl_layout=(t0:LWord):>void=>$unsafe {
-    let tp=tl_types[0].ptr
-    if t0 not=? 0 and LWord(tp[t0].flags) & TF_LAID_OUT not=? 0 and tp[t0].kind not=? 'var' {return}
+    if t0 not=? 0 and LWord(tl_types[0][t0].flags) & TF_LAID_OUT not=? 0 and tl_types[0][t0].kind not=? 'var' {return}
     tl_layout_body(t0)
 }
 tl_layout_body=(t0:LWord):>void=>$unsafe {
-    let tp=tl_types[0].ptr
     let t=t0
-    loop t not=? 0 and tp[t].kind =? 'var' and tp[t].ref not=? 0 {t=LWord(tp[t].ref)}
-    if LWord(tp[t].flags) & TF_LAID_OUT not=? 0 {return}
-    let k=tp[t].kind
+    loop t not=? 0 and tl_types[0][t].kind =? 'var' and tl_types[0][t].ref not=? 0 {t=LWord(tl_types[0][t].ref)}
+    if LWord(tl_types[0][t].flags) & TF_LAID_OUT not=? 0 {return}
+    let k=tl_types[0][t].kind
     let size:LWord=0
     let al:LWord=1
     let m=false

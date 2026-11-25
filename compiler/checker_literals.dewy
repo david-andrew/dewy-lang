@@ -102,8 +102,7 @@ xl_publish=(@node:Node t:XLWord):>void=>{
 }
 xl_finish_slow=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
     let t=t0
-    let tp=xl_types[0].ptr
-    if xl_refine[0] and tp[t].kind =? 'refined' and tp[t].bits not=? -2 {t=XLWord(tp[t].elem)}
+    if xl_refine[0] and xl_types[0][t].kind =? 'refined' and xl_types[0][t].bits not=? -2 {t=XLWord(xl_types[0][t].elem)}
     # Without an expected type the host's callable inference returns the type as published.
     if xl_effects[0] and expected not=? 0 {
         xl_nodes[0].ptr[n].type=int32<overflow='wrap'>(t)
@@ -135,24 +134,21 @@ xl_int_default=(n:XLWord):>XLWord=>$unsafe {
 # Does fixed-width integer type t hold int literal n of a Jo file? (else the host's coerce
 # decides, and reports what does not fit)
 xl_word_fits=(n:XLWord t:XLWord):>bool=>$unsafe {
-    let node=xl_nodes[0].ptr + n
-    if node[0].kind not=? 'int_lit' {return false}
-    let ty=xl_types[0].ptr + t
-    let bits=XLWord(ty[0].bits)
-    let sign=ty[0].sign
-    if (XLWord(node[0].flags) & 2097152) not=? 0 {return bits >=? 64}
-    let v=node[0].ival
+    if xl_nodes[0][n].kind not=? 'int_lit' {return false}
+    let bits=XLWord(xl_types[0][t].bits)
+    let sign=xl_types[0][t].sign
+    if (XLWord(xl_nodes[0][n].flags) & 2097152) not=? 0 {return bits >=? 64}
+    let v=xl_nodes[0][n].ival
     if bits >=? 64 {return sign or v >=? 0}
     if sign {return v >=? -(XLWord(1) << (bits - 1)) and v <? (XLWord(1) << (bits - 1))}
     v >=? 0 and v <? (XLWord(1) << bits)
 }
 xl_check_int=(n:XLWord expected:XLWord):>XLWord=>$unsafe {
-    let node=xl_nodes[0].ptr + n
-    node[0].flags=node[0].flags | 256
-    let initial=if xl_files[0].ptr[node[0].pos >> 40].is_dewy {xl_math_int[0]} else {xl_int_type[0]}
-    node[0].type=int32<overflow='wrap'>(initial)
+    xl_nodes[0].ptr[n].flags=xl_nodes[0].ptr[n].flags | 256
+    let initial=if xl_files[0].ptr[xl_nodes[0].ptr[n].pos >> 40].is_dewy {xl_math_int[0]} else {xl_int_type[0]}
+    xl_nodes[0].ptr[n].type=int32<overflow='wrap'>(initial)
     if expected =? 0 {
-        node[0].flags |= 128
+        xl_nodes[0].ptr[n].flags |= 128
         if xl_exact_measure[0] {exact_note(n)}
         xl_last[0]=n
         return initial
@@ -163,8 +159,8 @@ xl_check_int=(n:XLWord expected:XLWord):>XLWord=>$unsafe {
     let t:XLWord=0
     if exk =? 'int_' and initial not=? xl_math_int[0] and ex not=? xl_math_int[0] and xl_word_fits(n ex) {
         # (coerce's fixed-width literal case: retyped, no longer a literal)
-        node[0].type=int32<overflow='wrap'>(ex)
-        node[0].flags=node[0].flags & ~256
+        xl_nodes[0].ptr[n].type=int32<overflow='wrap'>(ex)
+        xl_nodes[0].ptr[n].flags=xl_nodes[0].ptr[n].flags & ~256
         t=ex
     } else if ex not=? 0 and (exk =? 'int_' or exk =? 'float_') {
         coerce(n ex);
@@ -199,19 +195,18 @@ xl_check_scalar=(n:XLWord expected:XLWord):>XLWord=>$unsafe {
     let ex=xl_expected(expected)
     let exk:TK='void_'
     if ex not=? 0 {exk=xl_types[0].ptr[ex].kind}
-    let node=xl_nodes[0].ptr + n
-    let k=node[0].kind
+    let k=xl_nodes[0][n].kind
     let t:XLWord=0
     if k =? 'float_lit' {
         if ex not=? 0 and exk =? 'float_' {
-            if node[0].sval not=? 0 and node[0].fval - node[0].fval not=? 0.0 {literal_float_error(n)}
-            node[0].flags=node[0].flags & ~256
+            if xl_nodes[0][n].sval not=? 0 and xl_nodes[0][n].fval - xl_nodes[0][n].fval not=? 0.0 {literal_float_error(n)}
+            xl_nodes[0][n].flags=xl_nodes[0][n].flags & ~256
             t=ex
         } else if ex not=? 0 and exk =? 'opt' and xl_types[0].ptr[tu_prune(XLWord(xl_types[0].ptr[ex].elem))].kind =? 'float_' {
-            node[0].flags=node[0].flags & ~256
+            xl_nodes[0][n].flags=xl_nodes[0][n].flags & ~256
             t=tu_prune(XLWord(xl_types[0].ptr[ex].elem))
         } else {
-            node[0].flags=node[0].flags | 256
+            xl_nodes[0][n].flags=xl_nodes[0][n].flags | 256
             t=xl_float_type[0]
         }
     } else if k =? 'bool_lit' {t=xl_bool_type[0]}

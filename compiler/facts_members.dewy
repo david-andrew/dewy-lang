@@ -51,8 +51,6 @@ let fms_pairs:array<int64>=[]
 let fms_has_exact:bool=false
 let fms_has_rat:bool=false
 let fms_has_pos:bool=false
-let fms_nodes:ptr<Node>=$unsafe (uint64(0) as ptr<Node>)
-let fms_lists:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
 let fms_locals:ptr<Local>=$unsafe (uint64(0) as ptr<Local>)
 let fms_exact:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
 let fms_nexact:MemberWord=0
@@ -64,8 +62,6 @@ fact_member_same=(x:MemberWord y:MemberWord index:MemberWord @pairs:array<int64>
     fms_has_exact=exact_marks.length >? 0
     fms_has_rat=rational_constants.length not=? 0
     fms_has_pos=member_templates.ptr[index].positions.length >? 0
-    fms_nodes=nodes.ptr
-    fms_lists=lists.ptr
     fms_locals=locals.ptr
     fms_nexact=exact_marks.length
     if fms_has_exact {fms_exact=exact_marks.ptr}
@@ -88,8 +84,6 @@ fact_member_same_fast=(x0:MemberWord y0:MemberWord):>bool=>$unsafe {
     let sp:MemberWord=1
     sx[0]=x0
     sy[0]=y0
-    let np=fms_nodes
-    let lp=fms_lists
     let lp0=fms_locals
     let icp=iso_child_p
     let has_exact=fms_has_exact
@@ -105,35 +99,35 @@ fact_member_same_fast=(x0:MemberWord y0:MemberWord):>bool=>$unsafe {
             if x not=? y {return false}
             continue
         }
-        let nx=np + x
-        let ny=np + y
-        let k=nx[0].kind
-        if k not=? ny[0].kind or nx[0].pos not=? ny[0].pos or nx[0].type not=? ny[0].type or nx[0].flags not=? ny[0].flags {return false}
+        let left=nodes[x]
+        let right=nodes[y]
+        let k=left.kind
+        if k not=? right.kind or left.pos not=? right.pos or left.type not=? right.type or left.flags not=? right.flags {return false}
         if has_exact and ((x <? nexact and exactp[x] not=? uint8(0)) or (y <? nexact and exactp[y] not=? uint8(0))) {return false}
         if has_rat and (rational_constants.has(x) or rational_constants.has(y)) {return false}
         if k =? 'ident' {
-            if nx[0].name not=? ny[0].name or nx[0].aux not=? ny[0].aux or nx[0].aux2 not=? ny[0].aux2 or nx[0].op not=? ny[0].op or nx[0].ival not=? ny[0].ival or nx[0].sval not=? ny[0].sval or nx[0].d not=? ny[0].d or nx[0].nlist not=? ny[0].nlist or nx[0].nlist2 not=? 0 or ny[0].nlist2 not=? 0 {return false}
-            if nx[0].sym not=? ny[0].sym {
-                if nx[0].aux not=? int32(1) or nx[0].sym <=? 0 or ny[0].sym <=? 0 {return false}
-                let lx=MemberWord(nx[0].sym)
-                let ly=MemberWord(ny[0].sym)
+            if left.name not=? right.name or left.aux not=? right.aux or left.aux2 not=? right.aux2 or left.op not=? right.op or left.ival not=? right.ival or left.sval not=? right.sval or left.d not=? right.d or left.nlist not=? right.nlist or left.nlist2 not=? 0 or right.nlist2 not=? 0 {return false}
+            if left.sym not=? right.sym {
+                if left.aux not=? int32(1) or left.sym <=? 0 or right.sym <=? 0 {return false}
+                let lx=MemberWord(left.sym)
+                let ly=MemberWord(right.sym)
                 if lp0[lx].type not=? lp0[ly].type or lp0[lx].flags not=? lp0[ly].flags {return false}
             }
             continue
         }
         if k =? 'int_lit' {
-            if nx[0].ival not=? ny[0].ival or nx[0].aux not=? ny[0].aux or nx[0].aux2 not=? ny[0].aux2 or nx[0].sym not=? ny[0].sym or nx[0].op not=? ny[0].op or nx[0].name not=? ny[0].name or nx[0].sval not=? ny[0].sval or nx[0].d not=? ny[0].d or nx[0].nlist not=? ny[0].nlist or nx[0].nlist2 not=? 0 or ny[0].nlist2 not=? 0 {return false}
+            if left.ival not=? right.ival or left.aux not=? right.aux or left.aux2 not=? right.aux2 or left.sym not=? right.sym or left.op not=? right.op or left.name not=? right.name or left.sval not=? right.sval or left.d not=? right.d or left.nlist not=? right.nlist or left.nlist2 not=? 0 or right.nlist2 not=? 0 {return false}
             continue
         }
-        if nx[0].op not=? ny[0].op or nx[0].ival not=? ny[0].ival or nx[0].name not=? ny[0].name or nx[0].aux2 not=? ny[0].aux2 or nx[0].d not=? ny[0].d or nx[0].nlist not=? ny[0].nlist or nx[0].nlist2 not=? 0 or ny[0].nlist2 not=? 0 {return false}
-        if has_pos and (k =? 'str_lit' or k =? 'dotname') and member_templates.ptr[fms_index].positions.has(nx[0].pos) {
-            if k =? 'dotname' and tkind(ntype(x)) =? 'enum_' or k =? 'str_lit' and (nx[0].aux not=? 0 or nx[0].nlist not=? 0) {return false}
+        if left.op not=? right.op or left.ival not=? right.ival or left.name not=? right.name or left.aux2 not=? right.aux2 or left.d not=? right.d or left.nlist not=? right.nlist or left.nlist2 not=? 0 or right.nlist2 not=? 0 {return false}
+        if has_pos and (k =? 'str_lit' or k =? 'dotname') and member_templates.ptr[fms_index].positions.has(left.pos) {
+            if k =? 'dotname' and tkind(ntype(x)) =? 'enum_' or k =? 'str_lit' and (left.aux not=? 0 or left.nlist not=? 0) {return false}
         }
-        else if nx[0].sval not=? ny[0].sval or nx[0].aux not=? ny[0].aux {return false}
-        if nx[0].sym not=? ny[0].sym {
-            if k not=? 'vardecl' or nx[0].sym <=? 0 or ny[0].sym <=? 0 {return false}
-            let lx=MemberWord(nx[0].sym)
-            let ly=MemberWord(ny[0].sym)
+        else if left.sval not=? right.sval or left.aux not=? right.aux {return false}
+        if left.sym not=? right.sym {
+            if k not=? 'vardecl' or left.sym <=? 0 or right.sym <=? 0 {return false}
+            let lx=MemberWord(left.sym)
+            let ly=MemberWord(right.sym)
             if lp0[lx].type not=? lp0[ly].type or lp0[lx].flags not=? lp0[ly].flags {return false}
         }
         match k {
@@ -145,9 +139,9 @@ fact_member_same_fast=(x0:MemberWord y0:MemberWord):>bool=>$unsafe {
             fms_pairs.push(x)
             fms_pairs.push(y)
         }
-        let mask=MemberWord(icp[int64((nx as ptr<uint32>)[0])])
+        let mask=MemberWord(icp[int64(((nodes.ptr + x) as ptr<uint32>)[0])])
         if mask <? 0 {return false}
-        let nlist:MemberWord=if mask & 16 not=? 0 {MemberWord(nx[0].nlist)} else {0}
+        let nlist:MemberWord=if mask & 16 not=? 0 {MemberWord(nodes[x].nlist)} else {0}
         if sp + nlist + 3 >? scap {
             scap=(sp + nlist + 3) * 2
             fms_sx.resize(scap)
@@ -156,12 +150,12 @@ fact_member_same_fast=(x0:MemberWord y0:MemberWord):>bool=>$unsafe {
             sy=fms_sy.ptr
         }
         if nlist >? 0 {
-            let lx=MemberWord(nx[0].list)
-            let ly=MemberWord(ny[0].list)
+            let lx=MemberWord(nodes[x].list)
+            let ly=MemberWord(nodes[y].list)
             let i:MemberWord=nlist - 1
             loop i >=? 0 {
-                let cx=MemberWord(lp[lx + i])
-                let cy=MemberWord(lp[ly + i])
+                let cx=MemberWord(lists[lx + i])
+                let cy=MemberWord(lists[ly + i])
                 if (cx | cy) not=? 0 {
                     sx[sp]=cx; sy[sp]=cy; sp += 1
                 }
@@ -169,15 +163,15 @@ fact_member_same_fast=(x0:MemberWord y0:MemberWord):>bool=>$unsafe {
             }
         }
         if mask & 4 not=? 0 {
-            let cx=MemberWord(nx[0].c); let cy=MemberWord(ny[0].c)
+            let cx=MemberWord(nodes[x].c); let cy=MemberWord(nodes[y].c)
             if (cx | cy) not=? 0 {sx[sp]=cx; sy[sp]=cy; sp += 1}
         }
         if mask & 2 not=? 0 {
-            let bx=MemberWord(nx[0].b); let by=MemberWord(ny[0].b)
+            let bx=MemberWord(nodes[x].b); let by=MemberWord(nodes[y].b)
             if (bx | by) not=? 0 {sx[sp]=bx; sy[sp]=by; sp += 1}
         }
         if mask & 1 not=? 0 {
-            let ax=MemberWord(nx[0].a); let ay=MemberWord(ny[0].a)
+            let ax=MemberWord(nodes[x].a); let ay=MemberWord(nodes[y].a)
             if (ax | ay) not=? 0 {sx[sp]=ax; sy[sp]=ay; sp += 1}
         }
     }

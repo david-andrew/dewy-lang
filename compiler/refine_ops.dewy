@@ -320,8 +320,8 @@ refine_gen_args=(args:array<int64> values:array<int64> offset:int64 mutmask:int6
     let ap=args.ptr
     let na=args.length
     loop k in [0..na) {
-        let nd=nodes.ptr + ap[k]
-        if nd[0].kind =? 'conv' and nd[0].aux =? int32(int64(CV.refinement)) {has_ref=true; break}
+        let index=ap[k]
+        if nodes[index].kind =? 'conv' and nodes[index].aux =? int32(int64(CV.refinement)) {has_ref=true; break}
     }
     if not has_ref {return}
     let captured:array<int64>=[]

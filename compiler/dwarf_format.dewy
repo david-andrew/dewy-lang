@@ -938,9 +938,8 @@ dw_loc_expr=(@e:array<uint8> kind:DWord r:DWord off:DWord):>void=>$unsafe {
     }
 }
 dw_prune=(t0:DWord):>DWord=>$unsafe {
-    let info=dw_inputs[0].types[0].ptr
     let t=t0
-    loop t not=? 0 and info[t].kind =? 'var' and info[t].ref not=? 0 {t=DWord(info[t].ref)}
+    loop t not=? 0 and dw_inputs[0].types[0][t].kind =? 'var' and dw_inputs[0].types[0][t].ref not=? 0 {t=DWord(dw_inputs[0].types[0][t].ref)}
     t
 }
 dw_tkind=(t:DWord):>TK=>$unsafe {

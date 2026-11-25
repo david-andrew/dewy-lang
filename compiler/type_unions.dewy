@@ -113,10 +113,9 @@ uu_mk_union=(ms0:array<int64>):>UWord=>$unsafe {
 }
 uu_union_inst=(ms:array<int64>):>UWord=>$unsafe {
     let stable=true
-    let types=uu_inputs[0].types[0].ptr
     let values=ms.ptr
     loop i in [UWord(0)..UWord(ms.length)) {
-        if (types[values[i]].flags & 1) not=? 0 {stable=false}
+        if (uu_inputs[0].types[0][values[i]].flags & 1) not=? 0 {stable=false}
     }
     if stable {
         let cached=uu_instances.get(ms)

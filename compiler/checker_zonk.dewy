@@ -89,8 +89,6 @@ xz_summary=(root:XZWord):>void=>$unsafe {
     if xz_summary_stack.length <? 256 {xz_summary_stack.resize(256)}
     let st=xz_summary_stack.ptr
     let cap=xz_summary_stack.length
-    let lists=xz_lists[0].ptr
-    let nodes_p=xz_nodes[0].ptr
     st[0]=int64(root)
     let sp:XZWord=1
     let index=false
@@ -98,10 +96,9 @@ xz_summary=(root:XZWord):>void=>$unsafe {
     loop sp >? 0 {
         sp=sp - 1
         let n=XZWord(st[sp])
-        let node=nodes_p + n
-        let k=node[0].kind
+        let k=xz_nodes[0][n].kind
         if k =? 'ident' {
-            if not global and xz_user_global(node[0].aux node[0].sym) {
+            if not global and xz_user_global(xz_nodes[0][n].aux xz_nodes[0][n].sym) {
                 global=true
                 xz_user_globals[0]=xz_user_globals[0] + 1
                 if index {break}
@@ -109,25 +106,25 @@ xz_summary=(root:XZWord):>void=>$unsafe {
             continue
         }
         if xz_is_leaf(k) {continue}
-        if not index and (k =? 'index' or (k =? 'call' and node[0].aux =? 0 and node[0].nlist =? 3 and xz_swap_call(node[0].aux node[0].nlist node[0].sym))) {
+        if not index and (k =? 'index' or (k =? 'call' and xz_nodes[0][n].aux =? 0 and xz_nodes[0][n].nlist =? 3 and xz_swap_call(xz_nodes[0][n].aux xz_nodes[0][n].nlist xz_nodes[0][n].sym))) {
             xz_indexes[0]=xz_indexes[0] + 1
             index=true
             if global {break}
         }
         # Every child, so the first pops first: the lists (second, then first), then d,
         # c, b and a, as a recursive walk visits them.
-        let n1=XZWord(node[0].nlist)
-        let n2=XZWord(node[0].nlist2)
+        let n1=XZWord(xz_nodes[0][n].nlist)
+        let n2=XZWord(xz_nodes[0][n].nlist2)
         if sp + n1 + n2 + 4 >? cap {
             cap=(sp + n1 + n2 + 4) * 2
             xz_summary_stack.resize(cap)
             st=xz_summary_stack.ptr
         }
         if n2 >? 0 {
-            let l2=XZWord(node[0].list2)
+            let l2=XZWord(xz_nodes[0][n].list2)
             let i=n2 - 1
             loop i >=? 0 {
-                let x=lists[l2 + i]
+                let x=xz_lists[0][l2 + i]
                 if x not=? 0 {
                     st[sp]=int64(x)
                     sp=sp + 1
@@ -136,10 +133,10 @@ xz_summary=(root:XZWord):>void=>$unsafe {
             }
         }
         if n1 >? 0 {
-            let l1=XZWord(node[0].list)
+            let l1=XZWord(xz_nodes[0][n].list)
             let i=n1 - 1
             loop i >=? 0 {
-                let x=lists[l1 + i]
+                let x=xz_lists[0][l1 + i]
                 if x not=? 0 {
                     st[sp]=int64(x)
                     sp=sp + 1
@@ -148,21 +145,21 @@ xz_summary=(root:XZWord):>void=>$unsafe {
             }
         }
         if k not=? 'for_' {
-            if k not=? 'partial' and node[0].d not=? 0 {
-                st[sp]=int64(node[0].d)
+            if k not=? 'partial' and xz_nodes[0][n].d not=? 0 {
+                st[sp]=int64(xz_nodes[0][n].d)
                 sp=sp + 1
             }
-            if node[0].c not=? 0 {
-                st[sp]=int64(node[0].c)
+            if xz_nodes[0][n].c not=? 0 {
+                st[sp]=int64(xz_nodes[0][n].c)
                 sp=sp + 1
             }
         }
-        if node[0].b not=? 0 {
-            st[sp]=int64(node[0].b)
+        if xz_nodes[0][n].b not=? 0 {
+            st[sp]=int64(xz_nodes[0][n].b)
             sp=sp + 1
         }
-        if node[0].a not=? 0 {
-            st[sp]=int64(node[0].a)
+        if xz_nodes[0][n].a not=? 0 {
+            st[sp]=int64(xz_nodes[0][n].a)
             sp=sp + 1
         }
     }
@@ -201,9 +198,6 @@ xz_walk=<Proofs>(root:XZWord):>void=>$unsafe {
     let kf_p=xz_kflags_p
     let st=xz_stack.ptr
     let cap=xz_stack.length
-    let lists=xz_lists[0].ptr
-    let nodes_p=xz_nodes[0].ptr
-    let types_p=xz_types[0].ptr
     let collect=xz_collect[0]
     st[0]=int64(root)
     let sp:XZWord=1
@@ -215,13 +209,11 @@ xz_walk=<Proofs>(root:XZWord):>void=>$unsafe {
             if collect {xz_sites[0].push(int64(n))}
             continue
         }
-        let node=nodes_p + n
+        let node=xz_nodes[0].ptr + n
         let t=XZWord(node[0].type)
-        if t not=? 0 and XZWord(types_p[t].flags) & 1 not=? 0 {
+        if t not=? 0 and XZWord(xz_types[0][t].flags) & 1 not=? 0 {
             let zonked=tu_zonk(t)
-            types_p=xz_types[0].ptr
-            nodes_p=xz_nodes[0].ptr
-            node=nodes_p + n
+            node=xz_nodes[0].ptr + n
             node[0].type=int32<overflow='wrap'>(zonked)
         }
         let kf=kf_p[int64((node as ptr<uint32>)[0])]
@@ -281,7 +273,7 @@ xz_walk=<Proofs>(root:XZWord):>void=>$unsafe {
             let l2=XZWord(node[0].list2)
             let i=n2 - 1
             loop i >=? 0 {
-                let x=lists[l2 + i]
+                let x=xz_lists[0][l2 + i]
                 if x not=? 0 {
                     st[sp]=int64(x)
                     sp=sp + 1
@@ -293,7 +285,7 @@ xz_walk=<Proofs>(root:XZWord):>void=>$unsafe {
             let l1=XZWord(node[0].list)
             let i=n1 - 1
             loop i >=? 0 {
-                let x=lists[l1 + i]
+                let x=xz_lists[0][l1 + i]
                 if x not=? 0 {
                     st[sp]=int64(x)
                     sp=sp + 1

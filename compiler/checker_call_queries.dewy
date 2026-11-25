@@ -79,9 +79,8 @@ intrinsic_of=(name:CGWord):>CGWord=>$unsafe {
 }
 # A literal too wide for a word (a call the reader marked), possibly negated.
 cg_oversized=(a:CGWord):>bool=>$unsafe {
-    let node=cg_nodes[0].ptr + a
-    if node[0].kind =? 'unary' and node[0].op =? 59 {return cg_oversized(CGWord(node[0].a))}
-    node[0].kind =? 'call' and node[0].aux2 =? -1
+    if cg_nodes[0][a].kind =? 'unary' and cg_nodes[0][a].op =? 59 {return cg_oversized(CGWord(cg_nodes[0][a].a))}
+    cg_nodes[0][a].kind =? 'call' and cg_nodes[0][a].aux2 =? -1
 }
 cg_dewy=(pos:int64):>bool=>$unsafe {cg_files[0][pos >> 40].is_dewy}
 # Does argument a take its type from its parameter: an unchecked Dewy literal (array,
@@ -98,43 +97,39 @@ ctx_array_waits=(a:CGWord):>bool=>$unsafe {
     true
 }
 ctx_dependent_call=(a:CGWord):>bool=>$unsafe {
-    let node=cg_nodes[0].ptr + a
-    if node[0].aux2 =? -1 {return true}
-    if node[0].type =? 0 {
-        let callee=cg_nodes[0].ptr + CGWord(node[0].a)
-        let ck=callee[0].kind
-        if node[0].nlist =? 1 and ck =? 'ident' and CGWord(callee[0].name) =? cg_set_name[0] {return true}
+    if cg_nodes[0][a].aux2 =? -1 {return true}
+    if cg_nodes[0][a].type =? 0 {
+        let callee_index=CGWord(cg_nodes[0][a].a)
+        let ck=cg_nodes[0][callee_index].kind
+        if cg_nodes[0][a].nlist =? 1 and ck =? 'ident' and CGWord(cg_nodes[0][callee_index].name) =? cg_set_name[0] {return true}
         if ck =? 'dotname' {return true}
-        if ck =? 'ident' {return ctx_call_waits(a CGWord(callee[0].name))}
+        if ck =? 'ident' {return ctx_call_waits(a CGWord(cg_nodes[0][callee_index].name))}
     }
     false
 }
 ctx_dependent_array=(a:CGWord):>bool=>$unsafe {
-    let node=cg_nodes[0].ptr + a
-    let count=CGWord(node[0].nlist)
-    if count =? 0 {return node[0].b =? 0}
-    if node[0].type =? 0 and (CGWord(node[0].flags) & 128) =? 0 and cg_dewy(node[0].pos) {return ctx_array_waits(a)}
-    let base=CGWord(node[0].list)
-    let lp=cg_lists[0].ptr
+    let count=CGWord(cg_nodes[0][a].nlist)
+    if count =? 0 {return cg_nodes[0][a].b =? 0}
+    if cg_nodes[0][a].type =? 0 and (CGWord(cg_nodes[0][a].flags) & 128) =? 0 and cg_dewy(cg_nodes[0][a].pos) {return ctx_array_waits(a)}
+    let base=CGWord(cg_nodes[0][a].list)
     let i:CGWord=0
     loop i <? count {
-        if ctx_dependent(CGWord(lp[base + i])) {return true}
+        if ctx_dependent(CGWord(cg_lists[0][base + i])) {return true}
         i=i + 1
     }
     false
 }
 ctx_dependent=(a:CGWord):>bool=>$unsafe {
-    let node=cg_nodes[0].ptr + a
-    match node[0].kind {
-        <'ident'|'field'|'typeapply'> => (CGWord(node[0].flags) & 4096) not=? 0
+    match cg_nodes[0].ptr[a].kind {
+        <'ident'|'field'|'typeapply'> => (CGWord(cg_nodes[0].ptr[a].flags) & 4096) not=? 0
         <'call'> => ctx_dependent_call(a)
-        <'unary'> => node[0].op =? 59 and cg_oversized(CGWord(node[0].a))
-        <'dotname'> => node[0].type =? 0
+        <'unary'> => cg_nodes[0].ptr[a].op =? 59 and cg_oversized(CGWord(cg_nodes[0].ptr[a].a))
+        <'dotname'> => cg_nodes[0].ptr[a].type =? 0
         <'lambda'|'none_lit'|'hole'|'record_lit'> => true
-        <'if_'|'match_'> => (CGWord(node[0].flags) & 128) =? 0 and cg_dewy(node[0].pos)
-        <'block'> => (CGWord(node[0].flags) & 67108864) not=? 0 and (CGWord(node[0].flags) & 128) =? 0
+        <'if_'|'match_'> => (CGWord(cg_nodes[0].ptr[a].flags) & 128) =? 0 and cg_dewy(cg_nodes[0].ptr[a].pos)
+        <'block'> => (CGWord(cg_nodes[0].ptr[a].flags) & 67108864) not=? 0 and (CGWord(cg_nodes[0].ptr[a].flags) & 128) =? 0
         <'array'> => ctx_dependent_array(a)
-        <'map_lit'> => node[0].nlist =? 0 or (node[0].type =? 0 and (CGWord(node[0].flags) & 128) =? 0 and cg_dewy(node[0].pos))
+        <'map_lit'> => cg_nodes[0].ptr[a].nlist =? 0 or (cg_nodes[0].ptr[a].type =? 0 and (CGWord(cg_nodes[0].ptr[a].flags) & 128) =? 0 and cg_dewy(cg_nodes[0].ptr[a].pos))
         _ => false
     }
 }
@@ -175,17 +170,16 @@ check_mutable_arguments=(args:array<int64> mask:CGWord pos:CGWord):>void=>$unsaf
 map_float_key=(n:CGWord):>void=>$unsafe {
     let d=CGWord(cg_fns[0].ptr[CGWord(cg_nodes[0].ptr[n].sym)].decl)
     if d =? 0 {return}
-    let decl=cg_nodes[0].ptr + d
-    let nd=CGWord(decl[0].nlist)
+    let nd=CGWord(cg_nodes[0][d].nlist)
     if nd <? 1 {return}
     let nn=CGWord(cg_nodes[0].ptr[n].nlist)
     let names=cg_float_key_names[0].ptr
     if nn =? 1 {
-        let nm=CGWord(decl[0].name)
+        let nm=CGWord(cg_nodes[0][d].name)
         if nm not=? names[0] and nm not=? names[1] {return}
     } else {
         if nd <? 2 or nn <? 2 {return}
-        let p=CGWord(cg_nodes[0].ptr[CGWord(cg_lists[0].ptr[CGWord(decl[0].list) + 1])].name)
+        let p=CGWord(cg_nodes[0].ptr[CGWord(cg_lists[0].ptr[CGWord(cg_nodes[0][d].list) + 1])].name)
         if p not=? names[2] and p not=? names[3] {return}
     }
     cg_host[0].float_key(n)
@@ -453,9 +447,8 @@ cl_stamp=(name:CGWord):>CGWord=>$unsafe {
 }
 # (a Dewy method: its first parameter is `$self...`)
 cl_method=(d:CGWord):>bool=>$unsafe {
-    let decl=cg_nodes[0].ptr + d
-    if decl[0].nlist <? 1 {return false}
-    let p=CGWord(cg_lists[0].ptr[CGWord(decl[0].list)])
+    if cg_nodes[0][d].nlist <? 1 {return false}
+    let p=CGWord(cg_lists[0].ptr[CGWord(cg_nodes[0][d].list)])
     cg_names[0].ptr[CGWord(cg_nodes[0].ptr[p].name)].startswith("$self")
 }
 # A bare name in a Dewy module names one binding: the module's own declarations of it

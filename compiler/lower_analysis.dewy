@@ -652,43 +652,42 @@ fw_global=(n:LAWord @w:FnWrites):>void=>$unsafe {
 }
 fw_scan=(n:LAWord @w:FnWrites):>void=>$unsafe {
     if n <=? 0 {return}
-    let nd=nodes.ptr + n
-    let k=nd[0].kind
+    let k=nodes[n].kind
     if k =? 'lambda' {return}
-    if (k =? 'binary' and nd[0].aux =? int32(1)) or (k =? 'intrinsic' and nd[0].aux =? int32(24)) {
+    if (k =? 'binary' and nodes[n].aux =? int32(1)) or (k =? 'intrinsic' and nodes[n].aux =? int32(24)) {
         loop f in value_helper_calls(n) {
             if not w.calls.contains(f) {w.calls.push(f);}
         }
     }
     if k =? 'ident' {
-        if nd[0].aux =? int32(2) and not w.mentions.contains(LAWord(nd[0].sym)) {w.mentions.push(LAWord(nd[0].sym));}
+        if nodes[n].aux =? int32(2) and not w.mentions.contains(LAWord(nodes[n].sym)) {w.mentions.push(LAWord(nodes[n].sym));}
         return
     }
     if k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'none_lit' or k =? 'null_lit' or k =? 'dotname' or k =? 'break_' or k =? 'continue_' {return}
-    if k =? 'assign' {fw_global(LAWord(nd[0].a) @w);}
-    else if k =? 'intrinsic' and nd[0].nlist >? 0 {
-        let id=nd[0].aux as IN
+    if k =? 'assign' {fw_global(LAWord(nodes[n].a) @w);}
+    else if k =? 'intrinsic' and nodes[n].nlist >? 0 {
+        let id=nodes[n].aux as IN
         if id =? IN.fmt_struct or id =? IN.json_fields {w.all = true;}
         if id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend {fw_global(kid(n 0) @w);}
     }
-    else if k =? 'for_' and has_flag(n NF_MUT) {fw_global(LAWord(nd[0].a) @w);}
-    else if k =? 'call' or (k =? 'pair' and nd[0].sym >? 0) {
+    else if k =? 'for_' and has_flag(n NF_MUT) {fw_global(LAWord(nodes[n].a) @w);}
+    else if k =? 'call' or (k =? 'pair' and nodes[n].sym >? 0) {
         let mm=checked_call_mutmask(n)
         if mm not=? 0 {
-            loop i in [0..LAWord(nd[0].nlist)) {
+            loop i in [0..LAWord(nodes[n].nlist)) {
                 if mm & (LAWord(1) << LAWord(i)) not=? 0 {fw_global(kid(n i) @w);}
             }
         }
-        let aux=if k =? 'pair' {0} else {LAWord(nd[0].aux)}
+        let aux=if k =? 'pair' {0} else {LAWord(nodes[n].aux)}
         if aux =? 1 or aux =? 4 {w.all = true;}
-        else if aux =? 0 and not w.calls.contains(LAWord(nd[0].sym)) {w.calls.push(LAWord(nd[0].sym));}
+        else if aux =? 0 and not w.calls.contains(LAWord(nodes[n].sym)) {w.calls.push(LAWord(nodes[n].sym));}
     }
-    let a=LAWord(nd[0].a)
-    let b=LAWord(nd[0].b)
+    let a=LAWord(nodes[n].a)
+    let b=LAWord(nodes[n].b)
     let c=kid_c(n)
     let d=kid_d(n)
-    let n1=LAWord(nd[0].nlist)
-    let n2=LAWord(nd[0].nlist2)
+    let n1=LAWord(nodes[n].nlist)
+    let n2=LAWord(nodes[n].nlist2)
     if a >? 0 {fw_scan(a @w);}
     if b >? 0 {fw_scan(b @w);}
     if c >? 0 {fw_scan(c @w);}

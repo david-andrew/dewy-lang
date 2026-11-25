@@ -13,11 +13,10 @@ type_substitute_bind=(input:ptr<TypeInferenceInput>):>SWord=>{ts_inputs=input;0}
 ts_fixed_len=(t:SWord):>SWord=>$unsafe {SWord(ts_inputs[0].types[0].ptr[tu_prune(t)].bits)}
 # Borrow only for the entry guard; recursive constructors reacquire the header.
 ts_subst=(t0:SWord targs:array<int64>):>SWord=>$unsafe {
-    let types=ts_inputs[0].types[0].ptr
     let t=t0
-    loop t not=? 0 and types[t].kind =? 'var' and types[t].ref not=? 0 {t=SWord(types[t].ref)}
-    if t =? 0 or (types[t].flags & 1) =? 0 {return t}
-    let k=types[t].kind
+    loop t not=? 0 and ts_inputs[0].types[0][t].kind =? 'var' and ts_inputs[0].types[0][t].ref not=? 0 {t=SWord(ts_inputs[0].types[0][t].ref)}
+    if t =? 0 or (ts_inputs[0].types[0][t].flags & 1) =? 0 {return t}
+    let k=ts_inputs[0].types[0][t].kind
     if k =? 'param' {
         let id=SWord(ts_inputs[0].types[0].ptr[t].id)
         if id <? targs.length and targs[id] not=? 0 {return targs[id]}
@@ -49,11 +48,10 @@ ts_subst=(t0:SWord targs:array<int64>):>SWord=>$unsafe {
     t
 }
 ts_partial=(pat0:SWord @binds:array<int64>):>SWord=>$unsafe {
-    let types=ts_inputs[0].types[0].ptr
     let pat=pat0
-    loop pat not=? 0 and types[pat].kind =? 'var' and types[pat].ref not=? 0 {pat=SWord(types[pat].ref)}
-    if (types[pat].flags & 1) =? 0 {return pat}
-    let k=types[pat].kind
+    loop pat not=? 0 and ts_inputs[0].types[0][pat].kind =? 'var' and ts_inputs[0].types[0][pat].ref not=? 0 {pat=SWord(ts_inputs[0].types[0][pat].ref)}
+    if (ts_inputs[0].types[0][pat].flags & 1) =? 0 {return pat}
+    let k=ts_inputs[0].types[0][pat].kind
     if k =? 'param' {
         let id=SWord(ts_inputs[0].types[0].ptr[pat].id)
         if binds[id] =? 0 {binds[id] = tb_mk_var()}

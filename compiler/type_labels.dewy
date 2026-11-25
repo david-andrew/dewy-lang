@@ -50,13 +50,11 @@ tn_label_names=(key:NWord count:NWord):>array<int64>=>$unsafe {
 }
 tn_decl_labels=(decl:NWord):>NWord=>$unsafe {
     if decl =? 0 {return 0}
-    let nodes=tn_inputs[0].nodes[0].ptr
-    let file=nodes[decl].pos >> 40
+    let file=tn_inputs[0].nodes[0][decl].pos >> 40
     if not tn_inputs[0].files[0].ptr[file].is_dewy {return 0}
-    let first=NWord(nodes[decl].list)
-    let count=NWord(nodes[decl].nlist)
-    let children=tn_inputs[0].lists[0].ptr
+    let first=NWord(tn_inputs[0].nodes[0][decl].list)
+    let count=NWord(tn_inputs[0].nodes[0][decl].nlist)
     let names:array<int64>=[]
-    loop i in [NWord(0)..count) {names.push(NWord(nodes[NWord(children[first+i])].name))}
+    loop i in [NWord(0)..count) {names.push(NWord(tn_inputs[0].nodes[0][NWord(tn_inputs[0].lists[0][first+i])].name))}
     tn_label_key(names)
 }

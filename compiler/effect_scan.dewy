@@ -545,8 +545,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     if es_seen_p =? (uint64(0) as ptr<int64>) {es_seen_p=effect_seen.ptr}
     if es_seen_p[n] =? f {return}
     es_seen_p[n]=f
-    let np=nodes.ptr + n
-    let k=np[0].kind
+    let k=nodes[n].kind
     let exact_rep=effect_exact_rep
     if not exact_rep and ownership_decls.length =? 0 {
         if k =? 'block' {
@@ -557,23 +556,23 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
             return
         }
         if k =? 'exprstmt' or k =? 'not_' or k =? 'defer_' {
-            let a=EffectScanWord(np[0].a)
+            let a=EffectScanWord(nodes[n].a)
             if a not=? 0 {effect_scan_node(f a)}
             return
         }
         if k =? 'and_' or k =? 'or_' or k =? 'while_' {
-            let a=EffectScanWord(np[0].a)
+            let a=EffectScanWord(nodes[n].a)
             if a not=? 0 {effect_scan_node(f a)}
-            let b=EffectScanWord(np[0].b)
+            let b=EffectScanWord(nodes[n].b)
             if b not=? 0 {effect_scan_node(f b)}
             return
         }
         if k =? 'if_' {
-            let a=EffectScanWord(np[0].a)
+            let a=EffectScanWord(nodes[n].a)
             if a not=? 0 {effect_scan_node(f a)}
-            let b=EffectScanWord(np[0].b)
+            let b=EffectScanWord(nodes[n].b)
             if b not=? 0 {effect_scan_node(f b)}
-            let c=EffectScanWord(np[0].c)
+            let c=EffectScanWord(nodes[n].c)
             if c not=? 0 {effect_scan_node(f c)}
             return
         }
@@ -584,10 +583,10 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         es_seen_p=effect_seen.ptr
     }
     if k =? 'for_' {
-        let marks=effect_for_marks.get(EffectScanWord(np[0].sym)) ?? []
+        let marks=effect_for_marks.get(EffectScanWord(nodes[n].sym)) ?? []
         if not marks.contains(n) {
             marks.push(n);
-            effect_for_marks[EffectScanWord(np[0].sym)] = marks;
+            effect_for_marks[EffectScanWord(nodes[n].sym)] = marks;
     # These shortened place walks omit evaluated-root visits. Keep the legacy
     # adapter conservative rather than accidentally proving a global/alias pure.
         }
@@ -599,9 +598,9 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         if reason not=? IsolationReason.none_ {effect_isolation_block(f reason n);}
     }
     if k =? 'ident' {
-        if np[0].aux =? int32<overflow='wrap'>(2) {effect_isolation_block(f IsolationReason.global_ n);}
-        else if np[0].aux not=? int32<overflow='wrap'>(1) {effect_isolation_block(f IsolationReason.node n);}
-        else if EffectScanWord(locals.ptr[EffectScanWord(np[0].sym)].flags) & (LF_CAPTURE | LF_ADDR) not=? 0 {effect_isolation_block(f IsolationReason.capture n);}
+        if nodes[n].aux =? int32<overflow='wrap'>(2) {effect_isolation_block(f IsolationReason.global_ n);}
+        else if nodes[n].aux not=? int32<overflow='wrap'>(1) {effect_isolation_block(f IsolationReason.node n);}
+        else if EffectScanWord(locals.ptr[EffectScanWord(nodes[n].sym)].flags) & (LF_CAPTURE | LF_ADDR) not=? 0 {effect_isolation_block(f IsolationReason.capture n);}
     }
     if ownership_decls.length not=? 0 {
         if k =? 'block' {effect_body_moves_out(n 0 false)}

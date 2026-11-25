@@ -312,16 +312,14 @@ xe_untyped_pairs=(n:XEWord):>void=>$unsafe {
 }
 # `__dewy_set(...)`, a set literal not yet checked.
 xe_set_call=(a:XEWord):>bool=>$unsafe {
-    let node=xe_nodes[0].ptr + a
-    if node[0].type not=? 0 or node[0].nlist not=? 1 {return false}
-    let callee=xe_nodes[0].ptr + XEWord(node[0].a)
-    callee[0].kind =? 'ident' and XEWord(callee[0].name) =? xe_set_name[0]
+    if xe_nodes[0][a].type not=? 0 or xe_nodes[0][a].nlist not=? 1 {return false}
+    let callee_index=XEWord(xe_nodes[0][a].a)
+    xe_nodes[0][callee_index].kind =? 'ident' and XEWord(xe_nodes[0][callee_index].name) =? xe_set_name[0]
 }
 # An array whose first member spreads (NF_SPREAD 1024) in Dewy may be a record literal.
 xe_spread=(a:XEWord):>void=>$unsafe {
-    let node=xe_nodes[0].ptr + a
-    if node[0].b not=? 0 or node[0].nlist =? 0 {return}
-    if (XEWord(xe_nodes[0].ptr[XEWord(xe_lists[0].ptr[XEWord(node[0].list)])].flags) & 1024) =? 0 {return}
+    if xe_nodes[0][a].b not=? 0 or xe_nodes[0][a].nlist =? 0 {return}
+    if (XEWord(xe_nodes[0].ptr[XEWord(xe_lists[0].ptr[XEWord(xe_nodes[0][a].list)])].flags) & 1024) =? 0 {return}
     xe_call_host[0].spread(a)
 }
 xe_members=(a:XEWord):>void=>$unsafe {xe_call_host[0].members(a)}
@@ -331,17 +329,15 @@ xe_fn_kind=(t:XEWord):>bool=>$unsafe {
 }
 xe_untyped=(a0:XEWord):>void=>$unsafe {
     let a=a0
-    let node=xe_nodes[0].ptr + a
-    let k=node[0].kind
+    let k=xe_nodes[0].ptr[a].kind
     if k =? 'namedarg' {
-        a=XEWord(node[0].a)
-        node=xe_nodes[0].ptr + a
-        k=node[0].kind
+        a=XEWord(xe_nodes[0].ptr[a].a)
+        k=xe_nodes[0].ptr[a].kind
     }
-    if (XEWord(node[0].flags) & 128) not=? 0 and k not=? 'call' and k not=? 'array' and k not=? 'record_lit' and k not=? 'map_lit' {return}
+    if (XEWord(xe_nodes[0].ptr[a].flags) & 128) not=? 0 and k not=? 'call' and k not=? 'array' and k not=? 'record_lit' and k not=? 'map_lit' {return}
     if k =? 'call' {
         let m=xe_members_name[0]
-        if m =? 0 or XEWord(xe_nodes[0].ptr[XEWord(node[0].a)].name) =? m {xe_members(a)}
+        if m =? 0 or XEWord(xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[a].a)].name) =? m {xe_members(a)}
         if xe_nodes[0].ptr[a].kind =? 'call' and xe_set_call(a) {
             xe_untyped_kids(a)
             return
@@ -507,11 +503,10 @@ xe_charlike=(n:XEWord):>bool=>$unsafe {xe_nodes[0].ptr[n].kind =? 'str_lit' and 
 # How a quantity operand was written, before it is checked (units.jo): `2 * m`, `-2 * m`.
 xe_quantity_literal=(e:XEWord):>bool=>$unsafe {
     if e =? 0 or xe_flag(e 128) {return false}
-    let node=xe_nodes[0].ptr + e
-    if node[0].kind =? 'unary' {return xe_quantity_literal(XEWord(node[0].a))}
-    if node[0].kind =? 'binary' and node[0].op =? 60 {
-        let x=xe_nodes[0].ptr[XEWord(node[0].a)].kind
-        return (x =? 'int_lit' or x =? 'float_lit') and xe_nodes[0].ptr[XEWord(node[0].b)].kind =? 'ident'
+    if xe_nodes[0][e].kind =? 'unary' {return xe_quantity_literal(XEWord(xe_nodes[0][e].a))}
+    if xe_nodes[0][e].kind =? 'binary' and xe_nodes[0][e].op =? 60 {
+        let x=xe_nodes[0].ptr[XEWord(xe_nodes[0][e].a)].kind
+        return (x =? 'int_lit' or x =? 'float_lit') and xe_nodes[0].ptr[XEWord(xe_nodes[0][e].b)].kind =? 'ident'
     }
     false
 }
@@ -522,11 +517,10 @@ xe_quantity_name=(e:XEWord):>bool=>$unsafe {
 }
 # A collection literal operand of `=? not=? & | ^ -` in Dewy, which takes the other side's type.
 xe_literal_operand=(e:XEWord):>bool=>$unsafe {
-    let node=xe_nodes[0].ptr + e
-    let k=node[0].kind
+    let k=xe_nodes[0].ptr[e].kind
     if k =? 'array' or k =? 'record_lit' or k =? 'map_lit' {return true}
     # (a set literal is the call `__dewy_set(...)`, not yet checked)
-    k =? 'call' and node[0].type =? 0 and node[0].nlist =? 1 and xe_nodes[0].ptr[XEWord(node[0].a)].kind =? 'ident' and dewy_set_literal(e)
+    k =? 'call' and xe_nodes[0].ptr[e].type =? 0 and xe_nodes[0].ptr[e].nlist =? 1 and xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[e].a)].kind =? 'ident' and dewy_set_literal(e)
 }
 # `a xor b`: not=? on bools, ^ on integers.
 xe_xor=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
@@ -574,13 +568,12 @@ xe_first=(b:XEWord):>XEWord=>$unsafe {
 # then the second operand in the first's type. Two plain numbers go to the numeric leaf;
 # a secret, a quantity, text, an optional, a struct and every other pair to the host.
 xe_binary=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
-    let nd=xe_nodes[0].ptr + n
-    let op=XEWord(nd[0].op)
+    let op=XEWord(xe_nodes[0].ptr[n].op)
     if op =? 85 {return check_dotted(n expected)}
-    if op =? 60 and (XEWord(nd[0].flags) & 536870912) not=? 0 {binary_juxt(n); nd=xe_nodes[0].ptr + n}
+    if op =? 60 and (XEWord(xe_nodes[0].ptr[n].flags) & 536870912) not=? 0 {binary_juxt(n); }
     if op =? 82 {return xe_xor(n expected)}
-    let a=XEWord(nd[0].a)
-    let b=XEWord(nd[0].b)
+    let a=XEWord(xe_nodes[0].ptr[n].a)
+    let b=XEWord(xe_nodes[0].ptr[n].b)
     if op not=? 58 and op not=? 60 and xe_nodes[0].ptr[a].kind =? 'str_lit' {xe_char(n)}
     if op =? 12 {return xe_in(n expected)}
     let is_cmp=op >=? 69 and op <=? 74
@@ -867,18 +860,16 @@ check_expr=(n0:int64 expected0:int64):>int64=>$unsafe {
     let n=XEWord(n0)
     let expected=XEWord(expected0)
     xe_last[0]=n
-    let node=xe_nodes[0].ptr + n
-    let fl=XEWord(node[0].flags)
+    let fl=XEWord(xe_nodes[0].ptr[n].flags)
     if (fl & 8320) not=? 0 {
         if (fl & 8192) not=? 0 {
             let contribution=collection_check(n expected)
             if contribution >=? 0 {return contribution}
-            node=xe_nodes[0].ptr + n
         }
         # NF_CHECKED 128: a node checked before keeps its type.
-        if node[0].type not=? 0 and (XEWord(node[0].flags) & 128) not=? 0 {return XEWord(node[0].type)}
+        if xe_nodes[0].ptr[n].type not=? 0 and (XEWord(xe_nodes[0].ptr[n].flags) & 128) not=? 0 {return XEWord(xe_nodes[0].ptr[n].type)}
     }
-    match node[0].kind {
+    match xe_nodes[0].ptr[n].kind {
         <'ident'> => xe_ident(n expected)
         <'int_lit'> => xl_check_int(n expected)
         <'binary'> => xl_finish(n xe_binary(n expected) expected)

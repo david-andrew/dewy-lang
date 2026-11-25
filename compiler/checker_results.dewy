@@ -28,15 +28,14 @@ cr_has_flag=(n:CRWord flag:CRWord):>bool=>$unsafe {(CRWord(cr_nodes[0].ptr[n].fl
 # This walk and cr_has_propagate cannot invoke hosts or grow either arena.
 cr_has_value_return=(n:CRWord):>bool=>$unsafe {
     if n =? 0 {return false}
-    let nd=cr_nodes[0].ptr + n
-    let k=nd[0].kind
-    if k =? 'return_' {return nd[0].a not=? 0}
+    let k=cr_nodes[0].ptr[n].kind
+    if k =? 'return_' {return cr_nodes[0].ptr[n].a not=? 0}
     if k =? 'lambda' {return false}
-    if nd[0].a not=? 0 and cr_has_value_return(CRWord(nd[0].a)) {return true}
-    if nd[0].b not=? 0 and cr_has_value_return(CRWord(nd[0].b)) {return true}
-    if k not=? 'for_' and nd[0].c not=? 0 and cr_has_value_return(CRWord(nd[0].c)) {return true}
-    loop i in [0..CRWord(nd[0].nlist)) {
-        if cr_has_value_return(CRWord(cr_lists[0].ptr[CRWord(nd[0].list) + i])) {return true}
+    if cr_nodes[0].ptr[n].a not=? 0 and cr_has_value_return(CRWord(cr_nodes[0].ptr[n].a)) {return true}
+    if cr_nodes[0].ptr[n].b not=? 0 and cr_has_value_return(CRWord(cr_nodes[0].ptr[n].b)) {return true}
+    if k not=? 'for_' and cr_nodes[0].ptr[n].c not=? 0 and cr_has_value_return(CRWord(cr_nodes[0].ptr[n].c)) {return true}
+    loop i in [0..CRWord(cr_nodes[0].ptr[n].nlist)) {
+        if cr_has_value_return(CRWord(cr_lists[0].ptr[CRWord(cr_nodes[0].ptr[n].list) + i])) {return true}
     }
     false
 }
@@ -88,15 +87,14 @@ cr_syntactic_void=(body:CRWord):>bool=>$unsafe {
 }
 cr_has_propagate=(n:CRWord):>bool=>$unsafe {
     if n =? 0 {return false}
-    let nd=cr_nodes[0].ptr + n
-    let k=nd[0].kind
+    let k=cr_nodes[0][n].kind
     if k =? 'propagate' {return true}
     if k =? 'lambda' {return false}
-    if nd[0].a not=? 0 and cr_has_propagate(CRWord(nd[0].a)) {return true}
-    if nd[0].b not=? 0 and cr_has_propagate(CRWord(nd[0].b)) {return true}
-    if k not=? 'for_' and nd[0].c not=? 0 and cr_has_propagate(CRWord(nd[0].c)) {return true}
-    loop i in [0..CRWord(nd[0].nlist)) {
-        if cr_has_propagate(CRWord(cr_lists[0].ptr[CRWord(nd[0].list) + i])) {return true}
+    if cr_nodes[0][n].a not=? 0 and cr_has_propagate(CRWord(cr_nodes[0][n].a)) {return true}
+    if cr_nodes[0][n].b not=? 0 and cr_has_propagate(CRWord(cr_nodes[0][n].b)) {return true}
+    if k not=? 'for_' and cr_nodes[0][n].c not=? 0 and cr_has_propagate(CRWord(cr_nodes[0][n].c)) {return true}
+    loop i in [0..CRWord(cr_nodes[0][n].nlist)) {
+        if cr_has_propagate(CRWord(cr_lists[0].ptr[CRWord(cr_nodes[0][n].list) + i])) {return true}
     }
     false
 }

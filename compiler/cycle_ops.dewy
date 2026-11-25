@@ -170,8 +170,6 @@ cyc_walk=(root:CycleWord):>void=>$unsafe {
     let scap=cyc_wstack.length
     st[base]=root
     let sp:CycleWord=base + 1
-    let ns=nodes.ptr
-    let lp=lists.ptr
     let icp=iso_child_p
     let gl=globals.ptr
     let crm=cr_member.ptr
@@ -179,14 +177,13 @@ cyc_walk=(root:CycleWord):>void=>$unsafe {
         sp -= 1
         let n=CycleWord(st[sp])
         if n <=? 0 {continue}
-        let np=ns + n
-        let k=np[0].kind
+        let k=nodes[n].kind
         if k =? 'ident' {
-            if np[0].aux =? int32(2) {
-                let g=CycleWord(np[0].sym)
+            if nodes[n].aux =? int32(2) {
+                let g=CycleWord(nodes[n].sym)
                 if crm[CycleWord(gl[g].mod)] {
                     if cr_owner >? 0 {cr_ev.push(g)}
-                    else {cyc_take(g np[0].pos 0)}
+                    else {cyc_take(g nodes[n].pos 0)}
                 }
             }
             continue
@@ -194,8 +191,8 @@ cyc_walk=(root:CycleWord):>void=>$unsafe {
         if k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'none_lit' or k =? 'dotname' or k =? 'null_lit' or k =? 'hole' or k =? 'break_' or k =? 'continue_' {continue}
         let h:CycleWord=0
         if k =? 'call' {
-            if np[0].aux =? 0 {h=CycleWord(np[0].sym)}
-            else if np[0].aux =? 1 or np[0].aux =? 4 {h=cyc_callable(CycleWord(np[0].a))}
+            if nodes[n].aux =? 0 {h=CycleWord(nodes[n].sym)}
+            else if nodes[n].aux =? 1 or nodes[n].aux =? 4 {h=cyc_callable(CycleWord(nodes[n].a))}
         }
         if h >? 0 {
             cyc_wsp=sp
@@ -209,11 +206,11 @@ cyc_walk=(root:CycleWord):>void=>$unsafe {
             st=cyc_wstack.ptr
             scap=cyc_wstack.length
         }
-        let mask:CycleWord=int64(icp[int64((np as ptr<uint32>)[0])])
+        let mask:CycleWord=int64(icp[int64(((nodes.ptr + n) as ptr<uint32>)[0])])
         if mask =? 0 {continue}
         if mask <? 0 {mask=1 | 2 | 16}
-        let k1:CycleWord=if mask & 16 not=? 0 {CycleWord(np[0].nlist)} else {0}
-        let k2:CycleWord=if mask & 32 not=? 0 {CycleWord(np[0].nlist2)} else {0}
+        let k1:CycleWord=if mask & 16 not=? 0 {CycleWord(nodes[n].nlist)} else {0}
+        let k2:CycleWord=if mask & 32 not=? 0 {CycleWord(nodes[n].nlist2)} else {0}
         if sp + k1 + k2 + 3 >? scap {
             scap=(sp + k1 + k2 + 3) * 2
             cyc_wstack.resize(scap)
@@ -228,17 +225,17 @@ cyc_walk=(root:CycleWord):>void=>$unsafe {
             }
         }
         if k1 >? 0 {
-            let l1=CycleWord(np[0].list)
+            let l1=CycleWord(nodes[n].list)
             let i=k1 - 1
             loop i >=? 0 {
-                let c=CycleWord(lp[l1 + i])
+                let c=CycleWord(lists[l1 + i])
                 if c >? 0 {st[sp]=c; sp += 1}
                 i -= 1
             }
         }
-        if mask & 4 not=? 0 and np[0].c >? 0 {st[sp]=CycleWord(np[0].c); sp += 1}
-        if mask & 2 not=? 0 and np[0].b >? 0 {st[sp]=CycleWord(np[0].b); sp += 1}
-        if mask & 1 not=? 0 and np[0].a >? 0 {st[sp]=CycleWord(np[0].a); sp += 1}
+        if mask & 4 not=? 0 and nodes[n].c >? 0 {st[sp]=CycleWord(nodes[n].c); sp += 1}
+        if mask & 2 not=? 0 and nodes[n].b >? 0 {st[sp]=CycleWord(nodes[n].b); sp += 1}
+        if mask & 1 not=? 0 and nodes[n].a >? 0 {st[sp]=CycleWord(nodes[n].a); sp += 1}
     }
     cyc_wsp=base
 }

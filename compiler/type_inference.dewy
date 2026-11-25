@@ -43,8 +43,7 @@ tu_prune_var=(tp:ptr<TypeInfo> t0:TWord):>TWord=>$unsafe {
     t
 }
 tu_prune=(t0:TWord):>TWord=>$unsafe {
-    let tp=tu_types[0].ptr + t0
-    if tp[0].kind =? 'var' and tp[0].ref not=? 0 {return tu_prune_var(tu_types[0].ptr TWord(tp[0].ref))}
+    if tu_types[0].ptr[t0].kind =? 'var' and tu_types[0].ptr[t0].ref not=? 0 {return tu_prune_var(tu_types[0].ptr TWord(tu_types[0].ptr[t0].ref))}
     t0
 }
 tu_has_var=(t:TWord):>bool=>$unsafe {
@@ -63,27 +62,24 @@ tu_occurs=(v:TWord t0:TWord):>bool=>$unsafe {
     type_query_occurs_children(@tu_types[0]  @tu_structs[0]  @tu_args[0]  v  t)
 }
 tu_equal_slow=(a0:TWord b0:TWord):>bool=>$unsafe {
-    let types=tu_types[0].ptr
     let a=a0
     let b=b0
-    loop a not=? 0 and types[a].kind =? 'var' and types[a].ref not=? 0 {a=TWord(types[a].ref)}
-    loop b not=? 0 and types[b].kind =? 'var' and types[b].ref not=? 0 {b=TWord(types[b].ref)}
+    loop a not=? 0 and tu_types[0][a].kind =? 'var' and tu_types[0][a].ref not=? 0 {a=TWord(tu_types[0][a].ref)}
+    loop b not=? 0 and tu_types[0][b].kind =? 'var' and tu_types[0][b].ref not=? 0 {b=TWord(tu_types[0][b].ref)}
     if a =? b {return true}
     if a =? 0 or b =? 0 {return false}
-    if (types[a].flags & 1) =? 0 and (types[b].flags & 1) =? 0 {return false}
+    if (tu_types[0][a].flags & 1) =? 0 and (tu_types[0][b].flags & 1) =? 0 {return false}
     type_query_equal_shape(@tu_types[0]  @tu_structs[0]  @tu_args[0]  a  b)
 }
 tu_equal=(a0:TWord b0:TWord):>bool=>$unsafe {
     if a0 =? b0 {return true}
     if a0 =? 0 or b0 =? 0 {return false}
-    let tp=tu_types[0].ptr
-    if (tp[a0].flags & 1) =? 0 and tp[a0].kind not=? 'var' and (tp[b0].flags & 1) =? 0 and tp[b0].kind not=? 'var' {return false}
+    if (tu_types[0].ptr[a0].flags & 1) =? 0 and tu_types[0].ptr[a0].kind not=? 'var' and (tu_types[0].ptr[b0].flags & 1) =? 0 and tu_types[0].ptr[b0].kind not=? 'var' {return false}
     tu_equal_slow(a0 b0)
 }
 tu_is_union=(t0:TWord):>bool=>$unsafe {
     let t=tu_prune(t0)
-    let tp=tu_types[0].ptr
-    tp[t].kind =? 'enum_' and tu_structs[0].ptr[TWord(tp[t].st)].union_
+    tu_types[0][t].kind =? 'enum_' and tu_structs[0].ptr[TWord(tu_types[0][t].st)].union_
 }
 tu_union_members=(t0:TWord):>array<int64>=>$unsafe {
     let si=TWord(tu_inputs[0].types[0].ptr[tu_prune(t0)].st)
@@ -93,16 +89,14 @@ tu_union_members=(t0:TWord):>array<int64>=>$unsafe {
 }
 
 tu_zonk_slow=(t0:TWord):>TWord=>$unsafe {
-    let types=tu_types[0].ptr
     let t=t0
-    loop t not=? 0 and types[t].kind =? 'var' and types[t].ref not=? 0 {t=TWord(types[t].ref)}
-    if t =? 0 or (types[t].flags & 1) =? 0 or types[t].kind =? 'var' or types[t].kind =? 'param' {return t}
+    loop t not=? 0 and tu_types[0][t].kind =? 'var' and tu_types[0][t].ref not=? 0 {t=TWord(tu_types[0][t].ref)}
+    if t =? 0 or (tu_types[0][t].flags & 1) =? 0 or tu_types[0][t].kind =? 'var' or tu_types[0][t].kind =? 'param' {return t}
     tu_zonk_children(t)
 }
 tu_zonk=(t0:TWord):>TWord=>$unsafe {
     if t0 =? 0 {return 0}
-    let tp=tu_types[0].ptr
-    if (tp[t0].flags & 1) =? 0 and tp[t0].kind not=? 'var' {return t0}
+    if (tu_types[0][t0].flags & 1) =? 0 and tu_types[0][t0].kind not=? 'var' {return t0}
     tu_zonk_slow(t0)
 }
 tu_zonk_children=(t:TWord):>TWord=>$unsafe {
@@ -128,11 +122,10 @@ tu_zonk_children=(t:TWord):>TWord=>$unsafe {
 # Identity needs no recursive frame or mutable view. Borrow through pruning,
 # then end that view before a structural unification can replace arena storage.
 tu_unify_slow=(a0:TWord b0:TWord):>bool=>$unsafe {
-    let types=tu_types[0].ptr
     let a=a0
     let b=b0
-    loop a not=? 0 and types[a].kind =? 'var' and types[a].ref not=? 0 {a=TWord(types[a].ref)}
-    loop b not=? 0 and types[b].kind =? 'var' and types[b].ref not=? 0 {b=TWord(types[b].ref)}
+    loop a not=? 0 and tu_types[0][a].kind =? 'var' and tu_types[0][a].ref not=? 0 {a=TWord(tu_types[0][a].ref)}
+    loop b not=? 0 and tu_types[0][b].kind =? 'var' and tu_types[0][b].ref not=? 0 {b=TWord(tu_types[0][b].ref)}
     if a =? b {return true}
     tu_unify_pair(a b)
 }

@@ -191,12 +191,11 @@ xj_ident=(n:XJWord expected:XJWord kind:XJWord ref:XJWord s:XJWord flags:XJWord)
         if (fl & 2056) =? 0 and XJWord(lp[0].owner) =? XJWord(xj_contexts[0].ptr[xj_context[0]].inst) {
             let t=XJWord(lp[0].type)
             if xj_tk_special_p[int64(((xj_types[0].ptr + t) as ptr<uint32>)[0])] =? uint8(0) and not xl_exact_measure[0] and (expected =? 0 or not xl_effects[0]) {
-                let node=xj_nodes[0].ptr + n
-                node[0].aux=int32<overflow='wrap'>(1)
-                node[0].sym=int32<overflow='wrap'>(ref)
+                xj_nodes[0][n].aux=int32<overflow='wrap'>(1)
+                xj_nodes[0][n].sym=int32<overflow='wrap'>(ref)
                 if n not=? xj_assign_root[0] {lp[0].flags=int32<overflow='wrap'>(fl | 32768)}
-                node[0].type=int32<overflow='wrap'>(t)
-                node[0].flags |= 128
+                xj_nodes[0][n].type=int32<overflow='wrap'>(t)
+                xj_nodes[0][n].flags |= 128
                 xl_last[0]=n
                 return [type=t bypass=false]
             }

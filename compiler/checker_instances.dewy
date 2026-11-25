@@ -45,14 +45,13 @@ checker_instances_bind=(input:ptr<CheckerInstanceInput>):>CIWord=>$unsafe {
     0
 }
 ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe {
-    let nd=ci_nodes[0].ptr + decl
     if dir_code_any {
-        let file=nd[0].pos >> 40
+        let file=ci_nodes[0][decl].pos >> 40
         if file >=? 0 and file <? dir_code_masks.length and dir_code_masks[file] not=? 0 {return ci_get_policy_inst(decl targs use_pos)}
     }
-    if nd[0].kind =? 'lambda' {return poly_inst(decl targs use_pos)}
+    if ci_nodes[0][decl].kind =? 'lambda' {return poly_inst(decl targs use_pos)}
     # The host's preflight only acts on extern or attributed declarations.
-    if (CIWord(nd[0].flags) & 4) not=? 0 or nd[0].c not=? 0 {instance_preflight(decl use_pos)}
+    if (CIWord(ci_nodes[0][decl].flags) & 4) not=? 0 or ci_nodes[0][decl].c not=? 0 {instance_preflight(decl use_pos)}
     # Preserve the original hot cached-signature guard without entering the
     # recursive signature constructor (which saves a full working frame).
     let di=CIWord(ci_nodes[0].ptr[decl].sym)

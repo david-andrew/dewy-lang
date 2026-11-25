@@ -213,12 +213,11 @@ bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
     # the loop's own would, to the enclosing collector or body, as a single-header loop's do)
     # Mark synthetic sequencing unscoped only after parsing: parser-level lifting
     # would detach the receiving context. Ownership/lowering still see the scope.
-    let bnd=bk_nodes[0].ptr + b
-    if bnd[0].aux2 =? -17 or bnd[0].aux2 =? -20 or bnd[0].aux2 =? -21 {
-        bnd[0].flags=int32<overflow='wrap'>(BWord(bnd[0].flags) | 4)
+    if bk_nodes[0][b].aux2 =? -17 or bk_nodes[0][b].aux2 =? -20 or bk_nodes[0][b].aux2 =? -21 {
+        bk_nodes[0][b].flags=int32<overflow='wrap'>(BWord(bk_nodes[0][b].flags) | 4)
     }
-    if want_value and bnd[0].aux2 =? -17 {literal_snapshot_context(b expected)}
-    if want_value and bnd[0].aux2 =? -21 {literal_sequence_context(b expected)}
+    if want_value and bk_nodes[0][b].aux2 =? -17 {literal_snapshot_context(b expected)}
+    if want_value and bk_nodes[0][b].aux2 =? -21 {literal_sequence_context(b expected)}
     let pos=BWord(bk_nodes[0].ptr[b].pos)
     if want_value and bk_flag(b 131072) and bk_files[0].ptr[pos >> 40].is_dewy {
         bk_block(b 0 false);
@@ -235,17 +234,15 @@ bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
         bk_bind_next[0]=0
     }
     let counted=mode =? 2 or mode =? 6
-    let bnd2=bk_nodes[0].ptr + b
-    let transparent=bnd2[0].aux =? 5 and not want_value
+    let transparent=bk_nodes[0][b].aux =? 5 and not want_value
     # (`( ... )`, NF_UNSCOPED 4: its names stay visible after it, value or not)
-    let unscoped=(BWord(bnd2[0].flags) & 4) not=? 0
-    let n0=BWord(bnd2[0].nlist)
+    let unscoped=(BWord(bk_nodes[0][b].flags) & 4) not=? 0
+    let n0=BWord(bk_nodes[0][b].nlist)
     if n0 >? 0 {
-        let nds=bk_nodes[0].ptr
-        let lbase=bk_lists[0].ptr + BWord(bnd2[0].list)
+        let lbase_index=BWord(bk_nodes[0][b].list)
         let i:BWord=0
         loop i <? n0 {
-            if nds[BWord(lbase[i])].kind =? 'when_' {
+            if bk_nodes[0][BWord(bk_lists[0][lbase_index + i])].kind =? 'when_' {
                 block_expand(b)
                 break
             }

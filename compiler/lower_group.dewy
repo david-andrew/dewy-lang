@@ -935,9 +935,9 @@ lg_kids_into=(e:LGWord @buf:array<int64>):>void=>$unsafe {
     if nk >? 0 {
         if cap(buf) <? nk {buf.reserve(nk)}
         __set_len(buf nk)
-        let src=lists.ptr + LGWord(nodes.ptr[e].list)
+        let src_index=LGWord(nodes.ptr[e].list)
         let dst=buf.ptr
-        loop i in [0..nk) {dst[i]=int64(src[i])}
+        loop i in [0..nk) {dst[i]=int64(lists[src_index + i])}
     }
 }
 
@@ -3374,12 +3374,11 @@ gen_value_ident_slow=(e:LGWord):>Val=>$unsafe {
     return V(-1 false)
 }
 gen_value_ident=(e:LGWord):>Val=>$unsafe {
-    let np=nodes.ptr + e
-    if np[0].aux =? LGI32(1) {
-        let nt=LGWord(np[0].type)
+    if nodes[e].aux =? LGI32(1) {
+        let nt=LGWord(nodes[e].type)
         let tk=types.ptr[nt].kind
         if nt not=? T_MATH_INT and tk not=? 'var' and tk not=? 'refined' {
-            let lp=locals.ptr + LGWord(np[0].sym)
+            let lp=locals.ptr + LGWord(nodes[e].sym)
             if lp[0].offset <? 0 {
                 let f=LGWord(lp[0].flags)
                 if (f & (LF_OWNERBORROW | LF_ALIAS | LF_SHARED | LF_CAPTURE | LF_BYREF | LF_MUTPARAM)) =? 0 {
@@ -3441,8 +3440,7 @@ gen_value_istype=(e:LGWord):>Val=>$unsafe {
     return V(e_bin('eq' VI e_load(VI addr 0 4) e_iconst(vi)) false)
 }
 gen_value_call=(e:LGWord):>Val=>$unsafe {
-    let np=nodes.ptr + e
-    let nt=LGWord(np[0].type)
+    let nt=LGWord(nodes[e].type)
     let t=if types.ptr[nt].kind not=? 'var' {nt} else {prune(nt)}
     # A guarded numeric map already proved every intermediate fits a word.
     # Keep min/max as a value select so its inlined branch does not extend
@@ -3456,20 +3454,20 @@ gen_value_call=(e:LGWord):>Val=>$unsafe {
         return V(result false)
     # (a call that never comes back, as panic(...), where a value is wanted: "a" + panic("x"))
     }
-    let aux:LGWord=LGWord(np[0].aux)
-    let sym:LGWord=LGWord(np[0].sym)
+    let aux:LGWord=LGWord(nodes[e].aux)
+    let sym:LGWord=LGWord(nodes[e].sym)
     if aux =? 0 and sym >? 0 {
         let rf=LGWord(fns.ptr[sym].ret)
         if (rf =? T_NEVER or (types.ptr[rf].kind =? 'var' and prune(rf) =? T_NEVER)) and t not=? T_NEVER and vc(t) not=? VC_VOID {
-            let saved_t=np[0].type
-            np[0].type = LGI32(T_NEVER);
+            let saved_t=nodes[e].type
+            nodes[e].type = LGI32(T_NEVER);
             gen_expr(e);
             nodes.ptr[e].type = saved_t;
             return never_value(t)
         }
     }
     if t =? T_MATH_INT and math_word_helper(e) >? 0 {return math_pack_word(e math_word_expr(e))}
-    ir_set_pos(np[0].pos);
+    ir_set_pos(nodes[e].pos);
     if aux =? 0 {
         let ck:int8=if sym >? 0 and sym <? lg_call_kind.length {lg_call_kind.ptr[sym]} else {int8(0)}
         if ck =? int8(0) and sym >? 0 {ck=lg_classify_call(sym)}
@@ -3490,14 +3488,14 @@ gen_value_call=(e:LGWord):>Val=>$unsafe {
             }
         }
         let fn_p=fns.ptr + sym
-        if fn_p[0].parallel_api {race_check(sym kids(e) np[0].pos);}
+        if fn_p[0].parallel_api {race_check(sym kids(e) nodes[e].pos);}
         if fn_p[0].deterministic {
             # Cache ownership follows reachable serial lowering, not worker candidates.
             if fused_on {fz_note(7 0 e 0 0);}
-            else {det_check(sym kids(e) np[0].pos);}
+            else {det_check(sym kids(e) nodes[e].pos);}
         }
         let order:array<int64>=[]
-        if np[0].c not=? 0 {order=call_eval_order(e)}
+        if nodes[e].c not=? 0 {order=call_eval_order(e)}
         let is_op=ownership_prints.length >? 0 and ownership_prints.has(e)
         let target=if is_op {runtime_fn("__owner_print")} else {sym}
         let call_kids=lg_take_buf(@lg_args_pool)

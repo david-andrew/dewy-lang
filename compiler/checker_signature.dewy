@@ -36,14 +36,13 @@ cs_has_shape=(n:CSWord):>bool=>$unsafe {
 cs_written_refinement=(n:CSWord):>bool=>$unsafe {
     if n =? 0 {return false}
     # This pure walk cannot grow nodes or lists, so retain the borrowed record.
-    let nd=cs_input[0].nodes[0].ptr + n
-    let k=nd[0].kind
-    if k =? 'trefined' or (k =? 'tmap' and nd[0].aux =? 1) or (k =? 'tarray' and nd[0].ival =? 1) {return true}
+    let k=cs_input[0].nodes[0][n].kind
+    if k =? 'trefined' or (k =? 'tmap' and cs_input[0].nodes[0][n].aux =? 1) or (k =? 'tarray' and cs_input[0].nodes[0][n].ival =? 1) {return true}
     if k =? 'block' or k =? 'lambda' {return false}
-    if (k =? 'param' or k =? 'fn_') and cs_written_refinement(CSWord(nd[0].a)) {return true}
-    if k not=? 'param' and k not=? 'fn_' and (cs_written_refinement(CSWord(nd[0].a)) or cs_written_refinement(CSWord(nd[0].b))) {return true}
-    loop i in [0..CSWord(nd[0].nlist)) {
-        if cs_written_refinement(CSWord(cs_input[0].lists[0].ptr[CSWord(nd[0].list) + i])) {return true}
+    if (k =? 'param' or k =? 'fn_') and cs_written_refinement(CSWord(cs_input[0].nodes[0][n].a)) {return true}
+    if k not=? 'param' and k not=? 'fn_' and (cs_written_refinement(CSWord(cs_input[0].nodes[0][n].a)) or cs_written_refinement(CSWord(cs_input[0].nodes[0][n].b))) {return true}
+    loop i in [0..CSWord(cs_input[0].nodes[0][n].nlist)) {
+        if cs_written_refinement(CSWord(cs_input[0].lists[0].ptr[CSWord(cs_input[0].nodes[0][n].list) + i])) {return true}
     }
     false
 }

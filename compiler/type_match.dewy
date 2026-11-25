@@ -20,11 +20,10 @@ type_match_bind=(input:ptr<TypeInferenceInput> active:ptr<bool> never:ptr<int64>
 }
 tm_quantity_base=(t:MWord):>MWord=>$unsafe {MWord(tm_types[0].ptr[tu_prune(t)].elem)}
 tm_match=(pat0:MWord a0:MWord @binds:array<int64> depth:MWord):>MWord=>$unsafe {
-    let types=tm_types[0].ptr
     let pat=pat0
     let a=a0
-    loop pat not=? 0 and types[pat].kind =? 'var' and types[pat].ref not=? 0 {pat=MWord(types[pat].ref)}
-    loop a not=? 0 and types[a].kind =? 'var' and types[a].ref not=? 0 {a=MWord(types[a].ref)}
+    loop pat not=? 0 and tm_types[0][pat].kind =? 'var' and tm_types[0][pat].ref not=? 0 {pat=MWord(tm_types[0][pat].ref)}
+    loop a not=? 0 and tm_types[0][a].kind =? 'var' and tm_types[0][a].ref not=? 0 {a=MWord(tm_types[0][a].ref)}
     if tm_types[0].ptr[pat].kind =? 'callable' {
         if not effect_match(tm_contract(a)  tm_contract(pat)  @binds) {return - 1}
         return tm_match(tm_callable_base(pat)  tm_callable_base(a)  @binds  depth)
