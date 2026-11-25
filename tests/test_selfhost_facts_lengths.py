@@ -3,6 +3,9 @@ ceiling and its strict `$no_assumed_bounds` scopes) agree with frozen Jo: the sa
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_facts_row_queries import chain_program
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 GLOBS = ('heap_count/*.dewy', 'self_length/*.dewy', 'shrinking/*.dewy', 'pool_fixed_update/*.dewy', 'addr_length/*.dewy',
          'progress_bounded/*.dewy', 'progress_difference/*.dewy', 'parallel_range_bound/*.dewy', 'dogfood34_proofs/*.dewy',

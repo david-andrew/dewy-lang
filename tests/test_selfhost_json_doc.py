@@ -17,6 +17,8 @@ import pytest
 from tests.support import compiler  # noqa: F401 (fixture)
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
 

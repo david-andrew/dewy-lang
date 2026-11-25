@@ -5,6 +5,8 @@ import pytest
 
 from tests.support import ROOT, compiler
 
+pytestmark = pytest.mark.nightly
+
 
 def test_storage_query_paths(compiler, tmp_path):
     source = tmp_path / 'storage_walk.jo'

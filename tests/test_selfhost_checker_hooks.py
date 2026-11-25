@@ -5,6 +5,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import compare
 from tests.selfhost_expr_double import jo_doubles
 from tests.test_selfhost_checker_values import DRIVER as BASE, JO as BASE_JO, DOUBLES as BASE_DOUBLES
+
+pytestmark = pytest.mark.nightly
 JO = dict(BASE_JO)
 DOUBLES = dict(BASE_DOUBLES)
 EXTRA = {'check.jo': {'FK_INIT': 'const FK_INIT = 4',
@@ -150,7 +152,6 @@ MAIN = r'''main = ():
 '''
 STEMS = ('checker_hooks', 'checker_call_cost', 'checker_call_convert')
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_hooks_twins(compiler, tmp_path, release):
     assert compare(compiler, tmp_path, release, DRIVER + MAIN,

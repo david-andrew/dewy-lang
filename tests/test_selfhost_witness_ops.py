@@ -1,6 +1,9 @@
 """Explanations of unproven obligations agree with frozen Jo, text for text."""
 from tests.selfhost_facts_double import compare_moved
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'place_method/early_exits',

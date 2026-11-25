@@ -1,6 +1,9 @@
 """Unread locals have the same location and proposed spelling in Jo and Dewy sources."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_local_warnings_twins(compiler, tmp_path, monkeypatch):

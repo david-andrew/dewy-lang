@@ -2,6 +2,9 @@
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 LEAF = ('facts_slice_prep',)
 

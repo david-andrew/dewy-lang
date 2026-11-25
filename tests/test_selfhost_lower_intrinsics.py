@@ -8,6 +8,8 @@ from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
 from tests.test_shader_units import PROGRAM
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.parametrize('target', ['native', 'aarch64-mac', 'wasm32'])
 def test_lower_intrinsics_twins(compiler, tmp_path, monkeypatch, target):

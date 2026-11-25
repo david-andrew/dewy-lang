@@ -1,6 +1,9 @@
 """Shared analysis of admitted member copies agrees with frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = ['record/inline_map', 'tests/ladder/99_dewy_frontend/design.dewy']
 

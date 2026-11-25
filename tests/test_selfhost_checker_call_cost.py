@@ -5,6 +5,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVE, compare
 from tests.selfhost_expr_double import jo_doubles
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = RESOLVE.split('main = ():')[0] + r'''
 cost_context = (a: int) -> bool: nodes[a].aux == 2
 cost_word = (t: int) -> bool: types[t].bits == 99
@@ -120,7 +122,6 @@ JO['refine.jo'] += 'refine_active = false\n'
 JO['checker_call_convert.jo'] += "call_mutable_cost = (a: int, p: int, bs: mut int[], recv: mut bool, receiver: bool) -> int: call_mutable_double(a, p, bs, recv, receiver)\n"
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_call_cost_twins(compiler, tmp_path, release):  # noqa: F811
     output = compare(compiler, tmp_path, release, DRIVER, extra_stems=('checker_call_cost',),

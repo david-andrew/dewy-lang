@@ -6,6 +6,9 @@ from tests.selfhost_build_double import compare_builds
 from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_driver_cli import run
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_driver_compile_twins(compiler, tmp_path, monkeypatch):

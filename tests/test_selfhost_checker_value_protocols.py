@@ -3,6 +3,9 @@
 from tools.cases import parse
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_value_protocols_twins(compiler, tmp_path, monkeypatch):  # noqa: F811

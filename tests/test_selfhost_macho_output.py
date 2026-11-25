@@ -8,6 +8,8 @@ import pytest
 from tests.selfhost_narrow import compare_narrow
 from tests.support import compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 DOUBLES = {
     'lower.jo': 'mac_imports: (int, str, str)[]\n',
     'util.jo': 'ice = (msg: str): print("ice: {msg}")\n',

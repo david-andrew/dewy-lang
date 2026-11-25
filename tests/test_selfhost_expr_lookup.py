@@ -5,6 +5,8 @@ import pytest
 from tests.selfhost_build_double import compare_golden_cases
 from tests.support import compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.parametrize(("leaf", "cases"), [
     ("call_shape_queries", ("style/zero_argument_calls", "overload/group_arity", "overload/group_defaults",

@@ -6,6 +6,8 @@ import pytest
 from tests.support import compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 # Independent field widths: do not derive the expected ABI from either twin.
 LAYOUTS = {
@@ -72,6 +74,5 @@ def test_checker_state_twins(compiler, tmp_path, release):  # noqa: F811
         assert ran.stdout == expected
 
 
-@pytest.mark.core_quick
 def test_checker_state_ships_dewy(compiler):  # noqa: F811
     assert b'/compiler/checker_state.dewy\0' in compiler.read_bytes()

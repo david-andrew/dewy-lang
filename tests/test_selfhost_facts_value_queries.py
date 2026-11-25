@@ -4,6 +4,9 @@ from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_facts_projection_queries import record_program
 from tests.test_selfhost_facts_row_queries import chain_program
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 GLOBS = ('facts/*.dewy', 'loop_bounds/*.dewy', 'saved_operands/*.dewy', 'uint64_ceiling/*.dewy', 'dict_refine/*.dewy',
          'refinements/*.dewy', 'heap_count/*.dewy', 'witness_bounds/*.dewy')

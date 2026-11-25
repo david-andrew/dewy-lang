@@ -7,6 +7,8 @@ from tests.support import compiler  # noqa: F401
 from tests import parser_oracle
 from tools.compiler import parser_diff
 
+pytestmark = pytest.mark.nightly
+
 CASES = sorted(str(p.relative_to(parser_diff.ROOT)) for folder in ('block_scope', 'parallel_blocks')
                for p in (parser_diff.ROOT / 'tests/cases' / folder).glob('*.dewy'))
 

@@ -6,6 +6,8 @@ import pytest
 from tests.selfhost_narrow import compare_narrow
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 STATE = re.sub(r"(?m)^(use '[^']*'|#.*)\n", '', (ROOT / 'compiler/places.jo').read_text())
 SERVICES = r'''use 'source_types.dewy'
 use 'node_store.dewy'

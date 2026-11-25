@@ -1,6 +1,9 @@
 """Shape-covered matches agree with frozen Jo."""
 from tests.selfhost_checks_double import compare_checks
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'match/object_pattern_gap',

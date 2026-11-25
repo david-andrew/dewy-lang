@@ -2,6 +2,9 @@
 inbox sources, queue payload clashes, close-arm spins) agree with frozen Jo: the same messages and bytes."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 DIRS = ('select', 'select_named', 'select_sources', 'race_sources', 'race_spread', 'no_deadlocks', 'queues',
         'queue_cancel_wait', 'channels', 'reserve', 'handle', 'type_members', 'match', 'tasks')

@@ -6,6 +6,8 @@ import pytest
 from tests.support import compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('constant_eval', 'constant_host', 'evaluator_state', 'node_store', 'source_types', 'checker_tokens')
 ERRORS = {1: "'missing' is not a compile-time constant",

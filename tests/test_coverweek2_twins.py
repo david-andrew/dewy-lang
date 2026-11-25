@@ -3,6 +3,8 @@ import pytest
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 
 def cases(prefixes):
     return sorted(str(p.relative_to(ROOT)) for p in

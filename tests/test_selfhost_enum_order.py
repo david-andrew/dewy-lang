@@ -8,6 +8,8 @@ import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
 
+pytestmark = pytest.mark.nightly
+
 FIXTURES = Path(__file__).resolve().parent / 'fixtures/selfhost'
 # (by name, check < emit < lex < parse: every answer of the first line but the last would flip)
 EXPECTED = 'true true false false true true\nparse lex\n'

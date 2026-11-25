@@ -7,6 +7,8 @@ from tests import leaf_oracle, selfhost_lsp_double, whole_oracle
 from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 
 def jo_text(s):
     """s as a Jo string literal (braces doubled, other bytes escaped)."""

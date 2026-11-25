@@ -6,6 +6,8 @@ from tests.selfhost_build_double import compare_builds, compare_golden_cases
 from tests.support import compiler  # noqa: F401
 from tests.test_dewy_data_after_move import MOVED, TAKEN_FIRST
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.parametrize(("leaf", "cases"), [
     ("aggregate_sources", ("fixed/array_error_1", "fixed/array_dictionary", "spread/arrays",

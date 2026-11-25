@@ -4,6 +4,8 @@ from tests.support import compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf, jo_doubles
 from tests.test_selfhost_lower_ptr_reads import DRIVER as BASE, JO as BASE_JO
 
+pytestmark = pytest.mark.nightly
+
 JO = dict(BASE_JO)
 JO.update(jo_doubles({
     'copies.jo': {'copy_consumes': 'copy_consumes = (f: int, i: int) -> bool:\n    if fail_copy: print("copy-error"); exit(42)\n    consumes'},

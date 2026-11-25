@@ -5,6 +5,9 @@ from pathlib import Path
 
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = sorted(str(p.relative_to(ROOT)) for p in (ROOT / 'tests/cases/comptime').glob('*.dewy')) + [

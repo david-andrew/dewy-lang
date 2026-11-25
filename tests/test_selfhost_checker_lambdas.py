@@ -4,6 +4,8 @@ import pytest
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = RESOLVER.split('main = ():')[0] + r'''
 fns: FnInst[] = [FnInst()]
 locals: Local[] = [Local()]
@@ -119,7 +121,6 @@ expected_none = () -> int: int(tb_mk_fn([], T_INT, 0, 0, 0, false))
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_lambdas_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER + HELPERS + MAIN,

@@ -8,6 +8,8 @@ import pytest
 
 from tests.support import ROOT, compiler
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.skipif(platform.system() != 'Linux' or platform.machine() != 'x86_64',
                     reason='executes Linux x86-64 machine code')

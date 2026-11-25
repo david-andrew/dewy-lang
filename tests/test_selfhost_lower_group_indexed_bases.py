@@ -3,6 +3,9 @@ import subprocess
 
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 PROGRAM = '''$runtime_checks

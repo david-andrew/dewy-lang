@@ -5,6 +5,8 @@ from tests.selfhost_expr_double import compare_leaf, jo_doubles
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = RESOLVER.split('main = ():')[0] + r'''
 xd_sentinel_name = 0
 xd_ide_on = false
@@ -212,7 +214,6 @@ MEMBER_JO = {
     },
 }
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_members_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER + MAIN,

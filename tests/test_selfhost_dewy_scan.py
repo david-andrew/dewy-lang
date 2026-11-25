@@ -14,6 +14,8 @@ from tests.enumerations import dewy_enumerations
 from tests.test_selfhost_dewy_grammar import ranked
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/dewy_scan_jo.jo'
 ENUMS = dewy_enumerations((ROOT / 'compiler/dewy_tokens.dewy').read_text())

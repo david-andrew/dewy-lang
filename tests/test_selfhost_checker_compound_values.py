@@ -1,6 +1,9 @@
 """Compound updates preserve short circuiting, bit operations, floor division and numeric storage diagnostics."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_compound_values_twins(compiler, tmp_path, monkeypatch):

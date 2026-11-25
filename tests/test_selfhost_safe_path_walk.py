@@ -4,6 +4,9 @@ from pathlib import Path
 
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = '''comptime/library_text copies/explicit_array_assignment_2 dogfood/01_wordfreq dogfood/04_todo
 dogfood/09_logs dogfood/12_adventure dogfood/14_containers dogfood/16_binary_format dogfood/44_archive_files

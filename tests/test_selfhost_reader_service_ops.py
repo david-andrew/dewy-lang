@@ -1,6 +1,9 @@
 """The forwarding services behind the reader host record agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_moved
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'frontend/m_directives_direct_directives_identity_1',

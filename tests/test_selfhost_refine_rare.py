@@ -2,6 +2,9 @@
 contracts, resolved limits, record conversions) agree with frozen Jo: the same messages and bytes."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 DIRS = ('self_length', 'length_in_place', 'refinements', 'refinement_aggregates', 'record_field_shape', 'sibling_length', 'dict_sibling')
 

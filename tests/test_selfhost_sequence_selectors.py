@@ -5,6 +5,8 @@ from tests.selfhost_fact_double import FACT_SERVICES
 from tests.selfhost_narrow import compare_narrow
 from tests.support import compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 STEMS = ('source_types', 'node_store', 'checker_types', 'checker_state', 'checker_tokens', 'refinement_types', 'nd_slices', 'sequence_selectors')
 SERVICES = ('facts', 'facts_ranges', 'facts_routes', 'facts_forgets', 'facts_changes', 'facts_elements', 'nd_contracts', 'expr', 'witness', 'witness_nodes', 'ast', 'types', 'refine', 'effects', 'ownership', 'util', 'check', 'effect_values', 'ownership_types', 'facts_arith')
 

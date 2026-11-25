@@ -3,6 +3,9 @@ an n-d value, its make, capture, broadcast, transpose, upload, download and stor
 with frozen Jo: the same messages and bytes."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 DIRS = ('nd_contracts', 'gpu_nonempty', 'gpu_integer_upload', 'record_field_shape', 'library_contracts', 'notraps16_shapes',
         'gpu_upload_shape', 'gpu_broadcast', 'refine_selection_output', 'tensor_shape_flow', 'tensor', 'broadcast_facts')

@@ -2,6 +2,9 @@
 
 from tests.selfhost_build_double import compare_golden_cases
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_expression_types_twin(compiler, tmp_path, monkeypatch):  # noqa: F811

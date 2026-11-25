@@ -5,6 +5,8 @@ import pytest
 
 from tests.support import ROOT, compiler
 
+pytestmark = pytest.mark.nightly
+
 
 def test_backend_workspace_reuses_storage_without_locations(compiler, tmp_path):
     source = tmp_path / 'workspace.jo'

@@ -257,12 +257,12 @@ def test_core_driver_quick_rejects_marker_override(monkeypatch):
 
 @pytest.mark.parametrize('arguments, cpus, available, expected_workers', [
     ([], 16, True, '4'),
-    ([], 2, True, '2'),
-    ([], 1, True, None),
-    ([], 16, False, None),
-    (['-k', 'json'], 16, True, None),
+    pytest.param([], 2, True, '2', marks=pytest.mark.nightly),
+    pytest.param([], 1, True, None, marks=pytest.mark.nightly),
+    pytest.param([], 16, False, None, marks=pytest.mark.nightly),
+    pytest.param(['-k', 'json'], 16, True, None, marks=pytest.mark.nightly),
     (['-n', '0'], 16, True, '0'),
-    (['-n', '2', '-k', 'json'], 16, True, '2'),
+    pytest.param(['-n', '2', '-k', 'json'], 16, True, '2', marks=pytest.mark.nightly),
 ])
 def test_core_driver_worker_selection(monkeypatch, tmp_path, arguments, cpus, available, expected_workers):
     binary = tmp_path / 'dewy-core'

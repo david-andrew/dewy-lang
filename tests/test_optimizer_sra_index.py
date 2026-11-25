@@ -6,6 +6,8 @@ import pytest
 
 from tests.support import compiler
 
+pytestmark = pytest.mark.nightly
+
 
 def test_sra_definition_index(compiler, tmp_path):
     root = Path(__file__).resolve().parents[1]

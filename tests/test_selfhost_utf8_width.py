@@ -10,6 +10,8 @@ from tests.support import compiler  # noqa: F401 (fixture)
 from tests.test_selfhost_utf8_text import FIXTURES, build, run
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 TABLE_VERSION = '17.0.0'  # (the Unicode version the committed tables were generated from)
 
 

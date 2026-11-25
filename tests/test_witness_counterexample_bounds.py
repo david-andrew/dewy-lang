@@ -9,6 +9,8 @@ from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 
 def test_witness_counterexample_twins(compiler, tmp_path, monkeypatch):
     assert compare_facts(compiler, tmp_path, monkeypatch,

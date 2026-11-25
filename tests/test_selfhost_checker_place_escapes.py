@@ -1,6 +1,9 @@
 """Reject escaping places while accepting a returned function handle."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_place_escapes_twins(compiler, tmp_path, monkeypatch):

@@ -11,6 +11,7 @@ from tests.support import ROOT, compiler
 pytestmark = pytest.mark.skipif(
     platform.system() != 'Linux' or platform.machine() != 'x86_64',
     reason='executes Linux x86-64 machine code')
+pytestmark = [*(pytestmark if isinstance(pytestmark, list) else [pytestmark]), pytest.mark.nightly]
 
 
 def test_mask_flags_and_frames(compiler, tmp_path):

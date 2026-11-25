@@ -9,6 +9,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_node_store import KINDS
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/dewy_walk_jo.jo'
 

@@ -1,6 +1,9 @@
 """Nested push counts and literal dictionary key bounds agree with frozen twins."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_nested_push_twins(compiler, tmp_path, monkeypatch):

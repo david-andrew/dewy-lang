@@ -2,6 +2,9 @@
 their hints) agree with frozen Jo: the same messages and bytes."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 DIRS = ('broadcast_facts', 'broadcast_places', 'new_axis', 'gpu_broadcast', 'gpu_integer_ops', 'gpu_integer_upload',
         'gpu_upload_shape', 'gpu_ieee', 'gpu', 'gpu_float_sum', 'tensor', 'tensor_shape_flow', 'refine_selection_output',

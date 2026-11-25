@@ -2,6 +2,9 @@
 messages, IR and bytes for flat and nested records, near misses and default/release builds."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 BATCH = '''$runtime_checks
 

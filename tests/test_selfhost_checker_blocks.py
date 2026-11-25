@@ -10,6 +10,8 @@ from tests.test_selfhost_checker_vardecls import DECL_JO, DRIVER as DECLS
 from tests.selfhost_expr_double import compare_leaf, jo_doubles
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 
+pytestmark = pytest.mark.nightly
+
 STEMS = ('checker_loops', 'checker_vardecls', 'checker_assigns', 'checker_exprstmts', 'checker_statements',
          'checker_for_loops', 'checker_returns', 'checker_conditionals', 'checker_exact', 'checker_literals', 'checker_blocks')
 
@@ -233,7 +235,6 @@ BLOCK_JO = {
 JO_DOUBLES = jo_doubles(BLOCK_JO, ASSIGN_JO, DECL_JO, LITERAL_JO, CONDITIONAL_JO)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_blocks_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'db_check', extra_stems=STEMS, jo_doubles=JO_DOUBLES).endswith(b'ok\n')

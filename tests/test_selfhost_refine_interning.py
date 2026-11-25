@@ -1,6 +1,9 @@
 """Refinement interning, refined-type construction and state reset agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 LEAVES = ('refine_metadata', 'refine_rare')
 # Interned contracts from declarations, N-D shapes, reflection singletons, integer type

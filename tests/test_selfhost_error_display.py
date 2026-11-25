@@ -3,6 +3,9 @@ generic calls as notes, held errors in source order, assert messages' conditions
 agrees with frozen Jo: the same exit codes, messages and output bytes."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'tests/cases/witness/generic_instance.dewy',

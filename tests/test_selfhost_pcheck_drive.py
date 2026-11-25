@@ -13,6 +13,7 @@ from tools.compiler.speed import generate_dewy
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith('linux') or platform.machine().lower() not in ('x86_64', 'amd64'),
     reason='partitioned checking is x86-64 Linux only')
+pytestmark = [*(pytestmark if isinstance(pytestmark, list) else [pytestmark]), pytest.mark.nightly]
 
 
 def sources(tmp_path):

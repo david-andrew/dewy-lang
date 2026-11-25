@@ -6,6 +6,8 @@ from tests.test_selfhost_checker_call_expr import DRIVER as CALL
 from tests.test_selfhost_checker_expr import JO_DOUBLES, STEMS
 from tests.test_selfhost_checker_resolve import compare
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = CALL + r'''
 use 'expr.jo'
 kids = (n: int) -> int[]: node_kids(mut nodes, mut lists, n)
@@ -69,7 +71,6 @@ main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_call_member_twins(compiler, tmp_path, release):  # noqa: F811
     output = compare(compiler, tmp_path, release, DRIVER + MAIN,

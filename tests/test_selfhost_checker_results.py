@@ -7,6 +7,8 @@ import pytest
 from tests.support import ROOT, compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = r'''
 nodes: Node[] = [Node()]
 lists: i32[]
@@ -90,7 +92,6 @@ def corpus():
     return '\n'.join(lines) + '\n    print("ok")\n'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_result_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []

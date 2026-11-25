@@ -7,6 +7,8 @@ import pytest
 
 from tests.support import ROOT, compiler
 
+pytestmark = pytest.mark.nightly
+
 
 def test_token_array_spare_eofs(compiler, tmp_path):
     source = tmp_path / 'spare.jo'

@@ -3,6 +3,9 @@ agrees with frozen Jo: the same session transcripts, exit codes and files."""
 from tests.selfhost_process_double import compare_watch
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_watch_ops import GAME
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_watch_drive_game_matches_twin(compiler, tmp_path, monkeypatch):

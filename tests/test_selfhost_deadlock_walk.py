@@ -5,6 +5,9 @@ from tests.selfhost_diagnostic_double import diagnostic_status
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_deadlock_walk_twins(compiler, tmp_path, monkeypatch):

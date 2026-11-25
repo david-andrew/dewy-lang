@@ -3,6 +3,9 @@ import subprocess
 from tests import selfhost_lsp_double
 from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 DRIVER = r'''use 'main.jo'
 use 'expr_source_hints.dewy'

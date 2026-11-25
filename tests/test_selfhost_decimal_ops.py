@@ -1,6 +1,9 @@
 """Decimal bindings that start a body over agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_moved
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'import_cycles/use_before_init_one_file',

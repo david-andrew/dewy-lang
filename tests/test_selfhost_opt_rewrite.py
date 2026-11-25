@@ -8,6 +8,8 @@ from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_opt_cleanup import decode_source
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 
 MODULES = ('ir_types', 'ir_operands', 'opt_workspace', 'opt_cleanup', 'opt_rewrite')
 

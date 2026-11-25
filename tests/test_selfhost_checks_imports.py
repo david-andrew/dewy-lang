@@ -1,6 +1,9 @@
 """Import binding, clashes and splat shadowing agree with frozen Jo."""
 from tests.selfhost_checks_double import compare_checks
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'modules/splat_selective_collision',

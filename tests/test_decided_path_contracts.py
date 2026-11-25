@@ -1,6 +1,9 @@
 """Path field and collection contracts survive semantic types and frozen leaves."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES=sorted((ROOT/'tests/cases/decided_path_contracts').glob('*.dewy'))
 

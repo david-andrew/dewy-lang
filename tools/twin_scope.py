@@ -68,6 +68,26 @@ def closure(graph: dict[str, set[str]], names) -> set[str]:
     return seen
 
 
+def _tree_index(root: Path) -> tuple[frozenset[str], frozenset[str]]:
+    """All repository-relative file and directory paths under `root`, indexed once to avoid stat() storms."""
+    skip = {'.git', '__dewycache__', '.venv', '__pycache__', 'node_modules'}
+    files: set[str] = set()
+    dirs: set[str] = set()
+    root_str = str(root)
+    prefix_len = len(root_str) + 1
+    for current, dirnames, filenames in os.walk(root_str):
+        dirnames[:] = [d for d in dirnames if d not in skip]
+        rel_dir = '' if current == root_str else current[prefix_len:].replace(os.sep, '/')
+        if rel_dir:
+            dirs.add(rel_dir)
+            base = rel_dir + '/'
+        else:
+            base = ''
+        for fn in filenames:
+            files.add(base + fn)
+    return frozenset(files), frozenset(dirs)
+
+
 def facts(path: Path, root: Path, stems: frozenset, graph: dict, memo: dict) -> tuple[set, set, list]:
     """What one Python file reads by itself: (repository paths, compiler files named, modules imported)."""
     if path in memo:
@@ -79,7 +99,12 @@ def facts(path: Path, root: Path, stems: frozenset, graph: dict, memo: dict) -> 
     except (OSError, SyntaxError):
         paths.add('')  # (cannot place it: the empty prefix is an input of everything)
         return memo[path]
+    if 'tree_index' not in memo:
+        memo['tree_index'] = _tree_index(root)
+    all_files, all_dirs = memo['tree_index']
+    imported_memo = memo.setdefault('imported_files', {})
     docs = set()
+    is_harness = path.relative_to(root).as_posix() in HARNESS
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.body:
             first = node.body[0]
@@ -89,36 +114,45 @@ def facts(path: Path, root: Path, stems: frozenset, graph: dict, memo: dict) -> 
                  else [node.module] + [f'{node.module}.{a.name}' for a in node.names]
                  if isinstance(node, ast.ImportFrom) and node.module and not node.level else [])
         for module in names:
-            found = root.joinpath(*module.split('.')).with_suffix('.py')
-            if module.split('.')[0] in ('tests', 'tools') and found.is_file() and found not in modules:
-                modules.append(found)
-        if (isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs
-                and path.relative_to(root).as_posix() not in HARNESS):
+            if module.split('.')[0] in ('tests', 'tools'):
+                rel_mod = '/'.join(module.split('.')) + '.py'
+                if rel_mod in all_files:
+                    found = root / rel_mod
+                    if found not in modules:
+                        modules.append(found)
+        if (not is_harness and isinstance(node, ast.Constant) and isinstance(node.value, str)
+                and id(node) not in docs):
             text = node.value
             for stem in FILE_NAME.findall(text) + ([text] if text in stems else []):
                 named.update(n for n in (stem + '.jo', stem + '.dewy') if n in graph)
             if len(text) <= 200 and PATHLIKE.fullmatch(text) and not text.startswith(('/', '-')):
                 for candidate in (text, f'tests/cases/{text}.dewy', f'tests/fixtures/{text}', f'tests/fixtures/selfhost/{text}',
                                   f'tests/{text}'):
-                    candidate = os.path.normpath(candidate).replace(os.sep, '/')
-                    if candidate.startswith('..') or candidate == '.':
-                        continue
-                    target = root / candidate
-                    if target.is_dir():
-                        if candidate.strip('/') not in NOT_WHOLE:
-                            paths.add(candidate.rstrip('/') + '/')
-                    elif target.is_file():
+                    if '..' in candidate or '//' in candidate or candidate.endswith('/'):
+                        candidate = os.path.normpath(candidate).replace(os.sep, '/')
+                        if candidate.startswith('..') or candidate == '.':
+                            continue
+                    if candidate in all_dirs:
+                        if candidate not in NOT_WHOLE:
+                            paths.add(candidate + '/')
+                    elif candidate in all_files:
                         paths.add(candidate)
-                        if target.suffix in ('.jo', '.dewy') and not candidate.startswith('compiler/'):
-                            named.update(imported(target, graph))  # (a fixture program imports compiler modules)
+                        if candidate.endswith(('.jo', '.dewy')) and not candidate.startswith('compiler/'):
+                            if candidate not in imported_memo:
+                                imported_memo[candidate] = imported(root / candidate, graph)
+                            named.update(imported_memo[candidate])  # (a fixture program imports compiler modules)
     return memo[path]
 
 
 def inputs(test: Path, graph: dict[str, set[str]], root: Path = ROOT, memo: dict | None = None) -> set[str]:
     """The repository-relative files and directories (directories end in '/') a self-hosting test reads."""
     memo = {} if memo is None else memo
-    stems = memo.setdefault('stems', frozenset(p.stem for p in (root / 'compiler').iterdir()))
-    reach = memo.setdefault('closures', {})
+    stems = memo.get('stems')
+    if stems is None:
+        stems = memo['stems'] = frozenset(p.stem for p in (root / 'compiler').iterdir())
+    reach = memo.get('closures')
+    if reach is None:
+        reach = memo['closures'] = {}
     found, named, seen, todo = set(), set(), set(), [test]
     # (its recorded leaf outputs, tests/leaf_oracle.py)
     found.add(f'tests/fixtures/leaf_outputs/{test.stem}.json')

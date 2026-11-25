@@ -5,6 +5,8 @@ import pytest
 
 from tests.support import ROOT, compiler
 
+pytestmark = pytest.mark.nightly
+
 
 def test_lower_temporary_arena_nested_early_release(compiler, tmp_path):
     source = tmp_path / 'temporary_arena.jo'

@@ -4,6 +4,9 @@ from tests.selfhost_facts_double import compare_facts
 from tests.selfhost_lower_double import modules_for
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_facts_projection_queries import record_program
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 LEAF = ('facts_slice_prep',)
 GLOBS = ('facts/*.dewy', 'loop_bounds/*.dewy', 'saved_operands/*.dewy',

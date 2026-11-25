@@ -5,6 +5,8 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.parametrize('following, column', [
     ('$runtime_checks', 1),

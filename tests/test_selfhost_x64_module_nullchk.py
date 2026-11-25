@@ -8,6 +8,8 @@ from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.parametrize('flags', [(), ('--release',)], ids=['default', 'release'])
 def test_x64_module_nullchk_twins(compiler, tmp_path, monkeypatch, flags):  # noqa: F811

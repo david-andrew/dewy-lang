@@ -3,6 +3,8 @@ import pytest
 from tests.selfhost_narrow import compare_narrow
 from tests.support import compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 SERVICES = r'''err_held: (int, str)[]
 errors_only = false
 shown_warnings: str[]

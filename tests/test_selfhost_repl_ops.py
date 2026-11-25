@@ -2,6 +2,9 @@
 frozen Jo: the same transcripts, messages, exit codes and saved history."""
 from tests.selfhost_process_double import compare_repl
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 TRANSCRIPTS = [
     ('1+2\nlet xs=[20 22]\nlet saved=xs\nxs[0]=99\nsaved[0]+saved[1]\n'

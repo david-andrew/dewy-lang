@@ -6,6 +6,8 @@ from tests.support import compiler  # noqa: F401
 from tests import parser_oracle
 from tools.compiler import parser_diff
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_dewy_direct_ops_matches_twin(compiler, tmp_path, release):

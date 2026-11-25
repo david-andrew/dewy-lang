@@ -1,6 +1,9 @@
 """Cold directive scopes, bundles, panics and version warnings agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_moved
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'frontend/statements_direct_statements_1',

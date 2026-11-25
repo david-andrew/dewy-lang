@@ -4,6 +4,9 @@ import subprocess
 from tests import leaf_oracle
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 SOURCE = r'''struct Point:
     x: int

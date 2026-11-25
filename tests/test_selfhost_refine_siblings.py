@@ -2,6 +2,9 @@
 operations, their hints and runtime checks) agree with frozen Jo: the same messages and bytes."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 DIRS = ('record_paired_fields', 'sibling_length', 'dict_sibling', 'self_length')
 

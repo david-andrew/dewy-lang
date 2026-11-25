@@ -3,6 +3,9 @@ and module statements' declarations ($proof, $export, allocation failure, suppor
 agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_moved
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'default_proofs/refuted_literal_union',

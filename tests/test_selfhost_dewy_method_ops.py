@@ -1,6 +1,9 @@
 """Inherited members, receivers, change inference and member closures agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_moved
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'object/closure_member_escape',

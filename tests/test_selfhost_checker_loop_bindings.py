@@ -1,6 +1,9 @@
 """Destructuring a loop binder preserves nested patterns, mutable dictionary iteration and diagnostics."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_loop_bindings_twins(compiler, tmp_path, monkeypatch):

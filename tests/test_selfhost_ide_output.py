@@ -2,6 +2,9 @@
 from tests.selfhost_build_double import compare_builds
 from tests.test_selfhost_lsp_ops import compare_session
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_ide_output_session(compiler, tmp_path, monkeypatch):

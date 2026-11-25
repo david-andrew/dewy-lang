@@ -1,6 +1,9 @@
 """Change effects of bodies on facts agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'misc/zero_divisor_remainder_uint64',

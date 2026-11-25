@@ -4,6 +4,9 @@ build programs that use settings, with the same messages and bytes."""
 from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_directive_rules import CASES, MIXED, outcome
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 EXTRA = sorted([*(ROOT / 'tests/cases/parallel_range_bound').glob('*.dewy'),
                 *(ROOT / 'tests/cases/dogfood34_proofs').glob('*.dewy'),

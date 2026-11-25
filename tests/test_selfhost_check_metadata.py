@@ -1,4 +1,7 @@
 from tests.selfhost_expr_double import print_warnings
+import pytest
+
+pytestmark = pytest.mark.nightly
 """Checker metadata spelling, fixed-size names and browser warnings agree with the frozen Jo leaf."""
 import re
 import subprocess

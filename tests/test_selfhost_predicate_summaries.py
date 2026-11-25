@@ -7,6 +7,8 @@ from tests.selfhost_fact_double import FACT_SERVICES
 from tests.selfhost_narrow import compare_narrow
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 STEMS = ('source_types', 'node_store', 'checker_types', 'checker_state', 'checker_tokens', 'refinement_types', 'predicate_summaries')
 SERVICES = ('facts', 'expr', 'lex', 'util', 'ast', 'check', 'types', 'ownership', 'refine', 'checked_eval', 'facts_forgets')
 STATE = re.sub(r"(?m)^(use '[^']*'|#.*)\n", '', (ROOT / 'compiler/predicate_facts.jo').read_text())

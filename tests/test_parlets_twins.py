@@ -11,7 +11,10 @@ CASES = sorted(str(p.relative_to(parser_diff.ROOT))
                for p in (parser_diff.ROOT / 'tests/cases/parallel_lets').glob('*.dewy'))
 
 
-@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('release', [
+    pytest.param(False, id='default'),
+    pytest.param(True, id='release', marks=pytest.mark.nightly),
+])
 def test_parlets_dewy_reader(compiler, tmp_path, release):
     pair = parser_oracle.build_pair(compiler, tmp_path, release)
     failures = parser_oracle.compare(pair, [parser_diff.ROOT / p for p in CASES], tmp_path, release, workers=1)

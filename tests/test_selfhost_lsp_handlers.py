@@ -2,6 +2,9 @@
 workspace symbols, offsets and the request queue) agree with frozen Jo over one session."""
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_lsp_ops import compare_session
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_lsp_handlers_session(compiler, tmp_path, monkeypatch):

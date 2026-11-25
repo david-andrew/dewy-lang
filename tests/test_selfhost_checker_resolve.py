@@ -6,6 +6,8 @@ from tests.leaf_driver import build_leaf_driver
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_type_constructors import DRIVER as CONSTRUCTORS
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = CONSTRUCTORS.split('main = ():')[0] + r'''
 nodes: Node[] = [Node()]
 lists: i32[]
@@ -235,7 +237,6 @@ RESOLVE_JO = {
     },
 }
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_resolve_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER).endswith(b'ok\n')

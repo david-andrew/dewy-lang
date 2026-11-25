@@ -1428,7 +1428,10 @@ def test_core_many_record_types(compiler, tmp_path):
     assert checked.returncode == 0, checked.stdout + checked.stderr
 
 
-@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('release', [
+    pytest.param(False, id='debug'),
+    pytest.param(True, id='release', marks=pytest.mark.nightly),
+])
 def test_core_type_instance_inference(compiler, tmp_path, release):
     source = Path(__file__).resolve().parents[1] / 'tests/fixtures/programs/type_instances.jo'
     binary = tmp_path / 'type_instances'
@@ -1581,6 +1584,7 @@ loop flag in [true false] {{printl(pick(x y flag))}}
     assert ran.stdout.splitlines() == expected
 
 
+@pytest.mark.nightly
 @pytest.mark.parametrize('host', ['windows', 'macos', 'linux-arm64'])
 def test_core_compiler_hosts(compiler, tmp_path, host):
     # A selected immutable host must rebuild its matching compiler/runtime pair.
@@ -2163,11 +2167,16 @@ def test_core_numeric_example(compiler, tmp_path, target, release):
                           'height at 0.6 seconds: 4.538\n')
 
 
-@pytest.mark.parametrize('target, backend', [
-    ('native', 'fallback'), ('wasm', 'fallback'),
-    ('native', 'gles'), ('native', 'vulkan'),
+@pytest.mark.parametrize('target, backend, release', [
+    pytest.param('native', 'fallback', False, id='debug-native-fallback'),
+    pytest.param('native', 'fallback', True, id='release-native-fallback'),
+    pytest.param('wasm', 'fallback', False, id='debug-wasm-fallback'),
+    pytest.param('wasm', 'fallback', True, id='release-wasm-fallback', marks=pytest.mark.nightly),
+    pytest.param('native', 'gles', False, id='debug-native-gles'),
+    pytest.param('native', 'gles', True, id='release-native-gles', marks=pytest.mark.nightly),
+    pytest.param('native', 'vulkan', False, id='debug-native-vulkan'),
+    pytest.param('native', 'vulkan', True, id='release-native-vulkan', marks=pytest.mark.nightly),
 ])
-@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_gpu_arrays(compiler, tmp_path, target, backend, release, request):
     env = {key: value for key, value in os.environ.items()
            if not key.startswith('DEWY_')}
@@ -2987,7 +2996,11 @@ def test_core_game_web_build(compiler, tmp_path, game, release):
     assert validation.returncode == 0, validation.stdout + validation.stderr
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines', 'controls', 'charts', 'reaction_field'])
+@pytest.mark.parametrize('game', [
+    'forest', 'dunes', 'rollback_lab',
+    *[pytest.param(g, marks=pytest.mark.nightly)
+      for g in ('paddle', 'physics', 'netpong', 'camera_roll', 'outlines', 'controls', 'charts', 'reaction_field')],
+])
 def test_core_game_renderer(compiler, tmp_path, game):
     source = Path(__file__).resolve().parents[1] / f'examples/{game}.dewy'
     binary = tmp_path / game
@@ -3263,7 +3276,10 @@ def test_core_build_source_counts(compiler, tmp_path):
     assert 'implementation lines' in built.stderr and 'lower+codegen' in built.stderr
 
 
-@pytest.mark.parametrize('kind', ['game', 'arcade', 'platformer', '3d', 'story', 'online', 'program'])
+@pytest.mark.parametrize('kind', [
+    'game', '3d',
+    *[pytest.param(k, marks=pytest.mark.nightly) for k in ('arcade', 'platformer', 'story', 'online', 'program')],
+])
 def test_core_new_project(compiler, tmp_path, kind):
     project = tmp_path / 'project with spaces'
     made = subprocess.run([compiler, 'new', project, kind], capture_output=True,
@@ -4705,7 +4721,10 @@ main = () -> int:
 from tests.lexer_probe import lexer_span_helpers
 
 
-@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('release', [
+    pytest.param(False, id='default'),
+    pytest.param(True, id='release', marks=pytest.mark.nightly),
+])
 def test_core_lexer_bounded_spans(compiler, tmp_path, release):
     # Expected payloads and byte spans are independent of the lexer implementation.
     cases = [

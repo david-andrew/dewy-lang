@@ -118,7 +118,10 @@ def build(compiler, source, binary, release=False):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.fixture(scope='module', params=[False, True], ids=['debug', 'release'])
+@pytest.fixture(scope='module', params=[
+    pytest.param(False, id='debug'),
+    pytest.param(True, id='release', marks=pytest.mark.nightly),
+])
 def echo_binary(compiler, tmp_path_factory, request):
     work = tmp_path_factory.mktemp('network-echo')
     source = work / 'main.dewy'
@@ -234,7 +237,10 @@ def test_core_network_shared_read_buffer(compiler, tmp_path, release):
         assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.fixture(scope='module', params=[False, True], ids=['debug', 'release'])
+@pytest.fixture(scope='module', params=[
+    pytest.param(False, id='debug'),
+    pytest.param(True, id='release', marks=pytest.mark.nightly),
+])
 def room_binaries(compiler, tmp_path_factory, request):
     work = tmp_path_factory.mktemp('rooms')
     server, game = work / 'rendezvous', work / 'room_game'

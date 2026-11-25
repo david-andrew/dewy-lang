@@ -1,6 +1,9 @@
 """Exact-counter progress recognition agrees with frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = ['sequence/nested_field_paths', 'generic/pool_direct_impostor',
          'progress_entries/counted', 'progress_entries/other_key', 'progress_entries/own_growth',

@@ -9,6 +9,8 @@ from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
 from tools.cores import on_cores
 
+pytestmark = pytest.mark.nightly
+
 SOURCE = '''
 $runtime_checks
 

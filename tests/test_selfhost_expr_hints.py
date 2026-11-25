@@ -3,6 +3,9 @@ builtin names, map_args, duration and element-gap notes, refuted literal contrac
 coalesce) agree with frozen Jo: the same messages and bytes."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 DIRS = ('regroup_hints', 'coalesce', 'coalesce_jump', 'cancel_defaults', 'explicit_cancellation', 'errors', 'secret',
         'self_length', 'units', 'named', 'fmt', 'dogfood37_proofs')

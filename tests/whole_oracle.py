@@ -13,7 +13,11 @@ from pathlib import Path
 from tests import leaf_oracle
 
 RUN_SECONDS = 2
+CONCURRENT_RUN_SECONDS = 10
+GPU_RUN_SECONDS = 20
 LADDER_RUNTIME_ONLY = {'95_kv_store', '96_ct_crypto'}
+GPU_HINT = re.compile(rb'\b(?:gpu|shader|compute|vulkan|spirv)\b', re.I)
+_run_timeout = None
 # ELF e_machine of native Linux executables.
 HOST_MACHINE = ({'x86_64': 62, 'amd64': 62, 'aarch64': 183, 'arm64': 183}.get(platform.machine().lower())
                 if sys.platform.startswith('linux') else None)
@@ -78,32 +82,50 @@ def _one_cpu():
     os.sched_setaffinity(0, {min(os.sched_getaffinity(0))})
 
 
+def _is_gpu(source):
+    if source is None:
+        return False
+    if 'gpu' in source.as_posix().lower() or 'shader' in source.as_posix().lower():
+        return True
+    try:
+        return bool(GPU_HINT.search(source.read_bytes()))
+    except OSError:
+        return False
+
+
 def _run(path, tmp, setup=None):
+    timeout = RUN_SECONDS if _run_timeout is None else _run_timeout
     try:
         ran = subprocess.run([path], cwd=tmp, stdin=subprocess.DEVNULL, capture_output=True,
-                             timeout=RUN_SECONDS, check=False, preexec_fn=setup)
+                             timeout=timeout, check=False, preexec_fn=setup)
     except subprocess.TimeoutExpired:
         return 'timeout'
     return {'status': ran.returncode, 'stdout': _text(tmp, ran.stdout), 'stderr': _text(tmp, ran.stderr)}
 
 
-def made(path, tmp, runs=True, concurrent=False):
+def made(path, tmp, runs=True, concurrent=False, timeout=RUN_SECONDS):
     """The record of one file a build made."""
     with path.open('rb') as stream:
         header = stream.read(20)
     if header.startswith(b'\x7fELF'):
         if not runs or int.from_bytes(header[18:20], 'little') != HOST_MACHINE or not os.access(path, os.X_OK):
             return {'binary': 'elf'}
-        first = _run(path, tmp)
-        if concurrent and first != 'timeout' and hasattr(os, 'sched_setaffinity'):
-            second = _run(path, tmp, _one_cpu)
-            if second == 'timeout':
-                first['one_cpu_status'] = 'timeout'
-            elif first != second:
-                first['one_cpu_status'] = second['status']
-                for stream in ('stdout', 'stderr'):
-                    if first[stream] != second[stream]:
-                        first[stream] = {'varies': True}
+        global _run_timeout
+        previous = _run_timeout
+        _run_timeout = timeout
+        try:
+            first = _run(path, tmp)
+            if concurrent and first != 'timeout' and hasattr(os, 'sched_setaffinity'):
+                second = _run(path, tmp, _one_cpu)
+                if second == 'timeout':
+                    first['one_cpu_status'] = 'timeout'
+                elif first != second:
+                    first['one_cpu_status'] = second['status']
+                    for stream in ('stdout', 'stderr'):
+                        if first[stream] != second[stream]:
+                            first[stream] = {'varies': True}
+        finally:
+            _run_timeout = previous
         return {'run': first}
     for magic, kind in ((b'MZ', 'pe'), (b'\0asm', 'wasm'), (b'\xcf\xfa\xed\xfe', 'macho')):
         if header.startswith(magic):
@@ -130,7 +152,9 @@ def build(arguments, status, stdout, stderr, files, tmp, *, run_outputs=True):
     if status == 0 and files:
         runs = run_outputs and _native(source)
         concurrent = runs and _concurrent(source)
-        outputs = {path.name: made(path, tmp, runs, concurrent) for path in files}
+        timeout = (GPU_RUN_SECONDS if runs and _is_gpu(source)
+                   else CONCURRENT_RUN_SECONDS if concurrent else RUN_SECONDS)
+        outputs = {path.name: made(path, tmp, runs, concurrent, timeout) for path in files}
     return {'args': [_text(tmp, os.fsencode(a)) for a in names], 'status': status,
             'stdout': '' if '--ir' in names or '--host-ir' in names else _text(tmp, stdout),
             'stderr': stderr.decode(errors='surrogateescape'), 'files': outputs}

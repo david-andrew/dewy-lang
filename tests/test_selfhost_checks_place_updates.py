@@ -3,6 +3,9 @@ pool and index updates through end, unused values, mismatched assignments) agree
 the same messages and bytes."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 DIRS = ('tuple_slot_write', 'pool_fixed_update', 'end', 'refine_selection_output', 'slice_assign_extents', 'nd_contracts',
         'notraps16_shapes', 'notraps24', 'copies', 'argument', 'dict_refine', 'juxtaposition', 'multi', 'semicolon_narrow',

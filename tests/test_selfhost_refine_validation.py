@@ -1,6 +1,9 @@
 """Signature and record validation, storage contracts and nested formals agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 LEAVES = ('refine_metadata',)
 # Rejected declarations: cyclic, mutable, nested-formal and self-naming contracts.

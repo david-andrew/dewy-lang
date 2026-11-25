@@ -1,6 +1,9 @@
 """State compaction, scope collection, decided remainders and guarded words agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'refinements/later_dependent',

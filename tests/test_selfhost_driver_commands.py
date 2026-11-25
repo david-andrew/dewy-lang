@@ -8,6 +8,8 @@ from tests import test_selfhost_driver_cli as cli_cases
 from tests import test_selfhost_watch_drive as watch_cases
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_driver_commands_twins(compiler, tmp_path, monkeypatch, release):

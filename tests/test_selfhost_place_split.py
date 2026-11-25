@@ -4,6 +4,8 @@ import pytest
 from tests.selfhost_narrow import compare_narrow
 from tests.support import compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 SERVICES = r'''use 'node_store.dewy'
 const NF_AT = 2147483648
 const NF_GENERIC = 64

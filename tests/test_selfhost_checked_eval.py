@@ -9,6 +9,8 @@ from tests import whole_oracle
 from tests.support import ROOT, compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 
 def enum_members(text, name):
     match = re.search(r'^enum '+name+r':([^\n]*)(\n(?:[ \t]+[^\n]*\n)*)?', text, re.M)

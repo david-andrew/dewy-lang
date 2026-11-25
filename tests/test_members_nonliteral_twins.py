@@ -2,6 +2,9 @@
 from tests.selfhost_narrow import compare_narrow
 from tests.support import ROOT, compiler
 from tests.test_selfhost_reflect_ops import SERVICES
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 DRIVER = r'''

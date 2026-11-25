@@ -8,6 +8,8 @@ from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 
 DRIVER = r'''
 run = (size: int, raw: bool, extra: bool):

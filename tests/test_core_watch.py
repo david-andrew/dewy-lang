@@ -109,7 +109,10 @@ def test_core_watch_program(compiler, tmp_path):
         watcher.close()
 
 
-@pytest.mark.parametrize('flags', [[], ['--release']])
+@pytest.mark.parametrize('flags', [
+    pytest.param([], id='debug'),
+    pytest.param(['--release'], id='release', marks=pytest.mark.nightly),
+])
 def test_core_watch_tests(compiler, tmp_path, flags):
     source = tmp_path / 'tests.dewy'
     helper = tmp_path / 'helper.dewy'
@@ -402,8 +405,14 @@ draw=():>void=>clear(BLACK)
         watcher.close()
 
 
-@pytest.mark.parametrize('imported', [False, True], ids=['local', 'imported'])
-@pytest.mark.parametrize('indirect', ['direct', 'helper', 'embedded-helper'])
+@pytest.mark.parametrize('imported, indirect', [
+    pytest.param(False, 'direct', id='direct-local'),
+    pytest.param(True, 'embedded-helper', id='embedded-helper-imported'),
+    pytest.param(False, 'helper', id='helper-local', marks=pytest.mark.nightly),
+    pytest.param(False, 'embedded-helper', id='embedded-helper-local', marks=pytest.mark.nightly),
+    pytest.param(True, 'direct', id='direct-imported', marks=pytest.mark.nightly),
+    pytest.param(True, 'helper', id='helper-imported', marks=pytest.mark.nightly),
+])
 def test_core_watch_derived_asset(compiler, tmp_path, imported, indirect):
     source = tmp_path / 'game.dewy'
     asset_dir = tmp_path / 'assets' if imported else tmp_path

@@ -1,6 +1,9 @@
 """Partitioned slices agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_moved
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'argument/mutable_param_entry_global_write',

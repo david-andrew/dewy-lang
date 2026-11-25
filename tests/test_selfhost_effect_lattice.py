@@ -6,6 +6,8 @@ import pytest
 from tests.support import ROOT, compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 STEMS = ('dewy_reader_types', 'effect_types', 'effect_lattice')
 
 DRIVER = r'''
@@ -77,7 +79,6 @@ main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_effect_lattice_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []

@@ -73,6 +73,7 @@ main = ():
 '''
 
 
+@pytest.mark.nightly
 @pytest.mark.parametrize('optimized', [False, True], ids=['default', 'release'])
 def test_concurrency_waits_execution(compiler, tmp_path, monkeypatch, optimized):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
@@ -84,8 +85,11 @@ def test_concurrency_waits_execution(compiler, tmp_path, monkeypatch, optimized)
     assert out == b'waiting ok\n'
 
 
-@pytest.mark.parametrize('case', ['parallel_callbacks/blocking_callback', 'channels/parallel_wait',
-                                  'parallel_callbacks/local_literal_blocks'])
+@pytest.mark.parametrize('case', [
+    pytest.param('parallel_callbacks/blocking_callback', marks=pytest.mark.nightly),
+    pytest.param('channels/parallel_wait', marks=pytest.mark.nightly),
+    'parallel_callbacks/local_literal_blocks',
+])
 def test_concurrency_waits_diagnostics(compiler, tmp_path, monkeypatch, case):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     source = ROOT / 'tests/cases' / (case + '.dewy')

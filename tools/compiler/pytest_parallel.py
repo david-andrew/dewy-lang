@@ -21,6 +21,9 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         if item.get_closest_marker('xdist_group') is not None:
             continue
         name = item.path.name
+        if any(tag in name for tag in ('spirv', 'glsl', 'msl', 'shader', '_gpu_')):
+            item.add_marker(pytest.mark.xdist_group(name='gpu'))
+            continue
         group = str(item.path)
         if name.startswith('test_core'):
             owner = item.getparent(pytest.Class)

@@ -11,6 +11,7 @@ from tests.support import compiler  # noqa: F401
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith('linux') or platform.machine().lower() not in ('x86_64', 'amd64'),
     reason='--host-ir is a Linux x86-64 build')
+pytestmark = [*(pytestmark if isinstance(pytestmark, list) else [pytestmark]), pytest.mark.nightly]
 
 PROGRAM = '''$runtime_checks
 

@@ -16,6 +16,8 @@ from tests.support import compiler  # noqa: F401 (fixture)
 from tests.test_selfhost_literals import BAD, GOOD, Problem, escape
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/string_text_jo.jo'
 TWIN = "use '../../../compiler/literals.jo'"

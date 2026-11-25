@@ -4,6 +4,8 @@ from tests.selfhost_narrow import compare_narrow
 from tests.test_selfhost_constant_checks import DRIVER, SERVICES
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.parametrize('release', [False, True])
 def test_policy_literal_strict_validation_matches_twins(compiler, tmp_path, release):

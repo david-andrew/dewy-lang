@@ -1,6 +1,9 @@
 """Forgetting exposed roots, call effects, text sinks and routed writes agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'fixed/array_update_parameters',

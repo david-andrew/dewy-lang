@@ -1,6 +1,9 @@
 """Constant-check folding (time literals, regex and melody patterns) agrees with frozen Jo."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = '''dogfood/09_logs dogfood/11_markdown dogfood/125_markdown_html dogfood/144_shift_roster
 dogfood/145_log_analyzer dogfood/24_wordcount_cli dogfood/55_tiny_regex dogfood37_proofs/duration_constant_coerces

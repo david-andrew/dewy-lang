@@ -4,6 +4,8 @@ import pytest
 from tests.selfhost_narrow import compare_narrow
 from tests.support import compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 JO = {
     'ir.jo': "const VF = 1\nconst M_INDEX = 4\nuse_of: int[][]\n",
     'loops.jo': '''use 'ir_types.dewy'

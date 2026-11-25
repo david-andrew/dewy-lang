@@ -44,6 +44,7 @@ def test_parallel_outputs_repeat(compiler, tmp_path, flags, extra, command):
     assert outputs(compiler, source, tmp_path / 'program', flags, env, command) == first
 
 
+@pytest.mark.nightly
 def test_par_drive_ir_builders_fused_drive_pcheck_drive_match_twins(compiler, tmp_path, monkeypatch):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     source = tmp_path / 'program.dewy'

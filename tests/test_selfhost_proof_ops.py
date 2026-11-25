@@ -1,6 +1,9 @@
 """Proof terms, erasure, result contracts and their evidence agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_moved
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'facts/pool_calls_effects',

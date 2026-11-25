@@ -2,6 +2,9 @@
 import subprocess
 
 from tests.support import ROOT, compiler
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_release_call_boundary_index(compiler, tmp_path):

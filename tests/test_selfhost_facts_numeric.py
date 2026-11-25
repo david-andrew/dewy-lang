@@ -1,6 +1,9 @@
 """Scaled products, quotients, midpoints, bit operations, extrema, rationals and powers agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'exact_int/constant_width',

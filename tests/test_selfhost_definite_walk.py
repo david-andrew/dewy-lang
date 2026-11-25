@@ -7,6 +7,8 @@ from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf, jo_doubles
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 
+pytestmark = pytest.mark.nightly
+
 STATE = re.sub(r"(?m)^(use '[^']*'|#.*)\n", '', (ROOT / 'compiler/definite.jo').read_text())
 
 JO = jo_doubles({

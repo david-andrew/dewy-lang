@@ -9,6 +9,7 @@ from tests.selfhost_lower_double import modules_for
 from tests.test_selfhost_lower_analysis import DRIVER
 
 
+@pytest.mark.nightly
 def test_lower_races_twins(compiler, tmp_path, monkeypatch):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     source, output = tmp_path / 'input.dewy', tmp_path / 'program'
@@ -35,6 +36,7 @@ def test_lower_races_twins(compiler, tmp_path, monkeypatch):
     assert out == b'ok\n'
 
 
+@pytest.mark.nightly
 @pytest.mark.parametrize('captured', [False, True], ids=['global', 'capture'])
 def test_lower_races_diagnostics(compiler, tmp_path, monkeypatch, captured):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
@@ -59,6 +61,7 @@ def test_lower_races_diagnostics(compiler, tmp_path, monkeypatch, captured):
     assert b'unreachable' not in out
 
 
+@pytest.mark.nightly
 @pytest.mark.parametrize('optimized', [False, True], ids=['default', 'release'])
 def test_lower_races_callback_forms(compiler, tmp_path, monkeypatch, optimized):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
@@ -98,6 +101,7 @@ main = ():
     assert out == b'ok\n'
 
 
+@pytest.mark.nightly
 @pytest.mark.parametrize('case,expected', [
     ('type_as_value(la_node(.int_lit, 0, 0, [], T_INT))', b'this is a type'),
     ('race_arg(la_node(.ident), "parallel")', b'pass a function by name or a lambda'),

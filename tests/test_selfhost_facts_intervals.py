@@ -4,6 +4,9 @@ import subprocess
 
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 FUNCTION = '''pick{index}=(xs:array<int64> a:{word} b:{word}):>int64=>{{
     if a >=? {a_lo} and a <=? {a_hi} and b >=? {b_lo} and b <=? {b_hi} {{

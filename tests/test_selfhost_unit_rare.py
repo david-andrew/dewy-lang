@@ -3,6 +3,9 @@ from pathlib import Path
 
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 PROGRAMS = {
     'days.dewy': 'main=()=>{\n    let t=3hour\n    printl(t + 1day)\n}\n',

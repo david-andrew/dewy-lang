@@ -10,6 +10,8 @@ from tests.selfhost_build_double import build_all
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_shader_nan import PROGRAM
 
+pytestmark = pytest.mark.nightly
+
 
 def bit_cases():
     # Both zero signs, subnormals, normal/exponent transitions, f32 rounding

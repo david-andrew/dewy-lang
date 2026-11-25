@@ -1,6 +1,9 @@
 """Cold refinement helpers (dictionary keys, string sets, self-length arrays, lengths, results) agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_moved
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'self_length/runtime_shrink_fails',

@@ -2,6 +2,9 @@
 from tests.selfhost_build_double import build_all
 from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 SOURCE = '''W:type=int32<overflow='wrap'>
 bump=(x:W):>W=>x+1

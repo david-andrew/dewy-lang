@@ -1,6 +1,9 @@
 """Final expressions, terminating arms and implicit void returns agree with the frozen checker."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_body_end_twins(compiler, tmp_path, monkeypatch):  # noqa: F811

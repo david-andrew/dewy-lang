@@ -14,9 +14,13 @@ CASES = Path(__file__).parent / 'cases'
 GROUPS = ['gpu_nonempty', 'gpu_float_sum', 'gpu_upload_shape', 'gpu_integer_upload', 'gpu_ieee', 'gpu_integer_ops']
 
 
-@pytest.mark.parametrize('group', GROUPS)
 @pytest.mark.parametrize('target', [pytest.param('native', marks=pytest.mark.xdist_group(name='gpu')), 'wasm'])
-@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('group, release', [
+    *[pytest.param(g, False, id=f'debug-{g}') for g in GROUPS],
+    pytest.param('gpu_integer_ops', True, id='release-gpu_integer_ops'),
+    *[pytest.param(g, True, id=f'release-{g}', marks=pytest.mark.nightly)
+      for g in GROUPS if g != 'gpu_integer_ops'],
+])
 def test_gpu_correctness(compiler, tmp_path, group, target, release):
     env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
     headless(env)

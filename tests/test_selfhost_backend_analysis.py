@@ -7,6 +7,8 @@ import pytest
 from tests.support import ROOT, compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 
 DRIVER = r'''
 layouts = ir_operand_layouts()

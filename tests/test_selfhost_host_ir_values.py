@@ -7,6 +7,7 @@ from tests import selfhost_lsp_double
 from tests.selfhost_build_double import build_all
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_driver_host_ir import PROGRAM, pytestmark
+pytestmark = [*(pytestmark if isinstance(pytestmark, list) else [pytestmark]), pytest.mark.nightly]
 
 DRIVER = '''use 'main.jo'
 use 'host_ir_values.dewy'

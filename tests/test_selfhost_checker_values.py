@@ -5,6 +5,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import compare
 from tests.test_selfhost_checker_call_convert import DRIVER as BASE, JO as BASE_JO, DOUBLES as BASE_DOUBLES
 
+pytestmark = pytest.mark.nightly
+
 DOUBLES = {name: dict(pair) for name, pair in BASE_DOUBLES.items()}
 
 JO = dict(BASE_JO)
@@ -198,7 +200,6 @@ MAIN = r'''main = ():
     print("ok")
 '''
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_values_twins(compiler, tmp_path, release):
     assert compare(compiler, tmp_path, release, DRIVER + MAIN,

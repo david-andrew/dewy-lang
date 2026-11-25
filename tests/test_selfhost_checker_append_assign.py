@@ -1,6 +1,9 @@
 """A Jo concatenation spine and a Dewy interpolation keep the order of the appended pieces."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_append_assign_twins(compiler, tmp_path, monkeypatch):

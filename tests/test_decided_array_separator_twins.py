@@ -10,6 +10,8 @@ from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
 from tests import parser_oracle
 
+pytestmark = pytest.mark.nightly
+
 CASES = sorted((ROOT / 'tests/cases/decided_array_separators').glob('*.dewy'))
 
 

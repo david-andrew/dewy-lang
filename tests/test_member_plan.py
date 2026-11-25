@@ -8,6 +8,8 @@ import pytest
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 
 CASES = ROOT / 'tests/cases/member_template'
 FRONTEND = ROOT / 'tests/ladder/99_dewy_frontend/design.dewy'

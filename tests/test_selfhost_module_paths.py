@@ -13,6 +13,8 @@ import pytest
 from tests.support import compiler  # noqa: F401 (fixture)
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/module_paths_jo.jo'
 FILES = ', '.join(f'`{n}`' for n in ['read_file', 'list_dir', 'walk_dir', 'glob', 'make_dirs', 'rename_file',

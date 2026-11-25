@@ -7,6 +7,8 @@ import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 
 def build_run(compiler, source, binary):
     built = subprocess.run([compiler, 'build', source, '-o', binary],
@@ -17,7 +19,6 @@ def build_run(compiler, source, binary):
     return ran.stdout
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('write', ['direct', 'call', 'recursive', 'record', 'tuple'])
 @pytest.mark.parametrize('order', list(itertools.permutations(('a', 'b', 'c'))))
 def test_cycle_writes_import_order(compiler, tmp_path, write, order):

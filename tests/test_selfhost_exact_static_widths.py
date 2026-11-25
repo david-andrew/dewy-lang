@@ -3,6 +3,9 @@ remainders, shifts and midpoints) match their frozen Jo twin."""
 
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_exact_static_widths_twins(compiler, tmp_path, monkeypatch):  # noqa: F811

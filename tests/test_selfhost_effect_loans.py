@@ -10,6 +10,8 @@ from tests.test_selfhost_ownership_checks import STEMS as CHECK_STEMS
 from tests.selfhost_effect_double import type_helpers_home
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 STEMS = CHECK_STEMS + ('dewy_reader_types', 'effect_types', 'effect_lattice', 'effect_loans')
 
 # Intrinsic ordinals: lend 1, address 2, length 3, load 4, store 5, len 6,
@@ -151,7 +153,6 @@ def run(compiler, tmp_path, release, driver, status=0):
     return outputs[0]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_effect_loans_twins(compiler, tmp_path, release):  # noqa: F811
     output = run(compiler, tmp_path, release, DRIVER + MAIN)

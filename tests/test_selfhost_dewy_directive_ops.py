@@ -4,6 +4,8 @@ import pytest
 from tests.selfhost_narrow import compare_narrow
 from tests.support import compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 STEMS = ('source_types', 'dewy_tokens', 'node_store', 'dewy_parser', 'dewy_directive_ops')
 
 SERVICES = r'''use 'source_types.dewy'

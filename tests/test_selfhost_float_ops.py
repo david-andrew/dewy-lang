@@ -1,6 +1,9 @@
 """Float conversion guards, dictionary key proofs and the no-NaN and no-infinity analysis agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_moved
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'float_guards/field_guard',

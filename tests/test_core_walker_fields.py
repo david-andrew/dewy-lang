@@ -22,7 +22,10 @@ class CollidingRunner(cases.Runner):
                               errors='replace', timeout=cases.BUILD_TIMEOUT, check=False)
 
 
-@pytest.mark.parametrize('slice_index', range(4))
+@pytest.mark.parametrize('slice_index', [
+    0,
+    *[pytest.param(k, marks=pytest.mark.nightly) for k in range(1, 4)],
+])
 def test_core_walker_fields(compiler, tmp_path, slice_index):
     chosen = [dataclasses.replace(case, modes=('native',))
               for case in map(cases.parse, sorted((cases.CASES / 'dogfood').glob('*.dewy')))

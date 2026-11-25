@@ -6,6 +6,8 @@ import pytest
 from tests.support import ROOT, compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = r'''
 main = ():
     loop rva in [0x1000, 0x11000, 0x12345000]:

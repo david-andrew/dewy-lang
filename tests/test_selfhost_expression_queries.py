@@ -5,6 +5,8 @@ import pytest
 from tests.selfhost_build_double import compare_golden_cases
 from tests.support import compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.parametrize(("leaf", "cases"), [
     ("struct_construction", ("object/zero_defaults", "object/positional_literal_extra", "generic/type_defaults")),

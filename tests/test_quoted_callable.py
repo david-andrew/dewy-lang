@@ -9,6 +9,8 @@ from tests.support import ROOT, compiler  # noqa: F401
 from tests import parser_oracle
 from tools.compiler import parser_diff
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_quoted_callable_twins(compiler, tmp_path, monkeypatch, release):

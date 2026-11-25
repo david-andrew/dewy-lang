@@ -1,6 +1,9 @@
 """Generic prepared source methods have the same provenance with frozen twins."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_signals_partial_checks(compiler, tmp_path, monkeypatch):

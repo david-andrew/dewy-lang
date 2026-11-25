@@ -3,6 +3,9 @@ import subprocess
 
 from tests import selfhost_lsp_double
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 DRIVER = """use 'main.jo'
 use 'checker_symbol_spelling.dewy'

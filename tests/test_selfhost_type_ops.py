@@ -2,6 +2,9 @@
 from tests.selfhost_facts_double import compare_moved
 from tests.selfhost_narrow import compare_narrow
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'misc/unsigned_constant_math',

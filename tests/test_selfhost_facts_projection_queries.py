@@ -2,6 +2,9 @@
 on small scanned states and on states past FACT_PROJECTION_SCAN whose projections are indexed."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 GLOBS = ('facts/*field*.dewy', 'facts/*record*.dewy', 'facts/*length*.dewy', 'refine_proven_rows/*.dewy',
          'refine_length_helpers/*.dewy', 'dict_refine/*.dewy', 'queue_refined_slots/*.dewy', 'heap_count/*.dewy')

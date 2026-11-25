@@ -1,6 +1,9 @@
 """Static truth of assertions and the build block agree with frozen Jo."""
 from tests.selfhost_checks_double import compare_checks
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'main/explicit_call_rejected',

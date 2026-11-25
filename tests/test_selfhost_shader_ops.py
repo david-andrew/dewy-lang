@@ -2,6 +2,9 @@
 frozen Jo in compiled shader programs, for this machine and cross-compiled for a Mac."""
 from tests.selfhost_facts_double import compare_moved
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'draw_context/direct',

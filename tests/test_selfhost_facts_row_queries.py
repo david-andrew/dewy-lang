@@ -2,6 +2,9 @@
 frozen Jo on small scanned states and on states past FACT_ROW_SCAN whose rows are indexed."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 GLOBS = ('loop_bounds/*.dewy', 'saved_operands/*.dewy', 'dogfood35_proofs/*.dewy', 'product_bounds/*.dewy',
          'facts/nonlinear*.dewy', 'facts/relation*.dewy', 'facts/distance*.dewy', 'range/stepped_error_1*.dewy')

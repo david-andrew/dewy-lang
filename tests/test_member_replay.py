@@ -247,7 +247,10 @@ REJECTED = {'later_proof_fails', 'singleton_overloads', 'later_conversion_fails'
 
 
 @pytest.mark.parametrize('name', SOURCES)
-@pytest.mark.parametrize('mode', MODES)
+@pytest.mark.parametrize('mode', [
+    'native',
+    *[pytest.param(m, marks=pytest.mark.nightly) for m in MODES if m != 'native'],
+])
 def test_member_replay_matches_reference(compiler, tmp_path, name, mode):
     source = tmp_path / f'{name}.dewy'
     source.write_text(SOURCES[name])
@@ -272,6 +275,7 @@ def test_member_replay_is_exercised(compiler, tmp_path):
                if line.startswith('member lowering ')) == 3, run.stderr
 
 
+@pytest.mark.nightly
 def test_member_lowering_rejects_nonliteral_ir_differences(compiler, tmp_path):
     source = tmp_path / 'lowering.jo'
     source.write_text(''.join(f"use '{ROOT / 'compiler' / (name + '.jo')}'\n"

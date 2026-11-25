@@ -8,6 +8,8 @@ from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_effect_double import type_helpers_home
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = r'''
 
 

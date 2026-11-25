@@ -2,6 +2,9 @@
 from tests.driver_cache import build_driver
 from tests.leaf_driver import LeafDriver
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_node_marks_twins(compiler):

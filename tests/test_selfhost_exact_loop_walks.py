@@ -2,6 +2,9 @@
 frozen Jo: the same messages and bytes, in default and release builds and for the compiler itself."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 GLOBS = ('exact_int/*.dewy', 'optimizer/guarded_array_*.dewy', 'numeric/broadcast_*.dewy', 'numeric/matrix_*.dewy',
          'facts/nd_*.dewy', 'broadcast_facts/*.dewy', 'comprehension/broadcast_statement.dewy')

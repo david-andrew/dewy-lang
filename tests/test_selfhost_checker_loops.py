@@ -5,6 +5,8 @@ from tests.support import compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = RESOLVER.split('main = ():')[0] + r'''
 ctxs: FnCtx[]
 cx = 0
@@ -119,7 +121,6 @@ main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_loops_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'xb_check',

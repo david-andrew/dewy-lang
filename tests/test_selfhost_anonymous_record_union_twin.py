@@ -1,6 +1,9 @@
 """Anonymous record branches infer their fields before forming a union in both builds."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_anonymous_record_union_twin(compiler, tmp_path, monkeypatch):

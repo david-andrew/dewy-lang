@@ -5,6 +5,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import compare
 from tests.test_selfhost_checker_call_resolve import DRIVER as RESOLVER, DOUBLES as RESOLVE_DOUBLES, JO as RESOLVE_JO
 
+pytestmark = pytest.mark.nightly
+
 DOUBLES = {name: dict(pair) for name, pair in RESOLVE_DOUBLES.items()}
 DOUBLES['checker_expr']['dewy'] += 'from p"services.jo" import cv_lookup\nlookup=(n:int64):>int64=>cv_lookup(n)\n'
 DOUBLES['checker_expr']['jo'] += 'lookup = (n: int) -> int: cv_lookup(n)\n'
@@ -197,7 +199,6 @@ MAIN = r'''main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_call_convert_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER + MAIN,

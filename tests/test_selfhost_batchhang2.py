@@ -1,6 +1,9 @@
 """Owner cleanup survives callable erasure and transfer into a match binding."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_batchhang2_lower_group_twins(compiler, tmp_path, monkeypatch):

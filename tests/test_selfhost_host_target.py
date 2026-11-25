@@ -4,6 +4,8 @@ import pytest
 from tests.selfhost_narrow import compare_narrow
 from tests.support import compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = r'''
 main = ():
     loop path in ["elf_x64", "elf_arm64", "macho", "macho_x64", "short", "missing", "empty"]: print(elf_machine_of(path))

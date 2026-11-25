@@ -5,6 +5,8 @@ import pytest
 
 from tests.support import ROOT, compiler
 
+pytestmark = pytest.mark.nightly
+
 
 def test_nested_zero_inventory_order(compiler, tmp_path):
     source = tmp_path / 'zero_inventory.jo'

@@ -12,6 +12,8 @@ import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 HARNESS = '''
 use '{root}/compiler/util.jo'
 use '{root}/compiler/source_types.dewy'

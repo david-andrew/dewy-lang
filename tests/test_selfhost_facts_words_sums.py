@@ -3,6 +3,9 @@ obligation (facts_library), parallel collections' lengths (facts_capture) and lo
 constant thresholds (facts_loops) agree with frozen Jo: the same programs, messages and bytes."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 LEAVES = ('glsl_ops', 'facts_values', 'facts_library', 'facts_capture', 'facts_loops')
 

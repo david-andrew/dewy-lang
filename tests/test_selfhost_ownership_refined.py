@@ -4,6 +4,8 @@ from tests.support import compiler
 from tests import test_selfhost_ownership_types as original
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 PROBE = '''
     ref_res = kind(.refined, res)
     ref_arr = kind(.refined, arr_res)
@@ -23,7 +25,6 @@ def compare_refined(compiler, tmp_path, release, monkeypatch):
         assert b'refined true true true false false true true true\n' in ran.stdout, ran.stdout[-800:]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_refined_ownership_twins(compiler, tmp_path, release, monkeypatch):
     compare_refined(compiler, tmp_path, release, monkeypatch)

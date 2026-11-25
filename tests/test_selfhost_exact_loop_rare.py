@@ -2,6 +2,9 @@
 parameters, widths, census and stride versions) agrees with frozen Jo: the same messages and bytes."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 GLOBS = ('exact_int/*.dewy', 'optimizer/guarded_array_*.dewy', 'numeric/broadcast_*.dewy', 'numeric/array_error_*.dewy',
          'numeric/matrix_*.dewy', 'facts/nd_*.dewy', 'facts/selection_ranges.dewy', 'draw_context/*.dewy',

@@ -6,6 +6,8 @@ from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_facts_row_queries import chain_program
 
+pytestmark = pytest.mark.nightly
+
 GLOBS = ('facts/affine*.dewy', 'facts/nonlinear*.dewy', 'facts/comparison.dewy',
          'facts/bounded_sum*.dewy', 'facts/endpoint*.dewy', 'facts/shape_guard*.dewy',
          'facts/snapshot*.dewy', 'facts/loop_snapshot.dewy', 'facts/short_circuit.dewy',

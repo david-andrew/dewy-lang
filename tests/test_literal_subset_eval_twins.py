@@ -6,6 +6,9 @@ from tests import whole_oracle
 
 from tests.support import ROOT, compiler  # noqa: F401
 from tests import leaf_oracle
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_literal_subset_eval_twins(compiler, tmp_path):

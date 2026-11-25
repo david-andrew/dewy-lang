@@ -4,6 +4,9 @@ transcripts, exit codes and history."""
 from tests.selfhost_process_double import compare_repl
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_repl_ops import TRANSCRIPTS
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_repl_session_matches_twin(compiler, tmp_path, monkeypatch):

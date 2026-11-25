@@ -1,6 +1,9 @@
 """Nested compile-time arms preserve statement order and block result checking."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_block_entries_twins(compiler, tmp_path, monkeypatch):

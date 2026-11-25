@@ -7,6 +7,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_expr import DRIVER as EXPR, JO_DOUBLES, STEMS
 from tests.test_selfhost_checker_resolve import compare
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = EXPR + r'''
 drv_loops: ValueLoop[]
 drv_refine = false
@@ -119,7 +121,6 @@ main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_intrinsics_twins(compiler, tmp_path, release):  # noqa: F811
     out = compare(compiler, tmp_path, release, DRIVER + MAIN, extra_stems=STEMS, jo_doubles=JO_DOUBLES)

@@ -6,6 +6,8 @@ from tests.selfhost_lower_double import modules_for
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_facts_obligations import DRIVER as WALK_DRIVER
 
+pytestmark = pytest.mark.nightly
+
 LEAF = ('facts_lifecycle',)
 CLASSIFIER = '''    init_types()
     nodes[20] = Node(kind=.int_lit, type=i32(T_INT), ival=0)

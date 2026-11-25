@@ -4,6 +4,8 @@ import pytest
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = RESOLVER.split('main = ():')[0] + r'''
 xk_floaty = false
 xk_coercible = true
@@ -115,7 +117,6 @@ main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_collections_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER + MAIN,

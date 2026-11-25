@@ -79,6 +79,7 @@ else:
     assert 'lib/prelude/comment.dewy' not in str(failure.value)
 
 
+@pytest.mark.nightly
 def test_declaration_index_matches_parser(scan_check):
     """Each library file's scanned names and units are what the parser finds in it."""
     run([scan_check, ROOT / 'lib'])

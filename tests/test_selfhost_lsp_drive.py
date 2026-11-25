@@ -6,6 +6,9 @@ import subprocess
 from tests.selfhost_lsp_double import leaf_compilers, session
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_lsp_ops import GAME, MODEL, compare_session
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_lsp_drive_session_matches_twin(compiler, tmp_path, monkeypatch):

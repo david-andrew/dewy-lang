@@ -39,6 +39,32 @@ def pytest_configure(config):
     leaf_oracle.configure(config)
 
 
+def _has_nightly_module_mark(path: Path) -> bool:
+    try:
+        text = path.read_bytes()
+    except OSError:
+        return False
+    if b'pytestmark' not in text:
+        return False
+    return any(line.startswith(b'pytestmark') and b'pytest.mark.nightly' in line for line in text.splitlines())
+
+
+def pytest_ignore_collect(collection_path, config):
+    """Avoid importing hundreds of unselected test modules during `--quick` and per-landing runs."""
+    if collection_path.suffix != '.py' or not collection_path.name.startswith('test_'):
+        return None
+    markexpr = (getattr(config.option, 'markexpr', '') or '').strip()
+    if markexpr == 'core_quick':
+        try:
+            return b'core_quick' not in collection_path.read_bytes()
+        except OSError:
+            return None
+    if markexpr == 'not nightly':
+        if _has_nightly_module_mark(collection_path):
+            return True
+    return None
+
+
 def scope_twins(items):
     """`tools.core test --base REV` names the self-hosting test files none of whose inputs changed (see
     tools/twin_scope.py); they join the nightly tier. The counts go back to its summary line."""

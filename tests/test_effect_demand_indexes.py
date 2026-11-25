@@ -2,6 +2,9 @@
 import subprocess
 
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_effect_site_index_lifecycle(compiler, tmp_path):

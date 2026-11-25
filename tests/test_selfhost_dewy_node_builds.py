@@ -2,6 +2,9 @@
 method finishing, constants, integer singletons and target names agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_moved
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'dogfood/18_roman_tests',

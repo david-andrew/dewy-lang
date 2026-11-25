@@ -2,6 +2,9 @@
 from tests.selfhost_facts_double import compare_moved
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'search/regex_limits',

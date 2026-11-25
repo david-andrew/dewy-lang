@@ -3,6 +3,9 @@ with frozen Jo: the same watch transcripts, exit codes and files."""
 from tests.selfhost_process_double import compare_watch
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_watch_ops import GAME
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_proc_sys_program_watch_matches_twin(compiler, tmp_path, monkeypatch):

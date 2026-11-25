@@ -5,6 +5,8 @@ from tests.selfhost_narrow import compare_narrow
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 SERVICES = '''use 'checker_types.dewy'
 struct RNode:
     pos: int = 0

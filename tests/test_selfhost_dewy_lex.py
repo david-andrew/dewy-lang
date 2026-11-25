@@ -10,6 +10,8 @@ import pytest
 from tests.corpus_cache import corpus_paths, SHARDS, built_once, cached, digest, shard_of
 from tests.support import compiler  # noqa: F401 (fixture)
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
 

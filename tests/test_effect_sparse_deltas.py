@@ -2,6 +2,9 @@
 import subprocess
 
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_effect_delta_generations(compiler, tmp_path):

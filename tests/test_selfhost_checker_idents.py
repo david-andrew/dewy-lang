@@ -5,6 +5,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_literals import DRIVER as LITERALS, LITERAL_JO
 from tests.selfhost_expr_double import compare_leaf, jo_doubles
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = LITERALS.split('main = ():')[0] + r'''
 locals: Local[] = [Local()]
 globals: Global[] = [Global()]
@@ -170,7 +172,6 @@ IDENT_JO = {
     },
 }
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_idents_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'literal_check', jo_doubles=jo_doubles(IDENT_JO, LITERAL_JO),

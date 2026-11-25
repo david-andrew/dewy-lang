@@ -1,6 +1,9 @@
 """Partial application, prepared waits and rest arguments agree with the frozen twin."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 DIRS = ('partial', 'rest_params', 'select', 'select_named', 'select_sources', 'handle')
 

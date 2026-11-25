@@ -4,6 +4,9 @@ import subprocess
 
 from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 PROGRAMS = {
     'mode.dewy': "$build.mode = 'release'\nmain=()=>printl(\"mode\")\n",

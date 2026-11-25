@@ -4,6 +4,8 @@ import pytest
 from tests.support import ROOT, compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = r'''
 quantity_dimensions: int[][] = [[0, 0, 0, 0, 0, 0, 0, 0]]
 quantity_dimension_names: str[] = ["Time", "Length", "Mass", "Current", "Temperature", "Amount", "Luminosity", "Angle"]

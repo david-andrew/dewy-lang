@@ -9,6 +9,7 @@ from tests.selfhost_narrow import compare_narrow
 from tests.support import ROOT, compiler  # noqa: F401
 
 pytestmark = pytest.mark.skipif(shutil.which('git') is None, reason='git is not installed')
+pytestmark = [*(pytestmark if isinstance(pytestmark, list) else [pytestmark]), pytest.mark.nightly]
 
 DRIVER = r'''
 use 'pkg.jo'

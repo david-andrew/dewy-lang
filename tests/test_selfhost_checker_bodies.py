@@ -7,6 +7,8 @@ from tests.test_selfhost_checker_instances import DRIVER as INSTANCES, INSTANCE_
 from tests.test_selfhost_checker_signature import SIGNATURE_JO
 from tests.test_selfhost_checker_resolve import compare
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = INSTANCES.split('main = ():')[0] + r'''
 body_locals: Local[] = [Local()]
 trail: int[] = [99]
@@ -149,7 +151,6 @@ BODY_JO = {
 JO_DOUBLES = jo_doubles(BODY_JO, INSTANCE_JO, SIGNATURE_JO)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_bodies_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER,

@@ -6,6 +6,8 @@ from tests.selfhost_facts_double import compare_facts
 from tests.selfhost_lower_double import modules_for
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 LEAVES = ('refine_transfers',)
 DRIVER = '''use 'main.jo'
 use 'refine.jo'

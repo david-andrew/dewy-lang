@@ -6,6 +6,8 @@ from tests.test_selfhost_checker_resolve import compare
 from tests.selfhost_expr_double import jo_doubles
 from tests.test_selfhost_checker_call_convert import DRIVER as BASE, JO as BASE_JO, DOUBLES
 
+pytestmark = pytest.mark.nightly
+
 JO = dict(BASE_JO)
 JO["directives.jo"] = "dir_code_any = false\ndir_code_parameter = (n: int, callee: int): pass\n"
 def replace(module, name, definition):
@@ -81,7 +83,6 @@ MAIN = r'''main = ():
     print("ok")
 '''
 STEMS = ('checker_call_cost', 'checker_call_convert', 'checker_call_values')
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_call_values_twins(compiler, tmp_path, release):
     assert compare(compiler, tmp_path, release, DRIVER + MAIN,

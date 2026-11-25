@@ -13,6 +13,7 @@ from tools.compiler.speed import generate_dewy
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith('linux') or platform.machine().lower() not in ('x86_64', 'amd64'),
     reason='parallel emission is x86-64 Linux only')
+pytestmark = [*(pytestmark if isinstance(pytestmark, list) else [pytestmark]), pytest.mark.nightly]
 
 
 def test_par_join_debug_and_release_match_twin(compiler, tmp_path, monkeypatch):

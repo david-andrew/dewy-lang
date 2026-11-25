@@ -9,6 +9,8 @@ import shutil
 from tests.support import compiler  # noqa: F401 (fixture)
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 
 def compare_operands(compiler, tmp_path, extension):
     root = Path(__file__).resolve().parents[1]

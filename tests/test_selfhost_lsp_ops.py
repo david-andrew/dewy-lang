@@ -1,6 +1,9 @@
 """Language-server JSON access, document lookup, replies and lenses agree with frozen Jo over one session."""
 from tests.selfhost_lsp_double import leaf_compilers, session
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 MODEL = '''# A record and its step.
 Point:type=[x:float64 y:float64]

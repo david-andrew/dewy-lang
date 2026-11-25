@@ -3,6 +3,9 @@ stages and kernels agree with frozen Jo: the GPU cases built for Linux, with the
 bytes (each kernel carries its SPIR-V module)."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = '''dogfood/91_markov_weather game/headless_window game/polyline_batches game/polyline_degenerate
 game/polyline_joins'''.split()

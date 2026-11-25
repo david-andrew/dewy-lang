@@ -4,6 +4,9 @@ import subprocess
 from tests.parser_oracle import build_pair, compare
 from tools.compiler.parser_diff import environment
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_batch8_reader_twins(compiler, tmp_path):  # noqa: F811

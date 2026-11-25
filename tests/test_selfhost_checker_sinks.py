@@ -5,6 +5,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import compare
 from tests.selfhost_expr_double import jo_doubles
 from tests.test_selfhost_checker_value_calls import DRIVER as BASE, JO as BASE_JO, DOUBLES as BASE_DOUBLES
+
+pytestmark = pytest.mark.nightly
 JO = dict(BASE_JO)
 JO.pop("checker_sinks.dewy", None)
 JO.pop("checker_sinks.jo", None)
@@ -151,7 +153,6 @@ MAIN = r'''main = ():
 '''
 STEMS = ('checker_sinks', 'checker_values', 'checker_call_cost', 'checker_call_convert')
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_sinks_twins(compiler, tmp_path, release):
     assert compare(compiler, tmp_path, release, DRIVER + MAIN,

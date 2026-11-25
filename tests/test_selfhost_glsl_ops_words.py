@@ -3,6 +3,9 @@ SPIR-V statements), the facts' ranges they read (facts_capture) and GPU code's p
 (witness_ops, exact_fact_transfer; the ranges exact_preparation demands) agree with frozen Jo: the same programs, messages and bytes."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 LEAVES = ('glsl_ops', 'glsl_stmts', 'msl_stmts', 'spirv_stmts', 'facts_capture', 'witness_ops', 'exact_preparation', 'exact_fact_transfer')
 

@@ -1,6 +1,9 @@
 """Recent fact-proof branches agree with their frozen Jo implementations."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_exact_zero_and_share_twins(compiler, tmp_path, monkeypatch):

@@ -1,6 +1,9 @@
 """Explicit and lazy imports retain one prelude module identity."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_prelude_import_twins(compiler, tmp_path, monkeypatch):

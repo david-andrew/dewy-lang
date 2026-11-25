@@ -4,6 +4,8 @@ from collections import Counter
 from pathlib import Path
 import re
 
+pytestmark = pytest.mark.nightly
+
 
 COMPILER = Path(__file__).resolve().parents[1] / "compiler"
 # Keep overloads separately. A new body in an existing bridge file needs review too.
@@ -55,7 +57,6 @@ def test_live_jo_bodies_have_a_bridge_contract():
     assert actual == {stem: Counter(names.split()) for stem, (_, names) in BRIDGES.items()}
 
 
-@pytest.mark.core_quick
 def test_bootstrap_sources_stay_in_archive():
     assert not [p for p in COMPILER.glob("*.dewy") if p.with_suffix(".jo").exists()]
     assert not (COMPILER / "dewy_reader_seed.jo").exists()

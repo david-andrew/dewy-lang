@@ -5,6 +5,9 @@ import subprocess
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
 from tests.test_end_index_cost import FORMS, RUNTIME_CHECKS, SOURCE
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_index_end_walks_twins(compiler, tmp_path, monkeypatch):  # noqa: F811

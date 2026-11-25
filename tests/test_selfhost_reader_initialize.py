@@ -3,6 +3,8 @@ import pytest
 from tests.selfhost_narrow import compare_narrow
 from tests.support import compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 FIELDS = ('dc_axis_depth', 'dc_condition_depth', 'dc_empty_id', 'dc_head_depth', 'dc_initial_at',
           'dc_literal_at', 'dc_live_at', 'dc_member_depth', 'dc_spread_depth', 'dc_target_problem',
           'dc_value_start')

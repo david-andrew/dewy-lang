@@ -12,6 +12,8 @@ from tests import layout_corpus
 from tests.layout_corpus import layout_texts
 from tests.support import compiler  # noqa: F401 (fixture)
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
 

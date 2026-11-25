@@ -2,6 +2,9 @@
 language-server session."""
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_lsp_ops import compare_session
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_ide_ops_session(compiler, tmp_path, monkeypatch):

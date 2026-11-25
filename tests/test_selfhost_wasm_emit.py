@@ -6,6 +6,8 @@ import pytest
 from tests.support import ROOT, compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 
 DRIVER = r'''
 render = (f: IrFn) -> str:
@@ -101,7 +103,6 @@ main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_wasm_emitter_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []

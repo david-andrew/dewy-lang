@@ -2,6 +2,9 @@
 with and without debug information."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 PROGRAMS = {
     'loops.dewy': 'main=()=>{\n    let xs=[1 2 3]\n    loop x in xs {printl(x * 2)}\n    let total=0.5\n    printl(total)\n}\n',

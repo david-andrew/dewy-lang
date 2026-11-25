@@ -5,6 +5,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_exprstmts import DRIVER as EXPRSTMTS
 from tests.selfhost_expr_double import compare_leaf
 
+pytestmark = pytest.mark.nightly
+
 STEMS = ('checker_exprstmts', 'checker_statements')
 DRIVER = EXPRSTMTS + r'''
 globals: Global[] = [Global()]
@@ -93,7 +95,6 @@ main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_statements_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'st_check_host', extra_stems=STEMS).endswith(b'ok\n')

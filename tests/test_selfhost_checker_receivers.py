@@ -9,6 +9,8 @@ from tests.selfhost_expr_double import compare_leaf, jo_doubles
 from tests.test_selfhost_checker_members import DRIVER as MEMBERS, MEMBER_JO
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 
+pytestmark = pytest.mark.nightly
+
 STEMS = ('checker_exact', 'checker_literals', 'checker_members', 'checker_indexes', 'checker_receivers')
 BASE = RESOLVER.split('main = ():')[0]
 DRIVER = (MEMBERS + LITERALS.split('main = ():')[0][len(BASE):]
@@ -208,7 +210,6 @@ RECEIVER_JO = {
     },
 }
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_receivers_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'rv_check_host', jo_doubles=jo_doubles(RECEIVER_JO, INDEX_JO, MEMBER_JO, LITERAL_JO), extra_stems=STEMS).endswith(b'ok\n')

@@ -6,6 +6,8 @@ import pytest
 from tests.support import ROOT, compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = r'''
 files: SrcFile[] = [SrcFile(path="/root/é/main.dewy"), SrcFile(path="lib/other.dewy")]
 positions: int[] = [0, 1, (1 << 40) | 8, (9 << 40) | 1]

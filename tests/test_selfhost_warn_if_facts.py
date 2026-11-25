@@ -7,6 +7,8 @@ from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_driver_cli import run
 from tests.test_warn_if import SOURCE, MESSAGES, warned
 
+pytestmark = pytest.mark.nightly
+
 SERVICES = '''use 'checker_tokens.dewy'
 use 'refinement_types.dewy'
 struct FactState:

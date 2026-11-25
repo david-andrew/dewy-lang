@@ -1,6 +1,9 @@
 """Refinement IR checks (terms, call arguments, entry snapshots) emit the same images as frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 LEAVES = ('refine_ops',)
 # Programs whose checks stay at run time: scalar, unsigned, math-int, offset, sibling,

@@ -1,6 +1,9 @@
 """Exercise watch patch delivery, global initialization and record migration."""
 from tests.selfhost_process_double import compare_watch
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 GAME = '''$runtime_checks
 

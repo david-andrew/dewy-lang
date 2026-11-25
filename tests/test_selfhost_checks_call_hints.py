@@ -1,6 +1,9 @@
 """Color, member, file name and text call hints agree with frozen Jo."""
 from tests.selfhost_checks_double import compare_checks
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'float_constants/reject_old_inf',

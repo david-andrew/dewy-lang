@@ -1,6 +1,9 @@
 """Date range loops reach the calendar checker from either compiler build."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_date_range_twin(compiler, tmp_path, monkeypatch):

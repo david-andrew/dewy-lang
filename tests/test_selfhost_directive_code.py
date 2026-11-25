@@ -4,6 +4,9 @@ bytes."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_directive_rules import MIXED
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 GENERIC = '''total_of=<T>(xs:array<T>):>T=>{
     let total:T=0

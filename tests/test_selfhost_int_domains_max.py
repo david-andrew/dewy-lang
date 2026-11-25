@@ -7,6 +7,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_int_domains import DRIVER, ROOT, MIN, MAX
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_capture_endpoint(compiler, tmp_path, release):  # noqa: F811

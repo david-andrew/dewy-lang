@@ -1,6 +1,9 @@
 """Program configuration and its reused call inventory agree with frozen twins."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_program_settings_twins(compiler, tmp_path, monkeypatch):

@@ -6,6 +6,8 @@ import pytest
 from tests.support import compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 OPCODES = """nop iconst fconst mov add sub mul divs divu rems remu and_ or_ xor shl shrs shru neg not_ eq ne lts les gts ges ltu leu gtu geu fadd fsub fmul fdiv fneg fsqrt fmin fmax ffloor fceil fabs ftrunc feq fne flt fle fgt fge sext8 sext16 sext32 zext8 zext16 zext32 i2f u2f f2i f2f bits2f f2bits load store slot gaddr daddr faddr copy zero memcpy memset zeroslots vop call calli callc syscall intr block loop if_ else_ end br brif ret trap select assume brtable vld vst vbin vsplat vzu mulhs mulhu memeq checked_add checked_sub checked_mul overflow_add overflow_sub overflow_mul rot32 streq findbyte scanbytes findb""".split()
 DRIVER = r'''main = ():

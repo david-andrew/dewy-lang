@@ -5,6 +5,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_loops import DRIVER as LOOPS
 from tests.selfhost_expr_double import compare_leaf, jo_doubles
 
+pytestmark = pytest.mark.nightly
+
 STEMS = ('checker_loops', 'checker_assigns')
 DRIVER = LOOPS + r'''
 da_refining = false
@@ -325,7 +327,6 @@ from tests.selfhost_expr_double import isolate_hooks
 JO_DOUBLES = jo_doubles(ASSIGN_JO)
 isolate_hooks(JO_DOUBLES)
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_assigns_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'da_check', extra_stems=STEMS, jo_doubles=JO_DOUBLES).endswith(b'ok\n')

@@ -7,6 +7,8 @@ from tests.selfhost_effect_double import effect_services
 from tests.test_selfhost_type_constructors import DRIVER as CONSTRUCTOR_DRIVER
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = CONSTRUCTOR_DRIVER.split('main = ():')[0] + r'''
 active = false
 dewy = false

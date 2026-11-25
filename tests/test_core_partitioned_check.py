@@ -5,6 +5,7 @@ import subprocess
 import pytest
 
 from tests.test_core_fused_determinism import build, check, pytestmark
+pytestmark = [*(pytestmark if isinstance(pytestmark, list) else [pytestmark]), pytest.mark.nightly]
 from tests.support import ROOT, compiler
 from tools.compiler.speed import generate_dewy
 

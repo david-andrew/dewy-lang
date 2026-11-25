@@ -6,6 +6,8 @@ from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
 from tests.test_selfhost_ir_types import OPCODES
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = r'''use 'main.jo'
 use 'ir.jo'
 use 'ir_types.dewy'

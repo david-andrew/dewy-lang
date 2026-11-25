@@ -19,8 +19,12 @@ second()
 '''
 
 
-@pytest.mark.parametrize('automatic', [False, True])
-@pytest.mark.parametrize('shared', [False, True])
+@pytest.mark.parametrize('automatic, shared', [
+    (False, True),
+    pytest.param(False, False, marks=pytest.mark.nightly),
+    pytest.param(True, False, marks=pytest.mark.nightly),
+    pytest.param(True, True, marks=pytest.mark.nightly),
+])
 def test_rollback_warning_order(compiler, tmp_path, automatic, shared):
     source = tmp_path / 'rollback.dewy'
     text = LOST
@@ -71,7 +75,10 @@ def test_library_root_error_order(compiler, tmp_path, forced):
 
 
 @pytest.mark.parametrize('mode', ['partitioned', 'fused', 'emission'])
-@pytest.mark.parametrize('failed', ['0', '1'])
+@pytest.mark.parametrize('failed', [
+    '0',
+    pytest.param('1', marks=pytest.mark.nightly),
+])
 def test_partial_worker_failure(compiler, tmp_path, mode, failed):
     source = tmp_path / 'partial.dewy'
     source.write_text(generate_dewy(600))

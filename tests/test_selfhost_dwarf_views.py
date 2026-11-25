@@ -7,6 +7,8 @@ from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_dwarf_format import SETUP
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = SETUP + r'''
 main = ():
     reset()

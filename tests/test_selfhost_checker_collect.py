@@ -8,6 +8,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_call_queries import DRIVER as QUERIES
 from tests.test_selfhost_checker_resolve import compare
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = QUERIES.split('main = ():')[0] + r'''
 cl_ctxs: FnCtx[] = [FnCtx(mod = 0), FnCtx(mod = 1), FnCtx(mod = 2), FnCtx(mod = 3)]
 cl_cx = -1
@@ -138,7 +140,6 @@ main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_collect_twins(compiler, tmp_path, release):  # noqa: F811
     out = compare(compiler, tmp_path, release, DRIVER, extra_stems=('checker_call_queries',))

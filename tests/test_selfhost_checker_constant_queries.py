@@ -1,6 +1,9 @@
 """Resolved constants and integer type arguments use the same binding and fixed-width range rules."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_constant_queries_twins(compiler, tmp_path, monkeypatch):

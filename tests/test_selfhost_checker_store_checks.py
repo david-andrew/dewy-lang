@@ -1,6 +1,9 @@
 """Declarations, refinement stores, tuple values and updates select the same write checks."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_store_checks_twins(compiler, tmp_path, monkeypatch):

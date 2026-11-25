@@ -1,6 +1,9 @@
 """Foreign function layouts and recursive boxes match the frozen checker."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_ffi_layout_twins(compiler, tmp_path, monkeypatch):  # noqa: F811

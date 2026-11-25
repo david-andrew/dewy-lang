@@ -13,6 +13,8 @@ from tests.support import compiler  # noqa: F401 (fixture)
 from tests.enumerations import dewy_enumerations
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/node_store_jo.jo'
 KINDS = dewy_enumerations((ROOT / 'compiler/node_store.dewy').read_text())['NK']

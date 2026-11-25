@@ -2,6 +2,9 @@
 
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_proofgaps_rebased_twins(compiler, tmp_path, monkeypatch):

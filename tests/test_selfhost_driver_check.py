@@ -7,6 +7,8 @@ from tests import selfhost_lsp_double
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_driver_cli import run
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_driver_check_twins(compiler, tmp_path, monkeypatch, release):

@@ -8,6 +8,8 @@ from tests.support import compiler  # noqa: F401
 from tests import leaf_oracle
 from tests.enumerations import dewy_enumerations
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('checker_tokens', 'checker_types', 'refinement_types')
 # Frozen native ABI: each field's width/alignment, independently of either definition.

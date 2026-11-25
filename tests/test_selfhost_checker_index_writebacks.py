@@ -1,6 +1,9 @@
 """End-relative selectors and pool element fields write back through the same evaluated place."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_index_writebacks_twins(compiler, tmp_path, monkeypatch):

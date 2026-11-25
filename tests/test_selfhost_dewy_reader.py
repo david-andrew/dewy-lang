@@ -8,6 +8,8 @@ from tests.support import compiler  # noqa: F401
 from tests import parser_oracle
 from tools.compiler import parser_diff
 
+pytestmark = pytest.mark.nightly
+
 
 def test_recursive_reader_ships_dewy(compiler, tmp_path):
     binary = compiler.read_bytes()

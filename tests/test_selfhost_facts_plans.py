@@ -1,6 +1,9 @@
 """Plan currency, tuple component facts, row bounds and assertion queueing agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'dogfood13_proofs/matching_rows',

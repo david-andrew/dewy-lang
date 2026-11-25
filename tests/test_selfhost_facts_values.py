@@ -7,6 +7,9 @@ membership. The recursive transfer and memo storage are real shared services.
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_facts_projection_queries import record_program
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 GLOBS = (
     'facts/*.dewy', 'uint64_ceiling/*.dewy', 'self_length/*.dewy',

@@ -5,6 +5,9 @@ import subprocess
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_type_intern_rehash import DRIVER
 from tests import leaf_oracle
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_rehash_twin(compiler, tmp_path):

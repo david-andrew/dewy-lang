@@ -5,6 +5,8 @@ import pytest
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 
 CASE = 'exact_int/oversized_word_shift'
 

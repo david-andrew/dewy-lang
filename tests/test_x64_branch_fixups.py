@@ -1,6 +1,9 @@
 """Forward fixups preserve destinations across short-branch boundaries."""
 import subprocess
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_forward_branch_destinations(compiler, tmp_path):

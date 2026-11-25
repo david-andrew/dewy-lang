@@ -10,6 +10,8 @@ from tests.test_selfhost_ownership_types import DRIVER as TYPES, STEMS as TYPE_S
 from tests.selfhost_effect_double import type_helpers_home
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 STEMS = ('node_store', 'source_types') + TYPE_STEMS + ('ownership_checks',)
 
 DRIVER = TYPES.split('\nmain = ():')[0] + r'''
@@ -171,7 +173,6 @@ def run(compiler, tmp_path, release, driver, status=0):
     return outputs[0]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_ownership_checks_twins(compiler, tmp_path, release):  # noqa: F811
     output = run(compiler, tmp_path, release, DRIVER + MAIN)

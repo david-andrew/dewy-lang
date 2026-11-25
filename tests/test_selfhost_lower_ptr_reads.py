@@ -4,6 +4,8 @@ from tests.support import compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf, jo_doubles
 from tests.test_selfhost_checker_resolve import DRIVER as BASE
 
+pytestmark = pytest.mark.nightly
+
 JO = jo_doubles({
     'ast.jo': {
         'nkids': 'nkids = (n: int) -> int: int(nodes[n].nlist)',

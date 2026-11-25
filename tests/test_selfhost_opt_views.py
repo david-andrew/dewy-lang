@@ -6,6 +6,8 @@ from tests.test_selfhost_opt_cleanup import decode_source
 from tests.test_selfhost_opt_rewrite import build_run
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 
 DRIVER = r'''
 ir: IrFn

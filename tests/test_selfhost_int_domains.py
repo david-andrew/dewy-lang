@@ -14,6 +14,8 @@ import pytest
 from tests.support import compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/int_domains_jo.jo'
 MIN, MAX = -(1 << 63), (1 << 63) - 1

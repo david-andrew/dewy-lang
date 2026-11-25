@@ -1,4 +1,7 @@
 from tests.selfhost_expr_double import print_warnings
+import pytest
+
+pytestmark = pytest.mark.nightly
 """Demand closure and first-cycle reporting agree with frozen Jo."""
 import re
 

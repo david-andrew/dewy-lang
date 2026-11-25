@@ -5,6 +5,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 from tests.selfhost_expr_double import compare_leaf, jo_doubles
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = RESOLVER.split('main = ():')[0] + r'''
 locals: Local[] = [Local()]
 xf_scope = CheckerScope()
@@ -241,7 +243,6 @@ CONDITIONAL_JO = {
 
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_conditionals_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'xf_check_host', jo_doubles=jo_doubles(CONDITIONAL_JO),

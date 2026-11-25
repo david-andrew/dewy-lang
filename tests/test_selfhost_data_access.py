@@ -5,6 +5,8 @@ from tests.support import compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.test_selfhost_lower_ptr_reads import DRIVER, JO as POINTER_JO
 
+pytestmark = pytest.mark.nightly
+
 JO = dict(POINTER_JO)
 JO['refine.jo'] = 'representation_type = (t: int) -> int: t\n'
 JO['check.jo'] += '\ndewy_at = (pos: int) -> bool: pos > 0\n'

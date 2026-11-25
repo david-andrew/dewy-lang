@@ -1,6 +1,9 @@
 """Self-length holders and refined array calls (insert, swap, reverse, sort) agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 LEAVES = ('refine_rare',)
 # Holder marking: self-length declarations, misplaced and doubled contracts, paired inserts,

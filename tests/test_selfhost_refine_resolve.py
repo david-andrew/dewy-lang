@@ -6,6 +6,8 @@ import pytest
 from tests.support import compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('refine_resolve', 'refine_resolve_host', 'checker_state', 'checker_types',
            'checker_tokens', 'refinement_types', 'node_store', 'refine_queries', 'refine_predicates')

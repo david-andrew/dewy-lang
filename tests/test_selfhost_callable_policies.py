@@ -3,6 +3,9 @@
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
 from tests.test_settingsplace_defaults import SOURCE
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_callable_policies_twins(compiler, tmp_path, monkeypatch):  # noqa: F811

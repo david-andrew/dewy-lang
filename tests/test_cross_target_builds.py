@@ -9,6 +9,8 @@ import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401 (fixture)
 
+pytestmark = pytest.mark.nightly
+
 TARGETS = ('x86_64-windows', 'aarch64-mac', 'aarch64-linux', 'wasm32', 'x86_64-linux')
 
 # Programs whose imports (lib/net.dewy) or own source branch on `$target`.

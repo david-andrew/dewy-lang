@@ -3,6 +3,9 @@ child process) as Dewy target branches: here the Linux arms agree with frozen Jo
 builds (tests/test_cross_target_builds.py) check the Windows and macOS arms."""
 from tests.selfhost_process_double import compare_watch
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_watch_windows_program_matches_twin(compiler, tmp_path, monkeypatch):

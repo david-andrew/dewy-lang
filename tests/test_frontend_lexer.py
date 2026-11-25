@@ -7,8 +7,10 @@ from tests.support import compiler  # noqa: F401
 from tests.test_core import lexer_span_helpers
 
 
-@pytest.mark.core_quick
-@pytest.mark.parametrize('release', [False, True])
+@pytest.mark.parametrize('release', [
+    pytest.param(False, id='False', marks=pytest.mark.core_quick),
+    pytest.param(True, id='True', marks=pytest.mark.nightly),
+])
 def test_punctuation_dispatch(compiler, tmp_path, release):
     source = tmp_path / 'punctuation.jo'
     source.write_text(lexer_span_helpers(compiler, tmp_path) + '''

@@ -5,6 +5,8 @@ import pytest
 from tests.selfhost_narrow import compare_narrow
 from tests.support import compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 
 SERVICES = '''struct DirScope:
     start: int

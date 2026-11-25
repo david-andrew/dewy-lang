@@ -13,6 +13,8 @@ from tests import selfhost_build_double, selfhost_lsp_double
 from tests import test_selfhost_driver_cli as cli_cases
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 LEAVES = ('driver_options', 'driver_timing')
 
 

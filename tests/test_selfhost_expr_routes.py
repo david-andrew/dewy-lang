@@ -1,6 +1,9 @@
 """Cold expression helpers agree with the frozen twin on their existing golden cases."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 PATHS = (
     'tests/cases/record/function_field_sibling.dewy',

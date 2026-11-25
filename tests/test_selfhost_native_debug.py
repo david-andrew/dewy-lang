@@ -7,6 +7,8 @@ from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_dwarf_format import SETUP
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = SETUP.replace('dbg_raw: int[]\n', '').replace('dbg_cfi: int[]\n', '') + r"""
 aggregate = (t: int) -> bool: t == 12
 main = ():

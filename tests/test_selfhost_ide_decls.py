@@ -5,6 +5,9 @@ import subprocess
 from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_lsp_ops import compare_session
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 PROGRAMS = {
     # (an error inside a generic instance: the note names the instance's signature)

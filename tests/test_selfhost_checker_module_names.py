@@ -1,6 +1,9 @@
 """Module and prelude bindings preserve overload order, duplicate diagnostics and names arriving through a diamond."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_module_names_twins(compiler, tmp_path, monkeypatch):

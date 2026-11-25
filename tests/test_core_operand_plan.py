@@ -5,6 +5,8 @@ import pytest
 
 from tests.support import ROOT, compiler
 
+pytestmark = pytest.mark.nightly
+
 
 def test_backend_operand_layouts_match_optimizer(compiler, tmp_path):
     source = tmp_path / 'operands.jo'

@@ -2,6 +2,9 @@
 lengths, moduli and endpoint arithmetic in the indexed cache) agree with frozen Jo: messages, IR, bytes."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 PROGRAM = '''
 $runtime_checks

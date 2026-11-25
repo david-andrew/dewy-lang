@@ -5,8 +5,9 @@ from tests.selfhost_build_double import compare_builds
 from tests.selfhost_lsp_double import leaf_compilers
 import subprocess
 
+pytestmark = pytest.mark.nightly
 
-@pytest.mark.core_quick
+
 def test_output_cancellation_twins(compiler, tmp_path, monkeypatch):
     monkeypatch.setenv('DEWY_EMIT_WORKERS', '1')
     files = ['tests/cases/tasks/output_canceled.dewy']

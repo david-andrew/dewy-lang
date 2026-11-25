@@ -8,6 +8,8 @@ import pytest
 from tests.support import compiler  # noqa: F401
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/dewy_parser_jo.jo'
 WORDS = 'set b main _ array ptr dict totaldict addr no_effects reads mutates allocates blocks panics length overflow p'.split()

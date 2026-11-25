@@ -7,6 +7,8 @@ from tests.support import compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf, jo_doubles
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = RESOLVER.split('main = ():')[0] + r'''
 last_checked = 0
 secret_reveal_name = 2

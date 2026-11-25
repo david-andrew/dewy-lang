@@ -2,6 +2,9 @@
 
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_tuple_slot_write_twin(compiler, tmp_path, monkeypatch):

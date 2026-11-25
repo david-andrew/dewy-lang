@@ -6,6 +6,8 @@ import resource
 import subprocess
 import sys
 
+import pytest
+
 from tests.support import compiler
 from tools.compiler import speed
 from tools.filelock import lock_exclusive
@@ -49,14 +51,18 @@ def _build(compiler, tmp_path):
     return binary
 
 
-def test_products_and_text_match_python(compiler, tmp_path):
+@pytest.fixture(scope='module')
+def conv_binary(compiler, tmp_path_factory):
+    return _build(compiler, tmp_path_factory.mktemp('bigint-conv'))
+
+
+def test_products_and_text_match_python(conv_binary):
     sys.set_int_max_str_digits(0)
-    binary = _build(compiler, tmp_path)
     rng = random.Random(11)
     for da, db in [(12, 7), (900, 900), (6000, 6000), (25000, 9000), (40000, 3), (30000, 30000)]:
         a = rng.randrange(10 ** (da - 1), 10 ** da)
         b = -rng.randrange(10 ** (db - 1), 10 ** db)
-        ran = subprocess.run([binary, 'mul', str(a), str(b)], capture_output=True, text=True,
+        ran = subprocess.run([conv_binary, 'mul', str(a), str(b)], capture_output=True, text=True,
                              timeout=60, check=False)
         assert ran.returncode == 0, ran.stderr
         assert ran.stdout.strip() == str(a * b), (da, db)
@@ -89,20 +95,20 @@ def _cost(binary, *arguments):
     return ran.stdout, seconds, CPU_SECONDS_LIMIT, 'CPU seconds'
 
 
-def test_long_decimal_text_converts_quickly(compiler, tmp_path):
+@pytest.mark.nightly
+def test_long_decimal_text_converts_quickly(conv_binary, tmp_path):
     sys.set_int_max_str_digits(0)
-    binary = _build(compiler, tmp_path)
     # Each old iteration drew the first digit from a fresh generator with this seed.
     digits = random.Random(5).choice('0123456789') * 300_000
     text = tmp_path / 'digits.txt'
     text.write_text('9' + digits)
-    out, cost, limit, unit = _cost(binary, 'int', str(text))
+    out, cost, limit, unit = _cost(conv_binary, 'int', str(text))
     assert out.split()[0] == 'true'
     assert cost < limit, f'{cost:.3g} {unit} (limit {limit:.3g})'
 
 
-def test_max_digits(compiler, tmp_path):
-    binary = _build(compiler, tmp_path)
-    ran = subprocess.run([binary, 'limit'], capture_output=True, text=True, timeout=120, check=False)
+@pytest.mark.nightly
+def test_max_digits(conv_binary):
+    ran = subprocess.run([conv_binary, 'limit'], capture_output=True, text=True, timeout=120, check=False)
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout.split('\n')[:3] == ['true true 12345', '-12 777', '1001']

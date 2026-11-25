@@ -5,6 +5,8 @@ from tests.support import compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.test_selfhost_deadlock_waits import JO as WAITS, DRIVER as WAIT_DRIVER
 
+pytestmark = pytest.mark.nightly
+
 JO = dict(WAITS)
 JO['deadlock.jo'] += r'''
 struct DcEvent:

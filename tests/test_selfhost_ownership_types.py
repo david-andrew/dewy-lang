@@ -10,6 +10,8 @@ from tests.test_selfhost_type_properties import DRIVER as PROPERTIES
 from tests.selfhost_effect_double import type_helpers_home
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 STEMS = ('checker_types', 'checker_tokens', 'checker_state', 'refinement_types', 'refine_predicates',
          'refine_queries', 'type_queries', 'type_intern', 'type_inference', 'type_format', 'type_layout',
          'type_properties', 'type_constructors', 'ownership_types')
@@ -105,7 +107,6 @@ main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_ownership_types_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []

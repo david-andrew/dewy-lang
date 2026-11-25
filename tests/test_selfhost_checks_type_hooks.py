@@ -1,6 +1,9 @@
 """Type resolution, field, signature and instance services agree with frozen Jo."""
 from tests.selfhost_checks_double import compare_checks
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'surface/recursive_alias_record',

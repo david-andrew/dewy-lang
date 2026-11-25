@@ -9,6 +9,8 @@ from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.parametrize('optimized', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('case', ['promote_values', 'strict_capacity', 'nested'])

@@ -494,6 +494,7 @@ def test_interruption_at_any_point_leaves_a_working_toolchain(world):
     assert [p.name for p in (world.prefix / 'libexec').iterdir()] == ['dewy-install.sh']
 
 
+@pytest.mark.nightly
 @posix_only
 def test_waits_for_a_running_installer(world):
     a = world.releases.publish('a')
@@ -606,6 +607,7 @@ def real_archive(toolchain: Path):
     return make
 
 
+@pytest.mark.nightly
 @posix_only
 def test_real_toolchain_over_http(world, real_toolchain):
     server = Server(world.releases.root.parent)

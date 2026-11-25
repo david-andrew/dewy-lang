@@ -2,6 +2,8 @@
 line at bytes: Delete and ctrl-d on a character, completions that share only part of a character."""
 import re
 
+import pytest
+
 from tests.selfhost_process_double import compare_repl
 from tests.support import compiler  # noqa: F401
 
@@ -17,6 +19,7 @@ TRANSCRIPTS = [
 ]
 
 
+@pytest.mark.nightly
 def test_repl_multibyte_matches_twin(compiler, tmp_path, monkeypatch):
     runs = compare_repl(compiler, tmp_path, monkeypatch, ('repl_ops',), TRANSCRIPTS)
     assert not any('panic' in run[2] for run in runs), runs

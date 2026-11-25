@@ -1,6 +1,9 @@
 """Length certificates and their rejection paths agree with the frozen leaves."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_proofgaps_twins(compiler, tmp_path, monkeypatch):

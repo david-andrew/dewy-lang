@@ -9,6 +9,8 @@ from tests.support import compiler  # noqa: F401
 from tests.enumerations import dewy_enumerations
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 ROOT = Path(__file__).resolve().parents[1]
 TOK = dewy_enumerations((ROOT / 'compiler/checker_tokens.dewy').read_text())['Tok']
 MIN, MAX = -(1 << 63), (1 << 63) - 1

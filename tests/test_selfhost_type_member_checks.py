@@ -2,6 +2,9 @@
 clashes, generic families) agree with frozen Jo: the same messages and bytes."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 DIRS = ('type_members', 'queues', 'queue_nested_optional', 'protocols', 'select', 'select_named', 'select_sources',
         'race_sources', 'generic_names', 'gpu_broadcast', 'gpu_word_memory', 'rest_params', 'channels')

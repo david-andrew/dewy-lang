@@ -8,6 +8,8 @@ from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
 
+pytestmark = pytest.mark.nightly
+
 
 def test_lower_primitives_state_twins(compiler, tmp_path, monkeypatch):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))

@@ -5,6 +5,8 @@ from tests.support import compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.test_selfhost_deadlock_summaries import JO as SUMMARIES, DRIVER as SUMMARY_DRIVER
 
+pytestmark = pytest.mark.nightly
+
 JO = dict(SUMMARIES)
 JO['ast.jo'] += '''kids = (n: int) -> int[]:
     out: int[]

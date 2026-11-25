@@ -8,6 +8,8 @@ from tests.selfhost_narrow import compare_narrow
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_dwarf_format import SETUP
 
+pytestmark = pytest.mark.nightly
+
 STEMS = ('checker_types', 'checker_state', 'source_types', 'elf_format', 'pe_format', 'leb128',
          'module_paths', 'json_doc', 'dwarf_format', 'pdb_format', 'native_output')
 

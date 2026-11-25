@@ -11,6 +11,8 @@ from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
 from tests.test_panics_effect import PROVED, REJECTED
 
+pytestmark = pytest.mark.nightly
+
 
 DRIVER = r'''
 use 'main.jo'

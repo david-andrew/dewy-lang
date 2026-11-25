@@ -5,6 +5,8 @@ from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_type_unions import DRIVER as CONSTRUCTION_DRIVER
 from tests import leaf_oracle
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = CONSTRUCTION_DRIVER[:CONSTRUCTION_DRIVER.index('main = ():')]
 DRIVER = DRIVER.replace('literal_of = (t0: int) -> int:\n', 'lookup_grow = false\nlookup_union = 0\nliteral_of = (t0: int) -> int:\n    if lookup_grow:\n        lookup_grow = false\n        loop i in [0..128):\n            types.push(TypeInfo())\n            structs.push(StructInfo())\n            args.push(0)\n            sets.push([])\n        assert(uu_index(lookup_union, 1) == 0, "reentrant member lookup")\n')
 DRIVER += r'''

@@ -1,6 +1,9 @@
 """Dependent field stores, length mutations, mutable authority and record conversions agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 LEAVES = ('refine_rare',)
 # Rejected mutations: SafePath representations and partial record authority.

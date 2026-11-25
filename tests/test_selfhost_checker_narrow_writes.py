@@ -1,6 +1,9 @@
 """Stores follow aliases to their root, keep matching payloads and invalidate stale tag evidence."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_narrow_writes_twins(compiler, tmp_path, monkeypatch):

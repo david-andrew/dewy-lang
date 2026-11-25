@@ -7,6 +7,8 @@ import pytest
 from tests.selfhost_lsp_double import leaf_compilers
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 # Implementation-language text the layout rules reach: tabs, odd indentation, comments at columns,
 # unary signs, array elements, units, dotted operators, and=, continuations, blank-line runs, CRLF
 SAMPLES = {

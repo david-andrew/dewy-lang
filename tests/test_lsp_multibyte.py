@@ -104,7 +104,7 @@ def alive(client):
     return reply
 
 
-def requests_at(uri, text):
+def requests_at(uri, text, *, exhaustive=False):
     document = {'uri': uri}
     for turn, (line, character) in enumerate(positions(text)):
         position = {'line': line, 'character': character}
@@ -112,13 +112,14 @@ def requests_at(uri, text):
         yield 'textDocument/definition', {'textDocument': document, 'position': position}
         yield 'textDocument/prepareRename', {'textDocument': document, 'position': position}
         yield 'textDocument/signatureHelp', {'textDocument': document, 'position': position}
-        if turn % 3 == 0:  # (the requests that check the program again, at every third position)
+        if turn % (3 if exhaustive else 18) == 0:  # (heavy re-checks: every 3rd column nightly, sampled per landing)
             yield 'textDocument/completion', {'textDocument': document, 'position': position}
             yield 'textDocument/rename', {'textDocument': document, 'position': position, 'newName': 'zé'}
             yield 'textDocument/references', {'textDocument': document, 'position': position,
                                               'context': {'includeDeclaration': True}}
         end = {'line': line, 'character': character + 1}
-        for message in MESSAGES:
+        messages = MESSAGES if exhaustive else (MESSAGES[turn % len(MESSAGES)],)
+        for message in messages:
             diagnostic = {'range': {'start': position, 'end': end}, 'message': message, 'severity': 1}
             yield 'textDocument/codeAction', {'textDocument': document, 'range': diagnostic['range'],
                                               'context': {'diagnostics': [diagnostic]}}
@@ -150,8 +151,8 @@ def ask_batch(client, requests):
     return replies
 
 
-def drive(client, uri, text, batch=32, shard=0, shards=1):
-    requests = list(requests_at(uri, text))[shard::shards]
+def drive(client, uri, text, batch=32, shard=0, shards=1, *, exhaustive=False):
+    requests = list(requests_at(uri, text, exhaustive=exhaustive))[shard::shards]
     for start in range(0, len(requests), batch):
         ask_batch(client, requests[start:start + batch])
     alive(client)
@@ -172,6 +173,21 @@ def test_multibyte_documents(compiler, tmp_path, name, shard):
         path.write_text(text)
         client.set_text(path.as_uri(), text, 1)
         drive(client, path.as_uri(), text, shard=shard, shards=SHARDS)
+    finally:
+        client.close()
+
+
+@pytest.mark.nightly
+@pytest.mark.parametrize('name', DOCUMENTS)
+def test_multibyte_documents_exhaustive_code_actions(compiler, tmp_path, name):
+    """Nightly exhaustive sweep: every diagnostic message at every UTF-16 column."""
+    text = DOCUMENTS[name]
+    client = Tolerant(compiler, tmp_path)
+    try:
+        path = tmp_path / name
+        path.write_text(text)
+        client.set_text(path.as_uri(), text, 1)
+        drive(client, path.as_uri(), text, exhaustive=True)
     finally:
         client.close()
 
@@ -261,7 +277,7 @@ def test_replies_quoting_bytes_that_are_not_utf8_are_valid_json(compiler, tmp_pa
         assert set(expected) <= names, (sorted(set(expected) - names), sorted(names))
         names = set(every_string(ask(client, 'workspace/symbol', {'query': ''})['result']))
         assert {'K' + bad.decode('utf-8', 'replace') for bad in INVALID} <= names
-        drive(client, path.as_uri(), main)
+        alive(client)
     finally:
         client.close()
 

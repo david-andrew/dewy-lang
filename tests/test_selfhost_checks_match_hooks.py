@@ -1,6 +1,9 @@
 """Match hooks and exhaustiveness errors agree with frozen Jo."""
 from tests.selfhost_checks_double import compare_checks
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'facts/match_arm',

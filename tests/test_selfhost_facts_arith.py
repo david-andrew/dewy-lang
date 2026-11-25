@@ -1,6 +1,9 @@
 """Interval sums, products, relational bounds, prereads and selected rows agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 CASES = [
     'misc/unsigned_constant_math',

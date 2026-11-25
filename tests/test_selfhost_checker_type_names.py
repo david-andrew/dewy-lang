@@ -1,6 +1,9 @@
 """Qualified members, generic families and builtins resolve to the same type or diagnostic."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_type_names_twins(compiler, tmp_path, monkeypatch):

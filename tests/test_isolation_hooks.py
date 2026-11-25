@@ -4,6 +4,9 @@ from pathlib import Path
 import subprocess
 
 from tests.support import compiler
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 FIXTURES = Path(__file__).parent / 'fixtures/isolation'
 

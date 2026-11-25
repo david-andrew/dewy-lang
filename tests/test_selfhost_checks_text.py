@@ -1,6 +1,9 @@
 """Byte positions in text and symbol kind ordinals agree with frozen Jo, on text with multi-byte characters."""
 from tests.selfhost_narrow import compare_narrow
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 DRIVER = '''main = ():
     texts = ["", "a", "abcabc", "é(x(é", "((", "日本語.dewy"]

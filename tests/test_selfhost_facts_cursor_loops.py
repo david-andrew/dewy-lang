@@ -1,6 +1,9 @@
 """The checked cursor summary and its fallback agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_facts_cursor_loops_twins(compiler, tmp_path, monkeypatch):

@@ -10,6 +10,8 @@ from tests.support import compiler  # noqa: F401
 from tests import leaf_oracle
 from tools.compiler import parser_diff
 
+pytestmark = pytest.mark.nightly
+
 
 PROBE = '''    if a.len() > 3 and a[1] == "--lexer-probe":
         path = a[2]
@@ -106,7 +108,6 @@ def test_lexer_generated_spans(compiler, tmp_path, release):
             probe(pair, source, mode, cut, len(data))
 
 
-@pytest.mark.core_quick
 def test_lexer_ships_dewy(compiler):
     binary = compiler.read_bytes()
     assert b'/compiler/dewy_lexer.dewy\0' in binary

@@ -1,6 +1,9 @@
 """A toolchain version in hex or with separators compares as the frozen Jo's `to_int` reads it."""
 from tests.selfhost_facts_double import compare_moved
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_directive_ops_version_text_twins(compiler, tmp_path, monkeypatch):

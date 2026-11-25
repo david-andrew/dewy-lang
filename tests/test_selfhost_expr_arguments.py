@@ -5,6 +5,8 @@ import pytest
 from tests.selfhost_build_double import compare_builds, compare_golden_cases
 from tests.support import compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.parametrize(("leaf", "cases"), [
     ("index_operand_checks", ("addr_length/negative_index", "end/index_slices", "array/get_int_index")),

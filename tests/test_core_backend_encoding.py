@@ -20,6 +20,7 @@ def run_source(compiler, tmp_path, text, flags=()):
     return ran.stdout
 
 
+@pytest.mark.nightly
 def test_encoding_reservations_preserve_shared_buffers(compiler, tmp_path):
     # Invoke the actual emitter with empty, shared and growing buffers. The
     # expected bytes are independent of the emitter's reserve/store strategy.

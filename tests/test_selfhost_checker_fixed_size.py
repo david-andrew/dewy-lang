@@ -1,6 +1,9 @@
 """Literal and named Jo array lengths, Dewy lengths, and size diagnostics agree with the twin."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 
 def test_checker_fixed_size_twins(compiler, tmp_path, monkeypatch):

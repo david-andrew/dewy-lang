@@ -6,6 +6,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_call_args import DRIVER as CALL_ARGS
 from tests.test_selfhost_checker_expr import JO_DOUBLES, STEMS
 
+pytestmark = pytest.mark.nightly
+
 DRIVER = CALL_ARGS + r'''
 use 'concurrency.jo'
 zh_habits: int[] = [3, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -156,7 +158,6 @@ main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_call_expr_twins(compiler, tmp_path, release):  # noqa: F811
     from tests.test_selfhost_checker_resolve import compare

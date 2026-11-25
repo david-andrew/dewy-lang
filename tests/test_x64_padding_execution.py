@@ -7,6 +7,8 @@ import subprocess
 import pytest
 from tests.support import ROOT, compiler  # noqa: F401
 
+pytestmark = pytest.mark.nightly
+
 
 @pytest.mark.skipif(platform.system() != 'Linux' or platform.machine() != 'x86_64',
                     reason='executes Linux x86-64 machine code')

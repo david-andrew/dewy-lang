@@ -2,6 +2,9 @@
 frozen Jo: the same messages, IR and bytes for the exact-int and bigint cases and near misses."""
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 PROGRAM = '''$runtime_checks
 

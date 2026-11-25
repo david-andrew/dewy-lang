@@ -2,6 +2,9 @@
 proof atoms agree with frozen Jo."""
 from tests.selfhost_facts_double import compare_facts
 from tests.support import ROOT, compiler  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.nightly
 
 LEAVES = ('refine_rare',)
 PATTERNS = ('self_length/*.dewy', 'sibling_length/*.dewy', 'dict_sibling/*.dewy',

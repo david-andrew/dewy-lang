@@ -6,6 +6,8 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_loops import DRIVER as LOOPS
 from tests.selfhost_expr_double import compare_leaf
 
+pytestmark = pytest.mark.nightly
+
 STEMS = ('checker_loops', 'checker_for_loops')
 DRIVER = LOOPS + r'''
 locals: Local[] = [Local()]
@@ -175,7 +177,6 @@ FOR_JO = {
     },
 }
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_for_loops_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'fl_check_host', jo_doubles=jo_doubles(FOR_JO), extra_stems=STEMS).endswith(b'ok\n')
