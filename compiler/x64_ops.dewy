@@ -144,7 +144,7 @@ x64_function=():>void=>$unsafe {
     }
     let priority=opt_release and ra_prio and not dbg_on and ((ra_only as array<uint8>).length =? 0 or ir.name =? ra_only)
     if dbg_on {backend_debug_bindings()}
-    backend_analyze(@ir @ir_operand_layout dbg_on target_wasm ra_stat ra_on or priority)
+    backend_analyze(@ir @ir_operand_layout dbg_on target_wasm ra_stat ra_on or priority priority)
     nchk_fn=panic_bounds_lf
     x64_allocate(xf_ir priority dbg_on ra_stat)
     # Large loop frames keep compact negative displacements and their established

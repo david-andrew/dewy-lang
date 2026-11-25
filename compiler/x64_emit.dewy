@@ -878,7 +878,7 @@ patch_control_end=(c:ptr<XCtl> pos:XWord):>void=>$unsafe {
         closed += 1
     }
     let target:XWord=-1
-    if next <? xe_ncode and xe_instructions[next].op =? 'br' {
+    if not x_in_cold and next <? xe_ncode and xe_instructions[next].op =? 'br' {
         target=xctl_n - closed - 1 - XWord(xe_instructions[next].imm)
     }
     if target >=? 0 {
@@ -2109,7 +2109,9 @@ x_emit_end=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
     if cp[0].fix_head >=? 0 or cp[0].nifx >? 0 {patch_control_end(cp  pos)}
 }
 x_emit_br=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
-    branch_target_fix(XWord(ins[0].imm))
+    let depth=XWord(ins[0].imm)
+    if x_loop_line =? 32 and x_defer_cold_br(pos  depth) {return}
+    branch_target_fix(depth)
 }
 
 # The final IR is immutable through selection. Borrow its instruction records
@@ -3947,12 +3949,87 @@ x_emit_loop=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
     x_loop_depth += 1
 }
 let x_cold_ifs:array<int64>=[] # 6 words per deferred noreturn if: fix0, fix1, start, end, reload_pos, reload_at
+let x_cold_blks:array<int64>=[] # 7 words per deferred cold block: depth, f0, f1, f2, start, end, resume_ip
 let x_skip_end:XWord=-1
+let x_in_cold=false
+x_patch_fix_list=(fh0:XWord):>void=>$unsafe {
+    let fh=fh0
+    loop fh >=? 0 {
+        patch_fixup_here(xfix_val_p[fh])
+        fh=XWord(xfix_next_p[fh])
+    }
+}
+x_in_call_pos=(p:XWord calls:ptr<XWord> ncalls:XWord):>bool=>$unsafe {
+    let lo:XWord=0
+    let hi:XWord=ncalls
+    loop lo <? hi {
+        let mid=(lo + hi) >> 1
+        if calls[mid] <? p {lo=mid + 1}
+        else {hi=mid}
+    }
+    lo <? ncalls and calls[lo] =? p
+}
+# Defer a cold slow-path block skipped by an unconditional `br` right before `end` inside a loop
+# (e.g. exact_chain_store 128-bit fallback, array push grow/bump slow path) to the function tail
+# so the hot fast path falls straight through without an unconditional jump or cold-code I-cache bloat.
+x_cold_br_end=(pos:XWord depth:XWord):>XWord=>$unsafe {
+    if x_loop_line not=? 32 or xe_debug or x_in_cold or x_loop_depth <=? 0 or rsp_extra not=? 0 or nchk_open >=? 0 or fold_load >=? 0 or cmp_load >=? 0 or cmp_reload_at >=? 0 or sel_fused >=? 0 or store_val_skip >=? 0 or ret_in_rax >=? 0 or fused_cc >=? 0 {return -1}
+    if depth <? 1 or depth >? 3 or xctl_n <=? depth or pos + 2 >=? xe_ncode or xe_instructions[pos + 1].op not=? 'end' {return -1}
+    let target=xctl_n - 1 - depth
+    if xctl_p[xctl_n - 1].fix_head <? 0 {return -1}
+    loop c in [target..xctl_n) {
+        if xctl_p[c].kind not=? 0 or xctl_p[c].nifx not=? 0 {return -1}
+    }
+    let limit=min(xe_ncode  pos + 130)
+    let open_blocks=depth
+    let has_cold=false
+    let q=pos + 2
+    loop q <? limit {
+        let qins=xe_instructions + q
+        let op=qins[0].op
+        if op =? 'loop' or op =? 'brtable' {return -1}
+        if op =? 'block' or op =? 'if_' {open_blocks += 1}
+        else if op =? 'end' {
+            open_blocks -= 1
+            if open_blocks =? 0 {
+                return if has_cold {q} else {-1}
+            }
+        }
+        else if op =? 'br' or op =? 'brif' {
+            if XWord(qins[0].imm) >=? open_blocks {return -1}
+        }
+        else if op =? 'call' and (qins[0].c =? 1 or qins[0].c =? 2) {has_cold=true}
+        else if op =? 'load' and (XWord(qins[0].c) & M_NULLF) not=? 0 {return -1}
+        q += 1
+    }
+    -1
+}
+x_defer_cold_br=(pos:XWord depth:XWord):>bool=>$unsafe {
+    let outer_end=x_cold_br_end(pos  depth)
+    if outer_end <? 0 {return false}
+    let target=xctl_n - 1 - depth
+    x_patch_fix_list(XWord(xctl_p[target].fix_head))
+    let resume_ip=XWord(x_code[0].length)
+    x_padding_floor=resume_ip
+    let f0=XWord(xctl_p[xctl_n - 1].fix_head)
+    let f1:XWord=if depth >=? 2 {XWord(xctl_p[xctl_n - 2].fix_head)} else {-1}
+    let f2:XWord=if depth >=? 3 {XWord(xctl_p[xctl_n - 3].fix_head)} else {-1}
+    xctl_n=target
+    x_cold_blks.push(depth)
+    x_cold_blks.push(f0)
+    x_cold_blks.push(f1)
+    x_cold_blks.push(f2)
+    x_cold_blks.push(pos + 2)
+    x_cold_blks.push(outer_end)
+    x_cold_blks.push(resume_ip)
+    x_skip_end=outer_end
+    true
+}
 # Defer a short straight-line noreturn `if` (e.g. bounds/overflow/panic trap) to the
 # function tail so the hot path falls through without taken branches or cold code bloat.
 # Bounded O(16) lookahead; skipped in debug builds to keep dbg_pos monotonic.
 x_cold_if_end=(pos:XWord):>XWord=>$unsafe {
-    if x_loop_line not=? 32 or xe_debug or rsp_extra not=? 0 or nchk_open >=? 0 or fold_load >=? 0 or cmp_load >=? 0 or sel_fused >=? 0 or store_val_skip >=? 0 or ret_in_rax >=? 0 {return -1}
+    if x_loop_line not=? 32 or xe_debug or x_in_cold or rsp_extra not=? 0 or nchk_open >=? 0 or fold_load >=? 0 or cmp_load >=? 0 or sel_fused >=? 0 or store_val_skip >=? 0 or ret_in_rax >=? 0 {return -1}
     let limit=min(xe_ncode  pos + 17)
     let last:XWord=-1
     let q=pos + 1
@@ -3978,60 +4055,62 @@ x_cold_if_end=(pos:XWord):>XWord=>$unsafe {
     -1
 }
 x_emit_if_=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
-    let cold_end=x_cold_if_end(pos)
-    if cold_end >=? 0 {
-        let fix0:XWord=-1
-        let fix1:XWord=-1
-        if fused_cc >=? 0 {
-            let cc=fused_cc
-            fused_cc=-1
-            if cc =? 100 {
-                let skip=jcc32(CC_P)
-                fix0=jcc32(CC_E)
-                patch_here(skip)
-            }
-            else if cc =? 101 {
-                fix0=jcc32(CC_P)
-                fix1=jcc32(CC_NE)
-            }
-            else {fix0=jcc32(cc)}
-        }
-        else {
-            let a=XWord(ins[0].a)
-            if vloc[a] =? LOC_SPILL {
-                x_branch_pos=pos
-                if x_loop_depth >? 0 {cmp_branch_pad(14)}
-                x_branch_pos=-1
-                rex(true  0  0  RBP  false)
-                b(0x83)
-                mem(7  RBP  xe_spill[a])
-                b(0)
+    if x_loop_line =? 32 {
+        let cold_end=x_cold_if_end(pos)
+        if cold_end >=? 0 {
+            let fix0:XWord=-1
+            let fix1:XWord=-1
+            if fused_cc >=? 0 {
+                let cc=fused_cc
+                fused_cc=-1
+                if cc =? 100 {
+                    let skip=jcc32(CC_P)
+                    fix0=jcc32(CC_E)
+                    patch_here(skip)
+                }
+                else if cc =? 101 {
+                    fix0=jcc32(CC_P)
+                    fix1=jcc32(CC_NE)
+                }
+                else {fix0=jcc32(cc)}
             }
             else {
-                let ra=reg_of(a  RAX)
-                x_branch_pos=pos
-                if x_loop_depth >? 0 {cmp_branch_pad(9)}
-                x_branch_pos=-1
-                rex(true  ra  0  ra  false)
-                b(0x85)
-                modrr(ra  ra)
+                let a=XWord(ins[0].a)
+                if vloc[a] =? LOC_SPILL {
+                    x_branch_pos=pos
+                    if x_loop_depth >? 0 {cmp_branch_pad(14)}
+                    x_branch_pos=-1
+                    rex(true  0  0  RBP  false)
+                    b(0x83)
+                    mem(7  RBP  xe_spill[a])
+                    b(0)
+                }
+                else {
+                    let ra=reg_of(a  RAX)
+                    x_branch_pos=pos
+                    if x_loop_depth >? 0 {cmp_branch_pad(9)}
+                    x_branch_pos=-1
+                    rex(true  ra  0  ra  false)
+                    b(0x85)
+                    modrr(ra  ra)
+                }
+                fix0=jcc32(CC_NE)
             }
-            fix0=jcc32(CC_NE)
+            let rpos=cmp_reload
+            let rat=cmp_reload_at
+            if rat >=? 0 {
+                cmp_reload=-1
+                cmp_reload_at=-1
+            }
+            x_cold_ifs.push(fix0)
+            x_cold_ifs.push(fix1)
+            x_cold_ifs.push(pos + 1)
+            x_cold_ifs.push(cold_end)
+            x_cold_ifs.push(rpos)
+            x_cold_ifs.push(rat)
+            x_skip_end=cold_end
+            return
         }
-        let rpos=cmp_reload
-        let rat=cmp_reload_at
-        if rat >=? 0 {
-            cmp_reload=-1
-            cmp_reload_at=-1
-        }
-        x_cold_ifs.push(fix0)
-        x_cold_ifs.push(fix1)
-        x_cold_ifs.push(pos + 1)
-        x_cold_ifs.push(cold_end)
-        x_cold_ifs.push(rpos)
-        x_cold_ifs.push(rat)
-        x_skip_end=cold_end
-        return
     }
     if xctl_n >=? xctl_cap {xctl_grow()}
     let cp=xctl_p + xctl_n
@@ -4706,7 +4785,9 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
     xe_emit_error=""
     x_int_fail.clear()
     x_cold_ifs.clear()
+    x_cold_blks.clear()
     x_skip_end=-1
+    x_in_cold=false
     rsp_extra=0
     if rsp_frame {rsp_row(0)}
     xctl_n=0
@@ -4757,9 +4838,14 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
     nchk_open=-1
     let has_n32=x_has_narrow32
     let has_ovp=x_has_overflow_pair
+    let allow_cold=x_loop_line =? 32 and not dbg
     let ins=instructions
     loop pos in [0..xe_ncode) {
-        if x_skip_end >=? 0 {
+        if allow_cold and x_skip_end >=? 0 {
+            if pos =? next_call {
+                ci += 1
+                next_call=if ci <? ncalls {calls[ci]} else {-1}
+            }
             if pos =? x_skip_end {x_skip_end=-1}
             ins=ins + 1
             continue
@@ -4828,6 +4914,7 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
         ins=ins + 1
     }
     if XWord(x_cold_ifs.length) >? 0 {
+        x_in_cold=true
         x_padding_floor=XWord(x_code[0].length)
         let ci_cold:XWord=0
         let nc_cold=XWord(x_cold_ifs.length)
@@ -4878,6 +4965,92 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
             }
             ci_cold += 6
         }
+        x_in_cold=false
+    }
+    if XWord(x_cold_blks.length) >? 0 {
+        x_in_cold=true
+        x_padding_floor=XWord(x_code[0].length)
+        let bi_cold:XWord=0
+        let nb_cold=XWord(x_cold_blks.length)
+        loop bi_cold <? nb_cold {
+            let bdepth=x_cold_blks[bi_cold]
+            let bf0=x_cold_blks[bi_cold + 1]
+            let bf1=x_cold_blks[bi_cold + 2]
+            let bf2=x_cold_blks[bi_cold + 3]
+            let bstart=x_cold_blks[bi_cold + 4]
+            let bend=x_cold_blks[bi_cold + 5]
+            let bresume=x_cold_blks[bi_cold + 6]
+            let bhere=XWord(x_code[0].length)
+            x_patch_fix_list(bf0)
+            loop xctl_n + bdepth >=? xctl_cap {xctl_grow()}
+            xctl_n=bdepth
+            xctl_p[0].kind=0; xctl_p[0].fix_head=-1; xctl_p[0].nifx=0; xctl_p[0].start=bhere
+            if bdepth =? 2 {
+                xctl_p[1].kind=0; xctl_p[1].fix_head=int32(bf1); xctl_p[1].nifx=0; xctl_p[1].start=bhere
+            }
+            else if bdepth =? 3 {
+                xctl_p[1].kind=0; xctl_p[1].fix_head=int32(bf2); xctl_p[1].nifx=0; xctl_p[1].start=bhere
+                xctl_p[2].kind=0; xctl_p[2].fix_head=int32(bf1); xctl_p[2].nifx=0; xctl_p[2].start=bhere
+            }
+            fused_cc=-1
+            cmp_load=-1
+            cmp_reload=-1
+            cmp_reload_at=-1
+            fuse_skip=-1
+            fuse_skip2=-1
+            sel_fused=-1
+            store_val_skip=-1
+            ret_in_rax=-1
+            fold_load=-1
+            let bins=instructions + bstart
+            loop bpos in [bstart..bend + 1) {
+                if bpos =? cmp_reload_at {
+                    let original=cmp_reload
+                    cmp_reload=-1
+                    cmp_reload_at=-1
+                    emit_ins(bpos  instructions + original)
+                }
+                let bipos=XWord(bins[0].pos)
+                if bipos not=? 0 and (bipos not=? row_pos or fused_flag) {line_row(bipos)}
+                if bpos not=? fuse_skip and bpos not=? fuse_skip2 {
+                    if has_saves and x_in_call_pos(bpos  calls  ncalls) {
+                        let bop=bins[0].op
+                        save_active.clear()
+                        loop sk in [0..nsaves) {
+                            let sv=saves[sk]
+                            if live_start(sv) <? bpos and XWord(v_live[sv].last) >? bpos {save_active.push(sv)}
+                        }
+                        let bclob:XWord=if bop =? 'memset' {(XWord(1) << RAX) | (XWord(1) << RCX) | (XWord(1) << RDI)}
+                        else if bop =? 'memcpy' {(XWord(1) << RCX) | (XWord(1) << RSI) | (XWord(1) << RDI)}
+                        else {-1}
+                        save_around_call(bpos  true  -1  bclob)
+                        emit_ins(bpos  bins)
+                        let bd:XWord=-1
+                        if bop =? 'call' or bop =? 'calli' or bop =? 'callc' or bop =? 'syscall' or bop =? 'intr' {bd=XWord(bins[0].dst)}
+                        save_around_call(bpos  false  bd  bclob)
+                    }
+                    else {
+                        let bofl=XWord(X_OP_FLAGS[int64((bins as ptr<uint32>)[0]) & 127])
+                        if bofl =? 0 {
+                            if not has_n32 or bpos + 1 >? bend or (bins + 1)[0].op not=? 'zext32' or not x_emit_narrow32(bpos  bins) {
+                                emit_ins(bpos  bins)
+                            }
+                        }
+                        else if (bofl & 1) =? 0 {
+                            if (bofl & 2) not=? 0 and vloc[XWord(bins[0].dst)] <? -1 {
+                            }
+                            else if (not has_n32 or bpos + 1 >? bend or (bins + 1)[0].op not=? 'zext32' or not x_emit_narrow32(bpos  bins)) and (not has_ovp or (bofl & 4) =? 0 or not x_emit_overflow_pair(bpos  bins)) {
+                                emit_ins(bpos  bins)
+                            }
+                        }
+                    }
+                }
+                bins=bins + 1
+            }
+            jmp_back(bresume)
+            bi_cold += 7
+        }
+        x_in_cold=false
     }
     if XWord(x_int_fail.length) >? 0 {
         loop fix in x_int_fail {patch32(fix  XWord(x_code[0].length) - fix - 4)}

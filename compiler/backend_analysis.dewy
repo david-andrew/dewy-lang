@@ -114,7 +114,7 @@ ba_grow=(nv:int64):>void=>$unsafe {
 # Complete final-IR analysis. The input arenas do not grow during this call.
 # O(N + U + V log L + visited loop summaries), retaining the existing loop
 # interval extension. Allocation-start indexing is built only on request.
-backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_wasm:bool ra_stat:bool plan_starts:bool=false):>void=>$unsafe {
+backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_wasm:bool ra_stat:bool plan_starts:bool=false cold_tails:bool=false):>void=>$unsafe {
     x_has_foreign_call=false
     x_has_narrow32=false
     x_has_overflow_pair=false
@@ -375,6 +375,39 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
                         let base_w=if cold_depth >? 0 {1} else {BackendWord(1) << (BackendWord(3) * min(depth BackendWord(6)))}
                         let sh=min(cond_depth BackendWord(2))
                         w=if base_w >> sh >? 1 {base_w >> sh} else {1}
+                    } else if bs[bsp] <=? -3 {
+                        if bs[bsp] =? -4 {cond_depth-=1}
+                        cold_depth-=1
+                        let base_w=if cold_depth >? 0 {1} else {BackendWord(1) << (BackendWord(3) * min(depth BackendWord(6)))}
+                        let sh=min(cond_depth BackendWord(2))
+                        w=if base_w >> sh >? 1 {base_w >> sh} else {1}
+                    }
+                    if cold_tails and depth >? 0 and not bk[bsp] and pos >? 0 and instructions[pos - 1].op =? 'br' {
+                        let br_d=BackendWord(instructions[pos - 1].imm)
+                        if br_d >=? 1 and br_d <=? 3 and bsp >=? br_d {
+                            let tgt=bsp - br_d
+                            if not bk[tgt] and bs[tgt] >? -3 {
+                                let ob:BackendWord=br_d
+                                let is_cold_tail=false
+                                let q=pos + 1
+                                let qlim=min(nc pos + 65)
+                                loop q <? qlim {
+                                    let qop=instructions[q].op
+                                    if qop =? 'block' or qop =? 'if_' or qop =? 'loop' {ob+=1}
+                                    else if qop =? 'end' {
+                                        ob-=1
+                                        if ob =? 0 {break}
+                                    }
+                                    else if qop =? 'call' and (instructions[q].c =? 1 or instructions[q].c =? 2) {is_cold_tail=true}
+                                    q+=1
+                                }
+                                if ob =? 0 and is_cold_tail {
+                                    bs[tgt]=if bs[tgt] =? -2 {-4} else {-3}
+                                    cold_depth+=1
+                                    w=1
+                                }
+                            }
+                        }
                     }
                 } else if (op =? 'brif' and ins[0].imm =? 0) or op =? 'brtable' {
                     if depth >? 0 and bsp >? 0 and bs[bsp - 1] =? -1 {
