@@ -30,7 +30,7 @@ $NamePattern = '^[A-Za-z0-9][A-Za-z0-9._-]*$'
 $MemberPattern = '^dewy-core(/[A-Za-z0-9_+@-][A-Za-z0-9._+@-]*)*/?$'
 $Platform = 'windows-x86_64'
 $Asset = "dewy-core-$Platform.tar.gz"
-$State = @{ Staging = $null; Lock = $null }
+$State = @{ Staging = $null; Lock = $null; FetchDir = $null; Recover = $true; ExitCode = 0 }
 
 function Fail([string]$message) { throw [System.InvalidOperationException]::new($message) }
 function Test-IOException($record) {
@@ -42,6 +42,7 @@ function Test-IOException($record) {
     return $false
 }
 function Info([string]$message) { Write-Host $message }
+function Warn-Refresh { Write-Warning 'Could not download the update installer; using the current installer' }
 
 function Show-Usage {
     Info @'
@@ -120,6 +121,24 @@ function Read-Channel([string]$path) {
         $sums[$Matches[2]] = $Matches[1]
     }
     return @{ Tag = $tag; Sums = $sums }
+}
+
+function Resolve-Release([string]$release, [string]$channelUrl, [string]$metadata) {
+    if ($release) {
+        $tag = $release
+        $archiveSum = Find-Sum $metadata $Asset
+        $installerSum = Find-Sum $metadata 'install.ps1'
+        if (-not $archiveSum -or -not $installerSum) { Fail "SHA256SUMS of $tag does not list $Asset and install.ps1" }
+    } else {
+        $channel = Read-Channel $metadata
+        if ($null -eq $channel) { Fail "invalid toolchain channel at $channelUrl" }
+        $tag = $channel.Tag
+        if (-not $channel.Sums.ContainsKey($Asset) -or -not $channel.Sums.ContainsKey('install.ps1')) { Fail "the channel lists no $Asset or install.ps1" }
+        $archiveSum = $channel.Sums[$Asset]
+        $installerSum = $channel.Sums['install.ps1']
+    }
+    if ($tag -cnotmatch $TagPattern) { Fail "not a Dewy toolchain release tag: $tag" }
+    return @{ Tag = $tag; Short = $Matches[1]; ArchiveSum = $archiveSum; InstallerSum = $installerSum }
 }
 
 function Invoke-Native([string]$exe, [string[]]$arguments) {
@@ -281,9 +300,15 @@ if /i "%~1"=="rollback" goto manage
 set "DEWY_TOOLCHAIN="
 if exist "%DEWY_ROOT%\toolchains\current" set /p DEWY_TOOLCHAIN=<"%DEWY_ROOT%\toolchains\current"
 if not defined DEWY_TOOLCHAIN goto missing
+if /i "%~1"=="version" goto version
+if /i "%~1"=="--version" goto version
 endlocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%DEWY_ROOT%\toolchains\%DEWY_TOOLCHAIN%\bin\dewy-core.exe" %*
 :manage
 endlocal & goto #_undefined_# 2>NUL || title %COMSPEC% & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%DEWY_ROOT%\libexec\dewy-install.ps1" -Prefix "%DEWY_ROOT%" %*
+:version
+setlocal EnableDelayedExpansion
+echo(!DEWY_TOOLCHAIN!
+exit /b 0
 :missing
 echo ${name}: no Dewy toolchain is active in "%DEWY_ROOT%"; run the installer again 1>&2
 exit /b 1
@@ -354,8 +379,10 @@ function Install-Dewy([object[]]$arguments) {
         } elseif ($arg -in @('update', '-Update', '--update')) {
             $action = 'update'
             $modifyPath = $false
+            $State.Recover = $true
         } elseif ($arg -in @('rollback', '-Rollback', '--rollback')) {
             $action = 'rollback'
+            $State.Recover = $false
         } elseif ($arg -in @('-h', '--help', '-Help')) {
             Show-Usage
             return
@@ -385,6 +412,78 @@ function Install-Dewy([object[]]$arguments) {
         return
     }
 
+    $channelUrl = $env:DEWY_INSTALL_CHANNEL_URL
+    if (-not $channelUrl) { $channelUrl = 'https://dewy-lang.org/toolchain-channel.txt' }
+    $downloadUrl = $env:DEWY_INSTALL_DOWNLOAD_URL
+    if (-not $downloadUrl) { $downloadUrl = 'https://github.com/david-andrew/dewy-lang/releases/download' }
+    $downloadUrl = $downloadUrl.TrimEnd('/', '\')
+    $separator = '/'
+    if ($downloadUrl -notmatch '^[A-Za-z][A-Za-z0-9+.-]+://') { $separator = '\' }
+    $downloadRoot = "$downloadUrl$separator"
+
+    # Resolve and refresh before taking the lock. Keep the running copy
+    # outside staging so another install cannot remove it.
+    $guard = $null
+    $runningSum = ''
+    if ($action -eq 'update') {
+        $guard = $env:DEWY_INSTALL_REEXEC
+        if ($PSCommandPath) {
+            try { $runningSum = Get-Sha256 $PSCommandPath } catch { $runningSum = '' }
+        }
+    }
+    $installer = $null
+    if ($guard) {
+        if ($runningSum -cne $guard) { Fail 'could not verify the running update installer; nothing was changed' }
+        $installer = $PSCommandPath
+        # Reuse the manifest that selected this script, even if the channel moved.
+        $metadata = Join-Path (Split-Path -Parent $installer) 'release.txt'
+    } else {
+        $State.FetchDir = Join-Path ([IO.Path]::GetTempPath()) ('dewy-install.' + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $State.FetchDir | Out-Null
+        $metadata = Join-Path $State.FetchDir 'release.txt'
+        $url = $channelUrl
+        if ($release) { $url = "$downloadRoot$release${separator}SHA256SUMS" }
+        try {
+            Get-Download $url $metadata
+        } catch {
+            if ($action -eq 'update') { Warn-Refresh }
+            throw
+        }
+    }
+    $resolved = Resolve-Release $release $channelUrl $metadata
+    $tag = $resolved.Tag
+    $short = $resolved.Short
+    $installerSum = $resolved.InstallerSum
+    $installerUrl = "$downloadRoot$tag${separator}install.ps1"
+    if ($action -eq 'update') {
+        if ($guard) {
+            if ($installerSum -cne $guard) { Fail 'the running update installer does not match the release; nothing was changed' }
+        } else {
+            $installer = Join-Path $State.FetchDir 'install.ps1'
+            try {
+                Get-Download $installerUrl $installer
+            } catch {
+                Warn-Refresh
+                $installer = $null
+            }
+            if ($installer) {
+                Assert-Sum $installer $installerSum 'install.ps1'
+                if ($runningSum -cne $installerSum) {
+                    $env:DEWY_INSTALL_REEXEC = $installerSum
+                    try {
+                        $global:LASTEXITCODE = 0
+                        & $installer @arguments
+                        $State.ExitCode = $LASTEXITCODE
+                        $State.Recover = $false
+                    } finally {
+                        $env:DEWY_INSTALL_REEXEC = $guard
+                    }
+                    return
+                }
+            }
+        }
+    }
+
     foreach ($dir in @($toolchains, (Join-Path $prefix 'bin'), (Join-Path $prefix 'libexec'))) {
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
     }
@@ -395,41 +494,14 @@ function Install-Dewy([object[]]$arguments) {
     $State.Staging = Join-Path $toolchains ('.staging.' + [Guid]::NewGuid().ToString('N').Substring(0, 12))
     New-Item -ItemType Directory -Path $State.Staging | Out-Null
     $pointer = Read-Pointer $toolchains
-
-    $channelUrl = $env:DEWY_INSTALL_CHANNEL_URL
-    if (-not $channelUrl) { $channelUrl = 'https://dewy-lang.org/toolchain-channel.txt' }
-    $downloadUrl = $env:DEWY_INSTALL_DOWNLOAD_URL
-    if (-not $downloadUrl) { $downloadUrl = 'https://github.com/david-andrew/dewy-lang/releases/download' }
-    $downloadUrl = $downloadUrl.TrimEnd('/', '\')
-    $separator = '/'
-    if ($downloadUrl -notmatch '^[A-Za-z][A-Za-z0-9+.-]+://') { $separator = '\' }
-
-    # 1. Resolve the release and the digests that every download must match.
-    if ($release) {
-        $tag = $release
-        $sums = Join-Path $State.Staging 'SHA256SUMS'
-        Get-Download "$downloadUrl$separator$tag${separator}SHA256SUMS" $sums
-        $archiveSum = Find-Sum $sums $Asset
-        $installerSum = Find-Sum $sums 'install.ps1'
-        if (-not $archiveSum -or -not $installerSum) { Fail "SHA256SUMS of $tag does not list $Asset and install.ps1" }
-    } else {
-        $channelFile = Join-Path $State.Staging 'channel.txt'
-        Get-Download $channelUrl $channelFile
-        $channel = Read-Channel $channelFile
-        if ($null -eq $channel) { Fail "invalid toolchain channel at $channelUrl" }
-        $tag = $channel.Tag
-        if (-not $channel.Sums.ContainsKey($Asset) -or -not $channel.Sums.ContainsKey('install.ps1')) { Fail "the channel lists no $Asset or install.ps1" }
-        $archiveSum = $channel.Sums[$Asset]
-        $installerSum = $channel.Sums['install.ps1']
-    }
-    if ($tag -cnotmatch $TagPattern) { Fail "not a Dewy toolchain release tag: $tag" }
-    $short = $Matches[1]
     if ($action -eq 'update' -and $tag -ceq $pointer.Current) { Info "Dewy is up to date ($tag)." }
 
-    # 2. Download and verify the installer this release ships (the updater).
-    $installer = Join-Path $State.Staging 'install.ps1'
-    Get-Download "$downloadUrl$separator$tag${separator}install.ps1" $installer
-    Assert-Sum $installer $installerSum 'install.ps1'
+    # Fresh installs and update fallbacks use the regular installer download.
+    if (-not $installer) {
+        $installer = Join-Path $State.Staging 'install.ps1'
+        Get-Download $installerUrl $installer
+        Assert-Sum $installer $installerSum 'install.ps1'
+    }
 
     # 3. Reuse a verified toolchain, or download, verify, extract and test one.
     $target = Join-Path $toolchains $tag
@@ -437,8 +509,8 @@ function Install-Dewy([object[]]$arguments) {
         Info "Using the installed toolchain $tag"
     } else {
         $archive = Join-Path $State.Staging $Asset
-        Get-Download "$downloadUrl$separator$tag$separator$Asset" $archive
-        Assert-Sum $archive $archiveSum $Asset
+        Get-Download "$downloadRoot$tag$separator$Asset" $archive
+        Assert-Sum $archive $resolved.ArchiveSum $Asset
         $unpacked = Join-Path $State.Staging 'unpacked'
         Expand-Toolchain $archive $unpacked
         $problem = Test-Toolchain (Join-Path $unpacked 'dewy-core') $short
@@ -464,6 +536,7 @@ function Install-Dewy([object[]]$arguments) {
     $previous = $pointer.Current
     if ($previous -ceq $tag) { $previous = $pointer.Previous }
     Write-Pointer $toolchains $tag $previous
+    $State.Recover = $false
     Remove-Unused $toolchains @{ Current = $tag; Previous = $previous }
 
     $bin = Join-Path $prefix 'bin'
@@ -479,20 +552,23 @@ function Install-Dewy([object[]]$arguments) {
     if (-not $modifyPath) { Info "Add $bin to PATH, or run $bin\dewy.cmd directly." }
 }
 
-$code = 0
 try {
     Install-Dewy $argv
 } catch {
     [Console]::Error.WriteLine("dewy install: $($_.Exception.Message)")
-    $code = 1
+    if ($State.Recover) { [Console]::Error.WriteLine('Reinstall with: irm https://dewy-lang.org/install.ps1 | iex') }
+    $State.ExitCode = 1
 } finally {
     if ($State.Staging -and (Test-Path -LiteralPath $State.Staging)) {
         Remove-Item -LiteralPath $State.Staging -Recurse -Force -ErrorAction SilentlyContinue
     }
     if ($State.Lock) { $State.Lock.Dispose() }
+    if ($State.FetchDir) {
+        Remove-Item -LiteralPath $State.FetchDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 # A script file reports failure through its exit code; `irm | iex` must not
 # close the caller's session.
-if ($PSCommandPath) { exit $code }
-if ($code) { $global:LASTEXITCODE = $code }
+if ($PSCommandPath) { exit $State.ExitCode }
+if ($State.ExitCode) { $global:LASTEXITCODE = $State.ExitCode }
 } $args

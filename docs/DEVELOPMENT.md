@@ -321,6 +321,7 @@ Install, update and roll back:
 curl -fsSL https://dewy-lang.org/install.sh | bash        # [-s -- --release TAG --prefix DIR --no-modify-path]
 dewy update [--release TAG]
 dewy rollback
+dewy version
 ```
 
 On Windows, `install.ps1 [-Release TAG] [-Prefix DIR] [-NoModifyPath]` does the
@@ -341,8 +342,14 @@ Each install runs as one transaction:
 An interrupted install leaves the previous toolchain active; a lock serializes
 installers. `PREFIX/bin` holds the launchers `dewy` and `dewy-core` (`.cmd` on
 Windows). Both run the active `bin/dewy-core` and handle `update`/`rollback`
-themselves with the release's verified installer (`PREFIX/libexec`). The
-installers keep one previous toolchain. A marked block in the shell startup
+themselves with the saved installer (`PREFIX/libexec`). On update, it verifies
+and runs the target release's installer before taking the lock. A download
+failure warns and falls back to the saved installer. `dewy version` and
+`dewy --version` print the active release tag. A failed install or update can
+be retried with the install command above, or
+`irm https://dewy-lang.org/install.ps1 | iex` on Windows.
+
+The installers keep one previous toolchain. A marked block in the shell startup
 files puts `PREFIX/bin` first on PATH. A legacy installation (`~/.dewy/current`,
 `~/.dewy/dewy`) is left untouched, and `bin/udewy` explains that µDewy is
 retired. `DEWY_INSTALL_CHANNEL_URL` and `DEWY_INSTALL_DOWNLOAD_URL` (default

@@ -33,6 +33,9 @@ from tools.compiler.package import package, release_identity
 ROOT = Path(__file__).resolve().parents[1]
 DATE = '20261020'
 SAMPLE = 'main=():>void=>{let values=[20 22] if sum(values) =? 42 exit(42) else exit(1)}\n'
+BROKEN_SMOKE = b'main=()=>{let values=[20 22] return sum(values)}'
+RECOVERY_SH = 'Reinstall with: curl -fsSL https://dewy-lang.org/install.sh | bash'
+RECOVERY_PS = 'Reinstall with: irm https://dewy-lang.org/install.ps1 | iex'
 
 
 def host_platform() -> str | None:
@@ -276,6 +279,23 @@ def toolchains(prefix: Path) -> list[str]:
     return sorted(p.name for p in (prefix / 'toolchains').iterdir() if p.is_dir() and not p.name.startswith('.'))
 
 
+def break_smoke(updater: Path) -> None:
+    source = updater.read_bytes()
+    smoke = SAMPLE.rstrip().encode()
+    assert smoke in source
+    updater.write_bytes(source.replace(smoke, BROKEN_SMOKE, 1))
+
+
+def wrap_curl(world, script: str, **settings) -> dict:
+    tools = world.tmp / 'tools'
+    tools.mkdir()
+    curl = tools / 'curl'
+    curl.write_text('#!/bin/sh\nfor url do :; done\n' + script + '\nexec "$REAL_CURL" "$@"\n')
+    curl.chmod(0o755)
+    return dict(world.env, PATH=f'{tools}{os.pathsep}{world.env["PATH"]}',
+                REAL_CURL=shutil.which('curl'), **settings)
+
+
 @posix_only
 def test_install_update_and_rollback(world):
     a = world.releases.publish('a')
@@ -283,8 +303,10 @@ def test_install_update_and_rollback(world):
     out = install(world).stdout
     assert f'Installed Dewy toolchain {a}' in out and revision_for('a') in out
     assert pointer(world.prefix) == [a, '']
-    assert launch(world.prefix, '--version', env=world.env).stdout == 'dewy-core fake a\n'
-    assert launch(world.prefix, '--version', name='dewy-core', env=world.env).stdout == 'dewy-core fake a\n'
+    assert launch(world.prefix, '--version', env=world.env).stdout == f'{a}\n'
+    assert launch(world.prefix, '--version', name='dewy-core', env=world.env).stdout == f'{a}\n'
+    core = world.prefix / 'toolchains' / a / 'bin' / 'dewy-core'
+    assert subprocess.check_output([core, '--version'], text=True) == 'dewy-core fake a\n'
     # Ordinary arguments reach the versioned compiler unchanged.
     assert launch(world.prefix, 'run', 'my program.dewy', env=world.env).stdout == 'fake a ran: run my program.dewy\n'
     assert launch(world.prefix, '--print-lib', env=world.env).stdout.strip() == str(world.prefix / 'toolchains' / a / 'lib')
@@ -293,13 +315,13 @@ def test_install_update_and_rollback(world):
     world.releases.point(b)
     launch(world.prefix, 'update', env=world.env)
     assert pointer(world.prefix) == [b, a]
-    assert launch(world.prefix, '--version', env=world.env).stdout == 'dewy-core fake b\n'
+    assert launch(world.prefix, '--version', env=world.env).stdout == f'{b}\n'
     assert 'up to date' in launch(world.prefix, 'update', env=world.env).stdout
     assert pointer(world.prefix) == [b, a]
 
     assert f'Rolled back to {a}' in launch(world.prefix, 'rollback', env=world.env).stdout
     assert pointer(world.prefix) == [a, b]
-    assert launch(world.prefix, '--version', env=world.env).stdout == 'dewy-core fake a\n'
+    assert launch(world.prefix, '--version', env=world.env).stdout == f'{a}\n'
     launch(world.prefix, 'rollback', name='dewy-core', env=world.env)
     assert pointer(world.prefix) == [b, a]
 
@@ -313,6 +335,76 @@ def test_install_update_and_rollback(world):
     assert launch(world.prefix, 'rollback', env=world.env).returncode == 0
     # The stored updater is the verified installer of the release.
     assert sha256(world.prefix / 'libexec/dewy-install.sh') == sha256(ROOT / 'install.sh')
+
+
+@posix_only
+def test_version_requires_an_active_toolchain(world):
+    a = world.releases.publish('a')
+    world.releases.point(a)
+    install(world)
+    (world.prefix / 'toolchains/current').unlink()
+    for query in ('version', '--version'):
+        result = launch(world.prefix, query, env=world.env, check=False)
+        assert result.returncode == 1 and not result.stdout
+        assert 'no Dewy toolchain is active' in result.stderr
+
+
+@posix_only
+@pytest.mark.parametrize('unavailable', ['channel', 'installer'])
+def test_offline_update_keeps_active_toolchain(world, unavailable):
+    a = world.releases.publish('a')
+    world.releases.point(a)
+    install(world)
+    before = snapshot(world.prefix)
+    b = world.releases.publish('b')
+    world.releases.point(b)
+    if unavailable == 'channel':
+        world.releases.channel.unlink()
+    else:
+        (world.releases.root / b / 'install.sh').unlink()
+    result = launch(world.prefix, 'update', env=world.env, check=False)
+    assert result.returncode == 1
+    assert result.stderr.count('using the current installer') == 1
+    assert result.stderr.splitlines().count(RECOVERY_SH) == 1
+    assert snapshot(world.prefix) == before
+
+
+@posix_only
+def test_update_recovers_if_installer_download_fails_once(world):
+    a = world.releases.publish('a')
+    world.releases.point(a)
+    install(world)
+    b = world.releases.publish('b')
+    world.releases.point(b)
+    marker = world.tmp / 'refresh-attempted'
+    env = wrap_curl(world, '''case "$url" in
+    */install.sh)
+        if [ ! -e "$REFRESH_ATTEMPTED" ]; then
+            touch "$REFRESH_ATTEMPTED"
+            exit 1
+        fi ;;
+esac''', REFRESH_ATTEMPTED=str(marker))
+    result = launch(world.prefix, 'update', env=env)
+    assert result.stderr.count('using the current installer') == 1
+    assert marker.is_file()
+    assert pointer(world.prefix) == [b, a]
+
+
+@posix_only
+def test_update_rejects_unverified_installer(world):
+    a = world.releases.publish('a')
+    world.releases.point(a)
+    install(world)
+    b = world.releases.publish('b')
+    world.releases.point(b)
+    installer = world.releases.root / b / 'install.sh'
+    installer.write_text('#!/usr/bin/env bash\necho "unverified installer ran"\n')
+    before = snapshot(world.prefix)
+    result = launch(world.prefix, 'update', env=world.env, check=False)
+    assert result.returncode == 1 and 'checksum mismatch for install.sh' in result.stderr
+    assert 'unverified installer ran' not in result.stdout
+    assert result.stderr.splitlines().count(RECOVERY_SH) == 1
+    assert snapshot(world.prefix) == before
 
 
 @posix_only
@@ -358,9 +450,10 @@ def test_rejects_defective_release(world, defect):
     result = install(world, check=False)
     assert result.returncode != 0, result.stdout
     assert 'nothing was changed' in result.stderr or 'contains' in result.stderr or 'readable' in result.stderr, result.stderr
+    assert result.stderr.splitlines().count(RECOVERY_SH) == 1
     assert snapshot(world.home) == before
     assert not (world.tmp / 'escaped').exists() and not (world.home / 'escaped').exists()
-    assert launch(world.prefix, '--version', env=world.env).stdout == 'dewy-core fake a\n'
+    assert launch(world.prefix, '--version', env=world.env).stdout == f'{a}\n'
 
 
 CHANNELS = {
@@ -433,7 +526,7 @@ def test_interrupted_download_keeps_previous_toolchain(world):
         assert server.stalled.wait(60)
         kill_group(process)
         assert pointer(world.prefix) == [a, '']
-        assert launch(world.prefix, '--version', env=env).stdout == 'dewy-core fake a\n'
+        assert launch(world.prefix, '--version', env=env).stdout == f'{a}\n'
         assert (world.prefix / 'toolchains/.lock').is_dir()  # left by the killed installer
         server.stall.clear()
         install(world, env=env)  # recovers the stale lock and staging directory
@@ -460,7 +553,7 @@ def test_interrupted_smoke_test_keeps_previous_toolchain(world):
     kill_group(process)
     assert pointer(world.prefix) == [a, '']
     assert toolchains(world.prefix) == [a]
-    assert launch(world.prefix, '--version', env=world.env).stdout == 'dewy-core fake a\n'
+    assert launch(world.prefix, '--version', env=world.env).stdout == f'{a}\n'
 
 
 @posix_only
@@ -484,7 +577,7 @@ def test_interruption_at_any_point_leaves_a_working_toolchain(world):
         kill_group(process)
         assert pointer(world.prefix)[0] in (a, b)
         version = launch(world.prefix, '--version', env=world.env).stdout
-        assert version in ('dewy-core fake a\n', 'dewy-core fake b\n')
+        assert version in (f'{a}\n', f'{b}\n')
         if pointer(world.prefix)[0] == b:
             launch(world.prefix, 'rollback', env=world.env)
     install(world)
@@ -526,7 +619,7 @@ def test_prefix_with_spaces_and_quotes(world):
     env = dict(world.env, SHELL='/usr/bin/zsh')
     install(world, '--prefix', str(prefix), env=env)
     assert pointer(prefix) == [a, '']
-    assert launch(prefix, '--version', env=env).stdout == 'dewy-core fake a\n'
+    assert launch(prefix, '--version', env=env).stdout == f'{a}\n'
     assert launch(prefix, 'rollback', env=env, check=False).returncode != 0
     for rc in ('.zshrc', '.zprofile'):
         shown = subprocess.run(['sh', '-c', '. "$1"; printf %s "$PATH"', 'sh', str(world.home / rc)],
@@ -584,7 +677,7 @@ def test_legacy_installation_is_preserved(world):
          '. "$HOME/.bashrc"; . "$HOME/.bashrc"; command -v dewy; command -v udewy; dewy --version; udewy; echo "udewy $?"'],
         env=dict(world.env, PATH='/usr/bin:/bin'), capture_output=True, text=True, timeout=60)
     lines = shell.stdout.splitlines()
-    assert lines[:3] == [str(world.prefix / 'bin/dewy'), str(world.prefix / 'bin/udewy'), 'dewy-core fake a']
+    assert lines[:3] == [str(world.prefix / 'bin/dewy'), str(world.prefix / 'bin/udewy'), a]
     assert lines[3] == 'udewy 1'
     assert 'retired' in shell.stderr and str(legacy / 'udewy') in shell.stderr
     assert subprocess.run([str(legacy / 'udewy')], capture_output=True, text=True).stdout == 'legacy udewy\n'
@@ -605,6 +698,37 @@ def real_archive(toolchain: Path):
         else:
             path.write_bytes(b'other platform\n')
     return make
+
+
+@posix_only
+@pytest.mark.parametrize('explicit', [False, True], ids=['channel', 'release'])
+def test_update_uses_the_target_installer(world, real_toolchain, explicit):
+    a = world.releases.publish('real a', archive=real_archive(real_toolchain))
+    b = world.releases.publish('real b', archive=real_archive(real_toolchain))
+    world.releases.point(a)
+    install(world, '--no-modify-path')
+    updater = world.prefix / 'libexec/dewy-install.sh'
+    break_smoke(updater)
+    env = world.env
+    if not explicit:
+        world.releases.point(b)
+        # The updater is fetched before locking and the new process uses the same manifest.
+        env = wrap_curl(world, '''case "$url" in
+    */install.sh)
+        if [ -e "$TOOLCHAIN_LOCK" ]; then exit 1; fi
+        "$REAL_CURL" "$@" && rm "$CHANNEL_FILE"
+        exit $? ;;
+esac''', TOOLCHAIN_LOCK=str(world.prefix / 'toolchains/.lock'), CHANNEL_FILE=str(world.releases.channel))
+    options = ('--release', b) if explicit else ()
+    result = launch(world.prefix, 'update', *options, env=env)
+    assert 'using the current installer' not in result.stderr
+    if not explicit:
+        assert not world.releases.channel.exists()
+    assert pointer(world.prefix) == [b, a]
+    assert sha256(updater) == sha256(world.releases.root / b / 'install.sh')
+    assert launch(world.prefix, 'version', env=world.env).stdout == f'{b}\n'
+    launch(world.prefix, 'rollback', env=world.env)
+    assert launch(world.prefix, '--version', env=world.env).stdout == f'{a}\n'
 
 
 @pytest.mark.nightly
@@ -632,7 +756,7 @@ def test_real_toolchain_over_http(world, real_toolchain):
         assert pointer(world.prefix) == [b, a]
         launch(world.prefix, 'rollback', env=env)
         assert pointer(world.prefix) == [a, b]
-        assert launch(world.prefix, '--version', env=clean).stdout.startswith('dewy-core ')
+        assert launch(world.prefix, '--version', env=clean).stdout == f'{a}\n'
     finally:
         server.close()
 
@@ -703,8 +827,23 @@ def test_powershell_install_update_and_rollback(ps_world, real_toolchain, shell,
 
     b = releases.publish('real b', archive=real_archive(real_toolchain))
     releases.point(b)
+    updater = prefix / 'libexec/dewy-install.ps1'
+    target_installer = releases.root / b / 'install.ps1'
+    target_source = target_installer.read_bytes()
+    target_installer.unlink()
+    before = snapshot(prefix)
+    offline = cmd(prefix, 'update', env=env, check=False)
+    assert offline.returncode == 1
+    assert offline.stdout.count('using the current installer') == 1
+    assert offline.stderr.splitlines().count(RECOVERY_PS) == 1
+    assert snapshot(prefix) == before
+    target_installer.write_bytes(target_source)
+    break_smoke(updater)
     cmd(prefix, 'update', env=env)
     assert pointer(prefix) == [b, a]
+    assert sha256(updater) == sha256(target_installer)
+    for query in ('version', '--version'):
+        assert cmd(prefix, query, env=env).stdout == f'{b}\n'
     cmd(prefix, 'rollback', env=env)
     assert pointer(prefix) == [a, b]
     c = releases.publish('real c', archive=real_archive(real_toolchain))
@@ -728,6 +867,7 @@ def test_powershell_rejects_defective_release(ps_world, real_toolchain, defect):
         fake_archive(releases.root / b / f'dewy-core-{HOST}.tar.gz', HOST, revision_for('b'), 'tampered')
     result = powershell(shell, '-Prefix', str(prefix), '-NoModifyPath', env=env, check=False)
     assert result.returncode != 0
+    assert result.stderr.splitlines().count(RECOVERY_PS) == 1
     assert {k: v for k, v in snapshot(prefix).items() if not k.endswith('.lock')} == \
         {k: v for k, v in before.items() if not k.endswith('.lock')}
     assert pointer(prefix) == [a, '']
@@ -754,7 +894,7 @@ def test_powershell_interrupted_download(ps_world, real_toolchain):
         process.kill()
         process.wait(30)
         assert pointer(prefix) == [a, '']
-        assert cmd(prefix, '--version', env=env).stdout.startswith('dewy-core ')
+        assert cmd(prefix, '--version', env=env).stdout == f'{a}\n'
         server.stall.clear()
         powershell(shell, '-Prefix', str(prefix), '-NoModifyPath', env=env)
         assert pointer(prefix) == [b, a]

@@ -34,11 +34,14 @@ main() {
     name_re='^[A-Za-z0-9][A-Za-z0-9._-]*$'
     staging=''
     lock_dir=''
+    fetch_dir=''
+    recover=1
     trap cleanup EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM HUP
 
     local release='' prefix='' modify_path=1 action=install
+    local original_args=("$@")
     while [ $# -gt 0 ]; do
         case $1 in
             --release) [ $# -ge 2 ] || fail '--release needs a release tag'; release=$2; shift 2 ;;
@@ -46,8 +49,8 @@ main() {
             --prefix) [ $# -ge 2 ] || fail '--prefix needs a directory'; prefix=$2; shift 2 ;;
             --prefix=*) prefix=${1#*=}; shift ;;
             --no-modify-path) modify_path=0; shift ;;
-            --update) action=update; modify_path=0; shift ;;
-            --rollback) action=rollback; shift ;;
+            --update) action=update; modify_path=0; recover=1; shift ;;
+            --rollback) action=rollback; recover=0; shift ;;
             -h|--help) usage; return 0 ;;
             *) fail "unknown option: $1 (see --help)" ;;
         esac
@@ -83,6 +86,44 @@ main() {
         return 0
     fi
 
+    # Resolve and refresh before taking the lock. Keep the running copy in a
+    # private directory outside the startup cleanup's reach.
+    local tag short archive_sum installer_sum running_sum='' installer='' metadata guard=''
+    if [ "$action" = update ]; then
+        guard=${DEWY_INSTALL_REEXEC:-}
+        if [ -f "${BASH_SOURCE[0]:-}" ]; then
+            running_sum=$(sha256_of "${BASH_SOURCE[0]}" 2>/dev/null) || running_sum=''
+        fi
+    fi
+    if [ -n "$guard" ]; then
+        [ "$running_sum" = "$guard" ] || fail 'could not verify the running update installer; nothing was changed'
+        installer=${BASH_SOURCE[0]}
+        # Reuse the manifest that selected this script, even if the channel moved.
+        metadata="$(dirname "$installer")/release.txt"
+    else
+        fetch_dir=$(mktemp -d "${TMPDIR:-/tmp}/dewy-install.XXXXXX")
+        metadata="$fetch_dir/release.txt"
+    fi
+    asset="dewy-core-${platform}.tar.gz"
+    resolve_release "$release" "$metadata"
+    local installer_url="${download_url}/${tag}/install.sh"
+    if [ "$action" = update ]; then
+        if [ -n "$guard" ]; then
+            [ "$installer_sum" = "$guard" ] || fail 'the running update installer does not match the release; nothing was changed'
+        elif fetch "$installer_url" "$fetch_dir/install.sh" 2>/dev/null; then
+            installer="$fetch_dir/install.sh"
+            check_sum "$installer" "$installer_sum" install.sh
+            if [ "$running_sum" != "$installer_sum" ]; then
+                # The parent only cleans up the download and forwards the result.
+                recover=0
+                (DEWY_INSTALL_REEXEC=$installer_sum exec "$BASH" "$installer" "${original_args[@]}")
+                return
+            fi
+        else
+            warn_refresh
+        fi
+    fi
+
     mkdir -p -- "$toolchains" "$prefix/bin" "$prefix/libexec"
     acquire_lock
     # Leftovers from interrupted runs; the lock guarantees none is active.
@@ -92,31 +133,16 @@ main() {
     staging=$(mktemp -d "$toolchains/.staging.XXXXXX")
     read_pointer
 
-    # 1. Resolve the release and the digests that every download must match.
-    local tag archive_sum installer_sum
-    asset="dewy-core-${platform}.tar.gz"
-    if [ -n "$release" ]; then
-        tag=$release
-        download "${download_url}/${tag}/SHA256SUMS" "$staging/SHA256SUMS"
-        archive_sum=$(sums_lookup "$staging/SHA256SUMS" "$asset") || fail "SHA256SUMS of $tag does not list $asset"
-        installer_sum=$(sums_lookup "$staging/SHA256SUMS" install.sh) || fail "SHA256SUMS of $tag does not list install.sh"
-    else
-        download "$channel_url" "$staging/channel.txt"
-        parse_channel "$staging/channel.txt" || fail "invalid toolchain channel at $channel_url"
-        tag=$channel_tag
-        archive_sum=$(channel_lookup "$asset") || fail "the channel lists no $asset"
-        installer_sum=$(channel_lookup install.sh) || fail 'the channel lists no install.sh'
-    fi
-    [[ $tag =~ $tag_re ]] || fail "not a Dewy toolchain release tag: $tag"
-    local short=${BASH_REMATCH[1]}
-
     if [ "$action" = update ] && [ "$tag" = "$current_name" ]; then
         info "Dewy is up to date ($tag)."
     fi
 
-    # 2. Download and verify the installer this release ships (the updater).
-    download "${download_url}/${tag}/install.sh" "$staging/install.sh"
-    check_sum "$staging/install.sh" "$installer_sum" install.sh
+    # Fresh installs and update fallbacks use the regular installer download.
+    if [ -z "$installer" ]; then
+        installer="$staging/install.sh"
+        download "$installer_url" "$installer"
+        check_sum "$installer" "$installer_sum" install.sh
+    fi
 
     # 3. Reuse a verified toolchain, or download, verify, extract and test one.
     local target="$toolchains/$tag"
@@ -139,12 +165,13 @@ main() {
     write_launcher dewy
     write_launcher dewy-core
     write_udewy_shim
-    replace "$staging/install.sh" "$prefix/libexec/dewy-install.sh" 755
+    replace "$installer" "$prefix/libexec/dewy-install.sh" 755
 
     # 5. Activate: one rename switches the toolchain. Keep one previous one.
     local previous=$current_name
     if [ "$previous" = "$tag" ]; then previous=$previous_name; fi
     write_pointer "$tag" "$previous"
+    recover=0
     current_name=$tag
     previous_name=$previous
     prune
@@ -188,10 +215,16 @@ EOF
 
 info() { printf '%s\n' "$*"; }
 fail() { printf 'dewy install: %s\n' "$*" >&2; exit 1; }
+warn_refresh() { printf '%s\n' 'dewy install: warning: could not download the update installer; using the current installer' >&2; }
 
 cleanup() {
+    local status=$?
+    if [ "$status" -ne 0 ] && [ "$recover" = 1 ]; then
+        printf '%s\n' 'Reinstall with: curl -fsSL https://dewy-lang.org/install.sh | bash' >&2
+    fi
     if [ -n "$staging" ]; then rm -rf -- "$staging"; fi
     if [ -n "$lock_dir" ]; then rm -rf -- "$lock_dir"; fi
+    if [ -n "$fetch_dir" ]; then rm -rf -- "$fetch_dir"; fi
 }
 
 detect_platform() {
@@ -233,10 +266,36 @@ sha256_of() {
     printf '%s\n' "${line%% *}"
 }
 
-download() {
+fetch() {
     curl --fail --silent --show-error --location --proto-redir '=https' \
-        --connect-timeout 30 --retry 2 --output "$2" "$1" < /dev/null \
-        || fail "could not download $1"
+        --connect-timeout 30 --retry 2 --output "$2" "$1" < /dev/null
+}
+
+download() {
+    fetch "$1" "$2" || fail "could not download $1"
+}
+
+resolve_release() {
+    local release=$1 metadata=$2 url=$channel_url
+    if [ -z "$guard" ]; then
+        if [ -n "$release" ]; then url="${download_url}/${release}/SHA256SUMS"; fi
+        if ! fetch "$url" "$metadata"; then
+            if [ "$action" = update ]; then warn_refresh; fi
+            fail "could not download $url"
+        fi
+    fi
+    if [ -n "$release" ]; then
+        tag=$release
+        archive_sum=$(sums_lookup "$metadata" "$asset") || fail "SHA256SUMS of $tag does not list $asset"
+        installer_sum=$(sums_lookup "$metadata" install.sh) || fail "SHA256SUMS of $tag does not list install.sh"
+    else
+        parse_channel "$metadata" || fail "invalid toolchain channel at $channel_url"
+        tag=$channel_tag
+        archive_sum=$(channel_lookup "$asset") || fail "the channel lists no $asset"
+        installer_sum=$(channel_lookup install.sh) || fail 'the channel lists no install.sh'
+    fi
+    [[ $tag =~ $tag_re ]] || fail "not a Dewy toolchain release tag: $tag"
+    short=${BASH_REMATCH[1]}
 }
 
 check_sum() {
@@ -482,6 +541,9 @@ case \$current in
     ''|.*|*/*)
         echo "$1: no Dewy toolchain is active in \$root; run the installer again" >&2
         exit 1 ;;
+esac
+case \${1-} in
+    version|--version) printf '%s\\n' "\$current"; exit 0 ;;
 esac
 exec "\$root/toolchains/\$current/bin/dewy-core" "\$@"
 EOF
