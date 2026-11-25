@@ -327,7 +327,7 @@ parse_simple_stmt=():>int64=>$unsafe {
     let pos=tp[t].pos
     let k=tp[t].kind
     # (a struct's field named by a keyword: `build: Rect`, `when: f64`)
-    if struct_body not=? "" and k not=? 'ident' and is_keyword_tok(k) and k not=? 'kw_pass' and (pkn(1) =? 'colon' or pkn(1) =? 'assign') {keyword_name_error(ti)}
+    if (struct_body as array<uint8>).length not=? 0 and k not=? 'ident' and is_keyword_tok(k) and k not=? 'kw_pass' and (pkn(1) =? 'colon' or pkn(1) =? 'assign') {keyword_name_error(ti)}
     if k not=? 'ident' {
         if k =? 'kw_return' {
             ti=t + 1

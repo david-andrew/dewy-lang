@@ -17,6 +17,7 @@ InlineWord:type=int64<overflow='wrap'>
 let fast_has_copy:array<bool>=[]
 let fast_has_loop:array<bool>=[]
 let fast_cands:array<IrFn>=[]
+let fast_cand_len:array<int32>=[]
 let fast_cand_by_index:array<int64>=[]
 let fast_cand_state:array<int64>=[]
 let fast_cand_is_leaf:array<bool>=[]
@@ -191,6 +192,7 @@ fast_inline_prepare=(fs:array<IrFn>):>void=>$unsafe {
     fast_has_copy=[]
     fast_has_loop=[]
     fast_cands=[]
+    fast_cand_len=[]
     fast_cand_state=[]
     fast_cand_is_leaf=[]
     let fsp=fs.ptr
@@ -213,11 +215,29 @@ fast_inline_prepare=(fs:array<IrFn>):>void=>$unsafe {
         let cbi=fast_cand_by_index.ptr
         loop k in [0..nfs) {
             let fp=fsp + k
-            if fp[0].cabi or fp[0].noinline or (fp[0].export_name as array<uint8>).length >? 0 or fp[0].code.length >? 256 {continue}
+            let ncode=fp[0].code.length
+            if fp[0].cabi or fp[0].noinline or (fp[0].export_name as array<uint8>).length >? 0 or ncode >? 256 {continue}
+            let plain=fast_plain_kind_ptr(fp)
+            let moves=fast_moves_alone_ptr(fp plain)
+            let kind=if moves {3} else {plain}
+            if kind =? 0 {continue}
             let fi=fp[0].fn_index
             cbi[fi]=fast_cands.length
-            fast_cands.push(fp[0])
-            fast_cand_state.push(-1)
+            fast_cand_len.push(int32<overflow='wrap'>(ncode))
+            if kind not=? 2 {
+                let j=fast_fns.length
+                fast_fns.push(fp[0])
+                fast_loop_only.push(kind =? 3)
+                fast_moves.push(moves)
+                fast_has_copy.push(fast_last_has_copy)
+                fast_has_loop.push(fast_last_has_loop)
+                fast_cand_is_leaf.push(true)
+                fast_cands.push(IrFn())
+                fast_cand_state.push(j + 1)
+            } else {
+                fast_cands.push(fp[0])
+                fast_cand_state.push(-1)
+            }
         }
     } else {
         if fast_cand_by_index.length >? 0 {fast_cand_by_index.clear()}
@@ -257,6 +277,7 @@ fast_resolve=(fi:InlineWord allow_wrapper:bool):>InlineWord=>$unsafe {
         return -1
     }
     let f=fp[0]
+    fast_cands.ptr[ci]=IrFn()
     let leaf:InlineWord=-1
     let equality=false
     let cp=f.code.ptr
@@ -486,7 +507,7 @@ fast_inline_target=(ins:Ins in_loop:bool):>InlineWord=>$unsafe {
     if not in_loop and not fast_expanding_wrapper and ir.code.length >? 48 {
         if fi <? 0 or fi >=? fast_cand_by_index.length {return -1}
         let ci=fast_cand_by_index.ptr[fi]
-        if ci <? 0 or fast_cands.ptr[ci].code.length >? 12 {return -1}
+        if ci <? 0 or fast_cand_len.ptr[ci] >? 12 {return -1}
     }
     let j=fast_resolve(fi not fast_expanding_wrapper)
     if j <? 0 or fast_fns.ptr[j].fn_index =? ir.fn_index or int64(ins.b) not=? fast_fns.ptr[j].nparams {return -1}
@@ -546,7 +567,7 @@ fast_inline_into=():>void=>$unsafe {
             if not exp_wrap and not small_caller and sloop =? 0 {
                 if cfi <? 0 or cfi >=? fast_cand_by_index.length {p+=1; continue}
                 let ci=fast_cand_by_index.ptr[cfi]
-                if ci <? 0 or fast_cands.ptr[ci].code.length >? 12 {p+=1; continue}
+                if ci <? 0 or fast_cand_len.ptr[ci] >? 12 {p+=1; continue}
             }
             let j=fast_resolve(cfi not exp_wrap)
             if j <? 0 or fast_fns.ptr[j].fn_index =? ir.fn_index or int64(p[0].b) not=? fast_fns.ptr[j].nparams {p+=1; continue}

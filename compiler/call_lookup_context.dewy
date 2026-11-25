@@ -126,9 +126,9 @@ ci=(slot:LookupWord s:string):>LookupWord=>$unsafe {
 # declares it, or -1 for any other call. O(1).
 path_literal_module=(n:LookupWord callee:LookupWord args:array<int64>):>LookupWord=>$unsafe {
     if LookupWord(nodes.ptr[callee].name) not=? ci(43 "p") or args.length not=? 1 or not dewy_at(nodes.ptr[n].pos) {return -1}
-    let src=files.ptr[pos_file(nodes.ptr[callee].pos)].src as array<uint8>
+    let src_s=files.ptr[pos_file(nodes.ptr[callee].pos)].src
     let off=LookupWord(pos_off(nodes.ptr[callee].pos)) + 1
-    if off >=? src.length or (src[off] not=? 34 and src[off] not=? 39) {return -1}
+    if off >=? (src_s as array<uint8>).length or ((src_s as array<uint8>).ptr[off] not=? 34 and (src_s as array<uint8>).ptr[off] not=? 39) {return -1}
     let name=LookupWord(nodes.ptr[callee].name)
     let s=prelude.get(int64(name)) ?? dewy_prelude_lookup(name)
     if s =? 0 or syms.ptr[s].decl =? 0 {return -1}

@@ -316,6 +316,14 @@ ref_gen_check=(n:int64 self:int64 args:array<int64> arg_types:array<int64>):>voi
 # Each refined argument of a call is checked against the arguments as passed;
 # mutable arguments are read through their places once, before the first check.
 refine_gen_args=(args:array<int64> values:array<int64> offset:int64 mutmask:int64=0):>void=>$unsafe {
+    let has_ref=false
+    let ap=args.ptr
+    let na=args.length
+    loop k in [0..na) {
+        let nd=nodes.ptr + ap[k]
+        if nd[0].kind =? 'conv' and nd[0].aux =? int32(int64(CV.refinement)) {has_ref=true; break}
+    }
+    if not has_ref {return}
     let captured:array<int64>=[]
     let arg_types:array<int64>=[]
     loop arg in args {arg_types.push(ntype(arg))}

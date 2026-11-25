@@ -45,7 +45,8 @@ name_assignable=(nm:AssignmentDeclWord m:AssignmentDeclWord):>bool=>{
     let prev=gok
     if prelude_game_pending or prelude_std_pending {
         let w=name_of(nm)
-        gok=w =? "ui_style" or w =? "hud_style"
+        let wl=(w as array<uint8>).length
+        gok=(wl =? 8 and w =? "ui_style") or (wl =? 9 and w =? "hud_style")
     }
     let s=module_lookup(m nm)
     gok=prev
@@ -59,7 +60,8 @@ var_visible=(nm:AssignmentDeclWord):>bool=>{
     let prev=gok
     if prelude_game_pending or prelude_std_pending {
         let w=name_of(nm)
-        gok=w =? "ui_style" or w =? "hud_style"
+        let wl=(w as array<uint8>).length
+        gok=(wl =? 8 and w =? "ui_style") or (wl =? 9 and w =? "hud_style")
     }
     let s=lookup(nm)
     gok=prev

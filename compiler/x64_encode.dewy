@@ -763,8 +763,9 @@ rel_fixup_lea=(r:XWord kind:XWord off:XWord):>void=>$unsafe {
 
 let x_hdr:ptr<XWord>=$unsafe (uint64(0) as ptr<XWord>)
 x_encode_begin=(est:XWord=64):>void=>$unsafe {
-    let h=(x_code as ptr<ptr<XWord>>)[0]
     let need=if est >? 64 {est} else {64}
+    let h=x_hdr
+    if h =? (uint64(0) as ptr<XWord>) {h=(x_code as ptr<ptr<XWord>>)[0]}
     if h =? (uint64(0) as ptr<XWord>) or h[0] not=? 1 or h[1] + need >? h[2] {
         let old=XWord(x_code[0].length)
         x_code[0].reserve(old + need)

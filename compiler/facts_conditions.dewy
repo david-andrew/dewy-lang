@@ -321,13 +321,14 @@ fact_implied=(s:FactState e:ResultEvidence part:ConditionWord):>bool=>{
     false
 }
 # Whether leaf condition v tests a value implication e's antecedent reads.
-fact_implication_reads=(e:ResultEvidence v:ConditionWord):>bool=>{
-    let r=fact_implications[e.base - 1]
-    let t=fact_terms[v]
-    loop x in [v t.a t.b] {
-        if x not=? 0 and (r.k & 1 =? 0 and r.a0 =? x or r.k & 2 =? 0 and r.b0 =? x) {return true}
-    }
-    false
+fact_implication_reads=(e:ResultEvidence v:ConditionWord):>bool=>$unsafe {
+    let r=fact_implications.ptr[e.base - 1]
+    let t=fact_terms.ptr[v]
+    let k0=r.k & 1 =? 0
+    let k1=r.k & 2 =? 0
+    if v not=? 0 and ((k0 and r.a0 =? v) or (k1 and r.b0 =? v)) {return true}
+    if t.a not=? 0 and ((k0 and r.a0 =? t.a) or (k1 and r.b0 =? t.a)) {return true}
+    t.b not=? 0 and ((k0 and r.a0 =? t.b) or (k1 and r.b0 =? t.b))
 }
 # Assume implication e's consequent in s.
 fact_imply=(@s:FactState e:ResultEvidence):>void=>{

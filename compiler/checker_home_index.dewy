@@ -130,8 +130,7 @@ module_lookup_now=(m:HomeIndexWord name:HomeIndexWord):>HomeIndexWord=>$unsafe {
     }
     if prelude_std_pending or prelude_game_pending {
         let nm_s=names.ptr[name]
-        let nb=nm_s as array<uint8>
-        let dunder=nb.length >=? 2 and nb[0] =? b'_' and nb[1] =? b'_'
+        let dunder=(nm_s as array<uint8>).length >=? 2 and (nm_s as array<uint8>).ptr[0] =? b'_' and (nm_s as array<uint8>).ptr[1] =? b'_'
         if not game_lookup_ok and not dunder {return 0}
         if not game_lookup_skip(name) {
             if prelude_std_pending {

@@ -3332,16 +3332,25 @@ lg_classify_call=(f:LGWord):>int8=>$unsafe {
     let res:int8=int8(-1)
     if d not=? 0 {
         let name=name_of(LGWord(nodes.ptr[d].name))
-        if name =? "__floor_mod" or name =? "__floor_mod_pow2" {
-            let p=files.ptr[pos_file(nodes.ptr[d].pos)].path
-            if p =? "{lib_dir}/std/date.jo" or p =? "{lib_dir}/math_int.jo" {res=int8(1)}
-        } else if name =? "__floor_div" or name =? "__floor_div_pow2" {
-            let p=files.ptr[pos_file(nodes.ptr[d].pos)].path
-            if p =? "{lib_dir}/std/date.jo" or p =? "{lib_dir}/math_int.jo" {res=int8(2)}
-        } else if name =? "__dewy_read_u64" or name =? "__dewy_read_u32" or name =? "__dewy_read_u16" {
-            if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/dewy.jo" {res=int8(3)}
-        } else if name =? "swap" {
-            if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/array.jo" {res=int8(4)}
+        let nlen=(name as array<uint8>).length
+        if nlen >=? 4 {
+            let c0=(name as array<uint8>).ptr[0]
+            if c0 =? 95 and (name as array<uint8>).ptr[1] =? 95 {
+                let c2=(name as array<uint8>).ptr[2]
+                if c2 =? 102 {
+                    if name =? "__floor_mod" or name =? "__floor_mod_pow2" {
+                        let p=files.ptr[pos_file(nodes.ptr[d].pos)].path
+                        if p =? "{lib_dir}/std/date.jo" or p =? "{lib_dir}/math_int.jo" {res=int8(1)}
+                    } else if name =? "__floor_div" or name =? "__floor_div_pow2" {
+                        let p=files.ptr[pos_file(nodes.ptr[d].pos)].path
+                        if p =? "{lib_dir}/std/date.jo" or p =? "{lib_dir}/math_int.jo" {res=int8(2)}
+                    }
+                } else if c2 =? 100 and (name =? "__dewy_read_u64" or name =? "__dewy_read_u32" or name =? "__dewy_read_u16") {
+                    if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/dewy.jo" {res=int8(3)}
+                }
+            } else if c0 =? 115 and nlen =? 4 and name =? "swap" {
+                if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/array.jo" {res=int8(4)}
+            }
         }
     }
     lg_call_kind.ptr[f]=res

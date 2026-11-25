@@ -361,6 +361,18 @@ fact_route_values=(@s:FactState route:FactRoute):>array<int64>=>{
 fact_store_route=(@s:FactState route:FactRoute value0:RouteWord at:RouteWord bounds:bool=false):>void=>{
     let p=fact_place(route.root)
     if p.declaration =? 0 {fact_forget(@s at 'write' not fact_route_raw(route)); return}
+    if route.selectors.length =? 0 and not bounds {
+        let old:RouteWord=if route.root not=? 0 {fact_read(@s route.root)} else {0}
+        if old not=? 0 and s.conditional.length >? 0 {result_replaced(old at @s)}
+        let value=value0
+        if ref_self_active {
+            let held=refine_storage(route.root ntype(route.root))
+            if ref_self_contract(held) {ref_assume(held value [] @s)}
+        }
+        if fact_exposed(p) {fact_forget(@s at 'write' false p)}
+        fact_rebind(@s p value at old)
+        return
+    }
     let values=fact_route_values(@s route)
     if bounds and fact_speculating =? 0 and fact_probe_on {fact_probe_route(@s route values)}
     else if bounds and fact_speculating =? 0 and (fact_policy =? 'RequireStatic' or fact_query) {fact_route_bounds(@s route values)}

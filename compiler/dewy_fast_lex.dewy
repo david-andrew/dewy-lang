@@ -127,7 +127,7 @@ dn_lex_newline=(s:string a:int64 b:int64):>bool=>find_byte(__str_slice(s a b) 10
 dn_lex_slice=(s:string a:int64 b:int64):>string=>__str_slice(s a b)
 
 # Materialize text only when projection needs a literal payload.
-dn_payload=(token:DewyLexeme):>string=>{
+dn_payload=(token:DewyLexeme):>string=>$unsafe {
     if token.symbol not=? 'none' {return dn_token_text(token.symbol)}
     if token.name not=? 0 {return name_of(FastLexWord(token.name))}
     let source=files[dc_parser.file].src
@@ -135,7 +135,7 @@ dn_payload=(token:DewyLexeme):>string=>{
     if token.kind =? 'metatag' {return __str_slice(source first + 1 token.stop)}
     if token.kind =? 'integer' {return "{__str_slice(source first first + 2)}:{__str_slice(source first + 2 token.stop)}"}
     if token.kind =? 'based_string' {return "{__str_slice(source first first + 2)}:{__str_slice(source first + 3 token.stop - 1)}"}
-    let bytes=source as array<uint8>
-    if (token.kind =? 'source_integer' or token.kind =? 'source_real') and first + 1 <? token.stop and bytes[first] =? 48 and bytes[first + 1] =? 100 {first+=2}
+    let bp=(source as array<uint8>).ptr
+    if (token.kind =? 'source_integer' or token.kind =? 'source_real') and first + 1 <? token.stop and bp[first] =? 48 and bp[first + 1] =? 100 {first+=2}
     __str_slice(source first token.stop)
 }

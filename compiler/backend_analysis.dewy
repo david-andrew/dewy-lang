@@ -50,7 +50,80 @@ let x_has_narrow32:bool=false
 let x_has_overflow_pair:bool=false
 let x_has_slot:bool=false
 let x_has_any_call:bool=false
-let ba_tail_dsts:array<int64>=[]
+
+ba_loc_def=(ins:ptr<Ins> d:int64 vl:ptr<IrUsePlan> loc_arr:ptr<int64>):>void=>$unsafe {
+    let op=ins[0].op
+    if op =? 'add' {
+        if x_has_slot {
+            let a=int64(ins[0].a)
+            if loc_arr[a] =? LOC_SLOT {
+                let b=int64(ins[0].b)
+                if loc_arr[b] =? LOC_CONST and vl[a].ndef =? 1 and vl[b].ndef =? 1 {
+                    loc_arr[d]=LOC_SLOT
+                    vslot[d]=vslot[a]
+                    vsoff[d]=BackendWord(vsoff[a]) + BackendWord(vcval[b])
+                }
+            }
+        }
+    } else if op =? 'slot' {
+        x_has_slot=true
+        loc_arr[d]=LOC_SLOT
+        vslot[d]=int64(ins[0].a)
+        vsoff[d]=0
+    } else if op =? 'gaddr' or op =? 'daddr' {
+        loc_arr[d]=LOC_GLOBAL
+        vgoff[d]=ins[0].imm
+        vgkind[d]=if op =? 'gaddr' {1} else {0}
+    } else if op =? 'iconst' {
+        if ins[0].imm >=? -2147483648 and ins[0].imm <=? 2147483647 {
+            loc_arr[d]=LOC_CONST
+            vcval[d]=ins[0].imm
+        }
+    } else if op =? 'fconst' {
+        loc_arr[d]=LOC_FCONST
+        vcval[d]=ins[0].imm
+    }
+}
+
+ba_call_ends=(instructions:ptr<Ins> arguments:ptr<int32> types:ptr<int8> nc:int64 pos:int64 ins:ptr<Ins> plan_starts:bool):>bool=>$unsafe {
+    let nxt=ins + 1
+    let ep=BackendWord(pos) + 1
+    loop ep <? nc and (instructions[ep].op =? 'end' or instructions[ep].op =? 'nop') {ep+=1}
+    if plan_starts and ep <? nc and instructions[ep].op =? 'ret' {
+        let ra=int64(instructions[ep].a)
+        if ra <? 0 or (ins[0].dst >=? 0 and ra =? int64(ins[0].dst)) or int64(types[ra]) =? 3 {return true}
+    } else if plan_starts and ep <? nc and instructions[ep].op =? 'trap' {
+        return true
+    } else if ins[0].dst >=? 0 and nxt[0].op =? 'call' and nxt[0].c =? 1 {
+        let na=BackendWord(int64(nxt[0].a))
+        let nb=int64(nxt[0].b)
+        let dst0=int64(ins[0].dst)
+        loop k in [0..nb) {
+            let v=int64(arguments[na + BackendWord(k)])
+            if v not=? dst0 and int64(types[v]) not=? 3 {return false}
+        }
+        return true
+    }
+    false
+}
+
+ba_cold_tail_scan=(instructions:ptr<Ins> nc:int64 pos:int64 br_d:BackendWord):>bool=>$unsafe {
+    let ob:BackendWord=br_d
+    let is_cold_tail=false
+    let q=pos + 1
+    let qlim=min(nc pos + 65)
+    loop q <? qlim {
+        let qop=instructions[q].op
+        if qop =? 'block' or qop =? 'if_' or qop =? 'loop' {ob+=1}
+        else if qop =? 'end' {
+            ob-=1
+            if ob =? 0 {break}
+        }
+        else if qop =? 'call' and (instructions[q].c =? 1 or instructions[q].c =? 2) {is_cold_tail=true}
+        q+=1
+    }
+    ob =? 0 and is_cold_tail
+}
 
 BackendWord:type=int64<overflow='wrap'>
 BackendI32:type=int32<overflow='wrap'>
@@ -120,7 +193,6 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
     x_has_overflow_pair=false
     x_has_slot=false
     x_has_any_call=false
-    if ba_tail_dsts.length >? 0 {ba_tail_dsts.clear()}
     let nv=ir.vtypes.length
     let nc=ir.code.length
     let np=ir.nparams
@@ -130,16 +202,10 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
     if v_live_storage.length <? nv {ba_grow(nv)}
     let vl=v_live
     let loc_arr=vloc
-    let cval_arr=vcval
-    let slot_arr=vslot
-    let soff_arr=vsoff
-    let gkind_arr=vgkind
-    let goff_arr=vgoff
-    let save_arr=vsave
     if nv >? 0 {
         mem_set(vl as ptr<uint8> 0 nv * size_of<IrUsePlan>)
         mem_set(loc_arr as ptr<uint8> 255 nv * 8)
-        mem_set(save_arr as ptr<uint8> 0 nv)
+        mem_set(vsave as ptr<uint8> 0 nv)
     }
     if call_pos.length >? 0 {call_pos.clear()}
     if call_w.length >? 0 {call_w.clear()}
@@ -152,21 +218,19 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
         ba_bs_p=ba_starts.ptr
         ba_bcap=ba_kinds.length
     }
-    let bk=ba_bk_p
-    let bs=ba_bs_p
-    let bcap:BackendWord=ba_bcap
     let bsp:BackendWord=0
     loop p in [0..np) {
         vl[p].first=0
         vl[p].last=0
         vl[p].ndef=1
     }
+    let cval_init=vcval
     loop v in [0..nk) {
         if int64(types[v]) =? 3 {
             vl[v].ndef=1
             vl[v].last=-1
             loc_arr[v]=LOC_CONST
-            cval_arr[v]=constants[v]
+            cval_init[v]=constants[v]
         }
     }
     let depth:BackendWord=0
@@ -177,7 +241,7 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
     let arguments=ir.args.ptr
     let layouts=ir_operand_layout.ptr
     let features:int64=0
-    let has_slots=ir.slot_size.length >? 0
+    let want_call_w=cold_tails or ra_stat
     let ins=instructions
     loop pos in [0..nc) {
         let pos32=BackendI32(pos)
@@ -242,37 +306,7 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
                 live[0].ndef=nd
                 live[0].weight=BackendWord(live[0].weight) + w
                 if nd =? 1 and mode & IR_LOC_DEF not=? 0 {
-                    let op=ins[0].op
-                    if op =? 'add' {
-                        if x_has_slot {
-                            let a=int64(ins[0].a)
-                            if loc_arr[a] =? LOC_SLOT {
-                                let b=int64(ins[0].b)
-                                if loc_arr[b] =? LOC_CONST and vl[a].ndef =? 1 and vl[b].ndef =? 1 {
-                                    loc_arr[d]=LOC_SLOT
-                                    slot_arr[d]=slot_arr[a]
-                                    soff_arr[d]=BackendWord(soff_arr[a]) + BackendWord(cval_arr[b])
-                                }
-                            }
-                        }
-                    } else if op =? 'slot' {
-                        x_has_slot=true
-                        loc_arr[d]=LOC_SLOT
-                        slot_arr[d]=int64(ins[0].a)
-                        soff_arr[d]=0
-                    } else if op =? 'gaddr' or op =? 'daddr' {
-                        loc_arr[d]=LOC_GLOBAL
-                        goff_arr[d]=ins[0].imm
-                        gkind_arr[d]=if op =? 'gaddr' {1} else {0}
-                    } else if op =? 'iconst' {
-                        if ins[0].imm >=? -2147483648 and ins[0].imm <=? 2147483647 {
-                            loc_arr[d]=LOC_CONST
-                            cval_arr[d]=ins[0].imm
-                        }
-                    } else if op =? 'fconst' {
-                        loc_arr[d]=LOC_FCONST
-                        cval_arr[d]=ins[0].imm
-                    }
+                    ba_loc_def(ins d vl loc_arr)
                 }
             }
         }
@@ -299,45 +333,30 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
                 if is_call {
                     let ends=false
                     if not dbg_on and BackendWord(pos) + 1 <? nc and (op =? 'call' or op =? 'calli' or (op =? 'callc' and ins[0].imm >=? 0)) {
-                        let nxt=ins + 1
-                        let ep=BackendWord(pos) + 1
-                        loop ep <? nc and (instructions[ep].op =? 'end' or instructions[ep].op =? 'nop') {ep+=1}
-                        if plan_starts and ep <? nc and instructions[ep].op =? 'ret' {
-                            let ra=int64(instructions[ep].a)
-                            if ra <? 0 or (ins[0].dst >=? 0 and ra =? int64(ins[0].dst)) or int64(types[ra]) =? 3 {
-                                ends=true
-                            }
-                        } else if plan_starts and ep <? nc and instructions[ep].op =? 'trap' {
-                            ends=true
-                        } else if ins[0].dst >=? 0 and nxt[0].op =? 'call' and nxt[0].c =? 1 {
-                            ends=true
-                            let na=BackendWord(int64(nxt[0].a))
-                            let nb=int64(nxt[0].b)
-                            let dst0=int64(ins[0].dst)
-                            loop k in [0..nb) {
-                                let v=int64(arguments[na + BackendWord(k)])
-                                if v not=? dst0 and int64(types[v]) not=? 3 {ends=false; break}
-                            }
-                        }
+                        ends=ba_call_ends(instructions arguments types nc pos ins plan_starts)
                     }
                     if real_call {x_has_any_call=true}
                     if not ends {
                         call_pos.push(pos)
-                        if op =? 'call' and ins[0].c =? 2 {call_w.push(1)}
-                        else {call_w.push(w)}
+                        if want_call_w {
+                            if op =? 'call' and ins[0].c =? 2 {call_w.push(1)}
+                            else {call_w.push(w)}
+                        }
                     }
                 }
             }
             if mode & IR_BA_CTRL not=? 0 {
                 let op=ins[0].op
+                let bk=ba_bk_p
+                let bs=ba_bs_p
                 if op =? 'block' or op =? 'loop' or op =? 'if_' {
-                    if bsp >=? bcap {
-                        bcap=bcap * 2
-                        ba_kinds.resize(bcap)
-                        ba_starts.resize(bcap)
+                    if bsp >=? ba_bcap {
+                        let nbcap:BackendWord=ba_bcap * 2
+                        ba_kinds.resize(nbcap)
+                        ba_starts.resize(nbcap)
                         ba_bk_p=ba_kinds.ptr
                         ba_bs_p=ba_starts.ptr
-                        ba_bcap=bcap
+                        ba_bcap=nbcap
                         bk=ba_bk_p
                         bs=ba_bs_p
                     }
@@ -386,26 +405,10 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
                         let br_d=BackendWord(instructions[pos - 1].imm)
                         if br_d >=? 1 and br_d <=? 3 and bsp >=? br_d {
                             let tgt=bsp - br_d
-                            if not bk[tgt] and bs[tgt] >? -3 {
-                                let ob:BackendWord=br_d
-                                let is_cold_tail=false
-                                let q=pos + 1
-                                let qlim=min(nc pos + 65)
-                                loop q <? qlim {
-                                    let qop=instructions[q].op
-                                    if qop =? 'block' or qop =? 'if_' or qop =? 'loop' {ob+=1}
-                                    else if qop =? 'end' {
-                                        ob-=1
-                                        if ob =? 0 {break}
-                                    }
-                                    else if qop =? 'call' and (instructions[q].c =? 1 or instructions[q].c =? 2) {is_cold_tail=true}
-                                    q+=1
-                                }
-                                if ob =? 0 and is_cold_tail {
-                                    bs[tgt]=if bs[tgt] =? -2 {-4} else {-3}
-                                    cold_depth+=1
-                                    w=1
-                                }
+                            if not bk[tgt] and bs[tgt] >? -3 and ba_cold_tail_scan(instructions nc pos br_d) {
+                                bs[tgt]=if bs[tgt] =? -2 {-4} else {-3}
+                                cold_depth+=1
+                                w=1
                             }
                         }
                     }
@@ -439,11 +442,6 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
     x_has_narrow32=features & IR_NARROW32 not=? 0
     x_has_overflow_pair=features & IR_OVERFLOW not=? 0
     if features & IR_CHECKED not=? 0 {x_has_any_call=true}
-    else if not x_has_any_call and ba_tail_dsts.length >? 0 {
-        loop di in [0..ba_tail_dsts.length) {
-            if vl[ba_tail_dsts.ptr[di]].nuse not=? 1 {x_has_any_call=true; break}
-        }
-    }
     if dbg_on {
         dbg_keep=[]
         dbg_keep.resize(nv)

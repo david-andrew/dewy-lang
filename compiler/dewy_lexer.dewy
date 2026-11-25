@@ -314,42 +314,42 @@ dx_lex=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<
     let cap:DxWord=capacity
     let stopw:DxWord=stop
     let flags:DxWord=0
-    let skip=state.skip
     let nesting:DxWord=0
-    let sym_tags=symbols as ptr<uint32>
     dx_cur_cls=classes
-    let nsp:ptr<int32>=uint64(0) as ptr<int32>
-    let nhp:ptr<int64>=uint64(0) as ptr<int64>
-    let ntp:ptr<ptr<uint8>>=uint64(0) as ptr<ptr<uint8>>
-    let nmask:DxWord=-1
     let slen0=DxWord(state.names[0].length)
     if slen0 >? 0 {
-        nsp=state.names[0].ptr
-        nhp=state.hashes[0].ptr
-        ntp=state.texts[0].ptr as ptr<ptr<uint8>>
-        nmask=slen0 - 1
+        dx_nsp=state.names[0].ptr
+        dx_nhp=state.hashes[0].ptr
+        dx_ntp=state.texts[0].ptr as ptr<ptr<uint8>>
+        dx_nmask=slen0 - 1
+    } else {
+        dx_nsp=uint64(0) as ptr<int32>
+        dx_nhp=uint64(0) as ptr<int64>
+        dx_ntp=uint64(0) as ptr<ptr<uint8>>
+        dx_nmask=-1
     }
-    dx_nsp=nsp; dx_nhp=nhp; dx_ntp=ntp; dx_nmask=nmask
     loop i <? stopw {
         let c=bytes[i]
-        if c =? b' ' {
-            flags |= 1
-            i+=1
-            loop i <? stopw and bytes[i] =? b' ' {i+=1}
-            if i >=? stopw {break}
-            c=bytes[i]
-        }
-        if (classes[c] & 16) not=? 0 {
-            flags |= 1
-            if c =? b'\n' {flags |= 2}
-            i+=1
-            loop i <? stopw {
-                c=bytes[i]
-                if c =? b'\n' {flags |= 2}
-                else if (classes[c] & 16) =? 0 {break}
+        if c <=? 32 {
+            if c =? b' ' {
+                flags |= 1
                 i+=1
+                loop i <? stopw and bytes[i] =? b' ' {i+=1}
+                if i >=? stopw {break}
+                c=bytes[i]
             }
-            continue
+            if c <=? 32 and (classes[c] & 16) not=? 0 {
+                flags |= 1
+                if c =? b'\n' {flags |= 2}
+                i+=1
+                loop i <? stopw {
+                    c=bytes[i]
+                    if c =? b'\n' {flags |= 2}
+                    else if (classes[c] & 16) =? 0 {break}
+                    i+=1
+                }
+                continue
+            }
         }
         if (classes[c] & 1) not=? 0 {
             if c <? 0x80 and not (c =? b'r' and i + 1 <? stopw and (bytes[i + 1] =? b'"' or bytes[i + 1] =? b'\'')) {
@@ -359,6 +359,7 @@ dx_lex=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<
                 let n:DxWord=i - start
                 let p=bytes + start
                 let id:DxWord=-1
+                let nmask=dx_nmask
                 if n <=? 16 and nmask >=? 0 {
                     let hu:DxUWord=DxUWord(n) * 0x9E3779B97F4A7C15
                     if n >? 8 {
@@ -371,11 +372,11 @@ dx_lex=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<
                     }
                     hu=hu * 0xBF58476D1CE4E5B9
                     let h:DxWord=(hu xor (hu >> 32)) transmute int64
-                    let e0=DxWord(nsp[h & nmask])
+                    let e0=DxWord(dx_nsp[h & nmask])
                     if e0 not=? 0 {
                         let id0=e0 - 1
-                        if nhp[id0] =? h {
-                            let hdr=ntp[id0]
+                        if dx_nhp[id0] =? h {
+                            let hdr=dx_ntp[id0]
                             if hdr not=? (uint64(0) as ptr<uint8>) and (hdr as ptr<int64>)[1] =? n {
                                 hdr=hdr + 24
                                 if n >? 8 {
@@ -391,7 +392,6 @@ dx_lex=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<
                 }
                 if id <? 0 {
                     id=dx_intern_slow(@state host source p start n)
-                    nsp=dx_nsp; nhp=dx_nhp; ntp=dx_ntp; nmask=dx_nmask
                 }
                 let kind:DewyKind='identifier'
                 let symbol:DewyToken='none'
@@ -495,7 +495,7 @@ dx_lex=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<
         if c <? 128 and next <? 128 {
             let idx=(DxWord(c) << 7) | DxWord(next)
             symbol=symbols[idx]
-            let stag=DxWord(sym_tags[idx])
+            let stag=DxWord((symbols as ptr<uint32>)[idx])
             if stag >=? 1 and stag <=? 25 {i+=1}
             else if stag >=? 37 and stag <=? 56 {i+=2}
             else if stag >=? 31 and stag <=? 36 {i+=3}
@@ -515,7 +515,7 @@ dx_lex=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<
         sl[0].kind='op'; sl[0].name=0; sl[0].start=start; sl[0].stop=i
         sl[0].space=(flags & 1) not=? 0; sl[0].newline=(flags & 2) not=? 0; sl[0].symbol=symbol
         count+=1; flags=0
-        if skip {
+        if state.skip {
             if symbol =? 'lparen' or symbol =? 'lbrack' or symbol =? 'lbrace' {nesting+=1}
             else if symbol =? 'rparen' or symbol =? 'rbrack' or symbol =? 'rbrace' {nesting-=1}
             else if symbol =? 'function' and nesting =? 0 {

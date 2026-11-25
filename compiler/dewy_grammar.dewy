@@ -212,8 +212,8 @@ dn_operator_habit=(@tokens:array<DewyLexeme> at:int64 text:string):>string=>{
 # `{n:>8,}`: the last one outside brackets and quotes whose remaining text is a whole spec
 # (literals.dewy literal_spec_problem); else -1. The text ends at the interpolation's closing
 # brace or the source's end.
-dn_spec_colon=(@lx:DewyLexer source:string start:int64 stop:int64):>int64=>{
-    let b=source as array<uint8>
+dn_spec_colon=(@lx:DewyLexer source:string start:int64 stop:int64):>int64=>$unsafe {
+    let b=(source as array<uint8>).ptr
     let depth:int64=0
     let found:int64=-1
     let i=start

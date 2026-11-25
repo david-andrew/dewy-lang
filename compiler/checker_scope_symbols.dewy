@@ -34,12 +34,16 @@ scope_reset=(mark:int64):>void=>{
     check_scopes.prev.truncate(mark)
 }
 
-new_local=(name:int64 t:int64 pos:int64):>int64=>{
-    let inst=CheckerScopeSymbolsWord(ctxs[cx].inst)
+let css_underscore_id:int64=0
+new_local=(name:int64 t:int64 pos:int64):>int64=>$unsafe {
+    let inst=CheckerScopeSymbolsWord(ctxs.ptr[cx].inst)
     let l=locals.length
     locals.push(Local[name=int32<overflow='wrap'>(name) type=int32<overflow='wrap'>(t) owner=int32(inst) pos=pos dloops=int32(loop_serials.length)])
-    fns[inst].locals.push(l)
-    if name not=? 0 and name_of(name) not=? "_" {push_scope_sym(name new_sym(name 'local' l 0))}
+    fns.ptr[inst].locals.push(l)
+    if name not=? 0 {
+        if css_underscore_id =? 0 {css_underscore_id=intern("_")}
+        if name not=? css_underscore_id {push_scope_sym(name new_sym(name 'local' l 0))}
+    }
     l
 }
 

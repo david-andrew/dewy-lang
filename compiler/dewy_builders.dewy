@@ -32,11 +32,13 @@ db_stmt=(@store:array<Node> value:int64 pos:int64):>int64=>{
     n
 }
 
-db_value_name=(@renamed:array<int64> name:int32 pos:int64):>int32=>{
-    if int64(name) =? renamed[0] {return int32(renamed[1])}
-    if int64(name) =? renamed[2] {return int32(renamed[3])}
+db_value_name=(@renamed:array<int64> name:int32 pos:int64):>int32=>$unsafe {
+    let rp=renamed.ptr
+    let nm=int64(name)
+    if nm =? rp[0] {return int32(rp[1])}
+    if nm =? rp[2] {return int32(rp[3])}
     # (`bigint` names `int`'s arbitrary-precision form: the same type, so `bigint(x)` is `int(x)`)
-    if int64(name) =? renamed[4] or int64(name) =? renamed[6] {return int32(renamed[5])}
+    if nm =? rp[4] or nm =? rp[6] {return int32(rp[5])}
     name
 }
 
@@ -152,54 +154,70 @@ db_background_tasks=(@store:array<Node> @texts:array<string> t:int64):>bool=>{
     t not=? 0 and store[t].kind =? 'tname' and texts[int64(store[t].name)] =? "BackgroundTasks"
 }
 
-db_finish_function=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> n:int64 parameters:array<int64> body:int64 name:string):>int64=>{
+db_finish_function=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> n:int64 parameters:array<int64> body:int64 name:string):>int64=>$unsafe {
     let ps=parameters
+    let is_main=(name as array<uint8>).length =? 4 and name =? "main"
     let prefix:array<int64>=[]
+    let stp=store.ptr
+    let txtp=texts.ptr
     loop param in ps {
-        if (int64(store[param].flags) & DB_MUT) not=? 0 or texts[int64(store[param].name)] =? "_" {continue}
-        let local=node_mk(@store 'vardecl' store[param].pos)
-        store[local].aux2 = 1 # synthesized value-parameter binding
-        store[local].name = store[param].name
-        if int64(store[param].nlist) >? 0 {node_set_list(@store @lists local node_kids(@store @lists param))}
-        let value=node_mk(@store 'ident' store[param].pos)
-        store[value].name = store[param].name
-        store[value].aux2 = 1 # the parameter's value itself, even a function
-        if name =? "main" {
-            if ps.length not=? 1 {return host.unsupported(store[n].pos "multiple entry-point parameters")}
+        let pp=stp + param
+        if (int64(pp[0].flags) & DB_MUT) not=? 0 {continue}
+        let pname=txtp[int64(pp[0].name)]
+        if (pname as array<uint8>).length =? 1 and (pname as array<uint8>).ptr[0] =? 95 {continue}
+        let ppos=pp[0].pos
+        let pnm=pp[0].name
+        let pnlist=int64(pp[0].nlist)
+        let pa=pp[0].a
+        let local=node_mk(@store 'vardecl' ppos)
+        store.ptr[local].aux2 = 1 # synthesized value-parameter binding
+        store.ptr[local].name = pnm
+        if pnlist >? 0 {node_set_list(@store @lists local node_kids(@store @lists param))}
+        let value=node_mk(@store 'ident' ppos)
+        store.ptr[value].name = pnm
+        store.ptr[value].aux2 = 1 # the parameter's value itself, even a function
+        if is_main {
+            if ps.length not=? 1 {return host.unsupported(store.ptr[n].pos "multiple entry-point parameters")}
             # (`main = (app:BackgroundTasks)`: the program's group, D4 Q3)
-            store[value].name = int32(host.intern_name(if db_background_tasks(@store @texts int64(store[param].a)) {"__program_tasks"} else {"args"}))
-            let call=node_mk(@store 'call' store[param].pos)
-            store[call].a = int32(value)
+            store.ptr[value].name = int32(host.intern_name(if db_background_tasks(@store @texts int64(pa)) {"__program_tasks"} else {"args"}))
+            let call=node_mk(@store 'call' ppos)
+            store.ptr[call].a = int32(value)
             value=call
-            store[local].a = store[param].a
+            store.ptr[local].a = pa
         }
-        store[local].b = int32(value)
+        store.ptr[local].b = int32(value)
         prefix.push(local)
+        stp=store.ptr
     }
     loop param in ps {
-        if db_has_shape(@store int64(store[param].a)) {db_shape_prologue(@store @lists @host param @prefix)}
+        if db_has_shape(@store int64(store.ptr[param].a)) {db_shape_prologue(@store @lists @host param @prefix)}
     }
-    if name =? "main" {
+    if is_main {
         loop param in ps {
-            if (int64(store[param].flags) & DB_MUT) not=? 0 {return host.unsupported(store[n].pos "a mutable entry-point parameter")}
+            if (int64(store.ptr[param].flags) & DB_MUT) not=? 0 {return host.unsupported(store.ptr[n].pos "a mutable entry-point parameter")}
         }
         ps=[]
     }
     node_set_list(@store @lists n ps)
-    loop statement in node_kids(@store @lists body) {prefix.push(statement)}
+    let blist=int64(store.ptr[body].list)
+    let bnlist=int64(store.ptr[body].nlist)
+    if bnlist >? 0 {
+        let lp=lists.ptr + blist
+        loop i in [0..bnlist) {prefix.push(int64(lp[i]))}
+    }
     # (a shaped result, `:>array<T length=[m p]>`: the final value is checked as it leaves;
     # a `return` is checked where it is)
-    if db_has_shape(@store int64(store[n].a)) and prefix.length >? 0 and store[prefix[prefix.length - 1]].kind =? 'exprstmt' {
+    if db_has_shape(@store int64(store.ptr[n].a)) and prefix.length >? 0 and store.ptr[prefix[prefix.length - 1]].kind =? 'exprstmt' {
         let last=prefix[prefix.length - 1]
-        let pos=store[last].pos
+        let pos=store.ptr[last].pos
         let dims:array<int64>=[]
-        loop dim in node_kids(@store @lists int64(store[n].a)) {dims.push(node_clone(@store @lists dim))}
+        loop dim in node_kids(@store @lists int64(store.ptr[n].a)) {dims.push(node_clone(@store @lists dim))}
         let sizes=node_mk(@store 'array' pos)
         node_set_list(@store @lists sizes dims)
-        store[last].a = int32(db_call(@store @lists @host "__shape_value" [int64(store[last].a) sizes] pos))
+        store.ptr[last].a = int32(db_call(@store @lists @host "__shape_value" [int64(store.ptr[last].a) sizes] pos))
     }
     node_set_list(@store @lists body prefix)
-    store[n].b = int32(body)
+    store.ptr[n].b = int32(body)
     return n
 # Caller validates both endpoints; flags are ast.jo's NF_STEP/INCLUSIVE/EXCL_FIRST.
 }

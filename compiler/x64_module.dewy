@@ -3,7 +3,7 @@ $runtime_checks
 
 # Complete x64 module emission and relocation walks. Fixed input tables are
 # borrowed through each walk; code patches retain copy-on-write behavior.
-from p"x64_encode.dewy" import (RAX RBP RBX RCX RDI RDX RSI RSP VX XWord b b16 b24 b32 lea mem modrr mov_imm mov_mr mov_rm mov_rr patch32 rel_fixup_lea rex sse_rm vmov_mr vmov_rm vmov_rr x_code x_data_fix)
+from p"x64_encode.dewy" import (RAX RBP RBX RCX RDI RDX RSI RSP VX XWord b b16 b24 b32 lea mem modrr mov_imm mov_mr mov_rm mov_rr patch32 rel_fixup_lea rex sse_rm vmov_mr vmov_rm vmov_rr x_code x_data_fix x_encode_begin x_encode_end)
 from p"x64_emit.dewy" import (CALL_IF_SHARED VI cabi_fix call_fix int_arg_regs ld line_rows row_pos rsp_row rsp_rows stub_fix)
 win_virtual_alloc=(at:XWord size:XWord kind:XWord iat:XWord):>void=>$unsafe {
     mov_imm(RCX  at)
@@ -321,6 +321,7 @@ let stub_addr:array<int64>=[-1  -1  -1  -1  -1  -1  -1  -1  -1  -1  -1  -1  -1]
 
 # machine code stubs for non-local control transfer
 x64_emit_stubs=():>void=>$unsafe {
+    x_encode_begin(1024)
     let frames=XWord(rsp_rows.length) >? 0
     loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
     if frames {rsp_row(0)}
@@ -415,6 +416,7 @@ x64_emit_stubs=():>void=>$unsafe {
     loop x in xm_bytes1 {b(x)}
     if frames {rsp_row(0)}
     b(0xC3)
+    x_encode_end()
 }
 
 # movdqu [rsp + 16 i], xmm i (or back)

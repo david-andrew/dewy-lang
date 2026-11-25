@@ -154,28 +154,39 @@ dewy_len_check=(n:int64 member:bool t0:int64 object:int64):>void=>$unsafe {
 }
 
 dewy_member_name=(callee:int64 rt:int64 fname:int64 args:array<int64>):>int64=>$unsafe {
-    let name=name_of(fname)
     let k=types.ptr[rt].kind
-    let pos=nodes.ptr[callee].pos
-    if name =? "add" and is_dewy_set_type(rt) {fatal(pos "sets insert with push: replace `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.add(value)` with `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.push(value)`")}
+    let name=name_of(fname)
+    let nlen=(name as array<uint8>).length
+    if nlen =? 0 {return fname}
+    let c0=(name as array<uint8>).ptr[0]
     if k =? 'array' {
-        if name =? "pop" and args.length =? 1 {return intern("remove")}
-        if name =? "insert" {return intern("__dewy_insert")}
-        if name =? "remove" {fatal(pos "an array removes by position with pop: `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.pop(i)`")}
-        if name =? "index_of" and args.length =? 1 {return intern("__dewy_index_of")}
-        if (name =? "any" or name =? "all") and args.length =? 0 and prune(MemberReceiverWord(types.ptr[rt].elem)) not=? T_BOOL {
-            fatal(pos "{name} without a predicate is for an array of bools, `{name}(flags)`: give it one, `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.{name}(x => x >? 0)`")
+        if c0 =? 112 and nlen =? 3 and args.length =? 1 and name =? "pop" {return intern("remove")}
+        if c0 =? 105 {
+            if nlen =? 6 and name =? "insert" {return intern("__dewy_insert")}
+            if nlen =? 8 and args.length =? 1 and name =? "index_of" {return intern("__dewy_index_of")}
         }
+        if c0 =? 114 and nlen =? 6 and name =? "remove" {fatal(nodes.ptr[callee].pos "an array removes by position with pop: `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.pop(i)`")}
+        if c0 =? 97 and nlen =? 3 and args.length =? 0 and (name =? "any" or name =? "all") and prune(MemberReceiverWord(types.ptr[rt].elem)) not=? T_BOOL {
+            fatal(nodes.ptr[callee].pos "{name} without a predicate is for an array of bools, `{name}(flags)`: give it one, `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.{name}(x => x >? 0)`")
+        }
+        return fname
     }
-    if name =? "keys" and args.length =? 0 and is_map_type(rt) {return intern("__dewy_keys")}
     if k =? 'str_' {
-        if name =? "chars" and args.length =? 0 {return intern("graphemes")}
-        if name =? "find" {return intern("__dewy_find")}
-        if name =? "rfind" {return intern("__dewy_rfind")}
-        if name =? "byte_slice" and args.length =? 2 {return intern("__dewy_byte_slice")}
-        if name =? "startswith" {return intern("starts_with")}
-        if name =? "endswith" {return intern("ends_with")}
-        if name =? "starts_with" or name =? "ends_with" {fatal(pos "write `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.{replace(name "_" "")}(...)`")}
+        if c0 =? 99 and nlen =? 5 and args.length =? 0 and name =? "chars" {return intern("graphemes")}
+        if c0 =? 102 and nlen =? 4 and name =? "find" {return intern("__dewy_find")}
+        if c0 =? 114 and nlen =? 5 and name =? "rfind" {return intern("__dewy_rfind")}
+        if c0 =? 98 and nlen =? 10 and args.length =? 2 and name =? "byte_slice" {return intern("__dewy_byte_slice")}
+        if c0 =? 115 {
+            if nlen =? 10 and name =? "startswith" {return intern("starts_with")}
+            if nlen =? 11 and name =? "starts_with" {fatal(nodes.ptr[callee].pos "write `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.{replace(name "_" "")}(...)`")}
+        }
+        if c0 =? 101 {
+            if nlen =? 8 and name =? "endswith" {return intern("ends_with")}
+            if nlen =? 9 and name =? "ends_with" {fatal(nodes.ptr[callee].pos "write `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.{replace(name "_" "")}(...)`")}
+        }
+        return fname
     }
+    if c0 =? 97 and nlen =? 3 and name =? "add" and is_dewy_set_type(rt) {fatal(nodes.ptr[callee].pos "sets insert with push: replace `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.add(value)` with `{receiver_text(MemberReceiverWord(nodes.ptr[callee].a))}.push(value)`")}
+    if c0 =? 107 and nlen =? 4 and args.length =? 0 and name =? "keys" and is_map_type(rt) {return intern("__dewy_keys")}
     fname
 }

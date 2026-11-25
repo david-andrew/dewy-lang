@@ -43,16 +43,17 @@ let file_in_lib_root:string=""
 let file_in_lib_root_p:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
 
 util_file_in_lib_slow=(f:UtilWord):>bool=>$unsafe {
-    let lr=lib_root as array<uint8>
-    if lr.length =? 0 or f <? 0 or f >=? files.length {return false}
+    let lr_len=(lib_root as array<uint8>).length
+    if lr_len =? 0 or f <? 0 or f >=? files.length {return false}
+    let lr_p=(lib_root as array<uint8>).ptr
     let cur_p=(file_in_lib_root as array<uint8>).ptr
-    if cur_p not=? lr.ptr and file_in_lib_root not=? lib_root {
+    if cur_p not=? lr_p and file_in_lib_root not=? lib_root {
         file_in_lib_root=lib_root
         file_in_lib_cache=[]
         file_in_lib_p=(uint64(0) as ptr<int8>)
         file_in_lib_n=0
     }
-    file_in_lib_root_p=lr.ptr
+    file_in_lib_root_p=lr_p
     if f <? file_in_lib_cache.length {
         let c=file_in_lib_cache.ptr[f]
         if c not=? 0 {return c =? 2}

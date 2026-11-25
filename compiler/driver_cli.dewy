@@ -171,10 +171,10 @@ scan_build_lines=(src:string at:CliWord):>void=>{
 # A Dewy file's `$target = 'name'` and `$build.mode = 'name'` lines (at the start of a line,
 # outside comments and multi-line strings, the value a string literal, then nothing but a
 # comment). The parser checks each in place: dw_build_setting.
-scan_settings=(src:string):>void=>{
-    if find(src "$") <? 0 {return}
-    let sb=src as array<uint8>
-    let n:CliWord=sb.length
+scan_settings=(src:string):>void=>$unsafe {
+    if find(src "$target") <? 0 and find(src "$build") <? 0 {return}
+    let sb=(src as array<uint8>).ptr
+    let n:CliWord=(src as array<uint8>).length
     let depth:CliWord=0
     let i:CliWord=0
     loop i <? n {

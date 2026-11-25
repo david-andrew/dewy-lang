@@ -380,19 +380,11 @@ lex=(file:LexScanWord src:string begin:LexScanWord=0 stop:LexScanWord=-1):>array
     let p=lx_p
     let cls=lx_cls
     let op_mode=lx_op_mode
-    let tok1=lx_tok1
-    let tok_eq=lx_tok_eq
-    let kws=kw_tok.ptr
-    let nkw:LexScanWord=kw_tok.length
     let at:LexScanWord=(lx_file << 40) | lx_base
-    let nsp=name_tab.ptr
-    let nhp=name_hash.ptr
-    let ntp=names.ptr as ptr<ptr<uint8>>
-    let nmask=LexScanWord(name_tab.length) - 1
-    lx_nsp=nsp
-    lx_nhp=nhp
-    lx_ntp=ntp
-    lx_nmask=nmask
+    lx_nsp=name_tab.ptr
+    lx_nhp=name_hash.ptr
+    lx_ntp=names.ptr as ptr<ptr<uint8>>
+    lx_nmask=LexScanWord(name_tab.length) - 1
     # (the scan position is local here; the helpers read and move lx_i)
     let lim:LexScanWord=lx_n
     let i:LexScanWord=lx_i
@@ -439,11 +431,11 @@ lex=(file:LexScanWord src:string begin:LexScanWord=0 stop:LexScanWord=-1):>array
                 }
                 hu=hu * 0xBF58476D1CE4E5B9
                 let h:LexScanWord=(hu xor (hu >> 32)) transmute int64
-                let e0=LexScanWord(nsp[h & nmask])
+                let e0=LexScanWord(lx_nsp[h & lx_nmask])
                 if e0 not=? 0 {
                     let id0=e0 - 1
-                    if nhp[id0] =? h {
-                        let hdr=ntp[id0]
+                    if lx_nhp[id0] =? h {
+                        let hdr=lx_ntp[id0]
                         if (hdr as ptr<int64>)[1] =? ln {
                             hdr=hdr + 24
                             if ln >? 8 {
@@ -459,10 +451,9 @@ lex=(file:LexScanWord src:string begin:LexScanWord=0 stop:LexScanWord=-1):>array
             }
             if id <? 0 {
                 id=lx_intern_slow(ps ln)
-                nsp=lx_nsp; nhp=lx_nhp; ntp=lx_ntp; nmask=lx_nmask
             }
             let kind:Tok='ident'
-            if id <? nkw {kind=kws[id]}
+            if id <? kw_tok.length {kind=kw_tok.ptr[id]}
             if cnt =? lcap {
                 lx_count=cnt
                 lx_grow()
@@ -483,9 +474,9 @@ lex=(file:LexScanWord src:string begin:LexScanWord=0 stop:LexScanWord=-1):>array
         if om not=? 0 {
             match om {
                 <6> => {
-                    let k=tok1[c]
+                    let k=lx_tok1[c]
                     let n:LexScanWord=1
-                    if p[i + 1] =? 61 {k=tok_eq[c]; n=2}
+                    if p[i + 1] =? 61 {k=lx_tok_eq[c]; n=2}
                     if cnt =? lcap {
                         lx_count=cnt; lx_grow(); lcap=lx_cap; slots=lx_slots
                     }
@@ -507,7 +498,7 @@ lex=(file:LexScanWord src:string begin:LexScanWord=0 stop:LexScanWord=-1):>array
                     let tk:LexScanWord=cnt
                     let sl=slots + tk
                     cnt += 1
-                    sl[0].kind = tok1[c]
+                    sl[0].kind = lx_tok1[c]
                     sl[0].flags = 0
                     sl[0].pos = at + i
                     sl[0].start = int32<overflow='wrap'>(i)
@@ -544,7 +535,7 @@ lex=(file:LexScanWord src:string begin:LexScanWord=0 stop:LexScanWord=-1):>array
                     }
                     let sl=slots + cnt
                     cnt += 1
-                    sl[0].kind = tok1[c]
+                    sl[0].kind = lx_tok1[c]
                     sl[0].flags = 0
                     sl[0].pos = at + i
                     sl[0].start = int32<overflow='wrap'>(i)
@@ -619,7 +610,7 @@ lex=(file:LexScanWord src:string begin:LexScanWord=0 stop:LexScanWord=-1):>array
                     }
                     let sl=slots + cnt
                     cnt += 1
-                    sl[0].kind = tok1[c]
+                    sl[0].kind = lx_tok1[c]
                     sl[0].flags = 0
                     sl[0].pos = at + i
                     sl[0].start = int32<overflow='wrap'>(i)
