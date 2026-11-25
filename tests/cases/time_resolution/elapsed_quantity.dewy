@@ -1,0 +1,9 @@
+forward=(z:ZonedDateTime q:rational*Time):>ZonedDateTime|OffGrid=>z+q
+backward=(z:ZonedDateTime q:rational*Time):>ZonedDateTime|OffGrid=>z-q
+milliseconds=(z:ZonedDateTime count:int64):>ZonedDateTime=>z+count*1ms
+let before=zoned"2026-03-08T01:59:59.900[America/New_York]"
+let after=zoned"2026-03-08T03:00:00[America/New_York]"
+printl(forward(before 100ms))
+printl(backward(after 100ms))
+printl(milliseconds(before 100) =? after)
+printl(forward(before 1ns/3) is? OffGrid backward(after 1ns/3) is? OffGrid)

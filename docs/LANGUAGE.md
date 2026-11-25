@@ -1876,6 +1876,10 @@ says what to do. `date - date` is a `Period` that knows its dates: `.total_days`
 anniversaries, to today when `on` is left out; a 29 February birthday counts on 1 March in a common year (or pass
 `leap_day='february_28'`).
 
+Adding or subtracting an exact elapsed time from a zoned value keeps its zone.
+For example, adding 100ms to 01:59:59.900 just before a spring clock change
+can give 03:00:00. A runtime fraction of a nanosecond gives `OffGrid`.
+
 Mixed periods compose in order: `1month + 2day` and `2day + 1month` are different recipes.
 Adding either to a `Date` or `ZonedDateTime` applies each step in sequence; a month that lacks
 the requested day still gives `InvalidDate`.

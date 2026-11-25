@@ -5,7 +5,7 @@ import p"format.dewy" as pattern
 import p"zone_cache.jo" as cache
 from p"../runtime/settings_zones.jo" import (__settings_rule_id __settings_rule_data __settings_zone_pack __settings_zone_handle __settings_zone_index __settings_rule_dynamic __settings_zone_bound __settings_zone_host)
 from p"civil.dewy" import (Date TimeOfDay LocalDateTime Gregorian date_of _of_days _LeapDay _Overflow)
-from p"core.dewy" import (Instant Duration Days Months _Recipe _DatePeriod instant_at ns_count read_fields read_offset NO_OFFSET _Cursor Fields _byte _utc_to_axis _axis_to_utc civil_from_days days_from_civil days_in_month _year_text _fraction_text _DAY_NS _NS pad)
+from p"core.dewy" import (Instant Duration Days Months _Recipe _DatePeriod instant_at ns_count _grid_error read_fields read_offset NO_OFFSET _Cursor Fields _byte _utc_to_axis _axis_to_utc civil_from_days days_from_civil days_in_month _year_text _fraction_text _DAY_NS _NS pad)
 import p"core.dewy" as core
 # (inside a function, so a program links the pack only if something still reads it when it runs:
 # a literal folded while compiling does not)
@@ -773,6 +773,10 @@ __add__=(z:ZonedDateTime d:Duration):>ZonedDateTime=>in_zone(z.nominal+d z.zone)
 __sub__=(z:ZonedDateTime d:Duration):>ZonedDateTime=>in_zone(z.nominal-d z.zone)
 __add__=(z:ZonedDateTime q:int*Time):>ZonedDateTime=>in_zone(z.nominal+q z.zone)
 __sub__=(z:ZonedDateTime q:int*Time):>ZonedDateTime=>in_zone(z.nominal-q z.zone)
+$check_constant _grid_error(q) "off the nanosecond grid"
+__add__=(z:ZonedDateTime q:rational*Time):>ZonedDateTime|OffGrid=>in_zone((z.nominal+q) or_throw z.zone)
+$check_constant _grid_error(q) "off the nanosecond grid"
+__sub__=(z:ZonedDateTime q:rational*Time):>ZonedDateTime|OffGrid=>in_zone((z.nominal-q) or_throw z.zone)
 __sub__=(a:ZonedDateTime b:ZonedDateTime):>Duration=>a.nominal-b.nominal
 __eq__=(a:ZonedDateTime b:ZonedDateTime):>bool=>a.nominal =? b.nominal and a.zone =? b.zone
 __lt__=(a:ZonedDateTime b:ZonedDateTime):>bool=>a.nominal <? b.nominal
