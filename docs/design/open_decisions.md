@@ -21,7 +21,7 @@
   - D42 Q3: one leaf per operation, families never returned bare; `FileError` becomes the file failures' parent;
   - D40 Q2, Q5, Q6: cleanup timing, `defer`, and visible cleanup exits;
   - D38 Q1: snake_case naming style;
-  - D45 Q1, Q5, Q6, Q7: one value per advance; `defer` inside a lazy body (D40 Q5); who reports a failed close; cancelled sources can't look empty;
+  - D45 Q1, Q6, Q7: one value per advance; who reports a failed close; cancelled sources can't look empty;
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
@@ -30,7 +30,6 @@
   - D41 Q1–Q3: `check_cancel()`, `protect_from_cancel(limit @work)`, `task.tasks(@body)` as ordinary calls;
   - D42 Q1, Q2, Q6, Q7: no part lost silently (narrow or held); facets and `as`; a stack stays its own type; exit code of a combination;
   - D43 Q1, Q2: native database v1 and a database-filter inspection pilot;
-  - D45 Q3, Q4, Q8: `@g` pauses and `g` ends a generator at `break`; one-token reads by a borrowed loop; spreading a generator into fixed parameters;
   - D11 Q2: `check=` or `valid_if=`;
   - D11 Q3: `__read__` or `$reader`;
   - D11 Q4: the checked constructor `Roll(count=…)`;
@@ -43,7 +42,6 @@
   - D42 Q4, Q5: `ErrorStack` or `ErrorList`; `$origin`, `$trace`, `$parts`, `$origin_at_caller`;
   - D38 Q2: prefer familiar words;
   - D43 Q3: core database names, with `related` being renamed;
-  - D45 Q2: `lazy`, `generator<T>`, `failure=`;
   - D10 Q4–Q8;
   - D11 Q5, Q6;
   - D28 Q1–Q4;
@@ -685,25 +683,16 @@ Paper dogfood remains below all-5; the 45-line core cold read conveyed broad rol
 
 ### D45. Generators from `lazy`, with no `yield`
 
-This is your sketch, worked into a full design.
+This is your sketch, worked into a full design. You answered most of it on 11-25 ([decisions.md](decisions.md), batch 11). These three are left.
 - `lazy expr` makes a generator from any expression: a group, a block or a loop.
-- Ordinary functions return generators like any other value, and ordinary calls stay eager.
-- `inner()...` inside a lazy body hands over to another generator, so there is no `yield from`.
-- Side effects happen only as values are pulled.
-- A lazy body is its own scope whatever its delimiter, and a label prefixing it (`$done lazy (…)`, then `break $done`) ends it.
-- Pipelines that stay inside one loop compile into that loop, with no allocation.
+- Ordinary calls stay eager, and nothing runs until a value is pulled.
+- `inner()...` inside a lazy body hands over to another generator.
 
 ```dewy
-squares = (n:int64) => lazy loop i in [0..n) i^2
+squares = () => lazy loop i in 0.. i^2
 evens = (source) => lazy loop x in source { if x % 2 =? 0 x }
-loop x in evens(squares(10)) printl(x)       # 0 4 16 36 64; nothing runs until the loop pulls
+loop x in evens(squares) and _ in [0..5) printl(x)   # 0 4 16 36 64
 ```
-
-**Changes from your sketch, recommended without a separate question** (each reversible):
-- **Eager bindings still hold a fixed number of values**, as you decided on 10-23. A varying count goes to a collector, a generator or an explicit `match` on a union. `let v = if c (1 2) else (3 4 5)` stays an error; write `let v = if c [1 2] else [3 4 5]`.
-- **The loop shorthand is dropped:** write `lazy loop i in xs i^2`, not `lazy i in xs i^2`. It saves five characters, and the dogfood found the full form clearer.
-- **Version 1 doesn't produce places.** `lazy loop @x in @values @x` is rejected for now; a place handed out across a pause can dangle.
-- **`length=` and a generator `.next` are cut from version 1.** The soundness review found the first goes stale after a pull and the second confuses a failure with an item. Q4 and Q8 cover what replaces them.
 
 #### Q1 (a). What does one advance give?
 
@@ -712,138 +701,56 @@ let g = lazy (1 (2 3) 4)
 loop x in g { printl([x]) }
 ```
 
-Should this print four singletons (A), or three arrays with `[2 3]` in the middle (B)?
+Does this print four singletons (A), or three lines with `[2 3]` in the middle (B)?
 
-**Rec:** A, four singletons, so an ordinary one-argument `map` or `filter` works on every step. Parentheses already don't group values anywhere else: `add((1 2))` is `add(1 2)`. A row that belongs together is written `[a b]` at the producer and spread with `row...` at the call. In 13 paired programs A won 3, B won 2 (both forward fixed rows to positional callbacks) and 8 tied. Two independent reviewers also chose A. **Reversible** before release.
+**For A, one value per advance:**
+- A generator steps exactly as its collector does. `[1 (2 3) 4]` is `[1 2 3 4]`, and `lazy (1 (2 3) 4)` gives the same four values in the same order.
+- Commas stay meaningless, as you want. Under A, `lazy (1 2, 3 4)` and `lazy (1 2 3 4)` are the same. Under B, the comma makes `(2 3)` one step, so adding or dropping a comma would change the program.
+- Every one-argument adapter (`map`, `filter`, take the first n) works on every generator, and a step never changes width.
+- The type stays `generator<int64>`.
 
-#### Q2 (c). The names
+**For B, one group per advance:**
+- Your answer above makes multivalues ordinary values, so a step could naturally be one: `loop (id name) in rows` could take rows apart without wrapping them in brackets.
+- Under A, a producer of pairs writes `[id name]` and the consumer spreads `row...`. This cost the meter and zip programs a point of concision.
 
-```dewy
-ids = (n:int64):>generator<int64> => lazy loop i in [0..n) i
-numbers = (file):>generator<int64 failure=ReadFailed> => lazy loop line in file.lines() or_throw parse_int(line) or_throw
-```
+**Possible middle ground:** keep A for the groups you write in a lazy body, and give pairs only when the type asks for them, as in `generator<(int64 string)>`. This can be added later without breaking A.
 
-Keep `lazy`, the type `generator<T>`, and its named argument `failure=E` for a failure that ends the stream?
-
-**Rec:** yes. Three fresh readers read all of them correctly cold. **Reversible** before release.
-
-#### Q3 (b). Does stopping early pause the generator or end it?
-
-```dewy
-rest = () => {
-    let g = lazy (10 20)
-    loop x in @g { break }       # borrows g: break pauses it
-    [g...]                       # [20]
-}
-preview = (g:generator<int64>) => {
-    loop x in g { break }        # owns g: break ends it and runs its cleanup
-}
-```
-
-`loop x in @g` borrows the generator, so a `break` pauses it and it can resume. `loop x in g` owns it, so a `break` ends it and runs its cleanup. Use `g` again after an owning loop, and the compiler errors at the transfer.
-
-**Rec:** yes. The `@` already means "place, not value" everywhere else, so the rule needs no new syntax. A generator has one owner; calling its function again starts a fresh one. **Reversible** before release.
-
-#### Q4 (b). How does a parser read one token?
-
-```dewy
-required_number = (@tokens end_offset:int64) => {
-    loop t in @tokens or_throw {
-        if t is? PortNumber return t
-        return BadPortSyntax[t.offset]
-    }
-    BadPortSyntax[end_offset]    # clean end of the stream
-}
-```
-
-Read one item with a borrowed loop that returns from its first step, instead of a generator `.next`?
-
-**Rec:** yes. The three outcomes stay separate even when an item is `none` or an error value:
-- an item runs the body;
-- a clean end falls through to the last line;
-- a failed pull leaves the function at `or_throw`.
-
-A `.next` returning `T | none` can't tell an item from the end when the item itself can be `none`. Existing iterators keep their `next`. **Reversible:** a separately designed `.next` can be added later.
-
-#### Q5 (a). `defer` inside a lazy body (D40 Q5)
-
-```dewy
-stream_reply = (prompt journal) => lazy {
-    let chunks:array<string> = []
-    defer journal.save(chunks.join(""))      # finished, or the consumer stopped early, or the stream failed
-    loop chunk in llm.complete(prompt stream=true) or_throw {
-        chunks.push(chunk)
-        chunk
-    }
-}
-main = () => {
-    loop text in stream_reply("Write a haiku about rain" journal) {
-        print(text)
-        if stop_pressed() break               # the partial reply is still saved
-    }
-}
-```
-
-Keep `defer`, with a lazy body as its strongest case? Here it runs when the generator finishes, when the consumer breaks out early, when the stream fails, or when the stream is cancelled. Nothing in the consumer's code marks those last three exits, so code after the loop can't be the fix.
-
-**Rec:** keep the checked `defer` provisionally for a cleanup action that can't fail. When the record is owed even if the body never starts, use a value with a `$__drop__` hook created by the generator's function instead: it can record zero. This is the case your Python token-stream example needed. A function-level `defer` would fire at `return`, before anyone reads the stream. **Reversible** before release; D40 Q5 decides whether the short form stays.
+**Rec:** A. **Reversible** before release.
 
 #### Q6 (a). Who reports a failed close?
 
 ```dewy
-show_first = (rows ui) => {
-    loop row in @rows or_throw { ui.show(row) or_throw; return true }
-    false
+first_row = (rows) => {
+    loop row in rows { return row }       # stop after one row
+    none
 }
-preview = (rows ui) => {
-    let found = show_first(rows ui) or_throw    # rows' socket closes when show_first returns
-    ui.finish(found)
+main = () => {
+    let row = first_row(db.rows("users")) or_throw   # the query's socket closes as first_row returns
+    show(row)
 }
 ```
 
-Does a socket close that fails inside `show_first` reach `preview` before `ui.finish` runs, with both failures kept if display also failed?
+`first_row` stops reading after one row, so the generator's socket closes when `first_row` returns. Suppose that close fails. Should `main` get the failure at its `or_throw` instead of the row? If reading also failed, both failures would be kept.
 
-**Rec:** yes. This is your decided D40 Q1 rule, that cleanup failures join the function's result, plus D42's combining. For a break that continues in the same function, use the marked scope from D40 Q6. **Reversible** before release for the local spelling.
+**Rec:** yes. It is your D40 Q1 rule, applied to generators: a cleanup failure joins the result of the function whose value it cleans up, and D42 keeps both failures. The alternative is to drop or log a failed close, which hides a lost write on the other end. **Reversible** before release.
 
 #### Q7 (a). Can a cancelled source look like an empty one?
 
 ```dewy
-mapped = (source f) => lazy loop x in source or_throw f(x)
-publish = (source sink) => {
-    loop x in mapped(source @id) or_throw { sink.stage(x) or_throw }
-    sink.commit() or_throw
+doubled = (source) => lazy loop x in source x * 2
+save_all = (source file) => {
+    loop x in doubled(source) file.write(x) or_throw
+    file.commit() or_throw
 }
 ```
 
-When a source in a lazy producer can be cancelled, require `or_throw` on it?
+Suppose `source` is a network stream and the task is cancelled halfway. If `doubled` just stops, `save_all` sees a short stream that looks finished and commits half the data as if it were complete.
 
-**Rec:** yes. Otherwise a cancelled read would end `mapped` cleanly and `publish` would commit a partial result. A consumer that wants the partial result, like a progress display, can use a plain loop and then `check_cancel()`. A source that can't cancel, such as an array, needs no suffix. This follows D44's rule that loops over sources end at cancellation. **Reversible:** later, accepting more cases is additive.
+Should a lazy body be required to pass a cancellation on, by writing `loop x in source or_throw`? With your Q2 answer, the cancellation then arrives as the generator's last value, and the consumer's type makes it handle it.
 
-#### Q8 (b). Which generators can fill a fixed call?
+**Rec:** yes. The check costs a suffix only on sources that can actually be cancelled; ranges and arrays need none. A consumer that wants the partial result, such as a progress display, uses a plain loop and then `check_cancel()`. This follows D44's rule that loops over sources end at cancellation. **Reversible:** accepting more cases later is additive.
 
-```dewy
-let fresh = lazy (20 22)
-add(fresh...)                              # allowed: visibly two values, used once
-pair = (g:generator<int64>) => add(g...)   # error: the caller may already have pulled some
-```
-
-Allow spreading a generator into fixed parameters only when the compiler can see exactly what it produces and that nothing else has pulled from it?
-
-**Rec:** yes. Across a function boundary, pass a tuple when you need an exact count. **Reversible:** a later proof of the remaining length could allow more calls.
-
-Dogfooded on 13 programs, audited against existing decisions, reviewed for soundness, and names read cold.
-
-**Not yet all 5s:**
-- **Discoverability, 4:** the logs, catalog, asset tree, parser, meter, zip and recorder programs. Each rests on editor feedback, such as hover showing who owns a cursor and where the stream ends, that can only be judged once the compiler exists.
-- **Concision, 4:**
-  - the reply journal, for its ticket that covers a request that never starts;
-  - the parser, for its small token reader;
-  - the meter and zip programs, for `[a b]` and `row...` at positional callbacks;
-  - the socket program, for its helper, until D40 Q6 settles.
-
-**Still unmeasured:** compile cost, fusion and exactly-once cleanup.
-
-Programs, latest versions: [reply journal](proposals/generators/programs-r1/01-reply-r4.dewy), [access logs](proposals/generators/programs-r1/02-access-log-r4.dewy), [asset tree](proposals/generators/programs-r1/04-asset-tree-r4.dewy), [port parser](proposals/generators/programs-r1/05-port-rules-r4.dewy), [retry preview](proposals/generators/programs-r1/06-retry-preview-r4.dewy), [meter pipeline](proposals/generators/programs-r1/07-meter-pipeline-r4.dewy), [ledger zip](proposals/generators/programs-r1/08-ledger-zip-r4.dewy), [socket](proposals/generators/programs-r1/11-inventory-socket-r3.dewy). Full design: [generators proposal](proposals/generators/) (round 4 is the latest delta).
+Dogfooded on 13 programs, audited against existing decisions, reviewed for soundness, and names read cold. Programs: [generators proposal](proposals/generators/) (round 4 is the latest; [your answers](proposals/generators/answers-r4.md)).
 
 ---
 

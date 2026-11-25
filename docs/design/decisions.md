@@ -743,3 +743,45 @@ section linked. ROADMAP.md lists them in one line each.
     complement `~E` in handler types, what `$explicit_cancellation` checks now, and the
     cancellation spin case (`let job = jobs.receive ?? continue` keeps waking after a cancel;
     the fix is `??<~Canceled> continue`, possibly with a compiler warning on such loops).
+- Batch 11 (David, 2026-11-25), from D45 ([proposals/generators/](proposals/generators/),
+  [answers-r4.md](proposals/generators/answers-r4.md)):
+  - **Multivalues are ordinary structural values** (standing; replaces the 10-23 rule that an
+    eager binding holds a fixed number of values, and the round 4 recommendation built on it):
+    `x = (42 "hello" true)` has type `(int string bool)`, and `fn2(x)`, `fn2(fn1())`,
+    `fn2((fn1))` and `fn2((42 ("hello" true)))` are the same call. Unions of different widths
+    are valid types: `let args = if c (42 "hello") else (0 "" false)` has type
+    `(int string) | (int string bool)` and fills `fn3 = (a:int b:string c:bool=true) => …`.
+    `if verbose (timestamp user_id)` gives `(Timestamp UserId) | void` to optional parameters.
+    Brackets still make one array value: `fn4(if c [1 2] else [3 4 5])` doesn't match `fn4`'s
+    parameters. Reason: uniformity. If `f2(f1())` works, then `x = f1(); f2(x)` must work too,
+    and a storable multivalue must take part in the type system like any other structural type.
+    Making the varying-width case an error would only add `...` spreads and `[]` wrapping.
+    Rejected: the fixed-width rule.
+  - **No loop shorthand:** write `lazy loop i in xs i^2`, not `lazy i in xs i^2`.
+  - **Version 1 generators don't produce places.** To revisit later: look for compelling cases
+    and compare yielding a place with other ways to get the same result.
+  - **`length=` and a generator `.next` are cut from version 1.** To revisit later: a generator
+    type that promises at least some number of values, among other uses.
+  - **Names:** `lazy` and `generator<T>`, with no `failure=` argument. A failure travels as one
+    of the generator's values, as in `generator<int64 | ReadFailed>`, and the generator documents
+    which failures end it and which it yields while it keeps going. Reason: failures arrive
+    through the same path as items anyway.
+  - **A loop over a generator never ends its owner** (round 4 Q3 replaced): in
+    `let g = lazy (10 20); loop x in g { break }; [g...]`, the variable `g` still owns the
+    generator after the loop, so `[g...]` is `[20]`. A generator is cleaned up when its owner
+    goes away, like any value. A temporary written in the loop header is owned by the loop, so it
+    is cleaned up at the `break`. No `@` is needed. Rejected: ending the generator at a `break`
+    when the loop names it without `@`.
+  - **One-token reads use a loop that returns from its first step** (Q4), not a generator
+    `.next`, provisionally. The three outcomes stay separate: an item runs the body, a clean end
+    falls through, and a failed pull leaves at `or_throw`. Existing iterators keep their `next`.
+  - **`defer` inside a lazy body** (Q5, D40 Q5): kept provisionally for cleanup that can't fail.
+    It runs when the generator finishes, when the consumer stops early, when the stream fails and
+    when it is cancelled. A record owed even if the body never starts uses a value with a
+    `$__drop__` hook, created by the generator's function.
+  - **Spreading a generator into fixed parameters** (Q8) is allowed only when the compiler can
+    see exactly what it produces and that nothing else has pulled from it (`add(lazy (20 22)...)`).
+    Across a function boundary, pass a multivalue. Long term, a generator type should be able to
+    promise how many values remain, and slicing should take values lazily
+    (`(g:generator<int64 length>=?2>) => add(g[0..2)...)`) without draining the generator into
+    an array.
