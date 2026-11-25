@@ -106,14 +106,15 @@ _of_int=(q:int*Time):>Duration=>{
     if seconds >? -9000000000 and seconds <? 9000000000 {return duration_word(int64<overflow='wrap'>(seconds)*1000000000)}
     _duration(seconds*_NS)
 }
-_of_rational=(q:rational*Time):>Duration|OffGrid=>{
+_grid_ns=(q:rational*Time):>int|OffGrid=>{
     # (on the grid exactly when the denominator divides a billion: no fraction arithmetic needed)
     let exact=_seconds(q)
     if exact.denominator >? 1000000000 or _NS%exact.denominator not=? 0 {return OffGrid}
-    _duration(exact.numerator*(_NS//exact.denominator))
+    exact.numerator*(_NS//exact.denominator)
 }
+_of_rational=(q:rational*Time):>Duration|OffGrid=>_duration(_grid_ns(q) or_throw)
 _grid_error=(q:rational*Time):>string?=>{
-    if _of_rational(q) is? OffGrid {
+    if _grid_ns(q) is? OffGrid {
         return "the nanosecond grid has no such value: round it with `quantize(q rounding='nearest_even')`"
     }
     none
@@ -434,34 +435,43 @@ __sub__=(a:Duration_width_64 b:Duration_width_64):>Duration_width_64|OutOfRange=
     let word=_word_sub(a._count b._count) or_throw
     Duration_width_64[word]
 }
-__add__=(t:Instant_width_64 d:Duration):>Instant_width_64|OutOfRange=>compact_instant((t as Instant)+d)
-__sub__=(t:Instant_width_64 d:Duration):>Instant_width_64|OutOfRange=>compact_instant((t as Instant)-d)
-__add__=(t:Instant_width_64 q:int*Time):>Instant_width_64|OutOfRange=>compact_instant((t as Instant)+q)
-__sub__=(t:Instant_width_64 q:int*Time):>Instant_width_64|OutOfRange=>compact_instant((t as Instant)-q)
-# (off the grid in a constant is a compile error; a compact result can still leave the range, so no promise)
-_grid_only=(q:rational*Time):>string?=>{
-    let why=_grid_error(q)
-    if why is? none {""} else {why}
+# A mixed-width calculation can exceed even 128 bits, or cancel back into one
+# word. Narrow the exact result once. Compact/compact operations above stay word-sized.
+_compact_instant_ns=(n:int):>Instant_width_64|OutOfRange=>{
+    let word=n.to_int64() ?? return OutOfRange
+    Instant_width_64[word]
 }
-__add__=(q:int*Time t:Instant_width_64):>Instant_width_64|OutOfRange=>compact_instant((t as Instant)+q)
+_compact_duration_ns=(n:int):>Duration_width_64|OutOfRange=>{
+    let word=n.to_int64() ?? return OutOfRange
+    Duration_width_64[word]
+}
+__add__=(t:Instant_width_64 d:Duration):>Instant_width_64|OutOfRange=>_compact_instant_ns(int(t._count)+ns_count(d))
+__sub__=(t:Instant_width_64 d:Duration):>Instant_width_64|OutOfRange=>_compact_instant_ns(int(t._count)-ns_count(d))
+__add__=(t:Instant_width_64 q:int*Time):>Instant_width_64|OutOfRange=>_compact_instant_ns(int(t._count)+(q transmute int)*_NS)
+__sub__=(t:Instant_width_64 q:int*Time):>Instant_width_64|OutOfRange=>_compact_instant_ns(int(t._count)-(q transmute int)*_NS)
+__add__=(q:int*Time t:Instant_width_64):>Instant_width_64|OutOfRange=>t+q
+# A constant still may overflow after adding the compact operand.
+_grid_only=(q:rational*Time):>string?=>{
+    _grid_error(q) ?? ""
+}
 $check_constant _grid_only(q) "not a whole nanosecond"
-__add__=(t:Instant_width_64 q:rational*Time):>Instant_width_64|OutOfRange|OffGrid=>compact_instant((t as Instant)+(_of_rational(q) or_throw))
+__add__=(t:Instant_width_64 q:rational*Time):>Instant_width_64|OutOfRange|OffGrid=>_compact_instant_ns(int(t._count)+(_grid_ns(q) or_throw))
 $check_constant _grid_only(q) "not a whole nanosecond"
-__add__=(q:rational*Time t:Instant_width_64):>Instant_width_64|OutOfRange|OffGrid=>compact_instant((t as Instant)+(_of_rational(q) or_throw))
+__add__=(q:rational*Time t:Instant_width_64):>Instant_width_64|OutOfRange|OffGrid=>t+q
 $check_constant _grid_only(q) "not a whole nanosecond"
-__sub__=(t:Instant_width_64 q:rational*Time):>Instant_width_64|OutOfRange|OffGrid=>compact_instant((t as Instant)-(_of_rational(q) or_throw))
-__add__=(a:Duration_width_64 q:int*Time):>Duration_width_64|OutOfRange=>compact_duration((a as Duration)+q)
-__add__=(q:int*Time a:Duration_width_64):>Duration_width_64|OutOfRange=>compact_duration(q+(a as Duration))
-__sub__=(a:Duration_width_64 q:int*Time):>Duration_width_64|OutOfRange=>compact_duration((a as Duration)-q)
-__sub__=(q:int*Time a:Duration_width_64):>Duration_width_64|OutOfRange=>compact_duration(q-(a as Duration))
+__sub__=(t:Instant_width_64 q:rational*Time):>Instant_width_64|OutOfRange|OffGrid=>_compact_instant_ns(int(t._count)-(_grid_ns(q) or_throw))
+__add__=(a:Duration_width_64 q:int*Time):>Duration_width_64|OutOfRange=>_compact_duration_ns(int(a._count)+(q transmute int)*_NS)
+__add__=(q:int*Time a:Duration_width_64):>Duration_width_64|OutOfRange=>a+q
+__sub__=(a:Duration_width_64 q:int*Time):>Duration_width_64|OutOfRange=>_compact_duration_ns(int(a._count)-(q transmute int)*_NS)
+__sub__=(q:int*Time a:Duration_width_64):>Duration_width_64|OutOfRange=>_compact_duration_ns((q transmute int)*_NS-int(a._count))
 $check_constant _grid_only(q) "not a whole nanosecond"
-__add__=(a:Duration_width_64 q:rational*Time):>Duration_width_64|OutOfRange|OffGrid=>compact_duration((a as Duration)+(_of_rational(q) or_throw))
+__add__=(a:Duration_width_64 q:rational*Time):>Duration_width_64|OutOfRange|OffGrid=>_compact_duration_ns(int(a._count)+(_grid_ns(q) or_throw))
 $check_constant _grid_only(q) "not a whole nanosecond"
-__add__=(q:rational*Time a:Duration_width_64):>Duration_width_64|OutOfRange|OffGrid=>compact_duration((a as Duration)+(_of_rational(q) or_throw))
+__add__=(q:rational*Time a:Duration_width_64):>Duration_width_64|OutOfRange|OffGrid=>a+q
 $check_constant _grid_only(q) "not a whole nanosecond"
-__sub__=(a:Duration_width_64 q:rational*Time):>Duration_width_64|OutOfRange|OffGrid=>compact_duration((a as Duration)-(_of_rational(q) or_throw))
+__sub__=(a:Duration_width_64 q:rational*Time):>Duration_width_64|OutOfRange|OffGrid=>_compact_duration_ns(int(a._count)-(_grid_ns(q) or_throw))
 $check_constant _grid_only(q) "not a whole nanosecond"
-__sub__=(q:rational*Time a:Duration_width_64):>Duration_width_64|OutOfRange|OffGrid=>compact_duration((_of_rational(q) or_throw)-(a as Duration))
+__sub__=(q:rational*Time a:Duration_width_64):>Duration_width_64|OutOfRange|OffGrid=>_compact_duration_ns((_grid_ns(q) or_throw)-int(a._count))
 __lt__=(a:Duration_width_64 q:int*Time):>bool=>(a as Duration)<?q
 __lt__=(q:int*Time a:Duration_width_64):>bool=>q<?(a as Duration)
 __eq__=(a:Duration_width_64 q:int*Time):>bool=>(a as Duration)=?q

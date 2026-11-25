@@ -1,0 +1,26 @@
+import p"@lib/time/core.dewy" as core
+
+check_whole=(q:int*Time t:Instant<width=64> d:Duration<width=64>)=>{
+    printl(t+q is? OutOfRange q+t is? OutOfRange t-q is? OutOfRange)
+    printl(d+q is? OutOfRange q+d is? OutOfRange d-q is? OutOfRange q-d is? OutOfRange)
+}
+check_fraction=(q:rational*Time t:Instant<width=64> d:Duration<width=64>)=>{
+    printl(t+q is? OutOfRange q+t is? OutOfRange t-q is? OutOfRange)
+    printl(d+q is? OutOfRange q+d is? OutOfRange d-q is? OutOfRange q-d is? OutOfRange)
+}
+off_grid=(d:Duration<width=64> q:rational*Time):>bool=>d+q is? OffGrid
+main=()=>{
+    let t=core.Instant_width_64[1]
+    let d=core.Duration_width_64[-1]
+    let largest=core.Duration[9223372036854775807 18446744073709551615]
+    let smallest=core.Duration[-9223372036854775808 0]
+    printl(t+largest is? OutOfRange t-smallest is? OutOfRange)
+    let huge=2^140
+    check_whole(huge*s t d)
+    check_fraction(rational(-huge 2)*1ns t d)
+    printl(off_grid(d 1ns/2))
+    # The delta alone exceeds a signed word, but the final point fits.
+    let limit=core.Instant_width_64[-9223372036854775808]
+    let result=limit+core.duration_of(2^64-1)
+    printl(result =? core.Instant_width_64[9223372036854775807])
+}
