@@ -1,0 +1,14 @@
+# Built into the diagnostic compiler only. Keep the retired buffers for the
+# lifetime of this short-lived process so allocation cannot reuse their bytes.
+__debug_nodes: int
+__debug_lists: int
+__debug_types: int
+
+__grow_compiler_array = (slot: **u8, p: *u8, used: int, size: int) -> *u8:
+    address = slot as int
+    if address != __debug_nodes and address != __debug_lists and address != __debug_types:
+        return __grow_alloc(p, used, size)
+    q = __alloc_raw(size)
+    mem_copy(q, p, used)
+    mem_set(p, 165, __alloc_size(p))
+    q

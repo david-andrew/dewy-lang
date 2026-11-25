@@ -1,0 +1,20 @@
+# The diagnostic allocator owns both buffers until process exit. Check the
+# retired bytes while the allocator still owns them.
+rows: int[]
+block: *u8
+main = ():
+    __debug_lists = (&rows) as int
+    rows.push(7)
+    before = data(rows) as int
+    rows.reserve(cap(rows) + 1)
+    assert(data(rows) as int != before and rows[0] == 7)
+
+    __debug_nodes = (&block) as int
+    block = __alloc_raw(32)
+    mem_set(block, 42, 32)
+    old = block
+    block = __grow_compiler_array(&block, old, 32, 64)
+    assert(block != old)
+    loop i in [0..32):
+        assert(block[i] == 42)
+        assert(old[i] == 165)

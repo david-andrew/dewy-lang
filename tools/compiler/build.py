@@ -89,7 +89,7 @@ def claim_output(output: Path) -> Path | None:
 
 
 def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False, fixed_point: bool = False,
-          seed_cache: Path | None = None) -> Path:
+          seed_cache: Path | None = None, debug_table_growth: bool = False) -> Path:
     """Build into `output`, replacing an earlier build's output there. A failed build keeps both
     its own files (logs, a non-fixed-point pair of executables) and the earlier output, at
     `<output>.previous`."""
@@ -107,7 +107,7 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False, fi
     previous = claim_output(output)
     try:
         binary = build_into(output, seed=seed, bootstrap=bootstrap, fixed_point=fixed_point,
-                            seed_cache=seed_cache)
+                            seed_cache=seed_cache, debug_table_growth=debug_table_growth)
     except BaseException:
         if previous is not None:
             print(f'build failed; the earlier output is kept at {previous}', file=sys.stderr)
@@ -117,16 +117,36 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False, fi
     return binary
 
 
+def table_growth_sources(output: Path) -> Path:
+    """Instrument the compiler build. Programs it emits still use the shipped lib."""
+    inputs = output / 'debug-inputs'
+    for name in ('compiler', 'lib'):
+        shutil.copytree(output / name, inputs / name)
+    main = inputs / 'compiler/main.jo'
+    runtime = inputs / 'lib/core/rt.jo'
+    entry = 'main = ():\n'
+    grow = 'q = __grow_alloc(p, 24 + h[1] * es, __arr_bytes(cap, es))'
+    main_source, runtime_source = main.read_text(), runtime.read_text()
+    if main_source.count(entry) != 1 or runtime_source.count(grow) != 1:
+        raise ValueError('the compiler entry or array growth hook changed')
+    slots = ''.join(f'    __debug_{name} = (&{name}) as int\n' for name in ('nodes', 'lists', 'types'))
+    main.write_text(main_source.replace(entry, entry + slots))
+    hook = grow.replace('__grow_alloc(p', '__grow_compiler_array(slot, p')
+    runtime.write_text(runtime_source.replace(grow, hook) + '\n' + (HERE / 'debug_table_growth.jo').read_text())
+    return inputs
+
+
 def build_into(output: Path, *, seed: Path | None, bootstrap: bool, fixed_point: bool,
-               seed_cache: Path | None = None) -> Path:
+               seed_cache: Path | None = None, debug_table_growth: bool = False) -> Path:
     for name in ('compiler', 'lib'):
         shutil.copytree(ROOT / name, output / name, ignore=shutil.ignore_patterns('sloppy0', '__pycache__'))
     shutil.copy2(ROOT / 'LICENSE', output / 'LICENSE')
+    inputs = table_growth_sources(output) if debug_table_growth else output
     sources = {str(p.relative_to(output)): identity(p) for p in sorted(output.rglob('*')) if p.is_file() and p != output / OUTPUT_MARKER}
     binary_dir = output / 'bin'
     binary_dir.mkdir()
     env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
-    env.update(DEWY_CORE_LIB=str(output / 'lib'), DEWY_EMIT_WORKERS='1')
+    env.update(DEWY_CORE_LIB=str(inputs / 'lib'), DEWY_EMIT_WORKERS='1')
     steps = []
 
     def run(command, log, cwd=output):
@@ -141,7 +161,7 @@ def build_into(output: Path, *, seed: Path | None, bootstrap: bool, fixed_point:
             raise RuntimeError(f'{log}:\n{result.stdout}{result.stderr}')
 
     bootstrap_hashes = []
-    provenance = {}
+    provenance = {'debug_table_growth': True} if debug_table_growth else {}
     if bootstrap:
         assert seed_cache is not None  # resolved before claiming output
         seed, pin = seed_archive.obtain(seed_cache, log=output / 'archive-bootstrap.log')
@@ -153,14 +173,14 @@ def build_into(output: Path, *, seed: Path | None, bootstrap: bool, fixed_point:
         raise ValueError('provide --seed or --bootstrap')
     seed = seed.resolve(strict=True)
     binary = binary_dir / 'dewy-core'
-    run([seed, 'build', output / 'compiler/main.jo', '-o', binary],
+    run([seed, 'build', inputs / 'compiler/main.jo', '-o', binary],
         'self-build.log' if bootstrap else 'core-build.log')
     if fixed_point or bootstrap:
         generations = [identity(binary)]
 
         def rebuild(compiler: Path, target: Path) -> None:
             log = 'fixed-point.log' if len(generations) == 1 else 'fixed-point-2.log'
-            run([compiler, 'build', output / 'compiler/main.jo', '-o', target], log)
+            run([compiler, 'build', inputs / 'compiler/main.jo', '-o', target], log)
             generations.append(identity(target))
 
         check_fixed_point(binary, rebuild, older_seed=bootstrap)
@@ -185,11 +205,13 @@ if __name__ == '__main__':
     cli.add_argument('--output', type=Path, required=True, help='directory for the standalone toolchain (an earlier build'"'"'s output there is replaced)')
     cli.add_argument('--fixed-point', action='store_true',
                      help='rebuild the compiler with itself and fail unless the bytes are identical')
+    cli.add_argument('--debug-table-growth', action='store_true',
+                     help='move compiler tables on capacity growth and poison retired buffers')
     args = cli.parse_args()
     if args.seed_cache is not None and not args.bootstrap:
         cli.error('--seed-cache requires --bootstrap')
     try:
         print(build(args.output, seed=args.seed, bootstrap=args.bootstrap, fixed_point=args.fixed_point,
-                    seed_cache=args.seed_cache))
+                    seed_cache=args.seed_cache, debug_table_growth=args.debug_table_growth))
     except OutputDirectoryError as error:
         raise SystemExit(f'build.py: {error}') from None
