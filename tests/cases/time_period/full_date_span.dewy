@@ -1,0 +1,18 @@
+import p"@lib/time/civil.dewy" as civil
+
+let first=civil.Date<Gregorian>[-9223372036854775808]
+let last=civil.Date<Gregorian>[9223372036854775807]
+let forward=last-first
+let backward=first-last
+printl(forward.total_days backward.total_days)
+printl(forward/1day backward/1day)
+printl(first+forward =? last last+backward =? first)
+printl(last-forward =? first first-backward =? last)
+let local_end=first.at(time_of_day"12:34:56")+forward
+printl(local_end =? last.at(time_of_day"12:34:56"))
+let z=zoned"2026-01-01T12:34:56Z[UTC]"
+let finish=z+forward
+match finish {
+    t:ZonedDateTime => printl(t-z =? forward.total_days*24hour)
+    _ => printl(false)
+}

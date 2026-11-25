@@ -60,7 +60,7 @@ __sub__=(d:Date p:Days):>Date=>_of_days(int(d._days)-int(p.count))
 # anniversaries and months, a 29 February start counting on 1 March (`age`'s default). It is the
 # Period `Date - Date` gives, beside the recipes `1day` (Days) and `1month` (Months).
 __sub__=(a:Date b:Date):>_DatePeriod=>{
-    let total=int64<overflow='saturate'>(int(a._days)-int(b._days))
+    let total=int(a._days)-int(b._days)
     let forward=total >=? 0
     let early=if forward b else a
     let late=if forward a else b
@@ -80,8 +80,8 @@ _month_clamped=(d:Date count:int64):>Date=>{
     let [y m dd]=_month_add(d count)
     date_of(y m min(dd days_in_month(y m)))
 }
-__add__=(d:Date p:_DatePeriod):>Date=>_of_days(int(d._days)+int(p.total_days))
-__sub__=(d:Date p:_DatePeriod):>Date=>_of_days(int(d._days)-int(p.total_days))
+__add__=(d:Date p:_DatePeriod):>Date=>_of_days(int(d._days)+p.total_days)
+__sub__=(d:Date p:_DatePeriod):>Date=>_of_days(int(d._days)-p.total_days)
 
 # Moves by months, keeping the day; [the date, whether that day exists in the month].
 _month_add=(d:Date count:int64):>[int int64 int64]=>{

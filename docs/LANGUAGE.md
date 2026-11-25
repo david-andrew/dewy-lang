@@ -1871,7 +1871,8 @@ such an `Instant` prints as a TT label.
 `1day`, `1week`, `1month` and `1year` are calendar periods, not lengths of time: they need a
 date or a zoned time. `date + 1day` is the next calendar day; `date + 1month` is `Date |
 InvalidDate`, since not every month has a 31st, and `.add(1month overflow='clamp')` or `'next'`
-says what to do. `date - date` is a `Period` that knows its dates: `.total_days`, and `.years`,
+says what to do. `date - date` is a `Period` that knows its dates. Its `.total_days` is an exact `int`, so `a + (b - a) =? b`
+holds even for the earliest and latest representable dates. It also gives `.years`,
 `.months` and `.days` by completed anniversaries and months. `age(born on=date)` counts completed
 anniversaries, to today when `on` is left out; a 29 February birthday counts on 1 March in a common year (or pass
 `leap_day='february_28'`).

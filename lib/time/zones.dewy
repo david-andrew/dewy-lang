@@ -472,7 +472,7 @@ _zone_seconds=(t:Instant):>int=>{
     (mjd-_MJD_1970)*86400+(if in_day >=? _DAY_NS {86399} else {in_day//_NS})
 }
 in_zone=(t:Instant z:Zone):>ZonedDateTime=>ZonedDateTime[t z Offset[int32<overflow='wrap'>(offset_at(z _zone_seconds(t)))]]
-_at=(moment:int64 nanos:int z:Zone offset:int64):>ZonedDateTime|OutsideCoverage|OffGrid|InvalidFields=>{
+_at=(moment:int nanos:int z:Zone offset:int64):>ZonedDateTime|OutsideCoverage|OffGrid|InvalidFields=>{
     let days=int(moment)//86400
     let axis=_utc_to_axis(days+_MJD_1970 (int(moment)%86400)*_NS+nanos) or_throw
     ZonedDateTime[instant_at(axis) z Offset[int32<overflow='wrap'>(offset)]]
@@ -497,7 +497,7 @@ _GapPolicy:type='preserve_displacement'|'next'|'reject'
 _FoldChoice:type=_FoldPolicy|'all'
 _GapChoice:type=_GapPolicy|'skip'
 # Local seconds in a zone: the moment under the policies, or the Gap or Ambiguous with no policy.
-_resolve=(local:int64 nanos:int z:Zone fold:_FoldChoice|none gap:_GapChoice|none):>ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous|OutsideCoverage|OffGrid|InvalidFields=>{
+_resolve=(local:int nanos:int z:Zone fold:_FoldChoice|none gap:_GapChoice|none):>ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous|OutsideCoverage|OffGrid|InvalidFields=>{
     let pack_bytes=_zone_rules(z)
     let record=_record(z)
     let window:int64=93600
@@ -792,8 +792,8 @@ _civil=(r:ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous|OutsideCoverage|
     e:InvalidFields=>Gap[e.message 0 0]
     <OffGrid>=>Gap["that label falls between nanoseconds under the UTC rate of its time" 0 0]
 }
-_day_add=(z:ZonedDateTime p:Days fold:_FoldChoice|none gap:_GapChoice|none):>ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous=>{
-    _civil(_resolve((_local(z)+int(p.count)*86400).to_int64() ?? 0 int(_nanos(z)) z.zone fold gap))
+_day_add=(z:ZonedDateTime days:int fold:_FoldChoice|none gap:_GapChoice|none):>ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous=>{
+    _civil(_resolve(_local(z)+days*86400 int(_nanos(z)) z.zone fold gap))
 }
 _month_add=(z:ZonedDateTime p:Months fold:_FoldChoice|none gap:_GapChoice|none):>ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous|InvalidDate=>{
     let local=_local(z)
@@ -832,7 +832,7 @@ _civil_one=(r:ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous):>ZonedDateT
     e:Gap=>e
     e:Ambiguous=>e
 }
-_day_add_one=(z:ZonedDateTime p:Days fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>_civil_one(_day_add(z p fold gap))
+_day_add_one=(z:ZonedDateTime p:Days fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>_civil_one(_day_add(z p.count fold gap))
 _month_add_one=(z:ZonedDateTime p:Months fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>match _month_add(z p fold gap) {
     zdt:ZonedDateTime=>zdt
     zs:array<ZonedDateTime>=>Ambiguous["a single resolution cannot return every candidate" []]
@@ -842,7 +842,7 @@ _month_add_one=(z:ZonedDateTime p:Months fold:_FoldPolicy|none gap:_GapPolicy|no
     e:InvalidDate=>e
 }
 # (what is wrong with these constants; none when the add resolves)
-day_add_error=(z:ZonedDateTime p:Days fold:_FoldChoice|none gap:_GapChoice|none):>string?=>match _day_add(z p fold gap) {
+day_add_error=(z:ZonedDateTime p:Days fold:_FoldChoice|none gap:_GapChoice|none):>string?=>match _day_add(z p.count fold gap) {
     r:ZonedDateTime=>none
     rs:array<ZonedDateTime>=>none
     <none>=>none
@@ -882,17 +882,17 @@ __add__=(z:ZonedDateTime p:Days|Months|_Recipe|_DatePeriod fold:_FoldPolicy|none
     days:Days=>_day_add_one(z days fold gap)
     months:Months=>_month_add_one(z months fold gap)
     recipe:_Recipe=>_recipe_add(z recipe fold gap)
-    span:_DatePeriod=>_day_add_one(z Days[span.total_days] fold gap)
+    span:_DatePeriod=>_civil_one(_day_add(z span.total_days fold gap))
 }
 $check_constant day_add_error(z p fold gap) "this add has no one answer"
 $check_constant policy_gap(fold gap) "unused"
 add=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>_day_add_one(z p fold gap)
 $check_constant day_add_error(z p fold gap) "this add has no candidates"
-add=(z:ZonedDateTime p:Days fold:'all' gap:_GapPolicy|none=$time.gap):>array<ZonedDateTime>|Gap|Ambiguous=>_civil_all(_day_add(z p fold gap))
+add=(z:ZonedDateTime p:Days fold:'all' gap:_GapPolicy|none=$time.gap):>array<ZonedDateTime>|Gap|Ambiguous=>_civil_all(_day_add(z p.count fold gap))
 $check_constant day_add_error(z p fold gap) "this add has no answer"
-add=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:'skip'):>ZonedDateTime|none|Gap|Ambiguous=>_civil_skip(_day_add(z p fold gap))
+add=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:'skip'):>ZonedDateTime|none|Gap|Ambiguous=>_civil_skip(_day_add(z p.count fold gap))
 $check_constant day_add_error(z p fold gap) "this add has no answer"
-add=(z:ZonedDateTime p:Days fold:'all' gap:'skip'):>array<ZonedDateTime>|none|Gap|Ambiguous=>_civil_all_skip(_day_add(z p fold gap))
+add=(z:ZonedDateTime p:Days fold:'all' gap:'skip'):>array<ZonedDateTime>|none|Gap|Ambiguous=>_civil_all_skip(_day_add(z p.count fold gap))
 add=(z:ZonedDateTime p:Months overflow:_Overflow fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>_month_add_named(z p overflow fold gap)
 
 # The local date of an instant in a zone.
