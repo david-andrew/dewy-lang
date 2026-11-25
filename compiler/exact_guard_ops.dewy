@@ -108,6 +108,11 @@ eg_loop=():>void=>{
         eg_version[entry.local] += 1
     }
 }
+eg_nonneg=(n:GuardWord):>bool=>$unsafe {
+    if eg_stack.length =? 0 {return false}
+    let l=eg_local(n)
+    l >? 0 and l <? eg_owner.length and eg_owner[l] =? cur_fn and eg_lo[l] >=? 0
+}
 # One signed-word operation can use the endpoints already established above;
 # no new relational state, recursive body walk or speculative proof is needed.
 eg_fits=(n:GuardWord):>bool=>$unsafe {

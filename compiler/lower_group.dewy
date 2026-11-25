@@ -18,7 +18,7 @@ from p"expr.jo" import (CV FMT_DEWY IN format_word_inst)
 from p"integer_conversions.dewy" import (int_widens integer_constant)
 from p"vector_swizzles.dewy" import (swizzle_run)
 from p"checks_thin_expr.dewy" import (fmt_field_order fmt_hidden fmt_minted is_map_type swizzle_index)
-from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_RESIZED LF_SHARED LF_VALUECAP fns globals lib_dir locals target_macos target_wasm target_windows)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_RESIZED LF_SHARED LF_VALUECAP LF_VALUEITER fns globals lib_dir locals target_macos target_wasm target_windows)
 from p"checker_compound_values.dewy" import (compound_op)
 from p"checks_thin.dewy" import (jd mutable_loop_syntax readonly_global)
 from p"ir.jo" import (M_FLOAT M_SIGNED VF VI VOP_SPLAT_B VOP_SPLAT_C VS dbg_on ir ir_cold mulh_ok)
@@ -30,7 +30,7 @@ from p"checker_tokens.dewy" import (Tok)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"facts.jo" import (array_len_expr len_of_local lower_length_guards)
 from p"facts_index_proofs.dewy" import (is_nonneg positive_bound)
-from p"facts_index_proofs.dewy" import (fixed_array_len fixed_array_local index_safety lower_length_guard range_facts_begin range_facts_end stable_loop_index)
+from p"facts_index_proofs.dewy" import (fixed_array_len fixed_array_local index_safety lower_length_guard range_facts_begin range_facts_end record_const_array_len stable_loop_index)
 from p"facts_elements.dewy" import (fact_fixed_comprehension fact_fixed_comprehension_exact)
 from p"facts_library.dewy" import (fact_library_call)
 from p"secrets.jo" import (secret_compares)
@@ -46,7 +46,7 @@ from p"copies.jo" import (copies_on copy_bindings copy_explicit)
 from p"copy_ops.dewy" import (copy_capture_ids copy_components copy_consumes copy_error copy_own copy_shared_decl copy_shared_global copy_strict costly_copy own_at)
 from p"lower_determinism.dewy" import (det_check)
 from p"exact_guards.jo" import (eg_active eg_stack)
-from p"exact_guard_ops.dewy" import (eg_begin eg_end eg_loop eg_write)
+from p"exact_guard_ops.dewy" import (eg_begin eg_end eg_loop eg_nonneg eg_write)
 from p"exact.jo" import (exact_join_blocks exact_lower_active exact_progress_math exact_word_reads)
 from p"exact_finalization.dewy" import (exact_counter_bound)
 from p"exact_marks.dewy" import (exact_has_node exact_match_literals)
@@ -186,13 +186,61 @@ scope_pop=():>void=>$unsafe {
 let nz_locals:array<int64>=[]
 let ib_arrs:array<int64>=[]
 let ib_idxs:array<int64>=[]
+let ib_offs:array<int64>=[]
+let ib_len_fn:LGWord=0
+let ib_len_var:array<int64>=[]
+let ib_len_arr:array<int64>=[]
+let ib_len_node:array<int64>=[]
+ib_len_clear=():>void=>{
+    if ib_len_var.length >? 0 {
+        ib_len_var.clear()
+        ib_len_arr.clear()
+        ib_len_node.clear()
+    }
+}
+ib_len_kill=(l:LGWord):>void=>$unsafe {
+    if ib_len_var.length =? 0 {return}
+    if ib_len_fn not=? cur_fn {ib_len_clear(); return}
+    let ap=ib_len_arr.ptr
+    let vp=ib_len_var.ptr
+    loop i in [0..ib_len_var.length) {
+        if ap[i] =? l or vp[i] =? l {ap[i]=-1}
+    }
+}
+ib_len_record=(l:LGWord iv0:LGWord):>void=>$unsafe {
+    if LGWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_MUTPARAM | LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_EXPOSED) not=? 0 {return}
+    let iv=if iv0 >? 0 and nodes.ptr[iv0].kind =? 'conv' {ib_unwrap(iv0)} else {iv0}
+    if iv <=? 0 or nodes.ptr[iv].kind not=? 'intrinsic' or (nodes.ptr[iv].aux as IN) not=? IN.len or nkids(iv) not=? 1 {return}
+    let arg=kid(iv 0)
+    if arg <=? 0 or nodes.ptr[arg].kind not=? 'ident' or nodes.ptr[arg].aux not=? int32(1) {return}
+    let al=LGWord(nodes.ptr[arg].sym)
+    if al <=? 0 or is_shared(al) {return}
+    if LGWord(locals.ptr[al].flags) & (LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_EXPOSED) not=? 0 {return}
+    if tkind(prune(ntype(arg))) not=? 'array' {return}
+    if ib_len_fn not=? cur_fn {ib_len_clear(); ib_len_fn=cur_fn}
+    ib_len_var.push(l)
+    ib_len_arr.push(al)
+    ib_len_node.push(arg)
+}
+ib_copy_local=(dst:LGWord src_expr:LGWord):>void=>$unsafe {
+    if ib_arrs.length =? 0 {return}
+    let src=ib_plain_local(src_expr)
+    if src =? 0 or src =? dst {return}
+    let ncur=ib_arrs.length
+    loop j in [0..ncur) {
+        if ib_arrs.ptr[j] >? 0 and ib_idxs.ptr[j] =? src {ib_push(ib_arrs.ptr[j] dst ib_offs.ptr[j])}
+    }
+}
 ib_unwrap=(n0:LGWord):>LGWord=>$unsafe {
     let n=n0
-    loop n >? 0 and nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.int_)) {
+    loop n >? 0 and nodes.ptr[n].kind =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.int_)) or nodes.ptr[n].aux =? int32(int64(CV.fixed_store))) {
         let inner=LGWord(nodes.ptr[n].a)
-        let src=prune(ntype(inner))
-        let dst=prune(ntype(n))
-        if not ((src =? T_INT and dst =? T_MATH_INT) or (src =? T_MATH_INT and dst =? T_INT)) {break}
+        if nodes.ptr[n].aux =? int32(int64(CV.int_)) {
+            let src=prune(ntype(inner))
+            let dst=prune(ntype(n))
+            if not ((src =? T_INT and dst =? T_MATH_INT) or (src =? T_MATH_INT and dst =? T_INT)) {break}
+        }
+        else if prune(ntype(n)) not=? T_INT {break}
         n=inner
     }
     n
@@ -204,6 +252,32 @@ ib_plain_local=(n0:LGWord):>LGWord=>$unsafe {
     if l <=? 0 or is_shared(l) {return 0}
     if LGWord(locals.ptr[l].flags) & (LF_MUTPARAM | LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_EXPOSED) not=? 0 {return 0}
     l
+}
+ib_unwrap_add=(n0:LGWord):>[int64 int64 int64]=>$unsafe {
+    let n=ib_unwrap(n0)
+    if n <=? 0 {return [0 0 0]}
+    let l=ib_plain_local(n)
+    if l not=? 0 {return [l 0 n]}
+    if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].aux =? 0 and cx_token_values.ptr[LGWord(nodes.ptr[n].op)] =? 'plus' {
+        let a=LGWord(nodes.ptr[n].a)
+        let b=LGWord(nodes.ptr[n].b)
+        let [kb kv]=integer_constant(b)
+        if kb and not has_flag(b NF_U64) and kv >=? 0 and kv <? 1024 {
+            let al=ib_plain_local(a)
+            if al not=? 0 {return [al kv a]}
+        }
+        let [ka kva]=integer_constant(a)
+        if ka and not has_flag(a NF_U64) and kva >=? 0 and kva <? 1024 {
+            let bl=ib_plain_local(b)
+            if bl not=? 0 {return [bl kva b]}
+        }
+    }
+    [0 0 0]
+}
+ib_push=(al:LGWord il:LGWord off:LGWord):>void=>{
+    ib_arrs.push(al)
+    ib_idxs.push(il)
+    ib_offs.push(off)
 }
 ib_clear=():>void=>$unsafe {
     let n=ib_arrs.length
@@ -224,31 +298,85 @@ ib_truncate=(mark:LGWord):>void=>{
     if ib_arrs.length >? mark {
         ib_arrs.truncate(mark)
         ib_idxs.truncate(mark)
+        ib_offs.truncate(mark)
     }
 }
-ib_has=(a:LGWord ix0:LGWord):>bool=>$unsafe {
+ib_is_bounded_local=(n:LGWord):>bool=>$unsafe {
     if ib_arrs.length =? 0 {return false}
-    if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? int32(1) {return false}
-    let ix=ib_unwrap(ix0)
-    if ix <=? 0 or nodes.ptr[ix].kind not=? 'ident' or nodes.ptr[ix].aux not=? int32(1) {return false}
-    let al=LGWord(nodes.ptr[a].sym)
-    let il=LGWord(nodes.ptr[ix].sym)
+    let il=ib_plain_local(n)
+    if il =? 0 {return false}
     let ap=ib_arrs.ptr
     let ip=ib_idxs.ptr
     loop i in [0..ib_arrs.length) {
-        if ap[i] =? al and ip[i] =? il {return true}
+        if ap[i] >? 0 and ip[i] =? il {return true}
+    }
+    false
+}
+ib_has=(a:LGWord ix0:LGWord):>bool=>$unsafe {
+    let n=ib_arrs.length
+    if n =? 0 {return false}
+    if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? int32(1) {return false}
+    let al=LGWord(nodes.ptr[a].sym)
+    let ap=ib_arrs.ptr
+    let ip=ib_idxs.ptr
+    let op=ib_offs.ptr
+    if nodes.ptr[ix0].kind =? 'ident' and nodes.ptr[ix0].aux =? int32(1) {
+        let il=LGWord(nodes.ptr[ix0].sym)
+        loop i in [0..n) {
+            if ap[i] =? al and ip[i] =? il and op[i] >? 0 {return true}
+        }
+        return false
+    }
+    let found=false
+    loop i in [0..n) {
+        if ap[i] =? al {found=true; break}
+    }
+    if not found {return false}
+    let [il off _]=ib_unwrap_add(ix0)
+    if il =? 0 {return false}
+    loop i in [0..n) {
+        if ap[i] =? al and ip[i] =? il and off <? op[i] {return true}
     }
     false
 }
 ib_len_local=(n0:LGWord):>LGWord=>$unsafe {
     let n=if n0 >? 0 and nodes.ptr[n0].kind =? 'conv' {ib_unwrap(n0)} else {n0}
-    if n <=? 0 or nodes.ptr[n].kind not=? 'intrinsic' or (nodes.ptr[n].aux as IN) not=? IN.len or nkids(n) not=? 1 {return 0}
+    if n <=? 0 {return 0}
+    if nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].aux =? int32(1) {
+        if not fns.ptr[cur_fn].writes_ready {return 0}
+        let l=LGWord(nodes.ptr[n].sym)
+        if l >? 0 and LGWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_MUTPARAM | LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_EXPOSED) =? 0 {
+            let a=len_of_local.get(l)
+            if a not=? none {
+                let al=LGWord(a)
+                if al >? 0 and not is_shared(al) and LGWord(locals.ptr[al].flags) & (LF_MUTPARAM | LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_RESIZED) =? 0 {
+                    return al
+                }
+            }
+            if ib_len_var.length >? 0 and ib_len_fn =? cur_fn and fixed_paths.length >? 0 {
+                let k=ib_len_var.length - 1
+                loop k >=? 0 {
+                    if ib_len_var.ptr[k] =? l {
+                        let al=ib_len_arr.ptr[k]
+                        if al >? 0 and fixed_path_of(ib_len_node.ptr[k]) >=? 0 {return al}
+                        break
+                    }
+                    k -= 1
+                }
+            }
+        }
+        return 0
+    }
+    if nodes.ptr[n].kind not=? 'intrinsic' or (nodes.ptr[n].aux as IN) not=? IN.len or nkids(n) not=? 1 {return 0}
     let arg=kid(n 0)
     let a0=if arg >? 0 and nodes.ptr[arg].kind =? 'conv' {ib_unwrap(arg)} else {arg}
     if a0 <=? 0 or nodes.ptr[a0].kind not=? 'ident' or nodes.ptr[a0].aux not=? int32(1) {return 0}
     let al=LGWord(nodes.ptr[a0].sym)
     if al <=? 0 or is_shared(al) {return 0}
-    if LGWord(locals.ptr[al].flags) & (LF_MUTPARAM | LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_RESIZED) not=? 0 {return 0}
+    if LGWord(locals.ptr[al].flags) & (LF_MUTPARAM | LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_RESIZED) not=? 0 {
+        if fixed_paths.length >? 0 and fixed_path_of(a0) >=? 0 {return al}
+        return 0
+    }
     let bk=tkind(prune(ntype(arg)))
     if bk not=? 'array' and bk not=? 'str_' {return 0}
     al
@@ -256,7 +384,7 @@ ib_len_local=(n0:LGWord):>LGWord=>$unsafe {
 ib_nonneg=(n:LGWord):>bool=>$unsafe {
     let t=prune(ntype(n))
     if types.ptr[t].kind =? 'int_' and not types.ptr[t].sign {return true}
-    is_nonneg(n) or positive_bound(n true) >=? 0
+    is_nonneg(n) or positive_bound(n true) >=? 0 or eg_nonneg(n)
 }
 ib_collect=(n:LGWord yes:bool):>void=>$unsafe {
     if n <=? 0 {return}
@@ -274,28 +402,81 @@ ib_collect=(n:LGWord yes:bool):>void=>$unsafe {
     }
     if k not=? 'binary' or nodes.ptr[n].aux not=? 0 {return}
     let op=nodes.ptr[n].op
+    if op <? int32(71) or op >? int32(74) {return}
     let want_lt=(yes and op =? int32(71)) or (not yes and op =? int32(74))
-    if want_lt {
-        let al=ib_len_local(LGWord(nodes.ptr[n].b))
+    let want_le=(yes and op =? int32(72)) or (not yes and op =? int32(73))
+    let want_gt=(yes and op =? int32(73)) or (not yes and op =? int32(72))
+    let want_ge=(yes and op =? int32(74)) or (not yes and op =? int32(71))
+    if want_lt or want_le {
+        let bn=LGWord(nodes.ptr[n].b)
+        let bnk=nodes.ptr[bn].kind
+        let al=if bnk =? 'intrinsic' or bnk =? 'conv' or (bnk =? 'ident' and (len_of_local.length >? 0 or ib_len_var.length >? 0)) {ib_len_local(bn)} else {0}
         if al not=? 0 {
-            let au=ib_unwrap(LGWord(nodes.ptr[n].a))
-            let il=ib_plain_local(au)
-            if il not=? 0 and ib_nonneg(au) {
-                ib_arrs.push(al)
-                ib_idxs.push(il)
+            let [il k base_n]=ib_unwrap_add(LGWord(nodes.ptr[n].a))
+            let span=k + (if want_lt {1} else {0})
+            if il not=? 0 and span >? 0 and ib_nonneg(base_n) {
+                ib_push(al il span)
+            }
+            return
+        }
+        if want_lt and ib_arrs.length >? 0 {
+            let lo=ib_plain_local(LGWord(nodes.ptr[n].a))
+            let hi=ib_plain_local(bn)
+            if lo not=? 0 and hi not=? 0 and lo not=? hi {
+                let ncur=ib_arrs.length
+                let has_hi=false
+                loop j in [0..ncur) {
+                    if ib_arrs.ptr[j] >? 0 and ib_idxs.ptr[j] =? hi {has_hi=true; break}
+                }
+                if has_hi and ib_nonneg(LGWord(nodes.ptr[n].a)) {
+                    loop j in [0..ncur) {
+                        if ib_arrs.ptr[j] >? 0 and ib_idxs.ptr[j] =? hi {ib_push(ib_arrs.ptr[j] lo ib_offs.ptr[j])}
+                    }
+                }
             }
         }
         return
     }
-    let want_gt=(yes and op =? int32(73)) or (not yes and op =? int32(72))
-    if want_gt {
-        let al=ib_len_local(LGWord(nodes.ptr[n].a))
+    if want_gt or want_ge {
+        let an=LGWord(nodes.ptr[n].a)
+        let ank=nodes.ptr[an].kind
+        let al=if ank =? 'intrinsic' or ank =? 'conv' or (ank =? 'ident' and (len_of_local.length >? 0 or ib_len_var.length >? 0)) {ib_len_local(an)} else {0}
         if al not=? 0 {
-            let bu=ib_unwrap(LGWord(nodes.ptr[n].b))
-            let il=ib_plain_local(bu)
-            if il not=? 0 and ib_nonneg(bu) {
-                ib_arrs.push(al)
-                ib_idxs.push(il)
+            let [il k base_n]=ib_unwrap_add(LGWord(nodes.ptr[n].b))
+            let span=k + (if want_gt {1} else {0})
+            if il not=? 0 and span >? 0 and ib_nonneg(base_n) {
+                ib_push(al il span)
+            }
+            return
+        }
+        if want_gt and ib_arrs.length >? 0 {
+            # i - cand > 0 (i.e. cand < i) or i > cand
+            let a_n=ib_unwrap(an)
+            let b_n=LGWord(nodes.ptr[n].b)
+            let hi:LGWord=0
+            let lo:LGWord=0
+            let lo_node:LGWord=0
+            let [zb zv]=integer_constant(b_n)
+            if zb and zv =? 0 and nodes.ptr[a_n].kind =? 'binary' and nodes.ptr[a_n].aux =? 0 and cx_token_values.ptr[LGWord(nodes.ptr[a_n].op)] =? 'minus' {
+                hi=ib_plain_local(LGWord(nodes.ptr[a_n].a))
+                lo_node=LGWord(nodes.ptr[a_n].b)
+                lo=ib_plain_local(lo_node)
+            } else {
+                hi=ib_plain_local(an)
+                lo_node=b_n
+                lo=ib_plain_local(lo_node)
+            }
+            if lo not=? 0 and hi not=? 0 and lo not=? hi {
+                let ncur=ib_arrs.length
+                let has_hi=false
+                loop j in [0..ncur) {
+                    if ib_arrs.ptr[j] >? 0 and ib_idxs.ptr[j] =? hi {has_hi=true; break}
+                }
+                if has_hi and ib_nonneg(lo_node) {
+                    loop j in [0..ncur) {
+                        if ib_arrs.ptr[j] >? 0 and ib_idxs.ptr[j] =? hi {ib_push(ib_arrs.ptr[j] lo ib_offs.ptr[j])}
+                    }
+                }
             }
         }
     }
@@ -378,6 +559,7 @@ local_place=(l:LGWord write:bool):>Place=>$unsafe {
     if write {
         if nz_locals.length >? 0 {nz_kill(l)}
         if ib_arrs.length >? 0 {ib_kill(l)}
+        if ib_len_var.length >? 0 {ib_len_kill(l)}
     }
     let f:LGWord=LGWord(locals.ptr[l].flags)
     if f & LF_OWNERBORROW not=? 0 {return Place[true e_load(VI env_v LGWord(locals.ptr[l].env_off) ptr_size)]}
@@ -426,6 +608,19 @@ gen_index=(n:LGWord):>LGWord=>$unsafe {
     if frozen.length >? 0 {
         let v=frozen.get(n)
         if v not=? none {return v}
+    }
+    return gen_expr(n).v
+}
+gen_index_ib=(n:LGWord):>LGWord=>$unsafe {
+    if frozen.length >? 0 {
+        let v=frozen.get(n)
+        if v not=? none {return v}
+    }
+    if prune(ntype(n)) =? T_INT {
+        let [il k _]=ib_unwrap_add(n)
+        if il not=? 0 and k >? 0 and prune(LGWord(locals.ptr[il].type)) =? T_INT {
+            return e_bin('add' VI read_place(local_place(il false) T_INT) e_iconst(k))
+        }
     }
     return gen_expr(n).v
 }
@@ -511,9 +706,10 @@ gen_place=(e:LGWord write:bool):>Place=>$unsafe {
             if fi >=? 0 {
                 let fp=fixed_paths.ptr[fi]
                 let ixn:LGWord=LGWord(nodes.ptr[e].b)
-                let idx=gen_index(ixn)
+                let inb=ib_arrs.length >? 0 and ib_has(a ixn)
+                let idx=if inb {gen_index_ib(ixn)} else {gen_index(ixn)}
                 let by_loopvar=fp.loopvar >=? 0 and nodes.ptr[ixn].kind =? 'ident' and nodes.ptr[ixn].aux =? LGI32(1) and LGWord(nodes.ptr[ixn].sym) =? fp.loopvar
-                if not by_loopvar and not has_flag(e NF_INBOUNDS) and index_safety(a ixn) =? 0 and not ib_has(a ixn) {
+                if not inb and not by_loopvar and not has_flag(e NF_INBOUNDS) and index_safety(a ixn) =? 0 {
                     iff(e_bin('geu' VI idx fp.len));
                     e_call_nr3(rt("__panic_bounds") idx fp.len e_daddr(loc_data(nodes.ptr[e].pos)) -1);
                     endc();
@@ -523,24 +719,25 @@ gen_place=(e:LGWord write:bool):>Place=>$unsafe {
             }
             let arr:LGWord=0
             let idx:LGWord=0
+            let ixn:LGWord=LGWord(nodes.ptr[e].b)
+            let inb=ib_arrs.length >? 0 and ib_has(a ixn)
             if write {
                 let base=gen_place(a true)
                 if not is_uniq_array(a) {arr_unique(base bt); note_uniq_expr(a);}
-                idx=gen_index(LGWord(nodes.ptr[e].b))
+                idx=if inb {gen_index_ib(ixn)} else {gen_index(ixn)}
                 arr=read_place(base bt)
                 # re-read: evaluating the index cannot change the array place
             }
             else if nodes.ptr[a].kind =? 'ident' {
                 # (the index first: a call in it may change the array, as nodes[mk()] grows nodes)
-                idx=gen_index(LGWord(nodes.ptr[e].b))
+                idx=if inb {gen_index_ib(ixn)} else {gen_index(ixn)}
                 arr=gen_borrowed(a).v
             }
             else {
                 arr=gen_borrowed(a).v
-                idx=gen_index(LGWord(nodes.ptr[e].b))
+                idx=if inb {gen_index_ib(ixn)} else {gen_index(ixn)}
             }
-            let safety=index_safety(a LGWord(nodes.ptr[e].b))
-            if has_flag(e NF_INBOUNDS) or (safety =? 0 and ib_has(a LGWord(nodes.ptr[e].b))) {safety=1}
+            let safety=if inb or has_flag(e NF_INBOUNDS) {1} else {index_safety(a ixn)}
             if safety =? 0 {bounds_check(arr idx nodes.ptr[e].pos);}
             else if safety =? 2 and opt_release {null_check(arr idx nodes.ptr[e].pos);}
             let sz=owner_stride(LGWord(types.ptr[bt].elem))
@@ -968,6 +1165,7 @@ gen_direct_call=(f:LGWord args:array<int64> order:array<int64>=[] call_node:LGWo
     let target_lf=if callback_calls.length =? 0 {-1} else {callback_calls.get(callback_key(ir.fn_index call_node)) ?? (-1)}
     if exr_call_target =? f {target_lf=lf_helper(HK.reset_words 0 f)}
     if target_lf <? 0 {target_lf=lf_of_inst(f)}
+    if ib_len_var.length >? 0 {ib_len_clear()}
     let rv=if nr {e_call_nr(target_lf argv -1)} else {e_call(target_lf argv ret_vt(ret))}
     lg_argv_pool.push(argv)
     copy_back(mark);
@@ -1038,6 +1236,7 @@ gen_closure_call=(callee:LGWord args:array<int64> order:array<int64>=[]):>Val=>$
     let snaps=arg_snapshots.length
     call_args(args pts LGWord(types.ptr[ft].mutmask) @argv order = order);
     if refine_active {refine_gen_args(args argv if vc(ret) =? VC_AGG {2} else {1} LGWord(types.ptr[ft].mutmask));}
+    if ib_len_var.length >? 0 {ib_len_clear()}
     let rv=if known >=? 0 {e_call(lf_of_inst(known) argv ret_vt(ret))} else {e_calli(fp argv ret_vt(ret) false)}
     copy_back(mark);
     release_arg_snapshots(snaps);
@@ -1053,6 +1252,7 @@ gen_cfn_call=(callee:LGWord args:array<int64>):>Val=>$unsafe {
         borrow(val ntype(a));
         argv.push(val.v);
     }
+    if ib_len_var.length >? 0 {ib_len_clear()}
     let rv=e_calli(fp argv ret_vt(ret) true)
     if vc(ret) =? VC_AGG {ice("C functions returning structs are not supported");}
     if vc(ret) =? VC_INT {rv=norm(rv ret)}
@@ -2180,6 +2380,7 @@ gen_intrinsic_relocate=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     endc();
     return V(-1 false)
 }
+let push_move_node:LGWord=0
 gen_intrinsic_push=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     let arg0:LGWord=LGWord(lists.ptr[arg_start])
     let arg1:LGWord=LGWord(lists.ptr[arg_start + 1])
@@ -2203,8 +2404,29 @@ gen_intrinsic_push=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     let in_place=not ownership_type(et) and is_plain_ctor(arg1)
     let pl=gen_place(arg0 true)
     let val=V(-1 false)
+    let moved_local:LGWord=-1
     if not in_place {
-        if direct_agg_ok(arg1 et) and plain_unaliased_local(arg1) {val=gen_borrowed(arg1)}
+        if e =? push_move_node and not dbg_on and not copies_on and not ownership_type(et) and vc(et) =? VC_INT and is_managed(et) and nodes.ptr[arg1].kind =? 'ident' and nodes.ptr[arg1].aux =? LGI32(1) and scope_locals.length >? 0 {
+            let ml=LGWord(nodes.ptr[arg1].sym)
+            let mfl=LGWord(locals.ptr[ml].flags)
+            if ml >? 0 and locals.ptr[ml].offset <? 0 and mfl & (LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_MUTPARAM | LF_PARAM | LF_EXPOSED) =? 0 and not is_shared(ml) and not parallel_owned.has(ml) and type_eq(prune(store_type(ml)) prune(et)) and not mentions_local(arg0 ml) {
+                let top_i=scope_locals.length - 1
+                if scope_defers.ptr[top_i].length =? 0 {
+                    let ls=scope_locals.ptr[top_i]
+                    loop li in [0..ls.length) {
+                        if ls.ptr[li] =? ml {
+                            moved_local=li
+                            break
+                        }
+                    }
+                }
+            }
+        }
+        if moved_local >=? 0 {
+            let ml=LGWord(nodes.ptr[arg1].sym)
+            val=V(read_place(local_place(ml false) et) true)
+        }
+        else if direct_agg_ok(arg1 et) and plain_unaliased_local(arg1) {val=gen_borrowed(arg1)}
         else {val=gen_owned(arg1)}
     }
     let p=read_place(pl at)
@@ -2296,6 +2518,7 @@ gen_intrinsic_push=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     }
     store_val(et slotp 0 val.v);
     if direct {endc();}
+    if moved_local >=? 0 {scope_locals.ptr[scope_locals.length - 1].pop(moved_local);}
     owner_element_live(slotp et);
     if ownership_type(et) {owner_forget_slot(val.slot);}
     note_uniq_expr(arg0);
@@ -3648,7 +3871,11 @@ gen_value_and_=(e:LGWord):>Val=>$unsafe {
     if k =? 'and_' {iff(r);}
     else {iff(e_bin('eq' VI r e_iconst(0)));}
     enter_cond();
+    let ea=LGWord(nodes.ptr[e].a)
+    let do_eg=eg_active and loops.length >? 0 and (nodes.ptr[ea].kind =? 'binary' or nodes.ptr[ea].kind =? 'and_')
+    let guard=if do_eg {eg_begin(ea k =? 'and_')} else {0}
     e_mov(r gen_expr(LGWord(nodes.ptr[e].b)).v);
+    if do_eg {eg_end(guard);}
     leave_cond();
     endc();
     return V(r false)
@@ -4082,14 +4309,17 @@ jump_if_false=(e:LGWord level:LGWord):>void=>$unsafe {
         let ea=LGWord(nodes.ptr[e].a)
         jump_if_false(ea level);
         let eak=nodes.ptr[ea].kind
-        if loops.length >? 0 and (eak =? 'binary' or eak =? 'and_') {
+        let do_ib=loops.length >? 0 and (eak =? 'binary' or eak =? 'and_')
+        let guard=if eg_active and do_ib {eg_begin(ea true)} else {0}
+        if do_ib {
             let ib_mark=ib_arrs.length
             ib_collect(ea true)
             jump_if_false(LGWord(nodes.ptr[e].b) level);
-            ib_truncate(ib_mark)
+            if ib_arrs.length >? ib_mark {ib_truncate(ib_mark)}
         } else {
             jump_if_false(LGWord(nodes.ptr[e].b) level);
         }
+        if eg_active and do_ib {eg_end(guard);}
         return
     }
     if k =? 'or_' {
@@ -4135,8 +4365,12 @@ jump_if_true=(e:LGWord level:LGWord):>void=>$unsafe {
     if k =? 'and_' {
         blk();
         let f=ctl
-        jump_if_false(LGWord(nodes.ptr[e].a) f);
+        let ea=LGWord(nodes.ptr[e].a)
+        jump_if_false(ea f);
+        let do_eg=eg_active and loops.length >? 0 and (nodes.ptr[ea].kind =? 'binary' or nodes.ptr[ea].kind =? 'and_')
+        let guard=if do_eg {eg_begin(ea true)} else {0}
         jump_if_true(LGWord(nodes.ptr[e].b) level);
+        if do_eg {eg_end(guard);}
         endc();
         return
     }
@@ -4146,8 +4380,179 @@ jump_if_true=(e:LGWord level:LGWord):>void=>$unsafe {
     }
     brif_to(cond_leaf(e) level);
 }
+let lg_map_lib_dir:string=""
+let lg_map_path:string=""
+lg_core_map_path=():>string=>{
+    if lg_map_lib_dir not=? lib_dir {
+        lg_map_lib_dir=lib_dir
+        lg_map_path="{lib_dir}/core/map.jo"
+    }
+    lg_map_path
+}
+map_set_scan=(b:LGWord map_path:string @fh:LGWord @fp:LGWord @fa:LGWord):>void=>$unsafe {
+    if b <=? 0 {return}
+    loop i in [0..nkids(b)) {
+        let st=kid(b i)
+        let sk=nodes.ptr[st].kind
+        if sk =? 'block' {
+            map_set_scan(st map_path @fh @fp @fa)
+            continue
+        }
+        if sk =? 'if_' {
+            map_set_scan(LGWord(nodes.ptr[st].b) map_path @fh @fp @fa)
+            if nodes.ptr[st].c not=? 0 {map_set_scan(LGWord(nodes.ptr[st].c) map_path @fh @fp @fa)}
+            continue
+        }
+        if sk =? 'vardecl' and nkids(st) =? 0 {
+            let rhs=LGWord(nodes.ptr[st].b)
+            if rhs >? 0 and nodes.ptr[rhs].kind =? 'call' and nodes.ptr[rhs].aux =? 0 and nodes.ptr[rhs].sym >? 0 {
+                let cf=LGWord(nodes.ptr[rhs].sym)
+                let cd=LGWord(fns.ptr[cf].decl)
+                if cd not=? 0 and files.ptr[pos_file(nodes.ptr[cd].pos)].path =? map_path {
+                    let cname=name_of(LGWord(nodes.ptr[cd].name))
+                    if cname =? "__map_hash" and nkids(rhs) =? 1 and nodes.ptr[kid(rhs 0)].kind =? 'ident' {fh=cf}
+                    else if cname =? "__map_probe" and nkids(rhs) =? 3 {fp=cf}
+                }
+            }
+        }
+        else if sk =? 'exprstmt' or sk =? 'return_' or sk =? 'call' {
+            let ex=if sk =? 'call' {st} else {LGWord(nodes.ptr[st].a)}
+            if ex >? 0 and nodes.ptr[ex].kind =? 'call' and nodes.ptr[ex].aux =? 0 and nodes.ptr[ex].sym >? 0 and nkids(ex) =? 5 {
+                let cf=LGWord(nodes.ptr[ex].sym)
+                let cd=LGWord(fns.ptr[cf].decl)
+                if cd not=? 0 and files.ptr[pos_file(nodes.ptr[cd].pos)].path =? map_path and name_of(LGWord(nodes.ptr[cd].name)) =? "__map_add" {fa=cf}
+            }
+        }
+    }
+}
+try_gen_map_insert_if_absent=(e:LGWord):>bool=>$unsafe {
+    if copies_on or partition_active or ownership_decls.length not=? 0 {return false}
+    let body=LGWord(nodes.ptr[e].b)
+    if body <=? 0 or nodes.ptr[body].kind not=? 'block' or nkids(body) <? 1 {return false}
+    let first=kid(body 0)
+    if nodes.ptr[first].kind not=? 'exprstmt' {return false}
+    let sc=LGWord(nodes.ptr[first].a)
+    if sc <=? 0 or nodes.ptr[sc].kind not=? 'call' or nodes.ptr[sc].aux not=? 0 or nodes.ptr[sc].c not=? 0 or nkids(sc) not=? 3 or nodes.ptr[sc].sym <=? 0 {return false}
+    let fn_set=LGWord(nodes.ptr[sc].sym)
+    let sd=LGWord(fns.ptr[fn_set].decl)
+    if sd =? 0 or name_of(LGWord(nodes.ptr[sd].name)) not=? "[]=" {return false}
+    let map_path=lg_core_map_path()
+    if files.ptr[pos_file(nodes.ptr[sd].pos)].path not=? map_path {return false}
+    let cond=LGWord(nodes.ptr[e].a)
+    let d1:LGWord=0
+    let k1:LGWord=0
+    let ck=nodes.ptr[cond].kind
+    if ck =? 'istype' and nodes.ptr[cond].aux =? LGI32(-1) {
+        let gc=LGWord(nodes.ptr[cond].a)
+        if gc <=? 0 or nodes.ptr[gc].kind not=? 'call' or nodes.ptr[gc].c not=? 0 or nkids(gc) not=? 2 {return false}
+        if nodes.ptr[cond].aux2 =? 0 {
+            if nodes.ptr[gc].aux not=? 0 or nodes.ptr[gc].sym <=? 0 {return false}
+            let gd=LGWord(fns.ptr[LGWord(nodes.ptr[gc].sym)].decl)
+            if gd =? 0 or name_of(LGWord(nodes.ptr[gd].name)) not=? "get" or files.ptr[pos_file(nodes.ptr[gd].pos)].path not=? map_path {return false}
+        }
+        d1=kid(gc 0)
+        k1=kid(gc 1)
+    }
+    else if ck =? 'binary' and nodes.ptr[cond].aux =? 6 and nodes.ptr[cond].aux2 not=? 0 and cx_token_values.ptr[LGWord(nodes.ptr[cond].op)] =? 'eq' {
+        let gc=LGWord(nodes.ptr[cond].a)
+        if gc <=? 0 or nodes.ptr[gc].kind not=? 'call' or nodes.ptr[gc].c not=? 0 or nkids(gc) not=? 2 {return false}
+        d1=kid(gc 0)
+        k1=kid(gc 1)
+    }
+    else if ck =? 'not_' {
+        let hc=LGWord(nodes.ptr[cond].a)
+        if hc <=? 0 or nodes.ptr[hc].kind not=? 'call' or nodes.ptr[hc].aux not=? 0 or nodes.ptr[hc].c not=? 0 or nkids(hc) not=? 2 or nodes.ptr[hc].sym <=? 0 {return false}
+        let hd=LGWord(fns.ptr[LGWord(nodes.ptr[hc].sym)].decl)
+        if hd =? 0 or files.ptr[pos_file(nodes.ptr[hd].pos)].path not=? map_path {return false}
+        let hname=name_of(LGWord(nodes.ptr[hd].name))
+        if hname not=? "has" and hname not=? "contains" {return false}
+        d1=kid(hc 0)
+        k1=kid(hc 1)
+    }
+    else {return false}
+    let d2=kid(sc 0)
+    let k2=kid(sc 1)
+    let v_expr=kid(sc 2)
+    if nodes.ptr[d1].kind not=? 'ident' or nodes.ptr[d1].aux not=? LGI32(1) or nodes.ptr[d2].kind not=? 'ident' or nodes.ptr[d2].aux not=? LGI32(1) or nodes.ptr[d1].sym not=? nodes.ptr[d2].sym {return false}
+    if nodes.ptr[k1].kind not=? 'ident' or nodes.ptr[k1].aux not=? LGI32(1) or nodes.ptr[k2].kind not=? 'ident' or nodes.ptr[k2].aux not=? LGI32(1) or nodes.ptr[k1].sym not=? nodes.ptr[k2].sym {return false}
+    let dl=LGWord(nodes.ptr[d2].sym)
+    let kl=LGWord(nodes.ptr[k2].sym)
+    if dl <=? 0 or kl <=? 0 or dl =? kl {return false}
+    if is_shared(dl) or LGWord(locals.ptr[dl].flags) & (LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED) not=? 0 {return false}
+    let kfl=LGWord(locals.ptr[kl].flags)
+    if is_shared(kl) or kfl & (LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_EXPOSED) not=? 0 {return false}
+    if kfl & LF_ALIAS not=? 0 and locals.ptr[kl].alias =? 0 {return false}
+    if kfl & LF_BYREF not=? 0 and kfl & LF_VALUEITER =? 0 {return false}
+    let mt0=ntype(d2)
+    let kt0=ntype(k2)
+    let vt0=ntype(v_expr)
+    if types.ptr[mt0].kind =? 'refined' or types.ptr[kt0].kind =? 'refined' or types.ptr[vt0].kind =? 'refined' {return false}
+    let mt=prune(mt0)
+    let kt=prune(kt0)
+    let vt=prune(vt0)
+    if not is_map_type(mt) or vc(kt) =? VC_AGG or vc(vt) =? VC_AGG or ownership_type(kt) or ownership_type(vt) {return false}
+    if mentions_local(v_expr dl) or may_write_root(v_expr d2) or may_write_root(v_expr k2) {return false}
+    let fh:LGWord=0
+    let fp:LGWord=0
+    let fa:LGWord=0
+    map_set_scan(LGWord(fns.ptr[fn_set].body) map_path @fh @fp @fa)
+    if fh <=? 0 or fp <=? 0 or fa <=? 0 {return false}
+    if fns.ptr[fh].ptypes.length not=? 1 or fns.ptr[fp].ptypes.length not=? 3 or fns.ptr[fa].ptypes.length not=? 5 {return false}
+    if not type_eq(kt prune(LGWord(fns.ptr[fh].ptypes.ptr[0]))) or not type_eq(vt prune(LGWord(fns.ptr[fa].ptypes.ptr[2]))) {return false}
+    let has_else=nodes.ptr[e].c not=? 0
+    stmt_begin();
+    let d_addr=place_addr(gen_place(d2 true) mt)
+    let k_val=gen_borrowed(k1).v
+    let h=e_call1(lf_of_inst(fh) k_val VI)
+    let idx=e_call3(lf_of_inst(fp) d_addr k_val h VI)
+    stmt_end();
+    blk();
+    let end_level=ctl
+    if has_else {blk();}
+    let else_level=ctl
+    brif_to(e_bin('ges' VI idx e_iconst(0)) else_level);
+    enter_cond();
+    scope_push();
+    stmt_begin();
+    let v_val=gen_borrowed(v_expr).v
+    let slot0=e_bin('sub' VI e_iconst(-2) idx)
+    e_call(lf_of_inst(fa) [d_addr k_val v_val h slot0] -1);
+    stmt_end();
+    let guarded=lower_length_guards.length
+    let nbody=nkids(body)
+    loop bi in [1..nbody) {
+        cur_block=body
+        cur_block_i=bi
+        let st=kid(body bi)
+        let saved_pm=push_move_node
+        if bi =? nbody - 1 and not dbg_on and not copies_on and scope_defers.ptr[scope_defers.length - 1].length =? 0 and nodes.ptr[st].kind =? 'exprstmt' {
+            let pa=LGWord(nodes.ptr[st].a)
+            if pa >? 0 and nodes.ptr[pa].kind =? 'intrinsic' and (nodes.ptr[pa].aux as IN) =? IN.push {push_move_node=pa}
+        }
+        gen_stmt(st);
+        push_move_node=saved_pm
+        lower_length_guard(st);
+    }
+    lower_length_guards.truncate(guarded);
+    scope_pop();
+    if has_else {
+        br_to(end_level);
+        endc();
+        scope_push();
+        gen_block_stmts(LGWord(nodes.ptr[e].c));
+        scope_pop();
+    }
+    leave_cond();
+    endc();
+    true
+}
 gen_if=(e:LGWord t:LGWord):>Val=>$unsafe {
     let val=vc(t) not=? VC_VOID and t not=? T_NEVER and not has_flag(e NF_STMT)
+    if not val {
+        let c0=LGWord(nodes.ptr[e].a)
+        let ck0=nodes.ptr[c0].kind
+        if (ck0 =? 'istype' or (ck0 =? 'binary' and nodes.ptr[c0].aux2 not=? 0) or ck0 =? 'not_') and nodes.ptr[LGWord(nodes.ptr[c0].a)].kind =? 'call' and try_gen_map_insert_if_absent(e) {return V(-1 false)}
+    }
     let has_else=nodes.ptr[e].c not=? 0
     let rs:LGWord=-1
     let rv:LGWord=-1
@@ -4174,7 +4579,12 @@ gen_if=(e:LGWord t:LGWord):>Val=>$unsafe {
     enter_cond();
     let guard=if eg_active {eg_begin(LGWord(nodes.ptr[e].a) true)} else {0}
     let nz_mark=nz_locals.length
+    let ib_mark=ib_arrs.length
     nz_collect(LGWord(nodes.ptr[e].a) true)
+    if fixed_paths.length >? 0 and ib_arrs.length >? 0 {
+        let ck=nodes.ptr[LGWord(nodes.ptr[e].a)].kind
+        if ck =? 'binary' or ck =? 'and_' {ib_collect(LGWord(nodes.ptr[e].a) true)}
+    }
     if val {gen_value_block(LGWord(nodes.ptr[e].b) rs t rv);}
     else {
         scope_push();
@@ -4182,6 +4592,7 @@ gen_if=(e:LGWord t:LGWord):>Val=>$unsafe {
         scope_pop();
     }
     nz_locals.truncate(nz_mark)
+    if ib_arrs.length >? ib_mark {ib_truncate(ib_mark)}
     if eg_active {eg_end(guard);}
     if has_else {
         guard=if eg_active {eg_begin(LGWord(nodes.ptr[e].a) false)} else {0}
@@ -4581,8 +4992,16 @@ gen_vardecl=(s:LGWord):>void=>$unsafe {
         let iv:LGWord=LGWord(nodes.ptr[s].b)
         let a=fixed_array_len(iv)
         if a >=? 0 and LGWord(locals.ptr[l].flags) & LF_ASSIGNED =? 0 {len_of_local[l] = a;}
+        else if a <? 0 and nodes.ptr[iv].kind =? 'intrinsic' and (nodes.ptr[iv].aux as IN) =? IN.len {ib_len_record(l iv)}
+        if ib_arrs.length >? 0 {ib_copy_local(l iv)}
         # A := [x; E]: A's length is E for as long as A is not resized
-        if nodes.ptr[iv].kind =? 'array' and nodes.ptr[iv].b not=? 0 and fixed_array_local(l) {array_len_expr[l] = LGWord(nodes.ptr[iv].b);}
+        if nodes.ptr[iv].kind =? 'array' and nodes.ptr[iv].b not=? 0 and fixed_array_local(l) {
+            array_len_expr[l] = LGWord(nodes.ptr[iv].b);
+            record_const_array_len(l LGWord(nodes.ptr[iv].b));
+        }
+        else if nodes.ptr[iv].kind =? 'intrinsic' and (nodes.ptr[iv].aux as IN) =? IN.fill and nkids(iv) =? 2 and fixed_array_local(l) {
+            record_const_array_len(l kid(iv 1));
+        }
         let stack=nodes.ptr[iv].kind =? 'lambda' and files.ptr[pos_file(nodes.ptr[s].pos)].is_dewy and stack_closure_local(l)
         if stack and stack_closure_passed.has(l) {
             stack=not has_flag(iv NF_GENERIC) and closure_env_shareable(LGWord(nodes.ptr[iv].sym))
@@ -4660,7 +5079,7 @@ held_value_addr=(e:LGWord):>LGWord=>$unsafe {
 }
 gen_loop_body=(b:LGWord):>void=>$unsafe {
     scope_push();
-    gen_block_stmts(b);
+    gen_block_stmts_popping(b);
     scope_pop();
 }
 gen_stepped_for=(s:LGWord):>void=>$unsafe {
@@ -5339,6 +5758,54 @@ gen_while_scalar=(s:LGWord):>void=>$unsafe {
     fp_end(nfp);
     scope_pop();
 }
+gen_assign_ib=(s:LGWord):>void=>$unsafe {
+    let ib_saved_arr:LGWord=0
+    let ib_saved_off:LGWord=0
+    let ib_dst:LGWord=0
+    if nodes.ptr[s].op =? int32(47) and nodes.ptr[s].aux =? 0 {
+        ib_dst=ib_plain_local(LGWord(nodes.ptr[s].a))
+        if ib_dst not=? 0 {
+            let ib_src=ib_plain_local(LGWord(nodes.ptr[s].b))
+            if ib_src not=? 0 and ib_src not=? ib_dst {
+                loop j in [0..ib_arrs.length) {
+                    if ib_arrs.ptr[j] >? 0 and ib_idxs.ptr[j] =? ib_src {
+                        ib_saved_arr=ib_arrs.ptr[j]
+                        ib_saved_off=ib_offs.ptr[j]
+                        break
+                    }
+                }
+            }
+        }
+    }
+    gen_assign(s);
+    if ib_saved_arr >? 0 {ib_push(ib_saved_arr ib_dst ib_saved_off)}
+}
+gen_stmt_popping=(st:LGWord):>void=>$unsafe {
+    if not dbg_on and not copies_on and scope_defers.ptr[scope_defers.length - 1].length =? 0 and nodes.ptr[st].kind =? 'exprstmt' {
+        let pa=LGWord(nodes.ptr[st].a)
+        if pa >? 0 and nodes.ptr[pa].kind =? 'intrinsic' and (nodes.ptr[pa].aux as IN) =? IN.push {
+            let saved_pm=push_move_node
+            push_move_node=pa
+            gen_stmt(st);
+            push_move_node=saved_pm
+            return
+        }
+    }
+    gen_stmt(st);
+}
+ib_early_exit_if=(ex:LGWord):>void=>$unsafe {
+    if nodes.ptr[ex].c =? 0 {
+        let tb=LGWord(nodes.ptr[ex].b)
+        if tb >? 0 and nodes.ptr[tb].kind =? 'block' and nkids(tb) >? 0 {
+            let lk=nodes.ptr[kid(tb nkids(tb) - 1)].kind
+            if lk =? 'break_' or lk =? 'return_' or lk =? 'continue_' {
+                let ic=LGWord(nodes.ptr[ex].a)
+                let ick=nodes.ptr[ic].kind
+                if ick =? 'binary' or ick =? 'or_' {ib_collect(ic false)}
+            }
+        }
+    }
+}
 gen_stmt=(s:LGWord):>void=>$unsafe {
     ir_set_pos(nodes.ptr[s].pos);
     let k=nodes.ptr[s].kind
@@ -5349,7 +5816,8 @@ gen_stmt=(s:LGWord):>void=>$unsafe {
     }
     else if k =? 'assign' {
         stmt_begin();
-        gen_assign(s);
+        if ib_arrs.length >? 0 {gen_assign_ib(s);}
+        else {gen_assign(s);}
         if eg_stack.length >? 0 {eg_write(LGWord(nodes.ptr[s].a));}
         stmt_end();
     }
@@ -5403,6 +5871,28 @@ gen_stmt=(s:LGWord):>void=>$unsafe {
     }
     else if k =? 'const_' {}
     else {fatal(nodes.ptr[s].pos "unsupported statement in codegen");}
+}
+gen_block_stmts_popping=(b:LGWord):>void=>$unsafe {
+    if member_scopes.length >? 0 and nkids(b) >? 1 and member_lower_block(b) {return}
+    let settings=if dir_runtime_settings and (has_flag(b NF_UNSCOPED) or nodes.ptr[b].aux =? 5) {scope_defers.ptr[scope_defers.length - 1].length} else {-1}
+    let guarded=lower_length_guards.length
+    let ib_mark=ib_arrs.length
+    let nb=nkids(b)
+    let has_fp=fixed_paths.length >? 0
+    loop i in [0..nb) {
+        cur_block=b
+        cur_block_i=i
+        let st=kid(b i)
+        if i =? nb - 1 {gen_stmt_popping(st);}
+        else {
+            gen_stmt(st);
+            if has_fp and nodes.ptr[st].kind =? 'if_' {ib_early_exit_if(st);}
+        }
+        lower_length_guard(st);
+    }
+    if ib_arrs.length >? ib_mark {ib_truncate(ib_mark)}
+    lower_length_guards.truncate(guarded);
+    gen_unscoped_settings(settings);
 }
 gen_block_stmts=(b:LGWord):>void=>$unsafe {
     if member_scopes.length >? 0 and nkids(b) >? 1 and member_lower_block(b) {return}

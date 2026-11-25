@@ -157,15 +157,43 @@ lower_length_guard=(n0:IndexWord):>void=>$unsafe {
     let [known length]=integer_constant(IndexWord(nodes.ptr[condition].b))
     if known and length >? 0 {index_lower_length_guards[0].push([array length])}
 }
+let array_len_const_fn:IndexWord=-1
+let array_len_const_arr:array<int64>=[]
+let array_len_const_len:array<int64>=[]
+record_const_array_len=(al:IndexWord len_node:IndexWord):>void=>$unsafe {
+    let [known clen]=integer_constant(len_node)
+    if not known or clen <=? 0 {return}
+    if array_len_const_fn not=? cur_fn {
+        array_len_const_fn=cur_fn
+        if array_len_const_arr.length >? 0 {
+            array_len_const_arr.clear()
+            array_len_const_len.clear()
+        }
+    }
+    array_len_const_arr.push(al)
+    array_len_const_len.push(clen)
+}
 # 0: needs a bounds check, 1: in bounds, 2: in bounds but keep the null check (other
 # accesses to the array in the loop are checked and can build on it)
 index_safety=(arr:IndexWord idx0:IndexWord):>IndexWord=>$unsafe {
     let idx=word_integer_value(idx0)
-    if lower_length_guards.length >? 0 and nodes.ptr[arr].kind =? 'ident' and nodes.ptr[arr].aux =? int32(1) {
-        loop guard in lower_length_guards {
-            if guard[0] =? IndexWord(nodes.ptr[arr].sym) {
-                let bound=positive_bound(idx true)
-                if bound >=? 0 and bound <? guard[1] {return 1}
+    if (lower_length_guards.length >? 0 or (array_len_const_fn =? cur_fn and array_len_const_arr.length >? 0)) and nodes.ptr[arr].kind =? 'ident' and nodes.ptr[arr].aux =? int32(1) {
+        let al=IndexWord(nodes.ptr[arr].sym)
+        if array_len_const_fn =? cur_fn and array_len_const_arr.length >? 0 {
+            loop i in [0..array_len_const_arr.length) {
+                if array_len_const_arr.ptr[i] =? al {
+                    let bound=positive_bound(idx true)
+                    if bound >=? 0 and bound <? array_len_const_len.ptr[i] {return 1}
+                    break
+                }
+            }
+        }
+        if lower_length_guards.length >? 0 {
+            loop guard in lower_length_guards {
+                if guard[0] =? al {
+                    let bound=positive_bound(idx true)
+                    if bound >=? 0 and bound <? guard[1] {return 1}
+                }
             }
         }
     }
@@ -417,59 +445,194 @@ positive_target_write=(n:IndexWord bound:IndexWord):>void=>$unsafe {
         loop i in [0..nkids(n)) {positive_target_write(kid(n i) (-1))}
     }
 }
+let positive_deps:array<[int64 int64 bool]>=[]
+let positive_is_dewy:bool=false
+positive_deps_clear=(is_dewy:bool):>void=>{
+    positive_is_dewy=is_dewy
+    if positive_deps.length >? 0 {positive_deps.clear()}
+}
+positive_deps_finish=():>void=>$unsafe {
+    let nd=positive_deps.length
+    if nd =? 0 {return}
+    let iter:IndexWord=0
+    loop iter <=? nd {
+        let changed=false
+        loop dep in positive_deps {
+            let dst=dep[0]
+            let src=dep[1]
+            let is_add=dep[2]
+            let db=positive_bounds.get(dst) ?? (-1)
+            if db <? 0 {continue}
+            let sb=positive_bounds.get(src) ?? (-1)
+            if sb <? 0 {
+                positive_place_bounds[0][dst]=-1
+                changed=true
+            }
+            else if is_add {
+                if db <? 9223372036854775807 {
+                    positive_place_bounds[0][dst]=9223372036854775807
+                    changed=true
+                }
+            }
+            else if sb >? db {
+                positive_place_bounds[0][dst]=sb
+                changed=true
+            }
+        }
+        if not changed {break}
+        iter += 1
+    }
+    positive_deps.clear()
+}
+positive_local_rhs=(rhs0:IndexWord):>[int64 bool]=>$unsafe {
+    let r=rhs0
+    if r >? 0 and nodes.ptr[r].kind =? 'conv' and nodes.ptr[r].aux =? int32(int64(CV.fixed_store)) {r=IndexWord(nodes.ptr[r].a)}
+    r=word_integer_value(r)
+    if r <=? 0 {return [0 false]}
+    let rk=nodes.ptr[r].kind
+    if rk =? 'ident' and nodes.ptr[r].aux =? int32(1) {
+        let sl=IndexWord(nodes.ptr[r].sym)
+        if sl >? 0 {
+            let sfl=IndexWord(locals.ptr[sl].flags)
+            let skip=LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_SOAELEM | LF_ELEMALIAS | LF_QUIET
+            if sfl & LF_DECL not=? 0 and sfl & skip =? 0 and prune(IndexWord(locals.ptr[sl].type)) =? T_INT {return [sl false]}
+        }
+        return [0 false]
+    }
+    if rk =? 'binary' and nodes.ptr[r].aux =? 0 {
+        let op=nodes.ptr[r].op
+        if op =? int32(58) or op =? int32(60) {
+            let a=IndexWord(nodes.ptr[r].a)
+            let b=IndexWord(nodes.ptr[r].b)
+            if nodes.ptr[b].kind =? 'int_lit' and not has_flag(b NF_U64) and nodes.ptr[b].ival >=? 0 {
+                let [sl _]=positive_local_rhs(a)
+                if sl >? 0 {return [sl true]}
+            }
+            if nodes.ptr[a].kind =? 'int_lit' and not has_flag(a NF_U64) and nodes.ptr[a].ival >=? 0 {
+                let [sl _]=positive_local_rhs(b)
+                if sl >? 0 {return [sl true]}
+            }
+        }
+    }
+    [0 false]
+}
+positive_local_ok=(l:IndexWord):>IndexWord=>$unsafe {
+    if l <=? 0 or IndexWord(locals.ptr[l].owner) not=? cur_fn {return 0}
+    let fl=IndexWord(locals.ptr[l].flags)
+    let skip=LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_SOAELEM | LF_ELEMALIAS | LF_QUIET
+    if fl & LF_DECL =? 0 or fl & skip not=? 0 {return 0}
+    let lt=prune(IndexWord(locals.ptr[l].type))
+    if lt =? T_INT {return 1}
+    if lt =? T_MATH_INT {return 2}
+    0
+}
+positive_local_write_ok=(l:IndexWord bound:IndexWord):>void=>$unsafe {
+    let old=positive_bounds.get(l) ?? bound
+    if old <? 0 or bound <? 0 {positive_place_bounds[0][l]=-1}
+    else {positive_place_bounds[0][l]=max(old bound)}
+}
 positive_write=(n:IndexWord):>void=>$unsafe {
     let k=nodes.ptr[n].kind
     if k =? 'vardecl' and not has_flag(n NF_GLOBAL) {
         if nkids(n) =? 0 {
+            let l=IndexWord(nodes.ptr[n].sym)
+            let ok=positive_local_ok(l)
+            if ok =? 0 {return}
             let b=IndexWord(nodes.ptr[n].b)
-            positive_local_write(IndexWord(nodes.ptr[n].sym) if b =? 0 {0} else {positive_bound(b false)})
+            if b =? 0 {
+                positive_local_write_ok(l 0)
+                return
+            }
+            let bound=positive_bound(b false)
+            if bound <? 0 and positive_is_dewy and ok =? 1 {
+                let bk=nodes.ptr[b].kind
+                if bk =? 'ident' or bk =? 'binary' or bk =? 'conv' {
+                    let [sl is_add]=positive_local_rhs(b)
+                    if sl >? 0 {
+                        positive_deps.push([l sl is_add])
+                        positive_local_write_ok(l 0)
+                        return
+                    }
+                }
+            }
+            positive_local_write_ok(l bound)
         }
         else {
             loop i in [0..nkids(n)) {positive_local_write(IndexWord(nodes.ptr[kid(n i)].sym) (-1))}
         }
+        return
     }
     if k =? 'assign' {
+        let lhs=IndexWord(nodes.ptr[n].a)
+        let lk=nodes.ptr[lhs].kind
+        if lk =? 'tuple' {
+            positive_target_write(lhs (-1))
+            return
+        }
+        if lk not=? 'ident' or nodes.ptr[lhs].aux not=? int32(1) {return}
+        let l0=IndexWord(nodes.ptr[lhs].sym)
+        let ok=positive_local_ok(l0)
+        if ok =? 0 {return}
+        let old=positive_bounds.get(l0)
+        if old not=? none and old <? 0 {return}
         let bound:IndexWord=-1
         if nodes.ptr[n].op =? int32(47) and nodes.ptr[n].aux =? 0 {
             let rhs=IndexWord(nodes.ptr[n].b)
             bound=positive_bound(rhs false)
-            let pf=pos_file(nodes.ptr[n].pos)
-            if bound <? 0 and pf >=? 0 and pf <? files.length and files.ptr[pf].is_dewy {
-                let lhs=IndexWord(nodes.ptr[n].a)
-                if nodes.ptr[lhs].kind =? 'ident' and nodes.ptr[lhs].aux =? int32(1) {
-                    let l0=IndexWord(nodes.ptr[lhs].sym)
-                    let lt0=if l0 >? 0 {prune(IndexWord(locals.ptr[l0].type))} else {0}
-                    if lt0 =? T_INT {
-                        let rb=rhs
-                        if rb >? 0 and nodes.ptr[rb].kind =? 'conv' and nodes.ptr[rb].aux =? int32(int64(CV.fixed_store)) {rb=IndexWord(nodes.ptr[rb].a)}
-                        rb=word_integer_value(rb)
-                        if rb >? 0 and nodes.ptr[rb].kind =? 'binary' and nodes.ptr[rb].aux =? 0 and nodes.ptr[rb].op =? int32(58) {
-                            let ra=word_integer_value(IndexWord(nodes.ptr[rb].a))
-                            let rc=word_integer_value(IndexWord(nodes.ptr[rb].b))
-                            if ra >? 0 and nodes.ptr[ra].kind =? 'ident' and nodes.ptr[ra].aux =? int32(1) and IndexWord(nodes.ptr[ra].sym) =? l0 and positive_bound(rc false) >=? 0 {
-                                bound=9223372036854775807
-                            } else if rc >? 0 and nodes.ptr[rc].kind =? 'ident' and nodes.ptr[rc].aux =? int32(1) and IndexWord(nodes.ptr[rc].sym) =? l0 and positive_bound(ra false) >=? 0 {
-                                bound=9223372036854775807
+            if bound <? 0 and positive_is_dewy and ok =? 1 {
+                let rb=rhs
+                if rb >? 0 and nodes.ptr[rb].kind =? 'conv' and nodes.ptr[rb].aux =? int32(int64(CV.fixed_store)) {rb=IndexWord(nodes.ptr[rb].a)}
+                rb=word_integer_value(rb)
+                if rb >? 0 and nodes.ptr[rb].kind =? 'binary' and nodes.ptr[rb].aux =? 0 and nodes.ptr[rb].op =? int32(58) {
+                    let ra=word_integer_value(IndexWord(nodes.ptr[rb].a))
+                    let rc=word_integer_value(IndexWord(nodes.ptr[rb].b))
+                    if ra >? 0 and nodes.ptr[ra].kind =? 'ident' and nodes.ptr[ra].aux =? int32(1) and IndexWord(nodes.ptr[ra].sym) =? l0 {
+                        if positive_bound(rc false) >=? 0 {bound=9223372036854775807}
+                        else {
+                            let [sl _]=positive_local_rhs(rc)
+                            if sl >? 0 {
+                                positive_deps.push([l0 sl true])
+                                positive_local_write_ok(l0 0)
+                                return
                             }
                         }
+                    } else if rc >? 0 and nodes.ptr[rc].kind =? 'ident' and nodes.ptr[rc].aux =? int32(1) and IndexWord(nodes.ptr[rc].sym) =? l0 {
+                        if positive_bound(ra false) >=? 0 {bound=9223372036854775807}
+                        else {
+                            let [sl _]=positive_local_rhs(ra)
+                            if sl >? 0 {
+                                positive_deps.push([l0 sl true])
+                                positive_local_write_ok(l0 0)
+                                return
+                            }
+                        }
+                    }
+                }
+                if bound <? 0 {
+                    let [sl is_add]=positive_local_rhs(rhs)
+                    if sl >? 0 {
+                        positive_deps.push([l0 sl is_add])
+                        positive_local_write_ok(l0 0)
+                        return
                     }
                 }
             }
         }
         else if nodes.ptr[n].op =? int32(48) and nodes.ptr[n].aux =? 0 {
-            let pf=pos_file(nodes.ptr[n].pos)
-            if pf >=? 0 and pf <? files.length and files.ptr[pf].is_dewy {
-                let lhs=IndexWord(nodes.ptr[n].a)
-                if nodes.ptr[lhs].kind =? 'ident' and nodes.ptr[lhs].aux =? int32(1) {
-                    let l0=IndexWord(nodes.ptr[lhs].sym)
-                    let lt0=if l0 >? 0 {prune(IndexWord(locals.ptr[l0].type))} else {0}
-                    if lt0 =? T_INT and positive_bound(IndexWord(nodes.ptr[n].b) false) >=? 0 {
-                        bound=9223372036854775807
+            if positive_is_dewy and ok =? 1 {
+                if positive_bound(IndexWord(nodes.ptr[n].b) false) >=? 0 {
+                    bound=9223372036854775807
+                } else {
+                    let [sl _]=positive_local_rhs(IndexWord(nodes.ptr[n].b))
+                    if sl >? 0 {
+                        positive_deps.push([l0 sl true])
+                        positive_local_write_ok(l0 0)
+                        return
                     }
                 }
             }
         }
-        positive_target_write(IndexWord(nodes.ptr[n].a) bound)
+        positive_local_write_ok(l0 bound)
     }
 }
 

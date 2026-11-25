@@ -15,7 +15,7 @@ from p"exact_marks.dewy" import (exact_has_node exact_proved exact_range_flags)
 from p"exact_check_hooks.dewy" import (exact_representation)
 from p"exact_static_widths.dewy" import (exact_midpoint exact_type_width)
 from p"exact_chain_walks.dewy" import (exact_affine_store exact_chain_store exact_offset_store)
-from p"exact_guard_ops.dewy" import (eg_fits)
+from p"exact_guard_ops.dewy" import (eg_fits eg_nonneg)
 from p"exact_loop.jo" import (exact_loop_fast exact_map_active exact_map_stores)
 from p"exact_words.dewy" import (exact_add exact_compare exact_div exact_extend exact_mul exact_neg exact_select exact_shift exact_shift_literal)
 from p"expr.jo" import (CV IN)
@@ -24,7 +24,7 @@ from p"ir.jo" import (VI checked_flags ir_cold)
 from p"ir_builders.dewy" import (e_addi e_bin e_call e_call1 e_fconst e_iconst e_mov e_slot e_store e_un emit new_slot vreg)
 from p"ir_types.dewy" import (Op)
 from p"lower.jo" import (Val)
-from p"lower_group.dewy" import (gen_borrowed gen_expr gen_iflet gen_match gen_place gen_stmt scope_pop)
+from p"lower_group.dewy" import (gen_borrowed gen_expr gen_iflet gen_match gen_place gen_stmt ib_is_bounded_local scope_pop)
 from p"lower_primitives.dewy" import (e_call_nr1 e_daddr loc_data rt)
 from p"lower_scalars.dewy" import (int_op math_int_guard)
 from p"lower_storage.dewy" import (V els endc enter_cond freeze_scalar iff leave_cond norm opt_has opt_value place_addr scope_push stmt_begin stmt_end vt_of)
@@ -146,8 +146,21 @@ exact_fast_compare=(op:Tok ln:ExactEmitWord rn:ExactEmitWord):>int64=>$unsafe {
         yv=exact_value(y)[0]
         cmp=exact_flip_cmp(op)
     }
-    if is_sub and (is_nonneg(x) or positive_bound(x true) >=? 0) and (is_nonneg(y) or positive_bound(y true) >=? 0) {
+    if is_sub and (is_nonneg(x) or positive_bound(x true) >=? 0 or eg_nonneg(x)) and (is_nonneg(y) or positive_bound(y true) >=? 0 or eg_nonneg(y)) {
         return e_bin(exact_cmp_ir(cmp) VI e_bin('sub' VI xv yv) zv)
+    }
+    # For signed int64 x, nonnegative z, and positive constant c (1..int64.max),
+    # z - c lies in [-int64.max..int64.max-1] without overflow, so x + c cmp z
+    # equals x cmp (z - c) in exact arithmetic without an overflow branch.
+    if not is_sub {
+        let [yk yval]=integer_constant(y)
+        if yk and not has_flag(y NF_U64) and yval >? 0 and (is_nonneg(other) or positive_bound(other true) >=? 0 or eg_nonneg(other)) {
+            return e_bin(exact_cmp_ir(cmp) VI xv e_bin('sub' VI zv yv))
+        }
+        let [xk xval]=integer_constant(x)
+        if xk and not has_flag(x NF_U64) and xval >? 0 and (is_nonneg(other) or positive_bound(other true) >=? 0 or eg_nonneg(other)) {
+            return e_bin(exact_cmp_ir(cmp) VI yv e_bin('sub' VI zv xv))
+        }
     }
     let sum=e_bin(if is_sub {'sub'} else {'add'} VI xv yv)
     let ovf=e_bin(if is_sub {'overflow_sub'} else {'overflow_add'} VI xv yv)
@@ -474,6 +487,16 @@ exact_gen_store=(n:ExactEmitWord):>Val=>$unsafe {
         proven=bound >=? 0 and sa_fits(bound t)
     }
     if not proven and t =? T_INT and eg_fits(source) {proven=true}
+    if not proven and t =? T_INT and nodes.ptr[source].kind =? 'binary' and nodes.ptr[source].aux =? 0 and nodes.ptr[source].op =? int32(58) {
+        let sa=ExactEmitWord(nodes.ptr[source].a)
+        let sb=ExactEmitWord(nodes.ptr[source].b)
+        let [kb kv]=integer_constant(sb)
+        if kb and not has_flag(sb NF_U64) and kv >=? 0 and kv <=? 1024 and ib_is_bounded_local(sa) {proven=true}
+        else {
+            let [ka kva]=integer_constant(sa)
+            if ka and not has_flag(sa NF_U64) and kva >=? 0 and kva <=? 1024 and ib_is_bounded_local(sb) {proven=true}
+        }
+    }
     let bits=types.ptr[t].bits
     let signed=types.ptr[t].sign
     if proven and bits <=? 64 {return V(exact_low_word(source) false)}

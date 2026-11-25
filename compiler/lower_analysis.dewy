@@ -402,7 +402,16 @@ index_stable=(n:LAWord rhs:LAWord):>bool=>$unsafe {
     if op not=? 'plus' and op not=? 'minus' and op not=? 'star' and op not=? 'amp' and op not=? 'pipe' and op not=? 'caret' and op not=? 'kw_xor' {return false}
     return index_stable(LAWord(nodes.ptr[n].a) rhs) and index_stable(LAWord(nodes.ptr[n].b) rhs)
 }
-unchanged_by=(e:LAWord n:LAWord):>bool=>$unsafe {
+unchanged_by=(e0:LAWord n:LAWord):>bool=>$unsafe {
+    let e=e0
+    if e >? 0 and (nodes.ptr[e].kind =? 'narrow' or nodes.ptr[e].kind =? 'unwrap') {e=LAWord(nodes.ptr[e].a)}
+    if e >? 0 and nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32(1) {
+        let r0:LAWord=LAWord(nodes.ptr[e].sym)
+        if LAWord(locals.ptr[r0].flags) & LF_ALIAS not=? 0 and locals.ptr[r0].alias not=? 0 {
+            let al:LAWord=LAWord(locals.ptr[r0].alias)
+            if nodes.ptr[al].kind =? 'narrow' or nodes.ptr[al].kind =? 'unwrap' {e=LAWord(nodes.ptr[al].a)}
+        }
+    }
     if lpath_key(e) =? 0 {return false}
     let rn=lpath_root(e)
     if nodes.ptr[rn].aux not=? int32(2) {

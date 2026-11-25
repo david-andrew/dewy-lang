@@ -28,7 +28,7 @@ from p"exact_raw_plans.dewy" import (exact_local_width)
 from p"exact_words.dewy" import (exact_add exact_extend exact_mul exact_neg exact_shift_literal)
 from p"exact_reset_loop.jo" import (exr_fast exr_locals)
 from p"facts.jo" import (positive_bounds positive_bounds_fn positive_collecting_writes)
-from p"facts_index_proofs.dewy" import (positive_bound positive_write)
+from p"facts_index_proofs.dewy" import (positive_bound positive_deps_clear positive_deps_finish positive_write)
 from p"facts_index_proofs.dewy" import (stable_loop_index word_integer_value)
 from p"facts_values.dewy" import (fact_domain)
 from p"facts_ranges.dewy" import (fact_floor_call)
@@ -748,6 +748,9 @@ math_prepare_writes=():>void=>$unsafe {
     math_writes_ready=true
     positive_bounds_fn=cur_fn
     positive_bounds.clear();
+    let pfd=MathWord(fns.ptr[cur_fn].decl)
+    let pff=if pfd >? 0 {pos_file(nodes.ptr[pfd].pos)} else {-1}
+    positive_deps_clear(pff >=? 0 and pff <? files.length and files.ptr[pff].is_dewy);
     let enclosing:array<int64>=[]
     positive_collecting_writes=true
     # Finalization already visited these bodies. Replay only writes and
@@ -760,6 +763,7 @@ math_prepare_writes=():>void=>$unsafe {
     }
     else {math_index_writes(MathWord(fns.ptr[cur_fn].body) @enclosing);}
     positive_collecting_writes=false
+    positive_deps_finish();
 }
 math_index_writes=(n:MathWord @enclosing:array<int64>):>void=>$unsafe {
     if n =? 0 {return}
