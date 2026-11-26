@@ -542,8 +542,9 @@ This follows your direction from 11-26 ([your notes](proposals/cleanup/answers-r
 - **One failure comes back bare; several from one exit come back as one ordered list.**
 - **Cleanup hooks (`$__drop__`, `$__abandon__`) may only end the value's own fields.** Publishing work, like an archive's footer, goes in a consuming method such as `finish`.
 - **A failed removal of a temporary file is an undo failure** (`TempRemoveFailed`), so `first_ok` can't discard it.
+- **Raced work:** a function run under `race` or `first_ok` can't own a value that still owes a flush (such as a `FileWriter`) across a point where it can be cancelled, so a loser's final flush is never silently discarded.
 - **An exit that carries an owing value out**, such as `return writer`, can't also have a failing `defer` still live: finish the other value first.
-- **The warning-only tier for leftovers is dropped:** no standard type needs it, and both names tested for it failed their cold read. Your warning idea stays available if a real case turns up.
+- **The warning-only tier for leftovers is given up:** no standard type needs it, and both names tested for it failed their cold read. Your warning idea stays available if a real case turns up.
 
 **Know before deciding:** two things are still not visible in the text alone.
 - A `return` line doesn't show that a close may replace its value.
@@ -568,7 +569,7 @@ The list's name is D42 Q4: round 10 recommends `ErrorList`. In a cold read all t
 - returning an owner while another value's close is still pending;
 - automatic joining, which cost 12 lines across 13 programs.
 
-**Not done yet:** an independent review of rounds 9 and 10 together, and a cost check on the flagship panel.
+**Reviewed:** an independent review of rounds 9 and 10 found the earlier blockers fixed and the design ready to bring to you ([review](proposals/cleanup/review-round10.md)). **Not done yet:** a cost check on the flagship panel, which needs an implementation.
 
 [Round 10](proposals/cleanup/round10.md) · [round 9](proposals/cleanup/round9.md) · [round 9 review](proposals/cleanup/review-round9.md) · [cold read](proposals/cleanup/cold-read-round9.md) · [round 8 study](proposals/cleanup/round8.md)
 
