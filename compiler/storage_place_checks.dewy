@@ -30,13 +30,15 @@ StoragePlaceChecksWord:type=int64<overflow='wrap'>
 check_place=(n:int64 for_mut:bool):>void=>$unsafe {
     let cp_inner_slot=@cp_inner
     let place_write_pos_slot=@place_write_pos
-    if is_map_get(n) {map_elem_place(n)}
     let k=nodes.ptr[n].kind
+    if k =? 'call' and is_map_get(n) {
+        map_elem_place(n)
+        k=nodes.ptr[n].kind
+    }
     if k =? 'ident' {
         if nodes.ptr[n].aux =? 1 {
             let l=StoragePlaceChecksWord(nodes.ptr[n].sym)
             let f=StoragePlaceChecksWord(locals.ptr[l].flags)
-            let nm=name_of(StoragePlaceChecksWord(locals.ptr[l].name))
             if f & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 and narrowed_var(l) =? 0 {
                 let alias=StoragePlaceChecksWord(locals.ptr[l].alias)
                 if nodes.ptr[alias].kind =? 'unwrap' or nodes.ptr[alias].kind =? 'narrow' {
@@ -51,41 +53,49 @@ check_place=(n:int64 for_mut:bool):>void=>$unsafe {
                     return
                 }
             }
-            if f & LF_SOAELEM not=? 0 {fatal(nodes.ptr[n].pos "'{nm}' stands for an element of a soa array: assign it a whole value (in `loop mut`) or change its fields")}
+            if f & LF_SOAELEM not=? 0 {fatal(nodes.ptr[n].pos "'{name_of(StoragePlaceChecksWord(locals.ptr[l].name))}' stands for an element of a soa array: assign it a whole value (in `loop mut`) or change its fields")}
             # a closure modifying a variable it captured modifies the variable itself
             # (and a narrowed name stands for its variable, which a closure may have captured)
             let r=l
             let via_closure=false
-            loop true {
-                if StoragePlaceChecksWord(locals.ptr[r].flags) & LF_CAPTURE not=? 0 and StoragePlaceChecksWord(locals.ptr[r].flags) & LF_VALUECAP =? 0 {
-                    r=StoragePlaceChecksWord(locals.ptr[r].outer)
-                    via_closure=true
+            let rf=f
+            if (rf & (LF_CAPTURE | LF_ALIAS)) not=? 0 {
+                loop true {
+                    if rf & LF_CAPTURE not=? 0 and rf & LF_VALUECAP =? 0 {
+                        r=StoragePlaceChecksWord(locals.ptr[r].outer)
+                        via_closure=true
+                        rf=StoragePlaceChecksWord(locals.ptr[r].flags)
+                    }
+                    else if rf & LF_ALIAS not=? 0 {
+                        let nv=narrowed_var(r)
+                        if nv =? 0 {break}
+                        r=nv
+                        rf=StoragePlaceChecksWord(locals.ptr[r].flags)
+                    }
+                    else {break}
                 }
-                else if narrowed_var(r) not=? 0 {r=narrowed_var(r)}
-                else {break}
             }
-            let rf=StoragePlaceChecksWord(locals.ptr[r].flags)
             if (rf & LF_BYREF not=? 0 or loop_copy_writes.length >? 0 and loop_copy_writes.has(r)) and dewy_at(nodes.ptr[n].pos) {
                 # (`loop x in xs`: x is the loop's own copy, which this write makes real)
                 loop_copy_write(r nodes.ptr[n].pos via_closure for_mut)
                 rf=StoragePlaceChecksWord(locals.ptr[r].flags)
                 if r =? l {f=rf}
             }
-            if rf & LF_CONST not=? 0 {place_fatal(nodes.ptr[n].pos "cannot modify const '{nm}'; copy it with `let {nm} = {nm}`")}
+            if rf & LF_CONST not=? 0 {let nm=name_of(StoragePlaceChecksWord(locals.ptr[l].name)); place_fatal(nodes.ptr[n].pos "cannot modify const '{nm}'; copy it with `let {nm} = {nm}`")}
             if rf & (LF_CAPTURE | LF_VALUECAP) =? LF_CAPTURE | LF_VALUECAP and implicit_capture(r) {implicit_capture_write(r if place_write_pos_slot not=? 0 {place_write_pos_slot} else {nodes.ptr[n].pos})}
-            let ag=alias_global(r)
-            if ag >=? 0 and readonly_global(ag) {place_fatal(nodes.ptr[n].pos "cannot modify const '{nm}'")}
-            if rf & LF_PARAM not=? 0 and rf & LF_MUTPARAM =? 0 and not consumed_receiver(r) {place_fatal(nodes.ptr[n].pos "cannot modify parameter '{nm}' (parameters are read-only; {jd(nodes.ptr[n].pos "mark it `mut`" "take it by place, `@{nm}`,")} or copy it with `let {nm} = {nm}`)")}
-            if rf & LF_BYREF not=? 0 and via_closure {fatal(nodes.ptr[n].pos "cannot modify loop variable '{nm}', a copy of an element, and the function changing it runs later: change the element by its position, `loop i in 0.. and {nm} in xs:` and then `(): xs[i]...` in the function")}
-            if rf & LF_BYREF not=? 0 {place_fatal(nodes.ptr[n].pos "cannot modify loop variable '{nm}' (use `{mutable_loop_syntax(nodes.ptr[n].pos)}` to modify elements)")}
+            let ag:StoragePlaceChecksWord=if rf & LF_ALIAS not=? 0 {alias_global(r)} else {-1}
+            if ag >=? 0 and readonly_global(ag) {place_fatal(nodes.ptr[n].pos "cannot modify const '{name_of(StoragePlaceChecksWord(locals.ptr[l].name))}'")}
+            if rf & LF_PARAM not=? 0 and rf & LF_MUTPARAM =? 0 and not consumed_receiver(r) {let nm=name_of(StoragePlaceChecksWord(locals.ptr[l].name)); place_fatal(nodes.ptr[n].pos "cannot modify parameter '{nm}' (parameters are read-only; {jd(nodes.ptr[n].pos "mark it `mut`" "take it by place, `@{nm}`,")} or copy it with `let {nm} = {nm}`)")}
+            if rf & LF_BYREF not=? 0 and via_closure {let nm=name_of(StoragePlaceChecksWord(locals.ptr[l].name)); fatal(nodes.ptr[n].pos "cannot modify loop variable '{nm}', a copy of an element, and the function changing it runs later: change the element by its position, `loop i in 0.. and {nm} in xs:` and then `(): xs[i]...` in the function")}
+            if rf & LF_BYREF not=? 0 {place_fatal(nodes.ptr[n].pos "cannot modify loop variable '{name_of(StoragePlaceChecksWord(locals.ptr[l].name))}' (use `{mutable_loop_syntax(nodes.ptr[n].pos)}` to modify elements)")}
             let nf=f | LF_ASSIGNED
             if cp_inner_slot =? 0 {nf |= LF_RESIZED}
             if for_mut and f & LF_CAPTURE =? 0 {nf |= LF_ADDR}
-            locals[l].flags = int32<overflow='wrap'>(nf)
+            locals.ptr[l].flags = int32<overflow='wrap'>(nf)
             if r not=? l {
                 rf |= LF_ASSIGNED
                 if cp_inner_slot =? 0 {rf |= LF_RESIZED}
-                locals[r].flags = int32<overflow='wrap'>(rf)
+                locals.ptr[r].flags = int32<overflow='wrap'>(rf)
             }
             if const_views.length >? 0 {const_view_write(r nodes.ptr[n].pos)}
             if for_mut and string_domains.length >? 0 and ntype(n) =? T_STR {string_domain_write(n 0)}

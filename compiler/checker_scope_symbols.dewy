@@ -53,6 +53,7 @@ new_local=(name:int64 t:int64 pos:int64):>int64=>$unsafe {
 # elements picked by a mask or indexes; the rewritten statement, or 0
 # A condition that has just been found to hold or not: `i =? k` on a local is noted, with a scope
 # entry so that the branch's reset takes it back. O(1).
+let id_position_guard:CheckerScopeSymbolsWord=0
 position_guard_note=(c:int64 holds:bool):>void=>$unsafe {
     let op=nodes.ptr[c].op
     # Frozen Tok.eq and Tok.ne ordinals.
@@ -66,5 +67,6 @@ position_guard_note=(c:int64 holds:bool):>void=>$unsafe {
     }
     if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? 1 or nodes.ptr[b].kind not=? 'int_lit' {return}
     position_guards.push(PositionGuard(local=nodes.ptr[a].sym value=int32<overflow='wrap'>(nodes.ptr[b].ival) mark=int32(scope_mark())))
-    push_scope_sym(intern("$position_guard") 0)
+    if id_position_guard =? 0 {id_position_guard=intern("$position_guard")}
+    push_scope_sym(id_position_guard 0)
 }

@@ -48,7 +48,7 @@ checker_numeric_bind=(input:ptr<CheckerNumericInput>):>XWWord=>$unsafe {
     xw_never_type=input[0].never_type
     0
 }
-xw_in_dewy=(n:XWWord):>bool=>$unsafe {xw_files[0][xw_nodes[0].ptr[n].pos >> 40].is_dewy}
+xw_in_dewy=(n:XWWord):>bool=>$unsafe {xw_files[0].ptr[xw_nodes[0].ptr[n].pos >> 40].is_dewy}
 xw_dewy=(n:XWWord):>bool=>$unsafe {
     let pos=xw_nodes[0].ptr[n].pos
     let f=pos >> 40
@@ -178,21 +178,29 @@ xw_fold_float=(n:XWWord op:int32 a:XWWord b:XWWord):>XWWord=>$unsafe {
 }
 xw_numeric=(n:XWWord op:int32 a:XWWord b:XWWord ta:XWWord tb:XWWord is_cmp:bool):>XWWord=>$unsafe {
     let dewy_file=xw_in_dewy(n)
-    if op =? 61 and xw_int(ta) and xw_int(tb) and dewy_file {numeric_error(n 1)}
-    # High unsigned Dewy literals go through typed lowering: the untyped fold uses
-    # signed division and shifts and would lose their unsigned meaning.
-    let wide_unsigned=(xw_flag(a 2097152) or xw_flag(b 2097152)) and dewy_file
-    if xw_flag(a 256) and xw_flag(b 256) and not is_cmp and not wide_unsigned {
-        let ak=xw_nodes[0].ptr[a].kind
-        let bk=xw_nodes[0].ptr[b].kind
-        if ak =? 'int_lit' and bk =? 'int_lit' {
-            let folded=xw_fold_int(n op a b)
-            if folded >=? 0 {return folded}
-        } else if (op =? 58 or op =? 59 or op =? 60 or op =? 61) and (ak =? 'int_lit' or ak =? 'float_lit') and (bk =? 'int_lit' or bk =? 'float_lit') {
-            return xw_fold_float(n op a b)
+    let tak=xw_types[0].ptr[ta].kind
+    let tbk=xw_types[0].ptr[tb].kind
+    if op =? 61 and tak =? 'int_' and tbk =? 'int_' and dewy_file {numeric_error(n 1)}
+    let fa=XWWord(xw_nodes[0].ptr[a].flags)
+    let fb=XWWord(xw_nodes[0].ptr[b].flags)
+    let a_lit=(fa & 256) not=? 0
+    let b_lit=(fb & 256) not=? 0
+    if a_lit and b_lit and not is_cmp {
+        # High unsigned Dewy literals go through typed lowering: the untyped fold uses
+        # signed division and shifts and would lose their unsigned meaning.
+        let wide_unsigned=(((fa | fb) & 2097152) not=? 0) and dewy_file
+        if not wide_unsigned {
+            let ak=xw_nodes[0].ptr[a].kind
+            let bk=xw_nodes[0].ptr[b].kind
+            if ak =? 'int_lit' and bk =? 'int_lit' {
+                let folded=xw_fold_int(n op a b)
+                if folded >=? 0 {return folded}
+            } else if (op =? 58 or op =? 59 or op =? 60 or op =? 61) and (ak =? 'int_lit' or ak =? 'float_lit') and (bk =? 'int_lit' or bk =? 'float_lit') {
+                return xw_fold_float(n op a b)
+            }
         }
     }
-    if is_cmp and xw_int(ta) and xw_int(tb) and (ta not=? xw_math_int[0] or xw_flag(a 256)) and (tb not=? xw_math_int[0] or xw_flag(b 256)) and (xw_exact_potential(a) or xw_exact_potential(b)) {
+    if is_cmp and tak =? 'int_' and tbk =? 'int_' and (ta not=? xw_math_int[0] or a_lit) and (tb not=? xw_math_int[0] or b_lit) and (xw_exact_potential(a) or xw_exact_potential(b)) {
         let operands:array<int64>=[int64(a) int64(b)]
         loop operand in operands {
             if xw_flag(operand 256) and xw_nodes[0].ptr[operand].kind =? 'int_lit' {
@@ -204,24 +212,22 @@ xw_numeric=(n:XWWord op:int32 a:XWWord b:XWWord ta:XWWord tb:XWWord is_cmp:bool)
                 xw_nodes[0][operand].flags=xw_nodes[0].ptr[operand].flags & ~256
             }
         }
-        xw_nodes[0][n].type=int32<overflow='wrap'>(xw_bool_type[0])
+        xw_nodes[0].ptr[n].type=int32<overflow='wrap'>(xw_bool_type[0])
         return xw_bool_type[0]
     }
-    if is_cmp and not xw_flag(a 256) and not xw_flag(b 256) and xw_dewy(n) {
+    if is_cmp and not a_lit and not b_lit and tak =? 'int_' and tbk =? 'int_' and ta not=? xw_math_int[0] and tb not=? xw_math_int[0] and xw_dewy(n) {
         # i:uint64 <? s.length: compared in the left operand's width, the right one's cast.
-        let wa=tu_prune(xw_type(a))
-        let wb=tu_prune(xw_type(b))
-        if xw_types[0].ptr[wa].kind =? 'int_' and xw_types[0].ptr[wb].kind =? 'int_' and wa not=? xw_math_int[0] and wb not=? xw_math_int[0] and num_join(wa wb) =? 0 {coerce(b wa);}
+        if num_join(ta tb) =? 0 {coerce(b ta);}
     }
-    let j=xw_join(a b xw_nodes[0].ptr[n].pos)
-    if (op =? 63 or op =? 64 or op =? 65) and not xw_int(j) {numeric_error(n 3)}
+    let j:XWWord=if ta =? tb and not a_lit and not b_lit and (tak =? 'int_' or tak =? 'float_') and ta not=? xw_never_type[0] and xw_nodes[0].ptr[a].kind not=? 'str_lit' and xw_nodes[0].ptr[b].kind not=? 'str_lit' {ta} else {xw_join(a b xw_nodes[0].ptr[n].pos)}
+    if (op =? 63 or op =? 64 or op =? 65) and xw_types[0].ptr[j].kind not=? 'int_' {numeric_error(n 3)}
     # got / total * 100 with whole numbers: the division drops the fraction first.
-    if op =? 60 and xw_int(j) and xw_nodes[0].ptr[a].kind =? 'binary' and xw_nodes[0].ptr[a].op =? 61 and xw_nodes[0].ptr[b].kind =? 'int_lit' and xw_nodes[0].ptr[b].ival =? 100 and not pos_in_lib(xw_nodes[0].ptr[n].pos) {
+    if op =? 60 and xw_types[0].ptr[j].kind =? 'int_' and xw_nodes[0].ptr[a].kind =? 'binary' and xw_nodes[0].ptr[a].op =? 61 and xw_nodes[0].ptr[b].kind =? 'int_lit' and xw_nodes[0].ptr[b].ival =? 100 and not pos_in_lib(xw_nodes[0].ptr[n].pos) {
         numeric_warn_percent(n a)
     }
-    if is_cmp {xw_nodes[0][n].type=int32<overflow='wrap'>(xw_bool_type[0])}
-    else {xw_nodes[0][n].type=int32<overflow='wrap'>(j)}
+    let res:XWWord=if is_cmp {xw_bool_type[0]} else {j}
+    xw_nodes[0].ptr[n].type=int32<overflow='wrap'>(res)
     # Semantic int64 arithmetic gives the exact semantic integer in Dewy.
-    if not is_cmp and xw_dewy(n) and xw_type(n) =? xw_int_type[0] {return numeric_exact(n)}
-    xw_type(n)
+    if not is_cmp and res =? xw_int_type[0] and xw_dewy(n) {return numeric_exact(n)}
+    res
 }

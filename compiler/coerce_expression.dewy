@@ -67,9 +67,11 @@ coerce=(n:int64 target:int64):>int64=>$unsafe {
     if target =? 0 {return n}
     # (a settled value already of the type: none of the cases below applies but to literals,
     # refinements and callables)
-    if nodes.ptr[n].type not=? 0 and not is_lit(n) and nodes.ptr[n].kind not=? 'str_lit' and nodes.ptr[n].kind not=? 'float_lit' {
-        let to=prune(target)
-        if prune(ntype(n)) =? to and types.ptr[to].kind not=? 'refined' and types.ptr[to].kind not=? 'callable' {return n}
+    let nd0=nodes.ptr + n
+    let nt0=CoerceExpressionWord(nd0[0].type)
+    if nt0 not=? 0 and (CoerceExpressionWord(nd0[0].flags) & 256) =? 0 and nd0[0].kind not=? 'str_lit' and nd0[0].kind not=? 'float_lit' {
+        let to0:CoerceExpressionWord=if nt0 =? target and (CoerceExpressionWord(types.ptr[target].flags) & 1) =? 0 {target} else {prune(target)}
+        if (nt0 =? to0 or prune(nt0) =? to0) and types.ptr[to0].kind not=? 'refined' and types.ptr[to0].kind not=? 'callable' {return n}
     }
     # (an integer literal into a fixed-width integer type: none of the cases before the
     # literal's below applies; its range is checked there and here alike)

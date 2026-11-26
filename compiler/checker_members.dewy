@@ -64,7 +64,7 @@ checker_members_bind=(input:ptr<CheckerMemberInput>):>XDWord=>$unsafe {
     0
 }
 xd_kind=(t:XDWord):>TK=>$unsafe {xd_types[0].ptr[tu_prune(t)].kind}
-xd_in_dewy=(n:XDWord):>bool=>$unsafe {xd_files[0][xd_nodes[0].ptr[n].pos >> 40].is_dewy}
+xd_in_dewy=(n:XDWord):>bool=>$unsafe {xd_files[0].ptr[xd_nodes[0].ptr[n].pos >> 40].is_dewy}
 xd_dewy=(n:XDWord):>bool=>$unsafe {
     let pos=xd_nodes[0].ptr[n].pos
     let f=pos >> 40
@@ -90,13 +90,15 @@ xd_fn_type=(t:XDWord):>bool=>{
 }
 # A record field: its index (the last of that name), resolving the record's fields first.
 xd_field=(si:XDWord name:XDWord):>XDWord=>$unsafe {
-    if not xd_structs[0][si].resolved {member_fields(si)}
+    if not xd_structs[0].ptr[si].resolved {member_fields(si)}
     let first=XDWord(xd_structs[0].ptr[si].fields)
-    let fi:XDWord=-1
-    loop i in [0..XDWord(xd_structs[0].ptr[si].nfields)) {
-        if XDWord(xd_fields[0][first + i].name) =? name {fi=i}
+    let fp=xd_fields[0].ptr + first
+    let i=XDWord(xd_structs[0].ptr[si].nfields) - 1
+    loop i >=? 0 {
+        if XDWord(fp[i].name) =? name {return i}
+        i-=1
     }
-    fi
+    -1
 }
 # A bypass returns directly: a rewrite, owner or bare call already published it.
 CheckerMemberResult:type=[type:int64 bypass:bool]
@@ -154,8 +156,8 @@ xd_member=(n:XDWord expected:XDWord spelled:XDWord is_callee:bool):>CheckerMembe
             let si=XDWord(xd_types[0].ptr[st].st)
             let fi=xd_field(si fname)
             if fi >=? 0 {
-                xd_nodes[0][n].aux=int32<overflow='wrap'>(fi)
-                t=XDWord(xd_fields[0][XDWord(xd_structs[0].ptr[si].fields) + fi].type)
+                xd_nodes[0].ptr[n].aux=int32<overflow='wrap'>(fi)
+                t=XDWord(xd_fields[0].ptr[XDWord(xd_structs[0].ptr[si].fields) + fi].type)
                 if xd_ide[0] {member_field_ref(n si fi t)}
                 # A method held in a field is called; a function-valued field read bare is too.
                 let method:XDWord=0

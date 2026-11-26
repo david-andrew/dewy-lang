@@ -4,7 +4,7 @@ from p"checker_source_positions.dewy" import (dewy_at)
 
 from p"checker_sinks.dewy" import (pack_written)
 from p"node_store.dewy" import Node
-from p"checker_state.dewy" import (FnInst FnSig FnCtx DeclInfo FnInstanceKey)
+from p"checker_state.dewy" import (FnInst FnSig FnCtx DeclInfo FnInstanceKey decl_mono_fn decl_mono_enabled)
 from p"checker_signature.dewy" import (cs_decl_info fn_sig)
 from p"type_inference.dewy" import (tu_has_var tu_prune tu_zonk tu_equal)
 from p"type_substitute.dewy" import ts_subst
@@ -44,14 +44,24 @@ checker_instances_bind=(input:ptr<CheckerInstanceInput>):>CIWord=>$unsafe {
     ci_index=input[0].index
     0
 }
+ci_record_mono=(decl:CIWord f:CIWord):>void=>$unsafe {
+    if not decl_mono_enabled or dir_code_any {return}
+    let dn=ci_nodes[0].ptr + decl
+    if (CIWord(dn[0].flags) & 4) not=? 0 or dn[0].c not=? 0 or dn[0].kind =? 'lambda' {return}
+    if ci_fns[0].ptr[f].ret =? 0 or ci_fns[0].ptr[f].targs.length not=? 0 {return}
+    if decl >=? decl_mono_fn.length {decl_mono_fn.resize(decl * 2 + 256)}
+    decl_mono_fn.ptr[decl]=int32<overflow='wrap'>(f)
+}
 ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe {
     if dir_code_any {
-        let file=ci_nodes[0][decl].pos >> 40
+        decl_mono_enabled=false
+        let file=ci_nodes[0].ptr[decl].pos >> 40
         if file >=? 0 and file <? dir_code_masks.length and dir_code_masks[file] not=? 0 {return ci_get_policy_inst(decl targs use_pos)}
     }
-    if ci_nodes[0][decl].kind =? 'lambda' {return poly_inst(decl targs use_pos)}
+    let dn0=ci_nodes[0].ptr + decl
+    if dn0[0].kind =? 'lambda' {return poly_inst(decl targs use_pos)}
     # The host's preflight only acts on extern or attributed declarations.
-    if (CIWord(ci_nodes[0][decl].flags) & 4) not=? 0 or ci_nodes[0][decl].c not=? 0 {instance_preflight(decl use_pos)}
+    if (CIWord(dn0[0].flags) & 4) not=? 0 or dn0[0].c not=? 0 {instance_preflight(decl use_pos)}
     # Preserve the original hot cached-signature guard without entering the
     # recursive signature constructor (which saves a full working frame).
     let di=CIWord(ci_nodes[0].ptr[decl].sym)
@@ -71,12 +81,14 @@ ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe 
             let fp=ci_fns[0].ptr
             if fp[f0].targs.length =? 0 {
                 if fp[f0].ret =? 0 {ensure_ret(f0 use_pos)}
+                ci_record_mono(decl f0)
                 return f0
             }
             loop ii in [1..ilen) {
                 let f=ip[ii]
                 if fp[f].targs.length =? 0 {
                     if fp[f].ret =? 0 {ensure_ret(f use_pos)}
+                    ci_record_mono(decl f)
                     return f
                 }
             }
@@ -157,6 +169,7 @@ ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe 
     ci_input[0].declarations[0][di].insts.push(f)
     if zt.length >? 0 {ci_input[0].index[0][FnInstanceKey[decl zt]]=f}
     if ci_input[0].functions[0].ptr[f].ret =? 0 {ensure_ret(f use_pos)}
+    if tlen =? 0 {ci_record_mono(decl f)}
     f
 }
 

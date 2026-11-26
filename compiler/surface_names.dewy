@@ -2,7 +2,7 @@ $runtime_checks
 from p"type_ops.dewy" import (get_struct_inst)
 from p"expr.jo" import (console_type_id dewy_surface_hints quantity_call_names surface_hidden task_surface_names)
 from p"checker_expr.dewy" import (lookup)
-from p"check.jo" import (lib_dir prelude syms)
+from p"check.jo" import (lib_dir prelude prelude_syms syms)
 from p"ast.jo" import (kid nkids nodes)
 from p"util.jo" import (files intern name_of pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
@@ -68,10 +68,12 @@ shown_fn_name=(name:string):>string=>$unsafe {
     name
 }
 
+let console_name_id:SurfaceNamesWord=0
 console_type=():>int64=>$unsafe {
     let console_type_id_slot=@console_type_id
     if console_type_id_slot >=? 0 {return console_type_id_slot}
-    let s=prelude.get(intern("Console")) ?? 0
+    if console_name_id =? 0 {console_name_id=intern("Console")}
+    let s:SurfaceNamesWord=if console_name_id <? prelude_syms.length {prelude_syms.ptr[console_name_id]} else if prelude_syms.length =? 0 and prelude.length >? 0 {prelude.get(console_name_id) ?? 0} else {0}
     if s =? 0 or syms.ptr[s].kind not=? 'struct_' {return 0}
     console_type_id_slot=get_struct_inst(SurfaceNamesWord(syms.ptr[s].decl) [])
     console_type_id_slot

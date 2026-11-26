@@ -43,7 +43,9 @@ member_receiver=(n:MemberReceiverWord expected:MemberReceiverWord):>int64=>$unsa
     let saved=at
     let receiver=MemberReceiverWord(nodes.ptr[n].a)
     at=receiver
-    let bt=check_expr(receiver receiver_literal_hint(receiver MemberReceiverWord(nodes.ptr[n].name) 0 expected nodes.ptr[n].pos))
+    let rk=nodes.ptr[receiver].kind
+    let hint:MemberReceiverWord=if expected not=? 0 and (rk =? 'array' or rk =? 'map_lit' or rk =? 'call') {receiver_literal_hint(receiver MemberReceiverWord(nodes.ptr[n].name) 0 expected nodes.ptr[n].pos)} else {0}
+    let bt=check_expr(receiver hint)
     at=saved
     nodes.ptr[n].a=int32(last_checked)
     bt
@@ -80,8 +82,10 @@ receiver_text=(n:int64):>string=>$unsafe {
     "x"
 }
 
+let mr_copy_id:MemberReceiverWord=0
 synthetic_copy=(t:int64 name:int64 pos:int64):>bool=>$unsafe {
-    if name_of(name) not=? "copy" or not files.ptr[pos_file(pos)].is_dewy {return false}
+    if mr_copy_id =? 0 {mr_copy_id=intern("copy")}
+    if name not=? mr_copy_id or not files.ptr[pos_file(pos)].is_dewy {return false}
     let k=tkind(t)
     if k =? 'module' or k =? 'typeval' or k =? 'void_' or t =? T_NEVER {return false}
     if copy_member(t name) {return false}
@@ -103,8 +107,10 @@ synthetic_copy=(t:int64 name:int64 pos:int64):>bool=>$unsafe {
 # expected of the result, as the literal written there would; Dewy only, and only when every function of the name
 # that could take the arguments gives its first parameter's type)
 receiver_literal_hint=(recv:int64 name:int64 nargs:int64 expected:int64 pos:int64):>int64=>$unsafe {
-    if expected =? 0 or not dewy_at(pos) {return 0}
+    if expected =? 0 {return 0}
     let k=nodes.ptr[recv].kind
+    if k not=? 'array' and k not=? 'map_lit' and k not=? 'call' {return 0}
+    if not dewy_at(pos) {return 0}
     let literal=(k =? 'array' or k =? 'map_lit' or dewy_set_literal(recv)) and ctx_dependent(recv)
     if not literal and not (k =? 'call' and nodes.ptr[recv].type =? 0 and not has_flag(recv NF_CHECKED)) {return 0}
     let want=prune(expected)

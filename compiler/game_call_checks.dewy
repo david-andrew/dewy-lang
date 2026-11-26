@@ -56,26 +56,25 @@ shader_uniforms_in=(e:GameCheckWord):>GameCheckWord=>$unsafe {
 }
 # rotation_y(45): an angle in degrees given where radians go
 angle_check=(decl:GameCheckWord args:array<int64>):>void=>$unsafe {
-    let fnm=name_of(GameCheckWord(nodes.ptr[decl].name))
     let params=nkids(decl)
     let count:GameCheckWord=if params <? args.length {params} else {args.length}
     loop i in [0..count) {
         let a=args[i]
         if a =? 0 or not has_flag(a NF_LITERAL) {continue}
-        let txt=""
+        let k=nodes.ptr[a].kind
         let v:float64=0.0
-        if nodes.ptr[a].kind =? 'int_lit' {
-            v=float64(nodes.ptr[a].ival)
-            txt="{nodes.ptr[a].ival}"
-        }
-        else if nodes.ptr[a].kind =? 'float_lit' {
-            v=nodes.ptr[a].fval
-            txt="{v}"
-        }
+        if k =? 'int_lit' {v=float64(nodes.ptr[a].ival)}
+        else if k =? 'float_lit' {v=nodes.ptr[a].fval}
         else {continue}
         if abs(v) <=? 6.3 {continue}
         let pn=name_of(GameCheckWord(nodes.ptr[kid(decl i)].name))
-        if pn =? "angle" or pn =? "yaw" or pn =? "pitch" or pn =? "roll" or (pn =? "a" and (starts_with(fnm "rotation") or starts_with(fnm "quat_"))) {
+        let match_param=pn =? "angle" or pn =? "yaw" or pn =? "pitch" or pn =? "roll"
+        if not match_param and pn =? "a" {
+            let fnm=name_of(GameCheckWord(nodes.ptr[decl].name))
+            match_param=starts_with(fnm "rotation") or starts_with(fnm "quat_")
+        }
+        if match_param {
+            let txt=if k =? 'int_lit' {"{nodes.ptr[a].ival}"} else {"{v}"}
             warn(nodes.ptr[a].pos "{txt} radians is more than a whole turn: angles are in radians (a turn is TAU, 6.28); `{txt}deg` is {txt} degrees")
         }
     }

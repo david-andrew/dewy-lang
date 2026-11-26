@@ -108,21 +108,40 @@ xl_finish_slow=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
     }
     # Without an expected type the host's callable inference returns the type as published.
     if xl_effects[0] and expected not=? 0 {
-        xl_nodes[0].ptr[n].type=int32<overflow='wrap'>(t)
+        xl_nodes[0][n].type=int32<overflow='wrap'>(t)
         t=effect_infer_callable(n expected)
     }
+    xl_publish(@xl_nodes[0][n] t)
     let node=xl_nodes[0].ptr + n
-    node[0].type=int32<overflow='wrap'>(t)
-    node[0].flags |= 128
     let k=node[0].kind
     if xl_exact_measure[0] or ((k =? 'binary' or k =? 'unary' or k =? 'intrinsic' or (k =? 'conv' and node[0].aux =? 2)) and exact_candidate(n)) {exact_note(n)}
     xl_last[0]=n
     t
 }
 xl_finish=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
-    let node=(((xl_nodes as ptr<ptr<uint8>>)[0] + 24) as ptr<Node>) + n
-    if (xl_effects[0] and expected not=? 0) or xl_exact_measure[0] or xl_exact_nk_p[int64((node as ptr<uint32>)[0])] not=? uint8(0) or (xl_refine[0] and xl_types[0].ptr[t0].kind =? 'refined' and xl_types[0].ptr[t0].bits not=? -2) {
+    let hdr=(xl_nodes as ptr<ptr<int64>>)[0]
+    if hdr[0] not=? 1 {return xl_finish_slow(n t0 expected)}
+    let node=(((hdr as ptr<uint8>) + 24) as ptr<Node>) + n
+    if (xl_effects[0] and expected not=? 0) or xl_exact_measure[0] or (xl_refine[0] and xl_types[0].ptr[t0].kind =? 'refined' and xl_types[0].ptr[t0].bits not=? -2) {
         return xl_finish_slow(n t0 expected)
+    }
+    if xl_exact_nk_p[int64((node as ptr<uint32>)[0])] not=? uint8(0) {
+        let k=node[0].kind
+        let maybe_exact=false
+        if k =? 'binary' {
+            let op=node[0].op
+            if op =? 63 or op =? 64 or op =? 65 {maybe_exact=true}
+            else if (op <=? 61 or op =? 67 or op =? 79) and node[0].aux =? 0 {
+                if t0 not=? xl_bool_type[0] and t0 not=? xl_float_type[0] and t0 not=? xl_string_type[0] and t0 not=? xl_math_int[0] {maybe_exact=true}
+            }
+        } else if k =? 'unary' {
+            if node[0].op =? 59 {maybe_exact=true}
+        } else if k =? 'conv' {
+            if node[0].aux =? 2 {maybe_exact=true}
+        } else {
+            if node[0].aux =? 89 {maybe_exact=true}
+        }
+        if maybe_exact {return xl_finish_slow(n t0 expected)}
     }
     node[0].type=int32<overflow='wrap'>(t0)
     node[0].flags |= 128

@@ -71,6 +71,22 @@ let cd_name_mask:array<uint8>=[]
 let cd_mask_ptr:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
 let cd_mask_len:CDWord=0
 let cd_mask_bp:CDWord=0
+let cd_univ_syms:array<int64>=[]
+let cd_univ_len:CDWord=0
+
+cd_univ_lookup=(name:CDWord):>CDWord=>$unsafe {
+    let ulen=universe.length
+    if ulen =? 0 {return 0}
+    if ulen not=? cd_univ_len {
+        if cd_univ_syms.length >? 0 {mem_set(cd_univ_syms.ptr as ptr<uint8> 0 cd_univ_syms.length * 8)}
+        cd_univ_len=ulen
+        loop [k v] in universe {
+            if cd_univ_syms.length <=? k {cd_univ_syms.resize(CDWord(k) * 2 + 64)}
+            cd_univ_syms.ptr[k]=v
+        }
+    }
+    if name >=? 0 and name <? cd_univ_syms.length {cd_univ_syms.ptr[name]} else {0}
+}
 
 cd_mark_name=(id:CDWord bit:uint8):>void=>$unsafe {
     if id >=? cd_name_mask.length {cd_name_mask.resize(id + 256)}
@@ -554,7 +570,8 @@ call_name_sym=(n:CDWord name:CDWord mod_scope:CDWord s:CDWord args:array<int64> 
         jo_type_spelling(name s nodes.ptr[n].pos)
         return conversion(n CDWord(syms.ptr[s].ref) args)
     }
-    else if sk =? 'fns' and args.length =? 1 and nodes.ptr[args.ptr[0]].kind not=? 'namedarg' and universe.get(name) not=? none {
+    else if sk =? 'fns' and args.length =? 1 and nodes.ptr[args.ptr[0]].kind not=? 'namedarg' and cd_univ_lookup(name) not=? 0 {
+        let usym=cd_univ_lookup(name)
         let at:CDWord=prune(check_expr(args.ptr[0] 0))
         add_flag(args.ptr[0] NF_CHECKED)
         let fd:array<int64>=[]
@@ -564,7 +581,7 @@ call_name_sym=(n:CDWord name:CDWord mod_scope:CDWord s:CDWord args:array<int64> 
             let sig=fn_sig(d)
             if sig.params.length >=? 1 and (sig.generic or can_coerce(args.ptr[0] at sig.params.ptr[0])) {takes=true}
         }
-        if not takes {return conversion(n CDWord(syms.ptr[universe[name]].ref) args)}
+        if not takes {return conversion(n CDWord(syms.ptr[usym].ref) args)}
     }
     else if sk =? 'fns' and args.length =? 2 and name =? take_name and (prelude.get(name) ?? 0) =? s and pos_in_lib(nodes.ptr[n].pos) {return take_call(n args)}
     else if sk =? 'fns' and args.length =? 3 and name =? relocate_name and (prelude.get(name) ?? 0) =? s and pos_in_lib(nodes.ptr[n].pos) {return relocate_call(n args)}

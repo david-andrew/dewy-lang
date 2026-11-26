@@ -6,6 +6,7 @@ from p"checker_runtime_functions.dewy" import (runtime_fn)
 from p"checker_source_positions.dewy" import (dewy_at)
 from p"checker_type_entries.dewy" import (get_fn_inst)
 
+from p"checker_state.dewy" import (decl_mono_fn decl_mono_enabled)
 from p"data_access.dewy" import (data_access_reset data_access_finalize)
 from p"checker_hooks.dewy" import (run_pending_functions)
 from p"check.jo" import (decl_infos FK_INIT check_all cx draw_fn export_decls export_fns float_int_demanded fns global_ids globals init_fns late_module_imports lib_dir main_fn module_ctx module_frames modules open_globals optional_runtime prelude runtime_memeq runtime_names runtime_streq skip_main syms nchk_wanted target_macos target_wasm test_mode update_fn want_cpu_flag want_loop_watch)
@@ -66,6 +67,8 @@ from p"refine_rare.dewy" import (refine_reset)
 # Program-level checking owns phase order; services may grow all compiler arenas.
 PGWord:type=int64<overflow='wrap'>
 check_program=(main_path:string):>void=>$unsafe {
+    decl_mono_fn.clear()
+    decl_mono_enabled=true
     data_access_reset()
     member_reset()
     console_type_id=-1
@@ -102,6 +105,7 @@ check_program=(main_path:string):>void=>$unsafe {
         ic_restore(icb)
         i += 1
     }
+    if dir_code_any {decl_mono_enabled=false}
     if dir_header_cores {runtime_switch_on("__HEADER_CORES")}
     if dir_scoped_cores {runtime_switch_on("__SCOPED_CORES")}
     if dir_runtime_caps {runtime_switch_on("__CORE_CAPS")}

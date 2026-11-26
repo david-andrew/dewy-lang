@@ -15,7 +15,7 @@ from p"refine_metadata.dewy" import (ref_self_stored refine_storage)
 from p"refine_rare.dewy" import (ref_field_store ref_self_store)
 from p"string_domain_ops.dewy" import (int_domain_write string_domain_write)
 from p"type_ops.dewy" import (is_values)
-from p"types.jo" import (prune values_any)
+from p"types.jo" import (prune types values_any)
 
 StoreCheckWord:type=int64<overflow='wrap'>
 
@@ -34,14 +34,18 @@ assign_refine=(s:StoreCheckWord lt:StoreCheckWord code:StoreCheckWord):>StoreChe
     0
 }
 
-assign_value=(s:StoreCheckWord lt:StoreCheckWord settle:StoreCheckWord):>StoreCheckWord=>{
-    let rhs=StoreCheckWord(nodes[s].b)
-    let rt=prune(if values_any and is_values(lt) {values_init(rhs lt)} else {check_expr(rhs lt)})
+assign_value=(s:StoreCheckWord lt:StoreCheckWord settle:StoreCheckWord):>StoreCheckWord=>$unsafe {
+    let rhs=StoreCheckWord(nodes.ptr[s].b)
+    let rt0=if values_any and is_values(lt) {values_init(rhs lt)} else {check_expr(rhs lt)}
+    let rt:StoreCheckWord=if (StoreCheckWord(types.ptr[rt0].flags) & 1) =? 0 {rt0} else {prune(rt0)}
     if settle =? 0 {return rt}
     let v=last_checked
-    if settle =? 2 and rt not=? lt and not can_coerce(v rt lt) {var_type_error(StoreCheckWord(nodes[s].a) lt rt nodes[v].pos)}
-    if nodes[v].kind not=? 'intrinsic' or nodes[v].aux not=? int32(int64(IN.zeroed)) {
-        nodes[s].b=int32<overflow='wrap'>(coerce(v lt))
+    if settle =? 2 and rt not=? lt and not can_coerce(v rt lt) {var_type_error(StoreCheckWord(nodes.ptr[s].a) lt rt nodes.ptr[v].pos)}
+    let vn=nodes.ptr + v
+    let vk=vn[0].kind
+    if vk not=? 'intrinsic' or vn[0].aux not=? int32(int64(IN.zeroed)) {
+        let settled=StoreCheckWord(vn[0].type) =? lt and lt not=? 0 and (StoreCheckWord(vn[0].flags) & 256) =? 0 and vk not=? 'str_lit' and vk not=? 'float_lit' and (StoreCheckWord(types.ptr[lt].flags) & 1) =? 0 and types.ptr[lt].kind not=? 'refined' and types.ptr[lt].kind not=? 'callable'
+        nodes.ptr[s].b=int32<overflow='wrap'>(if settled {v} else {coerce(v lt)})
     }
     rt
 }

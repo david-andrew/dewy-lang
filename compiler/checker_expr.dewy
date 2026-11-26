@@ -249,8 +249,12 @@ xe_one_value=(a:XEWord):>bool=>$unsafe {
 values_settled=(n:XEWord):>bool=>$unsafe {
     let callee=XEWord(xe_nodes[0].ptr[n].a)
     if xe_nodes[0].ptr[callee].kind =? 'ident' {
-        let text=xe_names[0].ptr[XEWord(xe_nodes[0].ptr[callee].name)]
-        if text.startswith("__") or (text.startswith("$") and text not=? "$") {return true}
+        let sh=(xe_names[0].ptr as ptr<ptr<uint8>>)[XEWord(xe_nodes[0].ptr[callee].name)]
+        if sh not=? (uint64(0) as ptr<uint8>) {
+            let slen=(sh as ptr<int64>)[1]
+            let sp=sh + 24
+            if slen >=? 2 and ((sp[0] =? uint8(95) and sp[1] =? uint8(95)) or sp[0] =? uint8(36)) {return true}
+        }
     }
     let count=XEWord(xe_nodes[0].ptr[n].nlist)
     let base=XEWord(xe_nodes[0].ptr[n].list)
@@ -621,27 +625,34 @@ xe_binary=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     # Type-checking the typed operand first supplies context without moving either
     # operand in the runtime expression or checking it twice.
     if a_literal and not b_literal {hint=xe_literal_hint(a xe_first(b) op hint)}
-    let ta=tu_prune(check_expr(a hint))
+    let ta0=XEWord(check_expr(a hint))
+    let ta:XEWord=if (XEWord(xe_types[0].ptr[ta0].flags) & 1) =? 0 {ta0} else {tu_prune(ta0)}
     let tb:XEWord=0
     let bk=xe_nodes[0].ptr[b].kind
-    if bk =? 'none_lit' or bk =? 'null_lit' or bk =? 'dotname' {tb=tu_prune(check_expr(b ta))}
-    else {
+    if bk =? 'none_lit' or bk =? 'null_lit' or bk =? 'dotname' {
+        let tb0=XEWord(check_expr(b ta))
+        tb=if (XEWord(xe_types[0].ptr[tb0].flags) & 1) =? 0 {tb0} else {tu_prune(tb0)}
+    } else {
         let h:XEWord=0
         let tk=xe_types[0].ptr[ta].kind
         if not xe_flag(a 256) and not is_shift and (tk =? 'int_' or tk =? 'float_') {
             h=ta
             # (exact_potential is pure: the cheaper test first)
-            if is_cmp and (bk =? 'int_lit' or bk =? 'unary') and exact_potential(a) {h=if xe_flag(b 2097152) {xe_u64_type[0]} else {xe_int_type[0]}}
+            if is_cmp and (bk =? 'int_lit' or bk =? 'unary') {
+                let akp=xe_nodes[0].ptr[a].kind
+                if (akp =? 'binary' or akp =? 'unary' or akp =? 'intrinsic' or akp =? 'conv' or akp =? 'if_' or akp =? 'iflet' or akp =? 'coalesce' or akp =? 'match_' or akp =? 'block' or akp =? 'exprstmt') and exact_potential(a) {h=if xe_flag(b 2097152) {xe_u64_type[0]} else {xe_int_type[0]}}
+            }
         }
         if not a_literal and b_literal {h=xe_literal_hint(b ta op h)}
         # (an n-dimensional array against, or times, an array written out)
         if bk =? 'array' and tk =? 'struct_' and (op =? 69 or op =? 70 or op =? 60) {h=binary_nd_hint(n ta h)}
-        tb=tu_prune(check_expr(b h))
+        let tb0=XEWord(check_expr(b h))
+        tb=if (XEWord(xe_types[0].ptr[tb0].flags) & 1) =? 0 {tb0} else {tu_prune(tb0)}
     }
     if xe_types[0].ptr[ta].kind =? 'secret' or xe_types[0].ptr[tb].kind =? 'secret' {return binary_secret(n a b)}
     # Static-width exact intermediates fused before scalar arithmetic is chosen.
     let mi=xe_math_int[0]
-    if (XEWord(xe_nodes[0].ptr[a].type) =? mi or XEWord(xe_nodes[0].ptr[b].type) =? mi) and xe_dewy_at(xe_nodes[0].ptr[n].pos) {
+    if (ta =? mi or tb =? mi) and (XEWord(xe_nodes[0].ptr[a].type) =? mi or XEWord(xe_nodes[0].ptr[b].type) =? mi) and xe_dewy_at(xe_nodes[0].ptr[n].pos) {
         let wa=XEWord(exact_math_operand(a))
         let wb=XEWord(exact_math_operand(b))
         let ua=XEWord(xe_nodes[0].ptr[wa].type)
@@ -691,12 +702,16 @@ check_call_expr=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     if ex not=? 0 and xe_nodes[0].ptr[callee].kind =? 'ident' {
         let count=XEWord(xe_nodes[0].ptr[n].nlist)
         if count =? 1 or count =? 2 {
-            let cname=xe_names[0].ptr[XEWord(xe_nodes[0].ptr[callee].name)]
-            let cb=cname as array<uint8>
-            if count =? 2 and cb.length =? 13 and cb.ptr[0] =? uint8(95) and (xe_types[0].ptr[ex].kind =? 'array' or is_nd(ex)) and cname =? "__shape_value" {
-                check_expr(xe_kid(n 0) ex);
-                xe_set_kid(n 0 xe_last[0])
-            } else if count =? 1 and cb.length =? 8 and cb.ptr[0] =? uint8(95) and cname =? "__map_of" {call_map_rows(n ex)}
+            let cnm=XEWord(xe_nodes[0].ptr[callee].name)
+            let sh=(xe_names[0].ptr as ptr<ptr<uint8>>)[cnm]
+            if sh not=? (uint64(0) as ptr<uint8>) {
+                let slen=(sh as ptr<int64>)[1]
+                let sp=sh + 24
+                if count =? 2 and slen =? 13 and sp[0] =? uint8(95) and sp[1] =? uint8(95) and (xe_types[0].ptr[ex].kind =? 'array' or is_nd(ex)) and xe_names[0].ptr[cnm] =? "__shape_value" {
+                    check_expr(xe_kid(n 0) ex);
+                    xe_set_kid(n 0 xe_last[0])
+                } else if count =? 1 and slen =? 8 and sp[0] =? uint8(95) and sp[1] =? uint8(95) and xe_names[0].ptr[cnm] =? "__map_of" {call_map_rows(n ex)}
+            }
         }
     }
     if is_unchecked_at(n) {
@@ -731,21 +746,25 @@ check_call_expr=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     }
     let t=check_call(n expected)
     # (a call the check replaced, `int64(x)` of an int64 now x itself: its sym is not a function)
-    if xe_nodes[0].ptr[n].kind not=? 'call' {return xl_finish(n t expected)}
-    if xe_nodes[0].ptr[n].aux =? 2 and xe_nodes[0].ptr[n].nlist >? 1 and not xe_dewy_at(xe_nodes[0].ptr[n].pos) {dewy_data_after_give(n)}
-    if xe_called(n) >? 0 {
-        if xe_functions[0].ptr[xe_called(n)].atomic_api {concurrency_atomic_call(n)}
-        if xe_functions[0].ptr[xe_called(n)].task_api {
+    let nnd=xe_nodes[0].ptr + n
+    if nnd[0].kind not=? 'call' {return xl_finish(n t expected)}
+    let naux=nnd[0].aux
+    let nnlist=XEWord(nnd[0].nlist)
+    let called:XEWord=if naux =? 0 and nnd[0].sym >? 0 {XEWord(nnd[0].sym)} else {0}
+    if naux =? 2 and nnlist >? 1 and not xe_dewy_at(nnd[0].pos) {dewy_data_after_give(n)}
+    if called >? 0 {
+        if xe_functions[0].ptr[called].atomic_api {concurrency_atomic_call(n)}
+        if xe_functions[0].ptr[called].task_api {
             concurrency_tasks.push(n)
             concurrency_runtime_needed=true
         }
-    }
-    if xe_nodes[0].ptr[n].nlist =? 2 and xe_called(n) >? 0 and xe_functions[0].ptr[xe_called(n)].parallel_api {
-        concurrency_calls.push(n)
-        parallel_prepare(n)
-    }
-    if xe_called(n) >? 0 and xe_nodes[0].ptr[n].nlist >=? 1 and xe_dewy_at(xe_nodes[0].ptr[n].pos) {map_float_key(n)}
-    if xe_called(n) >? 0 and xe_functions[0].ptr[xe_called(n)].pack not=? 0 {sink_pack_call(n)} else if xe_nodes[0].ptr[n].aux =? 1 and xe_fn_pack(callable_base(tu_prune(XEWord(xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[n].a)].type)))) {sink_pack_call(n)}
+        if nnlist =? 2 and xe_functions[0].ptr[called].parallel_api {
+            concurrency_calls.push(n)
+            parallel_prepare(n)
+        }
+        if nnlist >=? 1 and xe_dewy_at(xe_nodes[0].ptr[n].pos) {map_float_key(n)}
+        if xe_functions[0].ptr[called].pack not=? 0 {sink_pack_call(n)}
+    } else if naux =? 1 and xe_fn_pack(callable_base(tu_prune(XEWord(xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[n].a)].type)))) {sink_pack_call(n)}
     xl_finish(n t expected)
 }
 # A call by its callee's kind: the head checks every call gets, then a type application,

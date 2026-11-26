@@ -185,12 +185,17 @@ arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
         if r <? 0 {return -1}
         return r + 1
     }
-    if nodes.ptr[a].kind not=? 'int_lit' and bundled_rational_type(target) and decimal_literal_tree(a) {return 0}
-    if is_float(target) and nodes.ptr[a].type not=? 0 and bundled_rational_type(ntype(a)) {return 10}
-    if bundled_rational_type(target) and (nodes.ptr[a].kind =? 'int_lit' or (nodes.ptr[a].type not=? 0 and is_int(ntype(a)))) {return 10}
-    if nodes.ptr[a].type not=? 0 and bundled_word_rational_type(ntype(a)) and (bundled_rational_type(target) or is_float(target)) {return 10}
-    if bundled_word_rational_type(target) and nodes.ptr[a].type not=? 0 and word_rational_source(a ntype(a)) {return 5}
-    if not is_lit(a) and nodes.ptr[a].type not=? 0 and ntype(a) =? T_MATH_INT and bundled_bigint_type(target) {return 1}
+    let tk0=types.ptr[target].kind
+    let at0:CVWord=if nodes.ptr[a].type not=? 0 {prune(ntype(a))} else {0}
+    let ak0=if at0 not=? 0 {types.ptr[at0].kind} else {'void_'}
+    if tk0 =? 'struct_' or ak0 =? 'struct_' {
+        if tk0 =? 'struct_' and nodes.ptr[a].kind not=? 'int_lit' and bundled_rational_type(target) and decimal_literal_tree(a) {return 0}
+        if ak0 =? 'struct_' and tk0 =? 'float_' and bundled_rational_type(at0) {return 10}
+        if tk0 =? 'struct_' and (nodes.ptr[a].kind =? 'int_lit' or ak0 =? 'int_') and bundled_rational_type(target) {return 10}
+        if ak0 =? 'struct_' and (tk0 =? 'float_' or (tk0 =? 'struct_' and bundled_rational_type(target))) and bundled_word_rational_type(at0) {return 10}
+        if tk0 =? 'struct_' and at0 not=? 0 and bundled_word_rational_type(target) and word_rational_source(a at0) {return 5}
+        if tk0 =? 'struct_' and not is_lit(a) and at0 =? T_MATH_INT and bundled_bigint_type(target) {return 1}
+    }
     if ctx_dependent(a) {
         if oversized_literal(a) {
             target=prune(subst_partial(p @binds))
@@ -446,7 +451,7 @@ arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
             }
             return -1
         }
-        if dewy_bigint_literal_target(a p) {return 3}
+        if pk =? 'struct_' and dewy_bigint_literal_target(a p) {return 3}
         if pk =? 'float_' {
             if p =? T_FLOAT {
                 if nodes.ptr[a].kind =? 'int_lit' {return if lit_default(a) =? T_MATH_INT {3} else {2}}
@@ -488,8 +493,8 @@ arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
     let r:CVWord=match_type(pat ntype(a) @binds 0)
     if r <? 0 and types.ptr[fp].kind =? 'array' and tkind(ntype(a)) =? 'tuple' and not has_var(fp) and sibling_array_source(a prune(ntype(a)) CVWord(types.ptr[fp].elem)) {return 2}
     if r <? 0 and types.ptr[fp].kind =? 'fn_' and tkind(ntype(a)) =? 'fn_' and not has_var(fp) and fn_value_adapts(a prune(ntype(a)) fp) {return 2}
-    if r <? 0 and types.ptr[fp].kind =? 'array' and is_nd(ntype(a)) {
-        r=match_type(pat mk_array(nd_elem(ntype(a))) @binds 0)
+    if r <? 0 and types.ptr[fp].kind =? 'array' and ak0 =? 'struct_' and is_nd(at0) {
+        r=match_type(pat mk_array(nd_elem(at0)) @binds 0)
         if r >=? 0 {return r + 2}
     }
     r

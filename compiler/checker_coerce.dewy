@@ -11,11 +11,16 @@ CQWord:type=int64<overflow='wrap'>
 # a refinement or a callable: coerce's first case), or no type wanted.
 cq_settled=(nodes:ptr<array<Node>> types:ptr<array<TypeInfo>> n:CQWord t:CQWord):>bool=>$unsafe {
     if t =? 0 {return true}
-    if nodes[0][n].type =? 0 or (CQWord(nodes[0][n].flags) & 256) not=? 0 {return false}
-    let k=nodes[0][n].kind
+    let nd=nodes[0].ptr + n
+    let nt=CQWord(nd[0].type)
+    if nt =? 0 or (CQWord(nd[0].flags) & 256) not=? 0 {return false}
+    let k=nd[0].kind
     if k =? 'str_lit' or k =? 'float_lit' {return false}
-    let to=tu_prune(t)
-    if tu_prune(CQWord(nodes[0][n].type)) not=? to {return false}
+    let to:CQWord=t
+    if nt not=? t or (CQWord(types[0].ptr[t].flags) & 1) not=? 0 {
+        to=tu_prune(t)
+        if tu_prune(nt) not=? to {return false}
+    }
     let tk=types[0].ptr[to].kind
     tk not=? 'refined' and tk not=? 'callable'
 }
@@ -31,6 +36,7 @@ checker_coerce_bind=(host:ptr<CheckerCoerceHost>):>CQWord=>$unsafe {
     0
 }
 cq_can_coerce=(n:CQWord from0:CQWord to0:CQWord):>bool=>$unsafe {
+    if from0 =? to0 {return true}
     let source=tu_prune(from0)
     let target=tu_prune(to0)
     if source =? target {return true}
