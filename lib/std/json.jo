@@ -11,12 +11,6 @@
 
 enum Json: null_, boolean(b: bool), number(n: f64), text(s: str), list(items: Json[]), object(keys: str[], values: Json[])
 
-@nominal(error)
-struct JsonError:
-    message: str
-    line: int
-    column: int
-
 struct __JsonReader:
     s: str
     i = 0

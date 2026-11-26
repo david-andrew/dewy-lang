@@ -15,6 +15,23 @@ struct FileExists:
 struct FileError:
     pass
 @nominal(error)
+struct PathEscape:
+    pass
+@nominal(error)
+struct TextError:
+    message: str
+    line: int
+    column: int
+    path = ""
+@nominal(error)
+struct JsonError:
+    message: str
+    line: int
+    column: int
+@nominal(error)
+struct SpawnError:
+    pass
+@nominal(error)
 struct InvalidUtf8:
     pass
 # A search that found nothing (`text.find(part)`, `xs.index_of(x)`): an

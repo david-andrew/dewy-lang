@@ -10,7 +10,7 @@ from p"numeric_library_types.dewy" import (is_nd)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"check.jo" import (fns globals open_globals)
 from p"prelude.jo" import (prelude_game_pending prelude_std_pending)
-from p"checker_startup.dewy" import (load_game_prelude load_std_prelude)
+from p"checker_startup.dewy" import (load_game_for_name load_std_for_name)
 from p"expr_node_queries.dewy" import (fn_names_for)
 from p"call_style_lookup.dewy" import (fn_name_for member_call_without_arguments)
 from p"util.jo" import (files intern name_of pos_file pos_in_lib)
@@ -136,13 +136,12 @@ member_missing=(n:int64 bt:int64 expected:int64 @bypass:bool):>int64=>$unsafe {
             }
         }
         never_cascade(nodes.ptr[n].pos bt)
-        if prelude_std_pending {
-            load_std_prelude()
+        let fnm_s=name_of(fname)
+        if prelude_std_pending and load_std_for_name(fnm_s) {
             bypass=true
             return check_expr(n expected)
         }
-        if prelude_game_pending {
-            load_game_prelude()
+        if prelude_game_pending and load_game_for_name(fnm_s true) {
             bypass=true
             return check_expr(n expected)
         }

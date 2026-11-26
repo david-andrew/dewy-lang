@@ -3,7 +3,7 @@ from p"checker_type_entries.dewy" import (get_fn_inst)
 from p"checker_scope_symbols.dewy" import (new_sym)
 from p"intrinsic_registration.dewy" import (register_intrinsics)
 from p"@lib/core/os.jo" import (file_exists list_dir)
-from p"@lib/core/str.jo" import (ends_with)
+from p"@lib/core/str.jo" import (ends_with starts_with)
 from p"ast.jo" import (mk NF_EXTERN decl_has_rest has_flag kid nkids nodes)
 from p"check.jo" import (fns init_fns lib_dir module_by_path module_ctx modules registered runtime_ffi_done runtime_ffi_scan syms target_macos target_wasm target_windows)
 from p"checker_contexts.dewy" import (setup_module_contexts)
@@ -15,7 +15,7 @@ from p"checks_thin.dewy" import (check_fn_body module_path_key runtime_demand)
 from p"concurrency.jo" import (concurrency_first_ok_module concurrency_protocol_module concurrency_task_core_module concurrency_task_module concurrency_thread_module)
 from p"dewy_method_ops.dewy" import (dewy_is_method)
 from p"lazy_force.dewy" import (dc_force_all dc_force_module)
-from p"prelude.jo" import (pn_seen prelude_game_hint prelude_game_pending prelude_lazy prelude_std_pending std_optional_file)
+from p"prelude.jo" import (GAME_FILE_SPEC GAME_PREFIX_SPEC STD_FILE_SPEC STD_PREFIX_SPEC pn_seen prelude_game_hint prelude_game_pending prelude_index_files prelude_lazy prelude_std_pending std_file_init std_optional_file)
 from p"prelude_ops.dewy" import (defer_prelude prelude_known_names prelude_lazy_setup)
 from p"util.jo" import (files intern name_of)
 
@@ -298,9 +298,113 @@ load_game_prelude=():>void=>{
     ml_bump()
 }
 
+let prelude_game_extra:StartupWord=-1
+std_file_route=(nm:string):>StartupWord=>$unsafe {
+    let n=StartupWord((nm as array<uint8>).length)
+    if n =? 0 {return -1}
+    let p=(nm as array<uint8>).ptr
+    let mask=(StartupWord((STD_PREFIX_SPEC as array<uint8>).length) >> 1) - 2
+    let b=(17 * StartupWord(p[0]) + 31 * StartupWord(p[n >> 1]) + 7 * StartupWord(p[n - 1]) + n) & mask
+    let off=(STD_PREFIX_SPEC as array<uint8>).ptr as ptr<uint16>
+    let i=StartupWord(off[b])
+    let stop=StartupWord(off[b + 1])
+    let r=(STD_FILE_SPEC as array<uint8>).ptr
+    loop i <? stop {
+        let size=StartupWord(r[i])
+        if size =? n and __mem_eq(p r + i + 2 n) {
+            let file=StartupWord(r[i + 1])
+            if file >=? 128 {return -2}
+            return file
+        }
+        i += size + 2
+    }
+    -1
+}
+std_files_for=(nm:string):>array<string>=>$unsafe {
+    let out:array<string>=[]
+    let n=StartupWord((nm as array<uint8>).length)
+    if n =? 0 {return out}
+    let p=(nm as array<uint8>).ptr
+    let mask=(StartupWord((STD_PREFIX_SPEC as array<uint8>).length) >> 1) - 2
+    let b=(17 * StartupWord(p[0]) + 31 * StartupWord(p[n >> 1]) + 7 * StartupWord(p[n - 1]) + n) & mask
+    let off=(STD_PREFIX_SPEC as array<uint8>).ptr as ptr<uint16>
+    let i=StartupWord(off[b])
+    let stop=StartupWord(off[b + 1])
+    let r=(STD_FILE_SPEC as array<uint8>).ptr
+    loop i <? stop {
+        let size=StartupWord(r[i])
+        if size =? n and __mem_eq(p r + i + 2 n) {
+            out.push(std_file_init(int64(StartupWord(r[i + 1]) & 127)))
+        }
+        i += size + 2
+    }
+    out
+}
+game_file_route=(nm:string):>StartupWord=>$unsafe {
+    let n=StartupWord((nm as array<uint8>).length)
+    if n =? 0 {return -1}
+    let p=(nm as array<uint8>).ptr
+    let mask=(StartupWord((GAME_PREFIX_SPEC as array<uint8>).length) >> 1) - 2
+    let b=(17 * StartupWord(p[0]) + 31 * StartupWord(p[n >> 1]) + 7 * StartupWord(p[n - 1]) + n) & mask
+    let off=(GAME_PREFIX_SPEC as array<uint8>).ptr as ptr<uint16>
+    let i=StartupWord(off[b])
+    let stop=StartupWord(off[b + 1])
+    let r=(GAME_FILE_SPEC as array<uint8>).ptr
+    let dunder=starts_with(nm "__")
+    let target:StartupWord=if target_wasm {8} else if target_macos {4} else if target_windows {2} else {1}
+    let found=false
+    loop i <? stop {
+        let size=StartupWord(r[i])
+        if size =? n and __mem_eq(p r + i + 3 n) {
+            found=true
+            if dunder and (StartupWord(r[i + 2]) & target) not=? 0 {return StartupWord(r[i + 1])}
+        }
+        i += size + 3
+    }
+    if found {-2} else {-1}
+}
+prelude_game_has_extra=():>bool=>{
+    if prelude_game_extra >=? 0 {return prelude_game_extra =? 1}
+    std_file_init(0);
+    let names_=list_dir("{lib_dir}/game")
+    let extra=false
+    loop n in names_ {
+        if not ends_with(n ".jo") {continue}
+        if not prelude_index_files.contains(n) {
+            extra=true
+            break
+        }
+    }
+    prelude_game_extra=if extra {1} else {0}
+    extra
+}
+load_std_for_name=(nm:string):>bool=>{
+    if not prelude_std_pending {return false}
+    let r=std_file_route(nm)
+    if r =? -1 {return false}
+    if r >=? 0 {return load_std_file(std_file_init(int64(r)))}
+    let any=false
+    loop f in std_files_for(nm) {
+        if load_std_file(f) {any=true}
+    }
+    any
+}
+load_game_for_name=(nm:string allow_bulk:bool):>bool=>{
+    if not prelude_game_pending {return false}
+    let r=game_file_route(nm)
+    if r >=? 0 {return load_game_file(std_file_init(int64(r)))}
+    if not allow_bulk {return false}
+    if r =? -2 or prelude_game_has_extra() {
+        load_game_prelude()
+        return true
+    }
+    false
+}
+
 load_prelude=():>void=>{
     # all .jo files in lib/core, lib/std and lib/game are loaded into the shared prelude scope
     # (lib/core must stay compilable by the C bootstrap compiler; lib/std need not)
+    prelude_game_extra=-1
     prelude_lazy_setup()
     let game_pending=@prelude_game_pending
     let std_pending=@prelude_std_pending

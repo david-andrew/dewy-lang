@@ -135,11 +135,6 @@ with_suffix = (path: Path, new_suffix: str) -> Path: with_name(path, stem(path) 
 # joined to a base reaches them: the traversal pattern. A path taken whole has no base to escape.
 type SafePath = Path
 
-# root.confine(p) found p outside root
-@nominal(error)
-struct PathEscape:
-    pass
-
 # (a part that leaves the base it follows: `..`, a root, and on Windows a drive or a `\`)
 __fsys_escaping_part = (part: str) -> bool:
     if part == ".." or __fsys_root(part): return true

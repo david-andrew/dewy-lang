@@ -10,8 +10,8 @@ from p"checks_text.dewy" import (byte_find)
 from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (NF_CHECKED add_flag kid kid2 kids mk nkids nkids2 nodes set_list)
 from p"check.jo" import (fns syms)
-from p"checker_startup.dewy" import (load_game_file load_game_prelude load_std_file load_std_prelude)
-from p"prelude.jo" import (game_file_for prelude_game_pending prelude_std_pending std_file_for)
+from p"checker_startup.dewy" import (load_game_for_name load_std_for_name)
+from p"prelude.jo" import (prelude_game_pending prelude_std_pending)
 from p"checks_thin.dewy" import (jd)
 from p"checker_call_cost.dewy" import (Cand)
 from p"checker_call_resolve.dewy" import (resolve_fn_call)
@@ -187,27 +187,23 @@ union_hash=(n:CallErrorWord a:CallErrorWord t:CallErrorWord expected:CallErrorWo
     check_expr(n expected)
 }
 call_no_candidate=(n:CallErrorWord name:CallErrorWord decls:array<int64> args:array<int64> expected:CallErrorWord ufcs:bool recv_fits:bool @failure:CallFailure):>int64=>$unsafe {
-    if (prelude_std_pending or prelude_game_pending) and (ufcs or nodes.ptr[CallErrorWord(nodes.ptr[n].a)].kind =? 'ident') and (decls.length =? 0 or nodes.ptr[CallErrorWord(decls[0])].kind =? 'fn_') {
-        if prelude_std_pending {
-            let sf=std_file_for(name_of(name))
-            if (sf as array<uint8>).length >? 0 and load_std_file(sf) {return call_by_name(n name -1 args expected ufcs)}
-            load_std_prelude()
-            return call_by_name(n name -1 args expected ufcs)
-        }
-        if prelude_game_pending {
-            let gf=game_file_for(name_of(name))
-            if (gf as array<uint8>).length >? 0 and load_game_file(gf) {return call_by_name(n name -1 args expected ufcs)}
-            load_game_prelude()
-            return call_by_name(n name -1 args expected ufcs)
-        }
+    if call_targs.length =? 0 {
+        let ud=union_dispatch(n name decls args expected)
+        if ud >=? 0 {return ud}
     }
-    call_targs=[]
-    # (f(e) with e a union and an overload of f for each of its members: chosen by what e holds)
-    let ud=union_dispatch(n name decls args expected)
-    if ud >=? 0 {return ud}
-    # (`lookup(id).scaled(2)`: an error or none receiver is the result as it is)
     if ufcs and caller_dewy() and args.length >? 0 and nodes.ptr[unnamed(args[0])].type not=? 0 and forwards_exceptions(ntype(unnamed(args[0]))) {
+        call_targs=[]
         return forward_call(n name args expected)
+    }
+    if (prelude_std_pending or prelude_game_pending) and (ufcs or nodes.ptr[CallErrorWord(nodes.ptr[n].a)].kind =? 'ident') and (decls.length =? 0 or nodes.ptr[CallErrorWord(decls[0])].kind =? 'fn_') {
+        let nm_s=name_of(name)
+        if prelude_std_pending and load_std_for_name(nm_s) {return call_by_name(n name -1 args expected ufcs)}
+        if prelude_game_pending and load_game_for_name(nm_s true) {return call_by_name(n name -1 args expected ufcs)}
+    }
+    if call_targs.length >? 0 {
+        call_targs=[]
+        let ud=union_dispatch(n name decls args expected)
+        if ud >=? 0 {return ud}
     }
     if failure.last_err_map not=? 0 {failure.last_err=map_args_text(failure.last_err_map args)}
     if failure.last_err_tie {

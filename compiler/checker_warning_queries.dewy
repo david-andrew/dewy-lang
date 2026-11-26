@@ -7,15 +7,15 @@ from p"ast.jo" import (NF_EXTERN NF_MUT has_flag kid nkids nodes)
 from p"check.jo" import (dewy_target_dropped discarding fns globals locals modules syms)
 from p"checker_expr.dewy" import (lookup)
 from p"checker_signature.dewy" import (fn_sig)
-from p"checker_startup.dewy" import (load_std_file)
+from p"checker_startup.dewy" import (load_std_for_name std_file_route)
 from p"checks_thin.dewy" import (hidden_method_message)
 from p"expr.jo" import (intrinsics)
-from p"prelude.jo" import (prelude_std_pending std_file_for)
+from p"prelude.jo" import (prelude_std_pending)
 from p"source_warnings.dewy" import (warn)
 from p"spelling.dewy" import (edit_distance)
 from p"type_ops.dewy" import (dt)
-from p"types.jo" import (T_NEVER has_var prune tkind type_eq types)
-from p"util.jo" import (files name_of pos_file)
+from p"types.jo" import (T_NEVER has_var prune structs tkind type_eq types)
+from p"util.jo" import (files name_of pos_file pos_in_lib)
 
 WarningWord:type=int64<overflow='wrap'>
 # xs.sorted(), s.trim() as a statement: a library function that gives a new value of its first
@@ -105,9 +105,18 @@ hidden_method_warnings=(m:WarningWord):>void=>$unsafe {
                 continue
             }
         }
-        if prelude_std_pending {
-            let sf=std_file_for(dn)
-            if (sf as array<uint8>).length >? 0 {load_std_file(sf); cl_demand(name);}
+        if prelude_std_pending and std_file_route(dn) not=? -1 {
+            let mine0=fn_sig(d)
+            let skip_std=mine0.params.length =? 0
+            if not skip_std {
+                let p0=prune(mine0.params[0])
+                let pk=types.ptr[p0].kind
+                if pk =? 'struct_' or pk =? 'enum_' {
+                    let sd=WarningWord(structs.ptr[WarningWord(types.ptr[p0].st)].decl)
+                    if sd not=? 0 and not pos_in_lib(nodes.ptr[sd].pos) {skip_std=true}
+                }
+            }
+            if not skip_std and load_std_for_name(dn) {cl_demand(name)}
         }
         let found:array<int64>=[]
         let dm=cl_prelude_module(name)

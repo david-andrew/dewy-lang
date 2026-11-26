@@ -1,9 +1,9 @@
 $runtime_checks
 from p"checker_module_lookup.dewy" import (demand_name game_lookup_skip)
-from p"checker_startup.dewy" import (load_game_file load_game_prelude load_std_file load_std_prelude)
+from p"checker_startup.dewy" import (load_game_file load_game_for_name load_std_for_name)
 from p"checks_thin.dewy" import (is_private lib_private)
 from p"prelude_ops.dewy" import (dewy_prelude_lookup)
-from p"prelude.jo" import (game_file_for prelude_game_pending prelude_std_pending std_file_for)
+from p"prelude.jo" import (prelude_game_pending prelude_std_pending)
 from p"types.jo" import (T_MAT4 types)
 from p"util.jo" import (files names)
 from p"check.jo" import (game_lookup_ok home_first home_mod home_next homes_built modules name_first name_mod name_next name_sym prelude prelude_syms prelude_used syms universe)
@@ -118,7 +118,12 @@ module_lookup_now=(m:HomeIndexWord name:HomeIndexWord):>HomeIndexWord=>$unsafe {
     }
     if name <? prelude_syms.length {
         let s=prelude_syms.ptr[name]
-        if s not=? 0 and (not user or not lib_private(name)) {return s}
+        if s not=? 0 and (not user or not lib_private(name)) {
+            if prelude_std_pending and user and syms.ptr[s].kind =? 'fns' and syms.ptr[s].surface =? 2 and files[HomeIndexWord(modules[m].file)].is_dewy {
+                if load_std_for_name(names.ptr[name]) {return module_lookup_now(m name)}
+            }
+            return s
+        }
     }
     let us=universe_sym_lookup(name)
     if us not=? 0 {
@@ -133,23 +138,10 @@ module_lookup_now=(m:HomeIndexWord name:HomeIndexWord):>HomeIndexWord=>$unsafe {
         let dunder=(nm_s as array<uint8>).length >=? 2 and (nm_s as array<uint8>).ptr[0] =? b'_' and (nm_s as array<uint8>).ptr[1] =? b'_'
         if not game_lookup_ok and not dunder {return 0}
         if not game_lookup_skip(name) {
-            if prelude_std_pending {
-                let sf=std_file_for(nm_s)
-                if (sf as array<uint8>).length >? 0 and load_std_file(sf) {return module_lookup_now(m name)}
-                if game_lookup_ok and (m <? 0 or not modules[m].is_prelude) {
-                    load_std_prelude()
-                    return module_lookup_now(m name)
-                }
-            }
+            if prelude_std_pending and load_std_for_name(nm_s) {return module_lookup_now(m name)}
             if prelude_game_pending {
-                if (m <? 0 or not modules[m].is_prelude) or dunder {
-                    let gf=game_file_for(nm_s)
-                    if (gf as array<uint8>).length >? 0 and load_game_file(gf) {return module_lookup_now(m name)}
-                    if game_lookup_ok and (m <? 0 or not modules[m].is_prelude) {
-                        load_game_prelude()
-                        return module_lookup_now(m name)
-                    }
-                }
+                let allow_bulk=game_lookup_ok and (m <? 0 or not modules[m].is_prelude)
+                if (allow_bulk or dunder) and load_game_for_name(nm_s allow_bulk) {return module_lookup_now(m name)}
             }
         }
     }

@@ -11,7 +11,7 @@ from p"checker_contexts.dewy" import (setup_module_contexts)
 from p"checker_load_module.dewy" import (load_module)
 from p"checker_module_edges.dewy" import (module_added)
 from p"checker_registration.dewy" import (register_module)
-from p"checker_startup.dewy" import (load_game_prelude load_std_prelude target_const)
+from p"checker_startup.dewy" import (load_game_prelude load_std_prelude std_file_route std_files_for target_const)
 from p"checks_imports.dewy" import (bind_from_imports)
 from p"checks_thin.dewy" import (module_path_key)
 from p"directives.jo" import (dir_runtime_caps dir_runtime_settings)
@@ -23,7 +23,7 @@ from p"intern.dewy" import (hash_bytes)
 from p"main.jo" import (repl_image)
 from p"module_paths.dewy" import (module_key path_dir path_stem)
 from p"parser_text.dewy" import (parse_span)
-from p"prelude.jo" import (PnEntry PnPost dp_by_name dp_loaded dp_mods dp_names dp_paths dp_scanned math_eval_loaded math_runtime_loaded pm_exports pn_entries pn_pending pn_posts pn_seen pn_slots prelude_game_hint prelude_known prelude_lazy prelude_new_decls prelude_std_pending pu_done pu_mod settings_frames_loaded settings_permits_loaded settings_rule_data_loaded settings_rules_loaded settings_runtime_loaded settings_values_loaded settings_zone_loaded)
+from p"prelude.jo" import (PnEntry PnPost dp_by_name dp_loaded dp_mods dp_names dp_paths dp_scanned math_eval_loaded math_runtime_loaded pm_exports pn_entries pn_pending pn_posts pn_seen pn_slots prelude_game_hint prelude_known prelude_lazy prelude_new_decls prelude_std_pending pu_done pu_mod settings_frames_loaded settings_permits_loaded settings_rule_data_loaded settings_rules_loaded settings_runtime_loaded settings_values_loaded settings_zone_loaded std_file_init)
 from p"refine.jo" import (refine_active)
 from p"scan.jo" import (SU_EAGER SU_EXPORT SU_NOMINAL sc_target su_end su_flags su_name0 su_name_at su_name_len su_start)
 from p"scan_index.dewy" import (scan_source)
@@ -454,8 +454,12 @@ prelude_source=(name:PreludeWord):>string=>$unsafe {
         }
     }
     if prelude_std_pending {
-        load_std_prelude()
-        return prelude_source(name)
+        let r=std_file_route(names[name])
+        if r >=? 0 {return "lib/std/{std_file_init(int64(r))}"}
+        if r =? -2 {
+            let fs=std_files_for(names[name])
+            if fs.length >? 0 {return "lib/std/{fs[0]}"}
+        }
     }
     ""
 }
