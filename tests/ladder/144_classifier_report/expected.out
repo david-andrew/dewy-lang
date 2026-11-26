@@ -1,0 +1,69 @@
+line 11: unknown actual parcel
+line 12: unknown prediction parcel
+line 13: count must be positive
+line 14: invalid count
+line 15: expected actual,prediction,count
+batch inbox
+actual | billing | shipping | returns | other | referred
+billing | 3 | 2 | 3 | 0 | 1
+shipping | 3 | 7 | 0 | 0 | 0
+returns | 0 | 2 | 0 | 0 | 2
+other | 0 | 0 | 0 | 0 | 0
+class: support, precision, recall, F1
+billing: 9, 50.0%, 33.3%, 40.0%
+shipping: 10, 63.6%, 70.0%, 66.7%
+returns: 4, 0.0%, 0.0%, 0.0%
+other: 0, n/a, n/a, n/a
+reviewed 23, assigned 20, referred 3
+coverage 87.0%, accuracy 43.5%
+accuracy on assigned tickets 50.0%
+most frequent wrong assignments:
+  billing -> returns: 3
+  shipping -> billing: 3
+  billing -> shipping: 2
+batch escalations
+actual | billing | shipping | returns | other | referred
+billing | 0 | 0 | 0 | 0 | 0
+shipping | 0 | 0 | 0 | 0 | 0
+returns | 0 | 0 | 0 | 0 | 4
+other | 0 | 0 | 0 | 0 | 0
+class: support, precision, recall, F1
+billing: 0, n/a, n/a, n/a
+shipping: 0, n/a, n/a, n/a
+returns: 4, n/a, 0.0%, 0.0%
+other: 0, n/a, n/a, n/a
+reviewed 4, assigned 0, referred 4
+coverage 0.0%, accuracy 0.0%
+accuracy on assigned tickets n/a
+no wrong assignments
+batch empty queue
+actual | billing | shipping | returns | other | referred
+billing | 0 | 0 | 0 | 0 | 0
+shipping | 0 | 0 | 0 | 0 | 0
+returns | 0 | 0 | 0 | 0 | 0
+other | 0 | 0 | 0 | 0 | 0
+class: support, precision, recall, F1
+billing: 0, n/a, n/a, n/a
+shipping: 0, n/a, n/a, n/a
+returns: 0, n/a, n/a, n/a
+other: 0, n/a, n/a, n/a
+reviewed 0, assigned 0, referred 0
+coverage n/a, accuracy n/a
+accuracy on assigned tickets n/a
+no wrong assignments
+batch bulk import
+actual | billing | shipping | returns | other | referred
+billing | 9007199254740993 | 0 | 0 | 0 | 0
+shipping | 1 | 0 | 0 | 0 | 0
+returns | 0 | 0 | 0 | 0 | 0
+other | 0 | 0 | 0 | 0 | 0
+class: support, precision, recall, F1
+billing: 9007199254740993, 100.0%, 100.0%, 100.0%
+shipping: 1, n/a, 0.0%, 0.0%
+returns: 0, n/a, n/a, n/a
+other: 0, n/a, n/a, n/a
+reviewed 9007199254740994, assigned 9007199254740994, referred 0
+coverage 100.0%, accuracy 100.0%
+accuracy on assigned tickets 100.0%
+most frequent wrong assignments:
+  shipping -> billing: 1

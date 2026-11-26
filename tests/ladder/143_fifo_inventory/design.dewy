@@ -1,0 +1,152 @@
+# A stockroom daybook. Costs are integer cents throughout. Outgoing units
+# consume the oldest receipts first, including stock written off as damaged.
+Lot:type = [units:int cost:int]
+Stock:type = [
+    lots:array<Lot>
+    bought:int
+    sold_cost:int
+    revenue:int
+    shrink:int
+]
+Book:type = [items:dict<string Stock> accepted:int rejected:int]
+
+const quantity_text = regex(r"^[0-9]+$")
+const sku_text = regex(r"^[a-z][a-z0-9-]*$")
+const price_text = regex(r"^[0-9]+(\.[0-9]{1,2})?$")
+
+quantity = (text:string):>int | none => {
+    if not text.matches(quantity_text) return none
+    let n = to_int(text) ?? return none
+    if n <=? 0 return none
+    n
+}
+
+# Prices arrive as dollars. Reject extra precision before accepting a receipt.
+cents = (text:string):>int | none => {
+    if not text.matches(price_text) return none
+    let dollars = rational(text) ?? return none
+    (dollars * 100).floor
+}
+
+money = (amount:int):>string => {
+    let sign = if amount <? 0 "-" else ""
+    let n = abs(amount)
+    "{sign}{n // 100}.{fmt'02d'(n % 100)}"
+}
+
+on_hand = (s:Stock):>int => {
+    let count = 0
+    loop lot in s.lots { count += lot.units }
+    count
+}
+
+valuation = (s:Stock):>int => {
+    let cost = 0
+    loop lot in s.lots { cost += lot.units * lot.cost }
+    cost
+}
+
+receive = (@s:Stock count:int unit_cost:int):>void => {
+    s.lots.push(Lot[count unit_cost])
+    s.bought += count * unit_cost
+}
+
+# The caller checks availability first. Keep the unconsumed suffix, including
+# the tail of a partially used lot, in its original order.
+take_oldest = (@s:Stock count:int):>int => {
+    let left = count
+    let cost = 0
+    let rest:array<Lot> = []
+    loop lot in s.lots {
+        let taken = min(left lot.units)
+        cost += taken * lot.cost
+        left -= taken
+        if taken <? lot.units rest.push(Lot[lot.units - taken lot.cost])
+    }
+    s.lots = rest
+    cost
+}
+
+# Stage each posting in a local value. A rejected order must never consume
+# a partial shipment or create an empty item in the stockroom.
+post = (@book:Book fields:array<string>):>string | none => {
+    let op = fields.get(0) ?? return "empty order"
+    let priced = op =? "buy" or op =? "sell"
+    if not priced and op not=? "damage" return "unknown operation"
+    let width = if priced 4 else 3
+    if fields.length not=? width return "wrong field count"
+    let sku = fields.get(1) ?? return "missing sku"
+    if not sku.matches(sku_text) {
+        return "invalid sku {sku}"
+    }
+    let count = quantity(fields.get(2) ?? "") ?? return "invalid quantity"
+    let price = 0
+    if priced {
+        price = cents(fields.get(3) ?? "") ?? return "invalid price"
+    }
+
+    let item = book.items.get(sku) ?? Stock[[] 0 0 0 0]
+    if op =? "buy" {
+        receive(@item count price)
+    } else {
+        let available = on_hand(item)
+        if count >? available return "{sku} has {available}, needs {count}"
+        let cost = take_oldest(@item count)
+        if op =? "sell" {
+            item.sold_cost += cost
+            item.revenue += count * price
+        } else {
+            item.shrink += cost
+        }
+    }
+    book.items[sku] = item
+    none
+}
+
+report = (book:Book):>void => {
+    printl"stockroom after {book.accepted} postings ({book.rejected} rejected)"
+    let purchased = 0
+    let held = 0
+    let sales = 0
+    let cost = 0
+    let loss = 0
+    loop sku in book.items.keys.sorted {
+        let item = book.items.get(sku) ?? continue
+        let worth = valuation(item)
+        printl"  {sku}: {on_hand(item)} units, value {money(worth)}"
+        loop lot in item.lots {
+            printl"    {lot.units} @ {money(lot.cost)}"
+        }
+        printl"    sales {money(item.revenue)}, cost {money(item.sold_cost)}, damage {money(item.shrink)}"
+        purchased += item.bought
+        held += worth
+        sales += item.revenue
+        cost += item.sold_cost
+        loss += item.shrink
+    }
+    printl"purchases {money(purchased)}, held {money(held)}, released {money(cost + loss)}"
+    printl"net margin {money(sales - cost - loss)}"
+    printl"unreconciled {money(purchased - held - cost - loss)}"
+}
+
+main = () => {
+    let book = Book[[] 0 0]
+    let journal = read_stdin or_throw
+    loop n in 1.. and raw in journal.split("\n") {
+        let line = raw.trim
+        if line =? "" or line.startswith("#") continue
+        if line =? "report" {
+            report(book)
+            continue
+        }
+        let fields = [loop field in line.split(" ") if field not=? "" field]
+        let problem = post(@book fields)
+        if problem is? string {
+            book.rejected += 1
+            printl"line {n}: {problem}"
+        } else {
+            book.accepted += 1
+        }
+    }
+    report(book)
+}

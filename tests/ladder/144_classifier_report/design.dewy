@@ -1,0 +1,150 @@
+# Compare a routing model's predictions with reviewed labels. "-" means the
+# model referred the ticket to a human. Each input row may summarize many
+# identical tickets, so counts and displayed percentages use exact integers.
+Row:type = dict<string int>
+Matrix:type = dict<string Row>
+Observation:type = [actual:string predicted:string count:int]
+Score:type = [label:string support:int predicted:int correct:int]
+Confusion:type = [actual:string predicted:string count:int]
+
+UsageError:type = type of error & [message:string]
+
+const abstain = "-"
+const label_word = regex(r"^[a-z][a-z0-9_-]*$")
+
+labels_from = (words:array<string>):>array<string> | UsageError => {
+    let labels:array<string> = []
+    loop word in words {
+        if not word.matches(label_word) return UsageError["invalid label {word}"]
+        if word in? labels return UsageError["duplicate label {word}"]
+        labels.push(word)
+    }
+    if labels.is_empty return UsageError["supply the model's labels in display order"]
+    labels
+}
+
+parse = (fields:array<string> labels:array<string>):>Observation | string => {
+    if fields.length not=? 3 return "expected actual,prediction,count"
+    let actual = fields[0].trim
+    let predicted = fields[1].trim
+    if actual not in? labels return "unknown actual {actual}"
+    if predicted not=? abstain and predicted not in? labels {
+        return "unknown prediction {predicted}"
+    }
+    let count = to_int(fields[2].trim) ?? return "invalid count"
+    if count <=? 0 return "count must be positive"
+    Observation[actual predicted count]
+}
+
+record = (@matrix:Matrix obs:Observation):>void => {
+    let row:Row = matrix.get(obs.actual) ?? []
+    row[obs.predicted] = (row.get(obs.predicted) ?? 0) + obs.count
+    matrix[obs.actual] = row
+}
+
+# Ignore labels with no observations when computing totals, but still give
+# them a place in the printed matrix and a score row.
+scores = (matrix:Matrix labels:array<string>):>array<Score> => {
+    let out:array<Score> = []
+    loop label in labels {
+        let row:Row = matrix.get(label) ?? []
+        let support = 0
+        loop n in row.values { support += n }
+        let predicted = 0
+        loop other in matrix.values { predicted += other.get(label) ?? 0 }
+        out.push(Score[label support predicted row.get(label) ?? 0])
+    }
+    out
+}
+
+# Percent to one decimal, rounding half upward even for very large counts.
+# A class with no predictions has undefined precision. Printing zero would
+# imply the model made wrong predictions for that class.
+percent = (part:int total:int):>string => {
+    if total <=? 0 return "n/a"
+    let tenths = (part * 1000 + total // 2) // total
+    "{tenths // 10}.{tenths % 10}%"
+}
+
+show_matrix = (matrix:Matrix labels:array<string>):>void => {
+    printl"actual | {labels.join(" | ")} | referred"
+    loop label in labels {
+        let row:Row = matrix.get(label) ?? []
+        let cells = [loop column in labels "{row.get(column) ?? 0}"]
+        cells.push("{row.get(abstain) ?? 0}")
+        printl"{label} | {cells.join(" | ")}"
+    }
+}
+
+show_scores = (metrics:array<Score>):>void => {
+    let reviewed = 0
+    let assigned = 0
+    let correct = 0
+    printl"class: support, precision, recall, F1"
+    loop s in metrics {
+        let precision = percent(s.correct s.predicted)
+        let recall = percent(s.correct s.support)
+        let f1 = percent(2 * s.correct s.support + s.predicted)
+        printl"{s.label}: {s.support}, {precision}, {recall}, {f1}"
+        reviewed += s.support
+        assigned += s.predicted
+        correct += s.correct
+    }
+    printl"reviewed {reviewed}, assigned {assigned}, referred {reviewed - assigned}"
+    printl"coverage {percent(assigned reviewed)}, accuracy {percent(correct reviewed)}"
+    printl"accuracy on assigned tickets {percent(correct assigned)}"
+}
+
+# Preserve label order among equally frequent mistakes so that different runs
+# present ties consistently. Referrals are counted separately from mistakes.
+mistakes = (matrix:Matrix labels:array<string>):>array<Confusion> => {
+    let pairs:array<Confusion> = []
+    loop actual in labels {
+        let row:Row = matrix.get(actual) ?? continue
+        loop predicted in labels {
+            if actual =? predicted continue
+            let n = row.get(predicted) ?? continue
+            pairs.push(Confusion[actual predicted n])
+        }
+    }
+    pairs.sorted(key=(pair:Confusion) => pair.count reverse=true)
+}
+
+report = (name:string matrix:Matrix labels:array<string>):>void => {
+    printl"batch {name}"
+    show_matrix(matrix labels)
+    show_scores(scores(matrix labels))
+    let pairs = mistakes(matrix labels)
+    if pairs.is_empty {
+        printl"no wrong assignments"
+    } else {
+        printl"most frequent wrong assignments:"
+        loop pair in pairs[$clamp ..3) {
+            printl"  {pair.actual} -> {pair.predicted}: {pair.count}"
+        }
+    }
+}
+
+main = (argv:array<string>) => {
+    let labels = labels_from(argv[$clamp 1..))
+    if labels is? UsageError return labels
+
+    let matrix:Matrix = []
+    let batch = "inbox"
+    let text = read_stdin or_throw
+    loop n in 1.. and raw in text.split("\n") {
+        let line = raw.trim
+        if line =? "" or line.startswith("#") continue
+        if line.startswith("batch ") {
+            report(batch matrix labels)
+            batch = line.remove_prefix("batch ").trim
+            matrix = []
+            continue
+        }
+        match parse(line.split(",") labels) {
+            obs:Observation => record(@matrix obs)
+            why:string => printl"line {n}: {why}"
+        }
+    }
+    report(batch matrix labels)
+}

@@ -1,0 +1,43 @@
+inventory: 0 files, 0 events
+preview 2024-02-28: 2 rolls, 0 expired
+  roll api.log -> api.2024-02-28.log
+  roll worker.log -> worker.2024-02-28.log
+  api.log: 2 [first request / response sent]
+  worker.log: 1 [queue ready / queue ready]
+inventory: 2 files, 3 events
+rotate 2024-02-28: 2 rolls, 0 expired
+  roll api.log -> api.2024-02-28.log
+  roll worker.log -> worker.2024-02-28.log
+rotate 2024-02-28: 0 rolls, 0 expired
+  keep api.log: today's archive exists
+invalid stream ../escape
+write needs a stream and message
+invalid rotation date 2023-02-29
+rotate 2024-02-29: 1 rolls, 0 expired
+  roll api.log -> api.2024-02-29.log
+rotate 2024-03-01: 1 rolls, 0 expired
+  roll api.log -> api.2024-03-01.log
+preview 2024-03-02: 1 rolls, 2 expired
+  roll worker.log -> worker.2024-03-02.log
+  expire api.2024-02-28.log
+  expire worker.2024-02-28.log
+  api.2024-02-28.log: 2 [first request / response sent]
+  api.2024-02-29.log: 1 [still active / still active]
+  api.2024-03-01.log: 1 [leap day complete / leap day complete]
+  worker.2024-02-28.log: 1 [queue ready / queue ready]
+  worker.log: 1 [restarted / restarted]
+inventory: 5 files, 6 events
+rotate 2024-03-02: 1 rolls, 2 expired
+  roll worker.log -> worker.2024-03-02.log
+  expire api.2024-02-28.log
+  expire worker.2024-02-28.log
+  api.2024-02-29.log: 1 [still active / still active]
+  api.2024-03-01.log: 1 [leap day complete / leap day complete]
+  worker.2024-03-02.log: 1 [restarted / restarted]
+inventory: 3 files, 3 events
+rotate 2024-02-27: 0 rolls, 0 expired
+rotate 2024-03-04: 0 rolls, 2 expired
+  expire api.2024-02-29.log
+  expire api.2024-03-01.log
+  worker.2024-03-02.log: 1 [restarted / restarted]
+inventory: 1 files, 1 events

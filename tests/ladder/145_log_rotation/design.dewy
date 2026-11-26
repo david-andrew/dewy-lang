@@ -1,0 +1,150 @@
+# Run this single-writer spool in a directory managed by the operator.
+# Rotate active streams into dated archives, then expire them by calendar day.
+# The caller chooses the root directory and retention window. Preview computes
+# the same plan without applying it.
+Spool:type = [root:Path keep_days:int]
+Roll:type = [source:SafePath target:SafePath]
+Plan:type = [rolls:array<Roll> expired:array<SafePath> blocked:array<string>]
+UsageError:type = type of error & [message:string]
+
+const stream_name = regex(r"^[a-z][a-z0-9_-]*$")
+const iso_day = regex(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+
+settings = (argv:array<string>):>Spool | UsageError => {
+    if argv.length not=? 3 return UsageError["usage: spool DIRECTORY RETENTION_DAYS"]
+    let days = to_int(argv[2]) ?? return UsageError["retention must be a number of days"]
+    if days <? 1 or days >? 3650 return UsageError["retention must be 1 to 3650 days"]
+    Spool[p(argv[1]) days]
+}
+
+archive_day = (name:string):>Date | none => {
+    let parts = name.split(".")
+    if parts.length not=? 3 return none
+    let [stream stamp suffix] = parts
+    if suffix not=? "log" or not stream.matches(stream_name) return none
+    if not stamp.matches(iso_day) return none
+    date(stamp) ?? none
+}
+
+# Accept only the spool's own filename grammar. Operators sometimes keep
+# other files in the same directory. None of them belong to a rotation plan.
+plan_for = (spool:Spool today:Date) => {
+    let plan = Plan[[] [] []]
+    let root = spool.root
+    let names = root.list or_throw
+    loop name in names.sorted {
+        let file = root.confine(p"{root}/{name}") or_throw
+        if not file.is_file continue
+        let stamp = archive_day(name)
+        if stamp is? Date {
+            let age = (today - stamp).total_days
+            if age >=? spool.keep_days plan.expired.push(file)
+            continue
+        }
+        if file.suffix not=? ".log" continue
+        let stream = file.stem
+        if not stream.matches(stream_name) continue
+        let dest = root.confine(p"{root}/{stream}.{today}.log") or_throw
+        if dest.exists {
+            plan.blocked.push(name)
+        } else {
+            plan.rolls.push(Roll[file dest])
+        }
+    }
+    plan
+}
+
+rotate = (spool:Spool day:Date preview:bool) => {
+    let plan = plan_for(spool day) or_throw
+    let mode = if preview "preview" else "rotate"
+    printl"{mode} {day}: {plan.rolls.length} rolls, {plan.expired.length} expired"
+    loop roll in plan.rolls {
+        if not preview {
+            roll.source.rename(roll.target) or_throw;
+        }
+        printl"  roll {roll.source.name} -> {roll.target.name}"
+    }
+    loop file in plan.expired {
+        if not preview {
+            file.unlink or_throw;
+        }
+        printl"  expire {file.name}"
+    }
+    loop name in plan.blocked {
+        printl"  keep {name}: today's archive exists"
+    }
+}
+
+append_event = (spool:Spool fields:array<string>) => {
+    if fields.length <? 3 {
+        printl"write needs a stream and message"
+        return
+    }
+    let stream = fields[1]
+    if not stream.matches(stream_name) {
+        printl"invalid stream {stream}"
+        return
+    }
+    let root = spool.root
+    let target = root.confine(p"{root}/{stream}.log") or_throw
+    let message = fields[$clamp 2..).join(" ")
+    append_file(target.path "{message}\n") or_throw;
+}
+
+# Reopen each file and report its first and last messages. Equal file sizes
+# alone would miss a swapped archive or an overwritten active stream.
+inventory = (spool:Spool) => {
+    let root = spool.root
+    let names = root.list or_throw
+    let files = 0
+    let events = 0
+    loop name in names.sorted {
+        let file = root.confine(p"{root}/{name}") or_throw
+        if not file.is_file or file.suffix not=? ".log" continue
+        if not file.stem.matches(stream_name) and archive_day(name) is? none continue
+        let text = file.read_text or_throw
+        let lines = text.lines
+        let first = lines.get(0) ?? ""
+        let last = lines.get(lines.length - 1) ?? ""
+        printl"  {name}: {lines.length} [{first} / {last}]"
+        files += 1
+        events += lines.length
+    }
+    printl"inventory: {files} files, {events} events"
+}
+
+rotation_request = (spool:Spool fields:array<string> preview:bool) => {
+    if fields.length not=? 2 {
+        printl"rotation needs an ISO date"
+        return
+    }
+    let stamp = fields[1]
+    let day = date(stamp)
+    if day is? error or not stamp.matches(iso_day) {
+        printl"invalid rotation date {stamp}"
+        return
+    }
+    rotate(spool day preview) or_throw
+}
+
+main = (argv:array<string>) => {
+    let spool = settings(argv)
+    if spool is? UsageError return spool
+    spool.root.make_dirs or_throw;
+    let script = read_stdin or_throw
+    loop raw in script.split("\n") {
+        let line = raw.trim
+        if line =? "" or line.startswith("#") continue
+        let fields = line.split(" ")
+        match fields.get(0) ?? "" {
+            <"write"> => append_event(spool fields) or_throw
+            <"rotate"> => rotation_request(spool fields false) or_throw
+            <"preview"> => rotation_request(spool fields true) or_throw
+            <"list"> => {
+                if fields.length =? 1 inventory(spool) or_throw
+                else printl"list takes no arguments"
+            }
+            _ => printl"unknown request {line}"
+        }
+    }
+}
