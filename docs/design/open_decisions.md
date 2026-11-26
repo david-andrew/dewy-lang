@@ -513,6 +513,8 @@ Resources clean themselves up: files flush and close, sockets close, locks unloc
 
 #### Q1 (a). Who handles a failed cleanup? (reopened)
 
+> **Your direction (11-26), being worked through in round 9:** types that require handling, so leaving one unhandled is a compile error (or a warning, for less strict types); plain code in the ordinary control flow; the strict metatag on top; nothing that can't fail ever appears; several resources combine into an error stack, with `defer` as the hook. Open: exactly when `defer` runs, how several defers combine, and whether D42's automatic combining should become more explicit. [Your notes](proposals/cleanup/answers-r8.md) · [Round 8 study](proposals/cleanup/round8.md) · [Review](proposals/cleanup/review-round8.md)
+
 ```dewy
 save = (data:array<uint8>) => {
     let out = open(p"/mnt/usb/data.bin" 'w') or_throw
