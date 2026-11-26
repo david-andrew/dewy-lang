@@ -29,16 +29,12 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
    Dogfood rounds alternate discovery and fix. Coverage rounds on value layouts,
    refinements and concurrency found 23 bug causes, all fixed; run more on
    untested areas (FFI, GPU/packed/SOA layouts, other native architectures).
-2. **Compile speed** (200–250k lines/s on every flagship). 99 and 100 need
-   33–35% fewer instructions. GCC O3+LTO on the compiler would give about 23%;
-   they would still need about 8–11% less compiler work. Allocator, isel, dense
-   storage, frames, optimizer structure, normalization and non-leaf inlining all
-   bounded under 1%, and profile-driven work cuts have nothing left bounded at
-   0.5%. [Structural round 1](docs/design/proposals/compile-speed/structural-round1.md)
-   bounded three ideas at 7–15%; one checked body per uniform
-   reflection loop (99) and word formatting from a proven range (100) both landed
-   (−10.9% and −9.0% instructions on their flagships, 11-21). Next: structural
-   round 2 (new bounded ideas; 99 and 100 still need about 25–40% more).
+2. **Compile speed** (200–250k lines/s on every flagship; flagships total 260k, 99 and 96
+   at about 220k). Moonshot toward 1M processed lines/s under way (Neon, plan in
+   [moonshot-round1](docs/design/proposals/compile-speed/moonshot-round1.md)): it owns
+   compiler storage/AST/IR layout, walk structure and code generation, including
+   replacing the remaining Jo storage modules with Dewy. No other compile-speed work;
+   route compiler changes in those areas around it.
 3. **Self-hosting** ([readiness](docs/design/self_hosting.md)): milestones 1 and 3
    done 11-24: Dewy runs the driver and every subsystem walk; the 609 frozen twins are
    deleted and the compiler bootstraps from C through the pinned source capsule
