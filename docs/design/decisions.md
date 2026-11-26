@@ -690,7 +690,8 @@ section linked. ROADMAP.md lists them in one line each.
     or_throw )`, then `config` and `sounds`), and `parallel { … }` keeps its names inside. This
     replaces D4's exception where top-level `let`s escaped a `parallel { … }` block. With D40 Q2,
     an owner bound in `parallel ( … )` belongs to the enclosing block.
-  - **A cleanup failure is the function's result** (D40 Q1): yes. If a file's final flush or
+  - **A cleanup failure is the function's result** (D40 Q1): **reopened 2026-11-25**, see D40 Q1
+    in [open_decisions.md](open_decisions.md). As first recorded: yes. If a file's final flush or
     close fails, that failure is what the function returns. Condition from David: no hard-to-
     follow nonlocal behavior; the language, highlighting and hover show what extra work runs at
     cleanup and which failures it can add. Still open: timing (Q2), combining failures (Q3), and
@@ -792,3 +793,5 @@ section linked. ROADMAP.md lists them in one line each.
     Everywhere else, multivalues spread out into a sequence of single values. There is no special
     support for some cases, such as an array of multivalues, for now. Rejected: one group per
     advance.
+  - **Who reports a generator's failed close** (Q6): not decided here; folded into reopened D40 Q1
+    in [open_decisions.md](open_decisions.md).

@@ -19,9 +19,8 @@
 - **(a) Changes something you decided:**
   - D44 Q1, Q2, Q5, Q6, Q8, Q9: `Canceled` inferred, never written; confined to its own work; loops end at cancellation; `race`/`first_ok` discard losers except a failed undo; the documented-behaviour changes (Ctrl-C keeps the OS default); a lazy body passes a cancellation on;
   - D42 Q3: one leaf per operation, families never returned bare; `FileError` becomes the file failures' parent;
-  - D40 Q2, Q5, Q6: cleanup timing, `defer`, and visible cleanup exits;
+  - D40 Q1, Q2, Q5, Q6: who handles a failed cleanup (reopened), cleanup timing, `defer`, and visible cleanup exits;
   - D38 Q1: snake_case naming style;
-  - D45 Q6: who reports a failed close, shown with D40 Q1 to check them together;
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
@@ -226,7 +225,7 @@ Should these changes be accepted together?
 - **Rec:** accept all. Each is **reversible** before release.
 - **You give up:** what the "Against" column names: in each, a documented rule changes to the one in the row.
 
-#### Q9 (a). A lazy body must pass on a cancellation (from D45, generators)
+#### Q9 (a). A lazy body must pass on a cancellation (from the generators design)
 
 ```dewy
 doubled = (source) => lazy loop x in source x * 2
@@ -510,7 +509,49 @@ For D43: commit consumes its transaction on every outcome, rolling back on failu
 
 ### D40. Cleanup: timing, visible exits and whether `defer` stays
 
-Resources clean themselves up: files flush and close, sockets close, locks unlock, and uncommitted transactions roll back. You decided that a cleanup failure becomes the function's result, with hover and highlighting showing the cleanup (Q1), and that `$__abandon__` discards unpublished work (Q4). `defer` is kept provisionally (Q5). Shared `channel` and `mpmc` keep explicit `close()` (agreed). Combining failures moves from the old Q3 to D42.
+Resources clean themselves up: files flush and close, sockets close, locks unlock, and uncommitted transactions roll back. You reopened who handles a cleanup failure (Q1), and decided that `$__abandon__` discards unpublished work (Q4). `defer` is kept provisionally (Q5). Shared `channel` and `mpmc` keep explicit `close()` (agreed). Combining failures moves from the old Q3 to D42.
+
+#### Q1 (a). Who handles a failed cleanup? (reopened)
+
+```dewy
+save = (data:array<uint8>) => {
+    let out = open(p"/mnt/usb/data.bin" 'w') or_throw
+    out.write_bytes(data) or_throw;     # buffered
+} or_throw                               # out's flush and close: a full disk is forwarded from here
+first_row = (rows) => {
+    loop row in rows { return row }      # rows' socket closes on this exit too
+    none
+} or_throw                               # covers both exits
+```
+
+The proposal: mark the scope that owns a value with `or_throw` (or `??<E>`) after its `}`, and that value's failed cleanup is forwarded (or handled) on every exit of the scope, early `return`s included. Leave it unmarked and the compiler warns, naming the value and the line; at run time the cleanup still runs and its failure is discarded. A strict metatag makes the warning an error.
+
+On 11-12 you decided a failed cleanup becomes the owning function's result with nothing written. You reopened it: nothing in `first_row` forwards the socket's failed close, and `save`'s `or_throw` forwards the write, not the flush at `}`, so the failure turning up in the caller is hidden nonlocal behavior.
+
+A value has one owning scope, but that scope can have several exits (`first_row` has two), all known at compile time. A move hands the duty to the new owner (the caller, an array); lending with `@` leaves it with the lender. So a form must cover every exit; a line at the bottom doesn't, because `return` never reaches it.
+
+- **Keep the 11-12 rule.** Nothing written; the failure becomes the function's result, and hover shows it. Your objection stands.
+- **Mark the scope** (above), on the baseline: warning by default, error under the strict tag. `} ??<FileCloseFailed> void` handles instead of forwarding; `out.close() ?? log("…")` finishes one value early. It is Q6's marked-block rule with the function-exit exemption removed; if taken, Q6's unmarked `break` also warns and discards instead of leaving the function.
+- **`defer` tied to the value**, on the same baseline:
+
+  ```dewy
+  save = (data:array<uint8>) => {
+      let out = open(p"/mnt/usb/data.bin" 'w') or_throw
+      defer out.close() or_throw
+      out.write_bytes(data) or_throw;
+  }
+  first_row = (rows) => {
+      defer drop(rows) or_throw    # generic close for any owner
+      loop row in rows { return row }
+      none
+  }
+  ```
+
+  Runs on every exit where the value is still owned. Each value gets its own handling, beside its acquisition, under either timing rule (Q2). Costs a line per value, makes `defer` fallible (reversing Q5's provisional rule), and needs a generic `drop(x)`.
+
+The strict tag's name is a placeholder (`$explicit_cleanup`, in `$bulletproof`); it may become one general tag with D44 Q7's `$no_discarded_failures`.
+
+**Rec:** mark the scope (3 of 4 brainstorm answers). No new syntax: one token on `save` and `first_row`, covering every exit and several values at once. Main risk: the suffix does two jobs. On an inner block that yields a value it both selects the value and authorizes cleanup, and readers may take `} or_throw` as running only at the bottom or add it by reflex. Highlighting from each exit to its marker, hover listing what it covers, and an unneeded-marker lint answer that. It assumes block-end cleanup (Q2); a reassignment drops the old value mid-block and warns there unless closed explicitly. **Reversible** before release. [Brainstorm synthesis](proposals/cleanup/brainstorm-round8.md)
 
 #### Q2 (a). Clean up at block end or after last use?
 
@@ -700,57 +741,6 @@ Use the core names below, while renaming the related-field selector currently sp
 Core names: `fields_of`, `collection`, `Ref`, `open(create= read_only=)`, `memory`, `get`, `require`, `insert`, `reference`, `replace`, `put`, `begin(timeout=)`, `commit`, `rollback`, `snapshot`, `close`; `index`, `unique(present_only=)`, `tuple`, `eq`, `lt`, `ge`, `contains`, `all_of`, `where`, `sorted(key= reverse=)`, `all`, `count`, `page(size= after= max_scanned= max_bytes= timeout=)`, `explain`, `include`, `update`, `delete`; result `.items`, `.next`, `.record`, `.related`. Additional release-module names and error names are not covered by this core ballot.
 
 Paper dogfood remains below all-5; the 45-line core cold read conveyed broad roles except `related` (two readers inferred a join), with low confidence for `present_only` and `reference`; inspection names have not been cold-read: [database proposal](proposals/database/), [function-inspection proposal](proposals/function-inspection/).
-
-### D45. Generators from `lazy`, with no `yield`
-
-This is your sketch, worked into a full design. You answered the rest on 11-25 ([decisions.md](decisions.md), batch 11). One question is left.
-- `lazy expr` makes a generator from any expression: a group, a block or a loop.
-- Ordinary calls stay eager, and nothing runs until a value is pulled.
-- `inner()...` inside a lazy body hands over to another generator.
-
-```dewy
-squares = () => lazy loop i in 0.. i^2
-evens = (source) => lazy loop x in source { if x % 2 =? 0 x }
-loop x in evens(squares) and _ in [0..5) printl(x)   # 0 4 16 36 64
-```
-
-#### Q6 (a). Who reports a failed close? Shown with D40 Q1, to check them together
-
-```dewy
-first_row = (rows) => {
-    loop row in rows { return row }       # stop after one row
-    none
-}
-main = () => {
-    let row = first_row(db.rows("users")) or_throw   # the query's socket closes as first_row returns
-    show(row)
-}
-```
-
-`db.rows("users")` makes a generator that owns a database socket. No references are involved: the generator is an ordinary value with the socket inside it, like `out` in D40 Q1's `save` below. A socket can't be copied, so passing the generator to `first_row` hands it over, the same move-at-last-use as any other value. `first_row` stops after one row, so the generator, and its socket, is cleaned up when `first_row` returns.
-
-Suppose closing that socket fails. Should `main` get the failure at its `or_throw` instead of the row? If reading also failed, both failures would be kept (D42).
-
-**The rule this rests on: D40 Q1, which you accepted on 11-12.** As it was asked:
-
-```dewy
-save = (data:array<uint8>) => {
-    let out = open(p"/mnt/usb/data.bin" 'w') or_throw
-    out.write_bytes(data) or_throw;     # buffered: nothing is on the disk yet
-}                                        # out flushes and closes here
-main = () => {
-    save(readings) ?? { printl"save failed"; return }
-    printl"saved"
-}
-```
-
-> If the USB stick is full, the failure only shows up at the final flush. Today a cleanup hook can't fail, so that error is lost and this program prints "saved". With this change the flush failure becomes `save`'s result, and `main` prints "save failed". Let cleanup hooks fail, with the failure becoming the function's result? (The alternative is requiring `out.close() or_throw` before every exit, which is the second step you want to avoid.)
-
-As recorded: yes. If a file's final flush or close fails, that failure is what the function returns. Your condition was no hard-to-follow nonlocal behavior: the language, highlighting and hover show what extra work runs at cleanup and which failures it can add. Still open in D40: timing (Q2), and a visible exit for a cleanup failure on `break`, `continue` or an inner block's end (Q6). [Cleanup proposal](proposals/cleanup/)
-
-**Rec:** keep D40 Q1, and apply it to generators exactly as to files. `first_row` owns the generator, so `first_row` returns the failed close. The alternative is to drop or log a failed close, which hides a lost write on the other end. **Reversible** before release.
-
-Dogfooded on 13 programs, audited against existing decisions, reviewed for soundness, and names read cold. Programs: [generators proposal](proposals/generators/) (round 4 is the latest; [your answers](proposals/generators/answers-r4.md)).
 
 ---
 
