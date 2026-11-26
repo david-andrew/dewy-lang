@@ -209,7 +209,7 @@
   {"args":["build","<root>/tests/cases/ownership/hook_global_facts.dewy","-o","<tmp>/program"],"status":1,"stderr":"<root>/tests/cases/ownership/hook_global_facts.dewy:12:12: error: cannot prove index is in bounds: missing lower and upper bounds\n        printl(xs[count])\n               ^\n<root>/tests/cases/ownership/hook_global_facts.dewy:11:5: note: count may have changed at this call to []=\n        m[0]=Owner[1]\n        ^\n    note: missing lower bound: nothing establishes `count >=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): count = -1\n    note: xs.length is 3\n    note: missing upper bound: nothing establishes `count <? xs.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): count = 9223372036854775807, xs.length = 3\n    help: establish `0 <=? count <? xs.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n"},
   {"args":["build","<root>/tests/cases/ownership/hook_local_facts.dewy","-o","<tmp>/program"],"files":{"program":{"run":{"status":0,"stdout":"20 10\n300 30\n","stderr":""}}}},
   {"args":5103,"files":8152},
-  10227,
+  12465,
   {"args":["build","<root>/tests/cases/ownership/inherited_hook_override.dewy","-o","<tmp>/program"],"files":8152},
   10228,
   {"args":["build","<root>/tests/cases/ownership/inherited_move_only_field.dewy","-o","<tmp>/program"],"status":1,"stderr":"<root>/tests/cases/ownership/inherited_move_only_field.dewy:8:49: error: cannot copy a move-only owner: no $__copy__ hook\n    main=()=>{let first=Child[1 Leaf[2]] let second=first.copy() printl(second.value)}\n                                                    ^\n"},

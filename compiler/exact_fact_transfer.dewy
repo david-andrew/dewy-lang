@@ -2,7 +2,7 @@ $runtime_checks
 from p"checker_source_positions.dewy" import (dewy_at)
 from p"expression_types.dewy" import (ntype)
 
-from p"ast.jo" import (nodes)
+from p"ast.jo" import (kid nodes)
 from p"checker_constant_queries.dewy" import (sa_fits)
 from p"checker_tokens.dewy" import (Tok)
 from p"exact_static_widths.dewy" import (exact_width_bits)
@@ -11,8 +11,10 @@ from p"directive_ops.dewy" import (dir_panic_fix)
 from p"directive_rules.dewy" import (dir_defer)
 from p"exact.jo" import (exact_marks exact_measure_on exact_measure_sites exact_range_meta exact_ranges exact_shader_owners exact_shifts exact_stores)
 from p"exact_marks.dewy" import (exact_decide exact_decided exact_has_node exact_proved)
-from p"exact_check_hooks.dewy" import (exact_representation)
+from p"exact_check_hooks.dewy" import (HOOK_TOK_MINUS HOOK_TOK_PLUS exact_representation)
 from p"exact_count_bounds.dewy" import (exact_count_bound)
+from p"expr.jo" import (IN)
+from p"integer_conversions.dewy" import (integer_constant)
 from p"facts.jo" import (FACT_MEMBER FACT_VALUE FactState fact_speculating fact_terms)
 from p"facts_arith.dewy" import (fact_relational)
 from p"facts_compare.dewy" import (fact_compare fact_open_endpoint)
@@ -28,7 +30,7 @@ from p"type_ops.dewy" import (dt)
 from p"types.jo" import (T_I32 T_INT T_MATH_INT T_U32 T_U64 prune types)
 from p"util.jo" import (err_notes)
 from p"witness_nodes.dewy" import (wit_text)
-from p"witness_ops.dewy" import (wit_help wit_operand_changed wit_unsupported)
+from p"witness_ops.dewy" import (wit_help wit_operand_changed wit_side wit_unsupported)
 
 TransferWord:type=int64<overflow='wrap'>
 TransferUnsigned:type=uint64<overflow='wrap'>
@@ -79,6 +81,41 @@ exact_fits_relation=(@s:FactState value:TransferWord t:TransferWord):>bool=>$uns
     if hi_real {return true}
     let ceiling=fact_constant(@s high)
     fact_compare(s 'le' value ceiling) =? 1
+}
+
+# Name the input endpoint for an operation that can overflow in just one
+# direction. Only a failed store requests the checked operand's spelling.
+exact_operand_guard=(n:TransferWord t:TransferWord):>string=>$unsafe {
+    let k=nodes.ptr[n].kind
+    let operand=TransferWord(nodes.ptr[n].a)
+    let negate=k =? 'unary' and nodes.ptr[n].op =? HOOK_TOK_MINUS
+    let add=false
+    let step:TransferWord=0
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.fixed_abs)) {
+        operand=kid(n 0)
+        negate=true
+    } else if k =? 'binary' and nodes.ptr[n].aux =? 0 {
+        add=nodes.ptr[n].op =? HOOK_TOK_PLUS
+        if not add and nodes.ptr[n].op not=? HOOK_TOK_MINUS {return ""}
+        let right=TransferWord(nodes.ptr[n].b)
+        let [known amount]=integer_constant(right)
+        if not known {
+            [known amount]=integer_constant(operand)
+            if not known or not add and amount not=? 0 {return ""}
+            operand=right
+            negate=not add
+        }
+        step=amount
+    } else if not negate {return ""}
+    let side=wit_side(0 operand)
+    if side.text =? "" or side.node <=? 0 or side.length or exact_representation(ntype(side.node)) not=? t {return ""}
+    let kind=nodes.ptr[side.node].kind
+    if kind not=? 'ident' and kind not=? 'field' {return ""}
+    let width=dt(t)
+    if negate {return if types.ptr[t].sign {"{side.text} >? {width}.min"} else {""}}
+    if step <=? 0 or not sa_fits(step t) {return ""}
+    if add {return if step =? 1 {"{side.text} <? {width}.max"} else {"{side.text} <=? {width}.max - {step}"}}
+    if step =? 1 {"{side.text} >? {width}.min"} else {"{side.text} >=? {width}.min + {step}"}
 }
 
 exact_fact_store=(n:TransferWord value:TransferWord @s:FactState):>int64=>$unsafe {
@@ -136,15 +173,19 @@ exact_fact_store=(n:TransferWord value:TransferWord @s:FactState):>int64=>$unsaf
             let what="cannot prove exact integer result fits {dt(t)}"
             if not dir_defer(n what true) {
                 let shown=wit_text(n)
+                let inner=n
+                loop inner not=? 0 and nodes.ptr[inner].kind =? 'conv' {inner=TransferWord(nodes.ptr[inner].a)}
+                let guard=exact_operand_guard(inner t)
                 if shown not=? "" {
                     err_notes.push([(-1) "note: nothing bounds `{shown}` within {dt(t)} here"])
-                    let inner=n
-                    loop inner not=? 0 and nodes.ptr[inner].kind =? 'conv' {inner=int64(nodes.ptr[inner].a)}
-                    let operand=wit_unsupported(inner)
-                    if dewy_at(nodes.ptr[n].pos) and operand not=? "this operation is outside the fact language" {err_notes.push([(-1) "note: {operand}"])}
+                    if guard =? "" and dewy_at(nodes.ptr[n].pos) {
+                        let operand=wit_unsupported(inner)
+                        if operand not=? "this operation is outside the fact language" {err_notes.push([(-1) "note: {operand}"])}
+                    }
                     wit_operand_changed(int64(nodes.ptr[n].a) s)
-                    wit_help("{dt(t)}.min <=? ({shown}) and ({shown}) <=? {dt(t)}.max")
                 }
+                if guard not=? "" {wit_help(guard)}
+                else if shown not=? "" {wit_help("{dt(t)}.min <=? ({shown}) and ({shown}) <=? {dt(t)}.max")}
                 if t not=? stored {err_notes.push([(-1) "note: GPU code holds {dt(stored)} values in 32-bit words, so this must fit {dt(t)}"])}
                 if shader {err_notes.push([(-1) "help: state the domain as a refinement or prove it with a guard before the operation, or choose `overflow='wrap'` (GPU code cannot check it)"])}
                 else {

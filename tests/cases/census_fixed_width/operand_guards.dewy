@@ -1,0 +1,8 @@
+Point:type=[x:int32]
+advance=(p:Point):>int32=>if p.x <=? int32.max - 3 {p.x+3} else {p.x}
+back=(depth:int64):>int64=>if depth >=? int64.min + 17 {depth-17} else {depth}
+negate=(p:Point):>int32=>if p.x >? int32.min {-p.x} else {0}
+magnitude=(step:int64):>int64=>if step >? int64.min {abs(step)} else {0}
+printl(advance(Point[int32.max-3]) advance(Point[int32.max-2]))
+printl(back(int64.min+17) back(int64.min+16))
+printl(negate(Point[int32.min+1]) magnitude(int64.min))
