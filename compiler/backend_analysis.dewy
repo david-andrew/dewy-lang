@@ -211,6 +211,7 @@ ba_straight_begin=(@ir:IrFn):>int64=>$unsafe {
     let ord_p=v_order
     if nv >? 0 {
         mem_set(vl as ptr<uint8> 0 nv * size_of<IrUsePlan>)
+        mem_set(vsave as ptr<uint8> 0 nv)
     }
     if call_pos.length >? 0 {__set_len(call_pos 0)}
     if call_w.length >? 0 {__set_len(call_w 0)}
@@ -621,9 +622,9 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
     let ord_n:int64=0
     if nv >? 0 {
         mem_set(vl as ptr<uint8> 0 nv * size_of<IrUsePlan>)
+        mem_set(vsave as ptr<uint8> 0 nv)
         if not use_order {
             mem_set(loc_arr as ptr<uint8> 255 nv * 8)
-            mem_set(vsave as ptr<uint8> 0 nv)
         }
     }
     if call_pos.length >? 0 {__set_len(call_pos 0)}
