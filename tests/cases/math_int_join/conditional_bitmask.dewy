@@ -1,0 +1,14 @@
+$runtime_checks
+
+probe=(choose:bool a:int64 b:int64)=>{
+    let base=-23
+    let zero=base-base
+    let mask=int64(-11) xor int64(-10)
+    printl(mask and (if choose {printl("left"); a} else {printl("right"); b}))
+    printl(zero)
+}
+
+main=()=>{
+    probe(true -5 2)
+    probe(false -5 2)
+}

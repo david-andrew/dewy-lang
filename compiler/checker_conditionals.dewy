@@ -139,7 +139,15 @@ xf_branch=(b:XFWord expected:XFWord value:bool changes:XFWord):>XFWord=>$unsafe 
 xf_settle=(b:XFWord ex:XFWord):>XFWord=>$unsafe {
     let v=xf_value(b)
     if ex not=? 0 {coerce(v ex);} else {finalize_literal(v);}
+    xf_nodes[0][b].type=xf_nodes[0].ptr[v].type
     XFWord(xf_nodes[0].ptr[v].type)
+}
+# Coercion updates each arm's final expression. Lowering also reads the
+# block's type to choose the representation of that value.
+xf_result=(b:XFWord c:XFWord result:XFWord):>XFWord=>$unsafe {
+    xf_nodes[0][b].type=int32<overflow='wrap'>(result)
+    xf_nodes[0][c].type=int32<overflow='wrap'>(result)
+    result
 }
 # Two branch types: never, void statements, an expected type or their join.
 xf_join=(n:XFWord ex:XFWord b:XFWord c:XFWord t1:XFWord t2:XFWord):>XFWord=>$unsafe {
@@ -259,15 +267,14 @@ xf_if_body=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
         let result=cond_union(ta tb)
         coerce(va result);
         coerce(vb result);
-        return result
+        return xf_result(b c result)
     }
     if ex =? 0 and then_literal not=? 0 and XFWord(xf_types[0].ptr[t2].flags) & 1 =? 0 and not tu_equal(t1 t2) and (xf_kind(t2) =? 'array' or xf_kind(t2) =? 'fixed' or is_map_type(t2)) {
         xf_nodes[0][va]=xf_nodes[0].ptr[then_literal]
         check_expr(va t2);
-        xf_nodes[0][b].type=int32<overflow='wrap'>(t2)
     }
     # Both values take an expected type; otherwise their join.
-    cond_join(va vb ex xf_nodes[0].ptr[n].pos)
+    xf_result(b c cond_join(va vb ex xf_nodes[0].ptr[n].pos))
 }
 xf_iflet=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
     let is_stmt=XFWord(xf_nodes[0].ptr[n].flags) & 16 not=? 0
@@ -308,7 +315,7 @@ xf_iflet=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
     if xf_nodes[0].ptr[b].aux =? 0 or xf_nodes[0].ptr[c].aux =? 0 {cond_error(n 0 3)}
     let va=xf_value(b)
     let vb=xf_value(c)
-    cond_join(va vb ex xf_nodes[0].ptr[n].pos)
+    xf_result(b c cond_join(va vb ex xf_nodes[0].ptr[n].pos))
 }
 
 xf_if=(n:XFWord ex:XFWord):>XFWord=>{
