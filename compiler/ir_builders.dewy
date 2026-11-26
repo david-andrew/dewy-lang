@@ -20,11 +20,11 @@ ir_begin=(name:string fn_index:IRWord):>void=>$unsafe {
     ir.name=name
     ir.nparams=0
     ir.ret=-1
-    ir.vtypes.clear()
-    ir.slot_size.clear()
-    ir.slot_align.clear()
-    ir.code.clear()
-    ir.args.clear()
+    if ir.vtypes.length >? 0 {ir.vtypes.clear()}
+    if ir.slot_size.length >? 0 {ir.slot_size.clear()}
+    if ir.slot_align.length >? 0 {ir.slot_align.clear()}
+    if ir.code.length >? 0 {ir.code.clear()}
+    if ir.args.length >? 0 {ir.args.clear()}
     ir.cabi=false
     ir.noinline=false
     ir.export_name=""
@@ -37,9 +37,9 @@ ir_begin=(name:string fn_index:IRWord):>void=>$unsafe {
         ir_fn_has_loop.ptr[fn_index]=false
     }
     ir.raw_mem=false
-    ir.kval.clear()
+    if ir.kval.length >? 0 {ir.kval.clear()}
     ir.decl_pos=0
-    ir.dbg_locals.clear()
+    if ir.dbg_locals.length >? 0 {ir.dbg_locals.clear()}
     if cap(ir.code) <? 48 {ir.code.reserve(48)}
     if cap(ir.vtypes) <? 48 {ir.vtypes.reserve(48)}
     kc_fn = IRWord(kc_fn) + 1
@@ -63,13 +63,9 @@ kv_of=(v:IRWord):>int64=>$unsafe {
 k_vreg=(v:IRWord):>int64=>$unsafe {
     let slot=((v xor (v >> 8))) & 255
     if kc_epoch.ptr[slot] =? kc_fn and kc_val.ptr[slot] =? v {return kc_reg.ptr[slot]}
-    let d=k_vreg_new(v)
-    kc_epoch.ptr[slot] = kc_fn;
-    kc_val.ptr[slot] = v;
-    kc_reg.ptr[slot] = d;
-    return d
+    k_vreg_new(v slot)
 }
-k_vreg_new=(v:IRWord):>int64=>$unsafe {
+k_vreg_new=(v:IRWord slot:IRWord=-1):>int64=>$unsafe {
     let d=ir.vtypes.length
     ir.vtypes.push(int8<overflow='wrap'>(VK));
     let old=ir.kval.length
@@ -84,9 +80,14 @@ k_vreg_new=(v:IRWord):>int64=>$unsafe {
         let kh=kp - 3
         kh[1]=need
         kp[d]=v
-        return d
+    } else {
+        ir.kval[d]=v
     }
-    ir.kval[d]=v
+    if slot >=? 0 {
+        kc_epoch.ptr[slot] = kc_fn;
+        kc_val.ptr[slot] = v;
+        kc_reg.ptr[slot] = d;
+    }
     return d
 }
 ir_fits32=(v:IRWord):>bool=>$unsafe {

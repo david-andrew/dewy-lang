@@ -689,29 +689,59 @@ const CC_BE = 6
 const CC_A = 7
 const CC_P = 0xA
 const CC_NP = 0xB
-let NOPS:array<array<int64>>=[[0x90]  [0x66  0x90]  [0x0F  0x1F  0x00]  [0x0F  0x1F  0x40  0x00]  [0x0F  0x1F  0x44  0x00  0x00]  [0x66  0x0F  0x1F  0x44  0x00  0x00]  [0x0F  0x1F  0x80  0x00  0x00  0x00  0x00]  [0x0F  0x1F  0x84  0x00  0x00  0x00  0x00  0x00]  [0x66  0x0F  0x1F  0x84  0x00  0x00  0x00  0x00  0x00]]
 nop_pad=(n0:XWord):>void=>$unsafe {
     let n=n0
     loop n >? 0 {
         let k=min(n  14)
         let p=x_bytes(k)
-        let j:XWord=0
         if k >? 9 {
-            loop i in [0..k - 8) {
-                p[j]=0x66
-                j += 1
-            }
-            let seq=NOPS.ptr[7].ptr
-            loop i in [0..8) {
-                p[j]=uint8(seq[i])
-                j += 1
-            }
+            let pre=k - 8
+            loop i in [0..pre) {p[i]=0x66}
+            let q=(p + pre) as ptr<uint64>
+            q[0]=uint64(0x0000000000841F0F)
+        }
+        else if k =? 8 {
+            let q=p as ptr<uint64>
+            q[0]=uint64(0x0000000000841F0F)
+        }
+        else if k =? 9 {
+            p[0]=0x66
+            let q=(p + 1) as ptr<uint64>
+            q[0]=uint64(0x0000000000841F0F)
+        }
+        else if k =? 4 {
+            let q=p as ptr<uint32>
+            q[0]=uint32(0x00401F0F)
+        }
+        else if k =? 5 {
+            let q=p as ptr<uint32>
+            q[0]=uint32(0x00441F0F)
+            p[4]=0x00
+        }
+        else if k =? 6 {
+            let q=p as ptr<uint32>
+            q[0]=uint32(0x441F0F66)
+            let q2=(p + 4) as ptr<uint16>
+            q2[0]=uint16(0)
+        }
+        else if k =? 7 {
+            let q=p as ptr<uint32>
+            q[0]=uint32(0x00801F0F)
+            let q2=(p + 4) as ptr<uint16>
+            q2[0]=uint16(0)
+            p[6]=0x00
+        }
+        else if k =? 3 {
+            let q=p as ptr<uint16>
+            q[0]=uint16(0x1F0F)
+            p[2]=0x00
+        }
+        else if k =? 2 {
+            let q=p as ptr<uint16>
+            q[0]=uint16(0x9066)
         }
         else {
-            let seq=NOPS.ptr[k - 1].ptr
-            loop i in [0..k) {
-                p[i]=uint8(seq[i])
-            }
+            p[0]=0x90
         }
         n -= k
     }

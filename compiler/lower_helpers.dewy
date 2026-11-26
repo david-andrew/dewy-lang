@@ -5,7 +5,7 @@ from p"lower_primitives.dewy" import (e_faddr e_gaddr global_addr_off inst_mutma
 from p"lower_functions.dewy" import (begin_fn)
 from p"lower_closures.dewy" import (env_layout partial_layout spawn_body spawn_owned_capture)
 from p"lower_scalars.dewy" import (vec_comps)
-from p"lower_storage.dewy" import (V rc_assume_st release_expanded arr_len blk box_val br_to brif_to copy_at drop_at els endc env_guard env_guarded field_store_type hdr_load hdr_store iff is_shared load_val lop new_temp opt_has opt_value own release ret_vt retain retain_elems store_type store_val vc vt_of)
+from p"lower_storage.dewy" import (V rc_assume_mt rc_assume_st release_expanded arr_len blk box_val br_to brif_to copy_at drop_at els endc env_guard env_guarded field_store_type hdr_load hdr_store iff is_shared load_val lop new_temp opt_has opt_value own release ret_vt retain retain_elems store_type store_val vc vt_of)
 from p"lower_analysis.dewy" import (fn_writes)
 from p"lower.jo" import (BOX_HDR VC_AGG VC_FLT VC_INT Val ctl hk_key lfuncs opt_release value_member_cache)
 from p"check.jo" import (FK_PARTIAL LF_ASSIGNED LF_EXPOSED LF_VALUECAP fns locals prelude syms value_equal_fns value_hash_fns)
@@ -146,13 +146,16 @@ helper_drop=(t:LHWord copy:bool):>void=>$unsafe {
         if opt_release and not ownership_type(t) and nman >=? 2 {
             iff(rt_global("__mt_active"));
             let was_cold=ir_cold
+            let was_mt=rc_assume_mt
             ir_cold=true
+            rc_assume_mt=true
             loop i in [0..fs.length) {
                 let fo=fs.ptr[if copy {i} else {fs.length - 1 - i}]
                 if not is_managed(fo[0]) {continue}
                 if copy {copy_at(e_addi(a fo[1]) fo[0]);}
                 else {drop_embedded(e_addi(a fo[1]) fo[0]);}
             }
+            rc_assume_mt=was_mt
             ir_cold=was_cold
             els();
             let was_st=rc_assume_st
@@ -218,7 +221,9 @@ helper_arrrel=(t:LHWord):>void=>$unsafe {
     if opt_release and not ownership_type(et) {
         iff(rt_global("__mt_active"));
         let was_cold=ir_cold
+        let was_mt=rc_assume_mt
         ir_cold=true
+        rc_assume_mt=true
         let i0=vreg(VI)
         e_mov(i0 e_iconst(0));
         blk();
@@ -231,6 +236,7 @@ helper_arrrel=(t:LHWord):>void=>$unsafe {
         br_to(ctl);
         endc();
         endc();
+        rc_assume_mt=was_mt
         ir_cold=was_cold
         els();
         let was_st=rc_assume_st

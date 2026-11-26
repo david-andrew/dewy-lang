@@ -20,11 +20,11 @@ from p"concurrency.jo" import concurrency_runtime_needed
 # Sparse cleanup records are allocated only for demanded owners.
 OwnerWord:type=int64<overflow='wrap'>
 owner_begin=():>void=>{
-    owner_records.clear()
-    owner_parts.clear()
-    owner_adoptions.clear()
-    owner_values.clear()
-    owner_capture_records.clear()
+    if owner_records.length >? 0 {owner_records.clear()}
+    if owner_parts.length >? 0 {owner_parts.clear()}
+    if owner_adoptions.length >? 0 {owner_adoptions.clear()}
+    if owner_values.length >? 0 {owner_values.clear()}
+    if owner_capture_records.length >? 0 {owner_capture_records.clear()}
     owner_init=-1
     if ownership_decls.length not=? 0 {owner_init=emit('nop' 0 0 0 0 0 0)}
 }

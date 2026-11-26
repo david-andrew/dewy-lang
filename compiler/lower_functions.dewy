@@ -54,35 +54,35 @@ begin_fn=(name:string idx:LFnWord):>void=>$unsafe {
     exact_lower_active=exact_nodes.length >? 0
     eg_active=false
     lower_length_guards=[]
-    parallel_scalars.clear();
-    parallel_owned.clear();
+    if parallel_scalars.length >? 0 {parallel_scalars.clear()}
+    if parallel_owned.length >? 0 {parallel_owned.clear()}
     stack_closure_fn=-1
-    stack_closure_params.clear();
-    math_word_regs.clear();
-    math_static_regs.clear();
-    math_static_widths.clear();
-    math_word_limits.clear();
-    math_word_updates.clear();
+    if stack_closure_params.length >? 0 {stack_closure_params.clear()}
+    if math_word_regs.length >? 0 {math_word_regs.clear()}
+    if math_static_regs.length >? 0 {math_static_regs.clear()}
+    if math_static_widths.length >? 0 {math_static_widths.clear()}
+    if math_word_limits.length >? 0 {math_word_limits.clear()}
+    if math_word_updates.length >? 0 {math_word_updates.clear()}
     math_writes_ready=false
     math_has_mutable=false
-    math_writes.clear();
-    math_decl_depth.clear();
-    math_loop_sites.clear();
-    math_write_loop.clear();
-    math_loop_parent.clear();
+    if math_writes.length >? 0 {math_writes.clear()}
+    if math_decl_depth.length >? 0 {math_decl_depth.clear()}
+    if math_loop_sites.length >? 0 {math_loop_sites.clear()}
+    if math_write_loop.length >? 0 {math_write_loop.clear()}
+    if math_loop_parent.length >? 0 {math_loop_parent.clear()}
     ctl=0
     cond_depth=0
     scope_locals=[]
     scope_defers=[]
-    zero_ctls.clear();
+    if zero_ctls.length >? 0 {zero_ctls.clear()}
     loops=[]
-    tl_items.clear();
-    tl_values.clear();
-    tl_nop.clear();
-    lower_zeros.clear();
+    if tl_items.length >? 0 {tl_items.clear()}
+    if tl_values.length >? 0 {tl_values.clear()}
+    if tl_nop.length >? 0 {tl_nop.clear()}
+    if lower_zeros.length >? 0 {lower_zeros.clear()}
     lower_mark_serial=0
     lower_has_nops=ownership_decls.length not=? 0
-    tl_cond.clear();
+    if tl_cond.length >? 0 {tl_cond.clear()}
     building=[]
     sret_v=-1
     env_v=-1
@@ -273,8 +273,8 @@ lower_inst=(lf:LFnWord f:LFnWord):>void=>$unsafe {
             zero_defer(l t fl at);
         }
     }
-    exm_censuses.clear(); lower_entry=[]
-    exm_produced_flags.clear(); exm_produced_widths.clear()
+    if exm_censuses.length >? 0 {exm_censuses.clear()}; lower_entry=[]
+    if exm_produced_flags.length >? 0 {exm_produced_flags.clear()}; if exm_produced_widths.length >? 0 {exm_produced_widths.clear()}
     let exm_start=ir.code.length
     if exact_loop_plan(f body) {
         let guard=exact_loop_guard(body)

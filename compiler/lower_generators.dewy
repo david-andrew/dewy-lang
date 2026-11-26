@@ -72,7 +72,7 @@ let gen_comb_slots:dict<int64 int64>=dict<int64 int64>()
 
 gen_reset_lower=():>void=>{
     gen_comb_fn=-1
-    gen_comb_slots.clear()
+    if gen_comb_slots.length >? 0 {gen_comb_slots.clear()}
     gen_fuse_reset()
 }
 
@@ -1447,11 +1447,11 @@ let gen_fuse_stack:array<GenFuseCtx>=[]
 let gen_fuse_brk_scopes:dict<int64 int64>=dict<int64 int64>()
 
 gen_fuse_reset=():>void=>{
-    gen_fuse_pool=[]
-    gen_fuse_locals.clear()
-    gen_fuse_decls.clear()
-    gen_fuse_stack=[]
-    gen_fuse_brk_scopes.clear()
+    if gen_fuse_pool.length >? 0 {gen_fuse_pool=[]}
+    if gen_fuse_locals.length >? 0 {gen_fuse_locals.clear()}
+    if gen_fuse_decls.length >? 0 {gen_fuse_decls.clear()}
+    if gen_fuse_stack.length >? 0 {gen_fuse_stack=[]}
+    if gen_fuse_brk_scopes.length >? 0 {gen_fuse_brk_scopes.clear()}
 }
 
 gen_fuse_active=():>bool=>gen_fuse_brk_scopes.length >? 0

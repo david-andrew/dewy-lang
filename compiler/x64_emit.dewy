@@ -4783,17 +4783,17 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
     xe_cabi=cabi
     xe_positions=positions
     xe_emit_error=""
-    x_int_fail.clear()
-    x_cold_ifs.clear()
-    x_cold_blks.clear()
+    if x_int_fail.length >? 0 {x_int_fail.clear()}
+    if x_cold_ifs.length >? 0 {x_cold_ifs.clear()}
+    if x_cold_blks.length >? 0 {x_cold_blks.clear()}
     x_skip_end=-1
     x_in_cold=false
     rsp_extra=0
     if rsp_frame {rsp_row(0)}
     xctl_n=0
     xfix_n=0
-    x_tfix_pos.clear()
-    x_tfix_base.clear()
+    if x_tfix_pos.length >? 0 {x_tfix_pos.clear()}
+    if x_tfix_base.length >? 0 {x_tfix_base.clear()}
     x_loop_depth=0
     x_mach_loop=0
     fused_cc=-1
@@ -4821,11 +4821,11 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
     emit_prologue()
     let body_start=XWord(x_code[0].length)
     if xe_debug and XWord(dbg_pos.length) <? xe_ncode + 1 {dbg_pos=fill(0  xe_ncode + 64)}
-    dbg_epis.clear()
+    if dbg_epis.length >? 0 {dbg_epis.clear()}
     let ci:XWord=0
     if XWord(save_list.length) >? 1 {save_list.sort(key=(v:int64):>int64=>live_start(v))}
     save_next=0
-    save_active.clear()
+    if save_active.length >? 0 {save_active.clear()}
     let instructions=xe_instructions
     let calls=call_pos.ptr as ptr<XWord>
     let ncalls=XWord(call_pos.length)

@@ -181,6 +181,10 @@ retain=(v:LSWord t0:LSWord):>void=>$unsafe {
         return
     # during a parallel job refcounts must be updated atomically (out of line)
     }
+    if rc_assume_mt {
+        e_call1(rt("__rc_inc") v -1);
+        return
+    }
     if not rc_assume_st {
         blk();
         let done=ctl
@@ -211,6 +215,7 @@ retain=(v:LSWord t0:LSWord):>void=>$unsafe {
 # it out instead of the compact register-preserving call of ordinary release sites.
 let release_expanded=false
 let rc_assume_st=false
+let rc_assume_mt=false
 # Last reference: the out-of-line path frees (and releases elements). Nothing else
 # can see a plain object now, so the count needs no final write.
 release_last=(v:LSWord t:LSWord):>void=>$unsafe {
@@ -222,7 +227,9 @@ release_element=(v:LSWord t:LSWord):>void=>$unsafe {
     iff(e_bin('ne' VI v e_iconst(0)));
     let rc=hdr_load(v 0)
     iff(e_bin('gts' VI rc e_iconst(0)));
-    if not rc_assume_st {
+    if rc_assume_mt {
+        release_call(v t);
+    } else if not rc_assume_st {
         iff(rt_global("__mt_active"));
         release_call(v t);
         els();
@@ -272,6 +279,10 @@ release=(v:LSWord t0:LSWord):>void=>$unsafe {
         release_call(v t);
         ir.code.ptr[ir.code.length - 1].c = CALL_RC_DEC;
         note_mt_active();
+        return
+    }
+    if rc_assume_mt {
+        release_call(v t);
         return
     }
     if not rc_assume_st {

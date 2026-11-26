@@ -476,7 +476,7 @@ ug_scan=(root:LVWord root_ctx:LVWord):>void=>$unsafe {
             <'intrinsic'> => {
                 let id=nodes.ptr[n].aux as IN
                 let nk:LVWord=LVWord(nodes.ptr[n].nlist)
-                if nk >? 0 and (id =? IN.len or id =? IN.arrcap or id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend) {
+                if nk >? 0 and (id =? IN.len or id =? IN.arrcap or id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend or id =? IN.arrdata or id =? IN.setlen) {
                     if sp + nk >? scap {scap=(sp + nk) * 2; ug_stack.resize(scap); st=ug_stack.ptr}
                     let base:LVWord=LVWord(nodes.ptr[n].list)
                     let i:LVWord=nk - 1

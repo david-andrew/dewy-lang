@@ -117,7 +117,7 @@ xl_finish_slow=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
     t
 }
 xl_finish=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
-    let node=xl_nodes[0].ptr + n
+    let node=(((xl_nodes as ptr<ptr<uint8>>)[0] + 24) as ptr<Node>) + n
     if (xl_effects[0] and expected not=? 0) or xl_exact_measure[0] or xl_exact_nk_p[int64((node as ptr<uint32>)[0])] not=? uint8(0) or (xl_refine[0] and xl_types[0].ptr[t0].kind =? 'refined' and xl_types[0].ptr[t0].bits not=? -2) {
         return xl_finish_slow(n t0 expected)
     }

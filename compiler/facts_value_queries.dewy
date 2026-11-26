@@ -50,11 +50,39 @@ fact_slot_slow_raw=(ix_p:ptr<int64> ix_n:ValueWord v:ValueWord n:ValueWord ids:p
 }
 fact_slot_slow=(s:FactState v:ValueWord n:ValueWord ids:ptr<int64>):>int64=>$unsafe {
     let idx=s.index.ptr
-    fact_slot_slow_raw(idx[0].slots.ptr idx[0].slots.length v n ids)
+    let ix_n:ValueWord=idx[0].slots.length
+    if ix_n not=? 0 {
+        let i:ValueWord=fact_index_get_raw(idx[0].slots.ptr ix_n v)
+        if i >=? 0 and i <? n and ids[i] =? v {return i}
+        return -1
+    }
+    if v <? ids[0] or v >? ids[n - 1] {return -1}
+    let lo:ValueWord=0
+    let hi:ValueWord=n
+    loop lo <? hi {
+        let mid=(lo + hi) >> 1
+        if ids[mid] <? v {lo=mid + 1} else {hi=mid}
+    }
+    if lo <? n and ids[lo] =? v {return lo}
+    -1
 }
 fact_slot_slow_ref=(@s:FactState v:ValueWord n:ValueWord ids:ptr<int64>):>int64=>$unsafe {
     let idx=s.index.ptr
-    fact_slot_slow_raw(idx[0].slots.ptr idx[0].slots.length v n ids)
+    let ix_n:ValueWord=idx[0].slots.length
+    if ix_n not=? 0 {
+        let i:ValueWord=fact_index_get_raw(idx[0].slots.ptr ix_n v)
+        if i >=? 0 and i <? n and ids[i] =? v {return i}
+        return -1
+    }
+    if v <? ids[0] or v >? ids[n - 1] {return -1}
+    let lo:ValueWord=0
+    let hi:ValueWord=n
+    loop lo <? hi {
+        let mid=(lo + hi) >> 1
+        if ids[mid] <? v {lo=mid + 1} else {hi=mid}
+    }
+    if lo <? n and ids[lo] =? v {return lo}
+    -1
 }
 fact_slot_ref=(@s:FactState v:ValueWord):>int64=>$unsafe {
     let n:ValueWord=s.ids.length

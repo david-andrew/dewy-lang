@@ -2835,7 +2835,7 @@ arrdata_header=(e:LGWord arg_start:LGWord):>LGWord=>$unsafe {
     let a0=arg0
     let at=prune(ntype(a0))
     let p:LGWord=0
-    if id =? IN.arrdata and types.ptr[at].kind =? 'array' and data_writable(a0) and not ptr_read_only(e) {
+    if id =? IN.arrdata and types.ptr[at].kind =? 'array' and data_writable(a0) and not is_uniq_array(a0) and not ptr_read_only(e) {
         let pl=gen_place(a0 true)
         arr_unique(pl at);
         # gen_place also detaches containing arrays and evaluates indexes.
