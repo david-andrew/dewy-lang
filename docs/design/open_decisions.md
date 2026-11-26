@@ -444,6 +444,8 @@ Take `$origin`, `$trace`, `$parts` and `$origin_at_caller`?
 
 #### Q6 (b). Two cleanup failures of one kind
 
+> **Affected by reopened D40 Q1:** under design (g), cleanup failures join only where a `defer … or_throw` is written, and several from one exit come back as one ordered list. See D40 Q1.
+
 ```dewy
 import p"@lib/std/files.dewy" as files
 save_two = (left:Path right:Path text:string) => {
@@ -511,49 +513,64 @@ For D43: commit consumes its transaction on every outcome, rolling back on failu
 
 Resources clean themselves up: files flush and close, sockets close, locks unlock, and uncommitted transactions roll back. You reopened who handles a cleanup failure (Q1), and decided that `$__abandon__` discards unpublished work (Q4). `defer` is kept provisionally (Q5). Shared `channel` and `mpmc` keep explicit `close()` (agreed). Combining failures moves from the old Q3 to D42.
 
-#### Q1 (a). Who handles a failed cleanup? (reopened)
+#### Q1 (a). Who handles a failed cleanup? (reopened; now design (g), with D42 Q6)
 
-> **Your direction (11-26), being worked through in round 9:** types that require handling, so leaving one unhandled is a compile error (or a warning, for less strict types); plain code in the ordinary control flow; the strict metatag on top; nothing that can't fail ever appears; several resources combine into an error stack, with `defer` as the hook. Open: exactly when `defer` runs, how several defers combine, and whether D42's automatic combining should become more explicit. [Your notes](proposals/cleanup/answers-r8.md) · [Round 8 study](proposals/cleanup/round8.md) · [Review](proposals/cleanup/review-round8.md)
+Turn this on, and closing a reader, aborting a connection or unlocking never fails and never appears anywhere. Anything whose cleanup can fail (a writer's flush, a transaction, a running child process, a temporary file) must be handled on every exit, or the program doesn't compile. The usual way is one `defer` under the value. Finishing the value, or handing it to another owner, turns that `defer` off on that path.
 
 ```dewy
-save = (data:array<uint8>) => {
-    let out = open(p"/mnt/usb/data.bin" 'w') or_throw
-    out.write_bytes(data) or_throw;     # buffered
-} or_throw                               # out's flush and close: a full disk is forwarded from here
+save = (path:Path data:array<uint8>) => {
+    let out = files.open(path 'w') or_throw
+    defer out.close() or_throw     # runs after the result is computed; a failed close replaces it
+    out.write_bytes(data) or_throw;
+}
 first_row = (rows) => {
-    loop row in rows { return row }      # rows' socket closes on this exit too
+    loop row in rows { return row }   # rows only reads: its close can't fail, so nothing is written
     none
-} or_throw                               # covers both exits
+}
 ```
 
-The proposal: mark the scope that owns a value with `or_throw` (or `??<E>`) after its `}`, and that value's failed cleanup is forwarded (or handled) on every exit of the scope, early `return`s included. Leave it unmarked and the compiler warns, naming the value and the line; at run time the cleanup still runs and its failure is discarded. A strict metatag makes the warning an error.
+This follows your direction from 11-26 ([your notes](proposals/cleanup/answers-r8.md)):
+- types that require handling, checked at compile time;
+- plain code in the ordinary control flow;
+- the strict metatag on top;
+- anything that can't fail never appears.
 
-On 11-12 you decided a failed cleanup becomes the owning function's result with nothing written. You reopened it: nothing in `first_row` forwards the socket's failed close, and `save`'s `or_throw` forwards the write, not the flush at `}`, so the failure turning up in the caller is hidden nonlocal behavior.
+**The rules:**
+- **The type says what a value owes.** A file opened `'r'` owes nothing; one opened `'w'` owes its flush (`FileReader`, `FileWriter`). A connection owes finishing what it sent, and `finish_sending()` turns it into a reader.
+- **When `defer` runs:** your timing. Defers run after the exit's value is computed, before leaving, in reverse order, and all of them run. A failing defer replaces a success value or joins a failure that is already leaving. It can never produce a different success value, or remove a failure.
+- **One `defer` per value**, not one `defer` building the stack. If `r2` fails to open, a single `defer` written after it never covers `r1`.
+- **One failure comes back bare; several from one exit come back as one ordered list.**
+- **Cleanup hooks (`$__drop__`, `$__abandon__`) may only end the value's own fields.** Publishing work, like an archive's footer, goes in a consuming method such as `finish`.
+- **A failed removal of a temporary file is an undo failure** (`TempRemoveFailed`), so `first_ok` can't discard it.
+- **An exit that carries an owing value out**, such as `return writer`, can't also have a failing `defer` still live: finish the other value first.
+- **The warning-only tier for leftovers is dropped:** no standard type needs it, and both names tested for it failed their cold read. Your warning idea stays available if a real case turns up.
 
-A value has one owning scope, but that scope can have several exits (`first_row` has two), all known at compile time. A move hands the duty to the new owner (the caller, an array); lending with `@` leaves it with the lender. So a form must cover every exit; a line at the bottom doesn't, because `return` never reaches it.
+**Know before deciding:** two things are still not visible in the text alone.
+- A `return` line doesn't show that a close may replace its value.
+- The same `defer` line covers every exit, or only failure exits, depending on a later `commit`, `finish` or `return`. `errdefer` (Zig's keyword, a `defer` that runs only on failure) would make the second visible, at the cost of a keyword.
 
-- **Keep the 11-12 rule.** Nothing written; the failure becomes the function's result, and hover shows it. Your objection stands.
-- **Mark the scope** (above), on the baseline: warning by default, error under the strict tag. `} ??<FileCloseFailed> void` handles instead of forwarding; `out.close() ?? log("…")` finishes one value early. It is Q6's marked-block rule with the function-exit exemption removed; if taken, Q6's unmarked `break` also warns and discards instead of leaving the function.
-- **`defer` tied to the value**, on the same baseline:
+Without editor hints, 50 of 65 grades are 5, and 11 of the fifteen 4s come from these two points.
 
-  ```dewy
-  save = (data:array<uint8>) => {
-      let out = open(p"/mnt/usb/data.bin" 'w') or_throw
-      defer out.close() or_throw
-      out.write_bytes(data) or_throw;
-  }
-  first_row = (rows) => {
-      defer drop(rows) or_throw    # generic close for any owner
-      loop row in rows { return row }
-      none
-  }
-  ```
+**D42 Q6 changes with it:** a cleanup failure joins another failure only where a written `defer … or_throw` says so, with no automatic joining. Several failures from one exit come back as one ordered list. `is?` and `or_throw<E>` look inside the list; `??<E>` doesn't, so a handler written for one failure never swallows a second:
 
-  Runs on every exit where the value is still owned. Each value gets its own handling, beside its acquisition, under either timing rule (Q2). Costs a line per value, makes `defer` fallible (reversing Q5's provisional rule), and needs a generic `drop(x)`.
+```dewy
+let r = transfer(db req from to 500)      # low balance, then the rollback fails too
+if r is? Declined printl"declined"        # true
+r ??<Declined> 0                          # not consumed: the failed rollback is forwarded with it
+```
 
-The strict tag's name is a placeholder (`$explicit_cleanup`, in `$bulletproof`); it may become one general tag with D44 Q7's `$no_discarded_failures`.
+The list's name is D42 Q4: round 10 recommends `ErrorList`, because two of three cold readers took `ErrorStack` for a chain of causes.
 
-**Rec:** mark the scope (3 of 4 brainstorm answers). No new syntax: one token on `save` and `first_row`, covering every exit and several values at once. Main risk: the suffix does two jobs. On an inner block that yields a value it both selects the value and authorizes cleanup, and readers may take `} or_throw` as running only at the bottom or add it by reflex. Highlighting from each exit to its marker, hover listing what it covers, and an unneeded-marker lint answer that. It assumes block-end cleanup (Q2); a reassignment drops the old value mid-block and warns there unless closed explicitly. **Reversible** before release. [Brainstorm synthesis](proposals/cleanup/brainstorm-round8.md)
+**Rec:** yes to (g), with explicit joining and without `errdefer`. **Reversible** before release: an error can become a warning later without breaking anything, but making a release fallible later breaks callers. **You give up:**
+- failures from releases, entirely;
+- one line per writer;
+- repeating an abandon at an early success exit;
+- returning an owner while another value's close is still pending;
+- automatic joining, which cost 12 lines across 13 programs.
+
+**Not done yet:** an independent review of rounds 9 and 10 together, cold reads of `ErrorList` and `TempRemoveFailed`, and a cost check on the flagship panel.
+
+[Round 10](proposals/cleanup/round10.md) · [round 9](proposals/cleanup/round9.md) · [round 9 review](proposals/cleanup/review-round9.md) · [cold read](proposals/cleanup/cold-read-round9.md) · [round 8 study](proposals/cleanup/round8.md)
 
 #### Q2 (a). Clean up at block end or after last use?
 
