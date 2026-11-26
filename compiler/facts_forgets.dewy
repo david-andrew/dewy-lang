@@ -651,6 +651,10 @@ fact_drop_type=(t:ForgetWord @out:array<int64> @seen:array<int64> depth:ForgetWo
     }
     seen.push(t)
     let k=tkind(t)
+    if k =? 'generator' {
+        out[0]=out[0] | 1
+        return true
+    }
     if k =? 'fixed' or k =? 'array' or k =? 'opt' or k =? 'box' {return fact_drop_type(ow_representation(telem(t)) @out @seen depth + 1)}
     if k not=? 'tuple' and k not=? 'enum_' and k not=? 'struct_' {return true}
     let settled=true

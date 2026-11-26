@@ -14,7 +14,7 @@ from p"arena_ops.dewy" import (arena_finalize)
 from p"arm64_ops.dewy" import (arm64_entry arm64_entry_mac arm64_resolve arm64_stubs)
 from p"ast.jo" import (NF_EXTERN has_flag nodes set_list)
 from p"callback_ops.dewy" import (callback_prepare)
-from p"check.jo" import (draw_fn export_fns fns global_ids globals init_fns main_entry_fn main_error_payloads main_fn modules nchk_wanted prelude program_icon program_name program_named syms target_arm64 target_macos target_wasm target_windows test_mode update_fn want_cpu_flag want_loop_watch watch_build)
+from p"check.jo" import (FK_GENERATOR draw_fn export_fns fns global_ids globals init_fns main_entry_fn main_error_payloads main_fn modules nchk_wanted prelude program_icon program_name program_named syms target_arm64 target_macos target_wasm target_windows test_mode update_fn want_cpu_flag want_loop_watch watch_build)
 from p"checker_program.dewy" import (check_program)
 from p"checker_runtime_functions.dewy" import (runtime_fn)
 from p"checks_main.dewy" import (print_exit_codes)
@@ -198,6 +198,7 @@ compile=(path:string out0:string):>string=>$unsafe {
     # them. The emitter still prunes unreachable code in ordinary builds.
     if copies_on {
         loop f in [1..fns.length) {
+            if fns.ptr[f].kind =? FK_GENERATOR {continue}
             let body=DriverWord(fns.ptr[f].body)
             if body not=? 0 and (copy_strict(body) or ownership_functions.has(f)) {lf_of_inst(f);}
         }

@@ -258,6 +258,7 @@ ownership_fact_type=(t0:OWord depth:OWord=0):>bool=>$unsafe {
     if ownership_callable_cap(t) not=? 0 {return true}
     if depth >? 32 {return true}
     let k=ow_kind(t)
+    if k =? 'generator' {return true}
     if k =? 'fixed' or k =? 'array' or k =? 'opt' or k =? 'box' {return ownership_fact_type(ow_elem(t) depth + 1)}
     if k =? 'tuple' or k =? 'enum_' {
         let parts=if k =? 'tuple' {ow_field_types(t)} else {ow_variant_types(t)}

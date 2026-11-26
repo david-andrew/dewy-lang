@@ -43,7 +43,7 @@ from p"facts_value_queries.dewy" import (fact_index_get fact_index_get_raw)
 from p"float_ops.dewy" import (ff_integer_demand)
 from p"floats.jo" import (ff_conversions)
 from p"nd_contracts.jo" import (fact_nd_call nd_mutable_call nd_mutable_handle nd_mutable_signatures)
-from p"ownership.jo" import (ownership_decls)
+from p"ownership.jo" import (ownership_decls ownership_fact_cleanup)
 from p"ownership_types.dewy" import (ownership_fact_type)
 from p"places.jo" import (place_locked)
 from p"predicate_summaries.dewy" import (fact_predicate_summary)
@@ -471,7 +471,7 @@ fact_slice_prepare_fast=(f:SlicePrepWord summary:bool=false):>void=>$unsafe {
     let exact=not summary and exact_marks.length >? 0 and exact_owners.has(f)
     let representation=exact and f <? exact_rep_owners.length and exact_rep_owners.ptr[f]
     let demand_static=not summary and (fact_probe_on or fact_policy =? 'RequireStatic')
-    let has_own=ownership_decls.length not=? 0
+    let has_own=ownership_decls.length not=? 0 or ownership_fact_cleanup
     let has_nd_mut=nd_mutable_signatures.length not=? 0
     if summary or result_active {values.push(body)}
     if summary {
@@ -575,6 +575,7 @@ fact_slice_prepare_fast=(f:SlicePrepWord summary:bool=false):>void=>$unsafe {
                 else if p.declaration =? 0 {opaque_writes.push(n)}
             }
             <'for_'> => {
+                if nodes[n].aux =? int32(5) {opaque_writes.push(n)}
                 let l=SlicePrepWord(nodes[n].sym)
                 if l >? 0 {fact_slice_writer(@writers PlaceIdentity('local' SlicePrepWord(locals_p[l].owner) l) n)}
                 if nodes[n].aux =? int32(3) and nodes[n].aux2 >? 0 {

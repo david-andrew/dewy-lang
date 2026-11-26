@@ -355,6 +355,9 @@ fact_changes_walk=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='lo
     if n =? 0 {return}
     if fact_slice_flags(n) & (FACT_MEMBER | FACT_ACTIVE) =? FACT_MEMBER {return}
     let k=nodes.ptr[n].kind
+    if k =? 'for_' and nodes.ptr[n].aux =? int32(5) {
+        fact_forget(@s at 'call')
+    }
     if (k =? 'intrinsic' or k =? 'call') and nkids(n) >=? 2 and fact_balanced_resize(n) not=? 0 {
         fact_balanced_changes(n @s at reason)
         return

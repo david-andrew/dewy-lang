@@ -20,6 +20,7 @@ const LF_SHARED=1024
 const LF_VALUECAP=262144
 const LF_OWNERBORROW=8388608
 const NF_GLOBAL=2048
+const FK_GENERATOR=5
 OwnershipCheckHost:type=[
     error:<(pos:int64 message:string):>void>
     escapes:<(body:int64 local:int64):>bool>
@@ -212,7 +213,7 @@ ownership_validate_node=(n:CWord f:CWord):>void=>$unsafe {
         }
     }
     # 1788: compiler settings cleanup; like task cleanup (17), it borrows no owner.
-    if k =? 'defer_' and oc_nodes[0].ptr[n].aux2 not=? 17 and oc_nodes[0].ptr[n].aux2 not=? 1788 and f in? oc[0].functions[0] and ownership_defer_conflict(f) {
+    if k =? 'defer_' and oc_nodes[0].ptr[n].aux2 not=? 17 and oc_nodes[0].ptr[n].aux2 not=? 1788 and CWord(oc_fns[0].ptr[f].kind) not=? FK_GENERATOR and f in? oc[0].functions[0] and ownership_defer_conflict(f) {
         oc_fail(n "an owner with defer requires a unified defer unwind plan; transfer is not proven safe")
     }
     if k =? 'conv' and CWord(oc_nodes[0].ptr[n].aux) =? oc[0].cv_copy and ownership_type(t) and not ownership_copyable(t) {
@@ -246,7 +247,7 @@ ownership_validate=():>void=>$unsafe {
             if not ownership_contains(lt) {continue}
             if not ownership_type(lt) {oc_local_fail(l "resource containers require aggregate ownership support")}
             let flags=CWord(oc_locals[0].ptr[l].flags)
-            if flags & LF_CAPTURE not=? 0 and ownership_callable_cap(CWord(oc_fns[0].ptr[f].fntype)) =? 0 {oc_local_fail(l "this callable requires a checked ownership capability")}
+            if flags & LF_CAPTURE not=? 0 and CWord(oc_fns[0].ptr[f].kind) not=? FK_GENERATOR and ownership_callable_cap(CWord(oc_fns[0].ptr[f].fntype)) =? 0 {oc_local_fail(l "this callable requires a checked ownership capability")}
             if flags & LF_SHARED not=? 0 {oc_local_fail(l "captured owners require closure ownership support")}
         }
         ownership_validate_node(CWord(oc_fns[0].ptr[f].body) f)

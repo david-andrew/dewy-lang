@@ -22,6 +22,7 @@ from p"error_ops.dewy" import (exception_join exception_member value_members)
 from p"expr.jo" import (IN bc_count last_checked)
 from p"expression_types.dewy" import (ntype)
 from p"literal_context.dewy" import (is_lit lit_default)
+from p"ownership.jo" import (ownership_fact_cleanup)
 from p"sibling_types.jo" import (sibling_block sibling_index)
 from p"types.jo" import (T_BOOL T_INT T_NEVER T_NONE T_VOID fields has_var is_union prune structs targ telem tkind type_eq types union_members variants)
 from p"type_ops.dewy" import (dt is_values mk_generator mk_union mk_var unify zonk)
@@ -39,6 +40,7 @@ GenFrame:type=[
     has_loop_label:bool=false
     start_loops:int64=0
     yields:array<int64>=[]
+    yield_stmts:array<int64>=[]
     yield_types:array<int64>=[]
     yield_kinds:array<int64>=[]
     straight:bool=true
@@ -340,6 +342,7 @@ gen_expected_generator=(expected:GenWord):>GenWord=>$unsafe {
 
 check_lazy=(n:GenWord expected:GenWord):>GenWord=>$unsafe {
     gen_maybe_reset()
+    ownership_fact_cleanup=true
     let ex_gen=gen_expected_generator(expected)
     let expected_elem:GenWord=if ex_gen not=? 0 {prune(telem(ex_gen))} else {0}
     let want_values=expected_elem not=? 0 and is_values(expected_elem)
@@ -486,8 +489,31 @@ check_lazy=(n:GenWord expected:GenWord):>GenWord=>$unsafe {
                 if not can_coerce(0 child_el elem_t) {
                     fatal(nodes.ptr[yn].pos "cannot delegate generator<{dt(child_el)}> into generator<{dt(elem_t)}>")
                 }
-                # Widening delegation: record target elem_t on yield_ node for lowering.
-                nodes[yn].aux2=GenI32(elem_t)
+                # Widening delegation: rewrite `child...` into `loop $gwdelN in child { yield(coerce($gwdelN, elem_t)) }`
+                # so every Dewy coercion (unions, optionals, integer widening, etc.) runs through standard lowering.
+                let ys=frame.yield_stmts[i]
+                let pos=nodes.ptr[yn].pos
+                let serial=@bc_count
+                let wname="$gwdel{serial}"
+                serial=GenWord(serial) + 1
+                add_flag(val NF_CHECKED)
+                let lp=mk('for_' pos)
+                nodes[lp].a=GenI32(val)
+                set_list(lp [bc_ident(wname pos)])
+                nodes[lp].b=GenI32(bc_block([bc_stmt(bc_ident(wname pos) pos)] pos))
+                nodes[ys]=nodes.ptr[lp]
+                gen_frames.push(GenFrame[inst=f body=body expected_elem=elem_t want_values=is_values(elem_t) straight=false])
+                let ss=sink_fn
+                let sm=sink_body_mode
+                sink_body_mode=SINK_GENERATOR
+                sink_fn=sinks.length
+                check_stmt(ys)
+                sink_fn=ss
+                sink_body_mode=sm
+                let wframe=gen_frames.pop()
+                loop wy in wframe.yields {
+                    nodes[wy].a=GenI32(coerce(GenWord(nodes.ptr[wy].a) elem_t))
+                }
             }
         } else if yk =? 2 {
             let ft=prune(ntype(val))
@@ -548,6 +574,7 @@ gen_express=(s:GenWord t0:GenWord pack:bool):>void=>$unsafe {
             nodes[s].a=GenI32(yn)
             add_flag(s NF_CHECKED)
             gen_frames[fi].yields.push(yn)
+            gen_frames[fi].yield_stmts.push(s)
             gen_frames[fi].yield_types.push(prune(telem(t)))
             gen_frames[fi].yield_kinds.push(1)
             return
@@ -580,6 +607,7 @@ gen_express=(s:GenWord t0:GenWord pack:bool):>void=>$unsafe {
                 nodes[st].a=GenI32(yn)
                 add_flag(st NF_CHECKED)
                 gen_frames[fi].yields.push(yn)
+                gen_frames[fi].yield_stmts.push(st)
                 gen_frames[fi].yield_types.push(prune(ntype(part)))
                 gen_frames[fi].yield_kinds.push(0)
                 out.push(st)
@@ -614,6 +642,7 @@ gen_express=(s:GenWord t0:GenWord pack:bool):>void=>$unsafe {
                 nodes[st].a=GenI32(yn)
                 add_flag(st NF_CHECKED)
                 gen_frames[fi].yields.push(yn)
+                gen_frames[fi].yield_stmts.push(st)
                 gen_frames[fi].yield_types.push(prune(ntype(part)))
                 gen_frames[fi].yield_kinds.push(0)
                 out.push(st)
@@ -649,6 +678,7 @@ gen_express=(s:GenWord t0:GenWord pack:bool):>void=>$unsafe {
     nodes[s].a=GenI32(yn)
     add_flag(s NF_CHECKED)
     gen_frames[fi].yields.push(yn)
+    gen_frames[fi].yield_stmts.push(s)
     gen_frames[fi].yield_types.push(t)
     gen_frames[fi].yield_kinds.push(0)
     if gen_frames[fi].straight {
@@ -739,6 +769,7 @@ gen_check_fail_yield=(n:GenWord):>GenWord=>$unsafe {
     nodes[n].type=GenI32(T_NEVER)
     add_flag(n NF_CHECKED)
     gen_frames[fi].yields.push(n)
+    gen_frames[fi].yield_stmts.push(0)
     gen_frames[fi].yield_types.push(t)
     gen_frames[fi].yield_kinds.push(2)
     last_checked=n

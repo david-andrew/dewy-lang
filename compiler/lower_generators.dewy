@@ -1,7 +1,8 @@
 $runtime_checks
 from p"ast.jo" import (NF_INCLUSIVE NF_STEP has_flag kid kids nkids nodes)
 from p"check.jo" import (LF_ALIAS LF_CAPTURE LF_MUTPARAM fns locals)
-from p"copy_ops.dewy" import (copy_capture_ids own_at)
+from p"copies.jo" import (copies_on)
+from p"copy_ops.dewy" import (copies_prepare copy_capture_ids own_at)
 from p"diagnostic_exit.dewy" import (fatal ice)
 from p"expression_types.dewy" import (ntype)
 from p"ir.jo" import (VI ir ir_pos)
@@ -57,6 +58,9 @@ GenLayout:type=[
     defer_offs:dict<int64 int64>=dict<int64 int64>()
     defer_nodes:array<int64>=[]
     defer_flag_offs:array<int64>=[]
+    unwind_kinds:array<int64>=[]
+    unwind_refs:array<int64>=[]
+    unwind_seen_locals:dict<int64 bool>=dict<int64 bool>()
 ]
 
 let gen_layouts:dict<int64 GenLayout>=dict<int64 GenLayout>()
@@ -115,6 +119,14 @@ gen_needs_sm=(s:LGnWord plain_loops:LGnWord):>bool=>$unsafe {
     false
 }
 
+gen_record_unwind_local=(@lay:GenLayout l:LGnWord):>void=>{
+    if l >? 0 and lay.live_offs.has(l) and not lay.unwind_seen_locals.has(l) {
+        lay.unwind_seen_locals[l]=true
+        lay.unwind_kinds.push(3)
+        lay.unwind_refs.push(l)
+    }
+}
+
 gen_layout_walk=(s:LGnWord @lay:GenLayout @off:int64):>void=>$unsafe {
     if s =? 0 {return}
     let k=nodes.ptr[s].kind
@@ -125,6 +137,8 @@ gen_layout_walk=(s:LGnWord @lay:GenLayout @off:int64):>void=>$unsafe {
         lay.defer_offs[s]=d_off
         lay.defer_nodes.push(LGnWord(nodes.ptr[s].a))
         lay.defer_flag_offs.push(d_off)
+        lay.unwind_kinds.push(0)
+        lay.unwind_refs.push(lay.defer_nodes.length - 1)
         return
     }
     if k =? 'yield_' {
@@ -136,6 +150,8 @@ gen_layout_walk=(s:LGnWord @lay:GenLayout @off:int64):>void=>$unsafe {
             lay.child_offs[s]=c_off
             lay.child_list_offs.push(c_off)
             lay.child_list_types.push(ct)
+            lay.unwind_kinds.push(1)
+            lay.unwind_refs.push(lay.child_list_offs.length - 1)
         }
         return
     }
@@ -159,6 +175,8 @@ gen_layout_walk=(s:LGnWord @lay:GenLayout @off:int64):>void=>$unsafe {
                 fs.snap_live_off=off
                 off += 1
                 lay.for_snaps.push(fs)
+                lay.unwind_kinds.push(2)
+                lay.unwind_refs.push(lay.for_snaps.length - 1)
             }
         } else if aux =? 1 or aux =? 2 or aux =? 3 {
             let st=prune(ntype(LGnWord(nodes.ptr[s].a)))
@@ -171,6 +189,8 @@ gen_layout_walk=(s:LGnWord @lay:GenLayout @off:int64):>void=>$unsafe {
                 fs.snap_live_off=off
                 off += 1
                 lay.for_snaps.push(fs)
+                lay.unwind_kinds.push(2)
+                lay.unwind_refs.push(lay.for_snaps.length - 1)
             }
             off=align_up(off 8)
             fs.idx_off=off
@@ -185,14 +205,18 @@ gen_layout_walk=(s:LGnWord @lay:GenLayout @off:int64):>void=>$unsafe {
             }
         }
         lay.for_slots[s]=fs
+        gen_record_unwind_local(@lay LGnWord(nodes.ptr[s].sym))
+        if nodes.ptr[s].c not=? 0 {gen_record_unwind_local(@lay LGnWord(nodes.ptr[s].c))}
         gen_layout_walk(LGnWord(nodes.ptr[s].b) @lay @off)
         return
     }
     if k =? 'while_' {
+        if nodes.ptr[s].aux =? 1 {gen_record_unwind_local(@lay LGnWord(nodes.ptr[s].sym))}
         gen_layout_walk(LGnWord(nodes.ptr[s].b) @lay @off)
         return
     }
     if k =? 'if_' or k =? 'iflet' {
+        if k =? 'iflet' {gen_record_unwind_local(@lay LGnWord(nodes.ptr[s].sym))}
         gen_layout_walk(LGnWord(nodes.ptr[s].b) @lay @off)
         gen_layout_walk(LGnWord(nodes.ptr[s].c) @lay @off)
         return
@@ -202,6 +226,7 @@ gen_layout_walk=(s:LGnWord @lay:GenLayout @off:int64):>void=>$unsafe {
         return
     }
     if k =? 'match_' {
+        gen_record_unwind_local(@lay LGnWord(nodes.ptr[s].sym))
         loop i in [0..nkids(s)) {
             gen_layout_walk(LGnWord(nodes.ptr[kid(s i)].b) @lay @off)
         }
@@ -215,6 +240,14 @@ gen_layout_walk=(s:LGnWord @lay:GenLayout @off:int64):>void=>$unsafe {
         let b=LGnWord(nodes.ptr[s].b)
         if b not=? 0 and nodes.ptr[b].kind =? 'block' {
             gen_layout_walk(b @lay @off)
+        }
+        if nodes.ptr[s].nlist >? 0 {
+            loop i in [0..nkids(s)) {
+                let id=kid(s i)
+                if nodes.ptr[id].kind not=? 'hole' {gen_record_unwind_local(@lay LGnWord(nodes.ptr[id].sym))}
+            }
+        } else {
+            gen_record_unwind_local(@lay LGnWord(nodes.ptr[s].sym))
         }
         return
     }
@@ -246,6 +279,10 @@ gen_frame_layout=(f:LGnWord):>GenLayout=>$unsafe {
             locals[inn].offset=-1
             off += max(tsize(t) 1)
         }
+        if is_managed(t) {
+            lay.live_offs[inn]=off
+            off += 1
+        }
     }
     loop l in fns.ptr[f].locals {
         if cap_set.has(l) {continue}
@@ -273,6 +310,7 @@ gen_frame_layout=(f:LGnWord):>GenLayout=>$unsafe {
         }
     }
     gen_layout_walk(LGnWord(fns.ptr[f].body) @lay @off)
+    loop l in lay.managed_locals {gen_record_unwind_local(@lay l)}
     lay.frame_size=align_up(off 8)
     gen_layouts[f]=lay
     lay
@@ -302,6 +340,9 @@ gen_lazy=(e:LGnWord):>Val=>$unsafe {
             let cid=cap_ids.ptr[ci]
             let val=own_at(cid gen_expr(cid) t)
             store_val(t frame off val.v);
+        }
+        if lay.live_offs.has(inn_l) {
+            e_store(frame lay.live_offs[inn_l] e_iconst(1) 1);
         }
     }
     Val[frame true (-1)]
@@ -740,36 +781,29 @@ gen_emit_drop_for_snap=(fs:GenForSlot):>void=>$unsafe {
 }
 
 # Full generator cleanup (used on normal finish, break $label, or_throw failure, and early drop_fn):
-# 1. Run active defers in reverse order (clearing each flag before running)
-# 2. Drop active delegated child generators in reverse order
-# 3. Drop live for-loop snapshots and live frame locals in reverse order
-# 4. Mark state = -1 (finished)
+# Unwinds active delegated children, defers, for-loop snapshots, and live frame locals in
+# exact reverse lexical order, then marks state = -1 (finished).
 gen_emit_full_cleanup=(lay:GenLayout):>void=>$unsafe {
-    let di=lay.defer_nodes.length - 1
-    loop di >=? 0 {
-        gen_emit_run_defer(lay.defer_nodes[di] lay.defer_flag_offs[di])
-        di -= 1
-    }
-    let ci=lay.child_list_offs.length - 1
-    loop ci >=? 0 {
-        let coff=lay.child_list_offs[ci]
-        let ct=lay.child_list_types[ci]
-        let ch=e_load(VI env_v coff ptr_size)
-        iff(e_bin('ne' VI ch e_iconst(0)));
-        e_store(env_v coff e_iconst(0) ptr_size);
-        release(ch ct);
-        endc();
-        ci -= 1
-    }
-    let si=lay.for_snaps.length - 1
-    loop si >=? 0 {
-        gen_emit_drop_for_snap(lay.for_snaps[si])
-        si -= 1
-    }
-    let li=lay.managed_locals.length - 1
-    loop li >=? 0 {
-        gen_emit_drop_local(lay.managed_locals[li] lay)
-        li -= 1
+    let ui=lay.unwind_kinds.length - 1
+    loop ui >=? 0 {
+        let uk=lay.unwind_kinds[ui]
+        let ur=lay.unwind_refs[ui]
+        if uk =? 0 {
+            gen_emit_run_defer(lay.defer_nodes[ur] lay.defer_flag_offs[ur])
+        } else if uk =? 1 {
+            let coff=lay.child_list_offs[ur]
+            let ct=lay.child_list_types[ur]
+            let ch=e_load(VI env_v coff ptr_size)
+            iff(e_bin('ne' VI ch e_iconst(0)));
+            e_store(env_v coff e_iconst(0) ptr_size);
+            release(ch ct);
+            endc();
+        } else if uk =? 2 {
+            gen_emit_drop_for_snap(lay.for_snaps[ur])
+        } else if uk =? 3 {
+            gen_emit_drop_local(ur lay)
+        }
+        ui -= 1
     }
     e_store(env_v lay.state_off e_iconst(-1) 8);
 }
@@ -970,7 +1004,7 @@ gen_emit_for_check=(s:LGnWord lay:GenLayout body_s:int64 after_s:int64 dispatch_
         if k =? 'fixed' {base=e_addi(env_v fs.snap_off)}
         else {
             let hdr=load_val(st env_v fs.snap_off)
-            base=if k =? 'str_' {e_addi(hdr 16)} else {e_addi(hdr 24)}
+            base=e_addi(hdr 24)
         }
         let ea=e_bin('add' VI base e_bin('mul' VI idx e_iconst(tsize(et))))
         let raw=load_val(et ea 0)
@@ -1041,6 +1075,7 @@ helper_gen_step=(f:LGnWord gen_t:LGnWord):>void=>$unsafe {
     let lay=gen_frame_layout(f)
     cur_fn=f
     env_v=frame
+    if copies_on {copies_prepare(f);}
 
     # Build the flat state graph from fns[f].body.
     let b=GenBuilder[lay=lay]
@@ -1243,13 +1278,23 @@ helper_gen_drop=(f:LGnWord gen_t:LGnWord):>void=>$unsafe {
     gen_emit_full_cleanup(lay)
     endc();
 
-    # Always drop captures in reverse order and free the heap frame.
+    # Always drop live captures in reverse order and free the heap frame.
     let ci=lay.cap_locals.length - 1
     loop ci >=? 0 {
         let inn=lay.cap_locals[ci]
         let t=store_type(inn)
         if is_managed(t) {
-            if is_shared(inn) {
+            if lay.live_offs.has(inn) {
+                let loff=lay.live_offs[inn]
+                iff(e_bin('ne' VI e_load(VI frame loff 1) e_iconst(0)));
+                e_store(frame loff e_iconst(0) 1);
+                if is_shared(inn) {
+                    release(e_load(VI frame LGnWord(locals.ptr[inn].env_off) ptr_size) t);
+                } else {
+                    drop_embedded(e_addi(frame LGnWord(locals.ptr[inn].env_off)) t);
+                }
+                endc();
+            } else if is_shared(inn) {
                 release(e_load(VI frame LGnWord(locals.ptr[inn].env_off) ptr_size) t);
             } else {
                 drop_embedded(e_addi(frame LGnWord(locals.ptr[inn].env_off)) t);

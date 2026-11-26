@@ -7,7 +7,7 @@ from p"lower.jo" import HK
 from p"@lib/core/str.jo" import (starts_with)
 from p"arena_ops.dewy" import (arena_handle)
 from p"ast.jo" import (NF_GENERIC has_flag kid lists nkids nodes)
-from p"check.jo" import (FK_LAMBDA FK_NORMAL LF_ADDR LF_ASSIGNED LF_CAPTURED LF_EXPOSED LF_PARAM LF_READ fns globals locals)
+from p"check.jo" import (FK_GENERATOR FK_LAMBDA FK_NORMAL LF_ADDR LF_ASSIGNED LF_CAPTURED LF_EXPOSED LF_PARAM LF_READ fns globals locals)
 from p"checker_generators.dewy" import (gen_type_contains)
 from p"type_constructors.dewy" import (tb_generators_seen)
 from p"checker_tree_queries.dewy" import (place_root)
@@ -25,14 +25,14 @@ from p"lower_group.dewy" import (gen_expr gen_place local_place)
 from p"lower_helpers.dewy" import (field_list)
 from p"lower_primitives.dewy" import (call_eval_order e_gaddr global_addr_off lf_helper)
 from p"lower_races.dewy" import (in_lib)
-from p"lower_storage.dewy" import (V boxed_field_of is_shared new_temp own place_addr scope_add_local store_val vc vt_of write_place zero_val)
+from p"lower_storage.dewy" import (V boxed_field_of is_shared new_temp own place_addr scope_add_local store_type store_val vc vt_of write_place zero_val)
 from p"ownership.jo" import (owner_adoptions ownership_consumers ownership_decls ownership_functions)
 from p"ownership_checks.dewy" import (LF_ALIAS LF_BYREF LF_CAPTURE LF_MUTPARAM NF_GLOBAL ownership_parameters ownership_validate)
 from p"ownership_lower.dewy" import (owner_forget_field owner_forget_slot owner_register owner_value)
 from p"ownership_types.dewy" import (ownership_copyable ownership_nominal ownership_type)
 from p"poly_closure.jo" import (poly_families)
-from p"types.jo" import (fields prune structs targ telem tkind tsize type_eq types variants)
-from p"type_ops.dewy" import (dt layout type_has_fn)
+from p"types.jo" import (fields prune ptr_size structs targ telem tkind tsize type_eq types variants)
+from p"type_ops.dewy" import (dt is_managed layout type_has_fn)
 from p"util.jo" import (err_notes name_of)
 from p"diagnostic_exit.dewy" import (fatal ice)
 
@@ -405,7 +405,7 @@ copy_live=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
         }
         return
     }
-    if k =? 'return_' {live.clear()}
+    if k =? 'return_' or (k =? 'yield_' and (nodes.ptr[n].aux =? 2 or nodes.ptr[n].aux =? 3)) {live.clear()}
     if k =? 'field' {
         let key=copy_field(n)
         if key <? 0 {
@@ -431,6 +431,7 @@ copy_live=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
             let skip=LF_PARAM | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED
             if copy_inputs.length >? 0 and copy_inputs.has(l) {skip &= ~LF_PARAM}
             if spawn_owned_capture(CopyWord(locals.ptr[l].owner) l) {skip &= ~LF_CAPTURE}
+            if tb_generators_seen and fns.ptr[CopyWord(locals.ptr[l].owner)].kind =? FK_GENERATOR and not is_shared(l) {skip &= ~LF_CAPTURE}
             if (ownership_type(CopyWord(locals.ptr[l].type)) or (tb_generators_seen and gen_type_contains(CopyWord(locals.ptr[l].type)))) and not is_shared(l) and CopyWord(locals.ptr[l].flags) & LF_ADDR =? 0 {skip &= ~LF_CAPTURED}
             if CopyWord(locals.ptr[l].flags) & skip =? 0 {
                 copy_moves[n]=true
@@ -631,7 +632,7 @@ copy_deferred=(n:CopyWord):>void=>$unsafe {
 copy_take=(e:CopyWord value:Val t:CopyWord):>Val=>$unsafe {
     let p=gen_place(e false)
     if vc(t) =? VC_AGG {
-        if ownership_type(t) {copy_forget(e t)}
+        if ownership_type(t) or (tb_generators_seen and fns.ptr[cur_fn].kind =? FK_GENERATOR and is_managed(t)) {copy_forget(e t)}
         let s=new_temp(t)
         let a=e_slot(s)
         # Implementation-library forwarding adopts an already initialized API
@@ -652,6 +653,9 @@ copy_take=(e:CopyWord value:Val t:CopyWord):>Val=>$unsafe {
         copy_forget(e t)
         return owner_value(V(v true) t)
     }
+    if tb_generators_seen and fns.ptr[cur_fn].kind =? FK_GENERATOR and is_managed(t) {
+        copy_forget(e t)
+    }
     Val(v true (-1))
 }
 copy_forget=(e:CopyWord t:CopyWord):>void=>$unsafe {
@@ -659,6 +663,11 @@ copy_forget=(e:CopyWord t:CopyWord):>void=>$unsafe {
         let l=CopyWord(nodes.ptr[e].sym)
         if spawn_owned_capture(cur_fn l) {
             e_store(env_v CopyWord(locals.ptr[l].env_off) - 8 e_iconst(0) 8);
+        }
+        else if fns.ptr[cur_fn].kind =? FK_GENERATOR {
+            let lt=store_type(l)
+            let loff=CopyWord(locals.ptr[l].env_off) + (if is_shared(l) {ptr_size} else {max(tsize(lt) 1)})
+            e_store(env_v loff e_iconst(0) 1);
         }
         else {owner_forget_slot(CopyWord(locals.ptr[l].offset))}
     }
