@@ -100,7 +100,7 @@ dn_range_bound=(@tokens:array<DewyLexeme> at:int64):>bool=>{
     if not dn_can_start(@tokens at) {return false}
     let symbol=tokens[at].symbol
     match symbol {
-        <'lbrace'|'kw_let'|'kw_const'|'kw_return'|'kw_break'|'kw_continue'|'kw_if'|'kw_loop'|'kw_parallel'|'kw_match'> => false
+        <'lbrace'|'kw_let'|'kw_const'|'kw_return'|'kw_break'|'kw_continue'|'kw_if'|'kw_loop'|'kw_parallel'|'kw_match'|'kw_lazy'|'kw_defer'> => false
         _ => dn_power(symbol) =? 0 or symbol =? 'plus' or symbol =? 'minus'
     }
 }

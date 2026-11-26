@@ -17,12 +17,12 @@ ParserFileHost:type=[
     finish_declarations:<(made:array<int64>):>array<int64>>
 ]
 
-df_file=(@p:ParserContext @nodes:array<Node> host:ParserFileHost saved_edits:bool lib_lazy:bool lazy:bool):>array<int64>=>$unsafe {
+df_file=(@p:ParserContext @nodes:array<Node> host:ParserFileHost saved_edits:bool lib_lazy:bool lazy_bodies:bool):>array<int64>=>$unsafe {
     let file=p.file
-    p.reader.dc_lazy_on=lazy
-    p.reader.dc_lib_lazy=lib_lazy and not lazy
-    host.note_lazy(file lazy p.reader.dc_lib_lazy)
-    if lazy {p.reader.dc_lazy_tokens[file]=p.tokens}
+    p.reader.dc_lazy_on=lazy_bodies
+    p.reader.dc_lib_lazy=lib_lazy and not lazy_bodies
+    host.note_lazy(file lazy_bodies p.reader.dc_lib_lazy)
+    if lazy_bodies {p.reader.dc_lazy_tokens[file]=p.tokens}
     p.at=0
     p.reader.dn_angles=0
     p.reader.dn_depth=0

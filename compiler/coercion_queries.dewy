@@ -80,7 +80,7 @@ can_coerce=(n:int64 from0:int64 to0:int64):>bool=>$unsafe {
     if fk =? 'polyfn' and tk =? 'fn_' {return poly_matches(source_type to)}
     if has_var(source_type) or has_var(to) {
         if fk =? 'var' or tk =? 'var' {return true}
-        if fk =? tk and fk =? 'array' {
+        if fk =? tk and (fk =? 'array' or fk =? 'generator') {
             let fe=prune(CoercionQueriesWord(types.ptr[source_type].elem))
             let te=prune(CoercionQueriesWord(types.ptr[to].elem))
             return types.ptr[fe].kind =? 'var' or types.ptr[te].kind =? 'var' or type_eq(fe te)
@@ -113,6 +113,7 @@ can_coerce=(n:int64 from0:int64 to0:int64):>bool=>$unsafe {
         if fk =? 'opt' {return can_coerce(0 telem(source_type) telem(to))}
         return can_coerce(n source_type CoercionQueriesWord(types.ptr[to].elem))
     }
+    if fk =? 'generator' and tk =? 'generator' and prune(CoercionQueriesWord(types.ptr[source_type].elem)) =? T_NEVER {return true}
     if fk =? 'null_' and (tk =? 'ptr' or tk =? 'cfn') {return true}
     if fk =? 'ptr' and tk =? 'ptr' and (to =? T_RAWPTR or source_type =? T_RAWPTR) {return true}
     false

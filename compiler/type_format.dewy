@@ -105,6 +105,7 @@ tf_string_in=(t0:FWord dewy:bool):>string=>$unsafe {
         }
         <'quantity'> => {"{tf_string(FWord(ti.elem)  dewy)} * {tf_inputs[0].host[0].dimension_str(FWord(ti.st))}"}
         <'secret'> => {if dewy {"secret<{tf_string(FWord(ti.elem) dewy)}>"} else {"secret[{tf_string(FWord(ti.elem) dewy)}]"}}
+        <'generator'> => {if dewy {"generator<{tf_string(FWord(ti.elem) dewy)}>"} else {"generator[{tf_string(FWord(ti.elem) dewy)}]"}}
         <'dimension'> => {tf_inputs[0].host[0].dimension_str(FWord(ti.st))}
         <'void_'> => {
             if FWord(ti.flags) & TF_NEVER not=? 0 {return "never"}

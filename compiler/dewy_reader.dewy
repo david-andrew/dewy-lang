@@ -851,6 +851,9 @@ rd_dc_atom=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
     if (op =? 'kw_spawn') {
         return rd_dc_spawn(@reader_ctx @reader_nodes token)
     }
+    if (op =? 'kw_lazy') {
+        return rd_dc_lazy(@reader_ctx @reader_nodes pos 0)
+    }
     # (`in + 1`: a word operator where a value starts is a name, dw_expr's identifier)
     if ((((((token.kind =? 'identifier') and (op not=? 'kw_not')) and (op not=? 'kw_and')) and (op not=? 'kw_or')) and rd_dc_word_operator(op)) and reader_ctx.flags.report_now) {
         return rd_dc_word_name(@reader_ctx @reader_nodes token pos)
@@ -1605,6 +1608,20 @@ rd_dc_body_metatag=(@reader_ctx:ParserContext @reader_nodes:array<Node> @stateme
         return mistake
     }
     reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+    if (rd_dn_peek(@reader_ctx) =? 'kw_lazy') {
+        let lazy_pos:int64=rd_mkpos(reader_ctx.file tag.start)
+        reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+        let lz:int64=rd_dc_lazy(@reader_ctx @reader_nodes lazy_pos reader_ctx.stores.host[0].intern(name))
+        if (lz =? 0) {
+            return (-1)
+        }
+        let st:int64=rd_dc_expression_statement(@reader_ctx @reader_nodes lazy_pos lazy_pos lz)
+        if (st =? 0) {
+            return (-1)
+        }
+        statements.push(st);
+        return 1
+    }
     let statement:int64=rd_dc_statement(@reader_ctx @reader_nodes)
     if (statement =? 0) {
         return (-1)
@@ -1631,7 +1648,7 @@ rd_dc_body_parens=(@reader_ctx:ParserContext):>bool=>$unsafe {
     let at:int64=int64<overflow='wrap'>(reader_ctx.at)+1
     loop at <? close {
         let symbol=reader_ctx.tokens[at].symbol
-        if symbol =? 'kw_let' or symbol =? 'kw_const' or depth =? 0 and (symbol =? 'kw_if' or symbol =? 'kw_match' or symbol =? 'kw_loop' or symbol =? 'kw_return' or symbol =? 'kw_break' or symbol =? 'kw_continue' or symbol =? 'semi' or symbol =? 'assign' or dn_token_assignment(symbol)) {return true}
+        if symbol =? 'kw_let' or symbol =? 'kw_const' or depth =? 0 and (symbol =? 'kw_if' or symbol =? 'kw_match' or symbol =? 'kw_loop' or symbol =? 'kw_return' or symbol =? 'kw_break' or symbol =? 'kw_continue' or symbol =? 'kw_defer' or symbol =? 'semi' or symbol =? 'assign' or dn_token_assignment(symbol)) {return true}
         if symbol =? 'lparen' or symbol =? 'lbrack' or symbol =? 'lbrace' {depth=int64<overflow='wrap'>(depth)+1}
         else if symbol =? 'rparen' or symbol =? 'rbrack' or symbol =? 'rbrace' {depth=int64<overflow='wrap'>(depth)-1}
         at=int64<overflow='wrap'>(at)+1
@@ -1682,7 +1699,7 @@ rd_dc_body_within=(@reader_ctx:ParserContext @reader_nodes:array<Node> open:Dewy
         let depth:int64=reader_ctx.depth
         let edits:int64=reader_ctx.reader.dn_edit_at.length
         # Settings prefix the following construct; `$outer loop ...`: a loop's label (dw_block)
-        if reader_ctx.tokens[reader_ctx.at].kind =? 'metatag' and (braced or reader_ctx.tokens[reader_ctx.at + 1].symbol =? 'kw_loop') {
+        if reader_ctx.tokens[reader_ctx.at].kind =? 'metatag' and (braced or reader_ctx.tokens[reader_ctx.at + 1].symbol =? 'kw_loop' or reader_ctx.tokens[reader_ctx.at + 1].symbol =? 'kw_lazy') {
             let tagged:int64=rd_dc_body_metatag(@reader_ctx @reader_nodes @statements)
             if (tagged <? 0) {
                 return 0
@@ -1841,7 +1858,7 @@ rd_dc_body_tag=(@reader_ctx:ParserContext name:string tag:DewyLexeme):>int64=>$u
         return (-1)
     }
     let next:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)]
-    if (next.symbol =? 'kw_loop') {
+    if ((next.symbol =? 'kw_loop') or (next.symbol =? 'kw_lazy')) {
         return 0
     }
     # (a label is a tag alone: one an expression goes on from is no label)
@@ -4271,7 +4288,11 @@ rd_dc_expr=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int64):>
         if ((end_sym =? 'question') or (minimum >? 170)) {
             return 0
         }
-        if (reader_ctx.depth not=? reader_ctx.reader.dc_spread_depth) {
+        if ((reader_ctx.depth not=? reader_ctx.reader.dc_spread_depth) and (reader_ctx.reader.dc_in_lazy =? 0)) {
+            if ((reader_ctx.reader.dc_spread_depth >? 0) and (reader_ctx.depth >? reader_ctx.reader.dc_spread_depth)) {
+                reader_ctx.depth = (int64<overflow='wrap'>(reader_ctx.depth) - 1)
+                return left
+            }
             if ((not reader_ctx.flags.report_now) or (rd_dc_spread_outside(@reader_ctx pos) =? 0)) {
                 return 0
             }
@@ -4280,7 +4301,7 @@ rd_dc_expr=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int64):>
         }
         let after_p=reader_ctx.tokens.ptr + (int64<overflow='wrap'>(reader_ctx.at) + 1)
         let asym:DewyToken=after_p[0].symbol
-        if (((((not (((after_p[0].space or after_p[0].newline) or (asym =? 'rbrack')) or (asym =? 'rparen') or (asym =? 'semi'))) or (dn_power(asym) >? 0)) or (asym =? 'dot')) or (asym =? 'question')) or (asym =? 'ellipsis')) {
+        if (((((not (((((after_p[0].space or after_p[0].newline) or (asym =? 'rbrack')) or (asym =? 'rparen')) or (asym =? 'rbrace')) or (asym =? 'semi') or (after_p[0].kind =? 'eof'))) or (dn_power(asym) >? 0)) or (asym =? 'dot')) or (asym =? 'question')) or (asym =? 'ellipsis')) {
             return 0
         }
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
@@ -5698,8 +5719,8 @@ rd_dc_group=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64):>int
         return 0
     }
     if (items.length =? 0) {
-        # (`(xs...)`: dw_expr's mistake, should nothing else read it)
-        if rd_has_flag(@reader_nodes n NF_SPREAD) {
+        # (`(xs...)`: dw_expr's mistake, should nothing else read it; allowed inside lazy)
+        if rd_has_flag(@reader_nodes n NF_SPREAD) and (reader_ctx.reader.dc_in_lazy =? 0) {
             return rd_dc_hint(@reader_ctx reader_nodes[n].pos "spread is supported inside array or record literals and call arguments: `[values... item]`, `[base... field=value]`, `add(pair...)`")
         }
         return n
@@ -5900,7 +5921,8 @@ rd_dc_head_term=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$u
     if (named and rd_dn_reserved(@reader_ctx int64<overflow='wrap'>(reader_ctx.tokens[at].name))) {
         rd_dc_reserved_at(@reader_ctx reader_ctx.tokens[at]);
     }
-    if (not (named or ((reader_ctx.tokens[at].symbol =? 'lbrack') and (not place)))) {
+    let paren_bind:bool=(((not place) and (reader_ctx.tokens[at].symbol =? 'lparen')) and (not rd_dc_paren_not_header(@reader_ctx)))
+    if (not ((named or ((reader_ctx.tokens[at].symbol =? 'lbrack') and (not place))) or paren_bind)) {
         # (`loop k, v in pairs`: dw_loop_head's mistake, at once)
         if (reader_ctx.flags.report_now and rd_dc_comma_names(@reader_ctx at)) {
             return rd_dc_fail_now(@reader_ctx rd_mkpos(reader_ctx.file reader_ctx.tokens[at].start) "several loop names go in brackets: `loop [key value] in pairs \{ ... }`")
@@ -5934,9 +5956,10 @@ rd_dc_head_term=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$u
         node_set_list(@reader_nodes @reader_ctx.stores.lists[0] head [value]);
     }
     else {
+        let close_tok:DewyToken=if paren_bind {'rparen'} else {'rbrack'}
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
         let seen:array<int64>=[]
-        let binders:array<int64>=rd_dc_binding_items(@reader_ctx @reader_nodes @seen)
+        let binders:array<int64>=rd_dc_binding_items(@reader_ctx @reader_nodes @seen close_tok)
         if ((binders.length =? 0) or (not rd_dn_accept(@reader_ctx 'kw_in'))) {
             return 0
         }
@@ -7340,6 +7363,14 @@ rd_dc_metatag_atom=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:De
     if ((((width =? 7) and (rd_dn_payload(@reader_ctx token) =? "expect")) or ((width =? 5) and (rd_dn_payload(@reader_ctx token) =? "fail"))) and reader_ctx.flags.report_now) {
         return rd_dc_fail_now(@reader_ctx pos "`${rd_dn_payload(@reader_ctx token)}` is a statement: it returns from its function when it fails, so it cannot give a value")
     }
+    # (`$label lazy ...`: a labelled lazy expression in value position)
+    if (reader_ctx.tokens[reader_ctx.at].symbol =? 'kw_lazy') {
+        let label_name:string=rd_dn_payload(@reader_ctx token)
+        if ((not reader_ctx.stores.host[0].dw_dir_name(label_name)) and (not dw_designed_directive(label_name))) and (dn_directive_form(label_name) =? 0) {
+            reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+            return rd_dc_lazy(@reader_ctx @reader_nodes pos reader_ctx.stores.host[0].intern(label_name))
+        }
+    }
     (-1)
 }
 
@@ -8720,7 +8751,7 @@ rd_dc_range=(@reader_ctx:ParserContext @reader_nodes:array<Node> bracketed:bool 
         }
     }
     let last:int64=0
-    if dn_range_bound(@reader_ctx.tokens reader_ctx.at) {
+    if dn_range_bound(@reader_ctx.tokens reader_ctx.at) and (bracketed or not reader_ctx.tokens[reader_ctx.at].space) {
         last = rd_dc_expr(@reader_ctx @reader_nodes 101)
         if (last =? 0) {
             return rd_dc_range_fail(@reader_ctx)
@@ -9907,6 +9938,80 @@ rd_dc_spread_outside=(@reader_ctx:ParserContext pos:int64):>int64=>$unsafe {
     1
 }
 
+# `lazy expr`: a generator value whose body runs only when pulled.
+rd_dc_lazy=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64 label:int64):>int64=>$unsafe {
+    let saved_lazy:int64=reader_ctx.reader.dc_in_lazy
+    reader_ctx.reader.dc_in_lazy = (int64<overflow='wrap'>(saved_lazy) + 1)
+    let next:DewyToken=rd_dn_peek(@reader_ctx)
+    let body:int64=0
+    if (next =? 'lbrace') {
+        body = rd_dc_body_within(@reader_ctx @reader_nodes 'lbrace' 'rbrace')
+    }
+    else if (next =? 'lparen') {
+        if (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'rparen') {
+            reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 2)
+            body = node_mk(@reader_nodes 'block' pos)
+        }
+        else if (rd_dc_body_parens(@reader_ctx) or rd_dc_paren_block_next(@reader_ctx reader_ctx.at)) {
+            body = rd_dc_paren_block(@reader_ctx @reader_nodes)
+        }
+        else {
+            let group_pos:int64=rd_mkpos(reader_ctx.file reader_ctx.tokens[reader_ctx.at].start)
+            reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+            let expr:int64=rd_dc_group(@reader_ctx @reader_nodes group_pos)
+            if (expr not=? 0) {
+                if (reader_nodes[expr].kind =? 'block') {
+                    body = expr
+                }
+                else {
+                    let st:int64=node_mk(@reader_nodes 'exprstmt' group_pos)
+                    reader_nodes[st].a = int32<overflow='wrap'>(expr)
+                    body = node_mk(@reader_nodes 'block' group_pos)
+                    node_set_list(@reader_nodes @reader_ctx.stores.lists[0] body [st]);
+                }
+            }
+        }
+    }
+    else if (((next =? 'kw_loop') or (next =? 'kw_if')) or (next =? 'kw_match')) {
+        let flow:int64=rd_dc_flow(@reader_ctx @reader_nodes)
+        if (flow not=? 0) {
+            body = node_mk(@reader_nodes 'block' reader_nodes[flow].pos)
+            node_set_list(@reader_nodes @reader_ctx.stores.lists[0] body [rd_dc_flow_stmt(@reader_nodes flow)]);
+        }
+    }
+    else if ((reader_ctx.tokens[reader_ctx.at].kind =? 'metatag') and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'kw_loop')) {
+        let tag:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
+        let tag_name:string=rd_dn_payload(@reader_ctx tag)
+        reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+        let flow:int64=rd_dc_flow(@reader_ctx @reader_nodes)
+        if (flow not=? 0) {
+            reader_nodes[flow].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(tag_name))
+            body = node_mk(@reader_nodes 'block' reader_nodes[flow].pos)
+            node_set_list(@reader_nodes @reader_ctx.stores.lists[0] body [rd_dc_flow_stmt(@reader_nodes flow)]);
+        }
+    }
+    else {
+        reader_ctx.reader.dc_in_lazy = saved_lazy
+        let expr:int64=rd_dc_expr(@reader_ctx @reader_nodes 0)
+        if (expr not=? 0) {
+            let st:int64=node_mk(@reader_nodes 'exprstmt' reader_nodes[expr].pos)
+            reader_nodes[st].a = int32<overflow='wrap'>(expr)
+            body = node_mk(@reader_nodes 'block' reader_nodes[expr].pos)
+            node_set_list(@reader_nodes @reader_ctx.stores.lists[0] body [st]);
+        }
+    }
+    reader_ctx.reader.dc_in_lazy = saved_lazy
+    if (body =? 0) {
+        return 0
+    }
+    let n:int64=node_mk(@reader_nodes 'lazy_' pos)
+    reader_nodes[n].a = int32<overflow='wrap'>(body)
+    if (label not=? 0) {
+        reader_nodes[n].sval = int32<overflow='wrap'>(label)
+    }
+    n
+}
+
 # Statement contexts are distinct from arguments, parameters and record
 # elements. Keep that context at the construction boundary.
 rd_dc_statement=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe {
@@ -9963,6 +10068,16 @@ rd_dc_statement=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$u
         if ((n =? 0) or (rd_dn_peek(@reader_ctx) =? 'semi')) {
             return 0
         }
+        return n
+    }
+    if (op =? 'kw_defer') {
+        reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+        let body:int64=rd_dc_body(@reader_ctx @reader_nodes)
+        if (body =? 0) {
+            return 0
+        }
+        let n:int64=node_mk(@reader_nodes 'defer_' pos)
+        reader_nodes[n].a = int32<overflow='wrap'>(body)
         return n
     }
     if (op =? 'kw_return') {
@@ -10677,6 +10792,13 @@ rd_dc_type_arguments=(@reader_ctx:ParserContext @reader_nodes:array<Node> n0:int
             }
             # `array<T length=n>`, `T<overflow='wrap'>` (dw_type's type application)
             if rd_dc_named_next(@reader_ctx) {
+                if (reader_nodes[n].kind =? 'tname') and (rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[n].name)) =? "generator") {
+                    let gopt:string=rd_dn_payload(@reader_ctx reader_ctx.tokens[reader_ctx.at])
+                    if (gopt =? "length") or (gopt =? "failure") {
+                        reader_ctx.stores.host[0].fatal(pos "generator type constraint `{gopt}=` is not decided yet; use `generator<T>`")
+                        return 0
+                    }
+                }
                 let setting:int64=rd_dc_word(@reader_ctx int64<overflow='wrap'>(reader_ctx.tokens[reader_ctx.at].name))
                 reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 2)
                 # `array<T length=[m n]>`: a shape (dw_shape_type)
@@ -10805,6 +10927,11 @@ rd_dc_type_arguments=(@reader_ctx:ParserContext @reader_nodes:array<Node> n0:int
                 reader_nodes[wrapper].ival = policy
                 n = wrapper
                 continue
+            }
+            # `generator<T length>=?N>`: length constraints are not decided yet
+            if (((reader_nodes[n].kind =? 'tname') and (rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[n].name)) =? "generator")) and (args.length =? 1)) and ((reader_ctx.tokens[reader_ctx.at].kind =? 'identifier') and (rd_dn_payload(@reader_ctx reader_ctx.tokens[reader_ctx.at]) =? "length")) {
+                reader_ctx.stores.host[0].fatal(pos "generator length constraints are not decided yet; use `generator<T>`")
+                return 0
             }
             # `array<T length >? 0>`: a condition on the array (dw_type's array constraint)
             if ((((word =? DC_ARRAY) and (args.length =? 1)) and (length =? 0)) and (reader_ctx.reader.dc_shapes.length =? shape)) {
@@ -12156,6 +12283,17 @@ rd_dn_statement=(@reader_ctx:ParserContext @reader_nodes:array<Node> top:bool=fa
 rd_dn_statement_read=(@reader_ctx:ParserContext @reader_nodes:array<Node> top:bool):>int64=>$unsafe {
     if top and reader_ctx.tokens[reader_ctx.at].kind =? 'metatag' and reader_ctx.tokens[reader_ctx.at].stop-reader_ctx.tokens[reader_ctx.at].start =? 12 and rd_dn_payload(@reader_ctx reader_ctx.tokens[reader_ctx.at]) =? "memory_left" {
         reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[reader_ctx.at].start) "`$memory_left` is not yet supported: memory caps need reserved-block accounting and budget ownership")
+    }
+    if top and reader_ctx.tokens[reader_ctx.at].kind =? 'metatag' and reader_ctx.tokens[reader_ctx.at + 1].symbol =? 'kw_lazy' {
+        let tag=reader_ctx.tokens[reader_ctx.at]
+        let name=rd_dn_payload(@reader_ctx tag)
+        if not reader_ctx.stores.host[0].dw_dir_name(name) and not dw_designed_directive(name) {
+            let lazy_pos=rd_mkpos(reader_ctx.file tag.start)
+            reader_ctx.at += 2
+            let lz=rd_dc_lazy(@reader_ctx @reader_nodes lazy_pos reader_ctx.stores.host[0].intern(name))
+            if lz =? 0 {return 0}
+            return rd_dc_expression_statement(@reader_ctx @reader_nodes lazy_pos lazy_pos lz)
+        }
     }
     if top and reader_ctx.tokens[reader_ctx.at].kind =? 'metatag' and reader_ctx.tokens[reader_ctx.at + 1].symbol =? 'kw_loop' {
         let tag=reader_ctx.tokens[reader_ctx.at]

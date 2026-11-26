@@ -169,9 +169,13 @@ index_select=(n:int64 b:int64 bt:int64 kind:int64 expected:int64):>int64=>$unsaf
 }
 index_error=(n:int64 code:int64 bt:int64):>void=>$unsafe {
     if code =? 1 {fatal(nodes.ptr[n].pos jd(nodes.ptr[n].pos "an array of indexes is int[], or a mask bool[] (found {dt(bt)})" "an array of indexes is array<int64>, or a mask array<bool> (found {dt(bt)})"))}
-    if code =? 2 {fatal(nodes.ptr[n].pos "cannot slice {dt(bt)}")}
+    if code =? 2 {
+        if tkind(bt) =? 'generator' {fatal(nodes.ptr[n].pos "slicing a generator ({dt(bt)}) is not decided yet; limit with `loop _ in [0..n) and x in g` or collect with `[g...]`")}
+        fatal(nodes.ptr[n].pos "cannot slice {dt(bt)}")
+    }
     if code =? 3 {fatal(nodes.ptr[n].pos "invalid index")}
     if code =? 4 {fatal(nodes.ptr[n].pos "index {nodes.ptr[n].ival} is out of bounds for {dt(bt)}")}
+    if tkind(bt) =? 'generator' {fatal(nodes.ptr[n].pos "indexing or slicing a generator ({dt(bt)}) is not decided yet; pull from it with a loop (`loop x in g`) or collect with `[g...]`")}
     if tkind(bt) =? 'tuple' {fatal(nodes.ptr[n].pos "a tuple's parts are `t.0`, `t.1` (an index in brackets is for arrays)")}
     if tkind(bt) =? 'opt' and dewy_at(nodes.ptr[n].pos) {
         fatal(nodes.ptr[n].pos "cannot index a value of type {dt(bt)}: it may be none (a member read through an optional is optional too). Check the value first, `if x isnt? none \{ ... }`, which narrows x inside, or give a fallback, `(x ?? default)[i]`")

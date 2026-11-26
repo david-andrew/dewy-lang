@@ -62,7 +62,7 @@ unpack_loop=(s:LoopBindingWord):>void=>{
     if nodes[it].kind =? 'range' {fatal(nodes[s].pos "`loop a, b in` unpacks pairs; a range has single numbers")}
     let t=prune(check_expr(it 0))
     nodes[s].a=LoopBindingI32(last_checked)
-    if types[t].kind not=? 'array' and types[t].kind not=? 'fixed' {return}
+    if types[t].kind not=? 'array' and types[t].kind not=? 'fixed' and types[t].kind not=? 'generator' {return}
     let pos=nodes[s].pos
     let et=prune(LoopBindingWord(types[t].elem))
     if not dewy and (types[et].kind not=? 'tuple' or types[et].nargs not=? 2) {

@@ -739,6 +739,7 @@ cv_name=(t0:PWord):>string=>$unsafe {
     if k =? 'array' {return "array<{cv_name(PWord(dw_inputs[0].types[0].ptr[t].elem))}>"}
     if k =? 'opt' {return "optional<{cv_name(PWord(dw_inputs[0].types[0].ptr[t].elem))}>"}
     if k =? 'secret' {return "secret<{cv_name(PWord(dw_inputs[0].types[0].ptr[t].elem))}>"}
+    if k =? 'generator' {return "generator<{cv_name(PWord(dw_inputs[0].types[0].ptr[t].elem))}>"}
     if k =? 'ptr' {return "{cv_name(PWord(dw_inputs[0].types[0].ptr[t].elem))}*"}
     if k =? 'fn_' or k =? 'cfn' {return "fn"}
     if k =? 'tuple' {

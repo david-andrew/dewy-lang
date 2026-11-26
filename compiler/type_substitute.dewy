@@ -4,7 +4,7 @@ from p"refinement_types.dewy" import (RefAtom)
 from p"refine_predicates.dewy" import (ref_atoms_intern)
 from p"checker_types.dewy" import (TypeInfo StructInfo)
 from p"type_inference.dewy" import (TypeInferenceInput tu_zonk tu_prune tu_has_var tu_targ tu_struct_targ)
-from p"type_constructors.dewy" import (tb_mk_secret tb_mk_array tb_mk_fixed tb_mk_ptr tb_mk_opt tb_mk_tuple tb_mk_cfn tb_mk_fn tb_mk_var)
+from p"type_constructors.dewy" import (tb_mk_secret tb_mk_array tb_mk_fixed tb_mk_ptr tb_mk_opt tb_mk_generator tb_mk_tuple tb_mk_cfn tb_mk_fn tb_mk_var)
 # Recursive full and partial substitution retain type IDs across constructors.
 # Partial requests share bindings by place; completed types stay canonical.
 SWord:type=int64<overflow='wrap'>
@@ -32,6 +32,7 @@ ts_subst=(t0:SWord targs:array<int64>):>SWord=>$unsafe {
     if k =? 'fixed' {return tb_mk_fixed(ts_subst(SWord(ts_inputs[0].types[0].ptr[t].elem)  targs)  ts_fixed_len(t))}
     if k =? 'ptr' {return tb_mk_ptr(ts_subst(SWord(ts_inputs[0].types[0].ptr[t].elem)  targs))}
     if k =? 'opt' {return tb_mk_opt(ts_subst(SWord(ts_inputs[0].types[0].ptr[t].elem)  targs))}
+    if k =? 'generator' {return tb_mk_generator(ts_subst(SWord(ts_inputs[0].types[0].ptr[t].elem)  targs))}
     if k =? 'fn_' or k =? 'tuple' or k =? 'cfn' {
         let a:array<int64>=[]
         loop i in [0..SWord(ts_inputs[0].types[0].ptr[t].nargs)) {a.push(ts_subst(tu_targ(t  i)  targs))}
@@ -65,6 +66,7 @@ ts_partial=(pat0:SWord @binds:array<int64>):>SWord=>$unsafe {
     if k =? 'fixed' {return tb_mk_fixed(ts_partial(SWord(ts_inputs[0].types[0].ptr[pat].elem) @binds)  ts_fixed_len(pat))}
     if k =? 'ptr' {return tb_mk_ptr(ts_partial(SWord(ts_inputs[0].types[0].ptr[pat].elem) @binds))}
     if k =? 'opt' {return tb_mk_opt(ts_partial(SWord(ts_inputs[0].types[0].ptr[pat].elem) @binds))}
+    if k =? 'generator' {return tb_mk_generator(ts_partial(SWord(ts_inputs[0].types[0].ptr[pat].elem) @binds))}
     if k =? 'fn_' or k =? 'tuple' {
         let a:array<int64>=[]
         loop i in [0..SWord(ts_inputs[0].types[0].ptr[pat].nargs)) {a.push(ts_partial(tu_targ(pat  i) @binds))}

@@ -47,7 +47,8 @@ TypeConstructorInput:type=[
     host:ptr<TypeConstructorHost>
 ]
 let tb_inputs:ptr<TypeConstructorInput>=$unsafe (uint64(0) as ptr<TypeConstructorInput>)
-type_constructor_bind=(input:ptr<TypeConstructorInput>):>BWord=>{tb_inputs=input;0}
+let tb_generators_seen:bool=false
+type_constructor_bind=(input:ptr<TypeConstructorInput>):>BWord=>{tb_inputs=input;tb_generators_seen=false;0}
 tb_basic=(kind:TK bits:BWord sign:bool size:BWord):>BWord=>$unsafe {
     let t=TypeInfo[kind = kind  bits = int32<overflow='wrap'>(bits)  sign = sign  size = int32<overflow='wrap'>(size)  align = int32<overflow='wrap'>(size)]
     if size =? 0 {t.align = 1}
@@ -61,6 +62,10 @@ tb_mk_fixed=(e:BWord n:BWord):>BWord=>$unsafe {
 tb_mk_ptr=(e:BWord):>BWord=>type_intern_element('ptr' e)
 tb_mk_box=(e:BWord):>BWord=>type_intern_element('box' e)
 tb_mk_opt=(e:BWord):>BWord=>type_intern_element('opt' e)
+tb_mk_generator=(e:BWord):>BWord=>$unsafe {
+    tb_generators_seen = true
+    type_intern_element('generator' e)
+}
 tb_mk_secret=(e:BWord):>BWord=>$unsafe {
     if tb_inputs[0].types[0].ptr[tu_prune(e)].kind =? 'secret' {return tu_prune(e)}
     tb_inputs[0].secrets_seen[0] = true
@@ -104,6 +109,7 @@ tb_mk_modval=(m:BWord):>BWord=>$unsafe {
     tb_inputs[0].types[0].length - 1
 }
 tb_init_types=():>void=>$unsafe {
+    tb_generators_seen = false
     tb_inputs[0].T_VOID[0] = tb_basic('void_'  0  false  0)
     tb_inputs[0].T_BOOL[0] = tb_basic('bool_'  8  false  1)
     tb_inputs[0].T_INT[0] = tb_basic('int_'  64  true  8)

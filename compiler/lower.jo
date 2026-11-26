@@ -4,6 +4,7 @@ use 'lower_views.dewy'
 use 'lower_storage.dewy'
 use 'lower_analysis.dewy'
 use 'lower_helpers.dewy'
+use 'lower_generators.dewy'
 use 'lower_group.dewy'
 use 'lower_determinism.dewy'
 use 'lower_uniqueness.dewy'
@@ -68,7 +69,7 @@ const VC_AGG = 3
 const LK_INST = 0
 const LK_HELPER = 1
 
-enum HK: drop, copy, move, arrrel, arruniq, arrcopy, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main, owner_boxcopy, parallel_serial, parallel_job, partition, promote, reset_words, capture_drop
+enum HK: drop, copy, move, arrrel, arruniq, arrcopy, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main, owner_boxcopy, parallel_serial, parallel_job, partition, promote, reset_words, capture_drop, gen_step, gen_drop
 
 struct LFunc:
     kind: int

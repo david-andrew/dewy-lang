@@ -56,7 +56,7 @@ isolation_children = (k: NK) -> int:
     -1
 iso_child_tab = fill(i8(-1), 128)
 iso_child_p = (():
-    loop i in [0..int(NK.new_axis) + 1): iso_child_tab[i] = i8(isolation_children(NK(i)))
+    loop i in [0..int(NK.yield_) + 1): iso_child_tab[i] = i8(isolation_children(NK(i)))
     data(iso_child_tab)
 )()
 fatal = (pos: int, msg: str):

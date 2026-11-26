@@ -7,7 +7,9 @@ from p"lower.jo" import HK
 from p"@lib/core/str.jo" import (starts_with)
 from p"arena_ops.dewy" import (arena_handle)
 from p"ast.jo" import (NF_GENERIC has_flag kid lists nkids nodes)
-from p"check.jo" import (FK_NORMAL LF_ADDR LF_ASSIGNED LF_CAPTURED LF_EXPOSED LF_PARAM LF_READ fns globals locals)
+from p"check.jo" import (FK_LAMBDA FK_NORMAL LF_ADDR LF_ASSIGNED LF_CAPTURED LF_EXPOSED LF_PARAM LF_READ fns globals locals)
+from p"checker_generators.dewy" import (gen_type_contains)
+from p"type_constructors.dewy" import (tb_generators_seen)
 from p"checker_tree_queries.dewy" import (place_root)
 from p"checks_thin.dewy" import (readonly_global)
 from p"copies.jo" import (copies_on copy_bindings copy_blocked copy_borrowed copy_capture_nodes copy_costs copy_explicit copy_fields copy_inputs copy_loop_after copy_loop_back copy_moves copy_noenv copy_hidden copy_owner_hidden copy_part_roots copy_parts copy_proof_budget)
@@ -58,6 +60,34 @@ copies_reset=():>void=>$unsafe {
     }
     ownership_validate()
     if ownership_decls.length not=? 0 {copies_on=true}
+    if tb_generators_seen {
+        copies_on=true
+        loop f in [1..fns.length) {
+            let fk=fns.ptr[f].kind
+            if fk not=? FK_NORMAL and fk not=? FK_LAMBDA {continue}
+            let body=CopyWord(fns.ptr[f].body)
+            if body not=? 0 {
+                loop i in [0..nkids(body)) {
+                    let s=kid(body i)
+                    if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+                    if nkids(s) >? 0 {continue}
+                    let l=CopyWord(nodes.ptr[s].sym)
+                    let source=CopyWord(nodes.ptr[s].b)
+                    if nodes.ptr[source].kind not=? 'ident' or nodes.ptr[source].aux not=? int32(1) {continue}
+                    let p=CopyWord(nodes.ptr[source].sym)
+                    if gen_type_contains(CopyWord(locals.ptr[l].type)) {
+                        copy_inputs[p]=true
+                        copy_bindings[l]=true
+                    }
+                }
+            }
+            loop p in fns.ptr[f].params {
+                if CopyWord(locals.ptr[p].flags) & LF_MUTPARAM =? 0 and gen_type_contains(CopyWord(locals.ptr[p].type)) {
+                    copy_inputs[p]=true
+                }
+            }
+        }
+    }
 }
 copy_consumes=(f:CopyWord i:CopyWord):>bool=>$unsafe {
     f >? 0 and i <? fns.ptr[f].params.length and copy_inputs.has(fns.ptr[f].params[i])
@@ -254,9 +284,9 @@ let copy_call_gen:int32=0
 copy_mentions_call=(n:CopyWord g_seen:int32 g_here:int32 seen_p:ptr<int32> here_p:ptr<int32> @live:dict<int64 bool>):>void=>$unsafe {
     if n =? 0 {return}
     let k=nodes[n].kind
-    if k =? 'lambda' {
+    if k =? 'lambda' or k =? 'lazy_' {
         let f=CopyWord(nodes[n].sym)
-        if has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nodes[n].aux)].envfn}
+        if k =? 'lambda' and has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nodes[n].aux)].envfn}
         loop cap in fns.ptr[f].caps {
             let l=int64(cap.outer)
             if here_p[l] not=? g_here {
@@ -288,9 +318,9 @@ copy_mentions_call=(n:CopyWord g_seen:int32 g_here:int32 seen_p:ptr<int32> here_
 copy_mentions=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
     if n =? 0 {return}
     let k=nodes.ptr[n].kind
-    if k =? 'lambda' {
+    if k =? 'lambda' or k =? 'lazy_' {
         let f=CopyWord(nodes.ptr[n].sym)
-        if has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nodes.ptr[n].aux)].envfn}
+        if k =? 'lambda' and has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nodes.ptr[n].aux)].envfn}
         loop cap in fns.ptr[f].caps {live[int64(cap.outer)]=true}
         return
     }
@@ -366,7 +396,7 @@ copy_live=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
         loop [l used] in edge {live[l]=used}
         return
     }
-    if k =? 'lambda' {
+    if k =? 'lambda' or k =? 'lazy_' {
         let ids=copy_capture_ids(n)
         let i=ids.length - 1
         loop i >=? 0 {
@@ -401,7 +431,7 @@ copy_live=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
             let skip=LF_PARAM | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED
             if copy_inputs.length >? 0 and copy_inputs.has(l) {skip &= ~LF_PARAM}
             if spawn_owned_capture(CopyWord(locals.ptr[l].owner) l) {skip &= ~LF_CAPTURE}
-            if ownership_type(CopyWord(locals.ptr[l].type)) and not is_shared(l) and CopyWord(locals.ptr[l].flags) & LF_ADDR =? 0 {skip &= ~LF_CAPTURED}
+            if (ownership_type(CopyWord(locals.ptr[l].type)) or (tb_generators_seen and gen_type_contains(CopyWord(locals.ptr[l].type)))) and not is_shared(l) and CopyWord(locals.ptr[l].flags) & LF_ADDR =? 0 {skip &= ~LF_CAPTURED}
             if CopyWord(locals.ptr[l].flags) & skip =? 0 {
                 copy_moves[n]=true
             }
@@ -535,11 +565,17 @@ copies_prepare=(f:CopyWord):>void=>$unsafe {
     copy_parts=false
     if copy_hidden {copy_owner_hidden=[]}
     copy_hidden=false
+    let has_gens=false
+    if tb_generators_seen {
+        loop l in fns.ptr[f].locals {
+            if gen_type_contains(CopyWord(locals.ptr[l].type)) {has_gens=true; break}
+        }
+    }
     let owners=ownership_functions.has(f)
     copy_proof_budget=if owners {4096} else {-1}
     if not copies_on {return}
     let body=CopyWord(fns.ptr[f].body)
-    if body =? 0 or (not copy_strict(body) and not owners) {return}
+    if body =? 0 or (not copy_strict(body) and not owners and not has_gens) {return}
     loop l in fns.ptr[f].locals {
         # (a match's own variable is declared by the match, fresh each iteration too)
         if owners and locals.ptr[l].name =? 0 and CopyWord(locals.ptr[l].flags) & LF_ADDR not=? 0 and ownership_type(CopyWord(locals.ptr[l].type)) {
@@ -676,9 +712,9 @@ copy_movable=(e:CopyWord):>bool=>$unsafe {
 copy_later_use=(n:CopyWord l:CopyWord after:CopyWord):>CopyWord=>$unsafe {
     if n =? 0 {return 0}
     if nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].aux =? int32(1) and nodes.ptr[n].sym =? int32(l) and nodes.ptr[n].pos >? after {return nodes.ptr[n].pos}
-    if nodes.ptr[n].kind =? 'lambda' {
+    if nodes.ptr[n].kind =? 'lambda' or nodes.ptr[n].kind =? 'lazy_' {
         let f=CopyWord(nodes.ptr[n].sym)
-        if has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nodes.ptr[n].aux)].envfn}
+        if nodes.ptr[n].kind =? 'lambda' and has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nodes.ptr[n].aux)].envfn}
         loop cap in fns.ptr[f].caps {
             if int64(cap.outer) =? l and nodes.ptr[n].pos >? after {return nodes.ptr[n].pos}
         }
@@ -710,6 +746,15 @@ copy_later_use=(n:CopyWord l:CopyWord after:CopyWord):>CopyWord=>$unsafe {
     found
 }
 copy_own=(e:CopyWord value:Val t:CopyWord):>Val=>$unsafe {
+    if tb_generators_seen and gen_type_contains(t) {
+        if value.owned {return value}
+        if (nodes.ptr[e].kind =? 'ident' or (nodes.ptr[e].kind =? 'field' and copy_moves.has(e))) and copy_movable(e) {return copy_take(e value t)}
+        if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32(1) {
+            let at=copy_later_use(CopyWord(fns.ptr[cur_fn].body) CopyWord(nodes.ptr[e].sym) nodes.ptr[e].pos)
+            if at >? 0 {err_notes.push([at "note: later use of '{name_of(CopyWord(nodes.ptr[e].name))}' prevents this transfer"])}
+        }
+        fatal(nodes.ptr[e].pos "cannot copy a generator ({dt(t)}); generators are move-only and can only be moved at their last use")
+    }
     if ownership_type(t) {
         if value.owned {return value}
         if copy_parts and nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32(1) and copy_part_roots.has(CopyWord(nodes.ptr[e].sym)) {
@@ -813,7 +858,7 @@ copy_capture_ids=(n:CopyWord):>array<int64>=>$unsafe {
     let ids=copy_capture_nodes.get(n)
     if ids not=? none {return ids}
     let f=CopyWord(nodes.ptr[n].sym)
-    if has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nodes.ptr[n].aux)].envfn}
+    if nodes.ptr[n].kind =? 'lambda' and has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nodes.ptr[n].aux)].envfn}
     let ids:array<int64>=[]
     loop cap in fns.ptr[f].caps {ids.push(mk_ident_local(int64(cap.outer) nodes.ptr[n].pos))}
     copy_capture_nodes[n]=ids

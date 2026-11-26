@@ -39,9 +39,9 @@ iso_set_child=(@tab:array<int8> @tmp:array<Node> ks:array<NK> v:int8):>void=>$un
 iso_build_child_tab=():>array<int8>=>$unsafe {
     let tab=fill(int8(-1) 128)
     let tmp=[Node[kind='nil']]
-    iso_set_child(@tab @tmp ['int_lit' 'float_lit' 'bool_lit' 'none_lit' 'null_lit' 'ident' 'dotname' 'hole' 'break_' 'continue_' 'pwild' 'lambda'] int8(0))
+    iso_set_child(@tab @tmp ['int_lit' 'float_lit' 'bool_lit' 'none_lit' 'null_lit' 'ident' 'dotname' 'hole' 'break_' 'continue_' 'pwild' 'lambda' 'lazy_'] int8(0))
     iso_set_child(@tab @tmp ['str_lit' 'block' 'tuple' 'map_lit' 'matrix' 'pvariant'] int8(16))
-    iso_set_child(@tab @tmp ['field' 'unary' 'not_' 'unwrap' 'narrow' 'cast' 'conv' 'addr' 'exprstmt' 'return_' 'defer_' 'istype' 'plit' 'fnref'] int8(1))
+    iso_set_child(@tab @tmp ['field' 'unary' 'not_' 'unwrap' 'narrow' 'cast' 'conv' 'addr' 'exprstmt' 'return_' 'defer_' 'istype' 'plit' 'fnref' 'yield_'] int8(1))
     iso_set_child(@tab @tmp ['binary' 'and_' 'or_' 'coalesce' 'assign' 'while_' 'for_' 'prange'] int8(3))
     iso_set_child(@tab @tmp ['if_' 'iflet' 'range'] int8(7))
     iso_set_child(@tab @tmp ['vardecl'] int8(2))
@@ -57,7 +57,7 @@ iso_build_plain_tab=():>array<uint8>=>$unsafe {
     let tab=fill(uint8(0) 128)
     let tmp=[Node[kind='nil']]
     let tagp=tmp.ptr as ptr<uint32>
-    let ks:array<NK>=['int_lit' 'float_lit' 'bool_lit' 'none_lit' 'null_lit' 'ident' 'dotname' 'hole' 'break_' 'continue_' 'pwild' 'str_lit' 'block' 'tuple' 'matrix' 'unary' 'not_' 'unwrap' 'narrow' 'exprstmt' 'return_' 'defer_' 'plit' 'and_' 'or_' 'coalesce' 'assign' 'while_' 'for_' 'prange' 'if_' 'iflet' 'range' 'vardecl' 'array' 'match_' 'arm' 'pvariant']
+    let ks:array<NK>=['int_lit' 'float_lit' 'bool_lit' 'none_lit' 'null_lit' 'ident' 'dotname' 'hole' 'break_' 'continue_' 'pwild' 'str_lit' 'block' 'tuple' 'matrix' 'unary' 'not_' 'unwrap' 'narrow' 'exprstmt' 'return_' 'defer_' 'yield_' 'plit' 'and_' 'or_' 'coalesce' 'assign' 'while_' 'for_' 'prange' 'if_' 'iflet' 'range' 'vardecl' 'array' 'match_' 'arm' 'pvariant']
     loop k in ks {
         tmp.ptr[0].kind=k
         tab.ptr[int64(tagp[0])]=uint8(1)
@@ -80,7 +80,7 @@ isolation_children=(k:NK):>int64=>$unsafe {
     match k {
         <'int_lit' | 'float_lit' | 'bool_lit' | 'none_lit' | 'null_lit' | 'ident' | 'dotname' | 'hole' | 'break_' | 'continue_' | 'pwild'> => {return 0}
         <'str_lit' | 'block' | 'tuple' | 'map_lit' | 'matrix'> => {return 16}
-        <'field' | 'unary' | 'not_' | 'unwrap' | 'narrow' | 'cast' | 'conv' | 'addr' | 'exprstmt' | 'return_' | 'defer_' | 'istype' | 'plit'> => {return 1}
+        <'field' | 'unary' | 'not_' | 'unwrap' | 'narrow' | 'cast' | 'conv' | 'addr' | 'exprstmt' | 'return_' | 'defer_' | 'istype' | 'plit' | 'yield_'> => {return 1}
         <'binary' | 'and_' | 'or_' | 'coalesce' | 'assign' | 'while_' | 'for_' | 'prange'> => {return 3}
         <'if_' | 'iflet' | 'range'> => {return 7}
         <'vardecl'> => {return 2}
@@ -90,8 +90,8 @@ isolation_children=(k:NK):>int64=>$unsafe {
         <'arm'> => {return 7 | 16}
         <'pvariant'> => {return 16}
         <'fnref'> => {return 1}
-        # A closure is conservatively a blocker; never walk its body as this owner.
-        <'lambda'> => {return 0}
+        # A closure or lazy generator is conservatively a blocker; never walk its body as this owner.
+        <'lambda' | 'lazy_'> => {return 0}
         _ => {return -1}
     }
 }
@@ -112,7 +112,7 @@ isolation_effect=(n:IsolationWord @edges:array<int64>):>IsolationReason=>$unsafe
     if iso_plain_p[ktag] not=? uint8(0) {return IsolationReason.none_}
     let k=nodes.ptr[n].kind
     match k {
-        <'lambda' | 'partial'> => {return IsolationReason.indirect}
+        <'lambda' | 'lazy_' | 'partial'> => {return IsolationReason.indirect}
         <'addr'> => {return IsolationReason.raw}
         <'cast' | 'conv'> => {
             if raw_view(n) {return IsolationReason.raw}
@@ -365,7 +365,7 @@ isolation_operation=(n:IsolationWord):>bool=>$unsafe {
     if k =? 'index' or k =? 'field' {
         return tkind(prune(ntype(IsolationWord(nodes.ptr[n].a)))) not=? 'ptr'
     }
-    if k =? 'addr' or k =? 'lambda' or k =? 'partial' {return false}
+    if k =? 'addr' or k =? 'lambda' or k =? 'lazy_' or k =? 'partial' {return false}
     let edges:array<int64>=[]
     if isolation_effect(n @edges) not=? IsolationReason.none_ {return false}
     loop f in edges {

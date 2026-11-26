@@ -6,7 +6,7 @@ from p"checker_types.dewy" import (TK TypeInfo)
 from p"checker_state.dewy" import (RefineBindings)
 from p"checker_alias.dewy" import (ca_resolve_alias)
 from p"type_inference.dewy" import (tu_prune tu_equal)
-from p"type_constructors.dewy" import (tb_mk_array tb_mk_opt tb_mk_ptr tb_mk_tuple tb_mk_values tb_mk_fn tb_mk_cfn tb_mk_secret)
+from p"type_constructors.dewy" import (tb_mk_array tb_mk_opt tb_mk_ptr tb_mk_tuple tb_mk_values tb_mk_fn tb_mk_cfn tb_mk_secret tb_mk_generator)
 from p"type_unions.dewy" import (uu_mk_union)
 from p"type_labels.dewy" import (tn_label_key)
 from p"checker_type_names.dewy" import (resolve_type_name)
@@ -92,6 +92,12 @@ ct_resolve_type=(tn:CTWord):>CTWord=>$unsafe {
             resolve_type_error(8   tn   0)
         }
         if named.kind =? 4 {return tb_mk_secret(ct_resolve_type(ct_kid(tn   0)))}
+        if named.kind =? 6 {
+            ct_input[0].values[0] = true
+            let elem=ct_resolve_type(ct_kid(tn   0))
+            ct_input[0].values[0] = false
+            return tb_mk_generator(elem)
+        }
         if named.kind =? 1 {
             let targs:array<int64>=[]
             let d=named.ref

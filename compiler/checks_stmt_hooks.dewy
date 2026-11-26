@@ -24,6 +24,7 @@ from p"ast.jo" import (NF_INCLUSIVE NF_STEP NF_CHECKED NF_FLOW_RETURNS NF_INBOUN
 from p"check.jo" import (FK_INIT SINK_NONE or_throw_returns ctxs cx expectation_ifs fns locals map_loop_values modules lib_dir sink_body_mode sink_fn sinks)
 from p"checker_decl_slots.dewy" import (collide_local)
 from p"checker_iterator_rewrites.dewy" import (dewy_cursor_loop dewy_iterator_loop dewy_sequence_loop)
+from p"checker_generators.dewy" import (gen_for_check)
 from p"checker_loop_bindings.dewy" import (dewy_nested_loop_bindings map_tidy_first soa_loop unpack_loop)
 from p"checker_local_warnings.dewy" import (copy_write_warnings)
 from p"checker_place_escapes.dewy" import (returned_place)
@@ -119,6 +120,9 @@ for_rewrite=(s:int64):>bool=>$unsafe {
     if has_flag(s NF_MUT) and files[pos_file(nodes.ptr[s].pos)].is_dewy {
         let source_type=prune(check_expr(StmtHookWord(nodes.ptr[s].a) 0))
         nodes.ptr[s].a=int32(last_checked)
+        if types.ptr[source_type].kind =? 'generator' {
+            fatal(nodes.ptr[s].pos "looping by place (`loop @item in g`) over a generator is not decided yet")
+        }
         if types.ptr[source_type].kind not=? 'array' and types.ptr[source_type].kind not=? 'fixed' {
             fatal(nodes.ptr[s].pos "`loop @item in items` needs stored array elements; ordinary iteration yields values")
         }
@@ -139,6 +143,7 @@ for_rewrite=(s:int64):>bool=>$unsafe {
     if dewy_cursor_loop(s) {return true}
     if map_tidy_first(s) {return true}
     if dewy_iterator_loop(s) {return true}
+    if gen_for_check(s) {return true}
     if dewy_sequence_loop(s) {return true}
     false
 }

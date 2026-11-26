@@ -59,7 +59,7 @@ tl_managed=(t0:LWord):>bool=>$unsafe {
     let t=quantity_base(t0)
     if tl_types[0][t].rep =? 'tagged_int' {return true}
     let k=tl_types[0][t].kind
-    if k =? 'str_' or k =? 'array' or k =? 'fn_' or k =? 'polyfn' or k =? 'callable' or k =? 'box' {return true}
+    if k =? 'str_' or k =? 'array' or k =? 'fn_' or k =? 'polyfn' or k =? 'callable' or k =? 'box' or k =? 'generator' {return true}
     if k =? 'struct_' or k =? 'enum_' or k =? 'tuple' or k =? 'opt' or k =? 'fixed' {
         let f=LWord(tl_types[0][t].flags)
         if f & TF_LAID_OUT not=? 0 {return f & TF_MANAGED not=? 0}
@@ -217,10 +217,10 @@ tl_layout_body=(t0:LWord):>void=>$unsafe {
         tl_inputs[0].types[0][t].flags = tl_inputs[0].types[0].ptr[base].flags | (tl_inputs[0].types[0].ptr[t].flags & int32(TF_HAS_VAR))
         return
     }
-    if k =? 'array' or k =? 'ptr' or k =? 'null_' or k =? 'cfn' or k =? 'box' {
+    if k =? 'array' or k =? 'ptr' or k =? 'null_' or k =? 'cfn' or k =? 'box' or k =? 'generator' {
         size=tl_inputs[0].ptr_size[0]
         al=tl_inputs[0].ptr_size[0]
-        m=k =? 'array' or k =? 'box'
+        m=k =? 'array' or k =? 'box' or k =? 'generator'
         boxed=k =? 'box'
     }
     else if k =? 'fn_' or k =? 'polyfn' {

@@ -15,6 +15,7 @@ from p"checks_assign_hooks.dewy" import (block_value)
 from p"checks_stmt_hooks.dewy" import (stmt_terminates)
 from p"checker_expr.dewy" import (check_expr)
 from p"checker_propagate.dewy" import (xq_check)
+from p"checker_generators.dewy" import (gen_in_lazy gen_propagate)
 from p"checker_state.dewy" import (FnCtx)
 from p"checker_resolve.dewy" import (ct_resolve_family)
 from p"errors.jo" import (error_type exception_type infer_returns infer_throws nominal_families nominal_generic nominal_parent nominal_ready nominal_resolving nominal_types out_of_memory_type)
@@ -285,6 +286,7 @@ infer_finish=(f:ErrWord body:ErrWord):>ErrWord=>$unsafe {
 # E selected members and ancestry depth D. Parent links are indexed.
 # The ordinary form keeps its existing checker and pays no type resolution.
 check_propagate=(n:ErrWord expected:ErrWord):>ErrWord=>$unsafe {
+    if gen_in_lazy() {return gen_propagate(n expected)}
     if nodes.ptr[n].b =? 0 {return xq_check(n expected)}
     let inst=ErrWord(ctxs[cx].inst)
     let inferring=ctxs[cx].infer_ret and propagate_inferring(inst)

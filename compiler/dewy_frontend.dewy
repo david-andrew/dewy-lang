@@ -48,7 +48,7 @@ dn_lex=(file:int64 begin:int64 stop:int64 intern_names:bool=true):>array<DewyLex
     let state=DewyLexState[dn_skip_bodies false dn_metatags false false dc_parser.reader.dn_true_id dc_parser.reader.dn_false_id dc_parser.reader.dn_is_id dc_parser.reader.dn_isnt_id dc_parser.reader.dn_in_id dn_word_tokens.length frontend_texts frontend_hashes frontend_names]
     let count:FrontendWord=dx_lex(@state frontend_host @dn_lexer @dn_block_comments source begin stop intern_names classes symbols dn_word_tokens.ptr @out capacity)
     dn_metatags=state.metatags
-    if state.lazy {dc_parser.reader.dn_lazy_left=true}
+    if state.has_lazy {dc_parser.reader.dn_lazy_left=true}
     let spaced=state.space
     let newline=state.newline
     capacity=FrontendWord(out.length)

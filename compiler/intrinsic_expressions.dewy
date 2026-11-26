@@ -37,7 +37,8 @@ from p"type_expression_forms.dewy" import (expr_as_type)
 from p"exact.jo" import (exact_shader_roots)
 from p"util.jo" import (err_notes files intern name_of pos_file pos_in_lib)
 from p"embed_walk.dewy" import (embed_dir_walk)
-from p"type_ops.dewy" import (dt get_struct_inst int_policy layout mk_array mk_fn mk_ptr unify)
+from p"type_ops.dewy" import (dt get_struct_inst int_policy layout mk_array mk_fn mk_generator mk_ptr unify)
+from p"checker_generators.dewy" import (gen_extend_rewrite gen_iter_value_wrap)
 from p"program_settings.dewy" import (dir_program_setting)
 from p"directives.jo" import (dir_find dir_module_start dir_program_values dir_runtime_caps dir_runtime_policies dir_runtime_settings dir_scopes)
 from p"checks_thin_expr.dewy" import (dewy_set_literal fmt_fallback fmt_field_order fmt_hidden is_dewy_cursor_iter is_dewy_grapheme_iter is_map_type sequence_length_name struct_ctor_zero)
@@ -195,7 +196,8 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
         # (`loop x in inbox or_throw {`: for an iterator the failures are each step's, not the iterator's)
         if nodes.ptr[args[0]].kind =? 'propagate' and dewy_at(nodes.ptr[n].pos) {
             let inner=IntrinsicExpressionsWord(nodes.ptr[args[0]].a)
-            if dewy_iterator_type(prune(check_expr(inner 0))) {
+            let it_t=prune(check_expr(inner 0))
+            if dewy_iterator_type(it_t) or tkind(it_t) =? 'generator' {
                 add_flag(last_checked_slot NF_CHECKED)
                 throwing_iters[n] = IntrinsicExpressionsWord(nodes.ptr[args[0]].b)
                 args[0] = last_checked_slot
@@ -232,6 +234,17 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
         let t=arg_type(args 0 0)
         add_flag(args[0] NF_CHECKED)
         let pos=nodes.ptr[n].pos
+        if tkind(t) =? 'generator' {
+            arg_type(args 1 0);
+            set_list(n args)
+            if id =? int64(IN.dewy_iter_done) {
+                nodes[n].type = int32<overflow='wrap'>(T_BOOL)
+                add_flag(n NF_CHECKED)
+                return T_BOOL
+            }
+            nodes[n].aux = int32<overflow='wrap'>(int64(IN.dewy_iter_value))
+            return gen_iter_value_wrap(n args t)
+        }
         if is_dewy_cursor_iter(t) {
             let prefix=if is_dewy_grapheme_iter(t) {"__dewy_grapheme"} else if is_dewy_range_type(t "__DewyOpenRangeIter") {"__dewy_open_range"} else {"__dewy_range"}
             let name="{prefix}_done"
@@ -299,6 +312,7 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
             source=kid(source 0)
         }
         let hint=t
+        if nodes.ptr[source].kind =? 'lazy_' {hint=mk_generator(IntrinsicExpressionsWord(types.ptr[t].elem))}
         if dewy_set_literal(source) {
             let set_sym=prelude.get(ci(18 "Set")) ?? 0
             if set_sym =? 0 {fatal(nodes.ptr[source].pos "Set type is not available")}
@@ -307,6 +321,9 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
         let source_type=prune(check_expr(source hint))
         source=last_checked_slot
         add_flag(source NF_CHECKED)
+        if types.ptr[source_type].kind =? 'generator' {
+            return gen_extend_rewrite(n args[0] source t source_type)
+        }
         if is_map_type(source_type) and dewy_at(nodes.ptr[n].pos) {fatal(nodes.ptr[source].pos "a dictionary cannot be spread into an array or added to one: take its keys (`[d.keys...]`), its values (`d.values`), or its entries as records (`[loop [key value] in d [key=key value=value]]`)")}
         if is_dewy_set_type(source_type) {source=bc_call("__dewy_set_values" [source] nodes.ptr[source].pos)}
         if types.ptr[source_type].kind =? 'fixed' and has_var(IntrinsicExpressionsWord(types.ptr[t].elem)) {

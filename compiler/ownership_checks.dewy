@@ -74,7 +74,7 @@ oc_local_fail=(l:CWord message:string):>void=>$unsafe {oc[0].host[0].error(oc_lo
 oc_children=(k:NK):>CWord=>match k {
     <'int_lit' | 'float_lit' | 'bool_lit' | 'none_lit' | 'null_lit' | 'ident' | 'dotname' | 'hole' | 'break_' | 'continue_' | 'pwild'> => 0
     <'str_lit' | 'block' | 'tuple' | 'map_lit' | 'matrix'> => 16
-    <'field' | 'unary' | 'not_' | 'unwrap' | 'narrow' | 'cast' | 'conv' | 'addr' | 'exprstmt' | 'return_' | 'defer_' | 'istype' | 'plit'> => 1
+    <'field' | 'unary' | 'not_' | 'unwrap' | 'narrow' | 'cast' | 'conv' | 'addr' | 'exprstmt' | 'return_' | 'defer_' | 'istype' | 'plit' | 'yield_'> => 1
     <'binary' | 'and_' | 'or_' | 'coalesce' | 'assign' | 'while_' | 'for_' | 'prange'> => 3
     <'if_' | 'iflet' | 'range'> => 7
     <'vardecl'> => 2
@@ -84,7 +84,7 @@ oc_children=(k:NK):>CWord=>match k {
     <'arm'> => 23
     <'pvariant'> => 16
     <'fnref'> => 1
-    <'lambda'> => 0
+    <'lambda' | 'lazy_'> => 0
     _ => -1
 }
 # Owners passed to Dewy's synthetic parameter bindings, and library parameters

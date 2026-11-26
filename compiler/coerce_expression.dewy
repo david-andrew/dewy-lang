@@ -406,6 +406,10 @@ coerce=(n:int64 target:int64):>int64=>$unsafe {
         wrap_conv(n CV.opt to)
         return n
     }
+    if fk =? 'generator' and tk =? 'generator' and prune(CoerceExpressionWord(types.ptr[source_type].elem)) =? T_NEVER {
+        nodes[n].type = int32<overflow='wrap'>(to)
+        return n
+    }
     if fk =? 'null_' and (tk =? 'ptr' or tk =? 'cfn') {
         nodes[n].type = int32<overflow='wrap'>(to)
         return n

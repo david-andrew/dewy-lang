@@ -30,7 +30,7 @@ OPERATORS = {'ellipsis': '...', 'function': '=>', 'returns': ':>', 'arrow': '->'
 COMPARISONS = {'eq': '=?', 'lt': '<?', 'gt': '>?', 'le': '<=?', 'ge': '>=?'}
 KEYWORDS = ['let', 'const', 'return', 'break', 'continue', 'import', 'from', 'else', 'if', 'loop', 'match', 'test',
             'not', 'as', 'transmute', 'or', 'xor', 'and', 'in', 'of', 'or_throw', 'nand', 'nor', 'xnor', 'parallel',
-            'concurrent', 'spawn']
+            'concurrent', 'spawn', 'lazy', 'defer']
 LABELS = {'multiply_apply': 'MultiplyJuxtapose', 'call': 'CallJuxtapose', 'broadcast_call': 'CallJuxtaposeBroadcast',
           'index': 'IndexJuxtapose', 'type_apply': 'TypeParamJuxtapose', 'range_apply': 'RangeJuxtapose',
           'statement_end': 'SemicolonJuxtapose'}

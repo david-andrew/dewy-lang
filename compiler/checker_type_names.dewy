@@ -29,6 +29,7 @@ from p"util.jo" import (files intern name_of pos_file pos_off)
 
 TypeNameWord:type=int64<overflow='wrap'>
 let rational_name:TypeNameWord=0
+let generator_name:TypeNameWord=0
 
 resolve_type_name=(tn:TypeNameWord):>CheckerTypeName=>{
     if nodes[tn].aux =? -10 {return CheckerTypeName[0 stored_time_type(tn)]}
@@ -73,6 +74,11 @@ resolve_type_name=(tn:TypeNameWord):>CheckerTypeName=>{
     if nm =? secret_name and nodes[tn].sval =? 0 and (s =? 0 or not secret_type_sym(syms[s].kind)) {
         if nkids(tn) not=? 1 {fatal(nodes[tn].pos jd(nodes[tn].pos "`secret` takes one type argument: `secret[str]`" "`secret` takes one type argument: `secret<string>`"))}
         return CheckerTypeName[4 0]
+    }
+    if generator_name =? 0 {generator_name=intern("generator")}
+    if nm =? generator_name and nodes[tn].sval =? 0 and (s =? 0 or not secret_type_sym(syms[s].kind)) {
+        if nkids(tn) not=? 1 {fatal(nodes[tn].pos jd(nodes[tn].pos "`generator` takes one type argument: `generator[int]`" "`generator` takes one type argument: `generator<int64>`"))}
+        return CheckerTypeName[6 0]
     }
     if s =? 0 {
         let name=name_of(nm)

@@ -52,7 +52,7 @@ dc_scan_arm_end=(@tokens:array<DewyLexeme> at:int64):>int64=>{
 dc_scan_ends=(symbol:DewyToken):>bool=>{
     if dn_power(symbol) >? 0 {return symbol =? 'range' or symbol =? 'kw_or_throw'}
     match symbol {
-        <'lparen'|'lbrack'|'lbrace'|'langle'|'at'|'tilde'|'bang'|'dot'|'kw_let'|'kw_const'|'kw_if'|'kw_else'|'kw_loop'|'kw_match'|'kw_not'|'kw_import'|'kw_from'|'kw_of'|'kw_parallel'|'kw_concurrent'|'kw_spawn'> => false
+        <'lparen'|'lbrack'|'lbrace'|'langle'|'at'|'tilde'|'bang'|'dot'|'kw_let'|'kw_const'|'kw_if'|'kw_else'|'kw_loop'|'kw_match'|'kw_not'|'kw_import'|'kw_from'|'kw_of'|'kw_parallel'|'kw_concurrent'|'kw_spawn'|'kw_lazy'|'kw_defer'> => false
         _ => true
     }
 }

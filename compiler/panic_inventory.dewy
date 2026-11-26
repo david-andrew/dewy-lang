@@ -334,7 +334,7 @@ panic_site=(f:PanicWord n:PanicWord):>void=>$unsafe {
             else {panic_witness.ptr[f] = n;}
         }
     }
-    else if k =? 'call' and nodes.ptr[n].aux =? 0 or k =? 'fnref' or k =? 'lambda' or k =? 'pair' or k =? 'partial' and nodes.ptr[n].aux =? 0 {
+    else if k =? 'call' and nodes.ptr[n].aux =? 0 or k =? 'fnref' or k =? 'lambda' or k =? 'lazy_' or k =? 'pair' or k =? 'partial' and nodes.ptr[n].aux =? 0 {
         # Draw context is checked at the program/library boundary, like bounds.
         if panic_draw and k =? 'call' and nodes.ptr[n].sym =? int32(draw_context_guard) {
             draw_required.ptr[f] = true;
@@ -357,7 +357,7 @@ panic_is_leaf=(k:NK):>bool=>match k {
     _ => false
 }
 panic_is_site=(k:NK):>bool=>match k {
-    <'call'|'intrinsic'|'fnref'|'lambda'|'pair'|'partial'> => true
+    <'call'|'intrinsic'|'fnref'|'lambda'|'lazy_'|'pair'|'partial'> => true
     _ => false
 }
 let panic_ktbl_arr:array<uint8>=[]
@@ -365,7 +365,7 @@ let panic_ktbl_p:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
 panic_init_ktbl=():>void=>$unsafe {
     panic_ktbl_arr=fill(uint8(0) 256)
     let p=panic_ktbl_arr.ptr
-    let all_nk:array<NK>=['nil' 'int_lit' 'float_lit' 'str_lit' 'bool_lit' 'none_lit' 'null_lit' 'ident' 'field' 'dotname' 'call' 'index' 'unary' 'binary' 'and_' 'or_' 'not_' 'coalesce' 'unwrap' 'lambda' 'array' 'map_lit' 'tuple' 'if_' 'match_' 'cast' 'range' 'addr' 'hole' 'namedarg' 'pair' 'block' 'iflet' 'conv' 'fnref' 'partial' 'intrinsic' 'vardecl' 'assign' 'exprstmt' 'while_' 'for_' 'return_' 'break_' 'continue_' 'defer_' 'when_' 'arm' 'fn_' 'param' 'struct_' 'enum_' 'variant' 'const_' 'import_' 'test_' 'build_' 'tname' 'tarray' 'tmap' 'ttuple' 'topt' 'tptr' 'tfn' 'pwild' 'plit' 'prange' 'pvariant' 'tunion' 'istype' 'loopx' 'lhead' 'narrow' 'typealias' 'ptype' 'record_lit' 'matrix' 'trecord' 'propagate' 'unit_lit' 'tquantity' 'reflect_scope' 'record_loop' 'trefined' 'typeapply' 'pshape' 'pseq' 'parallel_region' 'new_axis']
+    let all_nk:array<NK>=['nil' 'int_lit' 'float_lit' 'str_lit' 'bool_lit' 'none_lit' 'null_lit' 'ident' 'field' 'dotname' 'call' 'index' 'unary' 'binary' 'and_' 'or_' 'not_' 'coalesce' 'unwrap' 'lambda' 'array' 'map_lit' 'tuple' 'if_' 'match_' 'cast' 'range' 'addr' 'hole' 'namedarg' 'pair' 'block' 'iflet' 'conv' 'fnref' 'partial' 'intrinsic' 'vardecl' 'assign' 'exprstmt' 'while_' 'for_' 'return_' 'break_' 'continue_' 'defer_' 'when_' 'arm' 'fn_' 'param' 'struct_' 'enum_' 'variant' 'const_' 'import_' 'test_' 'build_' 'tname' 'tarray' 'tmap' 'ttuple' 'topt' 'tptr' 'tfn' 'pwild' 'plit' 'prange' 'pvariant' 'tunion' 'istype' 'loopx' 'lhead' 'narrow' 'typealias' 'ptype' 'record_lit' 'matrix' 'trecord' 'propagate' 'unit_lit' 'tquantity' 'reflect_scope' 'record_loop' 'trefined' 'typeapply' 'pshape' 'pseq' 'parallel_region' 'new_axis' 'lazy_' 'yield_']
     let kp=all_nk.ptr as ptr<uint32>
     loop i in [0..all_nk.length) {
         let k=all_nk.ptr[i]

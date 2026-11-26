@@ -117,7 +117,7 @@ isolation_children = (k: NK) -> int:
 isolation_node_children = (n: int) -> int: isolation_children(nodes[n].kind)
 iso_child_tab = fill(i8(-1), 128)
 iso_child_p = (():
-    loop i in [0..int(NK.new_axis) + 1): iso_child_tab[i] = i8(isolation_children(NK(i)))
+    loop i in [0..int(NK.yield_) + 1): iso_child_tab[i] = i8(isolation_children(NK(i)))
     data(iso_child_tab)
 )()
 '''

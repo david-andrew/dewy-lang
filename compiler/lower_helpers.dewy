@@ -27,6 +27,7 @@ from p"ir_builders.dewy" import (e_addi e_bin e_call e_call0 e_call1 e_call2 e_c
 from p"arena_ops.dewy" import (helper_promote)
 from p"math_ops.dewy" import (math_compare math_main math_tag)
 from p"parallel_ops.dewy" import (parallel_job_helper)
+from p"lower_generators.dewy" import (helper_gen_step helper_gen_drop)
 # Generated aggregate helpers; shared state has one owner in lower.jo.
 LHWord:type=int64<overflow='wrap'>
 helper_params=(n:LHWord):>array<int64>=>$unsafe {
@@ -77,7 +78,7 @@ helper_drop=(t:LHWord copy:bool):>void=>$unsafe {
             if hook not=? 0 {e_call1(lf_of_inst(hook) a -1);}
         }
     }
-    if k =? 'array' or k =? 'box' {
+    if k =? 'array' or k =? 'box' or k =? 'generator' {
         if copy {copy_at(a t);}
         else {release(e_load(VI a 0 ptr_size) t);}
     }
@@ -1066,6 +1067,8 @@ lower_helper=(lf:LHWord):>void=>$unsafe {
         <18 | 20 | 22> => {ice("borrowed region helper must lower as an instance");}
         <19> => {parallel_job_helper(h.inst h.htype & 1 not=? 0 h.htype & 2 not=? 0);}
         <21> => {helper_promote(t);}
+        <24> => {helper_gen_step(h.inst t);}
+        <25> => {helper_gen_drop(h.inst t);}
         _ => {}
     }
 }
@@ -1084,7 +1087,7 @@ helper_move=(t:LHWord):>void=>$unsafe {
     let ps=helper_params(2)
     let dest=ps.ptr[0]
     let source=ps.ptr[1]
-    if tkind(t) =? 'array' or tkind(t) =? 'box' or is_fn_type(t) {
+    if tkind(t) =? 'array' or tkind(t) =? 'box' or tkind(t) =? 'generator' or is_fn_type(t) {
         e_copy(dest source tsize(t));
     }
     else if tkind(t) =? 'opt' {

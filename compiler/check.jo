@@ -46,6 +46,7 @@ use 'isolation_ops.dewy'
 use 'checker_program.dewy'
 use 'checker_hooks.dewy'
 use 'checker_sinks.dewy'
+use 'checker_generators.dewy'
 use 'checker_value_calls.dewy'
 use 'checker_values.dewy'
 use 'host_binds.jo'
@@ -257,6 +258,7 @@ const FK_LAMBDA = 1
 const FK_THUNK = 2
 const FK_PARTIAL = 3
 const FK_INIT = 4
+const FK_GENERATOR = 5
 
 # Concrete types are interned: their IDs are their equality keys. Keep the
 # declaration's instance list for inference-bearing arguments and IDE ordering.
@@ -447,6 +449,7 @@ const SINK_ARM = 3        # an arm of the `if`/`match` ending a BODY (or ARM): e
 const SINK_COLLECTOR = 4  # loop capture, `[...]` with blocks: pushes onto its accumulator
 const SINK_VOID = 5       # a body written `:>void` (or `:>void | E`): expressing a value is an error
 const SINK_BIND = 6       # a binding's value, `x = { 1 2 }`: one value, or several it holds as `(T T)`
+const SINK_GENERATOR = 7  # a lazy generator body: every expressed value yields one item
 
 # (Sink and its modes: checker_exprstmts.dewy)
 sinks: Sink[]

@@ -30,6 +30,8 @@ for _name in list(EXTRA['check.jo']):
         EXTRA['check.jo'][_name] = _signature + '): print("' + _name + '"); exit(43)'
 for _module, _text in jo_doubles(EXTRA).items():
     JO[_module] = JO.get(_module, "") + _text
+JO['checker_generators.dewy'] = 'gen_spread_fresh=(c:int64 call:int64):>int64=>0\ngen_spread_parts=(c:int64 k:int64 @pre:array<int64> @out:array<int64>):>void=>{}\ngen_express=(s:int64 t:int64 pack:bool):>void=>{}\ngen_after_decl=(s:int64 l:int64 t:int64):>void=>{}\n'
+JO['checker_generators.jo'] = 'gen_spread_fresh = (c: int, call: int) -> int: 0\ngen_spread_parts = (c: int, k: int, pre: mut int[], out: mut int[]): return\ngen_express = (s: int, t: int, pack: bool): return\ngen_after_decl = (s: int, l: int, t: int): return\n'
 DOUBLES['checker_call_queries']['jo'] += '''use 'check.jo'
 collect_module = (mod: int, name: int, ds: mut int[]): vc_collect_module(mod, name, ds)
 collect_fns = (name: int, ds: mut int[]): vc_collect_fns(name, ds)

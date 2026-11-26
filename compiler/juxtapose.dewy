@@ -20,7 +20,7 @@ from p"source_warnings.dewy" import (warn)
 from p"diagnostic_exit.dewy" import (fatal)
 
 JuxtWord:type=int64<overflow='wrap'>
-let juxt_keywords=["if" "else" "loop" "in" "and" "or" "not" "xor" "nand" "nor" "xnor" "return" "let" "const" "match" "is" "as" "of" "break" "continue" "transmute" "or_throw" "parallel" "concurrent" "spawn" "defer" "import" "from" "then"]
+let juxt_keywords=["if" "else" "loop" "in" "and" "or" "not" "xor" "nand" "nor" "xnor" "return" "let" "const" "match" "is" "as" "of" "break" "continue" "transmute" "or_throw" "parallel" "concurrent" "spawn" "defer" "lazy" "import" "from" "then"]
 juxt_numeric=(t0:JuxtWord):>bool=>$unsafe {
     let t=prune(t0)
     let k=types.ptr[t].kind

@@ -1,0 +1,1347 @@
+$runtime_checks
+from p"ast.jo" import (NF_INCLUSIVE NF_STEP has_flag kid kids nkids nodes)
+from p"check.jo" import (LF_ALIAS LF_CAPTURE LF_MUTPARAM fns locals)
+from p"copy_ops.dewy" import (copy_capture_ids own_at)
+from p"diagnostic_exit.dewy" import (fatal ice)
+from p"expression_types.dewy" import (ntype)
+from p"ir.jo" import (VI ir ir_pos)
+from p"ir_builders.dewy" import (e_addi e_bin e_brtable e_call0 e_call1 e_calli e_copy e_iconst e_load e_mov e_ret e_slot e_store e_zero ir_set_pos new_slot vreg)
+from p"lower.jo" import (HK LoopInfo VC_AGG VC_VOID Val ctl cur_fn env_v loops lower_epoch scope_locals)
+from p"lower_group.dewy" import (gen_block_stmts gen_expr gen_match_test gen_owned gen_place gen_stmt local_place scope_pop)
+from p"lower_helpers.dewy" import (drop_embedded helper_params)
+from p"lower_primitives.dewy" import (e_faddr lf_helper rt tuple_off)
+from p"lower_storage.dewy" import (V arr_len blk borrow br_to brif_to cell_place els endc iff is_shared load_val lop new_temp opt_has opt_value own read_place release retain scope_add_local scope_push stmt_begin stmt_end store_type store_val vc vt_of write_place zero_declare)
+from p"math_ops.dewy" import (math_binary math_compare math_word)
+from p"types.jo" import (T_BOOL T_INT T_MATH_INT T_NEVER T_VOID align_up fields ptr_size prune structs talign targ telem tkind tsize types)
+from p"type_ops.dewy" import (fixed_len is_managed layout)
+from p"util.jo" import (name_of)
+
+LGnWord:type=int64<overflow='wrap'>
+LGnI32:type=int32<overflow='wrap'>
+
+# Per-generator heap frame layout:
+#   [0]:          step_fn: ptr  ((frame: *u8, out: *T) -> i64 bool)
+#   [ptr_size]:   drop_fn: ptr  ((frame: *u8) -> void)
+#   [state_off]:  state: i64    (0 = fresh, >0 = suspended, -1 = finished)
+#   [captures]:   outer captures (LF_VALUECAP / LF_CAPTURE)
+#   [locals]:     all non-alias frame locals of the generator body (marked LF_CAPTURE)
+#   [live_flags]: 1 byte per managed frame local (0 = uninitialized/dropped, 1 = live)
+#   [for_slots]:  hidden loop state (ctr/end/step/snap/idx/len) for yielding for_ loops
+#   [children]:   active child generator pointer slots for `child()...` delegation
+#   [defers]:     1 byte per defer statement (0 = inactive, 1 = active)
+GenForSlot:type=[
+    aux:int64=0
+    is_math:bool=false
+    ctr_off:int64=0
+    end_off:int64=0
+    step_off:int64=0
+    snap_off:int64=0
+    snap_live_off:int64=-1
+    snap_type:int64=0
+    idx_off:int64=0
+    len_off:int64=0
+]
+
+GenLayout:type=[
+    epoch:int64=0
+    frame_size:int64=0
+    state_off:int64=0
+    cap_locals:array<int64>=[]
+    managed_locals:array<int64>=[]
+    live_offs:dict<int64 int64>=dict<int64 int64>()
+    for_slots:dict<int64 GenForSlot>=dict<int64 GenForSlot>()
+    for_snaps:array<GenForSlot>=[]
+    child_offs:dict<int64 int64>=dict<int64 int64>()
+    child_list_offs:array<int64>=[]
+    child_list_types:array<int64>=[]
+    defer_offs:dict<int64 int64>=dict<int64 int64>()
+    defer_nodes:array<int64>=[]
+    defer_flag_offs:array<int64>=[]
+]
+
+let gen_layouts:dict<int64 GenLayout>=dict<int64 GenLayout>()
+let gen_comb_fn:int64=-1
+let gen_comb_slots:dict<int64 int64>=dict<int64 int64>()
+
+gen_reset_lower=():>void=>{
+    gen_comb_fn=-1
+    gen_comb_slots.clear()
+}
+
+# Does statement `s` require state-machine splitting (contains a yield_ or a jump to an enclosing SM loop)?
+gen_needs_sm=(s:LGnWord plain_loops:LGnWord):>bool=>$unsafe {
+    if s =? 0 {return false}
+    let k=nodes.ptr[s].kind
+    if k =? 'lambda' or k =? 'lazy_' or k =? 'defer_' {return false}
+    if k =? 'yield_' {return true}
+    if k =? 'break_' or k =? 'continue_' {
+        return LGnWord(nodes.ptr[s].ival) >=? plain_loops
+    }
+    if k =? 'exprstmt' {
+        let a=LGnWord(nodes.ptr[s].a)
+        if a =? 0 {return false}
+        let ak=nodes.ptr[a].kind
+        if ak =? 'yield_' {return true}
+        if ak =? 'match_' {
+            loop i in [0..nkids(a)) {
+                if gen_needs_sm(LGnWord(nodes.ptr[kid(a i)].b) plain_loops) {return true}
+            }
+            return false
+        }
+        if ak =? 'block' or ak =? 'if_' or ak =? 'iflet' {
+            return gen_needs_sm(a plain_loops)
+        }
+        return false
+    }
+    if k =? 'block' {
+        loop i in [0..nkids(s)) {
+            if gen_needs_sm(kid(s i) plain_loops) {return true}
+        }
+        return false
+    }
+    if k =? 'if_' or k =? 'iflet' {
+        return gen_needs_sm(LGnWord(nodes.ptr[s].b) plain_loops) or gen_needs_sm(LGnWord(nodes.ptr[s].c) plain_loops)
+    }
+    if k =? 'while_' or k =? 'for_' {
+        return gen_needs_sm(LGnWord(nodes.ptr[s].b) plain_loops + 1)
+    }
+    if k =? 'vardecl' {
+        let b=LGnWord(nodes.ptr[s].b)
+        if b not=? 0 and nodes.ptr[b].kind =? 'block' {
+            return gen_needs_sm(b plain_loops)
+        }
+        return false
+    }
+    false
+}
+
+gen_layout_walk=(s:LGnWord @lay:GenLayout @off:int64):>void=>$unsafe {
+    if s =? 0 {return}
+    let k=nodes.ptr[s].kind
+    if k =? 'lambda' or k =? 'lazy_' {return}
+    if k =? 'defer_' {
+        let d_off=off
+        off += 1
+        lay.defer_offs[s]=d_off
+        lay.defer_nodes.push(LGnWord(nodes.ptr[s].a))
+        lay.defer_flag_offs.push(d_off)
+        return
+    }
+    if k =? 'yield_' {
+        if nodes.ptr[s].aux =? 1 {
+            off=align_up(off ptr_size)
+            let c_off=off
+            off += ptr_size
+            let ct=prune(ntype(LGnWord(nodes.ptr[s].a)))
+            lay.child_offs[s]=c_off
+            lay.child_list_offs.push(c_off)
+            lay.child_list_types.push(ct)
+        }
+        return
+    }
+    if k =? 'for_' {
+        let aux=LGnWord(nodes.ptr[s].aux)
+        let fs=GenForSlot[aux=aux]
+        if aux =? 0 or aux =? 4 {
+            let l=LGnWord(nodes.ptr[s].sym)
+            let is_math=aux =? 0 and prune(LGnWord(locals.ptr[l].type)) =? T_MATH_INT
+            fs.is_math=is_math
+            off=align_up(off 8)
+            fs.ctr_off=off
+            off += 8
+            fs.end_off=off
+            off += 8
+            if is_math or (aux =? 0 and has_flag(LGnWord(nodes.ptr[s].a) NF_STEP)) {
+                fs.step_off=off
+                off += 8
+            }
+            if is_math {
+                fs.snap_live_off=off
+                off += 1
+                lay.for_snaps.push(fs)
+            }
+        } else if aux =? 1 or aux =? 2 or aux =? 3 {
+            let st=prune(ntype(LGnWord(nodes.ptr[s].a)))
+            layout(st);
+            off=align_up(off max(talign(st) 1))
+            fs.snap_off=off
+            fs.snap_type=st
+            off += max(tsize(st) 1)
+            if is_managed(st) {
+                fs.snap_live_off=off
+                off += 1
+                lay.for_snaps.push(fs)
+            }
+            off=align_up(off 8)
+            fs.idx_off=off
+            off += 8
+            fs.len_off=off
+            off += 8
+        } else if aux =? 5 {
+            if nodes.ptr[s].c not=? 0 {
+                off=align_up(off 8)
+                fs.idx_off=off
+                off += 8
+            }
+        }
+        lay.for_slots[s]=fs
+        gen_layout_walk(LGnWord(nodes.ptr[s].b) @lay @off)
+        return
+    }
+    if k =? 'while_' {
+        gen_layout_walk(LGnWord(nodes.ptr[s].b) @lay @off)
+        return
+    }
+    if k =? 'if_' or k =? 'iflet' {
+        gen_layout_walk(LGnWord(nodes.ptr[s].b) @lay @off)
+        gen_layout_walk(LGnWord(nodes.ptr[s].c) @lay @off)
+        return
+    }
+    if k =? 'exprstmt' {
+        gen_layout_walk(LGnWord(nodes.ptr[s].a) @lay @off)
+        return
+    }
+    if k =? 'match_' {
+        loop i in [0..nkids(s)) {
+            gen_layout_walk(LGnWord(nodes.ptr[kid(s i)].b) @lay @off)
+        }
+        return
+    }
+    if k =? 'block' {
+        loop i in [0..nkids(s)) {gen_layout_walk(kid(s i) @lay @off)}
+        return
+    }
+    if k =? 'vardecl' {
+        let b=LGnWord(nodes.ptr[s].b)
+        if b not=? 0 and nodes.ptr[b].kind =? 'block' {
+            gen_layout_walk(b @lay @off)
+        }
+        return
+    }
+}
+
+gen_frame_layout=(f:LGnWord):>GenLayout=>$unsafe {
+    if gen_layouts.has(f) {
+        let prev=gen_layouts[f]
+        if prev.epoch =? lower_epoch {return prev}
+    }
+    let state_off=align_up(2 * ptr_size 8)
+    let off:int64=state_off + 8
+    let lay=GenLayout[epoch=lower_epoch state_off=state_off]
+    let cap_set=dict<int64 bool>()
+    loop cap in fns.ptr[f].caps {
+        let inn=LGnWord(cap.inner)
+        cap_set[inn]=true
+        lay.cap_locals.push(inn)
+        let t=store_type(inn)
+        if is_shared(inn) {
+            off=align_up(off ptr_size)
+            locals[inn].env_off=LGnI32(off)
+            locals[inn].offset=-1
+            off += ptr_size
+        } else {
+            layout(t);
+            off=align_up(off max(talign(t) 1))
+            locals[inn].env_off=LGnI32(off)
+            locals[inn].offset=-1
+            off += max(tsize(t) 1)
+        }
+    }
+    loop l in fns.ptr[f].locals {
+        if cap_set.has(l) {continue}
+        let fl=LGnWord(locals.ptr[l].flags)
+        if fl & LF_ALIAS not=? 0 {continue}
+        let t=store_type(l)
+        layout(t);
+        if is_shared(l) {
+            off=align_up(off ptr_size)
+            locals[l].flags=LGnI32(fl | LF_CAPTURE)
+            locals[l].env_off=LGnI32(off)
+            locals[l].offset=-1
+            off += ptr_size
+        } else {
+            off=align_up(off max(talign(t) 1))
+            locals[l].flags=LGnI32(fl | LF_CAPTURE)
+            locals[l].env_off=LGnI32(off)
+            locals[l].offset=-1
+            off += max(tsize(t) 1)
+        }
+        if is_managed(t) {
+            lay.live_offs[l]=off
+            lay.managed_locals.push(l)
+            off += 1
+        }
+    }
+    gen_layout_walk(LGnWord(fns.ptr[f].body) @lay @off)
+    lay.frame_size=align_up(off 8)
+    gen_layouts[f]=lay
+    lay
+}
+
+# Lower a `lazy` expression into a heap-allocated generator frame.
+gen_lazy=(e:LGnWord):>Val=>$unsafe {
+    let f=LGnWord(nodes.ptr[e].sym)
+    let gen_t=prune(ntype(e))
+    let lay=gen_frame_layout(f)
+    let frame=e_call1(rt("__alloc") e_iconst(lay.frame_size) VI)
+    e_zero(frame lay.frame_size);
+    e_store(frame 0 e_faddr(lf_helper(HK.gen_step gen_t f)) ptr_size);
+    e_store(frame ptr_size e_faddr(lf_helper(HK.gen_drop gen_t f)) ptr_size);
+    let cap_ids=copy_capture_ids(e)
+    loop ci in [0..fns.ptr[f].caps.length) {
+        let cap=fns.ptr[f].caps.ptr[ci]
+        let out_l=LGnWord(cap.outer)
+        let inn_l=LGnWord(cap.inner)
+        let off=LGnWord(locals.ptr[inn_l].env_off)
+        let t=store_type(inn_l)
+        if is_shared(inn_l) {
+            let cell=read_place(cell_place(out_l) t)
+            retain(cell t);
+            e_store(frame off cell ptr_size);
+        } else {
+            let cid=cap_ids.ptr[ci]
+            let val=own_at(cid gen_expr(cid) t)
+            store_val(t frame off val.v);
+        }
+    }
+    Val[frame true (-1)]
+}
+
+# ---------------- State Machine IR Representation ----------------
+# Action kinds inside a generator state:
+#  0: plain non-yielding statement (node)
+#  1: SM vardecl (node) -> initializes frame local & sets live_off = 1
+#  2: SM defer register (node = defer_ node) -> sets defer_off = 1
+#  3: SM scope exit (drop managed locals in `locals_drop`, run defers in `defers_run`)
+GenAction:type=[
+    kind:int64=0
+    node:int64=0
+    locals_drop:array<int64>=[]
+    defers_run:array<int64>=[]
+]
+
+# State terminator kinds:
+#  0: FINISH (run cleanup, set state = -1, return 0)
+#  1: GOTO(next_s)
+#  2: BRANCH(cond_node, next_s=then, alt_s=else)
+#  3: YIELD_VAL(val_node, next_s)
+#  4: YIELD_FAIL(val_node) -> yield failure as last value, run cleanup, state=-1, return 1
+#  5: DELEGATE_START(yield_node, next_s=pull_s)
+#  6: DELEGATE_PULL(yield_node, next_s=after_s)
+#  7: IFLET_CHECK(iflet_node, next_s=then_s, alt_s=else_s)
+#  8: MATCH_DISPATCH(match_node, arm_states, alt_s=join_s)
+#  9: FOR_INIT(for_node, next_s=check_s)
+# 10: FOR_CHECK(for_node, next_s=body_s, alt_s=after_s)
+# 11: FOR_STEP(for_node, next_s=check_s)
+GenState:type=[
+    actions:array<GenAction>=[]
+    term:int64=0
+    node:int64=0
+    next_s:int64=-1
+    alt_s:int64=-1
+    arm_states:array<int64>=[]
+]
+
+GenSmScope:type=[
+    locals_:array<int64>=[]
+    defers_:array<int64>=[]
+]
+
+GenSmLoop:type=[
+    brk_s:int64=0
+    cont_s:int64=0
+    scope_depth:int64=0
+    for_node:int64=0
+]
+
+GenBuilder:type=[
+    states:array<GenState>=[]
+    scopes:array<GenSmScope>=[]
+    sm_loops:array<GenSmLoop>=[]
+    lay:GenLayout=GenLayout()
+]
+
+sm_new_state=(@b:GenBuilder):>int64=>{
+    b.states.push(GenState[])
+    b.states.length - 1
+}
+
+sm_push_scope=(@b:GenBuilder):>void=>{
+    b.scopes.push(GenSmScope[])
+}
+
+sm_pop_scope_action=(@b:GenBuilder):>GenAction=>{
+    let sc=b.scopes.pop()
+    GenAction[kind=3 locals_drop=sc.locals_ defers_run=sc.defers_]
+}
+
+sm_exit_to_depth=(@b:GenBuilder target_depth:int64):>GenAction=>{
+    let ls:array<int64>=[]
+    let ds:array<int64>=[]
+    let i=b.scopes.length - 1
+    loop i >=? target_depth {
+        let j=b.scopes[i].defers_.length - 1
+        loop j >=? 0 {ds.push(b.scopes[i].defers_[j]); j -= 1}
+        let k=b.scopes[i].locals_.length - 1
+        loop k >=? 0 {ls.push(b.scopes[i].locals_[k]); k -= 1}
+        i -= 1
+    }
+    GenAction[kind=3 locals_drop=ls defers_run=ds]
+}
+
+sm_has_exit=(a:GenAction):>bool=>a.locals_drop.length >? 0 or a.defers_run.length >? 0
+
+sm_record_vardecl_locals=(@b:GenBuilder s:LGnWord):>void=>$unsafe {
+    let top=b.scopes.length - 1
+    if nodes.ptr[s].nlist >? 0 {
+        loop i in [0..nkids(s)) {
+            let id=kid(s i)
+            if nodes.ptr[id].kind not=? 'hole' {
+                let l=LGnWord(nodes.ptr[id].sym)
+                if b.lay.live_offs.has(l) {b.scopes[top].locals_.push(l)}
+            }
+        }
+    } else {
+        let l=LGnWord(nodes.ptr[s].sym)
+        if b.lay.live_offs.has(l) {b.scopes[top].locals_.push(l)}
+    }
+}
+
+# Build state graph for statement `s` starting at state `cur_s`, returning the continuation state ID (or -1 if terminated).
+sm_compile_stmt=(@b:GenBuilder cur_s0:int64 s:LGnWord):>int64=>$unsafe {
+    if cur_s0 <? 0 {return -1}
+    let cur_s=cur_s0
+    let k=nodes.ptr[s].kind
+
+    if k =? 'defer_' {
+        b.states[cur_s].actions.push(GenAction[kind=2 node=s])
+        b.scopes[b.scopes.length - 1].defers_.push(s)
+        return cur_s
+    }
+
+    if k =? 'vardecl' {
+        let bv=LGnWord(nodes.ptr[s].b)
+        if bv not=? 0 and nodes.ptr[bv].kind =? 'block' and gen_needs_sm(bv 0) {
+            # Lowering of `let x = expr or_throw` inside lazy body!
+            # The block `bv` ends with a value expression (`exprstmt`) and may yield a failure (`yield_(aux=2)`) earlier!
+            sm_push_scope(@b)
+            let nb=nkids(bv)
+            loop i in [0..nb - 1) {
+                cur_s=sm_compile_stmt(@b cur_s kid(bv i))
+                if cur_s <? 0 {break}
+            }
+            if cur_s >=? 0 and nb >? 0 {
+                let last_st=kid(bv nb - 1)
+                let val_expr=if nodes.ptr[last_st].kind =? 'exprstmt' {LGnWord(nodes.ptr[last_st].a)} else {last_st}
+                let synth=nodes.length
+                nodes.push(nodes.ptr[s])
+                nodes[synth].b=LGnI32(val_expr)
+                b.states[cur_s].actions.push(GenAction[kind=1 node=synth])
+                let exit_act=sm_pop_scope_action(@b)
+                if sm_has_exit(exit_act) {b.states[cur_s].actions.push(exit_act)}
+                sm_record_vardecl_locals(@b s)
+                return cur_s
+            }
+            b.scopes.pop();
+            return -1
+        }
+        b.states[cur_s].actions.push(GenAction[kind=1 node=s])
+        sm_record_vardecl_locals(@b s)
+        return cur_s
+    }
+
+    if k =? 'exprstmt' {
+        let a=LGnWord(nodes.ptr[s].a)
+        if a =? 0 {return cur_s}
+        let ak=nodes.ptr[a].kind
+        if ak =? 'yield_' {
+            let yaux=LGnWord(nodes.ptr[a].aux)
+            if yaux =? 0 {
+                let nxt=sm_new_state(@b)
+                b.states[cur_s].term=3
+                b.states[cur_s].node=LGnWord(nodes.ptr[a].a)
+                b.states[cur_s].next_s=nxt
+                return nxt
+            }
+            if yaux =? 1 {
+                let pull_s=sm_new_state(@b)
+                let after_s=sm_new_state(@b)
+                b.states[cur_s].term=5
+                b.states[cur_s].node=a
+                b.states[cur_s].next_s=pull_s
+                b.states[pull_s].term=6
+                b.states[pull_s].node=a
+                b.states[pull_s].next_s=after_s
+                return after_s
+            }
+            if yaux =? 2 {
+                b.states[cur_s].term=4
+                b.states[cur_s].node=LGnWord(nodes.ptr[a].a)
+                return -1
+            }
+            if yaux =? 3 {
+                b.states[cur_s].term=0
+                return -1
+            }
+            return cur_s
+        }
+        if ak =? 'match_' and gen_needs_sm(s 0) {
+            return sm_compile_match(@b cur_s a)
+        }
+        if (ak =? 'block' or ak =? 'if_' or ak =? 'iflet') and gen_needs_sm(a 0) {
+            return sm_compile_stmt(@b cur_s a)
+        }
+        b.states[cur_s].actions.push(GenAction[kind=0 node=s])
+        return cur_s
+    }
+
+    if k =? 'block' {
+        if not gen_needs_sm(s 0) {
+            b.states[cur_s].actions.push(GenAction[kind=0 node=s])
+            return cur_s
+        }
+        sm_push_scope(@b)
+        loop i in [0..nkids(s)) {
+            cur_s=sm_compile_stmt(@b cur_s kid(s i))
+            if cur_s <? 0 {break}
+        }
+        let exit_act=sm_pop_scope_action(@b)
+        if cur_s >=? 0 and sm_has_exit(exit_act) {
+            b.states[cur_s].actions.push(exit_act)
+        }
+        return cur_s
+    }
+
+    if k =? 'if_' {
+        if not gen_needs_sm(s 0) {
+            b.states[cur_s].actions.push(GenAction[kind=0 node=s])
+            return cur_s
+        }
+        let then_s=sm_new_state(@b)
+        let join_s=sm_new_state(@b)
+        let has_else=nodes.ptr[s].c not=? 0
+        let else_s=if has_else {sm_new_state(@b)} else {join_s}
+        b.states[cur_s].term=2
+        b.states[cur_s].node=LGnWord(nodes.ptr[s].a)
+        b.states[cur_s].next_s=then_s
+        b.states[cur_s].alt_s=else_s
+        let then_end=sm_compile_stmt(@b then_s LGnWord(nodes.ptr[s].b))
+        if then_end >=? 0 {
+            b.states[then_end].term=1
+            b.states[then_end].next_s=join_s
+        }
+        if has_else {
+            let else_end=sm_compile_stmt(@b else_s LGnWord(nodes.ptr[s].c))
+            if else_end >=? 0 {
+                b.states[else_end].term=1
+                b.states[else_end].next_s=join_s
+            }
+            if then_end <? 0 and else_end <? 0 {return -1}
+        }
+        return join_s
+    }
+
+    if k =? 'iflet' {
+        if not gen_needs_sm(s 0) {
+            b.states[cur_s].actions.push(GenAction[kind=0 node=s])
+            return cur_s
+        }
+        let then_s=sm_new_state(@b)
+        let join_s=sm_new_state(@b)
+        let has_else=nodes.ptr[s].c not=? 0
+        let else_s=if has_else {sm_new_state(@b)} else {join_s}
+        b.states[cur_s].term=7
+        b.states[cur_s].node=s
+        b.states[cur_s].next_s=then_s
+        b.states[cur_s].alt_s=else_s
+        sm_push_scope(@b)
+        let bl=LGnWord(nodes.ptr[s].sym)
+        if b.lay.live_offs.has(bl) {b.scopes[b.scopes.length - 1].locals_.push(bl)}
+        let then_end=sm_compile_stmt(@b then_s LGnWord(nodes.ptr[s].b))
+        let exit_act=sm_pop_scope_action(@b)
+        if then_end >=? 0 {
+            if sm_has_exit(exit_act) {b.states[then_end].actions.push(exit_act)}
+            b.states[then_end].term=1
+            b.states[then_end].next_s=join_s
+        }
+        if has_else {
+            let else_end=sm_compile_stmt(@b else_s LGnWord(nodes.ptr[s].c))
+            if else_end >=? 0 {
+                b.states[else_end].term=1
+                b.states[else_end].next_s=join_s
+            }
+            if then_end <? 0 and else_end <? 0 {return -1}
+        }
+        return join_s
+    }
+
+    if k =? 'while_' {
+        if not gen_needs_sm(s 0) {
+            b.states[cur_s].actions.push(GenAction[kind=0 node=s])
+            return cur_s
+        }
+        let cond_s=sm_new_state(@b)
+        let body_s=sm_new_state(@b)
+        let after_s=sm_new_state(@b)
+        b.states[cur_s].term=1
+        b.states[cur_s].next_s=cond_s
+        if nodes.ptr[s].aux =? 1 {
+            b.states[cond_s].term=7
+            b.states[cond_s].node=s
+            b.states[cond_s].next_s=body_s
+            b.states[cond_s].alt_s=after_s
+        } else {
+            b.states[cond_s].term=2
+            b.states[cond_s].node=LGnWord(nodes.ptr[s].a)
+            b.states[cond_s].next_s=body_s
+            b.states[cond_s].alt_s=after_s
+        }
+        let sc_depth=b.scopes.length
+        b.sm_loops.push(GenSmLoop[brk_s=after_s cont_s=cond_s scope_depth=sc_depth])
+        sm_push_scope(@b)
+        if nodes.ptr[s].aux =? 1 {
+            let bl=LGnWord(nodes.ptr[s].sym)
+            if b.lay.live_offs.has(bl) {b.scopes[b.scopes.length - 1].locals_.push(bl)}
+        }
+        let body_end=sm_compile_stmt(@b body_s LGnWord(nodes.ptr[s].b))
+        let exit_act=sm_pop_scope_action(@b)
+        b.sm_loops.pop();
+        if body_end >=? 0 {
+            if sm_has_exit(exit_act) {b.states[body_end].actions.push(exit_act)}
+            b.states[body_end].term=1
+            b.states[body_end].next_s=cond_s
+        }
+        return after_s
+    }
+
+    if k =? 'for_' {
+        if not gen_needs_sm(s 0) {
+            b.states[cur_s].actions.push(GenAction[kind=0 node=s])
+            return cur_s
+        }
+        let check_s=sm_new_state(@b)
+        let body_s=sm_new_state(@b)
+        let step_s=sm_new_state(@b)
+        let after_s=sm_new_state(@b)
+        b.states[cur_s].term=9
+        b.states[cur_s].node=s
+        b.states[cur_s].next_s=check_s
+        b.states[check_s].term=10
+        b.states[check_s].node=s
+        b.states[check_s].next_s=body_s
+        b.states[check_s].alt_s=after_s
+        b.states[step_s].term=11
+        b.states[step_s].node=s
+        b.states[step_s].next_s=check_s
+
+        let sc_depth=b.scopes.length
+        b.sm_loops.push(GenSmLoop[brk_s=after_s cont_s=step_s scope_depth=sc_depth for_node=s])
+        sm_push_scope(@b)
+        let el_l=LGnWord(nodes.ptr[s].sym)
+        if el_l >? 0 and b.lay.live_offs.has(el_l) {b.scopes[b.scopes.length - 1].locals_.push(el_l)}
+        let body_end=sm_compile_stmt(@b body_s LGnWord(nodes.ptr[s].b))
+        let exit_act=sm_pop_scope_action(@b)
+        b.sm_loops.pop();
+        if body_end >=? 0 {
+            if sm_has_exit(exit_act) {b.states[body_end].actions.push(exit_act)}
+            b.states[body_end].term=1
+            b.states[body_end].next_s=step_s
+        }
+        # On exit of a for_ loop with a managed snapshot, drop the snapshot!
+        let fs=b.lay.for_slots[s]
+        if fs.snap_live_off >=? 0 {
+            # Insert a dedicated cleanup action at after_s? Put a special cleanup state!
+            let clean_s=sm_new_state(@b)
+            b.states[after_s].actions.push(GenAction[kind=4 node=s])
+            b.states[after_s].term=1
+            b.states[after_s].next_s=clean_s
+            return clean_s
+        }
+        return after_s
+    }
+
+    if k =? 'break_' or k =? 'continue_' {
+        let idx=b.sm_loops.length - 1 - LGnWord(nodes.ptr[s].ival)
+        let lp=b.sm_loops[idx]
+        let exit_act=sm_exit_to_depth(@b lp.scope_depth)
+        if sm_has_exit(exit_act) {b.states[cur_s].actions.push(exit_act)}
+        b.states[cur_s].term=1
+        b.states[cur_s].next_s=if k =? 'break_' {lp.brk_s} else {lp.cont_s}
+        return -1
+    }
+
+    b.states[cur_s].actions.push(GenAction[kind=0 node=s])
+    cur_s
+}
+
+sm_compile_match=(@b:GenBuilder cur_s:int64 m:LGnWord):>int64=>$unsafe {
+    let na=nkids(m)
+    let join_s=sm_new_state(@b)
+    let arm_states:array<int64>=[]
+    loop i in [0..na) {arm_states.push(sm_new_state(@b))}
+    b.states[cur_s].term=8
+    b.states[cur_s].node=m
+    b.states[cur_s].arm_states=arm_states
+    b.states[cur_s].alt_s=join_s
+    let hidden=LGnWord(nodes.ptr[m].sym)
+    let any_open=false
+    loop i in [0..na) {
+        let arm=kid(m i)
+        sm_push_scope(@b)
+        if hidden >? 0 and b.lay.live_offs.has(hidden) {b.scopes[b.scopes.length - 1].locals_.push(hidden)}
+        let end_s=sm_compile_stmt(@b arm_states[i] LGnWord(nodes.ptr[arm].b))
+        let exit_act=sm_pop_scope_action(@b)
+        if end_s >=? 0 {
+            if sm_has_exit(exit_act) {b.states[end_s].actions.push(exit_act)}
+            b.states[end_s].term=1
+            b.states[end_s].next_s=join_s
+            any_open=true
+        }
+    }
+    if not any_open {return -1}
+    join_s
+}
+
+# ---------------- IR Emission Helpers for Generator Frame ----------------
+gen_emit_drop_local=(l:LGnWord lay:GenLayout):>void=>$unsafe {
+    if not lay.live_offs.has(l) {return}
+    let loff=lay.live_offs[l]
+    let t=store_type(l)
+    iff(e_bin('ne' VI e_load(VI env_v loff 1) e_iconst(0)));
+    e_store(env_v loff e_iconst(0) 1);
+    drop_embedded(e_addi(env_v LGnWord(locals.ptr[l].env_off)) t);
+    endc();
+}
+
+gen_emit_run_defer=(d_body:LGnWord d_off:LGnWord):>void=>$unsafe {
+    iff(e_bin('ne' VI e_load(VI env_v d_off 1) e_iconst(0)));
+    e_store(env_v d_off e_iconst(0) 1);
+    scope_push();
+    gen_stmt(d_body);
+    scope_pop();
+    endc();
+}
+
+gen_emit_drop_for_snap=(fs:GenForSlot):>void=>$unsafe {
+    if fs.snap_live_off <? 0 {return}
+    iff(e_bin('ne' VI e_load(VI env_v fs.snap_live_off 1) e_iconst(0)));
+    e_store(env_v fs.snap_live_off e_iconst(0) 1);
+    if fs.is_math {
+        release(e_load(VI env_v fs.ctr_off 8) T_MATH_INT);
+        release(e_load(VI env_v fs.end_off 8) T_MATH_INT);
+        release(e_load(VI env_v fs.step_off 8) T_MATH_INT);
+        e_store(env_v fs.ctr_off e_iconst(0) 8);
+        e_store(env_v fs.end_off e_iconst(0) 8);
+        e_store(env_v fs.step_off e_iconst(0) 8);
+    } else {
+        drop_embedded(e_addi(env_v fs.snap_off) fs.snap_type);
+    }
+    endc();
+}
+
+# Full generator cleanup (used on normal finish, break $label, or_throw failure, and early drop_fn):
+# 1. Run active defers in reverse order (clearing each flag before running)
+# 2. Drop active delegated child generators in reverse order
+# 3. Drop live for-loop snapshots and live frame locals in reverse order
+# 4. Mark state = -1 (finished)
+gen_emit_full_cleanup=(lay:GenLayout):>void=>$unsafe {
+    let di=lay.defer_nodes.length - 1
+    loop di >=? 0 {
+        gen_emit_run_defer(lay.defer_nodes[di] lay.defer_flag_offs[di])
+        di -= 1
+    }
+    let ci=lay.child_list_offs.length - 1
+    loop ci >=? 0 {
+        let coff=lay.child_list_offs[ci]
+        let ct=lay.child_list_types[ci]
+        let ch=e_load(VI env_v coff ptr_size)
+        iff(e_bin('ne' VI ch e_iconst(0)));
+        e_store(env_v coff e_iconst(0) ptr_size);
+        release(ch ct);
+        endc();
+        ci -= 1
+    }
+    let si=lay.for_snaps.length - 1
+    loop si >=? 0 {
+        gen_emit_drop_for_snap(lay.for_snaps[si])
+        si -= 1
+    }
+    let li=lay.managed_locals.length - 1
+    loop li >=? 0 {
+        gen_emit_drop_local(lay.managed_locals[li] lay)
+        li -= 1
+    }
+    e_store(env_v lay.state_off e_iconst(-1) 8);
+}
+
+gen_emit_sm_vardecl=(s:LGnWord lay:GenLayout):>void=>$unsafe {
+    ir_set_pos(nodes.ptr[s].pos);
+    stmt_begin();
+    if nodes.ptr[s].nlist >? 0 {
+        let tt=prune(ntype(LGnWord(nodes.ptr[s].b)))
+        let val=gen_owned(LGnWord(nodes.ptr[s].b))
+        loop i in [0..LGnWord(types.ptr[tt].nargs)) {
+            let el=targ(tt i)
+            let id=kid(s i)
+            let ea=e_addi(val.v tuple_off(tt i))
+            if nodes.ptr[id].kind =? 'hole' {
+                drop_embedded(ea el);
+            } else {
+                let l=LGnWord(nodes.ptr[id].sym)
+                write_place(local_place(l true) el load_val(el ea 0));
+                if lay.live_offs.has(l) {e_store(env_v lay.live_offs[l] e_iconst(1) 1);}
+            }
+        }
+        stmt_end();
+        return
+    }
+    let l=LGnWord(nodes.ptr[s].sym)
+    let t=store_type(l)
+    let pl=local_place(l true)
+    if nodes.ptr[s].b not=? 0 {
+        let val=gen_owned(LGnWord(nodes.ptr[s].b))
+        write_place(pl t val.v);
+    } else {
+        e_zero(pl.v tsize(t));
+    }
+    if lay.live_offs.has(l) {e_store(env_v lay.live_offs[l] e_iconst(1) 1);}
+    stmt_end();
+}
+
+gen_emit_yield_into=(expr:LGnWord elem_t:LGnWord out_v:LGnWord):>void=>$unsafe {
+    stmt_begin();
+    let val=gen_owned(expr)
+    if vc(elem_t) =? VC_AGG {
+        e_copy(out_v val.v tsize(elem_t));
+    } else if vc(elem_t) not=? VC_VOID {
+        store_val(elem_t out_v 0 val.v);
+    }
+    stmt_end();
+}
+
+# Emit FOR_INIT for a yielding `for_` loop in the state machine.
+gen_emit_for_init=(s:LGnWord lay:GenLayout):>void=>$unsafe {
+    let fs=lay.for_slots[s]
+    let aux=fs.aux
+    stmt_begin();
+    if aux =? 0 {
+        let it=LGnWord(nodes.ptr[s].a)
+        let l=LGnWord(nodes.ptr[s].sym)
+        let lt=prune(LGnWord(locals.ptr[l].type))
+        if fs.is_math {
+            let start_v=gen_owned(LGnWord(nodes.ptr[it].a)).v
+            e_store(env_v fs.ctr_off start_v 8);
+            if nodes.ptr[it].b not=? 0 {
+                let end_v=gen_owned(LGnWord(nodes.ptr[it].b)).v
+                e_store(env_v fs.end_off end_v 8);
+            } else {
+                e_store(env_v fs.end_off e_iconst(0) 8);
+            }
+            if has_flag(it NF_STEP) {
+                let second_v=gen_expr(LGnWord(nodes.ptr[it].c)).v
+                let step_v=math_binary('minus' second_v e_load(VI env_v fs.ctr_off 8)).v
+                e_store(env_v fs.step_off step_v 8);
+            } else {
+                e_store(env_v fs.step_off math_word(e_iconst(1)).v 8);
+            }
+            e_store(env_v fs.snap_live_off e_iconst(1) 1);
+        } else {
+            let start_v=gen_expr(LGnWord(nodes.ptr[it].a)).v
+            e_store(env_v fs.ctr_off start_v 8);
+            if nodes.ptr[it].b =? 0 {
+                let bits=LGnWord(types.ptr[lt].bits)
+                if types.ptr[lt].sign {bits -= 1}
+                let maxv:LGnWord=-1
+                if bits <? 64 {maxv=(LGnWord(1) << bits) - 1}
+                e_store(env_v fs.end_off e_iconst(maxv) 8);
+            } else {
+                let end_v=gen_expr(LGnWord(nodes.ptr[it].b)).v
+                e_store(env_v fs.end_off end_v 8);
+            }
+            if has_flag(it NF_STEP) {
+                let second_v=gen_expr(LGnWord(nodes.ptr[it].c)).v
+                e_store(env_v fs.step_off e_bin('sub' VI second_v start_v) 8);
+            }
+        }
+    } else if aux =? 4 {
+        let r=gen_expr(LGnWord(nodes.ptr[s].a)).v
+        e_store(env_v fs.ctr_off e_load(VI r 0 8) 8);
+        e_store(env_v fs.end_off e_load(VI r 8 8) 8);
+    } else if aux =? 1 or aux =? 2 {
+        let st=fs.snap_type
+        let sv=gen_owned(LGnWord(nodes.ptr[s].a))
+        store_val(st env_v fs.snap_off sv.v);
+        if fs.snap_live_off >=? 0 {e_store(env_v fs.snap_live_off e_iconst(1) 1);}
+        e_store(env_v fs.idx_off e_iconst(0) 8);
+        let k=types.ptr[st].kind
+        let len_v:LGnWord=if k =? 'fixed' {e_iconst(fixed_len(st))} else {arr_len(load_val(st env_v fs.snap_off))}
+        e_store(env_v fs.len_off len_v 8);
+    } else if aux =? 3 {
+        let st=fs.snap_type
+        let sv=gen_owned(LGnWord(nodes.ptr[s].a))
+        store_val(st env_v fs.snap_off sv.v);
+        if fs.snap_live_off >=? 0 {e_store(env_v fs.snap_live_off e_iconst(1) 1);}
+        e_store(env_v fs.idx_off e_iconst(0) 8);
+        let mp=load_val(st env_v fs.snap_off)
+        let keys_arr=e_load(VI mp 0 ptr_size)
+        e_store(env_v fs.len_off arr_len(keys_arr) 8);
+    } else if aux =? 5 {
+        if nodes.ptr[s].c not=? 0 {
+            e_store(env_v fs.idx_off e_iconst(-1) 8);
+        }
+    }
+    stmt_end();
+}
+
+# Emit FOR_CHECK: branch to body_s if more items (binding loop variables), else to after_s.
+gen_emit_for_check=(s:LGnWord lay:GenLayout body_s:int64 after_s:int64 dispatch_lvl:int64):>void=>$unsafe {
+    let fs=lay.for_slots[s]
+    let aux=fs.aux
+    if aux =? 0 or aux =? 4 {
+        let l=LGnWord(nodes.ptr[s].sym)
+        let lt=prune(LGnWord(locals.ptr[l].type))
+        let ctr=e_load(VI env_v fs.ctr_off 8)
+        let endv=e_load(VI env_v fs.end_off 8)
+        let open_end=aux =? 0 and nodes.ptr[LGnWord(nodes.ptr[s].a)].b =? 0
+        let inclusive=aux =? 0 and has_flag(LGnWord(nodes.ptr[s].a) NF_INCLUSIVE)
+        if fs.is_math {
+            if not open_end {
+                let stv=e_load(VI env_v fs.step_off 8)
+                let up=math_compare('gt' stv math_word(e_iconst(0)).v)
+                let done=vreg(VI)
+                iff(up);
+                e_mov(done math_compare((if inclusive {'gt'} else {'ge'}) ctr endv));
+                els();
+                e_mov(done math_compare((if inclusive {'lt'} else {'le'}) ctr endv));
+                endc();
+                iff(done);
+                e_store(env_v lay.state_off e_iconst(after_s) 8);
+                br_to(dispatch_lvl);
+                endc();
+            }
+            retain(ctr T_MATH_INT);
+            write_place(local_place(l true) T_MATH_INT ctr);
+            if lay.live_offs.has(l) {e_store(env_v lay.live_offs[l] e_iconst(1) 1);}
+            e_store(env_v lay.state_off e_iconst(body_s) 8);
+            br_to(dispatch_lvl);
+            return
+        }
+        let signed=types.ptr[lt].sign
+        let done:LGnWord=0
+        if open_end {
+            done=e_iconst(0)
+        } else if aux =? 0 and has_flag(LGnWord(nodes.ptr[s].a) NF_STEP) {
+            let stv=e_load(VI env_v fs.step_off 8)
+            let pos_cmp=if inclusive {if signed {'gts'} else {'gtu'}} else {if signed {'ges'} else {'geu'}}
+            let neg_cmp=if inclusive {if signed {'lts'} else {'ltu'}} else {if signed {'les'} else {'leu'}}
+            done=vreg(VI)
+            iff(e_bin('ges' VI stv e_iconst(0)));
+            e_mov(done e_bin(pos_cmp VI ctr endv));
+            els();
+            e_mov(done e_bin(neg_cmp VI ctr endv));
+            endc();
+        } else {
+            let cmp=if inclusive {if signed {'gts'} else {'gtu'}} else {if signed {'ges'} else {'geu'}}
+            done=e_bin(cmp VI ctr endv)
+        }
+        iff(done);
+        e_store(env_v lay.state_off e_iconst(after_s) 8);
+        br_to(dispatch_lvl);
+        endc();
+        write_place(local_place(l true) lt ctr);
+        e_store(env_v lay.state_off e_iconst(body_s) 8);
+        br_to(dispatch_lvl);
+        return
+    }
+    if aux =? 1 or aux =? 2 {
+        let idx=e_load(VI env_v fs.idx_off 8)
+        let len_v=e_load(VI env_v fs.len_off 8)
+        iff(e_bin('ges' VI idx len_v));
+        e_store(env_v lay.state_off e_iconst(after_s) 8);
+        br_to(dispatch_lvl);
+        endc();
+        let idx_l=LGnWord(nodes.ptr[s].c)
+        if idx_l >? 0 {write_place(local_place(idx_l true) T_INT idx);}
+        let el_l=LGnWord(nodes.ptr[s].sym)
+        let et=prune(LGnWord(locals.ptr[el_l].type))
+        let st=fs.snap_type
+        let k=types.ptr[st].kind
+        let base:LGnWord=0
+        if k =? 'fixed' {base=e_addi(env_v fs.snap_off)}
+        else {
+            let hdr=load_val(st env_v fs.snap_off)
+            base=if k =? 'str_' {e_addi(hdr 16)} else {e_addi(hdr 24)}
+        }
+        let ea=e_bin('add' VI base e_bin('mul' VI idx e_iconst(tsize(et))))
+        let raw=load_val(et ea 0)
+        let owned_v=own(V(raw false) et)
+        write_place(local_place(el_l true) et owned_v.v);
+        if lay.live_offs.has(el_l) {e_store(env_v lay.live_offs[el_l] e_iconst(1) 1);}
+        e_store(env_v lay.state_off e_iconst(body_s) 8);
+        br_to(dispatch_lvl);
+        return
+    }
+    if aux =? 5 {
+        let el_l=LGnWord(nodes.ptr[s].sym)
+        let et=prune(LGnWord(locals.ptr[el_l].type))
+        stmt_begin();
+        let g_val=gen_expr(LGnWord(nodes.ptr[s].a))
+        let step_fn=e_load(VI g_val.v 0 ptr_size)
+        let out_addr=local_place(el_l true).v
+        let has=e_calli(step_fn [g_val.v out_addr] VI false)
+        stmt_end();
+        iff(e_bin('eq' VI has e_iconst(0)));
+        e_store(env_v lay.state_off e_iconst(after_s) 8);
+        br_to(dispatch_lvl);
+        endc();
+        if lay.live_offs.has(el_l) {e_store(env_v lay.live_offs[el_l] e_iconst(1) 1);}
+        let idx_l=LGnWord(nodes.ptr[s].c)
+        if idx_l >? 0 {
+            let next_i=e_bin('add' VI e_load(VI env_v fs.idx_off 8) e_iconst(1))
+            e_store(env_v fs.idx_off next_i 8);
+            write_place(local_place(idx_l true) T_INT next_i);
+        }
+        e_store(env_v lay.state_off e_iconst(body_s) 8);
+        br_to(dispatch_lvl);
+        return
+    }
+    fatal(nodes.ptr[s].pos "unsupported loop kind inside lazy generator")
+}
+
+gen_emit_for_step=(s:LGnWord lay:GenLayout check_s:int64 dispatch_lvl:int64):>void=>$unsafe {
+    let fs=lay.for_slots[s]
+    let aux=fs.aux
+    if aux =? 0 or aux =? 4 {
+        if fs.is_math {
+            let old_c=e_load(VI env_v fs.ctr_off 8)
+            let stv=e_load(VI env_v fs.step_off 8)
+            let next_c=math_binary('plus' old_c stv).v
+            e_store(env_v fs.ctr_off next_c 8);
+            release(old_c T_MATH_INT);
+        } else {
+            let step_v=if aux =? 0 and has_flag(LGnWord(nodes.ptr[s].a) NF_STEP) {e_load(VI env_v fs.step_off 8)} else {e_iconst(1)}
+            let next_c=e_bin('add' VI e_load(VI env_v fs.ctr_off 8) step_v)
+            e_store(env_v fs.ctr_off next_c 8);
+        }
+    } else if aux =? 1 or aux =? 2 or aux =? 3 {
+        let next_i=e_bin('add' VI e_load(VI env_v fs.idx_off 8) e_iconst(1))
+        e_store(env_v fs.idx_off next_i 8);
+    }
+    e_store(env_v lay.state_off e_iconst(check_s) 8);
+    br_to(dispatch_lvl);
+}
+
+# Lower the generator's step function: `(frame: *u8, out: *T) -> i64` (1 = yielded, 0 = done).
+helper_gen_step=(f:LGnWord gen_t:LGnWord):>void=>$unsafe {
+    let ps=helper_params(2)
+    ir.ret=VI
+    let frame=ps.ptr[0]
+    let out_v=ps.ptr[1]
+    let elem_t=prune(telem(gen_t))
+    let lay=gen_frame_layout(f)
+    cur_fn=f
+    env_v=frame
+
+    # Build the flat state graph from fns[f].body.
+    let b=GenBuilder[lay=lay]
+    let start_s=sm_new_state(@b)
+    sm_push_scope(@b)
+    let end_s=sm_compile_stmt(@b start_s LGnWord(fns.ptr[f].body))
+    b.scopes.pop();
+    if end_s >=? 0 {
+        b.states[end_s].term=0
+    }
+    let ns=b.states.length
+
+    # Fast exit if generator already finished (state < 0).
+    iff(e_bin('lts' VI e_load(VI frame lay.state_off 8) e_iconst(0)));
+    e_ret(e_iconst(0));
+    endc();
+
+    # Dispatch loop:
+    # blk (done_lvl) -> lop (dispatch_lvl) -> brtable over 0..ns-1
+    blk();
+    let done_lvl=ctl
+    lop();
+    let dispatch_lvl=ctl
+    blk();
+    let default_lvl=ctl
+    let state_lvls=fill(0 ns)
+    let si=ns - 1
+    loop si >=? 0 {
+        blk();
+        state_lvls[si]=ctl
+        si -= 1
+    }
+    let cur_state=e_load(VI frame lay.state_off 8)
+    let depths:array<int64>=[]
+    loop i in [0..ns) {depths.push(ctl - state_lvls[i])}
+    e_brtable(cur_state depths ctl - default_lvl);
+
+    loop i in [0..ns) {
+        endc();
+        let st=b.states[i]
+        loop act in st.actions {
+            if act.kind =? 0 {
+                scope_push();
+                gen_stmt(act.node);
+                scope_pop();
+            } else if act.kind =? 1 {
+                gen_emit_sm_vardecl(act.node lay)
+            } else if act.kind =? 2 {
+                let d_off=lay.defer_offs[act.node]
+                e_store(frame d_off e_iconst(1) 1);
+            } else if act.kind =? 3 {
+                let di=act.defers_run.length - 1
+                loop di >=? 0 {
+                    let dn=act.defers_run[di]
+                    gen_emit_run_defer(LGnWord(nodes.ptr[dn].a) lay.defer_offs[dn])
+                    di -= 1
+                }
+                let li=act.locals_drop.length - 1
+                loop li >=? 0 {
+                    gen_emit_drop_local(act.locals_drop[li] lay)
+                    li -= 1
+                }
+            } else if act.kind =? 4 {
+                gen_emit_drop_for_snap(lay.for_slots[act.node])
+            }
+        }
+        let term=st.term
+        if term =? 0 {
+            br_to(done_lvl);
+        } else if term =? 1 {
+            e_store(frame lay.state_off e_iconst(st.next_s) 8);
+            br_to(dispatch_lvl);
+        } else if term =? 2 {
+            stmt_begin();
+            let cv=gen_expr(st.node).v
+            stmt_end();
+            iff(cv);
+            e_store(frame lay.state_off e_iconst(st.next_s) 8);
+            els();
+            e_store(frame lay.state_off e_iconst(st.alt_s) 8);
+            endc();
+            br_to(dispatch_lvl);
+        } else if term =? 3 {
+            gen_emit_yield_into(st.node elem_t out_v)
+            e_store(frame lay.state_off e_iconst(st.next_s) 8);
+            e_ret(e_iconst(1));
+        } else if term =? 4 {
+            gen_emit_yield_into(st.node elem_t out_v)
+            gen_emit_full_cleanup(lay)
+            e_ret(e_iconst(1));
+        } else if term =? 5 {
+            let coff=lay.child_offs[st.node]
+            stmt_begin();
+            let cv=gen_owned(LGnWord(nodes.ptr[st.node].a))
+            e_store(frame coff cv.v ptr_size);
+            stmt_end();
+            e_store(frame lay.state_off e_iconst(st.next_s) 8);
+            br_to(dispatch_lvl);
+        } else if term =? 6 {
+            let coff=lay.child_offs[st.node]
+            let ct=prune(ntype(LGnWord(nodes.ptr[st.node].a)))
+            let ch=e_load(VI frame coff ptr_size)
+            let step_fn=e_load(VI ch 0 ptr_size)
+            let widen=LGnWord(nodes.ptr[st.node].aux2)
+            if widen =? 0 {
+                let has=e_calli(step_fn [ch out_v] VI false)
+                iff(e_bin('ne' VI has e_iconst(0)));
+                e_ret(e_iconst(1));
+                endc();
+            } else {
+                let cel=prune(telem(ct))
+                let tmp=new_slot(max(tsize(cel) 8) max(talign(cel) 8))
+                let has=e_calli(step_fn [ch e_slot(tmp)] VI false)
+                iff(e_bin('ne' VI has e_iconst(0)));
+                # Widening copy: currently supports union/opt widening or same-size copy.
+                if vc(cel) =? VC_AGG {e_copy(out_v e_slot(tmp) tsize(cel));}
+                else if vc(cel) not=? VC_VOID {store_val(cel out_v 0 load_val(cel e_slot(tmp) 0));}
+                e_ret(e_iconst(1));
+                endc();
+            }
+            e_store(frame coff e_iconst(0) ptr_size);
+            release(ch ct);
+            e_store(frame lay.state_off e_iconst(st.next_s) 8);
+            br_to(dispatch_lvl);
+        } else if term =? 7 {
+            let ifn=st.node
+            let bl=LGnWord(nodes.ptr[ifn].sym)
+            let ot=prune(ntype(LGnWord(nodes.ptr[ifn].a)))
+            let inner_t=prune(telem(ot))
+            stmt_begin();
+            let ov=gen_owned(LGnWord(nodes.ptr[ifn].a))
+            let has=opt_has(ov.v inner_t)
+            iff(has);
+            let inner_v=opt_value(ov.v inner_t)
+            let owned_v=own(V(inner_v false) inner_t)
+            write_place(local_place(bl true) inner_t owned_v.v);
+            if lay.live_offs.has(bl) {e_store(frame lay.live_offs[bl] e_iconst(1) 1);}
+            e_store(frame lay.state_off e_iconst(st.next_s) 8);
+            els();
+            e_store(frame lay.state_off e_iconst(st.alt_s) 8);
+            endc();
+            borrow(ov ot);
+            stmt_end();
+            br_to(dispatch_lvl);
+        } else if term =? 8 {
+            let m=st.node
+            let hidden=LGnWord(nodes.ptr[m].sym)
+            let mt=prune(ntype(LGnWord(nodes.ptr[m].a)))
+            stmt_begin();
+            let sv=gen_owned(LGnWord(nodes.ptr[m].a))
+            store_val(mt local_place(hidden true).v 0 sv.v);
+            if lay.live_offs.has(hidden) {e_store(frame lay.live_offs[hidden] e_iconst(1) 1);}
+            stmt_end();
+            e_store(frame lay.state_off e_iconst(st.alt_s) 8);
+            blk();
+            let mend=ctl
+            loop ai in [0..nkids(m)) {
+                let arm=kid(m ai)
+                loop ki in [0..nkids(arm)) {
+                    let ok=gen_match_test(kid(arm ki) mt local_place(hidden false).v)
+                    iff(ok);
+                    e_store(frame lay.state_off e_iconst(st.arm_states[ai]) 8);
+                    br_to(mend);
+                    endc();
+                }
+            }
+            endc();
+            br_to(dispatch_lvl);
+        } else if term =? 9 {
+            gen_emit_for_init(st.node lay)
+            e_store(frame lay.state_off e_iconst(st.next_s) 8);
+            br_to(dispatch_lvl);
+        } else if term =? 10 {
+            gen_emit_for_check(st.node lay st.next_s st.alt_s dispatch_lvl)
+        } else if term =? 11 {
+            gen_emit_for_step(st.node lay st.next_s dispatch_lvl)
+        }
+    }
+    # default block:
+    endc();
+    br_to(done_lvl);
+    # end lop:
+    endc();
+    # done_lvl:
+    endc();
+    gen_emit_full_cleanup(lay)
+    e_ret(e_iconst(0));
+}
+
+# Lower the generator's drop function: `(frame: *u8) -> void`.
+helper_gen_drop=(f:LGnWord gen_t:LGnWord):>void=>$unsafe {
+    let ps=helper_params(1)
+    let frame=ps.ptr[0]
+    let lay=gen_frame_layout(f)
+    cur_fn=f
+    env_v=frame
+
+    # If generator was not finished yet, unwind active defers, children, snapshots, and live locals.
+    iff(e_bin('ges' VI e_load(VI frame lay.state_off 8) e_iconst(0)));
+    gen_emit_full_cleanup(lay)
+    endc();
+
+    # Always drop captures in reverse order and free the heap frame.
+    let ci=lay.cap_locals.length - 1
+    loop ci >=? 0 {
+        let inn=lay.cap_locals[ci]
+        let t=store_type(inn)
+        if is_managed(t) {
+            if is_shared(inn) {
+                release(e_load(VI frame LGnWord(locals.ptr[inn].env_off) ptr_size) t);
+            } else {
+                drop_embedded(e_addi(frame LGnWord(locals.ptr[inn].env_off)) t);
+            }
+        }
+        ci -= 1
+    }
+    e_call1(rt("__free") frame -1);
+    e_ret(-1);
+}
+
+# Lower `loop x in g` and `loop i in 0.. and x in g` (`for_` with `aux == 5`).
+gen_for_generator=(s:LGnWord):>void=>$unsafe {
+    let el_l=LGnWord(nodes.ptr[s].sym)
+    let et=prune(LGnWord(locals.ptr[el_l].type))
+    let idx_l=LGnWord(nodes.ptr[s].c)
+    let out_slot=new_slot(max(tsize(et) 8) max(talign(et) 8))
+    if idx_l >? 0 {
+        zero_declare(idx_l);
+        write_place(local_place(idx_l true) T_INT e_iconst(-1));
+    }
+    blk();
+    let brk_lvl=ctl
+    lop();
+    let cont_lvl=ctl
+    stmt_begin();
+    let g_val=gen_expr(LGnWord(nodes.ptr[s].a))
+    let step_fn=e_load(VI g_val.v 0 ptr_size)
+    let has=e_calli(step_fn [g_val.v e_slot(out_slot)] VI false)
+    stmt_end();
+    iff(e_bin('eq' VI has e_iconst(0)));
+    br_to(brk_lvl);
+    endc();
+    if idx_l >? 0 {
+        let cur_i=read_place(local_place(idx_l false) T_INT)
+        write_place(local_place(idx_l true) T_INT e_bin('add' VI cur_i e_iconst(1)));
+    }
+    scope_push();
+    zero_declare(el_l);
+    if vc(et) =? VC_AGG {
+        e_copy(local_place(el_l true).v e_slot(out_slot) tsize(et));
+    } else if vc(et) not=? VC_VOID {
+        write_place(local_place(el_l true) et load_val(et e_slot(out_slot) 0));
+    }
+    scope_add_local(el_l true);
+    loops.push(LoopInfo[brk_lvl cont_lvl scope_locals.length - 1 0 0]);
+    gen_block_stmts(LGnWord(nodes.ptr[s].b));
+    loops.pop();
+    scope_pop();
+    br_to(cont_lvl);
+    endc();
+    endc();
+}
+
+# Combined-loop generator intrinsics (`IN.dewy_iter_done` and `IN.dewy_iter_value`):
+# Pulls into a stack `out_slot` keyed by the loop counter local `arg1` in `dewy_iter_done`,
+# and moves the pulled value out in `dewy_iter_value`.
+gen_comb_slot_for=(key_node:LGnWord et:LGnWord):>int64=>$unsafe {
+    if gen_comb_fn not=? cur_fn {
+        gen_comb_fn=cur_fn
+        gen_comb_slots.clear()
+    }
+    let key=if nodes.ptr[key_node].kind =? 'ident' and nodes.ptr[key_node].aux =? int32(1) {LGnWord(nodes.ptr[key_node].sym)} else {key_node}
+    if gen_comb_slots.has(key) {return gen_comb_slots[key]}
+    let sl=new_slot(max(tsize(et) 8) max(talign(et) 8))
+    gen_comb_slots[key]=sl
+    sl
+}
+
+gen_intrinsic_iter_done=(e:LGnWord arg_start:LGnWord):>Val=>$unsafe {
+    let gen_arg=LGnWord(kid(e 0))
+    let k_arg=LGnWord(kid(e 1))
+    let gt=prune(ntype(gen_arg))
+    let et=prune(telem(gt))
+    let out_slot=gen_comb_slot_for(k_arg et)
+    let g_val=gen_expr(gen_arg)
+    let step_fn=e_load(VI g_val.v 0 ptr_size)
+    let has=e_calli(step_fn [g_val.v e_slot(out_slot)] VI false)
+    V(e_bin('eq' VI has e_iconst(0)) false)
+}
+
+gen_intrinsic_iter_value=(e:LGnWord arg_start:LGnWord):>Val=>$unsafe {
+    let gen_arg=LGnWord(kid(e 0))
+    let k_arg=LGnWord(kid(e 1))
+    let gt=prune(ntype(gen_arg))
+    let et=prune(telem(gt))
+    let out_slot=gen_comb_slot_for(k_arg et)
+    if vc(et) =? VC_AGG {
+        let s=new_temp(et)
+        e_copy(e_slot(s) e_slot(out_slot) tsize(et));
+        return Val[e_slot(s) true s]
+    }
+    if vc(et) =? VC_VOID {return V(-1 false)}
+    V(load_val(et e_slot(out_slot) 0) true)
+}

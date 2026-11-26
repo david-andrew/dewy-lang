@@ -356,7 +356,7 @@ has_call=(n:LAWord):>bool=>$unsafe {
     if n <=? 0 {return false}
     let k=nodes.ptr[n].kind
     if k =? 'call' or (k =? 'pair' and nodes.ptr[n].sym >? 0) {return true}
-    if k =? 'lambda' {return false}
+    if k =? 'lambda' or k =? 'lazy_' {return false}
     let child_a:LAWord=LAWord(nodes.ptr[n].a)
     let child_b:LAWord=LAWord(nodes.ptr[n].b)
     # (kid_c and kid_d, with the kind in hand)
@@ -378,7 +378,7 @@ assign_rhs_effects=(n:LAWord):>bool=>$unsafe {
     if n <=? 0 {return false}
     let k=nodes.ptr[n].kind
     if k =? 'call' or (k =? 'pair' and nodes.ptr[n].sym >? 0) or k =? 'assign' or k =? 'block' or k =? 'for_' or k =? 'while_' {return true}
-    if k =? 'lambda' {return false}
+    if k =? 'lambda' or k =? 'lazy_' {return false}
     if k =? 'intrinsic' {
         let id=nodes.ptr[n].aux as IN
         if id =? IN.fmt_struct or id =? IN.json_fields or id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend {return true}
@@ -469,7 +469,7 @@ write_overlaps=(target:LAWord root:LAWord place:LAWord):>bool=>$unsafe {
 may_write_root=(n:LAWord rn:LAWord place:LAWord=0):>bool=>$unsafe {
     if n <=? 0 {return false}
     let k=nodes.ptr[n].kind
-    if k =? 'lambda' {return false}
+    if k =? 'lambda' or k =? 'lazy_' {return false}
     let glob=nodes.ptr[rn].aux =? int32(2)
     let mutparam=not glob and LAWord(locals.ptr[LAWord(nodes.ptr[rn].sym)].flags) & LF_MUTPARAM not=? 0
     if not mwr_direct and (glob or mutparam) {
@@ -533,7 +533,7 @@ may_write_root=(n:LAWord rn:LAWord place:LAWord=0):>bool=>$unsafe {
 calls_leave=(n:LAWord rn:LAWord written:bool):>bool=>$unsafe {
     if n <=? 0 {return true}
     let k=nodes.ptr[n].kind
-    if k =? 'lambda' {return true}
+    if k =? 'lambda' or k =? 'lazy_' {return true}
     loop f in value_helper_calls(n) {
         let w=fn_writes(f)
         if w.all {return false}
@@ -662,7 +662,7 @@ fw_global=(n:LAWord @w:FnWrites):>void=>$unsafe {
 fw_scan=(n:LAWord @w:FnWrites):>void=>$unsafe {
     if n <=? 0 {return}
     let k=nodes[n].kind
-    if k =? 'lambda' {return}
+    if k =? 'lambda' or k =? 'lazy_' {return}
     if (k =? 'binary' and nodes[n].aux =? int32(1)) or (k =? 'intrinsic' and nodes[n].aux =? int32(24)) {
         loop f in value_helper_calls(n) {
             if not w.calls.contains(f) {w.calls.push(f);}
@@ -737,7 +737,7 @@ fr_root=(n:LAWord @out:array<int64>):>void=>$unsafe {
 fr_scan=(n:LAWord @out:array<int64>):>void=>$unsafe {
     if n <=? 0 {return}
     let k=nodes.ptr[n].kind
-    if k =? 'lambda' {return}
+    if k =? 'lambda' or k =? 'lazy_' {return}
     if k =? 'assign' {
         # (a whole value replaced, not an element's field: g.enemies = [], g = Game())
         let t:LAWord=LAWord(nodes.ptr[n].a)
@@ -772,7 +772,7 @@ lm_resizing_call=(n:LAWord g:LAWord):>LAWord=>$unsafe {
         if fn_resizes(called).contains(g) {return n}
     }
     let k=nodes.ptr[n].kind
-    if k =? 'lambda' {return 0}
+    if k =? 'lambda' or k =? 'lazy_' {return 0}
     if k =? 'call' and LAWord(nodes.ptr[n].aux) =? 0 and nodes.ptr[n].sym >? 0 and fn_resizes(LAWord(nodes.ptr[n].sym)).contains(g) {return n}
     let r=lm_resizing_call(LAWord(nodes.ptr[n].a) g)
     if r =? 0 {r=lm_resizing_call(LAWord(nodes.ptr[n].b) g)}
@@ -851,7 +851,7 @@ path_within=(p:LAWord k:LAWord):>bool=>$unsafe {
 lm_change_at=(n:LAWord key:LAWord):>LAWord=>$unsafe {
     if n =? 0 {return 0}
     let k=nodes.ptr[n].kind
-    if k =? 'lambda' {return 0}
+    if k =? 'lambda' or k =? 'lazy_' {return 0}
     if k =? 'assign' {
         let tk=lpath_key(LAWord(nodes.ptr[n].a))
         if tk not=? 0 and path_within(key tk) {return nodes.ptr[n].pos}

@@ -75,7 +75,7 @@ PARTIAL = set(COMPARISONS) | {'is_type', 'isnt_type', 'contains', 'not_contains'
 CHAIN = {'lt': 1, 'le': 1, 'gt': -1, 'ge': -1, 'eq': 0}
 CLOSERS = {'rparen', 'rbrack', 'rbrace', 'rangle', 'shr', 'kw_else', 'semi', 'comma'}
 STATEMENTS = {'lbrace', 'kw_let', 'kw_const', 'kw_return', 'kw_break', 'kw_continue', 'kw_if', 'kw_loop',
-              'kw_parallel', 'kw_match'}
+              'kw_parallel', 'kw_match', 'kw_lazy', 'kw_defer'}
 FORMS = {'assert': 1, 'runtime_assert': 1, 'expect': 1, 'unsafe_assume': 1, 'fail': 2, 'breakpoint': 3, 'lend': 4,
          'allocator': 5, 'unsafe': 6, 'warn_if': 7}
 DESIGNED = {'abstract', 'field', 'lend', 'no_prelude', 'proof', 'unsafe_assume', '__copy__', '__drop__', '__move__', '__consume__'}

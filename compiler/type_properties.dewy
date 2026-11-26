@@ -83,7 +83,7 @@ tp_is_managed=(t0:PWord):>bool=>$unsafe {
     }
     if tp_types[0][t].rep =? 'tagged_int' {return true}
     match k {
-        <'str_'|'array'|'fn_'|'polyfn'|'callable'|'box'> => true
+        <'str_'|'array'|'fn_'|'polyfn'|'callable'|'box'|'generator'> => true
         <'struct_'|'enum_'|'tuple'|'opt'|'fixed'> => {
             let f=PWord(tp_types[0][t].flags)
             if f & TF_LAID_OUT not=? 0 {return f & TF_MANAGED not=? 0}
@@ -98,7 +98,7 @@ tp_is_managed=(t0:PWord):>bool=>$unsafe {
 tp_plain_problem=(t0:PWord):>string=>$unsafe {
     let t=tp_base(t0)
     let k=tp_inputs[0].types[0].ptr[t].kind
-    if k =? 'str_' or k =? 'array' or k =? 'fn_' or k =? 'polyfn' or k =? 'ptr' or k =? 'cfn' or k =? 'null_' {return tp_type_string(t)}
+    if k =? 'str_' or k =? 'array' or k =? 'fn_' or k =? 'polyfn' or k =? 'ptr' or k =? 'cfn' or k =? 'null_' or k =? 'generator' {return tp_type_string(t)}
     if k =? 'opt' or k =? 'fixed' {return tp_plain_problem(PWord(tp_inputs[0].types[0].ptr[t].elem))}
     if k =? 'tuple' {
         loop i in [0..PWord(tp_inputs[0].types[0].ptr[t].nargs)) {

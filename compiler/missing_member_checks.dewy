@@ -121,6 +121,9 @@ member_missing=(n:int64 bt:int64 expected:int64 @bypass:bool):>int64=>$unsafe {
             }
             fatal(nodes.ptr[n].pos "{dt(bt)} has no field '{name_of(fname)}' (it is one of its members: find out which first, with {jd(nodes.ptr[n].pos "`match x:` and an arm for each, or `if x is ...:`" "`match x \{ ... }` and an arm for each, or `if x is? ... \{ }`")})")
         }
+        if bk =? 'generator' and name_of(fname) =? "next" {
+            fatal(nodes.ptr[n].pos "a generator has no `.next` member in v1 (not decided yet): pull from it with a loop (`loop x in g \{ ... break }`) or collect with `[g...]`")
+        }
         if is_map_type(bt) {fatal(nodes.ptr[n].pos "{dt(bt)} has no field '{name_of(fname)}' (a map's entries are `m[\"{name_of(fname)}\"]`; for fields by name, make a struct)")}
         # (an element of enemies = [] read before anything checked so far pushed one)
         loop g in open_globals {

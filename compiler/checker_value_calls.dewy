@@ -37,6 +37,7 @@ from p"util.jo" import (name_of)
 from p"poly_closure.jo" import (poly_families)
 from p"refine_metadata.dewy" import (representation_type str_set_of)
 from p"checker_values.dewy" import (values_arity values_candidate values_count values_flatten values_parts values_record values_simple)
+from p"checker_generators.dewy" import (gen_spread_fresh gen_spread_parts)
 from p"effect_contracts.dewy" import (callable_base effect_generic_argument)
 # Demand-driven call expansion; retain arena indices across checker services.
 VCWord:type=int64<overflow='wrap'>
@@ -112,6 +113,7 @@ values_expand=(items0:array<int64> @pre:array<int64> call:int64):>array<int64>=>
                     k=1
                 }
             }
+            else if types.ptr[t].kind =? 'generator' {k=gen_spread_fresh(items.ptr[i] call)}
             else if types.ptr[t].kind =? 'struct_' and not is_map_type(t) {values_expand_error0(c)}
             else {values_expand_error1(c t)}
             info.ptr[i].count = k
@@ -207,6 +209,10 @@ values_expand=(items0:array<int64> @pre:array<int64> call:int64):>array<int64>=>
 values_spread_parts=(c:int64 k:int64 @pre:array<int64> @out:array<int64>):>void=>$unsafe {
     let pos=nodes.ptr[c].pos
     let t:VCWord=prune(ntype(c))
+    if types.ptr[t].kind =? 'generator' {
+        gen_spread_parts(c k @pre @out)
+        return
+    }
     let src:VCWord=0
     if nodes.ptr[c].kind =? 'ident' and nodes.ptr[c].aux =? 1 {src=VCWord(nodes.ptr[c].sym)}
     else {

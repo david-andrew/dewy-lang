@@ -8,6 +8,7 @@ from p"expression_types.dewy" import (ntype)
 from p"checked_expression_nodes.dewy" import (type_node_of)
 
 from p"error_ops.dewy" import (check_propagate)
+from p"checker_generators.dewy" import (check_lazy gen_check_fail_yield)
 from p"ast.jo" import (NF_BROADCAST NF_CABI NF_CHECKED NF_COMPREHENSION NF_MUT NF_SPREAD TUPLE_VALUES add_flag clear_flag has_flag kid kids mk nkids nodes set_kid set_list)
 from p"check.jo" import (FK_LAMBDA assign_root fns spread_calls syms target_arm64 target_wasm)
 from p"checker_node_marks.dewy" import (node_mark)
@@ -259,6 +260,8 @@ expr_other=(n:int64 expected:int64):>int64=>$unsafe {
         return expected
     }
     if k =? 'propagate' {return check_propagate(n expected)}
+    if k =? 'lazy_' {return check_lazy(n expected)}
+    if k =? 'yield_' and nodes.ptr[n].aux =? 2 {return gen_check_fail_yield(n)}
     if k =? 'unit_lit' {
         return quantity_constant(n nodes.ptr[n].ival ValueHookWord(nodes.ptr[n].aux) ValueHookWord(nodes.ptr[n].aux2) expected)
     }

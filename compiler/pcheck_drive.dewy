@@ -3,7 +3,7 @@ $runtime_checks
 from p"@lib/core/rt.jo" import (__olen __write_fd)
 from p"@lib/core/os.jo" import (__zstr env eprint exit)
 from p"ast.jo" import (NF_EXTERN has_flag kid kid2 nkids nkids2 nodes)
-from p"check.jo" import (FK_LAMBDA FK_NORMAL FK_PARTIAL check_all fns global_read globals modules open_globals target_arm64 target_macos target_wasm target_windows test_mode watch_build)
+from p"check.jo" import (FK_GENERATOR FK_LAMBDA FK_NORMAL FK_PARTIAL check_all fns global_read globals modules open_globals target_arm64 target_macos target_wasm target_windows test_mode watch_build)
 from p"checks_thin.dewy" import (check_fn_body)
 from p"comptime.jo" import (ct_values)
 from p"directive_ops.dewy" import (directives_after_facts)
@@ -52,7 +52,7 @@ pc_features=():>bool=>{
     if (fact_policy not=? 'RuntimeAllowed' and not pc_static()) or effects_active or effect_policy.prohibitions not=? 0 or refine_active or proof_active or result_active or ownership_decls.length not=? 0 or loan_owners.length not=? 0 or fact_requests.length not=? 0 or refine_requests.length not=? 0 or proof_calls.length not=? 0 or poly_families.length >? 1 {return false}
     if dir_copies_any or dir_rows_any {return false}
     loop f in fns {
-        if f.kind =? FK_LAMBDA or f.kind =? FK_PARTIAL or f.parallel_api or f.deterministic {return false}
+        if f.kind =? FK_LAMBDA or f.kind =? FK_PARTIAL or f.kind =? FK_GENERATOR or f.parallel_api or f.deterministic {return false}
     }
     true
 }

@@ -36,14 +36,14 @@ load_module=(path:string is_prelude:bool origin:ModuleLoadWord):>ModuleLoadWord=
     let mi=ModuleLoadWord(modules.length) - 1
     module_added(mi)
     module_by_path[key]=mi
-    let lazy = @p_lazy
-    lazy=is_prelude and not ide_on
+    let lazy_mode = @p_lazy
+    lazy_mode=is_prelude and not ide_on
     if pl_on {pl_files.push(fi)}
     # Charge parsing to frontend work even for a module discovered by the checker.
     let previous_bucket=ic_mod(IC_LOAD mi)
     let decls=source_declarations(fi)
     ic_restore(previous_bucket)
-    lazy=false
+    lazy_mode=false
     modules[mi].decls=decls
     mi
 }

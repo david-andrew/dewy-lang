@@ -25,7 +25,7 @@ from p"ownership_lower.dewy" import (owner_drop owner_element_live owner_forget_
 from p"ownership_types.dewy" import (ownership_copyable ownership_type)
 from p"facts.jo" import (positive_epoch)
 from p"units.jo" import (quantity_base)
-from p"ir_builders.dewy" import (e_addi e_bin e_block e_br e_brif e_call0 e_call1 e_call2 e_call3 e_copy e_else e_end e_fconst e_iconst e_if e_load e_loop e_mov e_slot e_store e_un e_zero emit is_kv kv_of new_slot vreg)
+from p"ir_builders.dewy" import (e_addi e_bin e_block e_br e_brif e_call0 e_call1 e_call2 e_call3 e_calli e_copy e_else e_end e_fconst e_iconst e_if e_load e_loop e_mov e_slot e_store e_un e_zero emit is_kv kv_of new_slot vreg)
 from p"math_ops.dewy" import (math_payload_type math_tag)
 # Value storage, lifetime and structured control; state stays in lower.jo.
 LSWord:type=int64<overflow='wrap'>
@@ -156,6 +156,10 @@ static_datum=(v:LSWord):>bool=>$unsafe {
 retain=(v:LSWord t0:LSWord):>void=>$unsafe {
     if static_datum(v) {return}
     let t=quantity_base(t0)
+    if types.ptr[t].kind =? 'generator' {
+        fatal(ir_pos "cannot copy a generator ({dt(t)}): generators are move-only")
+        return
+    }
     if math_optional(t) {
         retain(e_bin('xor' VI v e_iconst(1)) T_MATH_INT);
         return
@@ -240,6 +244,13 @@ release_element=(v:LSWord t:LSWord):>void=>$unsafe {
 }
 release=(v:LSWord t0:LSWord):>void=>$unsafe {
     let t=quantity_base(t0)
+    if types.ptr[t].kind =? 'generator' {
+        iff(e_bin('ne' VI v e_iconst(0)));
+        let df=e_load(VI v ptr_size ptr_size)
+        e_calli(df [v] -1 false);
+        endc();
+        return
+    }
     if math_optional(t) {
         release(e_bin('xor' VI v e_iconst(1)) T_MATH_INT);
         return

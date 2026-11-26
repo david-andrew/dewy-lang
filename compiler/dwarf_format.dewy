@@ -834,7 +834,7 @@ dw_type_die=(t0:DWord):>void=>$unsafe {
         dw_member("env"  DW_VOIDP  8)
         dw_tb.push(0)
     }
-    else if k =? 'secret' {
+    else if k =? 'secret' or k =? 'generator' {
         # (a secret: its bytes are not described, so a debugger shows none of them; lib/debug's
         # printers show `<redacted>`)
         dw_tb.push(17)

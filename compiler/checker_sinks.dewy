@@ -4,7 +4,8 @@ from p"coercion_queries.dewy" import (can_coerce)
 from p"expression_types.dewy" import (ntype)
 from p"checked_expression_nodes.dewy" import (capture_value mk_ident_local type_node_of)
 
-from p"check.jo" import (LF_QUIET SINK_ARM SINK_BIND SINK_BODY SINK_COLLECTOR SINK_NONE SINK_ONE SINK_VOID ctxs cx fns locals loop_serials sink_arm_next sink_bind_expect sink_body_mode sink_fn sink_no_tuple sink_pack_hit sink_pack_site sink_pending sink_pfinal sink_splice sink_want_elem sink_want_n sinks spread_calls)
+from p"check.jo" import (LF_QUIET SINK_ARM SINK_BIND SINK_BODY SINK_COLLECTOR SINK_GENERATOR SINK_NONE SINK_ONE SINK_VOID ctxs cx fns locals loop_serials sink_arm_next sink_bind_expect sink_body_mode sink_fn sink_no_tuple sink_pack_hit sink_pack_site sink_pending sink_pfinal sink_splice sink_want_elem sink_want_n sinks spread_calls)
+from p"checker_generators.dewy" import (gen_express)
 from p"checker_node_marks.dewy" import (node_marked)
 from p"checker_body_end.dewy" import (union_has_void)
 from p"checks_thin.dewy" import (check_stmt has_value_return pack_result_count sink_error0 sink_error1 sink_error2 sink_error3)
@@ -187,6 +188,10 @@ sink_express=(s:int64 t:int64 pack:bool final:bool):>void=>$unsafe {
     if mode =? SINK_VOID {sink_void_error(s t)}
     if mode =? SINK_ONE {
         sink_error1(v)
+    }
+    if mode =? SINK_GENERATOR {
+        gen_express(s t pack)
+        return
     }
     if mode =? SINK_COLLECTOR {
         if sinks.ptr[i].acc =? 0 {sinks.ptr[i].acc = SNWord(nodes.ptr[kid(SNWord(sinks.ptr[i].block) 0)].sym)}

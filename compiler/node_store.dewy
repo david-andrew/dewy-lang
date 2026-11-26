@@ -30,6 +30,8 @@ $runtime_checks
 #   pseq: Dewy sequence pattern (p q r): kids are the element patterns
 #   parallel_region: a: checked library call; retains the scoped fork/join boundary
 #   new_axis: Dewy xs[new ..]: a is the receiver, kids the entries (`new` is the ident $new)
+#   lazy_: Dewy lazy expr: a is body block, sval optional label, sym FnInst, aux flags, aux2 exact count
+#   yield_: checked generator step inside lazy_: a is expr, aux 0 value, 1 delegate, 2 or_throw failure
 NK:type='nil' |
     'int_lit' | 'float_lit' | 'str_lit' | 'bool_lit' | 'none_lit' | 'null_lit' | 'ident' | 'field' |
     'dotname' | 'call' | 'index' | 'unary' | 'binary' | 'and_' | 'or_' | 'not_' |
@@ -44,7 +46,7 @@ NK:type='nil' |
     'pwild' | 'plit' | 'prange' | 'pvariant' |
     'tunion' | 'istype' | 'loopx' | 'lhead' | 'narrow' | 'typealias' | 'ptype' | 'record_lit' |
     'matrix' | 'trecord' | 'propagate' | 'unit_lit' | 'tquantity' | 'reflect_scope' | 'record_loop' | 'trefined' |
-    'typeapply' | 'pshape' | 'pseq' | 'parallel_region' | 'new_axis'
+    'typeapply' | 'pshape' | 'pseq' | 'parallel_region' | 'new_axis' | 'lazy_' | 'yield_'
 
 Node:type=[
     kind:NK='nil'

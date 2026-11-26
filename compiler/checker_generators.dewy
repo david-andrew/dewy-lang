@@ -1,0 +1,1071 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_CHECKED NF_COMPREHENSION NF_DISCARD NF_LITERAL NF_LOOP_SETUP NF_MUT NF_SOA NF_SPREAD NF_SQUOTE NF_STMT NF_UNSCOPED TUPLE_VALUES add_flag clear_flag has_flag kid kids mk nkids nodes set_kid set_list)
+from p"check.jo" import (FK_GENERATOR LF_ADDR LF_ALIAS LF_ASSIGNED LF_CAPTURED LF_DECL LF_QUIET SINK_GENERATOR check_scopes ctxs cx fns locals loop_serial_next loop_serials sink_body_mode sink_fn sinks throwing_iters)
+from p"checker_block_entries.dewy" import (check_block)
+from p"checker_contexts.dewy" import (cur_mod)
+from p"checker_expr.dewy" import (check_expr)
+from p"checker_loops.dewy" import (xb_enter xb_leave)
+from p"checker_resolve.dewy" import (ct_resolve_family)
+from p"checker_scope_symbols.dewy" import (new_local scope_mark scope_reset)
+from p"checker_state.dewy" import (FnCtx live_body_global_mod live_body_indexes live_body_user_globals)
+from p"checker_tree_queries.dewy" import (place_root)
+from p"checker_values.dewy" import (values_parts)
+from p"checked_expression_nodes.dewy" import (capture_value mk_ident_local type_node_of)
+from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_int bc_let bc_stmt)
+from p"checks_thin.dewy" import (check_stmt new_inst zonk_tree)
+from p"checks_thin_expr.dewy" import (ce_expected ce_finish)
+from p"coerce_expression.dewy" import (coerce)
+from p"coercion_queries.dewy" import (can_coerce)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"error_ops.dewy" import (exception_join exception_member value_members)
+from p"expr.jo" import (IN bc_count last_checked)
+from p"expression_types.dewy" import (ntype)
+from p"literal_context.dewy" import (is_lit lit_default)
+from p"sibling_types.jo" import (sibling_block sibling_index)
+from p"types.jo" import (T_BOOL T_INT T_NEVER T_NONE T_VOID fields has_var is_union prune structs targ telem tkind type_eq types union_members variants)
+from p"type_ops.dewy" import (dt is_values mk_generator mk_union mk_var unify zonk)
+from p"util.jo" import (intern name_of)
+
+GenWord:type=int64<overflow='wrap'>
+GenI32:type=int32<overflow='wrap'>
+
+GenFrame:type=[
+    inst:int64=0
+    body:int64=0
+    expected_elem:int64=0
+    want_values:bool=false
+    label:int64=0
+    has_loop_label:bool=false
+    start_loops:int64=0
+    yields:array<int64>=[]
+    yield_types:array<int64>=[]
+    yield_kinds:array<int64>=[]
+    straight:bool=true
+    exact_count:int64=0
+]
+
+let gen_frames:array<GenFrame>=[]
+let gen_spread_stmts:dict<int64 bool>=dict<int64 bool>()
+let gen_local_fresh:dict<int64 array<int64>>=dict<int64 array<int64>>()
+let gen_iter_throwing:dict<int64 int64>=dict<int64 int64>()
+let gen_iter_aliases:dict<int64 array<int64>>=dict<int64 array<int64>>()
+let gen_type_has_cache:array<uint8>=[]
+let gen_last_nodes_len:int64=0
+let gen_last_types_len:int64=0
+
+gen_maybe_reset=():>void=>{
+    if nodes.length <? gen_last_nodes_len {
+        gen_frames=[]
+        gen_spread_stmts.clear()
+        gen_local_fresh.clear()
+        gen_iter_throwing.clear()
+        gen_iter_aliases.clear()
+    }
+    if types.length <? gen_last_types_len {
+        gen_type_has_cache.clear()
+    }
+    gen_last_nodes_len=nodes.length
+    gen_last_types_len=types.length
+}
+
+gen_in_lazy=():>bool=>{
+    gen_frames.length >? 0 and cx >=? 0 and fns[GenWord(ctxs[cx].inst)].kind =? FK_GENERATOR
+}
+
+# Whether type t is or contains TK.generator (cached per type ID, O(1) amortized).
+gen_type_contains=(t0:GenWord):>bool=>$unsafe {
+    if types.length <? gen_last_types_len {gen_type_has_cache.clear()}
+    gen_last_types_len=types.length
+    let t=prune(t0)
+    if t <=? 0 or t >=? types.length {return false}
+    if t <? gen_type_has_cache.length {
+        let c=gen_type_has_cache.ptr[t]
+        if c not=? uint8(0) {return c =? uint8(3)}
+    } else {
+        gen_type_has_cache.resize(max(t + 1 types.length) + 64)
+    }
+    # Mark in-progress (1) to break recursive struct/enum cycles safely.
+    gen_type_has_cache.ptr[t]=uint8(1)
+    let k=types.ptr[t].kind
+    let has=k =? 'generator'
+    if not has {
+        if k =? 'array' or k =? 'fixed' or k =? 'opt' or k =? 'box' or k =? 'secret' or k =? 'refined' or k =? 'quantity' {
+            has=gen_type_contains(GenWord(types.ptr[t].elem))
+        } else if k =? 'tuple' {
+            loop i in [0..GenWord(types.ptr[t].nargs)) {
+                if gen_type_contains(targ(t i)) {has=true; break}
+            }
+        } else if k =? 'struct_' {
+            let si=GenWord(types.ptr[t].st)
+            loop i in [0..GenWord(structs.ptr[si].nfields)) {
+                let ft=GenWord(fields.ptr[GenWord(structs.ptr[si].fields) + i].type)
+                if gen_type_contains(ft) {has=true; break}
+            }
+        } else if k =? 'enum_' {
+            let si=GenWord(types.ptr[t].st)
+            loop v in [0..GenWord(structs.ptr[si].nvariants)) {
+                let vi=GenWord(structs.ptr[si].variants) + v
+                loop i in [0..GenWord(variants.ptr[vi].nfields)) {
+                    let ft=GenWord(fields.ptr[GenWord(variants.ptr[vi].fields) + i].type)
+                    if gen_type_contains(ft) {has=true; break}
+                }
+                if has {break}
+            }
+        }
+    }
+    if t >=? gen_type_has_cache.length {gen_type_has_cache.resize(max(t + 1 types.length) + 64)}
+    gen_type_has_cache.ptr[t]=if has {uint8(3)} else {uint8(2)}
+    has
+}
+
+# Scan a defer body inside a lazy generator to reject fallible/escaping constructs.
+gen_scan_defer=(n:GenWord loop_depth:GenWord):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'lazy_' {return}
+    if k =? 'return_' {fatal(nodes.ptr[n].pos "'return' is not allowed inside 'defer' in a lazy generator")}
+    if k =? 'propagate' {fatal(nodes.ptr[n].pos "cleanup inside 'defer' in a lazy generator cannot fail (fallible generator cleanup is not decided yet)")}
+    if (k =? 'break_' or k =? 'continue_') and loop_depth =? 0 {
+        fatal(nodes.ptr[n].pos "cannot jump out of 'defer' inside a lazy generator")
+    }
+    let next_depth=if k =? 'while_' or k =? 'for_' {loop_depth + 1} else {loop_depth}
+    if nodes.ptr[n].a not=? 0 {gen_scan_defer(GenWord(nodes.ptr[n].a) next_depth)}
+    if nodes.ptr[n].b not=? 0 {gen_scan_defer(GenWord(nodes.ptr[n].b) next_depth)}
+    if nodes.ptr[n].c not=? 0 {gen_scan_defer(GenWord(nodes.ptr[n].c) next_depth)}
+    loop i in [0..nkids(n)) {gen_scan_defer(kid(n i) next_depth)}
+}
+
+# After checking a lazy body, verify that no defer body leaves an unhandled failure type
+# (fallible cleanup inside generators is undecided, D40 Q1).
+gen_check_defers_after=(n:GenWord in_defer:bool):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'lazy_' {return}
+    if k =? 'defer_' {
+        gen_check_defers_after(GenWord(nodes.ptr[n].a) true)
+        return
+    }
+    if in_defer and k =? 'exprstmt' {
+        let e=GenWord(nodes.ptr[n].a)
+        if e not=? 0 and nodes.ptr[e].type not=? 0 {
+            let t=prune(ntype(e))
+            if is_union(t) {
+                loop m in union_members(t) {
+                    if m not=? T_NONE and exception_member(m) {
+                        fatal(nodes.ptr[e].pos "cleanup inside 'defer' in a lazy generator cannot fail (found {dt(t)}; fallible generator cleanup is not decided yet)")
+                    }
+                }
+            }
+        }
+    }
+    if nodes.ptr[n].a not=? 0 {gen_check_defers_after(GenWord(nodes.ptr[n].a) in_defer)}
+    if nodes.ptr[n].b not=? 0 {gen_check_defers_after(GenWord(nodes.ptr[n].b) in_defer)}
+    if nodes.ptr[n].c not=? 0 {gen_check_defers_after(GenWord(nodes.ptr[n].c) in_defer)}
+    loop i in [0..nkids(n)) {gen_check_defers_after(kid(n i) in_defer)}
+}
+
+gen_tuple_has_nested_or_spread=(n:GenWord):>bool=>$unsafe {
+    loop i in [0..nkids(n)) {
+        let c=kid(n i)
+        if has_flag(c NF_SPREAD) {return true}
+        if nodes.ptr[c].kind =? 'tuple' and nodes.ptr[c].aux =? int32(TUPLE_VALUES) {return true}
+    }
+    false
+}
+
+gen_flatten_tuple_expr=(n:GenWord want_values:bool @out:array<int64>):>void=>$unsafe {
+    if nodes.ptr[n].kind =? 'tuple' and nodes.ptr[n].aux =? int32(TUPLE_VALUES) {
+        if want_values and not gen_tuple_has_nested_or_spread(n) {
+            out.push(n)
+            return
+        }
+        loop i in [0..nkids(n)) {
+            gen_flatten_tuple_expr(kid(n i) want_values @out)
+        }
+        return
+    }
+    out.push(n)
+}
+
+# Pre-process statements in a lazy generator body before type-checking:
+# - flatten nested/non-tuple multivalue groups into individual exprstmts
+# - record spread exprstmts (`child()...`, `xs...`) and clear NF_SPREAD
+# - reject yielding places (`@x`) and `return`
+# - rewrite `break $label` (for non-loop `$label lazy`) to checked `yield_(aux=3)`
+# - wrap `defer` bodies with NF_DISCARD so expressions inside defer never yield
+gen_prep_block=(b:GenWord label:GenWord has_loop_label:bool want_values:bool shadowed:bool):>void=>$unsafe {
+    if b =? 0 or nodes.ptr[b].kind not=? 'block' {return}
+    if has_flag(b NF_DISCARD) or has_flag(b NF_COMPREHENSION) {return}
+    let orig=kids(b)
+    let out:array<int64>=[]
+    let changed=false
+    loop s in orig {
+        let k=nodes.ptr[s].kind
+        if k =? 'return_' {
+            fatal(nodes.ptr[s].pos "'return' is not allowed inside a lazy generator; use a labeled break (e.g. `$done lazy \{ ... break $done }`) to stop early")
+        }
+        if k =? 'break_' and not has_loop_label and not shadowed and label not=? 0 and GenWord(nodes.ptr[s].name) =? label {
+            let yn=mk('yield_' nodes.ptr[s].pos)
+            nodes.ptr[yn].aux=3
+            nodes.ptr[yn].type=GenI32(T_NEVER)
+            add_flag(yn NF_CHECKED)
+            nodes.ptr[s].kind='exprstmt'
+            nodes.ptr[s].a=GenI32(yn)
+            nodes.ptr[s].name=0
+            add_flag(s NF_CHECKED)
+            out.push(s)
+            continue
+        }
+        if k =? 'continue_' and not has_loop_label and not shadowed and label not=? 0 and GenWord(nodes.ptr[s].name) =? label {
+            fatal(nodes.ptr[s].pos "cannot 'continue' label '${name_of(label)}' on a non-loop lazy generator; use `break $${name_of(label)}` to end the generator, or label a loop directly")
+        }
+        if k =? 'defer_' {
+            let d=GenWord(nodes.ptr[s].a)
+            gen_scan_defer(d 0)
+            if nodes.ptr[d].kind not=? 'block' {
+                d=bc_block([d] nodes.ptr[d].pos)
+                nodes.ptr[s].a=GenI32(d)
+            }
+            add_flag(d NF_DISCARD)
+            out.push(s)
+            continue
+        }
+        if k =? 'exprstmt' {
+            let e=GenWord(nodes.ptr[s].a)
+            if e not=? 0 {
+                let ek=nodes.ptr[e].kind
+                if has_flag(e NF_MUT) and (ek =? 'ident' or ek =? 'field' or ek =? 'index') {
+                    fatal(nodes.ptr[e].pos "yielding places from a generator is not decided yet")
+                }
+                if ek =? 'tuple' and nodes.ptr[e].aux =? int32(TUPLE_VALUES) and (not want_values or gen_tuple_has_nested_or_spread(e)) {
+                    let parts:array<int64>=[]
+                    gen_flatten_tuple_expr(e want_values @parts)
+                    loop p in parts {
+                        let ps=mk('exprstmt' nodes.ptr[p].pos)
+                        if has_flag(p NF_MUT) and (nodes.ptr[p].kind =? 'ident' or nodes.ptr[p].kind =? 'field' or nodes.ptr[p].kind =? 'index') {
+                            fatal(nodes.ptr[p].pos "yielding places from a generator is not decided yet")
+                        }
+                        if has_flag(p NF_SPREAD) {
+                            clear_flag(p NF_SPREAD)
+                            gen_spread_stmts[ps]=true
+                        }
+                        nodes.ptr[ps].a=GenI32(p)
+                        out.push(ps)
+                    }
+                    changed=true
+                    continue
+                }
+                if has_flag(e NF_SPREAD) {
+                    clear_flag(e NF_SPREAD)
+                    gen_spread_stmts[s]=true
+                } else if ek =? 'match_' {
+                    loop i in [0..nkids(e)) {
+                        let arm=kid(e i)
+                        gen_prep_block(GenWord(nodes.ptr[arm].b) label has_loop_label want_values shadowed)
+                    }
+                }
+            }
+            out.push(s)
+            continue
+        }
+        if k =? 'if_' or k =? 'iflet' {
+            gen_prep_block(GenWord(nodes.ptr[s].b) label has_loop_label want_values shadowed)
+            if nodes.ptr[s].c not=? 0 {gen_prep_block(GenWord(nodes.ptr[s].c) label has_loop_label want_values shadowed)}
+            out.push(s)
+            continue
+        }
+        if k =? 'while_' or k =? 'for_' {
+            let sh=shadowed or (label not=? 0 and GenWord(nodes.ptr[s].sval) =? label)
+            gen_prep_block(GenWord(nodes.ptr[s].b) label has_loop_label want_values sh)
+            out.push(s)
+            continue
+        }
+        if k =? 'block' {
+            gen_prep_block(s label has_loop_label want_values shadowed)
+            out.push(s)
+            continue
+        }
+        out.push(s)
+    }
+    if changed {set_list(b out)}
+}
+
+gen_all_exceptions=(t:GenWord):>bool=>{
+    let ms=value_members(t)
+    if ms.length =? 0 {return false}
+    loop m in ms {
+        if not exception_member(m) {return false}
+    }
+    true
+}
+
+gen_join_elem=(a0:GenWord b0:GenWord pos:GenWord):>GenWord=>{
+    let a=prune(a0)
+    let b=prune(b0)
+    if a =? T_NEVER {return b}
+    if b =? T_NEVER {return a}
+    if type_eq(a b) {return a}
+    if can_coerce(0 b a) {return a}
+    if can_coerce(0 a b) {return b}
+    let ej=exception_join(a b)
+    if ej not=? 0 {return ej}
+    if gen_all_exceptions(a) or gen_all_exceptions(b) {
+        return mk_union([value_members(a)... value_members(b)...])
+    }
+    fatal(pos "generator yields incompatible types {dt(a)} and {dt(b)}")
+    a
+}
+
+gen_expected_generator=(expected:GenWord):>GenWord=>$unsafe {
+    let ex=ce_expected(expected)
+    if ex =? 0 {return 0}
+    if types.ptr[ex].kind =? 'generator' {return ex}
+    if types.ptr[ex].kind =? 'opt' {
+        let inner=prune(GenWord(types.ptr[ex].elem))
+        if types.ptr[inner].kind =? 'generator' {return inner}
+    }
+    if is_union(ex) {
+        let found:GenWord=0
+        loop m in union_members(ex) {
+            if types.ptr[prune(m)].kind =? 'generator' {
+                if found not=? 0 {return 0}
+                found=prune(m)
+            }
+        }
+        return found
+    }
+    0
+}
+
+check_lazy=(n:GenWord expected:GenWord):>GenWord=>$unsafe {
+    gen_maybe_reset()
+    let ex_gen=gen_expected_generator(expected)
+    let expected_elem:GenWord=if ex_gen not=? 0 {prune(telem(ex_gen))} else {0}
+    let want_values=expected_elem not=? 0 and is_values(expected_elem)
+
+    let f=new_inst(FK_GENERATOR cur_mod() "lazy")
+    fns[f].decl=GenI32(n)
+    let body=GenWord(nodes.ptr[n].a)
+    fns[f].body=GenI32(body)
+    nodes[n].sym=GenI32(f)
+    fns[f].state=1
+
+    # Handle `$label lazy ...`:
+    # If the lazy body is a single top-level loop with no label of its own,
+    # attach the label to that loop so both `continue $label` and `break $label` work.
+    let label=GenWord(nodes.ptr[n].sval)
+    let has_loop_label=false
+    if label not=? 0 and nkids(body) =? 1 {
+        let k0=kid(body 0)
+        let k0k=nodes.ptr[k0].kind
+        if (k0k =? 'for_' or k0k =? 'while_') and nodes.ptr[k0].sval =? 0 {
+            nodes[k0].sval=GenI32(label)
+            has_loop_label=true
+        } else if k0k =? 'block' and has_flag(k0 NF_LOOP_SETUP) and nkids(k0) >? 0 {
+            let wl=kid(k0 nkids(k0) - 1)
+            if (nodes.ptr[wl].kind =? 'for_' or nodes.ptr[wl].kind =? 'while_') and nodes.ptr[wl].sval =? 0 {
+                nodes[wl].sval=GenI32(label)
+                has_loop_label=true
+            }
+        }
+    }
+
+    gen_prep_block(body label has_loop_label want_values false)
+
+    # Check if the body is straight-line (only top-level exprstmts, no loops/branches/defers).
+    let initial_straight=true
+    loop s in kids(body) {
+        let sk=nodes.ptr[s].kind
+        if sk not=? 'exprstmt' {initial_straight=false; break}
+        let e=GenWord(nodes.ptr[s].a)
+        if e =? 0 or nodes.ptr[e].kind =? 'match_' or nodes.ptr[e].kind =? 'yield_' or gen_spread_stmts.has(s) {
+            initial_straight=false
+            break
+        }
+    }
+
+    let zi_slot=@live_body_indexes
+    let zg_slot=@live_body_user_globals
+    let zm_slot=@live_body_global_mod
+    let saved_zi=zi_slot
+    let saved_zg=zg_slot
+    let saved_zm=zm_slot
+    zi_slot=0
+    zg_slot=0
+    zm_slot=-1
+
+    let context=@cx
+    let parent=context
+    let elem_var=if expected_elem not=? 0 and not has_var(expected_elem) {expected_elem} else {mk_var()}
+    ctxs.push(FnCtx(GenI32(f) GenI32(parent) GenI32(elem_var) (expected_elem =? 0) 0 ctxs[parent].mod ctxs[parent].floor))
+    context=GenWord(ctxs.length) - 1
+    let mark=scope_mark()
+
+    gen_frames.push(GenFrame[
+        inst=f
+        body=body
+        expected_elem=expected_elem
+        want_values=want_values
+        label=label
+        has_loop_label=has_loop_label
+        start_loops=loop_serials.length
+        straight=initial_straight
+    ])
+
+    let saved_sink=sink_fn
+    let saved_mode=sink_body_mode
+    sink_body_mode=SINK_GENERATOR
+    sink_fn=sinks.length
+    check_block(body 0 false);
+    sink_fn=saved_sink
+    sink_body_mode=saved_mode
+
+    let frame=gen_frames.pop()
+    gen_check_defers_after(body false)
+
+    # Settle the generator's element type.
+    let elem_t:GenWord=T_NEVER
+    if frame.yields.length =? 0 {
+        if expected_elem not=? 0 and not has_var(expected_elem) {elem_t=expected_elem}
+        else {elem_t=T_NEVER}
+    } else if expected_elem not=? 0 and not has_var(expected_elem) {
+        elem_t=expected_elem
+    } else {
+        # Infer element type across all yields; resolve integer/float literals
+        # against concrete yields when present, else default literals.
+        let non_lit:GenWord=0
+        let first_lit:GenWord=0
+        loop i in [0..frame.yields.length) {
+            let yn=frame.yields[i]
+            let yt=prune(frame.yield_types[i])
+            let yk=frame.yield_kinds[i]
+            if yk =? 0 and is_lit(GenWord(nodes.ptr[yn].a)) {
+                if first_lit =? 0 {first_lit=GenWord(nodes.ptr[yn].a)}
+                continue
+            }
+            if non_lit =? 0 {non_lit=yt}
+            else {non_lit=gen_join_elem(non_lit yt nodes.ptr[yn].pos)}
+        }
+        if non_lit not=? 0 {
+            elem_t=non_lit
+            # If any literal cannot coerce to non_lit (e.g. only exception yields plus a literal),
+            # join the literal's default type with non_lit!
+            loop i in [0..frame.yields.length) {
+                let yn=frame.yields[i]
+                if frame.yield_kinds[i] =? 0 and is_lit(GenWord(nodes.ptr[yn].a)) {
+                    let lt=lit_default(GenWord(nodes.ptr[yn].a))
+                    if not can_coerce(GenWord(nodes.ptr[yn].a) lt elem_t) {
+                        elem_t=gen_join_elem(lt elem_t nodes.ptr[yn].pos)
+                    }
+                }
+            }
+        } else if first_lit not=? 0 {
+            elem_t=lit_default(first_lit)
+        } else {
+            elem_t=T_NEVER
+        }
+    }
+
+    if expected_elem not=? 0 and has_var(expected_elem) and elem_t not=? T_NEVER {
+        unify(expected_elem elem_t);
+        elem_t=prune(expected_elem)
+    }
+
+    # Coerce every yield to elem_t (and check delegation/failure yields).
+    loop i in [0..frame.yields.length) {
+        let yn=frame.yields[i]
+        let yk=frame.yield_kinds[i]
+        let val=GenWord(nodes.ptr[yn].a)
+        if yk =? 0 {
+            nodes[yn].a=GenI32(coerce(val elem_t))
+        } else if yk =? 1 {
+            let child_t=prune(ntype(val))
+            let child_el=prune(telem(child_t))
+            if child_el not=? T_NEVER and not type_eq(child_el elem_t) {
+                if not can_coerce(0 child_el elem_t) {
+                    fatal(nodes.ptr[yn].pos "cannot delegate generator<{dt(child_el)}> into generator<{dt(elem_t)}>")
+                }
+                # Widening delegation: record target elem_t on yield_ node for lowering.
+                nodes[yn].aux2=GenI32(elem_t)
+            }
+        } else if yk =? 2 {
+            let ft=prune(ntype(val))
+            if not can_coerce(0 ft elem_t) {
+                fatal(nodes.ptr[yn].pos "or_throw inside generator cannot yield {dt(ft)}: generator element type is {dt(elem_t)}")
+            }
+            nodes[yn].a=GenI32(coerce(val elem_t))
+        }
+    }
+
+    fns[f].ret=GenI32(elem_t)
+    fns[f].state=2
+    zonk_tree(body)
+    loop l in fns[f].locals {
+        let lt=GenWord(locals.ptr[l].type)
+        if lt not=? 0 {
+            let z=zonk(lt)
+            locals[l].type=GenI32(z)
+        }
+    }
+    scope_reset(mark)
+    ctxs.pop();
+    context=parent
+    zi_slot=saved_zi
+    zg_slot=saved_zg
+    zm_slot=saved_zm
+
+    if frame.straight {
+        nodes[n].aux=1
+        nodes[n].aux2=GenI32(frame.exact_count)
+    } else {
+        nodes[n].aux=0
+        nodes[n].aux2=0
+    }
+    let gen_t=mk_generator(elem_t)
+    nodes[n].type=GenI32(gen_t)
+    add_flag(n NF_CHECKED)
+    ce_finish(n gen_t expected)
+}
+
+# Called from sink_express when SINK_GENERATOR is active.
+gen_express=(s:GenWord t0:GenWord pack:bool):>void=>$unsafe {
+    let fi=gen_frames.length - 1
+    let v=GenWord(nodes.ptr[s].a)
+    let pos=nodes.ptr[v].pos
+    let t=prune(t0)
+
+    if gen_spread_stmts.has(s) {
+        gen_spread_stmts.remove(s);
+        gen_frames[fi].straight=false
+        let tk=types.ptr[t].kind
+        if tk =? 'generator' {
+            let yn=mk('yield_' pos)
+            nodes[yn].a=GenI32(v)
+            nodes[yn].aux=1
+            nodes[yn].type=GenI32(T_VOID)
+            add_flag(yn NF_CHECKED)
+            nodes[s].a=GenI32(yn)
+            add_flag(s NF_CHECKED)
+            gen_frames[fi].yields.push(yn)
+            gen_frames[fi].yield_types.push(prune(telem(t)))
+            gen_frames[fi].yield_kinds.push(1)
+            return
+        }
+        if tk =? 'array' or tk =? 'fixed' or tk =? 'str_' {
+            let serial=@bc_count
+            let nm="$gspread{serial}"
+            serial=GenWord(serial) + 1
+            add_flag(v NF_CHECKED)
+            let lp=mk('for_' pos)
+            nodes[lp].a=GenI32(v)
+            set_list(lp [bc_ident(nm pos)])
+            nodes[lp].b=GenI32(bc_block([bc_stmt(bc_ident(nm pos) pos)] pos))
+            nodes[s]=nodes.ptr[lp]
+            check_stmt(s)
+            return
+        }
+        if is_values(t) {
+            let pre:array<int64>=[]
+            let parts=values_parts(v @pre)
+            let out:array<int64>=[]
+            loop d in pre {out.push(d)}
+            loop part in parts {
+                let yn=mk('yield_' pos)
+                nodes[yn].a=GenI32(part)
+                nodes[yn].aux=0
+                nodes[yn].type=GenI32(T_VOID)
+                add_flag(yn NF_CHECKED)
+                let st=mk('exprstmt' pos)
+                nodes[st].a=GenI32(yn)
+                add_flag(st NF_CHECKED)
+                gen_frames[fi].yields.push(yn)
+                gen_frames[fi].yield_types.push(prune(ntype(part)))
+                gen_frames[fi].yield_kinds.push(0)
+                out.push(st)
+            }
+            let blk=bc_block(out pos)
+            add_flag(blk NF_UNSCOPED)
+            add_flag(blk NF_CHECKED)
+            nodes[blk].type=GenI32(T_VOID)
+            nodes[s]=nodes.ptr[blk]
+            return
+        }
+        fatal(pos "cannot spread {dt(t)} inside a lazy generator; expected a generator or sequence")
+    }
+
+    # Multivalue expression in a lazy body:
+    # - if the generator explicitly wants a multivalue (e.g. generator<(int int)>), yield it as one step
+    # - otherwise unpack eager multivalues / pack arrays into individual yields.
+    if (pack or is_values(t)) and not (gen_frames[fi].want_values and is_values(t)) {
+        gen_frames[fi].straight=false
+        if is_values(t) {
+            let pre:array<int64>=[]
+            let parts=values_parts(v @pre)
+            let out:array<int64>=[]
+            loop d in pre {out.push(d)}
+            loop part in parts {
+                let yn=mk('yield_' pos)
+                nodes[yn].a=GenI32(part)
+                nodes[yn].aux=0
+                nodes[yn].type=GenI32(T_VOID)
+                add_flag(yn NF_CHECKED)
+                let st=mk('exprstmt' pos)
+                nodes[st].a=GenI32(yn)
+                add_flag(st NF_CHECKED)
+                gen_frames[fi].yields.push(yn)
+                gen_frames[fi].yield_types.push(prune(ntype(part)))
+                gen_frames[fi].yield_kinds.push(0)
+                out.push(st)
+            }
+            let blk=bc_block(out pos)
+            add_flag(blk NF_UNSCOPED)
+            add_flag(blk NF_CHECKED)
+            nodes[blk].type=GenI32(T_VOID)
+            nodes[s]=nodes.ptr[blk]
+            return
+        }
+        if pack and types.ptr[t].kind =? 'array' {
+            let serial=@bc_count
+            let nm="$gpack{serial}"
+            serial=GenWord(serial) + 1
+            add_flag(v NF_CHECKED)
+            let lp=mk('for_' pos)
+            nodes[lp].a=GenI32(v)
+            set_list(lp [bc_ident(nm pos)])
+            nodes[lp].b=GenI32(bc_block([bc_stmt(bc_ident(nm pos) pos)] pos))
+            nodes[s]=nodes.ptr[lp]
+            check_stmt(s)
+            return
+        }
+    }
+
+    # Ordinary single-value yield.
+    let yn=mk('yield_' pos)
+    nodes[yn].a=GenI32(v)
+    nodes[yn].aux=0
+    nodes[yn].type=GenI32(T_VOID)
+    add_flag(yn NF_CHECKED)
+    nodes[s].a=GenI32(yn)
+    add_flag(s NF_CHECKED)
+    gen_frames[fi].yields.push(yn)
+    gen_frames[fi].yield_types.push(t)
+    gen_frames[fi].yield_kinds.push(0)
+    if gen_frames[fi].straight {
+        if loop_serials.length =? gen_frames[fi].start_loops {
+            gen_frames[fi].exact_count += 1
+        } else {
+            gen_frames[fi].straight=false
+        }
+    }
+}
+
+# `value or_throw` / `value or_throw<E>` inside a lazy generator:
+# yields any matched failure as the generator's last value and ends the generator.
+gen_propagate=(n:GenWord expected:GenWord):>GenWord=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let fi=gen_frames.length - 1
+    gen_frames[fi].straight=false
+    let at=prune(check_expr(GenWord(nodes.ptr[n].a) 0))
+    let a=last_checked
+    add_flag(a NF_CHECKED)
+    let members=value_members(at)
+    let exceptions:array<int64>=[]
+    if nodes.ptr[n].b not=? 0 {
+        let selected=prune(ct_resolve_family(GenWord(nodes.ptr[n].b)))
+        let wanted=value_members(selected)
+        loop t in wanted {
+            if not exception_member(t) {fatal(pos "`or_throw<...>` names the failures to forward: {dt(t)} is not an exception or none")}
+        }
+        loop t in members {
+            if not exception_member(t) {continue}
+            let matched=false
+            loop e in wanted {
+                if t =? e or (t not=? T_NONE and e not=? T_NONE and can_coerce(0 t e)) {matched=true}
+            }
+            if matched {exceptions.push(t)}
+        }
+    } else {
+        loop t in members {
+            if exception_member(t) {exceptions.push(t)}
+        }
+    }
+    if exceptions.length =? 0 {
+        nodes[n]=nodes.ptr[a]
+        return check_expr(n expected)
+    }
+    let name="$gprop{n}"
+    let stmts:array<int64>=[bc_let(name a pos)]
+    loop t in exceptions {
+        let fval=if t =? T_NONE {mk('none_lit' pos)} else {bc_ident(name pos)}
+        let yn=mk('yield_' pos)
+        nodes[yn].a=GenI32(fval)
+        nodes[yn].aux=2
+        nodes[yn].type=GenI32(T_NEVER)
+        let yst=mk('exprstmt' pos)
+        nodes[yst].a=GenI32(yn)
+        # We check the failure yield expression after narrowing in the `if` branch,
+        # using a tiny marker node checked below!
+        if exceptions.length =? members.length and t =? exceptions[exceptions.length - 1] {
+            stmts.push(yst)
+            break
+        }
+        let cond=mk('istype' pos)
+        nodes[cond].a=GenI32(bc_ident(name pos))
+        nodes[cond].b=GenI32(type_node_of(t pos))
+        let br=mk('if_' pos)
+        nodes[br].a=GenI32(cond)
+        nodes[br].b=GenI32(bc_block([yst] pos))
+        add_flag(br NF_STMT)
+        stmts.push(br)
+    }
+    if exceptions.length not=? members.length {
+        stmts.push(bc_stmt(bc_ident(name pos) pos))
+    }
+    let lowered=bc_block(stmts pos)
+    nodes[n]=nodes.ptr[lowered]
+    # Check each branch normally; our `yield_(aux=2)` inside `yst` needs its inner expr checked!
+    # We intercept `yield_(aux=2)` right here before calling check_expr? Better:
+    # `check_expr(n expected)` will run `es_statement` on `yst`, which sees `e.kind =? 'yield_'`!
+    # So we handle `k =? 'yield_'` in `checks_value_hooks.dewy` `expr_other`!
+    check_expr(n expected)
+}
+
+# Check a synthetic `yield_(aux=2)` node produced by `gen_propagate` inside `expr_other`.
+gen_check_fail_yield=(n:GenWord):>GenWord=>$unsafe {
+    let fi=gen_frames.length - 1
+    let t=prune(check_expr(GenWord(nodes.ptr[n].a) 0))
+    nodes[n].a=GenI32(last_checked)
+    nodes[n].type=GenI32(T_NEVER)
+    add_flag(n NF_CHECKED)
+    gen_frames[fi].yields.push(n)
+    gen_frames[fi].yield_types.push(t)
+    gen_frames[fi].yield_kinds.push(2)
+    last_checked=n
+    T_NEVER
+}
+
+# Walk checked AST subtree to detect any read/capture of local `target_l` (for re-entry / fresh-spread checks).
+gen_subtree_uses_local=(n:GenWord target_l:GenWord):>GenWord=>$unsafe {
+    if n =? 0 {return 0}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(1) and GenWord(nodes.ptr[n].sym) =? target_l {
+        return nodes.ptr[n].pos
+    }
+    if k =? 'lambda' or k =? 'lazy_' {
+        let f=GenWord(nodes.ptr[n].sym)
+        if f >? 0 and f <? fns.length {
+            loop cap in fns.ptr[f].caps {
+                if GenWord(cap.outer) =? target_l {return nodes.ptr[n].pos}
+            }
+        }
+        return 0
+    }
+    let p:GenWord=0
+    if nodes.ptr[n].a not=? 0 {
+        p=gen_subtree_uses_local(GenWord(nodes.ptr[n].a) target_l)
+        if p not=? 0 {return p}
+    }
+    if nodes.ptr[n].b not=? 0 {
+        p=gen_subtree_uses_local(GenWord(nodes.ptr[n].b) target_l)
+        if p not=? 0 {return p}
+    }
+    if nodes.ptr[n].c not=? 0 and k not=? 'for_' {
+        p=gen_subtree_uses_local(GenWord(nodes.ptr[n].c) target_l)
+        if p not=? 0 {return p}
+    }
+    loop i in [0..nkids(n)) {
+        p=gen_subtree_uses_local(kid(n i) target_l)
+        if p not=? 0 {return p}
+    }
+    0
+}
+
+gen_named_local=(e:GenWord):>GenWord=>$unsafe {
+    let r=place_root(e)
+    if r not=? 0 and nodes.ptr[r].kind =? 'ident' and nodes.ptr[r].aux =? int32(1) {
+        return GenWord(nodes.ptr[r].sym)
+    }
+    0
+}
+
+# Check `loop x in g`, `loop i in 0.. and x in g`, `loop x in g or_throw`, and temporary `loop x in make_gen()`.
+gen_for_check=(s:GenWord):>bool=>$unsafe {
+    let it=GenWord(nodes.ptr[s].a)
+    if it =? 0 or nodes.ptr[it].kind =? 'range' {return false}
+    let t:GenWord=0
+    if nodes.ptr[it].type not=? 0 {t=prune(ntype(it))}
+    else {
+        t=prune(check_expr(it 0))
+        it=last_checked
+        nodes[s].a=GenI32(it)
+    }
+    if types.ptr[t].kind not=? 'generator' {return false}
+    let pos=nodes.ptr[s].pos
+    let throwing=throwing_iters.has(it)
+    let throw_filter:GenWord=if throwing {throwing_iters[it]} else {0}
+
+    # Temporary generator expression: bind to a local in a wrapper block so break/return/exit drops it immediately.
+    let ik=nodes.ptr[it].kind
+    let is_named=(ik =? 'ident' and nodes.ptr[it].aux =? int32(1)) or (ik =? 'field' and gen_named_local(it) >? 0)
+    if not is_named {
+        let serial=@bc_count
+        let tmp_name="$gen_tmp{serial}"
+        serial=GenWord(serial) + 1
+        add_flag(it NF_CHECKED)
+        let decl=bc_let(tmp_name it pos)
+        let inner=nodes.length
+        nodes.push(nodes.ptr[s])
+        let ref_it=bc_ident(tmp_name pos)
+        nodes[inner].a=GenI32(ref_it)
+        if throwing {
+            throwing_iters.remove(it);
+            throwing_iters[ref_it]=throw_filter
+        }
+        let blk=bc_block([decl inner] pos)
+        nodes[s]=nodes.ptr[blk]
+        check_stmt(s)
+        return true
+    }
+
+    # If `loop x in g or_throw`, rewrite binder to unwrap each pulled item with `or_throw`.
+    if throwing {
+        throwing_iters.remove(it);
+        let serial=@bc_count
+        let raw_name="$gen_raw{serial}"
+        serial=GenWord(serial) + 1
+        let nv=GenWord(nkids(s))
+        let bi=nv - 1
+        let binder=kid(s bi)
+        let prop=mk('propagate' nodes.ptr[binder].pos)
+        nodes[prop].a=GenI32(bc_ident(raw_name nodes.ptr[binder].pos))
+        nodes[prop].b=GenI32(throw_filter)
+        let decl=mk('vardecl' nodes.ptr[binder].pos)
+        if nodes.ptr[binder].kind =? 'tuple' {set_list(decl kids(binder))}
+        else {
+            nodes[decl].name=nodes.ptr[binder].name
+            nodes[decl].a=nodes.ptr[binder].a
+        }
+        nodes[decl].b=GenI32(prop)
+        let body=GenWord(nodes.ptr[s].b)
+        let stmts:array<int64>=[decl]
+        loop x in kids(body) {stmts.push(x)}
+        set_list(body stmts)
+        set_kid(s bi bc_ident(raw_name nodes.ptr[binder].pos))
+    }
+
+    let mark=scope_mark()
+    loop_serial_next += 1
+    loop_serials.push(loop_serial_next)
+    let nv=GenWord(nkids(s))
+    let et=prune(telem(t))
+    if nv =? 2 and nodes.ptr[s].ival =? 1 {
+        let idx_l=new_local(GenWord(nodes.ptr[kid(s 0)].name) T_INT pos)
+        locals[idx_l].flags=GenI32(GenWord(locals.ptr[idx_l].flags) | LF_DECL)
+        nodes[s].c=GenI32(idx_l)
+        let el_l=new_local(GenWord(nodes.ptr[kid(s 1)].name) et pos)
+        locals[el_l].flags=GenI32(GenWord(locals.ptr[el_l].flags) | LF_DECL)
+        nodes[s].sym=GenI32(el_l)
+    } else if nv =? 1 {
+        nodes[s].c=0
+        let el_l=new_local(GenWord(nodes.ptr[kid(s 0)].name) et pos)
+        locals[el_l].flags=GenI32(GenWord(locals.ptr[el_l].flags) | LF_DECL)
+        nodes[s].sym=GenI32(el_l)
+    } else {
+        fatal(pos "a generator loop binds one value (or `(a b)` for multivalue generators)")
+    }
+    nodes[s].aux=5
+    xb_enter(s)
+    check_block(GenWord(nodes.ptr[s].b) 0 false);
+    xb_leave(s)
+    loop_serials.pop();
+    if scope_mark() not=? mark {scope_reset(mark)}
+
+    # Reject re-entry / use of a named generator while iterating over it.
+    let borrow_l=gen_named_local(it)
+    if borrow_l >? 0 {
+        let nm=name_of(GenWord(locals.ptr[borrow_l].name))
+        if not starts_with(nm "$gen_tmp") {
+            let bad=gen_subtree_uses_local(GenWord(nodes.ptr[s].b) borrow_l)
+            if bad not=? 0 {
+                fatal(bad "cannot use generator '{nm}' while iterating over it")
+            }
+        }
+    }
+    true
+}
+
+# Rewrite `[g...]` / `xs.extend(g)` into `loop $gext in g { xs.push($gext) }`.
+gen_extend_rewrite=(n:GenWord dst:GenWord src:GenWord arr_t:GenWord src_t:GenWord):>GenWord=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let gel=prune(telem(src_t))
+    if gel not=? T_NEVER and has_var(GenWord(types.ptr[arr_t].elem)) {
+        unify(GenWord(types.ptr[arr_t].elem) gel);
+    }
+    let serial=@bc_count
+    let el_name="$gext{serial}"
+    serial=GenWord(serial) + 1
+    add_flag(src NF_CHECKED)
+    add_flag(dst NF_CHECKED)
+    let callee=bc_field(dst "push" pos)
+    let call=mk('call' pos)
+    nodes[call].a=GenI32(callee)
+    set_list(call [bc_ident(el_name pos)])
+    let lp=mk('for_' pos)
+    nodes[lp].a=GenI32(src)
+    set_list(lp [bc_ident(el_name pos)])
+    nodes[lp].b=GenI32(bc_block([bc_stmt(call pos)] pos))
+    let blk=bc_block([lp] pos)
+    nodes[n]=nodes.ptr[blk]
+    check_stmt(lp)
+    nodes[n].type=GenI32(T_VOID)
+    add_flag(n NF_CHECKED)
+    last_checked=n
+    T_VOID
+}
+
+# Called from checker_hooks.dewy `decl_after(..., 13)` whenever a local has type `TK.generator`.
+gen_after_decl=(s:GenWord l:GenWord t:GenWord):>void=>$unsafe {
+    gen_maybe_reset()
+    let b=GenWord(nodes.ptr[s].b)
+    let nm=name_of(GenWord(locals.ptr[l].name))
+    # Combined loop synthetic binding `let __sN = __dewy_iter(g)`:
+    # borrow named `g` via LF_ALIAS instead of moving it!
+    if starts_with(nm "__s") and b not=? 0 {
+        let bk=nodes.ptr[b].kind
+        let is_named=(bk =? 'ident' and nodes.ptr[b].aux =? int32(1)) or (bk =? 'field' and gen_named_local(b) >? 0)
+        if throwing_iters.has(b) {
+            gen_iter_throwing[l]=throwing_iters[b]
+            throwing_iters.remove(b);
+        }
+        if is_named {
+            # Detect `loop a in g and b in g` (same named generator twice in one combined loop).
+            let root=gen_named_local(b)
+            if root >? 0 and sibling_block >? 0 {
+                let prev=gen_iter_aliases.get(sibling_block) ?? []
+                if prev.contains(root) {
+                    fatal(nodes.ptr[b].pos "cannot iterate over generator '{name_of(GenWord(locals.ptr[root].name))}' twice in the same loop")
+                }
+                prev.push(root)
+                gen_iter_aliases[sibling_block]=prev
+            }
+            locals[l].flags=GenI32(LF_ALIAS | LF_QUIET)
+            locals[l].alias=GenI32(b)
+            nodes[s].kind='block'
+            nodes[s].nlist=0
+            return
+        }
+    }
+    # Track visibly fresh straight-line local `let g = lazy (20 22)` for same-block sole-use spread.
+    if b not=? 0 and nodes.ptr[b].kind =? 'lazy_' and nodes.ptr[b].aux =? 1 and cx >=? 0 {
+        gen_local_fresh[l]=[b sibling_block GenWord(ctxs[cx].inst) s]
+    }
+}
+
+# Handle `IN.dewy_iter_value` / `IN.dewy_iter_pair` on a generator in combined loops.
+gen_iter_value_wrap=(n:GenWord args:array<int64> t:GenWord):>GenWord=>$unsafe {
+    let et=prune(telem(t))
+    let src=args[0]
+    let throwing=false
+    let filter:GenWord=0
+    if nodes.ptr[src].kind =? 'ident' and nodes.ptr[src].aux =? int32(1) {
+        let sl=GenWord(nodes.ptr[src].sym)
+        if gen_iter_throwing.has(sl) {
+            throwing=true
+            filter=gen_iter_throwing[sl]
+        }
+    }
+    nodes[n].type=GenI32(et)
+    add_flag(n NF_CHECKED)
+    if throwing {
+        let inner=nodes.length
+        nodes.push(nodes.ptr[n])
+        let prop=mk('propagate' nodes.ptr[n].pos)
+        nodes[prop].a=GenI32(inner)
+        nodes[prop].b=GenI32(filter)
+        nodes[n]=nodes.ptr[prop]
+        return check_expr(n 0)
+    }
+    et
+}
+
+# Spread of a generator into fixed parameters (`add(lazy (20 22)...)` or sole-use same-block local).
+gen_spread_fresh=(c:GenWord call:GenWord):>GenWord=>$unsafe {
+    let pos=nodes.ptr[c].pos
+    let k=nodes.ptr[c].kind
+    if k =? 'lazy_' {
+        if nodes.ptr[c].aux =? 1 {return GenWord(nodes.ptr[c].aux2)}
+        fatal(pos "cannot spread this generator into fixed parameters because its item count is not statically fixed; use a multivalue `(a b)` or collect it with `[g...]`")
+    }
+    if k =? 'ident' and nodes.ptr[c].aux =? int32(1) {
+        let l=GenWord(nodes.ptr[c].sym)
+        if gen_local_fresh.has(l) and cx >=? 0 {
+            let info=gen_local_fresh[l]
+            let lz=info[0]
+            let decl_blk=info[1]
+            let decl_inst=info[2]
+            let decl_stmt=info[3]
+            if decl_inst =? GenWord(ctxs[cx].inst) and decl_blk =? sibling_block and decl_blk >? 0 and (GenWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_CAPTURED | LF_ADDR)) =? 0 {
+                # Ensure `l` was not used in any statement between its declaration and this statement.
+                let used=false
+                let past_decl=false
+                loop i in [0..sibling_index) {
+                    let st=kid(decl_blk i)
+                    if st =? decl_stmt {past_decl=true; continue}
+                    if past_decl and gen_subtree_uses_local(st l) not=? 0 {used=true; break}
+                }
+                if not used {
+                    gen_local_fresh.remove(l);
+                    return GenWord(nodes.ptr[lz].aux2)
+                }
+            }
+        }
+    }
+    fatal(pos "cannot spread a generator into fixed parameters unless it is visibly fresh with a known count (as in `f(lazy (a b)...)` or a sole-use local in the same block); use a multivalue `(a b)` instead")
+    0
+}
+
+# Expand a fresh generator spread of exact count `count` into `@pre` pulls and `@out` argument idents.
+gen_spread_parts=(c:GenWord count:GenWord @pre:array<int64> @out:array<int64>):>void=>$unsafe {
+    let pos=nodes.ptr[c].pos
+    let t=prune(ntype(c))
+    let et=prune(telem(t))
+    # Always capture (moving any sole-use local so any later read is caught by move-only!).
+    let held=capture_value(c t @pre)
+    let src=GenWord(nodes.ptr[held].sym)
+    let serial=@bc_count
+    serial=GenWord(serial) + 1
+    let k_decl=bc_let("$gspk{serial}" bc_int(0 pos) pos)
+    check_stmt(k_decl)
+    pre.push(k_decl)
+    let kl=GenWord(nodes.ptr[k_decl].sym)
+    loop i in [0..count) {
+        let done_call=mk('intrinsic' pos)
+        nodes[done_call].aux=GenI32(int64(IN.dewy_iter_done))
+        set_list(done_call [mk_ident_local(src pos) mk_ident_local(kl pos)])
+        nodes[done_call].type=GenI32(T_BOOL)
+        add_flag(done_call NF_CHECKED)
+        let ds=mk('exprstmt' pos)
+        nodes[ds].a=GenI32(done_call)
+        add_flag(ds NF_CHECKED)
+        pre.push(ds)
+
+        let val_call=mk('intrinsic' pos)
+        nodes[val_call].aux=GenI32(int64(IN.dewy_iter_value))
+        set_list(val_call [mk_ident_local(src pos) mk_ident_local(kl pos)])
+        nodes[val_call].type=GenI32(et)
+        add_flag(val_call NF_CHECKED)
+        let item_held=capture_value(val_call et @pre)
+        out.push(item_held)
+    }
+    # Pull once more so the generator reaches its natural end and runs any defers.
+    let end_call=mk('intrinsic' pos)
+    nodes[end_call].aux=GenI32(int64(IN.dewy_iter_done))
+    set_list(end_call [mk_ident_local(src pos) mk_ident_local(kl pos)])
+    nodes[end_call].type=GenI32(T_BOOL)
+    add_flag(end_call NF_CHECKED)
+    let es=mk('exprstmt' pos)
+    nodes[es].a=GenI32(end_call)
+    add_flag(es NF_CHECKED)
+    pre.push(es)
+}

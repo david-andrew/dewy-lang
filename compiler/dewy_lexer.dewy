@@ -14,7 +14,7 @@ from p"dewy_tokens.dewy" import (DewyLexeme DewyKind DewyToken dn_token_kind dn_
 from p"dewy_lex.dewy" import (DewyLexer dx_quote_end dx_block_comment_end dx_block_comment_error dx_lazy_end)
 from p"intern.dewy" import (hash_bytes name_find_raw same_bytes)
 DewyLexState:type=[
-    skip:bool lazy:bool metatags:int64 space:bool newline:bool
+    skip:bool has_lazy:bool metatags:int64 space:bool newline:bool
     true_id:int64 false_id:int64 is_id:int64 isnt_id:int64 in_id:int64
     word_count:int64
     texts:ptr<array<string>> hashes:ptr<array<int64>> names:ptr<array<int32>>
@@ -273,7 +273,7 @@ dx_lex_no_intern=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comme
                         let lz=slots + count
                         lz[0].kind='lazy_body'; lz[0].name=0; lz[0].start=j; lz[0].stop=e
                         lz[0].space=(j >? i); lz[0].newline=false; lz[0].symbol='none'
-                        count+=1; state.lazy=true; i=e
+                        count+=1; state.has_lazy=true; i=e
                     }
                 }
             }
@@ -528,7 +528,7 @@ dx_lex=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<
                         let lz=slots + count
                         lz[0].kind='lazy_body'; lz[0].name=0; lz[0].start=j; lz[0].stop=e
                         lz[0].space=(j >? i); lz[0].newline=false; lz[0].symbol='none'
-                        count+=1; state.lazy=true; i=e
+                        count+=1; state.has_lazy=true; i=e
                     }
                 }
             }
@@ -620,6 +620,8 @@ dx_token_width=(symbol:DewyToken):>int64=>match symbol {
     <'kw_parallel'> => 8
     <'kw_concurrent'> => 10
     <'kw_spawn'> => 5
+    <'kw_lazy'> => 4
+    <'kw_defer'> => 5
     <'kw_match'> => 5
     <'kw_test'> => 4
     <'kw_not'> => 3

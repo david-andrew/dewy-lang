@@ -81,7 +81,7 @@ xz_swap_call=(aux:int32 nlist:int32 sym:int32):>bool=>$unsafe {
     nm.length >=? 7 and nm.ptr[0] =? 102 and nm.ptr[1] =? 95 and nm.ptr[2] =? 115 and nm.ptr[3] =? 119 and nm.ptr[4] =? 97 and nm.ptr[5] =? 112 and nm.ptr[6] =? 95
 }
 xz_is_leaf=(k:NK):>bool=>match k {
-    <'int_lit'|'bool_lit'|'float_lit'|'none_lit'|'null_lit'|'dotname'|'lambda'> => true
+    <'int_lit'|'bool_lit'|'float_lit'|'none_lit'|'null_lit'|'dotname'|'lambda'|'lazy_'> => true
     _ => false
 }
 xz_summary=(root:XZWord):>void=>$unsafe {
@@ -187,7 +187,7 @@ xz_init_kflags=():>void=>$unsafe {
     xz_set_kf(p @tmp ['vardecl' 'assign' 'return_' 'break_' 'continue_'] uint8(2))
     # bit 4 = special handling; combined with bit 2 where applicable
     xz_set_kf(p @tmp ['ident' 'index' 'call' 'fn_'] uint8(4))
-    xz_set_kf(p @tmp ['lambda' 'for_' 'while_'] uint8(2 | 4))
+    xz_set_kf(p @tmp ['lambda' 'lazy_' 'for_' 'while_'] uint8(2 | 4))
     xz_kflags_p=p
 }
 
@@ -248,7 +248,7 @@ xz_walk=<Proofs>(root:XZWord):>void=>$unsafe {
             }
         }
         if kf & uint8(4) not=? uint8(0) {
-            if k =? 'lambda' {continue}
+            if k =? 'lambda' or k =? 'lazy_' {continue}
             if k =? 'for_' or k =? 'while_' {
                 if sp + 1 >? cap {
                     cap=(sp + 1) * 2

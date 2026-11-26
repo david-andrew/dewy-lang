@@ -34,6 +34,7 @@ from p"util.jo" import (files intern pos_file pos_in_lib)
 from p"lower_views.dewy" import (find_views param_view_decl)
 from p"lower_group.dewy" import (cur_fn_has_array_local gen_block_stmts gen_return gen_stmt scope_pop uq_fn_finish uq_fn_prepare)
 from p"lower_helpers.dewy" import (lower_helper)
+from p"lower_generators.dewy" import (gen_reset_lower)
 from p"math_lower.jo" import (math_decl_depth math_loop_parent math_loop_sites math_static_regs math_static_widths math_word_limits math_word_regs math_word_updates math_write_loop math_writes)
 from p"ownership.jo" import (ownership_consumers ownership_decls)
 from p"ownership_lower.dewy" import (owner_begin owner_end owner_enter_captures)
@@ -84,6 +85,7 @@ begin_fn=(name:string idx:LFnWord):>void=>$unsafe {
     building=[]
     sret_v=-1
     env_v=-1
+    gen_reset_lower()
 }
 find_bytes_set=(name:LFnWord):>int64=>$unsafe {
     if find_ids.length =? 0 {

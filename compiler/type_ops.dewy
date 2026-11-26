@@ -5,7 +5,7 @@ from p"check.jo" import (lib_dir)
 from p"concurrency_types.dewy" import (concurrency_builtin_type)
 from p"error_ops.dewy" import (nominal_instance)
 from p"errors.jo" import (nominal_generic)
-from p"type_constructors.dewy" import (tb_init_types tb_mk_array tb_mk_box tb_mk_cfn tb_mk_fixed tb_mk_fn tb_mk_modval tb_mk_opt tb_mk_param tb_mk_ptr tb_mk_secret tb_mk_tuple tb_mk_typeval tb_mk_values tb_mk_var tb_secret_repr)
+from p"type_constructors.dewy" import (tb_init_types tb_mk_array tb_mk_box tb_mk_cfn tb_mk_fixed tb_mk_fn tb_mk_generator tb_mk_modval tb_mk_opt tb_mk_param tb_mk_ptr tb_mk_secret tb_mk_tuple tb_mk_typeval tb_mk_values tb_mk_var tb_secret_repr)
 from p"type_factory.dewy" import (MAX_TYPE_NESTING TypeDeclInfo tc_soa_inst tc_struct_inst)
 from p"type_format.dewy" import (tf_postfix tf_string)
 from p"type_inference.dewy" import (tu_unify tu_zonk)
@@ -41,6 +41,9 @@ mk_box=(e:TypeOpWord):>int64=>{
 }
 mk_opt=(e:int64):>int64=>{
     tb_mk_opt(e)
+}
+mk_generator=(e:int64):>int64=>{
+    tb_mk_generator(e)
 }
 mk_secret=(e:TypeOpWord):>int64=>{
     tb_mk_secret(e)
@@ -125,7 +128,7 @@ simple_enum=(t:int64):>bool=>$unsafe {
 is_managed=(t:TypeOpWord):>bool=>$unsafe {
     let k=types[t].kind
     if k =? 'int_' or k =? 'bool_' or k =? 'float_' or k =? 'void_' or k =? 'ptr' or k =? 'null_' {return types[t].rep =? 'tagged_int'}
-    if k =? 'str_' or k =? 'array' or k =? 'fn_' {return true}
+    if k =? 'str_' or k =? 'array' or k =? 'fn_' or k =? 'generator' {return true}
     if (TypeOpWord(types[t].flags) & 2) not=? 0 and (k =? 'struct_' or k =? 'enum_' or k =? 'tuple' or k =? 'opt' or k =? 'fixed') {return (TypeOpWord(types[t].flags) & 4) not=? 0}
     tp_is_managed(t)
 }

@@ -9,6 +9,7 @@ from p"check.jo" import (syms throwing_iters universe)
 from p"checks_builders.dewy" import (bc_bool bc_call bc_field bc_ident bc_int bc_let bc_method)
 from p"checks_stmt_hooks.dewy" import (for_date_range_value)
 from p"checks_thin.dewy" import (check_stmt dewy_iterator_type)
+from p"checker_generators.dewy" import (gen_in_lazy)
 from p"checks_thin_expr.dewy" import (is_dewy_cursor_iter is_map_type sequence_length_name)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"error_ops.dewy" import (value_members)
@@ -127,6 +128,9 @@ dewy_iterator_loop=(s:IteratorRewriteWord place:IteratorRewriteWord=0):>bool=>{
             }
             if outcome =? IteratorRewriteWord(syms[universe[intern("Canceled")]].ref) {canceled=true}
         }
+    }
+    if canceled and gen_in_lazy() {
+        fatal(pos "a lazy loop over a cancellable source is not decided yet (open decision D44 Q9)")
     }
     if terminal.length >? 0 {
         let end_types=mk('tunion' pos)

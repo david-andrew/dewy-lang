@@ -55,7 +55,7 @@ tm_match=(pat0:MWord a0:MWord @binds:array<int64> depth:MWord):>MWord=>$unsafe {
         if pat =? a or tu_equal(pat  a) {return 0}
         if tu_has_var(a) {
             if ak =? 'var' {return 0}
-            if ak =? pk and ak =? 'array' and tm_match(MWord(tm_types[0].ptr[pat].elem)  MWord(tm_types[0].ptr[a].elem)  @binds  depth + 1) >=? 0 {return 0}
+            if ak =? pk and (ak =? 'array' or ak =? 'generator') and tm_match(MWord(tm_types[0].ptr[pat].elem)  MWord(tm_types[0].ptr[a].elem)  @binds  depth + 1) >=? 0 {return 0}
             if ak =? 'opt' and pk =? 'opt' {return 0}
         }
         if ak =? 'none_lit' and pk =? 'opt' {return 0}
@@ -92,7 +92,7 @@ tm_match=(pat0:MWord a0:MWord @binds:array<int64> depth:MWord):>MWord=>$unsafe {
         return r + 2
     }
     if pk not=? ak {return - 1}
-    if pk =? 'array' or pk =? 'ptr' or pk =? 'opt' or pk =? 'secret' {return tm_match(MWord(tm_types[0].ptr[pat].elem)  MWord(tm_types[0].ptr[a].elem)  @binds  depth + 1)}
+    if pk =? 'array' or pk =? 'ptr' or pk =? 'opt' or pk =? 'secret' or pk =? 'generator' {return tm_match(MWord(tm_types[0].ptr[pat].elem)  MWord(tm_types[0].ptr[a].elem)  @binds  depth + 1)}
     if pk =? 'fixed' {
         if tm_types[0].ptr[pat].bits not=? tm_types[0].ptr[a].bits {return - 1}
         return tm_match(MWord(tm_types[0].ptr[pat].elem)  MWord(tm_types[0].ptr[a].elem)  @binds  depth + 1)
@@ -135,7 +135,7 @@ tm_param_in_union=(t0:MWord id:MWord):>bool=>$unsafe {
             if tm_types[0].ptr[tu_prune(m)].kind =? 'param' and MWord(tm_types[0].ptr[tu_prune(m)].id) =? id {return true}
         }
     }
-    if k =? 'array' or k =? 'opt' or k =? 'ptr' {return tm_param_in_union(MWord(tm_types[0].ptr[t].elem)  id)}
+    if k =? 'array' or k =? 'opt' or k =? 'ptr' or k =? 'generator' {return tm_param_in_union(MWord(tm_types[0].ptr[t].elem)  id)}
     if k =? 'struct_' or k =? 'enum_' {
         let si=MWord(tm_types[0].ptr[t].st)
         loop j in [0..MWord(tm_structs[0].ptr[si].ntargs)) {

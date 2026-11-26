@@ -65,7 +65,8 @@ def arm_end(ts, at):
 
 
 UNENDING = OPEN | {'langle', 'at', 'tilde', 'bang', 'dot', 'kw_let', 'kw_const', 'kw_if', 'kw_else', 'kw_loop',
-                   'kw_match', 'kw_not', 'kw_import', 'kw_from', 'kw_of', 'kw_parallel', 'kw_concurrent', 'kw_spawn'}
+                   'kw_match', 'kw_not', 'kw_import', 'kw_from', 'kw_of', 'kw_parallel', 'kw_concurrent', 'kw_spawn',
+                   'kw_lazy', 'kw_defer'}
 
 
 def ends(symbol):
