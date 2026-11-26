@@ -38,6 +38,7 @@ from p"icount_ops.dewy" import (ic_lf ic_lines_report ic_report ic_restore ic_st
 from p"ide.jo" import (ide_skip)
 from p"inline_ops.dewy" import (rel_collect)
 from p"ir.jo" import (checked_flags dbg_on ir_pos main_code main_exit_lf mulh_ok rotate32_ok)
+from p"ir_operands.dewy" import (ba_fuse_enabled)
 from p"isolation_ops.dewy" import (isolation_reset)
 from p"lazy_force.dewy" import (dc_flush_warnings)
 from p"loops.jo" import (lx_vec_on)
@@ -50,7 +51,7 @@ from p"lower_functions.dewy" import (lower_function)
 from p"lower_primitives.dewy" import (global_addr_off lf_helper lf_of_inst)
 from p"lower_views.dewy" import (find_unique_globals)
 from p"macho_output.dewy" import (macho_watch_loader macos_bundle write_macho)
-from p"main.jo" import (DEWY_CORE_VERSION bss_reserve debug_info debug_vars exit_codes_only host_ir img_data_addr img_ro_addr img_text_addr lower_only repl_image timing)
+from p"main.jo" import (DEWY_CORE_VERSION bss_reserve debug_info debug_vars dump exit_codes_only host_ir img_data_addr img_ro_addr img_text_addr lower_only repl_image timing)
 from p"module_paths.dewy" import (strip_ext)
 from p"native_debug.dewy" import (pe_backtrace_info x64_frame_table x64_line_table)
 from p"native_output.dewy" import (write_elf write_pdb write_pe)
@@ -192,6 +193,7 @@ compile=(path:string out0:string):>string=>$unsafe {
     let lower_epoch_slot=@lower_epoch
     lower_epoch_slot=DriverWord(lower_epoch_slot) + 1
     opt_allow_cse=opt_release_slot or target_wasm
+    ba_fuse_enabled=not opt_release_slot and not dbg_on_slot and not target_wasm and not target_arm64 and not host_ir and not lower_only and not dump and not ra_stat
     let roots:array<int64>=[]
     loop f in init_fns {roots.push(lf_of_inst(f))}
     # Source promises apply to checked bodies even when no caller reaches

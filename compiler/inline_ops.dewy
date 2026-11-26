@@ -344,6 +344,7 @@ inlinable=(f:IrFn):>int64=>{
     if f.cabi or f.noinline or (f.export_name as array<uint8>).length >? 0 or f.code.length >? 400 {return 0}
     let leaf=true
     let cold_leaf=true
+    let noinline_calls:InlineWord=0
     let has_loop=false
     let has_load=false
     let has_brtable=false
@@ -392,7 +393,10 @@ inlinable=(f:IrFn):>int64=>{
                 cold_leaf=false
             } else {
                 let cf=rel_fns[rel_by_index[int64(ins.imm)]]
-                if cf.code.length <=? INLINE_MAX {
+                if cf.noinline {
+                    noinline_calls += 1
+                    if noinline_calls >? 2 {cold_leaf=false}
+                } else if cf.code.length <=? INLINE_MAX {
                     let cf_loop=false
                     loop cins in cf.code {
                         if cins.op =? 'loop' {cf_loop=true; break}

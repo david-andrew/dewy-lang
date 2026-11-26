@@ -20,6 +20,10 @@ const IR_LOC_DEF = 4096
 const IR_BA_CTRL = 8192
 const IR_CHECKED = 16384
 let ba_no_loops_fn:int64=-1
+let ba_fuse_enabled:bool=false
+let ba_defer_compact_fn:int64=-1
+let ba_defer_any_mov:bool=false
+let ba_defer_checked_flags:bool=true
 # Literal unions expose text, not integer ordinals, to Dewy. Keep this ABI-order
 # list aligned with Op; exhaustive twin/walker tests check every table slot.
 ir_operand_layouts=():>array<int64>=>{

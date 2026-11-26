@@ -13,7 +13,7 @@ from p"opt_workspace.dewy" import (
     opt_use_span_count opt_use_values opt_working fl_cache fl_sid fl_next_sid fl_blk_start fl_blk_kind
 )
 from p"opt_cleanup.dewy" import (oc_defines oc_extreme_select oc_has_use oc_if_select oc_negate oc_pure oc_retargetable oc_sole_slot oc_tag oc_vtype opt_cleanup opt_cleanup_ir)
-from p"ir_operands.dewy" import (ba_no_loops_fn)
+from p"ir_operands.dewy" import (ba_defer_any_mov ba_defer_checked_flags ba_defer_compact_fn ba_fuse_enabled ba_no_loops_fn)
 
 # Word arithmetic preserves Jo overflow; IR IDs and bounded cursors are fixed width.
 OptWord:type=int64<overflow='wrap'>
@@ -2336,7 +2336,8 @@ opt_fast_straight=():>void=>$unsafe {
         }
         p_ins+=1
     }
-    # Pass 3: in-place backward DCE.
+    # Pass 3: in-place backward DCE (and mark sole-use movs when deferring compaction to backend analysis).
+    let defer_ba=ba_fuse_enabled and opt_ir[0].fn_index >=? 0
     let any_nop=false
     let b_ins=w_ins - 1
     loop b_ins >=? input {
@@ -2359,11 +2360,24 @@ opt_fast_straight=():>void=>$unsafe {
             }
             b_ins[0].op='nop'
             any_nop=true
+        } else if defer_ba and any_mov and b_ins[0].op =? 'mov' {
+            b_ins[0].c=if regs[int64(b_ins[0].a)].nuse =? 1 {OptIndex(1)} else {OptIndex(0)}
         }
         b_ins-=1
     }
-    # Pass 4: compaction + mov retargeting (skipped if nothing to compact or retarget).
+    # Pass 4: compaction + mov retargeting (deferred into backend_analyze_straight when active).
     ba_no_loops_fn=opt_ir[0].fn_index
+    if defer_ba {
+        if w_ins >? input {
+            __set_len(opt_ir[0].code (OptWord(w_ins as int64) - OptWord(input as int64)) // size_of<Ins>)
+            if any_nop or any_mov {
+                ba_defer_compact_fn=opt_ir[0].fn_index
+                ba_defer_any_mov=any_mov
+                ba_defer_checked_flags=opt_checked_flags
+            }
+        } else {opt_ir[0].code.clear()}
+        return
+    }
     if not any_nop and not any_mov {
         if w_ins >? input {__set_len(opt_ir[0].code (OptWord(w_ins as int64) - OptWord(input as int64)) // size_of<Ins>)} else {opt_ir[0].code.clear()}
         return
@@ -3238,12 +3252,20 @@ fl_pass2=():>int64=>$unsafe {
                 let ra=regs + a
                 let rb=regs + b
                 let rd=regs + d
-                if cur_p[0].ty =? 0 and (ra[0].constant or rb[0].constant or a =? b or (loop_depth >? 0 and ((0x10184050 >> (int64((cur_p as ptr<uint32>)[0]) & 63)) & 1) not=? 0)) {
-                    if loop_depth >? 0 {fl_p2_ctl_n=ctl_n; fl_p2_nbr=nbr}
-                    let kept=fl_p2_bin_cold(cur_p w_ins a b depth loop_depth)
-                    regs=o_regs; vt=opt_vtypes
-                    if kept not=? 0 {w_ins+=1}
-                    continue
+                if cur_p[0].ty =? 0 {
+                    let btag=int64((cur_p as ptr<uint32>)[0])
+                    let need_cold=ra[0].constant or a =? b or (loop_depth >? 0 and ((0x10184050 >> (btag & 63)) & 1) not=? 0)
+                    if not need_cold and rb[0].constant {
+                        let k=rb[0].cval
+                        need_cold=k =? 0 or (btag >=? 6 and btag <=? 10) or (btag =? 4 and int64(ra[0].dop) =? 4) or (btag =? 11 and k =? -1) or (btag >=? 21 and btag <=? 28 and (k =? OW_MIN_INT or k =? 9223372036854775807 or int64(ra[0].dop) =? 11))
+                    }
+                    if need_cold {
+                        if loop_depth >? 0 {fl_p2_ctl_n=ctl_n; fl_p2_nbr=nbr}
+                        let kept=fl_p2_bin_cold(cur_p w_ins a b depth loop_depth)
+                        regs=o_regs; vt=opt_vtypes
+                        if kept not=? 0 {w_ins+=1}
+                        continue
+                    }
                 }
                 if w_ins not=? cur_p {w_ins[0]=cur_p[0]}
                 w_ins[0].a=OptIndex(a)
@@ -3721,6 +3743,8 @@ fl_pass4_compact=(used:int64):>void=>$unsafe {
     let bs_p=fl_blk_start_p
     let bk_p=fl_blk_kind_p
     let bcap=fl_blk_cap_g
+    let regs=o_regs
+    let rc=o_reg_count
     let bn:OptWord=0
     let w:OptWord=0
     let wp=input
@@ -3751,13 +3775,22 @@ fl_pass4_compact=(used:int64):>void=>$unsafe {
                 bn-=1
                 let bk=bk_p[bn]
                 if bk not=? 'loop' {
-                    let r=fl_compact_end(input bs_p[bn] bk w)
-                    if r >=? 0 {w=r; wp=input + w; continue}
-                    w=-1 - r; wp=input + w
+                    let st=bs_p[bn]
+                    let lop=(wp - 1)[0].op
+                    if bk =? 'if_' and w >? st + 1 and lop not=? 'mov' and lop not=? 'br' {
+                    } else {
+                        let r=fl_compact_end(input st bk w)
+                        if r >=? 0 {w=r; wp=input + w; continue}
+                        w=-1 - r; wp=input + w
+                    }
                 }
             }
         } else if ck =? 13 {
-            if w >? 0 and fl_compact_mov(input wp w cur_p) {continue}
+            if w >? 0 {
+                let t=int64(cur_p[0].a)
+                let d=int64(cur_p[0].dst)
+                if t not=? d and t >=? 0 and t <? rc and regs[t].nuse =? 1 and fl_compact_mov(input wp w cur_p) {continue}
+            }
         } else if ck =? 14 {
             if w >? 0 {
                 let last=wp - 1

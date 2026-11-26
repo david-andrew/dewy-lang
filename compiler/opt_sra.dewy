@@ -30,6 +30,7 @@ SraSlot:type=[
     width:SraWord=8
     ok:bool
     in_loop:bool
+    has_load:bool
 ]
 
 SraLane:type=[
@@ -60,7 +61,7 @@ sra_workspace=(nv:int64 ns:int64):>void=>$unsafe {
         let width:SraWord=8
         if size =? 1 or size =? 2 {width=size}
         else if size & 7 not=? 0 {width=4}
-        sra_slots[slot]=SraSlot(width false false)
+        sra_slots[slot]=SraSlot(width false false false)
     }
 }
 
@@ -316,12 +317,23 @@ sra_zero_lane=(@out:array<Ins> t:SraWord):>void=>$unsafe {
 # each of A demanded definitions once. The final rewrite runs only on success.
 # Operand fields are read where an operation needs them.
 let sra_nested:bool=false
+let sra_loop_only:bool=false
 let sra_roots:array<int64>=[]
 let sra_pending:array<int64>=[]
+let sra_ctl:array<bool>=[]
 let sra_roots_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let sra_pending_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let sra_ctl_p:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
 let sra_roots_cap:int64=0
 let sra_pending_cap:int64=0
+let sra_ctl_cap:int64=0
+
+sra_grow_ctl=():>void=>$unsafe {
+    let nc=if sra_ctl_cap <? 64 {64} else {sra_ctl_cap * 2}
+    sra_ctl.resize(nc)
+    sra_ctl_p=sra_ctl.ptr
+    sra_ctl_cap=nc
+}
 
 sra_push_root=(n:int64 pos:int64):>int64=>$unsafe {
     if n >=? sra_roots_cap {
@@ -349,6 +361,7 @@ sra_rewrite=(code:ptr<Ins> count:int64 nv:int64 ns:int64 pending_n:int64):>void=
     let sizes=ir.slot_size.ptr
     let any=false
     loop s in [0..ns) {
+        if sra_loop_only and not sra_slots[s].in_loop and sra_slots[s].has_load {sra_slots[s].ok=false}
         let size=SraWord(sizes[s])
         let width=sra_slots[s].width
         if size & (width - 1) not=? 0 or size >> (sra_shift(width) & 63) >? 4 {sra_slots[s].ok=false}
@@ -648,12 +661,44 @@ o_sra=():>void=>$unsafe {
         } else {sv[d].slot=-1}
     }
     if sra_ok_count =? 0 {return}
+    if sra_loop_only and sra_ctl_cap <? 64 {sra_grow_ctl()}
+    let ctl_p=sra_ctl_p
+    let ctl_cap=sra_ctl_cap
+    let ctl_n:int64=0
+    let loop_depth:int64=0
+    let track_loop=sra_loop_only
     let pending_n:int64=0
     ins=code
     pos=0
     loop ins <? end_ {
         match ins[0].op {
-            <'slot'|'zeroslots'|'nop'|'iconst'|'fconst'|'gaddr'|'daddr'|'faddr'|'block'|'loop'|'else_'|'end'|'br'|'trap'|'vzu'> => {}
+            <'slot'|'zeroslots'|'nop'|'iconst'|'fconst'|'gaddr'|'daddr'|'faddr'|'else_'|'br'|'trap'|'vzu'> => {}
+            <'block'> => {
+                if track_loop {
+                    if ctl_n >=? ctl_cap {sra_grow_ctl(); ctl_p=sra_ctl_p; ctl_cap=sra_ctl_cap}
+                    ctl_p[ctl_n]=false; ctl_n+=1
+                }
+            }
+            <'if_'> => {
+                if sra_esc_v(SraWord(ins[0].a)) {return}
+                if track_loop {
+                    if ctl_n >=? ctl_cap {sra_grow_ctl(); ctl_p=sra_ctl_p; ctl_cap=sra_ctl_cap}
+                    ctl_p[ctl_n]=false; ctl_n+=1
+                }
+            }
+            <'loop'> => {
+                if track_loop {
+                    if ctl_n >=? ctl_cap {sra_grow_ctl(); ctl_p=sra_ctl_p; ctl_cap=sra_ctl_cap}
+                    ctl_p[ctl_n]=true; ctl_n+=1
+                    loop_depth+=1
+                }
+            }
+            <'end'> => {
+                if track_loop and ctl_n >? 0 {
+                    ctl_n-=1
+                    if ctl_p[ctl_n] {loop_depth-=1}
+                }
+            }
             <'mov'> => {
                 let d=SraWord(ins[0].dst)
                 let a=SraWord(ins[0].a)
@@ -697,6 +742,8 @@ o_sra=():>void=>$unsafe {
                 let c=SraWord(ins[0].c)
                 let sa=if a >=? 0 {let s0=SraWord(sv[a].slot); if s0 =? -2 {sra_resolve_address(a)} else {s0}} else {-1}
                 if sa >=? 0 {
+                    slots[sa].has_load=true
+                    if loop_depth >? 0 {slots[sa].in_loop=true}
                     sra_narrow(sa a pos c)
                     if c & M_INDEX =? 0 {pending_n=sra_push_pending(pending_n pos)}
                     else {
@@ -720,6 +767,7 @@ o_sra=():>void=>$unsafe {
                     if sd >=? 0 and sv[sd].slot not=? -1 {sra_escape(sd); if sra_ok_count =? 0 {return}}
                 }
                 if sa >=? 0 {
+                    if loop_depth >? 0 {slots[sa].in_loop=true}
                     sra_narrow(sa a pos SraWord(ins[0].c))
                     pending_n=sra_push_pending(pending_n pos)
                 }
@@ -731,6 +779,13 @@ o_sra=():>void=>$unsafe {
                 let sa=sra_address(a)
                 let sb=sra_address(b)
                 let sc=sra_address(c)
+                if sb >=? 0 {slots[sb].has_load=true}
+                if sc >=? 0 {slots[sc].has_load=true}
+                if loop_depth >? 0 {
+                    if sa >=? 0 {slots[sa].in_loop=true}
+                    if sb >=? 0 {slots[sb].in_loop=true}
+                    if sc >=? 0 {slots[sc].in_loop=true}
+                }
                 if sa >=? 0 and regs[a].defpos <? pos {slots[sa].width=4}
                 if sb >=? 0 and regs[b].defpos <? pos {slots[sb].width=4}
                 if sc >=? 0 and regs[c].defpos <? pos {slots[sc].width=4}
@@ -741,6 +796,11 @@ o_sra=():>void=>$unsafe {
                 let b=SraWord(ins[0].b)
                 let sa=sra_address(a)
                 let sb=sra_address(b)
+                if sb >=? 0 {slots[sb].has_load=true}
+                if loop_depth >? 0 {
+                    if sa >=? 0 {slots[sa].in_loop=true}
+                    if sb >=? 0 {slots[sb].in_loop=true}
+                }
                 sra_narrow_copy(sa a pos SraWord(ins[0].imm))
                 sra_narrow_copy(sb b pos SraWord(ins[0].imm))
                 if sa >=? 0 or sb >=? 0 {pending_n=sra_push_pending(pending_n pos)}
@@ -748,6 +808,7 @@ o_sra=():>void=>$unsafe {
             <'zero'> => {
                 let a=SraWord(ins[0].a)
                 let sa=sra_address(a)
+                if loop_depth >? 0 and sa >=? 0 {slots[sa].in_loop=true}
                 sra_narrow_copy(sa a pos SraWord(ins[0].imm))
                 if sa >=? 0 {pending_n=sra_push_pending(pending_n pos)}
             }

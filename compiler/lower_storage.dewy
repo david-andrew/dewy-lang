@@ -88,13 +88,20 @@ vt_of=(t0:LSWord):>int64=>$unsafe {
     if f & 64 not=? 0 {return (f >> 9) & 3}
     vt_of_slow(t0)
 }
-mem_mode=(t0:LSWord):>int64=>$unsafe {
+mem_mode_slow=(t0:LSWord):>int64=>$unsafe {
     let t=quantity_base(t0)
     let k=types.ptr[t].kind
     let s=tsize(t)
-    if k =? 'float_' {return s | M_FLOAT}
-    if k =? 'int_' and types.ptr[t].sign {return s | M_SIGNED}
-    return s
+    let m:LSWord=if k =? 'float_' {s | M_FLOAT} else if k =? 'int_' and types.ptr[t].sign {s | M_SIGNED} else {s}
+    if t =? t0 and m >=? 0 and m <=? 63 and k not=? 'var' {
+        types.ptr[t0].flags |= int32<overflow='wrap'>(8192 | (m << 14))
+    }
+    return m
+}
+mem_mode=(t0:LSWord):>int64=>$unsafe {
+    let f=LSWord(types.ptr[t0].flags)
+    if f & 8192 not=? 0 {return (f >> 14) & 63}
+    mem_mode_slow(t0)
 }
 load_val=(t:LSWord addr:LSWord off:LSWord):>int64=>$unsafe {
     if vc(t) =? VC_AGG {return e_addi(addr off)}
@@ -443,19 +450,38 @@ own=(val:Val t:LSWord):>Val=>$unsafe {
     if is_managed(t) {return Val[copy_ref(val.v t) true -1]}
     return Val[val.v true -1]
 }
+stmt_begin_grow=(tvlen:int64 nop:int64 cd:int64):>void=>$unsafe {
+    if cap(tl_items) <? 64 {tl_items.reserve(64)}
+    if cap(tl_nop) <? 64 {tl_nop.reserve(64)}
+    if cap(tl_cond) <? 64 {tl_cond.reserve(64)}
+    tl_items.push(tvlen)
+    tl_nop.push(nop)
+    tl_cond.push(cd)
+}
 stmt_begin=():>void=>$unsafe {
     positive_epoch += 1;
-    tl_items.push(tl_values.length);
     lower_mark_serial += 1;
-    tl_nop.push((ir.code.length << 32) | lower_mark_serial);
-    tl_cond.push(cond_depth);
+    let tvlen=tl_values.length
+    let nop=(ir.code.length << 32) | lower_mark_serial
+    let cd=cond_depth
+    let p0=tl_items.ptr
+    let p1=tl_nop.ptr
+    let p2=tl_cond.ptr
+    if p0 not=? (uint64(0) as ptr<int64>) and p1 not=? (uint64(0) as ptr<int64>) and p2 not=? (uint64(0) as ptr<int64>) {
+        let h0=p0 - 3
+        let h1=p1 - 3
+        let h2=p2 - 3
+        let n=h0[1]
+        if h0[0] =? 1 and h1[0] =? 1 and h2[0] =? 1 and n <? h0[2] and h1[1] =? n and n <? h1[2] and h2[1] =? n and n <? h2[2] {
+            p0[n]=tvlen; h0[1]=n + 1
+            p1[n]=nop; h1[1]=n + 1
+            p2[n]=cd; h2[1]=n + 1
+            return
+        }
+    }
+    stmt_begin_grow(tvlen nop cd)
 }
-stmt_end=():>void=>$unsafe {
-    let start=tl_items.pop()
-    let end_=tl_values.length
-    let nop=tl_nop.pop()
-    tl_cond.pop();
-    if start =? end_ {return}
+stmt_end_slow=(start:int64 end_:int64 nop:int64):>void=>$unsafe {
     # Append the demanded zero inventory directly into the IR argument arena.
     let args_start=ir.args.length
     loop i in [start..end_) {
@@ -482,6 +508,25 @@ stmt_end=():>void=>$unsafe {
         i -= 1;
     }
     tl_values.truncate(start);
+}
+stmt_end=():>void=>$unsafe {
+    let n=tl_items.length - 1
+    let start=tl_items.ptr[n]
+    let end_=tl_values.length
+    let nop=tl_nop.ptr[n]
+    let h0=tl_items.ptr - 3
+    let h1=tl_nop.ptr - 3
+    let h2=tl_cond.ptr - 3
+    if h0[0] =? 1 and h1[0] =? 1 and h2[0] =? 1 {
+        h0[1]=n
+        h1[1]=n
+        h2[1]=n
+    } else {
+        tl_items.pop();
+        tl_nop.pop();
+        tl_cond.pop();
+    }
+    if start not=? end_ {stmt_end_slow(start end_ nop)}
 }
 build_slot=(s:LSWord t:LSWord needs_zero:bool=false):>bool=>$unsafe {
     if not is_managed(t) {return false}

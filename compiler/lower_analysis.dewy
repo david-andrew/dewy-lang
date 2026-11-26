@@ -7,7 +7,7 @@ from p"lower.jo" import (FW_NEAR FnWrites LF_ELEMENTVIEW fr_direct fr_total fw_d
 from p"expr.jo" import (IN)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_VALUEITER LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_SHARED LF_SOAELEM LF_VALUECAP fns globals lib_dir locals)
-from p"ast.jo" import (NF_EXTERN NF_MUT has_flag kid kid2 kid_c kid_d nkids nodes)
+from p"ast.jo" import (NF_EXTERN NF_MUT has_flag kid kid2 kid_c kid_d lists nkids nodes)
 from p"types.jo" import (T_MATH_INT is_int prune tkind types)
 from p"type_ops.dewy" import (int_policy is_managed math_optional ptr_optional)
 from p"checked_eval.dewy" import (cx_token_values)
@@ -429,20 +429,32 @@ mentions_local=(n:LAWord l:LAWord):>bool=>$unsafe {
     if n <=? 0 {return false}
     let k=nodes.ptr[n].kind
     if k =? 'ident' {return nodes.ptr[n].aux =? int32(1) and LAWord(nodes.ptr[n].sym) =? l}
+    if k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'none_lit' or k =? 'null_lit' or k =? 'dotname' or k =? 'hole' or k =? 'break_' or k =? 'continue_' or k =? 'pwild' {return false}
     let child_a:LAWord=LAWord(nodes.ptr[n].a)
+    if child_a >? 0 and mentions_local(child_a l) {return true}
     let child_b:LAWord=LAWord(nodes.ptr[n].b)
-    # (kid_c and kid_d, with the kind in hand)
-    let child_c=if nodes.ptr[n].kind =? 'for_' {0} else {LAWord(nodes.ptr[n].c)}
-    let child_d=if nodes.ptr[n].kind =? 'for_' or nodes.ptr[n].kind =? 'partial' {0} else {LAWord(nodes.ptr[n].d)}
-    if mentions_local(child_a l) {return true}
-    if mentions_local(child_b l) {return true}
-    if mentions_local(child_c l) {return true}
-    if mentions_local(child_d l) {return true}
-    loop i in [0..nkids(n)) {
-        if mentions_local(kid(n i) l) {return true}
+    if child_b >? 0 and mentions_local(child_b l) {return true}
+    if k not=? 'for_' {
+        let child_c=LAWord(nodes.ptr[n].c)
+        if child_c >? 0 and mentions_local(child_c l) {return true}
+        if k not=? 'partial' {
+            let child_d=LAWord(nodes.ptr[n].d)
+            if child_d >? 0 and mentions_local(child_d l) {return true}
+        }
     }
-    loop i in [0..nkids2(n)) {
-        if mentions_local(kid2(n i) l) {return true}
+    let nk=LAWord(nodes.ptr[n].nlist)
+    if nk >? 0 {
+        let l0=LAWord(nodes.ptr[n].list)
+        loop i in [0..nk) {
+            if mentions_local(LAWord(lists.ptr[l0 + i]) l) {return true}
+        }
+    }
+    let nk2=LAWord(nodes.ptr[n].nlist2)
+    if nk2 >? 0 {
+        let l2=LAWord(nodes.ptr[n].list2)
+        loop i in [0..nk2) {
+            if mentions_local(LAWord(lists.ptr[l2 + i]) l) {return true}
+        }
     }
     return false
 }
@@ -466,39 +478,43 @@ write_overlaps=(target:LAWord root:LAWord place:LAWord):>bool=>$unsafe {
     let w=place_var(target)
     return w not=? 0 and same_var(w root) and (place =? 0 or steps_overlap(place_steps(target) place_steps(place)))
 }
-may_write_root=(n:LAWord rn:LAWord place:LAWord=0):>bool=>$unsafe {
-    if n <=? 0 {return false}
+mwr_walk=(n:LAWord rn:LAWord place:LAWord glob:bool mutparam:bool rsym:LAWord):>bool=>$unsafe {
     let k=nodes.ptr[n].kind
-    if k =? 'lambda' or k =? 'lazy_' {return false}
-    let glob=nodes.ptr[rn].aux =? int32(2)
-    let mutparam=not glob and LAWord(locals.ptr[LAWord(nodes.ptr[rn].sym)].flags) & LF_MUTPARAM not=? 0
+    if k =? 'ident' or k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'none_lit' or k =? 'null_lit' or k =? 'dotname' or k =? 'hole' or k =? 'break_' or k =? 'continue_' or k =? 'lambda' or k =? 'lazy_' or k =? 'pwild' {return false}
     if not mwr_direct and (glob or mutparam) {
         loop f in value_helper_calls(n) {
             let w=fn_writes(f)
-            if w.all or (glob and w.globals.contains(LAWord(nodes.ptr[rn].sym))) or (mutparam and w.globals.length >? 0) {return true}
+            if w.all or (glob and w.globals.contains(rsym)) or (mutparam and w.globals.length >? 0) {return true}
         }
     }
     if k =? 'assign' {
         if write_overlaps(LAWord(nodes.ptr[n].a) rn place) {return true}
     }
-    if k =? 'intrinsic' and nkids(n) >? 0 {
-        let id=nodes.ptr[n].aux as IN
-        if (id =? IN.fmt_struct or id =? IN.json_fields) and (glob or mutparam) {return true}
-        if id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend or id =? IN.arrdata {
-            if write_overlaps(kid(n 0) rn place) {return true}
+    else if k =? 'intrinsic' {
+        let nk0=LAWord(nodes.ptr[n].nlist)
+        if nk0 >? 0 {
+            let id=nodes.ptr[n].aux as IN
+            if (id =? IN.fmt_struct or id =? IN.json_fields) and (glob or mutparam) {return true}
+            if id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend or id =? IN.arrdata {
+                if write_overlaps(LAWord(lists.ptr[LAWord(nodes.ptr[n].list)]) rn place) {return true}
+            }
         }
     }
-    if k =? 'addr' or (k =? 'cast' or k =? 'conv') and raw_view(n) {
+    else if k =? 'addr' or (k =? 'cast' or k =? 'conv') and raw_view(n) {
         if write_overlaps(LAWord(nodes.ptr[n].a) rn place) {return true}
     }
-    if k =? 'for_' and has_flag(n NF_MUT) {
-        if write_overlaps(LAWord(nodes.ptr[n].a) rn place) {return true}
+    else if k =? 'for_' {
+        if has_flag(n NF_MUT) and write_overlaps(LAWord(nodes.ptr[n].a) rn place) {return true}
     }
-    if k =? 'call' or (k =? 'pair' and nodes.ptr[n].sym >? 0) {
+    else if k =? 'call' or (k =? 'pair' and nodes.ptr[n].sym >? 0) {
         let mm=checked_call_mutmask(n)
-        loop i in [0..nkids(n)) {
-            if mm & (LAWord(1) << LAWord(i)) not=? 0 {
-                if write_overlaps(kid(n i) rn place) {return true}
+        if mm not=? 0 {
+            let nk0=LAWord(nodes.ptr[n].nlist)
+            let l0=LAWord(nodes.ptr[n].list)
+            loop i in [0..nk0) {
+                if mm & (LAWord(1) << LAWord(i)) not=? 0 {
+                    if write_overlaps(LAWord(lists.ptr[l0 + i]) rn place) {return true}
+                }
             }
         }
         let aux=if k =? 'pair' {0} else {LAWord(nodes.ptr[n].aux)}
@@ -510,25 +526,47 @@ may_write_root=(n:LAWord rn:LAWord place:LAWord=0):>bool=>$unsafe {
             # (what the function and everything it calls may write; a mut parameter may be the
             # caller's global)
             let w=fn_writes(LAWord(nodes.ptr[n].sym))
-            if w.all or (glob and w.globals.contains(LAWord(nodes.ptr[rn].sym))) or (mutparam and w.globals.length >? 0) {return true}
+            if w.all or (glob and w.globals.contains(rsym)) or (mutparam and w.globals.length >? 0) {return true}
         }
     }
     let child_a:LAWord=LAWord(nodes.ptr[n].a)
+    if child_a >? 0 and mwr_walk(child_a rn place glob mutparam rsym) {return true}
     let child_b:LAWord=LAWord(nodes.ptr[n].b)
-    # (kid_c and kid_d, with the kind in hand)
-    let child_c=if nodes.ptr[n].kind =? 'for_' {0} else {LAWord(nodes.ptr[n].c)}
-    let child_d=if nodes.ptr[n].kind =? 'for_' or nodes.ptr[n].kind =? 'partial' {0} else {LAWord(nodes.ptr[n].d)}
-    if may_write_root(child_a rn place) {return true}
-    if may_write_root(child_b rn place) {return true}
-    if may_write_root(child_c rn place) {return true}
-    if may_write_root(child_d rn place) {return true}
-    loop i in [0..nkids(n)) {
-        if may_write_root(kid(n i) rn place) {return true}
+    if child_b >? 0 and mwr_walk(child_b rn place glob mutparam rsym) {return true}
+    if k not=? 'for_' {
+        let child_c=LAWord(nodes.ptr[n].c)
+        if child_c >? 0 and mwr_walk(child_c rn place glob mutparam rsym) {return true}
+        if k not=? 'partial' {
+            let child_d=LAWord(nodes.ptr[n].d)
+            if child_d >? 0 and mwr_walk(child_d rn place glob mutparam rsym) {return true}
+        }
     }
-    loop i in [0..nkids2(n)) {
-        if may_write_root(kid2(n i) rn place) {return true}
+    let nk=LAWord(nodes.ptr[n].nlist)
+    if nk >? 0 {
+        let l0=LAWord(nodes.ptr[n].list)
+        loop i in [0..nk) {
+            let ci=LAWord(lists.ptr[l0 + i])
+            if ci >? 0 and mwr_walk(ci rn place glob mutparam rsym) {return true}
+        }
+    }
+    let nk2=LAWord(nodes.ptr[n].nlist2)
+    if nk2 >? 0 {
+        let l2=LAWord(nodes.ptr[n].list2)
+        loop i in [0..nk2) {
+            let ci=LAWord(lists.ptr[l2 + i])
+            if ci >? 0 and mwr_walk(ci rn place glob mutparam rsym) {return true}
+        }
     }
     return false
+}
+may_write_root=(n:LAWord rn:LAWord place:LAWord=0):>bool=>$unsafe {
+    if n <=? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' or k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'none_lit' or k =? 'null_lit' or k =? 'dotname' or k =? 'hole' or k =? 'break_' or k =? 'continue_' or k =? 'lambda' or k =? 'lazy_' or k =? 'pwild' {return false}
+    let glob=nodes.ptr[rn].aux =? int32(2)
+    let rsym=LAWord(nodes.ptr[rn].sym)
+    let mutparam=not glob and LAWord(locals.ptr[rsym].flags) & LF_MUTPARAM not=? 0
+    mwr_walk(n rn place glob mutparam rsym)
 }
 calls_leave=(n:LAWord rn:LAWord written:bool):>bool=>$unsafe {
     if n <=? 0 {return true}

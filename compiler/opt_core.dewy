@@ -10,7 +10,7 @@ from p"opt.jo" import (o_decode o_resize_fast opt_bind_addresses)
 from p"opt_registers.dewy" import (o_resize)
 from p"opt_rewrite.dewy" import (opt_fast_loop opt_fast_straight opt_rewrite)
 from p"opt_licm.dewy" import (o_licm)
-from p"opt_sra.dewy" import (o_sra sra_nested)
+from p"opt_sra.dewy" import (o_sra sra_loop_only sra_nested)
 
 # Decode words are wrapping machine words, as in Jo.
 CoreWord:type=int64<overflow='wrap'>
@@ -170,7 +170,9 @@ optimize=():>void=>$unsafe {
         }
         let nested=false
         if has_small {
+            sra_loop_only=true
             o_sra()
+            sra_loop_only=false
             nested=sra_nested
         } else {
             o_resize_fast(opt_ir[0].vtypes.length)
