@@ -1,18 +1,21 @@
 $runtime_checks
-from p"ast.jo" import (NF_INCLUSIVE NF_STEP has_flag kid kids nkids nodes)
-from p"check.jo" import (LF_ALIAS LF_CAPTURE LF_MUTPARAM fns locals)
+from p"ast.jo" import (NF_GENERIC NF_GLOBAL NF_INCLUSIVE NF_STEP has_flag kid kids nkids nodes)
+from p"check.jo" import (FK_NORMAL LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_MUTPARAM LF_PARAM fns locals)
+from p"checker_generators.dewy" import (gen_type_contains)
 from p"copies.jo" import (copies_on)
 from p"copy_ops.dewy" import (copies_prepare copy_capture_ids own_at)
 from p"diagnostic_exit.dewy" import (fatal ice)
 from p"expression_types.dewy" import (ntype)
 from p"ir.jo" import (VI ir ir_pos)
 from p"ir_builders.dewy" import (e_addi e_bin e_brtable e_call0 e_call1 e_calli e_copy e_iconst e_load e_mov e_ret e_slot e_store e_zero ir_set_pos new_slot vreg)
-from p"lower.jo" import (HK LoopInfo VC_AGG VC_VOID Val ctl cur_fn env_v loops lower_epoch scope_locals)
-from p"lower_group.dewy" import (gen_block_stmts gen_expr gen_match_test gen_owned gen_place gen_stmt local_place scope_pop)
+from p"lower.jo" import (HK LoopInfo VC_AGG VC_VOID Val building ctl cur_fn env_v loops lower_epoch scope_locals tl_items)
+from p"lower_group.dewy" import (emit_scope_exit gen_block_stmts gen_expr gen_match_test gen_owned gen_place gen_stmt local_place scope_pop)
 from p"lower_helpers.dewy" import (drop_embedded helper_params)
 from p"lower_primitives.dewy" import (e_faddr lf_helper rt tuple_off)
-from p"lower_storage.dewy" import (V arr_len blk borrow br_to brif_to cell_place els endc iff is_shared load_val lop new_temp opt_has opt_value own read_place release retain scope_add_local scope_push stmt_begin stmt_end store_type store_val vc vt_of write_place zero_declare)
+from p"lower_storage.dewy" import (V arr_len blk borrow br_to brif_to cell_place drop_held els endc iff is_shared load_val lop new_temp opt_has opt_value own read_place release retain scope_add_local scope_push stmt_begin stmt_end store_type store_val vc vt_of write_place zero_declare)
 from p"math_ops.dewy" import (math_binary math_compare math_word)
+from p"ownership_types.dewy" import (ownership_type)
+from p"type_constructors.dewy" import (tb_generators_seen)
 from p"types.jo" import (T_BOOL T_INT T_MATH_INT T_NEVER T_VOID align_up fields ptr_size prune structs talign targ telem tkind tsize types)
 from p"type_ops.dewy" import (fixed_len is_managed layout)
 from p"util.jo" import (name_of)
@@ -70,6 +73,7 @@ let gen_comb_slots:dict<int64 int64>=dict<int64 int64>()
 gen_reset_lower=():>void=>{
     gen_comb_fn=-1
     gen_comb_slots.clear()
+    gen_fuse_reset()
 }
 
 # Does statement `s` require state-machine splitting (contains a yield_ or a jump to an enclosing SM loop)?
@@ -1308,6 +1312,7 @@ helper_gen_drop=(f:LGnWord gen_t:LGnWord):>void=>$unsafe {
 
 # Lower `loop x in g` and `loop i in 0.. and x in g` (`for_` with `aux == 5`).
 gen_for_generator=(s:LGnWord):>void=>$unsafe {
+    if tb_generators_seen and gen_fuse_try_for(s) {return}
     let el_l=LGnWord(nodes.ptr[s].sym)
     let et=prune(LGnWord(locals.ptr[el_l].type))
     let idx_l=LGnWord(nodes.ptr[s].c)
@@ -1389,4 +1394,646 @@ gen_intrinsic_iter_value=(e:LGnWord arg_start:LGnWord):>Val=>$unsafe {
     }
     if vc(et) =? VC_VOID {return V(-1 false)}
     V(load_val(et e_slot(out_slot) 0) true)
+}
+
+# ---------------- Local Loop Fusion (Zero-Allocation Pipeline Lowering) ----------------
+# Fuses non-escaping local generator pipelines (`lazy ...`, single-use local chains, and
+# direct single-`lazy` factory calls) directly into their single consuming `for_ (aux = 5)` loop
+# with zero heap frame allocation and zero indirect `step_fn` dispatch.
+GenFuseSource:type=[
+    kind:int64=0        # 0 = direct lazy_, 1 = direct single-lazy factory call
+    node:int64=0        # lazy_ node or call node
+    lazy_node:int64=0   # underlying lazy_ AST node
+    fn_inst:int64=0     # FK_GENERATOR instance
+    factory_fn:int64=0  # FK_NORMAL factory instance (if kind == 1)
+    cap_slots:array<int64>=[]
+    cap_fused:array<int64>=[]
+    cap_types:array<int64>=[]
+    prepared:bool=false
+]
+
+GenFuseCtx:type=[
+    el_l:int64=0
+    idx_l:int64=0
+    consumer_body:int64=0
+    brk_lvl:int64=0
+    brk_scope:int64=0
+    out_slot:int64=-1
+    consumer_loops:array<LoopInfo>=[]
+    consumer_items:int64=0
+    consumer_built:int64=0
+]
+
+GenFuseScan:type=[
+    cand_decl:dict<int64 int64>=dict<int64 int64>()
+    cand_rhs:dict<int64 int64>=dict<int64 int64>()
+    cand_depth:dict<int64 int64>=dict<int64 int64>()
+    cand_block:dict<int64 int64>=dict<int64 int64>()
+    cand_idx:dict<int64 int64>=dict<int64 int64>()
+    use_count:dict<int64 int64>=dict<int64 int64>()
+    use_kind:dict<int64 int64>=dict<int64 int64>()
+    use_parent:dict<int64 int64>=dict<int64 int64>()
+    use_block:dict<int64 int64>=dict<int64 int64>()
+    use_idx:dict<int64 int64>=dict<int64 int64>()
+    disqualified:dict<int64 bool>=dict<int64 bool>()
+    rhs_owner:dict<int64 int64>=dict<int64 int64>()
+    cands:array<int64>=[]
+]
+
+let gen_fuse_pool:array<GenFuseSource>=[]
+let gen_fuse_locals:dict<int64 int64>=dict<int64 int64>()
+let gen_fuse_decls:dict<int64 int64>=dict<int64 int64>()
+let gen_fuse_stack:array<GenFuseCtx>=[]
+let gen_fuse_brk_scopes:dict<int64 int64>=dict<int64 int64>()
+
+gen_fuse_reset=():>void=>{
+    gen_fuse_pool=[]
+    gen_fuse_locals.clear()
+    gen_fuse_decls.clear()
+    gen_fuse_stack=[]
+    gen_fuse_brk_scopes.clear()
+}
+
+gen_fuse_active=():>bool=>gen_fuse_brk_scopes.length >? 0
+
+gen_fuse_brk_scope=(brk_lvl:LGnWord fallback:LGnWord):>int64=>{
+    gen_fuse_brk_scopes.get(brk_lvl) ?? fallback
+}
+
+# Map a factory parameter's view local (if Dewy inserted a synthetic param-view vardecl `aux2 == 1`)
+# back to its parameter index in `fns.ptr[cf].params`, or -1 if not a direct parameter.
+gen_fuse_factory_param_idx=(cf:LGnWord outer_l:LGnWord):>int64=>$unsafe {
+    let target=outer_l
+    let body=LGnWord(fns.ptr[cf].body)
+    loop i in [0..nkids(body)) {
+        let s=kid(body i)
+        if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+        if LGnWord(nodes.ptr[s].sym) =? target {
+            let rhs=LGnWord(nodes.ptr[s].b)
+            if rhs >? 0 and nodes.ptr[rhs].kind =? 'ident' and nodes.ptr[rhs].aux =? int32(1) {
+                target=LGnWord(nodes.ptr[rhs].sym)
+            }
+            break
+        }
+    }
+    loop j in [0..fns.ptr[cf].params.length) {
+        if LGnWord(fns.ptr[cf].params.ptr[j]) =? target {return j}
+    }
+    -1
+}
+
+# Check if direct call `c` invokes a single-lazy factory function; return its `lazy_` node or 0.
+gen_fuse_factory_lazy=(c:LGnWord):>int64=>$unsafe {
+    if c <=? 0 or nodes.ptr[c].kind not=? 'call' or nodes.ptr[c].aux not=? 0 {return 0}
+    let cf=LGnWord(nodes.ptr[c].sym)
+    if cf <=? 0 or cf >=? fns.length {return 0}
+    if fns.ptr[cf].kind not=? FK_NORMAL or fns.ptr[cf].state not=? 2 {return 0}
+    if fns.ptr[cf].cabi or fns.ptr[cf].has_env {return 0}
+    let body=LGnWord(fns.ptr[cf].body)
+    if body <=? 0 or nodes.ptr[body].kind not=? 'block' {return 0}
+    if nkids(c) not=? fns.ptr[cf].params.length {return 0}
+    let si:int64=0
+    loop si <? nkids(body) {
+        let st=kid(body si)
+        if nodes.ptr[st].kind =? 'vardecl' and nodes.ptr[st].aux2 =? 1 {si += 1}
+        else {break}
+    }
+    if si not=? nkids(body) - 1 {return 0}
+    let s0=kid(body si)
+    let s0k=nodes.ptr[s0].kind
+    if s0k not=? 'exprstmt' and s0k not=? 'return_' {return 0}
+    let lz=LGnWord(nodes.ptr[s0].a)
+    if lz <=? 0 or nodes.ptr[lz].kind not=? 'lazy_' {return 0}
+    let fp=LGnWord(nodes.ptr[lz].sym)
+    if fp <=? 0 or fp >=? fns.length {return 0}
+    # Every parameter must be a plain value parameter (no @mut, byref, addr, shared, or $__drop__ owner).
+    loop p in fns.ptr[cf].params {
+        let fl=LGnWord(locals.ptr[p].flags)
+        if fl & (LF_MUTPARAM | LF_BYREF | LF_ADDR) not=? 0 or is_shared(p) {return 0}
+        let pt=prune(LGnWord(locals.ptr[p].type))
+        if ownership_type(pt) {return 0}
+    }
+    # Every capture of `lz` must be a direct parameter (or its synthetic view) of `cf`.
+    loop cap in fns.ptr[fp].caps {
+        if gen_fuse_factory_param_idx(cf LGnWord(cap.outer)) <? 0 {return 0}
+    }
+    lz
+}
+
+# Check whether generator function `fp` is eligible for local loop fusion (bounded size & yields).
+gen_fuse_walk_eligible=(n:LGnWord @ncount:int64 @ycount:int64):>bool=>$unsafe {
+    if n =? 0 {return true}
+    ncount += 1
+    if ncount >? 160 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'lazy_' {
+        # Reject inner closures/generators capturing locals of `fp` (would need frame env).
+        let inf=LGnWord(nodes.ptr[n].sym)
+        if inf >? 0 and inf <? fns.length and fns.ptr[inf].caps.length >? 0 {return false}
+        return true
+    }
+    if k =? 'yield_' {
+        let aux=LGnWord(nodes.ptr[n].aux)
+        # Dynamic delegation (`child()...`, aux=1) stays on the heap state machine.
+        if aux =? 1 {return false}
+        if aux =? 0 or aux =? 2 {
+            ycount += 1
+            if ycount >? 4 {return false}
+        }
+        return gen_fuse_walk_eligible(LGnWord(nodes.ptr[n].a) @ncount @ycount)
+    }
+    if nodes.ptr[n].a not=? 0 and not gen_fuse_walk_eligible(LGnWord(nodes.ptr[n].a) @ncount @ycount) {return false}
+    if nodes.ptr[n].b not=? 0 and not gen_fuse_walk_eligible(LGnWord(nodes.ptr[n].b) @ncount @ycount) {return false}
+    if nodes.ptr[n].c not=? 0 and k not=? 'for_' and not gen_fuse_walk_eligible(LGnWord(nodes.ptr[n].c) @ncount @ycount) {return false}
+    loop i in [0..nkids(n)) {
+        if not gen_fuse_walk_eligible(kid(n i) @ncount @ycount) {return false}
+    }
+    true
+}
+
+gen_fuse_eligible=(fp:LGnWord depth:int64):>bool=>$unsafe {
+    if depth >? 6 or fp <=? 0 or fp >=? fns.length {return false}
+    let cap_set=dict<int64 bool>()
+    loop cap in fns.ptr[fp].caps {cap_set[LGnWord(cap.inner)]=true}
+    loop l in fns.ptr[fp].locals {
+        if is_shared(l) {return false}
+        let lt=prune(LGnWord(locals.ptr[l].type))
+        if ownership_type(lt) {return false}
+        # Only allow generator-typed locals that are direct captures (upstream pipeline inputs).
+        if not cap_set.has(l) and gen_type_contains(lt) {return false}
+    }
+    let ncount:int64=0
+    let ycount:int64=0
+    gen_fuse_walk_eligible(LGnWord(fns.ptr[fp].body) @ncount @ycount)
+}
+
+gen_fuse_note_use=(@sc:GenFuseScan l:LGnWord ukind:int64 parent:LGnWord depth:int64 blk_n:int64 st_idx:int64 in_lam:bool):>void=>{
+    if not sc.cand_decl.has(l) {return}
+    let prev=sc.use_count.get(l) ?? 0
+    sc.use_count[l]=prev + 1
+    if prev >? 0 or in_lam or ukind =? 99 or depth not=? sc.cand_depth[l] {
+        sc.disqualified[l]=true
+        return
+    }
+    sc.use_kind[l]=ukind
+    sc.use_parent[l]=parent
+    sc.use_block[l]=blk_n
+    sc.use_idx[l]=st_idx
+}
+
+gen_fuse_scan_node=(n:LGnWord @sc:GenFuseScan depth:int64 blk_n:int64 st_idx:int64 in_lam:bool):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'block' {
+        loop i in [0..nkids(n)) {
+            gen_fuse_scan_node(kid(n i) @sc depth n i in_lam)
+        }
+        return
+    }
+    if k =? 'vardecl' {
+        let rhs=LGnWord(nodes.ptr[n].b)
+        if not has_flag(n NF_GLOBAL) and nkids(n) =? 0 and nodes.ptr[n].sym >? 0 and rhs not=? 0 and not in_lam {
+            let l=LGnWord(nodes.ptr[n].sym)
+            let fl=LGnWord(locals.ptr[l].flags)
+            let lt=prune(LGnWord(locals.ptr[l].type))
+            if types.ptr[lt].kind =? 'generator' and (fl & (LF_PARAM | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_ADDR | LF_ASSIGNED)) =? 0 and not is_shared(l) {
+                sc.cand_decl[l]=n
+                sc.cand_rhs[l]=rhs
+                sc.cand_depth[l]=depth
+                sc.cand_block[l]=blk_n
+                sc.cand_idx[l]=st_idx
+                sc.rhs_owner[rhs]=l
+                sc.cands.push(l)
+            }
+        }
+        if rhs not=? 0 {gen_fuse_scan_node(rhs @sc depth blk_n st_idx in_lam)}
+        return
+    }
+    if k =? 'for_' {
+        let it=LGnWord(nodes.ptr[n].a)
+        if nodes.ptr[n].aux =? 5 and it not=? 0 and nodes.ptr[it].kind =? 'ident' and nodes.ptr[it].aux =? int32(1) {
+            gen_fuse_note_use(@sc LGnWord(nodes.ptr[it].sym) 1 n depth blk_n st_idx in_lam)
+        } else if it not=? 0 {
+            gen_fuse_scan_node(it @sc depth blk_n st_idx in_lam)
+        }
+        gen_fuse_scan_node(LGnWord(nodes.ptr[n].b) @sc depth + 1 blk_n st_idx in_lam)
+        return
+    }
+    if k =? 'while_' {
+        gen_fuse_scan_node(LGnWord(nodes.ptr[n].a) @sc depth blk_n st_idx in_lam)
+        gen_fuse_scan_node(LGnWord(nodes.ptr[n].b) @sc depth + 1 blk_n st_idx in_lam)
+        return
+    }
+    if k =? 'lazy_' {
+        let fp=LGnWord(nodes.ptr[n].sym)
+        if fp >? 0 and fp <? fns.length {
+            loop cap in fns.ptr[fp].caps {
+                gen_fuse_note_use(@sc LGnWord(cap.outer) 2 n depth blk_n st_idx in_lam)
+            }
+        }
+        return
+    }
+    if k =? 'lambda' {
+        let lf=LGnWord(nodes.ptr[n].sym)
+        if lf >? 0 and lf <? fns.length {
+            loop cap in fns.ptr[lf].caps {
+                gen_fuse_note_use(@sc LGnWord(cap.outer) 99 n depth blk_n st_idx true)
+            }
+        }
+        return
+    }
+    if k =? 'call' {
+        let flz=gen_fuse_factory_lazy(n)
+        if flz not=? 0 {
+            loop i in [0..nkids(n)) {
+                let arg=kid(n i)
+                if nodes.ptr[arg].kind =? 'ident' and nodes.ptr[arg].aux =? int32(1) {
+                    gen_fuse_note_use(@sc LGnWord(nodes.ptr[arg].sym) 3 n depth blk_n st_idx in_lam)
+                } else {
+                    # Propagate rhs_owner so nested factory call args (e.g. evens(squares(n))) know their owner!
+                    if sc.rhs_owner.has(n) {sc.rhs_owner[arg]=sc.rhs_owner[n]}
+                    gen_fuse_scan_node(arg @sc depth blk_n st_idx in_lam)
+                }
+            }
+            return
+        }
+    }
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(1) {
+        gen_fuse_note_use(@sc LGnWord(nodes.ptr[n].sym) 99 n depth blk_n st_idx in_lam)
+        return
+    }
+    if nodes.ptr[n].a not=? 0 {gen_fuse_scan_node(LGnWord(nodes.ptr[n].a) @sc depth blk_n st_idx in_lam)}
+    if nodes.ptr[n].b not=? 0 {gen_fuse_scan_node(LGnWord(nodes.ptr[n].b) @sc depth blk_n st_idx in_lam)}
+    if nodes.ptr[n].c not=? 0 {gen_fuse_scan_node(LGnWord(nodes.ptr[n].c) @sc depth blk_n st_idx in_lam)}
+    loop i in [0..nkids(n)) {
+        gen_fuse_scan_node(kid(n i) @sc depth blk_n st_idx in_lam)
+    }
+}
+
+# Resolve an expression `e` into a fusable `GenFuseSource` (returns pool index or -1).
+gen_fuse_build_source=(e:LGnWord active_fns:array<int64> depth:int64):>int64=>$unsafe {
+    if e <=? 0 or depth >? 6 {return -1}
+    let k=nodes.ptr[e].kind
+    if k =? 'lazy_' {
+        let fp=LGnWord(nodes.ptr[e].sym)
+        if active_fns.contains(fp) or not gen_fuse_eligible(fp depth) {return -1}
+        let idx=gen_fuse_pool.length
+        gen_fuse_pool.push(GenFuseSource[kind=0 node=e lazy_node=e fn_inst=fp])
+        return idx
+    }
+    if k =? 'call' {
+        let lz=gen_fuse_factory_lazy(e)
+        if lz =? 0 {return -1}
+        let cf=LGnWord(nodes.ptr[e].sym)
+        let fp=LGnWord(nodes.ptr[lz].sym)
+        if active_fns.contains(fp) or active_fns.contains(cf) or not gen_fuse_eligible(fp depth) {return -1}
+        let idx=gen_fuse_pool.length
+        gen_fuse_pool.push(GenFuseSource[kind=1 node=e lazy_node=lz fn_inst=fp factory_fn=cf])
+        return idx
+    }
+    -1
+}
+
+# Check whether any capture of `src_idx` is managed (not scalar and not another generator).
+gen_fuse_has_managed_cap=(src_idx:int64):>bool=>$unsafe {
+    let src=gen_fuse_pool[src_idx]
+    let fp=src.fn_inst
+    loop cap in fns.ptr[fp].caps {
+        let t=store_type(LGnWord(cap.inner))
+        if types.ptr[prune(t)].kind not=? 'generator' and is_managed(t) {return true}
+    }
+    false
+}
+
+gen_fuse_node_has_defer=(n:LGnWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'lazy_' {return false}
+    if k =? 'defer_' {return true}
+    if nodes.ptr[n].a not=? 0 and gen_fuse_node_has_defer(LGnWord(nodes.ptr[n].a)) {return true}
+    if nodes.ptr[n].b not=? 0 and gen_fuse_node_has_defer(LGnWord(nodes.ptr[n].b)) {return true}
+    if nodes.ptr[n].c not=? 0 and k not=? 'for_' and gen_fuse_node_has_defer(LGnWord(nodes.ptr[n].c)) {return true}
+    loop i in [0..nkids(n)) {
+        if gen_fuse_node_has_defer(kid(n i)) {return true}
+    }
+    false
+}
+
+# Check whether statements between decl and use in the same block have no early exit (return/break/continue).
+gen_fuse_straight_between=(blk_n:LGnWord i0:int64 i1:int64):>bool=>$unsafe {
+    if blk_n <=? 0 or nodes.ptr[blk_n].kind not=? 'block' {return false}
+    loop i in [i0 + 1..i1) {
+        let sk=nodes.ptr[kid(blk_n i)].kind
+        if sk not=? 'vardecl' and sk not=? 'assign' {return false}
+    }
+    true
+}
+
+gen_fuse_prepare=(f:LGnWord):>void=>$unsafe {
+    gen_fuse_reset()
+    let body=LGnWord(fns.ptr[f].body)
+    if body <=? 0 {return}
+    let sc=GenFuseScan[]
+    gen_fuse_scan_node(body @sc 0 body 0 false)
+    if sc.cands.length =? 0 {return}
+
+    let ok_src=dict<int64 int64>()
+    # Pass 1: direct `for_ (aux = 5)` consumers.
+    loop l in sc.cands {
+        if sc.disqualified.has(l) or (sc.use_count.get(l) ?? 0) not=? 1 {continue}
+        if (sc.use_kind.get(l) ?? 0) not=? 1 {continue}
+        let sidx=gen_fuse_build_source(sc.cand_rhs[l] [f] 0)
+        if sidx <? 0 {continue}
+        if gen_fuse_has_managed_cap(sidx) {
+            if sc.cand_block[l] not=? sc.use_block[l] or not gen_fuse_straight_between(sc.cand_block[l] sc.cand_idx[l] sc.use_idx[l]) {
+                continue
+            }
+        }
+        # If the producer registers a `defer`, only fuse when the consumer loop is the last statement
+        # of `l`'s declaring block (e.g. a loop temporary `{ let $gen_tmp = ...; loop ... }`), so
+        # a named owner surviving `break` never runs its `defer` before leaving its block.
+        if gen_fuse_node_has_defer(LGnWord(fns.ptr[gen_fuse_pool[sidx].fn_inst].body)) {
+            if sc.cand_block[l] not=? sc.use_block[l] or sc.use_idx[l] not=? nkids(sc.cand_block[l]) - 1 {
+                continue
+            }
+        }
+        ok_src[l]=sidx
+    }
+    # Pass 2: propagate upstream through local generator pipelines (up to 6 hops).
+    loop hop in [0..6) {
+        let added=false
+        loop l in sc.cands {
+            if ok_src.has(l) or sc.disqualified.has(l) or (sc.use_count.get(l) ?? 0) not=? 1 {continue}
+            let uk=sc.use_kind.get(l) ?? 0
+            if uk not=? 2 and uk not=? 3 {continue}
+            let par=sc.use_parent[l]
+            if not sc.rhs_owner.has(par) {continue}
+            let owner_l=sc.rhs_owner[par]
+            if not ok_src.has(owner_l) {continue}
+            let sidx=gen_fuse_build_source(sc.cand_rhs[l] [f gen_fuse_pool[ok_src[owner_l]].fn_inst] hop + 1)
+            if sidx <? 0 {continue}
+            if gen_fuse_has_managed_cap(sidx) {
+                if sc.cand_block[l] not=? sc.use_block[l] or not gen_fuse_straight_between(sc.cand_block[l] sc.cand_idx[l] sc.use_idx[l]) {
+                    continue
+                }
+            }
+            if gen_fuse_node_has_defer(LGnWord(fns.ptr[gen_fuse_pool[sidx].fn_inst].body)) {
+                if sc.cand_block[l] not=? sc.use_block[l] or sc.use_idx[l] not=? nkids(sc.cand_block[l]) - 1 {
+                    continue
+                }
+            }
+            ok_src[l]=sidx
+            added=true
+        }
+        if not added {break}
+    }
+
+    loop [l sidx] in ok_src {
+        gen_fuse_locals[l]=sidx
+        gen_fuse_decls[sc.cand_decl[l]]=l
+    }
+}
+
+# Recursively evaluate captures/arguments of a fusable generator source into stack slots / child sources.
+gen_fuse_eval_source=(sidx:int64 active_fns:array<int64> depth:int64):>void=>$unsafe {
+    let src=gen_fuse_pool[sidx]
+    if src.prepared {return}
+    let fp=src.fn_inst
+    let ncaps=fns.ptr[fp].caps.length
+    let slots:array<int64>=[]
+    let fused:array<int64>=[]
+    let types_:array<int64>=[]
+    let cap_ids:array<int64>=if src.kind =? 0 {copy_capture_ids(src.lazy_node)} else {[]}
+    let next_active=[active_fns... fp]
+    if src.factory_fn >? 0 {next_active.push(src.factory_fn)}
+
+    loop ci in [0..ncaps) {
+        let cap=fns.ptr[fp].caps.ptr[ci]
+        let inn_l=LGnWord(cap.inner)
+        let t=store_type(inn_l)
+        types_.push(t)
+        let arg_e:LGnWord=0
+        if src.kind =? 0 {
+            arg_e=cap_ids.ptr[ci]
+        } else {
+            let cf=src.factory_fn
+            let pi=gen_fuse_factory_param_idx(cf LGnWord(cap.outer))
+            arg_e=kid(src.node pi)
+        }
+        # Check if this capture/arg is an upstream fused local or an inline fusable factory/lazy expression!
+        let child_idx:int64=-1
+        if types.ptr[prune(t)].kind =? 'generator' {
+            if nodes.ptr[arg_e].kind =? 'ident' and nodes.ptr[arg_e].aux =? int32(1) {
+                let al=LGnWord(nodes.ptr[arg_e].sym)
+                if gen_fuse_locals.has(al) {
+                    child_idx=gen_fuse_locals[al]
+                    if not gen_fuse_pool[child_idx].prepared {
+                        gen_fuse_eval_source(child_idx next_active depth + 1)
+                    }
+                }
+            } else {
+                let inline_idx=gen_fuse_build_source(arg_e next_active depth + 1)
+                if inline_idx >=? 0 {
+                    gen_fuse_eval_source(inline_idx next_active depth + 1)
+                    child_idx=inline_idx
+                }
+            }
+        }
+        if child_idx >=? 0 {
+            slots.push(-1)
+            fused.push(child_idx)
+        } else {
+            let val=own_at(arg_e gen_expr(arg_e) t)
+            let sl=new_slot(max(tsize(t) 8) max(talign(t) 8))
+            store_val(t e_slot(sl) 0 val.v);
+            slots.push(sl)
+            fused.push(-1)
+        }
+    }
+    gen_fuse_pool[sidx].cap_slots=slots
+    gen_fuse_pool[sidx].cap_fused=fused
+    gen_fuse_pool[sidx].cap_types=types_
+    gen_fuse_pool[sidx].prepared=true
+}
+
+# Called from `gen_vardecl(s)`: if `s` declares a fused local generator, evaluate its captures
+# eagerly (preserving capture-by-value order) and skip allocating a heap frame.
+gen_fuse_init_decl=(s:LGnWord):>bool=>$unsafe {
+    if not gen_fuse_decls.has(s) {return false}
+    let l=gen_fuse_decls[s]
+    let sidx=gen_fuse_locals[l]
+    gen_fuse_eval_source(sidx [cur_fn] 0)
+    true
+}
+
+# Emit a fused producer inline for consumer loop `el_l` / `idx_l` / `consumer_body`.
+gen_fuse_run_producer=(sidx:int64 el_l:LGnWord idx_l:LGnWord consumer_body:LGnWord):>void=>$unsafe {
+    let src=gen_fuse_pool[sidx]
+    let fp=src.fn_inst
+    let et=prune(LGnWord(locals.ptr[el_l].type))
+    let out_slot:int64=if vc(et) =? VC_AGG {new_slot(max(tsize(et) 8) max(talign(et) 8))} else {-1}
+
+    # Save and allocate fresh local storage (vregs/stack slots) for all locals of `fp` in `cur_fn`.
+    let saved:array<array<int64>>=[]
+    loop l in fns.ptr[fp].locals {
+        saved.push([l LGnWord(locals.ptr[l].flags) LGnWord(locals.ptr[l].vreg) LGnWord(locals.ptr[l].offset) LGnWord(locals.ptr[l].env_off)])
+        let fl=LGnWord(locals.ptr[l].flags)
+        if fl & LF_ALIAS not=? 0 {continue}
+        locals[l].flags=LGnI32(fl & ~LF_CAPTURE)
+        locals[l].env_off=0
+        let lt=store_type(l)
+        if vc(lt) =? VC_AGG or (fl & LF_ADDR not=? 0) {
+            let sl=new_slot(max(tsize(lt) 1) max(talign(lt) 1))
+            locals[l].offset=LGnI32(sl)
+            locals[l].vreg=-1
+            if is_managed(lt) {e_zero(e_slot(sl) tsize(lt));}
+        } else {
+            let vr=vreg(vt_of(lt))
+            locals[l].vreg=LGnI32(vr)
+            locals[l].offset=-1
+            if is_managed(lt) {e_mov(vr e_iconst(0));}
+        }
+    }
+
+    if idx_l >? 0 {
+        zero_declare(idx_l);
+        write_place(local_place(idx_l true) T_INT e_iconst(-1));
+    }
+
+    blk();
+    let brk_lvl=ctl
+    scope_push();
+    let brk_scope=scope_locals.length - 1
+    gen_fuse_brk_scopes[brk_lvl]=brk_scope
+
+    # Populate captures: bind upstream fused generators or transfer evaluated slots into `inn_l`.
+    let added_fused:array<int64>=[]
+    loop ci in [0..fns.ptr[fp].caps.length) {
+        let inn_l=LGnWord(fns.ptr[fp].caps.ptr[ci].inner)
+        let fchild=src.cap_fused[ci]
+        if fchild >=? 0 {
+            gen_fuse_locals[inn_l]=fchild
+            added_fused.push(inn_l)
+        } else {
+            let sl=src.cap_slots[ci]
+            let ct=src.cap_types[ci]
+            if vc(ct) =? VC_AGG {
+                e_copy(local_place(inn_l true).v e_slot(sl) tsize(ct));
+            } else if vc(ct) not=? VC_VOID {
+                write_place(local_place(inn_l true) ct load_val(ct e_slot(sl) 0));
+            }
+            scope_add_local(inn_l true);
+        }
+    }
+
+    let saved_loops=loops
+    gen_fuse_stack.push(GenFuseCtx[
+        el_l=el_l
+        idx_l=idx_l
+        consumer_body=consumer_body
+        brk_lvl=brk_lvl
+        brk_scope=brk_scope
+        out_slot=out_slot
+        consumer_loops=saved_loops
+        consumer_items=tl_items.length
+        consumer_built=building.length
+    ])
+    loops=[]
+
+    gen_block_stmts(LGnWord(fns.ptr[fp].body));
+
+    loops=saved_loops
+    gen_fuse_stack.pop();
+    gen_fuse_brk_scopes.remove(brk_lvl);
+    scope_pop();
+    endc();
+
+    loop fl in added_fused {gen_fuse_locals.remove(fl);}
+    loop sv in saved {
+        let l=sv[0]
+        locals[l].flags=LGnI32(sv[1])
+        locals[l].vreg=LGnI32(sv[2])
+        locals[l].offset=LGnI32(sv[3])
+        locals[l].env_off=LGnI32(sv[4])
+    }
+}
+
+# Attempt to fuse `for_ (aux = 5)` loop `s`; returns true if fused, false to fall back to heap frame.
+gen_fuse_try_for=(s:LGnWord):>bool=>$unsafe {
+    let it=LGnWord(nodes.ptr[s].a)
+    if it <=? 0 or nodes.ptr[it].kind not=? 'ident' or nodes.ptr[it].aux not=? int32(1) {return false}
+    let l=LGnWord(nodes.ptr[it].sym)
+    if not gen_fuse_locals.has(l) {return false}
+    let sidx=gen_fuse_locals[l]
+    if not gen_fuse_pool[sidx].prepared {gen_fuse_eval_source(sidx [cur_fn] 0)}
+    gen_fuse_run_producer(sidx LGnWord(nodes.ptr[s].sym) LGnWord(nodes.ptr[s].c) LGnWord(nodes.ptr[s].b))
+    true
+}
+
+# Lower a `yield_` statement inside a fused producer body by inlining the consumer body directly.
+gen_fuse_yield=(yn:LGnWord):>void=>$unsafe {
+    if gen_fuse_stack.length =? 0 {
+        fatal(nodes.ptr[yn].pos "unsupported yield_ outside fused generator")
+    }
+    let ctx=gen_fuse_stack[gen_fuse_stack.length - 1]
+    let yaux=LGnWord(nodes.ptr[yn].aux)
+    if yaux =? 3 {
+        drop_held(ctx.consumer_items ctx.consumer_built);
+        let i=scope_locals.length - 1
+        loop i >=? ctx.brk_scope {
+            emit_scope_exit(i);
+            i -= 1
+        }
+        br_to(ctx.brk_lvl);
+        return
+    }
+    let et=prune(LGnWord(locals.ptr[ctx.el_l].type))
+    stmt_begin();
+    let val=gen_owned(LGnWord(nodes.ptr[yn].a))
+    let yv:LGnWord=-1
+    if vc(et) =? VC_AGG {
+        e_copy(e_slot(ctx.out_slot) val.v tsize(et));
+    } else if vc(et) not=? VC_VOID {
+        yv=vreg(vt_of(et))
+        e_mov(yv val.v);
+    }
+    stmt_end();
+
+    if ctx.idx_l >? 0 {
+        let cur_i=read_place(local_place(ctx.idx_l false) T_INT)
+        write_place(local_place(ctx.idx_l true) T_INT e_bin('add' VI cur_i e_iconst(1)));
+    }
+
+    blk();
+    let cont_lvl=ctl
+    scope_push();
+    let cont_scope=scope_locals.length - 1
+    zero_declare(ctx.el_l);
+    if vc(et) =? VC_AGG {
+        e_copy(local_place(ctx.el_l true).v e_slot(ctx.out_slot) tsize(et));
+    } else if vc(et) not=? VC_VOID {
+        write_place(local_place(ctx.el_l true) et yv);
+    }
+    scope_add_local(ctx.el_l true);
+
+    let prod_loops=loops
+    let saved_ctx=gen_fuse_stack.pop()
+    loops=[ctx.consumer_loops... LoopInfo[ctx.brk_lvl cont_lvl cont_scope ctx.consumer_items ctx.consumer_built]]
+
+    gen_block_stmts(ctx.consumer_body);
+
+    loops=prod_loops
+    gen_fuse_stack.push(saved_ctx)
+    scope_pop();
+    endc();
+
+    if yaux =? 2 {
+        drop_held(ctx.consumer_items ctx.consumer_built);
+        let i=scope_locals.length - 1
+        loop i >=? ctx.brk_scope {
+            emit_scope_exit(i);
+            i -= 1
+        }
+        br_to(ctx.brk_lvl);
+    }
 }

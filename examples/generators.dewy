@@ -1,0 +1,71 @@
+# Generators in Dewy: lazy evaluation, infinite sequences, pipelines, and tree walks.
+
+# Infinite generator of squares using an open range.
+squares = ():>generator<int> => lazy loop i in 0.. { i * i }
+
+# Infinite generator of prime numbers using a labeled lazy loop.
+primes = ():>generator<int> => $outer lazy loop n in 2.. {
+    loop d in 2..n {
+        if d * d >? n { break }
+        if n % d =? 0 { continue $outer }
+    }
+    n
+}
+
+# Multivalue generator yielding (index, fibonacci) pairs as one step each.
+fib = ():>generator<(int int)> => lazy {
+    let a = 0
+    let b = 1
+    loop i in 0.. {
+        (i a)
+        let next = a + b
+        a = b
+        b = next
+    }
+}
+
+# Composable generator pipeline adapters.
+only_even = (g:generator<int>):>generator<int> => lazy loop x in g {
+    if x % 2 =? 0 { x }
+}
+
+take_n = (n:int g:generator<int>):>generator<int> => lazy {
+    let count = 0
+    loop x in g {
+        if count >=? n { break }
+        count += 1
+        x
+    }
+}
+
+# Recursive tree walk using `child()...` delegation.
+Node:type = [name:string children:array<Node>]
+
+walk = (node:Node):>generator<string> => lazy {
+    node.name
+    loop child in node.children {
+        walk(child)...
+    }
+}
+
+main = ():>void => {
+    let first_squares = [loop _ in [0..6) and s in squares() s]
+    printl"First 6 squares: {first_squares}"
+
+    let first_primes = [loop _ in [0..10) and p in primes() p]
+    printl"First 10 primes: {first_primes}"
+
+    printl"First 6 Fibonacci numbers:"
+    loop _ in [0..6) and (idx val) in fib() {
+        printl"  F({idx}) = {val}"
+    }
+
+    let even_squares = [take_n(5 only_even(squares()))...]
+    printl"First 5 even squares: {even_squares}"
+
+    let tree = Node[name="root" children=[
+        Node[name="textures" children=[Node[name="sky.png" children=[]] Node[name="grass.png" children=[]]]]
+        Node[name="audio" children=[Node[name="wind.ogg" children=[]]]]
+    ]]
+    printl"Tree walk: {[walk(tree)...]}"
+}

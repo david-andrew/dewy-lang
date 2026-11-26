@@ -5263,6 +5263,60 @@ stored ranges and strings. Active labels must be unique within a function;
 a label can be reused after its loop ends. A closure cannot exit its caller's
 loop. Unlabeled exits still target the nearest loop.
 
+### Generators
+
+`lazy` turns a group, block, or loop into a `generator<T>`. Nothing inside the
+`lazy` body runs until values are pulled from it; ordinary function calls stay
+eager, and functions return generators like any other value.
+
+```dewy
+squares = ():>generator<int> => lazy loop i in 0.. { i * i }
+
+primes = ():>generator<int> => $outer lazy loop n in 2.. {
+    loop d in 2..n {
+        if d * d >? n { break }
+        if n % d =? 0 { continue $outer }
+    }
+    n
+}
+
+fib = ():>generator<(int int)> => lazy {
+    let a = 0
+    let b = 1
+    loop i in 0.. {
+        (i a)
+        let next = a + b
+        a = b
+        b = next
+    }
+}
+```
+
+A generator yields one value per advance: `lazy (1 (2 3) 4)` yields four values
+just like `[1 (2 3) 4]`. When a multivalue element type is declared (such as
+`generator<(int int)>`), each multivalue is yielded as one step. Inside a `lazy`
+body, `child()...` delegates to another generator and `xs...` spreads a
+sequence; a label prefixing a `lazy` body (`$done lazy { ... break $done }`)
+ends it early, and on a single top-level loop (`$outer lazy loop ...`) also
+targets `continue $outer`.
+
+Pull values with `loop x in g`, limit infinite generators with combined headers
+(`loop _ in [0..10) and p in primes() { ... }`), or collect them with `[g...]`.
+A loop borrows a named generator without ending it (`loop x in g { break }; [g...]`),
+while a temporary in the loop header (`loop x in make_gen() { break }`) is owned
+by the loop and cleaned up immediately on exit. Generators are move-only and
+move at their last use. Spreading a generator into fixed parameters works only
+when it is visibly fresh with a fixed item count (`add(lazy (20 22)...)`).
+
+Failures travel as values (`generator<int64 | ReadFailed>`). Inside a `lazy`
+body, `or_throw` (or `or_throw<E>`) yields the matched failure as the
+generator's last value and ends it; callers can inspect items directly or unwrap
+them with `loop x in g or_throw { ... }`. `defer` inside a `lazy` body registers
+non-failing cleanup that runs in reverse order on normal finish, early stop,
+failure, or drop of a suspended generator (and never runs if the generator was
+never started). Local non-escaping generator pipelines consumed by one loop fuse
+into that loop without heap allocation.
+
 `$breakpoint` is a statement that prints `── breakpoint at file.dewy:LINE ──` and
 the function's live bindings (`name = value`, strings quoted; functions, types,
 ranges and hidden bindings are left out) to standard error, then reads commands
