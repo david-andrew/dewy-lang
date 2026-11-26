@@ -454,6 +454,33 @@ fact_share=(@s:FactState n:NumericWord v:NumericWord a:NumericWord c:NumericWord
         fact_difference(@s v factors[0] (if k.hi <? c and g.lo >=? 1 {-1} else {0}) n)
     }
 }
+# For n >= 0 and d >= 1, n = q*d + r >= q + r. Match the captured
+# value IDs, including the divisor: a reassignment makes a different pair.
+# Only an exact sum whose independent upper bounds overflow asks for this.
+# O(1) term/origin lookups plus indexed bounds on the two operands.
+fact_divmod_sum_bound=(s:FactState a:NumericWord b:NumericWord):>NumericWord=>$unsafe {
+    if a <=? 0 or b <=? 0 {return -1}
+    let x=fact_terms[a]
+    let y=fact_terms[b]
+    if x.op not=? 'eof' or y.op not=? 'eof' or fact_type(x.type) =? T_U64 or fact_type(y.type) =? T_U64 {return -1}
+    if x.a <=? 0 or x.b <=? 0 or x.a not=? y.a or x.b not=? y.b or x.origin <=? 0 or y.origin <=? 0 {return -1}
+    let cx=fact_divmod_kind(x.origin)
+    let cy=fact_divmod_kind(y.origin)
+    if not (cx =? 1 and cy =? 2 or cx =? 2 and cy =? 1) {return -1}
+    let dividend=fact_bound(s x.a)
+    let divisor=fact_bound(s x.b)
+    if dividend.wide or dividend.lo <? 0 or divisor.wide or divisor.lo <? 1 or not fact_host_endpoint(s x.a true) {return -1}
+    dividend.hi
+}
+fact_divmod_kind=(n:NumericWord):>NumericWord=>$unsafe {
+    if nodes.ptr[n].kind =? 'call' {return fact_floor_call(n)}
+    if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].aux =? 0 {
+        let op=cx_token(nodes.ptr[n].op)
+        if op =? 'slash' {return 1}
+        if op =? 'percent' {return 2}
+    }
+    0
+}
 # The constant positive divisor of a floor quotient value (`d // c`, Dewy's
 # `__floor_div` or its power-of-two shift, or a nonnegative dividend's
 # truncating `/`), else 0: c*q <= d. O(1).

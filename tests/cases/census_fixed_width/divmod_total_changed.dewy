@@ -1,0 +1,7 @@
+split=(n:int64 d:int64):>int64=>{
+    if n <? 0 or d <=? 0 return -1
+    let rest=n%d
+    d=1
+    rest + n//d
+}
+printl(split(int64.max 2))

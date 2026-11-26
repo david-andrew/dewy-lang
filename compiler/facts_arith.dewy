@@ -18,7 +18,7 @@ from p"facts_value_queries.dewy" import (fact_bound fact_slot)
 from p"facts_row_queries.dewy" import (fact_difference_head fact_difference_next fact_incident)
 from p"facts_joins.dewy" import (fact_host_finite)
 from p"facts_loops.dewy" import (fact_entails)
-from p"facts_numeric.dewy" import (fact_offset_value fact_open_bound fact_open_product fact_reuse_tighten fact_scaled_again fact_scaled_open fact_scaled_quotient fact_square fact_word_type)
+from p"facts_numeric.dewy" import (fact_divmod_sum_bound fact_offset_value fact_open_bound fact_open_product fact_reuse_tighten fact_scaled_again fact_scaled_open fact_scaled_quotient fact_square fact_word_type)
 from p"facts_routes.dewy" import (fact_read)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
 from p"types.jo" import (T_MATH_INT T_U64 is_int prune types)
@@ -290,6 +290,10 @@ fact_arithmetic=(@s:FactState n:ArithWord op:Tok a:ArithWord b:ArithWord):>Arith
         if d not=? FACT_MAX and (not high or d <? hi) {hi=d; high=true}
         let e=fact_shortest(s b a)
         if e not=? FACT_MAX and e not=? FACT_MIN and (not low or -ArithWord(e) >? lo) {lo=-ArithWord(e); low=true}
+    }
+    if not high and op =? 'plus' and exact_has_node(n) {
+        let bound=fact_divmod_sum_bound(s a b)
+        if bound >=? 0 {hi=bound; high=true}
     }
     loop r in sums {
         if r.a =? 0 {

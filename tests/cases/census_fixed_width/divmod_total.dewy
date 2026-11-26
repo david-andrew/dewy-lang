@@ -1,0 +1,10 @@
+split=(n:int64 d:int64):>int64 & no_effects=>{
+    if n <? 0 or d <=? 0 return -1
+    n%d + n//d
+}
+reverse=(n:int64 d:int64):>int64=>{
+    if n <? 0 or d <=? 0 return -1
+    n//d + n%d
+}
+printl(split(int64.max 1) reverse(int64.max 1))
+printl(split(int64.max int64.max) reverse(29 12) split(5 0))
