@@ -1157,7 +1157,12 @@ class Fuzzer:
             progress = False
             for part in ('checks', 'setup', 'decls'):
                 items = getattr(test, part)
-                for i in range(len(items)):
+                # Later expected outputs in these families use the state left by
+                # earlier checks. Only a suffix can be removed without replaying it.
+                indices = range(len(items))
+                if part == 'checks' and test.family in ('arith', 'arrays', 'kernels'):
+                    indices = indices[-1:]
+                for i in indices:
                     candidate = Test(test.family, test.seed, list(test.decls), list(test.setup), list(test.checks),
                                      test.prefix)
                     del getattr(candidate, part)[i]
