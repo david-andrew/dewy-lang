@@ -9,6 +9,7 @@ from p"check.jo" import (fns globals lib_dir locals universe)
 from p"checker_state.dewy" import (Global)
 from p"expr.jo" import (CV)
 from p"type_ops.dewy" import (dt)
+from p"time_grid_types.dewy" import grid_family
 from p"types.jo" import (is_float is_int is_numeric prune structs types)
 from p"unit_ops.dewy" import (base_dimension mk_dimension quantity_constant_scale quantity_dimension)
 from p"units.jo" import (quantity_base quantity_dimension_names quantity_scales)
@@ -60,7 +61,7 @@ time_core_type=(t0:UnitRareWord name:string):>bool=>$unsafe {
 # A constant time meets a `Duration` directly (time.md: "they mix"), so it is one where a `Duration` is
 # wanted: `let total:Duration = 0s`. A time known only at run time goes through `convert<Duration>`.
 time_constant_duration=(n:UnitRareWord from_:UnitRareWord to:UnitRareWord):>bool=>$unsafe {
-    n not=? 0 and types.ptr[prune(from_)].kind =? 'quantity' and quantity_dimension(prune(from_)) =? base_dimension(0) and time_core_type(to "Duration") and not is_float(quantity_base(prune(from_))) and quantity_constant_scale(n) >=? 0
+    n not=? 0 and types.ptr[prune(from_)].kind =? 'quantity' and quantity_dimension(prune(from_)) =? base_dimension(0) and (time_core_type(to "Duration") or grid_family(to) =? 2) and not is_float(quantity_base(prune(from_))) and quantity_constant_scale(n) >=? 0
 }
 # (`d*1day` next to a quantity: what a calendar period is, for an operator's error)
 calendar_period_why=(a:UnitRareWord b:UnitRareWord):>string=>{

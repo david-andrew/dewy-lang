@@ -1,0 +1,26 @@
+import ranges
+const tick=1ns/3
+Point:type=Instant<tick=tick>
+Third:type=Duration<tick=2ns/6>
+Seventh:type=Duration<tick=1ns/7 width=64>
+
+const epoch=instant"2026-10-24T12:00:00Z"
+shift=(point:Point):>Point=>point+1ns/3
+widen=(small:Seventh):>Duration<tick=1ns/21>=>small as Duration<tick=1ns/21>
+main=()=>{
+    let p=epoch as Point
+    let next=shift(p)
+    let third:Third=1ns/3
+    let small=convert<Seventh>(2ns/7)
+    printl"{next-p =? third} {p =? epoch} {epoch <? next} {next <? epoch}"
+    printl"{small <? third} {third =? small} {widen(small) =? small}"
+    printl(convert<Instant>(next) is? OffGrid)
+    printl("{ranges.is_empty((p..next))} {ranges.is_empty([p..next))}")
+    let added=p.checked_add(third)
+    if added isnt? OutOfRange {printl(added =? next)}
+    let neg= -third
+    let [whole left]=neg.ticks(1ns)
+    printl"{neg} {whole} {left/1ns}"
+    let [stamp loss]=next.quantize(tick=1ns rounding='nearest_even')
+    printl"{stamp} {loss/1ns}"
+}

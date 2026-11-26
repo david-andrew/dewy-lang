@@ -26,5 +26,5 @@ def test_literal_policy_source_ranges_match_twins(compiler, tmp_path, release):
     result=compare_narrow(compiler,tmp_path,release,
         ('source_types','node_store','checker_types','checker_state','checker_tokens','evaluator_state','constant_checks'),driver,
         doubles={'services.jo':services,'check_constant.jo':(ROOT/'compiler/check_constant.jo').read_text()},
-        services=('directives','checker_expr','ast','check','expr','types','util','errors','error_ops','comptime','warn_if_ops','constant_folds','unit_rare'))
+        services=('directives','checker_expr','ast','check','expr','types','util','errors','error_ops','comptime','warn_if_ops','constant_folds','unit_rare', 'time_grid_types'))
     assert result==b'ranges ok\n'

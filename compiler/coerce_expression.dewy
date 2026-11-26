@@ -6,6 +6,7 @@ from p"source_warnings.dewy" import (warn)
 from p"checks_compare_hints.dewy" import (variant_hint void_rec_hint)
 from p"checks_place_updates.dewy" import (var_type_error)
 from p"unit_rare.dewy" import (time_constant_duration)
+from p"time_grid_types.dewy" import (grid_conversion grid_family)
 from p"soa_helpers.dewy" import (soa_from_array)
 from p"sibling_ops.dewy" import (sibling_array_source sibling_to_array)
 from p"policy_value_queries.dewy" import (setting_value_target)
@@ -155,6 +156,10 @@ coerce=(n:int64 target:int64):>int64=>$unsafe {
         let source=nodes.length
         nodes.push(nodes.ptr[n])
         add_flag(source NF_CHECKED)
+        if grid_family(to) =? 2 {
+            grid_conversion(n source source_type to true);
+            return n
+        }
         ensure_bundled_import("time/core.dewy" "$dewy_time" pos)
         nodes[n] = Node(kind = 'call' pos = pos a = int32<overflow='wrap'>(bc_field(bc_ident("$dewy_time" pos) "duration_of" pos)))
         set_list(n [source])

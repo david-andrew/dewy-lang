@@ -1804,6 +1804,27 @@ that result also has `OutOfRange`, and a constant zero is a compile error. A con
 quantity off the nanosecond grid (`t + 1ns/3`) is a compile error; at run time such a sum
 is `Instant | OffGrid`.
 
+A stored time can name its own positive, exact tick. For example,
+`Instant<tick=1ns/3>` counts thirds of a nanosecond from the same epoch as
+`Instant`. `Duration<tick=1ns/3>` stores differences on that grid. Equivalent
+ticks name the same type. Both use 128 bits by default, and adding `width=64`
+selects an eight-byte count. Comparisons across grids are exact, including at
+the limits of either width.
+
+```dewy
+const t = instant"2026-10-24T12:00:00Z"
+let start = t as Instant<tick=1ns/3>
+let finish = start + 1ns/3
+printl(finish - start)                  # 1/3ns
+printl(convert<Instant>(finish) is? OffGrid)  # true
+```
+
+Use `as` when the value or the source type proves the conversion fits.
+`convert<T>` checks the destination tick and width at run time and returns
+`OffGrid` for a fractional count or `OutOfRange` for a count beyond that width.
+Rounding a finer stored time to whole nanoseconds returns the signed loss as
+an exact time quantity.
+
 `quantize` puts a time on a grid, naming the rounding (`'nearest_even'`, `'nearest_away'`,
 `'floor'`, `'ceil'` or `'toward_zero'`), and gives back what was lost, signed so that the
 original is the value plus the loss. The tick is `1ns` unless given:

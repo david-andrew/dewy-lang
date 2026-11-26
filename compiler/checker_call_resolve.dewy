@@ -32,6 +32,7 @@ from p"rational_types.dewy" import (bundled_rational_type bundled_word_rational_
 from p"effects.jo" import (effect_contracts)
 from p"poly_ops.dewy" import (poly_default_type poly_default_variant poly_fnref)
 from p"util.jo" import (pos_file files)
+from p"time_grid_types.dewy" import grid_convert_call
 from p"ide.jo" import (ide_on)
 from p"refine.jo" import (RefArrayCall refine_active)
 from p"refine_rare.dewy" import (ref_array_call_prepare ref_sib_dict_call)
@@ -58,6 +59,10 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
     let targs_here=call_targs
     call_targs=[]
     if args.length >? 0 {check_args_untyped(args)}
+    if targs_here.length =? 1 and args.length =? 1 and decls.length >? 0 and nodes.ptr[n].aux2 not=? int32(AUX2_PARTIAL) {
+        let grid=grid_convert_call(n name decls[0] args[0] targs_here[0])
+        if grid >=? 0 {return grid}
+    }
     let positional=true
     let n_args=args.length
     let ap=args.ptr

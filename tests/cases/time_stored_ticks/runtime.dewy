@@ -1,0 +1,16 @@
+D:type=Duration<tick=1ns/3>
+const thirds:D=2ns/3
+scale=(d:D k:int):>D=>k*d
+measure=(d:D q:rational*Time)=>{
+    let sum=d+q
+    if sum is? OffGrid {printl("off grid");return}
+    let [n rem]=sum.ticks(1ns/3)
+    printl("{n} {rem/1ns} {sum/thirds} {(sum/2)/1ns}")
+}
+main=()=>{
+    let d=scale(thirds 3)
+    measure(d 1ns/3)
+    measure(d 1ns/7)
+    let tiny=convert<Duration<tick=1s/18446744073709551617>>(1s/18446744073709551617) or_throw
+    printl("{tiny >? 0s} {tiny <? thirds}")
+}

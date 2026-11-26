@@ -23,6 +23,7 @@ from p"select_checks.dewy" import (named_wait_type)
 from p"type_member_checks.dewy" import (generic_family_type handle_member_error)
 from p"type_ops.dewy" import (get_struct_inst)
 from p"type_value_arguments.dewy" import (named_integer_type)
+from p"time_grid_types.dewy" import stored_time_type
 from p"types.jo" import (T_NONE fields is_int tkind)
 from p"util.jo" import (files intern name_of pos_file pos_off)
 
@@ -30,6 +31,7 @@ TypeNameWord:type=int64<overflow='wrap'>
 let rational_name:TypeNameWord=0
 
 resolve_type_name=(tn:TypeNameWord):>CheckerTypeName=>{
+    if nodes[tn].aux =? -10 {return CheckerTypeName[0 stored_time_type(tn)]}
     if nodes[tn].aux =? -8 {fatal(nodes[tn].pos "Effect row is not a value type")}
     let nm=TypeNameWord(nodes[tn].name)
     let s:TypeNameWord=0

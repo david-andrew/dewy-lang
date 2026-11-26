@@ -305,6 +305,7 @@ MAIN = r'''main = ():
 '''
 
 # A module boundary double isolates the scoring/resolver leaf from conversion.
+JO['time_grid_types.dewy'] = 'grid_convert_call=(n:int64 name:int64 decl:int64 arg:int64 target:int64):>int64=>-1\n'
 JO['checker_call_convert.dewy'] = r'''from p"expr.jo" import call_conversion_double
 arg_cost_rest=(a:int64 p:int64 @bs:array<int64>):>int64=>call_conversion_double(a p @bs)
 '''

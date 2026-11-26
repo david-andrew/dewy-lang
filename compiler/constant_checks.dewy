@@ -21,6 +21,7 @@ from p"error_ops.dewy" import (exception_member)
 from p"comptime.jo" import (ct_values)
 from p"warn_if_ops.dewy" import (wi_param)
 from p"unit_rare.dewy" import (time_grid_proven)
+from p"time_grid_types.dewy" import grid_constant_check
 
 ConstantWord:type=int64<overflow='wrap'>
 let CC_LOCAL:ConstantWord=1 # SK.local
@@ -132,6 +133,10 @@ cc_call=(n:ConstantWord f:ConstantWord decl:ConstantWord):>ConstantWord=>$unsafe
     }
     # (the first check whose arguments are all closed decides)
     loop c in cc_decls[decl] {
+        let validator=name_of(ConstantWord(nodes[c.validator].name))
+        if validator in? ["_operand_error" "_rounding_bound" "_nonzero_stored"] and files[pos_file(nodes[c.validator].pos)].path =? "{lib_dir}/time/grid.dewy" {
+            return grid_constant_check(n validator c.params[0])
+        }
         if c.params.length =? 1 and c.params[0] <? nkids(n) and time_grid_proven(c.validator kid(n c.params[0])) {return cc_narrow(n "OffGrid")}
         let args=cc_arguments(kids(n) c)
         if args.length not=? c.params.length {continue}

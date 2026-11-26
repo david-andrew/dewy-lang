@@ -10739,13 +10739,43 @@ rd_dc_type_arguments=(@reader_ctx:ParserContext @reader_nodes:array<Node> n0:int
                 if ((((word =? DC_ARRAY) and (setting not=? DC_OVERFLOW)) and reader_ctx.flags.report_now) and (rd_dc_array_constraint(@reader_ctx @reader_nodes) not=? 0)) {
                     continue
                 }
+                if word =? 0 and setting not=? DC_OVERFLOW and args.length =? 0 and reader_nodes[n].kind =? 'tname' {
+                    let option=rd_dn_payload(@reader_ctx reader_ctx.tokens[int64<overflow='wrap'>(reader_ctx.at)-2])
+                    if option =? "tick" and rd_name_of(@reader_ctx int64(reader_nodes[n].name)) in? ["Duration" "Instant"] {
+                        if reader_nodes[n].a not=? 0 {return rd_dc_hint(@reader_ctx pos "a stored time type takes one tick")}
+                        let start=reader_ctx.at
+                        reader_ctx.reader.dn_angles += 1
+                        let tick=rd_dc_expr(@reader_ctx @reader_nodes int64<overflow='wrap'>(dn_power('assign'))+1)
+                        reader_ctx.reader.dn_angles -= 1
+                        if tick =? 0 {return 0}
+                        # Keep the existing integer-option lookup for a library's
+                        # own Duration_tick_2. Stored time ticks have units.
+                        if reader_ctx.at =? start+1 and reader_nodes[n].ival =? 0 and rd_dc_closes(@reader_ctx) and reader_ctx.tokens[start].kind in? ['source_integer' 'integer'] {
+                            let base=rd_name_of(@reader_ctx int64(reader_nodes[n].name))
+                            let chosen=rd_dn_payload(@reader_ctx reader_ctx.tokens[start])
+                            reader_nodes[n].name=int32(reader_ctx.stores.host[0].intern("{base}_tick_{chosen}"))
+                            continue
+                        }
+                        reader_nodes[n].a=int32(tick)
+                        reader_nodes[n].aux=-10
+                        if not rd_dc_closes(@reader_ctx) and not rd_dc_named_next(@reader_ctx) {return rd_dc_hint(@reader_ctx pos "a stored time type takes tick= and width=")}
+                        continue
+                    }
+                    if reader_nodes[n].aux =? -10 and option not=? "width" {return rd_dc_hint(@reader_ctx pos "a stored time type takes tick= and width=")}
+                }
                 # (`Instant<width=64>`, a library's own option: the type it declares as `Instant_width_64`)
                 if ((word =? 0) and (setting not=? DC_OVERFLOW) and (args.length =? 0) and (reader_nodes[n].kind =? 'tname') and ((reader_ctx.tokens[reader_ctx.at].kind =? 'integer') or (reader_ctx.tokens[reader_ctx.at].kind =? 'source_integer'))) {
                     let option:string=rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 2)])
                     let chosen:string=rd_dn_payload(@reader_ctx reader_ctx.tokens[reader_ctx.at])
                     let base:string=rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[n].name))
-                    reader_nodes[n].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("{base}_{option}_{chosen}"))
                     reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+                    if option =? "width" and (reader_nodes[n].aux =? -10 or (base in? ["Duration" "Instant"] and rd_dc_named_next(@reader_ctx) and rd_dn_payload(@reader_ctx reader_ctx.tokens[reader_ctx.at]) =? "tick")) {
+                        if reader_nodes[n].ival not=? 0 or (chosen not=? "64" and chosen not=? "128") {return rd_dc_hint(@reader_ctx pos "a stored time type takes one width, 64 or 128")}
+                        reader_nodes[n].ival=if chosen =? "64" {64} else {128}
+                        if not rd_dc_closes(@reader_ctx) and not rd_dc_named_next(@reader_ctx) {return rd_dc_hint(@reader_ctx pos "a stored time type takes tick= and width=")}
+                        continue
+                    }
+                    reader_nodes[n].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("{base}_{option}_{chosen}"))
                     if (not rd_dc_closes(@reader_ctx)) {
                         return 0
                     }

@@ -59,7 +59,7 @@ def test_policy_literal_strict_validation_matches_twins(compiler, tmp_path, rele
     result=compare_narrow(compiler,tmp_path,release,
         ('source_types','node_store','checker_types','checker_state','checker_tokens','evaluator_state','constant_checks'),driver,
         doubles={'services.jo':services,'check_constant.jo':(ROOT/'compiler/check_constant.jo').read_text()},
-        services=('directives','checker_expr','ast','check','expr','types','util','errors','error_ops','comptime','warn_if_ops','constant_folds','unit_rare'))
+        services=('directives','checker_expr','ast','check','expr','types','util','errors','error_ops','comptime','warn_if_ops','constant_folds','unit_rare', 'time_grid_types'))
     assert result.endswith(b'policy literals ok\n')
     for text in (b'computed true', b'arg true 30 128', b'true true', b'not a zoned time: happens more than once (functions here set time policies',
                  b'literal validation through inherited run-time time policies is not yet supported'):

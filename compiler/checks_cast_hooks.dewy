@@ -20,6 +20,7 @@ from p"checker_expr.dewy" import (check_expr lookup)
 from p"expr.jo" import (last_checked)
 from p"numeric_library_types.dewy" import (bundled_bigint_type)
 from p"collection_checks.dewy" import (as_conversion)
+from p"time_grid_types.dewy" import grid_conversion
 from p"expr_hints.dewy" import (array_elems_gap_text)
 from p"checks_thin_expr.dewy" import (bare_fn_error is_map_type str_set_unnumbered)
 from p"checks_call_hints.dewy" import (a_type)
@@ -77,7 +78,7 @@ cast_helper=(n:int64 a:int64 decode:bool expected:int64):>int64=>$unsafe {
 # (a record's own conversion, `__as__ = (x:T):>U => ...`: `x as U` calls it)
 cast_record=(n:int64 a:int64 ft:int64 tt:int64):>int64=>$unsafe {
     let conv=as_conversion(ft tt)
-    if conv =? 0 {return -1}
+    if conv =? 0 {return grid_conversion(n a ft tt true)}
     add_flag(a NF_CHECKED)
     nodes.ptr[n]=Node(kind='call' pos=nodes.ptr[n].pos a=int32(bc_ident("__as__" nodes.ptr[n].pos)))
     set_list(n [a])

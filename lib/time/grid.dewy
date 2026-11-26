@@ -1,0 +1,339 @@
+from p"core.dewy" import (Duration Instant Instant_width_64 Duration_width_64 duration_word _label_shift _Rounding _rounded _instant ns_count _duration _fits _seconds _nonzero_time _tick_ns _word_add _word_sub _nonzero_int)
+_GridInstant:type=<N D S>[_count:S]
+_GridDuration:type=<N D S>[_count:S]
+
+# The checked constant evaluator can interpolate a word. Emit larger type
+# arguments a decimal digit at a time without narrowing the tick itself.
+_integer_text=(value:int):>string=>{
+    let count=value
+    let suffix=""
+    loop count >? 9223372036854775807 {
+        let digit=(count%10).to_int64() ?? 0
+        suffix="{digit}{suffix}"
+        count=count//10
+    }
+    let head=count.to_int64() ?? 0
+    "{head}{suffix}"
+}
+_parts=(tick:rational*Time):>[string string]=>{
+    let q=_seconds(tick)
+    if q.numerator <=? 0 {return ["" ""]}
+    [_integer_text(q.numerator) _integer_text(q.denominator)]
+}
+
+# The compiler supplies one normalized integer spelling per type argument.
+# The member loop expands to that literal. Parsing happens once at compile time.
+_digits=<T>():>string=>{
+    loop text in members(T) {return text}
+    ""
+}
+_tick=<N D>():>rational=>{
+    const value=rational(_digits<N>() _digits<D>()) ?? rational(0)
+    value
+}
+_count=((x:int64):>int=>int(x)) & ((x:Duration):>int=>ns_count(x))
+_at=<N D S>(x:_GridDuration<N D S>):>rational=>_count(x._count)*_tick<N D>()
+_at=<N D S>(x:_GridInstant<N D S>):>rational=>_count(x._count)*_tick<N D>()
+_at=(x:Duration):>rational=>rational(ns_count(x) 1000000000)
+_at=(x:Instant):>rational=>rational(ns_count(x) 1000000000)
+_at=(x:Instant_width_64):>rational=>rational(int(x._count) 1000000000)
+_at=(x:Duration_width_64):>rational=>rational(int(x._count) 1000000000)
+_at=(x:int*Time):>rational=>rational(x transmute int)
+_at=(x:rational*Time):>rational=>_seconds(x)
+
+_wide=(n:int):>Duration|OutOfRange=>{
+    if not _fits(n) {return OutOfRange}
+    _duration(n)
+}
+_pack=(_kind:array<int64> n:int):>int64|OutOfRange=>n.to_int64() ?? OutOfRange
+_pack=(_kind:array<Duration> n:int):>Duration|OutOfRange=>_wide(n)
+_integral=(v:rational):>int|OffGrid=>{
+    if v.denominator not=? 1 {return OffGrid}
+    v.numerator
+}
+_on=<N D>(seconds:rational):>int|OffGrid=>{
+    const unit=_tick<N D>()
+    _delta(seconds unit)
+}
+_store=<N D S>(_target:array<_GridDuration<N D S>> seconds:rational):>_GridDuration<N D S>|OffGrid|OutOfRange=>{
+    let kind:array<S>=[]
+    _GridDuration<N D S>[_pack(kind _on<N D>(seconds) or_throw) or_throw]
+}
+_store=<N D S>(_target:array<_GridInstant<N D S>> seconds:rational):>_GridInstant<N D S>|OffGrid|OutOfRange=>{
+    let kind:array<S>=[]
+    _GridInstant<N D S>[_pack(kind _on<N D>(seconds) or_throw) or_throw]
+}
+_whole_ns=(v:rational):>int|OffGrid=>_integral(v*1000000000)
+_store=(_target:array<Duration> seconds:rational):>Duration|OffGrid|OutOfRange=>_wide(_whole_ns(seconds) or_throw)
+_store=(_target:array<Instant> seconds:rational):>Instant|OffGrid|OutOfRange=>{
+    let d=_wide(_whole_ns(seconds) or_throw) or_throw
+    Instant[d._hi d._lo]
+}
+_store=(_target:array<Duration_width_64> seconds:rational):>Duration_width_64|OffGrid|OutOfRange=>{
+    Duration_width_64[(_whole_ns(seconds) or_throw).to_int64() ?? return OutOfRange]
+}
+_store=(_target:array<Instant_width_64> seconds:rational):>Instant_width_64|OffGrid|OutOfRange=>{
+    Instant_width_64[(_whole_ns(seconds) or_throw).to_int64() ?? return OutOfRange]
+}
+_convert=<T V>(x:V):>T|OffGrid|OutOfRange=>{
+    let target:array<T>=[]
+    _store(target _at(x))
+}
+
+# Add and subtract counts directly on one grid. Compact operations expose
+# their reachable boundary. Wide operations share the default two-word path.
+__add__=<N D>(a:_GridInstant<N D Duration> b:_GridDuration<N D Duration>):>_GridInstant<N D Duration>=>_GridInstant<N D Duration>[a._count+b._count]
+__add__=<N D>(a:_GridDuration<N D Duration> b:_GridInstant<N D Duration>):>_GridInstant<N D Duration>=>_GridInstant<N D Duration>[a._count+b._count]
+__sub__=<N D>(a:_GridInstant<N D Duration> b:_GridDuration<N D Duration>):>_GridInstant<N D Duration>=>_GridInstant<N D Duration>[a._count-b._count]
+__sub__=<N D>(a:_GridInstant<N D Duration> b:_GridInstant<N D Duration>):>_GridDuration<N D Duration>=>_GridDuration<N D Duration>[a._count-b._count]
+__add__=<N D>(a:_GridDuration<N D Duration> b:_GridDuration<N D Duration>):>_GridDuration<N D Duration>=>_GridDuration<N D Duration>[a._count+b._count]
+__sub__=<N D>(a:_GridDuration<N D Duration> b:_GridDuration<N D Duration>):>_GridDuration<N D Duration>=>_GridDuration<N D Duration>[a._count-b._count]
+__add__=<N D>(a:_GridInstant<N D int64> b:_GridDuration<N D int64>):>_GridInstant<N D int64>|OutOfRange=>_GridInstant<N D int64>[_word_add(a._count b._count) or_throw]
+__add__=<N D>(a:_GridDuration<N D int64> b:_GridInstant<N D int64>):>_GridInstant<N D int64>|OutOfRange=>_GridInstant<N D int64>[_word_add(a._count b._count) or_throw]
+__sub__=<N D>(a:_GridInstant<N D int64> b:_GridDuration<N D int64>):>_GridInstant<N D int64>|OutOfRange=>_GridInstant<N D int64>[_word_sub(a._count b._count) or_throw]
+__sub__=<N D>(a:_GridInstant<N D int64> b:_GridInstant<N D int64>):>_GridDuration<N D int64>|OutOfRange=>_GridDuration<N D int64>[_word_sub(a._count b._count) or_throw]
+__add__=<N D>(a:_GridDuration<N D int64> b:_GridDuration<N D int64>):>_GridDuration<N D int64>|OutOfRange=>_GridDuration<N D int64>[_word_add(a._count b._count) or_throw]
+__sub__=<N D>(a:_GridDuration<N D int64> b:_GridDuration<N D int64>):>_GridDuration<N D int64>|OutOfRange=>_GridDuration<N D int64>[_word_sub(a._count b._count) or_throw]
+
+__unary_sub__=<N D>(a:_GridDuration<N D Duration>):>_GridDuration<N D Duration>=>_GridDuration<N D Duration>[-a._count]
+__unary_sub__=<N D>(a:_GridDuration<N D int64>):>_GridDuration<N D int64>|OutOfRange=>_GridDuration<N D int64>[_word_sub(0 a._count) or_throw]
+__mul__=<N D>(a:_GridDuration<N D Duration> k:int):>_GridDuration<N D Duration>=>_GridDuration<N D Duration>[a._count*k]
+__mul__=<N D>(k:int a:_GridDuration<N D Duration>):>_GridDuration<N D Duration>=>a*k
+__mul__=<N D>(a:_GridDuration<N D int64> k:int):>_GridDuration<N D int64>|OutOfRange=>_GridDuration<N D int64>[(int(a._count)*k).to_int64() ?? return OutOfRange]
+__mul__=<N D>(k:int a:_GridDuration<N D int64>):>_GridDuration<N D int64>|OutOfRange=>a*k
+
+checked_add=<N D S>(t:_GridInstant<N D S> d:_GridDuration<N D S>):>_GridInstant<N D S>|OutOfRange=>{
+    let kind:array<S>=[]
+    _GridInstant<N D S>[_pack(kind _count(t._count)+_count(d._count)) or_throw]
+}
+_range_is_empty=<N D S>(first:_GridInstant<N D S> last:_GridInstant<N D S> includes_first:bool includes_last:bool):>bool=>{
+    if last <? first {return true}
+    if first =? last {return not (includes_first and includes_last)}
+    not includes_first and not includes_last and _count(last._count)-_count(first._count) =? 1
+}
+# The result is checked after exact arithmetic: a large displacement may
+# cancel the starting count. Only divisibility depends on the operand alone.
+_delta=(seconds:rational unit:rational):>int|OffGrid=>{
+    if unit.numerator <=? 0 {return OffGrid}
+    _integral(rational(seconds.numerator*unit.denominator seconds.denominator*unit.numerator))
+}
+# The stored operand supplies N and D even when its count is a run-time value.
+_operand_error=<N D>(q:rational*Time):>string?=>{
+    if _on<N D>(_seconds(q)) is? OffGrid {return "use quantize with a named rounding or choose a finer tick"}
+    none
+}
+$check_constant _operand_error(q) "off the stored time grid"
+__add__=<N D>(a:_GridInstant<N D Duration> q:rational*Time):>_GridInstant<N D Duration>|OffGrid=>{
+    let change=_on<N D>(_seconds(q)) or_throw
+    _GridInstant<N D Duration>[_duration(_count(a._count)+change)]
+}
+$check_constant _operand_error(q) "off the stored time grid"
+__sub__=<N D>(a:_GridInstant<N D Duration> q:rational*Time):>_GridInstant<N D Duration>|OffGrid=>{
+    let change=_on<N D>(_seconds(q)) or_throw
+    _GridInstant<N D Duration>[_duration(_count(a._count)-change)]
+}
+$check_constant _operand_error(q) "off the stored time grid"
+__add__=<N D>(q:rational*Time a:_GridInstant<N D Duration>):>_GridInstant<N D Duration>|OffGrid=>{
+    let change=_on<N D>(_seconds(q)) or_throw
+    _GridInstant<N D Duration>[_duration(change+_count(a._count))]
+}
+$check_constant _operand_error(q) "off the stored time grid"
+__add__=<N D>(a:_GridInstant<N D int64> q:rational*Time):>_GridInstant<N D int64>|OffGrid|OutOfRange=>{
+    let change=_on<N D>(_seconds(q)) or_throw
+    _GridInstant<N D int64>[(_count(a._count)+change).to_int64() ?? return OutOfRange]
+}
+$check_constant _operand_error(q) "off the stored time grid"
+__sub__=<N D>(a:_GridInstant<N D int64> q:rational*Time):>_GridInstant<N D int64>|OffGrid|OutOfRange=>{
+    let change=_on<N D>(_seconds(q)) or_throw
+    _GridInstant<N D int64>[(_count(a._count)-change).to_int64() ?? return OutOfRange]
+}
+$check_constant _operand_error(q) "off the stored time grid"
+__add__=<N D>(q:rational*Time a:_GridInstant<N D int64>):>_GridInstant<N D int64>|OffGrid|OutOfRange=>{
+    let change=_on<N D>(_seconds(q)) or_throw
+    _GridInstant<N D int64>[(change+_count(a._count)).to_int64() ?? return OutOfRange]
+}
+$check_constant _operand_error(q) "off the stored time grid"
+__add__=<N D>(a:_GridDuration<N D Duration> q:rational*Time):>_GridDuration<N D Duration>|OffGrid=>{
+    let change=_on<N D>(_seconds(q)) or_throw
+    _GridDuration<N D Duration>[_duration(_count(a._count)+change)]
+}
+$check_constant _operand_error(q) "off the stored time grid"
+__sub__=<N D>(a:_GridDuration<N D Duration> q:rational*Time):>_GridDuration<N D Duration>|OffGrid=>{
+    let change=_on<N D>(_seconds(q)) or_throw
+    _GridDuration<N D Duration>[_duration(_count(a._count)-change)]
+}
+$check_constant _operand_error(q) "off the stored time grid"
+__add__=<N D>(q:rational*Time a:_GridDuration<N D Duration>):>_GridDuration<N D Duration>|OffGrid=>{
+    let change=_on<N D>(_seconds(q)) or_throw
+    _GridDuration<N D Duration>[_duration(change+_count(a._count))]
+}
+$check_constant _operand_error(q) "off the stored time grid"
+__sub__=<N D>(q:rational*Time a:_GridDuration<N D Duration>):>_GridDuration<N D Duration>|OffGrid=>{
+    let change=_on<N D>(_seconds(q)) or_throw
+    _GridDuration<N D Duration>[_duration(change-_count(a._count))]
+}
+$check_constant _operand_error(q) "off the stored time grid"
+__add__=<N D>(a:_GridDuration<N D int64> q:rational*Time):>_GridDuration<N D int64>|OffGrid|OutOfRange=>{
+    let change=_on<N D>(_seconds(q)) or_throw
+    _GridDuration<N D int64>[(_count(a._count)+change).to_int64() ?? return OutOfRange]
+}
+$check_constant _operand_error(q) "off the stored time grid"
+__sub__=<N D>(a:_GridDuration<N D int64> q:rational*Time):>_GridDuration<N D int64>|OffGrid|OutOfRange=>{
+    let change=_on<N D>(_seconds(q)) or_throw
+    _GridDuration<N D int64>[(_count(a._count)-change).to_int64() ?? return OutOfRange]
+}
+$check_constant _operand_error(q) "off the stored time grid"
+__add__=<N D>(q:rational*Time a:_GridDuration<N D int64>):>_GridDuration<N D int64>|OffGrid|OutOfRange=>{
+    let change=_on<N D>(_seconds(q)) or_throw
+    _GridDuration<N D int64>[(change+_count(a._count)).to_int64() ?? return OutOfRange]
+}
+$check_constant _operand_error(q) "off the stored time grid"
+__sub__=<N D>(q:rational*Time a:_GridDuration<N D int64>):>_GridDuration<N D int64>|OffGrid|OutOfRange=>{
+    let change=_on<N D>(_seconds(q)) or_throw
+    _GridDuration<N D int64>[(change-_count(a._count)).to_int64() ?? return OutOfRange]
+}
+
+# On equal grids compare the signed counts in place. Other grids compare
+# cross-products in mathematical integers; no destination width is involved.
+_words=((v:Duration):>Duration=>v) & ((v:int64):>Duration=>duration_word(v))
+_compare=<N D A B S W>(left:S right:W):>int64=>{
+    const u=_tick<N D>()
+    const v=_tick<A B>()
+    const equal_grid=u =? v
+    if equal_grid {
+        let x=_words(left)
+        let y=_words(right)
+        return if x <? y {-1} else if x =? y {0} else {1}
+    }
+    let x=_count(left)*u.numerator*v.denominator
+    let y=_count(right)*v.numerator*u.denominator
+    if x <? y {-1} else if x =? y {0} else {1}
+}
+# Cross-grid comparisons keep both scaled counts exact.
+__eq__=<N D S A B W>(a:_GridInstant<N D S> b:_GridInstant<A B W>):>bool=>_compare<N D A B S W>(a._count b._count) =? 0
+__eq__=<N D S>(a:_GridInstant<N D S> b:Instant):>bool=>_at(a) =? _at(b)
+__eq__=<N D S>(a:Instant b:_GridInstant<N D S>):>bool=>_at(a) =? _at(b)
+__eq__=<N D S>(a:_GridInstant<N D S> b:Instant_width_64):>bool=>_at(a) =? _at(b)
+__eq__=<N D S>(a:Instant_width_64 b:_GridInstant<N D S>):>bool=>_at(a) =? _at(b)
+__lt__=<N D S A B W>(a:_GridInstant<N D S> b:_GridInstant<A B W>):>bool=>_compare<N D A B S W>(a._count b._count) <? 0
+__lt__=<N D S>(a:_GridInstant<N D S> b:Instant):>bool=>_at(a) <? _at(b)
+__lt__=<N D S>(a:Instant b:_GridInstant<N D S>):>bool=>_at(a) <? _at(b)
+__lt__=<N D S>(a:_GridInstant<N D S> b:Instant_width_64):>bool=>_at(a) <? _at(b)
+__lt__=<N D S>(a:Instant_width_64 b:_GridInstant<N D S>):>bool=>_at(a) <? _at(b)
+__eq__=<N D S A B W>(a:_GridDuration<N D S> b:_GridDuration<A B W>):>bool=>_compare<N D A B S W>(a._count b._count) =? 0
+__eq__=<N D S>(a:_GridDuration<N D S> b:Duration):>bool=>_at(a) =? _at(b)
+__eq__=<N D S>(a:Duration b:_GridDuration<N D S>):>bool=>_at(a) =? _at(b)
+__eq__=<N D S>(a:_GridDuration<N D S> b:Duration_width_64):>bool=>_at(a) =? _at(b)
+__eq__=<N D S>(a:Duration_width_64 b:_GridDuration<N D S>):>bool=>_at(a) =? _at(b)
+__eq__=<N D S>(a:_GridDuration<N D S> b:rational*Time):>bool=>_at(a) =? _at(b)
+__eq__=<N D S>(a:_GridDuration<N D S> b:int*Time):>bool=>_at(a) =? _at(b)
+__eq__=<N D S>(a:rational*Time b:_GridDuration<N D S>):>bool=>_at(a) =? _at(b)
+__eq__=<N D S>(a:int*Time b:_GridDuration<N D S>):>bool=>_at(a) =? _at(b)
+__lt__=<N D S A B W>(a:_GridDuration<N D S> b:_GridDuration<A B W>):>bool=>_compare<N D A B S W>(a._count b._count) <? 0
+__lt__=<N D S>(a:_GridDuration<N D S> b:Duration):>bool=>_at(a) <? _at(b)
+__lt__=<N D S>(a:Duration b:_GridDuration<N D S>):>bool=>_at(a) <? _at(b)
+__lt__=<N D S>(a:_GridDuration<N D S> b:Duration_width_64):>bool=>_at(a) <? _at(b)
+__lt__=<N D S>(a:Duration_width_64 b:_GridDuration<N D S>):>bool=>_at(a) <? _at(b)
+__lt__=<N D S>(a:_GridDuration<N D S> b:rational*Time):>bool=>_at(a) <? _at(b)
+__lt__=<N D S>(a:_GridDuration<N D S> b:int*Time):>bool=>_at(a) <? _at(b)
+__lt__=<N D S>(a:rational*Time b:_GridDuration<N D S>):>bool=>_at(a) <? _at(b)
+__lt__=<N D S>(a:int*Time b:_GridDuration<N D S>):>bool=>_at(a) <? _at(b)
+
+$check_constant _nonzero_time(q) "not a divisor"
+__truediv__=<N D S>(a:_GridDuration<N D S> q:rational*Time):>rational|OutOfRange=>{
+    let b=_seconds(q)
+    if b.numerator =? 0 {return OutOfRange}
+    let v=_at(a)
+    rational(v.numerator*b.denominator v.denominator*b.numerator)
+}
+
+$check_constant _nonzero_int(k) "not a divisor"
+__truediv__=<N D S>(a:_GridDuration<N D S> k:int):>(rational*Time)|OutOfRange=>{
+    if k =? 0 {return OutOfRange}
+    let v=_at(a)
+    rational(v.numerator v.denominator*k)*s
+}
+_nonzero_stored=<N D S>(d:_GridDuration<N D S>):>string?=>if _count(d._count) =? 0 {"this divides by zero"} else {none}
+$check_constant _nonzero_stored(b) "not a divisor"
+__truediv__=<N D S A B W>(a:_GridDuration<N D S> b:_GridDuration<A B W>):>rational|OutOfRange=>{
+    let y=_at(b)
+    if y.numerator =? 0 {return OutOfRange}
+    let x=_at(a)
+    rational(x.numerator*y.denominator x.denominator*y.numerator)
+}
+# An exact cast can omit its checks if even the extreme negative count fits.
+_bits=(_tag:array<int64>):>int=>64
+_bits=(_tag:array<Duration>):>int=>128
+_limits=<N D S>(_tag:array<_GridInstant<N D S>>):>[rational int]=>{
+    let storage:array<S>=[]
+    [_tick<N D>() _bits(storage)]
+}
+_limits=<N D S>(_tag:array<_GridDuration<N D S>>):>[rational int]=>{
+    let storage:array<S>=[]
+    [_tick<N D>() _bits(storage)]
+}
+_limits=(_tag:array<Instant>):>[rational int]=>[rational(1 1000000000) 128]
+_limits=(_tag:array<Duration>):>[rational int]=>[rational(1 1000000000) 128]
+_limits=(_tag:array<Instant_width_64>):>[rational int]=>[rational(1 1000000000) 64]
+_limits=(_tag:array<Duration_width_64>):>[rational int]=>[rational(1 1000000000) 64]
+_covers=<T V>():>bool=>{
+    let target:array<T>=[]
+    let source:array<V>=[]
+    let [src src_bits]=_limits(source)
+    let [dst dst_bits]=_limits(target)
+    let scale=_delta(src dst)
+    if scale is? OffGrid {return false}
+    (scale << src_bits) <=? (int(1) << dst_bits)
+}
+
+# Split exactly at any positive quantum; floor keeps a negative point's
+# remainder nonnegative. Remainders may be off the ordinary nanosecond grid.
+_positive_tick=(tick:rational*Time):>string?=>if _seconds(tick).numerator <=? 0 {"a tick must be positive"} else {none}
+_split=(v:rational q:rational*Time):>[int rational*Time]|OffGrid=>{
+    let step=_seconds(q)
+    if step.numerator <=? 0 {return OffGrid}
+    let count=(v.numerator*step.denominator)//(v.denominator*step.numerator)
+    [count (v-count*step)*s]
+}
+$check_constant _positive_tick(tick) "not a tick"
+ticks=<N D S>(x:_GridDuration<N D S> tick:rational*Time):>[int rational*Time]|OffGrid=>_split(_at(x) tick)
+$check_constant _positive_tick(tick) "not a tick"
+ticks=<N D S>(x:_GridInstant<N D S> tick:rational*Time):>[int rational*Time]|OffGrid=>_split(_at(x) tick)
+
+__as__=<N D S>(d:_GridDuration<N D S>):>string=>"{_at(d)*s}"
+
+# Rounding can move either endpoint by less than one output quantum.
+# A constant step settles the range check wherever even that bound fits.
+_rounding_bound=<N D S>(tick:rational*Time):>string?=>{
+    let ns=_tick_ns(tick)
+    if ns is? none {return "a tick here is a positive whole number of nanoseconds"}
+    let storage:array<S>=[]
+    let magnitude=(int(1) << (_bits(storage)-1))*_tick<N D>()*1000000000
+    if magnitude+ns >=? (int(1) << 127) {return ""}
+    none
+}
+# Round onto the ordinary storage grid, retaining signed, exact sub-ns loss.
+# Civil rounding of an instant shares the UTC minute shift with the default grid.
+_round_ns=(v:rational step:int shift:int rounding:_Rounding):>[int rational*Time]=>{
+    if step <=? 0 {return [0 v*s]}
+    let ns=v*1000000000
+    let shifted=ns-shift
+    let count=_rounded(rational(shifted.numerator shifted.denominator*step) rounding)
+    let rounded=count*step+shift
+    [rounded (v-rational(rounded 1000000000))*s]
+}
+$check_constant _rounding_bound(tick) "not a tick"
+quantize=<N D S>(x:_GridDuration<N D S> tick:rational*Time rounding:_Rounding):>[Duration rational*Time]|OffGrid|OutOfRange=>{
+    let step=_tick_ns(tick) ?? return OffGrid
+    let [ns loss]=_round_ns(_at(x) step 0 rounding)
+    [_wide(ns) or_throw loss]
+}
+$check_constant _rounding_bound(tick) "not a tick"
+quantize=<N D S>(x:_GridInstant<N D S> tick:rational*Time rounding:_Rounding):>[Instant rational*Time]|OffGrid|OutOfRange=>{
+    let step=_tick_ns(tick) ?? return OffGrid
+    let v=_at(x)
+    let shift=_label_shift((v*1000000000).floor() step)
+    let [ns loss]=_round_ns(v step shift rounding)
+    if not _fits(ns) {return OutOfRange}
+    [_instant(ns) loss]
+}

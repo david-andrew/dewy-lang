@@ -1,0 +1,28 @@
+Half:type=Duration<width=64 tick=1ns/2>
+Fine:type=Duration<tick=1ns/2>
+# An equal tick in another width and a default-ns value past the compact boundary.
+compare=(v:Half wide:Fine plain:Duration)=>printl"{v =? wide} {v <? plain} {plain <? v}"
+check=(count:int)=>{
+    let r=convert<Half>(count*(1ns/2))
+    if r is? OffGrid {printl("off grid");return}
+    if r is? OutOfRange {printl("out of range");return}
+    let wide=r as Fine
+    let bound:Duration=4611686018427387904ns
+    compare(r wide bound)
+    printl("{(r+1ns/2) is? OutOfRange} {(r-1ns/2) is? OutOfRange}")
+}
+extremes=(n:int)=>{
+    let max=convert<Fine>(n*(1ns/2)) or_throw
+    let near=convert<Duration<tick=1ns/3>>((n-1)*(1ns/3)) or_throw
+    printl("{max >? near} {near <? max} {max =? near}")
+}
+main=()=>{
+    check(9223372036854775807)
+    check(-9223372036854775808)
+    check(9223372036854775808)
+    let a:Duration<tick=1ns>=0s
+    let b:Duration=a
+    printl(b)
+    printl("{size_of<Half>} {size_of<Fine>}")
+    extremes(170141183460469231731687303715884105727) or_throw
+}

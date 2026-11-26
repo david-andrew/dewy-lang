@@ -1,0 +1,184 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED add_flag clone kid mk nodes set_list)
+from p"check.jo" import (fns lib_dir syms)
+from p"checked_expression_nodes.dewy" import (type_node_of)
+from p"call_argument_checks.dewy" import unnamed
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checker_import_discovery.dewy" import (ensure_bundled_import)
+from p"checker_module_lookup.dewy" import (module_lookup)
+from p"checks_assign_hooks.dewy" import (block_value)
+from p"checks_builders.dewy" import (bc_block bc_field bc_ident bc_stmt)
+from p"checks_thin.dewy" import (resolve_type)
+from p"comptime.jo" import (ct_values)
+from p"comptime_ops.dewy" import (ct_literal ct_run)
+from p"constant_checks.dewy" import (cc_narrow)
+from p"constant_fold_ops.dewy" import (cc_closed_expr)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (last_checked setting_value_wrapped)
+from p"expression_types.dewy" import (ntype)
+from p"refine_ops.dewy" import (str_set_type)
+from p"type_ops.dewy" import (dt get_struct_inst)
+from p"types.jo" import (T_INT is_float prune struct_targ structs tkind types)
+from p"unit_rare.dewy" import (time_core_type)
+from p"unit_ops.dewy" import (base_dimension quantity_dimension)
+from p"units.jo" import (is_quantity quantity_base)
+from p"util.jo" import (files intern name_of pos_file)
+GridWord:type=int64<overflow='wrap'>
+# Only a named tick reaches here. Evaluate the expression in its caller's scope.
+# Reduced parts are singleton type arguments, so equal grids share a specialization
+# and a stored point contains only its count, even for a very large denominator.
+stored_time_type=(tn:GridWord):>int64=>$unsafe {
+    let pos=nodes.ptr[tn].pos
+    let base=mk('tname' pos)
+    nodes.ptr[base].name=nodes.ptr[tn].name
+    nodes.ptr[base].sval=nodes.ptr[tn].sval
+    let plain=resolve_type(base)
+    let point=time_core_type(plain "Instant")
+    if not point and not time_core_type(plain "Duration") {fatal(pos "tick= requires an Instant or Duration")}
+    ensure_bundled_import("time/grid.dewy" "$time_grid" pos)
+    let m=GridWord(syms.ptr[lookup(intern("$time_grid"))].ref)
+    let helper=mk('call' pos)
+    nodes.ptr[helper].a=int32(bc_field(bc_ident("$time_grid" pos) "_parts" pos))
+    set_list(helper [clone(GridWord(nodes.ptr[tn].a))])
+    # Signatures have no executable owner. Check the constant as a small
+    # function body so ordinary refinement checks have their own valid scope.
+    let lambda=mk('lambda' pos)
+    nodes.ptr[lambda].b=int32(bc_block([bc_stmt(helper pos)] pos))
+    setting_value_wrapped[lambda]=true
+    check_expr(lambda 0);
+    let fn=GridWord(nodes.ptr[lambda].sym)
+    let value=ct_values[ct_run(block_value(GridWord(fns.ptr[fn].body)))]
+    let num=ct_values[value.items[0]].s
+    let den=ct_values[value.items[1]].s
+    if num =? "" {fatal(pos "a stored time tick must be a positive exact time constant")}
+    let compact=nodes.ptr[tn].ival =? 64
+    if num =? "1" and den =? "1000000000" {
+        if not compact {return plain}
+        let name=if point {"Instant_width_64"} else {"Duration_width_64"}
+        return grid_core_record(plain name)
+    }
+    let form=if point {"_GridInstant"} else {"_GridDuration"}
+    let decl=GridWord(syms.ptr[module_lookup(m intern(form))].ref)
+    let storage=if compact {T_INT} else {grid_core_record(plain "Duration")}
+    get_struct_inst(decl [str_set_type([num]) str_set_type([den]) storage])
+}
+
+grid_core_record=(plain:GridWord name:string):>int64=>$unsafe {
+    let d=GridWord(structs.ptr[GridWord(types.ptr[plain].st)].decl)
+    let sym=module_lookup(GridWord(nodes.ptr[d].mod) intern(name))
+    get_struct_inst(GridWord(syms.ptr[sym].ref) [])
+}
+
+# Classify only the types at an explicit conversion. User records of the same
+# name do not acquire a conversion. 1 = point, 2 = duration.
+grid_family=(t:GridWord):>int64=>$unsafe {
+    if tkind(t) not=? 'struct_' {return 0}
+    let record=structs.ptr[GridWord(types.ptr[prune(t)].st)]
+    if record.name not=? "_GridInstant" and record.name not=? "_GridDuration" {return 0}
+    if files[pos_file(nodes.ptr[GridWord(record.decl)].pos)].path not=? "{lib_dir}/time/grid.dewy" {return 0}
+    if record.name =? "_GridInstant" {1} else {2}
+}
+plain_family=(t:GridWord):>int64=>{
+    if time_core_type(t "Instant") or time_core_type(t "Instant_width_64") {return 1}
+    if time_core_type(t "Duration") or time_core_type(t "Duration_width_64") {return 2}
+    0
+}
+# Form an ordinary call to a specialized library helper at this use site.
+grid_call=(name:string targs:array<int64> args:array<int64> pos:GridWord):>int64=>$unsafe {
+    ensure_bundled_import("time/grid.dewy" "$time_grid" pos)
+    let callee=mk('typeapply' pos)
+    nodes.ptr[callee].a=int32(bc_field(bc_ident("$time_grid" pos) name pos))
+    let arguments:array<int64>=[]
+    loop t in targs {arguments.push(type_node_of(t pos))}
+    set_list(callee arguments)
+    let call=mk('call' pos)
+    nodes.ptr[call].a=int32(callee)
+    set_list(call args)
+    check_expr(call 0);
+    last_checked
+}
+grid_convert_call=(n:GridWord name:GridWord decl:GridWord argument:GridWord target:GridWord):>int64=>$unsafe {
+    if name_of(name) not=? "convert" or files[pos_file(nodes.ptr[decl].pos)].path not=? "{lib_dir}/prelude/time.dewy" {return -1}
+    let value=unnamed(argument)
+    if nodes.ptr[value].type =? 0 {return -1}
+    let label=if argument =? value {""} else {name_of(GridWord(nodes.ptr[argument].name))}
+    grid_conversion(n value ntype(value) target false label)
+}
+grid_conversion=(n:GridWord a:GridWord source:GridWord target:GridWord cast:bool label:string=""):>int64=>$unsafe {
+    let source_family=grid_family(source)
+    let to=grid_family(target)
+    if source_family =? 0 and to =? 0 {return -1}
+    let quantity=is_quantity(source) and quantity_dimension(source) =? base_dimension(0) and not is_float(quantity_base(source))
+    if source_family =? 0 {source_family=if quantity {2} else {plain_family(source)}}
+    if to =? 0 {to=plain_family(target)}
+    if source_family =? 0 or to not=? source_family {return -1}
+    if label not=? "" and label not=? (if quantity {"q"} else if source_family =? 1 {"t"} else {"d"}) {return -1}
+    let pos=nodes.ptr[n].pos
+    add_flag(a NF_CHECKED)
+    let checked=grid_call("_convert" [target source] [a] pos)
+    let t=ntype(checked)
+    if cc_closed_expr(a 0) {
+        let result=ct_values[ct_run(checked)]
+        if result.items.length >? 0 and ct_values[result.items[0]].type =? target {
+            let literal=ct_literal(result.items[0] pos)
+            nodes.ptr[n]=nodes.ptr[literal]
+            last_checked=n
+            return target
+        }
+        if cast {fatal(pos "the time does not fit the destination width or tick: choose a wider count or quantize to the tick")}
+    }
+    if cast {
+        if quantity {fatal(pos "this time conversion needs a divisibility or range check: use convert<T>(value)")}
+        let proof=grid_call("_covers" [target source] [] pos)
+        if ct_values[ct_run(proof)].i =? 0 {fatal(pos "this time conversion needs a divisibility or range check: use convert<T>(value)")}
+        nodes.ptr[n]=nodes.ptr[checked]
+        let narrowed=cc_narrow(n)
+        last_checked=n
+        return narrowed
+    }
+    nodes.ptr[n]=nodes.ptr[checked]
+    last_checked=n
+    t
+}
+
+# Grid validators specialize on the stored operand's type. Its count may be
+# open even though the other operand, and therefore this proof, is constant.
+grid_constant_check=(n:GridWord validator:string index:GridWord):>int64=>$unsafe {
+    let arg=kid(n index)
+    if not cc_closed_expr(arg 0) {return 0}
+    let receiver=if validator =? "_nonzero_stored" {arg} else {kid(n 1-index)}
+    let si=GridWord(types.ptr[prune(ntype(receiver))].st)
+    let parts=[struct_targ(si 0) struct_targ(si 1)]
+    if validator not=? "_operand_error" {parts.push(struct_targ(si 2))}
+    let pos=nodes.ptr[arg].pos
+    if validator =? "_operand_error" {
+        # Materialize a representable constant offset once. The run-time point
+        # then moves by integer addition, with no fraction or grid division.
+        let m=GridWord(nodes.ptr[GridWord(structs.ptr[si].decl)].mod)
+        let decl=GridWord(syms.ptr[module_lookup(m intern("_GridDuration"))].ref)
+        let duration=get_struct_inst(decl [parts[0] parts[1] struct_targ(si 2)])
+        let call=grid_call("_convert" [duration ntype(arg)] [arg] pos)
+        let result=ct_values[ct_run(call)]
+        let member=result.items[0]
+        if ct_values[member].type =? duration {
+            let amount=ct_literal(member pos)
+            let args=if index =? 0 {[amount receiver]} else {[receiver amount]}
+            let operation=name_of(GridWord(nodes.ptr[GridWord(fns.ptr[GridWord(nodes.ptr[n].sym)].decl)].name))
+            let sum=grid_call(operation parts args pos)
+            nodes.ptr[n]=nodes.ptr[sum]
+            last_checked=n
+            return ntype(n)
+        }
+        # An out-of-range offset can still cancel the starting count.
+        if dt(ct_values[member].type) =? "OutOfRange" {return cc_narrow(n "OffGrid")}
+        fatal(pos "off the stored time grid: use quantize with a named rounding or choose a finer tick")
+    }
+    let call=grid_call(validator parts [arg] pos)
+    let verdict=ct_values[ct_run(call)]
+    if verdict.i not=? 0 {
+        let why=ct_values[verdict.items[0]].s
+        if why =? "" {return cc_narrow(n "OffGrid")}
+        fatal(pos why)
+    }
+    cc_narrow(n)
+}

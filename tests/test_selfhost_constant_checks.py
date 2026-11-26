@@ -49,6 +49,7 @@ pos_in_lib = (p: int) -> bool: false
 cc_closed_expr = (x: int, depth: int) -> bool: nodes[x].kind == .int_lit
 cc_fold_first = (n: int, d: int) -> int: 0
 cc_fold_after = (n: int, d: int) -> int: 0
+grid_constant_check = (n: int, validator: str, index: int) -> int: 0
 time_grid_proven = (validator: int, n: int) -> bool: false
 dt = (t: int) -> str: "type{t}"
 name_of = (n: int) -> str: if n == 1: "check_constant" else: "name{n}"
@@ -182,7 +183,7 @@ def test_constant_checks_twins(compiler, tmp_path, release):  # noqa: F811
     output = compare_narrow(compiler, tmp_path, release,
                             ('source_types', 'node_store', 'checker_types', 'checker_state', 'checker_tokens', 'evaluator_state', 'constant_checks'), DRIVER,
                             doubles={'services.jo': SERVICES, 'check_constant.jo': (ROOT / 'compiler/check_constant.jo').read_text()},
-                            services=('directives', 'checker_expr', 'ast', 'check', 'expr', 'types', 'util', 'errors', 'error_ops', 'comptime', 'warn_if_ops', 'constant_folds', 'unit_rare'))
+                            services=('directives', 'checker_expr', 'ast', 'check', 'expr', 'types', 'util', 'errors', 'error_ops', 'comptime', 'warn_if_ops', 'constant_folds', 'unit_rare', 'time_grid_types'))
     assert output.endswith(b'constant ok\n')
     for text in (b'the validator of a constant check', b'bad pattern: inner', b'bad pattern: text fails', b'union [50, 51]', b'names a validator'):
         assert text in output, text
