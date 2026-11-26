@@ -792,7 +792,3 @@ section linked. ROADMAP.md lists them in one line each.
     Everywhere else, multivalues spread out into a sequence of single values. There is no special
     support for some cases, such as an array of multivalues, for now. Rejected: one group per
     advance.
-  - **A failed close goes to the function that owns the generator** (Q6, closed without a new
-    rule): a generator holding a socket is owned like any value. When a function that owns one
-    returns before reading it all, closing the socket can fail. D40 Q1 already makes that failure
-    the function's result, and D42 keeps it alongside any read failure.

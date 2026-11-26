@@ -17,11 +17,11 @@
 
 **Questions at a glance**
 - **(a) Changes something you decided:**
-  - D44 Q1, Q2, Q5, Q6, Q8: `Canceled` inferred, never written; confined to its own work; loops end at cancellation; `race`/`first_ok` discard losers except a failed undo; the documented-behaviour changes (Ctrl-C keeps the OS default);
+  - D44 Q1, Q2, Q5, Q6, Q8, Q9: `Canceled` inferred, never written; confined to its own work; loops end at cancellation; `race`/`first_ok` discard losers except a failed undo; the documented-behaviour changes (Ctrl-C keeps the OS default); a lazy body passes a cancellation on;
   - D42 Q3: one leaf per operation, families never returned bare; `FileError` becomes the file failures' parent;
   - D40 Q2, Q5, Q6: cleanup timing, `defer`, and visible cleanup exits;
   - D38 Q1: snake_case naming style;
-  - D45 Q7: a cancelled source hands over `Canceled` as a value (decides D44 Q5 too);
+  - D45 Q6: who reports a failed close, shown with D40 Q1 to check them together;
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
@@ -165,7 +165,6 @@ Should a loop over any source (a channel, a `merged` inbox or a signal) end when
 
 - **Rec:** yes. It replaces `merged`'s "one `Canceled` item, then end" rule with the signal rule. **Reversible** before release.
 - **You give up:** a loop ended by cancellation looks like one that ran out of input, and the code after it runs. Write `or_throw` where that code publishes a result.
-- **Depends on D45 Q7**, which recommends the opposite: a cancelled source hands over `Canceled` as a value.
 
 #### Q6 (a). `race` and `first_ok` discard their losers, but never a failed undo
 
@@ -226,6 +225,26 @@ Should these changes be accepted together?
 
 - **Rec:** accept all. Each is **reversible** before release.
 - **You give up:** what the "Against" column names: in each, a documented rule changes to the one in the row.
+
+#### Q9 (a). A lazy body must pass on a cancellation (from D45, generators)
+
+```dewy
+doubled = (source) => lazy loop x in source x * 2
+save_all = (source file) => {
+    loop x in doubled(source) file.write(x) or_throw
+    file.commit() or_throw
+}
+main = () => {
+    let file = open("copy.bin" write=true) or_throw
+    race(@save_all(download(url) file) @give_up_after(10s))   # the timer wins halfway through
+}
+```
+
+When the timer wins, `race` cancels the task running `save_all` while `download` is mid-stream. Under Q5, a loop over a source ends quietly at cancellation. It does not hand over `Canceled` as a value, so `x * 2` compiles. `doubled` then ends as if the download had finished, and `save_all` commits half the data as if it were complete.
+
+Should a lazy body be required to pass a cancellation on, by writing `lazy loop x in source or_throw x * 2`?
+
+**Rec:** yes. The suffix is needed only on sources that can actually be cancelled; ranges and arrays need none. A consumer that wants the partial result, such as a progress display, uses a plain loop and then `check_cancel()` (D41). **Reversible:** accepting more cases later is additive.
 
 Dogfooded in 26 programs, with independent reviews and soundness checks; the names in Q3, Q4, Q6 and Q7 were read correctly cold: [proposal](proposals/cancellation/).
 
@@ -695,26 +714,41 @@ evens = (source) => lazy loop x in source { if x % 2 =? 0 x }
 loop x in evens(squares) and _ in [0..5) printl(x)   # 0 4 16 36 64
 ```
 
-#### Q7 (a). Does a cancelled source hand over `Canceled`, or just stop?
+#### Q6 (a). Who reports a failed close? Shown with D40 Q1, to check them together
 
 ```dewy
-doubled = (source) => lazy loop x in source x * 2
-save_all = (source file) => {
-    loop x in doubled(source) file.write(x) or_throw
-    file.commit() or_throw
+first_row = (rows) => {
+    loop row in rows { return row }       # stop after one row
+    none
 }
 main = () => {
-    let file = open("copy.bin" write=true) or_throw
-    race(@save_all(download(url) file) @give_up_after(10s))   # the timer wins halfway through
+    let row = first_row(db.rows("users")) or_throw   # the query's socket closes as first_row returns
+    show(row)
 }
 ```
 
-When the timer wins, `race` cancels the task running `save_all` while `download` is mid-stream. You've read this correctly if a cancelled source hands over `Canceled` as a value. That is one of two possible designs, and D44 Q5 currently recommends the other:
+`db.rows("users")` makes a generator that owns a database socket. No references are involved: the generator is an ordinary value with the socket inside it, like `out` in D40 Q1's `save` below. A socket can't be copied, so passing the generator to `first_row` hands it over, the same move-at-last-use as any other value. `first_row` stops after one row, so the generator, and its socket, is cleaned up when `first_row` returns.
 
-- **A value (your reading).** The source gives `Canceled` as its last value, and its type includes it (inferred, D44 Q1). `lazy loop x in source x * 2` then doesn't compile: you `match` it or forward it with `or_throw`. This matches your Q2 answer that failures travel as values, and batch 10's rule that `Canceled` isn't special. The cost is that every loop over a cancellable source handles it, including loops that would be happy to just stop, such as D44 Q5's `total_of`.
-- **A quiet end (D44 Q5's recommendation).** The loop just ends, as signal loops do today, and `or_throw` after the source forwards the cancellation instead. `doubled` then compiles as written, and `save_all` commits half the download as if it were complete. Lazy bodies would need an extra rule that requires `or_throw` on a cancellable source.
+Suppose closing that socket fails. Should `main` get the failure at its `or_throw` instead of the row? If reading also failed, both failures would be kept (D42).
 
-**Rec:** a value. The type system then catches the half-download, with no special rule for lazy bodies. Answering this also answers D44 Q5: plain loops over channels and signals would follow the same rule. **Reversible** before release.
+**The rule this rests on: D40 Q1, which you accepted on 11-12.** As it was asked:
+
+```dewy
+save = (data:array<uint8>) => {
+    let out = open(p"/mnt/usb/data.bin" 'w') or_throw
+    out.write_bytes(data) or_throw;     # buffered: nothing is on the disk yet
+}                                        # out flushes and closes here
+main = () => {
+    save(readings) ?? { printl"save failed"; return }
+    printl"saved"
+}
+```
+
+> If the USB stick is full, the failure only shows up at the final flush. Today a cleanup hook can't fail, so that error is lost and this program prints "saved". With this change the flush failure becomes `save`'s result, and `main` prints "save failed". Let cleanup hooks fail, with the failure becoming the function's result? (The alternative is requiring `out.close() or_throw` before every exit, which is the second step you want to avoid.)
+
+As recorded: yes. If a file's final flush or close fails, that failure is what the function returns. Your condition was no hard-to-follow nonlocal behavior: the language, highlighting and hover show what extra work runs at cleanup and which failures it can add. Still open in D40: timing (Q2), and a visible exit for a cleanup failure on `break`, `continue` or an inner block's end (Q6). [Cleanup proposal](proposals/cleanup/)
+
+**Rec:** keep D40 Q1, and apply it to generators exactly as to files. `first_row` owns the generator, so `first_row` returns the failed close. The alternative is to drop or log a failed close, which hides a lost write on the other end. **Reversible** before release.
 
 Dogfooded on 13 programs, audited against existing decisions, reviewed for soundness, and names read cold. Programs: [generators proposal](proposals/generators/) (round 4 is the latest; [your answers](proposals/generators/answers-r4.md)).
 
