@@ -26,7 +26,7 @@ from p"checker_contexts.dewy" import (cur_mod)
 from p"expr.jo" import (IN intrinsics)
 from p"explicit_conversions.dewy" import (conversion)
 from p"checker_expr.dewy" import (call_by_name check_expr check_intrinsic lookup)
-from p"checker_startup.dewy" import (load_game_for_name load_std_for_name)
+from p"checker_startup.dewy" import (load_game_for_name load_game_prelude load_std_for_name load_std_prelude prelude_custom_lib)
 from p"prelude.jo" import (prelude_game_pending prelude_std_pending)
 from p"call_lookup_context.dewy" import (caller_dewy)
 from p"node_store.dewy" import (Node)
@@ -149,6 +149,16 @@ call_name_unknown=(n:int64 name:int64 mod_scope:int64 args:array<int64> expected
         }
     }
     if hidden_assert {fatal(nodes.ptr[n].pos "unknown function 'assert' (assertions are directives: `$assert condition` must be proven while compiling, `$runtime_assert condition` checks while running, and `$expect condition` states what a `$test` checks)")}
+    if prelude_custom_lib and mod_scope <? 0 {
+        if prelude_std_pending {
+            load_std_prelude()
+            return call_by_name(n name mod_scope args expected ufcs)
+        }
+        if prelude_game_pending {
+            load_game_prelude()
+            return call_by_name(n name mod_scope args expected ufcs)
+        }
+    }
     let all=visible_names()
     loop it in intrinsics {
         if it.id not=? IN.assert or not dewy_at(nodes.ptr[n].pos) {all.push(intern(it.name))}

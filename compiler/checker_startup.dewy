@@ -2,7 +2,7 @@ $runtime_checks
 from p"checker_type_entries.dewy" import (get_fn_inst)
 from p"checker_scope_symbols.dewy" import (new_sym)
 from p"intrinsic_registration.dewy" import (register_intrinsics)
-from p"@lib/core/os.jo" import (file_exists list_dir)
+from p"@lib/core/os.jo" import (env file_exists list_dir)
 from p"@lib/core/str.jo" import (ends_with starts_with)
 from p"ast.jo" import (mk NF_EXTERN decl_has_rest has_flag kid nkids nodes)
 from p"check.jo" import (fns init_fns lib_dir module_by_path module_ctx modules registered runtime_ffi_done runtime_ffi_scan syms target_macos target_wasm target_windows)
@@ -299,6 +299,7 @@ load_game_prelude=():>void=>{
 }
 
 let prelude_game_extra:StartupWord=-1
+let prelude_custom_lib:bool=false
 std_file_route=(nm:string):>StartupWord=>$unsafe {
     let n=StartupWord((nm as array<uint8>).length)
     if n =? 0 {return -1}
@@ -405,6 +406,7 @@ load_prelude=():>void=>{
     # all .jo files in lib/core, lib/std and lib/game are loaded into the shared prelude scope
     # (lib/core must stay compilable by the C bootstrap compiler; lib/std need not)
     prelude_game_extra=-1
+    prelude_custom_lib=env("DEWY_CORE_LIB") not=? none
     prelude_lazy_setup()
     let game_pending=@prelude_game_pending
     let std_pending=@prelude_std_pending
