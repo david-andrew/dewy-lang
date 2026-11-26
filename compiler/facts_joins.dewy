@@ -3,7 +3,7 @@ from p"expression_types.dewy" import (ntype)
 
 from p"ast.jo" import (nodes)
 from p"checker_tokens.dewy" import (Tok)
-from p"facts.jo" import (FACT_CAP FACT_MAP_GROWN FACT_MAP_POSITIONS FactBinding FactIndexes FactProjection FactState fact_grown_roots fact_implications fact_terms)
+from p"facts.jo" import (FACT_CAP FACT_MAP_GROWN FACT_MAP_POSITIONS FactBinding FactIndexes FactProjection FactState fact_empty_index fact_grown_roots fact_implications fact_terms)
 from p"facts_values.dewy" import (fact_type fact_pair_key)
 from p"facts_compare.dewy" import (fact_distance)
 from p"facts_lengths.dewy" import (fact_difference)
@@ -191,6 +191,48 @@ fact_host_finite=(s:FactState v:JoinWord):>bool=>{
     if v =? 0 or fact_type(fact_terms[v].type) =? T_U64 {return false}
     fact_host_value(s v) or fact_host_endpoint(s v false) and fact_host_endpoint(s v true)
 }
+# Consuming join: mutates @a in place when frames match (zero array clones) and
+# clears @b so refcounts drop immediately.
+fact_join_into=(@a:FactState @b:FactState at:JoinWord):>void=>$unsafe {
+    if not a.live {a=b; b=FactState(live=false); return}
+    if not b.live {return}
+    let same_ids=a.ids.length =? b.ids.length and (a.ids.ptr =? b.ids.ptr or a.ids =? b.ids)
+    let same_cond=a.conditional.length =? b.conditional.length and (a.conditional.ptr =? b.conditional.ptr or a.conditional =? b.conditional)
+    if same_ids and same_cond {
+        let same_bind=a.bindings.length =? b.bindings.length and (a.bindings.ptr =? b.bindings.ptr or a.bindings =? b.bindings)
+        if same_bind {
+            let same_proj=a.projections.length =? b.projections.length and (a.projections.ptr =? b.projections.ptr or a.projections =? b.projections)
+            if same_proj and a.differences.length =? b.differences.length and (a.differences.ptr =? b.differences.ptr or a.differences =? b.differences) {
+                a.cmp_mask=JoinWord(a.cmp_mask) | JoinWord(b.cmp_mask)
+                a.full=false
+                let bp=b.bounds.ptr
+                if a.bounds.ptr not=? bp {
+                    let count=a.bounds.length
+                    let reason=fact_hull_reason(at)
+                    let unique=false
+                    let sp:ptr<FactBound>=uint64(0) as ptr<FactBound>
+                    loop i in [0..count) {
+                        let xp=a.bounds.ptr + i
+                        let yp=bp + i
+                        if xp[0].lo =? yp[0].lo and xp[0].hi =? yp[0].hi and xp[0].nz =? yp[0].nz and xp[0].wide =? yp[0].wide and xp[0].reason =? yp[0].reason and xp[0].witness =? yp[0].witness {continue}
+                        let h=FactBound(min(xp[0].lo yp[0].lo) max(xp[0].hi yp[0].hi) (xp[0].nz or xp[0].lo >? 0 or xp[0].hi <? 0) and (yp[0].nz or yp[0].lo >? 0 or yp[0].hi <? 0) reason at xp[0].wide or yp[0].wide)
+                        if not unique {
+                            a.bounds[i]=h
+                            sp=a.bounds.ptr
+                            unique=true
+                        } else {
+                            sp[i]=h
+                        }
+                    }
+                }
+                b=FactState(live=false)
+                return
+            }
+        }
+    }
+    a=fact_join(a b at)
+    b=FactState(live=false)
+}
 fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
     if not a.live {return b}
     if not b.live {return a}
@@ -217,7 +259,7 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
             }
         }
     }
-    let s=FactState(index=[FactIndexes()])
+    let s=FactState(index=fact_empty_index)
     s.cmp_mask=JoinWord(a.cmp_mask) | JoinWord(b.cmp_mask)
     # (both paths usually inherit one list: keep it without hashing)
     if same_cond {s.conditional=a.conditional}
@@ -234,7 +276,7 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
     let ids_match_b=same_ids
     if same_ids {
         s.ids=a.ids
-        s.index[0].slots=a.index[0].slots
+        if a.index.ptr[0].slots.length not=? 0 {s.index[0].slots=a.index[0].slots}
         s.bounds=a.bounds
         fact_hull_all(@s a b s.bounds.length at)
     }
@@ -250,7 +292,7 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
         loop k <? common and aids[k] =? bids[k] {k += 1}
         let prefix=true
         if k <? alen {
-            let sorted=a.index[0].slots.length =? 0 and b.index[0].slots.length =? 0
+            let sorted=a.index.ptr[0].slots.length =? 0 and b.index.ptr[0].slots.length =? 0
             let disjoint=sorted and (k =? blen or aids[alen - 1] <? bids[k] or aids[k] >? bids[blen - 1])
             if not disjoint {
                 loop i in [k..alen) {
@@ -269,7 +311,7 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
                 ids_match_a=true
             }
             if k =? blen {ids_match_b=true}
-            s.index[0].slots=a.index[0].slots
+            if a.index.ptr[0].slots.length not=? 0 {s.index[0].slots=a.index[0].slots}
             fact_hull_all(@s a b k at)
         }
         else {
@@ -324,11 +366,13 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
         let src=if from_ =? 1 {b} else {a}
         s.projections=src.projections
         s.proj_base_mask=src.proj_base_mask
-        s.index[0].projection_index=src.index[0].projection_index
-        s.index[0].projection_head=src.index[0].projection_head
-        s.index[0].projection_tail=src.index[0].projection_tail
-        s.index[0].projection_next=src.index[0].projection_next
-        s.index[0].projection_value=src.index[0].projection_value
+        if src.index.ptr[0].projection_next.length not=? 0 {
+            s.index[0].projection_index=src.index[0].projection_index
+            s.index[0].projection_head=src.index[0].projection_head
+            s.index[0].projection_tail=src.index[0].projection_tail
+            s.index[0].projection_next=src.index[0].projection_next
+            s.index[0].projection_value=src.index[0].projection_value
+        }
     }
     else if b.projections.length >? 0 {
         # (b holds p when p is on b's chain for p.base: every projection is chained)
@@ -349,7 +393,7 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
     }
     if same_proj and (same_bind or (not bind_checked and a.bindings.length =? b.bindings.length and (a.bindings.ptr =? b.bindings.ptr or a.bindings =? b.bindings))) {
         s.bindings=a.bindings
-        s.index[0].roots=a.index[0].roots
+        if a.index.ptr[0].roots.length not=? 0 {s.index[0].roots=a.index[0].roots}
         fact_join_shared_rows(@s a b)
         return s
     }
@@ -382,7 +426,7 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
         aligned += 1
     }
     if aligned <? a.bindings.length {s.bindings=a.bindings[0..aligned)} else {s.bindings=a.bindings}
-    s.index[0].roots=a.index[0].roots
+    if a.index.ptr[0].roots.length not=? 0 {s.index[0].roots=a.index[0].roots}
     loop i in [0..aligned) {
         let ap=abp + i
         let bp=bbp + i
@@ -615,10 +659,12 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
         s.differences=src.differences
         s.diff_a_mask=src.diff_a_mask
         s.diff_b_mask=src.diff_b_mask
-        s.index[0].difference_index=src.index[0].difference_index
-        s.index[0].difference_value=src.index[0].difference_value
-        s.index[0].difference_record=src.index[0].difference_record
-        s.index[0].difference_next=src.index[0].difference_next
+        if src.index.ptr[0].difference_next.length not=? 0 {
+            s.index[0].difference_index=src.index[0].difference_index
+            s.index[0].difference_value=src.index[0].difference_value
+            s.index[0].difference_record=src.index[0].difference_record
+            s.index[0].difference_next=src.index[0].difference_next
+        }
     }
     else {
         loop i in [0..common_rows) {fact_add_difference(@s adp[i])}
@@ -927,10 +973,12 @@ fact_join_shared_rows=(@s:FactState a:FactState b:FactState):>void=>$unsafe {
         s.differences=a.differences
         s.diff_a_mask=a.diff_a_mask
         s.diff_b_mask=a.diff_b_mask
-        s.index[0].difference_index=a.index[0].difference_index
-        s.index[0].difference_value=a.index[0].difference_value
-        s.index[0].difference_record=a.index[0].difference_record
-        s.index[0].difference_next=a.index[0].difference_next
+        if a.index.ptr[0].difference_next.length not=? 0 {
+            s.index[0].difference_index=a.index[0].difference_index
+            s.index[0].difference_value=a.index[0].difference_value
+            s.index[0].difference_record=a.index[0].difference_record
+            s.index[0].difference_next=a.index[0].difference_next
+        }
         return
     }
     let mindiff=min(alen blen)
@@ -943,19 +991,23 @@ fact_join_shared_rows=(@s:FactState a:FactState b:FactState):>void=>$unsafe {
         s.differences=a.differences
         s.diff_a_mask=a.diff_a_mask
         s.diff_b_mask=a.diff_b_mask
-        s.index[0].difference_index=a.index[0].difference_index
-        s.index[0].difference_value=a.index[0].difference_value
-        s.index[0].difference_record=a.index[0].difference_record
-        s.index[0].difference_next=a.index[0].difference_next
+        if a.index.ptr[0].difference_next.length not=? 0 {
+            s.index[0].difference_index=a.index[0].difference_index
+            s.index[0].difference_value=a.index[0].difference_value
+            s.index[0].difference_record=a.index[0].difference_record
+            s.index[0].difference_next=a.index[0].difference_next
+        }
     }
     else if common =? blen {
         s.differences=b.differences
         s.diff_a_mask=b.diff_a_mask
         s.diff_b_mask=b.diff_b_mask
-        s.index[0].difference_index=b.index[0].difference_index
-        s.index[0].difference_value=b.index[0].difference_value
-        s.index[0].difference_record=b.index[0].difference_record
-        s.index[0].difference_next=b.index[0].difference_next
+        if b.index.ptr[0].difference_next.length not=? 0 {
+            s.index[0].difference_index=b.index[0].difference_index
+            s.index[0].difference_value=b.index[0].difference_value
+            s.index[0].difference_record=b.index[0].difference_record
+            s.index[0].difference_next=b.index[0].difference_next
+        }
     }
     else {
         loop i in [0..common) {fact_add_difference(@s adp[i])}

@@ -210,6 +210,20 @@ index_safety=(arr:IndexWord idx0:IndexWord):>IndexWord=>$unsafe {
     }
     0
 }
+let oi_seen_gen:array<int32>=[]
+let oi_gen:int32=0
+oi_next_gen=():>int32=>$unsafe {
+    let nn:IndexWord=nodes.length
+    if oi_seen_gen.length <? nn {
+        oi_seen_gen.resize(max(nn + 1024 IndexWord(oi_seen_gen.length) * 2))
+    }
+    oi_gen=int32<overflow='wrap'>(int64(oi_gen) + 1)
+    if oi_gen =? int32(0) {
+        mem_set(oi_seen_gen.ptr as ptr<uint8> 0 oi_seen_gen.length * 4)
+        oi_gen=int32(1)
+    }
+    oi_gen
+}
 # does the loop body index array local a with anything but the loop variables in `ok`
 # (this loop's, and those of nested loops that are in bounds for a too)?
 other_index_of=(n:IndexWord a:IndexWord ok:array<int64> @seen:array<bool>):>bool=>$unsafe {
@@ -246,6 +260,39 @@ other_index_of=(n:IndexWord a:IndexWord ok:array<int64> @seen:array<bool>):>bool
     }
     false
 }
+other_index_of_gen=(n:IndexWord a:IndexWord ok:array<int64> gen:int32):>bool=>$unsafe {
+    if n <=? 0 or n >=? oi_seen_gen.length or oi_seen_gen.ptr[n] =? gen {return false}
+    oi_seen_gen.ptr[n]=gen
+    let k=nodes.ptr[n].kind
+    let ca=IndexWord(nodes.ptr[n].a)
+    let cb=IndexWord(nodes.ptr[n].b)
+    if k =? 'index' {
+        if nodes.ptr[ca].kind =? 'ident' and nodes.ptr[ca].aux =? int32(1) and IndexWord(nodes.ptr[ca].sym) =? a {
+            let ix=word_integer_value(cb)
+            if not (nodes.ptr[ix].kind =? 'ident' and nodes.ptr[ix].aux =? int32(1) and ok.contains(IndexWord(nodes.ptr[ix].sym))) {return true}
+        }
+    }
+    if k =? 'for_' {
+        let inner=ok
+        let sym=IndexWord(nodes.ptr[n].sym)
+        if IndexWord(nodes.ptr[n].aux) =? 0 and stable_loop_index(sym) and range_bounds_arrays(ca).contains(a) {inner.push(sym)}
+        return other_index_of_gen(ca a ok gen) or other_index_of_gen(cb a inner gen)
+    }
+    # (a checked `for` returned above; a partial's d is a function instance)
+    if ca >? 0 and other_index_of_gen(ca a ok gen) {return true}
+    if cb >? 0 and other_index_of_gen(cb a ok gen) {return true}
+    let cc=kid_c(n)
+    if cc >? 0 and other_index_of_gen(cc a ok gen) {return true}
+    let cd=kid_d(n)
+    if cd >? 0 and other_index_of_gen(cd a ok gen) {return true}
+    loop i in [0..nkids(n)) {
+        if other_index_of_gen(kid(n i) a ok gen) {return true}
+    }
+    loop i in [0..nkids2(n)) {
+        if other_index_of_gen(kid2(n i) a ok gen) {return true}
+    }
+    false
+}
 # Share range facts between unit and stepped loops. Array paths can still be
 # hoisted when the counter is mutable, but only stable indices prove bounds.
 range_facts_begin=(s:IndexWord l:IndexWord):>[int64 int64 bool]=>$unsafe {
@@ -279,12 +326,12 @@ range_facts_begin=(s:IndexWord l:IndexWord):>[int64 int64 bool]=>$unsafe {
     }
     let nfp=fp_begin(s l bound 0)
     loop sa in safe_arrs {
-        let seen=fill(false nodes.length)
+        let gen=oi_next_gen()
         let ok:array<int64>=[l]
         loop p in safe_index {
             if p[0] =? sa {ok.push(p[1])}
         }
-        index_safe_index[0].push([sa l other_index_of(IndexWord(nodes.ptr[s].b) sa ok @seen)])
+        index_safe_index[0].push([sa l other_index_of_gen(IndexWord(nodes.ptr[s].b) sa ok gen)])
     }
     [nfp safe_arrs.length nonneg]
 }
@@ -334,14 +381,14 @@ facts_positive_bind=(positive_cache:ptr<array<int64>> positive_stamp:ptr<array<i
 positive_bound=(n:IndexWord use_locals:bool):>IndexWord=>$unsafe {
     if not use_locals {return positive_bound_value(n false)}
     if n >=? positive_cache.length {
-        let need=max(n + 1 IndexWord(nodes.length))
+        let need=max(max(n + 1 IndexWord(nodes.length)) + 1024 IndexWord(positive_cache.length) * 2)
         positive_place_cache[0].resize(need)
         positive_place_stamp[0].resize(need)
     }
     if positive_stamp.ptr[n] =? positive_epoch {return positive_cache.ptr[n]}
     let value=positive_bound_value(n true)
-    positive_place_cache[0][n]=value
-    positive_place_stamp[0][n]=positive_epoch
+    positive_cache.ptr[n]=value
+    positive_stamp.ptr[n]=positive_epoch
     value
 }
 # One cache entry per expression in a lowering context. Statements and range
@@ -695,12 +742,12 @@ fact_is_array_swap=(n:StorageWord):>bool=>$unsafe {
 # ctx: 0 the value is used (copied, passed), 1 it is only indexed or measured.
 fact_storage_scan=(n:StorageWord ctx:StorageWord):>void=>$unsafe {
     if n =? 0 {return}
-    let k=nodes[n].kind
+    let k=nodes.ptr[n].kind
     match k {
         <'int_lit'|'float_lit'|'bool_lit'|'none_lit'|'null_lit'|'dotname'|'hole'|'break_'|'continue_'|'pwild'> => {return}
         <'ident'> => {
-            if nodes[n].aux =? int32(1) and StorageWord(locals.ptr[StorageWord(nodes[n].sym)].flags) & LF_ELEMALIAS not=? 0 {
-                let key=lpath_key(StorageWord(nodes.ptr[StorageWord(locals.ptr[StorageWord(nodes[n].sym)].alias)].a))
+            if nodes.ptr[n].aux =? int32(1) and StorageWord(locals.ptr[StorageWord(nodes.ptr[n].sym)].flags) & LF_ELEMALIAS not=? 0 {
+                let key=lpath_key(StorageWord(nodes.ptr[StorageWord(locals.ptr[StorageWord(nodes.ptr[n].sym)].alias)].a))
                 if key not=? 0 {storage_kill[0].push(key)}
                 return
             }
@@ -711,30 +758,31 @@ fact_storage_scan=(n:StorageWord ctx:StorageWord):>void=>$unsafe {
         <'field'> => {
             if not storage_calls[0] and not ambient_storage_stable(n) {storage_calls[0]=true}
             let key=lpath_key(n)
+            let ca=StorageWord(nodes.ptr[n].a)
             if key not=? 0 {
                 if ctx =? 0 {storage_escape[0].push(key)}
-                fact_storage_scan(StorageWord(nodes[n].a) 1)
+                fact_storage_scan(ca 1)
                 return
             }
-            fact_storage_scan(StorageWord(nodes[n].a) 0)
+            fact_storage_scan(ca 0)
             return
         }
         <'index'> => {
             if not storage_calls[0] and not ambient_storage_stable(n) {storage_calls[0]=true}
-            let base:StorageWord=StorageWord(nodes[n].a)
+            let base:StorageWord=StorageWord(nodes.ptr[n].a)
             if lpath_key(base) not=? 0 and tkind(ntype(base)) =? 'array' {storage_bases[0].push(base)}
-            fact_storage_scan(base if nodes[n].aux =? 1 {0} else {1})
-            fact_storage_scan(StorageWord(nodes[n].b) 0)
-            let nk=StorageWord(nodes[n].nlist)
+            fact_storage_scan(base if nodes.ptr[n].aux =? 1 {0} else {1})
+            fact_storage_scan(StorageWord(nodes.ptr[n].b) 0)
+            let nk=StorageWord(nodes.ptr[n].nlist)
             if nk >? 0 {
-                let l0=StorageWord(nodes[n].list)
+                let l0=StorageWord(nodes.ptr[n].list)
                 loop i in [0..nk) {fact_storage_scan(StorageWord(lists.ptr[l0 + i]) 0)}
             }
             return
         }
         <'assign'> => {
-            fact_storage_target(StorageWord(nodes[n].a))
-            fact_storage_scan(StorageWord(nodes[n].b) 0)
+            fact_storage_target(StorageWord(nodes.ptr[n].a))
+            fact_storage_scan(StorageWord(nodes.ptr[n].b) 0)
             return
         }
         <'for_'|'while_'> => {
@@ -762,7 +810,7 @@ fact_storage_scan=(n:StorageWord ctx:StorageWord):>void=>$unsafe {
         }
         <'addr'> => {
             if not storage_calls[0] and not ambient_storage_stable(n) {storage_calls[0]=true}
-            let ca=StorageWord(nodes[n].a)
+            let ca=StorageWord(nodes.ptr[n].a)
             let key=lpath_key(ca)
             if key not=? 0 {storage_kill[0].push(key)}
             fact_storage_scan(ca 1)
@@ -770,7 +818,7 @@ fact_storage_scan=(n:StorageWord ctx:StorageWord):>void=>$unsafe {
         }
         <'cast'|'conv'> => {
             if not storage_calls[0] and not ambient_storage_stable(n) {storage_calls[0]=true}
-            let ca=StorageWord(nodes[n].a)
+            let ca=StorageWord(nodes.ptr[n].a)
             if raw_view(n) {
                 let key=lpath_key(ca)
                 if key not=? 0 {storage_kill[0].push(key)}
@@ -781,15 +829,15 @@ fact_storage_scan=(n:StorageWord ctx:StorageWord):>void=>$unsafe {
             return
         }
         <'intrinsic'> => {
-            let id=nodes[n].aux as IN
+            let id=nodes.ptr[n].aux as IN
             if not isolation_intrinsic(id) {
                 storage_opaque[0]=true
                 return
             }
             if not storage_calls[0] and not ambient_storage_stable(n) {storage_calls[0]=true}
-            let nk=StorageWord(nodes[n].nlist)
+            let nk=StorageWord(nodes.ptr[n].nlist)
             if nk >? 0 {
-                let l0=StorageWord(nodes[n].list)
+                let l0=StorageWord(nodes.ptr[n].list)
                 if id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend or id =? IN.arrdata {
                     let a0=StorageWord(lists.ptr[l0])
                     let key=lpath_key(a0)
@@ -802,18 +850,18 @@ fact_storage_scan=(n:StorageWord ctx:StorageWord):>void=>$unsafe {
                     fact_storage_scan(StorageWord(lists.ptr[l0]) 1)
                     return
                 }
-                let ca=StorageWord(nodes[n].a)
+                let ca=StorageWord(nodes.ptr[n].a)
                 if ca not=? 0 {fact_storage_scan(ca 0)}
                 loop i in [0..nk) {fact_storage_scan(StorageWord(lists.ptr[l0 + i]) 0)}
                 return
             }
-            let ca=StorageWord(nodes[n].a)
+            let ca=StorageWord(nodes.ptr[n].a)
             if ca not=? 0 {fact_storage_scan(ca 0)}
             return
         }
         <'call'> => {
+            let l0=StorageWord(nodes.ptr[n].list)
             if fact_is_array_swap(n) {
-                let l0=StorageWord(nodes[n].list)
                 let base=StorageWord(lists.ptr[l0])
                 let key=lpath_key(base)
                 if key not=? 0 and tkind(ntype(base)) =? 'array' {
@@ -827,8 +875,7 @@ fact_storage_scan=(n:StorageWord ctx:StorageWord):>void=>$unsafe {
             }
             if not storage_calls[0] and not ambient_storage_stable(n) {storage_calls[0]=true}
             let mm:StorageWord=checked_call_mutmask(n)
-            let nk=StorageWord(nodes[n].nlist)
-            let l0=StorageWord(nodes[n].list)
+            let nk=StorageWord(nodes.ptr[n].nlist)
             if mm not=? 0 {
                 loop i in [0..nk) {
                     if mm & (StorageWord(1) << StorageWord(i)) not=? 0 {
@@ -839,41 +886,41 @@ fact_storage_scan=(n:StorageWord ctx:StorageWord):>void=>$unsafe {
                     }
                 }
             }
-            let ca=StorageWord(nodes[n].a)
+            let ca=StorageWord(nodes.ptr[n].a)
             if ca not=? 0 {fact_storage_scan(ca 0)}
             loop i in [0..nk) {fact_storage_scan(StorageWord(lists.ptr[l0 + i]) 0)}
             return
         }
         <'binary'|'and_'|'or_'|'coalesce'|'prange'> => {
             if k =? 'binary' and not storage_calls[0] and not ambient_storage_stable(n) {storage_calls[0]=true}
-            let ca=StorageWord(nodes[n].a)
-            let cb=StorageWord(nodes[n].b)
+            let ca=StorageWord(nodes.ptr[n].a)
+            let cb=StorageWord(nodes.ptr[n].b)
             if ca not=? 0 {fact_storage_scan(ca 0)}
             if cb not=? 0 {fact_storage_scan(cb 0)}
             return
         }
         <'vardecl'> => {
-            let cb=StorageWord(nodes[n].b)
+            let cb=StorageWord(nodes.ptr[n].b)
             if cb not=? 0 {fact_storage_scan(cb 0)}
             return
         }
         <'block'|'str_lit'|'tuple'|'matrix'|'pvariant'> => {
-            let nk=StorageWord(nodes[n].nlist)
-            let l0=StorageWord(nodes[n].list)
+            let nk=StorageWord(nodes.ptr[n].nlist)
+            let l0=StorageWord(nodes.ptr[n].list)
             loop i in [0..nk) {fact_storage_scan(StorageWord(lists.ptr[l0 + i]) 0)}
             return
         }
         <'if_'|'iflet'|'range'> => {
-            let ca=StorageWord(nodes[n].a)
-            let cb=StorageWord(nodes[n].b)
-            let cc=StorageWord(nodes[n].c)
+            let ca=StorageWord(nodes.ptr[n].a)
+            let cb=StorageWord(nodes.ptr[n].b)
+            let cc=StorageWord(nodes.ptr[n].c)
             if ca not=? 0 {fact_storage_scan(ca 0)}
             if cb not=? 0 {fact_storage_scan(cb 0)}
             if cc not=? 0 {fact_storage_scan(cc 0)}
             return
         }
         <'unary'|'not_'|'unwrap'|'narrow'|'exprstmt'|'return_'|'defer_'|'plit'> => {
-            let ca=StorageWord(nodes[n].a)
+            let ca=StorageWord(nodes.ptr[n].a)
             if ca not=? 0 {fact_storage_scan(ca 0)}
             return
         }
@@ -885,25 +932,25 @@ fact_storage_scan=(n:StorageWord ctx:StorageWord):>void=>$unsafe {
             }
             if not storage_calls[0] and (k =? 'partial' or k =? 'fnref' or k =? 'pair' or k =? 'map_lit' or k =? 'istype') and not ambient_storage_stable(n) {storage_calls[0]=true}
             if mask & 1 not=? 0 {
-                let a:StorageWord=StorageWord(nodes[n].a)
+                let a:StorageWord=StorageWord(nodes.ptr[n].a)
                 if a not=? 0 {fact_storage_scan(a 0)}
             }
             if mask & 2 not=? 0 {
-                let b:StorageWord=StorageWord(nodes[n].b)
+                let b:StorageWord=StorageWord(nodes.ptr[n].b)
                 if b not=? 0 {fact_storage_scan(b 0)}
             }
             if mask & 4 not=? 0 {
-                let c:StorageWord=StorageWord(nodes[n].c)
+                let c:StorageWord=StorageWord(nodes.ptr[n].c)
                 if c not=? 0 {fact_storage_scan(c 0)}
             }
             if mask & 16 not=? 0 {
-                let nk=StorageWord(nodes[n].nlist)
-                let l0=StorageWord(nodes[n].list)
+                let nk=StorageWord(nodes.ptr[n].nlist)
+                let l0=StorageWord(nodes.ptr[n].list)
                 loop i in [0..nk) {fact_storage_scan(StorageWord(lists.ptr[l0 + i]) 0)}
             }
             if mask & 32 not=? 0 {
-                let nk2=StorageWord(nodes[n].nlist2)
-                let l2=StorageWord(nodes[n].list2)
+                let nk2=StorageWord(nodes.ptr[n].nlist2)
+                let l2=StorageWord(nodes.ptr[n].list2)
                 loop i in [0..nk2) {fact_storage_scan(StorageWord(lists.ptr[l2 + i]) 0)}
             }
         }

@@ -1,7 +1,7 @@
 $runtime_checks
 
 from p"ir_types.dewy" import (Ins IrFn IrUsePlan)
-from p"ir_operands.dewy" import (IR_DEF IR_ARGS IR_INDEX IR_STORE IR_INDIRECT IR_RETURN IR_CALL IR_NARROW32 IR_OVERFLOW IR_LOC_DEF IR_BA_CTRL IR_CHECKED)
+from p"ir_operands.dewy" import (IR_DEF IR_ARGS IR_INDEX IR_STORE IR_INDIRECT IR_RETURN IR_CALL IR_NARROW32 IR_OVERFLOW IR_LOC_DEF IR_BA_CTRL IR_CHECKED ba_no_loops_fn)
 
 # Shared native analysis workspace. One sequential function at a time, as before.
 # Consumers borrow these views until the next analysis; no IR stores a view.
@@ -33,6 +33,10 @@ let v_live_storage:array<IrUsePlan>=[]
 let v_live:ptr<IrUsePlan>=$unsafe (uint64(0) as ptr<IrUsePlan>)
 let v_start_storage:array<int64>=[]
 let v_start:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let v_order_storage:array<int32>=[]
+let v_order:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
+let v_order_n:int64=0
+let v_order_ready:bool=false
 let call_pos:array<int64>=[]
 let call_w:array<int64>=[]
 let loop_s:array<int64>=[]
@@ -174,7 +178,12 @@ ba_grow=(nv:int64):>void=>$unsafe {
         if cap(vsave_storage) <? nv {vsave_storage.reserve(nv)}
         __set_len(vsave_storage nv)
     }
+    if v_order_storage.length <? nv {
+        if cap(v_order_storage) <? nv {v_order_storage.reserve(nv)}
+        __set_len(v_order_storage nv)
+    }
     v_live=v_live_storage.ptr
+    v_order=v_order_storage.ptr
     vloc=ba_grow_i64(@vloc_storage nv)
     vcval=ba_grow_i64(@vcval_storage nv)
     vslot=ba_grow_i64(@vslot_storage nv)
@@ -184,15 +193,249 @@ ba_grow=(nv:int64):>void=>$unsafe {
     vsave=vsave_storage.ptr
 }
 
-# Complete final-IR analysis. The input arenas do not grow during this call.
-# O(N + U + V log L + visited loop summaries), retaining the existing loop
-# interval extension. Allocation-start indexing is built only on request.
-backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_wasm:bool ra_stat:bool plan_starts:bool=false cold_tails:bool=false):>void=>$unsafe {
+# Prepare shared backend analysis state for straight-line fused or standalone analysis.
+ba_straight_begin=(@ir:IrFn):>int64=>$unsafe {
+    let nv=ir.vtypes.length
+    let np=ir.nparams
+    let nk=ir.kval.length
+    let types=ir.vtypes.ptr
+    let constants=ir.kval.ptr
     x_has_foreign_call=false
     x_has_narrow32=false
     x_has_overflow_pair=false
     x_has_slot=false
     x_has_any_call=false
+    if v_live_storage.length <? nv {ba_grow(nv)}
+    let vl=v_live
+    let loc_arr=vloc
+    let ord_p=v_order
+    if nv >? 0 {
+        mem_set(vl as ptr<uint8> 0 nv * size_of<IrUsePlan>)
+    }
+    if call_pos.length >? 0 {__set_len(call_pos 0)}
+    if call_w.length >? 0 {__set_len(call_w 0)}
+    if loop_s.length >? 0 {__set_len(loop_s 0)}
+    if loop_e.length >? 0 {__set_len(loop_e 0)}
+    loop p in [0..np) {
+        vl[p].first=0
+        vl[p].last=0
+        vl[p].ndef=1
+        vl[p].weight=-1
+        loc_arr[p]=LOC_SPILL
+        ord_p[p]=BackendI32(p)
+    }
+    let cval_init=vcval
+    loop v in [0..nk) {
+        if int64(types[v]) =? 3 {
+            vl[v].ndef=1
+            vl[v].last=-1
+            loc_arr[v]=LOC_CONST
+            cval_init[v]=constants[v]
+        }
+    }
+    np
+}
+
+# Finalize call endpoints, feature flags, and compacted v_order for a straight-line function.
+ba_straight_finish=(@ir:IrFn ord_n:int64 features:int64 filter_calls:bool):>void=>$unsafe {
+    let nc=ir.code.length
+    let np=ir.nparams
+    x_has_narrow32=features & IR_NARROW32 not=? 0
+    x_has_overflow_pair=features & IR_OVERFLOW not=? 0
+    if features & IR_CHECKED not=? 0 {x_has_any_call=true}
+    if filter_calls and call_pos.length >? 0 {
+        let instructions=ir.code.ptr
+        let arguments=ir.args.ptr
+        let types=ir.vtypes.ptr
+        let cp=call_pos.ptr
+        let ncalls=call_pos.length
+        let cw:int64=0
+        loop ci in [0..ncalls) {
+            let pos=cp[ci]
+            let ins=instructions + pos
+            let op=ins[0].op
+            let ends=false
+            if BackendWord(pos) + 1 <? nc and (op =? 'call' or op =? 'calli' or (op =? 'callc' and ins[0].imm >=? 0)) {
+                ends=ba_call_ends(instructions arguments types nc pos ins true)
+            }
+            if not ends {
+                cp[cw]=pos
+                cw+=1
+            }
+        }
+        __set_len(call_pos cw)
+    }
+    let vl=v_live
+    let loc_arr=vloc
+    let ord_p=v_order
+    let ord_w:int64=0
+    loop i in [0..ord_n) {
+        let v=int64(ord_p[i])
+        let live=vl + v
+        let loc=loc_arr[v]
+        if live[0].ndef not=? 1 {
+            loc=LOC_SPILL
+            loc_arr[v]=LOC_SPILL
+        }
+        if loc not=? LOC_SPILL {continue}
+        if live[0].last <? 0 or (v >=? np and live[0].nuse =? 0) {
+            loc_arr[v]=LOC_NONE
+            continue
+        }
+        live[0].weight=BackendWord(live[0].weight) + BackendWord(int64(live[0].ndef)) + BackendWord(int64(live[0].nuse))
+        ord_p[ord_w]=BackendI32(v)
+        ord_w+=1
+    }
+    v_order_n=ord_w
+    v_order_ready=true
+    let n_starts=BackendWord(nc) + 1
+    if v_start_storage.length <? n_starts {
+        if cap(v_start_storage) <? n_starts {v_start_storage.reserve(n_starts)}
+        __set_len(v_start_storage n_starts)
+        v_start=v_start_storage.ptr
+    }
+}
+
+# Fast loop-free default-mode analysis (no loops, no debug, no cold tails, plan_starts=true).
+# Skips control-flow stack, depth/weight tracking, loop extensions, and v_start building.
+backend_analyze_straight=(@ir:IrFn @ir_operand_layout:array<int64>):>void=>$unsafe {
+    let nc=ir.code.length
+    let ord_n=ba_straight_begin(@ir)
+    let vl=v_live
+    let loc_arr=vloc
+    let ord_p=v_order
+    let instructions=ir.code.ptr
+    let arguments=ir.args.ptr
+    let types=ir.vtypes.ptr
+    let layouts=ir_operand_layout.ptr
+    let features:int64=0
+    let ins=instructions
+    loop pos in [0..nc) {
+        let pos32=BackendI32(pos)
+        let mode=layouts[int64((ins as ptr<uint32>)[0])]
+        features=features or mode
+        let uses=(ins as ptr<int32>) + 3
+        let nuses=mode & 3
+        if mode & (IR_ARGS | IR_STORE | IR_INDEX | IR_RETURN) not=? 0 {
+            let extra:int64=-1
+            if mode & IR_ARGS not=? 0 {
+                uses=arguments + int64(ins[0].a)
+                nuses=int64(ins[0].b)
+                if mode & IR_INDIRECT not=? 0 {extra=int64(ins[0].c)}
+            } else if mode & IR_STORE not=? 0 {
+                if mode & IR_INDEX =? 0 or int64(ins[0].c) & 128 not=? 0 {extra=int64(ins[0].dst)}
+            } else if mode & IR_INDEX not=? 0 {
+                if int64(ins[0].c) & 128 not=? 0 {nuses=2}
+            } else if ins[0].a <? 0 {nuses=0}
+            if extra >=? 0 {
+                let live=vl + extra
+                if (live as ptr<int64>)[1] =? 0 {live[0].first=pos32; loc_arr[extra]=LOC_SPILL; ord_p[ord_n]=BackendI32(extra); ord_n+=1}
+                live[0].last=pos32
+                live[0].nuse=BackendI32(live[0].nuse) + BackendI32(1)
+            }
+        }
+        if nuses =? 1 {
+            let u0=int64(uses[0])
+            let live=vl + u0
+            if (live as ptr<int64>)[1] =? 0 {live[0].first=pos32; loc_arr[u0]=LOC_SPILL; ord_p[ord_n]=BackendI32(u0); ord_n+=1}
+            live[0].last=pos32
+            live[0].nuse=BackendI32(live[0].nuse) + BackendI32(1)
+        } else if nuses =? 2 {
+            let u0=int64(uses[0])
+            let l0=vl + u0
+            if (l0 as ptr<int64>)[1] =? 0 {l0[0].first=pos32; loc_arr[u0]=LOC_SPILL; ord_p[ord_n]=BackendI32(u0); ord_n+=1}
+            l0[0].last=pos32
+            l0[0].nuse=BackendI32(l0[0].nuse) + BackendI32(1)
+            let u1=int64(uses[1])
+            let l1=vl + u1
+            if (l1 as ptr<int64>)[1] =? 0 {l1[0].first=pos32; loc_arr[u1]=LOC_SPILL; ord_p[ord_n]=BackendI32(u1); ord_n+=1}
+            l1[0].last=pos32
+            l1[0].nuse=BackendI32(l1[0].nuse) + BackendI32(1)
+        } else if nuses >? 2 {
+            loop operand_index in [0..nuses) {
+                let u=int64(uses[operand_index])
+                let live=vl + u
+                if (live as ptr<int64>)[1] =? 0 {live[0].first=pos32; loc_arr[u]=LOC_SPILL; ord_p[ord_n]=BackendI32(u); ord_n+=1}
+                live[0].last=pos32
+                live[0].nuse=BackendI32(live[0].nuse) + BackendI32(1)
+            }
+        }
+        if mode & IR_DEF not=? 0 {
+            let d=int64(ins[0].dst)
+            if d >=? 0 {
+                let live=vl + d
+                if (live as ptr<int64>)[1] =? 0 {live[0].first=pos32; loc_arr[d]=LOC_SPILL; ord_p[ord_n]=BackendI32(d); ord_n+=1}
+                live[0].last=pos32
+                let nd=BackendI32(live[0].ndef) + BackendI32(1)
+                live[0].ndef=nd
+                if nd =? 1 and mode & IR_LOC_DEF not=? 0 {
+                    ba_loc_def(ins d vl loc_arr)
+                }
+            }
+        }
+        if mode & IR_CALL not=? 0 {
+            let op=ins[0].op
+            let is_call=false
+            let real_call=false
+            if op =? 'call' {
+                let cc=ins[0].c
+                is_call=cc not=? 1 and not (cc >=? 3 and cc <=? 5)
+                real_call=true
+                if not is_call {x_has_any_call=true}
+            } else if op =? 'copy' or op =? 'zero' {
+                is_call=ins[0].imm >? INLINE_COPY
+            } else if op =? 'intr' {
+                is_call=ins[0].imm >=? 2
+                real_call=is_call
+            } else {
+                is_call=true
+                real_call=(op =? 'calli' or op =? 'callc' or op =? 'syscall')
+                if op =? 'callc' {x_has_foreign_call=true}
+            }
+            if is_call {
+                let ends=false
+                if BackendWord(pos) + 1 <? nc and (op =? 'call' or op =? 'calli' or (op =? 'callc' and ins[0].imm >=? 0)) {
+                    ends=ba_call_ends(instructions arguments types nc pos ins true)
+                }
+                if real_call {x_has_any_call=true}
+                if not ends {call_pos.push(pos)}
+            }
+        } else if mode & IR_BA_CTRL not=? 0 and ins[0].op =? 'zeroslots' {
+            x_has_slot=true
+            let a0=BackendWord(int64(ins[0].a))
+            loop k in [0..int64(ins[0].b)) {
+                let item=int64(arguments[a0 + BackendWord(k)])
+                if item & 1 =? 1 {
+                    let v=item >> 1
+                    let live=vl + v
+                    if (live as ptr<int64>)[1] =? 0 {live[0].first=pos32; loc_arr[v]=LOC_SPILL; ord_p[ord_n]=BackendI32(v); ord_n+=1}
+                    live[0].last=pos32
+                    live[0].ndef=BackendI32(live[0].ndef) + BackendI32(2)
+                    live[0].weight=BackendWord(live[0].weight) - 2
+                }
+            }
+        }
+        ins=ins + 1
+    }
+    ba_straight_finish(@ir ord_n features false)
+}
+
+# Complete final-IR analysis. The input arenas do not grow during this call.
+# O(N + U + V log L + visited loop summaries), retaining the existing loop
+# interval extension. Allocation-start indexing is built only on request.
+backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_wasm:bool ra_stat:bool plan_starts:bool=false cold_tails:bool=false):>void=>$unsafe {
+    let no_loops=ba_no_loops_fn =? ir.fn_index and ir.fn_index >=? 0
+    ba_no_loops_fn=-1
+    v_order_ready=false
+    x_has_foreign_call=false
+    x_has_narrow32=false
+    x_has_overflow_pair=false
+    x_has_slot=false
+    x_has_any_call=false
+    if no_loops and not dbg_on and not target_wasm and not ra_stat and plan_starts and not cold_tails {
+        backend_analyze_straight(@ir @ir_operand_layout)
+        return
+    }
     let nv=ir.vtypes.length
     let nc=ir.code.length
     let np=ir.nparams
@@ -202,15 +445,20 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
     if v_live_storage.length <? nv {ba_grow(nv)}
     let vl=v_live
     let loc_arr=vloc
+    let use_order=plan_starts and not cold_tails and not dbg_on and not ra_stat and not target_wasm
+    let ord_p=v_order
+    let ord_n:int64=0
     if nv >? 0 {
         mem_set(vl as ptr<uint8> 0 nv * size_of<IrUsePlan>)
-        mem_set(loc_arr as ptr<uint8> 255 nv * 8)
-        mem_set(vsave as ptr<uint8> 0 nv)
+        if not use_order {
+            mem_set(loc_arr as ptr<uint8> 255 nv * 8)
+            mem_set(vsave as ptr<uint8> 0 nv)
+        }
     }
-    if call_pos.length >? 0 {call_pos.clear()}
-    if call_w.length >? 0 {call_w.clear()}
-    if loop_s.length >? 0 {loop_s.clear()}
-    if loop_e.length >? 0 {loop_e.clear()}
+    if call_pos.length >? 0 {__set_len(call_pos 0)}
+    if call_w.length >? 0 {__set_len(call_w 0)}
+    if loop_s.length >? 0 {__set_len(loop_s 0)}
+    if loop_e.length >? 0 {__set_len(loop_e 0)}
     if ba_bcap <? 64 {
         ba_kinds.resize(64)
         ba_starts.resize(64)
@@ -223,7 +471,12 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
         vl[p].first=0
         vl[p].last=0
         vl[p].ndef=1
+        if use_order {
+            loc_arr[p]=LOC_SPILL
+            ord_p[p]=BackendI32(p)
+        }
     }
+    if use_order {ord_n=np}
     let cval_init=vcval
     loop v in [0..nk) {
         if int64(types[v]) =? 3 {
@@ -264,33 +517,52 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
             } else if ins[0].a <? 0 {nuses=0}
             if extra >=? 0 {
                 let live=vl + extra
-                if (live as ptr<int64>)[1] =? 0 {live[0].first=pos32}
+                if (live as ptr<int64>)[1] =? 0 {
+                    live[0].first=pos32
+                    if use_order {loc_arr[extra]=LOC_SPILL; ord_p[ord_n]=BackendI32(extra); ord_n+=1}
+                }
                 live[0].last=pos32
                 live[0].nuse=BackendI32(live[0].nuse) + BackendI32(1)
                 live[0].weight=BackendWord(live[0].weight) + w
             }
         }
         if nuses =? 1 {
-            let live=vl + int64(uses[0])
-            if (live as ptr<int64>)[1] =? 0 {live[0].first=pos32}
+            let u0=int64(uses[0])
+            let live=vl + u0
+            if (live as ptr<int64>)[1] =? 0 {
+                live[0].first=pos32
+                if use_order {loc_arr[u0]=LOC_SPILL; ord_p[ord_n]=BackendI32(u0); ord_n+=1}
+            }
             live[0].last=pos32
             live[0].nuse=BackendI32(live[0].nuse) + BackendI32(1)
             live[0].weight=BackendWord(live[0].weight) + w
         } else if nuses =? 2 {
-            let l0=vl + int64(uses[0])
-            if (l0 as ptr<int64>)[1] =? 0 {l0[0].first=pos32}
+            let u0=int64(uses[0])
+            let l0=vl + u0
+            if (l0 as ptr<int64>)[1] =? 0 {
+                l0[0].first=pos32
+                if use_order {loc_arr[u0]=LOC_SPILL; ord_p[ord_n]=BackendI32(u0); ord_n+=1}
+            }
             l0[0].last=pos32
             l0[0].nuse=BackendI32(l0[0].nuse) + BackendI32(1)
             l0[0].weight=BackendWord(l0[0].weight) + w
-            let l1=vl + int64(uses[1])
-            if (l1 as ptr<int64>)[1] =? 0 {l1[0].first=pos32}
+            let u1=int64(uses[1])
+            let l1=vl + u1
+            if (l1 as ptr<int64>)[1] =? 0 {
+                l1[0].first=pos32
+                if use_order {loc_arr[u1]=LOC_SPILL; ord_p[ord_n]=BackendI32(u1); ord_n+=1}
+            }
             l1[0].last=pos32
             l1[0].nuse=BackendI32(l1[0].nuse) + BackendI32(1)
             l1[0].weight=BackendWord(l1[0].weight) + w
         } else if nuses >? 2 {
             loop operand_index in [0..nuses) {
-                let live=vl + int64(uses[operand_index])
-                if (live as ptr<int64>)[1] =? 0 {live[0].first=pos32}
+                let u=int64(uses[operand_index])
+                let live=vl + u
+                if (live as ptr<int64>)[1] =? 0 {
+                    live[0].first=pos32
+                    if use_order {loc_arr[u]=LOC_SPILL; ord_p[ord_n]=BackendI32(u); ord_n+=1}
+                }
                 live[0].last=pos32
                 live[0].nuse=BackendI32(live[0].nuse) + BackendI32(1)
                 live[0].weight=BackendWord(live[0].weight) + w
@@ -300,7 +572,10 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
             let d=int64(ins[0].dst)
             if d >=? 0 {
                 let live=vl + d
-                if (live as ptr<int64>)[1] =? 0 {live[0].first=pos32}
+                if (live as ptr<int64>)[1] =? 0 {
+                    live[0].first=pos32
+                    if use_order {loc_arr[d]=LOC_SPILL; ord_p[ord_n]=BackendI32(d); ord_n+=1}
+                }
                 live[0].last=pos32
                 let nd=BackendI32(live[0].ndef) + BackendI32(1)
                 live[0].ndef=nd
@@ -429,7 +704,10 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
                         if item & 1 =? 1 {
                             let v=item >> 1
                             let live=vl + v
-                            if (live as ptr<int64>)[1] =? 0 {live[0].first=pos32}
+                            if (live as ptr<int64>)[1] =? 0 {
+                                live[0].first=pos32
+                                if use_order {loc_arr[v]=LOC_SPILL; ord_p[ord_n]=BackendI32(v); ord_n+=1}
+                            }
                             live[0].last=pos32
                             live[0].ndef=BackendI32(live[0].ndef) + BackendI32(2)
                         }
@@ -442,6 +720,87 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
     x_has_narrow32=features & IR_NARROW32 not=? 0
     x_has_overflow_pair=features & IR_OVERFLOW not=? 0
     if features & IR_CHECKED not=? 0 {x_has_any_call=true}
+    if use_order {
+        let nl=loop_s.length
+        let ord_w:int64=0
+        if nl =? 0 {
+            loop i in [0..ord_n) {
+                let v=int64(ord_p[i])
+                let live=vl + v
+                let loc=loc_arr[v]
+                if live[0].ndef not=? 1 {
+                    loc=LOC_SPILL
+                    loc_arr[v]=LOC_SPILL
+                }
+                if loc not=? LOC_SPILL {continue}
+                if live[0].last <? 0 or (v >=? np and live[0].nuse =? 0) {
+                    loc_arr[v]=LOC_NONE
+                    continue
+                }
+                ord_p[ord_w]=BackendI32(v)
+                ord_w+=1
+            }
+        } else {
+            let loop_starts=loop_s.ptr
+            let loop_ends=loop_e.ptr
+            let lfirst=loop_starts[0]
+            let llast=loop_starts[nl - 1]
+            loop i in [0..ord_n) {
+                let v=int64(ord_p[i])
+                let live=vl + v
+                let loc=loc_arr[v]
+                if live[0].ndef not=? 1 {
+                    loc=LOC_SPILL
+                    loc_arr[v]=LOC_SPILL
+                }
+                if loc not=? LOC_SPILL {continue}
+                let vlast=int64(live[0].last)
+                if vlast <? 0 or (v >=? np and live[0].nuse =? 0) {
+                    loc_arr[v]=LOC_NONE
+                    continue
+                }
+                if vlast >=? lfirst {
+                    if v <? np {
+                        let li:BackendWord=0
+                        loop li <? nl and loop_starts[li] <=? vlast {
+                            if loop_ends[li] >? vlast {vlast=loop_ends[li]}
+                            li+=1
+                        }
+                        live[0].last=BackendI32(vlast)
+                    } else {
+                        let vf=int64(live[0].first)
+                        if vf <? llast {
+                            let lo:BackendWord=0
+                            if nl >? 1 {
+                                let hi:BackendWord=BackendWord(nl)
+                                loop lo <? hi {
+                                    let mid=(lo + hi) >> 1
+                                    if loop_starts[mid] <=? vf {lo=mid + 1} else {hi=mid}
+                                }
+                            }
+                            let li=lo
+                            loop li <? nl and loop_starts[li] <=? vlast {
+                                if loop_ends[li] >? vlast {vlast=loop_ends[li]}
+                                li+=1
+                            }
+                            live[0].last=BackendI32(vlast)
+                        }
+                    }
+                }
+                ord_p[ord_w]=BackendI32(v)
+                ord_w+=1
+            }
+        }
+        v_order_n=ord_w
+        v_order_ready=true
+        let n_starts=BackendWord(nc) + 1
+        if v_start_storage.length <? n_starts {
+            if cap(v_start_storage) <? n_starts {v_start_storage.reserve(n_starts)}
+            __set_len(v_start_storage n_starts)
+            v_start=v_start_storage.ptr
+        }
+        return
+    }
     if dbg_on {
         dbg_keep=[]
         dbg_keep.resize(nv)

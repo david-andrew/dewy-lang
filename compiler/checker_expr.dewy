@@ -753,6 +753,57 @@ check_call_expr=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
 # function picked by name, from a `p"..."` module when it names one), an enum variant,
 # a member, a type or generic index, else the callee as a value. The named path runs
 # here; the rest are services. O(arguments) plus the services.
+let xe_args_pool:array<array<int64>>=[]
+let xe_decls_pool:array<array<int64>>=[]
+xe_args_pop=(n:XEWord):>array<int64>=>$unsafe {
+    let out:array<int64>=if xe_args_pool.length >? 0 {xe_args_pool.pop()} else {[]}
+    let nd=xe_nodes[0].ptr + n
+    let count=XEWord(nd[0].nlist)
+    if count >? 0 {
+        let start=XEWord(nd[0].list)
+        if cap(out) <? count {out.reserve(count)}
+        __set_len(out count)
+        let dst=out.ptr
+        let src=xe_lists[0].ptr + start
+        loop i in [0..count) {dst[i]=int64(src[i])}
+    }
+    out
+}
+xe_args_pop_prepend=(recv:XEWord args:array<int64>):>array<int64>=>$unsafe {
+    let out:array<int64>=if xe_args_pool.length >? 0 {xe_args_pool.pop()} else {[]}
+    let count=args.length + 1
+    if cap(out) <? count {out.reserve(count)}
+    __set_len(out count)
+    let dst=out.ptr
+    dst[0]=int64(recv)
+    let src=args.ptr
+    loop i in [0..args.length) {dst[i + 1]=src[i]}
+    out
+}
+xe_args_put=(@buf:array<int64>):>void=>$unsafe {
+    if cap(buf) >? 0 and xe_args_pool.length <? 32 {
+        let p=buf.ptr as ptr<int64>
+        if (p - 3)[0] =? 1 {
+            __set_len(buf 0)
+            xe_args_pool.push(buf)
+            buf=[]
+        }
+    }
+}
+xe_decls_pop=():>array<int64>=>$unsafe {
+    if xe_decls_pool.length >? 0 {return xe_decls_pool.pop()}
+    []
+}
+xe_decls_put=(@buf:array<int64>):>void=>$unsafe {
+    if cap(buf) >? 0 and xe_decls_pool.length <? 32 {
+        let p=buf.ptr as ptr<int64>
+        if (p - 3)[0] =? 1 {
+            __set_len(buf 0)
+            xe_decls_pool.push(buf)
+            buf=[]
+        }
+    }
+}
 check_call=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     let head=call_head(n expected)
     if head >=? 0 {return head}
@@ -763,10 +814,12 @@ check_call=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
         let special=call_ident_special(n expected)
         if special >=? 0 {return special}
         let name=XEWord(xe_nodes[0].ptr[callee].name)
-        let args=node_kids(@xe_nodes[0] @xe_lists[0] n)
+        let args=xe_args_pop(n)
         if not pos_in_lib(xe_nodes[0].ptr[n].pos) {habit_call_check(n name args)}
         # (path_literal_module answers a module or -1)
-        return call_by_name(n name path_literal_module(n callee args) args expected false)
+        let r=call_by_name(n name path_literal_module(n callee args) args expected false)
+        xe_args_put(@args)
+        return r
     }
     if ck =? 'dotname' {return call_dotname(n expected)}
     if ck =? 'field' {return call_member(n expected)}
@@ -781,9 +834,10 @@ check_call=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
 # Cold services retain diagnostics, type values, callable fields and name rewrites.
 call_member=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     let callee=XEWord(xe_nodes[0].ptr[n].a)
-    let args=node_kids(@xe_nodes[0] @xe_lists[0] n)
+    let args=xe_args_pop(n)
     if xe_flag(callee 536870912) {juxt_member_check(callee)}
     if xe_flag(n 536870912) and juxt_head_numeric(n) {
+        xe_args_put(@args)
         juxt_product(n)
         return check_expr(n expected)
     }
@@ -793,26 +847,28 @@ call_member=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     let rt:int64=tu_prune(check_expr(recv receiver_literal_hint(recv XEWord(xe_nodes[0].ptr[callee].name) args.length expected xe_nodes[0].ptr[n].pos)))
     type_receiver_at=saved_receiver
     recv=xe_last[0]
-    xe_nodes[0][callee].a=int32<overflow='wrap'>(recv)
+    xe_nodes[0].ptr[callee].a=int32<overflow='wrap'>(recv)
     let fname:int64=XEWord(xe_nodes[0].ptr[callee].name)
     let prepared=call_member_prepare(n callee recv @rt args expected)
-    if prepared >=? 0 {return prepared}
+    if prepared >=? 0 {xe_args_put(@args); return prepared}
     let rk=xe_types[0].ptr[rt].kind
-    if rk =? 'module' {return call_by_name(n fname XEWord(xe_types[0].ptr[rt].mod) args expected false)}
-    if rk =? 'typeval' {return call_member_type(n callee rt fname args expected)}
-    if is_soa(rt) {return check_soa_method(n recv fname args expected)}
+    if rk =? 'module' {let r=call_by_name(n fname XEWord(xe_types[0].ptr[rt].mod) args expected false); xe_args_put(@args); return r}
+    if rk =? 'typeval' {let r=call_member_type(n callee rt fname args expected); xe_args_put(@args); return r}
+    if is_soa(rt) {let r=check_soa_method(n recv fname args expected); xe_args_put(@args); return r}
     if fname =? id_dewy_len {dewy_len_check(callee true rt recv)}
     if rk =? 'struct_' or rk =? 'ptr' {
         let field=call_member_callable(n callee recv rt fname args expected)
-        if field >=? 0 {return field}
+        if field >=? 0 {xe_args_put(@args); return field}
     }
     let tail=call_member_tail(n callee recv rt @fname @args expected)
-    if tail >=? 0 {return tail}
+    if tail >=? 0 {xe_args_put(@args); return tail}
     xe_add_flag(recv 128)
-    let nl:array<int64>=[recv]
-    loop a in args {nl.push(a)}
+    let nl=xe_args_pop_prepend(recv args)
+    xe_args_put(@args)
     node_set_list(@xe_nodes[0] @xe_lists[0] n nl)
-    call_by_name(n fname -1 nl expected true)
+    let r=call_by_name(n fname -1 nl expected true)
+    xe_args_put(@nl)
+    r
 }
 
 # A call by name, from module mod_scope when it is one (else as the file sees the name), or
@@ -823,27 +879,30 @@ call_member=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
 call_by_name=(n:XEWord name:XEWord mod_scope:XEWord args:array<int64> expected:XEWord ufcs:bool):>XEWord=>$unsafe {
     let early=call_name_early(n name mod_scope args expected ufcs)
     if early >=? 0 {return early}
-    let ii0=if intrinsic_of(name) <? 0 {-1} else {call_name_intrinsic(n intrinsic_of(name))}
+    let ii_raw=intrinsic_of(name)
+    let ii0=if ii_raw <? 0 {-1} else {call_name_intrinsic(n ii_raw)}
     let hidden=ii0 =? -2
     let ii:XEWord=if hidden {-1} else {ii0}
     if ii >=? 0 and args.length >? 0 {
         let arr=call_name_array(n name mod_scope args expected ufcs ii)
         if arr >=? 0 {return arr}
     }
-    let decls:array<int64>=[]
+    let decls=xe_decls_pop()
     if not ufcs {
         let s=if mod_scope >=? 0 {module_lookup(mod_scope name)} else {lookup(name)}
         # (a function family's symbol matters only for a type's conversion of one argument
         # and the library's take, release and relocate)
         if s not=? 0 and (xe_syms[0].ptr[s].kind not=? 'fns' or xe_fns_special(name args.length)) {
             let named=call_name_sym(n name mod_scope s args expected hidden @decls)
-            if named >=? 0 {return named}
+            if named >=? 0 {xe_decls_put(@decls); return named}
         }
     }
     let collected=call_name_collect(n name mod_scope args expected ufcs @decls)
-    if collected >=? 0 {return collected}
-    if decls.length =? 0 {return call_name_unknown(n name mod_scope args expected ufcs ii hidden)}
-    resolve_fn_call(n name decls args expected 0 ufcs)
+    if collected >=? 0 {xe_decls_put(@decls); return collected}
+    if decls.length =? 0 {xe_decls_put(@decls); return call_name_unknown(n name mod_scope args expected ufcs ii hidden)}
+    let r=resolve_fn_call(n name decls args expected 0 ufcs)
+    xe_decls_put(@decls)
+    r
 }
 # Could a function family's symbol answer a call of count arguments (call_name_sym's kinds)?
 xe_fns_special=(name:XEWord count:XEWord):>bool=>$unsafe {count =? 1 or (count =? 2 and (name =? take_name or name =? release_name)) or (count =? 3 and name =? relocate_name)}

@@ -67,30 +67,93 @@ from p"string_domain_ops.dewy" import (string_domain_members)
 from p"effect_contracts.dewy" import (effect_generic_argument)
 # Call dispatch uses interned names and indices; services may grow the arenas.
 CDWord:type=int64<overflow='wrap'>
-call_head=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
-    if reflect_fields(n) {call_dispatch_error(1 n 0 0 0 0 0 0 0)}
-    let callee:CDWord=CDWord(nodes.ptr[n].a)
-    if nodes.ptr[callee].name =? int32(id_members) and nodes.ptr[callee].kind =? 'ident' and lookup(id_members) =? 0 {
-        if string_domain_members(n) {return ntype(n)}
-        if reflect_members(n) {return members_array(n expected)}
-    }
+let cd_name_mask:array<uint8>=[]
+let cd_mask_ptr:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
+let cd_mask_len:CDWord=0
+let cd_mask_bp:CDWord=0
+
+cd_mark_name=(id:CDWord bit:uint8):>void=>$unsafe {
+    if id >=? cd_name_mask.length {cd_name_mask.resize(id + 256)}
+    cd_name_mask.ptr[id]=cd_name_mask.ptr[id] | bit
+}
+cd_init_masks=():>void=>$unsafe {
+    if cd_name_mask.length >? 0 {mem_set(cd_name_mask.ptr 0 cd_name_mask.length)}
     if id_breakpoint =? 0 {id_breakpoint=intern("$breakpoint")}
-    if nodes.ptr[callee].kind =? 'ident' and CDWord(nodes.ptr[callee].name) =? id_breakpoint and nkids(n) =? 0 {
-        breakpoint_call(n);
-        return check_expr(n expected)
-    }
-    if nodes.ptr[callee].kind =? 'field' {
-        if nodes.ptr[callee].b not=? 0 {reflect_name(callee)}
+    if id_len =? 0 {id_len=intern("len")}
+    # bit 1: call_head / call_ident_special / path_literal_module special names
+    cd_mark_name(intern("fields") uint8(1))
+    cd_mark_name(intern("members") uint8(1))
+    if id_members not=? 0 {cd_mark_name(id_members uint8(1))}
+    cd_mark_name(id_breakpoint uint8(1))
+    cd_mark_name(id_len uint8(1))
+    cd_mark_name(ci(5 "__dewy_power") uint8(1))
+    cd_mark_name(select_id() uint8(1))
+    cd_mark_name(ci(60 "merged") uint8(1))
+    cd_mark_name(intern("race") uint8(1))
+    cd_mark_name(intern("first_ok") uint8(1))
+    cd_mark_name(intern("$race_needs") uint8(1))
+    cd_mark_name(ci(43 "p") uint8(1))
+    # bit 2: call_name_early special names
+    cd_mark_name(id_find uint8(2))
+    cd_mark_name(id_rfind uint8(2))
+    cd_mark_name(id_index_of uint8(2))
+    cd_mark_name(id_chars uint8(2))
+    cd_mark_name(ci(47 "get") uint8(2))
+    cd_mark_name(ci(3 "__floor_div") uint8(2))
+    cd_mark_name(ci(4 "__floor_mod") uint8(2))
+    cd_mark_name(ci(5 "__dewy_power") uint8(2))
+    cd_mark_name(ci(6 "__dewy_divide") uint8(2))
+    cd_mark_name(ci(58 "__dewy_range") uint8(2))
+    cd_mark_name(ci(59 "__dewy_range_tail") uint8(2))
+    cd_mark_name(intern("sleep") uint8(2))
+    cd_mark_name(intern("sin") uint8(2))
+    cd_mark_name(intern("cos") uint8(2))
+    cd_mark_name(intern("tan") uint8(2))
+    cd_mark_name(ci(28 "abs") uint8(2))
+    # bit 4: call_name_collect special names
+    cd_mark_name(ci(7 "to_int") uint8(4))
+    cd_mark_name(ci(9 "[]") uint8(4))
+    cd_mark_name(ci(10 "[]=") uint8(4))
+    cd_mask_ptr=cd_name_mask.ptr
+    cd_mask_len=cd_name_mask.length
+    cd_mask_bp=id_breakpoint
+}
+cd_name_flags=(name:CDWord):>uint8=>$unsafe {
+    if id_breakpoint =? 0 or cd_mask_bp not=? id_breakpoint {cd_init_masks()}
+    if name >=? 0 and name <? cd_mask_len {return cd_mask_ptr[name]}
+    uint8(0)
+}
+call_head=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
+    if id_breakpoint =? 0 or cd_mask_bp not=? id_breakpoint {cd_init_masks()}
+    let callee:CDWord=CDWord(nodes.ptr[n].a)
+    let cn=nodes.ptr + callee
+    let ck=cn[0].kind
+    if ck =? 'ident' {
+        let nm=CDWord(cn[0].name)
+        if nm >=? 0 and nm <? cd_mask_len and (cd_mask_ptr[nm] & uint8(1)) not=? uint8(0) {
+            if reflect_fields(n) {call_dispatch_error(1 n 0 0 0 0 0 0 0)}
+            if nm =? id_members and lookup(id_members) =? 0 {
+                if string_domain_members(n) {return ntype(n)}
+                if reflect_members(n) {return members_array(n expected)}
+            }
+            if nm =? id_breakpoint and nkids(n) =? 0 {
+                breakpoint_call(n);
+                return check_expr(n expected)
+            }
+        }
+        if (CDWord(nodes.ptr[n].flags) & NF_PRIVATE_COORD) not=? 0 and name_of(nm) =? "__bcast_index" {
+            loop arg in kids(n) {finish_arg(arg T_INT false)}
+            nodes.ptr[n].aux = 0
+            let function=runtime_fn("__bcast_index")
+            nodes.ptr[n].sym = int32(function)
+            nodes.ptr[n].type = int32(T_INT)
+            return T_INT
+        }
+    } else if ck =? 'field' {
+        if cn[0].b not=? 0 {reflect_name(callee)}
         if reflect_active {reflect_member(callee);}
-    }
-    let ck=nodes.ptr[callee].kind
-    if has_flag(n NF_PRIVATE_COORD) and ck =? 'ident' and name_of(CDWord(nodes.ptr[callee].name)) =? "__bcast_index" {
-        loop arg in kids(n) {finish_arg(arg T_INT false)}
-        nodes.ptr[n].aux = 0
-        let function=runtime_fn("__bcast_index")
-        nodes.ptr[n].sym = int32(function)
-        nodes.ptr[n].type = int32(T_INT)
-        return T_INT
+    } else {
+        if reflect_fields(n) {call_dispatch_error(1 n 0 0 0 0 0 0 0)}
     }
     -1
 }
@@ -150,28 +213,38 @@ call_typeapply=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
     return struct_ctor(n t CDWord(structs.ptr[CDWord(types.ptr[t].st)].decl) args expected)
 }
 call_ident_special=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
-    let callee:CDWord=CDWord(nodes.ptr[n].a)
-    if has_flag(n NF_JUXT) and juxt_head_numeric(n) {
-        juxt_product(n)
-        return check_expr(n expected)
+    let nd=nodes.ptr + n
+    let callee:CDWord=CDWord(nd[0].a)
+    let nm=CDWord(nodes.ptr[callee].name)
+    let nfl=CDWord(nd[0].flags)
+    let nl=CDWord(nd[0].nlist)
+    if (nfl & NF_JUXT) =? 0 and (cd_name_flags(nm) & uint8(1)) =? uint8(0) {
+        if nl =? 0 or nodes.ptr[kid(n 0)].kind not=? 'array' {return -1}
+        return type_sequence_call(n expected)
     }
-    if has_flag(n NF_JUXT) and CDWord(nodes.ptr[callee].name) =? ci(5 "__dewy_power") and nkids(n) =? 2 and nodes.ptr[kid(n 0)].kind =? 'call' and juxt_chain_numeric(kid(n 0)) {
-        juxt_power(n)
-        return check_expr(n expected)
+    if (nfl & NF_JUXT) not=? 0 {
+        if juxt_head_numeric(n) {
+            juxt_product(n)
+            return check_expr(n expected)
+        }
+        if nm =? ci(5 "__dewy_power") and nl =? 2 and nodes.ptr[kid(n 0)].kind =? 'call' and juxt_chain_numeric(kid(n 0)) {
+            juxt_power(n)
+            return check_expr(n expected)
+        }
     }
     if id_len =? 0 {id_len=intern("len")}
-    if nkids(n) =? 1 and CDWord(nodes.ptr[callee].name) =? id_len {
+    if nl =? 1 and nm =? id_len {
         let at:CDWord=prune(check_expr(kid(n 0) 0))
         let a0=last_checked
         set_kid(n 0 a0)
         if lookup(id_len) =? 0 or syms.ptr[lookup(id_len)].kind =? 'builtin' or decl_in_prelude(CDWord(syms.ptr[lookup(id_len)].decl)) {dewy_len_check(callee false at a0)}
-        if is_soa(at) {return check_soa_method(n a0 CDWord(nodes.ptr[callee].name) [] expected)}
+        if is_soa(at) {return check_soa_method(n a0 nm [] expected)}
     }
     # (`named([Png Jpeg])`: a call specialized on a sequence of types, decisions.md batch 7)
-    if nkids(n) >? 0 and nodes.ptr[kid(n 0)].kind =? 'array' {return type_sequence_call(n expected)}
+    if nl >? 0 and nodes.ptr[kid(n 0)].kind =? 'array' {return type_sequence_call(n expected)}
     # (`select(if open @a.receive else none ...)`: a wait turned off, decisions.md batch 7)
-    if nkids(n) >? 0 and CDWord(nodes.ptr[callee].name) =? select_id() {return select_conditions(n expected)}
-    if nkids(n) >? 0 and CDWord(nodes.ptr[callee].name) =? ci(60 "merged") {merged_nested_waits(n)}
+    if nl >? 0 and nm =? select_id() {return select_conditions(n expected)}
+    if nl >? 0 and nm =? ci(60 "merged") {merged_nested_waits(n)}
     # (`race(xs...)`: the spread must not be empty, as select needs a wait)
     race_spread(n expected)
 }
@@ -333,6 +406,7 @@ call_own_sequence_fn=(name:CDWord):>bool=>$unsafe {
     return false
 }
 call_name_early=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expected:CDWord ufcs:bool):>CDWord=>$unsafe {
+    if ide_sentinel =? 0 and (cd_name_flags(name) & uint8(2)) =? uint8(0) {return -1}
     if ide_sentinel not=? 0 and name =? ide_sentinel {
         if ufcs and args.length >? 0 {
             check_expr(args.ptr[0] 0);
@@ -516,14 +590,15 @@ call_name_collect=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expec
         }
         return -1
     }
-    surface_hidden.clear()
+    if surface_hidden.length >? 0 {surface_hidden.clear()}
     if prelude_std_pending and args.length =? 1 and (name =? ci(61 "sum") or name =? ci(44 "min") or name =? ci(45 "max")) {load_std_file("nd.jo");}
     if ufcs {
         if mod_scope >=? 0 {collect_module(mod_scope name @decls)}
         else {collect_fns(name @decls)}
     }
     else {collect_named(name mod_scope @decls)}
-    if name =? ci(7 "to_int") and mod_scope <? 0 and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy and not bound_here(name) {
+    let has_c4=(cd_name_flags(name) & uint8(4)) not=? uint8(0)
+    if has_c4 and name =? ci(7 "to_int") and mod_scope <? 0 and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy and not bound_here(name) {
         let own=false
         loop d in decls {
             if not decl_in_prelude(d) {own=true}
@@ -538,7 +613,7 @@ call_name_collect=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expec
             return resolve_fn_call(n parser decls args expected)
         }
     }
-    let indexed=name =? ci(9 "[]") or name =? ci(10 "[]=")
+    let indexed=has_c4 and (name =? ci(9 "[]") or name =? ci(10 "[]="))
     if (ufcs or indexed) and args.length >? 0 {
         if indexed and not has_flag(args.ptr[0] NF_CHECKED) {
             check_expr(args.ptr[0] 0);

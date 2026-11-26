@@ -1,7 +1,7 @@
 $runtime_checks
 from p"map_entry_places.dewy" import (is_map_entries_type)
 from p"expression_types.dewy" import (ntype)
-from p"ast.jo" import (NF_SQUOTE NF_INDEX_CAPTURED NF_COMPREHENSION NF_GLOBAL NF_INBOUNDS NF_INCLUSIVE NF_MAP_KEY NF_PRIVATE_SETLEN NF_STEP NF_STMT NF_UNSCOPED RANGE_EXHAUSTION UNPACK_OBLIGATION has_flag kid nkids nodes set_list)
+from p"ast.jo" import (NF_SQUOTE NF_INDEX_CAPTURED NF_COMPREHENSION NF_GLOBAL NF_INBOUNDS NF_INCLUSIVE NF_MAP_KEY NF_PRIVATE_SETLEN NF_STEP NF_STMT NF_UNSCOPED RANGE_EXHAUSTION UNPACK_OBLIGATION has_flag kid lists nkids nodes set_list)
 from p"check.jo" import (LF_MUTPARAM LF_PARAM fns globals index_update_arrays index_update_sources locals)
 from p"checker_constant_queries.dewy" import (sa_fits)
 from p"checker_tokens.dewy" import (Tok)
@@ -28,8 +28,8 @@ from p"facts_conditions.dewy" import (fact_cond_out fact_condition fact_conditio
 from p"facts_elements.dewy" import (fact_fixed_check fact_permuted_elements fact_stepped)
 from p"facts_forgets.dewy" import (fact_builtin_formatter fact_callback_writes_nothing fact_drop_block fact_drop_exit fact_drop_footprint fact_drop_forget fact_drop_statement fact_ends_path fact_exposed fact_forget fact_path_call_effects fact_pointer_cast)
 from p"facts_forks.dewy" import (fact_call_arguments fact_fork_record fact_key_callback fact_key_record fact_parallel_array fact_parallel_record fact_slice_capture)
-from p"facts_index_writes.dewy" import (fact_add_projection fact_add_value fact_bind fact_constant fact_new fact_set_bound)
-from p"facts_joins.dewy" import (fact_hull fact_hull_type fact_join fact_join_length)
+from p"facts_index_writes.dewy" import (fact_add_projection fact_add_value fact_bind fact_constant fact_new fact_set_bound ft_begin ft_depth ft_is_active ft_rollback)
+from p"facts_joins.dewy" import (fact_hull fact_hull_type fact_join fact_join_into fact_join_length)
 from p"facts_lengths.dewy" import (fact_difference fact_heap_length fact_length_max fact_shrunk_elements)
 from p"facts_library.dewy" import (fact_chosen fact_chosen_call fact_clamped fact_copy_length_call fact_count_call fact_empty_array_call fact_endpoint fact_endpoint_call fact_entry_count_call fact_exact_sum_call fact_exact_sum_check fact_field_args fact_gpu_index_call fact_gpu_index_check fact_heap_call fact_heap_type fact_integer_gcd_call fact_length_through fact_library_call fact_nonempty_call fact_nonempty_check fact_prelude_call fact_same_length_call)
 from p"facts_lifecycle.dewy" import (fact_owner_value fact_parallel_count_check fact_parallel_range_call fact_refinements_unreachable fact_scope_exit)
@@ -61,7 +61,7 @@ from p"place_routes.dewy" import (place_route)
 from p"predicate_summaries.dewy" import (fact_predicate_apply fact_predicate_summary)
 from p"proof_ops.dewy" import (proof_call proof_exit ref_arm_publish result_exit result_publish)
 from p"proofs.jo" import (proof_active proof_decls result_active)
-from p"refine.jo" import (fact_pair_transient ref_pair_stmts ref_self_active refine_owners)
+from p"refine.jo" import (fact_pair_transient ref_pair_stmts ref_self_active refine_active refine_owners)
 from p"refine_transfers.dewy" import (ref_assume ref_check ref_fact_current_entry)
 from p"refine_metadata.dewy" import (refine_storage representation_type str_set_of)
 from p"refine_rare.dewy" import (ref_self_place_read)
@@ -208,6 +208,64 @@ fact_parallel_range_count=(r:CaptureWord @s:FactState):>int64=>$unsafe {
     }
     if nodes.ptr[a].ival not=? 0 or inclusive {return 0}
     fact_clamped(@s fact_capture(b @s) r)
+}
+# Trivial atom expression that cannot spawn nested FactStates, obligations, or writes.
+fact_no_state_replace=(n:CaptureWord @budget:CaptureWord):>bool=>$unsafe {
+    if n <=? 0 {return true}
+    if budget <=? 0 {return false}
+    budget -= 1
+    let nd=nodes.ptr + n
+    let k=nd[0].kind
+    match k {
+        <'int_lit'|'float_lit'|'bool_lit'|'none_lit'|'null_lit'|'dotname'|'str_lit'|'ident'> => {return true}
+        <'not_'|'conv'> => {return fact_no_state_replace(CaptureWord(nd[0].a) @budget)}
+        _ => {return false}
+    }
+}
+# Pure condition expression: cannot write storage/bindings or spawn nested FactStates.
+fact_pure_cond=(n:CaptureWord @budget:CaptureWord):>bool=>$unsafe {
+    if n <=? 0 {return true}
+    if budget <=? 0 {return false}
+    budget -= 1
+    let nd=nodes.ptr + n
+    let k=nd[0].kind
+    match k {
+        <'int_lit'|'float_lit'|'bool_lit'|'none_lit'|'null_lit'|'dotname'|'ident'> => {return true}
+        <'not_'|'conv'|'istype'|'narrow'> => {
+            return fact_pure_cond(CaptureWord(nd[0].a) @budget)
+        }
+        <'binary'> => {
+            if nd[0].aux not=? 0 {return false}
+            let op=capture_tokens[nd[0].op]
+            if op not=? 'eq' and op not=? 'ne' and op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' {return false}
+            return fact_pure_cond(CaptureWord(nd[0].a) @budget) and fact_pure_cond(CaptureWord(nd[0].b) @budget)
+        }
+        _ => {return false}
+    }
+}
+fact_flatten_and=(n:CaptureWord @out:array<int64>):>bool=>$unsafe {
+    if nodes.ptr[n].kind =? 'and_' {
+        return fact_flatten_and(CaptureWord(nodes.ptr[n].a) @out) and fact_flatten_and(CaptureWord(nodes.ptr[n].b) @out)
+    }
+    if out.length >=? 8 {return false}
+    out.push(n)
+    true
+}
+fact_simple_diverges=(b:CaptureWord):>bool=>$unsafe {
+    if b <=? 0 {return false}
+    let k=nodes.ptr[b].kind
+    let budget:CaptureWord=16
+    if k =? 'return_' {
+        return fact_no_state_replace(CaptureWord(nodes.ptr[b].a) @budget)
+    }
+    if k =? 'block' {
+        let nk=CaptureWord(nodes.ptr[b].nlist)
+        if nk not=? 1 {return false}
+        let only=CaptureWord(lists.ptr[CaptureWord(nodes.ptr[b].list)])
+        if nodes.ptr[only].kind not=? 'return_' {return false}
+        return fact_no_state_replace(CaptureWord(nodes.ptr[only].a) @budget)
+    }
+    false
 }
 fact_capture_value=(n:CaptureWord @s:FactState):>int64=>$unsafe {
     if n =? 0 {return 0}
@@ -665,6 +723,73 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
             return r
         }
         <'if_'> => {
+            # Fast zero-clone trailed path for statement `if cond { ... return/break/continue }`:
+            # mutate @s in place for the diverging then-arm and roll back for the else/fallthrough.
+            if (mark & FACT_VALUE) =? 0 and not ownership_fact_cleanup and ownership_decls.length =? 0 and s.conditional.length =? 0 and fact_summary_field =? 0 and fact_summary_owner =? 0 and fact_pending_defers =? 0 and not proof_active and not result_active and s.index.ptr[0].slots.length =? 0 and s.ids.length <? FACT_CAP - 128 and ft_depth() <? 8 {
+                let cn=CaptureWord(nodes.ptr[n].a)
+                let sense=true
+                let membership=string_set_owners.length >? 0 and string_set_owners.has(fact_owner)
+                loop nodes.ptr[cn].kind =? 'not_' and not (membership and string_set_tests.has(cn)) {
+                    cn=CaptureWord(nodes.ptr[cn].a)
+                    sense=not sense
+                }
+                let ck=nodes.ptr[cn].kind
+                if ck not=? 'and_' and ck not=? 'or_' and ck not=? 'block' and not (membership and string_set_tests.has(cn)) and fact_simple_diverges(CaptureWord(nodes.ptr[n].b)) {
+                    let v=fact_capture(cn @s)
+                    if not s.live {return 0}
+                    let cp=ft_begin(s)
+                    fact_assume(@s v sense)
+                    fact_capture(CaptureWord(nodes.ptr[n].b) @s);
+                    ft_rollback(@s cp)
+                    fact_assume(@s v (not sense))
+                    let ec=CaptureWord(nodes.ptr[n].c)
+                    if ec not=? 0 {fact_capture(ec @s);}
+                    return 0
+                }
+                if fact_speculating >? 0 and sense and ck =? 'and_' and not membership and fact_simple_diverges(CaptureWord(nodes.ptr[n].b)) {
+                    let leaves:array<int64>=[]
+                    if fact_flatten_and(cn @leaves) {
+                        let all_pure=true
+                        let cb:CaptureWord=64
+                        loop lv in leaves {
+                            if not fact_pure_cond(lv @cb) {all_pure=false; break}
+                        }
+                        if all_pure {
+                            let cp=ft_begin(s)
+                            let unknown_count:CaptureWord=0
+                            let dead=false
+                            loop lv in leaves {
+                                let v=fact_capture(lv @s)
+                                if not s.live {dead=true; break}
+                                let tr=fact_truth(s v)
+                                if tr =? 0 {dead=true; break}
+                                if tr <? 0 {
+                                    unknown_count += 1
+                                    fact_assume(@s v true)
+                                    if not s.live {dead=true; break}
+                                }
+                            }
+                            if not dead {fact_capture(CaptureWord(nodes.ptr[n].b) @s);}
+                            ft_rollback(@s cp)
+                            if not dead {
+                                if unknown_count =? 0 {
+                                    s.live=false
+                                    return 0
+                                }
+                                if unknown_count =? 1 {
+                                    loop lv in leaves {
+                                        let v=fact_capture(lv @s)
+                                        if fact_truth(s v) <? 0 {fact_assume(@s v false); break}
+                                    }
+                                }
+                            }
+                            let ec=CaptureWord(nodes.ptr[n].c)
+                            if ec not=? 0 {fact_capture(ec @s);}
+                            return 0
+                        }
+                    }
+                }
+            }
             # (a refuted conjunction continues only past a branch that leaves, or
             # into an else: fact_either)
             let outer_either=fact_either_wanted
@@ -702,9 +827,13 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                 s=FactState(live=false)
                 return fact_constructor_join(n paths y z result hull @s)
             }
+            if (mark & FACT_VALUE) =? 0 {
+                fact_join_into(@s @no_s n)
+                return 0
+            }
             let joined_s=fact_join(s no_s n)
             let joined=fact_new(@joined_s result FactTerm(type=hull))
-            if mark & FACT_VALUE not=? 0 {fact_join_length(@joined_s joined s y no_s z n)}
+            fact_join_length(@joined_s joined s y no_s z n)
             s=joined_s
             return joined
         }

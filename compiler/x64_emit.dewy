@@ -2,8 +2,8 @@ $runtime_checks
 
 from p"ir_types.dewy" import (Ins IrFn Op)
 from p"backend_analysis.dewy" import (INLINE_COPY LOC_CONST LOC_FCONST LOC_GLOBAL LOC_NONE LOC_SLOT LOC_SPILL backend_call_like call_pos call_w v_live vcval vgkind vgoff vloc vslot vsoff x_has_any_call x_has_narrow32 x_has_overflow_pair x_has_slot)
-from p"x64_encode.dewy" import (CC_A CC_AE CC_B CC_BE CC_E CC_G CC_GE CC_L CC_LE CC_NE CC_P R10 R11 R8 R9 RAX RBP RCX RDI RDX RIPREL RSI RSP VX VY XMM XWord b b16 b24 b32 cur_index frame_size indexed_base is_vreg_vec jcc32 jmp32 jmp_back lea load_sized mem modrr mov_imm mov_mr mov_rm mov_rr nop_pad op_rm op_rr patch32 patch_branch patch_here patch_rel_here rel_fixup_lea rex rip_kind rsp_extra rsp_frame setcc setcc_reg sse_rm sse_rr store_sized use_index vec_esize vex vmov_mr vmov_rm vmov_rr x_abs_at1 x_abs_at2 x_abs_d1 x_abs_d2 x_absorb_recent x_bytes x_code x_data_fix x_encode_begin x_encode_end x_pad_record x_pad_track x_padding_cmov x_padding_floor)
-from p"x64_allocate.dewy" import (callee_off live_start ra_on save_list slot_off vspill)
+from p"x64_encode.dewy" import (CC_A CC_AE CC_B CC_BE CC_E CC_G CC_GE CC_L CC_LE CC_NE CC_P R10 R11 R8 R9 RAX RBP RCX RDI RDX RIPREL RSI RSP VX VY XMM XWord b b16 b24 b32 cur_index frame_size indexed_base is_vreg_vec jcc32 jmp32 jmp_back lea load_sized mem modrr mov_imm mov_mr mov_rm mov_rr nop_pad op_rm op_rr patch32 patch_branch patch_here patch_rel_here rel_fixup_lea rex rip_kind rsp_extra rsp_frame setcc setcc_reg sse_rm sse_rr store_sized use_index vec_esize vex vmov_mr vmov_rm vmov_rr x_abs_at1 x_abs_at2 x_abs_d1 x_abs_d2 x_absorb_recent x_bytes x_code x_data_fix x_encode_begin x_encode_end x_grow x_hdr x_pad0 x_pad1 x_pad2 x_pad_record x_pad_track x_padding_cmov x_padding_floor)
+from p"x64_allocate.dewy" import (callee_off live_start ra_on ra_saved_mask save_list slot_off vspill)
 
 # Whole-function x64 instruction selection, call preservation and source rows.
 # Final IR and module policy are borrowed for one sequential emission. Arena
@@ -535,13 +535,24 @@ let x_no_frame:bool=false
 emit_prologue=():>void=>$unsafe {
     x_no_frame=rsp_frame and frame_size =? 0 and not x_has_any_call and not x_has_slot and xe_nparams <=? 6 and not xe_windows and not xe_debug
     if not rsp_frame {b(0x55)} # push rbp
-    let nsave:XWord=0
-    loop r in [0..16) {
-        if xe_saved[r] not=? 0 {nsave += 1}
-    }
+    let sm=ra_saved_mask
     uw_fo=0
-    if xe_windows and nsave >? 0 {uw_fo=(8 * nsave + 15) // 16}
+    if xe_windows and sm not=? 0 {
+        let nsave:XWord=0
+        if sm & (XWord(1) << 3) not=? 0 {nsave += 1}
+        if sm & (XWord(1) << 12) not=? 0 {nsave += 1}
+        if sm & (XWord(1) << 13) not=? 0 {nsave += 1}
+        if sm & (XWord(1) << 14) not=? 0 {nsave += 1}
+        if sm & (XWord(1) << 15) not=? 0 {nsave += 1}
+        if nsave >? 0 {uw_fo=(8 * nsave + 15) // 16}
+    }
     if uw_fo >? 0 {
+        let nsave:XWord=0
+        if sm & (XWord(1) << 3) not=? 0 {nsave += 1}
+        if sm & (XWord(1) << 12) not=? 0 {nsave += 1}
+        if sm & (XWord(1) << 13) not=? 0 {nsave += 1}
+        if sm & (XWord(1) << 14) not=? 0 {nsave += 1}
+        if sm & (XWord(1) << 15) not=? 0 {nsave += 1}
         # (Windows: rbp is set as rsp + 16 fo, as its unwind codes can say, so the registers
         # saved below rbp are above where unwinding starts and the codes can say where: pe_format.dewy)
         let start=xe_start
@@ -588,8 +599,12 @@ emit_prologue=():>void=>$unsafe {
             }
             if rsp_frame {rsp_row(frame_size + 8)}
         }
-        loop r in [0..16) {
-            if xe_saved[r] not=? 0 {mov_mr(RBP  xe_saved[r]  r)}
+        if sm not=? 0 {
+            if sm & (XWord(1) << 3) not=? 0 {mov_mr(RBP  xe_saved[3]  3)}
+            if sm & (XWord(1) << 12) not=? 0 {mov_mr(RBP  xe_saved[12]  12)}
+            if sm & (XWord(1) << 13) not=? 0 {mov_mr(RBP  xe_saved[13]  13)}
+            if sm & (XWord(1) << 14) not=? 0 {mov_mr(RBP  xe_saved[14]  14)}
+            if sm & (XWord(1) << 15) not=? 0 {mov_mr(RBP  xe_saved[15]  15)}
         }
     }
     # Spill incoming registers before moving any; capture register sources in
@@ -649,8 +664,13 @@ emit_prologue=():>void=>$unsafe {
     }
 }
 emit_epilogue=():>void=>$unsafe {
-    loop r in [0..16) {
-        if xe_saved[r] not=? 0 {mov_rm(r  RBP  xe_saved[r])}
+    let sm=ra_saved_mask
+    if sm not=? 0 {
+        if sm & (XWord(1) << 3) not=? 0 {mov_rm(3  RBP  xe_saved[3])}
+        if sm & (XWord(1) << 12) not=? 0 {mov_rm(12  RBP  xe_saved[12])}
+        if sm & (XWord(1) << 13) not=? 0 {mov_rm(13  RBP  xe_saved[13])}
+        if sm & (XWord(1) << 14) not=? 0 {mov_rm(14  RBP  xe_saved[14])}
+        if sm & (XWord(1) << 15) not=? 0 {mov_rm(15  RBP  xe_saved[15])}
     }
     if rsp_frame {
         if x_no_frame {
@@ -4770,7 +4790,7 @@ const X_OP_FLAGS:array<uint8 length=128>=[
 ]
 
 x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_active:XWord iat_base:XWord cabi:ptr<array<bool>> positions:ptr<array<int64>>):>XWord=>$unsafe {
-    x_encode_begin(XWord(input[0].code.length) * 10 + 64)
+    if x_hdr =? (uint64(0) as ptr<XWord>) {x_encode_begin(XWord(input[0].code.length) * 10 + 64)}
     x64_emitter_ir(input)
     xe_start=start
     xe_debug=debug
@@ -4819,7 +4839,7 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
         }
     }
     emit_prologue()
-    let body_start=XWord(x_code[0].length)
+    let body_start=x_hdr[1]
     if xe_debug and XWord(dbg_pos.length) <? xe_ncode + 1 {dbg_pos=fill(0  xe_ncode + 64)}
     if dbg_epis.length >? 0 {dbg_epis.clear()}
     let ci:XWord=0
@@ -4839,6 +4859,9 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
     let has_n32=x_has_narrow32
     let has_ovp=x_has_overflow_pair
     let allow_cold=x_loop_line =? 32 and not dbg
+    let pad_track=x_pad_track
+    let rsp_f=rsp_frame
+    let fsz=frame_size
     let ins=instructions
     loop pos in [0..xe_ncode) {
         if allow_cold and x_skip_end >=? 0 {
@@ -4856,12 +4879,17 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
             cmp_reload_at=-1
             emit_ins(pos  instructions + original)
         }
-        let ofl=XWord(X_OP_FLAGS[int64((ins as ptr<uint32>)[0]) & 127])
+        let tag=int64((ins as ptr<uint32>)[0])
+        let ofl=XWord(X_OP_FLAGS[tag & 127])
         if (ofl & 8) not=? 0 and XWord(ins[0].c) & M_NULLF not=? 0 {nchk_begin(pos)}
         let ipos=XWord(ins[0].pos)
         if ipos not=? 0 and (ipos not=? row_pos or fused_flag) {line_row(ipos)}
-        if dbg {dbg_pos[pos] = XWord(x_code[0].length); x_cur_pos=pos}
+        if dbg {dbg_pos[pos] = x_hdr[1]; x_cur_pos=pos}
         if pos not=? fuse_skip and pos not=? fuse_skip2 {
+            let rm_opc:XWord=0
+            let rm_reg:XWord=0
+            let rm_base:XWord=0
+            let rm_disp:XWord=0
             if pos =? next_call {
                 if has_saves {
                     let op=ins[0].op
@@ -4898,19 +4926,151 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
                 next_call=if ci <? ncalls {calls[ci]} else {-1}
             }
             else if ofl =? 0 {
-                if not has_n32 or pos + 1 >=? xe_ncode or (ins + 1)[0].op not=? 'zext32' or not x_emit_narrow32(pos  ins) {
+                let op=ins[0].op
+                if op =? 'block' {
+                    if xctl_n >=? xctl_cap {xctl_grow()}
+                    let cp=xctl_p + xctl_n
+                    cp[0].kind=0; cp[0].fix_head=-1; cp[0].nifx=0; cp[0].start=x_hdr[1]
+                    xctl_n += 1
+                }
+                else if op =? 'end' {
+                    xctl_n -= 1
+                    let cp=xctl_p + xctl_n
+                    if cp[0].kind =? 1 {x_loop_depth -= 1}
+                    if cp[0].fix_head >=? 0 or cp[0].nifx >? 0 {patch_control_end(cp  pos)}
+                }
+                else if op =? 'mov' {
+                    let d=XWord(ins[0].dst)
+                    let dl=vloc[d]
+                    if dl not=? LOC_NONE {
+                        if XWord(xe_types[d]) =? 0 and (pos + 1 >=? xe_ncode or (ins + 1)[0].op not=? 'ret') {
+                            let a=XWord(ins[0].a)
+                            let al=vloc[a]
+                            if dl >=? 0 and dl <? XMM and al >=? 0 and al <? XMM {
+                                if dl not=? al {
+                                    let header=x_hdr
+                                    if header[1] + 3 >? header[2] {header=x_grow(3)}
+                                    let old=header[1]
+                                    let end_=old + 3
+                                    header[1]=end_
+                                    let p=(header as ptr<uint8>) + 24 + old
+                                    p[0]=uint8<overflow='wrap'>(0x48 | ((al >> 1) & 4) | ((dl >> 3) & 1))
+                                    p[1]=0x89
+                                    p[2]=uint8<overflow='wrap'>(0xC0 | ((al & 7) << 3) | (dl & 7))
+                                    if pad_track {x_pad0=x_pad1; x_pad1=x_pad2; x_pad2=(end_ << 32) | old}
+                                }
+                            }
+                            else if dl >=? 0 and dl <? XMM and al =? LOC_SPILL {
+                                rm_opc=0x8B; rm_reg=dl; rm_base=RBP; rm_disp=xe_spill[a]
+                            }
+                            else if dl =? LOC_SPILL and al >=? 0 and al <? XMM {
+                                rm_opc=0x89; rm_reg=al; rm_base=RBP; rm_disp=xe_spill[d]
+                            }
+                            else {x_emit_mov(pos  ins)}
+                        }
+                        else {x_emit_mov(pos  ins)}
+                    }
+                }
+                else if op =? 'store' {
+                    let mode=XWord(ins[0].c)
+                    if store_val_skip <? 0 and (mode & (M_INDEX | 15)) =? 8 {
+                        let bb=XWord(ins[0].b)
+                        let bt=XWord(xe_types[bb])
+                        let bl=vloc[bb]
+                        if (bt =? 0 or bt =? 3) and bl >=? 0 and bl <? XMM {
+                            let a=XWord(ins[0].a)
+                            let al=vloc[a]
+                            if al >=? 0 and al <? XMM {
+                                rm_opc=0x89; rm_reg=bl; rm_base=al; rm_disp=XWord(ins[0].imm)
+                            }
+                            else if al =? LOC_SLOT {
+                                rm_opc=0x89; rm_reg=bl; rm_base=RBP; rm_disp=xe_slots[vslot[a]] + vsoff[a] + XWord(ins[0].imm)
+                            }
+                            else {x_emit_store(pos  ins)}
+                        }
+                        else {x_emit_store(pos  ins)}
+                    }
+                    else {x_emit_store(pos  ins)}
+                }
+                else if not has_n32 or pos + 1 >=? xe_ncode or (ins + 1)[0].op not=? 'zext32' or not x_emit_narrow32(pos  ins) {
                     emit_ins(pos  ins)
                 }
             }
             else if (ofl & 1) =? 0 {
-                if (ofl & 2) not=? 0 and vloc[XWord(ins[0].dst)] <? -1 {
+                if (ofl & 2) not=? 0 {
+                    if vloc[XWord(ins[0].dst)] >=? -1 {emit_ins(pos  ins)}
                 }
-                else if (not has_n32 or pos + 1 >=? xe_ncode or (ins + 1)[0].op not=? 'zext32' or not x_emit_narrow32(pos  ins)) and (not has_ovp or (ofl & 4) =? 0 or not x_emit_overflow_pair(pos  ins)) {
+                else if (ofl & 8) not=? 0 {
+                    let d=XWord(ins[0].dst)
+                    let dl=vloc[d]
+                    if dl not=? LOC_NONE {
+                        let mode=XWord(ins[0].c)
+                        let handled=false
+                        if (mode & (M_FLOAT | M_INDEX | 15)) =? 8 and dl >=? 0 and dl <? XMM {
+                            let fuse_cand=false
+                            if pos + 1 <? xe_ncode {
+                                let ntag=int64(((ins + 1) as ptr<uint32>)[0])
+                                let nop=(ins + 1)[0].op
+                                if (ntag >=? 19 and ntag <=? 28) or nop =? 'and_' or nop =? 'if_' or nop =? 'brif' or nop =? 'ret' {fuse_cand=true}
+                            }
+                            if not fuse_cand {
+                                let a=XWord(ins[0].a)
+                                let al=vloc[a]
+                                if al >=? 0 and al <? XMM {
+                                    rm_opc=0x8B; rm_reg=dl; rm_base=al; rm_disp=XWord(ins[0].imm); handled=true
+                                }
+                                else if al =? LOC_SLOT {
+                                    rm_opc=0x8B; rm_reg=dl; rm_base=RBP; rm_disp=xe_slots[vslot[a]] + vsoff[a] + XWord(ins[0].imm); handled=true
+                                }
+                            }
+                        }
+                        if not handled {x_emit_load(pos  ins)}
+                    }
+                }
+                else if (not has_n32 or pos + 1 >=? xe_ncode or (ins + 1)[0].op not=? 'zext32' or not x_emit_narrow32(pos  ins)) and (not has_ovp or not x_emit_overflow_pair(pos  ins)) {
                     emit_ins(pos  ins)
                 }
             }
+            if rm_opc not=? 0 {
+                let header=x_hdr
+                if header[1] + 9 >? header[2] {header=x_grow(9)}
+                if rsp_f and rm_base =? RBP {
+                    rm_base=RSP
+                    rm_disp += fsz + rsp_extra
+                }
+                let old=header[1]
+                let p=(header as ptr<uint8>) + 24 + old
+                p[0]=uint8<overflow='wrap'>(0x48 | ((rm_reg >> 1) & 4) | ((rm_base >> 3) & 1))
+                p[1]=uint8<overflow='wrap'>(rm_opc)
+                let bs=rm_base & 7
+                let rm=((rm_reg & 7) << 3) | bs
+                let end_:XWord=old
+                if rm_disp =? 0 and bs not=? 5 {
+                    p[2]=uint8<overflow='wrap'>(rm)
+                    if bs =? 4 {p[3]=0x24; end_=old + 4}
+                    else {end_=old + 3}
+                } else if rm_disp >=? -128 and rm_disp <=? 127 {
+                    p[2]=uint8<overflow='wrap'>(0x40 | rm)
+                    if bs =? 4 {p[3]=0x24; p[4]=uint8<overflow='wrap'>(rm_disp); end_=old + 5}
+                    else {p[3]=uint8<overflow='wrap'>(rm_disp); end_=old + 4}
+                } else {
+                    p[2]=uint8<overflow='wrap'>(0x80 | rm)
+                    if bs =? 4 {
+                        p[3]=0x24
+                        let dw=(p + 4) as ptr<uint32>
+                        dw[0]=uint32<overflow='wrap'>(rm_disp)
+                        end_=old + 8
+                    } else {
+                        let dw=(p + 3) as ptr<uint32>
+                        dw[0]=uint32<overflow='wrap'>(rm_disp)
+                        end_=old + 7
+                    }
+                }
+                header[1]=end_
+                if pad_track {x_pad0=x_pad1; x_pad1=x_pad2; x_pad2=(end_ << 32) | old}
+            }
         }
-        if nchk_open >=? 0 and XWord(x_code[0].length) >? nchk_start and fold_load <? 0 and cmp_load <? 0 {nchk_close()}
+        if nchk_open >=? 0 and x_hdr[1] >? nchk_start and fold_load <? 0 and cmp_load <? 0 {nchk_close()}
         ins=ins + 1
     }
     if XWord(x_cold_ifs.length) >? 0 {

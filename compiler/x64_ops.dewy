@@ -125,7 +125,7 @@ x64_function=():>void=>$unsafe {
     loop fn_len.length <=? ir.fn_index {fn_len.push(0)}
     let align=X64OpsWord(x64_code_align())
     x_loop_line=if align =? 64 64 else 32
-    x_encode_begin(X64OpsWord(ir.code.length) * 10 + 128)
+    x_encode_begin(X64OpsWord(ir.code.length) * 16 + 256)
     # (align is 16 or 64 and the length is not negative: the remainder is a mask)
     let rem=X64OpsWord(code.length) & (align - 1)
     if rem not=? 0 {

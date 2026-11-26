@@ -131,27 +131,28 @@ coerce=(n:int64 target:int64):>int64=>$unsafe {
         return n
     }
     let tk=types.ptr[to].kind
-    if tk =? 'secret' or types.ptr[source_type].kind =? 'secret' {
+    let sk=types.ptr[source_type].kind
+    if tk =? 'secret' or sk =? 'secret' {
         let r=secret_coerce(n source_type to)
         if r >=? 0 {return r}
     }
-    if types.ptr[source_type].kind =? 'tuple' and tk =? 'array' and sibling_array_source(n source_type CoerceExpressionWord(types.ptr[to].elem)) {return sibling_to_array(n source_type to)}
-    if (source_type =? T_MATH_INT and math_rep_type(to)) or (to =? T_MATH_INT and math_rep_type(source_type)) {
+    if sk =? 'tuple' and tk =? 'array' and sibling_array_source(n source_type CoerceExpressionWord(types.ptr[to].elem)) {return sibling_to_array(n source_type to)}
+    if (source_type =? T_MATH_INT and tk =? 'struct_' and math_rep_type(to)) or (to =? T_MATH_INT and sk =? 'struct_' and math_rep_type(source_type)) {
         wrap_conv(n CV.none_ to)
         return n
     }
-    if to =? T_MATH_INT and bundled_bigint_type(source_type) {
+    if to =? T_MATH_INT and sk =? 'struct_' and bundled_bigint_type(source_type) {
         wrap_conv(n CV.big2math to)
         return n
     }
-    if source_type =? T_MATH_INT and bundled_bigint_type(to) {
+    if source_type =? T_MATH_INT and tk =? 'struct_' and bundled_bigint_type(to) {
         wrap_conv(n CV.math2big to)
         return n
     }
-    if types.ptr[source_type].kind =? 'quantity' and tk =? 'quantity' {
+    if sk =? 'quantity' and tk =? 'quantity' {
         return quantity_coerce(n to)
     }
-    if types.ptr[source_type].kind =? 'quantity' and tk =? 'struct_' and time_constant_duration(n source_type to) {
+    if sk =? 'quantity' and tk =? 'struct_' and time_constant_duration(n source_type to) {
         let pos=nodes.ptr[n].pos
         let source=nodes.length
         nodes.push(nodes.ptr[n])
@@ -166,66 +167,69 @@ coerce=(n:int64 target:int64):>int64=>$unsafe {
         check_expr(n to);
         return n
     }
-    if bundled_word_rational_type(source_type) and bundled_rational_type(to) {return rational_wrap(n "_widen" to)}
-    if bundled_word_rational_type(source_type) and tk =? 'float_' {
-        let convert=if to =? T_F32 {"_word_float32"} else {"_word_float64"}
-        return rational_wrap(n convert to)
-    }
-    if bundled_word_rational_type(to) and word_rational_source(n source_type) {
-        let pos=nodes.ptr[n].pos
-        ensure_bundled_import("rational.dewy" "$dewy_rational" pos)
-        let parts=rational_constants.get(n)
-        if parts isnt? none {
-            nodes[n] = nodes.ptr[rational_constant(parts[0] parts[1] pos true rational_shown.get(n) ?? 0)]
+    if sk =? 'struct_' or tk =? 'struct_' {
+        if sk =? 'struct_' and tk =? 'struct_' and bundled_word_rational_type(source_type) and bundled_rational_type(to) {return rational_wrap(n "_widen" to)}
+        if sk =? 'struct_' and tk =? 'float_' and bundled_word_rational_type(source_type) {
+            let convert=if to =? T_F32 {"_word_float32"} else {"_word_float64"}
+            return rational_wrap(n convert to)
         }
-        else {
-            let source=nodes.length
-            nodes.push(nodes.ptr[n])
-            add_flag(source NF_CHECKED)
-            nodes[n] = Node(kind = 'call' pos = pos a = int32<overflow='wrap'>(bc_field(bc_ident("$dewy_rational" pos) "RationalWord" pos)))
-            set_list(n [source bc_int(1 pos)])
-        }
-        check_expr(n to);
-        return n
-    }
-    if tk =? 'struct_' and is_int(source_type) and bundled_rational_type(to) {
-        # (an integer constant is a rational constant: `x/2` divides by a known nonzero)
-        let [known value]=integer_constant(n)
-        if known and (value >=? 0 or types.ptr[source_type].sign or source_type =? T_MATH_INT) {
-            nodes[n] = nodes.ptr[rational_constant(value 1 nodes.ptr[n].pos)]
+        if tk =? 'struct_' and bundled_word_rational_type(to) and word_rational_source(n source_type) {
+            let pos=nodes.ptr[n].pos
+            ensure_bundled_import("rational.dewy" "$dewy_rational" pos)
+            let parts=rational_constants.get(n)
+            if parts isnt? none {
+                nodes[n] = nodes.ptr[rational_constant(parts[0] parts[1] pos true rational_shown.get(n) ?? 0)]
+            }
+            else {
+                let source=nodes.length
+                nodes.push(nodes.ptr[n])
+                add_flag(source NF_CHECKED)
+                nodes[n] = Node(kind = 'call' pos = pos a = int32<overflow='wrap'>(bc_field(bc_ident("$dewy_rational" pos) "RationalWord" pos)))
+                set_list(n [source bc_int(1 pos)])
+            }
             check_expr(n to);
-            rational_constants[n] = rational_constant_parts(value 1)
             return n
         }
-        let source=nodes.length
-        nodes.push(nodes.ptr[n])
-        let pos=nodes.ptr[n].pos
-        ensure_bundled_import("rational.dewy" "$dewy_rational" pos)
-        nodes[n] = Node(kind = 'call' pos = pos a = int32<overflow='wrap'>(bc_field(bc_ident("$dewy_rational" pos) "rational" pos)))
-        set_list(n [source])
-        check_expr(n to);
-        return n
+        if tk =? 'struct_' and is_int(source_type) and bundled_rational_type(to) {
+            # (an integer constant is a rational constant: `x/2` divides by a known nonzero)
+            let [known value]=integer_constant(n)
+            if known and (value >=? 0 or types.ptr[source_type].sign or source_type =? T_MATH_INT) {
+                nodes[n] = nodes.ptr[rational_constant(value 1 nodes.ptr[n].pos)]
+                check_expr(n to);
+                rational_constants[n] = rational_constant_parts(value 1)
+                return n
+            }
+            let source=nodes.length
+            nodes.push(nodes.ptr[n])
+            let pos=nodes.ptr[n].pos
+            ensure_bundled_import("rational.dewy" "$dewy_rational" pos)
+            nodes[n] = Node(kind = 'call' pos = pos a = int32<overflow='wrap'>(bc_field(bc_ident("$dewy_rational" pos) "rational" pos)))
+            set_list(n [source])
+            check_expr(n to);
+            return n
+        }
+        if tk =? 'float_' and sk =? 'struct_' and bundled_rational_type(source_type) {
+            let source=nodes.length
+            nodes.push(nodes.ptr[n])
+            move_divisor(n source)
+            # (checked already: an operator's call, `-x`, has no callee to check again)
+            add_flag(source NF_CHECKED)
+            let name=if to =? T_F32 {"to_float32"} else {"to_float64"}
+            let callee=bc_field(source name nodes.ptr[n].pos)
+            nodes[n] = Node(kind = 'call' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(callee))
+            check_expr(n to);
+            return n
+        }
     }
-    if tk =? 'float_' and bundled_rational_type(source_type) {
-        let source=nodes.length
-        nodes.push(nodes.ptr[n])
-        move_divisor(n source)
-        # (checked already: an operator's call, `-x`, has no callee to check again)
-        add_flag(source NF_CHECKED)
-        let name=if to =? T_F32 {"to_float32"} else {"to_float64"}
-        let callee=bc_field(source name nodes.ptr[n].pos)
-        nodes[n] = Node(kind = 'call' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(callee))
-        check_expr(n to);
-        return n
-    }
-    if types.ptr[source_type].kind =? 'polyfn' and tk =? 'fn_' {
+    if sk =? 'polyfn' and tk =? 'fn_' {
         let source=nodes.length
         nodes.push(nodes.ptr[n])
         fn_value(n to closure = source);
         source_type=prune(ntype(n))
+        sk=types.ptr[source_type].kind
     }
-    if types.ptr[source_type].kind =? 'fn_' and tk =? 'fn_' and not callable_fits(source_type to) and fn_value_adapts(n source_type to) {return fn_value_adapter(n to)}
-    if dewy_bigint_literal_target(n to) {
+    if sk =? 'fn_' and tk =? 'fn_' and not callable_fits(source_type to) and fn_value_adapts(n source_type to) {return fn_value_adapter(n to)}
+    if tk =? 'struct_' and nodes.ptr[n].kind =? 'int_lit' and is_lit(n) and dewy_bigint_literal_target(n to) {
         dewy_coerce_bigint_literal(n to)
         return n
     }

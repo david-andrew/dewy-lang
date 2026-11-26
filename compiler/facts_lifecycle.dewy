@@ -6,7 +6,7 @@ from p"directive_queries.dewy" import (dir_policy)
 from p"util.jo" import (file_in_lib pos_in_lib)
 from p"facts.jo" import (FactSummary)
 from p"facts_capture.dewy" import (fact_capture)
-from p"facts_index_writes.dewy" import (fact_new)
+from p"facts_index_writes.dewy" import (fact_new ft_is_active ft_record_bind)
 from p"facts_index_writes.dewy" import (fact_index_put)
 from p"facts_value_queries.dewy" import (fact_bound)
 from p"facts.jo" import (FactProbeRun)
@@ -180,8 +180,9 @@ fact_scope_exit=(@s:FactState n:LifeWord first:LifeWord):>void=>$unsafe {
     }
     if kept.length =? s.bindings.length - first {return}
     s.bindings.truncate(first)
+    let has_roots=s.index.ptr[0].roots.length not=? 0
     loop b in kept {
-        fact_index_put(@s.index[0].roots fact_root_key(b.place) s.bindings.length)
+        if has_roots {fact_index_put(@s.index[0].roots fact_root_key(b.place) s.bindings.length)}
         s.bindings.push(b)
     }
 }
@@ -442,6 +443,7 @@ fact_forget_hooked=(@s:FactState n:LifeWord):>void=>$unsafe {
         let t=if p.root =? 'local' {LifeWord(locals.ptr[p.declaration].type)} else {LifeWord(globals.ptr[p.declaration].type)}
         let v=fact_new(@s fact_domain(t 'call' n) FactTerm(type=t))
         fact_holds_contract(@s t v)
+        if ft_is_active() {ft_record_bind(i s.bindings[i])}
         s.bindings[i]=FactBinding(p v n s.bindings[i].value)
     }
 }

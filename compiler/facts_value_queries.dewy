@@ -128,7 +128,17 @@ fact_bound=(s:FactState v:ValueWord):>FactBound=>$unsafe {
 fact_binding_ref=(@s:FactState p:PlaceIdentity):>int64=>$unsafe {
     let idx=s.index.ptr
     let rn:ValueWord=idx[0].roots.length
-    if rn =? 0 {return -1}
+    if rn =? 0 {
+        let bn:ValueWord=s.bindings.length
+        if bn =? 0 {return -1}
+        let bp=s.bindings.ptr
+        let decl=p.declaration
+        loop i in [ValueWord(0)..bn) {
+            let bi=bp + i
+            if bi[0].place.declaration =? decl and bi[0].place.root =? p.root and bi[0].place.owner =? p.owner and bi[0].place.parent =? p.parent and bi[0].place.projection =? p.projection and bi[0].place.selector =? p.selector {return i}
+        }
+        return -1
+    }
     let rp=idx[0].roots.ptr
     let key:ValueWord=fact_root_key(p)
     let mask:ValueWord=((rn - 1) >> 1) - 1
@@ -150,7 +160,17 @@ fact_binding_ref=(@s:FactState p:PlaceIdentity):>int64=>$unsafe {
 fact_binding=(s:FactState p:PlaceIdentity):>int64=>$unsafe {
     let idx=s.index.ptr
     let rn:ValueWord=idx[0].roots.length
-    if rn =? 0 {return -1}
+    if rn =? 0 {
+        let bn:ValueWord=s.bindings.length
+        if bn =? 0 {return -1}
+        let bp=s.bindings.ptr
+        let decl=p.declaration
+        loop i in [ValueWord(0)..bn) {
+            let bi=bp + i
+            if bi[0].place.declaration =? decl and bi[0].place.root =? p.root and bi[0].place.owner =? p.owner and bi[0].place.parent =? p.parent and bi[0].place.projection =? p.projection and bi[0].place.selector =? p.selector {return i}
+        }
+        return -1
+    }
     let rp=idx[0].roots.ptr
     let key:ValueWord=fact_root_key(p)
     let mask:ValueWord=((rn - 1) >> 1) - 1

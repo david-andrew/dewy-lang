@@ -798,7 +798,8 @@ x_encode_begin=(est:XWord=64):>void=>$unsafe {
     if h =? (uint64(0) as ptr<XWord>) {h=(x_code as ptr<ptr<XWord>>)[0]}
     if h =? (uint64(0) as ptr<XWord>) or h[0] not=? 1 or h[1] + need >? h[2] {
         let old=XWord(x_code[0].length)
-        x_code[0].reserve(old + need)
+        let target_cap:XWord=max(old + need 65536)
+        x_code[0].reserve(target_cap)
         h=(x_code as ptr<ptr<XWord>>)[0]
     }
     x_hdr=h

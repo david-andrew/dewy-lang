@@ -8,18 +8,22 @@ from p"util.jo" import (files pos_file)
 
 RationalTypeWord:type=int64<overflow='wrap'>
 
-bundled_word_rational_type=(t0:int64):>bool=>{
+bundled_word_rational_type=(t0:int64):>bool=>$unsafe {
     let t:RationalTypeWord=prune(t0)
-    if types[t].kind not=? 'struct_' {return false}
-    let si:RationalTypeWord=RationalTypeWord(types[t].st)
-    let d:RationalTypeWord=RationalTypeWord(structs[si].decl)
-    d not=? 0 and structs[si].name =? "RationalWord" and files[RationalTypeWord(pos_file(nodes[d].pos))].path =? "{lib_dir}/rational.dewy"
+    let ti=types.ptr + t
+    if ti[0].kind not=? 'struct_' {return false}
+    let si:RationalTypeWord=RationalTypeWord(ti[0].st)
+    let st=structs.ptr + si
+    let d:RationalTypeWord=RationalTypeWord(st[0].decl)
+    d not=? 0 and st[0].name =? "RationalWord" and files.ptr[RationalTypeWord(pos_file(nodes.ptr[d].pos))].path =? "{lib_dir}/rational.dewy"
 }
 
-bundled_rational_type=(t0:int64):>bool=>{
+bundled_rational_type=(t0:int64):>bool=>$unsafe {
     let t:RationalTypeWord=prune(t0)
-    if types[t].kind not=? 'struct_' {return false}
-    let si:RationalTypeWord=RationalTypeWord(types[t].st)
-    let d:RationalTypeWord=RationalTypeWord(structs[si].decl)
-    d not=? 0 and structs[si].name =? "Rational" and files[RationalTypeWord(pos_file(nodes[d].pos))].path =? "{lib_dir}/rational.dewy"
+    let ti=types.ptr + t
+    if ti[0].kind not=? 'struct_' {return false}
+    let si:RationalTypeWord=RationalTypeWord(ti[0].st)
+    let st=structs.ptr + si
+    let d:RationalTypeWord=RationalTypeWord(st[0].decl)
+    d not=? 0 and st[0].name =? "Rational" and files.ptr[RationalTypeWord(pos_file(nodes.ptr[d].pos))].path =? "{lib_dir}/rational.dewy"
 }

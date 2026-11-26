@@ -12,6 +12,152 @@ from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
 
 IndexWord:type=int64<overflow='wrap'>
 
+# Lightweight undo trail for zero-clone in-place rollback of diverging branches.
+FactCheckpoint:type=[
+    ids_len:int64
+    bin_len:int64
+    proj_len:int64
+    diff_len:int64
+    cond_len:int64
+    bnd_top:int64
+    bin_top:int64
+    diff_top:int64
+    diff_a_mask:int64
+    diff_b_mask:int64
+    proj_base_mask:int64
+    cmp_mask:int64
+    has_roots:bool
+    full:bool
+]
+let ft_active:IndexWord=0
+let ft_bnd_slot:array<int32>=[]
+let ft_bnd_old:array<FactBound>=[]
+let ft_bin_idx:array<int32>=[]
+let ft_bin_old:array<FactBinding>=[]
+let ft_diff_idx:array<int32>=[]
+let ft_diff_old:array<FactDifference>=[]
+
+ft_is_active=():>bool=>ft_active >? 0
+ft_depth=():>IndexWord=>ft_active
+ft_record_bound=(slot:IndexWord old:FactBound):>void=>{
+    ft_bnd_slot.push(int32<overflow='wrap'>(slot))
+    ft_bnd_old.push(old)
+}
+ft_record_bind=(idx:IndexWord old:FactBinding):>void=>{
+    ft_bin_idx.push(int32<overflow='wrap'>(idx))
+    ft_bin_old.push(old)
+}
+ft_record_diff=(idx:IndexWord old:FactDifference):>void=>{
+    ft_diff_idx.push(int32<overflow='wrap'>(idx))
+    ft_diff_old.push(old)
+}
+ft_begin=(s:FactState):>FactCheckpoint=>$unsafe {
+    ft_active += 1
+    FactCheckpoint(
+        s.ids.length
+        s.bindings.length
+        s.projections.length
+        s.differences.length
+        s.conditional.length
+        ft_bnd_slot.length
+        ft_bin_idx.length
+        ft_diff_idx.length
+        s.diff_a_mask
+        s.diff_b_mask
+        s.proj_base_mask
+        s.cmp_mask
+        s.index.ptr[0].roots.length not=? 0
+        s.full
+    )
+}
+ft_rollback=(@s:FactState cp:FactCheckpoint):>void=>$unsafe {
+    ft_active -= 1
+    s.live=true
+    s.full=cp.full
+    s.diff_a_mask=cp.diff_a_mask
+    s.diff_b_mask=cp.diff_b_mask
+    s.proj_base_mask=cp.proj_base_mask
+    s.cmp_mask=cp.cmp_mask
+    if s.ids.length >? cp.ids_len {
+        s.ids.truncate(cp.ids_len)
+        s.bounds.truncate(cp.ids_len)
+    }
+    if s.index.ptr[0].slots.length not=? 0 {s.index[0].slots=[]}
+    let bi:IndexWord=IndexWord(ft_bnd_slot.length) - 1
+    loop bi >=? cp.bnd_top {
+        let sl=IndexWord(ft_bnd_slot.ptr[bi])
+        if sl <? cp.ids_len {s.bounds[sl]=ft_bnd_old.ptr[bi]}
+        bi -= 1
+    }
+    if ft_bnd_slot.length >? cp.bnd_top {
+        ft_bnd_slot.truncate(cp.bnd_top)
+        ft_bnd_old.truncate(cp.bnd_top)
+    }
+    let bin_shrank=s.bindings.length >? cp.bin_len
+    if bin_shrank {s.bindings.truncate(cp.bin_len)}
+    if bin_shrank and s.index.ptr[0].roots.length not=? 0 {
+        if cp.bin_len >=? 16 {
+            let ridx=fact_index_sized(cp.bin_len * 2)
+            let bp=s.bindings.ptr
+            loop k in [IndexWord(0)..cp.bin_len) {fact_index_put(@ridx fact_root_key(bp[k].place) k)}
+            s.index[0].roots=ridx
+        } else {
+            s.index[0].roots=[]
+        }
+    } else if not cp.has_roots and s.index.ptr[0].roots.length not=? 0 {
+        s.index[0].roots=[]
+    }
+    let ni:IndexWord=IndexWord(ft_bin_idx.length) - 1
+    loop ni >=? cp.bin_top {
+        let idx=IndexWord(ft_bin_idx.ptr[ni])
+        if idx <? cp.bin_len {s.bindings[idx]=ft_bin_old.ptr[ni]}
+        ni -= 1
+    }
+    if ft_bin_idx.length >? cp.bin_top {
+        ft_bin_idx.truncate(cp.bin_top)
+        ft_bin_old.truncate(cp.bin_top)
+    }
+    if s.projections.length >? cp.proj_len {
+        s.projections.truncate(cp.proj_len)
+        if s.index.ptr[0].projection_next.length not=? 0 {
+            let projections=s.projections
+            s.projections=[]
+            s.proj_base_mask=0
+            s.index[0].projection_index=[]
+            s.index[0].projection_head=[]
+            s.index[0].projection_tail=[]
+            s.index[0].projection_next=[]
+            s.index[0].projection_value=[]
+            loop p in projections {fact_add_projection(@s p)}
+        }
+    }
+    if s.differences.length >? cp.diff_len {
+        s.differences.truncate(cp.diff_len)
+        if s.index.ptr[0].difference_next.length not=? 0 {
+            let differences=s.differences
+            s.differences=[]
+            s.diff_a_mask=0
+            s.diff_b_mask=0
+            s.index[0].difference_index=[]
+            s.index[0].difference_value=[]
+            s.index[0].difference_record=[]
+            s.index[0].difference_next=[]
+            loop row in differences {fact_add_difference(@s row)}
+        }
+    }
+    let di:IndexWord=IndexWord(ft_diff_idx.length) - 1
+    loop di >=? cp.diff_top {
+        let idx=IndexWord(ft_diff_idx.ptr[di])
+        if idx <? cp.diff_len {s.differences[idx]=ft_diff_old.ptr[di]}
+        di -= 1
+    }
+    if ft_diff_idx.length >? cp.diff_top {
+        ft_diff_idx.truncate(cp.diff_top)
+        ft_diff_old.truncate(cp.diff_top)
+    }
+    if s.conditional.length >? cp.cond_len {s.conditional.truncate(cp.cond_len)}
+}
+
 # (an empty index sized to take n entries without growing)
 fact_index_sized=(n:IndexWord):>array<int64>=>{
     let slots:IndexWord=8
@@ -215,8 +361,20 @@ fact_constant=(@s:FactState x:IndexWord at:IndexWord=0):>int64=>fact_new(@s Fact
 fact_bind=(@s:FactState p:PlaceIdentity v:IndexWord):>void=>$unsafe {
     if p.declaration =? 0 {return}
     let i:IndexWord=fact_binding_ref(@s p)
-    if i >=? 0 {s.bindings[i].value=v} else if s.bindings.length <? FACT_CAP {
-        fact_index_put(@s.index[0].roots fact_root_key(p) s.bindings.length)
+    if i >=? 0 {
+        if ft_active >? 0 {ft_record_bind(i s.bindings.ptr[i])}
+        s.bindings[i].value=v
+    } else if s.bindings.length <? FACT_CAP {
+        let idx:IndexWord=s.bindings.length
+        if s.index.ptr[0].roots.length not=? 0 {
+            fact_index_put(@s.index[0].roots fact_root_key(p) idx)
+        } else if idx + 1 >=? 16 {
+            let ridx=fact_index_sized((idx + 1) * 2)
+            let bp=s.bindings.ptr
+            loop k in [IndexWord(0)..idx) {fact_index_put(@ridx fact_root_key(bp[k].place) k)}
+            fact_index_put(@ridx fact_root_key(p) idx)
+            s.index[0].roots=ridx
+        }
         s.bindings.push(FactBinding(p v))
     }
 }
@@ -225,14 +383,23 @@ fact_rebind=(@s:FactState p:PlaceIdentity v:IndexWord at:IndexWord prior:IndexWo
     if p.declaration =? 0 {return}
     let i:IndexWord=fact_binding_ref(@s p)
     if i >=? 0 {
+        if ft_active >? 0 {ft_record_bind(i s.bindings.ptr[i])}
         s.bindings[i].value=v
         if at not=? 0 {
             s.bindings[i].event=at
             s.bindings[i].prior=prior
         }
     } else if s.bindings.length <? FACT_CAP {
-        let idx=s.bindings.length
-        fact_index_put(@s.index[0].roots fact_root_key(p) idx)
+        let idx:IndexWord=s.bindings.length
+        if s.index.ptr[0].roots.length not=? 0 {
+            fact_index_put(@s.index[0].roots fact_root_key(p) idx)
+        } else if idx + 1 >=? 16 {
+            let ridx=fact_index_sized((idx + 1) * 2)
+            let bp=s.bindings.ptr
+            loop k in [IndexWord(0)..idx) {fact_index_put(@ridx fact_root_key(bp[k].place) k)}
+            fact_index_put(@ridx fact_root_key(p) idx)
+            s.index[0].roots=ridx
+        }
         if at not=? 0 {s.bindings.push(FactBinding(p v at prior))}
         else {s.bindings.push(FactBinding(p v))}
     }
@@ -252,6 +419,7 @@ fact_set_bound=(@s:FactState v:IndexWord b0:FactBound exact:bool=false):>void=>$
         b.nz=true
     }
     if s.bounds.ptr[i] =? b {return}
+    if ft_active >? 0 {ft_record_bound(i s.bounds.ptr[i])}
     s.bounds[i]=b
 }
 

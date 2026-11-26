@@ -14,7 +14,7 @@ from p"facts_projection_queries.dewy" import (fact_projection_origin)
 from p"facts_lifecycle.dewy" import (fact_scope_exit)
 from p"facts_forgets.dewy" import (fact_drop_forget fact_drop_statement)
 from p"ownership.jo" import (ownership_fact_cleanup)
-from p"facts_joins.dewy" import (fact_join fact_projection_value)
+from p"facts_joins.dewy" import (fact_join fact_join_into fact_projection_value)
 from p"facts_summaries.dewy" import (fact_summary_payload)
 from p"proofs.jo" import (ResultEvidence)
 from p"proof_ops.dewy" import (result_activate)
@@ -45,12 +45,14 @@ fact_cond_out=(n:ConditionWord @state:FactState @other:FactState need_state:bool
             let other_b=FactState(live=false)
             let mb=fact_cond_out(ConditionWord(nodes.ptr[n].b) @state @other_b need_state true sense)
             let reason=if a_cont_live and a_sc_live {ma.reason} else {mb.reason}
-            let joined=fact_join(other other_b n)
             let want_bit:ConditionWord=if sense {2} else {1}
-            if fact_either_wanted & want_bit not=? 0 and a_sc_live and other_b.live and ma.value not=? 0 and mb.value not=? 0 {
+            if fact_speculating =? 0 and fact_either_wanted & want_bit not=? 0 and a_sc_live and other_b.live and ma.value not=? 0 and mb.value not=? 0 {
+                let joined=fact_join(other other_b n)
                 fact_either(@joined ma.value @other (not sense) mb.value @other_b (not sense))
+                other=joined
+            } else {
+                fact_join_into(@other @other_b n)
             }
-            other=joined
             return FactCondMeta(reason 0)
         }
         let sc_a=FactState(live=false)
@@ -66,12 +68,15 @@ fact_cond_out=(n:ConditionWord @state:FactState @other:FactState need_state:bool
         let mb=fact_cond_out(ConditionWord(nodes.ptr[n].b) @state @sc_b need_other true (not sense))
         let reason=if a_sc_live and a_cont_live {ma.reason} else {mb.reason}
         if need_other {other=state}
-        let joined=fact_join(sc_a sc_b n)
         let want_bit:ConditionWord=if sense {1} else {2}
-        if fact_either_wanted & want_bit not=? 0 and a_sc_live and sc_b.live and ma.value not=? 0 and mb.value not=? 0 {
+        if fact_speculating =? 0 and fact_either_wanted & want_bit not=? 0 and a_sc_live and sc_b.live and ma.value not=? 0 and mb.value not=? 0 {
+            let joined=fact_join(sc_a sc_b n)
             fact_either(@joined ma.value @sc_a sense mb.value @sc_b sense)
+            state=joined
+        } else {
+            fact_join_into(@sc_a @sc_b n)
+            state=sc_a
         }
-        state=joined
         return FactCondMeta(reason 0)
     }
     if fact_condition_block(n) {

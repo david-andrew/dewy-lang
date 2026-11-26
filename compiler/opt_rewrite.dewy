@@ -13,6 +13,7 @@ from p"opt_workspace.dewy" import (
     opt_use_span_count opt_use_values opt_working fl_cache fl_sid fl_next_sid fl_blk_start fl_blk_kind
 )
 from p"opt_cleanup.dewy" import (oc_defines oc_extreme_select oc_has_use oc_if_select oc_negate oc_pure oc_retargetable oc_sole_slot oc_tag oc_vtype opt_cleanup opt_cleanup_ir)
+from p"ir_operands.dewy" import (ba_no_loops_fn)
 
 # Word arithmetic preserves Jo overflow; IR IDs and bounded cursors are fixed width.
 OptWord:type=int64<overflow='wrap'>
@@ -2362,6 +2363,7 @@ opt_fast_straight=():>void=>$unsafe {
         b_ins-=1
     }
     # Pass 4: compaction + mov retargeting (skipped if nothing to compact or retarget).
+    ba_no_loops_fn=opt_ir[0].fn_index
     if not any_nop and not any_mov {
         if w_ins >? input {__set_len(opt_ir[0].code (OptWord(w_ins as int64) - OptWord(input as int64)) // size_of<Ins>)} else {opt_ir[0].code.clear()}
         return

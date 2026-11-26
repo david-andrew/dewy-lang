@@ -145,10 +145,15 @@ x64_line_table=():>array<uint8>=>$unsafe {
     # borrow it for this walk; source filtering only shortens the final prefix.
     let ents:array<int64>=fill(NWord(0) nc * 3 // 2)
     let entries=ents.ptr
+    let has_ir_lines=dw_inputs[0].ir_lines not=? (uint64(0) as ptr<array<int64>>)
+    if has_ir_lines {dw_inputs[0].host[0].ir_line(0);}
+    let ir_lines_p=if has_ir_lines {dw_inputs[0].ir_lines[0].ptr} else {uint64(0) as ptr<int64>}
+    let ir_lines_n:NWord=if has_ir_lines {NWord(dw_inputs[0].ir_lines[0].length)} else {0}
     let ne:NWord=0
     let k:NWord=0
     loop k <? nc {
-        let f=dw_pos_file(positions[calls[k + 1]])
+        let pos_id=calls[k + 1]
+        let f=dw_pos_file(positions[pos_id])
         if f <? 0 or f >=? nf {
             k += 2
             continue
@@ -162,7 +167,7 @@ x64_line_table=():>array<uint8>=>$unsafe {
         }
         entries[ne]=calls[k]
         entries[ne + 1]=file_index[f]
-        entries[ne + 2]=dw_inputs[0].host[0].ir_line(calls[k + 1])
+        entries[ne + 2]=if not has_ir_lines {dw_inputs[0].host[0].ir_line(pos_id)} else if pos_id >? 0 and pos_id <? ir_lines_n {ir_lines_p[pos_id]} else {0}
         ne += 3
         k += 2
     }

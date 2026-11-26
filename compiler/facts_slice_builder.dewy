@@ -2,7 +2,6 @@ $runtime_checks
 from p"ast.jo" import (nodes)
 from p"checker_tokens.dewy" import (Tok)
 from p"effect_types.dewy" import (PlaceIdentity)
-from p"facts.jo" import (fact_mark_flags fact_mark_gen fact_mark_head fact_mark_stamp fact_mark_touched)
 from p"facts_slice_prep.dewy" import (fact_slice_prepare_fast facts_slice_marks_begin)
 
 SliceWord:type=int64<overflow='wrap'>
@@ -22,16 +21,7 @@ fact_root_key=(p:PlaceIdentity):>SliceWord=>{
     (SliceWord(p.declaration) << 3) | tag
 }
 fact_mark_begin=():>void=>{
-    let gen=@fact_mark_gen
-    if fact_mark_stamp.length <? nodes.length {
-        fact_mark_stamp=fill(0 SliceWord(nodes.length) * 2 + 64)
-        fact_mark_flags=fill(0 fact_mark_stamp.length)
-        fact_mark_head=fill(0 fact_mark_stamp.length)
-        gen=0
-    }
-    gen=SliceWord(gen) + 1
-    fact_mark_touched.clear()
-    facts_slice_marks_begin(fact_mark_gen)
+    facts_slice_marks_begin()
 }
 fact_slice_prepare=(f:SliceWord summary:bool=false):>void=>$unsafe {
     fact_slice_prepare_fast(f summary)

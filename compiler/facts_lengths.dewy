@@ -5,7 +5,7 @@ from p"check.jo" import (fns)
 from p"directives.jo" import (dir_assumed_bounds_any dir_name_assumed_bounds dir_scopes dir_scopes_gen dir_value)
 from p"facts.jo" import (FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_COPY FACT_ELEMENT_VALUE FactDifference FactProjection FactState fact_length_forced fact_length_gen fact_length_owner fact_length_owner_strict fact_length_strict_fns fact_owner fact_retry_owner)
 from p"facts_elements.dewy" import (fact_inventory)
-from p"facts_index_writes.dewy" import (fact_add_difference fact_add_projection fact_new fact_set_bound)
+from p"facts_index_writes.dewy" import (fact_add_difference fact_add_projection fact_new fact_set_bound ft_is_active ft_record_diff)
 from p"facts_projection_queries.dewy" import (fact_projection_find)
 from p"facts_row_queries.dewy" import (fact_incident fact_row_find)
 from p"facts_value_queries.dewy" import (fact_bound)
@@ -21,7 +21,10 @@ fact_difference=(@s:FactState a:LengthWord b:LengthWord limit:LengthWord at:Leng
     if a =? 0 or b =? 0 or a =? b {return}
     let i:LengthWord=fact_row_find(s a b)
     if i >=? 0 {
-        if limit <? s.differences[i].limit {s.differences[i]=FactDifference(a b limit at)}
+        if limit <? s.differences[i].limit {
+            if ft_is_active() {ft_record_diff(i s.differences[i])}
+            s.differences[i]=FactDifference(a b limit at)
+        }
         return
     }
     if s.differences.length <? 256 and max(0 fact_incident(s a)) <? cap and max(0 fact_incident(s b)) <? cap {fact_add_difference(@s FactDifference(a b limit at))}

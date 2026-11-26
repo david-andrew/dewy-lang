@@ -79,16 +79,17 @@ intrinsic_of=(name:CGWord):>CGWord=>$unsafe {
 }
 # A literal too wide for a word (a call the reader marked), possibly negated.
 cg_oversized=(a:CGWord):>bool=>$unsafe {
-    if cg_nodes[0][a].kind =? 'unary' and cg_nodes[0][a].op =? 59 {return cg_oversized(CGWord(cg_nodes[0][a].a))}
-    cg_nodes[0][a].kind =? 'call' and cg_nodes[0][a].aux2 =? -1
+    let nd=cg_nodes[0].ptr + a
+    if nd[0].kind =? 'unary' and nd[0].op =? 59 {return cg_oversized(CGWord(nd[0].a))}
+    nd[0].kind =? 'call' and nd[0].aux2 =? -1
 }
-cg_dewy=(pos:int64):>bool=>$unsafe {cg_files[0][pos >> 40].is_dewy}
+cg_dewy=(pos:int64):>bool=>$unsafe {cg_files[0].ptr[pos >> 40].is_dewy}
 # Does argument a take its type from its parameter: an unchecked Dewy literal (array,
 # map, set, record, conditional, comprehension), a lambda, `none`, a hole, `.v`, a
 # function named as a value, an oversized literal?
 # (out of ctx_dependent, which is hot)
 ctx_call_waits=(a:CGWord name:CGWord):>bool=>$unsafe {
-    if name <? call_waits_never.length and call_waits_never[name] {return false}
+    if name <? call_waits_never.length and call_waits_never.ptr[name] {return false}
     if not cg_dewy(cg_nodes[0].ptr[a].pos) {return false}
     call_waits_hook(a) not=? 0
 }
@@ -97,44 +98,49 @@ ctx_array_waits=(a:CGWord):>bool=>$unsafe {
     true
 }
 ctx_dependent_call=(a:CGWord):>bool=>$unsafe {
-    if cg_nodes[0][a].aux2 =? -1 {return true}
-    if cg_nodes[0][a].type =? 0 {
-        let callee_index=CGWord(cg_nodes[0][a].a)
-        let ck=cg_nodes[0][callee_index].kind
-        if cg_nodes[0][a].nlist =? 1 and ck =? 'ident' and CGWord(cg_nodes[0][callee_index].name) =? cg_set_name[0] {return true}
+    let nd=cg_nodes[0].ptr + a
+    if nd[0].aux2 =? -1 {return true}
+    if nd[0].type =? 0 {
+        let callee_index=CGWord(nd[0].a)
+        let cn=cg_nodes[0].ptr + callee_index
+        let ck=cn[0].kind
+        if nd[0].nlist =? 1 and ck =? 'ident' and CGWord(cn[0].name) =? cg_set_name[0] {return true}
         if ck =? 'dotname' {return true}
-        if ck =? 'ident' {return ctx_call_waits(a CGWord(cg_nodes[0][callee_index].name))}
+        if ck =? 'ident' {return ctx_call_waits(a CGWord(cn[0].name))}
     }
     false
 }
 ctx_dependent_array=(a:CGWord):>bool=>$unsafe {
-    let count=CGWord(cg_nodes[0][a].nlist)
-    if count =? 0 {return cg_nodes[0][a].b =? 0}
-    if cg_nodes[0][a].type =? 0 and (CGWord(cg_nodes[0][a].flags) & 128) =? 0 and cg_dewy(cg_nodes[0][a].pos) {return ctx_array_waits(a)}
-    let base=CGWord(cg_nodes[0][a].list)
+    let nd=cg_nodes[0].ptr + a
+    let count=CGWord(nd[0].nlist)
+    if count =? 0 {return nd[0].b =? 0}
+    if nd[0].type =? 0 and (CGWord(nd[0].flags) & 128) =? 0 and cg_dewy(nd[0].pos) {return ctx_array_waits(a)}
+    let base=CGWord(nd[0].list)
     let i:CGWord=0
     loop i <? count {
-        if ctx_dependent(CGWord(cg_lists[0][base + i])) {return true}
+        if ctx_dependent(CGWord(cg_lists[0].ptr[base + i])) {return true}
         i=i + 1
     }
     false
 }
 ctx_dependent=(a:CGWord):>bool=>$unsafe {
-    match cg_nodes[0].ptr[a].kind {
-        <'ident'|'field'|'typeapply'> => (CGWord(cg_nodes[0].ptr[a].flags) & 4096) not=? 0
-        <'call'> => ctx_dependent_call(a)
-        <'unary'> => cg_nodes[0].ptr[a].op =? 59 and cg_oversized(CGWord(cg_nodes[0].ptr[a].a))
-        <'dotname'> => cg_nodes[0].ptr[a].type =? 0
+    let nd=cg_nodes[0].ptr + a
+    match nd[0].kind {
+        <'ident'|'field'|'typeapply'> => (CGWord(nd[0].flags) & 4096) not=? 0
+        <'unary'> => nd[0].op =? 59 and cg_oversized(CGWord(nd[0].a))
+        <'dotname'> => nd[0].type =? 0
         <'lambda'|'none_lit'|'hole'|'record_lit'> => true
-        <'if_'|'match_'> => (CGWord(cg_nodes[0].ptr[a].flags) & 128) =? 0 and cg_dewy(cg_nodes[0].ptr[a].pos)
-        <'block'> => (CGWord(cg_nodes[0].ptr[a].flags) & 67108864) not=? 0 and (CGWord(cg_nodes[0].ptr[a].flags) & 128) =? 0
+        <'if_'|'match_'> => (CGWord(nd[0].flags) & 128) =? 0 and cg_dewy(nd[0].pos)
+        <'block'> => (CGWord(nd[0].flags) & 67108864) not=? 0 and (CGWord(nd[0].flags) & 128) =? 0
+        <'map_lit'> => nd[0].nlist =? 0 or (nd[0].type =? 0 and (CGWord(nd[0].flags) & 128) =? 0 and cg_dewy(nd[0].pos))
+        <'call'> => ctx_dependent_call(a)
         <'array'> => ctx_dependent_array(a)
-        <'map_lit'> => cg_nodes[0].ptr[a].nlist =? 0 or (cg_nodes[0].ptr[a].type =? 0 and (CGWord(cg_nodes[0].ptr[a].flags) & 128) =? 0 and cg_dewy(cg_nodes[0].ptr[a].pos))
         _ => false
     }
 }
 cg_unnamed=(a:CGWord):>CGWord=>$unsafe {
-    if cg_nodes[0].ptr[a].kind =? 'namedarg' {return CGWord(cg_nodes[0].ptr[a].a)}
+    let nd=cg_nodes[0].ptr + a
+    if nd[0].kind =? 'namedarg' {return CGWord(nd[0].a)}
     a
 }
 cg_order=(n:CGWord given:array<int64> final:array<int64>):>void=>$unsafe {cg_host[0].order(n given final)}
@@ -148,9 +154,11 @@ save_call_order=(n:CGWord given:array<int64> final:array<int64>):>void=>$unsafe 
         cg_order(n given final)
         return
     }
+    let gp=given.ptr
+    let fp=final.ptr
     let i:CGWord=0
     loop i <? count {
-        if cg_unnamed(given[i]) not=? final[i] {
+        if cg_unnamed(gp[i]) not=? fp[i] {
             cg_order(n given final)
             return
         }
@@ -168,18 +176,20 @@ check_mutable_arguments=(args:array<int64> mask:CGWord pos:CGWord):>void=>$unsaf
 # named `__dewy_make_set` or `set`; parameter 1 not named `k` or `value` (the interned
 # names, in that order). The host tests the library and the key type.
 map_float_key=(n:CGWord):>void=>$unsafe {
-    let d=CGWord(cg_fns[0].ptr[CGWord(cg_nodes[0].ptr[n].sym)].decl)
+    let np=cg_nodes[0].ptr
+    let d=CGWord(cg_fns[0].ptr[CGWord(np[n].sym)].decl)
     if d =? 0 {return}
-    let nd=CGWord(cg_nodes[0][d].nlist)
+    let dn=np + d
+    let nd=CGWord(dn[0].nlist)
     if nd <? 1 {return}
-    let nn=CGWord(cg_nodes[0].ptr[n].nlist)
+    let nn=CGWord(np[n].nlist)
     let names=cg_float_key_names[0].ptr
     if nn =? 1 {
-        let nm=CGWord(cg_nodes[0][d].name)
+        let nm=CGWord(dn[0].name)
         if nm not=? names[0] and nm not=? names[1] {return}
     } else {
         if nd <? 2 or nn <? 2 {return}
-        let p=CGWord(cg_nodes[0].ptr[CGWord(cg_lists[0].ptr[CGWord(cg_nodes[0][d].list) + 1])].name)
+        let p=CGWord(np[CGWord(cg_lists[0].ptr[CGWord(dn[0].list) + 1])].name)
         if p not=? names[2] and p not=? names[3] {return}
     }
     cg_host[0].float_key(n)
@@ -508,19 +518,27 @@ collect_named=(name:CGWord mod:CGWord @out:array<int64>):>void=>$unsafe {
             let f=fams[0].ptr + (e - 1)
             if f[0].mod =? mod and f[0].cur =? cur {
                 if f[0].gen =? gen {
-                    let decls=cl_in[0].named_decls
-                    let i=f[0].decls
-                    let stop=i + f[0].ndecls
-                    loop i <? stop {
-                        out.push(decls[0].ptr[i])
-                        i=i + 1
+                    let nd=CGWord(f[0].ndecls)
+                    if nd >? 0 {
+                        let start_d=CGWord(f[0].decls)
+                        if cap(out) <? nd or ((out.ptr as ptr<int64>) - 3)[0] not=? 1 {
+                            out=[]
+                            out.reserve(nd)
+                        }
+                        __set_len(out nd)
+                        let dst=out.ptr
+                        let src=cl_in[0].named_decls[0].ptr + start_d
+                        loop j in [0..nd) {dst[j]=src[j]}
                     }
-                    let hidden=cl_in[0].named_hidden
-                    i=f[0].hidden
-                    stop=i + f[0].nhidden
-                    loop i <? stop {
-                        cl_in[0].surface_hidden[0].push(hidden[0].ptr[i])
-                        i=i + 1
+                    let nh=CGWord(f[0].nhidden)
+                    if nh >? 0 {
+                        let hidden=cl_in[0].named_hidden
+                        let j:CGWord=CGWord(f[0].hidden)
+                        let stop:CGWord=j + nh
+                        loop j <? stop {
+                            cl_in[0].surface_hidden[0].push(hidden[0].ptr[j])
+                            j=j + 1
+                        }
                     }
                     return
                 }

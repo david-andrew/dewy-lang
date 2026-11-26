@@ -63,6 +63,7 @@ emit_function=():>void=>$unsafe {
     }
     if queue_emit {
         emit_queue.push(driver_state[0].ir[0])
+        driver_state[0].ir[0] = IrFn()
         emit_queue_rel.push(false)
         return
     }
@@ -137,6 +138,7 @@ release_pipeline=():>void=>$unsafe {
         driver_state[0].ir[0] = snap[k]
         if queue_emit {
             emit_queue.push(driver_state[0].ir[0])
+            driver_state[0].ir[0] = IrFn()
             emit_queue_rel.push(true)
             continue
         }

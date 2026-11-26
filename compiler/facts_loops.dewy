@@ -27,7 +27,7 @@ from p"facts_arith.dewy" import (fact_preread_local)
 from p"facts_routes.dewy" import (fact_read)
 from p"facts_changes.dewy" import (fact_changes)
 from p"facts_conditions.dewy" import (fact_cond_out fact_condition fact_condition_in fact_loop_stable_implications)
-from p"facts_joins.dewy" import (fact_field_node fact_hull fact_hull_type fact_join fact_join_grown fact_join_payload fact_known_none fact_projection_value)
+from p"facts_joins.dewy" import (fact_field_node fact_hull fact_hull_type fact_join fact_join_into fact_join_grown fact_join_payload fact_known_none fact_projection_value)
 from p"facts_pools.dewy" import (fact_pool_type)
 from p"facts_summaries.dewy" import (fact_summary_payload)
 from p"facts_text.dewy" import (fact_string_call)
@@ -230,7 +230,7 @@ fact_loop_header=(@entry:FactState back:FactState old:FactState at:LoopWord wide
     let in_place=entry.live
     if not in_place {
         s.bindings=[]
-        s.index[0].roots=[]
+        if s.index.ptr[0].roots.length not=? 0 {s.index[0].roots=[]}
     }
     let changed_h:array<int64>=[]
     let changed_v:array<int64>=[]
@@ -258,10 +258,14 @@ fact_loop_header=(@entry:FactState back:FactState old:FactState at:LoopWord wide
             if in_place {
                 let prefix=s.bindings[0..bi)
                 s.bindings=prefix
-                let ridx=fact_index_sized(src_len)
-                let pp=prefix.ptr
-                loop k in [0..bi) {fact_index_put(@ridx fact_root_key(pp[k].place) k)}
-                s.index[0].roots=ridx
+                if bi >=? 16 {
+                    let ridx=fact_index_sized(src_len)
+                    let pp=prefix.ptr
+                    loop k in [0..bi) {fact_index_put(@ridx fact_root_key(pp[k].place) k)}
+                    s.index[0].roots=ridx
+                } else if s.index.ptr[0].roots.length not=? 0 {
+                    s.index[0].roots=[]
+                }
                 in_place=false
             }
             continue
@@ -850,7 +854,7 @@ fact_loop_body=(n:LoopWord @body:FactState):>FactLoop=>$unsafe {
     fact_loops.push(FactLoop())
     fact_capture(LoopWord(nodes.ptr[n].b) @body);
     let edges=fact_loops.pop()
-    edges.back=fact_join(edges.back body n)
+    fact_join_into(@edges.back @body n)
     edges
 }
 # A scanner may first read its array parameter in the condition. Seed only
@@ -910,17 +914,83 @@ fact_cursor_predicate=(n:LoopWord cursor:LoopWord @budget:LoopWord):>bool=>$unsa
     }
     true
 }
+# Check whether expression e mentions local symbol sym. Bounded by budget.
+fact_cursor_mentions=(e:LoopWord sym:LoopWord @budget:LoopWord):>bool=>$unsafe {
+    if e <=? 0 or budget <=? 0 {return true}
+    budget -= 1
+    let nd=nodes.ptr + e
+    let k=nd[0].kind
+    if k =? 'ident' {return nd[0].aux =? int32(1) and LoopWord(nd[0].sym) =? sym}
+    if k =? 'int_lit' or k =? 'bool_lit' {return false}
+    let ca=LoopWord(nd[0].a)
+    let cb=LoopWord(nd[0].b)
+    if k =? 'and_' or k =? 'or_' or k =? 'binary' or k =? 'index' {
+        return (ca not=? 0 and fact_cursor_mentions(ca sym @budget)) or (cb not=? 0 and fact_cursor_mentions(cb sym @budget))
+    }
+    if k =? 'not_' or k =? 'conv' {return ca not=? 0 and fact_cursor_mentions(ca sym @budget)}
+    if k =? 'call' {
+        loop i in [0..nkids(e)) {
+            if fact_cursor_mentions(kid(e i) sym @budget) {return true}
+        }
+        return false
+    }
+    true
+}
+# Single private-bool literal assignment `flag = true/false`, not touching cursor/limit or condition.
+fact_cursor_flag_assign=(stmt0:LoopWord cursor:LoopWord limit:LoopWord cond:LoopWord @budget:LoopWord):>LoopWord=>$unsafe {
+    let stmt=if nodes.ptr[stmt0].kind =? 'exprstmt' {LoopWord(nodes.ptr[stmt0].a)} else {stmt0}
+    if nodes.ptr[stmt].kind =? 'block' {
+        if nkids(stmt) not=? 1 {return 0}
+        stmt=kid(stmt 0)
+        if nodes.ptr[stmt].kind =? 'exprstmt' {stmt=LoopWord(nodes.ptr[stmt].a)}
+    }
+    if nodes.ptr[stmt].kind not=? 'assign' or nodes.ptr[stmt].aux not=? 0 or cx_token_values.ptr[LoopWord(nodes.ptr[stmt].op)] not=? 'assign' {return 0}
+    let target=LoopWord(nodes.ptr[stmt].a)
+    let rhs=LoopWord(nodes.ptr[stmt].b)
+    if not fact_cursor_local(target) or ntype(target) not=? T_BOOL or nodes.ptr[rhs].kind not=? 'bool_lit' {return 0}
+    let sym=LoopWord(nodes.ptr[target].sym)
+    if sym =? cursor or sym =? limit {return 0}
+    let mb:LoopWord=64
+    if fact_cursor_mentions(cond sym @mb) {return 0}
+    sym
+}
+fact_cursor_body_stmt=(stmt0:LoopWord cursor:LoopWord limit:LoopWord cond:LoopWord @budget:LoopWord):>bool=>$unsafe {
+    let stmt=if nodes.ptr[stmt0].kind =? 'exprstmt' {LoopWord(nodes.ptr[stmt0].a)} else {stmt0}
+    if fact_cursor_flag_assign(stmt cursor limit cond @budget) >? 0 {return true}
+    if nodes.ptr[stmt].kind =? 'if_' {
+        if not fact_cursor_predicate(LoopWord(nodes.ptr[stmt].a) cursor @budget) {return false}
+        if fact_cursor_flag_assign(LoopWord(nodes.ptr[stmt].b) cursor limit cond @budget) <=? 0 {return false}
+        let ec=LoopWord(nodes.ptr[stmt].c)
+        if ec not=? 0 and fact_cursor_flag_assign(ec cursor limit cond @budget) <=? 0 {return false}
+        return true
+    }
+    false
+}
+fact_cursor_collect_flag_assign=(stmt0:LoopWord @out:array<int64>):>void=>$unsafe {
+    let stmt=if nodes.ptr[stmt0].kind =? 'exprstmt' {LoopWord(nodes.ptr[stmt0].a)} else {stmt0}
+    if nodes.ptr[stmt].kind =? 'block' and nkids(stmt) =? 1 {
+        stmt=kid(stmt 0)
+        if nodes.ptr[stmt].kind =? 'exprstmt' {stmt=LoopWord(nodes.ptr[stmt].a)}
+    }
+    if nodes.ptr[stmt].kind =? 'assign' {
+        let sym=LoopWord(nodes.ptr[LoopWord(nodes.ptr[stmt].a)].sym)
+        if sym >? 0 and not out.contains(sym) {out.push(sym)}
+    }
+}
 # On the demanded while transfer only. The conjunction's first operand must
 # guard the very local that advances once on the sole continuing edge.
 fact_cursor_shape=(n:LoopWord):>bool=>$unsafe {
     let condition=LoopWord(nodes.ptr[n].a)
     let guard=LoopWord(nodes.ptr[condition].a)
     let body=LoopWord(nodes.ptr[n].b)
-    if nodes.ptr[guard].kind not=? 'binary' or nodes.ptr[guard].aux not=? 0 or cx_token_values.ptr[LoopWord(nodes.ptr[guard].op)] not=? 'lt' or nodes.ptr[body].kind not=? 'block' or nkids(body) not=? 1 {return false}
+    let nstmts=nkids(body)
+    if nodes.ptr[guard].kind not=? 'binary' or nodes.ptr[guard].aux not=? 0 or cx_token_values.ptr[LoopWord(nodes.ptr[guard].op)] not=? 'lt' or nodes.ptr[body].kind not=? 'block' or nstmts <? 1 or nstmts >? 5 {return false}
     let cursor=LoopWord(nodes.ptr[guard].a)
     let limit=LoopWord(nodes.ptr[guard].b)
     if not fact_cursor_local(cursor) or not fact_cursor_local(limit) or ntype(cursor) not=? T_INT or ntype(limit) not=? T_INT or nodes.ptr[cursor].sym =? nodes.ptr[limit].sym {return false}
-    let store=kid(body 0)
+    let csym=LoopWord(nodes.ptr[cursor].sym)
+    let lsym=LoopWord(nodes.ptr[limit].sym)
+    let store=kid(body nstmts - 1)
     let target=LoopWord(nodes.ptr[store].a)
     if nodes.ptr[store].kind not=? 'assign' or nodes.ptr[store].aux not=? 0 or not fact_preread_local(target) or nodes.ptr[target].sym not=? nodes.ptr[cursor].sym or ntype(target) not=? T_INT {return false}
     let rhs=LoopWord(nodes.ptr[store].b)
@@ -935,7 +1005,11 @@ fact_cursor_shape=(n:LoopWord):>bool=>$unsafe {
     } else if op not=? 'pluseq' {return false}
     if nodes.ptr[rhs].kind not=? 'int_lit' or nodes.ptr[rhs].ival not=? 1 or ntype(rhs) not=? T_INT {return false}
     let budget:LoopWord=64
-    fact_cursor_predicate(LoopWord(nodes.ptr[condition].b) LoopWord(nodes.ptr[cursor].sym) @budget)
+    if not fact_cursor_predicate(LoopWord(nodes.ptr[condition].b) csym @budget) {return false}
+    loop si in [0..nstmts - 1) {
+        if not fact_cursor_body_stmt(kid(body si) csym lsym condition @budget) {return false}
+    }
+    true
 }
 # O(predicate size + demanded effect rows) once per candidate. Bounds and
 # relations depend on this entry, so recompute them even on a shape cache hit.
@@ -952,22 +1026,48 @@ fact_cursor_header=(n:LoopWord entry:FactState @header:FactState):>bool=>$unsafe
     let x=fact_bound(entry start)
     let y=fact_bound(entry stop)
     if x.wide or y.wide {return false}
+    if fact_compare(entry 'lt' start stop) =? 0 {return true}
     # Preserve the exact entry if the old transfer can refute the first
     # trip (including a byte or flag known false only at the entry cursor).
     let outer=fact_speculating
     fact_speculating += 1
-    let first=fact_condition(LoopWord(nodes.ptr[n].a) entry)
+    let first_yes=entry
+    let dummy_s=FactState(live=false)
+    fact_cond_out(LoopWord(nodes.ptr[n].a) @first_yes @dummy_s true false true);
     fact_speculating=outer
     if fact_loop_exhausted {return false}
-    if not first.yes.live {return true}
+    if not first_yes.live {return true}
     # Every header is either entry or the result of adding one below stop.
     # Strict comparison makes this representable even when stop is INT64_MAX.
-    # The only write replaces this private scalar. All other bindings survive.
+    # The only writes replace this private cursor and any pure bool flags.
     let value=fact_new(@header FactBound(x.lo max(x.hi y.hi) reason='loop_' witness=n) FactTerm(type=T_INT))
     if value =? 0 {return false}
     fact_rebind(@header place value n start)
     fact_difference(@header start value 0 n)
     if fact_entails(entry start stop 0) {fact_difference(@header value stop 0 n)}
+    let body=LoopWord(nodes.ptr[n].b)
+    let nstmts=nkids(body)
+    if nstmts >? 1 {
+        let flags:array<int64>=[]
+        loop si in [0..nstmts - 1) {
+            let st=kid(body si)
+            if nodes.ptr[st].kind =? 'exprstmt' {st=LoopWord(nodes.ptr[st].a)}
+            if nodes.ptr[st].kind =? 'if_' {
+                fact_cursor_collect_flag_assign(LoopWord(nodes.ptr[st].b) @flags)
+                if nodes.ptr[st].c not=? 0 {fact_cursor_collect_flag_assign(LoopWord(nodes.ptr[st].c) @flags)}
+            } else {
+                fact_cursor_collect_flag_assign(st @flags)
+            }
+        }
+        loop fl in flags {
+            let fplace=PlaceIdentity('local' LoopWord(locals.ptr[fl].owner) fl)
+            let fi=fact_binding(entry fplace)
+            let fprior=if fi >=? 0 {entry.bindings.ptr[fi].value} else {0}
+            let fv=fact_new(@header fact_domain(T_BOOL 'loop_' n) FactTerm(type=T_BOOL))
+            if fv =? 0 {return false}
+            fact_rebind(@header fplace fv n fprior)
+        }
+    }
     true
 }
 fact_while=(n:LoopWord @s:FactState):>void=>$unsafe {
@@ -977,6 +1077,12 @@ fact_while=(n:LoopWord @s:FactState):>void=>$unsafe {
     let entry=s
     let header=s
     if nodes.ptr[LoopWord(nodes.ptr[n].a)].kind =? 'and_' and fact_cursor_header(n entry @header) {
+        if outer >? 0 and fact_loop_bound_demands(n).length =? 0 {
+            let exit_no=FactState(live=false)
+            fact_cond_out(LoopWord(nodes.ptr[n].a) @header @exit_no false true true);
+            s=exit_no
+            return
+        }
         s=fact_while_exit(n @entry @header)
         return
     }

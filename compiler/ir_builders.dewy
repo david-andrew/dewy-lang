@@ -40,8 +40,8 @@ ir_begin=(name:string fn_index:IRWord):>void=>$unsafe {
     if ir.kval.length >? 0 {ir.kval.clear()}
     ir.decl_pos=0
     if ir.dbg_locals.length >? 0 {ir.dbg_locals.clear()}
-    if cap(ir.code) <? 48 {ir.code.reserve(48)}
-    if cap(ir.vtypes) <? 48 {ir.vtypes.reserve(48)}
+    if cap(ir.code) <? 62 {ir.code.reserve(62)}
+    if cap(ir.vtypes) <? 88 {ir.vtypes.reserve(88)}
     kc_fn = IRWord(kc_fn) + 1
 }
 vreg=(ty:IRWord):>int64=>$unsafe {
