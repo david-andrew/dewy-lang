@@ -51,7 +51,8 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
 5. **Decided surface still to build** ([decisions.md](docs/design/decisions.md)):
    the rest of the time system; self-length refinements (D17); R-value units;
    examples needing `$runtime_checks`, 21 of 29 as of 11-06, toward zero.
-6. **In David's design rounds, build nothing:** D4 parallel (`select`, cancel
+6. **Generators (D45) are decided and being built** (Neon, `~/dev/tmp/generators-v1/brief.md`;
+   undecided edges are compile errors). **In David's other design rounds, build nothing:** D4 parallel (`select`, cancel
    scopes, metatag placement, `tasks`), D10 safety tags, D11 game APIs, D21
    packages. Remaining user-facing environment variables wait for their metatag
    names (inventory: 31 knobs, mostly `$window.*` under D11).
