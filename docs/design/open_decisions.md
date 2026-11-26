@@ -559,7 +559,7 @@ if r is? Declined printl"declined"        # true
 r ??<Declined> 0                          # not consumed: the failed rollback is forwarded with it
 ```
 
-The list's name is D42 Q4: round 10 recommends `ErrorList`, because two of three cold readers took `ErrorStack` for a chain of causes.
+The list's name is D42 Q4: round 10 recommends `ErrorList`. In a cold read all three readers read `ErrorList` correctly, and none read `ErrorStack` correctly (they took it for a call stack or a chain of causes). `TempRemoveFailed` and `finish` also read correctly 3 of 3 ([cold read](proposals/cleanup/cold-read-round10.md)).
 
 **Rec:** yes to (g), with explicit joining and without `errdefer`. **Reversible** before release: an error can become a warning later without breaking anything, but making a release fallible later breaks callers. **You give up:**
 - failures from releases, entirely;
@@ -568,7 +568,7 @@ The list's name is D42 Q4: round 10 recommends `ErrorList`, because two of three
 - returning an owner while another value's close is still pending;
 - automatic joining, which cost 12 lines across 13 programs.
 
-**Not done yet:** an independent review of rounds 9 and 10 together, cold reads of `ErrorList` and `TempRemoveFailed`, and a cost check on the flagship panel.
+**Not done yet:** an independent review of rounds 9 and 10 together, and a cost check on the flagship panel.
 
 [Round 10](proposals/cleanup/round10.md) · [round 9](proposals/cleanup/round9.md) · [round 9 review](proposals/cleanup/review-round9.md) · [cold read](proposals/cleanup/cold-read-round9.md) · [round 8 study](proposals/cleanup/round8.md)
 
