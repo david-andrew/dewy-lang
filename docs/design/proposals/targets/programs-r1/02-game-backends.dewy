@@ -1,0 +1,41 @@
+# 02: a game choosing its audio and graphics backends.
+#
+#   dewy run game.dewy                                   # this machine
+#   dewy build game.dewy --release --target wasm32 -o dist/game.html
+#   dewy build game.dewy --release --target aarch64-android -o dist/game.apk
+$supported_targets = ['linux' 'mac' 'windows' 'web' 'android' 'ios']
+
+# Audio: one module per platform API, chosen while compiling. Dead arms are not
+# checked, so each may import platform-only modules.
+if $target.os =? 'web' {
+    import p"audio/web_audio.dewy" as audio
+} else if $target.apple {
+    import p"audio/core_audio.dewy" as audio
+} else if $target.os =? 'windows' {
+    import p"audio/wasapi.dewy" as audio
+} else if $target.os =? 'android' {
+    import p"audio/aaudio.dewy" as audio
+} else {
+    import p"audio/alsa_pipewire.dewy" as audio      # Linux: libraries load at run time
+}
+
+# Graphics: the target says which GPU APIs exist; the runtime still falls back
+# to the CPU renderer when a driver is missing.
+if 'metal' in? $target.gpu {
+    import p"gfx/metal.dewy" as gfx
+} else if 'vulkan' in? $target.gpu {
+    import p"gfx/vulkan_then_gl.dewy" as gfx
+} else {
+    import p"gfx/webgl2.dewy" as gfx
+}
+
+main = () => {
+    let w = window('Dunes' 1280 720) or_throw
+    if $target.os =? 'web' { show_click_to_start(w) }    # browsers need a gesture before audio
+    if $target.mobile { enable_touch_controls(w) }
+    audio.open(48000) or_throw
+    gfx.init(w) or_throw
+}
+
+update = (dt:float64) => step_world(dt)
+draw = () => draw_world()

@@ -1,0 +1,28 @@
+# 09: a WASI command-line tool (CSV column sum), also built natively.
+#
+#   dewy build csvsum.dewy -o csvsum.wasm                           # WASI preview 1
+#   wasmtime --dir=. csvsum.wasm data.csv 3
+#   dewy build csvsum.dewy --target wasm32-wasi2 -o csvsum.wasm     # a WASI 0.2 component
+#   dewy build csvsum.dewy --target host -o csvsum                  # native, for local use
+$target = 'wasm32-wasi'
+$supported_targets = ['wasi' 'posix' 'windows']
+
+main = () => {
+    let argv = args
+    if argv.length <? 3 { eprintl"usage: csvsum FILE COLUMN"; exit(2) }
+    let column = to_int(argv[2]) ?? { eprintl"COLUMN must be a number"; exit(2) }
+    let text = p(argv[1]).read_text ?? {
+        if $target.os =? 'wasi' { eprintl"cannot read {argv[1]} (did you pass --dir to the runtime?)" }
+        else { eprintl"cannot read {argv[1]}" }
+        exit(1)
+    }
+    let total = 0.0
+    loop line in text.lines[1..] {
+        let cells = line.split(",")
+        total += to_float(cells.get(column) ?? "0") ?? 0.0
+    }
+    printl(total)
+}
+
+# Under WASI, `start_process` is `unsupported` (no processes), so a call to it
+# would fail to compile with: start_process is unsupported on wasm32-wasi.

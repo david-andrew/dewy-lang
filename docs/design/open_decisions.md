@@ -21,6 +21,7 @@
   - D42 Q3: one leaf per operation, families never returned bare; `FileError` becomes the file failures' parent;
   - D40 Q1, Q2, Q5, Q6: who handles a failed cleanup (reopened), cleanup timing, `defer`, and visible cleanup exits;
   - D38 Q1: snake_case naming style;
+  - D46 Q1: `host` and `host_tuned` replace a bare processor name (`x86_64` alone becomes an error);
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
@@ -35,7 +36,8 @@
   - D31 Q5: `Instant<width=64>`;
   - D33 Q1: a self-naming alias;
   - D37 Q1: `iso_basic` and `""`;
-  - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`).
+  - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
+  - D46 Q2–Q6: CPU level or core in the processor field; version floors glued on (`mac14`); `$supported_targets` patterns; chips as libraries; C output chosen by a `.c` output name.
 - **(c) Names only:**
   - D44 Q4, Q7: `task.cancel_request` / `task.CancelRequest`; `$no_discarded_failures`;
   - D42 Q4, Q5: `ErrorStack` or `ErrorList`; `$origin`, `$trace`, `$parts`, `$origin_at_caller`;
@@ -50,7 +52,8 @@
   - D35 Q1;
   - D36 Q1;
   - D37 Q2;
-  - D39 Q2: `stack` and `Ragged`.
+  - D39 Q2: `stack` and `Ragged`;
+  - D46 Q7: target words (`host_tuned`, `web`, `wasi`, `sim`, core names) and `$target` members.
 - **Unchanged:** D30 (function types without parentheses), D32 (time zone data license) and D21 (packages).
 
 ---
@@ -1168,6 +1171,203 @@ pause_menu = ():>void => {
 ```
 
 Dogfooded; names read cold. Full rules: `proposals/ui/round2-with-string-shapes.md` and `proposals/integration/amendments.md`.
+
+### D46. Compilation target names
+
+A target name is `processor[-system][-variant]`, with only the fields the others don't imply: `x86_64-linux`, `wasm32`, `cortex_m4f`, `aarch64-ios17-sim`. A name means the same thing on every machine. The compiler's current behaviour stays the default: `x86_64-linux` is a static executable with no C library linked in, and `wasm32` is the browser. These questions settle the surface; the semantics below them are taken.
+
+#### Q1 (a). `host` and `host_tuned` replace a bare processor
+
+```sh
+dewy build game.dewy --target host         # this machine at a portable CPU level: x86_64-linux here
+dewy build game.dewy --target host_tuned   # this machine and its exact CPU: znver4-linux here
+dewy build game.dewy --target x86_64       # error: x86_64 names only a processor: write x86_64-linux, or host
+```
+
+Should a bare general-purpose processor (`x86_64`, `aarch64`, `riscv64`) be an error with a fix-it, with `host` and `host_tuned` naming this machine? Your target list had `x86_64` meaning "this machine's system on that processor".
+
+- **Rec:** yes. The same `$target` line or script then builds the same thing on a Linux desktop and a Windows laptop, and `--target host` overrides a file's `$target = 'wasm32'` for a native dev loop. Processors that imply their system (`wasm32`, `cortex_m4f`) still stand alone. **Reversible:** a bare processor could later be allowed again as shorthand.
+- **Unblocks:** `$supported_targets` patterns (Q4), which need host-independent names.
+- **You give up:** `--target aarch64` as shorthand for `aarch64-linux` on a Linux machine.
+
+#### Q2 (b). The CPU level or core goes in the processor field
+
+```dewy
+$target = 'x86_64_v3-linux'     # Linux on x86-64 with AVX2, FMA and BMI2
+$target = 'cortex_a76-linux'    # Raspberry Pi 5
+$target = 'cortex_m4f'          # Cortex-M4 with its FPU, bare metal (STM32F4, nRF52840)
+```
+
+Should the processor field take an ISA (`x86_64`), an ISA level (`x86_64_v3`) or a core (`cortex_a76`, `cortex_m4f`)? The alternatives are a suffix (`x86_64-linux@v3`) or a separate `$target.cpu = 'v3'` setting.
+
+- **Rec:** the processor field. Only the target and the mode come from the command line, so a level outside the name could not vary per build (`--target x86_64_v3-windows` for a tuned download). It needs no new punctuation, and embedded users name cores. A level is a refinement: `x86_64_v3-linux` matches the pattern `x86_64-linux`. No `+feature` lists; a missing case gets a core name. **Reversible:** the spelling, before release.
+- **Unblocks:** tuned builds from scripts, and every microcontroller target.
+- **You give up:** a short way to add one feature (`+avx512f`) to a level.
+
+#### Q3 (b). Version floors glued to the field they qualify
+
+```dewy
+$target = 'aarch64-mac14'            # macOS 14 or later
+$target = 'aarch64-android33'        # Android API level 33 or later
+$target = 'x86_64-linux-glibc2.28'   # a dynamic glibc executable for glibc 2.28 or later
+```
+
+Should a version be glued to its word, as in `c89`, rather than a separate field (`aarch64-mac-14`) or a dotted one (`aarch64-mac.14`)? Versions are floors: `$supported_targets = ['aarch64-mac13']` accepts a `mac14` build, and `.os_version` reads the floor.
+
+- **Rec:** glued. It reads like "macOS 14". A written version pins the floor even when it equals today's default, since defaults rise between releases. **Reversible.**
+- **Unblocks:** Apple and Android builds that use newer APIs, and old-glibc builds.
+- **You give up:** `android33` means the API level (Android 13), as Android's own tools do, not "Android 33".
+
+#### Q4 (b). `$supported_targets` entries are patterns
+
+```dewy
+$supported_targets = ['posix' 'windows']          # desktops, phones and BSDs; not web or bare metal
+$supported_targets = ['linux' 'mac' 'web']        # any CPU level, OS floor or C library
+$supported_targets = ['cortex_m4f' 'cortex_m33f'] # the cores this driver's FPU code assumes
+```
+
+Should an entry be any of a name's fields (an omitted field matches anything, a refinement matches its pattern), or a family word (`posix`, `apple`, `bsd`, `mobile`, `hosted`)? Full names still work.
+
+- **Rec:** yes. The same set is the editor's target set: a facility typed `T | unsupported` shows plainly when every accepted target has it, and using one that some target lacks is a compile error naming that target. **Reversible.**
+- **Unblocks:** libraries that don't list forty names, and `| unsupported` in the editor.
+- **You give up:** nothing; exact names remain for a strict list.
+
+#### Q5 (b). Chips and boards are libraries, not target names
+
+```dewy
+$target = 'cortex_m0p'                     # the RP2040's core
+import p"@lib/boards/pico.dewy" as pico    # memory map, startup code, pins
+```
+
+Should the target be the core, with the chip or board in a library, rather than chip names as targets (`rp2040`, `esp32c3`)? `--target rp2040` is an error naming the core and the board library; a board library imported by a build for another core names the `$target` line to add.
+
+- **Rec:** libraries. A chip is a memory map, pins and a flasher; one core serves hundreds of chips, and the compiler keeps no chip table (it looks up `@lib/boards/NAME.dewy` only on the error path). **Reversible:** chip names could be added later as targets.
+- **Unblocks:** a board-library layout for embedded work.
+- **You give up:** TinyGo's one-flag `-target=pico`; Dewy needs the import as well.
+
+#### Q6 (b). C for a known target is chosen by the output name
+
+```sh
+dewy build lamp.dewy --target xtensa_lx7 -o lamp.c   # C for the ESP32-S3, every target fact decided
+dewy build crc.dewy --target c-posix -o crc.c         # portable C: the C compiler picks the CPU
+```
+
+Should an output name ending in `.c` mean "emit C for this target", as `.html` already picks the web page? The alternative is a `$build.emit = 'c'` setting, which the command line could not set.
+
+- **Rec:** the output name. A processor with no native backend yet (Xtensa) builds only as C, and its error gives this fix-it. `c`, `c89` and `c-posix` stay targets for C whose CPU is chosen later. **Reversible.**
+- **Unblocks:** ESP32 and ESP32-S3, and console ports through their SDKs' C compilers.
+- **You give up:** setting C output in the file itself.
+
+#### Q7 (c). New target words and members
+
+```dewy
+$target = 'wasm32-wasi'                                   # a WASI command-line tool
+$target = 'aarch64-ios17-sim'                             # the iOS Simulator, iOS 17 floor
+if $target.posix and 'avx2' in? $target.features { ... }
+if $target.os =? 'mac' and $target.os_version >=? 14 { ... }
+```
+
+Use these names?
+
+- Whole names: `host`, `host_tuned`.
+- Words in a name: `web`, `wasi`, `wasi2`, `uefi`, `ios`, `android`, `freebsd`, `openbsd`, `netbsd`, `musl`, `glibc`, `sim`; levels `x86_64_v2/v3/v4`; cores such as `cortex_a76`, `cortex_m0p`, `cortex_m4f`, `cortex_m7d`, `riscv32_imc`, `xtensa_lx7`; GPU `spirv`, `metal`, `ptx_sm80`, `amdgpu_gfx1100`, `wgsl`.
+- Members: `$target.cpu`, `.features`, `.os_version`, `.libc`, `.simulator`, `.posix`, `.apple`, `.bsd`, `.mobile`, `.hosted`, `.pointer_bits`, `.endian`, `.gpu_apis`.
+
+- **Rec:** yes. Kept from today: `aarch64` (`arm64` gets a fix-it), `mac` (`macos` gets one), `c-posix`, `c89`, `wasm32`. **Reversible:** names are easy to change before release.
+- **Cold-read:** three fresh readers read every name correctly after two renames: `native` (read as "native code" or left unclear) became `host_tuned`, and `$target.gpu` (read as "is this a GPU build?") became `.gpu_apis`. Readers assumed `x86_64-linux` links glibc; it doesn't, and a static executable runs on every distribution.
+
+#### Other details
+
+- **Grammar.** `-` between fields, `_` inside one, a dot only inside a version. Fields go processor, system, variants; out of order is an error with the canonical spelling.
+- **Omitted fields.** A system is omitted only when the processor implies it: `wasm32` → `web`, microcontroller cores → `freestanding`, GPU words → their API, `c` → standard C only. Writing an implied field (`wasm32-web`, `cortex_m4f-freestanding`) is an error with a fix-it.
+- **Baselines.** `x86_64` is x86-64-v1, as today; vectorized loops already pick AVX2 at run time. `aarch64` is ARMv8.0; `aarch64-mac` implies `apple_m1`. Floors: macOS 11, iOS 15, Android API 24, Windows 10, glibc 2.28, Linux kernel 4.4.
+- **Linux and C.** `x86_64-linux` is static, with no C library linked in; a `$extern` library loads at its first call through the system's glibc loader, as today. `-musl` links musl statically so static C archives can be linked; `-glibc` makes an ordinary dynamic glibc executable. A C library that fails to load names those two variants. Other systems' C libraries are their system API and are never named.
+- **wasm.** `wasm32` is the browser, and its `.os` becomes `'web'` (it was `'none'`). `wasm32-wasi` is WASI preview 1, permanently; `wasm32-wasi2` is 0.2; `wasm32-freestanding` imports only the program's `$extern`s; `wasm64` is the browser with memory64.
+- **`c`.** `c` is portable C11 with only the standard library (`.os` `'none'`); `c89`, `c99`, `c23` pick the dialect; `c-posix`, `c-linux`, `c-windows`, `c-freestanding` add a system. On these, `.pointer_bits` and `.endian` are `none`.
+- **GPU.** GPU functions belong to the host program and use the APIs in `$target.gpu_apis`. Only a kernel-only build names a GPU target; `amdgpu` alone is an error, since each chip is its own ISA.
+- **Members.** `.arch` is the ISA family (`'arm'` for `armv7` and the Cortex-M cores); `.cpu` is the processor word as resolved; `.libc` is `'none'`, `'glibc'`, `'musl'` or `'system'`; `.gpu_apis` is the system's GPU APIs. Conditions fold on bare boolean members, numeric comparisons with literals, `'x' in? $target.features`, and `=? none`.
+- **Whole-name tests.** In a folded condition, `$target =? 'NAME'` is an error with a fix-it to the member test, since it would silently miss refinements (`x86_64_v3-linux` is not `=? 'x86_64-linux'`). `$target` as text is for messages.
+- **`| unsupported`.** A platform facility is `T | unsupported` until the target is known. Using it on a target without it is a compile error naming the target and the deciding fact; using it is the requirement, so there is no `require`. The editor's set is the module's `$supported_targets`, else the main file's `$target`, else this machine. `dewy check` checks once per pattern.
+- **Removed.** `riscv64-windows` (no such platform).
+
+#### Catalog
+
+| Name | What it is |
+|---|---|
+| `host`, `host_tuned` | this machine; with its exact CPU |
+| `x86_64-linux` | Linux PC or server: static, kernel ABI, C loaded at run time |
+| `x86_64_v3-linux` | the same with AVX2, FMA, BMI2 |
+| `znver2-linux` | Steam Deck, tuned |
+| `x86_64-linux-musl` | static with musl (Alpine, scratch images linking C archives) |
+| `x86_64-linux-glibc`, `x86_64-linux-glibc2.17` | dynamic glibc executable; for older distros |
+| `aarch64-linux` | 64-bit ARM Linux: Raspberry Pi 3/4/5 64-bit, Graviton, Ampere |
+| `cortex_a53-linux`, `cortex_a72-linux`, `cortex_a76-linux` | Raspberry Pi 3, 4, 5, tuned |
+| `neoverse_n1-linux` | Graviton 2, Ampere Altra |
+| `aarch64-linux-musl` | Alpine on ARM |
+| `armv7-linux`, `armv6-linux` | 32-bit Raspberry Pi OS (Pi 2/3/4; Zero and 1) |
+| `riscv64-linux`, `riscv64_rva23-linux` | RISC-V boards; with vectors |
+| `x86_64-windows`, `aarch64-windows`, `x86-windows` | Windows x64, on ARM, 32-bit |
+| `aarch64-mac`, `aarch64-mac14`, `x86_64-mac` | Apple silicon Mac; macOS 14 floor; Intel Mac |
+| `aarch64-ios`, `aarch64-ios17` | iPhone and iPad; iOS 17 floor |
+| `aarch64-ios-sim`, `x86_64-ios-sim` | iOS Simulator on Apple silicon; on Intel |
+| `aarch64-android`, `aarch64-android33`, `x86_64-android` | Android phone; API 33 floor; emulator and ChromeOS |
+| `x86_64-freebsd`, `aarch64-freebsd`, `x86_64-openbsd`, `x86_64-netbsd` | the BSDs |
+| `wasm32`, `wasm64` | browser; with memory64 |
+| `wasm32-wasi`, `wasm32-wasi2`, `wasm32-freestanding` | WASI preview 1; WASI 0.2; bare module |
+| `cortex_m0p` | RP2040, STM32G0 |
+| `cortex_m3` | STM32F1 |
+| `cortex_m4f` | STM32F4, nRF52840 |
+| `cortex_m7d` | STM32H7, Teensy 4 |
+| `cortex_m33f` | RP2350 (Arm cores), nRF5340 |
+| `riscv32_imc`, `riscv32_imac` | ESP32-C3; ESP32-C6 and RP2350 (RISC-V cores) |
+| `xtensa_lx6`, `xtensa_lx7` | ESP32; ESP32-S3 (C output) |
+| `x86_64-freestanding`, `aarch64-freestanding`, `riscv64-freestanding` | kernels and bare metal |
+| `x86_64-uefi`, `aarch64-uefi` | UEFI applications |
+| `spirv`, `metal`, `ptx_sm80`, `amdgpu_gfx1100`, `wgsl` | kernel-only GPU builds |
+| `c`, `c89`, `c-posix`, `c-linux`, `c-windows`, `c-freestanding` | C whose CPU a C compiler picks later |
+
+#### The whole design in one program
+
+```dewy
+# main.dewy: a game for desktops, phones and the web
+#   dewy run main.dewy                                 # this machine
+#   dewy build main.dewy --target x86_64_v3-windows -o dist/dunes.exe
+#   dewy build main.dewy --target aarch64-ios17 -o dist/Dunes.ipa
+#   dewy build main.dewy -o dist/index.html            # .html picks wasm32
+$supported_targets = ['linux' 'windows' 'aarch64-mac13' 'aarch64-ios16' 'android' 'web']
+$build.mode = 'release'
+
+import p"@lib/game/haptics.dewy" as haptics          # haptics.pulse: Pulse | unsupported off phones
+
+if $target.os =? 'web' {
+    import p"audio/web_audio.dewy" as audio
+} else if $target.apple {
+    import p"audio/core_audio.dewy" as audio
+} else if $target.os =? 'windows' {
+    import p"audio/wasapi.dewy" as audio
+} else {
+    import p"audio/linux_or_android.dewy" as audio   # Linux libraries load at run time
+}
+
+mix = (out:array<float32> a:array<float32> b:array<float32>):>void => {
+    if 'avx2' in? $target.features { mix_avx2(out a b); return }   # x86_64_v3 builds and host_tuned
+    loop i in [0..out.length) { out[i] = a[i] + b[i] }              # vectorized everywhere else
+}
+
+main = () => {
+    let w = window('Dunes' 1280 720) or_throw
+    if $target.os =? 'web' { show_click_to_start(w) }
+    if $target.mobile { enable_touch_controls(w) }
+    if $target.simulator { load_demo_save() }
+    audio.open(48000) or_throw
+}
+
+on_crash = () => {
+    if haptics.pulse isnt? unsupported { haptics.pulse(60ms) }     # folds: phones only
+}
+```
+
+Dogfooded (13 programs; three criteria at 4, all run-time features next to naming: CPU dispatch, C loading on musl, OS availability). Names cold-read. Full rules: [proposals/targets/round1.md](proposals/targets/round1.md).
 
 ---
 

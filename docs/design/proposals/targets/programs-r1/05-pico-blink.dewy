@@ -1,0 +1,22 @@
+# 05: RP2040 (Raspberry Pi Pico) blink.
+#
+#   dewy build blink.dewy -o blink.uf2        # drag onto the Pico's USB drive
+#
+# The Pico's chip, the RP2040, has Cortex-M0+ cores. Writing the chip instead:
+#   --target rp2040
+#   error: rp2040 is a chip, not a target: its core is cortex_m0p.
+#          Set $target = 'cortex_m0p' and import p"@lib/boards/pico.dewy".
+# Forgetting the target line:
+#   error: @lib/boards/pico.dewy supports cortex_m0p; this build is x86_64-linux.
+#          Add `$target = 'cortex_m0p'` to blink.dewy.
+$target = 'cortex_m0p'
+
+import p"@lib/boards/pico.dewy" as pico
+
+main = () => {
+    let led = pico.gpio(25).output
+    loop true {
+        led.toggle()
+        pico.sleep(500ms)
+    }
+}

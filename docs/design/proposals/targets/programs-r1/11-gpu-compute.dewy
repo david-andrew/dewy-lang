@@ -1,0 +1,36 @@
+# 11: GPU compute: GPU functions inside a normal program, and a kernel-only build.
+#
+# (a) The usual way. The program targets a CPU; its GPU functions run on whatever
+#     GPU API the system offers ($target.gpu), and on the CPU when there is none.
+#
+#   dewy build blur.dewy --release                          # Vulkan, then GL, on Linux
+#   dewy build blur.dewy --release --target aarch64-mac     # Metal
+#   dewy build blur.dewy --release --target wasm32 -o b.html  # WebGL 2
+$supported_targets = ['linux' 'mac' 'windows' 'web']
+
+blur_row = (src:array<float32> dst:array<float32> width:int32 id:int32):>void => {
+    if id <? 1 or id >=? width - 1 { return }
+    dst[id] = (src[id-1] + src[id] + src[id+1]) / 3.0
+}
+
+main = () => {
+    let pixels = gpu(load_gray(p"photo.png") or_throw)
+    let out = compute(@blur_row pixels)             # placement follows the data
+    save_gray(p"photo-blur.png" cpu(out)) or_throw
+    if $target.gpu.length =? 0 { eprintl"no GPU API on {$target}: ran on the CPU" }
+}
+
+# (b) A kernel-only build, for a host written in another language. Only GPU
+#     functions may be in such a file; the target names the GPU ISA.
+#
+#   dewy build saxpy.dewy --target spirv -o saxpy.spv           # Vulkan compute
+#   dewy build saxpy.dewy --target ptx_sm80 -o saxpy.ptx        # CUDA, Ampere
+#   dewy build saxpy.dewy --target metal -o saxpy.metal
+#   dewy build saxpy.dewy --target amdgpu -o x.hsaco
+#   error: amdgpu needs a chip: amdgpu_gfx1100 (RDNA 3), amdgpu_gfx90a (MI200), ...
+#
+# --- saxpy.dewy ---
+# $supported_targets = ['spirv' 'ptx' 'metal']
+# export saxpy = (a:float32 x:array<float32> y:array<float32> id:int32):>void => {
+#     if id <? y.length { y[id] = a * x[id] + y[id] }
+# }

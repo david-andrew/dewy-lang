@@ -1,0 +1,36 @@
+# 04: firmware for a Cortex-M4F board (STM32F411 "Black Pill").
+#
+#   dewy build sensor.dewy --release -o sensor.elf     # for a debugger
+#   dewy build sensor.dewy --release -o sensor.bin     # raw image for dfu-util / st-flash
+#
+# The target is the core. The board library supplies the memory map, the vector
+# table, clocks and pins; it declares `$supported_targets = ['cortex_m4f']`, so a
+# build for anything else stops at its import with a one-line fix-it.
+$target = 'cortex_m4f'
+$build.mode = 'release'
+$no_hidden_costs
+
+import p"@lib/boards/stm32f411.dewy" as board
+import p"@lib/drivers/bme280.dewy" as bme280
+
+Reading:type = [celsius:float32 pascal:float32]
+
+# A fixed ring in static memory: there is no heap on a freestanding target.
+log:array<Reading length =? 64> = fill(Reading[celsius=0.0 pascal=0.0] 64)
+head:int32 = 0
+
+main = () => {
+    board.clocks_100mhz()
+    let i2c = board.i2c1(sda=board.PB7 scl=board.PB6 hz=400000)
+    let sensor = bme280.open(i2c) ?? { board.led_blink_forever(100ms); return }
+    loop true {
+        let r = sensor.read                   # float32 math runs on the FPU: 'fpu' in? $target.features
+        log[head] = Reading[celsius=r.celsius pascal=r.pascal]
+        head = (head + 1) % 64
+        board.sleep_until_tick(1s)
+    }
+}
+
+# Same source, another core: change one line. The FPU-free core takes a
+# fixed-point path chosen by the driver itself:
+#   driver: if 'fpu' in? $target.features { ... float32 ... } else { ... fixed-point ... }

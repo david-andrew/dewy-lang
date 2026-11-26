@@ -1,0 +1,31 @@
+# 13: OS floors and the iOS simulator.
+#
+#   dewy build notes.dewy --target aarch64-mac14 -o Notes.app
+#   dewy build notes.dewy --target aarch64-ios17 -o Notes.ipa
+#   dewy build notes.dewy --target aarch64-ios17-sim -o Notes-sim.app   # the Simulator on an Apple-silicon Mac
+$supported_targets = ['aarch64-mac13' 'aarch64-ios16']   # floors: mac14, mac15 and ios17 builds match too
+
+import p"@lib/apple/observation.dewy" as observation       # observation.watch: Watch | unsupported below macOS 14 / iOS 17
+import p"@lib/apple/kvo.dewy" as kvo
+
+main = () => {
+    let store = open_notes() or_throw
+    # The facility carries its own floor, so the test is on the facility, not on
+    # version numbers. It folds: a mac14 build keeps only the first arm.
+    if observation.watch isnt? unsupported {
+        observation.watch(store)
+    } else {
+        kvo.watch(store)
+    }
+    if $target.simulator {
+        seed_demo_notes(store)                 # the Simulator has no real data
+    }
+}
+
+# Writing the floor out works too, when there is no facility to test:
+#   if $target.os =? 'mac' and $target.os_version >=? 14 { ... }
+#
+# Calling a facility above the build's floor:
+#   error: metal_fx needs macOS 13; this build's floor is 11 (raise it: --target aarch64-mac13)
+# Here the declared floors are mac13 and ios16, so the editor shows plain MetalFX
+# on the mac arm.

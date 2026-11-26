@@ -1,0 +1,31 @@
+# 12: a release build file that cross-compiles a game for six targets.
+# build.dewy, run with `dewy build.dewy` on any developer machine.
+#
+# It is an ordinary program: it runs on this machine and starts the compiler once
+# per target. The command line may set only the target and the mode, so each
+# build is fully described by one name.
+
+Release:type = [target:string out:string]
+
+releases:array<Release> = [
+    Release[target='x86_64-linux'       out='dist/linux-x64/dunes']
+    Release[target='aarch64-linux'      out='dist/linux-arm64/dunes']      # Raspberry Pi 4/5 64-bit, ARM servers
+    Release[target='x86_64-windows'     out='dist/windows-x64/dunes.exe']
+    Release[target='aarch64-mac'        out='dist/mac-arm64/dunes']
+    Release[target='x86_64-mac'         out='dist/mac-x64/dunes']
+    Release[target='wasm32'             out='dist/web/index.html']
+]
+
+main = () => {
+    loop r in releases {
+        printl"building {r.target}"
+        let status = run(p"/usr/bin/env" ['dewy' 'build' 'main.dewy' '--release' '--target' r.target '-o' r.out]) or_throw
+        if status not=? 0 { eprintl"{r.target} failed ({status})"; exit(status) }
+    }
+    # A tuned build for players with newer PCs, side by side with the portable one:
+    run(p"/usr/bin/env" ['dewy' 'build' 'main.dewy' '--release' '--target' 'x86_64_v3-windows' '-o' 'dist/windows-x64-v3/dunes.exe']) or_throw;
+}
+
+# main.dewy itself has no $target line; it declares where it runs:
+#   $supported_targets = ['linux' 'windows' 'mac' 'web']
+# so a typo or an unplanned target ('aarch64-android') fails at once, naming main.dewy.

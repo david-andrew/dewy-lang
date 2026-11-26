@@ -1,0 +1,25 @@
+# 06: ESP32-C3 blink, plus a driver shared with other RISC-V and Arm boards.
+#
+#   dewy build blink.dewy -o blink.bin        # then: esptool.py write_flash 0x0 blink.bin
+$target = 'riscv32_imc'                       # ESP32-C3: RV32IMC, no atomics, no FPU
+
+import p"@lib/boards/esp32c3_devkit.dewy" as board
+
+main = () => {
+    let led = board.gpio(8).output            # the DevKitM-1's RGB LED data pin
+    let t = 0
+    loop true {
+        led.set(t % 2 =? 0)
+        t += 1
+        board.sleep(250ms)
+    }
+}
+
+# --- @lib/drivers/ring_counter.dewy (a driver used by this and other boards) ---
+# $supported_targets = ['cortex_m0p' 'cortex_m4f' 'riscv32_imc' 'riscv32_imac']
+#
+# The C3 has no atomic instructions; its counter masks interrupts instead.
+# bump = (@n:Counter):>void => {
+#     if 'atomics' in? $target.features { n.value.add(1) }
+#     else { board.without_interrupts(() => n.value += 1) }
+# }

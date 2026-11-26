@@ -1,0 +1,36 @@
+# 10: C output, twice: for a chip without a native backend, and portable C.
+#
+# (a) ESP32-S3 (Xtensa LX7). Dewy has no Xtensa backend, so this target builds
+#     only as C, with every fact of the target decided (32-bit, little-endian,
+#     FPU, its pins via the board library):
+#
+#   dewy build lamp.dewy -o build/lamp.c          # then the vendor toolchain: idf.py build
+#   dewy build lamp.dewy -o lamp.bin
+#   error: there is no native backend for xtensa_lx7 yet: write C, -o NAME.c
+$target = 'xtensa_lx7'
+
+import p"@lib/boards/esp32s3_devkit.dewy" as board
+
+main = () => {
+    let strip = board.ws2812(pin=48 count=1)
+    let hue = 0.0
+    loop true {
+        strip.set(0 hsv(hue 1.0 0.3))
+        hue = (hue + 0.01) % 1.0
+        board.sleep(20ms)
+    }
+}
+
+# (b) Portable C for a library other people build with their own C compiler:
+#
+#   dewy build crc.dewy --target c-posix -o crc.c   # C11 + POSIX, any CPU
+#   dewy build crc.dewy --target c89 -o crc89.c     # strict C89
+#
+# --- crc.dewy ---
+# $supported_targets = ['c' 'posix' 'windows']
+# Word:type = if $target.pointer_bits =? none { uint64 }          # c: width unknown, use a fixed one
+#             else if $target.pointer_bits =? 64 { uint64 } else { uint32 }
+# export crc32 = (data:array<uint8>):>uint32 => ...
+#
+# A console port works like (a): its SDK's C compiler takes `-o game.c`, and the
+# platform library comes from the console maker under NDA.

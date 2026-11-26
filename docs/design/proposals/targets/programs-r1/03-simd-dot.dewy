@@ -1,0 +1,32 @@
+# 03: a SIMD fast path with a scalar fallback.
+#
+#   dewy build mix.dewy --release                             # x86_64-linux: SSE2 floor; plain loops still
+#                                                             #   get AVX2 at run time from the vectorizer
+#   dewy build mix.dewy --release --target x86_64_v3-linux    # AVX2 arm compiled, no run-time check
+#   dewy build mix.dewy --release --target native             # this CPU, whatever it has
+#   dewy build mix.dewy --release --target cortex_a76-linux   # Raspberry Pi 5: NEON + dotprod arm
+#   dewy build mix.dewy --release --target wasm32             # simd128 is in the wasm32 baseline
+
+# Ordinary loops: the compiler vectorizes them on every target. Nothing to gate.
+gain = (xs:array<float32> k:float32):>array<float32> => xs .* k
+
+# Hand-written kernels: the floor decides at compile time, and only the live arm
+# is checked, so each arm may call intrinsics that exist only there.
+dot_i8 = (a:array<int8> b:array<int8>):>int32 => {
+    if 'avx2' in? $target.features {
+        return dot_i8_avx2(a b)                # x86_64_v3 and up, or native on a modern PC
+    } else if 'dotprod' in? $target.features {
+        return dot_i8_sdot(a b)                # cortex_a76, neoverse_n1, apple_m1
+    } else if 'neon' in? $target.features {
+        return dot_i8_neon(a b)                # every aarch64 and armv7 target
+    } else if 'simd128' in? $target.features {
+        return dot_i8_wasm(a b)
+    }
+    dot_i8_scalar(a b)                         # x86_64 (v1), Cortex-M, riscv32, c
+}
+
+main = () => {
+    let a:array<int8> = fill(int8(3) 4096)
+    let b:array<int8> = fill(int8(2) 4096)
+    printl"{dot_i8(a b)} via {$target.cpu}"    # $target.cpu: 'x86_64_v3', 'cortex_a76', ...
+}

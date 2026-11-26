@@ -1,0 +1,33 @@
+# 08: a wasm app in the browser.
+#
+#   dewy build sketch.dewy -o site/sketch.html    # `.html` alone would pick wasm32; the file says it anyway
+#   dewy run sketch.dewy --target host            # the same program as a native window while developing
+$target = 'wasm32'
+$supported_targets = ['web' 'linux' 'mac' 'windows']
+
+Stroke:type = [points:array<vec2> color:vec4]
+strokes:array<Stroke> = []
+
+main = () => {
+    window('Sketch' 960 640) or_throw
+    if $target.os =? 'web' {
+        # page-only facilities: the query string and local storage
+        let saved = web.local_storage.get('strokes')
+        if saved is? string { strokes = decode_strokes(saved) }
+    } else {
+        let file = p"{data_dir('sketch') or_throw}/strokes.json"
+        if file.exists { strokes = decode_strokes(file.read_text or_throw) }
+    }
+}
+
+update = (dt:float64) => {
+    if mouse_down { extend_stroke(@strokes mouse_position) }
+}
+
+draw = () => {
+    clear(WHITE)
+    loop s in strokes { polyline(s.points s.color 3.0) }
+}
+
+# `web.local_storage` has type `Storage | unsupported`: on the native arms it is
+# `unsupported`, but those arms never name it, so nothing fails.

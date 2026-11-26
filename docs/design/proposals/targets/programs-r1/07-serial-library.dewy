@@ -1,0 +1,39 @@
+# 07: a library that declares its targets and uses platform facilities.
+# lib/serial/serial.dewy
+#
+# Patterns, not full names: every Linux, Apple desktop, BSD and Windows target
+# matches, at any CPU level or OS floor.
+$supported_targets = ['linux' 'mac' 'bsd' 'windows']
+
+Port:type = [handle:int64 name:string]
+SerialError:type = type of error & [message:string]
+
+if $target.os =? 'windows' {
+    $extern(name='CreateFileW' lib='kernel32')
+    create_file_w = (name:ptr<uint16> access:uint32 share:uint32 sec:ptr<uint8>? disposition:uint32 flags:uint32 template:ptr<uint8>?):>ptr<uint8>?
+    open_port = (name:string baud:int):>Port | SerialError => win_open(name baud)
+} else {
+    # Every remaining target is POSIX; its C library is loaded when first called
+    # (x86_64-linux) or is the system's own (mac, bsd).
+    $extern
+    open = (path:string flags:int32):>int32
+    open_port = (name:string baud:int):>Port | SerialError => posix_open(name baud)
+}
+
+# A program that imports this from a web build:
+#   $ dewy build game.dewy --target wasm32
+#   error: lib/serial/serial.dewy supports linux, mac, bsd, windows; this build is wasm32 (os web)
+#     --> game.dewy:3  import p"@lib/serial/serial.dewy"
+#
+# In the editor, this module's set has no web or bare-metal target, so
+# `os.env` shows as plain `dict<string string>`. A module that adds 'web' to its
+# list sees `dict<string string> | unsupported`, and an unguarded use is an error
+# naming wasm32.
+
+# --- a module that wants the web too: lib/config/config.dewy ---
+# $supported_targets = ['posix' 'windows' 'web']
+#
+# config_path = ():>Path | unsupported => {
+#     if $target.os =? 'web' { return unsupported }   # browsers have no files; callers use local storage
+#     p"{config_dir('game') or_throw}/settings.json"
+# }

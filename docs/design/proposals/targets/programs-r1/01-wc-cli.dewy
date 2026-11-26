@@ -1,0 +1,33 @@
+# 01: a word-count CLI built for Linux, macOS and Windows.
+#
+#   dewy build wc.dewy --release --target x86_64-linux   -o dist/linux/wc
+#   dewy build wc.dewy --release --target aarch64-mac    -o dist/mac/wc
+#   dewy build wc.dewy --release --target x86_64-windows -o dist/win/wc.exe
+#   dewy build wc.dewy --release --target x86_64-linux-musl -o dist/alpine/wc   # (not needed: no C is called)
+#
+# No `$target` line: plain `dewy wc.dewy` builds for this machine. The file says
+# where it may run; any other target is an error naming this list.
+$supported_targets = ['linux' 'mac' 'windows']
+
+Counts:type = [lines:int words:int bytes:int]
+
+count = (text:string):>Counts => {
+    let words = 0
+    loop line in text.lines { words += line.split.length }
+    Counts[lines=text.lines.length words bytes=text.length]
+}
+
+main = () => {
+    let argv = args
+    if argv.length <? 2 { eprintl"usage: wc FILE..."; return }
+    # Windows shells pass `*.txt` through unexpanded; Unix shells expand it
+    let paths = if $target.os =? 'windows' { expand_globs(argv[1..]) } else { argv[1..] }
+    let total = Counts[lines=0 words=0 bytes=0]
+    loop path in paths {
+        let text = p(path).read_text ?? { eprintl"wc: cannot read {path}"; continue }
+        let c = count(text)
+        printl"{c.lines} {c.words} {c.bytes} {path}"
+        total = Counts[lines=total.lines+c.lines words=total.words+c.words bytes=total.bytes+c.bytes]
+    }
+    printl"{total.lines} {total.words} {total.bytes} total"
+}
