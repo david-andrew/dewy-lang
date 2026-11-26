@@ -366,7 +366,7 @@ class Cond(Expr):
         return f'(if {render(self.test)} {render(self.then, typed)} else {render(self.other, typed)})'
 
     def eval(self, m, env):
-        return m.eval(self.then if m.eval(self.test, env) else self.other, env)
+        return m.eval(self.then if m.eval(self.test, env) else self.other, env, m.expected)
 
 
 @dataclass(frozen=True)
@@ -384,8 +384,8 @@ class MatchLit(Expr):
         subject = m.eval(self.subject, env)
         for key, value in self.arms:
             if key.value == subject:
-                return m.eval(value, env)
-        return m.eval(self.default, env)
+                return m.eval(value, env, m.expected)
+        return m.eval(self.default, env, m.expected)
 
 
 @dataclass(frozen=True)
@@ -405,8 +405,8 @@ class MatchOpt(Expr):
     def eval(self, m, env):
         value = m.eval(self.subject, env)
         if value is None:
-            return m.eval(self.absent, env)
-        return m.eval(self.some, Scope({self.bind: copy.deepcopy(value)}, env))
+            return m.eval(self.absent, env, m.expected)
+        return m.eval(self.some, Scope({self.bind: copy.deepcopy(value)}, env), m.expected)
 
 
 @dataclass(frozen=True)
@@ -424,7 +424,7 @@ class MatchUnion(Expr):
         value = m.eval(self.subject, env)
         for name, ty, body in self.arms:
             if member(value, ty):
-                return m.eval(body, Scope({name: copy.deepcopy(value)}, env))
+                return m.eval(body, Scope({name: copy.deepcopy(value)}, env), m.expected)
         raise InvalidProgram('non-exhaustive union match')
 
 
@@ -456,6 +456,36 @@ class Is(Expr):
         return found != self.negate
 
 
+def inferred_type(expr):
+    """Type of a generated value without a destination. The generator's integer
+    type also describes the operands, which can differ from the result type."""
+    if isinstance(expr, (ArrayLit, MultiLit)):
+        return Ty('array', (expr.element(),))
+    if expr.ty != I:
+        return expr.ty
+    if isinstance(expr, Bin):
+        if expr.op == '??':
+            return inferred_type(expr.right)
+        return INT
+    if isinstance(expr, Unary):
+        return INT
+    if isinstance(expr, Cond):
+        arms = (expr.then, expr.other)
+    elif isinstance(expr, MatchLit):
+        arms = (expr.default, *(body for _, body in expr.arms))
+    elif isinstance(expr, MatchOpt):
+        arms = (expr.some, expr.absent)
+    elif isinstance(expr, MatchUnion):
+        arms = (body for _, _, body in expr.arms)
+    else:
+        return expr.ty
+    return INT if any(inferred_type(arm) == INT for arm in arms) else expr.ty
+
+
+def collected_values(m, env, items, element):
+    return [copy.deepcopy(store(m.eval(item, env, element), element)) for item in items]
+
+
 @dataclass(frozen=True)
 class ArrayLit(Expr):
     ty: Ty
@@ -465,7 +495,11 @@ class ArrayLit(Expr):
         return '[' + ' '.join(render(x, typed) for x in self.items) + ']'
 
     def eval(self, m, env):
-        return [copy.deepcopy(store(m.eval(x, env), x.ty)) for x in self.items]
+        element = m.expected.args[0] if m.expected and m.expected.kind == 'array' else self.element()
+        return collected_values(m, env, self.items, element)
+
+    def element(self):
+        return inferred_type(self.items[0]) if self.items else self.ty.args[0]
 
 
 @dataclass(frozen=True)
@@ -478,8 +512,7 @@ class MultiBlock(Expr):
         return '{' + ' '.join(render(x, typed) for x in self.items) + '}'
 
     def eval(self, m, env):
-        # The enclosing unannotated collector can infer int for exact results.
-        return [copy.deepcopy(m.eval(x, env)) for x in self.items]
+        return collected_values(m, env, self.items, m.expected)
 
 
 @dataclass(frozen=True)
@@ -498,7 +531,7 @@ class MultiIf(Expr):
 
     def eval(self, m, env):
         arm = self.then if m.eval(self.test, env) else (self.other or ())
-        return [copy.deepcopy(m.eval(x, env)) for x in arm]
+        return collected_values(m, env, arm, m.expected)
 
 
 @dataclass(frozen=True)
@@ -516,17 +549,16 @@ class MultiLit(Expr):
         first = self.items[0]
         while isinstance(first, (MultiBlock, MultiIf)):
             first = (first.items if isinstance(first, MultiBlock) else first.then or first.other or ())[0]
-        return INT if (first.ty == INT or isinstance(first, (Bin, Unary)) and first.ty in (I, U)) else first.ty
+        return inferred_type(first)
 
     def eval(self, m, env):
-        element = self.element()
+        element = m.expected.args[0] if m.expected and m.expected.kind == 'array' else self.element()
         out = []
         for x in self.items:
             if isinstance(x, (MultiBlock, MultiIf)):
-                for value in m.eval(x, env):
-                    out.append(copy.deepcopy(store(value, element)))
+                out.extend(m.eval(x, env, element))
             else:
-                out.append(copy.deepcopy(store(m.eval(x, env), element)))
+                out.append(copy.deepcopy(store(m.eval(x, env, element), element)))
         return out
 
 
@@ -608,8 +640,9 @@ class RecLit(Expr):
     def eval(self, m, env):
         # An anonymous literal without an expected type infers exact fields (LANGUAGE.md, records);
         # a binding of its declared shape checks them, in store().
-        types = dict(self.ty.args)
-        values = {n: copy.deepcopy(store(m.eval(e, env), types[n]) if self.ty.name else m.eval(e, env))
+        shape = self.ty if self.ty.name else m.expected
+        types = dict(shape.args) if shape and shape.kind == 'rec' else {}
+        values = {n: copy.deepcopy(store(m.eval(e, env, types[n]), types[n]) if n in types else m.eval(e, env))
                   for n, e in self.items}
         return Rec(self.ty.name, {n: values[n] for n, _ in self.ty.args})
 
@@ -626,7 +659,7 @@ class DictLit(Expr):
         result = {}
         for k, v in self.items:
             key = store(m.eval(k, env), self.ty.args[0])
-            result[key] = copy.deepcopy(store(m.eval(v, env), self.ty.args[1]))
+            result[key] = copy.deepcopy(store(m.eval(v, env, self.ty.args[1]), self.ty.args[1]))
         return result
 
 
@@ -697,7 +730,10 @@ class Call(Expr):
 
     def eval(self, m, env):
         target = env.get(self.callee, m) if self.closure else m.functions[self.callee]
-        return m.call(target, [m.eval(a, env) for a in self.args])
+        if len(self.args) != len(target.params):
+            raise InvalidProgram('arity')
+        arguments = [m.eval(a, env, param[1]) for a, param in zip(self.args, target.params)]
+        return m.call(target, arguments)
 
 
 @dataclass(frozen=True)
@@ -714,7 +750,7 @@ class Method(Expr):
 
     def eval(self, m, env):
         recv = m.eval(self.recv, env)
-        args = [store(m.eval(a, env), a.ty) for a in self.args]
+        args = [store(m.eval(a, env, a.ty), a.ty) for a in self.args]
         name = self.name
         if isinstance(recv, list):
             if name == 'push':
@@ -926,11 +962,11 @@ class Comp(Expr):
                 continue
             if self.key is not None:
                 key = store(m.eval(self.key, local), key_ty)
-                result[key] = copy.deepcopy(store(m.eval(self.value, local), value_ty))
+                result[key] = copy.deepcopy(store(m.eval(self.value, local, value_ty), value_ty))
             elif isinstance(result, DSet):
-                result.items.setdefault(store(m.eval(self.value, local), value_ty))
+                result.items.setdefault(store(m.eval(self.value, local, value_ty), value_ty))
             else:
-                result.append(copy.deepcopy(store(m.eval(self.value, local), value_ty)))
+                result.append(copy.deepcopy(store(m.eval(self.value, local, value_ty), value_ty)))
         return result
 
 
@@ -1334,6 +1370,8 @@ class Machine:
         self.output = []
         self.fuel = fuel
         self.depth = 0
+        self.expected = None  # contextual type of the expression being evaluated
+        self.result_type = None
         self.observed = {}
         self.probing = False  # a settling run: unfit conversions wrap and are recorded
         self.converted = {}   # conversion tag -> every evaluation fit
@@ -1343,9 +1381,13 @@ class Machine:
         if self.fuel < 0:
             raise InvalidProgram('fuel exhausted')
 
-    def eval(self, e, env):
+    def eval(self, e, env, expected=None):
         self.tick()
-        return e.eval(self, env)
+        previous, self.expected = self.expected, expected
+        try:
+            return e.eval(self, env)
+        finally:
+            self.expected = previous
 
     def place(self, e, env, store=False):
         if isinstance(e, Var):
@@ -1363,6 +1405,7 @@ class Machine:
         raise InvalidProgram('not a place')
 
     def call(self, target, arguments):
+        previous_result = self.result_type
         self.depth += 1
         if self.depth > 40:
             raise InvalidProgram('deep recursion')
@@ -1374,6 +1417,7 @@ class Machine:
                 scope = Scope({}, target.scope)
             else:
                 raise InvalidProgram('not callable')
+            self.result_type = target.result
             if len(params) != len(arguments):
                 raise InvalidProgram('arity')
             for (name, ty, mutable), value in zip(params, arguments):
@@ -1382,13 +1426,14 @@ class Machine:
                 scope.vars[name] = value if mutable else copy.deepcopy(store(value, ty))
             try:
                 if isinstance(target, FuncDef) and target.expression:
-                    return copy.deepcopy(store(self.eval(target.body[0].value, scope), target.result))
+                    return copy.deepcopy(store(self.eval(target.body[0].value, scope, target.result), target.result))
                 self.execute(target.body, scope)
                 return None
             except Returned as result:
                 return copy.deepcopy(store(result.value, target.result))
         finally:
             self.depth -= 1
+            self.result_type = previous_result
 
     def run(self, body):
         try:
@@ -1407,13 +1452,14 @@ class Machine:
         if isinstance(s, Let):
             if s.name in env.vars:
                 raise InvalidProgram('redefinition')
-            env.vars[s.name] = copy.deepcopy(store(self.eval(s.value, env), s.ty))
+            ty = s.ty if s.annotate else None
+            env.vars[s.name] = copy.deepcopy(store(self.eval(s.value, env, ty), ty))
         elif isinstance(s, Assign):
             place = self.place(s.target, env, store=not s.op)
             # (`x += f()` reads x before f runs, as `x + f()` does: a closure
             # sharing x does not change the value already read)
             old = place.get() if s.op else None
-            value = self.eval(s.value, env)
+            value = self.eval(s.value, env, s.target.ty)
             if s.op:
                 ty = s.target.ty
                 value = Bin(ty, s.op, Lit(ty, old), Lit(ty, value)).eval(self, env)
@@ -1436,7 +1482,7 @@ class Machine:
         elif isinstance(s, Jump):
             raise Jumped(s.word)
         elif isinstance(s, Return):
-            raise Returned(None if s.value is None else self.eval(s.value, env))
+            raise Returned(None if s.value is None else self.eval(s.value, env, self.result_type))
         elif isinstance(s, Unpack):
             s.run(self, env)
         elif isinstance(s, Assert):
@@ -3031,7 +3077,7 @@ def variant_outline(program: Program, r: random.Random) -> Program | None:
                                 # (a helper's declared result would narrow an anonymous literal's exact fields)
                                 or isinstance(x, RecLit) and not x.ty.name
                                 # (or an unannotated collector's inferred int elements)
-                                or isinstance(x, MultiLit) and x.element() == INT
+                                or isinstance(x, (ArrayLit, MultiLit)) and inferred_type(x) != x.ty
                                 for x in walk(n))):
                 candidates.append(n)
     r.shuffle(candidates)
