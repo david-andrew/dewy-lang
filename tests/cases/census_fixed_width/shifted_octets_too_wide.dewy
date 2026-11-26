@@ -1,0 +1,8 @@
+pack=(bytes:array<uint8 length=4>):>array<uint16 length=2> & no_effects=>{
+    let words:array<uint16 length=2>=[]
+    loop i in [0..2) {
+        words[i]=(bytes[2*i] as uint16)+((bytes[2*i+1] as uint16) << 9)
+    }
+    words
+}
+printl(pack([0 0 255 255]))

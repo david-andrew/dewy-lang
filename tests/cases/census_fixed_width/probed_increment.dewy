@@ -1,0 +1,7 @@
+advance=(steps:array<int64> at:int64):>int64 & no_effects=>{
+    if at <? 0 or at >=? steps.length return 0
+    let x=steps[at]
+    if x >=? int64.max return 0
+    return x+1
+}
+printl(advance([41 int64.max] 0) advance([41 int64.max] 1))

@@ -13,12 +13,13 @@ from p"exact.jo" import (exact_marks exact_measure_on exact_measure_sites exact_
 from p"exact_marks.dewy" import (exact_decide exact_decided exact_has_node exact_proved)
 from p"exact_check_hooks.dewy" import (exact_representation)
 from p"exact_count_bounds.dewy" import (exact_count_bound)
-from p"facts.jo" import (FactState fact_speculating fact_terms)
+from p"facts.jo" import (FACT_MEMBER FACT_VALUE FactState fact_speculating fact_terms)
 from p"facts_arith.dewy" import (fact_relational)
 from p"facts_compare.dewy" import (fact_compare fact_open_endpoint)
 from p"facts_index_proofs.dewy" import (positive_bound)
 from p"facts_index_writes.dewy" import (fact_constant fact_new fact_set_bound)
 from p"facts_joins.dewy" import (fact_host_finite)
+from p"facts_slice_prep.dewy" import (fact_slice_flags)
 from p"facts_lengths.dewy" import (fact_difference)
 from p"facts_value_queries.dewy" import (fact_bound)
 from p"facts_values.dewy" import (fact_domain fact_type fact_unmodeled)
@@ -81,6 +82,11 @@ exact_fits_relation=(@s:FactState value:TransferWord t:TransferWord):>bool=>$uns
 }
 
 exact_fact_store=(n:TransferWord value:TransferWord @s:FactState):>int64=>$unsafe {
+    # A whole-body probe can already have proved this store. A later slice
+    # can visit it for its operand's effects alone, with no result to check.
+    # Only reuse the proof when the plan explicitly dropped the value (one
+    # indexed lookup); an evaluated but unknown value still has to fit.
+    if value =? 0 and exact_proved(n) and fact_speculating =? 0 and fact_slice_flags(TransferWord(nodes.ptr[n].a)) & (FACT_MEMBER | FACT_VALUE) =? FACT_MEMBER {return value}
     if not s.live {
         if not exact_decided(n) {exact_decide(n true);}
         return value
