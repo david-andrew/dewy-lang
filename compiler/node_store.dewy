@@ -102,7 +102,8 @@ node_run=(@lists:array<int32> xs:array<int64>):>int64=>$unsafe {
         if cap(lists) <? need {lists.reserve(need)}
         __set_len(lists need)
         let src=xs.ptr
-        loop i in [0..count) {lists[start + i]=int32<overflow='wrap'>(src[i])}
+        let dst=lists.ptr + start
+        loop i in [0..count) {dst[i]=int32<overflow='wrap'>(src[i])}
     }
     start
 }
@@ -116,7 +117,8 @@ node_set_list=(@store:array<Node> @lists:array<int32> n:int64 xs:array<int64>)=>
         if cap(lists) <? need {lists.reserve(need)}
         __set_len(lists need)
         let src=xs.ptr
-        loop i in [0..count) {lists.ptr[start + i]=int32<overflow='wrap'>(src[i])}
+        let dst=lists.ptr + start
+        loop i in [0..count) {dst[i]=int32<overflow='wrap'>(src[i])}
     }
     store.ptr[n].list=int32<overflow='wrap'>(start)
     store.ptr[n].nlist=int32<overflow='wrap'>(count)

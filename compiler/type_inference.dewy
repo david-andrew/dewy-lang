@@ -113,7 +113,7 @@ tu_zonk_children=(t:TWord):>TWord=>$unsafe {
     }
     if k =? 'typeval' or k =? 'module' {return t}
     let c=tu_inputs[0].types[0].ptr[t]
-    c.flags = int32(TWord(c.flags) & ((TF_HAS_VAR | TF_LAID_OUT) xor -1))
+    c.flags = int32(TWord(c.flags) & 8)
     if c.elem not=? 0 {c.elem = int32(tu_zonk(TWord(c.elem)))}
     let args:array<int64>=[]
     loop i in [0..TWord(tu_inputs[0].types[0].ptr[t].nargs)) {args.push(tu_zonk(tu_targ(t  i)))}

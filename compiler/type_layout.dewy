@@ -209,12 +209,22 @@ tl_layout_body=(t0:LWord):>void=>$unsafe {
     let al:LWord=1
     let m=false
     let boxed=false
+    let agg=false
+    let vc_v:LWord=1
     if k =? 'quantity' or k =? 'refined' or k =? 'callable' or k =? 'secret' {
         let base=LWord(tl_inputs[0].types[0].ptr[t].elem)
         tl_layout(base)
-        tl_inputs[0].types[0][t].size = tl_inputs[0].types[0].ptr[base].size
-        tl_inputs[0].types[0][t].align = tl_inputs[0].types[0].ptr[base].align
-        tl_inputs[0].types[0][t].flags = tl_inputs[0].types[0].ptr[base].flags | (tl_inputs[0].types[0].ptr[t].flags & int32(TF_HAS_VAR))
+        let bp=tl_inputs[0].types[0].ptr + base
+        let tp=tl_inputs[0].types[0].ptr + t
+        tp[0].size = bp[0].size
+        tp[0].align = bp[0].align
+        let bf=LWord(bp[0].flags)
+        let keep=LWord(tp[0].flags) & (TF_HAS_VAR | 32)
+        if k =? 'refined' {
+            tp[0].flags = int32(keep | (bf & (TF_LAID_OUT | TF_MANAGED | TF_BOXED)))
+        } else {
+            tp[0].flags = int32(keep | (bf & ((TF_HAS_VAR | 32) xor -1)))
+        }
         return
     }
     if k =? 'array' or k =? 'ptr' or k =? 'null_' or k =? 'cfn' or k =? 'box' or k =? 'generator' {
@@ -227,12 +237,16 @@ tl_layout_body=(t0:LWord):>void=>$unsafe {
         size=2 * tl_inputs[0].ptr_size[0]
         al=tl_inputs[0].ptr_size[0]
         m=true
+        agg=true
+        vc_v=3
     }
     else if k =? 'opt' {
         let e=LWord(tl_inputs[0].types[0].ptr[t].elem)
         tl_layout(e)
         al=tl_align(e)
-        size=if math_optional(t) {8} else if ptr_optional(t) {tl_inputs[0].ptr_size[0]} else {tl_align_up(tl_size(e) + 1  al)}
+        if math_optional(t) {size=8}
+        else if ptr_optional(t) {size=tl_inputs[0].ptr_size[0]}
+        else {size=tl_align_up(tl_size(e) + 1  al); agg=true; vc_v=3}
         m=tl_managed(e)
         boxed=LWord(tl_inputs[0].types[0].ptr[tl_prune(e)].flags) & TF_BOXED not=? 0
     }
@@ -243,6 +257,8 @@ tl_layout_body=(t0:LWord):>void=>$unsafe {
         size=tl_size(e) * LWord(tl_inputs[0].types[0].ptr[t].bits)
         m=tl_managed(e)
         boxed=LWord(tl_inputs[0].types[0].ptr[tl_prune(e)].flags) & TF_BOXED not=? 0
+        agg=true
+        vc_v=3
     }
     else if k =? 'tuple' {
         let off:LWord=0
@@ -256,6 +272,8 @@ tl_layout_body=(t0:LWord):>void=>$unsafe {
             if LWord(tl_inputs[0].types[0].ptr[tl_prune(e)].flags) & TF_BOXED not=? 0 {boxed=true}
         }
         size=tl_align_up(off  al)
+        agg=true
+        vc_v=3
     }
     else if k =? 'struct_' {
         let si=LWord(tl_inputs[0].types[0].ptr[t].st)
@@ -283,6 +301,8 @@ tl_layout_body=(t0:LWord):>void=>$unsafe {
         # Padding is a tl_layout fact; retain the payload's natural alignment.
         # An extra line also isolates payloads at an unaligned array base.
         if layout_cache_padded(t) {size=tl_align_up(size + 127  128)}
+        agg=true
+        vc_v=3
     }
     else if k =? 'enum_' {
         let si=LWord(tl_inputs[0].types[0].ptr[t].st)
@@ -313,7 +333,9 @@ tl_layout_body=(t0:LWord):>void=>$unsafe {
         tl_endless_check(si)
         # General unions use address-based tag remapping and narrowing even
         # when all alternatives are unit records (nominal errors, for example).
-        tl_inputs[0].structs[0][si].simple_enum = psize =? 0 and not tl_inputs[0].structs[0].ptr[si].union_
+        let is_simple=psize =? 0 and not tl_inputs[0].structs[0].ptr[si].union_
+        tl_inputs[0].structs[0][si].simple_enum = is_simple
+        if not is_simple {agg=true; vc_v=3}
         let poff=tl_align_up(4  pal)
         tl_inputs[0].structs[0][si].payload_off = int32(poff)
         loop v in [0..LWord(tl_inputs[0].structs[0].ptr[si].nvariants)) {
@@ -338,8 +360,9 @@ tl_layout_body=(t0:LWord):>void=>$unsafe {
     }
     tl_inputs[0].types[0][t].size = int32(size)
     tl_inputs[0].types[0][t].align = int32(al)
-    let f=LWord(tl_inputs[0].types[0].ptr[t].flags) | TF_LAID_OUT
+    let f=(LWord(tl_inputs[0].types[0].ptr[t].flags) & (384 xor -1)) | TF_LAID_OUT | 64 | (vc_v << 7) | 4096
     if m {f |= TF_MANAGED}
     if boxed {f |= TF_BOXED}
+    if agg {f |= 2048}
     tl_inputs[0].types[0][t].flags = int32(f)
 }

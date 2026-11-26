@@ -199,6 +199,9 @@ xz_walk=<Proofs>(root:XZWord):>void=>$unsafe {
     let st=xz_stack.ptr
     let cap=xz_stack.length
     let collect=xz_collect[0]
+    let nodes_p=xz_nodes[0].ptr
+    let lists_p=xz_lists[0].ptr
+    let types_p=xz_types[0].ptr
     st[0]=int64(root)
     let sp:XZWord=1
     loop sp >? 0 {
@@ -209,11 +212,14 @@ xz_walk=<Proofs>(root:XZWord):>void=>$unsafe {
             if collect {xz_sites[0].push(int64(n))}
             continue
         }
-        let node=xz_nodes[0].ptr + n
+        let node=nodes_p + n
         let t=XZWord(node[0].type)
-        if t not=? 0 and XZWord(xz_types[0][t].flags) & 1 not=? 0 {
+        if t not=? 0 and XZWord(types_p[t].flags) & 1 not=? 0 {
             let zonked=tu_zonk(t)
-            node=xz_nodes[0].ptr + n
+            nodes_p=xz_nodes[0].ptr
+            lists_p=xz_lists[0].ptr
+            types_p=xz_types[0].ptr
+            node=nodes_p + n
             node[0].type=int32<overflow='wrap'>(zonked)
         }
         let kf=kf_p[int64((node as ptr<uint32>)[0])]
@@ -243,6 +249,9 @@ xz_walk=<Proofs>(root:XZWord):>void=>$unsafe {
                     sp=next
                     st=xz_stack.ptr
                     cap=xz_stack.length
+                    nodes_p=xz_nodes[0].ptr
+                    lists_p=xz_lists[0].ptr
+                    types_p=xz_types[0].ptr
                     continue
                 }
             }
@@ -273,7 +282,7 @@ xz_walk=<Proofs>(root:XZWord):>void=>$unsafe {
             let l2=XZWord(node[0].list2)
             let i=n2 - 1
             loop i >=? 0 {
-                let x=xz_lists[0][l2 + i]
+                let x=lists_p[l2 + i]
                 if x not=? 0 {
                     st[sp]=int64(x)
                     sp=sp + 1
@@ -285,7 +294,7 @@ xz_walk=<Proofs>(root:XZWord):>void=>$unsafe {
             let l1=XZWord(node[0].list)
             let i=n1 - 1
             loop i >=? 0 {
-                let x=xz_lists[0][l1 + i]
+                let x=lists_p[l1 + i]
                 if x not=? 0 {
                     st[sp]=int64(x)
                     sp=sp + 1

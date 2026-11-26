@@ -146,7 +146,11 @@ xe_module=(name:XEWord):>XEWord=>$unsafe {
     let c=xe_context[0]
     let m:XEWord=if c >=? 0 {XEWord(xe_contexts[0].ptr[c].mod)} else {-1}
     if name <? xe_ml_at[0].length {
-        let stamp=if name <? xe_ml_tick[0].length and xe_ml_tick[0].ptr[name] >? xe_ml_struct[0] {xe_ml_tick[0].ptr[name]} else {xe_ml_struct[0]}
+        let stamp=xe_ml_struct[0]
+        if name <? xe_ml_tick[0].length {
+            let tk=xe_ml_tick[0].ptr[name]
+            if tk >? stamp {stamp=tk}
+        }
         if xe_ml_at[0].ptr[name] =? stamp and xe_ml_mod[0].ptr[name] =? m {return xe_ml_sym[0].ptr[name]}
     }
     expr_module(m name)

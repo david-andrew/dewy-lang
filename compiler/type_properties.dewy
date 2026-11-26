@@ -51,8 +51,7 @@ tp_base_slow=(types:ptr<TypeInfo> t0:PWord):>PWord=>$unsafe {
     t
 }
 tp_base=(t0:PWord):>PWord=>$unsafe {
-    let k=tp_types[0][t0].kind
-    if k not=? 'var' and k not=? 'secret' and k not=? 'callable' and k not=? 'quantity' and k not=? 'refined' {return t0}
+    if (PWord(tp_types[0].ptr[t0].flags) & 32) =? 0 {return t0}
     tp_base_slow(tp_types[0].ptr t0)
 }
 tp_targ=(t:PWord i:PWord):>PWord=>$unsafe {
@@ -75,17 +74,17 @@ tp_is_managed_agg=(t:PWord):>bool=>$unsafe {
     PWord(tp_types[0][t].flags) & TF_MANAGED not=? 0
 }
 tp_is_managed=(t0:PWord):>bool=>$unsafe {
+    let f0=PWord(tp_types[0].ptr[t0].flags)
+    if f0 & 4096 not=? 0 {return f0 & TF_MANAGED not=? 0}
     let t=t0
-    let k=tp_types[0][t].kind
-    if k =? 'var' or k =? 'secret' or k =? 'callable' or k =? 'quantity' or k =? 'refined' {
-        t=tp_base_slow(tp_types[0].ptr t0)
-        k=tp_types[0][t].kind
-    }
-    if tp_types[0][t].rep =? 'tagged_int' {return true}
-    match k {
+    if f0 & 32 not=? 0 {t=tp_base_slow(tp_types[0].ptr t0)}
+    let tp=tp_types[0].ptr + t
+    let f=PWord(tp[0].flags)
+    if f & 4096 not=? 0 {return f & TF_MANAGED not=? 0}
+    if tp[0].rep =? 'tagged_int' {return true}
+    match tp[0].kind {
         <'str_'|'array'|'fn_'|'polyfn'|'callable'|'box'|'generator'> => true
         <'struct_'|'enum_'|'tuple'|'opt'|'fixed'> => {
-            let f=PWord(tp_types[0][t].flags)
             if f & TF_LAID_OUT not=? 0 {return f & TF_MANAGED not=? 0}
             tp_is_managed_agg(t)
         }
@@ -207,7 +206,11 @@ tp_ptr_optional=(t:PWord):>bool=>$unsafe {
     tp_inputs[0].types[0].ptr[t].kind =? 'opt' and tp_inputs[0].types[0].ptr[tp_base(PWord(tp_inputs[0].types[0].ptr[t].elem))].kind =? 'ptr'
 }
 tp_is_aggregate=(t0:PWord):>bool=>$unsafe {
+    let f0=PWord(tp_types[0].ptr[t0].flags)
+    if f0 & 64 not=? 0 {return f0 & 2048 not=? 0}
     let t=tp_base(t0)
+    let f=PWord(tp_types[0].ptr[t].flags)
+    if f & 64 not=? 0 {return f & 2048 not=? 0}
     if tp_math_optional(t) or tp_ptr_optional(t) {return false}
     let k=tp_inputs[0].types[0].ptr[t].kind
     if k =? 'struct_' or k =? 'tuple' or k =? 'opt' or k =? 'fn_' or k =? 'polyfn' or k =? 'callable' or k =? 'range' or k =? 'vec' or k =? 'fixed' {return true}

@@ -61,8 +61,9 @@ lower_type_plan=(t0:LSWord):>ptr<LowerTypePlan>=>$unsafe {
     return lower_type_plan_fill(t0)
 }
 vc_slow=(t0:LSWord):>int64=>$unsafe {
-    if lower_planning {return lower_type_plan_fill(t0)[0].value_class}
     let t=quantity_base(t0)
+    let f=LSWord(types.ptr[t].flags)
+    if f & 64 not=? 0 {return (f >> 7) & 3}
     let k=types.ptr[t].kind
     if k =? 'void_' or k =? 'typeval' or k =? 'module' {return VC_VOID}
     if k =? 'float_' {return VC_FLT}
@@ -70,26 +71,22 @@ vc_slow=(t0:LSWord):>int64=>$unsafe {
     return VC_INT
 }
 vc=(t0:LSWord):>int64=>$unsafe {
-    if lower_planning and t0 <? lower_types.length {
-        let plan=lower_types.ptr + t0
-        if plan[0].epoch =? lower_epoch {return plan[0].value_class}
-    }
+    let f=LSWord(types.ptr[t0].flags)
+    if f & 64 not=? 0 {return (f >> 7) & 3}
     vc_slow(t0)
 }
-vt_of=(t0:LSWord):>int64=>$unsafe {
-    if lower_planning {
-        if t0 <? lower_types.length {
-            let plan=lower_types.ptr + t0
-            if plan[0].epoch =? lower_epoch {return plan[0].vtype}
-        }
-        return lower_type_plan_fill(t0)[0].vtype
-    }
+vt_of_slow=(t0:LSWord):>int64=>$unsafe {
     let t=quantity_base(t0)
     if types.ptr[t].kind =? 'float_' {
         if LSWord(types.ptr[t].bits) =? 32 {return VS}
         return VF
     }
     return VI
+}
+vt_of=(t0:LSWord):>int64=>$unsafe {
+    let f=LSWord(types.ptr[t0].flags)
+    if f & 64 not=? 0 {return (f >> 9) & 3}
+    vt_of_slow(t0)
 }
 mem_mode=(t0:LSWord):>int64=>$unsafe {
     let t=quantity_base(t0)

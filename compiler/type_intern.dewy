@@ -18,6 +18,27 @@ type_intern_bind=(types:ptr<array<TypeInfo>> args:ptr<array<int32>> table:ptr<ar
     ti_types=types; ti_args=args; ti_table=table; 0
 }
 const TI_HAS_VAR:int32=1
+const TI_MANAGED:int32=4
+const TI_WRAPPER:int32=32
+const TI_VC_KNOWN:int32=64
+const TI_AGG:int32=2048
+const TI_MGD_KNOWN:int32=4096
+
+ti_static_flags=(input:ptr<TypeInfo>):>int32=>$unsafe {
+    let k=input[0].kind
+    match k {
+        <'var'|'secret'|'callable'|'quantity'|'refined'> => TI_WRAPPER
+        <'void_'|'typeval'|'module'> => TI_VC_KNOWN | TI_MGD_KNOWN
+        <'int_'> => if input[0].rep =? 'tagged_int' {TI_VC_KNOWN | int32(1 << 7) | TI_MGD_KNOWN | TI_MANAGED} else {TI_VC_KNOWN | int32(1 << 7) | TI_MGD_KNOWN}
+        <'float_'> => if input[0].bits =? 32 {TI_VC_KNOWN | int32(2 << 7) | int32(2 << 9) | TI_MGD_KNOWN} else {TI_VC_KNOWN | int32(2 << 7) | int32(1 << 9) | TI_MGD_KNOWN}
+        <'str_'|'array'|'box'|'generator'> => TI_VC_KNOWN | int32(1 << 7) | TI_MGD_KNOWN | TI_MANAGED
+        <'fn_'|'polyfn'> => TI_VC_KNOWN | int32(3 << 7) | TI_AGG | TI_MGD_KNOWN | TI_MANAGED
+        <'range'|'vec'> => TI_VC_KNOWN | int32(3 << 7) | TI_AGG | TI_MGD_KNOWN
+        <'tuple'|'fixed'|'struct_'> => TI_VC_KNOWN | int32(3 << 7) | TI_AGG
+        <'enum_'|'opt'> => int32(0)
+        _ => TI_VC_KNOWN | int32(1 << 7) | TI_MGD_KNOWN
+    }
+}
 
 ti_hash_seed=(input:ptr<TypeInfo>):>IWord=>$unsafe {
     # The frozen ABI stores both literal-union discriminants as 32-bit ordinals.
@@ -76,6 +97,7 @@ type_intern_rehash=():>void=>$unsafe {
 # new arena entry needs a value snapshot; append retains ordinary arena COW.
 ti_append=(input:ptr<TypeInfo> args:array<int64> hv:bool):>IWord=>$unsafe {
     let t=input[0]
+    t.flags=t.flags | ti_static_flags(input)
     if hv {t.flags=t.flags | TI_HAS_VAR}
     let count=IWord(args.length)
     let values=args.ptr
@@ -118,7 +140,7 @@ ti_targ=(t:IWord i:IWord):>IWord=>$unsafe {IWord(ti_args[0].ptr[IWord(ti_types[0
 # Inference variables are always fresh and have no type arguments or hash entry.
 # This is the interner's existing fresh-entry case, without a host record copy.
 type_intern_var=(id:IWord):>IWord=>$unsafe {
-    ti_types[0].push(TypeInfo[kind='var' id=int32<overflow='wrap'>(id) flags=TI_HAS_VAR args=int32<overflow='wrap'>(ti_args[0].length)])
+    ti_types[0].push(TypeInfo[kind='var' id=int32<overflow='wrap'>(id) flags=TI_HAS_VAR | TI_WRAPPER args=int32<overflow='wrap'>(ti_args[0].length)])
     IWord(ti_types[0].length) - 1
 }
 

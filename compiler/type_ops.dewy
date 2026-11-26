@@ -130,11 +130,8 @@ simple_enum=(t:int64):>bool=>$unsafe {
     tp_simple_enum(t)
 }
 is_managed=(t:TypeOpWord):>bool=>$unsafe {
-    let ti=types.ptr + t
-    let k=ti[0].kind
-    if k =? 'int_' or k =? 'bool_' or k =? 'float_' or k =? 'void_' or k =? 'ptr' or k =? 'null_' {return ti[0].rep =? 'tagged_int'}
-    if k =? 'str_' or k =? 'array' or k =? 'fn_' or k =? 'generator' {return true}
-    if (TypeOpWord(ti[0].flags) & 2) not=? 0 and (k =? 'struct_' or k =? 'enum_' or k =? 'tuple' or k =? 'opt' or k =? 'fixed') {return (TypeOpWord(ti[0].flags) & 4) not=? 0}
+    let f=TypeOpWord(types.ptr[t].flags)
+    if f & 4096 not=? 0 {return (f & 4) not=? 0}
     tp_is_managed(t)
 }
 plain_problem=(t:TypeOpWord):>string=>{
@@ -156,7 +153,9 @@ math_optional=(t:TypeOpWord):>bool=>{
 ptr_optional=(t:TypeOpWord):>bool=>{
     tp_ptr_optional(t)
 }
-is_aggregate=(t:TypeOpWord):>bool=>{
+is_aggregate=(t:TypeOpWord):>bool=>$unsafe {
+    let f=TypeOpWord(types.ptr[t].flags)
+    if f & 64 not=? 0 {return (f & 2048) not=? 0}
     tp_is_aggregate(t)
 }
 decide_boxes=(si:TypeOpWord):>void=>{

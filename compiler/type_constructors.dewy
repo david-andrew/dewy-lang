@@ -101,11 +101,11 @@ tb_mk_var=():>BWord=>$unsafe {
 }
 tb_mk_param=(idx:BWord):>BWord=>type_intern_param(idx)
 tb_mk_typeval=(t:BWord):>BWord=>$unsafe {
-    tb_inputs[0].types[0].push(TypeInfo[kind ='typeval'  elem = int32<overflow='wrap'>(t)  flags = int32<overflow='wrap'>(TF_LAID_OUT)])
+    tb_inputs[0].types[0].push(TypeInfo[kind ='typeval'  elem = int32<overflow='wrap'>(t)  flags = int32<overflow='wrap'>(TF_LAID_OUT | 64 | 4096)])
     tb_inputs[0].types[0].length - 1
 }
 tb_mk_modval=(m:BWord):>BWord=>$unsafe {
-    tb_inputs[0].types[0].push(TypeInfo[kind ='module'  mod = int32<overflow='wrap'>(m)  flags = int32<overflow='wrap'>(TF_LAID_OUT)])
+    tb_inputs[0].types[0].push(TypeInfo[kind ='module'  mod = int32<overflow='wrap'>(m)  flags = int32<overflow='wrap'>(TF_LAID_OUT | 64 | 4096)])
     tb_inputs[0].types[0].length - 1
 }
 tb_init_types=():>void=>$unsafe {
@@ -124,13 +124,13 @@ tb_init_types=():>void=>$unsafe {
     tb_inputs[0].T_FLOAT[0] = tb_basic('float_'  64  true  8)
     tb_inputs[0].T_F32[0] = tb_basic('float_'  32  true  4)
     tb_inputs[0].T_STR[0] = tb_basic('str_'  0  false  tb_inputs[0].ptr_size[0])
-    tb_inputs[0].types[0][tb_inputs[0].T_STR[0]].flags = int32<overflow='wrap'>(TF_LAID_OUT | TF_MANAGED)
+    tb_inputs[0].types[0][tb_inputs[0].T_STR[0]].flags |= int32<overflow='wrap'>(TF_LAID_OUT | TF_MANAGED)
     tb_inputs[0].T_NULL[0] = tb_basic('null_'  0  false  tb_inputs[0].ptr_size[0])
     tb_inputs[0].T_RANGE[0] = tb_basic('range'  0  false  16)
     tb_inputs[0].types[0][tb_inputs[0].T_RANGE[0]].align = 8
     tb_inputs[0].T_NONE[0] = tb_basic('none_lit'  0  false  0)
     tb_inputs[0].T_NEVER[0] = tb_basic('void_'  1  false  0)
-    tb_inputs[0].types[0][tb_inputs[0].T_NEVER[0]].flags = int32<overflow='wrap'>(TF_LAID_OUT | TF_NEVER)
+    tb_inputs[0].types[0][tb_inputs[0].T_NEVER[0]].flags |= int32<overflow='wrap'>(TF_LAID_OUT | TF_NEVER)
     tb_inputs[0].T_RAWPTR[0] = tb_mk_ptr(tb_inputs[0].T_U8[0])
     tb_inputs[0].T_VEC2[0] = tb_basic('vec'  2  false  8)
     tb_inputs[0].types[0][tb_inputs[0].T_VEC2[0]].align = 4

@@ -7,7 +7,7 @@ from p"checked_expression_nodes.dewy" import (capture_value)
 
 from p"node_store.dewy" import (call_waits_hook)
 from p"checker_state.dewy" import (live_body_indexes)
-from p"ast.jo" import (decl_has_rest rest_bundles nodes dewy_param_kinds nkids nkids2 kid has_flag add_flag set_list NF_MUT NF_CHECKED)
+from p"ast.jo" import (decl_has_rest lists rest_bundles nodes dewy_param_kinds nkids nkids2 kid has_flag add_flag set_list NF_MUT NF_CHECKED)
 from p"expr.jo" import (setting_site rational_module_found call_targs CallFailure AUX2_PARTIAL place_method dewy_literal_method_name)
 from p"call_argument_checks.dewy" import (call_decl_checks call_map_candidate call_note_contracts call_reject_candidate comprehension_settle match_type unnamed)
 from p"rational_lookup.dewy" import (exact_family_name)
@@ -66,9 +66,10 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
     let positional=true
     let n_args=args.length
     let ap=args.ptr
+    let np0=nodes.ptr
     loop i in [0..n_args) {
         let arg=ap[i]
-        if arg =? 0 or nodes[arg].kind =? 'namedarg' {
+        if arg =? 0 or np0[arg].kind =? 'namedarg' {
             positional=false
             break
         }
@@ -91,11 +92,13 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
                 if (mutmask & (CRWord(1) << CRWord(i))) not=? 0 {
                     if call_mutable_cost(a pt @empty_binds @recv_fits0 i =? 0) <? 0 {ok=false; break}
                 } else {
-                    let nt=CRWord(nodes[a].type)
+                    let an=nodes.ptr + a
+                    let nt=CRWord(an[0].type)
                     let exact=false
-                    if nt =? pt and nt not=? 0 and (CRWord(nodes[a].flags) & 256) =? 0 and nodes[a].kind not=? 'str_lit' and nodes[a].kind not=? 'float_lit' {
-                        if (CRWord(types[pt].flags) & 1) =? 0 {
-                            let tk=types[pt].kind
+                    if nt =? pt and nt not=? 0 and (CRWord(an[0].flags) & 256) =? 0 and an[0].kind not=? 'str_lit' and an[0].kind not=? 'float_lit' {
+                        let pti=types.ptr + pt
+                        if (CRWord(pti[0].flags) & 1) =? 0 {
+                            let tk=pti[0].kind
                             if tk not=? 'opt' and tk not=? 'refined' and tk not=? 'callable' and tk not=? 'polyfn' and (tk not=? 'struct_' or not rat_on or not bundled_word_rational_type(pt)) {exact=true}
                         }
                     }
@@ -118,7 +121,14 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
                     }
                 }
                 if mutmask not=? 0 and (mutmask & (mutmask - 1)) not=? 0 {check_mutable_arguments(args mutmask nodes.ptr[n].pos)}
-                set_list(n args)
+                let same_list=CRWord(nodes.ptr[n].nlist) =? np
+                if same_list and np >? 0 {
+                    let lp=lists.ptr + CRWord(nodes.ptr[n].list)
+                    loop i in [0..np) {
+                        if CRWord(lp[i]) not=? ap[i] {same_list=false; break}
+                    }
+                }
+                if not same_list {set_list(n args)}
                 nodes.ptr[n].sym = int32(f)
                 nodes.ptr[n].aux = 0
                 nodes.ptr[n].kind = 'call'
