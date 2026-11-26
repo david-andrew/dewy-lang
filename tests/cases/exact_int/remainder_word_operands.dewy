@@ -1,0 +1,6 @@
+$runtime_checks
+remainder=(a:uint64 b:uint64):>uint64=>((a % 4611686018427387905) * (b >> 47)) % 100
+main=():>void=>{
+    printl(remainder(17 0))
+    printl(remainder(uint64.max - 1 uint64.max))
+}

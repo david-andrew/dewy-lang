@@ -8,7 +8,7 @@ from p"check.jo" import (target_arm64 target_wasm)
 from p"checker_constant_queries.dewy" import (sa_fits)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"checker_tokens.dewy" import (Tok)
-from p"diagnostic_exit.dewy" import (fatal ice)
+from p"diagnostic_exit.dewy" import (fatal)
 from p"exact.jo" import (exact_chain_active exact_chain_saved exact_join_blocks exact_shifts)
 from p"exact_finalization.dewy" import (exact_bits)
 from p"exact_marks.dewy" import (exact_has_node exact_proved exact_range_flags)
@@ -71,7 +71,7 @@ exact_lower_bits=(n:ExactEmitWord):>int64=>{
     min(width int64(exact_emit_bits(bound)))
 }
 
-# True when n's exact value fits in one signed 64-bit word (exact_value has length 1).
+# True when n's exact value fits in one signed 64-bit word.
 exact_signed_word=(n:ExactEmitWord):>bool=>$unsafe {
     if exact_has_node(n) {return exact_lower_bits(n) <=? 64}
     let t=exact_representation(ntype(n))
@@ -202,20 +202,20 @@ exact_word_remainder=(n:ExactEmitWord):>array<int64>=>$unsafe {
     if op not=? 'plus' and op not=? 'minus' and op not=? 'star' {return empty}
     let a=ExactEmitWord(nodes.ptr[source].a)
     let b=ExactEmitWord(nodes.ptr[source].b)
-    if exact_lower_bits(a) >? 64 or exact_lower_bits(b) >? 64 {return empty}
-    let av=exact_value(a)
-    let bv=exact_value(b)
-    if av.length not=? 1 or bv.length not=? 1 {ice("word remainder width mismatch")}
+    if not exact_signed_word(a) or not exact_signed_word(b) {return empty}
+    # A proven word may still have a redundant extension word in exact_value.
+    let av=exact_low_word(a)
+    let bv=exact_low_word(b)
     let modulus=e_iconst(divisor)
     let result=vreg(VI)
     let plain:Op=if op =? 'plus' {'add'} else if op =? 'minus' {'sub'} else {'mul'}
     let flagged:Op=if op =? 'plus' {'overflow_add'} else if op =? 'minus' {'overflow_sub'} else {'overflow_mul'}
-    let value=e_bin(plain VI av[0] bv[0])
-    let overflow=e_bin(flagged VI av[0] bv[0])
+    let value=e_bin(plain VI av bv)
+    let overflow=e_bin(flagged VI av bv)
     iff(overflow);
     let cold=ir_cold
     ir_cold=true
-    let words=if op =? 'star' {exact_mul(av bv 2)} else {exact_add(av bv 2 op =? 'minus')}
+    let words=if op =? 'star' {exact_mul([av] [bv] 2)} else {exact_add([av] [bv] 2 op =? 'minus')}
     e_mov(result e_call(rt("__exact_i128_mod_pos") [words[0] words[1] modulus] VI));
     ir_cold=cold
     els();
