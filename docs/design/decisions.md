@@ -785,3 +785,14 @@ section linked. ROADMAP.md lists them in one line each.
     promise how many values remain, and slicing should take values lazily
     (`(g:generator<int64 length>=?2>) => add(g[0..2)...)`) without draining the generator into
     an array.
+- Batch 12 (David, 2026-11-25), from D45 ([proposals/generators/](proposals/generators/)):
+  - **One value per advance** (Q1): `lazy (1 (2 3) 4)` gives four values, as its collector
+    `[1 (2 3) 4]` does, so commas stay meaningless. A multivalue is yielded as one step only where
+    that is unambiguous, as in `fib = ():>generator<(int int)> => { … lazy loop i in 0.. { (l r) … } }`.
+    Everywhere else, multivalues spread out into a sequence of single values. There is no special
+    support for some cases, such as an array of multivalues, for now. Rejected: one group per
+    advance.
+  - **A failed close goes to the function that owns the generator** (Q6, closed without a new
+    rule): a generator holding a socket is owned like any value. When a function that owns one
+    returns before reading it all, closing the socket can fail. D40 Q1 already makes that failure
+    the function's result, and D42 keeps it alongside any read failure.

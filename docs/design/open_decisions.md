@@ -21,7 +21,7 @@
   - D42 Q3: one leaf per operation, families never returned bare; `FileError` becomes the file failures' parent;
   - D40 Q2, Q5, Q6: cleanup timing, `defer`, and visible cleanup exits;
   - D38 Q1: snake_case naming style;
-  - D45 Q1, Q6, Q7: one value per advance; who reports a failed close; cancelled sources can't look empty;
+  - D45 Q7: a cancelled source hands over `Canceled` as a value (decides D44 Q5 too);
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
@@ -165,6 +165,7 @@ Should a loop over any source (a channel, a `merged` inbox or a signal) end when
 
 - **Rec:** yes. It replaces `merged`'s "one `Canceled` item, then end" rule with the signal rule. **Reversible** before release.
 - **You give up:** a loop ended by cancellation looks like one that ran out of input, and the code after it runs. Write `or_throw` where that code publishes a result.
+- **Depends on D45 Q7**, which recommends the opposite: a cancelled source hands over `Canceled` as a value.
 
 #### Q6 (a). `race` and `first_ok` discard their losers, but never a failed undo
 
@@ -683,7 +684,7 @@ Paper dogfood remains below all-5; the 45-line core cold read conveyed broad rol
 
 ### D45. Generators from `lazy`, with no `yield`
 
-This is your sketch, worked into a full design. You answered most of it on 11-25 ([decisions.md](decisions.md), batch 11). These three are left.
+This is your sketch, worked into a full design. You answered the rest on 11-25 ([decisions.md](decisions.md), batch 11). One question is left.
 - `lazy expr` makes a generator from any expression: a group, a block or a loop.
 - Ordinary calls stay eager, and nothing runs until a value is pulled.
 - `inner()...` inside a lazy body hands over to another generator.
@@ -694,47 +695,7 @@ evens = (source) => lazy loop x in source { if x % 2 =? 0 x }
 loop x in evens(squares) and _ in [0..5) printl(x)   # 0 4 16 36 64
 ```
 
-#### Q1 (a). What does one advance give?
-
-```dewy
-let g = lazy (1 (2 3) 4)
-loop x in g { printl([x]) }
-```
-
-Does this print four singletons (A), or three lines with `[2 3]` in the middle (B)?
-
-**For A, one value per advance:**
-- A generator steps exactly as its collector does. `[1 (2 3) 4]` is `[1 2 3 4]`, and `lazy (1 (2 3) 4)` gives the same four values in the same order.
-- Commas stay meaningless, as you want. Under A, `lazy (1 2, 3 4)` and `lazy (1 2 3 4)` are the same. Under B, the comma makes `(2 3)` one step, so adding or dropping a comma would change the program.
-- Every one-argument adapter (`map`, `filter`, take the first n) works on every generator, and a step never changes width.
-- The type stays `generator<int64>`.
-
-**For B, one group per advance:**
-- Your answer above makes multivalues ordinary values, so a step could naturally be one: `loop (id name) in rows` could take rows apart without wrapping them in brackets.
-- Under A, a producer of pairs writes `[id name]` and the consumer spreads `row...`. This cost the meter and zip programs a point of concision.
-
-**Possible middle ground:** keep A for the groups you write in a lazy body, and give pairs only when the type asks for them, as in `generator<(int64 string)>`. This can be added later without breaking A.
-
-**Rec:** A. **Reversible** before release.
-
-#### Q6 (a). Who reports a failed close?
-
-```dewy
-first_row = (rows) => {
-    loop row in rows { return row }       # stop after one row
-    none
-}
-main = () => {
-    let row = first_row(db.rows("users")) or_throw   # the query's socket closes as first_row returns
-    show(row)
-}
-```
-
-`first_row` stops reading after one row, so the generator's socket closes when `first_row` returns. Suppose that close fails. Should `main` get the failure at its `or_throw` instead of the row? If reading also failed, both failures would be kept.
-
-**Rec:** yes. It is your D40 Q1 rule, applied to generators: a cleanup failure joins the result of the function whose value it cleans up, and D42 keeps both failures. The alternative is to drop or log a failed close, which hides a lost write on the other end. **Reversible** before release.
-
-#### Q7 (a). Can a cancelled source look like an empty one?
+#### Q7 (a). Does a cancelled source hand over `Canceled`, or just stop?
 
 ```dewy
 doubled = (source) => lazy loop x in source x * 2
@@ -742,13 +703,18 @@ save_all = (source file) => {
     loop x in doubled(source) file.write(x) or_throw
     file.commit() or_throw
 }
+main = () => {
+    let file = open("copy.bin" write=true) or_throw
+    race(@save_all(download(url) file) @give_up_after(10s))   # the timer wins halfway through
+}
 ```
 
-Suppose `source` is a network stream and the task is cancelled halfway. If `doubled` just stops, `save_all` sees a short stream that looks finished and commits half the data as if it were complete.
+When the timer wins, `race` cancels the task running `save_all` while `download` is mid-stream. You've read this correctly if a cancelled source hands over `Canceled` as a value. That is one of two possible designs, and D44 Q5 currently recommends the other:
 
-Should a lazy body be required to pass a cancellation on, by writing `loop x in source or_throw`? With your Q2 answer, the cancellation then arrives as the generator's last value, and the consumer's type makes it handle it.
+- **A value (your reading).** The source gives `Canceled` as its last value, and its type includes it (inferred, D44 Q1). `lazy loop x in source x * 2` then doesn't compile: you `match` it or forward it with `or_throw`. This matches your Q2 answer that failures travel as values, and batch 10's rule that `Canceled` isn't special. The cost is that every loop over a cancellable source handles it, including loops that would be happy to just stop, such as D44 Q5's `total_of`.
+- **A quiet end (D44 Q5's recommendation).** The loop just ends, as signal loops do today, and `or_throw` after the source forwards the cancellation instead. `doubled` then compiles as written, and `save_all` commits half the download as if it were complete. Lazy bodies would need an extra rule that requires `or_throw` on a cancellable source.
 
-**Rec:** yes. The check costs a suffix only on sources that can actually be cancelled; ranges and arrays need none. A consumer that wants the partial result, such as a progress display, uses a plain loop and then `check_cancel()`. This follows D44's rule that loops over sources end at cancellation. **Reversible:** accepting more cases later is additive.
+**Rec:** a value. The type system then catches the half-download, with no special rule for lazy bodies. Answering this also answers D44 Q5: plain loops over channels and signals would follow the same rule. **Reversible** before release.
 
 Dogfooded on 13 programs, audited against existing decisions, reviewed for soundness, and names read cold. Programs: [generators proposal](proposals/generators/) (round 4 is the latest; [your answers](proposals/generators/answers-r4.md)).
 
