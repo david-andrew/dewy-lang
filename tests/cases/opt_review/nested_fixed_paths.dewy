@@ -1,0 +1,19 @@
+# modes: native native-release
+$runtime_checks
+
+walk = (xs:array<int64> start:int64):>int64 => {
+    let total:int64=0
+    loop i in [0..xs.length) {
+        loop j in [start..xs.length) {
+            if j <? 0 {continue}
+            if j >? i {break}
+            total += xs[i] * 10 + xs[j]
+        }
+    }
+    total
+}
+
+main = ():>void => {
+    let xs:array<int64>=[2 4 8]
+    printl("{walk(xs -1)} {walk(xs 1)} {walk(xs 3)} {walk([] 0)}")
+}

@@ -1,0 +1,29 @@
+# modes: native native-release
+$runtime_checks
+
+add_missing = (@table:dict<int64 int64> key:int64):>void => {
+    if not table.has(key) {
+        table[key]=key * 10
+    }
+}
+
+main = ():>void => {
+    let table:dict<int64 int64>=[]
+    loop key in [0..6) {
+        if table.get(key) is? none {table[key]=key * 10}
+    }
+    let saved=table
+    table.remove(0);
+    loop key in [0 6 3 7 8] {
+        if table.get(key) is? none {
+            table[key]=key * 100 + 1
+        } else {
+            printl(table[key])
+        }
+    }
+    let put=($capture @table key:int64):>void => {add_missing(@table key)}
+    put(8)
+    put(9)
+    printl("{table.length} {table[0]} {table[8]} {table[9]}")
+    printl("{saved.length} {saved[0]} {saved[3]} {saved.has(6)}")
+}

@@ -1,0 +1,28 @@
+# modes: native native-release
+$runtime_checks
+
+write_twice = (@xs:array<int64> take_first:bool):>void => {
+    if take_first {xs[0]=30}
+    xs[1]=40
+    xs.push(50)
+    printl(xs.pop())
+    xs.push(60)
+}
+
+returned = ():>array<int64> => {
+    let xs:array<int64>=[1 2]
+    xs[0]=3
+    defer xs[0]=9
+    return xs
+}
+
+main = ():>void => {
+    let xs:array<int64>=[10 20]
+    let saved=xs
+    write_twice(@xs false)
+    printl(xs)
+    printl(saved)
+    write_twice(@xs true)
+    printl(xs)
+    printl(returned())
+}

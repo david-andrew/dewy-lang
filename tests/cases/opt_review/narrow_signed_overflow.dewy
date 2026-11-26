@@ -1,0 +1,10 @@
+# modes: native native-release
+# exit: 101
+$runtime_checks
+
+multiply = (x:int32 y:int32):>int32 => {x * y}
+
+main = ():>void => {
+    printl(multiply(-1073741824 2))
+    printl(multiply(-1073741825 2))
+}

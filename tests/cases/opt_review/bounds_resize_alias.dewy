@@ -1,0 +1,18 @@
+# modes: native native-release
+# exit: 101
+$runtime_checks
+
+shrink = (@xs:array<int64>):>void => {xs.truncate(1)}
+
+main = ():>void => {
+    let xs:array<int64>=fill(42 4)
+    let n=xs.length
+    let i:int64=1
+    loop true {
+        if i + 1 >=? n {break}
+        printl(xs[i + 1])
+        shrink(@xs)
+        printl(xs[i + 1])
+        i+=1
+    }
+}

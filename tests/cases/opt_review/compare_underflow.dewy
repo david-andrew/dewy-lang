@@ -1,0 +1,28 @@
+# modes: native native-release
+$runtime_checks
+
+compare = (x:int64 z:int64):>void => {
+    printl("{x + 3 <? z} {z <=? 3 + x} {x + 3 =? z} {z >? x - 3}")
+}
+
+guarded = (x:int64 start:int64 change:bool):>void => {
+    let z=start
+    if z >=? 0 {
+        printl(3 + x >? z)
+        if change {z=-9223372036854775807 - 1}
+        printl(z <? x + 3)
+    }
+}
+
+main = ():>void => {
+    let lo:int64=-9223372036854775807 - 1
+    let hi:int64=9223372036854775807
+    compare(lo lo)
+    compare(-1 lo)
+    compare(lo lo + 3)
+    compare(hi hi)
+    compare(hi - 3 hi)
+    guarded(lo 0 false)
+    guarded(lo 0 true)
+    guarded(hi 0 true)
+}

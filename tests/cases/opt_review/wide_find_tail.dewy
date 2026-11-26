@@ -1,0 +1,14 @@
+# modes: native native-release
+$runtime_checks
+
+main = ():>void => {
+    let bytes:array<uint8>=fill(uint8(97) 450)
+    bytes[31]=98
+    bytes[160]=98
+    bytes[289]=98
+    bytes[418]=98
+    let text=str_from_bytes(bytes)
+    printl("{find_byte(text 98 0)} {find_byte(text 98 32)} {find_byte(text 98 161)}")
+    printl("{find_byte(text 98 290)} {find_byte(text 98 419)}")
+    printl("{find_byte(text.byte_slice(32 289) 98 129)} {find_byte(text.byte_slice(33 418) 98 128)}")
+}

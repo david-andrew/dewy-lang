@@ -1,0 +1,10 @@
+# modes: native native-release
+# exit: 101
+$runtime_checks
+
+subtract = (x:uint32 y:uint32):>uint32 => {x - y}
+
+main = ():>void => {
+    printl(subtract(4294967295 0))
+    printl(subtract(0 1))
+}

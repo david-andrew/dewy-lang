@@ -1,0 +1,17 @@
+# modes: native native-release
+$runtime_checks
+
+main = ():>void => {
+    let rows:array<array<int64>>=[]
+    let readers:array<():>int64>=[]
+    loop i in [0..5) {
+        let row:array<int64>=[i+10]
+        defer printl(row[0])
+        if i =? 1 {continue}
+        if i =? 4 {break}
+        readers.push(():>int64 => row[0])
+        rows.push(row)
+    }
+    loop read in readers {printl(read())}
+    printl(rows)
+}

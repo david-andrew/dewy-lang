@@ -1,0 +1,12 @@
+# modes: native native-release
+# exit: 101
+$runtime_checks
+
+walk = (stop:int64):>void => {
+    loop i in [0..6) {
+        if i =? stop {panic("stopped at {i}")}
+        printl("step {i}")
+    }
+}
+
+main = ():>void => {walk(2)}

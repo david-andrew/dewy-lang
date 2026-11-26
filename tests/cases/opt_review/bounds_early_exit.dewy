@@ -1,0 +1,27 @@
+# modes: native native-release
+$runtime_checks
+
+sum_pairs = (xs:array<int64> start:int64):>int64 => {
+    let n=xs.length
+    let i=start
+    let total:int64=0
+    loop i >=? 0 {
+        if i + 2 >? n or i >=? 4 {break}
+        let next=i + 1
+        if xs[next] =? 0 {
+            i+=1
+            continue
+        }
+        total+=xs[i] + xs[next]
+        i+=1
+    }
+    total
+}
+
+main = ():>void => {
+    let xs:array<int64>=[1 0 3 4 5 6]
+    printl(sum_pairs(xs 0))
+    printl(sum_pairs(xs -1))
+    printl(sum_pairs(xs 9223372036854775807))
+    printl(sum_pairs([] 0))
+}

@@ -1,0 +1,18 @@
+# modes: native native-release
+$runtime_checks
+
+grow = (n:int64):>int64 => {
+    let xs:array<int64>=[]
+    let total:int64=0
+    loop i in [0..n) {
+        if i % 3 =? 1 {continue}
+        xs.push(i+11)
+        total+=xs[xs.length-1]
+        if i =? 24 {break}
+    }
+    total * 100 + xs.length
+}
+
+main = ():>void => {
+    printl("{grow(0)} {grow(3)} {grow(100)}")
+}

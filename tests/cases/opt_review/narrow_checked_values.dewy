@@ -1,0 +1,73 @@
+# modes: native native-release
+$runtime_checks
+
+signed8 = (x:int8 y:int8 n:int64):>int64 => {
+    let total:int64=0
+    loop i in [0..n) {
+        let sum:int8=x + y
+        let difference:int8=x - y
+        let product:int8=x * y
+        total+=int64(sum)+int64(difference)+int64(product)+i
+    }
+    total
+}
+
+signed16 = (x:int16 y:int16 n:int64):>int64 => {
+    let total:int64=0
+    loop i in [0..n) {
+        let sum:int16=x + y
+        let difference:int16=x - y
+        let product:int16=x * y
+        total+=int64(sum)+int64(difference)+int64(product)+i
+    }
+    total
+}
+
+signed32 = (x:int32 y:int32 n:int64):>int64 => {
+    let total:int64=0
+    loop i in [0..n) {
+        let sum:int32=x + y
+        let difference:int32=x - y
+        let product:int32=x * y
+        total+=int64(sum)+int64(difference)+int64(product)+i
+    }
+    total
+}
+
+unsigned8 = (x:uint8 y:uint8 n:int64):>int64 => {
+    let total:int64=0
+    loop i in [0..n) {
+        let sum:uint8=x + y
+        let difference:uint8=x - y
+        let product:uint8=x * y
+        total+=int64(sum)+int64(difference)+int64(product)+i
+    }
+    total
+}
+
+unsigned16 = (x:uint16 y:uint16 n:int64):>int64 => {
+    let total:int64=0
+    loop i in [0..n) {
+        let sum:uint16=x + y
+        let difference:uint16=x - y
+        let product:uint16=x * y
+        total+=int64(sum)+int64(difference)+int64(product)+i
+    }
+    total
+}
+
+unsigned32 = (x:uint32 y:uint32 n:int64):>int64 => {
+    let total:int64=0
+    loop i in [0..n) {
+        let sum:uint32=x + y
+        let difference:uint32=x - y
+        let product:uint32=x * y
+        total+=int64(sum)+int64(difference)+int64(product)+i
+    }
+    total
+}
+
+main = ():>void => {
+    printl("{signed8(-127 1 3)} {signed16(-32767 1 3)} {signed32(-2147483647 1 3)}")
+    printl("{unsigned8(254 1 3)} {unsigned16(65534 1 3)} {unsigned32(4294967294 1 3)}")
+}

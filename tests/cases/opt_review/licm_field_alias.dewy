@@ -1,0 +1,35 @@
+# modes: native native-release
+$runtime_checks
+
+Meter:type=[value:int64 stamp:int64]
+bump = (@x:int64):>void => {x+=4}
+
+via_place = (n:int64):>int64 => {
+    let meter=Meter[1 7]
+    let total:int64=0
+    let i:int64=0
+    loop i <? n {
+        total+=meter.value
+        if i =? 1 {bump(@meter.value)}
+        i+=1
+    }
+    total+meter.stamp
+}
+
+via_closure = (n:int64):>int64 => {
+    let meter=Meter[1 7]
+    let change=($capture @meter):>void => {meter=Meter[5 9]}
+    let total:int64=0
+    let i:int64=0
+    loop i <? n {
+        total+=meter.value
+        if i =? 1 {change()}
+        i+=1
+    }
+    total+meter.stamp
+}
+
+main = ():>void => {
+    printl("{via_place(0)} {via_place(4)}")
+    printl("{via_closure(0)} {via_closure(4)}")
+}
