@@ -2979,10 +2979,13 @@ fl_p2_bin_cold=(cur_p:ptr<Ins> w_ins:ptr<Ins> a0:int64 b0:int64 depth:OptWord lo
         }
         if op =? 'add' and fl_def_is(a 4) and regs[int64(ra[0].db)].constant {
             let k2=OptWord(k) + OptWord(regs[int64(ra[0].db)].cval)
-            let base0=int64(ra[0].da)
-            b=fl_kconst(k2)
-            regs=o_regs; vt=opt_vtypes
-            a=base0; ra=regs + a; rb=regs + b; rd=regs + d
+            # Pooled constants must fit a signed imm32 on x86-64.
+            if ow_fits32(k2) {
+                let base0=int64(ra[0].da)
+                b=fl_kconst(k2)
+                regs=o_regs; vt=opt_vtypes
+                a=base0; ra=regs + a; rb=regs + b; rd=regs + d
+            }
         }
         else if op =? 'mul' {
             let sh=ow_log2_exact(k)

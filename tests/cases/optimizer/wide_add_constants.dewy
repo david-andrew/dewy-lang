@@ -1,0 +1,8 @@
+combine=(x:int64<overflow='wrap'>):>int64<overflow='wrap'>=>{
+    let total=x
+    loop i in [0..2) {
+        total = (total + 2147483647) + 1
+    }
+    total
+}
+main=():>void=>printl(combine(3))
