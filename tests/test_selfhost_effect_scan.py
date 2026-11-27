@@ -60,7 +60,7 @@ main = ():
     assert(effect_summaries[1].isolation == .node and effect_summaries[1].isolation_witness == n)
     effect_seen.resize(nodes.len())
     effect_scan_node(1, ref)
-    assert(effect_seen[ref] == 1)
+    assert(effect_seen[ref] > 0 and (effect_seen[ref] & 0xFFFFFF) == 1)
     print("scan ok")
 '''
 

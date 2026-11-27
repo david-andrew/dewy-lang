@@ -431,6 +431,11 @@ fact_inventory=(s:FactState base0:ElementWord):>array<int64>=>{
     let source=fact_projection_find(s base FACT_ELEMENT_SOURCE false)
     if source >=? 0 {base=s.projections[source].value}
     let parts:array<int64>=[]
+    let bt=fact_terms[base].type
+    if bt >? 0 {
+        let bk=tkind(fact_type(bt))
+        if bk not=? 'array' and bk not=? 'fixed' {return parts}
+    }
     let li=fact_projection_find(s base (-1) false)
     if li <? 0 {return parts}
     let length=fact_bound(s s.projections[li].value)

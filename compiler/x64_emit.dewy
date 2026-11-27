@@ -1144,7 +1144,10 @@ cmp_branch_pad=(span:XWord):>void=>$unsafe {
     # Most loop comparisons rely on aligned entries and fixed-size fixups.
     # Crossing backedges may grow the preceding ALU without adding executed
     # instructions. Larger forward regions also permit ordinary alignment.
-    if x_mach_loop =? 0 and x_loop_depth >? 0 and(XWord(x_code[0].length) & 31) + span <? 32 {return}
+    if x_mach_loop =? 0 and x_loop_depth >? 0 and (XWord(x_code[0].length) & 31) + span <? 32 {
+        if ((XWord(x_code[0].length) + 16) & 31) + span >=? 32 {pad_moves=true}
+        return
+    }
     if x_mach_loop =? 0 and x_loop_depth >? 0 and not x_far_if(x_branch_pos) {
         if x_branch_pos >=? 0 {
             let branch=xe_instructions[x_branch_pos]

@@ -605,6 +605,7 @@ jcc32=(cc:XWord):>XWord=>$unsafe {
     q[0]=uint32(0)
     XWord(x_code[0].length) - 4
 }
+let x_patch_moves:bool=false
 patch_branch=(pos:XWord target:XWord):>void=>$unsafe {
     let bytes=x_code[0].ptr
     let delta=target - pos
@@ -613,6 +614,7 @@ patch_branch=(pos:XWord target:XWord):>void=>$unsafe {
         let pad:XWord=if offset >=? 30 {32 - offset} else {0}
         let short=delta - 1 - pad
         if offset >=? 27 and short >=? -128 and short <=? 127 {
+            x_patch_moves=true
             if pad =? 1 {
                 bytes[pos - 1] = 0x90
             }
@@ -636,6 +638,10 @@ patch_branch=(pos:XWord target:XWord):>void=>$unsafe {
             }
         }
         else {
+            let alt=(offset + 16) & 31
+            let alt_pad:XWord=if alt >=? 30 {32 - alt} else {0}
+            let alt_short=delta - 1 - alt_pad
+            if alt >=? 27 and alt_short >=? -128 and alt_short <=? 127 {x_patch_moves=true}
             patch32(pos  delta - 4)
         }
         return
@@ -643,37 +649,47 @@ patch_branch=(pos:XWord target:XWord):>void=>$unsafe {
     let offset=(pos - 2) & 31
     let pad:XWord=if offset >=? 30 {32 - offset} else {0}
     let short=delta - pad
-    if pos >=? 2 and offset >=? 26 and (offset <? 30 or delta <? 0) and short >=? -128 and short <=? 127 and bytes[pos - 2] =? 0x0F and bytes[pos - 1] >=? 0x80 and bytes[pos - 1] <=? 0x8F {
-        let cc=bytes[pos - 1] - 0x10
-        if pad =? 1 {
-            bytes[pos - 2] = 0x90
-        }
-        else if pad =? 2 {
-            bytes[pos - 2] = 0x66
-            bytes[pos - 1] = 0x90
-        }
-        bytes[pos - 2 + pad] = cc
-        bytes[pos - 1 + pad] = uint8((short & 255) & 255)
-        if pad =? 0 {
-            patch32(pos  0x00401F0F)
-        }
-        else if pad =? 1 {
-            bytes[pos + 1] = 0x0F
-            bytes[pos + 2] = 0x1F
-            bytes[pos + 3] = 0
-        }
-        else {
-            bytes[pos + 2] = 0x66
-            bytes[pos + 3] = 0x90
-        }
-        let next=pos + 4
-        if next + 1 <? XWord(x_code[0].length) and bytes[next] & 0xF0 =? 0x40 {
-            let op=XWord(bytes[next + 1])
-            if op =? 0x89 or op =? 0x8B or op =? 0x8D or op =? 0x85 or (op <? 0x40 and (op & 7 =? 1 or op & 7 =? 3)) or (op >=? 0xB8 and op <=? 0xBF) or ((op =? 0x81 or op =? 0x83 or op =? 0xC7) and next + 2 <? XWord(x_code[0].length) and bytes[next + 2] >=? 0xC0) {
-                loop i in [pos + pad..pos + 4) {
-                    bytes[i] = 0x2E
+    if pos >=? 2 and bytes[pos - 2] =? 0x0F and bytes[pos - 1] >=? 0x80 and bytes[pos - 1] <=? 0x8F {
+        if offset >=? 26 and (offset <? 30 or delta <? 0) and short >=? -128 and short <=? 127 {
+            x_patch_moves=true
+            let cc=bytes[pos - 1] - 0x10
+            if pad =? 1 {
+                bytes[pos - 2] = 0x90
+            }
+            else if pad =? 2 {
+                bytes[pos - 2] = 0x66
+                bytes[pos - 1] = 0x90
+            }
+            bytes[pos - 2 + pad] = cc
+            bytes[pos - 1 + pad] = uint8((short & 255) & 255)
+            if pad =? 0 {
+                patch32(pos  0x00401F0F)
+            }
+            else if pad =? 1 {
+                bytes[pos + 1] = 0x0F
+                bytes[pos + 2] = 0x1F
+                bytes[pos + 3] = 0
+            }
+            else {
+                bytes[pos + 2] = 0x66
+                bytes[pos + 3] = 0x90
+            }
+            let next=pos + 4
+            if next + 1 <? XWord(x_code[0].length) and bytes[next] & 0xF0 =? 0x40 {
+                let op=XWord(bytes[next + 1])
+                if op =? 0x89 or op =? 0x8B or op =? 0x8D or op =? 0x85 or (op <? 0x40 and (op & 7 =? 1 or op & 7 =? 3)) or (op >=? 0xB8 and op <=? 0xBF) or ((op =? 0x81 or op =? 0x83 or op =? 0xC7) and next + 2 <? XWord(x_code[0].length) and bytes[next + 2] >=? 0xC0) {
+                    loop i in [pos + pad..pos + 4) {
+                        bytes[i] = 0x2E
+                    }
                 }
             }
+        }
+        else {
+            let alt=(offset + 16) & 31
+            let alt_pad:XWord=if alt >=? 30 {32 - alt} else {0}
+            let alt_short=delta - alt_pad
+            if alt >=? 26 and (alt <? 30 or delta <? 0) and alt_short >=? -128 and alt_short <=? 127 {x_patch_moves=true}
+            patch32(pos  delta - 4)
         }
     }
     else {
@@ -888,6 +904,7 @@ x_encode_begin=(est:XWord=64):>void=>$unsafe {
         h=(x_code as ptr<ptr<XWord>>)[0]
     }
     x_hdr=h
+    x_patch_moves=false
     x_pad_track=false
     x_pad0=-1
     x_pad1=-1

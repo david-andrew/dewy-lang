@@ -253,9 +253,9 @@ values_settled=(n:XEWord):>bool=>$unsafe {
         let hdr=(xe_names[0].ptr as ptr<ptr<uint8>>)[nid]
         if hdr not=? (uint64(0) as ptr<uint8>) {
             let nlen=(hdr as ptr<int64>)[1]
-            if nlen >=? 1 {
+            if nlen >=? 2 {
                 let b0=hdr[24]
-                if b0 =? 36 or (b0 =? 95 and nlen >=? 2 and hdr[25] =? 95) {return true}
+                if b0 =? 36 or (b0 =? 95 and hdr[25] =? 95) {return true}
             }
         }
     }

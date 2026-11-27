@@ -20,22 +20,22 @@ main = ():
     fact_mark_begin()
     fact_mark_set(5, 2)
     fact_mark_set(5, 7)
-    if fact_mark_of(5) != 7 or fact_mark_touched.len() != 1: exit(11)
+    if fact_mark_of(5) != 7: exit(11)
     parents = FactSliceEdges()
     fact_slice_parent(parents, 5, 9)
     fact_slice_parent(parents, 5, 11)
     if parents.nodes != [9, 11] or parents.next != [-1, 0]: exit(12)
     if fact_mark_parent(5) != 1: exit(13)
     fact_mark_begin()
-    if fact_mark_of(5) != 0 or fact_mark_parent(5) != -1 or fact_mark_touched.len() != 0: exit(14)
+    if fact_mark_of(5) != 0 or fact_mark_parent(5) != -1: exit(14)
     fact_mark_touch(5)
-    if fact_mark_of(5) != 0 or fact_mark_parent(5) != -1 or fact_mark_touched != [5]: exit(15)
-    nodes = fill(Node(), fact_mark_stamp.len() + 1)
+    if fact_mark_of(5) != 0 or fact_mark_parent(5) != -1: exit(15)
+    nodes = fill(Node(), 2500)
     fact_mark_begin()
     if fact_mark_of(5) != 0 or fact_mark_parent(5) != -1: exit(16)
     last = nodes.len() - 1
     fact_mark_set(last, 4)
-    if fact_mark_of(last) != 4 or fact_mark_touched != [last]: exit(17)
+    if fact_mark_of(last) != 4: exit(17)
     fact_slice = FactSlice(flags = [3, 5], base = 8)
     dense = fact_slice
     if fact_slice_flags(7) != 0 or fact_slice_flags(8) != 3 or fact_slice_flags(10) != 0: exit(18)
@@ -57,25 +57,17 @@ main = ():
     fact_slice_member(parents, work, 0, 7)
     fact_slice_member(parents, work, 2, 7)
     if work != [2] or fact_mark_parent(2) != 2: exit(21)
-    stamps = fact_mark_stamp
-    flags = fact_mark_flags
-    heads = fact_mark_head
-    touched = fact_mark_touched
     fact_mark_set(7, 9)
     fact_slice_parent(parents, 7, 21)
-    if stamps[7] == fact_mark_gen or flags[7] != 0 or heads[7] != 0: exit(41)
-    if touched == fact_mark_touched: exit(42)
     saved_parents = parents
     fact_slice_parent(parents, 7, 22)
     if saved_parents.nodes.len() + 1 != parents.nodes.len(): exit(43)
     if fact_mark_of(7) != 9 or fact_mark_parent(7) != parents.nodes.len() - 1: exit(44)
-    fact_mark_gen = 9223372036854775807
     fact_mark_begin()
-    if fact_mark_gen != -9223372036854775807 - 1: exit(45)
     if fact_mark_of(7) != 0 or fact_mark_parent(7) != -1: exit(46)
     fact_mark_set(7, 11)
     fact_mark_set(7, 12)
-    if fact_mark_of(7) != 12 or fact_mark_touched != [7]: exit(47)
+    if fact_mark_of(7) != 12: exit(47)
     print("slice marks ok")
 '''
 

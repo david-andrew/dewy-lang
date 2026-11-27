@@ -325,6 +325,29 @@ fact_no_state_replace_stmt=(st:CaptureWord @budget:CaptureWord):>bool=>$unsafe {
     }
     false
 }
+fact_pure_lit=(a:CaptureWord):>bool=>$unsafe {
+    if a <=? 0 {return true}
+    let nd=nodes.ptr + a
+    let k=nd[0].kind
+    match k {
+        <'int_lit'|'float_lit'|'bool_lit'|'none_lit'|'null_lit'|'dotname'> => {true}
+        <'str_lit'> => {nd[0].aux =? 0 and nd[0].nlist =? 0}
+        _ => {false}
+    }
+}
+fact_trivial_diverges=(b:CaptureWord):>bool=>$unsafe {
+    if b <=? 0 {return false}
+    let k=nodes.ptr[b].kind
+    if k =? 'break_' or k =? 'continue_' {return true}
+    if k =? 'return_' {
+        let a=CaptureWord(nodes.ptr[b].a)
+        return a <=? 0 or (refine_owners.length =? 0 and fact_pure_lit(a))
+    }
+    if k =? 'block' and CaptureWord(nodes.ptr[b].nlist) =? 1 {
+        return fact_trivial_diverges(CaptureWord(lists.ptr[CaptureWord(nodes.ptr[b].list)]))
+    }
+    false
+}
 fact_simple_diverges=(b:CaptureWord):>bool=>$unsafe {
     if b <=? 0 {return false}
     let k=nodes.ptr[b].kind
@@ -862,7 +885,7 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                     if ec not=? 0 {fact_capture(ec @s);}
                     return 0
                 }
-                if sense and ck =? 'or_' and not membership and fact_simple_diverges(CaptureWord(nodes.ptr[n].b)) {
+                if sense and ck =? 'or_' and not membership and (if fact_speculating >? 0 {fact_simple_diverges(CaptureWord(nodes.ptr[n].b))} else {fact_trivial_diverges(CaptureWord(nodes.ptr[n].b))}) {
                     let leaves:array<int64>=[]
                     if fact_flatten_or(cn @leaves) {
                         let all_pure=true

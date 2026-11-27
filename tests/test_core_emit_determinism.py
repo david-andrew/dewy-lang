@@ -34,10 +34,12 @@ def build(compiler, name, flags, output, workers):
 
 def workers_ran(log, workers):
     """How many functions the join made again; fails when the emission workers did not run."""
-    found = re.search(rf'emit: {workers} workers, .*, (\d+) functions again here', log)
+    found = re.search(r'emit: (\d+) workers, .*, (\d+) functions again here', log)
     assert found, f'the emission workers did not run:\n{log}'
+    ran = int(found.group(1))
+    assert 2 <= ran <= workers, f'unexpected worker count {ran} (requested {workers}):\n{log}'
     assert not re.search(r'fused: \d+ workers', log), 'the fused path ran: the program is not below the gate'
-    return int(found.group(1))
+    return int(found.group(2))
 
 
 def test_ungated_program_one_and_four_workers(compiler, tmp_path):

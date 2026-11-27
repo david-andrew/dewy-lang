@@ -59,14 +59,15 @@ main = ():
         n = mk(k, 0); nodes[n].a = i32(syscall)
         assert(not concurrency_blocks_node(n, seen))
     assert(not concurrency_blocks_node(0, seen))
-    files.resize(1)
+    files.resize(2)
     modules[0].is_prelude = true
     files[0].path = lib_dir + "/std/settings.jo"
+    files[1].path = "user.dewy"
     nodes[int(fns[3].decl)].name = i32(intern("__settings_core_resume"))
     fns[3].body = i32(syscall)
     seen.clear()
     assert(not concurrency_blocks(3, seen))
-    files[0].path = "user.dewy"
+    nodes[int(fns[3].decl)].pos = 1 << 40
     seen.clear()
     assert(concurrency_blocks(3, seen))
     print("waiting ok")

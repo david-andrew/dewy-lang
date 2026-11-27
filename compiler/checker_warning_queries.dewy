@@ -110,11 +110,15 @@ hidden_method_load_std=(dn:string pk:TK):>bool=>{
     if r >=? 0 {
         let f=std_file_init(int64(r))
         if not hidden_method_std_file_can_match(f dn pk) {return false}
-        return load_std_file(f)
+        load_std_file(f);
+        return true
     }
     let any=false
     loop f in std_files_for(dn) {
-        if hidden_method_std_file_can_match(f dn pk) and load_std_file(f) {any=true}
+        if hidden_method_std_file_can_match(f dn pk) {
+            load_std_file(f);
+            any=true
+        }
     }
     any
 }

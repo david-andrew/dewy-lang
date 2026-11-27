@@ -6,7 +6,9 @@ from p"checker_type_entries.dewy" import (get_fn_inst)
 from p"checker_method_receiver.dewy" import (method_modules)
 from p"checker_module_lookup.dewy" import (demand_name)
 from p"checker_contexts.dewy" import (cur_mod)
-from p"prelude_ops.dewy" import (dewy_prelude_lookup)
+from p"prelude_ops.dewy" import (demand_prelude_name dewy_prelude_lookup)
+from p"prelude.jo" import (prelude_std_pending)
+from p"checker_startup.dewy" import (load_std_file)
 from p"checker_expr.dewy" import (check_expr)
 from p"checker_state.dewy" import (FnCtx)
 from p"ast.jo" import (nkids nodes)
@@ -130,6 +132,8 @@ path_literal_module=(n:LookupWord callee:LookupWord args:array<int64>):>LookupWo
     let off=LookupWord(pos_off(nodes.ptr[callee].pos)) + 1
     if off >=? (src_s as array<uint8>).length or ((src_s as array<uint8>).ptr[off] not=? 34 and (src_s as array<uint8>).ptr[off] not=? 39) {return -1}
     let name=LookupWord(nodes.ptr[callee].name)
+    if prelude_std_pending {load_std_file("files.jo");}
+    demand_prelude_name(name)
     let s=prelude.get(int64(name)) ?? dewy_prelude_lookup(name)
     if s =? 0 or syms.ptr[s].decl =? 0 {return -1}
     LookupWord(nodes.ptr[LookupWord(syms.ptr[s].decl)].mod)

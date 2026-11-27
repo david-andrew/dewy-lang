@@ -219,9 +219,9 @@ main = ():
     ptr_type = add(TypeInfo(kind=.ptr, elem=1, size=8, align=8, flags=2))
     opt_ptr = add(TypeInfo(kind=.opt, elem=i32(ptr_type)))
     arr = add(TypeInfo(kind=.array, elem=1))
-    refined_arr = add(TypeInfo(kind=.refined, elem=i32(arr)))
-    quantity_arr = add(TypeInfo(kind=.quantity, elem=i32(arr)))
-    secret_arr = add(TypeInfo(kind=.secret, elem=i32(arr)))
+    refined_arr = add(TypeInfo(kind=.refined, elem=i32(arr), flags=32))
+    quantity_arr = add(TypeInfo(kind=.quantity, elem=i32(arr), flags=32))
+    secret_arr = add(TypeInfo(kind=.secret, elem=i32(arr), flags=32))
     fixed = add(TypeInfo(kind=.fixed, elem=1, bits=3))
     texture_type = record("Texture", [], 42)
     structs[int(types[texture_type].st)].nfields = 0

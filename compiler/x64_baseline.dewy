@@ -7637,7 +7637,7 @@ bl_eval=(e:BlWord):>void=>$unsafe {
                 res_off=bl_tmp_alloc(sz  XWord(talign(t)))
                 bl_zero_mem(RBP  -res_off  sz)
             }
-            bl_emit_block(e  res_off  t)
+            bl_emit_block(e  res_off  t  1)
             if is_val {
                 bl_load_val(t  RBP  -res_off)
                 bl_last_owned=is_managed(t) or vc(t) =? VC_AGG
@@ -8237,7 +8237,7 @@ bl_try_match_lookup=(m:BlWord st0:BlWord rtp0:BlWord):>bool=>$unsafe {
         }
     }
     if not have or vals.length <? 4 {return false}
-    if hi - lo >=? 1024 or hi <? lo {return false}
+    if hi <? lo or uint64<overflow='wrap'>(hi) - uint64<overflow='wrap'>(lo) >=? uint64<overflow='wrap'>(1024) {return false}
     let span=hi - lo + 1
     if wild <? 0 {
         if sk not=? 'enum_' {return false}
@@ -8294,7 +8294,7 @@ bl_try_match_lookup=(m:BlWord st0:BlWord rtp0:BlWord):>bool=>$unsafe {
         loop byte in [0..width) {rodata.push(uint8<overflow='wrap'>((value >> (8 * byte)) & 255))}
     }
     if lo not=? 0 {
-        if -lo >=? -2147483648 and -lo <=? 2147483647 {bl_add_imm(RAX  XWord(-lo))}
+        if lo >=? -2147483647 and lo <=? 2147483648 {bl_add_imm(RAX  XWord(-lo))}
         else {mov_imm(RDX  XWord(lo)); op_rr(0x29  true  RDX  RAX)}
     }
     mov_imm(RCX  XWord(fallback))
@@ -9138,13 +9138,14 @@ bl_emit_stmt=(s:BlWord):>void=>$unsafe {
         <'continue_'> => bl_emit_break_continue(s  false)
         <'defer_'> => {bl_defer_nodes.push(BlWord(nodes.ptr[s].a))}
         <'return_'> => bl_emit_return_expr(BlWord(nodes.ptr[s].a)  nodes.ptr[s].pos)
-        <'block'> => bl_emit_block(s  -1  0)
+        <'block'> => bl_emit_block(s  -1  0  2)
         _ => {}
     }
 }
 
-bl_emit_block=(bnode:BlWord val_off:XWord val_ty:BlWord):>void=>$unsafe {
-    let unscoped=nodes.ptr[bnode].aux =? 5 or has_flag(bnode NF_UNSCOPED)
+# unscoped_mode: 0 always scoped (branch/match arm/loop body), 1 NF_UNSCOPED only (value block), 2 NF_UNSCOPED or aux==5 (stmt block)
+bl_emit_block=(bnode:BlWord val_off:XWord val_ty:BlWord unscoped_mode:BlWord=0):>void=>$unsafe {
+    let unscoped=if unscoped_mode =? 2 {nodes.ptr[bnode].aux =? 5 or has_flag(bnode NF_UNSCOPED)} else if unscoped_mode =? 1 {has_flag(bnode NF_UNSCOPED)} else {false}
     let smark=bl_scope_off.length
     let dmark=bl_defer_nodes.length
     if not unscoped {

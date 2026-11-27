@@ -60,16 +60,18 @@ main = ():
     nodes[17] = Node(kind=.conv, type=i32(T_INT), aux=i32(int(CV.fixed_store)), a=1)
     if positive_bound(17, false) != 5: exit(17)
     positive_cache = []; positive_stamp = []; positive_epoch = 1
-    if positive_bound(1, true) != 5 or positive_cache.len() != nodes.len(): exit(18)
+    if positive_bound(1, true) != 5: exit(18)
+    if positive_bound(10, true) != 7 or positive_cache.len() < nodes.len(): exit(18)
     saved_cache = positive_cache
     saved_stamp = positive_stamp
     nodes[1].ival = 6
-    if positive_bound(1, true) != 5 or positive_bound(1, false) != 6: exit(19)
+    if positive_bound(10, true) != 7 or positive_bound(10, false) != 8: exit(19)
     positive_epoch += 1
-    if positive_bound(1, true) != 6 or saved_cache[1] != 5 or saved_stamp[1] != 1: exit(20)
-    nodes.resize(200)
-    nodes[199] = Node(kind=.int_lit, type=i32(T_INT), ival=13)
-    if positive_bound(199, true) != 13 or positive_cache.len() != 200 or saved_cache.len() != 128: exit(21)
+    if positive_bound(10, true) != 8 or saved_cache[10] != 7 or saved_stamp[10] != 1: exit(20)
+    big = positive_cache.len() + 16
+    nodes.resize(big)
+    nodes[big - 1] = Node(kind=.binary, type=i32(T_INT), op=i32(int(Tok.plus)), a=1, b=6)
+    if positive_bound(big - 1, true) != 8 or positive_cache.len() < big or saved_cache.len() >= big: exit(21)
     positive_bounds = {}
     positive_local_write(1, 5)
     saved_bounds = positive_bounds

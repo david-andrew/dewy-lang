@@ -22,6 +22,7 @@ def test_facts_slice_builder_twins(compiler, tmp_path, monkeypatch):
 def test_facts_slice_builder_keys_and_marks(compiler, tmp_path, monkeypatch):
     monkeypatch.setenv("DEWY_CORE_LIB", str(ROOT / "lib"))
     monkeypatch.setattr(selfhost_lsp_double, "DRIVER", """use 'main.jo'
+use 'facts_slice_prep.dewy'
 use 'facts_slice_builder.dewy'
 use 'facts.jo'
 use 'checker_tokens.dewy'
@@ -36,15 +37,14 @@ main = ():
         assert(fact_root_key(PlaceIdentity(PlaceRoot(i), 9, 17)) == 136 + i)
     nodes.resize(11)
     fact_mark_begin()
-    assert(fact_mark_gen == 1 and fact_mark_stamp.len() >= 11)
-    assert(fact_mark_stamp.len() == fact_mark_flags.len() and fact_mark_stamp.len() == fact_mark_head.len())
-    fact_mark_stamp[2] = 19
-    fact_mark_touched.push(2)
+    fact_mark_set(2, 19)
+    assert(fact_mark_of(2) == 19)
     fact_mark_begin()
-    assert(fact_mark_gen == 2 and fact_mark_stamp[2] == 19 and fact_mark_touched.len() == 0)
-    nodes.resize(fact_mark_stamp.len() + 1)
+    assert(fact_mark_of(2) == 0)
+    nodes.resize(2500)
     fact_mark_begin()
-    assert(fact_mark_gen == 1 and fact_mark_stamp[2] == 0)
+    fact_mark_set(2499, 7)
+    assert(fact_mark_of(2) == 0 and fact_mark_of(2499) == 7)
     print("ok")
 """)
     for binary in leaf_compilers(compiler, tmp_path, ("facts_slice_builder",)):

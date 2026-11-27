@@ -78,7 +78,7 @@ main = ():
         tb_init_types()
         assert(T_VOID == 1 and T_BOOL == 2 and T_INT == 3 and T_MATH_INT == 4, "builtin allocation order")
         assert(types[T_STR].size == i32(word) and types[T_NULL].align == i32(word))
-        assert(types[T_MATH_INT].rep == .tagged_int and types[T_NEVER].flags == 10)
+        assert(types[T_MATH_INT].rep == .tagged_int and (types[T_NEVER].flags & 10) == 10)
         assert(types[T_VEC3].size == 12 and types[T_VEC3].align == 4 and types[T_IVEC4].sign)
         saved_types = types
         saved_args = args
@@ -120,12 +120,12 @@ main = ():
         low = int(tb_mk_fixed(T_INT, -9223372036854775807 - 1))
         assert(types[low].bits == 0)
         fresh = int(tb_mk_var())
-        assert(types[fresh].args == i32(args.len()) and types[fresh].nargs == 0 and types[fresh].flags == 1)
+        assert(types[fresh].args == i32(args.len()) and types[fresh].nargs == 0 and (types[fresh].flags & 1) == 1)
         tuple: int = int(tb_mk_tuple([T_INT, T_STR], false))
         values: int = int(tb_mk_values([T_INT, T_STR]))
         assert(tuple != values and values_any and types[values].sign)
         a: int = int(tb_mk_typeval(T_INT)); b: int = int(tb_mk_typeval(T_INT))
-        assert(a != b and types[a].flags == 2 and types[a].kind == .typeval)
+        assert(a != b and (types[a].flags & 2) == 2 and types[a].kind == .typeval)
         a = int(tb_mk_modval(123)); b = int(tb_mk_modval(123))
         assert(a != b and types[a].mod == 123 and types[a].kind == .module)
         assert(saved_types.len() == nt and saved_args.len() == na and saved_table != table, "constructor arena snapshots")

@@ -94,7 +94,14 @@ ref_string_set_type=(@sets:array<array<string>> @set_types:array<int64> @types:a
             bp[off]=39
             off += 1
         }
-        text=buf as string ?? ""
+        let built=buf as string | none
+        if built is? string {text=built}
+        else {
+            loop i in [0..vlen) {
+                if i >? 0 {text="{text} | "}
+                text="{text}'{vsp[i]}'"
+            }
+        }
     }
     let si=StructInfo[name=text resolved=true lit_set=int32(id) variants=int32(variants.length) nvariants=int32(values.length)]
     if vlen >? 0 {variants.reserve(variants.length + vlen)}

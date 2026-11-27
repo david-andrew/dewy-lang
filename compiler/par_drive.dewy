@@ -21,6 +21,7 @@ from p"x64.jo" import (code data_fix fn_addr fn_len)
 from p"x64_ops.dewy" import (x64_code_align)
 from p"x64_allocate.dewy" import (ra_dump)
 from p"x64_emit.dewy" import (cabi_fix call_fix call_sites line_rows nchk_rows pad_moves ra_stat ro_const ro_new rsp_rows stub_fix)
+from p"x64_encode.dewy" import (x_patch_moves)
 from p"x64_module.dewy" import (cabi_adapter)
 
 ParWord:type=int64<overflow='wrap'>
@@ -150,7 +151,7 @@ par_worker=(q:array<IrFn> fin:array<bool> a:ParWord b:ParWord r0:ParWord fd:ParW
         pw(@out fn_addr[ir.fn_index])
         pw(@out fn_len[ir.fn_index])
         let moved:ParWord=0
-        if pad_moves {moved=1}
+        if pad_moves or x_patch_moves {moved=1}
         pw(@out moved)
         loop x in at {pw(@out x)}
     }
