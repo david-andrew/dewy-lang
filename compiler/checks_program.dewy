@@ -34,6 +34,7 @@ from p"util.jo" import (files intern mkpos name_of pos_file pos_in_lib)
 from p"source_warnings.dewy" import (warn)
 from p"source_queries.dewy" import (line_col)
 from p"diagnostic_exit.dewy" import (fatal)
+from p"definite.jo" import (dg_tests)
 
 ProgramWord:type=int64<overflow='wrap'>
 # if __test_begin(name): body; __test_end()   (the body in a process of its own, where it can be)
@@ -177,6 +178,7 @@ program_tests=(mainm:ProgramWord main_path:string):>void=>$unsafe {
     if test_mode {
         # top-level code runs first (it may set up globals), then each test in order
         if not check_all {skip_main=true}
+        let first=modules[mainm].inits.length
         let count:ProgramWord=0
         let computed:array<int64>=[]
         loop d in test_decls {
@@ -215,6 +217,9 @@ program_tests=(mainm:ProgramWord main_path:string):>void=>$unsafe {
         let total=cnt
         loop cases in computed {total=bc_bin('plus' total bc_call("__test_count" [cases] 0) 0)}
         modules[mainm].inits.push(synth_call("__test_done" [total] 0))
+        if check_all {
+            loop i in [first..modules[mainm].inits.length) {dg_tests[modules[mainm].inits[i]]=true}
+        }
     }
 }
 program_game=(mainm:ProgramWord has_upd:bool has_drw:bool):>void=>$unsafe {

@@ -1,0 +1,8 @@
+# A test may read a global main gives a value: tests never run in a build
+let y:int64
+main = () => {
+    y = 3
+    printl(y)
+}
+$test
+reads = () => $expect y =? 3

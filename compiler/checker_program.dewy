@@ -343,7 +343,7 @@ check_program=(main_path:string):>void=>$unsafe {
         }
     }
     merge_cycle_inits(order)
-    if dg_globals.length >? 0 and not test_mode {
+    if dg_globals.length >? 0 and (not test_mode or check_all) {
         let later:array<int64>=[]
         if update_fn >? 0 {later.push(update_fn)}
         if draw_fn >? 0 {later.push(draw_fn)}
