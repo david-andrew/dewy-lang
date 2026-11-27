@@ -1,0 +1,8 @@
+# The implied lower bound is checked on each yield
+positions = (names:array<string>):>generator<int64<(<? names.length)>> => lazy loop i in [0..names.length) {
+    i - 1
+}
+main = () => {
+    const names = ["b" "a" "c"]
+    loop v in positions(names) printl(v)
+}

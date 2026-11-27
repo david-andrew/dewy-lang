@@ -1434,7 +1434,10 @@ on every store and holds on every read: `stack.pop()`, a sorted or reversed copy
 of a `generator<addr<(<? n)>>`, whose yields are checked. **Provisional:** as for
 self-length arrays, an upper bound on a signed value by a constant's length,
 `int64<(<? names.length)>` after `const names = ...`, also means `>=? 0` unless the
-contract states its own lower bound (`int64<v => -1 <=? v and v <? names.length>`). The library's own sorts
+contract states its own lower bound (`int64<v => -1 <=? v and v <? names.length>`), and
+so does a generator result's element contract naming a by-value parameter's length,
+`:>generator<int64<(<? names.length)>>` (also provisional); a scalar parameter's contract,
+`i:int64<(<? xs.length)>`, does not. The library's own sorts
 and dictionary operations prove their moves of such values. A closure or lazy body
 keeps what its creator knew of a value it captures as a snapshot and never changes
 (`if step <=? 0 return` before `(i) => i // step`); a `$capture` that changes, or a

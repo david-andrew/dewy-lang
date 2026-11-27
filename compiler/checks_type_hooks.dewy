@@ -7,7 +7,7 @@ from p"checker_scope_symbols.dewy" import (new_local new_sym push_scope_sym scop
 from p"proof_ops.dewy" import (result_signature)
 from p"proof_ops.dewy" import (proof_atom_type)
 from p"error_ops.dewy" import (nominal_descends)
-from p"refine_rare.dewy" import (ref_holder_candidate ref_atoms)
+from p"refine_rare.dewy" import (ref_holder_candidate ref_atoms ref_generator_element_nonnegative)
 from p"checks_thin.dewy" import (jd)
 from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (NF_EXTERN NF_LITERAL NF_MUT clone has_flag kid kid2 kids mk nkids nkids2 nodes)
@@ -222,6 +222,7 @@ signature_finish=(decl:int64 @sig:FnSig shaped:bool mask:int64):>void=>$unsafe {
         proof_predicates[decl]=ref_intern(atoms)
     }
     if refine_active {
+        sig.ret=int32(ref_generator_element_nonnegative(int64(sig.ret)))
         ref_validate_signature(sig.params int64(sig.ret) mask nodes.ptr[decl].pos)
         if has_flag(decl NF_EXTERN) {
             # (a refined result is the unsafe declaration's claim, trusted like

@@ -1,0 +1,8 @@
+# The element contract naming a parameter's length also means >=? 0 (provisional)
+positions = (names:array<string>):>generator<int64<(<? names.length)>> => lazy loop i in [0..names.length) {
+    names.length - 1 - i
+}
+main = () => {
+    const names = ["b" "a" "c"]
+    loop v in positions(names) printl(names[v])
+}

@@ -53,7 +53,7 @@ from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactRequest Fa
 from p"string_domain_ops.dewy" import (string_domain_conversion int_domain_conversion)
 from p"string_domains.jo" import (domain_literals)
 from p"string_domains.jo" import (string_domain_conversion_stops string_domain_proofs string_domains string_set_obligations)
-from p"type_ops.dewy" import (dt mk_array)
+from p"type_ops.dewy" import (dt mk_array mk_generator)
 from p"type_refinement.dewy" import (tr_limit)
 from p"type_value_arguments.dewy" import (integer_parameter_literal integer_parameter_type)
 from p"types.jo" import (T_I16 T_I32 T_I8 T_INT T_MATH_INT T_STR T_U16 T_U32 T_U64 T_U8 T_VOID fields has_var is_int prune struct_targ structs tkind type_eq types)
@@ -1209,7 +1209,29 @@ resolve_refinement=(n:int64):>int64=>$unsafe {
     if not ref_spans.has(predicate) {ref_spans[predicate]=nodes.ptr[n].pos}
     mk_refined(base predicate)
 }
-ref_lexical_length_bound=(atoms:array<RefAtom>):>bool=>{
+ref_lexical_length_bound=(atoms:array<RefAtom>):>bool=>{ref_length_bound(atoms 3)}
+# Provisional, the same rule for a generator result's element contract naming a by-value
+# parameter's length, `:>generator<int64<(<? names.length)>>`: each element is a valid
+# index into the argument, so `>=? 0` too, unless the contract states its own lower bound.
+# A scalar parameter's contract, `i:int64<(<? xs.length)>`, is unchanged. O(atoms).
+ref_generator_element_nonnegative=(ret:int64):>int64=>$unsafe {
+    let g=prune(ret)
+    if types.ptr[g].kind not=? 'generator' {return ret}
+    let e=prune(RefineRareWord(types.ptr[g].elem))
+    if types.ptr[e].kind not=? 'refined' or types.ptr[e].bits =? -2 {return ret}
+    let rep=representation_type(RefineRareWord(types.ptr[e].elem))
+    if not is_int(rep) or not types.ptr[rep].sign {return ret}
+    let predicate=RefineRareWord(types.ptr[e].st)
+    let atoms=ref_predicates[predicate]
+    if not ref_length_bound(atoms 2) {return ret}
+    let more=[atoms... RefAtom('le' RefTerm(1 0) RefTerm(0))]
+    let widened=ref_intern(more)
+    if not ref_spans.has(widened) and ref_spans.has(predicate) {ref_spans[widened]=ref_spans[predicate]}
+    mk_generator(mk_refined(RefineRareWord(types.ptr[e].elem) widened))
+}
+# (an upper bound on the value by the length of a term of this kind, and no lower bound
+# or equality of its own)
+ref_length_bound=(atoms:array<RefAtom> kind:RefineRareWord):>bool=>{
     let upper=false
     loop atom in atoms {
         let own_left=atom.a.kind =? 0 and atom.a.path.length =? 0
@@ -1217,7 +1239,7 @@ ref_lexical_length_bound=(atoms:array<RefAtom>):>bool=>{
         if (atom.op =? 'lt' or atom.op =? 'le') and own_right {return false}
         if (atom.op =? 'gt' or atom.op =? 'ge') and own_left {return false}
         if atom.op =? 'eq' and (own_left or own_right) {return false}
-        if (atom.op =? 'lt' or atom.op =? 'le') and own_left and atom.b.kind =? 3 and ref_path_length(atom.b.path) {upper=true}
+        if (atom.op =? 'lt' or atom.op =? 'le') and own_left and atom.b.kind =? kind and ref_path_length(atom.b.path) {upper=true}
     }
     upper
 }

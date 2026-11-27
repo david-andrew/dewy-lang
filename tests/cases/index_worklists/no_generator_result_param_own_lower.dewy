@@ -1,0 +1,9 @@
+# A contract with its own lower bound keeps it
+positions = (names:array<string>):>generator<int64<v => -1 <=? v and v <? names.length>> => lazy loop i in [0..names.length) {
+    i - 1
+}
+main = () => {
+    const names = ["b" "a" "c"]
+    loop v in positions(names) printl(v)
+    loop v in positions(names) printl(names[v])
+}
