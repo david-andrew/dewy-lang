@@ -1712,7 +1712,7 @@ zero:
 $runtime_checks              # dividing by a unit is checked
 
 from units import K, °C, °F
-let start = 20°C
+let start = 20*°C            # a number times the unit: a point
 let later = start+15°C       # 35°C: a literal added to a point is a difference
 let rise = later-start       # 15°C: point - point is a difference
 printl"{rise as °F} {later as °F} {mean[start later]} {start/°F}"  # 27°F 95°F 55/2°C 68
@@ -4946,8 +4946,8 @@ main = ():>void => $unsafe {
     text.push(0)
     let stop:array<ptr<uint8>?> = [none]
     printl(strtol(text.ptr stop.ptr 10))   # 12
-    let end = stop[0]
-    if end isnt? none { printl(end[0]) }   # 97
+    let rest = stop[0]
+    if rest isnt? none { printl(rest[0]) }   # 97
 }
 ```
 
