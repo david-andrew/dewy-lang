@@ -1,0 +1,6 @@
+# Zero plus or minus a nonzero value stays nonzero
+flip = (s:-1|1):>-1|1 => -s
+printl(flip(1))
+printl(flip(-1))
+f = (s:-1|1):>int64 => 10 // (0 - s) + 10 // (s + 0) + 10 // -s
+printl(f(1))

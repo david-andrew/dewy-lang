@@ -340,6 +340,14 @@ fact_arithmetic=(@s:FactState n:ArithWord op:Tok a:ArithWord b:ArithWord):>Arith
     if (lo_open or hi_open) and exact_has_node(n) {term_type=T_MATH_INT}
     if not lo_open and not hi_open {term_type=fact_word_type(s n a b lo hi)}
     let value=fact_new(@s fact_open_bound(lo hi lo_open and lo =? FACT_MIN hi_open and hi =? FACT_MAX) FactTerm(op a b n term_type))
+    # (zero plus or minus a nonzero value is nonzero: `-s` of an `s:-1|1`. O(1))
+    if value not=? 0 and (x.lo =? 0 and x.hi =? 0 and y.nz or y.lo =? 0 and y.hi =? 0 and x.nz) {
+        let held=fact_bound(s value)
+        if not held.nz {
+            held.nz=true
+            fact_set_bound(@s value held)
+        }
+    }
     loop r in sums {fact_difference(@s (if r.a =? 0 {value} else {r.a}) (if r.b =? 0 {value} else {r.b}) r.limit n)}
     if y.lo =? y.hi and y.lo not=? FACT_MIN {
         fact_difference(@s value a y.lo 0 16)
