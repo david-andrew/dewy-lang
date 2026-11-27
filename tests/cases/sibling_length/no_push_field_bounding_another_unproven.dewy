@@ -1,0 +1,8 @@
+G:type = [names:array<string> targets:array<int64<(<? names.length)>> starts:array<int64<(<=? targets.length)>>]
+add = (@g:G t:addr):>void => {
+    g.targets.push(t)
+}
+main = () => {
+    let g = G[["a" "b" "c"] [] [0]]
+    add(@g 1)
+}

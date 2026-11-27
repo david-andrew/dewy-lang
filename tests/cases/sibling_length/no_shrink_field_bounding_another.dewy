@@ -1,0 +1,10 @@
+# Shrinking a field another's elements are bounded by may break them: not in place.
+G:type = [names:array<string> targets:array<int64<(<? names.length)>> starts:array<int64<(<=? targets.length)>>]
+drop = (@g:G):>void => {
+    if g.targets.is_empty return
+    g.targets.pop();
+}
+main = () => {
+    let g = G[["a" "b" "c"] [1 2] [0 2]]
+    drop(@g)
+}

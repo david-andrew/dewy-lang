@@ -708,8 +708,14 @@ ref_sib_in_place=(n:RefineSibWord id:IN place0:RefineSibWord t:RefineSibWord):>b
     if record =? 0 {return false}
     let at=RefineSibWord(nodes.ptr[ref_place_alias(place0)].aux)
     if ref_sib_contract(t) {
-        if not ref_sib_free(place0 t) {return false}
-        if id =? IN.pop or id =? IN.truncate or id =? IN.remove or id =? IN.clear {return true}
+        loop atom in ref_predicates[RefineSibWord(types.ptr[prune(t)].st)] {
+            if not ref_sib_atom(atom) {return false}
+        }
+        # (a field another's elements are bounded by, `starts:array<int64<(<=? targets.length)>>`,
+        # may grow in place, as an unrefined such sibling does: only a shrink owes them a check)
+        let shrink=id =? IN.pop or id =? IN.truncate or id =? IN.remove or id =? IN.clear
+        if not ref_sib_unnamed(record at) and (shrink or not ref_sib_only_bounds(record at)) {return false}
+        if shrink {return true}
         if (id =? IN.push or id =? IN.insert) and nkids(n) >=? 2 {
             ref_self_value(kid(n 1) t 0 place0)
             return true

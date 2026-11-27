@@ -1,0 +1,13 @@
+# A field bounded by one sibling and bounding another grows in place: a proven push keeps both.
+G:type = [names:array<string> targets:array<int64<(<? names.length)>> starts:array<int64<(<=? targets.length)>>]
+main = () => {
+    let g = G[["a" "b" "c"] [] [0]]
+    loop t in ["c" "a" "x"] {
+        g.targets.push(g.names.index_of(t) ?? continue)
+    }
+    g.starts.push(g.targets.length)
+    let more:array<addr> = [1]
+    g.targets.extend(more)
+    printl(g.targets g.starts)
+    loop v in g.targets printl(g.names[v])
+}
