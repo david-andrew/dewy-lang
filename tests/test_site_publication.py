@@ -30,7 +30,7 @@ def test_site_requires_explicit_example_intent(tmp_path):
         checker.metadata('{"mode":"run"}', 'lesson:1')
     with pytest.raises(ValueError, match='diagnostic'):
         checker.metadata('{"mode":"reject"}', 'lesson:1')
-    page.write_text('<!-- dewy-example: {"mode":"design-only"} -->\n```dewy\nunimplemented\n```\n')
+    page.write_text('<!-- dewy-example: {"mode":"design-only","why":"not built yet"} -->\n```dewy\nunimplemented\n```\n')
     example, = checker.examples_in(page)
     assert example.metadata['mode'] == 'design-only'
     parser = checker.StaticExamples(page)
