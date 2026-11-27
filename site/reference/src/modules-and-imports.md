@@ -55,7 +55,7 @@ Target names have only the fields they need, not LLVM triples: a processor alone
 
 ## Prelude
 
-Before checking an ordinary module, the compiler supplies a source prelude of shadowable bindings: paths, printing, `rational` and `fixed` numbers, time (the second and its scales, `Duration`), and the current target's services layer. Every other unit of measure is imported from the library module `units`. `$no_prelude = true` disables those implicit bindings for its containing module only. Imported modules retain their own prelude decision.
+Before checking an ordinary module, the compiler supplies a source prelude of shadowable bindings: paths, printing, `rational` and `fixed` numbers, time (the second and its scales, `Duration`), and the current target's services layer. Every other unit of measure is imported from the library module `units`. `$no_prelude = true` disables those implicit bindings for its containing module only (designed; the current compiler reports it as not implemented yet). Imported modules retain their own prelude decision.
 
 ## Provisional Package Facilities
 

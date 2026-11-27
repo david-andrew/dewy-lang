@@ -49,7 +49,10 @@ printl(42)
 ````
 
 Modes: `check`, `run` (exact `stdout`, optional `exit`/`args`), `reject`
-(required `diagnostic` substring), `design-only`. Static code uses a JSON
+(required `diagnostic` substring), `design-only`. Examples compile under the
+default rules (no hidden runtime checks); `"runtime_checks": true` compiles one
+under `$runtime_checks`. In the Learn book, the build shows each `run` example's
+checked `stdout` under it. Static code uses a JSON
 `data-example` attribute on `code.language-dewy`. `fixtures` supplies named
 companion-file contents; `prefix`/`suffix` supply a declared context for a snippet.
 The checker writes complete temporary files and reports page/line plus compiler

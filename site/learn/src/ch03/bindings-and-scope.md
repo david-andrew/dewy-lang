@@ -9,13 +9,4 @@ let score = 20
 printl(score)
 ```
 
-Expected output:
-
-```text
-42
-20
-```
-
-Run the example from a file with `dewy example.dewy`. Its exact output is checked by the website build on the native release target.
-
-> **Design boundary.** The [Bindings and Scope reference](/reference/bindings-and-scope.html) specifies the complete language rules. A passing example covers this program only. See [generated coverage](/status/#ref-bindings-and-scope) for related acceptance programs and unmeasured areas.
+The [reference](/reference/bindings-and-scope.html) has the complete rules.

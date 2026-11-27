@@ -70,6 +70,28 @@ def channel_html(identity):
             +html.escape(identity)+'</pre></details>')
 
 
+def show_outputs(markdown):
+    """Show each run example's checked stdout under its fence."""
+    lines, out, data = markdown.split('\n'), [], None
+    i = 0
+    while i < len(lines):
+        line = lines[i]; out.append(line)
+        marker = re.fullmatch(r'<!--\s*dewy-example:\s*(\{.*\})\s*-->', line.strip())
+        if marker: data = json.loads(marker[1])
+        elif line.strip() == '```dewy' and data:
+            i += 1
+            while i < len(lines) and lines[i].strip() != '```': out.append(lines[i]); i += 1
+            if i < len(lines): out.append(lines[i])
+            if data.get('mode') == 'run' and data.get('stdout'):
+                args = ' '.join(data.get('args', []))
+                label = 'Output' + (f' (with arguments <code>{html.escape(args)}</code>)' if args else '')
+                out += ['', f'<div class="dewy-output"><span>{label}</span><pre><code>{html.escape(data["stdout"].rstrip(chr(10)))}</code></pre></div>']
+            data = None
+        elif line.strip(): data = None
+        i += 1
+    return '\n'.join(out)
+
+
 def build_book(source, destination, mdbook, scratch):
     # Expand generated prose in a disposable source copy; never edit tracked source.
     book = scratch/source.name
@@ -78,6 +100,7 @@ def build_book(source, destination, mdbook, scratch):
     for p in (book/'src').rglob('*.md'):
         value = p.read_text()
         for key,text in REPLACEMENTS.items():value=value.replace(f'<!-- generated: {key} -->',text)
+        if source == LEARN: value = show_outputs(value)
         p.write_text(value)
     run([mdbook,'build',str(book),'--dest-dir',str(destination)])
     # mdBook 0.4 prefixes root-relative Markdown URLs in nested print chapters.

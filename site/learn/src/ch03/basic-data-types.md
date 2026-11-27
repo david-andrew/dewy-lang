@@ -1,20 +1,28 @@
 # Types and Numbers
 
-`int` is the arbitrary-precision integer; explicit widths such as `int64` fix how a value is stored. Type annotations follow a colon.
+Types are inferred, and an annotation after a colon states one when you want to. The everyday types are `int`, `rational`, `float64`, `bool` and `string`.
 
-<!-- dewy-example: {"mode": "run", "stdout": "42 true\n"} -->
+<!-- dewy-example: {"mode": "run", "stdout": "42 true\n1267650600228229401496703205376\n7/2 3\n"} -->
 ```dewy
-let count:int64 = 40
-let ready:bool = true
-printl"{count+2} {ready}"
+let count:int = 40
+let ready = true
+printl"{count + 2} {ready}"
+
+printl(2^100)            # int never overflows
+printl"{7 / 2} {7 // 2}" # exact division, floor division
 ```
 
-Expected output:
+`int` is the mathematical integer. It is stored in a machine word while the value fits and grows when it does not, so ordinary arithmetic is both fast and exact. Dividing two integers with `/` gives an exact `rational`, and `//` is floor division. A decimal literal such as `0.1` is exact too, unless a float is wanted.
 
-```text
-42 true
+`float64` and `float32` are IEEE floating point, used when you ask for them:
+
+<!-- dewy-example: {"mode": "run", "stdout": "0.30000000000000004\ntrue\n"} -->
+```dewy
+let x:float64 = 0.1
+printl(x + 0.2)
+printl(0.1 + 0.2 =? 0.3)
 ```
 
-Run the example from a file with `dewy example.dewy`. Its exact output is checked by the website build on the native release target.
+Fixed-width integers (`int8` to `int64`, `uint8` to `uint64`) fix how a value is stored, for dense data and interop. Arithmetic on them is exact; storing a result that might not fit the width is a compile error, unless the type says it wraps or saturates (`uint32<overflow='wrap'>`).
 
-> **Design boundary.** The [Types and Numbers reference](/reference/numeric-types.html) specifies the complete language rules. A passing example covers this program only. See [generated coverage](/status/#ref-numeric-types) for related acceptance programs and unmeasured areas.
+The [reference](/reference/numeric-types.html) has the complete rules.

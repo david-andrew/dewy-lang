@@ -8,6 +8,22 @@
     "target": "wasm-release"
   },
   {
+    "id": "words",
+    "title": "Counting words",
+    "source": "text = \"the cat sat on the mat and the dog sat too\"\n\nlet counts:dict<string int> = []\nloop word in text.split(\" \") {\n    if word not in? counts counts[word] = 0\n    counts[word] += 1      # proven present: no KeyError\n}\n\nloop [word n] in counts if n >? 1 printl\"{word} × {n}\"\nprintl\"owls: {counts.get(\"owl\") ?? 0}\"\n",
+    "stdout": "the × 3\nsat × 2\nowls: 0\n",
+    "mode": "run",
+    "target": "wasm-release"
+  },
+  {
+    "id": "primes",
+    "title": "A prime generator",
+    "source": "primes = ():>generator<int> => $outer lazy loop n in 2.. {\n    loop d in 2..n {\n        if d * d >? n { break }\n        if n % d =? 0 { continue $outer }\n    }\n    n\n}\n\nprintl([loop _ in [0..10) and p in primes() p])\n",
+    "stdout": "[2 3 5 7 11 13 17 19 23 29]\n",
+    "mode": "run",
+    "target": "wasm-release"
+  },
+  {
     "id": "values",
     "title": "Independent array values",
     "source": "let original = [20 22]\nlet copy = original\ncopy[0] = 99\nprintl(original[0]+original[1])\n",

@@ -1,20 +1,36 @@
 # Optional Values and Narrowing
 
-An optional value is a union with `none`. Test its member type before using the contained value.
+Dewy has no `null`. A value that may be missing has a union type with `none`, such as `int | none`, written `int?` for short. Before using it as an `int`, the code has to rule out `none`.
 
-<!-- dewy-example: {"mode": "run", "stdout": "42\n"} -->
+<!-- dewy-example: {"mode": "run", "stdout": "found at 1\nnot found\n"} -->
 ```dewy
-find = (present:bool):>int64|none => { if present { return 42 }; return none }
-let result = find(true)
-if result is? int64 { printl(result) }
+position_of = (xs:array<string> target:string):>int? => {
+    loop i in 0.. and x in xs if x =? target return i
+    none
+}
+
+names = ["ada" "grace" "alan"]
+loop who in ["grace" "linus"] {
+    let at = position_of(names who)
+    if at is? int printl"found at {at}" else printl"not found"
+}
 ```
 
-Expected output:
+Inside the `if`, `at` is narrowed to `int`. Three other forms come up constantly:
 
-```text
-42
+<!-- dewy-example: {"mode": "run", "stdout": "0\n4\nnobody\n"} -->
+```dewy
+ages = ["ada" -> 36 "alan" -> 41]
+printl(ages.get("grace") ?? 0)              # a default with ??
+
+names = ["ada" "grace" "alan"]
+let last = names.get(2)
+if last isnt? none printl(last.length)      # narrowed to string
+
+who = [3 1 4].get(9)
+printl(match who { n:int => "{n}" <none> => "nobody" })
 ```
 
-Run the example from a file with `dewy example.dewy`. Its exact output is checked by the website build on the native release target.
+`xs.get(i)` and `d.get(k)` are how you read a position or key that might not exist: they give an optional instead of crashing.
 
-> **Design boundary.** The [Optional Values and Narrowing reference](/reference/types-and-conversions.html) specifies the complete language rules. A passing example covers this program only. See [generated coverage](/status/#ref-types-and-conversions) for related acceptance programs and unmeasured areas.
+The [reference](/reference/types-and-conversions.html) has the complete rules.

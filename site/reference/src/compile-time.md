@@ -43,7 +43,7 @@ Configuration metatags may bind a compile-time value:
 $no_prelude = true
 ```
 
-`$no_prelude` affects only its containing module.
+`$no_prelude` affects only its containing module. The current compiler does not implement it yet and reports an error.
 
 Directive metatags are forms with their own argument grammar rather than scope metadata: `$assert cond [, message]`, `$runtime_assert cond [, message]`, and `$expect cond [, message]` take a condition and an optional message, and `$fail [message]` only a message (see [Assertions](refinements-and-effects.md#assertions)); `$breakpoint` takes nothing and stops the program there (see [Debugging](debugging.md)); `$include_bytes(p"…")` reads a file at compile time; `$target` is the compile-time target name. `$test` (or `$test(cases=…)`) on its own line marks the function declaration after it as a test (see [Testing](testing.md)).
 

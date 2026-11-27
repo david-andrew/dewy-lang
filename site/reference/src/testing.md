@@ -60,10 +60,15 @@ Each case is reported as `name[index]`. A test that takes parameters must be giv
 
 ## Running tests
 
-For the current compiler, use the [project-test guide](#current-project-tests).
-The `$test` model above specifies test discovery and per-case expectations;
-its runner behavior is part of the design rather than a promise about the current
-command. Historical driver details are retained in the [archive](/archive/).
+`dewy test file.dewy` builds the file with a generated entry that runs each test
+(and each case) in declaration order, printing `.` for a pass and `F` for a failure,
+then the counts. Output from a failing test is shown under `--- FAIL name[case]`.
+Words after the filename select tests whose names contain them; `--release`
+tests a release build, `--watch` reruns after edits, and `--json` prints one
+object per test. On native hosts each test runs in its own process, so an abort
+does not stop the others. The exit status is the number of failures (at most
+100), 101 when a test aborted, and 102 when the file does not build. Given a
+directory, `dewy test` runs every `.dewy` file under it that declares tests.
 
 ## Whole programs
 
@@ -91,7 +96,7 @@ let program_exit_status = (name:string expected:int64) => {
 }
 ```
 
-Once the compiler is written in Dewy, `compile` is a library function and the spawn disappears; the same goes for testing the compiler's own stages — `tokenize"…"`, `parse"…"`, `typecheck"…"` are ordinary functions whose results (`result is? UnterminatedString`) a test inspects, so invalid source is a string passed to them, never the body of a test.
+With the compiler written in Dewy, the design makes `compile` a library function so the spawn disappears; the same goes for testing the compiler's own stages — `tokenize"…"`, `parse"…"`, `typecheck"…"` are ordinary functions whose results (`result is? UnterminatedString`) a test inspects, so invalid source is a string passed to them, never the body of a test.
 
 ## Planned
 

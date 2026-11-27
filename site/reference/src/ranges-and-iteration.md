@@ -84,7 +84,7 @@ The exact truth and exhaustion formulas for `and`, `or`, `xor`, `nand`, `nor`, a
 The following remain under design:
 
 - ~~advancement and short-circuit behavior when iterator clauses mix with ordinary Boolean predicates~~ (settled, see below);
-- stored generators and some dynamic iterator sources; and
+- some dynamic iterator sources (generators themselves are implemented: `lazy` makes a `generator<T>`); and
 - result types, normalization, empty-span behavior, and representation for arbitrary runtime range arithmetic.
 
 See [Design Maturity and Open Questions](design-status.md).

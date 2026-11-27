@@ -4,7 +4,7 @@
 
 ## Meet Dewy
 
-- [Dewy at a Glance](pitch.md)
+- [A Tour of Dewy](pitch.md)
 - [Safer than Rust](safer-than-rust.md)
 - [Getting Started](ch01/00-getting-started.md)
   - [Installation](ch01/01-installation.md)

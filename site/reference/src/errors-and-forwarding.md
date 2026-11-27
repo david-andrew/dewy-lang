@@ -203,7 +203,7 @@ The general pattern-selection syntax and type-directed recovery helpers remain p
 
 Forwarded values do not become false in Boolean context. If `user.isAdmin` has type `bool | UserError | none`, it is not a valid `if` condition until every exception alternative is propagated, handled, or otherwise narrowed away.
 
-The current fallback direction keeps absence and failure distinct: `??` would replace `none` while preserving any `error` alternative. Under that proposal, applying a default to `Address | DatabaseError | none` produces `Address | DatabaseError`, not just `Address`. The final operator split between absence and error recovery is still provisional.
+`value ?? fallback` evaluates the left side once and uses the fallback when it is `none` or an error value (such as `to_int`'s `NotAnInteger` or a search's `Missing`), so applying a default to `Address | DatabaseError | none` produces `Address`. `Canceled` is never replaced: it leaves the enclosing function, as `or_throw` would. To keep an error while defaulting only absence, test for `none` explicitly or use `match`.
 
 ## Mutation
 

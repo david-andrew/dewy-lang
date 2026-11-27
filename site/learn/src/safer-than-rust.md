@@ -2,7 +2,7 @@
 
 Rust is the standard for memory safety, and Dewy does not claim to beat it there. The claim is about everything else a safe Rust program can still do: abort on `v[i]`, abort on `unwrap`, panic on overflow in a debug build and wrap in a release build. Dewy's rule is that none of these happens behind your back. Each partial operation is proven from facts the compiler can see, handled as a value, or written out by the author.
 
-Some of this works in today's compiler and some is decided and landing. Each section below says which. Every example on this page is compiled by the website build, and a rejection example appears only where today's compiler rejects it.
+Everything on this page works in today's compiler. Every example is compiled by the website build under the default rules, and each rejection shown is one the current compiler makes.
 
 ## No hidden panics
 
@@ -17,25 +17,36 @@ let big = 9223372036854775807
 printl(big + 1)              # int is exact: no overflow
 ```
 
-An index, a nonzero divisor or a narrowing that the compiler cannot prove is an obligation. With checks off, it is a compile error that names the missing fact:
+An index, a nonzero divisor or a narrowing that the compiler cannot prove is an obligation. By default it is a compile error that names the missing fact:
 
 <!-- dewy-example: {"mode": "reject", "diagnostic": "cannot prove index is in bounds"} -->
 ```dewy
-at = (xs:array<int64> i:int64):>int64 => {
-    $runtime_checks = false
-    xs[i]
-}
+at = (xs:array<int> i:int):>int => xs[i]
+printl(at([3 1 4] 1))
 ```
 
 The fix is more facts (a guard such as `if 0 <=? i and i <? xs.length`, or a refined parameter) or a value (`xs.get(i)`), not a hidden check.
 
-**Status.** Working today: exact `int`, `get`, `??`, and the compile error above under `$runtime_checks = false`. Landing: that compile error becomes the default. Until then an unproven index in a default build still compiles to a runtime check that stops the program with exit status 101 and a report.
+A program, file, function or block that prefers runtime checks says `$runtime_checks`. Its unproven obligations then compile to checks that stop the program with exit status 101 and a report of the values they saw, and proven ones still cost nothing. That is a choice written in the source, never a silent default.
 
 ## Fixed-width arithmetic never wraps silently
 
 Rust's `i32` overflow panics in a debug build and wraps in a release build, so the same program can behave differently by build mode. In Dewy, arithmetic on `int32`, `uint8` and the other fixed-width types is exact like `int`; the width is a storage property. Storing a result back into a narrower binding, field, parameter or return is the narrowing obligation: free when the compiler proves it fits, otherwise a compile error with fix-its. Wrapping and saturating are still available, but only when the type says so (`uint32<overflow='wrap'>` for hashes and checksums).
 
-**Status.** Decided, in progress, and not yet today's behavior. Today's compiler still wraps a fixed-width result when it is stored (an `int32` holding `2147483647` plus one stores `-2147483648`), and the explicit wrap form is currently `uint8<overflow='wrap'>(x)`. The exact arithmetic, the narrowing error and the `overflow=` spelling are landing.
+<!-- dewy-example: {"mode": "reject", "diagnostic": "cannot prove exact integer result fits int32"} -->
+```dewy
+let x:int32 = 2147483647
+let y:int32 = x + 1
+```
+
+The error offers three fixes: widen the destination to `int`, state the domain as a refinement, or say what overflow means in the type:
+
+<!-- dewy-example: {"mode": "run", "stdout": "1\n"} -->
+```dewy
+let h:uint32<overflow='wrap'> = 4294967295
+h += 2
+printl(h)
+```
 
 ## Data-race freedom from value semantics
 
@@ -57,7 +68,7 @@ printl(squares)
 
 Rust also has data-race freedom, so this is not an advantage over Rust. It is the same guarantee without lifetimes in the signatures, which is why it belongs on this page.
 
-**Status.** Working today, including the rejection above and the structural `Send` and `Sync` checks.
+The compiler infers which values may cross threads (Rust's `Send` and `Sync`) from their structure, so there is nothing to declare.
 
 ## `panics` and `blocks` as checkable effects
 
@@ -65,7 +76,7 @@ An effect row says what a function may do, and `& no ...` forbids one. A functio
 
 <!-- dewy-example: {"mode": "reject", "diagnostic": "blocking operation exceeds the contract"} -->
 ```dewy
-tick = (n:int64):>int64 & no blocks => {
+tick = (n:int):>int & no blocks => {
     printl(n)
     return n + 1
 }
@@ -75,7 +86,17 @@ tick = (n:int64):>int64 & no blocks => {
 
 The `panics` effect is the same idea for failure. "May fail a runtime check", or any other possible panic, is an inferred effect that shows in rows. `& no panics` forbids it outright, and code that opted into runtime checks cannot be called from a scope that did not.
 
-**Status.** `& no blocks` works today. `panics` and `& no panics` are decided and in progress; today's compiler does not accept `no panics` yet.
+Code that opted into runtime checks may panic, and the effect follows it through every call:
+
+<!-- dewy-example: {"mode": "reject", "diagnostic": "it may panic, and its row excludes panics"} -->
+```dewy
+at = (xs:array<int> i:int):>int => {
+    $runtime_checks
+    xs[i]
+}
+safe = (xs:array<int>):>int & no panics => at(xs 0)
+printl(safe([1 2]))
+```
 
 ## `$no_hidden_costs`
 
@@ -83,7 +104,7 @@ A module, function or block can ask for the strict lane with one line. It turns 
 
 <!-- dewy-example: {"mode": "reject", "diagnostic": "cannot prove index is in bounds"} -->
 ```dewy
-at = (xs:array<int64> i:int64):>int64 => {
+at = (xs:array<int> i:int):>int => {
     $no_hidden_costs
     xs[i]
 }
@@ -91,10 +112,10 @@ at = (xs:array<int64> i:int64):>int64 => {
 
 Code that needs more opts out with `$no_hidden_costs = false` in its body, or declares a row of its own. Game code never has to enter this lane.
 
-**Status.** Working today for checks, allocation and copies. `no panics` joins the bundle when the `panics` effect lands.
+
 
 ## What this does not claim
 
 - Memory safety and data-race freedom are table stakes, and Rust has them too.
 - Dewy's `unsafe` boundary and foreign calls are trusted, as in Rust.
-- The strongest form of the claim, no hidden traps by default, describes where the language is going. This page marks what a current build does.
+- Proofs come from facts the compiler can see. Some correct programs need a guard, a refined type or a value-returning form before they compile, and the error messages say which.

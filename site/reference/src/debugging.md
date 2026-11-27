@@ -33,4 +33,4 @@ Then the program stops. **Without a debugger** it waits at a `>>> ` prompt readi
 
 The end of input (a pipe that runs dry, `/dev/null`) continues, so a program with breakpoints left in still runs unattended.
 
-**Under a debugger** (a native debugger attached to the process) the same directive traps into the debugger instead — the program stops on the `$breakpoint` line in your function, with the debugger's prompt and the snapshot already printed. The program decides at runtime by asking the kernel whether it is being traced, so one build serves both uses.
+**Under a debugger** (a native debugger attached to the process) the design has the same directive trap into the debugger instead, deciding at run time whether the process is traced. The current compiler does not do this yet: it always uses the prompt, so set a native breakpoint on the line instead.

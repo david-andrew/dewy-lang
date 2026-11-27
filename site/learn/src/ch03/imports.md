@@ -8,12 +8,6 @@ from p"helpers.dewy" import answer
 printl(answer())
 ```
 
-Expected output:
-
-```text
-42
-```
-
 Create `helpers.dewy` beside the importing file:
 
 <!-- dewy-example: {"mode": "check"} -->
@@ -31,6 +25,4 @@ printl(answer())
 printl(helpers.answer())
 ```
 
-Run the example from a file with `dewy example.dewy`. Its exact output is checked by the website build on the native release target.
-
-> **Design boundary.** The [Modules, Imports, and the Prelude reference](/reference/modules-and-imports.html) specifies the complete language rules. A passing example covers this program only. See [generated coverage](/status/#ref-modules-and-imports) for related acceptance programs and unmeasured areas.
+The [reference](/reference/modules-and-imports.html) has the complete rules.

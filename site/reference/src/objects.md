@@ -140,20 +140,20 @@ Mixing named and positional items is not allowed; too many items, or a missing f
 
 An object type may declare methods: `name = (params) => body` rows among the fields. Inside a method, bare names of the type's fields and methods refer to the instance (`stop - start`, `width`); a method that assigns or grows a field takes its receiver as a place, so it must be called on a binding or a field, not on a temporary. Calls are `value.method(args)`, and a zero-argument method is called by `value.method` alone.
 
-<!-- dewy-example: {"mode":"run","stdout":"","exit":10} -->
+<!-- dewy-example: {"mode":"run","stdout":"10\n"} -->
 ```dewy
 let Span:type = [
-    start:int64
-    stop:int64 = start
+    start:int
+    stop:int = start
     width = () => stop - start
-    grow = (by:int64) => { stop += by }
-    shifted = (by:int64):>Span => Span(start + by stop + by)
+    grow = (by:int) => { stop += by }
+    shifted = (by:int):>Span => Span(start + by stop + by)
 ]
 
 let main = ():>void => {
     let s = Span(3 7)
     s.grow(2)                       # 3..9
-    exit(s.width + s.shifted(1).start)   # 6 + 4
+    printl(s.width + s.shifted(1).start)   # 6 + 4
 }
 ```
 

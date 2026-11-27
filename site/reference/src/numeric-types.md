@@ -35,7 +35,7 @@ let big:bigint = 5                 # explicitly arbitrary precision
 let f = 2^100                      # constant, folded exactly
 ```
 
-A big value cannot silently cross a word-sized boundary. Returning it from a function whose result type is `int` or `int64`, passing it to a word-sized parameter, or storing it in a fixed-width binding is a compile error unless a comparison proves the range or the boundary is annotated `bigint`; `int` in a signature is a 64-bit word, so functions that carry big values say `bigint`.
+A big value cannot silently cross a fixed-width boundary. Returning it from a function whose result type is `int64`, passing it to an `int64` parameter, or storing it in a fixed-width binding is a compile error unless a comparison proves the range. `int` in a signature stays the mathematical integer: `(x:int):>int => x*x` returns the exact square of `5000000000`.
 
 An explicit `bigint` can cross a fixed-width boundary after a range guard;
 `as` uses the same proof as an annotated binding or result. Both signed and
@@ -92,9 +92,7 @@ Operands are evaluated once.
 
 ## Floating Point
 
-First-class IEEE floating-point types and arithmetic belong to the language design. The initial focus is on making the numeric types people reach for without specialist mathematical or engineering knowledge work intuitively: integers, exact rationals, and fixed-point values. This sequencing does not limit the eventual numerical scope of Dewy; conventional scientific computing, including the kinds of array and tensor operations supported by NumPy and PyTorch, is an intended use case.
-
-Supported formats, conversions, mixed-type promotion, exceptional values, and numerical execution policies remain design work; floats are not restricted to host interoperability.
+`float32` and `float64` are strict IEEE 754 binary floating point. A decimal literal is an exact rational unless its context is a float (`let x:float64 = 0.1`), and conversions between exact and floating values are explicit. Scope settings relax or tighten float semantics: `$fast_math` permits reassociation, `$no_nan` and `$no_inf` make producing those values an obligation, and `$finite_floats` bundles both. Conventional scientific computing, including the kinds of array and tensor operations supported by NumPy and PyTorch, is an intended use case; see the repository's [language guide](https://github.com/david-andrew/dewy-lang/blob/master/docs/LANGUAGE.md) for current float behavior.
 
 ## Numeric Hierarchy
 
@@ -141,8 +139,8 @@ remaining = (src:string):>nat64|none => {
 ```
 
 Fixed-width expressions use sufficiently wide machine words, including statically
-sized multiword values, without bigint allocation. Unproven stores retain runtime
-checks under the current default; `$no_hidden_costs` rejects them. Use
+sized multiword values, without bigint allocation. Unproven stores are compile errors
+by default and become runtime checks only under `$runtime_checks`. Use
 `uint32<overflow='wrap'>` for modular arithmetic or `overflow='saturate'` for
 clamping. Provisionally, if facts cannot bound an intermediate's width, compilation
 fails with suggestions to guard the count/exponent, use explicit `int`, or choose

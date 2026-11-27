@@ -1,19 +1,18 @@
 # Strings and Graphemes
 
-String length counts graphemes. Interpolation puts values inside braces.
+Strings are Unicode text. Length and indexing count graphemes, the characters a reader sees, so an emoji family or an accented letter counts once. Braces interpolate any expression.
 
-<!-- dewy-example: {"mode": "run", "stdout": "café: 4\n"} -->
+<!-- dewy-example: {"mode": "run", "stdout": "café: 4\nstarts with c\n[\"red\" \"green\" \"blue\"]\nred+green+blue\n"} -->
 ```dewy
 let word = "café"
 printl"{word}: {word.length}"
+if word.startswith("c") printl"starts with c"
+
+colors = "red,green,blue".split(",")
+printl(colors)
+printl(colors.join("+"))
 ```
 
-Expected output:
+Single and double quotes mean the same thing; pick whichever avoids escaping. A function given a single string can be called without parentheses, which is why `printl"..."` works.
 
-```text
-café: 4
-```
-
-Run the example from a file with `dewy example.dewy`. Its exact output is checked by the website build on the native release target.
-
-> **Design boundary.** The [Strings and Graphemes reference](/reference/strings.html) specifies the complete language rules. A passing example covers this program only. See [generated coverage](/status/#ref-strings) for related acceptance programs and unmeasured areas.
+The [reference](/reference/strings.html) has the complete rules.

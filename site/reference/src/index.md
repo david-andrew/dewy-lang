@@ -8,7 +8,7 @@ For a guided introduction, read [Learning Dewy](../learn/).
 
 ## Normative Language and Current Implementations
 
-The main reference describes Dewy itself. A rule does not become less normative merely because the current compiler has not implemented it yet.
+The main reference describes Dewy itself. A rule does not become less normative merely because the current compiler does not implement it yet; the [learning book](../learn/) shows only what the current compiler does.
 
 Language-design maturity is recorded in [Design Maturity and Open Questions](design-status.md):
 

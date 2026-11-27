@@ -41,7 +41,7 @@ Addition, subtraction, and comparison require identical dimensions and are other
 
 ## Time and Sleeping
 
-`s`, `ms`, `us`, and `ns`, together with their written names and `minute`/`hour`, denote exact time scales. `sleep` accepts a rational time quantity and converts it to whole nanoseconds at the system boundary; a dimensionless number is rejected.
+`s`, `ms`, `us`, and `ns`, together with their written names and `minute`/`hour`, denote exact time scales. `sleep` accepts a rational time quantity and converts it to whole nanoseconds at the system boundary; a dimensionless number is rejected. Clock readings (`now`, `monotonic`), `Instant` and `Duration`, time zones and calendar dates are part of the prelude's time system, documented in the repository's [language guide](https://github.com/david-andrew/dewy-lang/blob/master/docs/LANGUAGE.md#time-and-dates).
 
 ## Provisional Scope
 
