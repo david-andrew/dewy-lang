@@ -13,6 +13,7 @@ from p"refine_ops.dewy" import (representation_deep)
 from p"refine.jo" import (refine_active str_sets)
 from p"refine_metadata.dewy" import (ref_storage_contract representation_type str_set_of)
 from p"refine_rare.dewy" import (ref_length_mutation)
+from p"refine_siblings.dewy" import (ref_sib_extend_plain)
 from p"checks_read_code.dewy" import (read_code)
 from p"ownership_types.dewy" import (ownership_fact_type)
 from p"expression_types.dewy" import (ntype)
@@ -329,6 +330,7 @@ intrinsic_rest=(n:int64 iid:int64 args0:array<int64> expected:int64):>int64=>$un
         if types.ptr[source_type].kind =? 'fixed' and has_var(IntrinsicExpressionsWord(types.ptr[t].elem)) {
             unify(IntrinsicExpressionsWord(types.ptr[t].elem) IntrinsicExpressionsWord(types.ptr[source_type].elem));
         }
+        if refine_active {ref_sib_extend_plain(args[0] source)}
         let expanded=[args[0] source]
         arg_type(expanded 1 t);
         set_list(n expanded)

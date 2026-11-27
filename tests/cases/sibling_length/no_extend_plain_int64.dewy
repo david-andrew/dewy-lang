@@ -1,0 +1,8 @@
+# Elements of `array<int64>` admit negatives: say so, not a type mismatch.
+G:type = [names:array<string> targets:array<int64<(<? names.length)>>]
+main = () => {
+    let g = G[["a" "b" "c"] []]
+    let more:array<int64> = [2 1]
+    g.targets.extend(more)
+    printl(g.targets)
+}

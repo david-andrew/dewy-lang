@@ -732,6 +732,33 @@ ref_sib_in_place=(n:RefineSibWord id:IN place0:RefineSibWord t:RefineSibWord):>b
     if types.ptr[prune(t)].kind =? 'refined' or not ref_sib_only_bounds(record at) {return false}
     id =? IN.push or id =? IN.insert or id =? IN.extend
 }
+# `g.targets.extend(more)` with `more:array<int64>`: its elements admit negatives, so no fact
+# about their values makes them valid indexes, and a converted copy would hide that. Say so,
+# naming the sibling, before the element types disagree. O(atoms), on extend only.
+ref_sib_extend_plain=(place0:RefineSibWord value:RefineSibWord):>void=>$unsafe {
+    if not ref_self_active {return}
+    let t=prune(refine_storage(place0 ntype(place0)))
+    if not ref_sib_contract(t) {return}
+    let record=ref_sib_record(place0)
+    if record =? 0 {return}
+    let given=prune(ntype(value))
+    if nodes.ptr[value].kind =? 'array' or tkind(given) not=? 'array' {return}
+    let element=prune(RefineSibWord(types.ptr[given].elem))
+    if types.ptr[element].kind =? 'refined' or not type_eq(representation_type(element) T_INT) {return}
+    let sibling="its sibling"
+    let si=RefineSibWord(types.ptr[record].st)
+    loop atom in ref_predicates[RefineSibWord(types.ptr[prune(t)].st)] {
+        if ref_sib_atom(atom) and atom.b.value <? RefineSibWord(structs.ptr[si].nfields) {
+            let parent=wit_text(RefineSibWord(nodes.ptr[ref_place_alias(place0)].a))
+            let field=name_of(RefineSibWord(fields.ptr[RefineSibWord(structs.ptr[si].fields) + atom.b.value].name))
+            sibling=if parent not=? "" {"`{parent}.{field}`"} else {"`{field}`"}
+        }
+    }
+    let shown=wit_text(value)
+    if shown =? "" {shown="the added array"} else {shown="`{shown}`"}
+    err_notes.push([(-1) "help: its elements are `{dt(element)}`, which admits negative values, so none is known to be a valid index: declare it `array<addr>`, or with the field's own bound, or push each element, as each push is checked"])
+    fatal(nodes.ptr[value].pos "cannot prove every element of {shown} is a valid index of {sibling}")
+}
 # The type of an array added to a field bounded by a sibling: every element below the sibling's
 # length (term kind 6, the array the value goes into), the field's own element bounds as well.
 ref_sib_extension=(t0:RefineSibWord):>int64=>$unsafe {
