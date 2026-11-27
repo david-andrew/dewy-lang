@@ -6404,7 +6404,14 @@ rd_dc_head_term=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$u
         reader_ctx.reader.dn_edit_was.push(reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 1)]);
     }
     else {
+        let start_at:int64=reader_ctx.at
         it = rd_dc_iterable(@reader_ctx @reader_nodes)
+        # (`loop i in ..5`, `loop i in [..5)`: a range with no first value has nowhere to start)
+        let opener:DewyToken=reader_ctx.tokens[start_at].symbol
+        let open_start:bool=((opener =? 'range') or (((opener =? 'lbrack') or (opener =? 'lparen')) and (reader_ctx.tokens[(int64<overflow='wrap'>(start_at) + 1)].symbol =? 'range')))
+        if (((it =? 0) and open_start) and reader_ctx.flags.report_now) {
+            return rd_dc_fail_now(@reader_ctx rd_mkpos(reader_ctx.file reader_ctx.tokens[start_at].start) "a range with no start cannot be iterated: give it a first value, `loop i in [0..5)`")
+        }
     }
     if (it =? 0) {
         return 0
