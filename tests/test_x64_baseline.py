@@ -566,5 +566,240 @@ main = ():>void => {
     assert ran.returncode != 0
 
 
+ROUND5_PROGRAM = '''
+$runtime_checks
+
+Node:type = [val:int64 tag:string next:Node?]
+Lit:type = [v:int64]
+Add:type = [l:Expr r:Expr]
+Expr:type = Lit | Add
+BigRes:type = [s:int64 f:int64 label:string]
+
+eval_expr = (e:Expr):>int64 => match e {
+    lit:Lit => lit.v
+    add:Add => eval_expr(add.l) + eval_expr(add.r)
+}
+
+sum_nodes = (n:Node?):>int64 => {
+    if n is? Node {
+        return n.val + sum_nodes(n.next)
+    }
+    0
+}
+
+make_triple = (n:int64):>[int64 string array<int64>] => {
+    let mid = "drop-{n}"
+    let arr:array<int64> = [n n + 1]
+    [n * 10 mid arr]
+}
+
+many_args = (a1:int64 a2:int64 a3:int64 a4:int64 a5:int64 a6:int64 a7:int64 a8:int64
+             f1:float64 f2:float64 f3:float64 f4:float64 f5:float64 f6:float64 f7:float64 f8:float64 f9:float64 f10:float64
+             tag:string):>BigRes => {
+    let isum:int64 = a1 + a2 * 2 + a3 * 3 + a4 * 4 + a5 * 5 + a6 * 6 + a7 * 7 + a8 * 8
+    let fsum:float64 = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9 * 10.0 + f10 * 100.0
+    BigRes[isum int64(fsum) "{tag}:{a7}:{a8}"]
+}
+
+bump_cell = (@v:int64 delta:int64):>void => {
+    v += delta
+}
+
+round5_features = (x:int64 u1:uint64 u2:uint64):>string => {
+    # Boxed recursive struct & enum (construct, read, mutate, drop)
+    let tail = Node[3 "c" none]
+    let mid = Node[2 "b" tail]
+    let head = Node[1 "a" mid]
+    head.next = Node[20 "bb" Node[30 "cc" none]]
+    let nsum = sum_nodes(head)
+    let expr:Expr = Add[Lit[4] Add[Lit[5] Lit[6]]]
+    let ev = eval_expr(expr)
+
+    # Tuple destructuring with managed `_` hole drop
+    let [t0 _ t2] = make_triple(x)
+    let tsum = t0 + t2[0] + t2[1]
+
+    # Empty map_lit + nested array mutation + @mut element
+    let empty_m:dict<string int64> = []
+    let grid:array<array<int64>> = [[1 2] [3 4]]
+    grid[1][0] = 30
+    grid[0].push(9)
+    bump_cell(@grid[1][1] 10)
+    let gsum = grid[0][2] + grid[1][0] + grid[1][1]
+
+    # 2-word (int128) exact arithmetic: u64 leaves, 128-bit mul/add/shift/div/cmp/conv
+    let u_sum:uint64 = u1 + u2
+    let u_diff:uint64 = u1 - u2
+    let u_div:uint64 = u1 // u2
+    let u_rem:uint64 = u1 % u2
+    let u_cmp:bool = (u1 + 100) >? (u2 + 100)
+    let big_m:int = (x * 1000000000000) * 1000000000 + 7
+    let big_small:int = (u1 - u1) + 7
+    let sh_hi:int64<overflow='wrap'> = int64<overflow='wrap'>(((x * 1000000000000) << 20) >> 20)
+    let pow2_q:int64 = ((x * 1000000000000) + 16) // 8
+    let pow2_r:int64 = ((x * 1000000000000) + 19) % 8
+    let f128:float64 = float64((x * 1000000000000) * 1000)
+
+    # Stepped small math-int range loops
+    let step_up:int = 0
+    let lo_m:int = 1
+    let hi_m:int = 10
+    loop k in [lo_m, lo_m + 2..hi_m) { step_up += k }
+    let step_dn:int = 0
+    loop k in [hi_m, hi_m - 3..lo_m] { step_dn += k }
+
+    # >6 int args + >8 float args + sret stack arguments
+    let br = many_args(1 2 3 4 5 6 7 8 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0 "ok")
+
+    "{nsum}:{ev}|{tsum}:{empty_m.length}:{gsum}|{u_sum}:{u_diff}:{u_div}:{u_rem}:{u_cmp}:{big_m}:{big_small}:{sh_hi}:{pow2_q}:{pow2_r}:{int64(f128 / 1000000000.0)}|{step_up}:{step_dn}|{br.s}:{br.f}:{br.label}"
+}
+
+main = ():>void => {
+    let a:uint64 = uint64(10000000000000000000)
+    let b:uint64 = uint64(3000000000000000000)
+    printl"{round5_features(7 a b)}"
+}
+'''
+
+
+def test_x64_baseline_round5_matches_release(compiler, tmp_path):  # noqa: F811
+    source = tmp_path / 'baseline_r5.dewy'
+    source.write_text(ROUND5_PROGRAM)
+    outputs = []
+    for tag, flags in (('default', []), ('release', ['--release'])):
+        binary = tmp_path / f'r5_{tag}'
+        built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                               capture_output=True, text=True, timeout=60)
+        assert built.returncode == 0, built.stdout + built.stderr
+        ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+        outputs.append(ran.stdout)
+    assert outputs[0] == outputs[1]
+    assert outputs[0] == (
+        '51:15|85:0:53|'
+        '13000000000000000000:7000000000000000000:3:1000000000000000000:true:'
+        '7000000000000000000007:7:7000000000000:875000000002:3:7000000|'
+        '25:22|204:1126:ok:7:8\n'
+    )
+
+
+EXPLICIT_COPIES_PROGRAM = '''
+$runtime_checks
+$explicit_copies
+
+consume_bytes = (xs:array<uint8>):>int64 => {
+    let s:int64 = 0
+    loop b in xs { s += b as int64 }
+    s
+}
+
+take_and_return = (xs:array<uint8>):>array<uint8> => {
+    let out = xs.copy
+    out.push(99)
+    out
+}
+
+explicit_copies_demo = (src:array<uint8>):>string => {
+    let bytes:array<uint8> = [10 20 30 40]
+    let dup = bytes.copy
+    let sl = bytes[1..3).copy
+    let acc:array<uint8> = [1 2]
+    acc.extend(bytes)
+    acc.extend(sl)
+    acc.extend(src)
+    let moved_sum = consume_bytes(dup)
+    let ext_sum = consume_bytes(acc)
+    let grown = take_and_return(bytes)
+    "{moved_sum}:{ext_sum}:{bytes.length}:{grown.length}:{grown[4]}"
+}
+
+main = ():>void => {
+    let seed:array<uint8> = [5 6]
+    printl"{explicit_copies_demo(seed)}"
+}
+'''
+
+
+def test_x64_baseline_explicit_copies_matches_release(compiler, tmp_path):  # noqa: F811
+    source = tmp_path / 'baseline_ec.dewy'
+    source.write_text(EXPLICIT_COPIES_PROGRAM)
+    outputs = []
+    for tag, flags in (('default', []), ('release', ['--release'])):
+        binary = tmp_path / f'ec_{tag}'
+        built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                               capture_output=True, text=True, timeout=60)
+        assert built.returncode == 0, built.stdout + built.stderr
+        ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+        outputs.append(ran.stdout)
+    assert outputs[0] == outputs[1]
+    assert outputs[0] == '100:164:4:5:99\n'
+
+
+def test_x64_baseline_exact_i128_overflow_traps(compiler, tmp_path):  # noqa: F811
+    source = tmp_path / 'baseline_i128_ovf.dewy'
+    source.write_text('''
+$runtime_checks
+boom128 = (a:int64 b:int64):>int64 => {
+    let extra:int64 = 0
+    loop i in [0..4) { extra += i }
+    let z:int64 = a * b + extra
+    z
+}
+main = ():>void => {
+    printl"{boom128(5000000000 5000000000)}"
+}
+''')
+    binary = tmp_path / 'i128_ovf_default'
+    built = subprocess.run([compiler, 'build', source, '-o', binary],
+                           capture_output=True, text=True, timeout=60)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode != 0
+
+
+def test_x64_baseline_nested_assign_order_matches_release(compiler, tmp_path):
+    source = tmp_path / 'nested_assign.dewy'
+    source.write_text('''$runtime_checks
+
+Cell:type=[val:int64]
+trace=""
+at=(label:string value:int64):>int64=>{trace="{trace}{label}" return value}
+
+run=():>string=>{
+    let grid:array<array<int64>>=[[1 2] [3 4]]
+    let idx:int64=0
+    grid[at("a" idx)][at("b" 1)]={idx=1 at("r" 99)}
+    let s1="{trace}:{grid[0][1]}:{grid[1][1]}"
+    trace=""
+    let cells:array<Cell>=[Cell[val=10] Cell[val=20]]
+    idx=0
+    cells[at("c" idx)].val={idx=1 at("d" 77)}
+    let s2="{trace}:{cells[0].val}:{cells[1].val}"
+    trace=""
+    let flat:array<int64>=[5 6]
+    idx=0
+    flat[idx]={idx=1 55}
+    return "{s1}|{s2}|{flat[0]}:{flat[1]}"
+}
+
+main=():>void=>{
+    printl"{run()}"
+}
+''')
+    default_bin = tmp_path / 'nested_default'
+    release_bin = tmp_path / 'nested_release'
+    for binary, flags in [(default_bin, []), (release_bin, ['--release'])]:
+        built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                               capture_output=True, text=True, timeout=60)
+        assert built.returncode == 0, built.stdout + built.stderr
+    r_def = subprocess.run([default_bin], capture_output=True, text=True, timeout=10)
+    r_rel = subprocess.run([release_bin], capture_output=True, text=True, timeout=10)
+    assert r_def.returncode == 0, r_def.stderr
+    assert r_rel.returncode == 0, r_rel.stderr
+    assert r_def.stdout == r_rel.stdout
+    assert r_def.stdout.strip() == 'abr:99:4|cd:77:20|55:6'
+
+
 
 

@@ -50,6 +50,10 @@ exact_count_fits=(lo:CountWord hi:CountWord t:CountWord):>bool=>$unsafe {
 }
 exact_count_bound=(n:CountWord):>FactBound=>$unsafe {
     if n =? 0 {return FactBound(wide=true)}
+    if nodes.ptr[n].kind =? 'int_lit' {
+        if has_flag(n NF_U64) and nodes.ptr[n].ival <? 0 {return FactBound(wide=true)}
+        return FactBound(nodes.ptr[n].ival nodes.ptr[n].ival)
+    }
     if n <? exact_count_index.length and exact_count_index[n] not=? 0 {return exact_count_bounds[exact_count_index[n] - 1]}
     let out=FactBound(wide=true)
     if n >=? exact_count_index.length {exact_count_index.resize(max(max(int64(n + 1) nodes.length) exact_count_index.length * 2))}

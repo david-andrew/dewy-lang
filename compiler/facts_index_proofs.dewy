@@ -380,6 +380,14 @@ facts_positive_bind=(positive_cache:ptr<array<int64>> positive_stamp:ptr<array<i
 # During write collection, do not use local bounds (no circular assumptions).
 positive_bound=(n:IndexWord use_locals:bool):>IndexWord=>$unsafe {
     if not use_locals {return positive_bound_value(n false)}
+    if n =? 0 {return -1}
+    if nodes.ptr[n].kind =? 'int_lit' and not exact_has_node(n) {
+        let t0=exact_representation(ntype(n))
+        if types.ptr[t0].kind not=? 'int_' {return -1}
+        if not types.ptr[t0].sign and IndexWord(types.ptr[t0].bits) <? 64 {return (IndexWord(1) << IndexWord(types.ptr[t0].bits)) - 1}
+        if (t0 =? T_INT or t0 =? T_MATH_INT) and not has_flag(n NF_U64) and nodes.ptr[n].ival >=? 0 {return nodes.ptr[n].ival}
+        return -1
+    }
     if n >=? positive_cache.length {
         let need=max(max(n + 1 IndexWord(nodes.length)) + 1024 IndexWord(positive_cache.length) * 2)
         positive_place_cache[0].resize(need)
