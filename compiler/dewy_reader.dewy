@@ -5856,6 +5856,14 @@ rd_dc_function_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> name
         if (body =? 0) {
             return 0
         }
+        # (`(v) => total += v` as an argument: rd_dc_arm's mistake, noted; the value read on)
+        if (((rd_dn_peek(@reader_ctx) =? 'assign') or dn_token_assignment(rd_dn_peek(@reader_ctx))) and reader_ctx.flags.report_now) {
+            rd_dc_report(@reader_ctx reader_nodes[n].pos "a lambda whose body assigns needs braces, `(v) => \{target = value}`: `=` binds more loosely than `=>`, so without them the whole lambda is the assignment's target");
+            reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+            if (rd_dc_expr(@reader_ctx @reader_nodes 11) =? 0) {
+                return 0
+            }
+        }
         reader_ctx.depth = (int64<overflow='wrap'>(reader_ctx.depth) - 2)
         return reader_ctx.stores.host[0].dw_finish_function(n ps body name)
     }
