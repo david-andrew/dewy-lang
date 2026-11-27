@@ -108,7 +108,7 @@ bk_assign=(s:BWord):>void=>$unsafe {
         if bk_nodes[0].ptr[b].kind =? 'call' and bk_nodes[0].ptr[b].aux2 =? 17 {stmt_error(s 3)}
     }
     let r=va_assign(s)
-    if r not=? s {bk_nodes[0][s]=bk_nodes[0].ptr[r]}
+    if r not=? s {bk_nodes[0].ptr[s]=bk_nodes[0].ptr[r]}
 }
 # One statement (NF_CHECKED 128: a quantity constant settled before its module's code
 # ran; a shaped parameter's dimension is aux2 1789).
@@ -145,7 +145,7 @@ bk_if=(s:BWord):>void=>$unsafe {
         stmt_special(s 4)
         return
     }
-    bk_nodes[0][s].flags=int32<overflow='wrap'>(f | 16)
+    bk_nodes[0].ptr[s].flags=int32<overflow='wrap'>(f | 16)
     xl_finish(s xf_if(s 0) 0);
     if bk_watch[0].expectations >? 0 {stmt_special(s 5)}
 }
@@ -160,7 +160,7 @@ bk_open=(b:BWord want_value:bool):>BWord=>$unsafe {
         bk_body_mode[0]=-1
     } else if bk_flag(b 8) {
         return block_open(b if want_value {-2} else {-1})
-    } else if want_value and bk_files[0][BWord(bk_nodes[0].ptr[b].pos) >> 40].is_dewy {
+    } else if want_value and bk_files[0].ptr[BWord(bk_nodes[0].ptr[b].pos) >> 40].is_dewy {
         if bk_flag(b 67108864) {mode=4}
         else if bk_arm_next[0] =? b {mode=3}
         else if bk_bind_next[0] =? b {mode=6}
@@ -185,12 +185,12 @@ bk_final=(b:BWord i:BWord expected:BWord mode:BWord):>BWord=>$unsafe {
     let e=BWord(bk_nodes[0].ptr[s].a)
     if bk_nodes[0].ptr[e].kind =? 'call' and bk_nodes[0].ptr[e].aux2 =? 17 {return -1}
     if mode =? 2 or mode =? 3 or mode =? 6 {return block_final(b i expected mode)}
-    if bk_nodes[0].ptr[e].kind =? 'match_' {bk_nodes[0][e].flags=int32<overflow='wrap'>(BWord(bk_nodes[0].ptr[e].flags) & -17)}
+    if bk_nodes[0].ptr[e].kind =? 'match_' {bk_nodes[0].ptr[e].flags=int32<overflow='wrap'>(BWord(bk_nodes[0].ptr[e].flags) & -17)}
     let result=BWord(check_expr(e expected))
-    bk_nodes[0][s].a=int32<overflow='wrap'>(bk_last[0])
-    if bk_types[0].ptr[tu_prune(result)].kind not=? 'void_' {bk_nodes[0][b].aux=1}
-    if result =? bk_never_type[0] {bk_nodes[0][b].aux=0}
-    bk_nodes[0][s].flags=int32<overflow='wrap'>(BWord(bk_nodes[0].ptr[s].flags) | 128)
+    bk_nodes[0].ptr[s].a=int32<overflow='wrap'>(bk_last[0])
+    if bk_types[0].ptr[tu_prune(result)].kind not=? 'void_' {bk_nodes[0].ptr[b].aux=1}
+    if result =? bk_never_type[0] {bk_nodes[0].ptr[b].aux=0}
+    bk_nodes[0].ptr[s].flags=int32<overflow='wrap'>(BWord(bk_nodes[0].ptr[s].flags) | 128)
     result
 }
 # A value block's result: never when its last statement ends every path (NF_FLOW_RETURNS

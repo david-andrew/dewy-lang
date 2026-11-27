@@ -23,7 +23,7 @@ checker_signature_bind=(input:ptr<CheckerSignatureInput>):>CSWord=>{cs_input=inp
 cs_decl_info=(decl:CSWord):>CSWord=>$unsafe {
     if cs_input[0].nodes[0].ptr[decl].sym =? 0 {
         cs_input[0].declarations[0].push(DeclInfo[])
-        cs_input[0].nodes[0][decl].sym = int32<overflow='wrap'>(cs_input[0].declarations[0].length - 1)
+        cs_input[0].nodes[0].ptr[decl].sym = int32<overflow='wrap'>(cs_input[0].declarations[0].length - 1)
     }
     CSWord(cs_input[0].nodes[0].ptr[decl].sym)
 }
@@ -36,13 +36,16 @@ cs_has_shape=(n:CSWord):>bool=>$unsafe {
 cs_written_refinement=(n:CSWord):>bool=>$unsafe {
     if n =? 0 {return false}
     # This pure walk cannot grow nodes or lists, so retain the borrowed record.
-    let k=cs_input[0].nodes[0][n].kind
-    if k =? 'trefined' or (k =? 'tmap' and cs_input[0].nodes[0][n].aux =? 1) or (k =? 'tarray' and cs_input[0].nodes[0][n].ival =? 1) {return true}
+    let nd=cs_input[0].nodes[0].ptr + n
+    let k=nd[0].kind
+    if k =? 'trefined' or (k =? 'tmap' and nd[0].aux =? 1) or (k =? 'tarray' and nd[0].ival =? 1) {return true}
     if k =? 'block' or k =? 'lambda' {return false}
-    if (k =? 'param' or k =? 'fn_') and cs_written_refinement(CSWord(cs_input[0].nodes[0][n].a)) {return true}
-    if k not=? 'param' and k not=? 'fn_' and (cs_written_refinement(CSWord(cs_input[0].nodes[0][n].a)) or cs_written_refinement(CSWord(cs_input[0].nodes[0][n].b))) {return true}
-    loop i in [0..CSWord(cs_input[0].nodes[0][n].nlist)) {
-        if cs_written_refinement(CSWord(cs_input[0].lists[0].ptr[CSWord(cs_input[0].nodes[0][n].list) + i])) {return true}
+    if (k =? 'param' or k =? 'fn_') and cs_written_refinement(CSWord(nd[0].a)) {return true}
+    if k not=? 'param' and k not=? 'fn_' and (cs_written_refinement(CSWord(nd[0].a)) or cs_written_refinement(CSWord(nd[0].b))) {return true}
+    let lbase=CSWord(nd[0].list)
+    let nk=CSWord(nd[0].nlist)
+    loop i in [0..nk) {
+        if cs_written_refinement(CSWord(cs_input[0].lists[0].ptr[lbase + i])) {return true}
     }
     false
 }
@@ -57,12 +60,15 @@ fn_sig=(decl:CSWord):>FnSig=>$unsafe {
     let old_formals=cs_input[0].binders[0].formals
     let old_self=cs_input[0].binders[0].self
     cs_input[0].binders[0].formals = []
-    if cs_input[0].refine[0] {
-        loop i in [0..cs_nkids(decl)) {cs_input[0].binders[0].formals.push(CSWord(cs_input[0].nodes[0].ptr[cs_kid(decl i)].name))}
+    let nparams=cs_nkids(decl)
+    if cs_input[0].refine[0] and nparams >? 0 {
+        cs_input[0].binders[0].formals.reserve(nparams)
+        loop i in [0..nparams) {cs_input[0].binders[0].formals.push(CSWord(cs_input[0].nodes[0].ptr[cs_kid(decl i)].name))}
     }
     let mm:CSWord=0
     let shaped=cs_has_shape(CSWord(cs_input[0].nodes[0].ptr[decl].a))
-    loop i in [0..cs_nkids(decl)) {
+    if nparams >? 0 {sig.params.reserve(nparams)}
+    loop i in [0..nparams) {
         let p=cs_kid(decl i)
         cs_input[0].binders[0].self = CSWord(cs_input[0].nodes[0].ptr[p].name)
         if cs_has_shape(CSWord(cs_input[0].nodes[0].ptr[p].a)) {shaped=true}

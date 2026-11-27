@@ -229,17 +229,36 @@ pn_find=(name:PreludeWord):>int64=>$unsafe {
 # Parse units (of one module, in file order); their declarations
 prelude_parse_units=(us:array<int64>):>array<int64>=>{
     let out:array<int64>=[]
-    loop u in us {
+    let n=PreludeWord(us.length)
+    let i:PreludeWord=0
+    loop i <? n {
+        let u=us[i]
+        i += 1
         if pu_done[u] {continue}
         pu_done[u]=true
         let m=pu_mod[u]
         let f=PreludeWord(modules[m].file)
+        let s0=PreludeWord(su_start[u])
+        let e0=PreludeWord(su_end[u])
         if pl_on {
             pl_units.push(f)
-            pl_units.push(su_start[u])
-            pl_units.push(su_end[u])
+            pl_units.push(s0)
+            pl_units.push(e0)
         }
-        loop d in parse_span(f su_start[u] su_end[u]) {out.push(d)}
+        loop i <? n {
+            let u2=us[i]
+            if pu_done[u2] {i += 1; continue}
+            if pu_mod[u2] not=? m or PreludeWord(su_start[u2]) not=? e0 {break}
+            pu_done[u2]=true
+            e0=PreludeWord(su_end[u2])
+            if pl_on {
+                pl_units.push(f)
+                pl_units.push(PreludeWord(su_start[u2]))
+                pl_units.push(e0)
+            }
+            i += 1
+        }
+        loop d in parse_span(f s0 e0) {out.push(d)}
     }
     out
 }

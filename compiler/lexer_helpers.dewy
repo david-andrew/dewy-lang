@@ -8,6 +8,128 @@ from p"util.jo" import (intern)
 from p"@lib/core/rt.jo" import (__str_from_bytes)
 
 LexHelpWord:type=int64<overflow='wrap'>
+LexHelpUWord:type=uint64<overflow='wrap'>
+
+let lx_p10_pos_hi:array<uint64>=[]
+let lx_p10_pos_lo:array<uint64>=[]
+let lx_p10_pos_ex:array<int64>=[]
+let lx_p10_neg_hi:array<uint64>=[]
+let lx_p10_neg_lo:array<uint64>=[]
+let lx_p10_neg_ex:array<int64>=[]
+
+lx_init_p10=():>void=>{
+    lx_p10_pos_hi=[0xa000000000000000 0xc800000000000000 0x9c40000000000000 0xbebc200000000000 0x8e1bc9bf04000000 0x9dc5ada82b70b59d 0xc2781f49ffcfa6d5 0x93ba47c980e98cdf 0xaa7eebfb9df9de8d]
+    lx_p10_pos_lo=[0 0 0 0 0 0xf020000000000000 0x3cbf6b71c76b25fb 0xc66f336c36b10137 0xddbb901b98feeab7]
+    lx_p10_pos_ex=[3 6 13 26 53 106 212 425 850]
+    lx_p10_neg_hi=[0xcccccccccccccccc 0xa3d70a3d70a3d70a 0xd1b71758e219652b 0xabcc77118461cefc 0xe69594bec44de15b 0xcfb11ead453994ba 0xa87fea27a539e9a5 0xddd0467c64bce4a0 0xc0314325637a1939]
+    lx_p10_neg_lo=[0xcccccccccccccccc 0x3d70a3d70a3d70a3 0xd3c36113404ea4a8 0xfdc20d2b36ba7c3d 0x4c2ebe687989a9b3 0x67de18eda5814af2 0x3f2398d747b36224 0xac7cb3f6d05ddbde 0xfa911155fefb5308]
+    lx_p10_neg_ex=[-4 -7 -14 -27 -54 -107 -213 -426 -851]
+}
+
+lx_mul64_hi=(a:LexHelpUWord b:LexHelpUWord):>LexHelpUWord=>{
+    let a0=a & 0xFFFFFFFF
+    let a1=a >> 32
+    let b0=b & 0xFFFFFFFF
+    let b1=b >> 32
+    let p00=a0 * b0
+    let p01=a0 * b1
+    let p10=a1 * b0
+    let p11=a1 * b1
+    let mid=(p00 >> 32) + (p01 & 0xFFFFFFFF) + (p10 & 0xFFFFFFFF)
+    p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32)
+}
+
+lx_mul128_norm=(ahi:LexHelpUWord alo:LexHelpUWord aexp:LexHelpWord bhi:LexHelpUWord blo:LexHelpUWord bexp:LexHelpWord):>[LexHelpUWord LexHelpUWord LexHelpWord]=>{
+    let a0=ahi & 0xFFFFFFFF
+    let a1=ahi >> 32
+    let b0=bhi & 0xFFFFFFFF
+    let b1=bhi >> 32
+    let p00=a0 * b0
+    let p01=a0 * b1
+    let p10=a1 * b0
+    let p11=a1 * b1
+    let mid=(p00 >> 32) + (p01 & 0xFFFFFFFF) + (p10 & 0xFFFFFFFF)
+    let h1=p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32)
+    let l1=(p00 & 0xFFFFFFFF) | (mid << 32)
+    let h2=lx_mul64_hi(ahi blo)
+    let h3=lx_mul64_hi(alo bhi)
+    let s1=l1 + h2
+    let c1:LexHelpUWord=if s1 <? l1 {1} else {0}
+    let lo=s1 + h3
+    let c2:LexHelpUWord=if lo <? s1 {1} else {0}
+    let hi=h1 + c1 + c2
+    let exp2=aexp + bexp
+    if (hi >> 63) =? 0 {
+        hi=(hi << 1) | (lo >> 63)
+        lo=lo << 1
+    } else {
+        exp2 += 1
+    }
+    [hi lo exp2]
+}
+
+lx_float_128=(mant:LexHelpUWord exp:LexHelpWord truncated:bool):>[bool float64]=>$unsafe {
+    if exp <? -342 or exp >? 308 {return [false 0.0]}
+    if lx_p10_pos_hi.length =? 0 {lx_init_p10()}
+    let lz:LexHelpWord=0
+    let m_hi=mant
+    if (m_hi >> 32) =? 0 {m_hi <<= 32; lz += 32}
+    if (m_hi >> 48) =? 0 {m_hi <<= 16; lz += 16}
+    if (m_hi >> 56) =? 0 {m_hi <<= 8; lz += 8}
+    if (m_hi >> 60) =? 0 {m_hi <<= 4; lz += 4}
+    if (m_hi >> 62) =? 0 {m_hi <<= 2; lz += 2}
+    if (m_hi >> 63) =? 0 {m_hi <<= 1; lz += 1}
+    let m_exp:LexHelpWord=63 - lz
+    let p_hi:LexHelpUWord=LexHelpUWord(1) << 63
+    let p_lo:LexHelpUWord=0
+    let p_exp:LexHelpWord=0
+    if exp >? 0 {
+        let e=exp
+        let bit:LexHelpWord=0
+        let hp=lx_p10_pos_hi.ptr
+        let lp=lx_p10_pos_lo.ptr
+        let ep=lx_p10_pos_ex.ptr
+        loop e >? 0 {
+            if (e & 1) not=? 0 {
+                let [nh nl ne]=lx_mul128_norm(p_hi p_lo p_exp LexHelpUWord(hp[bit]) LexHelpUWord(lp[bit]) LexHelpWord(ep[bit]))
+                p_hi=nh; p_lo=nl; p_exp=ne
+            }
+            e >>= 1
+            bit += 1
+        }
+    } else if exp <? 0 {
+        let e=-exp
+        let bit:LexHelpWord=0
+        let hp=lx_p10_neg_hi.ptr
+        let lp=lx_p10_neg_lo.ptr
+        let ep=lx_p10_neg_ex.ptr
+        loop e >? 0 {
+            if (e & 1) not=? 0 {
+                let [nh nl ne]=lx_mul128_norm(p_hi p_lo p_exp LexHelpUWord(hp[bit]) LexHelpUWord(lp[bit]) LexHelpWord(ep[bit]))
+                p_hi=nh; p_lo=nl; p_exp=ne
+            }
+            e >>= 1
+            bit += 1
+        }
+    }
+    let [hi _lo exp2]=lx_mul128_norm(m_hi 0 m_exp p_hi p_lo p_exp)
+    let bexp=exp2 + 1023
+    if bexp <=? 0 or bexp >=? 2047 {return [false 0.0]}
+    let rem=hi & 0x7FF
+    let guard:LexHelpUWord=if truncated {32} else {8}
+    if rem >=? (0x400 - guard) and rem <=? (0x400 + guard) {return [false 0.0]}
+    let sig=hi >> 11
+    if rem >? 0x400 {
+        sig += 1
+        if sig =? (LexHelpUWord(1) << 53) {
+            sig >>= 1
+            bexp += 1
+            if bexp >=? 2047 {return [false 0.0]}
+        }
+    }
+    let bits=(LexHelpUWord(bexp) << 52) | (sig & 0x000FFFFFFFFFFFFF)
+    [true (bits transmute float64)]
+}
 
 tok_text=(k:Tok):>string=>match k {
     <'kw_struct'> => "struct"
@@ -245,21 +367,27 @@ is_ident_char=(c:uint8):>bool=>is_ident_start(c) or c >=? 48 and c <=? 57
 
 lx_float=(s:LexHelpWord e:LexHelpWord):>float64=>$unsafe {
     let p=lx_p
-    let mant:LexHelpWord=0
+    let mant:LexHelpUWord=0
     let nd:LexHelpWord=0
     let exp:LexHelpWord=0
     let i=s
-    let simple=true
     let seen_dot=false
+    let truncated=false
     loop i <? e {
         let c=p[i]
         if c >=? 48 and c <=? 57 {
             if nd >? 0 or c not=? 48 {
                 nd += 1
-                if nd <=? 15 {mant=mant * 10 + LexHelpWord(c - 48)}
-                else {simple=false}
+                if nd <=? 19 {
+                    mant=mant * 10 + LexHelpUWord(c - 48)
+                    if seen_dot {exp -= 1}
+                } else {
+                    if not seen_dot {exp += 1}
+                    if c not=? 48 {truncated=true}
+                }
+            } else {
+                if seen_dot {exp -= 1}
             }
-            if seen_dot {exp -= 1}
         } else if c =? 46 {seen_dot=true}
         else if c =? 101 or c =? 69 {
             i += 1
@@ -275,10 +403,13 @@ lx_float=(s:LexHelpWord e:LexHelpWord):>float64=>$unsafe {
         }
         i += 1
     }
-    if simple and exp >=? -22 and exp <=? 22 {
+    if nd <=? 15 and exp >=? -22 and exp <=? 22 {
         if exp >=? 0 {return float64(mant) * __pow10(exp)}
         return float64(mant) / __pow10(-exp)
     }
+    if mant =? 0 {return 0.0}
+    let [ok fast_v]=lx_float_128(mant exp truncated)
+    if ok {return fast_v}
     let digits:array<uint8>=[]
     loop k in [s..e) {if p[k] not=? 95 {digits.push(p[k])}}
     to_float(__str_from_bytes(digits)) ?? 0.0

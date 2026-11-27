@@ -619,6 +619,29 @@ lex=(file:LexScanWord src:string begin:LexScanWord=0 stop:LexScanWord=-1):>array
                     i += 1
                     continue
                 }
+                <12> => {
+                    if cls[p[i + 1]] not=? 0 {
+                        if cnt =? lcap {
+                            lx_count=cnt; lx_grow(); lcap=lx_cap; slots=lx_slots
+                        }
+                        let sl=slots + cnt
+                        cnt += 1
+                        sl[0].kind = 'dot'
+                        sl[0].flags = 0
+                        sl[0].pos = at + i
+                        sl[0].start = int32<overflow='wrap'>(i)
+                        sl[0].len = 1
+                        sl[0].ival = 0
+                        i += 1
+                        continue
+                    }
+                    lx_count=cnt
+                    i=lx_op_multi(p i om c at)
+                    cnt=lx_count
+                    lcap=lx_cap
+                    slots=lx_slots
+                    continue
+                }
                 _ => {
                     lx_count=cnt
                     i=lx_op_multi(p i om c at)
@@ -630,13 +653,54 @@ lex=(file:LexScanWord src:string begin:LexScanWord=0 stop:LexScanWord=-1):>array
             }
         }
         if c =? 10 {
-            if ctx_n =? 1 and (not lx_lazy or cnt =? 0 or slots[cnt - 1].kind not=? 'colon') {
+            if (ctx_p[ctx_n - 1] & 1) =? 0 {
                 let q:LexScanWord=i + 1
-                loop p[q] =? 32 {q += 1}
-                let nc=p[q]
-                if q <? lim and nc not=? 10 and nc not=? 35 and nc not=? 9 and nc not=? 13 {
-                    let ind:LexScanWord=q - (i + 1)
-                    if ind =? top_indent {
+                let ok_nl=true
+                loop true {
+                    let line0=q
+                    loop p[q] =? 32 {q += 1}
+                    if q >=? lim {ok_nl=false; break}
+                    let nc=p[q]
+                    if nc =? 10 {q += 1; continue}
+                    if nc =? 35 {
+                        q=__find_newline(p q lim)
+                        if q <? lim {q += 1; continue}
+                        ok_nl=false; break
+                    }
+                    if nc =? 9 or nc =? 13 {ok_nl=false; break}
+                    let ind=q - line0
+                    lx_line_indent=ind
+                    if ind >? 0 {lx_space_indent=true}
+                    i=q
+                    break
+                }
+                if ok_nl {continue}
+            } else if ctx_n =? 1 and (not lx_lazy or cnt =? 0 or slots[cnt - 1].kind not=? 'colon') {
+                let q:LexScanWord=i + 1
+                let ok_nl=false
+                let ind:LexScanWord=0
+                loop true {
+                    let line0=q
+                    loop p[q] =? 32 {q += 1}
+                    if q >=? lim {break}
+                    let nc=p[q]
+                    if nc =? 10 {q += 1; continue}
+                    if nc =? 35 {
+                        q=__find_newline(p q lim)
+                        if q <? lim {q += 1; continue}
+                        break
+                    }
+                    if nc =? 9 or nc =? 13 {break}
+                    ind=q - line0
+                    ok_nl=true
+                    break
+                }
+                if ok_nl {
+                    let idir:LexScanWord=0
+                    if ind =? top_indent {idir=1}
+                    else if ind >? top_indent {idir=2}
+                    else if lx_indents.length >=? 2 and ind =? lx_indents.ptr[LexScanWord(lx_indents.length) - 2] {idir=3}
+                    if idir not=? 0 {
                         if cnt >? 0 {
                             let lk=slots[cnt - 1].kind
                             if lk not=? 'newline' and lk not=? 'indent' and lk not=? 'dedent' {
@@ -652,6 +716,35 @@ lex=(file:LexScanWord src:string begin:LexScanWord=0 stop:LexScanWord=-1):>array
                                 sl[0].len = 0
                                 sl[0].ival = 0
                             }
+                        }
+                        if idir =? 2 {
+                            lx_indents.push(ind)
+                            top_indent=ind
+                            if cnt =? lcap {
+                                lx_count=cnt; lx_grow(); lcap=lx_cap; slots=lx_slots
+                            }
+                            let sl=slots + cnt
+                            cnt += 1
+                            sl[0].kind = 'indent'
+                            sl[0].flags = 0
+                            sl[0].pos = at + q
+                            sl[0].start = int32<overflow='wrap'>(q)
+                            sl[0].len = 0
+                            sl[0].ival = 0
+                        } else if idir =? 3 {
+                            lx_indents.pop();
+                            top_indent=ind
+                            if cnt =? lcap {
+                                lx_count=cnt; lx_grow(); lcap=lx_cap; slots=lx_slots
+                            }
+                            let sl=slots + cnt
+                            cnt += 1
+                            sl[0].kind = 'dedent'
+                            sl[0].flags = 0
+                            sl[0].pos = at + q
+                            sl[0].start = int32<overflow='wrap'>(q)
+                            sl[0].len = 0
+                            sl[0].ival = 0
                         }
                         lx_line_indent=ind
                         if ind >? 0 {lx_space_indent=true}

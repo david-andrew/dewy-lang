@@ -80,7 +80,15 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
         if not decl_infos.ptr[di].sig.done {fn_sig(decl);}
         let np:CRWord=nkids(decl)
         let mutmask=CRWord(decl_infos.ptr[di].sig.mutmask)
-        if not decl_infos.ptr[di].sig.generic and decl_infos.ptr[di].sig.ntp =? 0 and n_args =? np and np <=? 31 and not (refine_active and mutmask =? 1) and (dewy_param_kinds.length =? 0 or not dewy_param_kinds.has(decl)) {
+        let p0_ref_mut=false
+        if refine_active and mutmask =? 1 {
+            p0_ref_mut=true
+            if np >? 0 {
+                let p0=decl_infos.ptr[di].sig.params.ptr[0]
+                if types.ptr[p0].kind =? 'struct_' and types.ptr[p0].nargs =? 0 {p0_ref_mut=false}
+            }
+        }
+        if not decl_infos.ptr[di].sig.generic and decl_infos.ptr[di].sig.ntp =? 0 and n_args =? np and np <=? 31 and not p0_ref_mut and (dewy_param_kinds.length =? 0 or not dewy_param_kinds.has(decl)) {
             let ok=true
             let exact_mask:CRWord=0
             let empty_binds:array<int64>=[]

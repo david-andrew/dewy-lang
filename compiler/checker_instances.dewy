@@ -124,51 +124,56 @@ ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe 
             }
         }
     }
-    let sig=ci_input[0].declarations[0].ptr[di].sig
+    let sig=ci_decls[0].ptr[di].sig
     let f=instance_create(decl use_pos)
     let zt:array<int64>=[]
-    loop t in targs {
-        let z=tu_zonk(t)
-        if tu_has_var(tu_prune(z)) {instance_bad_arg(decl z use_pos)}
-        zt.push(z)
+    if tlen >? 0 {
+        zt.reserve(tlen)
+        loop t in targs {
+            let z=tu_zonk(t)
+            if tu_has_var(tu_prune(z)) {instance_bad_arg(decl z use_pos)}
+            zt.push(z)
+        }
     }
-    ci_input[0].functions[0][f].targs=zt
+    ci_fns[0].ptr[f].targs=zt
     if ci_input[0].context[0] >=? 0 {
         let parent=CIWord(ci_input[0].contexts[0].ptr[ci_input[0].context[0]].inst)
-        if parent >? 0 and ci_input[0].functions[0].ptr[parent].targs.length >? 0 {
-            ci_input[0].functions[0][f].gdepth=ci_input[0].functions[0].ptr[parent].gdepth + 1
-            if ci_input[0].functions[0].ptr[f].gdepth >? 500 {instance_depth_error(decl use_pos)}
+        if parent >? 0 and ci_fns[0].ptr[parent].targs.length >? 0 {
+            ci_fns[0].ptr[f].gdepth=ci_fns[0].ptr[parent].gdepth + 1
+            if ci_fns[0].ptr[f].gdepth >? 500 {instance_depth_error(decl use_pos)}
         }
     }
     # (a rest parameter, NF_SPREAD: the extra type argument is its type, expr.jo's rest_inst_binds)
-    let rest_type:CIWord=if zt.length >? CIWord(sig.ntp) zt[CIWord(sig.ntp)] else 0
-    loop i in [0..CIWord(ci_input[0].nodes[0].ptr[decl].nlist)) {
-        let pt=ts_subst(sig.params[i] zt)
+    let rest_type:CIWord=if zt.length >? CIWord(sig.ntp) zt.ptr[CIWord(sig.ntp)] else 0
+    let np=CIWord(ci_nodes[0].ptr[decl].nlist)
+    if np >? 0 {ci_fns[0].ptr[f].ptypes.reserve(np)}
+    loop i in [0..np) {
+        let pt=ts_subst(sig.params.ptr[i] zt)
         let param:CIWord=kid(decl i)
-        if rest_type not=? 0 and (CIWord(ci_input[0].nodes[0].ptr[param].flags) & 1024) not=? 0 {pt=rest_type}
-        ci_input[0].functions[0][f].ptypes.push(pt)
+        if rest_type not=? 0 and (CIWord(ci_nodes[0].ptr[param].flags) & 1024) not=? 0 {pt=rest_type}
+        ci_fns[0].ptr[f].ptypes.push(pt)
     }
     instance_load(decl f sig.generic or rest_type not=? 0)
     if sig.ret not=? 0 {
         let ret=ts_subst(CIWord(sig.ret) zt)
-        ci_input[0].functions[0][f].ret=int32<overflow='wrap'>(ret)
+        ci_fns[0].ptr[f].ret=int32<overflow='wrap'>(ret)
     }
-    pack_written(f CIWord(ci_input[0].nodes[0].ptr[decl].a))
-    if sig.ret =? 0 and ci_input[0].nodes[0].ptr[decl].b not=? 0 and cr_syntactic_void(CIWord(ci_input[0].nodes[0].ptr[decl].b)) and not (dewy_at(ci_input[0].nodes[0].ptr[decl].pos) and (cr_may_express(CIWord(ci_input[0].nodes[0].ptr[decl].b)) or cr_has_propagate(CIWord(ci_input[0].nodes[0].ptr[decl].b)))) {
-        ci_input[0].functions[0][f].ret=int32<overflow='wrap'>(ci_input[0].void_type[0])
+    pack_written(f CIWord(ci_nodes[0].ptr[decl].a))
+    if sig.ret =? 0 and ci_nodes[0].ptr[decl].b not=? 0 and cr_syntactic_void(CIWord(ci_nodes[0].ptr[decl].b)) and not (dewy_at(ci_nodes[0].ptr[decl].pos) and (cr_may_express(CIWord(ci_nodes[0].ptr[decl].b)) or cr_has_propagate(CIWord(ci_nodes[0].ptr[decl].b)))) {
+        ci_fns[0].ptr[f].ret=int32<overflow='wrap'>(ci_input[0].void_type[0])
     }
     instance_validate(f sig use_pos)
     if sig.generic or rest_type not=? 0 {
-        let body=clone(CIWord(ci_input[0].nodes[0].ptr[decl].b))
-        ci_input[0].functions[0][f].body=int32<overflow='wrap'>(body)
-    } else {ci_input[0].functions[0][f].body=ci_input[0].nodes[0].ptr[decl].b}
-    if (CIWord(ci_input[0].nodes[0].ptr[decl].flags) & 4) not=? 0 and ci_input[0].functions[0].ptr[f].ret =? 0 {
-        ci_input[0].functions[0][f].ret=int32<overflow='wrap'>(ci_input[0].void_type[0])
+        let body=clone(CIWord(ci_nodes[0].ptr[decl].b))
+        ci_fns[0].ptr[f].body=int32<overflow='wrap'>(body)
+    } else {ci_fns[0].ptr[f].body=ci_nodes[0].ptr[decl].b}
+    if (CIWord(ci_nodes[0].ptr[decl].flags) & 4) not=? 0 and ci_fns[0].ptr[f].ret =? 0 {
+        ci_fns[0].ptr[f].ret=int32<overflow='wrap'>(ci_input[0].void_type[0])
     }
     instance_attributes(decl f zt use_pos)
-    ci_input[0].declarations[0][di].insts.push(f)
-    if zt.length >? 0 {ci_input[0].index[0][FnInstanceKey[decl zt]]=f}
-    if ci_input[0].functions[0].ptr[f].ret =? 0 {ensure_ret(f use_pos)}
+    ci_decls[0].ptr[di].insts.push(f)
+    if zt.length >? 0 {ci_index[0][FnInstanceKey[decl zt]]=f}
+    if ci_fns[0].ptr[f].ret =? 0 {ensure_ret(f use_pos)}
     if tlen =? 0 {ci_record_mono(decl f)}
     f
 }

@@ -249,8 +249,15 @@ xe_one_value=(a:XEWord):>bool=>$unsafe {
 values_settled=(n:XEWord):>bool=>$unsafe {
     let callee=XEWord(xe_nodes[0].ptr[n].a)
     if xe_nodes[0].ptr[callee].kind =? 'ident' {
-        let name=xe_names[0].ptr[XEWord(xe_nodes[0].ptr[callee].name)]
-        if name.startswith("__") or name.startswith("$") {return true}
+        let nid=XEWord(xe_nodes[0].ptr[callee].name)
+        let hdr=(xe_names[0].ptr as ptr<ptr<uint8>>)[nid]
+        if hdr not=? (uint64(0) as ptr<uint8>) {
+            let nlen=(hdr as ptr<int64>)[1]
+            if nlen >=? 1 {
+                let b0=hdr[24]
+                if b0 =? 36 or (b0 =? 95 and nlen >=? 2 and hdr[25] =? 95) {return true}
+            }
+        }
     }
     let count=XEWord(xe_nodes[0].ptr[n].nlist)
     let base=XEWord(xe_nodes[0].ptr[n].list)
@@ -698,11 +705,18 @@ check_call_expr=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     if ex not=? 0 and xe_nodes[0].ptr[callee].kind =? 'ident' {
         let count=XEWord(xe_nodes[0].ptr[n].nlist)
         if count =? 1 or count =? 2 {
-            let cname=xe_names[0].ptr[XEWord(xe_nodes[0].ptr[callee].name)]
-            if count =? 2 and cname =? "__shape_value" and (xe_types[0].ptr[ex].kind =? 'array' or is_nd(ex)) {
-                check_expr(xe_kid(n 0) ex);
-                xe_set_kid(n 0 xe_last[0])
-            } else if count =? 1 and cname =? "__map_of" {call_map_rows(n ex)}
+            let nid=XEWord(xe_nodes[0].ptr[callee].name)
+            let hdr=(xe_names[0].ptr as ptr<ptr<uint8>>)[nid]
+            if hdr not=? (uint64(0) as ptr<uint8>) {
+                let nlen=(hdr as ptr<int64>)[1]
+                if nlen >=? 8 and hdr[24] =? 95 and hdr[25] =? 95 {
+                    let cname=xe_names[0].ptr[nid]
+                    if count =? 2 and cname =? "__shape_value" and (xe_types[0].ptr[ex].kind =? 'array' or is_nd(ex)) {
+                        check_expr(xe_kid(n 0) ex);
+                        xe_set_kid(n 0 xe_last[0])
+                    } else if count =? 1 and cname =? "__map_of" {call_map_rows(n ex)}
+                }
+            }
         }
     }
     if is_unchecked_at(n) {

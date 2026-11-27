@@ -122,8 +122,13 @@ xl_finish=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
     let hdr=(xl_nodes as ptr<ptr<int64>>)[0]
     if hdr[0] not=? 1 {return xl_finish_slow(n t0 expected)}
     let node=(((hdr as ptr<uint8>) + 24) as ptr<Node>) + n
-    if (xl_effects[0] and expected not=? 0) or xl_exact_measure[0] or (xl_refine[0] and xl_types[0].ptr[t0].kind =? 'refined' and xl_types[0].ptr[t0].bits not=? -2) {
-        return xl_finish_slow(n t0 expected)
+    if xl_exact_measure[0] {return xl_finish_slow(n t0 expected)}
+    if xl_refine[0] or (xl_effects[0] and expected not=? 0) {
+        let ti=xl_types[0].ptr + t0
+        let tk=ti[0].kind
+        if (xl_refine[0] and tk =? 'refined' and ti[0].bits not=? -2) or (xl_effects[0] and expected not=? 0 and (tk =? 'fn_' or tk =? 'cfn' or tk =? 'polyfn' or tk =? 'var')) {
+            return xl_finish_slow(n t0 expected)
+        }
     }
     if xl_exact_nk_p[int64((node as ptr<uint32>)[0])] not=? uint8(0) {
         let k=node[0].kind

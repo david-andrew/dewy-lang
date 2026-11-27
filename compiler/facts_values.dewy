@@ -58,13 +58,13 @@ fact_scalar=(t0:ValueBuildWord):>bool=>$unsafe {
 }
 fact_type_slow=(t0:ValueBuildWord):>int64=>$unsafe {
     let t=exact_representation(t0)
-    if types[t].kind =? 'int_' and types[t].bits =? 64 and not types[t].sign {return T_U64}
+    if types.ptr[t].kind =? 'int_' and types.ptr[t].bits =? 64 and not types.ptr[t].sign {return T_U64}
     t
 }
 fact_type=(t0:ValueBuildWord):>int64=>$unsafe {
-    let k=types[t0].kind
+    let k=types.ptr[t0].kind
     if k =? 'int_' {
-        if types[t0].bits =? 64 and not types[t0].sign {return T_U64}
+        if types.ptr[t0].bits =? 64 and not types.ptr[t0].sign {return T_U64}
         return t0
     }
     if k not=? 'refined' and k not=? 'var' and (not secrets_seen or k not=? 'secret') {return t0}
