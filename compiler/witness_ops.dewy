@@ -146,10 +146,45 @@ wit_note=(at:WitWord text:string):>void=>{
     }
     err_notes.push([at line])
 }
-# Repairs are current evidence or an explicit runtime check, never `$assert`.
+# A relation between two integer literals, `0 >? 0`, decided by its text: 1 always
+# true, 2 never, 0 otherwise. (error path only)
+wit_decided=(relation:string):>WitWord=>{
+    let parts=split(relation " ")
+    if parts.length not=? 3 {return 0}
+    let values:array<int64>=[]
+    loop part in [parts[0] parts[2]] {
+        let b=part as array<uint8>
+        let negative=b.length >? 1 and b[0] =? b'-'
+        let i:WitWord=if negative {1} else {0}
+        if b.length =? i or b.length >? 18 {return 0}
+        let v:int64=0
+        loop i <? b.length {
+            if b[i] <? b'0' or b[i] >? b'9' {return 0}
+            v=v*10 + int64(b[i] - b'0')
+            i += 1
+        }
+        values.push(if negative {-v} else {v})
+    }
+    let [a c]=[values[0] values[1]]
+    let op=parts[1]
+    let holds=if op =? "<?" {a <? c} else if op =? "<=?" {a <=? c} else if op =? ">?" {a >? c} else if op =? ">=?" {a >=? c} else if op =? "=?" {a =? c} else if op =? "not=?" {a not=? c} else {return 0}
+    if holds {1} else {2}
+}
+# Repairs are current evidence or an explicit runtime check, never `$assert`;
+# a relation between constants has neither, only another value: an argument's is the
+# parameter's contract (`formal`, `n >? 0`).
 # Inside an erased proof, evidence comes only from its preconditions, guards
 # and other proofs.
-wit_help=(relation:string runtime:bool=true contract:WitWord=0 before:string=""):>void=>$unsafe {
+wit_help=(relation:string runtime:bool=true contract:WitWord=0 before:string="" formal:string=""):>void=>$unsafe {
+    let decided=wit_decided(relation)
+    if decided =? 1 {return}
+    if decided =? 2 {
+        let parts=split(relation " ")
+        let want=if formal not=? "" {formal} else {"{parts[1]} {parts[2]}"}
+        let verb=if formal not=? "" {"pass"} else {"use"}
+        err_notes.push([(-1) "help: `{parts[0]}` can never satisfy `{want}`: {verb} a value that does"])
+        return
+    }
     let after=wit_after
     wit_after=0
     let want=if relation not=? "" {"`{relation}`"} else if contract >? 0 {"the declared contract"} else {"what the operation needs"}
@@ -1203,12 +1238,27 @@ wit_refinement=(n:WitWord t:WitWord atom:RefAtom self:WitWord a:WitWord b:WitWor
     let missing=if storage {""} else {wit_relation(s s op x y refuted)}
     if refuted {
         wit_context(contract)
-        wit_help(relation)
+        wit_help(relation formal=wit_formal_relation(n atom))
         wit_fail(nodes.ptr[n].pos "refinement refuted: {shown} violates the declared contract")
         return
     }
     let what=if relation not=? "" and ref_narrowing.has(n) {"`{relation}` for the conversion to {dt(ref_narrowing[n])}"} else if relation not=? "" {"refinement `{relation}`"} else {"refinement"}
     wit_unknown(n fact_bound(s self) what contract relation missing)
+}
+# An argument's contract said by the callee's names, `n >? 0`, or "" (and for the library's
+# functions, which may stand for an operator such as an indexed store). (error path only)
+wit_formal_relation=(n:WitWord atom:RefAtom):>string=>$unsafe {
+    let call=wit_call_holding(n)
+    if call <=? 0 or nodes.ptr[call].aux not=? 0 or nodes.ptr[call].sym <=? 0 {return ""}
+    let f=WitWord(nodes.ptr[call].sym)
+    let d=WitWord(fns.ptr[f].decl)
+    if d =? 0 or pos_in_lib(nodes.ptr[d].pos) {return ""}
+    let at:WitWord=-1
+    loop i in [0..nkids(call)) {
+        if kid(call i) =? n {at=i}
+    }
+    let o=wit_orient(atom.op WitSide(0 0 wit_formal_text(atom.a f at) false atom.a.kind =? 1) WitSide(0 0 wit_formal_text(atom.b f at) false atom.b.kind =? 1))
+    wit_relation_text(o[0] o[1] o[2])
 }
 # A record field's refinement that names its siblings (`head:int64<v => v <? items.length>`),
 # met while one is built: said with the fields' names, from the record declaring the

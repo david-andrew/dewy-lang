@@ -1,0 +1,4 @@
+# A constant argument that breaks the contract: the help names the parameter's
+# contract, not a guard for `0 >? 0`.
+share = (total:int n:int<(>? 0)>) => total // n
+printl(share(84 0))

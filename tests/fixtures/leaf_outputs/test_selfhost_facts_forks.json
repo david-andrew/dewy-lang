@@ -2,7 +2,7 @@
  "test_facts_forks_twins": [
   {"args":5825,"files":8248},
   {"args":4478,"files":7899},
-  10468,
+  12613,
   {"args":["build","<root>/tests/cases/dogfood20_proofs/chosen_element_wider.dewy","-o","<tmp>/program"],"status":1,"stderr":"<root>/tests/cases/dogfood20_proofs/chosen_element_wider.dewy:6:12: error: cannot prove index is in bounds: missing upper bound\n        printl(scores[best])\n               ^\n    note: best is between 0 and 4\n    note: scores.length is 4\n    note: missing upper bound: nothing establishes `best <? scores.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): best = 4, scores.length = 4\n    help: establish `best <? scores.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n"},
   {"args":["build","<root>/tests/cases/dogfood19_proofs/key_callback_other.dewy","-o","<tmp>/program"],"status":1,"stderr":"<root>/tests/cases/dogfood19_proofs/key_callback_other.dewy:3:67: error: cannot prove index is in bounds: missing upper bound\n        let order = [loop i in [0..rank.length) i].sorted(key=(i) => -other[i])\n                                                                      ^\n    note: i is between 0 and 281474976710654\n    note: other.length is between 0 and 281474976710655\n    note: missing upper bound: nothing establishes `i <? other.length` here\n    note: possible witness (consistent with the known bounds, not an observed execution): i = 0, other.length = 0\n    help: establish `i <? other.length` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n"}
  ]
