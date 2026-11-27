@@ -25,7 +25,7 @@ from p"member_replay.jo" import (member_compact_owners)
 from p"facts_arrays.dewy" import (fact_array_call)
 from p"facts_changes.dewy" import (fact_enum_cast fact_handle_opaque fact_partial_opaque fact_pure_binary fact_pure_conversion fact_pure_intrinsic)
 from p"facts_forgets.dewy" import (fact_exposed fact_fn_in_lib fact_own_local fact_pointer_cast fact_written_root)
-from p"facts_forks.dewy" import (fact_key_callback fact_parallel_array fact_seed_lambdas)
+from p"facts_forks.dewy" import (fact_inline_forks fact_key_callback fact_parallel_array fact_seed_lambdas)
 from p"facts_joins.dewy" import (fact_payload_node)
 from p"facts_library.dewy" import (fact_chosen_call fact_copy_length_call fact_empty_array_call fact_endpoint_call fact_entry_count_call fact_exact_sum_call fact_gpu_index_call fact_heap_call fact_integer_gcd_call fact_library_call fact_nonempty_call fact_same_length_call)
 from p"facts_lifecycle.dewy" import (fact_bounded_index fact_exact_demand fact_parallel_range_call)
@@ -394,6 +394,7 @@ fsp_lib_loop1=(n:SlicePrepWord nk:SlicePrepWord l0:SlicePrepWord flags:SlicePrep
             let arg=SlicePrepWord(lists[l0 + j])
             if nodes[arg].kind =? 'lambda' and nodes[arg].sym >? 0 {
                 fact_fork_nodes[arg]=true
+                fact_inline_forks[arg]=true
                 forks.push(arg)
             }
         }
@@ -416,6 +417,7 @@ fsp_lib_loop1=(n:SlicePrepWord nk:SlicePrepWord l0:SlicePrepWord flags:SlicePrep
         let kcb=fact_key_callback(n)
         if kcb >? 0 {
             fact_fork_nodes[kcb]=true
+            fact_inline_forks[kcb]=true
             forks.push(kcb)
             values.push(n)
             values.push(SlicePrepWord(lists[l0]))

@@ -50,9 +50,13 @@ ForkWord:type=int64<overflow='wrap'>
 # Filled by fact_seed_closures for one finalization. O(captures) per closure.
 let fact_seed_lambdas:dict<int64 array<int64>>=[]
 let fact_general_forks:dict<int64 bool>=[]
+# (a library call's inline callback, which the call runs while it holds what the callback
+# shares: the existing fork rules, whatever else it may be)
+let fact_inline_forks:dict<int64 bool>=[]
 fact_seed_reset=():>void=>{
     fact_seed_lambdas=[]
     fact_general_forks=[]
+    fact_inline_forks=[]
 }
 # The function creating closure f when the closure captures a value its creator's facts can
 # describe, else 0. O(captures).
@@ -88,7 +92,7 @@ fact_seed_note=(creator:ForkWord lam:ForkWord):>void=>{
 fact_fork_record=(lam:ForkWord @s:FactState):>void=>$unsafe {
     let f=ForkWord(nodes.ptr[lam].sym)
     if f <=? 0 or f >=? fns.length {return}
-    let general=fact_general_forks.has(lam)
+    let general=fact_general_forks.has(lam) and not fact_inline_forks.has(lam)
     let entry=FactForkEntry()
     let values:array<int64>=[]
     loop cap in fns.ptr[f].caps {

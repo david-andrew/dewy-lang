@@ -51,6 +51,15 @@ main=():>void=>exit(int64<overflow='wrap'>(f([1 2 3] 3 1)-5) & 255)
 ''',
     # A fork closure starts from what its creator knew of its snapshot
     # captures and of the lengths of the arrays it borrows by partition.
+    # A stored closure's snapshots keep what its creator knew of them: they cannot change.
+    'stored_closure_snapshot': '''main=():>void=>{
+    let xs:array<int64>=[1 2 3 4]
+    let mid:int64=xs.length//2
+    let later=(i:int64):>int64=>int64<overflow='wrap'>(xs[..mid).length)+int64<overflow='wrap'>(i)
+    xs.clear()
+    exit(int64<overflow='wrap'>(later(0)-2) & 255)
+}
+''',
     'fork_slices': '''fill=(@xs:array<int64> @ys:array<int64> v:int64):>void=>{
     loop i in [0..xs.length) {xs[i]=v}
     loop i in [0..ys.length) {ys[i]=v}
@@ -142,11 +151,12 @@ main=():>void=>exit(int64<overflow='wrap'>(g([1 2] 0 1)) & 255)
 }
 main=():>void=>exit(int64<overflow='wrap'>(f([1])) & 255)
 ''', 'cannot prove index is in bounds'),
-    # A closure that is not a fork's runs later: its creator's facts say nothing.
+    # A closure that is not a fork's runs later: what it shares may have changed by then.
     'stored_closure': ('''main=():>void=>{
     let xs:array<int64>=[1 2 3 4]
     let mid:int64=xs.length//2
-    let later=(i:int64):>int64=>int64<overflow='wrap'>(xs[..mid).length)+int64<overflow='wrap'>(i)
+    let later=($capture @xs i:int64):>int64=>int64<overflow='wrap'>(xs[..mid).length)+int64<overflow='wrap'>(i)
+    xs.clear()
     exit(int64<overflow='wrap'>(later(0)-2) & 255)
 }
 ''', 'cannot prove slice is in bounds'),
