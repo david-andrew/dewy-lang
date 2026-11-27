@@ -49,6 +49,7 @@ FnInst:type=[
     kind:int32=0
     has_env:bool=false
     task_api:bool=false # checked waiting-lane spawn boundaries
+    float_key_checked:uint8=uint8(0) # 0 unknown, 1 not a map/set float-key candidate, 2 candidate
     caps:array<Capture>=[]
     env_size:int32=0
     mod:int32=0
@@ -87,6 +88,8 @@ FnSig:type=[
     mutmask:int32=0
     generic:bool=false
     done:bool=false
+    check_tag:uint8=uint8(0)
+    mono_fn:int32=0
 ]
 
 DeclInfo:type=[
@@ -102,7 +105,6 @@ FnInstanceKey:type=[
 let live_body_indexes:int64=0
 let live_body_user_globals:int64=0
 let live_body_global_mod:int64=-1
-let decl_mono_fn:array<int32>=[]
 let decl_mono_enabled:bool=true
 
 # A name's binding: its kind and the arena entry it refers to (check.jo `syms`).

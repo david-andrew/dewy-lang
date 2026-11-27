@@ -96,7 +96,7 @@ name_find=(@texts:array<string> @hashes:array<int64> @slots:array<int32> p:ptr<u
 }
 
 # a new id for name, which the table does not have; h is its hash_bytes
-name_add=(@texts:array<string> @hashes:array<int64> @slots:array<int32> name:string h:int64):>int64=>{
+name_add=(@texts:array<string> @hashes:array<int64> @slots:array<int32> name:string h:int64):>int64=>$unsafe {
     if slots.length =? 0 {
         slots=fill(int32(0) 1 << 14)
         # (name 0 is "", whose hash is 0: 0 stands for no name)
@@ -104,20 +104,25 @@ name_add=(@texts:array<string> @hashes:array<int64> @slots:array<int32> name:str
         if (name as array<uint8>).length =? 0 {return 0}
     }
     let mask=NameWord(slots.length) - 1
+    let sp=slots.ptr
     let i=NameWord(h) & mask
-    loop slots[i] not=? 0 {i=if i <? mask i + 1 else 0}
+    loop sp[i] not=? 0 {i=(i + 1) & mask}
     let id=NameWord(texts.length)
     texts.push(name)
     hashes.push(h)
-    slots[i]=int32(id + 1)
+    if ((sp as ptr<int64>) - 3)[0] =? 1 {sp[i]=int32<overflow='wrap'>(id + 1)}
+    else {slots[i]=int32<overflow='wrap'>(id + 1)}
     if NameWord(texts.length) * 2 >? NameWord(slots.length) {
         # (grown: every id placed again)
         slots=fill(int32(0) slots.length * 2)
         let m2=NameWord(slots.length) - 1
-        loop k in [0..NameWord(texts.length)) {
-            let j=NameWord(hashes[k]) & m2
-            loop slots[j] not=? 0 {j=if j <? m2 j + 1 else 0}
-            slots[j]=int32(k + 1)
+        let sp2=slots.ptr
+        let hp=hashes.ptr
+        let n=NameWord(texts.length)
+        loop k in [NameWord(0)..n) {
+            let j=NameWord(hp[k]) & m2
+            loop sp2[j] not=? 0 {j=(j + 1) & m2}
+            sp2[j]=int32<overflow='wrap'>(k + 1)
         }
     }
     int64(id)

@@ -71,6 +71,7 @@ let cd_name_mask:array<uint8>=[]
 let cd_mask_ptr:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
 let cd_mask_len:CDWord=0
 let cd_mask_bp:CDWord=0
+let cd_mask_ulen:CDWord=-1
 let cd_univ_syms:array<int64>=[]
 let cd_univ_len:CDWord=0
 
@@ -101,6 +102,7 @@ cd_init_masks=():>void=>$unsafe {
     cd_mark_name(intern("members") uint8(1))
     if id_members not=? 0 {cd_mark_name(id_members uint8(1))}
     cd_mark_name(id_breakpoint uint8(1))
+    cd_mark_name(intern("__bcast_index") uint8(1))
     cd_mark_name(id_len uint8(1))
     cd_mark_name(ci(5 "__dewy_power") uint8(1))
     cd_mark_name(select_id() uint8(1))
@@ -130,12 +132,32 @@ cd_init_masks=():>void=>$unsafe {
     cd_mark_name(ci(7 "to_int") uint8(4))
     cd_mark_name(ci(9 "[]") uint8(4))
     cd_mark_name(ci(10 "[]=") uint8(4))
+    cd_mark_name(ci(61 "sum") uint8(4))
+    cd_mark_name(ci(44 "min") uint8(4))
+    cd_mark_name(ci(45 "max") uint8(4))
+    # bit 8: habit_call_check names
+    cd_mark_name(intern("line") uint8(8))
+    cd_mark_name(intern("text") uint8(8))
+    cd_mark_name(intern("clear") uint8(8))
+    cd_mark_name(intern("fill") uint8(8))
+    cd_mark_name(intern("push") uint8(8))
+    cd_mark_name(intern("pop") uint8(8))
+    cd_mark_name(intern("map") uint8(8))
+    cd_mark_name(intern("atan") uint8(8))
+    cd_mark_name(intern("random") uint8(8))
+    # bit 16: __take_at / __release_at / __relocate_at
+    cd_mark_name(intern("__take_at") uint8(16))
+    cd_mark_name(intern("__release_at") uint8(16))
+    cd_mark_name(intern("__relocate_at") uint8(16))
+    # bit 32: universe names (1-arg fns conversion check)
+    loop [k _] in universe {cd_mark_name(CDWord(k) uint8(32))}
     cd_mask_ptr=cd_name_mask.ptr
     cd_mask_len=cd_name_mask.length
     cd_mask_bp=id_breakpoint
+    cd_mask_ulen=universe.length
 }
 cd_name_flags=(name:CDWord):>uint8=>$unsafe {
-    if id_breakpoint =? 0 or cd_mask_bp not=? id_breakpoint {cd_init_masks()}
+    if id_breakpoint =? 0 or cd_mask_bp not=? id_breakpoint or cd_mask_ulen not=? universe.length {cd_init_masks()}
     if name >=? 0 and name <? cd_mask_len {return cd_mask_ptr[name]}
     uint8(0)
 }

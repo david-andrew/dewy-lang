@@ -6,7 +6,7 @@ from p"expression_types.dewy" import (ntype)
 from p"checked_expression_nodes.dewy" import (capture_value)
 
 from p"node_store.dewy" import (call_waits_hook)
-from p"checker_state.dewy" import (live_body_indexes decl_mono_fn decl_mono_enabled)
+from p"checker_state.dewy" import (live_body_indexes decl_mono_enabled)
 from p"ast.jo" import (decl_has_rest lists rest_bundles nodes dewy_param_kinds nkids nkids2 kid has_flag add_flag set_list NF_MUT NF_CHECKED)
 from p"expr.jo" import (setting_site rational_module_found call_targs CallFailure AUX2_PARTIAL place_method dewy_literal_method_name)
 from p"call_argument_checks.dewy" import (call_decl_checks call_map_candidate call_note_contracts call_reject_candidate comprehension_settle match_type unnamed)
@@ -102,22 +102,25 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
                 let rat_on=rational_module_found >=? 0
                 loop i in [CRWord(0)..np) {
                     let a=CRWord(ap[i])
-                    if ctx_dependent(a) {ok=false; break}
+                    let an=nodes.ptr + a
+                    let ak=an[0].kind
+                    let afl=CRWord(an[0].flags)
+                    let nt=CRWord(an[0].type)
+                    if not ((afl & 4096) =? 0 and (ak =? 'ident' or ak =? 'int_lit' or ak =? 'binary' or ak =? 'field' or ak =? 'index' or ak =? 'str_lit' or ak =? 'bool_lit' or ak =? 'float_lit' or (ak =? 'call' and nt not=? 0 and an[0].aux2 not=? -1))) {
+                        if ctx_dependent(a) {ok=false; break}
+                    }
                     let pt=CRWord(decl_infos.ptr[di].sig.params.ptr[i])
                     if (mutmask & (CRWord(1) << i)) not=? 0 {
                         if call_mutable_cost(a pt @empty_binds @recv_fits0 i =? 0) <? 0 {ok=false; break}
                     } else {
-                        let an=nodes.ptr + a
-                        let nt=CRWord(an[0].type)
-                        let afl=CRWord(an[0].flags)
                         let exact=false
-                        if nt =? pt and nt not=? 0 and (afl & 256) =? 0 and an[0].kind not=? 'str_lit' and an[0].kind not=? 'float_lit' {
+                        if nt =? pt and nt not=? 0 and (afl & 256) =? 0 and ak not=? 'str_lit' and ak not=? 'float_lit' {
                             let pti=types.ptr + pt
                             if (CRWord(pti[0].flags) & 1) =? 0 {
                                 let tk=pti[0].kind
                                 if tk not=? 'opt' and tk not=? 'refined' and tk not=? 'callable' and tk not=? 'polyfn' and (tk not=? 'struct_' or not rat_on or not bundled_word_rational_type(pt)) {
                                     exact=true
-                                    if (afl & 129) =? 128 and an[0].kind not=? 'hole' {exact_mask |= (CRWord(1) << i)}
+                                    if (afl & 129) =? 128 and ak not=? 'hole' {exact_mask |= (CRWord(1) << i)}
                                 }
                             }
                         }
@@ -127,8 +130,8 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
                 if ok {
                     call_decl_checks(n name decl args args np ufcs)
                     let f:CRWord=0
-                    if decl_mono_enabled and decl <? decl_mono_fn.length {
-                        let mf=CRWord(decl_mono_fn.ptr[decl])
+                    if decl_mono_enabled {
+                        let mf=CRWord(decl_infos.ptr[di].sig.mono_fn)
                         if mf >? 0 and mf <? fns.length {
                             let dn=nodes.ptr + decl
                             if (CRWord(dn[0].flags) & 4) =? 0 and dn[0].c =? 0 and dn[0].kind not=? 'lambda' and CRWord(fns.ptr[mf].decl) =? decl and fns.ptr[mf].targs.length =? 0 and fns.ptr[mf].ret not=? 0 {f=mf}

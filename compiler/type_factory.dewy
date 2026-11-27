@@ -32,8 +32,9 @@ let tc_nesting_least:dict<int64 int64>=[]
 let tc_instances:dict<StructInstanceKey int64>=[]
 let tc_instance_groups:array<array<int64>>=[]
 let tc_instance_group:dict<int64 int64>=[]
+let tc_mono:dict<int64 int64>=[]
 type_factory_bind=(input:ptr<TypeFactoryInput>):>CWord=>{
-    tc_inputs=input; tc_nesting_memo=[]; tc_nesting_least=[]; tc_instances=[]; tc_instance_groups=[]; tc_instance_group=[]; 0
+    tc_inputs=input; tc_nesting_memo=[]; tc_nesting_least=[]; tc_instances=[]; tc_instance_groups=[]; tc_instance_group=[]; tc_mono=[]; 0
 }
 tc_type_string=(t:CWord):>string=>tf_string(t false)
 tc_soa_inst=(p:CWord):>CWord=>$unsafe {
@@ -90,9 +91,20 @@ tc_nesting=(t0:CWord lim:CWord):>CWord=>$unsafe {
     }
     d + 1
 }
+tc_struct_inst_mono=(decl:CWord):>CWord=>$unsafe {
+    if tc_inputs[0].structs[0].length <=? 1 and tc_mono.length >? 0 {tc_mono.clear()}
+    let cached=tc_mono.get(decl)
+    if cached isnt? none {return cached as int64}
+    tc_struct_inst(decl [])
+}
 tc_struct_inst=(decl:CWord targs:array<int64>):>CWord=>$unsafe {
     if decl =? 0 {return uu_mk_union(targs)}
     if decl =? tc_inputs[0].soa_decl[0] {return tc_soa_inst(targs[0])}
+    if targs.length =? 0 {
+        if tc_inputs[0].structs[0].length <=? 1 and tc_mono.length >? 0 {tc_mono.clear()}
+        let cached=tc_mono.get(decl)
+        if cached isnt? none {return cached as int64}
+    }
     let stable=true
     loop t in targs {
         # Test the stored argument, not prune(t): a bound inference variable
@@ -148,5 +160,7 @@ tc_struct_inst=(decl:CWord targs:array<int64>):>CWord=>$unsafe {
     instances=[]
     tc_instance_groups[group].push(idx)
     if indexed {tc_instances[StructInstanceKey[decl  targs]] = idx}
-    tc_inputs[0].types[0].length - 1
+    let res=tc_inputs[0].types[0].length - 1
+    if targs.length =? 0 {tc_mono[decl]=res}
+    res
 }

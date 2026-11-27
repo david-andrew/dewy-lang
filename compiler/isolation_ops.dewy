@@ -21,10 +21,10 @@ IsolationWord:type=int64<overflow='wrap'>
 # including watch/repl. Do not publish init bodies, which lowering still edits,
 # or any instances discovered after this boundary. No incremental invalidation.
 isolation_reset=():>void=>$unsafe {
-    isolation_rows=fill(IsolationRow[] fns.length)
-    isolation_replayed=dict<int64 int64>()
-    isolation_seen=fill(0 nodes.length)
-    isolation_stack=[]
+    isolation_rows=[]
+    if isolation_replayed.length >? 0 {isolation_replayed.clear()}
+    isolation_seen=[]
+    if isolation_stack.length >? 0 {isolation_stack.clear()}
     isolation_serial=0
     isolation_limit=fns.length
     isolation_node_limit=nodes.length
@@ -209,6 +209,7 @@ isolation_scan=(f:IsolationWord):>array<int64>=>$unsafe {
     }
     let todo=iso_todo_pool; iso_todo_pool=[]; todo.clear()
     todo.push(IsolationWord(fns.ptr[f].body))
+    if isolation_seen.length <? isolation_node_limit {isolation_seen=fill(0 isolation_node_limit)}
     let seen_p=isolation_seen.ptr
     let locals_p=locals.ptr
     let nlocals:IsolationWord=locals.length
@@ -341,6 +342,7 @@ isolation_visit=(f:IsolationWord):>void=>$unsafe {
 }
 instance_isolated=(f:IsolationWord):>bool=>$unsafe {
     if f <=? 0 or f >=? isolation_limit {return false}
+    if isolation_rows.length <? isolation_limit {isolation_rows=fill(IsolationRow[] isolation_limit)}
     if isolation_rows.ptr[f].index =? 0 {isolation_visit(f);}
     return isolation_rows.ptr[f].done and isolation_rows.ptr[f].reason =? IsolationReason.none_
 }

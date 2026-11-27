@@ -24,7 +24,7 @@ from p"warn_if.jo" import (wi_any)
 from p"proofs.jo" import (proof_active proof_calls proof_decls)
 from p"float_ops.dewy" import (ff_note_call)
 from p"directives.jo" import (dir_floats_any)
-from p"check.jo" import (ctxs cx fns modules statement_watch target_wasm)
+from p"check.jo" import (ctxs cx decl_infos fns modules statement_watch target_wasm)
 from p"check_constant.jo" import (cc_decls)
 from p"refinement_types.dewy" import (FactRequest)
 from p"checker_source_positions.dewy" import (dewy_at)
@@ -154,16 +154,13 @@ call_string_cost=(a:int64 p:int64 sp:int64 @binds:array<int64>):>int64=>$unsafe 
     -2
 }
 
-let decl_check_tags:array<uint8>=[]
-let decl_check_names:array<int32>=[]
-
 decl_bundled_tag=(decl:int64):>uint8=>$unsafe {
-    let dnm=nodes.ptr[decl].name
-    if decl <? decl_check_tags.length and decl_check_names.ptr[decl] =? dnm {
-        let t=decl_check_tags.ptr[decl]
+    let di=CallArgWord(nodes.ptr[decl].sym)
+    if di >? 0 and di <? decl_infos.length {
+        let t=decl_infos.ptr[di].sig.check_tag
         if t not=? uint8(0) {return t}
     }
-    let fnm=name_of(CallArgWord(dnm))
+    let fnm=name_of(CallArgWord(nodes.ptr[decl].name))
     let tag:uint8=uint8(128)
     if DRAWING_FNS.contains(fnm) or fnm =? "draw_to" or fnm =? "draw_to_screen" or starts_with(fnm "begin_") or fnm =? "camera3d" or fnm =? "clear" or fnm =? "input" or fnm =? "input_int" or fnm =? "input_float" or (fnm =? "read_line" and nkids(decl) =? 0) or fnm =? "sleep" {
         tag=tag | uint8(1)
@@ -186,13 +183,7 @@ decl_bundled_tag=(decl:int64):>uint8=>$unsafe {
     if fnm =? "random_int" {tag=tag | uint8(16)}
     else if fnm =? "random" {tag=tag | uint8(32)}
     else if fnm =? "read_file" or fnm =? "read_bytes" {tag=tag | uint8(64)}
-    if decl >=? decl_check_tags.length {
-        let cap_n=decl * 2 + 256
-        decl_check_tags.resize(cap_n)
-        decl_check_names.resize(cap_n)
-    }
-    decl_check_tags.ptr[decl]=tag
-    decl_check_names.ptr[decl]=dnm
+    if di >? 0 and di <? decl_infos.length {decl_infos.ptr[di].sig.check_tag=tag}
     tag
 }
 

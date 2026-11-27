@@ -74,6 +74,44 @@ xs_soa=(t0:XSWord):>bool=>$unsafe {
     let t=tu_prune(t0)
     xs_types[0].ptr[t].kind =? 'struct_' and xs_structs[0].ptr[XSWord(xs_types[0].ptr[t].st)].soa_
 }
+let xs_field_mask:array<uint8>=[]
+let xs_field_scanned:XSWord=0
+xs_sync_field_mask=():>void=>$unsafe {
+    let n=XSWord(xs_names[0].length)
+    if n <? xs_field_scanned {xs_field_scanned=0}
+    if n >? xs_field_mask.length {xs_field_mask.resize(n + 256)}
+    let mp=xs_field_mask.ptr
+    let np=xs_names[0].ptr as ptr<ptr<uint8>>
+    let i=xs_field_scanned
+    loop i <? n {
+        let mut_bits:uint8=uint8(0)
+        let hdr=np[i]
+        if hdr not=? (uint64(0) as ptr<uint8>) {
+            let slen=(hdr as ptr<int64>)[1]
+            if slen >=? 2 {
+                let c0=hdr[24]
+                let c1=hdr[25]
+                if c0 =? uint8(95) and c1 =? uint8(95) {
+                    mut_bits=uint8(16)
+                    if slen =? 10 and xs_names[0].ptr[i] =? "__has_name" {mut_bits=uint8(24)}
+                    else if slen =? 13 and xs_names[0].ptr[i] =? "__range_words" {mut_bits=uint8(24)}
+                } else if slen =? 3 and c0 =? uint8(97) and hdr[25] =? uint8(100) and hdr[26] =? uint8(100) {
+                    mut_bits=uint8(1)
+                } else if slen =? 4 {
+                    if c0 =? uint8(99) and xs_names[0].ptr[i] =? "copy" {mut_bits=uint8(4)}
+                    else if c0 =? uint8(110) and xs_names[0].ptr[i] =? "name" {mut_bits=uint8(8)}
+                } else if slen =? 6 and c0 =? uint8(108) and xs_names[0].ptr[i] =? "length" {
+                    mut_bits=uint8(2)
+                } else if slen =? 8 and c0 =? uint8(115) and xs_names[0].ptr[i] =? "spelling" {
+                    mut_bits=uint8(8)
+                }
+            }
+        }
+        mp[i]=mut_bits
+        i += 1
+    }
+    xs_field_scanned=n
+}
 # Flags: NF_JUXT 536870912, NF_LOOPCOUNT 33554432.
 xs_field=(n:XSWord expected:XSWord):>XSWord=>$unsafe {
     if xs_nodes[0].ptr[n].aux2 =? (-11) and grouped_place_call(n) {return check_expr(n expected)}
@@ -85,13 +123,15 @@ xs_field=(n:XSWord expected:XSWord):>XSWord=>$unsafe {
     if xs_flag(n 536870912) {field_juxt(n)}
     if xs_nodes[0].ptr[n].b not=? 0 {field_reflect_name(n)}
     if xs_reflecting[0] and reflect_member(n) {return XSWord(xs_nodes[0].ptr[n].type)}
+    if xs_names[0].length not=? xs_field_scanned {xs_sync_field_mask()}
     let nm=XSWord(xs_nodes[0].ptr[n].name)
+    let fmask:uint8=if nm >=? 0 and nm <? xs_field_scanned {xs_field_mask.ptr[nm]} else {uint8(0)}
     # (`T.name`: a type's short name)
-    if (xs_names[0].ptr[nm] =? "name" or xs_names[0].ptr[nm] =? "spelling" or xs_names[0].ptr[nm] =? "__has_name" or xs_names[0].ptr[nm] =? "__range_words") and type_name_member(n) {return XSWord(xs_nodes[0].ptr[n].type)}
+    if (fmask & uint8(8)) not=? uint8(0) and type_name_member(n) {return XSWord(xs_nodes[0].ptr[n].type)}
     let a0=XSWord(xs_nodes[0].ptr[n].a)
     let is_callee=n =? xs_callee[0]
     # `c.__peer` in a program: a library's own field, which may change in any version.
-    if xs_names[0].ptr[nm].startswith("__") and not xs_ide[0] and not xs_flag(n 33554432) {a0=field_private(n)}
+    if (fmask & uint8(16)) not=? uint8(0) and not xs_ide[0] and not xs_flag(n 33554432) {a0=field_private(n)}
     # A soa element alias `p` (loop p in ps): `p.x` is `ps.x[i]`.
     if xs_soa_aliases[0] >? 0 and xs_nodes[0].ptr[a0].kind =? 'ident' {
         let t=field_soa_alias(n a0 expected)
@@ -103,11 +143,10 @@ xs_field=(n:XSWord expected:XSWord):>XSWord=>$unsafe {
         xs_nodes[0][a0].a=int32<overflow='wrap'>(xs_last[0])
         if xs_soa(abt) {return field_soa_index(n a0 expected)}
     }
-    let name=xs_names[0].ptr[XSWord(xs_nodes[0].ptr[n].name)]
-    let spelled:XSWord=0
-    if name =? "add" {spelled=1}
-    else if name =? "length" {spelled=2}
-    else if name =? "copy" {spelled=4}
+    if xs_names[0].length not=? xs_field_scanned {xs_sync_field_mask()}
+    let nm2=XSWord(xs_nodes[0].ptr[n].name)
+    let fmask2:uint8=if nm2 =? nm {fmask} else if nm2 >=? 0 and nm2 <? xs_field_scanned {xs_field_mask.ptr[nm2]} else {uint8(0)}
+    let spelled=XSWord(fmask2 & uint8(7))
     let result=xd_member(n expected spelled is_callee)
     if result.bypass {return result.type}
     xl_finish(n result.type expected)

@@ -20,15 +20,21 @@ type_match_bind=(input:ptr<TypeInferenceInput> active:ptr<bool> never:ptr<int64>
 }
 tm_quantity_base=(t:MWord):>MWord=>$unsafe {MWord(tm_types[0].ptr[tu_prune(t)].elem)}
 tm_match=(pat0:MWord a0:MWord @binds:array<int64> depth:MWord):>MWord=>$unsafe {
+    let tp=tm_types[0].ptr
     let pat=pat0
     let a=a0
-    loop pat not=? 0 and tm_types[0][pat].kind =? 'var' and tm_types[0][pat].ref not=? 0 {pat=MWord(tm_types[0][pat].ref)}
-    loop a not=? 0 and tm_types[0][a].kind =? 'var' and tm_types[0][a].ref not=? 0 {a=MWord(tm_types[0][a].ref)}
-    if tm_types[0].ptr[pat].kind =? 'callable' {
+    loop pat not=? 0 and tp[pat].kind =? 'var' and tp[pat].ref not=? 0 {pat=MWord(tp[pat].ref)}
+    loop a not=? 0 and tp[a].kind =? 'var' and tp[a].ref not=? 0 {a=MWord(tp[a].ref)}
+    if pat =? a {
+        let pi=tp + pat
+        let pk0=pi[0].kind
+        if (MWord(pi[0].flags) & 1) =? 0 and pk0 not=? 'callable' and pk0 not=? 'param' {return 0}
+    }
+    if tp[pat].kind =? 'callable' {
         if not effect_match(tm_contract(a)  tm_contract(pat)  @binds) {return - 1}
         return tm_match(tm_callable_base(pat)  tm_callable_base(a)  @binds  depth)
     }
-    if tm_types[0].ptr[a].kind =? 'callable' and tm_types[0].ptr[pat].kind not=? 'param' {a=tm_callable_base(a)}
+    if tp[a].kind =? 'callable' and tp[pat].kind not=? 'param' {a=tm_callable_base(a)}
 # (inside a container a type parameter takes the elements' refinement too: array<Pos> is
 # array<T> with T a Pos, not an int64, so the instance stores and returns Pos values)
     let whole=a

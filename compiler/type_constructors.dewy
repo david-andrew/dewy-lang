@@ -2,7 +2,7 @@ $runtime_checks
 
 from p"checker_types.dewy" import (TK TypeInfo)
 from p"type_inference.dewy" import (tu_prune)
-from p"type_intern.dewy" import (type_intern_var type_intern_element type_intern_param)
+from p"type_intern.dewy" import (type_intern_var type_intern_element type_intern_param type_intern_reset)
 # Builtin initialization and recursive constructors preserve IDs and demand
 # flags. Scalar requests enter the interner directly; general records use its
 # thin host ABI adapter.
@@ -109,6 +109,7 @@ tb_mk_modval=(m:BWord):>BWord=>$unsafe {
     tb_inputs[0].types[0].length - 1
 }
 tb_init_types=():>void=>$unsafe {
+    type_intern_reset()
     tb_generators_seen = false
     tb_inputs[0].T_VOID[0] = tb_basic('void_'  0  false  0)
     tb_inputs[0].T_BOOL[0] = tb_basic('bool_'  8  false  1)

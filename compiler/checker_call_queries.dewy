@@ -177,20 +177,28 @@ check_mutable_arguments=(args:array<int64> mask:CGWord pos:CGWord):>void=>$unsaf
 # names, in that order). The host tests the library and the key type.
 map_float_key=(n:CGWord):>void=>$unsafe {
     let np=cg_nodes[0].ptr
-    let d=CGWord(cg_fns[0].ptr[CGWord(np[n].sym)].decl)
-    if d =? 0 {return}
+    let fi=CGWord(np[n].sym)
+    let f=cg_fns[0].ptr + fi
+    if f[0].float_key_checked =? uint8(1) {return}
+    let d=CGWord(f[0].decl)
+    if d =? 0 {f[0].float_key_checked=uint8(1); return}
     let dn=np + d
     let nd=CGWord(dn[0].nlist)
-    if nd <? 1 {return}
-    let nn=CGWord(np[n].nlist)
+    if nd <? 1 {f[0].float_key_checked=uint8(1); return}
     let names=cg_float_key_names[0].ptr
-    if nn =? 1 {
-        let nm=CGWord(dn[0].name)
-        if nm not=? names[0] and nm not=? names[1] {return}
-    } else {
-        if nd <? 2 or nn <? 2 {return}
+    let nm=CGWord(dn[0].name)
+    let name_hit=nm =? names[0] or nm =? names[1]
+    let p1_hit=false
+    if nd >=? 2 {
         let p=CGWord(np[CGWord(cg_lists[0].ptr[CGWord(dn[0].list) + 1])].name)
-        if p not=? names[2] and p not=? names[3] {return}
+        p1_hit=p =? names[2] or p =? names[3]
+    }
+    if not name_hit and not p1_hit {f[0].float_key_checked=uint8(1); return}
+    let nn=CGWord(np[n].nlist)
+    if nn =? 1 {
+        if not name_hit {return}
+    } else {
+        if not p1_hit or nn <? 2 {return}
     }
     cg_host[0].float_key(n)
 }

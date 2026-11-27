@@ -26,18 +26,68 @@ cr_kid_c=(n:CRWord):>CRWord=>$unsafe {if cr_nodes[0].ptr[n].kind =? 'for_' {0} e
 cr_kids=(n:CRWord):>array<int64>=>$unsafe {node_kids(@cr_nodes[0] @cr_lists[0] n)}
 cr_has_flag=(n:CRWord flag:CRWord):>bool=>$unsafe {(CRWord(cr_nodes[0].ptr[n].flags) & flag) not=? 0}
 # This walk and cr_has_propagate cannot invoke hosts or grow either arena.
-cr_has_value_return=(n:CRWord):>bool=>$unsafe {
-    if n =? 0 {return false}
-    let k=cr_nodes[0].ptr[n].kind
-    if k =? 'return_' {return cr_nodes[0].ptr[n].a not=? 0}
-    if k =? 'lambda' {return false}
-    if cr_nodes[0].ptr[n].a not=? 0 and cr_has_value_return(CRWord(cr_nodes[0].ptr[n].a)) {return true}
-    if cr_nodes[0].ptr[n].b not=? 0 and cr_has_value_return(CRWord(cr_nodes[0].ptr[n].b)) {return true}
-    if k not=? 'for_' and cr_nodes[0].ptr[n].c not=? 0 and cr_has_value_return(CRWord(cr_nodes[0].ptr[n].c)) {return true}
-    loop i in [0..CRWord(cr_nodes[0].ptr[n].nlist)) {
-        if cr_has_value_return(CRWord(cr_lists[0].ptr[CRWord(cr_nodes[0].ptr[n].list) + i])) {return true}
+let cr_stack:array<int64>=[]
+cr_has_value_return=(n0:CRWord):>bool=>$unsafe {
+    if n0 =? 0 {return false}
+    let np=cr_nodes[0].ptr
+    let lp=cr_lists[0].ptr
+    let nd0=np + n0
+    let k0=nd0[0].kind
+    if k0 =? 'return_' {return nd0[0].a not=? 0}
+    if k0 =? 'lambda' {return false}
+    if (nd0[0].a | nd0[0].b | nd0[0].c | nd0[0].nlist) =? 0 {return false}
+    let st=cr_stack; cr_stack=[]
+    if cap(st) <? 64 {st.reserve(64)}
+    __set_len(st 1)
+    st.ptr[0]=int64(n0)
+    let found=false
+    loop st.length >? 0 {
+        let top=CRWord(st.length) - 1
+        let n=CRWord(st.ptr[top])
+        __set_len(st top)
+        let nd=np + n
+        let k=nd[0].kind
+        let a=CRWord(nd[0].a)
+        if a not=? 0 {
+            let an=np + a
+            let ak=an[0].kind
+            if ak =? 'return_' {if an[0].a not=? 0 {found=true; break}}
+            else if ak not=? 'lambda' and (an[0].a | an[0].b | an[0].c | an[0].nlist) not=? 0 {st.push(int64(a))}
+        }
+        let b=CRWord(nd[0].b)
+        if b not=? 0 {
+            let bn=np + b
+            let bk=bn[0].kind
+            if bk =? 'return_' {if bn[0].a not=? 0 {found=true; break}}
+            else if bk not=? 'lambda' and (bn[0].a | bn[0].b | bn[0].c | bn[0].nlist) not=? 0 {st.push(int64(b))}
+        }
+        if k not=? 'for_' {
+            let c=CRWord(nd[0].c)
+            if c not=? 0 {
+                let cn=np + c
+                let ck=cn[0].kind
+                if ck =? 'return_' {if cn[0].a not=? 0 {found=true; break}}
+                else if ck not=? 'lambda' and (cn[0].a | cn[0].b | cn[0].c | cn[0].nlist) not=? 0 {st.push(int64(c))}
+            }
+        }
+        let nl=CRWord(nd[0].nlist)
+        if nl >? 0 {
+            let base=CRWord(nd[0].list)
+            loop i in [CRWord(0)..nl) {
+                let x=CRWord(lp[base + i])
+                if x not=? 0 {
+                    let xn=np + x
+                    let xk=xn[0].kind
+                    if xk =? 'return_' {if xn[0].a not=? 0 {found=true; break}}
+                    else if xk not=? 'lambda' and (xn[0].a | xn[0].b | xn[0].c | xn[0].nlist) not=? 0 {st.push(int64(x))}
+                }
+            }
+            if found {break}
+        }
     }
-    false
+    __set_len(st 0)
+    cr_stack=st
+    found
 }
 cr_value_leaves=(n:CRWord @out:array<int64>):>void=>$unsafe {
     if n =? 0 {return}
@@ -85,18 +135,67 @@ cr_syntactic_void=(body:CRWord):>bool=>$unsafe {
     if(k =? 'if_' or k =? 'iflet') and cr_nodes[0].ptr[last].c not=? 0 {return false}
     not cr_has_value_return(body)
 }
-cr_has_propagate=(n:CRWord):>bool=>$unsafe {
-    if n =? 0 {return false}
-    let k=cr_nodes[0][n].kind
-    if k =? 'propagate' {return true}
-    if k =? 'lambda' {return false}
-    if cr_nodes[0][n].a not=? 0 and cr_has_propagate(CRWord(cr_nodes[0][n].a)) {return true}
-    if cr_nodes[0][n].b not=? 0 and cr_has_propagate(CRWord(cr_nodes[0][n].b)) {return true}
-    if k not=? 'for_' and cr_nodes[0][n].c not=? 0 and cr_has_propagate(CRWord(cr_nodes[0][n].c)) {return true}
-    loop i in [0..CRWord(cr_nodes[0][n].nlist)) {
-        if cr_has_propagate(CRWord(cr_lists[0].ptr[CRWord(cr_nodes[0][n].list) + i])) {return true}
+cr_has_propagate=(n0:CRWord):>bool=>$unsafe {
+    if n0 =? 0 {return false}
+    let np=cr_nodes[0].ptr
+    let lp=cr_lists[0].ptr
+    let nd0=np + n0
+    let k0=nd0[0].kind
+    if k0 =? 'propagate' {return true}
+    if k0 =? 'lambda' {return false}
+    if (nd0[0].a | nd0[0].b | nd0[0].c | nd0[0].nlist) =? 0 {return false}
+    let st=cr_stack; cr_stack=[]
+    if cap(st) <? 64 {st.reserve(64)}
+    __set_len(st 1)
+    st.ptr[0]=int64(n0)
+    let found=false
+    loop st.length >? 0 {
+        let top=CRWord(st.length) - 1
+        let n=CRWord(st.ptr[top])
+        __set_len(st top)
+        let nd=np + n
+        let k=nd[0].kind
+        let a=CRWord(nd[0].a)
+        if a not=? 0 {
+            let an=np + a
+            let ak=an[0].kind
+            if ak =? 'propagate' {found=true; break}
+            else if ak not=? 'lambda' and (an[0].a | an[0].b | an[0].c | an[0].nlist) not=? 0 {st.push(int64(a))}
+        }
+        let b=CRWord(nd[0].b)
+        if b not=? 0 {
+            let bn=np + b
+            let bk=bn[0].kind
+            if bk =? 'propagate' {found=true; break}
+            else if bk not=? 'lambda' and (bn[0].a | bn[0].b | bn[0].c | bn[0].nlist) not=? 0 {st.push(int64(b))}
+        }
+        if k not=? 'for_' {
+            let c=CRWord(nd[0].c)
+            if c not=? 0 {
+                let cn=np + c
+                let ck=cn[0].kind
+                if ck =? 'propagate' {found=true; break}
+                else if ck not=? 'lambda' and (cn[0].a | cn[0].b | cn[0].c | cn[0].nlist) not=? 0 {st.push(int64(c))}
+            }
+        }
+        let nl=CRWord(nd[0].nlist)
+        if nl >? 0 {
+            let base=CRWord(nd[0].list)
+            loop i in [CRWord(0)..nl) {
+                let x=CRWord(lp[base + i])
+                if x not=? 0 {
+                    let xn=np + x
+                    let xk=xn[0].kind
+                    if xk =? 'propagate' {found=true; break}
+                    else if xk not=? 'lambda' and (xn[0].a | xn[0].b | xn[0].c | xn[0].nlist) not=? 0 {st.push(int64(x))}
+                }
+            }
+            if found {break}
+        }
     }
-    false
+    __set_len(st 0)
+    cr_stack=st
+    found
 }
 cr_may_express=(n:CRWord):>bool=>$unsafe {
     if n =? 0 {return false}

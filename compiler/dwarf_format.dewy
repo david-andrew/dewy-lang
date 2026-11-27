@@ -108,7 +108,7 @@ dw_line_grow=(@buf:array<uint8> cap:DWord):>ptr<uint8>=>$unsafe {
 dw_line_hdr_build=(fnames:array<string>):>array<uint8>=>$unsafe {
     let hdr:array<uint8>=[]
     let est:DWord=32
-    loop nm in fnames {est += DWord(nm.length) + 4}
+    loop nm in fnames {est += DWord((nm as array<uint8>).length) + 4}
     hdr.reserve(est)
     __set_len(hdr est)
     let p=hdr.ptr

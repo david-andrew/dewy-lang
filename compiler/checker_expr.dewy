@@ -374,7 +374,13 @@ xe_untyped=(a0:XEWord):>void=>$unsafe {
     let bk=xe_nodes[0].ptr[base].kind
     if bk =? 'ident' {xe_fnref(a base)}
     else if bk =? 'field' and xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[base].a)].kind =? 'ident' {xe_module_fn(a base)}
-    if ctx_dependent(a) or xe_flag(a 128) {return}
+    let an=xe_nodes[0].ptr + a
+    let afl=XEWord(an[0].flags)
+    if (afl & 128) not=? 0 {return}
+    let ak=an[0].kind
+    if not ((afl & 4096) =? 0 and (ak =? 'ident' or ak =? 'int_lit' or ak =? 'binary' or ak =? 'field' or ak =? 'index' or ak =? 'str_lit' or ak =? 'bool_lit' or ak =? 'float_lit' or (ak =? 'call' and an[0].type not=? 0 and an[0].aux2 not=? -1))) {
+        if ctx_dependent(a) {return}
+    }
     check_expr(a 0);
     xe_add_flag(a 128)
 }
@@ -767,7 +773,7 @@ check_call_expr=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
             concurrency_calls.push(n)
             parallel_prepare(n)
         }
-        if nnlist >=? 1 and xe_dewy_at(xe_nodes[0].ptr[n].pos) {map_float_key(n)}
+        if nnlist >=? 1 and xe_functions[0].ptr[called].float_key_checked not=? uint8(1) and xe_dewy_at(xe_nodes[0].ptr[n].pos) {map_float_key(n)}
         if xe_functions[0].ptr[called].pack not=? 0 {sink_pack_call(n)}
     } else if naux =? 1 and xe_fn_pack(callable_base(tu_prune(XEWord(xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[n].a)].type)))) {sink_pack_call(n)}
     xl_finish(n t expected)

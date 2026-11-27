@@ -4,7 +4,7 @@ from p"checker_source_positions.dewy" import (dewy_at)
 
 from p"checker_sinks.dewy" import (pack_written)
 from p"node_store.dewy" import Node
-from p"checker_state.dewy" import (FnInst FnSig FnCtx DeclInfo FnInstanceKey decl_mono_fn decl_mono_enabled)
+from p"checker_state.dewy" import (FnInst FnSig FnCtx DeclInfo FnInstanceKey decl_mono_enabled)
 from p"checker_signature.dewy" import (cs_decl_info fn_sig)
 from p"type_inference.dewy" import (tu_has_var tu_prune tu_zonk tu_equal)
 from p"type_substitute.dewy" import ts_subst
@@ -44,14 +44,13 @@ checker_instances_bind=(input:ptr<CheckerInstanceInput>):>CIWord=>$unsafe {
     ci_index=input[0].index
     0
 }
-ci_record_mono=(decl:CIWord f:CIWord):>void=>$unsafe {
+ci_record_mono=(decl:CIWord di:CIWord f:CIWord):>void=>$unsafe {
     if not decl_mono_enabled {return}
     let dn=ci_nodes[0].ptr + decl
     if dir_code_any and dir_code_mask(dn[0].pos >> 40) not=? 0 {return}
     if (CIWord(dn[0].flags) & 4) not=? 0 or dn[0].c not=? 0 or dn[0].kind =? 'lambda' {return}
     if ci_fns[0].ptr[f].ret =? 0 or ci_fns[0].ptr[f].targs.length not=? 0 {return}
-    if decl >=? decl_mono_fn.length {decl_mono_fn.resize(decl * 2 + 256)}
-    decl_mono_fn.ptr[decl]=int32<overflow='wrap'>(f)
+    ci_decls[0].ptr[di].sig.mono_fn=int32<overflow='wrap'>(f)
 }
 ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe {
     if dir_code_any {
@@ -81,14 +80,14 @@ ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe 
             let fp=ci_fns[0].ptr
             if fp[f0].targs.length =? 0 {
                 if fp[f0].ret =? 0 {ensure_ret(f0 use_pos)}
-                ci_record_mono(decl f0)
+                ci_record_mono(decl di f0)
                 return f0
             }
             loop ii in [1..ilen) {
                 let f=ip[ii]
                 if fp[f].targs.length =? 0 {
                     if fp[f].ret =? 0 {ensure_ret(f use_pos)}
-                    ci_record_mono(decl f)
+                    ci_record_mono(decl di f)
                     return f
                 }
             }
@@ -174,7 +173,7 @@ ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe 
     ci_decls[0].ptr[di].insts.push(f)
     if zt.length >? 0 {ci_index[0][FnInstanceKey[decl zt]]=f}
     if ci_fns[0].ptr[f].ret =? 0 {ensure_ret(f use_pos)}
-    if tlen =? 0 {ci_record_mono(decl f)}
+    if tlen =? 0 {ci_record_mono(decl di f)}
     f
 }
 
