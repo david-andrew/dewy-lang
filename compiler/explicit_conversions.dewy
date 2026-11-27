@@ -1,11 +1,14 @@
 $runtime_checks
 from p"check.jo" import (float_int_demanded)
-from p"refine_metadata.dewy" import (str_set_of)
+from p"refine_metadata.dewy" import (representation_type str_set_of)
+from p"refine_rare.dewy" import (str_set_read)
+from p"checks_builders.dewy" import (bc_block bc_call bc_ident bc_stmt)
+from p"checked_expression_nodes.dewy" import (type_node_of)
 from p"expr_cold_queries.dewy" import (src_char)
 from p"checks_thin.dewy" import (jd runtime_demand)
 from p"unit_ops.dewy" import (rational_helper_call)
 from p"expression_types.dewy" import (ntype)
-from p"util.jo" import (name_of pos_in_lib)
+from p"util.jo" import (intern name_of pos_in_lib)
 from p"literal_context.dewy" import (is_lit)
 from p"string_domain_ops.dewy" import (int_domain_conversion)
 from p"float_ops.dewy" import (ff_note_conversion)
@@ -24,13 +27,49 @@ from p"checks_thin_expr.dewy" import (bytes_text_warning str_set_unnumbered)
 from p"rational_types.dewy" import (bundled_rational_type bundled_word_rational_type)
 from p"numeric_library_types.dewy" import (bundled_bigint_type math_rep_type)
 from p"checks_call_hints.dewy" import (a_type)
-from p"types.jo" import (T_F32 T_FLOAT T_INT T_MATH_INT T_U8 is_float is_int is_numeric is_union prune type_eq types union_members)
+from p"types.jo" import (T_BOOL T_F32 T_FLOAT T_INT T_MATH_INT T_STR T_U8 is_float is_int is_numeric is_union prune tkind type_eq types union_members)
 from p"node_store.dewy" import (Node)
 from p"ast.jo" import (NF_CHECKED NF_EXPLICIT_INTEGER NF_LITERAL NF_RECORD add_flag clear_flag mk nodes set_list)
 from p"expr.jo" import (CV)
 from p"coerce_expression.dewy" import (coerce)
 
 ExplicitConversionsWord:type=int64<overflow='wrap'>
+
+# `T(text)`, a type's text reader (argparse_and_reflection.md, item 3), also for a type
+# parameter's type: `T | ValidationError`. A literal union reads a member; a number or truth
+# value is read by the prelude's readers (lib/prelude/text_readers.dewy, loaded on demand); a
+# refined integer is read as its integer, then tested. -1 for another type. Only a conversion
+# from text reaches it.
+text_reader=(n:int64 to:int64 a:int64):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    if str_set_of(to) not=? 0 {
+        add_flag(a NF_CHECKED)
+        return str_set_read(n a to 0)
+    }
+    let base=prune(representation_type(to))
+    if tkind(to) =? 'refined' and types.ptr[prune(to)].bits <? 0 {return -1}
+    let reader=if base =? T_MATH_INT {"__text_int"} else if is_int(base) {"__text_integer"} else if is_float(base) {"__text_float"} else if base =? T_BOOL {"__text_bool"} else {""}
+    if reader =? "" {return -1}
+    add_flag(a NF_CHECKED)
+    let statements:array<int64>=[]
+    let args:array<int64>=[a]
+    if reader =? "__text_integer" or reader =? "__text_float" {args.push(text_witness(base "__text_as{n}" pos @statements))}
+    let call=bc_call(reader args pos)
+    if not type_eq(base prune(to)) {call=bc_call("__text_refined" [text_witness(to "__text_to{n}" pos @statements) call] pos)}
+    statements.push(bc_stmt(call pos))
+    let block=bc_block(statements pos)
+    nodes[n] = nodes.ptr[block]
+    check_expr(n 0)
+}
+# `let name:t? = none`, naming the type a text reader gives
+text_witness=(t:int64 name:string pos:int64 @statements:array<int64>):>int64=>$unsafe {
+    let d=mk('vardecl' pos)
+    nodes[d].name = int32<overflow='wrap'>(intern(name))
+    nodes[d].a = int32<overflow='wrap'>(type_node_of(mk_opt(t) pos))
+    nodes[d].b = int32<overflow='wrap'>(mk('none_lit' pos))
+    statements.push(d)
+    bc_ident(name pos)
+}
 
 conversion=(n:int64 to0:int64 args:array<int64>):>int64=>$unsafe {
     let to=prune(to0)
@@ -65,6 +104,10 @@ conversion=(n:int64 to0:int64 args:array<int64>):>int64=>$unsafe {
     let a=args[0]
     check_expr(a if tk =? 'float_' and nodes.ptr[a].kind =? 'float_lit' {to} else {0});
     let ft=prune(ntype(a))
+    if ft =? T_STR and dewy_at(nodes.ptr[n].pos) {
+        let read=text_reader(n to a)
+        if read >=? 0 {return read}
+    }
     if nodes.ptr[a].kind =? 'int_lit' and int_policy(to) not=? 0 and not dbg_on and lit_fits(a to) {
         nodes[n] = nodes.ptr[a]
         nodes[n].type = int32<overflow='wrap'>(to)

@@ -568,6 +568,9 @@ call_name_sym=(n:CDWord name:CDWord mod_scope:CDWord s:CDWord args:array<int64> 
     }
     else if sk =? 'type_' {
         jo_type_spelling(name s nodes.ptr[n].pos)
+        # (T(x), T a type parameter given a record: its constructor, as the record's name calls it)
+        let bound:CDWord=prune(CDWord(syms.ptr[s].ref))
+        if types.ptr[bound].kind =? 'struct_' and dewy_at(nodes.ptr[n].pos) {return struct_ctor(n bound CDWord(structs.ptr[CDWord(types.ptr[bound].st)].decl) args expected)}
         return conversion(n CDWord(syms.ptr[s].ref) args)
     }
     else if sk =? 'fns' and args.length =? 1 and nodes.ptr[args.ptr[0]].kind not=? 'namedarg' and cd_univ_lookup(name) not=? 0 {

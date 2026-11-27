@@ -16,6 +16,10 @@ from p"checker_type_entries.dewy" import (check_struct_fields)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checks_builders.dewy" import (bc_call bc_ident bc_let bc_stmt)
 from p"types.jo" import (T_STR fields prune structs tkind types)
+from p"refine.jo" import (ref_predicates)
+from p"refine_metadata.dewy" import (representation_type)
+from p"refinement_types.dewy" import (RefTerm)
+from p"@lib/core/str.jo" import (to_int)
 from p"node_store.dewy" import (Node)
 from p"ast.jo" import (NF_AT NF_CHECKED NF_MUT NF_SPREAD add_flag clear_flag clone has_flag kids nodes set_list)
 from p"expr.jo" import (AUX2_PARTIAL AUX2_PLACE bc_count last_checked race_name_ids race_needs_id select_name_id type_name_id)
@@ -83,14 +87,67 @@ race_spread=(n:int64 expected:int64):>int64=>$unsafe {
     check_expr(n expected)
 }
 
+let type_spelling_id:int64=0
+# `T.spelling`: the type as Dewy writes it. A refined integer shows its predicate over `value`
+# (`int64<value => 1 <=? value and value <=? 16>`), as does a run of consecutive integer
+# literals; anything else is the type as diagnostics show it. O(the type's size).
+type_spelling=(t0:int64):>string=>$unsafe {
+    let t=prune(t0)
+    let base=dt(representation_type(t))
+    if tkind(t) =? 'refined' and types.ptr[t].bits >=? 0 {
+        let parts:array<string>=[]
+        let lows:array<string>=[]
+        loop atom in ref_predicates[MemberHandlesWord(types.ptr[t].st)] {
+            let op=match atom.op {
+                <'lt'> => "<?"
+                <'le'> => "<=?"
+                <'gt'> => ">?"
+                <'ge'> => ">=?"
+                <'eq'> => "=?"
+                <'ne'> => "not=?"
+                _ => ""
+            }
+            let a=spelling_term(atom.a)
+            let b=spelling_term(atom.b)
+            if op =? "" or a =? "" or b =? "" {return dt(t)}
+            # (lower bounds first, each as `low <? value`)
+            if a =? "value" and op =? ">?" {lows.push("{b} <? value")}
+            else if a =? "value" and op =? ">=?" {lows.push("{b} <=? value")}
+            else if b =? "value" {lows.push("{a} {op} {b}")}
+            else {parts.push("{a} {op} {b}")}
+        }
+        loop part in parts {lows.push(part)}
+        if lows.length >? 0 {return "{base}<value => {lows.join(" and ")}>"}
+    }
+    let text=dt(t)
+    let words=text.split(" | ")
+    if words.length <? 3 {return text}
+    let first=to_int(words[0])
+    if first is? none {return text}
+    loop i in 0.. and w in words {
+        let k=to_int(w)
+        if k is? none or k not=? first + i {return text}
+    }
+    "{base}<value => {first} <=? value and value <=? {first + words.length - 1}>"
+}
+spelling_term=(term:RefTerm):>string=>{
+    if term.kind =? 0 and term.path.length =? 0 and term.offset =? 0 {return "value"}
+    if term.kind =? 1 and term.offset =? 0 {return "{term.value}"}
+    ""
+}
 # `T.name` on a name that is a type (a type parameter, a `loop t in members(U)` binder, a
 # declared type): its short name, as a checked text literal. A member of that name the type
 # has wins, as an ordinary read. O(1) unless the member is `name`.
 type_name_member=(n:int64):>bool=>$unsafe {
     let last_checked_slot=@last_checked
     let type_name_id_slot=@type_name_id
-    if type_name_id_slot =? 0 {type_name_id_slot=intern("name")}
-    if nodes.ptr[n].name not=? int32<overflow='wrap'>(type_name_id_slot) or nodes.ptr[n].b not=? 0 {return false}
+    let spelling_slot=@type_spelling_id
+    if type_name_id_slot =? 0 {
+        type_name_id_slot=intern("name")
+        spelling_slot=intern("spelling")
+    }
+    let member=MemberHandlesWord(nodes.ptr[n].name)
+    if (member not=? type_name_id_slot and member not=? spelling_slot) or nodes.ptr[n].b not=? 0 {return false}
     let receiver=MemberHandlesWord(nodes.ptr[n].a)
     if nodes.ptr[receiver].kind not=? 'ident' or not dewy_at(nodes.ptr[n].pos) {return false}
     let s=lookup(MemberHandlesWord(nodes.ptr[receiver].name))
@@ -100,13 +157,14 @@ type_name_member=(n:int64):>bool=>$unsafe {
     let t=if k =? 'type_' {MemberHandlesWord(syms.ptr[s].ref)} else {prune(expr_as_type(receiver))}
     if tkind(t) =? 'struct_' {
         let si=MemberHandlesWord(types.ptr[t].st)
-        if structs.ptr[si].decl not=? 0 and dewy_type_method(MemberHandlesWord(structs.ptr[si].decl) type_name_id_slot) >=? 0 {return false}
+        if structs.ptr[si].decl not=? 0 and dewy_type_method(MemberHandlesWord(structs.ptr[si].decl) member) >=? 0 {return false}
         check_struct_fields(si)
         loop i in [0..MemberHandlesWord(structs.ptr[si].nfields)) {
-            if fields.ptr[MemberHandlesWord(structs.ptr[si].fields) + i].name =? int32<overflow='wrap'>(type_name_id_slot) {return false}
+            if fields.ptr[MemberHandlesWord(structs.ptr[si].fields) + i].name =? int32<overflow='wrap'>(member) {return false}
         }
     }
-    let text=type_short_name(t)
+    # (`T.spelling`: the type as Dewy writes it, for any type)
+    let text=if member =? spelling_slot {type_spelling(t)} else {type_short_name(t)}
     # (`Img:type = Png | Jpeg`: an alias whose right side has no name gives its own)
     if (text as array<uint8>).length =? 0 and k =? 'alias_' {text=name_of(MemberHandlesWord(nodes.ptr[receiver].name))}
     if (text as array<uint8>).length =? 0 {fatal(nodes.ptr[n].pos "{dt(t)} has no name of its own: an anonymous record, a union or a computed type has none (give it one, `Name:type = ...`)")}

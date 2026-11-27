@@ -1,0 +1,17 @@
+# `T(text)` is the type's text reader, `T | ValidationError`, also through a type parameter;
+# `T.spelling` is the type as Dewy writes it.
+Small:type = int64<n => 0 <? n and n <=? 16>
+Mode:type = 'tokens' | 'ast'
+AtLeastOne:type = int64<(>=? 1)>
+Box:type = [label:string]
+
+read = <T>(text:string) => T(text)
+
+main = () => {
+    printl"{int64("42")} {int64("4x2")}"
+    printl"{uint8("300")} {float64("2.5")} {bool("false")} {bool("no")}"
+    printl"{Small("7")} {Small("70")}"
+    printl"{read<Mode>("ast")} {read<Mode>("zz")}"
+    printl"{read<Small>("3")} {read<int64>("-17")} {read<Box>("hi").label}"
+    printl"{Small.spelling} | {Mode.spelling} | {AtLeastOne.spelling}"
+}

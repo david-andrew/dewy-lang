@@ -331,6 +331,7 @@ prelude_load_runtime=(path:string imports:bool):>void=>{
     if module_ctx.length >? 0 {setup_module_contexts(init_fns[0])}
     late_module_imports=true
 }
+let text_readers_loaded:bool=false
 demand_prelude_name=(name:PreludeWord):>void=>$unsafe {
     let tp=names.ptr as ptr<ptr<uint8>>
     let hdr=tp[name]
@@ -370,6 +371,12 @@ demand_prelude_name=(name:PreludeWord):>void=>$unsafe {
                     prelude_load_runtime("{lib_dir}/prelude/settings.dewy" true)
                 }
             }
+        }
+        # (`int64(text)`: the text readers, lib/prelude/text_readers.dewy)
+        let readers=@text_readers_loaded
+        if not readers and starts_with(name_of(name) "__text_") {
+            readers=true
+            prelude_load_runtime("{lib_dir}/prelude/text_readers.dewy" true)
         }
         if not math_runtime_loaded and starts_with(name_of(name) "__mi_") {
             math_runtime_loaded=true

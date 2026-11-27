@@ -11,14 +11,36 @@ from p"expr.jo" import (AUX2_PARTIAL)
 from p"call_argument_checks.dewy" import (unnamed)
 from p"source_queries.dewy" import (pos_str)
 from p"type_ops.dewy" import (dt)
-from p"types.jo" import (tkind)
+from p"types.jo" import (structs tkind types)
+from p"type_inference.dewy" import (tu_prune tu_struct_targ)
 from p"util.jo" import (name_of)
 
 OverloadDiagWord:type=int64<overflow='wrap'>
 
+# How much fixed structure a generic signature's parameter types have around its type
+# parameters: of two generic overloads that both fit, the more specific one is chosen
+# (`<T>(d:Named<array<T>>)` over `<T>(d:Named<T>)`). O(the types' size); ties only.
+generic_specificity=(cd:Cand):>OverloadDiagWord=>{
+    let total:OverloadDiagWord=0
+    loop t in cd.sig.params {total += pattern_size(t 0)}
+    total
+}
+pattern_size=(t0:OverloadDiagWord depth:OverloadDiagWord):>OverloadDiagWord=>$unsafe {
+    let t=tu_prune(t0)
+    let k=types.ptr[t].kind
+    if depth >? 8 or k =? 'param' or k =? 'var' {return 0}
+    let total:OverloadDiagWord=1
+    if k =? 'array' or k =? 'opt' or k =? 'fixed' {total += pattern_size(OverloadDiagWord(types.ptr[t].elem) depth + 1)}
+    if k =? 'struct_' or k =? 'enum_' {
+        let si=OverloadDiagWord(types.ptr[t].st)
+        loop i in [0..OverloadDiagWord(structs.ptr[si].ntargs)) {total += pattern_size(tu_struct_targ(si i) depth + 1)}
+    }
+    total
+}
 call_tie_error=(n:OverloadDiagWord name:OverloadDiagWord args:array<int64> cands:array<Cand> best:OverloadDiagWord):>void=>$unsafe {
     loop index in 0.. and cd in cands {
         if index =? best or cd.cost not=? cands[best].cost or cd.sig.generic not=? cands[best].sig.generic {continue}
+        if cd.sig.generic and generic_specificity(cd) not=? generic_specificity(cands[best]) {continue}
         if decl_in_prelude(cd.decl) not=? decl_in_prelude(cands[best].decl) or rest_bundles.length not=? 0 and decl_has_rest(cd.decl) not=? decl_has_rest(cands[best].decl) {continue}
         let ats=""
         loop ai in 0.. and a0 in args {

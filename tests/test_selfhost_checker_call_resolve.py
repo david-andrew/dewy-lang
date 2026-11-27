@@ -103,6 +103,7 @@ call_type_arity = (name: int, d: int, ts: int[], failure: mut CallFailure): fail
 call_reject_candidate = (cd: Cand, failed: int, failure: mut CallFailure): failure.rejected.push(failed); failure.last_err_arg = failed
 call_rejection_text = (failure: mut CallFailure): events.push("rejections:{failure.rejected}")
 call_tie_error = (n: int, name: int, xs: int[], cands: Cand[], best: int): events.push("ties:{best}")
+generic_specificity = (cd: Cand) -> int: 0
 call_no_candidate = (n: int, name: int, ds: int[], xs: int[], expected: int, ufcs: bool, recv: bool, failure: mut CallFailure) -> int:
     print(events); print("no-candidate:{failure.last_err_arg}:{recv}"); exit(31)
     0

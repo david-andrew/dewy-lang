@@ -14,7 +14,7 @@ from p"rational_lookup.dewy" import (exact_family_name)
 from p"literal_context.dewy" import (is_lit lit_default)
 from p"argument_order.dewy" import (exact_args rest_inst_binds)
 from p"rational_lookup.dewy" import (exact_members_for)
-from p"overload_diagnostics.dewy" import (written_int_param call_tie_error)
+from p"overload_diagnostics.dewy" import (generic_specificity written_int_param call_tie_error)
 from p"default_arguments.dewy" import (default_arg default_uses_params)
 from p"call_wait_inference.dewy" import (expected_binds)
 from p"partial_checks.dewy" import (finish_partial)
@@ -273,6 +273,7 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
                 }
                 else if bc.sig.generic =? cd.sig.generic and decl_in_prelude(bc.decl) and not decl_in_prelude(cd.decl) {best=ci}
                 else if bc.sig.generic =? cd.sig.generic and decl_in_prelude(bc.decl) and decl_in_prelude(cd.decl) and exact_args(cd) >? exact_args(bc) {best=ci}
+                else if bc.sig.generic and cd.sig.generic and decl_in_prelude(bc.decl) =? decl_in_prelude(cd.decl) and generic_specificity(cd) >? generic_specificity(bc) {best=ci}
             }
         }
     }

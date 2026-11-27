@@ -17,14 +17,14 @@ from p"ide_ops.dewy" import (ide_builtin_ref)
 from p"check.jo" import (globals locals modules syms)
 from p"error_ops.dewy" import (forward_call forwards_exceptions nominal_family)
 from p"expr_node_queries.dewy" import (fn_names_for)
-from p"types.jo" import (fields has_var is_int is_union prune structs targ tkind types union_members)
+from p"types.jo" import (T_STR fields has_var is_int is_union prune structs targ tkind types union_members)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"checker_global_initialization.dewy" import (ensure_global)
 from p"type_ops.dewy" import (dt)
 from p"checker_source_positions.dewy" import (dewy_at)
 from p"checker_contexts.dewy" import (cur_mod)
 from p"expr.jo" import (IN intrinsics)
-from p"explicit_conversions.dewy" import (conversion)
+from p"explicit_conversions.dewy" import (conversion text_reader)
 from p"checker_expr.dewy" import (call_by_name check_expr check_intrinsic lookup)
 from p"checker_startup.dewy" import (load_game_for_name load_game_prelude load_std_for_name load_std_prelude prelude_custom_lib)
 from p"prelude.jo" import (prelude_game_pending prelude_std_pending)
@@ -132,6 +132,12 @@ call_name_unknown=(n:int64 name:int64 mod_scope:int64 args:array<int64> expected
             return str_set_read(n args[0] at expected)
         }
         if (tkind(at) =? 'refined') and dewy_at(nodes.ptr[n].pos) and args.length =? 1 and nodes.ptr[args[0]].kind not=? 'namedarg' {
+            # (Reading(text): the refined integer's text reader, `Reading | ValidationError`)
+            if prune(check_expr(args[0] 0)) =? T_STR {
+                let read=text_reader(n at args[0])
+                if read >=? 0 {return read}
+            }
+            add_flag(args[0] NF_CHECKED)
             let target=mk('tname' nodes.ptr[n].pos)
             nodes[target].name = int32<overflow='wrap'>(name)
             if qualified and lookup(name) not=? ts {

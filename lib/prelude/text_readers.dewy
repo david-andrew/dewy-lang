@@ -1,0 +1,33 @@
+# Dewy's prelude: the text readers `T(text)` calls (argparse_and_reflection.md, item 3), loaded
+# when a program reads a number or truth value from text. Each gives the value the text spells,
+# or a ValidationError holding why and the text.
+
+# `int64(text)`, `uint8(text)`: a whole number in the type's range
+__text_integer = <R>(text:string _:R?):>R | ValidationError => {
+    let v = to_int(text) ?? return ValidationError["must be a whole number" text]
+    if R.min <=? v and v <=? R.max return R(v)
+    ValidationError["must be from {R.min} to {R.max}" text]
+}
+
+# `int(text)`: a whole number of any size
+__text_int = (text:string):>int | ValidationError => to_int(text) ?? ValidationError["must be a whole number" text]
+
+# `float64(text)`: a decimal number, `inf` or `nan`
+__text_float = <R>(text:string _:R?):>R | ValidationError => {
+    let v = to_float(text) ?? return ValidationError["must be a number" text]
+    R(v)
+}
+
+# `bool(text)`: `true` or `false`
+__text_bool = (text:string):>bool | ValidationError => {
+    if text =? "true" return true
+    if text =? "false" return false
+    ValidationError["must be true or false" text]
+}
+
+# A refined integer's reading: the integer, then its refinement tested
+__text_refined = <T R>(_:T? read:R | ValidationError):>T | ValidationError => {
+    if read is? ValidationError return read
+    if read is? T return read
+    ValidationError["must be {T.spelling}" "{read}"]
+}
