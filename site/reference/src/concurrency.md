@@ -1,6 +1,6 @@
 # Concurrency and Parallel Work
 
-> [Generated coverage](/status/#ref-concurrency) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
+> [Generated coverage](/status/#ref-concurrency) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**. For a guided introduction, read [Concurrency and Parallel Work](/learn/ch03/concurrency.html) in *Learning Dewy*.
 
 Dewy has two lanes for work that runs at the same time:
 

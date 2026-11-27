@@ -71,7 +71,7 @@ def channel_html(identity):
 
 
 def show_outputs(markdown):
-    """Show each run example's checked stdout, and label design-only code, under its fence."""
+    """Show each run or test example's checked stdout, and label design-only code, under its fence."""
     lines, out, data = markdown.split('\n'), [], None
     i = 0
     while i < len(lines):
@@ -91,6 +91,11 @@ def show_outputs(markdown):
                 label = 'Output' + (f' (with arguments <code>{html.escape(args)}</code>)' if args else '')
                 if data.get('exit'): label += f', then exit status {int(data["exit"])}'
                 out += ['', f'<div class="dewy-output"><span>{label}</span><pre><code>{html.escape(data["stdout"].rstrip(chr(10)))}</code></pre></div>']
+            if data.get('mode') == 'test':
+                command = ' '.join(['dewy test', data.get('file', 'example.dewy'), *data.get('args', [])])
+                label = f'Output of <code>{html.escape(command)}</code>'
+                if data.get('exit'): label += f', exit status {int(data["exit"])}'
+                out += ['', f'<div class="dewy-output dewy-test"><span>{label}</span><pre><code>{html.escape(data["stdout"].rstrip(chr(10)))}</code></pre></div>']
             data = None
         elif line.strip(): data = None
         i += 1
@@ -228,8 +233,8 @@ def main(argv=None):
     if failures:
         ladder_html += '<h3>Known design failures</h3><ul>'+''.join(
             f'<li><code>{esc(r["program"])}</code>: {esc(r["error"])}</li>' for r in failures)+'</ul>'
-    counts={m:sum(e['mode']==m for e in examples) for m in ('run','check','reject','design-only')}
-    example_html='<p>'+', '.join(f'{v} {k}' for k,v in counts.items())+'. Check/reject rows measure diagnostics and checking; only run rows compare stdout.</p><details><summary>Exact snippet IDs</summary><ul>'+''.join(f'<li>{esc(e["id"])}: {e["mode"]} — {e["status"]}</li>' for e in examples)+'</ul></details>'
+    counts={m:sum(e['mode']==m for e in examples) for m in ('run','test','check','reject','design-only')}
+    example_html='<p>'+', '.join(f'{v} {k}' for k,v in counts.items())+'. Check/reject rows measure diagnostics and checking; only run and test rows compare stdout.</p><details><summary>Exact snippet IDs</summary><ul>'+''.join(f'<li>{esc(e["id"])}: {e["mode"]} — {e["status"]}</li>' for e in examples)+'</ul></details>'
     channel_exists=(DIST/'toolchain-channel.txt').is_file()
     channel_identity = (DIST/'toolchain-channel.txt').read_text() if channel_exists else None
     coverage['channel_identity'] = channel_identity

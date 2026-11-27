@@ -23,6 +23,7 @@
 - [Errors as Values](ch03/errors-as-values.md)
 - [Loops and Multiple Iterators](ch03/loops.md)
 - [Ranges](ch03/range-types.md)
+- [Generators and Lazy Sequences](ch03/generators.md)
 
 ## Working with Data
 
@@ -39,10 +40,12 @@
 - [Refinements](ch03/refinements.md)
 - [Physical Quantities and Units](ch03/units.md)
 - [Effects](ch03/effects.md)
+- [Concurrency and Parallel Work](ch03/concurrency.md)
 
 ## Programs and Libraries
 
 - [Modules, Imports, and the Prelude](ch03/imports.md)
+- [Testing](ch03/testing.md)
 - [The Standard Library](ch04/00-stdlib.md)
 
 ## Appendices

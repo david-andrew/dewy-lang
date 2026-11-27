@@ -176,6 +176,9 @@ blockquote:first-of-type {
 .content .dewy-output > span code { text-transform: none; letter-spacing: 0; }
 .content .dewy-output pre { margin: .25em 0 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
 .content .dewy-output pre > code { display: block; padding: 0; background: transparent !important; color: var(--fg) !important; font-size: .85em; white-space: pre-wrap; }
+/* Test reports keep their columns (carets under the condition): scroll, never wrap. */
+.content .dewy-output.dewy-test pre { overflow-x: auto; }
+.content .dewy-output.dewy-test pre > code { white-space: pre; width: max-content; }
 
 /* Design-only code: decided, not built. */
 .content .dewy-output.dewy-design { border-style: dashed; border-top: 0; }

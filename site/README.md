@@ -52,14 +52,16 @@ printl(42)
 ```
 ````
 
-Modes: `check`, `run` (exact `stdout`, optional `exit`/`args`), `reject`
+Modes: `check`, `run` (exact `stdout`, optional `exit`/`args`), `test` (`dewy test`
+on the snippet, saved unpadded as `file`, default `example.dewy`; exact `stdout`,
+optional `exit` and name-filter `args`), `reject`
 (required `diagnostic` substring), `design-only` (required `why`: one sentence on
 what is not built; both books print it under the code as a "Design only" label). Examples compile under the
 default rules (no hidden runtime checks); `"runtime_checks": true` compiles one
-under `$runtime_checks`. In both books, the build shows each `run` example's
+under `$runtime_checks`. In both books, the build shows each `run` and `test` example's
 checked `stdout` under it. Static code uses a JSON
 `data-example` attribute on `code.language-dewy`. `fixtures` supplies named
-companion-file contents; `prefix`/`suffix` supply a declared context for a snippet.
+companion-file contents, or `{"repo": "examples/x.dewy"}` for a tracked file's; `prefix`/`suffix` supply a declared context for a snippet.
 The checker writes complete temporary files and reports page/line plus compiler
 diagnostics. Reference snippets explicitly illustrate design, not implementation.
 

@@ -1,6 +1,6 @@
 # Time and Dates
 
-> [Generated coverage](/status/#ref-time-and-dates) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
+> [Generated coverage](/status/#ref-time-and-dates) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**. To test code that uses time, see [Testing code that uses time](/learn/ch03/testing.html#testing-code-that-uses-time) in *Learning Dewy*.
 
 Time needs no import. The prelude provides the clocks (`now`, `monotonic`, `today`), `sleep` and `within`, the types `Instant`, `Duration`, `Date` and the zoned and local times, and the literal forms `instant"…"`, `date"…"`, `zoned"…"`. Time quantities such as `300ms` are covered in [Physical Quantities](physical-quantities.md).
 

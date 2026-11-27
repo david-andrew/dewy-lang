@@ -1,6 +1,6 @@
 # Generators and Lazy Sequences
 
-> [Generated coverage](/status/#ref-generators) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
+> [Generated coverage](/status/#ref-generators) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**. For a guided introduction, read [Generators and Lazy Sequences](/learn/ch03/generators.html) in *Learning Dewy*.
 
 A generator produces values one at a time, on demand. `lazy` turns a group, block or loop into a `generator<T>`. Nothing in the body runs until a value is pulled from it.
 

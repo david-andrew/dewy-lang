@@ -11,6 +11,7 @@ Use this index to find a worked example, then consult the design reference for t
 - [Errors as Values](ch03/errors-as-values.md)
 - [Loops and Multiple Iterators](ch03/loops.md)
 - [Ranges](ch03/range-types.md)
+- [Generators and Lazy Sequences](ch03/generators.md)
 - [Values, Copies, and Places](ch03/values-and-places.md)
 - [Strings and Graphemes](ch03/string-types.md)
 - [Containers](ch03/container-types.md)
@@ -21,6 +22,8 @@ Use this index to find a worked example, then consult the design reference for t
 - [Refinements](ch03/refinements.md)
 - [Physical Quantities and Units](ch03/units.md)
 - [Effects](ch03/effects.md)
+- [Concurrency and Parallel Work](ch03/concurrency.md)
 - [Modules, Imports, and the Prelude](ch03/imports.md)
+- [Testing](ch03/testing.md)
 
 See [generated coverage](/status/) for exact program IDs and targets. This index is not an implementation checklist.

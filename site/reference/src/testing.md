@@ -1,6 +1,6 @@
 # Testing
 
-> [Generated coverage](/status/#ref-testing) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
+> [Generated coverage](/status/#ref-testing) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**. For a guided introduction, read [Testing](/learn/ch03/testing.html) in *Learning Dewy*.
 
 A test is an ordinary function marked `$test`. `$expect` states what it checks. `dewy test` builds the file with a generated entry that runs every test; an ordinary run or build of the same file runs its own `main` and ignores the tests.
 

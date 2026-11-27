@@ -13,7 +13,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MODES = {'check', 'run', 'reject', 'design-only'}
+MODES = {'check', 'run', 'test', 'reject', 'design-only'}
 MARKER = re.compile(r'(?:>\s*)?<!--\s*dewy-example:\s*(\{.*\})\s*-->')
 FENCE = re.compile(r'^(?P<quote>>\s*)?```dewy\s*$')
 
@@ -44,8 +44,8 @@ def metadata(value: str | None, location: str) -> dict:
     data = json.loads(value)
     if data.get('mode') not in MODES:
         raise ValueError(f'{location}: mode must be one of {sorted(MODES)}')
-    if data['mode'] == 'run' and not isinstance(data.get('stdout'), str):
-        raise ValueError(f'{location}: run requires exact stdout')
+    if data['mode'] in ('run', 'test') and not isinstance(data.get('stdout'), str):
+        raise ValueError(f'{location}: {data["mode"]} requires exact stdout')
     if data['mode'] == 'design-only' and not data.get('why'):
         raise ValueError(f'{location}: design-only requires a "why": what is not built yet')
     if data['mode'] == 'reject' and not data.get('diagnostic'):
@@ -117,7 +117,8 @@ def compiler_path(value: str | None = None) -> Path:
 def validate(example: Example, compiler: Path, scratch: Path) -> dict:
     data = example.metadata
     mode = data['mode']
-    result = {'id': example.id, 'mode': mode, 'target': ('native-release' if mode == 'run' else 'compiler-check' if mode != 'design-only' else None),
+    target = {'run': 'native-release', 'test': 'native-test', 'design-only': None}.get(mode, 'compiler-check')
+    result = {'id': example.id, 'mode': mode, 'target': target,
               'status': 'design only' if mode == 'design-only' else 'tested example'}
     if mode == 'design-only': return result
     with tempfile.TemporaryDirectory(prefix='example-', dir=scratch) as directory:
@@ -125,14 +126,19 @@ def validate(example: Example, compiler: Path, scratch: Path) -> dict:
         for name, content in data.get('fixtures', {}).items():
             path = (work / name).resolve()
             if not path.is_relative_to(work): raise ValueError('fixture escapes example directory')
+            if isinstance(content, dict):  # {"repo": "examples/x.dewy"}: a tracked file's contents
+                content = (REPO_ROOT / content['repo']).read_text()
             path.parent.mkdir(parents=True, exist_ok=True); path.write_text(content)
-        source = work / 'example.dewy'
+        # A test example's report quotes its own file and lines, so it is written unpadded.
+        source = work / (data.get('file', 'example.dewy') if mode == 'test' else 'example.dewy')
         # Blank lines keep diagnostics aligned with the documentation source.
         prefix = data.get('prefix', '')
-        padding = '\n' * max(0, example.line - 1 - prefix.count('\n'))
+        padding = '' if mode == 'test' else '\n' * max(0, example.line - 1 - prefix.count('\n'))
         text = prefix + padding + example.source + data.get('suffix', '')
         # Examples compile under the default: no hidden traps. One that shows runtime
         # checks says so with "runtime_checks": true in its metadata.
+        if data.get('runtime_checks') and mode == 'test':
+            raise ValueError('a test example writes $runtime_checks in its own source')
         if data.get('runtime_checks'):
             # Reuse two padding lines for the file setting and preserve example line numbers.
             text = '$runtime_checks\n\n' + (text[2:] if text.startswith('\n\n') else text)
@@ -154,8 +160,12 @@ def validate(example: Example, compiler: Path, scratch: Path) -> dict:
                 ran = call([binary, *data.get('args', [])])
                 if ran.returncode != data.get('exit', 0) or ran.stdout.decode() != data['stdout']:
                     raise ValueError(f'exit {ran.returncode}, stdout {ran.stdout!r}; expected {data["stdout"]!r}')
+            if mode == 'test':
+                ran = call([compiler, 'test', source.name, *data.get('args', [])])
+                if ran.returncode != data.get('exit', 0) or ran.stdout.decode() != data['stdout']:
+                    raise ValueError(f'dewy test: exit {ran.returncode}, stdout {ran.stdout!r}; expected {data["stdout"]!r}')
         result['checked'] = True
-        result['executed'] = mode == 'run'
+        result['executed'] = mode in ('run', 'test')
     return result
 
 
