@@ -225,6 +225,15 @@ op_rm64=(opc:XWord reg:XWord base0:XWord disp0:XWord):>void=>$unsafe {
         op_rm64_slow(opc reg base0 disp0)
         return
     }
+    let old=header[1]
+    let p=(header as ptr<uint8>) + 24 + old
+    if base0 =? RBP and not rsp_frame and not x_pad_track and disp0 >=? -128 and disp0 <=? 127 {
+        let w:XWord=(0x48 | ((reg >> 1) & 4)) | (opc << 8) | ((0x45 | ((reg & 7) << 3)) << 16) | ((disp0 & 0xFF) << 24)
+        let dw=p as ptr<uint32>
+        dw[0]=uint32<overflow='wrap'>(w)
+        header[1]=old + 4
+        return
+    }
     let base=base0
     let disp=disp0
     if rsp_frame and base =? RBP {
@@ -232,8 +241,6 @@ op_rm64=(opc:XWord reg:XWord base0:XWord disp0:XWord):>void=>$unsafe {
         disp += frame_size
         disp += rsp_extra
     }
-    let old=header[1]
-    let p=(header as ptr<uint8>) + 24 + old
     p[1]=uint8<overflow='wrap'>(opc)
     let prefix:XWord=0x48 | ((reg >> 1) & 4)
     p[0]=uint8<overflow='wrap'>(prefix | ((base >> 3) & 1))

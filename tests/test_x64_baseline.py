@@ -494,4 +494,77 @@ main = ():>void => {
     assert ran.returncode != 0
 
 
+ROUND4_PROGRAM = '''
+$runtime_checks
+
+round4_features = (n:int64):>string => {
+    let a:array<uint8 length=4> = [1 2 3 4]
+    let b:array<uint8 length=4> = [1 2 3 4]
+    let c:array<uint8 length=4> = [1 2 9 4]
+    let d1:array<int64> = [10 20 30]
+    let d2:array<int64> = [10 20 30]
+    let d3:array<int64> = [10 20 31]
+    let up_excl:int64 = 0
+    loop i in [0, 2..10) { up_excl += i }
+    let up_incl:int64 = 0
+    loop i in [1, 4..10] { up_incl += i }
+    let dn_excl:int64 = 0
+    loop i in [10, 7..1) { dn_excl += i }
+    let dn_incl:int64 = 0
+    loop i in [10, 7..1] { dn_incl += i }
+    let empty_up:int64 = 0
+    loop i in [10, 12..5] { empty_up += 1 }
+    let empty_dn:int64 = 0
+    loop i in [2, 0..5] { empty_dn += 1 }
+    let dyn_sum:int64 = 0
+    loop i in [n, n + 3..n + 10] { dyn_sum += i }
+    let pushed:array<int64> = []
+    loop i in [0..6) { pushed.push(i * 3) }
+    "{a =? b}:{a not=? c}:{d1 =? d2}:{d1 not=? d3}|{up_excl}:{up_incl}:{dn_excl}:{dn_incl}:{empty_up}:{empty_dn}:{dyn_sum}|{pushed.length}:{pushed[5]}"
+}
+
+main = ():>void => {
+    printl"{round4_features(2)}"
+}
+'''
+
+
+def test_x64_baseline_round4_matches_release(compiler, tmp_path):  # noqa: F811
+    source = tmp_path / 'baseline_r4.dewy'
+    source.write_text(ROUND4_PROGRAM)
+    outputs = []
+    for tag, flags in (('default', []), ('release', ['--release'])):
+        binary = tmp_path / f'r4_{tag}'
+        built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                               capture_output=True, text=True, timeout=60)
+        assert built.returncode == 0, built.stdout + built.stderr
+        ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+        outputs.append(ran.stdout)
+    assert outputs[0] == outputs[1]
+    assert outputs[0] == 'true:true:true:true|20:22:21:22:0:0:26|6:15\n'
+
+
+def test_x64_baseline_step_zero_traps(compiler, tmp_path):  # noqa: F811
+    source = tmp_path / 'baseline_step0.dewy'
+    source.write_text('''
+$runtime_checks
+step0 = (x:int64):>int64 => {
+    let acc:int64 = 0
+    loop i in [x, x..x + 5] { acc += i }
+    acc
+}
+main = ():>void => {
+    printl"{step0(3)}"
+}
+''')
+    binary = tmp_path / 'step0_default'
+    built = subprocess.run([compiler, 'build', source, '-o', binary],
+                           capture_output=True, text=True, timeout=60)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode != 0
+
+
+
 

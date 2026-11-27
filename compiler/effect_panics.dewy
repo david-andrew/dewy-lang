@@ -87,26 +87,27 @@ panic_grow=():>void=>$unsafe {
 panic_visit=(f:CWord):>void=>$unsafe {
     let serial:CWord=CWord(ep_serial[0]) + 1
     ep_serial[0] = serial
-    ep_index[0][f] = serial
-    ep_low[0][f] = serial
+    ep_index[0].ptr[f] = serial
+    ep_low[0].ptr[f] = serial
     ep_stack[0].push(f)
     let library=ep_host[0].scan(f)
     let at:CWord=CWord(ep_edge_at[0].ptr[f])
-    loop at <? CWord(ep_edge_end[0].ptr[f]) {
+    let edge_end:CWord=CWord(ep_edge_end[0].ptr[f])
+    loop at <? edge_end {
         if library and ep_witness[0].ptr[f] not=? 0 and ep_guard[0] =? 0 {break}
         let g:CWord=CWord(ep_edges[0].ptr[at])
         let n:CWord=CWord(ep_edges[0].ptr[at + 1])
         if ep_index[0].ptr[g] =? 0 {
             panic_visit(g)
-            if ep_answer[0].ptr[g] =? 0 and ep_low[0].ptr[g] <? ep_low[0].ptr[f] {ep_low[0][f] = ep_low[0].ptr[g]}
-        } else if ep_answer[0].ptr[g] =? 0 and ep_index[0].ptr[g] <? ep_low[0].ptr[f] {ep_low[0][f] = ep_index[0].ptr[g]}
+            if ep_answer[0].ptr[g] =? 0 and ep_low[0].ptr[g] <? ep_low[0].ptr[f] {ep_low[0].ptr[f] = ep_low[0].ptr[g]}
+        } else if ep_answer[0].ptr[g] =? 0 and ep_index[0].ptr[g] <? ep_low[0].ptr[f] {ep_low[0].ptr[f] = ep_index[0].ptr[g]}
         let answer:CWord=panic_edge_answer(f g n)
         if answer =? 2 and ep_witness[0].ptr[f] =? 0 {
-            ep_witness[0][f] = n
-            ep_via[0][f] = g
+            ep_witness[0].ptr[f] = n
+            ep_via[0].ptr[f] = g
         } else if answer =? 3 and ep_local[0].ptr[f] =? 0 {
-            ep_local[0][f] = n
-            ep_local_via[0][f] = g
+            ep_local[0].ptr[f] = n
+            ep_local_via[0].ptr[f] = g
         }
         at += 2
     }
@@ -119,10 +120,10 @@ panic_visit=(f:CWord):>void=>$unsafe {
     if start =? top - 1 {
         let answer:CWord=if ep_witness[0].ptr[f] not=? 0 {2} else if ep_local[0].ptr[f] not=? 0 {3} else {1}
         if answer =? 3 {
-            ep_witness[0][f] = ep_local[0].ptr[f]
-            ep_via[0][f] = ep_local_via[0].ptr[f]
+            ep_witness[0].ptr[f] = ep_local[0].ptr[f]
+            ep_via[0].ptr[f] = ep_local_via[0].ptr[f]
         }
-        ep_answer[0][f] = answer
+        ep_answer[0].ptr[f] = answer
         ep_stack[0].pop();
         return
     }
@@ -139,7 +140,7 @@ panic_visit=(f:CWord):>void=>$unsafe {
     let incoming:array<int64>=[]
     let pending:array<int64>=[]
     if any {
-        loop i in [start..top) {ep_low[0][ep_stack[0].ptr[i]] = -1}
+        loop i in [start..top) {ep_low[0].ptr[ep_stack[0].ptr[i]] = -1}
         loop i in [start..top) {
             let g:CWord=CWord(ep_stack[0].ptr[i])
             let e:CWord=CWord(ep_edge_at[0].ptr[g])
@@ -150,7 +151,7 @@ panic_visit=(f:CWord):>void=>$unsafe {
                     incoming.push(g)
                     incoming.push(ep_edges[0].ptr[e + 1])
                     incoming.push(ep_low[0].ptr[h])
-                    ep_low[0][h] = head
+                    ep_low[0].ptr[h] = head
                 }
                 e += 2
             }
@@ -160,29 +161,29 @@ panic_visit=(f:CWord):>void=>$unsafe {
         let g:CWord=CWord(ep_stack[0].ptr[i])
         let answer:CWord=if ep_witness[0].ptr[g] not=? 0 {2} else if ep_local[0].ptr[g] not=? 0 {3} else {1}
         if answer =? 3 {
-            ep_witness[0][g] = ep_local[0].ptr[g]
-            ep_via[0][g] = ep_local_via[0].ptr[g]
+            ep_witness[0].ptr[g] = ep_local[0].ptr[g]
+            ep_via[0].ptr[g] = ep_local_via[0].ptr[g]
         }
-        ep_answer[0][g] = answer
+        ep_answer[0].ptr[g] = answer
         if any and answer not=? 1 {pending.push(g)}
     }
     let next:CWord=0
     loop next <? CWord(pending.length) {
-        let g:CWord=CWord(pending[next])
+        let g:CWord=CWord(pending.ptr[next])
         next += 1
         let e:CWord=CWord(ep_low[0].ptr[g])
         loop e >=? 0 {
-            let h:CWord=CWord(incoming[e])
-            let n:CWord=CWord(incoming[e + 1])
+            let h:CWord=CWord(incoming.ptr[e])
+            let n:CWord=CWord(incoming.ptr[e + 1])
             let answer:CWord=panic_edge_answer(h g n)
             let old:CWord=CWord(ep_answer[0].ptr[h])
             if old =? 1 or (old =? 3 and answer =? 2) {
-                ep_answer[0][h] = answer
-                ep_witness[0][h] = n
-                ep_via[0][h] = g
+                ep_answer[0].ptr[h] = answer
+                ep_witness[0].ptr[h] = n
+                ep_via[0].ptr[h] = g
                 pending.push(h)
             }
-            e=CWord(incoming[e + 2])
+            e=CWord(incoming.ptr[e + 2])
         }
     }
     loop CWord(ep_stack[0].length) >? start {ep_stack[0].pop();}

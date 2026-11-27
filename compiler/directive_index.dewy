@@ -18,6 +18,22 @@ dir_index_group=(setting:int64 file:DirIndexWord):>int64=>$unsafe {
     g
 }
 
+# O(1) check whether a setting has any scope in `file` (conservatively true if wide/code-vector).
+dir_index_file_has=(setting:DirIndexWord file:DirIndexWord):>bool=>$unsafe {
+    if dir_scopes.length =? 0 {return false}
+    if dir_index_gen not=? dir_scopes_gen or dir_index_len not=? dir_scopes.length {dir_index_sync()}
+    if dir_index_wide or dir_code_any {return true}
+    if file <? 0 or file >=? dir_index_file.length {return false}
+    let g=DirIndexWord(dir_index_file.ptr[file]) - 1
+    let set_p=dir_index_setting.ptr
+    let gn_p=dir_index_group_next.ptr
+    loop g >=? 0 {
+        if set_p[g] =? setting {return true}
+        g=DirIndexWord(gn_p[g])
+    }
+    false
+}
+
 # Extend the index after pushes, rebuild it after a truncation.
 dir_index_sync=():>void=>$unsafe {
     let n=dir_scopes.length
@@ -25,7 +41,8 @@ dir_index_sync=():>void=>$unsafe {
     let gen=DirIndexWord(dir_scopes_gen)
     let old_gen=DirIndexWord(dir_index_gen)
     if old_gen =? gen and index_len =? n {return}
-    loop c in [0..4) {dir_cache_setting[c]=-1}
+    let cs=dir_cache_setting.ptr
+    loop c in [0..32) {cs[c]=-1}
     let wide=dir_index_wide
     if n <? index_len or gen - old_gen not=? DirIndexWord(n) - index_len {
         index_len=0
@@ -67,38 +84,50 @@ dir_index_sync=():>void=>$unsafe {
 
 # The innermost scope wins, with direct settings taking priority over bundles.
 dir_index_find=(setting:DirIndexWord p:DirIndexWord skip:DirIndexWord):>int64=>$unsafe {
+    if dir_scopes.length =? 0 {return -1}
     if dir_index_gen not=? dir_scopes_gen or dir_index_len not=? dir_scopes.length {dir_index_sync()}
     if dir_index_wide or p <? 0 {return dir_find_scan(setting p skip)}
-    let c=setting & 3
+    let c=setting & 31
     if skip <? 0 and dir_cache_setting.ptr[c] =? setting and p >=? dir_cache_lo.ptr[c] and p <=? dir_cache_hi.ptr[c] {return dir_cache_best.ptr[c]}
-    let file=pos_file(p)
-    let lo=DirIndexWord(dir_index_module_start(file))
-    let hi=DirIndexWord(dir_index_module_end(file))
+    let file=DirIndexWord(pos_file(p))
+    let lo=DirIndexWord(file << 40)
+    let hi=DirIndexWord((file << 40) | 0xFFFFFFFFFF)
     let best:DirIndexWord=-1
-    let g=DirIndexWord(dir_index_group(setting file))
+    let g:DirIndexWord=-1
+    if file <? dir_index_file.length {
+        g=DirIndexWord(dir_index_file.ptr[file]) - 1
+        let set_p=dir_index_setting.ptr
+        let gn_p=dir_index_group_next.ptr
+        loop g >=? 0 and set_p[g] not=? setting {g=DirIndexWord(gn_p[g])}
+    }
     let i=if g >=? 0 {DirIndexWord(dir_index_head.ptr[g])} else {-1}
-    loop i >=? 0 {
-        let s=dir_scopes.ptr[i]
-        if p <? s.start {hi=min(hi DirIndexWord(s.start) - 1)}
-        else if p >? s.end {lo=max(lo DirIndexWord(s.end) + 1)}
-        else {
-            lo=max(lo DirIndexWord(s.start))
-            hi=min(hi DirIndexWord(s.end))
-            if i not=? skip {
-                if best <? 0 {best=i}
-                else {
-                    let b=dir_scopes.ptr[best]
-                    if s.start >? b.start or s.start =? b.start and (s.bundle =? 0 or b.bundle not=? 0) {best=i}
+    if i >=? 0 {
+        let sc_p=dir_scopes.ptr
+        let nx_p=dir_index_next.ptr
+        loop i >=? 0 {
+            let s_start=DirIndexWord(sc_p[i].start)
+            let s_end=DirIndexWord(sc_p[i].end)
+            if p <? s_start {hi=min(hi s_start - 1)}
+            else if p >? s_end {lo=max(lo s_end + 1)}
+            else {
+                lo=max(lo s_start)
+                hi=min(hi s_end)
+                if i not=? skip {
+                    if best <? 0 {best=i}
+                    else {
+                        let b_start=DirIndexWord(sc_p[best].start)
+                        if s_start >? b_start or s_start =? b_start and (sc_p[i].bundle =? 0 or sc_p[best].bundle not=? 0) {best=i}
+                    }
                 }
             }
+            i=DirIndexWord(nx_p[i])
         }
-        i=dir_index_next.ptr[i]
     }
     if skip <? 0 {
-        dir_cache_setting[c]=setting
-        dir_cache_lo[c]=lo
-        dir_cache_hi[c]=hi
-        dir_cache_best[c]=best
+        dir_cache_setting.ptr[c]=setting
+        dir_cache_lo.ptr[c]=lo
+        dir_cache_hi.ptr[c]=hi
+        dir_cache_best.ptr[c]=best
     }
     best
 }

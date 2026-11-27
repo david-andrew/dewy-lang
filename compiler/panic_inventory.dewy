@@ -39,17 +39,21 @@ let panic_walk_stack:array<int64>=[]
 let panic_path_fmt:string=""
 let panic_path_math:string=""
 let panic_path_nd:string=""
+let panic_path_nd_dewy:string=""
 let panic_path_thread:string=""
 let panic_path_gpu:string=""
 let panic_path_rt:string=""
 let panic_name_add:PanicWord=0
 let panic_name_sum:PanicWord=0
 let panic_name_mean:PanicWord=0
+let panic_exempt_kind:array<int8>=[]
+let panic_exempt_names:dict<int64 bool>=dict<int64 bool>()
 panic_init_paths=():>void=>{
     if panic_path_fmt =? "" {
         panic_path_fmt="{lib_dir}/core/fmt.jo"
         panic_path_math="{lib_dir}/math_int.jo"
         panic_path_nd="{lib_dir}/std/nd.jo"
+        panic_path_nd_dewy="{lib_dir}/prelude/nd.dewy"
         panic_path_thread="{lib_dir}/std/thread.jo"
         panic_path_gpu="{lib_dir}/game/gpuarray.jo"
         panic_path_rt="{lib_dir}/core/rt.jo"
@@ -59,9 +63,38 @@ panic_init_paths=():>void=>{
         panic_name_sum=intern("sum")
         panic_name_mean=intern("mean")
     }
+    if panic_exempt_names.length =? 0 {
+        let names=["__dewy_string_length" "__dewy_string_index" "__dewy_string_slice" "__dewy_byte_slice" "__dewy_find" "find" "__bcast" "reshape" "__dewy_put_slice" "__dewy_pick_slice" "__pick" "__put" "__pick_indices" "__put_indices" "__pick_mask" "__put_mask" "swap" "__dewy_insert" "__dewy_read_u64" "__dewy_read_u32" "__dewy_read_u16" "reverse" "sort" "sort_by" "sort_with" "__floor_div" "__floor_mod" "__floor_div_pow2" "__floor_mod_pow2" "rational" "_fraction" "__dewy_power" "__dewy_policy_power" "pow" "__pow__" "format" "to" "add" "contains" "has" "[]" "__map_entry_present" "pop" "__map_entry" "[]=" "get" "__pool_index" "remove" "__dewy_range" "__nd_axis_slice" "__dewy_slice_range" "__dewy_open_range_iter" "peek" "peek_priority" "min" "max" "sum" "mean" "divmod" "atomic_add" "atomic_sub" "atomic_and" "atomic_or" "atomic_xor" "atomic_exchange" "atomic_min" "atomic_max" "atomic_compare_exchange"]
+        loop nm in names {panic_exempt_names[intern(nm)]=true}
+    }
+}
+panic_lib_maybe_exempt=(callee:PanicWord):>bool=>$unsafe {
+    if callee <? panic_exempt_kind.length {
+        let tag=panic_exempt_kind.ptr[callee]
+        if tag not=? int8(0) {return tag =? int8(2)}
+    }
+    if panic_path_fmt =? "" {panic_init_paths()}
+    if callee >=? panic_exempt_kind.length {panic_exempt_kind.resize(max(callee + 64 fns.length + 64))}
+    let d=PanicWord(fns.ptr[callee].decl)
+    if d =? 0 {
+        panic_exempt_kind.ptr[callee]=int8(1)
+        return false
+    }
+    if panic_exempt_names.has(PanicWord(nodes.ptr[d].name)) {
+        panic_exempt_kind.ptr[callee]=int8(2)
+        return true
+    }
+    let path=files.ptr[pos_file(nodes.ptr[d].pos)].path
+    if path =? panic_path_nd or path =? panic_path_nd_dewy or path =? panic_path_gpu {
+        panic_exempt_kind.ptr[callee]=int8(2)
+        return true
+    }
+    panic_exempt_kind.ptr[callee]=int8(1)
+    false
 }
 effect_panics_reset=():>void=>$unsafe {
     panic_path_fmt=""
+    panic_exempt_kind.clear()
     panic_calls_only=false
     effect_panics_demanded=false
     effect_panics_settled=false
@@ -344,7 +377,7 @@ panic_site=(f:PanicWord n:PanicWord):>void=>$unsafe {
         }
         if nodes.ptr[n].sym >? 0 {
             let callee=PanicWord(nodes.ptr[n].sym)
-            let exempt=not panic_calls_only and k =? 'call' and ((fact_divisors.length >? 0 and fact_divisors.has(n)) or (cc_passed.length >? 0 and cc_passed.has(n)) or (fn_in_lib(callee) and (fact_string_call(n) >=? 2 or fact_array_call(n) not=? 0 or fact_floor_call(n) not=? 0 or fact_rational_constructor(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or panic_atomic_progress(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n) or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_gpu_index_call(n) or fact_rational_divmod(n)) or panic_gpu_total(n) or panic_literal_safe(n))))
+            let exempt=not panic_calls_only and k =? 'call' and ((fact_divisors.length >? 0 and fact_divisors.has(n)) or (cc_passed.length >? 0 and cc_passed.has(n)) or (fn_in_lib(callee) and panic_lib_maybe_exempt(callee) and (fact_string_call(n) >=? 2 or fact_array_call(n) not=? 0 or fact_floor_call(n) not=? 0 or fact_rational_constructor(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or panic_atomic_progress(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n) or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_gpu_index_call(n) or fact_rational_divmod(n)) or panic_gpu_total(n) or panic_literal_safe(n))))
             if not exempt {panic_edge(f callee n);}
         }
     }
