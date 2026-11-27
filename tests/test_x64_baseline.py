@@ -248,3 +248,148 @@ def test_x64_baseline_control_flow_matches_release(compiler, tmp_path):  # noqa:
         '12 1\n'
     )
 
+
+ROUND2_PROGRAM = '''
+$runtime_checks
+
+BoxedRec:type = [k:int64 v:string]
+SmallTag:type = 'a' | 'b'
+WideTag:type = 'a' | 'b' | 'c'
+SubU:type = int64 | string
+SuperU:type = int64 | string | bool
+
+let g_init_val:int64 = 100 + 23
+
+float_and_exact = (a:int64 b:float64 u:uint64):>string => {
+    let f:float64 = b + float64(a * 3) + float64(a * 4)
+    let f32v:float32 = float32(f) + float32(1.5)
+    let back:float64 = float64(f32v) - 0.5
+    let uf:float64 = float64(u)
+    let root:float64 = sqrt(abs(back))
+    let zs:array<float64> = fill(0.0 3)
+    let nanv:float64 = 0.0 / 0.0
+    let nan_eq:bool = nanv =? nanv
+    let nan_ne:bool = nanv not=? nanv
+    let nan_lt:bool = nanv <? 1.0
+    let n32:int32 = int32(a + 7)
+    let n8:uint8 = uint8(a + 2)
+    let csum:int64 = int64(n32) + int64(n8) + int64(back)
+    let acc:float64 = 1.0
+    acc += 2.5
+    acc -= 0.5
+    acc *= 2.0
+    acc /= 3.0
+    "{csum}:{zs.length}:{nan_eq}:{nan_ne}:{nan_lt}:{int64(root)}:{int64(uf / 1048576.0)}:{int64(acc * 10.0)}"
+}
+
+fixed_and_ops = (idx:int64):>string => {
+    let fx:array<int64 length=4> = [10 20 30 40]
+    fx[idx] = fx[idx] + 5
+    let rep:array<int64 length=3> = fill(int64(7) 3)
+    let sl = fx[1..3)
+    let fsum:int64 = 0
+    loop v in fx { fsum += v }
+    let sfx:array<string length=2> = ["hi" "yo"]
+    let tup:[int64 string] = [fx.length sfx[1]]
+    let r1 = BoxedRec[1 "x"]
+    let r2 = BoxedRec[1 "x"]
+    let r3 = BoxedRec[2 "x"]
+    let xs:array<int64> = [1 2 3]
+    xs.reserve(8)
+    xs.extend([4 5])
+    let popped = xs.pop()
+    xs.truncate(3)
+    xs.resize(5)
+    let st:SmallTag = 'b'
+    let wt:WideTag = st
+    let wtxt:string = wt as string
+    let su:SubU = "ok"
+    let wu:SuperU = su
+    let wu_s:string = if wu is? string {wu} else {"no"}
+    "{fsum}:{rep[2]}:{sl[0]}:{sl[1]}:{tup[0]}:{tup[1]}:{r1 =? r2}:{r1 not=? r3}:{popped}:{xs.length}:{wtxt}:{wu_s}"
+}
+
+math_int_demo = (n:int):>string => {
+    let big:int = 5000000000000000000
+    let huge:int = big * big + n
+    let back:int = (huge - n) // big
+    let rem:int = (huge + 7) % 10
+    let neg:int = -n
+    let inv:int = ~n
+    let sh:int = (int(1) << 70) >> 68
+    let acc:int = 0
+    loop i in [0..5) {
+        acc += i * 2
+    }
+    let big_lo:int = big + 0
+    let big_hi:int = big + 3
+    let bcnt:int = 0
+    loop k in [big_lo..big_hi) {
+        if k >=? big_lo { bcnt += 1 }
+    }
+    let mres:string = match n {
+        <0> => "zero"
+        _x:int<1 <=? _x and _x <=? 10> => "small"
+        _ => "other"
+    }
+    let xs:array<int> = [n big huge]
+    let popped:int = xs.pop()
+    let f:float64 = float64(n) + float64(int(float64(3.9)))
+    let w:int64<overflow='wrap'> = int64<overflow='wrap'>(huge)
+    let u32v:uint32 = uint32(acc)
+    let labels:array<string> = [loop i in [0..3) "k{i}"]
+    "{back}:{rem}:{neg}:{inv}:{sh}:{acc}:{bcnt}:{mres}:{popped =? huge}:{int64(f)}:{u32v}:{w =? int64<overflow='wrap'>(huge)}:{labels.join(",")}"
+}
+
+main = ():>void => {
+    let big_u:uint64 = uint64(9223372036854775808)
+    printl"{g_init_val}"
+    printl"{float_and_exact(5 2.5 big_u)}"
+    printl"{fixed_and_ops(2)}"
+    printl"{math_int_demo(6)}"
+    printl"{math_int_demo(0)}"
+}
+'''
+
+
+def test_x64_baseline_round2_matches_release(compiler, tmp_path):  # noqa: F811
+    source = tmp_path / 'baseline_r2.dewy'
+    source.write_text(ROUND2_PROGRAM)
+    outputs = []
+    for tag, flags in (('default', []), ('release', ['--release'])):
+        binary = tmp_path / f'r2_{tag}'
+        built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                               capture_output=True, text=True, timeout=60)
+        assert built.returncode == 0, built.stdout + built.stderr
+        ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+        outputs.append(ran.stdout)
+    assert outputs[0] == outputs[1]
+    assert outputs[0].splitlines()[0] == '123'
+    assert outputs[0].splitlines()[2] == '105:7:20:35:4:yo:true:true:5:5:b:ok'
+    assert outputs[0].splitlines()[3] == '5000000000000000000:3:-6:-7:4:20:3:small:true:9:20:true:k0,k1,k2'
+
+
+def test_x64_baseline_exact_overflow_traps(compiler, tmp_path):  # noqa: F811
+    source = tmp_path / 'baseline_ovf.dewy'
+    source.write_text('''
+$runtime_checks
+boom = (x:int32 y:int32):>int32 => {
+    let extra:int64 = 0
+    loop i in [0..4) { extra += i }
+    let z:int32 = x + y
+    if extra <? 0 { return 0 }
+    z
+}
+main = ():>void => {
+    printl"{boom(2000000000 1000000000)}"
+}
+''')
+    binary = tmp_path / 'ovf_default'
+    built = subprocess.run([compiler, 'build', source, '-o', binary],
+                           capture_output=True, text=True, timeout=60)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode != 0
+
+
