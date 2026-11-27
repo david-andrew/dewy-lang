@@ -25,6 +25,7 @@ from p"member_replay.jo" import (member_compact_owners)
 from p"facts_arrays.dewy" import (fact_array_call)
 from p"facts_changes.dewy" import (fact_enum_cast fact_handle_opaque fact_partial_opaque fact_pure_binary fact_pure_conversion fact_pure_intrinsic)
 from p"facts_forgets.dewy" import (fact_exposed fact_fn_in_lib fact_own_local fact_pointer_cast fact_written_root)
+from p"refine_rare.dewy" import (ref_named_locals)
 from p"facts_forks.dewy" import (fact_inline_forks fact_key_callback fact_parallel_array fact_seed_lambdas)
 from p"facts_joins.dewy" import (fact_payload_node)
 from p"facts_library.dewy" import (fact_chosen_call fact_copy_length_call fact_empty_array_call fact_endpoint_call fact_entry_count_call fact_exact_sum_call fact_gpu_index_call fact_heap_call fact_integer_gcd_call fact_library_call fact_nonempty_call fact_same_length_call)
@@ -224,7 +225,22 @@ fact_slice_term_locals=(t0:SlicePrepWord @out:array<int64> depth:SlicePrepWord):
         loop i in [SlicePrepWord(0)..min(SlicePrepWord(structs.ptr[si].ntargs) 2)) {fact_slice_term_locals(struct_targ(si i) @out depth + 1)}
     }
 }
+# Whether type t names such a local, memoized by interned type: O(1) after its first query.
+let fsp_type_locals:array<int8>=[]
+fact_type_names_locals=(t0:SlicePrepWord):>bool=>$unsafe {
+    if t0 <=? 0 {return false}
+    let t=prune(t0)
+    let k=types.ptr[t].kind
+    if k =? 'int_' or k =? 'str_' or k =? 'bool_' or k =? 'float_' or k =? 'var' {return false}
+    if t <? fsp_type_locals.length and fsp_type_locals.ptr[t] not=? int8(0) {return fsp_type_locals.ptr[t] =? int8(2)}
+    let deps:array<int64>=[]
+    fact_slice_term_locals(t @deps 0)
+    if t >=? fsp_type_locals.length {fsp_type_locals.resize(max(t + 64 SlicePrepWord(fsp_type_locals.length) * 2))}
+    fsp_type_locals.ptr[t]=if deps.length >? 0 {int8(2)} else {int8(1)}
+    deps.length >? 0
+}
 fact_slice_local_writers=(t:SlicePrepWord writers:FactSliceEdges @values:array<int64> @active:array<int64>):>void=>$unsafe {
+    if ref_named_locals.length =? 0 or not fact_type_names_locals(t) {return}
     let deps:array<int64>=[]
     fact_slice_term_locals(t @deps 0)
     loop o in deps {
@@ -354,6 +370,7 @@ let fsp_special_names:dict<int64 bool>=dict<int64 bool>()
 
 fsp_reset=():>void=>{
     fsp_lib_kind.clear()
+    fsp_type_locals.clear()
     fsp_cur_plan=-1
 }
 

@@ -50,6 +50,7 @@ from p"ownership_types.dewy" import (ownership_fact_type)
 from p"predicate_facts.jo" import (FactPredicate fact_predicate_nodes fact_predicates)
 from p"proofs.jo" import (proof_active proof_calls proof_decls result_active result_contracts)
 from p"proof_ops.dewy" import (proof_erase proof_exit proof_prepare result_exit)
+from p"refine_rare.dewy" import (ref_named_locals)
 from p"refine.jo" import (ref_predicates refine_active refine_entry refine_owners refine_requests)
 from p"refine_transfers.dewy" import (ref_capture_links refine_fact_entry)
 from p"refine_metadata.dewy" import (ref_wrapped_check)
@@ -260,7 +261,7 @@ facts_finalize=():>void=>$unsafe {
     loop request in fact_fixed_requests {demanded[request.owner]=true}
     loop request in refine_requests {
         demanded[request.owner]=true
-        if refine_active and fact_foreign_bound(LifeWord(nodes.ptr[request.node].aux2) request.owner 0) {mandatory[request.owner]=true}
+        if ref_named_locals.length >? 0 and fact_foreign_bound(LifeWord(nodes.ptr[request.node].aux2) request.owner 0) {mandatory[request.owner]=true}
     }
     loop [f _] in exact_proof_demands {demanded[f]=true}
     if fact_policy =? 'RequireStatic' or dir_floats_any or ff_conversions.length >? 0 {
@@ -354,7 +355,7 @@ facts_finalize=():>void=>$unsafe {
         if refine_active or refine_requests.length >? 0 {refine_fact_entry(f @state)}
         if fact_fork_entries.length >? 0 or fact_parallel_bounds.length >? 0 {
             fact_fork_seed(f @state)
-            if refine_active and fns.ptr[f].caps.length >? 0 {ref_capture_links(f @state)}
+            if ref_named_locals.length >? 0 and fns.ptr[f].caps.length >? 0 {ref_capture_links(f @state)}
         }
         fact_slice_prepare(f)
         let result=fact_capture(LifeWord(fns.ptr[f].body) @state)

@@ -159,6 +159,9 @@ str_set_text=(id:int64):>string=>$unsafe {
     str_set_text_cache.ptr[id]=text
     text
 }
+# The constants a contract names (`addr<(<? n)>`): only these need the facts that relate a
+# contract's term to the binding, in slices, generic instances and closures. Per compilation.
+let ref_named_locals:dict<int64 bool>=[]
 ref_resolve_value=(n:int64):>RefTerm=>$unsafe {
     let name=RefineRareWord(nodes.ptr[n].name)
     if ref_holder_name not=? 0 and name =? ref_holder_name {return RefTerm(6)}
@@ -181,6 +184,7 @@ ref_resolve_value=(n:int64):>RefTerm=>$unsafe {
         let l=RefineRareWord(syms.ptr[sym].ref)
         if cx <? 0 or locals.ptr[l].owner not=? ctxs[cx].inst {fatal(nodes.ptr[n].pos "captured refinement dependencies await closure invariant checking")}
         if RefineRareWord(locals.ptr[l].flags) & LF_CONST =? 0 {fatal(nodes.ptr[n].pos "refinement dependency must be a stable binding")}
+        ref_named_locals[l]=true
         return RefTerm(3 l)
     }
     if name =? ref_declaring {fatal(nodes.ptr[n].pos "'{name_of(name)}' is the binding being declared: its length can bound the direct element of its array, as in `array<int64<(<? {name_of(name)}.length)>>`, and nothing else")}
@@ -1225,6 +1229,7 @@ ref_projection_type=(root:int64 path:array<int64> pos:int64):>int64=>$unsafe {
 }
 # A fresh compilation's refinement state. Jo owns every table; each is replaced whole.
 refine_reset=():>void=>{
+    ref_named_locals=[]
     nd_contracts_reset()
     str_sets=[[]]
     total_literals=dict<int64 bool>()

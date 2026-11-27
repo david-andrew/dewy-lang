@@ -9,7 +9,7 @@ from p"facts_capture.dewy" import (fact_capture)
 from p"facts_compare.dewy" import (fact_add_fits fact_assume fact_compare)
 from p"facts_index_writes.dewy" import (fact_bind fact_constant fact_new)
 from p"facts_value_queries.dewy" import (fact_binding)
-from p"facts_slice_prep.dewy" import (fact_slice_term_locals)
+from p"facts_slice_prep.dewy" import (fact_slice_term_locals fact_type_names_locals)
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"facts_lengths.dewy" import (fact_difference)
 from p"facts_routes.dewy" import (fact_read)
@@ -20,7 +20,7 @@ from p"nd_contracts.jo" import (nd_mutable_entry)
 from p"refine.jo" import (refine_active ref_fact_holder ref_pair_held ref_pair_hints ref_predicates ref_self_active ref_self_established ref_self_shrinks refine_entry)
 from p"refine_metadata.dewy" import (ref_encoded representation_type)
 from p"refine_ops.dewy" import (ref_self_k)
-from p"refine_rare.dewy" import (ref_self_assume ref_self_truth ref_self_written_truth ref_self_fail)
+from p"refine_rare.dewy" import (ref_named_locals ref_self_assume ref_self_truth ref_self_written_truth ref_self_fail)
 from p"refine_siblings.dewy" import (ref_sib_assume ref_sib_fail ref_sib_literal_truth ref_sib_truth)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm RefTerm)
 from p"string_domains.jo" import (int_domain_proven)
@@ -197,9 +197,20 @@ ref_check_held=(n:int64 self:int64 args:array<int64> @s:FactState):>void=>$unsaf
 # whole body, which can neither write nor see it, bound at entry so that every read, join and
 # call keeps it. O(atoms of the signature's types).
 ref_foreign_entry=(f:int64 @s:FactState):>void=>$unsafe {
-    let deps:array<int64>=[]
-    loop t in fns.ptr[f].ptypes {fact_slice_term_locals(t @deps 0)}
-    fact_slice_term_locals(RefineTransferWord(fns.ptr[f].ret) @deps 0)
+    if ref_named_locals.length =? 0 {return}
+    let named=fact_type_names_locals(RefineTransferWord(fns.ptr[f].ret))
+    loop t in fns.ptr[f].ptypes {
+        if not named and fact_type_names_locals(t) {named=true}
+    }
+    if named {
+        let deps:array<int64>=[]
+        loop t in fns.ptr[f].ptypes {fact_slice_term_locals(t @deps 0)}
+        fact_slice_term_locals(RefineTransferWord(fns.ptr[f].ret) @deps 0)
+        ref_foreign_bind(f deps @s)
+    }
+    ref_capture_links(f @s)
+}
+ref_foreign_bind=(f:int64 deps:array<int64> @s:FactState):>void=>$unsafe {
     loop l in deps {
         let owner=RefineTransferWord(locals.ptr[l].owner)
         if owner =? f or RefineTransferWord(locals.ptr[l].flags) & LF_CONST =? 0 {continue}
@@ -208,7 +219,6 @@ ref_foreign_entry=(f:int64 @s:FactState):>void=>$unsafe {
         let t=RefineTransferWord(locals.ptr[l].type)
         fact_bind(@s p fact_new(@s fact_domain(t) FactTerm(type=t)))
     }
-    ref_capture_links(f @s)
 }
 # A closure or lazy body capturing a constant holds a copy of the same value, which a contract
 # in it names by the constant (`lazy loop i in [0..n) i` yielding `addr<(<? n)>`): the constant's
@@ -217,7 +227,7 @@ ref_foreign_entry=(f:int64 @s:FactState):>void=>$unsafe {
 ref_capture_links=(f:int64 @s:FactState):>void=>$unsafe {
     loop cap in fns.ptr[f].caps {
         let o=int64(cap.outer)
-        if o <=? 0 or cap.inner <=? 0 or RefineTransferWord(locals.ptr[o].flags) & LF_CONST =? 0 {continue}
+        if o <=? 0 or cap.inner <=? 0 or not ref_named_locals.has(o) {continue}
         let copy=fact_read(@s mk_ident_local(int64(cap.inner) locals.ptr[o].pos))
         if copy not=? 0 {fact_bind(@s PlaceIdentity('local' RefineTransferWord(locals.ptr[o].owner) o) copy)}
     }
