@@ -47,7 +47,7 @@ def corpus():
         node = types[prune(t)]
         if node['kind'] == 'refined':
             return nested and node['formal'] == 2 or nested_formals(node['elem'], nested, depth + 1)
-        if node['kind'] in ('array', 'fixed', 'opt'):
+        if node['kind'] in ('array', 'fixed', 'opt', 'generator'):
             return nested_formals(node['elem'], True, depth + 1)
         return node['kind'] == 'tuple' and any(nested_formals(c, True, depth + 1) for c in node['args'])
 
