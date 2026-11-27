@@ -1,0 +1,10 @@
+# Only the library's marked function keeps the length: a program's own of the same name does not
+parallel_update = (@xs:array<int64> f:(int64:>int64)):>void => {
+    xs.clear()
+    loop i in [0..xs.length) { xs[i] = f(xs[i]) }
+}
+main = () => {
+    let xs:array<int64> = [1 2 3]
+    parallel_update(@xs (x) => x // 2)
+    printl(xs[2])
+}

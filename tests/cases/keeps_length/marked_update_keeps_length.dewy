@@ -1,0 +1,11 @@
+# quick
+# std/thread's parallel_update is marked @keeps_length: the array it updates keeps its length
+main = () => {
+    let xs = [1 2 3]
+    parallel_update(@xs (x) => x * 10)
+    printl(xs[2])
+    loop k in [0..2) {
+        parallel_update(@xs (x) => x + k)
+        printl(xs[2])
+    }
+}

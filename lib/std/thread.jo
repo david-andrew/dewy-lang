@@ -73,6 +73,7 @@ parallel_map[T, U] = (xs: T[], f: (T) -> U) -> U[]:
 
 # xs[i] = f(xs[i]) for every element, in parallel
 @parallel
+@keeps_length
 parallel_update[T] = (xs: mut T[], f: (T) -> T):
     n = xs.len()
     if n == 0: return

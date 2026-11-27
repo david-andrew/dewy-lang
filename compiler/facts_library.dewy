@@ -58,6 +58,17 @@ fact_library_call=(n:LibraryWord name:string):>bool=>$unsafe {
     let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
     d not=? 0 and pos_in_lib(nodes.ptr[d].pos) and name_of(LibraryWord(nodes.ptr[d].name)) =? name
 }
+# A direct call of a bundled library function marked `@keeps_length` (a reviewed contract:
+# the array it updates in place, its first argument, keeps its length). O(attributes).
+fact_keeps_length_call=(n:LibraryWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return false}
+    let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 or nodes.ptr[d].c =? 0 or not pos_in_lib(nodes.ptr[d].pos) {return false}
+    loop i in [0..nkids(LibraryWord(nodes.ptr[d].c))) {
+        if name_of(LibraryWord(nodes.ptr[kid(LibraryWord(nodes.ptr[d].c) i)].name)) =? "keeps_length" {return true}
+    }
+    false
+}
 # The exact integer prelude implementation, not another library's same-named
 # helper. Its zero-result law is used only for demanded calls below; O(1).
 fact_integer_gcd_call=(n:LibraryWord):>bool=>$unsafe {

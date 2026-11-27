@@ -20,7 +20,7 @@ from p"facts_row_queries.dewy" import (fact_incident)
 from p"facts_forgets.dewy" import (fact_drop_forget fact_drop_region fact_call_write fact_forget fact_forget_call fact_holds_contract fact_path_call_effects fact_exposed)
 from p"facts_ranges.dewy" import (fact_floor_call)
 from p"facts_arrays.dewy" import (fact_array_call)
-from p"facts_library.dewy" import (fact_library_call)
+from p"facts_library.dewy" import (fact_keeps_length_call)
 from p"facts_joins.dewy" import (fact_field_node fact_hull fact_payload_node)
 from p"facts_routes.dewy" import (fact_route fact_route_values)
 from p"facts_maps.dewy" import (fact_map_insert_call fact_map_reads_only fact_map_store_call fact_map_store_changes)
@@ -492,7 +492,7 @@ fact_changes_walk=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='lo
         }
     }
     let array=if k =? 'call' and nodes.ptr[n].aux =? 0 {fact_array_call(n)} else {0}
-    if array =? 6 or k =? 'call' and fact_library_call(n "parallel_update") {fact_permutation_change(n @s)}
+    if array =? 6 or k =? 'call' and fact_keeps_length_call(n) {fact_permutation_change(n @s)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and (fact_sequence_store_call(n) or array =? 4) {fact_sequence_store(n @s at reason)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and fact_nd_plain_store(n) {fact_nd_store(n @s at reason)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and fact_pool_call(n) =? 4 {fact_pool_store_changes(n @s)}

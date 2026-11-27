@@ -304,7 +304,7 @@ instance_attributes=(decl:int64 f:int64 zt:array<int64> use_pos:int64):>void=>$u
             let at=kid(ab i)
             let an=name_of(TypeHookWord(nodes.ptr[at].name))
             if an =? "cabi" {fns.ptr[f].cabi=true} else if an =? "parallel" {fns.ptr[f].parallel_api=true} else if an =? "deterministic" {fns.ptr[f].deterministic=true} else if an =? "noinline" {fns.ptr[f].noinline=true}
-            else if an =? "warn_if" or an =? "check_constant" or an =? "error_if" {} else if an =? "plain" {
+            else if an =? "warn_if" or an =? "check_constant" or an =? "error_if" or an =? "keeps_length" {} else if an =? "plain" {
                 # (its type arguments are copied as bytes, e.g. to the GPU)
                 loop z in zt {
                     let p=plain_problem(z)
