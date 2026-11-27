@@ -1,0 +1,30 @@
+# rename: rename files by replacing text in their names.
+#   rename .jpeg .jpg photos/a.jpeg photos/b.jpeg -n
+#   rename "IMG_" "trip-" *.png --force
+#   rename -n -- -old -new -old-notes.txt     (after `--` a word may start with -)
+import argparse
+
+Args:type = [
+    find = argparse.Positional<string>(help="the text to replace in each name")
+    replace = argparse.Positional<string>(help="what to put in its place")
+    files = argparse.Positional<array<Path>>(help="the files to rename")
+    dry_run = argparse.Flag(short='n' help="print the new names, rename nothing")
+    force = argparse.Flag(help="replace a file that already has the new name")
+]
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="rename files by replacing text in their names")
+    let renamed = 0
+    loop f in args.files {
+        if args.find not in? f.name continue
+        let target = f.with_name(f.name.replace(args.find args.replace))
+        if target.exists and not args.force {
+            printl("rename: {target} exists; --force replaces it" file=stderr)
+            continue
+        }
+        printl"{f.name} -> {target.name}"
+        if not args.dry_run f.rename(target) or_throw;
+        renamed += 1
+    }
+    if renamed =? 0 printl("rename: no file name contains {args.find}" file=stderr)
+}

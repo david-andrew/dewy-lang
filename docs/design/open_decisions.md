@@ -24,7 +24,8 @@
   - D46 Q1: `host` and `host_tuned` replace a bare processor name (`x86_64` alone becomes an error);
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
-  - D31 Q6: the prefix (`strict_`, `try_`, or per function).
+  - D31 Q6: the prefix (`strict_`, `try_`, or per function);
+  - D48 Q1: builtin types read text (`int64(text)`), and `to_int`/`to_float` go, ahead of D38.
 - **(b) New syntax or surface:**
   - D44 Q3: `$until_others_finish` for work that shouldn't keep its group alive;
   - D41 Q1–Q3: `check_cancel()`, `protect_from_cancel(limit @work)`, `task.tasks(@body)` as ordinary calls;
@@ -39,6 +40,7 @@
   - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
   - D46 Q2–Q6: CPU level or core in the processor field; version floors glued on (`mac14`); `$supported_targets` patterns; chips as libraries; C output chosen by a `.c` output name.
   - D47 Q1–Q3: `$time.monotonic = 'awake'`; readings that know their clock (`r.elapsed`, deadlines as timeouts); test clocks (`$time.clock = time.test_clock()`) that jump when everything waits.
+  - D48 Q2–Q6: argparse subcommands, `env=` fallbacks, a `check=` rule across arguments, `Parsed<Spec>`, `separator=` for lists.
 - **(c) Names only:**
   - D44 Q4, Q7: `task.cancel_request` / `task.CancelRequest`; `$no_discarded_failures`;
   - D42 Q4, Q5: `ErrorStack` or `ErrorList`; `$origin`, `$trace`, `$parts`, `$origin_at_caller`;
@@ -56,6 +58,7 @@
   - D39 Q2: `stack` and `Ragged`;
   - D46 Q7: target words (`host_tuned`, `web`, `wasi`, `sim`, core names) and `$target` members.
   - D47 Q4: test clock names (`advance`, `simulate_suspend`, `simulate_wall_step`, `simulate_monotonic_reset`, `wake_order=`).
+  - D48 Q7: `T.type_text` and the argparse names (`dispatch`, `Subcommand`, `env=`, `check=`, `Parsed`, `separator=`).
 - **Unchanged:** D30 (function types without parentheses), D32 (time zone data license) and D21 (packages).
 
 ---
@@ -1527,6 +1530,153 @@ on_crash = () => {
 ```
 
 Dogfooded (13 programs; three criteria at 4, all run-time features next to naming: CPU dispatch, C loading on musl, OS availability). Names cold-read. Full rules: [proposals/targets/round1.md](proposals/targets/round1.md).
+
+---
+
+### D48. Command-line arguments: text readers, subcommands and cross-argument rules
+
+`import argparse` reads `main`'s `argv` into a typed record (landed 2026-11-27, provisional where these questions say). Each value is read by its type's text reader `T(text)`, so `level=10` for an `int64<n => 1 <=? n and n <=? 9>` is a usage error and the field keeps its refinement. These questions settle the readers it rests on, and add what every comparable library has and Dewy's lacks: subcommands, environment fallbacks, rules across arguments and a name for the parsed record. The error name is D11 Q5's `ValidationError`, and a user type's reader is D11 Q3.
+
+#### Q1 (a). Builtin types read text
+
+```dewy
+let jobs = int64(text)              # int64 | ValidationError: "must be a whole number", "must be from … to …"
+let ratio = float64(text)           # bool(text) takes only true or false
+let level = Level(text)             # Level:type = int64<n => 1 <=? n and n <=? 9>: read, then tested
+read = <T>(text:string) => T(text)  # through a type parameter too, which argparse needs
+```
+
+Give every builtin number type and `bool` the text reader `T(text)` now, and remove `to_int` and `to_float` in the same change? `int(text max_digits=…)` keeps the digit limit, and `NotAnInteger` and `TooManyDigits` become kinds of `ValidationError`, so `??<TooManyDigits>` still works. This takes the `int(text)` rename you held for D38 (2026-11-07) early, and replaces LANGUAGE.md's "`bigint("12")` is an error".
+
+- **Rec:** yes. Generic code can't call `to_int` for an `int64` or `uint8` field, and every other type already reads through `T(text)` (convention 7). The rename changes a word, not a separator, so D38's answer can't change it. **Reversible:** yes.
+- **Unblocks:** argparse fields of any number type, `from_json<T>` and `input_field` numbers.
+- **You give up:** `to_int` and `to_float` as names.
+
+#### Q2 (b). Subcommands
+
+```dewy
+main = (argv:array<string>) => argparse.dispatch(argv about="a to-do list" [
+    add = argparse.Subcommand(AddArgs @add help="add an item")
+    list = argparse.Subcommand(ListArgs @list_items help="show the items")
+])
+# todo add "buy milk" priority=1      todo list --all      todo --help      todo add --help
+```
+
+Add subcommands as a record of `argparse.Subcommand(Spec @handler help=…)` run by `argparse.dispatch`? The first word picks the field by name, the rest is read with that spec and handed to the handler, and `dispatch` returns the handler's result. Shared options are a spec joined with `&` (`AddArgs:type = Common & [...]`). An option every command has may also come before the word, and a `Subcommand` given a table instead of a spec nests (`git remote add`).
+
+- **Rec:** yes. Without it, tools with modes fake them with a `mode` positional and one spec that accepts every option in every mode: `backup list --dry-run` is silently ignored. **Reversible:** yes.
+- **Unblocks:** tools with modes (backup, package managers, to-do lists, anything git-shaped).
+- **Considered:** `argparse.parse(AddArgs | ListArgs argv)` matched by type, which needs the result to record its spec; the table reads like a spec.
+
+#### Q3 (b). Environment fallbacks
+
+```dewy
+port = argparse.Named<Port>(default=8000 env="PORT" help="the port to listen on")
+# port=9000 on the command line, else $PORT, else 8000; PORT=abc is "PORT=abc: must be a whole number"
+```
+
+Add `env="NAME"` to `Named` and `Positional`: the command line wins, then the variable, read and checked by the same reader, then the default; help shows "(default 8000, env PORT)"?
+
+- **Rec:** yes; it is clap's `env` and click's `envvar`. By hand, `int64(env("PORT") ?? "") ?? 8000` ignores a bad value silently. **Reversible:** yes.
+
+#### Q4 (b). One rule across arguments: `check=`
+
+```dewy
+conflicts = (a:argparse.Parsed<Args>):>string | none =>
+    if a.in_place and a.out is? Path "out= and --in-place both say where to write; give one" else none
+let args = argparse.parse(Args argv check=@conflicts)   # a message is a usage error: shown with the usage, exit 2
+```
+
+Add `check=` to `parse`, `try`, `dispatch` and `Subcommand`, called after every field is read? It has the same name and shape as D11 Q2's `check=`. It replaces declarative groups (mutually exclusive, requires, at least one of): the rule is ordinary code, and its message says what's wrong.
+
+- **Rec:** yes. **Reversible:** yes.
+- **You give up:** help listing the exclusions by itself.
+
+#### Q5 (b). A name for the parsed record
+
+```dewy
+download = (url:string args:argparse.Parsed<Args>):>Path | HttpError => …   # args.jobs, args.out, …
+```
+
+Add `argparse.Parsed<Spec>`, the record type `parse` gives for a spec? Today it has no name, so a helper repeats every field's type or is generic, and `match argparse.try(…) { … args => … }` warns about the bare name.
+
+- **Rec:** yes. **Reversible:** yes.
+
+#### Q6 (b). A list in one word, when its author allows it
+
+```dewy
+columns = argparse.Named<array<int64>>(separator="," help="the columns, from 1")
+# csvcut data.csv columns=1,3        (columns=1 columns=3 still works)
+```
+
+Add `separator=","` to array fields, off by default because only the author knows its values can't contain the separator?
+
+- **Rec:** yes; it is clap's `value_delimiter`. Bracketed Dewy lists (`only=[lex parse]`) don't work unquoted: the shell splits them, and zsh rejects the brackets. **Reversible:** yes.
+
+#### Q7 (c). Names
+
+```dewy
+printl(Small.type_text)     # int64<value => 0 <? value and value <=? 16>   (Small.name is Small)
+printl(Mode.type_text)      # 'tokens' | 'ast'
+```
+
+Use `T.type_text` (replacing the provisional `T.spelling`), `argparse.dispatch`, `argparse.Subcommand`, `env=`, `check=`, `argparse.Parsed` and `separator=`?
+
+- **Rec:** yes; all read correctly cold. `spelling` failed: one reader took it as the alias name, and another hedged. `source_name`, `full_name` and `argparse.Result` (read as success-or-error) also failed. `run`/`Command`, `validate=`, `from_env=`, `Values` and `split=` passed as alternatives. **Reversible:** yes.
+
+#### Taken
+
+- An anonymous spec (`let spec = [source = … dest = …]`) with two or more positionals is a compile error. Its fields are in name order, so as landed `cp s d` read `dest=s source=d` without a word. The error says to declare it as a type.
+- `--ignore-case` names `ignore_case`; `--name=value` is accepted beside `name=value`; a valued argument given twice is an error; `-h` is reserved; an array positional takes the words later positionals don't need (`cp SRC... DEST`).
+- Flags combine (`-in`). `Flag(default=true)` is turned off by `--no-color`, which is what cold readers expected. `version=` adds `--version`.
+- Fixes found by running the programs: a flag with its own short no longer blocks another's first letter (`-i` was missing beside `invert` with `short='v'`); `--max-count 1` says "max_count takes a value: max_count=1"; an unknown name suggests the nearest; a refined integer's message and help give its range in words ("1 to 16") instead of the type text.
+
+#### The whole design in programs
+
+```dewy
+# backup create docs photos -v      backup list      backup prune keep=5 -n      BACKUP_STORE=/mnt/b backup list
+import argparse
+
+Common:type = [
+    store = argparse.Named<Path>(default=p"backups" env="BACKUP_STORE" help="where the backups live")
+    verbose = argparse.Flag(help="name each file as it is copied")
+]
+CreateArgs:type = Common & [sources = argparse.Positional<array<Path>>(help="the folders to back up")]
+ListArgs:type = Common & []
+PruneArgs:type = Common & [
+    keep = argparse.Named<int64<(>=? 1)>>(default=10 help="how many recent backups to keep")
+    dry_run = argparse.Flag(short='n' help="name what would be removed, remove nothing")
+]
+
+# (copy_tree and remove_tree: the program's own helpers over walk, copy_to, unlink and rmdir)
+needs_sources = (a:argparse.Parsed<CreateArgs>):>string | none =>
+    if a.sources.is_empty "give at least one folder" else none
+create = (a:argparse.Parsed<CreateArgs>) => {
+    let target = p"{a.store}/{today}"
+    target.make_dirs or_throw;
+    loop source in a.sources {
+        if a.verbose printl"copying {source}"
+        copy_tree(source p"{target}/{source.name}");
+    }
+}
+backups = (store:Path):>array<Path> => [loop name in (store.list ?? []).sorted p"{store}/{name}"]
+list_backups = (a:argparse.Parsed<ListArgs>) => loop b in backups(a.store) printl(b.name)
+prune = (a:argparse.Parsed<PruneArgs>) => {
+    let all = backups(a.store)
+    loop old in all[$clamp ..all.length - a.keep) {
+        printl(if a.dry_run "would remove {old.name}" else "removing {old.name}")
+        if not a.dry_run remove_tree(old);
+    }
+}
+
+main = (argv:array<string>) => argparse.dispatch(argv about="keep dated copies of folders" version="1.0.0" [
+    create = argparse.Subcommand(CreateArgs @create check=@needs_sources help="copy folders into a new backup")
+    list = argparse.Subcommand(ListArgs @list_backups help="show the backups, oldest first")
+    prune = argparse.Subcommand(PruneArgs @prune help="remove all but the newest backups")
+])
+```
+
+Dogfooded (12 programs; 4.08 as landed, 4.98 with these answers; the one 4 left is inherent: a spec holds descriptors, so its parsed record needs the second name `Parsed<…>` that clap's and Swift's derived structs don't). Names tested cold (three rounds, three readers each). Full rules, what was found by running the library, and what isn't proposed (`--name value`, `-vvv`, Dewy literals as values, completions): [proposals/argparse/round1.md](proposals/argparse/round1.md).
 
 ---
 

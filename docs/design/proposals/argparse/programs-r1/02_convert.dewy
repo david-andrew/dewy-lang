@@ -1,0 +1,42 @@
+# convert: convert a quantity between units.
+#   convert 12.5 km mi
+#   convert 451 F C places=1
+#   convert value=-40 unit=C target=F          (any positional can be named)
+import argparse
+
+Unit:type = 'km' | 'mi' | 'm' | 'ft' | 'kg' | 'lb' | 'C' | 'F' | 'K'
+
+Args:type = [
+    value = argparse.Positional<float64>(help="the amount")
+    unit = argparse.Positional<Unit>(help="its unit")
+    target = argparse.Positional<Unit>(help="the unit wanted")
+    places = argparse.Named<int64<n => 0 <=? n and n <=? 12>>(default=3 help="digits after the point")
+]
+
+# Each unit as (dimension, scale to the base unit, offset)
+Scale:type = [dimension:'length' | 'mass' | 'temperature' factor:float64 offset:float64 = 0.0]
+scale = (u:Unit):>Scale => match u {
+    'km' => Scale['length' 1000.0]
+    'mi' => Scale['length' 1609.344]
+    'm' => Scale['length' 1.0]
+    'ft' => Scale['length' 0.3048]
+    'kg' => Scale['mass' 1.0]
+    'lb' => Scale['mass' 0.45359237]
+    'C' => Scale['temperature' 1.0 273.15]
+    'F' => Scale['temperature' 5.0 / 9.0 459.67 * 5.0 / 9.0]
+    'K' => Scale['temperature' 1.0]
+}
+
+problem = (args:argparse.Parsed<Args>):>string | none => {                 # Q5, Q4
+    let a = scale(args.unit)
+    let b = scale(args.target)
+    if a.dimension not=? b.dimension "can't convert {a.dimension} ({args.unit}) to {b.dimension} ({args.target})" else none
+}
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="convert a quantity between units" check=@problem)   # Q4
+    let a = scale(args.unit)
+    let b = scale(args.target)
+    let base = args.value * a.factor + a.offset
+    printl"{fmt'.{args.places}f'((base - b.offset) / b.factor)} {args.target}"
+}

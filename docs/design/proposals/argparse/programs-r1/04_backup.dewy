@@ -1,0 +1,68 @@
+# backup: keep dated copies of folders, with one mode per command word.
+#   backup create docs photos --verbose
+#   backup list store=/mnt/disk/backups
+#   backup restore 2026-11-20 into=restored
+#   backup prune keep=5 --dry-run
+#   backup --help          (lists the commands)    backup prune --help    (prune's own usage)
+import argparse
+
+Common:type = [
+    store = argparse.Named<Path>(default=p"backups" env="BACKUP_STORE" help="where the backups live")   # Q3
+    verbose = argparse.Flag(help="name each file as it is copied")
+]
+CreateArgs:type = Common & [
+    sources = argparse.Positional<array<Path>>(help="the folders to back up")
+    label = argparse.Named<string?>(help="a note kept with the backup")
+]
+ListArgs:type = Common & []
+RestoreArgs:type = Common & [
+    name = argparse.Positional<string>(help="the backup, as `backup list` shows it")
+    into = argparse.Named<Path>(default=p"." help="where to put the files")
+    overwrite = argparse.Flag(help="replace files that already exist")
+]
+PruneArgs:type = Common & [
+    keep = argparse.Named<int64<(>=? 1)>>(default=10 help="how many recent backups to keep")
+    dry_run = argparse.Flag(short='n' help="name what would be removed, remove nothing")
+]
+
+# (copy_tree and remove_tree: the program's own helpers over `walk`, `copy_to`, `unlink` and `rmdir`)
+needs_sources = (args:argparse.Parsed<CreateArgs>):>string | none =>      # Q4, Q5
+    if args.sources.is_empty "give at least one folder" else none
+create = (args:argparse.Parsed<CreateArgs>) => {
+    let target = p"{args.store}/{today}"
+    target.make_dirs or_throw;
+    loop source in args.sources {
+        if args.verbose printl"copying {source}"
+        copy_tree(source p"{target}/{source.name}");
+    }
+    if args.label is? string p"{target}/LABEL".write_text(args.label) or_throw;
+    printl"created {target.name}"
+}
+backups = (store:Path):>array<Path> => [loop name in (store.list ?? []).sorted p"{store}/{name}"]
+list_backups = (args:argparse.Parsed<ListArgs>) => loop b in backups(args.store) printl(b.name)
+restore = (args:argparse.Parsed<RestoreArgs>) => {
+    let source = p"{args.store}/{args.name}"
+    if not source.is_dir {
+        printl("backup: no backup named {args.name}; `backup list` shows them" file=stderr)
+        exit(1)
+    }
+    loop f in source.walk or_throw {
+        let target = p"{args.into}/{f.path.remove_prefix(source.path)}"
+        if target.exists and not args.overwrite { printl"kept {target} (--overwrite replaces it)"; continue }
+        f.copy_to(target) or_throw;
+    }
+}
+prune = (args:argparse.Parsed<PruneArgs>) => {
+    let all = backups(args.store)
+    loop old in all[$clamp ..all.length - args.keep) {
+        printl(if args.dry_run "would remove {old.name}" else "removing {old.name}")
+        if not args.dry_run remove_tree(old);
+    }
+}
+
+main = (argv:array<string>) => argparse.dispatch(argv about="keep dated copies of folders" [    # Q2
+    create = argparse.Subcommand(CreateArgs @create check=@needs_sources help="copy folders into a new backup")
+    list = argparse.Subcommand(ListArgs @list_backups help="show the backups, oldest first")
+    restore = argparse.Subcommand(RestoreArgs @restore help="copy a backup's files back")
+    prune = argparse.Subcommand(PruneArgs @prune help="remove all but the newest backups")
+])

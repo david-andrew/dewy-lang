@@ -1,0 +1,26 @@
+# genpass: make random passwords or passphrases.
+#   genpass
+#   genpass length=32 count=5 --no-symbols
+#   genpass words=6 wordlist=/usr/share/dict/words
+import argparse
+
+Args:type = [
+    length = argparse.Named<int64<n => 8 <=? n and n <=? 256>>(default=20 short='l' help="characters per password")
+    count = argparse.Named<int64<n => 1 <=? n and n <=? 1000>>(default=1 short='c' help="how many to make")
+    symbols = argparse.Flag(default=true help="include punctuation")              # --no-symbols (taken)
+    digits = argparse.Flag(default=true help="include digits")                    # --no-digits
+    words = argparse.Named<int64<n => 3 <=? n and n <=? 20>?>(help="make a passphrase of this many words instead")
+    wordlist = argparse.Named<Path>(default=p"/usr/share/dict/words" help="where passphrase words come from")
+]
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="make random passwords")
+    let alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        + (if args.digits "0123456789" else "")
+        + (if args.symbols "!#$%&*+-=?@^_" else "")
+    let dictionary = if args.words is? int64 (args.wordlist.read_text or_throw).lines else []
+    loop _ in [0..args.count) {
+        if args.words is? int64 printl([loop _ in [0..args.words) dictionary[secure_random_below(dictionary.length)]].join("-"))
+        else printl([loop _ in [0..args.length) alphabet[secure_random_below(alphabet.length)]].join(""))
+    }
+}

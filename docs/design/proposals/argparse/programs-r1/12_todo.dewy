@@ -1,0 +1,39 @@
+# todo: a to-do list in a text file.
+#   todo add "buy milk" priority=2
+#   todo list --all
+#   todo done 3
+#   TODO_FILE=work.txt todo list
+import argparse
+
+Common:type = [file = argparse.Named<Path>(default=p"todo.txt" env="TODO_FILE" help="the list")]       # Q3
+AddArgs:type = Common & [
+    text = argparse.Positional<string>(help="what to do")
+    priority = argparse.Named<int64<n => 1 <=? n and n <=? 3>>(default=2 short='p' help="1 is most urgent")
+]
+ListArgs:type = Common & [all = argparse.Flag(help="include finished items")]
+DoneArgs:type = Common & [number = argparse.Positional<int64<(>=? 1)>>(help="the item, as `todo list` numbers it")]
+
+Item:type = [done:bool priority:int64 text:string]
+load = (file:Path):>array<Item> => [loop line in file.read_text ?? "" .lines {
+    let parts = line.split("\t")
+    if parts.length =? 3 Item[parts[0] =? "x" (int64(parts[1]) ?? 2) parts[2]]      # Q1
+}]
+save = (file:Path items:array<Item>) =>
+    file.write_text([loop i in items "{if i.done "x" else "-"}\t{i.priority}\t{i.text}\n"].join("")) or_throw;
+
+add = (a:argparse.Parsed<AddArgs>) => save(a.file [load(a.file)... Item[false a.priority a.text]])        # Q5
+list_items = (a:argparse.Parsed<ListArgs>) => loop n in 1.. and i in load(a.file) {
+    if a.all or not i.done printl"{n}. {if i.done "[x]" else "[ ]"} (p{i.priority}) {i.text}"
+}
+finish = (a:argparse.Parsed<DoneArgs>) => {
+    let items = load(a.file)
+    if a.number >? items.length { printl("todo: there is no item {a.number}" file=stderr); exit(1) }
+    items[a.number - 1].done = true
+    save(a.file items)
+}
+
+main = (argv:array<string>) => argparse.dispatch(argv about="a to-do list" [                     # Q2
+    add = argparse.Subcommand(AddArgs @add help="add an item")
+    list = argparse.Subcommand(ListArgs @list_items help="show the items")
+    done = argparse.Subcommand(DoneArgs @finish help="mark an item finished")
+])

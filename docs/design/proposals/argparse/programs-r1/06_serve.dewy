@@ -1,0 +1,36 @@
+# serve: serve a folder over HTTP for local testing (the http calls are illustrative).
+#   serve
+#   serve site port=9000 --open
+#   PORT=3000 serve public log=full --no-cache
+import argparse
+
+Port:type = int64<n => 1 <=? n and n <=? 65535>
+
+Args:type = [
+    root = argparse.Positional<Path>(default=p"." help="the folder to serve")
+    port = argparse.Named<Port>(default=8000 env="PORT" short='p' help="the port to listen on")     # Q3
+    host = argparse.Named<string>(default="127.0.0.1" env="HOST" help="the address to listen on; 0.0.0.0 for every interface")
+    open = argparse.Flag(help="open the page in a browser")
+    cache = argparse.Flag(default=true help="let browsers cache files")          # --no-cache (taken)
+    log = argparse.Named<'none' | 'short' | 'full'>(default='short' help="what to print per request")
+]
+
+not_a_folder = (args:argparse.Parsed<Args>):>string | none =>                # Q4, Q5
+    if args.root.is_dir none else "{args.root} is not a folder"
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="serve a folder over HTTP" version="1.4.0" check=@not_a_folder)   # --version (taken)
+    let server = http.listen(args.host args.port) or_throw
+    printl"serving {args.root} at http://{args.host}:{args.port}/"
+    if args.open open_in_browser("http://{args.host}:{args.port}/");
+    loop request in server.requests {
+        let file = args.root.contained(request.path) ?? { request.respond(404); continue }
+        let headers = if args.cache [] else ["Cache-Control" -> "no-store"]
+        request.respond_file(file headers=headers);
+        match args.log {
+            'none' => {}
+            'short' => printl"{request.method} {request.path}"
+            'full' => printl"{now} {request.peer} {request.method} {request.path} {request.headers}"
+        }
+    }
+}

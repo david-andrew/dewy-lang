@@ -1,0 +1,37 @@
+# logq: filter JSON-lines logs by level, age and text, and print chosen fields.
+#   logq app.log level=warn
+#   logq app.log old.log since=2hour show=time,message --json
+#   logq app.log has=timeout has=refused -c
+import argparse
+
+Level:type = 'debug' | 'info' | 'warn' | 'error'
+LogLine:type = [time:Instant level:Level message:string]
+
+Args:type = [
+    files = argparse.Positional<array<Path>>(help="the log files")
+    level = argparse.Named<Level>(default='info' help="the lowest level shown")
+    since = argparse.Named<Duration?>(help="only entries newer than this, like 2hour or 30minute")
+    has = argparse.Named<array<string>>(help="only entries whose message contains every one of these")
+    show = argparse.Named<array<'time' | 'level' | 'message'>>(default=['time' 'level' 'message'] separator="," help="the fields to print")   # Q6
+    json = argparse.Flag(help="print each entry as JSON")
+    count = argparse.Flag(help="print only how many entries match")
+]
+
+rank = (l:Level):>int64 => members(Level).index_of(l) ?? 0
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="filter JSON-lines logs")
+    let cutoff = if args.since is? Duration now.wall - args.since else none
+    let shown = 0
+    loop file in args.files loop line in (file.read_text or_throw).lines {
+        let entry = from_json<LogLine>(line) ?? continue
+        if rank(entry.level) <? rank(args.level) continue
+        if cutoff is? Instant and entry.time <? cutoff continue
+        if not args.has.all((w:string) => w in? entry.message) continue
+        shown += 1
+        if args.count continue
+        if args.json printl(to_json(entry))
+        else printl([loop f in args.show match f { 'time' => "{entry.time}"  'level' => entry.level  'message' => entry.message }].join("  "))
+    }
+    if args.count printl(shown)
+}

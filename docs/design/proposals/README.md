@@ -37,5 +37,6 @@ These folders record, for each design decision, what was considered and why one 
 | [generators/](generators/) | Generators from `lazy` with no `yield`: one value per advance, `@g` pauses and `g` ends a generator, cleanup and `defer` in lazy bodies, cancellation | David's sketch, an audit against existing decisions, rounds 1–4, 13 paired dogfood programs, two independent reviews, a soundness review, cold reads; `round4.md` is the latest delta. Open (D45). |
 | [database/](database/) | Native typed storage, selectors, transactions and SQL interoperability | Round 4 is current; descriptor v1 and future-lambda comparison. Core cold read flags `related` for renaming. Open (D43). |
 | [function-inspection/](function-inspection/) | Compile-time typed function descriptions with original execution as fallback | Rounds 1–3 and review; database-filter pilot only, broader consumers deferred. Shared-budget must-fix recorded; names have not been cold-read. Open (D43 Q2). |
+| [argparse/](argparse/) | Command-line arguments: text readers, subcommands, environment fallbacks, rules across arguments | Round 1: the landed library's provisional choices, 12 dogfood programs (`programs-r1/`), three cold reads. Open (D48). |
 
 The earliest time-design inputs were built from David's private notes and are kept outside the repo.

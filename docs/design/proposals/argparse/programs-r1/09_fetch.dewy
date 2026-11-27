@@ -1,0 +1,39 @@
+# fetch: download URLs into a folder, several at a time.
+#   fetch https://example.org/a.zip https://example.org/b.zip
+#   fetch urls... jobs=8 retries=5 out=downloads -q
+#   fetch urls... --verbose --quiet       (an error: they contradict)
+import argparse
+
+Args:type = [
+    urls = argparse.Positional<array<string>>(help="what to download")
+    out = argparse.Named<Path>(default=p"." short='o' help="the folder to save into")
+    jobs = argparse.Named<int64<n => 1 <=? n and n <=? 64>>(default=4 short='j' help="downloads at once")
+    retries = argparse.Named<int64<n => 0 <=? n and n <=? 20>>(default=3 help="tries after a failure")
+    quiet = argparse.Flag(help="print only failures")
+    verbose = argparse.Flag(help="print every attempt")
+]
+
+contradiction = (a:argparse.Parsed<Args>):>string | none =>               # Q4, Q5
+    if a.quiet and a.verbose "--quiet and --verbose contradict each other" else none
+
+download = (url:string args:argparse.Parsed<Args>):>Path | HttpError => {
+    let target = p"{args.out}/{url.split("/").last ?? "index.html"}"
+    loop attempt in [1..args.retries + 1] {
+        if args.verbose printl"{url}: try {attempt}"
+        match http.get_bytes(url) {
+            body:array<uint8> => return target.write_bytes(body) or_throw
+            e:HttpError => if attempt >? args.retries return e
+        }
+    }
+}
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="download files" check=@contradiction)
+    let results = parallel_map(args.urls limit=args.jobs (url:string) => download(url args))
+    let failed = 0
+    loop url in args.urls and r in results match r {
+        saved:Path => if not args.quiet printl"saved {saved}"
+        e:HttpError => { failed += 1; printl("{url}: {e.message}" file=stderr) }
+    }
+    if failed >? 0 exit(1)
+}

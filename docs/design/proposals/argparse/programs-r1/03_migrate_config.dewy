@@ -1,0 +1,55 @@
+# migrate-config: rewrite a settings file from one format version to the next.
+#   migrate-config app.toml --dry-run
+#   migrate-config app.toml out=app.v3.toml to=3
+#   migrate-config app.toml --in-place --backup
+import argparse
+
+Version:type = int64<n => 1 <=? n and n <=? 3>
+
+Args:type = [
+    input = argparse.Positional<Path>(help="the settings file")
+    to = argparse.Named<Version>(default=3 help="the format version to write")
+    out = argparse.Named<Path?>(short='o' help="where to write; standard output if neither this nor --in-place")
+    in_place = argparse.Flag(help="replace the input file")
+    backup = argparse.Flag(help="keep the original as FILE.bak (with --in-place)")
+    dry_run = argparse.Flag(short='n' help="report what would change, write nothing")
+]
+
+conflicts = (a:argparse.Parsed<Args>):>string | none => {                 # Q4, Q5
+    if a.in_place and a.out is? Path return "out= and --in-place both say where to write; give one"
+    if a.backup and not a.in_place return "--backup only applies with --in-place"
+    none
+}
+
+upgrade = (lines:array<string> current:Version wanted:Version):>array<string> => {
+    let out = lines.copy
+    if current <? 2 and wanted >=? 2 out = [loop l in out l.replace("listen_port" "port")]
+    if current <? 3 and wanted >=? 3 out = [loop l in out if not l.startswith("legacy_") l]
+    out
+}
+
+version_of = (lines:array<string>):>Version => {
+    loop l in lines if l.startswith("version = ") return Version(l[$clamp 10..]) ?? 1
+    1
+}
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="upgrade a settings file" check=@conflicts)
+    let lines = (args.input.read_text or_throw).lines
+    let current = version_of(lines)
+    if current >=? args.to {
+        printl"{args.input.name} is already version {current}"
+        return
+    }
+    let text = upgrade(lines current args.to).join("\n")
+    if args.dry_run {
+        printl"would upgrade {args.input.name} from version {current} to {args.to}"
+        return
+    }
+    if args.in_place {
+        if args.backup args.input.copy_to(p"{args.input}.bak") or_throw;
+        args.input.write_text(text) or_throw;
+    } else if args.out is? Path {
+        args.out.write_text(text) or_throw;
+    } else printl(text)
+}

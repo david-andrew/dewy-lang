@@ -1,0 +1,44 @@
+# find: print the lines of files that contain a text (a small grep).
+#   find TODO src/a.dewy src/b.dewy -in
+#   find error max_count=5 -l app.log old.log
+#   cat app.log | find --count warn
+# Runs on the library as landed except `-i` and the combined `-in` (both taken: see round1.md).
+import argparse
+
+Args:type = [
+    text = argparse.Positional<string>(help="the text to look for")
+    files = argparse.Positional<array<Path>>(help="files to search; none reads standard input")
+    ignore_case = argparse.Flag(help="match in any case")                     # -i
+    line_numbers = argparse.Flag(short='n' help="show line numbers")
+    count = argparse.Flag(help="print only how many lines match")             # -c
+    invert = argparse.Flag(short='v' help="print the lines that don't match")
+    files_only = argparse.Flag(short='l' help="print only the names of files with a match")
+    max_count = argparse.Named<int64<(>=? 1)>?>(short='m' help="stop after this many matching lines")
+]
+
+Source:type = [name:string text:string]
+
+matches = (line:string text:string ignore_case:bool):>bool =>
+    if ignore_case text.lower in? line.lower else text in? line
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="print the lines that contain a text")
+    let sources = if args.files.is_empty [Source["-" read_stdin() or_throw]] else [loop f in args.files Source[f.name f.read_text or_throw]]
+    let found = 0
+    loop source in sources {
+        let lines = source.text.lines
+        loop number in 1.. and line in lines {
+            if matches(line args.text args.ignore_case) =? args.invert continue
+            found += 1
+            if args.files_only { printl(source.name); break }
+            if not args.count {
+                let where = if args.line_numbers "{number}:" else ""
+                let file = if sources.length >? 1 "{source.name}:" else ""
+                printl"{file}{where}{line}"
+            }
+            if args.max_count is? int64 and found >=? args.max_count break
+        }
+    }
+    if args.count printl(found)
+    if found =? 0 exit(1)
+}

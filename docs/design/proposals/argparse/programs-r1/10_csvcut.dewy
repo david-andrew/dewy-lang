@@ -1,0 +1,32 @@
+# csvcut: print chosen columns of a CSV file.
+#   csvcut data.csv columns=1,3
+#   csvcut data.csv -c=name,email sep=tab --no-header
+#   csvcut columns=2 < data.csv
+import argparse
+
+Separator:type = 'comma' | 'tab' | 'semicolon' | 'pipe'
+
+Args:type = [
+    file = argparse.Positional<Path?>(help="the CSV file; standard input if left out")
+    columns = argparse.Named<array<string>>(short='c' separator="," help="column numbers (from 1) or header names")   # Q6
+    sep = argparse.Named<Separator>(default='comma' help="what separates fields")
+    header = argparse.Flag(default=true help="the first row names the columns")    # --no-header (taken)
+]
+
+char_of = (s:Separator):>string => match s { 'comma' => ","  'tab' => "\t"  'semicolon' => ";"  'pipe' => "|" }
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="print chosen columns of a CSV file")
+    let text = if args.file is? Path args.file.read_text or_throw else read_stdin() or_throw
+    let rows = [loop line in text.lines line.split(char_of(args.sep))]
+    if rows.is_empty return
+    let names = if args.header rows[0] else []
+    let picks = [loop c in args.columns {
+        match int64(c) {                                              # Q1: a text reader
+            n:int64 => n - 1
+            _ => names.index_of(c) ?? { printl("csvcut: no column {c}" file=stderr); exit(2) }
+        }
+    }]
+    let wanted = if picks.is_empty [0..rows[0].length) else picks
+    loop row in rows printl([loop i in wanted row.get(i) ?? ""].join(char_of(args.sep)))
+}

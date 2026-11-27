@@ -1,0 +1,37 @@
+# bench: run benchmark programs and report the median time of each.
+#   bench build/lex build/parse
+#   bench build/* runs=20 warmup=2 only=lex,parse --json
+#   BENCH_RUNS=50 bench build/lex timeout=2minute
+import argparse
+
+Args:type = [
+    programs = argparse.Positional<array<Path>>(help="the benchmark programs to run")
+    runs = argparse.Named<int64<n => 1 <=? n and n <=? 10000>>(default=10 env="BENCH_RUNS" help="timed runs of each")   # Q3
+    warmup = argparse.Named<int64<n => 0 <=? n and n <=? 100>>(default=1 help="untimed runs first")
+    only = argparse.Named<array<string>>(separator="," help="run only programs whose names contain one of these")   # Q6
+    timeout = argparse.Named<Duration>(default=60s help="give up on one run after this long")
+    json = argparse.Flag(help="print JSON instead of a table")
+]
+
+Result:type = [name:string median:Duration runs:int64 failed:bool]
+
+time_one = (program:Path limit:Duration):>Duration | 'failed' => {
+    let start = now
+    match within(limit @run(program [])) {
+        s:ExitStatus => if s.code =? 0 now - start else 'failed'
+        _ => 'failed'
+    }
+}
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="time benchmark programs")
+    let chosen = [loop prog in args.programs if args.only.is_empty or args.only.any((w:string) => w in? prog.name) prog]
+    let results = [loop prog in chosen {
+        loop _ in [0..args.warmup) time_one(prog args.timeout);
+        let times = [loop _ in [0..args.runs) time_one(prog args.timeout)]
+        let good = [loop t in times if t is? Duration t].sorted
+        Result[prog.name (if good.is_empty 0s else good[good.length // 2]) good.length good.length <? times.length]
+    }]
+    if args.json printl(to_json(results))
+    else loop r in results printl"{fmt'<24'(r.name)} {fmt'>10'(r.median)}{if r.failed "  (some runs failed)" else ""}"
+}
