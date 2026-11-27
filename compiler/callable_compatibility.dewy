@@ -1,13 +1,15 @@
 $runtime_checks
 from p"checked_expression_nodes.dewy" import (type_node_of)
-from p"ast.jo" import (mk nkids nodes set_list)
+from p"ast.jo" import (NF_MUT has_flag kid kids mk nkids nodes set_list)
+from p"checker_source_positions.dewy" import (dewy_at)
+from p"coercion_queries.dewy" import (can_coerce)
 from p"checker_expr.dewy" import (check_expr)
 from p"checks_builders.dewy" import (bc_block bc_ident bc_stmt)
 from p"checks_thin_expr.dewy" import (is_fn_type)
 from p"effect_contracts.dewy" import (callable_base effect_contract_fits)
 from p"ownership_types.dewy" import (ownership_callable_cap)
 from p"refine_rare.dewy" import (refine_implies)
-from p"types.jo" import (T_NEVER is_union prune targ type_eq types union_members)
+from p"types.jo" import (T_NEVER is_union prune targ tkind type_eq types union_members)
 from p"util.jo" import (intern)
 
 CallableCompatWord:type=int64<overflow='wrap'>
@@ -90,4 +92,29 @@ fn_adapter=(n:CallableCompatWord et:CallableCompatWord expected:CallableCompatWo
     nodes[lam].b=int32(bc_block([bc_stmt(call pos)] pos))
     nodes[n]=nodes[lam]
     check_expr(n expected)
+}
+
+# A lambda parameter written wider than the expected one (`(r:int) => ...` where an
+# int64 is passed) takes the expected type and converts on entry, as `@f` does
+# (fn_adapts): by value, unrefined, not a function, in the program's own code.
+lambda_param_widens=(p:CallableCompatWord at:CallableCompatWord want:CallableCompatWord mutable:bool):>bool=>{
+    not mutable and not has_flag(p NF_MUT) and dewy_at(nodes[p].pos) and tkind(at) not=? 'refined' and tkind(want) not=? 'refined' and not is_fn_type(at) and not is_fn_type(want) and can_coerce(0 want at)
+}
+# `(r:int) => body` becomes `($wide0) => { let r:int = $wide0; body }`; O(body statements).
+lambda_widen_param=(lam:CallableCompatWord i:CallableCompatWord):>void=>{
+    let p=kid(lam i)
+    let pos=nodes[p].pos
+    let hidden="$wide{i}"
+    let d=mk('vardecl' pos)
+    nodes[d].name=nodes[p].name
+    nodes[d].a=nodes[p].a
+    nodes[d].b=int32(bc_ident(hidden pos))
+    nodes[p].name=int32(intern(hidden))
+    nodes[p].a=0
+    let body=CallableCompatWord(nodes[lam].b)
+    if nodes[body].kind =? 'block' {
+        let stmts:array<int64>=[d]
+        loop st in kids(body) {stmts.push(st)}
+        set_list(body stmts)
+    } else {nodes[lam].b=int32(bc_block([d bc_stmt(body pos)] pos))}
 }

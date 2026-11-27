@@ -100,7 +100,11 @@ xm_lambda=(lam:XMWord expected:XMWord):>XMWord=>$unsafe {
         let pt:XMWord=0
         if xm_nodes[0].ptr[p].a not=? 0 {
             pt=ct_resolve_type(XMWord(xm_nodes[0].ptr[p].a))
-            if et not=? 0 and not tu_unify(pt xm_targ(et i)) {xm_host[0].error(p 2 pt xm_targ(et i))}
+            if et not=? 0 and not tu_unify(pt xm_targ(et i)) {
+                # (wider than expected: the host converts it on entry, or rejects it)
+                xm_host[0].error(lam 2 i et)
+                pt=xm_targ(et i)
+            }
         } else if et not=? 0 {pt=xm_targ(et i)}
         else {xm_host[0].error(p 3 i 0)}
         if XMWord(xm_nodes[0].ptr[p].flags) & 1 not=? 0 {mm=mm | (1 << i)}

@@ -450,6 +450,10 @@ main = () => {
 }
 ```
 
+A function value or lambda whose parameter accepts the expected argument by an
+implicit conversion stands in for it, converting on entry: `xs.sort(key=(r:int) => -r)`
+sorts an `array<int64>`. A `@` parameter's type must match exactly.
+
 `@f(args)` partially evaluates `f`: the arguments are evaluated now, and the
 result is a function of the remaining parameters. Every argument group in an
 ungrouped `@` chain partially evaluates (`@sum(1)(2)`); parentheses end the

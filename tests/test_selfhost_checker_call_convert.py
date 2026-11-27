@@ -32,6 +32,7 @@ find_variant = (s: int, name: int) -> int: name - 1
 array_has_spread = (a: int) -> bool: false
 literal_union_member = (n: int, expected: int) -> int: 0
 lambda_member = (n: int, expected: int) -> int: expected
+lambda_param_widens = (p: int, at: int, want: int, mutable: bool) -> bool: false
 function_member = (expected: int, count: int = -1) -> int: 0
 fixed_literal_ok = (a: int, t: int) -> bool: nkids(a) == int(types[t].bits)
 is_map_type = (t: int) -> bool: tkind(t) == .struct_ and types[t].bits == 91

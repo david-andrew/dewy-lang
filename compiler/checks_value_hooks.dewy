@@ -13,7 +13,7 @@ from p"ast.jo" import (NF_BROADCAST NF_CABI NF_CHECKED NF_COMPREHENSION NF_MUT N
 from p"check.jo" import (FK_LAMBDA assign_root fns spread_calls syms target_arm64 target_wasm)
 from p"checker_node_marks.dewy" import (node_mark)
 from p"checker_lambda_body.dewy" import (check_lambda_body)
-from p"checks_thin.dewy" import (jd new_inst zonk_tree)
+from p"checks_thin.dewy" import (jd new_inst resolve_type zonk_tree)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checker_sinks.dewy" import (sink_values_use)
 from p"checker_types.dewy" import (TK)
@@ -28,7 +28,7 @@ from p"call_argument_checks.dewy" import (unnamed)
 from p"call_lookup_context.dewy" import (ci)
 from p"aggregate_sources.dewy" import (dewy_classify_spread dewy_spread_source_type fixed_literal literal_union_member values_spread_call)
 from p"numeric_library_types.dewy" import (bundled_bigint_type is_nd)
-from p"callable_compatibility.dewy" import (lambda_member)
+from p"callable_compatibility.dewy" import (lambda_member lambda_param_widens lambda_widen_param)
 from p"operator_lookup.dewy" import (op_overload)
 from p"soa_helpers.dewy" import (check_soa_method)
 from p"expr_rare.dewy" import (check_matrix dewy_record_spread_entries)
@@ -44,7 +44,7 @@ from p"refine_metadata.dewy" import (is_total_dict representation_type ref_valid
 from p"refine_rare.dewy" import (total_literal_check)
 from p"reflect_ops.dewy" import (reflect_name reflect_record)
 from p"sibling_ops.dewy" import (sibling_index_narrow)
-from p"types.jo" import (T_BOOL T_MATH_INT has_var is_int prune struct_targ structs tkind types)
+from p"types.jo" import (T_BOOL T_MATH_INT has_var is_int prune struct_targ structs targ tkind types)
 from p"type_ops.dewy" import (dt is_soa is_values mk_array mk_tuple)
 from p"units.jo" import (quantity_unary_literal)
 from p"unit_ops.dewy" import (quantity_constant quantity_unary)
@@ -108,7 +108,17 @@ lambda_verify=(t:int64 expected:int64 lam:int64):>void=>$unsafe {
 }
 lambda_error=(n:int64 code:int64 a:int64 b:int64):>void=>$unsafe {
     if code =? 1 {fatal(nodes.ptr[n].pos "lambda has {a} parameter(s) but {b} are expected")}
-    if code =? 2 {fatal(nodes.ptr[n].pos "parameter type {dt(a)} does not match expected {dt(b)}")}
+    # (parameter a of lambda n, written other than b's: a wider one converts on entry)
+    if code =? 2 {
+        let p=kid(n a)
+        let at=resolve_type(ValueHookWord(nodes.ptr[p].a))
+        let want=targ(b a)
+        if lambda_param_widens(p at want ValueHookWord(types.ptr[b].mutmask) & (1 << a) not=? 0) {
+            lambda_widen_param(n a)
+            return
+        }
+        fatal(nodes.ptr[p].pos "parameter type {dt(at)} does not match expected {dt(want)}")
+    }
     if code =? 3 {
         let pn=name_of(ValueHookWord(nodes.ptr[n].name))
         if a =? 0 and (pn =? "self" or pn =? "this") {
@@ -208,7 +218,7 @@ intrinsic_error=(n:int64 code:int64 t:int64):>void=>$unsafe {
     if code =? 2 {fatal(nodes.ptr[n].pos "push adds one value: for several, {jd(nodes.ptr[n].pos "`xs.extend([1, 2, 3])`" "`xs.extend([1 2 3])`")}")}
     if code =? 3 {fatal(nodes.ptr[n].pos "push() needs an array, found {dt(t)}")}
     if code =? 4 {fatal(nodes.ptr[n].pos "pop() needs an array")}
-    if code =? 5 {
+    if code =? 2 {
         if types.ptr[t].kind =? 'str_' or is_int(t) {fatal(nodes.ptr[n].pos "clear() of the screen takes a color: `clear(rgb(1, 0, 0))`, or from hex digits `clear(hex(\"#ff0000\"))`")}
         fatal(nodes.ptr[n].pos "clear() needs an array")
     }

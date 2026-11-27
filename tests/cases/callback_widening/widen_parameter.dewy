@@ -1,0 +1,13 @@
+# quick
+# A callback parameter wider than the expected one converts on entry
+let xs:array<int64> = [3 1 2]
+xs.sort(key=(r:int) => -r)
+printl(xs)
+apply = (f:(int64:>int) v:int64):>int => f(v)
+printl(apply((r:int) => r * 2 5))
+apply32 = (f:(int32:>int) v:int32):>int => f(v)
+printl(apply32((r:int64) => r * 3 5))
+printl(apply32((r:int64?) => (r ?? 0) + 1 5))
+pair = (f:((int64 int32):>int) a:int64 b:int32):>int => f(a b)
+printl(pair((a:int b:int64) => a * b 6 7))
+printl([3 1 2].sorted(key=(r:int) => -r))

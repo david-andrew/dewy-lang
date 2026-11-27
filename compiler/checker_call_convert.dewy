@@ -23,7 +23,7 @@ from p"numeric_branch_queries.dewy" import (branch_numeric)
 from p"record_construction.dewy" import (dewy_record_target)
 from p"character_literals.dewy" import (charlike)
 from p"literal_number_forms.dewy" import (decimal_literal_tree word_rational_source)
-from p"callable_compatibility.dewy" import (function_member lambda_member)
+from p"callable_compatibility.dewy" import (function_member lambda_member lambda_param_widens)
 from p"literal_context.dewy" import (call_refined_literal_cost)
 from p"enum_expressions.dewy" import (find_variant variant_enum)
 from p"callable_checks.dewy" import (fn_value_adapts)
@@ -255,14 +255,18 @@ arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
             if pk =? 'callable' {p=callable_base(p); pk=types.ptr[p].kind}
             if pk not=? 'fn_' or CVWord(types.ptr[p].nargs) not=? nkids(a) {return -1}
             if has_flag(a NF_GENERIC) {return 0}
+            let widened:CVWord=0
             loop i in [0..nkids(a)) {
                 let pn=kid(a i)
                 if nodes.ptr[pn].a =? 0 {continue}
                 let at:CVWord=prune(resolve_type(CVWord(nodes.ptr[pn].a)))
                 let pt:CVWord=prune(targ(p i))
-                if not has_var(at) and not has_var(pt) and not type_eq(at pt) {return -1}
+                if not has_var(at) and not has_var(pt) and not type_eq(at pt) {
+                    if not lambda_param_widens(pn at pt CVWord(types.ptr[p].mutmask) & (1 << i) not=? 0) {return -1}
+                    widened=1
+                }
             }
-            return 0
+            return widened
         }
         if k =? 'call' and call_waits_hook(a) not=? 0 {return 1}
         if k =? 'dotname' or k =? 'call' {
