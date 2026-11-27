@@ -3,7 +3,7 @@ from p"coerce_expression.dewy" import (coerce)
 from p"checker_global_initialization.dewy" import (ensure_global)
 from p"expression_types.dewy" import (ntype)
 
-from p"ast.jo" import (NF_AT NF_CHECKED NF_GLOBAL NF_MUT has_flag kid kid_c kid_d kids kids2 nkids nodes)
+from p"ast.jo" import (NF_AT NF_CHECKED NF_EXCL_FIRST NF_GLOBAL NF_JUXT NF_MUT has_flag kid kid_c kid_d kids kids2 nkids nodes)
 from p"check.jo" import (LF_CAPTURE globals locals modules statement_watch syms)
 from p"checker_expr.dewy" import (lookup)
 from p"checked_eval.dewy" import (cx_token)
@@ -24,7 +24,8 @@ tk_literal_unit=(e:TempWord):>TempWord=>$unsafe {
     if e =? 0 or has_flag(e NF_CHECKED) {return 0}
     let k=nodes.ptr[e].kind
     if k =? 'unary' and nodes.ptr[e].op =? int32(59) {return tk_literal_unit(TempWord(nodes.ptr[e].a))}
-    if k not=? 'binary' or nodes.ptr[e].op not=? int32(60) {return 0}
+    # (written next to its number: `20*°C` is a product, a point)
+    if k not=? 'binary' or nodes.ptr[e].op not=? int32(60) or not has_flag(e NF_JUXT) {return 0}
     let x=nodes.ptr[TempWord(nodes.ptr[e].a)].kind
     let u=TempWord(nodes.ptr[e].b)
     if (x not=? 'int_lit' and x not=? 'float_lit') or nodes.ptr[u].kind not=? 'ident' {return 0}

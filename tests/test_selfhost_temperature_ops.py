@@ -14,6 +14,8 @@ const NF_AT = 1
 const NF_CHECKED = 2
 const NF_GLOBAL = 4
 const NF_MUT = 8
+const NF_EXCL_FIRST = 16
+const NF_JUXT = 16
 const LF_CAPTURE = 1
 const T_PLAIN = 1
 const T_POINT = 2
@@ -128,7 +130,10 @@ neg = (a: int) -> int:
     n = fresh(.unary)
     nodes[n].op = i32(int(Tok.minus)); nodes[n].a = i32(a)
     n
-temp = (v: int, unit: int) -> int: bin(.star, ilit(v), ident(unit))
+juxt = (n: int) -> int:
+    nodes[n].flags = i32(int(nodes[n].flags) | NF_JUXT)
+    n
+temp = (v: int, unit: int) -> int: juxt(bin(.star, ilit(v), ident(unit)))
 assign = (op: Tok, a: int, b: int) -> int:
     n = fresh(.assign)
     nodes[n].op = i32(int(op)); nodes[n].a = i32(a); nodes[n].b = i32(b)
@@ -178,7 +183,7 @@ main = ():
     g_l = bind_global(LENGTH, T_LENGTH, 2, fresh(.vardecl))
     print("{g_c} {g_k} {g_l}")
     # Literals and units.
-    loop e in [0, checked(temp(1, CELSIUS), T_POINT), temp(20, CELSIUS), neg(temp(5, CELSIUS)), bin(.star, flit(1.5), ident(CELSIUS)), bin(.star, ident(1), ident(CELSIUS)), bin(.star, ilit(2), ilit(3)), bin(.plus, ilit(2), ident(CELSIUS)), ident(1), neg(ident(1))]:
+    loop e in [0, checked(temp(1, CELSIUS), T_POINT), temp(20, CELSIUS), neg(temp(5, CELSIUS)), juxt(bin(.star, flit(1.5), ident(CELSIUS))), bin(.star, ilit(20), ident(CELSIUS)), bin(.star, ident(1), ident(CELSIUS)), bin(.star, ilit(2), ilit(3)), bin(.plus, ilit(2), ident(CELSIUS)), ident(1), neg(ident(1))]:
         print(tk_literal_unit(e))
     bound = bind_global(73, T_NO_ORIGIN, 2, fresh(.vardecl))
     print(bound)
