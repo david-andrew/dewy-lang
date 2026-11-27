@@ -30,8 +30,6 @@ HINTS = {
     'csv': '`csv_rows(text)` is there without an import',
     'collections': 'maps start missing keys at zero (`counts[w] += 1`); `sorted_by`, `unique`, `group_by`',
     'subprocess': '`run_program("ls", ["-l"])` (its exit code and output)',
-    'argparse': 'a struct of the options (`verbose = false`, `out = "a.txt"`, `files: str[]`), then '
-                '`opts = parse_args[Options]("what it does")`',
     'hashlib': '`sha256(text_or_bytes)` is there without an import (as hex digits)',
 }
 
@@ -188,7 +186,7 @@ def test_selfhost_module_paths_ship_dewy(compiler, tmp_path):
     main.write_text('from p"./x/../sub/helper.dewy" import f\nmain=():>void=>printl(f())\n')
     ran = subprocess.run([compiler, 'run', main], capture_output=True, text=True, timeout=60)
     assert ran.returncode == 0 and ran.stdout == '42\n', ran.stdout + ran.stderr
-    main.write_text('import argparse\nmain=():>void=>printl(1)\n')
+    main.write_text('import hashlib\nmain=():>void=>printl(1)\n')
     checked = subprocess.run([compiler, 'check', main], capture_output=True, text=True, timeout=60)
     assert checked.returncode != 0
-    assert "cannot find module 'argparse': a struct of the options" in checked.stdout + checked.stderr
+    assert "cannot find module 'hashlib': `sha256(text_or_bytes)`" in checked.stdout + checked.stderr

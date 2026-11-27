@@ -1,56 +1,22 @@
 # Tier 6 / 140 / milestone 1
 # Acceptance: A `wc`-plus-frequency command-line tool. Options follow the
 # decided argparse convention (`name=value`, `--flag`, `-f`, `--` ends
-# options) through a hand-written scanner until that library exists. Each
+# options), read by the argparse library into a typed record. Each
 # named file is read as text: a missing one is reported on standard error and
 # skipped, and the run goes on. It prints per-file line, word and byte counts,
 # the longest line, the most frequent words (ties alphabetical), writes the
 # same table as tab-separated text to `out=`, and reads it back to check it.
 
+import argparse
+
 Options:type = [
-    files:array<string>
-    top:int64 = 5
-    min_length:int64 = 1
-    ignore_case:bool = false
-    exclude:set<string>
-    out:string? = none
+    files = argparse.Positional<array<string>>(help="the files to count")
+    top = argparse.Named<int64<n => 1 <=? n and n <=? 1000>>(default=5 help="how many words to list")
+    min_length = argparse.Named<int64<n => 1 <=? n and n <=? 80>>(default=1 help="the shortest word counted")
+    ignore_case = argparse.Flag(help="count words in any case together")
+    exclude = argparse.Named<string>(default="" help="words left out, comma-separated")
+    out = argparse.Named<string?>(help="also write the table here, tab-separated")
 ]
-
-UsageError:type = type of error & [message:string]
-
-USAGE = "usage: tally [top=N] [min_length=N] [exclude=w,w] [out=FILE] [-i|--ignore-case] [--] FILE..."
-
-# A whole number for an option, or a usage error naming the option.
-count_option = (name:string text:string low:int64 high:int64):>int64 | UsageError => {
-    let n = to_int(text) ?? return UsageError["{name}={text}: not a whole number"]
-    if n <? low or n >? high return UsageError["{name}={text}: must be {low} to {high}"]
-    n
-}
-
-parse_options = (argv:array<string>):>Options | UsageError => {
-    let options = Options[files=[] exclude=set[]]
-    let only_files = false
-    loop word in argv[$clamp 1..) {
-        if only_files or not (word.startswith("-") or "=" in? word) {
-            options.files.push(word)
-            continue
-        }
-        if word =? "--" { only_files = true; continue }
-        if word =? "-i" or word =? "--ignore-case" { options.ignore_case = true; continue }
-        let at = word.find("=") ?? return UsageError["unknown option {word}"]
-        let name = word[..at)
-        let value = word[$clamp at + 1..]
-        match name {
-            <"top"> => { options.top = count_option(name value 1 1000) or_throw }
-            <"min_length"> => { options.min_length = count_option(name value 1 80) or_throw }
-            <"out"> => { options.out = value }
-            <"exclude"> => { loop w in value.split(",") options.exclude.push(w.lower) }
-            _ => return UsageError["unknown option {name}="]
-        }
-    }
-    if options.files.is_empty return UsageError["no files given"]
-    options
-}
 
 FileStats:type = [name:string lines:int64 words:int64 bytes:int64 longest:int64 longest_at:int64]
 
@@ -72,7 +38,7 @@ words_of = (line:string):>array<string> => {
     }]
 }
 
-tally_file = (path:Path options:Options @counts:dict<string int64>) => {
+tally_file = (path:Path ignore_case:bool min_length:int64 exclude:set<string> @counts:dict<string int64>) => {
     let text = path.read_text or_throw
     let stats = FileStats[path.name 0 0 (text as array<uint8>).length 0 0]
     loop number in 1.. and raw in text.lines {
@@ -84,8 +50,8 @@ tally_file = (path:Path options:Options @counts:dict<string int64>) => {
         }
         loop word in words_of(line) {
             stats.words += 1
-            let key = if options.ignore_case word.lower else word
-            if key.length <? options.min_length or key.lower in? options.exclude continue
+            let key = if ignore_case word.lower else word
+            if key.length <? min_length or key.lower in? exclude continue
             counts[key] = (counts.get(key) ?? 0) + 1
         }
     }
@@ -111,16 +77,18 @@ report = (all:array<FileStats> ranked:array<Ranked>):>string => {
 }
 
 main = (argv:array<string>) => {
-    let options = parse_options(argv)
-    if options is? UsageError {
-        printl(USAGE file=stderr)
-        return options
+    let options = argparse.parse(Options argv about="count lines, words and bytes, and the most frequent words")
+    if options.files.is_empty {
+        printl("tally: no files given" file=stderr)
+        exit(2)
     }
+    let exclude:set<string> = set[]
+    loop w in options.exclude.split(",") if not w.is_empty exclude.push(w.lower)
     let counts:dict<string int64> = []
     let all:array<FileStats> = []
     let skipped:array<string> = []
     loop name in options.files {
-        match tally_file(p(name) options @counts) {
+        match tally_file(p(name) options.ignore_case options.min_length exclude @counts) {
             stats:FileStats => all.push(stats)
             <FileNotFound> => {
                 printl("tally: {name}: no such file" file=stderr)

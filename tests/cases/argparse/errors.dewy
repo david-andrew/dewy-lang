@@ -1,0 +1,30 @@
+# A command line that does not fit is a UsageError value carrying the message and the usage.
+import argparse
+
+Args:type = [
+    path = argparse.Positional<string>(help="the input")
+    verbose = argparse.Flag(help="say more")
+    jobs = argparse.Named<int64>(default=1 short='j' help="workers")
+    name = argparse.Named<string>(help="required")
+]
+
+show = (words:array<string>) => {
+    match argparse.try(Args ["prog" words...]) {
+        e:argparse.UsageError => printl"error: {e.message} ({e.help.lines.length} usage lines)"
+        args => printl"ok: {args.path} {args.verbose} {args.jobs} {args.name}"
+    }
+}
+
+main = () => {
+    show(["in" "name=n" "-v" "-j=4"])
+    show(["name=n"])
+    show(["in"])
+    show(["in" "out" "name=n"])
+    show(["in" "name=n" "color=red"])
+    show(["in" "name=n" "--colour"])
+    show(["in" "name=n" "-x"])
+    show(["in" "name=n" "jobs=1" "jobs=2"])
+    show(["in" "name=n" "jobs=many"])
+    show(["in" "name=n" "verbose=maybe"])
+    show(["--" "-v" "name=n"])
+}

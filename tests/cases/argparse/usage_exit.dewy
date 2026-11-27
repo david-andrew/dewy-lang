@@ -1,0 +1,13 @@
+# exit: 2
+# args: tabsize=99
+# `parse` reports a usage error on standard error, with the usage, and ends with exit code 2.
+import argparse
+
+Args:type = [
+    tabsize = argparse.Named<int64<n => 0 <? n and n <=? 16>>(default=4 help="spaces per tab")
+]
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv)
+    printl(args.tabsize)
+}

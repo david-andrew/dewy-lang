@@ -1,0 +1,39 @@
+# Each value is read by its type's text reader, `T(text)`: integers of any width (in range),
+# `int` of any size, floats, truth values, paths, literal unions and refined integers, which
+# the field keeps.
+import argparse
+
+Level:type = int64<n => 1 <=? n and n <=? 9>
+
+Args:type = [
+    count = argparse.Named<uint8>(default=1)
+    big = argparse.Named<int>(default=0)
+    ratio = argparse.Named<float64>(default=1.0)
+    strict = argparse.Named<bool>(default=false)
+    file = argparse.Named<Path>(default=p("a.txt"))
+    color = argparse.Named<'red'|'green'>(default='red')
+    level = argparse.Named<Level>(default=5)
+    sizes = argparse.Named<array<int64>>()
+]
+
+show = (words:array<string>) => {
+    match argparse.try(Args ["prog" words...]) {
+        e:argparse.UsageError => printl"error: {e.message}"
+        _ => {
+            let args = argparse.parse(Args ["prog" words...])
+            printl"{args.count} {args.big} {args.ratio} {args.strict} {args.file.name} {args.color} {args.level} {args.sizes}"
+        }
+    }
+}
+
+main = () => {
+    show([])
+    show(["count=200" "big=123456789012345678901234567890" "ratio=2.5" "strict=true" "file=x/y.md" "color=green" "level=9" "sizes=3" "sizes=-4"])
+    show(["count=256"])
+    show(["count=x"])
+    show(["ratio=fast"])
+    show(["strict=yes"])
+    show(["color=blue"])
+    show(["level=10"])
+    show(["sizes=1" "sizes=two"])
+}

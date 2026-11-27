@@ -1,0 +1,20 @@
+# `--help` gives the generated usage: one line per field with how it is written, its type
+# spelled in Dewy (choices and refinements included), its help and its default.
+import argparse
+
+Args:type = [
+    path = argparse.Positional<Path>(help="the file to tokenize")
+    verbose = argparse.Flag(help="print each token")
+    tabsize = argparse.Named<int64<n => 0 <? n and n <=? 16>>(default=4 short='t' help="spaces per tab")
+    mode = argparse.Named<'tokens'|'ast'>(default='tokens' help="what to print")
+    include = argparse.Named<array<Path>>(help="extra files, repeatable")
+    out = argparse.Named<string?>(help="where to write")
+    plain = argparse.Flag(short=none help="no colors")
+]
+
+main = () => {
+    match argparse.try(Args ["tok" "--help"] about="tokenize a dewy file") {
+        e:argparse.UsageError => printl(e.help)
+        _ => printl("parsed")
+    }
+}

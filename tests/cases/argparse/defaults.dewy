@@ -1,0 +1,27 @@
+# Defaults fill what the command line leaves out: a default, an optional's none, an
+# array's empty list, a flag's false; a field can also be named on the command line.
+import argparse
+
+Args:type = [
+    first = argparse.Positional<string>(help="needed")
+    second = argparse.Positional<string>(default="b" help="has a default")
+    third = argparse.Positional<int64?>(help="may be left out")
+    level = argparse.Named<int64>(default=2 help="how loud")
+    out = argparse.Named<string?>(help="where to write")
+    tags = argparse.Named<array<string>>(help="labels")
+    quiet = argparse.Flag(help="say less")
+]
+
+show = (words:array<string>) => {
+    match argparse.try(Args ["prog" words...]) {
+        e:argparse.UsageError => printl"error: {e.message}"
+        args => printl"{args.first} {args.second} {args.third} {args.level} {args.out} {args.tags} {args.quiet}"
+    }
+}
+
+main = () => {
+    show(["a"])
+    show(["a" "c" "7" "level=5" "out=x.txt" "tags=t1" "tags=t2" "-q"])
+    show(["second=z" "first=y" "quiet=true"])
+    show(["a" "third=9" "--quiet"])
+}

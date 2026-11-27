@@ -1993,8 +1993,8 @@ including digit separators; their digits are converted at compilation.
 `to_int(text)` reads decimal text and returns `bigint | NotAnInteger |
 TooManyDigits`: an optional leading `+`/`-` and ASCII decimal digits, leading
 zeros accepted, no whitespace or separators. Invalid text gives `NotAnInteger`,
-more digits than `max_digits=` allows `TooManyDigits`. There is no constructor from text: `bigint("12")` is an error that
-points at `to_int`.
+more digits than `max_digits=` allows `TooManyDigits`. `bigint("12")` is the type's text reader
+(see "Command-line arguments"): it gives `int | ValidationError`.
 
 `+`, `-`, `*`, unary `-`, comparisons, `//` and `%` mix with signed and
 unsigned machine words in either order. Division rounds down and the remainder
@@ -4646,6 +4646,54 @@ On Windows, `run` works and `run_silent`, `spawn` and `capture` are not availabl
 yet (`SpawnError`). A `.bat` or `.cmd` program is refused with `SpawnError` and a
 message: cmd.exe would read its arguments again as commands, so run
 `cmd.exe` with `/c` explicitly, quoting the arguments for it.
+
+### Command-line arguments
+
+`import argparse` reads `main`'s `argv` into a typed record. The spec is a record of
+descriptors, each holding an argument's type, default, short and help in one place:
+
+```dewy
+import argparse
+
+Args:type = [
+    path = argparse.Positional<Path>(help="the file to tokenize")
+    verbose = argparse.Flag(help="print each token")                   # --verbose, -v
+    tabsize = argparse.Named<int64<n => 0 <? n and n <=? 16>>(default=4 short='t' help="spaces per tab")
+    mode = argparse.Named<'tokens'|'ast'>(default='tokens' help="what to print")
+    include = argparse.Named<array<Path>>(help="extra files, repeatable")
+]
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="tokenize a dewy file")
+    if args.verbose printl"tokenizing {args.path}"   # args.path:Path, args.mode:'tokens'|'ast'
+}
+```
+
+The command line fills the spec as a constructor call fills a record: bare words fill
+the `Positional` fields in field order, `name=value` fills any field by name (positionals
+included), and defaults fill the rest. A flag is `--verbose`, `-v` or `verbose=true|false`
+(`--ignore-case` names `ignore_case`); a short on a valued argument is written `-t=2`, never
+`-t 2`. A flag's short is its first letter when no other flag starts with it, `short='x'`
+chooses one and `short=none` has none. `--` ends the options. `array<T>` repeats
+(`include=a include=b`; a positional array takes the remaining words) and defaults to empty;
+`T?` defaults to `none`; any other argument without a default is required. Each value is
+read by its type's text reader, `T(text)`, so a literal union accepts its members and a
+refined integer its range. Declare the spec as a type to keep its written order: an
+anonymous record's fields are in name order, which is also the order its positionals fill.
+
+`argparse.parse` prints a usage error and the usage on standard error and exits with code 2;
+`--help` (`-h`) prints the usage and exits with 0. `argparse.try` gives the record or an
+`argparse.UsageError` (`message`, and the rendered `help`) instead. The usage has a line per
+field: how it is written, its type spelled in Dewy, its help and its default.
+
+The library is ordinary Dewy over `fields(S)`, `$field`, overloads on the descriptor types and
+`T(text)`. A type's text reader is `T(text)` for a number (`int64("42")`, `uint8`, `int`,
+`float64`), a truth value (`bool("true")`), a refined integer (`Level("7")`, read and then
+tested) or a literal union (`Mode("ast")`), also when `T` is a type parameter: each gives
+`T | ValidationError`, whose `message` says what was expected and whose `input` is the text.
+Inside a generic function `T(x)` constructs a record type parameter as its name would.
+`T.spelling` is a type as Dewy writes it, a compile-time string
+(`int64<value => 0 <? value and value <=? 16>`, `'tokens' | 'ast'`, `array<Path>`).
 
 ### Contained paths
 

@@ -1,0 +1,20 @@
+# args: src.dewy --verbose -t=3 mode=ast include=a.dewy -- include=b.dewy
+# quick
+# A command line read into a typed record: positionals in field order, `name=value`, flags,
+# a short on a valued argument, repetition and `--`.
+import argparse
+
+Args:type = [
+    path = argparse.Positional<Path>(help="the file to tokenize")
+    verbose = argparse.Flag(help="print each token")
+    tabsize = argparse.Named<int64<n => 0 <? n and n <=? 16>>(default=4 short='t' help="spaces per tab")
+    mode = argparse.Named<'tokens'|'ast'>(default='tokens' help="what to print")
+    include = argparse.Named<array<string>>(help="extra files, repeatable")
+    rest = argparse.Positional<array<string>>(help="anything after the path")
+]
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="tokenize a dewy file")
+    if args.verbose printl"tokenizing {args.path.name}"
+    printl"tabsize {args.tabsize}, mode {args.mode}, include {args.include}, rest {args.rest}"
+}

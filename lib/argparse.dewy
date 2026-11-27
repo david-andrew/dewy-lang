@@ -1,0 +1,354 @@
+# Command-line arguments read into a typed record (docs/design/argparse_and_reflection.md).
+#
+#     import argparse
+#     Args:type = [
+#         path = argparse.Positional<Path>(help="the file to read")
+#         verbose = argparse.Flag(help="print each step")                    # --verbose, -v
+#         tabsize = argparse.Named<int64<i => 0 <? i and i <=? 16>>(default=4 short='t' help="spaces per tab")
+#         mode = argparse.Named<'tokens'|'ast'>(default='tokens' help="what to print")
+#     ]
+#     main = (argv:array<string>) => {
+#         let args = argparse.parse(Args argv about="read a file")      # args.tabsize:int64<...>
+#     }
+#
+# The command line fills the spec as a constructor call fills a record: bare words fill the
+# positional fields in field order, `name=value` fills any field by name, defaults fill the rest.
+# A flag is `--verbose`, `-v` or `verbose=true|false`; a short on a valued argument is `-t=2`.
+# `--` ends the options and `--help` (`-h`) prints the generated usage. Values are read by
+# their type's text reader, `T(text)`, so a refinement or a literal union is checked here and
+# the field keeps that type. Nothing in the compiler knows this library: the result record is
+# the unrolled `fields(S)` literal below.
+
+# A command line that does not fit the spec: what is wrong, and the usage to show with it.
+UsageError:type = type of error & [message:string help:string]
+
+# (a descriptor given no default)
+NoDefault:type = [unset:bool = true]
+
+# A word in place: positional fields take bare words in field order. `array<T>` takes the rest,
+# `T?` may be left out.
+Positional:type = <T>[help:string = "" default:T | NoDefault = NoDefault[]]
+
+# `name=value` (or `-t=value` with `short='t'`). Required unless it has a default; `array<T>`
+# repeats (and defaults to empty), `T?` defaults to none.
+Named:type = <T>[default:T | NoDefault = NoDefault[] short:string? = "" help:string = ""]
+
+# `--name`, `-n` (the first letter when no other flag starts with it; `short=none` opts out),
+# or `name=true|false`.
+Flag:type = [short:string? = "" help:string = ""]
+
+# The command line's words, classified once.
+Scan:type = [
+    words:array<string> = []
+    names:array<string> = []
+    values:array<string> = []
+    switches:array<string> = []
+    help:bool = false
+]
+
+# A token `^[A-Za-z_][A-Za-z0-9_]*=`: a named argument
+is_named = (word:string):>bool => {
+    let at = word.find("=") ?? return false
+    if at =? 0 return false
+    let name = word[..at)
+    loop i in 0.. and ch in name {
+        if not (ch.is_alpha or ch =? "_" or i >? 0 and ch.is_digit) return false
+    }
+    true
+}
+
+# `--ignore-case` names the field `ignore_case`
+long_name = (text:string):>string => text.replace("-" "_")
+
+scan_arguments = (words:array<string>):>Scan => {
+    let scan = Scan[]
+    let only_words = false
+    loop word in words {
+        if only_words or word =? "-" or not (word.startswith("-") or is_named(word)) {
+            scan.words.push(word)
+            continue
+        }
+        if word =? "--" { only_words = true; continue }
+        if word =? "--help" or word =? "-h" { scan.help = true; continue }
+        if word.startswith("-") and word.length >? 1 and word[1..2).is_digit {
+            scan.words.push(word)
+            continue
+        }
+        let body = if word.startswith("--") word[$clamp 2..] else if word.startswith("-") word[$clamp 1..] else word
+        let short = word.startswith("-") and not word.startswith("--")
+        match body.find("=") {
+            at:int64 => {
+                let name = body[..at)
+                scan.names.push(if short "-{name}" else long_name(name))
+                scan.values.push(body[$clamp at + 1..])
+            }
+            _ => scan.switches.push(if short "-{body}" else long_name(body))
+        }
+    }
+    scan
+}
+
+# What one field is called on the command line, and the field order positionals fill.
+Shape:type = [
+    flags:array<string> = []
+    claimed:array<string> = []
+    positionals:array<string> = []
+    names:array<string> = []
+    many:bool = false
+]
+
+is_positional = <T>(_d:Positional<T>):>bool => true
+is_positional = <T>(_d:Named<T>):>bool => false
+is_positional = (_d:Flag):>bool => false
+is_flag = (_d:Flag):>bool => true
+is_flag = <T>(_d:Positional<T>):>bool => false
+is_flag = <T>(_d:Named<T>):>bool => false
+given_short = (d:Flag):>string? => d.short
+given_short = <T>(d:Named<T>):>string? => d.short
+given_short = <T>(_d:Positional<T>):>string? => none
+is_many = <T>(_d:Positional<array<T>>):>bool => true
+is_many = <T>(_d:Positional<T>):>bool => false
+is_many = <T>(_d:Named<T>):>bool => false
+is_many = (_d:Flag):>bool => false
+
+shape_of = <S>(spec:S):>Shape => {
+    let shape = Shape[]
+    loop f in fields(S) {
+        let d = spec.$field(f.name)
+        shape.names.push(f.name)
+        if is_positional(d) shape.positionals.push(f.name)
+        if is_flag(d) shape.flags.push(f.name)
+        if is_many(d) shape.many = true
+        let s = given_short(d)
+        if s is? string and not s.is_empty shape.claimed.push(s)
+    }
+    shape
+}
+
+# A field's short: the one given, none when opted out, else (for a flag) its first letter when
+# no other flag starts with it and nothing claims it
+short_for = (given:string? name:string shape:Shape flag:bool):>string? => {
+    if given is? none return none
+    if not given.is_empty return given
+    if not flag return none
+    let letter = name[..1)
+    if letter =? "h" or letter in? shape.claimed return none
+    let same = [loop other in shape.flags if other[..1) =? letter other]
+    if same.length =? 1 letter else none
+}
+
+# Every value given for a field, by name or by its short
+given = (scan:Scan name:string short:string?):>array<string> => {
+    [loop i in 0.. and n in scan.names {
+        if n =? name or short is? string and n =? "-{short}" scan.values[i]
+    }]
+}
+
+problem = (message:string help:string):>UsageError => UsageError[message help]
+
+# A text read as T, or the usage error naming the argument
+convert = <T>(text:string what:string help:string):>T | UsageError => checked(T(text) text what help)
+checked = <T>(v:T | ValidationError text:string what:string help:string):>T | UsageError => {
+    if v is? ValidationError return problem("{what}={text}: {v.message}" help)
+    v
+}
+
+one = (values:array<string> what:string help:string):>string? | UsageError => {
+    if values.length >? 1 return problem("{what} is given {values.length} times" help)
+    if values.is_empty none else values[0]
+}
+
+take = (d:Flag name:string shape:Shape scan:Scan help:string):>bool | UsageError => {
+    let short = short_for(d.short name shape true)
+    let set = name in? scan.switches or short is? string and "-{short}" in? scan.switches
+    match one(given(scan name short) name help) or_throw<UsageError> {
+        text:string => convert<bool>(text name help)
+        _ => set
+    }
+}
+take = <T>(d:Named<T> name:string shape:Shape scan:Scan help:string):>T | UsageError => {
+    match one(given(scan name short_for(d.short name shape false)) name help) or_throw<UsageError> {
+        text:string => convert<T>(text name help)
+        _ => {
+            let fallback = d.default
+            if fallback is? NoDefault return problem("{name}= is required" help)
+            fallback
+        }
+    }
+}
+take = <T>(d:Named<array<T>> name:string shape:Shape scan:Scan help:string):>array<T> | UsageError => {
+    let texts = given(scan name short_for(d.short name shape false))
+    if texts.is_empty {
+        let fallback = d.default
+        if fallback is? NoDefault return []
+        return fallback
+    }
+    [loop text in texts convert<T>(text name help) or_throw<UsageError>]
+}
+take = <T>(d:Named<T?> name:string shape:Shape scan:Scan help:string):>T? | UsageError => {
+    match one(given(scan name short_for(d.short name shape false)) name help) or_throw<UsageError> {
+        text:string => convert<T>(text name help) or_throw<UsageError>
+        _ => {
+            let fallback = d.default
+            if fallback is? NoDefault return none
+            fallback
+        }
+    }
+}
+
+# The words a positional field takes: its own, or (an array) all but those later fields need
+words_for = (name:string shape:Shape scan:Scan many:bool):>array<string> => {
+    let at = shape.positionals.index_of(name) ?? 0
+    let after = shape.positionals.length - at - 1
+    if not many return if at <? scan.words.length [scan.words[at]] else []
+    let stop = scan.words.length - after
+    if stop <=? at [] else scan.words[at..stop)
+}
+
+take = <T>(d:Positional<T> name:string shape:Shape scan:Scan help:string):>T | UsageError => {
+    let named = one(given(scan name none) name help) or_throw<UsageError>
+    let texts = if named is? string [named] else words_for(name shape scan false)
+    if texts.is_empty {
+        let fallback = d.default
+        if fallback is? NoDefault return problem("{name} is required" help)
+        return fallback
+    }
+    convert<T>(texts[0] name help)
+}
+take = <T>(d:Positional<array<T>> name:string shape:Shape scan:Scan help:string):>array<T> | UsageError => {
+    let named = given(scan name none)
+    let texts = if named.is_empty words_for(name shape scan true) else named
+    if texts.is_empty {
+        let fallback = d.default
+        if fallback is? NoDefault return []
+        return fallback
+    }
+    [loop text in texts convert<T>(text name help) or_throw<UsageError>]
+}
+take = <T>(d:Positional<T?> name:string shape:Shape scan:Scan help:string):>T? | UsageError => {
+    let named = one(given(scan name none) name help) or_throw<UsageError>
+    let texts = if named is? string [named] else words_for(name shape scan false)
+    if texts.is_empty {
+        let fallback = d.default
+        if fallback is? NoDefault return none
+        return fallback
+    }
+    convert<T>(texts[0] name help) or_throw<UsageError>
+}
+
+# Unknown names and switches, and words no positional field takes
+leftovers = (shape:Shape scan:Scan help:string):>void | UsageError => {
+    let shorts:array<string> = []
+    loop name in scan.names {
+        if name.startswith("-") {
+            shorts.push(name)
+            continue
+        }
+        if name not in? shape.names return problem("unknown argument {name}=" help)
+    }
+    loop s in scan.switches {
+        if s.startswith("-") {
+            shorts.push(s)
+            continue
+        }
+        if s not in? shape.flags return problem("unknown flag --{s.replace("_" "-")}" help)
+    }
+    loop s in shorts {
+        let body = s[$clamp 1..]
+        let letter = (body.split("="))[0]
+        if letter not in? shape.claimed and not known_flag_short(letter shape) return problem("unknown option {s}" help)
+    }
+    let taken = shape.positionals.length
+    if taken =? 0 and scan.words.length >? 0 return problem("unexpected argument {scan.words[0]}" help)
+}
+known_flag_short = (letter:string shape:Shape):>bool => {
+    loop name in shape.flags {
+        if short_for("" name shape true) =? letter return true
+    }
+    false
+}
+
+# One usage line per field: how it is written, its type, its help and default.
+describe = (d:Flag name:string shape:Shape):>array<string> => {
+    let short = short_for(d.short name shape true)
+    let written = if short is? string "-{short}, --{name.replace("_" "-")}" else "--{name.replace("_" "-")}"
+    [written "bool" d.help ""]
+}
+describe = <T>(d:Named<T> name:string shape:Shape):>array<string> => {
+    let short = short_for(d.short name shape false)
+    let written = if short is? string "-{short}=, {name}=" else "{name}="
+    let fallback = d.default
+    [written T.spelling d.help (if fallback is? NoDefault "required" else "default {fallback}")]
+}
+describe = <T>(d:Named<array<T>> name:string shape:Shape):>array<string> => {
+    let short = short_for(d.short name shape false)
+    let written = if short is? string "-{short}=, {name}=" else "{name}="
+    [written "array<{T.spelling}>" d.help "repeatable"]
+}
+describe = <T>(d:Named<T?> name:string shape:Shape):>array<string> => {
+    let short = short_for(d.short name shape false)
+    let written = if short is? string "-{short}=, {name}=" else "{name}="
+    let fallback = d.default
+    [written T.spelling d.help (if fallback is? NoDefault "optional" else "default {fallback}")]
+}
+describe = <T>(d:Positional<array<T>> name:string _shape:Shape):>array<string> => {
+    [name "array<{T.spelling}>" d.help "repeatable"]
+}
+describe = <T>(d:Positional<T?> name:string _shape:Shape):>array<string> => {
+    [name T.spelling d.help "optional"]
+}
+describe = <T>(d:Positional<T> name:string _shape:Shape):>array<string> => {
+    let fallback = d.default
+    [name T.spelling d.help (if fallback is? NoDefault "" else "default {fallback}")]
+}
+
+pad = (text:string width:int64):>string => if text.length >=? width "{text} " else "{text}{" ".repeat(width - text.length)}"
+
+usage = <S>(spec:S program:string about:string shape:Shape):>string => {
+    let rows = [loop f in fields(S) describe(spec.$field(f.name) f.name shape)]
+    let words = [loop name in shape.positionals name.upper]
+    let head = "usage: {program} [options]{if words.is_empty "" else " {words.join(" ")}"}"
+    let lines = [head]
+    if not about.is_empty lines.push(about)
+    lines.push("")
+    loop row in rows {
+        let note = if row[3].is_empty "" else " ({row[3]})"
+        lines.push("  {pad(row[0] 22)}{pad(row[1] 18)}{row[2]}{note}")
+    }
+    lines.push("  {pad("-h, --help" 22)}{pad("" 18)}show this help")
+    lines.join("\n")
+}
+
+program_name = (argv:array<string>):>string => if argv.is_empty "program" else p(argv[0]).name
+
+# The command line (`main`'s argv, the program first) read into the spec's record, or what is
+# wrong with it. `--help` gives a UsageError with an empty message.
+try = <S>(spec:S argv:array<string> about:string = "") => {
+    let scan = scan_arguments(argv[$clamp 1..])
+    let shape = shape_of(spec)
+    let help = usage(spec program_name(argv) about shape)
+    if scan.help return problem("" help)
+    leftovers(shape scan help) or_throw<UsageError>
+    let args = [loop f in fields(S) $field(f.name) = take(spec.$field(f.name) f.name shape scan help) or_throw<UsageError>]
+    if shape.positionals.length >? 0 and not taken_all(shape scan) return problem("unexpected argument {scan.words[scan.words.length - 1]}" help)
+    args
+}
+
+# Whether the positional fields take every word: one each, or an array field the rest
+taken_all = (shape:Shape scan:Scan):>bool => scan.words.length <=? shape.positionals.length or shape.many
+
+# `try`, ending the program on a usage error: the message and the usage on standard error and
+# exit code 2; `--help` prints the usage on standard output and ends with 0.
+parse = <S>(spec:S argv:array<string> about:string = "") => {
+    let result = try(spec argv about=about)
+    if result is? UsageError {
+        if result.message.is_empty {
+            printl(result.help)
+            exit(0)
+        }
+        printl("{program_name(argv)}: {result.message}" file=stderr)
+        printl(result.help file=stderr)
+        exit(2)
+    }
+    result
+}
