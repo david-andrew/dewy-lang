@@ -1427,7 +1427,15 @@ The caller proves it, and it holds at entry; a write that changes the length end
 Mutable `@` access requires an equivalent storage contract. A dependent record
 must be passed as a whole so its field updates retain invariant authority.
 Raw mutable access cannot expose refined storage; changing a container's element
-contract through an alias is rejected. Captured lexical dependencies remain
+contract through an alias is rejected. An element contract naming a constant
+(`const n = names.length`, then `let stack:array<addr<(<? n)>> = []`) is checked
+on every store and holds on every read: `stack.pop()`, a sorted or reversed copy,
+`d.pop(k)`, `d.get(k)` and `d.get(k) ?? 0` of a dictionary's values, and each element
+of a `generator<addr<(<? n)>>`, whose yields are checked. The library's own sorts
+and dictionary operations prove their moves of such values. A closure or lazy body
+keeps what its creator knew of a value it captures as a snapshot and never changes
+(`if step <=? 0 return` before `(i) => i // step`); a `$capture` that changes, or a
+shared `$capture @x`, keeps nothing. Captured lexical dependencies remain
 unsupported. Parameter-dependent contracts nested inside element types, and
 projected mutable postconditions with deferred cleanup, are conservatively
 rejected. There is no public strict-lane spelling.
