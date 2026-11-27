@@ -1,0 +1,10 @@
+# A literal's entries fit the pattern; a computed key may repeat, so only the run checks it
+let [[k v]] = ["a" -> 1]
+printl"{k} {v}"
+let [[a b] [c d]] = ["x" -> 1 "y" -> 2]
+printl"{a}{b}{c}{d}"
+let [[e f] ...] = ["x" -> 1 "y" -> 2]
+printl"{e}{f}"
+let key = "x"
+let [[g h] [i j]] = [key -> 1 "y" -> 2]
+printl"{g}{h}{i}{j}"

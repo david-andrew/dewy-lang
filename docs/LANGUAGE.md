@@ -2918,7 +2918,8 @@ Each level follows its source type: arrays and tuples use positions, dictionarie
 yield key/value pairs in insertion order, and records use field names. Dictionary
 unpacking skips removed entries and requires exactly as many live entries as
 targets (at least as many with a bare `...`; a dictionary's `...rest` is not
-supported yet), an obligation like an array's. `_` can discard an entry or either member of a pair. The source evaluates
+supported yet), an obligation like an array's; a dictionary literal that cannot fit,
+`let [k v] = ["a" -> 1]`, is a compile error (`let [[k v]] = ...` takes its one entry apart). `_` can discard an entry or either member of a pair. The source evaluates
 
 once, nested lengths are checked before destinations are written, and extracted
 values keep ordinary value semantics.

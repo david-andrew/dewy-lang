@@ -84,6 +84,29 @@ unpack_count_error=(e:UnpackWord t:UnpackWord count:UnpackWord rest:bool pos:Unp
     }
     fatal(pos "{dt(t)} has {n} positions, and the pattern takes {takes}")
 }
+# A dictionary literal's entry count is known while compiling: fewer pairs than the
+# pattern takes, or more distinct constant keys than it takes exactly, cannot fit
+# (a repeated key only lowers the count). O(pairs) per literal source.
+unpack_map_literal_count=(e:UnpackWord count:UnpackWord rest:bool pos:UnpackWord):>void=>$unsafe {
+    if nodes.ptr[e].kind not=? 'map_lit' {return}
+    let keys:set<string>=set[]
+    let constant=true
+    loop pair in kids(e) {
+        if has_flag(pair NF_SPREAD) {return}
+        let key=UnpackWord(nodes.ptr[pair].a)
+        let kk=nodes.ptr[key].kind
+        if key <=? 0 or (kk not=? 'str_lit' and kk not=? 'int_lit') {constant=false; continue}
+        keys.push("{kk} {nodes.ptr[key].ival} {nodes.ptr[key].sval}")
+    }
+    let n=UnpackWord(kids(e).length)
+    let fits=if n <? count {false} else if rest or not constant {true} else {keys.length =? count}
+    if fits {return}
+    let has=if constant {UnpackWord(keys.length)} else {n}
+    let entries=if has =? 1 {"entry"} else {"entries"}
+    let takes=if rest {"at least {count}"} else {"{count}"}
+    let hint=if has =? 1 {": `let [[key value]] = ...` takes its one entry apart"} else {""}
+    fatal(pos "this dictionary has {has} {entries}, and the pattern takes {takes}: a dictionary unpacks into its entries (key/value pairs){hint}")
+}
 # (the length of captured array src, a fresh read)
 unpack_length=(src:UnpackWord pos:UnpackWord):>UnpackWord=>$unsafe {
     let length=mk('call' pos)
@@ -136,6 +159,7 @@ unpack_values=(e:UnpackWord t:UnpackWord bindings:array<int64> pos:UnpackWord @s
     let input=e
     let input_type=t
     if is_map {
+        unpack_map_literal_count(e count r >=? 0 pos)
         add_flag(input NF_CHECKED)
         input_type=prune(check_expr(bc_call("__map_entries" [input] pos) 0))
         input=last_checked
