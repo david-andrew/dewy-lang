@@ -43,6 +43,7 @@ from p"exact_preparation.dewy" import (exact_prepare)
 from p"facts_lifecycle.dewy" import (facts_reset)
 from p"float_ops.dewy" import (float_keys_reset floats_notes_reset)
 from p"checker_signature.dewy" import (fn_sig)
+from p"ffi_checks.dewy" import (ffi_check_declaration)
 from p"ide.jo" import (ide_doc ide_force ide_on)
 from p"ide_ops.dewy" import (ide_find_file)
 from p"cycle_ops.dewy" import (init_module_order merge_cycle_inits)
@@ -240,6 +241,7 @@ check_program=(main_path:string):>void=>$unsafe {
                 if dir_code_any and dir_code_files.has(nodes.ptr[d].pos >> 40) {settings_pending.push(d)}
                 else {get_fn_inst(d [] nodes.ptr[d].pos);}
             }
+            else if nodes.ptr[d].kind =? 'fn_' and has_flag(d NF_EXTERN) {ffi_check_declaration(d)}
         }
     }
     loop nm in runtime_names {runtime_fn(nm);}

@@ -9,6 +9,7 @@ from p"directives.jo" import (dir_scopes dir_value)
 from p"util.jo" import (files intern name_of pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"ffi.jo" import (ffi_unsafe_name)
+from p"checker_signature.dewy" import (fn_sig)
 # Direct recursive lowering; shared state has one owner in ffi.jo.
 MoveWord:type=int64<overflow='wrap'>
 ffi_unsafe_at=(pos:MoveWord):>bool=>$unsafe {
@@ -37,6 +38,15 @@ ffi_check_signature=(f:MoveWord decl:MoveWord):>void=>$unsafe {
         ffi_check_type(t nodes.ptr[p].pos extern_ true);
     }
     if MoveWord(fns.ptr[f].ret) not=? T_VOID {ffi_check_type(MoveWord(fns.ptr[f].ret) nodes.ptr[decl].pos extern_ false);}
+}
+# An `$extern` nothing calls is never instantiated: its signature is checked where it is
+# declared, without making it a symbol to link. O(parameters).
+ffi_check_declaration=(decl:MoveWord):>void=>$unsafe {
+    if not files.ptr[pos_file(nodes.ptr[decl].pos)].is_dewy {return}
+    let sig=fn_sig(decl)
+    if sig.generic {return}
+    loop i in [0..sig.params.length) and t in sig.params {ffi_check_type(t nodes.ptr[kid(decl i)].pos true true)}
+    if sig.ret not=? 0 and prune(MoveWord(sig.ret)) not=? T_VOID {ffi_check_type(MoveWord(sig.ret) nodes.ptr[decl].pos true false)}
 }
 ffi_check_type=(t0:MoveWord pos:MoveWord extern_:bool param:bool):>void=>$unsafe {
     let seen:dict<int64 bool>=dict<int64 bool>()
