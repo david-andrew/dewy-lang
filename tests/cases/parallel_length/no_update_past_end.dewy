@@ -1,0 +1,6 @@
+# The kept length is exact: one past the end is still out of bounds
+main = () => {
+    let shifted = [parallel i in [0..10) i+1]
+    parallel @x in shifted { x *= 2 }
+    printl(shifted[10])
+}

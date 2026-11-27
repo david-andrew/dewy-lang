@@ -1,0 +1,7 @@
+# Only the length survives `parallel @x in xs`: its elements are new values
+main = () => {
+    let xs = [1 2 3]
+    printl(10 // xs[0])
+    parallel @x in xs { x = 0 }
+    printl(10 // xs[0])
+}

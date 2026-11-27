@@ -1,0 +1,8 @@
+# Across an outer loop too
+main = () => {
+    let xs = [1 2 3]
+    loop k in [0..3) {
+        parallel @x in xs { x += k }
+    }
+    printl(xs[3])
+}

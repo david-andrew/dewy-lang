@@ -1,5 +1,6 @@
 $runtime_checks
 from p"numeric_library_types.dewy" import (is_nd)
+from p"facts_library.dewy" import (fact_library_call)
 from p"checker_source_positions.dewy" import (dewy_at)
 from p"expression_types.dewy" import (ntype)
 
@@ -270,7 +271,10 @@ fact_path_call_effects=(n:ForgetWord @s:FactState):>void=>$unsafe {
     let summary=FactSummary()
     let shape_mask:ForgetWord=0
     if shapes.length >? 0 {effects_demand(ForgetWord(nodes.ptr[n].sym) true);}
-    if ForgetWord(nodes.ptr[n].sym) =? fact_summary_owner and fact_summary_assumed.length >? 0 {
+    # (std/thread.jo's `parallel_update(@xs f)`, a reviewed contract: it stores f's results
+    # in place, so xs keeps its length; f cannot reach xs, which the call borrows)
+    if lengths.length >? 0 and lengths[0][0] =? 0 and fact_library_call(n "parallel_update") {summary.lengths=[1]}
+    else if ForgetWord(nodes.ptr[n].sym) =? fact_summary_owner and fact_summary_assumed.length >? 0 {
         fact_summary_used=true
         summary.lengths=fact_summary_assumed
     }
