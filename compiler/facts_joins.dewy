@@ -191,42 +191,97 @@ fact_host_finite=(s:FactState v:JoinWord):>bool=>{
     if v =? 0 or fact_type(fact_terms[v].type) =? T_U64 {return false}
     fact_host_value(s v) or fact_host_endpoint(s v false) and fact_host_endpoint(s v true)
 }
-# Consuming join: mutates @a in place when frames match (zero array clones) and
-# clears @b so refcounts drop immediately.
+# Consuming join: mutates @a in place when frames match or @b only extends @a
+# (zero FactState/index clones) and clears @b so refcounts drop immediately.
 fact_join_into=(@a:FactState @b:FactState at:JoinWord):>void=>$unsafe {
     if not a.live {a=b; b=FactState(live=false); return}
     if not b.live {return}
-    let same_ids=a.ids.length =? b.ids.length and (a.ids.ptr =? b.ids.ptr or a.ids =? b.ids)
     let same_cond=a.conditional.length =? b.conditional.length and (a.conditional.ptr =? b.conditional.ptr or a.conditional =? b.conditional)
-    if same_ids and same_cond {
-        let same_bind=a.bindings.length =? b.bindings.length and (a.bindings.ptr =? b.bindings.ptr or a.bindings =? b.bindings)
-        if same_bind {
-            let same_proj=a.projections.length =? b.projections.length and (a.projections.ptr =? b.projections.ptr or a.projections =? b.projections)
-            if same_proj and a.differences.length =? b.differences.length and (a.differences.ptr =? b.differences.ptr or a.differences =? b.differences) {
-                a.cmp_mask=JoinWord(a.cmp_mask) | JoinWord(b.cmp_mask)
-                a.full=false
-                let bp=b.bounds.ptr
-                if a.bounds.ptr not=? bp {
-                    let count=a.bounds.length
-                    let reason=fact_hull_reason(at)
-                    let unique=false
-                    let sp:ptr<FactBound>=uint64(0) as ptr<FactBound>
-                    loop i in [0..count) {
-                        let xp=a.bounds.ptr + i
-                        let yp=bp + i
-                        if xp[0].lo =? yp[0].lo and xp[0].hi =? yp[0].hi and xp[0].nz =? yp[0].nz and xp[0].wide =? yp[0].wide and xp[0].reason =? yp[0].reason and xp[0].witness =? yp[0].witness {continue}
-                        let h=FactBound(min(xp[0].lo yp[0].lo) max(xp[0].hi yp[0].hi) (xp[0].nz or xp[0].lo >? 0 or xp[0].hi <? 0) and (yp[0].nz or yp[0].lo >? 0 or yp[0].hi <? 0) reason at xp[0].wide or yp[0].wide)
-                        if not unique {
-                            a.bounds[i]=h
-                            sp=a.bounds.ptr
-                            unique=true
-                        } else {
-                            sp[i]=h
+    if same_cond {
+        let alen:JoinWord=a.ids.length
+        let blen:JoinWord=b.ids.length
+        let same_ids=alen =? blen and (a.ids.ptr =? b.ids.ptr or a.ids =? b.ids)
+        let a_prefix_ids=same_ids
+        if not a_prefix_ids and alen <=? blen {
+            let aids=a.ids.ptr
+            let bids=b.ids.ptr
+            let k:JoinWord=0
+            loop k <? alen and aids[k] =? bids[k] {k += 1}
+            if k =? alen {a_prefix_ids=true}
+        }
+        if a_prefix_ids {
+            let same_bind=a.bindings.length =? b.bindings.length and (a.bindings.ptr =? b.bindings.ptr or a.bindings =? b.bindings)
+            if same_bind {
+                let aplen:JoinWord=a.projections.length
+                let bplen:JoinWord=b.projections.length
+                let same_proj=aplen =? bplen and (a.projections.ptr =? b.projections.ptr or a.projections =? b.projections)
+                let a_prefix_proj=same_proj
+                if not a_prefix_proj and aplen <=? bplen {
+                    let ap=a.projections.ptr
+                    let bp=b.projections.ptr
+                    let kp:JoinWord=0
+                    loop kp <? aplen and ap[kp] =? bp[kp] {kp += 1}
+                    if kp =? aplen {
+                        a_prefix_proj=true
+                        loop j in [aplen..bplen) {
+                            if bp[j].element {a_prefix_proj=false; break}
                         }
                     }
                 }
-                b=FactState(live=false)
-                return
+                if a_prefix_proj {
+                    let adlen:JoinWord=a.differences.length
+                    let bdlen:JoinWord=b.differences.length
+                    if not (adlen =? bdlen and (a.differences.ptr =? b.differences.ptr or a.differences =? b.differences)) {
+                        let adp=a.differences.ptr
+                        let bdp=b.differences.ptr
+                        let common:JoinWord=0
+                        let mindiff=min(adlen bdlen)
+                        loop common <? mindiff and adp[common] =? bdp[common] {common += 1}
+                        if common =? adlen {
+                            loop i in [common..bdlen) {
+                                let row=bdp[i]
+                                if fact_slot_ref(@a row.a) >=? 0 and fact_slot_ref(@a row.b) >=? 0 and fact_distance(a row.a row.b row.limit) {
+                                    fact_difference(@a row.a row.b row.limit row.at)
+                                }
+                            }
+                        } else {
+                            let a_snap=a
+                            a.differences=[]
+                            a.diff_a_mask=0
+                            a.diff_b_mask=0
+                            if a.index.ptr[0].difference_next.length not=? 0 {
+                                a.index[0].difference_index=[]
+                                a.index[0].difference_value=[]
+                                a.index[0].difference_record=[]
+                                a.index[0].difference_next=[]
+                            }
+                            fact_join_shared_rows(@a a_snap b)
+                        }
+                    }
+                    a.cmp_mask=JoinWord(a.cmp_mask) | JoinWord(b.cmp_mask)
+                    a.full=false
+                    let bp=b.bounds.ptr
+                    if a.bounds.ptr not=? bp {
+                        let reason=fact_hull_reason(at)
+                        let unique=false
+                        let sp:ptr<FactBound>=uint64(0) as ptr<FactBound>
+                        loop i in [0..alen) {
+                            let xp=a.bounds.ptr + i
+                            let yp=bp + i
+                            if xp[0].lo =? yp[0].lo and xp[0].hi =? yp[0].hi and xp[0].nz =? yp[0].nz and xp[0].wide =? yp[0].wide and xp[0].reason =? yp[0].reason and xp[0].witness =? yp[0].witness {continue}
+                            let h=FactBound(min(xp[0].lo yp[0].lo) max(xp[0].hi yp[0].hi) (xp[0].nz or xp[0].lo >? 0 or xp[0].hi <? 0) and (yp[0].nz or yp[0].lo >? 0 or yp[0].hi <? 0) reason at xp[0].wide or yp[0].wide)
+                            if not unique {
+                                a.bounds[i]=h
+                                sp=a.bounds.ptr
+                                unique=true
+                            } else {
+                                sp[i]=h
+                            }
+                        }
+                    }
+                    b=FactState(live=false)
+                    return
+                }
             }
         }
     }
@@ -391,7 +446,15 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
             if qi >=? 0 {fact_add_projection(@s p)}
         }
     }
-    if same_proj and (same_bind or (not bind_checked and a.bindings.length =? b.bindings.length and (a.bindings.ptr =? b.bindings.ptr or a.bindings =? b.bindings))) {
+    let proj_prefix_ok=same_proj
+    if not proj_prefix_ok and from_ =? 0 {
+        let bp=b.projections.ptr
+        proj_prefix_ok=true
+        loop j in [a.projections.length..b.projections.length) {
+            if bp[j].element {proj_prefix_ok=false; break}
+        }
+    }
+    if proj_prefix_ok and (same_bind or (not bind_checked and a.bindings.length =? b.bindings.length and (a.bindings.ptr =? b.bindings.ptr or a.bindings =? b.bindings))) {
         s.bindings=a.bindings
         if a.index.ptr[0].roots.length not=? 0 {s.index[0].roots=a.index[0].roots}
         fact_join_shared_rows(@s a b)

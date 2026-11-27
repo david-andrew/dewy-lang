@@ -393,3 +393,105 @@ main = ():>void => {
     assert ran.returncode != 0
 
 
+ROUND3_PROGRAM = '''
+$runtime_checks
+
+Limb:type = array<int64<x => x >=? -0x20000 and x <=? 0x1ffff> length=4>
+
+tag_text = (n:int64):>string => "t{n}"
+
+masked_swap = (@a:Limb @b:Limb bit:int64<i => i >=? 0 and i <=? 1>):>void => {
+    let m = -bit
+    let inv = ~m
+    loop i in [0..4) {
+        let t = (m and (a[i] xor b[i])) or (inv and 0)
+        a[i] = a[i] xor t
+        b[i] = b[i] xor t
+    }
+}
+
+round3_features = (x:float64 y:float32 n:int64):>string => {
+    let dbits:uint64 = $unsafe (x transmute uint64)
+    let dback:float64 = $unsafe (dbits transmute float64)
+    let fbits:uint32 = $unsafe (y transmute uint32)
+    let fback:float32 = $unsafe (fbits transmute float32)
+    let small:int = -n
+    let small_inv:int = ~small
+    let wrap_small:int64<overflow='wrap'> = int64<overflow='wrap'>(small)
+    let big:int = int(1) << 70
+    let wrap_big:int64<overflow='wrap'> = int64<overflow='wrap'>(big + 42)
+    let dyn:array<int64> = [10 20 30]
+    let fx:array<int64 length=3> = dyn
+    let back_dyn:array<int64> = fx
+    let sfx:array<string length=2> = ["aa" "bb"]
+    let sback:array<string> = sfx
+    let removed_i:int64 = back_dyn.pop(1)
+    let removed_s:string = sback.pop(0)
+    let m_int:dict<string int64> = ["k1" -> 11 "k2" -> 22]
+    let m_flt:dict<string float64> = ["pi" -> 3.5 "e" -> 2.5]
+    let m_str:dict<string string> = ["hi" -> "there"]
+    let m_empty:dict<string int64> = []
+    let p:Limb = [1 2 3 4]
+    let q:Limb = [10 20 30 40]
+    masked_swap(@p @q 1)
+    let parts:array<string> = []
+    loop i in [0..3) {
+        let idx:int64 = i * 2 + 1
+        let a1 = tag_text(idx)
+        let a2 = tag_text(idx + 1)
+        let a3 = tag_text(idx + 2)
+        let a4 = tag_text(idx + 3)
+        let a5 = tag_text(idx + 4)
+        if i =? 1 { parts.push("{a1}:{a2}:{a3}:{a4}:{a5}") }
+    }
+    let f_out:string = "{int64(dback * 10.0)}:{int64(float64(fback) * 10.0)}:{dbits}:{fbits}"
+    let m_out:string = "{m_int["k1"]}:{m_int["k2"]}:{int64(m_flt["pi"] * 10.0)}:{m_str["hi"]}:{m_empty.length}"
+    "{f_out}|{small}:{small_inv}:{wrap_small}:{wrap_big}|{removed_i}:{back_dyn.length}:{removed_s}:{sback.length}|{m_out}|{p[0]}:{q[0]}|{parts.join(",")}"
+}
+
+main = ():>void => {
+    printl"{round3_features(1.5 float32(2.5) 7)}"
+}
+'''
+
+
+def test_x64_baseline_round3_matches_release(compiler, tmp_path):  # noqa: F811
+    source = tmp_path / 'baseline_r3.dewy'
+    source.write_text(ROUND3_PROGRAM)
+    outputs = []
+    for tag, flags in (('default', []), ('release', ['--release'])):
+        binary = tmp_path / f'r3_{tag}'
+        built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                               capture_output=True, text=True, timeout=60)
+        assert built.returncode == 0, built.stdout + built.stderr
+        ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+        outputs.append(ran.stdout)
+    assert outputs[0] == outputs[1]
+    assert outputs[0] == (
+        '15:25:4609434218613702656:1075838976|-7:6:-7:42|20:2:aa:1|11:22:35:there:0|10:1|t3:t4:t5:t6:t7\n'
+    )
+
+
+def test_x64_baseline_arr2fixed_length_mismatch_traps(compiler, tmp_path):  # noqa: F811
+    source = tmp_path / 'baseline_arr2fixed_trap.dewy'
+    source.write_text('''
+$runtime_checks
+bad = (xs:array<int64>):>int64 => {
+    let fx:array<int64 length=3> = xs
+    fx[0] + fx[1] + fx[2]
+}
+main = ():>void => {
+    let xs:array<int64> = [1 2]
+    printl"{bad(xs)}"
+}
+''')
+    binary = tmp_path / 'arr2fixed_trap'
+    built = subprocess.run([compiler, 'build', source, '-o', binary],
+                           capture_output=True, text=True, timeout=60)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode != 0
+
+
+

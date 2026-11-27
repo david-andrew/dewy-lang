@@ -45,7 +45,8 @@ from p"refine.jo" import (ref_predicates)
 from p"refine_metadata.dewy" import (representation_type)
 from p"lower_storage.dewy" import (vc)
 from p"effect_owners.dewy" import (effect_owner_init)
-from p"isolation_ops.dewy" import (isolation_children isolation_effect isolation_intrinsic)
+from p"isolation_ops.dewy" import (iso_child_p isolation_children isolation_effect isolation_intrinsic)
+from p"util.jo" import (intern)
 # Demanded body and place scanning; shared state has one owner in effects.jo.
 EffectScanWord:type=int64<overflow='wrap'>
 # Locals never cross call edges. Externally visible roots use owner-qualified
@@ -488,6 +489,10 @@ effect_indirect=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         effect_add(f EffectEvent[atom n]);
     }
 }
+let es_oom_frame:EffectScanWord=0
+let es_oom_caught:EffectScanWord=0
+let es_oom_release:EffectScanWord=0
+let es_oom_unsupported:EffectScanWord=0
 # A call of the frame compiler/oom.jo wraps an allocating function's body in
 # under `$explicit_allocation_failure` (`__setjmp(__oom_frame())` included).
 effect_oom_frame=(n:EffectScanWord):>bool=>$unsafe {
@@ -496,8 +501,14 @@ effect_oom_frame=(n:EffectScanWord):>bool=>$unsafe {
     if k not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 0 {return false}
     let g:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
     if g >=? fns.length or fns.ptr[g].decl =? 0 or not fn_in_lib(g) {return false}
-    let name=effect_name(g)
-    return name in? ["__oom_frame" "__oom_caught" "__oom_release" "__oom_unsupported"]
+    if es_oom_frame =? 0 {
+        es_oom_frame=intern("__oom_frame")
+        es_oom_caught=intern("__oom_caught")
+        es_oom_release=intern("__oom_release")
+        es_oom_unsupported=intern("__oom_unsupported")
+    }
+    let nm=EffectScanWord(nodes.ptr[EffectScanWord(fns.ptr[g].decl)].name)
+    return nm =? es_oom_frame or nm =? es_oom_caught or nm =? es_oom_release or nm =? es_oom_unsupported
 }
 # Returned values move to the caller, including a branch's chosen result.
 # Walk only the result spine, bounded at depth 32. Node-indexed marks reuse
@@ -533,19 +544,27 @@ effect_body_moves_out=(body:EffectScanWord depth:EffectScanWord=0 result:bool=tr
     effect_moved_out[value]=true
     effect_moves_out(source depth + 1)
 }
-let es_seen_p:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let es_seen_gen:EffectScanWord=1
 let es_ro_owner:EffectScanWord=-1
 let es_has_ro:bool=false
+effect_seen_bump=():>void=>$unsafe {
+    es_ro_owner=-1
+    es_seen_gen += 1
+    if es_seen_gen >=? (EffectScanWord(1) << 36) {
+        es_seen_gen=1
+        loop i in [0..effect_seen.length) {effect_seen.ptr[i]=0}
+    }
+    if effect_seen.length <? nodes.length {effect_seen.resize(nodes.length)}
+}
 effect_scan_begin=(f:EffectScanWord):>void=>$unsafe {
-    es_seen_p=effect_seen.ptr
     if es_ro_owner =? f {es_ro_owner=-1}
 }
 effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     if n =? 0 or effect_footprints_only and effect_summaries.ptr[f].footprint_opaque {return}
-    if es_seen_p =? (uint64(0) as ptr<int64>) {es_seen_p=effect_seen.ptr}
-    if es_seen_p[n] =? f {return}
-    es_seen_p[n]=f
-    let k=nodes[n].kind
+    let stamp:EffectScanWord=(es_seen_gen << 24) | f
+    if effect_seen.ptr[n] =? stamp {return}
+    effect_seen.ptr[n]=stamp
+    let k=nodes.ptr[n].kind
     let exact_rep=effect_exact_rep
     if not exact_rep and ownership_decls.length =? 0 {
         if k =? 'block' {
@@ -556,23 +575,23 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
             return
         }
         if k =? 'exprstmt' or k =? 'not_' or k =? 'defer_' {
-            let a=EffectScanWord(nodes[n].a)
+            let a=EffectScanWord(nodes.ptr[n].a)
             if a not=? 0 {effect_scan_node(f a)}
             return
         }
         if k =? 'and_' or k =? 'or_' or k =? 'while_' {
-            let a=EffectScanWord(nodes[n].a)
+            let a=EffectScanWord(nodes.ptr[n].a)
             if a not=? 0 {effect_scan_node(f a)}
-            let b=EffectScanWord(nodes[n].b)
+            let b=EffectScanWord(nodes.ptr[n].b)
             if b not=? 0 {effect_scan_node(f b)}
             return
         }
         if k =? 'if_' {
-            let a=EffectScanWord(nodes[n].a)
+            let a=EffectScanWord(nodes.ptr[n].a)
             if a not=? 0 {effect_scan_node(f a)}
-            let b=EffectScanWord(nodes[n].b)
+            let b=EffectScanWord(nodes.ptr[n].b)
             if b not=? 0 {effect_scan_node(f b)}
-            let c=EffectScanWord(nodes[n].c)
+            let c=EffectScanWord(nodes.ptr[n].c)
             if c not=? 0 {effect_scan_node(f c)}
             return
         }
@@ -580,27 +599,48 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     }
     if exact_rep and (k =? 'vardecl' or k =? 'assign' or k =? 'binary' or k =? 'conv') {
         exact_effect_representation(n)
-        es_seen_p=effect_seen.ptr
     }
     if k =? 'for_' {
-        let marks=effect_for_marks.get(EffectScanWord(nodes[n].sym)) ?? []
+        let marks=effect_for_marks.get(EffectScanWord(nodes.ptr[n].sym)) ?? []
         if not marks.contains(n) {
             marks.push(n);
-            effect_for_marks[EffectScanWord(nodes[n].sym)] = marks;
+            effect_for_marks[EffectScanWord(nodes.ptr[n].sym)] = marks;
     # These shortened place walks omit evaluated-root visits. Keep the legacy
     # adapter conservative rather than accidentally proving a global/alias pure.
         }
     }
     if k =? 'field' or k =? 'assign' {effect_isolation_block(f IsolationReason.node n);}
     let hidden:array<int64>=[]
-    if k =? 'call' or k =? 'binary' or k =? 'intrinsic' or k =? 'index' or k =? 'field' or k =? 'cast' or k =? 'conv' or k =? 'addr' or k =? 'lambda' or k =? 'partial' or k =? 'fnref' or k =? 'pair' or k =? 'map_lit' or k =? 'istype' {
+    if k =? 'call' {
+        let aux=nodes.ptr[n].aux
+        if aux not=? 0 and aux not=? 2 and aux not=? 3 {effect_isolation_block(f IsolationReason.indirect n);}
+    } else if k =? 'binary' {
+        if nodes.ptr[n].aux not=? 0 {
+            let reason=isolation_effect(n @hidden)
+            if reason not=? IsolationReason.none_ {effect_isolation_block(f reason n);}
+        }
+    } else if k =? 'intrinsic' {
+        if nodes.ptr[n].aux =? int32(24) or effect_summaries.ptr[f].isolation =? IsolationReason.none_ {
+            let reason=isolation_effect(n @hidden)
+            if reason not=? IsolationReason.none_ {effect_isolation_block(f reason n);}
+        }
+    } else if k =? 'addr' {
+        effect_isolation_block(f IsolationReason.raw n);
+    } else if k =? 'lambda' or k =? 'partial' {
+        effect_isolation_block(f IsolationReason.indirect n);
+    } else if k =? 'index' or k =? 'cast' or k =? 'conv' {
+        if effect_summaries.ptr[f].isolation =? IsolationReason.none_ {
+            let reason=isolation_effect(n @hidden)
+            if reason not=? IsolationReason.none_ {effect_isolation_block(f reason n);}
+        }
+    } else if k =? 'fnref' or k =? 'map_lit' or k =? 'istype' or (k =? 'pair' and not (nodes.ptr[n].sym >? 0 and nodes.ptr[n].b =? 0)) {
         let reason=isolation_effect(n @hidden)
         if reason not=? IsolationReason.none_ {effect_isolation_block(f reason n);}
     }
     if k =? 'ident' {
-        if nodes[n].aux =? int32<overflow='wrap'>(2) {effect_isolation_block(f IsolationReason.global_ n);}
-        else if nodes[n].aux not=? int32<overflow='wrap'>(1) {effect_isolation_block(f IsolationReason.node n);}
-        else if EffectScanWord(locals.ptr[EffectScanWord(nodes[n].sym)].flags) & (LF_CAPTURE | LF_ADDR) not=? 0 {effect_isolation_block(f IsolationReason.capture n);}
+        if nodes.ptr[n].aux =? int32<overflow='wrap'>(2) {effect_isolation_block(f IsolationReason.global_ n);}
+        else if nodes.ptr[n].aux not=? int32<overflow='wrap'>(1) {effect_isolation_block(f IsolationReason.node n);}
+        else if EffectScanWord(locals.ptr[EffectScanWord(nodes.ptr[n].sym)].flags) & (LF_CAPTURE | LF_ADDR) not=? 0 {effect_isolation_block(f IsolationReason.capture n);}
     }
     if ownership_decls.length not=? 0 {
         if k =? 'block' {effect_body_moves_out(n 0 false)}
@@ -614,7 +654,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     # (an explicit-allocation-failure frame's bookkeeping, compiler/oom.jo: the
     # frame exists only for a function that may allocate, and its thread-state
     # words are the allocator's own; it is allocation, not an external effect)
-    if effect_oom_frame(n) {
+    if ((k =? 'call' and nodes.ptr[n].aux =? 0 and nkids(n) =? 0) or (k =? 'intrinsic' and nodes.ptr[n].aux =? int32(39))) and effect_oom_frame(n) {
         effect_add(f EffectEvent[EffectAtom['alloc'] n]);
         return
     }
@@ -788,7 +828,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         }
         if effect_share(t) and EffectScanWord(locals.ptr[l].flags) & LF_BYREF not=? 0 {
             loop q in (effect_for_marks.get(l) ?? []) {
-                if effect_seen.ptr[q] =? f and nodes.ptr[q].kind =? 'for_' and nodes.ptr[q].sym =? int32<overflow='wrap'>(l) and not has_flag(q NF_MUT) and tkind(ntype(EffectScanWord(nodes.ptr[q].a))) =? 'array' {return}
+                if effect_seen.ptr[q] =? stamp and nodes.ptr[q].kind =? 'for_' and nodes.ptr[q].sym =? int32<overflow='wrap'>(l) and not has_flag(q NF_MUT) and tkind(ntype(EffectScanWord(nodes.ptr[q].a))) =? 'array' {return}
             }
         }
         let fb:EffectScanWord=EffectScanWord(fns.ptr[f].body)
@@ -1053,8 +1093,8 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
             effect_plan_cost(f n 1 << 2);
         }
     }
-    let mask=isolation_children(k)
-    if mask <? 0 {return}
+    let mask:EffectScanWord=int64(iso_child_p[int64(((nodes.ptr + n) as ptr<uint32>)[0])])
+    if mask <=? 0 {return}
     if mask & 1 not=? 0 {
         let a=EffectScanWord(nodes.ptr[n].a)
         if a not=? 0 {effect_scan_node(f a);}

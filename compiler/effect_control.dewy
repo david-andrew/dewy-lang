@@ -13,6 +13,7 @@ from p"arena.jo" import (arena_fns)
 from p"effect_contracts.dewy" import (callable_contract effect_subst)
 from p"effect_lattice.dewy" import (effect_allows effect_excluded effect_rows_fit place_base)
 from p"effect_graph.dewy" import (effect_graph_reset effect_visit)
+from p"effect_scan.dewy" import (effect_seen_bump)
 from p"effect_classifiers.dewy" import (effect_library_reset)
 from p"facts.jo" import (fact_policy)
 from p"facts_probes.dewy" import (fact_probe_function)
@@ -289,7 +290,7 @@ effects_demand=(f:ControlWord footprints:bool=false):>bool=>$unsafe {
         effect_footprints_only=footprints and not effects_active and effect_policy.prohibitions =? 0
         effect_limit=fns.length
         effect_summaries=fill(EffectSummary[] effect_limit)
-        effect_seen=fill(0 nodes.length)
+        effect_seen_bump()
         effect_event_index=dict<EffectEventKey bool>()
         effect_for_marks=dict<int64 array<int64>>()
         effect_plain_cache=dict<int64 bool>()
@@ -299,7 +300,7 @@ effects_demand=(f:ControlWord footprints:bool=false):>bool=>$unsafe {
     if f <=? 0 or f >=? effect_limit {return false}
     # Checking and fact rewrites can append nodes after an early callable
     # summary sized the marks. Cover those nodes before scanning a new row.
-    loop effect_seen.length <? nodes.length {effect_seen.push(0);}
+    if effect_seen.length <? nodes.length {effect_seen.resize(nodes.length)}
     if effect_summaries.ptr[f].index =? 0 {
         let icb=ic_phase(IC_EFFECTS)
         effect_visit(f);

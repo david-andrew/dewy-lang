@@ -26,7 +26,7 @@ from p"facts_collect.dewy" import (fact_collect)
 from p"facts_compare.dewy" import (fact_add_fits fact_assume fact_compare fact_open_endpoint fact_saved_boolean)
 from p"facts_conditions.dewy" import (fact_cond_out fact_condition fact_condition_in fact_pattern_tag fact_tag)
 from p"facts_elements.dewy" import (fact_fixed_check fact_permuted_elements fact_stepped)
-from p"facts_forgets.dewy" import (fact_builtin_formatter fact_callback_writes_nothing fact_drop_block fact_drop_exit fact_drop_footprint fact_drop_forget fact_drop_statement fact_ends_path fact_exposed fact_forget fact_path_call_effects fact_pointer_cast)
+from p"facts_forgets.dewy" import (fact_builtin_formatter fact_callback_writes_nothing fact_drop_block fact_drop_exit fact_drop_footprint fact_drop_forget fact_drop_statement fact_ends_path fact_exposed fact_fn_in_lib fact_forget fact_path_call_effects fact_pointer_cast)
 from p"facts_forks.dewy" import (fact_call_arguments fact_fork_record fact_key_callback fact_key_record fact_parallel_array fact_parallel_record fact_slice_capture)
 from p"facts_index_writes.dewy" import (fact_add_projection fact_add_value fact_bind fact_constant fact_new fact_set_bound ft_begin ft_depth ft_is_active ft_rollback)
 from p"facts_joins.dewy" import (fact_hull fact_hull_type fact_join fact_join_into fact_join_length)
@@ -44,7 +44,7 @@ from p"facts_pushes.dewy" import (fact_counted_lengths fact_counted_pushes fact_
 from p"facts_ranges.dewy" import (fact_floor_call fact_narrow_check fact_nonnegative fact_range fact_range_assumed fact_range_first fact_refinement_covers fact_step_check)
 from p"facts_routes.dewy" import (fact_after_call fact_component fact_default_value fact_read fact_receiver_route fact_replace fact_route fact_route_values fact_store_pattern fact_store_route)
 from p"facts_row_queries.dewy" import (fact_incident)
-from p"facts_slice_prep.dewy" import (fact_slice_flags)
+from p"facts_slice_prep.dewy" import (fact_slice_flags fsp_is_lib_sp)
 from p"facts_summaries.dewy" import (fact_constructor_join fact_summary fact_summary_actual fact_summary_kept_upper fact_summary_length fact_summary_payload fact_summary_payload_publish fact_summary_record)
 from p"facts_text.dewy" import (fact_affix_call fact_byte_slice fact_byte_view fact_find_start fact_lines_call fact_regex_search_result fact_removal fact_search_call fact_search_reads_only fact_search_result fact_split_call fact_string_call fact_string_index fact_string_slice fact_words_call)
 from p"facts_value_queries.dewy" import (fact_binding fact_bound fact_slot fact_truth)
@@ -55,6 +55,7 @@ from p"lower.jo" import (VC_VOID)
 from p"lower_storage.dewy" import (vc)
 from p"nd_contract_ops.dewy" import (fact_nd_capture fact_nd_need)
 from p"nd_contracts.jo" import (fact_nd_call nd_mutable_handle nd_mutable_signatures)
+from p"numeric_library_types.dewy" import (is_nd)
 from p"ownership.jo" import (ownership_decls ownership_fact_cleanup)
 from p"ownership_types.dewy" import (ownership_fact_type)
 from p"place_routes.dewy" import (place_route)
@@ -209,7 +210,7 @@ fact_parallel_range_count=(r:CaptureWord @s:FactState):>int64=>$unsafe {
     if nodes.ptr[a].ival not=? 0 or inclusive {return 0}
     fact_clamped(@s fact_capture(b @s) r)
 }
-# Trivial atom expression that cannot spawn nested FactStates, obligations, or writes.
+# Pure straight-line expression that cannot call fact_forget/fact_compact or replace FactState.
 fact_no_state_replace=(n:CaptureWord @budget:CaptureWord):>bool=>$unsafe {
     if n <=? 0 {return true}
     if budget <=? 0 {return false}
@@ -218,11 +219,12 @@ fact_no_state_replace=(n:CaptureWord @budget:CaptureWord):>bool=>$unsafe {
     let k=nd[0].kind
     match k {
         <'int_lit'|'float_lit'|'bool_lit'|'none_lit'|'null_lit'|'dotname'|'str_lit'|'ident'> => {return true}
-        <'not_'|'conv'> => {return fact_no_state_replace(CaptureWord(nd[0].a) @budget)}
+        <'not_'|'conv'|'unary'|'field'> => {return fact_no_state_replace(CaptureWord(nd[0].a) @budget)}
+        <'binary'|'index'> => {return fact_no_state_replace(CaptureWord(nd[0].a) @budget) and fact_no_state_replace(CaptureWord(nd[0].b) @budget)}
         _ => {return false}
     }
 }
-# Pure condition expression: cannot write storage/bindings or spawn nested FactStates.
+# Pure condition expression (used inside fact_speculating > 0): no writes or state replacements.
 fact_pure_cond=(n:CaptureWord @budget:CaptureWord):>bool=>$unsafe {
     if n <=? 0 {return true}
     if budget <=? 0 {return false}
@@ -231,13 +233,16 @@ fact_pure_cond=(n:CaptureWord @budget:CaptureWord):>bool=>$unsafe {
     let k=nd[0].kind
     match k {
         <'int_lit'|'float_lit'|'bool_lit'|'none_lit'|'null_lit'|'dotname'|'ident'> => {return true}
-        <'not_'|'conv'|'istype'|'narrow'> => {
+        <'not_'|'conv'|'istype'|'narrow'|'field'> => {
             return fact_pure_cond(CaptureWord(nd[0].a) @budget)
+        }
+        <'index'> => {
+            return fact_pure_cond(CaptureWord(nd[0].a) @budget) and fact_pure_cond(CaptureWord(nd[0].b) @budget)
         }
         <'binary'> => {
             if nd[0].aux not=? 0 {return false}
             let op=capture_tokens[nd[0].op]
-            if op not=? 'eq' and op not=? 'ne' and op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' {return false}
+            if op not=? 'eq' and op not=? 'ne' and op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' and op not=? 'plus' and op not=? 'minus' and op not=? 'star' {return false}
             return fact_pure_cond(CaptureWord(nd[0].a) @budget) and fact_pure_cond(CaptureWord(nd[0].b) @budget)
         }
         _ => {return false}
@@ -251,19 +256,36 @@ fact_flatten_and=(n:CaptureWord @out:array<int64>):>bool=>$unsafe {
     out.push(n)
     true
 }
+fact_no_state_replace_stmt=(st:CaptureWord @budget:CaptureWord):>bool=>$unsafe {
+    if st <=? 0 {return true}
+    let k=nodes.ptr[st].kind
+    if k =? 'exprstmt' {return fact_no_state_replace(CaptureWord(nodes.ptr[st].a) @budget)}
+    if k =? 'vardecl' {
+        if has_flag(st NF_GLOBAL) or nkids(st) not=? 0 {return false}
+        return fact_no_state_replace(CaptureWord(nodes.ptr[st].b) @budget)
+    }
+    false
+}
 fact_simple_diverges=(b:CaptureWord):>bool=>$unsafe {
     if b <=? 0 {return false}
     let k=nodes.ptr[b].kind
-    let budget:CaptureWord=16
+    let budget:CaptureWord=24
+    if k =? 'break_' or k =? 'continue_' {return true}
     if k =? 'return_' {
         return fact_no_state_replace(CaptureWord(nodes.ptr[b].a) @budget)
     }
     if k =? 'block' {
         let nk=CaptureWord(nodes.ptr[b].nlist)
-        if nk not=? 1 {return false}
-        let only=CaptureWord(lists.ptr[CaptureWord(nodes.ptr[b].list)])
-        if nodes.ptr[only].kind not=? 'return_' {return false}
-        return fact_no_state_replace(CaptureWord(nodes.ptr[only].a) @budget)
+        if nk <? 1 or nk >? 8 {return false}
+        let l0=CaptureWord(nodes.ptr[b].list)
+        let last=CaptureWord(lists.ptr[l0 + nk - 1])
+        let lk=nodes.ptr[last].kind
+        if lk not=? 'return_' and lk not=? 'break_' and lk not=? 'continue_' {return false}
+        loop i in [CaptureWord(0)..nk - 1) {
+            if not fact_no_state_replace_stmt(CaptureWord(lists.ptr[l0 + i]) @budget) {return false}
+        }
+        if lk =? 'return_' {return fact_no_state_replace(CaptureWord(nodes.ptr[last].a) @budget)}
+        return true
     }
     false
 }
@@ -641,8 +663,22 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
             if ownership_fact_cleanup and s.live {fact_drop_forget(@s n fact_drop_exit(fact_owner))}
             let level=CaptureWord(fact_loops.length) - 1 - CaptureWord(nodes.ptr[n].ival)
             if level >=? 0 {
-                if k =? 'break_' {capture_loops[0][level].exits=fact_join(fact_loops[level].exits s n)}
-                else {capture_loops[0][level].back=fact_join(fact_loops[level].back s n)}
+                if ft_is_active() {
+                    if k =? 'break_' {capture_loops[0][level].exits=fact_join(fact_loops[level].exits s n)}
+                    else {capture_loops[0][level].back=fact_join(fact_loops[level].back s n)}
+                } else {
+                    if k =? 'break_' {
+                        let dst=capture_loops[0][level].exits
+                        capture_loops[0][level].exits=FactState[]
+                        fact_join_into(@dst @s n)
+                        capture_loops[0][level].exits=dst
+                    } else {
+                        let dst=capture_loops[0][level].back
+                        capture_loops[0][level].back=FactState[]
+                        fact_join_into(@dst @s n)
+                        capture_loops[0][level].back=dst
+                    }
+                }
             }
             s.live=false
             return 0
@@ -1456,264 +1492,276 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                 proof_call(n @s)
                 return 0
             }
+            let lib_sp=nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 and fact_fn_in_lib(CaptureWord(nodes.ptr[n].sym)) and fsp_is_lib_sp(n CaptureWord(nodes.ptr[n].sym))
             fact_capture(CaptureWord(nodes.ptr[n].a) @s);
             let outer_call=fact_route_call
             capture_route_call[0]=n
             let sum_operand=fact_sum_operand
-            if fact_floor_call(n) =? 1 {capture_sum_operand[0]=fact_sum_source(kid(n 0))}
+            if lib_sp and fact_floor_call(n) =? 1 {capture_sum_operand[0]=fact_sum_source(kid(n 0))}
             let values=fact_call_arguments(n @s)
             capture_sum_operand[0]=sum_operand
             capture_route_call[0]=outer_call
-            if fact_map_snapshot_call(n) {return fact_map_snapshot(n @s values[0])}
-            if fact_comprehension_sources.length >? 0 {
-                let made=fact_map_of(n @s)
-                if made not=? 0 {return made}
-            }
-            if dir_assumed_bounds_any and fact_parallel_range_call(n) {fact_parallel_count_check(n @s)}
-            if fact_parallel_array(n) {fact_parallel_record(n @s values[0])}
-            else if fact_fork_entries.length >? 0 and fact_key_callback(n) >? 0 {fact_key_record(n @s values[0])}
             if wi_fact_calls.length >? 0 and wi_fact_calls.has(n) {wi_fact_check(n values @s)}
-            if fact_speculating =? 0 {
-                let floor_probe=fact_probe_on and nkids(n) =? 2 and (fact_floor_call(n) =? 1 or fact_floor_call(n) =? 2)
-                # (a divisor's call keeps its two operands: a wrapper takes the
-                # obligation along, expr.jo move_divisor)
-                let obligation=if values.length =? 2 {fact_divisors.get(n) ?? (if fact_rational_constructor(n) or fact_rational_divmod(n) {1} else {0})} else {0}
-                if obligation not=? 0 {
-                    let proven=fact_divisor(@s n values[0] values[1] obligation =? 2)
-                    if floor_probe {fact_probe_record(n proven)}
+            if not lib_sp {
+                if fact_speculating =? 0 and values.length =? 2 and fact_divisors.length >? 0 {
+                    let obligation=fact_divisors.get(n) ?? 0
+                    if obligation not=? 0 {fact_divisor(@s n values[0] values[1] obligation =? 2);}
                 }
-                else if floor_probe {fact_probe_divisor(n @s values[1] kid(n 1))}
-                if values.length =? 2 and fact_power_call(n) {fact_power_check(n @s values[1] values[0])}
-                let first=fact_range_first(n true)
-                if first >=? 0 and values.length =? nkids(n) {fact_step_check(n @s values[first] values[CaptureWord(first) + 1] kid(n first) kid(n CaptureWord(first) + 1))}
-            }
-            # (a dictionary's or set's entry count is a length of its value)
-            if fact_entry_count_call(n) {return fact_project(@s values[0] (-1) false T_INT)}
-            # __bcast([n]) returns n for every integer n. Use the evaluated
-            # argument's length and element facts, including values produced by a
-            # caller, rather than the syntax of the generated dotted expression.
-            if fact_single_bcast_call(n) and values.length =? 1 and values[0] not=? 0 {
-                let count=fact_project(@s values[0] (-1) false T_INT)
-                let one=fact_constant(@s 1)
-                if fact_compare(s 'eq' count one) =? 1 {
-                    let zero=fact_constant(@s 0)
-                    return fact_project(@s values[0] zero true T_INT)
+                if values.length =? 1 and is_nd(prune(ntype(n))) {
+                    let nd=fact_nd_call(n)
+                    if nd not=? 0 {return fact_nd_capture(n @s values nd)}
                 }
-            }
-            if fact_same_length_call(n) and s.projections.length <? FACT_CAP {
-                let length=if values.length =? 1 and values[0] not=? 0 {fact_project(@s values[0] (-1) false T_INT)} else {fact_length_through(kid(n 0) @s 0)}
-                if length not=? 0 {
-                    let fresh=fact_new(@s FactBound() FactTerm(type=ntype(n)))
-                    fact_add_projection(@s FactProjection(fresh (-1) false length))
-                    let source=if values.length =? 1 {values[0]} else {0}
-                    if is_map_type(fact_type(ntype(kid(n 0)))) {
-                        let name=name_of(CaptureWord(nodes.ptr[CaptureWord(fns.ptr[CaptureWord(nodes.ptr[n].sym)].decl)].name))
-                        let kt=representation_type(struct_targ(CaptureWord(types.ptr[fact_type(ntype(kid(n 0)))].st) 0))
-                        # User equality/hash hooks need their own proof; even a
-                        # snapshot key need not compare equal to itself.
-                        if source not=? 0 and name not=? "values" and (fact_scalar(kt) or kt =? T_STR or fact_reflexive_key(kt)) and s.projections.length <? FACT_CAP {
-                            fact_add_projection(@s FactProjection(fresh FACT_KEYS_SOURCE false source))
-                            # (its key positions, which a later entry change keeps: fact_map_member)
-                            if fact_name_vals =? 0 {capture_name_vals[0]=intern("vals")}
-                            fact_project(@s source FACT_MAP_POSITIONS false T_INT);
+            } else {
+                if fact_map_snapshot_call(n) {return fact_map_snapshot(n @s values[0])}
+                if fact_comprehension_sources.length >? 0 {
+                    let made=fact_map_of(n @s)
+                    if made not=? 0 {return made}
+                }
+                if dir_assumed_bounds_any and fact_parallel_range_call(n) {fact_parallel_count_check(n @s)}
+                if fact_parallel_array(n) {fact_parallel_record(n @s values[0])}
+                else if fact_fork_entries.length >? 0 and fact_key_callback(n) >? 0 {fact_key_record(n @s values[0])}
+                if fact_speculating =? 0 {
+                    let floor_probe=fact_probe_on and nkids(n) =? 2 and (fact_floor_call(n) =? 1 or fact_floor_call(n) =? 2)
+                    # (a divisor's call keeps its two operands: a wrapper takes the
+                    # obligation along, expr.jo move_divisor)
+                    let obligation=if values.length =? 2 {fact_divisors.get(n) ?? (if fact_rational_constructor(n) or fact_rational_divmod(n) {1} else {0})} else {0}
+                    if obligation not=? 0 {
+                        let proven=fact_divisor(@s n values[0] values[1] obligation =? 2)
+                        if floor_probe {fact_probe_record(n proven)}
+                    }
+                    else if floor_probe {fact_probe_divisor(n @s values[1] kid(n 1))}
+                    if values.length =? 2 and fact_power_call(n) {fact_power_check(n @s values[1] values[0])}
+                    let first=fact_range_first(n true)
+                    if first >=? 0 and values.length =? nkids(n) {fact_step_check(n @s values[first] values[CaptureWord(first) + 1] kid(n first) kid(n CaptureWord(first) + 1))}
+                }
+                # (a dictionary's or set's entry count is a length of its value)
+                if fact_entry_count_call(n) {return fact_project(@s values[0] (-1) false T_INT)}
+                # __bcast([n]) returns n for every integer n. Use the evaluated
+                # argument's length and element facts, including values produced by a
+                # caller, rather than the syntax of the generated dotted expression.
+                if fact_single_bcast_call(n) and values.length =? 1 and values[0] not=? 0 {
+                    let count=fact_project(@s values[0] (-1) false T_INT)
+                    let one=fact_constant(@s 1)
+                    if fact_compare(s 'eq' count one) =? 1 {
+                        let zero=fact_constant(@s 0)
+                        return fact_project(@s values[0] zero true T_INT)
+                    }
+                }
+                if fact_same_length_call(n) and s.projections.length <? FACT_CAP {
+                    let length=if values.length =? 1 and values[0] not=? 0 {fact_project(@s values[0] (-1) false T_INT)} else {fact_length_through(kid(n 0) @s 0)}
+                    if length not=? 0 {
+                        let fresh=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+                        fact_add_projection(@s FactProjection(fresh (-1) false length))
+                        let source=if values.length =? 1 {values[0]} else {0}
+                        if is_map_type(fact_type(ntype(kid(n 0)))) {
+                            let name=name_of(CaptureWord(nodes.ptr[CaptureWord(fns.ptr[CaptureWord(nodes.ptr[n].sym)].decl)].name))
+                            let kt=representation_type(struct_targ(CaptureWord(types.ptr[fact_type(ntype(kid(n 0)))].st) 0))
+                            # User equality/hash hooks need their own proof; even a
+                            # snapshot key need not compare equal to itself.
+                            if source not=? 0 and name not=? "values" and (fact_scalar(kt) or kt =? T_STR or fact_reflexive_key(kt)) and s.projections.length <? FACT_CAP {
+                                fact_add_projection(@s FactProjection(fresh FACT_KEYS_SOURCE false source))
+                                # (its key positions, which a later entry change keeps: fact_map_member)
+                                if fact_name_vals =? 0 {capture_name_vals[0]=intern("vals")}
+                                fact_project(@s source FACT_MAP_POSITIONS false T_INT);
+                            }
                         }
+                        else {fact_keys_copy(@s source fresh)}
+                        return fresh
                     }
-                    else {fact_keys_copy(@s source fresh)}
-                    return fresh
                 }
-            }
-            let endpoint=fact_endpoint_call(n)
-            if endpoint not=? 0 {return fact_endpoint(n @s values[0] endpoint)}
-            if fact_chosen_call(n) and values.length >=? 1 {return fact_chosen(n @s values[0])}
-            if fact_affix_call(n) {
-                let length=fact_project(@s values[0] (-1) false T_INT)
-                let pattern=fact_project(@s values[1] (-1) false T_INT)
-                return fact_new(@s fact_domain(T_BOOL) FactTerm(a=length b=pattern origin=n))
-            }
-            if fact_empty_array_call(n) {
-                let t=fact_type(ntype(kid(n 0)))
-                let length=if types.ptr[t].kind =? 'fixed' {fact_constant(@s fixed_len(t))} else {fact_project(@s values[0] (-1) false T_INT)}
-                return fact_new(@s fact_domain(T_BOOL) FactTerm('eq' length fact_constant(@s 0)))
-            }
-            let nd=fact_nd_call(n)
-            if nd not=? 0 {return fact_nd_capture(n @s values nd)}
-            let array=fact_array_call(n)
-            if array not=? 0 {fact_array_call_check(n @s values array)}
-            # (a dotted expression's common length: its operands', proven equal)
-            if array =? 40 {
-                let common=fact_bcast_common(n @s)
-                if common not=? 0 {return common}
-            }
-            if fact_gpu_index_call(n) {fact_gpu_index_check(n @s values)}
-            if fact_nonempty_call(n) {fact_nonempty_check(n @s values)}
-            else if fact_exact_sum_call(n) {fact_exact_sum_check(n @s values)}
-            if array =? 4 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(kid(n 0)))) {
-                let route=fact_receiver_route(n @s)
-                let held=fact_route_values(@s route)
-                let base=if held.length >? 0 {held[CaptureWord(held.length) - 1]} else {values[0]}
-                let t=ntype(kid(n 0))
-                let element=telem(fact_type(t))
-                let left=fact_project(@s base values[1] true element)
-                let right=fact_project(@s base values[2] true element)
-                let first=fact_replace(@s base values[1] true right t)
-                let fresh=fact_replace(@s first values[2] true left t)
-                # (the second store keeps the first only for distinct positions,
-                # but a swap's first position holds the other's old element even
-                # when both are one: then the two elements are one value)
-                let kept=false
-                let pi=fact_projection_first(s fresh)
-                loop pi >=? 0 and not kept {
-                    kept=s.projections[pi].element and s.projections[pi].selector =? values[1]
-                    pi=fact_projection_after(s pi)
+                let endpoint=fact_endpoint_call(n)
+                if endpoint not=? 0 {return fact_endpoint(n @s values[0] endpoint)}
+                if fact_chosen_call(n) and values.length >=? 1 {return fact_chosen(n @s values[0])}
+                if fact_affix_call(n) {
+                    let length=fact_project(@s values[0] (-1) false T_INT)
+                    let pattern=fact_project(@s values[1] (-1) false T_INT)
+                    return fact_new(@s fact_domain(T_BOOL) FactTerm(a=length b=pattern origin=n))
                 }
-                if not kept and s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh values[1] true right))}
-                fact_store_route(@s route fresh n true)
-                return 0
-            }
-            if array =? 6 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(kid(n 0)))) {
-                let route=fact_receiver_route(n @s)
-                let p=fact_place(route.root)
-                let callback=nkids(n) >? 1 and is_fn_type(ntype(kid(n 1)))
-                let element=fact_type(telem(fact_type(ntype(kid(n 0)))))
-                let plain=not callback and (fact_scalar(element) or element =? T_STR)
-                let reverse=name_of(CaptureWord(nodes.ptr[CaptureWord(fns.ptr[CaptureWord(nodes.ptr[n].sym)].decl)].name)) =? "reverse"
-                # (an exposed receiver keeps its length too when the callback
-                # writes nothing: only the permutation itself changes it)
-                let unexposed=p.declaration not=? 0 and (not fact_exposed(p) or callback and fact_callback_writes_nothing(kid(n 1)))
-                if p.declaration not=? 0 and (plain or reverse or unexposed) {
+                if fact_empty_array_call(n) {
+                    let t=fact_type(ntype(kid(n 0)))
+                    let length=if types.ptr[t].kind =? 'fixed' {fact_constant(@s fixed_len(t))} else {fact_project(@s values[0] (-1) false T_INT)}
+                    return fact_new(@s fact_domain(T_BOOL) FactTerm('eq' length fact_constant(@s 0)))
+                }
+                let nd=fact_nd_call(n)
+                if nd not=? 0 {return fact_nd_capture(n @s values nd)}
+                let array=fact_array_call(n)
+                if array not=? 0 {fact_array_call_check(n @s values array)}
+                # (a dotted expression's common length: its operands', proven equal)
+                if array =? 40 {
+                    let common=fact_bcast_common(n @s)
+                    if common not=? 0 {return common}
+                }
+                if fact_gpu_index_call(n) {fact_gpu_index_check(n @s values)}
+                if fact_nonempty_call(n) {fact_nonempty_check(n @s values)}
+                else if fact_exact_sum_call(n) {fact_exact_sum_check(n @s values)}
+                if array =? 4 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(kid(n 0)))) {
+                    let route=fact_receiver_route(n @s)
                     let held=fact_route_values(@s route)
-                    let length=fact_project(@s held[CaptureWord(held.length) - 1] (-1) false T_INT)
-                    fact_path_call_effects(n @s)
-                    let fresh=fact_new(@s FactBound() FactTerm(type=ntype(kid(n 0))))
-                    fact_add_projection(@s FactProjection(fresh (-1) false length))
-                    # A callback receives scalar/string values, not their slots.
-                    # With an unexposed receiver, or one the callback cannot
-                    # write (fact_callback_writes_nothing), it cannot change the inventory.
-                    # Its ordinary effects above still invalidate other roots; key
-                    # provenance names the old dictionary, never its replacement.
-                    if plain or reverse or callback and (fact_scalar(element) or element =? T_STR) and unexposed {
-                        fact_keys_copy(@s held[CaptureWord(held.length) - 1] fresh)
-                        fact_permuted_elements(@s held[CaptureWord(held.length) - 1] fresh)
+                    let base=if held.length >? 0 {held[CaptureWord(held.length) - 1]} else {values[0]}
+                    let t=ntype(kid(n 0))
+                    let element=telem(fact_type(t))
+                    let left=fact_project(@s base values[1] true element)
+                    let right=fact_project(@s base values[2] true element)
+                    let first=fact_replace(@s base values[1] true right t)
+                    let fresh=fact_replace(@s first values[2] true left t)
+                    # (the second store keeps the first only for distinct positions,
+                    # but a swap's first position holds the other's old element even
+                    # when both are one: then the two elements are one value)
+                    let kept=false
+                    let pi=fact_projection_first(s fresh)
+                    loop pi >=? 0 and not kept {
+                        kept=s.projections[pi].element and s.projections[pi].selector =? values[1]
+                        pi=fact_projection_after(s pi)
                     }
+                    if not kept and s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh values[1] true right))}
+                    fact_store_route(@s route fresh n true)
+                    return 0
+                }
+                if array =? 6 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(kid(n 0)))) {
+                    let route=fact_receiver_route(n @s)
+                    let p=fact_place(route.root)
+                    let callback=nkids(n) >? 1 and is_fn_type(ntype(kid(n 1)))
+                    let element=fact_type(telem(fact_type(ntype(kid(n 0)))))
+                    let plain=not callback and (fact_scalar(element) or element =? T_STR)
+                    let reverse=name_of(CaptureWord(nodes.ptr[CaptureWord(fns.ptr[CaptureWord(nodes.ptr[n].sym)].decl)].name)) =? "reverse"
+                    # (an exposed receiver keeps its length too when the callback
+                    # writes nothing: only the permutation itself changes it)
+                    let unexposed=p.declaration not=? 0 and (not fact_exposed(p) or callback and fact_callback_writes_nothing(kid(n 1)))
+                    if p.declaration not=? 0 and (plain or reverse or unexposed) {
+                        let held=fact_route_values(@s route)
+                        let length=fact_project(@s held[CaptureWord(held.length) - 1] (-1) false T_INT)
+                        fact_path_call_effects(n @s)
+                        let fresh=fact_new(@s FactBound() FactTerm(type=ntype(kid(n 0))))
+                        fact_add_projection(@s FactProjection(fresh (-1) false length))
+                        # A callback receives scalar/string values, not their slots.
+                        # With an unexposed receiver, or one the callback cannot
+                        # write (fact_callback_writes_nothing), it cannot change the inventory.
+                        # Its ordinary effects above still invalidate other roots; key
+                        # provenance names the old dictionary, never its replacement.
+                        if plain or reverse or callback and (fact_scalar(element) or element =? T_STR) and unexposed {
+                            fact_keys_copy(@s held[CaptureWord(held.length) - 1] fresh)
+                            fact_permuted_elements(@s held[CaptureWord(held.length) - 1] fresh)
+                        }
+                        fact_store_route(@s route fresh n)
+                        return 0
+                    }
+                }
+                if array =? 5 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(kid(n 0)))) {
+                    let route=fact_receiver_route(n @s)
+                    let held=fact_route_values(@s route)
+                    let length=fact_project(@s (if held.length >? 0 {held[CaptureWord(held.length) - 1]} else {values[0]}) (-1) false T_INT)
+                    let old=fact_bound(s length)
+                    let fresh=fact_new(@s FactBound() FactTerm(type=ntype(kid(n 0))))
+                    let size=fact_new(@s FactBound(min(fact_length_max() CaptureWord(old.lo) + 1) fact_length_max()))
+                    if old.hi <? fact_length_max() {fact_set_bound(@s size FactBound(CaptureWord(old.lo) + 1 CaptureWord(old.hi) + 1))}
+                    # (one longer exactly: `xs.insert(xs.pop() 0)` keeps the length)
+                    if old.lo not=? old.hi {
+                        fact_difference(@s size length 1 n)
+                        fact_difference(@s length size (-1) n)
+                    }
+                    fact_add_projection(@s FactProjection(fresh (-1) false size))
                     fact_store_route(@s route fresh n)
                     return 0
                 }
-            }
-            if array =? 5 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(kid(n 0)))) {
-                let route=fact_receiver_route(n @s)
-                let held=fact_route_values(@s route)
-                let length=fact_project(@s (if held.length >? 0 {held[CaptureWord(held.length) - 1]} else {values[0]}) (-1) false T_INT)
-                let old=fact_bound(s length)
-                let fresh=fact_new(@s FactBound() FactTerm(type=ntype(kid(n 0))))
-                let size=fact_new(@s FactBound(min(fact_length_max() CaptureWord(old.lo) + 1) fact_length_max()))
-                if old.hi <? fact_length_max() {fact_set_bound(@s size FactBound(CaptureWord(old.lo) + 1 CaptureWord(old.hi) + 1))}
-                # (one longer exactly: `xs.insert(xs.pop() 0)` keeps the length)
-                if old.lo not=? old.hi {
-                    fact_difference(@s size length 1 n)
-                    fact_difference(@s length size (-1) n)
+                if array =? 30 or array =? 31 {
+                    # (a slice assignment changes elements, not the length)
+                    let a=kid(n 0)
+                    let route=fact_receiver_route(n @s)
+                    let held=fact_route_values(@s route)
+                    let length=fact_project(@s (if held.length >? 0 {held[CaptureWord(held.length) - 1]} else {values[0]}) (-1) false T_INT)
+                    let fresh=fact_new(@s FactBound() FactTerm(type=ntype(a)))
+                    if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh (-1) false length))}
+                    fact_store_route(@s route fresh n true)
+                    return fact_fresh(@s ntype(n))
                 }
-                fact_add_projection(@s FactProjection(fresh (-1) false size))
-                fact_store_route(@s route fresh n)
-                return 0
-            }
-            if array =? 30 or array =? 31 {
-                # (a slice assignment changes elements, not the length)
-                let a=kid(n 0)
-                let route=fact_receiver_route(n @s)
-                let held=fact_route_values(@s route)
-                let length=fact_project(@s (if held.length >? 0 {held[CaptureWord(held.length) - 1]} else {values[0]}) (-1) false T_INT)
-                let fresh=fact_new(@s FactBound() FactTerm(type=ntype(a)))
-                if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh (-1) false length))}
-                fact_store_route(@s route fresh n true)
-                return fact_fresh(@s ntype(n))
-            }
-            let pool=if fact_policy =? 'RequireStatic' or fact_query or fact_probe_on {fact_pool_call(n)} else {0}
-            if pool not=? 0 {return fact_pool_capture(n @s values pool)}
-            if (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) and fact_map_insert_call(n) {
-                let stored=fact_map_store(n @s values fact_map_receiver(@s n values[0]))
-                if stored not=? 0 {return stored}
-            }
-            if ref_self_active and (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) and values.length >=? 2 and values[0] not=? 0 and fact_projection_find(s values[0] FACT_SIB_BOUND false) >=? 0 {
-                let bounded=fact_map_bounded_call(n)
-                if bounded not=? 0 and (bounded =? 1 or values.length =? 3) {
-                    let result=fact_map_bounded(n @s values bounded)
-                    if result not=? 0 {return result}
-                }
-            }
-            if ref_self_active and (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) and fact_map_clear_call(n) and s.projections.length <? FACT_CAP and fact_map_clear(n @s) {return 0}
-            let map=if fact_policy =? 'RequireStatic' or fact_query or fact_probe_on {fact_map_call(n)} else {0}
-            if map >=? 2 and map <=? 4 {fact_map_check(n @s values)}
-            if map not=? 0 {
-                let before=fact_map_receiver(@s n values[0])
-                # (asking for a builtin key, or for its entry's position, reads the
-                # dictionary and nothing else: an exposed one is not forgotten, as
-                # its summary, through the hashing's generic calls, would have it)
-                let kt=representation_type(ntype(kid(n 1)))
-                let builtin=fact_scalar(kt) or kt =? T_STR
-                if map =? 5 and fact_map_store_call(n) {
-                    let stored=fact_map_store(n @s values before)
+                let pool=if fact_policy =? 'RequireStatic' or fact_query or fact_probe_on {fact_pool_call(n)} else {0}
+                if pool not=? 0 {return fact_pool_capture(n @s values pool)}
+                if (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) and fact_map_insert_call(n) {
+                    let stored=fact_map_store(n @s values fact_map_receiver(@s n values[0]))
                     if stored not=? 0 {return stored}
                 }
-                if map =? 6 and builtin and fact_map_optional(n) {
-                    let result=fact_fresh(@s ntype(n))
-                    let member=fact_map_member(@s n values[0] values[1])
-                    if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(result (-3) false member))}
-                    if ref_self_active {ref_sib_map_read(@s values[0] result n)}
+                if ref_self_active and (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) and values.length >=? 2 and values[0] not=? 0 and fact_projection_find(s values[0] FACT_SIB_BOUND false) >=? 0 {
+                    let bounded=fact_map_bounded_call(n)
+                    if bounded not=? 0 and (bounded =? 1 or values.length =? 3) {
+                        let result=fact_map_bounded(n @s values bounded)
+                        if result not=? 0 {return result}
+                    }
+                }
+                if ref_self_active and (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) and fact_map_clear_call(n) and s.projections.length <? FACT_CAP and fact_map_clear(n @s) {return 0}
+                let map=if fact_policy =? 'RequireStatic' or fact_query or fact_probe_on {fact_map_call(n)} else {0}
+                if map >=? 2 and map <=? 4 {fact_map_check(n @s values)}
+                if map not=? 0 {
+                    let before=fact_map_receiver(@s n values[0])
+                    # (asking for a builtin key, or for its entry's position, reads the
+                    # dictionary and nothing else: an exposed one is not forgotten, as
+                    # its summary, through the hashing's generic calls, would have it)
+                    let kt=representation_type(ntype(kid(n 1)))
+                    let builtin=fact_scalar(kt) or kt =? T_STR
+                    if map =? 5 and fact_map_store_call(n) {
+                        let stored=fact_map_store(n @s values before)
+                        if stored not=? 0 {return stored}
+                    }
+                    if map =? 6 and builtin and fact_map_optional(n) {
+                        let result=fact_fresh(@s ntype(n))
+                        let member=fact_map_member(@s n values[0] values[1])
+                        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(result (-3) false member))}
+                        if ref_self_active {ref_sib_map_read(@s values[0] result n)}
+                        return result
+                    }
+                    if map >? 3 or not builtin {fact_path_call_effects(n @s)}
+                    if map =? 1 {return fact_map_member(@s n before values[1])}
+                    # (the entry, of the dictionary's value after the hashing's calls)
+                    if map =? 2 {
+                        let entry=fact_map_entry(@s n (if builtin {before} else {fact_map_receiver(@s n values[0])}) values[1])
+                        if ref_self_active {ref_sib_map_read(@s values[0] entry n)}
+                        return entry
+                    }
+                    # (the entry is there now, in d's value after the change, and so is
+                    # every key known there before: a store removes none)
+                    if map =? 3 or map =? 5 {
+                        let after=fact_map_receiver(@s n values[0])
+                        if after not=? before {
+                            let keys:array<int64>=[]
+                            let i=fact_projection_first(s before)
+                            loop i >=? 0 {
+                                let q=s.projections[i]
+                                i=fact_projection_after(s i)
+                                if q.element and fact_truth(s q.value) =? 1 {keys.push(q.selector)}
+                            }
+                            loop key in keys {fact_assume(@s fact_project(@s after key true T_BOOL) true)}
+                        }
+                        fact_assume(@s fact_map_member(@s n after values[1]) true)
+                        if map =? 3 {return fact_map_position(@s n after values[1])}
+                    }
+                    let other=fact_new(@s fact_domain(ntype(n) 'missing' n) FactTerm(type=ntype(n)))
+                    if ref_self_active and (map =? 4 or map =? 6) {ref_sib_map_read(@s values[0] other n)}
+                    return other
+                }
+                let zero_test=fact_rational_zero_test(n)
+                if zero_test >=? 0 and values[zero_test] not=? 0 {
+                    let numerator=fact_project(@s values[zero_test] intern("numerator") false T_MATH_INT)
+                    let nothing=fact_constant(@s 0)
+                    if CaptureWord(nodes.ptr[CaptureWord(fns.ptr[CaptureWord(nodes.ptr[n].sym)].decl)].name) =? fact_name_rational_lt {
+                        return fact_new(@s fact_domain(T_BOOL) if zero_test =? 0 {FactTerm('lt' numerator nothing)} else {FactTerm('lt' nothing numerator)})
+                    }
+                    return fact_new(@s fact_domain(T_BOOL) FactTerm('eq' numerator nothing))
+                }
+                if values.length =? 2 and values[0] not=? 0 and values[1] not=? 0 and fact_rational_constructor(n) {return fact_rational_made(@s n values[0] values[1])}
+                if values.length =? 1 and values[0] not=? 0 and fact_rational_promotion(n) {
+                    let result=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+                    if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(result intern("numerator") false values[0]))}
                     return result
                 }
-                if map >? 3 or not builtin {fact_path_call_effects(n @s)}
-                if map =? 1 {return fact_map_member(@s n before values[1])}
-                # (the entry, of the dictionary's value after the hashing's calls)
-                if map =? 2 {
-                    let entry=fact_map_entry(@s n (if builtin {before} else {fact_map_receiver(@s n values[0])}) values[1])
-                    if ref_self_active {ref_sib_map_read(@s values[0] entry n)}
-                    return entry
+                let string=fact_string_call(n)
+                if string =? 4 {return fact_byte_slice(n @s values)}
+                if string =? 5 {fact_find_start(n @s values[2] fact_project(@s values[0] (-1) false T_INT))}
+                else if string not=? 0 {
+                    let length=fact_project(@s values[0] (-1) false T_INT)
+                    if string =? 1 {return length}
+                    if string =? 3 {return fact_string_slice(n @s values length)}
+                    fact_string_index(n @s values[1] length)
+                    return fact_new(@s fact_domain(ntype(n)) FactTerm(type=ntype(n)))
                 }
-                # (the entry is there now, in d's value after the change, and so is
-                # every key known there before: a store removes none)
-                if map =? 3 or map =? 5 {
-                    let after=fact_map_receiver(@s n values[0])
-                    if after not=? before {
-                        let keys:array<int64>=[]
-                        let i=fact_projection_first(s before)
-                        loop i >=? 0 {
-                            let q=s.projections[i]
-                            i=fact_projection_after(s i)
-                            if q.element and fact_truth(s q.value) =? 1 {keys.push(q.selector)}
-                        }
-                        loop key in keys {fact_assume(@s fact_project(@s after key true T_BOOL) true)}
-                    }
-                    fact_assume(@s fact_map_member(@s n after values[1]) true)
-                    if map =? 3 {return fact_map_position(@s n after values[1])}
-                }
-                let other=fact_new(@s fact_domain(ntype(n) 'missing' n) FactTerm(type=ntype(n)))
-                if ref_self_active and (map =? 4 or map =? 6) {ref_sib_map_read(@s values[0] other n)}
-                return other
-            }
-            let zero_test=fact_rational_zero_test(n)
-            if zero_test >=? 0 and values[zero_test] not=? 0 {
-                let numerator=fact_project(@s values[zero_test] intern("numerator") false T_MATH_INT)
-                let nothing=fact_constant(@s 0)
-                if CaptureWord(nodes.ptr[CaptureWord(fns.ptr[CaptureWord(nodes.ptr[n].sym)].decl)].name) =? fact_name_rational_lt {
-                    return fact_new(@s fact_domain(T_BOOL) if zero_test =? 0 {FactTerm('lt' numerator nothing)} else {FactTerm('lt' nothing numerator)})
-                }
-                return fact_new(@s fact_domain(T_BOOL) FactTerm('eq' numerator nothing))
-            }
-            if values.length =? 2 and values[0] not=? 0 and values[1] not=? 0 and fact_rational_constructor(n) {return fact_rational_made(@s n values[0] values[1])}
-            if values.length =? 1 and values[0] not=? 0 and fact_rational_promotion(n) {
-                let result=fact_new(@s FactBound() FactTerm(type=ntype(n)))
-                if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(result intern("numerator") false values[0]))}
-                return result
-            }
-            let string=fact_string_call(n)
-            if string =? 4 {return fact_byte_slice(n @s values)}
-            if string =? 5 {fact_find_start(n @s values[2] fact_project(@s values[0] (-1) false T_INT))}
-            else if string not=? 0 {
-                let length=fact_project(@s values[0] (-1) false T_INT)
-                if string =? 1 {return length}
-                if string =? 3 {return fact_string_slice(n @s values length)}
-                fact_string_index(n @s values[1] length)
-                return fact_new(@s fact_domain(ntype(n)) FactTerm(type=ntype(n)))
             }
             if nodes.ptr[n].aux =? 2 {
                 let result=fact_new(@s FactBound() FactTerm(type=ntype(n)))
@@ -1738,40 +1786,44 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                 }
             }
             let gcd_nonzero=false
-            if values.length =? 2 and fact_integer_gcd_call(n) {
-                let zero=fact_constant(@s 0)
-                gcd_nonzero=fact_compare(s 'ne' values[0] zero) =? 1 or fact_compare(s 'ne' values[1] zero) =? 1
-            }
-            # (an exact `int` power returns only for a nonnegative exponent: a base
-            # of at least one gives at least one, a nonzero base a nonzero power)
             let power_base=FactBound(0 0)
-            if values.length =? 2 and fact_power_call(n) and fact_type(ntype(n)) =? T_MATH_INT {power_base=fact_bound(s values[0])}
-            # (a heap's push or pop changes its entry count by exactly one: its place
-            # holds a new value with that count, as an array's `insert` does)
-            let heap=fact_heap_call(n)
-            let heap_route=FactRoute()
-            let heap_length:CaptureWord=0
-            if heap not=? 0 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(kid(n 0)))) {
-                heap_route=fact_receiver_route(n @s)
-                if heap_route.root not=? 0 and fact_place(heap_route.root).declaration not=? 0 and not fact_exposed(fact_place(heap_route.root)) {
-                    let held=fact_route_values(@s heap_route)
-                    heap_length=fact_project(@s held[CaptureWord(held.length) - 1] (-1) false T_INT)
+            if lib_sp {
+                if values.length =? 2 and fact_integer_gcd_call(n) {
+                    let zero=fact_constant(@s 0)
+                    gcd_nonzero=fact_compare(s 'ne' values[0] zero) =? 1 or fact_compare(s 'ne' values[1] zero) =? 1
                 }
+                # (an exact `int` power returns only for a nonnegative exponent: a base
+                # of at least one gives at least one, a nonzero base a nonzero power)
+                if values.length =? 2 and fact_power_call(n) and fact_type(ntype(n)) =? T_MATH_INT {power_base=fact_bound(s values[0])}
+                # (a heap's push or pop changes its entry count by exactly one: its place
+                # holds a new value with that count, as an array's `insert` does)
+                let heap=fact_heap_call(n)
+                let heap_route=FactRoute()
+                let heap_length:CaptureWord=0
+                if heap not=? 0 and (ownership_decls.length =? 0 or not ownership_fact_type(ntype(kid(n 0)))) {
+                    heap_route=fact_receiver_route(n @s)
+                    if heap_route.root not=? 0 and fact_place(heap_route.root).declaration not=? 0 and not fact_exposed(fact_place(heap_route.root)) {
+                        let held=fact_route_values(@s heap_route)
+                        heap_length=fact_project(@s held[CaptureWord(held.length) - 1] (-1) false T_INT)
+                    }
+                }
+                # (the library's floor helpers are arithmetic: they write no place of the caller)
+                let floor=fact_floor_call(n)
+                if not fact_search_reads_only(n) and floor =? 0 {fact_path_call_effects(n @s)}
+                if heap_length not=? 0 {
+                    let fresh=fact_new(@s FactBound() FactTerm(type=ntype(kid(n 0))))
+                    let delta=if heap =? 1 {1} else {-1}
+                    if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh (-1) false fact_heap_length(@s heap_length delta n)))}
+                    fact_store_route(@s heap_route fresh n)
+                }
+                if floor not=? 0 and fact_type(ntype(n)) =? T_U64 {return fact_floor_unsigned(@s n floor values[0] values[1])}
+                if floor not=? 0 {return fact_floor(@s n floor values[0] values[1] true)}
+                # (the prelude's `mod(a b)`, floored: the same remainder as `a % b`)
+                if fact_mod_call(n) {return fact_floor(@s n 2 values[0] values[1] true)}
+                if fact_extremum_call(n) {return fact_extremum(@s n values[0] values[1] fact_prelude_call(n "min"))}
+            } else {
+                fact_path_call_effects(n @s)
             }
-            # (the library's floor helpers are arithmetic: they write no place of the caller)
-            if not fact_search_reads_only(n) and fact_floor_call(n) =? 0 {fact_path_call_effects(n @s)}
-            if heap_length not=? 0 {
-                let fresh=fact_new(@s FactBound() FactTerm(type=ntype(kid(n 0))))
-                let delta=if heap =? 1 {1} else {-1}
-                if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh (-1) false fact_heap_length(@s heap_length delta n)))}
-                fact_store_route(@s heap_route fresh n)
-            }
-            let floor=fact_floor_call(n)
-            if floor not=? 0 and fact_type(ntype(n)) =? T_U64 {return fact_floor_unsigned(@s n floor values[0] values[1])}
-            if floor not=? 0 {return fact_floor(@s n floor values[0] values[1] true)}
-            # (the prelude's `mod(a b)`, floored: the same remainder as `a % b`)
-            if fact_mod_call(n) {return fact_floor(@s n 2 values[0] values[1] true)}
-            if fact_extremum_call(n) {return fact_extremum(@s n values[0] values[1] fact_prelude_call(n "min"))}
             if fact_ends_path(n) {s.live=false}
             let result=fact_new(@s fact_domain(ntype(n) 'missing' n) FactTerm(type=ntype(n)))
             # gcd(a, b) is zero exactly when both inputs are zero. Evaluate this
@@ -1799,55 +1851,58 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                 }
                 ref_assume(CaptureWord(fns.ptr[f].ret) result values @s)
                 ref_arm_publish(f result values @s)
-                if fact_search_call(n) {fact_search_result(n result entry @s)}
-                if nkids(n) =? 1 or nkids(n) =? 3 {fact_regex_search_result(n result entry @s)}
                 if result_active {result_publish(f result values @s)}
-                # (reviewed prelude contracts: `parallel_range(n f)` has max(0, n)
-                # results, `parallel_map(xs f)` one per element)
-                if nkids(n) =? 2 and tkind(fact_type(ntype(n))) =? 'array' {
-                    if fact_library_call(n "parallel_range") and fact_scalar(ntype(kid(n 0))) {
-                        fact_add_projection(@s FactProjection(result (-1) false fact_clamped(@s entry[0] n)))
+                let counted=false
+                if lib_sp {
+                    if fact_search_call(n) {fact_search_result(n result entry @s)}
+                    if nkids(n) =? 1 or nkids(n) =? 3 {fact_regex_search_result(n result entry @s)}
+                    # (reviewed prelude contracts: `parallel_range(n f)` has max(0, n)
+                    # results, `parallel_map(xs f)` one per element)
+                    if nkids(n) =? 2 and tkind(fact_type(ntype(n))) =? 'array' {
+                        if fact_library_call(n "parallel_range") and fact_scalar(ntype(kid(n 0))) {
+                            fact_add_projection(@s FactProjection(result (-1) false fact_clamped(@s entry[0] n)))
+                        }
+                        else if (fact_library_call(n "parallel_map") or fact_library_call(n "__dewy_parallel_collect")) and tkind(fact_type(ntype(kid(n 0)))) =? 'array' {
+                            fact_add_projection(@s FactProjection(result (-1) false fact_project(@s entry[0] (-1) false T_INT)))
+                        }
+                        # (`[parallel x in [0..n) e]`: one result per position, as `[loop x in [0..n) e]` has)
+                        else if fact_library_call(n "__dewy_parallel_collect") {
+                            let count=fact_parallel_range_count(kid(n 0) @s)
+                            if count not=? 0 {fact_add_projection(@s FactProjection(result (-1) false count))}
+                        }
                     }
-                    else if (fact_library_call(n "parallel_map") or fact_library_call(n "__dewy_parallel_collect")) and tkind(fact_type(ntype(kid(n 0)))) =? 'array' {
+                    if fact_copy_length_call(n) and s.projections.length <? FACT_CAP {
                         fact_add_projection(@s FactProjection(result (-1) false fact_project(@s entry[0] (-1) false T_INT)))
+                        fact_keys_copy(@s entry[0] result)
+                        fact_permuted_elements(@s entry[0] result)
                     }
-                    # (`[parallel x in [0..n) e]`: one result per position, as `[loop x in [0..n) e]` has)
-                    else if fact_library_call(n "__dewy_parallel_collect") {
-                        let count=fact_parallel_range_count(kid(n 0) @s)
-                        if count not=? 0 {fact_add_projection(@s FactProjection(result (-1) false count))}
+                    if fact_words_call(n) and s.projections.length <? FACT_CAP {
+                        fact_add_projection(@s FactProjection(result FACT_ELEMENT_LENGTH false fact_new(@s FactBound(1 fact_length_max()))))
                     }
-                }
-                if fact_copy_length_call(n) and s.projections.length <? FACT_CAP {
-                    fact_add_projection(@s FactProjection(result (-1) false fact_project(@s entry[0] (-1) false T_INT)))
-                    fact_keys_copy(@s entry[0] result)
-                    fact_permuted_elements(@s entry[0] result)
-                }
-                if fact_words_call(n) and s.projections.length <? FACT_CAP {
-                    fact_add_projection(@s FactProjection(result FACT_ELEMENT_LENGTH false fact_new(@s FactBound(1 fact_length_max()))))
-                }
-                if fact_lines_call(n) {
-                    let source_length=fact_project(@s entry[0] (-1) false T_INT)
-                    let source=fact_bound(s source_length)
-                    let length=fact_project(@s result (-1) false T_INT)
-                    let bound=fact_bound(s length)
-                    if source.lo >? 0 {bound.lo=max(1 bound.lo)}
-                    if source.hi =? 0 {bound.hi=0}
-                    fact_set_bound(@s length bound)
-                }
-                if fact_split_call(n) {
-                    let separator=fact_project(@s entry[1] (-1) false T_INT)
-                    if fact_bound(s separator).lo >? 0 {
+                    if fact_lines_call(n) {
+                        let source_length=fact_project(@s entry[0] (-1) false T_INT)
+                        let source=fact_bound(s source_length)
                         let length=fact_project(@s result (-1) false T_INT)
                         let bound=fact_bound(s length)
-                        bound.lo=max(1 bound.lo)
+                        if source.lo >? 0 {bound.lo=max(1 bound.lo)}
+                        if source.hi =? 0 {bound.hi=0}
                         fact_set_bound(@s length bound)
                     }
-                }
-                let counted=fact_count_call(n)
-                if counted {
-                    let length=fact_project(@s entry[0] (-1) false T_INT)
-                    fact_set_bound(@s result FactBound(0 fact_bound(s length).hi))
-                    fact_difference(@s result length 0 n)
+                    if fact_split_call(n) {
+                        let separator=fact_project(@s entry[1] (-1) false T_INT)
+                        if fact_bound(s separator).lo >? 0 {
+                            let length=fact_project(@s result (-1) false T_INT)
+                            let bound=fact_bound(s length)
+                            bound.lo=max(1 bound.lo)
+                            fact_set_bound(@s length bound)
+                        }
+                    }
+                    counted=fact_count_call(n)
+                    if counted {
+                        let length=fact_project(@s entry[0] (-1) false T_INT)
+                        fact_set_bound(@s result FactBound(0 fact_bound(s length).hi))
+                        fact_difference(@s result length 0 n)
+                    }
                 }
                 let summary=if counted {FactSummary()} else {fact_summary(f)}
                 if summary.seen {

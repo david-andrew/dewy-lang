@@ -24,15 +24,16 @@ from p"effect_costs.dewy" import (effect_lower_intrinsic)
 from p"effects.jo" import (effect_policy effects_active)
 from p"elf_format.dewy" import (elf_syms)
 from p"error_display.dewy" import (call_args_text)
-from p"exact.jo" import (exact_join_blocks exact_marks exact_owners exact_progress_math exact_word_reads)
+from p"exact.jo" import (exact_join_blocks exact_marks exact_owners exact_progress_math exact_ranges exact_word_reads)
 from p"exact_check_hooks.dewy" import (exact_representation)
-from p"exact_count_bounds.dewy" import (exact_count_bound exact_small_math)
+from p"exact_count_bounds.dewy" import (exact_count_bound exact_count_refined exact_small_math)
 from p"exact_finalization.dewy" import (exact_bits)
 from p"exact_loop.jo" import (exact_map_active exact_map_stores)
 from p"exact_marks.dewy" import (exact_has_node exact_proved)
 from p"exact_static_widths.dewy" import (exact_type_width)
 from p"expr.jo" import (CV IN format_word_inst)
 from p"expression_types.dewy" import (ntype)
+from p"facts_elements.dewy" import (fact_fixed_comprehension)
 from p"facts_index_proofs.dewy" import (positive_bound)
 from p"floats.jo" import (ff_checks ff_checks_any ff_int_proven float_keys float_keys_any)
 from p"integer_conversions.dewy" import (integer_constant)
@@ -789,6 +790,7 @@ let bl_last_owned:bool=false
 let bl_last_slot:XWord=-1
 let bl_scan_nodes:BlWord=0
 let bl_scan_calls:BlWord=0
+let bl_scan_fn_calls:BlWord=0
 let bl_scan_loops:BlWord=0
 let bl_scan_max_loop_depth:BlWord=0
 let bl_scan_has_while:bool=false
@@ -797,6 +799,8 @@ let bl_scan_has_float:bool=false
 let bl_scan_managed:bool=false
 let bl_scan_syscall:bool=false
 let bl_scan_sret:bool=false
+let bl_scan_exact_in_loop:bool=false
+let bl_scan_has_scan_loop:bool=false
 let bl_fn_exact:bool=false
 let bl_fn_copy_strict:bool=false
 let bl_tok_cache:array<int8>=[]
@@ -806,7 +810,7 @@ let bl_hot_ready:bool=false
 let bl_arg_offs:array<int64>=[0 0 0 0 0 0 0 0]
 
 bl_init_hot_ids=():>void=>$unsafe {
-    let hnames=["__alloc_z" "__alloc_z_mt" "__alloc_raw" "__alloc_slow" "__alloc_size" "__grow_alloc" "__grow_big" "__free" "__free_mt" "__free_big" "__rc_dec" "__rc_dec_test" "__rc_inc" "__arr_new_raw" "__arr_grow" "__arr_grow_more" "__arr_resize" "__arr_push_slot" "__arr_filled" "__arr_bytes" "__buf_reserve" "__buf_append_raw" "__buf_byte" "__ts" "__str_cmp" "__floor_mod" "__case_text" "get" "[]=" "[]" "has" "contains" "insert_if_absent" "__map_entry" "__map_entry_present" "__map_pair_at" "__map_slot_equal" "__map_hash" "__map_find" "__map_probe" "__map_add" "__map_rehash" "__map_entries" "__hk_word" "__hk_mix" "__hk_mum" "__hk_bytes" "__arena_alloc" "__arena_bytes" "__arena_fixed" "__arena_new" "__arena_enter" "__arena_leave" "reset" "find_byte" "starts_with" "ends_with" "__dewy_string_length" "__grapheme_next" "__bcast_offset"]
+    let hnames=["__alloc_z" "__alloc_raw" "__alloc_slow" "__alloc_size" "__grow_alloc" "__grow_big" "__free" "__free_big" "__rc_dec" "__rc_dec_test" "__rc_inc" "__arr_new_raw" "__arr_grow" "__arr_grow_more" "__arr_resize" "__arr_push_slot" "__arr_make_unique" "__arr_bytes" "__buf_append_raw" "__buf_byte" "__str_cmp" "__floor_mod" "__case_text" "get" "[]=" "[]" "has" "contains" "insert_if_absent" "__map_entry" "__map_entry_present" "__map_pair_at" "__map_find" "__map_probe" "__map_add" "__map_rehash" "__map_slot_equal" "__map_hash" "__hk_word" "__hk_mix" "__hk_mum" "__hk_bytes" "__arena_alloc" "__arena_enter" "__arena_leave" "reset" "find_byte" "__bcast_offset" "__mi_parse" "__mi_sum" "to_int" "sum"]
     loop nm in hnames {
         let id=intern(nm)
         if id >=? bl_hot_ids.length {bl_hot_ids.resize(id + 64)}
@@ -837,11 +841,64 @@ bl_loc_idx=(l:BlWord):>BlWord=>$unsafe {
     BlWord(bl_loc_map.ptr[d]) - 1
 }
 
-bl_is_small_math=(e:BlWord):>bool=>$unsafe {
+bl_is_small_math_neg_safe=(e:BlWord):>bool=>$unsafe {
+    if e <=? 0 {return false}
+    let te=prune(ntype(e))
+    if types.ptr[te].kind =? 'refined' {
+        let rb=exact_count_refined(te)
+        if not rb.wide and rb.lo >? -4611686018427387904 and rb.hi <=? 4611686018427387903 {return true}
+    }
+    if e <? exact_ranges.length and exact_ranges.ptr[e] >? 0 and exact_ranges.ptr[e] <=? 62 {return true}
+    if bl_fn_exact and exact_has_node(e) and exact_bits(e) <=? 62 {return true}
     if exact_small_math(e) >=? 0 {return true}
-    if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? 1 {
+    let pb=positive_bound(e  true)
+    if pb >=? 0 and pb <=? 4611686018427387903 {return true}
+    let k=nodes.ptr[e].kind
+    if k =? 'conv' and (nodes.ptr[e].aux =? int32(int64(CV.int_)) or nodes.ptr[e].aux =? int32(int64(CV.none_)) or nodes.ptr[e].aux =? int32(int64(CV.refinement))) {
+        let a=BlWord(nodes.ptr[e].a)
+        let qfr=quantity_base(prune(ntype(a)))
+        if is_int(qfr) and qfr not=? T_MATH_INT and types.ptr[qfr].bits <? 62 and not exact_has_node(a) {return true}
+        return bl_is_small_math_neg_safe(a)
+    }
+    false
+}
+
+bl_is_small_math=(e:BlWord):>bool=>$unsafe {
+    if e <=? 0 {return false}
+    let te=prune(ntype(e))
+    if types.ptr[te].kind =? 'refined' {
+        let rb=exact_count_refined(te)
+        if not rb.wide and rb.lo >=? -4611686018427387904 and rb.hi <=? 4611686018427387903 {return true}
+    }
+    if e <? exact_ranges.length and exact_ranges.ptr[e] >? 0 and exact_ranges.ptr[e] <=? 63 {return true}
+    if bl_fn_exact and exact_has_node(e) and exact_bits(e) <=? 63 {return true}
+    if exact_small_math(e) >=? 0 {return true}
+    let pb=positive_bound(e  true)
+    if pb >=? 0 and pb <=? 4611686018427387903 {return true}
+    let k=nodes.ptr[e].kind
+    if k =? 'ident' and nodes.ptr[e].aux =? 1 {
         let idx=bl_loc_idx(BlWord(nodes.ptr[e].sym))
         if idx >=? 0 and bl_loc_small_math.ptr[idx] {return true}
+    }
+    if k =? 'conv' and (nodes.ptr[e].aux =? int32(int64(CV.int_)) or nodes.ptr[e].aux =? int32(int64(CV.none_)) or nodes.ptr[e].aux =? int32(int64(CV.refinement))) {
+        let a=BlWord(nodes.ptr[e].a)
+        let qfr=quantity_base(prune(ntype(a)))
+        if is_int(qfr) and qfr not=? T_MATH_INT and types.ptr[qfr].bits <? 63 and not exact_has_node(a) {return true}
+        return bl_is_small_math(a)
+    }
+    if k =? 'unary' {
+        let op=nodes.ptr[e].op
+        if op =? 58 or op =? 78 {return bl_is_small_math(BlWord(nodes.ptr[e].a))}
+        if op =? 59 {return bl_is_small_math_neg_safe(BlWord(nodes.ptr[e].a))}
+    }
+    if k =? 'binary' and nodes.ptr[e].aux =? 0 {
+        let op=cx_token_values.ptr[BlWord(nodes.ptr[e].op)]
+        if op =? 'amp' or op =? 'pipe' or op =? 'caret' {
+            return bl_is_small_math(BlWord(nodes.ptr[e].a)) and bl_is_small_math(BlWord(nodes.ptr[e].b))
+        }
+        if op =? 'shr' and nodes.ptr[BlWord(nodes.ptr[e].b)].kind =? 'int_lit' and not has_flag(BlWord(nodes.ptr[e].b) NF_U64) and nodes.ptr[BlWord(nodes.ptr[e].b)].ival >=? 0 {
+            return bl_is_small_math(BlWord(nodes.ptr[e].a))
+        }
     }
     false
 }
@@ -1165,15 +1222,13 @@ bl_scan_node=(e:BlWord):>bool=>$unsafe {
     if float_keys_any and float_keys.has(e) {return false}
     if bl_fn_exact {
         if e <? exact_marks.length and (BlWord(exact_marks.ptr[e]) & 128) not=? 0 {return false}
-        if bl_scan_loops >? 0 and e <? exact_marks.length and (BlWord(exact_marks.ptr[e]) & 3) not=? 0 {return false}
+        if bl_scan_loops >? 0 and e <? exact_marks.length and (BlWord(exact_marks.ptr[e]) & 3) not=? 0 {bl_scan_exact_in_loop=true}
         if exact_join_blocks.length >? 0 and exact_join_blocks.has(e) {return false}
         if nodes.ptr[e].kind =? 'conv' and (nodes.ptr[e].aux as CV) =? CV.fixed_store {
-            if bl_scan_loops >? 0 {return false}
             bl_scan_nodes += 1
             return bl_exact_store_ok(e)
         }
         if exact_has_node(e) {
-            if bl_scan_loops >? 0 {return false}
             return bl_exact_1word_ok(e)
         }
     }
@@ -1429,6 +1484,7 @@ bl_scan_node=(e:BlWord):>bool=>$unsafe {
             else if quantity_base(lt) =? T_MATH_INT {
                 let op=cx_token_values.ptr[BlWord(nodes.ptr[e].op)]
                 if op not=? 'plus' and op not=? 'minus' and op not=? 'star' and op not=? 'slash' and op not=? 'percent' and op not=? 'amp' and op not=? 'pipe' and op not=? 'caret' and op not=? 'shl' and op not=? 'shr' and op not=? 'eq' and op not=? 'ne' and op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' {return false}
+                if (op =? 'amp' or op =? 'pipe' or op =? 'caret') and bl_scan_loops >? 0 and not (bl_is_small_math(a) and bl_is_small_math(b0)) {return false}
             }
         }
         if aux =? 2 {
@@ -1499,7 +1555,6 @@ bl_scan_node=(e:BlWord):>bool=>$unsafe {
         if fr =? T_NEVER or to =? T_NEVER {return false}
         let cv=nodes.ptr[e].aux as CV
         if cv =? CV.fixed_store {
-            if bl_scan_loops >? 0 {return false}
             return bl_exact_store_ok(e)
         }
         if bl_fn_exact {
@@ -1510,10 +1565,38 @@ bl_scan_node=(e:BlWord):>bool=>$unsafe {
                 bl_scan_calls += 1
                 return bl_type_ok(to) and vc(to) =? VC_FLT and bl_exact_float_ok(a)
             }
-            if exact_has_node(a) and (cv =? CV.wrap_int or cv =? CV.int_ or cv =? CV.none_) {return false}
+            if exact_has_node(a) and cv =? CV.wrap_int {
+                return bl_type_ok(to) and is_int(exact_representation(to)) and bl_exact_low_ok(a)
+            }
+            if exact_has_node(a) and (cv =? CV.int_ or cv =? CV.none_) {
+                if quantity_base(to) =? T_MATH_INT {
+                    if not bl_type_ok(to) or exact_bits(a) >? 64 or not bl_exact_1word_ok(a) {return false}
+                    if exact_small_math(a) <? 0 {
+                        bl_scan_calls += 1
+                        bl_scan_managed=true
+                    }
+                    return true
+                }
+                return bl_type_ok(to) and vc(to) =? VC_INT and exact_bits(a) <=? 64 and bl_exact_1word_ok(a)
+            }
         }
         if cv =? CV.none_ or cv =? CV.quantity_const or cv =? CV.ptr or cv =? CV.explicit_copy {
             return bl_type_ok(to) and bl_type_ok(fr) and bl_scan_node(a)
+        }
+        if cv =? CV.arr2fixed {
+            if not bl_type_ok(to) or not bl_type_ok(fr) or types.ptr[to].kind not=? 'fixed' or types.ptr[fr].kind not=? 'array' {return false}
+            if copies_on and is_managed(to) {return false}
+            if fact_fixed_comprehension(a  to) not=? 0 {return false}
+            if not has_flag(e NF_INBOUNDS) {bl_scan_calls += 1}
+            if is_managed(to) {bl_scan_managed=true; bl_scan_calls += 1}
+            return bl_scan_node(a)
+        }
+        if cv =? CV.fixed2arr {
+            if not bl_type_ok(to) or not bl_type_ok(fr) or types.ptr[fr].kind not=? 'fixed' or types.ptr[to].kind not=? 'array' {return false}
+            if copies_on and is_managed(fr) {return false}
+            bl_scan_calls += 1
+            bl_scan_managed=true
+            return bl_scan_node(a)
         }
         if cv =? CV.opt {
             if cs and costly_copy(fr) {return false}
@@ -1554,12 +1637,41 @@ bl_scan_node=(e:BlWord):>bool=>$unsafe {
         let to=prune(ntype(e))
         let a:BlWord=BlWord(nodes.ptr[e].a)
         let fr=prune(ntype(a))
-        if quantity_base(fr) =? T_MATH_INT or quantity_base(to) =? T_MATH_INT {
-            let qfr=quantity_base(fr)
-            let qto=quantity_base(to)
-            if not ((qfr =? T_MATH_INT and qto =? T_MATH_INT) or (qfr =? T_MATH_INT and types.ptr[qto].kind =? 'enum_') or (types.ptr[qfr].kind =? 'enum_' and qto =? T_MATH_INT)) {return false}
+        if not bl_type_ok(to) or not bl_type_ok(fr) {return false}
+        let vto=vc(to)
+        let vfr=vc(fr)
+        if vto =? VC_FLT and vfr =? VC_INT and types.ptr[quantity_base(fr)].kind =? 'int_' and quantity_base(fr) not=? T_MATH_INT {
+            bl_scan_has_float=true
+            return bl_scan_node(a)
         }
-        return bl_type_ok(to) and bl_type_ok(fr) and vc(to) =? VC_INT and vc(fr) =? VC_INT and bl_scan_node(a)
+        if vfr =? VC_FLT and vto =? VC_INT and types.ptr[quantity_base(to)].kind =? 'int_' and quantity_base(to) not=? T_MATH_INT {
+            bl_scan_has_float=true
+            return bl_scan_node(a)
+        }
+        if vto not=? VC_INT or vfr not=? VC_INT {return false}
+        if is_managed(to) or is_managed(fr) {bl_scan_managed=true}
+        return bl_scan_node(a)
+    }
+    if k =? 'map_lit' {
+        let t=prune(ntype(e))
+        if not bl_type_ok(t) or vc(t) not=? VC_AGG {return false}
+        if cs and costly_copy(t) {return false}
+        let f:BlWord=BlWord(nodes.ptr[e].sym)
+        if f <=? 0 or fns.ptr[f].cabi or fns.ptr[f].has_env or fns.ptr[f].parallel_api or fns.ptr[f].deterministic {return false}
+        if copies_on and (copy_consumes(f  1) or copy_consumes(f  2)) {return false}
+        if fns.ptr[f].ptypes.length <? 3 {return false}
+        let kt=prune(BlWord(fns.ptr[f].ptypes.ptr[1]))
+        let vt=prune(BlWord(fns.ptr[f].ptypes.ptr[2]))
+        if not bl_type_ok(kt) or not bl_type_ok(vt) or vc(kt) =? VC_VOID or vc(vt) =? VC_VOID {return false}
+        if vc(kt) =? VC_FLT or vc(vt) =? VC_FLT {bl_scan_has_float=true}
+        bl_scan_managed=true
+        let nk=nkids(e)
+        if nk >? 0 {bl_scan_calls += nk}
+        loop i in [0..nk) {
+            let p=kid(e i)
+            if not bl_scan_node(BlWord(nodes.ptr[p].a)) or not bl_scan_node(BlWord(nodes.ptr[p].b)) {return false}
+        }
+        return true
     }
     if k =? 'addr' {
         let a:BlWord=BlWord(nodes.ptr[e].a)
@@ -1571,6 +1683,7 @@ bl_scan_node=(e:BlWord):>bool=>$unsafe {
         if aux =? 0 {
             if ownership_prints.length >? 0 and ownership_prints.has(e) {return false}
             bl_scan_calls += 1
+            bl_scan_fn_calls += 1
             let sym:BlWord=BlWord(nodes.ptr[e].sym)
             if sym <=? 0 or sym =? runtime_memeq or sym =? runtime_streq or fns.ptr[sym].cabi or fns.ptr[sym].has_env or fns.ptr[sym].parallel_api or fns.ptr[sym].deterministic {return false}
             let rtp=prune(BlWord(fns.ptr[sym].ret))
@@ -1709,6 +1822,26 @@ bl_scan_node=(e:BlWord):>bool=>$unsafe {
             let ak=types.ptr[prune(ntype(a0))].kind
             return (ak =? 'array' or ak =? 'str_' or (id =? IN.len and ak =? 'fixed')) and bl_scan_node(a0)
         }
+        if id =? IN.zeroed {
+            if na not=? 0 {return false}
+            let t=prune(ntype(e))
+            if not bl_type_ok(t) or vc(t) =? VC_VOID {return false}
+            if vc(t) =? VC_FLT {bl_scan_has_float=true}
+            if is_managed(t) {bl_scan_managed=true}
+            return true
+        }
+        if id =? IN.remove {
+            if na not=? 2 {return false}
+            let a0=kid(e 0)
+            let a1=kid(e 1)
+            let at=prune(ntype(a0))
+            if types.ptr[at].kind not=? 'array' or not bl_can_mut_place(a0) {return false}
+            let et=prune(BlWord(types.ptr[at].elem))
+            if not bl_type_ok(et) or vc(et) =? VC_VOID {return false}
+            bl_scan_calls += 1
+            bl_scan_managed=true
+            return bl_scan_node(a0) and bl_scan_node(a1)
+        }
         if id =? IN.pop {
             if na not=? 1 {return false}
             let a0=kid(e 0)
@@ -1823,8 +1956,8 @@ bl_scan_node=(e:BlWord):>bool=>$unsafe {
         let a:BlWord=BlWord(nodes.ptr[e].a)
         let b0:BlWord=BlWord(nodes.ptr[e].b)
         if aux =? 0 {
-            # Leave actual byte-scan loops to gen_scan_loop (AVX2 scanbytes).
-            if bl_is_scan_loop(e) {return false}
+            # Leave tight byte-scan loops to gen_scan_loop (AVX2 scanbytes).
+            if bl_is_scan_loop(e) {bl_scan_has_scan_loop=true}
         } else {
             let l:BlWord=BlWord(nodes.ptr[e].sym)
             let ot=prune(ntype(a))
@@ -2081,14 +2214,19 @@ bl_can_emit_inst=(_lf:BlWord fi:BlWord):>bool=>$unsafe {
     }
     bl_scan_nodes=0
     bl_scan_calls=0
+    bl_scan_fn_calls=0
     bl_scan_loops=0
     bl_scan_max_loop_depth=0
     bl_scan_has_loop=false
     bl_scan_has_while=false
     bl_scan_syscall=false
+    bl_scan_exact_in_loop=false
+    bl_scan_has_scan_loop=false
     if not bl_scan_node(body) {return false}
+    if bl_scan_exact_in_loop and (bl_scan_fn_calls <=? 4 or bl_scan_nodes <=? 80) {return false}
+    if bl_scan_has_scan_loop and (decl =? 0 or not pos_in_lib(nodes.ptr[decl].pos)) {return false}
     if bl_scan_max_loop_depth >=? 3 or (bl_scan_has_while and bl_scan_mut_math) {return false}
-    if bl_scan_has_float and bl_scan_has_loop and (bl_scan_has_while or bl_scan_max_loop_depth >=? 2 or bl_scan_calls <=? 2) {return false}
+    if bl_scan_has_float and bl_scan_has_loop and (bl_scan_calls =? 0 or (bl_scan_nodes <=? 64 and bl_scan_calls <=? 2)) {return false}
     # Preserve default-mode fast_inline_into for tiny unmanaged scalar leaves,
     # 1-call wrappers, and pure constant lookup-table or dense-dispatch match leaves.
     if fp[0].kind =? FK_NORMAL and not bl_scan_syscall {
@@ -3067,7 +3205,7 @@ bl_eval_binary=(e:BlWord):>void=>$unsafe {
     let op_tok:BlWord=BlWord(nodes.ptr[e].op)
     let op=cx_token_values.ptr[op_tok]
     if aux =? 0 and quantity_base(lt) =? T_MATH_INT {
-        if (op =? 'shl' or op =? 'shr') and bl_is_small_math(a) and nodes.ptr[b0].kind =? 'int_lit' and not has_flag(b0 NF_U64) and nodes.ptr[b0].ival >=? 0 and nodes.ptr[b0].ival <? 64 and (op =? 'shr' or exact_small_math(e) >=? 0) {
+        if (op =? 'shl' or op =? 'shr') and bl_is_small_math(a) and nodes.ptr[b0].kind =? 'int_lit' and not has_flag(b0 NF_U64) and nodes.ptr[b0].ival >=? 0 and nodes.ptr[b0].ival <? 64 and (op =? 'shr' or bl_is_small_math(e)) {
             bl_eval_borrowed(a)
             let sh=XWord(nodes.ptr[b0].ival)
             if op =? 'shr' {
@@ -3112,7 +3250,7 @@ bl_eval_binary=(e:BlWord):>void=>$unsafe {
             bl_last_owned=false
             return
         }
-        if small_ab and (op =? 'amp' or op =? 'pipe' or op =? 'caret' or ((op =? 'plus' or op =? 'minus' or op =? 'star') and exact_small_math(e) >=? 0)) {
+        if small_ab and (op =? 'amp' or op =? 'pipe' or op =? 'caret' or ((op =? 'plus' or op =? 'minus' or op =? 'star') and bl_is_small_math(e))) {
             if op =? 'plus' {op_rr(0x01  true  RCX  RAX)}
             else if op =? 'minus' {op_rr(0x29  true  RCX  RAX)}
             else if op =? 'star' {bl_sh_imm(7  RAX  1); rex(true  RAX  0  RCX  false); b(0x0F); b(0xAF); modrr(RAX  RCX)}
@@ -3640,6 +3778,78 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         mov_rm(RAX  RAX  if id =? IN.arrcap {16} else {8})
         patch_here(is_null)
         bl_last_owned=false
+        return
+    }
+    if id =? IN.zeroed {
+        let t=prune(ntype(e))
+        if vc(t) =? VC_AGG {
+            let sz=XWord(tsize(t))
+            let off=bl_tmp_alloc(sz  XWord(talign(t)))
+            bl_zero_mem(RBP  -off  sz)
+            lea(RAX  RBP  -off)
+            bl_last_owned=true
+            bl_last_slot=off
+            return
+        }
+        if vc(t) =? VC_FLT {
+            sse_rr(0  0x57  0  0)
+            bl_last_owned=false
+            return
+        }
+        b16(0xC031) # xor eax, eax
+        bl_last_owned=is_managed(t)
+        bl_last_slot=-1
+        return
+    }
+    if id =? IN.remove {
+        let a0=kid(e 0)
+        let a1=kid(e 1)
+        let at=prune(ntype(a0))
+        let et=prune(BlWord(types.ptr[at].elem))
+        let esz=XWord(owner_stride(et))
+        let poff=bl_tmp_alloc(8)
+        let ioff=bl_tmp_alloc(8)
+        bl_place_addr(a0  true)
+        mov_mr(RBP  -poff  RAX)
+        bl_eval_borrowed(a1)
+        mov_mr(RBP  -ioff  RAX)
+        mov_rm(RAX  RBP  -poff)
+        mov_rm(RAX  RAX  0)
+        if not is_uniq_array(a0) {
+            bl_arr_unique_rax(at)
+            mov_rm(R10  RBP  -poff)
+            mov_mr(R10  0  RAX)
+        }
+        mov_rm(RCX  RBP  -ioff)
+        bl_bounds_check(nodes.ptr[e].pos)
+        bl_imul_imm(RCX  esz)
+        op_rr(0x01  true  RCX  RAX)
+        bl_add_imm(RAX  24)
+        if vc(et) =? VC_AGG {
+            let rslot=bl_tmp_alloc(XWord(tsize(et))  XWord(talign(et)))
+            lea(RDI  RBP  -rslot)
+            bl_copy_mem(RDI  RAX  XWord(tsize(et)))
+            mov_rm(RDI  RBP  -poff)
+            mov_imm(RSI  esz)
+            mov_rm(RDX  RBP  -ioff)
+            bl_set_pos(nodes.ptr[e].pos)
+            bl_call_pos(rt("__arr_remove_slot"))
+            lea(RAX  RBP  -rslot)
+            bl_last_owned=true
+            bl_last_slot=rslot
+            return
+        }
+        bl_load_val(et  RAX  0)
+        let voff=bl_tmp_alloc(8)
+        bl_save_res(et  voff)
+        mov_rm(RDI  RBP  -poff)
+        mov_imm(RSI  esz)
+        mov_rm(RDX  RBP  -ioff)
+        bl_set_pos(nodes.ptr[e].pos)
+        bl_call_pos(rt("__arr_remove_slot"))
+        bl_load_res(et  voff)
+        bl_last_owned=true
+        bl_last_slot=-1
         return
     }
     if id =? IN.pop {
@@ -5396,6 +5606,16 @@ bl_eval=(e:BlWord):>void=>$unsafe {
         let t=prune(ntype(e))
         bl_eval_borrowed(a)
         if quantity_base(t) =? T_MATH_INT {
+            if op =? 59 and bl_is_small_math_neg_safe(a) {
+                rex(true  0  0  RAX  false); b(0xF7); modrr(3  RAX)
+                bl_last_owned=false
+                return
+            }
+            if op =? 78 and bl_is_small_math(a) {
+                bl_alu_imm(6  RAX  -2)
+                bl_last_owned=false
+                return
+            }
             mov_rr(RCX  RAX)
             mov_imm(RAX  if op =? 59 {0} else {-2})
             bl_math_binary_regs('minus'  nodes.ptr[e].pos)
@@ -5463,12 +5683,115 @@ bl_eval=(e:BlWord):>void=>$unsafe {
         let to=prune(ntype(e))
         let a:BlWord=BlWord(nodes.ptr[e].a)
         let fr=prune(ntype(a))
+        if bl_fn_exact and exact_has_node(a) {
+            if cv =? CV.wrap_int {
+                bl_eval_exact_low(a)
+                bl_norm(RAX  exact_representation(to))
+                bl_last_owned=false
+                return
+            }
+            if cv =? CV.int_ or cv =? CV.none_ {
+                bl_eval_exact_low(a)
+                if quantity_base(to) =? T_MATH_INT {
+                    if bl_is_small_math(a) {
+                        bl_sh_imm(4  RAX  1)
+                        bl_last_owned=false
+                    } else {
+                        bl_math_word_rax(nodes.ptr[e].pos)
+                        bl_last_owned=true
+                        bl_last_slot=-1
+                    }
+                    return
+                }
+                if cv =? CV.int_ {bl_norm(RAX  to)}
+                bl_last_owned=false
+                return
+            }
+        }
         if cv =? CV.none_ or cv =? CV.quantity_const or cv =? CV.ptr or cv =? CV.refinement {
             bl_eval(a)
             return
         }
         if cv =? CV.explicit_copy {
             bl_eval_owned(a)
+            return
+        }
+        if cv =? CV.arr2fixed {
+            let src_off=bl_tmp_alloc(8)
+            bl_eval_borrowed(a)
+            mov_mr(RBP  -src_off  RAX)
+            let n=fixed_len(to)
+            if not has_flag(e NF_INBOUNDS) {
+                b16(0xC931) # xor ecx, ecx
+                bl_test_rr(RAX)
+                let is_null=jcc32(CC_E)
+                mov_rm(RCX  RAX  8)
+                patch_here(is_null)
+                mov_imm(RDX  XWord(n))
+                op_rr(0x39  true  RDX  RCX)
+                let len_ok=jcc32(CC_E)
+                rel_fixup_lea(RDI  0  XWord(str_data("fixed-size array needs {n} elements")))
+                bl_set_pos(nodes.ptr[e].pos)
+                bl_call_pos(rt("__panic"))
+                b16(0x0B0F)
+                patch_here(len_ok)
+            }
+            let sz=XWord(tsize(to))
+            let off=bl_tmp_alloc(sz  XWord(talign(to)))
+            if sz >? 0 {
+                mov_rm(RSI  RBP  -src_off)
+                bl_add_imm(RSI  24)
+                lea(RDI  RBP  -off)
+                bl_copy_mem(RDI  RSI  sz)
+            }
+            if is_managed(to) {
+                lea(RDI  RBP  -off)
+                bl_call(lf_helper(HK.copy to 0))
+            }
+            lea(RAX  RBP  -off)
+            bl_last_owned=true
+            bl_last_slot=off
+            return
+        }
+        if cv =? CV.fixed2arr {
+            let et=prune(BlWord(types.ptr[fr].elem))
+            let esz=tsize(et)
+            let n=fixed_len(fr)
+            let src_off=bl_tmp_alloc(8)
+            bl_eval_borrowed(a)
+            mov_mr(RBP  -src_off  RAX)
+            mov_imm(RDI  XWord(n))
+            mov_imm(RSI  XWord(esz))
+            bl_set_pos(nodes.ptr[e].pos)
+            bl_call_pos(rt("__arr_filled"))
+            let arr_off=bl_tmp_alloc(8)
+            mov_mr(RBP  -arr_off  RAX)
+            if n * esz >? 0 {
+                lea(RDI  RAX  24)
+                mov_rm(RSI  RBP  -src_off)
+                bl_copy_mem(RDI  RSI  XWord(n * esz))
+            }
+            if is_managed(et) and n >? 0 {
+                let i_off=bl_tmp_alloc(8)
+                b16(0xC031)
+                mov_mr(RBP  -i_off  RAX)
+                let ltop=XWord(x_code[0].length)
+                mov_rm(RCX  RBP  -i_off)
+                bl_imul_imm(RCX  XWord(esz))
+                mov_rm(RAX  RBP  -arr_off)
+                op_rr(0x01  true  RCX  RAX)
+                bl_add_imm(RAX  24)
+                bl_copy_at_reg(RAX  et)
+                bl_add_m64_imm(RBP  -i_off  1)
+                mov_rm(RAX  RBP  -i_off)
+                mov_imm(RCX  XWord(n))
+                op_rr(0x39  true  RCX  RAX)
+                let back=jcc32(CC_L)
+                patch_branch(back  ltop)
+            }
+            mov_rm(RAX  RBP  -arr_off)
+            bl_last_owned=true
+            bl_last_slot=-1
             return
         }
         if cv =? CV.set_text {
@@ -5577,7 +5900,7 @@ bl_eval=(e:BlWord):>void=>$unsafe {
         if cv =? CV.int_ and qto =? T_MATH_INT {
             if qfr =? T_MATH_INT {bl_eval(a); return}
             bl_eval_borrowed(a)
-            if exact_small_math(a) >=? 0 or (is_int(qfr) and types.ptr[qfr].bits <? 63 and not exact_has_node(a)) {
+            if bl_is_small_math(a) or (is_int(qfr) and types.ptr[qfr].bits <? 63 and not exact_has_node(a)) {
                 bl_sh_imm(4  RAX  1)
                 bl_last_owned=false
                 return
@@ -5639,9 +5962,13 @@ bl_eval=(e:BlWord):>void=>$unsafe {
         }
         bl_eval_borrowed(a)
         if cv =? CV.wrap_int and qfr =? T_MATH_INT {
-            mov_rr(RDI  RAX)
-            bl_set_pos(nodes.ptr[e].pos)
-            bl_call_pos(rt("__mi_low_word"))
+            if bl_is_small_math(a) {
+                bl_sh_imm(7  RAX  1)
+            } else {
+                mov_rr(RDI  RAX)
+                bl_set_pos(nodes.ptr[e].pos)
+                bl_call_pos(rt("__mi_low_word"))
+            }
         } else if cv =? CV.wrap_int and types.ptr[fr].bits =? 32 and not types.ptr[fr].sign and types.ptr[to].bits =? 64 {
             op_rr(0x8B  false  RAX  RAX) # zext32
         }
@@ -5669,11 +5996,75 @@ bl_eval=(e:BlWord):>void=>$unsafe {
             bl_last_slot=-1
             return
         }
+        if vc(fr) =? VC_FLT and vc(to) =? VC_INT {
+            bl_eval_borrowed(a)
+            bl_movq_rx(RAX  0)
+            if tsize(qfr) =? 4 {op_rr(0x8B  false  RAX  RAX)}
+            if types.ptr[to].kind =? 'int_' {bl_norm(RAX  to)}
+            bl_last_owned=false
+            return
+        }
+        if vc(fr) =? VC_INT and vc(to) =? VC_FLT {
+            bl_eval_borrowed(a)
+            bl_movq_xr(0  RAX)
+            bl_last_owned=false
+            return
+        }
         bl_eval(a)
         if is_managed(fr) {bl_borrow(fr)}
         if is_managed(to) {bl_last_owned=true; bl_last_slot=-1; return}
         if types.ptr[to].kind =? 'int_' {bl_norm(RAX  to)}
         bl_last_owned=false
+        return
+    }
+    if k =? 'map_lit' {
+        let t=prune(ntype(e))
+        let f:BlWord=BlWord(nodes.ptr[e].sym)
+        let kt=prune(BlWord(fns.ptr[f].ptypes.ptr[1]))
+        let vt=prune(BlWord(fns.ptr[f].ptypes.ptr[2]))
+        let sz=XWord(tsize(t))
+        let off=bl_tmp_alloc(sz  XWord(talign(t)))
+        bl_zero_mem(RBP  -off  sz)
+        let nk=nkids(e)
+        if nk >? 0 {
+            let smark=bl_scope_off.length
+            if is_managed(t) {
+                bl_scope_off.push(off); bl_scope_ty.push(t); bl_scope_agg.push(true)
+            }
+            loop i in [0..nk) {
+                let p=kid(e i)
+                let tm=bl_temps_off.length
+                let sm=bl_sp
+                let koff=bl_tmp_alloc(8)
+                let voff=bl_tmp_alloc(8)
+                bl_eval_borrowed(BlWord(nodes.ptr[p].a))
+                bl_save_res(kt  koff)
+                bl_eval_borrowed(BlWord(nodes.ptr[p].b))
+                bl_save_res(vt  voff)
+                lea(RDI  RBP  -off)
+                let int_i:BlWord=1
+                let flt_i:BlWord=0
+                if vc(kt) =? VC_FLT {
+                    sse_rm(bl_fpre(kt)  0x10  XWord(flt_i)  RBP  -koff)
+                    flt_i += 1
+                } else {
+                    mov_rm(XWord(int_arg_regs.ptr[int_i])  RBP  -koff)
+                    int_i += 1
+                }
+                if vc(vt) =? VC_FLT {
+                    sse_rm(bl_fpre(vt)  0x10  XWord(flt_i)  RBP  -voff)
+                } else {
+                    mov_rm(XWord(int_arg_regs.ptr[int_i])  RBP  -voff)
+                }
+                bl_set_pos(nodes.ptr[e].pos)
+                bl_call_pos(lf_of_inst(f))
+                bl_stmt_end(tm  sm)
+            }
+            bl_scope_off.truncate(smark); bl_scope_ty.truncate(smark); bl_scope_agg.truncate(smark)
+        }
+        lea(RAX  RBP  -off)
+        bl_last_owned=true
+        bl_last_slot=off
         return
     }
     if k =? 'call' {bl_eval_call(e); return}
@@ -5951,6 +6342,9 @@ bl_emit_vardecl=(s:BlWord):>void=>$unsafe {
         bl_eval_owned(iv)
         bl_store_val(t  RBP  -off  RAX)
         bl_last_owned=false
+        if quantity_base(t) =? T_MATH_INT and (BlWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_MUTPARAM | LF_EXPOSED)) =? 0 and bl_is_small_math(iv) {
+            bl_loc_small_math.ptr[idx]=true
+        }
         if quantity_base(t) not=? T_MATH_INT and (BlWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_MUTPARAM | LF_EXPOSED)) =? 0 and nodes.ptr[iv].kind =? 'intrinsic' and (nodes.ptr[iv].aux as IN) =? IN.len and nkids(iv) =? 1 {
             let a0=kid(iv 0)
             if nodes.ptr[a0].kind =? 'ident' and nodes.ptr[a0].aux =? 1 {
@@ -5962,6 +6356,9 @@ bl_emit_vardecl=(s:BlWord):>void=>$unsafe {
         }
     } else {
         bl_zero_mem(RBP  -off  XWord(tsize(t)))
+        if quantity_base(t) =? T_MATH_INT and (BlWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_MUTPARAM | LF_EXPOSED)) =? 0 {
+            bl_loc_small_math.ptr[idx]=true
+        }
     }
     if is_managed(t) {
         bl_scope_off.push(off)

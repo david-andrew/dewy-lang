@@ -31,7 +31,7 @@ from p"expression_types.dewy" import (ntype)
 from p"facts.jo" import (FACT_LENT FactBinding FactPlanDependency FactSlice FactState fact_call_field_types fact_carried_cache fact_comprehension_sources fact_comprehensions fact_constant_globals fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_calls fact_constructor_types fact_cursor_shapes fact_dead_refinements fact_decided fact_deferred fact_deferred_checks fact_deferred_proving fact_divisors fact_fixed_requests fact_fork_entries fact_fork_nodes fact_grown_roots fact_has_deferred fact_internal_policy fact_key_params fact_owner fact_panic_collect fact_panic_pending fact_panic_sites fact_parallel_bounds fact_plan_dependencies fact_plan_serial fact_policy fact_policy_default fact_probe_on fact_probe_runs fact_pushed_rows_cache fact_query fact_regex_counts fact_requests fact_retry_owner fact_return_escapes_cache fact_returns_cache fact_saving fact_search_predicate fact_selector_sources fact_shape_summaries fact_shared_literals fact_slice fact_slice_cache fact_speculating fact_sum_operand fact_summaries fact_summary_assumed fact_summary_field fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_text_sinks fact_validated)
 from p"facts_slice_builder.dewy" import (fact_root_key fact_slice_prepare)
 from p"facts_plan_cache.dewy" import (fact_plan_forget)
-from p"facts_slice_prep.dewy" import (fact_slice_push_children)
+from p"facts_slice_prep.dewy" import (fact_slice_push_children fsp_is_lib_sp fsp_reset)
 from p"facts_values.dewy" import (fact_domain fact_type)
 from p"facts_elements.dewy" import (fact_fixed_check fact_fixed_node)
 from p"facts_forgets.dewy" import (fact_drop_exit fact_drop_footprint fact_drop_forget fact_holds_contract fact_written_root)
@@ -155,36 +155,60 @@ fact_bounded_index=(n:LifeWord):>bool=>$unsafe {
 # compaction finds nothing reaching them). The state then grows with the live
 # places, not with every declaration a body ever made: joins, calls and loops
 # visit bindings. O(bindings bound inside the block).
+let fse_declared:array<int64>=[]
 fact_scope_exit=(@s:FactState n:LifeWord first:LifeWord):>void=>$unsafe {
-    let owner:LifeWord=0
-    let declared:array<int64>=[]
-    loop j in [0..nkids(n)) {
+    let nk=nkids(n)
+    fse_declared.clear()
+    loop j in [0..nk) {
         let c=kid(n j)
         if nodes.ptr[c].kind not=? 'vardecl' or has_flag(c NF_GLOBAL) {continue}
-        if nkids(c) =? 0 {
-            if nodes.ptr[c].sym not=? 0 {declared.push(LifeWord(nodes.ptr[c].sym))}
+        let cnk=nkids(c)
+        if cnk =? 0 {
+            if nodes.ptr[c].sym not=? 0 {fse_declared.push(LifeWord(nodes.ptr[c].sym))}
         }
         else {
-            loop ki in [0..nkids(c)) {
+            loop ki in [0..cnk) {
                 let d=kid(c ki)
-                if nodes.ptr[d].sym not=? 0 and not has_flag(d NF_GLOBAL) {declared.push(LifeWord(nodes.ptr[d].sym))}
+                if nodes.ptr[d].sym not=? 0 and not has_flag(d NF_GLOBAL) {fse_declared.push(LifeWord(nodes.ptr[d].sym))}
             }
         }
     }
-    if declared.length =? 0 {return}
-    let kept:array<FactBinding>=[]
-    loop i in [first..s.bindings.length) {
-        let b=s.bindings[i]
-        if b.place.root =? 'local' and declared.contains(b.place.declaration) and LifeWord(locals.ptr[b.place.declaration].flags) & (LF_CAPTURED | LF_SHARED) =? 0 {continue}
-        kept.push(b)
+    let nd=fse_declared.length
+    if nd =? 0 {return}
+    let dp=fse_declared.ptr
+    let blen=s.bindings.length
+    let bp=s.bindings.ptr
+    let first_drop:LifeWord=-1
+    loop i in [first..blen) {
+        let b=bp + i
+        if b[0].place.root =? 'local' {
+            let decl=b[0].place.declaration
+            if LifeWord(locals.ptr[decl].flags) & (LF_CAPTURED | LF_SHARED) =? 0 {
+                let hit=false
+                loop di in [0..nd) {if dp[di] =? decl {hit=true; break}}
+                if hit {first_drop=i; break}
+            }
+        }
     }
-    if kept.length =? s.bindings.length - first {return}
-    s.bindings.truncate(first)
+    if first_drop <? 0 {return}
     let has_roots=s.index.ptr[0].roots.length not=? 0
-    loop b in kept {
-        if has_roots {fact_index_put(@s.index[0].roots fact_root_key(b.place) s.bindings.length)}
-        s.bindings.push(b)
+    let w=first_drop
+    loop i in [first_drop + 1..blen) {
+        let b=s.bindings.ptr[i]
+        let drop=false
+        if b.place.root =? 'local' {
+            let decl=b.place.declaration
+            if LifeWord(locals.ptr[decl].flags) & (LF_CAPTURED | LF_SHARED) =? 0 {
+                loop di in [0..nd) {if dp[di] =? decl {drop=true; break}}
+            }
+        }
+        if not drop {
+            if has_roots {fact_index_put(@s.index[0].roots fact_root_key(b.place) w)}
+            s.bindings[w]=b
+            w += 1
+        }
     }
+    s.bindings.truncate(w)
 }
 fact_refinements_unreachable=(root:LifeWord):>void=>$unsafe {
     if fact_speculating not=? 0 or fact_summary_owner not=? 0 or fact_probe_on or fact_query or wit_tentative or not refine_owners.has(fact_owner) {return}
@@ -361,6 +385,7 @@ facts_reset=():>void=>{
     draw_context_reset()
     fact_search_predicate=0
     exact_reset()
+    fsp_reset()
     fact_slice=FactSlice()
     fact_slice_cache=dict<int64 FactSlice>()
     fact_plan_dependencies=dict<int64 FactPlanDependency>()
@@ -610,7 +635,7 @@ fact_obligation_node=(n:LifeWord):>bool=>$unsafe {
     if k =? 'call' {
         if wi_fact_calls.has(n) or fact_divisors.has(n) or nd_mutable_call(n) {return true}
         let callee=LifeWord(nodes.ptr[n].sym)
-        if callee >? 0 and fn_in_lib(callee) {
+        if callee >? 0 and fn_in_lib(callee) and fsp_is_lib_sp(n callee) {
             if fact_range_call(n) or fact_rational_constructor(n) and not fact_literal_nonzero(kid(n 1)) or fact_rational_divmod(n) {return true}
             if (fact_floor_call(n) not=? 0 and not fact_literal_nonzero(kid(n 1))) or fact_string_call(n) >=? 2 or fact_array_call(n) not=? 0 or fact_power_call(n) {return true}
             let map=fact_map_call(n)

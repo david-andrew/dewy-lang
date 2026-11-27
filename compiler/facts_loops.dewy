@@ -75,6 +75,15 @@ let loop_ch_mark:array<int32>=[]
 let loop_st_mark:array<int32>=[]
 let loop_mark_gen:int32=0
 let loop_header_widened:bool=false
+let lh_counters:array<int64>=[]
+let lh_lockstep:array<FactDifference>=[]
+let lh_carried:array<FactDifference>=[]
+let lh_offsets:array<int64>=[]
+let lh_changed_h:array<int64>=[]
+let lh_changed_v:array<int64>=[]
+let lh_changed_o:array<int64>=[]
+let lh_changed_bi:array<int64>=[]
+let lh_direct:array<FactDifference>=[]
 
 fact_loop_is_ch=(v:LoopWord):>bool=>$unsafe {
     v >=? 0 and v <? loop_ch_mark.length and loop_ch_mark.ptr[v] =? loop_mark_gen
@@ -100,7 +109,7 @@ fact_loop_header=(@entry:FactState back:FactState old:FactState at:LoopWord wide
     let st_mark=loop_st_mark.ptr
     let gen=loop_mark_gen
     let changing_count:LoopWord=0
-    let counters:array<int64>=[]
+    lh_counters.clear()
     if back.live and entry.live {
         let back_b=back.bindings.ptr
         let entry_b=entry.bindings.ptr
@@ -116,20 +125,20 @@ fact_loop_header=(@entry:FactState back:FactState old:FactState at:LoopWord wide
                 }
                 st_mark[entry_b[original].value]=gen
                 let b=fact_bound(entry entry_b[original].value)
-                if types.ptr[fact_type(t)].kind =? 'int_' and b.lo =? b.hi and not b.wide {counters.push(i)}
+                if types.ptr[fact_type(t)].kind =? 'int_' and b.lo =? b.hi and not b.wide {lh_counters.push(i)}
             }
         }
     }
-    let lockstep:array<FactDifference>=[]
-    if counters.length <=? 8 and counters.length >? 1 {
+    lh_lockstep.clear()
+    if lh_counters.length <=? 8 and lh_counters.length >? 1 {
         let back_b=back.bindings.ptr
         let entry_b=entry.bindings.ptr
-        loop i in counters {
+        loop i in lh_counters {
             let x=fact_bound(entry entry_b[fact_binding(entry back_b[i].place)].value)
             let link_n:LoopWord=0
             let link0=FactDifference()
             let link1=FactDifference()
-            loop j in counters {
+            loop j in lh_counters {
                 if j =? i {break}
                 let y=fact_bound(entry entry_b[fact_binding(entry back_b[j].place)].value)
                 if y.lo =? FACT_MIN or not fact_add_fits(x.lo (-y.lo)) or x.lo - y.lo =? FACT_MIN {continue}
@@ -143,33 +152,36 @@ fact_loop_header=(@entry:FactState back:FactState old:FactState at:LoopWord wide
                 }
                 if rn >? 0 {link_n=rn; link0=r0; link1=r1}
             }
-            if link_n >=? 1 {lockstep.push(link0)}
-            if link_n >=? 2 {lockstep.push(link1)}
+            if link_n >=? 1 {lh_lockstep.push(link0)}
+            if link_n >=? 2 {lh_lockstep.push(link1)}
         }
     }
-    if changing_count >? 1 and nodes.ptr[at].kind =? 'while_' {fact_guard_pairs(LoopWord(nodes.ptr[at].a) entry back @lockstep 0)}
-    let carried:array<FactDifference>=[]
-    let offsets:array<int64>=[]
-    if changing_count >? 0 and nodes.ptr[at].kind =? 'while_' {fact_offset_guarded(LoopWord(nodes.ptr[at].a) @offsets 0)}
+    if changing_count >? 1 and nodes.ptr[at].kind =? 'while_' {fact_guard_pairs(LoopWord(nodes.ptr[at].a) entry back @lh_lockstep 0)}
+    lh_carried.clear()
+    lh_offsets.clear()
+    if changing_count >? 0 and nodes.ptr[at].kind =? 'while_' {fact_offset_guarded(LoopWord(nodes.ptr[at].a) @lh_offsets 0)}
     if changing_count >? 0 {
         loop row in back.differences {
             let upper=fact_loop_is_ch(row.a)
             if not upper and not fact_loop_is_ch(row.b) {continue}
-            if fact_loop_materialize(@entry back if upper {row.b} else {row.a}) {carried.push(row)}
+            if fact_loop_materialize(@entry back if upper {row.b} else {row.a}) {lh_carried.push(row)}
         }
-        if offsets.length >? 0 {
+        if lh_offsets.length >? 0 {
+            let carried=lh_carried
+            lh_carried=[]
             loop binding in back.bindings {
-                if not fact_loop_is_ch(binding.value) or binding.place.root not=? 'local' or binding.place.declaration not in? offsets {continue}
+                if not fact_loop_is_ch(binding.value) or binding.place.root not=? 'local' or binding.place.declaration not in? lh_offsets {continue}
                 fact_loop_paths(@entry back binding.value true @carried)
             }
+            lh_carried=carried
         }
         if nodes.ptr[at].kind =? 'while_' {
-            let direct:array<FactDifference>=[]
-            fact_guarded_rows(LoopWord(nodes.ptr[at].a) back @direct 0)
-            if direct.length =? 1 {
-                let row=direct[0]
+            lh_direct.clear()
+            fact_guarded_rows(LoopWord(nodes.ptr[at].a) back @lh_direct 0)
+            if lh_direct.length =? 1 {
+                let row=lh_direct[0]
                 let other=if fact_loop_is_ch(row.a) {row.b} else {row.a}
-                if fact_loop_materialize(@entry back other) {carried.push(row)}
+                if fact_loop_materialize(@entry back other) {lh_carried.push(row)}
             }
         }
         loop binding in back.bindings {
@@ -189,30 +201,30 @@ fact_loop_header=(@entry:FactState back:FactState old:FactState at:LoopWord wide
             if joined {
                 if binding.place.root not=? 'local' or types.ptr[fact_type(LoopWord(locals.ptr[binding.place.declaration].type))].kind not=? 'int_' {continue}
                 let initial=fact_bound(entry start)
-                if not (initial.lo =? initial.hi and not initial.wide) and fact_entails(back start v 0) {carried.push(FactDifference(start v 0))}
+                if not (initial.lo =? initial.hi and not initial.wide) and fact_entails(back start v 0) {lh_carried.push(FactDifference(start v 0))}
             }
             if not falling {
                 let initial=fact_bound(entry start)
                 if initial.lo =? initial.hi and not initial.wide {continue}
-                if fact_entails(back start v 0) {carried.push(FactDifference(start v 0))}
+                if fact_entails(back start v 0) {lh_carried.push(FactDifference(start v 0))}
                 let ri=fact_difference_head(entry start 0)
                 let seen:LoopWord=0
                 loop ri >=? 0 and seen <? 8 {
                     let row=entry.differences[ri]
                     ri=fact_difference_next(entry ri 0)
                     seen += 1
-                    if row.b =? start and row.a not=? start and fact_entails(back row.a v row.limit) {carried.push(FactDifference(row.a v row.limit))}
+                    if row.b =? start and row.a not=? start and fact_entails(back row.a v row.limit) {lh_carried.push(FactDifference(row.a v row.limit))}
                 }
                 continue
             }
-            if fact_entails(back v start 0) {carried.push(FactDifference(v start 0))}
+            if fact_entails(back v start 0) {lh_carried.push(FactDifference(v start 0))}
             let ri=fact_difference_head(entry start 1)
             let seen:LoopWord=0
             loop ri >=? 0 and seen <? 8 {
                 let row=entry.differences[ri]
                 ri=fact_difference_next(entry ri 1)
                 seen += 1
-                if row.a =? start and row.b not=? start and fact_entails(back v row.b row.limit) {carried.push(FactDifference(v row.b row.limit))}
+                if row.a =? start and row.b not=? start and fact_entails(back v row.b row.limit) {lh_carried.push(FactDifference(v row.b row.limit))}
             }
         }
     }
@@ -222,20 +234,22 @@ fact_loop_header=(@entry:FactState back:FactState old:FactState at:LoopWord wide
     s.cmp_mask=LoopWord(entry.cmp_mask) | LoopWord(back.cmp_mask)
     s.live=entry.live or back.live
     s.full=false
-    let kept:array<ResultEvidence>=[]
-    loop evidence in entry.conditional {
-        if evidence.tag =? -2 and (not back.live or evidence in? back.conditional) {kept.push(evidence)}
+    if entry.conditional.length >? 0 {
+        let kept:array<ResultEvidence>=[]
+        loop evidence in entry.conditional {
+            if evidence.tag =? -2 and (not back.live or evidence in? back.conditional) {kept.push(evidence)}
+        }
+        s.conditional=kept
     }
-    s.conditional=kept
     let in_place=entry.live
     if not in_place {
         s.bindings=[]
         if s.index.ptr[0].roots.length not=? 0 {s.index[0].roots=[]}
     }
-    let changed_h:array<int64>=[]
-    let changed_v:array<int64>=[]
-    let changed_o:array<int64>=[]
-    let changed_bi:array<int64>=[]
+    lh_changed_h.clear()
+    lh_changed_v.clear()
+    lh_changed_o.clear()
+    lh_changed_bi.clear()
     let src_len=source.bindings.length
     let src_b=source.bindings.ptr
     let pred_len=predecessor.bindings.length
@@ -296,7 +310,7 @@ fact_loop_header=(@entry:FactState back:FactState old:FactState at:LoopWord wide
             # length or a bound below one holds it (`loop i+1 <? stop`); past
             # it, at the domain)
             let limit=fact_length_max()
-            let offset=offsets.length >? 0 and bp[0].place.root =? 'local' and bp[0].place.declaration in? offsets
+            let offset=lh_offsets.length >? 0 and bp[0].place.root =? 'local' and bp[0].place.declaration in? lh_offsets
             let stop=if local >? 0 and bound.hi >? before.hi {min(domain.hi fact_loop_threshold(at local bound.hi true))} else {domain.hi}
             bound.hi=if bound.hi <=? before.hi {before.hi} else if offset and before.hi <? limit and bound.hi <=? limit and domain.hi >? limit {limit} else {stop}
             if bound.lo not=? orig_lo or bound.hi not=? orig_hi {loop_header_widened=true}
@@ -323,26 +337,26 @@ fact_loop_header=(@entry:FactState back:FactState old:FactState at:LoopWord wide
                 fact_rebind(@s bp[0].place nv at prior)
             }
             if nv not=? v {
-                changed_h.push(h)
-                changed_v.push(v)
-                changed_o.push(peer_value)
-                changed_bi.push(bi)
+                lh_changed_h.push(h)
+                lh_changed_v.push(v)
+                lh_changed_o.push(peer_value)
+                lh_changed_bi.push(bi)
             }
         }
     }
     let shape_steps:LoopWord=FACT_CAP
-    loop ci in [0..changed_h.length) {
-        let hv=s.bindings[changed_h[ci]].value
-        let bv=changed_v[ci]
-        let other=changed_o[ci]
+    loop ci in [0..lh_changed_h.length) {
+        let hv=s.bindings[lh_changed_h[ci]].value
+        let bv=lh_changed_v[ci]
+        let other=lh_changed_o[ci]
         fact_loop_shape(@s source predecessor bv other hv @shape_steps 0)
         if fact_summary_payload(fact_type(fact_terms[hv].type)) not=? 0 {
             if widen {loop_header_widened=true}
-            fact_loop_payload(@s source bv predecessor other hv old source.bindings[changed_bi[ci]].place widen)
+            fact_loop_payload(@s source bv predecessor other hv old source.bindings[lh_changed_bi[ci]].place widen)
         }
         if fact_grown_roots.length >? 0 {fact_join_grown(@s source bv predecessor other hv)}
     }
-    if carried.length >? 0 {
+    if lh_carried.length >? 0 {
         let binding_values:array<int64>=[]
         if back.live and entry.live {
             let back_b=back.bindings.ptr
@@ -351,7 +365,7 @@ fact_loop_header=(@entry:FactState back:FactState old:FactState at:LoopWord wide
                 if fact_index_get(binding_values bv) <? 0 {fact_index_put(@binding_values bv i)}
             }
         }
-        loop row in carried {
+        loop row in lh_carried {
             let upper=fact_loop_is_ch(row.a)
             let value=if upper {row.a} else {row.b}
             let other=if upper {row.b} else {row.a}
@@ -384,7 +398,7 @@ fact_loop_header=(@entry:FactState back:FactState old:FactState at:LoopWord wide
             fact_set_bound(@s v b)
         }
     }
-    loop row in lockstep {
+    loop row in lh_lockstep {
         let p=fact_binding(s back.bindings[row.a].place)
         let q=fact_binding(s back.bindings[row.b].place)
         if p <? 0 or q <? 0 {continue}
@@ -762,9 +776,10 @@ fact_loop_payload=(@s:FactState a:FactState x:LoopWord b:FactState y:LoopWord in
     }
     fact_join_payload(@s a x b y into [] [] [] bound true)
 }
+let ls_renamed:dict<int64 int64>=dict<int64 int64>()
 fact_loop_stable=(a:FactState b:FactState):>bool=>$unsafe {
     let shape_steps:LoopWord=FACT_CAP
-    let renamed=dict<int64 int64>()
+    if ls_renamed.length >? 0 {ls_renamed.clear()}
     let ab=a.bindings.ptr
     let bb=b.bindings.ptr
     let an=a.bindings.length
@@ -790,18 +805,18 @@ fact_loop_stable=(a:FactState b:FactState):>bool=>$unsafe {
         # header aggregates with no projections or rows are both top.
         if av not=? bv {
             let t=if ap[0].place.root =? 'local' {LoopWord(locals.ptr[ap[0].place.declaration].type)} else {LoopWord(globals.ptr[ap[0].place.declaration].type)}
-            if not fact_scalar(t) and not (fact_top(a av) and fact_top(b bv)) and not fact_same_shape(a b av bv @shape_steps @renamed) {return false}
+            if not fact_scalar(t) and not (fact_top(a av) and fact_top(b bv)) and not fact_same_shape(a b av bv @shape_steps @ls_renamed) {return false}
         }
     }
     # Carried rows must return unchanged, renamed into the next frame.
     if a.differences.length not=? b.differences.length {return false}
     if a.differences.length =? 0 {return fact_loop_stable_implications(a b)}
-    let shaped=renamed.length >? 0
+    let shaped=ls_renamed.length >? 0
     let any_ren=shaped
     loop bi in [0..an) {
         let ap=ab + bi
         let av=ap[0].value
-        if not shaped and renamed.length >? 0 and renamed.has(av) {continue}
+        if not shaped and ls_renamed.length >? 0 and ls_renamed.has(av) {continue}
         let i:LoopWord=-1
         if bi <? bn {
             let bp=bb + bi
@@ -810,10 +825,10 @@ fact_loop_stable=(a:FactState b:FactState):>bool=>$unsafe {
         } else {i=fact_binding(b ap[0].place)}
         let other=if i >=? 0 {bb[i].value} else {0}
         if shaped {
-            if not fact_shape_rename(@renamed av other) {return false}
+            if not fact_shape_rename(@ls_renamed av other) {return false}
         }
         else if av not=? other {
-            renamed[av]=other
+            ls_renamed[av]=other
             any_ren=true
         }
     }
@@ -824,9 +839,9 @@ fact_loop_stable=(a:FactState b:FactState):>bool=>$unsafe {
         let row=adiffs + di
         # An unrenamed snapshot remains itself, never the target of a fresh
         # projection's renaming. This also prevents merging distinct terms.
-        if shaped and (renamed.has(-row[0].a) and not renamed.has(row[0].a) or renamed.has(-row[0].b) and not renamed.has(row[0].b)) {return false}
-        let x=if any_ren {renamed.get(row[0].a) ?? row[0].a} else {row[0].a}
-        let y=if any_ren {renamed.get(row[0].b) ?? row[0].b} else {row[0].b}
+        if shaped and (ls_renamed.has(-row[0].a) and not ls_renamed.has(row[0].a) or ls_renamed.has(-row[0].b) and not ls_renamed.has(row[0].b)) {return false}
+        let x=if any_ren {ls_renamed.get(row[0].a) ?? row[0].a} else {row[0].a}
+        let y=if any_ren {ls_renamed.get(row[0].b) ?? row[0].b} else {row[0].b}
         let i=fact_row_find(b x y)
         if i <? 0 or bdiffs[i].limit not=? row[0].limit {return false}
     }
