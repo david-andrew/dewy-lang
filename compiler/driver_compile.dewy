@@ -72,6 +72,7 @@ from p"watch_ops.dewy" import (draw_present watch_lower_inits watch_lower_migrat
 from p"witness_ops.dewy" import (wit_skip_close)
 from p"x64.jo" import (code entry_end_lf ra_spill_cost ra_total ra_verbose)
 from p"x64_ops.dewy" import (x64_entry x64_entry_win x64_resolve x64_stubs)
+from p"x64_baseline.dewy" import (x64_baseline_try)
 
 DriverWord:type=int64<overflow='wrap'>
 compile=(path:string out0:string):>string=>$unsafe {
@@ -240,6 +241,7 @@ compile=(path:string out0:string):>string=>$unsafe {
     }
     # (worker processes lower, optimize and emit most functions: fused.jo)
     fused_fork(pinit_lf);
+    let bl_ok=not opt_release_slot and not dbg_on_slot and not target_wasm and not target_arm64 and not target_windows and not target_macos and not watch_build and not repl_image and not lower_only and not host_ir and not dump and not ra_stat_slot and (ra_dump_slot as array<uint8>).length =? 0 and not fz_layout
     let tlow=time()
     let i:DriverWord=0
     loop true {
@@ -287,6 +289,11 @@ compile=(path:string out0:string):>string=>$unsafe {
                 continue
             }
             let icb=ic_lf(IC_LOWER i)
+            if bl_ok and x64_baseline_try(i) {
+                ic_restore(icb)
+                i += 1
+                continue
+            }
             lower_function(i)
             if opt_release_slot {rel_collect()}
             else {emit_function()}

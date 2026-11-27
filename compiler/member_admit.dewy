@@ -27,10 +27,12 @@ from p"warn_if.jo" import (wi_fact_calls)
 
 MemberWord:type=int64<overflow='wrap'>
 let member_has_exact:array<bool>=[]
+let member_seen_owners:dict<int64 bool>=dict<int64 bool>()
 member_reset=():>void=>{
     member_compact_owners=dict<int64 array<int64>>()
     member_templates=[]
     member_has_exact=[]
+    member_seen_owners=dict<int64 bool>()
     member_scopes=dict<int64 int64>()
     member_scope_locals=dict<int64 array<int64>>()
     member_words=dict<int64 dict<string int64>>()
@@ -143,6 +145,7 @@ member_syntax_inner=(n:MemberWord name:MemberWord @t:MemberTemplate value:bool):
     nkids2(n) =? 0
 }
 member_prepare=(scopes:array<int64> body:MemberWord):>void=>$unsafe {
+    if cx >=? 0 and scopes.length >=? 2 {member_seen_owners[MemberWord(ctxs[cx].inst)]=true}
     if not member_enabled or scopes.length <? 2 or ide_on or cx <? 0 or const_views.length >? 0 or sibling_known.length >? 0 or sibling_flow.length >? 0 {return}
     let t=MemberTemplate(owner=MemberWord(ctxs[cx].inst))
     loop scope in scopes {
