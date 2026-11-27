@@ -85,16 +85,17 @@ degrees = (g:Graph):>void => {
 # graph in reverse finish order. Iterative, with explicit stacks of people:
 # each holds valid indexes of `names`, checked as pushed and known when popped.
 groups = (g:Graph):>array<array<string>> => {
-    const n = g.names.length
+    const names = g.names
+    const n = names.length
     let seen = fill(false n)
-    let finished:array<addr<(<? n)>> = []
+    let finished:array<int64<(<? names.length)>> = []
     loop root in [0..n) {
         if seen[root] continue
         seen[root] = true
-        let stack:array<addr<(<? n)>> = [root]
+        let stack:array<int64<(<? names.length)>> = [root]
         loop not stack.is_empty {
             let v = stack[end]
-            let next:array<addr<(<? n)>> = [loop w in g.targets[$clamp first(g v)..last(g v)) if not seen[w] w]
+            let next:array<int64<(<? names.length)>> = [loop w in g.targets[$clamp first(g v)..last(g v)) if not seen[w] w]
             if next.is_empty {
                 finished.push(stack.pop())
             } else {
@@ -103,7 +104,7 @@ groups = (g:Graph):>array<array<string>> => {
             }
         }
     }
-    let incoming:array<array<addr<(<? n)>>> = fill([] n)
+    let incoming:array<array<int64<(<? names.length)>>> = fill([] n)
     loop v in [0..n) {
         loop w in g.targets[$clamp first(g v)..last(g v)) incoming[w].push(v)
     }
@@ -113,7 +114,7 @@ groups = (g:Graph):>array<array<string>> => {
         if placed[root] continue
         placed[root] = true
         let members:array<string> = []
-        let todo:array<addr<(<? n)>> = [root]
+        let todo:array<int64<(<? names.length)>> = [root]
         loop not todo.is_empty {
             let v = todo.pop()
             members.push(g.names[v])
@@ -138,14 +139,15 @@ tree = (kids:dict<string array<string>> name:string indent:string):>generator<st
 
 # Breadth-first rounds; the frontier holds valid indexes, as the stacks above do.
 reach = (g:Graph root:int64):>void => {
-    const n = g.names.length
+    const names = g.names
+    const n = names.length
     let reached = fill(false n)
     let kids:dict<string array<string>> = []
     if root <? 0 or root >=? n return
-    let frontier:array<addr<(<? n)>> = [root]
+    let frontier:array<int64<(<? names.length)>> = [root]
     let rounds = 0
     loop not frontier.is_empty {
-        let next:array<addr<(<? n)>> = []
+        let next:array<int64<(<? names.length)>> = []
         loop v in frontier {
             loop w in g.targets[$clamp first(g v)..last(g v)) {
                 if reached[w] or w =? root continue
