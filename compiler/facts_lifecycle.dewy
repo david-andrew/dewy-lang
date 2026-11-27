@@ -12,7 +12,7 @@ from p"facts_value_queries.dewy" import (fact_bound)
 from p"facts.jo" import (FactProbeRun)
 from p"facts.jo" import (FactKeyParam)
 from p"facts.jo" import (FactForkEntry)
-from p"ast.jo" import (NF_GLOBAL NF_INBOUNDS has_flag kid nkids nodes set_list)
+from p"ast.jo" import (NF_GLOBAL NF_INBOUNDS has_flag kid lists nkids nodes set_list)
 from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARTBORROW LF_SHARED LF_SOAELEM fns globals locals)
 from p"directives.jo" import (dir_floats_any dir_forced dir_name_assumed_bounds dir_obligations dir_proven dir_value)
 from p"directive_queries.dewy" import (dir_index dir_uniform_runtime)
@@ -65,7 +65,7 @@ from p"witness_ops.dewy" import (wit_fail)
 
 from p"directives.jo" import (DIR_PROTOTYPE DIR_STATIC)
 from p"ast.jo" import (kid2 nkids2)
-from p"isolation_ops.dewy" import (isolation_children)
+from p"isolation_ops.dewy" import (iso_child_p isolation_children)
 from p"nd_contracts.jo" import (nd_mutable_handle)
 
 from p"directives.jo" import (dir_assumed_bounds_any)
@@ -272,11 +272,13 @@ facts_finalize=():>void=>$unsafe {
         let icb=ic_fn(IC_FACTS f)
         let run=fact_probe_runs.get(f)
         if run not=? none {
+            fact_owner=f
             if fact_probe_reusable(f run) {
                 loop [n _] in run.proven {
                     if (nodes.ptr[n].kind =? 'index' or nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.arr2fixed))) and not has_flag(n NF_INBOUNDS) {dir_index(n true)}
                     if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.arr2fixed)) {fact_validated[n]=true}
                 }
+                fact_owner=0
                 ic_restore(icb)
                 continue
             }
@@ -571,42 +573,82 @@ facts_discovery_bind=(collect:ptr<bool> deferred:ptr<bool> pending:ptr<array<int
     0
 }
 
+# Bit flags per NodeKind ordinal: 128=init, 1=panic_site, 2=obligation_cand, 4=special(ident/lambda/parallel_region/binary)
+let fo_kind_bits:array<uint8>=[]
+fo_classify_kind=(n:LifeWord):>uint8=>$unsafe {
+    let k=nodes.ptr[n].kind
+    let b:LifeWord=128
+    if k =? 'intrinsic' or k =? 'call' or k =? 'fnref' or k =? 'lambda' or k =? 'pair' or k =? 'partial' {b |= 1}
+    if k =? 'index' or k =? 'binary' or k =? 'assign' or k =? 'for_' or k =? 'conv' or k =? 'call' or k =? 'intrinsic' {b |= 2}
+    if k =? 'ident' or k =? 'lambda' or k =? 'parallel_region' or k =? 'binary' {b |= 4}
+    uint8<overflow='wrap'>(b)
+}
+fo_bits_of=(n:LifeWord rk:LifeWord):>LifeWord=>$unsafe {
+    if rk >=? fo_kind_bits.length {fo_kind_bits.resize(max(rk + 32 128))}
+    let v=fo_kind_bits.ptr[rk]
+    if v not=? uint8(0) {return LifeWord(v)}
+    let c=fo_classify_kind(n)
+    fo_kind_bits.ptr[rk]=c
+    LifeWord(c)
+}
+
 fact_obliged=(n:LifeWord):>bool=>$unsafe {
     if n <=? 0 or n >=? nodes.length {return false}
-    let k=nodes.ptr[n].kind
-    if fact_panic_collect {
-        if k =? 'parallel_region' {discovery_collect[0]=false}
-        else if k =? 'intrinsic' or k =? 'call' or k =? 'fnref' or k =? 'lambda' or k =? 'pair' or k =? 'partial' or k =? 'binary' and nodes.ptr[n].aux =? 1 {discovery_pending[0].push(n)}
-    }
-    if k =? 'lambda' {return nd_mutable_handle(n)}
-    if k =? 'ident' {
-        if nodes.ptr[n].aux =? int32(1) {
-            let l=LifeWord(nodes.ptr[n].sym)
-            if l >? 0 and LifeWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 {
-                discovery_collect[0]=false
-                return fact_obliged(LifeWord(locals.ptr[l].alias))
+    let rk:LifeWord=int64(((nodes.ptr + n) as ptr<uint32>)[0])
+    let fb:LifeWord=if rk <? fo_kind_bits.length and fo_kind_bits.ptr[rk] not=? uint8(0) {LifeWord(fo_kind_bits.ptr[rk])} else {fo_bits_of(n rk)}
+    if fb & 5 not=? 0 {
+        if fact_panic_collect {
+            if fb & 1 not=? 0 {discovery_pending[0].push(n)}
+            else {
+                let k0=nodes.ptr[n].kind
+                if k0 =? 'binary' {if nodes.ptr[n].aux =? 1 {discovery_pending[0].push(n)}}
+                else if k0 =? 'parallel_region' {discovery_collect[0]=false}
             }
         }
-        return false
+        if fb & 4 not=? 0 {
+            let k=nodes.ptr[n].kind
+            if k =? 'ident' {
+                if nodes.ptr[n].aux =? int32(1) {
+                    let l=LifeWord(nodes.ptr[n].sym)
+                    if l >? 0 and LifeWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 {
+                        discovery_collect[0]=false
+                        return fact_obliged(LifeWord(locals.ptr[l].alias))
+                    }
+                }
+                return false
+            }
+            if k =? 'lambda' {return nd_mutable_signatures.length not=? 0 and nd_mutable_handle(n)}
+        }
     }
-    let mask=isolation_children(k)
+    let mask:LifeWord=int64(iso_child_p[rk])
     if mask =? 0 {return false}
     # A finite lowering width is required even when runtime checks are allowed.
-    if n <? exact_marks.length and exact_marks[n] & 128 not=? 0 {return true}
-    if fact_obligation_node(n) {
+    if n <? exact_marks.length and exact_marks.ptr[n] & 128 not=? 0 {return true}
+    if (fb & 2 not=? 0 and fact_obligation_node(n)) or (nd_mutable_signatures.length not=? 0 and nd_mutable_handle(n)) {
         if fact_deferred_proving {return true}
         let policy=dir_policy(nodes.ptr[n].pos)
         if policy =? DIR_STATIC or policy =? DIR_PROTOTYPE or dir_obligations or ide_on or dir_forced {return true}
         discovery_deferred[0]=true
     }
     if mask <? 0 {mask=7 | 16 | 32}
-    if mask & 1 not=? 0 and fact_obliged(LifeWord(nodes.ptr[n].a)) {return true}
-    if mask & 2 not=? 0 and fact_obliged(LifeWord(nodes.ptr[n].b)) {return true}
-    if mask & 4 not=? 0 and fact_obliged(LifeWord(nodes.ptr[n].c)) {return true}
+    if mask & 1 not=? 0 {
+        let ca=LifeWord(nodes.ptr[n].a)
+        if ca not=? 0 and fact_obliged(ca) {return true}
+    }
+    if mask & 2 not=? 0 {
+        let cb=LifeWord(nodes.ptr[n].b)
+        if cb not=? 0 and fact_obliged(cb) {return true}
+    }
+    if mask & 4 not=? 0 {
+        let cc=LifeWord(nodes.ptr[n].c)
+        if cc not=? 0 and fact_obliged(cc) {return true}
+    }
     if mask & 16 not=? 0 {
-        loop j in [0..nkids(n)) {
-            let child=kid(n j)
-            if fact_obliged(child) {return true}
+        let nk=LifeWord(nodes.ptr[n].nlist)
+        let l0=LifeWord(nodes.ptr[n].list)
+        loop j in [LifeWord(0)..nk) {
+            let child=LifeWord(lists.ptr[l0 + j])
+            if child not=? 0 and fact_obliged(child) {return true}
         }
     }
     if mask & 32 not=? 0 {
@@ -620,53 +662,56 @@ fact_obliged=(n:LifeWord):>bool=>$unsafe {
 fact_obligation_node=(n:LifeWord):>bool=>$unsafe {
     let k=nodes.ptr[n].kind
     if nd_mutable_signatures.length not=? 0 and nd_mutable_handle(n) {return true}
-    if k =? 'index' {return not has_flag(n NF_INBOUNDS) and fact_bounded_index(n)}
-    if k =? 'binary' {
-        if nodes.ptr[n].aux =? 0 and (nodes.ptr[n].op =? int32(61) or nodes.ptr[n].op =? int32(62)) and is_int(ntype(LifeWord(nodes.ptr[n].b))) and not fact_literal_nonzero(LifeWord(nodes.ptr[n].b)) {return true}
-        return fact_shift_obliged(n)
-    }
-    if k =? 'assign' {return fact_shift_obliged(n)}
-    if k =? 'for_' {return fact_stepped_loop(n) or fact_open_range(n)}
-    if k =? 'conv' {
-        if ff_integer_demand(n) {return true}
-        if exact_has_store(n) and not exact_decided(n) or nodes.ptr[n].aux =? int32(int64(CV.refinement)) or nodes.ptr[n].aux =? int32(int64(CV.arr2fixed)) {return true}
-        return nodes.ptr[n].aux =? int32(int64(CV.int_)) and prune(ntype(LifeWord(nodes.ptr[n].a))) =? T_MATH_INT and prune(ntype(n)) not=? T_MATH_INT
-    }
-    if k =? 'call' {
-        if wi_fact_calls.has(n) or fact_divisors.has(n) or nd_mutable_call(n) {return true}
-        let callee=LifeWord(nodes.ptr[n].sym)
-        if callee >? 0 and fn_in_lib(callee) and fsp_is_lib_sp(n callee) {
-            if fact_range_call(n) or fact_rational_constructor(n) and not fact_literal_nonzero(kid(n 1)) or fact_rational_divmod(n) {return true}
-            if (fact_floor_call(n) not=? 0 and not fact_literal_nonzero(kid(n 1))) or fact_string_call(n) >=? 2 or fact_array_call(n) not=? 0 or fact_power_call(n) {return true}
-            let map=fact_map_call(n)
-            if map >=? 2 and map <=? 4 or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_gpu_index_call(n) {return true}
-            let pool=fact_pool_call(n)
-            if pool >=? 2 and pool <=? 4 {return true}
-            # A fork closure's obligations start from its creator's facts.
-            if dir_assumed_bounds_any and fact_parallel_range_call(n) {return true}
-            if fact_library_call(n "parallel_range") or fact_library_call(n "parallel_map") or fact_parallel_array(n) {
-                loop i in [0..nkids(n)) {
-                    let arg=kid(n i)
-                    if nodes.ptr[arg].kind =? 'lambda' {
-                        discovery_collect[0]=false
-                        if fact_obliged(LifeWord(nodes.ptr[arg].b)) {return true}
+    match k {
+        <'index'> => {return not has_flag(n NF_INBOUNDS) and fact_bounded_index(n)}
+        <'binary'> => {
+            if nodes.ptr[n].aux =? 0 and (nodes.ptr[n].op =? int32(61) or nodes.ptr[n].op =? int32(62)) and is_int(ntype(LifeWord(nodes.ptr[n].b))) and not fact_literal_nonzero(LifeWord(nodes.ptr[n].b)) {return true}
+            return fact_shift_obliged(n)
+        }
+        <'assign'> => {return fact_shift_obliged(n)}
+        <'for_'> => {return fact_stepped_loop(n) or fact_open_range(n)}
+        <'conv'> => {
+            if ff_integer_demand(n) {return true}
+            let aux=nodes.ptr[n].aux
+            if exact_has_store(n) and not exact_decided(n) or aux =? int32(int64(CV.refinement)) or aux =? int32(int64(CV.arr2fixed)) {return true}
+            return aux =? int32(int64(CV.int_)) and prune(ntype(LifeWord(nodes.ptr[n].a))) =? T_MATH_INT and prune(ntype(n)) not=? T_MATH_INT
+        }
+        <'call'> => {
+            if (wi_fact_calls.length >? 0 and wi_fact_calls.has(n)) or (fact_divisors.length >? 0 and fact_divisors.has(n)) or (nd_mutable_signatures.length not=? 0 and nd_mutable_call(n)) {return true}
+            let callee=LifeWord(nodes.ptr[n].sym)
+            if callee >? 0 and fn_in_lib(callee) and fsp_is_lib_sp(n callee) {
+                if fact_range_call(n) or fact_rational_constructor(n) and not fact_literal_nonzero(kid(n 1)) or fact_rational_divmod(n) {return true}
+                if (fact_floor_call(n) not=? 0 and not fact_literal_nonzero(kid(n 1))) or fact_string_call(n) >=? 2 or fact_array_call(n) not=? 0 or fact_power_call(n) {return true}
+                let map=fact_map_call(n)
+                if map >=? 2 and map <=? 4 or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_gpu_index_call(n) {return true}
+                let pool=fact_pool_call(n)
+                if pool >=? 2 and pool <=? 4 {return true}
+                # A fork closure's obligations start from its creator's facts.
+                if dir_assumed_bounds_any and fact_parallel_range_call(n) {return true}
+                if fact_library_call(n "parallel_range") or fact_library_call(n "parallel_map") or fact_parallel_array(n) {
+                    loop i in [0..nkids(n)) {
+                        let arg=kid(n i)
+                        if nodes.ptr[arg].kind =? 'lambda' {
+                            discovery_collect[0]=false
+                            if fact_obliged(LifeWord(nodes.ptr[arg].b)) {return true}
+                        }
                     }
                 }
+                # (and so do a key callback's: fact_key_callback)
+                let key=fact_key_callback(n)
+                if key >? 0 {
+                    discovery_collect[0]=false
+                    if fact_obliged(LifeWord(nodes.ptr[key].b)) {return true}
+                }
             }
-            # (and so do a key callback's: fact_key_callback)
-            let key=fact_key_callback(n)
-            if key >? 0 {
-                discovery_collect[0]=false
-                if fact_obliged(LifeWord(nodes.ptr[key].b)) {return true}
-            }
+            return false
         }
-        return false
+        <'intrinsic'> => {
+            let id=nodes.ptr[n].aux as IN
+            return id =? IN.static_assert or id =? IN.runtime_assert or id =? IN.assert or nodes.ptr[n].aux2 =? int32(RANGE_EXHAUSTION) or id =? IN.lend or id =? IN.loan_length or id =? IN.loan_store or id =? IN.loan_address or id =? IN.loan_load or id =? IN.pop or id =? IN.remove or id =? IN.truncate
+        }
+        _ => {return false}
     }
-    if k =? 'intrinsic' {
-        let id=nodes.ptr[n].aux as IN
-        return id =? IN.static_assert or id =? IN.runtime_assert or id =? IN.assert or nodes.ptr[n].aux2 =? int32(RANGE_EXHAUSTION) or id =? IN.lend or id =? IN.loan_length or id =? IN.loan_store or id =? IN.loan_address or id =? IN.loan_load or id =? IN.pop or id =? IN.remove or id =? IN.truncate
-    }
-    false
 }
 
 from p"facts_compare.dewy" import (fact_add_fits)

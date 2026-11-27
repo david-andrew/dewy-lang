@@ -200,22 +200,52 @@ fact_join_into=(@a:FactState @b:FactState at:JoinWord):>void=>$unsafe {
     if same_cond {
         let alen:JoinWord=a.ids.length
         let blen:JoinWord=b.ids.length
-        let same_ids=alen =? blen and (a.ids.ptr =? b.ids.ptr or a.ids =? b.ids)
-        let a_prefix_ids=same_ids
-        if not a_prefix_ids and alen <=? blen {
-            let aids=a.ids.ptr
-            let bids=b.ids.ptr
-            let k:JoinWord=0
-            loop k <? alen and aids[k] =? bids[k] {k += 1}
-            if k =? alen {a_prefix_ids=true}
-        }
-        if a_prefix_ids {
-            let same_bind=a.bindings.length =? b.bindings.length and (a.bindings.ptr =? b.bindings.ptr or a.bindings =? b.bindings)
-            if same_bind {
+        let same_bind=a.bindings.length =? b.bindings.length and (a.bindings.ptr =? b.bindings.ptr or a.bindings =? b.bindings)
+        if same_bind {
+            let same_ids=alen =? blen and (a.ids.ptr =? b.ids.ptr or a.ids =? b.ids)
+            let a_prefix_ids=same_ids
+            let swapped=false
+            if not a_prefix_ids and alen <=? blen {
+                let aids=a.ids.ptr
+                let bids=b.ids.ptr
+                let k:JoinWord=0
+                loop k <? alen and aids[k] =? bids[k] {k += 1}
+                if k =? alen {a_prefix_ids=true}
+            } else if not a_prefix_ids and blen <? alen {
+                let aids=a.ids.ptr
+                let bids=b.ids.ptr
+                let k:JoinWord=0
+                loop k <? blen and aids[k] =? bids[k] {k += 1}
+                if k =? blen {
+                    let aplen0:JoinWord=a.projections.length
+                    let bplen0:JoinWord=b.projections.length
+                    let b_pref_p=aplen0 =? bplen0 and (a.projections.ptr =? b.projections.ptr or a.projections =? b.projections)
+                    if not b_pref_p and bplen0 <=? aplen0 {
+                        let ap0=a.projections.ptr
+                        let bp0=b.projections.ptr
+                        let kp0:JoinWord=0
+                        loop kp0 <? bplen0 and ap0[kp0] =? bp0[kp0] {kp0 += 1}
+                        if kp0 =? bplen0 {
+                            b_pref_p=true
+                            loop j in [bplen0..aplen0) {
+                                if ap0[j].element {b_pref_p=false; break}
+                            }
+                        }
+                    }
+                    if b_pref_p {
+                        let tmp=a; a=b; b=tmp
+                        alen=blen
+                        blen=b.ids.length
+                        a_prefix_ids=true
+                        swapped=true
+                    }
+                }
+            }
+            if a_prefix_ids {
                 let aplen:JoinWord=a.projections.length
                 let bplen:JoinWord=b.projections.length
                 let same_proj=aplen =? bplen and (a.projections.ptr =? b.projections.ptr or a.projections =? b.projections)
-                let a_prefix_proj=same_proj
+                let a_prefix_proj=same_proj or swapped
                 if not a_prefix_proj and aplen <=? bplen {
                     let ap=a.projections.ptr
                     let bp=b.projections.ptr
@@ -447,14 +477,36 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
         }
     }
     let proj_prefix_ok=same_proj
-    if not proj_prefix_ok and from_ =? 0 {
-        let bp=b.projections.ptr
+    let proj_no_elem=same_proj
+    if not proj_prefix_ok and from_ >=? 0 {
         proj_prefix_ok=true
-        loop j in [a.projections.length..b.projections.length) {
-            if bp[j].element {proj_prefix_ok=false; break}
+        if from_ =? 0 {
+            let bp=b.projections.ptr
+            loop j in [a.projections.length..b.projections.length) {
+                if bp[j].element {proj_prefix_ok=false; break}
+            }
+            if proj_prefix_ok {
+                proj_no_elem=true
+                let ap=a.projections.ptr
+                loop j in [0..a.projections.length) {
+                    if ap[j].element {proj_no_elem=false; break}
+                }
+            }
+        } else {
+            let ap=a.projections.ptr
+            loop j in [b.projections.length..a.projections.length) {
+                if ap[j].element {proj_prefix_ok=false; break}
+            }
+            if proj_prefix_ok {
+                proj_no_elem=true
+                let bp=b.projections.ptr
+                loop j in [0..b.projections.length) {
+                    if bp[j].element {proj_no_elem=false; break}
+                }
+            }
         }
     }
-    if proj_prefix_ok and (same_bind or (not bind_checked and a.bindings.length =? b.bindings.length and (a.bindings.ptr =? b.bindings.ptr or a.bindings =? b.bindings))) {
+    if (proj_prefix_ok and (from_ <=? 0 or proj_no_elem)) and (same_bind or (not bind_checked and a.bindings.length =? b.bindings.length and (a.bindings.ptr =? b.bindings.ptr or a.bindings =? b.bindings))) {
         s.bindings=a.bindings
         if a.index.ptr[0].roots.length not=? 0 {s.index[0].roots=a.index[0].roots}
         fact_join_shared_rows(@s a b)
@@ -589,7 +641,7 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
         loop cursor <? merged.length and merged.length <? FACT_CAP {
             let lv=left.ptr[cursor]
             let rv=right.ptr[cursor]
-            if (same_proj and lv =? rv) or (a_pmask & (JoinWord(1) << (lv & 63))) =? 0 or (b_pmask & (JoinWord(1) << (rv & 63))) =? 0 {
+            if (proj_no_elem and lv =? rv) or (a_pmask & (JoinWord(1) << (lv & 63))) =? 0 or (b_pmask & (JoinWord(1) << (rv & 63))) =? 0 {
                 cursor += 1
                 continue
             }
@@ -674,6 +726,8 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
     let lr_val_p:ptr<int32>=uint64(0) as ptr<int32>
     let rl_gen_p:ptr<int32>=uint64(0) as ptr<int32>
     let rl_val_p:ptr<int32>=uint64(0) as ptr<int32>
+    let l_chg_mask:JoinWord=0
+    let r_chg_mask:JoinWord=0
     if renamed {
         rcap=fact_terms.length + 1
         rg=fj_ensure_ren(rcap)
@@ -689,8 +743,20 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
             let lv=lp[i]
             let rv=rp[i]
             let mv=mp[i]
-            lm_gen_p[lv]=rg; lm_val_p[lv]=int32<overflow='wrap'>(mv)
-            rm_gen_p[rv]=rg; rm_val_p[rv]=int32<overflow='wrap'>(mv)
+            if lv not=? mv {
+                lm_gen_p[lv]=rg; lm_val_p[lv]=int32<overflow='wrap'>(mv)
+                l_chg_mask |= (JoinWord(1) << (lv & 63))
+            } else if lm_gen_p[lv] =? rg {
+                if fact_slot_ref(@s lv) >=? 0 {lm_gen_p[lv]=int32(0)}
+                else {lm_val_p[lv]=int32<overflow='wrap'>(mv)}
+            }
+            if rv not=? mv {
+                rm_gen_p[rv]=rg; rm_val_p[rv]=int32<overflow='wrap'>(mv)
+                r_chg_mask |= (JoinWord(1) << (rv & 63))
+            } else if rm_gen_p[rv] =? rg {
+                if fact_slot_ref(@s rv) >=? 0 {rm_gen_p[rv]=int32(0)}
+                else {rm_val_p[rv]=int32<overflow='wrap'>(mv)}
+            }
             lr_gen_p[lv]=rg; lr_val_p[lv]=int32<overflow='wrap'>(rv)
             rl_gen_p[rv]=rg; rl_val_p[rv]=int32<overflow='wrap'>(lv)
         }
@@ -756,8 +822,8 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
     let bids_p=b.ids.ptr; let bn_ids:JoinWord=b.ids.length
     let bslots_p=b.index.ptr[0].slots.ptr; let bslots_n:JoinWord=b.index.ptr[0].slots.length
     let gterms=fact_terms.ptr; let ngterms:JoinWord=fact_terms.length
-    fj_join_diff_side(@s a b common_rows lm_gen_p lm_val_p lr_gen_p lr_val_p rg rcap bids_p bn_ids bslots_p bslots_n gterms ngterms)
-    fj_join_diff_side(@s b a common_rows rm_gen_p rm_val_p rl_gen_p rl_val_p rg rcap aids_p an_ids aslots_p aslots_n gterms ngterms)
+    fj_join_diff_side(@s a b common_rows l_chg_mask lm_gen_p lm_val_p lr_gen_p lr_val_p rg rcap bids_p bn_ids bslots_p bslots_n gterms ngterms)
+    fj_join_diff_side(@s b a common_rows r_chg_mask rm_gen_p rm_val_p rl_gen_p rl_val_p rg rcap aids_p an_ids aslots_p aslots_n gterms ngterms)
     # (a value two places held, one replaced on one path only, `let hi = o`
     # then `if hi <? lo hi = lo`: the renaming above follows its last pair;
     # each earlier pair's rows follow here. O(shadowed pairs x their rows))
@@ -773,9 +839,10 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
     fj_chg_l_pool=chg_l; fj_chg_r_pool=chg_r; fj_chg_idx_pool=chg_idx; fj_pairs_pool=pairs
     s
 }
-fj_join_diff_side=(@s:FactState src:FactState peer:FactState common_rows:JoinWord m_gen_p:ptr<int32> m_val_p:ptr<int32> r_gen_p:ptr<int32> r_val_p:ptr<int32> rg:int32 rcap:JoinWord pids:ptr<int64> pn_ids:JoinWord pslots:ptr<int64> pslots_n:JoinWord gterms:ptr<FactTerm> ngterms:JoinWord):>void=>$unsafe {
+fj_join_diff_side=(@s:FactState src:FactState peer:FactState common_rows:JoinWord chg_mask:JoinWord m_gen_p:ptr<int32> m_val_p:ptr<int32> r_gen_p:ptr<int32> r_val_p:ptr<int32> rg:int32 rcap:JoinWord pids:ptr<int64> pn_ids:JoinWord pslots:ptr<int64> pslots_n:JoinWord gterms:ptr<FactTerm> ngterms:JoinWord):>void=>$unsafe {
     let dp=src.differences.ptr
-    loop ri in [0..src.differences.length) {
+    let start_ri:JoinWord=if (chg_mask & (JoinWord(src.diff_a_mask) | JoinWord(src.diff_b_mask))) =? 0 {common_rows} else {0}
+    loop ri in [start_ri..src.differences.length) {
         let row=dp[ri]
         if ri <? common_rows {
             if (row.a <? 0 or row.a >=? rcap or m_gen_p[row.a] not=? rg) and (row.b <? 0 or row.b >=? rcap or m_gen_p[row.b] not=? rg) {continue}

@@ -7,7 +7,7 @@ from p"directives.jo" import (dir_sites)
 from p"effect_control.dewy" import (effects_demand)
 from p"effect_types.dewy" import (EffectAtom)
 from p"effects.jo" import (effect_summaries)
-from p"facts.jo" import (FactFootprint FactProbeRun FactRoute FactSlice FactState fact_constructor_actuals fact_fork_entries fact_owner fact_parallel_bounds fact_policy fact_probe fact_probe_callees fact_probe_disjoint fact_probe_diverged fact_probe_footprints fact_probe_on fact_probe_runs fact_slice fact_terms)
+from p"facts.jo" import (FactFootprint FactProbeRun FactRoute FactSlice FactState fact_constructor_actuals fact_fork_entries fact_owner fact_parallel_bounds fact_policy fact_probe fact_probe_callees fact_probe_disjoint fact_probe_diverged fact_probe_footprints fact_probe_on fact_probe_runs fact_slice fact_slice_cache fact_terms)
 from p"facts_slice_builder.dewy" import (fact_slice_prepare)
 from p"facts_capture.dewy" import (fact_capture fact_index_success)
 from p"facts_values.dewy" import (fact_type fact_project)
@@ -49,17 +49,31 @@ fact_probe_note=(f:ProbeWord):>void=>{
     fact_probe_footprints.push(fact_footprint(f))
 }
 # Whether the facts pass would run f's body exactly as its probe did.
-fact_probe_reusable=(f:ProbeWord run:FactProbeRun):>bool=>{
+fact_probe_reusable=(f:ProbeWord run:FactProbeRun):>bool=>$unsafe {
     if fact_policy not=? 'RequireStatic' or proof_active or result_active or wi_fact_calls.length >? 0 or wit_collect and not wit_measure or run.refine not=? (refine_active or refine_requests.length >? 0) {return false}
+    # Settle callee footprints first so fact_plan_current reuses the cached slice
+    # even after effect_graph_reset(true) cleared effect_summaries.
+    loop i in [0..run.callees.length) {
+        if not fact_footprint_same(fact_footprint(run.callees[i]) run.footprints[i]) {return false}
+    }
+    let peer:ProbeWord=(f << 4) | 6
+    let cached=fact_slice_cache.get(peer)
+    if cached not=? none {
+        loop i in [0..cached.callees.length) {
+            if cached.versions.ptr[i] not=? 0 {
+                let c=cached.callees.ptr[i]
+                if c >? 0 and c <? effect_summaries.length and not effect_summaries.ptr[c].done {
+                    effects_demand(c true);
+                }
+            }
+        }
+    }
     fact_slice_prepare(f)
     if fact_slice.plan not=? run.plan {
         if fact_slice.base not=? run.slice_base or fact_slice.flags.length not=? run.slice.length {return false}
         loop i in [0..run.slice.length) {
             if fact_slice.flags[i] not=? run.slice[i] {return false}
         }
-    }
-    loop i in [0..run.callees.length) {
-        if not fact_footprint_same(fact_footprint(run.callees[i]) run.footprints[i]) {return false}
     }
     true
 }

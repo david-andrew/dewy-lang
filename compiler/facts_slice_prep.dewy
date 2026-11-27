@@ -88,8 +88,16 @@ fact_slice_push_children=(@out:array<int64> n:SlicePrepWord):>void=>$unsafe {
 }
 
 fact_slice_flags=(n:SlicePrepWord):>int64=>$unsafe {
-    if fact_slice.base <? 0 {return max(0 fact_index_get_raw(fact_slice.flags.ptr fact_slice.flags.length n))}
-    let i:SlicePrepWord=n - SlicePrepWord(fact_slice.base)
+    let base:SlicePrepWord=fact_slice.base
+    if base =? -2 {
+        let plan:SlicePrepWord=fact_slice.plan
+        if plan =? 0 {return 0}
+        if fsp_cur_plan not=? plan {fsp_sync_active()}
+        if n >=? 0 and n <? fsp_mark_stamp.length and mark_stamp_p[n] =? mark_gen {return SlicePrepWord(mark_flags_p[n])}
+        return 0
+    }
+    if base <? 0 {return max(0 fact_index_get_raw(fact_slice.flags.ptr fact_slice.flags.length n))}
+    let i:SlicePrepWord=n - base
     if i <? 0 or i >=? fact_slice.flags.length {return 0}
     fact_slice.flags.ptr[i]
 }
@@ -205,8 +213,10 @@ let mark_stamp_p:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
 let mark_flags_p:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
 let mark_head_p:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
 let mark_gen:int32=0
+let fsp_cur_plan:SlicePrepWord=-1
 facts_slice_marks_bind=(_stamp:ptr<array<int64>> _flags:ptr<array<int64>> _head:ptr<array<int64>> _touched:ptr<array<int64>>):>int64=>0
 facts_slice_marks_begin=():>void=>$unsafe {
+    fsp_cur_plan=-1
     let nn:SlicePrepWord=nodes.length
     if fsp_mark_stamp.length <? nn {
         let need=max(nn + 1024 SlicePrepWord(fsp_mark_stamp.length) * 2)
@@ -223,6 +233,22 @@ facts_slice_marks_begin=():>void=>$unsafe {
     mark_stamp_p=fsp_mark_stamp.ptr
     mark_flags_p=fsp_mark_flags.ptr
     mark_head_p=fsp_mark_head.ptr
+}
+fsp_sync_active=():>void=>$unsafe {
+    if fact_slice.plan =? 0 or fact_slice.base not=? -2 {return}
+    facts_slice_marks_begin()
+    let fp=fact_slice.flags.ptr
+    let fn_=fact_slice.flags.length
+    let mstamp=mark_stamp_p
+    let mflags=mark_flags_p
+    let mgen=mark_gen
+    loop i in [SlicePrepWord(0)..fn_) {
+        let entry:SlicePrepWord=fp[i]
+        let tn:SlicePrepWord=entry >> 8
+        mstamp[tn]=mgen
+        mflags[tn]=uint8<overflow='wrap'>(entry & 255)
+    }
+    fsp_cur_plan=fact_slice.plan
 }
 
 # Queries/touches are O(1); growth is O(nodes), parent appends amortized O(1).
@@ -293,6 +319,7 @@ let fsp_special_names:dict<int64 bool>=dict<int64 bool>()
 
 fsp_reset=():>void=>{
     fsp_lib_kind.clear()
+    fsp_cur_plan=-1
 }
 
 fsp_lib_classify=(n:SlicePrepWord callee:SlicePrepWord):>bool=>$unsafe {
@@ -485,16 +512,45 @@ fact_slice_prepare_fast=(f:SlicePrepWord summary:bool=false):>void=>$unsafe {
             }
         }
         if mask >? 0 {
-            if mask & 1 not=? 0 {let ca=SlicePrepWord(nodes.ptr[n].a); if ca not=? 0 {fact_slice_member(@parents @work ca n)}}
-            if mask & 2 not=? 0 {let cb=SlicePrepWord(nodes.ptr[n].b); if cb not=? 0 {fact_slice_member(@parents @work cb n)}}
-            if mask & 4 not=? 0 {let cc=SlicePrepWord(nodes.ptr[n].c); if cc not=? 0 {fact_slice_member(@parents @work cc n)}}
+            if mask & 1 not=? 0 {
+                let ca=SlicePrepWord(nodes.ptr[n].a)
+                if ca not=? 0 {
+                    let prev:SlicePrepWord=-1
+                    if mstamp[ca] not=? mgen {mstamp[ca]=mgen; mflags[ca]=uint8(0); fsp_mark_touched.push(int32<overflow='wrap'>(ca))}
+                    else {prev=SlicePrepWord(mhead[ca])}
+                    parents.next.push(prev); mhead[ca]=int32<overflow='wrap'>(parents.nodes.length); parents.nodes.push(n); work.push(ca)
+                }
+            }
+            if mask & 2 not=? 0 {
+                let cb=SlicePrepWord(nodes.ptr[n].b)
+                if cb not=? 0 {
+                    let prev:SlicePrepWord=-1
+                    if mstamp[cb] not=? mgen {mstamp[cb]=mgen; mflags[cb]=uint8(0); fsp_mark_touched.push(int32<overflow='wrap'>(cb))}
+                    else {prev=SlicePrepWord(mhead[cb])}
+                    parents.next.push(prev); mhead[cb]=int32<overflow='wrap'>(parents.nodes.length); parents.nodes.push(n); work.push(cb)
+                }
+            }
+            if mask & 4 not=? 0 {
+                let cc=SlicePrepWord(nodes.ptr[n].c)
+                if cc not=? 0 {
+                    let prev:SlicePrepWord=-1
+                    if mstamp[cc] not=? mgen {mstamp[cc]=mgen; mflags[cc]=uint8(0); fsp_mark_touched.push(int32<overflow='wrap'>(cc))}
+                    else {prev=SlicePrepWord(mhead[cc])}
+                    parents.next.push(prev); mhead[cc]=int32<overflow='wrap'>(parents.nodes.length); parents.nodes.push(n); work.push(cc)
+                }
+            }
             if mask & 16 not=? 0 {
                 let walk:SlicePrepWord=SlicePrepWord(nodes.ptr[n].nlist)
                 if members and k =? 'block' and walk >? 1 and fact_member_admit(n) {walk=1}
                 let l0:SlicePrepWord=SlicePrepWord(nodes.ptr[n].list)
                 loop i in [SlicePrepWord(0)..walk) {
                     let ci=SlicePrepWord(lists.ptr[l0 + i])
-                    if ci not=? 0 {fact_slice_member(@parents @work ci n)}
+                    if ci not=? 0 {
+                        let prev:SlicePrepWord=-1
+                        if mstamp[ci] not=? mgen {mstamp[ci]=mgen; mflags[ci]=uint8(0); fsp_mark_touched.push(int32<overflow='wrap'>(ci))}
+                        else {prev=SlicePrepWord(mhead[ci])}
+                        parents.next.push(prev); mhead[ci]=int32<overflow='wrap'>(parents.nodes.length); parents.nodes.push(n); work.push(ci)
+                    }
                 }
             }
         }
@@ -889,7 +945,7 @@ fact_slice_prepare_fast=(f:SlicePrepWord summary:bool=false):>void=>$unsafe {
     let count:SlicePrepWord=0
     let touched_p=fsp_mark_touched.ptr
     let touched_n=fsp_mark_touched.length
-    loop ti in [0..touched_n) {
+    loop ti in [SlicePrepWord(0)..touched_n) {
         let tn=SlicePrepWord(touched_p[ti])
         if mflags[tn] not=? uint8(0) {
             if tn <? lo {lo=tn}
@@ -900,23 +956,31 @@ fact_slice_prepare_fast=(f:SlicePrepWord summary:bool=false):>void=>$unsafe {
     if hi >=? lo and hi - lo <? 4 * count + 64 {
         let flags=fill(int64(0) hi - lo + 1)
         let fp=flags.ptr
-        loop ti in [0..touched_n) {
+        loop ti in [SlicePrepWord(0)..touched_n) {
             let tn=SlicePrepWord(touched_p[ti])
             let fv=SlicePrepWord(mflags[tn])
             if fv not=? 0 {fp[tn - lo]=fv}
         }
         fact_slice=FactSlice(flags probe_only lo carried rows)
+        fact_plan_serial += 1
+        fact_slice.plan=fact_plan_serial
     } else {
-        let flags=fact_index_sized(count)
-        loop ti in [0..touched_n) {
+        let flags=fill(int64(0) count)
+        let fp=flags.ptr
+        let fi:SlicePrepWord=0
+        loop ti in [SlicePrepWord(0)..touched_n) {
             let tn=SlicePrepWord(touched_p[ti])
             let fv=SlicePrepWord(mflags[tn])
-            if fv not=? 0 {fact_index_put(@flags tn fv)}
+            if fv not=? 0 {
+                fp[fi]=(tn << 8) | fv
+                fi += 1
+            }
         }
-        fact_slice=FactSlice(flags probe_only (-1) carried rows)
+        fact_slice=FactSlice(flags probe_only (-2) carried rows)
+        fact_plan_serial += 1
+        fact_slice.plan=fact_plan_serial
+        fsp_cur_plan=fact_plan_serial
     }
-    fact_plan_serial += 1
-    fact_slice.plan=fact_plan_serial
     fact_slice.callees=callees
     fact_slice.versions=versions
     fact_slice.exact_demands=exact_demands

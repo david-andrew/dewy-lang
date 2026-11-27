@@ -1,5 +1,6 @@
 $runtime_checks
 
+from p"dewy_reader_types.dewy" import (EffectKind)
 from p"effect_types.dewy" import (EffectAtom EffectEvent PlaceIdentity)
 from p"effect_library.jo" import EffectClass
 from p"isolation.jo" import IsolationReason
@@ -25,6 +26,19 @@ from p"effect_scan.dewy" import (effect_body_moves_out effect_copy_captures effe
 from p"concurrency_waits.dewy" import (concurrency_fn_blocks)
 # Demanded effect graph execution; shared state has one owner in effects.jo.
 GraphWord:type=int64<overflow='wrap'>
+let eg_placeless_mask:array<uint16>=[]
+eg_placeless_bit=(k:EffectKind):>uint16=>{
+    match k {
+        <'alloc'> => uint16(1)
+        <'io'> => uint16(2)
+        <'panic'> => uint16(4)
+        <'block'> => uint16(8)
+        <'opaque'> => uint16(16)
+        <'escape'> => uint16(32)
+        <'remainder'> => uint16(64)
+        _ => uint16(0)
+    }
+}
 effect_graph_reset=(reuse_bodies:bool=false):>void=>$unsafe {
     effect_footprints_only=false
     if not reuse_bodies {
@@ -40,8 +54,9 @@ effect_graph_reset=(reuse_bodies:bool=false):>void=>$unsafe {
     }
     effect_limit=fns.length
     effect_summaries=fill(EffectSummary[] effect_limit)
+    if eg_placeless_mask.length <? effect_limit {eg_placeless_mask.resize(effect_limit)}
+    if effect_limit >? 0 {mem_set(eg_placeless_mask.ptr as ptr<uint8> 0 effect_limit * 2)}
     effect_seen_bump()
-    effect_event_index=dict<EffectEventKey bool>()
     if not reuse_bodies {
         effect_for_marks=dict<int64 array<int64>>()
         effect_plain_cache=dict<int64 bool>()
@@ -99,7 +114,15 @@ effect_restamp=(f:GraphWord):>void=>$unsafe {
     effect_summaries.ptr[f].changed_at = effect_ticks;
     effect_stamps = GraphWord(effect_stamps) + 1;
     effect_summaries.ptr[f].stamp = effect_stamps;
-    loop old in effect_summaries.ptr[f].events {effect_event_index[EffectEventKey[effect_stamps old.atom]] = true;}
+    if f >=? eg_placeless_mask.length {eg_placeless_mask.resize(max(f + 64 effect_limit))}
+    let mask:uint16=uint16(0)
+    let ep=effect_summaries.ptr[f].events.ptr
+    let en=effect_summaries.ptr[f].events.length
+    loop i in [0..en) {
+        let oa=ep[i].atom
+        if oa.row =? 0 and oa.place.declaration =? 0 {mask |= eg_placeless_bit(oa.kind)}
+    }
+    eg_placeless_mask.ptr[f]=mask
 }
 # Opacity other than calls of f's own callbacks (effect_callback_add): the
 # row then stands for anything, whatever its callbacks are. O(1).
@@ -165,50 +188,46 @@ effect_add=(f:GraphWord event:EffectEvent):>bool=>$unsafe {
         }
     }
     else if effect_footprints_only and kind not=? 'write' and kind not=? 'remainder' {return false}
-    if f =? effect_body_owner and event.atom.kind =? 'panic' {effect_body_panics.push(event);}
+    if f =? effect_body_owner and kind =? 'panic' {effect_body_panics.push(event);}
     # (allocation proven within an arena's acquired capacity is not hidden: arena.jo)
     if arena_fns.length >? 0 and arena_capacity_exempt(event) {return false}
-    let covered=effect_place_atom(event.atom)
-    let root=if covered {place_base(event.atom.place)} else {event.atom.place}
-    let stamp=effect_summaries.ptr[f].stamp
-    if stamp <=? 0 {
-        if effect_summaries.ptr[f].capped {return false}
-        let n=effect_summaries.ptr[f].events.length
-        let ep=effect_summaries.ptr[f].events.ptr
+    let es=effect_summaries.ptr + f
+    let n=es[0].events.length
+    if f >=? eg_placeless_mask.length {eg_placeless_mask.resize(max(f + 64 effect_limit))}
+    if n =? 0 {eg_placeless_mask.ptr[f]=uint16(0)}
+    let erow=event.atom.row
+    let ep_decl=event.atom.place.declaration
+    let pbit:uint16=if erow =? 0 and ep_decl =? 0 {eg_placeless_bit(kind)} else {uint16(0)}
+    let covered=false
+    let root=event.atom.place
+    if pbit not=? uint16(0) {
+        if (eg_placeless_mask.ptr[f] & pbit) not=? uint16(0) {return false}
+        if es[0].capped {return false}
+    } else {
+        if es[0].capped {return false}
+        covered=(kind =? 'read' or kind =? 'write') and ep_decl not=? 0
+        if covered and root.parent not=? 0 {root=place_base(root)}
+        let ep=es[0].events.ptr
+        let epl=event.atom.place
         loop i in [0..n) {
             let oa=ep[i].atom
-            if oa =? event.atom {return false}
-            if covered and oa.kind =? event.atom.kind and oa.row =? 0 and oa.place =? root {return false}
+            if oa.kind not=? kind {continue}
+            if oa.row =? erow and oa.place.declaration =? ep_decl and oa.place.root =? epl.root and oa.place.owner =? epl.owner and oa.place.parent =? epl.parent and oa.place.projection =? epl.projection and oa.place.selector =? epl.selector {return false}
+            if covered and oa.row =? 0 and oa.place.declaration =? root.declaration and oa.place.root =? root.root and oa.place.owner =? root.owner and oa.place.parent =? root.parent and oa.place.projection =? root.projection and oa.place.selector =? root.selector {return false}
         }
-        if stamp =? 0 {
-            effect_stamps = GraphWord(effect_stamps) + 1;
-            effect_summaries.ptr[f].stamp = -GraphWord(effect_stamps) - 1;
-        }
-        effect_summaries.ptr[f].events.push(event);
-        if n + 1 >=? 12 {
-            effect_restamp(f);
-        } else {
-            effect_ticks = GraphWord(effect_ticks) + 1;
-            effect_summaries.ptr[f].changed_at = effect_ticks;
-        }
-        return true
     }
-    if effect_event_index.has(EffectEventKey[stamp event.atom]) {return false}
-    if effect_summaries.ptr[f].capped {return false}
-    # (a whole-root event already covers its fields)
-    if covered and effect_event_index.has(EffectEventKey[stamp EffectAtom[event.atom.kind root]]) {return false}
     # (the one placeless possible failure takes no room: discharging it never
     # changes how the summary widens)
     let budget:GraphWord=32
-    if effect_summaries.ptr[f].events.length >=? 32 and (event.atom.kind =? 'panic' or effect_event_index.has(EffectEventKey[stamp EffectAtom['panic']])) {budget=33}
-    if effect_summaries.ptr[f].events.length >=? budget {
+    if n >=? 32 and (kind =? 'panic' or (eg_placeless_mask.ptr[f] & uint16(4)) not=? uint16(0)) {budget=33}
+    if n >=? budget {
         # Past the budget every place event widens to its whole root, still an
         # upper bound: a kernel touching many fields of one record stays exact
         # about which records it reads and writes.
         let kept:array<EffectEvent>=[]
-        loop old0 in effect_summaries.ptr[f].events {
+        loop old0 in es[0].events {
             let old=old0
-            if effect_place_atom(old.atom) {old.atom.place = place_base(old.atom.place);}
+            if effect_place_atom(old.atom) and old.atom.place.parent not=? 0 {old.atom.place = place_base(old.atom.place);}
             let seen=false
             loop k in kept {
                 if k.atom =? old.atom {seen=true}
@@ -219,32 +238,34 @@ effect_add=(f:GraphWord event:EffectEvent):>bool=>$unsafe {
         if covered {wide.atom.place = root;}
         loop k in kept {
             if k.atom =? wide.atom {
-                effect_summaries.ptr[f].events = kept;
+                es[0].events = kept;
                 effect_restamp(f);
                 return true
             }
         }
         if kept.length <? budget {
             kept.push(wide);
-            effect_summaries.ptr[f].events = kept;
+            es[0].events = kept;
             effect_restamp(f);
             return true
         }
-        effect_summaries.ptr[f].events = kept;
+        es[0].events = kept;
         effect_restamp(f);
-        effect_summaries.ptr[f].capped = true;
+        es[0].capped = true;
         effect_mark_other(f);
-        loop old in effect_summaries.ptr[f].events {
-            if old.atom.kind =? 'opaque' {return false}
-        }
-        effect_summaries.ptr[f].events.push(EffectEvent[EffectAtom['opaque'] event.witness event.via]);
-        effect_event_index[EffectEventKey[effect_summaries.ptr[f].stamp EffectAtom['opaque']]] = true;
+        if (eg_placeless_mask.ptr[f] & uint16(16)) not=? uint16(0) {return false}
+        es[0].events.push(EffectEvent[EffectAtom['opaque'] event.witness event.via]);
+        eg_placeless_mask.ptr[f] |= uint16(16)
         return true
     }
-    effect_summaries.ptr[f].events.push(event);
-    effect_event_index[EffectEventKey[stamp event.atom]] = true;
+    if es[0].stamp =? 0 {
+        effect_stamps = GraphWord(effect_stamps) + 1;
+        es[0].stamp = -GraphWord(effect_stamps) - 1;
+    }
+    es[0].events.push(event);
+    if pbit not=? uint16(0) {eg_placeless_mask.ptr[f] |= pbit}
     effect_ticks = GraphWord(effect_ticks) + 1;
-    effect_summaries.ptr[f].changed_at = effect_ticks;
+    es[0].changed_at = effect_ticks;
     return true
 }
 effect_opaque=(f:GraphWord n:GraphWord):>bool=>$unsafe {
@@ -255,16 +276,18 @@ effect_edge_event=(f:GraphWord edge:EffectEdge event0:EffectEvent):>EffectEvent=
     event.via = edge.origin;
     event.via_fn = edge.callee;
     let p=event.atom.place
-    let base=place_base(p)
-    if base.root =? 'formal' {
-        let i:GraphWord=GraphWord(base.declaration) - 1
-        if base.owner not=? edge.callee or i <? 0 or i >=? edge.actuals.length {event.atom = EffectAtom['opaque'];}
-        else {
-            let actual=edge.actuals.ptr[i]
-            if actual.declaration =? 0 {event.atom = EffectAtom['opaque'];}
+    if p.declaration not=? 0 {
+        let base=if p.parent =? 0 {p} else {place_base(p)}
+        if base.root =? 'formal' {
+            let i:GraphWord=GraphWord(base.declaration) - 1
+            if base.owner not=? edge.callee or i <? 0 or i >=? edge.actuals.length {event.atom = EffectAtom['opaque'];}
             else {
-                event.atom.place = place_append(actual p);
-                if event.atom.place.declaration =? 0 {event.atom = EffectAtom['opaque'];}
+                let actual=edge.actuals.ptr[i]
+                if actual.declaration =? 0 {event.atom = EffectAtom['opaque'];}
+                else {
+                    event.atom.place = place_append(actual p);
+                    if event.atom.place.declaration =? 0 {event.atom = EffectAtom['opaque'];}
+                }
             }
         }
     }

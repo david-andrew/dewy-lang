@@ -27,9 +27,11 @@ FactCheckpoint:type=[
     proj_base_mask:int64
     cmp_mask:int64
     has_roots:bool
+    had_slots:bool
     full:bool
 ]
 let ft_active:IndexWord=0
+let ft_spec_back:bool=false
 let ft_bnd_slot:array<int32>=[]
 let ft_bnd_old:array<FactBound>=[]
 let ft_bin_idx:array<int32>=[]
@@ -39,6 +41,12 @@ let ft_diff_old:array<FactDifference>=[]
 
 ft_is_active=():>bool=>ft_active >? 0
 ft_depth=():>IndexWord=>ft_active
+ft_back_only=():>bool=>ft_spec_back
+ft_set_back_only=(v:bool):>bool=>{
+    let prev=ft_spec_back
+    ft_spec_back=v
+    prev
+}
 ft_record_bound=(slot:IndexWord old:FactBound):>void=>{
     ft_bnd_slot.push(int32<overflow='wrap'>(slot))
     ft_bnd_old.push(old)
@@ -67,6 +75,7 @@ ft_begin=(s:FactState):>FactCheckpoint=>$unsafe {
         s.proj_base_mask
         s.cmp_mask
         s.index.ptr[0].roots.length not=? 0
+        s.index.ptr[0].slots.length not=? 0
         s.full
     )
 }
@@ -78,11 +87,22 @@ ft_rollback=(@s:FactState cp:FactCheckpoint):>void=>$unsafe {
     s.diff_b_mask=cp.diff_b_mask
     s.proj_base_mask=cp.proj_base_mask
     s.cmp_mask=cp.cmp_mask
-    if s.ids.length >? cp.ids_len {
+    let ids_shrank=s.ids.length >? cp.ids_len
+    if ids_shrank {
         s.ids.truncate(cp.ids_len)
         s.bounds.truncate(cp.ids_len)
     }
-    if s.index.ptr[0].slots.length not=? 0 {s.index[0].slots=[]}
+    if not cp.had_slots {
+        if s.index.ptr[0].slots.length not=? 0 {s.index[0].slots=[]}
+    } else if ids_shrank {
+        let slen=s.index.ptr[0].slots.length
+        if slen >? 0 and IndexWord(s.index.ptr[0].slots.ptr[0]) * 4 >=? slen {
+            let sl=fact_index_sized(cp.ids_len * 2)
+            let idsp=s.ids.ptr
+            loop k in [IndexWord(0)..cp.ids_len) {fact_index_put(@sl idsp[k] k)}
+            s.index[0].slots=sl
+        }
+    }
     let bi:IndexWord=IndexWord(ft_bnd_slot.length) - 1
     loop bi >=? cp.bnd_top {
         let sl=IndexWord(ft_bnd_slot.ptr[bi])
@@ -95,17 +115,16 @@ ft_rollback=(@s:FactState cp:FactCheckpoint):>void=>$unsafe {
     }
     let bin_shrank=s.bindings.length >? cp.bin_len
     if bin_shrank {s.bindings.truncate(cp.bin_len)}
-    if bin_shrank and s.index.ptr[0].roots.length not=? 0 {
-        if cp.bin_len >=? 16 {
+    if not cp.has_roots {
+        if s.index.ptr[0].roots.length not=? 0 {s.index[0].roots=[]}
+    } else if bin_shrank {
+        let rlen=s.index.ptr[0].roots.length
+        if rlen >? 0 and IndexWord(s.index.ptr[0].roots.ptr[0]) * 4 >=? rlen {
             let ridx=fact_index_sized(cp.bin_len * 2)
             let bp=s.bindings.ptr
             loop k in [IndexWord(0)..cp.bin_len) {fact_index_put(@ridx fact_root_key(bp[k].place) k)}
             s.index[0].roots=ridx
-        } else {
-            s.index[0].roots=[]
         }
-    } else if not cp.has_roots and s.index.ptr[0].roots.length not=? 0 {
-        s.index[0].roots=[]
     }
     let ni:IndexWord=IndexWord(ft_bin_idx.length) - 1
     loop ni >=? cp.bin_top {
@@ -321,7 +340,7 @@ fact_index_difference=(@s:FactState row:FactDifference):>void=>{
     s.differences.push(row)
 }
 fact_new=(@s:FactState b:FactBound term:FactTerm=FactTerm[]):>int64=>{
-    if s.ids.length >=? FACT_CAP and not s.full {fact_compact(@s)}
+    if s.ids.length >=? FACT_CAP and not s.full and ft_active =? 0 {fact_compact(@s)}
     if s.ids.length >=? FACT_CAP {return 0}
     let v:IndexWord=fact_terms.length
     if v >=? 0x80000000 {return 0}

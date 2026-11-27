@@ -1,16 +1,20 @@
 $runtime_checks
 
 from p"string_domains.jo" import (string_set_owners string_set_tests)
-from p"ast.jo" import (NF_GLOBAL has_flag kid nkids nodes)
+from p"ast.jo" import (NF_GLOBAL has_flag kid lists nkids nodes)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_SHARED locals)
 from p"checker_tokens.dewy" import (Tok)
+from p"effects.jo" import (effect_summaries)
+from p"expr.jo" import (CV)
 from p"facts.jo" import (FACT_CAP FactImplication FactPaths FactState fact_either_wanted fact_implications fact_owner fact_query fact_speculating fact_terms)
-from p"facts_slice_builder.dewy" import (fact_comparison)
+from p"facts_slice_builder.dewy" import (fact_comparison fact_comparison_raw)
 from p"facts_capture.dewy" import (fact_capture)
-from p"facts_values.dewy" import (fact_domain fact_string_set fact_type fact_project)
+from p"facts_values.dewy" import (fact_domain fact_place fact_string_set fact_type fact_project)
 from p"facts_compare.dewy" import (fact_assume fact_compare fact_inverse)
 from p"facts_index_writes.dewy" import (fact_constant fact_new)
-from p"facts_value_queries.dewy" import (fact_binding fact_bound fact_slot)
-from p"facts_projection_queries.dewy" import (fact_projection_origin)
+from p"facts_value_queries.dewy" import (fact_binding fact_bound fact_slot fact_truth)
+from p"facts_projection_queries.dewy" import (fact_projection_find fact_projection_origin)
+from p"facts_row_queries.dewy" import (fact_incident)
 from p"facts_lifecycle.dewy" import (fact_scope_exit)
 from p"facts_forgets.dewy" import (fact_drop_forget fact_drop_statement)
 from p"ownership.jo" import (ownership_fact_cleanup)
@@ -18,26 +22,221 @@ from p"facts_joins.dewy" import (fact_join fact_join_into fact_projection_value)
 from p"facts_summaries.dewy" import (fact_summary_payload)
 from p"proofs.jo" import (ResultEvidence)
 from p"proof_ops.dewy" import (result_activate)
+from p"refine.jo" import (refine_owners)
 from p"refinement_types.dewy" import (FactBound FactTerm)
 from p"types.jo" import (T_BOOL T_INT T_U64 is_union types)
 
 ConditionWord:type=int64<overflow='wrap'>
 FactCondMeta:type=[reason:FactBound value:int64=0]
+let fco_or_failed:bool=false
+
+# Extract a private non-aliased local (and optional field selector) if n is a
+# pure single-variable predicate whose current value has no incident difference
+# rows in state. Returns [0 0] otherwise.
+fact_cond_single_var=(n0:ConditionWord s:FactState membership_owner:bool):>[int64 int64]=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'not_' {
+        if membership_owner and string_set_tests.has(n) {return [0 0]}
+        n=ConditionWord(nodes.ptr[n].a)
+    }
+    if membership_owner and string_set_tests.has(n) {return [0 0]}
+    let k=nodes.ptr[n].kind
+    let target:ConditionWord=0
+    if k =? 'ident' or k =? 'field' or k =? 'istype' {
+        target=if k =? 'istype' {ConditionWord(nodes.ptr[n].a)} else {n}
+    } else if k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison_raw(nodes.ptr[n].op) {
+        let a=ConditionWord(nodes.ptr[n].a)
+        let b=ConditionWord(nodes.ptr[n].b)
+        loop nodes.ptr[a].kind =? 'conv' and nodes.ptr[a].aux not=? int32(int64(CV.refinement)) {a=ConditionWord(nodes.ptr[a].a)}
+        loop nodes.ptr[b].kind =? 'conv' and nodes.ptr[b].aux not=? int32(int64(CV.refinement)) {b=ConditionWord(nodes.ptr[b].a)}
+        let ak=nodes.ptr[a].kind
+        let bk=nodes.ptr[b].kind
+        let a_const=ak =? 'int_lit' or ak =? 'bool_lit' or ak =? 'dotname' or ak =? 'none_lit' or (ak =? 'call' and nodes.ptr[a].aux =? 3 and nkids(a) =? 0)
+        let b_const=bk =? 'int_lit' or bk =? 'bool_lit' or bk =? 'dotname' or bk =? 'none_lit' or (bk =? 'call' and nodes.ptr[b].aux =? 3 and nkids(b) =? 0)
+        if b_const and (ak =? 'ident' or ak =? 'field') {target=a}
+        else if a_const and (bk =? 'ident' or bk =? 'field') {target=b}
+        else {return [0 0]}
+    } else {return [0 0]}
+    loop nodes.ptr[target].kind =? 'conv' and nodes.ptr[target].aux not=? int32(int64(CV.refinement)) {target=ConditionWord(nodes.ptr[target].a)}
+    let fld:ConditionWord=0
+    if nodes.ptr[target].kind =? 'field' {
+        if nodes.ptr[target].aux <? 0 {return [0 0]}
+        fld=ConditionWord(nodes.ptr[target].name)
+        if fld <=? 0 {return [0 0]}
+        target=ConditionWord(nodes.ptr[target].a)
+    }
+    if nodes.ptr[target].kind not=? 'ident' or nodes.ptr[target].aux not=? int32(1) {return [0 0]}
+    let l=ConditionWord(nodes.ptr[target].sym)
+    if l <=? 0 {return [0 0]}
+    let fl=ConditionWord(locals.ptr[l].flags)
+    if fl & (LF_ALIAS | LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_EXPOSED) not=? 0 {return [0 0]}
+    let bi=fact_binding(s fact_place(target))
+    if bi >=? 0 {
+        let bv=s.bindings.ptr[bi].value
+        if fld =? 0 {
+            if fact_incident(s bv) >=? 0 {return [0 0]}
+        } else {
+            let pi=fact_projection_find(s bv fld false)
+            if pi >=? 0 and fact_incident(s s.projections.ptr[pi].value) >=? 0 {return [0 0]}
+        }
+    }
+    [l fld]
+}
+
+fact_cond_pure_no_var=(n:ConditionWord sym0:ConditionWord fld0:ConditionWord membership_owner:bool @budget:ConditionWord):>bool=>$unsafe {
+    if n <=? 0 {return true}
+    if budget <=? 0 {return false}
+    budget -= 1
+    if membership_owner and string_set_tests.has(n) {return false}
+    let nd=nodes.ptr + n
+    let k=nd[0].kind
+    match k {
+        <'int_lit'|'float_lit'|'bool_lit'|'none_lit'|'null_lit'|'dotname'> => {return true}
+        <'str_lit'> => {return nd[0].aux =? 0 and nd[0].nlist =? 0}
+        <'ident'> => {
+            if nd[0].aux =? int32(2) {return true}
+            if nd[0].aux not=? int32(1) {return false}
+            let l=ConditionWord(nd[0].sym)
+            if l =? sym0 {return false}
+            ConditionWord(locals.ptr[l].flags) & LF_ALIAS =? 0
+        }
+        <'field'> => {
+            let a=ConditionWord(nd[0].a)
+            if fld0 >? 0 and nd[0].aux >=? 0 and ConditionWord(nd[0].name) not=? fld0 and a >? 0 and nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1) and ConditionWord(nodes.ptr[a].sym) =? sym0 {
+                return true
+            }
+            return fact_cond_pure_no_var(a sym0 fld0 membership_owner @budget)
+        }
+        <'not_'|'unary'|'istype'|'narrow'> => {return fact_cond_pure_no_var(ConditionWord(nd[0].a) sym0 fld0 membership_owner @budget)}
+        <'conv'> => {
+            if nd[0].aux =? int32(int64(CV.refinement)) or nd[0].aux =? int32(int64(CV.arr2fixed)) {return false}
+            return fact_cond_pure_no_var(ConditionWord(nd[0].a) sym0 fld0 membership_owner @budget)
+        }
+        <'binary'|'and_'|'or_'> => {
+            if k =? 'binary' and nd[0].aux not=? 0 {return false}
+            return fact_cond_pure_no_var(ConditionWord(nd[0].a) sym0 fld0 membership_owner @budget) and fact_cond_pure_no_var(ConditionWord(nd[0].b) sym0 fld0 membership_owner @budget)
+        }
+        <'index'> => {
+            if nd[0].b =? 0 or nd[0].nlist >? 1 {return false}
+            return fact_cond_pure_no_var(ConditionWord(nd[0].a) sym0 fld0 membership_owner @budget) and fact_cond_pure_no_var(ConditionWord(nd[0].b) sym0 fld0 membership_owner @budget)
+        }
+        <'call'> => {
+            if nd[0].aux =? 3 and nd[0].nlist =? 0 {return true}
+            if nd[0].aux not=? 0 {return false}
+            let callee=ConditionWord(nd[0].sym)
+            if callee <=? 0 or callee >=? effect_summaries.length or not effect_summaries.ptr[callee].done {return false}
+            let es=effect_summaries.ptr + callee
+            if es[0].cut or es[0].callbacks not=? 0 or es[0].opaque_other {return false}
+            loop event in es[0].events {
+                let ek=event.atom.kind
+                if ek not=? 'read' and ek not=? 'panic' {return false}
+            }
+            let l0=ConditionWord(nd[0].list)
+            let nk=ConditionWord(nd[0].nlist)
+            loop i in [ConditionWord(0)..nk) {
+                if not fact_cond_pure_no_var(ConditionWord(lists.ptr[l0 + i]) sym0 fld0 membership_owner @budget) {return false}
+            }
+            return true
+        }
+        _ => {return false}
+    }
+}
+
+fact_cond_flatten=(n:ConditionWord op_is_and:bool membership_owner:bool @out:array<int64>):>bool=>$unsafe {
+    if membership_owner and string_set_tests.has(n) {
+        if out.length >=? 16 {return false}
+        out.push(n)
+        return true
+    }
+    let k=nodes.ptr[n].kind
+    if (op_is_and and k =? 'and_') or (not op_is_and and k =? 'or_') {
+        return fact_cond_flatten(ConditionWord(nodes.ptr[n].a) op_is_and membership_owner @out) and fact_cond_flatten(ConditionWord(nodes.ptr[n].b) op_is_and membership_owner @out)
+    }
+    if out.length >=? 16 {return false}
+    out.push(n)
+    true
+}
+
 # In-place condition evaluation: @state holds the entry state and receives the
 # `sense` branch; @other receives the `not sense` branch when `need_other`.
 # Avoids FactPaths triple-FactState copies and drops on the hot non-query path.
 fact_cond_out=(n:ConditionWord @state:FactState @other:FactState need_state:bool need_other:bool sense:bool):>FactCondMeta=>$unsafe {
     let k=nodes.ptr[n].kind
-    let membership=string_set_owners.length >? 0 and string_set_owners.has(fact_owner) and string_set_tests.has(n)
+    let membership_owner=string_set_owners.length >? 0 and string_set_owners.has(fact_owner)
+    let membership=membership_owner and string_set_tests.has(n)
     if not membership and k =? 'not_' {
         return fact_cond_out(ConditionWord(nodes.ptr[n].a) @state @other need_state need_other (not sense))
     }
     if not membership and (k =? 'and_' or k =? 'or_') {
         let same_side=(k =? 'and_') =? sense
         if same_side {
+            let want_bit:ConditionWord=if sense {2} else {1}
+            if need_other and not ownership_fact_cleanup and state.conditional.length =? 0 {
+                let leaves:array<int64>=[]
+                if fact_cond_flatten(n (k =? 'and_') membership_owner @leaves) and leaves.length >=? 2 and (fact_speculating >? 0 or (fact_either_wanted & want_bit) =? 0 or leaves.length >=? 3) {
+                    let sv=fact_cond_single_var(leaves.ptr[0] state membership_owner)
+                    if sv[0] >? 0 {
+                        let cb:ConditionWord=96
+                        let ok=true
+                        loop li in [ConditionWord(1)..leaves.length) {
+                            if not fact_cond_pure_no_var(leaves.ptr[li] sv[0] sv[1] membership_owner @cb) {ok=false; break}
+                        }
+                        if ok {
+                            let cn0=leaves.ptr[0]
+                            let s0=sense
+                            loop nodes.ptr[cn0].kind =? 'not_' {cn0=ConditionWord(nodes.ptr[cn0].a); s0=not s0}
+                            let v0=fact_capture(cn0 @state)
+                            let r0=fact_bound(state v0)
+                            if not state.live {
+                                other=FactState(live=false)
+                                return FactCondMeta(r0 0)
+                            }
+                            let tr0=fact_truth(state v0)
+                            if (tr0 =? 0 and s0) or (tr0 =? 1 and not s0) {
+                                other=state
+                                state=FactState(live=false)
+                                return FactCondMeta(r0 0)
+                            }
+                            if tr0 <? 0 {
+                                let entry=state
+                                fact_assume(@state v0 s0)
+                                let can_fail=false
+                                let dummy=FactState(live=false)
+                                loop li in [ConditionWord(1)..leaves.length) {
+                                    if not state.live {can_fail=true; break}
+                                    let lf=leaves.ptr[li]
+                                    let lfk=nodes.ptr[lf].kind
+                                    if lfk not=? 'and_' and lfk not=? 'or_' and not fact_condition_block(lf) {
+                                        let cni=lf
+                                        let si=sense
+                                        loop nodes.ptr[cni].kind =? 'not_' {cni=ConditionWord(nodes.ptr[cni].a); si=not si}
+                                        let vi=fact_capture(cni @state)
+                                        if not state.live {can_fail=true; break}
+                                        let tri=fact_truth(state vi)
+                                        if not ((tri =? 1 and si) or (tri =? 0 and not si)) {can_fail=true}
+                                        if not need_state and fact_speculating >? 0 and can_fail {break}
+                                        fact_assume(@state vi si)
+                                    } else {
+                                        can_fail=true
+                                        fact_cond_out(lf @state @dummy true false sense);
+                                        if not need_state and fact_speculating >? 0 {break}
+                                    }
+                                }
+                                if not need_state {state=FactState(live=false)}
+                                other=entry
+                                if not can_fail and state.live {fact_assume(@other v0 (not s0))}
+                                return FactCondMeta(r0 0)
+                            }
+                        }
+                    }
+                }
+            }
             let ma=fact_cond_out(ConditionWord(nodes.ptr[n].a) @state @other true need_other sense)
             let a_cont_live=state.live
             let a_sc_live=if need_other {other.live} else {false}
+            if not a_cont_live and refine_owners.length =? 0 {
+                return FactCondMeta(ma.reason 0)
+            }
             if not need_other {
                 let mb=fact_cond_out(ConditionWord(nodes.ptr[n].b) @state @other need_state false sense)
                 return FactCondMeta(mb.reason 0)
@@ -45,7 +244,6 @@ fact_cond_out=(n:ConditionWord @state:FactState @other:FactState need_state:bool
             let other_b=FactState(live=false)
             let mb=fact_cond_out(ConditionWord(nodes.ptr[n].b) @state @other_b need_state true sense)
             let reason=if a_cont_live and a_sc_live {ma.reason} else {mb.reason}
-            let want_bit:ConditionWord=if sense {2} else {1}
             if fact_speculating =? 0 and fact_either_wanted & want_bit not=? 0 and a_sc_live and other_b.live and ma.value not=? 0 and mb.value not=? 0 {
                 let joined=fact_join(other other_b n)
                 fact_either(@joined ma.value @other (not sense) mb.value @other_b (not sense))
@@ -55,10 +253,76 @@ fact_cond_out=(n:ConditionWord @state:FactState @other:FactState need_state:bool
             }
             return FactCondMeta(reason 0)
         }
+        let want_bit:ConditionWord=if sense {1} else {2}
+        if need_state and not ownership_fact_cleanup and state.conditional.length =? 0 {
+            let leaves:array<int64>=[]
+            if fact_cond_flatten(n (k =? 'and_') membership_owner @leaves) and leaves.length >=? 2 and (fact_speculating >? 0 or (fact_either_wanted & want_bit) =? 0 or leaves.length >=? 3) {
+                let sv=fact_cond_single_var(leaves.ptr[0] state membership_owner)
+                if sv[0] >? 0 {
+                    let cb:ConditionWord=96
+                    let ok=true
+                    loop li in [ConditionWord(1)..leaves.length) {
+                        if not fact_cond_pure_no_var(leaves.ptr[li] sv[0] sv[1] membership_owner @cb) {ok=false; break}
+                    }
+                    if ok {
+                        let cn0=leaves.ptr[0]
+                        let s0=sense
+                        loop nodes.ptr[cn0].kind =? 'not_' {cn0=ConditionWord(nodes.ptr[cn0].a); s0=not s0}
+                        let v0=fact_capture(cn0 @state)
+                        let r0=fact_bound(state v0)
+                        if not state.live {
+                            if need_other {other=FactState(live=false)}
+                            return FactCondMeta(r0 0)
+                        }
+                        let tr0=fact_truth(state v0)
+                        if (tr0 =? 1 and s0) or (tr0 =? 0 and not s0) {
+                            if need_other {other=FactState(live=false)}
+                            return FactCondMeta(r0 0)
+                        }
+                        if tr0 <? 0 {
+                            let entry=state
+                            let cont=state
+                            fact_assume(@cont v0 (not s0))
+                            let can_sc=false
+                            let dummy=FactState(live=false)
+                            loop li in [ConditionWord(1)..leaves.length) {
+                                if not cont.live {can_sc=true; break}
+                                let lf=leaves.ptr[li]
+                                let lfk=nodes.ptr[lf].kind
+                                if lfk not=? 'and_' and lfk not=? 'or_' and not fact_condition_block(lf) {
+                                    let cni=lf
+                                    let si=sense
+                                    loop nodes.ptr[cni].kind =? 'not_' {cni=ConditionWord(nodes.ptr[cni].a); si=not si}
+                                    let vi=fact_capture(cni @cont)
+                                    if not cont.live {can_sc=true; break}
+                                    let tri=fact_truth(cont vi)
+                                    if not ((tri =? 0 and si) or (tri =? 1 and not si)) {can_sc=true}
+                                    if not need_other and fact_speculating >? 0 and can_sc {break}
+                                    fact_assume(@cont vi (not si))
+                                } else {
+                                    can_sc=true
+                                    fact_cond_out(lf @cont @dummy true false (not sense));
+                                    if not need_other and fact_speculating >? 0 {break}
+                                }
+                            }
+                            if need_other {other=cont}
+                            state=entry
+                            if not can_sc and cont.live {fact_assume(@state v0 s0)}
+                            return FactCondMeta(r0 0)
+                        }
+                    }
+                }
+            }
+        }
         let sc_a=FactState(live=false)
         let ma=fact_cond_out(ConditionWord(nodes.ptr[n].a) @state @sc_a true need_state (not sense))
         let a_cont_live=state.live
         let a_sc_live=if need_state {sc_a.live} else {false}
+        if not a_cont_live and refine_owners.length =? 0 {
+            if need_other {other=FactState(live=false)}
+            if need_state {state=sc_a}
+            return FactCondMeta(ma.reason 0)
+        }
         if not need_state {
             let mb=fact_cond_out(ConditionWord(nodes.ptr[n].b) @state @sc_a need_other false (not sense))
             if need_other {other=state; state=FactState(live=false)}
@@ -68,7 +332,6 @@ fact_cond_out=(n:ConditionWord @state:FactState @other:FactState need_state:bool
         let mb=fact_cond_out(ConditionWord(nodes.ptr[n].b) @state @sc_b need_other true (not sense))
         let reason=if a_sc_live and a_cont_live {ma.reason} else {mb.reason}
         if need_other {other=state}
-        let want_bit:ConditionWord=if sense {1} else {2}
         if fact_speculating =? 0 and fact_either_wanted & want_bit not=? 0 and a_sc_live and sc_b.live and ma.value not=? 0 and mb.value not=? 0 {
             let joined=fact_join(sc_a sc_b n)
             fact_either(@joined ma.value @sc_a sense mb.value @sc_b sense)
@@ -90,6 +353,10 @@ fact_cond_out=(n:ConditionWord @state:FactState @other:FactState need_state:bool
     }
     let v=if membership {fact_string_set(n @state)} else {fact_capture(n @state)}
     let reason=fact_bound(state v)
+    if not state.live {
+        if need_other {other=FactState(live=false)}
+        return FactCondMeta(reason v)
+    }
     if not need_other {
         fact_assume(@state v sense)
         if ownership_fact_cleanup {
@@ -100,6 +367,30 @@ fact_cond_out=(n:ConditionWord @state:FactState @other:FactState need_state:bool
         return FactCondMeta(reason v)
     }
     if not need_state {
+        let tr=fact_truth(state v)
+        if not ((tr =? 1 and not sense) or (tr =? 0 and sense)) {fco_or_failed=true}
+        fact_assume(@state v (not sense))
+        if ownership_fact_cleanup {
+            let drops=fact_drop_statement(n)
+            fact_drop_forget(@state n drops)
+        }
+        if state.conditional.length >? 0 {result_activate(@state v)}
+        other=state
+        state=FactState(live=false)
+        return FactCondMeta(reason v)
+    }
+    let tr=fact_truth(state v)
+    if (tr =? 1 and sense) or (tr =? 0 and not sense) {
+        fact_assume(@state v sense)
+        if ownership_fact_cleanup {
+            let drops=fact_drop_statement(n)
+            fact_drop_forget(@state n drops)
+        }
+        if state.conditional.length >? 0 {result_activate(@state v)}
+        other=FactState(live=false)
+        return FactCondMeta(reason v)
+    }
+    if (tr =? 0 and sense) or (tr =? 1 and not sense) {
         fact_assume(@state v (not sense))
         if ownership_fact_cleanup {
             let drops=fact_drop_statement(n)

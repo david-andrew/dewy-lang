@@ -3,7 +3,8 @@ from p"numeric_library_types.dewy" import (is_nd)
 from p"expression_types.dewy" import (ntype)
 from p"checked_expression_nodes.dewy" import (mk_ident_local)
 
-from p"ast.jo" import (NF_EXTERN has_flag kid nkids nodes)
+from p"ast.jo" import (NF_EXTERN has_flag kid lists nkids nodes)
+from p"isolation_ops.dewy" import (iso_child_p)
 from p"check.jo" import (FK_INIT LF_MUTPARAM fns globals locals)
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"effects.jo" import (effect_unavailable)
@@ -38,6 +39,7 @@ from p"refine_transfers.dewy" import (refine_fact_entry)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm RefAtom RefTerm)
 from p"types.jo" import (T_INT T_MATH_INT T_U64 T_VOID fields is_int structs tkind type_args types)
 from p"refine_metadata.dewy" import (ref_intern)
+from p"util.jo" import (pos_in_lib)
 
 SummaryWord:type=int64<overflow='wrap'>
 # Summarize only a demanded array field or integer tuple slot, over every
@@ -442,6 +444,32 @@ fact_summary_field_type=(t:SummaryWord field:SummaryWord):>SummaryWord=>$unsafe 
     }
     fact_type(shape_field_type(t field))
 }
+fact_body_has_while=(root:SummaryWord):>bool=>$unsafe {
+    let work:array<int64>=[root]
+    let steps:SummaryWord=0
+    loop work.length >? 0 and steps <? 256 {
+        steps += 1
+        let n=work.pop()
+        if n <=? 0 {continue}
+        let k=nodes.ptr[n].kind
+        if k =? 'while_' {return true}
+        if k =? 'lambda' {continue}
+        let mask:SummaryWord=int64(iso_child_p[int64(((nodes.ptr + n) as ptr<uint32>)[0])])
+        if mask <=? 0 {continue}
+        if mask & 1 not=? 0 {let c=SummaryWord(nodes.ptr[n].a); if c not=? 0 {work.push(c)}}
+        if mask & 2 not=? 0 {let c=SummaryWord(nodes.ptr[n].b); if c not=? 0 {work.push(c)}}
+        if mask & 4 not=? 0 {let c=SummaryWord(nodes.ptr[n].c); if c not=? 0 {work.push(c)}}
+        if mask & 16 not=? 0 {
+            let nk=SummaryWord(nodes.ptr[n].nlist)
+            let l0=SummaryWord(nodes.ptr[n].list)
+            loop i in [SummaryWord(0)..nk) {
+                let c=SummaryWord(lists.ptr[l0 + i])
+                if c not=? 0 {work.push(c)}
+            }
+        }
+    }
+    false
+}
 fact_summary=(f:SummaryWord places:bool=false field:SummaryWord=0):>FactSummary=>$unsafe {
     let strict=dir_assumed_bounds_any and fact_length_strict()
     # Payload bounds describe only present returns. A caller's array facts
@@ -461,6 +489,10 @@ fact_summary=(f:SummaryWord places:bool=false field:SummaryWord=0):>FactSummary=
     if tkind(t) not=? 'array' and not (fact_scalar(t) and is_int(t)) and not places {return unknown}
     if (field not=? 0 or fact_constructor_budget >=? 0) and not fact_constructor_body(f) {
         if field not=? 0 {fact_summaries[key]=unknown}
+        return unknown
+    }
+    if not places and field =? 0 and tkind(t) =? 'array' and d not=? 0 and pos_in_lib(nodes.ptr[d].pos) and not fact_constructor_body(f) and fact_body_has_while(SummaryWord(fns.ptr[f].body)) {
+        fact_summaries[key]=unknown
         return unknown
     }
     fact_summaries[key]=unknown

@@ -18,7 +18,7 @@ from p"facts_slice_prep.dewy" import (fact_slice_children)
 from p"facts_values.dewy" import (fact_domain fact_scalar fact_type fact_place fact_project)
 from p"facts_compare.dewy" import (fact_distance fact_shortest fact_add_fits)
 from p"facts_lengths.dewy" import (fact_difference fact_length_max)
-from p"facts_index_writes.dewy" import (fact_bind fact_new fact_rebind fact_set_bound)
+from p"facts_index_writes.dewy" import (fact_bind fact_new fact_rebind fact_set_bound ft_set_back_only)
 from p"facts_index_writes.dewy" import (fact_add_projection fact_add_value fact_index_put fact_index_sized)
 from p"facts_value_queries.dewy" import (fact_binding fact_bound fact_index_get fact_slot)
 from p"facts_projection_queries.dewy" import (fact_projection_after fact_projection_find fact_projection_first fact_projection_origin)
@@ -38,7 +38,7 @@ from p"proofs.jo" import (ResultEvidence)
 from p"refine.jo" import (refine_active)
 from p"refine_metadata.dewy" import (ref_interval representation_type)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
-from p"types.jo" import (T_BOOL T_INT T_U8 telem tkind types)
+from p"types.jo" import (T_BOOL T_INT T_STR T_U8 telem tkind types)
 
 LoopWord:type=int64<overflow='wrap'>
 # a - b <= limit, from rows or from the two intervals.
@@ -912,16 +912,19 @@ fact_cursor_predicate=(n:LoopWord cursor:LoopWord @budget:LoopWord):>bool=>$unsa
     }
     if k =? 'not_' {return fact_cursor_predicate(a cursor @budget)}
     if k =? 'int_lit' or k =? 'bool_lit' {return true}
-    if k =? 'ident' {return fact_cursor_local(n) and (ntype(n) =? T_BOOL or ntype(n) =? T_U8)}
+    if k =? 'ident' {return fact_cursor_local(n) and (ntype(n) =? T_BOOL or ntype(n) =? T_U8 or ntype(n) =? T_STR or is_int(fact_type(ntype(n))))}
     if k =? 'index' {
-        return fact_cursor_local(a) and tkind(ntype(a)) =? 'array' and telem(ntype(a)) =? T_U8 and nkids(n) =? 1 and kid(n 0) =? b and fact_preread_local(b) and LoopWord(nodes.ptr[b].sym) =? cursor
+        if not fact_cursor_local(a) or tkind(ntype(a)) not=? 'array' or nkids(n) not=? 1 or kid(n 0) not=? b or not fact_preread_local(b) or LoopWord(nodes.ptr[b].sym) not=? cursor {return false}
+        let et=telem(ntype(a))
+        return et =? T_U8 or et =? T_STR or is_int(fact_type(et))
     }
     if k not=? 'call' or a not=? 0 or nodes.ptr[n].aux not=? 0 or nkids(n) not=? 1 or ntype(n) not=? T_BOOL {return false}
     let f=LoopWord(nodes.ptr[n].sym)
     if f <=? 0 or f >=? fns.length or fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 or fns.ptr[f].has_env or fns.ptr[f].params.length not=? 1 {return false}
     let arg=kid(n 0)
     let param=fns.ptr[f].params.ptr[0]
-    if locals.ptr[param].type not=? T_U8 or LoopWord(locals.ptr[param].flags) & LF_MUTPARAM not=? 0 or ntype(arg) not=? T_U8 or not fact_cursor_predicate(arg cursor @budget) {return false}
+    let pt=LoopWord(locals.ptr[param].type)
+    if (pt not=? T_U8 and pt not=? T_STR and not is_int(fact_type(pt))) or LoopWord(locals.ptr[param].flags) & LF_MUTPARAM not=? 0 or ntype(arg) not=? pt or not fact_cursor_predicate(arg cursor @budget) {return false}
     if fact_summary_owner not=? 0 and (f >=? effect_summaries.length or not effect_summaries.ptr[f].done) {return false}
     if not effects_demand(f true) or effect_summaries.ptr[f].cut or effect_summaries.ptr[f].callbacks not=? 0 or effect_summaries.ptr[f].opaque_other {return false}
     loop event in effect_summaries.ptr[f].events {
@@ -999,12 +1002,18 @@ fact_cursor_shape=(n:LoopWord):>bool=>$unsafe {
     let guard=LoopWord(nodes.ptr[condition].a)
     let body=LoopWord(nodes.ptr[n].b)
     let nstmts=nkids(body)
-    if nodes.ptr[guard].kind not=? 'binary' or nodes.ptr[guard].aux not=? 0 or cx_token_values.ptr[LoopWord(nodes.ptr[guard].op)] not=? 'lt' or nodes.ptr[body].kind not=? 'block' or nstmts <? 1 or nstmts >? 5 {return false}
+    if nodes.ptr[guard].kind not=? 'binary' or nodes.ptr[guard].aux not=? 0 or cx_token_values.ptr[LoopWord(nodes.ptr[guard].op)] not=? 'lt' or nodes.ptr[body].kind not=? 'block' or nstmts <? 1 or nstmts >? 8 {return false}
     let cursor=LoopWord(nodes.ptr[guard].a)
     let limit=LoopWord(nodes.ptr[guard].b)
-    if not fact_cursor_local(cursor) or not fact_cursor_local(limit) or ntype(cursor) not=? T_INT or ntype(limit) not=? T_INT or nodes.ptr[cursor].sym =? nodes.ptr[limit].sym {return false}
+    let limit_sym:LoopWord=0
+    if fact_cursor_local(limit) and ntype(limit) =? T_INT {
+        limit_sym=LoopWord(nodes.ptr[limit].sym)
+    } else if nodes.ptr[limit].kind =? 'intrinsic' and nodes.ptr[limit].aux =? int32(int64(IN.len)) and nkids(limit) =? 1 and fact_cursor_local(kid(limit 0)) and tkind(fact_type(ntype(kid(limit 0)))) =? 'array' {
+        limit_sym=LoopWord(nodes.ptr[kid(limit 0)].sym)
+    } else {return false}
+    if not fact_cursor_local(cursor) or ntype(cursor) not=? T_INT or LoopWord(nodes.ptr[cursor].sym) =? limit_sym {return false}
     let csym=LoopWord(nodes.ptr[cursor].sym)
-    let lsym=LoopWord(nodes.ptr[limit].sym)
+    let lsym=limit_sym
     let store=kid(body nstmts - 1)
     let target=LoopWord(nodes.ptr[store].a)
     if nodes.ptr[store].kind not=? 'assign' or nodes.ptr[store].aux not=? 0 or not fact_preread_local(target) or nodes.ptr[target].sym not=? nodes.ptr[cursor].sym or ntype(target) not=? T_INT {return false}
@@ -1036,17 +1045,22 @@ fact_cursor_header=(n:LoopWord entry:FactState @header:FactState):>bool=>$unsafe
     let guard=LoopWord(nodes.ptr[LoopWord(nodes.ptr[n].a)].a)
     let place=fact_place(LoopWord(nodes.ptr[guard].a))
     let start=fact_guard_value(LoopWord(nodes.ptr[guard].a) entry)
-    let stop=fact_guard_value(LoopWord(nodes.ptr[guard].b) entry)
-    if start =? 0 or stop =? 0 or entry.ids.length >=? FACT_CAP {return false}
-    let x=fact_bound(entry start)
-    let y=fact_bound(entry stop)
+    let gb=LoopWord(nodes.ptr[guard].b)
+    let stop=fact_guard_value(gb entry)
+    if stop =? 0 and nodes.ptr[gb].kind =? 'intrinsic' and nodes.ptr[gb].aux =? int32(int64(IN.len)) and nkids(gb) =? 1 {
+        let base=fact_guard_value(kid(gb 0) header)
+        if base not=? 0 {stop=fact_project(@header base (-1) false T_INT)}
+    }
+    if start =? 0 or stop =? 0 or header.ids.length >=? FACT_CAP {return false}
+    let x=fact_bound(header start)
+    let y=fact_bound(header stop)
     if x.wide or y.wide {return false}
-    if fact_compare(entry 'lt' start stop) =? 0 {return true}
+    if fact_compare(header 'lt' start stop) =? 0 {return true}
     # Preserve the exact entry if the old transfer can refute the first
     # trip (including a byte or flag known false only at the entry cursor).
     let outer=fact_speculating
     fact_speculating += 1
-    let first_yes=entry
+    let first_yes=header
     let dummy_s=FactState(live=false)
     fact_cond_out(LoopWord(nodes.ptr[n].a) @first_yes @dummy_s true false true);
     fact_speculating=outer
@@ -1059,7 +1073,7 @@ fact_cursor_header=(n:LoopWord entry:FactState @header:FactState):>bool=>$unsafe
     if value =? 0 {return false}
     fact_rebind(@header place value n start)
     fact_difference(@header start value 0 n)
-    if fact_entails(entry start stop 0) {fact_difference(@header value stop 0 n)}
+    if fact_entails(header start stop 0) {fact_difference(@header value stop 0 n)}
     let body=LoopWord(nodes.ptr[n].b)
     let nstmts=nkids(body)
     if nstmts >? 1 {
@@ -1108,6 +1122,7 @@ fact_while=(n:LoopWord @s:FactState):>void=>$unsafe {
     # dependencies between changing counters settle before validation.
     let dummy_s=FactState(live=false)
     let edges=FactLoop()
+    let prev_back_only=ft_set_back_only(outer =? 0)
     loop iteration in [0..4) {
         if fact_loop_exhausted {break}
         let body_s=header
@@ -1118,6 +1133,7 @@ fact_while=(n:LoopWord @s:FactState):>void=>$unsafe {
         if settled {break}
         header=next
     }
+    ft_set_back_only(prev_back_only);
     if settled and not fact_loop_exhausted {
         # A settled round's header equals the one it ran with, so its
         # backedge is what a run with the settled header gives: narrow from
@@ -1130,8 +1146,8 @@ fact_while=(n:LoopWord @s:FactState):>void=>$unsafe {
             if not same {header=next}
         }
         # (inside an enclosing loop's speculation nothing is published: a
-        # header that narrowing left unchanged exits as the settled round did)
-        if same and outer >? 0 {
+        # header that narrowing left unchanged—or with no live breaks—exits directly)
+        if (same or not edges.exits.live) and outer >? 0 {
             fact_cond_out(LoopWord(nodes.ptr[n].a) @header @dummy_s true false false);
             fact_speculating=outer
             s=fact_join(header edges.exits n)
@@ -1298,6 +1314,7 @@ fact_loop_bounds=(n:LoopWord @s:FactState held_at_entry:array<int64> prep:LoopWo
         let head=s
         loop m in kept {fact_loop_bound_assume(@head m n)}
         loop_bound_speculation[0]=LoopWord(fact_speculating) + 1
+        let prev_bo=ft_set_back_only(true)
         let body=head
         if prep =? FACT_PREP_CONDITION {
             body=head
@@ -1307,6 +1324,7 @@ fact_loop_bounds=(n:LoopWord @s:FactState held_at_entry:array<int64> prep:LoopWo
         else if prep =? FACT_PREP_RANGE {body=fact_iteration_body(n head true 0 lo hi pushes)}
         else {fact_loop_prepare(n @body prep base pushes)}
         let edges=fact_loop_body(n @body)
+        ft_set_back_only(prev_bo);
         loop_bound_speculation[0]=outer
         if fact_loop_exhausted {break}
         let held:array<int64>=[]

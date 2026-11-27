@@ -347,14 +347,135 @@ fact_return_escapes=(n:ChangeWord depth:ChangeWord=0):>bool=>$unsafe {
 # This is also used for iterators whose backedge transfer is not modeled.
 # A lifecycle hook that can run anywhere in the region changes its
 # footprint too (facts_forgets: fact_drop_region).
-fact_changes=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='loop_'):>void=>{
+let fc_killed_gen:array<int32>=[]
+let fc_gen:int32=0
+let fc_cur_gen:int32=0
+
+fc_mark_killed=(l:ChangeWord):>void=>$unsafe {
+    if l <=? 0 {return}
+    if l >=? fc_killed_gen.length {fc_killed_gen.resize(max(l + 64 fc_killed_gen.length * 2 + 256))}
+    fc_killed_gen.ptr[l]=fc_cur_gen
+}
+fc_is_killed=(l:ChangeWord):>bool=>$unsafe {
+    l >? 0 and l <? fc_killed_gen.length and fc_killed_gen.ptr[l] =? fc_cur_gen
+}
+fact_changes=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='loop_'):>void=>$unsafe {
     if ownership_fact_cleanup {fact_drop_forget(@s at fact_drop_region(n))}
+    let saved=fc_cur_gen
+    fc_gen=int32<overflow='wrap'>(int64(fc_gen) + 1)
+    if fc_gen =? int32(0) {
+        if fc_killed_gen.length >? 0 {mem_set(fc_killed_gen.ptr as ptr<uint8> 0 fc_killed_gen.length * 4)}
+        fc_gen=int32(1)
+    }
+    fc_cur_gen=fc_gen
     fact_changes_walk(n @s at reason)
+    fc_cur_gen=saved
 }
 fact_changes_walk=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='loop_'):>void=>$unsafe {
     if n =? 0 {return}
     if fact_slice_flags(n) & (FACT_MEMBER | FACT_ACTIVE) =? FACT_MEMBER {return}
     let k=nodes.ptr[n].kind
+    match k {
+        <'ident'|'int_lit'|'float_lit'|'bool_lit'|'none_lit'|'null_lit'|'dotname'|'ptype'|'hole'|'break_'|'continue_'|'pwild'|'lazy_'> => {return}
+        <'exprstmt'|'not_'|'unary'|'conv'|'field'|'addr'|'unwrap'|'narrow'|'istype'|'cast'|'defer_'|'plit'|'yield_'> => {
+            fact_changes_walk(ChangeWord(nodes.ptr[n].a) @s at reason)
+            return
+        }
+        <'binary'|'and_'|'or_'|'coalesce'|'while_'|'prange'> => {
+            fact_changes_walk(ChangeWord(nodes.ptr[n].a) @s at reason)
+            fact_changes_walk(ChangeWord(nodes.ptr[n].b) @s at reason)
+            return
+        }
+        <'index'|'pair'> => {
+            fact_changes_walk(ChangeWord(nodes.ptr[n].a) @s at reason)
+            fact_changes_walk(ChangeWord(nodes.ptr[n].b) @s at reason)
+            let nk=nkids(n)
+            loop i in [ChangeWord(0)..nk) {fact_changes_walk(kid(n i) @s at reason)}
+            return
+        }
+        <'block'|'tuple'|'str_lit'|'map_lit'|'matrix'|'pvariant'|'pshape'|'pseq'> => {
+            let nk=nkids(n)
+            loop i in [ChangeWord(0)..nk) {fact_changes_walk(kid(n i) @s at reason)}
+            return
+        }
+        <'array'> => {
+            let b=ChangeWord(nodes.ptr[n].b)
+            if b not=? 0 {fact_changes_walk(b @s at reason)}
+            let nk=nkids(n)
+            loop i in [ChangeWord(0)..nk) {fact_changes_walk(kid(n i) @s at reason)}
+            return
+        }
+        <'match_'> => {
+            fact_changes_walk(ChangeWord(nodes.ptr[n].a) @s at reason)
+            let nk=nkids(n)
+            loop i in [ChangeWord(0)..nk) {fact_changes_walk(kid(n i) @s at reason)}
+            return
+        }
+        <'vardecl'> => {
+            let b=ChangeWord(nodes.ptr[n].b)
+            if b not=? 0 {fact_changes_walk(b @s at reason)}
+            return
+        }
+        <'if_'|'iflet'|'range'> => {
+            fact_changes_walk(ChangeWord(nodes.ptr[n].a) @s at reason)
+            fact_changes_walk(ChangeWord(nodes.ptr[n].b) @s at reason)
+            let c=ChangeWord(nodes.ptr[n].c)
+            if c not=? 0 {fact_changes_walk(c @s at reason)}
+            return
+        }
+        <'arm'> => {
+            fact_changes_walk(ChangeWord(nodes.ptr[n].a) @s at reason)
+            fact_changes_walk(ChangeWord(nodes.ptr[n].b) @s at reason)
+            let c=ChangeWord(nodes.ptr[n].c)
+            if c not=? 0 {fact_changes_walk(c @s at reason)}
+            let nk=nkids(n)
+            loop i in [ChangeWord(0)..nk) {fact_changes_walk(kid(n i) @s at reason)}
+            return
+        }
+        <'return_'> => {
+            if not fact_return_escapes(ChangeWord(nodes.ptr[n].a)) {return}
+            fact_changes_walk(ChangeWord(nodes.ptr[n].a) @s at reason)
+            return
+        }
+        <'assign'> => {
+            let target=ChangeWord(nodes.ptr[n].a)
+            let tk=nodes.ptr[target].kind
+            let skip_kill=false
+            let mark_l:ChangeWord=0
+            if tk =? 'ident' and nodes.ptr[target].aux =? int32(1) {
+                let l=ChangeWord(nodes.ptr[target].sym)
+                if l >? 0 and ChangeWord(locals.ptr[l].flags) & LF_ALIAS =? 0 {
+                    let p=fact_place(target)
+                    if p.declaration =? l and not fact_exposed(p) {
+                        if fc_is_killed(l) {skip_kill=true}
+                        else {mark_l=l}
+                    }
+                }
+            } else if tk =? 'index' and nodes.ptr[target].b not=? 0 {
+                let base=ChangeWord(nodes.ptr[target].a)
+                if nodes.ptr[base].kind =? 'ident' and nodes.ptr[base].aux =? int32(1) {
+                    let l=ChangeWord(nodes.ptr[base].sym)
+                    if l >? 0 and ChangeWord(locals.ptr[l].flags) & LF_ALIAS =? 0 and types.ptr[fact_type(ntype(base))].kind =? 'fixed' {
+                        let p=fact_place(base)
+                        if p.declaration =? l and not fact_exposed(p) {
+                            if fc_is_killed(l) {skip_kill=true}
+                            else {mark_l=l}
+                        }
+                    }
+                }
+            }
+            if not skip_kill {
+                if not fact_bounded_change(n @s at reason) {
+                    fact_change_route(@s target false at reason)
+                    if mark_l >? 0 {fc_mark_killed(mark_l)}
+                }
+            }
+            fact_changes_walk(target @s at reason)
+            fact_changes_walk(ChangeWord(nodes.ptr[n].b) @s at reason)
+            return
+        }
+        _ => {}
+    }
     if k =? 'for_' and nodes.ptr[n].aux =? int32(5) {
         fact_forget(@s at 'call')
     }
@@ -362,9 +483,6 @@ fact_changes_walk=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='lo
         fact_balanced_changes(n @s at reason)
         return
     }
-    if k =? 'return_' and not fact_return_escapes(ChangeWord(nodes.ptr[n].a)) {return}
-    # (an element or field store havocs only its route within its root: fact_change_route)
-    if k =? 'assign' and not fact_bounded_change(n @s at reason) {fact_change_route(@s ChangeWord(nodes.ptr[n].a) false at reason)}
     if k =? 'intrinsic' {
         let id=nodes.ptr[n].aux as IN
         if (id =? IN.push or id =? IN.extend) and fact_growth_route(kid(n 0)) {fact_growth_change(n @s at reason)}
@@ -372,9 +490,6 @@ fact_changes_walk=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='lo
             fact_change_route(@s kid(n 0) true at reason)
         }
     }
-    # (a direct call havocs what its summary writes; reading lengths and
-    # erased or failing assertions write nothing; a record is built in place)
-    # (a swap, as a selection store, keeps the length: facts_arrays.dewy, kind 4)
     let array=if k =? 'call' and nodes.ptr[n].aux =? 0 {fact_array_call(n)} else {0}
     if array =? 6 {fact_permutation_change(n @s)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and (fact_sequence_store_call(n) or array =? 4) {fact_sequence_store(n @s at reason)}
@@ -382,13 +497,9 @@ fact_changes_walk=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='lo
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and fact_pool_call(n) =? 4 {fact_pool_store_changes(n @s)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and (fact_map_store_call(n) or fact_map_insert_call(n)) {fact_map_store_changes(n @s at reason)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and (fact_map_reads_only(n) or fact_nd_reads_only(n) or fact_map_entries_call(n)) {s=s}
-    # Across any number of calls, exact lengths stay equal and non-shrinking
-    # lengths retain their entry lower bound. Reuse the demand-driven transfer.
     else if k =? 'call' and nodes.ptr[n].aux =? 0 {fact_path_call_effects(n @s)}
     else if k =? 'call' and nodes.ptr[n].aux =? 2 {s=s}
     else if k =? 'intrinsic' and (fact_reads_only(nodes.ptr[n].aux as IN) or fact_hook_free_resize(n)) {s=s}
-    # (a closure's, partial application's or handle's creation writes nothing,
-    # unless ownership may move an owner: fact_capture)
     else if k =? 'call' {fact_forget_call(@s n reason at)}
     else if k =? 'intrinsic' or k =? 'lambda' and ownership_decls.length not=? 0 or k =? 'partial' and fact_partial_opaque(n) or k =? 'fnref' and fact_handle_opaque(n) {fact_forget(@s at reason)}
     let mask=fact_change_children(n)

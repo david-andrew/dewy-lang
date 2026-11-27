@@ -26,9 +26,9 @@ from p"facts_collect.dewy" import (fact_collect)
 from p"facts_compare.dewy" import (fact_add_fits fact_assume fact_compare fact_open_endpoint fact_saved_boolean)
 from p"facts_conditions.dewy" import (fact_cond_out fact_condition fact_condition_in fact_pattern_tag fact_tag)
 from p"facts_elements.dewy" import (fact_fixed_check fact_permuted_elements fact_stepped)
-from p"facts_forgets.dewy" import (fact_builtin_formatter fact_callback_writes_nothing fact_drop_block fact_drop_exit fact_drop_footprint fact_drop_forget fact_drop_statement fact_ends_path fact_exposed fact_fn_in_lib fact_forget fact_path_call_effects fact_pointer_cast)
+from p"facts_forgets.dewy" import (fact_builtin_formatter fact_call_effects fact_callback_writes_nothing fact_drop_block fact_drop_exit fact_drop_footprint fact_drop_forget fact_drop_statement fact_ends_path fact_exposed fact_fn_in_lib fact_forget fact_path_call_effects fact_pointer_cast)
 from p"facts_forks.dewy" import (fact_call_arguments fact_fork_record fact_key_callback fact_key_record fact_parallel_array fact_parallel_record fact_slice_capture)
-from p"facts_index_writes.dewy" import (fact_add_projection fact_add_value fact_bind fact_constant fact_new fact_set_bound ft_begin ft_depth ft_is_active ft_rollback)
+from p"facts_index_writes.dewy" import (fact_add_projection fact_add_value fact_bind fact_constant fact_new fact_set_bound ft_back_only ft_begin ft_depth ft_is_active ft_rollback ft_set_back_only)
 from p"facts_joins.dewy" import (fact_hull fact_hull_type fact_join fact_join_into fact_join_length)
 from p"facts_lengths.dewy" import (fact_difference fact_heap_length fact_length_max fact_shrunk_elements)
 from p"facts_library.dewy" import (fact_chosen fact_chosen_call fact_clamped fact_copy_length_call fact_count_call fact_empty_array_call fact_endpoint fact_endpoint_call fact_entry_count_call fact_exact_sum_call fact_exact_sum_check fact_field_args fact_gpu_index_call fact_gpu_index_check fact_heap_call fact_heap_type fact_integer_gcd_call fact_length_through fact_library_call fact_nonempty_call fact_nonempty_check fact_prelude_call fact_same_length_call)
@@ -52,6 +52,7 @@ from p"facts_values.dewy" import (fact_bcast_common fact_domain fact_literal fac
 from p"float_ops.dewy" import (ff_conversion_operand ff_diverges ff_integer_demand ff_integer_record)
 from p"isolation_ops.dewy" import (isolation_children)
 from p"lower.jo" import (VC_VOID)
+from p"lower_analysis.dewy" import (checked_call_mutmask)
 from p"lower_storage.dewy" import (vc)
 from p"nd_contract_ops.dewy" import (fact_nd_capture fact_nd_need)
 from p"nd_contracts.jo" import (fact_nd_call nd_mutable_handle nd_mutable_signatures)
@@ -255,6 +256,64 @@ fact_flatten_and=(n:CaptureWord @out:array<int64>):>bool=>$unsafe {
     if out.length >=? 8 {return false}
     out.push(n)
     true
+}
+fact_flatten_or=(n:CaptureWord @out:array<int64>):>bool=>$unsafe {
+    if nodes.ptr[n].kind =? 'or_' {
+        return fact_flatten_or(CaptureWord(nodes.ptr[n].a) @out) and fact_flatten_or(CaptureWord(nodes.ptr[n].b) @out)
+    }
+    if out.length >=? 8 {return false}
+    out.push(n)
+    true
+}
+fact_no_loop_escape=(n:CaptureWord @budget:CaptureWord):>bool=>$unsafe {
+    if n <=? 0 {return true}
+    if budget <=? 0 {return false}
+    budget -= 1
+    let nd=nodes.ptr + n
+    let k=nd[0].kind
+    match k {
+        <'int_lit'|'float_lit'|'bool_lit'|'none_lit'|'null_lit'|'dotname'|'str_lit'|'ident'|'hole'|'ptype'> => {return true}
+        <'break_'|'continue_'|'defer_'|'while_'|'for_'> => {return false}
+        <'lambda'> => {return true}
+        _ => {
+            let mask=isolation_children(k)
+            if mask <? 0 {return false}
+            if mask & 1 not=? 0 and not fact_no_loop_escape(CaptureWord(nd[0].a) @budget) {return false}
+            if mask & 2 not=? 0 and not fact_no_loop_escape(CaptureWord(nd[0].b) @budget) {return false}
+            if mask & 4 not=? 0 and not fact_no_loop_escape(CaptureWord(nd[0].c) @budget) {return false}
+            if mask & 16 not=? 0 {
+                let l0=CaptureWord(nd[0].list)
+                let nk=CaptureWord(nd[0].nlist)
+                loop i in [CaptureWord(0)..nk) {
+                    if not fact_no_loop_escape(CaptureWord(lists.ptr[l0 + i]) @budget) {return false}
+                }
+            }
+            return true
+        }
+    }
+}
+# True if arm b unconditionally exits via return (or current-loop break when skip_break)
+# without any continue/defer/enclosing-break. Used only during fact_speculating > 0.
+fact_spec_dead_arm=(b:CaptureWord skip_break:bool):>bool=>$unsafe {
+    if b <=? 0 {return false}
+    let budget:CaptureWord=64
+    let k=nodes.ptr[b].kind
+    if k =? 'return_' {return fact_no_loop_escape(CaptureWord(nodes.ptr[b].a) @budget)}
+    if k =? 'break_' {return skip_break and nodes.ptr[b].ival =? 0}
+    if k =? 'block' {
+        let nk=CaptureWord(nodes.ptr[b].nlist)
+        if nk <? 1 or nk >? 16 {return false}
+        let l0=CaptureWord(nodes.ptr[b].list)
+        let last=CaptureWord(lists.ptr[l0 + nk - 1])
+        let lk=nodes.ptr[last].kind
+        if lk not=? 'return_' and not (skip_break and lk =? 'break_' and nodes.ptr[last].ival =? 0) {return false}
+        loop i in [CaptureWord(0)..nk - 1) {
+            if not fact_no_loop_escape(CaptureWord(lists.ptr[l0 + i]) @budget) {return false}
+        }
+        if lk =? 'return_' {return fact_no_loop_escape(CaptureWord(nodes.ptr[last].a) @budget)}
+        return true
+    }
+    false
 }
 fact_no_state_replace_stmt=(st:CaptureWord @budget:CaptureWord):>bool=>$unsafe {
     if st <=? 0 {return true}
@@ -759,9 +818,30 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
             return r
         }
         <'if_'> => {
+            # During loop speculation (outside summaries/ownership/proofs), an arm that
+            # unconditionally returns (or breaks when exits are ignored) cannot reach the
+            # backedge: skip evaluating that arm and assume the surviving branch in place.
+            if fact_speculating >? 0 and (mark & FACT_VALUE) =? 0 and fact_summary_owner =? 0 and fact_summary_field =? 0 and not ownership_fact_cleanup and ownership_decls.length =? 0 and s.conditional.length =? 0 and fact_pending_defers =? 0 and not proof_active and not result_active {
+                let tb=CaptureWord(nodes.ptr[n].b)
+                let ec=CaptureWord(nodes.ptr[n].c)
+                let back_only=ft_back_only()
+                if fact_spec_dead_arm(tb back_only) {
+                    let no_s=FactState(live=false)
+                    fact_cond_out(CaptureWord(nodes.ptr[n].a) @s @no_s false true true);
+                    s=no_s
+                    if ec not=? 0 {fact_capture(ec @s);}
+                    return 0
+                }
+                if ec not=? 0 and fact_spec_dead_arm(ec back_only) {
+                    let dummy_s=FactState(live=false)
+                    fact_cond_out(CaptureWord(nodes.ptr[n].a) @s @dummy_s true false true);
+                    fact_capture(tb @s);
+                    return 0
+                }
+            }
             # Fast zero-clone trailed path for statement `if cond { ... return/break/continue }`:
             # mutate @s in place for the diverging then-arm and roll back for the else/fallthrough.
-            if (mark & FACT_VALUE) =? 0 and not ownership_fact_cleanup and ownership_decls.length =? 0 and s.conditional.length =? 0 and fact_summary_field =? 0 and fact_summary_owner =? 0 and fact_pending_defers =? 0 and not proof_active and not result_active and s.index.ptr[0].slots.length =? 0 and s.ids.length <? FACT_CAP - 128 and ft_depth() <? 8 {
+            if (mark & FACT_VALUE) =? 0 and not ownership_fact_cleanup and ownership_decls.length =? 0 and s.conditional.length =? 0 and fact_summary_field =? 0 and fact_summary_owner =? 0 and fact_pending_defers =? 0 and not proof_active and not result_active and s.ids.length <? FACT_CAP - 128 and ft_depth() <? 8 {
                 let cn=CaptureWord(nodes.ptr[n].a)
                 let sense=true
                 let membership=string_set_owners.length >? 0 and string_set_owners.has(fact_owner)
@@ -781,6 +861,39 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                     let ec=CaptureWord(nodes.ptr[n].c)
                     if ec not=? 0 {fact_capture(ec @s);}
                     return 0
+                }
+                if sense and ck =? 'or_' and not membership and fact_simple_diverges(CaptureWord(nodes.ptr[n].b)) {
+                    let leaves:array<int64>=[]
+                    if fact_flatten_or(cn @leaves) {
+                        let all_pure=true
+                        let cb:CaptureWord=64
+                        loop lv in leaves {
+                            if not fact_pure_cond(lv @cb) {all_pure=false; break}
+                        }
+                        if all_pure {
+                            let tb=CaptureWord(nodes.ptr[n].b)
+                            loop lv in leaves {
+                                let v=fact_capture(lv @s)
+                                if not s.live {return 0}
+                                let tr=fact_truth(s v)
+                                if tr not=? 0 {
+                                    let cp=ft_begin(s)
+                                    fact_assume(@s v true)
+                                    fact_capture(tb @s);
+                                    ft_rollback(@s cp)
+                                    if tr =? 1 {
+                                        s.live=false
+                                        return 0
+                                    }
+                                    fact_assume(@s v false)
+                                    if not s.live {return 0}
+                                }
+                            }
+                            let ec=CaptureWord(nodes.ptr[n].c)
+                            if ec not=? 0 {fact_capture(ec @s);}
+                            return 0
+                        }
+                    }
                 }
                 if fact_speculating >? 0 and sense and ck =? 'and_' and not membership and fact_simple_diverges(CaptureWord(nodes.ptr[n].b)) {
                     let leaves:array<int64>=[]
@@ -912,20 +1025,24 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
             return fact_new(@s result FactTerm((if take {Tok.kw_and} else {Tok.kw_or}) a b))
         }
         <'while_'|'for_'> => {
+            let saved_back_only=ft_set_back_only(false)
             if fact_loops.length =? 0 and fact_speculating =? 0 {
                 capture_loop_steps[0]=0
                 capture_loop_exhausted[0]=false
             }
             if k =? 'while_' and nodes.ptr[n].aux =? 0 {
                 fact_while(n @s)
+                ft_set_back_only(saved_back_only);
                 return 0
             }
             if k =? 'for_' and nodes.ptr[n].aux =? 0 and not has_flag(CaptureWord(nodes.ptr[n].a) NF_STEP) {
                 fact_range(n @s)
+                ft_set_back_only(saved_back_only);
                 return 0
             }
             if k =? 'for_' and nodes.ptr[n].aux =? 0 and nodes.ptr[CaptureWord(nodes.ptr[n].a)].kind =? 'range' and nodes.ptr[CaptureWord(nodes.ptr[n].a)].c not=? 0 {
                 fact_stepped(n @s)
+                ft_set_back_only(saved_back_only);
                 return 0
             }
             # An indexed array loop evaluates its source once, before the loop.
@@ -984,6 +1101,7 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                 fact_counted_lengths(n @s pushes count)
                 fact_scaled_lengths(n @s scaled count)
             }
+            ft_set_back_only(saved_back_only);
             return 0
         }
         <'not_'> => {
@@ -1630,7 +1748,8 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                     if p.declaration not=? 0 and (plain or reverse or unexposed) {
                         let held=fact_route_values(@s route)
                         let length=fact_project(@s held[CaptureWord(held.length) - 1] (-1) false T_INT)
-                        fact_path_call_effects(n @s)
+                        if checked_call_mutmask(n) =? 1 {fact_call_effects(n @s)}
+                        else {fact_path_call_effects(n @s)}
                         let fresh=fact_new(@s FactBound() FactTerm(type=ntype(kid(n 0))))
                         fact_add_projection(@s FactProjection(fresh (-1) false length))
                         # A callback receives scalar/string values, not their slots.
@@ -1852,32 +1971,37 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                 ref_assume(CaptureWord(fns.ptr[f].ret) result values @s)
                 ref_arm_publish(f result values @s)
                 if result_active {result_publish(f result values @s)}
-                let counted=false
+                let contracted=tkind(prune(CaptureWord(fns.ptr[f].ret))) =? 'refined'
                 if lib_sp {
-                    if fact_search_call(n) {fact_search_result(n result entry @s)}
+                    if fact_search_call(n) {fact_search_result(n result entry @s); contracted=true}
                     if nkids(n) =? 1 or nkids(n) =? 3 {fact_regex_search_result(n result entry @s)}
                     # (reviewed prelude contracts: `parallel_range(n f)` has max(0, n)
                     # results, `parallel_map(xs f)` one per element)
                     if nkids(n) =? 2 and tkind(fact_type(ntype(n))) =? 'array' {
                         if fact_library_call(n "parallel_range") and fact_scalar(ntype(kid(n 0))) {
                             fact_add_projection(@s FactProjection(result (-1) false fact_clamped(@s entry[0] n)))
+                            contracted=true
                         }
                         else if (fact_library_call(n "parallel_map") or fact_library_call(n "__dewy_parallel_collect")) and tkind(fact_type(ntype(kid(n 0)))) =? 'array' {
                             fact_add_projection(@s FactProjection(result (-1) false fact_project(@s entry[0] (-1) false T_INT)))
+                            contracted=true
                         }
                         # (`[parallel x in [0..n) e]`: one result per position, as `[loop x in [0..n) e]` has)
                         else if fact_library_call(n "__dewy_parallel_collect") {
                             let count=fact_parallel_range_count(kid(n 0) @s)
                             if count not=? 0 {fact_add_projection(@s FactProjection(result (-1) false count))}
+                            contracted=true
                         }
                     }
                     if fact_copy_length_call(n) and s.projections.length <? FACT_CAP {
                         fact_add_projection(@s FactProjection(result (-1) false fact_project(@s entry[0] (-1) false T_INT)))
                         fact_keys_copy(@s entry[0] result)
                         fact_permuted_elements(@s entry[0] result)
+                        contracted=true
                     }
-                    if fact_words_call(n) and s.projections.length <? FACT_CAP {
-                        fact_add_projection(@s FactProjection(result FACT_ELEMENT_LENGTH false fact_new(@s FactBound(1 fact_length_max()))))
+                    if fact_words_call(n) {
+                        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(result FACT_ELEMENT_LENGTH false fact_new(@s FactBound(1 fact_length_max()))))}
+                        contracted=true
                     }
                     if fact_lines_call(n) {
                         let source_length=fact_project(@s entry[0] (-1) false T_INT)
@@ -1887,6 +2011,7 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                         if source.lo >? 0 {bound.lo=max(1 bound.lo)}
                         if source.hi =? 0 {bound.hi=0}
                         fact_set_bound(@s length bound)
+                        contracted=true
                     }
                     if fact_split_call(n) {
                         let separator=fact_project(@s entry[1] (-1) false T_INT)
@@ -1896,15 +2021,16 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                             bound.lo=max(1 bound.lo)
                             fact_set_bound(@s length bound)
                         }
+                        contracted=true
                     }
-                    counted=fact_count_call(n)
-                    if counted {
+                    if fact_count_call(n) {
                         let length=fact_project(@s entry[0] (-1) false T_INT)
                         fact_set_bound(@s result FactBound(0 fact_bound(s length).hi))
                         fact_difference(@s result length 0 n)
+                        contracted=true
                     }
                 }
-                let summary=if counted {FactSummary()} else {fact_summary(f)}
+                let summary=if contracted {FactSummary()} else {fact_summary(f)}
                 if summary.seen {
                     fact_summary_kept_upper(n f entry summary @s)
                     let payload=fact_summary_payload(fact_type(CaptureWord(fns.ptr[f].ret)))
