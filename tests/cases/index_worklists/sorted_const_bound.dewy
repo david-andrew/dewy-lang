@@ -1,0 +1,16 @@
+# Sorting and reversing an array of indices keeps their bound: the library proves its stores.
+main = () => {
+    const names = [loop i in [0..40) "n{(i * 7) % 40}"]
+    let idx:array<addr<(<? names.length)>> = []
+    loop i in [0..names.length) idx.push(names.length - 1 - i)
+    let s = idx.sorted
+    printl([loop v in s names[v]].join(" "))
+    idx.sort(reverse=true)
+    loop v in idx[$clamp ..3) printl(names[v])
+    idx.sort_with((a b) => a <? b)
+    loop v in idx[$clamp ..3) printl(names[v])
+    let r = idx.reversed
+    loop v in r[$clamp ..3) printl(names[v])
+    idx.reverse()
+    loop v in idx[$clamp ..3) printl(names[v])
+}

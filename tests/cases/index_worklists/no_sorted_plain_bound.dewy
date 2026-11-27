@@ -1,0 +1,9 @@
+# `int64<(<? n)>` admits negatives: a sorted copy's first element may be one.
+walk = (names:array<string> k:int64):>void => {
+    const n = names.length
+    let xs:array<int64<(<? n)>> = []
+    if k <? n xs.push(k)
+    let s = xs.sorted
+    loop v in s printl(names[v])
+}
+main = () => walk(["a"] 0)

@@ -26,7 +26,7 @@ from p"type_ops.dewy" import (dt fixed_len zonk)
 from p"type_refinement.dewy" import (tr_deep)
 from p"type_substitute.dewy" import (ts_ref_subst)
 from p"types.jo" import (T_MATH_INT fields mk_type prune ptr_size struct_targ structs tkind type_args types variants T_INT is_int)
-from p"util.jo" import (files pos_file)
+from p"util.jo" import (files name_of pos_file)
 from p"diagnostic_exit.dewy" import (fatal ice)
 from p"lower_storage.dewy" import (load_val arr_len endc field_val_addr freeze_scalar iff release)
 from p"ir.jo" import (VI)
@@ -172,6 +172,9 @@ ref_ir_term=(term:RefTerm self:int64 args:array<int64> self_type:int64 arg_types
         if value =? -1 {value=gen_expr(mk_ident_local(fns.ptr[cur_fn].params[term.value] (-1))).v}
     }
     else if term.kind =? 3 {
+        # (a constant of another function, as a generic instance's store of the caller's type
+        # meets it: not in this frame, so its checks are proved, never run)
+        if RefineOpWord(locals.ptr[term.value].owner) not=? cur_fn {fatal((-1) "cannot check a contract naming '{name_of(RefineOpWord(locals.ptr[term.value].name))}' outside the function that declares it: prove the value before it reaches this function")}
         t=RefineOpWord(locals.ptr[term.value].type)
         value=gen_expr(mk_ident_local(term.value locals.ptr[term.value].pos)).v
     }

@@ -50,7 +50,7 @@ from p"ownership_types.dewy" import (ownership_fact_type)
 from p"predicate_facts.jo" import (FactPredicate fact_predicate_nodes fact_predicates)
 from p"proofs.jo" import (proof_active proof_calls proof_decls result_active result_contracts)
 from p"proof_ops.dewy" import (proof_erase proof_exit proof_prepare result_exit)
-from p"refine.jo" import (refine_active refine_entry refine_owners refine_requests)
+from p"refine.jo" import (ref_predicates refine_active refine_entry refine_owners refine_requests)
 from p"refine_transfers.dewy" import (refine_fact_entry)
 from p"refine_metadata.dewy" import (ref_wrapped_check)
 from p"refinement_types.dewy" import (FACT_MIN FactBound FactPolicy FactTerm)
@@ -222,6 +222,20 @@ fact_refinements_unreachable=(root:LifeWord):>void=>$unsafe {
         fact_slice_push_children(@work n)
     }
 }
+# A generic instance (the library's sort, say) that stores values of a type whose contract
+# names a constant of the function that called it (`array<addr<(<? n)>>` after `const n = ...`)
+# cannot check that contract at run time: its stores are proved, each from the values of the
+# type it read, as the constant cannot change during the call. O(atoms) per refinement request.
+fact_foreign_bound=(t0:LifeWord owner:LifeWord depth:LifeWord):>bool=>$unsafe {
+    if t0 <=? 0 or depth >? 4 {return false}
+    let t=prune(t0)
+    if types.ptr[t].kind not=? 'refined' {return false}
+    loop atom in ref_predicates[LifeWord(types.ptr[t].st)] {
+        if atom.a.kind =? 3 and LifeWord(locals.ptr[atom.a.value].owner) not=? owner {return true}
+        if atom.b.kind =? 3 and LifeWord(locals.ptr[atom.b.value].owner) not=? owner {return true}
+    }
+    fact_foreign_bound(LifeWord(types.ptr[t].elem) owner depth + 1)
+}
 facts_finalize=():>void=>$unsafe {
     draw_context_finalize()
     if proof_active {proof_prepare()}
@@ -244,7 +258,10 @@ facts_finalize=():>void=>$unsafe {
     loop f in exact_shader_demand() {demanded[f]=true}
     let mandatory=demanded
     loop request in fact_fixed_requests {demanded[request.owner]=true}
-    loop request in refine_requests {demanded[request.owner]=true}
+    loop request in refine_requests {
+        demanded[request.owner]=true
+        if refine_active and fact_foreign_bound(LifeWord(nodes.ptr[request.node].aux2) request.owner 0) {mandatory[request.owner]=true}
+    }
     loop [f _] in exact_proof_demands {demanded[f]=true}
     if fact_policy =? 'RequireStatic' or dir_floats_any or ff_conversions.length >? 0 {
         loop f in [1..fns.length) {
