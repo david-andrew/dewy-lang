@@ -1,0 +1,13 @@
+# A popped element was below the sibling's length when popped, not after it shrinks.
+G:type = [names:array<string> targets:array<int64<(<? names.length)>>]
+f = (@g:G):>void => {
+    if g.targets.is_empty or g.names.is_empty return
+    let v = g.targets.pop()
+    g.targets.clear()
+    g.names.pop();
+    printl(g.names[v])
+}
+main = () => {
+    let g = G[["a" "b" "c"] [2]]
+    f(@g)
+}

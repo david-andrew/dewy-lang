@@ -1450,7 +1450,11 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                 let plain=ownership_decls.length =? 0 or not ownership_fact_type(ntype(a))
                 if plain and id =? IN.pop {
                     let last=fact_arithmetic(@s a 'minus' length fact_constant(@s 1))
-                    result=fact_project(@s base last true ntype(n))
+                    # (the element read as its stored type, as `xs[i]` reads it: a
+                    # refined element's contract held when it was stored)
+                    let at=fact_type(ntype(a))
+                    let et=if types.ptr[at].kind =? 'array' and tkind(CaptureWord(types.ptr[at].elem)) =? 'refined' {CaptureWord(types.ptr[at].elem)} else {ntype(n)}
+                    result=fact_project(@s base last true et)
                 }
                 let size=fact_new(@s FactBound(0 fact_length_max() reason='write' witness=n))
                 if id =? IN.clear {size=fact_constant(@s 0)}

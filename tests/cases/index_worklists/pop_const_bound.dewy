@@ -1,0 +1,17 @@
+# A worklist of indices bounded by a stable length: pushes are checked, pops are known.
+walk = (names:array<string>):>void => {
+    const n = names.length
+    let seen = fill(false n)
+    let stack:array<addr<(<? n)>> = []
+    if n >? 0 stack.push(0)
+    loop not stack.is_empty {
+        let v = stack.pop()
+        if seen[v] continue
+        seen[v] = true
+        printl(names[v])
+        if v + 1 <? n stack.push(v + 1)
+        let back = v - 1
+        if back >=? 0 stack.push(back)
+    }
+}
+main = () => walk(["a" "b" "c"])

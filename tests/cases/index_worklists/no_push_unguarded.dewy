@@ -1,0 +1,11 @@
+walk = (names:array<string>):>void => {
+    const n = names.length
+    let stack:array<addr<(<? n)>> = []
+    if n >? 0 stack.push(0)
+    loop not stack.is_empty {
+        let v = stack.pop()
+        printl(names[v])
+        if v <? 2 stack.push(v + 1)
+    }
+}
+main = () => walk(["a" "b" "c"])

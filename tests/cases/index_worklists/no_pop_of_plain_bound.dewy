@@ -1,0 +1,7 @@
+# Only the element's own contract is known: `int64<(<? n)>` admits negatives.
+walk = (names:array<string>):>void => {
+    const n = names.length
+    let stack:array<int64<(<? n)>> = [-1]
+    printl(names[stack.pop()])
+}
+main = () => walk(["a"])
