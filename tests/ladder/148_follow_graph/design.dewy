@@ -82,20 +82,19 @@ degrees = (g:Graph):>void => {
 }
 
 # Kosaraju: finish order of a depth-first walk, then sweeps of the reversed
-# graph in reverse finish order. Iterative, with explicit stacks of people,
-# whose bounds the checker does not follow into the stacks: checked as it runs.
+# graph in reverse finish order. Iterative, with explicit stacks of people:
+# each holds valid indexes of `names`, checked as pushed and known when popped.
 groups = (g:Graph):>array<array<string>> => {
-    $runtime_checks
-    let n = g.names.length
+    const n = g.names.length
     let seen = fill(false n)
-    let finished:array<int64> = []
+    let finished:array<addr<(<? n)>> = []
     loop root in [0..n) {
         if seen[root] continue
         seen[root] = true
-        let stack = [root]
+        let stack:array<addr<(<? n)>> = [root]
         loop not stack.is_empty {
             let v = stack[end]
-            let next = [loop w in g.targets[$clamp first(g v)..last(g v)) if not seen[w] w]
+            let next:array<addr<(<? n)>> = [loop w in g.targets[$clamp first(g v)..last(g v)) if not seen[w] w]
             if next.is_empty {
                 finished.push(stack.pop())
             } else {
@@ -104,7 +103,7 @@ groups = (g:Graph):>array<array<string>> => {
             }
         }
     }
-    let incoming = fill([] n)
+    let incoming:array<array<addr<(<? n)>>> = fill([] n)
     loop v in [0..n) {
         loop w in g.targets[$clamp first(g v)..last(g v)) incoming[w].push(v)
     }
@@ -114,7 +113,7 @@ groups = (g:Graph):>array<array<string>> => {
         if placed[root] continue
         placed[root] = true
         let members:array<string> = []
-        let todo = [root]
+        let todo:array<addr<(<? n)>> = [root]
         loop not todo.is_empty {
             let v = todo.pop()
             members.push(g.names[v])
@@ -137,16 +136,16 @@ tree = (kids:dict<string array<string>> name:string indent:string):>generator<st
     loop kid in (kids.get(name) ?? []) { tree(kids kid "{indent}  ")... }
 }
 
-# Breadth-first rounds; the frontier's people are checked as they are read.
+# Breadth-first rounds; the frontier holds valid indexes, as the stacks above do.
 reach = (g:Graph root:int64):>void => {
-    $runtime_checks
-    let n = g.names.length
+    const n = g.names.length
     let reached = fill(false n)
     let kids:dict<string array<string>> = []
-    let frontier = [root]
+    if root <? 0 or root >=? n return
+    let frontier:array<addr<(<? n)>> = [root]
     let rounds = 0
     loop not frontier.is_empty {
-        let next:array<int64> = []
+        let next:array<addr<(<? n)>> = []
         loop v in frontier {
             loop w in g.targets[$clamp first(g v)..last(g v)) {
                 if reached[w] or w =? root continue
