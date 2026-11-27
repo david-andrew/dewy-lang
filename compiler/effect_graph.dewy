@@ -170,11 +170,29 @@ effect_add=(f:GraphWord event:EffectEvent):>bool=>$unsafe {
     if arena_fns.length >? 0 and arena_capacity_exempt(event) {return false}
     let covered=effect_place_atom(event.atom)
     let root=if covered {place_base(event.atom.place)} else {event.atom.place}
-    if effect_summaries.ptr[f].stamp =? 0 {
-        effect_stamps = GraphWord(effect_stamps) + 1;
-        effect_summaries.ptr[f].stamp = effect_stamps;
-    }
     let stamp=effect_summaries.ptr[f].stamp
+    if stamp <=? 0 {
+        if effect_summaries.ptr[f].capped {return false}
+        let n=effect_summaries.ptr[f].events.length
+        let ep=effect_summaries.ptr[f].events.ptr
+        loop i in [0..n) {
+            let oa=ep[i].atom
+            if oa =? event.atom {return false}
+            if covered and oa.kind =? event.atom.kind and oa.row =? 0 and oa.place =? root {return false}
+        }
+        if stamp =? 0 {
+            effect_stamps = GraphWord(effect_stamps) + 1;
+            effect_summaries.ptr[f].stamp = -GraphWord(effect_stamps) - 1;
+        }
+        effect_summaries.ptr[f].events.push(event);
+        if n + 1 >=? 12 {
+            effect_restamp(f);
+        } else {
+            effect_ticks = GraphWord(effect_ticks) + 1;
+            effect_summaries.ptr[f].changed_at = effect_ticks;
+        }
+        return true
+    }
     if effect_event_index.has(EffectEventKey[stamp event.atom]) {return false}
     if effect_summaries.ptr[f].capped {return false}
     # (a whole-root event already covers its fields)
@@ -268,14 +286,40 @@ effect_declared_row=(g:GraphWord):>int64=>$unsafe {
     return c
 }
 effect_unique_edges=(f:GraphWord):>void=>$unsafe {
-    let seen:dict<EffectEdgeKey bool>=dict<EffectEdgeKey bool>()
+    let en=effect_summaries.ptr[f].edges.length
+    if en =? 0 {
+        effect_summaries.ptr[f].unique = [];
+        effect_summaries.ptr[f].deltas = [];
+        effect_summaries.ptr[f].unique_ready = true;
+        return
+    }
+    if en =? 1 {
+        effect_summaries.ptr[f].unique = [0];
+        effect_summaries.ptr[f].deltas = [EffectDelta[]];
+        effect_summaries.ptr[f].unique_ready = true;
+        return
+    }
     let unique:array<int64>=[]
-    let edges=effect_summaries.ptr[f].edges
-    loop i in [0..edges.length) {
-        let key=EffectEdgeKey[edges.ptr[i].callee edges.ptr[i].actuals]
-        if seen.has(key) {continue}
-        seen[key] = true;
-        unique.push(i);
+    if en <=? 8 {
+        let ep=effect_summaries.ptr[f].edges.ptr
+        loop i in [0..en) {
+            let dup=false
+            let ci=ep[i].callee
+            loop j in [0..unique.length) {
+                let u=unique.ptr[j]
+                if ep[u].callee =? ci and ep[u].actuals =? ep[i].actuals {dup=true; break}
+            }
+            if not dup {unique.push(i);}
+        }
+    } else {
+        let seen:dict<EffectEdgeKey bool>=dict<EffectEdgeKey bool>()
+        let edges=effect_summaries.ptr[f].edges
+        loop i in [0..en) {
+            let key=EffectEdgeKey[edges.ptr[i].callee edges.ptr[i].actuals]
+            if seen.has(key) {continue}
+            seen[key] = true;
+            unique.push(i);
+        }
     }
     effect_summaries.ptr[f].unique = unique;
     effect_summaries.ptr[f].deltas = fill(EffectDelta[] unique.length);

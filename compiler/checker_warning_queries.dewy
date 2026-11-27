@@ -7,13 +7,14 @@ from p"ast.jo" import (NF_EXTERN NF_MUT has_flag kid nkids nodes)
 from p"check.jo" import (dewy_target_dropped discarding fns globals locals modules syms)
 from p"checker_expr.dewy" import (lookup)
 from p"checker_signature.dewy" import (fn_sig)
-from p"checker_startup.dewy" import (load_std_for_name std_file_route)
+from p"checker_startup.dewy" import (load_std_file std_file_route std_files_for)
 from p"checks_thin.dewy" import (hidden_method_message)
 from p"expr.jo" import (intrinsics)
-from p"prelude.jo" import (prelude_std_pending)
+from p"prelude.jo" import (prelude_std_pending std_file_init)
 from p"source_warnings.dewy" import (warn)
 from p"spelling.dewy" import (edit_distance)
 from p"type_ops.dewy" import (dt)
+from p"checker_types.dewy" import (TK)
 from p"types.jo" import (T_NEVER has_var prune structs tkind type_eq types)
 from p"util.jo" import (files name_of pos_file pos_in_lib)
 
@@ -86,6 +87,38 @@ target_dropped_use=(f:WarningWord l:WarningWord):>bool=>$unsafe {
     false
 }
 
+# Whether an unloaded optional lib/std file can declare a public function named dn whose
+# first parameter matches non-local type kind pk (i.e. not one of that file's own types).
+hidden_method_std_file_can_match=(file:string dn:string pk:TK):>bool=>{
+    if pk =? 'struct_' or pk =? 'enum_' {return true}
+    if file =? "pool.jo" or file =? "heap.jo" or file =? "task_core.jo" or file =? "fork_join.jo" or file =? "tasks.jo" or file =? "cli.jo" or file =? "dewy_ranges.jo" or file =? "oom.jo" or file =? "repl.jo" or file =? "settings.jo" or file =? "signal_core.jo" or file =? "snapshot.jo" or file =? "text.jo" or file =? "watch.jo" or file =? "windows_cmdline.jo" {return false}
+    if file =? "story.jo" {return pk =? 'str_' and dn =? "story"}
+    if file =? "thread.jo" {return pk =? 'int_' and dn =? "atomic"}
+    if file =? "arena.jo" {return pk =? 'int_' and dn =? "arena"}
+    if file =? "json.jo" {return pk =? 'str_' and dn =? "parse_json"}
+    if file =? "graphemes.jo" or file =? "files.jo" or file =? "path.jo" or file =? "process.jo" or file =? "regex.jo" or file =? "save.jo" or file =? "task_input.jo" {return pk =? 'str_'}
+    if file =? "hash.jo" or file =? "base64.jo" or file =? "csv.jo" {return pk =? 'str_' or pk =? 'array'}
+    if file =? "bytes.jo" {return pk =? 'array' or pk =? 'int_' or pk =? 'ptr'}
+    if file =? "date.jo" {return pk =? 'float_' or pk =? 'str_' or pk =? 'int_'}
+    if file =? "nd.jo" {return pk =? 'int_' or pk =? 'float_' or pk =? 'array'}
+    true
+}
+
+hidden_method_load_std=(dn:string pk:TK):>bool=>{
+    let r=std_file_route(dn)
+    if r =? -1 {return false}
+    if r >=? 0 {
+        let f=std_file_init(int64(r))
+        if not hidden_method_std_file_can_match(f dn pk) {return false}
+        return load_std_file(f)
+    }
+    let any=false
+    loop f in std_files_for(dn) {
+        if hidden_method_std_file_can_match(f dn pk) and load_std_file(f) {any=true}
+    }
+    any
+}
+
 # A program function named as a library method, taking the same kind of first argument:
 # `x.name` calls the program's everywhere in the module, which may surprise. Demanded by the
 # program's own functions: a name lookup and a signature match each.
@@ -108,15 +141,16 @@ hidden_method_warnings=(m:WarningWord):>void=>$unsafe {
         if prelude_std_pending and std_file_route(dn) not=? -1 {
             let mine0=fn_sig(d)
             let skip_std=mine0.params.length =? 0
+            let pk0:TK='void_'
             if not skip_std {
                 let p0=prune(mine0.params[0])
-                let pk=types.ptr[p0].kind
-                if pk =? 'struct_' or pk =? 'enum_' {
+                pk0=types.ptr[p0].kind
+                if pk0 =? 'struct_' or pk0 =? 'enum_' {
                     let sd=WarningWord(structs.ptr[WarningWord(types.ptr[p0].st)].decl)
                     if sd not=? 0 and not pos_in_lib(nodes.ptr[sd].pos) {skip_std=true}
                 }
             }
-            if not skip_std and load_std_for_name(dn) {cl_demand(name)}
+            if not skip_std and hidden_method_load_std(dn pk0) {cl_demand(name)}
         }
         let found:array<int64>=[]
         let dm=cl_prelude_module(name)

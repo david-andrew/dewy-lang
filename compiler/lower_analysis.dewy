@@ -3,11 +3,11 @@ from p"expression_types.dewy" import (ntype)
 
 from p"lower_primitives.dewy" import (inst_mutmask)
 from p"lower_storage.dewy" import (boxed_field_of is_shared)
-from p"lower.jo" import (FW_NEAR FnWrites LF_ELEMENTVIEW fr_direct fr_total fw_direct fw_named fw_near fw_total held_views lpath_ids lpath_parents mwr_direct opt_release pw_box pw_depth pw_heap)
+from p"lower.jo" import (FW_NEAR FnWrites LF_ELEMENTVIEW fr_direct fr_total fw_direct fw_named fw_near fw_total held_views lower_epoch lpath_ids lpath_parents mwr_direct opt_release pw_box pw_depth pw_heap)
 from p"expr.jo" import (IN)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_VALUEITER LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_SHARED LF_SOAELEM LF_VALUECAP fns globals lib_dir locals)
-from p"ast.jo" import (NF_EXTERN NF_MUT has_flag kid kid2 kid_c kid_d lists nkids nodes)
+from p"ast.jo" import (NF_EXTERN NF_GLOBAL NF_MUT has_flag kid kid2 kid_c kid_d lists nkids nodes)
 from p"types.jo" import (T_MATH_INT is_int prune tkind types)
 from p"type_ops.dewy" import (int_policy is_managed math_optional ptr_optional)
 from p"checked_eval.dewy" import (cx_token_values)
@@ -923,4 +923,117 @@ lm_change_at=(n:LAWord key:LAWord):>LAWord=>$unsafe {
         if r =? 0 {r=lm_change_at(kid2(n i) key)}
     }
     return r
+}
+# Whether a direct callee cannot write heap memory or drop caller-owned heap storage
+# (used by view_decl to keep ptr-backed borrowed reads without retain/release).
+# 0: unseen, 1: read-only, 2: writes/unknown, 3: visiting
+let fro_state:array<int8>=[]
+let fro_epoch:LAWord=-1
+fro_plain_assign=(target:LAWord):>bool=>$unsafe {
+    if target <=? 0 or nodes.ptr[target].kind not=? 'ident' or nodes.ptr[target].aux not=? int32(1) {return false}
+    let sym=LAWord(nodes.ptr[target].sym)
+    let fl=LAWord(locals.ptr[sym].flags)
+    if fl & (LF_MUTPARAM | LF_SHARED | LF_BYREF | LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_EXPOSED | LF_OWNERBORROW) not=? 0 or is_shared(sym) {return false}
+    not is_managed(LAWord(locals.ptr[sym].type))
+}
+fro_pure_intrinsic=(id:IN):>bool=>{
+    id =? IN.len or id =? IN.arrcap or id =? IN.arrdata or id =? IN.sizeof or id =? IN.alignof or id =? IN.sqrt or id =? IN.floor_ or id =? IN.ceil_ or id =? IN.fabs or id =? IN.fmin or id =? IN.fmax or id =? IN.mul_hi or id =? IN.fixed_abs
+}
+mwh_walk=(n:LAWord allow_calls:bool):>bool=>$unsafe {
+    if n <=? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' or k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'str_lit' or k =? 'none_lit' or k =? 'null_lit' or k =? 'dotname' or k =? 'hole' or k =? 'break_' or k =? 'continue_' or k =? 'lambda' or k =? 'lazy_' or k =? 'pwild' {return false}
+    if k =? 'assign' {
+        if nodes.ptr[n].aux not=? 0 or not fro_plain_assign(LAWord(nodes.ptr[n].a)) {return true}
+    }
+    else if k =? 'vardecl' {
+        if has_flag(n NF_GLOBAL) {return true}
+        if nodes.ptr[n].nlist >? 0 {return true}
+        let sym=LAWord(nodes.ptr[n].sym)
+        if is_shared(sym) or is_managed(LAWord(locals.ptr[sym].type)) {return true}
+    }
+    else if k =? 'intrinsic' {
+        let id=nodes.ptr[n].aux as IN
+        if not fro_pure_intrinsic(id) {return true}
+    }
+    else if k =? 'for_' {
+        if has_flag(n NF_MUT) {return true}
+    }
+    else if k =? 'defer_' or k =? 'yield_' {return true}
+    else if k =? 'call' or (k =? 'pair' and nodes.ptr[n].sym >? 0) {
+        if not allow_calls {return true}
+        if checked_call_mutmask(n) not=? 0 {return true}
+        let aux=if k =? 'pair' {0} else {LAWord(nodes.ptr[n].aux)}
+        if aux not=? 0 {return true}
+        let callee=LAWord(nodes.ptr[n].sym)
+        if not fn_read_only(callee) {return true}
+    }
+    else if k =? 'binary' and nodes.ptr[n].aux =? int32(1) {
+        if not allow_calls {return true}
+        loop f in value_helper_calls(n) {
+            if not fn_read_only(f) {return true}
+        }
+    }
+    let child_a:LAWord=LAWord(nodes.ptr[n].a)
+    if child_a >? 0 and mwh_walk(child_a allow_calls) {return true}
+    let child_b:LAWord=LAWord(nodes.ptr[n].b)
+    if child_b >? 0 and mwh_walk(child_b allow_calls) {return true}
+    if k not=? 'for_' {
+        let child_c=LAWord(nodes.ptr[n].c)
+        if child_c >? 0 and mwh_walk(child_c allow_calls) {return true}
+        if k not=? 'partial' {
+            let child_d=LAWord(nodes.ptr[n].d)
+            if child_d >? 0 and mwh_walk(child_d allow_calls) {return true}
+        }
+    }
+    let nk=LAWord(nodes.ptr[n].nlist)
+    if nk >? 0 {
+        let l0=LAWord(nodes.ptr[n].list)
+        loop i in [0..nk) {
+            let ci=LAWord(lists.ptr[l0 + i])
+            if ci >? 0 and mwh_walk(ci allow_calls) {return true}
+        }
+    }
+    let nk2=LAWord(nodes.ptr[n].nlist2)
+    if nk2 >? 0 {
+        let l2=LAWord(nodes.ptr[n].list2)
+        loop i in [0..nk2) {
+            let ci=LAWord(lists.ptr[l2 + i])
+            if ci >? 0 and mwh_walk(ci allow_calls) {return true}
+        }
+    }
+    return false
+}
+fn_read_only=(f:LAWord):>bool=>$unsafe {
+    if f <=? 0 or f >=? fns.length {return false}
+    if fro_epoch not=? lower_epoch {
+        fro_state.clear()
+        fro_epoch=lower_epoch
+    }
+    if f >=? fro_state.length {
+        let need=max(f + 1 fns.length + 64)
+        fro_state.resize(need)
+    }
+    let st=fro_state.ptr[f]
+    if st =? int8(1) {return true}
+    if st =? int8(2) {return false}
+    if st =? int8(3) {return false}
+    fro_state.ptr[f]=int8(3)
+    let body=LAWord(fns.ptr[f].body)
+    let decl=LAWord(fns.ptr[f].decl)
+    if body =? 0 or (decl not=? 0 and has_flag(decl NF_EXTERN)) {
+        fro_state.ptr[f]=int8(2)
+        return false
+    }
+    let w=fn_writes(f)
+    if w.all or w.globals.length >? 0 {
+        fro_state.ptr[f]=int8(2)
+        return false
+    }
+    let ro=not mwh_walk(body true)
+    fro_state.ptr[f]=if ro {int8(1)} else {int8(2)}
+    return ro
+}
+may_write_heap=(n:LAWord):>bool=>$unsafe {
+    mwh_walk(n true)
 }

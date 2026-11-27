@@ -169,6 +169,7 @@ copy_escapes=(n:CopyWord l:CopyWord owning:bool=false):>bool=>$unsafe {
 # snapshot. Handles, callbacks, exports and C entry points keep the borrowed
 # ABI; their unsupported ownership proofs retain a diagnostic.
 copies_parameters=():>void=>$unsafe {
+    if not dir_copies_any {return}
     let indirect=dict<int64 bool>()
     loop n in nodes {
         if n.kind =? 'fnref' or n.kind =? 'partial' {

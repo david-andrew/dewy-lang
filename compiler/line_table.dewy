@@ -23,8 +23,8 @@ LineTable:type=[
 LineWord:type=int64<overflow='wrap'>
 LineU64:type=uint64<overflow='wrap'>
 
-# where each line of src starts: 0, then the offset after each newline. Scans 8 bytes per
-# step with SWAR word arithmetic, checking exact newline bytes only on hit words; O(bytes).
+# where each line of src starts: 0, then the offset after each newline. Scans with
+# hardware-accelerated __find_newline (AVX2 on x86-64); O(bytes).
 line_starts=(src:string):>array<int64>=>$unsafe {
     let n=LineWord((src as array<uint8>).length)
     let ls:array<int64>=[]
@@ -37,55 +37,18 @@ line_starts=(src:string):>array<int64>=>$unsafe {
     # (the pointer of a view, not of a variable: a variable's would be its own copy)
     let sp=(src as array<uint8>).ptr
     let i:LineWord=0
-    let nl_rep=LineU64(0x0A0A0A0A0A0A0A0A)
-    let lo_bits=LineU64(0x0101010101010101)
-    let hi_bits=LineU64(0x8080808080808080)
-    let all_ones=LineU64(0xFFFFFFFFFFFFFFFF)
-    let n8=n - 8
-    loop i <=? n8 {
-        let w=((sp + i) as ptr<LineU64>)[0]
-        let x=w xor nl_rep
-        let m=(x - lo_bits) & (x xor all_ones) & hi_bits
-        if m not=? LineU64(0) {
-            if lcnt + 8 >? lcap {
-                lcap=lcap * 2
-                ls.reserve(int64(lcap))
-                __set_len(ls int64(lcap))
-                lp=ls.ptr
-            }
-            let b=i
-            let ww=w
-            if (m & LineU64(0xFFFFFFFF)) =? LineU64(0) {
-                m >>= LineU64(32)
-                ww >>= LineU64(32)
-                b += 4
-            }
-            loop m not=? LineU64(0) {
-                if (ww & LineU64(0xFF)) =? LineU64(10) {
-                    lp[lcnt]=int64(b + 1)
-                    lcnt += 1
-                }
-                m >>= LineU64(8)
-                ww >>= LineU64(8)
-                b += 1
-            }
-        }
-        i += 8
-    }
-    if i <? n {
-        if lcnt + 8 >? lcap {
+    loop i <? n {
+        let j=LineWord(__find_newline(sp int64(i) int64(n)))
+        if j >=? n {break}
+        if lcnt >=? lcap {
             lcap=lcap * 2
             ls.reserve(int64(lcap))
             __set_len(ls int64(lcap))
             lp=ls.ptr
         }
-        loop i <? n {
-            if sp[i] =? uint8(10) {
-                lp[lcnt]=int64(i + 1)
-                lcnt += 1
-            }
-            i += 1
-        }
+        lp[lcnt]=int64(j + 1)
+        lcnt += 1
+        i=j + 1
     }
     __set_len(ls int64(lcnt))
     ls

@@ -190,18 +190,15 @@ retain=(v:LSWord t0:LSWord):>void=>$unsafe {
         return
     }
     if not rc_assume_st {
-        blk();
-        let done=ctl
+        iff(e_bin('ne' VI v e_iconst(0)));
+        let rc=hdr_load(v 0)
+        iff(e_bin('gts' VI rc e_iconst(0)));
         iff(rt_global("__mt_active"));
         let was=ir_cold
         ir_cold=true
         e_call1(rt("__rc_inc") v -1);
         ir_cold=was
-        br_to(done);
-        endc();
-        iff(e_bin('ne' VI v e_iconst(0)));
-        let rc=hdr_load(v 0)
-        iff(e_bin('gts' VI rc e_iconst(0)));
+        els();
         hdr_store(v 0 e_addi(rc 1));
         endc();
         endc();
@@ -290,21 +287,18 @@ release=(v:LSWord t0:LSWord):>void=>$unsafe {
         return
     }
     if not rc_assume_st {
-        blk();
-        let done=ctl
+        iff(e_bin('ne' VI v e_iconst(0)));
+        let rc=hdr_load(v 0)
+        iff(e_bin('gts' VI rc e_iconst(0)));
         iff(rt_global("__mt_active"));
         let was=ir_cold
         ir_cold=true
         release_call(v t);
         ir_cold=was
-        br_to(done);
-        endc();
-        iff(e_bin('ne' VI v e_iconst(0)));
-        let rc=hdr_load(v 0)
+        els();
         iff(e_bin('gts' VI rc e_iconst(1)));
         hdr_store(v 0 e_addi(rc -1));
         els();
-        iff(e_bin('eq' VI rc e_iconst(1)));
         release_last(v t);
         endc();
         endc();
@@ -314,10 +308,10 @@ release=(v:LSWord t0:LSWord):>void=>$unsafe {
     }
     iff(e_bin('ne' VI v e_iconst(0)));
     let rc=hdr_load(v 0)
+    iff(e_bin('gts' VI rc e_iconst(0)));
     iff(e_bin('gts' VI rc e_iconst(1)));
     hdr_store(v 0 e_addi(rc -1));
     els();
-    iff(e_bin('eq' VI rc e_iconst(1)));
     release_last(v t);
     endc();
     endc();

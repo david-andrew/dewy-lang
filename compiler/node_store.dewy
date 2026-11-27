@@ -87,10 +87,26 @@ call_waits_bind=(f:<(node:int64):>int64>):>int64=>{
     call_waits_hook=@f
     0
 }
-node_mk=(@store:array<Node> kind:NK pos:int64):>int64=>{
+node_mk_slow=(@store:array<Node> kind:NK pos:int64):>int64=>{
     let idx=store.length
     store.push(Node[kind=kind pos=pos])
     idx
+}
+node_mk=(@store:array<Node> kind:NK pos:int64):>int64=>$unsafe {
+    let sp=store.ptr
+    if sp not=? (uint64(0) as ptr<Node>) {
+        let sh=(sp as ptr<int64>) - 3
+        let idx=sh[1]
+        if sh[0] =? 1 and idx <? sh[2] {
+            sh[1]=idx + 1
+            let dst=sp + idx
+            mem_set(dst as ptr<uint8> 0 size_of<Node>)
+            dst[0].kind=kind
+            dst[0].pos=pos
+            return idx
+        }
+    }
+    node_mk_slow(@store kind pos)
 }
 
 # xs as a new run of lists; its start

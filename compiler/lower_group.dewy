@@ -11,10 +11,10 @@ from p"lower_closures.dewy" import (closure_env_shareable closure_scalar_environ
 from p"lower_scalars.dewy" import (all_const byte_eq_type byte_offset_plain const_array f2i_i32 float_op gen_eq gen_match_lookup gen_value_dotname gen_value_float_lit gen_value_int_lit gen_value_none_lit int_op is_plain_ctor is_slice math_int_guard negate_cmp never_after never_value pat_int positive_modulus range_cmp range_tail same_range_read saturate_binary saturate_shift sdiv_wrap stepped_done text_source vec_comps wide_shift)
 from p"lower_views.dewy" import (bounded_open_for declared_in_scope fixed_path_of fp_end held_encode_addr held_opt_reg is_uniq_array plain_read reserve_comprehension simple_cond uq_end)
 from p"lower_storage.dewy" import (V arr_len arr_unique blk borrow box_put box_val boxed_field_of br_to brif_to build_slot cell_place copy_at drop_at drop_held els endc enter_cond field_place field_store_type field_val_addr finish_call freeze_scalar hdr_load hdr_store iff is_shared leave_cond load_val lop new_cell new_temp norm opt_has opt_value own owner_array_from_fixed place_addr read_place reg_temp_slot reg_temp_vreg release release_arg_snapshots result_from_slot ret_vt retain retain_elems scope_add_local scope_push stmt_begin stmt_end store_field store_type store_val vc vt_of write_place zero_declare zero_note zero_val)
-from p"lower_analysis.dewy" import (assign_rhs_effects borrow_may_change copy_through index_stable lm_change_at lm_resizing_call lpath_key lpath_root may_write_root mentions_local mut_alias_check mut_may_reach path_within place_steps place_text place_var same_var shares_mut_root unchanged_by write_root)
+from p"lower_analysis.dewy" import (assign_rhs_effects borrow_may_change copy_through index_stable lm_change_at lm_resizing_call lpath_key lpath_root may_write_heap may_write_root mentions_local mut_alias_check mut_may_reach path_within place_steps place_text place_var same_var shares_mut_root unchanged_by write_root)
 from p"lower_helpers.dewy" import (field_list fixed_elem_addr fixed_loop_begin fixed_loop_end)
 from p"lower_generators.dewy" import (gen_for_generator gen_fuse_active gen_fuse_brk_scope gen_fuse_init_decl gen_fuse_yield gen_intrinsic_iter_done gen_intrinsic_iter_value gen_lazy)
-from p"lower.jo" import (once_slots BOX_HDR BuildItem CopyBack FixedPath HK LF_ELEMENTVIEW LF_HELDVIEW LoanCapacity LoopInfo Place VC_AGG VC_FLT VC_INT VC_VOID Val arg_snapshots box_slot building comprehension_push_index cond_depth copy_backs ctl cur_block cur_block_i cur_fn cur_ret env_v fixed_fill_count fixed_fill_exact fixed_fill_push fixed_fill_slot fixed_fill_type fixed_paths fp_bases fp_calls fp_escape fp_kill fp_lambda fp_written frozen held_views loan_capacities loops lower_entry opt_release pinned_box pinned_type scope_defers scope_locals sret_v stack_closure_passed stack_closure_targets tl_items tl_values uniq_locals zero_ctls)
+from p"lower.jo" import (once_slots BOX_HDR BuildItem CopyBack FixedPath HK LF_ELEMENTVIEW LF_HELDVIEW LoanCapacity LoopInfo Place VC_AGG VC_FLT VC_INT VC_VOID Val arg_snapshots box_slot building comprehension_push_index cond_depth copy_backs ctl cur_block cur_block_i cur_fn cur_ret env_v fixed_fill_count fixed_fill_exact fixed_fill_push fixed_fill_slot fixed_fill_type fixed_paths fp_bases fp_calls fp_escape fp_kill fp_lambda fp_written frozen held_views loan_capacities loops lower_entry lower_epoch opt_release pinned_box pinned_type scope_defers scope_locals sret_v stack_closure_passed stack_closure_targets tl_items tl_values uniq_locals zero_ctls)
 from p"expr.jo" import (CV FMT_DEWY IN format_word_inst)
 from p"integer_conversions.dewy" import (int_widens integer_constant)
 from p"vector_swizzles.dewy" import (swizzle_run)
@@ -1868,6 +1868,19 @@ gen_binary=(e:LGWord):>Val=>$unsafe {
         return V(e_bin('ne' VI has e_iconst(0)) false)
     }
     if aux =? 2 {
+        if opt_release and (op =? 'eq' or op =? 'ne') and secret_compares.get(e) =? none {
+            let lit_b=nodes.ptr[b].kind =? 'str_lit' and nodes.ptr[b].aux =? 0
+            let lit_a=not lit_b and nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux =? 0
+            if lit_b or lit_a {
+                let lnode=if lit_b {b} else {a}
+                let text=name_of(LGWord(nodes.ptr[lnode].sval))
+                let n=(text as array<uint8>).length
+                if n <=? 8 {
+                    let v=if lit_b {gen_borrowed(a).v} else {gen_borrowed(b).v}
+                    return V(gen_str_eq_lit(v text op =? 'ne') false)
+                }
+            }
+        }
         let va=gen_left(a lt keep_left)
         let vb=gen_borrowed(b).v
         if op =? 'plus' {return V(e_call2(rt("__str_concat") va vb VI) true)}
@@ -3547,7 +3560,80 @@ gen_value_str_lit=(e:LGWord):>Val=>$unsafe {
     return V(value false)
 }
 let lg_call_kind:array<int8>=[]
+let lg_call_kind_epoch:LGWord=-1
+lg_str_word=(bp:ptr<uint8> off:LGWord width:LGWord):>LGWord=>$unsafe {
+    let acc:LGUWord=0
+    loop i in [0..width) {
+        acc |= LGUWord(bp[off + i]) << LGUWord(i * 8)
+    }
+    LGWord(acc)
+}
+gen_str_bytes_eq=(p:LGWord off:LGWord text:string):>LGWord=>$unsafe {
+    let bs=text as array<uint8>
+    let n=bs.length
+    let bp=bs.ptr
+    if n =? 1 {return e_bin('eq' VI e_load(VI p off 1) e_iconst(LGWord(bp[0])))}
+    if n =? 2 {return e_bin('eq' VI e_load(VI p off 2) e_iconst(lg_str_word(bp 0 2)))}
+    if n =? 3 {
+        let d0=e_bin('xor' VI e_load(VI p off 2) e_iconst(lg_str_word(bp 0 2)))
+        let d1=e_bin('xor' VI e_load(VI p off + 2 1) e_iconst(LGWord(bp[2])))
+        return e_bin('eq' VI e_bin('or_' VI d0 d1) e_iconst(0))
+    }
+    if n =? 4 {return e_bin('eq' VI e_load(VI p off 4) e_iconst(lg_str_word(bp 0 4)))}
+    if n <? 8 {
+        let tail=n - 4
+        let d0=e_bin('xor' VI e_load(VI p off 4) e_iconst(lg_str_word(bp 0 4)))
+        let d1=e_bin('xor' VI e_load(VI p off + tail 4) e_iconst(lg_str_word(bp tail 4)))
+        return e_bin('eq' VI e_bin('or_' VI d0 d1) e_iconst(0))
+    }
+    e_bin('eq' VI e_load(VI p off 8) e_iconst(lg_str_word(bp 0 8)))
+}
+gen_str_eq_lit=(va:LGWord text:string negate:bool):>LGWord=>$unsafe {
+    let n=(text as array<uint8>).length
+    let res=vreg(VI)
+    if n =? 0 {
+        e_mov(res e_iconst(if negate {0} else {1}));
+        iff(e_bin('ne' VI va e_iconst(0)));
+        e_mov(res e_bin((if negate {Op.ne} else {Op.eq}) VI hdr_load(va 8) e_iconst(0)));
+        endc();
+        return res
+    }
+    e_mov(res e_iconst(if negate {1} else {0}));
+    iff(e_bin('ne' VI va e_iconst(0)));
+    iff(e_bin('eq' VI hdr_load(va 8) e_iconst(n)));
+    let eq=gen_str_bytes_eq(va 24 text)
+    e_mov(res if negate {e_bin('xor' VI eq e_iconst(1))} else {eq});
+    endc();
+    endc();
+    res
+}
+gen_str_affix_lit=(e:LGWord suffix:bool):>LGWord=>$unsafe {
+    if not opt_release or nkids(e) not=? 2 or nodes.ptr[e].c not=? 0 {return -1}
+    let a=kid(e 0)
+    let b=kid(e 1)
+    if nodes.ptr[b].kind not=? 'str_lit' or nodes.ptr[b].aux not=? 0 {return -1}
+    if tkind(prune(ntype(a))) not=? 'str_' {return -1}
+    let text=name_of(LGWord(nodes.ptr[b].sval))
+    let n=(text as array<uint8>).length
+    if n >? 8 {return -1}
+    let va=gen_borrowed(a).v
+    if n =? 0 {return e_iconst(1)}
+    let res=vreg(VI)
+    e_mov(res e_iconst(0));
+    iff(e_bin('ne' VI va e_iconst(0)));
+    let slen=hdr_load(va 8)
+    iff(e_bin('ges' VI slen e_iconst(n)));
+    let base=if suffix {e_bin('add' VI va e_bin('sub' VI slen e_iconst(n)))} else {va}
+    e_mov(res gen_str_bytes_eq(base 24 text));
+    endc();
+    endc();
+    res
+}
 lg_classify_call=(f:LGWord):>int8=>$unsafe {
+    if lg_call_kind_epoch not=? lower_epoch {
+        lg_call_kind.clear()
+        lg_call_kind_epoch=lower_epoch
+    }
     let want=f + 1
     if lg_call_kind.length <? want {
         let old=lg_call_kind.length
@@ -3575,8 +3661,14 @@ lg_classify_call=(f:LGWord):>int8=>$unsafe {
                 } else if c2 =? 100 and (name =? "__dewy_read_u64" or name =? "__dewy_read_u32" or name =? "__dewy_read_u16") {
                     if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/dewy.jo" {res=int8(3)}
                 }
-            } else if c0 =? 115 and nlen =? 4 and name =? "swap" {
-                if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/array.jo" {res=int8(4)}
+            } else if c0 =? 115 {
+                if nlen =? 4 and name =? "swap" {
+                    if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/array.jo" {res=int8(4)}
+                } else if nlen =? 11 and name =? "starts_with" and fns.ptr[f].params.length =? 2 {
+                    if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/str.jo" {res=int8(5)}
+                }
+            } else if c0 =? 101 and nlen =? 9 and name =? "ends_with" and fns.ptr[f].params.length =? 2 {
+                if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/str.jo" {res=int8(6)}
             }
         }
     }
@@ -3696,7 +3788,7 @@ gen_value_call=(e:LGWord):>Val=>$unsafe {
     if t =? T_MATH_INT and math_word_helper(e) >? 0 {return math_pack_word(e math_word_expr(e))}
     ir_set_pos(nodes[e].pos);
     if aux =? 0 {
-        let ck:int8=if sym >? 0 and sym <? lg_call_kind.length {lg_call_kind.ptr[sym]} else {int8(0)}
+        let ck:int8=if lg_call_kind_epoch =? lower_epoch and sym >? 0 and sym <? lg_call_kind.length {lg_call_kind.ptr[sym]} else {int8(0)}
         if ck =? int8(0) and sym >? 0 {ck=lg_classify_call(sym)}
         if ck >? int8(0) {
             if ck =? int8(1) {
@@ -3712,6 +3804,9 @@ gen_value_call=(e:LGWord):>Val=>$unsafe {
                 if word >=? 0 {return V(word false)}
             } else if ck =? int8(4) {
                 if gen_fixed_swap(e) {return V(-1 false)}
+            } else if ck =? int8(5) or ck =? int8(6) {
+                let matched=gen_str_affix_lit(e ck =? int8(6))
+                if matched >=? 0 {return V(matched false)}
             }
         }
         let fn_p=fns.ptr + sym
@@ -3871,13 +3966,16 @@ gen_value_and_=(e:LGWord):>Val=>$unsafe {
     let range=gen_range_cond(e)
     if range >=? 0 {return V(range false)}
     let r=vreg(VI)
-    e_mov(r gen_expr(LGWord(nodes.ptr[e].a)).v);
-    if k =? 'and_' {iff(r);}
-    else {iff(e_bin('eq' VI r e_iconst(0)));}
-    enter_cond();
+    let is_and=k =? 'and_'
+    e_mov(r e_iconst(if is_and {0} else {1}));
+    blk();
+    let done=ctl
     let ea=LGWord(nodes.ptr[e].a)
+    if is_and {jump_if_false(ea done);}
+    else {jump_if_true(ea done);}
+    enter_cond();
     let do_eg=eg_active and loops.length >? 0 and (nodes.ptr[ea].kind =? 'binary' or nodes.ptr[ea].kind =? 'and_')
-    let guard=if do_eg {eg_begin(ea k =? 'and_')} else {0}
+    let guard=if do_eg {eg_begin(ea is_and)} else {0}
     e_mov(r gen_expr(LGWord(nodes.ptr[e].b)).v);
     if do_eg {eg_end(guard);}
     leave_cond();
@@ -5025,48 +5123,94 @@ gen_vardecl=(s:LGWord):>void=>$unsafe {
     }
     scope_add_local(l true);
 }
+view_ptr_read=(iv:LGWord):>bool=>$unsafe {
+    let e=iv
+    let saw_ptr=false
+    loop true {
+        let k=nodes.ptr[e].kind
+        if k =? 'field' {
+            if nodes.ptr[e].aux <? 0 or boxed_field_of(e) >=? 0 {return false}
+            let a=LGWord(nodes.ptr[e].a)
+            let ak=tkind(ntype(a))
+            if ak =? 'ptr' {saw_ptr=true; return true}
+            if ak not=? 'struct_' and ak not=? 'tuple' {return false}
+            e=a
+        } else if k =? 'index' {
+            if nodes.ptr[e].aux not=? 0 {return false}
+            let a=LGWord(nodes.ptr[e].a)
+            let ak=tkind(ntype(a))
+            if ak =? 'ptr' {saw_ptr=true; return true}
+            if ak not=? 'array' and ak not=? 'fixed' {return false}
+            e=a
+        } else {break}
+    }
+    saw_ptr
+}
 view_decl=(s:LGWord l:LGWord):>bool=>$unsafe {
     if copies_on and copy_strict(s) {return false}
     if not opt_release or cur_block =? 0 or kid(cur_block cur_block_i) not=? s {return false}
     let fl:LGWord=LGWord(locals.ptr[l].flags)
-    if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM | LF_EXPOSED) not=? 0 or is_shared(l) {return false}
+    if fl & (LF_ASSIGNED | LF_RESIZED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM | LF_EXPOSED | LF_OWNERBORROW | LF_PARTBORROW) not=? 0 or is_shared(l) {return false}
     let t=prune(LGWord(locals.ptr[l].type))
-    if types.ptr[t].kind not=? 'struct_' and types.ptr[t].kind not=? 'tuple' and types.ptr[t].kind not=? 'array' {return false}
+    let tk=types.ptr[t].kind
+    let ref_val=tk =? 'array' or tk =? 'str_'
+    if not ref_val and tk not=? 'struct_' and tk not=? 'tuple' {return false}
     if type_has_fn(t) or ownership_type(t) {return false}
     let iv:LGWord=LGWord(nodes.ptr[s].b)
     if iv =? 0 {return false}
-    # the element of an array reached by a path (xs[i], w.xs[i], xs[i].part)
+    # Borrowed reads from an array element (xs[i], w.xs[i].part), a managed
+    # field/local path (x.name, other), or a ptr-backed read (xs.ptr[i]).
     let e=iv
-    loop nodes.ptr[e].kind =? 'field' and nodes.ptr[e].aux >=? 0 {e=LGWord(nodes.ptr[e].a)}
-    if nodes.ptr[e].kind not=? 'index' or nodes.ptr[e].aux not=? 0 {return false}
-    let base:LGWord=LGWord(nodes.ptr[e].a)
-    if lpath_key(base) =? 0 or tkind(ntype(base)) not=? 'array' {return false}
-    let rn=lpath_root(base)
-    let root_global=nodes.ptr[rn].aux =? LGI32(2)
-    let r:LGWord=LGWord(nodes.ptr[rn].sym)
-    if not root_global {
-        let rf:LGWord=LGWord(locals.ptr[r].flags)
-        if rf & (LF_ALIAS | LF_CAPTURE | LF_BYREF) not=? 0 or is_shared(r) {return false}
-    # the statements that use b: nothing in them may change the root variable
+    loop nodes.ptr[e].kind =? 'field' and nodes.ptr[e].aux >=? 0 and boxed_field_of(e) <? 0 {e=LGWord(nodes.ptr[e].a)}
+    let rn:LGWord=0
+    let ptr_backed=false
+    if nodes.ptr[e].kind =? 'index' and nodes.ptr[e].aux =? 0 {
+        let base:LGWord=LGWord(nodes.ptr[e].a)
+        let bk=tkind(ntype(base))
+        if lpath_key(base) not=? 0 and (bk =? 'array' or bk =? 'fixed') {
+            rn=lpath_root(base)
+        } else if is_managed(t) and view_ptr_read(iv) {
+            ptr_backed=true
+        } else {return false}
+    } else if is_managed(t) and lpath_key(iv) not=? 0 {
+        rn=lpath_root(iv)
+    } else if is_managed(t) and view_ptr_read(iv) {
+        ptr_backed=true
+    } else {return false}
+    if not ptr_backed {
+        let root_global=nodes.ptr[rn].aux =? LGI32(2)
+        let r:LGWord=LGWord(nodes.ptr[rn].sym)
+        if root_global {
+            if globals.ptr[r].exposed {ptr_backed=true}
+        } else {
+            let rf:LGWord=LGWord(locals.ptr[r].flags)
+            if rf & (LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ELEMENTVIEW | LF_HELDVIEW | LF_OWNERBORROW) not=? 0 or is_shared(r) {return false}
+            if rf & (LF_ADDR | LF_EXPOSED | LF_MUTPARAM) not=? 0 {ptr_backed=true}
+        }
     }
     let last:LGWord=-1
-    loop i in [cur_block_i + 1..nkids(cur_block)) {
-        if mentions_local(kid(cur_block i) l) {last=i}
+    let nb=nkids(cur_block)
+    loop i in [cur_block_i + 1..nb) {
+        let st=kid(cur_block i)
+        if nodes.ptr[st].kind =? 'defer_' {return false}
+        if mentions_local(st l) {last=i}
     }
     loop i in [cur_block_i + 1..last + 1) {
-        if may_write_root(kid(cur_block i) rn) {return false}
-    # b is the element's address
+        let st=kid(cur_block i)
+        if ptr_backed {
+            if may_write_heap(st) {return false}
+        } else if may_write_root(st rn) {return false}
     }
     let p=gen_place(iv false)
-    if not p.mem {return false}
+    if not ref_val and not p.mem {return false}
     let v=vreg(VI)
-    # Array values are one pointer. Cache that pointer, rather than an
-    # address into the parent; ordinary array loop hoisting then still works.
+    # Array and string values are one pointer. Cache that pointer rather than
+    # an address into the parent; ordinary loop hoisting then still works.
     # The root remains alive and unchanged through the last use proved above.
-    let array=types.ptr[t].kind =? 'array'
-    e_mov(v if array {read_place(p t)} else {p.v});
+    e_mov(v if ref_val {read_place(p t)} else {p.v});
     locals.ptr[l].vreg = LGI32(v);
-    locals.ptr[l].flags = LGI32(fl | LF_ELEMENTVIEW | (if array {0} else {LF_BYREF}));
+    if ref_val {locals.ptr[l].offset = LGI32(-1);}
+    locals.ptr[l].flags = LGI32(fl | LF_ELEMENTVIEW | (if ref_val {0} else {LF_BYREF}));
     return true
 }
 held_value_addr=(e:LGWord):>LGWord=>$unsafe {

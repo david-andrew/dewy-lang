@@ -602,7 +602,7 @@ x_pad_record=(start:XWord end_:XWord):>void=>$unsafe {
     x_pad1=x_pad2
     x_pad2=(end_ << 32) | start
 }
-x_pad_ok=(b0:uint8):>bool=>((b0 & 0xF0) =? 0x40) or (b0 >=? 0xB8 and b0 <=? 0xBF) or b0 =? 0x89 or b0 =? 0x8B or b0 =? 0x8D
+x_pad_ok=(b0:uint8):>bool=>((b0 & 0xF0) =? 0x40) or (b0 >=? 0xB8 and b0 <=? 0xBF) or b0 =? 0x89 or b0 =? 0x8B or b0 =? 0x8D or b0 =? 0x0F or b0 =? 0x63 or b0 =? 0x81 or b0 =? 0x83 or b0 =? 0xC1 or b0 =? 0xC7 or b0 =? 0x01 or b0 =? 0x29 or b0 =? 0x21 or b0 =? 0x09 or b0 =? 0x31
 x_shift_pad=(base:ptr<uint8> lo:XWord hi:XWord shift:XWord pad_at:XWord pad_n:XWord):>void=>$unsafe {
     let i=hi - 1
     loop i >=? lo {base[i + shift]=base[i]; i -= 1}
@@ -692,7 +692,7 @@ const CC_NP = 0xB
 nop_pad=(n0:XWord):>void=>$unsafe {
     let n=n0
     loop n >? 0 {
-        let k=min(n  14)
+        let k=min(n  15)
         let p=x_bytes(k)
         if k >? 9 {
             let pre=k - 8

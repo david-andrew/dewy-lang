@@ -218,12 +218,8 @@ name_family=(m:CGWord name:CGWord hide:CGWord):>CGWord=>$unsafe {
     }
     if s =? 0 {return 0}
     if hide not=? 0 {
-        let sh=(cg_names[0].ptr as ptr<ptr<uint8>>)[name]
-        if sh not=? (uint64(0) as ptr<uint8>) {
-            let slen=(sh as ptr<int64>)[1]
-            let sp=sh + 24
-            if slen >=? 1 and sp[0] =? uint8(95) and not (hide =? 2 and slen >=? 2 and sp[1] =? uint8(95)) {return 0}
-        }
+        let text=cg_names[0].ptr[name]
+        if text.startswith("_") and not (hide =? 2 and text.startswith("__")) {return 0}
     }
     if cg_syms[0].ptr[s].kind not=? 'fns' {return 0}
     s
@@ -434,18 +430,14 @@ collect_fns=(name:CGWord @out:array<int64>):>void=>$unsafe {
         user=(bits & 1) =? 0
         dewy=user and (bits & 2) not=? 0
     }
-    if dewy {
-        let sh=(cg_names[0].ptr as ptr<ptr<uint8>>)[name]
-        let starts_us=sh not=? (uint64(0) as ptr<uint8>) and (sh as ptr<int64>)[1] >=? 1 and (sh + 24)[0] =? uint8(95)
-        if not starts_us {
-            let dm=cl_prelude_module(name)
-            if dm >=? 0 and name_family(dm name 0) not=? 0 {
-                if dm not=? m {
-                    collect_in(dm name 0 @out)
-                    cl_prelude_reach(m dm)
-                }
-                return
+    if dewy and not cg_names[0].ptr[name].startswith("_") {
+        let dm=cl_prelude_module(name)
+        if dm >=? 0 and name_family(dm name 0) not=? 0 {
+            if dm not=? m {
+                collect_in(dm name 0 @out)
+                cl_prelude_reach(m dm)
             }
+            return
         }
     }
     let hide:CGWord=0
@@ -467,10 +459,7 @@ cl_stamp=(name:CGWord):>CGWord=>$unsafe {
 cl_method=(d:CGWord):>bool=>$unsafe {
     if cg_nodes[0].ptr[d].nlist <? 1 {return false}
     let p=CGWord(cg_lists[0].ptr[CGWord(cg_nodes[0].ptr[d].list)])
-    let sh=(cg_names[0].ptr as ptr<ptr<uint8>>)[CGWord(cg_nodes[0].ptr[p].name)]
-    if sh =? (uint64(0) as ptr<uint8>) or (sh as ptr<int64>)[1] <? 5 {return false}
-    let sp=sh + 24
-    sp[0] =? uint8(36) and sp[1] =? uint8(115) and sp[2] =? uint8(101) and sp[3] =? uint8(108) and sp[4] =? uint8(102)
+    cg_names[0].ptr[CGWord(cg_nodes[0].ptr[p].name)].startswith("$self")
 }
 # A bare name in a Dewy module names one binding: the module's own declarations of it
 # shadow the families it would otherwise see, as a whole (methods, reached through their

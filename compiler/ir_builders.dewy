@@ -40,14 +40,33 @@ ir_begin=(name:string fn_index:IRWord):>void=>$unsafe {
     if ir.kval.length >? 0 {ir.kval.clear()}
     ir.decl_pos=0
     if ir.dbg_locals.length >? 0 {ir.dbg_locals.clear()}
-    if cap(ir.code) <? 62 {ir.code.reserve(62)}
-    if cap(ir.vtypes) <? 88 {ir.vtypes.reserve(88)}
+    if cap(ir.code) <? 128 {ir.code.reserve(128)}
+    if cap(ir.vtypes) <? 128 {ir.vtypes.reserve(128)}
+    if cap(ir.args) <? 64 {ir.args.reserve(64)}
     kc_fn = IRWord(kc_fn) + 1
 }
-vreg=(ty:IRWord):>int64=>$unsafe {
+ir_vreg_slow=(ty:IRWord):>int64=>$unsafe {
     let idx=ir.vtypes.length
-    ir.vtypes.push(int8<overflow='wrap'>(ty));
-    return idx
+    ir.vtypes.push(int8<overflow='wrap'>(ty))
+    idx
+}
+ir_code_slow=(op:Op ty:IRWord dst:IRWord a:IRWord b:IRWord c:IRWord imm:IRWord):>int64=>$unsafe {
+    let idx=ir.code.length
+    ir.code.push(Ins[op int32<overflow='wrap'>(ty) int32<overflow='wrap'>(dst) int32<overflow='wrap'>(a) int32<overflow='wrap'>(b) int32<overflow='wrap'>(c) imm int32<overflow='wrap'>(ir_pos)])
+    idx
+}
+vreg=(ty:IRWord):>int64=>$unsafe {
+    let vp=ir.vtypes.ptr
+    if vp not=? (uint64(0) as ptr<int8>) {
+        let vh=(vp as ptr<int64>) - 3
+        if vh[0] =? 1 and vh[1] <? vh[2] {
+            let idx=vh[1]
+            vh[1]=idx + 1
+            vp[idx]=int8<overflow='wrap'>(ty)
+            return idx
+        }
+    }
+    ir_vreg_slow(ty)
 }
 vtype=(v:IRWord):>int64=>$unsafe {
     let t:IRWord=IRWord(ir.vtypes.ptr[v])
@@ -157,27 +176,52 @@ ir_set_pos=(p:IRWord):>void=>$unsafe {
 emit=(op:Op ty:IRWord dst:IRWord a:IRWord b:IRWord c0:IRWord imm:IRWord):>int64=>$unsafe {
     let c=c0
     if ir_cold and op =? 'call' and c =? 0 {c=2}
-    let idx=ir.code.length
-    ir.code.push(Ins[op int32<overflow='wrap'>(ty) int32<overflow='wrap'>(dst) int32<overflow='wrap'>(a) int32<overflow='wrap'>(b) int32<overflow='wrap'>(c) imm int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    let cp=ir.code.ptr
+    if cp not=? (uint64(0) as ptr<Ins>) {
+        let ch=(cp as ptr<int64>) - 3
+        if ch[0] =? 1 and ch[1] <? ch[2] {
+            let idx=ch[1]
+            ch[1]=idx + 1
+            let q=cp + idx
+            q[0].op=op
+            q[0].ty=int32<overflow='wrap'>(ty)
+            q[0].dst=int32<overflow='wrap'>(dst)
+            q[0].a=int32<overflow='wrap'>(a)
+            q[0].b=int32<overflow='wrap'>(b)
+            q[0].c=int32<overflow='wrap'>(c)
+            q[0].imm=imm
+            q[0].pos=int32<overflow='wrap'>(ir_pos)
+            return idx
+        }
+    }
+    ir_code_slow(op ty dst a b c imm)
 }
 e_iconst_wide=(v:IRWord):>int64=>$unsafe {
-    let d=ir.vtypes.length
-    ir.vtypes.push(int8<overflow='wrap'>(VI));
-    ir.code.push(Ins['iconst' int32<overflow='wrap'>(VI) int32<overflow='wrap'>(d) 0 0 0 v int32<overflow='wrap'>(ir_pos)]);
-    return d
+    let d=vreg(VI)
+    let cp=ir.code.ptr
+    if cp not=? (uint64(0) as ptr<Ins>) {
+        let ch=(cp as ptr<int64>) - 3
+        if ch[0] =? 1 and ch[1] <? ch[2] {
+            let idx=ch[1]
+            ch[1]=idx + 1
+            let q=cp + idx
+            q[0].op='iconst'; q[0].ty=0; q[0].dst=int32<overflow='wrap'>(d); q[0].a=0; q[0].b=0; q[0].c=0; q[0].imm=v; q[0].pos=int32<overflow='wrap'>(ir_pos)
+            return d
+        }
+    }
+    ir_code_slow('iconst' VI d 0 0 0 v);
+    d
 }
 e_iconst=(v:IRWord):>int64=>$unsafe {
     if ir_fits32(v) {return k_vreg(v)}
     e_iconst_wide(v)
 }
 e_fconst=(f:float64 ty:IRWord):>int64=>$unsafe {
-    let d=ir.vtypes.length
-    ir.vtypes.push(int8<overflow='wrap'>(ty));
+    let d=vreg(ty)
     let bits:IRWord=IRWord(f64_bits(f))
     if ty =? VS {bits=IRWord(f32_bits(float32(f)))}
-    ir.code.push(Ins['fconst' int32<overflow='wrap'>(ty) int32<overflow='wrap'>(d) 0 0 0 bits int32<overflow='wrap'>(ir_pos)]);
-    return d
+    emit('fconst' ty d 0 0 0 bits);
+    d
 }
 e_bin_ret_type=(op:Op ty:IRWord):>IRWord=>match op {
     <'feq'|'fne'|'flt'|'fle'|'fgt'|'fge'|'eq'|'ne'|'lts'|'les'|'gts'|'ges'|'ltu'|'leu'|'gtu'|'geu'> => VI
@@ -185,184 +229,325 @@ e_bin_ret_type=(op:Op ty:IRWord):>IRWord=>match op {
 }
 e_bin=(op:Op ty:IRWord a:IRWord b:IRWord):>int64=>$unsafe {
     let rt=if ty =? VI {VI} else {e_bin_ret_type(op ty)}
-    let d=ir.vtypes.length
-    ir.vtypes.push(int8<overflow='wrap'>(rt));
-    ir.code.push(Ins[op int32<overflow='wrap'>(ty) int32<overflow='wrap'>(d) int32<overflow='wrap'>(a) int32<overflow='wrap'>(b) 0 0 int32<overflow='wrap'>(ir_pos)]);
-    return d
+    let vp=ir.vtypes.ptr
+    let d:IRWord=0
+    if vp not=? (uint64(0) as ptr<int8>) {
+        let vh=(vp as ptr<int64>) - 3
+        if vh[0] =? 1 and vh[1] <? vh[2] {
+            d=vh[1]; vh[1]=d + 1; vp[d]=int8<overflow='wrap'>(rt)
+        } else {d=ir_vreg_slow(rt)}
+    } else {d=ir_vreg_slow(rt)}
+    let cp=ir.code.ptr
+    if cp not=? (uint64(0) as ptr<Ins>) {
+        let ch=(cp as ptr<int64>) - 3
+        if ch[0] =? 1 and ch[1] <? ch[2] {
+            let idx=ch[1]; ch[1]=idx + 1
+            let q=cp + idx
+            q[0].op=op; q[0].ty=int32<overflow='wrap'>(ty); q[0].dst=int32<overflow='wrap'>(d); q[0].a=int32<overflow='wrap'>(a); q[0].b=int32<overflow='wrap'>(b); q[0].c=0; q[0].imm=0; q[0].pos=int32<overflow='wrap'>(ir_pos)
+            return d
+        }
+    }
+    ir_code_slow(op ty d a b 0 0);
+    d
 }
 e_un=(op:Op ty:IRWord a:IRWord):>int64=>$unsafe {
-    let d=ir.vtypes.length
-    ir.vtypes.push(int8<overflow='wrap'>(ty));
-    ir.code.push(Ins[op int32<overflow='wrap'>(ty) int32<overflow='wrap'>(d) int32<overflow='wrap'>(a) 0 0 0 int32<overflow='wrap'>(ir_pos)]);
-    return d
+    let d=vreg(ty)
+    let cp=ir.code.ptr
+    if cp not=? (uint64(0) as ptr<Ins>) {
+        let ch=(cp as ptr<int64>) - 3
+        if ch[0] =? 1 and ch[1] <? ch[2] {
+            let idx=ch[1]; ch[1]=idx + 1
+            let q=cp + idx
+            q[0].op=op; q[0].ty=int32<overflow='wrap'>(ty); q[0].dst=int32<overflow='wrap'>(d); q[0].a=int32<overflow='wrap'>(a); q[0].b=0; q[0].c=0; q[0].imm=0; q[0].pos=int32<overflow='wrap'>(ir_pos)
+            return d
+        }
+    }
+    ir_code_slow(op ty d a 0 0 0);
+    d
 }
 e_mov=(dst:IRWord src:IRWord):>int64=>$unsafe {
     let t:IRWord=IRWord(ir.vtypes.ptr[dst])
     if t =? VK {ice("assignment to a constant vreg");}
-    let idx=ir.code.length
-    ir.code.push(Ins['mov' int32<overflow='wrap'>(t) int32<overflow='wrap'>(dst) int32<overflow='wrap'>(src) 0 0 0 int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    let cp=ir.code.ptr
+    if cp not=? (uint64(0) as ptr<Ins>) {
+        let ch=(cp as ptr<int64>) - 3
+        if ch[0] =? 1 and ch[1] <? ch[2] {
+            let idx=ch[1]; ch[1]=idx + 1
+            let q=cp + idx
+            q[0].op='mov'; q[0].ty=int32<overflow='wrap'>(t); q[0].dst=int32<overflow='wrap'>(dst); q[0].a=int32<overflow='wrap'>(src); q[0].b=0; q[0].c=0; q[0].imm=0; q[0].pos=int32<overflow='wrap'>(ir_pos)
+            return idx
+        }
+    }
+    ir_code_slow('mov' t dst src 0 0 0)
 }
 e_addi=(a:IRWord k:IRWord):>int64=>$unsafe {
     if k =? 0 {return a}
     let kv=e_iconst(k)
-    let d=ir.vtypes.length
-    ir.vtypes.push(int8<overflow='wrap'>(VI));
-    ir.code.push(Ins['add' int32<overflow='wrap'>(VI) int32<overflow='wrap'>(d) int32<overflow='wrap'>(a) int32<overflow='wrap'>(kv) 0 0 int32<overflow='wrap'>(ir_pos)]);
-    return d
+    let vp=ir.vtypes.ptr
+    let d:IRWord=0
+    if vp not=? (uint64(0) as ptr<int8>) {
+        let vh=(vp as ptr<int64>) - 3
+        if vh[0] =? 1 and vh[1] <? vh[2] {
+            d=vh[1]; vh[1]=d + 1; vp[d]=0
+        } else {d=ir_vreg_slow(VI)}
+    } else {d=ir_vreg_slow(VI)}
+    let cp=ir.code.ptr
+    if cp not=? (uint64(0) as ptr<Ins>) {
+        let ch=(cp as ptr<int64>) - 3
+        if ch[0] =? 1 and ch[1] <? ch[2] {
+            let idx=ch[1]; ch[1]=idx + 1
+            let q=cp + idx
+            q[0].op='add'; q[0].ty=0; q[0].dst=int32<overflow='wrap'>(d); q[0].a=int32<overflow='wrap'>(a); q[0].b=int32<overflow='wrap'>(kv); q[0].c=0; q[0].imm=0; q[0].pos=int32<overflow='wrap'>(ir_pos)
+            return d
+        }
+    }
+    ir_code_slow('add' VI d a kv 0 0);
+    d
 }
 e_load=(ty:IRWord addr:IRWord off:IRWord mode:IRWord):>int64=>$unsafe {
-    let d=ir.vtypes.length
-    ir.vtypes.push(int8<overflow='wrap'>(ty));
-    ir.code.push(Ins['load' int32<overflow='wrap'>(ty) int32<overflow='wrap'>(d) int32<overflow='wrap'>(addr) 0 int32<overflow='wrap'>(mode) off int32<overflow='wrap'>(ir_pos)]);
-    return d
+    let vp=ir.vtypes.ptr
+    let d:IRWord=0
+    if vp not=? (uint64(0) as ptr<int8>) {
+        let vh=(vp as ptr<int64>) - 3
+        if vh[0] =? 1 and vh[1] <? vh[2] {
+            d=vh[1]; vh[1]=d + 1; vp[d]=int8<overflow='wrap'>(ty)
+        } else {d=ir_vreg_slow(ty)}
+    } else {d=ir_vreg_slow(ty)}
+    let cp=ir.code.ptr
+    if cp not=? (uint64(0) as ptr<Ins>) {
+        let ch=(cp as ptr<int64>) - 3
+        if ch[0] =? 1 and ch[1] <? ch[2] {
+            let idx=ch[1]; ch[1]=idx + 1
+            let q=cp + idx
+            q[0].op='load'; q[0].ty=int32<overflow='wrap'>(ty); q[0].dst=int32<overflow='wrap'>(d); q[0].a=int32<overflow='wrap'>(addr); q[0].b=0; q[0].c=int32<overflow='wrap'>(mode); q[0].imm=off; q[0].pos=int32<overflow='wrap'>(ir_pos)
+            return d
+        }
+    }
+    ir_code_slow('load' ty d addr 0 mode off);
+    d
 }
 e_store=(addr:IRWord off:IRWord val:IRWord mode:IRWord):>int64=>$unsafe {
     let t:IRWord=IRWord(ir.vtypes.ptr[val])
     if t =? VK {t=VI}
-    let idx=ir.code.length
-    ir.code.push(Ins['store' int32<overflow='wrap'>(t) 0 int32<overflow='wrap'>(addr) int32<overflow='wrap'>(val) int32<overflow='wrap'>(mode) off int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    let cp=ir.code.ptr
+    if cp not=? (uint64(0) as ptr<Ins>) {
+        let ch=(cp as ptr<int64>) - 3
+        if ch[0] =? 1 and ch[1] <? ch[2] {
+            let idx=ch[1]; ch[1]=idx + 1
+            let q=cp + idx
+            q[0].op='store'; q[0].ty=int32<overflow='wrap'>(t); q[0].dst=0; q[0].a=int32<overflow='wrap'>(addr); q[0].b=int32<overflow='wrap'>(val); q[0].c=int32<overflow='wrap'>(mode); q[0].imm=off; q[0].pos=int32<overflow='wrap'>(ir_pos)
+            return idx
+        }
+    }
+    ir_code_slow('store' t 0 addr val mode off)
 }
 e_slot=(s:IRWord):>int64=>$unsafe {
-    let d=ir.vtypes.length
-    ir.vtypes.push(int8<overflow='wrap'>(VI));
-    ir.code.push(Ins['slot' int32<overflow='wrap'>(VI) int32<overflow='wrap'>(d) int32<overflow='wrap'>(s) 0 0 0 int32<overflow='wrap'>(ir_pos)]);
-    return d
+    let vp=ir.vtypes.ptr
+    let d:IRWord=0
+    if vp not=? (uint64(0) as ptr<int8>) {
+        let vh=(vp as ptr<int64>) - 3
+        if vh[0] =? 1 and vh[1] <? vh[2] {
+            d=vh[1]; vh[1]=d + 1; vp[d]=0
+        } else {d=ir_vreg_slow(VI)}
+    } else {d=ir_vreg_slow(VI)}
+    let cp=ir.code.ptr
+    if cp not=? (uint64(0) as ptr<Ins>) {
+        let ch=(cp as ptr<int64>) - 3
+        if ch[0] =? 1 and ch[1] <? ch[2] {
+            let idx=ch[1]; ch[1]=idx + 1
+            let q=cp + idx
+            q[0].op='slot'; q[0].ty=0; q[0].dst=int32<overflow='wrap'>(d); q[0].a=int32<overflow='wrap'>(s); q[0].b=0; q[0].c=0; q[0].imm=0; q[0].pos=int32<overflow='wrap'>(ir_pos)
+            return d
+        }
+    }
+    ir_code_slow('slot' VI d s 0 0 0);
+    d
 }
 e_copy=(dst:IRWord src:IRWord size:IRWord):>int64=>$unsafe {
-    let idx=ir.code.length
-    ir.code.push(Ins['copy' int32<overflow='wrap'>(VI) 0 int32<overflow='wrap'>(dst) int32<overflow='wrap'>(src) 0 size int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    emit('copy' VI 0 dst src 0 size)
 }
 e_vop=(dst:IRWord bsrc:IRWord csrc:IRWord kind:IRWord n:IRWord flags:IRWord):>int64=>$unsafe {
-    let idx=ir.code.length
-    ir.code.push(Ins['vop' int32<overflow='wrap'>(VI) 0 int32<overflow='wrap'>(dst) int32<overflow='wrap'>(bsrc) int32<overflow='wrap'>(csrc) kind | (n << 4) | flags int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    emit('vop' VI 0 dst bsrc csrc kind | (n << 4) | flags)
 }
 e_zero=(dst:IRWord size:IRWord):>int64=>$unsafe {
-    let idx=ir.code.length
-    ir.code.push(Ins['zero' int32<overflow='wrap'>(VI) 0 int32<overflow='wrap'>(dst) 0 0 size int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    emit('zero' VI 0 dst 0 0 size)
 }
 e_call0=(f:IRWord rtype:IRWord):>int64=>$unsafe {
     let start=ir.args.length
     return e_call_span(f start 0 rtype)
 }
 e_call1=(f:IRWord a0:IRWord rtype:IRWord):>int64=>$unsafe {
-    let start=ir.args.length
-    ir.args.push(int32<overflow='wrap'>(a0));
+    let ap=ir.args.ptr
+    let start:IRWord=0
+    if ap not=? (uint64(0) as ptr<int32>) {
+        let ah=(ap as ptr<int64>) - 3
+        if ah[0] =? 1 and ah[1] <? ah[2] {
+            start=ah[1]; ah[1]=start + 1; ap[start]=int32<overflow='wrap'>(a0)
+            return e_call_span(f start 1 rtype)
+        }
+    }
+    start=ir.args.length
+    ir.args.push(int32<overflow='wrap'>(a0))
     return e_call_span(f start 1 rtype)
 }
 e_call2=(f:IRWord a0:IRWord a1:IRWord rtype:IRWord):>int64=>$unsafe {
-    let start=ir.args.length
-    ir.args.push(int32<overflow='wrap'>(a0));
-    ir.args.push(int32<overflow='wrap'>(a1));
+    let ap=ir.args.ptr
+    let start:IRWord=0
+    if ap not=? (uint64(0) as ptr<int32>) {
+        let ah=(ap as ptr<int64>) - 3
+        if ah[0] =? 1 and ah[1] + 2 <=? ah[2] {
+            start=ah[1]; ah[1]=start + 2; ap[start]=int32<overflow='wrap'>(a0); ap[start + 1]=int32<overflow='wrap'>(a1)
+            return e_call_span(f start 2 rtype)
+        }
+    }
+    start=ir.args.length
+    ir.args.push(int32<overflow='wrap'>(a0))
+    ir.args.push(int32<overflow='wrap'>(a1))
     return e_call_span(f start 2 rtype)
 }
 e_call3=(f:IRWord a0:IRWord a1:IRWord a2:IRWord rtype:IRWord):>int64=>$unsafe {
-    let start=ir.args.length
-    ir.args.push(int32<overflow='wrap'>(a0));
-    ir.args.push(int32<overflow='wrap'>(a1));
-    ir.args.push(int32<overflow='wrap'>(a2));
+    let ap=ir.args.ptr
+    let start:IRWord=0
+    if ap not=? (uint64(0) as ptr<int32>) {
+        let ah=(ap as ptr<int64>) - 3
+        if ah[0] =? 1 and ah[1] + 3 <=? ah[2] {
+            start=ah[1]; ah[1]=start + 3; ap[start]=int32<overflow='wrap'>(a0); ap[start + 1]=int32<overflow='wrap'>(a1); ap[start + 2]=int32<overflow='wrap'>(a2)
+            return e_call_span(f start 3 rtype)
+        }
+    }
+    start=ir.args.length
+    ir.args.push(int32<overflow='wrap'>(a0))
+    ir.args.push(int32<overflow='wrap'>(a1))
+    ir.args.push(int32<overflow='wrap'>(a2))
     return e_call_span(f start 3 rtype)
 }
 e_call4=(f:IRWord a0:IRWord a1:IRWord a2:IRWord a3:IRWord rtype:IRWord):>int64=>$unsafe {
-    let start=ir.args.length
-    ir.args.push(int32<overflow='wrap'>(a0));
-    ir.args.push(int32<overflow='wrap'>(a1));
-    ir.args.push(int32<overflow='wrap'>(a2));
-    ir.args.push(int32<overflow='wrap'>(a3));
+    let ap=ir.args.ptr
+    let start:IRWord=0
+    if ap not=? (uint64(0) as ptr<int32>) {
+        let ah=(ap as ptr<int64>) - 3
+        if ah[0] =? 1 and ah[1] + 4 <=? ah[2] {
+            start=ah[1]; ah[1]=start + 4; ap[start]=int32<overflow='wrap'>(a0); ap[start + 1]=int32<overflow='wrap'>(a1); ap[start + 2]=int32<overflow='wrap'>(a2); ap[start + 3]=int32<overflow='wrap'>(a3)
+            return e_call_span(f start 4 rtype)
+        }
+    }
+    start=ir.args.length
+    ir.args.push(int32<overflow='wrap'>(a0))
+    ir.args.push(int32<overflow='wrap'>(a1))
+    ir.args.push(int32<overflow='wrap'>(a2))
+    ir.args.push(int32<overflow='wrap'>(a3))
     return e_call_span(f start 4 rtype)
 }
 e_call_span=(f:IRWord start:IRWord n:IRWord rtype:IRWord):>int64=>$unsafe {
     let d:IRWord=-1
-    if rtype >=? 0 {
-        d=ir.vtypes.length
-        ir.vtypes.push(int8<overflow='wrap'>(rtype));
-    }
+    if rtype >=? 0 {d=vreg(rtype)}
     let c:IRWord=if ir_cold {2} else {0}
-    ir.code.push(Ins['call' int32<overflow='wrap'>(rtype) int32<overflow='wrap'>(d) int32<overflow='wrap'>(start) int32<overflow='wrap'>(n) int32<overflow='wrap'>(c) f int32<overflow='wrap'>(ir_pos)]);
-    return d
+    let cp=ir.code.ptr
+    if cp not=? (uint64(0) as ptr<Ins>) {
+        let ch=(cp as ptr<int64>) - 3
+        if ch[0] =? 1 and ch[1] <? ch[2] {
+            let idx=ch[1]; ch[1]=idx + 1
+            let q=cp + idx
+            q[0].op='call'; q[0].ty=int32<overflow='wrap'>(rtype); q[0].dst=int32<overflow='wrap'>(d); q[0].a=int32<overflow='wrap'>(start); q[0].b=int32<overflow='wrap'>(n); q[0].c=int32<overflow='wrap'>(c); q[0].imm=f; q[0].pos=int32<overflow='wrap'>(ir_pos)
+            return d
+        }
+    }
+    ir_code_slow('call' rtype d start n c f);
+    d
 }
 e_call=(f:IRWord args:array<int64> rt:IRWord):>int64=>$unsafe {
+    let n=args.length
     let start=ir.args.length
-    loop a in args {ir.args.push(int32<overflow='wrap'>(a));}
-    let d:IRWord=-1
-    if rt >=? 0 {
-        d=ir.vtypes.length
-        ir.vtypes.push(int8<overflow='wrap'>(rt));
+    if n >? 0 {
+        let ap=ir.args.ptr
+        if ap not=? (uint64(0) as ptr<int32>) {
+            let ah=(ap as ptr<int64>) - 3
+            if ah[0] =? 1 and start + n <=? ah[2] {
+                ah[1]=start + n
+                let sp=args.ptr
+                loop i in [0..n) {ap[start + i]=int32<overflow='wrap'>(sp[i])}
+            } else {
+                loop a in args {ir.args.push(int32<overflow='wrap'>(a));}
+            }
+        } else {
+            loop a in args {ir.args.push(int32<overflow='wrap'>(a));}
+        }
     }
-    let c:IRWord=if ir_cold {2} else {0}
-    ir.code.push(Ins['call' int32<overflow='wrap'>(rt) int32<overflow='wrap'>(d) int32<overflow='wrap'>(start) int32<overflow='wrap'>(args.length) int32<overflow='wrap'>(c) f int32<overflow='wrap'>(ir_pos)]);
-    return d
+    e_call_span(f start n rt)
 }
 e_calli=(fp:IRWord args:array<int64> rt:IRWord cabi:bool):>int64=>$unsafe {
     let start=ir.args.length
     loop a in args {ir.args.push(int32<overflow='wrap'>(a));}
     let d:IRWord=-1
-    if rt >=? 0 {
-        d=ir.vtypes.length
-        ir.vtypes.push(int8<overflow='wrap'>(rt));
-    }
+    if rt >=? 0 {d=vreg(rt)}
     let op:Op='calli'
     if cabi {op='callc'}
-    ir.code.push(Ins[op int32<overflow='wrap'>(rt) int32<overflow='wrap'>(d) int32<overflow='wrap'>(start) int32<overflow='wrap'>(args.length) int32<overflow='wrap'>(fp) 0 int32<overflow='wrap'>(ir_pos)]);
-    return d
+    emit(op rt d start args.length fp 0);
+    d
 }
 e_block=():>int64=>$unsafe {
-    let idx=ir.code.length
-    ir.code.push(Ins['block' 0 0 0 0 0 0 int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    let cp=ir.code.ptr
+    if cp not=? (uint64(0) as ptr<Ins>) {
+        let ch=(cp as ptr<int64>) - 3
+        if ch[0] =? 1 and ch[1] <? ch[2] {
+            let idx=ch[1]; ch[1]=idx + 1
+            let q=cp + idx
+            q[0].op='block'; q[0].ty=0; q[0].dst=0; q[0].a=0; q[0].b=0; q[0].c=0; q[0].imm=0; q[0].pos=int32<overflow='wrap'>(ir_pos)
+            return idx
+        }
+    }
+    ir_code_slow('block' 0 0 0 0 0 0)
 }
 e_loop=():>int64=>$unsafe {
     let fi=ir.fn_index
     if fi >=? 0 and fi <? ir_fn_has_loop.length {ir_fn_has_loop.ptr[fi]=true}
-    let idx=ir.code.length
-    ir.code.push(Ins['loop' 0 0 0 0 0 int64(ir_cold) int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    emit('loop' 0 0 0 0 0 int64(ir_cold))
 }
 e_if=(c:IRWord):>int64=>$unsafe {
-    let idx=ir.code.length
-    ir.code.push(Ins['if_' 0 0 int32<overflow='wrap'>(c) 0 0 0 int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    let cp=ir.code.ptr
+    if cp not=? (uint64(0) as ptr<Ins>) {
+        let ch=(cp as ptr<int64>) - 3
+        if ch[0] =? 1 and ch[1] <? ch[2] {
+            let idx=ch[1]; ch[1]=idx + 1
+            let q=cp + idx
+            q[0].op='if_'; q[0].ty=0; q[0].dst=0; q[0].a=int32<overflow='wrap'>(c); q[0].b=0; q[0].c=0; q[0].imm=0; q[0].pos=int32<overflow='wrap'>(ir_pos)
+            return idx
+        }
+    }
+    ir_code_slow('if_' 0 0 c 0 0 0)
 }
 e_else=():>int64=>$unsafe {
-    let idx=ir.code.length
-    ir.code.push(Ins['else_' 0 0 0 0 0 0 int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    emit('else_' 0 0 0 0 0 0)
 }
 e_end=():>int64=>$unsafe {
-    let idx=ir.code.length
-    ir.code.push(Ins['end' 0 0 0 0 0 0 int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    let cp=ir.code.ptr
+    if cp not=? (uint64(0) as ptr<Ins>) {
+        let ch=(cp as ptr<int64>) - 3
+        if ch[0] =? 1 and ch[1] <? ch[2] {
+            let idx=ch[1]; ch[1]=idx + 1
+            let q=cp + idx
+            q[0].op='end'; q[0].ty=0; q[0].dst=0; q[0].a=0; q[0].b=0; q[0].c=0; q[0].imm=0; q[0].pos=int32<overflow='wrap'>(ir_pos)
+            return idx
+        }
+    }
+    ir_code_slow('end' 0 0 0 0 0 0)
 }
 e_br=(depth:IRWord):>int64=>$unsafe {
-    let idx=ir.code.length
-    ir.code.push(Ins['br' 0 0 0 0 0 depth int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    emit('br' 0 0 0 0 0 depth)
 }
 e_brif=(c:IRWord depth:IRWord):>int64=>$unsafe {
-    let idx=ir.code.length
-    ir.code.push(Ins['brif' 0 0 int32<overflow='wrap'>(c) 0 0 depth int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    emit('brif' 0 0 c 0 0 depth)
 }
 e_brtable=(idx:IRWord depths:array<int64> default_depth:IRWord):>int64=>$unsafe {
     let start=ir.args.length
     loop d in depths {ir.args.push(int32<overflow='wrap'>(d));}
-    let pos=ir.code.length
-    ir.code.push(Ins['brtable' 0 0 int32<overflow='wrap'>(idx) int32<overflow='wrap'>(depths.length) int32<overflow='wrap'>(start) default_depth int32<overflow='wrap'>(ir_pos)]);
-    return pos
+    emit('brtable' 0 0 idx depths.length start default_depth)
 }
 e_ret=(v:IRWord):>int64=>$unsafe {
-    let idx=ir.code.length
-    ir.code.push(Ins['ret' 0 0 int32<overflow='wrap'>(v) 0 0 0 int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    emit('ret' 0 0 v 0 0 0)
 }
 e_trap=():>int64=>$unsafe {
-    let idx=ir.code.length
-    ir.code.push(Ins['trap' 0 0 0 0 0 0 int32<overflow='wrap'>(ir_pos)]);
-    return idx
+    emit('trap' 0 0 0 0 0 0)
 }
 op_name=(op:Op):>string=>$unsafe {
     return "{op}"
