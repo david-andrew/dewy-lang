@@ -1,0 +1,203 @@
+# Streaming sensor report. Readings arrive on stdin as CSV text in time order,
+# interleaved across sensors and with some junk rows. Every stage is a
+# generator, so a report pulls readings through
+# rows -> one sensor -> fixed windows -> moving average -> alarms
+# one at a time without building the intermediate arrays.
+#
+# Usage: sensor_stream step=SECONDS width=N head=N SENSOR:HIGH:BAND...
+# An alarm opens when the smoothed value reaches HIGH and clears when it
+# falls to HIGH - BAND or below.
+
+Reading:type = [line:int seconds:int sensor:string value:rational]
+BadRow:type = [line:int why:string]
+Bucket:type = [start:int value:rational samples:int]
+Alarm:type = [start:int stop:int peak:rational open:bool]
+Watch:type = [sensor:string high:rational band:rational]
+Options:type = [step:int<(>? 0)> width:int<(>? 0)> head:int<(>=? 0)> watches:array<Watch>]
+UsageError:type = type of error & [message:string]
+
+clock = (text:string):>int | none => {
+    let parts = text.split(":")
+    if parts.length not=? 3 return none
+    let h = to_int(parts[0]) ?? return none
+    let m = to_int(parts[1]) ?? return none
+    let s = to_int(parts[2]) ?? return none
+    if h <? 0 or h >? 23 or m <? 0 or m >? 59 or s <? 0 or s >? 59 return none
+    h * 3600 + m * 60 + s
+}
+
+show_clock = (seconds:int):>string => {
+    "{fmt'02'(seconds // 3600)}:{fmt'02'(seconds // 60 % 60)}"
+}
+
+# Two decimals, rounding halves away from zero as people do.
+show = (x:rational):>string => {
+    let cents = round(x * 100)
+    let sign = if cents <? 0 "-" else ""
+    let whole = abs(cents)
+    "{sign}{whole // 100}.{fmt'02'(whole % 100)}"
+}
+
+parse = (line:int text:string):>Reading | BadRow => {
+    let fields = text.split(",")
+    if fields.length not=? 3 return BadRow[line "expected time,sensor,value"]
+    let seconds = clock(fields[0].trim) ?? return BadRow[line "bad time {fields[0].trim}"]
+    let sensor = fields[1].trim
+    if sensor =? "" return BadRow[line "missing sensor"]
+    let value = rational(fields[2].trim) ?? return BadRow[line "bad value {fields[2].trim}"]
+    Reading[line seconds sensor value]
+}
+
+# Every data row of the input, parsed lazily.
+rows = (text:string):>generator<Reading | BadRow> => lazy loop n in 1.. and raw in text.split("\n") {
+    let line = raw.trim
+    if line =? "" or line.startswith("#") or line =? "time,sensor,value" continue
+    parse(n line)
+}
+
+# One sensor's readings. A reading that does not move the sensor's clock
+# forward is dropped and reported when it is reached.
+readings_for = (sensor:string source:generator<Reading | BadRow>):>generator<Reading> => lazy {
+    let last = -1
+    let kept = 0
+    defer printl"  ({sensor}: {kept} readings pulled)"
+    loop item in source {
+        if item is? Reading and item.sensor =? sensor {
+            if item.seconds <=? last {
+                printl"  line {item.line}: {sensor} at {show_clock(item.seconds)} is out of order, dropped"
+            } else {
+                last = item.seconds
+                kept += 1
+                item
+            }
+        }
+    }
+}
+
+# Average each window of `step` seconds. A window with no readings between
+# two that have them repeats the previous average with zero samples.
+windows = (step:int<(>? 0)> source:generator<Reading>):>generator<Bucket> => lazy {
+    let started = false
+    let start = 0
+    let sum:rational = 0
+    let count = 0
+    loop r in source {
+        let window = r.seconds - r.seconds % step
+        if started and window not=? start and count >? 0 {
+            let average = sum / count
+            Bucket[start average count]
+            start += step
+            loop start <? window {
+                Bucket[start average 0]
+                start += step
+            }
+            sum = 0
+            count = 0
+        }
+        started = true
+        start = window
+        sum += r.value
+        count += 1
+    }
+    if count >? 0 Bucket[start sum / count count]
+}
+
+# Moving average over the last `width` windows.
+smooth = (width:int<(>? 0)> source:generator<Bucket>):>generator<Bucket> => lazy {
+    let recent:array<rational> = []
+    let total:rational = 0
+    loop b in source {
+        recent.push(b.value)
+        total += b.value
+        if recent.length >? width total -= recent.pop(0)
+        Bucket[b.start total / recent.length b.samples]
+    }
+}
+
+alarms = (watch:Watch step:int source:generator<Bucket>):>generator<Alarm> => lazy {
+    let active = false
+    let start = 0
+    let last = 0
+    let peak:rational = 0
+    loop b in source {
+        last = b.start
+        if active {
+            peak = max(peak b.value)
+            if b.value <=? watch.high - watch.band {
+                Alarm[start b.start peak false]
+                active = false
+            }
+        } else if b.value >=? watch.high {
+            active = true
+            start = b.start
+            peak = b.value
+        }
+    }
+    if active Alarm[start last + step peak true]
+}
+
+pipeline = (text:string watch:Watch opts:Options):>generator<Bucket> => {
+    smooth(opts.width windows(opts.step readings_for(watch.sensor rows(text))))
+}
+
+report = (text:string watch:Watch opts:Options):>void => {
+    printl"{watch.sensor}: alarm at {show(watch.high)}, clear at {show(watch.high - watch.band)}"
+    printl"  first {opts.head} windows:"
+    loop _ in [0..opts.head) and b in pipeline(text watch opts) {
+        let note = if b.samples =? 0 "gap" else if b.samples =? 1 "1 sample" else "{b.samples} samples"
+        printl"    {show_clock(b.start)}  {show(b.value)}  {note}"
+    }
+    let found = [alarms(watch opts.step pipeline(text watch opts))...]
+    if found.is_empty {
+        printl"  no alarms"
+        return
+    }
+    loop a in found {
+        let state = if a.open "still open" else "cleared"
+        printl"  alarm {show_clock(a.start)}-{show_clock(a.stop)} peak {show(a.peak)} {state}"
+    }
+}
+
+watch_from = (word:string):>Watch | UsageError => {
+    let parts = word.split(":")
+    if parts.length not=? 3 return UsageError["expected SENSOR:HIGH:BAND, got {word}"]
+    let high = rational(parts[1]) ?? return UsageError["bad threshold in {word}"]
+    let band = rational(parts[2]) ?? return UsageError["bad band in {word}"]
+    if band <? 0 return UsageError["negative band in {word}"]
+    Watch[parts[0] high band]
+}
+
+options = (words:array<string>):>Options | UsageError => {
+    let step = 300
+    let width = 3
+    let head = 6
+    let watches:array<Watch> = []
+    loop word in words {
+        if word.startswith("step=") {
+            step = to_int(word.remove_prefix("step=")) ?? return UsageError["bad {word}"]
+        } else if word.startswith("width=") {
+            width = to_int(word.remove_prefix("width=")) ?? return UsageError["bad {word}"]
+        } else if word.startswith("head=") {
+            head = to_int(word.remove_prefix("head=")) ?? return UsageError["bad {word}"]
+        } else {
+            watches.push(watch_from(word) or_throw)
+        }
+    }
+    if step <=? 0 or width <=? 0 or head <? 0 return UsageError["step and width must be positive"]
+    if watches.is_empty return UsageError["name at least one SENSOR:HIGH:BAND"]
+    Options[step width head watches]
+}
+
+main = (argv:array<string>) => {
+    let opts = options(argv[$clamp 1..)) or_throw
+    let text = read_stdin or_throw
+    let good = 0
+    loop item in rows(text) {
+        match item {
+            _:Reading => { good += 1 }
+            bad:BadRow => printl"line {bad.line}: {bad.why}"
+        }
+    }
+    printl"{good} readings"
+    loop watch in opts.watches report(text watch opts)
+}

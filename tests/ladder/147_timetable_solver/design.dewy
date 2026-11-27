@@ -1,0 +1,190 @@
+# School timetable solver. Each term on stdin lists rooms, periods, teachers'
+# absences, courses and enrollments. Every course needs one period and one
+# room: big enough, a lab exactly when the course is a lab course, at a period
+# its teacher is in, never sharing a period with a course of the same teacher
+# or of any of its students, and never sharing a room at one period.
+#
+# The search assigns the most constrained course first (fewest choices left,
+# then input order), tries its choices in period order with the smallest room
+# first, and after each assignment removes the choices it rules out from the
+# other courses. Each level of the search narrows its own copy of the
+# remaining choices, so backing up needs no undo log.
+
+Room:type = [name:string capacity:int lab:bool]
+Course:type = [name:string teacher:string size:int lab:bool]
+Choice:type = [period:string room:string]
+Term:type = [
+    name:string
+    rooms:array<Room> = []
+    periods:array<string> = []
+    away:dict<string array<string>> = []
+    courses:array<Course> = []
+    enrolled:dict<string array<string>> = []
+]
+Placement:type = dict<int Choice>
+Stats:type = [tried:int = 0 backtracks:int = 0]
+Next:type = [course:int clashing:array<bool> choices:array<Choice>]
+
+# Courses that may not share a period: same teacher or a shared student.
+clashes = (term:Term):>array<array<bool>> => {
+    let shared = (a:Course b:Course) => term.enrolled.values.any((names:array<string>) => a.name in? names and b.name in? names)
+    [loop a in term.courses [loop b in term.courses {
+        a.name not=? b.name and (a.teacher =? b.teacher or shared(a b))
+    }]]
+}
+
+# Every period and room a course could use on its own.
+choices = (term:Term course:Course):>array<Choice> => {
+    let out:array<Choice> = []
+    let away = term.away.get(course.teacher) ?? []
+    let order = term.rooms.sorted(key=(r:Room) => r.capacity)
+    loop period in term.periods {
+        if period in? away continue
+        loop room in order {
+            if room.capacity >=? course.size and room.lab =? course.lab out.push(Choice[period room.name])
+        }
+    }
+    out
+}
+
+# The other courses' choices once `course` takes `pick`, or none when some
+# course is left with no choice.
+narrow = (options:array<array<Choice>> placed:Placement next:Next pick:Choice):>array<array<Choice>> | none => {
+    let out:array<array<Choice>> = []
+    loop other in 0.. and choices in options and together in next.clashing {
+        if other =? next.course or placed.has(other) {
+            out.push(choices)
+            continue
+        }
+        let kept = choices.filter((c:Choice) => {
+            c.period not=? pick.period or (c.room not=? pick.room and not together)
+        })
+        if kept.is_empty return none
+        out.push(kept)
+    }
+    out
+}
+
+# The unplaced course with the fewest choices left, first in input order on a
+# tie; none when every course is placed.
+next_course = (options:array<array<Choice>> placed:Placement clash:array<array<bool>>):>Next | none => {
+    let best:Next | none = none
+    loop i in 0.. and choices in options and clashing in clash {
+        if placed.has(i) continue
+        if best =? none or choices.length <? best.choices.length best = Next[i clashing choices]
+    }
+    best
+}
+
+solve = (@stats:Stats options:array<array<Choice>> placed:Placement clash:array<array<bool>>):>Placement | none => {
+    let next = next_course(options placed clash) ?? return placed
+    loop pick in next.choices {
+        stats.tried += 1
+        let narrowed = narrow(options placed next pick) ?? {
+            stats.backtracks += 1
+            continue
+        }
+        let more = placed
+        more[next.course] = pick
+        let done = solve(@stats narrowed more clash) ?? {
+            stats.backtracks += 1
+            continue
+        }
+        return done
+    }
+    none
+}
+
+show_grid = (term:Term placed:Placement):>void => {
+    let width = 8
+    let held:dict<Choice string> = []
+    loop i in 0.. and course in term.courses {
+        width = max(width course.name.length + 2)
+        let at = placed.get(i) ?? continue
+        held[at] = course.name
+    }
+    let rooms = [loop room in term.rooms room.name.pad_end(width)]
+    printl("  {"period".pad_end(8)}{rooms.join("")}".trim_end)
+    loop period in term.periods {
+        let cells = [loop room in term.rooms (held.get(Choice[period room.name]) ?? "-").pad_end(width)]
+        printl("  {period.pad_end(8)}{cells.join("")}".trim_end)
+    }
+}
+
+show_teachers = (term:Term placed:Placement):>void => {
+    let teachers:array<string> = []
+    loop c in term.courses {
+        if c.teacher not in? teachers teachers.push(c.teacher)
+    }
+    loop t in teachers {
+        let slots:array<string> = []
+        loop i in 0.. and c in term.courses {
+            if c.teacher not=? t continue
+            let at = placed.get(i) ?? continue
+            slots.push("{c.name} {at.period} {at.room}")
+        }
+        printl"  {t}: {slots.join(", ")}"
+    }
+}
+
+report = (term:Term):>void => {
+    printl"term {term.name}: {term.courses.length} courses, {term.rooms.length} rooms, {term.periods.length} periods, {term.enrolled.length} students"
+    let options = [loop c in term.courses choices(term c)]
+    loop i in [0..term.courses.length) and c in term.courses {
+        if options[i].is_empty {
+            printl"  no timetable: {c.name} has no room and period it could use"
+            return
+        }
+    }
+    let stats = Stats[]
+    let placed = solve(@stats options [] clashes(term)) ?? {
+        printl"  no timetable after {stats.tried} assignments"
+        return
+    }
+    printl"  timetable after {stats.tried} assignments, {stats.backtracks} undone:"
+    show_grid(term placed)
+    show_teachers(term placed)
+}
+
+ReadError:type = type of error & [line:int message:string]
+
+read_terms = (text:string):>array<Term> | ReadError => {
+    let terms:array<Term> = []
+    loop n in 1.. and raw in text.split("\n") {
+        let words = raw.split
+        if words.is_empty or words[0].startswith("#") continue
+        if words[0] =? "term" and words.length =? 2 {
+            terms.push(Term[words[1]])
+            continue
+        }
+        if terms.is_empty return ReadError[n "expected a term line first"]
+        match words[0] {
+            <"room"> => {
+                if words.length <? 3 return ReadError[n "room NAME CAPACITY [lab]"]
+                let capacity = to_int(words[2]) ?? return ReadError[n "bad capacity {words[2]}"]
+                terms[end].rooms.push(Room[words[1] capacity words.length >? 3 and words[3] =? "lab"])
+            }
+            <"periods"> => { terms[end].periods.extend(words[1..)) }
+            <"away"> => {
+                if words.length <? 3 return ReadError[n "away TEACHER PERIOD..."]
+                terms[end].away[words[1]] = words[2..)
+            }
+            <"course"> => {
+                if words.length <? 4 return ReadError[n "course NAME TEACHER SIZE [lab]"]
+                let size = to_int(words[3]) ?? return ReadError[n "bad size {words[3]}"]
+                terms[end].courses.push(Course[words[1] words[2] size words.length >? 4 and words[4] =? "lab"])
+            }
+            <"enroll"> => {
+                if words.length <? 3 return ReadError[n "enroll STUDENT COURSE..."]
+                terms[end].enrolled[words[1]] = words[2..)
+            }
+            _ => return ReadError[n "unknown line kind {words[0]}"]
+        }
+    }
+    terms
+}
+
+main = () => {
+    let terms = read_terms(read_stdin or_throw) or_throw
+    loop term in terms report(term)
+}

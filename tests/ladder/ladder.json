@@ -672,6 +672,32 @@
     "3"
    ],
    "note": "Preview and perform dated log rotation in a confined spool, preserve active data on same-day collisions, and reopen the surviving logs after calendar-day expiry across leap day."
+  },
+  "146_sensor_stream": {
+   "milestone": 12,
+   "args": [
+    "step=300",
+    "width=3",
+    "head=6",
+    "boiler:80:5",
+    "chiller:12:3",
+    "attic:25:1"
+   ],
+   "note": "Streaming sensor report over stdin through a generator pipeline (rows -> one sensor -> fixed windows with gap fill -> moving average -> hysteresis alarms): bad rows yielded as values, a deferred pull count that runs at an early stop and at the end, a combined header taking the first windows, exact rational averages and refined generator parameters."
+  },
+  "147_timetable_solver": {
+   "milestone": 11,
+   "note": "School timetable search over stdin terms: per-course period and room choices from capacity, lab and absence constraints, teacher and shared-student clashes as a nested comprehension, most-constrained-first backtracking with forward checking on value copies of the remaining choices (no undo log), record dictionary keys for the printed grid, and an infeasible term and an unplaceable course reported with the assignments tried."
+  },
+  "148_follow_graph": {
+   "milestone": 13,
+   "args": [
+    "ana",
+    "ben",
+    "ivy",
+    "zed"
+   ],
+   "note": "Follow-graph report over stdin: edges parsed by a generator that yields malformed lines as values, compressed sparse rows whose targets carry a sibling-length bound so runs read through clamped slices index without checks, in-degree ranking, mutual follows, Kosaraju groups and breadth-first reach (explicit index stacks checked at run time), a recursive follow tree through generator delegation, and suggestions from one row of A*A."
   }
  },
  "design_passing": [
@@ -718,7 +744,24 @@
   "129_route_analysis",
   "12_linear_regression",
   "130_owned_exact_batches",
+  "131_ffi_sorted_records",
+  "132_packet_checksum",
+  "133_concurrent_job_router",
+  "134_command_formatter",
+  "135_ffi_image_tool",
+  "136_team_calendar",
+  "137_snapshot_backup",
+  "138_crate_puzzle",
   "13_logistic_regression",
+  "140_word_tally",
+  "141_calc_interpreter",
+  "142_clinic_simulation",
+  "143_fifo_inventory",
+  "144_classifier_report",
+  "145_log_rotation",
+  "146_sensor_stream",
+  "147_timetable_solver",
+  "148_follow_graph",
   "14_tokenizer",
   "15_expression_parser",
   "16_json_roundtrip",
@@ -804,20 +847,6 @@
   "96_ct_crypto",
   "97_notes_service",
   "98_notes_listen",
-  "99_dewy_frontend",
-  "131_ffi_sorted_records",
-  "132_packet_checksum",
-  "133_concurrent_job_router",
-  "134_command_formatter",
-  "135_ffi_image_tool",
-  "136_team_calendar",
-  "137_snapshot_backup",
-  "138_crate_puzzle",
-  "140_word_tally",
-  "141_calc_interpreter",
-  "142_clinic_simulation",
-  "143_fifo_inventory",
-  "144_classifier_report",
-  "145_log_rotation"
+  "99_dewy_frontend"
  ]
 }

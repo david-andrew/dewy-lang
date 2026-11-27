@@ -1,0 +1,198 @@
+# Follow-graph report. Stdin lists who follows whom, one `name -> name` per
+# line. The graph is stored as compressed sparse rows: person v's followees
+# are the run of `targets` from `starts[v]` up to `starts[v + 1]`, and every
+# target is a valid index of `names`, so reading a run and indexing with what
+# it holds needs no checks. The report gives degrees, mutual follows, groups
+# that all reach each other, the follow tree from one person and suggestions
+# from two-step paths (one row of the sparse matrix product A*A).
+#
+# Usage: follow_graph ROOT PERSON...
+
+Edge:type = [line:int source:string target:string]
+BadLine:type = [line:int text:string]
+Graph:type = [
+    names:array<string>
+    targets:array<int64<(<? names.length)>>
+    starts:array<int64>
+]
+UsageError:type = type of error & [message:string]
+
+# Every edge line of the input, parsed lazily; malformed lines are yielded too.
+edges = (text:string):>generator<Edge | BadLine> => lazy loop n in 1.. and raw in text.split("\n") {
+    let line = raw.trim
+    if line =? "" or line.startswith("#") continue
+    let parts = line.split("->")
+    let source = parts[0].trim
+    let target = (parts.get(1) ?? "").trim
+    if parts.length =? 2 and source not=? "" and target not=? "" {
+        Edge[n source target]
+    } else {
+        BadLine[n line]
+    }
+}
+
+build = (text:string):>Graph => {
+    let follows:dict<string array<string>> = []
+    let dropped = 0
+    loop item in edges(text) {
+        match item {
+            bad:BadLine => printl"line {bad.line}: expected `name -> name`, got `{bad.text}`"
+            e:Edge => {
+                let row = follows.get(e.source) ?? []
+                if not follows.has(e.target) follows[e.target] = []
+                if e.source =? e.target or e.target in? row {
+                    dropped += 1
+                } else {
+                    row.push(e.target)
+                }
+                follows[e.source] = row
+            }
+        }
+    }
+    if dropped >? 0 printl"dropped {dropped} repeated or self follows"
+    # Rows in name order, so every list below is alphabetical.
+    let g = Graph[follows.keys.sorted [] [0]]
+    loop name in g.names {
+        loop t in (follows.get(name) ?? []).sorted {
+            g.targets.push(g.names.index_of(t) ?? continue)
+        }
+        g.starts.push(g.targets.length)
+    }
+    g
+}
+
+# The run of `targets` holding v's followees (empty past the last row).
+first = (g:Graph v:int64):>int64 => g.starts.get(v) ?? 0
+last = (g:Graph v:int64):>int64 => g.starts.get(v + 1) ?? first(g v)
+
+degrees = (g:Graph):>void => {
+    let n = g.names.length
+    printl"{n} people, {g.targets.length} follows"
+    let followers = fill(0 n)
+    loop t in g.targets followers[t] += 1
+    let ranked = [loop v in [0..n) v].sorted(key=(v) => -followers[v])
+    printl"most followed: {[loop v in ranked[$clamp ..3) "{g.names[v]} ({followers[v]})"].join(", ")}"
+    let mutual:array<string> = []
+    loop v in [0..n) {
+        loop w in g.targets[$clamp first(g v)..last(g v)) {
+            if v <? w and v in? g.targets[$clamp first(g w)..last(g w)) mutual.push("{g.names[v]} <-> {g.names[w]}")
+        }
+    }
+    printl"mutual follows: {if mutual.is_empty "none" else mutual.join(", ")}"
+}
+
+# Kosaraju: finish order of a depth-first walk, then sweeps of the reversed
+# graph in reverse finish order. Iterative, with explicit stacks of people,
+# whose bounds the checker does not follow into the stacks: checked as it runs.
+groups = (g:Graph):>array<array<string>> => {
+    $runtime_checks
+    let n = g.names.length
+    let seen = fill(false n)
+    let finished:array<int64> = []
+    loop root in [0..n) {
+        if seen[root] continue
+        seen[root] = true
+        let stack = [root]
+        loop not stack.is_empty {
+            let v = stack[end]
+            let next = [loop w in g.targets[$clamp first(g v)..last(g v)) if not seen[w] w]
+            if next.is_empty {
+                finished.push(stack.pop())
+            } else {
+                seen[next[0]] = true
+                stack.push(next[0])
+            }
+        }
+    }
+    let incoming = fill([] n)
+    loop v in [0..n) {
+        loop w in g.targets[$clamp first(g v)..last(g v)) incoming[w].push(v)
+    }
+    let placed = fill(false n)
+    let out:array<array<string>> = []
+    loop root in finished.reversed {
+        if placed[root] continue
+        placed[root] = true
+        let members:array<string> = []
+        let todo = [root]
+        loop not todo.is_empty {
+            let v = todo.pop()
+            members.push(g.names[v])
+            loop u in incoming[v] {
+                if not placed[u] {
+                    placed[u] = true
+                    todo.push(u)
+                }
+            }
+        }
+        out.push(members.sorted)
+    }
+    out.sorted(key=(m) => -m.length)
+}
+
+# The follow tree under `name`, one line per person, each indented under
+# whoever reached them first.
+tree = (kids:dict<string array<string>> name:string indent:string):>generator<string> => lazy {
+    "{indent}{name}"
+    loop kid in (kids.get(name) ?? []) { tree(kids kid "{indent}  ")... }
+}
+
+# Breadth-first rounds; the frontier's people are checked as they are read.
+reach = (g:Graph root:int64):>void => {
+    $runtime_checks
+    let n = g.names.length
+    let reached = fill(false n)
+    let kids:dict<string array<string>> = []
+    let frontier = [root]
+    let rounds = 0
+    loop not frontier.is_empty {
+        let next:array<int64> = []
+        loop v in frontier {
+            loop w in g.targets[$clamp first(g v)..last(g v)) {
+                if reached[w] or w =? root continue
+                reached[w] = true
+                kids[g.names[v]] = [(kids.get(g.names[v]) ?? [])... g.names[w]]
+                next.push(w)
+            }
+        }
+        if not next.is_empty rounds += 1
+        frontier = next
+    }
+    let lines = [tree(kids g.names[root] "  ")...]
+    printl"{g.names[root]} reaches {lines.length - 1} of {n - 1} others within {rounds} steps:"
+    loop line in lines printl(line)
+}
+
+# People two steps away whom v does not follow yet, by the number of
+# followees leading there: row v of A*A without row v of A.
+suggest = (g:Graph v:int64):>void => {
+    let paths:dict<string int> = []
+    let direct = g.targets[$clamp first(g v)..last(g v))
+    loop w in direct {
+        loop x in g.targets[$clamp first(g w)..last(g w)) {
+            if x not=? v and x not in? direct paths[g.names[x]] = (paths.get(g.names[x]) ?? 0) + 1
+        }
+    }
+    let picks = paths.keys.sorted.sorted(key=(name) => -(paths.get(name) ?? 0))
+    let shown = [loop name in picks "{name} ({paths.get(name) ?? 0})"]
+    printl"suggest for {g.names.get(v) ?? "?"}: {if shown.is_empty "nobody" else shown.join(", ")}"
+}
+
+main = (argv:array<string>) => {
+    if argv.length <? 2 return UsageError["usage: follow_graph ROOT PERSON..."]
+    let g = build(read_stdin or_throw)
+    degrees(g)
+    let found = groups(g)
+    printl"groups that all reach each other:"
+    loop members in found {
+        if members.length >? 1 printl"  {members.join(" ")}"
+    }
+    printl"  and {[loop m in found if m.length =? 1 m].length} people on their own"
+    loop name in argv[1..) {
+        let v = g.names.index_of(name) ?? {
+            printl"nobody named {name}"
+            continue
+        }
+        if name =? argv[1] reach(g v) else suggest(g v)
+    }
+}
