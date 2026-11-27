@@ -1,0 +1,10 @@
+# The note names the parameter's own contract, not another declaration
+# with the same predicate (the library's rational denominator).
+half = (x:rational):>rational => x / 2
+
+repeat = (count:int<(>? 0)> word:string):>string => [loop _ in [0..count) word].join("")
+
+main = (argv:array<string>) => {
+    printl(half(3))
+    printl(repeat(argv.length - 1 "ab"))
+}

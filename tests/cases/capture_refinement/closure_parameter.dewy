@@ -1,0 +1,7 @@
+# A closure keeps the refinement of the parameter it captures.
+scaler = (step:int<(>? 0)> xs:array<int>):>array<int> => {
+    let down = (x:int) => x // step
+    [loop x in xs down(x)]
+}
+
+main = () => printl(scaler(4 [3 9 17]))

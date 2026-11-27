@@ -6,7 +6,7 @@ from p"expression_types.dewy" import (ntype)
 from p"facts_summaries.dewy" import fact_record_arrays
 from p"effect_library.jo" import EffectClass
 from p"ast.jo" import (NF_ALIASDECL NF_GENERIC NF_GLOBAL has_flag kid nkids nodes)
-from p"check.jo" import (LF_PARAM LF_VALUEITER map_loop_values FK_INIT LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARTBORROW LF_SHARED LF_SOAELEM fns globals lib_dir locals modules runtime_insts)
+from p"check.jo" import (LF_ASSIGNED LF_PARAM LF_VALUECAP LF_VALUEITER map_loop_values FK_INIT LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARTBORROW LF_SHARED LF_SOAELEM fns globals lib_dir locals modules runtime_insts)
 from p"checks_thin.dewy" import (library_exit_call readonly_global)
 from p"effect_classifiers.dewy" import (effect_library_class)
 from p"effect_control.dewy" import (effects_demand)
@@ -18,7 +18,7 @@ from p"effects.jo" import (effect_callbacks_full effect_footprints_only effect_i
 from p"checks_thin_expr.dewy" import (is_map_type nd_elem)
 from p"checks_shaped.dewy" import (shape_field_type)
 from p"facts.jo" import (FACT_LENT fact_probe_disjoint FACT_CAP FactBinding FactCallWrites FactProjection FactState FactSummary fact_call_field_types fact_drop_sites fact_drop_types fact_owner fact_probe_on fact_reach_cache fact_shape_summaries fact_summary_assumed fact_summary_owner fact_summary_used fact_terms fact_text_sinks)
-from p"facts_values.dewy" import (fact_domain fact_type fact_project)
+from p"facts_values.dewy" import (fact_domain fact_scalar fact_type fact_project)
 from p"facts_lengths.dewy" import (fact_difference)
 from p"facts_index_writes.dewy" import (fact_new fact_rebind fact_set_bound ft_is_active ft_record_bind)
 from p"facts_index_writes.dewy" import (fact_add_projection fact_index_put)
@@ -970,6 +970,9 @@ fact_exposed=(p:PlaceIdentity):>bool=>$unsafe {
     if flags & FACT_LENT =? LF_ADDR and fact_dewy_local(p.declaration) {return false}
     # Snapshot captures own their copy. Owner place captures remain exposed.
     if flags & FACT_LENT =? LF_ADDR | LF_CAPTURED and fact_dewy_local(p.declaration) and not (ownership_decls.length not=? 0 and ownership_fact_type(ForgetWord(locals.ptr[p.declaration].type))) {return false}
+    # A closure's or lazy body's own scalar snapshot that the body never writes
+    # or lends: no call can reach it.
+    if flags & (FACT_LENT | LF_ASSIGNED) =? LF_CAPTURE and flags & LF_VALUECAP not=? 0 and fact_scalar(fact_type(ForgetWord(locals.ptr[p.declaration].type))) and fact_dewy_local(p.declaration) {return false}
     # Only the closed checked partition ABI supplies disjoint mutable arrays.
     if fact_probe_disjoint not=? 0 and fact_owner =? fact_probe_disjoint and ForgetWord(locals.ptr[p.declaration].owner) =? fact_probe_disjoint and tkind(ForgetWord(locals.ptr[p.declaration].type)) =? 'array' and ForgetWord(locals.ptr[p.declaration].flags) & LF_MUTPARAM not=? 0 {return false}
     flags & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_ADDR | LF_BYREF | LF_EXPOSED) not=? 0

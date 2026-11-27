@@ -1,0 +1,6 @@
+# A bound naming another parameter is not assumed inside the lazy body.
+parts = (n:int d:int<(>? n)> xs:array<int>):>generator<int> => lazy loop x in xs {
+    x // d
+}
+
+main = () => printl([parts(0 2 [4 6])...])

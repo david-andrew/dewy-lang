@@ -1,0 +1,8 @@
+# A generator's element contract cannot name a parameter, as an array
+# result's cannot: nothing binds it where the values are pulled.
+G:type = [names:array<string> targets:array<int64<(<? names.length)>>]
+all = (g:G):>generator<int64<(<? g.names.length)>> => lazy loop t in g.targets { t }
+main = () => {
+    let g = G[["a" "b"] [1 0 1]]
+    loop t in all(g) printl(t)
+}

@@ -40,7 +40,7 @@ ref_types_nested_formals=(@types:array<TypeInfo> @args:array<int32> @predicates:
         if nested and ref_atoms_have_kind(predicates[int64(types[t].st)] 2) {return true}
         return ref_types_nested_formals(@types @args @predicates int64(types[t].elem) nested depth + 1)
     }
-    if k =? 'array' or k =? 'fixed' or k =? 'opt' {
+    if k =? 'array' or k =? 'fixed' or k =? 'opt' or k =? 'generator' {
         return ref_types_nested_formals(@types @args @predicates int64(types[t].elem) true depth + 1)
     }
     if k =? 'tuple' {

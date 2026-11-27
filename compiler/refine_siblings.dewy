@@ -767,8 +767,14 @@ ref_sib_loop_elements=(n:RefineSibWord base:RefineSibWord @s:FactState):>void=>$
     if value =? 0 or value =? before {
         # (the element type's own bounds: `>=? 0` unless it states another)
         let bound=fact_domain(RefineSibWord(locals.ptr[l].type))
-        let iterated=prune(refine_storage(RefineSibWord(nodes.ptr[n].a) ntype(RefineSibWord(nodes.ptr[n].a))))
+        let src=RefineSibWord(nodes.ptr[n].a)
+        let iterated=prune(refine_storage(src ntype(src)))
         if ref_sib_contract(iterated) {bound=ref_interval(RefineSibWord(types.ptr[representation_type(iterated)].elem) bound)}
+        else {
+            # (a run of such a field's elements, as a slice: the elements keep their written type)
+            let element=prune(RefineSibWord(types.ptr[representation_type(iterated)].elem))
+            if types.ptr[element].kind =? 'refined' {bound=ref_interval(element bound)}
+        }
         value=fact_new(@s bound FactTerm(type=RefineSibWord(locals.ptr[l].type)))
         fact_bind(@s place value)
     }

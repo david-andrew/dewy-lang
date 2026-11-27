@@ -1159,17 +1159,26 @@ wit_refinement=(n:WitWord t:WitWord atom:RefAtom self:WitWord a:WitWord b:WitWor
     # (a narrowing's check is the conversion's own, not a declared contract
     # that happens to share its interned predicate)
     let contract=if ref_narrowing.has(n) {0} else {ref_spans.get(WitWord(types.ptr[t].st)) ?? 0}
-    # (a shape contract: the parameter of the call this argument is for, and
-    # its storage relation said as one, with no internal marker's bounds)
-    let storage=false
-    if nd_shape_predicates.has(WitWord(types.ptr[t].st)) {
+    # An argument's contract written on its parameter is the parameter's: an
+    # interned predicate's first span may be any declaration with the same
+    # predicate. (A named refinement keeps its own declaration.)
+    if contract not=? 0 or nd_shape_predicates.has(WitWord(types.ptr[t].st)) {
         let call=wit_call_holding(n)
         let d=if call >? 0 and nodes.ptr[call].aux =? 0 and nodes.ptr[call].sym >? 0 {WitWord(fns.ptr[WitWord(nodes.ptr[call].sym)].decl)} else {0}
         if d not=? 0 and nodes.ptr[d].kind =? 'fn_' {
             loop i in [0..min(nkids(call) nkids(d))) {
-                if kid(call i) =? n {contract=nodes.ptr[kid(d i)].pos}
+                let p=kid(d i)
+                if kid(call i) not=? n {continue}
+                # (a shape contract: the parameter itself, as its relation is said)
+                if nd_shape_predicates.has(WitWord(types.ptr[t].st)) {contract=nodes.ptr[p].pos}
+                else if nodes.ptr[p].kind =? 'param' and nodes.ptr[p].a not=? 0 and nodes.ptr[WitWord(nodes.ptr[p].a)].kind =? 'trefined' {contract=nodes.ptr[WitWord(nodes.ptr[p].a)].pos}
             }
         }
+    }
+    # (a shape contract: its storage relation said as one, with no internal
+    # marker's bounds)
+    let storage=false
+    if nd_shape_predicates.has(WitWord(types.ptr[t].st)) {
         loop term in [atom.a atom.b] {
             if term.path.length =? 1 and term.path[0] =? ND_STORAGE_VALID {storage=true}
         }

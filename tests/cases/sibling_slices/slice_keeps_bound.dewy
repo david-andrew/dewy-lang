@@ -1,0 +1,23 @@
+# A run of a field whose elements index a sibling still indexes it, and
+# indexes any array as long as the sibling, with no guard.
+Graph:type = [
+    names:array<string>
+    targets:array<int64<(<? names.length)>>
+    starts:array<int64<(<=? targets.length)>>
+]
+
+row = (g:Graph v:int64<i => i >=? 0 and i <? g.names.length>):>void => {
+    if v + 1 >=? g.starts.length return
+    let seen = fill(false g.names.length)
+    loop w in g.targets[$clamp g.starts[v]..g.starts[v + 1]) {
+        if not seen[w] printl"{g.names[v]} -> {g.names[w]}"
+        seen[w] = true
+    }
+    let part = g.targets[$clamp g.starts[v]..)
+    printl([loop w in part g.names[w]].join(" "))
+}
+
+main = () => {
+    let g = Graph[["a" "b" "c"] [1 2 2 0 1] [0 3 4 5]]
+    loop v in [0..g.names.length) row(g v)
+}

@@ -1,7 +1,7 @@
 $runtime_checks
 from p"checked_expression_nodes.dewy" import (mk_ident_local)
 from p"ast.jo" import (nodes)
-from p"check.jo" import (LF_MUTPARAM fns locals)
+from p"check.jo" import (LF_ASSIGNED LF_MUTPARAM LF_PARAM LF_VALUEPARAM fns locals)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"facts.jo" import (FactState fact_owner fact_policy fact_probe fact_probe_on fact_speculating fact_terms fact_validated)
@@ -197,7 +197,39 @@ refine_fact_entry=(f:int64 @s:FactState):>void=>$unsafe {
         checks_entry[0].push(value)
     }
     loop i in 0.. and t in fns.ptr[f].ptypes {ref_assume(t refine_entry[i] refine_entry @s)}
+    if fns.ptr[f].caps.length >? 0 {ref_capture_entry(f @s)}
     nd_mutable_entry(f @s)
+}
+# A closure or lazy body keeps the declared refinements of the parameters it
+# captures: the type is a contract on the parameter's value, and an unassigned
+# parameter keeps that value whenever the body reads it. Only predicates on the
+# value and constants are assumed; a bound naming another parameter has no
+# meaning inside the body. O(captures + parameters).
+ref_capture_entry=(f:int64 @s:FactState):>void=>$unsafe {
+    loop cap in fns.ptr[f].caps {
+        let outer=int64(cap.outer)
+        let inner=int64(cap.inner)
+        if outer <=? 0 or inner <=? 0 {continue}
+        let flags=RefineTransferWord(locals.ptr[outer].flags)
+        if flags & (LF_PARAM | LF_VALUEPARAM) =? 0 or flags & (LF_MUTPARAM | LF_ASSIGNED) not=? 0 {continue}
+        let owner=RefineTransferWord(locals.ptr[outer].owner)
+        if owner <=? 0 or owner >=? fns.length {continue}
+        # (a value parameter's own binding: the parameter of the same name)
+        let at=-1
+        loop i in 0.. and p in fns.ptr[owner].params {
+            if p =? outer or flags & LF_VALUEPARAM not=? 0 and locals.ptr[p].name =? locals.ptr[outer].name {at=i}
+        }
+        if at <? 0 or at >=? fns.ptr[owner].ptypes.length {continue}
+        let t=prune(fns.ptr[owner].ptypes[at])
+        if types.ptr[t].kind not=? 'refined' {continue}
+        let closed=true
+        loop atom in ref_predicates[RefineTransferWord(types.ptr[t].st)] {
+            if atom.a.kind >? 1 or atom.b.kind >? 1 {closed=false}
+        }
+        if not closed {continue}
+        let value=fact_read(@s mk_ident_local(inner locals.ptr[inner].pos))
+        if value not=? 0 {ref_assume(t value [] @s)}
+    }
 }
 ref_fact_current_entry=(@s:FactState):>array<int64>=>$unsafe {
     let args=refine_entry
