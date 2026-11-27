@@ -1,0 +1,31 @@
+# A periodic job scheduler. Jobs are function values handed in by plugins; the scheduler
+# itself runs on real time. One plugin wants its waits on awake time.
+import p"@lib/std/tasks.dewy" as task
+Job:type = [name:string every:Duration run:(():>void) clock:'awake' | 'continuous' = 'continuous']
+
+repeat = (j:Job) => loop true {
+    sleep(j.every monotonic=j.clock) or_throw    # GUESS: `monotonic=` takes a run-time value on a wait
+    j.run()
+}
+spawn_all = (jobs:array<Job> group:Tasks) => loop j in jobs group.spawn(@repeat(j))
+run_jobs = (jobs:array<Job>) => task.tasks(@spawn_all(jobs))
+
+sync_mail = () => printl"mail: {within(30s @fetch_inbox)}"
+fetch_inbox = ():>int => 3
+
+thumbnailer_plugin = ():>Job => {
+    $time.monotonic = 'awake'
+    Job["thumbs" 10minute @make_thumbnails clock='awake']   # body captures 'awake' at this `@` (r2)
+}
+make_thumbnails = () => {
+    let r = within(5s @render_all)               # 5 s of awake time
+    printl"thumbs: {r}"
+}
+render_all = ():>int => 12
+
+main = () => run_jobs([Job["mail" 1minute @sync_mail] thumbnailer_plugin()])
+# r2: the plugin can now ask for an awake period (a field passed as `monotonic=`), and the body's
+# capture is written where it happens. FIGHT (inherent to dynamic scope): reading `repeat`, nothing
+# says that `j.run()` runs on awake time; and the plugin states its clock twice (the setting for
+# the body, the field for the period). Hover on a function value showing its captured clock would
+# help; r2 doesn't mention it.

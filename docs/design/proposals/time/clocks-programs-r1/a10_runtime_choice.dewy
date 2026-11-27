@@ -1,0 +1,20 @@
+# Command-line countdown timer. `--awake` makes it ignore time the machine spends asleep.
+# The choice comes from the command line, so it is known only at run time.
+countdown = (d:Duration awake:bool) => {
+    $time.monotonic = if awake 'awake' else 'continuous'
+    # r2: allowed; the rest of the scope compiles once per clock, so `end` has a static clock.
+    let end = now + d
+    loop now <? end {
+        sleep(min(end.remaining 1s)) or_throw;
+        print"\r{end.remaining.ticks(1s)[0]} s "
+    }
+    printl"\a\ntime's up at {now.nominal}"
+}
+
+main = (argv) => {
+    let awake = argv.contains("--awake")
+    let words = [loop a in argv[1..] if a !=? "--awake" a]
+    let minutes = int(words[0] ?? "5") ?? 5
+    countdown(minutes * 1minute awake)
+}
+# (a13 covers a reading that leaves such a scope.)

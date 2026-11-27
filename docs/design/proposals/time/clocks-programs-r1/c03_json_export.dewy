@@ -1,0 +1,28 @@
+# Export timing events to JSON for a web dashboard, then read the file back.
+Event:type = [name:string at:Instant<tick=1ns/4>]
+Coarse:type = [name:string at:Instant]
+
+main = () => {
+    const t = instant"2026-10-24T12:00:00Z"
+    let events = [
+        Event["arm" t as Instant<tick=1ns/4>]
+        Event["fire" (t as Instant<tick=1ns/4>) + 1ns/4]
+    ]
+    let text = to_json(events 2)
+    printl(text)                     # "at": "2026-10-24T12:00:00.00000000025Z"
+    p"events.json".write_text(text) or_throw;
+    # OUTSIDE THIS DESIGN (r3 item 6, G10): exact and valid RFC 3339, but the dashboard's JavaScript `Date` keeps milliseconds, Python's
+    # datetime microseconds, and many parsers stop at 9 digits. The spec's alternative was rejected
+    # for breaking consumers at run time; 11 digits can too, more quietly. Wanted: a JSON setting or
+    # field option for the digits written (`$json.instant_digits = 9` with declared loss), or at
+    # least a note that decimal ticks finer than 1ns write more than 9 digits.
+
+    let back = from_json<array<Event>>(p"events.json".read_text or_throw)
+    $runtime_assert(back is? array<Event>)
+    # OUT OF SCOPE (r2 item 13, parsing onto a tick). GUESS: and into a plain `Instant`:
+    let coarse = from_json<array<Coarse>>(text)
+    printl(coarse)                   # GUESS: TextError "off the 1 ns grid", never a silent rounding
+
+    # A record with an `Instant<tick=1ns/3>` field: `to_json` is a compile error at the call,
+    # decided by the type, as specified. Good: it can't fail at run time.
+}

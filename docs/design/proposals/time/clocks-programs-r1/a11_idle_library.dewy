@@ -1,0 +1,32 @@
+# Library module: presence detection for chat apps ("away" after 10 idle minutes).
+# Its natural default is awake time, but some callers (a server mirroring a remote client's
+# idleness) need real time. The caller should be able to choose; the library picks the default.
+Presence:type = 'active' | 'away'
+
+watch_presence = (activity:Channel<void> out:Channel<Presence>
+                  after:Duration = 10minute
+                  mode:'awake' | 'continuous' = 'awake') => {
+    $time.monotonic = mode           # r2: a run-time value; the body compiles once per clock
+    # FIGHT (kept on purpose by r2, so graded as a 4): a caller who wrote `$time.monotonic =
+    # 'continuous'` and calls `watch_presence(a o)` still gets awake time; the library's default
+    # beats the caller's setting. The caller must pass `mode=`. Clear in the signature, so a
+    # reader finds it; but it is the one place a scope setting silently doesn't reach.
+    let state:Presence = 'active'
+    loop true {
+        match activity.receive(timeout=after) {
+            <Timeout> => if state =? 'active' { state = 'away'; out.send(state) or_throw }
+            <Closed> => return
+            _ => if state =? 'away' { state = 'active'; out.send(state) or_throw }
+        }
+    }
+}
+
+main = () => {
+    let activity = channel<void>(1)       # GUESS: Channel<void> as a pure signal channel
+    let presence = channel<Presence>(4)
+    parallel {
+        watch_presence(activity presence)
+        watch_presence(activity presence mode='continuous')   # a server mirroring a remote user
+        loop p in presence printl"now {p}"
+    }
+}

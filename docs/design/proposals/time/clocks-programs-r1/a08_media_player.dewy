@@ -1,0 +1,36 @@
+# Audio player: the progress bar shows playing time. If the laptop sleeps mid-track, playback
+# stops with it, so the position must count awake time only; user pauses stop it too.
+Cmd:type = 'pause' | 'resume' | 'stop'
+
+play_track = (title:string length:Duration cmds:Channel<Cmd>) => {
+    $time.monotonic = 'awake'
+    let played:Duration = 0s
+    let resumed = now
+    let playing = true
+    let bar = ticker(250ms)
+    loop played <? length {
+        match select(@cmds.receive @bar.next) {
+            <bar.Tick> => if playing draw(title played + (now - resumed) length)
+            c:Cmd => match c {
+                'pause' => if playing { played += now - resumed; playing = false }
+                'resume' => if not playing { resumed = now; playing = true }
+                'stop' => return
+            }
+            <Closed> => return
+        }
+        if playing and played + (now - resumed) >=? length break
+    }
+}
+# OUT OF SCOPE (r2 item 13, user clocks): awake time is not play time. The setting removes suspend, but pause/resume is still
+# hand-written bookkeeping (`played`, `resumed`, `playing`). Games and players want a pausable
+# stopwatch: `let clock = time.stopwatch(); clock.pause(); clock.resume(); clock.elapsed`, and
+# ideally one that can drive `sleep`/`ticker` (a user clock), with a rate for slow motion.
+# The in-scope part (awake ticker and readings) works with no friction.
+
+draw = (title:string at:Duration total:Duration) =>
+    print"\r{title} {at.ticks(1s)[0]}/{total.ticks(1s)[0]} s"
+
+main = () => {
+    let cmds = channel<Cmd>(4)
+    play_track("Clair de lune" 5minute + 2s cmds)
+}

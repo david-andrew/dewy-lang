@@ -38,6 +38,7 @@
   - D37 Q1: `iso_basic` and `""`;
   - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
   - D46 Q2–Q6: CPU level or core in the processor field; version floors glued on (`mac14`); `$supported_targets` patterns; chips as libraries; C output chosen by a `.c` output name.
+  - D47 Q1–Q3: `$time.monotonic = 'awake'`; readings that know their clock (`r.elapsed`, deadlines as timeouts); test clocks (`$time.clock = time.test_clock()`) that jump when everything waits.
 - **(c) Names only:**
   - D44 Q4, Q7: `task.cancel_request` / `task.CancelRequest`; `$no_discarded_failures`;
   - D42 Q4, Q5: `ErrorStack` or `ErrorList`; `$origin`, `$trace`, `$parts`, `$origin_at_caller`;
@@ -54,6 +55,7 @@
   - D37 Q2;
   - D39 Q2: `stack` and `Ragged`;
   - D46 Q7: target words (`host_tuned`, `web`, `wasi`, `sim`, core names) and `$target` members.
+  - D47 Q4: test clock names (`advance`, `simulate_suspend`, `simulate_wall_step`, `simulate_monotonic_reset`, `wake_order=`).
 - **Unchanged:** D30 (function types without parentheses), D32 (time zone data license) and D21 (packages).
 
 ---
@@ -764,6 +766,163 @@ Use the core names below, while renaming the related-field selector currently sp
 Core names: `fields_of`, `collection`, `Ref`, `open(create= read_only=)`, `memory`, `get`, `require`, `insert`, `reference`, `replace`, `put`, `begin(timeout=)`, `commit`, `rollback`, `snapshot`, `close`; `index`, `unique(present_only=)`, `tuple`, `eq`, `lt`, `ge`, `contains`, `all_of`, `where`, `sorted(key= reverse=)`, `all`, `count`, `page(size= after= max_scanned= max_bytes= timeout=)`, `explain`, `include`, `update`, `delete`; result `.items`, `.next`, `.record`, `.related`. Additional release-module names and error names are not covered by this core ballot.
 
 Paper dogfood remains below all-5; the 45-line core cold read conveyed broad roles except `related` (two readers inferred a join), with low confidence for `present_only` and `reference`; inspection names have not been cold-read: [database proposal](proposals/database/), [function-inspection proposal](proposals/function-inspection/).
+
+### D47. Clocks for a scope: awake time and test clocks
+
+Two clock choices the time design promises but never spelled become settings, written and inherited exactly like `$time.zone`. `$time.monotonic = 'awake'` makes a function's waits, deadlines and elapsed times skip time the machine is asleep; the wall clock, `today` and `.nominal` don't change. `$time.clock = time.test_clock()` puts a function, its calls and its tasks on a virtual clock that jumps ahead whenever everything is waiting. Every clock call also takes the choice as an argument, as `today` takes the zone. They replace v5's `time.with_clocks(clocks.active @job)` and `time.with_context(test.context @job)`, which needed a named function per scope; cold readers took `clocks.active` to mean "the clocks currently in force".
+
+#### Q1 (b). Awake-only time as a setting
+
+```dewy
+lock_when_idle = (session:Session) => {
+    $time.monotonic = 'awake'              # a closed lid doesn't count toward the 5 minutes
+    match session.input.receive(timeout=5minute) {
+        <Timeout> => session.lock()
+        key:Key => session.handle(key)
+        <Closed> => {}
+    }
+}
+```
+
+Choose awake-only time with `$time.monotonic = 'awake'` at the top of a function or block, covering `sleep`, timeouts, tickers, deadlines and `now - start` there, in its calls and in its tasks? The default stays `'continuous'`: an hour asleep counts as an hour. One call can choose for itself: `sleep(1hour monotonic='awake')`.
+
+- **Rec:** yes. It reaches helpers and tasks the author didn't write, and it settles the implementation round's question: the wall clock stays, since the setting picks only the monotonic clock. **Reversible:** yes.
+- **Unblocks:** the awake clock (time.md's `clocks.active`).
+- **You give up:** `clocks.active` as a value to pass around; the choice is a word.
+
+#### Q2 (b). A reading knows its clock
+
+```dewy
+sent:array<ClockReading<monotonic='awake'>>          # written only where readings are stored
+if sent[0].elapsed >? 1minute { sent.remove(0) }      # time since that reading, on its own clock
+let paid_until = now + 2hour                          # a continuous deadline
+let result = within(paid_until @idle_loop(input))     # a deadline goes wherever a timeout goes
+```
+
+Put the monotonic clock in a reading's type (inferred, written only in stored types), so subtracting or comparing an awake reading with a continuous one is a compile error; add `r.elapsed` and `d.remaining` (`0s` once passed), measured on the reading's or deadline's own clock; and accept a deadline wherever a timeout goes?
+
+- **Rec:** yes. Without these, dogfooding found a shared rate limiter that mixed clocks and ended its task at run time, and a continuous deadline turned into an awake timeout that silently waited too long. With them, no mix is left to run time except one that travels through a channel or a stored structure (the existing clock-domain assumption). **Reversible:** yes.
+- **Unblocks:** code that mixes the two clocks safely (a paid session with an idle timeout, a play-time counter that also reports time asleep).
+- **You give up:** nothing; plain `ClockReading` still means the default clock.
+
+#### Q3 (b). Test clocks that jump when everything waits
+
+```dewy
+$test
+gives_up_after_three_tries = () => {
+    $time.clock = time.test_clock()
+    let start = now
+    $expect fetch_with_retry("https://unreachable.test") is? GaveUp
+    $expect start.elapsed =? 7s            # 1s + 2s + 4s of backoff, in no real time
+}
+```
+
+Put a scope on a virtual clock with `$time.clock = time.test_clock()`? When every task under it is waiting on the clock or on each other, it jumps to the next deadline; a wait on the outside world holds it still. Tasks under it run one at a time in the order they started, so equal deadlines wake in a repeatable `wake_order` (`'oldest_first'` by default, `'newest_first'`, or `'shuffled'` with `seed=`). `time.advance(5s)` lets 5 s pass and returns once everything due by then has run, for checking a moment.
+
+- **Rec:** yes. Jumping changes nothing a program can observe except speed, as in Go's `testing/synctest`, so tests of backoff and polling need no steps and the code under test needs no clock parameter. `advance` and the `simulate_` calls (Q4) default to the test clock in force, so without one they are compile errors and can never touch the real clock. **Reversible:** yes.
+- **Unblocks:** deterministic tests of timeouts, retries, rate limits, TTLs and schedules; time.md's test clock.
+- **You give up:** a clock that moves only when told (a test checks a moment with `advance` instead), and real parallelism among waiting tasks inside a test clock's scope.
+
+#### Q4 (c). Test clock names
+
+```dewy
+$time.clock = time.test_clock(start=instant"2030-03-10T06:00:00Z" wake_order='shuffled' seed=7)
+time.advance(5s)
+time.simulate_suspend(1hour)           # wall and continuous time jump; awake time doesn't
+time.simulate_wall_step(-1hour)        # an NTP correction: the wall clock moves, deadlines don't
+time.simulate_monotonic_reset()        # monotonic time loses continuity, as after a snapshot restore
+$time.clock = time.system_clock        # back to real time inside a test
+```
+
+Use `test_clock`, `TestClock`, `start=`, `wake_order=` with `'oldest_first'`, `'newest_first'` and `'shuffled'`, `seed=`, `advance`, `simulate_suspend`, `simulate_wall_step`, `simulate_monotonic_reset` and `system_clock`?
+
+- **Rec:** yes; all read correctly cold. **Reversible:** yes.
+
+#### Taken: fine ticks print exactly
+
+```dewy
+let quarter = instant"2026-10-24T12:00:00Z" as Instant<tick=1ns/4>
+printl(quarter + 1ns/4)                # 2026-10-24T12:00:00.00000000025Z
+let third = instant"2026-10-24T12:00:00Z" as Instant<tick=1ns/3>
+printl(third + 1ns/3)                  # 2026-10-24T12:00:00Z + 1/3ns
+to_json(third + 1ns/3)                 # compile error: JSON needs RFC 3339; fix-it `.round(1ns)`
+```
+
+An instant on a decimal tick prints exact RFC 3339 with more digits. One on a tick with no finite decimal prints the whole nanoseconds plus the exact remainder; a codec that promises RFC 3339 asks for `.round(1ns)` (D31 Q7). Taken under the two tests: nanosecond instants don't change and nothing is lost.
+
+#### The whole design in programs
+
+```dewy
+# A kiosk: a paid session lasts 2 hours of real time (the customer paid for it), and ends
+# early after 3 minutes without input while the machine is awake.
+idle_loop = (input:Channel<Key>):>'idle' | 'closed' => {
+    $time.monotonic = 'awake'
+    loop true {
+        match input.receive(timeout=3minute) {
+            <Timeout> => return 'idle'
+            <Closed> => return 'closed'
+            k:Key => printl"typed {k.text}"
+        }
+    }
+}
+session = (input:Channel<Key>):>'idle' | 'paid_time_over' | 'closed' => {
+    let paid_until = now + 2hour                      # continuous
+    match within(paid_until @idle_loop(input)) {      # the deadline keeps its own clock
+        <Timeout> => 'paid_time_over'
+        r => r
+    }
+}
+
+$test
+idle_ends_early_but_a_closed_lid_does_not = () => {
+    $time.clock = time.test_clock()
+    let keys = channel<Key>(4)
+    parallel (
+        let ended = session(keys)
+        {
+            time.advance(2minute)
+            time.simulate_suspend(1hour)              # awake time stands still
+            keys.send(Key["a"]) or_throw              # still in session: 2 awake minutes so far
+            time.advance(3minute)                     # 3 awake minutes without input
+        }
+    )
+    $expect ended =? 'idle'
+}
+```
+
+```dewy
+# A metrics agent flushes every second and stops after 3 s. At t = 3 s the last event, the
+# flush tick and the stop are due together: try eight orders in no real time.
+agent = (events:Channel<int> out:Channel<int> run_for:Duration) => {
+    let sum = 0
+    let flush = ticker(1s)
+    let stop = now + run_for
+    loop true {
+        match select(@events.receive @flush.next timeout=stop) {
+            n:int => sum += n
+            <flush.Tick> => { out.send(sum) or_throw; sum = 0 }
+            <Timeout> => break
+            <Closed> => break
+        }
+    }
+    out.send(sum) or_throw
+    out.close()
+}
+produce = (events:Channel<int>) => loop i in [1..6] { sleep(500ms) or_throw; events.send(i) or_throw }
+
+$test(cases=(0 1 2 3 4 5 6 7))
+totals_do_not_depend_on_wake_order = (seed:int) => {
+    $time.clock = time.test_clock(wake_order='shuffled' seed=seed)
+    let events = channel<int>(8)
+    let out = channel<int>(8)
+    parallel { produce(events); agent(events out 3s) }
+    let total = 0
+    loop n in out total += n
+    $expect total =? 21, "seed {seed}"         # fails for the seeds that wake the stop first
+}
+```
+
+Dogfooded (34 programs, three revisions; grades now 4.94, 4.96 and 4.97, and what is left under 5 is inherent). Names tested cold (six rounds, three readers each). Full rules, what was considered and what was found outside this design (a wall-clock wait, a per-test time limit, codec rounding): [proposals/time/clocks-round1.md](proposals/time/clocks-round1.md).
 
 ---
 

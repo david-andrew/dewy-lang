@@ -1,0 +1,34 @@
+# Lock the screen after five minutes without input. Time with the lid closed is not idle time.
+Key:type = [text:string]
+
+lock_screen = () => printl"locked at {now.nominal}"   # the wall clock: the setting never touches it
+handle = (k:Key) => printl"key {k.text}"
+
+lock_when_idle = (input:Channel<Key> idle:Duration) => {
+    $time.monotonic = 'awake'                # only time the machine is on counts toward `idle`
+    loop true {
+        match input.receive(timeout=idle) {  # restarts at each key: exactly "idle for 5 min"
+            <Timeout> => { lock_screen(); return }
+            <Closed> => return
+            <Canceled> => return
+            k:Key => handle(k)
+        }
+    }
+}
+
+read_keys = (out:Channel<Key>) => {
+    loop true {
+        let line = read_line()
+        if line is? exception or line is? none break
+        out.send(Key[line]) or_throw
+    }
+    out.close()
+}
+
+main = () => {
+    let keys = channel<Key>(64)
+    parallel {
+        read_keys(keys)
+        lock_when_idle(keys 5minute)
+    }
+}

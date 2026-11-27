@@ -1,0 +1,57 @@
+# Log shipper: batch lines and ship every 10 s. A slow upload must not cause a burst of
+# catch-up uploads afterward (ticks that pass while busy are dropped).
+import time
+
+ship = (lines:Channel<string> uploads:Channel<int> upload_time:Duration) => {
+    let tick = ticker(10s)
+    let batch:array<string> = []
+    loop true {
+        match select(@lines.receive @tick.next) {
+            line:string => batch.push(line)
+            <tick.Tick> => if batch.length >? 0 {
+                sleep(upload_time) or_throw          # the upload
+                uploads.send(batch.length) or_throw
+                batch = []
+            }
+            <Closed> => {
+                if batch.length >? 0 uploads.send(batch.length) or_throw   # ship the tail
+                uploads.close()
+                return
+            }
+        }
+    }
+}
+
+$test
+ships_every_ten_seconds = () => {
+    $time.clock = time.test_clock()
+    let lines = channel<string>(64)
+    let uploads = channel<int>(16)
+    parallel {
+        ship(lines uploads 1s)
+        {
+            loop i in [0..25) { lines.send("line {i}") or_throw; time.advance(1s) }
+            lines.close()
+        }
+    }
+    let sizes = [loop n in uploads n]
+    $expect sizes =? [10 10 5], "{sizes}"
+    # r2 makes this derivable: `advance` wakes last, so the tick at 10 s is taken before the
+    # test sends line 10, which goes in the second batch. Still a trace in my head (inherent).
+}
+
+$test
+slow_upload_drops_ticks = () => {
+    $time.clock = time.test_clock()
+    let lines = channel<string>(64)
+    let uploads = channel<int>(16)
+    let start = now
+    parallel {
+        ship(lines uploads 25s)                    # the upload takes 2.5 periods
+        { lines.send("a") or_throw; time.advance(40s); lines.send("b") or_throw; time.advance(20s); lines.close() }
+    }
+    $expect [loop n in uploads n] =? [1 1]         # ticks at 20 s and 30 s are dropped, not queued
+    $expect now - start =? 75s                     # the second upload (50 s + 25 s) outlives the close
+}
+# (Getting 75 s, and the tail flush I first forgot, took a careful trace of the scheduler. That
+# is inherent; but the exactness is what made the forgotten flush show up as [10 10], a clear F.)

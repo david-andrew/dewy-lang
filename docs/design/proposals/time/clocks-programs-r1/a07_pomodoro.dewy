@@ -1,0 +1,25 @@
+# Pomodoro timer: 25 minutes of focus. Closing the laptop pauses the pomodoro; on return it
+# says how long you were away.
+work_block = (length:Duration) => {
+    $time.monotonic = 'awake'
+    let started = now
+    let c0 = now(monotonic='continuous')
+    let done_at = started + length               # MonoPoint<monotonic='awake'>
+    let tick = ticker(1s)                        # awake: the scope's clock
+    let asleep_seen:Duration = 0s
+    loop now <? done_at {
+        tick.next or_throw;
+        print"\r{done_at.remaining.ticks(1s)[0]} s left"
+        let asleep = c0.elapsed - started.elapsed
+        if asleep - asleep_seen >? 1minute printl"\nwelcome back: you were away {asleep - asleep_seen}"
+        asleep_seen = asleep
+    }
+    printl"\ndone: take a 5 minute break"
+}
+# r3: `c0.elapsed - started.elapsed` reads as what it means; no clock named after the setup.
+
+main = () => loop round in [1..5) {
+    printl"pomodoro {round}"
+    work_block(25minute)
+    sleep(5minute) or_throw                     # the break counts real time: continuous
+}

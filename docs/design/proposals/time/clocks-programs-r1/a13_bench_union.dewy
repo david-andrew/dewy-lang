@@ -1,0 +1,22 @@
+# Benchmark harness: `--awake` times runs on awake time. The timer starts in one function and is
+# read in another, so a reading leaves the scope whose clock was chosen at run time.
+Mode:type = 'awake' | 'continuous'
+
+start_timer = (mode:Mode) => {
+    $time.monotonic = mode
+    now          # r2: ClockReading<monotonic='awake'> | ClockReading (a union)
+}
+
+run_case = (name:string work:(():>void) mode:Mode) => {
+    let t0 = start_timer(mode)
+    work()
+    let took = t0.elapsed     # r3: no narrowing; the union's members each know their clock
+    printl"{name}: {took}"
+}
+
+spin = () => loop i in [0..1_000_000) { }
+
+main = (argv) => {
+    let mode:Mode = if argv.contains("--awake") 'awake' else 'continuous'
+    run_case("spin" @spin mode)
+}

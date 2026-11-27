@@ -1,0 +1,40 @@
+# Desktop mail client: at most 3 notifications per awake hour (don't bury the user after a
+# night with the lid shut), while the server API allows 100 requests per real minute.
+# One Limiter type serves both clocks.
+Mode:type = 'awake' | 'continuous'
+
+Limiter:type = <M:Mode = 'continuous'>[        # r3 item 2: the documented pattern
+    max:int
+    per:Duration
+    sent:array<ClockReading<monotonic=M>> = []
+    allow = ():>bool => {
+        sent = [loop s in sent if s.elapsed <? per s]   # names no clock
+        if sent.length >=? max return false
+        sent.push(now(monotonic=M))                     # the one place that must name it
+        true
+    }
+]
+# r3: as Swift's `Limiter<C: Clock>`. A bare `now` in `push` would be reported at the awake
+# caller's line, naming `allow`, with the fix-it `now(monotonic=M)`. No friction left.
+
+notify_loop = (mail:Channel<string> toasts:Mutex<Limiter<'awake'>>) => loop subject in mail {
+    if @(toasts.lock()).allow() printl"toast: {subject}"
+}
+
+fetch_loop = (api:Mutex<Limiter> mail:Channel<string>) => loop true {
+    if not @(api.lock()).allow() { sleep(1s) or_throw; continue }
+    mail.send(fetch_one()) or_throw
+}
+fetch_one = ():>string => "subject"
+
+main = () => {
+    let mail = channel<string>(16)
+    let api = mutex(Limiter[max=100 per=1minute])
+    let toasts = mutex(Limiter<'awake'>[max=3 per=1hour])
+    parallel {
+        fetch_loop(api mail)
+        notify_loop(mail toasts)
+    }
+    # Passing `api` to notify_loop is now a compile error naming both clocks: r1's run-time
+    # report is gone. (No `$time.monotonic` setting needed anywhere: the type carries it.)
+}

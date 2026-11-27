@@ -1,0 +1,45 @@
+# Daily report at 09:00 New York time, across the March 2027 change to daylight time.
+import time
+
+next_run = (after:Instant at:TimeOfDay z:Zone):>Instant => {
+    let day = after.in_zone(z).date
+    loop true {
+        let t = day.at(at).in_zone(z fold='earlier' gap='next').nominal
+        if t >? after return t
+        day = day + 1day
+    }
+}
+
+daily = (at:TimeOfDay z:Zone job:(():>void) runs:int) => loop _ in [0..runs) {
+    let next = next_run(now.nominal at z)
+    sleep(next - now.nominal) or_throw
+    # OUT OF SCOPE (r2 item 11): there is no wall-clock wait, so a daily job turns a wall target into a monotonic
+    # Duration. That's wrong after an NTP step or a suspend across 09:00 (b11 shows it). The spec
+    # says "wall-clock schedules see it" (the step) but names no such schedule. Wanted:
+    # `sleep_until(next)` on an Instant: waits on the wall clock, re-arms on a step, wakes at
+    # resume if the target passed during sleep.
+    job()
+}
+
+$test
+nine_local_on_both_sides_of_the_change = () => {
+    $time.clock = time.test_clock(start=instant"2027-03-13T12:00:00Z")   # Sat 07:00 EST
+    let ny = zone"America/New_York"
+    let ran = channel<Instant>(4)
+    daily(time_of_day"09:00" ny () => ran.send(now.nominal) ?? void 3)
+    $expect ran.receive =? instant"2027-03-13T14:00:00Z"     # Sat 09:00 EST
+    $expect ran.receive =? instant"2027-03-14T13:00:00Z"     # Sun 09:00 EDT: 23 h later
+    $expect ran.receive =? instant"2027-03-15T13:00:00Z"
+    $expect now.nominal =? instant"2027-03-15T13:00:00Z"     # three days passed in no real time
+}
+
+$test
+today_follows_the_test_clock = () => {
+    $time.zone = 'America/New_York'
+    $time.clock = time.test_clock(start=instant"2027-03-14T04:59:59Z")   # 23:59:59 EST
+    $expect today =? date"2027-03-13"
+    time.advance(1s)
+    $expect today =? date"2027-03-14"
+}
+# GUESS: `$time.zone` set inside a test function is allowed when the test file's header sets none
+# (time.md: "A program whose main file sets none may set zones in its modules and scopes").

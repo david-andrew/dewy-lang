@@ -1,0 +1,17 @@
+# Debugging a resampler: print intermediate records, format for a report.
+Frame:type = [index:int64 at:Instant<tick=1ns/3> value:float64]
+
+resample = (base:Instant n:int64):>array<Frame> => {
+    let t0 = base as Instant<tick=1ns/3>
+    [loop i in [0..n) Frame[i t0 + i * 1ns/3 0.5]]
+}
+
+main = () => {
+    let frames = resample(instant"2026-10-24T12:00:00Z" 4)
+    printl(frames[1])        # r2: [index=1 at=2026-10-24T12:00:00Z+1/3ns value=0.5]: exact, compiles
+    printl"{frames[1].index} {frames[1].at.round(1ns)}"     # works; loses the third
+    printl(frames[1].at.format("HH:mm:ss.SSS"))
+    # OUT OF SCOPE (r2 item 13, D37): fixed-digit `S` patterns on a non-decimal tick.
+    printl(frames[3].at - frames[0].at)            # 1ns: exact quantity, as specified
+    printl(frames[1].at - frames[0].at)            # 1/3ns
+}

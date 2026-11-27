@@ -1,0 +1,45 @@
+# Token bucket: 5 tokens a second, bursts of 10. `acquire` waits for a token.
+import time
+
+Bucket:type = [
+    rate:rational = 5            # tokens per second
+    burst:rational = 10
+    tokens:rational = 10
+    last:ClockReading = now      # GUESS: a field default that reads the clock, evaluated at construction
+    refill = () => {
+        let t = now
+        tokens = min(burst tokens + (t - last) / 1s * rate)
+        last = t
+    }
+    try_take = ():>bool => {
+        refill()
+        if tokens <? 1 return false
+        tokens -= 1
+        true
+    }
+    acquire = () => loop not try_take() {
+        let wait = quantize((1 - tokens) / rate * 1s rounding='ceil')[0]   # (rational * 1s -> Duration: quantize, not this spec)
+        sleep(wait) or_throw;
+    }
+]
+
+$test
+burst_then_rate = () => {
+    $time.clock = time.test_clock()
+    let b = Bucket[]
+    loop _ in [0..10) $expect b.try_take()
+    $expect not b.try_take()
+    time.advance(199ms)
+    $expect not b.try_take()
+    time.advance(1ms)
+    $expect b.try_take()
+}
+
+$test
+twenty_requests_take_two_seconds = () => {
+    $time.clock = time.test_clock()
+    let b = Bucket[]
+    let start = now
+    loop _ in [0..20) b.acquire()
+    $expect now - start =? 2s                # 10 from the burst, 10 more at 200 ms each
+}

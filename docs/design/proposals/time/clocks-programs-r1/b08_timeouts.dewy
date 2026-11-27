@@ -1,0 +1,51 @@
+# RPC client: each reply must arrive within 2 s of the previous one, and the whole call within 5 s.
+import time
+Reply:type = [part:int last:bool]
+CallFailed:type = type of error & [why:string]
+
+collect = (replies:Channel<Reply>):>array<Reply> | CallFailed => {
+    let got:array<Reply> = []
+    loop true {
+        match replies.receive(timeout=2s) {
+            r:Reply => { got.push(r); if r.last return got }
+            <Timeout> => return CallFailed["stalled after part {got.length}"]
+            <Closed> => return CallFailed["closed"]
+        }
+    }
+}
+call = (replies:Channel<Reply>) => within(5s @collect(replies))
+
+server = (out:Channel<Reply> gaps:array<Duration>) => loop i in [0..gaps.length) {
+    sleep(gaps[i]) or_throw
+    out.send(Reply[i i =? gaps.length - 1]) ?? return
+}
+
+$test
+slow_part_stalls = () => {
+    $time.clock = time.test_clock()
+    let replies = channel<Reply>(4)
+    parallel (
+        $until_others_finish server(replies [1s 2001ms 1s])
+        let r = call(replies)
+    )
+    $expect r is? CallFailed and r.why =? "stalled after part 1"
+    # FIGHT: here I wanted "the clock reads 3 s": see below
+}
+
+$test
+whole_call_times_out = () => {
+    $time.clock = time.test_clock()
+    let replies = channel<Reply>(4)
+    let start = now
+    parallel (
+        $until_others_finish server(replies [1900ms 1900ms 1900ms])
+        let r = call(replies)
+    )
+    $expect r is? Timeout
+    $expect now - start =? 5s
+}
+# OUTSIDE THIS DESIGN (r3 item 6, G6): in the first test I had no `start`. A test clock starts its monotonic count at zero, so I
+# wanted `$expect time.since_start =? 3s` or `monotonic =? 3s`. `monotonic` is a
+# sample, presumably not comparable with a Duration. Small, but every test writes `let start = now`.
+# r2: the cleanup grace counts test-clock time. Resolved. The `let start = now` wish (F12) was
+# not taken; it stays a small concise-axis cost.

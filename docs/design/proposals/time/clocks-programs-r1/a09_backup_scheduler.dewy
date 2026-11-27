@@ -1,0 +1,20 @@
+# Backup agent: back up after every hour of use (awake time), and at least once a day even if the
+# laptop stays closed most of the day (real time), whichever comes first.
+import p"@lib/std/tasks.dewy" as task
+
+run_backup = (dir:Path):>int => {
+    let started = now
+    let n = dir.list or_throw
+    printl"backed up {n.length} files in {now - started} at {now.nominal}"
+    n.length
+}
+
+agent = (dir:Path) => loop true {
+    match race(@sleep(1hour monotonic='awake') @sleep(24hour)) {
+        _ => run_backup(dir) ?? 0;
+    }
+}
+# r2: the helper is gone; the wait names its clock. FIGHT (not this spec): race can't tell me which
+# sleep won, since both give void; a `match` arm naming the call (`<a.void>`) works only for waits on locals.
+
+main = () => agent(p"/home/me/Documents")

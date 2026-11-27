@@ -1,0 +1,40 @@
+# A session store and the helpers its tests share. Sessions expire after 20 idle minutes;
+# a VM snapshot restore must not let old deadlines compare with new readings.
+import time
+Session:type = [user:string idle_until:MonoPoint]
+
+touch = (s:Session):>Session => Session[s.user now + 20minute]
+alive = (s:Session):>bool | ClockDiscontinuity | DomainMismatch => {
+    $time.require_clock_domain
+    now <? s.idle_until              # after a monotonic reset: ClockDiscontinuity
+}
+
+# Shared test helper: advance in steps, checking a condition each time.
+advance_until = (step:Duration limit:Duration done:(():>bool) clock:time.TestClock = $time.clock):>Duration => {
+    let waited:Duration = 0s
+    loop not done() and waited <? limit {
+        time.advance(step clock=clock)
+        waited += step
+    }
+    waited
+}
+# r2: the default is read at each call site, which must have a test clock in force; callers
+# pass nothing. Inside, `clock=clock` is still needed (this body can't prove `$time.clock` is a
+# TestClock). Correct and cheap, so concise 4.
+
+$test
+expires_after_twenty_idle_minutes = () => {
+    $time.clock = time.test_clock()
+    let s = touch(Session["ann" now + 0s])
+    let w = advance_until(1minute 1hour () => alive(s) =? false)
+    $expect w =? 20minute
+}
+
+$test
+restore_invalidates_sessions = () => {
+    $time.clock = time.test_clock()
+    let s = touch(Session["ann" now + 0s])
+    time.simulate_monotonic_reset()        # r2 name
+    $expect alive(s) is? ClockDiscontinuity
+    $expect alive(touch(s)) =? true               # a fresh touch is in the new generation
+}

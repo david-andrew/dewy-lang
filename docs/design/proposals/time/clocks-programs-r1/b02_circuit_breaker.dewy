@@ -1,0 +1,50 @@
+# Circuit breaker: after 3 failures, refuse calls for 30 s, then let one trial call through.
+import time
+NetError:type = type of error
+Open:type = type of error
+
+Breaker:type = [
+    threshold:int = 3
+    cooldown:Duration = 30s
+    failures:int = 0
+    open_until:MonoPoint | none = none
+    call = (f:(():>string | NetError)):>string | NetError | Open => {
+        if open_until is? MonoPoint and now <? open_until return Open
+        let r = f()
+        if r is? NetError {
+            failures += 1
+            if failures >=? threshold open_until = now + cooldown
+        } else {
+            failures = 0
+            open_until = none
+        }
+        r
+    }
+]
+
+down = ():>string | NetError => NetError
+up = ():>string | NetError => "ok"
+
+$test
+opens_and_recovers = () => {
+    $time.clock = time.test_clock()
+    let b = Breaker[]
+    loop _ in [0..3) b.call(@down);
+    $expect b.call(@up) is? Open
+    time.advance(29s)
+    $expect b.call(@up) is? Open
+    time.advance(1s)
+    $expect b.call(@up) =? "ok"
+    $expect b.failures =? 0
+}
+
+$test
+trial_failure_reopens = () => {
+    $time.clock = time.test_clock()
+    let b = Breaker[threshold=1]
+    b.call(@down);
+    time.advance(30s)
+    $expect b.call(@down) is? NetError       # the trial call runs, fails, reopens
+    time.advance(29999ms)
+    $expect b.call(@up) is? Open
+}

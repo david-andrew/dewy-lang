@@ -1,0 +1,29 @@
+# NIC hardware timestamps with a 0.25 ns tick: log packet arrival times exactly. The NIC counts
+# quarter nanoseconds from a capture start the driver reports as an Instant.
+Stamp:type = Instant<tick=1ns/4>
+Packet:type = [seq:int64 rx:Stamp]
+
+from_hw = (start:Instant quarter_ns:int64):>Stamp =>
+    (start as Stamp) + quarter_ns * 1ns/4
+    # GUESS: a runtime count times the tick is on the grid by its type, so no OffGrid (as c01).
+    # OUT OF SCOPE (small): the obvious `Stamp.from_ticks(start quarter_ns)` doesn't exist.
+
+log_packet = (p:Packet) => printl"{p.rx} seq={p.seq}"     # exact: as many digits as needed
+
+main = () => {
+    const start = instant"2026-10-26T07:33:20Z"
+    let packets = [
+        Packet[1 from_hw(start 1)]
+        Packet[2 from_hw(start 6)]
+        Packet[3 from_hw(start 4_000_000_002)]
+    ]
+    loop p in packets log_packet(p)
+    # 2026-10-26T07:33:20.00000000025Z seq=1
+    # 2026-10-26T07:33:20.0000000015Z seq=2
+    # 2026-10-26T07:33:21.0000000005Z seq=3
+    # OUT OF SCOPE (r2 item 13, D37): lines don't align (11, 10 and 10 digits). For logs I want a fixed width:
+    # `p.rx.format("yyyy-MM-dd'T'HH:mm:ss.SSSSSSSSSSS'Z'")` (11 S). GUESS: S past 9 digits works and
+    # is exact on a 1ns/4 tick; time.md doesn't say how many S letters are allowed.
+    loop i in [1..packets.length) printl"gap {packets[i].rx - packets[i-1].rx}"   # 5/4ns, then 999999999ns
+    # OUT OF SCOPE (r2 item 13): prints `5/4ns`; I'd rather read 1.25ns.
+}

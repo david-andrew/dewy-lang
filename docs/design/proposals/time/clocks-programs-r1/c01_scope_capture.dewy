@@ -1,0 +1,26 @@
+# Oscilloscope capture at 3 GS/s: samples are 1/3 ns apart, timed from a hardware trigger.
+Sample:type = [at:Instant<tick=1ns/3> volts:float64]
+
+read_adc = (i:int):>float64 => sin(i as float64 / 7.0)   # stand-in for the device
+
+capture = (trigger:Instant n:int):>array<Sample> => {
+    let t0 = trigger as Instant<tick=1ns/3>
+    [loop i in [0..n) Sample[t0 + i * 1ns/3 read_adc(i)]]
+    # GUESS: `t0 + i * 1ns/3` with runtime `i` is on the 1ns/3 grid by its type, so no OffGrid.
+}
+
+main = () => {
+    const trigger = instant"2026-10-24T12:00:00.000000100Z"
+    let samples = capture(trigger 12)
+    printl"trigger {trigger}"                      # plain Instant: 2026-10-24T12:00:00.0000001Z
+    printl"time_ns,volts"
+    loop s in samples printl"{(s.at - samples[0].at) / 1ns},{fmt'.4f'(s.volts)}"
+    # prints 0,…  1/3,…  2/3,…  1,…  The exact rational is right but a CSV reader wants decimals;
+    # `fmt'.4f'((s.at - samples[0].at) / 1ns as float64)` is the honest choice. Not this spec's job.
+    let peak = samples[0]
+    loop s in samples if s.volts >? peak.volts peak = s
+    printl"peak at {peak.at}"                      # r2: 2026-10-24T12:00:00.000000103Z+1/3ns, exact
+    printl"peak at {peak.at.round(1ns)}"           # when a plain RFC 3339 label is wanted
+    # r2 removed my r1 complaint (rounded samples looking simultaneous): the exact print tells
+    # samples 9, 10 and 11 apart.
+}

@@ -1,0 +1,25 @@
+# Export the 3 GS/s capture (c01) to a JSON file for a web viewer. JSON promises RFC 3339, so a
+# 1ns/3 tick has to be rounded; the volts stay as they are.
+Sample:type = [at:Instant<tick=1ns/3> volts:float64]
+SampleOut:type = [at:Instant volts:float64 offset_ns:rational]
+
+export = (samples:array<Sample>):>string => {
+    let t0 = samples[0].at
+    let rows = [loop s in samples SampleOut[s.at.round(1ns) s.volts (s.at - t0) / 1ns]]
+    to_json(rows 2)
+    # to_json(samples) is a compile error with the fix-it `.round(1ns)`, as r2 says. Good.
+    # OUTSIDE THIS DESIGN (r3 item 6, G8): the fix-it can't be applied to `to_json(samples)`; it applies to a field, so I
+    # declare a mirror type and copy every field. For a record with ten fields and one instant,
+    # that's a second type to keep in step. Wanted: the codec takes the rounding,
+    # `to_json(samples round=1ns)` (declared loss, every non-decimal instant inside), or a field
+    # tag on Sample saying how it serializes.
+    # GUESS: a `rational` field writes as a JSON number or a "1/3" string? I kept `offset_ns` so
+    # the viewer can tell samples apart; JSON's number type can't hold 1/3 exactly either.
+}
+
+main = () => {
+    const trigger = instant"2026-10-24T12:00:00Z"
+    let t0 = trigger as Instant<tick=1ns/3>
+    let samples = [loop i in [0..6) Sample[t0 + i * 1ns/3 sin(i as float64)]]
+    p"capture.json".write_text(export(samples)) or_throw;
+}

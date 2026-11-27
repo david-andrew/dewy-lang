@@ -1,0 +1,61 @@
+# Leader lease: the leader may act only while its 30 s lease is fresh, renewing every 10 s.
+# After the machine sleeps, it must not believe it still leads: the lease is real time.
+import time
+
+Leader:type = [
+    lease:Duration = 30s
+    renewed:ClockReading | none = none
+    renew = () => { renewed = now }
+    leads = ():>bool => renewed is? ClockReading and renewed.elapsed <? lease
+]
+
+heartbeat = (l:Mutex<Leader> stop:Channel<void>) => {
+    let beat = ticker(10s)
+    loop true {
+        match select(@beat.next @stop.receive) {
+            <beat.Tick> => @(l.lock()).renew()
+            _ => return
+        }
+    }
+}
+
+$test
+suspend_loses_the_lease = () => {
+    $time.clock = time.test_clock()
+    let l = Leader[]
+    l.renew()
+    time.advance(29s)
+    $expect l.leads()
+    time.simulate_suspend(1minute)           # wall and continuous jump; awake does not
+    $expect not l.leads()
+}
+
+$test
+awake_lease_would_be_split_brain = () => {
+    $time.clock = time.test_clock()
+    $time.monotonic = 'awake'                # the bug this test exists to catch
+    let l = Leader[]
+    l.renew()
+    time.simulate_suspend(1minute)
+    $expect l.leads()                        # documents the wrong answer awake time gives
+}
+
+$test
+heartbeats_survive_a_suspend = () => {
+    $time.clock = time.test_clock()
+    let l = mutex(Leader[])
+    let stop = channel<void>(1)
+    @(l.lock()).renew()
+    parallel {
+        heartbeat(l stop)
+        {
+            time.advance(95s)
+            $expect @(l.lock()).leads()
+            time.simulate_suspend(1hour)
+            # r2: the ticker ticks once at resume, and simulate_suspend returns after
+            # the heartbeat has renewed. Both former guesses are now rules.
+            $expect @(l.lock()).leads()      # renewed at resume
+            stop.close()
+        }
+    }
+}

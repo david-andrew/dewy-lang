@@ -1,0 +1,44 @@
+# Retry with exponential backoff and "equal jitter": wait half the step plus a random half.
+import time
+NetError:type = type of error & [message:string]
+GaveUp:type = type of error & [tries:int last:NetError]
+
+retry = (attempt:(():>string | NetError) tries:int base:Duration dice:Rng):>string | GaveUp => {
+    let step = base
+    loop i in [1..tries] {
+        let r = attempt()
+        if r is? string return r
+        if i =? tries return GaveUp[tries r]
+        let half = step // 2
+        let extra = dice.next_int(0 half.ticks(1ms)[0] + 1)
+        sleep(half + convert<Duration>(extra * 1ms) or_throw) or_throw  # (runtime int*1ms needs convert: not this spec)
+        step = step * 2
+    }
+}
+
+$test(cases=(1 2 3 4))
+backoff_grows_and_gives_up = (seed:int) => {
+    $time.clock = time.test_clock()
+    let calls = channel<Instant>(8)
+    let start = now
+    let r = retry(() => { calls.send(now.nominal) ?? void; NetError["down"] } 4 1s rng(seed))
+    $expect r is? GaveUp
+    let total = now - start                  # exact: no sleeping, no tolerance
+    $expect total >=? 3500ms and total <=? 7s, "total {total}"
+    let t0 = calls.receive or_throw
+    let t1 = calls.receive or_throw
+    let t2 = calls.receive or_throw
+    let t3 = calls.receive or_throw
+    $expect t1 - t0 >=? 500ms and t1 - t0 <=? 1s
+    $expect t2 - t1 >=? 1s and t2 - t1 <=? 2s
+    $expect t3 - t2 >=? 2s and t3 - t2 <=? 4s
+}
+
+$test
+same_seed_same_schedule = () => {
+    $time.clock = time.test_clock()
+    let a = time.elapsed(() => retry(() => NetError["x"] 4 1s rng(7)))
+    let b = time.elapsed(() => retry(() => NetError["x"] 4 1s rng(7)))
+    $expect a =? b
+    # GUESS: time.elapsed takes a function literal as well as `@f`; it is shown only with `@work`.
+}

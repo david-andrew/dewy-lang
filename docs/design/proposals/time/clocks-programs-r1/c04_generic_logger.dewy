@@ -1,0 +1,21 @@
+# A tracing library: spans carry the start/end on whatever tick the caller's clock source uses.
+Span:type = <T>[name:string start:T end:T]          # GUESS: generic record spelling
+
+emit = <T>(s:Span<T>) => printl"{s.name} {s.start} .. {s.end} ({s.end - s.start})"
+# r2: compiles for every tick. Span<Instant<tick=1ns/3>> prints
+#   adc 2026-10-24T12:00:00Z .. 2026-10-24T12:00:00Z+1/3ns (1/3ns)
+# FIGHT (inherent to r2; the accessor that would let a library opt out is G9, outside this design, r3 item 6): this library writes trace lines that a log collector parses as RFC 3339. r2 lets
+# `printl` produce `Z+1/3ns`, which r1 rejected because consumers break at run time; now they break
+# only for callers with a non-decimal tick, and nothing in emit's signature says so. The library
+# can opt into the guarantee only by rounding always (`s.start.round(1ns)`, losing 1ns/4 digits).
+# Wanted: a way to ask for RFC 3339 that keeps decimal ticks exact and rounds only the rest, e.g.
+# `t.rfc3339` (compile error on a non-decimal tick, like JSON) beside a `t.round_to_decimal(1ns)`.
+
+main = () => {
+    const t = instant"2026-10-24T12:00:00Z"
+    emit(Span["load" t t + 125ms])
+    let q = t as Instant<tick=1ns/4>
+    emit(Span["dma" q q + 3ns/4])
+    let third = t as Instant<tick=1ns/3>
+    emit(Span["adc" third third + 1ns/3])          # r2: prints the exact `+1/3ns` form
+}

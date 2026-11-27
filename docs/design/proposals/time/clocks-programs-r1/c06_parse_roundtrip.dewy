@@ -1,0 +1,22 @@
+# A log replayer: reads RFC 3339 lines with up to 12 fraction digits written by a PTP logger
+# (c02), keeps them exact, and checks the order.
+Stamp:type = Instant<tick=1ns/4>
+
+parse_stamp = (text:string):>Stamp | ParseError | OffGrid | OutOfRange =>
+    instant<Stamp>(text)
+    # OUT OF SCOPE (r2 item 13). GUESS: `instant<Stamp>(text)` reads onto a chosen tick. time.md only shows `instant(text)`,
+    # which yields a 1 ns `Instant` and so `OffGrid` for "…0.00000000025Z". Without a target-tick
+    # form, a log written exactly (P3) cannot be read back exactly.
+
+main = () => {
+    let lines = ["2026-10-26T05:33:20.00000000025Z" "2026-10-26T05:33:20.0000000015Z"
+                 "2026-10-26T05:33:20.000000001Z"]
+    let prev:Stamp | none = none
+    loop line in lines {
+        let s = parse_stamp(line)
+        if s is? exception { printl"bad line {line}: {s}"; continue }
+        if prev is? Stamp and s <? prev printl"out of order: {s} after {prev}"
+        prev = s
+    }
+    printl"last {prev}"                            # exact round trip: same text out as in
+}

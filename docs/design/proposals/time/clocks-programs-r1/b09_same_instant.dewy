@@ -1,0 +1,43 @@
+# Metrics agent: flush every second, shut down after 3 s with a final flush. At t = 3 s the
+# flush tick and the shutdown are due together; the output must not depend on which wakes first.
+import time
+
+agent = (events:Channel<int> out:Channel<int> run_for:Duration) => {
+    let sum = 0
+    let flush = ticker(1s)
+    let stop = now + run_for
+    loop now <? stop {
+        match select(@events.receive @flush.next timeout=stop) {   # r2: a deadline is a timeout
+            n:int => sum += n
+            <flush.Tick> => { out.send(sum) or_throw; sum = 0 }
+            <Timeout> => break
+            <Closed> => break
+        }
+    }
+    out.send(sum) or_throw                    # final flush: possibly 0 if the tick won at t = 3 s
+    out.close()
+}
+
+produce = (events:Channel<int>) => loop i in [1..6] {
+    sleep(500ms) or_throw
+    events.send(i) or_throw
+}
+
+$test(cases=(0 1 2 3 4 5 6 7))
+totals_do_not_depend_on_wake_order = (seed:int) => {
+    $time.clock = time.test_clock(wake_order='shuffled' seed=seed)
+    let events = channel<int>(8)
+    let out = channel<int>(8)
+    parallel {
+        produce(events)
+        agent(events out 3s)
+    }
+    let total = 0
+    loop n in out total += n
+    $expect total =? 21, "seed {seed}"
+}
+# This test fails for some seeds, and should: event 6 is sent at exactly t = 3 s, so when the
+# stop deadline wakes first it is lost. Finding that with 8 seeds and no real time is the win.
+# r2: produce starts before agent (source order), so the default order is reproducible
+# too, and 'shuffled' shuffles starts and ties. OUTSIDE THIS DESIGN (r3 item 6, G6): `$test(seeds=8)` instead of
+# listing eight cases and threading `seed` into the clock by hand.

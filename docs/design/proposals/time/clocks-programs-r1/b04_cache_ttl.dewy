@@ -1,0 +1,41 @@
+# Page cache: entries live 60 s; a miss calls the loader. The loader table is built at module level.
+import time
+Entry:type = [body:string expires:MonoPoint]
+
+Cache:type = [
+    ttl:Duration = 60s
+    entries:dict<string Entry> = [:]          # GUESS: empty dict literal spelling
+    loads:int = 0
+    get = (key:string load:((key:string):>string)):>string => {
+        let e = entries.get(key)
+        if e is? Entry and now <? e.expires return e.body
+        let body = load(key)
+        loads += 1
+        entries[key] = Entry[body now + ttl]
+        body
+    }
+]
+
+fetch_page = (key:string):>string => {
+    let r = within(2s @slow_get(key))         # the loader times out after 2 s
+    r ?? "timeout"
+}
+slow_get = (key:string):>string => { sleep(500ms) or_throw; "<html>{key}</html>" }
+
+LOADERS = [page=@fetch_page]
+# r2: no clock is written in force at this `@`, so LOADERS.page runs on whoever calls it:
+# the test clock below. Resolved.
+
+$test
+expires_after_ttl = () => {
+    $time.clock = time.test_clock()
+    let c = Cache[]
+    $expect c.get("home" LOADERS.page) =? "<html>home</html>"
+    $expect c.loads =? 1
+    time.advance(59s)                          # 500 ms of the first load already passed
+    c.get("home" LOADERS.page);
+    $expect c.loads =? 1
+    time.advance(500ms)                        # expires exactly at 60 s after the store
+    c.get("home" LOADERS.page);
+    $expect c.loads =? 2
+}

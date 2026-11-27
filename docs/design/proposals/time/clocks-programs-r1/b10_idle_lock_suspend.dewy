@@ -1,0 +1,53 @@
+# Tests for the idle locker (a01): a closed lid doesn't count; typing restarts the count.
+import time
+Key:type = [text:string]
+AwakeReading:type = ClockReading<monotonic='awake'>     # r3 item 3: the program's own alias
+
+lock_when_idle = (input:Channel<Key> locks:Channel<AwakeReading> idle:Duration) => {
+    $time.monotonic = 'awake'
+    loop true {
+        match input.receive(timeout=idle) {
+            <Timeout> => { locks.send(now) or_throw; return }    # report when it locked
+            <Closed> => return
+            k:Key => {}
+        }
+    }
+}
+
+$test
+suspend_does_not_count = () => {
+    $time.clock = time.test_clock()
+    let keys = channel<Key>(4)
+    let locks = channel<AwakeReading>(1)
+    let start = now(monotonic='awake')
+    let wall0 = now.nominal
+    parallel {
+        lock_when_idle(keys locks 5minute)
+        {
+            time.advance(4minute)
+            time.simulate_suspend(1hour)
+            time.advance(59s)
+            $expect locks.receive(timeout=0s) is? Timeout    # not locked at 4:59 awake
+        }
+    }
+    let locked = locks.receive or_throw
+    $expect locked - start =? 5minute         # awake time
+    $expect locked.nominal - wall0 =? 1hour + 5minute
+}
+# r2: the channel's element type says the clock (a channel stores readings, so it is written), and
+# `start` names its clock at the read. A mismatch is a compile error at `locks` with the fix-it.
+# (The code under test reports on a channel so the test can probe it: the usual price in
+# Go/tokio too, so not counted against the design.)
+
+$test
+typing_restarts_the_count = () => {
+    $time.clock = time.test_clock()
+    let keys = channel<Key>(4)
+    let locks = channel<AwakeReading>(1)
+    let start = now(monotonic='awake')
+    parallel {
+        lock_when_idle(keys locks 5minute)
+        { time.advance(4minute); keys.send(Key["a"]) or_throw }
+    }
+    $expect (locks.receive or_throw) - start =? 9minute
+}

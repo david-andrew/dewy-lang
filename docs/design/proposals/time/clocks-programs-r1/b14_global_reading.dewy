@@ -1,0 +1,32 @@
+# Service status page: uptime since process start, and "last deploy N minutes ago".
+# The start reading is module-level, so it is made under the system clock.
+import time
+
+STARTED = now                                  # module level: system clock, at initialization
+
+uptime = ():>Duration => now - STARTED
+
+status_line = ():>string => "up {uptime()}"
+
+$test
+uptime_counts_up = () => {
+    $time.clock = time.test_clock()
+    let before = uptime()
+    time.advance(90s)
+    $expect uptime() - before =? 90s
+}
+# r3 item 4: a compile error at `uptime()` in this test, naming STARTED (system clock, module level)
+# and the test clock in force. So this test doesn't build until it takes the shape below, which is
+# the right outcome: the error replaces a run-time DomainMismatch.
+
+# The workable shape: the start is a parameter, so the test makes its own.
+uptime_since = (started:ClockReading):>Duration => started.elapsed
+
+$test
+uptime_since_counts_up = () => {
+    $time.clock = time.test_clock()
+    let started = now
+    time.advance(90s)
+    $expect uptime_since(started) =? 90s
+    time.advance(0s)                           # r2: let anything runnable settle (no-op here)
+}

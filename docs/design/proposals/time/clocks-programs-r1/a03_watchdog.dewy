@@ -1,0 +1,37 @@
+# Supervisor: restart the worker if it misses heartbeats for 30 s of awake time.
+# Without 'awake', closing the lid for a minute would restart a healthy worker on resume.
+import p"@lib/std/tasks.dewy" as task
+Beat:type = [seq:int64]
+
+worker = (beats:Channel<Beat> jobs:Channel<string>) => {
+    let seq:int64 = 0
+    loop job in jobs {
+        process_job(job)
+        seq += 1
+        beats.send(Beat[seq]) or_throw
+    }
+}
+process_job = (job:string) => sleep(2s)
+
+watch = (beats:Channel<Beat> limit:Duration):>'missed' | 'stopped' => {
+    $time.monotonic = 'awake'
+    let last = now
+    loop true {
+        match beats.receive(timeout=limit) {
+            b:Beat => { last = now }
+            <Timeout> => {
+                printl"no heartbeat for {last.elapsed} of awake time"
+                return 'missed'
+            }
+            <Closed> => return 'stopped'
+        }
+    }
+}
+
+supervise = (jobs:Channel<string>) => loop true {
+    let beats = channel<Beat>(1)
+    let outcome = race(@worker(beats jobs) @watch(beats 30s))
+    # `watch` sets its own clock; race's tasks would also inherit one set in `supervise`.
+    if outcome =? 'stopped' return
+    printl"restarting worker at {now.nominal}"
+}

@@ -1,0 +1,43 @@
+# Request timing must ignore an NTP step; log rotation at local midnight must follow it.
+import time
+
+timed = (work:(():>void)):>Duration => {
+    let start = now
+    work()
+    now - start
+}
+
+midnight_rotation = (z:Zone rotated:Channel<Instant>) => {
+    let today_local = now.nominal.in_zone(z).date
+    let midnight = (today_local + 1day).at(time_of_day"00:00").in_zone(z fold='earlier' gap='next').nominal
+    sleep(midnight - now.nominal) or_throw    # OUT OF SCOPE (r2 item 11): no wall-clock wait
+    rotated.send(now.nominal) or_throw
+}
+
+$test
+step_does_not_change_elapsed = () => {
+    $time.clock = time.test_clock(start=instant"2030-06-01T12:00:00Z")
+    let d = timed(() => {
+        sleep(2s) ?? void
+        time.simulate_wall_step(-90s)          # NTP pulls the clock back mid-request
+        sleep(1s) ?? void
+    })
+    $expect d =? 3s
+    $expect now.nominal =? instant"2030-06-01T11:58:33Z"
+    $expect now.status is? time.Stepped        # OUTSIDE THIS DESIGN (r3 item 5): the public status member
+}
+
+$test
+rotation_follows_the_wall_clock = () => {
+    $time.clock = time.test_clock(start=instant"2030-06-01T23:00:00Z")
+    let rotated = channel<Instant>(1)
+    parallel {
+        midnight_rotation(zone"UTC" rotated)
+        time.simulate_wall_step(30minute)      # wall now 23:30; 30 minutes left, not 60
+    }
+    $expect rotated.receive =? instant"2030-06-02T00:00:00Z"
+    # r2: the rotation item starts first (source order), arms 60 minutes, and the test FAILS
+    # every time, no longer by luck. It fails: the monotonic sleep was armed for 60 minutes, so it fires
+    # at wall 00:30. The test clock found the bug; the language gives no way to fix it short of
+    # polling the wall clock. A wall-clock wait (`sleep_until(instant)`) is the missing piece.
+}

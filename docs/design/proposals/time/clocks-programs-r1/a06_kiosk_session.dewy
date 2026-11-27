@@ -1,0 +1,33 @@
+# Library kiosk: a paid session lasts 2 hours of real time (sleep counts: the customer paid
+# for it), but ends early after 3 minutes without input while the machine is on.
+Key:type = [text:string]
+
+idle_loop = (input:Channel<Key>):>'idle' | 'closed' => {
+    $time.monotonic = 'awake'
+    loop true {
+        match input.receive(timeout=3minute) {
+            <Timeout> => return 'idle'
+            <Closed> => return 'closed'
+            k:Key => printl"typed {k.text}"
+        }
+    }
+}
+
+session = (input:Channel<Key>):>'idle' | 'paid_time_over' | 'closed' => {
+    let paid_until = now + 2hour                    # MonoPoint: continuous
+    match within(paid_until @idle_loop(input)) {    # the deadline keeps its own clock
+        <Timeout> => 'paid_time_over'
+        r => r
+    }
+}
+# r1's silent bug is gone: the paid deadline is waited on its own clock by `within`, and the idle
+# timeout on awake time inside. Two clocks compose with calls that already exist.
+# GUESS: `r => r` narrows the remaining arms to 'idle' | 'closed' (ordinary match behaviour).
+
+main = () => {
+    let keys = channel<Key>(16)
+    parallel {
+        loop true { let l = read_line(); if l is? exception or l is? none break; keys.send(Key[l]) or_throw }
+        printl"session ended: {session(keys)}"
+    }
+}

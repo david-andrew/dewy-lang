@@ -1,0 +1,31 @@
+# A slow property test that must give up after 20 s of compute, even if the CI laptop sleeps.
+import time
+
+collatz_len = (n:int):>int => {
+    let steps = 0
+    let x = n
+    loop x !=? 1 {
+        check_cancel() or_throw
+        x = if x % 2 =? 0 x // 2 else 3*x + 1
+        steps += 1
+    }
+    steps
+}
+
+longest_below = (limit:int):>int => {
+    let best = 0
+    loop n in [1..limit) best = max(best collatz_len(n))
+    best
+}
+
+$test
+collatz_is_bounded = () => {
+    $time.monotonic = 'awake'            # a suspended laptop must not fail the test
+    let r = within(20s @longest_below(1_000_000))
+    $expect r is? int, "gave up after 20 s of awake time"
+    $expect r =? 524
+}
+# OUT OF SCOPE (r2 item 10, test runner). What I wanted was a time limit on the test itself, applied by the runner to every test:
+# `$test(time_limit=20s)` (or a project default) counted in awake time. `./tools/dewy test` has no
+# per-test limit, so a hung test hangs CI until the job's own wall-clock timeout kills everything.
+# `within` only helps where the code under test cooperates with cancellation (check_cancel above).

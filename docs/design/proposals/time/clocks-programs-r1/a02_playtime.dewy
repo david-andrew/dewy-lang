@@ -1,0 +1,19 @@
+# Game launcher: record hours played per game, excluding time the laptop slept with the game open,
+# and also show how long the session spanned (sleep included).
+Played:type = [game:string started:Instant played:Duration spanned:Duration]
+
+play = (game:string exe:Path args:array<string>):>Played => {
+    $time.monotonic = 'awake'
+    let start = now                                  # ClockReading<monotonic='awake'>
+    let span_start = now(monotonic='continuous')     # plain ClockReading
+    let status = run(exe args)
+    printl"{game} exited with {status}"
+    Played[game start.nominal start.elapsed span_start.elapsed]   # r3: each on its own clock
+}
+
+main = (argv) => {
+    if argv.length <? 3 { printl"usage: launch GAME EXE"; return }
+    let p = play(argv[1] p(argv[2]) argv[3..])
+    printl"played {p.game} for {p.played} (session spanned {p.spanned})"
+    p"playtime.json".write_text(to_json(p)) or_throw;
+}

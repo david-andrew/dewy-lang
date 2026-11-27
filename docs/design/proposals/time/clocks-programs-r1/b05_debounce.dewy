@@ -1,0 +1,44 @@
+# Editor autosave: save 500 ms after the last keystroke, never in the middle of typing.
+import time
+
+debounce = (edits:Channel<string> saves:Channel<string> quiet:Duration) => {
+    let pending:string | none = none
+    loop true {
+        let got = if pending is? none edits.receive else edits.receive(timeout=quiet)
+        match got {
+            text:string => pending = text
+            <Timeout> => { saves.send(pending or_throw) or_throw; pending = none }
+            <Closed> => {
+                if pending is? string saves.send(pending) or_throw
+                saves.close()
+                return
+            }
+        }
+    }
+}
+
+$test
+saves_once_after_quiet = () => {
+    $time.clock = time.test_clock()
+    let edits = channel<string>(8)
+    let saves = channel<string>(8)
+    parallel {
+        debounce(edits saves 500ms)
+        {
+            edits.send("h") or_throw
+            time.advance(200ms)
+            edits.send("he") or_throw
+            time.advance(499ms)
+            $expect saves.receive(timeout=0s) is? Timeout   # nothing saved mid-typing
+            time.advance(1ms)
+            $expect saves.receive(timeout=0s) =? "he"
+            edits.close()
+        }
+    }
+    $expect saves.receive is? Closed
+}
+# OUTSIDE THIS DESIGN (r3 item 6, G5): if the first $expect in the item fails, the item returns without `edits.close()`, the
+# debouncer waits forever, and with no deadline pending the test ends in a deadlock report rather
+# than a clean F. Fine, but a failed expectation in a test-clock test should cancel the rest
+# (tokio/Go synctest have the same problem; Jest's fake timers don't, being single-threaded).
+# GUESS: `$expect` inside a parallel item is allowed (the spec's own example does it).
