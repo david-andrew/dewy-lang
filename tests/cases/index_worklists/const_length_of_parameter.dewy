@@ -1,0 +1,15 @@
+# A bound named by a constant copy of a parameter's length relates to that length.
+G:type = [names:array<string> targets:array<int64<(<? names.length)>>]
+reach = (g:G):>void => {
+    const n = g.names.length
+    let seen = fill(false n)
+    let next:array<addr<(<? n)>> = []
+    loop w in g.targets {
+        if not seen[w] {
+            seen[w] = true
+            next.push(w)
+        }
+    }
+    loop not next.is_empty printl(g.names[next.pop()])
+}
+main = () => reach(G[["a" "b" "c"] [2 0 2]])

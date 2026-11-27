@@ -18,7 +18,7 @@ from p"facts.jo" import (FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_COPY FACT_ELEM
 from p"facts_values.dewy" import (fact_domain fact_type fact_project)
 from p"facts_compare.dewy" import (fact_compare)
 from p"facts_lengths.dewy" import (fact_difference)
-from p"facts_index_writes.dewy" import (fact_bind fact_constant fact_new)
+from p"facts_index_writes.dewy" import (fact_bind fact_constant fact_new fact_set_bound)
 from p"facts_index_writes.dewy" import (fact_add_projection)
 from p"facts_value_queries.dewy" import (fact_binding fact_bound)
 from p"facts_projection_queries.dewy" import (fact_projection_after fact_projection_find fact_projection_first)
@@ -34,7 +34,7 @@ from p"refine_transfers.dewy" import (ref_value)
 from p"refine_metadata.dewy" import (ref_dependent_ancestor ref_dependent_record ref_interval ref_place_alias refine_storage representation_type mk_refined ref_intern)
 from p"refine_ops.dewy" import (copy_checked ref_ir_term ref_path_length ref_self_lower_bound)
 from p"refine_rare.dewy" import (ref_holder_place ref_ir_holder_length ref_self_value ref_span_copy refine_coerce)
-from p"refinement_types.dewy" import (FACT_MAX FactTerm RefAtom RefTerm)
+from p"refinement_types.dewy" import (FACT_MAX FactBound FactTerm RefAtom RefTerm)
 from p"sibling_types.jo" import (sibling_block sibling_index)
 from p"type_ops.dewy" import (dt get_struct_inst mk_array)
 from p"types.jo" import (T_INT T_VOID fields has_var is_int mk_type prune struct_targ structs telem tkind type_eq types)
@@ -488,7 +488,14 @@ ref_sib_element_row=(@s:FactState base:RefineSibWord v:RefineSibWord):>void=>{
     loop j >=? 0 {
         let p=s.projections[j]
         j=fact_projection_after(s j)
-        if not p.element and p.selector =? FACT_SIB_BOUND {fact_difference(@s v p.value 0 0 16)}
+        if not p.element and p.selector =? FACT_SIB_BOUND {
+            fact_difference(@s v p.value 0 0 16)
+            # (and below the bound's ceiling, which a comparison with a constant reads:
+            # `let y:addr = g.targets[i]`)
+            let limit=fact_bound(s p.value)
+            let had=fact_bound(s v)
+            if not limit.wide and not had.wide and limit.hi <? had.hi and limit.hi >=? had.lo {fact_set_bound(@s v FactBound(had.lo limit.hi had.nz))}
+        }
     }
 }
 # A value read from a dictionary known to hold sibling bounds (`d[k]`, `d.pop(k)`, or the payload
