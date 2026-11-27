@@ -33,4 +33,6 @@ dg_sink: int[]
 dg_summaries: {int: DgSummary}
 dg_progress: {int: bool}
 dg_mention_memo: {int: int[]}
-dg_tests: {int: bool}      # (`dewy check`: the test runs it adds, which a build never runs)
+dg_tests: {int: bool}      # the test runs `dewy test` adds (`dewy check` skips them: a build never runs them)
+dg_in_test = false         # (walking a test run: main has not run)
+dg_check_only = false      # (`dewy check`: test runs are skipped)

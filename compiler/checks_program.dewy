@@ -217,9 +217,7 @@ program_tests=(mainm:ProgramWord main_path:string):>void=>$unsafe {
         let total=cnt
         loop cases in computed {total=bc_bin('plus' total bc_call("__test_count" [cases] 0) 0)}
         modules[mainm].inits.push(synth_call("__test_done" [total] 0))
-        if check_all {
-            loop i in [first..modules[mainm].inits.length) {dg_tests[modules[mainm].inits[i]]=true}
-        }
+        loop i in [first..modules[mainm].inits.length) {dg_tests[modules[mainm].inits[i]]=true}
     }
 }
 program_game=(mainm:ProgramWord has_upd:bool has_drw:bool):>void=>$unsafe {
