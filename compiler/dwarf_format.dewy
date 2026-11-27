@@ -100,6 +100,35 @@ dw_abs=(dir:string p:string):>string=>{
     if is_abs_path(p) {return p}
     "{dir}/{p}"
 }
+dw_line_grow=(@buf:array<uint8> cap:DWord):>ptr<uint8>=>$unsafe {
+    buf.reserve(cap)
+    __set_len(buf cap)
+    buf.ptr
+}
+dw_line_hdr_build=(fnames:array<string>):>array<uint8>=>$unsafe {
+    let hdr:array<uint8>=[]
+    let est:DWord=32
+    loop nm in fnames {est += DWord(nm.length) + 4}
+    hdr.reserve(est)
+    __set_len(hdr est)
+    let p=hdr.ptr
+    p[0]=1; p[1]=1; p[2]=1; p[3]=251; p[4]=14; p[5]=13
+    p[6]=0; p[7]=1; p[8]=1; p[9]=1; p[10]=1; p[11]=0
+    p[12]=0; p[13]=0; p[14]=1; p[15]=0; p[16]=0; p[17]=1
+    p[18]=0
+    let o:DWord=19
+    loop nm in fnames {
+        let nb=nm as array<uint8>
+        let nl=DWord(nb.length)
+        if nl >? 0 {mem_copy(p + o nb.ptr nl)}
+        o += nl
+        p[o]=0; p[o + 1]=0; p[o + 2]=0; p[o + 3]=0
+        o += 4
+    }
+    p[o]=0; o += 1
+    __set_len(hdr o)
+    hdr
+}
 dw_line_section=(text_addr:DWord text_len:DWord dir:string):>array<uint8>=>$unsafe {
     let rows_count=DWord(dw_inputs[0].line_rows[0].length)
     let rows=dw_inputs[0].line_rows[0].ptr
@@ -131,32 +160,19 @@ dw_line_section=(text_addr:DWord text_len:DWord dir:string):>array<uint8>=>$unsa
         }
         k += 2
     }
-    # .debug_line: header, then the program (one sequence over all of .text)
-    let hdr:array<uint8>=[]
-    hdr.push(1) # minimum_instruction_length
-    hdr.push(1) # maximum_operations_per_instruction
-    hdr.push(1) # default_is_stmt
-    hdr.push(uint8((-5 & 255) & 0xff)) # line_base
-    hdr.push(14) # line_range
-    hdr.push(13) # opcode_base
-    loop x in [0  1  1  1  1  0  0  0  1  0  0  1] {hdr.push(uint8((x) & 0xff))}
-    hdr.push(0) # no include directories
-    loop nm in fnames {
-        cstr(@hdr  nm)
-        hdr.push(0) # directory, mtime, length
-        hdr.push(0)
-        hdr.push(0)
-    }
-    hdr.push(0)
-    let prog:array<uint8>=[]
-    let pcap:DWord=rows_count * 6 + 128
-    prog.reserve(pcap)
-    __set_len(prog pcap)
-    let pp=prog.ptr
-    let pu:DWord=0
-    pp[pu]=0; pu += 1 # DW_LNE_set_address
-    pp[pu]=9; pu += 1
-    pp[pu]=2; pu += 1
+    # .debug_line: 10-byte unit prefix + header + program written in one buffer.
+    let hdr=dw_line_hdr_build(fnames)
+    let hlen=DWord(hdr.length)
+    let line_sec:array<uint8>=[]
+    let pcap:DWord=10 + hlen + rows_count * 6 + 128
+    let pp=dw_line_grow(@line_sec pcap)
+    let p4=(pp + 4) as ptr<uint16>
+    p4[0]=uint16(4)
+    let p6=(pp + 6) as ptr<uint32>
+    p6[0]=uint32<overflow='wrap'>(hlen)
+    mem_copy(pp + 10 hdr.ptr hlen)
+    let pu:DWord=10 + hlen
+    pp[pu]=0; pp[pu + 1]=9; pp[pu + 2]=2; pu += 3 # DW_LNE_set_address
     let tp=(pp + pu) as ptr<int64>
     tp[0]=text_addr; pu += 8
     let has_ir_lines=dw_inputs[0].ir_lines not=? (uint64(0) as ptr<array<int64>>)
@@ -184,7 +200,7 @@ dw_line_section=(text_addr:DWord text_len:DWord dir:string):>array<uint8>=>$unsa
                 k += 2
                 continue
             }
-            l=if not has_ir_lines {dw_inputs[0].host[0].ir_line(pos_id)} else if pos_id >? 0 and pos_id <? ir_lines_n {ir_lines_p[pos_id]} else {0}
+            l=if has_ir_lines {if pos_id >? 0 and pos_id <? ir_lines_n {ir_lines_p[pos_id]} else {0}} else {dw_inputs[0].host[0].ir_line(pos_id)}
             last_pos_id=pos_id
             if f =? file and l =? line and k >? 0 {
                 k += 2
@@ -195,20 +211,18 @@ dw_line_section=(text_addr:DWord text_len:DWord dir:string):>array<uint8>=>$unsa
         }
         if pu + 40 >? pcap {
             pcap=pcap * 2 + 128
-            prog.reserve(pcap)
-            __set_len(prog pcap)
-            pp=prog.ptr
+            pp=dw_line_grow(@line_sec pcap)
         }
         if f not=? file {
             pp[pu]=4; pu += 1 # DW_LNS_set_file
             let v:DWord=f
-            if v <? 128 {pp[pu]=uint8(v); pu += 1}
+            if v <? 128 {pp[pu]=uint8<overflow='wrap'>(v); pu += 1}
             else {
                 loop true {
                     let b:DWord=v & 127
                     v = v >> 7
-                    if v not=? 0 {pp[pu]=uint8(b | 128); pu += 1}
-                    else {pp[pu]=uint8(b); pu += 1; break}
+                    if v not=? 0 {pp[pu]=uint8<overflow='wrap'>(b | 128); pu += 1}
+                    else {pp[pu]=uint8<overflow='wrap'>(b); pu += 1; break}
                 }
             }
             file=f
@@ -216,13 +230,13 @@ dw_line_section=(text_addr:DWord text_len:DWord dir:string):>array<uint8>=>$unsa
         if l not=? line {
             pp[pu]=3; pu += 1 # DW_LNS_advance_line
             let d:DWord=l - line
-            if d >=? -64 and d <? 64 {pp[pu]=uint8(d & 127); pu += 1}
+            if d >=? -64 and d <? 64 {pp[pu]=uint8<overflow='wrap'>(d & 127); pu += 1}
             else {
                 loop true {
                     let b:DWord=d & 127
                     d = d >> 7
-                    if (d =? 0 and (b & 64) =? 0) or (d =? -1 and (b & 64) not=? 0) {pp[pu]=uint8(b); pu += 1; break}
-                    pp[pu]=uint8(b | 128); pu += 1
+                    if (d =? 0 and (b & 64) =? 0) or (d =? -1 and (b & 64) not=? 0) {pp[pu]=uint8<overflow='wrap'>(b); pu += 1; break}
+                    pp[pu]=uint8<overflow='wrap'>(b | 128); pu += 1
                 }
             }
             line=l
@@ -231,13 +245,13 @@ dw_line_section=(text_addr:DWord text_len:DWord dir:string):>array<uint8>=>$unsa
         if rk not=? addr {
             pp[pu]=2; pu += 1 # DW_LNS_advance_pc
             let v:DWord=rk - addr
-            if v <? 128 {pp[pu]=uint8(v); pu += 1}
+            if v <? 128 {pp[pu]=uint8<overflow='wrap'>(v); pu += 1}
             else {
                 loop true {
                     let b:DWord=v & 127
                     v = v >> 7
-                    if v not=? 0 {pp[pu]=uint8(b | 128); pu += 1}
-                    else {pp[pu]=uint8(b); pu += 1; break}
+                    if v not=? 0 {pp[pu]=uint8<overflow='wrap'>(b | 128); pu += 1}
+                    else {pp[pu]=uint8<overflow='wrap'>(b); pu += 1; break}
                 }
             }
             addr=rk
@@ -247,34 +261,25 @@ dw_line_section=(text_addr:DWord text_len:DWord dir:string):>array<uint8>=>$unsa
     }
     if pu + 20 >? pcap {
         pcap=pu + 32
-        prog.reserve(pcap)
-        __set_len(prog pcap)
-        pp=prog.ptr
+        pp=dw_line_grow(@line_sec pcap)
     }
     if text_len >? addr {
         pp[pu]=2; pu += 1
         let v:DWord=text_len - addr
-        if v <? 128 {pp[pu]=uint8(v); pu += 1}
+        if v <? 128 {pp[pu]=uint8<overflow='wrap'>(v); pu += 1}
         else {
             loop true {
                 let b:DWord=v & 127
                 v = v >> 7
-                if v not=? 0 {pp[pu]=uint8(b | 128); pu += 1}
-                else {pp[pu]=uint8(b); pu += 1; break}
+                if v not=? 0 {pp[pu]=uint8<overflow='wrap'>(b | 128); pu += 1}
+                else {pp[pu]=uint8<overflow='wrap'>(b); pu += 1; break}
             }
         }
     }
-    pp[pu]=0; pu += 1 # DW_LNE_end_sequence
-    pp[pu]=1; pu += 1
-    pp[pu]=1; pu += 1
-    __set_len(prog pu)
-    let line_sec:array<uint8>=[]
-    line_sec.reserve(10 + DWord(hdr.length) + pu)
-    put32(@line_sec  2 + 4 + DWord(hdr.length) + pu)
-    put16(@line_sec  4)
-    put32(@line_sec  DWord(hdr.length))
-    elf_append_bytes(@line_sec  hdr)
-    elf_append_bytes(@line_sec  prog)
+    pp[pu]=0; pp[pu + 1]=1; pp[pu + 2]=1; pu += 3 # DW_LNE_end_sequence
+    let p0=pp as ptr<uint32>
+    p0[0]=uint32<overflow='wrap'>(pu - 4)
+    __set_len(line_sec pu)
     line_sec
 }
 dwarf_image=(text_addr:DWord text_len:DWord main_path:string version:string dir:string):>array<[string array<uint8>]>=>$unsafe {

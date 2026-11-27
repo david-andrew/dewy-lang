@@ -91,16 +91,16 @@ mem=(reg:XWord base0:XWord disp0:XWord):>void=>$unsafe {
         }
         else {
             let p=x_bytes(6)
-            p[0]=uint8(0x80 | (r << 3) | 4)
-            p[1]=uint8(sib)
+            p[0]=uint8<overflow='wrap'>(0x80 | (r << 3) | 4)
+            p[1]=uint8<overflow='wrap'>(sib)
             let q=(p + 2) as ptr<uint32>
-            q[0]=uint32(disp & 0xFFFFFFFF)
+            q[0]=uint32<overflow='wrap'>(disp)
         }
         return
     }
     if base =? RIPREL {
         let p=x_bytes(5)
-        p[0]=uint8((r << 3) | 5)
+        p[0]=uint8<overflow='wrap'>((r << 3) | 5)
         let q=(p + 1) as ptr<uint32>
         q[0]=uint32(0)
         x_data_fix[0].push([XWord(x_code[0].length) - 4  rip_kind  disp])
@@ -126,16 +126,16 @@ mem=(reg:XWord base0:XWord disp0:XWord):>void=>$unsafe {
     else {
         if bs =? 4 {
             let p=x_bytes(6)
-            p[0]=uint8(0x80 | (r << 3) | 4)
+            p[0]=uint8<overflow='wrap'>(0x80 | (r << 3) | 4)
             p[1]=uint8(0x24)
             let q=(p + 2) as ptr<uint32>
-            q[0]=uint32(disp & 0xFFFFFFFF)
+            q[0]=uint32<overflow='wrap'>(disp)
         }
         else {
             let p=x_bytes(5)
-            p[0]=uint8(0x80 | (r << 3) | bs)
+            p[0]=uint8<overflow='wrap'>(0x80 | (r << 3) | bs)
             let q=(p + 1) as ptr<uint32>
-            q[0]=uint32(disp & 0xFFFFFFFF)
+            q[0]=uint32<overflow='wrap'>(disp)
         }
     }
 }
@@ -233,14 +233,13 @@ mov_rm_rbp=(r:XWord disp:XWord):>void=>$unsafe {
     let old=header[1]
     let p=(header as ptr<uint8>) + 24 + old
     let base_w:uint32=x_rbp8_rm_p[r]
+    let dw=p as ptr<uint32>
     if disp >=? -128 and disp <=? 127 {
-        let dw=p as ptr<uint32>
         dw[0]=base_w | (uint32<overflow='wrap'>(disp) << uint32(24))
         header[1]=old + 4
         return
     }
-    let dw=p as ptr<uint32>
-    dw[0]=base_w + uint32(0x00400000)
+    dw[0]=base_w xor uint32(0x00C00000)
     let dw2=(p + 3) as ptr<uint32>
     dw2[0]=uint32<overflow='wrap'>(disp)
     header[1]=old + 7
@@ -254,14 +253,13 @@ mov_mr_rbp=(disp:XWord r:XWord):>void=>$unsafe {
     let old=header[1]
     let p=(header as ptr<uint8>) + 24 + old
     let base_w:uint32=x_rbp8_mr_p[r]
+    let dw=p as ptr<uint32>
     if disp >=? -128 and disp <=? 127 {
-        let dw=p as ptr<uint32>
         dw[0]=base_w | (uint32<overflow='wrap'>(disp) << uint32(24))
         header[1]=old + 4
         return
     }
-    let dw=p as ptr<uint32>
-    dw[0]=base_w + uint32(0x00400000)
+    dw[0]=base_w xor uint32(0x00C00000)
     let dw2=(p + 3) as ptr<uint32>
     dw2[0]=uint32<overflow='wrap'>(disp)
     header[1]=old + 7
@@ -275,14 +273,13 @@ lea_rbp=(r:XWord disp:XWord):>void=>$unsafe {
     let old=header[1]
     let p=(header as ptr<uint8>) + 24 + old
     let base_w:uint32=x_rbp8_lea_p[r]
+    let dw=p as ptr<uint32>
     if disp >=? -128 and disp <=? 127 {
-        let dw=p as ptr<uint32>
         dw[0]=base_w | (uint32<overflow='wrap'>(disp) << uint32(24))
         header[1]=old + 4
         return
     }
-    let dw=p as ptr<uint32>
-    dw[0]=base_w + uint32(0x00400000)
+    dw[0]=base_w xor uint32(0x00C00000)
     let dw2=(p + 3) as ptr<uint32>
     dw2[0]=uint32<overflow='wrap'>(disp)
     header[1]=old + 7
@@ -293,57 +290,72 @@ op_rm64_slow=(opc:XWord reg:XWord base0:XWord disp0:XWord):>void=>$unsafe {
 op_rm64=(opc:XWord reg:XWord base0:XWord disp0:XWord):>void=>$unsafe {
     let header=x_hdr
     if cur_index >=? 0 or base0 =? RIPREL or header =? (uint64(0) as ptr<XWord>) or header[1] + 9 >? header[2] {
-        op_rm64_slow(opc reg base0 disp0)
+        op_rm(opc true reg base0 disp0)
         return
     }
     let old=header[1]
     let p=(header as ptr<uint8>) + 24 + old
-    if base0 =? RBP and not rsp_frame and not x_pad_track {
-        let base_w:uint32=x_rbp8_base_p[reg] | (uint32<overflow='wrap'>(opc) << uint32(8))
-        let dw=p as ptr<uint32>
-        if disp0 >=? -128 and disp0 <=? 127 {
-            dw[0]=base_w | (uint32<overflow='wrap'>(disp0) << uint32(24))
-            header[1]=old + 4
-            return
-        }
-        dw[0]=base_w + uint32(0x00400000)
-        let dw2=(p + 3) as ptr<uint32>
-        dw2[0]=uint32<overflow='wrap'>(disp0)
-        header[1]=old + 7
-        return
-    }
     let base=base0
     let disp=disp0
-    if rsp_frame and base =? RBP {
-        base = RSP
-        disp += frame_size
-        disp += rsp_extra
+    if base =? RBP {
+        if not rsp_frame and not x_pad_track {
+            let base_w:uint32=x_rbp8_base_p[reg] | (uint32<overflow='wrap'>(opc) << uint32(8))
+            let dw=p as ptr<uint32>
+            if disp >=? -128 and disp <=? 127 {
+                dw[0]=base_w | (uint32<overflow='wrap'>(disp) << uint32(24))
+                header[1]=old + 4
+                return
+            }
+            dw[0]=base_w xor uint32(0x00C00000)
+            let dw2=(p + 3) as ptr<uint32>
+            dw2[0]=uint32<overflow='wrap'>(disp)
+            header[1]=old + 7
+            return
+        }
+        if rsp_frame {
+            base = RSP
+            disp += frame_size + rsp_extra
+        }
     }
-    p[1]=uint8<overflow='wrap'>(opc)
-    let prefix:XWord=0x48 | ((reg >> 1) & 4)
-    p[0]=uint8<overflow='wrap'>(prefix | ((base >> 3) & 1))
+    let prefix:XWord=0x48 | ((reg >> 1) & 4) | ((base >> 3) & 1)
     let bs=base & 7
     let rm=((reg & 7) << 3) | bs
     let end_:XWord=old
     if disp =? 0 and bs not=? 5 {
-        p[2]=uint8<overflow='wrap'>(rm)
-        if bs =? 4 {p[3]=0x24; end_=old + 4}
-        else {end_=old + 3}
+        if bs not=? 4 {
+            let w=p as ptr<uint16>
+            w[0]=uint16<overflow='wrap'>(prefix | (opc << 8))
+            p[2]=uint8<overflow='wrap'>(rm)
+            end_=old + 3
+        } else {
+            let dw=p as ptr<uint32>
+            dw[0]=uint32<overflow='wrap'>(prefix | (opc << 8) | (rm << 16) | 0x24000000)
+            end_=old + 4
+        }
     } else if disp >=? -128 and disp <=? 127 {
-        p[2]=uint8<overflow='wrap'>(0x40 | rm)
-        if bs =? 4 {p[3]=0x24; p[4]=uint8<overflow='wrap'>(disp); end_=old + 5}
-        else {p[3]=uint8<overflow='wrap'>(disp); end_=old + 4}
+        if bs not=? 4 {
+            let dw=p as ptr<uint32>
+            dw[0]=uint32<overflow='wrap'>(prefix | (opc << 8) | ((0x40 | rm) << 16) | ((disp & 255) << 24))
+            end_=old + 4
+        } else {
+            let dw=p as ptr<uint32>
+            dw[0]=uint32<overflow='wrap'>(prefix | (opc << 8) | ((0x40 | rm) << 16) | 0x24000000)
+            p[4]=uint8<overflow='wrap'>(disp)
+            end_=old + 5
+        }
     } else {
+        let w=p as ptr<uint16>
+        w[0]=uint16<overflow='wrap'>(prefix | (opc << 8))
         p[2]=uint8<overflow='wrap'>(0x80 | rm)
-        if bs =? 4 {
+        if bs not=? 4 {
+            let dw=(p + 3) as ptr<uint32>
+            dw[0]=uint32<overflow='wrap'>(disp)
+            end_=old + 7
+        } else {
             p[3]=0x24
             let dw=(p + 4) as ptr<uint32>
             dw[0]=uint32<overflow='wrap'>(disp)
             end_=old + 8
-        } else {
-            let dw=(p + 3) as ptr<uint32>
-            dw[0]=uint32<overflow='wrap'>(disp)
-            end_=old + 7
         }
     }
     header[1]=end_
@@ -591,115 +603,153 @@ vec_esize=(k:XWord):>XWord=>$unsafe {
     8
 }
 jmp32=():>XWord=>$unsafe {
-    let p=x_bytes(5)
+    let header=x_hdr
+    if header not=? (uint64(0) as ptr<XWord>) {
+        let old=header[1]
+        if old + 5 <=? header[2] {
+            header[1]=old + 5
+            let p=(header as ptr<uint8>) + 24 + old
+            p[0]=0xE9
+            let q=(p + 1) as ptr<uint32>
+            q[0]=uint32(0)
+            return old + 1
+        }
+    }
+    let p=x_bytes_grow(5)
     p[0]=0xE9
     let q=(p + 1) as ptr<uint32>
     q[0]=uint32(0)
     XWord(x_code[0].length) - 4
 }
 jcc32=(cc:XWord):>XWord=>$unsafe {
-    let p=x_bytes(6)
+    let header=x_hdr
+    if header not=? (uint64(0) as ptr<XWord>) {
+        let old=header[1]
+        if old + 6 <=? header[2] {
+            header[1]=old + 6
+            let p=(header as ptr<uint8>) + 24 + old
+            let w=p as ptr<uint16>
+            w[0]=uint16<overflow='wrap'>(0x0F | ((0x80 + cc) << 8))
+            let q=(p + 2) as ptr<uint32>
+            q[0]=uint32(0)
+            return old + 2
+        }
+    }
+    let p=x_bytes_grow(6)
     p[0]=0x0F
-    p[1]=uint8(0x80 + cc)
+    p[1]=uint8<overflow='wrap'>(0x80 + cc)
     let q=(p + 2) as ptr<uint32>
     q[0]=uint32(0)
     XWord(x_code[0].length) - 4
 }
 let x_track_patch_moves:bool=false
 let x_patch_moves:bool=false
-patch_branch=(pos:XWord target:XWord):>void=>$unsafe {
-    let bytes=x_code[0].ptr
-    let delta=target - pos
-    if bytes[pos - 1] =? 0xE9 {
-        let offset=(pos - 1) & 31
-        let pad:XWord=if offset >=? 30 {32 - offset} else {0}
-        let short=delta - 1 - pad
-        if offset >=? 27 and short >=? -128 and short <=? 127 {
-            if x_track_patch_moves {x_patch_moves=true}
-            if pad =? 1 {
-                bytes[pos - 1] = 0x90
-            }
-            else if pad =? 2 {
-                bytes[pos - 1] = 0x66
-                bytes[pos] = 0x90
-            }
-            bytes[pos - 1 + pad] = 0xEB
-            bytes[pos + pad] = uint8((short & 255) & 255)
-            if pad =? 0 {
-                bytes[pos + 1] = 0x0F
-                bytes[pos + 2] = 0x1F
-                bytes[pos + 3] = 0
-            }
-            else if pad =? 1 {
-                bytes[pos + 2] = 0x66
-                bytes[pos + 3] = 0x90
-            }
-            else {
-                bytes[pos + 3] = 0x90
-            }
-        }
-        else {
-            if x_track_patch_moves and not x_patch_moves {
-                let alt=(offset + 16) & 31
-                let alt_pad:XWord=if alt >=? 30 {32 - alt} else {0}
-                let alt_short=delta - 1 - alt_pad
-                if alt >=? 27 and alt_short >=? -128 and alt_short <=? 127 {x_patch_moves=true}
-            }
-            patch32(pos  delta - 4)
-        }
-        return
+patch_branch_short_jmp=(bytes:ptr<uint8> pos:XWord pad:XWord short:XWord):>void=>$unsafe {
+    if x_track_patch_moves {x_patch_moves=true}
+    if pad =? 1 {
+        bytes[pos - 1] = 0x90
     }
-    let offset=(pos - 2) & 31
-    let pad:XWord=if offset >=? 30 {32 - offset} else {0}
-    let short=delta - pad
-    if pos >=? 2 and bytes[pos - 2] =? 0x0F and bytes[pos - 1] >=? 0x80 and bytes[pos - 1] <=? 0x8F {
-        if offset >=? 26 and (offset <? 30 or delta <? 0) and short >=? -128 and short <=? 127 {
-            if x_track_patch_moves {x_patch_moves=true}
-            let cc=bytes[pos - 1] - 0x10
-            if pad =? 1 {
-                bytes[pos - 2] = 0x90
-            }
-            else if pad =? 2 {
-                bytes[pos - 2] = 0x66
-                bytes[pos - 1] = 0x90
-            }
-            bytes[pos - 2 + pad] = cc
-            bytes[pos - 1 + pad] = uint8((short & 255) & 255)
-            if pad =? 0 {
-                patch32(pos  0x00401F0F)
-            }
-            else if pad =? 1 {
-                bytes[pos + 1] = 0x0F
-                bytes[pos + 2] = 0x1F
-                bytes[pos + 3] = 0
-            }
-            else {
-                bytes[pos + 2] = 0x66
-                bytes[pos + 3] = 0x90
-            }
-            let next=pos + 4
-            if next + 1 <? XWord(x_code[0].length) and bytes[next] & 0xF0 =? 0x40 {
-                let op=XWord(bytes[next + 1])
-                if op =? 0x89 or op =? 0x8B or op =? 0x8D or op =? 0x85 or (op <? 0x40 and (op & 7 =? 1 or op & 7 =? 3)) or (op >=? 0xB8 and op <=? 0xBF) or ((op =? 0x81 or op =? 0x83 or op =? 0xC7) and next + 2 <? XWord(x_code[0].length) and bytes[next + 2] >=? 0xC0) {
-                    loop i in [pos + pad..pos + 4) {
-                        bytes[i] = 0x2E
-                    }
-                }
-            }
-        }
-        else {
-            if x_track_patch_moves and not x_patch_moves {
-                let alt=(offset + 16) & 31
-                let alt_pad:XWord=if alt >=? 30 {32 - alt} else {0}
-                let alt_short=delta - alt_pad
-                if alt >=? 26 and (alt <? 30 or delta <? 0) and alt_short >=? -128 and alt_short <=? 127 {x_patch_moves=true}
-            }
-            patch32(pos  delta - 4)
-        }
+    else if pad =? 2 {
+        bytes[pos - 1] = 0x66
+        bytes[pos] = 0x90
+    }
+    bytes[pos - 1 + pad] = 0xEB
+    bytes[pos + pad] = uint8<overflow='wrap'>(short)
+    if pad =? 0 {
+        bytes[pos + 1] = 0x0F
+        bytes[pos + 2] = 0x1F
+        bytes[pos + 3] = 0
+    }
+    else if pad =? 1 {
+        bytes[pos + 2] = 0x66
+        bytes[pos + 3] = 0x90
     }
     else {
-        patch32(pos  delta - 4)
+        bytes[pos + 3] = 0x90
     }
+}
+patch_branch_short_jcc=(bytes:ptr<uint8> clen:XWord pos:XWord pad:XWord short:XWord):>void=>$unsafe {
+    if x_track_patch_moves {x_patch_moves=true}
+    let cc=uint8<overflow='wrap'>(XWord(bytes[pos - 1]) - 0x10)
+    if pad =? 1 {
+        bytes[pos - 2] = 0x90
+    }
+    else if pad =? 2 {
+        bytes[pos - 2] = 0x66
+        bytes[pos - 1] = 0x90
+    }
+    bytes[pos - 2 + pad] = cc
+    bytes[pos - 1 + pad] = uint8<overflow='wrap'>(short)
+    if pad =? 0 {
+        let q=(bytes + pos) as ptr<uint32>
+        q[0]=uint32(0x00401F0F)
+    }
+    else if pad =? 1 {
+        bytes[pos + 1] = 0x0F
+        bytes[pos + 2] = 0x1F
+        bytes[pos + 3] = 0
+    }
+    else {
+        bytes[pos + 2] = 0x66
+        bytes[pos + 3] = 0x90
+    }
+    let next=pos + 4
+    if next + 1 <? clen and bytes[next] & 0xF0 =? 0x40 {
+        let op=XWord(bytes[next + 1])
+        if op =? 0x89 or op =? 0x8B or op =? 0x8D or op =? 0x85 or (op <? 0x40 and (op & 7 =? 1 or op & 7 =? 3)) or (op >=? 0xB8 and op <=? 0xBF) or ((op =? 0x81 or op =? 0x83 or op =? 0xC7) and next + 2 <? clen and bytes[next + 2] >=? 0xC0) {
+            loop i in [pos + pad..pos + 4) {
+                bytes[i] = 0x2E
+            }
+        }
+    }
+}
+patch_branch_track=(is_jmp:bool offset:XWord delta:XWord):>void=>$unsafe {
+    let alt=(offset + 16) & 31
+    let alt_pad:XWord=if alt >=? 30 {32 - alt} else {0}
+    if is_jmp {
+        let alt_short=delta - 1 - alt_pad
+        if alt >=? 27 and alt_short >=? -128 and alt_short <=? 127 {x_patch_moves=true}
+    } else {
+        let alt_short=delta - alt_pad
+        if alt >=? 26 and (alt <? 30 or delta <? 0) and alt_short >=? -128 and alt_short <=? 127 {x_patch_moves=true}
+    }
+}
+patch_branch=(pos:XWord target:XWord):>void=>$unsafe {
+    let header=x_hdr
+    let bytes:ptr<uint8>=if header not=? (uint64(0) as ptr<XWord>) {(header as ptr<uint8>) + 24} else {x_code[0].ptr}
+    let clen:XWord=if header not=? (uint64(0) as ptr<XWord>) {header[1]} else {XWord(x_code[0].length)}
+    if pos <? 0 or pos >? clen - 4 {panic("fixup outside x_code[0] buffer")}
+    let delta=target - pos
+    let b1=bytes[pos - 1]
+    if b1 =? 0xE9 {
+        let offset=(pos - 1) & 31
+        if offset >=? 27 {
+            let pad:XWord=if offset >=? 30 {32 - offset} else {0}
+            let short=delta - 1 - pad
+            if short >=? -128 and short <=? 127 {
+                patch_branch_short_jmp(bytes pos pad short)
+                return
+            }
+        }
+        if x_track_patch_moves and not x_patch_moves {patch_branch_track(true offset delta)}
+        let q=(bytes + pos) as ptr<uint32>
+        q[0]=uint32<overflow='wrap'>(delta - 4)
+        return
+    }
+    if pos >=? 2 and bytes[pos - 2] =? 0x0F and b1 >=? 0x80 and b1 <=? 0x8F {
+        let offset=(pos - 2) & 31
+        if offset >=? 26 and (offset <? 30 or delta <? 0) {
+            let pad:XWord=if offset >=? 30 {32 - offset} else {0}
+            let short=delta - pad
+            if short >=? -128 and short <=? 127 {
+                patch_branch_short_jcc(bytes clen pos pad short)
+                return
+            }
+        }
+        if x_track_patch_moves and not x_patch_moves {patch_branch_track(false offset delta)}
+    }
+    let q=(bytes + pos) as ptr<uint32>
+    q[0]=uint32<overflow='wrap'>(delta - 4)
 }
 let x_padding_floor:XWord=0
 let x_padding_cmov:XWord=-1
@@ -772,12 +822,16 @@ x_absorb_recent=(padding:XWord):>bool=>$unsafe {
     true
 }
 patch_here=(pos:XWord):>void=>$unsafe {
-    x_padding_floor = XWord(x_code[0].length)
-    patch_branch(pos  XWord(x_code[0].length))
+    let header=x_hdr
+    let cur:XWord=if header not=? (uint64(0) as ptr<XWord>) {header[1]} else {XWord(x_code[0].length)}
+    x_padding_floor = cur
+    patch_branch(pos  cur)
 }
 patch_rel_here=(pos:XWord base:XWord):>void=>$unsafe {
-    x_padding_floor = XWord(x_code[0].length)
-    patch32(pos  x_padding_floor - base)
+    let header=x_hdr
+    let cur:XWord=if header not=? (uint64(0) as ptr<XWord>) {header[1]} else {XWord(x_code[0].length)}
+    x_padding_floor = cur
+    patch32(pos  cur - base)
 }
 jmp_back=(target:XWord):>void=>$unsafe {
     let pos=jmp32()
@@ -855,7 +909,7 @@ nop_pad=(n0:XWord):>void=>$unsafe {
 setcc=(cc:XWord):>void=>$unsafe {
     let p=x_bytes(6)
     p[0]=0x0F
-    p[1]=uint8(0x90 + cc)
+    p[1]=uint8<overflow='wrap'>(0x90 + cc)
     p[2]=0xC0
     p[3]=0x0F
     p[4]=0xB6
@@ -867,31 +921,31 @@ setcc_reg=(cc:XWord r:XWord):>void=>$unsafe {
     if r >=? 4 or rx not=? 0 {
         let p=x_bytes(8)
         let rb:XWord=(r >> 3) & 1
-        p[0]=uint8(0x40 | rb | rx)
+        p[0]=uint8<overflow='wrap'>(0x40 | rb | rx)
         p[1]=0x0F
-        p[2]=uint8(0x90 + cc)
-        p[3]=uint8(0xC0 | rm)
-        p[4]=uint8(0x40 | (rb << 2) | rb | rx)
+        p[2]=uint8<overflow='wrap'>(0x90 + cc)
+        p[3]=uint8<overflow='wrap'>(0xC0 | rm)
+        p[4]=uint8<overflow='wrap'>(0x40 | (rb << 2) | rb | rx)
         p[5]=0x0F
         p[6]=0xB6
-        p[7]=uint8(0xC0 | (rm << 3) | rm)
+        p[7]=uint8<overflow='wrap'>(0xC0 | (rm << 3) | rm)
     }
     else {
         let p=x_bytes(6)
         p[0]=0x0F
-        p[1]=uint8(0x90 + cc)
-        p[2]=uint8(0xC0 | rm)
+        p[1]=uint8<overflow='wrap'>(0x90 + cc)
+        p[2]=uint8<overflow='wrap'>(0xC0 | rm)
         p[3]=0x0F
         p[4]=0xB6
-        p[5]=uint8(0xC0 | (rm << 3) | rm)
+        p[5]=uint8<overflow='wrap'>(0xC0 | (rm << 3) | rm)
     }
 }
 rel_fixup_lea=(r:XWord kind:XWord off:XWord):>void=>$unsafe {
     let rx:XWord=if cur_index >=? 0 and cur_index & 8 not=? 0 {2} else {0}
     let p=x_bytes(7)
-    p[0]=uint8(0x48 | ((r >> 1) & 4) | rx)
+    p[0]=uint8<overflow='wrap'>(0x48 | ((r >> 1) & 4) | rx)
     p[1]=0x8D
-    p[2]=uint8(((r & 7) << 3) | 5)
+    p[2]=uint8<overflow='wrap'>(((r & 7) << 3) | 5)
     let q=(p + 3) as ptr<uint32>
     q[0]=uint32(0)
     x_data_fix[0].push([XWord(x_code[0].length) - 4  kind  off])
@@ -967,14 +1021,14 @@ b=(x:XWord):>void=>$unsafe {
     }
     x_b_grow(x)
 }
-b16=(x:XWord):>void=>$unsafe {let p=x_bytes(2) as ptr<uint16>; p[0]=uint16(x & 65535)}
+b16=(x:XWord):>void=>$unsafe {let p=x_bytes(2) as ptr<uint16>; p[0]=uint16<overflow='wrap'>(x)}
 b24=(x:XWord):>void=>$unsafe {
     let p=x_bytes(3)
     let words=p as ptr<uint16>
-    words[0]=uint16(x & 65535)
-    p[2]=uint8((x >> 16) & 255)
+    words[0]=uint16<overflow='wrap'>(x)
+    p[2]=uint8<overflow='wrap'>(x >> 16)
 }
-b32=(x:XWord):>void=>$unsafe {let p=x_bytes(4) as ptr<uint32>; p[0]=uint32(x & 0xFFFFFFFF)}
+b32=(x:XWord):>void=>$unsafe {let p=x_bytes(4) as ptr<uint32>; p[0]=uint32<overflow='wrap'>(x)}
 b64=(x:XWord):>void=>$unsafe {let p=x_bytes(8) as ptr<XWord>; p[0]=x}
 patch32=(pos:XWord v:XWord):>void=>$unsafe {
     let header=x_hdr
@@ -987,5 +1041,5 @@ patch32=(pos:XWord v:XWord):>void=>$unsafe {
     if pos <? 0 or pos >? XWord(x_code[0].length) - 4 {panic("fixup outside x_code[0] buffer")}
     let bytes=x_code[0].ptr
     let word=(bytes + pos) as ptr<uint32>
-    word[0]=uint32(v & 0xFFFFFFFF)
+    word[0]=uint32<overflow='wrap'>(v)
 }

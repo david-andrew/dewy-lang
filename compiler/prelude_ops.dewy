@@ -262,57 +262,106 @@ prelude_parse_units=(us:array<int64>):>array<int64>=>{
     }
     out
 }
-prelude_demand_entry=(e:PreludeWord):>void=>{
-    if pn_entries[e].done {return}
-    pn_entries[e].done=true
+prelude_demand_entry=(e:PreludeWord):>void=>$unsafe {
+    if pn_entries.ptr[e].done {return}
+    pn_entries.ptr[e].done=true
     pn_pending -= 1
     let us:array<int64>=[]
-    let k0=PreludeWord(pn_entries[e].post)
+    let k0=PreludeWord(pn_entries.ptr[e].post)
+    let posts_p=pn_posts.ptr
     loop k0 >=? 0 {
-        us.push(PreludeWord(pn_posts[k0].unit))
-        k0=PreludeWord(pn_posts[k0].next)
+        us.push(PreludeWord(posts_p[k0].unit))
+        k0=PreludeWord(posts_p[k0].next)
     }
     let icb=ic_switch(IC_LOAD IC_LIB)
     let k:PreludeWord=0
-    loop k <? us.length {
-        let m=pu_mod[us[k]]
+    let us_len=PreludeWord(us.length)
+    let us_p=us.ptr
+    loop k <? us_len {
+        let m=PreludeWord(pu_mod.ptr[us_p[k]])
         let group:array<int64>=[]
-        loop k <? us.length and pu_mod[us[k]] =? m {
-            group.push(us[k])
+        loop k <? us_len and PreludeWord(pu_mod.ptr[us_p[k]]) =? m {
+            group.push(us_p[k])
             k += 1
         }
         let xs=pm_exports.get(m)
         if xs not=? none {
             pm_exports.remove(m);
-            loop x in xs {
-                if not pu_done[x] and not group.contains(x) {group.push(x)}
+            let xlen=PreludeWord(xs.length)
+            let xp=xs.ptr
+            let xi:PreludeWord=0
+            loop xi <? xlen {
+                let x=xp[xi]
+                xi += 1
+                if not pu_done.ptr[x] {
+                    let dup=false
+                    let gl=PreludeWord(group.length)
+                    let gp=group.ptr
+                    let gi:PreludeWord=0
+                    loop gi <? gl {
+                        if gp[gi] =? x {dup=true; break}
+                        gi += 1
+                    }
+                    if not dup {group.push(x)}
+                }
             }
             # (in file order)
-            loop a in [PreludeWord(1)..PreludeWord(group.length)) {
-                let v=group[a]
+            let gl=PreludeWord(group.length)
+            let gp=group.ptr
+            let a:PreludeWord=1
+            loop a <? gl {
+                let v=gp[a]
                 let b=a
-                loop b >? 0 and group[b - 1] >? v {
-                    group[b]=group[b - 1]
+                loop b >? 0 and gp[b - 1] >? v {
+                    gp[b]=gp[b - 1]
                     b -= 1
                 }
-                group[b]=v
+                gp[b]=v
+                a += 1
             }
         }
         let decls=prelude_parse_units(group)
-        if decls.length =? 0 {continue}
-        loop d in decls {prelude_new_decls.push(d)}
+        let add_n=PreludeWord(decls.length)
+        if add_n =? 0 {continue}
+        let decls_p=decls.ptr
+        let di:PreludeWord=0
+        loop di <? add_n {
+            prelude_new_decls.push(decls_p[di])
+            di += 1
+        }
         # (the module's declarations stay in file order)
-        loop d in decls {
-            let i=PreludeWord(modules[m].decls.length)
-            modules[m].decls.push(d)
-            loop i >? 0 and nodes[modules[m].decls[i - 1]].pos >? nodes[d].pos {
-                modules[m].decls[i]=modules[m].decls[i - 1]
-                i -= 1
+        let old_n=PreludeWord(modules.ptr[m].decls.length)
+        let tot_n=old_n + add_n
+        modules.ptr[m].decls.reserve(int64(tot_n))
+        __set_len(modules.ptr[m].decls int64(tot_n))
+        let dp=modules.ptr[m].decls.ptr
+        let np=nodes.ptr
+        let cur_n=old_n
+        di=0
+        loop di <? add_n {
+            let d=decls_p[di]
+            let dpos=np[d].pos
+            if cur_n =? 0 or np[dp[cur_n - 1]].pos <=? dpos {
+                dp[cur_n]=d
+            } else {
+                let lo:PreludeWord=0
+                let hi=cur_n
+                loop lo <? hi {
+                    let mid=(lo + hi) >> 1
+                    if np[dp[mid]].pos <=? dpos {lo=mid + 1} else {hi=mid}
+                }
+                let sh=cur_n
+                loop sh >? lo {
+                    dp[sh]=dp[sh - 1]
+                    sh -= 1
+                }
+                dp[lo]=d
             }
-            modules[m].decls[i]=d
+            cur_n += 1
+            di += 1
         }
         ic_restore(icb)
-        if m <? registered.length and registered[m] {register_decls(m decls)}
+        if m <? PreludeWord(registered.length) and registered.ptr[m] {register_decls(m decls)}
         icb=ic_switch(IC_LOAD IC_LIB)
     }
     ic_restore(icb)

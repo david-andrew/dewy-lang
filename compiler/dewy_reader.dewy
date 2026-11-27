@@ -3848,6 +3848,64 @@ rd_dc_export_name=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64
 }
 
 rd_dc_expr=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int64):>int64=>$unsafe {
+    if (int64<overflow='wrap'>(reader_ctx.depth) + int64<overflow='wrap'>(reader_ctx.reader.dn_depth)) <? 256 {
+        let at=int64<overflow='wrap'>(reader_ctx.at)
+        let toks_p=reader_ctx.tokens.ptr
+        let next_p=toks_p + (at + 1)
+        let next_ord:int64=int64((next_p as ptr<uint32>)[7])
+        if next_ord =? 2 or next_ord =? 4 or next_ord =? 6 or next_ord =? 12 or (next_ord =? 0 and next_p[0].space) or next_p[0].kind =? 'eof' {
+            let opening_p=toks_p + at
+            let open_kind:DewyKind=opening_p[0].kind
+            if open_kind =? 'identifier' {
+                let open_sym:DewyToken=opening_p[0].symbol
+                if open_sym =? 'none' or open_sym =? 'kw_test' {
+                    let open_name:int32=opening_p[0].name
+                    let nm=int64(open_name)
+                    if nm not=? reader_ctx.reader.dn_end_id and nm not=? reader_ctx.reader.dn_new_id and nm not=? reader_ctx.reader.dn_type_id and nm not=? reader_ctx.reader.dn_none_id and reader_ctx.reader.dw_renamed.length >? 0 {
+                        let pos:int64=rd_mkpos(reader_ctx.file opening_p[0].start)
+                        reader_ctx.at = at + 1
+                        let left=node_mk(@reader_nodes 'ident' pos)
+                        let rp=reader_ctx.reader.dw_renamed.ptr
+                        let rn:int32=open_name
+                        if nm =? rp[0] {rn=int32<overflow='wrap'>(rp[1])}
+                        else if nm =? rp[2] {rn=int32<overflow='wrap'>(rp[3])}
+                        else if nm =? rp[4] or nm =? rp[6] {rn=int32<overflow='wrap'>(rp[5])}
+                        reader_nodes.ptr[left].name = rn
+                        return left
+                    }
+                }
+            } else if open_kind =? 'source_integer' {
+                let first:int64<overflow='wrap'>=opening_p[0].start
+                let stop:int64<overflow='wrap'>=opening_p[0].stop
+                let slen:int64<overflow='wrap'>=stop - first
+                let bytes:ptr<uint8>=(reader_ctx.source as array<uint8>).ptr
+                if slen >=? 1 and slen <=? 18 and not (slen >=? 2 and bytes[first] =? b'0' and bytes[first + 1] =? b'd') {
+                    let value:uint64<overflow='wrap'>=0
+                    let ok=true
+                    let k:int64<overflow='wrap'>=first
+                    loop k <? stop {
+                        let c:uint8=bytes[k]
+                        if c =? b'_' {ok=false; break}
+                        value = value * 10 + uint64<overflow='wrap'>(uint8<overflow='wrap'>(c) - uint8<overflow='wrap'>(b'0'))
+                        k += 1
+                    }
+                    if ok {
+                        let pos:int64=rd_mkpos(reader_ctx.file first)
+                        reader_ctx.at = at + 1
+                        let left=node_mk(@reader_nodes 'int_lit' pos)
+                        let nd=reader_nodes.ptr + left
+                        nd[0].ival = (value transmute int64)
+                        nd[0].flags = int32<overflow='wrap'>(NF_LITERAL)
+                        return left
+                    }
+                }
+            }
+        }
+    }
+    rd_dc_expr_slow(@reader_ctx @reader_nodes minimum)
+}
+
+rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int64):>int64=>$unsafe {
     reader_ctx.depth = (int64<overflow='wrap'>(reader_ctx.depth) + 1)
     if ((int64<overflow='wrap'>(reader_ctx.depth) + int64<overflow='wrap'>(reader_ctx.reader.dn_depth)) >? 256) {
         return rd_dc_too_deep(@reader_ctx)

@@ -118,6 +118,34 @@ const PE_TOK:array<int8 length=128>=[
 ]
 
 parse_binary=(minprec:ExprWord):>int64=>$unsafe {
+    let tp=p_toks
+    let t0=ExprWord(ti)
+    let k0=tp[t0].kind
+    if PE_TOK[int64(((tp + (t0 + 1)) as ptr<uint32>)[0]) & 127] <=? int8(-2) {
+        if k0 =? 'ident' {
+            if p_id_underscore not=? 0 {
+                let iv=tp[t0].ival
+                if iv not=? p_id_underscore and (iv not=? id_end or p_index.length =? 0) and iv not=? p_id_async and iv not=? p_id_await {
+                    ti=t0 + 1
+                    let lhs=mk('ident' tp[t0].pos)
+                    nodes.ptr[lhs].name=int32<overflow='wrap'>(iv)
+                    return lhs
+                }
+            }
+        } else if k0 =? 'int_lit' {
+            ti=t0 + 1
+            let iv=tp[t0].ival
+            let lhs=mk('int_lit' tp[t0].pos)
+            let nd=nodes.ptr + lhs
+            nd[0].ival=iv
+            nd[0].flags=int32<overflow='wrap'>(if iv <? 0 {NF_LITERAL | NF_U64} else {NF_LITERAL})
+            return lhs
+        }
+    }
+    parse_binary_slow(minprec)
+}
+
+parse_binary_slow=(minprec:ExprWord):>int64=>$unsafe {
     let toks_p=p_toks
     let t0=ExprWord(ti)
     let k0=toks_p[t0].kind
@@ -129,7 +157,6 @@ parse_binary=(minprec:ExprWord):>int64=>$unsafe {
             ti=t0 + 1
             lhs=mk('ident' toks_p[t0].pos)
             nodes.ptr[lhs].name=int32<overflow='wrap'>(iv)
-            if PE_TOK[int64(((toks_p + (t0 + 1)) as ptr<uint32>)[0]) & 127] <=? int8(-2) {return lhs}
             have_primary=true
         }
     } else if k0 =? 'int_lit' {
@@ -138,7 +165,6 @@ parse_binary=(minprec:ExprWord):>int64=>$unsafe {
         let iv=toks_p[t0].ival
         nodes.ptr[lhs].ival=iv
         nodes.ptr[lhs].flags=int32<overflow='wrap'>(if iv <? 0 {NF_LITERAL | NF_U64} else {NF_LITERAL})
-        if PE_TOK[int64(((toks_p + (t0 + 1)) as ptr<uint32>)[0]) & 127] <=? int8(-2) {return lhs}
         have_primary=true
     }
     if not have_primary and k0 =? 'kw_not' and minprec <=? 2 {

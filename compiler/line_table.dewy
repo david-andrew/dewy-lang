@@ -23,12 +23,27 @@ LineTable:type=[
 LineWord:type=int64<overflow='wrap'>
 LineU64:type=uint64<overflow='wrap'>
 
+line_starts_grow_impl=(@ls:array<int64> lcap:LineWord):>LineWord=>$unsafe {
+    let nc=lcap * 2
+    ls.reserve(int64(nc))
+    __set_len(ls int64(nc))
+    nc
+}
+let line_starts_grow_hook:<(@ls:array<int64> lcap:LineWord):>LineWord>=@line_starts_grow_impl
+line_starts_grow=(@ls:array<int64> lcap:LineWord):>LineWord=>$unsafe {
+    let nc=lcap * 2
+    ls.reserve(int64(nc))
+    __set_len(ls int64(nc))
+    if lcap <? 0 {return line_starts_grow_hook(@ls lcap)}
+    nc
+}
+
 # where each line of src starts: 0, then the offset after each newline. Scans with
 # hardware-accelerated __find_newline (AVX2 on x86-64); O(bytes).
 line_starts=(src:string):>array<int64>=>$unsafe {
     let n=LineWord((src as array<uint8>).length)
     let ls:array<int64>=[]
-    let lcap=LineWord((n >> 5) + 16)
+    let lcap=LineWord((n >> 4) + 32)
     ls.reserve(int64(lcap))
     __set_len(ls int64(lcap))
     let lp=ls.ptr
@@ -41,9 +56,7 @@ line_starts=(src:string):>array<int64>=>$unsafe {
         let j=LineWord(__find_newline(sp int64(i) int64(n)))
         if j >=? n {break}
         if lcnt >=? lcap {
-            lcap=lcap * 2
-            ls.reserve(int64(lcap))
-            __set_len(ls int64(lcap))
+            lcap=line_starts_grow(@ls lcap)
             lp=ls.ptr
         }
         lp[lcnt]=int64(j + 1)

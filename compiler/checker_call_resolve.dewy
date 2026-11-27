@@ -56,118 +56,141 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
         if family.length >? decls.length {return resolve_fn_call(n name family args expected closure ufcs)}
     }
     if member_record >=? 0 {member_candidates(decls)}
-    let targs_here=call_targs
-    call_targs=[]
-    if args.length >? 0 {check_args_untyped(args)}
-    if targs_here.length =? 1 and args.length =? 1 and decls.length >? 0 and nodes.ptr[n].aux2 not=? int32(AUX2_PARTIAL) {
-        let grid=grid_convert_call(n name decls[0] args[0] targs_here[0])
-        if grid >=? 0 {return grid}
+    let has_targs=call_targs.length >? 0
+    if has_targs {
+        let targs_here=call_targs
+        call_targs=[]
+        if args.length >? 0 {check_args_untyped(args)}
+        if targs_here.length =? 1 and args.length =? 1 and decls.length >? 0 and nodes.ptr[n].aux2 not=? int32(AUX2_PARTIAL) {
+            let grid=grid_convert_call(n name decls[0] args[0] targs_here[0])
+            if grid >=? 0 {return grid}
+        }
+        return resolve_fn_call_slow(n name decls args expected closure ufcs targs_here)
     }
+    let n_args=CRWord(args.length)
+    if n_args >? 0 {check_args_untyped(args)}
+    if decls.length =? 1 and closure =? 0 and nodes.ptr[n].aux2 not=? int32(AUX2_PARTIAL) {
+        let ap=args.ptr
+        let np0=nodes.ptr
+        let positional=true
+        loop i in [CRWord(0)..n_args) {
+            let arg=ap[i]
+            if arg =? 0 or np0[arg].kind =? 'namedarg' {
+                positional=false
+                break
+            }
+        }
+        if positional {
+            let decl=CRWord(decls.ptr[0])
+            let di:CRWord=decl_info(decl)
+            if not decl_infos.ptr[di].sig.done {fn_sig(decl);}
+            let np:CRWord=CRWord(nodes.ptr[decl].nlist)
+            let mutmask=CRWord(decl_infos.ptr[di].sig.mutmask)
+            let p0_ref_mut=false
+            if refine_active and mutmask =? 1 {
+                p0_ref_mut=true
+                if np >? 0 {
+                    let p0=decl_infos.ptr[di].sig.params.ptr[0]
+                    if types.ptr[p0].kind =? 'struct_' and types.ptr[p0].nargs =? 0 {p0_ref_mut=false}
+                }
+            }
+            if not decl_infos.ptr[di].sig.generic and decl_infos.ptr[di].sig.ntp =? 0 and n_args =? np and np <=? 31 and not p0_ref_mut and (dewy_param_kinds.length =? 0 or not dewy_param_kinds.has(decl)) {
+                let ok=true
+                let exact_mask:CRWord=0
+                let empty_binds:array<int64>=[]
+                let recv_fits0=false
+                let rat_on=rational_module_found >=? 0
+                loop i in [CRWord(0)..np) {
+                    let a=CRWord(ap[i])
+                    if ctx_dependent(a) {ok=false; break}
+                    let pt=CRWord(decl_infos.ptr[di].sig.params.ptr[i])
+                    if (mutmask & (CRWord(1) << i)) not=? 0 {
+                        if call_mutable_cost(a pt @empty_binds @recv_fits0 i =? 0) <? 0 {ok=false; break}
+                    } else {
+                        let an=nodes.ptr + a
+                        let nt=CRWord(an[0].type)
+                        let afl=CRWord(an[0].flags)
+                        let exact=false
+                        if nt =? pt and nt not=? 0 and (afl & 256) =? 0 and an[0].kind not=? 'str_lit' and an[0].kind not=? 'float_lit' {
+                            let pti=types.ptr + pt
+                            if (CRWord(pti[0].flags) & 1) =? 0 {
+                                let tk=pti[0].kind
+                                if tk not=? 'opt' and tk not=? 'refined' and tk not=? 'callable' and tk not=? 'polyfn' and (tk not=? 'struct_' or not rat_on or not bundled_word_rational_type(pt)) {
+                                    exact=true
+                                    if (afl & 129) =? 128 and an[0].kind not=? 'hole' {exact_mask |= (CRWord(1) << i)}
+                                }
+                            }
+                        }
+                        if not exact and arg_cost(a pt @empty_binds) <? 0 {ok=false; break}
+                    }
+                }
+                if ok {
+                    call_decl_checks(n name decl args args np ufcs)
+                    let f:CRWord=0
+                    if decl_mono_enabled and decl <? decl_mono_fn.length {
+                        let mf=CRWord(decl_mono_fn.ptr[decl])
+                        if mf >? 0 and mf <? fns.length {
+                            let dn=nodes.ptr + decl
+                            if (CRWord(dn[0].flags) & 4) =? 0 and dn[0].c =? 0 and dn[0].kind not=? 'lambda' and CRWord(fns.ptr[mf].decl) =? decl and fns.ptr[mf].targs.length =? 0 and fns.ptr[mf].ret not=? 0 {f=mf}
+                        }
+                    }
+                    if f =? 0 {f=get_fn_inst(decl empty_binds nodes.ptr[n].pos)}
+                    if ide_on {call_ide_ref(n name args decl f)}
+                    loop i in [CRWord(0)..np) {
+                        let bit=CRWord(1) << i
+                        let is_mut=(mutmask & bit) not=? 0
+                        let fpt=CRWord(fns.ptr[f].ptypes.ptr[i])
+                        if not is_mut and (exact_mask & bit) not=? 0 and fpt =? CRWord(decl_infos.ptr[di].sig.params.ptr[i]) {continue}
+                        let a=CRWord(ap[i])
+                        if i =? 0 and is_mut and dewy_is_method(decl) and place_method =? 0 {
+                            place_method=if nodes.ptr[decl].kind =? 'fn_' {CRWord(nodes.ptr[decl].name)} else {dewy_literal_method_name}
+                            finish_arg(a fpt is_mut)
+                            place_method=0
+                        } else {
+                            finish_arg(a fpt is_mut)
+                        }
+                    }
+                    if mutmask not=? 0 and (mutmask & (mutmask - 1)) not=? 0 {check_mutable_arguments(args mutmask nodes.ptr[n].pos)}
+                    let same_list=CRWord(nodes.ptr[n].nlist) =? np
+                    if same_list and np >? 0 {
+                        let lp=lists.ptr + CRWord(nodes.ptr[n].list)
+                        loop i in [CRWord(0)..np) {
+                            if CRWord(lp[i]) not=? CRWord(ap[i]) {same_list=false; break}
+                        }
+                    }
+                    if not same_list {set_list(n args)}
+                    let nn=nodes.ptr + n
+                    nn[0].sym = int32<overflow='wrap'>(f)
+                    nn[0].aux = 0
+                    nn[0].kind = 'call'
+                    nn[0].a = 0
+                    if proof_active or wi_any or dir_floats_any {call_note_contracts(n f decl false 0)}
+                    let r0=CRWord(fns.ptr[f].ret)
+                    let result_type:CRWord=if refine_active {refine_read_type(r0)} else if (CRWord(types.ptr[r0].flags) & 1) =? 0 {r0} else {prune(r0)}
+                    nodes.ptr[n].type = int32<overflow='wrap'>(result_type)
+                    if cc_any and nodes.ptr[decl].c not=? 0 {
+                        let narrowed=cc_call(n f decl)
+                        if narrowed not=? 0 {return narrowed}
+                    }
+                    if wi_any and cc_any {call_warn_unsettled(n f decl)}
+                    return result_type
+                }
+            }
+        }
+    }
+    let no_targs:array<int64>=[]
+    resolve_fn_call_slow(n name decls args expected closure ufcs no_targs)
+}
+resolve_fn_call_slow=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expected:CRWord closure:CRWord ufcs:bool targs_here:array<int64>):>CRWord=>$unsafe {
     let positional=true
-    let n_args=args.length
+    let n_args=CRWord(args.length)
     let ap=args.ptr
     let np0=nodes.ptr
-    loop i in [0..n_args) {
+    loop i in [CRWord(0)..n_args) {
         let arg=ap[i]
         if arg =? 0 or np0[arg].kind =? 'namedarg' {
             positional=false
             break
-        }
-    }
-    if decls.length =? 1 and positional and targs_here.length =? 0 and closure =? 0 and nodes.ptr[n].aux2 not=? int32(AUX2_PARTIAL) {
-        let decl=decls.ptr[0]
-        let di:CRWord=decl_info(decl)
-        if not decl_infos.ptr[di].sig.done {fn_sig(decl);}
-        let np:CRWord=nkids(decl)
-        let mutmask=CRWord(decl_infos.ptr[di].sig.mutmask)
-        let p0_ref_mut=false
-        if refine_active and mutmask =? 1 {
-            p0_ref_mut=true
-            if np >? 0 {
-                let p0=decl_infos.ptr[di].sig.params.ptr[0]
-                if types.ptr[p0].kind =? 'struct_' and types.ptr[p0].nargs =? 0 {p0_ref_mut=false}
-            }
-        }
-        if not decl_infos.ptr[di].sig.generic and decl_infos.ptr[di].sig.ntp =? 0 and n_args =? np and np <=? 31 and not p0_ref_mut and (dewy_param_kinds.length =? 0 or not dewy_param_kinds.has(decl)) {
-            let ok=true
-            let exact_mask:CRWord=0
-            let empty_binds:array<int64>=[]
-            let recv_fits0=false
-            let rat_on=rational_module_found >=? 0
-            loop i in [0..np) {
-                let a=ap[i]
-                if ctx_dependent(a) {ok=false; break}
-                let pt=decl_infos.ptr[di].sig.params.ptr[i]
-                if (mutmask & (CRWord(1) << CRWord(i))) not=? 0 {
-                    if call_mutable_cost(a pt @empty_binds @recv_fits0 i =? 0) <? 0 {ok=false; break}
-                } else {
-                    let an=nodes.ptr + a
-                    let nt=CRWord(an[0].type)
-                    let afl=CRWord(an[0].flags)
-                    let exact=false
-                    if nt =? pt and nt not=? 0 and (afl & 256) =? 0 and an[0].kind not=? 'str_lit' and an[0].kind not=? 'float_lit' {
-                        let pti=types.ptr + pt
-                        if (CRWord(pti[0].flags) & 1) =? 0 {
-                            let tk=pti[0].kind
-                            if tk not=? 'opt' and tk not=? 'refined' and tk not=? 'callable' and tk not=? 'polyfn' and (tk not=? 'struct_' or not rat_on or not bundled_word_rational_type(pt)) {
-                                exact=true
-                                if (afl & 129) =? 128 and an[0].kind not=? 'hole' {exact_mask |= (CRWord(1) << CRWord(i))}
-                            }
-                        }
-                    }
-                    if not exact and arg_cost(a pt @empty_binds) <? 0 {ok=false; break}
-                }
-            }
-            if ok {
-                call_decl_checks(n name decl args args np ufcs)
-                let f:CRWord=0
-                if decl_mono_enabled and decl <? decl_mono_fn.length {
-                    let mf=CRWord(decl_mono_fn.ptr[decl])
-                    if mf >? 0 and mf <? fns.length {
-                        let dn=nodes.ptr + decl
-                        if (CRWord(dn[0].flags) & 4) =? 0 and dn[0].c =? 0 and dn[0].kind not=? 'lambda' and CRWord(fns.ptr[mf].decl) =? decl and fns.ptr[mf].targs.length =? 0 and fns.ptr[mf].ret not=? 0 {f=mf}
-                    }
-                }
-                if f =? 0 {f=get_fn_inst(decl empty_binds nodes.ptr[n].pos)}
-                if ide_on {call_ide_ref(n name args decl f)}
-                loop i in [0..np) {
-                    let bit=CRWord(1) << CRWord(i)
-                    let is_mut=(mutmask & bit) not=? 0
-                    let fpt=fns.ptr[f].ptypes.ptr[i]
-                    if not is_mut and (exact_mask & bit) not=? 0 and fpt =? decl_infos.ptr[di].sig.params.ptr[i] {continue}
-                    let a=ap[i]
-                    if i =? 0 and is_mut and dewy_is_method(decl) and place_method =? 0 {
-                        place_method=if nodes.ptr[decl].kind =? 'fn_' {CRWord(nodes.ptr[decl].name)} else {dewy_literal_method_name}
-                        finish_arg(a fpt is_mut)
-                        place_method=0
-                    } else {
-                        finish_arg(a fpt is_mut)
-                    }
-                }
-                if mutmask not=? 0 and (mutmask & (mutmask - 1)) not=? 0 {check_mutable_arguments(args mutmask nodes.ptr[n].pos)}
-                let same_list=CRWord(nodes.ptr[n].nlist) =? np
-                if same_list and np >? 0 {
-                    let lp=lists.ptr + CRWord(nodes.ptr[n].list)
-                    loop i in [0..np) {
-                        if CRWord(lp[i]) not=? ap[i] {same_list=false; break}
-                    }
-                }
-                if not same_list {set_list(n args)}
-                nodes.ptr[n].sym = int32(f)
-                nodes.ptr[n].aux = 0
-                nodes.ptr[n].kind = 'call'
-                nodes.ptr[n].a = 0
-                if proof_active or wi_any or dir_floats_any {call_note_contracts(n f decl false 0)}
-                let r0=CRWord(fns.ptr[f].ret)
-                let result_type:CRWord=if refine_active {refine_read_type(r0)} else if (CRWord(types.ptr[r0].flags) & 1) =? 0 {r0} else {prune(r0)}
-                nodes.ptr[n].type = int32(result_type)
-                if cc_any and nodes.ptr[decl].c not=? 0 {
-                    let narrowed=cc_call(n f decl)
-                    if narrowed not=? 0 {return narrowed}
-                }
-                if wi_any and cc_any {call_warn_unsettled(n f decl)}
-                return result_type
-            }
         }
     }
     let cands:array<Cand>=[]
@@ -495,13 +518,13 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
         }
     }
     if not same_fin {set_list(n fin)}
-    nodes.ptr[n].sym = int32(f)
+    nodes.ptr[n].sym = int32<overflow='wrap'>(f)
     nodes.ptr[n].aux = 0
     nodes.ptr[n].kind = 'call'
     nodes.ptr[n].a = 0
     if closure not=? 0 {
         let reference=poly_fnref(closure f)
-        nodes.ptr[n].a = int32(reference)
+        nodes.ptr[n].a = int32<overflow='wrap'>(reference)
         nodes.ptr[n].sym = 0
         nodes.ptr[n].aux = 1
     }
@@ -517,7 +540,7 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
     if not capture_defaults and not (positional and not cd.missing) {save_call_order(n args fin)}
     let r0=CRWord(fns.ptr[f].ret)
     let result_type:CRWord=if refine_active {refine_read_type(r0)} else if (CRWord(types.ptr[r0].flags) & 1) =? 0 {r0} else {prune(r0)}
-    nodes.ptr[n].type = int32(result_type)
+    nodes.ptr[n].type = int32<overflow='wrap'>(result_type)
     if refined_array.candidate not=? 0 {return ref_array_call_finish(n refined_array)}
     if cc_any and nodes.ptr[decl].c not=? 0 and closure =? 0 and not capture_defaults {
         let narrowed=cc_call(n f decl)

@@ -70,7 +70,7 @@ nodes: Node[] = [Node()]
 lists: i32[]
 
 # (the one-line field reads and flag tests stay here, where they inline into their callers)
-mk = (kind: NK, pos: int) -> int: node_mk(nodes, kind, pos)
+mk = (kind: NK, pos: int) -> int: ast_mk(kind, pos)
 set_list = (n: int, xs: int[]): node_set_list(nodes, lists, n, xs)
 set_list2 = (n: int, xs: int[]): node_set_list2(nodes, lists, n, xs)
 set_list_span = (n: int, buf: mut int[], base: int): node_set_list_span(nodes, lists, n, buf, base)

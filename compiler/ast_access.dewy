@@ -1,11 +1,26 @@
 $runtime_checks
 
 from p"ast.jo" import (dewy_len_members dewy_param_kinds id_dewy_len lists nodes)
-from p"node_store.dewy" import (NK node_clone node_kids node_kids2 node_mk node_set_list node_set_list2)
+from p"node_store.dewy" import (NK Node node_clone node_kids node_kids2 node_mk node_mk_slow node_set_list node_set_list2)
 
 AstWord:type=int64<overflow='wrap'>
 
-ast_mk=(kind:NK pos:int64):>int64=>node_mk(@nodes kind pos)
+ast_mk=(kind:NK pos:int64):>int64=>$unsafe {
+    let sp=nodes.ptr
+    if sp not=? (uint64(0) as ptr<Node>) {
+        let sh=(sp as ptr<int64>) - 3
+        let idx=AstWord(sh[1])
+        if sh[0] =? 1 and idx <? AstWord(sh[2]) {
+            sh[1]=int64(idx + 1)
+            let dst=sp + idx
+            mem_set(dst as ptr<uint8> 0 size_of<Node>)
+            dst[0].kind=kind
+            dst[0].pos=pos
+            return int64(idx)
+        }
+    }
+    node_mk_slow(@nodes kind pos)
+}
 ast_set_list=(n:int64 xs:array<int64>):>void=>node_set_list(@nodes @lists n xs)
 ast_set_list2=(n:int64 xs:array<int64>):>void=>node_set_list2(@nodes @lists n xs)
 
