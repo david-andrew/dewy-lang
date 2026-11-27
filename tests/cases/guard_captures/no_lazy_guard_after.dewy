@@ -1,0 +1,6 @@
+every = (xs:array<int64> step:int64):>generator<int64> => {
+    let g:generator<int64> = lazy loop x in xs { x // step }
+    if step <=? 0 return lazy {}
+    g
+}
+main = () => printl([every([4 8] 2)...])

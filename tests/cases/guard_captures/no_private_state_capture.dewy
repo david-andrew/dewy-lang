@@ -1,0 +1,13 @@
+# Private state changes between calls: the guard held only for the first.
+main = () => {
+    const names = ["a" "b" "c"]
+    let at = names.length - 1
+    if at >=? 0 {
+        let next = ($capture at) => {
+            let shown = names[at]
+            at += 1
+            shown
+        }
+        printl(next())
+    }
+}

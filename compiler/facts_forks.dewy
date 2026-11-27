@@ -3,12 +3,12 @@ $runtime_checks
 from p"expression_types.dewy" import (ntype)
 
 from p"ast.jo" import (NF_GENERIC has_flag kid nkids nodes)
-from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ASSIGNED LF_EXPOSED LF_PARTBORROW LF_SHARED LF_VALUECAP fns locals)
+from p"check.jo" import (FK_GENERATOR FK_LAMBDA LF_ADDR LF_ASSIGNED LF_EXPOSED LF_PARTBORROW LF_SHARED LF_VALUECAP fns locals)
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"expr.jo" import (CV)
 from p"set_type_queries.dewy" import (is_dewy_set_type)
 from p"checks_thin_expr.dewy" import (is_map_type)
-from p"facts.jo" import (FACT_CAP FACT_CONTRACT FACT_ELEMENT_BELOW FACT_ELEMENT_VALUE FACT_KEYS_SOURCE FACT_KEY_SOURCE FactDifference FactForkEntry FactKeyParam FactProjection FactState fact_covered fact_fork_entries fact_key_names fact_key_params fact_name_parallel_arrays fact_owner fact_parallel_bounds fact_pending fact_policy fact_probe_on fact_query fact_speculating fact_summary_owner)
+from p"facts.jo" import (FACT_CAP FACT_CONTRACT FACT_ELEMENT_BELOW FACT_ELEMENT_VALUE FACT_KEYS_SOURCE FACT_KEY_SOURCE FactDifference FactForkEntry FactKeyParam FactProjection FactState fact_covered fact_fork_entries fact_fork_nodes fact_key_names fact_key_params fact_name_parallel_arrays fact_owner fact_parallel_bounds fact_pending fact_policy fact_probe_on fact_query fact_speculating fact_summary_owner)
 from p"facts_capture.dewy" import (fact_capture)
 from p"facts_slice_prep.dewy" import (fact_slice_flags)
 from p"facts_values.dewy" import (fact_domain fact_scalar fact_type fact_project)
@@ -42,17 +42,60 @@ from p"type_ops.dewy" import (zonk)
 from p"util.jo" import (intern pos_in_lib)
 
 ForkWord:type=int64<overflow='wrap'>
+# Closures and lazy bodies (not only a library call's inline callback) whose body owes a
+# proof: the facts their creator knew of the values they capture by value and never assign
+# seed the body, as `if step <=? 0 return` before `(i) => i // step`. The capture is a copy,
+# so a later change of the outer binding does not reach it, and the body cannot change it.
+# Creator function -> its closures' lambda nodes; the closures recorded under that rule.
+# Filled by fact_seed_closures for one finalization. O(captures) per closure.
+let fact_seed_lambdas:dict<int64 array<int64>>=[]
+let fact_general_forks:dict<int64 bool>=[]
+fact_seed_reset=():>void=>{
+    fact_seed_lambdas=[]
+    fact_general_forks=[]
+}
+# The function creating closure f when the closure captures a value its creator's facts can
+# describe, else 0. O(captures).
+fact_seed_creator=(f:ForkWord):>ForkWord=>$unsafe {
+    if f <=? 0 or f >=? fns.length or fns.ptr[f].kind not=? FK_LAMBDA and fns.ptr[f].kind not=? FK_GENERATOR {return 0}
+    let lam=ForkWord(fns.ptr[f].decl)
+    if lam <=? 0 or nodes.ptr[lam].kind not=? 'lambda' and nodes.ptr[lam].kind not=? 'lazy_' or has_flag(lam NF_GENERIC) or fact_fork_nodes.has(lam) {return 0}
+    let creator:ForkWord=0
+    loop cap in fns.ptr[f].caps {
+        let o=int64(cap.outer)
+        let inner=int64(cap.inner)
+        if o <=? 0 or inner <=? 0 {continue}
+        if fact_seed_capture(o inner) {creator=ForkWord(locals.ptr[o].owner)}
+    }
+    if creator =? f {return 0}
+    creator
+}
+fact_seed_capture=(o:ForkWord inner:ForkWord):>bool=>$unsafe {
+    let flags=ForkWord(locals.ptr[inner].flags)
+    if flags & LF_VALUECAP =? 0 or flags & (LF_ASSIGNED | LF_ADDR | LF_SHARED | LF_EXPOSED) not=? 0 {return false}
+    let t=fact_type(ForkWord(locals.ptr[o].type))
+    tkind(t) =? 'array' or fact_scalar(t) and is_int(t) and t not=? T_U64
+}
+fact_seed_note=(creator:ForkWord lam:ForkWord):>void=>{
+    let held=fact_seed_lambdas.get(creator) ?? []
+    held.push(lam)
+    fact_seed_lambdas[creator]=held
+    fact_general_forks[lam]=true
+}
 # At a fork closure's creation: its captures' facts, by capture. O(k^2)
-# bounded relaxations for k <= 16 captured terms.
+# bounded relaxations for k <= 16 captured terms. A general closure (fact_seed_lambdas) may
+# be created at more than one evaluation: each record keeps only what every one gave.
 fact_fork_record=(lam:ForkWord @s:FactState):>void=>$unsafe {
     let f=ForkWord(nodes.ptr[lam].sym)
     if f <=? 0 or f >=? fns.length {return}
+    let general=fact_general_forks.has(lam)
     let entry=FactForkEntry()
     let values:array<int64>=[]
     loop cap in fns.ptr[f].caps {
         let o=int64(cap.outer)
         let inner=int64(cap.inner)
         if o <=? 0 or inner <=? 0 or values.length >=? 16 {continue}
+        if general and not fact_seed_capture(o inner) {continue}
         let flags=ForkWord(locals.ptr[inner].flags)
         let t=fact_type(ForkWord(locals.ptr[o].type))
         let snapshot=flags & LF_VALUECAP not=? 0
@@ -82,6 +125,19 @@ fact_fork_record=(lam:ForkWord @s:FactState):>void=>$unsafe {
             let d=fact_shortest(s values[i] values[j])
             if d not=? FACT_MAX {entry.rows.push(FactDifference(i j d))}
         }
+    }
+    let previous=if general {fact_fork_entries.get(lam)} else {none}
+    if previous not=? none {
+        let before:FactForkEntry=previous
+        if before.inner not=? entry.inner or before.length not=? entry.length {return}
+        loop i in [0..entry.bounds.length) {entry.bounds[i]=fact_hull(before.bounds[i] entry.bounds[i] lam)}
+        let kept:array<FactDifference>=[]
+        loop r in entry.rows {
+            loop q in before.rows {
+                if q.a =? r.a and q.b =? r.b {kept.push(FactDifference(r.a r.b max(q.limit r.limit)))}
+            }
+        }
+        entry.rows=kept
     }
     fact_fork_entries[lam]=entry
 }
@@ -182,7 +238,7 @@ fact_key_record=(n:ForkWord @s:FactState base:ForkWord):>void=>$unsafe {
     fact_key_params[f]=FactKeyParam(bound rows maps)
 }
 fact_fork_seed=(f:ForkWord @s:FactState):>void=>$unsafe {
-    if fns.ptr[f].kind not=? FK_LAMBDA {return}
+    if fns.ptr[f].kind not=? FK_LAMBDA and fns.ptr[f].kind not=? FK_GENERATOR {return}
     let bound=fact_parallel_bounds.get(f)
     if bound not=? none {
         let l=fns.ptr[f].params[0]

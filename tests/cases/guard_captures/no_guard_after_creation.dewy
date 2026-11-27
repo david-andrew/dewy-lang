@@ -1,0 +1,7 @@
+scale = (xs:array<int64> k:int64):>array<int64> => {
+    let step = k
+    let f = (i:int64):>int64 => i // step
+    if step <=? 0 return []
+    [loop x in xs f(x)]
+}
+main = () => printl(scale([4 8] 2))

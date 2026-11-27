@@ -1,0 +1,19 @@
+# A closure's snapshot of a value keeps what its creator knew of it there.
+scale = (xs:array<int64> step:int64):>array<int64> => {
+    if step <=? 0 return []
+    let f = (i:int64):>int64 => i // step
+    [loop x in xs f(x)]
+}
+main = () => {
+    printl(scale([4 8] 2))
+    const names = ["a" "b" "c"]
+    let shown:array<():>string> = []
+    loop k in [0..names.length) shown.push(() => names[k])
+    loop show in shown printl(show())
+    let at = names.length - 1
+    if at >=? 0 {
+        let last = () => names[at]
+        at = -1
+        printl(last())
+    }
+}

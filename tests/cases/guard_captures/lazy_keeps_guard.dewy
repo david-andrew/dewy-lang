@@ -1,0 +1,13 @@
+# A lazy body's snapshots keep the guards before it.
+every = (xs:array<int64> step:int64):>generator<int64> => {
+    if step <=? 0 return lazy {}
+    lazy loop x in xs { x // step }
+}
+twice = (names:array<string> at:int64):>generator<string> => {
+    if at <? 0 or at >=? names.length return lazy {}
+    lazy loop _ in [0..2) names[at]
+}
+main = () => {
+    printl([every([4 8] 2)...])
+    printl([twice(["a" "b"] 1)...])
+}

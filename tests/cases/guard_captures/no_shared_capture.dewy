@@ -1,0 +1,10 @@
+# A shared capture sees the enclosing binding's later changes.
+main = () => {
+    const names = ["a" "b" "c"]
+    let at = names.length - 1
+    if at >=? 0 {
+        let show = ($capture @at) => names[at]
+        at += 1
+        printl(show())
+    }
+}

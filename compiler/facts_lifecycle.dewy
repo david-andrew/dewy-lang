@@ -13,7 +13,7 @@ from p"facts.jo" import (FactProbeRun)
 from p"facts.jo" import (FactKeyParam)
 from p"facts.jo" import (FactForkEntry)
 from p"ast.jo" import (NF_GLOBAL NF_INBOUNDS has_flag kid lists nkids nodes set_list)
-from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARTBORROW LF_SHARED LF_SOAELEM fns globals locals)
+from p"check.jo" import (FK_GENERATOR FK_LAMBDA LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARTBORROW LF_SHARED LF_SOAELEM fns globals locals)
 from p"directives.jo" import (dir_floats_any dir_forced dir_name_assumed_bounds dir_obligations dir_proven dir_value)
 from p"directive_queries.dewy" import (dir_index dir_uniform_runtime)
 from p"directive_rules.dewy" import (dir_defer)
@@ -35,7 +35,7 @@ from p"facts_slice_prep.dewy" import (fact_slice_push_children fsp_is_lib_sp fsp
 from p"facts_values.dewy" import (fact_domain fact_type)
 from p"facts_elements.dewy" import (fact_fixed_check fact_fixed_node)
 from p"facts_forgets.dewy" import (fact_drop_exit fact_drop_footprint fact_drop_forget fact_holds_contract fact_written_root)
-from p"facts_forks.dewy" import (fact_fork_seed)
+from p"facts_forks.dewy" import (fact_fork_seed fact_seed_creator fact_seed_note fact_seed_reset)
 from p"facts_library.dewy" import (fact_library_call)
 from p"facts_members.dewy" import (fact_member_candidate fact_member_decide)
 from p"facts_probes.dewy" import (fact_probe_record fact_probe_reusable)
@@ -268,15 +268,37 @@ facts_finalize=():>void=>$unsafe {
             if (fact_policy =? 'RequireStatic' or dir_floats_any or ff_conversions.has(f)) and fns.ptr[f].body not=? 0 and fns.ptr[f].state =? 2 and not fn_in_lib(f) and fn_dewy(f) {demanded[f]=true}
         }
     }
+    # (closures whose captured values their creator's facts describe: the creator runs first
+    # and records them, fact_seed_closures; only where the closure's own body is decided here)
+    fact_seed_reset()
+    let seeded=dict<int64 bool>()
+    if fact_policy =? 'RequireStatic' or refine_active {
+        let collect=fact_panic_collect
+        fact_panic_collect=false
+        let seeds:array<[int64 int64 int64]>=[]
+        loop [f _] in demanded {
+            if f <=? 0 or f >=? fns.length or fns.ptr[f].kind not=? FK_LAMBDA and fns.ptr[f].kind not=? FK_GENERATOR or fns.ptr[f].caps.length =? 0 or fns.ptr[f].body =? 0 or fn_in_lib(f) {continue}
+            if dir_uniform_runtime(nodes.ptr[LifeWord(fns.ptr[f].body)].pos) or not fact_obliged(LifeWord(fns.ptr[f].body)) {continue}
+            let creator=fact_seed_creator(f)
+            if creator >? 0 and creator <? fns.length and fns.ptr[creator].state =? 2 and not fn_in_lib(creator) {seeds.push([creator LifeWord(fns.ptr[f].decl) f])}
+        }
+        fact_panic_collect=collect
+        loop [creator lam f] in seeds {
+            demanded[creator]=true
+            mandatory[creator]=true
+            seeded[f]=true
+            fact_seed_note(creator lam)
+        }
+    }
     # (an unproven obligation is held: every function's first is shown when the pass ends)
     err_held_on=more_errors and not ide_on and not quiet_errors and not wit_collect and not wit_tentative
     # (closures after the functions that create them: a fork's entry facts)
     let order:array<int64>=[]
     loop [f _] in demanded {
-        if f >? 0 and f <? fns.length and fns.ptr[f].kind not=? FK_LAMBDA {order.push(f)}
+        if f >? 0 and f <? fns.length and fns.ptr[f].kind not=? FK_LAMBDA and not seeded.has(f) {order.push(f)}
     }
     loop [f _] in demanded {
-        if f <=? 0 or f >=? fns.length or fns.ptr[f].kind =? FK_LAMBDA {order.push(f)}
+        if f <=? 0 or f >=? fns.length or fns.ptr[f].kind =? FK_LAMBDA or seeded.has(f) {order.push(f)}
     }
     loop f in order {
         # (another process's body: it decides its own; a body already

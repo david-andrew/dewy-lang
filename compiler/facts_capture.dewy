@@ -423,6 +423,8 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
         let control=match k { <'index'|'block'|'if_'|'iflet'|'match_'|'while_'|'for_'|'return_'|'break_'|'continue_'|'and_'|'or_'|'coalesce'> => true _ => false }
         if not control and mark & FACT_VALUE =? 0 {return fact_slice_capture(n @s)}
     }
+    # (a lazy body created here, whose captures' facts seed it: fact_seed_lambdas)
+    if k =? 'lazy_' and fact_speculating =? 0 and fact_fork_nodes.has(n) {fact_fork_record(n @s)}
     match k {
         <'ident'> => {
             return fact_read(@s n)
