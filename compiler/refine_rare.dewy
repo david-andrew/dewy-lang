@@ -15,7 +15,7 @@ from p"checked_expression_nodes.dewy" import (bc_assign bc_bin capture_value typ
 from p"expr.jo" import (CV)
 from p"call_argument_checks.dewy" import (unnamed)
 from p"ast.jo" import (NF_CHECKED NF_MUT NF_RDONLY add_flag clone has_flag kid kids mk nkids nodes set_list NF_RECORD)
-from p"check.jo" import (LF_CONST LF_MUTPARAM ctxs cx fns globals locals syms lib_dir refine_deferred)
+from p"check.jo" import (FK_GENERATOR LF_CONST LF_MUTPARAM ctxs cx fns globals locals syms lib_dir refine_deferred)
 from p"checker_store_checks.dewy" import (assign_value)
 from p"checker_compound_values.dewy" import (compound_checked)
 from p"checker_selector_capture.dewy" import (index_update_path)
@@ -397,6 +397,22 @@ ref_math_term=(value:RefineRareWord t:RefineRareWord @made:array<int64>):>int64=
 }
 # Does function f's own signature contain the refined type t, so that its
 # formals are f's parameters?
+# A lazy body's yield converts to the element contract on the result of the function making
+# it, which names that function's parameters: checked against the body's copies of them
+# (ref_generator_copy). The maker is the enclosing context being checked. O(depth).
+ref_generator_yield=(owner:RefineRareWord t:RefineRareWord):>bool=>$unsafe {
+    if owner <=? 0 or owner >=? fns.length or fns.ptr[owner].kind not=? FK_GENERATOR {return false}
+    let i=cx - 1
+    loop i >=? 0 {
+        let f=RefineRareWord(ctxs.ptr[i].inst)
+        if f >? 0 and f <? fns.length and fns.ptr[f].kind not=? FK_GENERATOR {
+            let g=prune(RefineRareWord(fns.ptr[f].ret))
+            return types.ptr[g].kind =? 'generator' and prune(RefineRareWord(types.ptr[g].elem)) =? prune(t)
+        }
+        i -= 1
+    }
+    false
+}
 ref_signature_has=(f:RefineRareWord t:RefineRareWord):>bool=>$unsafe {
     if f <=? 0 or f >=? fns.length {return false}
     if ref_type_contains(RefineRareWord(fns.ptr[f].ret) t 0) {return true}
@@ -1226,7 +1242,7 @@ refine_coerce=(n:int64 target:int64):>int64=>$unsafe {
     # function, or against the entry of the function itself. Elsewhere (a
     # literal compared with a call's optional result) nothing binds them: the
     # value keeps its base type, and the type's contract is not assumed for it.
-    if ref_has_formals(t) and t not=? refine_arg_target and not ref_signature_has(owner t) {return n}
+    if ref_has_formals(t) and t not=? refine_arg_target and not ref_signature_has(owner t) and not ref_generator_yield(owner t) {return n}
     wrap_conv(n CV.refinement RefineRareWord(types.ptr[t].elem))
     nodes.ptr[n].aux2=int32(t)
     if dewy_at(nodes.ptr[n].pos) {int_domain_conversion(n t)}

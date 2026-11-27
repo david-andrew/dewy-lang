@@ -33,7 +33,7 @@ from p"facts_joins.dewy" import (fact_hull fact_hull_type fact_join fact_join_in
 from p"facts_lengths.dewy" import (fact_difference fact_heap_length fact_length_max fact_shrunk_elements)
 from p"facts_library.dewy" import (fact_chosen fact_chosen_call fact_clamped fact_copy_length_call fact_count_call fact_empty_array_call fact_endpoint fact_endpoint_call fact_entry_count_call fact_exact_sum_call fact_exact_sum_check fact_field_args fact_gpu_index_call fact_gpu_index_check fact_heap_call fact_heap_type fact_integer_gcd_call fact_length_through fact_library_call fact_nonempty_call fact_nonempty_check fact_prelude_call fact_same_length_call)
 from p"facts_lifecycle.dewy" import (fact_owner_value fact_parallel_count_check fact_parallel_range_call fact_refinements_unreachable fact_scope_exit)
-from p"facts_loops.dewy" import (fact_loop_body fact_loop_bound_demands fact_loop_bound_entry fact_loop_bounds fact_loop_prepare fact_while)
+from p"facts_loops.dewy" import (fact_generator_call fact_loop_body fact_loop_bound_demands fact_loop_bound_entry fact_loop_bounds fact_loop_prepare fact_while)
 from p"facts_maps.dewy" import (fact_map_value_refined fact_ensured_close fact_keys_copy fact_keys_element fact_map_bounded fact_map_bounded_call fact_map_call fact_map_check fact_map_clear fact_map_clear_call fact_map_entry fact_map_insert_call fact_map_key fact_map_literal fact_map_member fact_map_of fact_map_optional fact_map_position fact_map_receiver fact_map_snapshot fact_map_snapshot_call fact_map_store fact_map_store_call fact_reflexive_key)
 from p"facts_members.dewy" import (fact_member_block fact_member_literal)
 from p"facts_numeric.dewy" import (fact_bitwise fact_divisor fact_extremum fact_extremum_call fact_floor fact_floor_unsigned fact_mod_call fact_power_call fact_power_check fact_rational_constructor fact_rational_divmod fact_rational_made fact_rational_promotion fact_rational_zero_test fact_shift_obliged)
@@ -2036,6 +2036,7 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                     if i <? fns[f].params.length and CaptureWord(locals.ptr[fns[f].params[i]].flags) & LF_MUTPARAM not=? 0 {values[i]=fact_after_call(n kid(n i) @s)}
                 }
                 ref_assume(CaptureWord(fns.ptr[f].ret) result values @s)
+                if refine_active and tkind(prune(CaptureWord(fns.ptr[f].ret))) =? 'generator' {fact_generator_call(@s result CaptureWord(fns.ptr[f].ret) entry)}
                 ref_arm_publish(f result values @s)
                 if result_active {result_publish(f result values @s)}
                 let contracted=tkind(prune(CaptureWord(fns.ptr[f].ret))) =? 'refined'

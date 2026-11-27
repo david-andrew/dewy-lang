@@ -1439,7 +1439,12 @@ and dictionary operations prove their moves of such values. A closure or lazy bo
 keeps what its creator knew of a value it captures as a snapshot and never changes
 (`if step <=? 0 return` before `(i) => i // step`); a `$capture` that changes, or a
 shared `$capture @x`, keeps nothing. Captured lexical dependencies remain
-unsupported. Parameter-dependent contracts nested inside element types, and
+unsupported. A generator result's element contract may name by-value parameters,
+`positions = (names:array<string>):>generator<addr<(<? names.length)>> => lazy ...`:
+each yield is checked against the arguments the call captured (a parameter the function
+assigns cannot be named), and a loop over the call's generator knows each element is below
+`names.length` of the argument while the caller's place still holds it. Other
+parameter-dependent contracts nested inside element types, and
 projected mutable postconditions with deferred cleanup, are conservatively
 rejected. There is no public strict-lane spelling.
 

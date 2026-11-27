@@ -1,0 +1,8 @@
+# The argument changed after the call: its elements were checked against the old one.
+idx = (names:array<string>):>generator<addr<(<? names.length)>> => lazy loop i in [0..names.length) i
+main = () => {
+    let names = ["b" "a" "c"]
+    let g = idx(names)
+    names.pop();
+    loop v in g printl(names[v])
+}

@@ -225,6 +225,15 @@ fact_slice_term_locals=(t0:SlicePrepWord @out:array<int64> depth:SlicePrepWord):
         loop i in [SlicePrepWord(0)..min(SlicePrepWord(structs.ptr[si].ntargs) 2)) {fact_slice_term_locals(struct_targ(si i) @out depth + 1)}
     }
 }
+# Whether a generator type's element contract names its function's parameters. O(atoms).
+fact_type_names_formals=(g0:SlicePrepWord):>bool=>$unsafe {
+    let e=prune(SlicePrepWord(types.ptr[prune(g0)].elem))
+    if types.ptr[e].kind not=? 'refined' {return false}
+    loop atom in ref_predicates[SlicePrepWord(types.ptr[e].st)] {
+        if atom.a.kind =? 2 or atom.b.kind =? 2 {return true}
+    }
+    false
+}
 # Whether type t names such a local, memoized by interned type: O(1) after its first query.
 let fsp_type_locals:array<int8>=[]
 fact_type_names_locals=(t0:SlicePrepWord):>bool=>$unsafe {
@@ -959,6 +968,9 @@ fact_slice_prepare_fast=(f:SlicePrepWord summary:bool=false):>void=>$unsafe {
                 let direct=nodes.ptr[n].aux =? 0 and callee >? 0
                 let lib_sp=direct and fact_fn_in_lib(callee) and fsp_is_lib_sp(n callee)
                 let push_summary_args=false
+                # (a generator whose element contract names the callee's parameters: the loop
+                # over it relates each element to the arguments, fact_generator_call)
+                if direct and refine_active and tkind(prune(SlicePrepWord(fns_p[callee].ret))) =? 'generator' and fact_type_names_formals(SlicePrepWord(fns_p[callee].ret)) {fact_slice_push_children(@values n)}
                 if direct and not lib_sp {
                     if nk =? 1 and fact_nd_call(n) not=? 0 or ntype(n) =? T_BOOL and fact_predicate_summary(callee) not=? 0 {
                         loop j in [SlicePrepWord(0)..nk) {values.push(SlicePrepWord(lists.ptr[l0 + j]))}

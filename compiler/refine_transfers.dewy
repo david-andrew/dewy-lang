@@ -1,7 +1,7 @@
 $runtime_checks
 from p"checked_expression_nodes.dewy" import (mk_ident_local)
 from p"ast.jo" import (nodes)
-from p"check.jo" import (LF_ASSIGNED LF_CONST LF_MUTPARAM LF_PARAM LF_VALUEPARAM fns locals)
+from p"check.jo" import (FK_GENERATOR LF_ASSIGNED LF_CONST LF_MUTPARAM LF_PARAM LF_VALUEPARAM fns locals)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"facts.jo" import (FactState fact_owner fact_policy fact_probe fact_probe_on fact_speculating fact_terms fact_validated)
@@ -279,8 +279,44 @@ ref_fact_current_entry=(@s:FactState):>array<int64>=>$unsafe {
     let args=refine_entry
     if fact_owner <=? 0 {return args}
     let f=fact_owner
+    if fns.ptr[f].kind =? FK_GENERATOR and fns.ptr[f].caps.length >? 0 {return ref_generator_entry(f @s)}
     loop i in 0.. and l in fns.ptr[f].params {
         if RefineTransferWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 {args[i]=fact_read(@s mk_ident_local(l locals.ptr[l].pos))}
+    }
+    args
+}
+# A lazy body's yields are checked against the contract on its creator's result, which names
+# the creator's by-value parameters (`generator<int64<(<? names.length)>>`): the body's copies
+# of them, captured when it was made, are those arguments while the creator never assigns
+# them. Formal i is the copy of the creator's parameter i, or 0 (unknown). O(params x caps).
+ref_generator_creator=(f:RefineTransferWord):>RefineTransferWord=>$unsafe {
+    loop cap in fns.ptr[f].caps {
+        let o=int64(cap.outer)
+        if o >? 0 {return RefineTransferWord(locals.ptr[o].owner)}
+    }
+    0
+}
+ref_generator_copy=(f:RefineTransferWord i:RefineTransferWord):>RefineTransferWord=>$unsafe {
+    let creator=ref_generator_creator(f)
+    if creator <=? 0 or creator >=? fns.length or i >=? fns.ptr[creator].params.length {return 0}
+    let param=RefineTransferWord(fns.ptr[creator].params[i])
+    if RefineTransferWord(locals.ptr[param].flags) & (LF_ASSIGNED | LF_MUTPARAM) not=? 0 {return 0}
+    loop cap in fns.ptr[f].caps {
+        let o=int64(cap.outer)
+        if o <=? 0 or cap.inner <=? 0 {continue}
+        # (a value parameter's own binding: the local of the same name, ref_capture_entry)
+        let same=o =? param or RefineTransferWord(locals.ptr[o].flags) & LF_VALUEPARAM not=? 0 and locals.ptr[o].name =? locals.ptr[param].name and locals.ptr[o].owner =? locals.ptr[param].owner
+        if same and RefineTransferWord(locals.ptr[o].flags) & LF_ASSIGNED =? 0 {return int64(cap.inner)}
+    }
+    0
+}
+ref_generator_entry=(f:RefineTransferWord @s:FactState):>array<int64>=>$unsafe {
+    let args:array<int64>=[]
+    let creator=ref_generator_creator(f)
+    if creator <=? 0 or creator >=? fns.length {return args}
+    loop i in [0..RefineTransferWord(fns.ptr[creator].params.length)) {
+        let copy=ref_generator_copy(f i)
+        args.push(if copy >? 0 {fact_read(@s mk_ident_local(copy locals.ptr[copy].pos))} else {0})
     }
     args
 }

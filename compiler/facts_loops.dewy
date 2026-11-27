@@ -35,7 +35,7 @@ from p"nd_contracts.jo" import (ND_STORAGE_VALID)
 from p"nd_contract_ops.dewy" import (fact_nd_valid_held)
 from p"ownership.jo" import (ownership_fact_cleanup)
 from p"proofs.jo" import (ResultEvidence)
-from p"refine.jo" import (refine_active)
+from p"refine.jo" import (ref_predicates refine_active)
 from p"refine_metadata.dewy" import (ref_interval representation_type)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
 from p"types.jo" import (T_BOOL T_INT T_STR T_U8 telem tkind types)
@@ -1207,22 +1207,52 @@ fact_loop_prepare=(n:LoopWord @body:FactState prep:LoopWord base:LoopWord pushes
     }
     else if prep =? FACT_PREP_MAPPED {fact_map_loop(n base @body)}
     else {
-        fact_capture(LoopWord(nodes.ptr[n].a) @body);
-        if refine_active {fact_generator_element(n @body)}
+        let source=fact_capture(LoopWord(nodes.ptr[n].a) @body)
+        if refine_active {fact_generator_element(n source @body)}
+    }
+}
+# A call's generator whose element contract names the callee's by-value parameters
+# (`idx = (names:array<string>):>generator<int64<(<? names.length)>>`): its value keeps the
+# contract (FACT_GENERATOR_ELEMENT, a constant naming the type) and the arguments the call
+# captured (each at FACT_GENERATOR_ELEMENT - 1 - i), so each element relates to them, while
+# the caller's places still hold them. Only for such a result; O(arguments).
+const FACT_GENERATOR_ELEMENT = -300
+fact_generator_call=(@s:FactState result:LoopWord ret:LoopWord values:array<int64>):>void=>$unsafe {
+    let g=prune(ret)
+    if result =? 0 or types.ptr[g].kind not=? 'generator' or tkind(prune(LoopWord(types.ptr[g].elem))) not=? 'refined' {return}
+    if LoopWord(s.projections.length) + LoopWord(values.length) + 1 >=? FACT_CAP {return}
+    fact_add_projection(@s FactProjection(result FACT_GENERATOR_ELEMENT false fact_constant(@s prune(LoopWord(types.ptr[g].elem)))))
+    loop i in 0.. and v in values {
+        if v not=? 0 {fact_add_projection(@s FactProjection(result FACT_GENERATOR_ELEMENT - 1 - i false v))}
     }
 }
 # `loop v in g` over a generator of a refined element type (`generator<addr<(<? n)>>`): every
 # yield was checked against the type, so each element holds it. O(atoms) per iteration.
-fact_generator_element=(n:LoopWord @body:FactState):>void=>$unsafe {
+fact_generator_element=(n:LoopWord source:LoopWord @body:FactState):>void=>$unsafe {
     let l=LoopWord(nodes.ptr[n].sym)
     # (a generator loop binding one value: checker_generators)
     if nodes.ptr[n].aux not=? 5 or nodes.ptr[n].c not=? 0 or l <=? 0 {return}
     let g=fact_type(ntype(LoopWord(nodes.ptr[n].a)))
     if tkind(g) not=? 'generator' {return}
     let et=LoopWord(types.ptr[g].elem)
+    let args:array<int64>=[]
+    let held=if source not=? 0 {fact_projection_find(body source FACT_GENERATOR_ELEMENT false)} else {-1}
+    if held >=? 0 {
+        et=LoopWord(fact_bound(body body.projections[held].value).lo)
+        # (each formal the contract names must have its argument)
+        loop atom in ref_predicates[LoopWord(types.ptr[et].st)] {
+            loop term in [atom.a atom.b] {
+                if term.kind not=? 2 {continue}
+                loop args.length <=? term.value {args.push(0)}
+                let at=fact_projection_find(body source FACT_GENERATOR_ELEMENT - 1 - term.value false)
+                if at <? 0 {return}
+                args[term.value]=body.projections[at].value
+            }
+        }
+    }
     if tkind(prune(et)) not=? 'refined' or fact_type(representation_type(et)) not=? fact_type(LoopWord(locals.ptr[l].type)) {return}
     let value=fact_new(@body fact_domain(et) FactTerm(type=fact_type(et)))
-    ref_assume(et value [] @body)
+    ref_assume(et value args @body)
     fact_bind(@body PlaceIdentity('local' LoopWord(locals.ptr[l].owner) l) value)
 }
 

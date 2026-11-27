@@ -16,7 +16,7 @@ from p"refine_queries.dewy" import (ref_types_nested_formals)
 from p"nd_contracts.jo" import (nd_shape_predicates)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"util.jo" import (err_notes name_of)
-from p"type_ops.dewy" import (dt)
+from p"type_ops.dewy" import (dt mk_generator)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"refine_rare.dewy" import (ref_self_misplaced ref_sib_fields ref_projection_type)
 from p"type_refinement.dewy" import (tr_make)
@@ -37,6 +37,9 @@ representation_type=(t0:int64):>int64=>$unsafe {
 refine_read_type=(t0:int64):>int64=>$unsafe {
     let t=prune(t0)
     if types.ptr[t].kind =? 'refined' and types.ptr[t].bits =? -2 {return t}
+    # (a call's generator whose element contract names the callee's parameters: the caller
+    # sees plain elements, and the facts relate each to the call's arguments instead)
+    if types.ptr[t].kind =? 'generator' and ref_nested_formals(t) {return mk_generator(representation_type(RefineWord(types.ptr[t].elem)))}
     representation_type(t)
 }
 # the string set a type is, or 0
@@ -231,8 +234,19 @@ ref_validate_signature=(params:array<int64> ret:int64 mask:int64 pos:int64):>voi
     let result=prune(ret)
     loop types.ptr[result].kind =? 'opt' {result=prune(RefineWord(types.ptr[result].elem))}
     # (an element contract on formals would escape into the caller's storage,
-    # where no call binds them)
-    if ref_nested_formals(result) {fatal(pos "a result's element contract cannot depend on parameters");}
+    # where no call binds them; a generator's elements are values the caller reads
+    # one at a time, each checked against the by-value arguments the call captured:
+    # `(names:array<string>):>generator<int64<(<? names.length)>>`)
+    let element=if types.ptr[result].kind =? 'generator' {prune(RefineWord(types.ptr[result].elem))} else {0}
+    if element not=? 0 and types.ptr[element].kind =? 'refined' and not ref_nested_formals(RefineWord(types.ptr[element].elem)) {
+        loop atom in ref_predicates[RefineWord(types.ptr[element].st)] {
+            loop term in [atom.a atom.b] {
+                if term.kind =? 2 and term.value <? params.length and mask & (RefineWord(1) << term.value) not=? 0 {fatal(pos "a generator's element contract can name only parameters passed by value: the caller reads its elements after the call, when a changed `@` argument no longer says what they were checked against");}
+                ref_signature_term(params element params.length term mask pos)
+            }
+        }
+    }
+    else if ref_nested_formals(result) {fatal(pos "a result's element contract cannot depend on parameters");}
     let refined=false
     loop i in 0.. and t in params {
         if ref_signature_type(params t i mask pos) {refined=true}

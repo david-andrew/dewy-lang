@@ -5,7 +5,8 @@ from p"expression_types.dewy" import (ntype)
 from p"checked_expression_nodes.dewy" import (mk_ident_local)
 
 from p"ast.jo" import (nodes)
-from p"check.jo" import (fns LF_MUTPARAM locals)
+from p"check.jo" import (FK_GENERATOR fns LF_MUTPARAM locals)
+from p"refine_transfers.dewy" import (ref_generator_copy)
 from p"checker_types.dewy" import (TypeInfo)
 from p"checks_thin.dewy" import (resolve_type)
 from p"expr.jo" import (CV IN)
@@ -13,7 +14,7 @@ from p"host_binds.jo" import (ref_intern_host)
 from p"lower.jo" import (Val cur_fn)
 from p"lower_group.dewy" import (gen_expr)
 from p"nd_contract_ops.dewy" import (nd_field_shape nd_ir_projection)
-from p"refine.jo" import (ref_holder_elems ref_narrowing ref_nd_receivers ref_predicates ref_self_active ref_self_shrinks refine_active refine_ir_entry refine_owners str_set_types str_sets)
+from p"refine.jo" import (ref_holder_elems ref_narrowing ref_nd_receivers ref_predicates ref_self_active ref_self_shrinks refine_active refine_ir_entry refine_owners refine_requests str_set_types str_sets)
 from p"refine_metadata.dewy" import (representation_type)
 from p"refine_siblings.dewy" import (ref_sib_contract ref_sib_gen)
 from p"refine_rare.dewy" import (ref_self_array ref_ir_holder_length ref_math_term ref_self_gen)
@@ -165,7 +166,16 @@ ref_ir_term=(term:RefTerm self:int64 args:array<int64> self_type:int64 arg_types
     if term.kind =? 1 {return e_iconst(term.value)}
     let value=self
     let t=self_type
-    if term.kind =? 2 or term.kind =? 5 {
+    let lazy_owner=if term.kind =? 2 {ref_check_owner(cur_fn)} else {0}
+    if lazy_owner >? 0 {
+        # (a lazy body's copy of its creator's parameter: ref_generator_copy; the body may be
+        # lowered where it is consumed, as a spread inlines it)
+        let copy=ref_generator_copy(lazy_owner term.value)
+        if copy <=? 0 {fatal(if ops_gen_site[0] >? 0 {nodes.ptr[ops_gen_site[0]].pos} else {-1} "cannot check this yield: its element contract names a parameter this generator does not capture, or one its function assigns")}
+        t=RefineOpWord(locals.ptr[copy].type)
+        value=gen_expr(mk_ident_local(copy locals.ptr[copy].pos)).v
+    }
+    else if term.kind =? 2 or term.kind =? 5 {
         if term.value >=? args.length {ice("missing refinement entry snapshot")}
         value=args[term.value]
         t=arg_types[term.value]
@@ -214,6 +224,17 @@ ref_ir_term=(term:RefTerm self:int64 args:array<int64> self_type:int64 arg_types
     }
     ref_term_type=representation_type(t)
     value
+}
+# The lazy body owning the check being lowered: the current function when it is one, else the
+# body whose yield this is (inlined where it is consumed). O(requests) on this rare path only.
+ref_check_owner=(f:RefineOpWord):>RefineOpWord=>$unsafe {
+    if fns.ptr[f].kind =? FK_GENERATOR {return f}
+    let site=ops_gen_site[0]
+    if site <=? 0 {return 0}
+    loop request in refine_requests {
+        if request.node =? site and request.owner >? 0 and request.owner <? fns.length and fns.ptr[request.owner].kind =? FK_GENERATOR {return request.owner}
+    }
+    0
 }
 ref_gen_check=(n:int64 self:int64 args:array<int64> arg_types:array<int64>):>void=>$unsafe {
     if nodes.ptr[n].ival =? 1 {return}

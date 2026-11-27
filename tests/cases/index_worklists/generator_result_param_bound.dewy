@@ -1,0 +1,13 @@
+# A generator's element contract may name its by-value parameters: each yield is checked
+# against the arguments, and the caller's loop relates each element to them.
+positions = (names:array<string>):>generator<addr<(<? names.length)>> => lazy loop i in [0..names.length) {
+    names.length - 1 - i
+}
+main = () => {
+    const names = ["b" "a" "c"]
+    loop v in positions(names) printl(names[v])
+    let later = ["x" "y"]
+    let g = positions(later)
+    loop v in g printl(later[v])
+    printl([positions(names)...])
+}
