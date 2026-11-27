@@ -1183,7 +1183,8 @@ from p"facts_routes.dewy" import (fact_route fact_route_values)
 from p"facts_index_writes.dewy" import (fact_constant)
 from p"facts_compare.dewy" import (fact_compare)
 from p"refine_metadata.dewy" import (refine_storage)
-from p"types.jo" import (is_int)
+from p"refine_transfers.dewy" import (ref_assume)
+from p"types.jo" import (is_int prune)
 
 # Jo owns the speculation and shared step budget. Bind their places once;
 # nested attempts retain direct reads and restore only the original fields.
@@ -1205,7 +1206,24 @@ fact_loop_prepare=(n:LoopWord @body:FactState prep:LoopWord base:LoopWord pushes
         ref_sib_loop_elements(n base @body)
     }
     else if prep =? FACT_PREP_MAPPED {fact_map_loop(n base @body)}
-    else {fact_capture(LoopWord(nodes.ptr[n].a) @body);}
+    else {
+        fact_capture(LoopWord(nodes.ptr[n].a) @body);
+        if refine_active {fact_generator_element(n @body)}
+    }
+}
+# `loop v in g` over a generator of a refined element type (`generator<addr<(<? n)>>`): every
+# yield was checked against the type, so each element holds it. O(atoms) per iteration.
+fact_generator_element=(n:LoopWord @body:FactState):>void=>$unsafe {
+    let l=LoopWord(nodes.ptr[n].sym)
+    # (a generator loop binding one value: checker_generators)
+    if nodes.ptr[n].aux not=? 5 or nodes.ptr[n].c not=? 0 or l <=? 0 {return}
+    let g=fact_type(ntype(LoopWord(nodes.ptr[n].a)))
+    if tkind(g) not=? 'generator' {return}
+    let et=LoopWord(types.ptr[g].elem)
+    if tkind(prune(et)) not=? 'refined' or fact_type(representation_type(et)) not=? fact_type(LoopWord(locals.ptr[l].type)) {return}
+    let value=fact_new(@body fact_domain(et) FactTerm(type=fact_type(et)))
+    ref_assume(et value [] @body)
+    fact_bind(@body PlaceIdentity('local' LoopWord(locals.ptr[l].owner) l) value)
 }
 
 # Checked arena IDs; paths may have conversion/field wrappers. No view escapes.

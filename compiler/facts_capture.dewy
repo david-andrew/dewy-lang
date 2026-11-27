@@ -425,6 +425,9 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
     }
     # (a lazy body created here, whose captures' facts seed it: fact_seed_lambdas)
     if k =? 'lazy_' and fact_speculating =? 0 and fact_fork_nodes.has(n) {fact_fork_record(n @s)}
+    # (making a lazy body runs none of it, as making a closure does: its value snapshots are
+    # taken, which change nothing. Each step of it is an iteration's, fact_generator_element)
+    if k =? 'lazy_' and refine_active and ownership_decls.length =? 0 {return fact_fresh(@s ntype(n))}
     match k {
         <'ident'> => {
             return fact_read(@s n)
@@ -1430,6 +1433,21 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                 let t=fact_type(ntype(kid(n 0)))
                 if types.ptr[t].kind =? 'fixed' {return fact_constant(@s fixed_len(t))}
                 return fact_project(@s base (-1) false T_INT)
+            }
+            # (a generator's next element, as `loop v in g` reads it: opaque as any other such
+            # step, then known to hold the element type's contract, every yield having been
+            # checked against it)
+            if id =? IN.dewy_iter_value and refine_active and nkids(n) =? 2 and tkind(fact_type(ntype(kid(n 0)))) =? 'generator' {
+                let et=CaptureWord(types.ptr[fact_type(ntype(kid(n 0)))].elem)
+                if tkind(prune(et)) =? 'refined' and fact_type(representation_type(et)) =? fact_type(ntype(n)) {
+                    fact_forget(@s n 'unsupported' true)
+                    fact_capture(kid(n 0) @s);
+                    fact_capture(kid(n 1) @s);
+                    fact_forget(@s n 'unsupported' true)
+                    let value=fact_new(@s fact_domain(ntype(n)) FactTerm(type=ntype(n)))
+                    ref_assume(et value [] @s)
+                    return value
+                }
             }
             # (the library's `__take_at(xs i)` moves an element out, leaving its slot vacant: the
             # element as its stored type, whose contract held when it was stored, and the array

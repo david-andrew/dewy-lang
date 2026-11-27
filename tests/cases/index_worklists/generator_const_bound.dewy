@@ -1,0 +1,9 @@
+# A generator of indices bounded by a stable length: each yield is checked, each element known.
+report = (names:array<string>):>void => {
+    const n = names.length
+    let order:generator<addr<(<? n)>> = lazy loop i in [0..n) { n - 1 - i }
+    loop v in order printl(names[v])
+    let picked:generator<addr<(<? n)>> = lazy loop i in [0..n) if names[i] not=? "b" i
+    printl([loop v in picked names[v]].join(" "))
+}
+main = () => report(["a" "b" "c"])

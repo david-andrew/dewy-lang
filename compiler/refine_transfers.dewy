@@ -208,6 +208,19 @@ ref_foreign_entry=(f:int64 @s:FactState):>void=>$unsafe {
         let t=RefineTransferWord(locals.ptr[l].type)
         fact_bind(@s p fact_new(@s fact_domain(t) FactTerm(type=t)))
     }
+    ref_capture_links(f @s)
+}
+# A closure or lazy body capturing a constant holds a copy of the same value, which a contract
+# in it names by the constant (`lazy loop i in [0..n) i` yielding `addr<(<? n)>`): the constant's
+# place is the copy's value. Again after the creator's facts seed the copies (fact_fork_seed).
+# O(captures).
+ref_capture_links=(f:int64 @s:FactState):>void=>$unsafe {
+    loop cap in fns.ptr[f].caps {
+        let o=int64(cap.outer)
+        if o <=? 0 or cap.inner <=? 0 or RefineTransferWord(locals.ptr[o].flags) & LF_CONST =? 0 {continue}
+        let copy=fact_read(@s mk_ident_local(int64(cap.inner) locals.ptr[o].pos))
+        if copy not=? 0 {fact_bind(@s PlaceIdentity('local' RefineTransferWord(locals.ptr[o].owner) o) copy)}
+    }
 }
 refine_fact_entry=(f:int64 @s:FactState):>void=>$unsafe {
     if refine_active {ref_foreign_entry(f @s)}

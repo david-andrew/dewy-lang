@@ -218,7 +218,7 @@ fact_slice_term_locals=(t0:SlicePrepWord @out:array<int64> depth:SlicePrepWord):
         }
         fact_slice_term_locals(SlicePrepWord(types.ptr[t].elem) @out depth + 1)
     }
-    else if k =? 'array' or k =? 'fixed' {fact_slice_term_locals(SlicePrepWord(types.ptr[t].elem) @out depth + 1)}
+    else if k =? 'array' or k =? 'fixed' or k =? 'generator' or k =? 'opt' {fact_slice_term_locals(SlicePrepWord(types.ptr[t].elem) @out depth + 1)}
     else if k =? 'struct_' {
         let si=SlicePrepWord(types.ptr[t].st)
         loop i in [SlicePrepWord(0)..min(SlicePrepWord(structs.ptr[si].ntargs) 2)) {fact_slice_term_locals(struct_targ(si i) @out depth + 1)}
@@ -914,7 +914,11 @@ fact_slice_prepare_fast=(f:SlicePrepWord summary:bool=false):>void=>$unsafe {
                     let l=SlicePrepWord(nodes.ptr[n].sym)
                     if SlicePrepWord(locals_p[l].flags) & LF_ALIAS not=? 0 and locals_p[l].alias not=? 0 {values.push(SlicePrepWord(locals_p[l].alias))}
                 }
-                if refine_active and not seen_root {fact_slice_local_writers(ntype(n) writers @values @active)}
+                if refine_active and not seen_root {
+                    fact_slice_local_writers(ntype(n) writers @values @active)
+                    # (a local's declared type, as a generator loop's element's, may carry one too)
+                    if nodes.ptr[n].aux =? int32(1) {fact_slice_local_writers(SlicePrepWord(locals_p[SlicePrepWord(nodes.ptr[n].sym)].type) writers @values @active)}
+                }
             }
             <'block'> => {
                 let nk=SlicePrepWord(nodes.ptr[n].nlist)

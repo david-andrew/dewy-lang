@@ -1,0 +1,7 @@
+# A generator of plain int64 says nothing about its elements.
+report = (names:array<string>):>void => {
+    const n = names.length
+    let order:generator<int64> = lazy loop i in [0..n) i
+    loop v in order printl(names[v])
+}
+main = () => report(["a" "b" "c"])

@@ -1,0 +1,6 @@
+report = (names:array<string>):>void => {
+    const n = names.length
+    let order:generator<addr<(<? n)>> = lazy loop i in [0..n] i
+    loop v in order printl(names[v])
+}
+main = () => report(["a" "b" "c"])

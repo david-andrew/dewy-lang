@@ -51,7 +51,7 @@ from p"predicate_facts.jo" import (FactPredicate fact_predicate_nodes fact_predi
 from p"proofs.jo" import (proof_active proof_calls proof_decls result_active result_contracts)
 from p"proof_ops.dewy" import (proof_erase proof_exit proof_prepare result_exit)
 from p"refine.jo" import (ref_predicates refine_active refine_entry refine_owners refine_requests)
-from p"refine_transfers.dewy" import (refine_fact_entry)
+from p"refine_transfers.dewy" import (ref_capture_links refine_fact_entry)
 from p"refine_metadata.dewy" import (ref_wrapped_check)
 from p"refinement_types.dewy" import (FACT_MIN FactBound FactPolicy FactTerm)
 from p"types.jo" import (tkind types)
@@ -352,7 +352,10 @@ facts_finalize=():>void=>$unsafe {
             continue
         }
         if refine_active or refine_requests.length >? 0 {refine_fact_entry(f @state)}
-        if fact_fork_entries.length >? 0 or fact_parallel_bounds.length >? 0 {fact_fork_seed(f @state)}
+        if fact_fork_entries.length >? 0 or fact_parallel_bounds.length >? 0 {
+            fact_fork_seed(f @state)
+            if refine_active and fns.ptr[f].caps.length >? 0 {ref_capture_links(f @state)}
+        }
         fact_slice_prepare(f)
         let result=fact_capture(LifeWord(fns.ptr[f].body) @state)
         # (falling off the end drops the owned parameters too)
