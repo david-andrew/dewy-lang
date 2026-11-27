@@ -1,6 +1,7 @@
 $runtime_checks
 from p"numeric_library_types.dewy" import (is_nd)
 from p"facts_library.dewy" import (fact_library_call)
+from p"storage_place_checks.dewy" import (raw_globals)
 from p"checker_source_positions.dewy" import (dewy_at)
 from p"expression_types.dewy" import (ntype)
 
@@ -965,7 +966,10 @@ fact_exposed=(p:PlaceIdentity):>bool=>$unsafe {
         # A checked const has no mutable route, including through its elements.
         if g >? 0 and readonly_global(g) {return false}
         if g <=? 0 or fact_owner <=? 0 {return true}
-        return globals.ptr[g].fn_accessed or globals.ptr[g].fn_written or globals.ptr[g].exposed or fns.ptr[fact_owner].kind not=? FK_INIT or modules[ForgetWord(globals.ptr[g].mod)].init_fn not=? int32(fact_owner)
+        # (a script's global only lent to `@` calls, as a local only lent: each call
+        # that borrows it changes it, and none keeps a view of it)
+        let lent_only=globals.ptr[g].exposed and not raw_globals.contains(g) and dewy_at(nodes.ptr[ForgetWord(globals.ptr[g].decl)].pos)
+        return globals.ptr[g].fn_accessed or globals.ptr[g].fn_written or globals.ptr[g].exposed and not lent_only or fns.ptr[fact_owner].kind not=? FK_INIT or modules[ForgetWord(globals.ptr[g].mod)].init_fn not=? int32(fact_owner)
     }
     if p.root not=? 'local' {return true}
     # Lock places cannot escape their guards; mutable actuals still invalidate.

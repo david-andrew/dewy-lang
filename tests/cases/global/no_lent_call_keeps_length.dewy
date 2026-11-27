@@ -1,0 +1,7 @@
+# The call it is lent to still changes it
+pop2 = (@xs:array<int64>):>void => { if xs.length >? 0 xs.pop(); }
+let values:array<int64> = [10 20 30]
+values[0, 2..] = 0
+printl(values)
+pop2(@values)
+printl(values[2])

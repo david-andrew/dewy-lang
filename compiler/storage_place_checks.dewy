@@ -26,6 +26,9 @@ from p"ast.jo" import (NF_RDONLY has_flag kid nkids nodes)
 from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CONST LF_EXPOSED LF_MUTPARAM LF_PARAM LF_RESIZED LF_SOAELEM LF_VALUECAP const_views fns globals locals loop_copy_writes modules)
 
 StoragePlaceChecksWord:type=int64<overflow='wrap'>
+# Globals whose storage a raw address reached (`exposed` also counts ones only lent to
+# an `@` call, which keeps no view of them once it returns)
+let raw_globals:set<int64>=set[]
 
 check_place=(n:int64 for_mut:bool):>void=>$unsafe {
     let cp_inner_slot=@cp_inner
@@ -220,6 +223,7 @@ note_storage_access=(n:int64):>void=>$unsafe {
     }
     else if k =? 'ident' and nodes.ptr[n].aux =? 2 {
         globals[StoragePlaceChecksWord(nodes[n].sym)].exposed = true
+        raw_globals.push(StoragePlaceChecksWord(nodes.ptr[n].sym))
     }
     else if k =? 'ident' and nodes.ptr[n].aux =? 1 {
         let l=StoragePlaceChecksWord(nodes.ptr[n].sym)
