@@ -1,0 +1,6 @@
+# A child's own field is not the family's
+Ticket:type = type of error & [message:string code:int64=1]
+Late:type = type of Ticket & [minutes:int64]
+f = (k:int64):>int64|Ticket => if k =? 0 Late["late" 2 5] else k
+let r = f(0)
+if r is? Ticket { printl(r.minutes) }

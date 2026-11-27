@@ -94,7 +94,7 @@ narrow_some=(tests:array<int64>):>void=>{
             if nodes[a].kind not=? 'ident' or nodes[a].aux not=? PATH_NARROW_LOCAL {return}
             if narrow_root_local(PathNarrowWord(nodes[a].sym)) not=? narrow_root_local(PathNarrowWord(nodes[a0].sym)) {return}
         }
-        else if path_key(a) not=? key {return}
+        else if narrow_subject_key(a) not=? key {return}
         let at=prune(ntype(a))
         if not is_union(at) {return}
         let m=union_members(at)[PathNarrowWord(nodes[t].aux)]
@@ -106,6 +106,19 @@ narrow_some=(tests:array<int64>):>void=>{
         count=PathNarrowWord(count) + 1
         narrow_expr(copy_path(a0) sel nodes[a0].pos path_name(key))
     }
+}
+
+# A later test of an or-chain sees its subject narrowed by the earlier ones failing
+# (`g is? A or g is? B`, a family's members): that alias stands for the same path.
+# O(alias depth).
+narrow_subject_key=(a:PathNarrowWord):>string=>$unsafe {
+    let e=a
+    loop nodes[e].kind =? 'ident' and nodes[e].aux =? PATH_NARROW_LOCAL and PathNarrowWord(locals[PathNarrowWord(nodes[e].sym)].flags) & LF_ALIAS not=? 0 {
+        let al=PathNarrowWord(locals[PathNarrowWord(nodes[e].sym)].alias)
+        if nodes[al].kind not=? 'conv' and nodes[al].kind not=? 'narrow' {break}
+        e=PathNarrowWord(nodes[al].a)
+    }
+    path_key(e)
 }
 
 const PATH_NARROW_GLOBAL:int32=2 # SK.global in the frozen node ABI.
