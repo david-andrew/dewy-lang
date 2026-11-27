@@ -1185,9 +1185,25 @@ resolve_refinement=(n:int64):>int64=>$unsafe {
             if not ref_repr_match(actual expected term.path) {fatal(nodes.ptr[n].pos "dependent scalar refinement requires matching integer representations");}
         }
     }
+    # Provisional (D17's rule, extended): an upper bound on a signed value by a constant's
+    # length, `int64<(<? names.length)>` after `const names = ...`, makes it a valid index,
+    # so it also means `>=? 0` unless the contract states its own lower bound. O(atoms).
+    if is_int(rep) and types.ptr[rep].sign and ref_lexical_length_bound(atoms) {atoms.push(RefAtom('le' RefTerm(1 0) RefTerm(0)))}
     let predicate=ref_intern(atoms)
     if not ref_spans.has(predicate) {ref_spans[predicate]=nodes.ptr[n].pos}
     mk_refined(base predicate)
+}
+ref_lexical_length_bound=(atoms:array<RefAtom>):>bool=>{
+    let upper=false
+    loop atom in atoms {
+        let own_left=atom.a.kind =? 0 and atom.a.path.length =? 0
+        let own_right=atom.b.kind =? 0 and atom.b.path.length =? 0
+        if (atom.op =? 'lt' or atom.op =? 'le') and own_right {return false}
+        if (atom.op =? 'gt' or atom.op =? 'ge') and own_left {return false}
+        if atom.op =? 'eq' and (own_left or own_right) {return false}
+        if (atom.op =? 'lt' or atom.op =? 'le') and own_left and atom.b.kind =? 3 and ref_path_length(atom.b.path) {upper=true}
+    }
+    upper
 }
 refine_coerce=(n:int64 target:int64):>int64=>$unsafe {
     let t=prune(target)

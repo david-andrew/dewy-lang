@@ -1,0 +1,11 @@
+# Provisional: an upper bound by a constant's length also means the value is nonnegative.
+walk = (g:array<string>):>void => {
+    const names = g
+    let stack:array<int64<(<? names.length)>> = []
+    if names.length >? 0 stack.push(0)
+    loop not stack.is_empty printl(names[stack.pop()])
+    let d:dict<string int64<(<? names.length)>> = []
+    if names.length >? 0 d["a"] = 0
+    if "a" in? d printl(names[d["a"]])
+}
+main = () => walk(["x" "y"])
