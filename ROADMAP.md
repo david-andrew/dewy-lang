@@ -12,7 +12,7 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 | Acceptance ladder, design surface | 144/144 (+1 held on D40) | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
 | No traps by default | census 2,073 sites in 929 of 2,252 programs (11-21, `tools/compiler/census.py`), down from 3,600 on 10-26 | ordinary code proves without opt-ins |
-| Compile throughput, single thread, default build, every processed line | flagships 250.6k lines/s (11-24, after the speed merge 807b93917; self-build −23%) | 200–250k on every flagship |
+| Compile throughput, single thread, default build, every processed line | flagships 371.6k lines/s total, every flagship ≥ 300k (11-27, moonshot slices) | 200–250k on every flagship |
 | Hello-world compile | 7.5 ms (instruction-derived) | ≤20 ms |
 | Kernels vs C -O2 (time, default, `bench` on redfox) | 18 of 28 at ≤1.2×; worst byte_find 2.85×, callbacks_literal 2.34× (fair C about 1.47×), name_table 1.67×, graph 1.54×, dict_words 1.51×, arena 1.43× | ≤1.2× |
 | Quick / full suite | about 25 s / about 9.5 min at 4 workers | ≤30 s / ≤5 min |
@@ -29,8 +29,7 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
    Dogfood rounds alternate discovery and fix. Coverage rounds on value layouts,
    refinements and concurrency found 23 bug causes, all fixed; run more on
    untested areas (FFI, GPU/packed/SOA layouts, other native architectures).
-2. **Compile speed** (200–250k lines/s on every flagship; flagships total 260k, 99 and 96
-   at about 220k). Moonshot toward 1M processed lines/s under way (Neon, plan in
+2. **Compile speed** (goal 200–250k met on every flagship: 300–457k, 11-27). Moonshot toward 1M processed lines/s under way (Neon, plan in
    [moonshot-round1](docs/design/proposals/compile-speed/moonshot-round1.md)): it owns
    compiler storage/AST/IR layout, walk structure and code generation, including
    replacing the remaining Jo storage modules with Dewy. No other compile-speed work;
