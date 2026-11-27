@@ -27,7 +27,6 @@ from p"effect_lattice.dewy" import (effect_intern place_base)
 from p"effect_control.dewy" import (effect_name)
 from p"effect_sites.dewy" import (effect_scalar_sites effect_use_sites)
 from p"effect_sources.dewy" import (effect_source_row)
-from p"exact.jo" import (exact_marks)
 from p"exact_count_bounds.dewy" import (exact_small_math)
 from p"exact_raw_plans.dewy" import (exact_effect_representation exact_local_width exact_raw_value)
 from p"facts_slice_builder.dewy" import (fact_comparison_raw)
@@ -205,10 +204,8 @@ effect_target_parts=(f:EffectScanWord n:EffectScanWord depth:EffectScanWord=0):>
 # products of them. Its magnitude bound, or -1.
 effect_small=(n:EffectScanWord depth:EffectScanWord=0):>int64=>$unsafe {
     if n =? 0 or depth >? 8 {return -1}
-    if exact_marks.length >? 0 {
-        let bounded=exact_small_math(n)
-        if bounded >=? 0 {return bounded}
-    }
+    let bounded=exact_small_math(n)
+    if bounded >=? 0 {return bounded}
     let k=nodes.ptr[n].kind
     if k =? 'int_lit' and is_int(ntype(n)) and not has_flag(n NF_U64) and nodes.ptr[n].ival >=? 0 {return if nodes.ptr[n].ival <? (1 << 31) {nodes.ptr[n].ival} else {-1}}
     if k =? 'ident' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) and prune(ntype(n)) =? T_MATH_INT {return effect_counters.get(EffectScanWord(nodes.ptr[n].sym)) ?? (-1)}

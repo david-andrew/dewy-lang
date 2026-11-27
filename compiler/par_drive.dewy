@@ -21,7 +21,7 @@ from p"x64.jo" import (code data_fix fn_addr fn_len)
 from p"x64_ops.dewy" import (x64_code_align)
 from p"x64_allocate.dewy" import (ra_dump)
 from p"x64_emit.dewy" import (cabi_fix call_fix call_sites line_rows nchk_rows pad_moves ra_stat ro_const ro_new rsp_rows stub_fix)
-from p"x64_encode.dewy" import (x_patch_moves)
+from p"x64_encode.dewy" import (x_patch_moves x_track_patch_moves)
 from p"x64_module.dewy" import (cabi_adapter)
 
 ParWord:type=int64<overflow='wrap'>
@@ -112,6 +112,7 @@ emit_parallel=(q:array<IrFn> fin:array<bool>):>bool=>{
 # ---- a worker: emit q[a..b), write what came of it to fd, end ----
 par_worker=(q:array<IrFn> fin:array<bool> a:ParWord b:ParWord r0:ParWord fd:ParWord):>void=>{
     # Workers retain dumps per function; only the accepted emission prints at join.
+    x_track_patch_moves=true
     if dump {ir_dump_capture=true}
     __olen=0
     code=[]

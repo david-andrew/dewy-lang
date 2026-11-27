@@ -96,3 +96,47 @@ main = ():>void => {
     ran = _build_and_run(compiler, tmp_path, 'dense_dict_in', source, release=release)
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout.strip() == 'one two three four'
+
+
+@pytest.mark.parametrize('release', [False, True])
+def test_match_uint64_crossing_and_short_circuit_unscoped(compiler, tmp_path, release):
+    source = r'''
+$runtime_checks
+
+classify_u64 = (x:uint64):>int64 => match x {
+    <9223372036854775807> => 10
+    <9223372036854775808> => 20
+    <9223372036854775809> => 30
+    <9223372036854775810> => 40
+    _ => 50
+}
+
+classify_u64_wide = (x:uint64):>int64 => match x {
+    <0> => 1
+    <1> => 2
+    <9223372036854775808> => 3
+    <18446744073709551615> => 4
+    _ => 5
+}
+
+pick = (flag:bool seed:string):>string => {
+    let b:string? = if flag none else "kept"
+    let c = b ?? (let tmp = "fallback-{seed}"; tmp)
+    let ok = flag and (let tag = "tag-{c}"; tag.length >? 0)
+    if ok "{c}:1" else "{c}:0"
+}
+
+main = ():>void => {
+    printl(classify_u64(uint64(9223372036854775807)))
+    printl(classify_u64(uint64(9223372036854775808)))
+    printl(classify_u64(uint64(0)))
+    printl(classify_u64_wide(uint64(0)))
+    printl(classify_u64_wide(uint64(18446744073709551615)))
+    printl(classify_u64_wide(uint64(7)))
+    loop i in [0..4) { printl(pick(i % 2 =? 0 "v{i}")) }
+}
+'''
+    ran = _build_and_run(compiler, tmp_path, 'u64_short_circuit', source, release=release)
+    assert ran.returncode == 0, ran.stderr
+    assert ran.stdout.splitlines() == ['10', '20', '50', '1', '4', '5',
+                                       'fallback-v0:1', 'kept:0', 'fallback-v2:1', 'kept:0']

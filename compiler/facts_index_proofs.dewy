@@ -395,8 +395,8 @@ positive_bound=(n:IndexWord use_locals:bool):>IndexWord=>$unsafe {
     }
     if positive_stamp.ptr[n] =? positive_epoch {return positive_cache.ptr[n]}
     let value=positive_bound_value(n true)
-    positive_cache.ptr[n]=value
-    positive_stamp.ptr[n]=positive_epoch
+    positive_place_cache[0][n]=value
+    positive_place_stamp[0][n]=positive_epoch
     value
 }
 # One cache entry per expression in a lowering context. Statements and range

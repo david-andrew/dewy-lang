@@ -22,19 +22,23 @@ from p"lower_races.dewy" import (local_literal_fn)
 # Demanded waiting-effect queries; shared state has one owner in concurrency.jo.
 WaitingWord:type=int64<overflow='wrap'>
 let cw_file_class:array<int8>=[]
+let cw_file_path:array<string>=[]
 let cw_file_lib:string=""
 cw_classify_file=(fi:WaitingWord):>int8=>$unsafe {
     if cw_file_lib not=? lib_dir {
         cw_file_class.clear()
+        cw_file_path.clear()
         cw_file_lib=lib_dir
     }
+    let p=files.ptr[fi].path
     if fi <? cw_file_class.length {
         let c=cw_file_class.ptr[fi]
-        if c not=? int8(0) {return c}
+        if c not=? int8(0) and cw_file_path.ptr[fi] =? p {return c}
     } else {
-        cw_file_class.resize(max(fi + 16 files.length + 16))
+        let need=max(fi + 16 files.length + 16)
+        cw_file_class.resize(need)
+        cw_file_path.resize(need)
     }
-    let p=files.ptr[fi].path
     let cls:int8=int8(1)
     if p =? "{lib_dir}/std/tasks.jo" {cls=int8(2)}
     else if p =? "{lib_dir}/std/thread.jo" {cls=int8(3)}
@@ -42,7 +46,8 @@ cw_classify_file=(fi:WaitingWord):>int8=>$unsafe {
     else if p =? "{lib_dir}/prelude/spsc.jo" {cls=int8(5)}
     else if p =? "{lib_dir}/std/task_core.jo" {cls=int8(6)}
     else if p =? "{lib_dir}/std/settings.jo" or p =? "{lib_dir}/runtime/settings_frames.jo" or p =? "{lib_dir}/runtime/settings_permits.jo" or p =? "{lib_dir}/core/rt.jo" {cls=int8(7)}
-    cw_file_class.ptr[fi]=cls
+    cw_file_class[fi]=cls
+    cw_file_path[fi]=p
     cls
 }
 concurrency_fn_blocks=(f:WaitingWord):>bool=>$unsafe {
