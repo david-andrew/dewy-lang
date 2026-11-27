@@ -45,6 +45,17 @@ fact_nd_axis=(n:SliceWord @s:FactState value:SliceWord extent:SliceWord):>FactND
         rest.push(fact_constant(@s 0))
         return fact_nd_range(n @s rest actuals[0] 11)
     }
+    # (`(a..b]`, `__dewy_range_tail` of `[a..b]`: an unstepped one selects from a + 1; past the
+    # word's end, or stepped, its obligations stay unproven)
+    if kind =? 15 and actuals.length =? 1 {
+        let whole=fact_nd_axis(n @s actuals[0] extent)
+        if not whole.known or not whole.keep or whole.count not=? 0 or whole.picks not=? 0 {return FactNDAxis()}
+        let origin=bc_int(0 nodes.ptr[n].pos)
+        nodes.ptr[origin].type=int32(T_INT)
+        let first=fact_arithmetic(@s origin 'plus' whole.first fact_constant(@s 1))
+        if first =? 0 {return FactNDAxis()}
+        return FactNDAxis(first whole.stop true true)
+    }
     if kind =? 154 and actuals.length =? 5 {
         let keep=fact_bound(s actuals[2])
         if keep.lo not=? keep.hi {return FactNDAxis()}

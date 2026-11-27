@@ -1,0 +1,18 @@
+# An exclusive-first range selects from one past its start, proven in bounds
+let xs = [10 20 30 40 50]
+printl(xs[(0..2]])
+printl(xs[(0..3)])
+printl(xs[(3..4]])
+printl(xs[(2..2]])
+printl(xs[(1..1)])
+main = () => {
+    let ys = [1 2 3]
+    printl(ys[(0..2]])
+    ys[(0..2]] = 9
+    printl(ys)
+}
+printl(xs[(-1..1]])
+let r = (0..3)
+printl(xs[r])
+f = (ys:array<int>) => if ys.length >? 3 printl(ys[(0..3]])
+f(xs)

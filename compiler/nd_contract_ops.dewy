@@ -437,7 +437,7 @@ fact_nd_capture=(n:NdWord @s:FactState values:array<int64> kind:NdWord):>int64=>
     if kind =? 115 {return values[0]}
     if kind >=? 150 and kind <=? 154 {return fact_nd_slice(n @s values kind)}
     if kind =? 114 {return fact_nd_download(n @s values[0])}
-    if kind >=? 11 and kind <=? 14 {return fact_nd_remember(n @s values ntype(n))}
+    if kind >=? 11 and kind <=? 15 {return fact_nd_remember(n @s values ntype(n))}
     if kind =? 140 {return fact_nd_broadcast(n @s values[0])}
     if kind =? 10 {return fact_nd_count(@s values[0])}
     if kind =? 106 {
