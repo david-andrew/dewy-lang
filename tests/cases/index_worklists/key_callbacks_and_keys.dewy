@@ -1,0 +1,14 @@
+# Key callbacks get the receiver's element contract; so do a dictionary's refined keys.
+walk = (g:array<string>):>void => {
+    const names = g
+    let idx:array<int64<(<? names.length)>> = []
+    loop i in [0..names.length) idx.push(names.length - 1 - i)
+    let s = idx.sorted(key=(v) => names[v])
+    printl([loop v in s names[v]].join(" "))
+    idx.sort(key=(v) => names[v])
+    if not idx.is_empty printl(names[idx.min_by((v) => names[v])])
+    let ranks:dict<int64<(<? names.length)> string> = []
+    loop v in idx ranks[v] = names[v]
+    loop k in ranks.keys printl(names[k])
+}
+main = () => walk(["b" "c" "a"])

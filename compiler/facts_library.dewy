@@ -88,7 +88,14 @@ fact_endpoint=(n:LibraryWord @s:FactState base:LibraryWord kind:LibraryWord):>Li
             fact_difference(@s length index 1)
         }
     }
-    fact_project(@s base index true ntype(n))
+    fact_project(@s base index true fact_stored_element(n))
+}
+# The element a receiver's read returns, as its stored type: a refined element's contract
+# held when it was stored (`xs[i]` reads it so). O(1).
+fact_stored_element=(n:LibraryWord):>LibraryWord=>$unsafe {
+    let at=fact_type(ntype(kid(n 0)))
+    if types.ptr[at].kind =? 'array' and tkind(LibraryWord(types.ptr[at].elem)) =? 'refined' and fact_type(LibraryWord(types.ptr[at].elem)) =? fact_type(ntype(n)) {return LibraryWord(types.ptr[at].elem)}
+    ntype(n)
 }
 fact_chosen_call=(n:LibraryWord):>bool=>$unsafe {
     if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 2 {return false}
@@ -105,7 +112,7 @@ fact_chosen=(n:LibraryWord @s:FactState base:LibraryWord):>LibraryWord=>{
     let b=fact_bound(s length)
     let index=fact_new(@s FactBound(0 max(0 LibraryWord(b.hi) - 1)) FactTerm(type=T_INT))
     fact_difference(@s index length (-1))
-    fact_project(@s base index true ntype(n))
+    fact_project(@s base index true fact_stored_element(n))
 }
 fact_copy_length_call=(n:LibraryWord):>bool=>$unsafe {
     if nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) <? 1 {return false}

@@ -6,7 +6,7 @@ from p"expression_types.dewy" import (ntype)
 from p"facts_summaries.dewy" import fact_record_arrays
 from p"effect_library.jo" import EffectClass
 from p"ast.jo" import (NF_ALIASDECL NF_GENERIC NF_GLOBAL has_flag kid nkids nodes)
-from p"check.jo" import (LF_ASSIGNED LF_PARAM LF_VALUECAP LF_VALUEITER map_loop_values FK_INIT LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARTBORROW LF_SHARED LF_SOAELEM fns globals lib_dir locals modules runtime_insts)
+from p"check.jo" import (LF_ASSIGNED LF_CONST LF_PARAM LF_VALUECAP LF_VALUEITER map_loop_values FK_INIT LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARTBORROW LF_SHARED LF_SOAELEM fns globals lib_dir locals modules runtime_insts)
 from p"checks_thin.dewy" import (library_exit_call readonly_global)
 from p"effect_classifiers.dewy" import (effect_library_class)
 from p"effect_control.dewy" import (effects_demand)
@@ -151,6 +151,9 @@ fact_forget=(@s:FactState at:ForgetWord reason:FactReason all:bool=false written
     loop i in [0..s.bindings.length) {
         let p=s.bindings.ptr[i].place
         if not all and not fact_exposed(p) {continue}
+        # (a constant has one value whoever sees it: a call cannot change it. A contract
+        # naming it relies on that, as `addr<(<? n)>` read inside the library's `min_by`)
+        if not all and p.root =? 'local' and p.declaration >? 0 and ForgetWord(locals.ptr[p.declaration].flags) & LF_CONST not=? 0 and ForgetWord(locals.ptr[p.declaration].flags) & (LF_ADDR | LF_SHARED | LF_EXPOSED) =? 0 {continue}
         # Output's internal buffers remain mutable. Preserve only checked
         # program globals that cannot alias those buffers through an escape.
         if text_sink and p.root =? 'global' and not globals.ptr[p.declaration].exposed {
