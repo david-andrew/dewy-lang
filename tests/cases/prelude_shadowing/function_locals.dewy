@@ -1,0 +1,12 @@
+# Inside a function, assigning a prelude name makes a local, as `let` would:
+# time units (`s`, `ms`), prelude consts (`week`) and functions (`date`).
+f = ():>int64 => {
+    s = 4
+    ms = 5
+    week = 6
+    date = 7
+    s + ms + week + date
+}
+printl(f())
+# The prelude's names are untouched outside the shadowing scope.
+printl(2s + 500ms)

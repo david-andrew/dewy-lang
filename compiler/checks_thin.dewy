@@ -15,7 +15,7 @@ from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (NF_RDONLY has_flag kid kid2 nkids nkids2 nodes shadowable_decls)
 from p"check.jo" import (FK_INIT LF_UNNARROWED ctxs cx fns globals inst_counter lib_dir locals loop_copy_writes ml_struct ml_tick module_by_path module_ctx module_frames modules narrow_changes prelude refine_deferred runtime_insts syms values_hint_label)
 from p"checker_startup.dewy" import (load_std_file)
-from p"prelude.jo" import (prelude_std_pending)
+from p"prelude.jo" import (dp_mods prelude_std_pending)
 from p"checker_alias.dewy" import (ca_resolve_alias)
 from p"checker_assigns.dewy" import (va_assign)
 from p"checker_blocks.dewy" import (bk_stmt)
@@ -47,7 +47,14 @@ ThinWord:type=int64<overflow='wrap'>
 # `$shadowable const` (shadowable_decls) or the prelude, which is declared so as a
 # whole: an inner scope or an importing module may bind the name anew.
 decl_shadowable=(d:ThinWord):>bool=>$unsafe {
-    d not=? 0 and (shadowable_decls.has(d) or modules[ThinWord(nodes.ptr[d].mod)].is_prelude)
+    d not=? 0 and (shadowable_decls.has(d) or prelude_module(ThinWord(nodes.ptr[d].mod)))
+}
+# (the prelude's Dewy files, lib/prelude/*.dewy, are ordinary modules otherwise)
+prelude_module=(m:ThinWord):>bool=>$unsafe {
+    if m <? 0 or m >=? modules.length {return false}
+    if modules.ptr[m].is_prelude {return true}
+    loop dm in dp_mods {if dm =? m {return true}}
+    false
 }
 ml_bump=():>void=>{
     ml_tick += 1

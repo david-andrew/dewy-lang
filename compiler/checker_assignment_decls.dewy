@@ -4,12 +4,12 @@ from p"checker_exact.dewy" import (exact_potential)
 from p"exact_check_hooks.dewy" import (exact_type exact_int_result)
 from p"types.jo" import (T_MATH_INT)
 from p"checker_module_lookup.dewy" import (module_lookup)
-from p"ast.jo" import (kids nodes)
-from p"check.jo" import (cx game_lookup_ok globals own_consts syms)
+from p"ast.jo" import (kids nodes shadowable_decls)
+from p"check.jo" import (cx game_lookup_ok globals own_consts syms universe)
 from p"prelude.jo" import (prelude_game_pending prelude_std_pending)
 from p"checker_binding_inputs.dewy" import (flatten_binding_leaves)
 from p"checker_expr.dewy" import (lookup)
-from p"checks_thin.dewy" import (decl_shadowable is_private)
+from p"checks_thin.dewy" import (decl_shadowable is_private prelude_module readonly_global)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"source_queries.dewy" import (line_col pos_str)
 from p"util.jo" import (files name_of pos_file pos_in_lib)
@@ -51,7 +51,16 @@ name_assignable=(nm:AssignmentDeclWord m:AssignmentDeclWord):>bool=>{
     let s=module_lookup(m nm)
     gok=prev
     if s =? 0 or syms[s].kind not=? 'global' {return false}
-    not is_private(nm) or globals[AssignmentDeclWord(syms[s].ref)].mod =? m
+    let g=AssignmentDeclWord(syms[s].ref)
+    if globals[g].mod not=? m and shadowable_const(s) {return false}
+    not is_private(nm) or globals[g].mod =? m
+}
+
+# a `$shadowable` (or prelude) const global: a plain `name = ...` makes a new binding
+shadowable_const=(s:AssignmentDeclWord):>bool=>{
+    let g=AssignmentDeclWord(syms[s].ref)
+    let d=AssignmentDeclWord(syms[s].decl)
+    readonly_global(g) and (shadowable_decls.has(d) or prelude_module(AssignmentDeclWord(globals[g].mod)))
 }
 
 # is there a variable of this name in scope (assigning to it changes it)?
@@ -67,7 +76,7 @@ var_visible=(nm:AssignmentDeclWord):>bool=>{
     gok=prev
     if s =? 0 {return false}
     let kind=syms[s].kind
-    kind =? 'local' or kind =? 'global'
+    kind =? 'local' or (kind =? 'global' and not shadowable_const(s))
 }
 
 assign_to_decl=(s:AssignmentDeclWord):>void=>{
@@ -77,7 +86,8 @@ assign_to_decl=(s:AssignmentDeclWord):>void=>{
     gok=false
     if nodes[lhs].kind =? 'ident' and files[pos_file(nodes[s].pos)].is_dewy {
         let cs=lookup(AssignmentDeclWord(nodes[lhs].name))
-        if cs not=? 0 and syms[cs].kind =? 'const_' and not decl_shadowable(AssignmentDeclWord(syms[cs].decl)) {
+        # (the universe's constants, the prelude's time units among them, are the prelude's)
+        if cs not=? 0 and syms[cs].kind =? 'const_' and not decl_shadowable(AssignmentDeclWord(syms[cs].decl)) and (universe.get(AssignmentDeclWord(nodes[lhs].name)) ?? 0) not=? cs {
             gok=prev_game_ok
             fatal(nodes[lhs].pos "cannot modify const '{name_of(AssignmentDeclWord(nodes[lhs].name))}'; use let to declare a new binding")
         }
