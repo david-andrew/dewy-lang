@@ -1,0 +1,14 @@
+# The library's reverse, sort and dictionary pop prove their stores of a type bounded by the
+# caller's constant, whatever its value.
+walk = (names:array<string>):>void => {
+    const n = names.length
+    let finished:array<addr<(<? n)>> = []
+    loop i in [0..n) finished.push(i)
+    loop v in finished.reversed printl(names[v])
+    finished.sort(reverse=true)
+    loop v in finished.sorted printl(names[v])
+    let at:dict<string addr<(<? n)>> = []
+    loop v in finished at[names[v]] = v
+    if "b" in? at printl(names[at.pop("b")])
+}
+main = () => walk(["a" "b" "c"])
