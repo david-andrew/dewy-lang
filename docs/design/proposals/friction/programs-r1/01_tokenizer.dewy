@@ -1,0 +1,48 @@
+# Tokenize an arithmetic expression and point at the first bad character.
+# r1 (after): field `end` (Q1), bare literal arms (Q3), a one-assignment arm (Q2).
+# Before: `stop`, `<" "> => { i += 1 }`, `<"(">`; the before version runs today.
+$runtime_checks
+
+Token:type = [
+    kind:string
+    start:int
+    end:int
+    width = () => end - start                        # outside brackets, a bare `end` in a method is the field
+    text = (src:string):>string => {
+        let stop = end                               # `src[start..end)` here is an error naming both meanings
+        src[start..stop)
+    }
+]
+
+tokenize = (src:string):>array<Token> | string => {
+    let tokens:array<Token> = []
+    let i = 0
+    loop i <? src.length {
+        let c = src[i]
+        let start = i
+        match c {
+            " " => i += 1
+            "+" | "-" | "*" | "/" => { tokens.push(Token["op" start i+1]) i += 1 }
+            "(" => { tokens.push(Token["open" start i+1]) i += 1 }
+            ")" => { tokens.push(Token["close" start i+1]) i += 1 }
+            _ => {
+                if c >=? "0" and c <=? "9" {
+                    loop i <? src.length and src[i] >=? "0" and src[i] <=? "9" { i += 1 }
+                    tokens.push(Token["number" start i])
+                } else {
+                    return "unexpected '{c}' at column {start + 1}"
+                }
+            }
+        }
+    }
+    tokens
+}
+
+main = ():>void => {
+    let src = "12 + (3*40) - 7"
+    let result = tokenize(src)
+    if result is? string { printl(result) return }
+    loop t in result printl("{t.kind} '{t.text(src)}' {t.start}..{t.end} ({t.width})")
+    let bad = tokenize("1 + x")
+    if bad is? string printl(bad)
+}

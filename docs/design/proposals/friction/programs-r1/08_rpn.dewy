@@ -1,0 +1,40 @@
+# A reverse-Polish calculator with a few stack words.
+# r1 (after): bare literal arms (Q3). Before: `<"+"> => ...`.
+$runtime_checks
+
+eval_rpn = (line:string):>float64 | string => {
+    let stack:array<float64> = []
+    loop word in line.split(" ") {
+        if word.is_empty continue
+        if word in? ["+" "-" "*" "/" "swap"] {
+            if stack.length <? 2 return "'{word}' needs two values"
+            let b = stack.pop()
+            let a = stack.pop()
+            match word {
+                "+" => stack.push(a + b)
+                "-" => stack.push(a - b)
+                "*" => stack.push(a * b)
+                "/" => { if b =? 0.0 return "division by zero" stack.push(a / b) }
+                _ => { stack.push(b) stack.push(a) }
+            }
+        } else {
+            match word {
+                "dup" => { if stack.is_empty return "'dup' needs a value" stack.push(stack[end]) }
+                "pi" => stack.push(3.141592653589793)
+                _ => {
+                    let n = to_float(word)
+                    if n is? float64 stack.push(n) else return "unknown word '{word}'"
+                }
+            }
+        }
+    }
+    if stack.length not =? 1 return "{stack.length} values left on the stack"
+    stack[0]
+}
+
+main = ():>void => {
+    loop line in ["3 4 + 2 *" "1 2 swap -" "2 dup *" "pi 2 *" "1 0 /" "1 +" "1 2" "3 x"] {
+        let r = eval_rpn(line)
+        printl("{line}  =>  {r}")
+    }
+}

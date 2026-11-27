@@ -1,0 +1,43 @@
+# Summarize a web server log: counts per level, slowest requests, and status codes by frequency.
+# r1 (after): one-assignment arms (Q2), bare literal arms (Q3), `(s:int)` callbacks (taken).
+# Before: `<"INFO"> => { infos += 1 }` and `(s:int64) =>`.
+$runtime_checks
+
+Entry:type = [level:string status:int64 ms:int64 path:string]
+
+parse = (line:string):>Entry | none => {
+    let f = line.split(" ")
+    if f.length <? 4 return none
+    let status = int64(f[1])
+    let ms = int64(f[2])
+    if status isnt? int64 or ms isnt? int64 return none
+    Entry[f[0] status ms f[3]]
+}
+
+main = ():>void => {
+    let lines = ["INFO 200 12 /" "WARN 404 3 /favicon.ico" "INFO 200 340 /search" "ERROR 500 1200 /pay" "INFO 304 2 /" "junk" "WARN 429 1 /search" "INFO 200 95 /pay"]
+    let infos = 0
+    let warns = 0
+    let errors = 0
+    let skipped = 0
+    let entries:array<Entry> = []
+    loop line in lines {
+        let e = parse(line)
+        if e is? none { skipped += 1 continue }
+        entries.push(e)
+        match e.level {
+            "INFO" => infos += 1
+            "WARN" => warns += 1
+            "ERROR" => errors += 1
+            _ => skipped += 1
+        }
+    }
+    printl("{infos} info, {warns} warn, {errors} error, {skipped} skipped")
+    let slow = entries.sorted(key=(e) => -e.ms)
+    loop i in [0..3) printl("slow: {slow[i].path} {slow[i].ms}ms")
+    let statuses:array<int64> = [loop e in entries e.status]
+    let by_class = statuses.sorted(key=(s:int) => s // 100)
+    printl(by_class)
+    let worst = statuses.max_by((s:int) => if s >=? 500 2 else if s >=? 400 1 else 0)
+    printl("worst status {worst}")
+}

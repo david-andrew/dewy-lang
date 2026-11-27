@@ -1,0 +1,39 @@
+# A vending machine as a state machine over coin and button events.
+# r1 (after): bare literal arms over a string and over a literal union (Q3). Before: `<'idle'> => ...`.
+$runtime_checks
+State:type = 'idle' | 'paying' | 'vending'
+
+main = ():>void => {
+    let state:State = 'idle'
+    let credit = 0
+    let sold = 0
+    let refunds = 0
+    const price = 150
+    let events = ["coin 100" "button" "coin 25" "coin 25" "button" "coin 50" "refund" "button"]
+    loop e in events {
+        let parts = e.split(" ")
+        let kind = parts[0]
+        match kind {
+            "coin" => {
+                credit += to_int(parts[1]) ?? 0
+                state = 'paying'
+            }
+            "refund" => {
+                if credit >? 0 { refunds += 1 }
+                credit = 0
+                state = 'idle'
+            }
+            "button" => match state {
+                'idle' => printl("insert coins")
+                'paying' => {
+                    if credit >=? price { credit -= price  sold += 1  state = 'vending' }
+                    else printl("{price - credit} more")
+                }
+                'vending' => printl("busy")
+            }
+            _ => printl("unknown event {e}")
+        }
+        if state =? 'vending' { printl("vend!") state = if credit >? 0 'paying' else 'idle' }
+    }
+    printl("sold {sold}, refunds {refunds}, credit {credit}")
+}

@@ -1,0 +1,24 @@
+# Rank players by score, then by fastest best lap; laps are stored as int64 milliseconds.
+# r1 (after): `(s:int) =>` callbacks on `array<int64>` (taken: a callback accepts what a call accepts).
+# Before: `(s:int64) =>`; `(s:int)` is "parameter type int does not match expected int64".
+$runtime_checks
+
+Player:type = [name:string score:int64 best_lap_ms:int64?]
+
+lap_text = (ms:int64?):>string => if ms is? int64 "{ms // 1000}.{ms % 1000}s" else "no lap"
+
+main = ():>void => {
+    let players = [
+        Player["ada" 3200 61250] Player["bo" 4100 none] Player["cy" 4100 59800] Player["di" 2800 64100]
+    ]
+    let ranked = players.sorted(key=(p):>[int64 int64] => [-p.score p.best_lap_ms ?? 999999])
+    loop place in 1.. and p in ranked printl("{place}. {p.name} {p.score} {lap_text(p.best_lap_ms)}")
+
+    let scores:array<int64> = [3200 4100 4100 2800]
+    let top = scores.sorted(key=(s:int) => -s)
+    printl("top score {top[0]}")
+    let closest = scores.min_by((s:int) => (s - 3000).abs)
+    printl("closest to 3000: {closest}")
+    let laps:array<int64> = [61250 59800 64100]
+    printl([loop ms in laps lap_text(ms)])
+}

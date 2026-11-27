@@ -1,0 +1,26 @@
+# Print a deploy plan from a config whose lists are all optional.
+# r1 (after): a lambda whose body is one assignment (Q2). Before: `=> { targets += 1 }`.
+# `loop h in (s.hosts ?? ...)` keeps its parentheses: decided 2026-10-23 (no loop-header precedence exception).
+Service:type = [name:string hosts:array<string>? replicas:int64? tags:array<string>?]
+Config:type = [services:array<Service>? default_hosts:array<string>?]
+
+each_target = (cfg:Config visit:((s:Service host:string):>void)):>void => {
+    loop s in (cfg.services ?? []) {
+        loop h in (s.hosts ?? cfg.default_hosts ?? ["localhost"]) visit(s h)
+    }
+}
+
+main = ():>void => {
+    let cfg = from_json<Config>(r'{"default_hosts":["a1","a2"],"services":[{"name":"web","replicas":3,"tags":["public"]},{"name":"jobs","hosts":["b1"]},{"name":"cache","tags":[]}]}')
+    if cfg is? TextError { printl(cfg.message) return }
+    let targets = 0
+    let replicas:int64 = 0
+    each_target(cfg (s h $capture @targets) => targets += 1)
+    loop s in (cfg.services ?? []) {
+        replicas += s.replicas ?? 1
+        let tags = (s.tags ?? []).join(", ")
+        printl("{s.name}: {(s.hosts ?? cfg.default_hosts ?? []).length} hosts, tags [{tags}]")
+    }
+    each_target(cfg (s h) => printl("  deploy {s.name} -> {h}"))
+    printl("{targets} targets, {replicas} replicas")
+}

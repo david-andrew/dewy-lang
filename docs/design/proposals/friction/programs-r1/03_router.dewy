@@ -1,0 +1,42 @@
+# Route HTTP requests by method and path segments.
+# r1 (after): bare literal arms, also inside sequence patterns (Q3). Before: `(<"users"> id <"posts">)`.
+# A one-element sequence pattern `("users")` doesn't parse today (nor `(<"users">)`): a separate bug, so whole
+# paths match as strings below.
+Request:type = [method:string path:string]
+Response:type = [status:int body:string]
+
+route = (req:Request):>Response => {
+    let parts = req.path.split("/").filter((s) => not s.is_empty)
+    match req.method {
+        "GET" => match parts {
+            ("users" id) => Response[200 "user {id}"]
+            ("users" id "posts") => Response[200 "posts by {id}"]
+            _ => match req.path {
+                "/" => Response[200 "home"]
+                "/users" => Response[200 "all users"]
+                _ => Response[404 "no page {req.path}"]
+            }
+        }
+        "POST" => match req.path {
+            "/users" => Response[201 "created"]
+            _ => Response[404 "no page {req.path}"]
+        }
+        "DELETE" => match parts {
+            ("users" id) => Response[204 "deleted {id}"]
+            _ => Response[404 "no page {req.path}"]
+        }
+        _ => Response[405 "{req.method} not allowed"]
+    }
+}
+
+main = ():>void => {
+    let reqs = [
+        Request["GET" "/"] Request["GET" "/users/42"] Request["GET" "/users/42/posts"] \
+        Request["POST" "/users"] Request["DELETE" "/users/7"] Request["PATCH" "/users/7"] \
+        Request["GET" "/nope"] Request["GET" "/users"]
+    ]
+    loop r in reqs {
+        let res = route(r)
+        printl("{r.method} {r.path} -> {res.status} {res.body}")
+    }
+}

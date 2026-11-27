@@ -1,0 +1,22 @@
+# Read a day's events from a calendar export and report overlaps and free time.
+# r1 (after): the record's field is `end`, as the export's key is (Q1), so `from_json` reads it.
+# Before: `from_json` can't fill a field named "end" (it can't be declared), so the export is
+# walked as a dynamic `Json` tree by hand: 14 lines in read_events, against 1 here.
+# The export's objects have "title", "start" and "end" (minutes after midnight).
+Event:type = [title:string start:int end:int]
+
+clock = (m:int):>string => "{m // 60}:{if m % 60 <? 10 "0" else ""}{m % 60}"
+
+main = ():>void => {
+    let export = r'[{"title":"standup","start":540,"end":555},{"title":"design review","start":600,"end":690},{"title":"lunch","start":660,"end":720},{"title":"1:1","start":840,"end":870}]'
+    let events = from_json<array<Event>>(export)
+    if events is? TextError { printl("bad export: {events.message}") return }
+    let day = events.sorted(key=(e) => e.start)
+    let free_from = 9 * 60
+    loop e in day {
+        if e.start >? free_from printl("free {clock(free_from)}-{clock(e.start)}")
+        if e.start <? free_from printl("'{e.title}' overlaps the previous event")
+        free_from = max(free_from e.end)
+    }
+    printl("free from {clock(free_from)}")
+}

@@ -1,0 +1,22 @@
+# Print an editor's diagnostics (Language Server Protocol shape) under the source lines.
+# r1 (after): `Range` has the protocol's own field names (Q1), so `from_json` reads a reply directly.
+# Before: a `Range[start stop]` record can't receive the key "end", so the reply is walked as a
+# dynamic `Json` tree: `position` and `read_diagnostics`, 23 lines, against 1 here.
+$runtime_checks
+
+Position:type = [line:int64 character:int64]
+Range:type = [start:Position end:Position]
+Diagnostic:type = [range:Range severity:int64 = 1 message:string]
+
+main = ():>void => {
+    let source = ["let total = 0" "loop x in items ?? [] \{" "    total += x"]
+    let reply = r'[{"range":{"start":{"line":1,"character":10},"end":{"line":1,"character":21}},"severity":1,"message":"parenthesize the source"}]'
+    let found = from_json<array<Diagnostic>>(reply)
+    if found is? TextError { printl(found.message) return }
+    loop d in found {
+        let r = d.range
+        printl(source[r.start.line])
+        let width = if r.end.line =? r.start.line r.end.character - r.start.character else 1
+        printl("{" " * r.start.character}{"^" * width} {if d.severity =? 1 "error" else "warning"}: {d.message}")
+    }
+}

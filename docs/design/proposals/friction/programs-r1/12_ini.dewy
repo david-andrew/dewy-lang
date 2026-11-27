@@ -1,0 +1,47 @@
+# Parse an INI file into sections, reporting errors with the line and column span.
+# r1 (after): `Problem[line start end message]` (Q1), bare literal arms (Q3). Before: `stop`, `<"#" | ";">`.
+$runtime_checks
+
+Problem:type = [line:int start:int end:int message:string]
+Ini:type = [sections:dict<string dict<string string>>]
+
+parse_ini = (text:string):>Ini | Problem => {
+    let empty:dict<string string> = []
+    let sections:dict<string dict<string string>> = ["" -> empty]
+    let current = ""
+    loop number in 1.. and raw in text.lines {
+        let line = raw.trim
+        if line.is_empty continue
+        match line[0] {
+            "#" | ";" => continue
+            "[" => {
+                if not line.endswith("]") return Problem[number 0 raw.length "a section header ends with ]"]
+                current = line[1..line.length - 1).trim
+                if current.is_empty return Problem[number 0 raw.length "a section needs a name"]
+                if not (current in? sections) sections[current] = empty
+            }
+            _ => {
+                let eq = line.find("=")
+                if eq is? Missing return Problem[number 0 raw.length "expected key = value"]
+                let key = line[0..eq).trim
+                if key.is_empty return Problem[number 0 (eq + 1) "a key is missing before ="]
+                sections[current][key] = line[eq + 1..line.length).trim
+            }
+        }
+    }
+    Ini[sections]
+}
+
+show = (text:string) => {
+    let r = parse_ini(text)
+    match r {
+        p:Problem => printl("line {p.line}, columns {p.start + 1}-{p.end}: {p.message}")
+        ini:Ini => loop name in ini.sections.keys printl("[{name}] {ini.sections[name].length} keys")
+    }
+}
+
+main = ():>void => {
+    show("name = demo\n[server]\nport = 8080\nhost = example.org\n# comment\n[client]\nretries = 3")
+    show("[server\nport = 1")
+    show("[a]\n= 3")
+}

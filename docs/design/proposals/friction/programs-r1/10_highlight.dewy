@@ -1,0 +1,33 @@
+# Mark numbers and TODOs in a line of text; spans are byte offsets, as regex gives them.
+# r1 (after): `Mark` names its span `start`/`end` like the library's regex `Match` (Q1); bare literal arms (Q3).
+# Before: `Mark[start stop style]` beside `m.start`/`m.end` in the same function.
+$runtime_checks
+
+Mark:type = [start:int end:int style:string]
+
+marks_in = (text:string):>array<Mark> => {
+    let marks:array<Mark> = []
+    loop m in text.find_all(regex(r"\d+")) marks.push(Mark[m.start m.end "number"])
+    loop m in text.find_all(regex(r"TODO")) marks.push(Mark[m.start m.end "todo"])
+    marks.sorted(key=(k) => k.start)
+}
+
+render = (text:string marks:array<Mark>):>string => {
+    let bytes = text as array<uint8>
+    let out = ""
+    let at = 0
+    loop k in marks {
+        let open = match k.style { "number" => "["  "todo" => "<<"  _ => "(" }
+        let close = match k.style { "number" => "]"  "todo" => ">>"  _ => ")" }
+        out = "{out}{bytes[at..k.start) as string ?? ""}{open}{bytes[k.start..k.end) as string ?? ""}{close}"
+        at = k.end
+    }
+    "{out}{bytes[at..bytes.length) as string ?? ""}"
+}
+
+main = ():>void => {
+    let line = "TODO: retry 3 times, wait 250 ms"
+    let marks = marks_in(line)
+    loop k in marks printl("{k.style} {k.start}..{k.end}")
+    printl(render(line marks))
+}

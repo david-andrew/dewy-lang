@@ -25,7 +25,8 @@
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function);
-  - D48 Q1: builtin types read text (`int64(text)`), and `to_int`/`to_float` go, ahead of D38.
+  - D48 Q1: builtin types read text (`int64(text)`), and `to_int`/`to_float` go, ahead of D38;
+  - D49 Q1, Q2: `end` and `new` as field names; a `=>` body that is one assignment.
 - **(b) New syntax or surface:**
   - D44 Q3: `$until_others_finish` for work that shouldn't keep its group alive;
   - D41 Q1–Q3: `check_cancel()`, `protect_from_cancel(limit @work)`, `task.tasks(@body)` as ordinary calls;
@@ -41,6 +42,7 @@
   - D46 Q2–Q6: CPU level or core in the processor field; version floors glued on (`mac14`); `$supported_targets` patterns; chips as libraries; C output chosen by a `.c` output name.
   - D47 Q1–Q3: `$time.monotonic = 'awake'`; readings that know their clock (`r.elapsed`, deadlines as timeouts); test clocks (`$time.clock = time.test_clock()`) that jump when everything waits.
   - D48 Q2–Q6: argparse subcommands, `env=` fallbacks, a `check=` rule across arguments, `Parsed<Spec>`, `separator=` for lists.
+  - D49 Q3: bare literal arms (`"look" =>`), and a bare name hiding a value becomes an error.
 - **(c) Names only:**
   - D44 Q4, Q7: `task.cancel_request` / `task.CancelRequest`; `$no_discarded_failures`;
   - D42 Q4, Q5: `ErrorStack` or `ErrorList`; `$origin`, `$trace`, `$parts`, `$origin_at_caller`;
@@ -1677,6 +1679,80 @@ main = (argv:array<string>) => argparse.dispatch(argv about="keep dated copies o
 ```
 
 Dogfooded (12 programs; 4.08 as landed, 4.98 with these answers; the one 4 left is inherent: a spec holds descriptors, so its parsed record needs the second name `Parsed<…>` that clap's and Swift's derived structs don't). Names tested cold (three rounds, three readers each). Full rules, what was found by running the library, and what isn't proposed (`--name value`, `-vvv`, Dewy literals as values, completions): [proposals/argparse/round1.md](proposals/argparse/round1.md).
+
+### D49. Newcomer friction: `end` fields, one-assignment arms, bare literal arms
+
+Three first attempts that are compile errors today, each following from a decided rule. Answering yes makes each one work as written; nothing that compiles today changes meaning.
+
+#### Q1 (a). `end` and `new` as field names
+
+```dewy
+Event:type = [title:string start:int end:int]
+let day = from_json<array<Event>>(export)          # {"title":"standup","start":540,"end":555}
+printl(day[0].end - day[0].start)
+Change:type = [key:string old:string? new:string?]
+```
+
+Let a data field be named `end` or `new`: `s.end`, `Event[start=1 end=2]`, `Event(end=2)`, `from_json` keys and `[end as stop] = s` all work. Both stay reserved everywhere else: variables, functions, parameters, methods, loop and pattern bindings, import aliases. Inside the type's own methods, a bare `end` outside brackets is the field (`width = () => end - start`), and inside brackets it is a compile error naming both meanings, with the fix `let stop = end`. This narrows the 2026-10-21 reservation, which LANGUAGE.md extends to fields.
+
+- **Rec:** yes. Today a JSON object with an `"end"` key (calendar events, LSP ranges) can't be read into a typed record at all, and the library's regex `Match.end` is a field no user type can have. **Reversible:** yes.
+- **You give up:** in such a type's methods, `xs[end]` needs `xs.length - 1` or a hoisted field.
+
+#### Q2 (a). A `=>` body that is one assignment
+
+```dewy
+match level { "INFO" => infos += 1  "WARN" => warns += 1  _ => skipped += 1 }
+visit_all(cfg (s h $capture @targets) => targets += 1)
+```
+
+Read `p => t op= v` as `p => (t op= v)`? Assignment stays below `=>` in the table. The parser moves an assignment whose target is a function (never assignable) into that function's body. Two statements still take braces. Method rows already accept `grow = (by:int) => stop += by` today, while a match arm and a lambda don't.
+
+- **Rec:** yes. **Reversible:** yes.
+
+#### Q3 (b). Bare literal arms
+
+```dewy
+match cmd { "look" => look()  "quit" => stop()  _ => printl("unknown {cmd}") }
+match n { 0 => "zero"  1 | 2 => "few"  _ => "many" }
+match parts { ("users" id "posts") => posts(id)  _ => not_found() }
+```
+
+Accept a literal (string, integer, `true`, `false`, `none`) or a `|` of literals on the left of an arm, inside sequence patterns too, as shorthand for `<"look">`? With it, a bare name that hides a value in scope becomes an error, not today's warning: `ROOM => …` still binds every value, and now looks as if it compares.
+
+- **Rec:** yes. It is your first sketch's `5 => 'five'`. Cold readers read `"room" =>` at confidence 4–5, and `<"room">` at 2. Two of three read `ROOM =>` as comparing. **Reversible:** yes.
+
+#### Taken and not asked
+
+- A callback accepts what a call accepts. `xs.sorted(key=(r:int) => -r)` on `array<int64>` is accepted and converted on entry, because LANGUAGE.md already makes parameters contravariant and a direct call already converts `int64` to `int`.
+- `loop x in a ?? b` keeps its parentheses: your 2026-10-23 rule ("no local precedence exception" for `loop c in s as …`) covers it, and the diagnostic gives the fix.
+
+#### The three together
+
+```dewy
+Token:type = [kind:string start:int end:int]           # Q1
+
+tokenize = (src:string):>array<Token> | string => {
+    let tokens:array<Token> = []
+    let i = 0
+    loop i <? src.length {
+        let start = i
+        let c = src[i]
+        match c {
+            " " => i += 1                                # Q2 and Q3
+            "+" | "-" | "*" | "/" => { tokens.push(Token["op" start i + 1]) i += 1 }
+            "(" | ")" => { tokens.push(Token["paren" start i + 1]) i += 1 }
+            _ => {
+                if not ("0" <=? c <=? "9") return "unexpected '{c}' at column {start + 1}"
+                loop i <? src.length and "0" <=? src[i] <=? "9" { i += 1 }
+                tokens.push(Token["number" start i])
+            }
+        }
+    }
+    tokens
+}
+```
+
+Dogfooded (13 programs; 3.38 today, 4.85 with these answers; the two 4s left are inherent: `end` in a method's brackets, and the decided loop parentheses). Names tested cold (one round, three readers). Rules, cold-read table and what was found outside this item: [proposals/friction/round1.md](proposals/friction/round1.md).
 
 ---
 

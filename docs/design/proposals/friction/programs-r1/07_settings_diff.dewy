@@ -1,0 +1,31 @@
+# Compare two settings files and list what changed, with the old and new values.
+# r1 (after): fields `old` and `new` (Q1 covers `new` too), bare `none` in a sequence pattern (Q3).
+# Before: fields `before`/`after`, `(<none> now:string)`. Parameters stay `old`/`new_`: Q1 keeps `new` reserved there.
+Change:type = [key:string old:string? new:string?]
+
+diff = (old:dict<string string> new_:dict<string string>):>array<Change> => {
+    let changes:array<Change> = []
+    loop key in old.keys {
+        let was = old.get(key)
+        let now = new_.get(key)
+        if now isnt? string changes.push(Change[key was none])
+        else if was isnt? string or was not =? now changes.push(Change[key was now])
+    }
+    loop key in new_.keys {
+        if not (key in? old) changes.push(Change[key none new_.get(key)])
+    }
+    changes.sorted(key=(c) => c.key)
+}
+
+describe = (c:Change):>string => match (c.old c.new) {
+    (none now:string) => "+ {c.key} = {now}"
+    (was:string none) => "- {c.key} (was {was})"
+    (was:string now:string) => "~ {c.key}: {was} -> {now}"
+    _ => "? {c.key}"
+}
+
+main = ():>void => {
+    let old = ["theme"->"dark" "font"->"mono" "size"->"12"]
+    let new_ = ["theme"->"light" "font"->"mono" "wrap"->"on"]
+    loop c in diff(old new_) printl(describe(c))
+}

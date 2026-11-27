@@ -1,0 +1,37 @@
+# A three-room text adventure driven by a script of commands.
+# r1 (after): bare literal arms (Q3) and `"look" => looks += 1` (Q2). Before: `<"look"> => { looks += 1 }`.
+$runtime_checks
+Room:type = [name:string north:string? south:string?]
+
+main = ():>void => {
+    let rooms = [
+        "hall" -> Room["Hall" "library" none]
+        "library" -> Room["Library" "tower" "hall"]
+        "tower" -> Room["Tower" none "library"]
+    ]
+    let here = "hall"
+    let moves = 0
+    let looks = 0
+    let script = ["look" "go north" "go north" "go up" "dance" "go south" "quit" "look"]
+    loop line in script {
+        let words = line.split(" ")
+        let verb = words[0]
+        let room = rooms[here]
+        match verb {
+            "look" => looks += 1
+            "go" => {
+                let dir = if words.length >? 1 words[1] else ""
+                let next = match dir {
+                    "north" => room.north
+                    "south" => room.south
+                    _ => none
+                }
+                if next is? string { here = next  moves += 1 } else printl("You can't go {dir}.")
+            }
+            "quit" => break
+            _ => printl("I don't know how to {verb}.")
+        }
+        printl("[{rooms[here].name}]")
+    }
+    printl("{moves} moves, {looks} looks")
+}
