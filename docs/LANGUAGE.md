@@ -4673,23 +4673,33 @@ The command line fills the spec as a constructor call fills a record: bare words
 the `Positional` fields in field order, `name=value` fills any field by name (positionals
 included), and defaults fill the rest. A flag is `--verbose`, `-v` or `verbose=true|false`
 (`--ignore-case` names `ignore_case`); a short on a valued argument is written `-t=2`, never
-`-t 2`. A flag's short is its first letter when no other flag starts with it, `short='x'`
-chooses one and `short=none` has none. `--` ends the options. `array<T>` repeats
+`-t 2`, and `--tabsize 2` is an error that says to write `tabsize=2`. A flag's short is its
+first letter when no other flag without a `short=` of its own starts with it, `short='x'`
+chooses one and `short=none` has none; flag shorts combine (`-in` is `-i -n`).
+`argparse.Flag(default=true)` is on unless `--no-color` (or `color=false`, or its `short=`)
+turns it off. `--` ends the options. A misspelled name is answered with the nearest one
+(`unknown flag --ignore-cse (did you mean --ignore-case?)`). `array<T>` repeats
 (`include=a include=b`; a positional array takes the remaining words) and defaults to empty;
 `T?` defaults to `none`; any other argument without a default is required. Each value is
 read by its type's text reader, `T(text)`, so a literal union accepts its members and a
-refined integer its range. Declare the spec as a type to keep its written order: an
-anonymous record's fields are in name order, which is also the order its positionals fill.
+refined integer its range ("level=10: must be from 1 to 9"). Declare the spec as a type to keep
+its written order: an anonymous record's fields are in name order, so an anonymous spec with two
+or more positionals is a compile error.
 
 `argparse.parse` prints a usage error and the usage on standard error and exits with code 2;
-`--help` (`-h`) prints the usage and exits with 0. `argparse.try` gives the record or an
-`argparse.UsageError` (`message`, and the rendered `help`) instead. The usage has a line per
-field: how it is written, its type spelled in Dewy, its help and its default.
+`--help` (`-h`) prints the usage and exits with 0, as `--version` prints the program's name and
+`version=` (`argparse.parse(Args argv version="1.4.0")`). `argparse.try` gives the record or an
+`argparse.UsageError` (`message`, and the rendered `help`) instead; for `--help` and
+`--version` its message is empty. The usage has a line per field: how it is written, its type
+spelled in Dewy (a refined integer as its base and range, `int64, 1 to 16`), its help and its
+default.
 
 The library is ordinary Dewy over `fields(S)`, `$field`, overloads on the descriptor types and
 `T(text)`. A type's text reader is `T(text)` for a number (`int64("42")`, `uint8`, `int`,
 `float64`), a truth value (`bool("true")`), a refined integer (`Level("7")`, read and then
-tested) or a literal union (`Mode("ast")`), also when `T` is a type parameter: each gives
+tested), a literal union (`Mode("ast")`) or a `Duration` (`Duration("90s")`: one number and
+one unit, as a duration prints or a time literal is written, `90min`, `1.5hour`, `250ms`; a
+day is a calendar period and is refused), also when `T` is a type parameter: each gives
 `T | ValidationError`, whose `message` says what was expected and whose `input` is the text.
 Inside a generic function `T(x)` constructs a record type parameter as its name would.
 `T.spelling` is a type as Dewy writes it, a compile-time string

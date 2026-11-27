@@ -240,6 +240,46 @@ __as__=(d:Duration):>string=>{
     "{n}ns"
 }
 
+# `Duration(text)`: one number and one time unit, as a Duration prints (`90min`, `1500ms`,
+# `169h`) or as a literal is written (`90minute`, `1.5hour`, `-2s`). A count off the
+# nanosecond grid, or too long for a Duration, is refused; so is anything else ("1h30min",
+# "90", "2day", which is a calendar period).
+read_duration=(text:string):>Duration|ValidationError=>{
+    let cut=0
+    loop i in 0.. and ch in text {
+        if not (ch.is_digit or ch =? "." or i =? 0 and (ch =? "-" or ch =? "+")) {break}
+        cut=i + 1
+    }
+    let unit=text[$clamp cut..]
+    let scale:int=0
+    if unit in? ["ns" "nanosecond" "nanoseconds"] {scale=1}
+    else if unit in? ["us" "µs" "microsecond" "microseconds"] {scale=1000}
+    else if unit in? ["ms" "millisecond" "milliseconds"] {scale=1000000}
+    else if unit in? ["s" "sec" "second" "seconds"] {scale=1000000000}
+    else if unit in? ["min" "minute" "minutes"] {scale=60000000000}
+    else if unit in? ["h" "hour" "hours"] {scale=3600000000000}
+    let shape=ValidationError["must be a length of time, like 90s, 250ms or 1.5hour" text]
+    if scale =? 0 and unit in? ["day" "days" "week" "weeks" "month" "months" "year" "years"] {return ValidationError["is a calendar period, whose length depends on the date: give hours, like 24hour" text]}
+    if scale =? 0 {return shape}
+    let number=text[$clamp ..cut)
+    let point=number.find(".")
+    let whole_text=if point is? int64 number[$clamp ..point) else number
+    let fraction_text=if point is? int64 number[$clamp point + 1..] else ""
+    if point is? int64 and fraction_text.is_empty {return shape}
+    let whole=to_int(whole_text) ?? return shape
+    let count=whole*scale
+    if not fraction_text.is_empty {
+        let digits=to_int(fraction_text) ?? return shape
+        if fraction_text.startswith("+") or fraction_text.startswith("-") {return shape}
+        let places=int(10)^fraction_text.length
+        if digits*scale % places not=? 0 {return ValidationError["is off the nanosecond grid" text]}
+        let part=digits*scale // places
+        count=if whole_text.startswith("-") count - part else count + part
+    }
+    if not _fits(count) {return ValidationError["is too long for a Duration" text]}
+    _duration(count)
+}
+
 # ---------------- Instant ----------------
 __add__=(t:Instant d:Duration):>Instant=>{
     let [hi lo]=_add(t._hi t._lo d._hi d._lo)

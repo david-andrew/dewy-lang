@@ -1,0 +1,41 @@
+# A flag takes its first letter unless another flag without a short of its own starts with
+# it, so `invert`'s own `short='v'` leaves `-i` to `ignore_case`; shorts combine (`-in`); a
+# named argument written as a flag says how to give its value; a misspelled name is matched to
+# the nearest one.
+import argparse
+
+Args:type = [
+    text = argparse.Positional<string>(help="what to find")
+    ignore_case = argparse.Flag(help="any case")
+    invert = argparse.Flag(short='v' help="lines that don't match")
+    line_numbers = argparse.Flag(short='n' help="number the lines")
+    max_count = argparse.Named<int64<(>=? 1)>?>(short='m' help="stop after this many")
+    color = argparse.Named<'red' | 'green'>(default='red' help="the color")
+]
+
+show = (words:array<string>) => {
+    match argparse.try(Args ["find" words...]) {
+        e:argparse.UsageError => printl"error: {e.message}"
+        _ => {
+            let a = argparse.parse(Args ["find" words...])
+            printl"ok: {a.text} i={a.ignore_case} v={a.invert} n={a.line_numbers} m={a.max_count} {a.color}"
+        }
+    }
+}
+
+main = () => {
+    show(["x" "-i" "-v"])
+    show(["x" "-in"])
+    show(["x" "-vin" "-m=3"])
+    show(["x" "--max-count=2"])
+    show(["x" "--max-count" "1"])
+    show(["x" "-m" "1"])
+    show(["x" "--ignore-cse"])
+    show(["x" "colr=green"])
+    show(["x" "max_count=0"])
+    show(["x" "-ix"])
+    match argparse.try([path = argparse.Positional<string>()] ["one" "a.txt"]) {
+        e:argparse.UsageError => printl"error: {e.message}"
+        r => printl"one positional, anonymous spec: {r.path}"
+    }
+}

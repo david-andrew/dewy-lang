@@ -13,8 +13,9 @@
 #
 # The command line fills the spec as a constructor call fills a record: bare words fill the
 # positional fields in field order, `name=value` fills any field by name, defaults fill the rest.
-# A flag is `--verbose`, `-v` or `verbose=true|false`; a short on a valued argument is `-t=2`.
-# `--` ends the options and `--help` (`-h`) prints the generated usage. Values are read by
+# A flag is `--verbose`, `-v` or `verbose=true|false`, shorts combine (`-vq`), and a flag with
+# `default=true` is turned off by `--no-name`; a short on a valued argument is `-t=2`. `--` ends
+# the options, `--help` (`-h`) prints the generated usage and `version=` adds `--version`. Values are read by
 # their type's text reader, `T(text)`, so a refinement or a literal union is checked here and
 # the field keeps that type. Nothing in the compiler knows this library: the result record is
 # the unrolled `fields(S)` literal below.
@@ -33,9 +34,10 @@ Positional:type = <T>[help:string = "" default:T | NoDefault = NoDefault[]]
 # repeats (and defaults to empty), `T?` defaults to none.
 Named:type = <T>[default:T | NoDefault = NoDefault[] short:string? = "" help:string = ""]
 
-# `--name`, `-n` (the first letter when no other flag starts with it; `short=none` opts out),
-# or `name=true|false`.
-Flag:type = [short:string? = "" help:string = ""]
+# `--name`, `-n` (the first letter when no other flag without a short of its own starts with
+# it; `short=none` opts out), or `name=true|false`. `default=true` makes a flag that is on
+# unless `--no-name` (or its `short=`) turns it off.
+Flag:type = [short:string? = "" help:string = "" default:bool = false]
 
 # The command line's words, classified once.
 Scan:type = [
@@ -91,7 +93,10 @@ scan_arguments = (words:array<string>):>Scan => {
 # What one field is called on the command line, and the field order positionals fill.
 Shape:type = [
     flags:array<string> = []
-    claimed:array<string> = []
+    on_flags:array<string> = []           # flags that default to true: `--no-name`
+    automatic:array<string> = []          # flags that may take their first letter
+    claimed:array<string> = []            # shorts given with `short=`
+    valued_shorts:array<string> = []      # of those, the ones on named arguments (`-m=5`)
     positionals:array<string> = []
     names:array<string> = []
     many:bool = false
@@ -110,6 +115,9 @@ is_many = <T>(_d:Positional<array<T>>):>bool => true
 is_many = <T>(_d:Positional<T>):>bool => false
 is_many = <T>(_d:Named<T>):>bool => false
 is_many = (_d:Flag):>bool => false
+flag_default = (d:Flag):>bool => d.default
+flag_default = <T>(_d:Positional<T>):>bool => false
+flag_default = <T>(_d:Named<T>):>bool => false
 
 shape_of = <S>(spec:S):>Shape => {
     let shape = Shape[]
@@ -117,24 +125,76 @@ shape_of = <S>(spec:S):>Shape => {
         let d = spec.$field(f.name)
         shape.names.push(f.name)
         if is_positional(d) shape.positionals.push(f.name)
-        if is_flag(d) shape.flags.push(f.name)
-        if is_many(d) shape.many = true
         let s = given_short(d)
-        if s is? string and not s.is_empty shape.claimed.push(s)
+        if is_flag(d) {
+            shape.flags.push(f.name)
+            if flag_default(d) shape.on_flags.push(f.name)
+            else if s =? "" shape.automatic.push(f.name)
+        }
+        if is_many(d) shape.many = true
+        if s is? string and not s.is_empty {
+            shape.claimed.push(s)
+            if not is_flag(d) shape.valued_shorts.push(s)
+        }
     }
     shape
 }
 
-# A field's short: the one given, none when opted out, else (for a flag) its first letter when
-# no other flag starts with it and nothing claims it
+# A field's short: the one given, none when opted out, else (for a flag that is off unless
+# given) its first letter when no other such flag starts with it and nothing claims it
 short_for = (given:string? name:string shape:Shape flag:bool):>string? => {
     if given is? none return none
     if not given.is_empty return given
-    if not flag return none
+    if not flag or name not in? shape.automatic return none
     let letter = name[..1)
     if letter =? "h" or letter in? shape.claimed return none
-    let same = [loop other in shape.flags if other[..1) =? letter other]
+    let same = [loop other in shape.automatic if other[..1) =? letter other]
     if same.length =? 1 letter else none
+}
+
+# `-in` is `-i -n`: shorts written together, unless the word is a short given whole
+expand_shorts = (scan:Scan shape:Shape):>Scan => {
+    let switches:array<string> = []
+    loop s in scan.switches {
+        let body = s[$clamp 1..]
+        if s.startswith("-") and body.length >? 1 and body not in? shape.claimed {
+            loop ch in body {
+                if ch =? "h" scan.help = true
+                else switches.push("-{ch}")
+            }
+        } else switches.push(s)
+    }
+    scan.switches = switches
+    scan
+}
+
+dashed = (name:string):>string => name.replace("_" "-")
+
+# The cost of turning one text into the other, a letter at a time (for a misspelled name)
+distance = (a:string b:string):>int64 => {
+    $runtime_checks
+    let previous:array<int64> = [loop j in [0..b.length] j]
+    loop i in 1.. and x in a {
+        let row:array<int64> = [i]
+        loop j in 1.. and y in b {
+            row.push(min(min(previous[j] + 1 row[j - 1] + 1) previous[j - 1] + (if x =? y 0 else 1)))
+        }
+        previous = row
+    }
+    previous[b.length]
+}
+# ` (did you mean color=?)`, when one name is close
+nearest = (word:string names:array<string> before:string after:string):>string => {
+    let best = ""
+    let cost = 3
+    loop name in names {
+        let d = distance(word name)
+        if d <? cost and d <? name.length {
+            best = name
+            cost = d
+        }
+    }
+    if best.is_empty "" else " (did you mean {before}{best}{after}?)"
 }
 
 # Every value given for a field, by name or by its short
@@ -160,10 +220,13 @@ one = (values:array<string> what:string help:string):>string? | UsageError => {
 
 take = (d:Flag name:string shape:Shape scan:Scan help:string):>bool | UsageError => {
     let short = short_for(d.short name shape true)
-    let set = name in? scan.switches or short is? string and "-{short}" in? scan.switches
+    let by_short = short is? string and "-{short}" in? scan.switches
+    let on = name in? scan.switches or by_short and not d.default
+    let off = d.default and ("no_{name}" in? scan.switches or by_short)
+    if on and off return problem("--{dashed(name)} and --no-{dashed(name)} are both given" help)
     match one(given(scan name short) name help) or_throw<UsageError> {
         text:string => convert<bool>(text name help)
-        _ => set
+        _ => if on true else if off false else d.default
     }
 }
 take = <T>(d:Named<T> name:string shape:Shape scan:Scan help:string):>T | UsageError => {
@@ -244,25 +307,30 @@ leftovers = (shape:Shape scan:Scan help:string):>void | UsageError => {
             shorts.push(name)
             continue
         }
-        if name not in? shape.names return problem("unknown argument {name}=" help)
+        if name not in? shape.names return problem("unknown argument {name}={nearest(name shape.names "" "=")}" help)
     }
+    let switch_names = [shape.flags... [loop f in shape.on_flags "no_{f}"]...]
     loop s in scan.switches {
         if s.startswith("-") {
+            let letter = s[$clamp 1..]
+            if letter in? shape.valued_shorts return problem("-{letter} takes a value: -{letter}=VALUE" help)
             shorts.push(s)
             continue
         }
-        if s not in? shape.flags return problem("unknown flag --{s.replace("_" "-")}" help)
+        if s in? switch_names continue
+        if s in? shape.names return problem("{s} takes a value: {s}=VALUE or --{dashed(s)}=VALUE" help)
+        return problem("unknown flag --{dashed(s)}{nearest(dashed(s) [loop n in switch_names dashed(n)] "--" "")}" help)
     }
     loop s in shorts {
         let body = s[$clamp 1..]
         let letter = (body.split("="))[0]
-        if letter not in? shape.claimed and not known_flag_short(letter shape) return problem("unknown option {s}" help)
+        if letter not in? shape.claimed and not known_flag_short(letter shape) return problem("unknown option -{letter}" help)
     }
     let taken = shape.positionals.length
     if taken =? 0 and scan.words.length >? 0 return problem("unexpected argument {scan.words[0]}" help)
 }
 known_flag_short = (letter:string shape:Shape):>bool => {
-    loop name in shape.flags {
+    loop name in shape.automatic {
         if short_for("" name shape true) =? letter return true
     }
     false
@@ -271,14 +339,22 @@ known_flag_short = (letter:string shape:Shape):>bool => {
 # One usage line per field: how it is written, its type, its help and default.
 describe = (d:Flag name:string shape:Shape):>array<string> => {
     let short = short_for(d.short name shape true)
-    let written = if short is? string "-{short}, --{name.replace("_" "-")}" else "--{name.replace("_" "-")}"
-    [written "bool" d.help ""]
+    let long = if d.default "--no-{dashed(name)}" else "--{dashed(name)}"
+    let written = if short is? string "-{short}, {long}" else long
+    [written "bool" d.help (if d.default "on by default" else "")]
+}
+# A type as help shows it: a refined integer as its base and range (`int64, 1 to 16`)
+type_words = <T>(_:T?):>string => {
+    let words = T.__range_words
+    let spelled = T.spelling
+    if words.is_empty return spelled
+    "{spelled[$clamp ..(spelled.find("<") ?? spelled.length))}, {words}"
 }
 describe = <T>(d:Named<T> name:string shape:Shape):>array<string> => {
     let short = short_for(d.short name shape false)
     let written = if short is? string "-{short}=, {name}=" else "{name}="
     let fallback = d.default
-    [written T.spelling d.help (if fallback is? NoDefault "required" else "default {fallback}")]
+    [written type_words<T>(none) d.help (if fallback is? NoDefault "required" else "default {fallback}")]
 }
 describe = <T>(d:Named<array<T>> name:string shape:Shape):>array<string> => {
     let short = short_for(d.short name shape false)
@@ -289,45 +365,56 @@ describe = <T>(d:Named<T?> name:string shape:Shape):>array<string> => {
     let short = short_for(d.short name shape false)
     let written = if short is? string "-{short}=, {name}=" else "{name}="
     let fallback = d.default
-    [written T.spelling d.help (if fallback is? NoDefault "optional" else "default {fallback}")]
+    [written type_words<T>(none) d.help (if fallback is? NoDefault "optional" else "default {fallback}")]
 }
 describe = <T>(d:Positional<array<T>> name:string _shape:Shape):>array<string> => {
     [name "array<{T.spelling}>" d.help "repeatable"]
 }
 describe = <T>(d:Positional<T?> name:string _shape:Shape):>array<string> => {
-    [name T.spelling d.help "optional"]
+    [name type_words<T>(none) d.help "optional"]
 }
 describe = <T>(d:Positional<T> name:string _shape:Shape):>array<string> => {
     let fallback = d.default
-    [name T.spelling d.help (if fallback is? NoDefault "" else "default {fallback}")]
+    [name type_words<T>(none) d.help (if fallback is? NoDefault "" else "default {fallback}")]
 }
 
 pad = (text:string width:int64):>string => if text.length >=? width "{text} " else "{text}{" ".repeat(width - text.length)}"
 
-usage = <S>(spec:S program:string about:string shape:Shape):>string => {
+# One help line: how it is written, its type, its help; a long type puts the help on the next line
+row = (cells:array<string>):>string => {
+    let note = if cells[3].is_empty "" else " ({cells[3]})"
+    if cells[0].length <? 22 and cells[1].length <? 18 return "  {pad(cells[0] 22)}{pad(cells[1] 18)}{cells[2]}{note}"
+    "  {cells[0]}  {cells[1]}\n{" ".repeat(42)}{cells[2]}{note}"
+}
+
+usage = <S>(spec:S program:string about:string version:string shape:Shape):>string => {
     let rows = [loop f in fields(S) describe(spec.$field(f.name) f.name shape)]
     let words = [loop name in shape.positionals name.upper]
     let head = "usage: {program} [options]{if words.is_empty "" else " {words.join(" ")}"}"
     let lines = [head]
     if not about.is_empty lines.push(about)
     lines.push("")
-    loop row in rows {
-        let note = if row[3].is_empty "" else " ({row[3]})"
-        lines.push("  {pad(row[0] 22)}{pad(row[1] 18)}{row[2]}{note}")
-    }
+    loop cells in rows lines.push(row(cells))
     lines.push("  {pad("-h, --help" 22)}{pad("" 18)}show this help")
+    if not version.is_empty lines.push("  {pad("--version" 22)}{pad("" 18)}show the version")
     lines.join("\n")
 }
 
 program_name = (argv:array<string>):>string => if argv.is_empty "program" else p(argv[0]).name
 
 # The command line (`main`'s argv, the program first) read into the spec's record, or what is
-# wrong with it. `--help` gives a UsageError with an empty message.
-try = <S>(spec:S argv:array<string> about:string = "") => {
-    let scan = scan_arguments(argv[$clamp 1..])
+# wrong with it. `--help` gives a UsageError with an empty message and the usage as its help,
+# `--version` (with `version=`) one with the program's name and version.
+try = <S>(spec:S argv:array<string> about:string = "" version:string = "") => {
+    # (an anonymous record's fields are in name order, so its positionals would be too)
+    let positionals = 0
+    loop f in fields(S) { if is_positional(spec.$field(f.name)) positionals += 1 }
+    $assert S.__has_name or positionals <? 2, "an anonymous spec's positional fields fill in name order, not as written: declare it as a type, `Args:type = [...]`"
     let shape = shape_of(spec)
-    let help = usage(spec program_name(argv) about shape)
+    let scan = expand_shorts(scan_arguments(argv[$clamp 1..]) shape)
+    let help = usage(spec program_name(argv) about version shape)
     if scan.help return problem("" help)
+    if not version.is_empty and "version" in? scan.switches and "version" not in? shape.names return problem("" "{program_name(argv)} {version}")
     leftovers(shape scan help) or_throw<UsageError>
     let args = [loop f in fields(S) $field(f.name) = take(spec.$field(f.name) f.name shape scan help) or_throw<UsageError>]
     if shape.positionals.length >? 0 and not taken_all(shape scan) return problem("unexpected argument {scan.words[scan.words.length - 1]}" help)
@@ -338,9 +425,14 @@ try = <S>(spec:S argv:array<string> about:string = "") => {
 taken_all = (shape:Shape scan:Scan):>bool => scan.words.length <=? shape.positionals.length or shape.many
 
 # `try`, ending the program on a usage error: the message and the usage on standard error and
-# exit code 2; `--help` prints the usage on standard output and ends with 0.
-parse = <S>(spec:S argv:array<string> about:string = "") => {
-    let result = try(spec argv about=about)
+# exit code 2; `--help` prints the usage (and `--version` the version) on standard output and
+# ends with 0.
+parse = <S>(spec:S argv:array<string> about:string = "" version:string = "") => {
+    # (as in `try`, here too, so the error points at the program's own call)
+    let positionals = 0
+    loop f in fields(S) { if is_positional(spec.$field(f.name)) positionals += 1 }
+    $assert S.__has_name or positionals <? 2, "an anonymous spec's positional fields fill in name order, not as written: declare it as a type, `Args:type = [...]`"
+    let result = try(spec argv about=about version=version)
     if result is? UsageError {
         if result.message.is_empty {
             printl(result.help)

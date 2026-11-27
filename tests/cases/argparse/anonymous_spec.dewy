@@ -1,0 +1,9 @@
+# An anonymous record's fields are in name order, so as a spec its positionals would fill
+# `cp s d` as dest=s source=d. Two or more positionals need a declared type.
+import argparse
+
+main = (argv:array<string>) => {
+    let spec = [source = argparse.Positional<string>() dest = argparse.Positional<string>()]
+    let args = argparse.parse(spec argv)
+    printl"{args.source} -> {args.dest}"
+}

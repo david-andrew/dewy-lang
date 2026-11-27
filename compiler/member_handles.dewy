@@ -15,7 +15,8 @@ from p"concurrency.jo" import (concurrency_first_ok_module)
 from p"checker_type_entries.dewy" import (check_struct_fields)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checks_builders.dewy" import (bc_call bc_ident bc_let bc_stmt)
-from p"types.jo" import (T_STR fields prune structs tkind types)
+from p"types.jo" import (T_BOOL T_STR fields prune structs tkind types)
+from p"util.jo" import (pos_in_lib)
 from p"refine.jo" import (ref_predicates)
 from p"refine_metadata.dewy" import (representation_type)
 from p"refinement_types.dewy" import (RefTerm)
@@ -88,6 +89,8 @@ race_spread=(n:int64 expected:int64):>int64=>$unsafe {
 }
 
 let type_spelling_id:int64=0
+let type_has_name_id:int64=0
+let type_range_words_id:int64=0
 # `T.spelling`: the type as Dewy writes it. A refined integer shows its predicate over `value`
 # (`int64<value => 1 <=? value and value <=? 16>`), as does a run of consecutive integer
 # literals; anything else is the type as diagnostics show it. O(the type's size).
@@ -130,6 +133,62 @@ type_spelling=(t0:int64):>string=>$unsafe {
     }
     "{base}<value => {first} <=? value and value <=? {first + words.length - 1}>"
 }
+# `T.__range_words` (library only): a refined integer's range in words, `1 to 16`, `1 or more`,
+# `16 or less`; "" when the type is not a range (another predicate, or no refinement). The
+# argparse library and the text readers say ranges so. O(the type's size).
+type_range_words=(t0:int64):>string=>$unsafe {
+    let t=prune(t0)
+    let low:int64?=none
+    let high:int64?=none
+    if tkind(t) =? 'refined' and types.ptr[t].bits >=? 0 {
+        loop atom in ref_predicates[MemberHandlesWord(types.ptr[t].st)] {
+            let a=atom.a
+            let b=atom.b
+            let op=atom.op
+            # (`3 <? value` as `value >? 3`)
+            if spelling_term(b) =? "value" and spelling_term(a) not=? "value" {
+                a=atom.b
+                b=atom.a
+                op=match atom.op {
+                    <'lt'> => 'gt'
+                    <'le'> => 'ge'
+                    <'gt'> => 'lt'
+                    <'ge'> => 'le'
+                    _ => atom.op
+                }
+            }
+            if spelling_term(a) not=? "value" or b.kind not=? 1 or b.offset not=? 0 {return ""}
+            let k=b.value
+            match op {
+                <'lt'> => {high=if high is? int64 {min(high k - 1)} else {k - 1}}
+                <'le'> => {high=if high is? int64 {min(high k)} else {k}}
+                <'gt'> => {low=if low is? int64 {max(low k + 1)} else {k + 1}}
+                <'ge'> => {low=if low is? int64 {max(low k)} else {k}}
+                <'eq'> => {
+                    low=k
+                    high=k
+                }
+                _ => {return ""}
+            }
+        }
+    } else {
+        # (a run of consecutive integer literals, as a small refined range is kept)
+        let words=dt(t).split(" | ")
+        if words.length <? 3 {return ""}
+        let first=to_int(words[0])
+        if first is? none {return ""}
+        loop i in 0.. and w in words {
+            let k=to_int(w)
+            if k is? none or k not=? first + i {return ""}
+        }
+        low=first
+        high=first + words.length - 1
+    }
+    if low is? int64 and high is? int64 {return "{low} to {high}"}
+    if low is? int64 {return "{low} or more"}
+    if high is? int64 {return "{high} or less"}
+    ""
+}
 spelling_term=(term:RefTerm):>string=>{
     if term.kind =? 0 and term.path.length =? 0 and term.offset =? 0 {return "value"}
     if term.kind =? 1 and term.offset =? 0 {return "{term.value}"}
@@ -142,12 +201,19 @@ type_name_member=(n:int64):>bool=>$unsafe {
     let last_checked_slot=@last_checked
     let type_name_id_slot=@type_name_id
     let spelling_slot=@type_spelling_id
+    let has_name_slot=@type_has_name_id
+    let range_words_slot=@type_range_words_id
     if type_name_id_slot =? 0 {
         type_name_id_slot=intern("name")
         spelling_slot=intern("spelling")
+        has_name_slot=intern("__has_name")
+        range_words_slot=intern("__range_words")
     }
     let member=MemberHandlesWord(nodes.ptr[n].name)
-    if (member not=? type_name_id_slot and member not=? spelling_slot) or nodes.ptr[n].b not=? 0 {return false}
+    let internal=member =? has_name_slot or member =? range_words_slot
+    if (member not=? type_name_id_slot and member not=? spelling_slot and not internal) or nodes.ptr[n].b not=? 0 {return false}
+    # (`T.__has_name`, `T.__range_words`: queries for the libraries, not a program's names)
+    if internal and not pos_in_lib(nodes.ptr[n].pos) {return false}
     let receiver=MemberHandlesWord(nodes.ptr[n].a)
     if nodes.ptr[receiver].kind not=? 'ident' or not dewy_at(nodes.ptr[n].pos) {return false}
     let s=lookup(MemberHandlesWord(nodes.ptr[receiver].name))
@@ -163,10 +229,21 @@ type_name_member=(n:int64):>bool=>$unsafe {
             if fields.ptr[MemberHandlesWord(structs.ptr[si].fields) + i].name =? int32<overflow='wrap'>(member) {return false}
         }
     }
+    if member =? range_words_slot {
+        nodes[n] = Node(kind = 'str_lit' pos = nodes.ptr[n].pos sval = int32<overflow='wrap'>(intern(type_range_words(t))) type = int32<overflow='wrap'>(T_STR) flags = int32<overflow='wrap'>(NF_CHECKED))
+        last_checked_slot=n
+        return true
+    }
     # (`T.spelling`: the type as Dewy writes it, for any type)
     let text=if member =? spelling_slot {type_spelling(t)} else {type_short_name(t)}
     # (`Img:type = Png | Jpeg`: an alias whose right side has no name gives its own)
     if (text as array<uint8>).length =? 0 and k =? 'alias_' {text=name_of(MemberHandlesWord(nodes.ptr[receiver].name))}
+    # (`S.__has_name`: whether `S.name` would give a name, an anonymous record has none)
+    if member =? has_name_slot {
+        nodes[n] = Node(kind = 'bool_lit' pos = nodes.ptr[n].pos ival = (if (text as array<uint8>).length >? 0 {1} else {0}) type = int32<overflow='wrap'>(T_BOOL) flags = int32<overflow='wrap'>(NF_CHECKED))
+        last_checked_slot=n
+        return true
+    }
     if (text as array<uint8>).length =? 0 {fatal(nodes.ptr[n].pos "{dt(t)} has no name of its own: an anonymous record, a union or a computed type has none (give it one, `Name:type = ...`)")}
     nodes[n] = Node(kind = 'str_lit' pos = nodes.ptr[n].pos sval = int32<overflow='wrap'>(intern(text)) type = int32<overflow='wrap'>(T_STR) flags = int32<overflow='wrap'>(NF_CHECKED))
     last_checked_slot=n

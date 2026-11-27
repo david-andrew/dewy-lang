@@ -29,5 +29,8 @@ __text_bool = (text:string):>bool | ValidationError => {
 __text_refined = <T R>(_:T? read:R | ValidationError):>T | ValidationError => {
     if read is? ValidationError return read
     if read is? T return read
-    ValidationError["must be {T.spelling}" "{read}"]
+    ValidationError[__text_range_message(T.__range_words T.spelling) "{read}"]
 }
+# `must be from 1 to 16`, `must be 1 or more`; a refinement that is not a range is spelled out
+__text_range_message = (words:string spelling:string):>string =>
+    if words.is_empty "must be {spelling}" else if " to " in? words "must be from {words}" else "must be {words}"

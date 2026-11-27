@@ -87,7 +87,7 @@ xs_field=(n:XSWord expected:XSWord):>XSWord=>$unsafe {
     if xs_reflecting[0] and reflect_member(n) {return XSWord(xs_nodes[0].ptr[n].type)}
     let nm=XSWord(xs_nodes[0].ptr[n].name)
     # (`T.name`: a type's short name)
-    if (xs_names[0].ptr[nm] =? "name" or xs_names[0].ptr[nm] =? "spelling") and type_name_member(n) {return XSWord(xs_nodes[0].ptr[n].type)}
+    if (xs_names[0].ptr[nm] =? "name" or xs_names[0].ptr[nm] =? "spelling" or xs_names[0].ptr[nm] =? "__has_name" or xs_names[0].ptr[nm] =? "__range_words") and type_name_member(n) {return XSWord(xs_nodes[0].ptr[n].type)}
     let a0=XSWord(xs_nodes[0].ptr[n].a)
     let is_callee=n =? xs_callee[0]
     # `c.__peer` in a program: a library's own field, which may change in any version.

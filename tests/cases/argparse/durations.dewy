@@ -1,0 +1,25 @@
+# A `Duration` argument reads as a Duration prints or as a time literal is written.
+import argparse
+
+Args:type = [
+    timeout = argparse.Named<Duration>(default=30s help="give up after this long")
+    every = argparse.Named<Duration?>(help="repeat this often")
+]
+
+show = (words:array<string>) => {
+    match argparse.try(Args ["poll" words...]) {
+        e:argparse.UsageError => printl"error: {e.message}"
+        _ => {
+            let a = argparse.parse(Args ["poll" words...])
+            printl"timeout={a.timeout} every={a.every}"
+        }
+    }
+}
+
+main = () => {
+    show([])
+    show(["timeout=90minute" "every=250ms"])
+    show(["timeout=1.5h"])
+    show(["timeout=soon"])
+    show(["timeout=1h30min"])
+}

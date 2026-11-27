@@ -1,0 +1,17 @@
+# `Duration(text)`: one number and one time unit, as a Duration prints (`90min`) or as a
+# literal is written (`90minute`, `1.5hour`); also as `T(text)`. Anything else, a count off
+# the nanosecond grid, or a calendar period (`2day`) is a ValidationError.
+read = <T>(text:string) => T(text)
+
+main = () => {
+    loop text in ["90min" "90minute" "1.5hour" "1500ms" "-2s" "+3s" "169h" "250µs" "7ns" "0.25s"] {
+        printl"{text}: {Duration(text)}"
+    }
+    loop text in ["0.5ns" "2day" "1h30min" "90" "" "1.s" ".5s" "s" "99999999999999999999999999999999hour"] {
+        match Duration(text) {
+            d:Duration => printl"{text}: unexpectedly {d}"
+            e:ValidationError => printl"{text}: {e.message}"
+        }
+    }
+    printl"{read<Duration>("45s")}"
+}

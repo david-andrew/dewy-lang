@@ -1,0 +1,31 @@
+# `Flag(default=true)` is on unless `--no-name` (or `name=false`, or its own short) turns it off;
+# help writes it as `--no-name`.
+import argparse
+
+Args:type = [
+    symbols = argparse.Flag(default=true help="include punctuation")
+    digits = argparse.Flag(default=true short='D' help="include digits")
+    upper = argparse.Flag(help="capitals only")
+]
+
+show = (words:array<string>) => {
+    match argparse.try(Args ["genpass" words...]) {
+        e:argparse.UsageError => printl"error: {e.message}"
+        _ => {
+            let a = argparse.parse(Args ["genpass" words...])
+            printl"symbols={a.symbols} digits={a.digits} upper={a.upper}"
+        }
+    }
+}
+
+main = () => {
+    show([])
+    show(["--no-symbols" "-D" "-u"])
+    show(["symbols=false" "--digits"])
+    show(["--symbols" "--no-symbols"])
+    show(["--no-upper"])
+    match argparse.try(Args ["genpass" "--help"]) {
+        e:argparse.UsageError => printl(e.help)
+        _ => {}
+    }
+}

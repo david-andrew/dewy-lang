@@ -1,4 +1,5 @@
 $runtime_checks
+from p"struct_construction.dewy" import (duration_reader)
 from p"@lib/core/str.jo" import (to_int starts_with)
 from p"checker_call_values.dewy" import (value_call)
 from p"refine_rare.dewy" import (str_set_read)
@@ -125,6 +126,11 @@ call_name_unknown=(n:int64 name:int64 mod_scope:int64 args:array<int64> expected
     if ts not=? 0 and syms.ptr[ts].kind =? 'alias_' and nkids2(UnresolvedCallNamesWord(syms.ptr[ts].ref)) =? 0 {
         let at=resolve_alias(UnresolvedCallNamesWord(syms.ptr[ts].ref) [] nodes.ptr[n].pos)
         if is_int(at) {return conversion(n at args)}
+        # (`Duration(text)`: the prelude's alias of the time library's type)
+        if tkind(at) =? 'struct_' {
+            let read=duration_reader(n at args expected)
+            if read >=? 0 {return read}
+        }
         # (Reading(n), Reading a refined alias: the conversion `n as Reading`, its
         # refinement an obligation; Color('red'), Color a union of string literals:
         # likewise `'red' as Color`)

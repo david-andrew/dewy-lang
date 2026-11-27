@@ -1,0 +1,23 @@
+# `version=` adds `--version`, which gives the program's name and version (and `parse` prints
+# it and ends with 0); help lists it. A long type puts the help on the next line.
+import argparse
+
+Args:type = [
+    format = argparse.Named<'text' | 'json' | 'yaml' | 'toml'>(default='text' help="how to print")
+    quiet = argparse.Flag(help="say less")
+]
+
+main = () => {
+    match argparse.try(Args ["tool" "--version"] version="1.4.0") {
+        e:argparse.UsageError => printl"message={e.message.is_empty} {e.help}"
+        _ => printl("parsed")
+    }
+    match argparse.try(Args ["tool" "--version"]) {
+        e:argparse.UsageError => printl"error: {e.message}"
+        _ => printl("parsed")
+    }
+    match argparse.try(Args ["tool" "-h"] about="a tool" version="1.4.0") {
+        e:argparse.UsageError => printl(e.help)
+        _ => printl("parsed")
+    }
+}

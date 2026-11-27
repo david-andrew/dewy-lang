@@ -24,14 +24,28 @@ from p"checker_type_entries.dewy" import (check_struct_fields type_param_default
 from p"check.jo" import (check_scopes ctxs cx)
 from p"checker_expr.dewy" import (check_args_untyped check_expr finish_arg)
 from p"checked_expression_nodes.dewy" import (capture_value)
-from p"types.jo" import (T_VOID fields has_var prune struct_targ structs tkind types)
+from p"types.jo" import (T_STR T_VOID fields has_var prune struct_targ structs tkind types)
 from p"node_store.dewy" import (Node)
 from p"ast.jo" import (NF_CHECKED add_flag clone dewy_param_kinds kid kid2 mk nkids nkids2 nodes set_list)
 from p"ide.jo" import (IK_FIELD ide_on)
+from p"checker_import_discovery.dewy" import (ensure_bundled_import)
+from p"checks_builders.dewy" import (bc_field bc_ident)
+from p"unit_rare.dewy" import (time_core_type)
 from p"checker_state.dewy" import (FnCtx)
 
 StructConstructionWord:type=int64<overflow='wrap'>
 
+# `Duration(text)`, also as `T(text)` and through the prelude's alias: the time library's text
+# reader, `Duration | ValidationError`. -1 when this is not that call. O(1).
+duration_reader=(n:int64 t:int64 args:array<int64> expected:int64):>int64=>$unsafe {
+    if args.length not=? 1 or nodes.ptr[args[0]].kind =? 'namedarg' or not dewy_at(nodes.ptr[n].pos) or not time_core_type(t "Duration") {return -1}
+    if prune(check_expr(args[0] 0)) not=? T_STR {return -1}
+    let pos=nodes.ptr[n].pos
+    ensure_bundled_import("time/core.dewy" "$dewy_time" pos)
+    nodes[n] = Node(kind = 'call' pos = pos a = int32<overflow='wrap'>(bc_field(bc_ident("$dewy_time" pos) "read_duration" pos)))
+    set_list(n [args[0]])
+    check_expr(n expected)
+}
 struct_ctor=(n:int64 st_type:int64 decl:int64 args:array<int64> expected:int64):>int64=>$unsafe {
     let ctor_fills_zero_slot=@ctor_fills_zero
     if decl not=? 0 and dewy_at(nodes.ptr[n].pos) {
@@ -43,6 +57,10 @@ struct_ctor=(n:int64 st_type:int64 decl:int64 args:array<int64> expected:int64):
             let name=name_of(StructConstructionWord(nodes.ptr[decl].name))
             if name =? "Task" or name =? "TaskGroup" {fatal(nodes.ptr[n].pos "task handles are created by concurrent and spawn; their storage is private")}
         }
+    }
+    if args.length =? 1 and decl not=? 0 and nkids2(decl) =? 0 and name_of(StructConstructionWord(nodes.ptr[decl].name)) =? "Duration" {
+        let read=duration_reader(n get_struct_inst(decl []) args expected)
+        if read >=? 0 {return read}
     }
     let fills_zero=ctor_fills_zero_slot
     ctor_fills_zero_slot=false
