@@ -8872,7 +8872,7 @@ rd_dc_pattern=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$uns
         reader_nodes[p].a = int32<overflow='wrap'>(value)
         return p
     }
-    # `[sign:1 limbs]`: an object's shape, each part a named field; `(a b)`: a sequence of two or more
+    # `[sign:1 limbs]`: an object's shape, each part a named field; `(a b)`: a sequence (`(<"users">)` of one)
     if ((token.symbol =? 'lbrack') or (token.symbol =? 'lparen')) {
         let shape:bool=(token.symbol =? 'lbrack')
         let close:DewyToken='rparen'
@@ -8894,7 +8894,7 @@ rd_dc_pattern=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$uns
             }
             parts.push(part);
         }
-        if ((not shape) and (parts.length <? 2)) {
+        if ((not shape) and (parts.length =? 0)) {
             return 0
         }
         let p:int64=node_mk(@reader_nodes (if shape 'pshape' else 'pseq') pos)
@@ -12182,6 +12182,22 @@ rd_dc_match_literal=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
         else if depth =? 1 and (t.newline or reader_ctx.tokens[(int64<overflow='wrap'>(k) - 1)].symbol =? 'lbrace') and (t.kind =? 'quoted' or t.kind =? 'integer' or t.kind =? 'source_integer') and reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)].symbol =? 'function' {
             let text:string=reader_ctx.stores.host[0].bytes_slice(reader_ctx.source t.start t.stop)
             reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file t.start) "a value in a pattern goes in angle brackets: `<{text}> => ...`, and `_ => ...` takes the rest");
+        }
+        else if depth =? 1 and (t.newline or reader_ctx.tokens[(int64<overflow='wrap'>(k) - 1)].symbol =? 'lbrace') and t.symbol =? 'lparen' {
+            # (`("users" id) => ...`: the same inside a sequence pattern)
+            let j:int64=(int64<overflow='wrap'>(k) + 1)
+            let lit:int64=0
+            loop reader_ctx.tokens[j].symbol not=? 'rparen' and reader_ctx.tokens[j].kind not=? 'eof' and not reader_ctx.tokens[j].newline {
+                let e:DewyLexeme=reader_ctx.tokens[j]
+                let before:DewyToken=reader_ctx.tokens[(int64<overflow='wrap'>(j) - 1)].symbol
+                if lit =? 0 and (e.kind =? 'quoted' or e.kind =? 'integer' or e.kind =? 'source_integer') and before not=? 'langle' and before not=? 'minus' {lit=j}
+                j = (int64<overflow='wrap'>(j) + 1)
+            }
+            if lit >? 0 and reader_ctx.tokens[j].symbol =? 'rparen' and reader_ctx.tokens[(int64<overflow='wrap'>(j) + 1)].symbol =? 'function' {
+                let v:DewyLexeme=reader_ctx.tokens[lit]
+                let text:string=reader_ctx.stores.host[0].bytes_slice(reader_ctx.source v.start v.stop)
+                reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file v.start) "a value in a pattern goes in angle brackets, in a sequence pattern too: `<{text}>`");
+            }
         }
         k = (int64<overflow='wrap'>(k) + 1)
     }

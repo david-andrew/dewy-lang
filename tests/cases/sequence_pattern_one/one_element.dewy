@@ -1,0 +1,20 @@
+# quick
+# A sequence pattern of one element tests the length and the element
+route = (parts:array<string>):>string => match parts {
+    (<"users">) => "all users"
+    (<"users"> id) => "user {id}"
+    (only) => "page {only}"
+    _ => "not found"
+}
+printl(route(["users"]))
+printl(route(["users" "7"]))
+printl(route(["about"]))
+printl(route([]))
+digits = (xs:array<int64>):>string => match xs {
+    (<7>) => "seven"
+    (n) => "one: {n}"
+    _ => "other"
+}
+printl(digits([7]))
+printl(digits([3]))
+printl(digits([1 2]))
