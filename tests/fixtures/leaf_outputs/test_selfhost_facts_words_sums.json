@@ -8,7 +8,7 @@
   {"args":4538,"files":7341},
   12462,
   {"args":["build","<root>/tests/cases/sum_narrow/bounded.dewy"],"files":{"p7-0":{"run":{"status":0,"stdout":"6\n45\n-1\n","stderr":""}}}},
-  {"args":["build","<root>/tests/cases/sum_narrow/checked_overflow.dewy"],"files":{"p8-0":{"run":{"status":101,"stdout":"","stderr":"panic: integer overflow: value does not fit the requested fixed width\n    in main (checked_overflow.dewy:6)\n"}}}},
+  {"args":["build","<root>/tests/cases/sum_narrow/checked_overflow.dewy"],"files":{"p8-0":{"run":{"status":101,"stdout":"","stderr":"panic: integer overflow: value does not fit the requested fixed width\n    in total (checked_overflow.dewy:4)\n    called from main (checked_overflow.dewy:6)\n"}}}},
   {"args":["build","<root>/tests/cases/sum_narrow/unbounded_bad.dewy"],"status":1,"stderr":"<root>/tests/cases/sum_narrow/unbounded_bad.dewy:6:12: error: cannot prove the exact sum of `b` fits `uint8`: missing bounds on its elements and length that keep every running sum in range\n        printl(b.sum)\n               ^\n    help: add into an `int` instead, which never overflows: `let total = 0` then `loop x in xs total += x`\n    help: establish what the operation needs with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n"},
   {"args":["build","<root>/tests/cases/parallel_length/collect_lengths.dewy"],"files":{"p10-0":{"run":{"status":0,"stdout":"3996001\n3996001\n3\n50\n2\n","stderr":""}}}},
   {"args":["build","<root>/tests/cases/loop_thresholds/guarded_counter.dewy"],"files":{"p11-0":{"run":{"status":0,"stdout":"202\n-28\n","stderr":""}}}},
