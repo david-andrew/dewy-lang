@@ -442,25 +442,37 @@ x64_patch_module=(text_addr:XWord ro_addr:XWord data_addr:XWord @fn_addr:array<i
         if a <? 0 {return [2  f[1]]}
         patch32(f[0]  a - (f[0] + 4))
     }
+    let cbytes=x_code[0].ptr
+    let clim=XWord(x_code[0].length) - 4
     let fixes1=stub_fix.ptr as ptr<[XWord XWord]>
-    loop i in [XWord(0)..XWord(stub_fix.length)) {
+    let n1=XWord(stub_fix.length)
+    loop i in [XWord(0)..n1) {
         let f=fixes1[i]
-        patch32(f[0] stubs[f[1]] - (f[0] + 4))
+        let pos=f[0]
+        if pos <? 0 or pos >? clim {panic("fixup outside x_code[0] buffer")}
+        let word=(cbytes + pos) as ptr<uint32>
+        word[0]=uint32<overflow='wrap'>(stubs[f[1]] - (pos + 4))
     }
     let fixes2=call_fix.ptr as ptr<[XWord XWord]>
-    loop i in [XWord(0)..XWord(call_fix.length)) {
+    let n2=XWord(call_fix.length)
+    loop i in [XWord(0)..n2) {
         let f=fixes2[i]
         let target=targets[f[1]]
         if target <? 0 {return [3  f[1]]}
-        patch32(f[0]  target - (f[0] + 4))
+        let pos=f[0]
+        if pos <? 0 or pos >? clim {panic("fixup outside x_code[0] buffer")}
+        let word=(cbytes + pos) as ptr<uint32>
+        word[0]=uint32<overflow='wrap'>(target - (pos + 4))
     }
     let fixes3=x_data_fix[0].ptr as ptr<[XWord XWord XWord]>
-    loop i in [XWord(0)..XWord(x_data_fix[0].length)) {
+    let n3=XWord(x_data_fix[0].length)
+    loop i in [XWord(0)..n3) {
         let f=fixes3[i]
-        let base=ro_addr
-        if f[1] =? 1 {base=data_addr}
-        let target=base + f[2]
-        patch32(f[0]  target - (text_addr + f[0] + 4))
+        let base=if f[1] =? 1 {data_addr} else {ro_addr}
+        let pos=f[0]
+        if pos <? 0 or pos >? clim {panic("fixup outside x_code[0] buffer")}
+        let word=(cbytes + pos) as ptr<uint32>
+        word[0]=uint32<overflow='wrap'>((base + f[2]) - (text_addr + pos + 4))
     }
     [0  -1]
 }

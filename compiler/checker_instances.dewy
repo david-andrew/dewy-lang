@@ -45,8 +45,9 @@ checker_instances_bind=(input:ptr<CheckerInstanceInput>):>CIWord=>$unsafe {
     0
 }
 ci_record_mono=(decl:CIWord f:CIWord):>void=>$unsafe {
-    if not decl_mono_enabled or dir_code_any {return}
+    if not decl_mono_enabled {return}
     let dn=ci_nodes[0].ptr + decl
+    if dir_code_any and dir_code_mask(dn[0].pos >> 40) not=? 0 {return}
     if (CIWord(dn[0].flags) & 4) not=? 0 or dn[0].c not=? 0 or dn[0].kind =? 'lambda' {return}
     if ci_fns[0].ptr[f].ret =? 0 or ci_fns[0].ptr[f].targs.length not=? 0 {return}
     if decl >=? decl_mono_fn.length {decl_mono_fn.resize(decl * 2 + 256)}
@@ -54,7 +55,6 @@ ci_record_mono=(decl:CIWord f:CIWord):>void=>$unsafe {
 }
 ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe {
     if dir_code_any {
-        decl_mono_enabled=false
         let file=ci_nodes[0].ptr[decl].pos >> 40
         if file >=? 0 and file <? dir_code_masks.length and dir_code_masks[file] not=? 0 {return ci_get_policy_inst(decl targs use_pos)}
     }

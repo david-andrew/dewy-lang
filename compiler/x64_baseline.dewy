@@ -41,7 +41,7 @@ from p"integer_conversions.dewy" import (integer_constant)
 from p"ir.jo" import (ir_pos ir_positions)
 from p"ir_builders.dewy" import (ir_set_pos)
 from p"lower.jo" import (BOX_HDR HK LK_HELPER LK_INST VC_AGG VC_FLT VC_INT VC_VOID cur_fn lfuncs lower_epoch mt_active_off once_slots ro_starts rodata)
-from p"lower_analysis.dewy" import (assign_rhs_effects borrow_may_change index_stable mut_alias_check shares_mut_root)
+from p"lower_analysis.dewy" import (assign_rhs_effects borrow_may_change index_stable mut_alias_check same_var shares_mut_root write_root)
 from p"lower_determinism.dewy" import (det_check)
 from p"lower_functions.dewy" import (find_bytes_set)
 from p"lower_helpers.dewy" import (field_list)
@@ -69,7 +69,7 @@ from p"units.jo" import (quantity_base)
 from p"util.jo" import (files intern name_of pos_file pos_in_lib)
 from p"x64.jo" import (code fn_addr fn_len)
 from p"x64_emit.dewy" import (call_fix call_sites int_arg_regs line_rows row_pos stub_fix)
-from p"x64_encode.dewy" import (CC_A CC_AE CC_B CC_BE CC_E CC_G CC_GE CC_L CC_LE CC_NE CC_P R10 R11 R8 R9 RAX RBP RBX RCX RDI RDX RSI RSP XWord b b16 b24 b32 jcc32 jmp32 lea load_sized mem modrr mov_imm mov_mr mov_rm mov_rr op_rm op_rm64 op_rr patch32 patch_branch patch_here rel_fixup_lea rex rsp_frame setcc sse_rm sse_rr store_sized use_index x_bytes x_code x_data_fix x_encode_begin x_encode_end x_pad_track)
+from p"x64_encode.dewy" import (CC_A CC_AE CC_B CC_BE CC_E CC_G CC_GE CC_L CC_LE CC_NE CC_P R10 R11 R8 R9 RAX RBP RBX RCX RDI RDX RSI RSP XWord b b16 b24 b32 jcc32 jmp32 lea lea_rbp load_sized mem modrr mov_imm mov_mr mov_mr_rbp mov_rm mov_rm_rbp mov_rr op_rm op_rm64 op_rr patch32 patch_branch patch_here rel_fixup_lea rex rsp_frame setcc sse_rm sse_rr store_sized use_index x_bytes x_code x_data_fix x_encode_begin x_encode_end x_pad_track)
 
 BlWord:type=int64<overflow='wrap'>
 const R12:XWord=12
@@ -1519,23 +1519,60 @@ bl_exact_float_ok=(a:BlWord):>bool=>$unsafe {
     bl_exact_2word_ok(a)
 }
 
+let bl_scan_stack:array<int32>=[]
+let bl_scan_sp:BlWord=0
+
+bl_scan_push=(x:BlWord):>void=>$unsafe {
+    if x =? 0 {return}
+    let sp=bl_scan_sp
+    if sp >=? bl_scan_stack.length {bl_scan_stack.resize(if bl_scan_stack.length >? 0 {bl_scan_stack.length * 2} else {256})}
+    bl_scan_stack.ptr[sp]=int32<overflow='wrap'>(x)
+    bl_scan_sp=sp + 1
+}
+
 bl_scan_node=(e0:BlWord):>bool=>$unsafe {
+    let sp0=bl_scan_sp
+    let loops0=bl_scan_loops
+    if bl_scan_stack.length <? sp0 + 64 {bl_scan_stack.resize(sp0 + 256)}
+    let sp=sp0
+    let cap=bl_scan_stack.length
+    let st=bl_scan_stack.ptr
+    let rare=bl_scan_rare
+    let copies_maybe=bl_fn_copies_maybe
     let e=e0
     loop true {
-        if e <=? 0 {return true}
-        if bl_scan_rare {
-            if ff_checks_any and ff_checks.has(e) {return false}
-            if float_keys_any and float_keys.has(e) {return false}
+        if e <=? 0 {
+            if e =? -1 {bl_scan_loops -= 1}
+            else if e =? -2 {
+                bl_scan_loops += 1
+                if bl_scan_loops >? bl_scan_max_loop_depth {bl_scan_max_loop_depth=bl_scan_loops}
+            }
+            if sp <=? sp0 {bl_scan_sp=sp0; return true}
+            sp -= 1
+            e=BlWord(st[sp])
+            continue
+        }
+        if rare {
+            if ff_checks_any and ff_checks.has(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+            if float_keys_any and float_keys.has(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
             if bl_fn_exact {
-                if e <? exact_marks.length and (BlWord(exact_marks.ptr[e]) & 128) not=? 0 {return false}
+                if e <? exact_marks.length and (BlWord(exact_marks.ptr[e]) & 128) not=? 0 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 if bl_scan_loops >? 0 and e <? exact_marks.length and (BlWord(exact_marks.ptr[e]) & 3) not=? 0 {bl_scan_exact_in_loop=true}
-                if exact_join_blocks.length >? 0 and exact_join_blocks.has(e) {return false}
+                if exact_join_blocks.length >? 0 and exact_join_blocks.has(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 if nodes.ptr[e].kind =? 'conv' and (nodes.ptr[e].aux as CV) =? CV.fixed_store {
                     bl_scan_nodes += 1
-                    return bl_exact_store_ok(e)
+                    bl_scan_sp=sp
+                    if not bl_exact_store_ok(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                    sp=bl_scan_sp; cap=bl_scan_stack.length; st=bl_scan_stack.ptr
+                    if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                    sp -= 1; e=BlWord(st[sp]); continue
                 }
                 if exact_has_node(e) {
-                    return bl_exact_low_ok(e)
+                    bl_scan_sp=sp
+                    if not bl_exact_low_ok(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                    sp=bl_scan_sp; cap=bl_scan_stack.length; st=bl_scan_stack.ptr
+                    if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                    sp -= 1; e=BlWord(st[sp]); continue
                 }
             }
         }
@@ -1544,42 +1581,54 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
         match k {
             <'ident'> => {
                 let aux=nodes.ptr[e].aux
-                if aux not=? 1 and aux not=? 2 {return false}
+                if aux not=? 1 and aux not=? 2 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 let t0:BlWord=BlWord(nodes.ptr[e].type)
                 let info:BlWord=if t0 >? 0 and t0 <? bl_ty_info.length {bl_ty_info.ptr[t0]} else {0}
                 if info =? 0 {info=bl_tinfo_slow(t0)}
-                if (info & 1) =? 0 {return false}
+                if (info & 1) =? 0 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 if aux =? 1 {
                     let l:BlWord=BlWord(nodes.ptr[e].sym)
                     let fl:BlWord=BlWord(locals.ptr[l].flags)
-                    if fl & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_OWNERBORROW | LF_PARTBORROW) not=? 0 {return false}
+                    if fl & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_OWNERBORROW | LF_PARTBORROW) not=? 0 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                     if fl & LF_ALIAS not=? 0 {
                         let al:BlWord=BlWord(locals.ptr[l].alias)
-                        if al <=? 0 or bl_scan_nodes >? 4096 {return false}
+                        if al <=? 0 or bl_scan_nodes >? 4096 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                         e=al
                         continue
                     }
                 }
-                return true
+                if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                sp -= 1; e=BlWord(st[sp]); continue
             }
             <'int_lit'> => {
                 let t0:BlWord=BlWord(nodes.ptr[e].type)
                 let info:BlWord=if t0 >? 0 and t0 <? bl_ty_info.length {bl_ty_info.ptr[t0]} else {0}
                 if info =? 0 {info=bl_tinfo_slow(t0)}
-                return (info & 13) =? 5
+                if (info & 13) not=? 5 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                sp -= 1; e=BlWord(st[sp]); continue
             }
             <'bool_lit' | 'null_lit' | 'none_lit' | 'dotname'> => {
                 let t0:BlWord=BlWord(nodes.ptr[e].type)
                 let info:BlWord=if t0 >? 0 and t0 <? bl_ty_info.length {bl_ty_info.ptr[t0]} else {0}
                 if info =? 0 {info=bl_tinfo_slow(t0)}
-                return (info & 1) not=? 0
+                if (info & 1) =? 0 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                sp -= 1; e=BlWord(st[sp]); continue
             }
             <'str_lit'> => {
-                if nodes.ptr[e].aux =? 0 {return true}
-                return bl_scan_node_slow(e)
+                if nodes.ptr[e].aux =? 0 {
+                    if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                    sp -= 1; e=BlWord(st[sp]); continue
+                }
+                bl_scan_sp=sp
+                if not bl_scan_node_slow(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                sp=bl_scan_sp; cap=bl_scan_stack.length; st=bl_scan_stack.ptr
+                if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                sp -= 1; e=BlWord(st[sp]); continue
             }
             <'exprstmt'> => {
-                if refine_active and ref_pair_erased(e) {return false}
+                if refine_active and ref_pair_erased(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 e=BlWord(nodes.ptr[e].a)
                 continue
             }
@@ -1589,19 +1638,29 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
             }
             <'and_' | 'or_'> => {
                 let b0:BlWord=BlWord(nodes.ptr[e].b)
-                if not bl_scan_node(BlWord(nodes.ptr[e].a)) {return false}
-                e=b0
+                if b0 not=? 0 {
+                    if sp >=? cap {cap=cap * 2 + 64; bl_scan_stack.resize(cap); st=bl_scan_stack.ptr}
+                    st[sp]=int32<overflow='wrap'>(b0); sp += 1
+                }
+                e=BlWord(nodes.ptr[e].a)
                 continue
             }
-            <'break_' | 'continue_'> => {return bl_scan_loops >? 0}
+            <'break_' | 'continue_'> => {
+                if bl_scan_loops <=? 0 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                sp -= 1; e=BlWord(st[sp]); continue
+            }
             <'return_'> => {
                 let a:BlWord=BlWord(nodes.ptr[e].a)
-                if a =? 0 {return true}
-                if bl_fn_copies_maybe {
+                if a =? 0 {
+                    if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                    sp -= 1; e=BlWord(st[sp]); continue
+                }
+                if copies_maybe {
                     let t0:BlWord=BlWord(nodes.ptr[a].type)
                     let info:BlWord=if t0 >? 0 and t0 <? bl_ty_info.length {bl_ty_info.ptr[t0]} else {0}
                     if info =? 0 {info=bl_tinfo_slow(t0)}
-                    if (info & 32) not=? 0 and not bl_copy_own_ok(a  t0) {return false}
+                    if (info & 32) not=? 0 and not bl_copy_own_ok(a  t0) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 }
                 e=a
                 continue
@@ -1611,91 +1670,136 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                 let t0:BlWord=BlWord(nodes.ptr[e].type)
                 let info:BlWord=if t0 >? 0 and t0 <? bl_ty_info.length {bl_ty_info.ptr[t0]} else {0}
                 if info =? 0 {info=bl_tinfo_slow(t0)}
-                if (info & 1) =? 0 {return false}
+                if (info & 1) =? 0 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 let vc_b=info & 12
                 if vc_b =? 8 {
                     bl_scan_has_float=true
-                    if op not=? 58 and op not=? 59 {return false}
+                    if op not=? 58 and op not=? 59 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                     e=BlWord(nodes.ptr[e].a)
                     continue
                 }
-                if (op not=? 58 and op not=? 59 and op not=? 66) or vc_b not=? 4 {return false}
+                if (op not=? 58 and op not=? 59 and op not=? 66) or vc_b not=? 4 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 e=BlWord(nodes.ptr[e].a)
                 continue
             }
             <'binary'> => {
-                if nodes.ptr[e].aux not=? 0 {return bl_scan_node_slow(e)}
+                if nodes.ptr[e].aux not=? 0 {
+                    bl_scan_sp=sp
+                    if not bl_scan_node_slow(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                    sp=bl_scan_sp; cap=bl_scan_stack.length; st=bl_scan_stack.ptr
+                    if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                    sp -= 1; e=BlWord(st[sp]); continue
+                }
                 let a:BlWord=BlWord(nodes.ptr[e].a)
                 let b0:BlWord=BlWord(nodes.ptr[e].b)
                 let lt0:BlWord=BlWord(nodes.ptr[a].type)
                 let linfo:BlWord=if lt0 >? 0 and lt0 <? bl_ty_info.length {bl_ty_info.ptr[lt0]} else {0}
                 if linfo =? 0 {linfo=bl_tinfo_slow(lt0)}
-                if (linfo & 77) not=? 5 {return bl_scan_node_slow(e)}
+                if (linfo & 77) not=? 5 {
+                    bl_scan_sp=sp
+                    if not bl_scan_node_slow(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                    sp=bl_scan_sp; cap=bl_scan_stack.length; st=bl_scan_stack.ptr
+                    if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                    sp -= 1; e=BlWord(st[sp]); continue
+                }
                 let rt0:BlWord=BlWord(nodes.ptr[e].type)
                 let rinfo:BlWord=if rt0 >? 0 and rt0 <? bl_ty_info.length {bl_ty_info.ptr[rt0]} else {0}
                 if rinfo =? 0 {rinfo=bl_tinfo_slow(rt0)}
-                if (rinfo & 1) =? 0 {return false}
-                if not bl_scan_node(a) {return false}
-                e=b0
+                if (rinfo & 1) =? 0 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                if b0 not=? 0 {
+                    if sp >=? cap {cap=cap * 2 + 64; bl_scan_stack.resize(cap); st=bl_scan_stack.ptr}
+                    st[sp]=int32<overflow='wrap'>(b0); sp += 1
+                }
+                e=a
                 continue
             }
             <'field'> => {
-                if nodes.ptr[e].aux <? 0 {return bl_scan_node_slow(e)}
+                if nodes.ptr[e].aux <? 0 {
+                    bl_scan_sp=sp
+                    if not bl_scan_node_slow(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                    sp=bl_scan_sp; cap=bl_scan_stack.length; st=bl_scan_stack.ptr
+                    if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                    sp -= 1; e=BlWord(st[sp]); continue
+                }
                 let a:BlWord=BlWord(nodes.ptr[e].a)
                 let at0:BlWord=BlWord(nodes.ptr[a].type)
                 let ainfo:BlWord=if at0 >? 0 and at0 <? bl_ty_info.length {bl_ty_info.ptr[at0]} else {0}
                 if ainfo =? 0 {ainfo=bl_tinfo_slow(at0)}
-                if (ainfo & 1) =? 0 {return false}
+                if (ainfo & 1) =? 0 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 let aq:BlWord=(ainfo >> 8) & 0xFFFFFF
                 let bk=types.ptr[aq].kind
-                if bk not=? 'struct_' and bk not=? 'tuple' {return bl_scan_node_slow(e)}
+                if bk not=? 'struct_' and bk not=? 'tuple' {
+                    bl_scan_sp=sp
+                    if not bl_scan_node_slow(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                    sp=bl_scan_sp; cap=bl_scan_stack.length; st=bl_scan_stack.ptr
+                    if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                    sp -= 1; e=BlWord(st[sp]); continue
+                }
                 let et0:BlWord=BlWord(nodes.ptr[e].type)
                 let einfo:BlWord=if et0 >? 0 and et0 <? bl_ty_info.length {bl_ty_info.ptr[et0]} else {0}
                 if einfo =? 0 {einfo=bl_tinfo_slow(et0)}
-                if (einfo & 1) =? 0 {return false}
+                if (einfo & 1) =? 0 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 e=a
                 continue
             }
             <'index'> => {
-                if nodes.ptr[e].aux not=? 0 {return bl_scan_node_slow(e)}
+                if nodes.ptr[e].aux not=? 0 {
+                    bl_scan_sp=sp
+                    if not bl_scan_node_slow(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                    sp=bl_scan_sp; cap=bl_scan_stack.length; st=bl_scan_stack.ptr
+                    if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                    sp -= 1; e=BlWord(st[sp]); continue
+                }
                 let a:BlWord=BlWord(nodes.ptr[e].a)
                 let b0:BlWord=BlWord(nodes.ptr[e].b)
                 let at0:BlWord=BlWord(nodes.ptr[a].type)
                 let ainfo:BlWord=if at0 >? 0 and at0 <? bl_ty_info.length {bl_ty_info.ptr[at0]} else {0}
                 if ainfo =? 0 {ainfo=bl_tinfo_slow(at0)}
-                if (ainfo & 1) =? 0 {return false}
+                if (ainfo & 1) =? 0 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 let aq:BlWord=(ainfo >> 8) & 0xFFFFFF
                 let bk=types.ptr[aq].kind
-                if bk not=? 'array' and bk not=? 'str_' and bk not=? 'ptr' and bk not=? 'fixed' {return false}
+                if bk not=? 'array' and bk not=? 'str_' and bk not=? 'ptr' and bk not=? 'fixed' {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 let et0:BlWord=BlWord(nodes.ptr[e].type)
                 let einfo:BlWord=if et0 >? 0 and et0 <? bl_ty_info.length {bl_ty_info.ptr[et0]} else {0}
                 if einfo =? 0 {einfo=bl_tinfo_slow(et0)}
-                if (einfo & 1) =? 0 {return false}
-                if not bl_scan_node(a) {return false}
-                e=b0
+                if (einfo & 1) =? 0 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                if b0 not=? 0 {
+                    if sp >=? cap {cap=cap * 2 + 64; bl_scan_stack.resize(cap); st=bl_scan_stack.ptr}
+                    st[sp]=int32<overflow='wrap'>(b0); sp += 1
+                }
+                e=a
                 continue
             }
             <'block'> => {
-                if dir_runtime_settings and (has_flag(e NF_UNSCOPED) or nodes.ptr[e].aux =? 5) {return false}
+                if dir_runtime_settings and (has_flag(e NF_UNSCOPED) or nodes.ptr[e].aux =? 5) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 let t0:BlWord=BlWord(nodes.ptr[e].type)
                 let tinfo:BlWord=0
                 if t0 >? 0 {
                     tinfo=if t0 <? bl_ty_info.length {bl_ty_info.ptr[t0]} else {0}
                     if tinfo =? 0 {tinfo=bl_tinfo_slow(t0)}
-                    if (tinfo & 1) =? 0 {return false}
+                    if (tinfo & 1) =? 0 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 }
                 let nb:BlWord=BlWord(nodes.ptr[e].nlist)
-                if nb =? 0 {return true}
+                if nb =? 0 {
+                    if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                    sp -= 1; e=BlWord(st[sp]); continue
+                }
                 let lbase:BlWord=BlWord(nodes.ptr[e].list)
-                if bl_fn_copies_maybe and nodes.ptr[e].aux not=? 0 and t0 >? 0 and (tinfo & 12) not=? 0 and (tinfo & 32) not=? 0 {
+                if copies_maybe and nodes.ptr[e].aux not=? 0 and t0 >? 0 and (tinfo & 12) not=? 0 and (tinfo & 32) not=? 0 {
                     let last:BlWord=BlWord(lists.ptr[lbase + nb - 1])
-                    if nodes.ptr[last].kind =? 'exprstmt' and not bl_copy_own_ok(BlWord(nodes.ptr[last].a)  t0) {return false}
+                    if nodes.ptr[last].kind =? 'exprstmt' and not bl_copy_own_ok(BlWord(nodes.ptr[last].a)  t0) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                 }
-                let last_k:BlWord=nb - 1
-                loop i in [0..last_k) {
-                    if not bl_scan_node(BlWord(lists.ptr[lbase + i])) {return false}
+                if nb >? 1 {
+                    if sp + nb >? cap {cap=(sp + nb) * 2 + 64; bl_scan_stack.resize(cap); st=bl_scan_stack.ptr}
+                    let lp=lists.ptr
+                    let i:BlWord=nb - 1
+                    loop i >? 0 {
+                        let ci=lp[lbase + i]
+                        if ci not=? 0 {st[sp]=ci; sp += 1}
+                        i -= 1
+                    }
                 }
-                e=BlWord(lists.ptr[lbase + last_k])
+                e=BlWord(lists.ptr[lbase])
                 continue
             }
             <'if_'> => {
@@ -1705,23 +1809,26 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                     if t not=? T_NEVER {
                         let info:BlWord=if t >? 0 and t <? bl_ty_info.length {bl_ty_info.ptr[t]} else {0}
                         if info =? 0 {info=bl_tinfo_slow(t)}
-                        if (info & 1) =? 0 {return false}
+                        if (info & 1) =? 0 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                     }
                 }
                 let a:BlWord=BlWord(nodes.ptr[e].a)
                 let b0:BlWord=BlWord(nodes.ptr[e].b)
                 let ec:BlWord=BlWord(nodes.ptr[e].c)
-                if not bl_scan_node(a) {return false}
-                if ec =? 0 {
-                    e=b0
-                    continue
-                }
-                if not bl_scan_node(b0) {return false}
-                e=ec
+                if sp + 2 >? cap {cap=cap * 2 + 64; bl_scan_stack.resize(cap); st=bl_scan_stack.ptr}
+                if ec not=? 0 {st[sp]=int32<overflow='wrap'>(ec); sp += 1}
+                if b0 not=? 0 {st[sp]=int32<overflow='wrap'>(b0); sp += 1}
+                e=a
                 continue
             }
             <'conv'> => {
-                if bl_fn_exact {return bl_scan_node_slow(e)}
+                if bl_fn_exact {
+                    bl_scan_sp=sp
+                    if not bl_scan_node_slow(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                    sp=bl_scan_sp; cap=bl_scan_stack.length; st=bl_scan_stack.ptr
+                    if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                    sp -= 1; e=BlWord(st[sp]); continue
+                }
                 let cv=nodes.ptr[e].aux as CV
                 if cv =? CV.none_ or cv =? CV.quantity_const or cv =? CV.ptr or cv =? CV.int_ or cv =? CV.wrap_int or cv =? CV.bits {
                     let a:BlWord=BlWord(nodes.ptr[e].a)
@@ -1732,18 +1839,29 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                     let fr_i:BlWord=if fr0 >? 0 and fr0 <? bl_ty_info.length {bl_ty_info.ptr[fr0]} else {0}
                     if fr_i =? 0 {fr_i=bl_tinfo_slow(fr0)}
                     if cv =? CV.none_ or cv =? CV.quantity_const or cv =? CV.ptr {
-                        if (to_i & 1) =? 0 or (fr_i & 1) =? 0 {return false}
+                        if (to_i & 1) =? 0 or (fr_i & 1) =? 0 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                     } else {
-                        if (to_i & 13) not=? 5 or (fr_i & 13) not=? 5 {return false}
+                        if (to_i & 13) not=? 5 or (fr_i & 13) not=? 5 {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
                     }
                     e=a
                     continue
                 }
-                return bl_scan_node_slow(e)
+                bl_scan_sp=sp
+                if not bl_scan_node_slow(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                sp=bl_scan_sp; cap=bl_scan_stack.length; st=bl_scan_stack.ptr
+                if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                sp -= 1; e=BlWord(st[sp]); continue
             }
-            _ => {return bl_scan_node_slow(e)}
+            _ => {
+                bl_scan_sp=sp
+                if not bl_scan_node_slow(e) {bl_scan_sp=sp0; bl_scan_loops=loops0; return false}
+                sp=bl_scan_sp; cap=bl_scan_stack.length; st=bl_scan_stack.ptr
+                if sp <=? sp0 {bl_scan_sp=sp0; return true}
+                sp -= 1; e=BlWord(st[sp]); continue
+            }
         }
     }
+    bl_scan_sp=sp0
     true
 }
 
@@ -1771,7 +1889,7 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if f not=? format_word_inst {
                     if fns.ptr[f].cabi or fns.ptr[f].has_env or fns.ptr[f].parallel_api or fns.ptr[f].deterministic {return false}
                 }
-                if not bl_scan_node(x) {return false}
+                bl_scan_push(x)
             }
             true
         }
@@ -1804,7 +1922,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                         if l <? 0 or (BlWord(locals.ptr[l].flags) & (LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_OWNERBORROW | LF_PARTBORROW)) not=? 0 {return false}
                     }
                 }
-                return bl_scan_node(iv)
+                bl_scan_push(iv)
+                return true
             }
             if has_flag(e NF_GLOBAL) {
                 let g:BlWord=BlWord(nodes.ptr[e].sym)
@@ -1814,7 +1933,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if (ginfo & 1) =? 0 or (ginfo & 12) =? 0 {return false}
                 let iv:BlWord=BlWord(nodes.ptr[e].b)
                 if iv not=? 0 and bl_fn_copies_maybe and (ginfo & 32) not=? 0 and not bl_copy_own_ok(iv  gt0) {return false}
-                return iv =? 0 or bl_scan_node(iv)
+                bl_scan_push(iv)
+                return true
             }
             let a2=nodes.ptr[e].aux2
             if a2 not=? 0 and a2 not=? 1 {return false}
@@ -1827,7 +1947,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             if iv not=? 0 and bl_fn_copies_maybe and (linfo & 32) not=? 0 and not (a2 =? 1 and ((copies_on and copy_bindings.has(l)) or bl_is_param_view_decl(e))) {
                 if not bl_copy_own_ok(iv  lt0) {return false}
             }
-            iv =? 0 or bl_scan_node(iv)
+            bl_scan_push(iv)
+            true
         }
         <'assign'> => {
             let aux=nodes.ptr[e].aux
@@ -1839,7 +1960,6 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             if (ainfo & 1) =? 0 or (ainfo & 12) =? 0 {return false}
             if aux =? 0 and nodes.ptr[e].op =? 47 and bl_fn_copies_maybe and (ainfo & 32) not=? 0 and not bl_copy_own_ok(b0  at0) {return false}
             if (ainfo & 16) not=? 0 {bl_scan_managed=true}
-            if not bl_scan_node(a) or not bl_scan_node(b0) {return false}
             let ak=nodes.ptr[a].kind
             if ak not=? 'ident' and ak not=? 'field' and ak not=? 'index' and ak not=? 'unwrap' and ak not=? 'narrow' {return false}
             if ak =? 'ident' or ak =? 'field' or ak =? 'unwrap' or ak =? 'narrow' {
@@ -1872,6 +1992,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 bl_scan_managed=true
                 if not bl_can_mut_place(a) {return false}
             }
+            bl_scan_push(b0)
+            bl_scan_push(a)
             true
         }
         <'iflet'> => {
@@ -1885,9 +2007,10 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             if bl_fn_copies_maybe and (oinfo & 32) not=? 0 and not bl_copy_own_ok(a  ot) {return false}
             let fl:BlWord=BlWord(locals.ptr[l].flags)
             if fl & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_BYREF | LF_OWNERBORROW | LF_PARTBORROW) not=? 0 {return false}
-            if not bl_scan_node(a) or not bl_scan_node(BlWord(nodes.ptr[e].b)) {return false}
-            let ec:BlWord=BlWord(nodes.ptr[e].c)
-            ec =? 0 or bl_scan_node(ec)
+            bl_scan_push(BlWord(nodes.ptr[e].c))
+            bl_scan_push(BlWord(nodes.ptr[e].b))
+            bl_scan_push(a)
+            true
         }
         <'coalesce'> => {
             let tinfo=bl_tinfo(BlWord(nodes.ptr[e].type))
@@ -1898,7 +2021,9 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             if (tinfo & 1) =? 0 or (oinfo & 1) =? 0 or types.ptr[ot].kind not=? 'opt' {return false}
             if (tinfo & 64) not=? 0 and quantity_base(prune(BlWord(types.ptr[ot].elem))) not=? T_MATH_INT {return false}
             if bl_fn_copies_maybe and ((tinfo | oinfo) & 32) not=? 0 and (bl_fn_copy_strict or copy_strict(e)) {return false}
-            bl_scan_node(a) and bl_scan_node(b0)
+            bl_scan_push(b0)
+            bl_scan_push(a)
+            true
         }
         <'array'> => {
             let tinfo=bl_tinfo(BlWord(nodes.ptr[e].type))
@@ -1913,14 +2038,17 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if copies_on and (einfo & 16) not=? 0 {return false}
                 if bl_fn_copies_maybe and (einfo & 32) not=? 0 and not bl_copy_own_ok(kid(e 0)  et) {return false}
                 if tk =? 'array' {bl_scan_calls += 1}
-                return bl_scan_node(kid(e 0)) and (tk =? 'fixed' or bl_scan_node(BlWord(nodes.ptr[e].b)))
+                if tk not=? 'fixed' {bl_scan_push(BlWord(nodes.ptr[e].b))}
+                bl_scan_push(kid(e 0))
+                return true
             }
             let n=nkids(e)
             if tk =? 'array' and n >? 0 and not all_const(e et) {bl_scan_calls += 1}
             let check_own=bl_fn_copies_maybe and (einfo & 32) not=? 0
             loop i in [0..n) {
                 let ki=kid(e i)
-                if (check_own and not bl_copy_own_ok(ki  et)) or not bl_scan_node(ki) {return false}
+                if check_own and not bl_copy_own_ok(ki  et) {return false}
+                bl_scan_push(ki)
             }
             true
         }
@@ -1937,14 +2065,17 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 let ki=kid(e i)
                 let el=targ(t i)
                 let einfo=bl_tinfo(el)
-                if (einfo & 1) =? 0 or (bl_fn_copies_maybe and (einfo & 32) not=? 0 and not bl_copy_own_ok(ki  el)) or not bl_scan_node(ki) {return false}
+                if (einfo & 1) =? 0 or (bl_fn_copies_maybe and (einfo & 32) not=? 0 and not bl_copy_own_ok(ki  el)) {return false}
+                bl_scan_push(ki)
             }
             true
         }
         <'unwrap'> => {
             let a:BlWord=BlWord(nodes.ptr[e].a)
             let oinfo=bl_tinfo(BlWord(nodes.ptr[a].type))
-            (oinfo & 1) not=? 0 and types.ptr[(oinfo >> 8) & 0xFFFFFF].kind =? 'opt' and bl_scan_node(a)
+            if (oinfo & 1) =? 0 or types.ptr[(oinfo >> 8) & 0xFFFFFF].kind not=? 'opt' {return false}
+            bl_scan_push(a)
+            true
         }
         <'narrow'> => {
             if once_slots.length >? 0 and once_slots.has(e) {return false}
@@ -1955,7 +2086,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             let vi:BlWord=BlWord(nodes.ptr[e].aux)
             let f:BlWord=BlWord(variants.ptr[BlWord(structs.ptr[BlWord(types.ptr[ut].st)].variants) + vi].fields)
             if fields.ptr[f].boxed or (bl_tinfo(BlWord(fields.ptr[f].type)) & 1) =? 0 {return false}
-            bl_scan_node(a)
+            bl_scan_push(a)
+            true
         }
         <'binary'> => {
             let aux=nodes.ptr[e].aux
@@ -1975,7 +2107,9 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if bl_fn_copies_maybe and (linfo & 32) not=? 0 and (bl_fn_copy_strict or copy_strict(e)) {return false}
                 bl_scan_calls += 1
                 if (linfo & 16) not=? 0 {bl_scan_managed=true}
-                return bl_scan_node(a) and bl_scan_node(b0)
+                bl_scan_push(b0)
+                bl_scan_push(a)
+                return true
             }
             if aux =? 0 {
                 let lvc=linfo & 12
@@ -1995,7 +2129,9 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 bl_scan_calls += 1
                 bl_scan_managed=true
             }
-            bl_scan_node(a) and bl_scan_node(b0)
+            bl_scan_push(b0)
+            bl_scan_push(a)
+            true
         }
         <'field'> => {
             let aux=nodes.ptr[e].aux
@@ -2006,7 +2142,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             let bk=types.ptr[bt].kind
             if aux =? -3 {
                 if bk not=? 'enum_' or (ainfo & 1) =? 0 or (bl_tinfo(BlWord(nodes.ptr[e].type)) & 1) =? 0 {return false}
-                return bl_scan_node(a)
+                bl_scan_push(a)
+                return true
             }
             if bk =? 'ptr' {
                 ainfo=bl_tinfo(BlWord(types.ptr[bt].elem))
@@ -2015,7 +2152,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             }
             if aux =? -2 and bk not=? 'tuple' {return false}
             if (bk not=? 'struct_' and bk not=? 'tuple') or (ainfo & 1) =? 0 or (bl_tinfo(BlWord(nodes.ptr[e].type)) & 1) =? 0 {return false}
-            bl_scan_node(a)
+            bl_scan_push(a)
+            true
         }
         <'index'> => {
             let aux=nodes.ptr[e].aux
@@ -2030,11 +2168,10 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if nodes.ptr[b0].kind not=? 'range' {return false}
                 bl_scan_calls += 1
                 bl_scan_managed=true
-                if not bl_scan_node(a) {return false}
-                let rlo:BlWord=BlWord(nodes.ptr[b0].a)
-                let rhi:BlWord=BlWord(nodes.ptr[b0].b)
-                if rlo not=? 0 and not bl_scan_node(rlo) {return false}
-                return rhi =? 0 or bl_scan_node(rhi)
+                bl_scan_push(BlWord(nodes.ptr[b0].b))
+                bl_scan_push(BlWord(nodes.ptr[b0].a))
+                bl_scan_push(a)
+                return true
             }
             false
         }
@@ -2048,7 +2185,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             let at:BlWord=(ainfo >> 8) & 0xFFFFFF
             if vi <? 0 and types.ptr[at].kind not=? 'opt' {return false}
             if vi >=? 0 and (types.ptr[at].kind not=? 'enum_' or structs.ptr[BlWord(types.ptr[at].st)].simple_enum) {return false}
-            bl_scan_node(a)
+            bl_scan_push(a)
+            true
         }
         <'conv'> => {
             let to=prune(ntype(e))
@@ -2061,7 +2199,9 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             }
             if bl_fn_exact {
                 if (exact_word_reads.length >? 0 and exact_word_reads.has(e)) or (exact_progress_math.length >? 0 and exact_progress_math.has(e)) {
-                    return (bl_tinfo(to) & 13) =? 5 and (bl_tinfo(fr) & 1) not=? 0 and bl_scan_node(a)
+                    if (bl_tinfo(to) & 13) not=? 5 or (bl_tinfo(fr) & 1) =? 0 {return false}
+                    bl_scan_push(a)
+                    return true
                 }
                 if exact_map_active and exact_map_stores.has(e) {return false}
                 if exact_has_node(a) and cv =? CV.int2float {
@@ -2069,6 +2209,7 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                     bl_scan_calls += 1
                     return (bl_tinfo(to) & 13) =? 9 and bl_exact_float_ok(a)
                 }
+                if exact_has_node(a) and cv =? CV.saturate_int {return false}
                 if exact_has_node(a) and cv =? CV.wrap_int {
                     return bl_type_ok(to) and is_int(exact_representation(to)) and (bl_exact_low_ok(a) or bl_exact_2word_ok(a))
                 }
@@ -2094,7 +2235,9 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 return ok
             }
             if cv =? CV.none_ or cv =? CV.quantity_const or cv =? CV.ptr {
-                return (bl_tinfo(to) & 1) not=? 0 and (bl_tinfo(fr) & 1) not=? 0 and bl_scan_node(a)
+                if (bl_tinfo(to) & 1) =? 0 or (bl_tinfo(fr) & 1) =? 0 {return false}
+                bl_scan_push(a)
+                return true
             }
             if cv =? CV.arr2fixed {
                 let toi=bl_tinfo(to)
@@ -2104,7 +2247,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if fact_fixed_comprehension(a  to) not=? 0 {return false}
                 if not has_flag(e NF_INBOUNDS) {bl_scan_calls += 1}
                 if (toi & 16) not=? 0 {bl_scan_managed=true; bl_scan_calls += 1}
-                return bl_scan_node(a)
+                bl_scan_push(a)
+                return true
             }
             if cv =? CV.fixed2arr {
                 let toi=bl_tinfo(to)
@@ -2113,43 +2257,74 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if copies_on and (fri & 16) not=? 0 {return false}
                 bl_scan_calls += 1
                 bl_scan_managed=true
-                return bl_scan_node(a)
+                bl_scan_push(a)
+                return true
             }
             if cv =? CV.opt {
                 let fri=bl_tinfo(fr)
                 if bl_fn_copies_maybe and (fri & 32) not=? 0 and not bl_copy_own_ok(a  fr) {return false}
-                return (bl_tinfo(to) & 1) not=? 0 and (fri & 1) not=? 0 and bl_scan_node(a)
+                if (bl_tinfo(to) & 1) =? 0 or (fri & 1) =? 0 {return false}
+                bl_scan_push(a)
+                return true
             }
             if cv =? CV.refinement {
-                return nodes.ptr[e].ival =? 1 and (bl_tinfo(to) & 1) not=? 0 and (bl_tinfo(fr) & 1) not=? 0 and bl_scan_node(a)
+                if nodes.ptr[e].ival not=? 1 or (bl_tinfo(to) & 1) =? 0 or (bl_tinfo(fr) & 1) =? 0 {return false}
+                bl_scan_push(a)
+                return true
             }
             if cv =? CV.set_text {
-                return (bl_tinfo(to) & 1) not=? 0 and (bl_tinfo(fr) & 13) =? 5 and bl_scan_node(a)
+                if (bl_tinfo(to) & 1) =? 0 or (bl_tinfo(fr) & 13) not=? 5 {return false}
+                bl_scan_push(a)
+                return true
             }
             if cv =? CV.union_ {
                 let toi=bl_tinfo(to)
                 let fri=bl_tinfo(fr)
                 if (toi & 1) =? 0 or (fri & 1) =? 0 {return false}
-                if str_set_of(fr) not=? 0 and str_set_of(to) not=? 0 {return bl_scan_node(a)}
+                if str_set_of(fr) not=? 0 and str_set_of(to) not=? 0 {bl_scan_push(a); return true}
                 if not is_union(fr) or not is_union(to) {return false}
                 if bl_fn_copies_maybe and (fri & 32) not=? 0 and not bl_copy_own_ok(a  fr) {return false}
                 if ((fri | toi) & 16) not=? 0 {bl_scan_managed=true}
-                return bl_scan_node(a)
+                bl_scan_push(a)
+                return true
+            }
+            if cv =? CV.big2math or cv =? CV.math2big {
+                if (bl_tinfo(to) & 1) =? 0 or (bl_tinfo(fr) & 1) =? 0 {return false}
+                bl_scan_calls += 1
+                bl_scan_managed=true
+                bl_scan_push(a)
+                return true
+            }
+            if cv =? CV.saturate_int {
+                let toi=bl_tinfo(to)
+                let fri=bl_tinfo(fr)
+                if (toi & 13) not=? 5 or (fri & 13) not=? 5 or (toi & 64) not=? 0 {return false}
+                if (fri & 64) not=? 0 {bl_scan_calls += 1}
+                bl_scan_push(a)
+                return true
             }
             if cv =? CV.int_ or cv =? CV.wrap_int or cv =? CV.bits {
-                return (bl_tinfo(to) & 13) =? 5 and (bl_tinfo(fr) & 13) =? 5 and bl_scan_node(a)
+                if (bl_tinfo(to) & 13) not=? 5 or (bl_tinfo(fr) & 13) not=? 5 {return false}
+                bl_scan_push(a)
+                return true
             }
             if cv =? CV.float_ {
                 bl_scan_has_float=true
-                return (bl_tinfo(to) & 13) =? 9 and (bl_tinfo(fr) & 13) =? 9 and bl_scan_node(a)
+                if (bl_tinfo(to) & 13) not=? 9 or (bl_tinfo(fr) & 13) not=? 9 {return false}
+                bl_scan_push(a)
+                return true
             }
             if cv =? CV.int2float {
                 bl_scan_has_float=true
-                return (bl_tinfo(to) & 13) =? 9 and (bl_tinfo(fr) & 13) =? 5 and bl_scan_node(a)
+                if (bl_tinfo(to) & 13) not=? 9 or (bl_tinfo(fr) & 13) not=? 5 {return false}
+                bl_scan_push(a)
+                return true
             }
             if cv =? CV.float2int {
                 bl_scan_has_float=true
-                return (bl_tinfo(fr) & 13) =? 9 and (bl_tinfo(to) & 13) =? 5 and bl_scan_node(a)
+                if (bl_tinfo(fr) & 13) not=? 9 or (bl_tinfo(to) & 13) not=? 5 {return false}
+                bl_scan_push(a)
+                return true
             }
             false
         }
@@ -2162,15 +2337,18 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             let vfr=fri & 12
             if vto =? 8 and vfr =? 4 and (fri & 64) =? 0 and types.ptr[(fri >> 8) & 0xFFFFFF].kind =? 'int_' {
                 bl_scan_has_float=true
-                return bl_scan_node(a)
+                bl_scan_push(a)
+                return true
             }
             if vfr =? 8 and vto =? 4 and (toi & 64) =? 0 and types.ptr[(toi >> 8) & 0xFFFFFF].kind =? 'int_' {
                 bl_scan_has_float=true
-                return bl_scan_node(a)
+                bl_scan_push(a)
+                return true
             }
             if vto not=? 4 or vfr not=? 4 {return false}
             if ((toi | fri) & 16) not=? 0 {bl_scan_managed=true}
-            bl_scan_node(a)
+            bl_scan_push(a)
+            true
         }
         <'map_lit'> => {
             let tinfo=bl_tinfo(BlWord(nodes.ptr[e].type))
@@ -2196,13 +2374,16 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 let vb:BlWord=BlWord(nodes.ptr[p].b)
                 if ck and not bl_copy_own_ok(ka  kt0) {return false}
                 if cv2 and not bl_copy_own_ok(vb  vt0) {return false}
-                if not bl_scan_node(ka) or not bl_scan_node(vb) {return false}
+                bl_scan_push(vb)
+                bl_scan_push(ka)
             }
             true
         }
         <'addr'> => {
             let a:BlWord=BlWord(nodes.ptr[e].a)
-            bl_can_mut_place(a) and bl_scan_node(a)
+            if not bl_can_mut_place(a) {return false}
+            bl_scan_push(a)
+            true
         }
         <'call'> => {
             if once_slots.length >? 0 and once_slots.has(e) {return false}
@@ -2253,7 +2434,7 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                             }
                         }
                     }
-                    if not bl_scan_node(arg) {return false}
+                    bl_scan_push(arg)
                 }
                 return true
             }
@@ -2272,7 +2453,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                     if fields.ptr[f].boxed {bl_scan_calls += 1; bl_scan_managed=true}
                     let ft:BlWord=BlWord(fields.ptr[f].type)
                     let finfo=bl_tinfo(ft)
-                    if (finfo & 1) =? 0 or (bl_fn_copies_maybe and (finfo & 32) not=? 0 and not bl_copy_own_ok(a  ft)) or not bl_scan_node(a) {return false}
+                    if (finfo & 1) =? 0 or (bl_fn_copies_maybe and (finfo & 32) not=? 0 and not bl_copy_own_ok(a  ft)) {return false}
+                    bl_scan_push(a)
                 }
                 return true
             }
@@ -2296,14 +2478,15 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                     if fields.ptr[f].boxed {bl_scan_calls += 1; bl_scan_managed=true}
                     let ft:BlWord=BlWord(fields.ptr[f].type)
                     let finfo=bl_tinfo(ft)
-                    if (finfo & 1) =? 0 or (bl_fn_copies_maybe and (finfo & 32) not=? 0 and not bl_copy_own_ok(a  ft)) or not bl_scan_node(a) {return false}
+                    if (finfo & 1) =? 0 or (bl_fn_copies_maybe and (finfo & 32) not=? 0 and not bl_copy_own_ok(a  ft)) {return false}
+                    bl_scan_push(a)
                 }
                 return true
             }
             if aux =? 4 {
                 let callee:BlWord=BlWord(nodes.ptr[e].a)
                 let ft=prune(ntype(callee))
-                if types.ptr[ft].kind not=? 'cfn' or not bl_scan_node(callee) {return false}
+                if types.ptr[ft].kind not=? 'cfn' {return false}
                 let rtp=prune(BlWord(types.ptr[ft].elem))
                 if rtp not=? T_NEVER {
                     let rinfo=bl_tinfo(rtp)
@@ -2315,12 +2498,14 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 loop i in [0..nkids(e)) {
                     let arg=kid(e i)
                     let ainfo=bl_tinfo(BlWord(nodes.ptr[arg].type))
-                    if (ainfo & 1) =? 0 or (ainfo & 12) =? 12 or not bl_scan_node(arg) {return false}
+                    if (ainfo & 1) =? 0 or (ainfo & 12) =? 12 {return false}
                     if (ainfo & 12) =? 8 {nf += 1; bl_scan_has_float=true}
                     else {ni += 1}
+                    bl_scan_push(arg)
                 }
                 if ni >? 6 or nf >? 8 {return false}
                 bl_scan_calls += 1
+                bl_scan_push(callee)
                 return true
             }
             false
@@ -2337,41 +2522,52 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             }
             if id =? IN.atomic_add {
                 bl_scan_calls += 1
-                return na =? 2 and bl_scan_node(kid(e 0)) and bl_scan_node(kid(e 1))
+                if na not=? 2 {return false}
+                bl_scan_push(kid(e 1)); bl_scan_push(kid(e 0))
+                return true
             }
             if id =? IN.atomic_cas {
                 bl_scan_calls += 1
-                return na =? 3 and bl_scan_node(kid(e 0)) and bl_scan_node(kid(e 1)) and bl_scan_node(kid(e 2))
+                if na not=? 3 {return false}
+                bl_scan_push(kid(e 2)); bl_scan_push(kid(e 1)); bl_scan_push(kid(e 0))
+                return true
             }
             if id =? IN.sqrt {
                 bl_scan_has_float=true
                 if na not=? 1 {return false}
                 let a0=kid(e 0)
-                return (bl_tinfo(BlWord(nodes.ptr[a0].type)) & 13) =? 9 and bl_scan_node(a0)
+                if (bl_tinfo(BlWord(nodes.ptr[a0].type)) & 13) not=? 9 {return false}
+                bl_scan_push(a0)
+                return true
             }
             if id =? IN.callc {
                 if na <? 1 {return false}
                 bl_scan_calls += 1
                 let fp0=kid(e 0)
-                if (bl_tinfo(BlWord(nodes.ptr[fp0].type)) & 13) not=? 5 or not bl_scan_node(fp0) {return false}
+                if (bl_tinfo(BlWord(nodes.ptr[fp0].type)) & 13) not=? 5 {return false}
                 let ni:BlWord=0
                 let nf:BlWord=0
                 loop i in [1..na) {
                     let arg=kid(e i)
                     let ainfo=bl_tinfo(BlWord(nodes.ptr[arg].type))
-                    if (ainfo & 1) =? 0 or not bl_scan_node(arg) {return false}
+                    if (ainfo & 1) =? 0 {return false}
                     let avc=ainfo & 12
                     if avc =? 8 {nf += 1; bl_scan_has_float=true}
                     else if avc =? 4 {ni += 1}
                     else {return false}
+                    bl_scan_push(arg)
                 }
-                return ni <=? 6 and nf <=? 8
+                if ni >? 6 or nf >? 8 {return false}
+                bl_scan_push(fp0)
+                return true
             }
             if id =? IN.len or id =? IN.arrcap {
                 if na not=? 1 {return false}
                 let a0=kid(e 0)
                 let ak=types.ptr[prune(ntype(a0))].kind
-                return (ak =? 'array' or ak =? 'str_' or (id =? IN.len and ak =? 'fixed')) and bl_scan_node(a0)
+                if ak not=? 'array' and ak not=? 'str_' and not (id =? IN.len and ak =? 'fixed') {return false}
+                bl_scan_push(a0)
+                return true
             }
             if id =? IN.zeroed {
                 if na not=? 0 {return false}
@@ -2391,7 +2587,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if (einfo & 1) =? 0 or (einfo & 12) =? 0 {return false}
                 bl_scan_calls += 1
                 bl_scan_managed=true
-                return bl_scan_node(a0) and bl_scan_node(a1)
+                bl_scan_push(a1); bl_scan_push(a0)
+                return true
             }
             if id =? IN.pop {
                 if na not=? 1 {return false}
@@ -2402,7 +2599,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if (einfo & 1) =? 0 or (einfo & 12) =? 0 {return false}
                 bl_scan_calls += 1
                 bl_scan_managed=true
-                return bl_scan_node(a0)
+                bl_scan_push(a0)
+                return true
             }
             if id =? IN.arrdata {
                 if na not=? 1 {return false}
@@ -2412,25 +2610,37 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if ak =? 'array' and data_writable(a0) and not is_uniq_array(a0) and not ptr_read_only(e) {
                     if not bl_can_mut_place(a0) {return false}
                 }
-                return bl_scan_node(a0)
+                bl_scan_push(a0)
+                return true
             }
-            if id =? IN.to_bytes {return na =? 1 and bl_scan_node(kid(e 0))}
+            if id =? IN.to_bytes {
+                if na not=? 1 {return false}
+                bl_scan_push(kid(e 0))
+                return true
+            }
             if id =? IN.panic {
                 bl_scan_calls += 1
-                return na <=? 1 and (na =? 0 or bl_scan_node(kid(e 0)))
+                if na >? 1 {return false}
+                if na =? 1 {bl_scan_push(kid(e 0))}
+                return true
             }
             if id =? IN.assert or id =? IN.runtime_assert {
                 bl_scan_calls += 1
-                return na >=? 1 and na <=? 2 and bl_scan_node(kid(e 0)) and (na <? 2 or bl_scan_node(kid(e 1)))
+                if na <? 1 or na >? 2 {return false}
+                if na =? 2 {bl_scan_push(kid(e 1))}
+                bl_scan_push(kid(e 0))
+                return true
             }
             if id =? IN.memcpy or id =? IN.memset {
-                return na =? 3 and bl_scan_node(kid(e 0)) and bl_scan_node(kid(e 1)) and bl_scan_node(kid(e 2))
+                if na not=? 3 {return false}
+                bl_scan_push(kid(e 2)); bl_scan_push(kid(e 1)); bl_scan_push(kid(e 0))
+                return true
             }
             if id =? IN.syscall {
                 if na <? 1 or na >? 7 {return false}
                 bl_scan_calls += 1
                 bl_scan_syscall=true
-                loop i in [0..na) {if not bl_scan_node(kid(e i)) {return false}}
+                loop i in [0..na) {bl_scan_push(kid(e i))}
                 return true
             }
             if id =? IN.push {
@@ -2445,7 +2655,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if bl_fn_copies_maybe and (einfo & 32) not=? 0 and not bl_copy_own_ok(a1  et0) {return false}
                 bl_scan_calls += 1
                 bl_scan_managed=true
-                return bl_scan_node(a0) and bl_scan_node(a1)
+                bl_scan_push(a1); bl_scan_push(a0)
+                return true
             }
             if id =? IN.clear {
                 if na not=? 1 {return false}
@@ -2455,7 +2666,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if (bl_tinfo(BlWord(types.ptr[at].elem)) & 1) =? 0 {return false}
                 bl_scan_calls += 1
                 bl_scan_managed=true
-                return bl_scan_node(a0)
+                bl_scan_push(a0)
+                return true
             }
             if id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.setlen {
                 if na not=? 2 {return false}
@@ -2467,24 +2679,44 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if (einfo & 1) =? 0 or (einfo & 12) =? 0 {return false}
                 bl_scan_calls += 1
                 bl_scan_managed=true
-                return bl_scan_node(a0) and bl_scan_node(a1)
+                bl_scan_push(a1); bl_scan_push(a0)
+                return true
             }
             if id =? IN.extend {
                 if na not=? 2 {return false}
                 let a0=kid(e 0)
                 let a1=kid(e 1)
-                if is_slice(a1) {return false}
                 let ainfo=bl_tinfo(BlWord(nodes.ptr[a0].type))
-                let binfo=bl_tinfo(BlWord(nodes.ptr[a1].type))
                 let at:BlWord=(ainfo >> 8) & 0xFFFFFF
-                let bt:BlWord=(binfo >> 8) & 0xFFFFFF
-                if types.ptr[at].kind not=? 'array' or types.ptr[bt].kind not=? 'array' or not bl_can_mut_place(a0) {return false}
+                if (ainfo & 1) =? 0 or types.ptr[at].kind not=? 'array' or not bl_can_mut_place(a0) {return false}
                 let einfo=bl_tinfo(BlWord(types.ptr[at].elem))
-                if (ainfo & 1) =? 0 or (einfo & 1) =? 0 or (einfo & 12) =? 0 {return false}
+                if (einfo & 1) =? 0 or (einfo & 12) =? 0 {return false}
+                if is_slice(a1) {
+                    if nodes.ptr[a1].kind not=? 'index' or nodes.ptr[a1].aux not=? 1 {return false}
+                    let rng=BlWord(nodes.ptr[a1].b)
+                    if nodes.ptr[rng].kind not=? 'range' {return false}
+                    let src=BlWord(nodes.ptr[a1].a)
+                    let sinfo=bl_tinfo(BlWord(nodes.ptr[src].type))
+                    let st:BlWord=(sinfo >> 8) & 0xFFFFFF
+                    let sk=types.ptr[st].kind
+                    if (sinfo & 1) =? 0 or (sk not=? 'array' and sk not=? 'fixed') {return false}
+                    if bl_fn_copies_maybe and (einfo & 32) not=? 0 {return false}
+                    bl_scan_calls += 1
+                    bl_scan_managed=true
+                    bl_scan_push(BlWord(nodes.ptr[rng].b))
+                    bl_scan_push(BlWord(nodes.ptr[rng].a))
+                    bl_scan_push(src)
+                    bl_scan_push(a0)
+                    return true
+                }
+                let binfo=bl_tinfo(BlWord(nodes.ptr[a1].type))
+                let bt:BlWord=(binfo >> 8) & 0xFFFFFF
+                if types.ptr[bt].kind not=? 'array' {return false}
                 if bl_fn_copies_maybe and (einfo & 32) not=? 0 and (bl_fn_copy_strict or copy_strict(e)) and not bl_copy_own_ok(a1  bt) {return false}
                 bl_scan_calls += 1
                 bl_scan_managed=true
-                return bl_scan_node(a0) and bl_scan_node(a1)
+                bl_scan_push(a1); bl_scan_push(a0)
+                return true
             }
             if id =? IN.relocate {
                 if na not=? 3 {return false}
@@ -2496,7 +2728,8 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if (ainfo & 1) =? 0 or (einfo & 1) =? 0 or (einfo & 12) =? 0 {return false}
                 bl_scan_calls += 1
                 bl_scan_managed=true
-                return bl_scan_node(a0) and bl_scan_node(kid(e 1)) and bl_scan_node(kid(e 2))
+                bl_scan_push(kid(e 2)); bl_scan_push(kid(e 1)); bl_scan_push(a0)
+                return true
             }
             false
         }
@@ -2522,9 +2755,10 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             bl_scan_dyn_loop=true
             bl_scan_loops += 1
             if bl_scan_loops >? bl_scan_max_loop_depth {bl_scan_max_loop_depth=bl_scan_loops}
-            let ok=bl_scan_node(a) and bl_scan_node(b0)
-            bl_scan_loops -= 1
-            ok
+            bl_scan_push(-1)
+            bl_scan_push(b0)
+            bl_scan_push(a)
+            true
         }
         <'for_'> => {
             let aux=nodes.ptr[e].aux
@@ -2546,15 +2780,15 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                     let rc=BlWord(nodes.ptr[a].c)
                     if (fl & (LF_ASSIGNED | LF_ADDR | LF_MUTPARAM | LF_EXPOSED)) not=? 0 or not bl_is_small_math(ra) or not bl_is_small_math(rb) or not bl_is_small_math(rc) {return false}
                 }
-                if not bl_scan_node(ra) or not bl_scan_node(rb) {return false}
-                if stepped and not bl_scan_node(BlWord(nodes.ptr[a].c)) {return false}
                 if stepped or nodes.ptr[ra].kind not=? 'int_lit' or nodes.ptr[rb].kind not=? 'int_lit' or nodes.ptr[rb].ival - nodes.ptr[ra].ival >? 64 {bl_scan_dyn_loop=true}
                 bl_scan_has_loop=true
-                bl_scan_loops += 1
-                if bl_scan_loops >? bl_scan_max_loop_depth {bl_scan_max_loop_depth=bl_scan_loops}
-                let ok=bl_scan_node(b0)
-                bl_scan_loops -= 1
-                return ok
+                bl_scan_push(-1)
+                bl_scan_push(b0)
+                bl_scan_push(-2)
+                if stepped {bl_scan_push(BlWord(nodes.ptr[a].c))}
+                bl_scan_push(rb)
+                bl_scan_push(ra)
+                return true
             }
             if aux =? 1 {
                 if has_flag(e NF_MUT) {return false}
@@ -2572,14 +2806,13 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if (BlWord(locals.ptr[el].flags) & LF_BYREF) =? 0 {return false}
                 if (BlWord(locals.ptr[idx].flags) & LF_BYREF) not=? 0 or (BlWord(locals.ptr[snap].flags) & LF_BYREF) not=? 0 {return false}
                 if (cinfo & 16) not=? 0 {bl_scan_managed=true}
-                if not bl_scan_node(a) {return false}
                 bl_scan_has_loop=true
                 bl_scan_dyn_loop=true
-                bl_scan_loops += 1
-                if bl_scan_loops >? bl_scan_max_loop_depth {bl_scan_max_loop_depth=bl_scan_loops}
-                let ok=bl_scan_node(b0)
-                bl_scan_loops -= 1
-                return ok
+                bl_scan_push(-1)
+                bl_scan_push(b0)
+                bl_scan_push(-2)
+                bl_scan_push(a)
+                return true
             }
             if aux =? 3 {
                 if has_flag(e NF_MUT) {return false}
@@ -2603,14 +2836,13 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                 if (BlWord(locals.ptr[idx].flags) & LF_BYREF) not=? 0 or (BlWord(locals.ptr[snap].flags) & LF_BYREF) not=? 0 {return false}
                 if vl >? 0 and (BlWord(locals.ptr[vl].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_OWNERBORROW | LF_PARTBORROW)) not=? 0 {return false}
                 if (cinfo & 16) not=? 0 {bl_scan_managed=true}
-                if not bl_scan_node(a) {return false}
                 bl_scan_has_loop=true
                 bl_scan_dyn_loop=true
-                bl_scan_loops += 1
-                if bl_scan_loops >? bl_scan_max_loop_depth {bl_scan_max_loop_depth=bl_scan_loops}
-                let ok=bl_scan_node(b0)
-                bl_scan_loops -= 1
-                return ok
+                bl_scan_push(-1)
+                bl_scan_push(b0)
+                bl_scan_push(-2)
+                bl_scan_push(a)
+                return true
             }
             false
         }
@@ -2626,7 +2858,7 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
             if (BlWord(locals.ptr[hidden].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_BYREF | LF_OWNERBORROW | LF_PARTBORROW)) not=? 0 {return false}
             if not has_flag(e NF_STMT) and rtp not=? T_NEVER and (bl_tinfo(rtp) & 1) =? 0 {return false}
             if (sinfo & 16) not=? 0 {bl_scan_managed=true}
-            if not bl_scan_node(a) {return false}
+            bl_scan_push(a)
             loop i in [0..nkids(e)) {
                 let arm=kid(e i)
                 loop j in [0..nkids(arm)) {
@@ -2661,17 +2893,18 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                         }
                         if types.ptr[pt].kind =? 'str_' {bl_scan_calls += 1; bl_scan_managed=true}
                         else if (bl_tinfo(pt) & 12) not=? 4 {return false}
-                        if not bl_scan_node(BlWord(nodes.ptr[p].a)) {return false}
+                        bl_scan_push(BlWord(nodes.ptr[p].a))
                         continue
                     }
                     if pk =? 'prange' {
                         if (sinfo & 12) not=? 4 {return false}
-                        if not bl_scan_node(BlWord(nodes.ptr[p].a)) or not bl_scan_node(BlWord(nodes.ptr[p].b)) {return false}
+                        bl_scan_push(BlWord(nodes.ptr[p].b))
+                        bl_scan_push(BlWord(nodes.ptr[p].a))
                         continue
                     }
                     return false
                 }
-                if not bl_scan_node(BlWord(nodes.ptr[arm].b)) {return false}
+                bl_scan_push(BlWord(nodes.ptr[arm].b))
             }
             true
         }
@@ -2815,9 +3048,9 @@ bl_can_emit_inst=(_lf:BlWord fi:BlWord):>bool=>$unsafe {
         if nodes.ptr[last_st].kind =? 'exprstmt' and not bl_copy_own_ok(BlWord(nodes.ptr[last_st].a)  rtp) {return false}
     }
     if not bl_scan_node(body) {return false}
-    if not in_lib_fn and bl_scan_exact_in_loop and bl_scan_dyn_loop and (bl_scan_fn_calls <=? 4 or bl_scan_nodes <=? 80 or (not bl_fn_copies_maybe and bl_scan_exact_wide_in_loop and bl_scan_nodes <=? 220)) {return false}
-    if bl_scan_has_scan_loop and not in_lib_fn {return false}
-    if (bl_scan_max_loop_depth >=? 3 and not in_lib_fn) or (bl_scan_has_while and bl_scan_mut_math) {return false}
+    if not in_lib_fn and bl_scan_exact_in_loop and bl_scan_dyn_loop and (bl_scan_nodes <=? 110 or (bl_scan_exact_wide_in_loop and bl_scan_nodes <=? 210)) {return false}
+    if bl_scan_has_scan_loop and not in_lib_fn and bl_scan_fn_calls <=? 2 and bl_scan_nodes <=? 120 {return false}
+    if (bl_scan_max_loop_depth >=? 3 and not in_lib_fn) or (bl_scan_has_while and bl_scan_mut_math and bl_scan_nodes <=? 96) {return false}
     if bl_scan_has_float and bl_scan_has_loop and not in_lib_fn and (bl_scan_calls =? 0 or (bl_scan_nodes <=? 64 and bl_scan_calls <=? 2)) {return false}
     # Preserve default-mode fast_inline_into for tiny unmanaged scalar leaves,
     # 1-call wrappers, and pure constant lookup-table or dense-dispatch match leaves.
@@ -2897,13 +3130,13 @@ bl_fconst=(x:XWord fval:float64 is_f32:bool):>void=>$unsafe {
 bl_save_res=(t0:BlWord off:XWord):>void=>$unsafe {
     let info=bl_tinfo(t0)
     if (info & 12) =? 8 {sse_rm(if bl_ti_size(info) =? 4 {0xF3} else {0xF2}  0x11  0  RBP  -off)}
-    else {mov_mr(RBP  -off  RAX)}
+    else {mov_mr_rbp(-off  RAX)}
 }
 
 bl_load_res=(t0:BlWord off:XWord):>void=>$unsafe {
     let info=bl_tinfo(t0)
     if (info & 12) =? 8 {sse_rm(if bl_ti_size(info) =? 4 {0xF3} else {0xF2}  0x10  0  RBP  -off)}
-    else {mov_rm(RAX  RBP  -off)}
+    else {mov_rm_rbp(RAX  -off)}
 }
 
 bl_load_val=(t0:BlWord base:XWord disp:XWord):>void=>$unsafe {
@@ -2958,7 +3191,7 @@ bl_borrow=(t0:BlWord):>void=>$unsafe {
         bl_temps_agg.push(true)
     } else {
         let off=bl_tmp_alloc(8)
-        mov_mr(RBP  -off  RAX)
+        mov_mr_rbp(-off  RAX)
         bl_temps_off.push(off)
         bl_temps_ty.push(t)
         bl_temps_agg.push(false)
@@ -2973,13 +3206,13 @@ bl_own_copy=(e:BlWord t0:BlWord):>void=>$unsafe {
     if (info & 12) =? 12 {
         let sz=bl_ti_size(info)
         let off=bl_tmp_alloc(sz  bl_ti_align(info))
-        lea(R10  RBP  -off)
+        lea_rbp(R10  -off)
         bl_copy_mem(R10  RAX  sz)
         if (info & 16) not=? 0 {
-            lea(RDI  RBP  -off)
+            lea_rbp(RDI  -off)
             bl_call(lf_helper(HK.copy t 0))
         }
-        lea(RAX  RBP  -off)
+        lea_rbp(RAX  -off)
         bl_last_owned=true
         bl_last_slot=off
         return
@@ -3007,22 +3240,22 @@ bl_own=(e:BlWord t0:BlWord):>void=>$unsafe {
             if (info & 12) =? 12 {
                 let sz=bl_ti_size(info)
                 let src_off=bl_tmp_alloc(8)
-                mov_mr(RBP  -src_off  RAX)
+                mov_mr_rbp(-src_off  RAX)
                 let off=bl_tmp_alloc(sz  bl_ti_align(info))
-                lea(R10  RBP  -off)
+                lea_rbp(R10  -off)
                 bl_copy_mem(R10  RAX  sz)
-                mov_rm(RAX  RBP  -src_off)
+                mov_rm_rbp(RAX  -src_off)
                 bl_zero_mem(RAX  0  sz)
-                lea(RAX  RBP  -off)
+                lea_rbp(RAX  -off)
                 bl_last_owned=true
                 bl_last_slot=off
                 return
             }
             let voff=bl_tmp_alloc(8)
-            mov_mr(RBP  -voff  RAX)
+            mov_mr_rbp(-voff  RAX)
             bl_place_addr(e  false)
             bl_zero_mem(RAX  0  bl_ti_size(info))
-            mov_rm(RAX  RBP  -voff)
+            mov_rm_rbp(RAX  -voff)
             bl_last_owned=true
             bl_last_slot=-1
             return
@@ -3049,8 +3282,8 @@ bl_box_put=(slot_off:XWord slot_in_rbp:bool ft0:BlWord voff:XWord):>void=>$unsaf
     let skip_j:XWord=-1
     if is_opt {
         b16(0xC031)
-        if slot_in_rbp {mov_mr(RBP  slot_off  RAX)}
-        else {mov_rm(R10  RBP  -slot_off); mov_mr(R10  0  RAX)}
+        if slot_in_rbp {mov_mr_rbp(slot_off  RAX)}
+        else {mov_rm_rbp(R10  -slot_off); mov_mr(R10  0  RAX)}
         load_sized(RAX  RBP  -voff + XWord(tsize(BlWord(types.ptr[ft].elem)))  1  false)
         bl_test_rr(RAX)
         skip_j=jcc32(CC_E)
@@ -3058,16 +3291,16 @@ bl_box_put=(slot_off:XWord slot_in_rbp:bool ft0:BlWord voff:XWord):>void=>$unsaf
     mov_imm(RDI  sz)
     bl_call(rt("__box_new"))
     let poff=bl_tmp_alloc(8)
-    mov_mr(RBP  -poff  RAX)
-    if slot_in_rbp {mov_mr(RBP  slot_off  RAX)}
-    else {mov_rm(R10  RBP  -slot_off); mov_mr(R10  0  RAX)}
+    mov_mr_rbp(-poff  RAX)
+    if slot_in_rbp {mov_mr_rbp(slot_off  RAX)}
+    else {mov_rm_rbp(R10  -slot_off); mov_mr(R10  0  RAX)}
     if vc(ft) =? VC_AGG {
         lea(RDI  RAX  XWord(BOX_HDR))
-        lea(RSI  RBP  -voff)
+        lea_rbp(RSI  -voff)
         bl_copy_mem(RDI  RSI  sz)
     } else {
         bl_load_res(ft  voff)
-        mov_rm(R10  RBP  -poff)
+        mov_rm_rbp(R10  -poff)
         bl_store_val(ft  R10  XWord(BOX_HDR)  RAX)
     }
     if skip_j >=? 0 {patch_here(skip_j)}
@@ -3080,10 +3313,10 @@ bl_stmt_end=(tmark:BlWord spmark:XWord):>void=>$unsafe {
         let is_agg=bl_temps_agg.pop()
         if ty =? 0 {continue}
         if is_agg {
-            lea(RDI  RBP  -off)
+            lea_rbp(RDI  -off)
             bl_call(lf_helper(HK.drop ty 0))
         } else {
-            mov_rm(RAX  RBP  -off)
+            mov_rm_rbp(RAX  -off)
             bl_release_val(ty)
         }
     }
@@ -3096,10 +3329,10 @@ bl_emit_scope_drops=(from_i:BlWord to_i:BlWord):>void=>$unsafe {
         let off=XWord(bl_scope_off.ptr[i])
         let ty=BlWord(bl_scope_ty.ptr[i])
         if bl_scope_agg.ptr[i] {
-            lea(RDI  RBP  -off)
+            lea_rbp(RDI  -off)
             bl_call(lf_helper(HK.drop ty 0))
         } else {
-            mov_rm(RAX  RBP  -off)
+            mov_rm_rbp(RAX  -off)
             bl_release_val(ty)
         }
         i -= 1
@@ -3113,10 +3346,10 @@ bl_emit_temp_drops=(from_i:BlWord to_i:BlWord):>void=>$unsafe {
         let ty=BlWord(bl_temps_ty.ptr[i])
         if ty =? 0 {i -= 1; continue}
         if bl_temps_agg.ptr[i] {
-            lea(RDI  RBP  -off)
+            lea_rbp(RDI  -off)
             bl_call(lf_helper(HK.drop ty 0))
         } else {
-            mov_rm(RAX  RBP  -off)
+            mov_rm_rbp(RAX  -off)
             bl_release_val(ty)
         }
         i -= 1
@@ -3213,7 +3446,7 @@ bl_eval_scalar_index=(e:BlWord):>void=>$unsafe {
     }
     let proven=has_flag(e NF_INBOUNDS) or (bl_for_reg_active and ireg =? R13 and al =? bl_for_inbounds_arr)
     if proven {
-        mov_rm(RAX  RBP  -aoff)
+        mov_rm_rbp(RAX  -aoff)
     } else if bl_for_reg_active and al =? bl_for_hoist_arr {
         op_rr(0x39  true  R15  idx_r) # cmp idx_r, r15 (hoisted len)
         let ok=jcc32(CC_B)
@@ -3224,9 +3457,9 @@ bl_eval_scalar_index=(e:BlWord):>void=>$unsafe {
         bl_call_pos(rt("__panic_bounds"))
         b16(0x0B0F)
         patch_here(ok)
-        mov_rm(RAX  RBP  -aoff)
+        mov_rm_rbp(RAX  -aoff)
     } else {
-        mov_rm(RAX  RBP  -aoff)
+        mov_rm_rbp(RAX  -aoff)
         if idx_r not=? RCX {mov_rr(RCX  idx_r)}
         bl_bounds_check(nodes.ptr[e].pos)
         idx_r=RCX
@@ -3253,7 +3486,7 @@ bl_frozen_off_of=(n:BlWord):>XWord=>$unsafe {
 bl_eval_index=(ixn:BlWord):>void=>$unsafe {
     let foff=bl_frozen_off_of(ixn)
     if foff >? 0 {
-        mov_rm(RAX  RBP  -foff)
+        mov_rm_rbp(RAX  -foff)
         bl_last_owned=false
         bl_last_slot=-1
         return
@@ -3273,8 +3506,8 @@ bl_place_addr=(e:BlWord write:bool):>void=>$unsafe {
                 return
             }
             let off=XWord(bl_loc_off.ptr[idx])
-            if lk =? int8(1) {mov_rm(RAX  RBP  -off)}
-            else {lea(RAX  RBP  -off)}
+            if lk =? int8(1) {mov_rm_rbp(RAX  -off)}
+            else {lea_rbp(RAX  -off)}
             return
         }
         rel_fixup_lea(RAX  1  XWord(global_addr_off(BlWord(nodes.ptr[e].sym))))
@@ -3362,20 +3595,20 @@ bl_place_addr=(e:BlWord write:bool):>void=>$unsafe {
             if aoff >? 0 {
                 let foff=bl_frozen_off_of(ixn)
                 if foff >? 0 {
-                    mov_rm(RAX  RBP  -aoff)
-                    mov_rm(RCX  RBP  -foff)
+                    mov_rm_rbp(RAX  -aoff)
+                    mov_rm_rbp(RCX  -foff)
                 } else {
                     let ioff2=bl_plain_local_off(ixn)
                     if ioff2 >? 0 {
-                        mov_rm(RAX  RBP  -aoff)
+                        mov_rm_rbp(RAX  -aoff)
                         bl_load_plain_local(RCX  ixn  ioff2)
                     } else if nodes.ptr[ixn].kind =? 'int_lit' {
-                        mov_rm(RAX  RBP  -aoff)
+                        mov_rm_rbp(RAX  -aoff)
                         mov_imm(RCX  XWord(nodes.ptr[ixn].ival))
                     } else {
                         bl_eval_borrowed(ixn)
                         mov_rr(RCX  RAX)
-                        mov_rm(RAX  RBP  -aoff)
+                        mov_rm_rbp(RAX  -aoff)
                     }
                 }
             } else {
@@ -3383,15 +3616,15 @@ bl_place_addr=(e:BlWord write:bool):>void=>$unsafe {
                 let ioff=bl_tmp_alloc(8)
                 if direct {
                     bl_eval_index(ixn)
-                    mov_mr(RBP  -ioff  RAX)
+                    mov_mr_rbp(-ioff  RAX)
                     bl_eval_borrowed(a)
-                    mov_rm(RCX  RBP  -ioff)
+                    mov_rm_rbp(RCX  -ioff)
                 } else {
                     bl_eval_borrowed(a)
-                    mov_mr(RBP  -ioff  RAX)
+                    mov_mr_rbp(-ioff  RAX)
                     bl_eval_index(ixn)
                     mov_rr(RCX  RAX)
-                    mov_rm(RAX  RBP  -ioff)
+                    mov_rm_rbp(RAX  -ioff)
                 }
             }
             bl_imul_imm(RCX  XWord(tsize(BlWord(types.ptr[bt].elem))))
@@ -3403,49 +3636,49 @@ bl_place_addr=(e:BlWord write:bool):>void=>$unsafe {
             if aoff >? 0 {
                 let foff=bl_frozen_off_of(ixn)
                 if foff >? 0 {
-                    mov_rm(RAX  RBP  -aoff)
-                    mov_rm(RCX  RBP  -foff)
+                    mov_rm_rbp(RAX  -aoff)
+                    mov_rm_rbp(RCX  -foff)
                 } else {
                     let ioff2=bl_plain_local_off(ixn)
                     if ioff2 >? 0 {
-                        mov_rm(RAX  RBP  -aoff)
+                        mov_rm_rbp(RAX  -aoff)
                         bl_load_plain_local(RCX  ixn  ioff2)
                     } else if nodes.ptr[ixn].kind =? 'int_lit' {
-                        mov_rm(RAX  RBP  -aoff)
+                        mov_rm_rbp(RAX  -aoff)
                         mov_imm(RCX  XWord(nodes.ptr[ixn].ival))
                     } else {
                         bl_eval_borrowed(ixn)
                         mov_rr(RCX  RAX)
-                        mov_rm(RAX  RBP  -aoff)
+                        mov_rm_rbp(RAX  -aoff)
                     }
                 }
             } else if write and bk =? 'array' {
                 bl_place_addr(a  true)
                 let poff=bl_tmp_alloc(8)
-                mov_mr(RBP  -poff  RAX)
+                mov_mr_rbp(-poff  RAX)
                 if not is_uniq_array(a) {
                     mov_rm(RAX  RAX  0)
                     bl_arr_unique_rax(bt)
-                    mov_rm(R10  RBP  -poff)
+                    mov_rm_rbp(R10  -poff)
                     mov_mr(R10  0  RAX)
                 }
                 bl_eval_index(ixn)
                 mov_rr(RCX  RAX)
-                mov_rm(R10  RBP  -poff)
+                mov_rm_rbp(R10  -poff)
                 mov_rm(RAX  R10  0)
             } else if nodes.ptr[a].kind =? 'ident' {
                 let ioff=bl_tmp_alloc(8)
                 bl_eval_index(ixn)
-                mov_mr(RBP  -ioff  RAX)
+                mov_mr_rbp(-ioff  RAX)
                 bl_eval_borrowed(a)
-                mov_rm(RCX  RBP  -ioff)
+                mov_rm_rbp(RCX  -ioff)
             } else {
                 let ioff=bl_tmp_alloc(8)
                 bl_eval_borrowed(a)
-                mov_mr(RBP  -ioff  RAX)
+                mov_mr_rbp(-ioff  RAX)
                 bl_eval_index(ixn)
                 mov_rr(RCX  RAX)
-                mov_rm(RAX  RBP  -ioff)
+                mov_rm_rbp(RAX  -ioff)
             }
             if not has_flag(e NF_INBOUNDS) {bl_bounds_check(nodes.ptr[e].pos)}
             let stride:XWord=if bk =? 'str_' {1} else {XWord(owner_stride(BlWord(types.ptr[bt].elem)))}
@@ -3457,7 +3690,7 @@ bl_place_addr=(e:BlWord write:bool):>void=>$unsafe {
         if bk =? 'fixed' {
             let boff=bl_tmp_alloc(8)
             bl_place_addr(a  write)
-            mov_mr(RBP  -boff  RAX)
+            mov_mr_rbp(-boff  RAX)
             bl_eval_index(ixn)
             mov_rr(RCX  RAX)
             let flen=fixed_len(bt)
@@ -3474,7 +3707,7 @@ bl_place_addr=(e:BlWord write:bool):>void=>$unsafe {
                 patch_here(ok)
             }
             bl_imul_imm(RCX  XWord(tsize(BlWord(types.ptr[bt].elem))))
-            mov_rm(RAX  RBP  -boff)
+            mov_rm_rbp(RAX  -boff)
             op_rr(0x01  true  RCX  RAX)
             return
         }
@@ -3485,7 +3718,7 @@ bl_place_addr=(e:BlWord write:bool):>void=>$unsafe {
     if vc(t) not=? VC_AGG {
         let toff=bl_tmp_alloc(8)
         bl_save_res(t  toff)
-        lea(RAX  RBP  -toff)
+        lea_rbp(RAX  -toff)
     }
 }
 
@@ -3939,11 +4172,11 @@ bl_eval_binary=(e:BlWord):>void=>$unsafe {
             bl_eval_borrowed(a)
         }
         let aoff=bl_tmp_alloc(8)
-        mov_mr(RBP  -aoff  RAX)
+        mov_mr_rbp(-aoff  RAX)
         if op =? 'shl' or op =? 'shr' {
             bl_eval_shift_count(b0  nodes.ptr[e].pos)
             mov_rr(RCX  RAX)
-            mov_rm(RAX  RBP  -aoff)
+            mov_rm_rbp(RAX  -aoff)
             bl_math_shift_regs(op  types.ptr[prune(ntype(b0))].sign  nodes.ptr[e].pos)
             bl_last_owned=true
             bl_last_slot=-1
@@ -3951,7 +4184,7 @@ bl_eval_binary=(e:BlWord):>void=>$unsafe {
         }
         bl_eval_borrowed(b0)
         mov_rr(RCX  RAX)
-        mov_rm(RAX  RBP  -aoff)
+        mov_rm_rbp(RAX  -aoff)
         let small_ab=bl_is_small_math(a) and bl_is_small_math(b0)
         if op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' {
             let sec=secret_compares.length >? 0 and secret_compares.get(e) not=? none
@@ -4000,9 +4233,9 @@ bl_eval_binary=(e:BlWord):>void=>$unsafe {
             } else {
                 bl_eval_borrowed(a)
             }
-            mov_mr(RBP  -aoff  RAX)
+            mov_mr_rbp(-aoff  RAX)
             bl_eval_borrowed(b0)
-            mov_rm(R10  RBP  -aoff)
+            mov_rm_rbp(R10  -aoff)
             op_rr(0x39  true  RAX  R10)
             let same_j=jcc32(CC_E)
             op_rr(0x31  false  RCX  RCX)
@@ -4046,15 +4279,15 @@ bl_eval_binary=(e:BlWord):>void=>$unsafe {
             if vc(lt) not=? VC_AGG {
                 let toff=bl_tmp_alloc(8)
                 bl_save_res(lt  toff)
-                lea(RAX  RBP  -toff)
+                lea_rbp(RAX  -toff)
             }
         } else {
             bl_place_addr(a  false)
         }
-        mov_mr(RBP  -ad_off  RAX)
+        mov_mr_rbp(-ad_off  RAX)
         bl_place_addr(b0  false)
         mov_rr(RSI  RAX)
-        mov_rm(RDI  RBP  -ad_off)
+        mov_rm_rbp(RDI  -ad_off)
         bl_set_pos(nodes.ptr[e].pos)
         bl_call_pos(lf_helper(HK.eq lt 0))
         if op =? 'ne' {rex(false  0  0  RAX  false); b(0x83); modrr(6  RAX); b(1)}
@@ -4082,10 +4315,10 @@ bl_eval_binary=(e:BlWord):>void=>$unsafe {
             bl_eval_borrowed(a)
         }
         let aoff=bl_tmp_alloc(8)
-        mov_mr(RBP  -aoff  RAX)
+        mov_mr_rbp(-aoff  RAX)
         bl_eval_borrowed(b0)
         mov_rr(RSI  RAX)
-        mov_rm(RDI  RBP  -aoff)
+        mov_rm_rbp(RDI  -aoff)
         bl_set_pos(nodes.ptr[e].pos)
         if op =? 'plus' {
             bl_call_pos(rt("__str_concat"))
@@ -4173,10 +4406,10 @@ bl_eval_binary=(e:BlWord):>void=>$unsafe {
     bl_eval_borrowed(a)
     if is_math_sh {
         let aoff=bl_tmp_alloc(8)
-        mov_mr(RBP  -aoff  RAX)
+        mov_mr_rbp(-aoff  RAX)
         bl_eval_shift_count(b0  nodes.ptr[e].pos)
         mov_rr(RCX  RAX)
-        mov_rm(RAX  RBP  -aoff)
+        mov_rm_rbp(RAX  -aoff)
     } else if breg >=? 0 {
         mov_rr(RCX  breg)
     } else if boff >? 0 {
@@ -4188,10 +4421,10 @@ bl_eval_binary=(e:BlWord):>void=>$unsafe {
         mov_rr(RAX  R10)
     } else {
         let aoff=bl_tmp_alloc(8)
-        mov_mr(RBP  -aoff  RAX)
+        mov_mr_rbp(-aoff  RAX)
         bl_eval_borrowed(b0)
         mov_rr(RCX  RAX)
-        mov_rm(RAX  RBP  -aoff)
+        mov_rm_rbp(RAX  -aoff)
     }
     if aux =? 4 {
         bl_imul_imm(RCX  XWord(tsize(BlWord(types.ptr[lt].elem))))
@@ -4258,7 +4491,7 @@ bl_eval_call=(e:BlWord):>void=>$unsafe {
             }
         }
         bl_scope_off.truncate(smark); bl_scope_ty.truncate(smark); bl_scope_agg.truncate(smark)
-        lea(RAX  RBP  -off)
+        lea_rbp(RAX  -off)
         bl_last_owned=true
         bl_last_slot=off
         return
@@ -4307,7 +4540,7 @@ bl_eval_call=(e:BlWord):>void=>$unsafe {
             }
         }
         bl_scope_off.truncate(smark); bl_scope_ty.truncate(smark); bl_scope_agg.truncate(smark)
-        lea(RAX  RBP  -off)
+        lea_rbp(RAX  -off)
         bl_last_owned=true
         bl_last_slot=off
         return
@@ -4320,7 +4553,7 @@ bl_eval_call=(e:BlWord):>void=>$unsafe {
         let na=nkids(e)
         let fp_off=bl_tmp_alloc(8)
         bl_eval_borrowed(callee)
-        mov_mr(RBP  -fp_off  RAX)
+        mov_mr_rbp(-fp_off  RAX)
         let base_off:XWord=if na >? 0 {bl_tmp_alloc(XWord(na * 8))} else {0}
         loop i in [0..na) {
             let arg=kid(e i)
@@ -4328,7 +4561,7 @@ bl_eval_call=(e:BlWord):>void=>$unsafe {
             let disp:XWord=-base_off + XWord(i * 8)
             bl_eval_borrowed(arg)
             if vc(at) =? VC_FLT {sse_rm(bl_fpre(at)  0x11  0  RBP  disp)}
-            else {mov_mr(RBP  disp  RAX)}
+            else {mov_mr_rbp(disp  RAX)}
         }
         let int_i:BlWord=0
         let flt_i:BlWord=0
@@ -4339,11 +4572,11 @@ bl_eval_call=(e:BlWord):>void=>$unsafe {
                 sse_rm(bl_fpre(at)  0x10  XWord(flt_i)  RBP  disp)
                 flt_i += 1
             } else {
-                mov_rm(XWord(int_arg_regs.ptr[int_i])  RBP  disp)
+                mov_rm_rbp(XWord(int_arg_regs.ptr[int_i])  disp)
                 int_i += 1
             }
         }
-        mov_rm(R11  RBP  -fp_off)
+        mov_rm_rbp(R11  -fp_off)
         bl_set_pos(nodes.ptr[e].pos)
         b24(0xD3FF41) # call r11
         bl_call_site()
@@ -4387,13 +4620,13 @@ bl_eval_call=(e:BlWord):>void=>$unsafe {
         let disp:XWord=-base_off + XWord(i * 8)
         if (mm & (BlWord(1) << i)) not=? 0 {
             bl_place_addr(arg  true)
-            mov_mr(RBP  disp  RAX)
+            mov_mr_rbp(disp  RAX)
         } else {
             let pt=if i <? fns.ptr[sym].ptypes.length {prune(BlWord(fns.ptr[sym].ptypes.ptr[i]))} else {prune(ntype(arg))}
             if copies_on and copy_consumes(sym  i) {
                 bl_eval_owned(arg)
                 bl_last_owned=false
-                mov_mr(RBP  disp  RAX)
+                mov_mr_rbp(disp  RAX)
             } else {
                 bl_eval(arg)
                 if vc(pt) =? VC_FLT {
@@ -4426,7 +4659,7 @@ bl_eval_call=(e:BlWord):>void=>$unsafe {
                     let tbefore=bl_temps_off.length
                     bl_borrow(pt)
                     if took_snap and bl_temps_off.length >? tbefore {bl_snap_idx.push(bl_temps_off.length - 1)}
-                    mov_mr(RBP  disp  RAX)
+                    mov_mr_rbp(disp  RAX)
                 }
             }
         }
@@ -4459,13 +4692,13 @@ bl_eval_call=(e:BlWord):>void=>$unsafe {
             if not is_mut and vc(pt) =? VC_FLT {
                 rf -= 1
                 if rf >=? 8 {
-                    mov_rm(RAX  RBP  disp)
+                    mov_rm_rbp(RAX  disp)
                     bl_push(RAX)
                 }
             } else {
                 ri -= 1
                 if ri >=? 6 {
-                    mov_rm(RAX  RBP  disp)
+                    mov_rm_rbp(RAX  disp)
                     bl_push(RAX)
                 }
             }
@@ -4476,7 +4709,7 @@ bl_eval_call=(e:BlWord):>void=>$unsafe {
     let int_i:BlWord=0
     let flt_i:BlWord=0
     if has_sret {
-        lea(RDI  RBP  -rslot)
+        lea_rbp(RDI  -rslot)
         int_i=1
     }
     loop i in [0..na) {
@@ -4487,7 +4720,7 @@ bl_eval_call=(e:BlWord):>void=>$unsafe {
             if flt_i <? 8 {sse_rm(bl_fpre(pt)  0x10  XWord(flt_i)  RBP  disp)}
             flt_i += 1
         } else {
-            if int_i <? 6 {mov_rm(XWord(int_arg_regs.ptr[int_i])  RBP  disp)}
+            if int_i <? 6 {mov_rm_rbp(XWord(int_arg_regs.ptr[int_i])  disp)}
             int_i += 1
         }
     }
@@ -4516,10 +4749,10 @@ bl_eval_call=(e:BlWord):>void=>$unsafe {
                 let ty=BlWord(bl_temps_ty.ptr[tidx])
                 if ty not=? 0 {
                     if bl_temps_agg.ptr[tidx] {
-                        lea(RDI  RBP  -off)
+                        lea_rbp(RDI  -off)
                         bl_call(lf_helper(HK.drop ty 0))
                     } else {
-                        mov_rm(RAX  RBP  -off)
+                        mov_rm_rbp(RAX  -off)
                         bl_release_val(ty)
                     }
                     bl_temps_ty[tidx]=0
@@ -4534,7 +4767,7 @@ bl_eval_call=(e:BlWord):>void=>$unsafe {
         }
     }
     if has_sret {
-        lea(RAX  RBP  -rslot)
+        lea_rbp(RAX  -rslot)
         bl_last_owned=true
         bl_last_slot=rslot
     } else if rtp not=? T_NEVER and vc(rtp) =? VC_INT {
@@ -4566,9 +4799,9 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         let base_off:XWord=if na >? 0 {bl_tmp_alloc(XWord(na * 8))} else {0}
         loop i in [0..na) {
             bl_eval_borrowed(kid(e i))
-            mov_mr(RBP  -base_off + XWord(i * 8)  RAX)
+            mov_mr_rbp(-base_off + XWord(i * 8)  RAX)
         }
-        loop i in [0..na) {mov_rm(XWord(int_arg_regs.ptr[i])  RBP  -base_off + XWord(i * 8))}
+        loop i in [0..na) {mov_rm_rbp(XWord(int_arg_regs.ptr[i])  -base_off + XWord(i * 8))}
         let code:XWord=if id =? IN.atomic_add {6} else if id =? IN.atomic_cas {7} else if id =? IN.stack_ptr {8} else {9}
         b(0xE8)
         b32(0)
@@ -4590,7 +4823,7 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
             let at=prune(ntype(arg))
             bl_eval_borrowed(arg)
             if vc(at) =? VC_FLT {sse_rm(bl_fpre(at)  0x11  0  RBP  -base_off + XWord(i * 8))}
-            else {mov_mr(RBP  -base_off + XWord(i * 8)  RAX)}
+            else {mov_mr_rbp(-base_off + XWord(i * 8)  RAX)}
         }
         let int_i:BlWord=0
         let flt_i:BlWord=0
@@ -4601,11 +4834,11 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
                 sse_rm(bl_fpre(at)  0x10  XWord(flt_i)  RBP  disp)
                 flt_i += 1
             } else {
-                mov_rm(XWord(int_arg_regs.ptr[int_i])  RBP  disp)
+                mov_rm_rbp(XWord(int_arg_regs.ptr[int_i])  disp)
                 int_i += 1
             }
         }
-        mov_rm(R11  RBP  -base_off)
+        mov_rm_rbp(R11  -base_off)
         bl_set_pos(nodes.ptr[e].pos)
         b24(0xD3FF41) # call r11
         bl_call_site()
@@ -4635,7 +4868,7 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
             let sz=XWord(tsize(t))
             let off=bl_tmp_alloc(sz  XWord(talign(t)))
             bl_zero_mem(RBP  -off  sz)
-            lea(RAX  RBP  -off)
+            lea_rbp(RAX  -off)
             bl_last_owned=true
             bl_last_slot=off
             return
@@ -4659,31 +4892,31 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         let poff=bl_tmp_alloc(8)
         let ioff=bl_tmp_alloc(8)
         bl_place_addr(a0  true)
-        mov_mr(RBP  -poff  RAX)
+        mov_mr_rbp(-poff  RAX)
         bl_eval_borrowed(a1)
-        mov_mr(RBP  -ioff  RAX)
-        mov_rm(RAX  RBP  -poff)
+        mov_mr_rbp(-ioff  RAX)
+        mov_rm_rbp(RAX  -poff)
         mov_rm(RAX  RAX  0)
         if not is_uniq_array(a0) {
             bl_arr_unique_rax(at)
-            mov_rm(R10  RBP  -poff)
+            mov_rm_rbp(R10  -poff)
             mov_mr(R10  0  RAX)
         }
-        mov_rm(RCX  RBP  -ioff)
+        mov_rm_rbp(RCX  -ioff)
         bl_bounds_check(nodes.ptr[e].pos)
         bl_imul_imm(RCX  esz)
         op_rr(0x01  true  RCX  RAX)
         bl_add_imm(RAX  24)
         if vc(et) =? VC_AGG {
             let rslot=bl_tmp_alloc(XWord(tsize(et))  XWord(talign(et)))
-            lea(RDI  RBP  -rslot)
+            lea_rbp(RDI  -rslot)
             bl_copy_mem(RDI  RAX  XWord(tsize(et)))
-            mov_rm(RDI  RBP  -poff)
+            mov_rm_rbp(RDI  -poff)
             mov_imm(RSI  esz)
-            mov_rm(RDX  RBP  -ioff)
+            mov_rm_rbp(RDX  -ioff)
             bl_set_pos(nodes.ptr[e].pos)
             bl_call_pos(rt("__arr_remove_slot"))
-            lea(RAX  RBP  -rslot)
+            lea_rbp(RAX  -rslot)
             bl_last_owned=true
             bl_last_slot=rslot
             return
@@ -4691,9 +4924,9 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         bl_load_val(et  RAX  0)
         let voff=bl_tmp_alloc(8)
         bl_save_res(et  voff)
-        mov_rm(RDI  RBP  -poff)
+        mov_rm_rbp(RDI  -poff)
         mov_imm(RSI  esz)
-        mov_rm(RDX  RBP  -ioff)
+        mov_rm_rbp(RDX  -ioff)
         bl_set_pos(nodes.ptr[e].pos)
         bl_call_pos(rt("__arr_remove_slot"))
         bl_load_res(et  voff)
@@ -4708,11 +4941,11 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         let esz=XWord(owner_stride(et))
         let poff=bl_tmp_alloc(8)
         bl_place_addr(a0  true)
-        mov_mr(RBP  -poff  RAX)
+        mov_mr_rbp(-poff  RAX)
         mov_rm(RAX  RAX  0)
         if not is_uniq_array(a0) {
             bl_arr_unique_rax(at)
-            mov_rm(R10  RBP  -poff)
+            mov_rm_rbp(R10  -poff)
             mov_mr(R10  0  RAX)
         }
         b16(0xC931)
@@ -4733,16 +4966,16 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         op_rr(0x01  true  RCX  RAX)
         bl_add_imm(RAX  24)
         let ea_off=bl_tmp_alloc(8)
-        mov_mr(RBP  -ea_off  RAX)
+        mov_mr_rbp(-ea_off  RAX)
         if vc(et) =? VC_AGG {
             let rslot=bl_tmp_alloc(XWord(tsize(et))  XWord(talign(et)))
-            lea(RDI  RBP  -rslot)
+            lea_rbp(RDI  -rslot)
             bl_copy_mem(RDI  RAX  XWord(tsize(et)))
             if is_managed(et) {
-                mov_rm(RAX  RBP  -ea_off)
+                mov_rm_rbp(RAX  -ea_off)
                 bl_zero_mem(RAX  0  esz)
             }
-            lea(RAX  RBP  -rslot)
+            lea_rbp(RAX  -rslot)
             bl_last_owned=true
             bl_last_slot=rslot
             return
@@ -4751,7 +4984,7 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         if is_managed(et) {
             let voff=bl_tmp_alloc(8)
             bl_save_res(et  voff)
-            mov_rm(R10  RBP  -ea_off)
+            mov_rm_rbp(R10  -ea_off)
             bl_zero_mem(R10  0  esz)
             bl_load_res(et  voff)
         }
@@ -4765,10 +4998,10 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         if types.ptr[at].kind =? 'array' and data_writable(a0) and not is_uniq_array(a0) and not ptr_read_only(e) {
             let poff=bl_tmp_alloc(8)
             bl_place_addr(a0  true)
-            mov_mr(RBP  -poff  RAX)
+            mov_mr_rbp(-poff  RAX)
             mov_rm(RAX  RAX  0)
             bl_arr_unique_rax(at)
-            mov_rm(R10  RBP  -poff)
+            mov_rm_rbp(R10  -poff)
             mov_mr(R10  0  RAX)
         } else {
             bl_eval_borrowed(a0)
@@ -4836,15 +5069,15 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
     if id =? IN.memcpy or id =? IN.memset {
         let d_off=bl_tmp_alloc(8)
         let s_off=bl_tmp_alloc(8)
-        bl_eval_borrowed(kid(e 0)); mov_mr(RBP  -d_off  RAX)
-        bl_eval_borrowed(kid(e 1)); mov_mr(RBP  -s_off  RAX)
+        bl_eval_borrowed(kid(e 0)); mov_mr_rbp(-d_off  RAX)
+        bl_eval_borrowed(kid(e 1)); mov_mr_rbp(-s_off  RAX)
         bl_eval_borrowed(kid(e 2)); mov_rr(RCX  RAX)
-        mov_rm(RDI  RBP  -d_off)
+        mov_rm_rbp(RDI  -d_off)
         if id =? IN.memcpy {
-            mov_rm(RSI  RBP  -s_off)
+            mov_rm_rbp(RSI  -s_off)
             b16(0xA4F3) # rep movsb
         } else {
-            mov_rm(RAX  RBP  -s_off)
+            mov_rm_rbp(RAX  -s_off)
             b16(0xAAF3) # rep stosb
         }
         bl_last_owned=false
@@ -4855,7 +5088,7 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         let base_off=bl_tmp_alloc(XWord(na * 8))
         loop i in [0..na) {
             bl_eval_borrowed(kid(e i))
-            mov_mr(RBP  -base_off + XWord(i * 8)  RAX)
+            mov_mr_rbp(-base_off + XWord(i * 8)  RAX)
         }
         let interruptible=false
         if concurrency_runtime_needed and nodes.ptr[arg0].kind =? 'int_lit' {
@@ -4872,7 +5105,7 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
             bl_call_pos(rt("__task_canceled"))
             bl_test_rr(RAX)
             let canceled_j=jcc32(CC_NE)
-            loop i in [0..na) {mov_rm(XWord(BL_SYSCALL_REGS.ptr[i])  RBP  -base_off + XWord(i * 8))}
+            loop i in [0..na) {mov_rm_rbp(XWord(BL_SYSCALL_REGS.ptr[i])  -base_off + XWord(i * 8))}
             b16(0x050F) # syscall
             bl_cmp_imm(RAX  -4)
             let retry_j=jcc32(CC_E)
@@ -4884,7 +5117,7 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
             bl_last_owned=false
             return
         }
-        loop i in [0..na) {mov_rm(XWord(BL_SYSCALL_REGS.ptr[i])  RBP  -base_off + XWord(i * 8))}
+        loop i in [0..na) {mov_rm_rbp(XWord(BL_SYSCALL_REGS.ptr[i])  -base_off + XWord(i * 8))}
         b16(0x050F) # syscall
         bl_last_owned=false
         return
@@ -4897,14 +5130,14 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         let esz=XWord(owner_stride(et))
         let poff=bl_tmp_alloc(8)
         bl_place_addr(a0  true)
-        mov_mr(RBP  -poff  RAX)
+        mov_mr_rbp(-poff  RAX)
         bl_eval_owned(a1)
         let voff:XWord=0
         if vc(et) =? VC_AGG {voff=bl_last_slot}
         else {voff=bl_tmp_alloc(8); bl_save_res(et  voff)}
         bl_last_owned=false
         if has_flag(e NF_INBOUNDS) {
-            mov_rm(R10  RBP  -poff)
+            mov_rm_rbp(R10  -poff)
             mov_rm(RAX  R10  0)
             mov_rm(RCX  RAX  8)
             lea(RDX  RCX  1)
@@ -4914,7 +5147,7 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
             bl_add_imm(RAX  24)
         } else {
             # Fast path: p != null && p.rc == 1 && p.len < p.cap
-            mov_rm(R10  RBP  -poff)
+            mov_rm_rbp(R10  -poff)
             mov_rm(RAX  R10  0)
             bl_test_rr(RAX)
             let slow0=jcc32(CC_E)
@@ -4935,10 +5168,10 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
             patch_here(slow0)
             patch_here(slow1)
             patch_here(slow2)
-            mov_rm(R10  RBP  -poff)
+            mov_rm_rbp(R10  -poff)
             mov_rm(RAX  R10  0)
             bl_arr_unique_rax(at)
-            mov_rm(RDI  RBP  -poff)
+            mov_rm_rbp(RDI  -poff)
             mov_mr(RDI  0  RAX)
             mov_imm(RSI  esz)
             bl_set_pos(nodes.ptr[e].pos)
@@ -4947,13 +5180,13 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         }
         # RAX = element slot pointer
         if vc(et) =? VC_AGG {
-            lea(RSI  RBP  -voff)
+            lea_rbp(RSI  -voff)
             bl_copy_mem(RAX  RSI  XWord(tsize(et)))
         } else if vc(et) =? VC_FLT {
             sse_rm(bl_fpre(et)  0x10  0  RBP  -voff)
             sse_rm(bl_fpre(et)  0x11  0  RAX  0)
         } else {
-            mov_rm(RCX  RBP  -voff)
+            mov_rm_rbp(RCX  -voff)
             store_sized(RAX  0  RCX  XWord(tsize(et)))
         }
         bl_last_owned=false
@@ -4966,7 +5199,7 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         let esz=XWord(owner_stride(et))
         let poff=bl_tmp_alloc(8)
         bl_place_addr(a0  true)
-        mov_mr(RBP  -poff  RAX)
+        mov_mr_rbp(-poff  RAX)
         mov_rm(RAX  RAX  0)
         bl_test_rr(RAX)
         let is_null=jcc32(CC_E)
@@ -4978,39 +5211,39 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
             let ioff=bl_tmp_alloc(8)
             let noff=bl_tmp_alloc(8)
             let ea_off=bl_tmp_alloc(8)
-            mov_mr(RBP  -arr_off  RAX)
+            mov_mr_rbp(-arr_off  RAX)
             mov_rm(RCX  RAX  8)
             bl_test_rr(RCX)
             let skip_d=jcc32(CC_LE)
-            mov_mr(RBP  -noff  RCX)
+            mov_mr_rbp(-noff  RCX)
             b16(0xC031)
-            mov_mr(RBP  -ioff  RAX)
+            mov_mr_rbp(-ioff  RAX)
             let ltop=XWord(x_code[0].length)
-            mov_rm(RAX  RBP  -arr_off)
-            mov_rm(RCX  RBP  -ioff)
+            mov_rm_rbp(RAX  -arr_off)
+            mov_rm_rbp(RCX  -ioff)
             bl_imul_imm(RCX  esz)
             op_rr(0x01  true  RCX  RAX)
             bl_add_imm(RAX  24)
-            mov_mr(RBP  -ea_off  RAX)
+            mov_mr_rbp(-ea_off  RAX)
             bl_drop_at_reg(RAX  et)
-            mov_rm(RAX  RBP  -ea_off)
+            mov_rm_rbp(RAX  -ea_off)
             bl_zero_mem(RAX  0  esz)
-            mov_rm(RCX  RBP  -ioff)
+            mov_rm_rbp(RCX  -ioff)
             bl_add_imm(RCX  1)
-            mov_mr(RBP  -ioff  RCX)
-            mov_rm(RDX  RBP  -noff)
+            mov_mr_rbp(-ioff  RCX)
+            mov_rm_rbp(RDX  -noff)
             op_rr(0x39  true  RDX  RCX)
             let back=jcc32(CC_L)
             patch_branch(back  ltop)
             patch_here(skip_d)
-            mov_rm(RAX  RBP  -arr_off)
+            mov_rm_rbp(RAX  -arr_off)
         }
         b16(0xC931) # xor ecx, ecx
         mov_mr(RAX  8  RCX)
         let done_j=jmp32()
         patch_here(is_shared_j)
         bl_rc_dec(bl_release_target(at))
-        mov_rm(R10  RBP  -poff)
+        mov_rm_rbp(R10  -poff)
         b16(0xC031)
         mov_mr(R10  0  RAX)
         patch_here(done_j)
@@ -5027,19 +5260,19 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         let poff=bl_tmp_alloc(8)
         let noff=bl_tmp_alloc(8)
         bl_place_addr(a0  true)
-        mov_mr(RBP  -poff  RAX)
+        mov_mr_rbp(-poff  RAX)
         bl_eval_borrowed(a1)
-        mov_mr(RBP  -noff  RAX)
+        mov_mr_rbp(-noff  RAX)
         if not is_uniq_array(a0) {
-            mov_rm(R10  RBP  -poff)
+            mov_rm_rbp(R10  -poff)
             mov_rm(RAX  R10  0)
             bl_arr_unique_rax(at)
-            mov_rm(R10  RBP  -poff)
+            mov_rm_rbp(R10  -poff)
             mov_mr(R10  0  RAX)
         }
-        mov_rm(RDI  RBP  -poff)
+        mov_rm_rbp(RDI  -poff)
         mov_imm(RSI  esz)
-        mov_rm(RDX  RBP  -noff)
+        mov_rm_rbp(RDX  -noff)
         bl_set_pos(nodes.ptr[e].pos)
         bl_call_pos(rt("__arr_reserve"))
         bl_last_owned=false
@@ -5054,9 +5287,9 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         let poff=bl_tmp_alloc(8)
         let noff=bl_tmp_alloc(8)
         bl_place_addr(a0  true)
-        mov_mr(RBP  -poff  RAX)
+        mov_mr_rbp(-poff  RAX)
         bl_eval_borrowed(a1)
-        mov_mr(RBP  -noff  RAX)
+        mov_mr_rbp(-noff  RAX)
         if id =? IN.truncate and files.ptr[pos_file(nodes.ptr[a1].pos)].is_dewy {
             bl_test_rr(RAX)
             let ok_n=jcc32(CC_GE)
@@ -5067,18 +5300,18 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
             patch_here(ok_n)
         }
         if not is_uniq_array(a0) {
-            mov_rm(R10  RBP  -poff)
+            mov_rm_rbp(R10  -poff)
             mov_rm(RAX  R10  0)
             bl_arr_unique_rax(at)
-            mov_rm(R10  RBP  -poff)
+            mov_rm_rbp(R10  -poff)
             mov_mr(R10  0  RAX)
         }
         if id =? IN.setlen and not is_managed(et) {
-            mov_rm(R10  RBP  -poff)
+            mov_rm_rbp(R10  -poff)
             mov_rm(RAX  R10  0)
             bl_test_rr(RAX)
             let is_null=jcc32(CC_E)
-            mov_rm(RCX  RBP  -noff)
+            mov_rm_rbp(RCX  -noff)
             mov_mr(RAX  8  RCX)
             patch_here(is_null)
             bl_last_owned=false
@@ -5087,14 +5320,14 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         if is_managed(et) {
             let ea_off=bl_tmp_alloc(8)
             let ltop=XWord(x_code[0].length)
-            mov_rm(R10  RBP  -poff)
+            mov_rm_rbp(R10  -poff)
             mov_rm(RAX  R10  0)
             b16(0xC931) # xor ecx, ecx
             bl_test_rr(RAX)
             let is_null=jcc32(CC_E)
             mov_rm(RCX  RAX  8)
             patch_here(is_null)
-            mov_rm(RDX  RBP  -noff)
+            mov_rm_rbp(RDX  -noff)
             op_rr(0x39  true  RDX  RCX) # cmp cur, n
             let done_drop=jcc32(CC_LE)
             bl_add_imm(RCX  -1)
@@ -5102,20 +5335,20 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
             bl_imul_imm(RCX  esz)
             op_rr(0x01  true  RCX  RAX)
             bl_add_imm(RAX  24)
-            mov_mr(RBP  -ea_off  RAX)
+            mov_mr_rbp(-ea_off  RAX)
             bl_drop_at_reg(RAX  et)
-            mov_rm(RAX  RBP  -ea_off)
+            mov_rm_rbp(RAX  -ea_off)
             bl_zero_mem(RAX  0  esz)
             let back=jmp32()
             patch_branch(back  ltop)
             patch_here(done_drop)
         }
         if id =? IN.truncate {
-            mov_rm(R10  RBP  -poff)
+            mov_rm_rbp(R10  -poff)
             mov_rm(RAX  R10  0)
             bl_test_rr(RAX)
             let is_null=jcc32(CC_E)
-            mov_rm(RCX  RBP  -noff)
+            mov_rm_rbp(RCX  -noff)
             mov_rm(RDX  RAX  8)
             op_rr(0x39  true  RDX  RCX) # cmp n, cur
             let skip_t=jcc32(CC_GE)
@@ -5125,9 +5358,9 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
             bl_last_owned=false
             return
         }
-        mov_rm(RDI  RBP  -poff)
+        mov_rm_rbp(RDI  -poff)
         mov_imm(RSI  esz)
-        mov_rm(RDX  RBP  -noff)
+        mov_rm_rbp(RDX  -noff)
         bl_set_pos(nodes.ptr[e].pos)
         bl_call_pos(rt("__arr_resize"))
         bl_last_owned=false
@@ -5139,13 +5372,132 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         let at=prune(ntype(a0))
         let et=prune(BlWord(types.ptr[at].elem))
         let esz=XWord(owner_stride(et))
+        let sliced=is_slice(a1)
+        if sliced {
+            let src_root=write_root(BlWord(nodes.ptr[a1].a))
+            let dst_root=write_root(a0)
+            if src_root not=? 0 and dst_root not=? 0 and same_var(src_root  dst_root) {sliced=false}
+        }
+        if sliced {
+            let src_node=BlWord(nodes.ptr[a1].a)
+            let rng=BlWord(nodes.ptr[a1].b)
+            let bt=prune(ntype(src_node))
+            let is_fixed=types.ptr[bt].kind =? 'fixed'
+            if copies_on {copy_explicit[src_node]=true}
+            bl_eval_owned(src_node)
+            if copies_on {copy_explicit.remove(src_node);}
+            bl_borrow(bt)
+            let src_off=bl_tmp_alloc(8)
+            let lo_off=bl_tmp_alloc(8)
+            let hi_off=bl_tmp_alloc(8)
+            let n_off=bl_tmp_alloc(8)
+            mov_mr_rbp(-src_off  RAX)
+            let rlo:BlWord=BlWord(nodes.ptr[rng].a)
+            let rhi:BlWord=BlWord(nodes.ptr[rng].b)
+            if rlo not=? 0 {
+                bl_eval_borrowed(rlo)
+                mov_mr_rbp(-lo_off  RAX)
+            } else {
+                b16(0xC031)
+                mov_mr_rbp(-lo_off  RAX)
+            }
+            if is_fixed {
+                mov_imm(RAX  XWord(fixed_len(bt)))
+                mov_mr_rbp(-n_off  RAX)
+            } else {
+                mov_rm_rbp(RAX  -src_off)
+                bl_test_rr(RAX)
+                let is_null_n=jcc32(CC_E)
+                mov_rm(RAX  RAX  8)
+                patch_here(is_null_n)
+                mov_mr_rbp(-n_off  RAX)
+            }
+            if rhi not=? 0 {
+                bl_eval_borrowed(rhi)
+                if has_flag(rng NF_INCLUSIVE) {bl_add_imm(RAX  1)}
+                mov_mr_rbp(-hi_off  RAX)
+            } else {
+                mov_rm_rbp(RAX  -n_off)
+                mov_mr_rbp(-hi_off  RAX)
+            }
+            mov_rm_rbp(RAX  -lo_off)
+            bl_test_rr(RAX)
+            let bad1=jcc32(CC_L)
+            mov_rm_rbp(RCX  -hi_off)
+            mov_rm_rbp(RDX  -n_off)
+            op_rr(0x39  true  RDX  RCX)
+            let bad2=jcc32(CC_G)
+            op_rr(0x39  true  RCX  RAX)
+            let ok_sl=jcc32(CC_LE)
+            patch_here(bad1)
+            patch_here(bad2)
+            rel_fixup_lea(RDI  0  XWord(str_data("slice")))
+            mov_rm_rbp(RSI  -lo_off)
+            mov_rm_rbp(RDX  -hi_off)
+            mov_rm_rbp(RCX  -n_off)
+            bl_set_pos(nodes.ptr[e].pos)
+            bl_call_pos(rt("__panic_slice"))
+            b16(0x0B0F)
+            patch_here(ok_sl)
+            let cnt_off=bl_tmp_alloc(8)
+            let data_off=bl_tmp_alloc(8)
+            mov_rm_rbp(RAX  -hi_off)
+            mov_rm_rbp(RCX  -lo_off)
+            op_rr(0x29  true  RCX  RAX) # sub rax, rcx -> hi - lo
+            mov_mr_rbp(-cnt_off  RAX)
+            mov_rm_rbp(RAX  -src_off)
+            if not is_fixed {bl_add_imm(RAX  24)}
+            mov_rm_rbp(RCX  -lo_off)
+            bl_imul_imm(RCX  esz)
+            op_rr(0x01  true  RCX  RAX)
+            mov_mr_rbp(-data_off  RAX)
+            let poff=bl_tmp_alloc(8)
+            bl_place_addr(a0  true)
+            mov_mr_rbp(-poff  RAX)
+            if not is_uniq_array(a0) {
+                mov_rm(RAX  RAX  0)
+                bl_arr_unique_rax(at)
+                mov_rm_rbp(R10  -poff)
+                mov_mr(R10  0  RAX)
+            }
+            mov_rm_rbp(RDI  -poff)
+            mov_rm_rbp(RSI  -data_off)
+            mov_rm_rbp(RDX  -cnt_off)
+            mov_imm(RCX  esz)
+            bl_set_pos(nodes.ptr[e].pos)
+            bl_call_pos(rt("__arr_extend_raw"))
+            if is_managed(et) {
+                let first_off=bl_tmp_alloc(8)
+                let ioff=bl_tmp_alloc(8)
+                mov_mr_rbp(-first_off  RAX)
+                b16(0xC031)
+                mov_mr_rbp(-ioff  RAX)
+                let ltop=XWord(x_code[0].length)
+                mov_rm_rbp(RCX  -ioff)
+                mov_rm_rbp(RDX  -cnt_off)
+                op_rr(0x39  true  RDX  RCX)
+                let done_c=jcc32(CC_GE)
+                bl_imul_imm(RCX  esz)
+                mov_rm_rbp(RAX  -first_off)
+                op_rr(0x01  true  RCX  RAX)
+                bl_copy_at_reg(RAX  et)
+                bl_add_m64_imm(RBP  -ioff  1)
+                let back=jmp32()
+                patch_branch(back  ltop)
+                patch_here(done_c)
+            }
+            bl_last_owned=false
+            return
+        }
         let ys_off=bl_tmp_alloc(8)
         let cnt_off:XWord=if is_managed(et) {bl_tmp_alloc(8)} else {0}
-        let whole=copies_on and not costly_copy(et) and not copy_explicit.has(a1)
+        let sl_tm:BlWord=bl_temps_off.length
+        let sl_sp:XWord=bl_sp
+        let whole=copies_on and not is_slice(a1) and not costly_copy(et) and not copy_explicit.has(a1)
         if whole {copy_explicit[a1]=true}
         bl_eval_owned(a1)
         if whole {copy_explicit.remove(a1);}
-        mov_mr(RBP  -ys_off  RAX)
+        mov_mr_rbp(-ys_off  RAX)
         bl_last_owned=false
         if is_managed(et) {
             b16(0xC931)
@@ -5153,38 +5505,39 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
             let is_null=jcc32(CC_E)
             mov_rm(RCX  RAX  8)
             patch_here(is_null)
-            mov_mr(RBP  -cnt_off  RCX)
+            mov_mr_rbp(-cnt_off  RCX)
         }
+        if is_slice(a1) {bl_stmt_end(sl_tm  sl_sp)}
         let smark=bl_scope_off.length
         bl_scope_off.push(ys_off); bl_scope_ty.push(at); bl_scope_agg.push(false)
         let poff=bl_tmp_alloc(8)
         bl_place_addr(a0  true)
         bl_scope_off.truncate(smark); bl_scope_ty.truncate(smark); bl_scope_agg.truncate(smark)
-        mov_mr(RBP  -poff  RAX)
+        mov_mr_rbp(-poff  RAX)
         if not is_uniq_array(a0) {
             mov_rm(RAX  RAX  0)
             bl_arr_unique_rax(at)
-            mov_rm(R10  RBP  -poff)
+            mov_rm_rbp(R10  -poff)
             mov_mr(R10  0  RAX)
         }
-        mov_rm(RDI  RBP  -poff)
-        mov_rm(RSI  RBP  -ys_off)
+        mov_rm_rbp(RDI  -poff)
+        mov_rm_rbp(RSI  -ys_off)
         mov_imm(RDX  esz)
         bl_set_pos(nodes.ptr[e].pos)
         bl_call_pos(rt("__arr_extend"))
         if is_managed(et) {
             let first_off=bl_tmp_alloc(8)
             let ioff=bl_tmp_alloc(8)
-            mov_mr(RBP  -first_off  RAX)
+            mov_mr_rbp(-first_off  RAX)
             b16(0xC031)
-            mov_mr(RBP  -ioff  RAX)
+            mov_mr_rbp(-ioff  RAX)
             let ltop=XWord(x_code[0].length)
-            mov_rm(RCX  RBP  -ioff)
-            mov_rm(RDX  RBP  -cnt_off)
+            mov_rm_rbp(RCX  -ioff)
+            mov_rm_rbp(RDX  -cnt_off)
             op_rr(0x39  true  RDX  RCX)
             let done_c=jcc32(CC_GE)
             bl_imul_imm(RCX  esz)
-            mov_rm(RAX  RBP  -first_off)
+            mov_rm_rbp(RAX  -first_off)
             op_rr(0x01  true  RCX  RAX)
             bl_copy_at_reg(RAX  et)
             bl_add_m64_imm(RBP  -ioff  1)
@@ -5192,7 +5545,7 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
             patch_branch(back  ltop)
             patch_here(done_c)
         }
-        mov_rm(RAX  RBP  -ys_off)
+        mov_rm_rbp(RAX  -ys_off)
         bl_rc_dec(bl_release_target(at))
         bl_last_owned=false
         return
@@ -5208,18 +5561,18 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         let dst_off=bl_tmp_alloc(8)
         let src_off=bl_tmp_alloc(8)
         bl_place_addr(a0  true)
-        mov_mr(RBP  -poff  RAX)
+        mov_mr_rbp(-poff  RAX)
         bl_eval_borrowed(a1)
-        mov_mr(RBP  -dst_off  RAX)
+        mov_mr_rbp(-dst_off  RAX)
         bl_eval_borrowed(a2)
-        mov_mr(RBP  -src_off  RAX)
-        mov_rm(R10  RBP  -poff)
+        mov_mr_rbp(-src_off  RAX)
+        mov_rm_rbp(R10  -poff)
         mov_rm(RAX  R10  0)
         bl_arr_unique_rax(at)
-        mov_rm(R10  RBP  -poff)
+        mov_rm_rbp(R10  -poff)
         mov_mr(R10  0  RAX)
-        mov_rm(RCX  RBP  -dst_off)
-        mov_rm(RDX  RBP  -src_off)
+        mov_rm_rbp(RCX  -dst_off)
+        mov_rm_rbp(RDX  -src_off)
         op_rr(0x39  true  RDX  RCX)
         let same_j=jcc32(CC_E)
         let da_off=bl_tmp_alloc(8)
@@ -5228,19 +5581,19 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
         bl_imul_imm(RCX  esz)
         op_rr(0x01  true  R10  RCX)
         bl_add_imm(RCX  24)
-        mov_mr(RBP  -da_off  RCX)
+        mov_mr_rbp(-da_off  RCX)
         bl_imul_imm(RDX  esz)
         op_rr(0x01  true  R10  RDX)
         bl_add_imm(RDX  24)
-        mov_mr(RBP  -sa_off  RDX)
+        mov_mr_rbp(-sa_off  RDX)
         if is_managed(et) {
             mov_rr(RAX  RCX)
             bl_drop_at_reg(RAX  et)
         }
-        mov_rm(RDI  RBP  -da_off)
-        mov_rm(RSI  RBP  -sa_off)
+        mov_rm_rbp(RDI  -da_off)
+        mov_rm_rbp(RSI  -sa_off)
         bl_copy_mem(RDI  RSI  esz)
-        mov_rm(RAX  RBP  -sa_off)
+        mov_rm_rbp(RAX  -sa_off)
         bl_zero_mem(RAX  0  esz)
         patch_here(same_j)
         bl_last_owned=false
@@ -5251,7 +5604,7 @@ bl_eval_intrinsic=(e:BlWord):>void=>$unsafe {
 bl_eval_str_interp=(e:BlWord):>void=>$unsafe {
     let bs_off=bl_tmp_alloc(8)
     b16(0xC031)
-    mov_mr(RBP  -bs_off  RAX)
+    mov_mr_rbp(-bs_off  RAX)
     let smark=bl_scope_off.length
     bl_scope_off.push(bs_off)
     bl_scope_ty.push(mk_array(T_U8))
@@ -5261,7 +5614,7 @@ bl_eval_str_interp=(e:BlWord):>void=>$unsafe {
         if nodes.ptr[p].kind =? 'str_lit' {
             let s=name_of(BlWord(nodes.ptr[p].sval))
             if (s as array<uint8>).length =? 0 {continue}
-            lea(RDI  RBP  -bs_off)
+            lea_rbp(RDI  -bs_off)
             rel_fixup_lea(RSI  0  XWord(str_data(s)))
             bl_call_pos(rt("__buf_append_str"))
             continue
@@ -5276,13 +5629,13 @@ bl_eval_str_interp=(e:BlWord):>void=>$unsafe {
                 else {bl_math_signed_rax(nodes.ptr[p].pos)}
             }
             mov_rr(RSI  RAX)
-            lea(RDI  RBP  -bs_off)
+            lea_rbp(RDI  -bs_off)
             bl_call_pos(rt("__fmt_word"))
             continue
         }
         bl_eval(x)
         if vc(xt) =? VC_FLT {
-            lea(RDI  RBP  -bs_off)
+            lea_rbp(RDI  -bs_off)
             if nodes.ptr[p].sval >=? 0 {
                 rel_fixup_lea(RSI  0  XWord(str_data(name_of(BlWord(nodes.ptr[p].sval)))))
             }
@@ -5295,7 +5648,7 @@ bl_eval_str_interp=(e:BlWord):>void=>$unsafe {
         }
         bl_borrow(xt)
         mov_rr(RSI  RAX)
-        lea(RDI  RBP  -bs_off)
+        lea_rbp(RDI  -bs_off)
         if nodes.ptr[p].sval >=? 0 {
             rel_fixup_lea(RDX  0  XWord(str_data(name_of(BlWord(nodes.ptr[p].sval)))))
         }
@@ -5305,7 +5658,7 @@ bl_eval_str_interp=(e:BlWord):>void=>$unsafe {
     bl_scope_off.truncate(smark)
     bl_scope_ty.truncate(smark)
     bl_scope_agg.truncate(smark)
-    mov_rm(RDI  RBP  -bs_off)
+    mov_rm_rbp(RDI  -bs_off)
     bl_call_pos(rt("__buf_finish"))
     bl_last_owned=true
     bl_last_slot=-1
@@ -5326,22 +5679,22 @@ bl_eval_array=(e:BlWord):>void=>$unsafe {
             if flen >? 1 {
                 let ioff=bl_tmp_alloc(8)
                 mov_imm(RAX  1)
-                mov_mr(RBP  -ioff  RAX)
+                mov_mr_rbp(-ioff  RAX)
                 let ltop=XWord(x_code[0].length)
-                mov_rm(RCX  RBP  -ioff)
+                mov_rm_rbp(RCX  -ioff)
                 bl_imul_imm(RCX  esz)
-                lea(RAX  RBP  -off)
+                lea_rbp(RAX  -off)
                 op_rr(0x01  true  RCX  RAX)
-                lea(RSI  RBP  -off)
+                lea_rbp(RSI  -off)
                 let ea_off=bl_tmp_alloc(8)
-                mov_mr(RBP  -ea_off  RAX)
+                mov_mr_rbp(-ea_off  RAX)
                 bl_copy_mem(RAX  RSI  esz)
                 if is_managed(et) {
-                    mov_rm(RAX  RBP  -ea_off)
+                    mov_rm_rbp(RAX  -ea_off)
                     bl_copy_at_reg(RAX  et)
                 }
                 bl_add_m64_imm(RBP  -ioff  1)
-                mov_rm(RCX  RBP  -ioff)
+                mov_rm_rbp(RCX  -ioff)
                 mov_imm(RDX  XWord(flen))
                 op_rr(0x39  true  RDX  RCX)
                 let back=jcc32(CC_L)
@@ -5360,7 +5713,7 @@ bl_eval_array=(e:BlWord):>void=>$unsafe {
             }
             bl_scope_off.truncate(smark); bl_scope_ty.truncate(smark); bl_scope_agg.truncate(smark)
         }
-        lea(RAX  RBP  -off)
+        lea_rbp(RAX  -off)
         bl_last_owned=true
         bl_last_slot=off
         return
@@ -5396,7 +5749,7 @@ bl_eval_array=(e:BlWord):>void=>$unsafe {
         bl_set_pos(nodes.ptr[e].pos)
         bl_call_pos(rt(if is_managed(et) {"__arr_repeat"} else {"__arr_filled"}))
         let roff=bl_tmp_alloc(8)
-        mov_mr(RBP  -roff  RAX)
+        mov_mr_rbp(-roff  RAX)
         bl_test_rr(RAX)
         let skip0=jcc32(CC_E)
         mov_rm(RCX  RAX  8)
@@ -5404,40 +5757,40 @@ bl_eval_array=(e:BlWord):>void=>$unsafe {
         let skip1=jcc32(CC_LE)
         let ioff=bl_tmp_alloc(8)
         let noff=bl_tmp_alloc(8)
-        mov_mr(RBP  -noff  RCX)
+        mov_mr_rbp(-noff  RCX)
         b16(0xC031)
-        mov_mr(RBP  -ioff  RAX)
+        mov_mr_rbp(-ioff  RAX)
         let ltop=XWord(x_code[0].length)
-        mov_rm(RAX  RBP  -roff)
-        mov_rm(RCX  RBP  -ioff)
+        mov_rm_rbp(RAX  -roff)
+        mov_rm_rbp(RCX  -ioff)
         bl_imul_imm(RCX  esz)
         op_rr(0x01  true  RCX  RAX)
         bl_add_imm(RAX  24)
         if vc(et) =? VC_AGG {
-            lea(RSI  RBP  -voff)
+            lea_rbp(RSI  -voff)
             bl_copy_mem(RAX  RSI  XWord(tsize(et)))
         } else if vc(et) =? VC_FLT {
             sse_rm(bl_fpre(et)  0x10  0  RBP  -voff)
             sse_rm(bl_fpre(et)  0x11  0  RAX  0)
         } else {
-            mov_rm(RDX  RBP  -voff)
+            mov_rm_rbp(RDX  -voff)
             store_sized(RAX  0  RDX  XWord(tsize(et)))
         }
         if is_managed(et) {bl_copy_at_reg(RAX  et)}
-        mov_rm(RCX  RBP  -ioff)
+        mov_rm_rbp(RCX  -ioff)
         bl_add_imm(RCX  1)
-        mov_mr(RBP  -ioff  RCX)
-        mov_rm(RDX  RBP  -noff)
+        mov_mr_rbp(-ioff  RCX)
+        mov_rm_rbp(RDX  -noff)
         op_rr(0x39  true  RDX  RCX)
         let back=jcc32(CC_L)
         patch_branch(back  ltop)
         patch_here(skip0)
         patch_here(skip1)
         if is_managed(et) {
-            lea(RAX  RBP  -voff)
+            lea_rbp(RAX  -voff)
             bl_drop_at_reg(RAX  et)
         }
-        mov_rm(RAX  RBP  -roff)
+        mov_rm_rbp(RAX  -roff)
         bl_last_owned=true
         bl_last_slot=-1
         return
@@ -5459,17 +5812,17 @@ bl_eval_array=(e:BlWord):>void=>$unsafe {
     bl_set_pos(nodes.ptr[e].pos)
     bl_call_pos(rt(if is_managed(et) {"__arr_repeat"} else {"__arr_filled"}))
     let roff=bl_tmp_alloc(8)
-    mov_mr(RBP  -roff  RAX)
+    mov_mr_rbp(-roff  RAX)
     let smark=bl_scope_off.length
     bl_scope_off.push(roff); bl_scope_ty.push(t); bl_scope_agg.push(false)
     loop i in [0..n) {
         bl_eval_owned(kid(e i))
-        mov_rm(R10  RBP  -roff)
+        mov_rm_rbp(R10  -roff)
         bl_store_val(et  R10  XWord(24 + i * esz)  RAX)
         bl_last_owned=false
     }
     bl_scope_off.truncate(smark); bl_scope_ty.truncate(smark); bl_scope_agg.truncate(smark)
-    mov_rm(RAX  RBP  -roff)
+    mov_rm_rbp(RAX  -roff)
     bl_last_owned=true
     bl_last_slot=-1
 }
@@ -5495,9 +5848,9 @@ bl_eval_iflet=(e:BlWord):>void=>$unsafe {
     let pa_off=bl_last_slot
     bl_last_owned=false
     if ptr_optional(ot) {
-        mov_mr(RBP  -loff  RAX)
+        mov_mr_rbp(-loff  RAX)
         bl_stmt_end(tm  sm)
-        mov_rm(RAX  RBP  -loff)
+        mov_rm_rbp(RAX  -loff)
         bl_test_rr(RAX)
     } else {
         load_sized(RBX  RBP  -pa_off + XWord(tsize(inner))  1  false)
@@ -5556,11 +5909,11 @@ bl_eval_coalesce=(e:BlWord):>void=>$unsafe {
         bl_store_val(t  RBP  -res_off  RAX)
     } else {
         let pa_off=bl_tmp_alloc(8)
-        mov_mr(RBP  -pa_off  RAX)
+        mov_mr_rbp(-pa_off  RAX)
         load_sized(RCX  RAX  XWord(tsize(inner))  1  false)
         bl_test_rr(RCX)
         is_none=jcc32(CC_E)
-        mov_rm(RAX  RBP  -pa_off)
+        mov_rm_rbp(RAX  -pa_off)
         bl_last_owned=false
         if nodes.ptr[e].aux =? 1 {
             bl_own(a  ot)
@@ -5595,15 +5948,15 @@ bl_eval_slice=(e:BlWord):>void=>$unsafe {
     bl_borrow(bt)
     let poff=bl_tmp_alloc(8)
     let lo_off=bl_tmp_alloc(8)
-    mov_mr(RBP  -poff  RAX)
+    mov_mr_rbp(-poff  RAX)
     let rlo:BlWord=BlWord(nodes.ptr[r].a)
     let rhi:BlWord=BlWord(nodes.ptr[r].b)
     if rlo not=? 0 {
         bl_eval_borrowed(rlo)
-        mov_mr(RBP  -lo_off  RAX)
+        mov_mr_rbp(-lo_off  RAX)
     } else {
         b16(0xC031)
-        mov_mr(RBP  -lo_off  RAX)
+        mov_mr_rbp(-lo_off  RAX)
     }
     if rhi not=? 0 {
         bl_eval_borrowed(rhi)
@@ -5611,7 +5964,7 @@ bl_eval_slice=(e:BlWord):>void=>$unsafe {
     } else if types.ptr[bt].kind =? 'fixed' {
         mov_imm(RAX  XWord(fixed_len(bt)))
     } else {
-        mov_rm(RAX  RBP  -poff)
+        mov_rm_rbp(RAX  -poff)
         bl_test_rr(RAX)
         let is_null=jcc32(CC_E)
         mov_rm(RAX  RAX  8)
@@ -5619,8 +5972,8 @@ bl_eval_slice=(e:BlWord):>void=>$unsafe {
     }
     if types.ptr[bt].kind =? 'str_' {
         mov_rr(RDX  RAX)
-        mov_rm(RSI  RBP  -lo_off)
-        mov_rm(RDI  RBP  -poff)
+        mov_rm_rbp(RSI  -lo_off)
+        mov_rm_rbp(RDI  -poff)
         bl_set_pos(nodes.ptr[e].pos)
         bl_call_pos(rt("__str_slice"))
         bl_last_owned=true
@@ -5631,23 +5984,23 @@ bl_eval_slice=(e:BlWord):>void=>$unsafe {
     let esz=XWord(if types.ptr[bt].kind =? 'fixed' {tsize(et)} else {owner_stride(et)})
     if types.ptr[bt].kind =? 'fixed' {
         mov_rr(RCX  RAX)
-        mov_rm(RDX  RBP  -lo_off)
+        mov_rm_rbp(RDX  -lo_off)
         mov_imm(RSI  XWord(fixed_len(bt)))
-        mov_rm(RDI  RBP  -poff)
+        mov_rm_rbp(RDI  -poff)
         mov_imm(R8  esz)
         bl_set_pos(nodes.ptr[e].pos)
         bl_call_pos(rt("__fixed_slice"))
     } else {
         mov_rr(RDX  RAX)
-        mov_rm(RSI  RBP  -lo_off)
-        mov_rm(RDI  RBP  -poff)
+        mov_rm_rbp(RSI  -lo_off)
+        mov_rm_rbp(RDI  -poff)
         mov_imm(RCX  esz)
         bl_set_pos(nodes.ptr[e].pos)
         bl_call_pos(rt("__arr_slice"))
     }
     if is_managed(et) {
         let qoff=bl_tmp_alloc(8)
-        mov_mr(RBP  -qoff  RAX)
+        mov_mr_rbp(-qoff  RAX)
         bl_test_rr(RAX)
         let skip0=jcc32(CC_E)
         mov_rm(RCX  RAX  8)
@@ -5655,26 +6008,26 @@ bl_eval_slice=(e:BlWord):>void=>$unsafe {
         let skip1=jcc32(CC_LE)
         let ioff=bl_tmp_alloc(8)
         let noff=bl_tmp_alloc(8)
-        mov_mr(RBP  -noff  RCX)
+        mov_mr_rbp(-noff  RCX)
         b16(0xC031)
-        mov_mr(RBP  -ioff  RAX)
+        mov_mr_rbp(-ioff  RAX)
         let ltop=XWord(x_code[0].length)
-        mov_rm(RAX  RBP  -qoff)
-        mov_rm(RCX  RBP  -ioff)
+        mov_rm_rbp(RAX  -qoff)
+        mov_rm_rbp(RCX  -ioff)
         bl_imul_imm(RCX  esz)
         op_rr(0x01  true  RCX  RAX)
         bl_add_imm(RAX  24)
         bl_copy_at_reg(RAX  et)
-        mov_rm(RCX  RBP  -ioff)
+        mov_rm_rbp(RCX  -ioff)
         bl_add_imm(RCX  1)
-        mov_mr(RBP  -ioff  RCX)
-        mov_rm(RDX  RBP  -noff)
+        mov_mr_rbp(-ioff  RCX)
+        mov_rm_rbp(RDX  -noff)
         op_rr(0x39  true  RDX  RCX)
         let back=jcc32(CC_L)
         patch_branch(back  ltop)
         patch_here(skip0)
         patch_here(skip1)
-        mov_rm(RAX  RBP  -qoff)
+        mov_rm_rbp(RAX  -qoff)
     }
     bl_last_owned=true
     bl_last_slot=-1
@@ -5812,10 +6165,10 @@ bl_emit_cond_fail=(cond:BlWord invert:bool):>void=>$unsafe {
                 op_rr(0x39  true  RAX  R8)
             } else {
                 let aoff=bl_tmp_alloc(8)
-                mov_mr(RBP  -aoff  RAX)
+                mov_mr_rbp(-aoff  RAX)
                 bl_eval_borrowed(b0)
                 mov_rr(RCX  RAX)
-                mov_rm(RAX  RBP  -aoff)
+                mov_rm_rbp(RAX  -aoff)
                 if bl_temps_off.length =? tm {
                     bl_sp=sm
                     op_rr(0x39  true  RCX  RAX)
@@ -5929,10 +6282,10 @@ bl_eval_union_conv=(e:BlWord):>void=>$unsafe {
     bl_eval_owned(a)
     let src_off=bl_tmp_alloc(8)
     let tag_off=bl_tmp_alloc(8)
-    mov_mr(RBP  -src_off  RAX)
+    mov_mr_rbp(-src_off  RAX)
     bl_last_owned=false
     load_sized(RCX  RAX  0  4  false)
-    mov_mr(RBP  -tag_off  RCX)
+    mov_mr_rbp(-tag_off  RCX)
     let fsi:BlWord=BlWord(types.ptr[fr].st)
     let tsi:BlWord=BlWord(types.ptr[to].st)
     let fms=union_members(fr)
@@ -5940,7 +6293,7 @@ bl_eval_union_conv=(e:BlWord):>void=>$unsafe {
     let dones:array<int64>=[]
     loop i in [0..fms.length) {
         let m=fms.ptr[i]
-        mov_rm(RCX  RBP  -tag_off)
+        mov_rm_rbp(RCX  -tag_off)
         bl_cmp_imm(RCX  XWord(i))
         let nxt=jcc32(CC_NE)
         let j=union_holder(to  m  false)
@@ -5956,14 +6309,14 @@ bl_eval_union_conv=(e:BlWord):>void=>$unsafe {
             let to_off=XWord(fields.ptr[BlWord(variants.ptr[BlWord(structs.ptr[tsi].variants) + j].fields)].offset)
             let tm=tms.ptr[j]
             if not type_eq(tm  m) {
-                mov_rm(R10  RBP  -src_off)
+                mov_rm_rbp(R10  -src_off)
                 load_sized(RAX  R10  fo  XWord(tsize(m))  false)
                 bl_emit_set_word_moved(m  tm  nodes.ptr[e].pos)
                 store_sized(RBP  -off + to_off  RAX  XWord(tsize(tm)))
             } else if tsize(m) >? 0 {
-                mov_rm(RSI  RBP  -src_off)
+                mov_rm_rbp(RSI  -src_off)
                 bl_add_imm(RSI  fo)
-                lea(RDI  RBP  -off + to_off)
+                lea_rbp(RDI  -off + to_off)
                 bl_copy_mem(RDI  RSI  XWord(tsize(m)))
             }
             dones.push(jmp32())
@@ -5971,7 +6324,7 @@ bl_eval_union_conv=(e:BlWord):>void=>$unsafe {
         patch_here(nxt)
     }
     loop dp in dones {patch_here(XWord(dp))}
-    lea(RAX  RBP  -off)
+    lea_rbp(RAX  -off)
     bl_last_owned=true
     bl_last_slot=off
 }
@@ -6065,23 +6418,23 @@ bl_emit_checked_op=(op:string bits:BlWord signed:bool pos:BlWord):>void=>$unsafe
 bl_eval_exact_pair=(a:BlWord b0:BlWord):>void=>$unsafe {
     bl_eval_exact_low(a)
     let aoff=bl_tmp_alloc(8)
-    mov_mr(RBP  -aoff  RAX)
+    mov_mr_rbp(-aoff  RAX)
     bl_eval_exact_low(b0)
     mov_rr(RCX  RAX)
-    mov_rm(RAX  RBP  -aoff)
+    mov_rm_rbp(RAX  -aoff)
 }
 
 bl_eval_exact_i128_pair=(a:BlWord b0:BlWord):>void=>$unsafe {
     bl_eval_exact_i128(a)
     let alo_off=bl_tmp_alloc(8)
     let ahi_off=bl_tmp_alloc(8)
-    mov_mr(RBP  -alo_off  RAX)
-    mov_mr(RBP  -ahi_off  RDX)
+    mov_mr_rbp(-alo_off  RAX)
+    mov_mr_rbp(-ahi_off  RDX)
     bl_eval_exact_i128(b0)
     mov_rr(RCX  RAX)
     mov_rr(R8  RDX)
-    mov_rm(RAX  RBP  -alo_off)
-    mov_rm(RDX  RBP  -ahi_off)
+    mov_rm_rbp(RAX  -alo_off)
+    mov_rm_rbp(RDX  -ahi_off)
 }
 
 bl_eval_exact_cmp128=(op:Tok ln:BlWord rn:BlWord):>void=>$unsafe {
@@ -6195,10 +6548,10 @@ bl_eval_exact_i128=(n:BlWord):>void=>$unsafe {
             if bl_exact_is_u64_leaf(a) and bl_exact_is_u64_leaf(b0) {
                 bl_eval_borrowed(a)
                 let aoff=bl_tmp_alloc(8)
-                mov_mr(RBP  -aoff  RAX)
+                mov_mr_rbp(-aoff  RAX)
                 bl_eval_borrowed(b0)
                 mov_rr(RCX  RAX)
-                mov_rm(RAX  RBP  -aoff)
+                mov_rm_rbp(RAX  -aoff)
                 let skip_dz=nodes.ptr[b0].kind =? 'int_lit' and nodes.ptr[b0].ival not=? 0
                 if not skip_dz {
                     bl_test_rr(RCX)
@@ -6525,7 +6878,7 @@ bl_eval=(e:BlWord):>void=>$unsafe {
             let sz=XWord(tsize(t))
             let off=bl_tmp_alloc(sz  XWord(talign(t)))
             bl_zero_mem(RBP  -off  sz)
-            lea(RAX  RBP  -off)
+            lea_rbp(RAX  -off)
             bl_last_owned=true
             bl_last_slot=off
         }
@@ -6559,7 +6912,7 @@ bl_eval=(e:BlWord):>void=>$unsafe {
                 bl_last_owned=false
             }
             bl_scope_off.truncate(smark); bl_scope_ty.truncate(smark); bl_scope_agg.truncate(smark)
-            lea(RAX  RBP  -off)
+            lea_rbp(RAX  -off)
             bl_last_owned=true
             bl_last_slot=off
         }
@@ -6578,7 +6931,7 @@ bl_eval=(e:BlWord):>void=>$unsafe {
             bl_zero_mem(RBP  -off  sz)
             mov_imm(RAX  XWord(nodes.ptr[e].aux))
             store_sized(RBP  -off  RAX  4)
-            lea(RAX  RBP  -off)
+            lea_rbp(RAX  -off)
             bl_last_owned=true
             bl_last_slot=off
         }
@@ -6605,7 +6958,7 @@ bl_eval=(e:BlWord):>void=>$unsafe {
                 }
                 let off=XWord(bl_loc_off.ptr[idx])
                 if lk =? int8(1) {
-                    mov_rm(RAX  RBP  -off)
+                    mov_rm_rbp(RAX  -off)
                     if vc(t) not=? VC_AGG {bl_load_val(t  RAX  0)}
                 } else {
                     bl_load_val(t  RBP  -off)
@@ -6814,9 +7167,9 @@ bl_eval=(e:BlWord):>void=>$unsafe {
                         patch_here(slow0)
                         patch_here(slow1)
                         let buf_off=bl_tmp_alloc(16  8)
-                        mov_mr(RBP  -buf_off  RAX)
-                        mov_mr(RBP  -buf_off + 8  RDX)
-                        lea(RDI  RBP  -buf_off)
+                        mov_mr_rbp(-buf_off  RAX)
+                        mov_mr_rbp(-buf_off + 8  RDX)
+                        lea_rbp(RDI  -buf_off)
                         mov_imm(RSI  2)
                         bl_set_pos(nodes.ptr[e].pos)
                         bl_call_pos(rt("__mi_words"))
@@ -6845,7 +7198,7 @@ bl_eval=(e:BlWord):>void=>$unsafe {
             if cv =? CV.arr2fixed {
                 let src_off=bl_tmp_alloc(8)
                 bl_eval_borrowed(a)
-                mov_mr(RBP  -src_off  RAX)
+                mov_mr_rbp(-src_off  RAX)
                 let n=fixed_len(to)
                 if not has_flag(e NF_INBOUNDS) {
                     b16(0xC931) # xor ecx, ecx
@@ -6865,16 +7218,16 @@ bl_eval=(e:BlWord):>void=>$unsafe {
                 let sz=XWord(tsize(to))
                 let off=bl_tmp_alloc(sz  XWord(talign(to)))
                 if sz >? 0 {
-                    mov_rm(RSI  RBP  -src_off)
+                    mov_rm_rbp(RSI  -src_off)
                     bl_add_imm(RSI  24)
-                    lea(RDI  RBP  -off)
+                    lea_rbp(RDI  -off)
                     bl_copy_mem(RDI  RSI  sz)
                 }
                 if is_managed(to) {
-                    lea(RDI  RBP  -off)
+                    lea_rbp(RDI  -off)
                     bl_call(lf_helper(HK.copy to 0))
                 }
-                lea(RAX  RBP  -off)
+                lea_rbp(RAX  -off)
                 bl_last_owned=true
                 bl_last_slot=off
                 return
@@ -6885,37 +7238,37 @@ bl_eval=(e:BlWord):>void=>$unsafe {
                 let n=fixed_len(fr)
                 let src_off=bl_tmp_alloc(8)
                 bl_eval_borrowed(a)
-                mov_mr(RBP  -src_off  RAX)
+                mov_mr_rbp(-src_off  RAX)
                 mov_imm(RDI  XWord(n))
                 mov_imm(RSI  XWord(esz))
                 bl_set_pos(nodes.ptr[e].pos)
                 bl_call_pos(rt("__arr_filled"))
                 let arr_off=bl_tmp_alloc(8)
-                mov_mr(RBP  -arr_off  RAX)
+                mov_mr_rbp(-arr_off  RAX)
                 if n * esz >? 0 {
                     lea(RDI  RAX  24)
-                    mov_rm(RSI  RBP  -src_off)
+                    mov_rm_rbp(RSI  -src_off)
                     bl_copy_mem(RDI  RSI  XWord(n * esz))
                 }
                 if is_managed(et) and n >? 0 {
                     let i_off=bl_tmp_alloc(8)
                     b16(0xC031)
-                    mov_mr(RBP  -i_off  RAX)
+                    mov_mr_rbp(-i_off  RAX)
                     let ltop=XWord(x_code[0].length)
-                    mov_rm(RCX  RBP  -i_off)
+                    mov_rm_rbp(RCX  -i_off)
                     bl_imul_imm(RCX  XWord(esz))
-                    mov_rm(RAX  RBP  -arr_off)
+                    mov_rm_rbp(RAX  -arr_off)
                     op_rr(0x01  true  RCX  RAX)
                     bl_add_imm(RAX  24)
                     bl_copy_at_reg(RAX  et)
                     bl_add_m64_imm(RBP  -i_off  1)
-                    mov_rm(RAX  RBP  -i_off)
+                    mov_rm_rbp(RAX  -i_off)
                     mov_imm(RCX  XWord(n))
                     op_rr(0x39  true  RCX  RAX)
                     let back=jcc32(CC_L)
                     patch_branch(back  ltop)
                 }
-                mov_rm(RAX  RBP  -arr_off)
+                mov_rm_rbp(RAX  -arr_off)
                 bl_last_owned=true
                 bl_last_slot=-1
                 return
@@ -6947,7 +7300,7 @@ bl_eval=(e:BlWord):>void=>$unsafe {
                 bl_store_val(inner  RBP  -off  RAX)
                 mov_imm(RAX  1)
                 store_sized(RBP  -off + XWord(tsize(inner))  RAX  1)
-                lea(RAX  RBP  -off)
+                lea_rbp(RAX  -off)
                 bl_last_owned=true
                 bl_last_slot=off
                 return
@@ -7017,6 +7370,75 @@ bl_eval=(e:BlWord):>void=>$unsafe {
                     return
                 }
                 bl_emit_float2int(e  a  fr  to)
+                bl_last_owned=false
+                return
+            }
+            if cv =? CV.big2math {
+                bl_eval_borrowed(a)
+                mov_rr(RDI  RAX)
+                bl_set_pos(nodes.ptr[e].pos)
+                bl_call_pos(rt("__mi_pack"))
+                bl_last_owned=true
+                bl_last_slot=-1
+                return
+            }
+            if cv =? CV.math2big {
+                let sz=XWord(tsize(to))
+                let off=bl_tmp_alloc(sz  XWord(talign(to)))
+                bl_zero_mem(RBP  -off  sz)
+                bl_eval_borrowed(a)
+                mov_rr(RSI  RAX)
+                lea_rbp(RDI  -off)
+                bl_set_pos(nodes.ptr[e].pos)
+                bl_call_pos(rt("__mi_big"))
+                lea_rbp(RAX  -off)
+                bl_last_owned=true
+                bl_last_slot=off
+                return
+            }
+            if cv =? CV.saturate_int {
+                let qfr=quantity_base(fr)
+                let qto=quantity_base(to)
+                let bits:BlWord=BlWord(types.ptr[qto].bits)
+                let to_sg=types.ptr[qto].sign
+                let hi:BlWord=if bits =? 64 {-1} else {(BlWord(1) << bits) - 1}
+                let lo:BlWord=0
+                if to_sg {
+                    hi=BlWord(uint64(hi) >> 1)
+                    lo=-hi - 1
+                }
+                bl_eval_borrowed(a)
+                if qfr =? T_MATH_INT {
+                    mov_rr(RDI  RAX)
+                    mov_imm(RSI  XWord(lo))
+                    mov_imm(RDX  XWord(hi))
+                    mov_imm(RCX  if to_sg {0} else {1})
+                    bl_set_pos(nodes.ptr[e].pos)
+                    bl_call_pos(rt("__mi_clamp_word"))
+                    bl_last_owned=false
+                    return
+                }
+                if types.ptr[qfr].sign {
+                    mov_imm(RCX  XWord(lo))
+                    op_rr(0x39  true  RCX  RAX)
+                    let ok_lo=jcc32(CC_GE)
+                    mov_imm(RAX  XWord(lo))
+                    let done_s=jmp32()
+                    patch_here(ok_lo)
+                    mov_imm(RCX  XWord(hi))
+                    op_rr(0x39  true  RCX  RAX)
+                    let ok_hi=jcc32(if to_sg {CC_LE} else {CC_BE})
+                    mov_imm(RAX  XWord(hi))
+                    patch_here(ok_hi)
+                    patch_here(done_s)
+                } else {
+                    mov_imm(RCX  XWord(hi))
+                    op_rr(0x39  true  RCX  RAX)
+                    let ok_hi=jcc32(CC_BE)
+                    mov_imm(RAX  XWord(hi))
+                    patch_here(ok_hi)
+                }
+                bl_norm(RAX  to)
                 bl_last_owned=false
                 return
             }
@@ -7177,20 +7599,20 @@ bl_eval=(e:BlWord):>void=>$unsafe {
                         bl_eval_borrowed(BlWord(nodes.ptr[p].b))
                     }
                     bl_save_res(vt  voff)
-                    lea(RDI  RBP  -off)
+                    lea_rbp(RDI  -off)
                     let int_i:BlWord=1
                     let flt_i:BlWord=0
                     if vc(kt) =? VC_FLT {
                         sse_rm(bl_fpre(kt)  0x10  XWord(flt_i)  RBP  -koff)
                         flt_i += 1
                     } else {
-                        mov_rm(XWord(int_arg_regs.ptr[int_i])  RBP  -koff)
+                        mov_rm_rbp(XWord(int_arg_regs.ptr[int_i])  -koff)
                         int_i += 1
                     }
                     if vc(vt) =? VC_FLT {
                         sse_rm(bl_fpre(vt)  0x10  XWord(flt_i)  RBP  -voff)
                     } else {
-                        mov_rm(XWord(int_arg_regs.ptr[int_i])  RBP  -voff)
+                        mov_rm_rbp(XWord(int_arg_regs.ptr[int_i])  -voff)
                     }
                     bl_set_pos(nodes.ptr[e].pos)
                     bl_call_pos(lf_of_inst(f))
@@ -7198,7 +7620,7 @@ bl_eval=(e:BlWord):>void=>$unsafe {
                 }
                 bl_scope_off.truncate(smark); bl_scope_ty.truncate(smark); bl_scope_agg.truncate(smark)
             }
-            lea(RAX  RBP  -off)
+            lea_rbp(RAX  -off)
             bl_last_owned=true
             bl_last_slot=off
         }
@@ -7235,10 +7657,10 @@ bl_emit_assign=(s:BlWord):>void=>$unsafe {
         # String +=
         bl_eval_borrowed(b0)
         let boff=bl_tmp_alloc(8)
-        mov_mr(RBP  -boff  RAX)
+        mov_mr_rbp(-boff  RAX)
         bl_place_addr(a  true)
         mov_rr(RDI  RAX)
-        mov_rm(RSI  RBP  -boff)
+        mov_rm_rbp(RSI  -boff)
         bl_set_pos(nodes.ptr[s].pos)
         bl_call_pos(rt("__str_append"))
         return
@@ -7248,10 +7670,10 @@ bl_emit_assign=(s:BlWord):>void=>$unsafe {
         bl_eval_borrowed(b0)
         bl_imul_imm(RAX  XWord(tsize(BlWord(types.ptr[t].elem))))
         let doff=bl_tmp_alloc(8)
-        mov_mr(RBP  -doff  RAX)
+        mov_mr_rbp(-doff  RAX)
         bl_place_addr(a  true)
         mov_rm(RCX  RAX  0)
-        mov_rm(RDX  RBP  -doff)
+        mov_rm_rbp(RDX  -doff)
         if nodes.ptr[s].op =? 48 {op_rr(0x01  true  RDX  RCX)}
         else {op_rr(0x29  true  RDX  RCX)}
         mov_mr(RAX  0  RCX)
@@ -7276,7 +7698,7 @@ bl_emit_assign=(s:BlWord):>void=>$unsafe {
                 if bl_frozen_off_of(ib) >? 0 {continue}
                 bl_eval_borrowed(ib)
                 let foff=bl_tmp_alloc(8)
-                mov_mr(RBP  -foff  RAX)
+                mov_mr_rbp(-foff  RAX)
                 bl_frozen_node.push(ib)
                 bl_frozen_off.push(foff)
             }
@@ -7306,11 +7728,11 @@ bl_emit_assign=(s:BlWord):>void=>$unsafe {
             bl_scope_off.truncate(smark); bl_scope_ty.truncate(smark); bl_scope_agg.truncate(smark)
             let soff=bl_tmp_alloc(8)
             let old_off=bl_tmp_alloc(8)
-            mov_mr(RBP  -soff  RAX)
+            mov_mr_rbp(-soff  RAX)
             mov_rm(RCX  RAX  0)
-            mov_mr(RBP  -old_off  RCX)
+            mov_mr_rbp(-old_off  RCX)
             bl_box_put(soff  false  BlWord(fields.ptr[bf].type)  voff)
-            mov_rm(RAX  RBP  -old_off)
+            mov_rm_rbp(RAX  -old_off)
             bl_release_val(mk_box(BlWord(fields.ptr[bf].type)))
             return
         }
@@ -7327,17 +7749,17 @@ bl_emit_assign=(s:BlWord):>void=>$unsafe {
         bl_frozen_node.truncate(fmark); bl_frozen_off.truncate(fmark)
         bl_scope_off.truncate(smark); bl_scope_ty.truncate(smark); bl_scope_agg.truncate(smark)
         let poff=bl_tmp_alloc(8)
-        mov_mr(RBP  -poff  RAX)
+        mov_mr_rbp(-poff  RAX)
         if is_managed(t) {bl_drop_at_reg(RAX  t)}
-        mov_rm(R10  RBP  -poff)
+        mov_rm_rbp(R10  -poff)
         if vc(t) =? VC_AGG {
-            lea(RSI  RBP  -voff)
+            lea_rbp(RSI  -voff)
             bl_copy_mem(R10  RSI  XWord(tsize(t)))
         } else if vc(t) =? VC_FLT {
             sse_rm(bl_fpre(t)  0x10  0  RBP  -voff)
             sse_rm(bl_fpre(t)  0x11  0  R10  0)
         } else {
-            mov_rm(RCX  RBP  -voff)
+            mov_rm_rbp(RCX  -voff)
             store_sized(R10  0  RCX  XWord(tsize(t)))
         }
         return
@@ -7349,25 +7771,25 @@ bl_emit_assign=(s:BlWord):>void=>$unsafe {
         let coff=bl_tmp_alloc(8)
         let noff=bl_tmp_alloc(8)
         bl_place_addr(a  true)
-        mov_mr(RBP  -poff  RAX)
+        mov_mr_rbp(-poff  RAX)
         mov_rm(RAX  RAX  0)
-        mov_mr(RBP  -coff  RAX)
+        mov_mr_rbp(-coff  RAX)
         if op =? 'shl' or op =? 'shr' {
             bl_eval_shift_count(b0  nodes.ptr[s].pos)
             mov_rr(RCX  RAX)
-            mov_rm(RAX  RBP  -coff)
+            mov_rm_rbp(RAX  -coff)
             bl_math_shift_regs(op  types.ptr[prune(ntype(b0))].sign  nodes.ptr[s].pos)
         } else {
             bl_eval_borrowed(b0)
             mov_rr(RCX  RAX)
-            mov_rm(RAX  RBP  -coff)
+            mov_rm_rbp(RAX  -coff)
             bl_math_binary_regs(op  nodes.ptr[s].pos)
         }
-        mov_mr(RBP  -noff  RAX)
-        mov_rm(RAX  RBP  -coff)
+        mov_mr_rbp(-noff  RAX)
+        mov_rm_rbp(RAX  -coff)
         bl_release_val(T_MATH_INT)
-        mov_rm(R10  RBP  -poff)
-        mov_rm(RAX  RBP  -noff)
+        mov_rm_rbp(R10  -poff)
+        mov_rm_rbp(RAX  -noff)
         mov_mr(R10  0  RAX)
         bl_last_owned=false
         return
@@ -7376,14 +7798,14 @@ bl_emit_assign=(s:BlWord):>void=>$unsafe {
         let poff=bl_tmp_alloc(8)
         let coff=bl_tmp_alloc(8)
         bl_place_addr(a  true)
-        mov_mr(RBP  -poff  RAX)
+        mov_mr_rbp(-poff  RAX)
         bl_load_val(t  RAX  0)
         bl_save_res(t  coff)
         bl_eval_borrowed(b0)
         sse_rr(0  0x28  1  0)
         bl_load_res(t  coff)
         bl_emit_falu(compound_op(BlWord(nodes.ptr[s].op))  t)
-        mov_rm(R10  RBP  -poff)
+        mov_rm_rbp(R10  -poff)
         bl_store_val(t  R10  0  RAX)
         return
     }
@@ -7408,9 +7830,9 @@ bl_emit_assign=(s:BlWord):>void=>$unsafe {
     let poff=bl_tmp_alloc(8)
     let coff=bl_tmp_alloc(8)
     bl_place_addr(a  true)
-    mov_mr(RBP  -poff  RAX)
+    mov_mr_rbp(-poff  RAX)
     bl_load_val(t  RAX  0)
-    mov_mr(RBP  -coff  RAX)
+    mov_mr_rbp(-coff  RAX)
     let cop_tok=compound_op(BlWord(cop))
     let cop_op=cx_token_values.ptr[cop_tok]
     if (cop_op =? 'shl' or cop_op =? 'shr') and quantity_base(prune(ntype(b0))) =? T_MATH_INT {
@@ -7419,9 +7841,9 @@ bl_emit_assign=(s:BlWord):>void=>$unsafe {
         bl_eval_borrowed(b0)
     }
     mov_rr(RCX  RAX)
-    mov_rm(RAX  RBP  -coff)
+    mov_rm_rbp(RAX  -coff)
     bl_emit_alu(cop_tok  t  t  false  nodes.ptr[s].pos  b0)
-    mov_rm(R10  RBP  -poff)
+    mov_rm_rbp(R10  -poff)
     store_sized(R10  0  RAX  XWord(tsize(t)))
 }
 
@@ -7440,7 +7862,7 @@ bl_emit_vardecl=(s:BlWord):>void=>$unsafe {
             let foff=XWord(tuple_off(tt i))
             if nodes.ptr[id].kind =? 'hole' {
                 if is_managed(el) {
-                    lea(RAX  RBP  -toff + foff)
+                    lea_rbp(RAX  -toff + foff)
                     bl_drop_at_reg(RAX  el)
                 }
             } else if has_flag(id NF_GLOBAL) {
@@ -7559,7 +7981,7 @@ bl_emit_unwind=(target_blk:BlWord target_smark:BlWord target_dmark:BlWord):>void
 
 bl_emit_opt_has=(addr_off:XWord ot:BlWord):>void=>$unsafe {
     if ptr_optional(ot) {
-        mov_rm(RAX  RBP  -addr_off)
+        mov_rm_rbp(RAX  -addr_off)
         bl_test_rr(RAX)
         setcc(CC_NE)
     } else {
@@ -7672,7 +8094,7 @@ bl_emit_match_test=(p:BlWord st0:BlWord subj_off:XWord disp:XWord):>void=>$unsaf
             let sm=bl_sp
             bl_eval_borrowed(a)
             mov_rr(RCX  RAX)
-            mov_rm(RAX  RBP  -subj_off + disp)
+            mov_rm_rbp(RAX  -subj_off + disp)
             bl_math_compare_regs('eq'  nodes.ptr[p].pos  false)
             if bl_temps_off.length >? tm {
                 mov_rr(RBX  RAX)
@@ -7686,7 +8108,7 @@ bl_emit_match_test=(p:BlWord st0:BlWord subj_off:XWord disp:XWord):>void=>$unsaf
             let sm=bl_sp
             bl_eval_borrowed(a)
             mov_rr(RSI  RAX)
-            mov_rm(RDI  RBP  -subj_off + disp)
+            mov_rm_rbp(RDI  -subj_off + disp)
             bl_set_pos(nodes.ptr[p].pos)
             bl_call_pos(rt("__str_eq"))
             if bl_temps_off.length >? tm {
@@ -7717,16 +8139,16 @@ bl_emit_match_test=(p:BlWord st0:BlWord subj_off:XWord disp:XWord):>void=>$unsaf
             let lo_off=bl_tmp_alloc(8)
             let hi_off=bl_tmp_alloc(8)
             bl_eval_borrowed(BlWord(nodes.ptr[p].a))
-            mov_mr(RBP  -lo_off  RAX)
+            mov_mr_rbp(-lo_off  RAX)
             bl_eval_borrowed(BlWord(nodes.ptr[p].b))
-            mov_mr(RBP  -hi_off  RAX)
-            mov_rm(RAX  RBP  -subj_off + disp)
-            mov_rm(RCX  RBP  -lo_off)
+            mov_mr_rbp(-hi_off  RAX)
+            mov_rm_rbp(RAX  -subj_off + disp)
+            mov_rm_rbp(RCX  -lo_off)
             bl_math_compare_regs('ge'  nodes.ptr[p].pos  false)
             bl_test_rr(RAX)
             let miss0=jcc32(CC_E)
-            mov_rm(RAX  RBP  -subj_off + disp)
-            mov_rm(RCX  RBP  -hi_off)
+            mov_rm_rbp(RAX  -subj_off + disp)
+            mov_rm_rbp(RCX  -hi_off)
             bl_math_compare_regs(if has_flag(p NF_INCLUSIVE) {'le'} else {'lt'}  nodes.ptr[p].pos  false)
             let done_j=jmp32()
             patch_here(miss0)
@@ -7744,10 +8166,10 @@ bl_emit_match_test=(p:BlWord st0:BlWord subj_off:XWord disp:XWord):>void=>$unsaf
         let sm=bl_sp
         let lo_off=bl_tmp_alloc(8)
         bl_eval_borrowed(BlWord(nodes.ptr[p].a))
-        mov_mr(RBP  -lo_off  RAX)
+        mov_mr_rbp(-lo_off  RAX)
         bl_eval_borrowed(BlWord(nodes.ptr[p].b))
         mov_rr(RDX  RAX) # hi in RDX
-        mov_rm(RCX  RBP  -lo_off) # lo in RCX
+        mov_rm_rbp(RCX  -lo_off) # lo in RCX
         bl_load_val(st  RBP  -subj_off + disp) # x in RAX
         op_rr(0x39  true  RCX  RAX) # cmp x, lo
         let miss0=jcc32(if sg {CC_L} else {CC_B})
@@ -8027,9 +8449,9 @@ bl_emit_while=(s:BlWord):>void=>$unsafe {
         let pa_off=bl_last_slot
         bl_last_owned=false
         if ptr_optional(ot) {
-            mov_mr(RBP  -loff  RAX)
+            mov_mr_rbp(-loff  RAX)
             bl_stmt_end(tm  sm)
-            mov_rm(RAX  RBP  -loff)
+            mov_rm_rbp(RAX  -loff)
             bl_test_rr(RAX)
         } else {
             load_sized(RBX  RBP  -pa_off + XWord(tsize(inner))  1  false)
@@ -8143,13 +8565,13 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
                 let rem_off=bl_tmp_alloc(8)
                 let tm=bl_temps_off.length
                 let sm=bl_sp
-                bl_eval_borrowed(ra); bl_sh_imm(7  RAX  1); mov_mr(RBP  -ctr_off  RAX)
-                bl_eval_borrowed(BlWord(nodes.ptr[a].c)); bl_sh_imm(7  RAX  1); mov_mr(RBP  -sec_off  RAX)
-                bl_eval_borrowed(rb); bl_sh_imm(7  RAX  1); mov_mr(RBP  -end_off  RAX)
+                bl_eval_borrowed(ra); bl_sh_imm(7  RAX  1); mov_mr_rbp(-ctr_off  RAX)
+                bl_eval_borrowed(BlWord(nodes.ptr[a].c)); bl_sh_imm(7  RAX  1); mov_mr_rbp(-sec_off  RAX)
+                bl_eval_borrowed(rb); bl_sh_imm(7  RAX  1); mov_mr_rbp(-end_off  RAX)
                 bl_stmt_end(tm  sm)
-                mov_rm(RAX  RBP  -sec_off)
+                mov_rm_rbp(RAX  -sec_off)
                 op_rm64(0x2B  RAX  RBP  -ctr_off)
-                mov_mr(RBP  -step_off  RAX)
+                mov_mr_rbp(-step_off  RAX)
                 bl_test_rr(RAX)
                 let step_ok=jcc32(CC_NE)
                 rel_fixup_lea(RDI  0  XWord(str_data("range step must be nonzero")))
@@ -8157,21 +8579,21 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
                 bl_call_pos(rt("__panic"))
                 b16(0x0B0F)
                 patch_here(step_ok)
-                mov_rm(RAX  RBP  -sec_off)
+                mov_rm_rbp(RAX  -sec_off)
                 op_rm64(0x3B  RAX  RBP  -ctr_off)
                 let is_down=jcc32(CC_LE)
-                mov_rm(RAX  RBP  -ctr_off)
+                mov_rm_rbp(RAX  -ctr_off)
                 op_rm64(0x3B  RAX  RBP  -end_off)
                 let exit_j1=jcc32(if incl {CC_G} else {CC_GE})
-                mov_rm(RAX  RBP  -end_off)
+                mov_rm_rbp(RAX  -end_off)
                 op_rm64(0x2B  RAX  RBP  -ctr_off)
-                mov_rm(RCX  RBP  -step_off)
+                mov_rm_rbp(RCX  -step_off)
                 let join_dist=jmp32()
                 patch_here(is_down)
-                mov_rm(RAX  RBP  -ctr_off)
+                mov_rm_rbp(RAX  -ctr_off)
                 op_rm64(0x3B  RAX  RBP  -end_off)
                 let exit_j2=jcc32(if incl {CC_L} else {CC_LE})
-                mov_rm(RAX  RBP  -ctr_off)
+                mov_rm_rbp(RAX  -ctr_off)
                 op_rm64(0x2B  RAX  RBP  -end_off)
                 b16(0xC931)
                 op_rm64(0x2B  RCX  RBP  -step_off)
@@ -8180,13 +8602,13 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
                 op_rr(0x31  false  RDX  RDX)
                 rex(true  0  0  RCX  false); b(0xF7); modrr(6  RCX)
                 bl_add_imm(RAX  1)
-                mov_mr(RBP  -rem_off  RAX)
+                mov_mr_rbp(-rem_off  RAX)
                 let prev_sm=bl_loc_small_math.ptr[lidx]
                 bl_loc_small_math.ptr[lidx]=true
                 let ltop=XWord(x_code[0].length)
-                mov_rm(RAX  RBP  -ctr_off)
+                mov_rm_rbp(RAX  -ctr_off)
                 bl_sh_imm(4  RAX  1)
-                mov_mr(RBP  -loff  RAX)
+                mov_mr_rbp(-loff  RAX)
                 let depth=bl_loop_blk.length
                 bl_loop_blk.push(bl_blk_smark.length)
                 bl_loop_tmark.push(bl_temps_off.length)
@@ -8196,9 +8618,9 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
                 bl_loop_blk.pop(); bl_loop_tmark.pop(); bl_loop_smark.pop(); bl_loop_dmark.pop();
                 bl_loc_small_math.ptr[lidx]=prev_sm
                 bl_patch_loop_jumps(depth  false)
-                mov_rm(RAX  RBP  -ctr_off)
+                mov_rm_rbp(RAX  -ctr_off)
                 op_rm64(0x03  RAX  RBP  -step_off)
-                mov_mr(RBP  -ctr_off  RAX)
+                mov_mr_rbp(-ctr_off  RAX)
                 bl_add_m64_imm(RBP  -rem_off  -1)
                 let back=jcc32(CC_NE)
                 patch_branch(back  ltop)
@@ -8217,17 +8639,17 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
                 let tm=bl_temps_off.length
                 let sm=bl_sp
                 bl_eval_borrowed(ra)
-                mov_mr(RBP  -ctr_off  RAX)
+                mov_mr_rbp(-ctr_off  RAX)
                 bl_eval_borrowed(rb)
-                mov_mr(RBP  -end_off  RAX)
+                mov_mr_rbp(-end_off  RAX)
                 bl_stmt_end(tm  sm)
                 let prev_sm=bl_loc_small_math.ptr[lidx]
                 bl_loc_small_math.ptr[lidx]=true
                 let ltop=XWord(x_code[0].length)
-                mov_rm(RAX  RBP  -ctr_off)
+                mov_rm_rbp(RAX  -ctr_off)
                 op_rm64(0x3B  RAX  RBP  -end_off)
                 let exit_j=jcc32(if incl {CC_G} else {CC_GE})
-                mov_mr(RBP  -loff  RAX)
+                mov_mr_rbp(-loff  RAX)
                 let depth=bl_loop_blk.length
                 bl_loop_blk.push(bl_blk_smark.length)
                 bl_loop_tmark.push(bl_temps_off.length)
@@ -8252,33 +8674,33 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
             let ctr_off=bl_tmp_alloc(8)
             let end_off=bl_tmp_alloc(8)
             b16(0xC031)
-            mov_mr(RBP  -ctr_off  RAX)
-            mov_mr(RBP  -end_off  RAX)
-            mov_mr(RBP  -loff  RAX)
+            mov_mr_rbp(-ctr_off  RAX)
+            mov_mr_rbp(-end_off  RAX)
+            mov_mr_rbp(-loff  RAX)
             bl_scope_off.push(ctr_off); bl_scope_ty.push(T_MATH_INT); bl_scope_agg.push(false)
             bl_scope_off.push(end_off); bl_scope_ty.push(T_MATH_INT); bl_scope_agg.push(false)
             bl_scope_off.push(loff); bl_scope_ty.push(T_MATH_INT); bl_scope_agg.push(false)
             let tm=bl_temps_off.length
             let sm=bl_sp
             bl_eval_owned(BlWord(nodes.ptr[a].a))
-            mov_mr(RBP  -ctr_off  RAX)
+            mov_mr_rbp(-ctr_off  RAX)
             bl_last_owned=false
             bl_eval_owned(BlWord(nodes.ptr[a].b))
-            mov_mr(RBP  -end_off  RAX)
+            mov_mr_rbp(-end_off  RAX)
             bl_last_owned=false
             bl_stmt_end(tm  sm)
             let ltop=XWord(x_code[0].length)
-            mov_rm(RAX  RBP  -ctr_off)
-            mov_rm(RCX  RBP  -end_off)
+            mov_rm_rbp(RAX  -ctr_off)
+            mov_rm_rbp(RCX  -end_off)
             bl_math_compare_regs(if incl {'gt'} else {'ge'}  nodes.ptr[s].pos  false)
             bl_test_rr(RAX)
             let exit_j=jcc32(CC_NE)
-            mov_rm(RAX  RBP  -loff)
+            mov_rm_rbp(RAX  -loff)
             bl_release_val(T_MATH_INT)
-            mov_rm(RAX  RBP  -ctr_off)
+            mov_rm_rbp(RAX  -ctr_off)
             mov_rr(R10  RAX)
             bl_retain_val(T_MATH_INT)
-            mov_mr(RBP  -loff  R10)
+            mov_mr_rbp(-loff  R10)
             let depth=bl_loop_blk.length
             bl_loop_blk.push(bl_blk_smark.length)
             bl_loop_tmark.push(bl_temps_off.length)
@@ -8288,14 +8710,14 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
             bl_loop_blk.pop(); bl_loop_tmark.pop(); bl_loop_smark.pop(); bl_loop_dmark.pop();
             bl_patch_loop_jumps(depth  false)
             let next_off=bl_tmp_alloc(8)
-            mov_rm(RAX  RBP  -ctr_off)
+            mov_rm_rbp(RAX  -ctr_off)
             mov_imm(RCX  2)
             bl_math_binary_regs('plus'  nodes.ptr[s].pos)
-            mov_mr(RBP  -next_off  RAX)
-            mov_rm(RAX  RBP  -ctr_off)
+            mov_mr_rbp(-next_off  RAX)
+            mov_rm_rbp(RAX  -ctr_off)
             bl_release_val(T_MATH_INT)
-            mov_rm(RAX  RBP  -next_off)
-            mov_mr(RBP  -ctr_off  RAX)
+            mov_rm_rbp(RAX  -next_off)
+            mov_mr_rbp(-ctr_off  RAX)
             let back=jmp32()
             patch_branch(back  ltop)
             patch_here(exit_j)
@@ -8317,16 +8739,16 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
             let tm=bl_temps_off.length
             let sm=bl_sp
             bl_eval_borrowed(BlWord(nodes.ptr[a].a))
-            mov_mr(RBP  -ctr_off  RAX)
+            mov_mr_rbp(-ctr_off  RAX)
             bl_eval_borrowed(BlWord(nodes.ptr[a].c))
-            mov_mr(RBP  -sec_off  RAX)
+            mov_mr_rbp(-sec_off  RAX)
             bl_eval_borrowed(BlWord(nodes.ptr[a].b))
-            mov_mr(RBP  -end_off  RAX)
+            mov_mr_rbp(-end_off  RAX)
             bl_stmt_end(tm  sm)
             # step = second - ctr; panic if 0
-            mov_rm(RAX  RBP  -sec_off)
+            mov_rm_rbp(RAX  -sec_off)
             op_rm64(0x2B  RAX  RBP  -ctr_off)
-            mov_mr(RBP  -step_off  RAX)
+            mov_mr_rbp(-step_off  RAX)
             bl_test_rr(RAX)
             let step_ok=jcc32(CC_NE)
             rel_fixup_lea(RDI  0  XWord(str_data("range step must be nonzero")))
@@ -8335,23 +8757,23 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
             b16(0x0B0F)
             patch_here(step_ok)
             # up = second > ctr
-            mov_rm(RAX  RBP  -sec_off)
+            mov_rm_rbp(RAX  -sec_off)
             op_rm64(0x3B  RAX  RBP  -ctr_off)
             let is_down=jcc32(if sg {CC_LE} else {CC_BE})
             # Upward: done if ctr > end (incl) or ctr >= end (excl)
-            mov_rm(RAX  RBP  -ctr_off)
+            mov_rm_rbp(RAX  -ctr_off)
             op_rm64(0x3B  RAX  RBP  -end_off)
             let exit_j1=jcc32(if incl {if sg {CC_G} else {CC_A}} else {if sg {CC_GE} else {CC_AE}})
-            mov_rm(RAX  RBP  -end_off)
+            mov_rm_rbp(RAX  -end_off)
             op_rm64(0x2B  RAX  RBP  -ctr_off)
-            mov_rm(RCX  RBP  -step_off)
+            mov_rm_rbp(RCX  -step_off)
             let join_dist=jmp32()
             # Downward: done if ctr < end (incl) or ctr <= end (excl)
             patch_here(is_down)
-            mov_rm(RAX  RBP  -ctr_off)
+            mov_rm_rbp(RAX  -ctr_off)
             op_rm64(0x3B  RAX  RBP  -end_off)
             let exit_j2=jcc32(if incl {if sg {CC_L} else {CC_B}} else {if sg {CC_LE} else {CC_BE}})
-            mov_rm(RAX  RBP  -ctr_off)
+            mov_rm_rbp(RAX  -ctr_off)
             op_rm64(0x2B  RAX  RBP  -end_off)
             b16(0xC931)
             op_rm64(0x2B  RCX  RBP  -step_off)
@@ -8360,10 +8782,10 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
             op_rr(0x31  false  RDX  RDX)
             rex(true  0  0  RCX  false); b(0xF7); modrr(6  RCX)
             bl_add_imm(RAX  1)
-            mov_mr(RBP  -rem_off  RAX)
+            mov_mr_rbp(-rem_off  RAX)
             let ltop=XWord(x_code[0].length)
             if not direct_ctr {
-                mov_rm(RAX  RBP  -ctr_off)
+                mov_rm_rbp(RAX  -ctr_off)
                 store_sized(RBP  -loff  RAX  XWord(tsize(lt)))
             }
             let depth=bl_loop_blk.length
@@ -8374,9 +8796,9 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
             bl_emit_block(b0  -1  0)
             bl_loop_blk.pop(); bl_loop_tmark.pop(); bl_loop_smark.pop(); bl_loop_dmark.pop();
             bl_patch_loop_jumps(depth  false)
-            mov_rm(RAX  RBP  -ctr_off)
+            mov_rm_rbp(RAX  -ctr_off)
             op_rm64(0x03  RAX  RBP  -step_off)
-            mov_mr(RBP  -ctr_off  RAX)
+            mov_mr_rbp(-ctr_off  RAX)
             bl_add_m64_imm(RBP  -rem_off  -1)
             let back=jcc32(CC_NE)
             patch_branch(back  ltop)
@@ -8394,10 +8816,10 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
             let tm=bl_temps_off.length
             let sm=bl_sp
             bl_eval_borrowed(BlWord(nodes.ptr[a].a))
-            mov_mr(RBP  -tmp_lo  RAX)
+            mov_mr_rbp(-tmp_lo  RAX)
             bl_eval_borrowed(BlWord(nodes.ptr[a].b))
             mov_rr(R14  RAX)
-            mov_rm(R13  RBP  -tmp_lo)
+            mov_rm_rbp(R13  -tmp_lo)
             bl_stmt_end(tm  sm)
             op_rr(0x39  true  R14  R13) # cmp r13, r14
             let exit_j=jcc32(if sg {CC_GE} else {CC_AE})
@@ -8420,7 +8842,7 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
             if hoist_arr >=? 0 {
                 let hoff=XWord(bl_loc_off.ptr[bl_loc_idx(hoist_arr)])
                 op_rr(0x31  false  R15  R15) # xor r15d, r15d
-                mov_rm(RAX  RBP  -hoff)
+                mov_rm_rbp(RAX  -hoff)
                 bl_test_rr(RAX)
                 let hnull=jcc32(CC_E)
                 mov_rm(R15  RAX  8)
@@ -8458,23 +8880,23 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
         let tm=bl_temps_off.length
         let sm=bl_sp
         bl_eval_borrowed(BlWord(nodes.ptr[a].a))
-        mov_mr(RBP  -ctr_off  RAX)
+        mov_mr_rbp(-ctr_off  RAX)
         bl_eval_borrowed(BlWord(nodes.ptr[a].b))
-        mov_mr(RBP  -end_off  RAX)
+        mov_mr_rbp(-end_off  RAX)
         bl_stmt_end(tm  sm)
-        mov_rm(RAX  RBP  -ctr_off)
+        mov_rm_rbp(RAX  -ctr_off)
         op_rm64(0x3B  RAX  RBP  -end_off) # cmp rax, [rbp - end_off]
         let exit_cc:XWord=if incl {if sg {CC_G} else {CC_A}} else {if sg {CC_GE} else {CC_AE}}
         let exit_j=jcc32(exit_cc)
         if incl {
-            mov_rm(RCX  RBP  -end_off)
+            mov_rm_rbp(RCX  -end_off)
             op_rr(0x29  true  RAX  RCX) # rcx = end - ctr
             bl_add_imm(RCX  1)
-            mov_mr(RBP  -rem_off  RCX)
+            mov_mr_rbp(-rem_off  RCX)
         }
         let ltop=XWord(x_code[0].length)
         if not direct_ctr {
-            mov_rm(RAX  RBP  -ctr_off)
+            mov_rm_rbp(RAX  -ctr_off)
             store_sized(RBP  -loff  RAX  XWord(tsize(lt)))
         }
         let depth=bl_loop_blk.length
@@ -8491,9 +8913,9 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
             let back=jcc32(CC_NE)
             patch_branch(back  ltop)
         } else {
-            mov_rm(RAX  RBP  -ctr_off)
+            mov_rm_rbp(RAX  -ctr_off)
             bl_add_imm(RAX  1)
-            mov_mr(RBP  -ctr_off  RAX)
+            mov_mr_rbp(-ctr_off  RAX)
             op_rm64(0x3B  RAX  RBP  -end_off) # cmp rax, [rbp - end_off]
             let back=jcc32(if sg {CC_L} else {CC_B})
             patch_branch(back  ltop)
@@ -8537,20 +8959,20 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
     if aux =? 1 {
         if types.ptr[ct].kind =? 'fixed' {
             kstride=XWord(tsize(BlWord(types.ptr[ct].elem)))
-            lea(RCX  RBP  -snap_off)
-            mov_mr(RBP  -base_off  RCX)
+            lea_rbp(RCX  -snap_off)
+            mov_mr_rbp(-base_off  RCX)
             mov_imm(RAX  XWord(fixed_len(ct)))
-            mov_mr(RBP  -n_off  RAX)
+            mov_mr_rbp(-n_off  RAX)
         } else {
             if types.ptr[ct].kind =? 'array' {kstride=XWord(owner_stride(BlWord(types.ptr[ct].elem)))}
-            mov_rm(RAX  RBP  -snap_off)
+            mov_rm_rbp(RAX  -snap_off)
             lea(RCX  RAX  24)
-            mov_mr(RBP  -base_off  RCX)
+            mov_mr_rbp(-base_off  RCX)
             bl_test_rr(RAX)
             let is_null=jcc32(CC_E)
             mov_rm(RAX  RAX  8)
             patch_here(is_null)
-            mov_mr(RBP  -n_off  RAX)
+            mov_mr_rbp(-n_off  RAX)
         }
     } else {
         let si:BlWord=BlWord(types.ptr[ct].st)
@@ -8564,35 +8986,35 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
         if vl >? 0 and (BlWord(locals.ptr[vl].flags) & LF_BYREF) not=? 0 {
             vl_off=XWord(bl_loc_off.ptr[bl_loc_idx(vl)])
         } else {vl=0}
-        mov_rm(RAX  RBP  -snap_off + XWord(fields.ptr[f0].offset))
+        mov_rm_rbp(RAX  -snap_off + XWord(fields.ptr[f0].offset))
         lea(RCX  RAX  24)
-        mov_mr(RBP  -base_off  RCX)
-        mov_rm(RDX  RBP  -snap_off + XWord(fields.ptr[f0 + 1].offset))
+        mov_mr_rbp(-base_off  RCX)
+        mov_rm_rbp(RDX  -snap_off + XWord(fields.ptr[f0 + 1].offset))
         lea(RDX  RDX  24)
-        mov_mr(RBP  -vals_off  RDX)
+        mov_mr_rbp(-vals_off  RDX)
         bl_test_rr(RAX)
         let is_null=jcc32(CC_E)
         mov_rm(RAX  RAX  8)
         patch_here(is_null)
-        mov_mr(RBP  -n_off  RAX)
+        mov_mr_rbp(-n_off  RAX)
     }
     b16(0xC031) # xor eax, eax
-    mov_mr(RBP  -idx_off  RAX)
-    mov_rm(RCX  RBP  -n_off)
+    mov_mr_rbp(-idx_off  RAX)
+    mov_rm_rbp(RCX  -n_off)
     bl_test_rr(RCX)
     let exit_j=jcc32(CC_LE)
     let ltop=XWord(x_code[0].length)
-    mov_rm(RCX  RBP  -idx_off)
+    mov_rm_rbp(RCX  -idx_off)
     bl_imul_imm(RCX  kstride)
-    mov_rm(RAX  RBP  -base_off)
+    mov_rm_rbp(RAX  -base_off)
     op_rr(0x01  true  RCX  RAX)
-    mov_mr(RBP  -el_off  RAX)
+    mov_mr_rbp(-el_off  RAX)
     if vl >? 0 {
-        mov_rm(RCX  RBP  -idx_off)
+        mov_rm_rbp(RCX  -idx_off)
         bl_imul_imm(RCX  vstride)
-        mov_rm(RAX  RBP  -vals_off)
+        mov_rm_rbp(RAX  -vals_off)
         op_rr(0x01  true  RCX  RAX)
-        mov_mr(RBP  -vl_off  RAX)
+        mov_mr_rbp(-vl_off  RAX)
     }
     let depth=bl_loop_blk.length
     bl_loop_blk.push(bl_blk_smark.length)
@@ -8602,10 +9024,10 @@ bl_emit_for=(s:BlWord):>void=>$unsafe {
     bl_emit_block(b0  -1  0)
     bl_loop_blk.pop(); bl_loop_tmark.pop(); bl_loop_smark.pop(); bl_loop_dmark.pop();
     bl_patch_loop_jumps(depth  false)
-    mov_rm(RAX  RBP  -idx_off)
+    mov_rm_rbp(RAX  -idx_off)
     bl_add_imm(RAX  1)
-    mov_mr(RBP  -idx_off  RAX)
-    mov_rm(RCX  RBP  -n_off)
+    mov_mr_rbp(-idx_off  RAX)
+    mov_rm_rbp(RCX  -n_off)
     op_rr(0x39  true  RCX  RAX)
     let back=jcc32(CC_L)
     patch_branch(back  ltop)
@@ -8628,7 +9050,7 @@ bl_emit_return_expr=(a:BlWord pos:BlWord):>void=>$unsafe {
     if has_val {
         bl_eval_owned(a)
         if vc(rtp) =? VC_AGG {
-            mov_rm(RDI  RBP  -bl_sret_off)
+            mov_rm_rbp(RDI  -bl_sret_off)
             bl_copy_mem(RDI  RAX  XWord(tsize(rtp)))
             bl_last_owned=false
             bl_stmt_end(tm  sm)
@@ -8646,7 +9068,7 @@ bl_emit_return_expr=(a:BlWord pos:BlWord):>void=>$unsafe {
             }
         } else if has_defers {
             rv_off=bl_tmp_alloc(8)
-            mov_mr(RBP  -rv_off  RAX)
+            mov_mr_rbp(-rv_off  RAX)
             bl_last_owned=false
             let keep_sp=bl_sp
             bl_stmt_end(tm  keep_sp)
@@ -8662,12 +9084,12 @@ bl_emit_return_expr=(a:BlWord pos:BlWord):>void=>$unsafe {
     if tm >? 0 {bl_emit_temp_drops(tm  0)}
     if bl_scope_off.length >? 0 or bl_defer_nodes.length >? 0 {bl_emit_unwind(0  0  0)}
     if has_val {
-        if vc(rtp) =? VC_AGG {mov_rm(RAX  RBP  -bl_sret_off)}
+        if vc(rtp) =? VC_AGG {mov_rm_rbp(RAX  -bl_sret_off)}
         else if vc(rtp) =? VC_FLT {if rv_off >=? 0 {bl_load_res(rtp  rv_off)}}
-        else if rv_off >=? 0 {mov_rm(RAX  RBP  -rv_off)}
+        else if rv_off >=? 0 {mov_rm_rbp(RAX  -rv_off)}
         else {mov_rr(RAX  RBX)}
     } else if rtp not=? T_NEVER and vc(rtp) =? VC_AGG {
-        mov_rm(RAX  RBP  -bl_sret_off)
+        mov_rm_rbp(RAX  -bl_sret_off)
     }
     if rv_off >=? 0 {bl_sp=sm}
     bl_ret_patches.push(jmp32())
@@ -8872,12 +9294,12 @@ bl_emit_inst=(lf:BlWord fi:BlWord):>bool=>$unsafe {
     rex(true  0  0  RSP  false); b(0x81); modrr(5  RSP)
     let sub_rsp_pos=XWord(x_code[0].length)
     b32(0)
-    mov_mr(RBP  -8  RBX)
-    mov_mr(RBP  -16  R12)
+    mov_mr_rbp(-8  RBX)
+    mov_mr_rbp(-16  R12)
     if save_loop_regs {
-        mov_mr(RBP  -24  R13)
-        mov_mr(RBP  -32  R14)
-        mov_mr(RBP  -40  R15)
+        mov_mr_rbp(-24  R13)
+        mov_mr_rbp(-32  R14)
+        mov_mr_rbp(-40  R15)
     }
 
     # Store incoming arguments into their stack slots (register + stack overflow args).
@@ -8885,7 +9307,7 @@ bl_emit_inst=(lf:BlWord fi:BlWord):>bool=>$unsafe {
     let flt_i:BlWord=0
     let stack_k:BlWord=0
     if has_sret {
-        mov_mr(RBP  -bl_sret_off  RDI)
+        mov_mr_rbp(-bl_sret_off  RDI)
         int_i=1
     }
     loop i in [0..nparams) {
@@ -8897,17 +9319,17 @@ bl_emit_inst=(lf:BlWord fi:BlWord):>bool=>$unsafe {
             if flt_i <? 8 {
                 sse_rm(bl_fpre(pt)  0x11  XWord(flt_i)  RBP  -off)
             } else {
-                mov_rm(RAX  RBP  XWord(16 + 8 * stack_k))
-                mov_mr(RBP  -off  RAX)
+                mov_rm_rbp(RAX  XWord(16 + 8 * stack_k))
+                mov_mr_rbp(-off  RAX)
                 stack_k += 1
             }
             flt_i += 1
         } else {
             if int_i <? 6 {
-                mov_mr(RBP  -off  XWord(int_arg_regs.ptr[int_i]))
+                mov_mr_rbp(-off  XWord(int_arg_regs.ptr[int_i]))
             } else {
-                mov_rm(RAX  RBP  XWord(16 + 8 * stack_k))
-                mov_mr(RBP  -off  RAX)
+                mov_rm_rbp(RAX  XWord(16 + 8 * stack_k))
+                mov_mr_rbp(-off  RAX)
                 stack_k += 1
             }
             int_i += 1
@@ -8937,19 +9359,19 @@ bl_emit_inst=(lf:BlWord fi:BlWord):>bool=>$unsafe {
     bl_blk_smark.pop();
     bl_blk_dmark.pop();
     if has_sret {
-        mov_rm(RAX  RBP  -bl_sret_off)
+        mov_rm_rbp(RAX  -bl_sret_off)
     } else if bl_cur_ret not=? T_NEVER and vc(bl_cur_ret) not=? VC_VOID {
         b16(0x0B0F) # ud2 (all paths should have returned)
     }
 
     # Shared epilogue.
     loop p in bl_ret_patches {patch_here(XWord(p))}
-    mov_rm(RBX  RBP  -8)
-    mov_rm(R12  RBP  -16)
+    mov_rm_rbp(RBX  -8)
+    mov_rm_rbp(R12  -16)
     if save_loop_regs {
-        mov_rm(R13  RBP  -24)
-        mov_rm(R14  RBP  -32)
-        mov_rm(R15  RBP  -40)
+        mov_rm_rbp(R13  -24)
+        mov_rm_rbp(R14  -32)
+        mov_rm_rbp(R15  -40)
     }
     b(0xC9) # leave
     b(0xC3) # ret

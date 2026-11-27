@@ -216,6 +216,77 @@ op_rr=(opc:XWord w:bool reg:XWord rm:XWord):>void=>$unsafe {
     q[1]=uint8<overflow='wrap'>(modrm)
     if x_pad_track {x_pad0=x_pad1; x_pad1=x_pad2; x_pad2=(end_ << 32) | old}
 }
+let x_rbp8_base:array<uint32>=[uint32(0x00450048) uint32(0x004D0048) uint32(0x00550048) uint32(0x005D0048) uint32(0x00650048) uint32(0x006D0048) uint32(0x00750048) uint32(0x007D0048) uint32(0x0045004C) uint32(0x004D004C) uint32(0x0055004C) uint32(0x005D004C) uint32(0x0065004C) uint32(0x006D004C) uint32(0x0075004C) uint32(0x007D004C)]
+let x_rbp8_rm:array<uint32>=[uint32(0x00458B48) uint32(0x004D8B48) uint32(0x00558B48) uint32(0x005D8B48) uint32(0x00658B48) uint32(0x006D8B48) uint32(0x00758B48) uint32(0x007D8B48) uint32(0x00458B4C) uint32(0x004D8B4C) uint32(0x00558B4C) uint32(0x005D8B4C) uint32(0x00658B4C) uint32(0x006D8B4C) uint32(0x00758B4C) uint32(0x007D8B4C)]
+let x_rbp8_mr:array<uint32>=[uint32(0x00458948) uint32(0x004D8948) uint32(0x00558948) uint32(0x005D8948) uint32(0x00658948) uint32(0x006D8948) uint32(0x00758948) uint32(0x007D8948) uint32(0x0045894C) uint32(0x004D894C) uint32(0x0055894C) uint32(0x005D894C) uint32(0x0065894C) uint32(0x006D894C) uint32(0x0075894C) uint32(0x007D894C)]
+let x_rbp8_lea:array<uint32>=[uint32(0x00458D48) uint32(0x004D8D48) uint32(0x00558D48) uint32(0x005D8D48) uint32(0x00658D48) uint32(0x006D8D48) uint32(0x00758D48) uint32(0x007D8D48) uint32(0x00458D4C) uint32(0x004D8D4C) uint32(0x00558D4C) uint32(0x005D8D4C) uint32(0x00658D4C) uint32(0x006D8D4C) uint32(0x00758D4C) uint32(0x007D8D4C)]
+let x_rbp8_base_p:ptr<uint32>=$unsafe x_rbp8_base.ptr
+let x_rbp8_rm_p:ptr<uint32>=$unsafe x_rbp8_rm.ptr
+let x_rbp8_mr_p:ptr<uint32>=$unsafe x_rbp8_mr.ptr
+let x_rbp8_lea_p:ptr<uint32>=$unsafe x_rbp8_lea.ptr
+mov_rm_rbp=(r:XWord disp:XWord):>void=>$unsafe {
+    let header=x_hdr
+    if header =? (uint64(0) as ptr<XWord>) or header[1] + 7 >? header[2] {
+        op_rm64_slow(0x8B r RBP disp)
+        return
+    }
+    let old=header[1]
+    let p=(header as ptr<uint8>) + 24 + old
+    let base_w:uint32=x_rbp8_rm_p[r]
+    if disp >=? -128 and disp <=? 127 {
+        let dw=p as ptr<uint32>
+        dw[0]=base_w | (uint32<overflow='wrap'>(disp) << uint32(24))
+        header[1]=old + 4
+        return
+    }
+    let dw=p as ptr<uint32>
+    dw[0]=base_w + uint32(0x00400000)
+    let dw2=(p + 3) as ptr<uint32>
+    dw2[0]=uint32<overflow='wrap'>(disp)
+    header[1]=old + 7
+}
+mov_mr_rbp=(disp:XWord r:XWord):>void=>$unsafe {
+    let header=x_hdr
+    if header =? (uint64(0) as ptr<XWord>) or header[1] + 7 >? header[2] {
+        op_rm64_slow(0x89 r RBP disp)
+        return
+    }
+    let old=header[1]
+    let p=(header as ptr<uint8>) + 24 + old
+    let base_w:uint32=x_rbp8_mr_p[r]
+    if disp >=? -128 and disp <=? 127 {
+        let dw=p as ptr<uint32>
+        dw[0]=base_w | (uint32<overflow='wrap'>(disp) << uint32(24))
+        header[1]=old + 4
+        return
+    }
+    let dw=p as ptr<uint32>
+    dw[0]=base_w + uint32(0x00400000)
+    let dw2=(p + 3) as ptr<uint32>
+    dw2[0]=uint32<overflow='wrap'>(disp)
+    header[1]=old + 7
+}
+lea_rbp=(r:XWord disp:XWord):>void=>$unsafe {
+    let header=x_hdr
+    if header =? (uint64(0) as ptr<XWord>) or header[1] + 7 >? header[2] {
+        op_rm64_slow(0x8D r RBP disp)
+        return
+    }
+    let old=header[1]
+    let p=(header as ptr<uint8>) + 24 + old
+    let base_w:uint32=x_rbp8_lea_p[r]
+    if disp >=? -128 and disp <=? 127 {
+        let dw=p as ptr<uint32>
+        dw[0]=base_w | (uint32<overflow='wrap'>(disp) << uint32(24))
+        header[1]=old + 4
+        return
+    }
+    let dw=p as ptr<uint32>
+    dw[0]=base_w + uint32(0x00400000)
+    let dw2=(p + 3) as ptr<uint32>
+    dw2[0]=uint32<overflow='wrap'>(disp)
+    header[1]=old + 7
+}
 op_rm64_slow=(opc:XWord reg:XWord base0:XWord disp0:XWord):>void=>$unsafe {
     op_rm(opc  true  reg  base0  disp0)
 }
@@ -227,11 +298,18 @@ op_rm64=(opc:XWord reg:XWord base0:XWord disp0:XWord):>void=>$unsafe {
     }
     let old=header[1]
     let p=(header as ptr<uint8>) + 24 + old
-    if base0 =? RBP and not rsp_frame and not x_pad_track and disp0 >=? -128 and disp0 <=? 127 {
-        let w:XWord=(0x48 | ((reg >> 1) & 4)) | (opc << 8) | ((0x45 | ((reg & 7) << 3)) << 16) | ((disp0 & 0xFF) << 24)
+    if base0 =? RBP and not rsp_frame and not x_pad_track {
+        let base_w:uint32=x_rbp8_base_p[reg] | (uint32<overflow='wrap'>(opc) << uint32(8))
         let dw=p as ptr<uint32>
-        dw[0]=uint32<overflow='wrap'>(w)
-        header[1]=old + 4
+        if disp0 >=? -128 and disp0 <=? 127 {
+            dw[0]=base_w | (uint32<overflow='wrap'>(disp0) << uint32(24))
+            header[1]=old + 4
+            return
+        }
+        dw[0]=base_w + uint32(0x00400000)
+        let dw2=(p + 3) as ptr<uint32>
+        dw2[0]=uint32<overflow='wrap'>(disp0)
+        header[1]=old + 7
         return
     }
     let base=base0

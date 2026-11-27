@@ -105,7 +105,11 @@ check_program=(main_path:string):>void=>$unsafe {
         ic_restore(icb)
         i += 1
     }
-    if dir_code_any {decl_mono_enabled=false}
+    if dir_code_any {
+        loop [_ mask] in dir_code_files {
+            if (PGWord(mask) & 112) not=? 0 {decl_mono_enabled=false; break}
+        }
+    }
     if dir_header_cores {runtime_switch_on("__HEADER_CORES")}
     if dir_scoped_cores {runtime_switch_on("__SCOPED_CORES")}
     if dir_runtime_caps {runtime_switch_on("__CORE_CAPS")}

@@ -274,7 +274,7 @@ dir_code_request=(decl:CodeWord at:CodeWord generic:bool=false mixed:bool=false 
 # Concrete foreign numerics keep their declared policy; report each call once.
 # (the cheapest of its pure tests first; `origin` when the caller has it)
 dir_code_foreign_warn=(decl:CodeWord at:CodeWord origin:CodeWord=-1):>void=>{
-    if at <=? 0 {return}
+    if at <=? 0 or dir_code_seen & (CodeWord(7) << 4) =? 0 {return}
     let file=CodeWord(pos_file(nodes[decl].pos))
     if not files[file].is_dewy or origin =? file {return}
     if pos_in_lib(at) or starts_with(name_of(CodeWord(nodes[decl].name)) "__") {return}
@@ -282,7 +282,7 @@ dir_code_foreign_warn=(decl:CodeWord at:CodeWord origin:CodeWord=-1):>void=>{
     if source =? file or dir_code_warnings.has(at) {return}
     if dir_code_mask(pos_file(at)) =? 0 and dir_code_current() =? 0 {return}
     source_force_body(decl)
-    if nodes[decl].b =? 0 or dir_code_seen & (CodeWord(7) << 4) =? 0 {return}
+    if nodes[decl].b =? 0 {return}
     let body=CodeWord(nodes[CodeWord(nodes[decl].b)].pos)
     loop slot in [CodeWord(4)..7) {
         let setting=CodeWord(dir_code_names[slot])

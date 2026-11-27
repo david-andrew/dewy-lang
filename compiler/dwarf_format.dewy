@@ -96,32 +96,37 @@ let dw_dewy=false
 dw_name=(t:DWord):>string=>$unsafe {
     dw_inputs[0].host[0].type_str(t  dw_dewy)
 }
-dwarf_image=(text_addr:DWord text_len:DWord main_path:string version:string dir:string):>array<[string array<uint8>]>=>$unsafe {
+dw_abs=(dir:string p:string):>string=>{
+    if is_abs_path(p) {return p}
+    "{dir}/{p}"
+}
+dw_line_section=(text_addr:DWord text_len:DWord dir:string):>array<uint8>=>$unsafe {
     let rows_count=DWord(dw_inputs[0].line_rows[0].length)
     let rows=dw_inputs[0].line_rows[0].ptr
     let positions=dw_inputs[0].ir_positions[0].ptr
     let sources_count=DWord(dw_inputs[0].files[0].length)
     let sources=dw_inputs[0].files[0].ptr
-    if rows_count =? 0 {return []}
-    dw_dewy=main_path.endswith(".dewy")
-    let abs=(p:string):>string=>{
-        if is_abs_path(p) {return p}
-        "{dir}/{p}"
-    }
     # Files are numbered from one, preserving their first-use order.
     let fidx:array<int64>=fill(DWord(0)  sources_count)
     # This private index has its final size before either line-table walk.
     let file_index=fidx.ptr
     let fnames:array<string>=[]
     let k:DWord=0
+    let prev_pid:DWord=0
     loop k <? rows_count {
-        if rows[k + 1] =? 0 {
+        let pid=rows[k + 1]
+        if pid =? prev_pid {
             k += 2
             continue
         }
-        let f=dw_pos_file(positions[rows[k + 1]])
+        prev_pid=pid
+        if pid =? 0 {
+            k += 2
+            continue
+        }
+        let f=dw_pos_file(positions[pid])
         if f >=? 0 and f <? sources_count and file_index[f] =? 0 {
-            fnames.push(abs(sources[f].path))
+            fnames.push(dw_abs(dir  sources[f].path))
             file_index[f] = DWord(fnames.length)
         }
         k += 2
@@ -162,31 +167,31 @@ dwarf_image=(text_addr:DWord text_len:DWord main_path:string version:string dir:
     let line:DWord=1
     let file:DWord=1
     let last_pos_id:DWord=-1
-    let last_line:DWord=0
     k=0
     loop k <? rows_count {
         let pos_id=rows[k + 1]
+        if pos_id =? last_pos_id {
+            k += 2
+            continue
+        }
         let f=file
         let l:DWord=0 # (0: code with no source line)
         if pos_id not=? 0 {
-            let p=positions[pos_id]
-            let pf=dw_pos_file(p)
+            let pf=dw_pos_file(positions[pos_id])
             f=0
             if pf >=? 0 and pf <? sources_count {f=file_index[pf]}
             if f =? 0 {
                 k += 2
                 continue
             }
-            if pos_id =? last_pos_id {l=last_line}
-            else {
-                l=if not has_ir_lines {dw_inputs[0].host[0].ir_line(pos_id)} else if pos_id >? 0 and pos_id <? ir_lines_n {ir_lines_p[pos_id]} else {0}
-                last_pos_id=pos_id
-                last_line=l
+            l=if not has_ir_lines {dw_inputs[0].host[0].ir_line(pos_id)} else if pos_id >? 0 and pos_id <? ir_lines_n {ir_lines_p[pos_id]} else {0}
+            last_pos_id=pos_id
+            if f =? file and l =? line and k >? 0 {
+                k += 2
+                continue
             }
-        }
-        if f =? file and l =? line and pos_id not=? 0 and k >? 0 {
-            k += 2
-            continue
+        } else {
+            last_pos_id=-1
         }
         if pu + 40 >? pcap {
             pcap=pcap * 2 + 128
@@ -264,11 +269,18 @@ dwarf_image=(text_addr:DWord text_len:DWord main_path:string version:string dir:
     pp[pu]=1; pu += 1
     __set_len(prog pu)
     let line_sec:array<uint8>=[]
-    put32(@line_sec  2 + 4 + DWord(hdr.length) + DWord(prog.length))
+    line_sec.reserve(10 + DWord(hdr.length) + pu)
+    put32(@line_sec  2 + 4 + DWord(hdr.length) + pu)
     put16(@line_sec  4)
     put32(@line_sec  DWord(hdr.length))
     elf_append_bytes(@line_sec  hdr)
     elf_append_bytes(@line_sec  prog)
+    line_sec
+}
+dwarf_image=(text_addr:DWord text_len:DWord main_path:string version:string dir:string):>array<[string array<uint8>]>=>$unsafe {
+    if DWord(dw_inputs[0].line_rows[0].length) =? 0 {return []}
+    dw_dewy=main_path.endswith(".dewy")
+    let line_sec=dw_line_section(text_addr  text_len  dir)
     let ab=dw_abbrevs()
     # .debug_info: the unit, its types, its functions with their variables; .debug_loc: where
     # each variable is while its code runs
@@ -276,7 +288,7 @@ dwarf_image=(text_addr:DWord text_len:DWord main_path:string version:string dir:
     uleb(@cu  1)
     cstr(@cu  "dewy-core {version}") # DW_AT_producer
     put16(@cu  0x0002) # DW_AT_language: DW_LANG_C (the closest a debugger knows)
-    cstr(@cu  abs(main_path)) # DW_AT_name
+    cstr(@cu  dw_abs(dir  main_path)) # DW_AT_name
     cstr(@cu  dir) # DW_AT_comp_dir
     put64(@cu  text_addr) # DW_AT_low_pc
     put64(@cu  text_len) # DW_AT_high_pc (a length)
@@ -289,7 +301,7 @@ dwarf_image=(text_addr:DWord text_len:DWord main_path:string version:string dir:
     dw_off=fill(-1  DWord(dw_inputs[0].types[0].length))
     dw_base=11 + DWord(cu.length)
     # the variables' types first (and the types they are made of), then the functions
-    k=0
+    let k:DWord=0
     loop k <? DWord(dw_inputs[0].dbg_raw[0].length) {
         let nv=dw_inputs[0].dbg_raw[0].ptr[k + 4]
         k += 5
@@ -410,6 +422,8 @@ dw_frames=(text_addr:DWord):>array<uint8>=>$unsafe {
     elf_append_bytes(@f  cie)
     let unit:DWord=1 # (bytes per advance)
     if arm {unit=4}
+    let x:array<uint8>=[]
+    x.reserve(128)
     let k:DWord=0
     loop k <? cfi_count {
         let start=cfi[k]
@@ -417,7 +431,7 @@ dw_frames=(text_addr:DWord):>array<uint8>=>$unsafe {
         let body=cfi[k + 2]
         let ns=cfi[k + 3]
         k += 4
-        let x:array<uint8>=[]
+        x.clear()
         put32(@x  0) # the CIE, at 0
         put64(@x  text_addr + start)
         put64(@x  len_)

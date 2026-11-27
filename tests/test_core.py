@@ -3690,27 +3690,36 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-def assert_x64_compare_branch_layout(objdump, binary, symbol):
+def assert_x64_compare_branch_layout(objdump, binary, symbol, *, min_pairs=8, machine_loops_only=False):
     dumped = subprocess.run([objdump, '-d', f'--disassemble={symbol}', binary],
                             capture_output=True, text=True, timeout=10, check=True)
     instructions = []
+    targets = {}
     for line in dumped.stdout.splitlines():
-        match = re.match(r'^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2}\s+)+)\s*(\S+)', line)
+        match = re.match(r'^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2}\s+)+)\s*(\S+)(.*)', line)
         if match:
-            instructions.append((int(match[1], 16), len(match[2].split()), match[3]))
+            addr = int(match[1], 16)
+            instructions.append((addr, len(match[2].split()), match[3]))
+            jump = re.search(r'\s([0-9a-f]+)\s+<', match[4])
+            if match[3].startswith('j') and jump:
+                targets[addr] = int(jump[1], 16)
     loops = []
-    for line in dumped.stdout.splitlines():
-        back = re.match(r"^\s*([0-9a-f]+):.*\s+j\w+\s+([0-9a-f]+)\s+<", line)
-        if back and int(back[2], 16) < int(back[1], 16):
-            loops.append((int(back[2], 16), int(back[1], 16)))
+    for addr, _, mnem in instructions:
+        target = targets.get(addr)
+        if target is not None and target < addr:
+            loops.append((target, addr, mnem))
     pairs = [(left, right) for left, right in zip(instructions, instructions[1:])
              if left[2].startswith('cmp') and right[2].startswith('j') and right[2] != 'jmp']
-    assert len(pairs) >= 8, dumped.stdout
-    for compare, branch in pairs:
-        # Padding in a loop costs an instruction on every iteration. Loop
-        # entries are aligned instead; only outside pairs receive padding.
-        if any(start <= compare[0] <= end for start, end in loops):
-            continue
+    if machine_loops_only:
+        pcmpeq_addrs = [addr for addr, _, mnem in instructions if mnem == 'pcmpeqb']
+        checked_loops = [(s, e) for s, e, mnem in loops
+                         if mnem == 'jmp' and any(s <= p <= e for p in pcmpeq_addrs)]
+        checked = [(c, b) for c, b in pairs if any(s <= c[0] <= e for s, e in checked_loops)]
+    else:
+        checked = [(c, b) for c, b in pairs
+                   if any(s <= c[0] <= e for s, e, _ in loops) and targets.get(b[0], 0) - b[0] >= 128]
+    assert len(checked) >= min_pairs, dumped.stdout
+    for compare, branch in checked:
         # The fused pair must neither cross nor end on the 32-byte boundary.
         assert compare[0] // 32 == (branch[0] + branch[1]) // 32, dumped.stdout
     return dumped.stdout
@@ -3725,15 +3734,31 @@ def test_core_x64_compare_branch_layout(compiler, tmp_path):
     source = tmp_path / 'branches.dewy'
     source.write_text('branch_probe=(x:int64 y:int64):>void=>{\n'
                       'if x <? y printl(777)\n' + body +
-                      '\n}\nmain=():>void=>{branch_probe(100 200) exit(42)}\n')
+                      '\n}\nloop_branch_probe=(x:int64 y:int64 n:int64):>void=>{\n'
+                      'loop _ in [0..n) {\nif x <? y printl(777)\n' + body +
+                      '\n}\n}\nmain=():>void=>{branch_probe(100 200) loop_branch_probe(100 200 1) exit(42)}\n')
     binary = tmp_path / 'branches'
     built = subprocess.run([compiler, 'build', source, '--release', '-o', binary],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, ran.stdout + ran.stderr
-    assert ran.stdout.splitlines() == ['777', *[str(i) for i, cutoff in enumerate(cutoffs) if 100 < cutoff]]
-    assert_x64_compare_branch_layout(objdump, binary, 'branch_probe')
+    expected = ['777', *[str(i) for i, cutoff in enumerate(cutoffs) if 100 < cutoff]]
+    assert ran.stdout.splitlines() == expected * 2
+    # Straight-line compare-branch pairs outside loops skip cmp_branch_pad.
+    straight = subprocess.run([objdump, '-d', '--disassemble=branch_probe', binary],
+                              capture_output=True, text=True, timeout=10, check=True)
+    straight_ops = []
+    for line in straight.stdout.splitlines():
+        match = re.match(r'^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2}\s+)+)\s*(\S+)', line)
+        if match:
+            straight_ops.append((int(match[1], 16), len(match[2].split()), match[3]))
+    straight_pairs = [(left, right) for left, right in zip(straight_ops, straight_ops[1:])
+                      if left[2].startswith('cmp') and right[2].startswith('j') and right[2] != 'jmp']
+    assert len(straight_pairs) >= 8, straight.stdout
+    assert any(c[0] // 32 != (b[0] + b[1]) // 32 for c, b in straight_pairs), straight.stdout
+    # Far compare-branch pairs inside loops keep 32-byte boundary padding.
+    assert_x64_compare_branch_layout(objdump, binary, 'loop_branch_probe')
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
@@ -4316,7 +4341,7 @@ def test_core_memory_equality_live_results(compiler, tmp_path, release):
     assert ran.returncode == 42, ran.stdout + ran.stderr
     objdump = shutil.which('objdump')
     if platform.system() == 'Linux' and platform.machine().lower() in ('x86_64', 'amd64') and objdump:
-        assembly = assert_x64_compare_branch_layout(objdump, binary, 'probe')
+        assembly = assert_x64_compare_branch_layout(objdump, binary, 'probe', min_pairs=48, machine_loops_only=True)
         assert 'pcmpeqb' in assembly, assembly
         assert any('push' in line and '%r11' in line for line in assembly.splitlines()), assembly
 
@@ -4363,7 +4388,7 @@ main = () -> int:
     objdump = shutil.which('objdump')
     if platform.system() == 'Linux' and platform.machine().lower() in ('x86_64', 'amd64') and objdump:
         for symbol in ['positive', 'negative']:
-            assembly = assert_x64_compare_branch_layout(objdump, binary, symbol)
+            assembly = assert_x64_compare_branch_layout(objdump, binary, symbol, min_pairs=2, machine_loops_only=True)
             assert 'pcmpeqb' in assembly, assembly
             assert not re.search(r'\bset(?:e|ne)\b', assembly), assembly
 
