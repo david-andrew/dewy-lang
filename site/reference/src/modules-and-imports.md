@@ -1,106 +1,147 @@
 # Modules and Imports
 
-> **Language design.** [Generated coverage](/status/#ref-modules-and-imports) names measured programs and target restrictions; examples here illustrate the design.
+> [Generated coverage](/status/#ref-modules-and-imports) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
 
-Each source file defines a module containing its top-level bindings and executable initialization expressions.
+Each source file is a module. Its top-level declarations are the module's bindings, and its top-level statements run when the program starts.
 
-## Relative Source Imports
+## Import Forms
 
-An import path resolves relative to the file containing the import:
+| Form | Binds |
+|---|---|
+| `import p"shapes.dewy"` | every top-level declaration of the module, here |
+| `import p"shapes.dewy" as shapes` | the module as a namespace: `shapes.area(…)` |
+| `import units` | a library module as a namespace, under its own name |
+| `from p"helpers.dewy" import advance, fresh` | the selected names |
+| `from p"helpers.dewy" import (advance as step fresh)` | the selected names, `advance` renamed |
+| `import (advance fresh) from p"helpers.dewy"` | the same as `from … import` |
 
-<!-- dewy-example: {"mode":"design-only"} -->
+A selection lists names with commas or inside parentheses, each optionally renamed with `as`. The selection may also go on the line after `from p"…"`.
+
+<!-- dewy-example: {"mode":"run","stdout":"42 6 1\n","fixtures":{"shapes.dewy":"area = (w:int h:int):>int => w*h\nperimeter = (w:int h:int):>int => 2*(w+h)\n_scale = 2\n","helpers.dewy":"advance = (x:int):>int => x + 1\nfresh = ():>int => 0\n"}} -->
 ```dewy
-from p"lib.dewy" import (answer add)
-import p"lib.dewy" as library
+import p"shapes.dewy"
+import p"shapes.dewy" as shapes
+from p"helpers.dewy" import advance as step, fresh
+printl(area(6 7) shapes.perimeter(1 2) step(fresh()))
 ```
 
-Selective imports bind the requested names directly. `as` renames a selected binding. A namespace import retains qualification. Importing a path without a selection splats its top-level bindings into the current scope.
+### Splat imports
 
-A bare name as the import source is a module of the *library* — `import units`, `from units import (m kg)`, `from linux.system import _exit` for a subfolder — looked up by name in the compiler's library directory (a `p"…"` is always a file, relative to the importing one; a bare name that is a *binding* holding an exact path, `let source = p"lib.dewy"` then `from source import …`, is that path). The forms never collide, and a vendored library is a matter of which directory the lookup searches first.
+An import with no selection and no `as` name binds each of the module's top-level declarations, as if every one were selected. Names starting with `_` stay private to their module, and the module's own imports are not passed on.
 
-The `from path import names` and `import names from path` orders are equivalent.
-
-## Import Sources
-
-`p` is an ordinary prelude function producing a structural path value. Any exact compile-time object with the required string `path` field satisfies the source-import contract:
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"unknown function '_scale'","fixtures":{"shapes.dewy":"area = (w:int h:int):>int => w*h\n_scale = (x:int):>int => 2*x\n"}} -->
 ```dewy
-from [path="lib.dewy"] import answer
+import p"shapes.dewy"
+printl(_scale(area(2 3)))
 ```
 
-Source imports must be known while constructing the module graph. Runtime strings cannot select source modules.
+Two imports that bind different declarations under one name are an error naming both modules. Import one under a name, or select what you need.
 
-## Binding Kinds
-
-Values, constants, functions, overload sets, and type aliases are importable. Imported type values remain compile-time values in the receiving module.
-
-Namespace-qualified types can be constructed directly: `library.Point[x=1 y=2]`
-or `library.Point(1 2)`. Minting with `type of` creates identity at the
-declaration, independently of spelling. Two modules may each declare a `Token`
-family; their types remain distinct, while importing the same declaration
-under another name preserves its identity.
-
-## Graph and Initialization
-
-Reachable source modules share a coherent type environment, initialize once in dependency order, and reject unresolved names, cycles, and collisions. A source suffix is conventional and does not select different Dewy semantics.
-
-## Targets
-
-Target names have only the fields they need, not LLVM triples: a processor alone (`x86_64`, `aarch64`, `riscv64`, `c`) is the current machine's system on it; then `x86_64-linux`, `aarch64-linux`, `riscv64-linux`, `c-linux`; `x86_64-mac`, `aarch64-mac`; `x86_64-windows`, `aarch64-windows`, `riscv64-windows`, `c-windows`; `x86_64-freestanding`, `aarch64-freestanding`, `riscv64-freestanding`, `c-freestanding`; and `c-posix`, `c89`, `wasm32`.
-
-`$target` is a compile-time string holding the full name being compiled for (never a processor alone); `$target.arch` and `$target.os` are its processor and system (`none` when the name has none). Comparing these with a string literal (`=?`, `not =?`, `in?` and `not in?` against a literal list, combined with `not`, `and`, `or`) folds during checking; an `if` whose condition is such a comparison skips its dead arms without checking them — they may import files that exist only for other targets — and splices the live arm's `{}` body into the enclosing scope so gated imports and declarations bind there. Plain literal conditions keep ordinary flow semantics.
-
-`$supported_targets = ["x86_64-linux" ...]` lists the full target names a module accepts; compiling for another target is an error.
-
-## Prelude
-
-Before checking an ordinary module, the compiler supplies a source prelude of shadowable bindings: paths, printing, `rational` and `fixed` numbers, time (the second and its scales, `Duration`), and the current target's services layer. Every other unit of measure is imported from the library module `units`. `$no_prelude = true` disables those implicit bindings for its containing module only (designed; the current compiler reports it as not implemented yet). Imported modules retain their own prelude decision.
-
-## Provisional Package Facilities
-
-Installed package lookup, directory or glob imports, non-source artifacts, project-wide freestanding policy, and domain-library naming remain provisional. They must extend rather than contradict file-relative module identity and one-time initialization.
-
-## Paths
-
-`p"…"` is a path literal and `p(text)` builds a path at runtime; both are the prelude's `Path`, a value holding its text (`.path`). A path interpolates as its text (`Path` declares the conversion method `__as__ = ():>string => path`, so `path as string` is the text too), so `p"{root}/{name}"` is how paths are joined — there is no `join` method, since interpolation is strictly more flexible. The methods follow Python's `pathlib`:
-
-- lexical: `name`, `stem`, `suffix` (with its dot; a dotfile has none), `parent`, `parts` (a leading `/` is the root part), `is_absolute`, `with_name(name)`, `with_stem(stem)`, `with_suffix(suffix)`;
-- the file system, every outcome a value: `exists`, `is_file`, `is_dir`, `list` (the directory's entries), `read_text` (`string | FileNotFound | FileAccessDenied | IsDirectory | FileExists | FileError | InvalidUtf8`), `read_bytes`, `write_text(text)` and `write_bytes(bytes)` (the byte count or an error), `mkdir`, `rmdir`, `unlink` (`true` or an error). Zero-argument methods are read like fields: `source.parent.name`.
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"'area' is imported from both shapes.dewy and rooms.dewy","fixtures":{"shapes.dewy":"area = (w:int h:int):>int => w*h\n","rooms.dewy":"area = (side:int):>int => side*side\n"}} -->
 ```dewy
-let source = p"{project}/src/main.dewy"
-match source.read_text {
-    text:string     => compile(text)
-    <FileNotFound>  => report"no such file: {source}"
-    _               => report"cannot read {source}"
-}
-let out = source.with_suffix(".udewy")
+import p"shapes.dewy"
+import p"rooms.dewy"
+printl(area(3))
 ```
 
-The same operations exist as free functions on a path's text (`read_text(path:string)`, `write_text`, `file_exists`, `is_file`, `is_directory`, `make_directory`, `remove_directory`, `remove_file`), provided by the target's file-system module (`library/linux/files.dewy`).
+## Module Lookup
 
-## Processes
+- `p"…"` names a file, relative to the importing file. Subfolders work: `import p"sub/greet.dewy" as greet`.
+- A bare name (`import physics`) searches beside the importing file, then the bundled library folders. The importing file itself is skipped, so `physics.dewy` can import the bundled `physics`.
+- Within a folder, a Dewy importer prefers `.dewy` and falls back to `.jo`.
+- `p"@lib/…"` names a file in the active toolchain's library directory, even when a neighbouring file has the same name: `import p"@lib/units.dewy" as units`.
 
-The prelude runs programs as child processes (`library/linux/process.dewy`); every outcome is a value. `program` is a path — the kernel does no `PATH` search, so `run("/usr/bin/env" ["python3" …])` is how to get one — and `args` are the arguments after it. A child inherits the environment, and a failed exec reports `127` like a shell would. A status is the exit code, or `128 + n` when signal `n` ended the child; `SpawnError` means the child could not be started.
+The import source must be a literal. A runtime string cannot choose a module.
 
-- `run(program args):>int64 | SpawnError` waits for the status; the child shares the standard streams. `run_silent` sends its stdout and stderr to `/dev/null`.
-- `spawn(program args):>Child | SpawnError` starts the child and returns it; `child.wait` yields the status. Several children may run at once.
-- `capture(program args):>Output | SpawnError` waits with the child's output collected: `status`, `stdout` and `stderr` (bytes, drained as the pipes fill, so a large output cannot block the child), and `stdout_text` / `stderr_text` (`string | none`: the bytes decoded, `none` when they are not UTF-8).
-- `environment(name):>string | none` reads one of this process's own environment variables.
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"3000 2km\n"} -->
 ```dewy
-let main = ():>void => {
-    match capture("/bin/sh" ["-c" "echo out; echo err 1>&2; exit 3"]) {
-        result:Output => {
-            match result.stdout_text { text:string => printl"{text}"  <none> => {} }
-            exit(result.status)                       # 3
-        }
-        <SpawnError> => exit(1)
-    }
+import units
+from units import km
+import p"@lib/units.dewy" as u
+printl(3km/units.m 2u.km)
+```
+
+## Shadowing and the Prelude
+
+Before checking a module, the compiler supplies the *prelude*: printing, numbers and their formatting, arrays, text, paths and files, processes, time units and clocks, channels and the rest of the everyday library. Every other module (`units`, `argparse`, game libraries) is imported.
+
+The prelude's bindings are `$shadowable`. A `$shadowable const` at module top level may be shadowed by inner scopes and importing modules: there a plain `name = …` declares a new binding instead of being an error.
+
+<!-- dewy-example: {"mode":"run","stdout":"3\n"} -->
+```dewy
+$shadowable const limit = 10
+main = () => {
+    limit = 3     # a new binding in this scope
+    printl(limit)
 }
 ```
 
-Still ahead: a working directory and a custom environment for the child, and reading a child's output as it runs.
+A plain `const` cannot be reassigned or shadowed by assignment; `let` declares a new binding deliberately.
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"cannot modify const 'limit'; use let"} -->
+```dewy
+const limit = 10
+main = () => {
+    limit = 3
+    printl(limit)
+}
+```
+
+Name conflicts resolve this way:
+
+- A module's own declaration may shadow an imported `$shadowable` one. Declaring a name that a non-`$shadowable` import also binds is an error; import that module under a name or rename the selection.
+- An import may shadow the prelude's names.
+- A non-`$shadowable` import outranks a `$shadowable` one.
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"is not `$shadowable`","fixtures":{"helpers.dewy":"advance = (x:int):>int => x + 1\n"}} -->
+```dewy
+import p"helpers.dewy"
+advance = (x:int):>int => x + 10
+printl(advance(1))
+```
+
+A splat import that shadows a prelude name warns, naming both. Selecting the name, or importing the module under a name, is quiet. Shadowing replaces the whole overload family: a module's own `max` hides every prelude `max` overload. Members are still found through their value, so `xs.hash()` reaches the prelude's.
+
+`$no_prelude`, which turns the prelude off for one module, is part of the design but not built: the compiler reports it as not implemented.
+
+## Import Cycles and Initialization
+
+Modules may import each other in cycles. A program runs as if its modules were one file: each module sees the others' functions, types and values whichever imports first.
+
+<!-- dewy-example: {"mode":"run","stdout":"42\n","fixtures":{"totals.dewy":"import p\"example.dewy\"\ntotal = ():>int => base + 2\n"}} -->
+```dewy
+import p"totals.dewy"
+let base = 40
+main = () => printl(total())
+```
+
+- Each module's top-level code runs once, in its own order. Imported modules go first, each running as far as it can.
+- Within a cycle, a line that reads or writes another module's value (directly or through a function it calls) runs after that value is initialized.
+- The only errors are the ones one file would have: values that need each other's first values, or a module's own order putting a line before a value it needs. Both name the chain of values and lines.
+- A top-level call waits until the values its functions read or write are initialized, through statically known calls. In one file, calling such a function before the value's declaration is an error; statements are never reordered. Calls through opaque function values are not checked here.
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"a value cycle across modules","fixtures":{"second.dewy":"import p\"example.dewy\"\nlet b = a + 1\n"}} -->
+```dewy
+import p"second.dewy"
+let a = b + 1
+```
+
+## Conditional Imports
+
+An `if` whose condition compares `$target`, `$target.arch`, `$target.os` or `$build.mode` with string literals is decided while compiling. Only the live arm is checked, and its body is spliced into the enclosing scope, so imports in it bind as if written outside. The dead arms may name modules that exist only for other targets.
+
+<!-- dewy-example: {"mode":"run","stdout":"42\n","fixtures":{"native_audio.dewy":"level = (x:int):>int => x + 1\n"}} -->
+```dewy
+if $target =? "wasm32" {
+    import p"web_audio.dewy" as audio
+} else {
+    import p"native_audio.dewy" as audio
+}
+printl(audio.level(41))
+```
+
+`$supported_targets = ["x86_64-linux" "wasm32"]` at file scope lists the targets a module accepts. See [Settings](settings.md#target-and-build-mode) for `$target` and `$build`.
+
+## Files and Processes
+
+Paths (`p"…"`), files, processes and command-line arguments are prelude services, described in [Command-Line Programs, Files, and Processes](command-line-programs.md).

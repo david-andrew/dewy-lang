@@ -20,6 +20,7 @@
 - [Control Flow](control-flow-and-iteration.md)
 - [Errors, Exceptions, and Forwarding](errors-and-forwarding.md)
 - [Ranges and Iteration](ranges-and-iteration.md)
+- [Generators and Lazy Sequences](generators.md)
 - [Refinements, Effects, and Safety](refinements-and-effects.md)
 - [Testing](testing.md)
 - [Debugging](debugging.md)
@@ -30,11 +31,16 @@
 - [Arrays and Containers](arrays-and-containers.md)
 - [Structural Objects](objects.md)
 - [Physical Quantities](physical-quantities.md)
+- [Time and Dates](time-and-dates.md)
 
 ## Programs and Implementations
 
 - [Modules and Imports](modules-and-imports.md)
 - [Compile-Time Facilities and Metatags](compile-time.md)
+- [Settings and Safety Levels](settings.md)
+- [Concurrency and Parallel Work](concurrency.md)
+- [Command-Line Programs, Files, and Processes](command-line-programs.md)
+- [Targets: Native, Web, and GPU](targets.md)
 - [Host Interoperability](interoperability.md)
 
 ## Appendices

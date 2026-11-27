@@ -1,166 +1,275 @@
 # Arrays and Containers
 
-> **Language design.** [Generated coverage](/status/#ref-arrays-and-containers) names measured programs and target restrictions; examples here illustrate the design.
+> [Generated coverage](/status/#ref-arrays-and-containers) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
+
+Arrays, tuples, dictionaries and sets are values. Binding, assigning, passing and returning one gives an independent value; the compiler shares storage until a write and moves values at their last use, so most copies cost nothing. Pass `@xs` to let a function change the caller's array (see [Values, Copies, and Places](values.md)).
 
 ## Arrays
 
-An array is an ordered homogeneous value. Array indexing is zero-based.
+`array<T>` is a growable, zero-indexed sequence of `T`. `array<T length=N>` has a fixed positive length known when compiling and stores its elements inline.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"[\"Ada\" \"Grace\"]\n[\"Bea\" \"Grace\"]\n30\n"} -->
 ```dewy
 let names:array<string> = ["Ada" "Grace"]
 let triple:array<int64 length=3> = [10 20 30]
+let copy = names
+copy[0] = "Bea"
+printl(names)
+printl(copy)
+printl(triple[2])
 ```
 
-`array<T>` specifies the element type. Growable arrays hold word scalars, strings, and objects; an object element is stored as an independent copy, so the array never aliases the value pushed into it, and a popped element remains valid. Inside an index, `end` is the last index (`xs.length - 1`) and composes freely: `xs[end]`, `xs[end - 1]`, `xs[2..end]`, proven from the same facts. Iterating an array of objects (`loop s in spans`) binds the loop variable as a read-only borrow of each element — assigning it, its fields, growing its arrays, or passing it as a place is rejected; copy it (`let mine:Span = s`) to change it. `array<T length=N>` additionally refines the length. Array values follow Dewy's value semantics: binding, assignment, argument passing, and return produce an independent value unless the program explicitly passes a place.
+`[]` takes its type from context, as `1` does: an array, dictionary, set or record with defaults. With no context it is an error asking for the type:
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"cannot infer the type of 'x'"} -->
 ```dewy
-let original = [1 2 3]
-let copy = original
-copy[0] = 9                  # original remains [1 2 3]
+let x = []
 ```
 
-The compiler may implement an unobservable copy as a move, borrowed read, shared immutable backing storage, or another equivalent representation.
+An array literal takes its element type from the expected type (`let bytes:array<uint8> = [0 255]`), and otherwise from its elements. `fill(value count)` makes `count` copies of a value.
 
-`.length` reports the length. Integer indexes select elements, and range indexes select slices. The compiler must prove an ordinary index valid; operations that perform explicit runtime validation are separate checked interfaces.
+### Methods
 
-### Growth Methods
+| Method | Effect |
+|---|---|
+| `push(v)`, `extend(ys)`, `insert(v i)` | add elements; `insert` places `v` before `i` |
+| `pop()`, `pop(i)` | remove and return the last element, or the one at `i` |
+| `truncate(n)`, `clear()` | keep the first `n`, or none |
+| `sort()`, `reverse()` | reorder in place |
+| `sorted`, `reversed` | a new array |
+| `get(i)` | the element, or `none` out of bounds |
+| `index_of(x)` | the first position of `x`, or `Missing` |
+| `count(x)`, `count(f)` | elements equal to `x`, or accepted by `f` |
+| `map(f)`, `filter(f)`, `any(f)`, `all(f)` | apply a predicate or function |
+| `min_by(key)`, `max_by(key)` | first element with the least or greatest key |
+| `is_empty`, `length` | inspection |
+| `join(sep)` | for strings: one string |
 
-An array whose type has no exact length (`array<T>`) may change length through methods on the value. `xs.push(v)` appends; `xs.pop` removes and yields the last element and `xs.pop(idx)` the element at `idx`, shifting later elements down; `xs.insert(v idx)` inserts before `idx` (`idx` may equal the length); `xs.truncate(n)` keeps the first `n` elements; `xs.clear` empties; `xs.reserve(n)` requests capacity; `xs.sort` orders integer elements ascending in place.
+`sort` and `sorted` take `key=` and `reverse=true`; both are stable. `sort_with(less)` and `sorted_with(less)` take a comparison function.
 
-Each partial operation carries a proof obligation: `pop` requires a proven positive length, and `pop(idx)`/`insert(v idx)` require `0 <= idx < length` (`<=` for `insert`). Proofs come from literal lengths (an exact length is retained as a fact until a length-changing operation steps it), from `push`/`pop` stepping known lengths, and from guards such as `xs.length >? 0` or `idx <? xs.length`. A binding declared with an exact length (`array<T length=N>`) cannot change length.
+Each partial operation is an obligation on the caller: `pop()` needs a nonempty array, `pop(i)` and `insert(v i)` need `i` in bounds, and `min_by`, `max_by`, `first` and `last` need `length >? 0`. Literal lengths, pushes, pops and guards supply the facts:
 
-Length-changing methods also preserve declared minimum and maximum lengths,
-including contracts on array fields. `xs.push(v)` must prove it stays below
-an annotated maximum, and `pop`, `truncate`, or `clear` must preserve an
-annotated minimum. See [array contracts](refinements-and-effects.md#array-contracts-and-dependent-indices).
-The count passed to `truncate` must be proven nonnegative, including when it
-is only known at runtime.
+<!-- dewy-example: {"mode":"reject","diagnostic":"pop() of an empty array"} -->
+```dewy
+let xs:array<int64> = []
+printl(xs.pop())
+```
 
-Container mutation is reached only through the container value; free functions are reserved for genuinely global operations.
+<!-- dewy-example: {"mode":"run","stdout":"[\"Ada\" \"Bea\" \"Cal\"]\nCal\n1\nMissing\n-1\n[10 20 30]\n[3 2]\ntrue\n"} -->
+```dewy
+let names = ["Ada" "Bea"]
+names.push("Cal")
+printl(names)
+printl(names.pop())
+let xs = [3 1 2]
+printl(xs.index_of(1))
+printl(xs.index_of(9))
+printl(xs.index_of(9) ?? -1)
+printl(xs.sorted.map((x) => x * 10))
+printl(xs.filter((x) => x >? 1))
+printl(xs.any((x) => x >? 2))
+```
 
-A `let` with a runtime-length annotation and an empty initializer, `let buffer:array<uint8> = []`, is a growable array from the start (an empty exact array would be useless), and a callee may grow it through a place parameter: `fill(@buffer 5)`. Passing `@name` makes the compiler forget what it knew about the binding — an exact length, a refinement — since the callee may have changed it.
+There is no `zip` or `enumerate`: a combined loop walks sources in step, `loop i in 0.. and x in xs` (see [Combined headers](ranges-and-iteration.md#combined-headers)).
 
-A loop inside `[]` is loop capture: the collector receives each non-`void` value the loop expresses and produces an array.
+### Combining
 
-A trailing `...` after a sequence inserts its elements into a surrounding array literal. Fixed elements and spreads may mix: `[heads... tails...]`, `[0 xs... 1]`.
+`+` does not join arrays; on arrays it is reserved for elementwise math, and `.+` adds element by element. Spread arrays and sets into a literal, `[head... item tail...]`, or append in place with `extend`:
+
+<!-- dewy-example: {"mode":"run","stdout":"[1 2 3 4 1 2 3]\n[11 22 33]\n"} -->
+```dewy
+let xs = [1 2 3]
+printl([xs... 4 xs...])
+printl(xs .+ [10 20 30])
+```
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"`+` does not join arrays"} -->
+```dewy
+let a = [1 2]
+let b = [3]
+printl(a + b)
+```
 
 ### Equality
 
-`xs =? ys` compares arrays by value: they are equal when they have the same length and their elements are pairwise `=?`, recursively through nested arrays, records and unions. Arrays whose static lengths differ are simply unequal. `not =?` is the negation. Storage is never compared: two arrays built separately with the same elements are equal. An array of dictionaries or sets has no `=?` yet.
+`xs =? ys` compares by value: the same length and pairwise equal elements, recursively. Storage is never compared. Floating-point elements follow float equality (`NaN` is unequal to itself).
 
-## Shapes and Dimensions
+## Indexing and Slices
 
-Arrays are also the intended foundation for vectors, matrices, and tensors. Shape belongs in array type information rather than requiring unrelated matrix classes.
+An index must be proven in bounds before the program runs; there is no hidden check (see [Making Code Prove](refinements-and-effects.md#making-code-prove)). `xs.get(i)` takes an out-of-bounds index as a value instead.
 
-The exact general multidimensional literal and type syntax remains provisional. In particular, nested `array<array<T>>` must remain a valid array-of-arrays construction and must not prevent a contiguous representation such as an array whose `length` or `shape` is a sequence of dimensions.
+| Form | Selects |
+|---|---|
+| `xs[i]` | one element |
+| `xs[end]`, `xs[end-1]` | counted from the last index, `xs.length - 1` |
+| `xs[a..b)`, `xs[a..b]` | a contiguous slice, end excluded or included |
+| `xs[a..]`, `xs[..b)` | to the end, from the start |
+| `xs[0, 2..]` | a stepped selection |
+| `xs[$clamp a..b)` | a slice with bounds clamped to the array, as in Python |
+| `xs[indexes]`, `xs[mask]` | elements at an index array, or where a `bool` array is true |
 
-## Dictionaries and Bidictionaries
+The receiver and its bounds are evaluated once. A slice is a new array. Selections may also be assigned: a scalar fills every selected element, and an array supplies exactly one replacement per element.
 
-A dictionary literal uses `->` pairs; a bidictionary uses `<->` pairs and supports lookup in both directions:
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"[20 30]\n[20 30 40]\n50\n[10 20]\n[20 30 40 50]\n[]\n[50 30 10]\n[0 20 0 40 0]\n"} -->
 ```dewy
-let scores = ["Ada" -> 10 "Grace" -> 12]
-let names = [1 <-> "one" 2 <-> "two"]
+let xs = [10 20 30 40 50]
+printl(xs[1..3))
+printl(xs[1..3])
+printl(xs[end])
+printl(xs[..2))
+printl(xs[$clamp 1..10))
+printl(xs[$clamp 7..9))
+printl(xs[end, end-2..0])
+let ys = [10 20 30 40 50]
+ys[0, 2..] = 0
+printl(ys)
 ```
 
-Dictionaries retain insertion order, and iteration yields key/value pairs in that order:
+Inside nested brackets, each `end` counts its own receiver. `new` inside brackets inserts an axis of length one, as NumPy's `newaxis` does.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+## Tuples and Fixed Arrays
+
+`[int64 string]` is a fixed-length array with a type per position: Dewy's tuple. A constant index reads that position's type; any other index gives the union of the element types and is proven in bounds like an array index.
+
+Unpacking with `let [a b] = value` works on arrays, tuples and records. Fixed lengths are checked while compiling; a growable array's length is an obligation. `_` discards an element and `...rest` takes the remainder. `[a b] = [b a]` swaps.
+
+<!-- dewy-example: {"mode":"run","stdout":"8\n7 seven\n[2 3]\n2 1\n1\n1\n"} -->
 ```dewy
-let scores = ["Ada" -> 10 "Grace" -> 12]
-
-loop [name score] in scores
-    printl"{name}: {score}"
+let entry:[int64 string] = [7 "seven"]
+printl(entry[0] + 1)
+let [n name] = entry
+printl"{n} {name}"
+let [first ...mid last] = [1 2 3 4]
+printl(mid)
+let a = 1
+let b = 2
+[a b] = [b a]
+printl"{a} {b}"
+let moves:array<[int64 int64]> = [[1 0] [0 1]]
+loop [dx dy] in moves { printl(dx + dy) }
 ```
 
-`dict<K V>` names a dictionary type; a dictionary literal in a `dict<K V>` context adopts those entry types, and an empty literal requires such a context. `K` may be a union of string literals (`'0b' | '0t'`, an enumeration of allowed keys — such a union is a string at runtime), and `V` may be an object type, an optional (`int64 | none`), or a union of objects, words, and strings (`Number | Name | Punct`, a token); arrays likewise hold string-literal unions, optionals, and such unions as elements — a loop over them binds each element for `match`. `V` may also be an array (`dict<string array<Op>>` — a table of handler lists); nested array elements are handles released one level deep. An abstract `int` or `uint` in an element position — `array<int>`, `dict<string int | none>`, `set<uint>` — is the 64-bit word, as `int` in a signature is. Unions containing arrays are not container elements yet. Dictionaries are values with the ordinary value semantics: they are passed, returned, stored, and compared by value, and copies are independent.
+Assigning a growable array to a fixed-length one requires its length to be proven.
+
+## Dictionaries
+
+`dict<K V>` maps keys to values. The literal is `[k -> v ...]`. Dictionaries keep insertion order, and iteration yields keys and values in that order.
 
 ### Lookup
 
-`d[key]` is valid only when the key is *proven present* and then has type `V`. A key is proven when it is a constant entry of the literal that initialized the dictionary, was stored by `d[key] = value`, is the key bound by `loop [key value] in d`, or was tested by a guard `if key in? d`. Facts are path-sensitive (a key proven on every branch stays proven after the branches join) and are invalidated when the dictionary or the key binding is reassigned. A guard's search result is reused by the guarded lookup, so a proven lookup performs no second search. An unproven `d[key]` is a compile error.
+`d[key]` needs the key proven present: by a guard (`if key in? d`), an earlier store into `d[key]`, a key of the literal that made the dictionary, or a key taken from the dictionary itself. An unproven lookup is an error. `d.get(key)` takes a missing key as a value: it gives `V?`, usually followed by `??`.
 
-`d.get(key)` is the lookup that may miss, with type `V | none`. `d.get(key default)` yields `default` when the key is absent and has type `V`.
-
-A dictionary whose key type is *finite* — a union of literals such as `'0b' | '0o' | '0x'` — and whose literal has an entry for every value of it is *total*: `d[k]` is then proven for any `k` of the key type, not only for a constant key. Totality is inferred from the literal (a `const` keeps it everywhere; a `let` keeps it until a `pop` or `clear`), or declared with `totaldict<K V>`, which makes a missing entry an error at the literal (naming the missing keys) rather than at some later lookup, and refuses `pop` and `clear`, so the type is an invariant: a `totaldict<K V>` parameter proves `table[k]` without any fact at the call site. A total dictionary passes where a `totaldict` is expected; a `dict<K V>` that may be partial does not. `totaldict` needs a finite key type.
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"cannot prove the key is in the dictionary"} -->
 ```dewy
-const BasePrefix:type = '0b' | '0o' | '0x'
-const RADIX:totaldict<BasePrefix int64> = ['0b' -> 2 '0o' -> 8 '0x' -> 16]   # forgetting `'0x'` is an error here
-let radix_of = (base:BasePrefix):>int64 => RADIX[base]                       # proven: every `BasePrefix` is a key
+let d = ["a" -> 1]
+let k = "b"
+printl(d[k])
 ```
 
-### Mutation
+<!-- dewy-example: {"mode":"run","stdout":"Ada: 10\nGrace: 12\n10\n0\nset[\"Ada\" \"Grace\" \"Bea\"]\n[10 12 7]\n10\n[\"Grace\" -> 12 \"Bea\" -> 7]\n"} -->
+```dewy
+let scores = ["Ada" -> 10 "Grace" -> 12]
+loop [name score] in scores { printl"{name}: {score}" }
+printl(scores["Ada"])
+printl(scores.get("Bea") ?? 0)
+scores["Bea"] = 7
+printl(scores.keys)
+printl(scores.values)
+printl(scores.pop("Ada"))
+printl(scores)
+```
 
-`d[key] = value` replaces the value of an existing key in place or appends a new entry. `d[key] += value` (any compound operator) updates a *proven* key in place: it reads like `d[key]`, so an unproven key is the same compile error, and the counting idiom is `if word in? counts counts[word] += 1 else counts[word] = 1`. `d.pop(key)` removes a proven key and yields its value; `d.pop(key default=v)` removes the key if present and yields its value, else `v`, without a proof. `d.clear` removes every entry. `d.length` is the number of entries.
+### Updates
 
-A dictionary must not be mutated by a loop that iterates it; stores, `pop`, and `clear` inside such a loop are compile errors.
+| Operation | Meaning |
+|---|---|
+| `d[k] = v` | replace the value, or add the entry at the end |
+| `d[k] += v`, `d[k].push(x)` | change an existing entry; the key must be proven present |
+| `d.pop(k)` | remove a present key and return its value |
+| `d.pop(k default=none)` | remove the key if present; the default otherwise |
+| `d.remove(k)` | remove the key if present; `bool` whether it was |
+| `d.insert_if_absent(k v)` | add only when missing; `bool` whether it was added |
+| `d.keys`, `d.values` | a new set of keys, a new array of values, in insertion order |
+| `d1 \| d2` | every entry of `d1`, plus `d2`'s new keys; a shared key takes `d2`'s value |
 
-### Views and Combination
+Counting and grouping put the key in first, so the update is proven:
 
-`d.keys` is a fresh `set<K>` of the keys and `d.values` a fresh `array<V>` of the values, both in insertion order. `d1 | d2` (equivalently `d1 or d2`) is a new dictionary containing every entry of `d1` followed by the entries of `d2` whose keys are new; for shared keys the right value replaces the left value at the left position. Other operators do not apply to dictionaries; combine key sets instead.
+<!-- dewy-example: {"mode":"run","stdout":"[\"a\" -> 2 \"b\" -> 1]\ntrue\nfalse\n[\"x\" -> 1 \"y\" -> 20 \"z\" -> 3]\n"} -->
+```dewy
+let counts:dict<string int64> = []
+loop w in ["a" "b" "a"] {
+    if w not in? counts counts[w] = 0
+    counts[w] += 1
+}
+printl(counts)
+let visited:dict<int64 int64> = []
+printl(visited.insert_if_absent(7 1))
+printl(visited.insert_if_absent(7 2))
+printl(["x" -> 1 "y" -> 2] | ["y" -> 20 "z" -> 3])
+```
 
-### Representation
+A loop over a dictionary iterates a snapshot of its entries, so changing the dictionary in the body does not change the iteration. Dictionaries compare and hash by their entries, ignoring order. A float key is an obligation: it must be proven not `NaN`.
 
-Bidirectional dictionaries and dictionary equality remain provisional.
+### Total dictionaries
+
+`totaldict<K V>` has an entry for every value of a finite key type, a union of literals. Its literal must list every key, and the error names any missing one. Every lookup is proven, and it has no `pop` or `clear`:
+
+<!-- dewy-example: {"mode":"run","stdout":"16\n"} -->
+```dewy
+BasePrefix:type = '0b' | '0o' | '0x'
+const RADIX:totaldict<BasePrefix int64> = ['0b' -> 2 '0o' -> 8 '0x' -> 16]
+radix_of = (base:BasePrefix):>int64 => RADIX[base]
+printl(radix_of('0x'))
+```
 
 ## Sets
 
-`set[...]` constructs a set; `set<T>` names its type. Members are distinct, and a set remembers first-seen order for iteration and `s.values` (a fresh `array<T>`).
+`set[...]` makes a set and `set<T>` names its type. Members are distinct and keep first-insertion order. `set(values)` makes the set of an array's elements and `set"0123"` the set of a string's graphemes.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+| Operation | Meaning |
+|---|---|
+| `s.push(x)` | add a member; an existing member keeps its position |
+| `x in? s`, `s.has(x)` | membership |
+| `s.remove(x)` | remove if present; `bool` whether it was |
+| `s.pop(x)`, `s.pop()` | remove and return a present member, or any member of a nonempty set |
+| `a \| b`, `a & b`, `a - b`, `a xor b` | union, intersection, difference, symmetric difference |
+| `s.values`, `s.sorted`, `[s...]` | the members as an array |
+
+A set has no positions: collect it into an array to index or sort it.
+
+<!-- dewy-example: {"mode":"run","stdout":"set[\"visible\" \"moving\" \"selected\"]\ntrue\nset[\"visible\" \"selected\"]\nset[\"0\" \"1\" \"2\" \"3\"]\n"} -->
 ```dewy
-let permissions = set["read" "write"]
-permissions.push("execute")
-let present = "read" in? permissions
-let taken = permissions.pop("read")
+let tags = set["visible" "moving" "visible"]
+tags.push("selected")
+printl(tags)
+printl("moving" in? tags)
+printl(tags - set["moving"])
+printl(set"0123")
 ```
-
-`set"0123"` is the set of a string's graphemes and `set(values)` the set of an array's elements (`set(xs)` also drops duplicates). `s.push(x)` inserts a member, using the same operation name as arrays; inserting an existing member preserves its position. `x in? s` tests membership. `s.pop(x)` removes a proven member and yields it; `s.pop(x default=v)` removes `x` if present and yields it, else `v` (`default=none` makes the result `T | none`). `s.clear` empties the set; `s.length` counts members. Sets are not indexable and have no `keys`.
-
-Set operators produce new sets: `|`/`or` union, `&`/`and` intersection, `-` difference, `xor` symmetric difference. Operands must have the same element type. A set must not be mutated by a loop that iterates it.
-
-Set equality, ordering, and compound operator forms remain provisional.
-
-Arrays, sets, and dictionaries print — and convert to `string` — as their literal syntax; see [Printing](strings.md#printing).
 
 ## Loop Capture
 
-An array literal whose only item is a loop collects the values the loop body expresses, in order — one per iteration, or none when the body expresses nothing on that path, so an `if` without an `else` filters. Nested loops flatten into the one array.
+A collector whose item is a loop gathers every value the loop body expresses, in order: none on a path that expresses nothing (an `if` without `else` filters), several when the body expresses several. `break`, `continue`, assignments and `void` calls express nothing. Nested loops flatten into the one collection. `set[loop ...]` collects a set, and `key -> value` values collect a dictionary (a later duplicate key replaces the value).
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"[1 4 9 16]\n[0 2 4 6 8]\n[11 12 21 22]\n[0 0 1 10 2 20]\nset[1 3 5 7 9]\n[\"a\" -> 1 \"bb\" -> 2]\n[[0 1 2] [3 4 5]]\n"} -->
 ```dewy
-let main = ():>void => {
-    let squares = [loop i in [1..5) i * i]                     # [1 4 9 16]
-    let evens = [loop n in [0..10) if n % 2 =? 0 n]            # [0 2 4 6 8]
-    let pairs = [loop a in [1..3) loop b in [1..3) a * 10 + b]  # [11 12 21 22]
-    exit(squares.length + evens.length + pairs.length)         # 13
-}
+printl([loop i in [1..5) i * i])
+printl([loop n in [0..10) if n % 2 =? 0 n])
+printl([loop a in [1..3) loop b in [1..3) a * 10 + b])
+printl([loop i in [0..3) {i i*10}])
+printl(set[loop n in [0..10) if n % 2 =? 1 n])
+printl([loop w in ["a" "bb"] w -> w.length])
+printl([loop y in [0..2) [loop x in [0..3) x + y * 3]])
 ```
 
-`set[loop …]` collects into a set, and a loop whose values are `key -> value` pairs collects into a dictionary (a later pair with the same key replaces the value, as a store does):
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let main = ():>void => {
-    let odds = set[loop n in [0..10) if n % 2 =? 1 n]          # set[1 3 5 7 9]
-    let lengths = [loop w in ["a" "bb" "ccc"] w -> w.length]   # ["a" -> 1 "bb" -> 2 "ccc" -> 3]
-    exit(odds.length + lengths.length)                         # 8
-}
-```
-
-The element (or key and value) type is the values' type, or the annotation's (`let xs:array<string> = [loop …]`); values of different types are an error, as is mixing pairs with plain values. The container is a runtime-length one declared and filled just before the statement that contains the literal, so the loop's `break` and `continue` work as usual. A capture must sit in a block body (`{ … }`), not in an expression-bodied function or a default; a loop whose body is all statements is an error.
+Collectors are eager. A grid built by a comprehension keeps its row lengths as facts, so its elements index without guards; prefer it to filling a grid after making it.
 
 ## Literal Classification
 
-At the top level of `[]`:
+At the top level of `[...]`:
 
-- positional values form an array;
-- named `=` fields form an object;
-- `->` pairs form a dictionary;
-- `<->` pairs form a bidictionary.
+- positional values make an array (or a tuple, or a record given positionally, when the context says so);
+- `name=value` fields make a record;
+- `key -> value` pairs make a dictionary.
 
-`set[...]` constructs a set from positional values. Mixed top-level forms must satisfy the rules of the selected container rather than silently switching interpretation element by element.
+`set[...]` makes a set. Mixing these forms in one literal is an error. Multidimensional numeric arrays and matrices are described in [Numeric Types](numeric-types.md).

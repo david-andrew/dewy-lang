@@ -46,6 +46,8 @@ def metadata(value: str | None, location: str) -> dict:
         raise ValueError(f'{location}: mode must be one of {sorted(MODES)}')
     if data['mode'] == 'run' and not isinstance(data.get('stdout'), str):
         raise ValueError(f'{location}: run requires exact stdout')
+    if data['mode'] == 'design-only' and not data.get('why'):
+        raise ValueError(f'{location}: design-only requires a "why": what is not built yet')
     if data['mode'] == 'reject' and not data.get('diagnostic'):
         raise ValueError(f'{location}: reject requires a diagnostic substring')
     return data

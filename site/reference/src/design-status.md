@@ -1,71 +1,53 @@
 # Design Maturity and Open Questions
 
-> **Language design.** [Generated coverage](/status/#ref-design-status) names measured programs and target restrictions; examples here illustrate the design.
+> [Generated coverage](/status/#ref-design-status) names related acceptance programs. This page has no examples.
 
-This appendix records where Dewy's intended semantics are settled, provisional, or open. It is about language design, not compiler progress.
+This appendix says which parts of Dewy are settled, which are decided but not built yet, and which are still open. Pages in this reference describe what the current compiler does; where they show a decided design that does not compile yet, the example carries a **Design only** label that says what is missing.
 
 ## Settled Foundations
 
-The following principles organize the language and should be treated as normative:
+These principles organize the language. The compiler implements them today.
 
-- Dewy is a statically checked, general-purpose language centered on everyday ease of use.
-- Expressions may produce values; declarations and ordinary assignments produce `void`.
-- Ordinary rebinding, argument passing, and return have value semantics.
-- `@` explicitly selects a place or function binding when reference-like behavior is intended.
-- Strings are immutable grapheme-cluster sequences with explicit lower-level views.
-- Arrays are homogeneous values and may carry length or shape facts in their types.
-- Loop capture is collecting a loop's non-`void` expressed values in a surrounding collector such as `[]`.
-- Sequences combine through their construction syntax: interpolation joins strings, and `...` spreads an array into a surrounding `[]` literal.
-- Objects are structural values. User-defined constructors are ordinary functions, while a structural or hybrid type may directly contextualize an object literal.
-- Defaults are per-call fallbacks and do not remove their parameters from positional binding.
-- Types are compile-time values and use the ordinary expression grammar where practical.
-- Physical dimensions participate in types and may erase from runtime representations; every dimension has a canonical unit and other units are exact rational scales of it.
-- Integers are arbitrary precision (words when proven to fit, big integers otherwise, `bigint` on request), `/` yields exact rationals, and `fixed` is the fixed-point domain. `float32` and `float64` are strict IEEE floating point.
-- Operations that would raise an exception in Python — indexing, dictionary lookup, `pop`, division by a literal zero — must be proven safe at compile time or use an explicit alternative (`get`, `default=`); non-failing behavior stays Python-shaped, and shared names (`length`, `pop`) mean the same thing on every container.
-- Dictionaries and sets are values with insertion-ordered iteration, proven-key lookups, and hash-table representations; a container may not be mutated by a loop that iterates it.
-- Every value has one owner and storage is released deterministically; placement (stack, static, arena) is a proof-gated optimization and never changes whether a program is valid.
-- Expected failures are direct union alternatives belonging to a nominal `error` family rather than values wrapped in a `Result` container.
-- Any alternative descended from nominal `exception` forwards through receiver navigation. Both `error` and `none` descend from it, while all ordinary alternatives remain subject to member checking; call arguments never forward implicitly.
-- Returned errors and evaluation effects occupy separate parts of a function contract.
-- `type of Parent` is the sole generative type operation. It creates a fresh nominal child; `&` is non-generative intersection and preserves nominal ancestry already present in its operands.
-- A unit-like nominal type has one canonical inhabitant written with the type's name. Hybrid nominal/structural values use `Type[field=value ...]` construction.
-- Structural object intersections merge matching fields by intersecting their types. A mutability disagreement is invalid rather than selecting one declaration.
+- Dewy is a statically checked, general-purpose language: Python-like ease, C-like speed, safe by default with danger opt-in.
+- Expressions may produce values; declarations and ordinary assignments produce `void`. A file without `main` runs top to bottom; with `main`, the top level runs first and then `main` runs once.
+- Rebinding, argument passing and return have value semantics. `@` selects a place (`@xs`, `@world`) or a function handle (`@f`) when reference-like behavior is intended; an explicit copy of a costly value is spelled `.copy`.
+- A bare function name calls the function; zero-argument calls may omit parentheses.
+- `int` is arbitrary precision. Fixed-width `intN` and `uintN` must be proven not to overflow unless their type asks for wrapping or saturation (`uint8<overflow='wrap'>`). Decimal literals and `/` on integers are exact; `float32` and `float64` are strict IEEE floating point. `%` is floored.
+- Operations that raise in Python (indexing, dictionary lookup, `pop`, division by zero, narrowing conversions) must be proven safe at compile time or use a form that returns the failure as a value. `$runtime_checks` opts a program into checking at run time instead.
+- Strings are immutable sequences of grapheme clusters; `length` counts what a reader sees as characters.
+- Arrays are homogeneous values that may carry length or shape facts in their types. Dictionaries and sets keep insertion order; `d.keys` is a set.
+- Objects are structural values; `type of Parent` is the only operation that mints a nominal type, and `&` intersects types without minting.
+- Expected failures are direct union alternatives in the `error` family, not wrapped results. Postfix `or_throw` passes a failure to the caller; `??` supplies a fallback. `none` and `error` both descend from `exception`, which forwards through member access.
+- Physical dimensions are part of types and are erased at run time. Every dimension has a canonical unit, other units are exact rational scales of it, and a quantity prints in a unit chosen from its dimension and magnitude.
+- Time has one continuous timeline: `Instant` and `Duration` count exact nanoseconds by default, with calendars, zones and dates layered on top.
+- Every value has one owner and is released deterministically. Allocation uses an implicit context allocator; running out of memory ends the process unless `$explicit_allocation_failure` asks for it as a value.
+- Settings are metatags in the language (`$runtime_checks`, `$program.max_cores = 2`), not environment variables or compiler flags.
+- Import cycles behave as one large file; imports splat their names unless written `as name`.
 
-## Provisional Designs
+## Decided, Not Built Yet
 
-These areas have a clear direction, but some syntax, edge cases, or runtime contracts remain undecided:
+The design is decided; the compiler does not implement all of it yet. Examples for these carry a **Design only** label.
 
-- user-written generic functions and generic structural objects;
-- inference for unannotated function parameters when the body requires overloaded operations;
-- first-class function handles, partial evaluation, captures, and closure identity;
-- the exact liquid-refinement language, proof boundary, and `unsafe` obligations;
-- the general effect vocabulary and effect-polymorphic contracts;
-- multidimensional array shape syntax, broadcasting, and contiguous layout selection;
-- bidictionaries, dictionary and set equality, container ordering, compound container operators, and keys beyond words and strings;
-- the numeric hierarchy beyond integers, rationals, and fixed-point (reals, complex, quaternions);
-- the overloadable string-conversion protocol beyond built-in conversions;
-- transformed exception propagation, recovery helpers, and whether pipes join automatic exception forwarding;
-- display units for printing quantities, `as unit`, offset units, and declaring base dimensions in library code;
-- runtime-length aggregate ownership, returns, and escaping places;
-- user-defined managed handles, including lifecycle hooks, typed allocation capabilities, and lifetime-bounded payload places;
-- the value-preservation obligations of elidable copy/move hooks; permission for observable hook effects does not by itself settle whether relocation may change the abstract payload;
-- local concrete/polymorphic representations and dense aggregate-array storage, including explicit transitions at general calling or stable-address boundaries;
-- library-defined validators and the checked-versus-trusted bridge from invariants to facts; the provisional default prefers static guarantees and permits a narrow documented trust boundary where needed;
-- general unpack/collect behavior and the remaining edges of pattern matching and generators;
-- compile-time evaluation and metaprogramming beyond type-valued expressions and imports;
-- the final Unicode identifier repertoire and source-normalization policy.
+- The rest of the time system beyond instants, durations, dates, zoned times and intervals.
+- Self-length refinements, where an array's elements are constrained by that array's own length (D17).
+- Some cleanup forms for resources, such as self-closing files and a fallible `$__abandon__` (D40).
+- Programs that still need `$runtime_checks` because the prover cannot yet establish an ordinary fact.
 
-Whether a unit-like nominal type value and its canonical inhabitant are literally the same semantic object remains open; the shared spelling is settled independently of that representation question.
+## Open Questions
 
-General compile-time execution is intended to trust the programmer and need not
-terminate (clarified 2026-09-30). Its capability/effect interfaces remain provisional;
-checked proof constructs still cannot treat incomplete search as evidence. See
-[Compile-Time Facilities](compile-time.md#general-compile-time-evaluation).
+These areas are waiting on a design decision. The reference does not pick an answer for them; a program that depends on one is rejected or uses a provisional form that may change.
 
-A normative page may describe the decided portion of one of these areas, but must not silently choose an unresolved rule.
+- Cancellation details: where `Canceled` can appear, cancellation helpers, `select` and cancel scopes (D4, D41, D44).
+- Combining failures and tracing where each came from (D42), and who handles a failed cleanup (D40).
+- Safety tag names and defaults beyond the bundles listed in [Settings and Safety Levels](settings.md) (D10).
+- Game APIs: compile-time shapes, action names, audio handles and UI (D11, D28).
+- Compilation target names (D46) and packages (D21).
+- Command-line parsing beyond the first version of `argparse`: subcommands and cross-argument rules (D48).
+- Smaller spelling questions about dates, time zones, units, `fmt` patterns, function types and nested array literals (D29–D39).
+- Naming style for multi-word library names (D38) and a native database interface (D43).
+
+Each question, with its recommended answer, is in the repository's [open decisions](https://github.com/david-andrew/dewy-lang/blob/master/docs/design/open_decisions.md); accepted answers move to [decisions](https://github.com/david-andrew/dewy-lang/blob/master/docs/design/decisions.md).
 
 ## Unspecified Behavior
 
-When the reference calls behavior unspecified, programs must not depend on one current implementation's result. An implementation should diagnose constructs for which no valid language behavior has been selected rather than treating an accidental lowering result as specification.
-
-Open design work is tracked in repository discussions and semantic notes. The implementation checklist may also mention a feature before its design is complete; that does not elevate the checklist wording into a language rule.
+When the reference calls behavior unspecified, programs must not depend on one compiler's result. The compiler diagnoses constructs for which no language behavior has been chosen rather than treating an accidental result as the specification.

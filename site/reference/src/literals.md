@@ -1,16 +1,16 @@
 # Literals
 
-> **Language design.** [Generated coverage](/status/#ref-literals) names measured programs and target restrictions; examples here illustrate the design.
+> [Generated coverage](/status/#ref-literals) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
 
-A literal introduces a value directly in source. Literal syntax may preserve more exact type information than the eventual context requires. In a type context the same literal is a singleton type — see [Literal Types](types-and-conversions.md#literal-types).
+A literal introduces a value directly in source. A literal keeps its exact value until context needs a type. In a type position the same literal is a singleton type; see [Literal Types](types-and-conversions.md#literal-types).
 
 ## Booleans and Absence
 
-`true` and `false` are the two `bool` values. `none` is a storable value used in unions such as `T | none`. `void` describes the absence of a produced value and is not interchangeable with `none`.
+`true` and `false` are the two `bool` values. `none` is a storable value used in optionals and unions (`T | none`, written `T?`). `void` is the type of no value; it is not interchangeable with `none`.
 
 ## Integers
 
-Decimal integers require no prefix. Integer numerals support the following bases; the prefix is lowercase (`0x`, never `0X`) and the alphabetic digits after it are case-insensitive:
+Decimal integers need no prefix. Based integers take a lowercase prefix; the alphabetic digits after it may be either case:
 
 | Base | Prefix | Digits            |
 | ---: | :----: | ----------------- |
@@ -23,69 +23,112 @@ Decimal integers require no prefix. Integer numerals support the following bases
 |   12 |  `0z`  | `0`–`9`, `x`, `e` |
 |   16 |  `0x`  | `0`–`9`, `a`–`f`  |
 
-<!-- dewy-example: {"mode":"design-only"} -->
+`_` groups digits without changing the value.
+
+<!-- dewy-example: {"mode":"run","stdout":"42 42 42 42 42 42 42 42 42\n255 1000000\n"} -->
 ```dewy
-42
-0b101010
-0t1120
-0q222
-0s110
-0o52
-0d42
-0z36
-0x2a
+printl"{42} {0b101010} {0t1120} {0q222} {0s110} {0o52} {0d42} {0z36} {0x2a}"
+printl"{0xFF} {1_000_000}"
 ```
 
-An integer literal initially has an exact value type. Context may place it in `int`, `uint`, or a compatible fixed-width integer type. A literal outside the destination range is rejected rather than truncated.
+An unannotated integer literal is an `int`, the arbitrary-precision integer; an oversized literal is still exact. In a fixed-width context the literal must fit, and one that does not is an error rather than a truncation:
 
-Underscores may group digits without affecting the value: `1_000_000`.
+<!-- dewy-example: {"mode":"reject","diagnostic":"value 200 does not fit in int8"} -->
+```dewy
+let x:int8 = 200
+```
 
-Prefixes for bases above 16 are available only on quoted packed data. An unquoted higher-base digit sequence is rejected rather than silently tokenized as a different value.
+A digit outside the base is an error, never a different token.
 
 ## Decimal and Exponent Literals
 
-A numeral with a fraction or a decimal exponent — `9.8`, `1.25e2`, `5e-1` — is an exact rational (`49/5`, `125`, `1/2`), never a floating-point approximation. Binary exponents and non-decimal bases in such literals are not yet supported.
+A numeral with a fraction or a decimal exponent (`9.8`, `1.25e2`, `5e-1`) is an exact `rational`, never a floating-point approximation, so `0.1 + 0.2 =? 0.3` is true. A float context (a `float64` annotation, parameter or operand) makes it a float instead. Binary exponents and based fractions are not supported.
 
-Integer numeral prefixes and packed based-string prefixes are related spellings with different results. An unquoted `0x2a` is an integer; quoted `0x"2a"` is packed data.
+<!-- dewy-example: {"mode":"run","stdout":"9.8 125 0.5 true\n0.30000000000000004\n"} -->
+```dewy
+printl"{9.8} {1.25e2} {5e-1} {0.1 + 0.2 =? 0.3}"
+let a:float64 = 0.1
+printl(a + 0.2)
+```
+
+See [Numeric Types](numeric-types.md#rationals) for how rationals print and compute.
 
 ## Strings
 
-Single and double quotes delimit strings. Both forms have the same string semantics.
+Single and double quotes delimit strings with the same meaning. Both support escapes and `{expression}` interpolation.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+- Letter escapes are `\n`, `\r`, `\t`, `\a`, `\b`, `\v` and `\f`, plus `\0`.
+- `\u` takes four hex digits (`é`) or one to six inside braces (`\u{1F642}`); `\U` is the same escape. Surrogates and values above `10FFFF` are errors.
+- Any ASCII punctuation escapes to itself: `\{`, `\}`, `\'`, `\"`, `\\`.
+- An unknown escape of a letter or digit (`\N`, `\x41`) is an error.
+- `\` before a line break continues the string without the newline.
+
+An `r` prefix keeps backslashes and braces literally. Three matching quotes allow embedded quotes and multi-line text, with whitespace preserved.
+
+<!-- dewy-example: {"mode":"run","stdout":"café 🙂 {braces}\nraw \\n {x}\nHe said \"go\".\n"} -->
 ```dewy
-'short text'
-"text with {interpolation}"
+printl("café \u{1F642} \{braces\}")
+printl(r"raw \n {x}")
+printl("""He said "go".""")
 ```
 
-Escape syntax may insert code points. Interpolation braces contain ordinary Dewy expressions. See [Strings and Graphemes](strings.md).
+<!-- dewy-example: {"mode":"reject","diagnostic":"unknown escape `\\x`"} -->
+```dewy
+printl("\x41")
+```
+
+See [Strings and Graphemes](strings.md) for string operations.
+
+## Bytes
+
+`b'a'` is the `uint8` 97: one byte, escapes allowed. `b"abc"` is the `array<uint8>` of the text's UTF-8 bytes, without interpolation.
 
 ## Packed Based Strings
 
-Power-of-two based strings encode digit sequences densely as exact bytes:
+A quoted digit sequence after a power-of-two prefix packs those digits densely into bytes, an `array<uint8>`:
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"[240]\n[222 173 190 239]\nhi\n[97] [104 105]\n"} -->
 ```dewy
-0b"11110000"
-0x"deadbeef"
+printl(0b"11110000")
+printl(0x"deadbeef")
+printl(0x"6869" as string | none)
+printl"{[b'a']} {b"hi"}"
 ```
 
-The supported packed prefixes are `0b`, `0q`, `0o`, `0x`, `0u`, and `0g`, contributing 1, 2, 3, 4, 5, and 6 bits per digit respectively. Bits are appended in source order from each digit's most-significant bit to its least-significant bit. A final partial byte is padded with zero bits on the right.
+The packed prefixes are `0b`, `0q`, `0o`, `0x`, `0u` and `0g`, giving 1, 2, 3, 4, 5 and 6 bits per digit. Bits are appended in source order, most significant bit of each digit first. A final partial byte is padded with zero bits on the right. Base 64 (`0g`) uses the ordered alphabet `0`–`9`, `a`–`z`, `A`–`Z`, `+`, `/`; trailing `=` is padding that contributes no bits. Whitespace between digits is an error.
 
-Whitespace and comments may separate digits. Base 64 uses the ordered alphabet `0`–`9`, `a`–`z`, `A`–`Z`, `+`, `/`; `-` aliases `+`, `_` aliases `/`, and trailing `=` is explicit padding that contributes no bits. `_` is therefore a digit in a base-64 string rather than a visual separator.
-
-Non-power-of-two dense packing remains a provisional design because the width of concatenated subsequences is not generally compositional.
+An unquoted `0x2a` is an integer; a quoted `0x"2a"` is bytes. Non-power-of-two bases (`0t"12"`) are not supported as packed strings.
 
 ## Container and Object Literals
 
-Square brackets use the top-level contents to determine the constructed form:
+Square brackets build arrays, objects (records), dictionaries and sets, chosen by the top-level contents:
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"[1 2 3]\n[active=true name=\"Ada\"]\n[\"Ada\" -> 1 \"Grace\" -> 2]\nset[1 2 3]\n[7 \"seven\"]\n"} -->
 ```dewy
-[1 2 3]                       # array
-[name="Ada" active=true]     # object
-["Ada" -> 1 "Grace" -> 2]   # dictionary
-set[1 2 3]                    # set
+printl([1 2 3])                       # array
+printl([name="Ada" active=true])      # object
+printl(["Ada" -> 1 "Grace" -> 2])     # dictionary
+printl(set[1 2 3])                    # set
+let entry:[int64 string] = [7 "seven"]
+printl(entry)                         # tuple: a type per position
 ```
 
-Array, object, dictionary, and set forms are settled; a dictionary or set literal may appear in any expression, and an empty one needs a `dict<K V>` or `set<T>` context. Postfix `...` spreads an existing container into a literal: `[xs... 0 ys...]` builds an array from the elements of arrays (or the members of sets) and written elements, with an exact length when every operand's length is known; `[base... c=3 other...]` builds an object from the fields of objects and written fields, a later entry winning over an earlier one with the same name (at the first one's position), as in Python. This is how containers combine — `+` never concatenates. Operands are named values (bind a computed value first) with a non-union type. Bidictionary and multidimensional literal details are catalogued in [Arrays and Containers](arrays-and-containers.md) and the [design appendix](design-status.md).
+`[]` takes its type from context: an array, dictionary, set or record with defaults. With no context it is an error.
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"cannot infer the type of 'e'"} -->
+```dewy
+let e = []
+```
+
+Postfix `...` spreads a container into a literal. `[xs... 0 ys...]` builds an array from the elements of arrays (or members of sets) and written elements. `[base... c=3]` builds an object from the fields of objects and written fields; a later entry wins over an earlier one with the same name. This is how containers combine: `+` never concatenates.
+
+<!-- dewy-example: {"mode":"run","stdout":"[1 2 3 0 4]\n[a=9 b=2 c=3]\n"} -->
+```dewy
+let xs = [1 2 3]
+let ys = [4]
+printl([xs... 0 ys...])
+let base = [a=1 b=2]
+printl([base... c=3 a=9])
+```
+
+Multidimensional array literals (`[1 2; 3 4]`) and the remaining container forms are in [Arrays and Containers](arrays-and-containers.md).

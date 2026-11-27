@@ -1,50 +1,211 @@
 [
-  {
-    "id": "hello",
-    "title": "Hello, Dewy",
-    "source": "printl\"Hello, Dewy!\"\n",
-    "stdout": "Hello, Dewy!\n",
-    "mode": "run",
-    "target": "wasm-release"
-  },
-  {
-    "id": "words",
-    "title": "Counting words",
-    "source": "text = \"the cat sat on the mat and the dog sat too\"\n\nlet counts:dict<string int> = []\nloop word in text.split(\" \") {\n    if word not in? counts counts[word] = 0\n    counts[word] += 1      # proven present: no KeyError\n}\n\nloop [word n] in counts if n >? 1 printl\"{word} × {n}\"\nprintl\"owls: {counts.get(\"owl\") ?? 0}\"\n",
-    "stdout": "the × 3\nsat × 2\nowls: 0\n",
-    "mode": "run",
-    "target": "wasm-release"
-  },
-  {
-    "id": "primes",
-    "title": "A prime generator",
-    "source": "primes = ():>generator<int> => $outer lazy loop n in 2.. {\n    loop d in 2..n {\n        if d * d >? n { break }\n        if n % d =? 0 { continue $outer }\n    }\n    n\n}\n\nprintl([loop _ in [0..10) and p in primes() p])\n",
-    "stdout": "[2 3 5 7 11 13 17 19 23 29]\n",
-    "mode": "run",
-    "target": "wasm-release"
-  },
-  {
-    "id": "values",
-    "title": "Independent array values",
-    "source": "let original = [20 22]\nlet copy = original\ncopy[0] = 99\nprintl(original[0]+original[1])\n",
-    "stdout": "42\n",
-    "mode": "run",
-    "target": "wasm-release"
-  },
-  {
-    "id": "graphemes",
-    "title": "Grapheme lengths",
-    "source": "let word = \"café\"\nprintl\"{word}: {word.length}\"\n",
-    "stdout": "café: 4\n",
-    "mode": "run",
-    "target": "wasm-release"
-  },
-  {
-    "id": "paddle",
-    "title": "Paddle",
-    "source_path": "examples/paddle.dewy",
-    "mode": "check",
-    "target": "wasm-release",
-    "instructions": "Move the pointer to keep the ball in play. This game is compile-checked; browser graphics and input need their own checks."
-  }
+ {
+  "id": "physics",
+  "kind": "game",
+  "title": "Physics playground",
+  "summary": "A 57-body scene: a box pyramid, a pinned bridge, a rope and a wrecking ball. Scene and game code are Dewy, on the bundled physics library.",
+  "controls": "Drag a body with the mouse. Right-click adds a box; B or middle-click adds a ball; R resets.",
+  "mode": "check",
+  "target": "wasm-release",
+  "source_path": "examples/physics.dewy",
+  "poster": "/assets/images/examples/physics.webp"
+ },
+ {
+  "id": "dunes",
+  "kind": "game",
+  "title": "Dunes",
+  "summary": "A desert walk with terrain, animated cloth, sand and beam shaders, and sound. The game code and its shaders are Dewy.",
+  "controls": "WASD or arrows to walk, Space to jump (hold to glide), Q/E or right-drag to turn the camera.",
+  "mode": "check",
+  "target": "wasm-release",
+  "source_path": "examples/dunes.dewy",
+  "poster": "/assets/images/examples/dunes.webp"
+ },
+ {
+  "id": "forest",
+  "kind": "game",
+  "title": "Forest",
+  "summary": "Rolling 3D terrain with 600 instanced trees, a moving beacon, shadows, fog and bloom. Terrain, placement, camera and drawing are Dewy.",
+  "controls": "Drag to orbit, wheel to zoom, Space toggles the automatic orbit, R resets.",
+  "mode": "check",
+  "target": "wasm-release",
+  "source_path": "examples/forest.dewy",
+  "poster": "/assets/images/examples/forest.webp"
+ },
+ {
+  "id": "reaction",
+  "kind": "game",
+  "title": "Pattern field",
+  "summary": "A reaction–diffusion simulation built from matrix slices and element-wise arithmetic.",
+  "controls": "Drag to paint. Sliders set the feed and removal rates; Space pauses, R seeds again.",
+  "mode": "check",
+  "target": "wasm-release",
+  "source_path": "examples/reaction_field.dewy",
+  "poster": "/assets/images/examples/reaction-field.webp"
+ },
+ {
+  "id": "rollback",
+  "kind": "game",
+  "title": "Rollback lab",
+  "summary": "Two copies of one game over a simulated network: prediction, rewinding and replay with ordinary Dewy value copies.",
+  "controls": "Sliders set latency, jitter and packet loss. P pauses, R resets.",
+  "mode": "check",
+  "target": "wasm-release",
+  "source_path": "examples/rollback_lab.dewy",
+  "poster": "/assets/images/examples/rollback-lab.webp"
+ },
+ {
+  "id": "pendulum",
+  "kind": "game",
+  "title": "Pendulum",
+  "summary": "A pendulum with ranged sliders for gravity, length, release angle and damping, and units in its labels.",
+  "controls": "Drag the sliders. Space pauses, R releases the pendulum again.",
+  "mode": "check",
+  "target": "wasm-release",
+  "source_path": "examples/controls.dewy",
+  "poster": "/assets/images/examples/controls.webp"
+ },
+ {
+  "id": "charts",
+  "kind": "game",
+  "title": "Charts",
+  "summary": "Projectile paths with equal axis scales, annotations, dashed lines, grouped bars and a sampled wave.",
+  "controls": "A still chart page; nothing to control.",
+  "mode": "check",
+  "target": "wasm-release",
+  "source_path": "examples/charts.dewy",
+  "poster": "/assets/images/examples/charts.webp"
+ },
+ {
+  "id": "camera",
+  "kind": "game",
+  "title": "Camera roll",
+  "summary": "A rolling 3D camera with labels projected from world positions and cursor-ray picking.",
+  "controls": "Move the pointer: the orange marker stays under it. The slider rolls the camera; P rotates automatically.",
+  "mode": "check",
+  "target": "wasm-release",
+  "source_path": "examples/camera_roll.dewy",
+  "poster": "/assets/images/examples/camera-roll.webp"
+ },
+ {
+  "id": "paddle",
+  "kind": "game",
+  "title": "Paddle",
+  "summary": "The smallest game here: 20 lines of game code on a separate, tested model.",
+  "controls": "Move the pointer to keep the ball in play.",
+  "mode": "check",
+  "target": "wasm-release",
+  "source_path": "examples/paddle.dewy",
+  "poster": "/assets/images/examples/paddle.webp"
+ },
+ {
+  "id": "hello",
+  "kind": "program",
+  "title": "Hello, Dewy",
+  "summary": "One line, no boilerplate.",
+  "mode": "run",
+  "target": "wasm-release",
+  "source": "printl\"Hello, Dewy!\"\n",
+  "stdout": "Hello, Dewy!\n"
+ },
+ {
+  "id": "words",
+  "kind": "program",
+  "title": "Counting words",
+  "summary": "A dictionary whose lookups are proven present, so there is no KeyError to handle.",
+  "mode": "run",
+  "target": "wasm-release",
+  "source": "text = \"the cat sat on the mat and the dog sat too\"\n\nlet counts:dict<string int> = []\nloop word in text.split(\" \") {\n    if word not in? counts counts[word] = 0\n    counts[word] += 1      # proven present: no KeyError\n}\n\nloop [word n] in counts if n >? 1 printl\"{word} × {n}\"\nprintl\"owls: {counts.get(\"owl\") ?? 0}\"\n",
+  "stdout": "the × 3\nsat × 2\nowls: 0\n"
+ },
+ {
+  "id": "errors",
+  "kind": "program",
+  "title": "Errors as values",
+  "summary": "A failure is part of the result type; `or_throw` passes it to the caller and `match` handles each case.",
+  "mode": "run",
+  "target": "wasm-release",
+  "source": "ParseError:type = type of error & [line:int message:string]\n\n# A failure is an ordinary value in the result type: nothing is thrown past you.\nparse_score = (line:int text:string):>int | ParseError => {\n    let n = to_int(text)\n    if n is? error return ParseError[line=line message=\"not a number: {text}\"]\n    if n <? 0 or n >? 100 return ParseError[line=line message=\"out of range: {n}\"]\n    return n\n}\n\n# `or_throw` hands a failure to the caller; the result type says so.\ntotal = (lines:array<string>):>int | ParseError => {\n    let sum = 0\n    loop i in 1.. and text in lines { sum += parse_score(i text) or_throw }\n    return sum\n}\n\nloop batch in [[\"90\" \"75\" \"88\"] [\"90\" \"seven\" \"88\"] [\"90\" \"175\"]] {\n    match total(batch) {\n        n:int => printl\"total {n}\"\n        e:ParseError => printl\"line {e.line}: {e.message}\"\n    }\n}\n",
+  "stdout": "total 253\nline 2: not a number: seven\nline 2: out of range: 175\n"
+ },
+ {
+  "id": "search",
+  "kind": "program",
+  "title": "Proven indexing",
+  "summary": "Binary search with no bounds checks at run time: the compiler proves every index is in range.",
+  "mode": "run",
+  "target": "wasm-release",
+  "source": "# Indexing is proven, not checked at run time: every index below is\n# shown in bounds by the loop condition and the midpoint arithmetic.\nsearch = (xs:array<int> target:int):>int | none => {\n    let lo = 0\n    let hi = xs.length\n    loop lo <? hi {\n        let mid = (lo + hi) // 2\n        if xs[mid] =? target return mid\n        if xs[mid] <? target lo = mid + 1 else hi = mid\n    }\n    return none\n}\n\nlet primes = [2 3 5 7 11 13 17 19 23 29 31 37]\nloop t in [19 20 2 37] {\n    match search(primes t) {\n        i:int => printl\"{t} is at index {i}\"\n        <none> => printl\"{t} is not prime\"\n    }\n}\n",
+  "stdout": "19 is at index 7\n20 is not prime\n2 is at index 0\n37 is at index 11\n"
+ },
+ {
+  "id": "quantities",
+  "kind": "program",
+  "title": "Units and dimensions",
+  "summary": "Quantities carry their dimension in the type and print in a fitting unit.",
+  "mode": "run",
+  "target": "wasm-release",
+  "source": "from units import m, km, kg\n\n# A unit is written against its number; dimensions are checked at compile time.\nlet g = 9.81m/s^2\nlet mass = 1200kg\nlet height = 30m\nprintl\"Lifting {mass} by {height} stores {mass * g * height}\"\n\nlet speed = 25m/s\nprintl\"{speed} is {speed as km/hour}\"\nprintl\"A 400m lap takes {400m / speed}\"\nprintl\"Exact scales: {3km =? 3000m} {300ms =? 3s/10}\"\n# 3m + 2s would not compile: a length and a time cannot be added.\n",
+  "stdout": "Lifting 1200kg by 30m stores 353160J\n25m/s is 90km/hour\nA 400m lap takes 16s\nExact scales: true true\n"
+ },
+ {
+  "id": "exact",
+  "kind": "program",
+  "title": "Exact numbers",
+  "summary": "`int` grows as needed, decimals and fractions are exact, and fixed-width integers never overflow silently.",
+  "mode": "run",
+  "target": "wasm-release",
+  "source": "# `int` grows as needed; decimal literals are exact.\nlet big = 2^200\nprintl\"2^200 = {big}\"\nprintl\"0.1 + 0.2 = {0.1 + 0.2}  (equal to 0.3: {0.1 + 0.2 =? 0.3})\"\n\nlet fact = 1\nloop k in 1..30 { fact *= k }\nprintl\"30! = {fact}\"\n\nlet harmonic = 0/1\nloop k in 1..10 { harmonic += 1/k }\nprintl\"1 + 1/2 + … + 1/10 = {harmonic}\"\n\n# Fixed-width integers never overflow silently: the compiler must prove the\n# result fits, or the type must ask for wrapping.\nlet counter:uint8<overflow='wrap'> = 250\ncounter += 10\nprintl\"wrapping uint8: 250 + 10 = {counter}\"\n",
+  "stdout": "2^200 = 1606938044258990275541962092341162602522202993782792835301376\n0.1 + 0.2 = 0.3  (equal to 0.3: true)\n30! = 265252859812191058636308480000000\n1 + 1/2 + … + 1/10 = 7381/2520\nwrapping uint8: 250 + 10 = 4\n"
+ },
+ {
+  "id": "dates",
+  "kind": "program",
+  "title": "Dates and time zones",
+  "summary": "Instants, calendar dates and zoned times, with literals checked while compiling.",
+  "mode": "run",
+  "target": "wasm-release",
+  "source": "# Time needs no import. Literals are checked while compiling.\nlet launch = instant\"2026-10-24T12:00:00Z\"\nprintl\"launch + 90 minutes: {launch + 90minute}\"\n\nlet d = date\"2027-01-31\"\nprintl\"{d} is a {d.weekday_name}; the next day is {d + 1day}\"\nprintl\"one month later, clamped: {d.add(1month overflow='clamp')}\"\nprintl\"days until the holiday: {(date\"2026-12-25\" - date\"2026-10-24\") / 1day}\"\n\n# A calendar week and 168 hours differ across a daylight-saving change.\nconst meet = zoned\"2026-10-26T09:00[America/New_York]\"\nprintl\"next week:       {meet + 1week}\"\nprintl\"168 hours later: {meet + 168hour}\"\n",
+  "stdout": "launch + 90 minutes: 2026-10-24T13:30:00Z\n2027-01-31 is a Sunday; the next day is 2027-02-01\none month later, clamped: 2027-02-28\ndays until the holiday: 62\nnext week:       2026-11-02T09:00:00-05:00[America/New_York]\n168 hours later: 2026-11-02T08:00:00-05:00[America/New_York]\n"
+ },
+ {
+  "id": "primes",
+  "kind": "program",
+  "title": "A prime generator",
+  "summary": "A lazy, infinite generator with a labelled `continue`.",
+  "mode": "run",
+  "target": "wasm-release",
+  "source": "primes = ():>generator<int> => $outer lazy loop n in 2.. {\n    loop d in 2..n {\n        if d * d >? n { break }\n        if n % d =? 0 { continue $outer }\n    }\n    n\n}\n\nprintl([loop _ in [0..10) and p in primes() p])\n",
+  "stdout": "[2 3 5 7 11 13 17 19 23 29]\n"
+ },
+ {
+  "id": "generators",
+  "kind": "program",
+  "title": "Generators and pipelines",
+  "summary": "Infinite sequences, multi-value steps, composable adapters and a recursive tree walk.",
+  "mode": "run",
+  "target": "wasm-release",
+  "source_path": "examples/generators.dewy",
+  "stdout": "First 6 squares: [0 1 4 9 16 25]\nFirst 10 primes: [2 3 5 7 11 13 17 19 23 29]\nFirst 6 Fibonacci numbers:\n  F(0) = 0\n  F(1) = 1\n  F(2) = 1\n  F(3) = 2\n  F(4) = 3\n  F(5) = 5\nFirst 5 even squares: [0 4 16 36 64]\nTree walk: [\"root\" \"textures\" \"sky.png\" \"grass.png\" \"audio\" \"wind.ogg\"]\n"
+ },
+ {
+  "id": "values",
+  "kind": "program",
+  "title": "Independent array values",
+  "summary": "Assignment gives a new value; changing the copy leaves the original alone.",
+  "mode": "run",
+  "target": "wasm-release",
+  "source": "let original = [20 22]\nlet copy = original\ncopy[0] = 99\nprintl(original[0]+original[1])\n",
+  "stdout": "42\n"
+ },
+ {
+  "id": "graphemes",
+  "kind": "program",
+  "title": "Grapheme lengths",
+  "summary": "A string's length counts what a reader sees as characters.",
+  "mode": "run",
+  "target": "wasm-release",
+  "source": "let word = \"café\"\nprintl\"{word}: {word.length}\"\n",
+  "stdout": "café: 4\n"
+ }
 ]

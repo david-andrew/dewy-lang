@@ -1,261 +1,316 @@
 # Functions and Calls
 
-> **Language design.** [Generated coverage](/status/#ref-functions-and-calls) names measured programs and target restrictions; examples here illustrate the design.
+> [Generated coverage](/status/#ref-functions-and-calls) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
 
-A function literal consists of a parameter contract, an optional return contract, `=>`, and a body expression:
+## Function Literals
 
-<!-- dewy-example: {"mode":"design-only"} -->
+A function literal is a parameter list, an optional result type after `:>`, `=>`, and a body expression. The body's final expression is the result; `return` exits early. Parameter and result types may be omitted and inferred. `:>void` declares a function with no result. One bare parameter may omit the parentheses: `x => x + 1`. The name is always the parameter, even when a type has that spelling.
+
+<!-- dewy-example: {"mode":"run","stdout":"42\n[2 4 6]\n"} -->
 ```dewy
-let add = (left:int64 right:int64=2):>int64 => left + right
-```
-
-One bare parameter name may omit parentheses: `x => x + 1`. Here `x` is always the local parameter name, never an anonymous argument whose type happens to be named `x`. Whether the body can infer a generic contract without other type context depends on the provisional generic-function design. Annotated parameters use `(x:int64)`, and zero parameters use `()`.
-
-## Argument Binding
-
-Each explicit argument binds one currently unset parameter. Arguments are processed from left to right.
-
-- A positional argument binds the first parameter still available by position.
-- A named argument binds the unset parameter with that name.
-- After explicit arguments are processed, each unset defaulted parameter evaluates its default for that completed call.
-- A required parameter still unset after binding is an error.
-
-Defaults are fallbacks, not values bound when the function is defined. They retain their positions:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let combine = (
-    left:int64
-    scale:int64=2
-    right:int64
-):>int64 => left + right * scale
-
-combine(10 3 16)       # left=10, scale=3, right=16
-combine(10 right=16)   # left=10, scale=2, right=16
-combine(scale=3 10 16) # scale=3, then left=10 and right=16
-```
-
-`combine(10 16)` binds `left` and `scale`; it does not skip `scale`, and therefore reports missing `right`.
-
-Default expressions evaluate independently for every completed call that omits them. Mutable objects created by a default are not shared accidentally between calls.
-
-## Parameter Kinds
-
-### Positional or keyword
-
-An ordinary named parameter before the positional divider may be bound by position or name:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let subtract = (left:int64 right:int64):>int64 => left - right
-subtract(7 2)
-subtract(right=2 left=7)
-```
-
-### Keyword-only
-
-A bare `...` ends the positional run. Parameters after it require names:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let offset = (value:int64 ... amount:int64):>int64 => value + amount
-offset(40 amount=2)
-```
-
-### Position-only
-
-Wrapping the name and type in `<>` preserves the local name but removes it from the keyword interface:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let increment = (<value:int64>):>int64 => value + 1
-increment(41)
-```
-
-`increment(value=41)` is an error. A default inside the wrapper remains a per-call fallback.
-
-Types and names share identifier syntax, so a bare identifier in a function literal is a parameter name, not an anonymous argument whose type happens to have that spelling.
-
-## Rest Parameters and Spreading
-
-The direction for `...rest` is to capture arguments not claimed by earlier parameters and allow the resulting bundle to be forwarded with `...`. Exact bundle types and all interactions with named arguments remain provisional.
-
-## Function Contracts
-
-A function type records its parameter and return contract:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let callback:<(value:int64):>int64> = increment
-```
-
-Position-only function contracts use `<name:type>`, just like function literals. The name describes the parameter inside the contract but is absent from the keyword-call interface. A bare identifier is always a parameter name, so Dewy does not infer an anonymous type-only parameter from its spelling.
-
-A function value is an ordinary value of its contract type: `@name` selects a named function instead of calling it, and such values are stored in arrays and dictionaries (`let table:dict<string <(x:int64):>int64>> = ['double' -> @double]`), chosen by a flow (`let op = if fast @double else @triple`), and called through whatever holds them (`table['double'](4)`, `op(3)`). A call whose callee's origin is not tracked — a table entry, a reassigned function binding — is checked for initialization order against every function of that type in the program. A function that reads enclosing locals cannot be a value yet (it needs a closure record); it is called directly or given what it needs as parameters.
-
-A function value fits a slot of a wider contract by the usual rules — parameters contravariant, the result covariant — and a narrower *union* result needs no adapter: a function returning `uint64?` is stored where `uint64? | TokenError` is expected and called through it, because a union value carries its member's identity rather than a position in one particular union. The one result difference that is rejected is a bare value against a tagged one (a function returning `none` alone, or `int64`, in a slot returning `int64?`): those are different runtime forms.
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let TokenError:type = type of error
-let TokenProtocol:type = [eat:<(src:string):>uint64? | TokenError>]
-Whitespace = type of TokenProtocol & [eat = (src:string):>uint64? => if src.startswith(" ") 1 else none]
-
-count = ():>uint64 => {
-    let table:array<TokenProtocol> = [Whitespace]
-    return match table[0].eat(" x") { n:uint64 => n  <none> => 0  <TokenError> => 0 }   # `Whitespace.eat` returns `uint64?`; the slot reads it
+twice = (x) => x + x
+add = (a:int b:int=2):>int => a + b
+main = () => {
+    printl(add(twice(20)))
+    printl([1 2 3].map(x => x * 2))
 }
 ```
 
-Expected failures appear as direct [error alternatives](errors-and-forwarding.md) in the return contract. Public functions should normally declare a stable set of returned errors even where an unexposed helper could infer them.
+A function declared `:>never` never returns: every path ends in `exit(…)`, a panic or an endless loop, and a call to it ends its branch like `exit` does.
 
-## Effect Contracts
-
-Effects describe what evaluation may do, independently of the returned value
-or error alternatives. Attach the row to the result with `&`:
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"bye\n","exit":3} -->
 ```dewy
-Filesystem = type of any
-forward = (f:():>int64 & reads<Filesystem>):>int64 & reads<Filesystem> => f()
-read_value = (@value:int64):>int64 & reads<value> => value
-set_value = (@value:int64):>void & mutates<value> => {value=42}
+fail = (msg:string):>never => {
+    printl(msg)
+    exit(3)
+}
+main = () => fail("bye")
 ```
 
-Named resources use nominal type identity. Aliases and imports preserve that
-identity; another mint with the same name does not. A place subject identifies
-a parameter's caller-owned storage, optionally followed by stored fields.
-Ordinary by-value reads and private scalar assignments have no external
-read/write effects. Compound assignment requires both reading and mutation.
+How deep calls can nest depends on the target: the main thread and each task have an 8 MB stack, and each `parallel` worker 7 MB. An overflow ends the program with `panic: stack overflow` and exit code 101.
 
-A positive row is an upper bound on all effects. `no_effects` (also spelled
-`Effect<>`) is the empty bound. `no reads<Filesystem>` excludes that read;
-`no reads` excludes the entire read family. Without a positive bound, negative
-clauses leave other effects open. Callback calls preserve these guarantees.
-`reads<>` and `no reads<>` are rejected to avoid confusing an empty subject set
-with a family-wide exclusion.
+## Calls
 
-Current checking covers scalar computation, read-only value access, place
-reads and scalar place writes, direct calls, and constrained callbacks.
-Unmodeled operations and allocations remain unknown and cannot satisfy an
-empty row or negative promise. In particular COW deferral is not proof of no
-allocation. A function literal with an omitted row now carries its inferred
-body effects when used as a callback:
+Arguments are separated by whitespace and the parentheses touch the callee: `add(1 2)`. A single delimited argument may follow a function directly: `total[1 2 3]` passes the array, and `printl"hi"` passes the string.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+A bare function name calls the function. A function whose parameters all have defaults is called by its name alone: `seven` is `seven()`. A function called for its effect keeps `()`, as `hello()`. Naming a function that needs arguments without calling it is an error; `@name` is the function itself (see [Function Handles](#function-handles)).
+
+<!-- dewy-example: {"mode":"run","stdout":"7\nhello\n"} -->
 ```dewy
-answer = ():>int64 => 42
-use = (f:():>int64 & no_effects):>int64 & no_effects => f()
-checked = ():>int64 & no_effects => use(@answer)
+seven = (x:int=7) => x
+hello = ():>void => printl"hello"
+main = () => {
+    printl(seven)
+    hello()
+}
 ```
 
-An omitted row on an unknown callback parameter still admits unknown behavior:
-there is no body from which to infer a narrower contract. Recursive calls,
-generic calls, conditional callback choices and callback reassignment retain
-possible effects; inferred rows also include synthesized lifecycle operations.
-Inferred wrappers preserve open negative guarantees; unknown operations still
-remove unproved exclusions. Generic row substitution preserves the guarantees
-shared by every contributing callback. Scoped place-row inference and the full
-allocation/failure vocabulary remain in progress.
-
-Effect rows have their own generic kind:
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"'add' needs arguments: call it, `add(...)`, or write `@add`"} -->
 ```dewy
-let apply = <E:Effect>(f:():>int64 & E):>int64 & E => f()
+add = (a:int b:int) => a + b
+printl(add)
 ```
 
-The callback's contract determines `E`; repeated callback constraints combine
-by union. Ordinary types and rows may coexist in a generic parameter list,
-but an effect parameter cannot be an argument type, return value type, or
-runtime value. Omitted callback contracts infer unknown effects, not purity.
-Generic instances retain their row arguments in cache identity.
+## Argument Binding
 
-The initial inference supports one free row remainder in each callback bound.
-Two unconstrained remainders cannot be split uniquely. Callback-relative place
-subjects are not inferred into an outer row: their slots belong to the callback,
-not the enclosing signature. Such routes need an explicit scoped representation
-before this case can be supported. Negative-only callback rows infer an open
-row with their exclusions. Combining callbacks keeps only shared guarantees;
-adding a permission can remove an incompatible inferred exclusion. Written
-exclusions remain obligations on the complete result.
-Effect-polymorphic type aliases are also pending.
+Each argument binds one parameter that is still unset, left to right:
 
-## Calls and Pipes
+- a positional argument binds the first parameter still available by position;
+- a named argument (`name=value`) binds the parameter with that name;
+- each parameter left unset then takes its default, evaluated for this call;
+- a required parameter still unset is an error.
 
-Parenthesized or juxtaposed arguments call a callable expression. `|>` supplies values to the callable on its right; `<|` supplies right-hand values to the callable on its left according to their associativity. The callable operand of a pipe is an ordinary expression, not a call position: a named function is written `@name` (`3 |> @square`), and a function literal or any other function-valued expression pipes as written.
+Defaults keep their positions, and are evaluated anew for every call that omits them, so a mutable default is never shared between calls. A default may refer to an earlier parameter.
 
-Argument expressions evaluate from left to right before the function body begins, except that omitted defaults evaluate as part of completing the call. A defaulted parameter may be optional — `(message:string? = none)` — and the default fills the cell when the argument is omitted.
-
-Record and container parameters may also have defaults, such as
-`(seen:set<int64> = set[])`. An omitted default is evaluated for each call;
-mutating that value does not affect the next call. An explicitly supplied
-record or container follows ordinary value-copy semantics, and its default
-is not evaluated.
-
-## Overloads
-
-`&` combines compatible functions into an overload set. The call contract selects a unique applicable alternative:
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"58\n42\n58\n"} -->
 ```dewy
-let describe = ((value:int64):>string => "integer")
-             & ((value:string):>string => value)
+combine = (left:int scale:int=2 right:int):>int => left + right * scale
+main = () => {
+    printl(combine(10 3 16))       # left=10 scale=3 right=16
+    printl(combine(10 right=16))   # scale defaults to 2
+    printl(combine(scale=3 10 16)) # then left=10 right=16
+}
 ```
 
-Ambiguous or unmatched calls are errors. Runtime multifunction values remain part of the provisional dynamic-dispatch design; ordinary overload resolution is static.
+`combine(10 16)` binds `left` and `scale`; it does not skip `scale`, so `right` is missing:
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"missing argument 'right'"} -->
+```dewy
+combine = (left:int scale:int=2 right:int):>int => left + right * scale
+printl(combine(10 16))
+```
+
+The callee evaluates first, then explicit arguments in written order, then omitted defaults in parameter order.
+
+## Parameter Kinds
+
+- An ordinary parameter may be bound by position or by name.
+- `...` after a parameter ends the positional run: the parameters after it must be named. A leading bare `...` makes every parameter keyword-only.
+- A parameter wrapped in `<>` is position-only: it keeps its local name, but a call cannot name it.
+- A parameter named `_` accepts positional arguments only.
+
+<!-- dewy-example: {"mode":"run","stdout":"42 42\n5 5\n"} -->
+```dewy
+offset = (value:int ... amount:int) => value + amount
+increment = (<value:int>) => value + 1
+subtract = (left:int right:int) => left - right
+main = () => {
+    printl"{offset(40 amount=2)} {increment(41)}"
+    printl"{subtract(7 2)} {subtract(right=2 left=7)}"
+}
+```
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"too many positional arguments: 'amount' takes its name"} -->
+```dewy
+offset = (value:int ... amount:int) => value + amount
+printl(offset(40 2))
+```
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"parameter 'value' is position-only"} -->
+```dewy
+increment = (<value:int>) => value + 1
+printl(increment(value=41))
+```
+
+### Rest Parameters and Spreading
+
+An attached `...rest:T` collects the positional arguments the earlier parameters leave into an `array<T>`; the parameters after it are keyword-only. A function has at most one, with no default, and it cannot be named in a call. `xs...` spreads a container into a call's positional parameters.
+
+<!-- dewy-example: {"mode":"run","stdout":"6\n13\nx: a-b\n"} -->
+```dewy
+total = (...xs:int):>int => {
+    let t:int = 0
+    loop x in xs { t += x }
+    t
+}
+label = (name:string ...parts:string sep:string=", ") => "{name}: {parts.join(sep)}"
+main = () => {
+    let ys = [4 5]
+    printl(total(1 2 3))
+    printl(total(1 ys... 3))
+    printl(label("x" "a" "b" sep="-"))
+}
+```
+
+Written arguments give the rest parameter a fixed-length array, passed in place. Rest parameters work on declared functions, not on lambdas.
+
+### Pattern Parameters
+
+A parameter can unpack its argument with the patterns of `let`: arrays and tuples by position, records by field name. `([a b]) =>` is one patterned parameter; `(a b) =>` is two parameters. The pattern's length is an obligation on entry, like an index.
+
+<!-- dewy-example: {"mode":"run","stdout":"42 7\n"} -->
+```dewy
+sum2 = ([left right]:array<int length=2>) => left + right
+score = ([damage armor]:[damage:int armor:int]) => damage - armor
+main = () => printl"{sum2([20 22])} {score([damage=10 armor=3])}"
+```
+
+## Function Types
+
+A function type is written in parentheses: `(int:>int)`, `(x:int:>int)`, `(():>int)`, `((x:int y:string):>int)`. One parameter needs no parentheses of its own; zero or several do, since `(int string)` alone is several values. A label lets a call name the argument. Inside the parentheses `:>` binds loosest, then `:`, then `|` and `&`. An optional or union of function types, or a function type as a parameter or result, takes its own group: `(int:>int)?`, `((int:>int):>int)`. `<x:int:>int>` is the same type as `(x:int:>int)`.
+
+A function type works wherever a type does: a parameter, a record field (`[run:(int:>int)]`), a type argument (`dict<string (int:>int)>`) or an alias (`Unary:type = (int:>int)`). Named arguments work through function values; an annotation supplies the names at that boundary:
+
+<!-- dewy-example: {"mode":"run","stdout":"42\n"} -->
+```dewy
+main = () => {
+    let f:(amount:int:>int) = (x) => x * 2
+    printl(f(amount=21))
+}
+```
+
+A function value fits a slot of a wider contract by the usual rules: parameters contravariant, the result covariant.
 
 ## Function Handles
 
-A bare function name is always a call: a function whose parameters all have defaults is called with none, and mentioning a function with required parameters without its arguments is an error rather than a reference. `@fn` selects the function binding as a first-class value instead:
+`@name` is the function itself, a value that can be passed, stored, chosen and called later. This holds for named functions, function-valued locals and parameters, and function-valued record fields (`w.on_event` calls it; `@w.on_event` selects it). A handle keeps its function's parameter names and defaults. A handle prints as its type.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"42\n8 6\n(x:int:>int)\n5 6\n3 11\n"} -->
 ```dewy
-let sum = (a:int64 b:int64) => a + b
-let reference = @sum
-let add5 = @sum(5)
+double = (x:int):>int => x * 2
+apply = (f:(x:int:>int) x:int):>int => f(x)
+add = (a:int b:int=2) => a + b
+Worker:type = [id:int64 on_event:(n:int:>int)]
+
+main = () => {
+    printl(apply(@double 20) + 2)
+    let table:dict<string (x:int:>int)> = ["double" -> @double]
+    let op = if table.length >? 0 @double else @apply(@double)
+    printl"{table["double"](4)} {op(3)}"
+    printl("{@double}")
+    let w = Worker(1 (n:int) => n + 1)
+    let h = @w.on_event
+    printl"{w.on_event(4)} {h(5)}"
+    let g = @add
+    printl"{g(1)} {g(1 b=10)}"
+}
 ```
 
-Selectors use the ordinary whole-route place rule: `@worker.on_event` selects the function-valued place at the end of the route, and it cannot be written `worker.@on_event`. Although parsing groups the leading prefix first, `@worker` is not the semantic result of that complete expression.
+Passing a function where a function value is expected needs `@`:
 
-A leading `@` suppresses calls at every function-valued node in its complete ungrouped selector-and-application chain. The route still selects only its final place; intermediate nodes are not separately observable place values. Argument groups within that chain partially evaluate functions. A grouping boundary ends the `@` chain, so an argument group outside it performs an ordinary call.
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"'double' is a function: write `@double`"} -->
 ```dewy
-@worker.on_event.metadata     # metadata belonging to the function value
-worker.on_event().metadata    # call on_event, then read result.metadata
-(@worker.on_event)(5).metadata # select on_event, call it, then read result.metadata
+double = (x:int):>int => x * 2
+apply = (f:(x:int:>int) x:int):>int => f(x)
+printl(apply(double 20))
 ```
 
-An ordinary call resolves the callable at that node without automatically calling it first. `@sum(5)` saves `5`, while `(@sum)(5)` invokes the selected function. Repeated argument groups do not implicitly end the chain:
+### Partial Evaluation
 
-<!-- dewy-example: {"mode":"design-only"} -->
+`@f(args)` partially evaluates `f`: the arguments are evaluated now, and the result is a function of the remaining parameters. Every argument group in an ungrouped `@` chain partially evaluates (`@sum3(1)(2)`); parentheses end the chain, after which an argument group calls (`(@sum3(1 2))(3)`). `@text.split(" ")` saves the receiver with the arguments. A parameter left to its default must have a literal default for now. An overloaded or generic function partially evaluates too: the arguments choose the version.
+
+<!-- dewy-example: {"mode":"run","stdout":"6 6\n(int:>int)\n[\"a\" \"b\" \"c\"]\n"} -->
 ```dewy
-@sum(1)(2)       # two stages of partial evaluation
-(@sum(1))(2)     # partially evaluate with 1, then call with 2
-@sum(1)()        # empty second partial evaluation; still a function
-(@sum(1))()      # call the partially evaluated function with no arguments
+sum3 = (a:int b:int c:int) => a + b + c
+main = () => {
+    let p = @sum3(1)(2)
+    printl"{p(3)} {(@sum3(1 2))(3)}"
+    printl(@sum3(1 2))
+    let text = "a b c"
+    let words = @text.split(" ")
+    printl(words())
+}
 ```
 
-An empty partial evaluation does not invoke the function or evaluate its signature defaults. If code needs a place within a returned value, it must bind that result and select a place from the stable binding; `@` does not make a temporary call result into an escaping place.
+A partial is a value like any other, so a comprehension collects partials: `[loop s in sources @load(s)]`.
 
-Partial evaluation also works when the selected function is an object member:
+## Closures
 
-<!-- dewy-example: {"mode":"design-only"} -->
+A function literal may read locals of the enclosing function. It captures a snapshot of each when it is created; later changes to the enclosing local do not reach it.
+
+A closure that changes a local must capture it explicitly. `$capture name` gives the closure its own private copy, kept between calls; `$capture @name` shares the enclosing binding. Captures can appear anywhere among the parameters and take no argument when called. Copying a closure (`@a`) copies its private state; shared captures stay shared.
+
+<!-- dewy-example: {"mode":"run","stdout":"11\n1 1 2\n2\n"} -->
 ```dewy
-let on_item = @worker.on_event(5)
+make_counter = () => {
+    let count = 0
+    return ($capture count) => { count += 1; count }
+}
+main = () => {
+    let base = 10
+    let add = (x:int) => x + base
+    base = 20
+    printl(add(1))              # the snapshot: 10 + 1
+    let a = make_counter()
+    let b = @a
+    let first = a()
+    let other = b()
+    printl"{first} {other} {a()}"
+    let n = 0
+    let next = ($capture @n) => { n += 1; n }
+    next();
+    next();
+    printl(n)
+}
 ```
 
-This selects `on_event` at the endpoint of the route, preserves its receiver, and saves `5`; it does not call either `worker` or `on_event`. When the object must first be produced by a call, bind that result before selecting its function member:
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"this closure changes 'count', which it captures implicitly"} -->
 ```dewy
-let worker = make_worker()
-let on_item = @worker.on_event(5)
+main = () => {
+    let count = 0
+    let bump = () => { count += 1 }
+    bump()
+}
 ```
 
-`@make_worker()` means an empty partial evaluation of `make_worker`, not an explicit call followed by place selection. A temporary call result is not a valid root for a place route.
+A function may return a closure. Ordinary callback parameters receive independent values: to advance a caller's state, take an `@` parameter and pass `@state`.
 
-Partial evaluation binds explicitly supplied values immediately. Defaults remain fallbacks evaluated when the resulting function is eventually called.
+<!-- dewy-example: {"mode":"run","stdout":"7\n3\n"} -->
+```dewy
+make_adder = (n:int) => ((x:int) => x + n)
+main = () => {
+    let add3 = make_adder(3)
+    printl(add3(4))
+    let adders = [loop k in [1..3] @make_adder(k)]
+    printl(adders.length)
+}
+```
 
-Handle identity, explicit function copying, escaping captures, and closure storage remain provisional.
+## Overloads
+
+`&` joins function literals into an overload set. A call selects the most specific applicable member from the argument types; an ambiguous or unmatched call is an error. Members may differ in arity, defaults and type parameters. A literal-typed parameter makes a specialization (see [Literal Types](types-and-conversions.md#literal-types)). When an overloaded function is passed as a value, the expected function type selects a member.
+
+<!-- dewy-example: {"mode":"run","stdout":"42\n"} -->
+```dewy
+measure = ((value:int):>int => value)
+    & ((text:string):>int => text.length)
+main = () => printl(measure(40) + measure("ab"))
+```
+
+Overload groups are module-level, and their members must be function literals.
+
+## Pipes
+
+`x |> @f` is `f(x)` and `@f <| x` is the same call written right to left; see [Pipes](operators-and-precedence.md#pipes).
+
+## Effect Contracts
+
+A result type may carry an effect row with `&`. `reads<x>` and `mutates<x>` name a place parameter the function may read or change; `no_effects` is the empty row. A positive row is an upper bound, and callers are checked against what the callee declares. `no reads<R>` excludes one effect; `& no allocates & no blocks` excludes several. Omitted rows are inferred when a checked contract needs them; an unannotated callback is never assumed pure.
+
+<!-- dewy-example: {"mode":"run","stdout":"41\n42\n42\n"} -->
+```dewy
+read = (@x:int64):>int64 & reads<x> => x
+write = (@x:int64 value:int64):>void & mutates<x> => { x = value }
+quiet = (x:int32):>int64 & no_effects => x * 2
+answer = ():>int64 => 42
+use = (f:(():>int64 & no_effects)):>int64 & no_effects => f()
+
+Action:type = <E:Effect>(x:int64:>int64 & E)
+apply = <E:Effect>(f:Action<E> x:int64):>int64 & E => f(x)
+inc = (x:int64):>int64 => if x <? 100 x + 1 else x
+
+main = () => {
+    let v:int64 = 1
+    write(@v 41)
+    printl(read(@v) + quiet(0))
+    printl(use(@answer))
+    printl(apply(@inc 41))
+}
+```
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"mutation of 'value' exceeds the closed row"} -->
+```dewy
+bad = (@value:int64):>void & reads<value> => { value = 42 }
+```
+
+Effect parameters have kind `Effect`: the callback's contract determines `E`. See [Effects](refinements-and-effects.md#effects) for the full vocabulary.

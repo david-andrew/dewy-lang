@@ -836,3 +836,35 @@ a.tag:hover, a.runs:hover { text-decoration: underline; }
 .code-top { flex-wrap: wrap; gap: .4rem 1rem; }
 .example-card details { width: 100%; }
 .example-card summary { color: var(--green-deep); cursor: pointer; }
+
+/* Playground and examples showcase: games with posters, programs with output. */
+.content-section.wide { max-width: none; }
+.content-section.wide > p { max-width: var(--reading); }
+.game-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 26rem), 1fr)); gap: 1.25rem; margin-top: 1.5rem; }
+.game-card { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--card); box-shadow: 0 12px 34px var(--shadow); scroll-margin-top: 5rem; }
+.game-stage { position: relative; aspect-ratio: 16 / 9; background: var(--slate); }
+.game-stage img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.game-stage iframe, [data-run-host].game-stage iframe { display: block; width: 100%; height: 100%; margin: 0; border: 0; background: #000; }
+.game-play { position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: flex-start; padding: 1rem; border: 0; background: linear-gradient(180deg, transparent 55%, rgba(4, 14, 10, .55)); color: #fff; font: 800 1rem var(--sans); cursor: pointer; }
+.game-play span { display: inline-grid; place-items: center; width: 2.6rem; height: 2.6rem; margin-right: .6rem; border-radius: 50%; background: var(--cta); color: var(--on-cta); font-size: 1rem; box-shadow: 0 6px 18px rgba(0, 0, 0, .3); transition: transform .15s; }
+.game-play:hover span, .game-play:focus-visible span { transform: scale(1.08); }
+.game-play:focus-visible { outline: 3px solid var(--green); outline-offset: -3px; }
+.game-body { display: flex; flex: 1; flex-direction: column; padding: 1.1rem 1.3rem 1.3rem; }
+.game-body h3 { margin: 0 0 .4rem; font-size: 1.15rem; font-weight: 800; letter-spacing: -.02em; }
+.game-body p { margin: 0; color: var(--muted); font-size: .93rem; }
+.game-body .game-controls { margin-top: .55rem; color: var(--ink-soft); font-size: .86rem; }
+.game-body .game-meta { margin-top: .55rem; color: var(--ink-soft); font-size: .86rem; }
+.game-body .button-row { margin-top: auto; padding-top: 1rem; }
+.game-card .button, .example-card .button { min-height: 2.4rem; padding-block: .45rem; font-size: .88rem; }
+.run-status { min-height: 1.3em; margin-top: .6rem !important; font-size: .84rem !important; }
+.run-status:empty { display: none; }
+.example-card .expected { margin-top: 1rem; border: 1px solid var(--edge); border-radius: 12px; padding: .6rem .9rem; background: var(--code-out-bg); }
+.example-card .expected span { display: block; color: var(--muted); font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.example-card .expected pre { margin: .3rem 0 0; padding: 0; border: 0; background: transparent; color: var(--ink); font: .8rem/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.example-card > p + pre, .example-card > p + details { margin-top: .9rem; }
+.example-card details pre { margin-bottom: .5rem; }
+.program-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); gap: 1rem; margin-top: 1.4rem; padding: 0 !important; list-style: none; }
+.program-list li { margin: 0 !important; padding: 1.1rem 1.2rem; border: 1px solid var(--edge); border-radius: 14px; background: var(--card); }
+.program-list h3 { margin: 0 0 .35rem; font-size: 1rem; }
+.program-list p { margin: 0; color: var(--muted); font-size: .9rem; }
+.program-list code { overflow-wrap: anywhere; }

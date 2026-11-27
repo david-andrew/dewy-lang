@@ -1,201 +1,228 @@
-# Structural Objects
+# Records and Objects
 
-> **Language design.** [Generated coverage](/status/#ref-objects) names measured programs and target restrictions; examples here illustrate the design.
+> [Generated coverage](/status/#ref-objects) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
 
-An object is a structural value containing named fields in source order. Field names, field types, and order participate in its structural type.
+A record is a value with named fields. `Name:type = [field:Type ...]` declares a named record type; a literal with `name=value` fields and no expected type makes an anonymous record.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"42\n[x=1 y=2]\n[x=5 y=22]\n[x=3 y=22]\n"} -->
 ```dewy
-let Pair:type = [left:int64 right:int64]
-let pair:Pair = [left=20 right=22]
+Point:type = [x:int64 y:int64=22]
+let p:Point = [x=20]
+let [y x] = p
+printl(x + y)
+printl(Point[1 2])
+let r:Point = [5]
+printl(r)
+printl(Point(3))
 ```
 
-A type alias names the structure; it does not create a runtime class object or give the structure nominal identity.
+## Construction
 
-## Structural Intersections
+A record type's fields are its constructor's parameters, read like a function's:
 
-Intersecting object types combines their field requirements. Unique fields are retained; a field required by both sides receives the intersection of its two types.
+- `Point[20 22]` and `Point(20 22)` construct explicitly, positionally or with `name=value` fields in any order;
+- where a record type is expected (an annotation, an `array<Point>` element, a dictionary value, an argument), a bare literal `[x=20]` or `[20]` uses it;
+- a field with a default may be left out, and a default may use earlier fields (`stop:int64=start`);
+- an optional field `next:Node?` defaults to `none`;
+- leaving out any other field, giving one twice, or naming an unknown field is an error;
+- when every field has a default, the type's bare name where a value goes constructs it, as `Origin()` would.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"Point needs its field 'y', which has no default"} -->
 ```dewy
-const Located:type = [line:int64 column:int64]
-const Labeled:type = [label:string]
-const LabeledLocation:type = Located & Labeled
-
-# equivalent requirements:
-# [line:int64 column:int64 label:string]
+Point:type = [x:int64 y:int64]
+let p:Point = [x=1]
 ```
 
-Matching fields must have the same mutability. Choosing the stricter-looking declaration would be unsound: code accepting the mutable contract is allowed to write the field, while the const contract prohibits that write. Incompatible field types normalize the containing intersection to `never`.
-
-Intersection never creates nominal identity. A structurally stronger alias remains the same nominal kind as any nominal component it already contains.
-
-## Fields and Mutation
-
-Member access uses `.`. A mutable object binding permits assignment to its mutable fields. Ordinary object copies remain independent:
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"[start=4 stop=4]\n[x=0 y=0]\n[left=1 right=2]\n"} -->
 ```dewy
-let original = [name="draft" saved=false]
+Span:type = [start:int64 stop:int64=start]
+printl(Span(4))
+Origin:type = [x:int64=0 y:int64=0]
+let o = Origin
+printl(o)
+make_pair = (left:int64 right:int64):>[left:int64 right:int64] => [left=left right=right]
+printl(make_pair(1 2))
+```
+
+Given values are evaluated first, in written order, then the defaults in field order. Names in a default come from the scope where the type was declared. A constructor that does more than fill fields is an ordinary function returning the record.
+
+## Structural Types
+
+Anonymous record types agree by field names and types, in any order; an inline shape such as `[x:int y:int]` can be written in any annotation. Anonymous records print with their fields in name order. Named records are distinct types: a `Point` is not a `Size` even with the same fields.
+
+<!-- dewy-example: {"mode":"run","stdout":"42\n[x=1 y=2]\n"} -->
+```dewy
+sum = (pt:[x:int y:int]):>int => pt.x + pt.y
+printl(sum([y=22 x=20]))
+printl([y=2 x=1])
+```
+
+### Intersections
+
+`A & B` of record types has the fields of both. A field on both sides takes the intersection of its types; when that is empty, the declaration is an error. A value of the intersection passes where an `A` or a `B` is expected. Intersections are module-level declarations of plain records; minting with `type of` is described in [Errors and Forwarding](errors-and-forwarding.md#declaring-error-types).
+
+<!-- dewy-example: {"mode":"run","stdout":"[line=1 column=2 label=\"x\"]\n"} -->
+```dewy
+Located:type = [line:int64 column:int64]
+Labeled:type = [label:string]
+LabeledLocation:type = Located & Labeled
+printl(LabeledLocation[line=1 column=2 label="x"])
+```
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"this intersection has no values"} -->
+```dewy
+Located:type = [line:int64]
+Named:type = [line:string]
+Both:type = Located & Named
+```
+
+### Spreads
+
+`[defaults... speed=12]` copies a record's fields into a new literal; later fields and spreads replace earlier ones of the same name. Every operand runs once, in source order.
+
+<!-- dewy-example: {"mode":"run","stdout":"[speed=12 name=\"d\"]\n"} -->
+```dewy
+Settings:type = [speed:int64=1 name:string="d"]
+let defaults:Settings = []
+let tuned:Settings = [defaults... speed=12]
+printl(tuned)
+```
+
+## Fields and Copies
+
+Fields are read with `.` and assigned on a mutable binding. Copies are independent, including nested arrays and records. `value.copy` asks for an independent value explicitly; it is what `$explicit_copies` requires where a copy has a cost (see [Values, Copies, and Places](values.md)).
+
+<!-- dewy-example: {"mode":"run","stdout":"[values=[20 22]]\n[values=[99 22]]\n"} -->
+```dewy
+let original = [values=[20 22]]
 let copy = original
-copy.saved = true             # original.saved remains false
+copy.values[0] = 99
+printl(original)
+printl(copy)
 ```
 
-Nested array and object fields recursively follow the same value rule.
+`@record.field` passes the place of a field, so a function can change it in the caller:
 
-## Equality
-
-`a =? b` compares records by value: field by field with `=?`, recursively. Records of different branded types are unequal, and a record in a family compares the fields of its own concrete type. As for arrays, storage is never compared.
-
-## Immutable Records
-
-`const [...]` in a type position is an *immutable record*: a runtime value whose contents never change after it is built. It is not a compile-time value, and it is not the `const` binding declaration: the binding may still be replaced whole. Nothing writes through such a value — not a field, not a member changed in place (an array's `push`, a dictionary's store or `pop`), not a place taken of a field (`@info.radix`), and not a method of the record that assigns a field (refused where the method is declared). The barrier holds through copies, containers, unions, and function boundaries, because the qualifier is part of the type: `const [x:int64]` and `[x:int64]` are different types. A writable record of the same shape may be used where the immutable one is expected (the value is copied there), never the reverse, so a writable contract cannot be handed an immutable value. A copy of a member taken out with `let` is an ordinary value again. `type of any & const [...]` mints an immutable nominal type, and a child of an immutable parent is immutable.
-
-What cannot change stays proven, which is what the qualifier is for: a field of an immutable record may relate to an earlier sibling — `radix:uint8<radix =? alphabet.length>` — and the relation is checked when the record is built (for the default and for an explicit value; a wrong explicit value is refuted) and known wherever the record is read afterwards. A writable record refuses such an invariant: either field could be assigned later.
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"[x=2 y=3]\n"} -->
 ```dewy
-BaseInfo:type = const [
-    alphabet:string<2 <=? length <=? uint8.max>
-    case_sensitive:bool
-    radix:uint8<radix =? alphabet.length> = alphabet.length     # a sibling invariant, with its default
-]
-let hex = BaseInfo['0123456789abcdef' false]                   # radix defaults to 16, proven equal to the length
-let bin = BaseInfo['01' true 2]                                # an explicit radix is checked the same way
-let last_digit = (info:BaseInfo):>string => info.alphabet[info.radix - 1]   # in bounds: radix is the alphabet's length
-let main = ():>void => {
-    let current:BaseInfo = bin
-    current = hex                                              # the binding is replaced whole; its contents never change
-    if last_digit(current) =? 'f' and bin.radix =? 2 return
-    exit(1)
+Point:type = [x:int64 y:int64]
+mover = (@pt:Point) => { pt.x += 1 }
+bump = (@n:int64) => { n += 1 }
+let p = Point[1 2]
+mover(@p)
+bump(@p.y)
+printl(p)
+```
+
+`a =? b` compares records field by field, recursively. A type may define `__eq__` and `hash`, which also apply where it is nested in arrays, records, optionals and unions.
+
+### Field invariants
+
+A field may carry a refinement. It is proven wherever a value is made or the field is stored, and it is a fact wherever the field is read. A field may refer to an earlier sibling: `high:int64<high >=? low>`.
+
+<!-- dewy-example: {"mode":"run","stdout":"42\n"} -->
+```dewy
+Ratio:type = [top:int64 bottom:int64<bottom >? 0>]
+scale = (r:Ratio):>int64 => r.top // r.bottom
+printl(scale(Ratio[84 2]))
+```
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"refinement refuted"} -->
+```dewy
+Ratio:type = [top:int64 bottom:int64<bottom >? 0>]
+let r = Ratio[1 0]
+```
+
+## Recursive Records
+
+A record may hold optional values of its own type, directly or through other records and unions. Copies stay independent; there is no pointer syntax. A recursive type must admit a finite value: `next:Node?` can end with `none`, while `next:Node` cannot.
+
+<!-- dewy-example: {"mode":"run","stdout":"42\n120\n"} -->
+```dewy
+Node:type = [value:int next:Node?]
+sum = (node:Node?):>int => {
+    let cur = node
+    let total = 0
+    loop cur is? Node { total += cur.value; cur = cur.next }
+    return total
 }
+let original = Node[20 Node[22]]
+let copy = original
+if copy.next is? Node { copy.next.value = 100 }
+printl(sum(original))
+printl(sum(copy))
 ```
 
-`info.radix = 8`, `info.alphabet = "01"`, or `bump(@info.radix)` in `last_digit` would each be refused as a write through an immutable record; `BaseInfo['01' true 3]` is refuted at construction.
+## Generic Records
 
-## Constructors
+Type parameters come before the fields: `Box:type = <T>[value:T]`. Constructors usually infer them. An integer type parameter is a constant carried in the type, usable in lengths and refinements.
 
-Calling an object type constructs a value of it. The field list is the constructor's signature, read exactly like a function's: positional arguments fill fields in declaration order, keyword arguments name them, and a field declared with a default (`name:type = default`) may be left out — a default may refer to earlier fields by name.
-
-Other names in a default come from the scope where the type was declared,
-including that module's namespace imports. Importing the type does not require
-repeating those imports. Earlier fields use the values supplied to this
-particular construction; explicit arguments are evaluated in the caller's
-scope.
-
-<!-- dewy-example: {"mode":"check"} -->
+<!-- dewy-example: {"mode":"run","stdout":"Dewy\n[value=[20 22]]\n64\n"} -->
 ```dewy
-let Span:type = [start:int64 stop:int64 = start label:string = "span"]
-
-let a = Span(1 9)                      # positional
-let b = Span(stop=5 start=2 label="b") # keywords, in any order
-let c = Span(7)                        # stop = start, label = "span"
-```
-
-The call is checked as the object literal `[start=1 stop=9 label="span"]` against the type: an unknown field, a field given twice, too many positional arguments, or a missing field without a default is an error. Types are values, so in a value context the name is the constructor and in a type context it is the type, with no separate class declaration.
-
-Construction that needs more than filling fields is an ordinary function added to the type's **constructor overload set** with `&=`; a call dispatches over the field-wise signature and the overloads by the usual most-specific rule, so keyword-only parameters, validation, and error-value results live where functions already have them:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let Range:type = [start:int64 stop:int64]
-Range &= (text:string):>Range => Range(0 text.length)
-
-let a = Range(1 9)          # field-wise
-let b = Range("seven..")    # the overload
-```
-
-A constructor can also be an ordinary function returning an object:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let make_pair = (left:int64 right:int64):>Pair =>
-    [left=left right=right]
-```
-
-### Positional Literals
-
-Where an object type is expected — an annotation, an element of `array<Point>`, a dictionary's value — an object literal may give its fields *positionally*, in declaration order, exactly as a constructor call would; a field left out takes its default:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let Point:type = [x:int64 y:int64 = 0]
-let Spec:type = [digits:set<string> case_insensitive:bool]
-
-const specs:dict<string Spec> = [
-    'b' -> [set'01' false]
-    't' -> [set'012' false]
+Box:type = <T>[value:T]
+let b = Box<string>["Dewy"]
+printl(b.value)
+printl(Box([20 22]))
+Ring:type = <T N>[
+    first:T
+    capacity = ():>int64 => N
 ]
-
-let main = ():>void => {
-    let p:Point = [3]                        # [x=3 y=0]
-    let corners:array<Point> = [[1 2] [5 6]]
-    exit(p.x + corners[1].y + specs['t'].digits.length)   # 3 + 6 + 3
-}
+printl(Ring<string 64>["a"].capacity)
 ```
-
-Mixing named and positional items is not allowed; too many items, or a missing field without a default, is an error naming the field.
 
 ## Methods
 
-An object type may declare methods: `name = (params) => body` rows among the fields. Inside a method, bare names of the type's fields and methods refer to the instance (`stop - start`, `width`); a method that assigns or grows a field takes its receiver as a place, so it must be called on a binding or a field, not on a temporary. Calls are `value.method(args)`, and a zero-argument method is called by `value.method` alone.
+A record type or literal may declare methods as rows among its fields: `name = (params) => body`. Inside a method, a bare field or method name is that member of the object the method was called on; there is no `self`. A parameter or local of the same name hides the member.
 
-<!-- dewy-example: {"mode":"run","stdout":"10\n"} -->
+<!-- dewy-example: {"mode":"run","stdout":"6 41\n1\n"} -->
 ```dewy
-let Span:type = [
+Span:type = [
     start:int
     stop:int = start
     width = () => stop - start
     grow = (by:int) => { stop += by }
-    shifted = (by:int):>Span => Span(start + by stop + by)
+    unit = ():>Span => Span(0 1)
 ]
-
-let main = ():>void => {
-    let s = Span(3 7)
-    s.grow(2)                       # 3..9
-    printl(s.width + s.shifted(1).start)   # 6 + 4
-}
-```
-
-Methods are compiled as ordinary functions taking the instance first as a hidden parameter — there is no `self`; a body reaches its instance only through bare field and method names — so no function value is stored in the object; a method that reads no field (nor calls one that does) is static and takes no instance at all (see [Types as Values](types-and-conversions.md#types-as-values)); they are not values yet (`s.grow` without a call is an error). Methods and constructor overloads are declared on module-level types only.
-
-A structural or hybrid type can also contextually construct an object literal:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-const ContextError:type =
-    (type of error) & [context:string code:int64]
-
-let problem = ContextError[
-    context='request body'
-    code=400
-]
-```
-
-The fields are checked against the structural portion, and the resulting value carries the type's nominal ancestry. A structurally strengthened alias requires all fields from the combined intersection.
-
-## Function Fields
-
-A function field may use sibling fields from the object literal's scope:
-
-<!-- dewy-example: {"mode":"check"} -->
-```dewy
-let counter = (start:int64=0) => [
-    value = start
+counter = (start=0) => [
+    value=start
     increment = () => (value += 1)
 ]
+let s = Span(3 7)
+s.grow(2)
+let c = counter(40)
+c.increment()
+printl"{s.width} {c.value}"
+printl(Span.unit.width)
 ```
 
-Accessing a zero-argument function field calls it when that call is valid. Explicit `()` remains available.
+- A method that assigns or grows a member changes its object, so it is called on a variable, field or element, not a temporary.
+- A method that reaches no member is static and can be called on the type (`Span.unit`).
+- A zero-argument method that gives a value is called without parentheses; one called for its effect keeps them (`c.increment()`).
+- Methods are not stored in values, are not constructor fields, and do not print. They are not values yet (`@c.increment` is an error).
+- Types with methods are declared at module level. A function written inside a method may read members but cannot change them yet.
 
-Extracting a method as a stored naked function, escaping captures, and full function-handle identity depend on the provisional function-handle and closure design.
+<!-- dewy-example: {"mode":"reject","diagnostic":"not on a temporary value"} -->
+```dewy
+Span:type = [start:int stop:int grow = (by:int) => { stop += by }]
+Span(1 2).grow(3)
+```
 
-## Places Through Fields
+A program function named like a library method, with the same kind of first argument, takes over `x.name` on such values in its module, with a warning.
 
-`@object.field` selects the place occupied by the field at the end of the complete route. Although the parser groups the prefix first, the language does not expose an intermediate reference value for `object`. `@(object.field)` selects the same place. There is no separate `object.@field` syntax.
+## Operators and Indexing
 
-See [Values, Copies, and Places](values.md) for aliasing and overlap rules.
+Ordinary functions with protocol names give records operators: `__add__`, `__sub__`, `__mul__`, `__truediv__`, `__floordiv__`, `__mod__`, `__pow__`, `__unary_sub__`, `__eq__`, `__ne__`, `__lt__`, `__le__`, `__gt__`, `__ge__`, and `__index__` / `__setindex__` for `x[i]`. Comparisons return `bool`; `not=?` derives from `__eq__`, and `<=?`, `>?`, `>=?` from `__lt__`. Operators are found in either operand's defining module, so importing the type is enough. `__as__ = ():>string` sets how a value prints.
 
-## Recursive Objects
+<!-- dewy-example: {"mode":"run","stdout":"[x=4 y=6]\ntrue\n"} -->
+```dewy
+Vec:type = [x:int y:int]
+__add__ = (a:Vec b:Vec):>Vec => Vec[a.x + b.x a.y + b.y]
+printl(Vec[1 2] + Vec[3 4])
 
-An object type may contain itself through a union-typed field: `let Node:type = [value:int64 next:Node|none]`. The self-referencing member is held behind a handle, copies are deep, and `is?` narrows the field route (`node.next is? Node`) so the field can be read and assigned as a `Node`. See [Recursive Types](types-and-conversions.md#recursive-types).
+Key:type = [id:uint64 label:string]
+__eq__ = (a:Key b:Key):>bool => a.id =? b.id
+hash = (key:Key):>uint64 => key.id.hash
+printl(Key[1 "b"] in? set[Key[1 "a"]])
+```
+
+Lifecycle hooks (`$__drop__`, `$__copy__`, `$__move__`) for records that own resources are described in [Values, Copies, and Places](values.md).

@@ -1,155 +1,226 @@
 # Operators and Precedence
 
-> **Language design.** [Generated coverage](/status/#ref-operators-and-precedence) names measured programs and target restrictions; examples here illustrate the design.
+> [Generated coverage](/status/#ref-operators-and-precedence) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
 
-Operator tokens resolve to typed operations. An operator's spelling determines parsing precedence; operand types and available overloads determine its meaning.
+An operator's spelling decides how it parses; its operand types and the available overloads decide what it means.
 
-## Main Operator Families
+## Operator Families
 
-- arithmetic: `+`, `-`, `*`, `/`, `//`, `%`, `^`;
-- shifts: `<<`, `>>`, `<<<`, `>>>`;
-- comparisons and tests: `=?`, `not =?`, `<?`, `<=?`, `>?`, `>=?`, `is?`, `isnt?`, `in?` (the tests bind like comparisons, so `a is? T and b in? s` needs no grouping; comparisons chain one direction, see below);
-- symbolic composition: `&`, `|`, `~` — the same operations as `and`, `or`, `not`, binding above the comparisons (see below);
-- Boolean logic: `and`, `or`, `xor`, `nand`, `nor`, `xnor`, `not`, binding below the comparisons (`not x =? y` is `not (x =? y)`);
-- conversion: `as`, `transmute`; propagation: postfix `or_throw`, below `as` ("this expression, or throw");
-- type relationships and construction: `of`, `has`, and the prefix `type of Parent`, which binds above `&` and `|`;
-- call pipes: `|>` and `<|`;
-- construction and binding: `:`, `:>`, `=>`, `->`, `<->`, `=`;
-- suppression: an attached postfix `;`.
+- Arithmetic: `+`, `-`, `*`, `/`, `//`, `%`, `^`. See [Numeric Types](numeric-types.md) for their results.
+- Shifts: `<<`, `>>`.
+- Comparisons and tests: `=?`, `not =?`, `<?`, `<=?`, `>?`, `>=?`, `is?`, `isnt?`, `in?`, `not in?`.
+- Symbolic composition: `&`, `|`, `~`, the same operations as `and`, `or`, `not` at a tighter precedence.
+- Logic: `and`, `or`, `xor`, `nand`, `nor`, `xnor`, `not`.
+- Fallback: `??` gives its right side when the left is `none` or an error.
+- Conversion: `as`, `transmute`. Propagation: postfix `or_throw`.
+- Types: prefix `type of`, postfix `?` (optional type).
+- Pipes: `|>`, `<|`.
+- Binding and construction: `:`, `:>`, `=>`, `->`, `=` and compound assignment.
+- Discard: postfix `;`.
+- Broadcast: `.+`, `.*`, `.<?` and the like apply elementwise and bind like their scalar forms.
 
-English Boolean operators short-circuit according to their truth rules. Explicit calls to the corresponding implementation functions are ordinary eager calls.
+`and` and `or` short-circuit. `a nand b` is `not (a and b)`; `nor` and `xnor` negate `or` and `xor` the same way. On integers the logical operators work on bits; `~x` is `not x` at a tight precedence. Use `xor`, not `^`, for exclusive-or.
 
-Most infix operations have a combined-assignment spelling such as `+=`. Combined assignment has assignment precedence, not the precedence of its inner operation.
-
-`no` is a prefix used only in function effect contracts, such as `:> int64 & no reads<Filesystem>`. It is not Boolean negation.
-
-## Juxtaposition
-
-Adjacent expressions written without whitespace can form several operations:
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"2 7 5 -1\nfalse false true\n"} -->
 ```dewy
-function(argument)
-values[index]
-2distance
-values...
+printl"{6 & 3} {6 | 3} {6 xor 3} {~0}"
+printl"{true and false} {true nand true} {false nor false}"
 ```
 
-Multiplication by juxtaposition is restricted and type-directed. The eligible forms are a numeric literal before a name, member term or parenthesized group (`2x`, `2sin(x)`, `3(a+b)`, `2x^2`); a named numeric value or field route before a parenthesized group (`a(x)`, `material.k(T)`, `n(n+1)/2`); and a parenthesized scalar before a parenthesized group (`(a+1)(a-1)`). The left side must be a statically known, non-callable numeric scalar or quantity; having `__mul__` alone does not qualify. In this multiplication the group holds exactly one value: for a number `a`, `a(x y)` is an error (write `a * (x * y)`).
+Most binary operators have a compound assignment (`+=`, `//=`, `<<=`, `and=`). It has assignment precedence, evaluates its destination route once, and keeps the destination's type: integer `/=` cannot store a fraction in an `int`. On booleans `and=` and `or=` short-circuit.
 
-At `head(...)` the head is classified once, before any implicit zero-argument call: a callable is a call, an eligible number is a multiplication at coefficient precedence, and a union of callable and numeric, an unresolved category, or a value that is both requires narrowing or an explicit operator. A failed call never falls back to multiplication.
-
-| Expression | Means |
-|---|---|
-| `sin(x)^2` | `(sin x)^2` |
-| numeric `a(x)^2` | `a*(x^2)` |
-| `2sin(x)^2` | `2*(sin(x)^2)` |
-| `-a(x)^2` | `-(a*x^2)` |
-| `2^3x` | `(2^3)*x` |
-| numeric `a(x)(y)^2` | `a*x*y^2` |
-| `1/2m` | `1/(2m)` |
-
-Whitespace always separates expressions, so `a b` is never a product (write `*`). A call result (`f(x)g(x)`), an indexed element (`xs[i](j)`) and a tensor (`A(x)`) are never coefficients; write `f(x) * g(x)`, `xs[i] * j` and `A*x` (or `A[x]` to index). Partial application `@a(x)` requires a callable, and a string literal after a name (`printl"hi"`) is always a call.
+<!-- dewy-example: {"mode":"run","stdout":"3 7/2 false [1 12 3]\n"} -->
+```dewy
+let x = 7
+x //= 2
+let y = 7/1
+y /= 2
+let b = true
+b and= false
+let xs = [1 2 3]
+xs[1] += 10
+printl"{x} {y} {b} {xs}"
+```
 
 ## Precedence
 
-The following table is ordered from highest to lowest. “Fail” means an ungrouped repetition at that level is rejected rather than given an arbitrary associativity. “Flat” produces one n-ary sequence.
+Operators bind from tightest to loosest:
 
-| Associativity    | Operators or forms                                   |
-| ---------------- | ---------------------------------------------------- |
-| prefix           | `@`                                                  |
-| left             | member `.`, call juxtaposition, index juxtaposition  |
-| fail             | type-parameter juxtaposition, ellipsis juxtaposition |
-| postfix / prefix | `` ` ``                                              |
-| prefix           | `~`, `no`                                            |
-| postfix          | `?`                                                  |
-| right            | `^`                                                  |
-| left             | multiplication juxtaposition                         |
-| prefix           | `*`, `/`, `//`                                       |
-| left             | `*`, `/`, `//`, `%`, `\` (left division, reserved)  |
-| prefix           | `+`, `-`                                             |
-| left             | `+`, `-`                                             |
-| left             | `<<`, `>>`, `<<<`, `>>>`, `<<!`, `!>>`               |
-| flat             | `,`                                                  |
-| flat             | range juxtaposition (`1..2`)                         |
-| fail             | iterator `in`                                        |
-| prefix           | `type of`                                            |
-| left             | `&`                                                  |
-| left             | `\|`                                                 |
-| left             | comparisons (chaining), membership, type tests       |
-| prefix           | `not`                                                |
-| left             | `and`, `nand`                                        |
-| left             | `xor`, `xnor`                                        |
-| left             | `or`, `nor`                                          |
-| left             | `as`, `transmute`                                    |
-| postfix          | `or_throw`                                           |
-| fail             | `of`, `has`                                          |
-| fail             | `:`                                                  |
-| left             | `:>`                                                 |
-| right            | `=>`                                                 |
-| left             | `\|>`                                                |
-| right            | `<\|`                                                |
-| fail             | `->`, `<->`                                          |
-| fail             | assignment and combined assignment                   |
-| left             | attached semicolon suppression                       |
+| Operators | Grouping |
+|---|---|
+| `@` (covers the whole place route: `@items[i].x`) | prefix |
+| member `.`, call `f(x)`, index `xs[i]`, `f"…"`, `f<T>`, spread `xs...` | left |
+| `~`, effect `no` | prefix |
+| `?` (optional type) | postfix |
+| `^` | right |
+| juxtaposed multiplication (`2x`, `a(x)`) | left |
+| `*` `/` `//` `%` | left |
+| `+` `-` | prefix |
+| `+` `-` | left |
+| `<<` `>>` | left |
+| `,` | flat |
+| `..` | range |
+| iterator `in` | |
+| `type of` | prefix |
+| `&` | left |
+| `\|` | left |
+| `??` | right |
+| `=?` `not =?` `<?` `<=?` `>?` `>=?` `is?` `isnt?` `in?` | chain |
+| `not` | prefix |
+| `and` `nand` | left |
+| `xor` `xnor` | left |
+| `or` `nor` | left |
+| `as` `transmute` | left |
+| `or_throw` | postfix |
+| `:` | |
+| `:>` | left |
+| `=>` | right |
+| `\|>` | left |
+| `<\|` | right |
+| `->` | |
+| `=` and compound assignment | |
+| `;` (discard) | postfix |
+
+Consequences worth knowing:
+
+- `-x^2` is `-(x^2)` and `-7 // 2` is `-(7 // 2)`: unary minus binds below `^` and the multiplicative operators.
+- `~x^2` is `(~x)^2`.
+- `not x =? y` is `not (x =? y)`, and `not a and b` is `(not a) and b`.
+- `x as int64 + 1` is `x as (int64 + 1)`, which is an error: write `(x as int64) + 1`. `bytes as string | none` converts to the union.
+- `f(x) * 2 or_throw` is `(f(x) * 2) or_throw`; propagate first with `(f(x) or_throw) * 2`.
+- `value ?? 0 + 1` is `value ?? (0 + 1)`, with a warning; write `(value ?? 0) + 1`.
+- `type of Parent & [fields]` mints the parent, then adds the fields.
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"`as` binds looser than `+`"} -->
+```dewy
+let x:int = 5
+let n = x as int64 + 1
+```
+
+`else` attaches flow alternatives outside these levels. Group with `( … )` or a scoped `{ … }` when the table does not give the tree you want.
 
 ## Symbolic and Word Composition
 
-`&` and `and` are the same operation, as are `|` and `or` and `~` and `not`: both spellings dispatch to the same builtin, so on booleans they agree, on integers both are bitwise, on sets both are algebra, on types both compose. They differ only in precedence, the way `*` and multiplication juxtaposition do. The symbolic forms bind *above* the comparisons and the word forms *below* them, because each spelling is idiomatic for a different kind of operand:
+`&` and `and` are the same operation, as are `|` and `or` and `~` and `not`: on booleans they agree, on integers both are bitwise, on sets both are set algebra, and on types both compose. They differ only in precedence. Symbols bind above the comparisons and words below, because each is idiomatic for a different kind of operand:
 
-- symbols compose types, overload sets, sets, and masks — `x is? A|B`, `d:int64 & ~0`, `Rational|Overflow`, `@print_int & @print_string`, `keys & other_keys`, `flags & MASK =? 0` — where the composed thing is then compared or tested as a whole;
-- words are boolean logic over comparisons — `x >? 0 and y <? n`, `k in? d or default` — where the comparisons are the operands.
+- Symbols compose types, overload sets, sets and masks, which are then compared or tested as a whole: `x is? A|B`, `d:int64 & ~0`, `flags & MASK =? 0`.
+- Words combine comparisons: `x >? 0 and y <? n`.
 
-The cost is the one expression that mixes them the wrong way round: `x >? 0 & y >? 0` parses as `x >? (0 & y) >? 0`, not as a conjunction. That spelling is unidiomatic — it works directly on boolean values, which is what `and` is for — and the checker rejects the misparse in nearly every case (a boolean compared with an integer). Write `x >? 0 and y >? 0`.
+Mixing them the wrong way round parses differently: `x >? 0 & y >? 0` is the chain `x >? (0 & y) >? 0`. Write `and`.
 
-`else` attaches flow alternatives outside these operator levels. Grouping with `()` or a scoped `{}` is required when the precedence table does not express the intended tree.
-
-Word-`not` sits just above `and`, below the comparisons — the same symbol/word split — so `not x =? y` is `not (x =? y)` and `not a and b` is `(not a) and b`, while `~flags =? 0` is `(~flags) =? 0`. `x not =? y` is still the one inverted comparison.
+<!-- dewy-example: {"mode":"run","stdout":"true\ntrue\nfalse\n"} -->
+```dewy
+let flags = 6
+let x = 5
+let y = 3
+printl(flags & 4 =? 4)          # (flags & 4) =? 4
+printl(x >? 0 and y >? 0)
+printl(x >? 0 & y >? 0)         # x >? (0 & y) >? 0
+```
 
 ## Chained Comparisons
 
-`a <? b <? c` is a chain: consecutive comparisons joined by `and`, each interior operand evaluated once (`0 <? x <? 10` is `0 <? x and x <? 10`; `0 <=? f(x) <? n` calls `f` once — a hidden local holds the value, in front of the statement or, in an expression-bodied function, in front of the chain; a name, a literal, or a route of member reads such as `loc.stop` or `src.length` is simply reused, so the facts a chain establishes are about that term). A chain is one monotonic statement: its operators are rising (`<?`, `<=?`) or falling (`>?`, `>=?`), and `=?` may appear in either without changing direction. Mixing directions is an error, and `not =?`, `is?`, `isnt?`, and `in?` do not chain — write `and`. Parenthesizing the left comparison (`(a <? b) =? c`) compares its boolean instead.
+`a <? b <? c` is `a <? b and b <? c`, with each interior operand evaluated once and later comparisons evaluated only while the chain holds. A chain is monotonic: rising (`<?`, `<=?`) or falling (`>?`, `>=?`), with `=?` allowed in either. Mixing directions is an error, and `not =?`, `is?`, `isnt?` and `in?` do not chain. A parenthesized comparison is a `bool`: `(a <? b) =? c` compares it.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"true true true\n"} -->
 ```dewy
 let x = 5
 $assert 0 <? x <? 10
 $assert 10 >? x >=? 0
-$assert 0 <? x =? 5 <=? 5
+printl"{0 <? x =? 5 <=? 5} {not x =? 4} {(x =? 5) =? true}"
 ```
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"a comparison chain goes one way"} -->
+```dewy
+let x = 5
+printl(0 <? x >? 3)
+```
+
+## Juxtaposition
+
+Writing expressions next to each other without whitespace forms calls, indexing and spreads: `f(x)`, `xs[i]`, `xs...`. A single delimited argument may follow a function directly: `total[1 2 3]`, `printl"hi"`. An empty `()` after any expression calls it.
+
+Juxtaposition multiplies only in these forms:
+
+- a numeric literal before a name, member or parenthesized group: `2x`, `3(x+1)`, `2^3x`;
+- a named number or field before a group: `a(x)`, `material.k(T)`, `n(n+1)/2`;
+- a parenthesized number before a group, a name or a number: `(x+1)(x-1)`, `(5)x`, `(x)2`.
+
+At `head(...)` the head decides once, before anything is called: a function is called, and a number or quantity multiplies, with exactly one value inside the parentheses. A failed call never becomes a product, and a head that may be either must be narrowed first. A call result, an indexed element or an array is never a coefficient.
+
+A juxtaposed product binds below `^` and above `*`, `/`, `//` and `%`, and unary minus applies to all of it:
+
+| Expression | Means |
+|---|---|
+| `2x^2` | `2*(x^2)` |
+| numeric `a(x)^2` | `a*(x^2)` |
+| `-a(x)^2` | `-(a*x^2)` |
+| `2^3x` | `(2^3)*x` |
+| numeric `a(x)(y)^2` | `a*x*y^2` |
+| `1/2a` | `1/(2a)` |
+
+<!-- dewy-example: {"mode":"run","stdout":"15 6 24 18 12 8\n18 -18 96 1/4\n"} -->
+```dewy
+let x = 3
+let a = 2
+let y = 4
+printl"{(5)x} {(x)2} {2^3x} {2x^2} {3(x+1)} {(x+1)(x-1)}"
+printl"{a(x)^2} {-a(x)^2} {a(x)(y)^2} {1/2a}"
+```
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"its parentheses hold exactly one value"} -->
+```dewy
+let a = 2
+let x = 3
+printl(a(x x))
+```
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"a call result is not a coefficient"} -->
+```dewy
+f = (x:int):>int => x
+g = (x:int):>int => x
+printl(f(2)g(3))
+```
+
+Whitespace always separates expressions: `a b` is two values, never a product.
 
 ## Partial Operators
 
-A binary operator applied to only its right operand, in parentheses, is a *partial operator*: a one-parameter function of the missing left operand. `(<? n)` is `i => i <? n`, `(* 2)` is `i => i * 2`, `(in? 1..3)` is `i => i in? 1..3`, `(.length)` is `x => x.length`, `(as string)` is `x => x as string`. Only that form exists, and only for operators that have no prefix form — the comparisons and tests (`=?`, `not =?`, `<?`, `>?`, `<=?`, `>=?`, `is?`, `isnt?`, `in?`, `not in?`), `.`, `as`, `transmute`, `*`, `/`, `//`, `^`, `%`, and `\` — so `(- 1)` remains negative one and `(+ 1)` is just one. (`*`, `/`, and `//` have no prefix form; `x ^/ 2` for a root is an opchain compound, its own operator.) The operand is everything to the closing parenthesis (`(<? a + b)` is `i => i <? a + b`). A partial operator is an ordinary function value: it is typed like an unannotated lambda, from the function type it is checked against (a sort key, a slot, an annotation — whose parameter name it takes), and it is a [fact](refinements-and-effects.md#type-facts) wherever a lambda is: `uint64<(<? src.length)>`.
+A binary operator with only its right operand, in parentheses, is a one-parameter function of the missing left operand: `(<? n)` is `i => i <? n`, `(* 2)` doubles, `(.x)` reads a field, `(as string)` converts. The operand runs to the closing parenthesis, so `(* 2 + 2)` is `x => x * 2 + 2`. Operators with a prefix meaning keep it: `(- 1)` is negative one.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+A partial operator is typed like an unannotated lambda, from the function type it is checked against: a parameter, a `key=`, an annotation. It also serves as a refinement: `int64<(>? 0)>`.
+
+<!-- dewy-example: {"mode":"run","stdout":"[\"a\" \"bb\" \"ccc\"]\ntrue true false\n3 -1\n"} -->
 ```dewy
-let main = ():>void => {
+main = () => {
     let names:array<string> = ["bb" "a" "ccc"]
     names.sort(key=(.length))
-    let small:<(x:int64):>bool> = (<? 10)
-    let text = "hello"
-    let k:uint64<(<? text.length)> = 3
-    let digit:uint64<(in? 0..9)> = 7
-    if small(3) and names[0] =? "a" { return }
-    exit(1)
+    printl(names)
+    let small:(x:int64:>bool) = (<? 10)
+    let digit:(x:int64:>bool) = (in? [0..9])
+    printl"{small(3)} {digit(7)} {digit(12)}"
+    let getx:([x:int y:int]:>int) = (.x)
+    let neg = (- 1)
+    printl"{getx([x=3 y=4])} {neg}"
 }
 ```
 
-## `type of`, `as`, and `or_throw`
+## Pipes
 
-`type of` is a prefix that binds above `&` and `|`, so `type of Parent & Structure` mints the parent and then strengthens it — `(type of Parent) & Structure` without the parentheses; a generic bound `<T of A & B>` uses the infix `of`, which stays loose, so the bound is the whole right-hand side.
+`x |> @f` is `f(x)` and chains left to right; `@f <| x` chains right to left. The callable side is an ordinary expression: a named function is written `@name`, and a function literal pipes as written.
 
-`as` sits below `|` so that `bytes as string | none` converts to the union. The cost is that `x as int64 + 1` is `x as (int64 + 1)`: write `(x as int64) + 1`.
+<!-- dewy-example: {"mode":"run","stdout":"10 10 30\n"} -->
+```dewy
+inc = (x:int):>int => x + 1
+square = (x:int):>int => x * x
+main = () => {
+    let a = 3 |> @square |> @inc
+    let b = @inc <| @square <| 3
+    let c = 3 |> ((x:int) => x * 10)
+    printl"{a} {b} {c}"
+}
+```
 
-`or_throw` is a postfix just below `as`: it applies to the whole expression on its left, so `f(x) * 2 or_throw` is `(f(x) * 2) or_throw`, `bytes as string | none or_throw` is `(bytes as (string | none)) or_throw`, and `lookup(id) or_throw` and `f(x) or_throw * 2` read as they look. Scaling a fallible call before propagating needs parentheses: `2 * (f(x) or_throw)`.
+## Discard
 
-This table lists source-language forms whose place in the expression grammar has been selected. Token spellings reserved by the parser for future operations—such as left division, expression-producing assignment, compile-time assignment, and additional shift forms—do not acquire language semantics merely by being tokenizable.
-
-## Retired Operators
-
-Three test operators were reserved early and removed on 2026-08-28; the symbols are free.
-
-- `of?` — a value-level "is this of type T?". It duplicated `is?`.
-- `has?` — a value-level "does this value have this structural binding?", meant to pair with the reserved type-level `has` (the binding side) the way `is?` pairs with `of`. Held back with `has` until structural binding is designed; today the question is a compile-time fact about the value's type.
-- `@?` — "do two place expressions designate the same place?". Places are borrows (`@x` parameters, `@` routes), not first-class values, and the ownership model gives every value one owner and never exposes storage sharing, so no program can observe the answer.
+An attached `;` evaluates the expression before it and discards what it expresses: `xs.pop();`. Directly inside an array literal `;` separates rows instead; to discard there, use a group: `[(f();) 7]`.

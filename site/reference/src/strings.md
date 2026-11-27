@@ -1,29 +1,35 @@
 # Strings and Graphemes
 
-> **Language design.** [Generated coverage](/status/#ref-strings) names measured programs and target restrictions; examples here illustrate the design.
+> [Generated coverage](/status/#ref-strings) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
 
 ## Semantic Model
 
-A `string` is an immutable sequence of Unicode extended grapheme clusters. A `grapheme` is a string whose length is one; `char` is an alias for the same semantic type.
+A `string` is an immutable sequence of Unicode extended grapheme clusters. Length, indexing, slicing and iteration count graphemes, not bytes or code points: `"é🙂".length` is 2. The exact code points are preserved; equality compares them, with no implicit normalization.
 
-Length, indexing, slicing, and default iteration operate in grapheme-cluster units rather than UTF-8 bytes or Unicode scalar values.
+Strings are immutable shares: binding, passing and returning one copies nothing.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"6\né\n🙂\n0:c 1:a 2:f 3:é 4:  5:🙂 \n[\"a\" \"b\" \"🙂\"]\n"} -->
 ```dewy
-let text = "café 👨‍👩‍👧‍👦"
-text.length
-text[4]
+let text = "café 🙂"
+printl(text.length)
+if text.length >? 5 {
+    printl(text[3])
+    printl(text[5])
+}
+loop i in 0.. and ch in text { print"{i}:{ch} " }
+printl("")
+printl(graphemes("ab🙂"))
 ```
 
-The exact scalar sequence is preserved. Canonically equivalent spellings are not implicitly normalized, and exact equality compares the preserved spelling. Normalization-aware operations are a separate API design.
+A string loop streams graphemes from a snapshot of the string; `graphemes(text)` (or `text.chars`) collects them into an array. Indexing scans from the start, so visit every grapheme with a loop rather than indexing in a loop.
 
 ## Indexing and Slicing
 
-`text[i]` is the grapheme at `i` and `text[a..b]` a slice; both are proven in bounds, never checked at runtime. A string with a known length (a literal, or a binding initialized from one and not reassigned) is checked against that length. A runtime-length string is indexed from facts, exactly like a runtime-length array: a guard `i <? text.length` (or a failed `i >=? text.length`) proves `text[i]` for that binding, a proven minimum length (`text.length >? 0`) proves constant indexes and `text[text.length - k]`, and a slice needs both endpoints proven the same way. Reassigning the binding drops its facts. Inside an index, `end` is the last index — `text.length - 1` — and may take part in any expression: `text[end]`, `text[end - 1]`, `text[2..end]` (each proven the same way, so `text[end]` needs `text.length >? 0`).
+`text[i]` is grapheme `i`, as a one-grapheme string; `text[a..b)` is a slice. Both are proven in bounds, like array indexes: an ASCII literal's length is known, and a runtime string needs facts such as `i <? text.length`. Inside the brackets, `end` is `text.length - 1`. `text.get(i)` gives the grapheme or `none` past either end.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"héllo\n"} -->
 ```dewy
-let first_word = (text:string):>string => {
+first_word = (text:string):>string => {
     let i:int64 = 0
     loop i <? text.length {
         if text[i] =? " " { return text[0..i) }
@@ -31,127 +37,186 @@ let first_word = (text:string):>string => {
     }
     return text
 }
-
-let main = ():>void => exit(first_word("héllo world").length)   # 5
+printl(first_word("héllo world"))
 ```
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"index is not in bounds"} -->
+```dewy
+let s = "abc"
+printl(s[3])
+```
+
+`text.startswith(prefix)` with a known nonempty prefix proves the text nonempty when true, so `if not text.startswith("=") return` permits `text[1..]` afterward. `text.byte_slice(start stop)` slices by UTF-8 byte offsets; both ends must be proven within the byte length and on character boundaries. Stepped string slices are not implemented.
+
+## Literals
+
+Single and double quotes are equivalent; both support escapes and interpolation. Three matching quotes allow embedded quotes and line breaks, keeping all whitespace. An `r` prefix keeps backslashes and braces literally.
+
+| Escape | Meaning |
+|---|---|
+| `\n` `\r` `\t` `\a` `\b` `\v` `\f` `\0` | control characters |
+| `é`, `\u{1F642}` | a Unicode scalar value: four hex digits, or one to six in braces |
+| `\{` `\}` `\'` `\"` `\\` | any ASCII punctuation escapes to itself |
+| backslash at end of line | continues the string without the line break |
+
+Surrogates and values above `10FFFF` are errors, as is an unknown letter or digit escape (`\N`).
+
+<!-- dewy-example: {"mode":"run","stdout":"Ada has 6 points\nassets\\{name}.png\nHe said \"go\".\nNext: 3\ntab:\there é 🙂 {braces}\n"} -->
+```dewy
+let name = "Ada"
+let n = 3
+printl"{name} has {n * 2} points"
+printl(r"assets\{name}.png")
+let caption = """He said "go".
+Next: {n}"""
+printl(caption)
+printl("tab:\there é \u{1F642} \{braces\}")
+```
+
+`printl"..."` is a call with one string argument; the parentheses may be left out.
 
 ## Interpolation
 
-Braces inside a string literal evaluate an ordinary Dewy expression and convert its value to string:
+`{expression}` inside a string evaluates an ordinary expression and converts its value as `value as string` does (see [Printing](#printing)). Interpolations may contain nested strings, blocks and comments.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+## Building Strings
+
+`+` does not join text. Two strings combine by interpolation, `"{left}{right}"`; many pieces collect in an `array<string>` and `join`. On a local string, `s = "{s}more"` appends in place, so building text in a loop stays linear. `text * n` repeats text; a count of zero or less gives `""`.
+
+<!-- dewy-example: {"mode":"run","stdout":"1, 2, 3\n123\n----------\n"} -->
 ```dewy
-let message = "item {index}: {value}"
-let combined = "{left}{right}"
+let pieces:array<string> = []
+loop v in [1 2 3] { pieces.push"{v}" }
+printl(pieces.join(", "))
+let s = ""
+loop v in [1 2 3] { s = "{s}{v}" }
+printl(s)
+printl("-" * 10)
 ```
 
-A field's value converts the way `value as string` does: numbers, booleans, and strings directly, a declared type through its conversion method `__as__ = ():>string => …` (see [`as`](types-and-conversions.md#as)) — user-defined formatting participates in the general conversion protocol rather than a string-only hook — and a container or an object without one as its literal syntax (see [Printing](#printing)). A field whose type cannot convert is an error. Big integers have a decimal string form, including inside optional values and containers.
+<!-- dewy-example: {"mode":"reject","diagnostic":"`+` does not join text"} -->
+```dewy
+let a = "x"
+let b = "y"
+printl(a + b)
+```
 
-An implementation may stream the literal chunks and converted fields directly to a consumer such as `printl`, or materialize a string value when the surrounding context needs one. That representation choice is not observable.
+`s += x` is an error for the same reason.
 
 ## Printing
 
-`print` writes a value; `printl` writes it and a newline. Both are ordinary generic functions of the prelude (`library/io.dewy`): a string, an integer, a boolean, or one of the number objects (`Rational`, `BigInt`, …) prints through its own arm — the arms are type tests decided per instance — and anything else prints as its `as string` text. So every value with a string conversion prints: a container as its literal syntax (`[1 2 3]`, `set["a" "b"]`, `["a" -> 1]`), an object through its `__as__ = ():>string` when its type declares one and otherwise field by field (`[x=1 name="q"]`), members the same way, so nesting is arbitrary. A string inside a structure is quoted, with the escapes of its literal syntax (`"a\tb"`); a string printed on its own prints bare.
+`print(x)` writes a value; `printl(x)` writes it and a line break. `file=stderr` writes to standard error. Printing, interpolation, `string(value)` and `value as string` show a value as its literal syntax:
 
-<!-- dewy-example: {"mode":"design-only"} -->
+- containers as their literals: `[1 2 3]`, `set["a" "b"]`, `["a" -> 1]`, a range as `[0..2]`;
+- a record field by field, `[x=1 name="q"]`; a minted type adds its name, `Fault[code=7]`;
+- a type that declares `__as__ = ():>string` shows that text instead;
+- a string bare on its own, and quoted with its escapes inside a structure (`["a\tb"]`);
+- an optional or union as its current member, and an absent optional as `none`.
+
+<!-- dewy-example: {"mode":"run","stdout":"[1 2 3]\nset[\"ab\" \"c\"]\n[\"k\" -> [x=1 y=2]]\n[\"a\\tb\"]\n[true false] and [name=\"q\"]\nnone\nFault[code=7]\n21°C\n"} -->
 ```dewy
-let Point:type = [x:int64 y:int64]
-
-let main = ():>void => {
-    printl(5)
-    printl([1 2 3])                  # [1 2 3]
-    printl(set["ab" "c"])            # set["ab" "c"]
-    printl(["k" -> Point(1 2)])      # ["k" -> [x=1 y=2]]
-    printl'{[true false]} and {[name="q"]}'
-    let text:string = [1 2 3] as string
-    exit(text.length)               # 7
-}
+Point:type = [x:int64 y:int64]
+Fault:type = type of error & [code:int64]
+Temp:type = [c:int64 __as__ = ():>string => "{c}°C"]
+printl([1 2 3])
+printl(set["ab" "c"])
+printl(["k" -> Point[1 2]])
+printl(["a\tb"])
+printl'{[true false]} and {[name="q"]}'
+let n:int64? = none
+printl(n)
+printl(Fault[7])
+printl(Temp[21])
 ```
 
-Because printing is `as string`, an array of graphemes prints as the text they form (`printl(["a" "b"])` writes `ab`), as [`as`](types-and-conversions.md#as) converts it. A value that cannot convert — a member of an optional type, a container whose members are containers, or a rational/fixed number object inside a structure (those print, but have no string form yet) — is an error where it is printed. An interpolated argument is written part by part rather than built into one string first; that representation choice is not observable. Printing a structure is for looking at values: its exact text is not a stable format.
+The printed text of a structure is for reading, not a stable format.
 
-## Searching, Splitting, and Trimming
+### Formatting
 
-Strings have methods, written in Dewy in the prelude's `strings.dewy`; positions and lengths are graphemes, like indexing. `text.contains(x)`, `text.startswith(x)`, `text.endswith(x)`; `text.find(x)` and `text.rfind(x)` yield the first or last position or `Missing` (the prelude's search exception, neither `none` nor -1; `xs.index_of(x)` too); `text.split(sep)` yields the pieces between separators (adjacent separators give empty pieces; an empty separator splits into graphemes); `text.lines` the lines without their breaks (a final break adds no empty line); `text.trim`, `text.trim_start`, `text.trim_end` drop spaces, tabs, and line breaks; `text.replace(old new)` replaces every occurrence. Zero-argument methods are called without parentheses.
+`fmt'pattern'` is a function that formats one value. The pattern is Python's format spec, `[[fill]align][+][#][0][width][,|_][.precision][type]`. A literal pattern is checked while compiling, including whether it accepts the value's type. `s.pad_start(n)`, `s.pad_end(n)` and `s.pad_center(n)` pad text to a width, with an optional fill. Widths count graphemes; text is never truncated.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"result is 3.14\n0x00ff\n1,234,567\n**hi**\n"} -->
 ```dewy
-let main = ():>void => {
-    let line:string = "  key: value  ".trim
-    match line.find": " {
-        i:int64 => printl"key ends at {i}"
-        <Missing> => printl"no separator"
-    }
-    let parts = line.split": "
-    exit(parts.length)                    # 2
-}
+let x = 3.14159
+printl'result is {fmt'.2f'(x)}'
+printl(fmt'#06x'(255))
+printl(fmt','(1234567))
+printl("hi".pad_center(6 "*"))
 ```
 
-`text.casefold` is the Unicode full case folding (`CaseFolding.txt`, statuses C and F): the form for case-insensitive comparison, not a lowercase for display — `"Straße".casefold` is `"strasse"`, `"İ".casefold` is `"i̇"`. Compare `a.casefold =? b.casefold`; a test like `head is? BasePrefix` narrows to the union member (see [Unions and Narrowing](types-and-conversions.md#unions-and-narrowing)).
+## Searching, Splitting and Trimming
 
-## Joining and Building
+Positions are grapheme positions, as indexing counts them. Methods that take no other argument are called without parentheses.
 
-`xs.join` concatenates the elements of a string array (`array<string>`, `array<grapheme>`) into a new string; `xs.join(sep)` — or, juxtaposed, `xs.join", "` — places the separator between neighbours. The result is re-segmented, so clusters may span the joins. `join` reads its receiver: it applies to any array value, of any length, and is not a mutation.
+| Method | Gives |
+|---|---|
+| `contains(part)`, `startswith(p)`, `endswith(s)` | `bool` |
+| `find(part)`, `rfind(part)`, `find(part start)` | first or last position, or `Missing` |
+| `count(part)` | nonoverlapping occurrences |
+| `split(sep)`, `split` | pieces between separators; words between runs of whitespace |
+| `lines` | lines without their breaks; a final break adds no empty line |
+| `trim`, `trim_start`, `trim_end`, `trim(chars)` | text without surrounding whitespace (or `chars`) |
+| `remove_prefix(p)`, `remove_suffix(s)` | text without that end, once, if present |
+| `replace(old new)` | every occurrence replaced |
+| `upper`, `lower` | Unicode full case mapping, locale-free |
+| `is_alpha`, `is_digit`, `is_space`, `is_alnum`, `is_empty` | `bool` |
+| `chars` | the graphemes, as an array |
 
-Loop-built strings use an `array<string>` as the builder: push each piece (an interpolation such as `"{value}"` converts anything printable), then `join`:
+A found position is at most `text.length`, so `text[..at)` and `at + 1` need no check; indexing `text[at]` still needs `at <? text.length`. Default a search with `??` (`text.find("=") ?? -1`), test it with `is? Missing`, or forward it with `or_throw`.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"key: value\n3\n-1\n[\"a\" \"\" \"b\"]\n[\"one\" \"two\" \"three\"]\n[\"x\" \"y\"]\n2\nfile\nSTRASSE\na+b+c\n"} -->
 ```dewy
-let render = (values:array<int64>):>string => {
-    let pieces:array<string> = []
-    loop v in values { pieces.push"{v}" }
-    return pieces.join", "
-}
+printl("  key: value  ".trim)
+let at = "key=value".find("=")
+if at isnt? Missing { printl(at) }
+printl("key=value".find("#") ?? -1)
+printl("a,,b".split(","))
+printl("one two  three".split)
+printl("x\ny\n".lines)
+printl("banana".count("an"))
+printl("file.txt".remove_suffix(".txt"))
+printl(upper("straße"))
+printl("a-b-c".replace("-" "+"))
 ```
 
-`+` is not string concatenation; two strings combine by interpolation (`"{left}{right}"`), many by `join`.
+### Regular expressions
 
-## Decoding Bytes
+`regex(pattern)` prepares a pattern, giving `Regex | RegexError`; a literal pattern is checked while compiling and gives a plain `Regex`. `text.find(r)` gives `Match | Missing`; `find_all`, `contains`, `matches` (whole string), `split` and `replace` also take a `Regex`. A `Match` has `text`, `groups`, `start` and `end`; its offsets are UTF-8 byte offsets, not grapheme positions. `replace` accepts `$0`, `$1`, … and `$$`, or a `(Match):>string` callback. Matching never backtracks exponentially.
 
-`bytes as string` requires a proof that the bytes are valid UTF-8, which the compiler cannot make for runtime data. The checked form is `bytes as string | none`: it validates the bytes (RFC 3629 — no overlong forms, no surrogates, nothing above U+10FFFF, no truncated sequences) and yields the decoded string, or `none` for invalid input, so the program decides what to do at that point:
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"2026-10\n[\"a\" \"b\" \"c\"]\n10/2026\n"} -->
 ```dewy
-let text = read_text(path)          # `string`, or a file error, or `InvalidUtf8`
-if text is? string { printl(text) } else { printl"not readable text" }
+let r = regex(r"(\d{4})-(\d\d)")
+let found = "due 2026-10!".find(r)
+if found isnt? Missing { printl(found.text) }
+printl("a, b;c".split(regex(r"[,;]\s*")))
+printl("2026-10".replace(r "$2/$1"))
 ```
 
-`read_text` is `read_bytes` followed by this decode, with `none` reported as the `InvalidUtf8` error alongside the file errors (`FileNotFound`, `FileAccessDenied`, `IsDirectory`, `FileError`); a decode of bytes you already hold is `bytes as string | none`.
+## Bytes
+
+`bytes(text)` and `text as array<uint8>` give a string's UTF-8 bytes. `b"abc"` is an `array<uint8>` literal and `b'a'` a single `uint8`. Decoding needs validation: `bytes as string | none` gives the text or `none` for invalid UTF-8, and `bytes as string ?? ""` decodes with a fallback. Plain `bytes as string` is an error, since nothing proves the bytes valid.
+
+<!-- dewy-example: {"mode":"run","stdout":"[104 105]\n97\n3\nhé\nnone\nA\n"} -->
+```dewy
+printl(b"hi")
+printl(b'a')
+let raw = bytes("hé")
+printl(raw.length)
+printl(raw as string | none)
+let bad:array<uint8> = [0xff]
+printl(bad as string | none)
+printl(chr(0x41))
+```
+
+`chr(scalar)` is the one-scalar string of a Unicode scalar value. `bytes.read<uint64>(i)` (and `uint32`, `uint16`) loads little-endian words from a byte array at any alignment; the offset is an obligation.
 
 ## Including Files
 
-`$include_bytes(p"path")` embeds a file's bytes at compile time. The path must be known when compiling — a path literal, resolved against the source file — and the result is a binary literal (`array<uint8>` of a known length), usable like `0x"…"`: `.length`, indexing, `as string | none`. `$include_bytes(p"path") as name` is the statement form, declaring `name`. The generated program does not spell the bytes out; the target embeds the file itself, which is how the compiler's Unicode tables travel.
+`$include_bytes(p"path")` embeds a file's bytes at compile time. The path is a literal, resolved against the source file. The result is an `array<uint8>` of known length:
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"6\nhello\n\n","fixtures":{"notes.txt":"hello\n"}} -->
 ```dewy
-let table = $include_bytes(p"data/table.bin")
-$include_bytes(p"data/notes.bin") as notes
-let text = $include_bytes(p"data/notes.txt") as string | none
-```
-
-## Representation Views
-
-Explicit array views expose lower-level representations:
-
-- `array<uint8>` contains UTF-8 code units;
-- `array<uint32>` contains Unicode scalar values;
-- `array<grapheme>` contains grapheme values.
-
-Converting a grapheme array to string concatenates its contents and segments the result again, so boundaries between adjacent inputs need not remain grapheme boundaries.
-
-Conversions from arbitrary integers to string representations require proof that the input is valid UTF-8 or valid Unicode scalar data; `array<uint8>` has the checked form `as string | none` described above.
-
-## Character Ranges
-
-A range whose unannotated anchors are one-grapheme strings advances in Unicode scalar order when each anchor contains exactly one scalar. Iteration skips the surrogate interval. Enumerating multi-scalar graphemes or natural-language collation order is unspecified.
-
-`chr(scalar)` is the one-scalar string of a Unicode scalar value (`chr(0x1F600)` is `"😀"`). The scalar's range, `0` to `0x10FFFF`, is a proof obligation at the call — a loop over `[0x41..0x5B)` proves it — and a surrogate code point, which no string can hold, yields the replacement character U+FFFD.
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let main = ():>void => {
-    let letters:array<string> = []
-    loop i in [0x41..0x44) { letters.push(chr(i)) }
-    exit(letters.join.length)      # "ABC": 3
-}
+let raw = $include_bytes(p"notes.txt")
+printl(raw.length)
+printl(raw as string ?? "")
 ```

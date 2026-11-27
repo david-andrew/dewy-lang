@@ -1,227 +1,203 @@
 # Values, Copies, and Places
 
-> **Language design.** [Generated coverage](/status/#ref-values) names measured programs and target restrictions; examples here illustrate the design.
+> [Generated coverage](/status/#ref-values) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
 
 ## Value Semantics
 
-Assignment, argument passing, and return supply an independent value. Mutating the destination cannot change the source merely because an implementation reused backing storage.
+Assignment, argument passing and return supply an independent value. Changing the destination never changes the source.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"[1 2 3] [9 2 3]\n"} -->
 ```dewy
 let original = [1 2 3]
 let copy = original
-copy[0] = 9                  # original remains [1 2 3]
+copy[0] = 9
+printl"{original} {copy}"
 ```
 
-The compiler may realize that semantic copy through physical copying, a move, ownership transfer, borrowed reading, shared immutable storage, or another representation whose differences are unobservable.
-
-Scalar, array, object, string, and container values all follow this rule. A field whose own type has explicit handle semantics retains those semantics when its containing value is copied.
+Scalars, strings, arrays, objects, dictionaries, sets and closures all follow this rule. The compiler realizes the semantic copy however it likes: a physical copy, a move at a last use, a borrow of read-only data, or sharing of immutable storage. Strings and `int` values are immutable shares, so keeping, passing or returning one never duplicates it.
 
 ## Places
 
-`@` explicitly selects the place occupied by a mutable value. A parameter that accepts a place also carries `@`, making caller-visible mutation explicit at both boundaries:
+`@` selects the place a mutable value occupies. A parameter that accepts a place carries `@`, and so does the argument, so caller-visible mutation is explicit at both ends:
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"[9 2 3]\n"} -->
 ```dewy
-let update = (@xs:array<int64 length=3>):>void => {
+set_first = (@xs:array<int64 length=3>):>void => {
     xs[0] = 9
 }
 
-let values = [1 2 3]
-update(@values)
+let values:array<int64 length=3> = [1 2 3]
+set_first(@values)
+printl(values)
 ```
 
-Passing `values` without `@` supplies an ordinary value. Passing `@values` to a non-place parameter is likewise a type error.
+Passing a value to an `@` parameter, or `@x` to a value parameter, is an error:
 
-## Projected Routes
-
-A leading `@` selects the place at the end of the complete field-and-index route:
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"a mutable argument needs `@` at the call site"} -->
 ```dewy
-set(@pair.left)
-set(@values[i])
-set(@box.rows[row][column])
+set_first = (@xs:array<int64 length=3>):>void => { xs[0] = 9 }
+let values:array<int64 length=3> = [1 2 3]
+set_first(values)
 ```
 
-The parser groups `@pair.left` as `(@pair).left`, but the language does not expose `@pair` as a separate reference value before applying `.left`. The whole expression refers to the place occupied by `left`. Putting the route inside the prefix, `@(pair.left)`, selects the same place. Grouping the completed selection, `(@pair.left)`, ends the `@` chain; this distinction matters when a following argument group calls a selected function. There is no `pair.@left` form. A computed index in a place route evaluates once before the call.
+<!-- dewy-example: {"mode":"reject","diagnostic":"this parameter takes a value: drop the `@`"} -->
+```dewy
+show = (xs:array<int64>):>void => printl(xs)
+let values:array<int64> = [1]
+show(@values)
+```
 
-## Type and Aliasing Rules
+`@` of a function is its handle, not a place; see [Function Handles](functions-and-calls.md#function-handles).
 
-A mutable place is invariant in its value type: a callee must not reinterpret the caller's storage through a broader or narrower place contract.
+## Place Routes
 
-Two mutable place arguments in one call must be proven disjoint. Sibling object fields and distinct constant indices are disjoint. Prefix-related routes overlap. Dynamic indices are potentially overlapping unless analysis proves otherwise.
+A leading `@` selects the place at the end of the whole field-and-index route: `@pair.left`, `@values[i]`, `@box.rows[r][c]`. `@(pair.left)` selects the same place. There is no `pair.@left` form. An index in a route evaluates once, before the call.
 
-A `const` binding does not provide a mutable place.
+<!-- dewy-example: {"mode":"run","stdout":"[left=2 right=3] [10 21 30]\n"} -->
+```dewy
+bump = (@value:int64):>void => { value += 1 }
+Pair:type = [left:int64 right:int64]
 
-## Local Read-Only Views
+main = () => {
+    let pair = Pair(1 2)
+    let values:array<int64> = [10 20 30]
+    let i = 1
+    bump(@pair.left)
+    bump(@values[i])
+    bump(@(pair.right))
+    printl"{pair} {values}"
+}
+```
 
-Inside a function, `const name = @route` demands a read-only view of an
-existing stored value. The compiler must prove that the storage stays
-valid and stable; it cannot silently replace this request with a copy.
+## Aliasing Rules
 
-<!-- dewy-example: {"mode":"design-only"} -->
+A mutable place is invariant in its type: an `int` local is not an `@int64` place. A `const` binding provides no mutable place.
+
+Two mutable place arguments in one call must be disjoint. Distinct fields and distinct constant indices are disjoint. The same binding, a parent and its field or element, and possibly equal indices of one array overlap:
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"mutable arguments 1 and 2 overlap"} -->
+```dewy
+swap2 = (@a:int64 @b:int64):>void => {
+    let t = a
+    a = b
+    b = t
+}
+main = () => {
+    let xs:array<int64> = [1 2]
+    swap2(@xs[0] @xs[0])
+}
+```
+
+## Local Places
+
+Inside a function, `let name = @route` declares a local place: reads and writes of `name` read and write the route, and an index in it evaluates once at the declaration. A local place can name a whole variable, an element, a dictionary entry or a field of a local variable. A top-level local place is not supported.
+
+<!-- dewy-example: {"mode":"run","stdout":"42\n[1 2 4]\n"} -->
+```dewy
+main = () => {
+    let xs:array<int64> = [40]
+    let cursor = @xs[0]
+    cursor += 2
+    printl(xs[0])
+    let ys:array<int64> = [1 2]
+    let p = @ys
+    p.push(4)
+    printl(ys)
+}
+```
+
+## Read-Only Views
+
+`const name = @route` is a read-only view of stored data. The compiler proves the storage stays valid and unchanged while the view is in use; it never silently replaces the view with a copy. A write to the route before the view's last use is an error at the write.
+
+<!-- dewy-example: {"mode":"run","stdout":"5\n"} -->
 ```dewy
 Box:type = [value:int64]
 read = (boxes:array<Box length=1>):>int64 => {
     const box = @boxes[0]
     return box.value
 }
+printl(read([Box(5)]))
 ```
 
-A conflicting write is diagnosed at that write. Use `.copy()` when an
-independent snapshot is intended. Reading a view through an ordinary value
-boundary, such as returning it or storing it in another record, still supplies
-an independent value; this does not create a first-class reference.
-
-The normal inference proof keeps the owner stable throughout the function.
-A required view can also use a shorter interval ending at the last use of
-all its dependent aliases, including return edges and loop backedges. Private,
-uncaptured storage may change outside that interval. Captured owners and
-exposed addresses still need stronger lifetime evidence.
-It supports bindings, fields, and array elements, including scalars, records,
-arrays, strings, unions, dictionaries and sets. Scalar views retain the
-source width and signedness; they make the same stability demand as a view
-of aggregate storage.
-
-`let cursor = @xs[i]` creates a mutable local place. Writes through `cursor`
-update the selected element; `i` is evaluated once at the declaration. A
-place may also select a named binding, a record field, or a proven dictionary
-entry (`let entry = @table[key]`). A dictionary key is evaluated once; the
-entry must already be known present when the place is declared. The selected storage
-must remain available until the last use, including uses by derived aliases.
-Replacing or resizing its owner in that interval is rejected. A local place
-retains the selected storage's write contract and const barriers, and its
-reads/writes retain the owner's effects and facts. It is not a first-class
-reference: captured or escaping places still require further lifetime support.
-Writes through the selected alias keep
-the containing dictionary’s keys present, while invalidating changed value
-facts. Earlier value snapshots remain independent. Ordinary value reads can still produce independent
-snapshots.
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"this write conflicts with const view 'view'"} -->
 ```dewy
-let xs:array<int64> = [40]
-let cursor = @xs[0]
-cursor += 2
-$assert xs[0] =? 42
-```
-
-The explicit `@` form is an escape hatch while inference improves; ordinary
-read-only locals already borrow when the compiler can prove it safe.
-
-A required view introduces no allocation permission: a function that only
-inspects ordinary by-value input through such views can state `no_effects`.
-The storage proof still has to succeed. A view of a place parameter retains
-its external read effect; binding a local name does not hide that access.
-
-## Requiring Explicit Copies
-
-The file-level `$explicit_copies` directive rejects an implicit copy of
-runtime-sized storage when the compiler cannot prove a borrow or move.
-It applies to that module, including when it is imported.
-Only copies that cost something count. Sharing an immutable string never
-duplicates its bytes, so keeping, passing or storing a string is not a copy
-under the policy. A string still counts when it leaves an `$allocator` block,
-which copies it for real. This distinction applies recursively: a fixed
-record or fixed array of strings can share its immutable bytes, while a
-runtime-length array still has an unbounded mutable-storage copy. Backend
-placement copies remain visible in analysis reports without changing which
-programs the source policy accepts.
-`$explicit_copies = false` disables the policy; a file may set it once.
-
-Use `.copy()` when an independent value is intended, or
-`const view = @source` when stable borrowed storage is required. For example,
-a function that needs a mutable working array can copy it explicitly:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-changed = (source:array<int64>):>array<int64> => {
-    $explicit_copies
-    let working = source.copy()
-    working.push(42)
-    return working
+main = () => {
+    let xs:array<int64> = [1 2]
+    const view = @xs
+    xs.push(3)
+    printl(view.length)
 }
 ```
 
-The check includes nested storage and fields added by concrete child types.
-A fixed-size record can contain a runtime-length array; a single grapheme
-can contain arbitrarily many bytes. Copy-on-write sharing does not satisfy
-the requirement by deferring those copies. Fixed-size copies remain allowed
-; this directive is not a no-allocation contract.
+A view introduces no allocation: a function that only reads its by-value input through views can state `no_effects`. Ordinary read-only locals already borrow when the compiler can prove it safe; the explicit form demands it.
 
-## Escaping Places and Identity
+## Requiring Explicit Copies
 
-Nonescaping place calls have settled semantics. Storing or returning a place, sharing it across concurrent work, and defining lifetime-bearing place types require the provisional ownership and escape design.
+The `$explicit_copies` setting rejects an implicit copy of runtime-sized storage that the compiler cannot turn into a move or a borrow. It applies to the module, function or block it is written in. Only costly copies count: sharing an immutable string is not a copy. Use `.copy()` when an independent value is intended, or `const view = @source` for a borrow. `$explicit_copies = false` turns it off.
 
-There is no place-identity test: places are borrows rather than first-class values, and the ownership model never exposes storage sharing between independent values, so the once-reserved `@?` was retired (see [Operators and Precedence](operators-and-precedence.md#retired-operators)).
+<!-- dewy-example: {"mode":"reject","diagnostic":"implicit costly copy of array<int64>"} -->
+```dewy
+$explicit_copies
+main = () => {
+    let a:array<int64> = [1 2]
+    a.push(3)
+    let b = a
+    b.push(4)
+    printl"{a} {b}"
+}
+```
 
-Function handles build on the same root-and-route interpretation of `@`; see [Functions and Calls](functions-and-calls.md#function-handles).
-
-## Provisional User-Managed Handles
-
-The future systems escape hatch builds on, but does not change, the rules above. A library-defined shared-ownership type such as `Rc<T>` is intended to remain an ordinary Dewy value. Copying the handle retains its explicitly shared payload; copying an object containing such a handle does the same recursively. This does not make ordinary arrays or objects reference-semantic values.
-
-`@rc` selects the place occupied by the handle, allowing a callee to replace that handle in the caller's binding. It does not select the allocation behind the handle. Payload access will instead use lifetime-bounded places supplied by the handle type: read-only while shared, and mutable only after unique ownership is established or through a separate checked-mutation abstraction.
-
-Minted types can declare compiler-only, zero-argument hooks, functions assigned
-to `$__drop__`, `$__copy__`, and `$__move__` (`$__drop__ = ():>void => …`). Drop returns `void` and runs before
-automatic field cleanup; copy and move return the same nominal type. The
-compiler supplies a borrowed receiver. A drop hook without a copy hook makes
-the resource move-only: proven last uses transfer it, proven read-only uses
-borrow it, and independent ownership requires a copy hook. Hooks participate
-in effect and fact checking. Copy/move elision can change whether an optional
-hook invocation occurs.
-
-Cleanup supports nested records, arrays and optional/union owners, including
-recursive records linked through optional fields. A parent's hook runs before
-its fields are cleaned up in reverse order; arrays clean up elements in reverse
-order. Resource dictionaries clean up live values and transfer ownership on
-removal; independent snapshots invoke the component copy hooks.
-
-Conditional transfers follow the path that executes. An owner created outside
-a loop can move on a path that exits with `break`, including a labeled exit,
-when no later use or live alias needs it. A path that continues the loop still
-needs the owner for later iterations. For example, an owning `consume(owner)`
-immediately followed by `break` can move; following it with `continue` cannot.
-Mutable entry places can replace resource values: the replacement is evaluated
-first, then the old value drops once. General field transfers remain
-conservative.
-
-The broader typed allocation capabilities remain provisional; see [Design Maturity](design-status.md).
+<!-- dewy-example: {"mode":"run","stdout":"[1 2 3] [1 2 3 4]\n"} -->
+```dewy
+$explicit_copies
+main = () => {
+    let a:array<int64> = [1 2]
+    a.push(3)
+    let b = a.copy()
+    b.push(4)
+    printl"{a} {b}"
+}
+```
 
 ## Scoped Allocators
 
-`$allocator(@scratch) expression` requests allocation from an `Arena` for the
-whole next expression. Braces group several statements under the same request:
+`$allocator(@scratch) expression` allocates from an `Arena` for the whole next expression; braces group several statements under one request. Results leave the scope with independent storage, so resetting the arena does not invalidate them. The arena cannot be used while it is lent.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"n=3\n"} -->
 ```dewy
-let scratch = Arena[]
-let summary = $allocator(@scratch) build_summary(input)
-scratch.reset()
+build_summary = (n:int64):>string => "n={n}"
+main = () => {
+    let scratch = Arena[]
+    let summary = $allocator(@scratch) build_summary(3)
+    scratch.reset()
+    printl(summary)
+}
 ```
 
-Results leave the scope with independent storage, so resetting the scratch
-arena does not invalidate `summary`. The arena itself cannot be used while
-it is lent to the expression. Cross-allocator copies remain subject to
-`$explicit_copies`, including immutable strings whose bytes must leave the
-arena.
+## Resource Types
 
-## Storage and Escape Copies
+A nominal record can declare a compiler-only `$__drop__` hook, a function with no parameters and a `void` result. It runs once when each owner's lifetime ends: at scope exit, replacement, return, loop exit, a panic or `exit`. A parent's hook runs before its fields are cleaned up in reverse order; arrays clean up their elements in reverse order.
 
-Where a value's bytes live is the implementation's business, but it is observable in one way: cost. A string may be static (a literal), arena-backed (decoded bytes, a `join`), owned by a container (an array element, an object field), frame-backed (an interpolation, or a call result copied into the calling frame), or a parameter's (the caller's, unknown to the callee). Storing a string where it outlives the current evaluation — into a growable array, an object field, a union cell — stores a static literal as it is, takes over a fresh arena string nobody else holds (a `join` or a decode stored directly), and copies everything else into the arena, so **every stored string has exactly one owner**.
+<!-- dewy-example: {"mode":"run","stdout":"7\n"} -->
+```dewy
+let released:int64 = 0
+Ticket = type of [id:int64
+    $__drop__ = ():>void => { released += id }
+]
+main = () => {
+    {
+        let _a = Ticket(3)
+        let _b = Ticket(4)
+    }
+    printl(released)
+}
+```
 
-A transfer at a value's last use is a *move*: `return xs`, `[items = xs]`, `box.items = xs`, or `return box` for a local built here, when nothing uses the local afterwards (and the store is not inside a loop the local outlives), adopts the arena storage instead of copying it. Transfers of a value that is used again copy, as value semantics require.
+Without a `$__copy__` hook such a record is move-only: a proven last use transfers it, a read-only use borrows it, and `.copy()` cannot duplicate it. `$__copy__` and `$__move__` hooks return the same type.
 
-An array of strings owns its elements: when a local array's scope ends (or the binding is rebound), the element strings are released with the buffer — so building and dropping string arrays in a loop runs in constant memory. It follows that element strings never alias: reading an element out and storing or returning it copies it, and a copy of a string array (`let copy = parts`) gets its own element strings.
+## Storage
 
-Objects own their runtime-sized members the same way. When a local object's scope ends, its string fields, its array fields (with their elements), and the string payloads of its union cells are released; a copy of an object (`let two:Point = one`) owns copies of its own; assigning over a string field (`two.name = "changed"`, through a nested object or an element too — `o.inner.name = …`, `pts[0].name = …`, `xs[0] = …`) releases the value it held; an exact-length local array releases its element strings and element objects with it; and a literal or call result stored into an array or returned *moves* its members into the new owner rather than cloning them. Dictionaries are objects of arrays, so a local dictionary releases its keys and values too. Building and dropping objects, arrays of objects, and dictionaries in a loop runs in constant memory.
+Where bytes live is the implementation's choice, observable only as cost. Every stored string, array and object has exactly one owner. A transfer at a value's last use (`return xs`, `box.items = xs`) is a move. Runtime-sized storage is released when its owner's scope ends, when it is overwritten, or at each iteration of a loop that built it, so building and dropping strings, arrays, objects and dictionaries in a loop runs in constant memory.
 
-String storage that never leaves a function — slices, decoded bytes, joins that no `return` reaches (stores copy such strings into the arena as described above) — comes from the function's *frame region*, a scoped arena created on entry and released whole at every exit, so string work in a loop does not accumulate. Strings a `return` may hand out, and their sources, stay in the process arena.
-
-A loop body gets a region of its own: a string it builds that stays within the iteration — no assignment carries it to a binding declared outside the loop — is given back at the end of every iteration (`continue` and `break` included), so string work inside a long loop runs in constant memory rather than accumulating until the function returns. A string assigned to an outer loop's variable lives in that loop's region; one assigned to a variable of the function lives in the function's. Stores into arrays, fields, and dictionaries copy, as before.
-
-String locals own their values. A local whose every value is a function's result, a literal, a view, an interpolation, or a join releases it when its scope ends; `return s` moves it to the caller instead; a return that only reaches it (`return s.trim`) copies; assigning over it releases the old value first. Every string a function hands back belongs to the caller: a parameter (or a module variable) returned as it is comes back as a fresh view of the same bytes, and a call result that nothing keeps — an argument (`printl(f(x))`), a receiver, the element copies of a `[a b].join` literal — is released after its statement. A local that holds a *view* of another local (`let t = pick(s true)`) is safe because the viewed local outlives it, and returning such a view copies. The same rules cover a runtime-length array a call returns that nothing keeps (`text.split" ".length`: released after its statement), the strings a loop's *condition* builds (the loop's region), and an optional or union local — or a `match` temporary — that holds a call's string payload: it is released at scope exit, `return maybe` moves it to the caller, and a return that reaches it through another local clones it. Building strings through calls in a loop therefore runs in constant memory.
-
-Runtime-sized storage is released when its owner is done with it. A growable array's old buffer is given back the moment growth relocates it, and a local that owns an array releases it at every exit of its scope — the end of the block, a `return` (after the returned value is computed; a returned array is copied out first), a `break` or `continue`. A loop that builds and drops a 1000-element array 10 000 times therefore runs in constant memory. Only storage the arena owns is released (a literal's static data and a borrowed parameter's are not); nothing is freed twice, because a released descriptor forgets that it owned anything.
+There is no place-identity test and no first-class reference: places are borrows, and storing or returning a place is an error.

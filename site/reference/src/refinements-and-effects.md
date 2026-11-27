@@ -1,495 +1,346 @@
 # Refinements, Effects, and Safety
 
-> **Language design.** [Generated coverage](/status/#ref-refinements-and-effects) names measured programs and target restrictions; examples here illustrate the design.
+> [Generated coverage](/status/#ref-refinements-and-effects) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
 
-This area has a settled semantic direction and a provisional general syntax. The rules below constrain the eventual design; they do not authorize arbitrary expressions as refinements or effects.
+Every operation that could fail at run time carries an *obligation*: an index in bounds, a nonzero divisor, a value that fits a narrower integer type, a refinement a value must satisfy, a dictionary key that is present, a nonzero range step. The compiler decides each obligation one of three ways:
 
-## Refinements
+- **proven**: the operation compiles to the bare instruction, with no check;
+- **refuted**: the operation always fails, which is a compile error;
+- **unproven**: a compile error by default, naming the missing relation and the bounds the compiler knows.
 
-A refinement combines a base type with facts every value of that type satisfies. Exact array length is a concrete instance:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-array<int64 length=3>
-```
-
-A parameterize block may attach conditions to any type. An entry is a condition when it is a one-argument lambda about the value (`int< i => i >? 0 >`), a `?`-comparison on `length` (`array< length >? 0 >`), or a `length=N` assignment; every other entry is a type parameter. A refined array type may leave its element open and receive it on application (`NonEmptyArray<int>`). A condition — a *fact* — compares against an integer literal, a fixed-width type's `min`/`max` (`uint64.max`), or — as an upper bound on a result — the length of one of the function's parameters (`:>uint64<(<=? src.length)>`, see [refined results](#refined-results-and-field-invariants) and [type facts](#type-facts)); `in?` a range of integer literals is its two bounds (`i => i in? 10..20`, `length in? [1..8)`); a [partial operator](operators-and-precedence.md#partial-operators) is the lambda it abbreviates (`uint64<(<? src.length)>`, `uint64<(in? 0..9)>`); and a condition may be a one-direction comparison chain — `0 <? length <=? uint64.max` is the two conditions `length >? 0` and `length <=? uint64.max`, `i => 0 <=? i <=? 100` likewise — following the [chaining rules](operators-and-precedence.md#chained-comparisons). A refined type is named like any other:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-nonemptystring = string<0 <? length <=? uint64.max>
-let eat_whitespace = (src:nonemptystring):>uint64? => {
-    loop i in 0..uint64.max and i <? src.length {
-        if src[i] not =? ' ' return i
-    }
-    return src.length
-}
-```
-
-Checking a value against a refined type yields one of three outcomes: proven, refuted (a compile error), or unknown (reported as unproven, never as false). A binding declared with a refined type carries the base type together with the proven facts: integer bounds feed range analysis and length intervals feed bounds proofs. The supported predicates apply to bindings, parameters, results, and object fields.
-
-Refinement facts may arise from annotations, literals, ordinary control-flow conditions, successful explicit checks, and trusted interfaces. Refinement facts include exact and minimum array lengths, `i <? xs.length` index guards, the difference two compared terms keep (`start <=? end` makes `end - start` nonnegative), integer intervals, narrowed union members, and proven dictionary and set keys.
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-if index >=? 0 and index <? values.length
-    use(values[index])
-```
-
-Inside the body, the index relationship is available to prove the access valid. Mutation and calls invalidate any fact they may falsify.
-
-### Array Contracts and Dependent Indices
-
-A mutable declaration `let xs:array<int64> = [1]` retains `array<int64>` as
-its assignment contract. Its initial length of one is a fact about the current
-value, so indexing `xs[0]` is valid, and assigning `[40 2]` later is also valid.
-An explicit `array<int64 length=1>` annotation instead requires every assigned
-value to have that length. Immutable bindings can retain their exact shape.
-
-Length inequalities are storage contracts too. Growing an
-`array<int64 length <=? 3>` must leave at most three elements; shrinking an
-`array<int64 length >=? 1>` must leave at least one. These checks apply to
-named arrays, place parameters, and array fields. A guard such as
-`if xs.length <? 3 { xs.push(value) }` proves bounded growth. Reassignment
-checks the replacement and retains the declared length bounds for later
-operations.
-
-The bound can also name another array's length, for example
-`(limit:array<int64> @xs:array<int64 length <=? limit.length>)`. Growth then
-needs a guard such as `xs.length <? limit.length`. Shrinking preserves that
-upper-bound relationship. More precise index guards can also survive a
-removal: an index known to be below `xs.length - 1` remains in bounds after
-one `pop`. This describes bounds, not which element occupies the index.
-
-A result can relate an index to an array passed as a mutable place. The
-contract below is checked against the updated array at each return:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let append = <T>(@xs:array<T> value:T):>addr<(<? xs.length)> => {
-    let i = xs.length
-    xs.push(value)
-    return i
-}
-
-let example = ():>int64 => {
-    let xs:array<int64> = []
-    let i = append(@xs 42)
-    return xs[i]
-}
-```
-
-The result uses ordinary refinement syntax. Growth preserves this bounds
-evidence; a value copy preserves the corresponding evidence for the copy.
-Truncation, replacement, or passing the array to another mutable call can
-invalidate it. The fact says that the index is in bounds for that array's
-current value; it does not establish provenance for an unrelated array, or
-promise that insertion has preserved which element occupies an index.
-
-Array membership similarly carries a result fact: after `if value in? xs`,
-`xs` is known to be nonempty. A failed search promises nothing about length.
-
-Nested range bounds compose with the enclosing loop's facts. For example,
-inside `loop i in [0..xs.length)`, a `loop j in [0..i)` can index `xs[j]`
-without restating a guard. The counters retain abstract-integer semantics.
-To represent an unbounded counter as a word, the compiler verifies its first
-value and every advancing path, including `continue`, against the word range.
-Breaks and returns do not advance. This also permits inclusive conditions
-when the bound leaves room for the next step, and descending counters.
-An unproved storage invariant is discarded, not assumed; arbitrary-precision
-iterator lowering remains required for counters that cannot use a word.
-
-The general proposition language must be a deliberately bounded, decidable fragment. Unsupported Dewy expressions produce an unknown proof result or a diagnostic; they do not silently enter refinement checking as trusted predicates.
-
-### Refined Parameters
-
-A parameter may carry a refinement: `(n:int64 d:int64<d not=? 0>)`, `(xs:array<int64 xs.length >? 0>)` — inside the annotation the parameter's own name is the value, so no lambda is needed (the lambda form `int64<(not=? 0)>` remains for aliases). `int64 & ~0` spells the same exclusion structurally. An object value may be refined by an integer field: `r:Ratio<bottom >? 0>` (also `r:Ratio<r.bottom >? 0>` or `q => q.bottom >? 0`) — proven from a literal's field, from a guard on the field (`if r.bottom >? 0 { value(r) }`), and assumed for `r.bottom` inside the body. Dispatch applies on the base type; the refinement is an obligation at every call site, proven the way `$assert` is — from constants at check time, otherwise by the bounds analysis from guards (`if d not=? 0 { f(n d) }`, `$runtime_assert d >? 0`), intervals (a loop variable over `1..3`), and length facts (`xs.length >? 0`). A refuted obligation and an unprovable one are both errors (`refinement refuted`, `cannot prove refinement`), with a note on what the analysis knew. Inside the body the refinement is a fact: `n // d` is proven with `d:int64<(not=? 0)>`, `xs[0]` with `length>?0`.
-
-Two related spellings make invalid states unrepresentable rather than merely checked. A union of integer singletons — `sign:-1|1` as a field, `s:-1|1` as a binding or parameter, `:>-1|1` as a result — is a word whose value set is its invariant: storing into it is an obligation (`sign = -a.sign` is proven from `a.sign`'s facts) and reading it yields the facts; `s is? 1` on such a word is the comparison `s =? 1`, and `s is? -1|1` an `or` of comparisons (`|` binds above `is?`). A union that mixes literals of different kinds (`1 | 2 | "fast"`) remains a tagged union tested with `is?`. A field may also carry a length invariant, `limbs:array<uint64 length >? 0>`, proven at construction and assumed on every read (`v.limbs[0]` needs no guard). And a literal beside an object type, `0 | [sign:-1|1 limbs:…]`, is a tagged union that `x =? 0` / `x not=? 0` narrow like `is?`; `T & ~0` on such a union names it without the literal member — the nonzero object — so a parameter `d:bigint & ~0` is satisfied by a binding narrowed with `if d not=? 0 { … }`. A field may also be refined by a field of its own type — `start:Point<x >=? 0>` — proven where the enclosing value is built (from a literal, or from a guard such as `if p.x >=? 0 { [start = p …] }`) and a fact wherever `s.start.x` is read; on a `0 | [...]` type the same spelling refines the object member, so `bigint<sign =? 1>` is a positive big integer, nonzero by construction (the abstract rational's denominator is one).
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let percent = (part:int64 whole:int64<whole >? 0>):>int64 => part * 100 // whole
-
-let share = (part:int64 whole:int64):>int64 => {
-    if whole >? 0 { return percent(part whole) }   # the guard proves the obligation
-    return 0
-}
-
-let main = ():>void => exit(percent(1 4) + share(3 4))   # 25 + 75
-```
-
-### Refined Results and Field Invariants
-
-A result may be refined — `let positive = (n:int64):>int64<(>=? 1)> => …` — in which case every `return` (and the body's value) is an obligation, and every call is a fact: `n // positive(n)` is proven, and `let g = positive(n)` carries the fact on `g`.
-
-A result may also be bounded by a parameter's length: `(src:string):>uint64<(<=? src.length)>` (or `<?`) promises that the result never passes the end of `src`. The function proves it at every return from what it knows of `src` — `return i` under `i <? src.length`, `return i + 1` under the same, `return src.length`, `return n - 1` after `n =? src.length` — and a call turns it into a fact about the argument: `let n = f(text)` gives `n <=? text.length`, so `text[0..n)` proves; `let length = f(src[i..])` gives `length <=? src.length - i`, so `src[i..i+length)` proves. That last fact follows the value where it goes — into a record field, an array of records, through `.sort`, out of `matches[0]` and an unpack — until `i`, `src`, or the value is reassigned (an element that does not satisfy it drops the fact from the array). A function type may carry the promise for its implementations: with `eatfn = (src:nonempty):>uint64<(<=? src.length)> | none`, a `type of Token & [eat = (src:nonempty):>uint64? => …]` implementing the slot `eat:eatfn` has the promise as its own contract (its returns prove it), and a `k.eat(src[i..])` through a `type<Token>` value has it as a fact. The promise is about the argument, not a name: a function whose own parameter is `src` cannot discharge `n <=? src.length` with `other(text)`, however `other` names its parameter.
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let nonempty:type = string<length >? 0>
-let eatfn:type = (src:nonempty):>uint64< (<=? src.length) > | none
-let Tok:type = $abstract type of any & [eat:eatfn]
-let Spaces = type of Tok & [
-    eat = (src:nonempty):>uint64? => {
-        if src[0] not=? ' ' return none
-        loop i in 0..uint64.max and i <? src.length { if src[i] not=? ' ' return i }
-        return src.length
-    }
-]
-let Word = type of Tok & [
-    eat = (src:nonempty):>uint64? => {
-        if src[0] =? ' ' return none
-        loop i in 0..uint64.max and i <? src.length { if src[i] =? ' ' return i }
-        return src.length
-    }
-]
-let tokenize = (src:string):>array<string> => {
-    let out:array<string> = []
-    let kinds:array<type<Tok>> = [Spaces Word]
-    let i:uint64 = 0
-    loop i <? src.length {
-        matches = [loop k in kinds { length = k.eat(src[i..])  if length isnt? exception [length=length k=k] }]
-        matches.sort(key=m => m.length reverse=true)
-        if matches.length =? 0 break
-        [length k] = matches[0]
-        out.push(src[i..i+length))          # proven: length <=? src.length - i
-        i += length
-    }
-    return out
-}
-```
-
-A field may declare an invariant: `let Ratio:type = [top:int64 bottom:int64<bottom >? 0>]`. It is proven wherever a `Ratio` is made — `Ratio(1 2)`, a literal, or a plain object flowing into the type — and wherever the field is stored (`r.bottom = z` needs `z >? 0`), and it is assumed wherever the field is read, so `r.top // r.bottom` is proven for any `Ratio`. The prelude's `rational<int64>` (`Rational`) declares `denominator:int64<denominator >? 0>` this way.
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let Ratio:type = [top:int64 bottom:int64<bottom >? 0>]
-let scale = (r:Ratio):>int64 => r.top // r.bottom      # the invariant proves the division
-
-let main = ():>void => {
-    let r = Ratio(84 2)
-    let q:rational<int64> = 1 / 3                        # the word rational declares the same invariant
-    exit(scale(r) // 42 * (9 // q.denominator))         # 3
-}
-```
-
-Facts about an object's integer field (`if r.bottom >? 0 { r.top // r.bottom }`) are tracked by member route, like array lengths, until the field or its object is reassigned; and a loop over an array or dictionary literal of constants that is never mutated bounds the loop variable by those constants.
-
-### Type Facts
-
-A *fact* is one condition of a refinement: `length >? 0`, `i => i <=? src.length`, `bottom >? 0`, `tok is? Word`. A block of them, `<facts>`, is a type in its own right — the values the facts hold of — and `T & <facts>` intersects it with `T`, distributing over a union member by member. `T<facts>` is the same thing spelled as a parameterize block (which can also take type arguments; `& <…>` takes facts only). Inside a fact block a name resolves to a member of the value when the value has one (`length`, a field), and otherwise to a binding in scope — in a result type, the function's parameters. So a result may carry facts about the *parameters*: what the function establishes about its inputs by the time it returns.
-
-A boolean result states its facts per arm:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let has_prefix = (src:string prefix:string):> true & <prefix.length <=? src.length> | false => {
-    if prefix.length =? 0 return true
-    if prefix.length >? src.length return false     # the guard is the proof of the `true` arm
-    let last:uint64 = prefix.length - 1
-    return src[0..last] =? prefix
-}
-```
-
-A `true` result establishes `prefix.length <=? src.length`; the bare `false` arm promises nothing. Every `return` in the body is an obligation for the arm it returns — `return true` must prove the fact, from a guard (`if prefix.length >? src.length return false` before it) or the facts of the value returned — and a call is that fact wherever the result is known: `if src[i..].startswith("[[") { i += 2 }` keeps `i` within `src`, because a true `startswith` establishes `prefix.length <=? text.length` and the argument was the tail `src[i..]`. The prelude's `startswith` and `endswith` are declared this way. A proposition in type position is the type of its truth value, both arms at once — a type predicate:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let is_word = (tok:Token):> tok is? Word => tok is? Word
-```
-
-`if is_word(t)` narrows `t` to `Word` and the else branch away from it, exactly as `if t is? Word` does; the body must return precisely that truth value — `return tok is? Word` is its own proof, and written as two returns, `if tok is? Word return true` then `return false`, the fall-through remembers that `tok` is not a `Word` (there is no type for "a `Tok` that is not a `Word`", so the exclusion is a fact rather than a narrowed type). An expression-bodied function whose body is one such proposition about its parameters — a type test, or a comparison of lengths — is inferred to be a predicate, so `let is_word = (tok:Token) => tok is? Word` is the same declaration; `:>bool` opts out.
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let Tok:type = $abstract type of any & [text:string]
-let Word = type of Tok & []
-let is_word = (tok:Tok) => tok is? Word
-
-# the offset past a `[[ … ]]` block, within the source — no guard: `startswith` proves the steps
-let eat_block = (src:string):>uint64<(<=? src.length)> | none => {
-    if not src.startswith("[[") return none
-    let depth:int64 = 0
-    let i:uint64 = 0
-    loop i <? src.length {
-        if src[i..].startswith("[[") { depth += 1  i += 2 }
-        else if src[i..].startswith("]]") { depth -= 1  i += 2 }
-        else { i += 1 }
-        if depth =? 0 return i
-    }
-    return none
-}
-
-let main = ():>void => {
-    let t:Tok = Word[text="hi"]
-    let n = eat_block("[[a[[b]]c]] rest")
-    if is_word(t) and n is? uint64 { let w:Word = t  exit((n transmute int64) - 11) }   # 0
-    exit(1)
-}
-```
-
-The facts a result may state about a parameter are type tests (`tok is? Word`, `tok isnt? Word`), bounds on its length (`prefix.length <=? src.length`, against another length or a number, in either direction), and bounds on its value — against a number (`true & <n >? 0> | false`) or another parameter (`(a:uint64 b:uint64) => a <=? b` is a predicate whose `true` arm makes `b - a` a proven `uint64` at the call). The value's own facts may likewise bound it by a parameter's length in either direction (`n >=? src.length`, `n =? src.length`) or by a parameter's value (`n => n <=? limit`). A length term may also appear on a parameter's own annotation, naming a sibling — `(src:string n:uint64<(<=? src.length)>)` makes `src[0..n)` proven inside and `n <=? src.length` an obligation on the arguments at every call (the term names the argument passed for `src`, which must be a binding) — and on a local's, naming a binding in scope: `let n:uint64<(<=? src.length)> = 3` is proven where it is declared and at every assignment to `n`, holds wherever `n` is read, and requires that `src` is never reassigned in that function. A function that returns nothing may still establish facts: a runtime result `:> void & <facts>` is owed at every `return` and at the end of the body, and holds for the caller after the call — the shape of a checking or fixing *procedure*. A boolean parameter promised `=? true` establishes the argument's own condition, so a library can write what `$runtime_assert` does; an `@` place argument gets the facts the call establishes about it, the only facts that survive passing it by place; a type fact narrows the argument:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let require = (ok:bool msg:string):> void & <ok =? true> => { if not ok { printl"{msg}"  exit(1) } }
-let ensure_nonempty = (@xs:array<int64>):> void & <xs.length >? 0> => { if xs.length =? 0 { xs.push(0) } }
-let must_be_word = (tok:Token):> void & <tok is? Word> => { if tok isnt? Word { exit(2) } }
-
-ensure_nonempty(@xs)  let first = xs[0]                 # proven
-require(i <? text.length "i out of range")  let c = text[i]
-must_be_word(t)  let w:Word = t
-```
-
-Facts may sit on any member of a union result — `true & <…> | false & <…>` is the case where the members are the two booleans. `Ok & <tok is? Word n <=? src.length> | Trouble` says what holds when the result is `Ok`: each `return Ok` owes those facts, and a caller that narrows the result to that member (`if r isnt? exception`, `if r is? Ok`, `=? none`) has them, until the result binding is reassigned. A bare fact block outside a `$proof` result — a parameter's or a local's annotation — is an error that says which type is missing (`T & <facts>`).
-
-What a caller learns follows the argument: a fact about a parameter's length becomes a fact about the argument's length, about `src.length - i` for a tail `src[i..]`, about `j - i` for a window `src[i..j)` (or `j - i + 1` for `src[i..j]`) — so `let k = take(text[i..j))` then `text[i..i+k)` proves under `i <=? j <=? text.length` — or a bound on a known length. Facts are never assumed from a type: a function type that states them (a slot `eat:eatfn`) makes them the contract of every implementation.
-
-## Prototyping Without the Proofs
-
-`$prototype` in the entry module defers the program's unproven proof obligations to runtime: an unproven index, integer narrowing, or refinement obligation compiles anyway, wrapped in a runtime check that — if it fails — reports `Runtime Panic` with the _violated requirement_ stated concretely (e.g. `array index out of bounds`, ``value does not fit `int8` ``, `requirement violated`), pointing at the same source span the compile error would have, with the observed values (`observed: the index was 5 and the length was 1`), then exits with status 102. The rigor is unchanged in kind, only in time: no-traps stays the language rule, and the metatag is the program writing the traps, wholesale, the way `$runtime_assert` writes one. Each deferral prints as a compile-time warning (`prototype: …`, silenced by `$prototype_warnings = false`). Type errors, arity errors, and structural rules are not proofs and still reject the program; a site whose check cannot be built (an operand with effects) also stays a compile error. `$prototype` is for development — remove it and the warnings show exactly what remains to prove.
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-half = (n:int64 d:int64<(not=? 0)>):>int64 => {
-    $prototype
-    n // d
-}
-main = (argv:array<string>) => {
-    printl(half(10 argv.length))    # warned at compile time; checked at runtime
-    return 0
-}
-```
-
-## The Length Cap
-
-One assumption sits under every length fact: no array or string holds more elements than the target's address space has bytes. An unknown length is therefore `[0, 2^bits)` rather than `[0, ∞)`, where `bits` is the target's address width — 48 on `x86_64`, `arm`, `riscv`, and `c`; 32 on `wasm32`. It is an axiom the analysis trusts, not something a program proves, and it is what lets `s.length <=? uint64.max` hold for any string on a 64-bit target, or `a.length + b.length` fit a word, without a guard; a bound below the cap (`length <=? uint16.max`) is a real obligation. The type `addr` is this axiom as a value: a natural that is a position in the address space, closed under sums and differences of positions (see *Numeric types*). Each target is analyzed against its own address-space cap.
+Failures the compiler cannot decide by its nature (a file that may be missing, text that may not parse) are values in the result type instead; see [Errors and Forwarding](errors-and-forwarding.md).
 
 ## No Traps
 
-Dewy is a trap-free language. A compiled program never aborts, panics, or crashes on a path the programmer did not write: the only exits are the ones spelled out in the source — `return`, a failed `$runtime_assert`, an explicit call to exit. Every operation that could fail is handled in one of two ways, and never a third:
+By default a program has no hidden runtime checks: every obligation is proven or the program does not compile. A program opts into checks explicitly.
 
-1. **A compile-time proof.** If the precondition is provable — an index within a proven length, a divisor a guard or refinement makes nonzero, a refinement an obligation discharges — the operation compiles to the bare instruction, with no check at runtime. If it is _not_ proven, that is a compile error, and the fix is more facts (a guard, a refined type, an assertion), not a runtime check inserted by the compiler.
-2. **A value.** If a failure is genuinely undecidable at compile time — arithmetic on 64-bit parts that may overflow, `tan` of an angle whose cosine may be exactly zero, reading a file that may not exist — the operation's type says so: `rational | Overflow`, `fixed | DivisionByZero`, `T | none`, and the caller handles that branch explicitly (`is?`, `or_throw`, a default).
+- `$runtime_checks`, at the top of a module, function or block, turns that scope's unproven obligations into runtime checks. A failed check prints a report on standard error and exits with status 101.
+- `$prototype` does the same and prints each deferred obligation as a warning, for development.
+- `panic(...)` and `$runtime_assert` are explicit checks.
+- `dewy check --obligations file.dewy` lists every obligation that compiles to a check, and the setting responsible.
 
-The compiler therefore never emits a fallback that changes an operation's meaning, and the library never contains one: no silent wrap-to-zero, no clamping, no "unreachable" abort. The rule follows from proofs-over-exceptions — whatever raises in Python must in Dewy be proven safe or return a value — and it is what makes the proofs worth trusting: a program that compiles has no hidden exit.
-
-The same holds for code written _for_ others. It is unidiomatic for a library to exit the process on its own account: an explicit exit is a decision about the whole program, which only the program's author can make. A library that cannot prove a precondition moves the proof to its caller (a refined parameter — `divide = (a:int64 b:int64 & ~0)`), and one that meets a failure it cannot rule out returns it (`:> T | Overflow`). Exits and `$runtime_assert` belong in applications, at the points their authors chose. The standard library is written this way throughout.
-
-## Operation Preconditions
-
-An ordinary partial operation is valid when its precondition is proven. Examples include indexing within bounds, dividing by a nonzero value, narrowing a number into a smaller representation, and satisfying a function's refined input contract. Integer `//` and `%` require the divisor proven nonzero: an interval that excludes zero (`d >? 0`, a loop variable over `1..3`), a `d not=? 0` guard (or a failed `d =? 0`), a refined parameter, or a `$runtime_assert`; otherwise `cannot prove the divisor is nonzero` is reported with the divisor's known range.
-
-When a fact cannot be proven statically, the program chooses an explicit checked operation, establishes the fact with control flow, supplies a checked proof, or crosses an explicit `unsafe` boundary. The compiler must not insert a hidden semantic fallback that changes the operation's type.
-
-## Assertions
-
-`$assert condition` states a fact the compiler must prove; `$assert condition, message` adds a string literal to the diagnostic. It has the three refinement outcomes: proven (nothing is emitted), refuted (`assertion refuted`), or unknown (`cannot prove assertion` — the fact is neither proven nor refuted). Facts come from the checker's folding and from the bounds analysis: constants, exact and minimum lengths, integer intervals, and index facts from guards.
-
-A refuted or unproven `$assert` underlines the condition, uses the message as the pointer text, and explains in `note:` lines what the analysis knows about each operand and what that decides for each comparison (`` `i` is 3 ``, `` `xs.length` is 3 (the array has exactly 3 elements) ``, ``so `i <? xs.length` is false``).
-
-`$runtime_assert condition` and `$runtime_assert condition, message` evaluate the condition at runtime. When it fails, the program writes the same report shape to stderr through `library/reporting.dewy` — the excerpt with the condition underlined, the message (which may interpolate values) as the pointer text, and `note:` lines with the value of each non-literal comparison operand (re-evaluated on the failure path) — and exits with status 101. The failure path diverges, so the code after the assertion holds the condition's facts exactly as code after an early-return guard does. A runtime assertion whose condition the analyses refute is still a compile-time error.
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"2\n","exit":101} -->
 ```dewy
-let xs:array<int64> = [1 2 3]
-$assert xs.length =? 3, "three elements"
-
-let get = (ys:array<int64> i:int64):>int64 => {
-    $runtime_assert i >=? 0 and i <? ys.length, "index {i} out of range"
-    return ys[i]                      # proven by the assertion
+pick = (xs:array<int64> i:int64):>int64 => {
+    $runtime_checks
+    xs[i]
 }
+let values:array<int64> = [1 2 3]
+printl(pick(values 1))
+printl(pick(values 7))
+```
 
-let main = ():>void => {
-    loop i in 0..2 { $assert i <? 3 }
-    exit(get(xs 1))                  # 2
+A function that keeps a check may panic, which is its `panics` effect (see [Effects](#effects)). Code without runtime checks cannot call it. Running out of memory, or a system with no random source, reports the failure and exits with status 1; these are environmental failures, not panics.
+
+A library that cannot prove a precondition moves it to its callers with a refined parameter, and a failure it cannot rule out it returns as a value. Exits and runtime assertions belong to applications.
+
+## Refinements
+
+A refinement is a condition in a type's arguments: `int64<(>? 0)>` is the `int64` values above zero.
+
+| Form | Example |
+|---|---|
+| partial operator, for one comparison | `int64<(>? 0)>`, `uint64<(<? b.length)>` |
+| lambda, for several conditions | `int64<i => 0 <=? i and i <=? 4>` |
+| the declared name as the value | `d:int64<d >? 0>`, `high:int64<high >=? low>` |
+| one-direction chain | `int64<v => 0 <=? v <? 100>` |
+| exclusion | `int64 & ~0` |
+| membership in a literal range | `int64<(in? 0..9)>` |
+| string length, in graphemes | `string<length >? 0>` |
+| array length | `array<int64 length <=? 10>` |
+
+Bounds may be integer literals, module constants, `.min` and `.max` of fixed-width types, other scalar parameters, an array or string parameter's `length`, and stable local bindings, each plus or minus a constant. Predicates cannot contain calls or other arithmetic.
+
+`n is? int64<(<? 100)>` tests a refinement at run time and narrows `n` when it holds.
+
+### Refined Parameters
+
+A refined parameter is an obligation at every call and a fact inside the body. Guards, loop ranges, lengths and other refinements prove it at the call:
+
+<!-- dewy-example: {"mode":"run","stdout":"42\n75\n0\n3\nd\n"} -->
+```dewy
+positive = int64<(>? 0)>
+quotient = (n:int64 d:positive):>int64 => n // d
+percent = (part:int whole:int64<whole >? 0>):>int => part * 100 // whole
+share = (part:int whole:int64):>int => {
+    if whole >? 0 return percent(part whole)
+    return 0
 }
+printl(quotient(84 2))
+printl(share(3 4))
+printl(share(3 0))
+small = (n:int64<i => 0 <=? i and i <=? 4>):>int64 => n
+printl(small(3))
+initial = (s:string<length >? 0>):>string => s[0]
+printl(initial("dewy"))
 ```
 
-`$expect condition, message` is the assertion form for tests: a failure is recorded and returns from the enclosing function instead of exiting, a refuted condition is a warning rather than an error, and the code after it holds the condition's facts like the code after an assertion. See [Testing](testing.md).
-
-The assertion directives are _forms_ with their own argument grammar, like `if cond body` or `return expr`, not operators: `$assert expr [, expr]`. The directive owns the top-level comma of its argument — it separates the condition from the message — so the comma's operator precedence (tighter than the comparisons) never applies there, and `x <? 3, "message"` is the condition `x <? 3` with the message `"message"`. A condition that is itself a tuple comparison is parenthesized, `$assert pair =? (1, 2)`, as a form's argument would be anywhere. A compile-time message must be a string literal.
-
-## Effects
-
-An effect describes observable behavior relevant beyond a function's return value. The intended effect model covers at least mutation, allocation, blocking, I/O or host capability access, process failure, and escape of storage or handles.
-
-Effects propagate through calls. A caller may preserve a refinement or borrow storage only when the callee's effects prove that behavior safe. Unresolved indirect calls require a conservative effect contract.
-
-Omitted function rows are inferred from bodies and checked callable assignments.
-Each call translates effects on the callee's place parameters into the caller's
-actual arguments. Reordering parameters or passing a field does not change the
-identity of the storage being described. Inferred callback rows retain this
-mapping until their behavior is known, including through reassigned handles.
-
-Negative guarantees retain their scope: `no mutates<box.field>` does not promise
-`no mutates<box>`. Unknown behavior cannot establish a missing guarantee.
-Generic row parameters carry nonlocal effects, including nominal resource
-permissions and negative guarantees. Place permissions stay explicit in each
-signature, for example:
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"which breaks its contract `d >? 0`"} -->
 ```dewy
-let forward = <E:Effect>(f:(@x:int64):>void & mutates<x> & E @y:int64):>void & mutates<y> & E => f(@y)
+positive = int64<(>? 0)>
+quotient = (n:int64 d:positive):>int64 => n // d
+printl(quotient(1 0))
 ```
 
-Here the call translates `mutates<x>` to `mutates<y>`. A callback-local place
-effect cannot instead be inferred into `E`: its parameter number would have a
-different meaning in the wrapper. Local exclusions remain at the callback
-boundary and are omitted from the nonlocal remainder. A more general syntax
-for rows carrying/remapping place identities remains a separate design item.
-
-Type aliases can also take row parameters. Each argument is checked against
-its parameter's kind; a row cannot become a value type or runtime value.
-Aliases preserve nominal resource identities, negative guarantees and nested
-binder scope, including through imports.
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"cannot prove refinement `d >? 0`"} -->
 ```dewy
-Action:type = <E:Effect>(():>int64 & E)
-let invoke = <E:Effect>(f:Action<E>):>int64 & E => f()
-quiet = ():>int64 & no_effects => 42
-main = ():>int64 & no_effects => invoke(@quiet)
+positive = int64<(>? 0)>
+quotient = (n:int64 d:positive):>int64 => n // d
+ask = (d:int64):>int64 => quotient(10 d)
+printl(ask(2))
 ```
 
-`Action<no_effects>` supplies a concrete empty row; `Action<E>` forwards an
-existing row parameter. Type and row parameters can occur in the same alias.
-A negative-only argument such as `no mutates<Filesystem>` keeps an open row
-with that exclusion; it does not promise that every other effect is absent.
+Arguments are evaluated in order and checked before the call. A parameter refinement may name a sibling parameter: `(@xs:array<int64> i:int64<0 <=? i <? xs.length>)` proves `xs[i]` in the body and moves the proof to each caller.
 
-`noreturn` is a control-flow guarantee that a function cannot return to its caller. It is kept separate from the may-effect row: permitting fewer possible effects does not imply that a call never returns.
+### Refined Results and Field Invariants
 
-Expected failures remain [error alternatives in the return type](errors-and-forwarding.md), not members of the effect set. A contract may contain both a returned error union and effects, but `|` combines the returned alternatives while the effect syntax describes evaluation behavior separately.
+A refined result is an obligation at every `return` and a fact at every call. A result may name a parameter; references to a value parameter describe its value at entry, and a result bounded by an `@` parameter's length is checked against its final length:
 
-Allocation contracts use bare `allocates` and `no allocates`:
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"42\n"} -->
 ```dewy
-snapshot = (xs:array<int64>):>array<int64> & allocates => xs.copy()
-inspect = (xs:array<int64>):>int64 & no allocates => xs.length
-```
-
-The positive row permits allocation and bounds other effects; the exclusion
-forbids allocation while leaving other behavior inferred. Neither permits
-an unrelated external read or mutation. `allocates<>` and
-`allocates<Resource>` are rejected: resource markers do not select an
-allocator. Normal row subtyping and `<E:Effect>` forwarding apply.
-
-The measurement rule counts logical storage work remaining after proven
-borrows, moves and static/stack placement. Deferring a copy through COW does
-not establish `no allocates`.
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-answer = ():>int64 & no_effects => {
-    let xs:array<int64> = [40 2]
-    xs[0] = xs[0] + xs[1]
-    return xs[0]
+append = (@xs:array<int64> x:int64):>addr<(<? xs.length)> => {
+    let i = xs.length
+    xs.push(x)
+    return i
 }
+let ys:array<int64> = []
+let at = append(@ys 42)
+printl(ys[at])
 ```
 
-A bounded temporary record passed to a read-only helper can also lend stable
-array descriptors and inline record fields. The root lives in frame storage;
-its fields keep their original owners. Known helper chains may forward this
-root when every use ultimately projects fields. A helper that owns or returns
-the complete record keeps the ordinary ownership boundary. Scalar union fields
-pack directly into the root, without a temporary allocation.
+`addr` is a nonnegative index below the target's address-space limit (`2^48` on native targets, `2^32` on WebAssembly). Record fields and array elements may be refined too; constructors, defaults and stores prove them, and reads assume them. See [Field invariants](objects.md#field-invariants).
 
-Closed literal initializers of startup `const` bindings supply stable storage,
-and reading those immutable values has no external effect. Mutable globals and captured bindings need their own stability proof. Exact array-length facts do not
-change the declaration's storage representation.
+## Literal Types
 
-Storage effects apply to built-in array growth, removal, reservation and joining, and to dictionary/set lookup, membership, stores, removal,
-entry snapshots and built-in array iteration. They conservatively require
-`allocates`: dictionary reads may build or compact an index, and mutations
-may detach shared storage. Reads and mutations of a place parameter also
-require its corresponding permissions; private value parameters do not
-introduce external resources. For example:
+An integer literal in a type position is its singleton type, and a union of integer singletons (`-1|1`, `Sign:type = <-1|1>`) is an `int64` whose value set is its invariant. A string literal is likewise a singleton, and a union of them is an enumeration: one word at run time, compared and matched without building text.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+- Storing into a literal type is an obligation: a member literal is accepted, another literal is an error, and any other value must be proven a member (`if s is? BasePrefix`).
+- `BasePrefix(text)` reads text and gives `BasePrefix | ValidationError`.
+- `members(U)` lists a literal union's members; `loop m in members(U)` unrolls over them.
+- Enumeration members are unordered: `<?`, `min` and sorting need a key the program chooses.
+
+<!-- dewy-example: {"mode":"run","stdout":"-1\n0o\nnone\nmust be one of '0b' | '0o' | '0x'\nwidth 80\n"} -->
 ```dewy
-append = (@items:array<int64> value:int64):>void
-    & reads<items> & mutates<items> & allocates => items.push(value)
-```
-
-Selectors, inserted values and eager lookup defaults retain their own effects.
-Taking a dictionary entry's address still reads its dictionary to find the key;
-it cannot promise `no reads<table>` merely because the callee only writes the
-payload. Lifecycle hook effects are checked after their calls are inserted.
-Sort callbacks remain conservative until their implicit calls are included in
-the public call equations.
-
-Numeric range iterators use allocation-free word counters when
-their finite extent fits or the bounds checker proves every advancing edge
-stays within the word range. A guard alone does not establish that proof:
-an unbounded `continue` path can defeat it. The loop body retains its own
-effects, including allocation and external writes.
-Lowering's full placement/move proofs are not yet shared with
-this checker, so it can require permission even for a boundary the backend
-later removes. Unsupported operations and unconstrained callbacks remain
-unknown, and cannot satisfy a closed row or an unproved exclusion. This
-initial allocation vocabulary does not settle allocation-failure policy or
-promise that the underlying allocator cannot fail.
-
-## `unsafe`
-
-`$unsafe_assume condition [, message]` introduces an assumption without a runtime
-check. The condition is a pure fact condition with an optional compile-time string literal. It does not turn off unrelated
-checking. Writes and calls invalidate its facts normally, and a checked
-`$proof` body cannot use it.
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-read_at = (xs:array<int64> i:int64):>int64 => {
-    $unsafe_assume 0 <=? i and i <? xs.length, 'validated by the producer'
-    return xs[i]
+flip = (s:-1|1):>-1|1 => if s is? 1 -1 else 1
+printl(flip(1))
+BasePrefix:type = '0b' | '0o' | '0x'
+parse_prefix = (text:string):>BasePrefix? => {
+    loop p in members(BasePrefix) { if text =? p return p }
+    none
 }
+printl(parse_prefix("0o"))
+printl(parse_prefix("0z"))
+let bad = BasePrefix("0q")
+if bad is? ValidationError { printl(bad.message) }
+Mode:type = 'auto' | int64
+show = (m:Mode):>string => match m { <'auto'> => "auto" w:int64 => "width {w}" }
+printl(show(80))
 ```
 
-The condition is not evaluated at runtime. Its truth is the programmer's
-responsibility; a false assumption can invalidate bounds or representation
-safety. Conditions the compiler can prove false are rejected with `assertion refuted`;
-unknown conditions are accepted and audited.
+A literal-typed parameter can select an overload: a method taking `d:0` receives a literal zero ahead of one taking `d:int64 & ~0`.
 
-## Provisional Boundary
+## Array Contracts and Dependent Indices
 
-The complete proposition grammar and qualifier inference still need work. The reviewed effect rules are: positive rows are upper bounds, omitted rows are inferred, `no_effects` is the explicit empty row, and `no reads<resource>` excludes one effect while `no reads` excludes the family. Empty family forms such as `reads<>` are rejected by the design; `Effect<>` is the desugared empty row. Error-value propagation has its own settled core and provisional surface details; see [Errors and Forwarding](errors-and-forwarding.md) and [Design Maturity](design-status.md).
+`array<int64 length <? 10>` is a growable array with a length contract; `array<int64 length=10>` is a fixed-size array. `push`, `pop`, `extend`, `clear` and `truncate` check the length they leave, so growth under `length <=? 3` needs a guard such as `if xs.length <? 3`:
 
-### Checked proof statements
+<!-- dewy-example: {"mode":"run","stdout":"[1 2 3]\n"} -->
+```dewy
+let bounded:array<int64 length <=? 3> = [1 2]
+if bounded.length <? 3 { bounded.push(3) }
+printl(bounded)
+```
 
-A `$proof` declaration establishes a fact without producing a value. Its
-fact-only result, `:> <P>`, is reserved for proofs; an ordinary runtime
-procedure uses `:> void & <P>` and retains its runtime behavior.
+An array may require that its elements are valid indexes of itself by naming its own length in its element refinement. The contract also means `>=? 0` unless it states another lower bound. Every store is checked against the length it leaves; growth, `swap`, `reverse` and sorting keep the contract without a proof per element, and a shrink is an error unless it empties the array or the element values are bounded:
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"1\n"} -->
+```dewy
+let parent:array<int64<(<? parent.length)>> = [0]
+parent.push(parent.length)
+let root = parent[parent[1]]
+printl(root)
+```
+
+A record field's elements can index a sibling array the same way: `next:array<int64<(<? nodes.length)>>`. An array whose elements carry a tighter refinement is accepted by value where looser ones are expected; an `@` parameter needs the same contract.
+
+## Type Facts
+
+A *fact* is one condition, and a block of them, `<facts>`, is a type: `T & <facts>` is `T` where the facts hold. A result type may attach facts about the parameters to each member of a union result. A caller that tests which member it got learns those facts:
+
+<!-- dewy-example: {"mode":"run","stdout":"25\n0\n"} -->
+```dewy
+positive = (a:int64):>true & <a >? 0> | false & <a <=? 0> => a >? 0
+quarter = (n:int64):>int64 => if positive(n) 100 // n else 0
+printl(quarter(4))
+printl(quarter(0))
+```
+
+`void & <facts>` publishes a postcondition every normal exit must establish:
+
+<!-- dewy-example: {"mode":"run","stdout":"6\n"} -->
+```dewy
+require_below = (i:int64 n:int64):>void & <i <? n> => { if i >=? n exit(2) }
+let ys = [5 6 7]
+let k = args.length
+require_below(k ys.length)
+printl(ys[k])
+```
+
+Each `return` must prove its arm's facts from guards or the value returned. The facts follow the argument: a fact about a parameter's length becomes a fact about the argument passed. Result facts currently take value parameters only, and need static evidence at each exit. Reassigning the result or an argument ends the facts. The prelude's `startswith` and `endswith` publish their length facts this way.
+
+### Proofs
+
+`$proof` marks a procedure that exists only to establish a fact. Its result is a fact block, checked at every exit. Proofs may contain static assertions, branches, bare returns and direct calls of other proofs (with no cycles). Loops, runtime calls, globals and place parameters are rejected. Proofs are erased after checking:
+
+<!-- dewy-example: {"mode":"check"} -->
 ```dewy
 $proof
-ordered = (a:int64 b:int64<(>=? a)> c:int64<(>=? b)>):> <a <=? c> => {
+ordered = (a:int64 b:int64<(>=? a)> c:int64<(>=? b)>):><a <=? c> => {
     $assert a <=? b
     $assert b <=? c
 }
-ordered(1 2 3)
+check = (a:int64 b:int64 c:int64) => {
+    if a <=? b and b <=? c {
+        ordered(a b c)
+        $assert a <=? c
+    }
+}
+check(1 2 3)
 ```
 
-Every normal exit must establish the result fact. Proof bodies initially
-permit static assertions, conditional branches, returns without a value,
-and direct calls of other proofs. The proof-call graph must be acyclic;
-loops, runtime calls, global reads, default arguments and place parameters
-are outside this initial finite subset. `$prototype` cannot defer proof
-obligations or checks on erased arguments.
+## Making Code Prove
 
-Only direct statement calls of statically known proofs are supported,
-including imported proofs. A proof cannot be stored, passed as a callback,
-or used as a value: both `let x = ordered(1 2 3)` and `@ordered` are errors.
-Arguments must be pure fact terms such as names, literals, trusted lengths,
-and supported arithmetic over those terms. Definitions and calls erase
-only after validation. Returned facts refer to current argument values;
-subsequent mutation invalidates them normally.
+An unproven obligation's error names the missing relation (`i <? xs.length`, `start <=? i`) and shows what is known. These forms supply facts:
 
-Sort invokes its `key` callback, so the callback's effects contribute to the
-sort's contract in addition to reading, mutating and allocating storage for
-the receiver. Selecting a callback can have separate effects. The `key` and
-`reverse` options evaluate once, in source order, even when the array is empty;
-the key itself is then called for each element. Unknown callback effects remain
-unknown.
+- **Loop over values or positions**: `loop x in xs`, `loop i in 0.. and x in xs`, `loop i in [0..xs.length)`. A cursor loop keeps its bound in the condition: `loop i <? xs.length and xs[i] =? " " { i += 1 }`.
+- **Guard the whole relation**, lower bound included: `if 0 <=? i <? xs.length`. A position that cannot be negative can say so in its type.
+- **Take the missing case as a value**: `xs.get(i) ?? fallback`, `d.get(k) ?? fallback`, `text.get(i) ?? ""`, or return an optional.
+- **Slice the Python way**: `xs[$clamp a..b)`.
+- **Put the key in first**: `if k not in? d d[k] = 0` before `d[k] += 1`.
+- **Give pairs a tuple type** (`array<[int64 int64]>`) so they unpack, and build grids with comprehensions.
+- **Use a small boolean helper**: `valid = (i:int xs:array<int>):>bool => 0 <=? i <? xs.length` carries its comparison back to the caller.
+- **Compute in `int`** when arithmetic may exceed a fixed width, or state the wrap: `uint32<overflow='wrap'>`.
+
+Facts come from literals, annotations, conditions, loop ranges, successful assertions and contracts. They include integer intervals, exact and minimum lengths, index relations, the order a sum keeps with its operands, narrowed union members and present dictionary keys. Facts hold until a write or call could change them: calls preserve facts only when their effects rule out interference, and an `@` argument keeps only the facts the callee publishes.
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"cannot prove index is in bounds"} -->
+```dewy
+at = (xs:array<int64> i:int64):>int64 => xs[i]
+printl(at([1 2] 1))
+```
+
+The 64-bit counter-progress assumption proves that a 64-bit counter advanced by a loop does not overflow; `$no_assumed_bounds` turns it off. Every length is assumed below the address-space limit.
+
+## Assertions
+
+`$assert condition` states a fact the compiler must prove; nothing runs. A refuted condition is `assertion refuted` and an unknown one `cannot prove assertion`, each with notes on what is known. `$runtime_assert condition` checks at run time: on failure it reports the condition and exits with status 101, and the code after it has the condition as a fact.
+
+Both take an optional message after a comma, `$assert x <? 3, "message"`; the directive owns that comma. A runtime message may interpolate values; a compile-time one is a string literal. `$expect` is the test form (see [Testing](testing.md)).
+
+<!-- dewy-example: {"mode":"run","stdout":"2\n","exit":101} -->
+```dewy
+let xs:array<int64> = [1 2 3]
+$assert xs.length =? 3, "three elements"
+item = (ys:array<int64> i:int64):>int64 => {
+    $runtime_assert 0 <=? i and i <? ys.length, "index {i} out of range"
+    return ys[i]
+}
+printl(item(xs 1))
+printl(item(xs 5))
+```
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"assertion refuted"} -->
+```dewy
+let i = 3
+let xs = [1 2 3]
+$assert i <? xs.length
+```
+
+## Effects
+
+A function's *effect row* follows its result type after `&`. It describes what calling the function does, apart from the value it returns.
+
+| Row | Meaning |
+|---|---|
+| `reads<x>`, `mutates<x>` | reads or changes the place passed as `@x` (or a field of it) |
+| `allocates`, `no allocates` | may allocate; never allocates |
+| `no blocks` | no I/O, waits, sleeps or foreign calls |
+| `panics`, `no panics` | may panic (inferred); never panics |
+| `no_effects` | the empty row |
+| `E` with `<E:Effect>` | a row parameter, forwarding a callback's effects |
+
+Omitted rows are inferred from the body. A positive row is a closed upper bound and is what callers see, even if the body does less. A negative row (`no allocates`, `no mutates<Filesystem>`) excludes what it names and leaves the rest inferred. In a row, `no` reaches to the next `&`.
+
+<!-- dewy-example: {"mode":"run","stdout":"41\n42\n42\n3\n"} -->
+```dewy
+read = (@x:int64):>int64 & reads<x> => x
+write = (@x:int64 value:int64):>void & mutates<x> => { x = value }
+quiet = (x:int32):>int64 & no_effects => x * 2
+let a:int64 = 1
+write(@a 41)
+printl(read(@a))
+printl(quiet(21))
+
+Action:type = <E:Effect>(x:int64:>int64 & E)
+apply = <E:Effect>(f:Action<E> x:int64):>int64 & E => f(x)
+inc = (x:int64):>int64 & no_effects => if x <? int64.max x + 1 else x
+printl(apply(@inc 41))
+
+zeros = (n:int64):>array<int64> & allocates => fill(0 n)
+size = (xs:array<int64>):>int64 & no allocates => xs.length
+printl(size(zeros(3)))
+```
+
+A body that does more than its row allows is an error naming the operation:
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"mutation of 'x' exceeds the closed row"} -->
+```dewy
+peek = (@x:int64):>int64 & reads<x> => { x = 0; x }
+let a:int64 = 1
+printl(peek(@a))
+```
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"allocation exceeds the closed row (no_effects permits none)"} -->
+```dewy
+double = (x:int64):>int & no_effects => x * 2
+printl(double(2))
+```
+
+Field permissions such as `mutates<pair.left>` cover that field and its descendants. Calls translate place permissions by argument, so a callback's `mutates<x>` becomes `mutates<y>` when called with `@y`. Callable types keep their rows through variables, containers and results. Arbitrary-precision `int` arithmetic, interpolation and growth allocate; fixed-width scalar work, length reads and proven indexes do not.
+
+### Panics
+
+A function may panic when it keeps a runtime check, calls `panic` or `$runtime_assert`, or calls a function that may panic. Within one module, such checks are the module's own choice and its other functions may call them. A caller in another module must prove what the callee checks or opt in with `$runtime_checks`. `& no panics` forbids panics outright, local assertions included.
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"calling `at` may panic","fixtures":{"lib.dewy":"at = (xs:array<int64> i:int64):>int64 => {\n    $runtime_checks\n    xs[i]\n}\n"}} -->
+```dewy
+from lib import at
+let values:array<int64> = [1 2 3]
+printl(at(values 1))
+```
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"its row excludes panics"} -->
+```dewy
+safe = (xs:array<int64> i:int64):>int64 & no panics => {
+    $runtime_assert 0 <=? i and i <? xs.length
+    xs[i]
+}
+printl(safe([1] 0))
+```
+
+Library preconditions are the caller's obligations: `xs.first`, `xs.last`, `min_by`, `max_by` and `min(xs)` need a nonempty array, `d[k]` a present key, `pool[h]` a live handle.
+
+### Strict settings
+
+`$no_hidden_costs` holds `$explicit_copies`, no runtime checks, and the default row `no allocates & no panics` for every function declared without its own row. `$bulletproof` adds every remaining strict setting and turns off the compiler's convenience assumptions. Both are described in [Settings](settings.md).
+
+## Unchecked Assumptions
+
+`$unsafe_assume condition [, message]` will introduce a fact without a runtime check, for code where the programmer knows more than the compiler. Its truth is the programmer's responsibility; a condition the compiler can refute is still an error, and writes invalidate the fact as usual. The compiler reports it as not implemented yet.
+
+<!-- dewy-example: {"mode":"design-only","why":"`$unsafe_assume` is decided but the compiler reports it as not implemented yet."} -->
+```dewy
+read_at = (xs:array<int64> i:int64):>int64 => {
+    $unsafe_assume 0 <=? i and i <? xs.length, "validated by the producer"
+    return xs[i]
+}
+```

@@ -1,6 +1,6 @@
 # Implementation Compatibility
 
-This appendix reports measured programs; it does not define language semantics. The [reference](index.md) remains normative even where a compiler does not yet implement a rule.
+This appendix reports measured programs for each reference page: acceptance-ladder programs and golden test cases that exercise the page's topic, with their results from this site build. The examples on each page are compiled and run separately; the [status page](/status/#website-examples) lists them.
 
 <!-- generated: coverage -->
 

@@ -1,253 +1,216 @@
 # Errors, Exceptions, and Forwarding
 
-> **Language design.** [Generated coverage](/status/#ref-errors-and-forwarding) names measured programs and target restrictions; examples here illustrate the design.
+> [Generated coverage](/status/#ref-errors-and-forwarding) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
 
-Dewy models expected failures as values belonging to nominal error types. A function exposes those values directly as alternatives in its return type rather than wrapping its result in a runtime `Result<T, E>` object.
+Expected failures are values. A function that can fail lists its failure types as alternatives of its result type, `int64 | ParseError`; there is no `Result` wrapper and no stack unwinding. A caller handles a failure, gives a fallback for it, or forwards it with `or_throw`.
 
-Automatic forwarding is defined by the broader nominal `exception` family. Errors are one kind of exception; `none` is another. The direct-union model, exception classification, receiver-forwarding rule, explicit treatment of arguments, and separation of errors from effects are settled semantic direction. The surface forms called out as provisional below are not yet normative.
-
-Errors are the second half of Dewy's no-trap rule (see [No Traps](refinements-and-effects.md#no-traps)): what cannot be proven safe at compile time is returned as a value, never raised, never aborted.
+Failures that the compiler can rule out are not values at all: an index, a divisor or a narrowing is proven before the program runs (see [Refinements, Effects, and Safety](refinements-and-effects.md)).
 
 ## The `exception` Family
 
-The built-in hierarchy contains:
-
 ```text
 exception
-├── error
-└── none
+├── error      file errors, ParseError, ValidationError, user errors, ...
+├── none
+└── Missing, Canceled, user exceptions, ...
 ```
 
-Any value whose type descends from `exception` is a forwarding value. Programs may define additional exception types. A type that does not descend from `exception` remains an ordinary union alternative even if programmers conventionally use it as a sentinel.
+A value whose type descends from `exception` is a *forwarding value*: member access forwards it, `??` replaces it and `or_throw` returns it. `is? error` and `is? exception` test the families. A type outside the family is an ordinary union alternative, even when used as a sentinel.
 
-“Exception” names a type category here. Exception values remain ordinary values; forwarding does not imply stack unwinding.
+`Missing` is the prelude's exception for a search that found nothing (`text.find`, `xs.index_of`); it is neither `none` nor `-1`. `Canceled` reports a canceled wait (see [Concurrency](concurrency.md)).
 
 ## Declaring Error Types
 
-An error type descends from the nominal base type `error`, which itself descends from `exception`. `type of error` creates a fresh nominal error type:
+`type of error` mints a new nominal error type. A unit error is written with its name. `& [fields]` adds a payload, constructed like a record. `type of exception` mints a non-error exception, and `type of Parent & [...]` mints a child that inherits the parent's fields. Two minted types are distinct even when their shapes agree. These declarations are module-level and nongeneric.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"42\nParseError[message=\"not a number: x\"]\nnot a number: x\n"} -->
 ```dewy
-const MyCustomError:type = type of error
-```
-
-A unit-like nominal error has one canonical inhabitant, written with the type's name. The question of whether that inhabitant is literally the type value itself remains open, but there is no separate `MyCustomError()` spelling:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let MyCustomError:type = type of error
-
-let maybeNumber = (flag:bool):>int64 | MyCustomError => {
-    if flag { return MyCustomError }
-    return 42
+ParseError:type = type of error & [message:string]
+parse = (text:string):>int|ParseError => {
+    let n = to_int(text)
+    if n is? error return ParseError["not a number: {text}"]
+    return n
+}
+twice = (text:string):>int|ParseError => {
+    let n = parse(text) or_throw
+    return n * 2
+}
+printl(twice("21"))
+let r = twice("x")
+printl(r)
+match r {
+    e:ParseError => printl(e.message)
+    v:int => printl(v)
 }
 ```
 
-Minted names are nominal: two `type of error` aliases are distinct types even though both descend from `error`, and a value of one is never a value of the other.
+A child keeps its identity where its parent is expected, so `match` and `is?` can select it:
 
-Intersect the fresh nominal type with an object type when an error carries fields. The result is constructed, matched, and read like any minted object (`Report`'s methods included when the structure is `Report`), sits in the `error` family for `is? error`, `or_throw`, and forwarding, and — being a fresh nominal child of its structure — satisfies a parameter of that structure:
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"late by 5\n"} -->
 ```dewy
-let TokenError:type = type of error & [message:string offset:int64 = 0]
-
-let count = (src:string):>int64 | TokenError => {
-    if src.length =? 0 return TokenError(message='empty input')
-    return src.length
-}
-
-describe = (n:int64):>string => match count("abc") {
-    e:TokenError => e.message
-    v:int64 => "{v} characters"
+Ticket:type = type of error & [message:string code:int64=1]
+Late:type = type of Ticket & [minutes:int64]
+check = (k:int64):>int64|Ticket => if k =? 0 Late["late" 2 5] else k
+match check(0) {
+    l:Late => printl"late by {l.minutes}"
+    t:Ticket => printl(t.message)
+    n:int64 => printl(n)
 }
 ```
-
-`type of error` mints the identity; `&` only adds the structural requirement. Further structural extension therefore reuses the existing nominal ancestry:
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-const MyMoreComplexError:type =
-    MyComplexError & [metadata:string]
-```
-
-`MyMoreComplexError` is structurally stronger but is not a separate nominal error variant. See [Nominal Identity](types-and-conversions.md#nominal-identity).
 
 ## Error Return Unions
 
-<!-- dewy-example: {"mode":"design-only"} -->
+Errors are direct alternatives of a result union. A function that declares its result fixes the set of failures it may give. A function without a declared result infers it: each `return` of an error and each `or_throw` adds its kinds.
+
+<!-- dewy-example: {"mode":"run","stdout":"Empty\n3\n"} -->
 ```dewy
-let loadCustomer = (id:CustomerId)
-    :> Customer | NotFoundError | DatabaseError
-=> {
-    # ...
+Empty:type = type of error
+measure = (text:string) => {
+    if text =? "" return Empty
+    return text.length
 }
+printl(measure(""))
+printl(measure("abc"))
 ```
 
-`Customer`, `NotFoundError`, and `DatabaseError` are direct alternatives. Union normalization flattens errors in the same way as other alternatives, while nominal membership in `error` prevents an error from collapsing into a structurally similar success type. No `Ok` or `Err` constructor is implied.
-
-An exposed function should ordinarily declare a stable error set. The compiler may infer error alternatives for an unexposed helper.
-
-## Forwarding Member Access
-
-Let a receiver have type:
-
-```text
-V1 | ... | Vn | X1 | ... | Xm
-```
-
-where each `Xi` descends from `exception` and no `Vi` does. For `receiver.member`:
-
-1. Every ordinary alternative `Vi` must support `member`. Otherwise the expression is a type error.
-2. When the runtime receiver is a `Vi`, the member operation is performed normally.
-3. When the runtime receiver is an `Xi`, member lookup is not performed and that exception value is forwarded.
-4. If the member results have types `R1` through `Rn`, the result type is `R1 | ... | Rn | X1 | ... | Xm`.
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let UserError:type = type of error
-let Address:type = [city:string]
-let User:type = [name:string address:Address|none]
-
-let load_user = (id:int64):>User | UserError | none =>
-    if id >? 0 [name="ada" address=[city="paris"]] else UserError
-
-let city_of = (id:int64):>string | UserError | none => {
-    let user = load_user(id)
-    let city = user.address.city      # city: string | UserError | none
-    return city
-}
-```
-
-Each successive route segment applies the rule again. This gives exception-bearing receivers safe navigation without a separate `?.` spelling. Ordinary union alternatives never forward merely because they lack the requested member.
-
-The rule with no exception alternatives is plain common-member access: when every alternative of an ordinary union has the member, the access reads it without narrowing, at the union of the member types (one type when they agree):
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let Customer:type = [name:string id:int64]
-let Organization:type = [name:string members:int64]
-
-let find = (id:int64):>Customer | Organization =>
-    if id >? 0 [name="ada" id=id] else [name="acme" members=3]
-
-let who = (id:int64):>string => find(id).name    # both alternatives have `name`
-```
-
-`find(id).id` is a type error there — `Organization` has no `id` — and so is assigning through any union route; narrow with `is?` first.
-
-Forwarding applies at the receiver's current type; it does not recursively search inside containers. An `array<int64 | ParseError>` is an array value, not a top-level `ParseError`. Code that wants to combine or reject exceptions among its elements must do so explicitly.
-
-## Calls and Arguments
-
-Selecting a member on an exception-bearing receiver follows the forwarding rule. Arguments to a call do not forward implicitly.
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let service:Service | ServiceError = connect()
-let request:Request | ParseError = parseRequest(text)
-
-service.send(request)            # type error: request is still a union
-service.send(request or_throw)  # explicit propagation
-```
-
-The first call is invalid unless `send` actually accepts `Request | ParseError`. Receiver forwarding does not change the argument contract.
+A function exposed to other modules should declare its failures.
 
 ## `or_throw`
 
-Postfix `or_throw` is the intended spelling for passing exception alternatives out of the current function.
+Postfix `expression or_throw` evaluates the expression once. If the value is an exception, the enclosing function returns it; otherwise the expression gives the success value. It binds just below `as`, so it applies to the whole expression on its left. The enclosing function's result must accept every forwarded alternative:
 
-For an expression of type `V | X`, where `X` contains its `exception` alternatives, `expression or_throw`:
-
-- evaluates `expression` once;
-- returns the encountered `X` value from the enclosing function; or
-- produces the corresponding non-exception `V` value locally.
-
-The enclosing return contract must accept every propagated exception alternative. This includes `none` and user-defined exception kinds as well as errors.
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"or_throw cannot propagate NotFound"} -->
 ```dewy
-let NotFound:type = type of error
-
-let lookup = (id:int64):>int64 | NotFound => {
-    if id >? 100 { return NotFound }
-    return id * 2
-}
-
-let twice = (id:int64):>int64 | NotFound | none => {
-    let first = lookup(id) or_throw      # first: int64
-    let second = lookup(first) or_throw
-    if second =? 8 { return none }
-    return second
-}
+NotFound:type = type of error
+lookup = (id:int64):>int|NotFound => if id >? 100 NotFound else id * 2
+use = (id:int64):>int => lookup(id) or_throw
+printl(use(1))
 ```
 
-`or_throw` is a postfix just below `as` in precedence, so it applies to the whole expression on its left: `lookup(id) or_throw` propagates the call's result, and `f(x) * 2 or_throw` propagates from the product (see [operators and precedence](operators-and-precedence.md)). The propagated alternatives must each be accepted by the enclosing function's declared result type; a function without a declared result type cannot use it. Forms that replace or transform the propagated exception are part of the design direction, but their exact syntax and evaluation rules remain provisional.
+`x or_throw<E>` forwards only the failures matched by `E` and leaves the others in the value. `E` may be a union or a family: `or_throw<error>` forwards errors and keeps `none`. The angle brackets select failures; they do not construct an `E`.
+
+## Fallbacks with `??`
+
+`value ?? fallback` gives the value when it is present, and otherwise runs the fallback. *Absent* means `none` or any exception value except `Canceled`. The left side runs once, and the fallback runs only when needed. Zero, `false` and empty collections are present values.
+
+- The fallback may be `return x`, `break` or `continue`.
+- `??<Missing | ParseError> fallback` covers only the listed kinds (and `none` only if listed); any other failure stays in the result. Listing a kind the value never holds is an error.
+- Chains associate to the right: `first ?? second ?? default`.
+- Arithmetic binds tighter than `??`; comparisons and boolean operators bind looser.
+- `Canceled` is never replaced: it leaves the enclosing function as `or_throw` would. Only `??<Canceled>` handles it.
+
+<!-- dewy-example: {"mode":"run","stdout":"42\n-1\n8080\n0\nBad\n"} -->
+```dewy
+total = (lines:array<string>):>int => {
+    let sum = 0
+    loop line in lines {
+        let v = to_int(line) ?? continue
+        sum += v
+    }
+    return sum
+}
+printl(total(["1" "x" "41"]))
+first_num = (text:string):>int => to_int(text) ?? return -1
+printl(first_num("q"))
+printl(to_int("8080") ?? 80)
+
+Bad:type = type of error
+pick = (k:int64):>int64|Bad|Missing => if k =? 0 Bad else if k =? 1 Missing else k
+printl(pick(1) ??<Missing> 0)
+printl(pick(0) ??<Missing> 0)
+```
 
 ## Explicit Handling
 
-Type tests narrow error unions through ordinary control flow:
+`is?`, `isnt?` and `match` narrow a result union through ordinary control flow. Each branch removes only the alternatives it tests; the rest stay in the type. A value that may hold a failure is not accepted where the success type is wanted:
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"it may hold a failure such as NotFound"} -->
 ```dewy
-let result = loadUser(id)
-
-if result is? NotFoundError
-    useGuest()
-else if result is? DatabaseError
-    report(result)
-else
-    greet(result.name)
+NotFound:type = type of error
+lookup = (id:int64):>int64|NotFound => if id >? 100 NotFound else id
+double = (n:int64):>int => n * 2
+printl(double(lookup(3)))
 ```
 
-The general pattern-selection syntax and type-directed recovery helpers remain provisional. Any recovery operation must remove only the alternatives it actually handles and preserve every unhandled error in the result type.
+## Forwarding Member Access
 
-Forwarded values do not become false in Boolean context. If `user.isAdmin` has type `bool | UserError | none`, it is not a valid `if` condition until every exception alternative is propagated, handled, or otherwise narrowed away.
+For a receiver of type `V1 | ... | Vn | X1 | ... | Xm`, where each `Xi` is an exception and no `Vi` is:
 
-`value ?? fallback` evaluates the left side once and uses the fallback when it is `none` or an error value (such as `to_int`'s `NotAnInteger` or a search's `Missing`), so applying a default to `Address | DatabaseError | none` produces `Address`. `Canceled` is never replaced: it leaves the enclosing function, as `or_throw` would. To keep an error while defaulting only absence, test for `none` explicitly or use `match`.
+1. Every `Vi` must have the member; otherwise the access is an error.
+2. When the receiver holds a `Vi`, the member is read (or the method called) normally.
+3. When it holds an `Xi`, nothing is read and that exception is the result.
+4. The result type is the union of the member types and `X1 | ... | Xm`.
 
-## Mutation
+Each step of a route applies the rule again, so a chain of reads is safe navigation without a separate `?.` operator. Method calls forward the same way: the receiver, then the arguments, are evaluated once.
 
-Safe navigation is a read and receiver-selection rule. An assignment through an exception-bearing route must not silently become a no-op:
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"paris\nnone\nUserError\n"} -->
 ```dewy
-user.profile.name = "Ada"  # invalid if user may be UserError or none
+UserError:type = type of error
+Address:type = [city:string]
+User:type = [name:string address:Address?]
+load_user = (id:int64):>User|UserError|none => {
+    if id <? 0 return UserError
+    if id =? 0 return none
+    return User["ada" Address["paris"]]
+}
+city_of = (id:int64) => load_user(id).address.city
+printl(city_of(1))
+printl(city_of(0))
+printl(city_of(-1))
 ```
 
-The program must first narrow or propagate every exception alternative so the destination is a definite place.
+Without exception alternatives this is common-member access: when every alternative of a union has the member, the access reads it at the union of the member types. A member some alternative lacks is an error; narrow with `is?` first.
 
-## Exceptions Versus Ordinary Sentinels
-
-Only alternatives descended from `exception` receive forwarding behavior:
-
-```text
-User | Missing         ordinary domain alternatives
-User | NotFoundError   value or propagatable failure
-User | none       value or forwarding absence
+<!-- dewy-example: {"mode":"reject","diagnostic":"Org has no field 'id'"} -->
+```dewy
+Customer:type = [name:string id:int64]
+Org:type = [name:string members:int64]
+find = (id:int64):>Customer|Org => if id >? 0 Customer["ada" id] else Org["acme" 3]
+printl(find(1).name)
+printl(find(1).id)
 ```
 
-Code should use an ordinary domain type when both outcomes are meant to participate normally in later operations. It should use an `error` subtype for a forwarding failure, `none` for ordinary forwarding absence, or another `exception` subtype when neither built-in category expresses the contract.
+Forwarding applies to the receiver's own type only. An `array<int64 | ParseError>` is an array, not a `ParseError`; arguments to a call do not forward either.
+
+### Assignment
+
+Forwarding is a read rule. Assigning through a route that may hold an exception is an error, so a write never silently does nothing:
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"cannot assign through a union receiver"} -->
+```dewy
+User:type = [name:string]
+load = (id:int64):>User|none => if id >? 0 User["ada"] else none
+let u = load(1)
+u.name = "bea"
+```
+
+## `main` and Exit Codes
+
+`main` is optional; without it a file runs top to bottom. With it, the top-level statements run first and then `main` runs once. `main` returns `void` or the errors that reach it, an ordinary `void | E` type, declared or inferred.
+
+- Success exits with status 0. A program that needs another status calls `exit(n)` with a `uint8`.
+- An error reaching `main` is printed on standard error as its kind and its `message` field, if it has one (`error: UsageError: usage: fetch HOST`). Other fields may hold secrets, so only a debug build (`-g`) prints the whole value.
+- Each kind exits with its own status: 1, 2, 3, … in the order the kinds are declared (or as a declared result lists them), up to 100. Status 101 is a failed runtime check.
+- An error type with an `exit_code` field pins its own status. The field is refined to 1–100, so an error can never report success.
+- `dewy build --exit-codes file.dewy` prints the table.
+
+<!-- dewy-example: {"mode":"run","stdout":"","exit":69,"args":["nowhere"]} -->
+```dewy
+UsageError:type = type of error & [message:string]
+Offline:type = type of error & [exit_code:int64=69]
+connect = (host:string):>void|Offline => {
+    if host =? "nowhere" return Offline[]
+    printl"connected to {host}"
+}
+main = ():>void|UsageError|Offline => {
+    let argv = args
+    if argv.length <? 2 return UsageError["usage: fetch HOST"]
+    connect(argv[1]) or_throw
+}
+```
+
+Run without arguments, this prints `error: UsageError: usage: fetch HOST` and exits 1; `fetch nowhere` prints `error: Offline` and exits 69.
 
 ## Errors Versus Effects
 
-Errors are return values. Effects describe observable behavior or requirements of evaluation. They occupy separate parts of a function contract and must not be mixed as alternatives of one union.
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-let loadInvoice = (id:InvoiceId)
-    :> (Invoice | NotFoundError | DatabaseError) & reads<database>
-```
-
-Here the union describes what the caller receives. `reads<database>` describes what evaluating the call does. General effect syntax remains provisional; see [Refinements, Effects, and Safety](refinements-and-effects.md).
-
-## Provisional Boundaries
-
-The following details remain open:
-
-- pattern-selection and concise recovery syntax;
-- transformed `or_throw` forms;
-- whether pipes automatically forward exceptions, and the exact rule for broadcast pipes whose elements may be exceptions;
-- fallback operators for absence and errors; and
-- runtime layouts for general heterogeneous unions.
-
-Until those questions are settled, programs should not infer behavior for them from an experimental compiler lowering. See [Design Maturity and Open Questions](design-status.md) and [Implementation Compatibility](compatibility.md).
+Errors are return values; effects describe what evaluating a call does. They are separate parts of a function's contract: `:>(Invoice | NotFound) & no allocates` has a result union and an effect row. A function's possible panic is the `panics` effect, not an error alternative. See [Effects](refinements-and-effects.md#effects).

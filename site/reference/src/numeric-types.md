@@ -1,147 +1,160 @@
 # Numeric Types
 
-> **Language design.** [Generated coverage](/status/#ref-numeric-types) names measured programs and target restrictions; examples here illustrate the design.
+> [Generated coverage](/status/#ref-numeric-types) names related acceptance programs. Every example on this page compiles with the current compiler unless it is marked **Design only**.
 
-## Integer Semantics
+| Type | Values |
+|---|---|
+| `int` | mathematical integers, arbitrary precision; `bigint` names the same type |
+| `int8` … `int64`, `uint8` … `uint64` | fixed-width integers: exact arithmetic, proven storage |
+| `addr` | a nonnegative position below the target's address space |
+| `rational` | exact fractions; decimal literals |
+| `float32`, `float64` | IEEE 754 binary floating point |
 
-`int` is an arbitrary-precision signed integer type. `uint` is its nonnegative counterpart. Their semantics do not silently change to machine-width overflow because a compiler chooses a compact representation.
+## `int`
 
-Fixed-width types use `intN` and `uintN` names such as `int8`, `int32`, and `uint64`. Arithmetic on them is exact, like `int`; the width is a storage property plus facts. Storing a result into an `intN` or `uintN` binding, field, parameter or return is the proven narrowing: free when the facts prove it fits, otherwise a compile error with fix-its (a guard, an overflow policy, or `$runtime_checks`). The overflow policy is a keyword type parameter: `uint32<overflow='wrap'>` wraps modulo 2^32 and `uint8<overflow='saturate'>` clamps.
+`int` is the mathematical integer. Unannotated integer literals are `int`, and arithmetic on `int` grows as needed; it never overflows. `int` has no `.min` or `.max`. The compiler keeps an `int` in a machine word when range analysis proves it fits, and switches to an arbitrary-precision representation otherwise; only the cost differs.
 
-The *natural* numbers, `nat` and `natN` (`nat8` … `nat64`), are the non-negative integers of a signed width: `nat64` is `int64 & <(>=? 0)>`, an `int64` carrying the fact that it is never negative. It is what a count is; a size is the `addr` below. Being an `int64` underneath, a `nat64` takes part in `int64` arithmetic without conversion (`src.length - i`), and stores into a `uint64` by its own fact; storing an `int64` into a `nat64` is the proven conversion described below (`let n:nat64 = a - b` after `if a >=? b`), never a wrap. A `nat64` may carry further facts (`nat64<(<=? src.length)>`). Use `uint64` for what is genuinely a bit pattern — hashes, masks, wrapping arithmetic — not for sizes.
-
-`addr` is the natural that fits the target's address space: a `nat64` carrying one more fact, that it is a *position* — below `2^bits`, where `bits` is the target's address width (48 on `x86_64`, `arm`, `riscv`, and `c`; 32 on `wasm32`), so it is `[0, 2^48)` on a 64-bit target and `[0, 2^32)` on `wasm32`. It is what `.length` is, and what an offset or an index is. Two positions in one address space add and subtract without leaving it — the same axiom that lets a length grow one element at a time — so `s.start + by`, `end - start` after `if start <=? end`, and `i + 1` under `i <? src.length` are `addr` values with no further proof, where a `nat64 + nat64` is an exact sum that needs a proof before it is stored in an `int64`. Storing an arbitrary `nat64` or `int64` into an `addr` is the proven conversion: it passes when the facts bound the value by a length (`i <=? src.length` after a guarded loop, an index fact, a `:>addr<(<=? src.length)>` result) or by a constant below the cap, and is otherwise an error naming the obligation (`value is a position in the address space`); a product or an unbounded sum is not a position. A constant at or above the cap is refuted. An `addr` is a `nat64` wherever one is wanted, and a record field or binding made from an `addr` keeps the name (`[length=result]` from an `addr` is `[length:addr]`). Spans and offsets in the standard reports are `addr`.
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"1267650600228229401496703205376\n27000000000000000000000000000\n25000000000000000000\n"} -->
 ```dewy
-let count:int = 10
-let byte:uint8 = 255
-let offset:int32 = -12
-```
-
-An integer literal is admitted to a numeric context only when its exact value belongs to that type.
-
-## Representation and `bigint`
-
-The compiler chooses how an `int` is stored. Range analysis proves most values fit a 64-bit word, and those lower to machine integers. A value it cannot prove word-sized — an oversized literal, a product of unbounded operands, a loop accumulator without a bound — takes the arbitrary-precision representation automatically, and every binding it flows into follows. The semantics are the same either way; only the cost differs.
-
-`bigint` names that representation explicitly: a `bigint` binding is always arbitrary precision, and any integer converts to it.
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
+let sq = (x:int):>int => x*x
+printl(2^100)
 let seed = 3000000000
-let cube = seed * seed * seed      # 2.7e28: stored as a big integer
-let big:bigint = 5                 # explicitly arbitrary precision
-let f = 2^100                      # constant, folded exactly
+printl(seed * seed * seed)
+printl(sq(5000000000))
 ```
 
-A big value cannot silently cross a fixed-width boundary. Returning it from a function whose result type is `int64`, passing it to an `int64` parameter, or storing it in a fixed-width binding is a compile error unless a comparison proves the range. `int` in a signature stays the mathematical integer: `(x:int):>int => x*x` returns the exact square of `5000000000`.
+`bigint` is `int`'s arbitrary-precision form under another name: any integer converts to it, and an oversized literal fits it. `.divmod(other)`, `.gcd(other)`, `.abs()` and `.pow(n)` are exact; `.to_int64()` and `.to_uint64()` return an optional word and never truncate. `to_int(text)` parses decimal text of any size.
 
-An explicit `bigint` can cross a fixed-width boundary after a range guard;
-`as` uses the same proof as an annotated binding or result. Both signed and
-unsigned limits are inclusive, and widening a `uint64` to `bigint` preserves
-all 64 bits.
+## Fixed-Width Integers
 
-<!-- dewy-example: {"mode":"design-only"} -->
+`int8`, `int16`, `int32`, `int64` and `uint8` … `uint64` describe storage. Their arithmetic is exact: plain `int64` arithmetic yields `int`, so an unannotated `let total = a + b` never overflows. Storing into a fixed-width binding, field, element, parameter or result is a *proven narrowing*: free when the facts prove the value fits, a compile error otherwise.
+
+<!-- dewy-example: {"mode":"run","stdout":"-32 227\n255 -9223372036854775808\n"} -->
 ```dewy
-let byte = (n:bigint):>uint8 | none => {
-    if n >=? 0 and n <=? 255 return n as uint8
-    return none
+printl"{uint64(2) - uint64(34)} {int8(127) + 100}"
+printl"{uint8.max} {int64.min}"
+```
+
+<!-- dewy-example: {"mode":"reject","diagnostic":"cannot prove `sq(a) <=? 9223372036854775807` for the conversion to int64"} -->
+```dewy
+let sq = (x:int):>int => x*x
+let a:int64 = 5000000000
+let t:int64 = sq(a)
+```
+
+An unproven narrowing offers three fixes: widen the destination to `int`, state the domain as a refinement or prove it with a guard, or choose an overflow policy. Under `$runtime_checks` it becomes a check that panics when the value does not fit. A literal must fit its fixed-width context exactly (`let b:uint8 = 256` is an error).
+
+### Overflow Policies
+
+Wrapping and saturation are part of the type, as a keyword parameter: `uint8<overflow='wrap'>` is arithmetic modulo 2^8 (two's complement for a signed type), and `uint8<overflow='saturate'>` clamps to 0 through 255. Calling the type converts any integer, including an `int`, by that policy. A policy operand decides the arithmetic with plain integers of its width or narrower; an `int` operand keeps the result exact, and two different policies do not mix.
+
+<!-- dewy-example: {"mode":"run","stdout":"44 255\n18446744073709551615\n4 255\n"} -->
+```dewy
+printl"{uint8<overflow='wrap'>(300)} {uint8<overflow='saturate'>(300)}"
+printl(uint64<overflow='wrap'>(int64(-1)))
+let a:uint8<overflow='wrap'> = 250
+let c:uint8<overflow='saturate'> = 250
+printl"{a + 10} {c + 10}"
+```
+
+## `addr`
+
+`addr` is a position: a nonnegative integer below `2^48` on 64-bit native targets and `2^32` on `wasm32`. It is what `.length`, indices and offsets are. Two positions in one address space add and subtract without leaving it, so `i + 1` under `i <? xs.length` is an `addr` with no further proof. Storing an arbitrary integer into an `addr` is a proven conversion.
+
+## Meeting Another Width
+
+A value of one integer type meeting another (an `int` stored into `uint64`, an `int8` widened to `int64`, `xs.length` stored into `uint64`) is a conversion the compiler proves in range from the type's own range, a comparison, a length or a loop guard. Widening always passes. A refuted narrowing is an error naming the value; an unproven one names the missing bound. `x as T` and `T(x)` are the same proven conversion, never a reinterpretation.
+
+<!-- dewy-example: {"mode":"run","stdout":"1\n"} -->
+```dewy
+first_over = (xs:array<int64> limit:int64):>uint64? => {
+    loop i in 0.. and i <? xs.length {
+        if xs[i] >? limit return i      # i is in [0, int64.max]: fits uint64
+    }
+    none
 }
+printl(first_over([1 5 9] 4))
 ```
 
-A `bigint` converts to decimal text with `as string` and in interpolation.
-The retained text uses the same digits and sign as printing, including zero;
-optional big integers render `none` when absent. Integer values also retain
-the required conversion when stored in `bigint | none`: a present machine
-word becomes a big integer, and absence remains absence.
-
-Arithmetic, comparisons, `//`, `%`, `^`, and `/` (an exact `rational`) apply to big integers. A `bigint` is `0 | [sign:-1|1 limbs:array<uint64 length >? 0>]`: zero is its own case rather than a sign value, so no negative zero and no zero with limbs is representable (canonical limbs — no leading zeros — remain the constructors' convention). `if x =? 0` / `x not=? 0` narrow between the two cases like `is?`, `bigint & ~0` names the nonzero form, and a big divisor must have it: `a // b`, `a % b`, and `a / b` need `if b not=? 0 { … }` or a `b:bigint & ~0` parameter (`cannot prove the divisor is nonzero` otherwise); a word divisor is proven the way any `int64 & ~0` argument is.
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"reject","diagnostic":"w does not fit int8"} -->
 ```dewy
-let ratio = (n:bigint d:bigint & ~0):>rational => n / d
-let half = (n:bigint):>bigint => n // 2          # a constant divisor proves itself
-let big:bigint = 2^128
-if big not=? 0 { let q = ratio(1 big) }          # `big` is `bigint & ~0` here
+let w:int64 = 300
+let b:int8 = w
+```
+
+A comparison between two widths (`i:uint64 <? s.length`) compares in the left operand's width; the right operand takes the same proven conversion. A comparison is kept as a fact about the difference of its two terms, so `xs.length - i` is at least 1 under `i <? xs.length`.
+
+## Division and Remainder
+
+On integers, `//` is floor division and `%` gives a remainder with the divisor's sign. `/` on integers gives an exact `rational`. `mod(a b kind='trunc')` gives C's remainder (the dividend's sign) and `kind='euclid'` a remainder that is never negative. A divisor must be proven nonzero; a constant zero divisor is a compile error.
+
+Unary minus binds below `*`, `/`, `//` and `%`, so `-7 // 2` is `-(7 // 2)`. Parenthesize a negative operand:
+
+<!-- dewy-example: {"mode":"run","stdout":"3 -4 -3\n1 2 -2 -1\n7/2 9223372036854775808\n"} -->
+```dewy
+printl"{7 // 2} {(-7) // 2} {-7 // 2}"
+printl"{7 % 3} {(-7) % 3} {7 % (-3)} {mod(-7 3 kind='trunc')}"
+printl"{7 / 2} {int64.min // (-1)}"
 ```
 
 ## Shifts
 
-Shift counts are unsigned. A negative literal count is therefore a type error.
+A shift count is unsigned; a negative literal count is an error. On `int`, a left shift is exact, and a right shift beyond the significant bits gives the sign continuation (`0` or `-1`). Plain `int64` shifts return `int`. Other fixed-width shifts are exact intermediates that must fit when stored; a wrapping type keeps the low bits.
 
-For a fixed-width value, shifting by at least its width reaches the continuation bits of that shift:
-
-- left shift produces `0`;
-- unsigned right shift produces `0`;
-- signed right shift produces `0` for a nonnegative value and `-1` for a negative value.
-
-Operands are evaluated once.
-
-## Rationals
-
-`rational` is an exact fraction, kept normalized: a positive denominator and coprime parts. Like `bigint` it is `0 | [numerator:bigint & ~0 denominator:bigint<sign =? 1>]` (the positive denominator is a type fact) — zero has no parts, so `q.numerator` and `q.denominator` are read behind `if q not=? 0 { … }`, which is also what a rational divisor needs. `a / b` on integers yields a rational (`//` is floor division and stays integral); a decimal literal such as `9.8` or `1.25e2` is an exact rational. `+`, `-`, `*`, `/`, negation, and the ordered comparisons apply, and an integer operand promotes to a rational. Constant rational expressions fold at compile time; a constant zero divisor is a compile error. Rationals print as `n/d`, or as an integer when the denominator is one. A decimal literal is a rational unless `fixed` is requested explicitly — by an annotation (`let x:fixed = 0.1`) or a `fixed` operand — and that coercion is the one lossy step: the constant rounds to the nearest Q32.32 value there (a constant outside the fixed range is a compile error).
-
-## Fixed-Point
-
-`fixed` is a signed fixed-point number with 32 integer and 32 fraction bits. Conversions from integers and rationals round to nearest; multiplication and division truncate toward zero. A fixed operand absorbs integer and rational operands, so mixed arithmetic yields `fixed`. Trigonometric functions produce `fixed` values. Fixed values print in decimal with trailing zeros trimmed.
+<!-- dewy-example: {"mode":"run","stdout":"1180591620717411303424\n18446744073709551616 -1 0\n"} -->
+```dewy
+printl(1 << 70)
+printl"{int64(1) << 64} {int64(-2) >> 64} {uint64<overflow='wrap'>(1) << 64}"
+```
 
 ## Powers
 
-`base ^ exponent` is right-associative. An integer base with a constant non-negative exponent, or an unsigned runtime exponent, yields an integer; a negative constant exponent yields a rational; a rational base takes any integer exponent. Dimensioned quantities raise their dimension to the same power and require a constant exponent.
+`^` is right-associative and binds above unary minus: `2^3^2` is `2^(3^2)` and `-2^2` is `-(2^2)`. An integer power with a nonnegative exponent is an exact integer; a negative constant exponent gives a `rational`; a runtime exponent that may be negative is an obligation. Zero to the zeroth power is one. Use `xor` for bitwise exclusive-or.
+
+<!-- dewy-example: {"mode":"run","stdout":"512 -4 1/4 27/8\n"} -->
+```dewy
+printl"{2^3^2} {-2^2} {2^(-2)} {(2/3)^(-3)}"
+```
+
+## Rationals
+
+`rational` is an exact fraction, kept normalized: a positive denominator and coprime parts, each a machine word while it fits. Integer `/` and decimal literals (`9.8`, `1.25e2`) give rationals, and an integer promotes to `rational` wherever one is expected. `+`, `-`, `*`, `/`, `^`, negation and comparisons are exact; `//` gives an `int` floor quotient and `%` a rational remainder.
+
+A value prints the way it was written: a whole number as an integer, a value made from decimals as a decimal (a repeating block in parentheses), a value made from fractions as `n/d`. How it prints never changes the value: `0.5 =? 1/2`.
+
+<!-- dewy-example: {"mode":"run","stdout":"5/6 0.0(3) 293.15 true\n3 4 -3\n"} -->
+```dewy
+kelvin = (celsius:rational):>rational => celsius + 273.15
+main = () => {
+    printl"{1/2 + 1/3} {0.1/3} {kelvin(20)} {0.5 =? 1/2}"
+    printl"{(7/2).floor} {(7/2).ceil} {int(-7/2)}"
+}
+```
+
+`rational<int64>` keeps `int64` parts; its arithmetic returns `rational<int64> | Overflow` when an exact result does not fit.
+
+## Rounding
+
+`.floor`, `.ceil` and `.round` of a rational give an `int`; `int(q)` truncates toward zero. `round` of an exact number sends a half away from zero; `round` of a float follows IEEE 754 and sends a half to the even neighbour. `rounding=` chooses the rule: `'nearest_away'`, `'nearest_even'`, `'nearest_toward_zero'`, `'nearest_up'`, `'nearest_down'`, `'floor'`, `'ceil'`, `'toward_zero'` or `'away_from_zero'`.
+
+<!-- dewy-example: {"mode":"run","stdout":"3 3 -3\n2.0 3.0\n"} -->
+```dewy
+printl"{round(5/2)} {round(2.5)} {round(-2.5)}"
+let f:float64 = 2.5
+printl"{round(f)} {round(f rounding='nearest_away')}"
+```
 
 ## Floating Point
 
-`float32` and `float64` are strict IEEE 754 binary floating point. A decimal literal is an exact rational unless its context is a float (`let x:float64 = 0.1`), and conversions between exact and floating values are explicit. Scope settings relax or tighten float semantics: `$fast_math` permits reassociation, `$no_nan` and `$no_inf` make producing those values an obligation, and `$finite_floats` bundles both. Conventional scientific computing, including the kinds of array and tensor operations supported by NumPy and PyTorch, is an intended use case; see the repository's [language guide](https://github.com/david-andrew/dewy-lang/blob/master/docs/LANGUAGE.md) for current float behavior.
+`float32` and `float64` are strict IEEE 754 binary32 and binary64. NaN, the infinities, signed zero and subnormals are ordinary values, not traps. Results round to nearest, ties to even, and arithmetic is never reassociated or fused, so a float expression gives the same result on every target. `float64.max`, `.min`, `.epsilon`, `.inf`, `.nan` and related constants name the limits.
 
-## Numeric Hierarchy
+A decimal literal is a float only in a float context (an annotation, a float operand or parameter). Conversions between exact and floating values are explicit: `.to_float64()` rounds a rational once; `rational(f)` is a float's exact binary value; `int(f)` truncates toward zero and requires the value to be finite and in range, proven like a narrowing.
 
-The intended hierarchy places `int` below `rational`, both below `real` and `number`, with complex numbers and quaternions as further domains whose rules remain provisional.
-
-## Representation Selection
-
-Semantic type and storage representation are separate. A value with `int` semantics uses a 64-bit machine representation when compile-time range analysis proves every reachable value fits; the analysis validates every abstract-integer arithmetic result and every narrowing (an `int` meeting `int64`, printing, a fixed-width parameter). When the proof is unavailable, the compiler reports the obligation — the value is only known to lie in some interval — rather than silently choosing overflow; the program annotates a fixed width or narrows the value with a comparison.
-
-`min(a b)` and `max(a b)` are the smaller and larger of two values, for `int64` and `uint64` (a call on integer literals alone takes `int64`, unless the expected type says `uint64`). Their results carry [type facts](refinements-and-effects.md#type-facts): `min(k src.length)` is at most `k` and at most `src.length`, so `src[..min(k src.length))` slices without a guard; `max(a b)` is at least either.
-
-## Meeting Another Width
-
-A value of one integer width meeting another — an abstract `int` or an `addr` length stored into a `uint64`, an `int8` widened to `int64` — is a conversion the bounds analysis must prove in range from the facts it has: the type's own range (widening always passes), a comparison, a length (never negative), or a loop guard. An unproven narrowing is a compile error naming the known range (`let b:int8 = w` for an arbitrary `w:int64`), never a silent wrap. The same holds when the target is a union with one fixed-width integer member such as `uint64?`: the integer becomes that member, with that member's proof. Spelling the conversion explicitly (`src.length as uint64`, `n as int8` after `if n <=? 127`) is the same proven cast, not a reinterpretation: an unproven `as` reports the same obligation. Comparisons between different widths (`i:uint64 <? s.length`) compare in the left operand's width — the right operand takes the same proven cast, so no value is ever reinterpreted.
-
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"0.30000000000000004 inf true\n"} -->
 ```dewy
-first_over = (xs:array<int64> limit:int64):>uint64? => {
-    loop i in 0.. and i <? xs.length {
-        if xs[i] >? limit return i      # `i` lies in [0, int64.max]: a `uint64`
-    }
-    return none
-}
+let a:float64 = 0.1
+let z:float64 = 0.0
+printl"{a + 0.2} {1.0/z} {-0.0 =? 0.0}"
 ```
 
-An abstract-integer counter stepped inside a guarded loop needs no annotation: in `i = 0  loop i <? src.length { i += 1 }` the analysis first widens `i` to `[0, ∞]` and then narrows it back to what the guard admits, `[0, cap]`, so the comparison and the steps fit a word (a counter that can genuinely pass the word, `loop true { i += 1  if i >? n break }` for an arbitrary `n:int64`, is still reported).
-
-A comparison between two terms — bindings, fields, lengths — is also kept as a fact about their *difference*, the one relational fact the analysis holds: under `i <? src.length` the value `src.length - i` is at least 1, under `start <=? end` the value `end - start` is at least 0, and after `a =? b` the difference is exactly 0. So `let rest:nat64 = src.length - i` proves inside the guarded loop, and a span width proves after `if 0 <=? start <=? end` (the lower bounds also keep the subtraction within `int64`). A slice's length is its endpoints' difference read the same way — `src[i..]` under `loop i <? src.length` has length at least 1, so it satisfies a `string<length >? 0>` parameter. The fact drops when either side is assigned (except `i += c` / `i -= c` by a constant, which moves the difference by `c` and keeps the fact while it stays nonnegative — `i <? src.length` then `i += 1` leaves `i <=? src.length`), when the sequence shrinks, and at a join where only one path established it — unless the other path implies it from its intervals (`i = 0` before a loop implies `i <=? src.length`, so a counter that steps by one is within the length at the loop's exit); arithmetic on fixed widths is exact and narrows only when stored, so `let w:nat64 = end - start` computes the exact difference followed by the proven cast.
-
-<!-- dewy-example: {"mode":"design-only"} -->
-```dewy
-remaining = (src:string):>nat64|none => {
-    i:int64 = 0
-    total:nat64 = 0
-    loop i <? src.length {
-        let rest:nat64 = src.length - i    # at least 1 while the guard holds
-        if total >? int64.max - rest return none
-        let sum:int64 = total + rest        # the guard proves the storage narrowing
-        total = sum
-        i += 1                              # the fact drops here, and returns with the next test
-    }
-    return total
-}
-```
-
-Fixed-width expressions use sufficiently wide machine words, including statically
-sized multiword values, without bigint allocation. Unproven stores are compile errors
-by default and become runtime checks only under `$runtime_checks`. Use
-`uint32<overflow='wrap'>` for modular arithmetic or `overflow='saturate'` for
-clamping. Provisionally, if facts cannot bound an intermediate's width, compilation
-fails with suggestions to guard the count/exponent, use explicit `int`, or choose
-an overflow policy.
+Settings change a scope's float policy: `$no_nan` and `$no_inf` make producing those values an obligation, `$finite_floats` is both, and `$fast_math` permits reassociation. See [Settings](settings.md).

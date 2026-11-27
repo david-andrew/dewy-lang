@@ -33,6 +33,10 @@ browser clients. Build output lives in ignored `site/dist/`; do not commit it.
 - `coverage-map.json`: reference section associations with ladder programs,
   golden cases and pytest node IDs. An association does not certify a chapter.
 - `playground/examples.json`: bounded, precompiled wasm programs and check/run intent.
+  `kind` is `game` (a `check` entry with `source_path`, `summary`, `controls` and a
+  `poster` under `static/assets/images/examples/`) or `program` (a `run` entry with
+  `summary` and exact `stdout`). Posters are frames the native build renders offscreen:
+  `DEWY_SOFTWARE=1 DEWY_SCREENSHOT=out.png DEWY_FRAMES=90 ./game`, scaled to 960×540 WebP.
 - `routes.json`: preserved anchors and retired routes, inventoried from both
   original books/static pages, tracked reference output and the archived µDewy
   specification/showcase catalog. It is routing metadata, not coverage evidence.
@@ -49,9 +53,10 @@ printl(42)
 ````
 
 Modes: `check`, `run` (exact `stdout`, optional `exit`/`args`), `reject`
-(required `diagnostic` substring), `design-only`. Examples compile under the
+(required `diagnostic` substring), `design-only` (required `why`: one sentence on
+what is not built; both books print it under the code as a "Design only" label). Examples compile under the
 default rules (no hidden runtime checks); `"runtime_checks": true` compiles one
-under `$runtime_checks`. In the Learn book, the build shows each `run` example's
+under `$runtime_checks`. In both books, the build shows each `run` example's
 checked `stdout` under it. Static code uses a JSON
 `data-example` attribute on `code.language-dewy`. `fixtures` supplies named
 companion-file contents; `prefix`/`suffix` supply a declared context for a snippet.
@@ -61,10 +66,11 @@ diagnostics. Reference snippets explicitly illustrate design, not implementation
 `coverage/index.json` and `coverage/ladder.json` are generated fresh with revision,
 compiler identity, host and target. Ladder and selected golden checks run native
 release builds. Related pytest IDs are labelled **not measured** by this build.
-Precompiled wasm run entries separately execute under Node and compare stdout; the game entry is check/build only; this does
+Precompiled wasm run entries separately execute under Node and compare stdout; game entries are check/build only; this does
 not certify browser input/graphics or other hosts. The playground runs generated
-pages in opaque-origin sandboxes with network denied, output limits, Stop buttons
-and a 15-second lifetime. It does not compile user edits.
+pages in opaque-origin sandboxes with network denied, output limits and Stop buttons.
+Programs stop after 15 seconds; one game runs at a time and stops after ten minutes.
+It does not compile user edits.
 
 ## Installers and deployment
 

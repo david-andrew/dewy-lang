@@ -71,7 +71,7 @@ def channel_html(identity):
 
 
 def show_outputs(markdown):
-    """Show each run example's checked stdout under its fence."""
+    """Show each run example's checked stdout, and label design-only code, under its fence."""
     lines, out, data = markdown.split('\n'), [], None
     i = 0
     while i < len(lines):
@@ -82,9 +82,14 @@ def show_outputs(markdown):
             i += 1
             while i < len(lines) and lines[i].strip() != '```': out.append(lines[i]); i += 1
             if i < len(lines): out.append(lines[i])
+            if data.get('mode') == 'design-only':
+                # Design-only code is labelled where it appears: it does not compile yet.
+                why = data.get('why', 'Not built yet; this shows the decided design.')
+                out += ['', f'<div class="dewy-output dewy-design"><span>Design only · not compiled</span><p>{md_code(why)}</p></div>']
             if data.get('mode') == 'run' and data.get('stdout'):
                 args = ' '.join(data.get('args', []))
                 label = 'Output' + (f' (with arguments <code>{html.escape(args)}</code>)' if args else '')
+                if data.get('exit'): label += f', then exit status {int(data["exit"])}'
                 out += ['', f'<div class="dewy-output"><span>{label}</span><pre><code>{html.escape(data["stdout"].rstrip(chr(10)))}</code></pre></div>']
             data = None
         elif line.strip(): data = None
@@ -100,7 +105,7 @@ def build_book(source, destination, mdbook, scratch):
     for p in (book/'src').rglob('*.md'):
         value = p.read_text()
         for key,text in REPLACEMENTS.items():value=value.replace(f'<!-- generated: {key} -->',text)
-        if source == LEARN: value = show_outputs(value)
+        value = show_outputs(value)
         p.write_text(value)
     run([mdbook,'build',str(book),'--dest-dir',str(destination)])
     # mdBook 0.4 prefixes root-relative Markdown URLs in nested print chapters.
@@ -135,10 +140,15 @@ def preserve_routes():
         dest.write_text(source)
 
 
+def md_code(text):
+    """Escape text, turning `code` spans into <code>."""
+    return re.sub(r'`([^`]+)`', r'<code>\1</code>', html.escape(text))
+
+
 def build_playground(compiler, scratch, node):
     from tools.cases import Scripts
     examples=json.loads((SITE_ROOT/'playground/examples.json').read_text())
-    cards=[];results=[]
+    cards=[];games=[];results=[]
     for e in examples:
         if e['mode'] not in ('run','check') or e['target'] != 'wasm-release':
             raise ValueError('playground entries must declare check or run, and wasm-release')
@@ -163,12 +173,20 @@ def build_playground(compiler, scratch, node):
                 'runner':'Node' if e['mode']=='run' else 'compiler (check and wasm build only)'}
         if e['mode']=='run':result['stdout']=e['stdout']
         results.append(result)
-        note=('Expected stdout: <code>'+html.escape(e['stdout'].strip())+'</code>') if e['mode']=='run' else html.escape(e['instructions'])
-        displayed = '<pre><code class="language-dewy">'+html.escape(source.read_text())+'</code></pre>'
-        if 'source_path' in e:
-            displayed = '<details><summary>Source</summary>'+displayed+'<p><a href="https://github.com/david-andrew/dewy-lang/tree/master/examples/">Source and companion modules</a></p></details>'
-        cards.append(f'''<article class="example-card"><h3>{html.escape(e['title'])}</h3>{displayed}<p>{note}</p><div class="button-row"><button class="button primary" data-program="/playground/programs/{e['id']}.html">Run example</button><button class="button" data-stop>Stop</button></div><p role="status" data-run-status>Ready</p><div data-run-host></div></article>''')
-    return '<div class="example-grid">'+''.join(cards)+'</div><script src="/assets/js/playground.js" defer></script>',results
+        title=html.escape(e['title']);summary=md_code(e.get('summary',''))
+        program=f'/playground/programs/{e["id"]}.html'
+        github=f'https://github.com/david-andrew/dewy-lang/blob/master/{e["source_path"]}' if 'source_path' in e else None
+        if e.get('kind')=='game':
+            games.append(f'''<article class="game-card" id="{e['id']}"><div class="game-stage" data-run-host><img src="{e['poster']}" alt="{title}: a frame rendered offscreen by the native build" width="960" height="540" loading="lazy"><button class="game-play" type="button" data-program="{program}" data-lifetime="600"><span aria-hidden="true">▶</span> Play {title}</button></div><div class="game-body"><h3>{title}</h3><p>{summary}</p><p class="game-controls">{html.escape(e['controls'])}</p><div class="button-row"><button class="button" type="button" data-stop>Stop</button><button class="button" type="button" data-fullscreen>Full screen</button><a class="button" href="{github}">Source</a></div><p class="run-status" role="status" data-run-status></p></div></article>''')
+            continue
+        displayed='<pre><code class="language-dewy">'+html.escape(source.read_text())+'</code></pre>'
+        if github:
+            displayed='<details><summary>Source ('+str(source.read_text().count(chr(10)))+' lines)</summary>'+displayed+f'<p><a href="{github}">View on GitHub</a></p></details>'
+        expected='<div class="expected"><span>Expected output</span><pre><code>'+html.escape(e['stdout'].rstrip(chr(10)))+'</code></pre></div>'
+        cards.append(f'''<article class="example-card" id="{e['id']}"><h3>{title}</h3><p>{summary}</p>{displayed}{expected}<div class="button-row"><button class="button primary" type="button" data-program="{program}" data-lifetime="15">Run</button><button class="button" type="button" data-stop>Stop</button></div><p class="run-status" role="status" data-run-status></p><div data-run-host></div></article>''')
+    page=('<section class="content-section wide" id="games"><h2>Games and simulations</h2><p>Each game was compiled to WebAssembly by this site build and runs in a sandbox with no network access. One game runs at a time; it stops after ten minutes. Builds are compile-checked; the build does not drive their input.</p><div class="game-grid">'+''.join(games)+'</div></section>'
+          '<section class="content-section wide" id="programs"><h2>Terminal programs</h2><p>Each program ran under Node during this build, and its output matched the expected text shown. A run stops after 15 seconds.</p><div class="example-grid">'+''.join(cards)+'</div></section>')
+    return page+'<script src="/assets/js/playground.js" defer></script>',results
 
 
 def write_sitemap():
