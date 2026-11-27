@@ -29,6 +29,7 @@ from p"ownership.jo" import (ownership_decls)
 from p"ownership_types.dewy" import (ownership_fact_type)
 from p"refine.jo" import (refine_active)
 from p"refine_metadata.dewy" import (ref_interval is_total_dict refine_storage representation_type)
+from p"refine_transfers.dewy" import (ref_assume)
 from p"refinement_types.dewy" import (FactBound FactReason FactTerm)
 from p"string_domains.jo" import (domain_leaf)
 from p"types.jo" import (is_int T_BOOL T_INT T_STR fields is_union prune struct_targ structs telem tkind types)
@@ -173,6 +174,25 @@ fact_map_entry=(@s:FactState n:MapWord map:MapWord key:MapWord):>MapWord=>$unsaf
     let et=ntype(n)
     if tkind(vt) =? 'array' and tkind(telem(vt)) =? 'refined' and fact_type(representation_type(telem(vt))) =? fact_type(et) {et=telem(vt)}
     fact_project(@s fact_project(@s map fact_name_vals false vt) position true et)
+}
+# A refined value type held when each entry was stored, as for `d[k]` (fact_map_entry):
+# `d.pop(k)`, `d.pop(k default)` (the default was checked against it at the call) and the
+# payload of `d.get(k)` are read as it. Only for a refined value type; O(atoms).
+fact_map_value_refined=(@s:FactState n:MapWord result:MapWord):>void=>$unsafe {
+    if result =? 0 or nkids(n) =? 0 {return}
+    let t=prune(ntype(kid(n 0)))
+    if types.ptr[t].kind =? 'refined' {t=prune(MapWord(types.ptr[t].elem))}
+    if types.ptr[t].kind not=? 'struct_' or MapWord(structs.ptr[MapWord(types.ptr[t].st)].ntargs) <? 2 {return}
+    let vt=prune(struct_targ(MapWord(types.ptr[t].st) 1))
+    if types.ptr[vt].kind not=? 'refined' {return}
+    let v=result
+    let rt=prune(ntype(n))
+    if types.ptr[rt].kind =? 'opt' {
+        rt=prune(telem(rt))
+        v=fact_project(@s result (-4) false rt)
+    }
+    if fact_type(representation_type(vt)) not=? fact_type(representation_type(rt)) {return}
+    ref_assume(vt v [] @s)
 }
 # A dictionary's membership test, read or entry position for a builtin key
 # reads the dictionary alone (the transfer's own rule). O(1).

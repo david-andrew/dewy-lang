@@ -174,7 +174,12 @@ ref_ir_term=(term:RefTerm self:int64 args:array<int64> self_type:int64 arg_types
     else if term.kind =? 3 {
         # (a constant of another function, as a generic instance's store of the caller's type
         # meets it: not in this frame, so its checks are proved, never run)
-        if RefineOpWord(locals.ptr[term.value].owner) not=? cur_fn {fatal((-1) "cannot check a contract naming '{name_of(RefineOpWord(locals.ptr[term.value].name))}' outside the function that declares it: prove the value before it reaches this function")}
+        if RefineOpWord(locals.ptr[term.value].owner) not=? cur_fn {
+            let site=ops_gen_site[0]
+            let shown=if site >? 0 {wit_text(RefineOpWord(nodes.ptr[site].a))} else {""}
+            let what=if shown =? "" {"a value"} else {"`{shown}`"}
+            fatal(if site >? 0 {nodes.ptr[site].pos} else {-1} "cannot prove {what} keeps its contract on '{name_of(RefineOpWord(locals.ptr[term.value].name))}' here, and it cannot be checked at run time outside the function that declares '{name_of(RefineOpWord(locals.ptr[term.value].name))}'")
+        }
         t=RefineOpWord(locals.ptr[term.value].type)
         value=gen_expr(mk_ident_local(term.value locals.ptr[term.value].pos)).v
     }

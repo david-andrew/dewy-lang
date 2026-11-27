@@ -34,7 +34,7 @@ from p"facts_lengths.dewy" import (fact_difference fact_heap_length fact_length_
 from p"facts_library.dewy" import (fact_chosen fact_chosen_call fact_clamped fact_copy_length_call fact_count_call fact_empty_array_call fact_endpoint fact_endpoint_call fact_entry_count_call fact_exact_sum_call fact_exact_sum_check fact_field_args fact_gpu_index_call fact_gpu_index_check fact_heap_call fact_heap_type fact_integer_gcd_call fact_length_through fact_library_call fact_nonempty_call fact_nonempty_check fact_prelude_call fact_same_length_call)
 from p"facts_lifecycle.dewy" import (fact_owner_value fact_parallel_count_check fact_parallel_range_call fact_refinements_unreachable fact_scope_exit)
 from p"facts_loops.dewy" import (fact_loop_body fact_loop_bound_demands fact_loop_bound_entry fact_loop_bounds fact_loop_prepare fact_while)
-from p"facts_maps.dewy" import (fact_ensured_close fact_keys_copy fact_keys_element fact_map_bounded fact_map_bounded_call fact_map_call fact_map_check fact_map_clear fact_map_clear_call fact_map_entry fact_map_insert_call fact_map_key fact_map_literal fact_map_member fact_map_of fact_map_optional fact_map_position fact_map_receiver fact_map_snapshot fact_map_snapshot_call fact_map_store fact_map_store_call fact_reflexive_key)
+from p"facts_maps.dewy" import (fact_map_value_refined fact_ensured_close fact_keys_copy fact_keys_element fact_map_bounded fact_map_bounded_call fact_map_call fact_map_check fact_map_clear fact_map_clear_call fact_map_entry fact_map_insert_call fact_map_key fact_map_literal fact_map_member fact_map_of fact_map_optional fact_map_position fact_map_receiver fact_map_snapshot fact_map_snapshot_call fact_map_store fact_map_store_call fact_reflexive_key)
 from p"facts_members.dewy" import (fact_member_block fact_member_literal)
 from p"facts_numeric.dewy" import (fact_bitwise fact_divisor fact_extremum fact_extremum_call fact_floor fact_floor_unsigned fact_mod_call fact_power_call fact_power_check fact_rational_constructor fact_rational_divmod fact_rational_made fact_rational_promotion fact_rational_zero_test fact_shift_obliged)
 from p"facts_pools.dewy" import (fact_pool_call fact_pool_capture)
@@ -1429,6 +1429,24 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                 if types.ptr[t].kind =? 'fixed' {return fact_constant(@s fixed_len(t))}
                 return fact_project(@s base (-1) false T_INT)
             }
+            # (the library's `__take_at(xs i)` moves an element out, leaving its slot vacant: the
+            # element as its stored type, whose contract held when it was stored, and the array
+            # a new value of the same length)
+            if id =? IN.take_slot and nkids(n) =? 2 {
+                let a=kid(n 0)
+                let index=fact_capture(kid(n 1) @s)
+                let route=fact_route(a @s)
+                let values=fact_route_values(@s route)
+                let base=if values.length >? 0 {values[CaptureWord(values.length) - 1]} else {0}
+                let at=fact_type(ntype(a))
+                let et=if types.ptr[at].kind =? 'array' {CaptureWord(types.ptr[at].elem)} else {ntype(n)}
+                let result=fact_project(@s base index true et)
+                let length=fact_project(@s base (-1) false T_INT)
+                let fresh=fact_new(@s FactBound() FactTerm(type=ntype(a)))
+                if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh (-1) false length))}
+                fact_store_route(@s route fresh n true)
+                return result
+            }
             if id =? IN.push or id =? IN.pop or id =? IN.clear or id =? IN.reserve or id =? IN.insert or id =? IN.remove {
                 let a=kid(n 0)
                 # Intrinsics lower value/selector operands before reacquiring the
@@ -1852,6 +1870,7 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                         let member=fact_map_member(@s n values[0] values[1])
                         if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(result (-3) false member))}
                         if ref_self_active {ref_sib_map_read(@s values[0] result n)}
+                        if refine_active {fact_map_value_refined(@s n result)}
                         return result
                     }
                     if map >? 3 or not builtin {fact_path_call_effects(n @s)}
@@ -1881,6 +1900,7 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
                     }
                     let other=fact_new(@s fact_domain(ntype(n) 'missing' n) FactTerm(type=ntype(n)))
                     if ref_self_active and (map =? 4 or map =? 6) {ref_sib_map_read(@s values[0] other n)}
+                    if refine_active and (map =? 4 or map =? 6) {fact_map_value_refined(@s n other)}
                     return other
                 }
                 let zero_test=fact_rational_zero_test(n)
@@ -2148,6 +2168,15 @@ fact_capture_value_body=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$u
             if k =? 'iflet' and ownership_fact_cleanup and s.live and ownership_fact_type(ntype(CaptureWord(nodes.ptr[n].a))) {fact_drop_forget(@s n fact_drop_footprint(ntype(CaptureWord(nodes.ptr[n].a))))}
             let joined=fact_new(@s result FactTerm(type=hull))
             if mark & FACT_VALUE not=? 0 {fact_join_length(@s joined yes y no z n)}
+            # (`d.get(k) ?? 0` of a refined payload type: the fallback was converted to that
+            # type, so either arm holds its contract, as the payload alone did)
+            if refine_active and k =? 'coalesce' {
+                let optional=prune(ntype(CaptureWord(nodes.ptr[n].a)))
+                let payload=if tkind(optional) =? 'opt' {prune(telem(optional))} else {0}
+                let fallback=CaptureWord(nodes.ptr[n].b)
+                let checked=nodes.ptr[fallback].kind =? 'conv' and nodes.ptr[fallback].aux =? int32(int64(CV.refinement)) and prune(CaptureWord(nodes.ptr[fallback].aux2)) =? payload
+                if payload not=? 0 and tkind(payload) =? 'refined' and (checked or prune(ntype(fallback)) =? payload) {ref_assume(payload joined [] @s)}
+            }
             return joined
         }
         <'match_'> => {

@@ -1,0 +1,20 @@
+# Dictionary values bounded by a stable length: each store is checked, each read is known.
+report = (names:array<string>):>void => {
+    const n = names.length
+    if n =? 0 return
+    let at:dict<string addr<(<? n)>> = []
+    loop i in [0..n) at[names[i]] = i
+    printl(names[at.get("b" 0)])
+    printl(names[at.get("zz") ?? 0])
+    let x = at.get("c")
+    if x isnt? none printl(names[x])
+    if "a" in? at printl(names[at["a"]])
+    loop v in at.values printl(names[v])
+    loop [k v] in at printl("{k}={names[v]}")
+    printl(names[at.pop("zz" 0)])
+    if "c" in? at printl(names[at.pop("c")])
+    let ranks:dict<addr<(<? n)> string> = []
+    loop [k v] in at ranks[v] = k
+    loop [k v] in ranks printl(names[k])
+}
+main = () => report(["a" "b" "c"])

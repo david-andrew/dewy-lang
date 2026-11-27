@@ -4,12 +4,12 @@ from p"expression_types.dewy" import (ntype)
 from p"ast.jo" import NF_INDEX_CAPTURED
 from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (NF_GLOBAL NF_COMPREHENSION NF_INBOUNDS NF_RELOOKUP NF_SPREAD has_flag kid nkids nodes)
-from p"check.jo" import (LF_ALIAS globals locals)
+from p"check.jo" import (LF_ALIAS LF_CONST globals locals)
 from p"checks_thin.dewy" import (readonly_global)
 from p"directive_queries.dewy" import (dir_index)
 from p"expr.jo" import (CV IN rational_constants)
 from p"checks_thin_expr.dewy" import (oversized_literal)
-from p"facts.jo" import (FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_COPY FACT_ELEMENT_LENGTH FACT_ELEMENT_SAME_LENGTH FACT_ELEMENT_SOURCE FACT_ELEMENT_VALUE FACT_FIELD_KEYS FACT_KEYS_POSITIONS FACT_KEYS_SOURCE FACT_MAP_DENSE FACT_MAP_POSITIONS FACT_POOL_POSITIONS FACT_ROW_SOURCE FACT_SELF_BOUND FACT_SIB_BOUND FactProjection FactRoute FactState fact_constant_globals fact_covered fact_name_vals fact_policy fact_probe_on fact_query fact_route_reuse fact_route_selectors fact_speculating fact_terms)
+from p"facts.jo" import (FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_COPY FACT_ELEMENT_LENGTH FACT_ELEMENT_SAME_LENGTH FACT_ELEMENT_SOURCE FACT_ELEMENT_VALUE FACT_FIELD_KEYS FACT_KEYS_POSITIONS FACT_KEYS_SOURCE FACT_MAP_DENSE FACT_MAP_POSITIONS FACT_POOL_POSITIONS FACT_ROW_SOURCE FACT_SELF_BOUND FACT_SIB_BOUND FactProjection FactRoute FactState fact_constant_globals fact_covered fact_name_vals fact_policy fact_probe_on fact_query fact_route_reuse fact_route_selectors fact_speculating fact_terms fact_owner)
 from p"facts_capture.dewy" import (fact_capture fact_index_success)
 from p"facts_values.dewy" import (fact_domain fact_scalar fact_type fact_place fact_project)
 from p"facts_compare.dewy" import (fact_compare)
@@ -104,6 +104,7 @@ fact_replace=(@s:FactState base:RouteWord selector:RouteWord element:bool value:
     if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(v selector element value))}
     v
 }
+let fact_foreign_reads:dict<int64 [int64 int64]>=[]
 fact_read=(@s:FactState e:RouteWord):>RouteWord=>$unsafe {
     if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32(1) {
         let l=RouteWord(nodes.ptr[e].sym)
@@ -123,8 +124,20 @@ fact_read=(@s:FactState e:RouteWord):>RouteWord=>$unsafe {
             return value
         }
     }
+    # (a constant of the function calling this one, read by a contract on a type the call
+    # instantiated, as the caller's `const n` in `addr<(<? n)>`: one value for the whole body,
+    # which never writes it, whatever a call or join forgot. O(1).)
+    let foreign=p.root =? 'local' and p.declaration >? 0 and RouteWord(locals.ptr[p.declaration].flags) & LF_CONST not=? 0 and RouteWord(locals.ptr[p.declaration].owner) not=? fact_owner and fact_owner >? 0
+    if foreign {
+        let held=fact_foreign_reads.get(p.declaration)
+        if held not=? none and held[0] =? fact_owner and held[1] <? RouteWord(fact_terms.length) {
+            fact_bind(@s p held[1])
+            return held[1]
+        }
+    }
     let t=refine_storage(e ntype(e))
     let v=fact_new(@s fact_domain(t) FactTerm(type=t))
+    if foreign {fact_foreign_reads[p.declaration]=[fact_owner v]}
     fact_bind(@s p v)
     # (the known length first: a contract on it would project a length of its own)
     if p.root =? 'global' {

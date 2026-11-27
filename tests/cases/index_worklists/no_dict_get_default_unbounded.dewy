@@ -1,0 +1,8 @@
+# The default is not a value of the dictionary: `?? -1` may be returned.
+report = (names:array<string>):>void => {
+    const n = names.length
+    let at:dict<string addr<(<? n)>> = []
+    loop i in [0..n) at[names[i]] = i
+    printl(names[at.get("b") ?? -1])
+}
+main = () => report(["a" "b"])
