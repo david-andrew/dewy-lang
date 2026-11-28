@@ -2261,7 +2261,7 @@ Let `...args` (no type) end an `$extern` declaration's parameters, as C's `...`?
 - **Rec:** `...args`, as the direction for Dewy's own rest parameters. Rejected: `$extern(variadic=true)`, which leaves the extras out of the parameter list (a cold reader: "looks like a two-parameter function while the call has three"); a bare `...`, which already means "named parameters follow"; `...args:c_args`, which readers were unsure compiles. **Reversible:** yes.
 - **Unblocks:** `printf`, `snprintf`, `open` with a mode, `ioctl`, `fcntl`, and C logging and formatting libraries.
 
-Names tested cold (one round, three readers, all read every candidate correctly). Not dogfooded. Candidates and the cold-read table: [proposals/ffi-variadic/round1.md](proposals/ffi-variadic/round1.md).
+Names tested cold (one round, three readers, all read every candidate correctly). Dogfooded (14 programs): the spelling is 5 on obvious everywhere, and with literals crossing as C's types (`3` as `int32`, `none` as null) and fix-it diagnostics it reaches 5 on discoverable, concise and complete except for general FFI gaps; safe stays 1-4 because formats, `execl`'s sentinel and `ioctl`'s argument are unchecked (format checking would need a new `$extern(format='printf')`). Candidates and the cold-read table: [proposals/ffi-variadic/round1.md](proposals/ffi-variadic/round1.md); dogfood: [proposals/ffi-variadic/round2.md](proposals/ffi-variadic/round2.md).
 
 ---
 
