@@ -1,0 +1,36 @@
+# R-values and U-values with areas, temperature differences, power and energy:
+# series and parallel paths, mixed R and RSI, U-factors in either system, a season's
+# energy from degree-days (one degree in a compound unit counts no offset).
+from units import inch, ft, m, K, W, kW, kWh, BTU, °C, °F, R, RSI, RValue
+Surface:type = [name:string area:float64*Length^2 r:float64*RValue]
+series = (layers:array<float64*RValue>):>float64*RValue => layers.sum
+combined = (a:float64*RValue b:float64*RValue):>float64*RValue => 1/(1/a + 1/b)
+conductance = (s:Surface) => s.area/s.r
+main = ():>void => {
+    let wall = series([0.68R 3.5inch*3.7R/inch 0.5inch*1.25R/inch 0.17R])
+    printl("wall R-{fmt'.1f'(wall/1R)} RSI {fmt'.2f'(wall/1RSI)}")
+    let surfaces = [
+        Surface["walls" 1400.0ft^2 wall]
+        Surface["roof" 100.0m^2 7.0RSI]
+        Surface["windows" 220.0ft^2 1/(0.30BTU/(hour*ft^2*°F))]
+    ]
+    let ua = 0.0W/K
+    loop s in surfaces { ua += conductance(s) }
+    printl("UA {fmt'.1f'(ua/(1W/K))} W/K, {fmt'.1f'(ua/(1BTU/(hour*°F)))} BTU/(hour*°F)")
+    let design = 70°F - 5°F
+    let load = ua*design
+    printl("design load {fmt'.0f'(load/1W)} W = {fmt'.0f'(load/(1BTU/hour))} BTU/hour")
+    let furnace = 60000.0BTU/hour
+    printl("furnace covers it: {furnace >? load}")
+    let best = surfaces.max_by((s) => conductance(s))
+    printl("worst surface: {best.name}")
+    let u_wall = 1/wall
+    printl("wall U {fmt'.3f'(u_wall/(1W/(m^2*K)))}")
+    let p = combined(19.0R 3.0R)
+    printl("parallel {fmt'.2f'(p/1R)}")
+    let code_min = 20.0R
+    if wall <? code_min { printl("below code by R-{fmt'.1f'((code_min - wall)/1R)}") }
+    let hdd = 6000*(°F*24hour)
+    let season = ua*hdd
+    printl("season {fmt'.0f'(season/1kWh)} kWh")
+}
