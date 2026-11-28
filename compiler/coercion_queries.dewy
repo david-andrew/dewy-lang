@@ -23,7 +23,7 @@ from p"literal_context.dewy" import (finalize_literal is_lit lit_default)
 from p"util.jo" import (files pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"error_ops.dewy" import (exception_join)
-from p"type_ops.dewy" import (dt int_policy is_soa mk_opt mk_union soa_elem union_index)
+from p"type_ops.dewy" import (dt int_policy is_soa mk_array mk_fixed mk_opt mk_union soa_elem union_index)
 from p"checker_source_positions.dewy" import (dewy_at)
 from p"callable_compatibility.dewy" import (callable_fits)
 from p"rational_types.dewy" import (bundled_rational_type bundled_word_rational_type)
@@ -266,6 +266,19 @@ join_types=(a:int64 b:int64 pos:int64):>int64=>$unsafe {
         # numeric fields still use the ordinary structural conversion above.
         if types.ptr[ta].kind =? 'struct_' and types.ptr[tb].kind =? 'struct_' and structs.ptr[CoercionQueriesWord(types.ptr[ta].st)].record_ and structs.ptr[CoercionQueriesWord(types.ptr[tb].st)].record_ {t=mk_union([ta tb])}
         if t not=? 0 {
+            coerce(a t);
+            coerce(b t);
+            return t
+        }
+    }
+    # (arrays whose elements carry refinements neither of which admits the other, as
+    # `array<Count>` and `array<Small>`: their plain elements, never the first arm's)
+    let k=types.ptr[ta].kind
+    if refine_active and (k =? 'array' or k =? 'fixed') and k =? types.ptr[tb].kind and types.ptr[ta].bits =? types.ptr[tb].bits {
+        let ea=prune(CoercionQueriesWord(types.ptr[ta].elem))
+        let base=representation_type(ea)
+        if base not=? ea and type_eq(base representation_type(prune(CoercionQueriesWord(types.ptr[tb].elem)))) {
+            let t=if k =? 'array' {mk_array(base)} else {mk_fixed(base CoercionQueriesWord(types.ptr[ta].bits))}
             coerce(a t);
             coerce(b t);
             return t

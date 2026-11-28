@@ -1,0 +1,13 @@
+# Arrays whose element contracts neither admit the other join as plain arrays, in either order.
+Count:type = int64<n => 1 <=? n and n <=? 400>
+Small:type = int64<n => 0 <=? n and n <=? 9>
+pick = (q:bool):>bool => q
+main = () => {
+    let xs:array<Count> = [5 6]
+    let ys:array<Small> = [0]
+    let a = if pick(true) xs else ys
+    let b = if pick(false) xs else ys
+    a.push(-1)
+    b.push(500)
+    printl"{a} {b}"
+}
