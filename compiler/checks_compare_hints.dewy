@@ -109,6 +109,12 @@ union_operand_why=(n:CompareWord u:CompareWord):>string=>$unsafe {
         }
         if member =? 0 and is_numeric(m) {member=m} else {others += 1}
     }
+    # (`Oops | array<int64>`: one value member that is not a number, and its failures)
+    if member =? 0 and others =? 1 {
+        loop m in value_members(prune(u)) {
+            if not exception_member(m) {return " (it may hold a failure instead of the {dt(m)}: fall back with `x ?? fallback`, pass the failure on with `or_throw`, or test it first, `if x is? {dt(m)} \{ ... }`)"}
+        }
+    }
     if member not=? 0 and others =? 0 {return " (it may hold a failure instead of the {dt(member)}: fall back with `x ?? 0`, pass the failure on with `or_throw`, or test it first, `if x is? {dt(member)} \{ ... }`)"}
     let shown=if member not=? 0 {dt(member)} else {"int64"}
     " (find out which it holds first: `if x is? {shown} \{ ... }` or a `match`)"
@@ -316,11 +322,14 @@ opt_cmp_error=(n:CompareWord a:CompareWord b:CompareWord ta:CompareWord tb:Compa
         if s not=? 0 and syms.ptr[s].kind =? 'local' {at=locals.ptr[CompareWord(syms.ptr[s].ref)].pos}
         if s not=? 0 and syms.ptr[s].kind =? 'global' {at=nodes.ptr[CompareWord(globals.ptr[CompareWord(syms.ptr[s].ref)].decl)].pos}
         let where=""
-        if at >? 0 {
+        let dewy=hint_dewy_at(nodes.ptr[n].pos)
+        if at >? 0 and not pos_in_lib(at) {
             let [ln c]=line_col(at)
             where=" where line {ln} makes it"
         }
-        fatal(nodes.ptr[n].pos "'{nm}' may be none (it is {a_type(tx)}), so it cannot be compared with {jd(nodes.ptr[n].pos "<, >" "<?, >?")}: say what to use then{where} (`... ?? {dv}`), or {jd(nodes.ptr[n].pos "`if let v = {nm}: ...`" "`if {nm} isnt? none \{ ... }`")}")
+        # (inside the library, as `sorted` compares elements: the program's values are what may be none)
+        if pos_in_lib(nodes.ptr[n].pos) and dewy {fatal(nodes.ptr[n].pos "its values may be none (they are {a_type(tx)}), and none has no order: give each a value first, `[loop x in xs x ?? {dv}]`, or leave the nones out, `[loop x in xs if x isnt? none x]`")}
+        fatal(nodes.ptr[n].pos "'{nm}' may be none (it is {a_type(tx)}), so it cannot be compared with {if dewy {"<?, >?"} else {"<, >"}}: say what to use then{where} (`... ?? {dv}`), or {if dewy {"`if {nm} isnt? none \{ ... }`"} else {"`if let v = {nm}: ...`"}}")
     }
     fatal(nodes.ptr[n].pos "optionals can only be compared with {op_text('eq' nodes.ptr[n].pos)} and {op_text('ne' nodes.ptr[n].pos)}")
 }

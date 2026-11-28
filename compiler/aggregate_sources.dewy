@@ -98,6 +98,8 @@ dewy_classify_spread=(n:int64):>void=>$unsafe {
     let first=kid(n 0)
     if not has_flag(first NF_SPREAD) or not files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {return}
     if dewy_set_literal(first) {return}
+    # (`[[x]...]`: an array literal spread is an array, never a record)
+    if nodes.ptr[first].kind =? 'array' and nodes.ptr[first].b =? 0 {return}
     let t=dewy_spread_source_type(first)
     if types.ptr[t].kind =? 'struct_' and not is_map_type(t) and not is_dewy_set_type(t) {nodes.ptr[n].kind='record_lit'}
 }

@@ -1,0 +1,20 @@
+# A literal spread inside a generic call or set: its elements' Canceled is forwarded, never an element.
+Oops:type = type of error & [message:string]
+nums = (n:int64):>array<int64> | Canceled => {
+    sleep(0ns) or_throw
+    [1 2 n]
+}
+table = (n:int64):>dict<string int64> | Canceled => {
+    sleep(0ns) or_throw
+    ["a" -> 1 "b" -> n]
+}
+maybe = (n:int64):>array<int64>? => if n >? 0 [n] else none
+risky = (n:int64):>array<int64> | Oops => if n >? 0 [n n] else Oops["no"]
+count = <T>(xs:array<T>):>int64 => xs.length
+add3 = (a:int64 b:int64 c:int64):>int => a + b + c
+main = ():>void | Canceled => {
+    let d = table(3)
+    printl(set[[d.keys]...])
+    printl(count([[nums(3)]...]))
+    printl(set[[nums(3)]...])
+}

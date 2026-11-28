@@ -33,7 +33,7 @@ from p"dewy_method_ops.dewy" import (dewy_is_method)
 from p"checker_source_positions.dewy" import (dewy_at)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"check.jo" import (ctxs cx fns)
-from p"checks_compare_hints.dewy" import (cmp_error opt_cmp_error uncalled_hint union_operand_why union_or_optional void_rec_hint)
+from p"checks_compare_hints.dewy" import (cmp_error hint_dewy_at opt_cmp_error uncalled_hint union_operand_why union_or_optional void_rec_hint)
 from p"vector_checks.dewy" import (check_vec_binary)
 from p"checker_expr.dewy" import (check_expr)
 from p"coercion_queries.dewy" import (can_coerce join_types)
@@ -294,7 +294,7 @@ binary_rest=(n:int64 expected:int64 a0:int64 b0:int64 ta0:int64 tb0:int64 hint:i
         else if type_eq(ta tb) and types.ptr[ta].kind =? 'struct_' and not is_map_type(ta) {
             why=" (a struct has the operators defined for it: `({opn}) = (a: {dt(ta)}, b: {dt(ta)}) -> ...`)"
             if op =? 'gt' or op =? 'le' or op =? 'ge' {why=" (define `(<) = (a: {dt(ta)}, b: {dt(ta)}) -> bool: ...` and >, <= and >= come from it)"}
-            if dewy_at(nodes.ptr[n].pos) {why=" (a record has the operators defined for it, such as `__add__ = (a:{dt(ta)} b:{dt(ta)}):>{dt(ta)} => ...` for + or `__lt__` for <?)"}
+            if hint_dewy_at(nodes.ptr[n].pos) {why=" (a record has the operators defined for it, such as `__add__ = (a:{dt(ta)} b:{dt(ta)}):>{dt(ta)} => ...` for + or `__lt__` for <?)"}
         }
         never_cascade(nodes.ptr[n].pos ta)
         never_cascade(nodes.ptr[n].pos tb)
