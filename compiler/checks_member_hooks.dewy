@@ -7,7 +7,7 @@ from p"checked_expression_nodes.dewy" import (mk_ident_local)
 
 from p"error_ops.dewy" import (forward_member)
 from p"dewy_method_ops.dewy" import (dewy_type_method)
-from p"ast.jo" import (NF_CHECKED NF_MUT NF_U64 add_flag kid mk nkids nodes)
+from p"ast.jo" import (NF_CHECKED NF_MUT NF_SPREAD NF_U64 add_flag kid mk nkids nodes)
 from p"check.jo" import (locals modules)
 from p"checker_assignment_entry.dewy" import (soa_alias_of)
 from p"checks_thin.dewy" import (rational_one_spelling)
@@ -205,7 +205,7 @@ member_vector=(n:int64 bt:int64 expected:int64 @bypass:bool):>int64=>$unsafe {
         let method=mk('field' nodes.ptr[n].pos)
         nodes.ptr[method].a=nodes.ptr[n].a
         nodes.ptr[method].name=int32(fname)
-        nodes.ptr[n]=Node(kind='call' pos=nodes.ptr[n].pos a=int32(method) aux2=-9)
+        nodes.ptr[n]=Node(kind='call' pos=nodes.ptr[n].pos flags=nodes.ptr[n].flags & int32(NF_SPREAD) a=int32(method) aux2=-9)
         bypass=true
         let t=check_expr(n expected)
         call_style_implicit(n fname*8 + 5 t)

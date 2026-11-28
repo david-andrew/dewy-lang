@@ -1,0 +1,14 @@
+# quick
+# A spread of a member called without parentheses (`d.keys...`) spreads its
+# elements in every literal, also as a generic argument and inside `set[...]`.
+count = <T>(xs:array<T>):>int64 => xs.length
+
+main = () => {
+    let a:dict<string int> = ["x"->1 "y"->2]
+    let b:dict<string int> = ["y"->1 "z"->2]
+    printl(count([b.keys...]))
+    printl(count(["a b c".split...]))
+    printl(set[b.keys...])
+    printl(set[a.keys... b.keys...].sorted)
+    printl(set["w" b.keys...].length)
+}

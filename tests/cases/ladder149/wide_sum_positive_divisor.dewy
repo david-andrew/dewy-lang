@@ -1,0 +1,15 @@
+# quick
+# A guard that puts an `int` sum of two words above zero (or below it) proves
+# it a nonzero divisor, though the sum may lie outside every word's range.
+Pair:type = [a:int64 b:int64]
+make = (argv:array<string>) => Pair[argv.length + 4 argv.length + 2]
+
+main = (argv:array<string>) => {
+    let p = make(argv)
+    let cycle = p.a + p.b
+    if cycle <? 1 return
+    printl(100 % cycle)
+    let back = -p.a - p.b
+    if back >=? 0 return
+    printl(100 // back)
+}

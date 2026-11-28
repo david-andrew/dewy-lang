@@ -247,6 +247,17 @@ infer_throw=(s:ErrWord t0:ErrWord):>bool=>{
     infer_note_return(s)
     true
 }
+# `infer_throw` for a result inferred as `T?` before T is known (a `return none`
+# came first): only a value made of exceptions alone is thrown, as it would be
+# before the `none`; anything else gives the payload. O(members)
+infer_throw_open=(s:ErrWord t:ErrWord):>bool=>{
+    let members=value_members(prune(t))
+    if members.length =? 0 {return false}
+    loop m in members {
+        if m =? T_NONE or not exception_member(m) {return false}
+    }
+    infer_throw(s t)
+}
 infer_note_return=(s:ErrWord):>void=>{
     let f=ErrWord(ctxs[cx].inst)
     let returns=infer_returns[f]

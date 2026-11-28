@@ -963,6 +963,18 @@ fact_assume=(@s:FactState v:CompareWord truth:bool):>void=>$unsafe {
             fact_set_bound(@s b y)
         }
     }
+    # (nor does a wide value above a positive end or below a negative one:
+    # `if c <? 1 return` before `n % c`, c an `int` sum of two words)
+    if (op =? 'lt' or op =? 'le') and (x.wide or y.wide) {
+        if y.wide and not x.wide and (x.lo >? 0 or op =? 'lt' and x.lo >=? 0) {
+            y.nz=true
+            fact_set_bound(@s b y)
+        }
+        if x.wide and not y.wide and (y.hi <? 0 or op =? 'lt' and y.hi <=? 0) {
+            x.nz=true
+            fact_set_bound(@s a x)
+        }
+    }
     if x.wide or y.wide {return}
     let exact=false
     if op =? 'eq' {

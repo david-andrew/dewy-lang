@@ -1,0 +1,22 @@
+# quick
+# `fill(fill(0 m) n)` makes rows of one length, as a comprehension of rows does:
+# writing an element of a row keeps it, so a table indexed by both counts proves.
+lcs_length = (a:string b:string):>int => {
+    let x = graphemes(a)
+    let y = graphemes(b)
+    let table = fill(fill(0 y.length + 1) x.length + 1)
+    loop i in [x.length - 1, x.length - 2..0] {
+        loop j in [y.length - 1, y.length - 2..0] {
+            table[i][j] = if x[i] =? y[j] table[i + 1][j + 1] + 1 else max(table[i + 1][j] table[i][j + 1])
+        }
+    }
+    table[0][0]
+}
+
+main = () => {
+    printl(lcs_length("kitten" "sitting"))
+    printl(lcs_length("" "abc"))
+    let words = fill(fill("" 3) 2)
+    words[1][2] = "end"
+    printl(words)
+}

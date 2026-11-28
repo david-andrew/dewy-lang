@@ -157,6 +157,7 @@ RETURN_JO = {
     },
     'errors.jo': {
         'infer_throw': 'infer_throw = (s: int, t0: int) -> bool: xt_thrown(s, t0)',
+        'infer_throw_open': 'infer_throw_open = (s: int, t0: int) -> bool: xt_thrown(s, t0)',
     },
 }
 

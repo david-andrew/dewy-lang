@@ -13,7 +13,7 @@ from p"checker_body_end.dewy" import (union_has_void)
 from p"checks_place_updates.dewy" import (shape_returned)
 from p"checks_thin.dewy" import (return_sink)
 from p"checks_stmt_hooks.dewy" import (return_place return_throws return_note return_void_value return_error)
-from p"error_ops.dewy" import (infer_throw)
+from p"error_ops.dewy" import (infer_throw infer_throw_open)
 # `return` and `return value`: where a return may stand, the value checked at the
 # declared result (its refinement's representation, a shaped result's dimensions,
 # coercion) or unified with an inferred one, and the exceptions an inferred Dewy
@@ -124,8 +124,12 @@ xt_return=(s:XTWord):>void=>$unsafe {
     if is_void and not inferring {return_error(s 0 3)}
     let expected=rt
     if is_void {expected=0}
+    # (an inferred `T?` whose T is still open, after a `return none`: an
+    # exception returned now is thrown, as it is before the `none`)
+    let open=inferring and xt_kind(rt) =? 'opt' and xt_kind(XTWord(xt_types[0].ptr[rt].elem)) =? 'var'
     let t=check_expr(a expected)
     xt_nodes[0][s].a=int32<overflow='wrap'>(xt_last[0])
+    if open and infer_throw_open(s t) {return}
     if inferring and not can_coerce(0 t rt) and infer_throw(s t) {return}
     if is_void {return_error(s 0 3)}
     let shaped=xt_shaped(XTWord(xt_nodes[0].ptr[s].a) xt_representation(rt))

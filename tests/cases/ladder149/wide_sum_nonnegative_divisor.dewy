@@ -1,0 +1,10 @@
+# Above or at zero is not nonzero: the guard leaves the divisor unproven.
+Pair:type = [a:int64 b:int64]
+make = (argv:array<string>) => Pair[argv.length argv.length]
+
+main = (argv:array<string>) => {
+    let p = make(argv)
+    let cycle = p.a + p.b
+    if cycle <? 0 return
+    printl(100 % cycle)
+}

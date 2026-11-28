@@ -1,0 +1,17 @@
+# quick
+# An inferred result that first returns `none`, then an error, then a value is
+# the value's optional with the error: the error is not taken for the payload.
+Reading:type = [name:string bytes:int64]
+Empty:type = type of error
+
+look = (name:string size:int64) => {
+    if name.is_empty return none
+    if size =? 0 return Empty[]
+    Reading[name size]
+}
+
+main = () => {
+    printl(look("" 3))
+    printl(look("a" 0) is? Empty)
+    printl(look("a" 3))
+}

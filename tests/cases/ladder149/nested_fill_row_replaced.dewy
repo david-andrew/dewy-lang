@@ -1,0 +1,10 @@
+# A row replaced by a shorter one no longer has the fill's one length: its
+# indexes need a proof again.
+main = (argv:array<string>) => {
+    let n = argv.length
+    let grid = fill(fill(0 n) 3)
+    grid[1] = []
+    loop j in [0..n) {
+        printl(grid[1][j])
+    }
+}
