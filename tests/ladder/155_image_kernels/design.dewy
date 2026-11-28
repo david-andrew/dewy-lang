@@ -1,0 +1,226 @@
+# Image kernels over a grayscale picture, each pixel computed in parallel.
+# The input is a plain PGM file (P2): `P2`, the width, the height and the
+# largest value, then the pixels row by row, with `#` comments anywhere.
+# Levels are rescaled to 0..255. The kernels: a box blur, Sobel edge
+# strengths, a histogram with Otsu's threshold, a contrast stretch, and the
+# connected regions of the thresholded mask. Neighbors past an edge repeat
+# the nearest border pixel.
+#
+# Usage: image_kernels FILE [radius=N] [--invert]
+
+import argparse
+
+Side:type = int64<n => 1 <=? n and n <=? 1024>
+Level:type = int64<v => 0 <=? v and v <=? 255>
+Step:type = int64<d => -1 <=? d and d <=? 1>
+
+Args:type = [
+    file = argparse.Positional<Path>(help="a plain PGM picture")
+    radius = argparse.Named<int64<r => 0 <=? r and r <=? 4>>(default=1 help="box blur radius")
+    invert = argparse.Flag(help="count the dark regions instead of the light ones")
+]
+
+Image:type = [width:Side height:Side pixels:array<Level>]
+
+BadImage:type = type of error & [message:string]
+
+# The whitespace-separated words of a PGM file, comments left out.
+words_of = (text:string):>array<string> => {
+    let out:array<string> = []
+    loop line in text.lines {
+        let kept = (line.split("#").get(0) ?? "")
+        loop word in kept.split out.push(word)
+    }
+    out
+}
+
+# A header or pixel value: PGM allows up to 65535.
+number = (word:string what:string):>int64<n => 0 <=? n and n <=? 65535> | BadImage => {
+    let n = to_int(word) ?? return BadImage["{what} `{word}` is not a whole number"]
+    if n <? 0 or n >? 65535 return BadImage["{what} {n} is out of range"]
+    int64(n)
+}
+
+parse = (text:string):>Image | BadImage => {
+    let words = words_of(text)
+    if words.get(0) not=? "P2" return BadImage["not a plain PGM file (expected `P2`)"]
+    if words.length <? 4 return BadImage["the header is cut short"]
+    let width = number(words[1] "width") or_throw
+    let height = number(words[2] "height") or_throw
+    let top = number(words[3] "largest value") or_throw
+    if width <? 1 or width >? 1024 or height <? 1 or height >? 1024 return BadImage["a {width}x{height} picture is not supported"]
+    if top <? 1 return BadImage["the largest value must be at least 1"]
+    let count = width * height
+    if words.length - 4 not=? count return BadImage["expected {count} pixels, found {words.length - 4}"]
+    let pixels:array<Level> = []
+    loop i in [0..count) {
+        let v = number(words[4 + i] "pixel") or_throw
+        if v >? top return BadImage["pixel {i} is {v}, above the largest value {top}"]
+        # (rounded to the nearest level, halves up)
+        pixels.push(min(255 (v * 255 + top // 2) // top))
+    }
+    Image[width height pixels]
+}
+
+# The pixel at (x, y), clamped into the picture.
+at = (img:Image x:int64 y:int64):>Level => {
+    let cx = max(0 min(x img.width - 1))
+    let cy = max(0 min(y img.height - 1))
+    img.pixels.get(cy * img.width + cx) ?? 0
+}
+
+with_pixels = (img:Image pixels:array<Level>):>Image => Image[img.width img.height pixels]
+
+blur = (img:Image radius:int64<r => 0 <=? r and r <=? 4>):>Image => {
+    let w = img.width
+    let side = 2 * radius + 1
+    let area = side * side
+    with_pixels(img [parallel i in [0..w * img.height) {
+        let x = i % w
+        let y = i // w
+        let total = 0
+        loop dy in [-radius..radius] {
+            loop dx in [-radius..radius] total += at(img x + dx y + dy)
+        }
+        min(255 (total + area // 2) // area)
+    }])
+}
+
+# Sobel strengths |gx| + |gy|, capped at the top level.
+edges = (img:Image):>Image => {
+    let w = img.width
+    with_pixels(img [parallel i in [0..w * img.height) {
+        let x = i % w
+        let y = i // w
+        let p = (dx:Step dy:Step):>Level => at(img x + dx y + dy)
+        let gx = p(1 (-1)) + 2 * p(1 0) + p(1 1) - p((-1) (-1)) - 2 * p((-1) 0) - p((-1) 1)
+        let gy = p((-1) 1) + 2 * p(0 1) + p(1 1) - p((-1) (-1)) - 2 * p(0 (-1)) - p(1 (-1))
+        min(255 abs(gx) + abs(gy))
+    }])
+}
+
+histogram = (img:Image):>array<int> => {
+    let counts = fill(0 256)
+    loop v in img.pixels counts[v] += 1
+    counts
+}
+
+# Otsu: the level t splitting the histogram into `<= t` and `> t` with the
+# largest between-class variance, (n*s0 - s*n0)^2 / (n0*n1) up to a constant
+# factor; the lowest such level on a tie.
+otsu = (counts:array<int>):>Level => {
+    let n = counts.sum
+    let s = sum([loop v in 0.. and c in counts v * c])
+    let n0 = 0
+    let s0 = 0
+    let best:rational = -1
+    let pick:Level = 0
+    loop t in [0..255] {
+        n0 += counts.get(t) ?? 0
+        s0 += t * (counts.get(t) ?? 0)
+        let n1 = n - n0
+        if n0 =? 0 or n1 =? 0 continue
+        let spread = rational((n * s0 - s * n0)^2) / (n0 * n1)
+        if spread >? best {
+            best = spread
+            pick = t
+        }
+    }
+    pick
+}
+
+# Levels stretched so the darkest pixel becomes 0 and the lightest 255.
+stretch = (img:Image):>Image => {
+    if img.pixels.length =? 0 return img
+    let lo = min(img.pixels)
+    let hi = max(img.pixels)
+    if hi =? lo return img
+    let span = hi - lo
+    let out = img.pixels
+    parallel @v in out {
+        v = max(0 min(255 ((v - lo) * 255 + span // 2) // span))
+    }
+    with_pixels(img out)
+}
+
+Region:type = [size:int left:int64 top:int64 right:int64 bottom:int64]
+
+# Four-connected regions of the pixels on the chosen side of the threshold,
+# largest first (then top to bottom, left to right).
+regions = (img:Image mask:array<bool>):>array<Region> => {
+    const pixels = img.pixels
+    const n = pixels.length
+    let w = img.width
+    let seen = fill(false n)
+    let found:array<Region> = []
+    loop start in [0..n) {
+        if seen[start] or not (mask.get(start) ?? false) continue
+        seen[start] = true
+        let todo:array<int64<(<? pixels.length)>> = [start]
+        let r = Region[0 start % w start // w start % w start // w]
+        loop not todo.is_empty {
+            let i = todo.pop()
+            let x = i % w
+            let y = i // w
+            r = Region[r.size + 1 min(r.left x) min(r.top y) max(r.right x) max(r.bottom y)]
+            let near = [
+                if x >? 0 i - 1
+                if x <? w - 1 i + 1
+                if i >=? w i - w
+                if i + w <? n i + w
+            ]
+            loop j in near {
+                if j >=? 0 and j <? n and not seen[j] and (mask.get(j) ?? false) {
+                    seen[j] = true
+                    todo.push(j)
+                }
+            }
+        }
+        found.push(r)
+    }
+    found.sorted(key=(r):>[int int64 int64] => [-r.size r.top r.left])
+}
+
+SHADES = " .:-=+*#%@"
+
+show = (img:Image title:string):>void => {
+    printl"{title}:"
+    loop y in [0..img.height) {
+        let row = [loop x in [0..img.width) SHADES[at(img x y) * 10 // 256]]
+        printl"  |{row.join("")}|"
+    }
+}
+
+main = (argv:array<string>) => {
+    let args = argparse.parse(Args argv about="image kernels over a plain PGM picture")
+    let text = args.file.read_text or_throw
+    let img = match parse(text) {
+        bad:BadImage => {
+            printl("{args.file.name}: {bad.message}" file=stderr)
+            exit(2)
+        }
+        ok:Image => ok
+    }
+    printl"{args.file.name}: {img.width}x{img.height}, mean level {fmt'.2f'(rational(img.pixels.sum) / (img.width * img.height))}"
+    let soft = blur(img args.radius)
+    let strong = edges(soft)
+    show(stretch(soft) "blurred, radius {args.radius}, stretched")
+    show(strong "edges")
+    let counts = histogram(soft)
+    let busiest = [loop v in [0..256) v].sorted(key=(v) => -(counts.get(v) ?? 0))
+    printl"most common levels: {[loop v in busiest[$clamp ..3) "{v} ({counts.get(v) ?? 0})"].join(", ")}"
+    let t = otsu(counts)
+    let mask = [loop v in soft.pixels if args.invert v <=? t else v >? t]
+    let side = if args.invert "dark" else "light"
+    printl"otsu threshold {t}: {mask.count((m) => m)} {side} pixels"
+    let found = regions(soft mask)
+    printl"{found.length} {side} regions"
+    loop r in found[$clamp ..5) {
+        printl"  {fmt'>4'(r.size)} pixels, x {r.left}..{r.right}, y {r.top}..{r.bottom}"
+    }
+    if strong.pixels.length >? 0 {
+        let strongest = max(strong.pixels)
+        let rim = [loop v in strong.pixels if v * 2 >=? strongest v].length
+        printl"strongest edge {strongest}; {rim} pixels at half of it or more"
+    }
+}

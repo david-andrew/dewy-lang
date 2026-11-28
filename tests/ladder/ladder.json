@@ -760,6 +760,14 @@
     "cost=POST:2,DELETE:3,PUT:1"
    ],
    "note": "Token-bucket rate limiter replaying a stdin request log: UTC instants read by `instant(text)` with impossible dates and out-of-order lines reported, policies parsed with `Duration(text)`, exact rational tokens refilled by `elapsed / period` (whose `OutOfRange` a runtime divisor brings is defaulted), retry waits from rational seconds quantized up to 1ms, a day header across midnight by `format`, method costs above a burst refused outright, and per-client tallies with a sliding one-second window over kept instants."
+  },
+  "155_image_kernels": {
+   "milestone": 18,
+   "args": [
+    "{dir}/scene.pgm",
+    "radius=1"
+   ],
+   "note": "Image kernels over a plain PGM file read through an argparse Positional<Path>: levels rescaled into a `Level` refinement, a box blur and Sobel strengths collected with `[parallel i in [0..n) ...]` over border-clamped neighbors, a fixed 256-bin histogram indexed by `Level`, Otsu's threshold by exact rational variance, an in-place `parallel @v` contrast stretch, and four-connected regions through a stack whose elements index the pixels."
   }
  },
  "design_passing": [
