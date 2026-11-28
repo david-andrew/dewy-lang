@@ -1,0 +1,12 @@
+# exit: 7
+# modes: native native-release
+# exit(n) runs C exit handlers with its code.
+$extern
+on_exit = (f:((status:int32 arg:ptr<uint8>?):>void) arg:ptr<uint8>?):>int32
+$export
+bye = (status:int32 _arg:ptr<uint8>?):>void => printl"bye {status}"
+main = ():>void => {
+    $unsafe on_exit(@bye none);
+    printl("main")
+    exit(7)
+}

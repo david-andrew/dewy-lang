@@ -155,6 +155,7 @@ arm64_emit_entry=(inits:array<int64> main_lf:ArmWord main_code:bool entry_end_lf
         }
     }
     if entry_end_lf >=? 0 {
+        a_mov(0  19) # (the exit code, for C's exit: lib/std/end_flush.jo)
         a_call_fix.push([ArmWord(a_code[0].length)  entry_end_lf])
         a_bl()
     }

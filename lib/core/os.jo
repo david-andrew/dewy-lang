@@ -11,7 +11,7 @@ __exit_program = (code: int):
     when BOOTSTRAP:
         __out_flush()
     else:
-        __end_flush()
+        __end_flush(code)
     __exit(code)
 
 # command line arguments (args()[0] is the program as it was started: `dewy tool.jo` gives "tool.jo")

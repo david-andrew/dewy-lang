@@ -443,7 +443,14 @@ when TARGET != "windows":
         when TARGET != "macos":
             if h != null and __c_fflush == null:
                 c = dl_open("libc.so.6")
-                if c != null: __c_fflush = dl_sym(c, "fflush") as cfn(*u8) -> i32
+                if c != null:
+                    __c_fflush = dl_sym(c, "fflush") as cfn(*u8) -> i32
+                    # (the program ends through C's exit, which runs C's handlers: end_flush.jo)
+                    when TARGET == "linux":
+                        at = dl_sym(c, "__cxa_atexit") as cfn(cfn(*u8), *u8, *u8) -> i32
+                        if at != null:
+                            flush: cfn(*u8) = __libc_exit_flush
+                            if at(flush, null, null) == 0: __libc_exit = dl_sym(c, "exit") as cfn(i32) -> void
         h
 
     # true if the library can be loaded on this system

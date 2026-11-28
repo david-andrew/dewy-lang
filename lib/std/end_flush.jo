@@ -1,7 +1,9 @@
 # the program's end: what print collected written out, then what C's stdio holds (printf's
 # output, which C writes out only at its own exit, which a Sloppy program does not go through)
+# (code: the exit code, which C's exit takes once C's library is in: Linux's entry and exit()
+# give it; elsewhere it is unused)
 @noinline
-__end_flush = ():
+__end_flush = (code: int):
     __run_end_fns()
     __out_flush()
     when TARGET == "macos":
@@ -13,13 +15,27 @@ __end_flush = ():
             __stdout_failed = false
             __write_err("error: could not write standard output\n")
             __exit_raw(1)
+    # (Linux, with C's library in: C's exit runs what C registered, atexit and on_exit handlers,
+    # then flushes C's stdio and ends; what they print through Dewy is written out last,
+    # __libc_exit_flush. macOS's start calls C's exit after main; Windows' C library runs its
+    # handlers as the process ends)
+    when TARGET == "linux":
+        if __libc_exit != null:
+            __owner_unwind()
+            __libc_exit(i32(code))
+
+__c_fflush: cfn(*u8) -> i32 = null
+__libc_exit: cfn(i32) -> void = null
+
+# (registered with C's exit before any handler a program adds, so it runs after them)
+@cabi
+__libc_exit_flush = (arg: *u8):
+    __out_flush()
 
 when TARGET == "macos":
     @lib("/usr/lib/libSystem.B.dylib")
     @symbol("fflush")
     extern __mac_fflush = (f: *u8) -> i32
-
-__c_fflush: cfn(*u8) -> i32 = null
 
 # (what parts of the library do as the program ends, once: net tells its peers it is going, so
 # they know at once, not after some seconds of silence)

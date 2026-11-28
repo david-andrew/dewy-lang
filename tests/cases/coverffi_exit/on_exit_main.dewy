@@ -1,0 +1,15 @@
+# modes: native native-release
+# C exit handlers run when main ends; what they print, through Dewy or C, is written out.
+$extern
+on_exit = (f:((status:int32 arg:ptr<uint8>?):>void) arg:ptr<uint8>?):>int32
+$extern
+printf = (fmt:string):>int32
+$export
+bye = (status:int32 _arg:ptr<uint8>?):>void => {
+    printl"bye {status}"
+    $unsafe printf("c says bye\n");
+}
+main = ():>void => {
+    $unsafe on_exit(@bye none);
+    printl("main")
+}

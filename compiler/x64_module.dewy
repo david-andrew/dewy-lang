@@ -303,6 +303,7 @@ x64_emit_entry=(inits:array<int64> main_lf:XWord main_code:bool entry_end_lf:XWo
         if main_code {mov_rr(RBX  RAX)}
     }
     if entry_end_lf >=? 0 {
+        mov_rr(RDI  RBX) # (the exit code, for C's exit: lib/std/end_flush.jo)
         b(0xE8)
         b32(0)
         call_fix.push([XWord(x_code[0].length) - 4  entry_end_lf])
