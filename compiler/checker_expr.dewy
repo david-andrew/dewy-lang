@@ -424,6 +424,14 @@ xe_read=(n:XEWord t:XEWord):>XEWord=>$unsafe {
     if xe_values[0] {expr_values_use(n it)}
     it
 }
+xe_ident_miss=(n:XEWord expected:XEWord sk:SK ref:XEWord s:XEWord):>XEWord=>$unsafe {
+    let flags:XEWord=if xe_watch[0].const_views >? 0 {1} else {0}
+    if xe_watch[0].decimal_globals >? 0 {flags=flags | 2}
+    let kind:XEWord=if sk =? 'local' {1} else {xe_kind(sk)}
+    let t=xj_ident_slow(n expected kind ref s flags).type
+    if xe_temperature[0] or xe_values[0] {return xe_read(n t)}
+    t
+}
 # A name read as a value: its scope binding above the current function's floor, else
 # the module's; the identifier leaf reads the binding.
 xe_ident=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
@@ -441,24 +449,18 @@ xe_ident=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     let i:XEWord=if nm <? sc[0].top.length {sc[0].top.ptr[nm]} else {-1}
     if i >=? floor {s=sc[0].syms.ptr[i]} else {s=xe_module(nm)}
     if s =? 0 {xe_unknown(n expected nm)}
-    let sk=xe_syms[0].ptr[s].kind
-    let ref=XEWord(xe_syms[0].ptr[s].ref)
+    let sp=xe_syms[0].ptr + s
+    let sk=sp[0].kind
+    let ref=XEWord(sp[0].ref)
     if sk =? 'local' and c >=? 0 and not xj_ide[0] and xe_watch[0].const_views <=? 0 {
-        let fl=XEWord(xe_locals[0].ptr[ref].flags)
-        if (fl & 2056) =? 0 and XEWord(xe_locals[0].ptr[ref].owner) =? cinst {
-            let t=XEWord(xe_locals[0].ptr[ref].type)
-            if xj_tk_special_p[int64(((xe_types[0].ptr + t) as ptr<uint32>)[0])] =? uint8(0) and not xl_exact_measure[0] and (expected =? 0 or not xl_effects[0]) {
+        let lp=xe_locals[0].ptr + ref
+        let fl=XEWord(lp[0].flags)
+        if (fl & 2056) =? 0 and XEWord(lp[0].owner) =? cinst {
+            let t=XEWord(lp[0].type)
+            if xj_tk_special_p[int64(((xe_types[0].ptr + t) as ptr<uint32>)[0])] =? uint8(0) and not xl_exact_measure[0] {
                 let nhdr=(xe_nodes as ptr<ptr<int64>>)[0]
                 if nhdr not=? (uint64(0) as ptr<int64>) and nhdr[0] =? 1 {
-                    if (fl & 32768) =? 0 and n not=? xj_assign_root[0] {
-                        let lhdr=(xe_locals as ptr<ptr<int64>>)[0]
-                        if lhdr not=? (uint64(0) as ptr<int64>) and lhdr[0] =? 1 {
-                            let lp=(((lhdr as ptr<uint8>) + 24) as ptr<Local>) + ref
-                            lp[0].flags=int32<overflow='wrap'>(fl | 32768)
-                        } else {
-                            xe_locals[0].ptr[ref].flags=int32<overflow='wrap'>(fl | 32768)
-                        }
-                    }
+                    if (fl & 32768) =? 0 and n not=? xj_assign_root[0] {lp[0].flags=int32<overflow='wrap'>(fl | 32768)}
                     let node=(((nhdr as ptr<uint8>) + 24) as ptr<Node>) + n
                     node[0].aux=int32<overflow='wrap'>(1)
                     node[0].sym=int32<overflow='wrap'>(ref)
@@ -468,66 +470,69 @@ xe_ident=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
                     if xe_temperature[0] or xe_values[0] {return xe_read(n t)}
                     return t
                 }
-                if (fl & 32768) =? 0 and n not=? xj_assign_root[0] {xe_locals[0].ptr[ref].flags=int32<overflow='wrap'>(fl | 32768)}
-                let node=xe_nodes[0].ptr + n
-                node[0].aux=int32<overflow='wrap'>(1)
-                node[0].sym=int32<overflow='wrap'>(ref)
-                node[0].type=int32<overflow='wrap'>(t)
-                node[0].flags |= 128
-                xl_last[0]=n
-                if xe_temperature[0] or xe_values[0] {return xe_read(n t)}
-                return t
             }
         }
     }
-    let flags:XEWord=if xe_watch[0].const_views >? 0 {1} else {0}
-    if xe_watch[0].decimal_globals >? 0 {flags=flags | 2}
-    let kind:XEWord=if sk =? 'local' {1} else {xe_kind(sk)}
-    let t=xj_ident_slow(n expected kind ref s flags).type
-    if xe_temperature[0] or xe_values[0] {return xe_read(n t)}
-    t
+    xe_ident_miss(n expected sk ref s)
 }
 # Kinds below the commonest: literals, operators, conversions and aggregates in their
 # leaves; lambdas, blocks, matches, ranges and the other rare kinds on the host.
 xe_other=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     let k=xe_nodes[0].ptr[n].kind
-    if k =? 'float_lit' or k =? 'bool_lit' or k =? 'none_lit' or k =? 'null_lit' {return xl_check_scalar(n expected)}
-    let ex=xl_expected(expected)
-    if k =? 'array' or (ex not=? 0 and (k =? 'map_lit' or k =? 'record_lit' or k =? 'tuple')) {ex=expr_literal(n expected ex)}
     let t:XEWord=0
-    if k =? 'dotname' {t=xv_check(n ex)}
-    else if k =? 'typeapply' {
-        let r=xa_check(n expected ex)
-        if r.bypass {return r.type}
-        t=r.type
-    } else if k =? 'unary' {
-        let r=xu_check(n expected ex)
-        if r.bypass {return r.type}
-        t=r.type
-    } else if k =? 'and_' or k =? 'or_' or k =? 'not_' {
-        let r=xg_check(n expected ex)
-        if r.bypass {return r.type}
-        t=r.type
-    } else if k =? 'istype' {t=xi_check(n)}
-    else if k =? 'coalesce' or k =? 'unwrap' {
-        let r=xo_check(n expected ex)
-        if r.bypass {return r.type}
-        t=r.type
-    } else if k =? 'array' or k =? 'record_lit' {
-        let r=xr_check(n expected ex)
-        if r.bypass {return r.type}
-        t=r.type
-    } else if k =? 'map_lit' or k =? 'tuple' {
-        let r=xk_check(n expected ex)
-        if r.bypass {return r.type}
-        t=r.type
-    } else if k =? 'iflet' {t=xf_iflet(n ex)}
-    else if k =? 'cast' {
-        let r=xc_check(n expected)
-        if r.bypass {return r.type}
-        t=r.type
-    } else if k =? 'addr' or k =? 'conv' or k =? 'fnref' or k =? 'parallel_region' or k =? 'hole' or k =? 'namedarg' {t=xp_check(n expected)}
-    else {return expr_other(n expected)}
+    match k {
+        <'float_lit' | 'bool_lit' | 'none_lit' | 'null_lit'> => {return xl_check_scalar(n expected)}
+        <'dotname'> => {t=xv_check(n xl_expected(expected))}
+        <'typeapply'> => {
+            let r=xa_check(n expected xl_expected(expected))
+            if r.bypass {return r.type}
+            t=r.type
+        }
+        <'unary'> => {
+            let r=xu_check(n expected xl_expected(expected))
+            if r.bypass {return r.type}
+            t=r.type
+        }
+        <'and_' | 'or_' | 'not_'> => {
+            let r=xg_check(n expected xl_expected(expected))
+            if r.bypass {return r.type}
+            t=r.type
+        }
+        <'istype'> => {t=xi_check(n)}
+        <'coalesce' | 'unwrap'> => {
+            let r=xo_check(n expected xl_expected(expected))
+            if r.bypass {return r.type}
+            t=r.type
+        }
+        <'array'> => {
+            let ex=expr_literal(n expected xl_expected(expected))
+            let r=xr_check(n expected ex)
+            if r.bypass {return r.type}
+            t=r.type
+        }
+        <'record_lit'> => {
+            let ex=xl_expected(expected)
+            if ex not=? 0 {ex=expr_literal(n expected ex)}
+            let r=xr_check(n expected ex)
+            if r.bypass {return r.type}
+            t=r.type
+        }
+        <'map_lit' | 'tuple'> => {
+            let ex=xl_expected(expected)
+            if ex not=? 0 {ex=expr_literal(n expected ex)}
+            let r=xk_check(n expected ex)
+            if r.bypass {return r.type}
+            t=r.type
+        }
+        <'iflet'> => {t=xf_iflet(n xl_expected(expected))}
+        <'cast'> => {
+            let r=xc_check(n expected)
+            if r.bypass {return r.type}
+            t=r.type
+        }
+        <'addr' | 'conv' | 'fnref' | 'parallel_region' | 'hole' | 'namedarg'> => {t=xp_check(n expected)}
+        _ => {return expr_other(n expected)}
+    }
     xl_finish(n t expected)
 }
 # Binary operators (frozen Tok ordinals: kw_in 12, plus 58, minus 59, star 60, amp 63,

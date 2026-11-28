@@ -648,17 +648,13 @@ lex_scan_loop=(p:ptr<uint8> i0:LexScanWord lim:LexScanWord cls:ptr<uint8>):>void
             let ln:LexScanWord=i - s
             sl[1]=LexScanUWord(lx_at + s)
             sl[2]=LexScanUWord(s) | (LexScanUWord(ln) << 32)
-            if ln <=? 16 {
-                let hu:LexScanUWord=LexScanUWord(ln) * 0x9E3779B97F4A7C15
-                if ln >? 8 {
-                    hu=(hu xor LexScanUWord(((p + s) as ptr<uint64>)[0])) * 0xBF58476D1CE4E5B9
-                    hu=(hu xor (hu >> 31)) xor LexScanUWord(((p + (i - 8)) as ptr<uint64>)[0])
-                } else if ln >=? 4 {
-                    hu=hu xor LexScanUWord(((p + s) as ptr<uint32>)[0]) xor (LexScanUWord(((p + (i - 4)) as ptr<uint32>)[0]) << 32)
+            if ln <=? 8 {
+                let w0:LexScanUWord=if ln >=? 4 {
+                    LexScanUWord(((p + s) as ptr<uint32>)[0]) | (LexScanUWord(((p + (i - 4)) as ptr<uint32>)[0]) << 32)
                 } else {
-                    hu=hu xor LexScanUWord(p[s]) xor (LexScanUWord(p[s + (ln >> 1)]) << 8) xor (LexScanUWord(p[i - 1]) << 16)
+                    LexScanUWord(p[s]) | (LexScanUWord(p[s + (ln >> 1)]) << 8) | (LexScanUWord(p[i - 1]) << 16)
                 }
-                hu=hu * 0xBF58476D1CE4E5B9
+                let hu:LexScanUWord=((LexScanUWord(ln) * 0x9E3779B97F4A7C15) xor w0) * 0xBF58476D1CE4E5B9
                 let h:LexScanWord=(hu xor (hu >> 32)) transmute int64
                 let e0=LexScanWord(lx_nsp[h & lx_nmask])
                 if e0 not=? 0 {
@@ -667,10 +663,35 @@ lex_scan_loop=(p:ptr<uint8> i0:LexScanWord lim:LexScanWord cls:ptr<uint8>):>void
                         let hdr=lx_ntp[id0]
                         if (hdr as ptr<int64>)[1] =? ln {
                             hdr=hdr + 24
-                            if (if ln >? 8 {(hdr as ptr<uint64>)[0] =? ((p + s) as ptr<uint64>)[0] and ((hdr + (ln - 8)) as ptr<uint64>)[0] =? ((p + (i - 8)) as ptr<uint64>)[0]}
-                                else if ln >=? 4 {(hdr as ptr<uint32>)[0] =? ((p + s) as ptr<uint32>)[0] and ((hdr + (ln - 4)) as ptr<uint32>)[0] =? ((p + (i - 4)) as ptr<uint32>)[0]}
-                                else if ln >=? 2 {(hdr as ptr<uint16>)[0] =? ((p + s) as ptr<uint16>)[0] and ((hdr + (ln - 2)) as ptr<uint16>)[0] =? ((p + (i - 2)) as ptr<uint16>)[0]}
-                                else {hdr[0] =? p[s]}) {
+                            let hw:LexScanUWord=if ln >=? 4 {
+                                LexScanUWord((hdr as ptr<uint32>)[0]) | (LexScanUWord(((hdr + (ln - 4)) as ptr<uint32>)[0]) << 32)
+                            } else {
+                                LexScanUWord(hdr[0]) | (LexScanUWord(hdr[ln >> 1]) << 8) | (LexScanUWord(hdr[ln - 1]) << 16)
+                            }
+                            if hw =? w0 {
+                                let k:LexScanUWord=if id0 <? lx_kw_n {LexScanUWord(lx_kw_p[id0])} else {4}
+                                sl[0]=k
+                                sl[3]=LexScanUWord(id0)
+                                sl=sl + 4
+                                continue
+                            }
+                        }
+                    }
+                }
+            } else if ln <=? 16 {
+                let w0:LexScanUWord=((p + s) as ptr<uint64>)[0]
+                let w1:LexScanUWord=((p + (i - 8)) as ptr<uint64>)[0]
+                let hu:LexScanUWord=((LexScanUWord(ln) * 0x9E3779B97F4A7C15) xor w0) * 0xBF58476D1CE4E5B9
+                hu=((hu xor (hu >> 31)) xor w1) * 0xBF58476D1CE4E5B9
+                let h:LexScanWord=(hu xor (hu >> 32)) transmute int64
+                let e0=LexScanWord(lx_nsp[h & lx_nmask])
+                if e0 not=? 0 {
+                    let id0=e0 - 1
+                    if lx_nhp[id0] =? h {
+                        let hdr=lx_ntp[id0]
+                        if (hdr as ptr<int64>)[1] =? ln {
+                            hdr=hdr + 24
+                            if ((w0 xor (hdr as ptr<uint64>)[0]) | (w1 xor ((hdr + (ln - 8)) as ptr<uint64>)[0])) =? 0 {
                                 let k:LexScanUWord=if id0 <? lx_kw_n {LexScanUWord(lx_kw_p[id0])} else {4}
                                 sl[0]=k
                                 sl[3]=LexScanUWord(id0)

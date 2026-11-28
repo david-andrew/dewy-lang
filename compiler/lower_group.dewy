@@ -4806,7 +4806,7 @@ gen_return=(s:LGWord):>void=>$unsafe {
             let ml=LGWord(nodes.ptr[a].sym)
             let mfl=LGWord(locals.ptr[ml].flags)
             let rk=tkind(rtp)
-            if ml >? 0 and rk not=? 'fn_' and rk not=? 'polyfn' and mfl & (LF_CAPTURED | LF_CAPTURE | LF_ALIAS | LF_BYREF | LF_SHARED | LF_MUTPARAM | LF_PARAM | LF_EXPOSED | LF_OWNERBORROW | LF_PARTBORROW) =? 0 and not is_shared(ml) and not parallel_owned.has(ml) and type_eq(prune(store_type(ml)) rtp) and type_eq(prune(ntype(a)) rtp) {
+            if ml >? 0 and rk not=? 'fn_' and rk not=? 'polyfn' and mfl & (LF_CAPTURED | LF_CAPTURE | LF_ALIAS | LF_BYREF | LF_SHARED | LF_MUTPARAM | LF_PARAM | LF_OWNERBORROW | LF_PARTBORROW) =? 0 and not is_shared(ml) and not parallel_owned.has(ml) and type_eq(prune(store_type(ml)) rtp) and type_eq(prune(ntype(a)) rtp) {
                 let no_defers=true
                 loop di in [0..scope_defers.length) {
                     if scope_defers.ptr[di].length >? 0 {no_defers=false; break}

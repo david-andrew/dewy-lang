@@ -564,17 +564,13 @@ dx_lex_loop=(bytes:ptr<uint8> i0:DxWord stopw:DxWord):>DxWord=>$unsafe {
                 let n:DxWord=i - start
                 sl[1]=DxUWord(start)
                 sl[2]=DxUWord(i)
-                if n <=? 16 and dx_nmask >=? 0 {
-                    let hu:DxUWord=DxUWord(n) * 0x9E3779B97F4A7C15
-                    if n >? 8 {
-                        hu=(hu xor DxUWord(((bytes + start) as ptr<uint64>)[0])) * 0xBF58476D1CE4E5B9
-                        hu=(hu xor (hu >> 31)) xor DxUWord(((bytes + (i - 8)) as ptr<uint64>)[0])
-                    } else if n >=? 4 {
-                        hu=hu xor DxUWord(((bytes + start) as ptr<uint32>)[0]) xor (DxUWord(((bytes + (i - 4)) as ptr<uint32>)[0]) << 32)
+                if n <=? 8 and dx_nmask >=? 0 {
+                    let w0:DxUWord=if n >=? 4 {
+                        DxUWord(((bytes + start) as ptr<uint32>)[0]) | (DxUWord(((bytes + (i - 4)) as ptr<uint32>)[0]) << 32)
                     } else {
-                        hu=hu xor DxUWord(bytes[start]) xor (DxUWord(bytes[start + (n >> 1)]) << 8) xor (DxUWord(bytes[i - 1]) << 16)
+                        DxUWord(bytes[start]) | (DxUWord(bytes[start + (n >> 1)]) << 8) | (DxUWord(bytes[i - 1]) << 16)
                     }
-                    hu=hu * 0xBF58476D1CE4E5B9
+                    let hu:DxUWord=((DxUWord(n) * 0x9E3779B97F4A7C15) xor w0) * 0xBF58476D1CE4E5B9
                     let h:DxWord=(hu xor (hu >> 32)) transmute int64
                     let e0=DxWord(dx_nsp[h & dx_nmask])
                     if e0 not=? 0 {
@@ -583,10 +579,47 @@ dx_lex_loop=(bytes:ptr<uint8> i0:DxWord stopw:DxWord):>DxWord=>$unsafe {
                             let hdr=dx_ntp[id0]
                             if hdr not=? (uint64(0) as ptr<uint8>) and (hdr as ptr<int64>)[1] =? n {
                                 hdr=hdr + 24
-                                if (if n >? 8 {(hdr as ptr<uint64>)[0] =? ((bytes + start) as ptr<uint64>)[0] and ((hdr + (n - 8)) as ptr<uint64>)[0] =? ((bytes + (i - 8)) as ptr<uint64>)[0]}
-                                    else if n >=? 4 {(hdr as ptr<uint32>)[0] =? ((bytes + start) as ptr<uint32>)[0] and ((hdr + (n - 4)) as ptr<uint32>)[0] =? ((bytes + (i - 4)) as ptr<uint32>)[0]}
-                                    else if n >=? 2 {(hdr as ptr<uint16>)[0] =? ((bytes + start) as ptr<uint16>)[0] and ((hdr + (n - 2)) as ptr<uint16>)[0] =? ((bytes + (i - 2)) as ptr<uint16>)[0]}
-                                    else {hdr[0] =? bytes[start]}) {
+                                let hw:DxUWord=if n >=? 4 {
+                                    DxUWord((hdr as ptr<uint32>)[0]) | (DxUWord(((hdr + (n - 4)) as ptr<uint32>)[0]) << 32)
+                                } else {
+                                    DxUWord(hdr[0]) | (DxUWord(hdr[n >> 1]) << 8) | (DxUWord(hdr[n - 1]) << 16)
+                                }
+                                if hw =? w0 {
+                                    if id0 >=? dx_g_word_count {
+                                        sl[0]=DxUWord(2) | (DxUWord(uint32<overflow='wrap'>(id0)) << 32)
+                                        sl[3]=DxUWord(flags)
+                                        sl=sl + 4
+                                        flags=0
+                                        continue
+                                    }
+                                    let sym_u64=DxUWord(dx_g_word_tags[id0])
+                                    let kind_u64:DxUWord=if id0 =? dx_g_state.true_id or id0 =? dx_g_state.false_id {3} else {2}
+                                    sl[0]=kind_u64 | (DxUWord(uint32<overflow='wrap'>(id0)) << 32)
+                                    sl[3]=DxUWord(flags) | (sym_u64 << 32)
+                                    if i <? stopw and (bytes[i] =? b'=' or bytes[i] =? b'?') {
+                                        i=dx_handle_kw_suffix(bytes i stopw id0 (sl as ptr<DewyLexeme>))
+                                    }
+                                    sl=sl + 4
+                                    flags=0
+                                    continue
+                                }
+                            }
+                        }
+                    }
+                } else if n <=? 16 and dx_nmask >=? 0 {
+                    let w0:DxUWord=((bytes + start) as ptr<uint64>)[0]
+                    let w1:DxUWord=((bytes + (i - 8)) as ptr<uint64>)[0]
+                    let hu:DxUWord=((DxUWord(n) * 0x9E3779B97F4A7C15) xor w0) * 0xBF58476D1CE4E5B9
+                    hu=((hu xor (hu >> 31)) xor w1) * 0xBF58476D1CE4E5B9
+                    let h:DxWord=(hu xor (hu >> 32)) transmute int64
+                    let e0=DxWord(dx_nsp[h & dx_nmask])
+                    if e0 not=? 0 {
+                        let id0=e0 - 1
+                        if dx_nhp[id0] =? h {
+                            let hdr=dx_ntp[id0]
+                            if hdr not=? (uint64(0) as ptr<uint8>) and (hdr as ptr<int64>)[1] =? n {
+                                hdr=hdr + 24
+                                if ((w0 xor (hdr as ptr<uint64>)[0]) | (w1 xor ((hdr + (n - 8)) as ptr<uint64>)[0])) =? 0 {
                                     if id0 >=? dx_g_word_count {
                                         sl[0]=DxUWord(2) | (DxUWord(uint32<overflow='wrap'>(id0)) << 32)
                                         sl[3]=DxUWord(flags)

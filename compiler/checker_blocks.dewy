@@ -110,32 +110,65 @@ bk_assign=(s:BWord):>void=>$unsafe {
     let r=va_assign(s)
     if r not=? s {bk_nodes[0].ptr[s]=bk_nodes[0].ptr[r]}
 }
-# One statement (NF_CHECKED 128: a quantity constant settled before its module's code
-# ran; a shaped parameter's dimension is aux2 1789).
-bk_stmt=(s:BWord):>void=>$unsafe {
-    let k=bk_nodes[0].ptr[s].kind
-    if bk_exact[0] and k =? 'assign' and node_op(bk_nodes[0].ptr[s].op_ext) not=? 47 and bk_context[0] >=? 0 {stmt_special(s 1)}
-    if k =? 'vardecl' and node_aux2(bk_nodes[0].ptr[s].op_ext) =? 1789 {
-        stmt_special(s 2)
-        k=bk_nodes[0].ptr[s].kind
-    }
+bk_stmt_dim_slow=(s:BWord):>void=>$unsafe {
+    stmt_special(s 2)
+    let nd=bk_nodes[0].ptr + s
+    let k=nd[0].kind
     if k =? 'reflect_scope' {stmt_special(s 3); return}
-    if (k =? 'vardecl' or k =? 'const_') and BWord(bk_nodes[0].ptr[s].flags) & 128 not=? 0 {return}
+    if (k =? 'vardecl' or k =? 'const_') and BWord(nd[0].flags) & 128 not=? 0 {return}
     if k =? 'vardecl' {vd_decl(s)}
     else if k =? 'const_' {st_const(s)}
     else if k =? 'assign' {bk_assign(s)}
-    else if k =? 'exprstmt' {es_statement(s)}
-    else if k =? 'if_' {bk_if(s)}
-    else if k =? 'iflet' {stmt_special(s 4)}
-    else if k =? 'while_' {xb_while(s)}
-    else if k =? 'for_' {fl_for(s)}
-    else if k =? 'return_' {xt_return(s)}
-    else if k =? 'break_' or k =? 'continue_' {xb_jump(s)}
-    else if k =? 'defer_' {st_defer(s)}
-    else if k =? 'when_' {st_when(s)}
-    else if k =? 'block' {bk_block(s 0 false);}
-    else if k =? 'fn_' or k =? 'struct_' or k =? 'enum_' or k =? 'import_' {stmt_error(s 1)}
-    else if k not=? 'test_' and k not=? 'build_' {stmt_error(s 2)}
+    else {bk_stmt(s)}
+}
+bk_stmt_watched=(s:BWord b:BWord):>void=>$unsafe {
+    if bk_watch[0].sibling_flow >? 0 {block_sibling(s 0 1)}
+    if bk_watch[0].sibling_known >? 0 {block_sibling(s b 2)}
+    else {bk_stmt(s)}
+}
+bk_stmt_loop_plain=(b:BWord n:BWord):>void=>$unsafe {
+    let i:BWord=0
+    loop i <? n {
+        let s=BWord(bk_lists[0].ptr[BWord(bk_nodes[0].ptr[b].list) + i])
+        bk_sibling_index[0]=i
+        if bk_watch[0].sibling_flow >? 0 or bk_watch[0].sibling_known >? 0 {bk_stmt_watched(s b)}
+        else {bk_stmt(s)}
+        let l=bk_flow_local[0]
+        if l not=? 0 {
+            block_sibling(l bk_nodes[0].ptr[s].pos 3)
+            bk_flow_local[0]=0
+        }
+        i=i + 1
+    }
+}
+# One statement (NF_CHECKED 128: a quantity constant settled before its module's code
+# ran; a shaped parameter's dimension is aux2 1789).
+bk_stmt=(s:BWord):>void=>$unsafe {
+    match bk_nodes[0].ptr[s].kind {
+        <'exprstmt'> => {es_statement(s)}
+        <'vardecl'> => {
+            if node_aux2(bk_nodes[0].ptr[s].op_ext) =? 1789 {bk_stmt_dim_slow(s); return}
+            if BWord(bk_nodes[0].ptr[s].flags) & 128 =? 0 {vd_decl(s)}
+        }
+        <'assign'> => {
+            if bk_exact[0] and node_op(bk_nodes[0].ptr[s].op_ext) not=? 47 and bk_context[0] >=? 0 {stmt_special(s 1)}
+            bk_assign(s)
+        }
+        <'if_'> => {bk_if(s)}
+        <'return_'> => {xt_return(s)}
+        <'for_'> => {fl_for(s)}
+        <'while_'> => {xb_while(s)}
+        <'const_'> => {if BWord(bk_nodes[0].ptr[s].flags) & 128 =? 0 {st_const(s)}}
+        <'break_' | 'continue_'> => {xb_jump(s)}
+        <'iflet'> => {stmt_special(s 4)}
+        <'defer_'> => {st_defer(s)}
+        <'when_'> => {st_when(s)}
+        <'block'> => {bk_block(s 0 false);}
+        <'reflect_scope'> => {stmt_special(s 3)}
+        <'fn_' | 'struct_' | 'enum_' | 'import_'> => {stmt_error(s 1)}
+        <'test_' | 'build_'> => {}
+        _ => {stmt_error(s 2)}
+    }
 }
 # An `if` statement (NF_STMT 16); one checked before (NF_CHECKED 128 with its type) goes
 # to the host whole. (A frame of its own: the dispatcher's stays as small as it was.)
@@ -262,25 +295,28 @@ bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
     let saved_block=bk_sibling_block[0]
     let saved_index=bk_sibling_index[0]
     bk_sibling_block[0]=b
-    let i:BWord=0
-    loop i <? n {
-        let s=BWord(bk_lists[0].ptr[BWord(bk_nodes[0].ptr[b].list) + i])
-        bk_sibling_index[0]=i
-        if counted {block_direct(s)}
-        let value:BWord=-1
-        if i =? n - 1 and want_value {value=bk_final(b i expected mode)}
-        if value >=? 0 {result=value}
-        else {
-            if bk_watch[0].sibling_flow >? 0 {block_sibling(s 0 1)}
-            if bk_watch[0].sibling_known >? 0 {block_sibling(s b 2)}
-            else {bk_stmt(s)}
-            let l=bk_flow_local[0]
-            if l not=? 0 {
-                block_sibling(l bk_nodes[0].ptr[s].pos 3)
-                bk_flow_local[0]=0
+    if not want_value and not counted {
+        bk_stmt_loop_plain(b n)
+    } else {
+        let i:BWord=0
+        loop i <? n {
+            let s=BWord(bk_lists[0].ptr[BWord(bk_nodes[0].ptr[b].list) + i])
+            bk_sibling_index[0]=i
+            if counted {block_direct(s)}
+            let value:BWord=-1
+            if i =? n - 1 and want_value {value=bk_final(b i expected mode)}
+            if value >=? 0 {result=value}
+            else {
+                if bk_watch[0].sibling_flow >? 0 or bk_watch[0].sibling_known >? 0 {bk_stmt_watched(s b)}
+                else {bk_stmt(s)}
+                let l=bk_flow_local[0]
+                if l not=? 0 {
+                    block_sibling(l bk_nodes[0].ptr[s].pos 3)
+                    bk_flow_local[0]=0
+                }
             }
+            i=i + 1
         }
-        i=i + 1
     }
     if bk_watch[0].sibling_flow >? 0 {block_sibling(b 0 4)}
     bk_sibling_block[0]=saved_block

@@ -472,16 +472,25 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
             }
         }
     }
-    if from_ >=? 0 {
-        let src=if from_ =? 1 {b} else {a}
-        s.projections=src.projections
-        s.proj_base_mask=src.proj_base_mask
-        if src.index.ptr[0].projection_next.length not=? 0 {
-            s.index[0].projection_index=src.index[0].projection_index
-            s.index[0].projection_head=src.index[0].projection_head
-            s.index[0].projection_tail=src.index[0].projection_tail
-            s.index[0].projection_next=src.index[0].projection_next
-            s.index[0].projection_value=src.index[0].projection_value
+    if from_ =? 1 {
+        s.projections=b.projections
+        s.proj_base_mask=b.proj_base_mask
+        if b.index.ptr[0].projection_next.length not=? 0 {
+            s.index[0].projection_index=b.index[0].projection_index
+            s.index[0].projection_head=b.index[0].projection_head
+            s.index[0].projection_tail=b.index[0].projection_tail
+            s.index[0].projection_next=b.index[0].projection_next
+            s.index[0].projection_value=b.index[0].projection_value
+        }
+    } else if from_ =? 0 {
+        s.projections=a.projections
+        s.proj_base_mask=a.proj_base_mask
+        if a.index.ptr[0].projection_next.length not=? 0 {
+            s.index[0].projection_index=a.index[0].projection_index
+            s.index[0].projection_head=a.index[0].projection_head
+            s.index[0].projection_tail=a.index[0].projection_tail
+            s.index[0].projection_next=a.index[0].projection_next
+            s.index[0].projection_value=a.index[0].projection_value
         }
     }
     else if b.projections.length >? 0 {
@@ -808,16 +817,25 @@ fact_join=(a:FactState b:FactState at:JoinWord):>FactState=>$unsafe {
             common_rows += 1
         }
     }
-    if common_rows =? a.differences.length or common_rows =? b.differences.length {
-        let src=if common_rows =? a.differences.length {a} else {b}
-        s.differences=src.differences
-        s.diff_a_mask=src.diff_a_mask
-        s.diff_b_mask=src.diff_b_mask
-        if src.index.ptr[0].difference_next.length not=? 0 {
-            s.index[0].difference_index=src.index[0].difference_index
-            s.index[0].difference_value=src.index[0].difference_value
-            s.index[0].difference_record=src.index[0].difference_record
-            s.index[0].difference_next=src.index[0].difference_next
+    if common_rows =? a.differences.length {
+        s.differences=a.differences
+        s.diff_a_mask=a.diff_a_mask
+        s.diff_b_mask=a.diff_b_mask
+        if a.index.ptr[0].difference_next.length not=? 0 {
+            s.index[0].difference_index=a.index[0].difference_index
+            s.index[0].difference_value=a.index[0].difference_value
+            s.index[0].difference_record=a.index[0].difference_record
+            s.index[0].difference_next=a.index[0].difference_next
+        }
+    } else if common_rows =? b.differences.length {
+        s.differences=b.differences
+        s.diff_a_mask=b.diff_a_mask
+        s.diff_b_mask=b.diff_b_mask
+        if b.index.ptr[0].difference_next.length not=? 0 {
+            s.index[0].difference_index=b.index[0].difference_index
+            s.index[0].difference_value=b.index[0].difference_value
+            s.index[0].difference_record=b.index[0].difference_record
+            s.index[0].difference_next=b.index[0].difference_next
         }
     }
     else {

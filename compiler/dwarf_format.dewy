@@ -11,6 +11,7 @@ from p"module_paths.dewy" import (is_abs_path)
 # layout and storage services may grow them, so no element view crosses a call.
 # Output follows existing demanded type/line walks, with indexed memo state.
 DWord:type=int64<overflow='wrap'>
+DUWord:type=uint64<overflow='wrap'>
 DwarfHost:type=[
     type_str:<(t:int64 dewy:bool):>string>
     layout:<(t:int64):>void>
@@ -129,6 +130,228 @@ dw_line_hdr_build=(fnames:array<string>):>array<uint8>=>$unsafe {
     __set_len(hdr o)
     hdr
 }
+DwLineState:type=[
+    rows:ptr<int64>
+    rp:ptr<int64>
+    rend:ptr<int64>
+    positions:ptr<int64>
+    sources_count:DWord
+    file_index:ptr<int64>
+    ir_lines_p:ptr<int64>
+    ir_lines_n:DWord
+    wp:ptr<uint8>
+    wlim:ptr<uint8>
+    addr:DWord
+    line:DWord
+    file:DWord
+    last_pos_id:DWord
+]
+dw_line_chunk=(@st:DwLineState):>void=>$unsafe {
+    let rp=st.rp
+    let rend=st.rend
+    let wp=st.wp
+    let wlim=st.wlim
+    let addr=st.addr
+    let line=st.line
+    let file=st.file
+    let last_pos_id=st.last_pos_id
+    loop rp <? rend and wp <=? wlim {
+        let pos_id:DWord=DWord(rp[1])
+        if pos_id =? last_pos_id {
+            rp += 2
+            continue
+        }
+        let f:DWord=file
+        let l:DWord=0
+        if pos_id not=? 0 {
+            let pval:DWord=DWord(st.positions[pos_id]) >> 40
+            f=if DUWord(pval) <? DUWord(st.sources_count) {DWord(st.file_index[pval])} else {0}
+            if f =? 0 {
+                rp += 2
+                continue
+            }
+            l=if DUWord(pos_id) <? DUWord(st.ir_lines_n) {DWord(st.ir_lines_p[pos_id])} else {0}
+            last_pos_id=pos_id
+            if f =? file and l =? line and rp >? st.rows {
+                rp += 2
+                continue
+            }
+        } else {
+            last_pos_id=-1
+        }
+        if f not=? file {
+            wp[0]=4; wp += 1
+            let v:DWord=f
+            if v <? 128 {wp[0]=uint8<overflow='wrap'>(v); wp += 1}
+            else {
+                loop true {
+                    let b:DWord=v & 127
+                    v = v >> 7
+                    if v not=? 0 {wp[0]=uint8<overflow='wrap'>(b | 128); wp += 1}
+                    else {wp[0]=uint8<overflow='wrap'>(b); wp += 1; break}
+                }
+            }
+            file=f
+        }
+        if l not=? line {
+            wp[0]=3; wp += 1
+            let d:DWord=l - line
+            if d >=? -64 and d <? 64 {wp[0]=uint8<overflow='wrap'>(d & 127); wp += 1}
+            else {
+                loop true {
+                    let b:DWord=d & 127
+                    d = d >> 7
+                    if (d =? 0 and (b & 64) =? 0) or (d =? -1 and (b & 64) not=? 0) {wp[0]=uint8<overflow='wrap'>(b); wp += 1; break}
+                    wp[0]=uint8<overflow='wrap'>(b | 128); wp += 1
+                }
+            }
+            line=l
+        }
+        let rk:DWord=DWord(rp[0])
+        if rk not=? addr {
+            wp[0]=2; wp += 1
+            let v:DWord=rk - addr
+            if v <? 128 {wp[0]=uint8<overflow='wrap'>(v); wp += 1}
+            else {
+                loop true {
+                    let b:DWord=v & 127
+                    v = v >> 7
+                    if v not=? 0 {wp[0]=uint8<overflow='wrap'>(b | 128); wp += 1}
+                    else {wp[0]=uint8<overflow='wrap'>(b); wp += 1; break}
+                }
+            }
+            addr=rk
+        }
+        wp[0]=1; wp += 1
+        rp += 2
+    }
+    st.rp=rp
+    st.wp=wp
+    st.addr=addr
+    st.line=line
+    st.file=file
+    st.last_pos_id=last_pos_id
+}
+dw_line_encode_fast=(rows:ptr<int64> rows_count:DWord positions:ptr<int64> sources_count:DWord file_index:ptr<int64> ir_lines_p:ptr<int64> ir_lines_n:DWord @line_sec:array<uint8> pu0:DWord pcap0:DWord @out_addr:DWord @out_pcap:DWord):>DWord=>$unsafe {
+    let pp=line_sec.ptr
+    let pcap=pcap0
+    let st=DwLineState(
+        rows=rows
+        rp=rows
+        rend=rows + rows_count
+        positions=positions
+        sources_count=sources_count
+        file_index=file_index
+        ir_lines_p=ir_lines_p
+        ir_lines_n=ir_lines_n
+        wp=pp + pu0
+        wlim=pp + (pcap - 40)
+        addr=0
+        line=1
+        file=1
+        last_pos_id=-1
+    )
+    dw_line_chunk(@st)
+    loop st.rp <? st.rend {
+        let pu:DWord=(st.wp as DWord) - (pp as DWord)
+        pcap=pcap * 2 + 128
+        pp=dw_line_grow(@line_sec pcap)
+        st.wp=pp + pu
+        st.wlim=pp + (pcap - 40)
+        dw_line_chunk(@st)
+    }
+    out_addr=st.addr
+    out_pcap=pcap
+    (st.wp as DWord) - (pp as DWord)
+}
+dw_line_encode_slow=(rows:ptr<int64> rows_count:DWord positions:ptr<int64> sources_count:DWord file_index:ptr<int64> @line_sec:array<uint8> pu0:DWord pcap0:DWord @out_addr:DWord @out_pcap:DWord):>DWord=>$unsafe {
+    let pp=line_sec.ptr
+    let pu=pu0
+    let pcap=pcap0
+    let addr:DWord=0
+    let line:DWord=1
+    let file:DWord=1
+    let last_pos_id:DWord=-1
+    let k:DWord=0
+    loop k <? rows_count {
+        let pos_id=rows[k + 1]
+        if pos_id =? last_pos_id {
+            k += 2
+            continue
+        }
+        let f=file
+        let l:DWord=0
+        if pos_id not=? 0 {
+            let pf=dw_pos_file(positions[pos_id])
+            f=0
+            if pf >=? 0 and pf <? sources_count {f=file_index[pf]}
+            if f =? 0 {
+                k += 2
+                continue
+            }
+            l=dw_inputs[0].host[0].ir_line(pos_id)
+            last_pos_id=pos_id
+            if f =? file and l =? line and k >? 0 {
+                k += 2
+                continue
+            }
+        } else {
+            last_pos_id=-1
+        }
+        if pu + 40 >? pcap {
+            pcap=pcap * 2 + 128
+            pp=dw_line_grow(@line_sec pcap)
+        }
+        if f not=? file {
+            pp[pu]=4; pu += 1
+            let v:DWord=f
+            if v <? 128 {pp[pu]=uint8<overflow='wrap'>(v); pu += 1}
+            else {
+                loop true {
+                    let b:DWord=v & 127
+                    v = v >> 7
+                    if v not=? 0 {pp[pu]=uint8<overflow='wrap'>(b | 128); pu += 1}
+                    else {pp[pu]=uint8<overflow='wrap'>(b); pu += 1; break}
+                }
+            }
+            file=f
+        }
+        if l not=? line {
+            pp[pu]=3; pu += 1
+            let d:DWord=l - line
+            if d >=? -64 and d <? 64 {pp[pu]=uint8<overflow='wrap'>(d & 127); pu += 1}
+            else {
+                loop true {
+                    let b:DWord=d & 127
+                    d = d >> 7
+                    if (d =? 0 and (b & 64) =? 0) or (d =? -1 and (b & 64) not=? 0) {pp[pu]=uint8<overflow='wrap'>(b); pu += 1; break}
+                    pp[pu]=uint8<overflow='wrap'>(b | 128); pu += 1
+                }
+            }
+            line=l
+        }
+        let rk=rows[k]
+        if rk not=? addr {
+            pp[pu]=2; pu += 1
+            let v:DWord=rk - addr
+            if v <? 128 {pp[pu]=uint8<overflow='wrap'>(v); pu += 1}
+            else {
+                loop true {
+                    let b:DWord=v & 127
+                    v = v >> 7
+                    if v not=? 0 {pp[pu]=uint8<overflow='wrap'>(b | 128); pu += 1}
+                    else {pp[pu]=uint8<overflow='wrap'>(b); pu += 1; break}
+                }
+            }
+            addr=rk
+        }
+        pp[pu]=1; pu += 1
+        k += 2
+    }
+    out_addr=addr
+    out_pcap=pcap
+    pu
+}
 dw_line_section=(text_addr:DWord text_len:DWord dir:string):>array<uint8>=>$unsafe {
     let rows_count=DWord(dw_inputs[0].line_rows[0].length)
     let rows=dw_inputs[0].line_rows[0].ptr
@@ -175,90 +398,17 @@ dw_line_section=(text_addr:DWord text_len:DWord dir:string):>array<uint8>=>$unsa
     pp[pu]=0; pp[pu + 1]=9; pp[pu + 2]=2; pu += 3 # DW_LNE_set_address
     let tp=(pp + pu) as ptr<int64>
     tp[0]=text_addr; pu += 8
-    let has_ir_lines=dw_inputs[0].ir_lines not=? (uint64(0) as ptr<array<int64>>)
-    if has_ir_lines {dw_inputs[0].host[0].ir_line(0);}
-    let ir_lines_p=if has_ir_lines {dw_inputs[0].ir_lines[0].ptr} else {uint64(0) as ptr<int64>}
-    let ir_lines_n:DWord=if has_ir_lines {DWord(dw_inputs[0].ir_lines[0].length)} else {0}
     let addr:DWord=0
-    let line:DWord=1
-    let file:DWord=1
-    let last_pos_id:DWord=-1
-    k=0
-    loop k <? rows_count {
-        let pos_id=rows[k + 1]
-        if pos_id =? last_pos_id {
-            k += 2
-            continue
-        }
-        let f=file
-        let l:DWord=0 # (0: code with no source line)
-        if pos_id not=? 0 {
-            let pf=dw_pos_file(positions[pos_id])
-            f=0
-            if pf >=? 0 and pf <? sources_count {f=file_index[pf]}
-            if f =? 0 {
-                k += 2
-                continue
-            }
-            l=if has_ir_lines {if pos_id >? 0 and pos_id <? ir_lines_n {ir_lines_p[pos_id]} else {0}} else {dw_inputs[0].host[0].ir_line(pos_id)}
-            last_pos_id=pos_id
-            if f =? file and l =? line and k >? 0 {
-                k += 2
-                continue
-            }
-        } else {
-            last_pos_id=-1
-        }
-        if pu + 40 >? pcap {
-            pcap=pcap * 2 + 128
-            pp=dw_line_grow(@line_sec pcap)
-        }
-        if f not=? file {
-            pp[pu]=4; pu += 1 # DW_LNS_set_file
-            let v:DWord=f
-            if v <? 128 {pp[pu]=uint8<overflow='wrap'>(v); pu += 1}
-            else {
-                loop true {
-                    let b:DWord=v & 127
-                    v = v >> 7
-                    if v not=? 0 {pp[pu]=uint8<overflow='wrap'>(b | 128); pu += 1}
-                    else {pp[pu]=uint8<overflow='wrap'>(b); pu += 1; break}
-                }
-            }
-            file=f
-        }
-        if l not=? line {
-            pp[pu]=3; pu += 1 # DW_LNS_advance_line
-            let d:DWord=l - line
-            if d >=? -64 and d <? 64 {pp[pu]=uint8<overflow='wrap'>(d & 127); pu += 1}
-            else {
-                loop true {
-                    let b:DWord=d & 127
-                    d = d >> 7
-                    if (d =? 0 and (b & 64) =? 0) or (d =? -1 and (b & 64) not=? 0) {pp[pu]=uint8<overflow='wrap'>(b); pu += 1; break}
-                    pp[pu]=uint8<overflow='wrap'>(b | 128); pu += 1
-                }
-            }
-            line=l
-        }
-        let rk=rows[k]
-        if rk not=? addr {
-            pp[pu]=2; pu += 1 # DW_LNS_advance_pc
-            let v:DWord=rk - addr
-            if v <? 128 {pp[pu]=uint8<overflow='wrap'>(v); pu += 1}
-            else {
-                loop true {
-                    let b:DWord=v & 127
-                    v = v >> 7
-                    if v not=? 0 {pp[pu]=uint8<overflow='wrap'>(b | 128); pu += 1}
-                    else {pp[pu]=uint8<overflow='wrap'>(b); pu += 1; break}
-                }
-            }
-            addr=rk
-        }
-        pp[pu]=1; pu += 1 # DW_LNS_copy
-        k += 2
+    let has_ir_lines=dw_inputs[0].ir_lines not=? (uint64(0) as ptr<array<int64>>)
+    if has_ir_lines {
+        dw_inputs[0].host[0].ir_line(0);
+        let ir_lines_p=dw_inputs[0].ir_lines[0].ptr
+        let ir_lines_n:DWord=DWord(dw_inputs[0].ir_lines[0].length)
+        pu=dw_line_encode_fast(rows rows_count positions sources_count file_index ir_lines_p ir_lines_n @line_sec pu pcap @addr @pcap)
+    } else {
+        pu=dw_line_encode_slow(rows rows_count positions sources_count file_index @line_sec pu pcap @addr @pcap)
     }
+    pp=line_sec.ptr
     if pu + 20 >? pcap {
         pcap=pu + 32
         pp=dw_line_grow(@line_sec pcap)

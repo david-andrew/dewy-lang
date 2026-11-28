@@ -51,11 +51,38 @@ let xl_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xl_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xl_exact_nk:array<uint8>=[]
 let xl_exact_nk_p:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
-xl_set_ek=(k:NK):>void=>$unsafe {
+let xl_tk_flags:array<uint8>=[]
+let xl_tk_flags_p:ptr<uint8>=$unsafe (uint64(0) as ptr<uint8>)
+# 2: always exact-candidate binary op (63,64,65); 1: exact-candidate if aux==0 and non-excluded type (<=61, 67, 79).
+const XL_BIN_EXACT:array<uint8 length=256>=[
+    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 \
+    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 \
+    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 \
+    1 1 1 1 1 1 1 1 1 1 1 1 1 1 0 2 \
+    2 2 0 1 0 0 0 0 0 0 0 0 0 0 0 1 \
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+]
+xl_set_ek=(k:NK tag:uint8):>void=>$unsafe {
     let d=[Node()]
     d.ptr[0].kind=k
     let ord=int64((d.ptr as ptr<uint32>)[0])
-    if ord >=? 0 and ord <? xl_exact_nk.length {xl_exact_nk.ptr[ord]=uint8(1)}
+    if ord >=? 0 and ord <? xl_exact_nk.length {xl_exact_nk.ptr[ord]=tag}
+}
+xl_set_tk=(k:TK tag:uint8):>void=>$unsafe {
+    let d=[TypeInfo()]
+    d.ptr[0].kind=k
+    let ord=int64((d.ptr as ptr<uint32>)[0])
+    if ord >=? 0 and ord <? xl_tk_flags.length {xl_tk_flags.ptr[ord]=tag}
 }
 checker_literals_bind=(input:ptr<CheckerLiteralInput>):>XLWord=>$unsafe {
     xl_nodes=input[0].nodes
@@ -75,8 +102,15 @@ checker_literals_bind=(input:ptr<CheckerLiteralInput>):>XLWord=>$unsafe {
     if xl_exact_nk.length =? 0 {
         xl_exact_nk.reserve(128);
         loop xl_exact_nk.length <? 128 {xl_exact_nk.push(uint8(0))}
-        xl_set_ek('binary'); xl_set_ek('unary'); xl_set_ek('intrinsic'); xl_set_ek('conv')
+        xl_set_ek('binary' uint8(1)); xl_set_ek('unary' uint8(2)); xl_set_ek('conv' uint8(3)); xl_set_ek('intrinsic' uint8(4))
         xl_exact_nk_p=xl_exact_nk.ptr
+    }
+    if xl_tk_flags.length =? 0 {
+        xl_tk_flags.reserve(128);
+        loop xl_tk_flags.length <? 128 {xl_tk_flags.push(uint8(0))}
+        xl_set_tk('refined' uint8(1))
+        xl_set_tk('fn_' uint8(2)); xl_set_tk('cfn' uint8(2)); xl_set_tk('polyfn' uint8(2)); xl_set_tk('var' uint8(2))
+        xl_tk_flags_p=xl_tk_flags.ptr
     }
     0
 }
@@ -118,35 +152,44 @@ xl_finish_slow=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
     xl_last[0]=n
     t
 }
+xl_finish_exact=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
+    let node=xl_nodes[0].ptr + n
+    let ek=xl_exact_nk_p[int64((node as ptr<uint32>)[0])]
+    if ek =? uint8(1) {
+        let btag=XL_BIN_EXACT[int64(node_op(node[0].op_ext))]
+        if btag =? uint8(2) {return xl_finish_slow(n t0 expected)}
+        if btag =? uint8(1) and node[0].aux =? 0 {
+            if t0 not=? xl_bool_type[0] and t0 not=? xl_float_type[0] and t0 not=? xl_string_type[0] and t0 not=? xl_math_int[0] {
+                return xl_finish_slow(n t0 expected)
+            }
+        }
+    } else if ek =? uint8(2) {
+        if node_op(node[0].op_ext) =? 59 {return xl_finish_slow(n t0 expected)}
+    } else if ek =? uint8(3) {
+        if node[0].aux =? 2 {return xl_finish_slow(n t0 expected)}
+    } else {
+        if node[0].aux =? 89 {return xl_finish_slow(n t0 expected)}
+    }
+    node[0].type=int32<overflow='wrap'>(t0)
+    node[0].flags |= 128
+    xl_last[0]=n
+    t0
+}
 xl_finish=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
-    let hdr=(xl_nodes as ptr<ptr<int64>>)[0]
-    if hdr[0] not=? 1 {return xl_finish_slow(n t0 expected)}
-    let node=(((hdr as ptr<uint8>) + 24) as ptr<Node>) + n
     if xl_exact_measure[0] {return xl_finish_slow(n t0 expected)}
-    if xl_refine[0] or (xl_effects[0] and expected not=? 0) {
-        let ti=xl_types[0].ptr + t0
-        let tk=ti[0].kind
-        if (xl_refine[0] and tk =? 'refined' and ti[0].bits not=? -2) or (xl_effects[0] and expected not=? 0 and (tk =? 'fn_' or tk =? 'cfn' or tk =? 'polyfn' or tk =? 'var')) {
+    if xl_refine[0] or (expected not=? 0 and xl_effects[0]) {
+        let thdr=(xl_types as ptr<ptr<uint8>>)[0]
+        let tk=int64(((((thdr + 24) as ptr<TypeInfo>) + t0) as ptr<uint32>)[0])
+        if xl_tk_flags_p[tk] not=? uint8(0) {
             return xl_finish_slow(n t0 expected)
         }
     }
-    if xl_exact_nk_p[int64((node as ptr<uint32>)[0])] not=? uint8(0) {
-        let k=node[0].kind
-        let maybe_exact=false
-        if k =? 'binary' {
-            let op=node_op(node[0].op_ext)
-            if op =? 63 or op =? 64 or op =? 65 {maybe_exact=true}
-            else if (op <=? 61 or op =? 67 or op =? 79) and node[0].aux =? 0 {
-                if t0 not=? xl_bool_type[0] and t0 not=? xl_float_type[0] and t0 not=? xl_string_type[0] and t0 not=? xl_math_int[0] {maybe_exact=true}
-            }
-        } else if k =? 'unary' {
-            if node_op(node[0].op_ext) =? 59 {maybe_exact=true}
-        } else if k =? 'conv' {
-            if node[0].aux =? 2 {maybe_exact=true}
-        } else {
-            if node[0].aux =? 89 {maybe_exact=true}
-        }
-        if maybe_exact {return xl_finish_slow(n t0 expected)}
+    let hdr=(xl_nodes as ptr<ptr<int64>>)[0]
+    if hdr[0] not=? 1 {return xl_finish_slow(n t0 expected)}
+    let node=(((hdr as ptr<uint8>) + 24) as ptr<Node>) + n
+    let nk=int64((node as ptr<uint32>)[0])
+    if xl_exact_nk_p[nk] not=? uint8(0) {
+        return xl_finish_exact(n t0 expected)
     }
     node[0].type=int32<overflow='wrap'>(t0)
     node[0].flags |= 128
