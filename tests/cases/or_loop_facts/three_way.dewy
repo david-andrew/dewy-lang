@@ -1,0 +1,22 @@
+# Each side refuted leaves the other for the branch below it.
+weave = (a:array<string> b:array<string>):>string => {
+    let out = ""
+    let i = 0
+    let j = 0
+    loop i <? a.length or j <? b.length {
+        if j >=? b.length {
+            out = "{out}{a[i]}"
+            i += 1
+        } else if i >=? a.length {
+            out = "{out}{b[j]}"
+            j += 1
+        } else {
+            out = "{out}{a[i]}{b[j]}"
+            i += 1
+            j += 1
+        }
+    }
+    out
+}
+printl(weave(["a" "b" "c"] ["1"]))
+printl(weave(["a"] ["1" "2" "3"]))

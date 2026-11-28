@@ -11,7 +11,7 @@ from p"effect_control.dewy" import (effects_demand)
 from p"effects.jo" import (effect_summaries)
 from p"expr.jo" import (CV IN)
 from p"checks_thin_expr.dewy" import (is_map_type)
-from p"facts.jo" import (FACT_CAP FACT_PREP_CONDITION FACT_PROJECTION_SCAN FactBinding FactDifference FactLoop FactPaths FactProjection FactState fact_cursor_shapes fact_grown_roots fact_loop_exhausted fact_loops fact_returns_cache fact_speculating fact_summary_owner fact_terms)
+from p"facts.jo" import (FACT_CAP FACT_PREP_CONDITION FACT_PROJECTION_SCAN FactBinding FactDifference FactLoop FactPaths FactProjection FactState fact_cursor_shapes fact_either_wanted fact_grown_roots fact_loop_exhausted fact_loops fact_returns_cache fact_speculating fact_summary_owner fact_terms)
 from p"facts_slice_builder.dewy" import (fact_comparison fact_comparison_raw fact_root_key)
 from p"facts_capture.dewy" import (fact_capture)
 from p"facts_slice_prep.dewy" import (fact_slice_children)
@@ -1168,7 +1168,12 @@ fact_while_exit=(n:LoopWord @entry:FactState @header:FactState):>FactState=>$uns
     let demands=fact_loop_bound_entry(fact_loop_bound_demands(n) @entry)
     if demands.length >? 0 {fact_loop_bounds(n @header demands FACT_PREP_CONDITION 0 0 0 []);}
     let exit_no=FactState(live=false)
+    # (`loop i <? a or j <? b`: the body keeps that the refuted side implies the other,
+    # so a guard `j >=? b` gives `i <? a`; fact_either, only for an `or` condition)
+    let outer_either=fact_either_wanted
+    if nodes.ptr[LoopWord(nodes.ptr[n].a)].kind =? 'or_' {fact_either_wanted=1}
     fact_cond_out(LoopWord(nodes.ptr[n].a) @header @exit_no true true true);
+    fact_either_wanted=outer_either
     let edges=fact_loop_body(n @header)
     fact_join(exit_no edges.exits n)
 }

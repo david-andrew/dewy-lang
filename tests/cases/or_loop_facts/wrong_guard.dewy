@@ -1,0 +1,15 @@
+# The guard refutes the side about i, which says nothing more about i.
+drain = (a:array<int64> b:array<int64>):>int64 => {
+    let total = 0
+    let i = 0
+    let j = 0
+    loop i <? a.length or j <? b.length {
+        if i >=? a.length {
+            total += a[i]
+        }
+        i += 1
+        j += 1
+    }
+    total
+}
+printl(drain([1 2] [3]))

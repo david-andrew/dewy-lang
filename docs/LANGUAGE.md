@@ -6074,6 +6074,8 @@ An unproven obligation's error names the missing relation (`i <? xs.length`,
   neighbours `i-1` and `i+1`). A cursor loop keeps its bound in the condition
   (`loop i <? xs.length and xs[i] =? " " { i += 1 }`), and a loop that moves an index
   elsewhere (a heap's parent or child) carries `i <? xs.length` in its condition too.
+  A loop over two arrays at once, `loop i <? a.length or j <? b.length`, proves `a[i]`
+  under a guard refuting the other side, `if j >=? b.length`.
 - Guard the whole relation, lower bound included: `if 0 <=? i <? xs.length`. A
   value of unknown sign, such as a search result after `?? 0`, needs both ends; a
   position that cannot be negative can say so in its type
