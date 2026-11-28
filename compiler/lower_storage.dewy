@@ -5,7 +5,7 @@ from p"lower_primitives.dewy" import (e_daddr e_gaddr global_addr_off lf_helper 
 from p"lower_closures.dewy" import (closure_scalar_environment drop_stack_closure)
 from p"ir.jo" import (A_RC1 M_FLOAT M_HDR M_SIGNED VF VI VS ir ir_cold ir_pos)
 from p"lower.jo" import (BOX_HDR BuildItem HK LowerTypePlan LowerZero Place TempItem VC_AGG VC_FLT VC_INT VC_VOID Val arg_snapshots box_dflt_data building cond_depth ctl env_v lop_watch lower_epoch lower_has_nops lower_mark_serial lower_planning lower_types lower_zeros mt_active_off opt_release pinned_box pinned_type ro_starts rodata scope_defers scope_locals tl_cond tl_items tl_nop tl_values zero_ctls zero_state zero_wait)
-from p"ir.jo" import (CALL_IF_SHARED CALL_RC_DEC CALL_RC_INC)
+from p"ir.jo" import (CALL_IF_SHARED CALL_RC_DEC CALL_RC_INC CALL_STUB)
 from p"checker_state.dewy" import (SK)
 from p"checks_thin.dewy" import (jd)
 from p"check.jo" import (LF_ALIAS LF_BYREF LF_CAPTURE LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_SHARED LF_VALUECAP locals prelude syms)
@@ -177,7 +177,7 @@ retain=(v:LSWord t0:LSWord):>void=>$unsafe {
         endc();
         return
     }
-    if not opt_release {
+    if not opt_release or (not rc_assume_mt and not rc_assume_st) {
         # (one call in the IR, which the code generator does inline when it can: CALL_RC_INC)
         e_call1(rt("__rc_inc") v -1);
         ir.code.ptr[ir.code.length - 1].c = CALL_RC_INC;
@@ -187,22 +187,6 @@ retain=(v:LSWord t0:LSWord):>void=>$unsafe {
     }
     if rc_assume_mt {
         e_call1(rt("__rc_inc") v -1);
-        return
-    }
-    if not rc_assume_st {
-        iff(e_bin('ne' VI v e_iconst(0)));
-        let rc=hdr_load(v 0)
-        iff(e_bin('gts' VI rc e_iconst(0)));
-        iff(rt_global("__mt_active"));
-        let was=ir_cold
-        ir_cold=true
-        e_call1(rt("__rc_inc") v -1);
-        ir_cold=was
-        els();
-        hdr_store(v 0 e_addi(rc 1));
-        endc();
-        endc();
-        endc();
         return
     }
     iff(e_bin('ne' VI v e_iconst(0)));
@@ -217,6 +201,11 @@ retain=(v:LSWord t0:LSWord):>void=>$unsafe {
 let release_expanded=false
 let rc_assume_st=false
 let rc_assume_mt=false
+let lower_rc_epoch:int64=-1
+let lower_rc_dec_lf:int64=-1
+let lower_free_lf:int64=-1
+lower_rc_dec_target=():>int64=>if lower_rc_epoch =? lower_epoch {lower_rc_dec_lf} else {-1}
+lower_free_target=():>int64=>if lower_rc_epoch =? lower_epoch {lower_free_lf} else {-1}
 # Last reference: the out-of-line path frees (and releases elements). Nothing else
 # can see a plain object now, so the count needs no final write.
 release_last=(v:LSWord t:LSWord):>void=>$unsafe {
@@ -276,7 +265,7 @@ release=(v:LSWord t0:LSWord):>void=>$unsafe {
         release_element(v t);
         return
     }
-    if not opt_release {
+    if not opt_release or (not rc_assume_mt and not rc_assume_st) {
         release_call(v t);
         ir.code.ptr[ir.code.length - 1].c = CALL_RC_DEC;
         note_mt_active();
@@ -284,26 +273,6 @@ release=(v:LSWord t0:LSWord):>void=>$unsafe {
     }
     if rc_assume_mt {
         release_call(v t);
-        return
-    }
-    if not rc_assume_st {
-        iff(e_bin('ne' VI v e_iconst(0)));
-        let rc=hdr_load(v 0)
-        iff(e_bin('gts' VI rc e_iconst(0)));
-        iff(rt_global("__mt_active"));
-        let was=ir_cold
-        ir_cold=true
-        release_call(v t);
-        ir_cold=was
-        els();
-        iff(e_bin('gts' VI rc e_iconst(1)));
-        hdr_store(v 0 e_addi(rc -1));
-        els();
-        release_last(v t);
-        endc();
-        endc();
-        endc();
-        endc();
         return
     }
     iff(e_bin('ne' VI v e_iconst(0)));
@@ -320,7 +289,16 @@ release=(v:LSWord t0:LSWord):>void=>$unsafe {
 release_call=(v:LSWord t:LSWord):>void=>$unsafe {
     if types.ptr[t].kind =? 'array' and is_managed(LSWord(types.ptr[t].elem)) {e_call1(lf_helper(HK.arrrel t 0) v -1);}
     else if types.ptr[t].kind =? 'box' {e_call1(lf_helper(HK.boxrel t 0) v -1);}
-    else {e_call1(rt("__rc_dec") v -1);}
+    else {
+        let dlf:LSWord=if not fused_on and lower_rc_epoch =? lower_epoch and lower_rc_dec_lf >=? 0 {lower_rc_dec_lf} else {
+            let r0=rt("__rc_dec")
+            lower_rc_epoch=lower_epoch
+            lower_rc_dec_lf=r0
+            lower_free_lf=if opt_release {rt("__free")} else {-1}
+            r0
+        }
+        e_call1(dlf v -1);
+    }
 }
 drop_at=(addr:LSWord t0:LSWord):>void=>$unsafe {
     if ownership_type(t0) {
@@ -741,7 +719,7 @@ box_unique=(slot:LSWord t:LSWord):>int64=>$unsafe {
     e_mov(r p);
     iff(e_bin('ne' VI hdr_load(p 0) e_iconst(1)));
     let q=e_call1(lf_helper(HK.boxuniq bt 0) p VI)
-    ir.code.ptr[ir.code.length - 1].c = CALL_IF_SHARED;
+    ir.code.ptr[ir.code.length - 1].c = CALL_STUB;
     e_mov(r q);
     e_store(slot 0 r ptr_size);
     endc();
@@ -839,11 +817,32 @@ arr_unique=(slot_addr_or_place:Place at:LSWord):>void=>$unsafe {
     iff(e_bin('ne' VI p e_iconst(0)));
     iff(e_bin('ne' VI hdr_load(p 0) e_iconst(1)));
     let np=e_call1(lf_helper(HK.arruniq at 0) p VI)
-    ir.code.ptr[ir.code.length - 1].c = CALL_IF_SHARED;
+    ir.code.ptr[ir.code.length - 1].c = CALL_STUB;
     write_place(slot_addr_or_place at np);
     endc();
     endc();
     emit('assume' 0 0 read_place(slot_addr_or_place at) 0 0 A_RC1);
+}
+arr_unique_val=(slot_addr_or_place:Place at:LSWord):>int64=>$unsafe {
+    let p=read_place(slot_addr_or_place at)
+    if not opt_release {
+        let np0=e_call1(lf_helper(HK.arruniq at 0) p VI)
+        ir.code.ptr[ir.code.length - 1].c = CALL_IF_SHARED;
+        write_place(slot_addr_or_place at np0);
+        return np0
+    }
+    let r=vreg(VI)
+    e_mov(r p);
+    iff(e_bin('ne' VI p e_iconst(0)));
+    iff(e_bin('ne' VI hdr_load(p 0) e_iconst(1)));
+    let np=e_call1(lf_helper(HK.arruniq at 0) p VI)
+    ir.code.ptr[ir.code.length - 1].c = CALL_STUB;
+    e_mov(r np);
+    write_place(slot_addr_or_place at np);
+    endc();
+    endc();
+    emit('assume' 0 0 r 0 0 A_RC1);
+    r
 }
 freeze_scalar=(v:LSWord t:LSWord):>int64=>$unsafe {
     if v <? 0 or is_kv(v) {return v}

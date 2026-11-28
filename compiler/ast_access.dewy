@@ -5,18 +5,26 @@ from p"node_store.dewy" import (NK Node node_clone node_kids node_kids2 node_mk 
 
 AstWord:type=int64<overflow='wrap'>
 
+let ast_nodes_p:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+ast_access_bind=(ns:ptr<array<Node>>):>int64=>$unsafe {
+    ast_nodes_p=ns
+    0
+}
+
 ast_mk=(kind:NK pos:int64):>int64=>$unsafe {
-    let sp=nodes.ptr
-    if sp not=? (uint64(0) as ptr<Node>) {
-        let sh=(sp as ptr<int64>) - 3
-        let idx=AstWord(sh[1])
-        if sh[0] =? 1 and idx <? AstWord(sh[2]) {
-            sh[1]=int64(idx + 1)
-            let dst=sp + idx
-            mem_set(dst as ptr<uint8> 0 size_of<Node>)
-            dst[0].kind=kind
-            dst[0].pos=pos
-            return int64(idx)
+    let np=ast_nodes_p
+    if np not=? (uint64(0) as ptr<array<Node>>) {
+        let sh=(np as ptr<ptr<int64>>)[0]
+        if sh not=? (uint64(0) as ptr<int64>) {
+            let idx=AstWord(sh[1])
+            if sh[0] =? 1 and idx <? AstWord(sh[2]) {
+                sh[1]=int64(idx + 1)
+                let dst=((sh + 3) as ptr<Node>) + idx
+                mem_set(dst as ptr<uint8> 0 size_of<Node>)
+                dst[0].kind=kind
+                dst[0].pos=pos
+                return int64(idx)
+            }
         }
     }
     node_mk_slow(@nodes kind pos)

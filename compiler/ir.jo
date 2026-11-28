@@ -75,6 +75,8 @@ const CALL_IF_SHARED = 3
 const CALL_RC_INC = 4
 # f(x) dropping a reference to x, freeing it with the last: inline while more than one is left
 const CALL_RC_DEC = 5
+# f(x) -> x' through the register-preserving stub without repeating the null/rc==1 guard
+const CALL_STUB = 6
 
 # Fixed-arity calls append evaluated operands directly to the shared IR span.
 # A nonzero loop immediate marks a cold fallback for allocation weights only.

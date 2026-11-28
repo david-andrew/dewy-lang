@@ -448,6 +448,26 @@ xe_ident=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
         if (fl & 2056) =? 0 and XEWord(xe_locals[0].ptr[ref].owner) =? cinst {
             let t=XEWord(xe_locals[0].ptr[ref].type)
             if xj_tk_special_p[int64(((xe_types[0].ptr + t) as ptr<uint32>)[0])] =? uint8(0) and not xl_exact_measure[0] and (expected =? 0 or not xl_effects[0]) {
+                let nhdr=(xe_nodes as ptr<ptr<int64>>)[0]
+                if nhdr not=? (uint64(0) as ptr<int64>) and nhdr[0] =? 1 {
+                    if (fl & 32768) =? 0 and n not=? xj_assign_root[0] {
+                        let lhdr=(xe_locals as ptr<ptr<int64>>)[0]
+                        if lhdr not=? (uint64(0) as ptr<int64>) and lhdr[0] =? 1 {
+                            let lp=(((lhdr as ptr<uint8>) + 24) as ptr<Local>) + ref
+                            lp[0].flags=int32<overflow='wrap'>(fl | 32768)
+                        } else {
+                            xe_locals[0].ptr[ref].flags=int32<overflow='wrap'>(fl | 32768)
+                        }
+                    }
+                    let node=(((nhdr as ptr<uint8>) + 24) as ptr<Node>) + n
+                    node[0].aux=int32<overflow='wrap'>(1)
+                    node[0].sym=int32<overflow='wrap'>(ref)
+                    node[0].type=int32<overflow='wrap'>(t)
+                    node[0].flags |= 128
+                    xl_last[0]=n
+                    if xe_temperature[0] or xe_values[0] {return xe_read(n t)}
+                    return t
+                }
                 if (fl & 32768) =? 0 and n not=? xj_assign_root[0] {xe_locals[0].ptr[ref].flags=int32<overflow='wrap'>(fl | 32768)}
                 let node=xe_nodes[0].ptr + n
                 node[0].aux=int32<overflow='wrap'>(1)
@@ -957,16 +977,22 @@ check_expr=(n0:int64 expected0:int64):>int64=>$unsafe {
     let n=XEWord(n0)
     let expected=XEWord(expected0)
     xe_last[0]=n
-    let fl=XEWord(xe_nodes[0].ptr[n].flags)
+    let nhdr=(xe_nodes as ptr<ptr<int64>>)[0]
+    let nd=(((nhdr as ptr<uint8>) + 24) as ptr<Node>) + n
+    let fl=XEWord(nd[0].flags)
+    let k=nd[0].kind
     if (fl & 8320) not=? 0 {
         if (fl & 8192) not=? 0 {
             let contribution=collection_check(n expected)
             if contribution >=? 0 {return contribution}
+            let nd2=xe_nodes[0].ptr + n
+            if nd2[0].type not=? 0 and (XEWord(nd2[0].flags) & 128) not=? 0 {return XEWord(nd2[0].type)}
+            k=nd2[0].kind
+        } else if nd[0].type not=? 0 {
+            return XEWord(nd[0].type)
         }
-        # NF_CHECKED 128: a node checked before keeps its type.
-        if xe_nodes[0].ptr[n].type not=? 0 and (XEWord(xe_nodes[0].ptr[n].flags) & 128) not=? 0 {return XEWord(xe_nodes[0].ptr[n].type)}
     }
-    match xe_nodes[0].ptr[n].kind {
+    match k {
         <'ident'> => xe_ident(n expected)
         <'int_lit'> => xl_check_int(n expected)
         <'binary'> => xl_finish(n xe_binary(n expected) expected)

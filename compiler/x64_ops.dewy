@@ -9,9 +9,9 @@ from p"util.jo" import (intern)
 from p"lower_primitives.dewy" import (global_addr_off rt)
 from p"fused.jo" import (fz_layout)
 from p"ir_builders.dewy" import (vtype)
-from p"lower_storage.dewy" import (vc)
+from p"lower_storage.dewy" import (lower_free_target lower_rc_dec_target vc)
 from p"main.jo" import (repl_image)
-from p"x64_emit.dewy" import (nchk_fn nchk_rows dbg_epis dbg_pos pad_moves ra_save_cost ra_save_x ra_stat rsp_row uw_at uw_fo x64_emit x_int_fail x_loop_line xe_emit_error)
+from p"x64_emit.dewy" import (nchk_fn nchk_rows dbg_epis dbg_pos pad_moves ra_save_cost ra_save_x ra_stat rsp_row uw_at uw_fo x64_emit x_int_fail x_loop_line xe_emit_error xe_free_lf xe_rc_dec_lf)
 from p"x64_encode.dewy" import (XMM b frame_size rsp_frame x_bytes x_encode_begin x_padding_cmov x_padding_floor)
 from p"native_debug.dewy" import (dbg_cfi native_debug_function sym_name)
 from p"elf_format.dewy" import (elf_syms)
@@ -147,6 +147,13 @@ x64_function=():>void=>$unsafe {
     if dbg_on {backend_debug_bindings()}
     backend_analyze(@ir @ir_operand_layout dbg_on target_wasm ra_stat ra_on or priority priority)
     nchk_fn=panic_bounds_lf
+    if opt_release {
+        xe_rc_dec_lf=lower_rc_dec_target()
+        xe_free_lf=lower_free_target()
+    } else {
+        xe_rc_dec_lf=-1
+        xe_free_lf=-1
+    }
     x64_allocate(xf_ir priority dbg_on ra_stat)
     # Large loop frames keep compact negative displacements and their established
     # branch layout. RSP's SIB/disp32 expansion otherwise adds hot-loop padding.

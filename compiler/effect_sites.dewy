@@ -135,22 +135,25 @@ effect_index_build=(kind:SiteWord):>void=>$unsafe {
     let hlen:SiteWord=effect_ix_heads.ptr[kind].length
     let cp=candidates.ptr
     let clen:SiteWord=candidates.length
+    let np=nodes.ptr
     loop i in [effect_ix_built.ptr[kind]..clen) {
         let q=cp[i]
         let key:SiteWord=0
-        let k=nodes[q].kind
+        let nq=np + q
+        let k=nq[0].kind
         if kind =? 2 {
-            if (k =? 'call' and nodes[q].aux =? 0 or k =? 'fnref') and nodes[q].sym >? 0 {key=SiteWord(nodes[q].sym)}
+            if (k =? 'call' and nq[0].aux =? 0 or k =? 'fnref') and nq[0].sym >? 0 {key=SiteWord(nq[0].sym)}
         } else if k =? 'vardecl' {
-            if (SiteWord(nodes[q].flags) & NF_GLOBAL) =? 0 and nodes[q].sym >? 0 {key=SiteWord(nodes[q].sym)}
+            if (SiteWord(nq[0].flags) & NF_GLOBAL) =? 0 and nq[0].sym >? 0 {key=SiteWord(nq[0].sym)}
         } else if k =? 'assign' {
             if kind =? 0 {
-                let target:SiteWord=SiteWord(nodes[q].a)
-                loop nodes[target].kind =? 'field' or nodes[target].kind =? 'index' {target=SiteWord(nodes[target].a)}
-                if nodes[target].kind =? 'ident' and nodes[target].aux =? int32(1) {key=SiteWord(nodes[target].sym)}
+                let target:SiteWord=SiteWord(nq[0].a)
+                loop np[target].kind =? 'field' or np[target].kind =? 'index' {target=SiteWord(np[target].a)}
+                if np[target].kind =? 'ident' and np[target].aux =? int32(1) {key=SiteWord(np[target].sym)}
             } else {
-                let p=place_scalar_root(SiteWord(nodes[q].a))
+                let p=place_scalar_root(SiteWord(nq[0].a))
                 if p.root =? 'local' {key=p.declaration}
+                np=nodes.ptr
             }
         }
         if key <=? 0 {continue}

@@ -317,7 +317,7 @@ x64_emit_entry=(inits:array<int64> main_lf:XWord main_code:bool entry_end_lf:XWo
 
 # where each call returns to, and the source position of the call (an index into
 # ir_positions): the line table of backtraces (lib/std/backtrace.jo)
-let stub_addr:array<int64>=[-1  -1  -1  -1  -1  -1  -1  -1  -1  -1  -1  -1  -1]
+let stub_addr:array<int64>=[-1  -1  -1  -1  -1  -1  -1  -1  -1  -1  -1  -1  -1  -1]
 
 # machine code stubs for non-local control transfer
 x64_emit_stubs=():>void=>$unsafe {
@@ -413,6 +413,18 @@ x64_emit_stubs=():>void=>$unsafe {
     loop x in xm_bytes2 {b(x)} # mov rdi, rax; call rcx
     loop i in [0..16) {xmm_spill(false  i)}
     let xm_bytes1:array<int64>=[0x48  0x8D  0x65  0xC8  0x41  0x5B  0x41  0x5A  0x41  0x59  0x41  0x58  0x5A  0x5E  0x5F  0x5D]
+    loop x in xm_bytes1 {b(x)}
+    if frames {rsp_row(0)}
+    b(0xC3)
+    # GPR-only variant of stub 12 for functions with no live XMM registers.
+    loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
+    if stub_addr.length <=? 13 {stub_addr.push(-1)}
+    stub_addr[13] = XWord(x_code[0].length)
+    loop x in xm_bytes4 {b(x)} # push rbp; mov rbp,rsp
+    if frames {rsp_row(-1)}
+    let xm_gpr_save:array<int64>=[0x57  0x56  0x52  0x41  0x50  0x41  0x51  0x41  0x52  0x41  0x53  0x48  0x83  0xE4  0xF0]
+    loop x in xm_gpr_save {b(x)}
+    loop x in xm_bytes2 {b(x)} # mov rdi, rax; call rcx
     loop x in xm_bytes1 {b(x)}
     if frames {rsp_row(0)}
     b(0xC3)

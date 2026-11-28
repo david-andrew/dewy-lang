@@ -20,6 +20,7 @@ const VOP_SPLAT_C = 512
 const CALL_IF_SHARED = 3
 const CALL_RC_INC = 4
 const CALL_RC_DEC = 5
+const CALL_STUB = 6
 let a_types:ptr<int8>=$unsafe (uint64(0) as ptr<int8>)
 let a_arguments:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
 let a_instructions:ptr<Ins>=$unsafe (uint64(0) as ptr<Ins>)
@@ -1130,7 +1131,7 @@ arm64_ins=(pos:ArmWord ins:Ins):>void=>$unsafe {
             }
         }
         <'call'> => {
-            if ins.c =? CALL_IF_SHARED or ins.c =? CALL_RC_INC or ins.c =? CALL_RC_DEC {
+            if ins.c =? CALL_IF_SHARED or ins.c =? CALL_RC_INC or ins.c =? CALL_RC_DEC or ins.c =? CALL_STUB {
                 a_guarded_call(ins)
             }
             else {
@@ -1277,6 +1278,19 @@ a_fix26=(p:ArmWord):>void=>$unsafe {
 }
 a_guarded_call=(ins:Ins):>void=>$unsafe {
     a_ld(9  ArmWord(a_arguments[ArmWord(ins.a)]))
+    if ins.c =? CALL_STUB {
+        a_faddr_fix.push([ArmWord(a_code[0].length)  ArmWord(ArmWord(ins.imm))])
+        w32(0x90000000 | 17)
+        w32(0x91000000 | (17 << 5) | 17)
+        a_stub_fix.push([ArmWord(a_code[0].length)  12])
+        a_bl()
+        a_call_site(ins)
+        let d=ArmWord(ins.dst)
+        if d >=? 0 and vloc[d] not=? LOC_NONE {
+            a_st(d  9)
+        }
+        return
+    }
     let done:array<int64>=[]
     done.push(ArmWord(a_code[0].length))
     w32(0xB4000000 | 9)

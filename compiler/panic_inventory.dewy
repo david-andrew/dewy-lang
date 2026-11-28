@@ -422,12 +422,14 @@ panic_node=(f:PanicWord root:PanicWord):>void=>$unsafe {
     let cap=panic_walk_stack.length
     let sp:PanicWord=0
     let n=root
+    let nodes_p=nodes.ptr
+    let lists_p=lists.ptr
     loop true {
-        let nodes_p=nodes.ptr
         let info=int64(ktbl[int64(((nodes_p + n) as ptr<uint32>)[0])])
         if (info & 32 not=? 0) or ((info & 128 not=? 0) and nodes_p[n].aux =? 1) {
             panic_site(f n);
             nodes_p=nodes.ptr
+            lists_p=lists.ptr
             if panic_stop and panic_witness.ptr[f] not=? 0 {return}
         }
         let mask=info & 31
@@ -448,7 +450,7 @@ panic_node=(f:PanicWord root:PanicWord):>void=>$unsafe {
                 let base=PanicWord(nodes_p[n].list)
                 let i=nk - 1
                 loop i >=? 0 {
-                    let x=lists.ptr[base + i]
+                    let x=lists_p[base + i]
                     if x not=? 0 and (ktbl[int64(((nodes_p + PanicWord(x)) as ptr<uint32>)[0])] & 64) =? 0 {
                         st[sp]=int64(x); sp=sp + 1
                     }

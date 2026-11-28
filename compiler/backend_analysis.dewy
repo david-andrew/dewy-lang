@@ -136,8 +136,8 @@ backend_call_like=(ins:ptr<Ins> dbg_on:bool target_wasm:bool):>bool=>$unsafe {
     let op=ins[0].op
     if op =? 'intr' and ins[0].imm >=? 2 {return true}
     if op =? 'call' and ins[0].c =? 1 and not dbg_on {return false}
-    # IR call-stub ABI: CALL_IF_SHARED..CALL_RC_DEC = 3..5.
-    if op =? 'call' and ins[0].c >=? 3 and ins[0].c <=? 5 and not target_wasm {return false}
+    # IR call-stub ABI: CALL_IF_SHARED..CALL_STUB = 3..6.
+    if op =? 'call' and ins[0].c >=? 3 and ins[0].c <=? 6 and not target_wasm {return false}
     if op =? 'call' or op =? 'calli' or op =? 'callc' or op =? 'syscall' or op =? 'memcpy' or op =? 'memset' or op =? 'findb' or op =? 'scanbytes' {return true}
     if op =? 'copy' or op =? 'zero' {return ins[0].imm >? INLINE_COPY}
     false
@@ -380,7 +380,7 @@ backend_analyze_straight=(@ir:IrFn @ir_operand_layout:array<int64>):>void=>$unsa
             let real_call=false
             if op =? 'call' {
                 let cc=ins[0].c
-                is_call=cc not=? 1 and not (cc >=? 3 and cc <=? 5)
+                is_call=cc not=? 1 and not (cc >=? 3 and cc <=? 6)
                 real_call=true
                 if not is_call {x_has_any_call=true}
             } else if op =? 'copy' or op =? 'zero' {
@@ -550,7 +550,7 @@ backend_analyze_straight_compact=(@ir:IrFn @ir_operand_layout:array<int64> any_m
             let real_call=false
             if op0 =? 'call' {
                 let cc=wp[0].c
-                is_call=cc not=? 1 and not (cc >=? 3 and cc <=? 5)
+                is_call=cc not=? 1 and not (cc >=? 3 and cc <=? 6)
                 real_call=true
                 if not is_call {x_has_any_call=true}
             } else if op0 =? 'copy' or op0 =? 'zero' {
@@ -693,7 +693,7 @@ backend_analyze_loop_fast=(@ir:IrFn @ir_operand_layout:array<int64>):>void=>$uns
                 let real_call=false
                 if op =? 'call' {
                     let cc=ins[0].c
-                    is_call=cc not=? 1 and not (cc >=? 3 and cc <=? 5)
+                    is_call=cc not=? 1 and not (cc >=? 3 and cc <=? 6)
                     real_call=true
                     if not is_call {x_has_any_call=true}
                 } else if op =? 'copy' or op =? 'zero' {
@@ -1059,7 +1059,7 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
                 let real_call=false
                 if op =? 'call' {
                     let cc=ins[0].c
-                    is_call=not (cc =? 1 and not dbg_on) and not (cc >=? 3 and cc <=? 5 and not target_wasm)
+                    is_call=not (cc =? 1 and not dbg_on) and not (cc >=? 3 and cc <=? 6 and not target_wasm)
                     real_call=true
                     if not is_call {x_has_any_call=true}
                 } else if op =? 'copy' or op =? 'zero' {

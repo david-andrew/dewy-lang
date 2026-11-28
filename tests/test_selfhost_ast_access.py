@@ -16,7 +16,8 @@ dewy_len_members: {int: int} = {}
 dewy_param_kinds: {int: int[]} = {}
 '''
 
-DRIVER = '''main = ():
+DRIVER = '''ast_nodes_binding = ast_access_bind(&nodes)
+main = ():
     first = ast_mk(.ident, 11)
     second = ast_mk(.ident, 13)
     tree = ast_mk(.call, 19)

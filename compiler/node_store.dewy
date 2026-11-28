@@ -115,17 +115,15 @@ node_mk_slow=(@store:array<Node> kind:NK pos:int64):>int64=>$unsafe {
 }
 node_mk=(@store:array<Node> kind:NK pos:int64):>int64=>$unsafe {
     let sp=store.ptr
-    if sp not=? (uint64(0) as ptr<Node>) {
-        let sh=(sp as ptr<int64>) - 3
-        let idx=NodeWord(sh[1])
-        if sh[0] =? 1 and idx <? NodeWord(sh[2]) {
-            sh[1]=int64(idx + 1)
-            let dst=sp + idx
-            mem_set(dst as ptr<uint8> 0 size_of<Node>)
-            dst[0].kind=kind
-            dst[0].pos=pos
-            return int64(idx)
-        }
+    let sh=(sp as ptr<int64>) - 3
+    let idx=NodeWord(sh[1])
+    if sh[0] =? 1 and idx <? NodeWord(sh[2]) {
+        sh[1]=int64(idx + 1)
+        let dst=sp + idx
+        mem_set(dst as ptr<uint8> 0 size_of<Node>)
+        dst[0].kind=kind
+        dst[0].pos=pos
+        return int64(idx)
     }
     node_mk_slow(@store kind pos)
 }
@@ -149,11 +147,11 @@ node_lists_grow=(@lists:array<int32> need:NodeWord):>void=>$unsafe {
 node_run=(@lists:array<int32> xs:array<int64>):>int64=>$unsafe {
     let lp=lists.ptr
     let lh=(lp as ptr<int64>) - 3
-    let start:NodeWord=if lp =? (uint64(0) as ptr<int32>) {0} else {NodeWord(lh[1])}
+    let start=NodeWord(lh[1])
     let count=NodeWord(xs.length)
     if count >? 0 {
         let need=start + count
-        if lp not=? (uint64(0) as ptr<int32>) and lh[0] =? 1 and need <=? NodeWord(lh[2]) {
+        if lh[0] =? 1 and need <=? NodeWord(lh[2]) {
             lh[1]=int64(need)
         } else {
             node_lists_grow(@lists need)
@@ -172,11 +170,11 @@ node_run=(@lists:array<int32> xs:array<int64>):>int64=>$unsafe {
 node_set_list=(@store:array<Node> @lists:array<int32> n:int64 xs:array<int64>)=>$unsafe {
     let lp=lists.ptr
     let lh=(lp as ptr<int64>) - 3
-    let start:NodeWord=if lp =? (uint64(0) as ptr<int32>) {0} else {NodeWord(lh[1])}
+    let start=NodeWord(lh[1])
     let count=NodeWord(xs.length)
     if count >? 0 {
         let need=start + count
-        if lp not=? (uint64(0) as ptr<int32>) and lh[0] =? 1 and need <=? NodeWord(lh[2]) {
+        if lh[0] =? 1 and need <=? NodeWord(lh[2]) {
             lh[1]=int64(need)
         } else {
             node_lists_grow(@lists need)
@@ -203,11 +201,11 @@ node_set_list=(@store:array<Node> @lists:array<int32> n:int64 xs:array<int64>)=>
 node_set_list2=(@store:array<Node> @lists:array<int32> n:int64 xs:array<int64>)=>$unsafe {
     let lp=lists.ptr
     let lh=(lp as ptr<int64>) - 3
-    let start:NodeWord=if lp =? (uint64(0) as ptr<int32>) {0} else {NodeWord(lh[1])}
+    let start=NodeWord(lh[1])
     let count=NodeWord(xs.length)
     if count >? 0 {
         let need=start + count
-        if lp not=? (uint64(0) as ptr<int32>) and lh[0] =? 1 and need <=? NodeWord(lh[2]) {
+        if lh[0] =? 1 and need <=? NodeWord(lh[2]) {
             lh[1]=int64(need)
         } else {
             node_lists_grow(@lists need)
@@ -227,11 +225,11 @@ node_set_list2=(@store:array<Node> @lists:array<int32> n:int64 xs:array<int64>)=
 node_append_raw=(@lists:array<int32> src:ptr<int64> count0:int64):>int64=>$unsafe {
     let lp=lists.ptr
     let lh=(lp as ptr<int64>) - 3
-    let start:NodeWord=if lp =? (uint64(0) as ptr<int32>) {0} else {NodeWord(lh[1])}
+    let start=NodeWord(lh[1])
     let count=NodeWord(count0)
     if count >? 0 {
         let need=start + count
-        if lp not=? (uint64(0) as ptr<int32>) and lh[0] =? 1 and need <=? NodeWord(lh[2]) {
+        if lh[0] =? 1 and need <=? NodeWord(lh[2]) {
             lh[1]=int64(need)
         } else {
             node_lists_grow(@lists need)
@@ -249,14 +247,14 @@ node_set_list_span=(@store:array<Node> @lists:array<int32> n:int64 @buf:array<in
     let base=NodeWord(base0)
     let bp=buf.ptr
     let bh=(bp as ptr<int64>) - 3
-    let blen:NodeWord=if bp =? (uint64(0) as ptr<int64>) {0} else {NodeWord(bh[1])}
+    let blen=NodeWord(bh[1])
     let count=blen - base
     let lp=lists.ptr
     let lh=(lp as ptr<int64>) - 3
-    let start:NodeWord=if lp =? (uint64(0) as ptr<int32>) {0} else {NodeWord(lh[1])}
+    let start=NodeWord(lh[1])
     if count >? 0 {
         let need=start + count
-        if lp not=? (uint64(0) as ptr<int32>) and lh[0] =? 1 and need <=? NodeWord(lh[2]) {
+        if lh[0] =? 1 and need <=? NodeWord(lh[2]) {
             lh[1]=int64(need)
         } else {
             node_lists_grow(@lists need)
@@ -308,7 +306,7 @@ node_clone=(@store:array<Node> @lists:array<int32> n0:int64):>int64=>$unsafe {
     if n =? 0 {return 0}
     let sp=store.ptr
     let sh=(sp as ptr<int64>) - 3
-    if sp =? (uint64(0) as ptr<Node>) or sh[0] not=? 1 or NodeWord(sh[1]) >=? NodeWord(sh[2]) {
+    if sh[0] not=? 1 or NodeWord(sh[1]) >=? NodeWord(sh[2]) {
         let oc=NodeWord(store.length)
         let nc:NodeWord=if oc <? 128 {128} else {oc * 2}
         store.reserve(int64(nc))
@@ -339,14 +337,12 @@ node_clone=(@store:array<Node> @lists:array<int32> n0:int64):>int64=>$unsafe {
     if nl1 >? 0 {
         if nl1 =? 1 {
             let c0=int32<overflow='wrap'>(node_clone(@store @lists int64(lists.ptr[l1])))
-            let start=NodeWord(lists.length)
             let lp=lists.ptr
-            if lp not=? (uint64(0) as ptr<int32>) {
-                let lh=(lp as ptr<int64>) - 3
-                if lh[0] =? 1 and start <? NodeWord(lh[2]) {
-                    lh[1]=int64(start + 1)
-                    lp[start]=c0
-                } else {lists.push(c0)}
+            let lh=(lp as ptr<int64>) - 3
+            let start=NodeWord(lh[1])
+            if lh[0] =? 1 and start <? NodeWord(lh[2]) {
+                lh[1]=int64(start + 1)
+                lp[start]=c0
             } else {lists.push(c0)}
             let dstc=store.ptr + c
             dstc[0].list=int32<overflow='wrap'>(start)
@@ -356,15 +352,13 @@ node_clone=(@store:array<Node> @lists:array<int32> n0:int64):>int64=>$unsafe {
             let k1=int64(lists.ptr[l1 + 1])
             let c0=int32<overflow='wrap'>(node_clone(@store @lists k0))
             let c1=int32<overflow='wrap'>(node_clone(@store @lists k1))
-            let start=NodeWord(lists.length)
             let lp=lists.ptr
-            if lp not=? (uint64(0) as ptr<int32>) {
-                let lh=(lp as ptr<int64>) - 3
-                if lh[0] =? 1 and start + 2 <=? NodeWord(lh[2]) {
-                    lh[1]=int64(start + 2)
-                    lp[start]=c0
-                    lp[start + 1]=c1
-                } else {lists.push(c0); lists.push(c1)}
+            let lh=(lp as ptr<int64>) - 3
+            let start=NodeWord(lh[1])
+            if lh[0] =? 1 and start + 2 <=? NodeWord(lh[2]) {
+                lh[1]=int64(start + 2)
+                lp[start]=c0
+                lp[start + 1]=c1
             } else {lists.push(c0); lists.push(c1)}
             let dstc=store.ptr + c
             dstc[0].list=int32<overflow='wrap'>(start)

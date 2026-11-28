@@ -19,7 +19,7 @@ reset = ():
     cabi_fix = []
     stub_fix = []
     cabi_adapter = {}
-    stub_addr = fill(-1, 13)
+    stub_addr = fill(-1, 14)
     line_rows = []
     rsp_rows = []
     rsp_frame = false
@@ -43,8 +43,8 @@ main = ():
             saved = code
             before = stub_addr
             x64_emit_stubs()
-            assert(saved == fill(u8(0xCC), padding) and before == fill(-1, 13), "stub COW")
-            loop i in [2..13):
+            assert(saved == fill(u8(0xCC), padding) and before == fill(-1, 14), "stub COW")
+            loop i in [2..14):
                 if i == 10: assert(stub_addr[i] == -1, "unassigned stub")
                 else: assert(stub_addr[i] >= padding and stub_addr[i] % 16 == 0, "stub alignment")
             print(stub_addr)
