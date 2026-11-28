@@ -3989,7 +3989,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
         return 0
     }
     # Immediate exit when a closing delimiter, semicolon, spaced non-op, or EOF follows.
-    let next_p=reader_ctx.tokens.ptr + reader_ctx.at
+    let next_p=toks_p + reader_ctx.at
     let next_ord:int64=int64((next_p as ptr<uint32>)[7])
     if next_ord =? 2 or next_ord =? 4 or next_ord =? 6 or next_ord =? 12 or (next_ord =? 0 and next_p[0].space) or next_p[0].kind =? 'eof' {
         reader_ctx.depth = (int64<overflow='wrap'>(reader_ctx.depth) - 1)
@@ -3998,7 +3998,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
     # (a name, a field route or a parenthesized group: `head(...)` may be a coefficient)
     let juxt_head:bool=((not lambda) and ((open_sym =? 'lparen') or ((open_kind =? 'identifier') and (reader_nodes.ptr[left].kind =? 'ident'))))
     # (a parenthesized group, while nothing has applied to it: `(5)x`, `(x)2` multiply)
-    let group:int64=(if (((not lambda) and (open_sym =? 'lparen')) and (reader_ctx.tokens.ptr[(int64<overflow='wrap'>(reader_ctx.at) - 1)].symbol =? 'rparen')) left else int64((-1)))
+    let group:int64=(if (((not lambda) and (open_sym =? 'lparen')) and (toks_p[(int64<overflow='wrap'>(reader_ctx.at) - 1)].symbol =? 'rparen')) left else int64((-1)))
     # (the call this loop made last: a member or index right after it is marked)
     let last_call:int64=0
     # (left is a comparison this loop made)
@@ -4009,7 +4009,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
     # (the chain being read: its first entry in dc_chain_ops, dc_chain_build)
     let chain:int64=(-1)
     loop true {
-        let tok_p=reader_ctx.tokens.ptr + reader_ctx.at
+        let tok_p=toks_p + reader_ctx.at
         let tok_sym:DewyToken=tok_p[0].symbol
         let op:DewyToken=tok_sym
         let op_ord:int64=int64((tok_p as ptr<uint32>)[7])
@@ -4035,7 +4035,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
             break
         }
         if ((not tok_space) and (((((tok_kind =? 'identifier') or (op =? 'lparen')) or (tok_kind =? 'source_integer')) or (tok_kind =? 'source_real')) or (tok_kind =? 'integer'))) {
-            let pk:DewyKind=reader_ctx.tokens.ptr[(int64<overflow='wrap'>(reader_ctx.at) - 1)].kind
+            let pk:DewyKind=toks_p[(int64<overflow='wrap'>(reader_ctx.at) - 1)].kind
             if (((((left =? group) or (pk =? 'source_integer')) or (pk =? 'source_real')) or (pk =? 'integer')) and dn_juxtaposed(@reader_ctx.tokens reader_ctx.at (left =? group))) {
                 if (minimum >? 135) {
                     break
@@ -4074,7 +4074,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
         }
         if ((op =? 'dot') and (minimum <=? 170)) {
             reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
-            let member_p=reader_ctx.tokens.ptr + reader_ctx.at
+            let member_p=toks_p + reader_ctx.at
             # `f.(xs)`: the call broadcast over its arguments; `value.$field(name)`: a member named
             # by a compile-time string
             if (((member_p[0].symbol =? 'lparen') and (not member_p[0].space)) or (member_p[0].kind =? 'metatag')) {
@@ -4118,7 +4118,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
                 rd_add_flag(@reader_nodes int64<overflow='wrap'>(reader_nodes.ptr[left].a) NF_MUT);
             }
             # (`members(<'a' | 1>)`: members(U) takes a type, grouped as in a type position)
-            if (((reader_ctx.tokens.ptr[reader_ctx.at].symbol =? 'langle') and (reader_nodes.ptr[left].kind =? 'ident')) and rd_dc_named_members(@reader_ctx @reader_nodes left)) {
+            if (((toks_p[reader_ctx.at].symbol =? 'langle') and (reader_nodes.ptr[left].kind =? 'ident')) and rd_dc_named_members(@reader_ctx @reader_nodes left)) {
                 if (not rd_dc_members_type(@reader_ctx @reader_nodes n)) {
                     return 0
                 }
@@ -4132,7 +4132,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
             }
             if (int64<overflow='wrap'>(reader_nodes.ptr[n].nlist) =? 0) {
                 # (`f()` whose `()` a style check may ask to drop: not before what would then read as its argument)
-                let after_p=reader_ctx.tokens.ptr + reader_ctx.at
+                let after_p=toks_p + reader_ctx.at
                 let joined:bool=(after_p[0].symbol =? 'lbrack') or (after_p[0].symbol =? 'lparen') or (after_p[0].kind =? 'quoted') or (after_p[0].kind =? 'rawquoted') or ((after_p[0].symbol =? 'lbrace') and (not after_p[0].space))
                 if not joined {
                     reader_nodes.ptr[n].aux2 = int32<overflow='wrap'>(AUX2_EMPTY_PARENS)
@@ -4272,7 +4272,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
         # `f<T>(x)`: the application as a type, and its arguments again as types
         if (((not tok_space) and (op =? 'langle')) and (minimum <=? 160)) {
             # (`b.read<uint64>(2)`: a module's name, dw_type's `.`)
-            let name_tok_p=reader_ctx.tokens.ptr + (int64<overflow='wrap'>(reader_ctx.at) - 1)
+            let name_tok_p=toks_p + (int64<overflow='wrap'>(reader_ctx.at) - 1)
             let first:int64=(int64<overflow='wrap'>(reader_ctx.at) - 1)
             if (not rd_dc_named_base(@reader_nodes left)) {
                 left = rd_dc_type_applied(@reader_ctx @reader_nodes left pos)
@@ -4282,7 +4282,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
                 juxt_head = false
                 continue
             }
-            if ((((((reader_nodes.ptr[left].kind =? 'field') and (reader_ctx.at >=? 3)) and (reader_ctx.tokens.ptr[(int64<overflow='wrap'>(reader_ctx.at) - 2)].symbol =? 'dot')) and (reader_ctx.tokens.ptr[(int64<overflow='wrap'>(reader_ctx.at) - 3)].kind =? 'identifier')) and (reader_nodes.ptr[int64<overflow='wrap'>(reader_nodes.ptr[left].a)].kind =? 'ident')) and (reader_nodes.ptr[int64<overflow='wrap'>(reader_nodes.ptr[left].a)].pos =? rd_mkpos(reader_ctx.file reader_ctx.tokens.ptr[(int64<overflow='wrap'>(reader_ctx.at) - 3)].start))) {
+            if ((((((reader_nodes.ptr[left].kind =? 'field') and (reader_ctx.at >=? 3)) and (toks_p[(int64<overflow='wrap'>(reader_ctx.at) - 2)].symbol =? 'dot')) and (toks_p[(int64<overflow='wrap'>(reader_ctx.at) - 3)].kind =? 'identifier')) and (reader_nodes.ptr[int64<overflow='wrap'>(reader_nodes.ptr[left].a)].kind =? 'ident')) and (reader_nodes.ptr[int64<overflow='wrap'>(reader_nodes.ptr[left].a)].pos =? rd_mkpos(reader_ctx.file toks_p[(int64<overflow='wrap'>(reader_ctx.at) - 3)].start))) {
                 first = (int64<overflow='wrap'>(reader_ctx.at) - 3)
             }
             else if (((reader_nodes.ptr[left].kind not=? 'ident') or (name_tok_p[0].kind not=? 'identifier')) or (reader_nodes.ptr[left].pos not=? rd_mkpos(reader_ctx.file name_tok_p[0].start))) {
@@ -4333,7 +4333,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
         if (((not tok_space) and ((tok_kind =? 'quoted') or (tok_kind =? 'rawquoted'))) and (minimum <=? 170)) {
             # `b'a'`, `b"abc"`: a byte, or an array of bytes (dw_byte_literal)
             if ((reader_nodes.ptr[left].kind =? 'ident') and (rd_dc_word(@reader_ctx int64<overflow='wrap'>(reader_nodes.ptr[left].name)) =? DC_B)) {
-                let written_p=reader_ctx.tokens.ptr + (int64<overflow='wrap'>(reader_ctx.at) - 1)
+                let written_p=toks_p + (int64<overflow='wrap'>(reader_ctx.at) - 1)
                 if ((written_p[0].kind not=? 'identifier') or (reader_nodes.ptr[left].pos not=? rd_mkpos(reader_ctx.file written_p[0].start))) {
                     return 0
                 }
@@ -4379,7 +4379,7 @@ rd_dc_expr_slow=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int
             break
         }
         # `x => body`: the name just read is a lambda's one parameter
-        if (((((((op =? 'function') and (minimum <=? 30)) and (left =? (int64<overflow='wrap'>(reader_nodes.length) - 1))) and (reader_nodes.ptr[left].kind =? 'ident')) and (open_kind =? 'identifier')) and (reader_ctx.tokens.ptr[(int64<overflow='wrap'>(reader_ctx.at) - 1)].start =? open_start)) and rd_dc_lambda_next_at(@reader_ctx (int64<overflow='wrap'>(reader_ctx.at) - 1))) {
+        if (((((((op =? 'function') and (minimum <=? 30)) and (left =? (int64<overflow='wrap'>(reader_nodes.length) - 1))) and (reader_nodes.ptr[left].kind =? 'ident')) and (open_kind =? 'identifier')) and (toks_p[(int64<overflow='wrap'>(reader_ctx.at) - 1)].start =? open_start)) and rd_dc_lambda_next_at(@reader_ctx (int64<overflow='wrap'>(reader_ctx.at) - 1))) {
             reader_nodes.truncate(left);
             reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) - 1)
             reader_ctx.depth = (int64<overflow='wrap'>(reader_ctx.depth) + 3)
@@ -6895,32 +6895,35 @@ rd_dc_intersection=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:De
 
 # An `&` joins the declared type's operands at the top (not `int64 & ~0`, a refinement).
 rd_dc_intersection_next=(@reader_ctx:ParserContext):>bool=>$unsafe {
-    let depth:int64=0
-    let k:int64=reader_ctx.at
+    let depth:int64<overflow='wrap'>=0
+    let start:int64<overflow='wrap'>=reader_ctx.at
+    let k:int64<overflow='wrap'>=start
+    let tlen:int64<overflow='wrap'>=reader_ctx.tokens.length
+    let tp=reader_ctx.tokens.ptr
     let found:bool=false
-    loop (k <? reader_ctx.tokens.length) {
-        let t:DewyLexeme=reader_ctx.tokens[k]
-        if ((t.kind =? 'eof') or (((k >? reader_ctx.at) and (depth =? 0)) and t.newline)) {
+    loop (k <? tlen) {
+        let tk=tp + k
+        if ((tk[0].kind =? 'eof') or (((k >? start) and (depth =? 0)) and tk[0].newline)) {
             break
         }
-        let symbol:DewyToken=t.symbol
+        let symbol:DewyToken=tk[0].symbol
         # (`All & (Png | Gif)`: an intersection of unions, an alias)
         if ((depth =? 0) and ((symbol =? 'lparen') or (symbol =? 'pipe'))) {
             return false
         }
         if ((((symbol =? 'lparen') or (symbol =? 'lbrack')) or (symbol =? 'lbrace')) or (symbol =? 'langle')) {
-            depth = (int64<overflow='wrap'>(depth) + 1)
+            depth = depth + 1
         }
         else if ((((symbol =? 'rparen') or (symbol =? 'rbrack')) or (symbol =? 'rbrace')) or (symbol =? 'rangle')) {
-            depth = (int64<overflow='wrap'>(depth) - 1)
+            depth = depth - 1
         }
         else if ((depth =? 0) and (symbol =? 'amp')) {
-            if (reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)].symbol =? 'tilde') {
+            if (tp[k + 1].symbol =? 'tilde') {
                 return false
             }
             found = true
         }
-        k = (int64<overflow='wrap'>(k) + 1)
+        k = k + 1
     }
     found
 }

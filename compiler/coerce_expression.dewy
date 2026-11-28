@@ -67,39 +67,47 @@ coerce=(n:int64 target:int64):>int64=>$unsafe {
     if target =? 0 {return n}
     # (a settled value already of the type: none of the cases below applies but to literals,
     # refinements and callables)
-    let nd0=nodes.ptr + n
-    let nt0=CoerceExpressionWord(nd0[0].type)
-    if nt0 not=? 0 and (CoerceExpressionWord(nd0[0].flags) & 256) =? 0 and nd0[0].kind not=? 'str_lit' and nd0[0].kind not=? 'float_lit' {
-        let to0:CoerceExpressionWord=if nt0 =? target and (CoerceExpressionWord(types.ptr[target].flags) & 1) =? 0 {target} else {prune(target)}
-        if (nt0 =? to0 or prune(nt0) =? to0) and types.ptr[to0].kind not=? 'refined' and types.ptr[to0].kind not=? 'callable' {return n}
+    let nt0=CoerceExpressionWord(nodes.ptr[n].type)
+    let fl0=CoerceExpressionWord(nodes.ptr[n].flags)
+    let nk0=nodes.ptr[n].kind
+    let is_lit0=(fl0 & NF_LITERAL) not=? 0
+    let to:CoerceExpressionWord=if types.ptr[target].kind =? 'var' and types.ptr[target].ref not=? 0 {prune(target)} else {target}
+    let tk=types.ptr[to].kind
+    if nt0 not=? 0 and not is_lit0 and nk0 not=? 'str_lit' and nk0 not=? 'float_lit' {
+        let src0:CoerceExpressionWord=if nt0 =? to {to} else if types.ptr[nt0].kind =? 'var' and types.ptr[nt0].ref not=? 0 {prune(nt0)} else {nt0}
+        if src0 =? to and tk not=? 'refined' and tk not=? 'callable' {return n}
     }
     # (an integer literal into a fixed-width integer type: none of the cases before the
     # literal's below applies; its range is checked there and here alike)
-    if nodes.ptr[n].kind =? 'int_lit' and is_lit(n) {
-        let to=prune(target)
-        let source_type=prune(ntype(n))
-        if source_type not=? 0 and to not=? T_MATH_INT and types.ptr[source_type].kind =? 'int_' and types.ptr[to].kind =? 'int_' {
+    if nk0 =? 'int_lit' and is_lit0 {
+        let source_type:CoerceExpressionWord=if nt0 not=? 0 and types.ptr[nt0].kind =? 'var' and types.ptr[nt0].ref not=? 0 {prune(nt0)} else {nt0}
+        if source_type not=? 0 and to not=? T_MATH_INT and types.ptr[source_type].kind =? 'int_' and tk =? 'int_' {
             if source_type not=? T_MATH_INT or not dbg_on and lit_fits(n to) {return coerce_int_literal(n to)}
         }
     }
-    if refine_active and types.ptr[prune(target)].kind =? 'refined' {return refine_coerce(n target)}
-    if nodes.ptr[n].kind =? 'float_lit' and nodes.ptr[n].sval not=? 0 and is_lit(n) and tkind(target) =? 'struct_' {
+    if refine_active and tk =? 'refined' {return refine_coerce(n target)}
+    let src_dirty=false
+    if nk0 =? 'float_lit' and is_lit0 and tk =? 'struct_' and nodes.ptr[n].sval not=? 0 {
         exact_decimal(n);
+        src_dirty=true
     }
-    if charlike(n) and is_int(target) {
+    if nk0 =? 'str_lit' and tk =? 'int_' and charlike(n) {
         charlike_to_int(n)
         nodes[n].type = int32<overflow='wrap'>(target)
         return n
     }
-    if effects_active and callable_contract(target) not=? 0 {nodes[n].type = int32<overflow='wrap'>(effect_infer_callable(n target))}
-    if str_sets.length >? 1 and str_set_coerced(n prune(target)) {return n}
-    let source_type=prune(ntype(n))
-    let to=prune(target)
+    if effects_active and tk =? 'callable' and types.ptr[to].st not=? 0 {
+        nodes[n].type = int32<overflow='wrap'>(effect_infer_callable(n target))
+        src_dirty=true
+    }
+    if str_sets.length >? 1 and str_set_coerced(n to) {return n}
+    let nt1:CoerceExpressionWord=if src_dirty {CoerceExpressionWord(nodes.ptr[n].type)} else {nt0}
+    let source_type:CoerceExpressionWord=if nt1 not=? 0 and types.ptr[nt1].kind =? 'var' and types.ptr[nt1].ref not=? 0 {prune(nt1)} else {nt1}
     if source_type =? 0 {ice("unchecked expression at {pos_str(nodes.ptr[n].pos)}")}
     # An immediately consumed exact arithmetic result needs no tagged boundary.
     # The fixed-width consumer below remains the sole narrowing obligation.
-    if source_type =? T_MATH_INT and (is_int(representation_type(to)) and representation_type(to) not=? T_MATH_INT or is_float(to)) {
-        if not is_lit(n) and is_int(to) and int_policy(to) =? 0 {check_integer_boundary(n source_type to)}
+    if source_type =? T_MATH_INT and (is_int(representation_type(to)) and representation_type(to) not=? T_MATH_INT or tk =? 'float_') {
+        if not is_lit(n) and tk =? 'int_' and int_policy(to) =? 0 {check_integer_boundary(n source_type to)}
         if exact_narrow_control(n to) {return n}
         let source=exact_math_operand(n)
         if source not=? n {
@@ -107,7 +115,7 @@ coerce=(n:int64 target:int64):>int64=>$unsafe {
             source_type=prune(ntype(n))
         }
     }
-    if source_type not=? to and int_policy(to) not=? 0 and is_int(source_type) {
+    if source_type not=? to and tk =? 'int_' and int_policy(to) not=? 0 and is_int(source_type) {
         if is_lit(n) {
             if nodes.ptr[n].kind =? 'int_lit' {
                 nodes[n].type = int32<overflow='wrap'>(if has_flag(n NF_U64) {T_U64} else {T_INT})
@@ -122,17 +130,16 @@ coerce=(n:int64 target:int64):>int64=>$unsafe {
     if source_type =? to and not is_lit(n) {return n}
     # Branded path reads keep their type for inference; an ordinary Path
     # consumer gets the same representation through a value-only view.
-    if refine_active and types.ptr[source_type].kind =? 'refined' and types.ptr[source_type].bits =? -2 and types.ptr[to].kind not=? 'var' and types.ptr[to].kind not=? 'param' and not (is_union(to) and union_index(to source_type) >=? 0) and not (types.ptr[to].kind =? 'opt' and prune(CoerceExpressionWord(types.ptr[to].elem)) =? source_type) {
+    if refine_active and types.ptr[source_type].kind =? 'refined' and types.ptr[source_type].bits =? -2 and tk not=? 'var' and tk not=? 'param' and not (is_union(to) and union_index(to source_type) >=? 0) and not (tk =? 'opt' and prune(CoerceExpressionWord(types.ptr[to].elem)) =? source_type) {
         wrap_conv(n CV.none_ CoerceExpressionWord(types.ptr[source_type].elem))
         return coerce(n to)
     }
     if source_type =? T_NEVER {
         # (what never comes back taken as a value, "a" + panic(...): marked, so code is made for
         # it as for any value of that type, never used)
-        if to not=? T_NEVER and types.ptr[to].kind not=? 'void_' and types.ptr[to].kind not=? 'var' and types.ptr[to].kind not=? 'param' {wrap_conv(n CV.none_ to)}
+        if to not=? T_NEVER and tk not=? 'void_' and tk not=? 'var' and tk not=? 'param' {wrap_conv(n CV.none_ to)}
         return n
     }
-    let tk=types.ptr[to].kind
     let sk=types.ptr[source_type].kind
     if tk =? 'secret' or sk =? 'secret' {
         let r=secret_coerce(n source_type to)

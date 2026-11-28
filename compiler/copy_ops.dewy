@@ -109,36 +109,40 @@ copy_consumes=(f:CopyWord i:CopyWord):>bool=>$unsafe {
 # This is also the escape check for sharing a read-only local snapshot.
 copy_escapes=(n:CopyWord l:CopyWord owning:bool=false):>bool=>$unsafe {
     if n =? 0 {return false}
-    let owning=owning and (not ownership_type(CopyWord(locals.ptr[l].type)) or ownership_type(ntype(n)))
+    copy_escapes_walk(n l ownership_type(CopyWord(locals.ptr[l].type)) owning)
+}
+copy_escapes_walk=(n:CopyWord l:CopyWord l_owned:bool owning0:bool=false):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let owning=owning0 and (not l_owned or ownership_type(ntype(n)))
     let k=nodes.ptr[n].kind
     if k =? 'ident' {
         return owning and nodes.ptr[n].aux =? int32(1) and nodes.ptr[n].sym =? int32(l)
     }
     if k =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.explicit_copy)) {return false}
     if k =? 'field' or k =? 'index' or k =? 'narrow' or k =? 'unwrap' {
-        if copy_escapes(CopyWord(nodes.ptr[n].a) l owning and costly_copy(ntype(n))) {return true}
-        if k =? 'index' {return copy_escapes(CopyWord(nodes.ptr[n].b) l)}
+        if copy_escapes_walk(CopyWord(nodes.ptr[n].a) l l_owned owning and costly_copy(ntype(n))) {return true}
+        if k =? 'index' {return copy_escapes_walk(CopyWord(nodes.ptr[n].b) l l_owned)}
         return false
     }
-    if k =? 'return_' {return copy_escapes(CopyWord(nodes.ptr[n].a) l true)}
+    if k =? 'return_' {return copy_escapes_walk(CopyWord(nodes.ptr[n].a) l l_owned true)}
     if k =? 'vardecl' {
         if nodes.ptr[n].aux2 =? 1 {return false}
-        return copy_escapes(CopyWord(nodes.ptr[n].b) l true)
+        return copy_escapes_walk(CopyWord(nodes.ptr[n].b) l l_owned true)
     }
     if k =? 'assign' {
-        return copy_escapes(CopyWord(nodes.ptr[n].a) l) or copy_escapes(CopyWord(nodes.ptr[n].b) l true)
+        return copy_escapes_walk(CopyWord(nodes.ptr[n].a) l l_owned) or copy_escapes_walk(CopyWord(nodes.ptr[n].b) l l_owned true)
     }
     if k =? 'call' {
         let aux=CopyWord(nodes.ptr[n].aux)
         let f=if aux =? 0 {CopyWord(nodes.ptr[n].sym)} else {0}
-        if copy_escapes(CopyWord(nodes.ptr[n].a) l) {return true}
+        if copy_escapes_walk(CopyWord(nodes.ptr[n].a) l l_owned) {return true}
         loop i in [0..nkids(n)) {
             let take=aux not=? 0 or copy_consumes(f i) or costly_copy(ntype(n))
             if f >? 0 and i <? fns.ptr[f].params.length and CopyWord(locals.ptr[fns.ptr[f].params[i]].flags) & LF_MUTPARAM not=? 0 {take=false}
             # (a checked callee that keeps this parameter borrowed cannot return
             # its storage without a copy of its own: `sha256(key)`)
             if aux =? 0 and f >? 0 and i <? fns.ptr[f].params.length and copy_borrowed.has(fns.ptr[f].params[i]) and not copy_consumes(f i) {take=false}
-            if copy_escapes(kid(n i) l take) {return true}
+            if copy_escapes_walk(kid(n i) l l_owned take) {return true}
         }
         return false
     }
@@ -149,30 +153,30 @@ copy_escapes=(n:CopyWord l:CopyWord owning:bool=false):>bool=>$unsafe {
             # (extend copies the source's elements, never adopts its storage)
             if id =? IN.extend and i =? 1 {take=costly_copy(telem(ntype(kid(n 0))))}
             if id =? IN.fill and i =? 0 {take=true}
-            if copy_escapes(kid(n i) l take) {return true}
+            if copy_escapes_walk(kid(n i) l l_owned take) {return true}
         }
         return false
     }
     if k =? 'block' {
         loop i in [0..nkids(n)) {
-            if copy_escapes(kid(n i) l nodes.ptr[n].aux not=? 0 and i =? nkids(n) - 1) {return true}
+            if copy_escapes_walk(kid(n i) l l_owned nodes.ptr[n].aux not=? 0 and i =? nkids(n) - 1) {return true}
         }
         return false
     }
     if k =? 'if_' {
-        return copy_escapes(CopyWord(nodes.ptr[n].a) l) or copy_escapes(CopyWord(nodes.ptr[n].b) l owning) or copy_escapes(CopyWord(nodes.ptr[n].c) l owning)
+        return copy_escapes_walk(CopyWord(nodes.ptr[n].a) l l_owned) or copy_escapes_walk(CopyWord(nodes.ptr[n].b) l l_owned owning) or copy_escapes_walk(CopyWord(nodes.ptr[n].c) l l_owned owning)
     }
     let take=owning or k =? 'array' or k =? 'tuple' or k =? 'map_lit'
     let mask=CopyWord(iso_child_p[int64(((nodes.ptr + n) as ptr<uint32>)[0])])
     if mask <=? 0 {return false}
-    if mask & 1 not=? 0 and nodes.ptr[n].a not=? 0 and copy_escapes(CopyWord(nodes.ptr[n].a) l take) {return true}
-    if mask & 2 not=? 0 and nodes.ptr[n].b not=? 0 and copy_escapes(CopyWord(nodes.ptr[n].b) l take) {return true}
-    if mask & 4 not=? 0 and nodes.ptr[n].c not=? 0 and copy_escapes(CopyWord(nodes.ptr[n].c) l take) {return true}
+    if mask & 1 not=? 0 and nodes.ptr[n].a not=? 0 and copy_escapes_walk(CopyWord(nodes.ptr[n].a) l l_owned take) {return true}
+    if mask & 2 not=? 0 and nodes.ptr[n].b not=? 0 and copy_escapes_walk(CopyWord(nodes.ptr[n].b) l l_owned take) {return true}
+    if mask & 4 not=? 0 and nodes.ptr[n].c not=? 0 and copy_escapes_walk(CopyWord(nodes.ptr[n].c) l l_owned take) {return true}
     if mask & 16 not=? 0 {
         let list_start=CopyWord(nodes.ptr[n].list)
         let nk=CopyWord(nodes.ptr[n].nlist)
         loop i in [CopyWord(0)..nk) {
-            if copy_escapes(CopyWord(lists.ptr[list_start + i]) l take) {return true}
+            if copy_escapes_walk(CopyWord(lists.ptr[list_start + i]) l l_owned take) {return true}
         }
     }
     false
@@ -1079,8 +1083,6 @@ copy_shared_decl=(s:CopyWord l:CopyWord):>bool=>$unsafe {
     if not copy_strict(s) or not copy_readonly(l) {return false}
     let e=CopyWord(nodes.ptr[s].b)
     if e =? 0 or not costly_copy(ntype(e)) or type_has_fn(ntype(e)) {return false}
-    if copy_movable(e) {return false}
-    if copy_escapes(CopyWord(fns.ptr[cur_fn].body) l) {return false}
     let root=place_root(e)
     if root =? 0 or nodes.ptr[root].kind not=? 'ident' {return false}
     if nodes.ptr[root].aux =? int32(1) {
@@ -1090,6 +1092,8 @@ copy_shared_decl=(s:CopyWord l:CopyWord):>bool=>$unsafe {
         if not readonly_global(CopyWord(nodes.ptr[root].sym)) {return false}
     }
     else {return false}
+    if copy_movable(e) {return false}
+    if copy_escapes(CopyWord(fns.ptr[cur_fn].body) l) {return false}
     let value=own(gen_expr(e) ntype(e))
     # This immutable reader keeps the source live. A subsequent transfer into
     # a mutable owner cannot use the source's lexical last read as uniqueness.

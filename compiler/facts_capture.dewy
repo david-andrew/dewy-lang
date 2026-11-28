@@ -911,7 +911,7 @@ fc_logic=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$unsafe {
         let result=fact_domain(T_BOOL)
         if not s.live {result=FactBound(0 0)}
         if not no_s.live {result=FactBound(1 1 true)}
-        s=fact_join(s no_s n)
+        fact_join_into(@s @no_s n)
         return fact_new(@s result)
     }
     # Evaluate a saved Boolean once, retaining the operand identities.
@@ -938,7 +938,7 @@ fc_logic=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$unsafe {
     if not rhs.live {result=FactBound((if take {0} else {1}) (if take {0} else {1}) not take)}
     else if not s.live {result=fact_bound(rhs b)}
     else if fact_truth(rhs b) =? (if take {0} else {1}) {result=FactBound((if take {0} else {1}) (if take {0} else {1}) not take)}
-    s=fact_join(s rhs n)
+    fact_join_into(@s @rhs n)
     return fact_new(@s result FactTerm((if take {Tok.kw_and} else {Tok.kw_or}) a b))
 }
 fc_loop=(n:CaptureWord @s:FactState):>int64=>$unsafe {
@@ -2065,7 +2065,12 @@ fc_coalesce_iflet=(n:CaptureWord @s:FactState mark:CaptureWord):>int64=>$unsafe 
     if not yes.live {result=fact_bound(s z); hull=fact_terms[z].type}
     if not s.live {result=fact_bound(yes y); hull=fact_terms[y].type}
     let no=s
-    s=fact_join(yes no n)
+    if mark & FACT_VALUE =? 0 {
+        fact_join_into(@yes @no n)
+        s=yes
+    } else {
+        s=fact_join(yes no n)
+    }
     # (an owned binding ends here; its hook may write exposed storage)
     if k =? 'iflet' and ownership_fact_cleanup and s.live and ownership_fact_type(ntype(CaptureWord(nodes.ptr[n].a))) {fact_drop_forget(@s n fact_drop_footprint(ntype(CaptureWord(nodes.ptr[n].a))))}
     let joined=fact_new(@s result FactTerm(type=hull))
@@ -2121,12 +2126,12 @@ fc_match=(n:CaptureWord @s:FactState):>int64=>$unsafe {
             result=if first {fact_bound(path r)} else {fact_hull(result fact_bound(path r) n)}
             first=false
         }
-        exits=fact_join(exits path n)
+        fact_join_into(@exits @path n)
         if wild {s.live=false}
     }
     # Without a value, no arm matching falls through; with one, it panics.
     let valued=not has_flag(n NF_STMT) and vc(ntype(n)) not=? VC_VOID and ntype(n) not=? T_NEVER
-    if not valued {exits=fact_join(exits s n)}
+    if not valued {fact_join_into(@exits @s n)}
     s=exits
     # (an arm's owned binding, or the subject the match owns, ends here)
     if ownership_fact_cleanup and s.live and ownership_fact_type(ntype(subject)) {fact_drop_forget(@s n fact_drop_footprint(ntype(subject)))}

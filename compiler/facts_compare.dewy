@@ -99,30 +99,6 @@ fact_distance_slow=(s:FactState a:CompareWord b:CompareWord limit:CompareWord x_
     let slots_n:CompareWord=idx[0].slots.length
     let gterms=fact_terms.ptr
     let ngterms:CompareWord=fact_terms.length
-    let dval_p=idx[0].difference_value.ptr
-    let dval_n:CompareWord=idx[0].difference_value.length
-    let drec=idx[0].difference_record.ptr
-    let dnext=idx[0].difference_next.ptr
-    let first_ri:CompareWord=-1
-    let has_a=false
-    if indexed {
-        let rv0:CompareWord=fact_index_get_raw(dval_p dval_n b)
-        if rv0 <? 0 {return false}
-        first_ri=drec[rv0 * FACT_RECORD + 1]
-        if first_ri <? 0 and from_cmp {return false}
-    } else {
-        let i:CompareWord=0
-        loop i <? ndiffs {
-            let rp=diffs + i
-            if rp[0].a =? a {
-                has_a=true
-                if rp[0].b =? b and rp[0].limit <=? limit {return true}
-            }
-            if rp[0].b =? b and first_ri <? 0 {first_ri=i}
-            i+=1
-        }
-        if first_ri <? 0 {return false}
-    }
     let x_ok=false
     let x_hi:CompareWord=0
     if from_cmp {
@@ -140,17 +116,37 @@ fact_distance_slow=(s:FactState a:CompareWord b:CompareWord limit:CompareWord x_
             }
         }
     }
+    if not x_ok and (amask & (CompareWord(1) << (a & 63))) =? 0 {return false}
+    let dval_p=idx[0].difference_value.ptr
+    let dval_n:CompareWord=idx[0].difference_value.length
+    let drec=idx[0].difference_record.ptr
+    let dnext=idx[0].difference_next.ptr
+    let first_ri:CompareWord=-1
+    let has_a=false
     if indexed {
-        if first_ri <? 0 {
-            return x_ok and fd_gap_ok(b x_hi 0 limit bounds gterms ngterms ids n_ids slots_p slots_n)
-        }
         if not x_ok {
-            if (amask & (CompareWord(1) << (a & 63))) =? 0 {return false}
             let rva:CompareWord=fact_index_get_raw(dval_p dval_n a)
             if rva <? 0 or drec[rva * FACT_RECORD + 3] <? 0 {return false}
         }
+        let rv0:CompareWord=fact_index_get_raw(dval_p dval_n b)
+        if rv0 <? 0 {return false}
+        first_ri=drec[rv0 * FACT_RECORD + 1]
+        if first_ri <? 0 {
+            if from_cmp {return false}
+            return x_ok and fd_gap_ok(b x_hi 0 limit bounds gterms ngterms ids n_ids slots_p slots_n)
+        }
     } else {
-        if not x_ok and not has_a {return false}
+        let i:CompareWord=0
+        loop i <? ndiffs {
+            let rp=diffs + i
+            if rp[0].a =? a {
+                has_a=true
+                if rp[0].b =? b and rp[0].limit <=? limit {return true}
+            }
+            if rp[0].b =? b and first_ri <? 0 {first_ri=i}
+            i+=1
+        }
+        if first_ri <? 0 or (not x_ok and not has_a) {return false}
     }
     if fd_terms.length <? 32 {
         fd_terms.resize(32)

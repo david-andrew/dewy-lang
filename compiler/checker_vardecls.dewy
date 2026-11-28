@@ -236,7 +236,7 @@ vd_decl=(s:VWord):>void=>$unsafe {
         let literal:VWord=0
         if t not=? 0 and vd_union(t) and dewy {literal=sibling_syntax_type(VWord(vd_nodes[0].ptr[s].b))}
         let et=decl_values(VWord(vd_nodes[0].ptr[s].b) t)
-        vd_nodes[0][s].b=int32<overflow='wrap'>(vd_last[0])
+        vd_nodes[0].ptr[s].b=int32<overflow='wrap'>(vd_last[0])
         if t not=? 0 {
             # (`let s:Circle|Square = Circle[...]`: which member it holds is followed)
             if literal not=? 0 or (vd_union(t) and vd_kind(et) =? 'struct_' and dewy) {
@@ -245,7 +245,7 @@ vd_decl=(s:VWord):>void=>$unsafe {
                 decl_annotated(s t member)
             }
             let v=VWord(vd_nodes[0].ptr[s].b)
-            if not cq_settled(vd_nodes vd_types v t) {vd_nodes[0][s].b=int32<overflow='wrap'>(coerce(v t))}
+            if not cq_settled(vd_nodes vd_types v t) {vd_nodes[0].ptr[s].b=int32<overflow='wrap'>(coerce(v t))}
         } else {
             t=et
             if dewy {t=decl_observed(s t)}
@@ -283,22 +283,22 @@ vd_decl=(s:VWord):>void=>$unsafe {
     if vd_growth_pending[0] not=? 0 or (not typed and vd_kind(t) =? 'struct_' and dewy and VWord(vd_nodes[0].ptr[s].flags) & 262144 =? 0) {decl_after(s l t 5)}
     let b=VWord(vd_nodes[0].ptr[s].b)
     if b not=? 0 and vd_watch[0].quaternions >? 0 and vd_quat_nodes[0].has(b) {vd_quat_locals[0][l]=true}
-    vd_locals[0][l].flags=int32<overflow='wrap'>(512)
+    let sfl=VWord(vd_nodes[0].ptr[s].flags)
+    let saux2=vd_nodes[0].ptr[s].aux2
+    let lfl:VWord=if (sfl & 33554432) not=? 0 {66048} else if (sfl & 262144) not=? 0 {197120} else {512}
+    if saux2 =? 1 {lfl |= 524288}
+    let lp=vd_locals[0].ptr + l
+    lp[0].flags=int32<overflow='wrap'>(lfl)
+    if (sfl & 262144) not=? 0 {lp[0].const_init=int32<overflow='wrap'>(b)}
+    vd_nodes[0].ptr[s].sym=int32<overflow='wrap'>(l)
     if not typed and dewy {
         if t =? vd_str_type[0] {decl_after(s l t 6)}
         else if t =? vd_math_int_type[0] {decl_after(s l t 7)}
     }
-    if VWord(vd_nodes[0].ptr[s].flags) & 262144 not=? 0 {
-        vd_locals[0][l].flags=int32<overflow='wrap'>(197120)
-        vd_locals[0][l].const_init=int32<overflow='wrap'>(b)
-        if b not=? 0 and vd_file_dewy(pos) {decl_after(s l t 8)}
-    }
-    if VWord(vd_nodes[0].ptr[s].flags) & 33554432 not=? 0 {vd_locals[0][l].flags=int32<overflow='wrap'>(66048)}
-    if vd_nodes[0].ptr[s].aux2 =? 1 {vd_or_flags(l 524288)}
-    vd_nodes[0][s].sym=int32<overflow='wrap'>(l)
+    if (sfl & 262144) not=? 0 and b not=? 0 and dewy {decl_after(s l t 8)}
     if t =? vd_math_int_type[0] and b not=? 0 and not unset {format_word_define(s l)}
     if unset {decl_after(s l t 9)}
     if vd_ide[0] and not typed {decl_after(s l t 10)}
-    if vd_nodes[0].ptr[s].aux2 =? 1792 {decl_after(s l t 11)}
+    if saux2 =? 1792 {decl_after(s l t 11)}
     if tk =? 'generator' {decl_after(s l t 13)}
 }

@@ -11,10 +11,12 @@ new_sym_push_slow=(name:CheckerScopeSymbolsWord kind:SK r:CheckerScopeSymbolsWor
 }
 
 new_sym=(name:CheckerScopeSymbolsWord kind:SK r:CheckerScopeSymbolsWord decl:CheckerScopeSymbolsWord):>CheckerScopeSymbolsWord=>$unsafe {
-    let s=CheckerScopeSymbolsWord(syms.length)
-    if s <? cap(syms) and ((syms.ptr as ptr<int64>) - 3)[0] =? 1 {
-        syms.ptr[s]=Sym[name=int32<overflow='wrap'>(name) kind=kind ref=int32<overflow='wrap'>(r) decl=int32<overflow='wrap'>(decl)]
-        __set_len(syms s + 1)
+    let sp=syms.ptr
+    let sh=(sp as ptr<int64>) - 3
+    let s=CheckerScopeSymbolsWord(sh[1])
+    if sh[0] =? 1 and s <? CheckerScopeSymbolsWord(sh[2]) {
+        sp[s]=Sym[name=int32<overflow='wrap'>(name) kind=kind ref=int32<overflow='wrap'>(r) decl=int32<overflow='wrap'>(decl)]
+        sh[1]=int64(s + 1)
     } else {
         new_sym_push_slow(name kind r decl)
     }
@@ -37,16 +39,24 @@ push_scope_sym_push_slow=(prev:CheckerScopeSymbolsWord name:CheckerScopeSymbolsW
 
 push_scope_sym=(name:CheckerScopeSymbolsWord sym:CheckerScopeSymbolsWord):>void=>$unsafe {
     if name >=? check_scopes.top.length {push_scope_sym_grow(name)}
-    let prev=CheckerScopeSymbolsWord(check_scopes.top.ptr[name])
-    let nlen=CheckerScopeSymbolsWord(check_scopes.names.length)
-    check_scopes.top.ptr[name]=int64(nlen)
-    if nlen <? cap(check_scopes.names) and nlen <? cap(check_scopes.syms) and nlen <? cap(check_scopes.prev) and ((check_scopes.names.ptr as ptr<int64>) - 3)[0] =? 1 and ((check_scopes.syms.ptr as ptr<int64>) - 3)[0] =? 1 and ((check_scopes.prev.ptr as ptr<int64>) - 3)[0] =? 1 {
-        check_scopes.prev.ptr[nlen]=int64(prev)
-        check_scopes.names.ptr[nlen]=int64(name)
-        check_scopes.syms.ptr[nlen]=int64(sym)
-        __set_len(check_scopes.prev nlen + 1)
-        __set_len(check_scopes.names nlen + 1)
-        __set_len(check_scopes.syms nlen + 1)
+    let top_p=check_scopes.top.ptr
+    let prev=CheckerScopeSymbolsWord(top_p[name])
+    let np=check_scopes.names.ptr
+    let sp=check_scopes.syms.ptr
+    let pp=check_scopes.prev.ptr
+    let nh=(np as ptr<int64>) - 3
+    let sh=(sp as ptr<int64>) - 3
+    let ph=(pp as ptr<int64>) - 3
+    let nlen=CheckerScopeSymbolsWord(nh[1])
+    top_p[name]=int64(nlen)
+    if ((nh[0] - 1) | (sh[0] - 1) | (ph[0] - 1)) =? 0 and nlen <? CheckerScopeSymbolsWord(nh[2]) and nlen <? CheckerScopeSymbolsWord(sh[2]) and nlen <? CheckerScopeSymbolsWord(ph[2]) {
+        pp[nlen]=int64(prev)
+        np[nlen]=int64(name)
+        sp[nlen]=int64(sym)
+        let n1=int64(nlen + 1)
+        ph[1]=n1
+        nh[1]=n1
+        sh[1]=n1
     } else {
         push_scope_sym_push_slow(prev name sym)
     }
@@ -58,18 +68,27 @@ scope_reset=(mark:int64):>void=>$unsafe {
     if position_guards.length >? 0 {
         loop position_guards.length >? 0 and position_guards.ptr[CheckerScopeSymbolsWord(position_guards.length) - 1].mark >=? mark {position_guards.pop();}
     }
-    let i=CheckerScopeSymbolsWord(check_scopes.names.length) - 1
+    let names_p=check_scopes.names.ptr
+    let nh=(names_p as ptr<int64>) - 3
+    let i=CheckerScopeSymbolsWord(nh[1]) - 1
     if i >=? mark {
         let top_p=check_scopes.top.ptr
-        let names_p=check_scopes.names.ptr
         let prev_p=check_scopes.prev.ptr
         loop i >=? mark {
             top_p[names_p[i]]=prev_p[i]
             i -= 1
         }
-        if ((names_p as ptr<int64>) - 3)[0] =? 1 {__set_len(check_scopes.names mark)} else {check_scopes.names.truncate(mark)}
-        if ((check_scopes.syms.ptr as ptr<int64>) - 3)[0] =? 1 {__set_len(check_scopes.syms mark)} else {check_scopes.syms.truncate(mark)}
-        if ((prev_p as ptr<int64>) - 3)[0] =? 1 {__set_len(check_scopes.prev mark)} else {check_scopes.prev.truncate(mark)}
+        let sh=(check_scopes.syms.ptr as ptr<int64>) - 3
+        let ph=(prev_p as ptr<int64>) - 3
+        if ((nh[0] - 1) | (sh[0] - 1) | (ph[0] - 1)) =? 0 {
+            nh[1]=mark
+            sh[1]=mark
+            ph[1]=mark
+        } else {
+            if nh[0] =? 1 {nh[1]=mark} else {check_scopes.names.truncate(mark)}
+            if sh[0] =? 1 {sh[1]=mark} else {check_scopes.syms.truncate(mark)}
+            if ph[0] =? 1 {ph[1]=mark} else {check_scopes.prev.truncate(mark)}
+        }
     }
 }
 
@@ -79,11 +98,13 @@ new_local_push_slow=(name:int64 t:int64 inst:CheckerScopeSymbolsWord pos:int64 d
 }
 new_local=(name:int64 t:int64 pos:int64):>int64=>$unsafe {
     let inst=CheckerScopeSymbolsWord(ctxs.ptr[cx].inst)
-    let l=CheckerScopeSymbolsWord(locals.length)
+    let lp=locals.ptr
+    let lh=(lp as ptr<int64>) - 3
+    let l=CheckerScopeSymbolsWord(lh[1])
     let dloops=loop_serials.length
-    if l <? cap(locals) and ((locals.ptr as ptr<int64>) - 3)[0] =? 1 {
-        locals.ptr[l]=Local[name=int32<overflow='wrap'>(name) type=int32<overflow='wrap'>(t) owner=int32<overflow='wrap'>(inst) pos=pos dloops=int32<overflow='wrap'>(dloops)]
-        __set_len(locals l + 1)
+    if lh[0] =? 1 and l <? CheckerScopeSymbolsWord(lh[2]) {
+        lp[l]=Local[name=int32<overflow='wrap'>(name) type=int32<overflow='wrap'>(t) owner=int32<overflow='wrap'>(inst) pos=pos dloops=int32<overflow='wrap'>(dloops)]
+        lh[1]=int64(l + 1)
     } else {
         new_local_push_slow(name t inst pos dloops)
     }

@@ -430,24 +430,28 @@ xe_ident=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     let nm=XEWord(xe_nodes[0].ptr[n].name)
     if xe_sentinel[0] not=? 0 and nm =? xe_sentinel[0] {xe_complete()}
     let c=xe_context[0]
-    let floor:XEWord=if c >=? 0 {XEWord(xe_contexts[0].ptr[c].floor)} else {0}
+    let floor:XEWord=0
+    let cinst:XEWord=0
+    if c >=? 0 {
+        floor=XEWord(xe_contexts[0].ptr[c].floor)
+        cinst=XEWord(xe_contexts[0].ptr[c].inst)
+    }
     let s:XEWord=0
-    let i:XEWord=if nm <? xe_scopes[0].top.length {xe_scopes[0].top.ptr[nm]} else {-1}
-    if i >=? floor {s=xe_scopes[0].syms.ptr[i]} else {s=xe_module(nm)}
+    let sc=xe_scopes
+    let i:XEWord=if nm <? sc[0].top.length {sc[0].top.ptr[nm]} else {-1}
+    if i >=? floor {s=sc[0].syms.ptr[i]} else {s=xe_module(nm)}
     if s =? 0 {xe_unknown(n expected nm)}
-    let sym=xe_syms[0].ptr + s
-    let sk=sym[0].kind
-    let ref=XEWord(sym[0].ref)
+    let sk=xe_syms[0].ptr[s].kind
+    let ref=XEWord(xe_syms[0].ptr[s].ref)
     if sk =? 'local' and c >=? 0 and not xj_ide[0] and xe_watch[0].const_views <=? 0 {
-        let lp=xe_locals[0].ptr + ref
-        let fl=XEWord(lp[0].flags)
-        if (fl & 2056) =? 0 and XEWord(lp[0].owner) =? XEWord(xe_contexts[0].ptr[c].inst) {
-            let t=XEWord(lp[0].type)
+        let fl=XEWord(xe_locals[0].ptr[ref].flags)
+        if (fl & 2056) =? 0 and XEWord(xe_locals[0].ptr[ref].owner) =? cinst {
+            let t=XEWord(xe_locals[0].ptr[ref].type)
             if xj_tk_special_p[int64(((xe_types[0].ptr + t) as ptr<uint32>)[0])] =? uint8(0) and not xl_exact_measure[0] and (expected =? 0 or not xl_effects[0]) {
+                if (fl & 32768) =? 0 and n not=? xj_assign_root[0] {xe_locals[0].ptr[ref].flags=int32<overflow='wrap'>(fl | 32768)}
                 let node=xe_nodes[0].ptr + n
                 node[0].aux=int32<overflow='wrap'>(1)
                 node[0].sym=int32<overflow='wrap'>(ref)
-                if n not=? xj_assign_root[0] {lp[0].flags=int32<overflow='wrap'>(fl | 32768)}
                 node[0].type=int32<overflow='wrap'>(t)
                 node[0].flags |= 128
                 xl_last[0]=n

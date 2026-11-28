@@ -99,17 +99,27 @@ setup_target=():>void=>{
 }
 # (a game's update or draw, as the checker finds it: a top-level `name =` or `let name =`, at
 # the start of a line; a method call such as hasher.update(...) is not one)
-declares_top=(src:string name:string):>bool=>{
-    let sb=src as array<uint8>
-    let n:CliWord=sb.length
-    let at:CliWord=find(src name)
+declares_top=(src:string name:string):>bool=>$unsafe {
+    let nb=name as array<uint8>
+    let m:CliWord=nb.length
+    if m =? 0 {return false}
+    let sb=(src as array<uint8>).ptr
+    let n:CliWord=(src as array<uint8>).length
+    let b0=nb.ptr[0]
+    let at:CliWord=find_byte(src b0 0)
     loop at >=? 0 {
         let b=at
         if b >=? 4 and sb[b - 1] =? b' ' and sb[b - 4] =? b'l' and sb[b - 3] =? b'e' and sb[b - 2] =? b't' {b -= 4}
-        let e=at + (name as array<uint8>).length
-        loop e <? n and sb[e] =? b' ' {e += 1}
-        if (b =? 0 or sb[b - 1] =? b'\n') and e <? n and sb[e] =? b'=' and (e + 1 >=? n or sb[e + 1] not=? b'=') {return true}
-        at=find(src name at + (name as array<uint8>).length)
+        if (b =? 0 or sb[b - 1] =? b'\n') and at + m <=? n {
+            let k:CliWord=1
+            loop k <? m and sb[at + k] =? nb.ptr[k] {k += 1}
+            if k =? m {
+                let e=at + m
+                loop e <? n and sb[e] =? b' ' {e += 1}
+                if e <? n and sb[e] =? b'=' and (e + 1 >=? n or sb[e + 1] not=? b'=') {return true}
+            }
+        }
+        at=find_byte(src b0 at + 1)
     }
     false
 }
@@ -172,9 +182,16 @@ scan_build_lines=(src:string at:CliWord):>void=>{
 # outside comments and multi-line strings, the value a string literal, then nothing but a
 # comment). The parser checks each in place: dw_build_setting.
 scan_settings=(src:string):>void=>$unsafe {
-    if find(src "$target") <? 0 and find(src "$build") <? 0 {return}
     let sb=(src as array<uint8>).ptr
     let n:CliWord=(src as array<uint8>).length
+    let has_dir=false
+    let pos:CliWord=find_byte(src b'$' 0)
+    loop pos >=? 0 {
+        if pos + 7 <=? n and sb[pos + 1] =? b't' and sb[pos + 2] =? b'a' and sb[pos + 3] =? b'r' and sb[pos + 4] =? b'g' and sb[pos + 5] =? b'e' and sb[pos + 6] =? b't' {has_dir=true; break}
+        if pos + 6 <=? n and sb[pos + 1] =? b'b' and sb[pos + 2] =? b'u' and sb[pos + 3] =? b'i' and sb[pos + 4] =? b'l' and sb[pos + 5] =? b'd' {has_dir=true; break}
+        pos=find_byte(src b'$' pos + 1)
+    }
+    if not has_dir {return}
     let depth:CliWord=0
     let i:CliWord=0
     loop i <? n {

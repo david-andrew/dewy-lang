@@ -68,26 +68,39 @@ line_starts=(src:string):>array<int64>=>$unsafe {
 }
 
 # the line and column (from 1) of byte off of file f, whose text is src
-line_col_in=(@t:LineTable f:int64 off:int64 src:string):>[int64 int64]=>{
+line_col_in=(@t:LineTable f:int64 off:int64 src:string):>[int64 int64]=>$unsafe {
     if f =? t.file and off >=? t.start and off <? t.stop {return [t.line int64(LineWord(off) - LineWord(t.start) + 1)]}
     $runtime_assert f >=? 0
-    let known:array<int64>=if f <? t.starts.length t.starts[f] else []
-    let ls=if known.length >? 0 known else line_starts(src)
-    loop t.starts.length <=? f {t.starts.push([])}
-    t.starts[f]=ls
-    # (line_starts begins every table with 0)
-    $runtime_assert ls.length >? 0
-    let lo:LineWord=0
-    let hi=LineWord(ls.length) - 1
-    loop lo <? hi {
-        let mid=(lo + hi + 1) // 2
-        $runtime_assert lo <? mid and mid <=? hi
-        if ls[mid] <=? off {lo=mid} else {hi=mid - 1}
+    if f >=? t.starts.length {
+        loop t.starts.length <=? f {t.starts.push([])}
     }
-    $runtime_assert 0 <=? lo and lo <? ls.length
+    if t.starts.ptr[f].length =? 0 {
+        t.starts[f]=line_starts(src)
+    }
+    let ls_len=LineWord(t.starts.ptr[f].length)
+    let lp=t.starts.ptr[f].ptr
+    # (line_starts begins every table with 0)
+    $runtime_assert ls_len >? 0
+    let lo:LineWord=0
+    if f =? t.file and off >=? t.stop and t.line >? 0 and LineWord(t.line) <? ls_len {
+        let next_idx=LineWord(t.line)
+        let next_stop:LineWord=if next_idx + 1 <? ls_len {LineWord(lp[next_idx + 1])} else {1 << 62}
+        if off <? next_stop {
+            lo=next_idx
+            t.start=lp[lo]
+            t.stop=int64(next_stop)
+            t.line=int64(lo + 1)
+            return [t.line int64(LineWord(off) - LineWord(t.start) + 1)]
+        }
+    }
+    let hi=ls_len - 1
+    loop lo <? hi {
+        let mid=(lo + hi + 1) >> 1
+        if lp[mid] <=? off {lo=mid} else {hi=mid - 1}
+    }
     t.file=f
-    t.start=ls[lo]
-    t.stop=if lo + 1 <? LineWord(ls.length) ls[lo + 1] else 1 << 62
+    t.start=lp[lo]
+    t.stop=if lo + 1 <? ls_len {lp[lo + 1]} else {1 << 62}
     t.line=int64(lo + 1)
-    [int64(lo + 1) int64(LineWord(off) - LineWord(ls[lo]) + 1)]
+    [int64(lo + 1) int64(LineWord(off) - LineWord(lp[lo]) + 1)]
 }

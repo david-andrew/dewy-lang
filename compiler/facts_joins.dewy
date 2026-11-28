@@ -291,21 +291,21 @@ fact_join_into=(@a:FactState @b:FactState at:JoinWord):>void=>$unsafe {
                     a.cmp_mask=JoinWord(a.cmp_mask) | JoinWord(b.cmp_mask)
                     a.full=false
                     let bp=b.bounds.ptr
-                    if a.bounds.ptr not=? bp {
+                    let ap=a.bounds.ptr
+                    if ap not=? bp {
                         let reason=fact_hull_reason(at)
                         let unique=false
-                        let sp:ptr<FactBound>=uint64(0) as ptr<FactBound>
                         loop i in [0..alen) {
-                            let xp=a.bounds.ptr + i
+                            let xp=ap + i
                             let yp=bp + i
                             if xp[0].lo =? yp[0].lo and xp[0].hi =? yp[0].hi and xp[0].nz =? yp[0].nz and xp[0].wide =? yp[0].wide and xp[0].reason =? yp[0].reason and xp[0].witness =? yp[0].witness {continue}
                             let h=FactBound(min(xp[0].lo yp[0].lo) max(xp[0].hi yp[0].hi) (xp[0].nz or xp[0].lo >? 0 or xp[0].hi <? 0) and (yp[0].nz or yp[0].lo >? 0 or yp[0].hi <? 0) reason at xp[0].wide or yp[0].wide)
                             if not unique {
                                 a.bounds[i]=h
-                                sp=a.bounds.ptr
+                                ap=a.bounds.ptr
                                 unique=true
                             } else {
-                                sp[i]=h
+                                ap[i]=h
                             }
                         }
                     }

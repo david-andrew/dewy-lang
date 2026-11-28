@@ -85,95 +85,119 @@ fact_compact=(@s:FactState):>void=>{
     # (too little freed: stop compacting this state rather than thrash)
     s.full=ids.length >? FACT_CAP - FACT_CAP // 8
 }
-fact_collect=(@s:FactState boundary:CollectWord result:CollectWord):>void=>{
+let fc_work:array<int64>=[]
+let fc_depth:array<int64>=[]
+fact_collect=(@s:FactState boundary:CollectWord result:CollectWord):>void=>$unsafe {
     if ft_is_active() {return}
+    let n_ids:CollectWord=s.ids.length
+    if n_ids <? 16 {return}
+    let ids_p=s.ids.ptr
     let fresh:CollectWord=0
-    loop v in s.ids {
-        if v >=? boundary {fresh += 1}
+    loop j in [CollectWord(0)..n_ids) {
+        if ids_p[j] >=? boundary {
+            fresh += 1
+            if fresh >=? 16 {break}
+        }
     }
     if fresh <? 16 {return}
-    if fact_stamp.length <? fact_terms.length {
-        let grow=fact_terms.length - fact_stamp.length + 1024
-        loop _ in [0..grow) {fact_stamp.push(0)}
+    let n_terms:CollectWord=fact_terms.length
+    if fact_stamp.length <? n_terms {
+        fact_stamp.resize(n_terms + 1024)
     }
     fact_stamp_gen += 1
     let gen=fact_stamp_gen
-    let work:array<int64>=[]
-    let depth:array<int64>=[]
-    work.push(result)
-    loop b in s.bindings {
-        work.push(b.value)
-        work.push(b.prior)
+    fc_work.clear()
+    fc_depth.clear()
+    fc_work.push(result)
+    let b_p=s.bindings.ptr
+    loop j in [CollectWord(0)..CollectWord(s.bindings.length)) {
+        fc_work.push(b_p[j].value)
+        fc_work.push(b_p[j].prior)
     }
     loop c in s.conditional {
-        work.push(c.result)
-        if c.payload not=? 0 {work.push(c.payload)}
-        loop x in c.values {work.push(x)}
+        fc_work.push(c.result)
+        if c.payload not=? 0 {fc_work.push(c.payload)}
+        loop x in c.values {fc_work.push(x)}
     }
-    loop x in refine_entry {work.push(x)}
-    loop loan in fact_loans {work.push(loan.capacity)}
-    loop x in fact_pending {work.push(x)}
-    loop x in fact_summary_entry {work.push(x)}
-    loop entry in fact_summary_fields {work.push(entry[2])}
-    depth=fill(0 work.length)
-    let kept:CollectWord=0
+    let re_p=refine_entry.ptr
+    loop j in [CollectWord(0)..CollectWord(refine_entry.length)) {fc_work.push(re_p[j])}
+    loop loan in fact_loans {fc_work.push(loan.capacity)}
+    loop x in fact_pending {fc_work.push(x)}
+    loop x in fact_summary_entry {fc_work.push(x)}
+    loop entry in fact_summary_fields {fc_work.push(entry[2])}
+    fc_depth.resize(fc_work.length)
+    let dp0=fc_depth.ptr
+    if fc_depth.length >? 0 {mem_set(dp0 as ptr<uint8> 0 fc_depth.length * 8)}
+    let stamp_p=fact_stamp.ptr
+    let terms_p=fact_terms.ptr
+    let projs_p=s.projections.ptr
+    let diffs_p=s.differences.ptr
     let i:CollectWord=0
-    loop i <? work.length {
-        let v=work[i]
-        let d=depth[i]
+    loop i <? fc_work.length {
+        let v=CollectWord(fc_work.ptr[i])
+        let d=CollectWord(fc_depth.ptr[i])
         i += 1
-        if v <=? 0 or v >=? fact_terms.length or fact_stamp[v] =? gen {continue}
-        fact_stamp[v]=gen
-        if v >=? boundary {kept += 1}
+        if v <=? 0 or v >=? n_terms or stamp_p[v] =? gen {continue}
+        stamp_p[v]=gen
         if d <? 2 {
-            work.push(fact_terms[v].a)
-            work.push(fact_terms[v].b)
-            depth.push(d + 1)
-            depth.push(d + 1)
+            fc_work.push(terms_p[v].a)
+            fc_work.push(terms_p[v].b)
+            fc_depth.push(d + 1)
+            fc_depth.push(d + 1)
         }
         let pi=fact_projection_first(s v)
         loop pi >=? 0 {
-            let p=s.projections[pi]
+            let pp=projs_p + pi
             pi=fact_projection_after(s pi)
-            work.push(p.value)
-            depth.push(d)
-            if p.element {
-                work.push(p.selector)
-                depth.push(d)
+            fc_work.push(pp[0].value)
+            fc_depth.push(d)
+            if pp[0].element {
+                fc_work.push(pp[0].selector)
+                fc_depth.push(d)
             }
         }
         # (a row relates its endpoints: a temporary between two live values,
         # `i+1 <? n`, still says something about them)
-        loop direction in [0..2) {
+        loop direction in [CollectWord(0)..CollectWord(2)) {
             let ri=fact_difference_head(s v direction)
             loop ri >=? 0 {
-                let row=s.differences[ri]
+                let rowp=diffs_p + ri
                 ri=fact_difference_next(s ri direction)
-                work.push(if direction =? 0 {row.a} else {row.b})
-                depth.push(0)
+                fc_work.push(if direction =? 0 {rowp[0].a} else {rowp[0].b})
+                fc_depth.push(0)
             }
         }
     }
     let total:CollectWord=0
-    loop v in s.ids {
-        if fact_stamp[v] =? gen {total += 1}
+    loop j in [CollectWord(0)..n_ids) {
+        if stamp_p[ids_p[j]] =? gen {total += 1}
     }
-    if (s.ids.length - total) * 4 <? s.ids.length {return}
+    if (n_ids - total) * 4 <? n_ids {return}
     let ids:array<int64>=[]
     let bounds:array<FactBound>=[]
-    loop j in [0..s.ids.length) {
-        if fact_stamp[s.ids[j]] =? gen {
-            ids.push(s.ids[j])
-            bounds.push(s.bounds[j])
+    ids.reserve(total)
+    bounds.reserve(total)
+    let bnds_p=s.bounds.ptr
+    loop j in [CollectWord(0)..n_ids) {
+        let idv=ids_p[j]
+        if stamp_p[idv] =? gen {
+            ids.push(idv)
+            bounds.push(bnds_p[j])
         }
     }
     let projections:array<FactProjection>=[]
-    loop p in s.projections {
-        if p.base >? 0 and p.base <? fact_terms.length and fact_stamp[p.base] =? gen and p.value >? 0 and p.value <? fact_terms.length and fact_stamp[p.value] =? gen {projections.push(p)}
+    let n_proj:CollectWord=s.projections.length
+    loop j in [CollectWord(0)..n_proj) {
+        let pp=projs_p + j
+        let pb=pp[0].base
+        let pv=pp[0].value
+        if pb >? 0 and pb <? n_terms and stamp_p[pb] =? gen and pv >? 0 and pv <? n_terms and stamp_p[pv] =? gen {projections.push(pp[0])}
     }
     let differences:array<FactDifference>=[]
-    loop row in s.differences {
-        if fact_stamp[row.a] =? gen and fact_stamp[row.b] =? gen {differences.push(row)}
+    let n_diff:CollectWord=s.differences.length
+    loop j in [CollectWord(0)..n_diff) {
+        let rp=diffs_p + j
+        if stamp_p[rp[0].a] =? gen and stamp_p[rp[0].b] =? gen {differences.push(rp[0])}
     }
     s.ids=ids
     s.bounds=bounds

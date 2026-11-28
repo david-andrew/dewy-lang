@@ -940,13 +940,21 @@ bl_is_small_math=(e:BlWord):>bool=>$unsafe {
 # bits 8..31: q (quantity_base)
 # bits 32..47: tsize (65535 if > 65534)
 # bits 48..55: talign (0 if > 127)
-bl_tinfo_slow=(t0:BlWord):>BlWord=>$unsafe {
-    if t0 <=? 0 {return 2}
+bl_ensure_tinfo=():>void=>$unsafe {
     if bl_tok_epoch not=? lower_epoch {
         bl_ty_info.clear()
         bl_tok_epoch=lower_epoch
         bl_tok_saw_cycle=false
     }
+    if bl_ty_info.length <=? types.length {
+        bl_ty_info.resize(types.length + 64)
+        bl_ty_info.ptr[0]=2
+    }
+}
+
+bl_tinfo_slow=(t0:BlWord):>BlWord=>$unsafe {
+    if t0 <=? 0 {return 2}
+    bl_ensure_tinfo()
     let t=if types.ptr[t0].kind =? 'var' {prune(t0)} else {t0}
     if t not=? t0 and t <? bl_ty_info.length {
         let c=bl_ty_info.ptr[t]
@@ -955,7 +963,10 @@ bl_tinfo_slow=(t0:BlWord):>BlWord=>$unsafe {
             return c
         }
     }
-    if t >=? bl_ty_info.length {bl_ty_info.resize(max(t + 64  types.length + 64))}
+    if t >=? bl_ty_info.length or bl_ty_info.length <=? types.length {
+        bl_ty_info.resize(max(t + 64  types.length + 64))
+        bl_ty_info.ptr[0]=2
+    }
     let ok=false
     let q:BlWord=0
     let saved_cycle=bl_tok_saw_cycle
@@ -1042,13 +1053,18 @@ bl_tinfo_slow=(t0:BlWord):>BlWord=>$unsafe {
     }
     if pushed_prog and not ok and bl_tok_saw_cycle {
         bl_ty_info.clear()
-        bl_tok_epoch=-1
+        bl_ty_info.resize(types.length + 64)
+        bl_ty_info.ptr[0]=2
+        bl_tok_epoch=lower_epoch
         bl_tok_saw_cycle=false
         return 2
     }
     if pushed_prog {bl_tok_saw_cycle=saved_cycle}
     let need_t=max(max(t t0) + 64  types.length + 64)
-    if need_t >? bl_ty_info.length {bl_ty_info.resize(need_t)}
+    if need_t >? bl_ty_info.length {
+        bl_ty_info.resize(need_t)
+        bl_ty_info.ptr[0]=2
+    }
     bl_ty_info.ptr[t]=val
     if t0 not=? t {bl_ty_info.ptr[t0]=val}
     val
@@ -1535,13 +1551,11 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
     let sp0=bl_scan_sp
     let loops0=bl_scan_loops
     if BlWord(bl_scan_stack.length) <? sp0 + 64 {bl_scan_stack.resize(sp0 + 256)}
+    if bl_tok_epoch not=? lower_epoch or bl_ty_info.length <=? types.length {bl_ensure_tinfo()}
     let sp=sp0
     let cap:BlWord=BlWord(bl_scan_stack.length)
     let st=bl_scan_stack.ptr
     let tip=bl_ty_info.ptr
-    let til:BlWord=BlWord(bl_ty_info.length)
-    let rare=bl_scan_rare
-    let copies_maybe=bl_fn_copies_maybe
     let e=e0
     let ok=true
     loop true {
@@ -1556,7 +1570,7 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
             e=BlWord(st[sp])
             continue
         }
-        if rare {
+        if bl_scan_rare {
             if ff_checks_any and ff_checks.has(e) {ok=false; break}
             if float_keys_any and float_keys.has(e) {ok=false; break}
             if bl_fn_exact {
@@ -1568,15 +1582,19 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                     bl_scan_sp=sp
                     if not bl_exact_store_ok(e) {ok=false; break}
                     sp=bl_scan_sp; cap=BlWord(bl_scan_stack.length); st=bl_scan_stack.ptr
-                    tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)
-                    e=0; continue
+                    if bl_ty_info.length <=? types.length {bl_ensure_tinfo()}
+                    tip=bl_ty_info.ptr
+                    if sp <=? sp0 {break}
+                    sp -= 1; e=BlWord(st[sp]); continue
                 }
                 if exact_has_node(e) {
                     bl_scan_sp=sp
                     if not bl_exact_low_ok(e) {ok=false; break}
                     sp=bl_scan_sp; cap=BlWord(bl_scan_stack.length); st=bl_scan_stack.ptr
-                    tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)
-                    e=0; continue
+                    if bl_ty_info.length <=? types.length {bl_ensure_tinfo()}
+                    tip=bl_ty_info.ptr
+                    if sp <=? sp0 {break}
+                    sp -= 1; e=BlWord(st[sp]); continue
                 }
             }
         }
@@ -1587,8 +1605,8 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                 let aux=nodes.ptr[e].aux
                 if aux not=? 1 and aux not=? 2 {ok=false; break}
                 let t0:BlWord=BlWord(nodes.ptr[e].type)
-                let info:BlWord=if t0 >? 0 and t0 <? til {tip[t0]} else {0}
-                if info =? 0 {info=bl_tinfo_slow(t0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                let info:BlWord=tip[t0]
+                if info =? 0 {info=bl_tinfo_slow(t0); tip=bl_ty_info.ptr}
                 if (info & 1) =? 0 {ok=false; break}
                 if aux =? 1 {
                     let l:BlWord=BlWord(nodes.ptr[e].sym)
@@ -1601,24 +1619,30 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                         continue
                     }
                 }
-                e=0; continue
+                if sp <=? sp0 {break}
+                sp -= 1; e=BlWord(st[sp]); continue
             }
             <'int_lit'> => {
                 let t0:BlWord=BlWord(nodes.ptr[e].type)
-                let info:BlWord=if t0 >? 0 and t0 <? til {tip[t0]} else {0}
-                if info =? 0 {info=bl_tinfo_slow(t0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                let info:BlWord=tip[t0]
+                if info =? 0 {info=bl_tinfo_slow(t0); tip=bl_ty_info.ptr}
                 if (info & 13) not=? 5 {ok=false; break}
-                e=0; continue
+                if sp <=? sp0 {break}
+                sp -= 1; e=BlWord(st[sp]); continue
             }
             <'bool_lit' | 'null_lit' | 'none_lit' | 'dotname'> => {
                 let t0:BlWord=BlWord(nodes.ptr[e].type)
-                let info:BlWord=if t0 >? 0 and t0 <? til {tip[t0]} else {0}
-                if info =? 0 {info=bl_tinfo_slow(t0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                let info:BlWord=tip[t0]
+                if info =? 0 {info=bl_tinfo_slow(t0); tip=bl_ty_info.ptr}
                 if (info & 1) =? 0 {ok=false; break}
-                e=0; continue
+                if sp <=? sp0 {break}
+                sp -= 1; e=BlWord(st[sp]); continue
             }
             <'str_lit'> => {
-                if nodes.ptr[e].aux =? 0 {e=0; continue}
+                if nodes.ptr[e].aux =? 0 {
+                    if sp <=? sp0 {break}
+                    sp -= 1; e=BlWord(st[sp]); continue
+                }
             }
             <'exprstmt'> => {
                 if refine_active and ref_pair_erased(e) {ok=false; break}
@@ -1640,29 +1664,37 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
             }
             <'break_' | 'continue_'> => {
                 if bl_scan_loops <=? 0 {ok=false; break}
-                e=0; continue
+                if sp <=? sp0 {break}
+                sp -= 1; e=BlWord(st[sp]); continue
             }
             <'return_'> => {
                 let a:BlWord=BlWord(nodes.ptr[e].a)
-                if a =? 0 {e=0; continue}
-                if copies_maybe {
+                if a =? 0 {
+                    if sp <=? sp0 {break}
+                    sp -= 1; e=BlWord(st[sp]); continue
+                }
+                if bl_fn_copies_maybe {
                     let t0:BlWord=BlWord(nodes.ptr[a].type)
-                    let info:BlWord=if t0 >? 0 and t0 <? til {tip[t0]} else {0}
-                    if info =? 0 {info=bl_tinfo_slow(t0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
-                    if (info & 32) not=? 0 and not bl_copy_own_ok(a  t0) {ok=false; break}
+                    let info:BlWord=tip[t0]
+                    if info =? 0 {info=bl_tinfo_slow(t0); tip=bl_ty_info.ptr}
+                    if (info & 32) not=? 0 {
+                        let cok=bl_copy_own_ok(a  t0)
+                        tip=bl_ty_info.ptr
+                        if not cok {ok=false; break}
+                    }
                 }
                 e=a
                 continue
             }
             <'vardecl'> => {
-                if not copies_maybe and nodes.ptr[e].nlist =? 0 and not has_flag(e NF_GLOBAL) {
+                if not bl_fn_copies_maybe and nodes.ptr[e].nlist =? 0 and not has_flag(e NF_GLOBAL) {
                     let a2=nodes.ptr[e].aux2
                     if a2 =? 0 or a2 =? 1 {
                         let l:BlWord=BlWord(nodes.ptr[e].sym)
                         if l >=? 0 and (BlWord(locals.ptr[l].flags) & LF_ALIAS) =? 0 {
                             let lt0:BlWord=BlWord(locals.ptr[l].type)
-                            let linfo:BlWord=if lt0 >? 0 and lt0 <? til {tip[lt0]} else {0}
-                            if linfo =? 0 {linfo=bl_tinfo_slow(lt0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                            let linfo:BlWord=tip[lt0]
+                            if linfo =? 0 {linfo=bl_tinfo_slow(lt0); tip=bl_ty_info.ptr}
                             if (linfo & 1) =? 0 or (linfo & 12) =? 0 {ok=false; break}
                             e=BlWord(nodes.ptr[e].b)
                             continue
@@ -1671,14 +1703,14 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                 }
             }
             <'assign'> => {
-                if not copies_maybe and nodes.ptr[e].aux =? 0 and nodes.ptr[e].op =? 47 {
+                if not bl_fn_copies_maybe and nodes.ptr[e].aux =? 0 and nodes.ptr[e].op =? 47 {
                     let a:BlWord=BlWord(nodes.ptr[e].a)
                     if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? 1 {
                         let l:BlWord=BlWord(nodes.ptr[a].sym)
                         if (BlWord(locals.ptr[l].flags) & LF_ALIAS) =? 0 {
                             let at0:BlWord=BlWord(nodes.ptr[a].type)
-                            let ainfo:BlWord=if at0 >? 0 and at0 <? til {tip[at0]} else {0}
-                            if ainfo =? 0 {ainfo=bl_tinfo_slow(at0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                            let ainfo:BlWord=tip[at0]
+                            if ainfo =? 0 {ainfo=bl_tinfo_slow(at0); tip=bl_ty_info.ptr}
                             if (ainfo & 1) =? 0 or (ainfo & 12) =? 0 {ok=false; break}
                             if (ainfo & 16) not=? 0 {bl_scan_managed=true}
                             let b0:BlWord=BlWord(nodes.ptr[e].b)
@@ -1698,8 +1730,8 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                     if sym >? 0 and sym not=? runtime_memeq and sym not=? runtime_streq and not fns.ptr[sym].cabi and not fns.ptr[sym].has_env and not fns.ptr[sym].parallel_api and inst_mutmask(sym) =? 0 {
                         let rtp0:BlWord=BlWord(fns.ptr[sym].ret)
                         let nt0:BlWord=BlWord(nodes.ptr[e].type)
-                        let rinfo:BlWord=if rtp0 >? 0 and rtp0 <? til {tip[rtp0]} else {0}
-                        let ninfo:BlWord=if nt0 >? 0 and nt0 <? til {tip[nt0]} else {0}
+                        let rinfo:BlWord=tip[rtp0]
+                        let ninfo:BlWord=tip[nt0]
                         if (rinfo & 1) not=? 0 and (ninfo & 1) not=? 0 and ((rinfo >> 8) & 0xFFFFFF) not=? T_NEVER and ((ninfo >> 8) & 0xFFFFFF) not=? T_NEVER {
                             let na:BlWord=BlWord(nodes.ptr[e].nlist)
                             let lbase:BlWord=BlWord(nodes.ptr[e].list)
@@ -1711,7 +1743,7 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                             loop i <? na {
                                 let arg:BlWord=BlWord(lists.ptr[lbase + i])
                                 let pt0:BlWord=if i <? npt {BlWord(ptp[i])} else {BlWord(nodes.ptr[arg].type)}
-                                let pinfo:BlWord=if pt0 >? 0 and pt0 <? til {tip[pt0]} else {0}
+                                let pinfo:BlWord=tip[pt0]
                                 if (pinfo & 33) not=? 1 {fast_ok=false; break}
                                 if (pinfo & 12) =? 8 {has_f=true}
                                 i += 1
@@ -1731,7 +1763,8 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                                     }
                                     e=BlWord(lists.ptr[lbase + na - 1])
                                 } else {
-                                    e=0
+                                    if sp <=? sp0 {break}
+                                    sp -= 1; e=BlWord(st[sp])
                                 }
                                 continue
                             }
@@ -1742,8 +1775,8 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
             <'unary'> => {
                 let op=nodes.ptr[e].op
                 let t0:BlWord=BlWord(nodes.ptr[e].type)
-                let info:BlWord=if t0 >? 0 and t0 <? til {tip[t0]} else {0}
-                if info =? 0 {info=bl_tinfo_slow(t0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                let info:BlWord=tip[t0]
+                if info =? 0 {info=bl_tinfo_slow(t0); tip=bl_ty_info.ptr}
                 if (info & 1) =? 0 {ok=false; break}
                 let vc_b=info & 12
                 if vc_b =? 8 {
@@ -1761,12 +1794,12 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                     let a:BlWord=BlWord(nodes.ptr[e].a)
                     let b0:BlWord=BlWord(nodes.ptr[e].b)
                     let lt0:BlWord=BlWord(nodes.ptr[a].type)
-                    let linfo:BlWord=if lt0 >? 0 and lt0 <? til {tip[lt0]} else {0}
-                    if linfo =? 0 {linfo=bl_tinfo_slow(lt0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                    let linfo:BlWord=tip[lt0]
+                    if linfo =? 0 {linfo=bl_tinfo_slow(lt0); tip=bl_ty_info.ptr}
                     if (linfo & 77) =? 5 {
                         let rt0:BlWord=BlWord(nodes.ptr[e].type)
-                        let rinfo:BlWord=if rt0 >? 0 and rt0 <? til {tip[rt0]} else {0}
-                        if rinfo =? 0 {rinfo=bl_tinfo_slow(rt0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                        let rinfo:BlWord=tip[rt0]
+                        if rinfo =? 0 {rinfo=bl_tinfo_slow(rt0); tip=bl_ty_info.ptr}
                         if (rinfo & 1) =? 0 {ok=false; break}
                         if b0 not=? 0 {
                             if sp >=? cap {cap=cap * 2 + 64; bl_scan_stack.resize(cap); st=bl_scan_stack.ptr}
@@ -1781,15 +1814,15 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                 if nodes.ptr[e].aux >=? 0 {
                     let a:BlWord=BlWord(nodes.ptr[e].a)
                     let at0:BlWord=BlWord(nodes.ptr[a].type)
-                    let ainfo:BlWord=if at0 >? 0 and at0 <? til {tip[at0]} else {0}
-                    if ainfo =? 0 {ainfo=bl_tinfo_slow(at0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                    let ainfo:BlWord=tip[at0]
+                    if ainfo =? 0 {ainfo=bl_tinfo_slow(at0); tip=bl_ty_info.ptr}
                     if (ainfo & 1) =? 0 {ok=false; break}
                     let aq:BlWord=(ainfo >> 8) & 0xFFFFFF
                     let bk=types.ptr[aq].kind
                     if bk =? 'struct_' or bk =? 'tuple' {
                         let et0:BlWord=BlWord(nodes.ptr[e].type)
-                        let einfo:BlWord=if et0 >? 0 and et0 <? til {tip[et0]} else {0}
-                        if einfo =? 0 {einfo=bl_tinfo_slow(et0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                        let einfo:BlWord=tip[et0]
+                        if einfo =? 0 {einfo=bl_tinfo_slow(et0); tip=bl_ty_info.ptr}
                         if (einfo & 1) =? 0 {ok=false; break}
                         e=a
                         continue
@@ -1801,15 +1834,15 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                     let a:BlWord=BlWord(nodes.ptr[e].a)
                     let b0:BlWord=BlWord(nodes.ptr[e].b)
                     let at0:BlWord=BlWord(nodes.ptr[a].type)
-                    let ainfo:BlWord=if at0 >? 0 and at0 <? til {tip[at0]} else {0}
-                    if ainfo =? 0 {ainfo=bl_tinfo_slow(at0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                    let ainfo:BlWord=tip[at0]
+                    if ainfo =? 0 {ainfo=bl_tinfo_slow(at0); tip=bl_ty_info.ptr}
                     if (ainfo & 1) =? 0 {ok=false; break}
                     let aq:BlWord=(ainfo >> 8) & 0xFFFFFF
                     let bk=types.ptr[aq].kind
                     if bk not=? 'array' and bk not=? 'str_' and bk not=? 'ptr' and bk not=? 'fixed' {ok=false; break}
                     let et0:BlWord=BlWord(nodes.ptr[e].type)
-                    let einfo:BlWord=if et0 >? 0 and et0 <? til {tip[et0]} else {0}
-                    if einfo =? 0 {einfo=bl_tinfo_slow(et0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                    let einfo:BlWord=tip[et0]
+                    if einfo =? 0 {einfo=bl_tinfo_slow(et0); tip=bl_ty_info.ptr}
                     if (einfo & 1) =? 0 {ok=false; break}
                     if b0 not=? 0 {
                         if sp >=? cap {cap=cap * 2 + 64; bl_scan_stack.resize(cap); st=bl_scan_stack.ptr}
@@ -1828,16 +1861,23 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                 let t0:BlWord=BlWord(nodes.ptr[e].type)
                 let tinfo:BlWord=0
                 if t0 >? 0 {
-                    tinfo=if t0 <? til {tip[t0]} else {0}
-                    if tinfo =? 0 {tinfo=bl_tinfo_slow(t0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                    tinfo=tip[t0]
+                    if tinfo =? 0 {tinfo=bl_tinfo_slow(t0); tip=bl_ty_info.ptr}
                     if (tinfo & 1) =? 0 {ok=false; break}
                 }
                 let nb:BlWord=BlWord(nodes.ptr[e].nlist)
-                if nb =? 0 {e=0; continue}
+                if nb =? 0 {
+                    if sp <=? sp0 {break}
+                    sp -= 1; e=BlWord(st[sp]); continue
+                }
                 let lbase:BlWord=BlWord(nodes.ptr[e].list)
-                if copies_maybe and nodes.ptr[e].aux not=? 0 and t0 >? 0 and (tinfo & 12) not=? 0 and (tinfo & 32) not=? 0 {
+                if bl_fn_copies_maybe and nodes.ptr[e].aux not=? 0 and t0 >? 0 and (tinfo & 12) not=? 0 and (tinfo & 32) not=? 0 {
                     let last:BlWord=BlWord(lists.ptr[lbase + nb - 1])
-                    if nodes.ptr[last].kind =? 'exprstmt' and not bl_copy_own_ok(BlWord(nodes.ptr[last].a)  t0) {ok=false; break}
+                    if nodes.ptr[last].kind =? 'exprstmt' {
+                        let cok=bl_copy_own_ok(BlWord(nodes.ptr[last].a)  t0)
+                        tip=bl_ty_info.ptr
+                        if not cok {ok=false; break}
+                    }
                 }
                 if nb >? 1 {
                     if sp + nb >? cap {cap=(sp + nb) * 2 + 64; bl_scan_stack.resize(cap); st=bl_scan_stack.ptr}
@@ -1857,8 +1897,8 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                     let t0:BlWord=BlWord(nodes.ptr[e].type)
                     let t:BlWord=if types.ptr[t0].kind =? 'var' {prune(t0)} else {t0}
                     if t not=? T_NEVER {
-                        let info:BlWord=if t >? 0 and t <? til {tip[t]} else {0}
-                        if info =? 0 {info=bl_tinfo_slow(t); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                        let info:BlWord=tip[t]
+                        if info =? 0 {info=bl_tinfo_slow(t); tip=bl_ty_info.ptr}
                         if (info & 1) =? 0 {ok=false; break}
                     }
                 }
@@ -1878,10 +1918,10 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                         let a:BlWord=BlWord(nodes.ptr[e].a)
                         let to0:BlWord=BlWord(nodes.ptr[e].type)
                         let fr0:BlWord=BlWord(nodes.ptr[a].type)
-                        let to_i:BlWord=if to0 >? 0 and to0 <? til {tip[to0]} else {0}
-                        if to_i =? 0 {to_i=bl_tinfo_slow(to0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
-                        let fr_i:BlWord=if fr0 >? 0 and fr0 <? til {tip[fr0]} else {0}
-                        if fr_i =? 0 {fr_i=bl_tinfo_slow(fr0); tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)}
+                        let to_i:BlWord=tip[to0]
+                        if to_i =? 0 {to_i=bl_tinfo_slow(to0); tip=bl_ty_info.ptr}
+                        let fr_i:BlWord=tip[fr0]
+                        if fr_i =? 0 {fr_i=bl_tinfo_slow(fr0); tip=bl_ty_info.ptr}
                         if cv =? CV.none_ or cv =? CV.quantity_const or cv =? CV.ptr {
                             if (to_i & 1) =? 0 or (fr_i & 1) =? 0 {ok=false; break}
                         } else {
@@ -1897,8 +1937,11 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
         bl_scan_sp=sp
         if not bl_scan_node_slow(e) {ok=false; break}
         sp=bl_scan_sp; cap=BlWord(bl_scan_stack.length); st=bl_scan_stack.ptr
-        tip=bl_ty_info.ptr; til=BlWord(bl_ty_info.length)
-        e=0
+        if bl_ty_info.length <=? types.length {bl_ensure_tinfo()}
+        tip=bl_ty_info.ptr
+        if sp <=? sp0 {break}
+        sp -= 1
+        e=BlWord(st[sp])
     }
     bl_scan_sp=sp0
     if not ok {bl_scan_loops=loops0}
@@ -3029,11 +3072,7 @@ bl_can_emit_inst=(_lf:BlWord fi:BlWord):>bool=>$unsafe {
     bl_fn_copy_strict=bl_fn_copies_maybe and copy_strict(body)
     bl_fn_exact=exact_owners.length >? 0 and exact_owners.has(fi)
     bl_scan_rare=ff_checks_any or float_keys_any or bl_fn_exact
-    if bl_tok_epoch not=? lower_epoch {
-        bl_ty_info.clear()
-        bl_tok_epoch=lower_epoch
-        bl_tok_saw_cycle=false
-    }
+    bl_ensure_tinfo()
     if ownership_decls.length not=? 0 and decl not=? 0 {
         if ownership_consumers.has(decl) or (ownership_hooks.get(decl) ?? 0) >? 1 {return false}
     }

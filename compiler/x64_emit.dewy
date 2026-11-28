@@ -1932,10 +1932,11 @@ emit_findb=(ins:ptr<Ins>):>void=>$unsafe {
         sse_rr(0x66  0x70  9  2)
         b(0x55)
     }
+    let margin:XWord=if lines {17 + w} else {16}
+    lea(RDX  RDX  -margin)
     nop_pad((16 - XWord(x_code[0].length) % 16) % 16)
     let top=XWord(x_code[0].length)
-    lea(mask  RAX  if lines {17 + w} else {16})
-    op_rr(0x39  true  RDX  mask) # cmp mask, rdx
+    op_rr(0x39  true  RDX  RAX) # cmp rax, rdx (i > n - margin)
     let tail=jcc32(CC_G)
     sse_rm(0xF3  0x6F  0  RCX  0) # movdqu xmm0, [rcx]
     if single {
@@ -2005,6 +2006,7 @@ emit_findb=(ins:ptr<Ins>):>void=>$unsafe {
     op_rr(0x01  true  mask  RAX) # add rax, mask
     let done=jmp32()
     patch_here(tail)
+    lea(RDX  RDX  margin) # restore n
     let bytes_top=XWord(x_code[0].length)
     op_rr(0x39  true  RDX  RAX) # cmp rax, rdx
     let ends:array<int64>=[]

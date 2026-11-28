@@ -218,6 +218,13 @@ resolve_fn_call_slow=(n:CRWord name:CRWord decls:array<int64> args:array<int64> 
         }
     }
     loop d in decls {
+        let np:CRWord=nkids(d)
+        let has_kinds=dewy_param_kinds.length >? 0 and dewy_param_kinds.has(d)
+        if positional and n_args not=? np and not has_kinds and (rest_bundles.length =? 0 or not decl_has_rest(d)) {
+            if (nfit >? 0 or (not ufcs and failure.last_err_arg not=? 0)) and (n_args >? np or nodes.ptr[kid(d n_args)].b =? 0) {
+                continue
+            }
+        }
         let di:CRWord=decl_info(d)
         if not decl_infos.ptr[di].sig.done {
             if a0t not=? 0 and tkind(a0t) =? 'float_' and written_int_param(d a0i) {continue}
@@ -229,19 +236,23 @@ resolve_fn_call_slow=(n:CRWord name:CRWord decls:array<int64> args:array<int64> 
             if p0 not=? a0t and (pk0 =? 'vec' or pk0 =? 'int_' or pk0 =? 'float_') and not can_coerce(0 a0t p0) {continue}
             if rational_module_found >=? 0 and pk0 =? 'struct_' and tkind(a0t) =? 'float_' and (bundled_rational_type(p0) or bundled_word_rational_type(p0)) {continue}
         }
+        if targs_here.length >? 0 and positional and n_args =? np and not has_kinds and nkids2(d) not=? targs_here.length {
+            if nfit =? 0 {call_type_arity(name d targs_here @failure)}
+            recv_fits=true
+            continue
+        }
         let cd=Cand[decl = d sig = decl_infos.ptr[di].sig]
-        let np:CRWord=nkids(d)
-        let kinds:array<int64>=if dewy_param_kinds.length >? 0 {dewy_param_kinds.get(d) ?? []} else {[]}
-        if positional and args.length =? np and kinds.length =? 0 {
+        if positional and n_args =? np and not has_kinds {
             cd.args = args
         }
         else {
+            let kinds:array<int64>=if has_kinds {dewy_param_kinds.get(d) ?? []} else {[]}
             if not call_map_candidate(d args @cd kinds ufcs @recv_fits @failure) {continue}
         }
         if cd.sig.ntp >? 0 {cd.binds = fill(0 CRWord(cd.sig.ntp))}
         if targs_here.length >? 0 {
             if nkids2(d) not=? targs_here.length {
-                call_type_arity(name d targs_here @failure)
+                if nfit =? 0 {call_type_arity(name d targs_here @failure)}
                 recv_fits=true
                 continue
             }
@@ -249,7 +260,7 @@ resolve_fn_call_slow=(n:CRWord name:CRWord decls:array<int64> args:array<int64> 
         }
         let failed=call_candidate_cost(@cd @recv_fits)
         if failed not=? 0 {
-            call_reject_candidate(cd failed @failure)
+            if nfit =? 0 {call_reject_candidate(cd failed @failure)}
             continue
         }
         if nfit =? 0 {first=cd}
