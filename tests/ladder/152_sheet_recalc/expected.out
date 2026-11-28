@@ -1,0 +1,41 @@
+line 32: E3: unexpected `'`
+line 49: F1: expected a value, found the end
+line 50: F2: `)` does not end a range
+line 51: F3: unexpected `$`
+line 52: F4: `12.5.1` is not a number, 'text or =formula
+line 53: `Q0` is not a cell
+line 55: F6: expected `)`
+line 56: expected `CELL: content`
+line 58: F8: unexpected `&`
+calculated 32 formulas
+   |   A    |   B   |  C   |  D   |   E   |   F   
+  1|Item    |Price  |Qty   |Cost  |Note   |       
+  2|Paper   |   4.25|    12|    51|  45.90|       
+  3|Pens    |   1.10|    30|    33|      1|       
+  4|Toner   |  64.99|     2|140.38| 140.38|       
+  5|Tape    |   2.50|     0|     0|     12|      1
+  6|Total   |       |    44|224.38|#CYCLE!|       
+  7|Average |       |      | 56.10|#CYCLE!|Item   
+  8|Per item|#DIV/0!|      |  5.10|#CYCLE!|       
+  9|Discount|   0.33| 74.79|149.59|#CYCLE!|  21.04
+ 10|#VALUE! |#NAME? |#ARGS!|#NAME?|  39.37|#DIV/0!
+ 11|Counted |#DIV/0!|     0|-74.79|       |       
+errors: B8 #DIV/0!, A10 #VALUE!, B10 #NAME?, C10 #ARGS!, D10 #NAME?, F10 #DIV/0!, B11 #DIV/0!, E6 #CYCLE!, E7 #CYCLE!, E8 #CYCLE!, E9 #CYCLE!
+set C5:3: recalculated 16, changed E4 140.38 -> 132.88, C5 0 -> 3, D5 0 -> 7.50, C6 44 -> 47, D6 224.38 -> 231.88, D7 56.10 -> 57.97, B8 #DIV/0! -> 2.50, D8 5.10 -> 4.93, C9 74.79 -> 77.29, D9 149.59 -> 154.59, E10 39.37 -> 38.30, B11 #DIV/0! -> #NAME?, C11 0 -> 2, D11 -74.79 -> -77.29
+set E8:=E9/2: recalculated 4, changed nothing
+set E6:5: recalculated 0, changed E6 #CYCLE! -> 5
+set B2:=B3*4: recalculated 23, changed B2 4.25 -> 4.40, D2 51 -> 52.80, E2 45.90 -> 47.52, D6 231.88 -> 233.68, D7 57.97 -> 58.42, D8 4.93 -> 4.97, C9 77.29 -> 77.89, D9 154.59 -> 155.79, F9 21.04 -> 21.34, E10 38.30 -> 38.05, D11 -77.29 -> -77.89
+edit `Z:4`: not a cell
+set C6:=SUM(C2:C4): recalculated 4, changed C6 47 -> 44, D8 4.97 -> 5.31
+   |   A    |  B   |  C   |  D   |   E   |   F   
+  1|Item    |Price |Qty   |Cost  |Note   |       
+  2|Paper   |  4.40|    12| 52.80|  47.52|       
+  3|Pens    |  1.10|    30|    33|      1|       
+  4|Toner   | 64.99|     2|140.38| 132.88|       
+  5|Tape    |  2.50|     3|  7.50|     12|      1
+  6|Total   |      |    44|233.68|      5|       
+  7|Average |      |      | 58.42|#CYCLE!|Item   
+  8|Per item|  2.50|      |  5.31|#CYCLE!|       
+  9|Discount|  0.33| 77.89|155.79|#CYCLE!|  21.34
+ 10|#VALUE! |#NAME?|#ARGS!|#NAME?|  38.05|#DIV/0!
+ 11|Counted |#NAME?|     2|-77.89|       |       

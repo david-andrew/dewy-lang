@@ -1,0 +1,385 @@
+# Spreadsheet recalculation. Stdin sets cells, one `A1: content` per line:
+# a number, 'text, or =formula over numbers, cells, ranges (A1:B3), + - * /,
+# comparisons (1 or 0) and SUM AVG MIN MAX COUNT ABS ROUND IF. Formulas
+# evaluate in dependency order with exact fractions; a circular reference,
+# a division by zero, text in arithmetic, an unknown function or a wrong
+# argument count becomes an error value in its cell and spreads to the
+# cells that use it. Each argument `A1:content` then edits the sheet and
+# recalculates only what depends on the edit.
+#
+# Usage: sheet_recalc [CELL:CONTENT...] < sheet.txt
+
+Cell:type = [col:int64<0 <=? col <? 26> row:int64<1 <=? row <=? 99>]
+Fault:type = type of error & [code:string]
+Value:type = rational | string | Fault
+
+Num:type = [value:rational]
+Ref:type = [cell:Cell]
+Span:type = [first:Cell last:Cell]
+Negate:type = [operand:Expr]
+Binary:type = [op:string left:Expr right:Expr]
+Call:type = [name:string args:array<Expr>]
+Expr:type = Num | Ref | Span | Negate | Binary | Call
+
+Formula:type = [source:string tree:Expr]
+Content:type = rational | string | Formula
+BadInput:type = type of error & [message:string]
+
+const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+name = (c:Cell):>string => "{LETTERS[c.col]}{c.row}"
+
+cell_named = (text:string):>Cell | none => {
+    let letter = text.get(0) ?? return none
+    let col = LETTERS.find(letter) ?? return none
+    let digits = text[$clamp 1..]
+    if col >=? 26 or not digits.is_digit or digits.startswith("0") return none
+    let row = int64(digits) ?? return none
+    if row <? 1 or row >? 99 return none
+    Cell[col row]
+}
+
+# Tokens are numbers, cell names, function names and operators.
+lex = (text:string):>array<string> | BadInput => {
+    let chars = text.chars
+    let tokens:array<string> = []
+    let i:int64 = 0
+    loop i <? chars.length {
+        let ch = chars[i]
+        if ch.is_space { i += 1; continue }
+        let start = i
+        if ch.is_digit or ch =? "." {
+            loop i <? chars.length and (chars[i].is_digit or chars[i] =? ".") i += 1
+        } else if ch.is_alpha {
+            loop i <? chars.length and chars[i].is_alnum i += 1
+        } else if (ch =? "<" or ch =? ">") and i + 1 <? chars.length and (chars[i + 1] =? "=" or "{ch}{chars[i + 1]}" =? "<>") {
+            i += 2
+        } else if ch in? ["+" "-" "*" "/" "(" ")" "," ":" "<" ">" "="] {
+            i += 1
+        } else {
+            return BadInput["unexpected `{ch}`"]
+        }
+        tokens.push(chars[start..i).join(""))
+    }
+    tokens
+}
+
+Parser:type = [tokens:array<string> at:int64]
+
+peek = (p:Parser):>string => p.tokens.get(p.at) ?? ""
+take = (@p:Parser):>string => {
+    let t = peek(p)
+    p.at += 1
+    t
+}
+shown = (t:string):>string => if t.is_empty "the end" else "`{t}`"
+
+strength = (op:string):>int64 => match op {
+    <"<" | ">" | "=" | "<=" | ">=" | "<>"> => 1
+    <"+" | "-"> => 2
+    <"*" | "/"> => 3
+    _ => 0
+}
+
+expression = (@p:Parser floor:int64 = 1):>Expr | BadInput => {
+    let left = unary(@p) or_throw
+    loop strength(peek(p)) >=? floor {
+        let op = take(@p)
+        left = Binary[op left expression(@p strength(op) + 1) or_throw]
+    }
+    left
+}
+
+unary = (@p:Parser):>Expr | BadInput => {
+    if peek(p) =? "-" {
+        take(@p);
+        return Negate[unary(@p) or_throw]
+    }
+    primary(@p)
+}
+
+primary = (@p:Parser):>Expr | BadInput => {
+    let t = take(@p)
+    if t =? "(" {
+        let inner = expression(@p) or_throw
+        if take(@p) not=? ")" return BadInput["expected `)`"]
+        return inner
+    }
+    let n = rational(t)
+    if n isnt? none return Num[n]
+    if t.is_empty or not t.is_alnum return BadInput["expected a value, found {shown(t)}"]
+    if peek(p) =? "(" {
+        take(@p);
+        let args:array<Expr> = []
+        loop peek(p) not=? ")" {
+            if not args.is_empty and take(@p) not=? "," return BadInput["expected `,` or `)` in {t}"]
+            args.push(expression(@p) or_throw)
+        }
+        take(@p);
+        return Call[t.upper args]
+    }
+    let first = cell_named(t) ?? return BadInput["{t} is not a cell"]
+    if peek(p) not=? ":" return Ref[first]
+    take(@p);
+    let closing = take(@p)
+    let last = cell_named(closing) ?? return BadInput["{shown(closing)} does not end a range"]
+    Span[first last]
+}
+
+parse_content = (text:string):>Content | BadInput => {
+    if text.startswith("'") return text[1..]
+    if not text.startswith("=") return rational(text) ?? BadInput["`{text}` is not a number, 'text or =formula"]
+    let p = Parser[lex(text[1..]) or_throw 0]
+    let tree = expression(@p) or_throw
+    if p.at <? p.tokens.length return BadInput["unexpected {shown(peek(p))}"]
+    Formula[text tree]
+}
+
+cells_in = (s:Span):>array<Cell> => [
+    loop row in [min(s.first.row s.last.row)..max(s.first.row s.last.row)]
+        loop col in [min(s.first.col s.last.col)..max(s.first.col s.last.col)] Cell[col row]
+]
+
+refs = (e:Expr):>array<Cell> => match e {
+    r:Ref => [r.cell]
+    s:Span => cells_in(s)
+    u:Negate => refs(u.operand)
+    b:Binary => [refs(b.left)... refs(b.right)...]
+    c:Call => [loop a in c.args loop cell in refs(a) cell]
+    _ => []
+}
+
+Sheet:type = [contents:dict<Cell Content> values:dict<Cell Value>]
+
+# An empty cell counts as 0; a stored error stays the cell's value.
+value_of = (sheet:Sheet c:Cell):>Value => sheet.values.get(c) ??<none> 0
+
+number = (v:Value):>rational | Fault => match v {
+    n:rational => n
+    f:Fault => f
+    _ => Fault["#VALUE!"]
+}
+
+# Numbers in a function's arguments: ranges skip text and empty cells, a
+# direct text argument is an error, and the first error found wins.
+numbers = (sheet:Sheet args:array<Expr>):>array<rational> | Fault => {
+    let found:array<rational> = []
+    loop a in args {
+        if a is? Span {
+            loop c in cells_in(a) {
+                match sheet.values.get(c) {
+                    n:rational => found.push(n)
+                    f:Fault => return f
+                    _ => {}
+                }
+            }
+        } else {
+            found.push(number(evaluate(sheet a)) or_throw)
+        }
+    }
+    found
+}
+
+evaluate = (sheet:Sheet e:Expr):>Value => match e {
+    n:Num => n.value
+    r:Ref => value_of(sheet r.cell)
+    _:Span => Fault["#VALUE!"]
+    u:Negate => -(number(evaluate(sheet u.operand)) or_throw)
+    b:Binary => {
+        let x = number(evaluate(sheet b.left)) or_throw
+        let y = number(evaluate(sheet b.right)) or_throw
+        match b.op {
+            <"+"> => x + y
+            <"-"> => x - y
+            <"*"> => x * y
+            <"/"> => {
+                if y =? 0 return Fault["#DIV/0!"]
+                x / y
+            }
+            <"<"> => truth(x <? y)
+            <">"> => truth(x >? y)
+            <"="> => truth(x =? y)
+            <"<="> => truth(x <=? y)
+            <">="> => truth(x >=? y)
+            _ => truth(x not=? y)
+        }
+    }
+    c:Call => call(sheet c)
+}
+
+truth = (b:bool):>rational => if b 1 else 0
+
+call = (sheet:Sheet c:Call):>Value => {
+    if c.args.is_empty return Fault["#ARGS!"]
+    match c.name {
+        <"IF"> => {
+            if c.args.length not=? 3 return Fault["#ARGS!"]
+            let test = number(evaluate(sheet c.args[0])) or_throw
+            evaluate(sheet c.args[if test not=? 0 1 else 2])
+        }
+        <"ROUND"> => {
+            if c.args.length not=? 2 return Fault["#ARGS!"]
+            let x = number(evaluate(sheet c.args[0])) or_throw
+            let places = number(evaluate(sheet c.args[1])) or_throw
+            if places <? 0 or places >? 6 or places.denominator not=? 1 return Fault["#VALUE!"]
+            let scale = rational(10^places.numerator)
+            round(x * scale) / scale
+        }
+        <"SUM" | "AVG" | "MIN" | "MAX" | "COUNT" | "ABS"> => {
+            if c.name =? "ABS" and c.args.length not=? 1 return Fault["#ARGS!"]
+            let ns = numbers(sheet c.args) or_throw
+            match c.name {
+                <"SUM"> => ns.sum
+                <"COUNT"> => ns.length
+                <"ABS"> => abs(ns.get(0) ?? 0)
+                <"AVG"> => if ns.is_empty Fault["#DIV/0!"] else ns.sum / ns.length
+                _ => if ns.is_empty 0 else if c.name =? "MIN" ns.min else ns.max
+            }
+        }
+        _ => Fault["#NAME?"]
+    }
+}
+
+# Formula cells in dependency order (by row, then column, among the ready),
+# and the ones left over, which are on or behind a circular reference.
+order = (sheet:Sheet):>[ready:array<Cell> stuck:array<Cell>] => {
+    let waiting:dict<Cell int> = []
+    let users:dict<Cell array<Cell>> = []
+    loop [c content] in sheet.contents {
+        if content isnt? Formula continue
+        let deps = set[loop d in refs(content.tree) if sheet.contents.get(d) is? Formula d]
+        waiting[c] = deps.length
+        loop d in deps users[d] = [(users.get(d) ?? [])... c]
+    }
+    let by_position = (c:Cell) => c.row * 26 + c.col
+    let ready = [loop [c n] in waiting if n =? 0 c].sorted(key=@by_position)
+    let done:array<Cell> = []
+    loop not ready.is_empty {
+        let next = ready[0]
+        ready = ready[1..)
+        done.push(next)
+        loop user in (users.get(next) ?? []) {
+            waiting[user] = (waiting.get(user) ?? 1) - 1
+            if waiting.get(user) =? 0 ready = [ready... user].sorted(key=@by_position)
+        }
+    }
+    let finished = set[done...]
+    [done [loop c in waiting.keys if c not in? finished c].sorted(key=@by_position)]
+}
+
+# Recalculates the formula cells in `dirty`, or all of them; gives how many.
+recalc = (@sheet:Sheet dirty:set<Cell>?):>int64 => {
+    let [ready stuck] = order(sheet)
+    let count = 0
+    loop c in ready {
+        if dirty isnt? none and c not in? dirty continue
+        let content = sheet.contents.get(c) ?? continue
+        if content is? Formula sheet.values[c] = evaluate(sheet content.tree)
+        count += 1
+    }
+    loop c in stuck {
+        if dirty isnt? none and c not in? dirty continue
+        sheet.values[c] = Fault["#CYCLE!"]
+        count += 1
+    }
+    count
+}
+
+show = (v:Value):>string => match v {
+    n:rational => {
+        if n.denominator =? 1 return "{n}"
+        let cents = round(n * 100)
+        let sign = if cents <? 0 "-" else ""
+        let whole = abs(cents) // 100
+        let part = abs(cents) % 100
+        "{sign}{whole}.{if part <? 10 "0" else ""}{part}"
+    }
+    f:Fault => f.code
+    t:string => t
+}
+
+shown_at = (values:dict<Cell Value> c:Cell):>string => show(values.get(c) ??<none> "")
+
+print_grid = (sheet:Sheet) => {
+    if sheet.contents.is_empty return
+    let last_row = [loop c in sheet.contents.keys c.row].max
+    let used = [loop c in sheet.contents.keys c.col]
+    let cols = [loop col in [0..26) if col in? used col]
+    let widths = [
+        loop col in cols {
+            let w:int64 = 1
+            loop c in sheet.contents.keys if c.col =? col w = max(w show(value_of(sheet c)).length)
+            w
+        }
+    ]
+    printl"   |{[loop col in cols and w in widths LETTERS[col].pad_center(w)].join("|")}"
+    loop row in [1..last_row] {
+        let line = [
+            loop col in cols and w in widths {
+                let v = value_of(sheet Cell[col row])
+                let empty = not sheet.contents.has(Cell[col row])
+                if empty " " * w else if v is? rational show(v).pad_start(w) else show(v).pad_end(w)
+            }
+        ]
+        printl"{fmt'>3'(row)}|{line.join("|")}"
+    }
+}
+
+# Cells that a change to any of `changed` reaches, the changed ones included.
+reached = (sheet:Sheet changed:array<Cell>):>set<Cell> => {
+    let seen = set[changed...]
+    let frontier = changed
+    loop not frontier.is_empty {
+        let next:array<Cell> = []
+        loop [c content] in sheet.contents {
+            if content isnt? Formula or c in? seen continue
+            if refs(content.tree).any((d) => d in? frontier) { seen.push(c); next.push(c) }
+        }
+        frontier = next
+    }
+    seen
+}
+
+set_cell = (@sheet:Sheet c:Cell content:Content) => {
+    sheet.contents[c] = content
+    if content isnt? Formula sheet.values[c] = content
+}
+
+main = (argv:array<string>) => {
+    let sheet = Sheet[[] []]
+    loop n in 1.. and raw in (read_stdin or_throw).lines {
+        let line = raw.trim
+        if line.is_empty or line.startswith("#") continue
+        let colon = line.find(":") ?? { printl"line {n}: expected `CELL: content`"; continue }
+        let c = cell_named(line[..colon).trim) ?? { printl"line {n}: `{line[..colon).trim}` is not a cell"; continue }
+        match parse_content(line[$clamp colon + 1..].trim) {
+            bad:BadInput => printl"line {n}: {name(c)}: {bad.message}"
+            content:Content => set_cell(@sheet c content)
+        }
+    }
+    let count = recalc(@sheet none)
+    printl"calculated {count} formulas"
+    print_grid(sheet)
+    let faults = [loop [c v] in sheet.values if v is? Fault "{name(c)} {v.code}"]
+    if not faults.is_empty printl"errors: {faults.join(", ")}"
+    loop edit in argv[$clamp 1..] {
+        let colon = edit.find(":") ?? { printl"edit `{edit}`: expected CELL:content"; continue }
+        let c = cell_named(edit[..colon)) ?? { printl"edit `{edit}`: not a cell"; continue }
+        let content = parse_content(edit[$clamp colon + 1..])
+        if content is? BadInput {
+            printl"edit {name(c)}: {content.message}"
+            continue
+        }
+        let before = sheet.values.copy
+        set_cell(@sheet c content)
+        let dirty = reached(sheet [c])
+        let count = recalc(@sheet dirty)
+        let moved = [
+            loop d in dirty.sorted(key=(d) => d.row * 26 + d.col)
+                if shown_at(before d) not=? shown_at(sheet.values d)
+                    "{name(d)} {shown_at(before d)} -> {shown_at(sheet.values d)}"
+        ]
+        printl"set {edit}: recalculated {count}, changed {if moved.is_empty "nothing" else moved.join(", ")}"
+    }
+    if argv.length >? 1 print_grid(sheet)
+}

@@ -730,6 +730,18 @@
     "dawdle=30"
    ],
    "note": "Nagel-Schreckenberg ring-road traffic CLI through argparse (refined counts and percent, a `uint64` seed, an optional light cell, a flag): an `array<Car?>` road updated in parallel each step, floored-modulo ring indexing, a seeded xorshift64* for dawdling, a red light that walls a cell on a cycle, a space-time diagram, exact mean speed formatted, cars past the light and the longest stopped queue."
+  },
+  "152_sheet_recalc": {
+   "milestone": 44,
+   "args": [
+    "C5:3",
+    "E8:=E9/2",
+    "E6:5",
+    "B2:=B3*4",
+    "Z:4",
+    "C6:=SUM(C2:C4)"
+   ],
+   "note": "Spreadsheet recalculation over stdin cells: a lexer and precedence parser for formulas with cell ranges and functions, exact fractions with guarded division, error values (#DIV/0!, #VALUE!, #NAME?, #ARGS!, #CYCLE!) stored in a `rational | string | Fault` cell union and spread through or_throw while `??<none>` keeps them, Kahn's order over record-keyed dictionaries with circular cells left over, a column-aligned grid, and edits from the command line that recalculate only the cells they reach."
   }
  },
  "design_passing": [
