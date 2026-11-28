@@ -889,6 +889,7 @@ def plan(cases: list[Case], node: bool) -> list[tuple[str, str, list[Case]]]:
                 DEFINES_MAIN.search(sources[c.path]) is None
                 or MAIN_WITH_PARAMS.search(sources[c.path]) is not None
                 or ALLOCATION_COUNTER.search(sources[c.path]) is not None
+                or EXIT_HANDLER.search(sources[c.path]) is not None
             )
         )
     }
