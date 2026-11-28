@@ -158,11 +158,12 @@ fact_count_call=(n:LibraryWord):>bool=>$unsafe {
 }
 # Reviewed array (set, text) emptiness contract. O(1), only when a demanded
 # expression reads the result; mutation continues to invalidate the receiver
-# normally. A set's is its entry count's (fact_entry_count_call).
+# normally. A set's or dictionary's is its entry count's (fact_entry_count_call).
 fact_empty_array_call=(n:LibraryWord):>bool=>$unsafe {
     if nkids(n) not=? 1 or not fact_library_call(n "is_empty") {return false}
     let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
     if is_dewy_set_type(representation_type(ntype(kid(n 0)))) {return files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/dewy_sets.jo"}
+    if is_map_type(representation_type(ntype(kid(n 0)))) {return files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/map.jo"}
     let t=fact_type(ntype(kid(n 0)))
     # Text has no bytes exactly when it has no graphemes, so either length projection is zero.
     if t =? T_STR {return files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/dewy.jo"}

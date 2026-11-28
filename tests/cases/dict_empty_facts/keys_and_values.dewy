@@ -1,0 +1,17 @@
+# A dictionary that is not empty has keys and values to reduce.
+widest = (d:dict<string int64>):>int64 => {
+    if d.is_empty return 0
+    [loop k in d.keys k.length].max
+}
+largest = (d:dict<string int64>):>int64 => {
+    if d.is_empty return 0
+    d.values.max
+}
+first_name = (d:dict<string int64>):>string => {
+    if d.is_empty return ""
+    d.keys.sorted[0]
+}
+let d:dict<string int64> = ["ann"->3 "bo"->9]
+printl"{widest(d)} {largest(d)} {first_name(d)}"
+let none_yet:dict<string int64> = []
+printl"{widest(none_yet)} {largest(none_yet)} [{first_name(none_yet)}]"
