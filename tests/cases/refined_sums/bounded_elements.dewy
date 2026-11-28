@@ -1,0 +1,17 @@
+# Bounded elements of an array no longer than the address range sum within int64, and its
+# least and greatest elements keep the contract.
+Level:type = int64<v => 0 <=? v and v <=? 255>
+total = (xs:array<Level>):>int64 => xs.sum
+spread = (xs:array<Level>):>int64 => {
+    if xs.length =? 0 return 0
+    let lo = min(xs)
+    let hi = max(xs)
+    if hi =? lo return 0
+    let span:int64 = hi - lo
+    255 // span
+}
+main = ():>void => {
+    let xs:array<Level> = [1 2 3 52]
+    printl(total(xs))
+    printl(spread(xs))
+}

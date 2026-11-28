@@ -31,6 +31,8 @@ from p"type_ops.dewy" import (dt fixed_len int_policy mk_array)
 from p"util.jo" import (err_notes files intern name_of pos_file pos_in_lib)
 from p"witness_nodes.dewy" import (wit_text)
 from p"witness_ops.dewy" import (wit_fail wit_help wit_index wit_unknown)
+from p"refine_transfers.dewy" import (ref_assume)
+from p"checker_call_resolve.dewy" import (sum_refined_elements)
 
 LibraryWord:type=int64<overflow='wrap'>
 # max(0, n) as a projection of n, so every use of one count (fills of the same
@@ -361,7 +363,10 @@ fact_exact_sum_check=(n:LibraryWord @s:FactState values:array<int64>):>void=>$un
     let nd=is_nd(representation_type(t))
     if nd {base=fact_project(@s base intern("data") false mk_array(nd_elem(representation_type(t))))}
     let length=if tkind(t) =? 'fixed' {fact_constant(@s fixed_len(t))} else {fact_project(@s base (-1) false T_INT)}
-    let hull=fact_element_hull(@s base e)
+    # (the elements' contract as the argument has it, before the call widened it to plain
+    # numbers: library_sum)
+    let declared=sum_refined_elements.get(n) ?? (if nd {0} else {telem(t)})
+    let hull=fact_refined_hull(@s fact_element_hull(@s base e) declared e)
     let proven=fact_exact_sum_fits(@s base fact_bound(s length) hull e)
     if fact_probe_on {
         fact_probe_record(n proven)
@@ -385,7 +390,7 @@ fact_array_extremum=(n:LibraryWord @s:FactState values:array<int64>):>LibraryWor
     if tkind(t) not=? 'array' and tkind(t) not=? 'fixed' {return 0}
     let e=fact_type(telem(t))
     if e not=? fact_type(ntype(n)) or not fact_scalar(e) {return 0}
-    let hull=fact_element_hull(@s fact_map_receiver(@s n values[0]) e)
+    let hull=fact_refined_hull(@s fact_element_hull(@s fact_map_receiver(@s n values[0]) e) telem(t) e)
     if hull.wide {return 0}
     fact_new(@s hull FactTerm(type=ntype(n)))
 }
@@ -403,6 +408,15 @@ fact_element_hull=(@s:FactState base:LibraryWord e:LibraryWord):>FactBound=>{
         }
     }
     b
+}
+# A hull narrowed by the elements' declared contract, `array<Level>`: each holds only what
+# Level admits. O(the contract's atoms).
+fact_refined_hull=(@s:FactState hull:FactBound declared0:LibraryWord e:LibraryWord):>FactBound=>$unsafe {
+    let declared=prune(declared0)
+    if declared =? 0 or types.ptr[declared].kind not=? 'refined' {return hull}
+    let element=fact_new(@s hull FactTerm(type=e))
+    ref_assume(declared element [] @s)
+    fact_bound(s element)
 }
 # Whether every running sum of base's elements fits e (int64 or uint64):
 # the positive upper bounds' total within e's maximum and the negative lower
@@ -429,10 +443,12 @@ fact_exact_sum_fits=(@s:FactState base:LibraryWord count:FactBound hull:FactBoun
         }
         return true
     }
-    if count.wide {return false}
-    if count.hi <=? 0 {return true}
+    if not count.wide and count.hi <=? 0 {return true}
     let m=fact_exact_sum_magnitudes(hull unsigned)
-    let length=uint64<overflow='wrap'>(count.hi)
+    # (no array is longer than the target's `addr` range: fact_length_max, an axiom
+    # `$no_assumed_bounds` turns off)
+    let most=fact_length_max()
+    let length=uint64<overflow='wrap'>(if count.wide or count.hi >? most {most} else {count.hi})
     (m[0] =? uint64<overflow='wrap'>(0) or length <=? top // m[0]) and (m[1] =? uint64<overflow='wrap'>(0) or length <=? bottom // m[1])
 }
 # (a bound's positive upper end and negative lower end as magnitudes; a wide

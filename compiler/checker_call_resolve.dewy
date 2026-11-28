@@ -26,12 +26,12 @@ from p"checker_call_cost.dewy" import (Cand arg_cost call_candidate_cost)
 from p"checker_call_convert.dewy" import (call_mutable_cost)
 from p"checker_call_queries.dewy" import (ctx_dependent check_mutable_arguments save_call_order)
 from p"checker_expr.dewy" import (check_expr finish_arg check_args_untyped)
-from p"check.jo" import (decl_infos fns)
+from p"check.jo" import (decl_infos fns lib_dir)
 from p"checker_decl_slots.dewy" import (decl_info)
 from p"rational_types.dewy" import (bundled_rational_type bundled_word_rational_type)
 from p"effects.jo" import (effect_contracts)
 from p"poly_ops.dewy" import (poly_default_type poly_default_variant poly_fnref)
-from p"util.jo" import (pos_file files)
+from p"util.jo" import (name_of pos_file files)
 from p"time_grid_types.dewy" import grid_convert_call
 from p"ide.jo" import (ide_on)
 from p"refine.jo" import (RefArrayCall refine_active)
@@ -431,6 +431,12 @@ resolve_fn_call_slow=(n:CRWord name:CRWord decls:array<int64> args:array<int64> 
             b=cd.binds.ptr[i]
         }
         if b =? 0 or tkind(b) =? 'var' {call_resolve_error(5 n name decl i partial)}
+        # (the library's `sum` adds plain numbers: `array<Level>` sums to an int64, which
+        # its elements' contract need not admit)
+        if refine_active and tkind(b) =? 'refined' and library_sum(decl) {
+            sum_refined_elements[n]=b
+            cd.binds.ptr[i]=representation_type(b)
+        }
     }
     if closure not=? 0 {
         let variant=poly_default_variant(decl cd.args)
@@ -563,4 +569,13 @@ resolve_fn_call_slow=(n:CRWord name:CRWord decls:array<int64> args:array<int64> 
     if wi_any and cc_any and closure =? 0 {call_warn_unsettled(n f decl)}
     if capture_defaults {call_capture_block(n f @statements)}
     result_type
+}
+# Each such call's element type as written, by call: what fact_exact_sum_check bounds them by.
+let sum_refined_elements:dict<int64 int64>=[]
+sum_refined_reset=():>void=>{sum_refined_elements=dict<int64 int64>()}
+# The bundled `sum` of an array or matrix, whose result is its elements' number type.
+library_sum=(decl:CRWord):>bool=>$unsafe {
+    if decl <=? 0 or name_of(CRWord(nodes.ptr[decl].name)) not=? "sum" {return false}
+    let path=files.ptr[pos_file(nodes.ptr[decl].pos)].path
+    path =? "{lib_dir}/core/array.jo" or path =? "{lib_dir}/std/nd.jo"
 }

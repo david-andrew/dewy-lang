@@ -1,5 +1,6 @@
 $runtime_checks
 from p"expression_types.dewy" import (ntype)
+from p"checker_call_resolve.dewy" import (sum_refined_reset)
 
 from p"directives.jo" import (DIR_IMPLICIT)
 from p"directive_queries.dewy" import (dir_policy)
@@ -418,6 +419,7 @@ facts_finalize=():>void=>$unsafe {
     if wit_collected >? 0 and not wit_measure {stop(1)}
 }
 facts_reset=():>void=>{
+    sum_refined_reset()
     fact_predicates=dict<int64 int64>()
     fact_predicate_nodes=[FactPredicate()]
     fact_shared_literals=[]
