@@ -574,11 +574,20 @@ fact_bitwise=(@s:FactState n:NumericWord op:Tok a:NumericWord b:NumericWord):>Nu
         let divided=fact_sum_quotient(@s n a NumericWord(1) << NumericWord(y.lo))
         if divided not=? 0 {return divided}
     }
+    # An open `int` end (MAX standing for beyond a word, as for a product of
+    # two int64s) bounds nothing: a result reaching it stays an open `int`,
+    # even on an exact node that keeps its fixed storage type. O(1) plus
+    # fact_open_endpoint's incident rows, only at a MAX end.
+    let x_open=x.hi =? FACT_MAX and fact_open_endpoint(s a true)
+    let y_open=y.hi =? FACT_MAX and fact_open_endpoint(s b true)
     # A finite nonnegative mask bounds even an arbitrarily wide exact operand.
     # Do not discard this proof just because the other side exceeded a word.
     if op =? 'amp' and (x.wide or y.wide) and fact_type(ntype(n)) not=? T_U64 {
         if not x.wide and x.lo >=? 0 or not y.wide and y.lo >=? 0 {
-            let hi=if not x.wide and x.lo >=? 0 and not y.wide and y.lo >=? 0 {min(x.hi y.hi)} else if not x.wide and x.lo >=? 0 {x.hi} else {y.hi}
+            let both=not x.wide and x.lo >=? 0 and not y.wide and y.lo >=? 0
+            let hi=if both {min(x.hi y.hi)} else if not x.wide and x.lo >=? 0 {x.hi} else {y.hi}
+            let open=if both {x_open and y_open} else if not x.wide and x.lo >=? 0 {x_open} else {y_open}
+            if open {return fact_new(@s fact_open_bound(0 FACT_MAX false true) FactTerm('eof' a b n T_MATH_INT))}
             return fact_new(@s FactBound(0 hi) FactTerm('eof' a b n ntype(n)))
         }
     }
@@ -591,6 +600,7 @@ fact_bitwise=(@s:FactState n:NumericWord op:Tok a:NumericWord b:NumericWord):>Nu
     }
     if x.wide or y.wide {return fact_unmodeled(@s n 'unsupported')}
     let r=FactBound()
+    let open=false
     if fact_type(ntype(n)) =? T_U64 {
         if fact_type(ntype(NumericWord(nodes.ptr[n].a))) not=? T_U64 {return fact_unmodeled(@s n 'unsupported')}
         if op =? 'amp' and fact_type(ntype(NumericWord(nodes.ptr[n].b))) =? T_U64 {
@@ -617,6 +627,8 @@ fact_bitwise=(@s:FactState n:NumericWord op:Tok a:NumericWord b:NumericWord):>Nu
     if op =? 'amp' and (x.lo >=? 0 or y.lo >=? 0) {
         r.lo=0
         r.hi=if x.lo >=? 0 and y.lo >=? 0 {min(x.hi y.hi)} else if x.lo >=? 0 {x.hi} else {y.hi}
+        open=if x.lo >=? 0 and y.lo >=? 0 {x_open and y_open} else if x.lo >=? 0 {x_open} else {y_open}
+        if open {r=fact_open_bound(0 FACT_MAX false true)}
     }
     else if (op =? 'pipe' or op =? 'caret') and x.lo >=? 0 and y.lo >=? 0 {
         let top=max(x.hi y.hi)
@@ -625,8 +637,9 @@ fact_bitwise=(@s:FactState n:NumericWord op:Tok a:NumericWord b:NumericWord):>Nu
         r.lo=if op =? 'pipe' {max(x.lo y.lo)} else {0}
         r.hi=mask
         # (an open `int` end makes no mask: `n | MAX` is at least MAX, not MAX)
-        if x.hi =? FACT_MAX and fact_open_endpoint(s a true) or y.hi =? FACT_MAX and fact_open_endpoint(s b true) {
+        if x_open or y_open {
             r=fact_open_bound(r.lo FACT_MAX false true)
+            open=true
         }
     }
     else if (op =? 'amp' or op =? 'pipe' or op =? 'caret') and fact_host_finite(s a) and fact_host_finite(s b) {
@@ -651,7 +664,7 @@ fact_bitwise=(@s:FactState n:NumericWord op:Tok a:NumericWord b:NumericWord):>Nu
         # Arithmetic right shift is monotone in x. For negative x increasing
         # the count raises the result; for nonnegative x it lowers it.
         # Mathematical int's endpoint sentinels are not finite bounds.
-        if fact_type(ntype(NumericWord(nodes.ptr[n].a))) =? T_MATH_INT and (not fact_host_endpoint(s a false) or not fact_host_endpoint(s a true)) {return fact_unmodeled(@s n 'unsupported')}
+        if (fact_type(ntype(NumericWord(nodes.ptr[n].a))) =? T_MATH_INT or fact_type(fact_terms[a].type) =? T_MATH_INT) and (not fact_host_endpoint(s a false) or not fact_host_endpoint(s a true)) {return fact_unmodeled(@s n 'unsupported')}
         let low_count:NumericWord=if x.lo <? 0 {y.lo} else {y.hi}
         let high_count:NumericWord=if x.hi <? 0 {y.hi} else {y.lo}
         r.lo=NumericWord(x.lo) >> low_count
@@ -665,7 +678,7 @@ fact_bitwise=(@s:FactState n:NumericWord op:Tok a:NumericWord b:NumericWord):>Nu
     }
     else {return fact_unmodeled(@s n 'unsupported')}
     r.nz=r.lo >? 0
-    let v=fact_new(@s r FactTerm('eof' a b n ntype(n)))
+    let v=fact_new(@s r FactTerm('eof' a b n (if open {T_MATH_INT} else {ntype(n)})))
     # (a row only where an interval cannot say it: a symbolic mask, as
     # `i & (n-1)`; constant masks and shifts are exact enough as intervals)
     if op =? 'amp' and y.lo >=? 0 and y.lo not=? y.hi {fact_difference(@s v b 0 n)}

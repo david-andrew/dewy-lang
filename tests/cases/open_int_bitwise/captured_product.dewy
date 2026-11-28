@@ -1,0 +1,23 @@
+# A product of two int64s is an `int` with an open upper end. Bitwise
+# operations and shifts on it must not read that end as int64.max.
+$runtime_checks
+$no_assumed_bounds
+main=():>void=>{
+    let n:int64=(int64(-8) - int64(4611686018427387904))
+    let get=(s:int64 $capture @n):>int64=>{ n }
+    printl(get(0))
+    printl"= {((n * n) and n)}"
+    printl((n * n) and int64(-5))
+    printl((n * n) and int64(5))
+    printl((n * n) and (n * n * n))
+    printl(n and (n * n))
+    printl((n * n + 1) and n)
+    printl((n * n) or int64(5))
+    printl((n * n) xor int64(5))
+    printl((n * n) >> 3)
+    printl(((n * n) and int64(255)) + 1)
+    let (a b ...rest)=[n int64(0) n]
+    printl(a)
+    printl(b)
+    printl(rest)
+}

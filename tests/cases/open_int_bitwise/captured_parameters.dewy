@@ -1,0 +1,25 @@
+# Captured int64 parameters and locals: a square or product is an open `int`.
+$runtime_checks
+f=(n:int64 m:int64):>void=>{
+    let g=(s:int64 $capture @n $capture @m):>int64=>{ n + m }
+    printl(g(0))
+    printl((n * n) and m)
+    printl((n * n) or int64(5))
+    printl((n * n) >> 3)
+    printl((n * n) and int64(-5))
+    printl((n * m) and int64(-5))
+    printl((n * n) and int64(1023))
+    let (a b)=[n m]
+    printl(a)
+}
+main=():>void=>{
+    let k:int64=int64(3037000500)
+    let h=(s:int64 $capture @k):>int64=>{ k }
+    printl(h(0))
+    printl((k * k) and int64(-1))
+    printl((k * k * 4) >> 1)
+    printl((k * k * 4) xor int64(1))
+    let (a b)=[k k]
+    f(int64(-4611686018427387912) int64(-3))
+    f(int64(-9223372036854775808) int64(9223372036854775807))
+}

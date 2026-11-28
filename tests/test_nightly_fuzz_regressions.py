@@ -2,6 +2,7 @@
 - x64 baseline match lookup table signed subtraction overflow on wide int64 literals
 - x64 baseline per-arm scoping for match/if value arms with managed bindings
 - facts inventory misclassifying dense integer-keyed dict literals as arrays
+- bitwise facts reading an open `int` end of an exact product as int64.max (2026-11-28)
 """
 import subprocess
 
@@ -140,3 +141,26 @@ main = ():>void => {
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout.splitlines() == ['10', '20', '50', '1', '4', '5',
                                        'fallback-v0:1', 'kept:0', 'fallback-v2:1', 'kept:0']
+
+
+@pytest.mark.parametrize('release', [False, True])
+def test_captured_int64_square_bitwise_stays_exact(compiler, tmp_path, release):
+    # seed 4610887 (2026-11-28): `n*n` of an int64 is an `int` in [0, open);
+    # `and` with a negative mask read the open end as int64.max and lowered
+    # the product as one wrapped word.
+    source = r'''
+$runtime_checks
+$no_assumed_bounds
+
+main = ():>void => {
+    let n2:int64 = (int64(-8) - int64(4611686018427387904))
+    let fn7 = (s9:int64 $capture @n2):>int64 => { n2 }
+    printl(n2)
+    printl"= {((n2 * n2) and n2)}"
+    let (v17 v18 v19 ...rest20) = [int64(n2) int64(0) int64(n2)]
+    printl(rest20)
+}
+'''
+    ran = _build_and_run(compiler, tmp_path, 'open_square_and', source, release=release)
+    assert ran.returncode == 0, ran.stderr
+    assert ran.stdout.splitlines() == ['-4611686018427387912', '= 21267647932558654040247889259323719744', '[]']
