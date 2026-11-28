@@ -2833,7 +2833,7 @@ entire source. Matrix slice reads use the same bulk append path for each row.
 to a value and `xs.count(f)` those a predicate accepts; `xs.any(f)` and
 `xs.all(f)` test a predicate. `xs.map(f)` is a new array of `f`'s results and
 `xs.filter(f)` one of the elements `f` accepts (a comprehension says either,
-`[loop x in xs if f(x) x]`); `xs.reversed()` is a new array in reverse order,
+`[loop x in xs if f(x) x]`); `xs.reversed` is a new array in reverse order,
 while `xs.reverse()` reverses `xs` itself. `xs.get(i)` gives the element, or
 `none` when `i` is out of bounds (negative included). Any `int` index works, with nothing to prove: one beyond the `int64` range is out of bounds too. Without a predicate, `any` and `all` apply only to
 an array of bools (`all(flags)`; the idiom for numbers is a comparison per
