@@ -39,13 +39,11 @@ targ = (t: int, i: int) -> int: T_INT
     'util.jo': r'''use 'source_types.dewy'
 files: SrcFile[] = [SrcFile(is_dewy=true)]
 pos_file = (p: int) -> int: 0
-name_of = (n: int) -> str: ""
 ''',
     'check.jo': r'''use 'driver.jo'
 use 'checker_state.dewy'
 decl_infos: DeclInfo[] = [DeclInfo()]
 fns: FnInst[] = [FnInst()]
-lib_dir = "/lib"
 decl_info = (d: int) -> int: int(nodes[d].aux)
 get_fn_inst = (d: int, bs: int[], pos: int) -> int:
     let bs = bs
@@ -319,13 +317,18 @@ call_mutable_cost=(a:int64 p:int64 @bs:array<int64> @recv:bool receiver:bool):>i
 '''
 JO['checker_call_convert.jo'] += "call_mutable_cost = (a: int, p: int, bs: mut int[], recv: mut bool, receiver: bool) -> int: call_mutable_double(a, p, bs, recv, receiver)\n"
 
+# (the library `sum` test reads the library's path; kept out of JO, which other twins extend)
+JO_RESOLVE = dict(JO)
+JO_RESOLVE['check.jo'] += 'lib_dir = "/lib"\n'
+JO_RESOLVE['util.jo'] += 'name_of = (n: int) -> str: ""\n'
+
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_call_resolve_twins(compiler, tmp_path, release):  # noqa: F811
     output = compare(compiler, tmp_path, release, DRIVER + MAIN,
                      extra_stems=('checker_call_cost', 'checker_call_resolve'),
-                     doubles=DOUBLES, jo_doubles=JO)
+                     doubles=DOUBLES, jo_doubles=JO_RESOLVE)
     assert output.endswith(b'ok\n')
     assert b'capture-block:' in output and b'partial:' in output
     assert b'untyped:[]' in output and b'settle' in output
@@ -340,5 +343,5 @@ def test_checker_call_resolve_twins(compiler, tmp_path, release):  # noqa: F811
 def test_checker_call_resolve_errors(compiler, tmp_path, setup, status, message):  # noqa: F811
     output = compare(compiler, tmp_path, False, DRIVER + 'main = ():\n    prepare(); events = []\n    ' + setup + '\n',
                      status=status, extra_stems=('checker_call_cost', 'checker_call_resolve'),
-                     doubles=DOUBLES, jo_doubles=JO)
+                     doubles=DOUBLES, jo_doubles=JO_RESOLVE)
     assert message in output

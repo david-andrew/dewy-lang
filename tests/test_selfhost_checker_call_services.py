@@ -133,6 +133,7 @@ exact_type = (t0: int, pos: int) -> bool: false
 ''',
     'util.jo': r'''
 intern = (s: str) -> int: 0
+name_of = (id: int) -> str: ""
 pos_in_lib = (p: int) -> bool: false
 ''',
     'reflection.jo': r'''
