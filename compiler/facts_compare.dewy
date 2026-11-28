@@ -122,6 +122,7 @@ fact_distance_slow=(s:FactState a:CompareWord b:CompareWord limit:CompareWord x_
     let drec=idx[0].difference_record.ptr
     let dnext=idx[0].difference_next.ptr
     let first_ri:CompareWord=-1
+    let last_ri:CompareWord=-1
     let has_a=false
     if indexed {
         if not x_ok {
@@ -143,7 +144,10 @@ fact_distance_slow=(s:FactState a:CompareWord b:CompareWord limit:CompareWord x_
                 has_a=true
                 if rp[0].b =? b and rp[0].limit <=? limit {return true}
             }
-            if rp[0].b =? b and first_ri <? 0 {first_ri=i}
+            if rp[0].b =? b {
+                if first_ri <? 0 {first_ri=i}
+                last_ri=i
+            }
             i+=1
         }
         if first_ri <? 0 or (not x_ok and not has_a) {return false}
@@ -218,7 +222,8 @@ fact_distance_slow=(s:FactState a:CompareWord b:CompareWord limit:CompareWord x_
             }
         } else {
             let k:CompareWord=if cursor =? 1 {first_ri} else {0}
-            loop k <? ndiffs {
+            let kend:CompareWord=if cursor =? 1 {last_ri + 1} else {ndiffs}
+            loop k <? kend {
                 let rp=diffs + k
                 k+=1
                 if rp[0].b not=? source {continue}

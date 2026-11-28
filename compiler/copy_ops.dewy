@@ -286,19 +286,11 @@ copy_escapes_batch=(n:CopyWord owning:bool):>void=>$unsafe {
 # ABI; their unsupported ownership proofs retain a diagnostic.
 copies_parameters=():>void=>$unsafe {
     if not dir_copies_any {return}
-    let indirect=dict<int64 bool>()
-    let np=nodes.ptr
-    loop ni in [0..nodes.length) {
-        let k=np[ni].kind
-        if k =? 'fnref' or k =? 'partial' {
-            if np[ni].sym >? 0 {indirect[int64(np[ni].sym)]=true}
-        }
-    }
     let cand_fns:array<int64>=[]
     loop f in [1..fns.length) {
         dir_code_owner=f
         let body=CopyWord(fns.ptr[f].body)
-        if body =? 0 or not copy_strict(body) or fns.ptr[f].kind not=? FK_NORMAL or fns.ptr[f].cabi or (fns.ptr[f].export_name as array<uint8>).length >? 0 or indirect.has(f) {continue}
+        if body =? 0 or not copy_strict(body) or fns.ptr[f].kind not=? FK_NORMAL or fns.ptr[f].cabi or (fns.ptr[f].export_name as array<uint8>).length >? 0 {continue}
         let has_cand=false
         let lbase=CopyWord(nodes.ptr[body].list)
         let nk=CopyWord(nodes.ptr[body].nlist)
@@ -311,11 +303,47 @@ copies_parameters=():>void=>$unsafe {
             if nodes.ptr[source].kind not=? 'ident' or nodes.ptr[source].aux not=? int32(1) {continue}
             let p=CopyWord(nodes.ptr[source].sym)
             if copy_inputs.has(p) or not costly_copy(CopyWord(locals.ptr[l].type)) {continue}
-            copy_borrowed[p]=true
             has_cand=true
+            break
         }
         if has_cand {cand_fns.push(f)}
     }
+    if cand_fns.length =? 0 {
+        dir_code_owner=0
+        return
+    }
+    let indirect=dict<int64 bool>()
+    let np=nodes.ptr
+    let nn:CopyWord=nodes.length
+    loop ni in [CopyWord(0)..nn) {
+        let kp=(np + ni) as ptr<uint32>
+        let kv=kp[0]
+        if kv =? uint32(34) or kv =? uint32(35) {
+            let sym=CopyWord(np[ni].sym)
+            if sym >? 0 {indirect[sym]=true}
+        }
+    }
+    let kept:array<int64>=[]
+    loop ci in [0..cand_fns.length) {
+        let f=cand_fns.ptr[ci]
+        if indirect.has(f) {continue}
+        let body=CopyWord(fns.ptr[f].body)
+        let lbase=CopyWord(nodes.ptr[body].list)
+        let nk=CopyWord(nodes.ptr[body].nlist)
+        loop i in [CopyWord(0)..nk) {
+            let s=CopyWord(lists.ptr[lbase + i])
+            if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+            if nkids(s) >? 0 {continue}
+            let l=CopyWord(nodes.ptr[s].sym)
+            let source=CopyWord(nodes.ptr[s].b)
+            if nodes.ptr[source].kind not=? 'ident' or nodes.ptr[source].aux not=? int32(1) {continue}
+            let p=CopyWord(nodes.ptr[source].sym)
+            if copy_inputs.has(p) or not costly_copy(CopyWord(locals.ptr[l].type)) {continue}
+            copy_borrowed[p]=true
+        }
+        kept.push(f)
+    }
+    cand_fns=kept
     if cand_fns.length =? 0 {
         dir_code_owner=0
         return

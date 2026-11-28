@@ -51,8 +51,33 @@ cw_classify_file=(fi:WaitingWord):>int8=>$unsafe {
     cw_file_path[fi]=p
     cls
 }
+let cw_seen_gen:array<int32>=[]
+let cw_seen_list:array<int32>=[]
+let cw_seen_cur:int32=0
+let cw_seen_active:bool=false
+
 concurrency_fn_blocks=(f:WaitingWord):>bool=>$unsafe {
     if concurrency_block_memo.has(f) {return concurrency_block_memo[f]}
+    if not cw_seen_active {
+        if cw_seen_gen.length <=? fns.length {cw_seen_gen.resize(fns.length + 64)}
+        cw_seen_cur=int32<overflow='wrap'>(int64(cw_seen_cur) + 1)
+        if cw_seen_cur =? int32(0) {
+            mem_set(cw_seen_gen.ptr as ptr<uint8> 0 cw_seen_gen.length * 4)
+            cw_seen_cur=int32(1)
+        }
+        cw_seen_list.clear()
+        cw_seen_active=true
+        let dummy:dict<int64 bool>=[]
+        let r=concurrency_blocks(f @dummy)
+        cw_seen_active=false
+        if r {concurrency_block_memo[f] = true;}
+        else {
+            let lp=cw_seen_list.ptr
+            let ln:WaitingWord=cw_seen_list.length
+            loop i in [WaitingWord(0)..ln) {concurrency_block_memo[WaitingWord(lp[i])] = false;}
+        }
+        return r
+    }
     let seen:dict<int64 bool>=dict<int64 bool>()
     let r=concurrency_blocks(f @seen)
     if r {concurrency_block_memo[f] = true;}
@@ -64,8 +89,15 @@ concurrency_fn_blocks=(f:WaitingWord):>bool=>$unsafe {
 concurrency_blocks=(f:WaitingWord @seen:dict<int64 bool> sharing:bool=false):>bool=>$unsafe {
     if f <=? 0 or f >=? fns.length {return true}
     if not sharing and concurrency_block_memo.has(f) {return concurrency_block_memo[f]}
-    if seen.has(f) {return false}
-    seen[f] = true;
+    if not sharing and cw_seen_active {
+        if f >=? cw_seen_gen.length {cw_seen_gen.resize(f + 64)}
+        if cw_seen_gen.ptr[f] =? cw_seen_cur {return false}
+        cw_seen_gen.ptr[f]=cw_seen_cur
+        cw_seen_list.push(int32<overflow='wrap'>(f))
+    } else {
+        if seen.has(f) {return false}
+        seen[f] = true;
+    }
     let d:WaitingWord=WaitingWord(fns.ptr[f].decl)
     if d =? 0 {return true}
     if modules.ptr[WaitingWord(fns.ptr[f].mod)].is_prelude {

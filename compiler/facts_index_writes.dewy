@@ -285,26 +285,31 @@ fact_add_projection=(@s:FactState p:FactProjection):>void=>{
 fact_index_projection=(@s:FactState p:FactProjection):>void=>$unsafe {
     let i:IndexWord=s.projections.length
     let key=fact_projection_key(p.base p.selector p.element)
-    if fact_index_get_raw(s.index[0].projection_index.ptr s.index[0].projection_index.length key) <? 0 {fact_index_put(@s.index[0].projection_index key i)}
-    if not p.element and fact_index_get_raw(s.index[0].projection_value.ptr s.index[0].projection_value.length p.value) <? 0 {fact_index_put(@s.index[0].projection_value p.value i)}
-    let tail:IndexWord=fact_index_get_raw(s.index[0].projection_tail.ptr s.index[0].projection_tail.length p.base)
-    if tail >=? 0 {s.index[0].projection_next[tail]=i} else {fact_index_put(@s.index[0].projection_head p.base i)}
-    fact_index_put(@s.index[0].projection_tail p.base i)
     s.index[0].projection_next.push(-1)
+    let idx=s.index.ptr
+    if fact_index_get_raw(idx[0].projection_index.ptr idx[0].projection_index.length key) <? 0 {fact_index_put(@idx[0].projection_index key i)}
+    if not p.element and fact_index_get_raw(idx[0].projection_value.ptr idx[0].projection_value.length p.value) <? 0 {fact_index_put(@idx[0].projection_value p.value i)}
+    let tail:IndexWord=fact_index_get_raw(idx[0].projection_tail.ptr idx[0].projection_tail.length p.base)
+    if tail >=? 0 {idx[0].projection_next.ptr[tail]=i} else {fact_index_put(@idx[0].projection_head p.base i)}
+    fact_index_put(@idx[0].projection_tail p.base i)
     s.projections.push(p)
 }
 # (v's row record, made on its first row; counts the row)
 fact_difference_touch=(@s:FactState v:IndexWord):>int64=>$unsafe {
-    let r:IndexWord=fact_index_get_raw(s.index[0].difference_value.ptr s.index[0].difference_value.length v)
+    let idx=s.index.ptr
+    let r:IndexWord=fact_index_get_raw(idx[0].difference_value.ptr idx[0].difference_value.length v)
     if r <? 0 {
-        r=s.index[0].difference_record.length // FACT_RECORD
-        fact_index_put(@s.index[0].difference_value v r)
+        r=idx[0].difference_record.length // FACT_RECORD
+        fact_index_put(@idx[0].difference_value v r)
         # (pushed one by one: `+=` would copy the whole record list)
-        s.index[0].difference_record.push(0)
-        loop _ in [0..4) {s.index[0].difference_record.push(-1)}
+        idx[0].difference_record.push(0)
+        idx[0].difference_record.push(-1)
+        idx[0].difference_record.push(-1)
+        idx[0].difference_record.push(-1)
+        idx[0].difference_record.push(-1)
     }
     let count:IndexWord=r * FACT_RECORD
-    s.index[0].difference_record[count]=IndexWord(s.index[0].difference_record[count]) + 1
+    idx[0].difference_record.ptr[count]=IndexWord(idx[0].difference_record.ptr[count]) + 1
     r
 }
 fact_add_difference=(@s:FactState row:FactDifference):>void=>{
@@ -324,19 +329,22 @@ fact_add_difference=(@s:FactState row:FactDifference):>void=>{
     }
     fact_index_difference(@s row)
 }
-fact_index_difference=(@s:FactState row:FactDifference):>void=>{
+fact_index_difference=(@s:FactState row:FactDifference):>void=>$unsafe {
     let i:IndexWord=s.differences.length
-    fact_index_put(@s.index[0].difference_index fact_pair_key(row.a row.b) i)
+    s.index[0].difference_next.push(-1)
+    let idx=s.index.ptr
+    idx[0].difference_next.push(-1)
+    fact_index_put(@idx[0].difference_index fact_pair_key(row.a row.b) i)
     let ra:IndexWord=fact_difference_touch(@s row.a)
     let rb:IndexWord=fact_difference_touch(@s row.b)
-    loop direction in [IndexWord(0)..2) {
-        let r=if direction =? 0 {rb} else {ra}
-        let at:IndexWord=r * FACT_RECORD + 1 + direction * 2
-        let tail:IndexWord=s.index[0].difference_record[at + 1]
-        if tail >=? 0 {s.index[0].difference_next[tail * 2 + direction]=i} else {s.index[0].difference_record[at]=i}
-        s.index[0].difference_record[at + 1]=i
-        s.index[0].difference_next.push(-1)
-    }
+    let at0:IndexWord=rb * FACT_RECORD + 1
+    let tail0:IndexWord=idx[0].difference_record.ptr[at0 + 1]
+    if tail0 >=? 0 {idx[0].difference_next.ptr[tail0 * 2]=i} else {idx[0].difference_record.ptr[at0]=i}
+    idx[0].difference_record.ptr[at0 + 1]=i
+    let at1:IndexWord=ra * FACT_RECORD + 3
+    let tail1:IndexWord=idx[0].difference_record.ptr[at1 + 1]
+    if tail1 >=? 0 {idx[0].difference_next.ptr[tail1 * 2 + 1]=i} else {idx[0].difference_record.ptr[at1]=i}
+    idx[0].difference_record.ptr[at1 + 1]=i
     s.differences.push(row)
 }
 fact_new=(@s:FactState b:FactBound term:FactTerm=FactTerm[]):>int64=>{
@@ -351,30 +359,77 @@ fact_new=(@s:FactState b:FactBound term:FactTerm=FactTerm[]):>int64=>{
     fact_add_value(@s v b)
     v
 }
-fact_reindex=(@s:FactState):>void=>{
-    let hashed=s.index[0].slots.length not=? 0
-    s.index[0].slots=[]
+fact_reindex=(@s:FactState):>void=>$unsafe {
+    let hashed=s.index.ptr[0].slots.length not=? 0
     if hashed {
-        loop i in [0..s.ids.length) {fact_index_put(@s.index[0].slots s.ids[i] i)}
+        let n_ids:IndexWord=s.ids.length
+        let sl=fact_index_sized(n_ids * 2)
+        let idsp=s.ids.ptr
+        loop i in [IndexWord(0)..n_ids) {fact_index_put(@sl idsp[i] i)}
+        s.index[0].slots=sl
+    } else if s.index.ptr[0].slots.length not=? 0 {
+        s.index[0].slots=[]
     }
     let projections=s.projections
-    s.projections=[]
-    s.proj_base_mask=0
-    s.index[0].projection_index=[]
-    s.index[0].projection_head=[]
-    s.index[0].projection_tail=[]
-    s.index[0].projection_next=[]
-    s.index[0].projection_value=[]
-    loop p in projections {fact_add_projection(@s p)}
+    let np:IndexWord=projections.length
+    let pmask:IndexWord=0
+    let pp=projections.ptr
+    loop i in [IndexWord(0)..np) {
+        pmask |= IndexWord(1) << (IndexWord(pp[i].base) & 63)
+    }
+    s.proj_base_mask=pmask
+    if np <? FACT_PROJECTION_SCAN {
+        if s.index.ptr[0].projection_next.length not=? 0 {
+            s.index[0].projection_index=[]
+            let idx=s.index.ptr
+            idx[0].projection_head=[]
+            idx[0].projection_tail=[]
+            idx[0].projection_next=[]
+            idx[0].projection_value=[]
+        }
+    } else {
+        s.projections=[]
+        s.projections.reserve(np)
+        let sz=np * 2
+        s.index[0].projection_index=fact_index_sized(sz)
+        let idx=s.index.ptr
+        idx[0].projection_value=fact_index_sized(sz)
+        idx[0].projection_head=fact_index_sized(np)
+        idx[0].projection_tail=fact_index_sized(np)
+        idx[0].projection_next=[]
+        idx[0].projection_next.reserve(np)
+        loop i in [IndexWord(0)..np) {fact_index_projection(@s pp[i])}
+    }
     let differences=s.differences
-    s.differences=[]
-    s.diff_a_mask=0
-    s.diff_b_mask=0
-    s.index[0].difference_index=[]
-    s.index[0].difference_value=[]
-    s.index[0].difference_record=[]
-    s.index[0].difference_next=[]
-    loop row in differences {fact_add_difference(@s row)}
+    let nd:IndexWord=differences.length
+    let amask:IndexWord=0
+    let bmask:IndexWord=0
+    let dp=differences.ptr
+    loop i in [IndexWord(0)..nd) {
+        amask |= IndexWord(1) << (IndexWord(dp[i].a) & 63)
+        bmask |= IndexWord(1) << (IndexWord(dp[i].b) & 63)
+    }
+    s.diff_a_mask=amask
+    s.diff_b_mask=bmask
+    if nd <? FACT_ROW_SCAN {
+        if s.index.ptr[0].difference_next.length not=? 0 {
+            s.index[0].difference_index=[]
+            let idx=s.index.ptr
+            idx[0].difference_value=[]
+            idx[0].difference_record=[]
+            idx[0].difference_next=[]
+        }
+    } else {
+        s.differences=[]
+        s.differences.reserve(nd)
+        s.index[0].difference_index=fact_index_sized(nd * 2)
+        let idx=s.index.ptr
+        idx[0].difference_value=fact_index_sized(nd)
+        idx[0].difference_record=[]
+        idx[0].difference_next=[]
+        idx[0].difference_next.reserve(nd * 2)
+        loop i in [IndexWord(0)..nd) {fact_index_difference(@s dp[i])}
+    }
 }
 fact_constant=(@s:FactState x:IndexWord at:IndexWord=0):>int64=>fact_new(@s FactBound(x x x not=? 0) FactTerm(origin=at))
 fact_bind=(@s:FactState p:PlaceIdentity v:IndexWord):>void=>$unsafe {

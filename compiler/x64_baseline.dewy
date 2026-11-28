@@ -53,20 +53,23 @@ from p"lower_storage.dewy" import (box_dflt_off boxed_field_of field_store_type 
 from p"lower_views.dewy" import (is_uniq_array)
 from p"math_ops.dewy" import (math_default_formatter math_payload_type)
 from p"member_admit.dewy" import (member_seen_owners)
+from p"member_replay.jo" import (member_compact_enabled member_compact_owners member_trace)
 from p"native_debug.dewy" import (sym_name)
 from p"ownership.jo" import (ownership_consumers ownership_decls ownership_hooks ownership_prints)
 from p"ownership_lower.dewy" import (owner_stride)
 from p"ownership_types.dewy" import (ownership_copyable ownership_type)
 from p"partition.jo" import (partition_active)
 from p"pcheck_drive.dewy" import (pc_restore)
-from p"refine.jo" import (refine_active refine_owners str_sets)
-from p"refine_metadata.dewy" import (ref_pair_erased str_set_of)
-from p"secrets.jo" import (secret_compares)
+from p"refine.jo" import (ref_narrowing ref_predicates ref_self_active refine_active refine_owners str_sets)
+from p"refine_metadata.dewy" import (ref_pair_erased representation_type str_set_of)
+from p"secrets.jo" import (secret_checks secret_compares)
 from p"type_constructors.dewy" import (tb_generators_seen)
-from p"type_ops.dewy" import (dt fixed_len int_policy is_managed layout math_optional mk_array mk_box ptr_optional type_has_fn union_holder union_index)
+from p"type_ops.dewy" import (dt fixed_len int_policy is_managed layout math_optional mk_array mk_box ptr_optional type_has_fn union_holder union_index zonk)
 from p"types.jo" import (TF_BOXED T_INT T_MATH_INT T_NEVER T_U8 align_up fields is_int is_union prune secrets_seen structs talign targ telem tkind tsize type_eq types union_members variants)
 from p"units.jo" import (quantity_base)
 from p"util.jo" import (files intern name_of pos_file pos_in_lib)
+from p"witness_nodes.dewy" import (wit_text)
+from p"witness_ops.dewy" import (wit_op wit_ref_text)
 from p"x64.jo" import (code fn_addr fn_len)
 from p"x64_emit.dewy" import (call_fix call_sites int_arg_regs line_rows row_pos stub_fix)
 from p"x64_encode.dewy" import (CC_A CC_AE CC_B CC_BE CC_E CC_G CC_GE CC_L CC_LE CC_NE CC_P R10 R11 R8 R9 RAX RBP RBX RCX RDI RDX RSI RSP XWord b b16 b24 b32 jcc32 jmp32 lea lea_rbp load_sized mem modrr mov_imm mov_mr mov_mr_rbp mov_rm mov_rm_rbp mov_rr op_rm op_rm64 op_rr patch32 patch_branch patch_here rel_fixup_lea rex rsp_frame setcc sse_rm sse_rr store_sized use_index x_bytes x_code x_data_fix x_encode_begin x_encode_end x_pad_track)
@@ -147,7 +150,7 @@ bl_rc_inc=():>void=>$unsafe {
     q[4]=0x00000000E8000000
     x_data_fix[0].push([base + 14  1  XWord(mt_active_off)])
     call_fix.push([base + 31  XWord(rt("__rc_inc"))])
-    stub_fix.push([base + 36  12])
+    stub_fix.push([base + 36  if bl_scan_has_float {12} else {13}])
 }
 
 # Inline refcount decrement for pointer in RAX (CALL_RC_DEC template: preserves all other regs).
@@ -165,7 +168,7 @@ bl_rc_dec=(target_lf:BlWord):>void=>$unsafe {
     tail[0]=0
     x_data_fix[0].push([base + 16  1  XWord(mt_active_off)])
     call_fix.push([base + 33  XWord(target_lf)])
-    stub_fix.push([base + 38  12])
+    stub_fix.push([base + 38  if bl_scan_has_float {12} else {13}])
 }
 
 # Inline COW uniqueness check for array pointer in RAX (CALL_IF_SHARED template: preserves all other regs).
@@ -178,7 +181,7 @@ bl_arr_unique_rax=(at:BlWord):>void=>$unsafe {
     let q2=(p + 15) as ptr<uint64>
     q2[0]=0x00000000E8000000
     call_fix.push([base + 14  XWord(lf_helper(HK.arruniq at 0))])
-    stub_fix.push([base + 19  12])
+    stub_fix.push([base + 19  if bl_scan_has_float {12} else {13}])
     bl_call_site()
 }
 
@@ -811,6 +814,7 @@ let bl_scan_syscall:bool=false
 let bl_scan_sret:bool=false
 let bl_scan_exact_in_loop:bool=false
 let bl_scan_exact_wide_in_loop:bool=false
+let bl_scan_math_bit_in_loop:bool=false
 let bl_scan_dyn_loop:bool=false
 let bl_scan_has_scan_loop:bool=false
 let bl_fn_exact:bool=false
@@ -824,14 +828,23 @@ let bl_tok_epoch:BlWord=-1
 let bl_tok_saw_cycle:bool=false
 let bl_hot_ids:array<uint8>=[]
 let bl_hot_ready:bool=false
+let bl_map_file_id:BlWord=-1
+let bl_map_file_epoch:BlWord=-1
 let bl_arg_offs:array<int64>=[0 0 0 0 0 0 0 0]
+const BL_TI_SAT:BlWord=BlWord(1) << 56
 
 bl_init_hot_ids=():>void=>$unsafe {
-    let hnames=["__alloc_z" "__alloc_raw" "__alloc_slow" "__alloc_size" "__grow_alloc" "__free" "__free_obj" "__rc_dec" "__rc_inc" "__arr_new_raw" "__arr_grow" "__arr_grow_more" "__arr_push_slot" "__arr_bytes" "__buf_append_raw" "__buf_byte" "__str_cmp" "__case_text" "get" "[]=" "[]" "has" "contains" "__map_entry" "__map_entry_present" "__map_find" "__map_probe" "__map_add" "__map_rehash" "__map_slot_equal" "__map_hash" "__hk_word" "__hk_mix" "__hk_mum" "__hk_bytes" "__arena_alloc" "find_byte" "__bcast_offset" "__mi_parse" "__mi_sum" "to_int" "sum"]
+    let hnames=["__alloc_z" "__alloc_raw" "__alloc_slow" "__alloc_size" "__grow_alloc" "__free" "__free_obj" "__rc_dec" "__rc_inc" "__arr_new_raw" "__arr_grow" "__arr_grow_more" "__arr_push_slot" "__arr_bytes" "__buf_append_raw" "__buf_byte" "__str_cmp" "__case_text" "contains" "__map_entry" "__map_entry_present" "__map_find" "__map_probe" "__map_add" "__map_rehash" "__map_slot_equal" "__map_hash" "__hk_word" "__hk_mix" "__hk_mum" "__hk_bytes" "__arena_alloc" "find_byte" "__bcast_offset" "__mi_parse" "__mi_sum" "to_int" "sum"]
     loop nm in hnames {
         let id=intern(nm)
         if id >=? bl_hot_ids.length {bl_hot_ids.resize(id + 64)}
         bl_hot_ids.ptr[id]=uint8(1)
+    }
+    let mnames=["get" "[]=" "[]" "has"]
+    loop nm in mnames {
+        let id=intern(nm)
+        if id >=? bl_hot_ids.length {bl_hot_ids.resize(id + 64)}
+        bl_hot_ids.ptr[id]=uint8(2)
     }
     bl_hot_ready=true
 }
@@ -840,7 +853,20 @@ bl_is_hot_lib_fn=(decl:BlWord):>bool=>$unsafe {
     if decl =? 0 {return false}
     if not bl_hot_ready {bl_init_hot_ids()}
     let id:BlWord=BlWord(nodes.ptr[decl].name)
-    id >=? 0 and id <? bl_hot_ids.length and bl_hot_ids.ptr[id] not=? uint8(0) and pos_in_lib(nodes.ptr[decl].pos)
+    if id <? 0 or id >=? bl_hot_ids.length {return false}
+    let tag=bl_hot_ids.ptr[id]
+    if tag =? uint8(0) {return false}
+    let pos=nodes.ptr[decl].pos
+    if not pos_in_lib(pos) {return false}
+    if tag =? uint8(1) {return true}
+    let fi:BlWord=pos_file(pos)
+    if bl_map_file_epoch =? lower_epoch and bl_map_file_id >=? 0 {return fi =? bl_map_file_id}
+    if files.ptr[fi].path =? "{lib_dir}/core/map.jo" {
+        bl_map_file_id=fi
+        bl_map_file_epoch=lower_epoch
+        return true
+    }
+    false
 }
 
 bl_tmp_alloc=(sz:XWord al:XWord=8):>XWord=>$unsafe {
@@ -976,7 +1002,7 @@ bl_tinfo_slow=(t0:BlWord):>BlWord=>$unsafe {
         if not ownership_type(q) and not math_optional(q) {
             let k=types.ptr[q].kind
             if k =? 'void_' or k =? 'bool_' or k =? 'ptr' or k =? 'str_' or k =? 'cfn' or k =? 'float_' {ok=true}
-            else if k =? 'int_' {ok=int_policy(q) not=? 2}
+            else if k =? 'int_' {ok=true}
             else if k =? 'array' {
                 let et=prune(BlWord(types.ptr[q].elem))
                 ok=not ownership_type(et) and not type_has_fn(et) and not math_optional(et)
@@ -1045,11 +1071,12 @@ bl_tinfo_slow=(t0:BlWord):>BlWord=>$unsafe {
         let cost_bit:BlWord=if copies_on and costly_copy(t) {32} else {0}
         let math_bit:BlWord=if q =? T_MATH_INT {64} else {0}
         let sg_bit:BlWord=if types.ptr[q].kind =? 'int_' and types.ptr[q].sign {128} else {0}
+        let sat_bit:BlWord=if types.ptr[q].kind =? 'int_' and int_policy(q) =? 2 {BL_TI_SAT} else {0}
         let sz:BlWord=if c =? VC_VOID {0} else {BlWord(tsize(q))}
         let al:BlWord=if c =? VC_VOID {1} else {BlWord(talign(q))}
         let sz_enc:BlWord=if sz >=? 0 and sz <=? 65534 {sz} else {65535}
         let al_enc:BlWord=if al >? 0 and al <=? 127 {al} else {0}
-        val=1 | vc_bits | man_bit | cost_bit | math_bit | sg_bit | ((q & 0xFFFFFF) << 8) | (sz_enc << 32) | (al_enc << 48)
+        val=1 | vc_bits | man_bit | cost_bit | math_bit | sg_bit | sat_bit | ((q & 0xFFFFFF) << 8) | (sz_enc << 32) | (al_enc << 48)
     }
     if pushed_prog and not ok and bl_tok_saw_cycle {
         bl_ty_info.clear()
@@ -1479,7 +1506,7 @@ bl_exact_store_ok=(e:BlWord):>bool=>$unsafe {
         return bl_type_ok(to) and bl_type_ok(prune(ntype(a))) and vc(to) =? VC_INT and bl_scan_node(a)
     }
     let t=exact_representation(ntype(e))
-    if not bl_type_ok(t) or not is_int(t) or types.ptr[t].bits >? 64 {return false}
+    if (bl_tinfo(t) & (1 | BL_TI_SAT)) not=? 1 or not is_int(t) or types.ptr[t].bits >? 64 {return false}
     let source:BlWord=BlWord(nodes.ptr[e].a)
     let proven=exact_proved(e)
     if not proven {
@@ -1727,7 +1754,7 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
             <'call'> => {
                 if nodes.ptr[e].aux =? 0 and once_slots.length =? 0 and ownership_prints.length =? 0 {
                     let sym:BlWord=BlWord(nodes.ptr[e].sym)
-                    if sym >? 0 and sym not=? runtime_memeq and sym not=? runtime_streq and not fns.ptr[sym].cabi and not fns.ptr[sym].has_env and not fns.ptr[sym].parallel_api and inst_mutmask(sym) =? 0 {
+                    if sym >? 0 and ((sym not=? runtime_memeq and sym not=? runtime_streq) or pos_in_lib(nodes.ptr[e].pos)) and not fns.ptr[sym].cabi and not fns.ptr[sym].has_env and not fns.ptr[sym].parallel_api and inst_mutmask(sym) =? 0 {
                         let rtp0:BlWord=BlWord(fns.ptr[sym].ret)
                         let nt0:BlWord=BlWord(nodes.ptr[e].type)
                         let rinfo:BlWord=tip[rtp0]
@@ -1785,7 +1812,7 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                     e=BlWord(nodes.ptr[e].a)
                     continue
                 }
-                if (op not=? 58 and op not=? 59 and op not=? 66) or vc_b not=? 4 {ok=false; break}
+                if (op not=? 58 and op not=? 59 and op not=? 66) or vc_b not=? 4 or (op =? 59 and (info & BL_TI_SAT) not=? 0) {ok=false; break}
                 e=BlWord(nodes.ptr[e].a)
                 continue
             }
@@ -1796,11 +1823,11 @@ bl_scan_node=(e0:BlWord):>bool=>$unsafe {
                     let lt0:BlWord=BlWord(nodes.ptr[a].type)
                     let linfo:BlWord=tip[lt0]
                     if linfo =? 0 {linfo=bl_tinfo_slow(lt0); tip=bl_ty_info.ptr}
-                    if (linfo & 77) =? 5 {
+                    if (linfo & (77 | BL_TI_SAT)) =? 5 {
                         let rt0:BlWord=BlWord(nodes.ptr[e].type)
                         let rinfo:BlWord=tip[rt0]
                         if rinfo =? 0 {rinfo=bl_tinfo_slow(rt0); tip=bl_ty_info.ptr}
-                        if (rinfo & 1) =? 0 {ok=false; break}
+                        if (rinfo & 1) =? 0 or (rinfo & BL_TI_SAT) not=? 0 {ok=false; break}
                         if b0 not=? 0 {
                             if sp >=? cap {cap=cap * 2 + 64; bl_scan_stack.resize(cap); st=bl_scan_stack.ptr}
                             st[sp]=int32<overflow='wrap'>(b0); sp += 1
@@ -1975,6 +2002,7 @@ bl_scan_assign=(e:BlWord):>bool=>$unsafe {
         if (bk =? 'array' or bk =? 'fixed') and not bl_can_mut_place(BlWord(nodes.ptr[a].a)) {return false}
     }
     if aux =? 0 and nodes.ptr[e].op not=? 47 {
+        if (ainfo & BL_TI_SAT) not=? 0 {return false}
         let cop=compound_op(BlWord(nodes.ptr[e].op))
         if cop =? 0 {return false}
         let avc=ainfo & 12
@@ -1992,6 +2020,23 @@ bl_scan_assign=(e:BlWord):>bool=>$unsafe {
     }
     bl_scan_push(b0)
     bl_scan_push(a)
+    true
+}
+
+bl_refinement_simple_ok=(e:BlWord):>bool=>$unsafe {
+    if ref_self_active and nodes.ptr[e].b not=? 0 {return false}
+    let rt=zonk(BlWord(nodes.ptr[e].aux2))
+    if rt <=? 0 or types.ptr[rt].kind not=? 'refined' {return false}
+    let base=representation_type(rt)
+    if base =? T_MATH_INT or not is_int(base) {return false}
+    if (bl_tinfo(base) & 13) not=? 5 {return false}
+    let st:BlWord=BlWord(types.ptr[rt].st)
+    if st <? 0 or st >=? ref_predicates.length {return false}
+    loop atom in ref_predicates.ptr[st] {
+        if atom.op not=? 'lt' and atom.op not=? 'le' and atom.op not=? 'ne' {return false}
+        if (atom.a.kind not=? 0 and atom.a.kind not=? 1) or (atom.b.kind not=? 0 and atom.b.kind not=? 1) {return false}
+        if atom.a.path.length not=? 0 or atom.b.path.length not=? 0 or atom.b.offset not=? 0 {return false}
+    }
     true
 }
 
@@ -2075,7 +2120,11 @@ bl_scan_conv=(e:BlWord):>bool=>$unsafe {
         return true
     }
     if cv =? CV.refinement {
-        if nodes.ptr[e].ival not=? 1 or (bl_tinfo(to) & 1) =? 0 or (bl_tinfo(fr) & 1) =? 0 {return false}
+        if (bl_tinfo(to) & 1) =? 0 or (bl_tinfo(fr) & 1) =? 0 {return false}
+        if nodes.ptr[e].ival not=? 1 {
+            if bl_scan_loops >? 0 or not bl_refinement_simple_ok(e) {return false}
+            bl_scan_calls += 1
+        }
         bl_scan_push(a)
         return true
     }
@@ -2144,7 +2193,7 @@ bl_scan_call=(e:BlWord):>bool=>$unsafe {
         bl_scan_calls += 1
         bl_scan_fn_calls += 1
         let sym:BlWord=BlWord(nodes.ptr[e].sym)
-        if sym <=? 0 or sym =? runtime_memeq or sym =? runtime_streq or fns.ptr[sym].cabi or fns.ptr[sym].has_env or fns.ptr[sym].parallel_api {return false}
+        if sym <=? 0 or ((sym =? runtime_memeq or sym =? runtime_streq) and not pos_in_lib(nodes.ptr[e].pos)) or fns.ptr[sym].cabi or fns.ptr[sym].has_env or fns.ptr[sym].parallel_api {return false}
         let rtp=prune(BlWord(fns.ptr[sym].ret))
         let nt=prune(ntype(e))
         let ninfo:BlWord=if nt not=? T_NEVER {bl_tinfo(nt)} else {0}
@@ -2499,7 +2548,7 @@ bl_scan_for=(e:BlWord):>bool=>$unsafe {
         let fl:BlWord=BlWord(locals.ptr[l].flags)
         if fl & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_BYREF | LF_OWNERBORROW | LF_PARTBORROW) not=? 0 {return false}
         let linfo=bl_tinfo(BlWord(locals.ptr[l].type))
-        if (linfo & 13) not=? 5 {return false}
+        if (linfo & (13 | BL_TI_SAT)) not=? 5 {return false}
         let ra=BlWord(nodes.ptr[a].a)
         let rb=BlWord(nodes.ptr[a].b)
         if stepped and (linfo & 64) not=? 0 {
@@ -2844,10 +2893,15 @@ bl_scan_node_slow=(e:BlWord):>bool=>$unsafe {
                     if op not=? 'plus' and op not=? 'minus' and op not=? 'star' and op not=? 'slash' and op not=? 'eq' and op not=? 'ne' and op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' {return false}
                     bl_scan_has_float=true
                 } else if lvc not=? 4 {return false}
+                else if (rinfo & BL_TI_SAT) not=? 0 {
+                    let op=cx_token_values.ptr[BlWord(nodes.ptr[e].op)]
+                    if op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'shl' or op =? 'slash' or op =? 'percent' {return false}
+                }
                 else if (linfo & 64) not=? 0 {
                     let op=cx_token_values.ptr[BlWord(nodes.ptr[e].op)]
                     if op not=? 'plus' and op not=? 'minus' and op not=? 'star' and op not=? 'slash' and op not=? 'percent' and op not=? 'amp' and op not=? 'pipe' and op not=? 'caret' and op not=? 'shl' and op not=? 'shr' and op not=? 'eq' and op not=? 'ne' and op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' {return false}
-                    if (op =? 'amp' or op =? 'pipe' or op =? 'caret') and bl_scan_loops >? 0 and not (bl_is_small_math(a) and bl_is_small_math(b0)) {return false}
+                    if pos_in_lib(nodes.ptr[e].pos) and (op =? 'shl' or op =? 'shr') and not (bl_is_small_math(a) and nodes.ptr[b0].kind =? 'int_lit' and not has_flag(b0 NF_U64) and nodes.ptr[b0].ival >=? 0 and nodes.ptr[b0].ival <? 64 and (op =? 'shr' or bl_is_small_math(e))) {return false}
+                    if (op =? 'amp' or op =? 'pipe' or op =? 'caret') and bl_scan_loops >? 0 and not (bl_is_small_math(a) and bl_is_small_math(b0)) {bl_scan_math_bit_in_loop=true}
                 }
             }
             if aux =? 2 {
@@ -3059,7 +3113,7 @@ bl_can_match_lookup=(m:BlWord):>bool=>$unsafe {
 
 bl_can_emit_inst=(_lf:BlWord fi:BlWord):>bool=>$unsafe {
     if want_loop_watch or partition_active or fi =? runtime_memeq or fi =? runtime_streq {return false}
-    if member_seen_owners.length >? 0 and member_seen_owners.has(fi) {return false}
+    if (member_compact_owners.length >? 0 and member_compact_owners.has(fi)) or ((member_trace or not member_compact_enabled) and member_seen_owners.length >? 0 and member_seen_owners.has(fi)) {return false}
     let fp=fns.ptr + fi
     if (fp[0].kind not=? FK_NORMAL and fp[0].kind not=? FK_INIT) or fp[0].cabi or fp[0].has_env or (fp[0].export_name as array<uint8>).length >? 0 {return false}
     let decl:BlWord=BlWord(fp[0].decl)
@@ -3143,6 +3197,7 @@ bl_can_emit_inst=(_lf:BlWord fi:BlWord):>bool=>$unsafe {
     bl_scan_syscall=false
     bl_scan_exact_in_loop=false
     bl_scan_exact_wide_in_loop=false
+    bl_scan_math_bit_in_loop=false
     bl_scan_dyn_loop=false
     bl_scan_has_scan_loop=false
     if fp[0].kind =? FK_NORMAL and nodes.ptr[body].aux not=? 0 and rtp not=? T_NEVER and vc(rtp) not=? VC_VOID and nkids(body) >? 0 {
@@ -3151,6 +3206,7 @@ bl_can_emit_inst=(_lf:BlWord fi:BlWord):>bool=>$unsafe {
     }
     if not bl_scan_node(body) {return false}
     if not in_lib_fn and bl_scan_exact_in_loop and bl_scan_dyn_loop and (bl_scan_nodes <=? 110 or (bl_scan_exact_wide_in_loop and bl_scan_nodes <=? 210)) {return false}
+    if not in_lib_fn and bl_scan_math_bit_in_loop and bl_scan_nodes <=? 120 {return false}
     if bl_scan_has_scan_loop and not in_lib_fn and bl_scan_fn_calls <=? 2 and bl_scan_nodes <=? 120 {return false}
     if (bl_scan_max_loop_depth >=? 3 and not in_lib_fn) or (bl_scan_has_while and bl_scan_mut_math and bl_scan_nodes <=? 96) {return false}
     if bl_scan_has_float and bl_scan_has_loop and not in_lib_fn and (bl_scan_calls =? 0 or (bl_scan_nodes <=? 64 and bl_scan_calls <=? 2)) {return false}
@@ -7219,8 +7275,62 @@ bl_eval_conv=(e:BlWord):>void=>$unsafe {
             return
         }
     }
-    if cv =? CV.none_ or cv =? CV.quantity_const or cv =? CV.ptr or cv =? CV.refinement {
+    if cv =? CV.none_ or cv =? CV.quantity_const or cv =? CV.ptr {
         bl_eval(a)
+        return
+    }
+    if cv =? CV.refinement {
+        bl_eval(a)
+        if nodes.ptr[e].ival not=? 1 {
+            let reft=zonk(BlWord(nodes.ptr[e].aux2))
+            let base=representation_type(reft)
+            let biased=is_int(base) and not types.ptr[base].sign
+            let shown=wit_text(a)
+            if shown =? "" {shown="the value"}
+            let hide=secret_checks.length >? 0 and secret_checks.has(e)
+            let voff=bl_tmp_alloc(8)
+            mov_mr_rbp(-voff  RAX)
+            loop atom in ref_predicates.ptr[BlWord(types.ptr[reft].st)] {
+                if atom.a.kind =? 0 {mov_rm_rbp(RAX  -voff)}
+                else {mov_imm(RAX  XWord(atom.a.value))}
+                if atom.b.kind =? 0 {mov_rm_rbp(RCX  -voff)}
+                else {mov_imm(RCX  XWord(atom.b.value))}
+                op_rr(0x39  true  RCX  RAX)
+                let cc=if atom.op =? 'ne' {CC_NE} else if atom.op =? 'lt' {if biased {CC_B} else {CC_L}} else {if biased {CC_BE} else {CC_LE}}
+                let ok_j=jcc32(cc)
+                let left=wit_ref_text(atom.a  shown)
+                let right=wit_ref_text(atom.b  shown)
+                if left =? "" {left="the bound"}
+                if right =? "" {right="the bound"}
+                let seen_left=if hide or atom.a.kind =? 1 {""} else {left}
+                let seen_right=if hide or atom.b.kind =? 1 {""} else {right}
+                let first_self=atom.a.kind =? 0
+                let first_val=atom.a.value
+                let second_self=atom.b.kind =? 0
+                let second_val=atom.b.value
+                let relation=atom.op
+                if atom.b.kind =? 0 and atom.a.kind not=? 0 and (relation =? 'lt' or relation =? 'le') {
+                    let tmp_s=left; left=right; right=tmp_s
+                    tmp_s=seen_left; seen_left=seen_right; seen_right=tmp_s
+                    let tmp_b=first_self; first_self=second_self; second_self=tmp_b
+                    let tmp_v=first_val; first_val=second_val; second_val=tmp_v
+                    relation=if relation =? 'lt' {'gt'} else {'ge'}
+                }
+                let message=if ref_narrowing.has(e) {"integer overflow: value does not fit {dt(ref_narrowing[e])}"} else {"refinement failed: `{left} {wit_op(relation)} {right}`"}
+                rel_fixup_lea(RDI  0  XWord(str_data(message)))
+                rel_fixup_lea(RSI  0  XWord(loc_data(nodes.ptr[e].pos)))
+                rel_fixup_lea(RDX  0  XWord(str_data(seen_left)))
+                if first_self {mov_rm_rbp(RCX  -voff)} else {mov_imm(RCX  XWord(first_val))}
+                rel_fixup_lea(R8  0  XWord(str_data(seen_right)))
+                if second_self {mov_rm_rbp(R9  -voff)} else {mov_imm(R9  XWord(second_val))}
+                bl_set_pos(nodes.ptr[e].pos)
+                bl_call_pos(rt("__requirement_fail"))
+                b16(0x0B0F)
+                patch_here(ok_j)
+            }
+            mov_rm_rbp(RAX  -voff)
+            bl_last_owned=false
+        }
         return
     }
     if cv =? CV.explicit_copy {
@@ -7436,14 +7546,19 @@ bl_eval_conv=(e:BlWord):>void=>$unsafe {
         let qto=quantity_base(to)
         let bits:BlWord=BlWord(types.ptr[qto].bits)
         let to_sg=types.ptr[qto].sign
-        let hi:BlWord=if bits =? 64 {-1} else {(BlWord(1) << bits) - 1}
-        let lo:BlWord=0
-        if to_sg {
-            hi=BlWord(uint64(hi) >> 1)
-            lo=-hi - 1
+        let hi:BlWord=if to_sg {
+            if bits =? 64 {BlWord(9223372036854775807)} else {(BlWord(1) << (bits - 1)) - 1}
+        } else {
+            if bits =? 64 {-1} else {(BlWord(1) << bits) - 1}
         }
+        let lo:BlWord=if to_sg {-hi - 1} else {0}
         bl_eval_borrowed(a)
         if qfr =? T_MATH_INT {
+            if to_sg and bits =? 64 and bl_is_small_math(a) {
+                bl_sh_imm(7  RAX  1)
+                bl_last_owned=false
+                return
+            }
             mov_rr(RDI  RAX)
             mov_imm(RSI  XWord(lo))
             mov_imm(RDX  XWord(hi))

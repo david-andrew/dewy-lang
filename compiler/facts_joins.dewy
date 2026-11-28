@@ -241,6 +241,31 @@ fact_join_into=(@a:FactState @b:FactState at:JoinWord):>void=>$unsafe {
                     }
                 }
             }
+            if not a_prefix_ids and a.index.ptr[0].slots.length =? 0 and b.index.ptr[0].slots.length =? 0 {
+                let aids=a.ids.ptr
+                let bids=b.ids.ptr
+                let common_id=min(alen blen)
+                let k:JoinWord=0
+                loop k <? common_id and aids[k] =? bids[k] {k += 1}
+                if k >? 0 and k <? alen and k <? blen and (aids[alen - 1] <? bids[k] or aids[k] >? bids[blen - 1]) {
+                    let aplen0:JoinWord=a.projections.length
+                    let bplen0:JoinWord=b.projections.length
+                    if aplen0 =? bplen0 and (a.projections.ptr =? b.projections.ptr or a.projections =? b.projections) {
+                        let ap0=a.projections.ptr
+                        let pok=true
+                        let hi_id=aids[k - 1]
+                        loop pi in [JoinWord(0)..aplen0) {
+                            if ap0[pi].base >? hi_id or ap0[pi].value >? hi_id {pok=false; break}
+                        }
+                        if pok {
+                            a.ids.truncate(k)
+                            a.bounds.truncate(k)
+                            alen=k
+                            a_prefix_ids=true
+                        }
+                    }
+                }
+            }
             if a_prefix_ids {
                 let aplen:JoinWord=a.projections.length
                 let bplen:JoinWord=b.projections.length

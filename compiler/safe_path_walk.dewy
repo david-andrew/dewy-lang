@@ -4,7 +4,7 @@ from p"checker_source_positions.dewy" import (dewy_at)
 
 from p"checks_text.dewy" import (byte_rfind)
 
-from p"ast.jo" import (kid kid2 kids nkids nkids2 nodes)
+from p"ast.jo" import (kid kid2 kids lists nkids nkids2 nodes)
 from p"check.jo" import (FK_INIT FK_LAMBDA LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_EXPOSED fns globals locals modules)
 from p"directive_ops.dewy" import (dir_confine_paths)
 from p"expr.jo" import (CV)
@@ -464,12 +464,25 @@ ut_add_local=(l:PathWalkWord whole:bool field:PathWalkWord):>void=>{
 ut_acc=(n:PathWalkWord):>void=>$unsafe {
     if n =? 0 {return}
     let t=PathWalkWord(nodes.ptr[n].type)
-    if t not=? 0 and not ut_text_type(t) {return}
     let k=nodes.ptr[n].kind
+    if t not=? 0 {
+        let tb=if t <? ut_tb.length {ut_tb.ptr[t]} else {0}
+        if tb not=? 0 {
+            if (tb & UT_T_TEXT) =? 0 {return}
+        } else if not ut_text_type(t) {return}
+    }
     if k =? 'str_lit' {
         if nodes.ptr[n].aux =? 0 {return}
-        loop i in [0..nkids(n)) {ut_acc(kid(n i))}
-        ut_joined(kids(n) n)
+        let l0=PathWalkWord(nodes.ptr[n].list)
+        let nk=PathWalkWord(nodes.ptr[n].nlist)
+        let pieces:array<int64>=[]
+        pieces.reserve(nk)
+        loop i in [PathWalkWord(0)..nk) {
+            let x=PathWalkWord(lists.ptr[l0 + i])
+            ut_acc(x)
+            pieces.push(x)
+        }
+        ut_joined(pieces n)
         return
     }
     if k =? 'binary' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].op =? int32(58) and prune(t) =? T_STR {
@@ -1138,9 +1151,11 @@ ut_visit=(n:PathWalkWord):>void=>$unsafe {
         }
         <'call'> => {
             let a=PathWalkWord(nodes.ptr[n].a)
+            let l0=PathWalkWord(nodes.ptr[n].list)
+            let nk=PathWalkWord(nodes.ptr[n].nlist)
             if a not=? 0 {ut_visit(a)}
-            loop i in [0..nkids(n)) {
-                let x=kid(n i)
+            loop i in [PathWalkWord(0)..nk) {
+                let x=PathWalkWord(lists.ptr[l0 + i])
                 if x not=? 0 {ut_visit(x)}
             }
             ut_call(n)
