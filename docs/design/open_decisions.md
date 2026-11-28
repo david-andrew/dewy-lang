@@ -44,6 +44,7 @@
   - D48 Q2–Q6: argparse subcommands, `env=` fallbacks, a `check=` rule across arguments, `Parsed<Spec>`, `separator=` for lists.
   - D49 Q3: bare literal arms (`"look" =>`), and a bare name hiding a value becomes an error.
   - D50 Q1: `max(xs default=d)`, `min(xs default=d)` and `default=` on `min_by`/`max_by`.
+  - D51 Q1: `...args` ends a variadic C function's parameters (`printf = (format:string ...args):>int32`).
 - **(c) Names only:**
   - D44 Q4, Q7: `task.cancel_request` / `task.CancelRequest`; `$no_discarded_failures`;
   - D42 Q4, Q5: `ErrorStack` or `ErrorList`; `$origin`, `$trace`, `$parts`, `$origin_at_caller`;
@@ -2235,6 +2236,30 @@ Give `min(xs)`, `max(xs)`, `xs.min_by(key)` and `xs.max_by(key)` a `default=` ar
 - **Unblocks:** empty-safe widths, ids and latest-of lookups without a branch or a proof (ladder 149, 150).
 
 Dogfooded (10 programs, 49 of 50 marks at 5; the 4 is a key lambda and `default=` sharing one call). Programs and grades: [proposals/reductions/round1.md](proposals/reductions/round1.md).
+
+---
+
+### D51. Variadic C functions
+
+```dewy
+$extern
+printf = (format:string ...args):>int32
+$extern
+open = (path:string flags:int32 ...args):>int32
+main = ():>void => $unsafe {
+    printf("%d apples, %s\n" 3 "red");
+    let fd = open("log.txt" 65 420)
+}
+```
+
+#### Q1 (b). `...args` after a C function's fixed parameters
+
+Let `...args` (no type) end an `$extern` declaration's parameters, as C's `...`? Each extra argument crosses as a fixed one would (numbers, `bool`, pointers, strings), with C's promotions (`float32` as `double`), and `int` or a record by value is an error. Today nothing declares one: `printf` declared with fixed parameters is undefined in C and breaks on Apple arm64, where variadic arguments go on the stack. The backends already pass them (the implementation language's `@variadic`).
+
+- **Rec:** `...args`, as the direction for Dewy's own rest parameters. Rejected: `$extern(variadic=true)`, which leaves the extras out of the parameter list (a cold reader: "looks like a two-parameter function while the call has three"); a bare `...`, which already means "named parameters follow"; `...args:c_args`, which readers were unsure compiles. **Reversible:** yes.
+- **Unblocks:** `printf`, `snprintf`, `open` with a mode, `ioctl`, `fcntl`, and C logging and formatting libraries.
+
+Names tested cold (one round, three readers, all read every candidate correctly). Not dogfooded. Candidates and the cold-read table: [proposals/ffi-variadic/round1.md](proposals/ffi-variadic/round1.md).
 
 ---
 
