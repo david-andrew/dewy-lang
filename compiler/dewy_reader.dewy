@@ -8370,6 +8370,11 @@ rd_dc_pack=(@reader_ctx:ParserContext @reader_nodes:array<Node> result:int64):>i
 # (`[parallel x in xs f(x)]`): the region dw_parallel makes. A form it reports is left unread
 # (dc_unread).
 rd_dc_parallel=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLexeme collect:bool):>int64=>$unsafe {
+    # (`parallel = (x) => ...`, `(parallel:int64)`: the keyword where a name was meant)
+    if (rd_dn_peek(@reader_ctx) =? 'assign' or rd_dn_peek(@reader_ctx) =? 'colon') and not reader_ctx.tokens[reader_ctx.at].newline and reader_ctx.flags.report_now {
+        let function:bool=rd_dn_peek(@reader_ctx) =? 'assign' and rd_dc_lambda_next_at(@reader_ctx int64<overflow='wrap'>(reader_ctx.at) + 1)
+        return rd_dc_fail_now(@reader_ctx rd_mkpos(reader_ctx.file token.start) if function {"`parallel` is a keyword, so it cannot name a function: choose another name"} else {rd_dc_keyword_text(token.symbol)})
+    }
     # (`parallel { ... }`, `parallel ( ... )`: a block, dc_parallel_block; `parallel (a b) in ...`
     # is a loop's header)
     if not collect and (rd_dn_peek(@reader_ctx) =? 'lbrace' or (rd_dn_peek(@reader_ctx) =? 'lparen' and rd_dc_paren_not_header(@reader_ctx))) {
@@ -8753,7 +8758,7 @@ rd_dc_parameter_word=(@reader_ctx:ParserContext parameter:DewyLexeme):>bool=>$un
         return false
     }
     let word:DewyToken=parameter.symbol
-    if (((((word =? 'kw_from') or (word =? 'kw_import')) or (word =? 'kw_return')) or (word =? 'kw_break')) or (word =? 'kw_continue')) {
+    if (((((word =? 'kw_from') or (word =? 'kw_import')) or (word =? 'kw_return')) or (word =? 'kw_break')) or (word =? 'kw_continue') or (word =? 'kw_parallel')) {
         rd_dc_keyword_name(@reader_ctx parameter);
     }
     if ((word =? 'kw_not') or (not rd_dc_word_operator(word))) {
