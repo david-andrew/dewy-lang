@@ -1,0 +1,17 @@
+# A loop's element of a self-length array indexes it, after any checked change.
+Forest:type = [parent:array<int64<(<? parent.length)>>]
+touch = (@f:Forest):>void => { if f.parent.length >? 0 { f.parent[0] = 0 } }
+total = (p:array<int64<(<? p.length)>>):>int64 => {
+    let t:int64 = 0
+    loop x in p { t = (t + p[x]) % 1000 }
+    t
+}
+main = ():>void => {
+    let f = Forest[[0 0 1]]
+    touch(@f)
+    loop p in f.parent { printl(f.parent[p]) }
+    let q:array<int64<(<? q.length)>> = [2 0 1]
+    q.push(3)
+    loop x in q { printl(q[x]) }
+    printl(total(q))
+}

@@ -14,7 +14,7 @@ from p"checks_thin_expr.dewy" import (is_map_type)
 from p"directive_rules.dewy" import (dir_defer)
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"expr.jo" import (IN last_checked)
-from p"facts.jo" import (FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_COPY FACT_ELEMENT_VALUE FACT_SIB_BOUND FactProjection FactState)
+from p"facts.jo" import (FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_COPY FACT_ELEMENT_VALUE FACT_SELF_BOUND FACT_SIB_BOUND FactProjection FactState)
 from p"facts_values.dewy" import (fact_domain fact_type fact_project)
 from p"facts_compare.dewy" import (fact_compare)
 from p"facts_lengths.dewy" import (fact_difference)
@@ -33,7 +33,7 @@ from p"refine.jo" import (RefArrayCall ref_fact_holder ref_pair_after ref_pair_b
 from p"refine_transfers.dewy" import (ref_value)
 from p"refine_metadata.dewy" import (ref_dependent_ancestor ref_dependent_record ref_interval ref_place_alias refine_storage representation_type mk_refined ref_intern)
 from p"refine_ops.dewy" import (copy_checked ref_ir_term ref_path_length ref_self_lower_bound)
-from p"refine_rare.dewy" import (ref_holder_place ref_ir_holder_length ref_self_value ref_span_copy refine_coerce)
+from p"refine_rare.dewy" import (ref_holder_place ref_ir_holder_length ref_self_element_row ref_self_value ref_span_copy refine_coerce)
 from p"refinement_types.dewy" import (FACT_MAX FactBound FactTerm RefAtom RefTerm)
 from p"sibling_types.jo" import (sibling_block sibling_index)
 from p"type_ops.dewy" import (dt get_struct_inst mk_array)
@@ -801,7 +801,9 @@ ref_sib_loop_elements=(n:RefineSibWord base:RefineSibWord @s:FactState):>void=>$
     let i=fact_binding(s place)
     let before=if i >=? 0 {s.bindings[i].value} else {0}
     fact_loop_elements(n base @s)
-    if fact_projection_find(s base FACT_SIB_BOUND false) <? 0 or not is_int(fact_type(RefineSibWord(locals.ptr[l].type))) {return}
+    # (an element of a self-length array is below that array's length too)
+    let sib=fact_projection_find(s base FACT_SIB_BOUND false) >=? 0
+    if not sib and fact_projection_find(s base FACT_SELF_BOUND false) <? 0 or not is_int(fact_type(RefineSibWord(locals.ptr[l].type))) {return}
     i=fact_binding(s place)
     let value=if i >=? 0 {s.bindings[i].value} else {0}
     if value =? 0 or value =? before {
@@ -818,7 +820,8 @@ ref_sib_loop_elements=(n:RefineSibWord base:RefineSibWord @s:FactState):>void=>$
         value=fact_new(@s bound FactTerm(type=RefineSibWord(locals.ptr[l].type)))
         fact_bind(@s place value)
     }
-    ref_sib_element_row(@s base value)
+    if sib {ref_sib_element_row(@s base value)}
+    else {ref_self_element_row(@s base value)}
 }
 ref_sib_permutable=(place:RefineSibWord t:RefineSibWord):>bool=>$unsafe {
     let record=ref_sib_record(place)
