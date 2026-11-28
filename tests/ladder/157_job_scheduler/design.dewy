@@ -1,0 +1,175 @@
+# A job scheduler. Stdin lists jobs, one per line: `NAME PRIORITY ARRIVAL
+# DURATION [after DEP,DEP...]`, a lower priority number being more urgent.
+# Workers take ready jobs (arrived, every dependency finished) one at a
+# time and run each to its end. A waiting job ages: every `age` time units
+# it waits count as one step more urgent, so nothing starves. Finishing
+# work is kept in a priority queue keyed by finish time. The simulation is a
+# generator of what happens, which the report consumes as it runs.
+#
+# Usage: job_scheduler [workers=N] [age=N]
+
+Small:type = int64<n => 0 <=? n and n <=? 1000000>
+Job:type = [name:string priority:Small arrival:Small duration:Small after:array<string>]
+
+Started:type = [time:int job:string worker:int64 waited:int urgency:int]
+Finished:type = [time:int job:string worker:int64]
+Stuck:type = [job:string waiting_for:array<string>]
+Happening:type = Started | Finished | Stuck
+
+BadJob:type = [line:int text:string why:string]
+
+small = (text:string):>Small | none => {
+    let n = to_int(text) ?? return none
+    if n <? 0 or n >? 1000000 return none
+    int64(n)
+}
+
+# Every job line, parsed lazily; malformed ones are yielded as such.
+jobs_in = (text:string):>generator<Job | BadJob> => lazy loop n in 1.. and raw in text.lines {
+    let line = raw.trim
+    if line =? "" or line.startswith("#") continue
+    let w = line.split
+    if w.length not=? 4 and not (w.length =? 6 and w[4] =? "after") {
+        BadJob[n line "expected NAME PRIORITY ARRIVAL DURATION [after DEP,...]"]
+        continue
+    }
+    let priority = small(w[1])
+    let arrival = small(w[2])
+    let duration = small(w[3])
+    if priority is? none or arrival is? none or duration is? none {
+        BadJob[n line "priority, arrival and duration are whole numbers up to 1000000"]
+        continue
+    }
+    if duration =? 0 {
+        BadJob[n line "a job takes some time"]
+        continue
+    }
+    let after = if w.length =? 6 w[5].split(",") else []
+    Job[w[0] priority arrival duration after]
+}
+
+# How urgent a ready job is at `now`: its priority, less one step per `age`
+# units waited.
+urgency = (job:Job now:int age:int64<(>=? 1)>):>int => job.priority - max(0 now - job.arrival) // age
+
+# The schedule, one happening at a time. Ties go to the more urgent job, then
+# the earlier arrival, then the name; free workers by number.
+simulate = (jobs:array<Job> workers:int64<w => 1 <=? w and w <=? 64> age:int64<(>=? 1)>):>generator<Happening> => lazy {
+    let pending = jobs.sorted(key=(j) => j.arrival)
+    let ready:array<Job> = []
+    let done:set<string> = []
+    let running:Heap<Finished> = []
+    let free = [loop w in [1..workers] w]
+    let now = 0
+    loop not pending.is_empty or not ready.is_empty or running.length >? 0 {
+        # Arrivals up to now join the ready list.
+        loop not pending.is_empty and pending[0].arrival <=? now ready.push(pending.pop(0))
+        # Free workers take the most urgent job whose dependencies are done.
+        loop not free.is_empty {
+            let runnable = [loop j in ready if j.after.all((d) => d in? done) j]
+            if runnable.is_empty break
+            let pick = runnable.sorted(key=(j) => j.name).sorted(key=(j) => j.arrival).min_by((j) => urgency(j now age))
+            ready = [loop j in ready if j.name not=? pick.name j]
+            let worker = free.pop(0)
+            Started[now pick.name worker now - pick.arrival urgency(pick now age)]
+            running.push(Finished[now + pick.duration pick.name worker] float64(now + pick.duration) * 128 + float64(worker))
+        }
+        # Then time moves to the next finish or arrival, whichever is first.
+        let next_arrival = if pending.is_empty none else pending[0].arrival
+        if running.length >? 0 and (next_arrival is? none or running.peek_priority <=? float64(next_arrival) * 128) {
+            let f = running.pop
+            now = f.time
+            done.push(f.job)
+            free = [free... f.worker].sorted
+            f
+            # (everything else finishing at the same moment frees its worker too)
+            loop running.length >? 0 and running.peek.time =? now {
+                let g = running.pop
+                done.push(g.job)
+                free = [free... g.worker].sorted
+                g
+            }
+        } else if next_arrival is? int64 {
+            now = next_arrival
+        } else {
+            # Nothing runs and nothing comes: what is left waits forever.
+            loop j in ready.sorted(key=(j) => j.name) {
+                Stuck[j.name [loop d in j.after if d not in? done d]]
+            }
+            break
+        }
+    }
+}
+
+main = (argv:array<string>) => {
+    let workers:int64<w => 1 <=? w and w <=? 64> = 2
+    let age:int64<(>=? 1)> = 4
+    loop arg in argv[$clamp 1..] {
+        let parts = arg.split("=")
+        let n = to_int(parts.get(1) ?? "") ?? -1
+        if parts[0] =? "workers" and n >=? 1 and n <=? 64 workers = int64(n)
+        else if parts[0] =? "age" and n >=? 1 and n <=? 1000 age = int64(n)
+        else printl"ignored `{arg}`"
+    }
+    let jobs:array<Job> = []
+    let names:set<string> = []
+    loop item in jobs_in(read_stdin or_throw) {
+        match item {
+            bad:BadJob => printl"line {bad.line}: {bad.why}: `{bad.text}`"
+            job:Job => {
+                if job.name in? names {
+                    printl"job {job.name} repeated; the first one stays"
+                } else {
+                    names.push(job.name)
+                    jobs.push(job)
+                }
+            }
+        }
+    }
+    loop job in jobs {
+        loop d in job.after {
+            if d not in? names printl"job {job.name} waits for {d}, which is not a job"
+        }
+    }
+    printl"{jobs.length} jobs on {workers} workers, aging one step per {age}"
+    let starts:dict<string int> = []
+    let waits:dict<string int> = []
+    let ends:dict<string int> = []
+    let busy = 0
+    let stuck = 0
+    loop h in simulate(jobs workers age) {
+        match h {
+            s:Started => {
+                printl"{fmt'>4'(s.time)}  w{s.worker} starts {s.job} (waited {s.waited}, urgency {s.urgency})"
+                starts[s.job] = s.time
+                waits[s.job] = s.waited
+            }
+            f:Finished => {
+                printl"{fmt'>4'(f.time)}  w{f.worker} finishes {f.job}"
+                ends[f.job] = f.time
+                busy += f.time - (starts.get(f.job) ?? f.time)
+            }
+            k:Stuck => {
+                printl"   -  {k.job} never runs: waiting for {k.waiting_for.join(", ")}"
+                stuck += 1
+            }
+        }
+    }
+    let finish = max([0 ends.values...])
+    printl"all done at {finish}; {ends.length} finished, {stuck} stuck"
+    if finish >? 0 printl"workers busy {fmt'.1f'(rational(100 * busy) / (finish * workers))}% of the time"
+    let by_priority:dict<int64 array<int>> = []
+    loop job in jobs {
+        let w = waits.get(job.name) ?? continue
+        by_priority[job.priority] = [(by_priority.get(job.priority) ?? [])... w]
+    }
+    loop p in by_priority.keys.sorted {
+        let ws = by_priority[p]
+        if ws.is_empty continue
+        printl"priority {p}: {ws.length} jobs, mean wait {fmt'.2f'(rational(ws.sum) / ws.length)}, longest {max([0 ws...])}"
+    }
+    let started = [loop job in jobs if waits.has(job.name) job].sorted(key=(j) => j.name)
+    if started.is_empty return
+    let slowest = started.max_by((j) => waits.get(j.name) ?? 0)
+    printl"longest wait: {slowest.name} ({waits.get(slowest.name) ?? 0})"
+}

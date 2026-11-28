@@ -780,6 +780,14 @@
     "at=99"
    ],
    "note": "Event-sourced bank over stdin commands: each parsed into an `Opened | Deposited | Withdrew | Moved | Closed | Frozen` event union (malformed lines and amounts reported), decided against the derived state with `Refused` error values forwarded by or_throw, applied through an `@` dictionary of account records, snapshots every N events kept as value copies later events never reach, replays from the start and from the nearest snapshot compared, balances as of earlier points, a conserved total, and an FNV-1a fingerprint of the log in wrapping uint64."
+  },
+  "157_job_scheduler": {
+   "milestone": 13,
+   "args": [
+    "workers=2",
+    "age=3"
+   ],
+   "note": "Job scheduler over stdin jobs: lines parsed by a generator that yields malformed ones as values, refined priorities and times, repeated and unknown dependencies reported, a `lazy` simulation yielding a `Started | Finished | Stuck` union that the report consumes as it runs, a Heap of running jobs keyed by finish time and worker, ready jobs chosen by aged urgency with arrival and name ties, a `set<string>` of finished jobs, a dependency cycle left stuck, utilization as an exact percentage and waits by priority. Held: the generator's ready-job filter is a callback capturing the generator's own `done` set, which lowering cannot yet yield past (`unsupported yield_ outside fused generator`; a smaller form is an internal error, `assignment to a constant vreg`)."
   }
  },
  "design_passing": [

@@ -1,0 +1,19 @@
+# name priority arrival duration [after deps]
+fetch 2 0 3
+lint 5 0 2
+compile 1 1 6 after fetch
+docs 6 1 4
+test 1 2 5 after compile
+bench 3 2 4 after compile
+package 2 3 2 after test,lint
+deploy 0 4 1 after package
+backup 4 5 7
+cleanup 9 0 1
+report 7 6 3
+audit 3 x 2
+notify 1 7 2 after deploy,ghost
+lint 1 9 1
+loop1 2 3 2 after loop2
+loop2 2 3 2 after loop1
+index 8 2 0
+archive 6 10 5

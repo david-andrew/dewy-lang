@@ -1,0 +1,44 @@
+line 13: priority, arrival and duration are whole numbers up to 1000000: `audit 3 x 2`
+job lint repeated; the first one stays
+line 18: a job takes some time: `index 8 2 0`
+job notify waits for ghost, which is not a job
+15 jobs on 2 workers, aging one step per 3
+   0  w1 starts fetch (waited 0, urgency 2)
+   0  w2 starts lint (waited 0, urgency 5)
+   2  w2 finishes lint
+   2  w2 starts docs (waited 1, urgency 6)
+   3  w1 finishes fetch
+   3  w1 starts compile (waited 2, urgency 1)
+   6  w2 finishes docs
+   6  w2 starts backup (waited 1, urgency 4)
+   9  w1 finishes compile
+   9  w1 starts test (waited 7, urgency -1)
+  13  w2 finishes backup
+  13  w2 starts bench (waited 11, urgency 0)
+  14  w1 finishes test
+  14  w1 starts package (waited 11, urgency -1)
+  16  w1 finishes package
+  16  w1 starts deploy (waited 12, urgency -4)
+  17  w1 finishes deploy
+  17  w2 finishes bench
+  17  w1 starts cleanup (waited 17, urgency 4)
+  17  w2 starts report (waited 11, urgency 4)
+  18  w1 finishes cleanup
+  18  w1 starts archive (waited 8, urgency 4)
+  20  w2 finishes report
+  23  w1 finishes archive
+   -  loop1 never runs: waiting for loop2
+   -  loop2 never runs: waiting for loop1
+   -  notify never runs: waiting for ghost
+all done at 23; 12 finished, 3 stuck
+workers busy 93.5% of the time
+priority 0: 1 jobs, mean wait 12.00, longest 12
+priority 1: 2 jobs, mean wait 4.50, longest 7
+priority 2: 2 jobs, mean wait 5.50, longest 11
+priority 3: 1 jobs, mean wait 11.00, longest 11
+priority 4: 1 jobs, mean wait 1.00, longest 1
+priority 5: 1 jobs, mean wait 0.00, longest 0
+priority 6: 2 jobs, mean wait 4.50, longest 8
+priority 7: 1 jobs, mean wait 11.00, longest 11
+priority 9: 1 jobs, mean wait 17.00, longest 17
+longest wait: cleanup (17)
