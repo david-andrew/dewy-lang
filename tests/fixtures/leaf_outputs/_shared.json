@@ -94,7 +94,6 @@
  "183": "<root>/tests/cases/argument/place_for_value.dewy:4:15: error: `@` passes a place, but this parameter takes a value: drop the `@`\n        printl(f(@a))\n                  ^\n",
  "184": "<root>/tests/cases/argument/return_place.dewy:1:41: error: a function gives back a value, not a place: drop the `@` (a place goes to an `@` parameter or `let name = @place`)\n    f = (@a:array<int64>):>array<int64> => @a\n                                            ^\n",
  "185": "<root>/tests/cases/bigint/dogfood14_gcd_shadow.dewy:1:30: warning: 'ignored' is given a value here but never used\n<root>/tests/cases/bigint/dogfood14_gcd_shadow.dewy:2:17: error: divisor refuted: zero\n    main=()=>printl(12 // gcd(3 4))\n                    ^\n    note: gcd(3 4) is 0\n    help: establish `gcd(3 4) not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
- "186": "<root>/tests/cases/bigint/dogfood14_gcd_zero_zero.dewy:1:17: error: cannot prove divisor is nonzero: missing bound\n    main=()=>printl(12 // gcd(0 0))\n                    ^\n    note: missing bound: nothing establishes `gcd(0 0) not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): gcd(0 0) = 0\n    help: establish `gcd(0 0) not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
  "189": "<root>/tests/cases/bigint/error_5.dewy:1:37: error: a shift count is unsigned, and -1 is negative\n    main=():>void=>{printl\"{bigint(2)<<(-1)}\"}\n                                        ^\n",
  "190": "<root>/tests/cases/bigint/error_6.dewy:1:38: error: a shift count is unsigned, and -1 is negative\n    main=():>void=>{printl\"{bigint(-2)>>(-1)}\"}\n                                         ^\n",
  "192": "<root>/tests/cases/bigint/import_rejected.dewy:2:1: error: `bigint` is built in, so there is nothing to import: `let n:bigint = 2^100`, and `to_int(text)` reads decimal text (`none` when it is not a number)\n    from bigint import BigInt\n    ^\n",
@@ -7773,7 +7772,6 @@
  "8367": {"args":2369,"stdout":1847},
  "8368": {"args":2370,"stdout":1851},
  "8369": {"args":2380,"status":1,"stderr":185},
- "8370": {"args":2381,"status":1,"stderr":186},
  "8373": {"args":2386,"status":1,"stderr":189},
  "8374": {"args":2387,"status":1,"stderr":190},
  "8376": {"args":2391,"status":1,"stderr":192},
@@ -7833,7 +7831,6 @@
  "8434": {"args":2689,"status":1,"stderr":1541},
  "8435": {"args":2694,"files":6286},
  "8442": {"args":2701,"status":1,"stderr":185},
- "8443": {"args":2702,"status":1,"stderr":186},
  "8448": {"args":2707,"status":1,"stderr":189},
  "8449": {"args":2708,"status":1,"stderr":190},
  "8453": {"args":2712,"status":1,"stderr":192},
@@ -8079,7 +8076,6 @@
  "8876": {"args":3184,"status":1,"stderr":180},
  "8877": {"args":3186,"status":1,"stderr":184},
  "8884": {"args":3195,"status":1,"stderr":185},
- "8885": {"args":3196,"status":1,"stderr":186},
  "8890": {"args":3201,"status":1,"stderr":189},
  "8891": {"args":3202,"status":1,"stderr":190},
  "8896": {"args":3207,"status":1,"stderr":192},
@@ -11681,5 +11677,9 @@
  "12771": {"args":3530,"status":1,"stderr":12751},
  "12772": {"args":5229,"status":1,"stderr":12752},
  "12773": {"args":5675,"status":1,"stderr":12753},
- "12774": {"args":5676,"status":1,"stderr":12753}
+ "12774": {"args":5676,"status":1,"stderr":12753},
+ "12775": "<root>/tests/cases/bigint/dogfood14_gcd_zero_zero.dewy:1:17: error: cannot prove divisor is nonzero: missing bound\n    main=()=>printl(12 // gcd(0 0))\n                    ^\n    note: gcd(0 0) is at least 0\n    note: missing bound: nothing establishes `gcd(0 0) not=? 0` here\n    note: possible witness (consistent with the known bounds, not an observed execution): gcd(0 0) = 0\n    help: establish `gcd(0 0) not=? 0` with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`\n",
+ "12776": {"args":2381,"status":1,"stderr":12775},
+ "12777": {"args":2702,"status":1,"stderr":12775},
+ "12778": {"args":3196,"status":1,"stderr":12775}
 }
