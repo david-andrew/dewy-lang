@@ -2,7 +2,7 @@ $runtime_checks
 from p"checker_scope_symbols.dewy" import (scope_mark scope_reset)
 from p"expression_types.dewy" import (ntype)
 
-from p"ast.jo" import (NF_CHECKED add_flag clone mk nodes set_list)
+from p"ast.jo" import (NF_CHECKED add_flag mk nodes set_list)
 from p"checker_expr.dewy" import (check_expr)
 from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_let bc_method bc_stmt)
 from p"checks_thin.dewy" import (check_stmt)
@@ -131,9 +131,17 @@ check_soa_method=(n:SoaWord recv:SoaWord fname:SoaWord args:array<int64> expecte
         loop i in 0.. and nm in fnms {stmts.push(bc_stmt(bc_method(fld(i) "push" [bc_field(bc_ident(tn pos) name_of(nm) pos)] pos) pos))}
     }
     else if m =? "clear" or m =? "reserve" or m =? "truncate" {
+        # (each argument is evaluated once, then given to every field's array)
+        let names:array<string>=[]
+        loop a in args {
+            let an="__sa{bc_count}"
+            bc_count += 1
+            stmts.push(bc_let(an a pos))
+            names.push(an)
+        }
         loop i in [0..fnms.length) {
             let cl:array<int64>=[]
-            loop a in args {cl.push(clone(a))}
+            loop an in names {cl.push(bc_ident(an pos))}
             stmts.push(bc_stmt(bc_method(fld(i) m cl pos) pos))
         }
     }

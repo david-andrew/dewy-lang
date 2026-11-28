@@ -1,0 +1,15 @@
+struct Point:
+    x: int
+    y: int
+    tag: u8
+calls = 0
+next_len = () -> int:
+    calls += 1
+    2
+main = ():
+    ps: soa Point[] = [Point(1, 2, 3), Point(4, 5, 6), Point(7, 8, 9)]
+    ps.truncate(next_len())
+    ps.reserve(next_len() + 8)
+    print(calls)
+    print(len(ps))
+    print(ps.tag)
