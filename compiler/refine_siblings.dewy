@@ -572,10 +572,16 @@ ref_sib_truth=(@s:FactState value:RefineSibWord atom:RefAtom args:array<int64>):
     let hull=fact_projection_find(s value FACT_ELEMENT_VALUE false)
     if hull >=? 0 {
         let hi=fact_bound(s s.projections[hull].value).hi
-        if hi <? FACT_MAX and fact_compare(s 'le' fact_constant(@s hi) limit) =? 1 {return 1}
+        if hi <? FACT_MAX {
+            let top=fact_constant(@s hi)
+            if fact_compare(s 'le' top limit) =? 1 {return 1}
+        }
     }
     let below=fact_projection_find(s value FACT_ELEMENT_BELOW false)
-    if below >=? 0 and fact_compare(s 'le' s.projections[below].value ref_sib_limit(atom args @s 1)) =? 1 {return 1}
+    if below >=? 0 {
+        let most=ref_sib_limit(atom args @s 1)
+        if fact_compare(s 'le' s.projections[below].value most) =? 1 {return 1}
+    }
     -1
 }
 # A dictionary literal's values against the bound: each an integer literal; else -1. O(entries).

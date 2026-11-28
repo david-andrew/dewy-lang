@@ -173,17 +173,31 @@ fact_parallel_array=(n:ForkWord):>bool=>$unsafe {
 fact_parallel_range_source=(r:ForkWord):>bool=>$unsafe {
     nodes.ptr[r].kind =? 'call' and nkids(r) =? 5 and fact_library_call(r "__dewy_range")
 }
-# An endpoint read again for the range's positions: a literal or a name (reading it twice
-# gives what the range read), else 0.
+# An endpoint read again for the range's positions: a literal, a name, a field of one or
+# plain arithmetic of those, `w * img.height` (reading it twice gives what the range
+# read), else 0.
 fact_parallel_endpoint=(e0:ForkWord):>ForkWord=>$unsafe {
     let e=e0
     loop nodes.ptr[e].kind =? 'conv' {e=ForkWord(nodes.ptr[e].a)}
-    if nodes.ptr[e].kind =? 'int_lit' or nodes.ptr[e].kind =? 'ident' {return e}
+    if fact_rereadable(e 0) {return e}
     0
+}
+# O(the expression), at most 4 deep.
+fact_rereadable=(e:ForkWord depth:ForkWord):>bool=>$unsafe {
+    if e <=? 0 or depth >? 4 {return false}
+    let k=nodes.ptr[e].kind
+    if k =? 'int_lit' or k =? 'ident' {return true}
+    if k =? 'conv' or k =? 'field' {return fact_rereadable(ForkWord(nodes.ptr[e].a) depth + 1)}
+    if k not=? 'binary' or nodes.ptr[e].aux not=? 0 {return false}
+    let op=node_op(nodes.ptr[e].op_ext)
+    # (Tok.plus 58, minus 59, star 60)
+    (op =? int32(58) or op =? int32(59) or op =? int32(60)) and fact_rereadable(ForkWord(nodes.ptr[e].a) depth + 1) and fact_rereadable(ForkWord(nodes.ptr[e].b) depth + 1)
 }
 fact_parallel_endpoint_bound=(e:ForkWord @s:FactState):>FactBound=>$unsafe {
     if nodes.ptr[e].kind =? 'int_lit' {return FactBound(nodes.ptr[e].ival nodes.ptr[e].ival)}
-    fact_bound(s fact_capture(e @s))
+    # (captured first: the state read after the capture adds its value)
+    let value=fact_capture(e @s)
+    fact_bound(s value)
 }
 # The positions `__dewy_range(first second last stepped inclusive)` visits: from first up to
 # last (before it unless inclusive), or, stepped, between the two. O(1).

@@ -1,0 +1,12 @@
+# A range end computed from bounded values bounds the positions.
+Side:type = int64<n => 1 <=? n and n <=? 1024>
+Img:type = [width:Side height:Side]
+rows = (img:Img radius:int64<r => 0 <=? r and r <=? 4>):>array<int64> => {
+    let w = img.width
+    [parallel i in [0..w * img.height) {
+        let y = i // w
+        let q:int64 = y + radius
+        q
+    }]
+}
+main = ():>void => printl(rows(Img[2 2] 1))

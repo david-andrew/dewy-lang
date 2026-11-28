@@ -680,7 +680,8 @@ fact_nd_upload_words=(n:NdWord @s:FactState input:NdWord text:string):>void=>$un
             }
         }
         # (no elements: nothing to change)
-        if fact_bound(s fact_project(@s input (-1) false T_INT)).hi <=? 0 {return}
+        let count=fact_project(@s input (-1) false T_INT)
+        if fact_bound(s count).hi <=? 0 {return}
     }
     if not bound.wide and bound.lo >=? -2147483648 and bound.hi <=? 2147483647 {return}
     if fact_speculating not=? 0 {return}

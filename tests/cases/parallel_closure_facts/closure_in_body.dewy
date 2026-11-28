@@ -1,0 +1,11 @@
+# A closure made in a parallel body knows what the body knew of its captures.
+Step:type = int64<d => -1 <=? d and d <=? 1>
+near = (n:int64):>array<int64> => {
+    if n <? 0 or n >? 100 return []
+    [parallel i in [0..n) {
+        let x = i % 7
+        let p = (dx:Step):>int64 => x + dx
+        p(1)
+    }]
+}
+main = ():>void => printl(near(3))

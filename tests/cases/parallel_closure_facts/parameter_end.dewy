@@ -1,0 +1,7 @@
+# The same with a parameter in the product.
+Side:type = int64<n => 1 <=? n and n <=? 1024>
+cells = (w:Side h:Side):>array<int64> => {
+    let a = w
+    [parallel i in [0..a * h) { let q:int64 = i + 3; q }]
+}
+main = ():>void => printl(cells(2 2))

@@ -666,7 +666,10 @@ ref_self_truth=(@s:FactState value:RefineRareWord k:RefineRareWord):>int64=>{
     let hull=fact_projection_find(s value FACT_ELEMENT_VALUE false)
     if hull >=? 0 and ref_self_hull_holds(@s fact_bound(s s.projections[hull].value).hi length k) {return 1}
     let below=fact_projection_find(s value FACT_ELEMENT_BELOW false)
-    if below >=? 0 and fact_compare(s 'lt' s.projections[below].value ref_value(RefTerm(0 path=[-1] offset=k + 2) value [] T_INT @s)) =? 1 {return 1}
+    if below >=? 0 {
+        let limit=ref_value(RefTerm(0 path=[-1] offset=k + 2) value [] T_INT @s)
+        if fact_compare(s 'lt' s.projections[below].value limit) =? 1 {return 1}
+    }
     -1
 }
 # Is every element at most hi within the length + k, whatever the length is, or for its least?

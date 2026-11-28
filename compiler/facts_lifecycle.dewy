@@ -134,8 +134,11 @@ fact_parallel_count_check=(n:LifeWord @s:FactState):>void=>$unsafe {
     if fact_library_call(range "__dewy_range") and nkids(range) =? 5 {
         let first=fact_through_conv(kid(range 0))
         let last=fact_through_conv(kid(range 2))
-        let lo=if nodes.ptr[first].kind =? 'int_lit' {FactBound(nodes.ptr[first].ival nodes.ptr[first].ival)} else {fact_bound(s fact_capture(first @s))}
-        let hi=if nodes.ptr[last].kind =? 'int_lit' {FactBound(nodes.ptr[last].ival nodes.ptr[last].ival)} else {fact_bound(s fact_capture(last @s))}
+        # (each value captured before the state is read: the capture adds it)
+        let first_value=if nodes.ptr[first].kind =? 'int_lit' {0} else {fact_capture(first @s)}
+        let lo=if nodes.ptr[first].kind =? 'int_lit' {FactBound(nodes.ptr[first].ival nodes.ptr[first].ival)} else {fact_bound(s first_value)}
+        let last_value=if nodes.ptr[last].kind =? 'int_lit' {0} else {fact_capture(last @s)}
+        let hi=if nodes.ptr[last].kind =? 'int_lit' {FactBound(nodes.ptr[last].ival nodes.ptr[last].ival)} else {fact_bound(s last_value)}
         proven=not lo.wide and not hi.wide and lo.lo not=? FACT_MIN and fact_add_fits(hi.hi (-lo.lo))
     }
     if fact_probe_on {
@@ -274,6 +277,7 @@ facts_finalize=():>void=>$unsafe {
     # and records them, fact_seed_closures; only where the closure's own body is decided here)
     fact_seed_reset()
     let seeded=dict<int64 bool>()
+    let seed_creators=dict<int64 int64>()
     if fact_policy =? 'RequireStatic' or refine_active {
         let collect=fact_panic_collect
         fact_panic_collect=false
@@ -289,6 +293,7 @@ facts_finalize=():>void=>$unsafe {
             demanded[creator]=true
             mandatory[creator]=true
             seeded[f]=true
+            seed_creators[f]=creator
             fact_seed_note(creator lam)
         }
     }
@@ -300,7 +305,29 @@ facts_finalize=():>void=>$unsafe {
         if f >? 0 and f <? fns.length and fns.ptr[f].kind not=? FK_LAMBDA and not seeded.has(f) {order.push(f)}
     }
     loop [f _] in demanded {
-        if f <=? 0 or f >=? fns.length or fns.ptr[f].kind =? FK_LAMBDA or seeded.has(f) {order.push(f)}
+        if f <=? 0 or f >=? fns.length or fns.ptr[f].kind =? FK_LAMBDA and not seeded.has(f) {order.push(f)}
+    }
+    # (a seeded closure after the one creating it, `let p = (dx) => ...` in a parallel
+    # body: each pass places those whose creator is placed. O(seeded closures x depth))
+    let placed=dict<int64 bool>()
+    loop f in order {placed[f]=true}
+    let waiting:array<int64>=[]
+    loop [f _] in demanded {
+        if seeded.has(f) and not placed.has(f) {waiting.push(f)}
+    }
+    loop waiting.length >? 0 {
+        let later:array<int64>=[]
+        loop f in waiting {
+            if placed.has(seed_creators.get(f) ?? 0) or not demanded.has(seed_creators.get(f) ?? 0) {
+                order.push(f)
+                placed[f]=true
+            } else {later.push(f)}
+        }
+        if later.length =? waiting.length {
+            loop f in later {order.push(f)}
+            break
+        }
+        waiting=later
     }
     loop f in order {
         # (another process's body: it decides its own; a body already

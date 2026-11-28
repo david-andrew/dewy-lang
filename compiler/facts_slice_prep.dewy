@@ -4,7 +4,7 @@ from p"ast.jo" import (NF_COMPREHENSION NF_GLOBAL NF_INBOUNDS has_flag kid lists
 
 from p"isolation_ops.dewy" import (iso_child_p isolation_children isolation_node_children)
 
-from p"check.jo" import (LF_ALIAS LF_ASSIGNED LF_MUTPARAM LF_PARAM LF_VALUEPARAM fns locals)
+from p"check.jo" import (LF_ALIAS LF_MUTPARAM fns locals)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"checks_thin.dewy" import (library_exit_call)
 from p"directives.jo" import (dir_assumed_bounds_any dir_floats_any)
@@ -565,7 +565,7 @@ fsp_lib_loop1=(n:SlicePrepWord nk:SlicePrepWord l0:SlicePrepWord flags:SlicePrep
             if fact_parallel_range_source(source) {
                 loop e in [kid(source 0) kid(source 2)] {
                     let named=fact_parallel_endpoint(e)
-                    if named not=? 0 and nodes.ptr[named].kind =? 'ident' {fsp_push_val(named)}
+                    if named not=? 0 {fsp_push_val(named)}
                 }
             }
         }
@@ -977,15 +977,11 @@ fact_slice_prepare_fast=(f:SlicePrepWord summary:bool=false):>void=>$unsafe {
                 # the range's int64, an index; its value, captured by fact_slice_capture)
                 fsp_visit_child(source call)
                 fsp_push_val(source)
-                if not fact_parallel_array(call) {}
-                else if fact_parallel_range_source(source) {
-                    # (a name read again for the positions, fact_parallel_range_bound; one
-                    # converted first only when it is a local `let`, whose conversion then is proved)
+                # (an endpoint read again for the positions, fact_parallel_range_bound: its
+                # value, a conversion to the range's int64 proved with it)
+                if fact_parallel_array(call) and fact_parallel_range_source(source) {
                     loop e in [kid(source 0) kid(source 2)] {
-                        let named=fact_parallel_endpoint(e)
-                        if named =? 0 or nodes.ptr[named].kind not=? 'ident' {continue}
-                        if named =? e {fsp_push_val(e)}
-                        else if nodes.ptr[named].aux =? int32(1) and nodes.ptr[named].sym >? 0 and SlicePrepWord(locals.ptr[SlicePrepWord(nodes.ptr[named].sym)].flags) & (LF_PARAM | LF_VALUEPARAM | LF_MUTPARAM | LF_ASSIGNED) =? 0 {fsp_push_val(e)}
+                        if fact_parallel_endpoint(e) not=? 0 {fsp_push_val(e)}
                     }
                 }
             }
