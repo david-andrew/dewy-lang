@@ -1,0 +1,9 @@
+# modes: native
+$extern
+memset = (p:ptr<uint8> c:int32 n:uint64):>ptr<uint8>
+Frame:type = [id:int32 buf:array<uint8 length=4>]
+main = ():>void => $unsafe {
+    let f = Frame[1 [0 0 0 0]]
+    memset(f.buf.ptr 7 4);
+    printl(f.buf)
+}

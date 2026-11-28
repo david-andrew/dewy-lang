@@ -122,6 +122,9 @@ member_missing=(n:int64 bt:int64 expected:int64 @bypass:bool):>int64=>$unsafe {
             }
             fatal(nodes.ptr[n].pos "{dt(bt)} has no field '{name_of(fname)}' (it is one of its members: find out which first, with {jd(nodes.ptr[n].pos "`match x:` and an arm for each, or `if x is ...:`" "`match x \{ ... }` and an arm for each, or `if x is? ... \{ }`")})")
         }
+        if bk =? 'fixed' and name_of(fname) =? "ptr" and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {
+            fatal(nodes.ptr[n].pos "a fixed-length array has no `.ptr` yet: give C a growable array (`let buf:array<uint8> = fill(0 n)`, then `buf.ptr`), or a pointer to the record holding it (`ptr<Record>`)")
+        }
         if bk =? 'generator' and name_of(fname) =? "next" {
             fatal(nodes.ptr[n].pos "a generator has no `.next` member in v1 (not decided yet): pull from it with a loop (`loop x in g \{ ... break }`) or collect with `[g...]`")
         }
