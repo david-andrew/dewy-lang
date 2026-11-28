@@ -98,7 +98,7 @@ fn_adapter=(n:CallableCompatWord et:CallableCompatWord expected:CallableCompatWo
 # int64 is passed) takes the expected type and converts on entry, as `@f` does
 # (fn_adapts): by value, unrefined, not a function, in the program's own code.
 lambda_param_widens=(p:CallableCompatWord at:CallableCompatWord want:CallableCompatWord mutable:bool):>bool=>{
-    not mutable and not has_flag(p NF_MUT) and dewy_at(nodes[p].pos) and tkind(at) not=? 'refined' and tkind(want) not=? 'refined' and not is_fn_type(at) and not is_fn_type(want) and can_coerce(0 want at)
+    not mutable and not has_flag(p NF_MUT) and dewy_at(nodes[p].pos) and tkind(at) not=? 'refined' and not is_fn_type(at) and not is_fn_type(want) and can_coerce(0 want at)
 }
 # `(r:int) => body` becomes `($wide0) => { let r:int = $wide0; body }`; O(body statements).
 lambda_widen_param=(lam:CallableCompatWord i:CallableCompatWord):>void=>{

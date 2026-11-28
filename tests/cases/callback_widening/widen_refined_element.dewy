@@ -1,0 +1,9 @@
+# A callback parameter written as a refined element's base type converts on entry
+let xs:array<int64<(>=? 0)>> = [3 1 2]
+xs.sort(key=(i:int64) => -i)
+printl(xs)
+printl(xs.sorted(key=(i:int) => i))
+printl(xs.map((i:int64) => i * 2))
+let order:array<int64<(<? order.length)>> = [1 2 0]
+order.sort(key=(i:int64) => -i)
+printl(order)
