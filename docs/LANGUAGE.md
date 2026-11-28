@@ -1401,7 +1401,8 @@ Every store is checked. A literal is checked element by element, `xs[i] = v` aga
 the length after the right side runs, and `push` and `insert` against the length they
 leave. A selector in such a store can't contain a call. Growing, `clear`,
 `swap`, `reverse` and the `sort` family keep the contract with no proof per element,
-and `push` and `swap` work in place. A shrink (`pop`, `truncate`) can leave an element
+and work in place, as `push` does. A key callback's parameter is an element, so after
+`words.length =? order.length`, `order.sort(key=(i) => words[i])` checks no bounds. A shrink (`pop`, `truncate`) can leave an element
 past the new end, so it is a compile error unless it ends at length 0 or
 the element values are bounded. Under `$runtime_checks` it checks every element before
 changing the array. `resize` is an error, as for any refined element.

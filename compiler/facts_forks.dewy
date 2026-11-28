@@ -8,7 +8,7 @@ from p"effect_types.dewy" import (PlaceIdentity)
 from p"expr.jo" import (CV)
 from p"set_type_queries.dewy" import (is_dewy_set_type)
 from p"checks_thin_expr.dewy" import (is_map_type)
-from p"facts.jo" import (FACT_CAP FACT_CONTRACT FACT_ELEMENT_BELOW FACT_ELEMENT_VALUE FACT_KEYS_SOURCE FACT_KEY_SOURCE FactDifference FactForkEntry FactKeyParam FactProjection FactState fact_covered fact_fork_entries fact_fork_nodes fact_key_names fact_key_params fact_name_parallel_arrays fact_owner fact_parallel_bounds fact_pending fact_policy fact_probe_on fact_query fact_speculating fact_summary_owner)
+from p"facts.jo" import (FACT_CAP FACT_CONTRACT FACT_ELEMENT_BELOW FACT_ELEMENT_VALUE FACT_KEYS_SOURCE FACT_KEY_SOURCE FACT_SELF_BOUND FACT_SIB_BOUND FactDifference FactForkEntry FactKeyParam FactProjection FactState fact_covered fact_fork_entries fact_fork_nodes fact_key_names fact_key_params fact_name_parallel_arrays fact_owner fact_parallel_bounds fact_pending fact_policy fact_probe_on fact_query fact_speculating fact_summary_owner)
 from p"facts_capture.dewy" import (fact_capture)
 from p"facts_slice_prep.dewy" import (fact_slice_flags)
 from p"facts_values.dewy" import (fact_domain fact_scalar fact_type fact_project)
@@ -261,6 +261,12 @@ fact_key_record=(n:ForkWord @s:FactState base:ForkWord):>void=>$unsafe {
             if d not=? FACT_MAX and d >? FACT_MIN + 1 {rows.push(FactDifference((-1) j d - 1))}
         }
     }
+    # (a self-length or sibling-bounded receiver's elements are below a length the callback
+    # may capture: `order.sort(key=(i) => words[i])` after `words.length =? order.length`)
+    let own=fact_projection_find(s base FACT_SELF_BOUND false)
+    if own >=? 0 {fact_key_rows(@s fact_project(@s base (-1) false T_INT) fact_bound(s s.projections[own].value).hi entry @rows)}
+    let sib=fact_projection_find(s base FACT_SIB_BOUND false)
+    if sib >=? 0 {fact_key_rows(@s s.projections[sib].value 0 entry @rows)}
     # Membership crosses the closure boundary only for the identical
     # immutable dictionary snapshot, never a shared/mutable capture or name.
     # O(captures^2), capped at 16, using indexed key-source projections.
@@ -294,6 +300,18 @@ fact_key_record=(n:ForkWord @s:FactState base:ForkWord):>void=>$unsafe {
     if element not=? 0 and tkind(prune(element)) not=? 'refined' {element=0}
     let held=fact_key_elements.get(f)
     fact_key_elements[f]=if held not=? none and held not=? element {0} else {element}
+}
+# Every element is at most top + k: a row to each captured value top is within a known
+# distance of. O(captures).
+fact_key_rows=(@s:FactState top:ForkWord k:ForkWord entry:FactForkEntry @rows:array<FactDifference>):>void=>{
+    # (offsets are written constants; both stay far from the ends of int64)
+    let far=ForkWord(1) << 61
+    if top =? 0 or k >=? far or k <=? -far {return}
+    loop j in [0..entry.values.length) {
+        if entry.maps[j] {continue}
+        let d=if entry.values[j] =? top {0} else {fact_shortest(s top entry.values[j])}
+        if d <? far and d >? -far {rows.push(FactDifference((-1) j d + k))}
+    }
 }
 fact_fork_seed=(f:ForkWord @s:FactState):>void=>$unsafe {
     if fns.ptr[f].kind not=? FK_LAMBDA and fns.ptr[f].kind not=? FK_GENERATOR {return}

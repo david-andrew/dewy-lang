@@ -1014,8 +1014,9 @@ ref_array_call_prepare=(decl:int64 @args:array<int64> ptypes:array<int64> writte
     if not sibling {ref_mutable_authority(place)}
     check_place(place true)
     let self_length=ref_self_active and ref_self_contract(t)
-    # (a swap changes neither the length nor the values, and has no callback to see it)
-    if name =? "swap" and (self_length or ref_length_route(place t)) {
+    # (a swap changes neither the length nor the values, and has no callback to see it; nor
+    # does any permutation, so a self-length array's holds whatever its callback does)
+    if name =? "swap" and (self_length or ref_length_route(place t)) or self_length and name not=? "__dewy_insert" {
         ref_self_direct[place]=true
         return out
     }

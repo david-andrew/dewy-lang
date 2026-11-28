@@ -1,0 +1,16 @@
+# An index table sorted in place by what its elements index: the key's parameter
+# is below the array's length, and so below a length known to equal it.
+main = ():>void => {
+    const words = ["pear" "apple" "fig" "kiwi"]
+    let order:array<int64<(<? order.length)>> = []
+    loop _ in [0..words.length) { order.push(order.length) }
+    if words.length =? order.length {
+        order.sort(key=(i) => words[i])
+        loop i in order { printl(words[i]) }
+        printl(order.sorted(key=(i) => words[i].length))
+    }
+    order.reverse()
+    printl(order)
+    order.sort_with((a b) => a >? b)
+    if order.length >? 0 { printl(order[order[0]]) }
+}

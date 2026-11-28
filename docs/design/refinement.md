@@ -178,7 +178,7 @@ Let `n` be the length before the operation.
 | `xs.reserve(k)` | none | The length does not change. |
 | `xs.clear()` | none | Vacuous at length 0. |
 | `xs.swap(i j)` | none, beyond the bounds of `i` and `j` | In place. A swap keeps the length and the set of values. |
-| `reverse`, `sort`, `sort_by`, `sort_with` | none | A private candidate, as for any refined array. A permutation keeps the contract, whatever a callback does, because it holds for the candidate alone. |
+| `reverse`, `sort`, `sort_by`, `sort_with` | none | In place, as `swap`: a permutation keeps the length and the set of values, whatever a callback does, because the call holds the array while the callback runs. A key callback's parameter is an element, so it is below the array's length. |
 | `xs.pop()`, `xs.pop(i)`, `xs.truncate(k)` | every remaining element `op` the new length | **Shrink.** See below. |
 | `xs.resize(k)` | rejected | It would create elements by zero initialization, which refined elements never allow. |
 | `xs .+= d` | every element of the result | The new whole array is unproven unless its values are known. |
