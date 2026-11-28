@@ -184,15 +184,21 @@ slot_disp=(v:XWord):>XWord=>$unsafe {
 }
 
 # value of int vreg v into register r
+let x_flags_live:bool=false
 ld=(r:XWord v:XWord):>void=>$unsafe {
     let l=vloc[v]
     if l >=? 0 {
         if l not=? r {mov_rr(r  l)}
     }
     else if l =? LOC_SPILL {mov_rm(r  RBP  xe_spill[v])}
-    else if l =? LOC_CONST or l =? LOC_FCONST {mov_imm(r  vcval[v])}
+    else if l =? LOC_CONST or l =? LOC_FCONST {
+        let cv=vcval[v]
+        if cv =? 0 and fused_cc <? 0 and not x_flags_live {op_rr(0x31  false  r  r)}
+        else {mov_imm(r  cv)}
+    }
     else if l =? LOC_SLOT {lea(r  RBP  slot_disp(v))}
     else if l =? LOC_GLOBAL {rel_fixup_lea(r  vgkind[v]  vgoff[v])}
+    else if fused_cc <? 0 and not x_flags_live {op_rr(0x31  false  r  r)}
     else {mov_imm(r  0)}
 }
 
@@ -785,7 +791,26 @@ emit_call_args=(start:XWord n:XWord extra:XWord extra_dst:XWord):>void=>$unsafe 
             if ty =? 0 or ty =? 3 {
                 ni -= 1
                 if ni <? 6 {continue}
-                ld(RAX  v)
+                let lv=vloc[v]
+                if lv >=? 0 and lv <? XMM {
+                    if lv >=? 8 {b(0x41)}
+                    b(0x50 + (lv & 7))
+                }
+                else if lv =? LOC_SPILL {
+                    b(0xFF)
+                    mem(6  RBP  xe_spill[v])
+                }
+                else if lv =? LOC_CONST and fits32(vcval[v]) {
+                    let cv=vcval[v]
+                    if cv >=? -128 and cv <=? 127 {b(0x6A); b(cv)}
+                    else {b(0x68); b32(cv)}
+                }
+                else {
+                    ld(RAX  v)
+                    b(0x50)
+                }
+                rsp_adjust(8)
+                continue
             }
             else {
                 nf -= 1
@@ -850,9 +875,16 @@ emit_call_args_win64=(start:XWord n:XWord extra:XWord extra_dst:XWord):>void=>$u
 pop_call_stack=():>void=>$unsafe {
     if call_stack_bytes >? 0 {
         rex(true  0  0  RSP  false)
-        b(0x81)
-        modrr(0  RSP)
-        b32(call_stack_bytes)
+        if call_stack_bytes <=? 127 {
+            b(0x83)
+            modrr(0  RSP)
+            b(call_stack_bytes)
+        }
+        else {
+            b(0x81)
+            modrr(0  RSP)
+            b32(call_stack_bytes)
+        }
         rsp_adjust(-call_stack_bytes)
     }
 }
@@ -979,16 +1011,22 @@ x_ret_direct=(pos:XWord d:XWord):>bool=>$unsafe {
     not xe_debug and v_live[d].nuse =? 1 and pos + 1 <? xe_ncode and xe_instructions[pos + 1].op =? 'ret' and XWord(xe_instructions[pos + 1].a) =? d
 }
 lea_add=(pos:XWord d:XWord a:XWord bb:XWord sign:XWord):>bool=>$unsafe {
+    if vloc[d] =? LOC_NONE or vloc[d] =? LOC_SLOT {return false}
     let ret_dir=x_ret_direct(pos d)
-    let rd=if ret_dir {RAX} else {vloc[d]}
+    let rd=if ret_dir {RAX} else {dreg(d  RAX)}
     let ra=vloc[a]
     let rb=vloc[bb]
+    if sign >? 0 and ra =? LOC_CONST and rb >=? 0 and rb <? XMM {
+        let ta=a; a=bb; bb=ta
+        let tr=ra; ra=rb; rb=tr
+    }
     if rd <? 0 or rd >=? XMM or ra <? 0 or ra >=? XMM or ra =? rd {return false}
     if rb =? LOC_CONST {
         let k=vcval[bb] * sign
         if not fits32(k) {return false}
         lea(rd  ra  k)
         if ret_dir {ret_in_rax=pos + 1}
+        else {st(d  rd)}
         return true
     }
     if rb <? 0 or rb >=? XMM or sign <? 0 {return false}
@@ -996,6 +1034,7 @@ lea_add=(pos:XWord d:XWord a:XWord bb:XWord sign:XWord):>bool=>$unsafe {
     lea(rd  ra  0)
     cur_index=-1
     if ret_dir {ret_in_rax=pos + 1}
+    else {st(d  rd)}
     true
 }
 int_bin=(opc_rr:XWord ext:XWord pos:XWord ins:ptr<Ins>):>void=>$unsafe {
@@ -1004,6 +1043,28 @@ int_bin=(opc_rr:XWord ext:XWord pos:XWord ins:ptr<Ins>):>void=>$unsafe {
     let a=XWord(ins[0].a)
     let bb=XWord(ins[0].b)
     let ret_dir=x_ret_direct(pos d)
+    if not ret_dir and vloc[d] =? LOC_SPILL {
+        if opc_rr not=? 0x29 and vloc[bb] =? LOC_SPILL and xe_spill[d] =? xe_spill[bb] and not (vloc[a] =? LOC_SPILL and xe_spill[d] =? xe_spill[a]) {
+            let temp=a; a=bb; bb=temp
+        }
+        if vloc[a] =? LOC_SPILL and xe_spill[d] =? xe_spill[a] {
+            let lb=vloc[bb]
+            if lb =? LOC_CONST and fits32(vcval[bb]) {
+                let cv=vcval[bb]
+                let short_c=cv >=? -128 and cv <=? 127
+                rex(true  0  0  RBP  false)
+                b(if short_c {0x83} else {0x81})
+                mem(ext  RBP  xe_spill[d])
+                if short_c {b(cv)}
+                else {b32(cv)}
+                return
+            }
+            if lb >=? 0 and lb <? XMM {
+                op_rm(opc_rr  true  lb  RBP  xe_spill[d])
+                return
+            }
+        }
+    }
     let r=if ret_dir {RAX} else {dreg(d  RAX)}
     if vloc[bb] =? r and r not=? vloc[a] {
         if opc_rr =? 0x29 {r=RAX}
@@ -2081,7 +2142,8 @@ x_emit_iconst=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
     let dl=vloc[d]
     if dl =? LOC_CONST or dl =? LOC_NONE {return}
     if x_ret_direct(pos d) {
-        mov_imm(RAX  ins[0].imm)
+        if ins[0].imm =? 0 and fused_cc <? 0 and not x_flags_live {op_rr(0x31  false  RAX  RAX)}
+        else {mov_imm(RAX  ins[0].imm)}
         ret_in_rax=pos + 1
         return
     }
@@ -2093,7 +2155,8 @@ x_emit_iconst=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
     }
     else {
         let r=dreg(d  RAX)
-        mov_imm(r  ins[0].imm)
+        if ins[0].imm =? 0 and fused_cc <? 0 and not x_flags_live {op_rr(0x31  false  r  r)}
+        else {mov_imm(r  ins[0].imm)}
         st(d  r)
     }
 }
@@ -2532,13 +2595,16 @@ x_emit_add=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
     if vloc[d] =? LOC_NONE or vloc[d] =? LOC_SLOT {return}
     if lea_add(pos  d  a  bb  1) {return}
     int_bin(0x01  0  pos  ins)
+    x_logic_flag_branch(pos  d  true)
 }
 x_emit_sub=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
     let d=XWord(ins[0].dst)
     let a=XWord(ins[0].a)
     let bb=XWord(ins[0].b)
+    if vloc[d] =? LOC_NONE {return}
     if vloc[bb] =? LOC_CONST and lea_add(pos  d  a  bb  -1) {return}
     int_bin(0x29  5  pos  ins)
+    x_logic_flag_branch(pos  d  true)
 }
 
 # A mask tested for zero needs flags, not an intermediate integer result.
@@ -2632,12 +2698,23 @@ x_test_ops=(a:XWord bb:XWord branch:bool):>void=>$unsafe {
         else {op_rr(0x85  true  r  base)}
     }
 }
+x_next_real=(start:XWord):>XWord=>$unsafe {
+    let p=start
+    loop p <? xe_ncode {
+        let op=xe_instructions[p].op
+        if op not=? 'block' and op not=? 'nop' and op not=? 'assume' {return p}
+        p += 1
+    }
+    xe_ncode
+}
 x_mask_test=(pos:XWord ins:ptr<Ins>):>bool=>$unsafe {
     let d=XWord(ins[0].dst)
     if xe_debug or pos + 1 >=? xe_ncode or v_live[d].ndef not=? 1 or v_live[d].nuse not=? 1 {return false}
-    let next=xe_instructions + pos + 1
+    let p1=x_next_real(pos + 1)
+    if p1 >=? xe_ncode {return false}
+    let next=xe_instructions + p1
     if(next[0].op =? 'if_' or next[0].op =? 'brif') and XWord(next[0].a) =? d {
-        x_branch_pos=pos + 1
+        x_branch_pos=p1
         x_test_ops(XWord(ins[0].a)  XWord(ins[0].b)  true)
         x_branch_pos=-1
         fused_cc=CC_NE
@@ -2649,12 +2726,14 @@ x_mask_test=(pos:XWord ins:ptr<Ins>):>bool=>$unsafe {
     else if XWord(next[0].b) =? d {other=XWord(next[0].a)}
     if other <? 0 or vloc[other] not=? LOC_CONST or vcval[other] not=? 0 {return false}
     let result=XWord(next[0].dst)
-    let branch=false
-    if pos + 2 <? xe_ncode and v_live[result].nuse =? 1 {
-        let consumer=xe_instructions + pos + 2
-        branch=(consumer[0].op =? 'if_' or consumer[0].op =? 'brif') and XWord(consumer[0].a) =? result
+    let p2=x_next_real(p1 + 1)
+    let next_branch=false
+    if p2 <? xe_ncode {
+        let consumer=xe_instructions + p2
+        next_branch=(consumer[0].op =? 'if_' or consumer[0].op =? 'brif') and XWord(consumer[0].a) =? result
     }
-    if branch {x_branch_pos=pos + 2}
+    let branch=next_branch and v_live[result].nuse =? 1
+    if branch {x_branch_pos=p2}
     x_test_ops(XWord(ins[0].a)  XWord(ins[0].b)  branch)
     x_branch_pos=-1
     let cc:XWord=if next[0].op =? 'eq' {CC_E} else {CC_NE}
@@ -2663,24 +2742,38 @@ x_mask_test=(pos:XWord ins:ptr<Ins>):>bool=>$unsafe {
         let r=dreg(result  RAX)
         setcc_reg(cc  r)
         st(result  r)
+        if next_branch {fused_cc=cc}
     }
-    fuse_skip=pos + 1
+    fuse_skip=p1
     true
 }
-x_logic_flag_branch=(pos:XWord d:XWord):>void=>$unsafe {
-    if xe_debug or vloc[d] =? LOC_NONE or pos + 2 >=? xe_ncode or v_live[d].nuse not=? 1 {return}
-    let nx=xe_instructions + pos + 1
+x_logic_flag_branch=(pos:XWord d:XWord only_zf:bool=false):>void=>$unsafe {
+    if xe_debug or vloc[d] =? LOC_NONE {return}
+    let p1=x_next_real(pos + 1)
+    if p1 >=? xe_ncode {return}
+    let nx=xe_instructions + p1
     let nop=nx[0].op
-    if nop not=? 'lts' and nop not=? 'ges' and nop not=? 'eq' and nop not=? 'ne' {return}
+    if (nop =? 'if_' or nop =? 'brif') and XWord(nx[0].a) =? d {
+        fused_cc=CC_NE
+        return
+    }
+    if v_live[d].nuse not=? 1 {return}
+    if only_zf {
+        if nop not=? 'eq' and nop not=? 'ne' {return}
+    }
+    else if nop not=? 'lts' and nop not=? 'ges' and nop not=? 'eq' and nop not=? 'ne' {return}
     if XWord(nx[0].a) not=? d {return}
     let nb=XWord(nx[0].b)
     if vloc[nb] not=? LOC_CONST or vcval[nb] not=? 0 {return}
     let cd=XWord(nx[0].dst)
     if v_live[cd].nuse not=? 1 {return}
-    let n2=xe_instructions + pos + 2
-    if (n2[0].op =? 'if_' or n2[0].op =? 'brif') and XWord(n2[0].a) =? cd {
-        fused_cc=icc(nop)
-        fuse_skip=pos + 1
+    let p2=x_next_real(p1 + 1)
+    if p2 <? xe_ncode {
+        let n2=xe_instructions + p2
+        if (n2[0].op =? 'if_' or n2[0].op =? 'brif') and XWord(n2[0].a) =? cd {
+            fused_cc=icc(nop)
+            fuse_skip=p1
+        }
     }
 }
 x_emit_and_=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
@@ -2742,18 +2835,21 @@ x_emit_mul=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
             cur_index=-1
         }
         else {
+            let short_c=c >=? -128 and c <=? 127
+            let opc:XWord=if short_c {0x6B} else {0x69}
             if vloc[a] =? LOC_SPILL {
                 rex(true  r  0  RBP  false)
-                b(0x69)
+                b(opc)
                 mem(r  RBP  xe_spill[a])
             }
             else {
                 let src=reg_of(a  RAX)
                 rex(true  r  0  src  false)
-                b(0x69)
+                b(opc)
                 modrr(r  src)
             }
-            b32(c)
+            if short_c {b(c)}
+            else {b32(c)}
         }
     }
     else {
@@ -2848,7 +2944,7 @@ x_emit_shl=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
         let k=vcval[bb] & 63
         let ret_dir=x_ret_direct(pos d)
         if op =? 'shl' and k >=? 1 and k <=? 3 {
-            let rd=if ret_dir {RAX} else {vloc[d]}
+            let rd=if ret_dir {RAX} else {dreg(d  RAX)}
             let ra=vloc[a]
             if rd >=? 0 and rd <? XMM and ra >=? 0 and ra <? XMM and rd not=? ra {
                 if k =? 1 {
@@ -2864,10 +2960,33 @@ x_emit_shl=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
                     b32(0)
                 }
                 if ret_dir {ret_in_rax=pos + 1}
+                else {st(d  rd)}
                 return
             }
         }
         let r=if ret_dir {RAX} else {dreg(d  RAX)}
+        if op =? 'shl' and k >=? 4 and k <=? 30 {
+            let la=vloc[a]
+            if la =? LOC_SPILL or (la >=? 0 and la <? XMM and r not=? la) {
+                let short_k=k <=? 6
+                let opc:XWord=if short_k {0x6B} else {0x69}
+                if la =? LOC_SPILL {
+                    rex(true  r  0  RBP  false)
+                    b(opc)
+                    mem(r  RBP  xe_spill[a])
+                }
+                else {
+                    rex(true  r  0  la  false)
+                    b(opc)
+                    modrr(r  la)
+                }
+                if short_k {b(XWord(1) << k)}
+                else {b32(XWord(1) << k)}
+                if ret_dir {ret_in_rax=pos + 1}
+                else {st(d  r)}
+                return
+            }
+        }
         ld(r  a)
         rex(op not=? 'rot32'  0  0  r  false)
         b(0xC1)
@@ -2908,11 +3027,25 @@ x_select_pure=(op:Op):>bool=>$unsafe {
         _ => {false}
     }
 }
+swap_icmp=(op:Op):>Op=>match op {
+    <'lts'> => 'gts'
+    <'les'> => 'ges'
+    <'gts'> => 'lts'
+    <'ges'> => 'les'
+    <'ltu'> => 'gtu'
+    <'leu'> => 'geu'
+    <'gtu'> => 'ltu'
+    <'geu'> => 'leu'
+    _ => op
+}
 x_compare_fused=(pos:XWord ins:ptr<Ins>):>bool=>$unsafe {
     let op=ins[0].op
     let d=XWord(ins[0].dst)
     let a=XWord(ins[0].a)
     let bb=XWord(ins[0].b)
+    if is_icmp(op) and cmp_load <? 0 and vloc[a] =? LOC_CONST and vloc[bb] not=? LOC_CONST and fits32(vcval[a]) {
+        let tmp=a; a=bb; bb=tmp; op=swap_icmp(op)
+    }
     # fuse with a following if/brif or select that is the only user
     if pos + 1 <? xe_ncode and v_live[d].nuse =? 1 {
         let nx=xe_instructions[pos + 1]
@@ -2997,18 +3130,22 @@ x_emit_eq=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
     let d=XWord(ins[0].dst)
     let a=XWord(ins[0].a)
     let bb=XWord(ins[0].b)
+    if cmp_load <? 0 and vloc[a] =? LOC_CONST and vloc[bb] not=? LOC_CONST and fits32(vcval[a]) {
+        let tmp=a; a=bb; bb=tmp; op=swap_icmp(op)
+    }
     let cc=icc_for(op)
-    if pos + 1 <? xe_ncode and v_live[d].nuse =? 1 {
-        let nx=ins + 1
+    let p1=x_next_real(pos + 1)
+    if p1 <? xe_ncode and v_live[d].nuse =? 1 {
+        let nx=xe_instructions + p1
         let nop=nx[0].op
         if (nop =? 'if_' or nop =? 'brif') and XWord(nx[0].a) =? d {
-            x_branch_pos=pos + 1
+            x_branch_pos=p1
             cmp_ops(a  bb  true)
             x_branch_pos=-1
             fused_cc=cc
             return
         }
-        if x_compare_fused(pos  ins) {return}
+        if p1 =? pos + 1 and x_compare_fused(pos  ins) {return}
     }
     cmp_ops(a  bb)
     if not xe_debug and v_live[d].nuse =? 1 and pos + 1 <? xe_ncode and xe_instructions[pos + 1].op =? 'ret' and XWord(xe_instructions[pos + 1].a) =? d {
@@ -3019,15 +3156,18 @@ x_emit_eq=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
     let r=dreg(d  RAX)
     setcc_reg(cc  r)
     st(d  r)
-    if pos + 1 <? xe_ncode {
-        let nx=xe_instructions + pos + 1
+    if p1 <? xe_ncode {
+        let nx=xe_instructions + p1
         if (nx[0].op =? 'if_' or nx[0].op =? 'brif') and XWord(nx[0].a) =? d {
             fused_cc=cc
         }
-        else if nx[0].op =? 'mov' and XWord(nx[0].a) =? d and xe_vtype(XWord(nx[0].dst)) =? VI and vloc[d] not=? LOC_CONST and pos + 2 <? xe_ncode {
-            let nx2=nx + 1
-            if (nx2[0].op =? 'if_' or nx2[0].op =? 'brif') and XWord(nx2[0].a) =? XWord(nx[0].dst) {
-                fused_cc=cc
+        else if nx[0].op =? 'mov' and XWord(nx[0].a) =? d and xe_vtype(XWord(nx[0].dst)) =? VI and vloc[d] not=? LOC_CONST {
+            let p2=x_next_real(p1 + 1)
+            if p2 <? xe_ncode {
+                let nx2=xe_instructions + p2
+                if (nx2[0].op =? 'if_' or nx2[0].op =? 'brif') and XWord(nx2[0].a) =? XWord(nx[0].dst) {
+                    fused_cc=cc
+                }
             }
         }
     }
@@ -4390,10 +4530,12 @@ x_emit_select=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
         if vloc[d] =? LOC_NONE {cmp_load=-1; return}
         cmp_ops(sel_ca  sel_cb)
         cc=sel_cc
+        x_flags_live=true
         rb=reg_of(bb  RDX)
         r=dreg(d  RAX)
         if r =? rb {r=RAX}
         ld(r  XWord(ins[0].c))
+        x_flags_live=false
     }
     else {
         if vloc[d] =? LOC_NONE {return}
@@ -4911,6 +5053,7 @@ x64_emit=(input:ptr<IrFn> start:XWord debug:bool windows:bool fused:bool mt_acti
     x_mach_loop=0
     x_rc_stub=-1
     fused_cc=-1
+    x_flags_live=false
     cmp_load=-1
     cmp_reload=-1
     cmp_reload_at=-1

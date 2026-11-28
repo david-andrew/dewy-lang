@@ -310,15 +310,17 @@ const DX_DISPATCH:array<uint8 length=256>=[
     1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 \
     1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
 ]
-let dx_solo_tok:array<DewyToken>=[]
-let dx_solo_p:ptr<DewyToken>=$unsafe (uint64(0) as ptr<DewyToken>)
-dx_solo_init=():>void=>$unsafe {
-    dx_solo_tok=fill(DewyToken.none 128)
-    let p=dx_solo_tok.ptr
-    p[33]='bang'; p[40]='lparen'; p[41]='rparen'; p[44]='comma'; p[59]='semi'
-    p[64]='at'; p[91]='lbrack'; p[93]='rbrack'; p[123]='lbrace'; p[125]='rbrace'; p[126]='tilde'
-    dx_solo_p=p
-}
+# DewyToken ordinals for solo 1-char ops (dk=2) in .rodata.
+const DX_SOLO_TOK:array<uint8 length=128>=[
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+    0 24 0 0 0 0 0 0 1 2 0 0 11 0 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 12 0 0 0 0 \
+    19 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 3 0 4 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+    0 0 0 0 0 0 0 0 0 0 0 5 0 6 25 0
+]
 
 let dx_g_state:DewyLexState=$unsafe DewyLexState[false false 0 false false 0 0 0 0 0 0 (uint64(0) as ptr<array<string>>) (uint64(0) as ptr<array<int64>>) (uint64(0) as ptr<array<int32>>)]
 let dx_g_host:ptr<DewyLexHost>=$unsafe (uint64(0) as ptr<DewyLexHost>)
@@ -328,9 +330,11 @@ let dx_g_source:string=""
 let dx_g_symbols:ptr<DewyToken>=$unsafe (uint64(0) as ptr<DewyToken>)
 let dx_g_sym_tags:ptr<uint32>=$unsafe (uint64(0) as ptr<uint32>)
 let dx_g_words:ptr<DewyToken>=$unsafe (uint64(0) as ptr<DewyToken>)
+let dx_g_word_tags:ptr<uint32>=$unsafe (uint64(0) as ptr<uint32>)
 let dx_g_word_count:DxWord=0
 let dx_g_out:array<DewyLexeme>=[]
 let dx_g_slots:ptr<DewyLexeme>=$unsafe (uint64(0) as ptr<DewyLexeme>)
+let dx_g_slots_guard:ptr<DewyLexeme>=$unsafe (uint64(0) as ptr<DewyLexeme>)
 let dx_g_cap:DxWord=0
 let dx_g_cap_guard:DxWord=0
 let dx_g_count:DxWord=0
@@ -354,6 +358,7 @@ dx_intern_slow_g=(p:ptr<uint8> start:DxWord n:DxWord):>DxWord=>$unsafe {
 }
 
 dx_grow_guard=(count:DxWord):>void=>$unsafe {
+    dx_g_count=count
     let nc:DxWord=dx_g_cap * 2
     if nc <? count + 4 {nc=count + 4}
     dx_g_out.reserve(nc)
@@ -361,6 +366,7 @@ dx_grow_guard=(count:DxWord):>void=>$unsafe {
     dx_g_cap=nc
     dx_g_cap_guard=nc - 2
     dx_g_slots=dx_g_out.ptr
+    dx_g_slots_guard=dx_g_slots + dx_g_cap_guard
 }
 
 dx_handle_kw_suffix=(bytes:ptr<uint8> i:DxWord stopw:DxWord id:DxWord sl:ptr<DewyLexeme>):>DxWord=>$unsafe {
@@ -382,30 +388,54 @@ dx_handle_kw_suffix=(bytes:ptr<uint8> i:DxWord stopw:DxWord id:DxWord sl:ptr<Dew
     i
 }
 
+dx_intern_finish=(bytes:ptr<uint8> i0:DxWord stopw:DxWord flags:DxWord sl:ptr<uint64>):>DxWord=>$unsafe {
+    let start:DxWord=DxWord(sl[1])
+    let id:DxWord=dx_intern_slow_g(bytes + start start (i0 - start))
+    if id <? dx_g_word_count {
+        let sym_u64=DxUWord(dx_g_word_tags[id])
+        let kind_u64:DxUWord=if id =? dx_g_state.true_id or id =? dx_g_state.false_id {3} else {2}
+        sl[0]=kind_u64 | (DxUWord(uint32<overflow='wrap'>(id)) << 32)
+        sl[3]=DxUWord(flags) | (sym_u64 << 32)
+        if i0 <? stopw and (bytes[i0] =? b'=' or bytes[i0] =? b'?') {
+            return dx_handle_kw_suffix(bytes i0 stopw id (sl as ptr<DewyLexeme>))
+        }
+        return i0
+    }
+    sl[0]=DxUWord(2) | (DxUWord(uint32<overflow='wrap'>(id)) << 32)
+    sl[3]=DxUWord(flags)
+    i0
+}
+
 dx_handle_raw_or_unicode=(bytes:ptr<uint8> i:DxWord stopw:DxWord count:DxWord flags:DxWord c:uint8):>DxWord=>$unsafe {
     if c =? b'r' and i + 1 <? stopw and (bytes[i + 1] =? b'"' or bytes[i + 1] =? b'\'') {
         let start:DxWord=i
         let ni:DxWord=dx_lex_quote(@dx_g_lx dx_g_host bytes (i + 1) stopw true)
-        let sl=dx_g_slots + count
-        sl[0].kind='rawquoted'; sl[0].name=0; sl[0].start=start; sl[0].stop=ni
-        sl[0].space=(flags & 1) not=? 0; sl[0].newline=(flags & 2) not=? 0; sl[0].symbol='none'
+        let sl=(dx_g_slots + count) as ptr<uint64>
+        sl[0]=8
+        sl[1]=DxUWord(start); sl[2]=DxUWord(ni)
+        sl[3]=DxUWord(flags)
         dx_g_count=count + 1
         dx_g_flags=0
         return ni
     }
     let cnt:DxWord=count
-    let fl:DxWord=flags
+    let fl:DxWord=(flags & 1) | ((flags >> 7) & 2)
     let ni:DxWord=dx_lex_unicode(@dx_g_state dx_g_host dx_g_source bytes i stopw dx_cur_cls dx_g_words dx_g_slots @cnt @fl)
     dx_g_count=cnt
-    dx_g_flags=fl
+    dx_g_flags=(fl & 1) | ((fl & 2) << 7)
     ni
 }
 
-dx_handle_op_slow=(bytes:ptr<uint8> start:DxWord stopw:DxWord):>DxWord=>$unsafe {
+dx_handle_op_slow=(bytes:ptr<uint8> start:DxWord stopw:DxWord flags:DxWord sl:ptr<uint64>):>DxWord=>$unsafe {
     let symbol=dx_symbol(bytes start stopw)
     if symbol =? 'none' {dx_g_host[0].error(start "unexpected character in Dewy source");}
-    dx_g_tmp_sym=symbol
-    start + dx_token_width(symbol)
+    let ni:DxWord=start + dx_token_width(symbol)
+    sl[0]=1
+    sl[1]=DxUWord(start); sl[2]=DxUWord(ni)
+    sl[3]=DxUWord(flags)
+    let lex_p=sl as ptr<DewyLexeme>
+    lex_p[0].symbol=symbol
+    ni
 }
 
 dx_handle_lazy_body=(bytes:ptr<uint8> i:DxWord stopw:DxWord count:DxWord):>DxWord=>$unsafe {
@@ -414,9 +444,10 @@ dx_handle_lazy_body=(bytes:ptr<uint8> i:DxWord stopw:DxWord count:DxWord):>DxWor
     if j <? stopw and bytes[j] =? b'\{' {
         let e:DxWord=dx_lazy_end(bytes j stopw)
         if e >? 0 {
-            let lz=dx_g_slots + count
-            lz[0].kind='lazy_body'; lz[0].name=0; lz[0].start=j; lz[0].stop=e
-            lz[0].space=(j >? i); lz[0].newline=false; lz[0].symbol='none'
+            let lz=(dx_g_slots + count) as ptr<uint64>
+            lz[0]=31
+            lz[1]=DxUWord(j); lz[2]=DxUWord(e)
+            lz[3]=if j >? i {1} else {0}
             dx_g_count=count + 1
             dx_g_state.has_lazy=true
             return e
@@ -434,9 +465,10 @@ dx_handle_other=(bytes:ptr<uint8> i:DxWord stopw:DxWord dk:uint8 count:DxWord fl
     if dk =? 5 {
         let start:DxWord=i
         let ni:DxWord=dx_lex_quote(@dx_g_lx dx_g_host bytes i stopw false)
-        let sl=dx_g_slots + count
-        sl[0].kind='quoted'; sl[0].name=0; sl[0].start=start; sl[0].stop=ni
-        sl[0].space=(flags & 1) not=? 0; sl[0].newline=(flags & 2) not=? 0; sl[0].symbol='none'
+        let sl=(dx_g_slots + count) as ptr<uint64>
+        sl[0]=7
+        sl[1]=DxUWord(start); sl[2]=DxUWord(ni)
+        sl[3]=DxUWord(flags)
         dx_g_count=count + 1
         dx_g_flags=0
         return ni
@@ -447,7 +479,7 @@ dx_handle_other=(bytes:ptr<uint8> i:DxWord stopw:DxWord dk:uint8 count:DxWord fl
             if e <? 0 {dx_block_comment_error(@dx_g_lx i); dx_g_host[0].error(dx_g_lx.problem_at dx_g_lx.problem);}
             dx_g_comments.push(i); dx_g_comments.push(e)
             let nf:DxWord=flags | 1
-            if dx_g_host[0].has_newline(dx_g_source i e) {nf |= 2}
+            if dx_g_host[0].has_newline(dx_g_source i e) {nf |= 256}
             dx_g_count=count
             dx_g_flags=nf
             return e
@@ -462,9 +494,10 @@ dx_handle_other=(bytes:ptr<uint8> i:DxWord stopw:DxWord dk:uint8 count:DxWord fl
         let ni:DxWord=i + 1
         loop ni <? stopw and (DX_CLASSES[bytes[ni]] & 2) not=? 0 {ni+=1}
         if ni =? start + 1 {dx_g_host[0].error(start "expected a name after $");}
-        let sl=dx_g_slots + count
-        sl[0].kind='metatag'; sl[0].name=0; sl[0].start=start; sl[0].stop=ni
-        sl[0].space=(flags & 1) not=? 0; sl[0].newline=(flags & 2) not=? 0; sl[0].symbol='none'
+        let sl=(dx_g_slots + count) as ptr<uint64>
+        sl[0]=4
+        sl[1]=DxUWord(start); sl[2]=DxUWord(ni)
+        sl[3]=DxUWord(flags)
         dx_g_count=count + 1
         dx_g_flags=0
         return ni
@@ -484,182 +517,178 @@ dx_handle_other=(bytes:ptr<uint8> i:DxWord stopw:DxWord dk:uint8 count:DxWord fl
     i + 1
 }
 
-# Tight register-resident Dewy scan loop: keeps bytes, i, stopw, slots, count in
-# the 5 callee-saved registers and reads constant byte tables from .rodata.
-dx_lex_loop=(bytes:ptr<uint8> i0:DxWord stopw:DxWord classes:ptr<uint8>):>DxWord=>$unsafe {
+# Tight register-resident Dewy scan loop: 5 live locals (bytes, i, stopw, sl, flags)
+# fit in the 5 callee-saved registers; short-lived values never span a call;
+# cls pointer bound locally inside inner loops for fused testb; flags packs space (1)
+# and newline (256) directly into DewyLexeme's 4th qword.
+dx_lex_loop=(bytes:ptr<uint8> i0:DxWord stopw:DxWord):>DxWord=>$unsafe {
     let i:DxWord=i0
-    let slots=dx_g_slots
-    let count:DxWord=0
+    let sl=dx_g_slots as ptr<uint64>
     let flags:DxWord=0
     loop i <? stopw {
-        if count >=? dx_g_cap_guard {
-            dx_grow_guard(count)
-            slots=dx_g_slots
+        if (sl as DxUWord) >=? (dx_g_slots_guard as DxUWord) {
+            dx_grow_guard(((sl as DxWord) - (dx_g_slots as DxWord)) >> 5)
+            sl=(dx_g_slots + dx_g_count) as ptr<uint64>
         }
-        let c=bytes[i]
-        if c <=? 32 {
-            if c =? b' ' {
+        let c0=bytes[i]
+        if c0 <=? 32 {
+            if c0 =? b' ' {
                 flags |= 1
                 i+=1
                 loop i <? stopw and bytes[i] =? b' ' {i+=1}
                 if i >=? stopw {break}
-                c=bytes[i]
+                c0=bytes[i]
             }
-            if c <=? 32 and (classes[c] & 16) not=? 0 {
-                flags |= 1
-                if c =? b'\n' {flags |= 2}
-                i+=1
-                loop i <? stopw {
-                    c=bytes[i]
-                    if c =? b'\n' {flags |= 2}
-                    else if (classes[c] & 16) =? 0 {break}
+            if c0 <=? 32 {
+                let wcls=dx_cur_cls
+                if (wcls[c0] & 16) not=? 0 {
+                    flags |= 1
+                    if c0 =? b'\n' {flags |= 256}
                     i+=1
+                    loop i <? stopw {
+                        let wc=bytes[i]
+                        if wc =? b'\n' {flags |= 256}
+                        else if (wcls[wc] & 16) =? 0 {break}
+                        i+=1
+                    }
+                    continue
                 }
-                continue
             }
         }
-        let dk=DX_DISPATCH[c]
-        if dk =? 1 {
-            if c <? 0x80 and not (c =? b'r' and i + 1 <? stopw and (bytes[i + 1] =? b'"' or bytes[i + 1] =? b'\'')) {
+        if DX_DISPATCH[c0] =? 1 {
+            if c0 <? 0x80 and not (c0 =? b'r' and i + 1 <? stopw and (bytes[i + 1] =? b'"' or bytes[i + 1] =? b'\'')) {
                 let start:DxWord=i
                 i+=1
-                loop i <? stopw and (classes[bytes[i]] & 2) not=? 0 {i+=1}
+                let icls=dx_cur_cls
+                loop i <? stopw and (icls[bytes[i]] & 2) not=? 0 {i+=1}
                 let n:DxWord=i - start
-                let p=bytes + start
-                let id:DxWord=-1
-                let nmask=dx_nmask
-                if n <=? 16 and nmask >=? 0 {
+                sl[1]=DxUWord(start)
+                sl[2]=DxUWord(i)
+                if n <=? 16 and dx_nmask >=? 0 {
                     let hu:DxUWord=DxUWord(n) * 0x9E3779B97F4A7C15
                     if n >? 8 {
-                        hu=(hu xor DxUWord((p as ptr<uint64>)[0])) * 0xBF58476D1CE4E5B9
-                        hu=(hu xor (hu >> 31)) xor DxUWord(((p + (n - 8)) as ptr<uint64>)[0])
+                        hu=(hu xor DxUWord(((bytes + start) as ptr<uint64>)[0])) * 0xBF58476D1CE4E5B9
+                        hu=(hu xor (hu >> 31)) xor DxUWord(((bytes + (i - 8)) as ptr<uint64>)[0])
                     } else if n >=? 4 {
-                        hu=hu xor DxUWord((p as ptr<uint32>)[0]) xor (DxUWord(((p + (n - 4)) as ptr<uint32>)[0]) << 32)
+                        hu=hu xor DxUWord(((bytes + start) as ptr<uint32>)[0]) xor (DxUWord(((bytes + (i - 4)) as ptr<uint32>)[0]) << 32)
                     } else {
-                        hu=hu xor DxUWord(p[0]) xor (DxUWord(p[n >> 1]) << 8) xor (DxUWord(p[n - 1]) << 16)
+                        hu=hu xor DxUWord(bytes[start]) xor (DxUWord(bytes[start + (n >> 1)]) << 8) xor (DxUWord(bytes[i - 1]) << 16)
                     }
                     hu=hu * 0xBF58476D1CE4E5B9
                     let h:DxWord=(hu xor (hu >> 32)) transmute int64
-                    let e0=DxWord(dx_nsp[h & nmask])
+                    let e0=DxWord(dx_nsp[h & dx_nmask])
                     if e0 not=? 0 {
                         let id0=e0 - 1
                         if dx_nhp[id0] =? h {
                             let hdr=dx_ntp[id0]
                             if hdr not=? (uint64(0) as ptr<uint8>) and (hdr as ptr<int64>)[1] =? n {
                                 hdr=hdr + 24
-                                if n >? 8 {
-                                    if (hdr as ptr<uint64>)[0] =? (p as ptr<uint64>)[0] and ((hdr + (n - 8)) as ptr<uint64>)[0] =? ((p + (n - 8)) as ptr<uint64>)[0] {id=id0}
-                                } else if n >=? 4 {
-                                    if (hdr as ptr<uint32>)[0] =? (p as ptr<uint32>)[0] and ((hdr + (n - 4)) as ptr<uint32>)[0] =? ((p + (n - 4)) as ptr<uint32>)[0] {id=id0}
-                                } else if n >=? 2 {
-                                    if (hdr as ptr<uint16>)[0] =? (p as ptr<uint16>)[0] and ((hdr + (n - 2)) as ptr<uint16>)[0] =? ((p + (n - 2)) as ptr<uint16>)[0] {id=id0}
-                                } else if hdr[0] =? p[0] {id=id0}
+                                if (if n >? 8 {(hdr as ptr<uint64>)[0] =? ((bytes + start) as ptr<uint64>)[0] and ((hdr + (n - 8)) as ptr<uint64>)[0] =? ((bytes + (i - 8)) as ptr<uint64>)[0]}
+                                    else if n >=? 4 {(hdr as ptr<uint32>)[0] =? ((bytes + start) as ptr<uint32>)[0] and ((hdr + (n - 4)) as ptr<uint32>)[0] =? ((bytes + (i - 4)) as ptr<uint32>)[0]}
+                                    else if n >=? 2 {(hdr as ptr<uint16>)[0] =? ((bytes + start) as ptr<uint16>)[0] and ((hdr + (n - 2)) as ptr<uint16>)[0] =? ((bytes + (i - 2)) as ptr<uint16>)[0]}
+                                    else {hdr[0] =? bytes[start]}) {
+                                    if id0 >=? dx_g_word_count {
+                                        sl[0]=DxUWord(2) | (DxUWord(uint32<overflow='wrap'>(id0)) << 32)
+                                        sl[3]=DxUWord(flags)
+                                        sl=sl + 4
+                                        flags=0
+                                        continue
+                                    }
+                                    let sym_u64=DxUWord(dx_g_word_tags[id0])
+                                    let kind_u64:DxUWord=if id0 =? dx_g_state.true_id or id0 =? dx_g_state.false_id {3} else {2}
+                                    sl[0]=kind_u64 | (DxUWord(uint32<overflow='wrap'>(id0)) << 32)
+                                    sl[3]=DxUWord(flags) | (sym_u64 << 32)
+                                    if i <? stopw and (bytes[i] =? b'=' or bytes[i] =? b'?') {
+                                        i=dx_handle_kw_suffix(bytes i stopw id0 (sl as ptr<DewyLexeme>))
+                                    }
+                                    sl=sl + 4
+                                    flags=0
+                                    continue
+                                }
                             }
                         }
                     }
                 }
-                if id <? 0 {
-                    id=dx_intern_slow_g(p start n)
-                }
-                let kind:DewyKind='identifier'
-                let symbol:DewyToken='none'
-                let check_suffix=false
-                if id <? dx_g_word_count {
-                    symbol=dx_g_words[id]
-                    if id =? dx_g_state.true_id or id =? dx_g_state.false_id {kind='boolean'}
-                    if i <? stopw and (bytes[i] =? b'=' or bytes[i] =? b'?') {check_suffix=true}
-                }
-                let sl=slots + count
-                sl[0].kind=kind
-                sl[0].name=int32<overflow='wrap'>(id)
-                sl[0].start=start
-                sl[0].stop=i
-                sl[0].space=(flags & 1) not=? 0
-                sl[0].newline=(flags & 2) not=? 0
-                sl[0].symbol=symbol
-                if check_suffix {
-                    i=dx_handle_kw_suffix(bytes i stopw id sl)
-                }
-                count+=1
+                i=dx_intern_finish(bytes i stopw flags sl)
+                sl=sl + 4
                 flags=0
                 continue
             }
-            i=dx_handle_raw_or_unicode(bytes i stopw count flags c)
-            count=dx_g_count
+            i=dx_handle_raw_or_unicode(bytes i stopw (((sl as DxWord) - (dx_g_slots as DxWord)) >> 5) flags bytes[i])
+            sl=(dx_g_slots + dx_g_count) as ptr<uint64>
             flags=dx_g_flags
             continue
         }
-        if dk =? 2 {
-            let symbol=dx_solo_p[c]
-            let sl=slots + count
-            sl[0].kind='op'; sl[0].name=0; sl[0].start=i; sl[0].stop=i + 1
-            sl[0].space=(flags & 1) not=? 0; sl[0].newline=(flags & 2) not=? 0; sl[0].symbol=symbol
-            count+=1; flags=0; i+=1
+        let c1=bytes[i]
+        let dk1=DX_DISPATCH[c1]
+        if dk1 =? 2 {
+            let sym_u64=DxUWord(DX_SOLO_TOK[c1])
+            sl[0]=1
+            sl[1]=DxUWord(i); sl[2]=DxUWord(i + 1)
+            sl[3]=DxUWord(flags) | (sym_u64 << 32)
+            sl=sl + 4; flags=0; i+=1
             if dx_g_skip {
-                if symbol =? 'lparen' or symbol =? 'lbrack' or symbol =? 'lbrace' {dx_g_nesting+=1}
-                else if symbol =? 'rparen' or symbol =? 'rbrack' or symbol =? 'rbrace' {dx_g_nesting-=1}
+                if sym_u64 =? 1 or sym_u64 =? 3 or sym_u64 =? 5 {dx_g_nesting+=1}
+                else if sym_u64 =? 2 or sym_u64 =? 4 or sym_u64 =? 6 {dx_g_nesting-=1}
             }
             continue
         }
-        if dk =? 3 {
+        if dk1 =? 3 {
             let start:DxWord=i
-            let symbol:DewyToken='none'
             let next:uint8=if start + 1 <? stopw {bytes[start + 1]} else {0}
+            let stag:DxWord=0
             if next <? 128 {
-                let idx=(DxWord(c) << 7) | DxWord(next)
-                symbol=dx_g_symbols[idx]
-                let stag=DxWord(dx_g_sym_tags[idx])
+                let idx=(DxWord(c1) << 7) | DxWord(next)
+                stag=DxWord(dx_g_sym_tags[idx])
                 if stag >=? 1 and stag <=? 25 {i+=1}
                 else if stag >=? 37 and stag <=? 56 {i+=2}
                 else if stag >=? 31 and stag <=? 36 {i+=3}
-                else if stag not=? 0 {i+=dx_token_width(symbol)}
-                else {
-                    i=dx_handle_op_slow(bytes start stopw)
-                    symbol=dx_g_tmp_sym
-                }
-            } else {
-                i=dx_handle_op_slow(bytes start stopw)
-                symbol=dx_g_tmp_sym
+                else if stag not=? 0 {i+=dx_token_width(dx_g_symbols[idx])}
             }
-            let sl=slots + count
-            sl[0].kind='op'; sl[0].name=0; sl[0].start=start; sl[0].stop=i
-            sl[0].space=(flags & 1) not=? 0; sl[0].newline=(flags & 2) not=? 0; sl[0].symbol=symbol
-            count+=1; flags=0
-            if dx_g_skip and symbol =? 'function' and dx_g_nesting =? 0 {
-                i=dx_handle_lazy_body(bytes i stopw count)
-                count=dx_g_count
+            if stag not=? 0 {
+                sl[0]=1
+                sl[1]=DxUWord(start); sl[2]=DxUWord(i)
+                sl[3]=DxUWord(flags) | (DxUWord(stag) << 32)
+            } else {
+                i=dx_handle_op_slow(bytes start stopw flags sl)
+            }
+            sl=sl + 4; flags=0
+            if dx_g_skip and stag =? 37 and dx_g_nesting =? 0 {
+                i=dx_handle_lazy_body(bytes i stopw (((sl as DxWord) - (dx_g_slots as DxWord)) >> 5))
+                sl=(dx_g_slots + dx_g_count) as ptr<uint64>
             }
             continue
         }
-        if dk =? 4 {
-            let sl=slots + count
+        let c2=bytes[i]
+        let dk2=DX_DISPATCH[c2]
+        if dk2 =? 4 {
             let start:DxWord=i
-            if not (c =? b'0' and i + 1 <? stopw and (classes[bytes[i + 1]] & 1) not=? 0) {
+            if not (c2 =? b'0' and i + 1 <? stopw and (dx_cur_cls[bytes[i + 1]] & 1) not=? 0) {
                 i+=1
                 loop i <? stopw and b'0' <=? bytes[i] and bytes[i] <=? b'9' {i+=1}
                 if i >=? stopw or (bytes[i] not=? b'_' and bytes[i] not=? b'.' and bytes[i] not=? b'e' and bytes[i] not=? b'E' and bytes[i] not=? b'"' and bytes[i] not=? b'\'') {
-                    sl[0].kind='source_integer'; sl[0].name=0; sl[0].start=start; sl[0].stop=i
-                    sl[0].space=(flags & 1) not=? 0; sl[0].newline=(flags & 2) not=? 0; sl[0].symbol='none'
-                    count+=1; flags=0; continue
+                    sl[0]=26
+                    sl[1]=DxUWord(start); sl[2]=DxUWord(i)
+                    sl[3]=DxUWord(flags)
+                    sl=sl + 4; flags=0; continue
                 }
             }
-            i=dx_handle_num_slow(bytes start stopw sl)
-            sl[0].space=(flags & 1) not=? 0; sl[0].newline=(flags & 2) not=? 0
-            count+=1; flags=0; continue
+            i=dx_handle_num_slow(bytes start stopw (sl as ptr<DewyLexeme>))
+            sl[3]=DxUWord(flags)
+            sl=sl + 4; flags=0; continue
         }
-        i=dx_handle_other(bytes i stopw dk count flags)
-        count=dx_g_count
+        i=dx_handle_other(bytes i stopw dk2 (((sl as DxWord) - (dx_g_slots as DxWord)) >> 5) flags)
+        sl=(dx_g_slots + dx_g_count) as ptr<uint64>
         flags=dx_g_flags
     }
     dx_g_flags=flags
-    count
+    ((sl as DxWord) - (dx_g_slots as DxWord)) >> 5
 }
 
 dx_lex=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<int64> source:string begin:int64 stop:int64 intern_names:bool classes:ptr<uint8> symbols:ptr<DewyToken> words:ptr<DewyToken> @out:array<DewyLexeme> capacity:int64):>int64=>$unsafe {
     if not intern_names {
         return dx_lex_no_intern(@state host @lx @comments source begin stop classes symbols words @out capacity)
     }
-    if dx_solo_tok.length =? 0 {dx_solo_init()}
     dx_cur_cls=classes
     let slen0=DxWord(state.names[0].length)
     if slen0 >? 0 {
@@ -682,18 +711,20 @@ dx_lex=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<
     dx_g_symbols=symbols
     dx_g_sym_tags=symbols as ptr<uint32>
     dx_g_words=words
+    dx_g_word_tags=words as ptr<uint32>
     dx_g_word_count=DxWord(state.word_count)
     dx_g_out=out
     out=[]
     dx_g_slots=dx_g_out.ptr
     dx_g_cap=DxWord(capacity)
     dx_g_cap_guard=DxWord(capacity) - 2
+    dx_g_slots_guard=dx_g_slots + dx_g_cap_guard
     dx_g_count=0
     dx_g_flags=0
     dx_g_nesting=0
     dx_g_skip=state.skip
     let bytes=(source as array<uint8>).ptr
-    let count=dx_lex_loop(bytes DxWord(begin) DxWord(stop) classes)
+    let count=dx_lex_loop(bytes DxWord(begin) DxWord(stop))
     out=dx_g_out
     dx_g_out=[]
     comments=dx_g_comments
@@ -702,7 +733,7 @@ dx_lex=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<
     state=dx_g_state
     dx_g_source=""
     state.space=(dx_g_flags & 1) not=? 0
-    state.newline=(dx_g_flags & 2) not=? 0
+    state.newline=(dx_g_flags & 256) not=? 0
     count
 }
 
