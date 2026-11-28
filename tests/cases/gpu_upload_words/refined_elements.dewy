@@ -1,0 +1,7 @@
+W:type = int64<v => -100 <=? v and v <=? 100>
+up = (xs:array<W>):>array<int32<overflow='wrap'>> => cpu(gpu(xs)).data
+up2 = (xs:array<uint32<(<=? 1000)>>):>array<int32<overflow='wrap'>> => cpu(gpu(xs)).data
+main = () => {
+    printl(up([1 -2]))
+    printl(up2([1 2]))
+}

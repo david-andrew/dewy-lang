@@ -4,13 +4,14 @@ from p"checker_runtime_functions.dewy" import (runtime_fn)
 from p"expression_types.dewy" import (ntype)
 
 from p"ast.jo" import (NF_MUT has_flag kid kids nkids nodes)
-from p"check.jo" import (game_lookup_ok syms)
+from p"check.jo" import (game_lookup_ok locals syms)
 from p"checker_expr.dewy" import (lookup)
 from p"checker_tokens.dewy" import (Tok)
 from p"checks_builders.dewy" import (bc_int)
 from p"checks_thin_expr.dewy" import (nd_elem)
-from p"facts.jo" import (FACT_CAP FactProjection FactState fact_policy fact_probe_on fact_query fact_speculating fact_terms)
-from p"facts_values.dewy" import (fact_type fact_project)
+from p"facts.jo" import (FACT_CAP FACT_ELEMENT_VALUE FactProjection FactState fact_policy fact_probe_on fact_query fact_speculating fact_terms)
+from p"facts_values.dewy" import (fact_domain fact_type fact_project)
+from p"facts_elements.dewy" import (fact_inventory)
 from p"facts_compare.dewy" import (fact_compare fact_add_fits)
 from p"facts_index_writes.dewy" import (fact_constant fact_new fact_set_bound)
 from p"facts_index_writes.dewy" import (fact_add_projection)
@@ -32,12 +33,13 @@ from p"nd_slices.dewy" import (fact_nd_integer_picks fact_nd_remember fact_nd_sl
 from p"refine.jo" import (ref_spans refine_bindings)
 from p"refine_metadata.dewy" import (representation_type ref_validate_signature mk_refined ref_intern)
 from p"refine_predicates.dewy" import (ref_add)
+from p"refine_transfers.dewy" import (ref_assume)
 from p"refine_rare.dewy" import (ref_decl_mask ref_resolve_value)
 from p"refine_resolve.dewy" import (ref_resolve_term)
 from p"refinement_types.dewy" import (FACT_MAX FactBound FactReason FactTerm RefAtom RefTerm)
 from p"sequence_selectors.dewy" import (fact_sequence_select)
-from p"type_ops.dewy" import (fixed_len mk_array)
-from p"types.jo" import (T_INT fields is_int structs tkind types union_members)
+from p"type_ops.dewy" import (dt fixed_len int_policy mk_array)
+from p"types.jo" import (T_INT T_MATH_INT fields is_int prune structs tkind types union_members)
 from p"util.jo" import (intern names)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"witness_nodes.dewy" import (wit_text)
@@ -349,6 +351,7 @@ fact_nd_check=(n:NdWord @s:FactState values:array<int64> kind:NdWord):>void=>{
             fact_nd_need(n @s 'le' rank fact_constant(@s 4) "{text}.length.length <=? 4");
             fact_nd_need(n @s 'eq' fact_nd_valid(@s values[0]) fact_constant(@s 1) "{text}.data.length matches its shape");
         }
+        fact_nd_upload_words(n @s values[0] text)
     }
     else if kind =? 102 {
         if is_nd(representation_type(t)) {fact_nd_need(n @s 'eq' fact_nd_valid(@s values[0]) fact_constant(@s 1) "{text}.data.length matches its shape");}
@@ -638,6 +641,56 @@ fact_nd_download=(n:NdWord @s:FactState input:NdWord):>int64=>{
     if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(data (-1) false length))}
     fact_set_bound(@s fact_nd_valid(@s result) FactBound(1 1 true))
     result
+}
+# gpu(xs) of integers wider than a GPU's 32-bit word (int, int64, uint32, uint64): each element
+# must be proven to fit an int32, since the upload would otherwise change it (a wrapping type,
+# `int64<overflow='wrap'>`, keeps the low 32 bits on purpose). The elements' known values,
+# else their type's range, decide. O(known parts).
+fact_nd_upload_words=(n:NdWord @s:FactState input:NdWord text:string):>void=>$unsafe {
+    # (a tighter element type given where the overload's looser one is wanted keeps its range)
+    let given=kid(n 0)
+    loop nodes.ptr[given].kind =? 'conv' {given=NdWord(nodes.ptr[given].a)}
+    let t=representation_type(ntype(given))
+    let nd=is_nd(t)
+    let tk=tkind(t)
+    if not nd and tk not=? 'array' and tk not=? 'fixed' {return}
+    let declared=prune(ntype(given))
+    if nodes.ptr[given].kind =? 'ident' and nodes.ptr[given].aux =? int32(1) and nodes.ptr[given].sym >? 0 {declared=prune(NdWord(locals.ptr[NdWord(nodes.ptr[given].sym)].type))}
+    let et=if nd {prune(nd_elem(t))} else if tkind(declared) =? tk {prune(NdWord(types.ptr[declared].elem))} else {prune(NdWord(types.ptr[t].elem))}
+    let base=if types.ptr[et].kind =? 'refined' {prune(NdWord(types.ptr[et].elem))} else {et}
+    if base not=? T_MATH_INT {
+        if types.ptr[base].kind not=? 'int_' or int_policy(base) not=? 0 {return}
+        let bits=NdWord(types.ptr[base].bits)
+        if bits <? 32 or bits =? 32 and types.ptr[base].sign {return}
+    }
+    # (the element type's own range: its refinement, assumed of a fresh element)
+    let element=fact_new(@s fact_domain(et) FactTerm(type=T_INT))
+    if types.ptr[et].kind =? 'refined' {ref_assume(et element [] @s)}
+    let bound=fact_bound(s element)
+    if not nd {
+        let pi=fact_projection_find(s input FACT_ELEMENT_VALUE false)
+        if pi >=? 0 {bound=fact_bound(s s.projections[pi].value)}
+        let parts=fact_inventory(s input)
+        if parts.length >? 0 {
+            bound=fact_bound(s parts[0])
+            loop i in [1..parts.length) {
+                let b=fact_bound(s parts[i])
+                bound=FactBound(min(bound.lo b.lo) max(bound.hi b.hi) false 'missing' 0 bound.wide or b.wide)
+            }
+        }
+        # (no elements: nothing to change)
+        if fact_bound(s fact_project(@s input (-1) false T_INT)).hi <=? 0 {return}
+    }
+    if not bound.wide and bound.lo >=? -2147483648 and bound.hi <=? 2147483647 {return}
+    if fact_speculating not=? 0 {return}
+    if fact_probe_on {
+        fact_probe_record(n false)
+        return
+    }
+    # (under `$runtime_checks` the upload checks each element: lib/game/gpuarray.jo)
+    if not (fact_policy =? 'RequireStatic' or fact_query) {return}
+    let shown=if text =? "the array" {"the array"} else {text}
+    fatal(nodes.ptr[n].pos "gpu() keeps integers in 32-bit words, and the elements of {shown} ({dt(et)}) are not proven to fit an int32, so uploading could change them: state their range in the element type (`int64<v => int32.min <=? v and v <=? int32.max>`), or declare them wrapping, `array<int64<overflow='wrap'>>`, whose upload keeps each element's low 32 bits on purpose");
 }
 fact_nd_upload=(n:NdWord @s:FactState input:NdWord):>int64=>{
     let t=representation_type(ntype(kid(n 0)))

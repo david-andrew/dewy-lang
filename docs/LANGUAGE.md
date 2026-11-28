@@ -3573,8 +3573,11 @@ so placement currently returns the value unchanged.
 
 `gpu(values)` uploads a numeric array or `NDArray`; `cpu(value)` downloads an
 independent `NDArray` with the same shape. Floating inputs become `float32`,
-integer inputs become `int32<overflow='wrap'>` (the GPU's modular word format),
-and arrays may have up to four dimensions: an `NDArray`'s upload needs
+integer inputs become `int32<overflow='wrap'>` (the GPU's modular word format):
+elements of a wider integer type (`int`, `int64`, `uint32`, `uint64`) must be proven
+to fit an `int32`, from their known values or a refined element type, or the upload is
+a compile error (under `$runtime_checks`, a check), while a wrapping element type
+(`array<int64<overflow='wrap'>>`) keeps each element's low 32 bits on purpose. Arrays may have up to four dimensions: an `NDArray`'s upload needs
 `m.length.length <=? 4` and storage matching its shape, proven from its
 constructor or a shaped parameter as other array contracts are. A download
 has storage matching its shape, and an uploaded `NDArray`'s download keeps the

@@ -1,0 +1,11 @@
+# Integer uploads whose elements are known to fit a GPU word, or wrap on purpose.
+main = () => {
+    let small:array<int64> = [5 -1 7]
+    printl(cpu(gpu(small)).data)
+    let r:array<int64<v => int32.min <=? v and v <=? int32.max>> = [1 2]
+    printl(cpu(gpu(r)).data)
+    let w:array<int64<overflow='wrap'>> = [5000000000]
+    printl(cpu(gpu(w)).data)
+    let u:array<uint32> = [1 2]
+    printl(cpu(gpu(u)).data)
+}

@@ -131,14 +131,14 @@ gpu = (xs: f32[]) -> GpuArray[f32]: __gpu_upload(xs, [xs.len()])
 gpu = (xs: f64[]) -> GpuArray[f32]: gpu(f32.(xs))
 gpu = (xs: __GpuInt[]) -> GpuArray[__GpuInt]: __gpu_upload(xs, [xs.len()])
 gpu = (xs: i32[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
-gpu = (xs: int[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
+gpu = (xs: int[]) -> GpuArray[__GpuInt]: gpu(__gpu_words_signed(xs))
 gpu = (xs: i8[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
 gpu = (xs: i16[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
 gpu = (xs: u8[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
 gpu = (xs: u16[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
-gpu = (xs: u32[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
-gpu = (xs: u64[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
-gpu = (xs: __dewy_int[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
+gpu = (xs: u32[]) -> GpuArray[__GpuInt]: gpu(__gpu_words_unsigned(xs))
+gpu = (xs: u64[]) -> GpuArray[__GpuInt]: gpu(__gpu_words_unsigned(xs))
+gpu = (xs: __dewy_int[]) -> GpuArray[__GpuInt]: gpu(__gpu_words_signed(xs))
 gpu = (xs: __GpuWrapI8[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
 gpu = (xs: __GpuWrapI16[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
 gpu = (xs: __GpuWrapI64[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
@@ -151,14 +151,14 @@ gpu = (m: f32[,]) -> GpuArray[f32]: __gpu_upload_nd(m.data, m.shape)
 gpu = (m: f64[,]) -> GpuArray[f32]: __gpu_upload_nd(f32.(m.data), m.shape)
 gpu = (m: __GpuInt[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(m.data, m.shape)
 gpu = (m: i32[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
-gpu = (m: int[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
+gpu = (m: int[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__gpu_words_signed(m.data), m.shape)
 gpu = (m: i8[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
 gpu = (m: i16[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
 gpu = (m: u8[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
 gpu = (m: u16[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
-gpu = (m: u32[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
-gpu = (m: u64[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
-gpu = (m: __dewy_int[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
+gpu = (m: u32[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__gpu_words_unsigned(m.data), m.shape)
+gpu = (m: u64[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__gpu_words_unsigned(m.data), m.shape)
+gpu = (m: __dewy_int[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__gpu_words_signed(m.data), m.shape)
 gpu = (m: __GpuWrapI8[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
 gpu = (m: __GpuWrapI16[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
 gpu = (m: __GpuWrapI64[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
@@ -166,6 +166,20 @@ gpu = (m: __GpuWrapU8[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.dat
 gpu = (m: __GpuWrapU16[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
 gpu = (m: __GpuWrapU32[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
 gpu = (m: __GpuWrapU64[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
+
+# (integers wider than a GPU word upload only when each fits an int32: a Dewy program proves
+# it, compiler/nd_contract_ops.dewy, or under runtime checks this checks it; wrapping types
+# keep their low 32 bits on purpose)
+__gpu_words_signed[T] = (xs: T[]) -> __GpuInt[]:
+    loop i in 0.. and x in xs:
+        if x < -2147483648 or x > 2147483647: __gpu_word_panic(i, "{x}")
+    __GpuInt.(xs)
+__gpu_words_unsigned[T] = (xs: T[]) -> __GpuInt[]:
+    loop i in 0.. and x in xs:
+        if x > 2147483647: __gpu_word_panic(i, "{x}")
+    __GpuInt.(xs)
+__gpu_word_panic = (i: int, x: str):
+    panic("element {i} of a GPU upload is {x}, which does not fit a GPU's 32-bit word: keep the elements in int32's range, or declare them wrapping (int64<overflow='wrap'>) to keep their low 32 bits")
 
 # (an N-D array's: the caller proves its rank and storage, compiler/nd_contracts.jo)
 __gpu_upload_nd[T] = (xs: T[], shape: int[]) -> GpuArray[T]:
