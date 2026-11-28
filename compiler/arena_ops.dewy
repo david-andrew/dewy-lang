@@ -454,6 +454,11 @@ arena_summary=(n:ArenaWord f:ArenaWord):>void=>$unsafe {
     let w=arena_keeps(f)
     if w =? 0 {return}
     let where=if w >? 0 and w <? nodes.length {" (at {pos_str(nodes.ptr[w].pos)})"} else {""}
+    # (the task group a `concurrent` block opens is named by the block)
+    if effect_name(f) =? "__task_new_group" {
+        arena_error(n "a `concurrent` block may keep storage of the arena where the expression's reset cannot see it");
+        return
+    }
     arena_error(n "`{effect_name(f)}` may keep storage of the arena where the expression's reset cannot see it{where}");
 }
 arena_call=(n:ArenaWord):>void=>$unsafe {

@@ -20,12 +20,12 @@ from p"checks_call_hints.dewy" import (a_type)
 from p"ownership_checks.dewy" import (NF_GLOBAL)
 from p"prelude_ops.dewy" import (prelude_demand_all)
 from p"secret_checks.dewy" import (secret_hint)
-from p"types.jo" import (T_MATH_INT T_U8 T_VEC2 T_VEC3 T_VEC4 is_int is_numeric is_union is_vec prune structs tkind type_eq types union_members variants)
+from p"types.jo" import (T_MATH_INT ts_dewy T_U8 T_VEC2 T_VEC3 T_VEC4 is_int is_numeric is_union is_vec prune structs tkind type_eq types union_members variants)
 from p"type_ops.dewy" import (dt dt_named union_index)
 from p"refine.jo" import (str_sets)
 from p"refine_metadata.dewy" import (str_set_of)
 from p"rational_types.dewy" import (bundled_rational_type)
-from p"util.jo" import (name_of)
+from p"util.jo" import (name_of pos_in_lib)
 from p"source_queries.dewy" import (line_col)
 from p"diagnostic_exit.dewy" import (fatal)
 
@@ -91,11 +91,15 @@ union_or_optional=(t0:CompareWord):>bool=>$unsafe {
     let t=prune(t0)
     is_union(t) or tkind(t) =? 'opt' and is_union(prune(CompareWord(types.ptr[t].elem)))
 }
+# (a hint's spelling: a library error is shown at a Dewy program's call, so in Dewy)
+hint_dewy_at=(pos:CompareWord):>bool=>{
+    dewy_at(pos) or ts_dewy and pos_in_lib(pos)
+}
 # a == b, a < b with types that do not compare
 # An arithmetic or comparison operand that is a union: the member to narrow to, as it
 # is spelled, and when the other members are all failures (`to_int(s)`), the fallback.
 union_operand_why=(n:CompareWord u:CompareWord):>string=>$unsafe {
-    if not dewy_at(nodes.ptr[n].pos) {return " (find out which it holds first: `if x is int: ...` or a `match`)"}
+    if not hint_dewy_at(nodes.ptr[n].pos) {return " (find out which it holds first: `if x is int: ...` or a `match`)"}
     let member:CompareWord=0
     let others:CompareWord=0
     loop m in value_members(prune(u)) {

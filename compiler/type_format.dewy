@@ -153,7 +153,8 @@ tf_string_in=(t0:FWord dewy:bool):>string=>$unsafe {
         <'null_'> => {"null"}
         <'range'> => {"range"}
         <'none_lit'> => {"none"}
-        <'var'> => {"?T{ti.id}"}
+        # (a type not inferred yet: a Dewy program sees a blank)
+        <'var'> => {if dewy {"_"} else {"?T{ti.id}"}}
         <'param'> => {
             let k=FWord(ti.id)
             if k <? tf_inputs[0].params[0].length and tf_inputs[0].params[0].ptr[k] not=? 0 {return tf_inputs[0].host[0].name_of(tf_inputs[0].params[0].ptr[k])}

@@ -7,7 +7,7 @@ from p"expression_types.dewy" import (ntype)
 from p"@lib/core/rt.jo" import (__str_slice)
 from p"expr.jo" import (IN)
 from p"checks_text.dewy" import (byte_find)
-from p"@lib/core/str.jo" import (starts_with)
+from p"@lib/core/str.jo" import (replace starts_with)
 from p"ast.jo" import (NF_CHECKED add_flag kid kid2 kids mk nkids nkids2 nodes set_list)
 from p"check.jo" import (fns syms)
 from p"checker_startup.dewy" import (load_game_for_name load_std_for_name)
@@ -312,7 +312,7 @@ call_no_candidate=(n:CallErrorWord name:CallErrorWord decls:array<int64> args:ar
         if (failure.last_err as array<uint8>).length =? 0 {failure.last_err="arguments do not match"}
         let ep=nodes.ptr[n].pos
         if failure.last_err_pos >? 0 {ep=failure.last_err_pos}
-        fatal(ep "in call to {call_text(decls[0])}: {failure.last_err}")
+        fatal(ep call_error_text(decls[0] failure.last_err))
     }
     let ts=""
     loop i in 0.. and a0 in args {
@@ -329,10 +329,23 @@ call_no_candidate=(n:CallErrorWord name:CallErrorWord decls:array<int64> args:ar
         if args.length =? 1 {an="1 argument"}
         fatal(nodes.ptr[n].pos "no version of '{shown_fn_name(name_of(name))}' takes {an}{ot}")
     }
+    # (`xs[a..b) = value`: the library's slice store, told as the assignment)
+    if name_of(name) =? "__dewy_put_slice" and args.length >? 1 and nodes.ptr[unnamed(args[0])].type not=? 0 and nodes.ptr[unnamed(args[args.length - 1])].type not=? 0 {
+        fatal(nodes.ptr[n].pos "cannot assign {dt(ntype(unnamed(args[args.length - 1])))} to a slice of {dt(ntype(unnamed(args[0])))}")
+    }
     let what="({ts})"
     if byte_find(ts "?") >=? 0 {what="these arguments"}
     fatal(nodes.ptr[n].pos "no version of '{shown_fn_name(name_of(name))}' takes {what}{sep}{failure.last_err}{ot}")
     0
+}
+# (how an error names the call it is in: a call the compiler made for a form the program
+# wrote is named by that form)
+call_error_text=(d:CallErrorWord err:string):>string=>$unsafe {
+    let nm=name_of(CallErrorWord(nodes.ptr[d].name))
+    if nm =? "__dewy_make_set" {return "in this `set[...]`: {replace(replace(err "argument 'values' has" "its elements have") "argument 'values'" "its elements")}"}
+    if nm =? "__dewy_range" {return "in this range: {replace(replace(replace(err "argument 'first'" "its start") "argument 'second'" "its second value") "argument 'last'" "its end")}"}
+    if nm =? "__expect_fail" {return "in this expectation: {replace(err "argument 'message'" "its message")}"}
+    "in call to {call_text(d)}: {err}"
 }
 call_type_arity=(name:CallErrorWord d:CallErrorWord targs_here:array<int64> @failure:CallFailure):>void=>{
     if failure.last_err_arg =? 0 {
