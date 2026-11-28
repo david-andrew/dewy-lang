@@ -1,0 +1,13 @@
+# modes: native native-release
+# An exported function's string parameter is C's char *, from C or from Dewy.
+$extern
+ftw = (dir:string visit:((path:string info:ptr<uint8>? kind:int32):>int32) open_dirs:int32):>int32
+$export
+visit = (path:string _info:ptr<uint8>? _kind:int32):>int32 => {
+    printl"visited {path} ({path.length} bytes)"
+    0
+}
+main = ():>void => $unsafe {
+    printl(ftw("/dev/null" @visit 4))
+    printl(visit("from Dewy" none 0))
+}

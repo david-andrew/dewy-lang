@@ -90,7 +90,7 @@ runtime_ffi_demand=():>bool=>$unsafe {
         if d not=? 0 and has_flag(d NF_EXTERN) {
             done = true
             if prelude_game_pending {load_game_file("dl.jo");}
-            loop nm in ["__c_str" "__ffi_resolve" "__ffi_missing"] {runtime_demand(nm)}
+            loop nm in ["__c_str" "__cstr" "__ffi_resolve" "__ffi_missing"] {runtime_demand(nm)}
             return true
         }
     }

@@ -5004,7 +5004,10 @@ ascending = (a:ptr<int32> b:ptr<int32>):>int32 => $unsafe {
 ```
 
 An exported function takes and returns the same kinds of values, `ptr<T>?`
-included. Native executables do not export symbols yet, so C reaches an
+included. A string parameter is C's `char *`, its bytes up to the zero copied into
+a string as the function is called (a call from Dewy passes one the same way), and a
+refined result crosses as its base type, which the body proves, so `@f` fits a C
+function type with the plain result. Native executables do not export symbols yet, so C reaches an
 exported function only through a pointer that Dewy gives it.
 
 A function prefixed with `$intrinsic` declares one the compiler provides

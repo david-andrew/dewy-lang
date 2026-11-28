@@ -89,7 +89,9 @@ ffi_check_nested_type=(t0:MoveWord pos:MoveWord extern_:bool param:bool nested:b
         ffi_check_pointee(MoveWord(types.ptr[prune(MoveWord(types.ptr[t].elem))].elem) pos);
         return
     }
-    if k =? 'str_' and extern_ and param {return}
+    # (a `$export` function's string parameter is C's `char *`, copied into a string as it is
+    # called: compiler/lower_functions.dewy)
+    if k =? 'str_' and param and (extern_ or not nested) {return}
     # (a record with C's layout is C's struct by value: compiler/lower_ffi.dewy)
     if k =? 'struct_' and extern_ and not nested {
         let fields_seen:dict<int64 bool>=dict<int64 bool>()

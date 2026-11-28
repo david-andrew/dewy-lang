@@ -1152,6 +1152,13 @@ gen_direct_call=(f:LGWord args:array<int64> order:array<int64>=[] call_node:LGWo
     let snaps=arg_snapshots.length
     call_args(args fns.ptr[f].ptypes inst_mutmask(f) @argv f order);
     if refine_active {refine_gen_args(args argv if vc(ret) =? VC_AGG {1} else {0} inst_mutmask(f));}
+    # (a `$export` function takes a string as C's `char *`, as C calls it: lower_functions.dewy)
+    if fns.ptr[f].cabi and fns.ptr[f].decl not=? 0 and files.ptr[pos_file(nodes.ptr[LGWord(fns.ptr[f].decl)].pos)].is_dewy {
+        let base=if vc(ret) =? VC_AGG {1} else {0}
+        loop i in [0..fns.ptr[f].ptypes.length) {
+            if tkind(fns.ptr[f].ptypes.ptr[i]) =? 'str_' {argv.ptr[base + i]=e_call1(rt("__c_str") argv.ptr[base + i] VI)}
+        }
+    }
     # Default builds can inline tiny checked helpers without expanding their
     # failure path. Release keeps its measured whole-function inlining policy.
     # Still unwind lowering's pending copy-back records; their unreachable

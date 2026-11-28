@@ -1,7 +1,7 @@
 from p"directives.jo" import (dir_code_any dir_code_owner)
 $runtime_checks
 
-from p"lower_primitives.dewy" import (e_gaddr global_addr_off rt_global)
+from p"lower_primitives.dewy" import (e_gaddr global_addr_off rt rt_global)
 from p"lower_closures.dewy" import (env_layout)
 from p"node_store.dewy" import (NK)
 from p"checker_state.dewy" import (SK)
@@ -46,7 +46,7 @@ from p"pcheck_drive.dewy" import (pc_restore)
 from p"refine.jo" import (refine_active)
 from p"refine_ops.dewy" import (refine_gen_entry)
 from p"lower_closure_borrow.dewy" import (stack_closure_params)
-from p"ir_builders.dewy" import (e_else e_bin e_end e_iconst e_if e_mov e_ret e_slot e_store e_trap e_zero emit ir_begin ir_set_pos new_slot vreg)
+from p"ir_builders.dewy" import (e_call1 e_else e_bin e_end e_iconst e_if e_mov e_ret e_slot e_store e_trap e_zero emit ir_begin ir_set_pos new_slot vreg)
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LFnWord:type=int64<overflow='wrap'>
 begin_fn=(name:string idx:LFnWord):>void=>$unsafe {
@@ -202,6 +202,8 @@ lower_inst=(lf:LFnWord f:LFnWord):>void=>$unsafe {
         loop l in fns.ptr[f].params {
             let t=prune(LFnWord(locals.ptr[l].type))
             if types.ptr[t].kind =? 'int_' and tsize(t) <? 8 and LFnWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 {e_mov(LFnWord(locals.ptr[l].vreg) norm(LFnWord(locals.ptr[l].vreg) t));}
+            # (a string from C is its `char *`: its bytes up to the zero, copied)
+            if types.ptr[t].kind =? 'str_' and files.ptr[pos_file(nodes.ptr[LFnWord(fns.ptr[f].decl)].pos)].is_dewy {e_mov(LFnWord(locals.ptr[l].vreg) e_call1(rt("__cstr") LFnWord(locals.ptr[l].vreg) VI));}
     # Bind read-only Dewy value parameters before allocating local storage.
     # These declarations form a contiguous synthetic prefix. Rebind on every
     # lowering so watch/repl and debug builds cannot reuse old virtual registers.
