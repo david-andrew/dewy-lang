@@ -1,0 +1,27 @@
+# modes: native native-release
+# An exported function may keep its string parameter past the call: the kept
+# value holds its own reference, so freeing the call's copy leaves it intact.
+$extern
+ftw = (dir:string visit:((path:string info:ptr<uint8>? kind:int32):>int32) open_dirs:int32):>int32
+let seen:array<string> = []
+$export
+keep = (path:string _info:ptr<uint8>? _kind:int32):>int32 => {
+    seen.push(path)
+    0
+}
+$export
+is_x = (text:string):>int32 => {
+    let held = text
+    if held =? "x" 1 else 0
+}
+main = ():>void => $unsafe {
+    printl(ftw("/dev/null" @keep 4))
+    keep("from Dewy" none 0);
+    loop i in [0..3) {keep("call {i}" none 0);}
+    let before = alloc_count
+    let hits:int64 = 0
+    loop i in [0..100) {hits += is_x(if i % 2 =? 0 "x" else "y")}
+    let after = alloc_count
+    printl("{hits} hits, {after - before}")
+    printl(seen)
+}

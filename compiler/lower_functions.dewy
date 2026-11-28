@@ -339,6 +339,12 @@ lower_inst_body=(f:LFnWord body:LFnWord):>void=>$unsafe {
         }
     }
     else if ownership_consumers.length not=? 0 and fns.ptr[f].params.length >? 0 and ownership_consumers.has(LFnWord(fns.ptr[f].decl)) and copy_inputs.has(fns.ptr[f].params.ptr[0]) {scope_add_local(fns.ptr[f].params.ptr[0]);}
+    # (a `$export` function's string parameters are its own copies of C's `char *`: released on exit)
+    if fns.ptr[f].cabi and fns.ptr[f].decl not=? 0 and files.ptr[pos_file(nodes.ptr[LFnWord(fns.ptr[f].decl)].pos)].is_dewy {
+        loop p in fns.ptr[f].params {
+            if types.ptr[prune(LFnWord(locals.ptr[p].type))].kind =? 'str_' and LFnWord(locals.ptr[p].flags) & (LF_MUTPARAM | LF_CAPTURE | LF_ALIAS | LF_BYREF) =? 0 {scope_locals.ptr[scope_locals.length - 1].push(p);}
+        }
+    }
     if fns.ptr[f].kind =? FK_INIT {
         gen_block_stmts(body);
     }

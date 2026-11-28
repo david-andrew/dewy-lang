@@ -1,0 +1,22 @@
+# modes: native native-release
+# An exported function's own copy of a string parameter is freed when it returns:
+# a million calls keep the peak resident size flat (it grows by ~100 MB if not).
+$extern
+getrusage = (who:int32 usage:ptr<int64>):>int32
+$export
+measure = (text:string):>int32 => if text.length >? 100 0 else 1
+max_rss_kb = ():>int64 => $unsafe {
+    let usage:array<int64> = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+    getrusage(0 usage.ptr);
+    usage[4]
+}
+main = ():>void => {
+    let rss_before = max_rss_kb
+    let before = alloc_count
+    let total:int64 = 0
+    loop i in [0..1000000) {total += measure("a string from Dewy, long enough to need its own block")}
+    let after = alloc_count
+    printl("{total} calls, {after - before} blocks still allocated")
+    let grown = max_rss_kb - rss_before
+    printl(if grown <? 16384 "resident size stays flat" else "leaked: grew {grown} KB")
+}
