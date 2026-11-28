@@ -1,0 +1,8 @@
+# The prelude's `abs` of an exact sum is never negative, and no larger than its magnitude.
+Level:type = int64<v => 0 <=? v and v <=? 255>
+strength = (a:Level b:Level c:Level):>Level => {
+    let gx = a + 2 * b - c
+    let gy = c - a
+    min(255 abs(gx) + abs(gy))
+}
+main = ():>void => printl(strength(10 100 30))

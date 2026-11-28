@@ -704,6 +704,19 @@ fact_mod_call=(n:NumericWord):>bool=>$unsafe {
     if nodes.ptr[k].kind =? 'dotname' {return name_of(NumericWord(nodes.ptr[k].name)) =? "floor"}
     nodes.ptr[k].kind =? 'str_lit' and nodes.ptr[k].aux =? 0 and node_sval(nodes.ptr[k].op_ext) >=? 0 and name_of(NumericWord(node_sval(nodes.ptr[k].op_ext))) =? "floor"
 }
+# The prelude's integer `abs(x)`: x or -x, whichever is not negative. O(1).
+fact_abs_call=(n:NumericWord):>bool=>{
+    nkids(n) =? 1 and fact_scalar(ntype(n)) and is_int(ntype(n)) and fact_type(ntype(n)) not=? T_U64 and fact_prelude_call(n "abs")
+}
+fact_abs=(@s:FactState n:NumericWord a:NumericWord):>NumericWord=>{
+    let x=fact_bound(s a)
+    let nz=x.nz or not x.wide and (x.lo >? 0 or x.hi <? 0)
+    if x.wide {return fact_new(@s FactBound(0 FACT_MAX nz wide=true) FactTerm(type=ntype(n)))}
+    # (the most negative end has no negation in the word: unbounded above)
+    let lo:NumericWord=if x.lo >=? 0 {x.lo} else if x.hi =? FACT_MIN {FACT_MAX} else if x.hi <=? 0 {-x.hi} else {0}
+    let hi:NumericWord=if x.lo =? FACT_MIN {FACT_MAX} else {max(x.hi (-x.lo))}
+    fact_new(@s FactBound(lo hi nz or lo >? 0) FactTerm(type=ntype(n)))
+}
 fact_extremum_call=(n:NumericWord):>bool=>{
     nkids(n) =? 2 and fact_scalar(ntype(n)) and is_int(ntype(n)) and fact_type(ntype(n)) not=? T_U64 and (fact_prelude_call(n "min") or fact_prelude_call(n "max"))
 }

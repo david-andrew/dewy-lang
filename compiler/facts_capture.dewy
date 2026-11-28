@@ -36,7 +36,7 @@ from p"facts_lifecycle.dewy" import (fact_owner_value fact_parallel_count_check 
 from p"facts_loops.dewy" import (fact_generator_call fact_loop_body fact_loop_bound_demands fact_loop_bound_entry fact_loop_bounds fact_loop_prepare fact_while)
 from p"facts_maps.dewy" import (fact_ensured_close fact_keys_copy fact_keys_element fact_map_bounded fact_map_bounded_call fact_map_call fact_map_check fact_map_clear fact_map_clear_call fact_map_entry fact_map_insert_call fact_map_key fact_map_literal fact_map_member fact_map_of fact_map_optional fact_map_position fact_map_receiver fact_map_snapshot fact_map_snapshot_call fact_map_store fact_map_store_call fact_map_value_refined fact_reflexive_key fact_snapshot_length)
 from p"facts_members.dewy" import (fact_member_block fact_member_literal)
-from p"facts_numeric.dewy" import (fact_bitwise fact_divisor fact_extremum fact_extremum_call fact_floor fact_floor_unsigned fact_mod_call fact_power_call fact_power_check fact_rational_constructor fact_rational_divmod fact_rational_made fact_rational_promotion fact_rational_zero_test fact_shift_obliged)
+from p"facts_numeric.dewy" import (fact_abs fact_abs_call fact_bitwise fact_divisor fact_extremum fact_extremum_call fact_floor fact_floor_unsigned fact_mod_call fact_power_call fact_power_check fact_rational_constructor fact_rational_divmod fact_rational_made fact_rational_promotion fact_rational_zero_test fact_shift_obliged)
 from p"facts_pools.dewy" import (fact_pool_call fact_pool_capture)
 from p"facts_probes.dewy" import (fact_probe_divisor fact_probe_index fact_probe_record)
 from p"facts_projection_queries.dewy" import (fact_projection_after fact_projection_find fact_projection_first)
@@ -1915,6 +1915,7 @@ fc_call=(n:CaptureWord @s:FactState):>int64=>$unsafe {
         # (the prelude's `mod(a b)`, floored: the same remainder as `a % b`)
         if fact_mod_call(n) {return fact_floor(@s n 2 values[0] values[1] true)}
         if fact_extremum_call(n) {return fact_extremum(@s n values[0] values[1] fact_prelude_call(n "min"))}
+        if values.length =? 1 and fact_abs_call(n) {return fact_abs(@s n values[0])}
     } else {
         fact_path_call_effects(n @s)
     }
