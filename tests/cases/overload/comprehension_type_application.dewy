@@ -1,0 +1,9 @@
+# An inline comprehension whose elements apply a type, `int32<overflow='wrap'>(x)`,
+# settles its element type before an overload is chosen: the reductions keep integers.
+main=()=>{
+    let xs:array<int64>=[1 2 3]
+    printl(sum([loop x in xs int32<overflow='wrap'>(x)]))
+    printl(max([loop x in xs int32<overflow='wrap'>(x)]))
+    printl(sum([loop x in xs int64<overflow='wrap'>(x * 2)]))
+    printl(mean([loop x in xs float32(x)]))
+}

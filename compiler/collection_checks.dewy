@@ -25,6 +25,10 @@ comprehension_self_typed=(n:CollectionWord):>bool=>$unsafe {
     if k =? 'lambda' or k =? 'none_lit' or k =? 'dotname' or k =? 'record_lit' or k =? 'hole' or k =? 'map_lit' or k =? 'fnref' {return false}
     if k =? 'array' and nkids(n) =? 0 {return false}
     if k =? 'call' and nodes.ptr[CollectionWord(nodes.ptr[n].a)].kind =? 'dotname' {return false}
+    # (`int32<overflow='wrap'>(x)`: an applied type or function names its own type; its type
+    # arguments are syntax, never values)
+    if k =? 'typeapply' {return comprehension_self_typed(CollectionWord(nodes.ptr[n].a))}
+    if k =? 'unit_lit' {return true}
     let mask=isolation_children(k)
     if mask <? 0 {return false}
     if mask & 1 not=? 0 and not comprehension_self_typed(CollectionWord(nodes.ptr[n].a)) {return false}

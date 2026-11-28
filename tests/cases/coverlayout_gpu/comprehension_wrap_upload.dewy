@@ -1,0 +1,8 @@
+# An inline comprehension of wrapping int32 values picks the integer upload, as the
+# same comprehension bound to a name does.
+main=()=>{
+    let xs:array<int64>=[1 2 2147483647]
+    printl(cpu(gpu([loop x in xs int32<overflow='wrap'>(x)]) .+ int32<overflow='wrap'>(1)).data)
+    let named=[loop x in xs int32<overflow='wrap'>(x)]
+    printl(cpu(gpu(named) .+ int32<overflow='wrap'>(1)).data)
+}

@@ -1,0 +1,6 @@
+# Without an int32 version, the inline comprehension is an error rather than a
+# silent conversion to float64.
+main=()=>{
+    let xs:array<int64>=[1 2 3]
+    printl(cumsum([loop x in xs int32<overflow='wrap'>(x)]))
+}
