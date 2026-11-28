@@ -114,17 +114,18 @@ main = ():
     fact_slice_place_arguments(writers, 8)
     if writers.nodes != [8, 8] or writers.next != [-1, 0]: exit(38)
     lists = [5, 6, 1]
-    values = [111]
+    fsp_val_h = fsp_init_i64(fsp_values, 256)
+    fsp_push_val(111)
     nodes[5].aux2 = 2
     types[2] = TypeInfo(kind = .refined, st = 1)
     a = RefTerm(kind = 2, value = 0)
     b = RefTerm(kind = 5, value = 2)
     ref_predicates = [[], [RefAtom(.le, a, b), RefAtom(.le, RefTerm(kind = 2, value = -1), RefTerm(kind = 5, value = 3)), RefAtom(.le, b, a)]]
-    fact_slice_contract_actuals(8, 5, values)
-    if values != [111, 5, 5, 1, 1, 5]: exit(39)
+    fact_slice_contract_actuals(8, 5)
+    if fsp_values != [111, 5, 5, 1, 1, 5]: exit(39)
     nodes[5].aux2 = 3
-    fact_slice_contract_actuals(8, 5, values)
-    if values != [111, 5, 5, 1, 1, 5, 5, 8]: exit(40)
+    fact_slice_contract_actuals(8, 5)
+    if fsp_values != [111, 5, 5, 1, 1, 5, 5, 8]: exit(40)
     print("slice targets ok")
 '''
 
