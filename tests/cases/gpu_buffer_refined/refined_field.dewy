@@ -1,0 +1,13 @@
+# A record with a refined field cannot be a GPU buffer's element.
+$runtime_checks
+
+R:type = [hp:uint8<b => b <=? 100> id:uint8]
+U:type = [rs:GpuBuffer<R>]
+f = (id:int64 u:U):>void => {
+    if id >=? 0 and id <? u.rs.length { u.rs[id].hp = 200 }
+}
+main = () => {
+    let b = gpu_buffer<R>(3)
+    dispatch(compute(@f) 3 U[b])
+    printl(cpu(b)[0].hp)
+}

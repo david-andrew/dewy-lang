@@ -1,0 +1,9 @@
+# Nor can a refined number.
+$runtime_checks
+
+main = () => {
+    let xs:array<int32<b => b >=? 0>> = [1 2 3]
+    let b = gpu_buffer(xs)
+    b[0] = -4
+    printl(cpu(b))
+}

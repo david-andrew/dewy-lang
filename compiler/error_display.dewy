@@ -4,7 +4,7 @@ $runtime_checks
 # call, the generic calls that made it as notes, and the held errors in source order.
 from p"@lib/core/rt.jo" import (__str_slice)
 from p"@lib/core/os.jo" import (eprint)
-from p"@lib/core/str.jo" import (starts_with trim)
+from p"@lib/core/str.jo" import (contains ends_with starts_with trim)
 from p"ide_decls.dewy" import (trail_sig)
 from p"lazy_force.dewy" import (dc_replay)
 from p"util.jo" import (err_held err_held_on err_more_note err_notes err_prior err_trail err_trail_fns err_trail_names files lib_root pos_file pos_in_lib pos_off)
@@ -66,7 +66,12 @@ err_locate=(p0:ErrWord msg0:string):>[int64 string array<int64>]=>{
         if k >=? 0 {
             let at=pos_str(p)
             if starts_with(at lib_root) {at="lib{__str_slice(at (lib_root as array<uint8>).length (at as array<uint8>).length)}"}
-            msg="in this call to {err_trail_names[k]}: {msg} ({at})"
+            # (a GPU buffer's elements are raw words that GPU code, uploads and atomics write:
+            # no refinement can be kept there, whichever library line found it)
+            if ends_with(files[pos_file(p)].path "/game/gpubuffer.jo") and contains(msg "refine") {
+                msg="a GPU buffer cannot hold refined elements or records with refined fields: GPU code, uploads and atomic operations write its words unchecked. Use the plain element type, and check values after `cpu(...)` downloads them"
+            }
+            else {msg="in this call to {err_trail_names[k]}: {msg} ({at})"}
             p=err_trail[k]
             k -= 1
         }
