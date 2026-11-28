@@ -786,8 +786,9 @@ fact_name_get = 0
 # Pool handle membership (no traps): `pool[h]`, `pool[h] = x` and a direct
 # update's `__pool_index(pool h)` need `pool.has(h)`, the calls' one failure,
 # an obligation as a dictionary key's presence is. has(h) reads only the
-# pool's slot tables, which add, remove and clear alone change (lib/std/pool.jo
-# keeps them so whatever its public fields hold): h's membership is an element
+# pool's slot tables, which add, remove and clear alone change (the bundled
+# Pool, matched by binding identity, keeps them so whatever its public fields
+# hold; a reviewed model, docs/design/assumptions.md): h's membership is an element
 # projection of the pool's value on h's, an integer, >= 1 for a member and 0
 # for none. A store into `items` or `handles`, element or whole, keeps a
 # pool's memberships (fact_replace, fact_change_route); so does `[]=`. `has`
@@ -802,7 +803,6 @@ fact_name_get = 0
 # call, plus O(members) projection copies per add, remove or store.
 # 1 has, 2 `[]`, 3 `__pool_index`, 4 `[]=`, 5 add, 6 remove, or 0.
 fact_pool_names: int[]
-fact_pool_path = ""
 
 # Handle positions name the pool's immutable slot-table value, separately
 # from its public items array. Public item edits keep positions, but bounds

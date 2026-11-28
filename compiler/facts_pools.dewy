@@ -2,10 +2,11 @@ $runtime_checks
 from p"expression_types.dewy" import (ntype)
 
 from p"ast.jo" import (kid nkids nodes)
-from p"check.jo" import (fns lib_dir)
+from p"check.jo" import (fns)
+from p"checks_thin.dewy" import (pool_library_decl)
 from p"directive_rules.dewy" import (dir_defer)
 from p"effect_types.dewy" import (PlaceIdentity)
-from p"facts.jo" import (FACT_CAP FACT_POOL_POSITIONS FactProjection FactState fact_policy fact_pool_items_name fact_pool_names fact_pool_path fact_probe_on fact_query fact_speculating)
+from p"facts.jo" import (FACT_CAP FACT_POOL_POSITIONS FactProjection FactState fact_policy fact_pool_items_name fact_pool_names fact_probe_on fact_query fact_speculating)
 from p"facts_values.dewy" import (fact_domain fact_type fact_place fact_project)
 from p"facts_lengths.dewy" import (fact_difference fact_length_max)
 from p"facts_index_writes.dewy" import (fact_constant fact_new)
@@ -21,7 +22,7 @@ from p"ownership_types.dewy" import (ownership_fact_type)
 from p"refinement_types.dewy" import (FactBound FactTerm)
 from p"types.jo" import (T_BOOL T_INT prune struct_targ structs types)
 from p"type_ops.dewy" import (mk_array)
-from p"util.jo" import (err_notes files intern pos_file pos_in_lib)
+from p"util.jo" import (err_notes intern pos_in_lib)
 from p"witness_nodes.dewy" import (wit_text)
 from p"witness_ops.dewy" import (wit_context wit_fail wit_help)
 
@@ -32,7 +33,6 @@ fact_pool_call=(n:PoolWord):>PoolWord=>$unsafe {
     if d =? 0 {return 0}
     if fact_pool_names.length =? 0 {
         fact_pool_names=[intern("has") intern("[]") intern("__pool_index") intern("[]=") intern("add") intern("remove")]
-        fact_pool_path="{lib_dir}/std/pool.jo"
     }
     let name=PoolWord(nodes.ptr[d].name)
     let k:PoolWord=0
@@ -40,18 +40,17 @@ fact_pool_call=(n:PoolWord):>PoolWord=>$unsafe {
         if fact_pool_names[i] =? name {k=i + 1}
     }
     if k =? 0 or nkids(n) not=? (if k =? 4 {3} else {2}) or not pos_in_lib(nodes.ptr[d].pos) {return 0}
-    if files[pos_file(nodes.ptr[d].pos)].path not=? fact_pool_path {return 0}
+    # (the bundled Pool's own function, by binding identity: docs/design/assumptions.md)
+    if not pool_library_decl(d) {return 0}
     k
 }
-# The bundled Pool's type. O(1).
+# The bundled Pool's type: the struct the prelude's `Pool` binds to. O(1).
 fact_pool_type=(t0:PoolWord):>bool=>$unsafe {
     let t=prune(t0)
     if types.ptr[t].kind not=? 'struct_' {return false}
     let st=PoolWord(types.ptr[t].st)
     if structs.ptr[st].name not=? "Pool" {return false}
-    let d=PoolWord(structs.ptr[st].decl)
-    if fact_pool_path =? "" {fact_pool_path="{lib_dir}/std/pool.jo"}
-    d not=? 0 and files[pos_file(nodes.ptr[d].pos)].path =? fact_pool_path
+    pool_library_decl(PoolWord(structs.ptr[st].decl))
 }
 fact_pool_member=(@s:FactState pool:PoolWord handle:PoolWord):>PoolWord=>{
     fact_project(@s pool handle true T_INT)

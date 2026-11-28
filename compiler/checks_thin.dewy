@@ -249,10 +249,22 @@ pool_update_scalar=(n:ThinWord):>bool=>{
     let t=prune(ntype(n))
     is_numeric(t) or tkind(t) =? 'bool_'
 }
+# The module the prelude's `Pool` binds to: the bundled Pool, found by binding
+# identity, never by a file path. -1 when no Pool is loaded. O(1).
+pool_module=():>ThinWord=>$unsafe {
+    let s=prelude.get(intern("Pool")) ?? 0
+    if s =? 0 {return -1}
+    let d=ThinWord(syms.ptr[s].decl)
+    if d =? 0 {return -1}
+    ThinWord(node_mod(nodes.ptr[d].op_ext))
+}
+# A declaration of the bundled Pool's module (pool_module). O(1).
+pool_library_decl=(d:ThinWord):>bool=>$unsafe {
+    d not=? 0 and decl_in_prelude(d) and ThinWord(node_mod(nodes.ptr[d].op_ext)) =? pool_module()
+}
 pool_library_fn=(f:ThinWord):>bool=>$unsafe {
     if f <=? 0 {return false}
-    let d=ThinWord(fns.ptr[f].decl)
-    d not=? 0 and decl_in_prelude(d) and files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/pool.jo"
+    pool_library_decl(ThinWord(fns.ptr[f].decl))
 }
 check_assign=(s:ThinWord):>int64=>{
     va_assign(s)
