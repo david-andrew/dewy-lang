@@ -1,0 +1,5 @@
+# A parallel statement's range past a refinement's bound is rejected too.
+Small:type = int64<v => 0 <=? v and v <? 100>
+main = ():>void => {
+    parallel i in [0..101) { let s:Small = i; }
+}

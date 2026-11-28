@@ -1,0 +1,20 @@
+# Refinement checks inside a parallel body know the positions of its range, and the
+# elements of its array, as its call arguments do.
+Small:type = int64<v => 0 <=? v and v <? 100>
+keep = (i:Small):>int64 => i
+main = ():>void => {
+    let n = 50
+    let named:array<Small> = [parallel i in [0..n) i]
+    let literal = [parallel i in [0..50) keep(i)]
+    let shifted = [parallel i in [10..60) keep(i - 10)]
+    let xs:array<int64> = [4 5 6]
+    let doubled = [parallel x in xs {
+        let s:Small = x * 2
+        s + 1
+    }]
+    let total = atomic<int64<overflow='wrap'>>(0)
+    parallel i in [0..n) { let s:Small = i; total.add(int64<overflow='wrap'>(s)); }
+    parallel x in xs { total.add(int64<overflow='wrap'>(keep(x))); }
+    let picked = [parallel i in [0..3) xs[i]]
+    printl"{named.length} {literal[49]} {shifted[0]} {doubled} {total.load} {picked}"
+}

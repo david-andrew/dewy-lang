@@ -41,7 +41,7 @@ from p"refine_siblings.dewy" import (ref_sib_atom ref_sib_contract ref_sib_limit
 from p"refine_rare.dewy" import (ref_signature_has)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
 from p"sequence_selectors.dewy" import (fact_sequence_store fact_sequence_store_call)
-from p"types.jo" import (T_INT T_STR T_U64 is_int prune struct_targ telem tkind types)
+from p"types.jo" import (T_INT T_MATH_INT T_STR T_U64 is_int prune struct_targ telem tkind types)
 from p"type_ops.dewy" import (zonk)
 from p"util.jo" import (intern pos_in_lib)
 from p"node_store.dewy" import (node_aux2 node_op)
@@ -224,6 +224,8 @@ fact_parallel_record=(n:ForkWord @s:FactState base:ForkWord):>void=>$unsafe {
             loop i in [1..parts.length) {bound=fact_hull(bound fact_bound(s parts[i]) n)}
         }
     }
+    # (an `int` parameter's unknown side is unbounded, not a 64-bit word's end)
+    if prune(ForkWord(locals.ptr[fns.ptr[f].params[0]].type)) =? T_MATH_INT and (bound.lo =? int64.min or bound.hi =? int64.max) {bound.wide=true}
     let previous=fact_parallel_bounds.get(f)
     if previous not=? none {bound=fact_hull(previous bound n)}
     fact_parallel_bounds[f]=bound
@@ -478,6 +480,17 @@ fact_slice_capture=(n:ForkWord @s:FactState):>ForkWord=>$unsafe {
                 if fact_probe_on {fact_probe_route(@s route fact_route_values(@s route))}
                 else if fact_policy =? 'RequireStatic' or fact_query {fact_route_bounds(@s route fact_route_values(@s route))}
             }
+        }
+        return 0
+    }
+    # (a parallel region outside the slice still gives its callback's parameter what it
+    # visits: a range's positions, or a named array's elements, read again here)
+    if k =? 'parallel_region' {
+        let call=ForkWord(nodes.ptr[n].a)
+        if fact_parallel_array(call) {
+            let source=kid(call 0)
+            if tkind(fact_type(ntype(source))) not=? 'array' {fact_parallel_record(call @s 0)}
+            else if nodes.ptr[source].kind =? 'ident' {fact_parallel_record(call @s fact_capture(source @s))}
         }
         return 0
     }

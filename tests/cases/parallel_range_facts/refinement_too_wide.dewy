@@ -1,0 +1,8 @@
+# Positions past a refinement's bound are still rejected inside a parallel body.
+Small:type = int64<v => 0 <=? v and v <? 100>
+keep = (i:Small):>int64 => i
+main = ():>void => {
+    let n = 200
+    let ys = [parallel i in [0..n) keep(i)]
+    printl(ys.length)
+}
